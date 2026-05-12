@@ -21,6 +21,21 @@ export default defineConfig({
           functions: 90,
           branches: 85,
         },
+        'src/use-cases/create-fundraising-campaign.ts': {
+          lines: 90,
+          functions: 90,
+          branches: 85,
+        },
+        'src/use-cases/add-fundraising-contribution-option.ts': {
+          lines: 90,
+          functions: 90,
+          branches: 85,
+        },
+        'src/use-cases/create-fundraising-contribution.ts': {
+          lines: 90,
+          functions: 90,
+          branches: 85,
+        },
       },
     },
     testTimeout: 30000, // Testcontainers needs time to spin up
