@@ -6,3 +6,8 @@ export { FundraisingContributionOptionNotFoundError } from './fundraising-contri
 export { FundraisingDuplicateOptionIdError } from './fundraising-duplicate-option-id.error.js';
 export { FundraisingInvalidInputError } from './fundraising-invalid-input.error.js';
 export { InvalidCatNameError } from './invalid-cat-name.error.js';
+export { PaymentAlreadyExistsError } from './payment-already-exists.error.js';
+export { PaymentAmountMismatchError } from './payment-amount-mismatch.error.js';
+export { PaymentInvalidStatusTransitionError } from './payment-invalid-status-transition.error.js';
+export { PaymentNotFoundError } from './payment-not-found.error.js';
+export { PaymentsInvalidInputError } from './payments-invalid-input.error.js';
