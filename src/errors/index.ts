@@ -1,4 +1,5 @@
 export { CatAlreadyExistsError } from './cat-already-exists.error.js';
+export { FeesInvalidInputError } from './fees-invalid-input.error.js';
 export { FundraisingCampaignNotFoundError } from './fundraising-campaign-not-found.error.js';
 export { FundraisingContributionAlreadyExistsError } from './fundraising-contribution-already-exists.error.js';
 export { FundraisingContributionOptionNotFoundError } from './fundraising-contribution-option-not-found.error.js';
