@@ -5,12 +5,11 @@
  * Used by integration tests and examples for fully self-contained execution.
  */
 
-import { promises as fs } from 'node:fs';
-import path from 'node:path';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import { FileMigrationProvider, Migrator } from 'kysely';
+import { Migrator } from 'kysely';
 import type { Database } from '../../src/adapters/database.js';
 import { createDatabase } from '../../src/adapters/database.js';
+import { createMigrationProvider } from './migration-provider.js';
 
 export interface TestDatabase {
   db: Database;
@@ -35,11 +34,7 @@ export async function createTestDatabase(): Promise<TestDatabase> {
   // Run migrations
   const migrator = new Migrator({
     db,
-    provider: new FileMigrationProvider({
-      fs,
-      path,
-      migrationFolder: path.join(import.meta.dirname, '..', '..', 'migrations'),
-    }),
+    provider: createMigrationProvider(),
   });
 
   const { error } = await migrator.migrateToLatest();
