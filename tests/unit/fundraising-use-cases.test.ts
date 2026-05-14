@@ -195,6 +195,28 @@ describe('createFundraisingContribution', () => {
     expect(contribution.contributionOptionId).toBe(optionId);
   });
 
+  it('throws FundraisingInvalidInputError on invalid contributor', async () => {
+    const campaignRepository = new FundraisingCampaignRepositoryMemory();
+    const contributionRepository = new FundraisingContributionRepositoryMemory();
+
+    await expect(
+      createFundraisingContribution(
+        {
+          campaignRepository,
+          contributionRepository,
+          clock,
+          observability: silentObservability,
+        },
+        {
+          id: randomUUID(),
+          campaignId: randomUUID(),
+          contributionOptionId: randomUUID(),
+          contributor: { displayName: '' },
+        },
+      ),
+    ).rejects.toThrow(FundraisingInvalidInputError);
+  });
+
   it('throws when campaign is missing', async () => {
     const campaignRepository = new FundraisingCampaignRepositoryMemory();
     const contributionRepository = new FundraisingContributionRepositoryMemory();

@@ -5,7 +5,6 @@ import {
   AddFundraisingContributionOptionInputSchema,
   type Campaign,
   type ContributionOption,
-  ContributionOptionSchema,
   campaignWithOption,
 } from '../domain/fundraising-campaign.js';
 import { FundraisingCampaignNotFoundError } from '../errors/fundraising-campaign-not-found.error.js';
@@ -50,17 +49,8 @@ export async function addFundraisingContributionOption(
         throw new FundraisingDuplicateOptionIdError(optionId);
       }
 
-      const optionParsed = ContributionOptionSchema.safeParse({
-        id: optionId,
-        amountCents,
-        label,
-      });
-      if (!optionParsed.success) {
-        const message = optionParsed.error.issues.map((i) => i.message).join('; ');
-        throw new FundraisingInvalidInputError(message);
-      }
-
-      const option: ContributionOption = optionParsed.data;
+      const option: ContributionOption =
+        label === undefined ? { id: optionId, amountCents } : { id: optionId, amountCents, label };
       const updated = campaignWithOption(existing, option);
 
       await campaignRepository.save(updated);

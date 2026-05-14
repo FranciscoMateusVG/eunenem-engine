@@ -1,9 +1,8 @@
-import { promises as fs } from 'node:fs';
-import path from 'node:path';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import { FileMigrationProvider, Kysely, Migrator, PostgresDialect } from 'kysely';
+import { Kysely, Migrator, PostgresDialect } from 'kysely';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { createMigrationProvider } from '../helpers/migration-provider.js';
 
 describe('Migration round-trip', () => {
   let container: StartedPostgreSqlContainer;
@@ -31,11 +30,7 @@ describe('Migration round-trip', () => {
   it('should migrate up and down cleanly', async () => {
     const migrator = new Migrator({
       db,
-      provider: new FileMigrationProvider({
-        fs,
-        path,
-        migrationFolder: path.join(import.meta.dirname, '..', '..', 'migrations'),
-      }),
+      provider: createMigrationProvider(),
     });
 
     // Migrate up
@@ -48,7 +43,7 @@ describe('Migration round-trip', () => {
     const tables = await db
       .selectFrom('information_schema.tables' as never)
       .select('table_name' as never)
-      .where('table_schema' as never, '=', 'public')
+      .where('table_schema' as never, '=', 'public' as never)
       .execute();
     const tableNames = tables.map((t: Record<string, unknown>) => t.table_name);
     expect(tableNames).toContain('cats');
@@ -61,7 +56,7 @@ describe('Migration round-trip', () => {
     const tablesAfter = await db
       .selectFrom('information_schema.tables' as never)
       .select('table_name' as never)
-      .where('table_schema' as never, '=', 'public')
+      .where('table_schema' as never, '=', 'public' as never)
       .execute();
     const tableNamesAfter = tablesAfter.map((t: Record<string, unknown>) => t.table_name);
     expect(tableNamesAfter).not.toContain('cats');
