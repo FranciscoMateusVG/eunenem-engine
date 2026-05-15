@@ -19,6 +19,10 @@ export { PaymentProviderFake } from './adapters/payment-provider.fake.js';
 export type { PaymentProvider, RequestPaymentInput } from './adapters/payment-provider.js';
 export type { PaymentRepository } from './adapters/payment-repository.js';
 export { PaymentRepositoryMemory } from './adapters/payment-repository.memory.js';
+export type { UserRepository } from './adapters/user-repository.js';
+export { UserRepositoryMemory } from './adapters/user-repository.memory.js';
+export type { UserSessionRepository } from './adapters/user-session-repository.js';
+export { UserSessionRepositoryMemory } from './adapters/user-session-repository.memory.js';
 export type { Cat, CatId, CatName, CreateCatInput } from './domain/cat.js';
 export { CatIdSchema, CatNameSchema, CreateCatInputSchema } from './domain/cat.js';
 export type {
@@ -169,6 +173,37 @@ export {
   PaymentValueCompositionSnapshotSchema,
   rejectPendingPayment,
 } from './domain/payments.js';
+export type {
+  AuthorizeUserPermissionInput,
+  CreateUserSessionInput,
+  RegisterUserAccountInput,
+  SimulatedUserCredential,
+  UpdateUserProfileInput,
+  User,
+  UserAccount,
+  UserAccountId,
+  UserDisplayName,
+  UserEmail,
+  UserId,
+  UserPermission,
+  UserSession,
+} from './domain/user.js';
+export {
+  AuthorizeUserPermissionInputSchema,
+  CreateUserSessionInputSchema,
+  DEFAULT_USER_PERMISSIONS,
+  isUserSessionExpired,
+  RegisterUserAccountInputSchema,
+  SessionTokenSchema,
+  SimulatedPasswordSchema,
+  UpdateUserProfileInputSchema,
+  UserAccountIdSchema,
+  UserDisplayNameSchema,
+  UserEmailSchema,
+  UserIdSchema,
+  UserPermissionSchema,
+  userAccountHasPermission,
+} from './domain/user.js';
 
 // --- Errors ---
 export { CatAlreadyExistsError } from './errors/cat-already-exists.error.js';
@@ -188,6 +223,10 @@ export { PaymentAmountMismatchError } from './errors/payment-amount-mismatch.err
 export { PaymentInvalidStatusTransitionError } from './errors/payment-invalid-status-transition.error.js';
 export { PaymentNotFoundError } from './errors/payment-not-found.error.js';
 export { PaymentsInvalidInputError } from './errors/payments-invalid-input.error.js';
+export { UserEmailAlreadyExistsError } from './errors/user-email-already-exists.error.js';
+export { UserForbiddenError } from './errors/user-forbidden.error.js';
+export { UserInvalidInputError } from './errors/user-invalid-input.error.js';
+export { UserSessionInvalidError } from './errors/user-session-invalid.error.js';
 export { ConsoleLogger } from './observability/console-logger.js';
 // --- Observability ---
 export type { Logger } from './observability/logger.js';
@@ -201,6 +240,8 @@ export type { AddFundraisingContributionOptionDeps } from './use-cases/add-fundr
 export { addFundraisingContributionOption } from './use-cases/add-fundraising-contribution-option.js';
 export type { ApprovePaymentDeps } from './use-cases/approve-payment.js';
 export { approvePayment } from './use-cases/approve-payment.js';
+export type { AuthorizeUserPermissionDeps } from './use-cases/authorize-user-permission.js';
+export { authorizeUserPermission } from './use-cases/authorize-user-permission.js';
 export type { CalculateFeeCompositionDeps } from './use-cases/calculate-fee-composition.js';
 export { calculateFeeComposition } from './use-cases/calculate-fee-composition.js';
 export type { CreateCatDeps } from './use-cases/create-cat.js';
@@ -211,6 +252,8 @@ export type { CreateFundraisingContributionDeps } from './use-cases/create-fundr
 export { createFundraisingContribution } from './use-cases/create-fundraising-contribution.js';
 export type { CreatePaymentIntentDeps } from './use-cases/create-payment-intent.js';
 export { createPaymentIntent } from './use-cases/create-payment-intent.js';
+export type { CreateUserSessionDeps } from './use-cases/create-user-session.js';
+export { createUserSession } from './use-cases/create-user-session.js';
 export type { GetPaymentByIdDeps } from './use-cases/get-payment-by-id.js';
 export { getPaymentById } from './use-cases/get-payment-by-id.js';
 export type { GetPlatformRevenueDeps } from './use-cases/get-platform-revenue.js';
@@ -219,7 +262,14 @@ export type { GetReceiverFinancialBalanceDeps } from './use-cases/get-receiver-f
 export { getReceiverFinancialBalance } from './use-cases/get-receiver-financial-balance.js';
 export type { RegisterApprovedPaymentFinancialEffectsDeps } from './use-cases/register-approved-payment-financial-effects.js';
 export { registerApprovedPaymentFinancialEffects } from './use-cases/register-approved-payment-financial-effects.js';
+export type {
+  RegisterUserAccountDeps,
+  RegisterUserAccountResult,
+} from './use-cases/register-user-account.js';
+export { registerUserAccount } from './use-cases/register-user-account.js';
 export type { RejectPaymentDeps } from './use-cases/reject-payment.js';
 export { rejectPayment } from './use-cases/reject-payment.js';
 export type { RequestReceiverPayoutDeps } from './use-cases/request-receiver-payout.js';
 export { requestReceiverPayout } from './use-cases/request-receiver-payout.js';
+export type { UpdateUserProfileDeps } from './use-cases/update-user-profile.js';
+export { updateUserProfile } from './use-cases/update-user-profile.js';
