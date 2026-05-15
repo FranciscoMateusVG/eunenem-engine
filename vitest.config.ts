@@ -36,6 +36,31 @@ export default defineConfig({
           functions: 90,
           branches: 85,
         },
+        'src/domain/user.ts': {
+          lines: 90,
+          functions: 90,
+          branches: 85,
+        },
+        'src/use-cases/register-user-account.ts': {
+          lines: 90,
+          functions: 90,
+          branches: 85,
+        },
+        'src/use-cases/update-user-profile.ts': {
+          lines: 90,
+          functions: 90,
+          branches: 85,
+        },
+        'src/use-cases/create-user-session.ts': {
+          lines: 90,
+          functions: 90,
+          branches: 85,
+        },
+        'src/use-cases/authorize-user-permission.ts': {
+          lines: 90,
+          functions: 90,
+          branches: 85,
+        },
       },
     },
     testTimeout: 30000, // Testcontainers needs time to spin up

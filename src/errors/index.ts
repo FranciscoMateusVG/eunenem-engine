@@ -15,3 +15,7 @@ export { PaymentAmountMismatchError } from './payment-amount-mismatch.error.js';
 export { PaymentInvalidStatusTransitionError } from './payment-invalid-status-transition.error.js';
 export { PaymentNotFoundError } from './payment-not-found.error.js';
 export { PaymentsInvalidInputError } from './payments-invalid-input.error.js';
+export { UserEmailAlreadyExistsError } from './user-email-already-exists.error.js';
+export { UserForbiddenError } from './user-forbidden.error.js';
+export { UserInvalidInputError } from './user-invalid-input.error.js';
+export { UserSessionInvalidError } from './user-session-invalid.error.js';
