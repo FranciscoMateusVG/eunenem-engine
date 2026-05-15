@@ -7,6 +7,8 @@ export type { Database } from './adapters/database.js';
 export { createDatabase } from './adapters/database.js';
 export type { FeeRuleProvider } from './adapters/fee-rule-provider.js';
 export { FeeRuleProviderMemory } from './adapters/fee-rule-provider.memory.js';
+export type { FinancialLedgerRepository } from './adapters/financial-ledger-repository.js';
+export { FinancialLedgerRepositoryMemory } from './adapters/financial-ledger-repository.memory.js';
 export type { FundraisingCampaignRepository } from './adapters/fundraising-campaign-repository.js';
 export { FundraisingCampaignRepositoryMemory } from './adapters/fundraising-campaign-repository.memory.js';
 export type { FundraisingContributionRepository } from './adapters/fundraising-contribution-repository.js';
@@ -41,6 +43,55 @@ export {
   FeePercentageBpsSchema,
   FeeRuleSchema,
 } from './domain/fees.js';
+export type {
+  FinancialBalanceCents,
+  FinancialContributionReferenceId,
+  FinancialEntry,
+  FinancialEntryId,
+  FinancialEntryIds,
+  FinancialEntryStatus,
+  FinancialEntryType,
+  FinancialFeePayer,
+  FinancialPaymentReferenceId,
+  FinancialPaymentStatus,
+  FinancialPayoutId,
+  FinancialReceiverId,
+  FinancialValueCompositionSnapshot,
+  GetReceiverFinancialBalanceInput,
+  PayoutStatus,
+  PlatformRevenue,
+  ReceiverFinancialBalance,
+  ReceiverPayout,
+  RegisterApprovedPaymentFinancialEffectsInput,
+  RequestReceiverPayoutInput,
+} from './domain/financial.js';
+export {
+  assertApprovedPaymentFinancialComposition,
+  calculatePlatformRevenue,
+  calculateReceiverFinancialBalance,
+  createFinancialEntriesForApprovedPayment,
+  createRequestedReceiverPayout,
+  FinancialBalanceCentsSchema,
+  FinancialContributionReferenceIdSchema,
+  FinancialEntryIdSchema,
+  FinancialEntryIdsSchema,
+  FinancialEntrySchema,
+  FinancialEntryStatusSchema,
+  FinancialEntryTypeSchema,
+  FinancialFeePayerSchema,
+  FinancialPaymentReferenceIdSchema,
+  FinancialPaymentStatusSchema,
+  FinancialPayoutIdSchema,
+  FinancialReceiverIdSchema,
+  FinancialValueCompositionSnapshotSchema,
+  GetReceiverFinancialBalanceInputSchema,
+  PayoutStatusSchema,
+  PlatformRevenueSchema,
+  ReceiverFinancialBalanceSchema,
+  ReceiverPayoutSchema,
+  RegisterApprovedPaymentFinancialEffectsInputSchema,
+  RequestReceiverPayoutInputSchema,
+} from './domain/financial.js';
 export type {
   AccountId,
   AddFundraisingContributionOptionInput,
@@ -122,6 +173,10 @@ export {
 // --- Errors ---
 export { CatAlreadyExistsError } from './errors/cat-already-exists.error.js';
 export { FeesInvalidInputError } from './errors/fees-invalid-input.error.js';
+export { FinancialInsufficientAvailableBalanceError } from './errors/financial-insufficient-available-balance.error.js';
+export { FinancialInvalidInputError } from './errors/financial-invalid-input.error.js';
+export { FinancialPaymentAlreadyRecordedError } from './errors/financial-payment-already-recorded.error.js';
+export { FinancialPaymentNotApprovedError } from './errors/financial-payment-not-approved.error.js';
 export { FundraisingCampaignNotFoundError } from './errors/fundraising-campaign-not-found.error.js';
 export { FundraisingContributionAlreadyExistsError } from './errors/fundraising-contribution-already-exists.error.js';
 export { FundraisingContributionOptionNotFoundError } from './errors/fundraising-contribution-option-not-found.error.js';
@@ -158,5 +213,13 @@ export type { CreatePaymentIntentDeps } from './use-cases/create-payment-intent.
 export { createPaymentIntent } from './use-cases/create-payment-intent.js';
 export type { GetPaymentByIdDeps } from './use-cases/get-payment-by-id.js';
 export { getPaymentById } from './use-cases/get-payment-by-id.js';
+export type { GetPlatformRevenueDeps } from './use-cases/get-platform-revenue.js';
+export { getPlatformRevenue } from './use-cases/get-platform-revenue.js';
+export type { GetReceiverFinancialBalanceDeps } from './use-cases/get-receiver-financial-balance.js';
+export { getReceiverFinancialBalance } from './use-cases/get-receiver-financial-balance.js';
+export type { RegisterApprovedPaymentFinancialEffectsDeps } from './use-cases/register-approved-payment-financial-effects.js';
+export { registerApprovedPaymentFinancialEffects } from './use-cases/register-approved-payment-financial-effects.js';
 export type { RejectPaymentDeps } from './use-cases/reject-payment.js';
 export { rejectPayment } from './use-cases/reject-payment.js';
+export type { RequestReceiverPayoutDeps } from './use-cases/request-receiver-payout.js';
+export { requestReceiverPayout } from './use-cases/request-receiver-payout.js';

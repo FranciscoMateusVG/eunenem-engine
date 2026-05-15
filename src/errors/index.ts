@@ -1,5 +1,9 @@
 export { CatAlreadyExistsError } from './cat-already-exists.error.js';
 export { FeesInvalidInputError } from './fees-invalid-input.error.js';
+export { FinancialInsufficientAvailableBalanceError } from './financial-insufficient-available-balance.error.js';
+export { FinancialInvalidInputError } from './financial-invalid-input.error.js';
+export { FinancialPaymentAlreadyRecordedError } from './financial-payment-already-recorded.error.js';
+export { FinancialPaymentNotApprovedError } from './financial-payment-not-approved.error.js';
 export { FundraisingCampaignNotFoundError } from './fundraising-campaign-not-found.error.js';
 export { FundraisingContributionAlreadyExistsError } from './fundraising-contribution-already-exists.error.js';
 export { FundraisingContributionOptionNotFoundError } from './fundraising-contribution-option-not-found.error.js';
