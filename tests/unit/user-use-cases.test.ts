@@ -1,18 +1,18 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { UserRepositoryMemory } from '../../src/adapters/user-repository.memory.js';
-import { UserSessionRepositoryMemory } from '../../src/adapters/user-session-repository.memory.js';
-import { SessionTokenSchema } from '../../src/domain/user.js';
-import { UserEmailAlreadyExistsError } from '../../src/errors/user-email-already-exists.error.js';
-import { UserForbiddenError } from '../../src/errors/user-forbidden.error.js';
-import { UserInvalidInputError } from '../../src/errors/user-invalid-input.error.js';
-import { UserSessionInvalidError } from '../../src/errors/user-session-invalid.error.js';
+import { UsuarioRepositoryMemory } from '../../src/adapters/usuario-repository.memory.js';
+import { SessaoUsuarioRepositoryMemory } from '../../src/adapters/usuario-sessao-repository.memory.js';
+import { TokenSessaoSchema } from '../../src/domain/usuario.js';
+import { UsuarioEmailJaExisteError } from '../../src/errors/usuario-email-ja-existe.error.js';
+import { UsuarioInputInvalidoError } from '../../src/errors/usuario-input-invalido.error.js';
+import { UsuarioNaoAutorizadoError } from '../../src/errors/usuario-nao-autorizado.error.js';
+import { UsuarioSessaoInvalidaError } from '../../src/errors/usuario-sessao-invalida.error.js';
 import { NoopLogger } from '../../src/observability/noop-logger.js';
 import { noopTracer } from '../../src/observability/tracer.js';
-import { authorizeUserPermission } from '../../src/use-cases/authorize-user-permission.js';
-import { createUserSession } from '../../src/use-cases/create-user-session.js';
-import { registerUserAccount } from '../../src/use-cases/register-user-account.js';
-import { updateUserProfile } from '../../src/use-cases/update-user-profile.js';
+import { atualizarPerfilUsuario } from '../../src/use-cases/atualizar-perfil-usuario.js';
+import { autorizarPermissaoUsuario } from '../../src/use-cases/autorizar-permissao-usuario.js';
+import { criarSessaoUsuario } from '../../src/use-cases/criar-sessao-usuario.js';
+import { registrarContaUsuario } from '../../src/use-cases/registrar-conta-usuario.js';
 
 const silentObservability = {
   logger: new NoopLogger(),
@@ -22,340 +22,342 @@ const silentObservability = {
 const fixedDate = new Date('2026-05-01T12:00:00.000Z');
 const clock = () => fixedDate;
 
-describe('registerUserAccount', () => {
+describe('registrarContaUsuario', () => {
   it('registers user, account and simulated credential', async () => {
-    const userRepository = new UserRepositoryMemory();
-    const userId = randomUUID();
-    const accountId = randomUUID();
+    const usuarioRepository = new UsuarioRepositoryMemory();
+    const idUsuario = randomUUID();
+    const idConta = randomUUID();
 
-    const result = await registerUserAccount(
-      { userRepository, clock, observability: silentObservability },
+    const result = await registrarContaUsuario(
+      { usuarioRepository, clock, observability: silentObservability },
       {
-        userId,
-        accountId,
+        idUsuario,
+        idConta,
         email: 'creator@example.com',
-        displayName: 'Campaign Owner',
-        simulatedPassword: 'not-a-real-password',
+        nomeExibicao: 'Campaign Owner',
+        senhaSimulada: 'not-a-real-password',
       },
     );
 
-    expect(result.user.id).toBe(userId);
-    expect(result.account.id).toBe(accountId);
-    expect(result.account.permissions).toEqual(['campaign:admin']);
-    expect(await userRepository.findUserByEmail('creator@example.com')).toEqual(result.user);
+    expect(result.usuario.id).toBe(idUsuario);
+    expect(result.conta.id).toBe(idConta);
+    expect(result.conta.permissoes).toEqual(['campaign:admin']);
+    expect(await usuarioRepository.findUsuarioByEmail('creator@example.com')).toEqual(
+      result.usuario,
+    );
   });
 
-  it('throws UserInvalidInputError on invalid email', async () => {
-    const userRepository = new UserRepositoryMemory();
+  it('throws UsuarioInputInvalidoError on invalid email', async () => {
+    const usuarioRepository = new UsuarioRepositoryMemory();
     await expect(
-      registerUserAccount(
-        { userRepository, clock, observability: silentObservability },
+      registrarContaUsuario(
+        { usuarioRepository, clock, observability: silentObservability },
         {
-          userId: randomUUID(),
-          accountId: randomUUID(),
+          idUsuario: randomUUID(),
+          idConta: randomUUID(),
           email: 'not-an-email',
-          displayName: 'X',
-          simulatedPassword: 'p',
+          nomeExibicao: 'X',
+          senhaSimulada: 'p',
         },
       ),
-    ).rejects.toThrow(UserInvalidInputError);
+    ).rejects.toThrow(UsuarioInputInvalidoError);
   });
 
-  it('throws UserEmailAlreadyExistsError when email is taken', async () => {
-    const userRepository = new UserRepositoryMemory();
+  it('throws UsuarioEmailJaExisteError when email is taken', async () => {
+    const usuarioRepository = new UsuarioRepositoryMemory();
     const email = 'taken@example.com';
-    await registerUserAccount(
-      { userRepository, clock, observability: silentObservability },
+    await registrarContaUsuario(
+      { usuarioRepository, clock, observability: silentObservability },
       {
-        userId: randomUUID(),
-        accountId: randomUUID(),
+        idUsuario: randomUUID(),
+        idConta: randomUUID(),
         email,
-        displayName: 'One',
-        simulatedPassword: 'p',
+        nomeExibicao: 'One',
+        senhaSimulada: 'p',
       },
     );
 
     await expect(
-      registerUserAccount(
-        { userRepository, clock, observability: silentObservability },
+      registrarContaUsuario(
+        { usuarioRepository, clock, observability: silentObservability },
         {
-          userId: randomUUID(),
-          accountId: randomUUID(),
+          idUsuario: randomUUID(),
+          idConta: randomUUID(),
           email,
-          displayName: 'Two',
-          simulatedPassword: 'p',
+          nomeExibicao: 'Two',
+          senhaSimulada: 'p',
         },
       ),
-    ).rejects.toThrow(UserEmailAlreadyExistsError);
+    ).rejects.toThrow(UsuarioEmailJaExisteError);
   });
 });
 
-describe('updateUserProfile', () => {
+describe('atualizarPerfilUsuario', () => {
   it('updates display name', async () => {
-    const userRepository = new UserRepositoryMemory();
-    const userId = randomUUID();
-    const accountId = randomUUID();
-    await registerUserAccount(
-      { userRepository, clock, observability: silentObservability },
+    const usuarioRepository = new UsuarioRepositoryMemory();
+    const idUsuario = randomUUID();
+    const idConta = randomUUID();
+    await registrarContaUsuario(
+      { usuarioRepository, clock, observability: silentObservability },
       {
-        userId,
-        accountId,
+        idUsuario,
+        idConta,
         email: 'u@example.com',
-        displayName: 'Before',
-        simulatedPassword: 'p',
+        nomeExibicao: 'Before',
+        senhaSimulada: 'p',
       },
     );
 
-    const updated = await updateUserProfile(
-      { userRepository, observability: silentObservability },
-      { userId, displayName: 'After' },
+    const updated = await atualizarPerfilUsuario(
+      { usuarioRepository, observability: silentObservability },
+      { idUsuario, nomeExibicao: 'After' },
     );
 
-    expect(updated.displayName).toBe('After');
+    expect(updated.nomeExibicao).toBe('After');
   });
 
   it('throws when user is missing', async () => {
-    const userRepository = new UserRepositoryMemory();
+    const usuarioRepository = new UsuarioRepositoryMemory();
     await expect(
-      updateUserProfile(
-        { userRepository, observability: silentObservability },
-        { userId: randomUUID(), displayName: 'Ghost' },
+      atualizarPerfilUsuario(
+        { usuarioRepository, observability: silentObservability },
+        { idUsuario: randomUUID(), nomeExibicao: 'Ghost' },
       ),
-    ).rejects.toThrow(UserInvalidInputError);
+    ).rejects.toThrow(UsuarioInputInvalidoError);
   });
 
-  it('throws UserInvalidInputError on invalid profile input', async () => {
-    const userRepository = new UserRepositoryMemory();
+  it('throws UsuarioInputInvalidoError on invalid profile input', async () => {
+    const usuarioRepository = new UsuarioRepositoryMemory();
     await expect(
-      updateUserProfile(
-        { userRepository, observability: silentObservability },
-        { userId: randomUUID(), displayName: '' },
+      atualizarPerfilUsuario(
+        { usuarioRepository, observability: silentObservability },
+        { idUsuario: randomUUID(), nomeExibicao: '' },
       ),
-    ).rejects.toThrow(UserInvalidInputError);
+    ).rejects.toThrow(UsuarioInputInvalidoError);
   });
 });
 
-describe('createUserSession', () => {
+describe('criarSessaoUsuario', () => {
   it('creates a session when simulated password matches', async () => {
-    const userRepository = new UserRepositoryMemory();
-    const sessionRepository = new UserSessionRepositoryMemory();
+    const usuarioRepository = new UsuarioRepositoryMemory();
+    const sessaoRepository = new SessaoUsuarioRepositoryMemory();
     const email = 'login@example.com';
     const password = 'secret-stub';
-    await registerUserAccount(
-      { userRepository, clock, observability: silentObservability },
+    await registrarContaUsuario(
+      { usuarioRepository, clock, observability: silentObservability },
       {
-        userId: randomUUID(),
-        accountId: randomUUID(),
+        idUsuario: randomUUID(),
+        idConta: randomUUID(),
         email,
-        displayName: 'L',
-        simulatedPassword: password,
+        nomeExibicao: 'L',
+        senhaSimulada: password,
       },
     );
 
-    const session = await createUserSession(
+    const sessao = await criarSessaoUsuario(
       {
-        userRepository,
-        sessionRepository,
+        usuarioRepository,
+        sessaoRepository,
         clock,
         sessionTtlMs: 60_000,
         observability: silentObservability,
       },
-      { email, simulatedPassword: password },
+      { email, senhaSimulada: password },
     );
 
-    expect(session.token.length).toBeGreaterThanOrEqual(32);
-    expect(session.expiresAt.getTime()).toBe(fixedDate.getTime() + 60_000);
+    expect(sessao.token.length).toBeGreaterThanOrEqual(32);
+    expect(sessao.expiraEm.getTime()).toBe(fixedDate.getTime() + 60_000);
   });
 
   it('throws on bad credentials', async () => {
-    const userRepository = new UserRepositoryMemory();
-    const sessionRepository = new UserSessionRepositoryMemory();
-    await registerUserAccount(
-      { userRepository, clock, observability: silentObservability },
+    const usuarioRepository = new UsuarioRepositoryMemory();
+    const sessaoRepository = new SessaoUsuarioRepositoryMemory();
+    await registrarContaUsuario(
+      { usuarioRepository, clock, observability: silentObservability },
       {
-        userId: randomUUID(),
-        accountId: randomUUID(),
+        idUsuario: randomUUID(),
+        idConta: randomUUID(),
         email: 'only@example.com',
-        displayName: 'L',
-        simulatedPassword: 'right',
+        nomeExibicao: 'L',
+        senhaSimulada: 'right',
       },
     );
 
     await expect(
-      createUserSession(
+      criarSessaoUsuario(
         {
-          userRepository,
-          sessionRepository,
+          usuarioRepository,
+          sessaoRepository,
           clock,
           sessionTtlMs: 60_000,
           observability: silentObservability,
         },
-        { email: 'only@example.com', simulatedPassword: 'wrong' },
+        { email: 'only@example.com', senhaSimulada: 'wrong' },
       ),
-    ).rejects.toThrow(UserInvalidInputError);
+    ).rejects.toThrow(UsuarioInputInvalidoError);
   });
 
-  it('throws UserInvalidInputError on invalid session input', async () => {
-    const userRepository = new UserRepositoryMemory();
-    const sessionRepository = new UserSessionRepositoryMemory();
+  it('throws UsuarioInputInvalidoError on invalid session input', async () => {
+    const usuarioRepository = new UsuarioRepositoryMemory();
+    const sessaoRepository = new SessaoUsuarioRepositoryMemory();
     await expect(
-      createUserSession(
+      criarSessaoUsuario(
         {
-          userRepository,
-          sessionRepository,
+          usuarioRepository,
+          sessaoRepository,
           clock,
           sessionTtlMs: 60_000,
           observability: silentObservability,
         },
-        { email: 'bad-email', simulatedPassword: 'x' },
+        { email: 'bad-email', senhaSimulada: 'x' },
       ),
-    ).rejects.toThrow(UserInvalidInputError);
+    ).rejects.toThrow(UsuarioInputInvalidoError);
   });
 });
 
-describe('authorizeUserPermission', () => {
+describe('autorizarPermissaoUsuario', () => {
   it('authorizes when session is valid and permission exists', async () => {
-    const userRepository = new UserRepositoryMemory();
-    const sessionRepository = new UserSessionRepositoryMemory();
-    const userId = randomUUID();
-    const accountId = randomUUID();
-    await registerUserAccount(
-      { userRepository, clock, observability: silentObservability },
+    const usuarioRepository = new UsuarioRepositoryMemory();
+    const sessaoRepository = new SessaoUsuarioRepositoryMemory();
+    const idUsuario = randomUUID();
+    const idConta = randomUUID();
+    await registrarContaUsuario(
+      { usuarioRepository, clock, observability: silentObservability },
       {
-        userId,
-        accountId,
+        idUsuario,
+        idConta,
         email: 'auth@example.com',
-        displayName: 'A',
-        simulatedPassword: 'p',
+        nomeExibicao: 'A',
+        senhaSimulada: 'p',
       },
     );
 
-    const { token } = await createUserSession(
+    const { token } = await criarSessaoUsuario(
       {
-        userRepository,
-        sessionRepository,
+        usuarioRepository,
+        sessaoRepository,
         clock,
         sessionTtlMs: 60_000,
         observability: silentObservability,
       },
-      { email: 'auth@example.com', simulatedPassword: 'p' },
+      { email: 'auth@example.com', senhaSimulada: 'p' },
     );
 
     await expect(
-      authorizeUserPermission(
-        { userRepository, sessionRepository, clock, observability: silentObservability },
-        { token, permission: 'campaign:admin' },
+      autorizarPermissaoUsuario(
+        { usuarioRepository, sessaoRepository, clock, observability: silentObservability },
+        { token, permissao: 'campaign:admin' },
       ),
     ).resolves.toBeUndefined();
   });
 
-  it('throws UserSessionInvalidError when token unknown', async () => {
-    const userRepository = new UserRepositoryMemory();
-    const sessionRepository = new UserSessionRepositoryMemory();
-    const token = SessionTokenSchema.parse(randomBytes(32).toString('base64url'));
+  it('throws UsuarioSessaoInvalidaError when token unknown', async () => {
+    const usuarioRepository = new UsuarioRepositoryMemory();
+    const sessaoRepository = new SessaoUsuarioRepositoryMemory();
+    const token = TokenSessaoSchema.parse(randomBytes(32).toString('base64url'));
 
     await expect(
-      authorizeUserPermission(
-        { userRepository, sessionRepository, clock, observability: silentObservability },
-        { token, permission: 'campaign:admin' },
+      autorizarPermissaoUsuario(
+        { usuarioRepository, sessaoRepository, clock, observability: silentObservability },
+        { token, permissao: 'campaign:admin' },
       ),
-    ).rejects.toThrow(UserSessionInvalidError);
+    ).rejects.toThrow(UsuarioSessaoInvalidaError);
   });
 
-  it('throws UserSessionInvalidError on malformed input token', async () => {
-    const userRepository = new UserRepositoryMemory();
-    const sessionRepository = new UserSessionRepositoryMemory();
+  it('throws UsuarioSessaoInvalidaError on malformed input token', async () => {
+    const usuarioRepository = new UsuarioRepositoryMemory();
+    const sessaoRepository = new SessaoUsuarioRepositoryMemory();
     await expect(
-      authorizeUserPermission(
-        { userRepository, sessionRepository, clock, observability: silentObservability },
-        { token: 'short', permission: 'campaign:admin' },
+      autorizarPermissaoUsuario(
+        { usuarioRepository, sessaoRepository, clock, observability: silentObservability },
+        { token: 'short', permissao: 'campaign:admin' },
       ),
-    ).rejects.toThrow(UserSessionInvalidError);
+    ).rejects.toThrow(UsuarioSessaoInvalidaError);
   });
 
-  it('throws UserSessionInvalidError when account is missing for session', async () => {
-    const userRepository = new UserRepositoryMemory();
-    const sessionRepository = new UserSessionRepositoryMemory();
-    const token = SessionTokenSchema.parse(randomBytes(32).toString('base64url'));
-    await sessionRepository.save({
+  it('throws UsuarioSessaoInvalidaError when account is missing for session', async () => {
+    const usuarioRepository = new UsuarioRepositoryMemory();
+    const sessaoRepository = new SessaoUsuarioRepositoryMemory();
+    const token = TokenSessaoSchema.parse(randomBytes(32).toString('base64url'));
+    await sessaoRepository.save({
       token,
-      accountId: randomUUID(),
-      expiresAt: new Date(fixedDate.getTime() + 60_000),
+      idConta: randomUUID(),
+      expiraEm: new Date(fixedDate.getTime() + 60_000),
     });
 
     await expect(
-      authorizeUserPermission(
-        { userRepository, sessionRepository, clock, observability: silentObservability },
-        { token, permission: 'campaign:admin' },
+      autorizarPermissaoUsuario(
+        { usuarioRepository, sessaoRepository, clock, observability: silentObservability },
+        { token, permissao: 'campaign:admin' },
       ),
-    ).rejects.toThrow(UserSessionInvalidError);
+    ).rejects.toThrow(UsuarioSessaoInvalidaError);
   });
 
-  it('throws UserSessionInvalidError when session expired', async () => {
-    const userRepository = new UserRepositoryMemory();
-    const sessionRepository = new UserSessionRepositoryMemory();
-    const userId = randomUUID();
-    const accountId = randomUUID();
-    await registerUserAccount(
-      { userRepository, clock, observability: silentObservability },
+  it('throws UsuarioSessaoInvalidaError when session expired', async () => {
+    const usuarioRepository = new UsuarioRepositoryMemory();
+    const sessaoRepository = new SessaoUsuarioRepositoryMemory();
+    const idUsuario = randomUUID();
+    const idConta = randomUUID();
+    await registrarContaUsuario(
+      { usuarioRepository, clock, observability: silentObservability },
       {
-        userId,
-        accountId,
+        idUsuario,
+        idConta,
         email: 'exp@example.com',
-        displayName: 'E',
-        simulatedPassword: 'p',
+        nomeExibicao: 'E',
+        senhaSimulada: 'p',
       },
     );
 
-    const token = SessionTokenSchema.parse(randomBytes(32).toString('base64url'));
-    await sessionRepository.save({
+    const token = TokenSessaoSchema.parse(randomBytes(32).toString('base64url'));
+    await sessaoRepository.save({
       token,
-      accountId,
-      expiresAt: new Date(fixedDate.getTime() - 1),
+      idConta,
+      expiraEm: new Date(fixedDate.getTime() - 1),
     });
 
     await expect(
-      authorizeUserPermission(
-        { userRepository, sessionRepository, clock, observability: silentObservability },
-        { token, permission: 'campaign:admin' },
+      autorizarPermissaoUsuario(
+        { usuarioRepository, sessaoRepository, clock, observability: silentObservability },
+        { token, permissao: 'campaign:admin' },
       ),
-    ).rejects.toThrow(UserSessionInvalidError);
+    ).rejects.toThrow(UsuarioSessaoInvalidaError);
   });
 
-  it('throws UserForbiddenError when permission missing on account', async () => {
-    const userRepository = new UserRepositoryMemory();
-    const sessionRepository = new UserSessionRepositoryMemory();
-    const userId = randomUUID();
-    const accountId = randomUUID();
-    await userRepository.saveRegistration({
-      user: {
-        id: userId,
-        accountId,
+  it('throws UsuarioNaoAutorizadoError when permission missing on account', async () => {
+    const usuarioRepository = new UsuarioRepositoryMemory();
+    const sessaoRepository = new SessaoUsuarioRepositoryMemory();
+    const idUsuario = randomUUID();
+    const idConta = randomUUID();
+    await usuarioRepository.saveRegistro({
+      usuario: {
+        id: idUsuario,
+        idConta,
         email: 'noperm@example.com',
-        displayName: 'N',
-        createdAt: fixedDate,
+        nomeExibicao: 'N',
+        criadoEm: fixedDate,
       },
-      account: {
-        id: accountId,
-        userId,
-        permissions: [],
-        createdAt: fixedDate,
+      conta: {
+        id: idConta,
+        idUsuario,
+        permissoes: [],
+        criadaEm: fixedDate,
       },
-      credential: { userId, simulatedPassword: 'p' },
+      credencial: { idUsuario, senhaSimulada: 'p' },
     });
 
-    const token = SessionTokenSchema.parse(randomBytes(32).toString('base64url'));
-    await sessionRepository.save({
+    const token = TokenSessaoSchema.parse(randomBytes(32).toString('base64url'));
+    await sessaoRepository.save({
       token,
-      accountId,
-      expiresAt: new Date(fixedDate.getTime() + 60_000),
+      idConta,
+      expiraEm: new Date(fixedDate.getTime() + 60_000),
     });
 
     await expect(
-      authorizeUserPermission(
-        { userRepository, sessionRepository, clock, observability: silentObservability },
-        { token, permission: 'campaign:admin' },
+      autorizarPermissaoUsuario(
+        { usuarioRepository, sessaoRepository, clock, observability: silentObservability },
+        { token, permissao: 'campaign:admin' },
       ),
-    ).rejects.toThrow(UserForbiddenError);
+    ).rejects.toThrow(UsuarioNaoAutorizadoError);
   });
 });

@@ -1,65 +1,65 @@
 import { describe, expect, it } from 'vitest';
-import { PaymentRepositoryMemory } from '../../src/adapters/payment-repository.memory.js';
-import { createPendingPayment } from '../../src/domain/payments.js';
-import { PaymentAlreadyExistsError } from '../../src/errors/payment-already-exists.error.js';
-import { PaymentNotFoundError } from '../../src/errors/payment-not-found.error.js';
+import { PagamentoRepositoryMemory } from '../../src/adapters/pagamento-repository.memory.js';
+import { criarPagamentoPendente } from '../../src/domain/pagamentos.js';
+import { PagamentoJaExisteError } from '../../src/errors/pagamento-ja-existe.error.js';
+import { PagamentoNaoEncontradoError } from '../../src/errors/pagamento-nao-encontrado.error.js';
 
-const paymentId = '550e8400-e29b-41d4-a716-446655440201';
-const paymentIntentId = '550e8400-e29b-41d4-a716-446655440202';
-const contributionId = '550e8400-e29b-41d4-a716-446655440203';
-const createdAt = new Date('2026-05-01T12:00:00.000Z');
+const idPagamento = '550e8400-e29b-41d4-a716-446655440201';
+const idIntencaoPagamento = '550e8400-e29b-41d4-a716-446655440202';
+const idContribuicao = '550e8400-e29b-41d4-a716-446655440203';
+const criadoEm = new Date('2026-05-01T12:00:00.000Z');
 
-function makePayment(id = paymentId) {
-  return createPendingPayment({
-    paymentId: id,
-    paymentIntentId,
-    valueComposition: {
-      contributionId,
+function makePagamento(id = idPagamento) {
+  return criarPagamentoPendente({
+    idPagamento: id,
+    idIntencaoPagamento,
+    composicaoValores: {
+      idContribuicao,
       contributionAmountCents: 8000,
       feeAmountCents: 400,
       totalPaidCents: 8400,
       receiverAmountCents: 8000,
-      feePayer: 'contributor',
+      responsavelTaxa: 'contribuinte',
     },
-    amountToChargeCents: 8400,
-    method: 'pix',
-    createdAt,
+    valorACobrarCents: 8400,
+    metodo: 'pix',
+    criadoEm,
   });
 }
 
-describe('PaymentRepositoryMemory', () => {
+describe('PagamentoRepositoryMemory', () => {
   it('saves and finds a payment by id', async () => {
-    const repository = new PaymentRepositoryMemory();
-    const payment = makePayment();
+    const repository = new PagamentoRepositoryMemory();
+    const pagamento = makePagamento();
 
-    await repository.save(payment);
+    await repository.save(pagamento);
 
-    await expect(repository.findById(payment.id)).resolves.toEqual(payment);
+    await expect(repository.findById(pagamento.id)).resolves.toEqual(pagamento);
   });
 
   it('rejects duplicate payment ids on save', async () => {
-    const repository = new PaymentRepositoryMemory();
-    const payment = makePayment();
+    const repository = new PagamentoRepositoryMemory();
+    const pagamento = makePagamento();
 
-    await repository.save(payment);
+    await repository.save(pagamento);
 
-    await expect(repository.save(payment)).rejects.toThrow(PaymentAlreadyExistsError);
+    await expect(repository.save(pagamento)).rejects.toThrow(PagamentoJaExisteError);
   });
 
   it('updates an existing payment', async () => {
-    const repository = new PaymentRepositoryMemory();
-    const payment = makePayment();
-    const updated = { ...payment, updatedAt: new Date('2026-05-01T12:10:00.000Z') };
+    const repository = new PagamentoRepositoryMemory();
+    const pagamento = makePagamento();
+    const updated = { ...pagamento, atualizadoEm: new Date('2026-05-01T12:10:00.000Z') };
 
-    await repository.save(payment);
+    await repository.save(pagamento);
     await repository.update(updated);
 
-    await expect(repository.findById(payment.id)).resolves.toEqual(updated);
+    await expect(repository.findById(pagamento.id)).resolves.toEqual(updated);
   });
 
   it('throws when updating a missing payment', async () => {
-    const repository = new PaymentRepositoryMemory();
+    const repository = new PagamentoRepositoryMemory();
 
-    await expect(repository.update(makePayment())).rejects.toThrow(PaymentNotFoundError);
+    await expect(repository.update(makePagamento())).rejects.toThrow(PagamentoNaoEncontradoError);
   });
 });

@@ -1,23 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { FeeRuleProviderMemory } from '../../src/adapters/fee-rule-provider.memory.js';
-import { DEFAULT_FEE_RULE } from '../../src/domain/fees.js';
+import { ProvedorRegraTaxaMemory } from '../../src/adapters/taxas-regra-provider.memory.js';
+import { REGRA_TAXA_PADRAO } from '../../src/domain/taxas.js';
 
-describe('FeeRuleProviderMemory', () => {
+describe('ProvedorRegraTaxaMemory', () => {
   it('returns the default fixed 5 percent rule', async () => {
-    const provider = new FeeRuleProviderMemory();
+    const provider = new ProvedorRegraTaxaMemory();
 
-    await expect(provider.getActiveRule()).resolves.toEqual(DEFAULT_FEE_RULE);
+    await expect(provider.getRegraAtiva()).resolves.toEqual(REGRA_TAXA_PADRAO);
   });
 
   it('returns a provided in-memory rule', async () => {
-    const provider = new FeeRuleProviderMemory({
+    const provider = new ProvedorRegraTaxaMemory({
       percentageBps: 250,
-      feePayer: 'contributor',
+      responsavelTaxa: 'contribuinte',
     });
 
-    await expect(provider.getActiveRule()).resolves.toEqual({
+    await expect(provider.getRegraAtiva()).resolves.toEqual({
       percentageBps: 250,
-      feePayer: 'contributor',
+      responsavelTaxa: 'contribuinte',
     });
   });
 });

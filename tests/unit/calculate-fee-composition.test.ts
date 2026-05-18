@@ -1,70 +1,70 @@
 import { describe, expect, it } from 'vitest';
-import type { FeeRuleProvider } from '../../src/adapters/fee-rule-provider.js';
-import { FeeRuleProviderMemory } from '../../src/adapters/fee-rule-provider.memory.js';
-import type { FeeRule } from '../../src/domain/fees.js';
-import { FeesInvalidInputError } from '../../src/errors/fees-invalid-input.error.js';
+import type { ProvedorRegraTaxa } from '../../src/adapters/taxas-regra-provider.js';
+import { ProvedorRegraTaxaMemory } from '../../src/adapters/taxas-regra-provider.memory.js';
+import type { RegraTaxa } from '../../src/domain/taxas.js';
+import { TaxasInputInvalidoError } from '../../src/errors/taxas-input-invalido.error.js';
 import { NoopLogger } from '../../src/observability/noop-logger.js';
 import { noopTracer } from '../../src/observability/tracer.js';
-import { calculateFeeComposition } from '../../src/use-cases/calculate-fee-composition.js';
+import { calcularComposicaoValores } from '../../src/use-cases/calcular-composicao-valores.js';
 
 const silentObservability = {
   logger: new NoopLogger(),
   tracer: noopTracer(),
 };
 
-const contributionId = '550e8400-e29b-41d4-a716-446655440021';
+const idContribuicao = '550e8400-e29b-41d4-a716-446655440021';
 
-describe('calculateFeeComposition', () => {
+describe('calcularComposicaoValores', () => {
   it('returns the canonical value composition using the memory rule provider', async () => {
-    const feeRuleProvider = new FeeRuleProviderMemory();
+    const provedorRegraTaxa = new ProvedorRegraTaxaMemory();
 
-    const composition = await calculateFeeComposition(
-      { feeRuleProvider, observability: silentObservability },
+    const composicao = await calcularComposicaoValores(
+      { provedorRegraTaxa, observability: silentObservability },
       {
-        contributionId,
+        idContribuicao,
         contributionAmountCents: 8000,
       },
     );
 
-    expect(composition).toEqual({
-      contributionId,
+    expect(composicao).toEqual({
+      idContribuicao,
       contributionAmountCents: 8000,
       feeAmountCents: 400,
       totalPaidCents: 8400,
       receiverAmountCents: 8000,
-      feePayer: 'contributor',
+      responsavelTaxa: 'contribuinte',
     });
   });
 
-  it('throws FeesInvalidInputError for invalid input', async () => {
-    const feeRuleProvider = new FeeRuleProviderMemory();
+  it('throws TaxasInputInvalidoError for invalid input', async () => {
+    const provedorRegraTaxa = new ProvedorRegraTaxaMemory();
 
     await expect(
-      calculateFeeComposition(
-        { feeRuleProvider, observability: silentObservability },
+      calcularComposicaoValores(
+        { provedorRegraTaxa, observability: silentObservability },
         {
-          contributionId,
+          idContribuicao,
           contributionAmountCents: 0,
         },
       ),
-    ).rejects.toThrow(FeesInvalidInputError);
+    ).rejects.toThrow(TaxasInputInvalidoError);
   });
 
-  it('throws FeesInvalidInputError for an invalid active rule', async () => {
-    const feeRuleProvider: FeeRuleProvider = {
-      async getActiveRule(): Promise<FeeRule> {
-        return { percentageBps: 0, feePayer: 'contributor' } as FeeRule;
+  it('throws TaxasInputInvalidoError for an invalid active rule', async () => {
+    const provedorRegraTaxa: ProvedorRegraTaxa = {
+      async getRegraAtiva(): Promise<RegraTaxa> {
+        return { percentageBps: 0, responsavelTaxa: 'contribuinte' } as RegraTaxa;
       },
     };
 
     await expect(
-      calculateFeeComposition(
-        { feeRuleProvider, observability: silentObservability },
+      calcularComposicaoValores(
+        { provedorRegraTaxa, observability: silentObservability },
         {
-          contributionId,
+          idContribuicao,
           contributionAmountCents: 8000,
         },
       ),
-    ).rejects.toThrow(FeesInvalidInputError);
+    ).rejects.toThrow(TaxasInputInvalidoError);
   });
 });

@@ -1,91 +1,91 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { UserRepositoryMemory } from '../../src/adapters/user-repository.memory.js';
-import { UserEmailAlreadyExistsError } from '../../src/errors/user-email-already-exists.error.js';
+import { UsuarioRepositoryMemory } from '../../src/adapters/usuario-repository.memory.js';
+import { UsuarioEmailJaExisteError } from '../../src/errors/usuario-email-ja-existe.error.js';
 
 const fixedDate = new Date('2026-05-01T12:00:00.000Z');
 
-describe('UserRepositoryMemory', () => {
+describe('UsuarioRepositoryMemory', () => {
   it('persists registration and resolves by id and email', async () => {
-    const repo = new UserRepositoryMemory();
-    const userId = randomUUID();
-    const accountId = randomUUID();
-    const user = {
-      id: userId,
-      accountId,
+    const repo = new UsuarioRepositoryMemory();
+    const idUsuario = randomUUID();
+    const idConta = randomUUID();
+    const usuario = {
+      id: idUsuario,
+      idConta,
       email: 'owner@example.com',
-      displayName: 'Owner',
-      createdAt: fixedDate,
+      nomeExibicao: 'Owner',
+      criadoEm: fixedDate,
     };
-    const account = {
-      id: accountId,
-      userId,
-      permissions: ['campaign:admin'] as const,
-      createdAt: fixedDate,
+    const conta = {
+      id: idConta,
+      idUsuario,
+      permissoes: ['campaign:admin'] as const,
+      criadaEm: fixedDate,
     };
-    const credential = { userId, simulatedPassword: 'stub-secret' };
+    const credencial = { idUsuario, senhaSimulada: 'stub-secret' };
 
-    await repo.saveRegistration({ user, account, credential });
+    await repo.saveRegistro({ usuario, conta, credencial });
 
-    expect(await repo.findUserById(userId)).toEqual(user);
-    expect(await repo.findUserByEmail('owner@example.com')).toEqual(user);
-    expect(await repo.findAccountById(accountId)).toEqual(account);
-    expect(await repo.findCredentialByUserId(userId)).toEqual(credential);
+    expect(await repo.findUsuarioById(idUsuario)).toEqual(usuario);
+    expect(await repo.findUsuarioByEmail('owner@example.com')).toEqual(usuario);
+    expect(await repo.findContaById(idConta)).toEqual(conta);
+    expect(await repo.findCredencialByIdUsuario(idUsuario)).toEqual(credencial);
   });
 
-  it('throws UserEmailAlreadyExistsError on duplicate email', async () => {
-    const repo = new UserRepositoryMemory();
+  it('throws UsuarioEmailJaExisteError on duplicate email', async () => {
+    const repo = new UsuarioRepositoryMemory();
     const bundle = (uid: string, aid: string, email: string) => ({
-      user: {
+      usuario: {
         id: uid,
-        accountId: aid,
+        idConta: aid,
         email,
-        displayName: 'A',
-        createdAt: fixedDate,
+        nomeExibicao: 'A',
+        criadoEm: fixedDate,
       },
-      account: {
+      conta: {
         id: aid,
-        userId: uid,
-        permissions: ['campaign:admin'] as const,
-        createdAt: fixedDate,
+        idUsuario: uid,
+        permissoes: ['campaign:admin'] as const,
+        criadaEm: fixedDate,
       },
-      credential: { userId: uid, simulatedPassword: 'p' },
+      credencial: { idUsuario: uid, senhaSimulada: 'p' },
     });
 
     const u1 = randomUUID();
     const a1 = randomUUID();
-    await repo.saveRegistration(bundle(u1, a1, 'dup@example.com'));
+    await repo.saveRegistro(bundle(u1, a1, 'dup@example.com'));
 
     const u2 = randomUUID();
     const a2 = randomUUID();
-    await expect(repo.saveRegistration(bundle(u2, a2, 'dup@example.com'))).rejects.toThrow(
-      UserEmailAlreadyExistsError,
+    await expect(repo.saveRegistro(bundle(u2, a2, 'dup@example.com'))).rejects.toThrow(
+      UsuarioEmailJaExisteError,
     );
   });
 
   it('updates display name', async () => {
-    const repo = new UserRepositoryMemory();
-    const userId = randomUUID();
-    const accountId = randomUUID();
-    await repo.saveRegistration({
-      user: {
-        id: userId,
-        accountId,
+    const repo = new UsuarioRepositoryMemory();
+    const idUsuario = randomUUID();
+    const idConta = randomUUID();
+    await repo.saveRegistro({
+      usuario: {
+        id: idUsuario,
+        idConta,
         email: 'x@example.com',
-        displayName: 'Old',
-        createdAt: fixedDate,
+        nomeExibicao: 'Old',
+        criadoEm: fixedDate,
       },
-      account: {
-        id: accountId,
-        userId,
-        permissions: ['campaign:admin'] as const,
-        createdAt: fixedDate,
+      conta: {
+        id: idConta,
+        idUsuario,
+        permissoes: ['campaign:admin'] as const,
+        criadaEm: fixedDate,
       },
-      credential: { userId, simulatedPassword: 'p' },
+      credencial: { idUsuario, senhaSimulada: 'p' },
     });
 
-    await repo.updateUserDisplayName(userId, 'New Name');
-    const loaded = await repo.findUserById(userId);
-    expect(loaded?.displayName).toBe('New Name');
+    await repo.atualizarNomeExibicaoUsuario(idUsuario, 'New Name');
+    const loaded = await repo.findUsuarioById(idUsuario);
+    expect(loaded?.nomeExibicao).toBe('New Name');
   });
 });

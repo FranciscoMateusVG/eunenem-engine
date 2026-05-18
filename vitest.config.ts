@@ -21,42 +21,42 @@ export default defineConfig({
           functions: 90,
           branches: 85,
         },
-        'src/use-cases/create-fundraising-campaign.ts': {
+        'src/use-cases/criar-campanha.ts': {
           lines: 90,
           functions: 90,
           branches: 85,
         },
-        'src/use-cases/add-fundraising-contribution-option.ts': {
+        'src/use-cases/adicionar-opcao-contribuicao.ts': {
           lines: 90,
           functions: 90,
           branches: 85,
         },
-        'src/use-cases/create-fundraising-contribution.ts': {
+        'src/use-cases/criar-contribuicao.ts': {
           lines: 90,
           functions: 90,
           branches: 85,
         },
-        'src/domain/user.ts': {
+        'src/domain/usuario.ts': {
           lines: 90,
           functions: 90,
           branches: 85,
         },
-        'src/use-cases/register-user-account.ts': {
+        'src/use-cases/registrar-conta-usuario.ts': {
           lines: 90,
           functions: 90,
           branches: 85,
         },
-        'src/use-cases/update-user-profile.ts': {
+        'src/use-cases/atualizar-perfil-usuario.ts': {
           lines: 90,
           functions: 90,
           branches: 85,
         },
-        'src/use-cases/create-user-session.ts': {
+        'src/use-cases/criar-sessao-usuario.ts': {
           lines: 90,
           functions: 90,
           branches: 85,
         },
-        'src/use-cases/authorize-user-permission.ts': {
+        'src/use-cases/autorizar-permissao-usuario.ts': {
           lines: 90,
           functions: 90,
           branches: 85,

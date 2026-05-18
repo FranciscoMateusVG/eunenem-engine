@@ -1,67 +1,67 @@
 import { describe, expect, it } from 'vitest';
-import { PaymentProviderFake } from '../../src/adapters/payment-provider.fake.js';
+import { PagamentoProviderFake } from '../../src/adapters/pagamento-provider.fake.js';
 
-const paymentId = '550e8400-e29b-41d4-a716-446655440301';
-const paymentIntentId = '550e8400-e29b-41d4-a716-446655440302';
-const externalTransactionId = '550e8400-e29b-41d4-a716-446655440303';
+const idPagamento = '550e8400-e29b-41d4-a716-446655440301';
+const idIntencaoPagamento = '550e8400-e29b-41d4-a716-446655440302';
+const idTransacaoExterna = '550e8400-e29b-41d4-a716-446655440303';
 const fixedDate = new Date('2026-05-01T12:00:00.000Z');
 
-describe('PaymentProviderFake', () => {
+describe('PagamentoProviderFake', () => {
   it('returns an approved external transaction by default', async () => {
-    const provider = new PaymentProviderFake({
-      transactionIdFactory: () => externalTransactionId,
+    const provider = new PagamentoProviderFake({
+      idTransacaoFactory: () => idTransacaoExterna,
       clock: () => fixedDate,
     });
 
-    const transaction = await provider.requestPayment({
-      paymentId,
-      paymentIntentId,
+    const transacao = await provider.solicitarPagamento({
+      idPagamento,
+      idIntencaoPagamento,
       amountCents: 8400,
-      method: 'pix',
+      metodo: 'pix',
     });
 
-    expect(transaction).toEqual({
-      id: externalTransactionId,
-      provider: 'fake-provider',
-      status: 'approved',
+    expect(transacao).toEqual({
+      id: idTransacaoExterna,
+      provedor: 'fake-provider',
+      status: 'aprovado',
       amountCents: 8400,
-      createdAt: fixedDate,
-      rawStatus: 'approved',
+      criadaEm: fixedDate,
+      statusBruto: 'aprovado',
     });
   });
 
   it('can return a rejected external transaction', async () => {
-    const provider = new PaymentProviderFake({
-      resultStatus: 'rejected',
-      transactionIdFactory: () => externalTransactionId,
+    const provider = new PagamentoProviderFake({
+      statusResultado: 'rejeitado',
+      idTransacaoFactory: () => idTransacaoExterna,
       clock: () => fixedDate,
     });
 
-    const transaction = await provider.requestPayment({
-      paymentId,
-      paymentIntentId,
+    const transacao = await provider.solicitarPagamento({
+      idPagamento,
+      idIntencaoPagamento,
       amountCents: 8400,
-      method: 'credit_card',
+      metodo: 'credit_card',
     });
 
-    expect(transaction.status).toBe('rejected');
-    expect(transaction.rawStatus).toBe('rejected');
+    expect(transacao.status).toBe('rejeitado');
+    expect(transacao.statusBruto).toBe('rejeitado');
   });
 
   it('can simulate an amount mismatch from the provider', async () => {
-    const provider = new PaymentProviderFake({
-      transactionIdFactory: () => externalTransactionId,
-      transactionAmountCents: 8500,
+    const provider = new PagamentoProviderFake({
+      idTransacaoFactory: () => idTransacaoExterna,
+      amountCentsTransacao: 8500,
       clock: () => fixedDate,
     });
 
-    const transaction = await provider.requestPayment({
-      paymentId,
-      paymentIntentId,
+    const transacao = await provider.solicitarPagamento({
+      idPagamento,
+      idIntencaoPagamento,
       amountCents: 8400,
-      method: 'pix',
+      metodo: 'pix',
     });
 
-    expect(transaction.amountCents).toBe(8500);
+    expect(transacao.amountCents).toBe(8500);
   });
 });

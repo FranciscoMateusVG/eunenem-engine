@@ -1,18 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { PaymentEventPublisherMemory } from '../../src/adapters/payment-event-publisher.memory.js';
-import { PaymentProviderFake } from '../../src/adapters/payment-provider.fake.js';
-import { PaymentRepositoryMemory } from '../../src/adapters/payment-repository.memory.js';
-import type { CreatePaymentIntentInput } from '../../src/domain/payments.js';
-import { PaymentAmountMismatchError } from '../../src/errors/payment-amount-mismatch.error.js';
-import { PaymentInvalidStatusTransitionError } from '../../src/errors/payment-invalid-status-transition.error.js';
-import { PaymentNotFoundError } from '../../src/errors/payment-not-found.error.js';
-import { PaymentsInvalidInputError } from '../../src/errors/payments-invalid-input.error.js';
+import { PagamentoEventPublisherMemory } from '../../src/adapters/pagamento-event-publisher.memory.js';
+import { PagamentoProviderFake } from '../../src/adapters/pagamento-provider.fake.js';
+import { PagamentoRepositoryMemory } from '../../src/adapters/pagamento-repository.memory.js';
+import type { CriarIntencaoPagamentoInput } from '../../src/domain/pagamentos.js';
+import { PagamentoNaoEncontradoError } from '../../src/errors/pagamento-nao-encontrado.error.js';
+import { PagamentoTransicaoStatusInvalidaError } from '../../src/errors/pagamento-transicao-status-invalida.error.js';
+import { PagamentoValorDivergenteError } from '../../src/errors/pagamento-valor-divergente.error.js';
+import { PagamentosInputInvalidoError } from '../../src/errors/pagamentos-input-invalido.error.js';
 import { NoopLogger } from '../../src/observability/noop-logger.js';
 import { noopTracer } from '../../src/observability/tracer.js';
-import { approvePayment } from '../../src/use-cases/approve-payment.js';
-import { createPaymentIntent } from '../../src/use-cases/create-payment-intent.js';
-import { getPaymentById } from '../../src/use-cases/get-payment-by-id.js';
-import { rejectPayment } from '../../src/use-cases/reject-payment.js';
+import { aprovarPagamento } from '../../src/use-cases/aprovar-pagamento.js';
+import { criarIntencaoPagamento } from '../../src/use-cases/criar-intencao-pagamento.js';
+import { obterPagamentoPorId } from '../../src/use-cases/obter-pagamento-por-id.js';
+import { rejeitarPagamento } from '../../src/use-cases/rejeitar-pagamento.js';
 
 const silentObservability = {
   logger: new NoopLogger(),
@@ -22,259 +22,259 @@ const silentObservability = {
 const fixedDate = new Date('2026-05-01T12:00:00.000Z');
 const clock = () => fixedDate;
 
-const paymentId = '550e8400-e29b-41d4-a716-446655440501';
-const paymentIntentId = '550e8400-e29b-41d4-a716-446655440502';
-const contributionId = '550e8400-e29b-41d4-a716-446655440503';
-const externalTransactionId = '550e8400-e29b-41d4-a716-446655440504';
+const idPagamento = '550e8400-e29b-41d4-a716-446655440501';
+const idIntencaoPagamento = '550e8400-e29b-41d4-a716-446655440502';
+const idContribuicao = '550e8400-e29b-41d4-a716-446655440503';
+const idTransacaoExterna = '550e8400-e29b-41d4-a716-446655440504';
 
-function makeCreatePaymentIntentInput(
-  overrides: Partial<CreatePaymentIntentInput> = {},
-): CreatePaymentIntentInput {
+function makeCriarIntencaoPagamentoInput(
+  overrides: Partial<CriarIntencaoPagamentoInput> = {},
+): CriarIntencaoPagamentoInput {
   return {
-    paymentId,
-    paymentIntentId,
-    valueComposition: {
-      contributionId,
+    idPagamento,
+    idIntencaoPagamento,
+    composicaoValores: {
+      idContribuicao,
       contributionAmountCents: 8000,
       feeAmountCents: 400,
       totalPaidCents: 8400,
       receiverAmountCents: 8000,
-      feePayer: 'contributor',
+      responsavelTaxa: 'contribuinte',
     },
-    amountToChargeCents: 8400,
-    method: 'pix',
+    valorACobrarCents: 8400,
+    metodo: 'pix',
     ...overrides,
   };
 }
 
 describe('payment use cases', () => {
   it('creates and approves the canonical R$ 80 + R$ 4 payment flow', async () => {
-    const paymentRepository = new PaymentRepositoryMemory();
-    const paymentEventPublisher = new PaymentEventPublisherMemory();
-    const paymentProvider = new PaymentProviderFake({
-      transactionIdFactory: () => externalTransactionId,
+    const pagamentoRepository = new PagamentoRepositoryMemory();
+    const pagamentoEventPublisher = new PagamentoEventPublisherMemory();
+    const pagamentoProvider = new PagamentoProviderFake({
+      idTransacaoFactory: () => idTransacaoExterna,
       clock,
     });
 
-    const created = await createPaymentIntent(
-      { paymentRepository, paymentEventPublisher, clock, observability: silentObservability },
-      makeCreatePaymentIntentInput(),
+    const created = await criarIntencaoPagamento(
+      { pagamentoRepository, pagamentoEventPublisher, clock, observability: silentObservability },
+      makeCriarIntencaoPagamentoInput(),
     );
 
-    expect(created.status).toBe('pending');
-    expect(created.intent.amountCents).toBe(8400);
+    expect(created.status).toBe('pendente');
+    expect(created.intencao.amountCents).toBe(8400);
 
-    const approved = await approvePayment(
+    const approved = await aprovarPagamento(
       {
-        paymentRepository,
-        paymentProvider,
-        paymentEventPublisher,
+        pagamentoRepository,
+        pagamentoProvider,
+        pagamentoEventPublisher,
         clock,
         observability: silentObservability,
       },
-      { paymentId },
+      { idPagamento },
     );
-    const loaded = await getPaymentById(
-      { paymentRepository, observability: silentObservability },
-      { paymentId },
+    const loaded = await obterPagamentoPorId(
+      { pagamentoRepository, observability: silentObservability },
+      { idPagamento },
     );
 
-    expect(approved.status).toBe('approved');
-    expect(approved.externalTransaction?.id).toBe(externalTransactionId);
-    expect(loaded?.status).toBe('approved');
-    expect(paymentEventPublisher.getPublishedEvents().map((event) => event.type)).toEqual([
+    expect(approved.status).toBe('aprovado');
+    expect(approved.transacaoExterna?.id).toBe(idTransacaoExterna);
+    expect(loaded?.status).toBe('aprovado');
+    expect(pagamentoEventPublisher.getEventosPublicados().map((event) => event.tipo)).toEqual([
       'payment.intent_created',
       'payment.approved',
     ]);
   });
 
   it('creates and rejects a payment from provider response', async () => {
-    const paymentRepository = new PaymentRepositoryMemory();
-    const paymentEventPublisher = new PaymentEventPublisherMemory();
-    const paymentProvider = new PaymentProviderFake({
-      resultStatus: 'rejected',
-      transactionIdFactory: () => externalTransactionId,
+    const pagamentoRepository = new PagamentoRepositoryMemory();
+    const pagamentoEventPublisher = new PagamentoEventPublisherMemory();
+    const pagamentoProvider = new PagamentoProviderFake({
+      statusResultado: 'rejeitado',
+      idTransacaoFactory: () => idTransacaoExterna,
       clock,
     });
 
-    await createPaymentIntent(
-      { paymentRepository, paymentEventPublisher, clock, observability: silentObservability },
-      makeCreatePaymentIntentInput(),
+    await criarIntencaoPagamento(
+      { pagamentoRepository, pagamentoEventPublisher, clock, observability: silentObservability },
+      makeCriarIntencaoPagamentoInput(),
     );
 
-    const rejected = await rejectPayment(
+    const rejected = await rejeitarPagamento(
       {
-        paymentRepository,
-        paymentProvider,
-        paymentEventPublisher,
+        pagamentoRepository,
+        pagamentoProvider,
+        pagamentoEventPublisher,
         clock,
         observability: silentObservability,
       },
-      { paymentId },
+      { idPagamento },
     );
 
-    expect(rejected.status).toBe('rejected');
-    expect(rejected.externalTransaction?.status).toBe('rejected');
-    expect(paymentEventPublisher.getPublishedEvents().map((event) => event.type)).toEqual([
+    expect(rejected.status).toBe('rejeitado');
+    expect(rejected.transacaoExterna?.status).toBe('rejeitado');
+    expect(pagamentoEventPublisher.getEventosPublicados().map((event) => event.tipo)).toEqual([
       'payment.intent_created',
       'payment.rejected',
     ]);
   });
 
   it('does not create an intent when the charge amount differs from totalPaidCents', async () => {
-    const paymentRepository = new PaymentRepositoryMemory();
-    const paymentEventPublisher = new PaymentEventPublisherMemory();
+    const pagamentoRepository = new PagamentoRepositoryMemory();
+    const pagamentoEventPublisher = new PagamentoEventPublisherMemory();
 
     await expect(
-      createPaymentIntent(
-        { paymentRepository, paymentEventPublisher, clock, observability: silentObservability },
-        makeCreatePaymentIntentInput({ amountToChargeCents: 8300 }),
+      criarIntencaoPagamento(
+        { pagamentoRepository, pagamentoEventPublisher, clock, observability: silentObservability },
+        makeCriarIntencaoPagamentoInput({ valorACobrarCents: 8300 }),
       ),
-    ).rejects.toThrow(PaymentAmountMismatchError);
+    ).rejects.toThrow(PagamentoValorDivergenteError);
   });
 
   it('does not approve when the provider returns a different amount', async () => {
-    const paymentRepository = new PaymentRepositoryMemory();
-    const paymentEventPublisher = new PaymentEventPublisherMemory();
-    const paymentProvider = new PaymentProviderFake({
-      transactionIdFactory: () => externalTransactionId,
-      transactionAmountCents: 8500,
+    const pagamentoRepository = new PagamentoRepositoryMemory();
+    const pagamentoEventPublisher = new PagamentoEventPublisherMemory();
+    const pagamentoProvider = new PagamentoProviderFake({
+      idTransacaoFactory: () => idTransacaoExterna,
+      amountCentsTransacao: 8500,
       clock,
     });
 
-    await createPaymentIntent(
-      { paymentRepository, paymentEventPublisher, clock, observability: silentObservability },
-      makeCreatePaymentIntentInput(),
+    await criarIntencaoPagamento(
+      { pagamentoRepository, pagamentoEventPublisher, clock, observability: silentObservability },
+      makeCriarIntencaoPagamentoInput(),
     );
 
     await expect(
-      approvePayment(
+      aprovarPagamento(
         {
-          paymentRepository,
-          paymentProvider,
-          paymentEventPublisher,
+          pagamentoRepository,
+          pagamentoProvider,
+          pagamentoEventPublisher,
           clock,
           observability: silentObservability,
         },
-        { paymentId },
+        { idPagamento },
       ),
-    ).rejects.toThrow(PaymentAmountMismatchError);
+    ).rejects.toThrow(PagamentoValorDivergenteError);
   });
 
   it('does not approve a rejected payment', async () => {
-    const paymentRepository = new PaymentRepositoryMemory();
-    const paymentEventPublisher = new PaymentEventPublisherMemory();
-    const rejectedProvider = new PaymentProviderFake({
-      resultStatus: 'rejected',
-      transactionIdFactory: () => externalTransactionId,
+    const pagamentoRepository = new PagamentoRepositoryMemory();
+    const pagamentoEventPublisher = new PagamentoEventPublisherMemory();
+    const rejectedProvider = new PagamentoProviderFake({
+      statusResultado: 'rejeitado',
+      idTransacaoFactory: () => idTransacaoExterna,
       clock,
     });
-    const approvedProvider = new PaymentProviderFake({
-      transactionIdFactory: () => externalTransactionId,
+    const approvedProvider = new PagamentoProviderFake({
+      idTransacaoFactory: () => idTransacaoExterna,
       clock,
     });
 
-    await createPaymentIntent(
-      { paymentRepository, paymentEventPublisher, clock, observability: silentObservability },
-      makeCreatePaymentIntentInput(),
+    await criarIntencaoPagamento(
+      { pagamentoRepository, pagamentoEventPublisher, clock, observability: silentObservability },
+      makeCriarIntencaoPagamentoInput(),
     );
-    await rejectPayment(
+    await rejeitarPagamento(
       {
-        paymentRepository,
-        paymentProvider: rejectedProvider,
-        paymentEventPublisher,
+        pagamentoRepository,
+        pagamentoProvider: rejectedProvider,
+        pagamentoEventPublisher,
         clock,
         observability: silentObservability,
       },
-      { paymentId },
+      { idPagamento },
     );
 
     await expect(
-      approvePayment(
+      aprovarPagamento(
         {
-          paymentRepository,
-          paymentProvider: approvedProvider,
-          paymentEventPublisher,
+          pagamentoRepository,
+          pagamentoProvider: approvedProvider,
+          pagamentoEventPublisher,
           clock,
           observability: silentObservability,
         },
-        { paymentId },
+        { idPagamento },
       ),
-    ).rejects.toThrow(PaymentInvalidStatusTransitionError);
+    ).rejects.toThrow(PagamentoTransicaoStatusInvalidaError);
   });
 
   it('does not reject an approved payment', async () => {
-    const paymentRepository = new PaymentRepositoryMemory();
-    const paymentEventPublisher = new PaymentEventPublisherMemory();
-    const approvedProvider = new PaymentProviderFake({
-      transactionIdFactory: () => externalTransactionId,
+    const pagamentoRepository = new PagamentoRepositoryMemory();
+    const pagamentoEventPublisher = new PagamentoEventPublisherMemory();
+    const approvedProvider = new PagamentoProviderFake({
+      idTransacaoFactory: () => idTransacaoExterna,
       clock,
     });
-    const rejectedProvider = new PaymentProviderFake({
-      resultStatus: 'rejected',
-      transactionIdFactory: () => externalTransactionId,
+    const rejectedProvider = new PagamentoProviderFake({
+      statusResultado: 'rejeitado',
+      idTransacaoFactory: () => idTransacaoExterna,
       clock,
     });
 
-    await createPaymentIntent(
-      { paymentRepository, paymentEventPublisher, clock, observability: silentObservability },
-      makeCreatePaymentIntentInput(),
+    await criarIntencaoPagamento(
+      { pagamentoRepository, pagamentoEventPublisher, clock, observability: silentObservability },
+      makeCriarIntencaoPagamentoInput(),
     );
-    await approvePayment(
+    await aprovarPagamento(
       {
-        paymentRepository,
-        paymentProvider: approvedProvider,
-        paymentEventPublisher,
+        pagamentoRepository,
+        pagamentoProvider: approvedProvider,
+        pagamentoEventPublisher,
         clock,
         observability: silentObservability,
       },
-      { paymentId },
+      { idPagamento },
     );
 
     await expect(
-      rejectPayment(
+      rejeitarPagamento(
         {
-          paymentRepository,
-          paymentProvider: rejectedProvider,
-          paymentEventPublisher,
+          pagamentoRepository,
+          pagamentoProvider: rejectedProvider,
+          pagamentoEventPublisher,
           clock,
           observability: silentObservability,
         },
-        { paymentId },
+        { idPagamento },
       ),
-    ).rejects.toThrow(PaymentInvalidStatusTransitionError);
+    ).rejects.toThrow(PagamentoTransicaoStatusInvalidaError);
   });
 
-  it('throws PaymentNotFoundError when approving a missing payment', async () => {
-    const paymentRepository = new PaymentRepositoryMemory();
-    const paymentEventPublisher = new PaymentEventPublisherMemory();
-    const paymentProvider = new PaymentProviderFake({
-      transactionIdFactory: () => externalTransactionId,
+  it('throws PagamentoNaoEncontradoError when approving a missing payment', async () => {
+    const pagamentoRepository = new PagamentoRepositoryMemory();
+    const pagamentoEventPublisher = new PagamentoEventPublisherMemory();
+    const pagamentoProvider = new PagamentoProviderFake({
+      idTransacaoFactory: () => idTransacaoExterna,
       clock,
     });
 
     await expect(
-      approvePayment(
+      aprovarPagamento(
         {
-          paymentRepository,
-          paymentProvider,
-          paymentEventPublisher,
+          pagamentoRepository,
+          pagamentoProvider,
+          pagamentoEventPublisher,
           clock,
           observability: silentObservability,
         },
-        { paymentId },
+        { idPagamento },
       ),
-    ).rejects.toThrow(PaymentNotFoundError);
+    ).rejects.toThrow(PagamentoNaoEncontradoError);
   });
 
-  it('throws PaymentsInvalidInputError when querying an invalid payment id', async () => {
-    const paymentRepository = new PaymentRepositoryMemory();
+  it('throws PagamentosInputInvalidoError when querying an invalid payment id', async () => {
+    const pagamentoRepository = new PagamentoRepositoryMemory();
 
     await expect(
-      getPaymentById(
-        { paymentRepository, observability: silentObservability },
-        { paymentId: 'not-a-uuid' },
+      obterPagamentoPorId(
+        { pagamentoRepository, observability: silentObservability },
+        { idPagamento: 'not-a-uuid' },
       ),
-    ).rejects.toThrow(PaymentsInvalidInputError);
+    ).rejects.toThrow(PagamentosInputInvalidoError);
   });
 });
