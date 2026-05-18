@@ -21,42 +21,42 @@ export default defineConfig({
           functions: 90,
           branches: 85,
         },
-        'src/use-cases/criar-campanha.ts': {
+        'src/use-cases/arrecadacao/criar-campanha.ts': {
           lines: 90,
           functions: 90,
           branches: 85,
         },
-        'src/use-cases/adicionar-opcao-contribuicao.ts': {
+        'src/use-cases/arrecadacao/adicionar-opcao-contribuicao.ts': {
           lines: 90,
           functions: 90,
           branches: 85,
         },
-        'src/use-cases/criar-contribuicao.ts': {
+        'src/use-cases/arrecadacao/criar-contribuicao.ts': {
           lines: 90,
           functions: 90,
           branches: 85,
         },
-        'src/domain/usuario.ts': {
+        'src/domain/usuario/usuario.ts': {
           lines: 90,
           functions: 90,
           branches: 85,
         },
-        'src/use-cases/registrar-conta-usuario.ts': {
+        'src/use-cases/usuario/registrar-conta-usuario.ts': {
           lines: 90,
           functions: 90,
           branches: 85,
         },
-        'src/use-cases/atualizar-perfil-usuario.ts': {
+        'src/use-cases/usuario/atualizar-perfil-usuario.ts': {
           lines: 90,
           functions: 90,
           branches: 85,
         },
-        'src/use-cases/criar-sessao-usuario.ts': {
+        'src/use-cases/usuario/criar-sessao-usuario.ts': {
           lines: 90,
           functions: 90,
           branches: 85,
         },
-        'src/use-cases/autorizar-permissao-usuario.ts': {
+        'src/use-cases/usuario/autorizar-permissao-usuario.ts': {
           lines: 90,
           functions: 90,
           branches: 85,

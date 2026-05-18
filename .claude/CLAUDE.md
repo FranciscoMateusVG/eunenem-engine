@@ -61,7 +61,7 @@ src/errors/         — Typed error classes.
 src/observability/  — Logger interface, implementations, tracer re-exports, Observability type.
 src/testing/        — Exported test helpers (frame/testing subpath). Uses OTel SDK.
 src/index.ts        — Public API surface.
-tests/unit/         — Unit + property-based tests.
+tests/unit/         — Unit + property-based tests (BC subfolders + shared root).
 tests/integration/  — Tests against real Postgres via Testcontainers.
 tests/helpers/      — Shared test utilities (test DB, test observability, conformance suites).
 examples/           — Runnable examples (executed in CI).
@@ -83,7 +83,7 @@ scripts/            — Build/check scripts.
    - Set `db.system`, `db.operation.name`, `db.collection.name` attributes.
    - Adapters do NOT log — spans only.
 6. Export public types and use case from `src/index.ts`.
-7. Write unit tests in `tests/unit/`.
+7. Write unit tests in `tests/unit/<bc>/` (or `tests/unit/` root for shared types like money/cat).
 8. Write integration tests in `tests/integration/`.
 9. Add span assertions to the conformance test suite.
 10. Run `pnpm check` — all green before committing.

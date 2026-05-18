@@ -33,25 +33,25 @@ Nada disto cobra pagamento nem calcula taxa — isso será outros bounded contex
 | Conceito | Onde está |
 |----------|-----------|
 | Montante em centavos (evitar `number` em reais) | [`src/domain/money.ts`](src/domain/money.ts) — `MoneyCentsSchema` |
-| Campanha, recebedor, criador, opção de contribuição | [`src/domain/arrecadacao-campanha.ts`](src/domain/arrecadacao-campanha.ts) — tipos `Campanha`, `OpcaoContribuicao`, schemas Zod |
-| Procurar opção na campanha (função pura) | [`src/domain/arrecadacao-campanha.ts`](src/domain/arrecadacao-campanha.ts) — `encontrarOpcaoContribuicao` |
-| Anexar opção de forma imutável | [`src/domain/arrecadacao-campanha.ts`](src/domain/arrecadacao-campanha.ts) — `campanhaComOpcao` |
-| Contribuição, dados do visitante, input de criação | [`src/domain/arrecadacao-contribuicao.ts`](src/domain/arrecadacao-contribuicao.ts) |
-| Persistência em memória da campanha | [`src/adapters/arrecadacao-campanha-repository.memory.ts`](src/adapters/arrecadacao-campanha-repository.memory.ts) |
-| Persistência em memória das contribuições | [`src/adapters/arrecadacao-contribuicao-repository.memory.ts`](src/adapters/arrecadacao-contribuicao-repository.memory.ts) |
-| Portas (interfaces) | [`src/adapters/arrecadacao-campanha-repository.ts`](src/adapters/arrecadacao-campanha-repository.ts) — `CampanhaRepository`; [`src/adapters/arrecadacao-contribuicao-repository.ts`](src/adapters/arrecadacao-contribuicao-repository.ts) — `ContribuicaoRepository` |
-| Caso de uso: criar campanha | [`src/use-cases/criar-campanha.ts`](src/use-cases/criar-campanha.ts) — `criarCampanha` |
-| Caso de uso: adicionar opção | [`src/use-cases/adicionar-opcao-contribuicao.ts`](src/use-cases/adicionar-opcao-contribuicao.ts) — `adicionarOpcaoContribuicao` |
-| Caso de uso: criar contribuição a partir da opção | [`src/use-cases/criar-contribuicao.ts`](src/use-cases/criar-contribuicao.ts) — `criarContribuicao` |
-| Erros de domínio / aplicação | [`src/errors/arrecadacao-*.error.ts`](src/errors) |
+| Campanha, recebedor, criador, opção de contribuição | [`src/domain/arrecadacao/campanha.ts`](src/domain/arrecadacao/campanha.ts) — tipos `Campanha`, `OpcaoContribuicao`, schemas Zod |
+| Procurar opção na campanha (função pura) | [`src/domain/arrecadacao/campanha.ts`](src/domain/arrecadacao/campanha.ts) — `encontrarOpcaoContribuicao` |
+| Anexar opção de forma imutável | [`src/domain/arrecadacao/campanha.ts`](src/domain/arrecadacao/campanha.ts) — `campanhaComOpcao` |
+| Contribuição, dados do visitante, input de criação | [`src/domain/arrecadacao/contribuicao.ts`](src/domain/arrecadacao/contribuicao.ts) |
+| Persistência em memória da campanha | [`src/adapters/arrecadacao/campanha-repository.memory.ts`](src/adapters/arrecadacao/campanha-repository.memory.ts) |
+| Persistência em memória das contribuições | [`src/adapters/arrecadacao/contribuicao-repository.memory.ts`](src/adapters/arrecadacao/contribuicao-repository.memory.ts) |
+| Portas (interfaces) | [`src/adapters/arrecadacao/campanha-repository.ts`](src/adapters/arrecadacao/campanha-repository.ts) — `CampanhaRepository`; [`src/adapters/arrecadacao/contribuicao-repository.ts`](src/adapters/arrecadacao/contribuicao-repository.ts) — `ContribuicaoRepository` |
+| Caso de uso: criar campanha | [`src/use-cases/arrecadacao/criar-campanha.ts`](src/use-cases/arrecadacao/criar-campanha.ts) — `criarCampanha` |
+| Caso de uso: adicionar opção | [`src/use-cases/arrecadacao/adicionar-opcao-contribuicao.ts`](src/use-cases/arrecadacao/adicionar-opcao-contribuicao.ts) — `adicionarOpcaoContribuicao` |
+| Caso de uso: criar contribuição a partir da opção | [`src/use-cases/arrecadacao/criar-contribuicao.ts`](src/use-cases/arrecadacao/criar-contribuicao.ts) — `criarContribuicao` |
+| Erros de domínio / aplicação | [`src/errors/arrecadacao/`](src/errors/arrecadacao) |
 | API pública do pacote (re-exports) | [`src/index.ts`](src/index.ts) |
-| Testes unitários | [`tests/unit/money.test.ts`](tests/unit/money.test.ts), [`tests/unit/arrecadacao-campanha.test.ts`](tests/unit/arrecadacao-campanha.test.ts), [`tests/unit/arrecadacao-contribuicao.test.ts`](tests/unit/arrecadacao-contribuicao.test.ts), [`tests/unit/fundraising-use-cases.test.ts`](tests/unit/fundraising-use-cases.test.ts) |
+| Testes unitários | [`tests/unit/money.test.ts`](tests/unit/money.test.ts), [`tests/unit/arrecadacao/campanha.test.ts`](tests/unit/arrecadacao/campanha.test.ts), [`tests/unit/arrecadacao/contribuicao.test.ts`](tests/unit/arrecadacao/contribuicao.test.ts), [`tests/unit/arrecadacao/casos-de-uso.test.ts`](tests/unit/arrecadacao/casos-de-uso.test.ts) |
 
 ---
 
 ## DDD
 
-- **Bounded context (contexto delimitado):** ficheiros com prefixo `arrecadacao-` no domínio, adaptadores e erros. Toda a linguagem (campanha, opção, contribuição, visitante) vive aqui; não aparecem “pagamentos” ou “taxas” neste BC.
+- **Bounded context (contexto delimitado):** ficheiros na subpasta `arrecadacao/` em domínio, adaptadores, erros e casos de uso. Toda a linguagem (campanha, opção, contribuição, visitante) vive aqui; não aparecem “pagamentos” ou “taxas” neste BC.
 
 - **Ubiquitous language (linguagem ubíqua):** os nomes em TypeScript (`Campanha`, `OpcaoContribuicao`, `criarContribuicao`) alinham com a conversa de produto em [`ENGINE-DDD.md`](ENGINE-DDD.md).
 
@@ -93,16 +93,16 @@ Como a taxa é paga pelo contribuinte, ela é somada ao total cobrado e não é 
 ## Mapa conceito de negócio → código
 
 - **Montante em centavos:** `src/domain/money.ts` — `MoneyCentsSchema`
-- **Regra de Taxa:** `src/domain/taxas.ts` — `RegraTaxa`, `REGRA_TAXA_PADRAO`
-- **Responsável pela Taxa:** `src/domain/taxas.ts` — `ResponsavelTaxa`, por enquanto apenas `contribuinte`
-- **Cálculo de Taxa:** `src/domain/taxas.ts` — `calcularValorTaxaPercentual` e `calcularTaxa`
-- **Composição de Valores:** `src/domain/taxas.ts` — `ComposicaoValores`, `comporComposicaoValores` e `calcularComposicaoValores` (domínio; exportado como `calcularComposicaoValoresDominio` no pacote)
-- **Porta para regra ativa:** `src/adapters/taxas-regra-provider.ts` — `ProvedorRegraTaxa`
-- **Regra em memória:** `src/adapters/taxas-regra-provider.memory.ts` — `ProvedorRegraTaxaMemory`
-- **Caso de uso:** `src/use-cases/calcular-composicao-valores.ts` — `calcularComposicaoValores`
-- **Erro tipado:** `src/errors/taxas-input-invalido.error.ts` — `TaxasInputInvalidoError`
+- **Regra de Taxa:** `src/domain/taxas/taxas.ts` — `RegraTaxa`, `REGRA_TAXA_PADRAO`
+- **Responsável pela Taxa:** `src/domain/taxas/taxas.ts` — `ResponsavelTaxa`, por enquanto apenas `contribuinte`
+- **Cálculo de Taxa:** `src/domain/taxas/taxas.ts` — `calcularValorTaxaPercentual` e `calcularTaxa`
+- **Composição de Valores:** `src/domain/taxas/taxas.ts` — `ComposicaoValores`, `comporComposicaoValores` e `calcularComposicaoValores` (domínio; exportado como `calcularComposicaoValoresDominio` no pacote)
+- **Porta para regra ativa:** `src/adapters/taxas/regra-provider.ts` — `ProvedorRegraTaxa`
+- **Regra em memória:** `src/adapters/taxas/regra-provider.memory.ts` — `ProvedorRegraTaxaMemory`
+- **Caso de uso:** `src/use-cases/taxas/calcular-composicao-valores.ts` — `calcularComposicaoValores`
+- **Erro tipado:** `src/errors/taxas/input-invalido.error.ts` — `TaxasInputInvalidoError`
 - **API pública:** `src/index.ts`
-- **Testes unitários:** `tests/unit/taxas.test.ts`, `tests/unit/fee-rule-provider.memory.test.ts`, `tests/unit/calculate-fee-composition.test.ts`
+- **Testes unitários:** `tests/unit/taxas/taxas.test.ts`, `tests/unit/taxas/regra-provider.memory.test.ts`, `tests/unit/taxas/calcular-composicao-valores.test.ts`
 
 ---
 
@@ -159,26 +159,26 @@ Pagamentos não calcula taxa. Ele só confere se o valor a cobrar é igual ao to
 ## Mapa conceito de negócio → código
 
 - **Montante em centavos:** `src/domain/money.ts` — `MoneyCentsSchema`
-- **Intenção de Pagamento:** `src/domain/pagamentos.ts` — `IntencaoPagamento`
-- **Pagamento:** `src/domain/pagamentos.ts` — `Pagamento`
-- **Método de Pagamento:** `src/domain/pagamentos.ts` — `MetodoPagamento`, por enquanto `pix` e `credit_card`
-- **Status do Pagamento:** `src/domain/pagamentos.ts` — `StatusPagamento`, com `pendente`, `aprovado` e `rejeitado`
-- **Composição de Valores recebida de Taxas:** `src/domain/pagamentos.ts` — `SnapshotComposicaoValores`
-- **Transação Externa simulada:** `src/domain/pagamentos.ts` — `TransacaoExterna`
-- **Evento de Pagamento:** `src/domain/pagamentos.ts` — `EventoPagamento`
-- **Porta de persistência:** `src/adapters/pagamento-repository.ts` — `PagamentoRepository`
-- **Persistência em memória:** `src/adapters/pagamento-repository.memory.ts` — `PagamentoRepositoryMemory`
-- **Porta do provedor:** `src/adapters/pagamento-provider.ts` — `PagamentoProvider`
-- **Provedor fake:** `src/adapters/pagamento-provider.fake.ts` — `PagamentoProviderFake`
-- **Porta de eventos:** `src/adapters/pagamento-event-publisher.ts` — `PagamentoEventPublisher`
-- **Eventos em memória:** `src/adapters/pagamento-event-publisher.memory.ts` — `PagamentoEventPublisherMemory`
-- **Caso de uso: criar intenção:** `src/use-cases/criar-intencao-pagamento.ts` — `criarIntencaoPagamento`
-- **Caso de uso: aprovar pagamento:** `src/use-cases/aprovar-pagamento.ts` — `aprovarPagamento`
-- **Caso de uso: rejeitar pagamento:** `src/use-cases/rejeitar-pagamento.ts` — `rejeitarPagamento`
-- **Caso de uso: consultar pagamento:** `src/use-cases/obter-pagamento-por-id.ts` — `obterPagamentoPorId`
-- **Erros tipados:** `src/errors/pagamento-*.error.ts` e `src/errors/pagamentos-input-invalido.error.ts`
+- **Intenção de Pagamento:** `src/domain/pagamentos/pagamentos.ts` — `IntencaoPagamento`
+- **Pagamento:** `src/domain/pagamentos/pagamentos.ts` — `Pagamento`
+- **Método de Pagamento:** `src/domain/pagamentos/pagamentos.ts` — `MetodoPagamento`, por enquanto `pix` e `credit_card`
+- **Status do Pagamento:** `src/domain/pagamentos/pagamentos.ts` — `StatusPagamento`, com `pendente`, `aprovado` e `rejeitado`
+- **Composição de Valores recebida de Taxas:** `src/domain/pagamentos/pagamentos.ts` — `SnapshotComposicaoValores`
+- **Transação Externa simulada:** `src/domain/pagamentos/pagamentos.ts` — `TransacaoExterna`
+- **Evento de Pagamento:** `src/domain/pagamentos/pagamentos.ts` — `EventoPagamento`
+- **Porta de persistência:** `src/adapters/pagamentos/repository.ts` — `PagamentoRepository`
+- **Persistência em memória:** `src/adapters/pagamentos/repository.memory.ts` — `PagamentoRepositoryMemory`
+- **Porta do provedor:** `src/adapters/pagamentos/provider.ts` — `PagamentoProvider`
+- **Provedor fake:** `src/adapters/pagamentos/provider.fake.ts` — `PagamentoProviderFake`
+- **Porta de eventos:** `src/adapters/pagamentos/event-publisher.ts` — `PagamentoEventPublisher`
+- **Eventos em memória:** `src/adapters/pagamentos/event-publisher.memory.ts` — `PagamentoEventPublisherMemory`
+- **Caso de uso: criar intenção:** `src/use-cases/pagamentos/criar-intencao-pagamento.ts` — `criarIntencaoPagamento`
+- **Caso de uso: aprovar pagamento:** `src/use-cases/pagamentos/aprovar-pagamento.ts` — `aprovarPagamento`
+- **Caso de uso: rejeitar pagamento:** `src/use-cases/pagamentos/rejeitar-pagamento.ts` — `rejeitarPagamento`
+- **Caso de uso: consultar pagamento:** `src/use-cases/pagamentos/obter-pagamento-por-id.ts` — `obterPagamentoPorId`
+- **Erros tipados:** `src/errors/pagamentos/`
 - **API pública:** `src/index.ts`
-- **Testes unitários:** `tests/unit/pagamentos.test.ts`, `tests/unit/payment-repository.memory.test.ts`, `tests/unit/payment-provider.fake.test.ts`, `tests/unit/payment-event-publisher.memory.test.ts`, `tests/unit/payment-use-cases.test.ts`
+- **Testes unitários:** `tests/unit/pagamentos/pagamentos.test.ts`, `tests/unit/pagamentos/repository.memory.test.ts`, `tests/unit/pagamentos/provider.fake.test.ts`, `tests/unit/pagamentos/event-publisher.memory.test.ts`, `tests/unit/pagamentos/casos-de-uso.test.ts`
 
 ---
 
@@ -257,22 +257,22 @@ O campo `idContribuicao` usado pelo Financeiro é o ID da **contribuição**, n�
 ## Mapa conceito de negócio → código
 
 - **Montante em centavos:** `src/domain/money.ts` — `MoneyCentsSchema`
-- **Lançamento Financeiro:** `src/domain/financeiro.ts` — `LancamentoFinanceiro`
-- **Saldo do Recebedor:** `src/domain/financeiro.ts` — `SaldoRecebedor`
-- **Receita da Plataforma:** `src/domain/financeiro.ts` — `ReceitaPlataforma`
-- **Valor Pendente / Disponível:** `src/domain/financeiro.ts` — `StatusLancamento` (`pendente`, `disponivel`)
-- **Resgate / Repasse:** `src/domain/financeiro.ts` — `RepasseRecebedor`
-- **Status do Repasse:** `src/domain/financeiro.ts` — `StatusRepasse`, por enquanto apenas `solicitado`
-- **Snapshot de valores recebido:** `src/domain/financeiro.ts` — `SnapshotComposicaoValoresFinanceiro`
-- **Porta de persistência:** `src/adapters/financeiro-livro-repository.ts` — `LivroFinanceiroRepository`
-- **Persistência em memória:** `src/adapters/financeiro-livro-repository.memory.ts` — `LivroFinanceiroRepositoryMemory`
-- **Caso de uso: registrar efeitos:** `src/use-cases/registrar-efeitos-financeiros-pagamento-aprovado.ts` — `registrarEfeitosFinanceirosPagamentoAprovado`
-- **Caso de uso: consultar saldo:** `src/use-cases/obter-saldo-recebedor.ts` — `obterSaldoRecebedor`
-- **Caso de uso: consultar receita:** `src/use-cases/obter-receita-plataforma.ts` — `obterReceitaPlataforma`
-- **Caso de uso: pedir repasse:** `src/use-cases/solicitar-repasse-recebedor.ts` — `solicitarRepasseRecebedor`
-- **Erros tipados:** `src/errors/financeiro-*.error.ts`
+- **Lançamento Financeiro:** `src/domain/financeiro/financeiro.ts` — `LancamentoFinanceiro`
+- **Saldo do Recebedor:** `src/domain/financeiro/financeiro.ts` — `SaldoRecebedor`
+- **Receita da Plataforma:** `src/domain/financeiro/financeiro.ts` — `ReceitaPlataforma`
+- **Valor Pendente / Disponível:** `src/domain/financeiro/financeiro.ts` — `StatusLancamento` (`pendente`, `disponivel`)
+- **Resgate / Repasse:** `src/domain/financeiro/financeiro.ts` — `RepasseRecebedor`
+- **Status do Repasse:** `src/domain/financeiro/financeiro.ts` — `StatusRepasse`, por enquanto apenas `solicitado`
+- **Snapshot de valores recebido:** `src/domain/financeiro/financeiro.ts` — `SnapshotComposicaoValoresFinanceiro`
+- **Porta de persistência:** `src/adapters/financeiro/livro-repository.ts` — `LivroFinanceiroRepository`
+- **Persistência em memória:** `src/adapters/financeiro/livro-repository.memory.ts` — `LivroFinanceiroRepositoryMemory`
+- **Caso de uso: registrar efeitos:** `src/use-cases/financeiro/registrar-efeitos-financeiros-pagamento-aprovado.ts` — `registrarEfeitosFinanceirosPagamentoAprovado`
+- **Caso de uso: consultar saldo:** `src/use-cases/financeiro/obter-saldo-recebedor.ts` — `obterSaldoRecebedor`
+- **Caso de uso: consultar receita:** `src/use-cases/financeiro/obter-receita-plataforma.ts` — `obterReceitaPlataforma`
+- **Caso de uso: pedir repasse:** `src/use-cases/financeiro/solicitar-repasse-recebedor.ts` — `solicitarRepasseRecebedor`
+- **Erros tipados:** `src/errors/financeiro/`
 - **API pública:** `src/index.ts`
-- **Testes unitários:** `tests/unit/financeiro.test.ts`, `tests/unit/financial-ledger-repository.memory.test.ts`, `tests/unit/financial-use-cases.test.ts`
+- **Testes unitários:** `tests/unit/financeiro/financeiro.test.ts`, `tests/unit/financeiro/livro-repository.memory.test.ts`, `tests/unit/financeiro/casos-de-uso.test.ts`
 
 ---
 
@@ -338,18 +338,18 @@ Este documento descreve a primeira fatia do **bounded context Usuário** na engi
 
 | Conceito | Onde está |
 |----------|-----------|
-| Utilizador, conta, email, perfil (nome de exibição), sessão, permissão, credencial simulada | [`src/domain/usuario.ts`](src/domain/usuario.ts) |
-| Regras puras (sessão expirada?, tem permissão?) | [`src/domain/usuario.ts`](src/domain/usuario.ts) — `sessaoExpirada`, `contaTemPermissao` |
-| Porta de persistência de utilizador/conta/credencial | [`src/adapters/usuario-repository.ts`](src/adapters/usuario-repository.ts) — `UsuarioRepository` |
-| Porta de sessões | [`src/adapters/usuario-sessao-repository.ts`](src/adapters/usuario-sessao-repository.ts) — `SessaoUsuarioRepository` |
-| Implementações em memória | [`src/adapters/usuario-repository.memory.ts`](src/adapters/usuario-repository.memory.ts), [`src/adapters/usuario-sessao-repository.memory.ts`](src/adapters/usuario-sessao-repository.memory.ts) |
-| Caso de uso: registo | [`src/use-cases/registrar-conta-usuario.ts`](src/use-cases/registrar-conta-usuario.ts) — `registrarContaUsuario` |
-| Caso de uso: atualizar perfil | [`src/use-cases/atualizar-perfil-usuario.ts`](src/use-cases/atualizar-perfil-usuario.ts) — `atualizarPerfilUsuario` |
-| Caso de uso: sessão fake | [`src/use-cases/criar-sessao-usuario.ts`](src/use-cases/criar-sessao-usuario.ts) — `criarSessaoUsuario` |
-| Caso de uso: autorizar permissão | [`src/use-cases/autorizar-permissao-usuario.ts`](src/use-cases/autorizar-permissao-usuario.ts) — `autorizarPermissaoUsuario` |
-| Erros | [`src/errors/usuario-*.error.ts`](src/errors) |
+| Utilizador, conta, email, perfil (nome de exibição), sessão, permissão, credencial simulada | [`src/domain/usuario/usuario.ts`](src/domain/usuario/usuario.ts) |
+| Regras puras (sessão expirada?, tem permissão?) | [`src/domain/usuario/usuario.ts`](src/domain/usuario/usuario.ts) — `sessaoExpirada`, `contaTemPermissao` |
+| Porta de persistência de utilizador/conta/credencial | [`src/adapters/usuario/repository.ts`](src/adapters/usuario/repository.ts) — `UsuarioRepository` |
+| Porta de sessões | [`src/adapters/usuario/sessao-repository.ts`](src/adapters/usuario/sessao-repository.ts) — `SessaoUsuarioRepository` |
+| Implementações em memória | [`src/adapters/usuario/repository.memory.ts`](src/adapters/usuario/repository.memory.ts), [`src/adapters/usuario/sessao-repository.memory.ts`](src/adapters/usuario/sessao-repository.memory.ts) |
+| Caso de uso: registo | [`src/use-cases/usuario/registrar-conta-usuario.ts`](src/use-cases/usuario/registrar-conta-usuario.ts) — `registrarContaUsuario` |
+| Caso de uso: atualizar perfil | [`src/use-cases/usuario/atualizar-perfil-usuario.ts`](src/use-cases/usuario/atualizar-perfil-usuario.ts) — `atualizarPerfilUsuario` |
+| Caso de uso: sessão fake | [`src/use-cases/usuario/criar-sessao-usuario.ts`](src/use-cases/usuario/criar-sessao-usuario.ts) — `criarSessaoUsuario` |
+| Caso de uso: autorizar permissão | [`src/use-cases/usuario/autorizar-permissao-usuario.ts`](src/use-cases/usuario/autorizar-permissao-usuario.ts) — `autorizarPermissaoUsuario` |
+| Erros | [`src/errors/usuario/`](src/errors/usuario) |
 | API pública do pacote | [`src/index.ts`](src/index.ts) |
-| Testes unitários | [`tests/unit/usuario-domain.test.ts`](tests/unit/usuario-domain.test.ts), [`tests/unit/user-repository.memory.test.ts`](tests/unit/user-repository.memory.test.ts), [`tests/unit/user-use-cases.test.ts`](tests/unit/user-use-cases.test.ts) |
+| Testes unitários | [`tests/unit/usuario/usuario.test.ts`](tests/unit/usuario/usuario.test.ts), [`tests/unit/usuario/repository.memory.test.ts`](tests/unit/usuario/repository.memory.test.ts), [`tests/unit/usuario/casos-de-uso.test.ts`](tests/unit/usuario/casos-de-uso.test.ts) |
 
 ---
 
