@@ -24,6 +24,7 @@ export { UsuarioRepositoryMemory } from './adapters/usuario/repository.memory.js
 export type { SessaoUsuarioRepository } from './adapters/usuario/sessao-repository.js';
 export { SessaoUsuarioRepositoryMemory } from './adapters/usuario/sessao-repository.memory.js';
 export type {
+  AdicionarAdministradorCampanhaInput,
   AdicionarOpcaoContribuicaoInput,
   Campanha,
   CriarCampanhaInput,
@@ -32,17 +33,24 @@ export type {
   IdOpcaoContribuicao,
   IdRecebedor,
   OpcaoContribuicao,
+  RemoverAdministradorCampanhaInput,
 } from './domain/arrecadacao/campanha.js';
 export {
+  AdicionarAdministradorCampanhaInputSchema,
   AdicionarOpcaoContribuicaoInputSchema,
   CriarCampanhaInputSchema,
+  campanhaComAdministrador,
   campanhaComOpcao,
+  campanhaPossuiAdministrador,
+  campanhaSemAdministrador,
   encontrarOpcaoContribuicao,
   IdCampanhaSchema,
   IdContaSchema,
   IdOpcaoContribuicaoSchema,
   IdRecebedorSchema,
+  IdsAdministradoresSchema,
   OpcaoContribuicaoSchema,
+  RemoverAdministradorCampanhaInputSchema,
 } from './domain/arrecadacao/campanha.js';
 export type {
   Contribuicao,
@@ -206,11 +214,14 @@ export {
 } from './domain/usuario/usuario.js';
 
 // --- Errors ---
+export { ArrecadacaoAdministradorDuplicadoError } from './errors/arrecadacao/administrador-duplicado.error.js';
+export { ArrecadacaoAdministradorNaoEncontradoError } from './errors/arrecadacao/administrador-nao-encontrado.error.js';
 export { ArrecadacaoCampanhaNaoEncontradaError } from './errors/arrecadacao/campanha-nao-encontrada.error.js';
 export { ArrecadacaoContribuicaoJaExisteError } from './errors/arrecadacao/contribuicao-ja-existe.error.js';
 export { ArrecadacaoInputInvalidoError } from './errors/arrecadacao/input-invalido.error.js';
 export { ArrecadacaoOpcaoContribuicaoNaoEncontradaError } from './errors/arrecadacao/opcao-contribuicao-nao-encontrada.error.js';
 export { ArrecadacaoOpcaoIdDuplicadoError } from './errors/arrecadacao/opcao-id-duplicado.error.js';
+export { ArrecadacaoUltimoAdministradorError } from './errors/arrecadacao/ultimo-administrador.error.js';
 export { CatAlreadyExistsError } from './errors/cat-already-exists.error.js';
 export { FinanceiroInputInvalidoError } from './errors/financeiro/input-invalido.error.js';
 export { FinanceiroPagamentoJaRegistradoError } from './errors/financeiro/pagamento-ja-registrado.error.js';
@@ -236,12 +247,16 @@ export { OtelLogger } from './observability/otel-logger.js';
 export type { Span, Tracer } from './observability/tracer.js';
 export { noopTracer, SpanKind, SpanStatusCode, trace } from './observability/tracer.js';
 // --- Use Cases ---
+export type { AdicionarAdministradorCampanhaDeps } from './use-cases/arrecadacao/adicionar-administrador-campanha.js';
+export { adicionarAdministradorCampanha } from './use-cases/arrecadacao/adicionar-administrador-campanha.js';
 export type { AdicionarOpcaoContribuicaoDeps } from './use-cases/arrecadacao/adicionar-opcao-contribuicao.js';
 export { adicionarOpcaoContribuicao } from './use-cases/arrecadacao/adicionar-opcao-contribuicao.js';
 export type { CriarCampanhaDeps } from './use-cases/arrecadacao/criar-campanha.js';
 export { criarCampanha } from './use-cases/arrecadacao/criar-campanha.js';
 export type { CriarContribuicaoDeps } from './use-cases/arrecadacao/criar-contribuicao.js';
 export { criarContribuicao } from './use-cases/arrecadacao/criar-contribuicao.js';
+export type { RemoverAdministradorCampanhaDeps } from './use-cases/arrecadacao/remover-administrador-campanha.js';
+export { removerAdministradorCampanha } from './use-cases/arrecadacao/remover-administrador-campanha.js';
 export type { CreateCatDeps } from './use-cases/create-cat.js';
 export { createCat } from './use-cases/create-cat.js';
 export type { ObterReceitaPlataformaDeps } from './use-cases/financeiro/obter-receita-plataforma.js';

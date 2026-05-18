@@ -20,7 +20,7 @@ Este documento descreve a primeira fatia da **engine de intermediação financei
 
 ## Resumo em linguagem simples
 
-1. Um **criador** (identificado só por um UUID de “conta”, sem login) abre uma **campanha** com título e indica quem é o **recebedor** (também só um UUID).
+1. Um ou mais **administradores** (identificados só por UUIDs de “conta”, sem login) abrem uma **campanha** com título e indicam quem é o **recebedor** (também só um UUID).
 2. A campanha começa sem **opções de contribuição**; depois podes acrescentar opções (cada uma com valor em **centavos** e rótulo opcional).
 3. Um **contribuinte visitante** (sem conta) escolhe uma opção: o sistema regista uma **contribuição** com o valor **copiado da opção** naquele momento, estado `pendente_pagamento`, e dados mínimos do visitante (nome de exibição e email opcional).
 
@@ -33,7 +33,7 @@ Nada disto cobra pagamento nem calcula taxa — isso será outros bounded contex
 | Conceito | Onde está |
 |----------|-----------|
 | Montante em centavos (evitar `number` em reais) | [`src/domain/money.ts`](src/domain/money.ts) — `MoneyCentsSchema` |
-| Campanha, recebedor, criador, opção de contribuição | [`src/domain/arrecadacao/campanha.ts`](src/domain/arrecadacao/campanha.ts) — tipos `Campanha`, `OpcaoContribuicao`, schemas Zod |
+| Campanha, recebedor, administradores, opção de contribuição | [`src/domain/arrecadacao/campanha.ts`](src/domain/arrecadacao/campanha.ts) — tipos `Campanha`, `OpcaoContribuicao`, schemas Zod |
 | Procurar opção na campanha (função pura) | [`src/domain/arrecadacao/campanha.ts`](src/domain/arrecadacao/campanha.ts) — `encontrarOpcaoContribuicao` |
 | Anexar opção de forma imutável | [`src/domain/arrecadacao/campanha.ts`](src/domain/arrecadacao/campanha.ts) — `campanhaComOpcao` |
 | Contribuição, dados do visitante, input de criação | [`src/domain/arrecadacao/contribuicao.ts`](src/domain/arrecadacao/contribuicao.ts) |
@@ -41,6 +41,8 @@ Nada disto cobra pagamento nem calcula taxa — isso será outros bounded contex
 | Persistência em memória das contribuições | [`src/adapters/arrecadacao/contribuicao-repository.memory.ts`](src/adapters/arrecadacao/contribuicao-repository.memory.ts) |
 | Portas (interfaces) | [`src/adapters/arrecadacao/campanha-repository.ts`](src/adapters/arrecadacao/campanha-repository.ts) — `CampanhaRepository`; [`src/adapters/arrecadacao/contribuicao-repository.ts`](src/adapters/arrecadacao/contribuicao-repository.ts) — `ContribuicaoRepository` |
 | Caso de uso: criar campanha | [`src/use-cases/arrecadacao/criar-campanha.ts`](src/use-cases/arrecadacao/criar-campanha.ts) — `criarCampanha` |
+| Caso de uso: adicionar administrador | [`src/use-cases/arrecadacao/adicionar-administrador-campanha.ts`](src/use-cases/arrecadacao/adicionar-administrador-campanha.ts) — `adicionarAdministradorCampanha` |
+| Caso de uso: remover administrador | [`src/use-cases/arrecadacao/remover-administrador-campanha.ts`](src/use-cases/arrecadacao/remover-administrador-campanha.ts) — `removerAdministradorCampanha` |
 | Caso de uso: adicionar opção | [`src/use-cases/arrecadacao/adicionar-opcao-contribuicao.ts`](src/use-cases/arrecadacao/adicionar-opcao-contribuicao.ts) — `adicionarOpcaoContribuicao` |
 | Caso de uso: criar contribuição a partir da opção | [`src/use-cases/arrecadacao/criar-contribuicao.ts`](src/use-cases/arrecadacao/criar-contribuicao.ts) — `criarContribuicao` |
 | Erros de domínio / aplicação | [`src/errors/arrecadacao/`](src/errors/arrecadacao) |
@@ -327,7 +329,7 @@ Este documento descreve a primeira fatia do **bounded context Usuário** na engi
 ## Resumo em linguagem simples
 
 1. Um **administrador** regista-se com email, nome de exibição e uma **palavra-passe simulada** (não é segurança real). O sistema cria um **utilizador**, uma **conta** (1:1), uma **credencial** em texto para demo e atribui a permissão `campaign:admin`.
-2. O **`idConta`** (UUID) da conta é o mesmo tipo de identificador que o BC **Arrecadação** espera como `idContaCriadora` na criação da campanha — a ligação é por **ID**, sem importar modelos entre contextos.
+2. O **`idConta`** (UUID) da conta é o mesmo tipo de identificador que o BC **Arrecadação** usa em `idsAdministradores` — a ligação é por **ID**, sem importar modelos entre contextos.
 3. Podes **atualizar o perfil** (nome de exibição).
 4. Podes abrir uma **sessão fake**: email + palavra-passe simulada devolvem um **token opaco** em memória com expiração.
 5. Podes **verificar uma permissão** com esse token; sessão inválida ou expirada não autoriza; falta de permissão devolve erro explícito.
@@ -361,4 +363,4 @@ Este documento descreve a primeira fatia do **bounded context Usuário** na engi
 - **Value objects / validação na fronteira:** email normalizado, token de sessão com comprimento mínimo, permissões enumeradas — validados com Zod nos inputs dos casos de uso.
 - **Repositório (porta + adaptador):** interfaces em `adapters/` e `*.memory.ts` para testes e demos sem Postgres.
 - **Serviço de aplicação:** cada ficheiro em `use-cases/` orquestra validação, leituras e persistência; a “autenticação” é **consciente de ser fake** (palavra-passe simulada, token opaco).
-- **Integração com Arrecadação:** o BC Arrecadação continua a usar só um UUID (`idContaCriadora`). O significado “conta registada no Usuário” é responsabilidade da **aplicação** (orquestração) ou de testes que chamam primeiro `registrarContaUsuario` e depois `criarCampanha` com o mesmo `idConta` — **sem** acoplar o domínio de campanhas ao de utilizadores.
+- **Integração com Arrecadação:** o BC Arrecadação guarda uma lista de UUIDs (`idsAdministradores`). O significado “conta registada no Usuário” é responsabilidade da **aplicação** (orquestração) ou de testes que chamam primeiro `registrarContaUsuario` e depois `criarCampanha` com o mesmo `idConta` na lista — **sem** acoplar o domínio de campanhas ao de utilizadores.

@@ -2,16 +2,21 @@ import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { CampanhaRepositoryMemory } from '../../../src/adapters/arrecadacao/campanha-repository.memory.js';
 import { ContribuicaoRepositoryMemory } from '../../../src/adapters/arrecadacao/contribuicao-repository.memory.js';
+import { ArrecadacaoAdministradorDuplicadoError } from '../../../src/errors/arrecadacao/administrador-duplicado.error.js';
+import { ArrecadacaoAdministradorNaoEncontradoError } from '../../../src/errors/arrecadacao/administrador-nao-encontrado.error.js';
 import { ArrecadacaoCampanhaNaoEncontradaError } from '../../../src/errors/arrecadacao/campanha-nao-encontrada.error.js';
 import { ArrecadacaoContribuicaoJaExisteError } from '../../../src/errors/arrecadacao/contribuicao-ja-existe.error.js';
 import { ArrecadacaoInputInvalidoError } from '../../../src/errors/arrecadacao/input-invalido.error.js';
 import { ArrecadacaoOpcaoContribuicaoNaoEncontradaError } from '../../../src/errors/arrecadacao/opcao-contribuicao-nao-encontrada.error.js';
 import { ArrecadacaoOpcaoIdDuplicadoError } from '../../../src/errors/arrecadacao/opcao-id-duplicado.error.js';
+import { ArrecadacaoUltimoAdministradorError } from '../../../src/errors/arrecadacao/ultimo-administrador.error.js';
 import { NoopLogger } from '../../../src/observability/noop-logger.js';
 import { noopTracer } from '../../../src/observability/tracer.js';
+import { adicionarAdministradorCampanha } from '../../../src/use-cases/arrecadacao/adicionar-administrador-campanha.js';
 import { adicionarOpcaoContribuicao } from '../../../src/use-cases/arrecadacao/adicionar-opcao-contribuicao.js';
 import { criarCampanha } from '../../../src/use-cases/arrecadacao/criar-campanha.js';
 import { criarContribuicao } from '../../../src/use-cases/arrecadacao/criar-contribuicao.js';
+import { removerAdministradorCampanha } from '../../../src/use-cases/arrecadacao/remover-administrador-campanha.js';
 
 const silentObservability = {
   logger: new NoopLogger(),
@@ -25,20 +30,21 @@ describe('criarCampanha', () => {
   it('creates a campaign with no options', async () => {
     const campanhaRepository = new CampanhaRepositoryMemory();
     const id = randomUUID();
-    const idContaCriadora = randomUUID();
+    const idsAdministradores = [randomUUID()];
     const idRecebedor = randomUUID();
 
     const campanha = await criarCampanha(
       { campanhaRepository, clock, observability: silentObservability },
       {
         id,
-        idContaCriadora,
+        idsAdministradores,
         idRecebedor,
         titulo: 'Campanha teste',
       },
     );
 
     expect(campanha.id).toBe(id);
+    expect(campanha.idsAdministradores).toEqual(idsAdministradores);
     expect(campanha.opcoes).toEqual([]);
     expect(campanha.criadaEm).toEqual(fixedDate);
 
@@ -53,12 +59,152 @@ describe('criarCampanha', () => {
         { campanhaRepository, clock, observability: silentObservability },
         {
           id: randomUUID(),
-          idContaCriadora: randomUUID(),
+          idsAdministradores: [randomUUID()],
           idRecebedor: randomUUID(),
           titulo: '',
         },
       ),
     ).rejects.toThrow(ArrecadacaoInputInvalidoError);
+  });
+});
+
+describe('adicionarAdministradorCampanha', () => {
+  it('adds an administrator to an existing campaign', async () => {
+    const campanhaRepository = new CampanhaRepositoryMemory();
+    const idCampanha = randomUUID();
+    const idAdminExistente = randomUUID();
+    const idAdminNovo = randomUUID();
+
+    await criarCampanha(
+      { campanhaRepository, clock, observability: silentObservability },
+      {
+        id: idCampanha,
+        idsAdministradores: [idAdminExistente],
+        idRecebedor: randomUUID(),
+        titulo: 'Campanha',
+      },
+    );
+
+    const updated = await adicionarAdministradorCampanha(
+      { campanhaRepository, observability: silentObservability },
+      { idCampanha, idConta: idAdminNovo },
+    );
+
+    expect(updated.idsAdministradores).toEqual([idAdminExistente, idAdminNovo]);
+  });
+
+  it('throws when campaign is missing', async () => {
+    const campanhaRepository = new CampanhaRepositoryMemory();
+    await expect(
+      adicionarAdministradorCampanha(
+        { campanhaRepository, observability: silentObservability },
+        { idCampanha: randomUUID(), idConta: randomUUID() },
+      ),
+    ).rejects.toThrow(ArrecadacaoCampanhaNaoEncontradaError);
+  });
+
+  it('throws on duplicate administrator', async () => {
+    const campanhaRepository = new CampanhaRepositoryMemory();
+    const idCampanha = randomUUID();
+    const idAdmin = randomUUID();
+
+    await criarCampanha(
+      { campanhaRepository, clock, observability: silentObservability },
+      {
+        id: idCampanha,
+        idsAdministradores: [idAdmin],
+        idRecebedor: randomUUID(),
+        titulo: 'Campanha',
+      },
+    );
+
+    await expect(
+      adicionarAdministradorCampanha(
+        { campanhaRepository, observability: silentObservability },
+        { idCampanha, idConta: idAdmin },
+      ),
+    ).rejects.toThrow(ArrecadacaoAdministradorDuplicadoError);
+  });
+});
+
+describe('removerAdministradorCampanha', () => {
+  it('removes an administrator from an existing campaign', async () => {
+    const campanhaRepository = new CampanhaRepositoryMemory();
+    const idCampanha = randomUUID();
+    const idAdmin1 = randomUUID();
+    const idAdmin2 = randomUUID();
+
+    await criarCampanha(
+      { campanhaRepository, clock, observability: silentObservability },
+      {
+        id: idCampanha,
+        idsAdministradores: [idAdmin1, idAdmin2],
+        idRecebedor: randomUUID(),
+        titulo: 'Campanha',
+      },
+    );
+
+    const updated = await removerAdministradorCampanha(
+      { campanhaRepository, observability: silentObservability },
+      { idCampanha, idConta: idAdmin2 },
+    );
+
+    expect(updated.idsAdministradores).toEqual([idAdmin1]);
+  });
+
+  it('throws when campaign is missing', async () => {
+    const campanhaRepository = new CampanhaRepositoryMemory();
+    await expect(
+      removerAdministradorCampanha(
+        { campanhaRepository, observability: silentObservability },
+        { idCampanha: randomUUID(), idConta: randomUUID() },
+      ),
+    ).rejects.toThrow(ArrecadacaoCampanhaNaoEncontradaError);
+  });
+
+  it('throws when administrator is not on campaign', async () => {
+    const campanhaRepository = new CampanhaRepositoryMemory();
+    const idCampanha = randomUUID();
+
+    await criarCampanha(
+      { campanhaRepository, clock, observability: silentObservability },
+      {
+        id: idCampanha,
+        idsAdministradores: [randomUUID()],
+        idRecebedor: randomUUID(),
+        titulo: 'Campanha',
+      },
+    );
+
+    await expect(
+      removerAdministradorCampanha(
+        { campanhaRepository, observability: silentObservability },
+        { idCampanha, idConta: randomUUID() },
+      ),
+    ).rejects.toThrow(ArrecadacaoAdministradorNaoEncontradoError);
+  });
+
+  it('throws when removing the last administrator', async () => {
+    const campanhaRepository = new CampanhaRepositoryMemory();
+    const idCampanha = randomUUID();
+    const idAdmin = randomUUID();
+
+    await criarCampanha(
+      { campanhaRepository, clock, observability: silentObservability },
+      {
+        id: idCampanha,
+        idsAdministradores: [idAdmin],
+        idRecebedor: randomUUID(),
+        titulo: 'Campanha',
+      },
+    );
+
+    await expect(
+      removerAdministradorCampanha(
+        { campanhaRepository, observability: silentObservability },
+        { idCampanha, idConta: idAdmin },
+      ),
+    ).rejects.toThrow(ArrecadacaoUltimoAdministradorError);
   });
 });
 
@@ -70,7 +216,7 @@ describe('adicionarOpcaoContribuicao', () => {
       { campanhaRepository, clock, observability: silentObservability },
       {
         id: idCampanha,
-        idContaCriadora: randomUUID(),
+        idsAdministradores: [randomUUID()],
         idRecebedor: randomUUID(),
         titulo: 'Campanha',
       },
@@ -115,7 +261,7 @@ describe('adicionarOpcaoContribuicao', () => {
       { campanhaRepository, clock, observability: silentObservability },
       {
         id: idCampanha,
-        idContaCriadora: randomUUID(),
+        idsAdministradores: [randomUUID()],
         idRecebedor: randomUUID(),
         titulo: 'Campanha',
       },
@@ -139,7 +285,7 @@ describe('adicionarOpcaoContribuicao', () => {
       { campanhaRepository, clock, observability: silentObservability },
       {
         id: idCampanha,
-        idContaCriadora: randomUUID(),
+        idsAdministradores: [randomUUID()],
         idRecebedor: randomUUID(),
         titulo: 'Campanha',
       },
@@ -165,7 +311,7 @@ describe('criarContribuicao', () => {
       { campanhaRepository, clock, observability: silentObservability },
       {
         id: idCampanha,
-        idContaCriadora: randomUUID(),
+        idsAdministradores: [randomUUID()],
         idRecebedor: randomUUID(),
         titulo: 'Campanha',
       },
@@ -249,7 +395,7 @@ describe('criarContribuicao', () => {
       { campanhaRepository, clock, observability: silentObservability },
       {
         id: idCampanha,
-        idContaCriadora: randomUUID(),
+        idsAdministradores: [randomUUID()],
         idRecebedor: randomUUID(),
         titulo: 'Campanha',
       },
@@ -284,7 +430,7 @@ describe('criarContribuicao', () => {
       { campanhaRepository, clock, observability: silentObservability },
       {
         id: idCampanha,
-        idContaCriadora: randomUUID(),
+        idsAdministradores: [randomUUID()],
         idRecebedor: randomUUID(),
         titulo: 'Campanha',
       },

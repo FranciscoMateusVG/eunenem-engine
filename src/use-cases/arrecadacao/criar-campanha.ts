@@ -31,10 +31,14 @@ export async function criarCampanha(
 
       span.setAttribute('arrecadacao.campanha.id', parsed.data.id);
       span.setAttribute('arrecadacao.campanha.titulo.length', parsed.data.titulo.length);
+      span.setAttribute(
+        'arrecadacao.campanha.administradores.count',
+        parsed.data.idsAdministradores.length,
+      );
 
       const campanha: Campanha = {
         id: parsed.data.id,
-        idContaCriadora: parsed.data.idContaCriadora,
+        idsAdministradores: parsed.data.idsAdministradores,
         idRecebedor: parsed.data.idRecebedor,
         titulo: parsed.data.titulo,
         opcoes: [],

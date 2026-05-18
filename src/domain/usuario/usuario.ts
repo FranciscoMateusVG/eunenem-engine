@@ -2,7 +2,7 @@ import { z } from 'zod/v4';
 
 /**
  * BC **Usuário**: administradores de campanhas (sem auth real; didático em memória).
- * `IdConta` é compatível com `idContaCriadora` em Arrecadação.
+ * `IdConta` é compatível com `idsAdministradores` em Arrecadação.
  */
 
 export const IdUsuarioSchema = z.uuid();
