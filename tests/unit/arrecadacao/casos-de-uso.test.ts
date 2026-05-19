@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { CampanhaRepositoryMemory } from '../../../src/adapters/arrecadacao/campanha-repository.memory.js';
 import { ContribuicaoRepositoryMemory } from '../../../src/adapters/arrecadacao/contribuicao-repository.memory.js';
+import type { DadosRecebedor } from '../../../src/domain/arrecadacao/campanha.js';
+import { IdRecebedorSchema } from '../../../src/domain/arrecadacao/campanha.js';
 import { ArrecadacaoAdministradorDuplicadoError } from '../../../src/errors/arrecadacao/administrador-duplicado.error.js';
 import { ArrecadacaoAdministradorNaoEncontradoError } from '../../../src/errors/arrecadacao/administrador-nao-encontrado.error.js';
 import { ArrecadacaoCampanhaNaoEncontradaError } from '../../../src/errors/arrecadacao/campanha-nao-encontrada.error.js';
@@ -26,25 +28,40 @@ const silentObservability = {
 const fixedDate = new Date('2026-05-01T12:00:00.000Z');
 const clock = () => fixedDate;
 
+const dadosRecebedorPadrao = (): DadosRecebedor => ({
+  nomeTitular: 'Maria Silva',
+  tipoChavePix: 'email',
+  chavePix: 'maria@exemplo.com',
+});
+
 describe('criarCampanha', () => {
   it('creates a campaign with no options', async () => {
     const campanhaRepository = new CampanhaRepositoryMemory();
     const id = randomUUID();
     const idsAdministradores = [randomUUID()];
-    const idRecebedor = randomUUID();
+    const dadosRecebedor = dadosRecebedorPadrao();
+    const idRecebedorGerado = randomUUID();
 
     const campanha = await criarCampanha(
-      { campanhaRepository, clock, observability: silentObservability },
+      {
+        campanhaRepository,
+        clock,
+        gerarIdRecebedor: () => idRecebedorGerado,
+        observability: silentObservability,
+      },
       {
         id,
         idsAdministradores,
-        idRecebedor,
+        dadosRecebedor,
         titulo: 'Campanha teste',
       },
     );
 
     expect(campanha.id).toBe(id);
     expect(campanha.idsAdministradores).toEqual(idsAdministradores);
+    expect(campanha.dadosRecebedor).toEqual(dadosRecebedor);
+    expect(campanha.idRecebedor).toBe(idRecebedorGerado);
+    expect(IdRecebedorSchema.safeParse(campanha.idRecebedor).success).toBe(true);
     expect(campanha.opcoes).toEqual([]);
     expect(campanha.criadaEm).toEqual(fixedDate);
 
@@ -60,7 +77,7 @@ describe('criarCampanha', () => {
         {
           id: randomUUID(),
           idsAdministradores: [randomUUID()],
-          idRecebedor: randomUUID(),
+          dadosRecebedor: dadosRecebedorPadrao(),
           titulo: '',
         },
       ),
@@ -80,7 +97,7 @@ describe('adicionarAdministradorCampanha', () => {
       {
         id: idCampanha,
         idsAdministradores: [idAdminExistente],
-        idRecebedor: randomUUID(),
+        dadosRecebedor: dadosRecebedorPadrao(),
         titulo: 'Campanha',
       },
     );
@@ -113,7 +130,7 @@ describe('adicionarAdministradorCampanha', () => {
       {
         id: idCampanha,
         idsAdministradores: [idAdmin],
-        idRecebedor: randomUUID(),
+        dadosRecebedor: dadosRecebedorPadrao(),
         titulo: 'Campanha',
       },
     );
@@ -139,7 +156,7 @@ describe('removerAdministradorCampanha', () => {
       {
         id: idCampanha,
         idsAdministradores: [idAdmin1, idAdmin2],
-        idRecebedor: randomUUID(),
+        dadosRecebedor: dadosRecebedorPadrao(),
         titulo: 'Campanha',
       },
     );
@@ -171,7 +188,7 @@ describe('removerAdministradorCampanha', () => {
       {
         id: idCampanha,
         idsAdministradores: [randomUUID()],
-        idRecebedor: randomUUID(),
+        dadosRecebedor: dadosRecebedorPadrao(),
         titulo: 'Campanha',
       },
     );
@@ -194,7 +211,7 @@ describe('removerAdministradorCampanha', () => {
       {
         id: idCampanha,
         idsAdministradores: [idAdmin],
-        idRecebedor: randomUUID(),
+        dadosRecebedor: dadosRecebedorPadrao(),
         titulo: 'Campanha',
       },
     );
@@ -217,7 +234,7 @@ describe('adicionarOpcaoContribuicao', () => {
       {
         id: idCampanha,
         idsAdministradores: [randomUUID()],
-        idRecebedor: randomUUID(),
+        dadosRecebedor: dadosRecebedorPadrao(),
         titulo: 'Campanha',
       },
     );
@@ -262,7 +279,7 @@ describe('adicionarOpcaoContribuicao', () => {
       {
         id: idCampanha,
         idsAdministradores: [randomUUID()],
-        idRecebedor: randomUUID(),
+        dadosRecebedor: dadosRecebedorPadrao(),
         titulo: 'Campanha',
       },
     );
@@ -286,7 +303,7 @@ describe('adicionarOpcaoContribuicao', () => {
       {
         id: idCampanha,
         idsAdministradores: [randomUUID()],
-        idRecebedor: randomUUID(),
+        dadosRecebedor: dadosRecebedorPadrao(),
         titulo: 'Campanha',
       },
     );
@@ -312,7 +329,7 @@ describe('criarContribuicao', () => {
       {
         id: idCampanha,
         idsAdministradores: [randomUUID()],
-        idRecebedor: randomUUID(),
+        dadosRecebedor: dadosRecebedorPadrao(),
         titulo: 'Campanha',
       },
     );
@@ -396,7 +413,7 @@ describe('criarContribuicao', () => {
       {
         id: idCampanha,
         idsAdministradores: [randomUUID()],
-        idRecebedor: randomUUID(),
+        dadosRecebedor: dadosRecebedorPadrao(),
         titulo: 'Campanha',
       },
     );
@@ -431,7 +448,7 @@ describe('criarContribuicao', () => {
       {
         id: idCampanha,
         idsAdministradores: [randomUUID()],
-        idRecebedor: randomUUID(),
+        dadosRecebedor: dadosRecebedorPadrao(),
         titulo: 'Campanha',
       },
     );

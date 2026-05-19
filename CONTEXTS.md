@@ -20,7 +20,7 @@ Este documento descreve a primeira fatia da **engine de intermediação financei
 
 ## Resumo em linguagem simples
 
-1. Um ou mais **administradores** (identificados só por UUIDs de “conta”, sem login) abrem uma **campanha** com título e indicam quem é o **recebedor** (também só um UUID).
+1. Um ou mais **administradores** (UUIDs de conta) abrem uma **campanha** com título e registam o **recebedor** externo (nome + chave PIX em `dadosRecebedor`); o sistema gera `idRecebedor` para o Financeiro.
 2. A campanha começa sem **opções de contribuição**; depois podes acrescentar opções (cada uma com valor em **centavos** e rótulo opcional).
 3. Um **contribuinte visitante** (sem conta) escolhe uma opção: o sistema regista uma **contribuição** com o valor **copiado da opção** naquele momento, estado `pendente_pagamento`, e dados mínimos do visitante (nome de exibição e email opcional).
 
@@ -33,7 +33,7 @@ Nada disto cobra pagamento nem calcula taxa — isso será outros bounded contex
 | Conceito | Onde está |
 |----------|-----------|
 | Montante em centavos (evitar `number` em reais) | [`src/domain/money.ts`](src/domain/money.ts) — `MoneyCentsSchema` |
-| Campanha, recebedor, administradores, opção de contribuição | [`src/domain/arrecadacao/campanha.ts`](src/domain/arrecadacao/campanha.ts) — tipos `Campanha`, `OpcaoContribuicao`, schemas Zod |
+| Campanha, administradores, recebedor (`dadosRecebedor`, `idRecebedor`), opção de contribuição | [`src/domain/arrecadacao/campanha.ts`](src/domain/arrecadacao/campanha.ts) — `Campanha`, `DadosRecebedor`, `OpcaoContribuicao` |
 | Procurar opção na campanha (função pura) | [`src/domain/arrecadacao/campanha.ts`](src/domain/arrecadacao/campanha.ts) — `encontrarOpcaoContribuicao` |
 | Anexar opção de forma imutável | [`src/domain/arrecadacao/campanha.ts`](src/domain/arrecadacao/campanha.ts) — `campanhaComOpcao` |
 | Contribuição, dados do visitante, input de criação | [`src/domain/arrecadacao/contribuicao.ts`](src/domain/arrecadacao/contribuicao.ts) |

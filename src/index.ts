@@ -28,12 +28,14 @@ export type {
   AdicionarOpcaoContribuicaoInput,
   Campanha,
   CriarCampanhaInput,
+  DadosRecebedor,
   IdCampanha,
   IdConta,
   IdOpcaoContribuicao,
   IdRecebedor,
   OpcaoContribuicao,
   RemoverAdministradorCampanhaInput,
+  TipoChavePix,
 } from './domain/arrecadacao/campanha.js';
 export {
   AdicionarAdministradorCampanhaInputSchema,
@@ -43,6 +45,7 @@ export {
   campanhaComOpcao,
   campanhaPossuiAdministrador,
   campanhaSemAdministrador,
+  DadosRecebedorSchema,
   encontrarOpcaoContribuicao,
   IdCampanhaSchema,
   IdContaSchema,
@@ -51,6 +54,7 @@ export {
   IdsAdministradoresSchema,
   OpcaoContribuicaoSchema,
   RemoverAdministradorCampanhaInputSchema,
+  TipoChavePixSchema,
 } from './domain/arrecadacao/campanha.js';
 export type {
   Contribuicao,

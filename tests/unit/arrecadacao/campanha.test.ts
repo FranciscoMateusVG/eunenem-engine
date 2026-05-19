@@ -5,6 +5,7 @@ import {
   campanhaComOpcao,
   campanhaPossuiAdministrador,
   campanhaSemAdministrador,
+  DadosRecebedorSchema,
   encontrarOpcaoContribuicao,
 } from '../../../src/domain/arrecadacao/campanha.js';
 
@@ -14,21 +15,59 @@ const idAdministrador2 = '550e8400-e29b-41d4-a716-446655440005';
 const idRecebedor = '550e8400-e29b-41d4-a716-446655440003';
 const idOpcao = '550e8400-e29b-41d4-a716-446655440004';
 
+const dadosRecebedorEmail = {
+  nomeTitular: 'Maria Silva',
+  tipoChavePix: 'email' as const,
+  chavePix: 'maria@exemplo.com',
+};
+
 const baseCampanha = {
   id: idCampanha,
   idsAdministradores: [idAdministrador1] as const,
   idRecebedor,
+  dadosRecebedor: dadosRecebedorEmail,
   titulo: 'Campanha',
   opcoes: [] as const,
   criadaEm: new Date('2026-01-01T00:00:00.000Z'),
 };
+
+describe('DadosRecebedorSchema', () => {
+  it('accepts valid email key', () => {
+    const r = DadosRecebedorSchema.safeParse(dadosRecebedorEmail);
+    expect(r.success).toBe(true);
+  });
+
+  it('rejects empty nomeTitular', () => {
+    const r = DadosRecebedorSchema.safeParse({
+      ...dadosRecebedorEmail,
+      nomeTitular: '   ',
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it('rejects empty chavePix', () => {
+    const r = DadosRecebedorSchema.safeParse({
+      ...dadosRecebedorEmail,
+      chavePix: '',
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it('rejects invalid email when tipoChavePix is email', () => {
+    const r = DadosRecebedorSchema.safeParse({
+      ...dadosRecebedorEmail,
+      chavePix: 'nao-e-email',
+    });
+    expect(r.success).toBe(false);
+  });
+});
 
 describe('CriarCampanhaInputSchema', () => {
   it('accepts valid input with one administrator', () => {
     const r = CriarCampanhaInputSchema.safeParse({
       id: idCampanha,
       idsAdministradores: [idAdministrador1],
-      idRecebedor,
+      dadosRecebedor: dadosRecebedorEmail,
       titulo: 'Ajuda ao Joao',
     });
     expect(r.success).toBe(true);
@@ -38,7 +77,7 @@ describe('CriarCampanhaInputSchema', () => {
     const r = CriarCampanhaInputSchema.safeParse({
       id: idCampanha,
       idsAdministradores: [idAdministrador1, idAdministrador2],
-      idRecebedor,
+      dadosRecebedor: dadosRecebedorEmail,
       titulo: 'Ajuda ao Joao',
     });
     expect(r.success).toBe(true);
@@ -48,7 +87,7 @@ describe('CriarCampanhaInputSchema', () => {
     const r = CriarCampanhaInputSchema.safeParse({
       id: idCampanha,
       idsAdministradores: [],
-      idRecebedor,
+      dadosRecebedor: dadosRecebedorEmail,
       titulo: 'Ajuda ao Joao',
     });
     expect(r.success).toBe(false);
@@ -58,7 +97,7 @@ describe('CriarCampanhaInputSchema', () => {
     const r = CriarCampanhaInputSchema.safeParse({
       id: idCampanha,
       idsAdministradores: [idAdministrador1, idAdministrador1],
-      idRecebedor,
+      dadosRecebedor: dadosRecebedorEmail,
       titulo: 'Ajuda ao Joao',
     });
     expect(r.success).toBe(false);
@@ -68,7 +107,7 @@ describe('CriarCampanhaInputSchema', () => {
     const r = CriarCampanhaInputSchema.safeParse({
       id: idCampanha,
       idsAdministradores: [idAdministrador1],
-      idRecebedor,
+      dadosRecebedor: dadosRecebedorEmail,
       titulo: '   ',
     });
     expect(r.success).toBe(false);
