@@ -62,7 +62,7 @@ export async function criarContribuicao(
         id,
         idCampanha,
         idOpcaoContribuicao,
-        amountCents: opcao.amountCents,
+        valor: opcao.valor,
         contribuinte,
         status: 'pendente_pagamento',
         criadaEm: clock(),
@@ -73,7 +73,7 @@ export async function criarContribuicao(
       logger.info('arrecadacao.contribuicao.criada', {
         idContribuicao: id,
         idCampanha,
-        amountCents: contribuicao.amountCents,
+        valor: contribuicao.valor,
       });
 
       span.setStatus({ code: SpanStatusCode.OK });

@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  AlterarDadosRecebedorCampanhaInputSchema,
+  AlterarValorOpcaoContribuicaoInputSchema,
   CriarCampanhaInputSchema,
   campanhaComAdministrador,
+  campanhaComDadosRecebedor,
   campanhaComOpcao,
+  campanhaComOpcaoValor,
   campanhaPossuiAdministrador,
   campanhaSemAdministrador,
   DadosRecebedorSchema,
@@ -143,7 +147,7 @@ describe('campanhaSemAdministrador', () => {
 
 describe('encontrarOpcaoContribuicao', () => {
   it('returns the option when present', () => {
-    const opcao = { id: idOpcao, amountCents: 8000, rotulo: 'Valor sugerido' };
+    const opcao = { id: idOpcao, valor: 8000, rotulo: 'Valor sugerido' };
     const campanha = {
       ...baseCampanha,
       opcoes: [opcao],
@@ -158,10 +162,64 @@ describe('encontrarOpcaoContribuicao', () => {
 
 describe('campanhaComOpcao', () => {
   it('appends option immutably', () => {
-    const opcao = { id: idOpcao, amountCents: 5000 };
+    const opcao = { id: idOpcao, valor: 5000 };
     const next = campanhaComOpcao(baseCampanha, opcao);
     expect(baseCampanha.opcoes).toHaveLength(0);
     expect(next.opcoes).toHaveLength(1);
     expect(next.opcoes[0]).toEqual(opcao);
+  });
+});
+
+describe('campanhaComDadosRecebedor', () => {
+  it('replaces receiver data immutably without changing idRecebedor', () => {
+    const novosDados = {
+      nomeTitular: 'Joao Santos',
+      tipoChavePix: 'cpf' as const,
+      chavePix: '12345678901',
+    };
+    const next = campanhaComDadosRecebedor(baseCampanha, novosDados);
+    expect(baseCampanha.dadosRecebedor).toEqual(dadosRecebedorEmail);
+    expect(next.dadosRecebedor).toEqual(novosDados);
+    expect(next.idRecebedor).toBe(idRecebedor);
+  });
+});
+
+describe('campanhaComOpcaoValor', () => {
+  it('updates option valor immutably', () => {
+    const comOpcao = campanhaComOpcao(baseCampanha, { id: idOpcao, valor: 1000 });
+    const next = campanhaComOpcaoValor(comOpcao, idOpcao, 9000);
+    expect(comOpcao.opcoes[0]?.valor).toBe(1000);
+    expect(next.opcoes[0]?.valor).toBe(9000);
+    expect(next.opcoes[0]?.rotulo).toBeUndefined();
+  });
+});
+
+describe('AlterarDadosRecebedorCampanhaInputSchema', () => {
+  it('accepts valid input', () => {
+    const r = AlterarDadosRecebedorCampanhaInputSchema.safeParse({
+      idCampanha,
+      dadosRecebedor: dadosRecebedorEmail,
+    });
+    expect(r.success).toBe(true);
+  });
+});
+
+describe('AlterarValorOpcaoContribuicaoInputSchema', () => {
+  it('accepts valid input', () => {
+    const r = AlterarValorOpcaoContribuicaoInputSchema.safeParse({
+      idCampanha,
+      idOpcao,
+      valor: 5000,
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it('rejects zero valor', () => {
+    const r = AlterarValorOpcaoContribuicaoInputSchema.safeParse({
+      idCampanha,
+      idOpcao,
+      valor: 0,
+    });
+    expect(r.success).toBe(false);
   });
 });

@@ -26,6 +26,8 @@ export { SessaoUsuarioRepositoryMemory } from './adapters/usuario/sessao-reposit
 export type {
   AdicionarAdministradorCampanhaInput,
   AdicionarOpcaoContribuicaoInput,
+  AlterarDadosRecebedorCampanhaInput,
+  AlterarValorOpcaoContribuicaoInput,
   Campanha,
   CriarCampanhaInput,
   DadosRecebedor,
@@ -40,9 +42,13 @@ export type {
 export {
   AdicionarAdministradorCampanhaInputSchema,
   AdicionarOpcaoContribuicaoInputSchema,
+  AlterarDadosRecebedorCampanhaInputSchema,
+  AlterarValorOpcaoContribuicaoInputSchema,
   CriarCampanhaInputSchema,
   campanhaComAdministrador,
+  campanhaComDadosRecebedor,
   campanhaComOpcao,
+  campanhaComOpcaoValor,
   campanhaPossuiAdministrador,
   campanhaSemAdministrador,
   DadosRecebedorSchema,
@@ -255,6 +261,10 @@ export type { AdicionarAdministradorCampanhaDeps } from './use-cases/arrecadacao
 export { adicionarAdministradorCampanha } from './use-cases/arrecadacao/adicionar-administrador-campanha.js';
 export type { AdicionarOpcaoContribuicaoDeps } from './use-cases/arrecadacao/adicionar-opcao-contribuicao.js';
 export { adicionarOpcaoContribuicao } from './use-cases/arrecadacao/adicionar-opcao-contribuicao.js';
+export type { AlterarDadosRecebedorCampanhaDeps } from './use-cases/arrecadacao/alterar-dados-recebedor-campanha.js';
+export { alterarDadosRecebedorCampanha } from './use-cases/arrecadacao/alterar-dados-recebedor-campanha.js';
+export type { AlterarValorOpcaoContribuicaoDeps } from './use-cases/arrecadacao/alterar-valor-opcao-contribuicao.js';
+export { alterarValorOpcaoContribuicao } from './use-cases/arrecadacao/alterar-valor-opcao-contribuicao.js';
 export type { CriarCampanhaDeps } from './use-cases/arrecadacao/criar-campanha.js';
 export { criarCampanha } from './use-cases/arrecadacao/criar-campanha.js';
 export type { CriarContribuicaoDeps } from './use-cases/arrecadacao/criar-contribuicao.js';

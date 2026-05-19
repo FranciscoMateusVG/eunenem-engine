@@ -5,7 +5,7 @@ import { IdCampanhaSchema, IdOpcaoContribuicaoSchema } from './campanha.js';
 
 /**
  * **Contribuição** (BC Arrecadação): vínculo entre visitante, campanha e opção escolhida.
- * O valor em centavos é copiado da opção no momento da criação (imutável face a mudanças futuras na campanha).
+ * O `valor` (centavos) é copiado da opção no momento da criação (imutável face a mudanças futuras na campanha).
  */
 export const IdContribuicaoSchema = z.uuid();
 export type IdContribuicao = z.infer<typeof IdContribuicaoSchema>;
@@ -29,7 +29,7 @@ export interface Contribuicao {
   readonly id: IdContribuicao;
   readonly idCampanha: IdCampanha;
   readonly idOpcaoContribuicao: IdOpcaoContribuicao;
-  readonly amountCents: MoneyCents;
+  readonly valor: MoneyCents;
   readonly contribuinte: DadosContribuinte;
   readonly status: StatusContribuicao;
   readonly criadaEm: Date;

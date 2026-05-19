@@ -1,4 +1,5 @@
 import { z } from 'zod/v4';
+import type { MoneyCents } from '../money.js';
 import { MoneyCentsSchema } from '../money.js';
 
 /**
@@ -76,7 +77,7 @@ export type DadosRecebedor = Readonly<z.infer<typeof DadosRecebedorSchema>>;
 
 export const OpcaoContribuicaoSchema = z.object({
   id: IdOpcaoContribuicaoSchema,
-  amountCents: MoneyCentsSchema,
+  valor: MoneyCentsSchema,
   rotulo: z.string().trim().max(200).optional(),
 });
 
@@ -104,11 +105,30 @@ export type CriarCampanhaInput = z.infer<typeof CriarCampanhaInputSchema>;
 export const AdicionarOpcaoContribuicaoInputSchema = z.object({
   idCampanha: IdCampanhaSchema,
   idOpcao: IdOpcaoContribuicaoSchema,
-  amountCents: MoneyCentsSchema,
+  valor: MoneyCentsSchema,
   rotulo: z.string().trim().max(200).optional(),
 });
 
 export type AdicionarOpcaoContribuicaoInput = z.infer<typeof AdicionarOpcaoContribuicaoInputSchema>;
+
+export const AlterarDadosRecebedorCampanhaInputSchema = z.object({
+  idCampanha: IdCampanhaSchema,
+  dadosRecebedor: DadosRecebedorSchema,
+});
+
+export type AlterarDadosRecebedorCampanhaInput = z.infer<
+  typeof AlterarDadosRecebedorCampanhaInputSchema
+>;
+
+export const AlterarValorOpcaoContribuicaoInputSchema = z.object({
+  idCampanha: IdCampanhaSchema,
+  idOpcao: IdOpcaoContribuicaoSchema,
+  valor: MoneyCentsSchema,
+});
+
+export type AlterarValorOpcaoContribuicaoInput = z.infer<
+  typeof AlterarValorOpcaoContribuicaoInputSchema
+>;
 
 export const AdicionarAdministradorCampanhaInputSchema = z.object({
   idCampanha: IdCampanhaSchema,
@@ -162,5 +182,28 @@ export function campanhaComOpcao(campanha: Campanha, opcao: OpcaoContribuicao): 
   return {
     ...campanha,
     opcoes: [...campanha.opcoes, opcao],
+  };
+}
+
+/** Substitui os dados do recebedor, imutavelmente. `idRecebedor` permanece inalterado. */
+export function campanhaComDadosRecebedor(
+  campanha: Campanha,
+  dadosRecebedor: DadosRecebedor,
+): Campanha {
+  return {
+    ...campanha,
+    dadosRecebedor,
+  };
+}
+
+/** Altera o valor de uma opção existente, imutavelmente. O caso de uso deve garantir que a opção existe. */
+export function campanhaComOpcaoValor(
+  campanha: Campanha,
+  idOpcao: IdOpcaoContribuicao,
+  valor: MoneyCents,
+): Campanha {
+  return {
+    ...campanha,
+    opcoes: campanha.opcoes.map((o) => (o.id === idOpcao ? { ...o, valor } : o)),
   };
 }

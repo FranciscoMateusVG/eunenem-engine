@@ -16,6 +16,8 @@ import { NoopLogger } from '../../../src/observability/noop-logger.js';
 import { noopTracer } from '../../../src/observability/tracer.js';
 import { adicionarAdministradorCampanha } from '../../../src/use-cases/arrecadacao/adicionar-administrador-campanha.js';
 import { adicionarOpcaoContribuicao } from '../../../src/use-cases/arrecadacao/adicionar-opcao-contribuicao.js';
+import { alterarDadosRecebedorCampanha } from '../../../src/use-cases/arrecadacao/alterar-dados-recebedor-campanha.js';
+import { alterarValorOpcaoContribuicao } from '../../../src/use-cases/arrecadacao/alterar-valor-opcao-contribuicao.js';
 import { criarCampanha } from '../../../src/use-cases/arrecadacao/criar-campanha.js';
 import { criarContribuicao } from '../../../src/use-cases/arrecadacao/criar-contribuicao.js';
 import { removerAdministradorCampanha } from '../../../src/use-cases/arrecadacao/remover-administrador-campanha.js';
@@ -225,6 +227,164 @@ describe('removerAdministradorCampanha', () => {
   });
 });
 
+describe('alterarDadosRecebedorCampanha', () => {
+  it('updates receiver data without changing idRecebedor', async () => {
+    const campanhaRepository = new CampanhaRepositoryMemory();
+    const idCampanha = randomUUID();
+    const idRecebedorFixo = randomUUID();
+    const novosDados: DadosRecebedor = {
+      nomeTitular: 'Joao Santos',
+      tipoChavePix: 'cpf',
+      chavePix: '12345678901',
+    };
+
+    const criada = await criarCampanha(
+      {
+        campanhaRepository,
+        clock,
+        gerarIdRecebedor: () => idRecebedorFixo,
+        observability: silentObservability,
+      },
+      {
+        id: idCampanha,
+        idsAdministradores: [randomUUID()],
+        dadosRecebedor: dadosRecebedorPadrao(),
+        titulo: 'Campanha',
+      },
+    );
+
+    const updated = await alterarDadosRecebedorCampanha(
+      { campanhaRepository, observability: silentObservability },
+      { idCampanha, dadosRecebedor: novosDados },
+    );
+
+    expect(criada.idRecebedor).toBe(idRecebedorFixo);
+    expect(updated.dadosRecebedor).toEqual(novosDados);
+    expect(updated.idRecebedor).toBe(idRecebedorFixo);
+  });
+
+  it('throws when campaign is missing', async () => {
+    const campanhaRepository = new CampanhaRepositoryMemory();
+    await expect(
+      alterarDadosRecebedorCampanha(
+        { campanhaRepository, observability: silentObservability },
+        { idCampanha: randomUUID(), dadosRecebedor: dadosRecebedorPadrao() },
+      ),
+    ).rejects.toThrow(ArrecadacaoCampanhaNaoEncontradaError);
+  });
+
+  it('throws ArrecadacaoInputInvalidoError on invalid receiver data', async () => {
+    const campanhaRepository = new CampanhaRepositoryMemory();
+    const idCampanha = randomUUID();
+    await criarCampanha(
+      { campanhaRepository, clock, observability: silentObservability },
+      {
+        id: idCampanha,
+        idsAdministradores: [randomUUID()],
+        dadosRecebedor: dadosRecebedorPadrao(),
+        titulo: 'Campanha',
+      },
+    );
+    await expect(
+      alterarDadosRecebedorCampanha(
+        { campanhaRepository, observability: silentObservability },
+        {
+          idCampanha,
+          dadosRecebedor: {
+            nomeTitular: 'X',
+            tipoChavePix: 'email',
+            chavePix: 'nao-e-email',
+          },
+        },
+      ),
+    ).rejects.toThrow(ArrecadacaoInputInvalidoError);
+  });
+});
+
+describe('alterarValorOpcaoContribuicao', () => {
+  it('updates option valor on existing campaign', async () => {
+    const campanhaRepository = new CampanhaRepositoryMemory();
+    const idCampanha = randomUUID();
+    const idOpcao = randomUUID();
+
+    await criarCampanha(
+      { campanhaRepository, clock, observability: silentObservability },
+      {
+        id: idCampanha,
+        idsAdministradores: [randomUUID()],
+        dadosRecebedor: dadosRecebedorPadrao(),
+        titulo: 'Campanha',
+      },
+    );
+    await adicionarOpcaoContribuicao(
+      { campanhaRepository, observability: silentObservability },
+      { idCampanha, idOpcao, valor: 1000 },
+    );
+
+    const updated = await alterarValorOpcaoContribuicao(
+      { campanhaRepository, observability: silentObservability },
+      { idCampanha, idOpcao, valor: 7500 },
+    );
+
+    expect(updated.opcoes[0]?.valor).toBe(7500);
+  });
+
+  it('throws when campaign is missing', async () => {
+    const campanhaRepository = new CampanhaRepositoryMemory();
+    await expect(
+      alterarValorOpcaoContribuicao(
+        { campanhaRepository, observability: silentObservability },
+        { idCampanha: randomUUID(), idOpcao: randomUUID(), valor: 100 },
+      ),
+    ).rejects.toThrow(ArrecadacaoCampanhaNaoEncontradaError);
+  });
+
+  it('throws when option is missing', async () => {
+    const campanhaRepository = new CampanhaRepositoryMemory();
+    const idCampanha = randomUUID();
+    await criarCampanha(
+      { campanhaRepository, clock, observability: silentObservability },
+      {
+        id: idCampanha,
+        idsAdministradores: [randomUUID()],
+        dadosRecebedor: dadosRecebedorPadrao(),
+        titulo: 'Campanha',
+      },
+    );
+    await expect(
+      alterarValorOpcaoContribuicao(
+        { campanhaRepository, observability: silentObservability },
+        { idCampanha, idOpcao: randomUUID(), valor: 100 },
+      ),
+    ).rejects.toThrow(ArrecadacaoOpcaoContribuicaoNaoEncontradaError);
+  });
+
+  it('throws ArrecadacaoInputInvalidoError on zero valor', async () => {
+    const campanhaRepository = new CampanhaRepositoryMemory();
+    const idCampanha = randomUUID();
+    const idOpcao = randomUUID();
+    await criarCampanha(
+      { campanhaRepository, clock, observability: silentObservability },
+      {
+        id: idCampanha,
+        idsAdministradores: [randomUUID()],
+        dadosRecebedor: dadosRecebedorPadrao(),
+        titulo: 'Campanha',
+      },
+    );
+    await adicionarOpcaoContribuicao(
+      { campanhaRepository, observability: silentObservability },
+      { idCampanha, idOpcao, valor: 100 },
+    );
+    await expect(
+      alterarValorOpcaoContribuicao(
+        { campanhaRepository, observability: silentObservability },
+        { idCampanha, idOpcao, valor: 0 },
+      ),
+    ).rejects.toThrow(ArrecadacaoInputInvalidoError);
+  });
+});
+
 describe('adicionarOpcaoContribuicao', () => {
   it('adds an option to an existing campaign', async () => {
     const campanhaRepository = new CampanhaRepositoryMemory();
@@ -245,13 +405,13 @@ describe('adicionarOpcaoContribuicao', () => {
       {
         idCampanha,
         idOpcao,
-        amountCents: 8000,
+        valor: 8000,
         rotulo: 'R$ 80',
       },
     );
 
     expect(updated.opcoes).toHaveLength(1);
-    expect(updated.opcoes[0]?.amountCents).toBe(8000);
+    expect(updated.opcoes[0]?.valor).toBe(8000);
     expect(updated.opcoes[0]?.id).toBe(idOpcao);
   });
 
@@ -264,7 +424,7 @@ describe('adicionarOpcaoContribuicao', () => {
         {
           idCampanha: missingId,
           idOpcao: randomUUID(),
-          amountCents: 100,
+          valor: 100,
         },
       ),
     ).rejects.toThrow(ArrecadacaoCampanhaNaoEncontradaError);
@@ -285,12 +445,12 @@ describe('adicionarOpcaoContribuicao', () => {
     );
     await adicionarOpcaoContribuicao(
       { campanhaRepository, observability: silentObservability },
-      { idCampanha, idOpcao, amountCents: 100 },
+      { idCampanha, idOpcao, valor: 100 },
     );
     await expect(
       adicionarOpcaoContribuicao(
         { campanhaRepository, observability: silentObservability },
-        { idCampanha, idOpcao, amountCents: 200 },
+        { idCampanha, idOpcao, valor: 200 },
       ),
     ).rejects.toThrow(ArrecadacaoOpcaoIdDuplicadoError);
   });
@@ -310,7 +470,7 @@ describe('adicionarOpcaoContribuicao', () => {
     await expect(
       adicionarOpcaoContribuicao(
         { campanhaRepository, observability: silentObservability },
-        { idCampanha, idOpcao: randomUUID(), amountCents: 0 },
+        { idCampanha, idOpcao: randomUUID(), valor: 0 },
       ),
     ).rejects.toThrow(ArrecadacaoInputInvalidoError);
   });
@@ -335,7 +495,7 @@ describe('criarContribuicao', () => {
     );
     await adicionarOpcaoContribuicao(
       { campanhaRepository, observability: silentObservability },
-      { idCampanha, idOpcao, amountCents: 8000 },
+      { idCampanha, idOpcao, valor: 8000 },
     );
 
     const contribuicao = await criarContribuicao(
@@ -353,7 +513,7 @@ describe('criarContribuicao', () => {
       },
     );
 
-    expect(contribuicao.amountCents).toBe(8000);
+    expect(contribuicao.valor).toBe(8000);
     expect(contribuicao.status).toBe('pendente_pagamento');
     expect(contribuicao.idOpcaoContribuicao).toBe(idOpcao);
   });
@@ -454,7 +614,7 @@ describe('criarContribuicao', () => {
     );
     await adicionarOpcaoContribuicao(
       { campanhaRepository, observability: silentObservability },
-      { idCampanha, idOpcao, amountCents: 100 },
+      { idCampanha, idOpcao, valor: 100 },
     );
 
     const deps = {

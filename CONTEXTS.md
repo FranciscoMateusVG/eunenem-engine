@@ -43,7 +43,9 @@ Nada disto cobra pagamento nem calcula taxa — isso será outros bounded contex
 | Caso de uso: criar campanha | [`src/use-cases/arrecadacao/criar-campanha.ts`](src/use-cases/arrecadacao/criar-campanha.ts) — `criarCampanha` |
 | Caso de uso: adicionar administrador | [`src/use-cases/arrecadacao/adicionar-administrador-campanha.ts`](src/use-cases/arrecadacao/adicionar-administrador-campanha.ts) — `adicionarAdministradorCampanha` |
 | Caso de uso: remover administrador | [`src/use-cases/arrecadacao/remover-administrador-campanha.ts`](src/use-cases/arrecadacao/remover-administrador-campanha.ts) — `removerAdministradorCampanha` |
+| Caso de uso: alterar dados do recebedor | [`src/use-cases/arrecadacao/alterar-dados-recebedor-campanha.ts`](src/use-cases/arrecadacao/alterar-dados-recebedor-campanha.ts) — `alterarDadosRecebedorCampanha` |
 | Caso de uso: adicionar opção | [`src/use-cases/arrecadacao/adicionar-opcao-contribuicao.ts`](src/use-cases/arrecadacao/adicionar-opcao-contribuicao.ts) — `adicionarOpcaoContribuicao` |
+| Caso de uso: alterar valor da opção | [`src/use-cases/arrecadacao/alterar-valor-opcao-contribuicao.ts`](src/use-cases/arrecadacao/alterar-valor-opcao-contribuicao.ts) — `alterarValorOpcaoContribuicao` |
 | Caso de uso: criar contribuição a partir da opção | [`src/use-cases/arrecadacao/criar-contribuicao.ts`](src/use-cases/arrecadacao/criar-contribuicao.ts) — `criarContribuicao` |
 | Erros de domínio / aplicação | [`src/errors/arrecadacao/`](src/errors/arrecadacao) |
 | API pública do pacote (re-exports) | [`src/index.ts`](src/index.ts) |

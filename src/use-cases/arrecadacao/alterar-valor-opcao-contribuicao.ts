@@ -1,61 +1,60 @@
 import { SpanStatusCode } from '@opentelemetry/api';
 import type { CampanhaRepository } from '../../adapters/arrecadacao/campanha-repository.js';
 import {
-  type AdicionarOpcaoContribuicaoInput,
-  AdicionarOpcaoContribuicaoInputSchema,
+  type AlterarValorOpcaoContribuicaoInput,
+  AlterarValorOpcaoContribuicaoInputSchema,
   type Campanha,
-  campanhaComOpcao,
-  type OpcaoContribuicao,
+  campanhaComOpcaoValor,
+  encontrarOpcaoContribuicao,
 } from '../../domain/arrecadacao/campanha.js';
 import { ArrecadacaoCampanhaNaoEncontradaError } from '../../errors/arrecadacao/campanha-nao-encontrada.error.js';
 import { ArrecadacaoInputInvalidoError } from '../../errors/arrecadacao/input-invalido.error.js';
-import { ArrecadacaoOpcaoIdDuplicadoError } from '../../errors/arrecadacao/opcao-id-duplicado.error.js';
+import { ArrecadacaoOpcaoContribuicaoNaoEncontradaError } from '../../errors/arrecadacao/opcao-contribuicao-nao-encontrada.error.js';
 import type { Observability } from '../../observability/observability.js';
 
-export interface AdicionarOpcaoContribuicaoDeps {
+export interface AlterarValorOpcaoContribuicaoDeps {
   readonly campanhaRepository: CampanhaRepository;
   readonly observability: Observability;
 }
 
 /**
- * Adiciona uma opção de contribuição a uma campanha existente.
+ * Altera o valor de uma opção de contribuição existente na campanha.
  */
-export async function adicionarOpcaoContribuicao(
-  deps: AdicionarOpcaoContribuicaoDeps,
-  input: AdicionarOpcaoContribuicaoInput,
+export async function alterarValorOpcaoContribuicao(
+  deps: AlterarValorOpcaoContribuicaoDeps,
+  input: AlterarValorOpcaoContribuicaoInput,
 ): Promise<Campanha> {
   const { campanhaRepository, observability } = deps;
   const { logger, tracer } = observability;
 
-  return tracer.startActiveSpan('adicionarOpcaoContribuicao', async (span) => {
+  return tracer.startActiveSpan('alterarValorOpcaoContribuicao', async (span) => {
     try {
-      const parsed = AdicionarOpcaoContribuicaoInputSchema.safeParse(input);
+      const parsed = AlterarValorOpcaoContribuicaoInputSchema.safeParse(input);
       if (!parsed.success) {
         const message = parsed.error.issues.map((i) => i.message).join('; ');
         throw new ArrecadacaoInputInvalidoError(message);
       }
 
-      const { idCampanha, idOpcao, valor, rotulo } = parsed.data;
+      const { idCampanha, idOpcao, valor } = parsed.data;
 
       span.setAttribute('arrecadacao.campanha.id', idCampanha);
       span.setAttribute('arrecadacao.opcao.id', idOpcao);
+      span.setAttribute('arrecadacao.opcao.valor', valor);
 
       const existing = await campanhaRepository.findById(idCampanha);
       if (!existing) {
         throw new ArrecadacaoCampanhaNaoEncontradaError(idCampanha);
       }
 
-      if (existing.opcoes.some((o) => o.id === idOpcao)) {
-        throw new ArrecadacaoOpcaoIdDuplicadoError(idOpcao);
+      if (!encontrarOpcaoContribuicao(existing, idOpcao)) {
+        throw new ArrecadacaoOpcaoContribuicaoNaoEncontradaError(idCampanha, idOpcao);
       }
 
-      const opcao: OpcaoContribuicao =
-        rotulo === undefined ? { id: idOpcao, valor } : { id: idOpcao, valor, rotulo };
-      const updated = campanhaComOpcao(existing, opcao);
+      const updated = campanhaComOpcaoValor(existing, idOpcao, valor);
 
       await campanhaRepository.save(updated);
 
-      logger.info('arrecadacao.campanha.opcao_adicionada', {
+      logger.info('arrecadacao.campanha.opcao_valor_alterado', {
         idCampanha,
         idOpcao,
         valor,
