@@ -47,18 +47,35 @@ describe('Migration round-trip', () => {
       .execute();
     const tableNames = tables.map((t: Record<string, unknown>) => t.table_name);
     expect(tableNames).toContain('cats');
+    expect(tableNames).toContain('campanhas');
 
-    // Migrate down
-    const downResult = await migrator.migrateDown();
-    expect(downResult.error).toBeUndefined();
+    // Migrate down (latest migration first; two steps for arrecadacao)
+    const downArrecadacaoAlter = await migrator.migrateDown();
+    expect(downArrecadacaoAlter.error).toBeUndefined();
 
-    // Verify cats table is gone
-    const tablesAfter = await db
+    const downArrecadacaoCreate = await migrator.migrateDown();
+    expect(downArrecadacaoCreate.error).toBeUndefined();
+
+    const tablesAfterArrecadacao = await db
       .selectFrom('information_schema.tables' as never)
       .select('table_name' as never)
       .where('table_schema' as never, '=', 'public' as never)
       .execute();
-    const tableNamesAfter = tablesAfter.map((t: Record<string, unknown>) => t.table_name);
-    expect(tableNamesAfter).not.toContain('cats');
+    const namesAfterArrecadacao = tablesAfterArrecadacao.map(
+      (t: Record<string, unknown>) => t.table_name,
+    );
+    expect(namesAfterArrecadacao).not.toContain('campanhas');
+    expect(namesAfterArrecadacao).toContain('cats');
+
+    const downCats = await migrator.migrateDown();
+    expect(downCats.error).toBeUndefined();
+
+    const tablesAfterCats = await db
+      .selectFrom('information_schema.tables' as never)
+      .select('table_name' as never)
+      .where('table_schema' as never, '=', 'public' as never)
+      .execute();
+    const namesAfterCats = tablesAfterCats.map((t: Record<string, unknown>) => t.table_name);
+    expect(namesAfterCats).not.toContain('cats');
   });
 });

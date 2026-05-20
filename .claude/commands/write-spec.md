@@ -50,7 +50,7 @@ If `pnpm vitest run` reports the new tests passing, something is wrong — eithe
 
 ## Architectural Rules You Must Respect
 
-- Test files go in `tests/unit/` (pure logic, schemas, properties) or `tests/integration/` (anything touching adapters).
+- Test files go in `tests/unit/<bc>/` for bounded contexts (e.g. `tests/unit/arrecadacao/campanha.test.ts`), `tests/unit/` root for shared skeleton/observability, or `tests/integration/` for Postgres-backed specs.
 - Property tests stay unit. Never run `fast-check` through Postgres — it'll murder the suite.
 - Integration tests use the test helpers (`tests/helpers/test-db.ts`, `tests/helpers/observability.ts`) for setup. Don't roll your own Postgres or observability wiring.
 - Tests must be self-contained: each test starts from a clean state (handled by `beforeEach` truncation in integration tests).

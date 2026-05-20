@@ -1,232 +1,266 @@
 // --- Domain ---
 
+export type { CampanhaRepository } from './adapters/arrecadacao/campanha-repository.js';
+export { CampanhaRepositoryMemory } from './adapters/arrecadacao/campanha-repository.memory.js';
+export { CampanhaRepositoryPostgres } from './adapters/arrecadacao/campanha-repository.postgres.js';
+export type { ContribuicaoRepository } from './adapters/arrecadacao/contribuicao-repository.js';
+export { ContribuicaoRepositoryMemory } from './adapters/arrecadacao/contribuicao-repository.memory.js';
+export { ContribuicaoRepositoryPostgres } from './adapters/arrecadacao/contribuicao-repository.postgres.js';
 // --- Adapter Interfaces (public contract — implement your own) ---
 export type { CatRepository } from './adapters/cat-repository.js';
 export type { Database } from './adapters/database.js';
 // --- Database utilities ---
 export { createDatabase } from './adapters/database.js';
-export type { FeeRuleProvider } from './adapters/fee-rule-provider.js';
-export { FeeRuleProviderMemory } from './adapters/fee-rule-provider.memory.js';
-export type { FinancialLedgerRepository } from './adapters/financial-ledger-repository.js';
-export { FinancialLedgerRepositoryMemory } from './adapters/financial-ledger-repository.memory.js';
-export type { FundraisingCampaignRepository } from './adapters/fundraising-campaign-repository.js';
-export { FundraisingCampaignRepositoryMemory } from './adapters/fundraising-campaign-repository.memory.js';
-export type { FundraisingContributionRepository } from './adapters/fundraising-contribution-repository.js';
-export { FundraisingContributionRepositoryMemory } from './adapters/fundraising-contribution-repository.memory.js';
-export type { PaymentEventPublisher } from './adapters/payment-event-publisher.js';
-export { PaymentEventPublisherMemory } from './adapters/payment-event-publisher.memory.js';
-export { PaymentProviderFake } from './adapters/payment-provider.fake.js';
-export type { PaymentProvider, RequestPaymentInput } from './adapters/payment-provider.js';
-export type { PaymentRepository } from './adapters/payment-repository.js';
-export { PaymentRepositoryMemory } from './adapters/payment-repository.memory.js';
-export type { UserRepository } from './adapters/user-repository.js';
-export { UserRepositoryMemory } from './adapters/user-repository.memory.js';
-export type { UserSessionRepository } from './adapters/user-session-repository.js';
-export { UserSessionRepositoryMemory } from './adapters/user-session-repository.memory.js';
+export type { LivroFinanceiroRepository } from './adapters/financeiro/livro-repository.js';
+export { LivroFinanceiroRepositoryMemory } from './adapters/financeiro/livro-repository.memory.js';
+export type { PagamentoEventPublisher } from './adapters/pagamentos/event-publisher.js';
+export { PagamentoEventPublisherMemory } from './adapters/pagamentos/event-publisher.memory.js';
+export { PagamentoProviderFake } from './adapters/pagamentos/provider.fake.js';
+export type { PagamentoProvider, SolicitarPagamentoInput } from './adapters/pagamentos/provider.js';
+export type { PagamentoRepository } from './adapters/pagamentos/repository.js';
+export { PagamentoRepositoryMemory } from './adapters/pagamentos/repository.memory.js';
+export type { ProvedorRegraTaxa } from './adapters/taxas/regra-provider.js';
+export { ProvedorRegraTaxaMemory } from './adapters/taxas/regra-provider.memory.js';
+export type { UsuarioRepository } from './adapters/usuario/repository.js';
+export { UsuarioRepositoryMemory } from './adapters/usuario/repository.memory.js';
+export type { SessaoUsuarioRepository } from './adapters/usuario/sessao-repository.js';
+export { SessaoUsuarioRepositoryMemory } from './adapters/usuario/sessao-repository.memory.js';
+export type {
+  AdicionarAdministradorCampanhaInput,
+  AdicionarOpcaoContribuicaoInput,
+  AlterarDadosRecebedorCampanhaInput,
+  Campanha,
+  CriarCampanhaInput,
+  DadosRecebedor,
+  IdCampanha,
+  IdConta,
+  IdOpcaoContribuicao,
+  IdRecebedor,
+  OpcaoContribuicao,
+  RemoverAdministradorCampanhaInput,
+  TipoChavePix,
+  TipoOpcaoContribuicao,
+} from './domain/arrecadacao/campanha.js';
+export {
+  AdicionarAdministradorCampanhaInputSchema,
+  AdicionarOpcaoContribuicaoInputSchema,
+  AlterarDadosRecebedorCampanhaInputSchema,
+  CriarCampanhaInputSchema,
+  campanhaComAdministrador,
+  campanhaComDadosRecebedor,
+  campanhaComOpcao,
+  campanhaPossuiAdministrador,
+  campanhaSemAdministrador,
+  DadosRecebedorSchema,
+  encontrarOpcaoContribuicao,
+  IdCampanhaSchema,
+  IdContaSchema,
+  IdOpcaoContribuicaoSchema,
+  IdRecebedorSchema,
+  IdsAdministradoresSchema,
+  OpcaoContribuicaoSchema,
+  RemoverAdministradorCampanhaInputSchema,
+  TipoChavePixSchema,
+  TipoOpcaoContribuicaoSchema,
+} from './domain/arrecadacao/campanha.js';
+export type {
+  AlterarValorContribuicaoInput,
+  AssociarContribuinteContribuicaoInput,
+  Contribuicao,
+  CriarContribuicaoInput,
+  DadosContribuinte,
+  IdContribuicao,
+  StatusContribuicao,
+} from './domain/arrecadacao/contribuicao.js';
+export {
+  AlterarValorContribuicaoInputSchema,
+  AssociarContribuinteContribuicaoInputSchema,
+  CriarContribuicaoInputSchema,
+  contribuicaoComContribuinte,
+  contribuicaoComValor,
+  contribuicaoDisponivel,
+  criarContribuicaoDisponivel,
+  DadosContribuinteSchema,
+  IdContribuicaoSchema,
+  NomeContribuicaoSchema,
+  NomeContribuinteSchema,
+  StatusContribuicaoSchema,
+} from './domain/arrecadacao/contribuicao.js';
 export type { Cat, CatId, CatName, CreateCatInput } from './domain/cat.js';
 export { CatIdSchema, CatNameSchema, CreateCatInputSchema } from './domain/cat.js';
 export type {
-  CalculateFeeCompositionInput,
-  ContributionReferenceId,
-  FeeCalculation,
-  FeePayer,
-  FeePercentageBps,
-  FeeRule,
-  ValueComposition,
-} from './domain/fees.js';
+  IdContribuicaoReferencia as IdContribuicaoReferenciaFinanceiro,
+  IdLancamentoFinanceiro,
+  IdPagamentoReferencia,
+  IdRecebedorFinanceiro,
+  IdRepasse,
+  LancamentoFinanceiro,
+  ObterSaldoRecebedorInput,
+  ReceitaPlataforma,
+  RegistrarEfeitosFinanceirosPagamentoAprovadoInput,
+  RepasseRecebedor,
+  SaldoCentavos,
+  SaldoRecebedor,
+  SnapshotComposicaoValoresFinanceiro,
+  SolicitarRepasseRecebedorInput,
+  StatusLancamento,
+  StatusPagamentoFinanceiro,
+  StatusRepasse,
+  TipoLancamentoFinanceiro,
+} from './domain/financeiro/financeiro.js';
 export {
-  CalculateFeeCompositionInputSchema,
-  ContributionReferenceIdSchema,
-  calculateFee,
-  calculatePercentageFeeAmount,
-  calculateValueComposition,
-  composeValueComposition,
-  DEFAULT_FEE_PERCENTAGE_BPS,
-  DEFAULT_FEE_RULE,
-  FeePayerSchema,
-  FeePercentageBpsSchema,
-  FeeRuleSchema,
-} from './domain/fees.js';
-export type {
-  FinancialBalanceCents,
-  FinancialContributionReferenceId,
-  FinancialEntry,
-  FinancialEntryId,
-  FinancialEntryIds,
-  FinancialEntryStatus,
-  FinancialEntryType,
-  FinancialFeePayer,
-  FinancialPaymentReferenceId,
-  FinancialPaymentStatus,
-  FinancialPayoutId,
-  FinancialReceiverId,
-  FinancialValueCompositionSnapshot,
-  GetReceiverFinancialBalanceInput,
-  PayoutStatus,
-  PlatformRevenue,
-  ReceiverFinancialBalance,
-  ReceiverPayout,
-  RegisterApprovedPaymentFinancialEffectsInput,
-  RequestReceiverPayoutInput,
-} from './domain/financial.js';
-export {
-  assertApprovedPaymentFinancialComposition,
-  calculatePlatformRevenue,
-  calculateReceiverFinancialBalance,
-  createFinancialEntriesForApprovedPayment,
-  createRequestedReceiverPayout,
-  FinancialBalanceCentsSchema,
-  FinancialContributionReferenceIdSchema,
-  FinancialEntryIdSchema,
-  FinancialEntryIdsSchema,
-  FinancialEntrySchema,
-  FinancialEntryStatusSchema,
-  FinancialEntryTypeSchema,
-  FinancialFeePayerSchema,
-  FinancialPaymentReferenceIdSchema,
-  FinancialPaymentStatusSchema,
-  FinancialPayoutIdSchema,
-  FinancialReceiverIdSchema,
-  FinancialValueCompositionSnapshotSchema,
-  GetReceiverFinancialBalanceInputSchema,
-  PayoutStatusSchema,
-  PlatformRevenueSchema,
-  ReceiverFinancialBalanceSchema,
-  ReceiverPayoutSchema,
-  RegisterApprovedPaymentFinancialEffectsInputSchema,
-  RequestReceiverPayoutInputSchema,
-} from './domain/financial.js';
-export type {
-  AccountId,
-  AddFundraisingContributionOptionInput,
-  Campaign,
-  CampaignId,
-  ContributionOption,
-  ContributionOptionId,
-  CreateFundraisingCampaignInput,
-  ReceiverId,
-} from './domain/fundraising-campaign.js';
-export {
-  AccountIdSchema,
-  AddFundraisingContributionOptionInputSchema,
-  CampaignIdSchema,
-  ContributionOptionIdSchema,
-  CreateFundraisingCampaignInputSchema,
-  findContributionOption,
-  ReceiverIdSchema,
-} from './domain/fundraising-campaign.js';
-export type {
-  Contribution,
-  ContributionId,
-  ContributorProfile,
-  CreateFundraisingContributionInput,
-} from './domain/fundraising-contribution.js';
-export {
-  ContributionIdSchema,
-  ContributorProfileSchema,
-  CreateFundraisingContributionInputSchema,
-} from './domain/fundraising-contribution.js';
+  calcularReceitaPlataforma,
+  calcularSaldoRecebedor,
+  criarLancamentosParaPagamentoAprovado,
+  criarRepasseRecebedorSolicitado,
+  IdLancamentoFinanceiroSchema,
+  IdPagamentoReferenciaSchema,
+  IdRecebedorFinanceiroSchema,
+  IdRepasseSchema,
+  IdsLancamentosFinanceirosSchema,
+  LancamentoFinanceiroSchema,
+  ObterSaldoRecebedorInputSchema,
+  ReceitaPlataformaSchema,
+  RegistrarEfeitosFinanceirosPagamentoAprovadoInputSchema,
+  RepasseRecebedorSchema,
+  SaldoCentavosSchema,
+  SaldoRecebedorSchema,
+  SnapshotComposicaoValoresFinanceiroSchema,
+  SolicitarRepasseRecebedorInputSchema,
+  StatusLancamentoSchema,
+  StatusPagamentoFinanceiroSchema,
+  StatusRepasseSchema,
+  TipoLancamentoFinanceiroSchema,
+  validarComposicaoFinanceiraPagamentoAprovado,
+} from './domain/financeiro/financeiro.js';
 export type { MoneyCents } from './domain/money.js';
 export { MoneyCentsSchema } from './domain/money.js';
 export type {
-  CreatePaymentIntentInput,
-  CreatePendingPaymentInput,
-  ExternalPaymentTransaction,
-  ExternalPaymentTransactionStatus,
-  ExternalTransactionId,
-  Payment,
-  PaymentCommandInput,
-  PaymentContributionReferenceId,
-  PaymentEvent,
-  PaymentEventType,
-  PaymentFeePayer,
-  PaymentId,
-  PaymentIntent,
-  PaymentIntentId,
-  PaymentMethod,
-  PaymentProviderName,
-  PaymentStatus,
-  PaymentValueCompositionSnapshot,
-} from './domain/payments.js';
+  ComandoPagamentoInput,
+  CriarIntencaoPagamentoInput,
+  CriarPagamentoPendenteInput,
+  EventoPagamento,
+  IdContribuicaoPagamento,
+  IdIntencaoPagamento,
+  IdPagamento,
+  IdTransacaoExterna,
+  IntencaoPagamento,
+  MetodoPagamento,
+  NomeProvedorPagamento,
+  Pagamento,
+  SnapshotComposicaoValores,
+  StatusPagamento,
+  StatusTransacaoExterna,
+  TipoEventoPagamento,
+  TransacaoExterna,
+} from './domain/pagamentos/pagamentos.js';
 export {
-  approvePendingPayment,
-  CreatePaymentIntentInputSchema,
-  canApprovePayment,
-  canRejectPayment,
-  createPaymentEvent,
-  createPendingPayment,
-  ExternalPaymentTransactionSchema,
-  ExternalPaymentTransactionStatusSchema,
-  ExternalTransactionIdSchema,
-  PaymentCommandInputSchema,
-  PaymentContributionReferenceIdSchema,
-  PaymentEventSchema,
-  PaymentEventTypeSchema,
-  PaymentFeePayerSchema,
-  PaymentIdSchema,
-  PaymentIntentIdSchema,
-  PaymentIntentSchema,
-  PaymentMethodSchema,
-  PaymentProviderNameSchema,
-  PaymentSchema,
-  PaymentStatusSchema,
-  PaymentValueCompositionSnapshotSchema,
-  rejectPendingPayment,
-} from './domain/payments.js';
+  aprovarPagamentoPendente,
+  ComandoPagamentoInputSchema,
+  CriarIntencaoPagamentoInputSchema,
+  criarEventoPagamento,
+  criarPagamentoPendente,
+  EventoPagamentoSchema,
+  IdContribuicaoPagamentoSchema,
+  IdIntencaoPagamentoSchema,
+  IdPagamentoSchema,
+  IdTransacaoExternaSchema,
+  IntencaoPagamentoSchema,
+  MetodoPagamentoSchema,
+  NomeProvedorPagamentoSchema,
+  PagamentoSchema,
+  podeAprovarPagamento,
+  podeRejeitarPagamento,
+  rejeitarPagamentoPendente,
+  SnapshotComposicaoValoresSchema,
+  StatusPagamentoSchema,
+  StatusTransacaoExternaSchema,
+  TipoEventoPagamentoSchema,
+  TransacaoExternaSchema,
+} from './domain/pagamentos/pagamentos.js';
 export type {
-  AuthorizeUserPermissionInput,
-  CreateUserSessionInput,
-  RegisterUserAccountInput,
-  SimulatedUserCredential,
-  UpdateUserProfileInput,
-  User,
-  UserAccount,
-  UserAccountId,
-  UserDisplayName,
-  UserEmail,
-  UserId,
-  UserPermission,
-  UserSession,
-} from './domain/user.js';
+  CalcularComposicaoValoresInput,
+  CalculoTaxa,
+  ComposicaoValores,
+  IdContribuicaoReferencia,
+  PercentualTaxaBps,
+  RegraTaxa,
+  ResponsavelTaxa,
+} from './domain/taxas/taxas.js';
 export {
-  AuthorizeUserPermissionInputSchema,
-  CreateUserSessionInputSchema,
-  DEFAULT_USER_PERMISSIONS,
-  isUserSessionExpired,
-  RegisterUserAccountInputSchema,
-  SessionTokenSchema,
-  SimulatedPasswordSchema,
-  UpdateUserProfileInputSchema,
-  UserAccountIdSchema,
-  UserDisplayNameSchema,
-  UserEmailSchema,
-  UserIdSchema,
-  UserPermissionSchema,
-  userAccountHasPermission,
-} from './domain/user.js';
+  CalcularComposicaoValoresInputSchema,
+  calcularComposicaoValores as calcularComposicaoValoresDominio,
+  calcularTaxa,
+  calcularValorTaxaPercentual,
+  comporComposicaoValores,
+  DEFAULT_FEE_PERCENTAGE_BPS,
+  IdContribuicaoReferenciaSchema,
+  PercentualTaxaBpsSchema,
+  REGRA_TAXA_PADRAO,
+  RegraTaxaSchema,
+  ResponsavelTaxaSchema,
+} from './domain/taxas/taxas.js';
+export type {
+  AtualizarPerfilUsuarioInput,
+  AutorizarPermissaoUsuarioInput,
+  Conta,
+  CredencialSimulada,
+  CriarSessaoUsuarioInput,
+  EmailUsuario,
+  IdContaUsuario,
+  IdUsuario,
+  NomeExibicaoUsuario,
+  Permissao,
+  RegistrarContaUsuarioInput,
+  SenhaSimulada,
+  Sessao,
+  TokenSessao,
+  Usuario,
+} from './domain/usuario/usuario.js';
+export {
+  AtualizarPerfilUsuarioInputSchema,
+  AutorizarPermissaoUsuarioInputSchema,
+  CriarSessaoUsuarioInputSchema,
+  contaTemPermissao,
+  EmailUsuarioSchema,
+  IdContaUsuarioSchema,
+  IdUsuarioSchema,
+  NomeExibicaoUsuarioSchema,
+  PERMISSOES_PADRAO,
+  PermissaoSchema,
+  RegistrarContaUsuarioInputSchema,
+  SenhaSimuladaSchema,
+  sessaoExpirada,
+  TokenSessaoSchema,
+} from './domain/usuario/usuario.js';
 
 // --- Errors ---
+export { ArrecadacaoAdministradorDuplicadoError } from './errors/arrecadacao/administrador-duplicado.error.js';
+export { ArrecadacaoAdministradorNaoEncontradoError } from './errors/arrecadacao/administrador-nao-encontrado.error.js';
+export { ArrecadacaoCampanhaNaoEncontradaError } from './errors/arrecadacao/campanha-nao-encontrada.error.js';
+export { ArrecadacaoContribuicaoJaExisteError } from './errors/arrecadacao/contribuicao-ja-existe.error.js';
+export { ArrecadacaoContribuicaoNaoDisponivelError } from './errors/arrecadacao/contribuicao-nao-disponivel.error.js';
+export { ArrecadacaoContribuicaoNaoEncontradaError } from './errors/arrecadacao/contribuicao-nao-encontrada.error.js';
+export { ArrecadacaoInputInvalidoError } from './errors/arrecadacao/input-invalido.error.js';
+export { ArrecadacaoOpcaoContribuicaoNaoEncontradaError } from './errors/arrecadacao/opcao-contribuicao-nao-encontrada.error.js';
+export { ArrecadacaoOpcaoIdDuplicadoError } from './errors/arrecadacao/opcao-id-duplicado.error.js';
+export { ArrecadacaoUltimoAdministradorError } from './errors/arrecadacao/ultimo-administrador.error.js';
 export { CatAlreadyExistsError } from './errors/cat-already-exists.error.js';
-export { FeesInvalidInputError } from './errors/fees-invalid-input.error.js';
-export { FinancialInsufficientAvailableBalanceError } from './errors/financial-insufficient-available-balance.error.js';
-export { FinancialInvalidInputError } from './errors/financial-invalid-input.error.js';
-export { FinancialPaymentAlreadyRecordedError } from './errors/financial-payment-already-recorded.error.js';
-export { FinancialPaymentNotApprovedError } from './errors/financial-payment-not-approved.error.js';
-export { FundraisingCampaignNotFoundError } from './errors/fundraising-campaign-not-found.error.js';
-export { FundraisingContributionAlreadyExistsError } from './errors/fundraising-contribution-already-exists.error.js';
-export { FundraisingContributionOptionNotFoundError } from './errors/fundraising-contribution-option-not-found.error.js';
-export { FundraisingDuplicateOptionIdError } from './errors/fundraising-duplicate-option-id.error.js';
-export { FundraisingInvalidInputError } from './errors/fundraising-invalid-input.error.js';
+export { FinanceiroInputInvalidoError } from './errors/financeiro/input-invalido.error.js';
+export { FinanceiroPagamentoJaRegistradoError } from './errors/financeiro/pagamento-ja-registrado.error.js';
+export { FinanceiroPagamentoNaoAprovadoError } from './errors/financeiro/pagamento-nao-aprovado.error.js';
+export { FinanceiroSaldoDisponivelInsuficienteError } from './errors/financeiro/saldo-disponivel-insuficiente.error.js';
 export { InvalidCatNameError } from './errors/invalid-cat-name.error.js';
-export { PaymentAlreadyExistsError } from './errors/payment-already-exists.error.js';
-export { PaymentAmountMismatchError } from './errors/payment-amount-mismatch.error.js';
-export { PaymentInvalidStatusTransitionError } from './errors/payment-invalid-status-transition.error.js';
-export { PaymentNotFoundError } from './errors/payment-not-found.error.js';
-export { PaymentsInvalidInputError } from './errors/payments-invalid-input.error.js';
-export { UserEmailAlreadyExistsError } from './errors/user-email-already-exists.error.js';
-export { UserForbiddenError } from './errors/user-forbidden.error.js';
-export { UserInvalidInputError } from './errors/user-invalid-input.error.js';
-export { UserSessionInvalidError } from './errors/user-session-invalid.error.js';
+export { PagamentosInputInvalidoError } from './errors/pagamentos/input-invalido.error.js';
+export { PagamentoJaExisteError } from './errors/pagamentos/ja-existe.error.js';
+export { PagamentoNaoEncontradoError } from './errors/pagamentos/nao-encontrado.error.js';
+export { PagamentoTransicaoStatusInvalidaError } from './errors/pagamentos/transicao-status-invalida.error.js';
+export { PagamentoValorDivergenteError } from './errors/pagamentos/valor-divergente.error.js';
+export { TaxasInputInvalidoError } from './errors/taxas/input-invalido.error.js';
+export { UsuarioEmailJaExisteError } from './errors/usuario/email-ja-existe.error.js';
+export { UsuarioInputInvalidoError } from './errors/usuario/input-invalido.error.js';
+export { UsuarioNaoAutorizadoError } from './errors/usuario/nao-autorizado.error.js';
+export { UsuarioSessaoInvalidaError } from './errors/usuario/sessao-invalida.error.js';
 export { ConsoleLogger } from './observability/console-logger.js';
 // --- Observability ---
 export type { Logger } from './observability/logger.js';
@@ -236,40 +270,50 @@ export { OtelLogger } from './observability/otel-logger.js';
 export type { Span, Tracer } from './observability/tracer.js';
 export { noopTracer, SpanKind, SpanStatusCode, trace } from './observability/tracer.js';
 // --- Use Cases ---
-export type { AddFundraisingContributionOptionDeps } from './use-cases/add-fundraising-contribution-option.js';
-export { addFundraisingContributionOption } from './use-cases/add-fundraising-contribution-option.js';
-export type { ApprovePaymentDeps } from './use-cases/approve-payment.js';
-export { approvePayment } from './use-cases/approve-payment.js';
-export type { AuthorizeUserPermissionDeps } from './use-cases/authorize-user-permission.js';
-export { authorizeUserPermission } from './use-cases/authorize-user-permission.js';
-export type { CalculateFeeCompositionDeps } from './use-cases/calculate-fee-composition.js';
-export { calculateFeeComposition } from './use-cases/calculate-fee-composition.js';
+export type { AdicionarAdministradorCampanhaDeps } from './use-cases/arrecadacao/adicionar-administrador-campanha.js';
+export { adicionarAdministradorCampanha } from './use-cases/arrecadacao/adicionar-administrador-campanha.js';
+export type { AdicionarOpcaoContribuicaoDeps } from './use-cases/arrecadacao/adicionar-opcao-contribuicao.js';
+export { adicionarOpcaoContribuicao } from './use-cases/arrecadacao/adicionar-opcao-contribuicao.js';
+export type { AlterarDadosRecebedorCampanhaDeps } from './use-cases/arrecadacao/alterar-dados-recebedor-campanha.js';
+export { alterarDadosRecebedorCampanha } from './use-cases/arrecadacao/alterar-dados-recebedor-campanha.js';
+export type { AlterarValorContribuicaoDeps } from './use-cases/arrecadacao/alterar-valor-contribuicao.js';
+export { alterarValorContribuicao } from './use-cases/arrecadacao/alterar-valor-contribuicao.js';
+export type { AssociarContribuinteContribuicaoDeps } from './use-cases/arrecadacao/associar-contribuinte-contribuicao.js';
+export { associarContribuinteContribuicao } from './use-cases/arrecadacao/associar-contribuinte-contribuicao.js';
+export type { CriarCampanhaDeps } from './use-cases/arrecadacao/criar-campanha.js';
+export { criarCampanha } from './use-cases/arrecadacao/criar-campanha.js';
+export type { CriarContribuicaoDeps } from './use-cases/arrecadacao/criar-contribuicao.js';
+export { criarContribuicao } from './use-cases/arrecadacao/criar-contribuicao.js';
+export type { RemoverAdministradorCampanhaDeps } from './use-cases/arrecadacao/remover-administrador-campanha.js';
+export { removerAdministradorCampanha } from './use-cases/arrecadacao/remover-administrador-campanha.js';
 export type { CreateCatDeps } from './use-cases/create-cat.js';
 export { createCat } from './use-cases/create-cat.js';
-export type { CreateFundraisingCampaignDeps } from './use-cases/create-fundraising-campaign.js';
-export { createFundraisingCampaign } from './use-cases/create-fundraising-campaign.js';
-export type { CreateFundraisingContributionDeps } from './use-cases/create-fundraising-contribution.js';
-export { createFundraisingContribution } from './use-cases/create-fundraising-contribution.js';
-export type { CreatePaymentIntentDeps } from './use-cases/create-payment-intent.js';
-export { createPaymentIntent } from './use-cases/create-payment-intent.js';
-export type { CreateUserSessionDeps } from './use-cases/create-user-session.js';
-export { createUserSession } from './use-cases/create-user-session.js';
-export type { GetPaymentByIdDeps } from './use-cases/get-payment-by-id.js';
-export { getPaymentById } from './use-cases/get-payment-by-id.js';
-export type { GetPlatformRevenueDeps } from './use-cases/get-platform-revenue.js';
-export { getPlatformRevenue } from './use-cases/get-platform-revenue.js';
-export type { GetReceiverFinancialBalanceDeps } from './use-cases/get-receiver-financial-balance.js';
-export { getReceiverFinancialBalance } from './use-cases/get-receiver-financial-balance.js';
-export type { RegisterApprovedPaymentFinancialEffectsDeps } from './use-cases/register-approved-payment-financial-effects.js';
-export { registerApprovedPaymentFinancialEffects } from './use-cases/register-approved-payment-financial-effects.js';
+export type { ObterReceitaPlataformaDeps } from './use-cases/financeiro/obter-receita-plataforma.js';
+export { obterReceitaPlataforma } from './use-cases/financeiro/obter-receita-plataforma.js';
+export type { ObterSaldoRecebedorDeps } from './use-cases/financeiro/obter-saldo-recebedor.js';
+export { obterSaldoRecebedor } from './use-cases/financeiro/obter-saldo-recebedor.js';
+export type { RegistrarEfeitosFinanceirosPagamentoAprovadoDeps } from './use-cases/financeiro/registrar-efeitos-financeiros-pagamento-aprovado.js';
+export { registrarEfeitosFinanceirosPagamentoAprovado } from './use-cases/financeiro/registrar-efeitos-financeiros-pagamento-aprovado.js';
+export type { SolicitarRepasseRecebedorDeps } from './use-cases/financeiro/solicitar-repasse-recebedor.js';
+export { solicitarRepasseRecebedor } from './use-cases/financeiro/solicitar-repasse-recebedor.js';
+export type { AprovarPagamentoDeps } from './use-cases/pagamentos/aprovar-pagamento.js';
+export { aprovarPagamento } from './use-cases/pagamentos/aprovar-pagamento.js';
+export type { CriarIntencaoPagamentoDeps } from './use-cases/pagamentos/criar-intencao-pagamento.js';
+export { criarIntencaoPagamento } from './use-cases/pagamentos/criar-intencao-pagamento.js';
+export type { ObterPagamentoPorIdDeps } from './use-cases/pagamentos/obter-pagamento-por-id.js';
+export { obterPagamentoPorId } from './use-cases/pagamentos/obter-pagamento-por-id.js';
+export type { RejeitarPagamentoDeps } from './use-cases/pagamentos/rejeitar-pagamento.js';
+export { rejeitarPagamento } from './use-cases/pagamentos/rejeitar-pagamento.js';
+export type { CalcularComposicaoValoresDeps } from './use-cases/taxas/calcular-composicao-valores.js';
+export { calcularComposicaoValores } from './use-cases/taxas/calcular-composicao-valores.js';
+export type { AtualizarPerfilUsuarioDeps } from './use-cases/usuario/atualizar-perfil-usuario.js';
+export { atualizarPerfilUsuario } from './use-cases/usuario/atualizar-perfil-usuario.js';
+export type { AutorizarPermissaoUsuarioDeps } from './use-cases/usuario/autorizar-permissao-usuario.js';
+export { autorizarPermissaoUsuario } from './use-cases/usuario/autorizar-permissao-usuario.js';
+export type { CriarSessaoUsuarioDeps } from './use-cases/usuario/criar-sessao-usuario.js';
+export { criarSessaoUsuario } from './use-cases/usuario/criar-sessao-usuario.js';
 export type {
-  RegisterUserAccountDeps,
-  RegisterUserAccountResult,
-} from './use-cases/register-user-account.js';
-export { registerUserAccount } from './use-cases/register-user-account.js';
-export type { RejectPaymentDeps } from './use-cases/reject-payment.js';
-export { rejectPayment } from './use-cases/reject-payment.js';
-export type { RequestReceiverPayoutDeps } from './use-cases/request-receiver-payout.js';
-export { requestReceiverPayout } from './use-cases/request-receiver-payout.js';
-export type { UpdateUserProfileDeps } from './use-cases/update-user-profile.js';
-export { updateUserProfile } from './use-cases/update-user-profile.js';
+  RegistrarContaUsuarioDeps,
+  RegistrarContaUsuarioResult,
+} from './use-cases/usuario/registrar-conta-usuario.js';
+export { registrarContaUsuario } from './use-cases/usuario/registrar-conta-usuario.js';

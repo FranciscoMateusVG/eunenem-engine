@@ -144,10 +144,12 @@ The import-graph rules above are paired with a structural gate on file and folde
 
 The rules live in `folder-structure.mjs` and enforce:
 
-- **`src/domain/`, `src/use-cases/`, `src/observability/`, `src/testing/`** — flat folders of kebab-case `*.ts` files. No nested subdirectories.
-- **`src/adapters/`** — `<port>.ts` (the interface) and `<port>.<impl>.ts` (concrete adapters, e.g. `cat-repository.postgres.ts`).
-- **`src/errors/`** — `<entity>-<thing>.error.ts` plus the `index.ts` barrel.
-- **`tests/{unit,integration}/`** — `*.test.ts` and `*.<flavor>.test.ts` (e.g. `cat-repository.memory.test.ts`).
+- **`src/domain/`, `src/use-cases/`, `src/adapters/`, `src/errors/`** — shared files at the layer root (`money.ts`, `cat.ts`, `create-cat.ts`, `database.ts`, …) plus one subfolder per bounded context: `arrecadacao/`, `taxas/`, `pagamentos/`, `financeiro/`, `usuario/` (kebab-case `*.ts` inside each BC folder).
+- **`src/adapters/`** — at the root: Cat and database adapters; inside each BC folder: `<port>.ts` and `<port>.<impl>.ts` (e.g. `arrecadacao/campanha-repository.memory.ts`).
+- **`src/errors/`** — Cat errors and `index.ts` at the root; per-BC errors in `<bc>/<thing>.error.ts`.
+- **`src/observability/`, `src/testing/`** — flat kebab-case `*.ts` files only.
+- **`tests/unit/`** — shared tests at the root (`money.test.ts`, `cat-*.test.ts`, `logger.test.ts`, …) plus one subfolder per bounded context (`arrecadacao/`, `taxas/`, …) with kebab-case `*.test.ts` and adapter-style `*.<impl>.test.ts` (e.g. `pagamentos/repository.memory.test.ts`).
+- **`tests/integration/`** — flat `*.test.ts` and `*.<flavor>.test.ts`.
 - **`tests/helpers/`** — flat kebab-case `*.ts`, optionally with a single dotted qualifier (`cat-repository.conformance.ts`).
 - **`examples/`** — three accepted forms: `<use-case>.ts`, `<use-case>.with-<integration>.ts`, `<use-case>.<flavor>.ts` (e.g. `create-cat.hono.ts`).
 - **`migrations/`** — `<YYYYMMDD>_<NNN>_<snake_name>.ts`.

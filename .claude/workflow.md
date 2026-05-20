@@ -95,7 +95,8 @@ About ten minutes. Then merge.
   - Repository interface: `src/adapters/cat-repository.ts`
   - Adapters: `src/adapters/cat-repository.{postgres,memory}.ts`
   - Conformance suite: `tests/helpers/cat-repository.conformance.ts`
-  - Property tests: `tests/unit/cat-property.test.ts`
-  - Observability primitive tests: `tests/unit/logger.test.ts`
+  - Property tests: `tests/unit/cat-property.test.ts` (root)
+  - BC unit tests: `tests/unit/<bc>/` (e.g. `tests/unit/arrecadacao/campanha.test.ts`)
+  - Observability primitive tests: `tests/unit/logger.test.ts` (root)
   - Test observability helper: `tests/helpers/observability.ts`
   - Test database helper: `tests/helpers/test-db.ts`

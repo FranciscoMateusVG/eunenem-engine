@@ -11,7 +11,11 @@
 //   • src/ follows the hexagonal layout (domain / use-cases / adapters / errors
 //     / observability / testing) with kebab-case filenames and the conventional
 //     suffixes (.error.ts, .<impl>.ts).
-//   • tests/ mirrors the unit/integration/helpers split with .test.ts suffix.
+//   • Bounded contexts live in subfolders: arrecadacao, taxas, pagamentos,
+//     financeiro, usuario (shared infra such as cat and money stay at layer root).
+//   • tests/unit/ — shared tests at root (money, cat, observability) plus BC
+//     subfolders with *.test.ts and *.<impl>.test.ts.
+//   • tests/integration/ and tests/helpers/ follow their own flat conventions.
 //   • examples/, migrations/, and scripts/ follow their respective conventions.
 //
 // WHAT THIS DOES NOT ENFORCE:
@@ -25,6 +29,33 @@ import { createFolderStructure } from 'eslint-plugin-project-structure';
 
 const KEBAB = '{kebab-case}';
 
+/** Subpastas por bounded context (linguagem ubíqua do ENGINE-DDD). */
+const BC_FOLDERS = ['arrecadacao', 'taxas', 'pagamentos', 'financeiro', 'usuario'];
+
+/** @param {{ withAdapterImpl?: boolean }} [opts] */
+function bcChildren(opts = {}) {
+  const fileChildren = [{ name: `${KEBAB}.ts` }];
+  if (opts.withAdapterImpl) {
+    fileChildren.push({ name: `${KEBAB}.${KEBAB}.ts` });
+  }
+  return BC_FOLDERS.map((name) => ({
+    name,
+    children: fileChildren,
+  }));
+}
+
+/** @param {{ withAdapterImpl?: boolean }} [opts] */
+function bcTestChildren(opts = {}) {
+  const fileChildren = [{ name: `${KEBAB}.test.ts` }];
+  if (opts.withAdapterImpl) {
+    fileChildren.push({ name: `${KEBAB}.${KEBAB}.test.ts` });
+  }
+  return BC_FOLDERS.map((name) => ({
+    name,
+    children: fileChildren,
+  }));
+}
+
 export const folderStructureConfig = createFolderStructure({
   structure: [
     // ── src/ — the architecture proper ──
@@ -34,23 +65,35 @@ export const folderStructureConfig = createFolderStructure({
         { name: 'index.ts' },
         {
           name: 'domain',
-          children: [{ name: `${KEBAB}.ts` }],
+          children: [{ name: 'money.ts' }, { name: 'cat.ts' }, ...bcChildren()],
         },
         {
           name: 'use-cases',
-          children: [{ name: `${KEBAB}.ts` }],
+          children: [{ name: 'create-cat.ts' }, ...bcChildren()],
         },
         {
           name: 'adapters',
           children: [
-            // <port>.ts (the interface) AND <port>.<impl>.ts (memory, postgres, ...)
-            { name: `${KEBAB}.ts` },
-            { name: `${KEBAB}.${KEBAB}.ts` },
+            { name: 'database.ts' },
+            { name: 'db-types.generated.ts' },
+            { name: 'cat-repository.ts' },
+            { name: 'cat-repository.memory.ts' },
+            { name: 'cat-repository.postgres.ts' },
+            { name: 'postgres.ts' },
+            ...bcChildren({ withAdapterImpl: true }),
           ],
         },
         {
           name: 'errors',
-          children: [{ name: 'index.ts' }, { name: `${KEBAB}.error.ts` }],
+          children: [
+            { name: 'index.ts' },
+            { name: 'cat-already-exists.error.ts' },
+            { name: 'invalid-cat-name.error.ts' },
+            ...BC_FOLDERS.map((name) => ({
+              name,
+              children: [{ name: `${KEBAB}.error.ts` }],
+            })),
+          ],
         },
         {
           name: 'observability',
@@ -70,9 +113,13 @@ export const folderStructureConfig = createFolderStructure({
         {
           name: 'unit',
           children: [
-            // Simple unit test AND adapter-flavored test (cat-repository.memory.test.ts).
-            { name: `${KEBAB}.test.ts` },
-            { name: `${KEBAB}.${KEBAB}.test.ts` },
+            { name: 'money.test.ts' },
+            { name: 'cat-domain.test.ts' },
+            { name: 'cat-property.test.ts' },
+            { name: 'cat-repository.memory.test.ts' },
+            { name: 'logger.test.ts' },
+            { name: 'otel-logger.test.ts' },
+            ...bcTestChildren({ withAdapterImpl: true }),
           ],
         },
         {
@@ -81,22 +128,12 @@ export const folderStructureConfig = createFolderStructure({
         },
         {
           name: 'helpers',
-          children: [
-            // Helpers may chain extra qualifiers (e.g. cat-repository.conformance.ts).
-            { name: `${KEBAB}.ts` },
-            { name: `${KEBAB}.${KEBAB}.ts` },
-          ],
+          children: [{ name: `${KEBAB}.ts` }, { name: `${KEBAB}.${KEBAB}.ts` }],
         },
       ],
     },
 
     // ── examples/ — one file per demo. ──
-    // Conventions:
-    //   • <use-case>.ts                          → bare SDK example (create-cat.ts)
-    //   • <use-case>.with-<integration>.ts       → SDK example demonstrating a wiring
-    //                                              (create-cat.with-otel.ts)
-    //   • <use-case>.<flavor>.ts                 → transport / integration example
-    //                                              (create-cat.hono.ts)
     {
       name: 'examples',
       children: [
@@ -107,12 +144,6 @@ export const folderStructureConfig = createFolderStructure({
     },
 
     // ── migrations/ — Kysely-style timestamped migrations ──
-    //
-    // Filenames are YYYYMMDD_NNN_<snake_name>.ts (e.g. 20260426_001_create_cats.ts).
-    // The plugin only supports its `{reference}` macros (camelCase, snake_case,
-    // kebab-case, etc.) — not arbitrary regex — so we use `{snake_case}.ts`,
-    // which accepts the digits+underscores+letters shape these filenames have.
-    // The timestamp/sequence convention is project policy, not lint-enforced here.
     {
       name: 'migrations',
       children: [{ name: '{snake_case}.ts' }],

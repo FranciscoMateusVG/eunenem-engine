@@ -66,11 +66,17 @@ The codegen drift check in `pnpm check` will catch if you forget step 4-5.
 ```
 tests/
 ├── unit/           # Fast tests using in-memory adapters
+│   ├── money.test.ts, cat-*.test.ts, …   # shared / skeleton at root
+│   ├── arrecadacao/   # BC subfolders (short PT names)
+│   ├── taxas/
+│   ├── pagamentos/
+│   ├── financeiro/
+│   └── usuario/
 ├── integration/    # Tests against real Postgres via Testcontainers
 └── helpers/        # Shared test utilities (e.g., Testcontainers setup)
 ```
 
-- **Unit tests**: Use the in-memory adapter. Fast, no Docker needed.
+- **Unit tests**: Use the in-memory adapter. Fast, no Docker needed. Place BC tests under `tests/unit/<bc>/` (e.g. `tests/unit/pagamentos/repository.memory.test.ts`); keep `money`, Cat, and observability tests at `tests/unit/` root.
 - **Integration tests**: Spin up Postgres via Testcontainers. Docker must be running.
 - **Property-based tests**: Use fast-check in `tests/unit/`. Good for invariants.
 - **Examples**: `examples/*.ts` run as smoke tests during `pnpm check`.
