@@ -23,8 +23,9 @@ Este documento descreve a primeira fatia da **engine de intermediação financei
 ## Resumo em linguagem simples
 
 1. Um ou mais **administradores** (UUIDs de conta) abrem uma **campanha** com título e registram o **recebedor** externo (nome + chave PIX em `dadosRecebedor`); o sistema gera `idRecebedor` para o Financeiro.
-2. A campanha começa sem **opções de contribuição**; depois é possível adicionar opções (cada uma com valor em **centavos** e `tipo`: `presente`, `rifa` ou `convite`).
-3. Um **contribuinte visitante** (sem conta) escolhe uma opção: o sistema registra uma **contribuição** com o valor **copiado da opção** naquele momento, estado `pendente_pagamento`, e dados do visitante (nome de exibição e **email obrigatório**).
+2. A campanha começa sem **opções de contribuição** (sacolas); o administrador adiciona opções só com `tipo`: `presente`, `rifa` ou `convite`.
+3. O administrador cria **itens de contribuição** dentro de uma opção (`nome`, `valor` em centavos), com status `disponivel` e sem contribuinte.
+4. Um **contribuinte visitante** (sem conta) escolhe um item e associa seus dados (`nome`, **email obrigatório**); a contribuição passa a `indisponivel`. Taxas e pagamentos usam o `idContribuicao` e o valor do item.
 
 Nada disso cobra pagamento nem calcula taxa — isso fica em outros bounded contexts.
 
@@ -36,10 +37,10 @@ Nada disso cobra pagamento nem calcula taxa — isso fica em outros bounded cont
 |--------|-------------------|--------|
 | `campanhas` | `id`, `id_recebedor`, `titulo`, `criada_em`, dados PIX embutidos | Recebedor na mesma linha (sem tabela `recebedores`) |
 | `campanha_administradores` | `campanha_id`, `id_usuario` | PK composta; `id_usuario` ↔ `IdConta` no domínio |
-| `opcoes_contribuicao` | `id`, `campanha_id`, `valor`, `tipo` | `tipo` NOT NULL: `presente` \| `rifa` \| `convite` |
-| `contribuicoes` | `id`, `campanha_id`, `id_opcao_contribuicao`, `valor`, `status`, `criada_em`, `contribuinte_*` | Email NOT NULL; FKs com `ON DELETE RESTRICT` |
+| `opcoes_contribuicao` | `id`, `campanha_id`, `tipo` | Sacola por `tipo`: `presente` \| `rifa` \| `convite` |
+| `contribuicoes` | `id`, `campanha_id`, `id_opcao_contribuicao`, `nome`, `valor`, `status`, `criada_em`, `contribuinte_*` | `status`: `disponivel` \| `indisponivel`; contribuinte NULL até associação; FKs `ON DELETE RESTRICT` |
 
-Migration: [`migrations/20260519_001_create_arrecadacao.ts`](migrations/20260519_001_create_arrecadacao.ts).
+Migrations: [`migrations/20260519_001_create_arrecadacao.ts`](migrations/20260519_001_create_arrecadacao.ts), [`migrations/20260520_002_alter_arrecadacao_sacola_itens.ts`](migrations/20260520_002_alter_arrecadacao_sacola_itens.ts).
 
 Adaptadores Postgres exportados também pelo subpath `frame/adapters/postgres` (não no `src/index.ts` público).
 
@@ -65,9 +66,10 @@ Adaptadores Postgres exportados também pelo subpath `frame/adapters/postgres` (
 | Caso de uso: adicionar administrador | [`src/use-cases/arrecadacao/adicionar-administrador-campanha.ts`](src/use-cases/arrecadacao/adicionar-administrador-campanha.ts) — `adicionarAdministradorCampanha` |
 | Caso de uso: remover administrador | [`src/use-cases/arrecadacao/remover-administrador-campanha.ts`](src/use-cases/arrecadacao/remover-administrador-campanha.ts) — `removerAdministradorCampanha` |
 | Caso de uso: alterar dados do recebedor | [`src/use-cases/arrecadacao/alterar-dados-recebedor-campanha.ts`](src/use-cases/arrecadacao/alterar-dados-recebedor-campanha.ts) — `alterarDadosRecebedorCampanha` |
-| Caso de uso: adicionar opção | [`src/use-cases/arrecadacao/adicionar-opcao-contribuicao.ts`](src/use-cases/arrecadacao/adicionar-opcao-contribuicao.ts) — `adicionarOpcaoContribuicao` |
-| Caso de uso: alterar valor da opção | [`src/use-cases/arrecadacao/alterar-valor-opcao-contribuicao.ts`](src/use-cases/arrecadacao/alterar-valor-opcao-contribuicao.ts) — `alterarValorOpcaoContribuicao` |
-| Caso de uso: criar contribuição a partir da opção | [`src/use-cases/arrecadacao/criar-contribuicao.ts`](src/use-cases/arrecadacao/criar-contribuicao.ts) — `criarContribuicao` |
+| Caso de uso: adicionar opção (sacola) | [`src/use-cases/arrecadacao/adicionar-opcao-contribuicao.ts`](src/use-cases/arrecadacao/adicionar-opcao-contribuicao.ts) — `adicionarOpcaoContribuicao` |
+| Caso de uso: criar item de contribuição (admin) | [`src/use-cases/arrecadacao/criar-contribuicao.ts`](src/use-cases/arrecadacao/criar-contribuicao.ts) — `criarContribuicao` |
+| Caso de uso: associar contribuinte (visitante) | [`src/use-cases/arrecadacao/associar-contribuinte-contribuicao.ts`](src/use-cases/arrecadacao/associar-contribuinte-contribuicao.ts) — `associarContribuinteContribuicao` |
+| Caso de uso: alterar valor do item | [`src/use-cases/arrecadacao/alterar-valor-contribuicao.ts`](src/use-cases/arrecadacao/alterar-valor-contribuicao.ts) — `alterarValorContribuicao` |
 | Erros de domínio / aplicação | [`src/errors/arrecadacao/`](src/errors/arrecadacao) |
 | API pública do pacote (re-exports) | [`src/index.ts`](src/index.ts) |
 | Testes unitários | [`tests/unit/money.test.ts`](tests/unit/money.test.ts), [`tests/unit/arrecadacao/campanha.test.ts`](tests/unit/arrecadacao/campanha.test.ts), [`tests/unit/arrecadacao/contribuicao.test.ts`](tests/unit/arrecadacao/contribuicao.test.ts), [`tests/unit/arrecadacao/casos-de-uso.test.ts`](tests/unit/arrecadacao/casos-de-uso.test.ts) |
@@ -84,13 +86,13 @@ Adaptadores Postgres exportados também pelo subpath `frame/adapters/postgres` (
 
 - **Entidade:** `Campanha` e `Contribuicao` têm **id** estável e ciclo de vida; a campanha **muda** quando se adicionam opções (nova versão imutável do agregado).
 
-- **Agregado:** nesta versão didática, a **Campanha** é a raiz que contém a lista de **opções**. A **Contribuição** é outra entidade guardada separadamente, referenciando `idCampanha` e `idOpcaoContribuicao` — uma escolha de modelagem para evitar uma lista gigante de contribuições dentro da campanha em memória; dá para evoluir para um agregado “mais fechado” depois.
+- **Agregado:** a **Campanha** é a raiz com **opções** (sacolas por `tipo`). Cada **Contribuição** é um item persistido à parte, referenciando `idCampanha` e `idOpcaoContribuicao` (herda o `tipo` da sacola sem duplicar no domínio).
 
-- **Repositório (padrão):** interfaces `CampanhaRepository` e `ContribuicaoRepository` são **portas**; `*.memory.ts` para testes unitários rápidos; `*.postgres.ts` para persistência real (upsert de campanha + sync de filhos; insert de contribuição com FK). No banco, administradores usam coluna `id_usuario` mapeada para `IdConta` no domínio.
+- **Repositório (padrão):** `CampanhaRepository` e `ContribuicaoRepository` são portas; Postgres faz upsert de campanha/opções e upsert de contribuições. Administradores usam coluna `id_usuario` ↔ `IdConta`.
 
-- **Caso de uso / serviço de aplicação:** cada arquivo em `src/use-cases/` orquestra validação (Zod), leituras do repositório, invariantes (ex.: opção duplicada) e persistência.
+- **Caso de uso / serviço de aplicação:** validação Zod, invariantes (opção duplicada, item só `disponivel` para associação/alteração de valor) e persistência.
 
-- **Invariantes:** exemplo — não é permitido adicionar duas opções com o mesmo `id` na mesma campanha (`ArrecadacaoOpcaoIdDuplicadoError`); o valor da contribuição **copia** o da opção para ficar fixo mesmo que a opção mude no futuro.
+- **Invariantes:** opção com `id` único na campanha; item nasce `disponivel` sem contribuinte; associação de visitante exige `disponivel` e resulta em `indisponivel`; valor do item definido pelo admin e alterável só enquanto `disponivel`.
 
 ---
 

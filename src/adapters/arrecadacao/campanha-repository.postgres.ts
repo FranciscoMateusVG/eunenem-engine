@@ -30,11 +30,11 @@ type CampanhaRow = {
 };
 
 type AdminRow = { campanha_id: string; id_usuario: string };
-type OpcaoRow = { id: string; campanha_id: string; valor: number; tipo: string };
+type OpcaoRow = { id: string; campanha_id: string; tipo: string };
 
 /**
- * PostgreSQL CampanhaRepository: upsert da campanha e sincronização delete-all + insert
- * de administradores e opções (MVP — o domínio não remove opções).
+ * PostgreSQL CampanhaRepository: upsert da campanha, sync de administradores (delete-all + insert)
+ * e upsert de opções por id (preserva opções referenciadas por contribuições).
  */
 export class CampanhaRepositoryPostgres implements CampanhaRepository {
   constructor(private readonly db: Database) {}
@@ -82,21 +82,19 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
               .execute();
           }
 
-          await trx
-            .deleteFrom('opcoes_contribuicao')
-            .where('campanha_id', '=', campanha.id)
-            .execute();
-
-          if (campanha.opcoes.length > 0) {
+          for (const opcao of campanha.opcoes) {
             await trx
               .insertInto('opcoes_contribuicao')
-              .values(
-                campanha.opcoes.map((opcao) => ({
-                  id: opcao.id,
-                  campanha_id: campanha.id,
-                  valor: opcao.valor,
+              .values({
+                id: opcao.id,
+                campanha_id: campanha.id,
+                tipo: opcao.tipo,
+              })
+              .onConflict((oc) =>
+                oc.column('id').doUpdateSet({
                   tipo: opcao.tipo,
-                })),
+                  campanha_id: campanha.id,
+                }),
               )
               .execute();
           }
@@ -173,7 +171,6 @@ function toCampanha(row: CampanhaRow, admins: AdminRow[], opcoes: OpcaoRow[]): C
 function toOpcao(row: OpcaoRow): OpcaoContribuicao {
   return {
     id: row.id,
-    valor: row.valor,
     tipo: row.tipo as TipoOpcaoContribuicao,
   };
 }

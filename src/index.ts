@@ -29,7 +29,6 @@ export type {
   AdicionarAdministradorCampanhaInput,
   AdicionarOpcaoContribuicaoInput,
   AlterarDadosRecebedorCampanhaInput,
-  AlterarValorOpcaoContribuicaoInput,
   Campanha,
   CriarCampanhaInput,
   DadosRecebedor,
@@ -46,12 +45,10 @@ export {
   AdicionarAdministradorCampanhaInputSchema,
   AdicionarOpcaoContribuicaoInputSchema,
   AlterarDadosRecebedorCampanhaInputSchema,
-  AlterarValorOpcaoContribuicaoInputSchema,
   CriarCampanhaInputSchema,
   campanhaComAdministrador,
   campanhaComDadosRecebedor,
   campanhaComOpcao,
-  campanhaComOpcaoValor,
   campanhaPossuiAdministrador,
   campanhaSemAdministrador,
   DadosRecebedorSchema,
@@ -67,6 +64,8 @@ export {
   TipoOpcaoContribuicaoSchema,
 } from './domain/arrecadacao/campanha.js';
 export type {
+  AlterarValorContribuicaoInput,
+  AssociarContribuinteContribuicaoInput,
   Contribuicao,
   CriarContribuicaoInput,
   DadosContribuinte,
@@ -74,10 +73,18 @@ export type {
   StatusContribuicao,
 } from './domain/arrecadacao/contribuicao.js';
 export {
+  AlterarValorContribuicaoInputSchema,
+  AssociarContribuinteContribuicaoInputSchema,
   CriarContribuicaoInputSchema,
+  contribuicaoComContribuinte,
+  contribuicaoComValor,
+  contribuicaoDisponivel,
+  criarContribuicaoDisponivel,
   DadosContribuinteSchema,
   IdContribuicaoSchema,
-  NomeExibicaoContribuinteSchema,
+  NomeContribuicaoSchema,
+  NomeContribuinteSchema,
+  StatusContribuicaoSchema,
 } from './domain/arrecadacao/contribuicao.js';
 export type { Cat, CatId, CatName, CreateCatInput } from './domain/cat.js';
 export { CatIdSchema, CatNameSchema, CreateCatInputSchema } from './domain/cat.js';
@@ -232,6 +239,8 @@ export { ArrecadacaoAdministradorDuplicadoError } from './errors/arrecadacao/adm
 export { ArrecadacaoAdministradorNaoEncontradoError } from './errors/arrecadacao/administrador-nao-encontrado.error.js';
 export { ArrecadacaoCampanhaNaoEncontradaError } from './errors/arrecadacao/campanha-nao-encontrada.error.js';
 export { ArrecadacaoContribuicaoJaExisteError } from './errors/arrecadacao/contribuicao-ja-existe.error.js';
+export { ArrecadacaoContribuicaoNaoDisponivelError } from './errors/arrecadacao/contribuicao-nao-disponivel.error.js';
+export { ArrecadacaoContribuicaoNaoEncontradaError } from './errors/arrecadacao/contribuicao-nao-encontrada.error.js';
 export { ArrecadacaoInputInvalidoError } from './errors/arrecadacao/input-invalido.error.js';
 export { ArrecadacaoOpcaoContribuicaoNaoEncontradaError } from './errors/arrecadacao/opcao-contribuicao-nao-encontrada.error.js';
 export { ArrecadacaoOpcaoIdDuplicadoError } from './errors/arrecadacao/opcao-id-duplicado.error.js';
@@ -267,8 +276,10 @@ export type { AdicionarOpcaoContribuicaoDeps } from './use-cases/arrecadacao/adi
 export { adicionarOpcaoContribuicao } from './use-cases/arrecadacao/adicionar-opcao-contribuicao.js';
 export type { AlterarDadosRecebedorCampanhaDeps } from './use-cases/arrecadacao/alterar-dados-recebedor-campanha.js';
 export { alterarDadosRecebedorCampanha } from './use-cases/arrecadacao/alterar-dados-recebedor-campanha.js';
-export type { AlterarValorOpcaoContribuicaoDeps } from './use-cases/arrecadacao/alterar-valor-opcao-contribuicao.js';
-export { alterarValorOpcaoContribuicao } from './use-cases/arrecadacao/alterar-valor-opcao-contribuicao.js';
+export type { AlterarValorContribuicaoDeps } from './use-cases/arrecadacao/alterar-valor-contribuicao.js';
+export { alterarValorContribuicao } from './use-cases/arrecadacao/alterar-valor-contribuicao.js';
+export type { AssociarContribuinteContribuicaoDeps } from './use-cases/arrecadacao/associar-contribuinte-contribuicao.js';
+export { associarContribuinteContribuicao } from './use-cases/arrecadacao/associar-contribuinte-contribuicao.js';
 export type { CriarCampanhaDeps } from './use-cases/arrecadacao/criar-campanha.js';
 export { criarCampanha } from './use-cases/arrecadacao/criar-campanha.js';
 export type { CriarContribuicaoDeps } from './use-cases/arrecadacao/criar-contribuicao.js';

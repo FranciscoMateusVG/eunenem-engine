@@ -3,7 +3,6 @@ import type { ReadableSpan } from '@opentelemetry/sdk-trace-base';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { ContribuicaoRepository } from '../../src/adapters/arrecadacao/contribuicao-repository.js';
 import type { Contribuicao } from '../../src/domain/arrecadacao/contribuicao.js';
-import { ArrecadacaoContribuicaoJaExisteError } from '../../src/errors/arrecadacao/contribuicao-ja-existe.error.js';
 
 interface ConformanceOptions {
   factory: () => ContribuicaoRepository | Promise<ContribuicaoRepository>;
@@ -44,11 +43,20 @@ export function describeContribuicaoRepositoryConformance(
       expect(found).toBeUndefined();
     });
 
-    it('rejects duplicate contribution id', async () => {
+    it('upserts contribution on second save with same id', async () => {
       const contribuicao = makeContribuicao();
       await options.seedForContribuicao?.(contribuicao);
       await repo.save(contribuicao);
-      await expect(repo.save(contribuicao)).rejects.toThrow(ArrecadacaoContribuicaoJaExisteError);
+
+      const updated: Contribuicao = {
+        ...contribuicao,
+        status: 'indisponivel',
+        contribuinte: { nome: 'Visitante', email: 'v@exemplo.com' },
+      };
+      await repo.save(updated);
+
+      const found = await repo.findById(contribuicao.id);
+      expect(found).toEqual(updated);
     });
 
     it('save emits db.arrecadacao_contribuicoes.save span', async () => {
@@ -58,7 +66,7 @@ export function describeContribuicaoRepositoryConformance(
       const span = findSpan(options.getSpans(), 'db.arrecadacao_contribuicoes.save');
       expect(span).toBeDefined();
       expect(span?.attributes['db.system']).toBe(options.expectedDbSystem);
-      expect(span?.attributes['db.operation.name']).toBe('INSERT');
+      expect(span?.attributes['db.operation.name']).toBe('UPSERT');
     });
 
     it('findById emits db.arrecadacao_contribuicoes.findById span', async () => {
@@ -76,9 +84,10 @@ function makeContribuicao(overrides: Partial<Contribuicao> = {}): Contribuicao {
     id: randomUUID(),
     idCampanha: randomUUID(),
     idOpcaoContribuicao: randomUUID(),
+    nome: 'Fralda',
     valor: 8000,
-    contribuinte: { nomeExibicao: 'Visitante', email: 'visitante@exemplo.com' },
-    status: 'pendente_pagamento',
+    contribuinte: null,
+    status: 'disponivel',
     criadaEm: new Date('2026-05-01T12:00:00.000Z'),
     ...overrides,
   };

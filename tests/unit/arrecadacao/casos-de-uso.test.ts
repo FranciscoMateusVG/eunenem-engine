@@ -8,6 +8,8 @@ import { ArrecadacaoAdministradorDuplicadoError } from '../../../src/errors/arre
 import { ArrecadacaoAdministradorNaoEncontradoError } from '../../../src/errors/arrecadacao/administrador-nao-encontrado.error.js';
 import { ArrecadacaoCampanhaNaoEncontradaError } from '../../../src/errors/arrecadacao/campanha-nao-encontrada.error.js';
 import { ArrecadacaoContribuicaoJaExisteError } from '../../../src/errors/arrecadacao/contribuicao-ja-existe.error.js';
+import { ArrecadacaoContribuicaoNaoDisponivelError } from '../../../src/errors/arrecadacao/contribuicao-nao-disponivel.error.js';
+import { ArrecadacaoContribuicaoNaoEncontradaError } from '../../../src/errors/arrecadacao/contribuicao-nao-encontrada.error.js';
 import { ArrecadacaoInputInvalidoError } from '../../../src/errors/arrecadacao/input-invalido.error.js';
 import { ArrecadacaoOpcaoContribuicaoNaoEncontradaError } from '../../../src/errors/arrecadacao/opcao-contribuicao-nao-encontrada.error.js';
 import { ArrecadacaoOpcaoIdDuplicadoError } from '../../../src/errors/arrecadacao/opcao-id-duplicado.error.js';
@@ -17,7 +19,8 @@ import { noopTracer } from '../../../src/observability/tracer.js';
 import { adicionarAdministradorCampanha } from '../../../src/use-cases/arrecadacao/adicionar-administrador-campanha.js';
 import { adicionarOpcaoContribuicao } from '../../../src/use-cases/arrecadacao/adicionar-opcao-contribuicao.js';
 import { alterarDadosRecebedorCampanha } from '../../../src/use-cases/arrecadacao/alterar-dados-recebedor-campanha.js';
-import { alterarValorOpcaoContribuicao } from '../../../src/use-cases/arrecadacao/alterar-valor-opcao-contribuicao.js';
+import { alterarValorContribuicao } from '../../../src/use-cases/arrecadacao/alterar-valor-contribuicao.js';
+import { associarContribuinteContribuicao } from '../../../src/use-cases/arrecadacao/associar-contribuinte-contribuicao.js';
 import { criarCampanha } from '../../../src/use-cases/arrecadacao/criar-campanha.js';
 import { criarContribuicao } from '../../../src/use-cases/arrecadacao/criar-contribuicao.js';
 import { removerAdministradorCampanha } from '../../../src/use-cases/arrecadacao/remover-administrador-campanha.js';
@@ -301,11 +304,13 @@ describe('alterarDadosRecebedorCampanha', () => {
   });
 });
 
-describe('alterarValorOpcaoContribuicao', () => {
-  it('updates option valor on existing campaign', async () => {
+describe('alterarValorContribuicao', () => {
+  it('updates valor on disponivel contribution', async () => {
     const campanhaRepository = new CampanhaRepositoryMemory();
+    const contribuicaoRepository = new ContribuicaoRepositoryMemory();
     const idCampanha = randomUUID();
     const idOpcao = randomUUID();
+    const idContribuicao = randomUUID();
 
     await criarCampanha(
       { campanhaRepository, clock, observability: silentObservability },
@@ -318,30 +323,50 @@ describe('alterarValorOpcaoContribuicao', () => {
     );
     await adicionarOpcaoContribuicao(
       { campanhaRepository, observability: silentObservability },
-      { idCampanha, idOpcao, valor: 1000, tipo: 'presente' },
+      { idCampanha, idOpcao, tipo: 'presente' },
+    );
+    await criarContribuicao(
+      {
+        campanhaRepository,
+        contribuicaoRepository,
+        clock,
+        observability: silentObservability,
+      },
+      {
+        id: idContribuicao,
+        idCampanha,
+        idOpcaoContribuicao: idOpcao,
+        nome: 'Fralda',
+        valor: 1000,
+      },
     );
 
-    const updated = await alterarValorOpcaoContribuicao(
-      { campanhaRepository, observability: silentObservability },
-      { idCampanha, idOpcao, valor: 7500 },
+    const updated = await alterarValorContribuicao(
+      { contribuicaoRepository, observability: silentObservability },
+      { idContribuicao, valor: 7500 },
     );
 
-    expect(updated.opcoes[0]?.valor).toBe(7500);
+    expect(updated.valor).toBe(7500);
+    expect(updated.status).toBe('disponivel');
   });
 
-  it('throws when campaign is missing', async () => {
-    const campanhaRepository = new CampanhaRepositoryMemory();
+  it('throws when contribution is missing', async () => {
+    const contribuicaoRepository = new ContribuicaoRepositoryMemory();
     await expect(
-      alterarValorOpcaoContribuicao(
-        { campanhaRepository, observability: silentObservability },
-        { idCampanha: randomUUID(), idOpcao: randomUUID(), valor: 100 },
+      alterarValorContribuicao(
+        { contribuicaoRepository, observability: silentObservability },
+        { idContribuicao: randomUUID(), valor: 100 },
       ),
-    ).rejects.toThrow(ArrecadacaoCampanhaNaoEncontradaError);
+    ).rejects.toThrow(ArrecadacaoContribuicaoNaoEncontradaError);
   });
 
-  it('throws when option is missing', async () => {
+  it('throws when contribution is indisponivel', async () => {
     const campanhaRepository = new CampanhaRepositoryMemory();
+    const contribuicaoRepository = new ContribuicaoRepositoryMemory();
     const idCampanha = randomUUID();
+    const idOpcao = randomUUID();
+    const idContribuicao = randomUUID();
+
     await criarCampanha(
       { campanhaRepository, clock, observability: silentObservability },
       {
@@ -351,35 +376,47 @@ describe('alterarValorOpcaoContribuicao', () => {
         titulo: 'Campanha',
       },
     );
+    await adicionarOpcaoContribuicao(
+      { campanhaRepository, observability: silentObservability },
+      { idCampanha, idOpcao, tipo: 'presente' },
+    );
+    await criarContribuicao(
+      {
+        campanhaRepository,
+        contribuicaoRepository,
+        clock,
+        observability: silentObservability,
+      },
+      {
+        id: idContribuicao,
+        idCampanha,
+        idOpcaoContribuicao: idOpcao,
+        nome: 'Fralda',
+        valor: 100,
+      },
+    );
+    await associarContribuinteContribuicao(
+      { contribuicaoRepository, observability: silentObservability },
+      {
+        idContribuicao,
+        contribuinte: { nome: 'V', email: 'v@exemplo.com' },
+      },
+    );
+
     await expect(
-      alterarValorOpcaoContribuicao(
-        { campanhaRepository, observability: silentObservability },
-        { idCampanha, idOpcao: randomUUID(), valor: 100 },
+      alterarValorContribuicao(
+        { contribuicaoRepository, observability: silentObservability },
+        { idContribuicao, valor: 200 },
       ),
-    ).rejects.toThrow(ArrecadacaoOpcaoContribuicaoNaoEncontradaError);
+    ).rejects.toThrow(ArrecadacaoContribuicaoNaoDisponivelError);
   });
 
   it('throws ArrecadacaoInputInvalidoError on zero valor', async () => {
-    const campanhaRepository = new CampanhaRepositoryMemory();
-    const idCampanha = randomUUID();
-    const idOpcao = randomUUID();
-    await criarCampanha(
-      { campanhaRepository, clock, observability: silentObservability },
-      {
-        id: idCampanha,
-        idsAdministradores: [randomUUID()],
-        dadosRecebedor: dadosRecebedorPadrao(),
-        titulo: 'Campanha',
-      },
-    );
-    await adicionarOpcaoContribuicao(
-      { campanhaRepository, observability: silentObservability },
-      { idCampanha, idOpcao, valor: 100, tipo: 'presente' },
-    );
+    const contribuicaoRepository = new ContribuicaoRepositoryMemory();
     await expect(
-      alterarValorOpcaoContribuicao(
-        { campanhaRepository, observability: silentObservability },
-        { idCampanha, idOpcao, valor: 0 },
+      alterarValorContribuicao(
+        { contribuicaoRepository, observability: silentObservability },
+        { idContribuicao: randomUUID(), valor: 0 },
       ),
     ).rejects.toThrow(ArrecadacaoInputInvalidoError);
   });
@@ -405,13 +442,12 @@ describe('adicionarOpcaoContribuicao', () => {
       {
         idCampanha,
         idOpcao,
-        valor: 8000,
         tipo: 'presente',
       },
     );
 
     expect(updated.opcoes).toHaveLength(1);
-    expect(updated.opcoes[0]?.valor).toBe(8000);
+    expect(updated.opcoes[0]?.tipo).toBe('presente');
     expect(updated.opcoes[0]?.id).toBe(idOpcao);
   });
 
@@ -424,7 +460,6 @@ describe('adicionarOpcaoContribuicao', () => {
         {
           idCampanha: missingId,
           idOpcao: randomUUID(),
-          valor: 100,
           tipo: 'presente',
         },
       ),
@@ -446,39 +481,19 @@ describe('adicionarOpcaoContribuicao', () => {
     );
     await adicionarOpcaoContribuicao(
       { campanhaRepository, observability: silentObservability },
-      { idCampanha, idOpcao, valor: 100, tipo: 'presente' },
+      { idCampanha, idOpcao, tipo: 'presente' },
     );
     await expect(
       adicionarOpcaoContribuicao(
         { campanhaRepository, observability: silentObservability },
-        { idCampanha, idOpcao, valor: 200, tipo: 'rifa' },
+        { idCampanha, idOpcao, tipo: 'rifa' },
       ),
     ).rejects.toThrow(ArrecadacaoOpcaoIdDuplicadoError);
-  });
-
-  it('throws ArrecadacaoInputInvalidoError on invalid amount', async () => {
-    const campanhaRepository = new CampanhaRepositoryMemory();
-    const idCampanha = randomUUID();
-    await criarCampanha(
-      { campanhaRepository, clock, observability: silentObservability },
-      {
-        id: idCampanha,
-        idsAdministradores: [randomUUID()],
-        dadosRecebedor: dadosRecebedorPadrao(),
-        titulo: 'Campanha',
-      },
-    );
-    await expect(
-      adicionarOpcaoContribuicao(
-        { campanhaRepository, observability: silentObservability },
-        { idCampanha, idOpcao: randomUUID(), valor: 0, tipo: 'presente' },
-      ),
-    ).rejects.toThrow(ArrecadacaoInputInvalidoError);
   });
 });
 
 describe('criarContribuicao', () => {
-  it('creates contribution with amount from option', async () => {
+  it('creates disponivel contribution with admin input', async () => {
     const campanhaRepository = new CampanhaRepositoryMemory();
     const contribuicaoRepository = new ContribuicaoRepositoryMemory();
     const idCampanha = randomUUID();
@@ -496,7 +511,7 @@ describe('criarContribuicao', () => {
     );
     await adicionarOpcaoContribuicao(
       { campanhaRepository, observability: silentObservability },
-      { idCampanha, idOpcao, valor: 8000, tipo: 'presente' },
+      { idCampanha, idOpcao, tipo: 'presente' },
     );
 
     const contribuicao = await criarContribuicao(
@@ -510,16 +525,19 @@ describe('criarContribuicao', () => {
         id: idContribuicao,
         idCampanha,
         idOpcaoContribuicao: idOpcao,
-        contribuinte: { nomeExibicao: 'Visitante', email: 'visitante@exemplo.com' },
+        nome: 'Fralda',
+        valor: 8000,
       },
     );
 
     expect(contribuicao.valor).toBe(8000);
-    expect(contribuicao.status).toBe('pendente_pagamento');
+    expect(contribuicao.nome).toBe('Fralda');
+    expect(contribuicao.status).toBe('disponivel');
+    expect(contribuicao.contribuinte).toBeNull();
     expect(contribuicao.idOpcaoContribuicao).toBe(idOpcao);
   });
 
-  it('throws ArrecadacaoInputInvalidoError on invalid contributor', async () => {
+  it('throws ArrecadacaoInputInvalidoError on invalid nome', async () => {
     const campanhaRepository = new CampanhaRepositoryMemory();
     const contribuicaoRepository = new ContribuicaoRepositoryMemory();
 
@@ -535,7 +553,8 @@ describe('criarContribuicao', () => {
           id: randomUUID(),
           idCampanha: randomUUID(),
           idOpcaoContribuicao: randomUUID(),
-          contribuinte: { nomeExibicao: '' },
+          nome: '',
+          valor: 100,
         },
       ),
     ).rejects.toThrow(ArrecadacaoInputInvalidoError);
@@ -558,7 +577,8 @@ describe('criarContribuicao', () => {
           id: randomUUID(),
           idCampanha: missingCampanha,
           idOpcaoContribuicao: randomUUID(),
-          contribuinte: { nomeExibicao: 'X', email: 'x@exemplo.com' },
+          nome: 'Fralda',
+          valor: 100,
         },
       ),
     ).rejects.toThrow(ArrecadacaoCampanhaNaoEncontradaError);
@@ -591,7 +611,8 @@ describe('criarContribuicao', () => {
           id: randomUUID(),
           idCampanha,
           idOpcaoContribuicao: randomUUID(),
-          contribuinte: { nomeExibicao: 'X', email: 'x@exemplo.com' },
+          nome: 'Fralda',
+          valor: 100,
         },
       ),
     ).rejects.toThrow(ArrecadacaoOpcaoContribuicaoNaoEncontradaError);
@@ -615,7 +636,7 @@ describe('criarContribuicao', () => {
     );
     await adicionarOpcaoContribuicao(
       { campanhaRepository, observability: silentObservability },
-      { idCampanha, idOpcao, valor: 100, tipo: 'presente' },
+      { idCampanha, idOpcao, tipo: 'presente' },
     );
 
     const deps = {
@@ -628,12 +649,130 @@ describe('criarContribuicao', () => {
       id: idContribuicao,
       idCampanha,
       idOpcaoContribuicao: idOpcao,
-      contribuinte: { nomeExibicao: 'A', email: 'a@exemplo.com' },
+      nome: 'Fralda',
+      valor: 100,
     };
 
     await criarContribuicao(deps, input);
     await expect(criarContribuicao(deps, input)).rejects.toThrow(
       ArrecadacaoContribuicaoJaExisteError,
     );
+  });
+});
+
+describe('associarContribuinteContribuicao', () => {
+  it('associates contributor and marks indisponivel', async () => {
+    const campanhaRepository = new CampanhaRepositoryMemory();
+    const contribuicaoRepository = new ContribuicaoRepositoryMemory();
+    const idCampanha = randomUUID();
+    const idOpcao = randomUUID();
+    const idContribuicao = randomUUID();
+
+    await criarCampanha(
+      { campanhaRepository, clock, observability: silentObservability },
+      {
+        id: idCampanha,
+        idsAdministradores: [randomUUID()],
+        dadosRecebedor: dadosRecebedorPadrao(),
+        titulo: 'Campanha',
+      },
+    );
+    await adicionarOpcaoContribuicao(
+      { campanhaRepository, observability: silentObservability },
+      { idCampanha, idOpcao, tipo: 'presente' },
+    );
+    await criarContribuicao(
+      {
+        campanhaRepository,
+        contribuicaoRepository,
+        clock,
+        observability: silentObservability,
+      },
+      {
+        id: idContribuicao,
+        idCampanha,
+        idOpcaoContribuicao: idOpcao,
+        nome: 'Fralda',
+        valor: 8000,
+      },
+    );
+
+    const updated = await associarContribuinteContribuicao(
+      { contribuicaoRepository, observability: silentObservability },
+      {
+        idContribuicao,
+        contribuinte: { nome: 'Visitante', email: 'visitante@exemplo.com' },
+      },
+    );
+
+    expect(updated.status).toBe('indisponivel');
+    expect(updated.contribuinte?.email).toBe('visitante@exemplo.com');
+  });
+
+  it('throws when contribution is missing', async () => {
+    const contribuicaoRepository = new ContribuicaoRepositoryMemory();
+    await expect(
+      associarContribuinteContribuicao(
+        { contribuicaoRepository, observability: silentObservability },
+        {
+          idContribuicao: randomUUID(),
+          contribuinte: { nome: 'V', email: 'v@exemplo.com' },
+        },
+      ),
+    ).rejects.toThrow(ArrecadacaoContribuicaoNaoEncontradaError);
+  });
+
+  it('throws when contribution is already indisponivel', async () => {
+    const campanhaRepository = new CampanhaRepositoryMemory();
+    const contribuicaoRepository = new ContribuicaoRepositoryMemory();
+    const idCampanha = randomUUID();
+    const idOpcao = randomUUID();
+    const idContribuicao = randomUUID();
+
+    await criarCampanha(
+      { campanhaRepository, clock, observability: silentObservability },
+      {
+        id: idCampanha,
+        idsAdministradores: [randomUUID()],
+        dadosRecebedor: dadosRecebedorPadrao(),
+        titulo: 'Campanha',
+      },
+    );
+    await adicionarOpcaoContribuicao(
+      { campanhaRepository, observability: silentObservability },
+      { idCampanha, idOpcao, tipo: 'presente' },
+    );
+    await criarContribuicao(
+      {
+        campanhaRepository,
+        contribuicaoRepository,
+        clock,
+        observability: silentObservability,
+      },
+      {
+        id: idContribuicao,
+        idCampanha,
+        idOpcaoContribuicao: idOpcao,
+        nome: 'Fralda',
+        valor: 100,
+      },
+    );
+    await associarContribuinteContribuicao(
+      { contribuicaoRepository, observability: silentObservability },
+      {
+        idContribuicao,
+        contribuinte: { nome: 'A', email: 'a@exemplo.com' },
+      },
+    );
+
+    await expect(
+      associarContribuinteContribuicao(
+        { contribuicaoRepository, observability: silentObservability },
+        {
+          idContribuicao,
+          contribuinte: { nome: 'B', email: 'b@exemplo.com' },
+        },
+      ),
+    ).rejects.toThrow(ArrecadacaoContribuicaoNaoDisponivelError);
   });
 });

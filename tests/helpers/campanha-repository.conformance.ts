@@ -41,8 +41,8 @@ export function describeCampanhaRepositoryConformance(name: string, options: Con
       const campanha = makeCampanha({
         idsAdministradores: [randomUUID(), randomUUID()],
         opcoes: [
-          { id: randomUUID(), valor: 5000, tipo: 'presente' },
-          { id: randomUUID(), valor: 10000, tipo: 'rifa' },
+          { id: randomUUID(), tipo: 'presente' },
+          { id: randomUUID(), tipo: 'rifa' },
         ],
       });
       await repo.save(campanha);

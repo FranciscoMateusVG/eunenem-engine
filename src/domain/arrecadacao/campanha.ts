@@ -1,9 +1,7 @@
 import { z } from 'zod/v4';
-import type { MoneyCents } from '../money.js';
-import { MoneyCentsSchema } from '../money.js';
 
 /**
- * Agregado **Campanha** (BC Arrecadação): raiz que agrupa opções de contribuição.
+ * Agregado **Campanha** (BC Arrecadação): raiz que agrupa sacolas (opções por `tipo`).
  * Administradores referenciam contas do sistema; recebedor é destino PIX externo (`dadosRecebedor` + `idRecebedor`).
  */
 export const IdContaSchema = z.uuid();
@@ -78,9 +76,9 @@ export const DadosRecebedorSchema = z
 
 export type DadosRecebedor = Readonly<z.infer<typeof DadosRecebedorSchema>>;
 
+/** Sacola de contribuição: agrupa itens (`Contribuicao`) pelo `tipo` de experiência. */
 export const OpcaoContribuicaoSchema = z.object({
   id: IdOpcaoContribuicaoSchema,
-  valor: MoneyCentsSchema,
   tipo: TipoOpcaoContribuicaoSchema,
 });
 
@@ -108,7 +106,6 @@ export type CriarCampanhaInput = z.infer<typeof CriarCampanhaInputSchema>;
 export const AdicionarOpcaoContribuicaoInputSchema = z.object({
   idCampanha: IdCampanhaSchema,
   idOpcao: IdOpcaoContribuicaoSchema,
-  valor: MoneyCentsSchema,
   tipo: TipoOpcaoContribuicaoSchema,
 });
 
@@ -121,16 +118,6 @@ export const AlterarDadosRecebedorCampanhaInputSchema = z.object({
 
 export type AlterarDadosRecebedorCampanhaInput = z.infer<
   typeof AlterarDadosRecebedorCampanhaInputSchema
->;
-
-export const AlterarValorOpcaoContribuicaoInputSchema = z.object({
-  idCampanha: IdCampanhaSchema,
-  idOpcao: IdOpcaoContribuicaoSchema,
-  valor: MoneyCentsSchema,
-});
-
-export type AlterarValorOpcaoContribuicaoInput = z.infer<
-  typeof AlterarValorOpcaoContribuicaoInputSchema
 >;
 
 export const AdicionarAdministradorCampanhaInputSchema = z.object({
@@ -172,7 +159,7 @@ export function campanhaSemAdministrador(campanha: Campanha, idConta: IdConta): 
   };
 }
 
-/** Procura uma opção de contribuição na campanha (regra pura de domínio). */
+/** Procura uma opção de contribuição (sacola) na campanha. */
 export function encontrarOpcaoContribuicao(
   campanha: Campanha,
   idOpcao: IdOpcaoContribuicao,
@@ -196,17 +183,5 @@ export function campanhaComDadosRecebedor(
   return {
     ...campanha,
     dadosRecebedor,
-  };
-}
-
-/** Altera o valor de uma opção existente, imutavelmente. O caso de uso deve garantir que a opção existe. */
-export function campanhaComOpcaoValor(
-  campanha: Campanha,
-  idOpcao: IdOpcaoContribuicao,
-  valor: MoneyCents,
-): Campanha {
-  return {
-    ...campanha,
-    opcoes: campanha.opcoes.map((o) => (o.id === idOpcao ? { ...o, valor } : o)),
   };
 }

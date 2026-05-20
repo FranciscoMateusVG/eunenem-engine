@@ -6,7 +6,10 @@ import type {
   Contribuicao,
   CriarContribuicaoInput,
 } from '../../domain/arrecadacao/contribuicao.js';
-import { CriarContribuicaoInputSchema } from '../../domain/arrecadacao/contribuicao.js';
+import {
+  CriarContribuicaoInputSchema,
+  criarContribuicaoDisponivel,
+} from '../../domain/arrecadacao/contribuicao.js';
 import { ArrecadacaoCampanhaNaoEncontradaError } from '../../errors/arrecadacao/campanha-nao-encontrada.error.js';
 import { ArrecadacaoContribuicaoJaExisteError } from '../../errors/arrecadacao/contribuicao-ja-existe.error.js';
 import { ArrecadacaoInputInvalidoError } from '../../errors/arrecadacao/input-invalido.error.js';
@@ -21,7 +24,7 @@ export interface CriarContribuicaoDeps {
 }
 
 /**
- * Regista uma contribuição de visitante a partir de uma opção da campanha (valor copiado da opção).
+ * Administrador cria um item de contribuição disponível dentro de uma opção (sacola).
  */
 export async function criarContribuicao(
   deps: CriarContribuicaoDeps,
@@ -38,7 +41,7 @@ export async function criarContribuicao(
         throw new ArrecadacaoInputInvalidoError(message);
       }
 
-      const { id, idCampanha, idOpcaoContribuicao, contribuinte } = parsed.data;
+      const { id, idCampanha, idOpcaoContribuicao, nome, valor } = parsed.data;
 
       span.setAttribute('arrecadacao.contribuicao.id', id);
       span.setAttribute('arrecadacao.campanha.id', idCampanha);
@@ -58,22 +61,23 @@ export async function criarContribuicao(
         throw new ArrecadacaoOpcaoContribuicaoNaoEncontradaError(idCampanha, idOpcaoContribuicao);
       }
 
-      const contribuicao: Contribuicao = {
+      const contribuicao = criarContribuicaoDisponivel({
         id,
         idCampanha,
         idOpcaoContribuicao,
-        valor: opcao.valor,
-        contribuinte,
-        status: 'pendente_pagamento',
+        nome,
+        valor,
         criadaEm: clock(),
-      };
+      });
 
       await contribuicaoRepository.save(contribuicao);
 
       logger.info('arrecadacao.contribuicao.criada', {
         idContribuicao: id,
         idCampanha,
+        idOpcaoContribuicao,
         valor: contribuicao.valor,
+        status: contribuicao.status,
       });
 
       span.setStatus({ code: SpanStatusCode.OK });

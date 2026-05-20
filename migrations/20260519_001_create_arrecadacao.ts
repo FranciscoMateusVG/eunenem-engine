@@ -48,7 +48,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn('valor', 'integer', (col) => col.notNull())
     .addColumn('status', 'varchar(40)', (col) => col.notNull())
     .addColumn('criada_em', 'timestamptz', (col) => col.notNull().defaultTo(sql`now()`))
-    .addColumn('contribuinte_nome_exibicao', 'varchar(120)', (col) => col.notNull())
+    .addColumn('contribuinte_nome', 'varchar(120)', (col) => col.notNull())
     .addColumn('contribuinte_email', 'varchar(320)', (col) => col.notNull())
     .addCheckConstraint('contribuicoes_status_check', sql`status IN ('pendente_pagamento')`)
     .execute();

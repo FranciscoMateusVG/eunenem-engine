@@ -49,9 +49,12 @@ describe('Migration round-trip', () => {
     expect(tableNames).toContain('cats');
     expect(tableNames).toContain('campanhas');
 
-    // Migrate down (latest migration first)
-    const downArrecadacao = await migrator.migrateDown();
-    expect(downArrecadacao.error).toBeUndefined();
+    // Migrate down (latest migration first; two steps for arrecadacao)
+    const downArrecadacaoAlter = await migrator.migrateDown();
+    expect(downArrecadacaoAlter.error).toBeUndefined();
+
+    const downArrecadacaoCreate = await migrator.migrateDown();
+    expect(downArrecadacaoCreate.error).toBeUndefined();
 
     const tablesAfterArrecadacao = await db
       .selectFrom('information_schema.tables' as never)

@@ -34,11 +34,12 @@ export interface Cats {
 
 export interface Contribuicoes {
   campanha_id: string;
-  contribuinte_email: string;
-  contribuinte_nome_exibicao: string;
+  contribuinte_email: string | null;
+  contribuinte_nome: string | null;
   criada_em: Generated<Timestamp>;
   id: string;
   id_opcao_contribuicao: string;
+  nome: string;
   status: string;
   valor: number;
 }
@@ -47,7 +48,6 @@ export interface OpcoesContribuicao {
   campanha_id: string;
   id: string;
   tipo: string;
-  valor: number;
 }
 
 export interface DB {

@@ -1,6 +1,5 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 import type { Contribuicao, IdContribuicao } from '../../domain/arrecadacao/contribuicao.js';
-import { ArrecadacaoContribuicaoJaExisteError } from '../../errors/arrecadacao/contribuicao-ja-existe.error.js';
 import type { ContribuicaoRepository } from './contribuicao-repository.js';
 
 const tracer = trace.getTracer('frame');
@@ -15,11 +14,8 @@ export class ContribuicaoRepositoryMemory implements ContribuicaoRepository {
 
   async save(contribuicao: Contribuicao): Promise<void> {
     return tracer.startActiveSpan('db.arrecadacao_contribuicoes.save', async (span) => {
-      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'INSERT' });
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPSERT' });
       try {
-        if (this.contribuicoes.has(contribuicao.id)) {
-          throw new ArrecadacaoContribuicaoJaExisteError(contribuicao.id);
-        }
         this.contribuicoes.set(contribuicao.id, contribuicao);
         span.setStatus({ code: SpanStatusCode.OK });
       } catch (error: unknown) {

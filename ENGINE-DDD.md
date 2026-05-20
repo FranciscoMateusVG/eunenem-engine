@@ -61,11 +61,11 @@ Cada contexto tem **responsabilidades claras** e um **vocabulário** próprio. C
 | Administrador(es) da Campanha | Quem configura a campanha (tipicamente ligado a Identidade e Conta; pode haver mais de um) |
 | Recebedor | Quem deve receber o valor líquido (pessoa externa; destino PIX em Arrecadação; `idRecebedor` para saldo/repasse no Financeiro) |
 | Campanha | Container de arrecadação com regras e opções |
-| Opção de Contribuição | Escolha pré-definida ou estruturada de valor/forma de contribuir |
+| Opção de Contribuição | Sacola por `tipo` (`presente`, `rifa`, `convite`) que agrupa itens |
+| Contribuição | Item de arrecadação (`nome`, `valor`) criado pelo admin dentro de uma opção |
 | Contribuinte Visitante | Quem paga, sem obrigatoriamente ter conta |
-| Dados do Contribuinte | Informações necessárias à operação (ex.: contato, anonimato) |
-| Contribuição | Compromisso/registro de uma intenção de valor em uma campanha |
-| Status da Contribuição | Ciclo de vida (pendente, paga, cancelada, etc.) |
+| Dados do Contribuinte | Informações associadas ao escolher um item (ex.: nome de exibição, email) |
+| Status da Contribuição | `disponivel` (sem visitante) ou `indisponivel` (após associação) |
 
 ---
 
@@ -144,9 +144,9 @@ Ordem lógica dos passos, do ponto de vista do domínio:
 
 1. **Administrador(es) da Campanha** criam uma **Campanha**.
 2. A **Campanha** define um **Recebedor**.
-3. A **Campanha** possui **Opções de Contribuição**.
-4. **Contribuinte Visitante** escolhe uma **Opção de Contribuição**.
-5. O sistema cria uma **Contribuição** (ex.: R$ 80).
+3. A **Campanha** possui **Opções de Contribuição** (sacolas por tipo).
+4. O **Administrador** cria **Contribuições** (itens, ex.: “fralda” R$ 80) dentro de uma opção.
+5. **Contribuinte Visitante** escolhe um item e associa seus dados; a contribuição fica **indisponível** para outros.
 6. **Taxas** calcula a taxa (ex.: R$ 4) e gera a **Composição de Valores**:
    - valor da contribuição: R$ 80  
    - taxa: R$ 4  
@@ -219,7 +219,8 @@ Estes itens vêm do contrato de trabalho do projeto e reforçam como o código d
 
 | Termo | Significado nesta engine |
 |--------|---------------------------|
-| Contribuição | Registro do valor e contexto de arrecadação antes e depois do pagamento |
+| Contribuição | Item de arrecadação com valor; visitante associa dados ao reservar para pagamento |
+| Opção de contribuição | Sacola por tipo de experiência; agrupa itens de contribuição |
 | Composição de valores | Decomposição oficial: contribuição, taxa, total, destino ao recebedor |
 | Intenção de pagamento | Passo explícito de cobrança com valor total (ex.: R$ 84) |
 | Recebedor | Destinatário do valor líquido da contribuição |

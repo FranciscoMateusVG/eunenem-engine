@@ -34,7 +34,7 @@ async function seedCampanhaParaContribuicao(contribuicao: {
       chavePix: 'maria@exemplo.com',
     },
     titulo: 'Campanha conformance',
-    opcoes: [{ id: contribuicao.idOpcaoContribuicao, valor: 5000, tipo: 'presente' }],
+    opcoes: [{ id: contribuicao.idOpcaoContribuicao, tipo: 'presente' }],
     criadaEm: new Date(),
   });
 }
@@ -74,7 +74,7 @@ describe('ContribuicaoRepositoryPostgres — Postgres-specific', () => {
         chavePix: 'maria@exemplo.com',
       },
       titulo: 'Campanha FK',
-      opcoes: [{ id: idOpcao, valor: 3000, tipo: 'convite' }],
+      opcoes: [{ id: idOpcao, tipo: 'convite' }],
       criadaEm: new Date(),
     });
 
@@ -83,14 +83,16 @@ describe('ContribuicaoRepositoryPostgres — Postgres-specific', () => {
       id: idContribuicao,
       idCampanha,
       idOpcaoContribuicao: idOpcao,
+      nome: 'Convite VIP',
       valor: 3000,
-      contribuinte: { nomeExibicao: 'Ana', email: 'ana@exemplo.com' },
-      status: 'pendente_pagamento',
+      contribuinte: null,
+      status: 'disponivel',
       criadaEm: new Date(),
     });
 
     const found = await contribuicaoRepo.findById(idContribuicao);
     expect(found?.idCampanha).toBe(idCampanha);
-    expect(found?.contribuinte.email).toBe('ana@exemplo.com');
+    expect(found?.nome).toBe('Convite VIP');
+    expect(found?.contribuinte).toBeNull();
   });
 });
