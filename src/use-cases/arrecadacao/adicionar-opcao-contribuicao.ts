@@ -35,7 +35,7 @@ export async function adicionarOpcaoContribuicao(
         throw new ArrecadacaoInputInvalidoError(message);
       }
 
-      const { idCampanha, idOpcao, valor, rotulo } = parsed.data;
+      const { idCampanha, idOpcao, valor, tipo } = parsed.data;
 
       span.setAttribute('arrecadacao.campanha.id', idCampanha);
       span.setAttribute('arrecadacao.opcao.id', idOpcao);
@@ -49,8 +49,7 @@ export async function adicionarOpcaoContribuicao(
         throw new ArrecadacaoOpcaoIdDuplicadoError(idOpcao);
       }
 
-      const opcao: OpcaoContribuicao =
-        rotulo === undefined ? { id: idOpcao, valor } : { id: idOpcao, valor, rotulo };
+      const opcao: OpcaoContribuicao = { id: idOpcao, valor, tipo };
       const updated = campanhaComOpcao(existing, opcao);
 
       await campanhaRepository.save(updated);

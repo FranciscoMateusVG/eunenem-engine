@@ -2,8 +2,10 @@
 
 export type { CampanhaRepository } from './adapters/arrecadacao/campanha-repository.js';
 export { CampanhaRepositoryMemory } from './adapters/arrecadacao/campanha-repository.memory.js';
+export { CampanhaRepositoryPostgres } from './adapters/arrecadacao/campanha-repository.postgres.js';
 export type { ContribuicaoRepository } from './adapters/arrecadacao/contribuicao-repository.js';
 export { ContribuicaoRepositoryMemory } from './adapters/arrecadacao/contribuicao-repository.memory.js';
+export { ContribuicaoRepositoryPostgres } from './adapters/arrecadacao/contribuicao-repository.postgres.js';
 // --- Adapter Interfaces (public contract — implement your own) ---
 export type { CatRepository } from './adapters/cat-repository.js';
 export type { Database } from './adapters/database.js';
@@ -38,6 +40,7 @@ export type {
   OpcaoContribuicao,
   RemoverAdministradorCampanhaInput,
   TipoChavePix,
+  TipoOpcaoContribuicao,
 } from './domain/arrecadacao/campanha.js';
 export {
   AdicionarAdministradorCampanhaInputSchema,
@@ -61,6 +64,7 @@ export {
   OpcaoContribuicaoSchema,
   RemoverAdministradorCampanhaInputSchema,
   TipoChavePixSchema,
+  TipoOpcaoContribuicaoSchema,
 } from './domain/arrecadacao/campanha.js';
 export type {
   Contribuicao,

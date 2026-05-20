@@ -28,6 +28,9 @@ export const IdsAdministradoresSchema = z
 export const TipoChavePixSchema = z.enum(['cpf', 'cnpj', 'email', 'telefone', 'aleatoria']);
 export type TipoChavePix = z.infer<typeof TipoChavePixSchema>;
 
+export const TipoOpcaoContribuicaoSchema = z.enum(['presente', 'rifa', 'convite']);
+export type TipoOpcaoContribuicao = z.infer<typeof TipoOpcaoContribuicaoSchema>;
+
 const apenasDigitos = (valor: string): string => valor.replace(/\D/g, '');
 
 function mensagemChavePixInvalida(
@@ -78,7 +81,7 @@ export type DadosRecebedor = Readonly<z.infer<typeof DadosRecebedorSchema>>;
 export const OpcaoContribuicaoSchema = z.object({
   id: IdOpcaoContribuicaoSchema,
   valor: MoneyCentsSchema,
-  rotulo: z.string().trim().max(200).optional(),
+  tipo: TipoOpcaoContribuicaoSchema,
 });
 
 export type OpcaoContribuicao = Readonly<z.infer<typeof OpcaoContribuicaoSchema>>;
@@ -106,7 +109,7 @@ export const AdicionarOpcaoContribuicaoInputSchema = z.object({
   idCampanha: IdCampanhaSchema,
   idOpcao: IdOpcaoContribuicaoSchema,
   valor: MoneyCentsSchema,
-  rotulo: z.string().trim().max(200).optional(),
+  tipo: TipoOpcaoContribuicaoSchema,
 });
 
 export type AdicionarOpcaoContribuicaoInput = z.infer<typeof AdicionarOpcaoContribuicaoInputSchema>;

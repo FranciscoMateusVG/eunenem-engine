@@ -3,7 +3,7 @@ import { defineConfig } from 'tsup';
 export default defineConfig({
   entry: {
     index: 'src/index.ts',
-    'adapters/postgres': 'src/adapters/cat-repository.postgres.ts',
+    'adapters/postgres': 'src/adapters/postgres.ts',
     testing: 'src/testing/observability.ts',
   },
   format: ['esm', 'cjs'],

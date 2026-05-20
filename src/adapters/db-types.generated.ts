@@ -11,12 +11,49 @@ export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
 
 export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
+export interface CampanhaAdministradores {
+  campanha_id: string;
+  id_usuario: string;
+}
+
+export interface Campanhas {
+  criada_em: Generated<Timestamp>;
+  id: string;
+  id_recebedor: string;
+  recebedor_chave_pix: string;
+  recebedor_nome_titular: string;
+  recebedor_tipo_chave_pix: string;
+  titulo: string;
+}
+
 export interface Cats {
   created_at: Generated<Timestamp>;
   id: string;
   name: string;
 }
 
+export interface Contribuicoes {
+  campanha_id: string;
+  contribuinte_email: string;
+  contribuinte_nome_exibicao: string;
+  criada_em: Generated<Timestamp>;
+  id: string;
+  id_opcao_contribuicao: string;
+  status: string;
+  valor: number;
+}
+
+export interface OpcoesContribuicao {
+  campanha_id: string;
+  id: string;
+  tipo: string;
+  valor: number;
+}
+
 export interface DB {
+  campanha_administradores: CampanhaAdministradores;
+  campanhas: Campanhas;
   cats: Cats;
+  contribuicoes: Contribuicoes;
+  opcoes_contribuicao: OpcoesContribuicao;
 }

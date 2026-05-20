@@ -318,7 +318,7 @@ describe('alterarValorOpcaoContribuicao', () => {
     );
     await adicionarOpcaoContribuicao(
       { campanhaRepository, observability: silentObservability },
-      { idCampanha, idOpcao, valor: 1000 },
+      { idCampanha, idOpcao, valor: 1000, tipo: 'presente' },
     );
 
     const updated = await alterarValorOpcaoContribuicao(
@@ -374,7 +374,7 @@ describe('alterarValorOpcaoContribuicao', () => {
     );
     await adicionarOpcaoContribuicao(
       { campanhaRepository, observability: silentObservability },
-      { idCampanha, idOpcao, valor: 100 },
+      { idCampanha, idOpcao, valor: 100, tipo: 'presente' },
     );
     await expect(
       alterarValorOpcaoContribuicao(
@@ -406,7 +406,7 @@ describe('adicionarOpcaoContribuicao', () => {
         idCampanha,
         idOpcao,
         valor: 8000,
-        rotulo: 'R$ 80',
+        tipo: 'presente',
       },
     );
 
@@ -425,6 +425,7 @@ describe('adicionarOpcaoContribuicao', () => {
           idCampanha: missingId,
           idOpcao: randomUUID(),
           valor: 100,
+          tipo: 'presente',
         },
       ),
     ).rejects.toThrow(ArrecadacaoCampanhaNaoEncontradaError);
@@ -445,12 +446,12 @@ describe('adicionarOpcaoContribuicao', () => {
     );
     await adicionarOpcaoContribuicao(
       { campanhaRepository, observability: silentObservability },
-      { idCampanha, idOpcao, valor: 100 },
+      { idCampanha, idOpcao, valor: 100, tipo: 'presente' },
     );
     await expect(
       adicionarOpcaoContribuicao(
         { campanhaRepository, observability: silentObservability },
-        { idCampanha, idOpcao, valor: 200 },
+        { idCampanha, idOpcao, valor: 200, tipo: 'rifa' },
       ),
     ).rejects.toThrow(ArrecadacaoOpcaoIdDuplicadoError);
   });
@@ -470,7 +471,7 @@ describe('adicionarOpcaoContribuicao', () => {
     await expect(
       adicionarOpcaoContribuicao(
         { campanhaRepository, observability: silentObservability },
-        { idCampanha, idOpcao: randomUUID(), valor: 0 },
+        { idCampanha, idOpcao: randomUUID(), valor: 0, tipo: 'presente' },
       ),
     ).rejects.toThrow(ArrecadacaoInputInvalidoError);
   });
@@ -495,7 +496,7 @@ describe('criarContribuicao', () => {
     );
     await adicionarOpcaoContribuicao(
       { campanhaRepository, observability: silentObservability },
-      { idCampanha, idOpcao, valor: 8000 },
+      { idCampanha, idOpcao, valor: 8000, tipo: 'presente' },
     );
 
     const contribuicao = await criarContribuicao(
@@ -509,7 +510,7 @@ describe('criarContribuicao', () => {
         id: idContribuicao,
         idCampanha,
         idOpcaoContribuicao: idOpcao,
-        contribuinte: { nomeExibicao: 'Visitante' },
+        contribuinte: { nomeExibicao: 'Visitante', email: 'visitante@exemplo.com' },
       },
     );
 
@@ -557,7 +558,7 @@ describe('criarContribuicao', () => {
           id: randomUUID(),
           idCampanha: missingCampanha,
           idOpcaoContribuicao: randomUUID(),
-          contribuinte: { nomeExibicao: 'X' },
+          contribuinte: { nomeExibicao: 'X', email: 'x@exemplo.com' },
         },
       ),
     ).rejects.toThrow(ArrecadacaoCampanhaNaoEncontradaError);
@@ -590,7 +591,7 @@ describe('criarContribuicao', () => {
           id: randomUUID(),
           idCampanha,
           idOpcaoContribuicao: randomUUID(),
-          contribuinte: { nomeExibicao: 'X' },
+          contribuinte: { nomeExibicao: 'X', email: 'x@exemplo.com' },
         },
       ),
     ).rejects.toThrow(ArrecadacaoOpcaoContribuicaoNaoEncontradaError);
@@ -614,7 +615,7 @@ describe('criarContribuicao', () => {
     );
     await adicionarOpcaoContribuicao(
       { campanhaRepository, observability: silentObservability },
-      { idCampanha, idOpcao, valor: 100 },
+      { idCampanha, idOpcao, valor: 100, tipo: 'presente' },
     );
 
     const deps = {
@@ -627,7 +628,7 @@ describe('criarContribuicao', () => {
       id: idContribuicao,
       idCampanha,
       idOpcaoContribuicao: idOpcao,
-      contribuinte: { nomeExibicao: 'A' },
+      contribuinte: { nomeExibicao: 'A', email: 'a@exemplo.com' },
     };
 
     await criarContribuicao(deps, input);

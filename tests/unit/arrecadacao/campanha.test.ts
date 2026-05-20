@@ -147,7 +147,7 @@ describe('campanhaSemAdministrador', () => {
 
 describe('encontrarOpcaoContribuicao', () => {
   it('returns the option when present', () => {
-    const opcao = { id: idOpcao, valor: 8000, rotulo: 'Valor sugerido' };
+    const opcao = { id: idOpcao, valor: 8000, tipo: 'presente' as const };
     const campanha = {
       ...baseCampanha,
       opcoes: [opcao],
@@ -162,7 +162,7 @@ describe('encontrarOpcaoContribuicao', () => {
 
 describe('campanhaComOpcao', () => {
   it('appends option immutably', () => {
-    const opcao = { id: idOpcao, valor: 5000 };
+    const opcao = { id: idOpcao, valor: 5000, tipo: 'rifa' as const };
     const next = campanhaComOpcao(baseCampanha, opcao);
     expect(baseCampanha.opcoes).toHaveLength(0);
     expect(next.opcoes).toHaveLength(1);
@@ -186,11 +186,11 @@ describe('campanhaComDadosRecebedor', () => {
 
 describe('campanhaComOpcaoValor', () => {
   it('updates option valor immutably', () => {
-    const comOpcao = campanhaComOpcao(baseCampanha, { id: idOpcao, valor: 1000 });
+    const comOpcao = campanhaComOpcao(baseCampanha, { id: idOpcao, valor: 1000, tipo: 'convite' });
     const next = campanhaComOpcaoValor(comOpcao, idOpcao, 9000);
     expect(comOpcao.opcoes[0]?.valor).toBe(1000);
     expect(next.opcoes[0]?.valor).toBe(9000);
-    expect(next.opcoes[0]?.rotulo).toBeUndefined();
+    expect(next.opcoes[0]?.tipo).toBe('convite');
   });
 });
 

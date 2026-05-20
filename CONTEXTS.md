@@ -16,13 +16,13 @@ Este ficheiro reúne a documentação dos **bounded contexts** já implementados
 
 # BC Arrecadação — o que foi implementado
 
-Este documento descreve a primeira fatia da **engine de intermediação financeira** no repositório (skeleton Frame): o **bounded context Arrecadação**, em memória, sem base de dados nova e sem autenticação real. O objetivo é aprender DDD vendo o código.
+Este documento descreve a primeira fatia da **engine de intermediação financeira** no repositório (skeleton Frame): o **bounded context Arrecadação**, com adaptadores em memória e **Postgres** (Kysely), sem autenticação real. O objetivo é aprender DDD vendo o código.
 
 ## Resumo em linguagem simples
 
 1. Um ou mais **administradores** (UUIDs de conta) abrem uma **campanha** com título e registam o **recebedor** externo (nome + chave PIX em `dadosRecebedor`); o sistema gera `idRecebedor` para o Financeiro.
-2. A campanha começa sem **opções de contribuição**; depois podes acrescentar opções (cada uma com valor em **centavos** e rótulo opcional).
-3. Um **contribuinte visitante** (sem conta) escolhe uma opção: o sistema regista uma **contribuição** com o valor **copiado da opção** naquele momento, estado `pendente_pagamento`, e dados mínimos do visitante (nome de exibição e email opcional).
+2. A campanha começa sem **opções de contribuição**; depois podes acrescentar opções (cada uma com valor em **centavos** e `tipo`: `presente`, `rifa` ou `convite`).
+3. Um **contribuinte visitante** (sem conta) escolhe uma opção: o sistema regista uma **contribuição** com o valor **copiado da opção** naquele momento, estado `pendente_pagamento`, e dados do visitante (nome de exibição e **email obrigatório**).
 
 Nada disto cobra pagamento nem calcula taxa — isso será outros bounded contexts.
 
@@ -38,7 +38,11 @@ Nada disto cobra pagamento nem calcula taxa — isso será outros bounded contex
 | Anexar opção de forma imutável | [`src/domain/arrecadacao/campanha.ts`](src/domain/arrecadacao/campanha.ts) — `campanhaComOpcao` |
 | Contribuição, dados do visitante, input de criação | [`src/domain/arrecadacao/contribuicao.ts`](src/domain/arrecadacao/contribuicao.ts) |
 | Persistência em memória da campanha | [`src/adapters/arrecadacao/campanha-repository.memory.ts`](src/adapters/arrecadacao/campanha-repository.memory.ts) |
+| Persistência Postgres da campanha | [`src/adapters/arrecadacao/campanha-repository.postgres.ts`](src/adapters/arrecadacao/campanha-repository.postgres.ts) — `CampanhaRepositoryPostgres` |
 | Persistência em memória das contribuições | [`src/adapters/arrecadacao/contribuicao-repository.memory.ts`](src/adapters/arrecadacao/contribuicao-repository.memory.ts) |
+| Persistência Postgres das contribuições | [`src/adapters/arrecadacao/contribuicao-repository.postgres.ts`](src/adapters/arrecadacao/contribuicao-repository.postgres.ts) — `ContribuicaoRepositoryPostgres` |
+| Schema relacional (migrations) | [`migrations/20260519_001_create_arrecadacao.ts`](migrations/20260519_001_create_arrecadacao.ts) — `campanhas`, `campanha_administradores` (`id_usuario`), `opcoes_contribuicao` (`tipo`), `contribuicoes` |
+| Testes de integração Postgres | [`tests/integration/campanha-repository.postgres.test.ts`](tests/integration/campanha-repository.postgres.test.ts), [`tests/integration/contribuicao-repository.postgres.test.ts`](tests/integration/contribuicao-repository.postgres.test.ts) |
 | Portas (interfaces) | [`src/adapters/arrecadacao/campanha-repository.ts`](src/adapters/arrecadacao/campanha-repository.ts) — `CampanhaRepository`; [`src/adapters/arrecadacao/contribuicao-repository.ts`](src/adapters/arrecadacao/contribuicao-repository.ts) — `ContribuicaoRepository` |
 | Caso de uso: criar campanha | [`src/use-cases/arrecadacao/criar-campanha.ts`](src/use-cases/arrecadacao/criar-campanha.ts) — `criarCampanha` |
 | Caso de uso: adicionar administrador | [`src/use-cases/arrecadacao/adicionar-administrador-campanha.ts`](src/use-cases/arrecadacao/adicionar-administrador-campanha.ts) — `adicionarAdministradorCampanha` |
@@ -65,7 +69,7 @@ Nada disto cobra pagamento nem calcula taxa — isso será outros bounded contex
 
 - **Agregado:** nesta versão didática, a **Campanha** é a raiz que contém a lista de **opções**. A **Contribuição** é outra entidade guardada à parte, referenciando `idCampanha` e `idOpcaoContribuicao` — uma escolha de modelação para evitar uma lista gigante de contribuições dentro da campanha em memória; podes evoluir para agregado “mais fechado” mais tarde.
 
-- **Repositório (padrão):** interfaces `CampanhaRepository` e `ContribuicaoRepository` são **portas**; as classes `*.memory.ts` são **adaptadores** para testes e demos sem Postgres.
+- **Repositório (padrão):** interfaces `CampanhaRepository` e `ContribuicaoRepository` são **portas**; `*.memory.ts` para testes unitários rápidos; `*.postgres.ts` para persistência real (upsert de campanha + sync de filhos; insert de contribuição com FK). No banco, administradores usam coluna `id_usuario` mapeada para `IdConta` no domínio.
 
 - **Caso de uso / serviço de aplicação:** cada ficheiro em `src/use-cases/` orquestra validação (Zod), leituras do repositório, invariantes (ex.: opção duplicada) e persistência.
 

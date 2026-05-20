@@ -18,7 +18,7 @@ export const NomeExibicaoContribuinteSchema = z
 
 export const DadosContribuinteSchema = z.object({
   nomeExibicao: NomeExibicaoContribuinteSchema,
-  email: z.string().trim().email().max(320).optional(),
+  email: z.string().trim().email('Email invalido').max(320),
 });
 
 export type DadosContribuinte = Readonly<z.infer<typeof DadosContribuinteSchema>>;

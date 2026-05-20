@@ -6,17 +6,7 @@ const idCampanha = '550e8400-e29b-41d4-a716-446655440011';
 const idOpcaoContribuicao = '550e8400-e29b-41d4-a716-446655440012';
 
 describe('CriarContribuicaoInputSchema', () => {
-  it('accepts valid contributor', () => {
-    const r = CriarContribuicaoInputSchema.safeParse({
-      id: idContribuicao,
-      idCampanha,
-      idOpcaoContribuicao,
-      contribuinte: { nomeExibicao: 'Ana' },
-    });
-    expect(r.success).toBe(true);
-  });
-
-  it('accepts optional email', () => {
+  it('accepts valid contributor with email', () => {
     const r = CriarContribuicaoInputSchema.safeParse({
       id: idContribuicao,
       idCampanha,
@@ -24,6 +14,16 @@ describe('CriarContribuicaoInputSchema', () => {
       contribuinte: { nomeExibicao: 'Ana', email: 'ana@example.com' },
     });
     expect(r.success).toBe(true);
+  });
+
+  it('rejects missing email', () => {
+    const r = CriarContribuicaoInputSchema.safeParse({
+      id: idContribuicao,
+      idCampanha,
+      idOpcaoContribuicao,
+      contribuinte: { nomeExibicao: 'Ana' },
+    });
+    expect(r.success).toBe(false);
   });
 
   it('rejects invalid email', () => {

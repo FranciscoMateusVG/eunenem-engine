@@ -79,6 +79,7 @@ export const folderStructureConfig = createFolderStructure({
             { name: 'cat-repository.ts' },
             { name: 'cat-repository.memory.ts' },
             { name: 'cat-repository.postgres.ts' },
+            { name: 'postgres.ts' },
             ...bcChildren({ withAdapterImpl: true }),
           ],
         },
