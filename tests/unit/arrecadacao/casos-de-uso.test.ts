@@ -490,6 +490,20 @@ describe('adicionarOpcaoContribuicao', () => {
       ),
     ).rejects.toThrow(ArrecadacaoOpcaoIdDuplicadoError);
   });
+
+  it('throws ArrecadacaoInputInvalidoError on invalid input', async () => {
+    const campanhaRepository = new CampanhaRepositoryMemory();
+    await expect(
+      adicionarOpcaoContribuicao(
+        { campanhaRepository, observability: silentObservability },
+        {
+          idCampanha: 'nao-uuid',
+          idOpcao: randomUUID(),
+          tipo: 'presente',
+        },
+      ),
+    ).rejects.toThrow(ArrecadacaoInputInvalidoError);
+  });
 });
 
 describe('criarContribuicao', () => {
