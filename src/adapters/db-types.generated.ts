@@ -51,7 +51,7 @@ export interface Recebedores {
   chave_pix: string;
   criada_em: Generated<Timestamp>;
   id: string;
-  is_active: boolean;
+  is_active: Generated<boolean>;
   nome_titular: string;
   tipo_chave_pix: string;
 }

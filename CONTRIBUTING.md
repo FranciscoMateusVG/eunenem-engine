@@ -45,7 +45,7 @@ If you're stuck and need to push a WIP branch for backup or collaboration, creat
 ## How the Hooks Work
 
 - **Husky** manages git hooks in `.husky/`
-- **lint-staged** (configured in `package.json`) runs Biome on staged files during pre-commit
+- **lint-staged** (configured in `lint-staged.config.js`) runs Biome on staged files during pre-commit; `*.generated.ts` is skipped (ignored by Biome)
 - The pre-push hook calls `pnpm check` which runs the full pipeline
 - `pnpm verify-hooks` (part of `pnpm check`) confirms hooks are installed and readable
 
