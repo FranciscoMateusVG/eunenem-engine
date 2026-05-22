@@ -9,7 +9,7 @@ import { FinanceiroPagamentoJaRegistradoError } from '../../../src/errors/financ
 
 const idPagamento = '550e8400-e29b-41d4-a716-446655442001';
 const idContribuicao = '550e8400-e29b-41d4-a716-446655442002';
-const idRecebedor = '550e8400-e29b-41d4-a716-446655442003';
+const idCampanha = '550e8400-e29b-41d4-a716-446655442003';
 const idLancamentoRecebedor = '550e8400-e29b-41d4-a716-446655442004';
 const idLancamentoReceitaPlataforma = '550e8400-e29b-41d4-a716-446655442005';
 const idRepasse = '550e8400-e29b-41d4-a716-446655442006';
@@ -18,7 +18,7 @@ const criadoEm = new Date('2026-05-01T12:00:00.000Z');
 const approvedPaymentInput: RegistrarEfeitosFinanceirosPagamentoAprovadoInput = {
   idPagamento,
   idContribuicao,
-  idRecebedor,
+  idCampanha,
   statusPagamento: 'aprovado',
   composicaoValores: {
     contributionAmountCents: 8000,
@@ -41,7 +41,7 @@ describe('LivroFinanceiroRepositoryMemory', () => {
     await repository.saveLancamentos(lancamentos);
 
     expect(await repository.findLancamentosByIdPagamento(idPagamento)).toEqual(lancamentos);
-    expect(await repository.findLancamentosByIdRecebedor(idRecebedor)).toEqual([lancamentos[0]]);
+    expect(await repository.findLancamentosByIdCampanha(idCampanha)).toEqual([lancamentos[0]]);
     expect(await repository.findLancamentosReceitaPlataforma()).toEqual([lancamentos[1]]);
   });
 
@@ -65,7 +65,7 @@ describe('LivroFinanceiroRepositoryMemory', () => {
     const repasse = criarRepasseRecebedorSolicitado(
       {
         idRepasse,
-        idRecebedor,
+        idCampanha,
         amountCents: 2000,
       },
       criadoEm,
@@ -74,6 +74,6 @@ describe('LivroFinanceiroRepositoryMemory', () => {
     await repository.saveRepasse(repasse);
 
     expect(await repository.findRepasseById(idRepasse)).toEqual(repasse);
-    expect(await repository.findRepassesByIdRecebedor(idRecebedor)).toEqual([repasse]);
+    expect(await repository.findRepassesByIdCampanha(idCampanha)).toEqual([repasse]);
   });
 });

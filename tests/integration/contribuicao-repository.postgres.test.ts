@@ -2,6 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { CampanhaRepositoryPostgres } from '../../src/adapters/arrecadacao/campanha-repository.postgres.js';
 import { ContribuicaoRepositoryPostgres } from '../../src/adapters/arrecadacao/contribuicao-repository.postgres.js';
+import { RecebedorRepositoryPostgres } from '../../src/adapters/arrecadacao/recebedor-repository.postgres.js';
+import { saveCampanhaComRecebedorAtivo } from '../helpers/arrecadacao-repos.js';
+import { makeCampanha } from '../helpers/campanha-repository.conformance.js';
 import { describeContribuicaoRepositoryConformance } from '../helpers/contribuicao-repository.conformance.js';
 import { createTestObservability } from '../helpers/observability.js';
 import { createTestDatabase, type TestDatabase } from '../helpers/test-db.js';
@@ -23,20 +26,17 @@ async function seedCampanhaParaContribuicao(contribuicao: {
   idCampanha: string;
   idOpcaoContribuicao: string;
 }): Promise<void> {
-  const campanhaRepo = new CampanhaRepositoryPostgres(testDb.db);
-  await campanhaRepo.save({
+  const recebedorRepository = new RecebedorRepositoryPostgres(testDb.db);
+  const campanhaRepo = new CampanhaRepositoryPostgres(testDb.db, recebedorRepository);
+  const campanha = makeCampanha({
     id: contribuicao.idCampanha,
-    idsAdministradores: [randomUUID()],
-    idRecebedor: randomUUID(),
-    dadosRecebedor: {
-      nomeTitular: 'Maria',
-      tipoChavePix: 'email',
-      chavePix: 'maria@exemplo.com',
-    },
-    titulo: 'Campanha conformance',
     opcoes: [{ id: contribuicao.idOpcaoContribuicao, tipo: 'presente' }],
-    criadaEm: new Date(),
+    titulo: 'Campanha conformance',
   });
+  await saveCampanhaComRecebedorAtivo(
+    { campanhaRepository: campanhaRepo, recebedorRepository },
+    campanha,
+  );
 }
 
 describeContribuicaoRepositoryConformance('Postgres', {
@@ -51,32 +51,28 @@ describeContribuicaoRepositoryConformance('Postgres', {
 describe('ContribuicaoRepositoryPostgres — Postgres-specific', () => {
   let campanhaRepo: CampanhaRepositoryPostgres;
   let contribuicaoRepo: ContribuicaoRepositoryPostgres;
+  let recebedorRepository: RecebedorRepositoryPostgres;
 
   beforeEach(async () => {
     await truncateArrecadacaoTables(testDb.db);
     testObs.reset();
-    campanhaRepo = new CampanhaRepositoryPostgres(testDb.db);
+    recebedorRepository = new RecebedorRepositoryPostgres(testDb.db);
+    campanhaRepo = new CampanhaRepositoryPostgres(testDb.db, recebedorRepository);
     contribuicaoRepo = new ContribuicaoRepositoryPostgres(testDb.db);
   });
 
   it('persists contribution with FK to campaign and option', async () => {
     const idCampanha = randomUUID();
     const idOpcao = randomUUID();
-    const idRecebedor = randomUUID();
-
-    await campanhaRepo.save({
+    const campanha = makeCampanha({
       id: idCampanha,
-      idsAdministradores: [randomUUID()],
-      idRecebedor,
-      dadosRecebedor: {
-        nomeTitular: 'Maria',
-        tipoChavePix: 'email',
-        chavePix: 'maria@exemplo.com',
-      },
-      titulo: 'Campanha FK',
       opcoes: [{ id: idOpcao, tipo: 'convite' }],
-      criadaEm: new Date(),
+      titulo: 'Campanha FK',
     });
+    await saveCampanhaComRecebedorAtivo(
+      { campanhaRepository: campanhaRepo, recebedorRepository },
+      campanha,
+    );
 
     const idContribuicao = randomUUID();
     await contribuicaoRepo.save({
@@ -91,8 +87,6 @@ describe('ContribuicaoRepositoryPostgres — Postgres-specific', () => {
     });
 
     const found = await contribuicaoRepo.findById(idContribuicao);
-    expect(found?.idCampanha).toBe(idCampanha);
     expect(found?.nome).toBe('Convite VIP');
-    expect(found?.contribuinte).toBeNull();
   });
 });

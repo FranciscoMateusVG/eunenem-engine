@@ -59,7 +59,7 @@ Cada contexto tem **responsabilidades claras** e um **vocabulário** próprio. C
 | Conceito | Papel no domínio |
 |----------|------------------|
 | Administrador(es) da Campanha | Quem configura a campanha (tipicamente ligado a Identidade e Conta; pode haver mais de um) |
-| Recebedor | Quem deve receber o valor líquido (pessoa externa; destino PIX em Arrecadação; `idRecebedor` para saldo/repasse no Financeiro) |
+| Recebedor | Quem deve receber o valor líquido (pessoa externa; histórico de recebedores com dados PIX em `recebedores`; saldo no Financeiro por `idCampanha` = `Campanha.id`) |
 | Campanha | Container de arrecadação com regras e opções |
 | Opção de Contribuição | Sacola por `tipo` (`presente`, `rifa`, `convite`) que agrupa itens |
 | Contribuição | Item de arrecadação (`nome`, `valor`) criado pelo admin dentro de uma opção |

@@ -3,18 +3,19 @@ import {
   AlterarDadosRecebedorCampanhaInputSchema,
   CriarCampanhaInputSchema,
   campanhaComAdministrador,
-  campanhaComDadosRecebedor,
   campanhaComOpcao,
+  campanhaComRecebedorAtivo,
   campanhaPossuiAdministrador,
   campanhaSemAdministrador,
   DadosRecebedorSchema,
   encontrarOpcaoContribuicao,
 } from '../../../src/domain/arrecadacao/campanha.js';
+import { criarRecebedorInicial } from '../../../src/domain/arrecadacao/recebedor.js';
 
 const idCampanha = '550e8400-e29b-41d4-a716-446655440001';
 const idAdministrador1 = '550e8400-e29b-41d4-a716-446655440002';
 const idAdministrador2 = '550e8400-e29b-41d4-a716-446655440005';
-const idRecebedor = '550e8400-e29b-41d4-a716-446655440003';
+const idRecebedor = '550e8400-e29b-41d4-a716-446655440006';
 const idOpcao = '550e8400-e29b-41d4-a716-446655440004';
 
 const dadosRecebedorEmail = {
@@ -22,6 +23,13 @@ const dadosRecebedorEmail = {
   tipoChavePix: 'email' as const,
   chavePix: 'maria@exemplo.com',
 };
+
+const recebedorAtivo = criarRecebedorInicial({
+  id: idRecebedor,
+  idCampanha,
+  dadosRecebedor: dadosRecebedorEmail,
+  criadaEm: new Date('2026-01-01T00:00:00.000Z'),
+});
 
 const baseCampanha = {
   id: idCampanha,
@@ -168,17 +176,23 @@ describe('campanhaComOpcao', () => {
   });
 });
 
-describe('campanhaComDadosRecebedor', () => {
-  it('replaces receiver data immutably without changing idRecebedor', () => {
+describe('campanhaComRecebedorAtivo', () => {
+  it('projects active receiver from new receiver row', () => {
     const novosDados = {
       nomeTitular: 'Joao Santos',
       tipoChavePix: 'cpf' as const,
       chavePix: '12345678901',
     };
-    const next = campanhaComDadosRecebedor(baseCampanha, novosDados);
+    const novoRecebedor = {
+      ...recebedorAtivo,
+      id: '550e8400-e29b-41d4-a716-446655440099',
+      dadosRecebedor: novosDados,
+    };
+    const next = campanhaComRecebedorAtivo(baseCampanha, novoRecebedor);
     expect(baseCampanha.dadosRecebedor).toEqual(dadosRecebedorEmail);
     expect(next.dadosRecebedor).toEqual(novosDados);
-    expect(next.idRecebedor).toBe(idRecebedor);
+    expect(next.id).toBe(idCampanha);
+    expect(next.idRecebedor).toBe(novoRecebedor.id);
   });
 });
 

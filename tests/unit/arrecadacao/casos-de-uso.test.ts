@@ -1,9 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { CampanhaRepositoryMemory } from '../../../src/adapters/arrecadacao/campanha-repository.memory.js';
 import { ContribuicaoRepositoryMemory } from '../../../src/adapters/arrecadacao/contribuicao-repository.memory.js';
 import type { DadosRecebedor } from '../../../src/domain/arrecadacao/campanha.js';
-import { IdRecebedorSchema } from '../../../src/domain/arrecadacao/campanha.js';
 import { ArrecadacaoAdministradorDuplicadoError } from '../../../src/errors/arrecadacao/administrador-duplicado.error.js';
 import { ArrecadacaoAdministradorNaoEncontradoError } from '../../../src/errors/arrecadacao/administrador-nao-encontrado.error.js';
 import { ArrecadacaoCampanhaNaoEncontradaError } from '../../../src/errors/arrecadacao/campanha-nao-encontrada.error.js';
@@ -24,6 +22,7 @@ import { associarContribuinteContribuicao } from '../../../src/use-cases/arrecad
 import { criarCampanha } from '../../../src/use-cases/arrecadacao/criar-campanha.js';
 import { criarContribuicao } from '../../../src/use-cases/arrecadacao/criar-contribuicao.js';
 import { removerAdministradorCampanha } from '../../../src/use-cases/arrecadacao/remover-administrador-campanha.js';
+import { createArrecadacaoMemoryRepos } from '../../helpers/arrecadacao-repos.js';
 
 const silentObservability = {
   logger: new NoopLogger(),
@@ -41,17 +40,15 @@ const dadosRecebedorPadrao = (): DadosRecebedor => ({
 
 describe('criarCampanha', () => {
   it('creates a campaign with no options', async () => {
-    const campanhaRepository = new CampanhaRepositoryMemory();
+    const { campanhaRepository, recebedorRepository } = createArrecadacaoMemoryRepos();
     const id = randomUUID();
     const idsAdministradores = [randomUUID()];
     const dadosRecebedor = dadosRecebedorPadrao();
-    const idRecebedorGerado = randomUUID();
-
     const campanha = await criarCampanha(
       {
         campanhaRepository,
+        recebedorRepository,
         clock,
-        gerarIdRecebedor: () => idRecebedorGerado,
         observability: silentObservability,
       },
       {
@@ -65,8 +62,6 @@ describe('criarCampanha', () => {
     expect(campanha.id).toBe(id);
     expect(campanha.idsAdministradores).toEqual(idsAdministradores);
     expect(campanha.dadosRecebedor).toEqual(dadosRecebedor);
-    expect(campanha.idRecebedor).toBe(idRecebedorGerado);
-    expect(IdRecebedorSchema.safeParse(campanha.idRecebedor).success).toBe(true);
     expect(campanha.opcoes).toEqual([]);
     expect(campanha.criadaEm).toEqual(fixedDate);
 
@@ -75,10 +70,10 @@ describe('criarCampanha', () => {
   });
 
   it('throws ArrecadacaoInputInvalidoError on bad title', async () => {
-    const campanhaRepository = new CampanhaRepositoryMemory();
+    const { campanhaRepository, recebedorRepository } = createArrecadacaoMemoryRepos();
     await expect(
       criarCampanha(
-        { campanhaRepository, clock, observability: silentObservability },
+        { campanhaRepository, recebedorRepository, clock, observability: silentObservability },
         {
           id: randomUUID(),
           idsAdministradores: [randomUUID()],
@@ -92,13 +87,13 @@ describe('criarCampanha', () => {
 
 describe('adicionarAdministradorCampanha', () => {
   it('adds an administrator to an existing campaign', async () => {
-    const campanhaRepository = new CampanhaRepositoryMemory();
+    const { campanhaRepository, recebedorRepository } = createArrecadacaoMemoryRepos();
     const idCampanha = randomUUID();
     const idAdminExistente = randomUUID();
     const idAdminNovo = randomUUID();
 
     await criarCampanha(
-      { campanhaRepository, clock, observability: silentObservability },
+      { campanhaRepository, recebedorRepository, clock, observability: silentObservability },
       {
         id: idCampanha,
         idsAdministradores: [idAdminExistente],
@@ -116,7 +111,7 @@ describe('adicionarAdministradorCampanha', () => {
   });
 
   it('throws when campaign is missing', async () => {
-    const campanhaRepository = new CampanhaRepositoryMemory();
+    const { campanhaRepository } = createArrecadacaoMemoryRepos();
     await expect(
       adicionarAdministradorCampanha(
         { campanhaRepository, observability: silentObservability },
@@ -126,12 +121,12 @@ describe('adicionarAdministradorCampanha', () => {
   });
 
   it('throws on duplicate administrator', async () => {
-    const campanhaRepository = new CampanhaRepositoryMemory();
+    const { campanhaRepository, recebedorRepository } = createArrecadacaoMemoryRepos();
     const idCampanha = randomUUID();
     const idAdmin = randomUUID();
 
     await criarCampanha(
-      { campanhaRepository, clock, observability: silentObservability },
+      { campanhaRepository, recebedorRepository, clock, observability: silentObservability },
       {
         id: idCampanha,
         idsAdministradores: [idAdmin],
@@ -151,13 +146,13 @@ describe('adicionarAdministradorCampanha', () => {
 
 describe('removerAdministradorCampanha', () => {
   it('removes an administrator from an existing campaign', async () => {
-    const campanhaRepository = new CampanhaRepositoryMemory();
+    const { campanhaRepository, recebedorRepository } = createArrecadacaoMemoryRepos();
     const idCampanha = randomUUID();
     const idAdmin1 = randomUUID();
     const idAdmin2 = randomUUID();
 
     await criarCampanha(
-      { campanhaRepository, clock, observability: silentObservability },
+      { campanhaRepository, recebedorRepository, clock, observability: silentObservability },
       {
         id: idCampanha,
         idsAdministradores: [idAdmin1, idAdmin2],
@@ -175,7 +170,7 @@ describe('removerAdministradorCampanha', () => {
   });
 
   it('throws when campaign is missing', async () => {
-    const campanhaRepository = new CampanhaRepositoryMemory();
+    const { campanhaRepository } = createArrecadacaoMemoryRepos();
     await expect(
       removerAdministradorCampanha(
         { campanhaRepository, observability: silentObservability },
@@ -185,11 +180,11 @@ describe('removerAdministradorCampanha', () => {
   });
 
   it('throws when administrator is not on campaign', async () => {
-    const campanhaRepository = new CampanhaRepositoryMemory();
+    const { campanhaRepository, recebedorRepository } = createArrecadacaoMemoryRepos();
     const idCampanha = randomUUID();
 
     await criarCampanha(
-      { campanhaRepository, clock, observability: silentObservability },
+      { campanhaRepository, recebedorRepository, clock, observability: silentObservability },
       {
         id: idCampanha,
         idsAdministradores: [randomUUID()],
@@ -207,12 +202,12 @@ describe('removerAdministradorCampanha', () => {
   });
 
   it('throws when removing the last administrator', async () => {
-    const campanhaRepository = new CampanhaRepositoryMemory();
+    const { campanhaRepository, recebedorRepository } = createArrecadacaoMemoryRepos();
     const idCampanha = randomUUID();
     const idAdmin = randomUUID();
 
     await criarCampanha(
-      { campanhaRepository, clock, observability: silentObservability },
+      { campanhaRepository, recebedorRepository, clock, observability: silentObservability },
       {
         id: idCampanha,
         idsAdministradores: [idAdmin],
@@ -231,10 +226,9 @@ describe('removerAdministradorCampanha', () => {
 });
 
 describe('alterarDadosRecebedorCampanha', () => {
-  it('updates receiver data without changing idRecebedor', async () => {
-    const campanhaRepository = new CampanhaRepositoryMemory();
+  it('replaces receiver data keeping same idCampanha', async () => {
+    const { campanhaRepository, recebedorRepository } = createArrecadacaoMemoryRepos();
     const idCampanha = randomUUID();
-    const idRecebedorFixo = randomUUID();
     const novosDados: DadosRecebedor = {
       nomeTitular: 'Joao Santos',
       tipoChavePix: 'cpf',
@@ -244,8 +238,8 @@ describe('alterarDadosRecebedorCampanha', () => {
     const criada = await criarCampanha(
       {
         campanhaRepository,
+        recebedorRepository,
         clock,
-        gerarIdRecebedor: () => idRecebedorFixo,
         observability: silentObservability,
       },
       {
@@ -257,30 +251,37 @@ describe('alterarDadosRecebedorCampanha', () => {
     );
 
     const updated = await alterarDadosRecebedorCampanha(
-      { campanhaRepository, observability: silentObservability },
+      { campanhaRepository, recebedorRepository, clock, observability: silentObservability },
       { idCampanha, dadosRecebedor: novosDados },
     );
 
-    expect(criada.idRecebedor).toBe(idRecebedorFixo);
     expect(updated.dadosRecebedor).toEqual(novosDados);
-    expect(updated.idRecebedor).toBe(idRecebedorFixo);
+    expect(updated.idRecebedor).not.toBe(criada.idRecebedor);
+
+    const historico = await recebedorRepository.findByCampanhaId(idCampanha);
+    expect(historico).toHaveLength(2);
+    expect(historico.filter((r) => r.isActive)).toHaveLength(1);
+    expect(historico.every((r) => r.idCampanha === idCampanha)).toBe(true);
+
+    const reloaded = await campanhaRepository.findById(idCampanha);
+    expect(reloaded?.dadosRecebedor).toEqual(novosDados);
   });
 
   it('throws when campaign is missing', async () => {
-    const campanhaRepository = new CampanhaRepositoryMemory();
+    const { campanhaRepository, recebedorRepository } = createArrecadacaoMemoryRepos();
     await expect(
       alterarDadosRecebedorCampanha(
-        { campanhaRepository, observability: silentObservability },
+        { campanhaRepository, recebedorRepository, clock, observability: silentObservability },
         { idCampanha: randomUUID(), dadosRecebedor: dadosRecebedorPadrao() },
       ),
     ).rejects.toThrow(ArrecadacaoCampanhaNaoEncontradaError);
   });
 
   it('throws ArrecadacaoInputInvalidoError on invalid receiver data', async () => {
-    const campanhaRepository = new CampanhaRepositoryMemory();
+    const { campanhaRepository, recebedorRepository } = createArrecadacaoMemoryRepos();
     const idCampanha = randomUUID();
     await criarCampanha(
-      { campanhaRepository, clock, observability: silentObservability },
+      { campanhaRepository, recebedorRepository, clock, observability: silentObservability },
       {
         id: idCampanha,
         idsAdministradores: [randomUUID()],
@@ -290,7 +291,7 @@ describe('alterarDadosRecebedorCampanha', () => {
     );
     await expect(
       alterarDadosRecebedorCampanha(
-        { campanhaRepository, observability: silentObservability },
+        { campanhaRepository, recebedorRepository, clock, observability: silentObservability },
         {
           idCampanha,
           dadosRecebedor: {
@@ -306,14 +307,14 @@ describe('alterarDadosRecebedorCampanha', () => {
 
 describe('alterarValorContribuicao', () => {
   it('updates valor on disponivel contribution', async () => {
-    const campanhaRepository = new CampanhaRepositoryMemory();
+    const { campanhaRepository, recebedorRepository } = createArrecadacaoMemoryRepos();
     const contribuicaoRepository = new ContribuicaoRepositoryMemory();
     const idCampanha = randomUUID();
     const idOpcao = randomUUID();
     const idContribuicao = randomUUID();
 
     await criarCampanha(
-      { campanhaRepository, clock, observability: silentObservability },
+      { campanhaRepository, recebedorRepository, clock, observability: silentObservability },
       {
         id: idCampanha,
         idsAdministradores: [randomUUID()],
@@ -361,14 +362,14 @@ describe('alterarValorContribuicao', () => {
   });
 
   it('throws when contribution is indisponivel', async () => {
-    const campanhaRepository = new CampanhaRepositoryMemory();
+    const { campanhaRepository, recebedorRepository } = createArrecadacaoMemoryRepos();
     const contribuicaoRepository = new ContribuicaoRepositoryMemory();
     const idCampanha = randomUUID();
     const idOpcao = randomUUID();
     const idContribuicao = randomUUID();
 
     await criarCampanha(
-      { campanhaRepository, clock, observability: silentObservability },
+      { campanhaRepository, recebedorRepository, clock, observability: silentObservability },
       {
         id: idCampanha,
         idsAdministradores: [randomUUID()],
@@ -424,10 +425,10 @@ describe('alterarValorContribuicao', () => {
 
 describe('adicionarOpcaoContribuicao', () => {
   it('adds an option to an existing campaign', async () => {
-    const campanhaRepository = new CampanhaRepositoryMemory();
+    const { campanhaRepository, recebedorRepository } = createArrecadacaoMemoryRepos();
     const idCampanha = randomUUID();
     await criarCampanha(
-      { campanhaRepository, clock, observability: silentObservability },
+      { campanhaRepository, recebedorRepository, clock, observability: silentObservability },
       {
         id: idCampanha,
         idsAdministradores: [randomUUID()],
@@ -452,7 +453,7 @@ describe('adicionarOpcaoContribuicao', () => {
   });
 
   it('throws when campaign is missing', async () => {
-    const campanhaRepository = new CampanhaRepositoryMemory();
+    const { campanhaRepository } = createArrecadacaoMemoryRepos();
     const missingId = randomUUID();
     await expect(
       adicionarOpcaoContribuicao(
@@ -467,11 +468,11 @@ describe('adicionarOpcaoContribuicao', () => {
   });
 
   it('throws on duplicate option id on same campaign', async () => {
-    const campanhaRepository = new CampanhaRepositoryMemory();
+    const { campanhaRepository, recebedorRepository } = createArrecadacaoMemoryRepos();
     const idCampanha = randomUUID();
     const idOpcao = randomUUID();
     await criarCampanha(
-      { campanhaRepository, clock, observability: silentObservability },
+      { campanhaRepository, recebedorRepository, clock, observability: silentObservability },
       {
         id: idCampanha,
         idsAdministradores: [randomUUID()],
@@ -492,7 +493,7 @@ describe('adicionarOpcaoContribuicao', () => {
   });
 
   it('throws ArrecadacaoInputInvalidoError on invalid input', async () => {
-    const campanhaRepository = new CampanhaRepositoryMemory();
+    const { campanhaRepository } = createArrecadacaoMemoryRepos();
     await expect(
       adicionarOpcaoContribuicao(
         { campanhaRepository, observability: silentObservability },
@@ -508,14 +509,14 @@ describe('adicionarOpcaoContribuicao', () => {
 
 describe('criarContribuicao', () => {
   it('creates disponivel contribution with admin input', async () => {
-    const campanhaRepository = new CampanhaRepositoryMemory();
+    const { campanhaRepository, recebedorRepository } = createArrecadacaoMemoryRepos();
     const contribuicaoRepository = new ContribuicaoRepositoryMemory();
     const idCampanha = randomUUID();
     const idOpcao = randomUUID();
     const idContribuicao = randomUUID();
 
     await criarCampanha(
-      { campanhaRepository, clock, observability: silentObservability },
+      { campanhaRepository, recebedorRepository, clock, observability: silentObservability },
       {
         id: idCampanha,
         idsAdministradores: [randomUUID()],
@@ -552,7 +553,7 @@ describe('criarContribuicao', () => {
   });
 
   it('throws ArrecadacaoInputInvalidoError on invalid nome', async () => {
-    const campanhaRepository = new CampanhaRepositoryMemory();
+    const { campanhaRepository } = createArrecadacaoMemoryRepos();
     const contribuicaoRepository = new ContribuicaoRepositoryMemory();
 
     await expect(
@@ -575,7 +576,7 @@ describe('criarContribuicao', () => {
   });
 
   it('throws when campaign is missing', async () => {
-    const campanhaRepository = new CampanhaRepositoryMemory();
+    const { campanhaRepository } = createArrecadacaoMemoryRepos();
     const contribuicaoRepository = new ContribuicaoRepositoryMemory();
     const missingCampanha = randomUUID();
 
@@ -599,12 +600,12 @@ describe('criarContribuicao', () => {
   });
 
   it('throws when option not on campaign', async () => {
-    const campanhaRepository = new CampanhaRepositoryMemory();
+    const { campanhaRepository, recebedorRepository } = createArrecadacaoMemoryRepos();
     const contribuicaoRepository = new ContribuicaoRepositoryMemory();
     const idCampanha = randomUUID();
 
     await criarCampanha(
-      { campanhaRepository, clock, observability: silentObservability },
+      { campanhaRepository, recebedorRepository, clock, observability: silentObservability },
       {
         id: idCampanha,
         idsAdministradores: [randomUUID()],
@@ -633,14 +634,14 @@ describe('criarContribuicao', () => {
   });
 
   it('throws when contribution id already exists', async () => {
-    const campanhaRepository = new CampanhaRepositoryMemory();
+    const { campanhaRepository, recebedorRepository } = createArrecadacaoMemoryRepos();
     const contribuicaoRepository = new ContribuicaoRepositoryMemory();
     const idCampanha = randomUUID();
     const idOpcao = randomUUID();
     const idContribuicao = randomUUID();
 
     await criarCampanha(
-      { campanhaRepository, clock, observability: silentObservability },
+      { campanhaRepository, recebedorRepository, clock, observability: silentObservability },
       {
         id: idCampanha,
         idsAdministradores: [randomUUID()],
@@ -676,14 +677,14 @@ describe('criarContribuicao', () => {
 
 describe('associarContribuinteContribuicao', () => {
   it('associates contributor and marks indisponivel', async () => {
-    const campanhaRepository = new CampanhaRepositoryMemory();
+    const { campanhaRepository, recebedorRepository } = createArrecadacaoMemoryRepos();
     const contribuicaoRepository = new ContribuicaoRepositoryMemory();
     const idCampanha = randomUUID();
     const idOpcao = randomUUID();
     const idContribuicao = randomUUID();
 
     await criarCampanha(
-      { campanhaRepository, clock, observability: silentObservability },
+      { campanhaRepository, recebedorRepository, clock, observability: silentObservability },
       {
         id: idCampanha,
         idsAdministradores: [randomUUID()],
@@ -737,14 +738,14 @@ describe('associarContribuinteContribuicao', () => {
   });
 
   it('throws when contribution is already indisponivel', async () => {
-    const campanhaRepository = new CampanhaRepositoryMemory();
+    const { campanhaRepository, recebedorRepository } = createArrecadacaoMemoryRepos();
     const contribuicaoRepository = new ContribuicaoRepositoryMemory();
     const idCampanha = randomUUID();
     const idOpcao = randomUUID();
     const idContribuicao = randomUUID();
 
     await criarCampanha(
-      { campanhaRepository, clock, observability: silentObservability },
+      { campanhaRepository, recebedorRepository, clock, observability: silentObservability },
       {
         id: idCampanha,
         idsAdministradores: [randomUUID()],

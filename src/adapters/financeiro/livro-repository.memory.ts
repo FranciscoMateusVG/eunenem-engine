@@ -1,13 +1,15 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
+import type { IdCampanha } from '../../domain/arrecadacao/campanha.js';
 import type {
+  DadosRecebedorAtivo,
   IdLancamentoFinanceiro,
   IdPagamentoReferencia,
-  IdRecebedorFinanceiro,
   IdRepasse,
   LancamentoFinanceiro,
   RepasseRecebedor,
 } from '../../domain/financeiro/financeiro.js';
 import { FinanceiroPagamentoJaRegistradoError } from '../../errors/financeiro/pagamento-ja-registrado.error.js';
+import type { RecebedorRepository } from '../arrecadacao/recebedor-repository.js';
 import type { LivroFinanceiroRepository } from './livro-repository.js';
 
 const tracer = trace.getTracer('frame');
@@ -20,6 +22,8 @@ const DB_ATTRS = {
 export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepository {
   private readonly lancamentos = new Map<IdLancamentoFinanceiro, LancamentoFinanceiro>();
   private readonly repasses = new Map<IdRepasse, RepasseRecebedor>();
+
+  constructor(private readonly recebedorRepository?: RecebedorRepository) {}
 
   async saveLancamentos(lancamentos: readonly LancamentoFinanceiro[]): Promise<void> {
     return tracer.startActiveSpan('db.financeiro_livro.lancamentos.save', async (span) => {
@@ -71,17 +75,15 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
     );
   }
 
-  async findLancamentosByIdRecebedor(
-    idRecebedor: IdRecebedorFinanceiro,
+  async findLancamentosByIdCampanha(
+    idCampanha: IdCampanha,
   ): Promise<readonly LancamentoFinanceiro[]> {
     return tracer.startActiveSpan(
-      'db.financeiro_livro.lancamentos.findByIdRecebedor',
+      'db.financeiro_livro.lancamentos.findByIdCampanha',
       async (span) => {
         span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
         try {
-          const result = [...this.lancamentos.values()].filter(
-            (l) => l.idRecebedor === idRecebedor,
-          );
+          const result = [...this.lancamentos.values()].filter((l) => l.idCampanha === idCampanha);
           span.setStatus({ code: SpanStatusCode.OK });
           return result;
         } catch (error: unknown) {
@@ -150,17 +152,38 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
     });
   }
 
-  async findRepassesByIdRecebedor(
-    idRecebedor: IdRecebedorFinanceiro,
-  ): Promise<readonly RepasseRecebedor[]> {
+  async findRepassesByIdCampanha(idCampanha: IdCampanha): Promise<readonly RepasseRecebedor[]> {
+    return tracer.startActiveSpan('db.financeiro_livro.repasses.findByIdCampanha', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        const result = [...this.repasses.values()].filter((r) => r.idCampanha === idCampanha);
+        span.setStatus({ code: SpanStatusCode.OK });
+        return result;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  async findRecebedorAtivoPorIdCampanha(
+    idCampanha: IdCampanha,
+  ): Promise<DadosRecebedorAtivo | undefined> {
     return tracer.startActiveSpan(
-      'db.financeiro_livro.repasses.findByIdRecebedor',
+      'db.financeiro_livro.recebedor.findAtivoPorIdCampanha',
       async (span) => {
         span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
         try {
-          const result = [...this.repasses.values()].filter((r) => r.idRecebedor === idRecebedor);
+          if (!this.recebedorRepository) {
+            span.setStatus({ code: SpanStatusCode.OK });
+            return undefined;
+          }
+          const recebedor = await this.recebedorRepository.findAtivoByCampanhaId(idCampanha);
           span.setStatus({ code: SpanStatusCode.OK });
-          return result;
+          return recebedor?.dadosRecebedor;
         } catch (error: unknown) {
           span.recordException(error as Error);
           span.setStatus({ code: SpanStatusCode.ERROR });

@@ -1,15 +1,8 @@
 import { afterAll, beforeAll } from 'vitest';
 import { CampanhaRepositoryPostgres } from '../../src/adapters/arrecadacao/campanha-repository.postgres.js';
 import { RecebedorRepositoryPostgres } from '../../src/adapters/arrecadacao/recebedor-repository.postgres.js';
-import {
-  createArrecadacaoMemoryRepos,
-  saveCampanhaComRecebedorAtivo,
-} from '../helpers/arrecadacao-repos.js';
-import {
-  describeCampanhaRepositoryConformance,
-  makeCampanha,
-} from '../helpers/campanha-repository.conformance.js';
 import { createTestObservability } from '../helpers/observability.js';
+import { describeRecebedorRepositoryConformance } from '../helpers/recebedor-repository.conformance.js';
 import { createTestDatabase, type TestDatabase } from '../helpers/test-db.js';
 import { truncateArrecadacaoTables } from '../helpers/truncate-arrecadacao.js';
 
@@ -25,24 +18,14 @@ afterAll(async () => {
   await testObs.shutdown();
 });
 
-describeCampanhaRepositoryConformance('Postgres', {
+describeRecebedorRepositoryConformance('Postgres', {
   factory: () => {
     const recebedorRepository = new RecebedorRepositoryPostgres(testDb.db);
-    return new CampanhaRepositoryPostgres(testDb.db, recebedorRepository);
-  },
-  saveCampanha: async (repo, campanha) => {
-    const recebedorRepository = new RecebedorRepositoryPostgres(testDb.db);
-    const repos = {
-      ...createArrecadacaoMemoryRepos(),
-      campanhaRepository: repo,
-      recebedorRepository,
-    };
-    await saveCampanhaComRecebedorAtivo(repos, campanha);
+    const campanhaRepository = new CampanhaRepositoryPostgres(testDb.db, recebedorRepository);
+    return { campanhaRepository, recebedorRepository };
   },
   resetState: () => truncateArrecadacaoTables(testDb.db),
   getSpans: () => testObs.getSpans(),
   resetSpans: () => testObs.reset(),
   expectedDbSystem: 'postgresql',
 });
-
-export { makeCampanha };

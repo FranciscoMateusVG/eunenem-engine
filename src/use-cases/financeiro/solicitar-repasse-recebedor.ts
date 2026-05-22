@@ -35,18 +35,18 @@ export async function solicitarRepasseRecebedor(
         throw new FinanceiroInputInvalidoError(message);
       }
 
-      const { idRepasse, idRecebedor, amountCents } = parsed.data;
+      const { idRepasse, idCampanha, amountCents } = parsed.data;
       span.setAttribute('financeiro.repasse.id', idRepasse);
-      span.setAttribute('financeiro.recebedor.id', idRecebedor);
+      span.setAttribute('financeiro.campanha.id', idCampanha);
       span.setAttribute('financeiro.repasse.amount_cents', amountCents);
 
-      const lancamentos = await livroFinanceiroRepository.findLancamentosByIdRecebedor(idRecebedor);
-      const saldo = calcularSaldoRecebedor(idRecebedor, lancamentos);
+      const lancamentos = await livroFinanceiroRepository.findLancamentosByIdCampanha(idCampanha);
+      const saldo = calcularSaldoRecebedor(idCampanha, lancamentos);
       if (saldo.valorDisponivelCents < amountCents) {
         throw new FinanceiroSaldoDisponivelInsuficienteError(
-          idRecebedor,
-          amountCents,
+          idCampanha,
           saldo.valorDisponivelCents,
+          amountCents,
         );
       }
 
@@ -55,7 +55,7 @@ export async function solicitarRepasseRecebedor(
 
       logger.info('financeiro.repasse.solicitado', {
         idRepasse,
-        idRecebedor,
+        idCampanha,
         amountCents,
       });
 

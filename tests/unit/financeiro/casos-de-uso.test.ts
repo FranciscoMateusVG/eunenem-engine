@@ -25,7 +25,7 @@ const clock = () => fixedDate;
 
 const idPagamento = '550e8400-e29b-41d4-a716-446655443001';
 const idContribuicao = '550e8400-e29b-41d4-a716-446655443002';
-const idRecebedor = '550e8400-e29b-41d4-a716-446655443003';
+const idCampanha = '550e8400-e29b-41d4-a716-446655443003';
 const idRepasse = '550e8400-e29b-41d4-a716-446655443004';
 
 function makeApprovedPaymentInput(
@@ -34,7 +34,7 @@ function makeApprovedPaymentInput(
   return {
     idPagamento,
     idContribuicao,
-    idRecebedor,
+    idCampanha,
     statusPagamento: 'aprovado',
     composicaoValores: {
       contributionAmountCents: 8000,
@@ -57,7 +57,7 @@ describe('financial use cases', () => {
     );
     const saldoRecebedor = await obterSaldoRecebedor(
       { livroFinanceiroRepository, observability: silentObservability },
-      { idRecebedor },
+      { idCampanha },
     );
     const receitaPlataforma = await obterReceitaPlataforma({
       livroFinanceiroRepository,
@@ -70,7 +70,7 @@ describe('financial use cases', () => {
       'credito_receita_plataforma',
     ]);
     expect(saldoRecebedor).toEqual({
-      idRecebedor,
+      idCampanha,
       valorPendenteCents: 8000,
       valorDisponivelCents: 0,
     });
@@ -124,7 +124,7 @@ describe('financial use cases', () => {
       id: '550e8400-e29b-41d4-a716-446655443005',
       idPagamento: '550e8400-e29b-41d4-a716-446655443006',
       idContribuicao: '550e8400-e29b-41d4-a716-446655443007',
-      idRecebedor,
+      idCampanha,
       tipo: 'credito_saldo_recebedor',
       amountCents: 5000,
       status: 'disponivel',
@@ -136,14 +136,14 @@ describe('financial use cases', () => {
       { livroFinanceiroRepository, clock, observability: silentObservability },
       {
         idRepasse,
-        idRecebedor,
+        idCampanha,
         amountCents: 3000,
       },
     );
 
     expect(repasse).toEqual({
       id: idRepasse,
-      idRecebedor,
+      idCampanha,
       amountCents: 3000,
       status: 'solicitado',
       solicitadoEm: fixedDate,
@@ -159,7 +159,7 @@ describe('financial use cases', () => {
         { livroFinanceiroRepository, clock, observability: silentObservability },
         {
           idRepasse,
-          idRecebedor,
+          idCampanha,
           amountCents: 3000,
         },
       ),

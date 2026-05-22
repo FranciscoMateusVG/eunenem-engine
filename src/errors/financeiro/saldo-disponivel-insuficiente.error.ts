@@ -1,18 +1,17 @@
-import type { IdRecebedorFinanceiro, SaldoCentavos } from '../../domain/financeiro/financeiro.js';
-import type { MoneyCents } from '../../domain/money.js';
+import type { IdCampanha } from '../../domain/arrecadacao/campanha.js';
+import type { SaldoCentavos } from '../../domain/financeiro/financeiro.js';
 
 export class FinanceiroSaldoDisponivelInsuficienteError extends Error {
-  public readonly code = 'FINANCEIRO_SALDO_DISPONIVEL_INSUFICIENTE' as const;
+  readonly name = 'FinanceiroSaldoDisponivelInsuficienteError';
 
   constructor(
-    public readonly idRecebedor: IdRecebedorFinanceiro,
-    public readonly valorSolicitadoCents: MoneyCents,
+    public readonly idCampanha: IdCampanha,
     public readonly valorDisponivelCents: SaldoCentavos,
+    public readonly valorSolicitadoCents: SaldoCentavos,
   ) {
     super(
-      `Recebedor "${idRecebedor}" tem ${valorDisponivelCents} centavos disponiveis, ` +
-        `mas foram solicitados ${valorSolicitadoCents} centavos.`,
+      `Campanha "${idCampanha}" tem ${valorDisponivelCents} centavos disponiveis, ` +
+        `mas o repasse solicitado e de ${valorSolicitadoCents} centavos.`,
     );
-    this.name = 'FinanceiroSaldoDisponivelInsuficienteError';
   }
 }

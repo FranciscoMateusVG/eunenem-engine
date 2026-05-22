@@ -1,6 +1,7 @@
+import type { IdCampanha } from '../../domain/arrecadacao/campanha.js';
 import type {
+  DadosRecebedorAtivo,
   IdPagamentoReferencia,
-  IdRecebedorFinanceiro,
   IdRepasse,
   LancamentoFinanceiro,
   RepasseRecebedor,
@@ -14,13 +15,10 @@ export interface LivroFinanceiroRepository {
   findLancamentosByIdPagamento(
     idPagamento: IdPagamentoReferencia,
   ): Promise<readonly LancamentoFinanceiro[]>;
-  findLancamentosByIdRecebedor(
-    idRecebedor: IdRecebedorFinanceiro,
-  ): Promise<readonly LancamentoFinanceiro[]>;
+  findLancamentosByIdCampanha(idCampanha: IdCampanha): Promise<readonly LancamentoFinanceiro[]>;
   findLancamentosReceitaPlataforma(): Promise<readonly LancamentoFinanceiro[]>;
   saveRepasse(repasse: RepasseRecebedor): Promise<void>;
   findRepasseById(idRepasse: IdRepasse): Promise<RepasseRecebedor | undefined>;
-  findRepassesByIdRecebedor(
-    idRecebedor: IdRecebedorFinanceiro,
-  ): Promise<readonly RepasseRecebedor[]>;
+  findRepassesByIdCampanha(idCampanha: IdCampanha): Promise<readonly RepasseRecebedor[]>;
+  findRecebedorAtivoPorIdCampanha(idCampanha: IdCampanha): Promise<DadosRecebedorAtivo | undefined>;
 }

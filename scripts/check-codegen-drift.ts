@@ -20,6 +20,11 @@ const tmpDir = join(import.meta.dirname, '..', 'tmp');
 const tmpPath = join(import.meta.dirname, '..', 'tmp', 'db-types.drift-check.ts');
 const pnpmCommand = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
 
+/** Normalizes line endings so drift check is not fooled by CRLF vs LF on Windows. */
+function normalizeGeneratedSource(content: string): string {
+  return content.replace(/\r\n/g, '\n').trim();
+}
+
 function isPostgresTerminationError(error: Error): boolean {
   return (error as { code?: unknown }).code === '57P01';
 }
@@ -93,9 +98,9 @@ try {
   );
   console.log('   Types generated to temp file.');
 
-  // 4. Compare
-  const committed = readFileSync(committedPath, 'utf-8').trim();
-  const generated = readFileSync(tmpPath, 'utf-8').trim();
+  // 4. Compare (ignore CRLF vs LF — kysely-codegen writes LF; Git may checkout CRLF on Windows)
+  const committed = normalizeGeneratedSource(readFileSync(committedPath, 'utf-8'));
+  const generated = normalizeGeneratedSource(readFileSync(tmpPath, 'utf-8'));
 
   if (committed !== generated) {
     console.error('');

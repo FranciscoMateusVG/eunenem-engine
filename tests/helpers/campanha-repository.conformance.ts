@@ -3,9 +3,11 @@ import type { ReadableSpan } from '@opentelemetry/sdk-trace-base';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { CampanhaRepository } from '../../src/adapters/arrecadacao/campanha-repository.js';
 import type { Campanha } from '../../src/domain/arrecadacao/campanha.js';
+import { saveCampanhaComRecebedorAtivo } from './arrecadacao-repos.js';
 
 interface ConformanceOptions {
   factory: () => CampanhaRepository | Promise<CampanhaRepository>;
+  saveCampanha: (repo: CampanhaRepository, campanha: Campanha) => Promise<void>;
   resetState?: () => Promise<void>;
   getSpans: () => ReadableSpan[];
   resetSpans: () => void;
@@ -26,7 +28,7 @@ export function describeCampanhaRepositoryConformance(name: string, options: Con
 
     it('saves and finds a campaign by ID', async () => {
       const campanha = makeCampanha();
-      await repo.save(campanha);
+      await options.saveCampanha(repo, campanha);
 
       const found = await repo.findById(campanha.id);
       expect(found).toEqual(campanha);
@@ -45,13 +47,13 @@ export function describeCampanhaRepositoryConformance(name: string, options: Con
           { id: randomUUID(), tipo: 'rifa' },
         ],
       });
-      await repo.save(campanha);
+      await options.saveCampanha(repo, campanha);
       const found = await repo.findById(campanha.id);
       expect(found).toEqual(campanha);
     });
 
     it('save emits db.arrecadacao_campanhas.save span', async () => {
-      await repo.save(makeCampanha());
+      await options.saveCampanha(repo, makeCampanha());
       const span = findSpan(options.getSpans(), 'db.arrecadacao_campanhas.save');
       expect(span).toBeDefined();
       expect(span?.attributes['db.system']).toBe(options.expectedDbSystem);
@@ -68,11 +70,12 @@ export function describeCampanhaRepositoryConformance(name: string, options: Con
   });
 }
 
-function makeCampanha(overrides: Partial<Campanha> = {}): Campanha {
+export function makeCampanha(overrides: Partial<Campanha> = {}): Campanha {
+  const idRecebedor = randomUUID();
   return {
     id: randomUUID(),
     idsAdministradores: [randomUUID()],
-    idRecebedor: randomUUID(),
+    idRecebedor,
     dadosRecebedor: {
       nomeTitular: 'Maria Silva',
       tipoChavePix: 'email',
@@ -83,6 +86,21 @@ function makeCampanha(overrides: Partial<Campanha> = {}): Campanha {
     criadaEm: new Date('2026-05-01T12:00:00.000Z'),
     ...overrides,
   };
+}
+
+/** Conformance em memória: campanha já embute recebedor ativo. */
+export function saveCampanhaMemory(repo: CampanhaRepository, campanha: Campanha): Promise<void> {
+  return repo.save(campanha);
+}
+
+/** Conformance Postgres: persiste também a linha em `recebedores`. */
+export async function saveCampanhaPostgres(
+  repos: ReturnType<typeof import('./arrecadacao-repos.js').createArrecadacaoMemoryRepos> & {
+    campanhaRepository: CampanhaRepository;
+  },
+  campanha: Campanha,
+): Promise<void> {
+  await saveCampanhaComRecebedorAtivo(repos, campanha);
 }
 
 function findSpan(spans: ReadableSpan[], name: string): ReadableSpan | undefined {

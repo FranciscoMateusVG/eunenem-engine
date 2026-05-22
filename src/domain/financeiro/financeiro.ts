@@ -1,4 +1,9 @@
 import { z } from 'zod/v4';
+import {
+  DadosRecebedorSchema,
+  type IdCampanha,
+  IdCampanhaSchema,
+} from '../arrecadacao/campanha.js';
 import { MoneyCentsSchema } from '../money.js';
 
 export const IdLancamentoFinanceiroSchema = z.uuid();
@@ -9,9 +14,6 @@ export type IdPagamentoReferencia = z.infer<typeof IdPagamentoReferenciaSchema>;
 
 export const IdContribuicaoReferenciaSchema = z.uuid();
 export type IdContribuicaoReferencia = z.infer<typeof IdContribuicaoReferenciaSchema>;
-
-export const IdRecebedorFinanceiroSchema = z.uuid();
-export type IdRecebedorFinanceiro = z.infer<typeof IdRecebedorFinanceiroSchema>;
 
 export const IdRepasseSchema = z.uuid();
 export type IdRepasse = z.infer<typeof IdRepasseSchema>;
@@ -40,7 +42,7 @@ export type SnapshotComposicaoValoresFinanceiro = Readonly<
 export const RegistrarEfeitosFinanceirosPagamentoAprovadoInputSchema = z.object({
   idPagamento: IdPagamentoReferenciaSchema,
   idContribuicao: IdContribuicaoReferenciaSchema,
-  idRecebedor: IdRecebedorFinanceiroSchema,
+  idCampanha: IdCampanhaSchema,
   statusPagamento: StatusPagamentoFinanceiroSchema,
   composicaoValores: SnapshotComposicaoValoresFinanceiroSchema,
 });
@@ -62,7 +64,7 @@ export const LancamentoFinanceiroSchema = z.object({
   id: IdLancamentoFinanceiroSchema,
   idPagamento: IdPagamentoReferenciaSchema,
   idContribuicao: IdContribuicaoReferenciaSchema,
-  idRecebedor: IdRecebedorFinanceiroSchema.optional(),
+  idCampanha: IdCampanhaSchema.optional(),
   tipo: TipoLancamentoFinanceiroSchema,
   amountCents: MoneyCentsSchema,
   status: StatusLancamentoSchema,
@@ -72,7 +74,7 @@ export const LancamentoFinanceiroSchema = z.object({
 export type LancamentoFinanceiro = Readonly<z.infer<typeof LancamentoFinanceiroSchema>>;
 
 export const SaldoRecebedorSchema = z.object({
-  idRecebedor: IdRecebedorFinanceiroSchema,
+  idCampanha: IdCampanhaSchema,
   valorPendenteCents: SaldoCentavosSchema,
   valorDisponivelCents: SaldoCentavosSchema,
 });
@@ -80,7 +82,7 @@ export const SaldoRecebedorSchema = z.object({
 export type SaldoRecebedor = Readonly<z.infer<typeof SaldoRecebedorSchema>>;
 
 export const ObterSaldoRecebedorInputSchema = z.object({
-  idRecebedor: IdRecebedorFinanceiroSchema,
+  idCampanha: IdCampanhaSchema,
 });
 
 export type ObterSaldoRecebedorInput = Readonly<z.infer<typeof ObterSaldoRecebedorInputSchema>>;
@@ -100,7 +102,7 @@ export type IdsLancamentosFinanceiros = Readonly<z.infer<typeof IdsLancamentosFi
 
 export const SolicitarRepasseRecebedorInputSchema = z.object({
   idRepasse: IdRepasseSchema,
-  idRecebedor: IdRecebedorFinanceiroSchema,
+  idCampanha: IdCampanhaSchema,
   amountCents: MoneyCentsSchema,
 });
 
@@ -113,13 +115,17 @@ export type StatusRepasse = z.infer<typeof StatusRepasseSchema>;
 
 export const RepasseRecebedorSchema = z.object({
   id: IdRepasseSchema,
-  idRecebedor: IdRecebedorFinanceiroSchema,
+  idCampanha: IdCampanhaSchema,
   amountCents: MoneyCentsSchema,
   status: StatusRepasseSchema,
   solicitadoEm: z.date(),
 });
 
 export type RepasseRecebedor = Readonly<z.infer<typeof RepasseRecebedorSchema>>;
+
+/** Snapshot PIX do recebedor ativo (leitura via livro financeiro). */
+export const DadosRecebedorAtivoSchema = DadosRecebedorSchema;
+export type DadosRecebedorAtivo = Readonly<z.infer<typeof DadosRecebedorAtivoSchema>>;
 
 export function validarComposicaoFinanceiraPagamentoAprovado(
   input: RegistrarEfeitosFinanceirosPagamentoAprovadoInput,
@@ -157,7 +163,7 @@ export function criarLancamentosParaPagamentoAprovado(
     id: idsParsed.idLancamentoRecebedor,
     idPagamento: inputParsed.idPagamento,
     idContribuicao: inputParsed.idContribuicao,
-    idRecebedor: inputParsed.idRecebedor,
+    idCampanha: inputParsed.idCampanha,
     tipo: 'credito_saldo_recebedor',
     amountCents: inputParsed.composicaoValores.receiverAmountCents,
     status: 'pendente',
@@ -178,13 +184,13 @@ export function criarLancamentosParaPagamentoAprovado(
 }
 
 export function calcularSaldoRecebedor(
-  idRecebedor: IdRecebedorFinanceiro,
+  idCampanha: IdCampanha,
   lancamentos: readonly LancamentoFinanceiro[],
 ): SaldoRecebedor {
-  const idParsed = IdRecebedorFinanceiroSchema.parse(idRecebedor);
+  const idParsed = IdCampanhaSchema.parse(idCampanha);
   const lancamentosRecebedor = lancamentos
     .map((l) => LancamentoFinanceiroSchema.parse(l))
-    .filter((l) => l.tipo === 'credito_saldo_recebedor' && l.idRecebedor === idParsed);
+    .filter((l) => l.tipo === 'credito_saldo_recebedor' && l.idCampanha === idParsed);
 
   const valorPendenteCents = lancamentosRecebedor
     .filter((l) => l.status === 'pendente')
@@ -195,7 +201,7 @@ export function calcularSaldoRecebedor(
     .reduce<SaldoCentavos>((total, l) => total + l.amountCents, 0);
 
   return SaldoRecebedorSchema.parse({
-    idRecebedor: idParsed,
+    idCampanha: idParsed,
     valorPendenteCents,
     valorDisponivelCents,
   });
@@ -220,7 +226,7 @@ export function criarRepasseRecebedorSolicitado(
 
   return RepasseRecebedorSchema.parse({
     id: parsed.idRepasse,
-    idRecebedor: parsed.idRecebedor,
+    idCampanha: parsed.idCampanha,
     amountCents: parsed.amountCents,
     status: 'solicitado',
     solicitadoEm,

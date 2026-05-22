@@ -19,10 +19,6 @@ export interface CampanhaAdministradores {
 export interface Campanhas {
   criada_em: Generated<Timestamp>;
   id: string;
-  id_recebedor: string;
-  recebedor_chave_pix: string;
-  recebedor_nome_titular: string;
-  recebedor_tipo_chave_pix: string;
   titulo: string;
 }
 
@@ -50,10 +46,21 @@ export interface OpcoesContribuicao {
   tipo: string;
 }
 
+export interface Recebedores {
+  campanha_id: string;
+  chave_pix: string;
+  criada_em: Generated<Timestamp>;
+  id: string;
+  is_active: Generated<boolean>;
+  nome_titular: string;
+  tipo_chave_pix: string;
+}
+
 export interface DB {
   campanha_administradores: CampanhaAdministradores;
   campanhas: Campanhas;
   cats: Cats;
   contribuicoes: Contribuicoes;
   opcoes_contribuicao: OpcoesContribuicao;
+  recebedores: Recebedores;
 }

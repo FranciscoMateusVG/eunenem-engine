@@ -32,12 +32,12 @@ export async function obterSaldoRecebedor(
         throw new FinanceiroInputInvalidoError(message);
       }
 
-      span.setAttribute('financeiro.recebedor.id', parsed.data.idRecebedor);
+      span.setAttribute('financeiro.campanha.id', parsed.data.idCampanha);
 
-      const lancamentos = await livroFinanceiroRepository.findLancamentosByIdRecebedor(
-        parsed.data.idRecebedor,
+      const lancamentos = await livroFinanceiroRepository.findLancamentosByIdCampanha(
+        parsed.data.idCampanha,
       );
-      const saldo = calcularSaldoRecebedor(parsed.data.idRecebedor, lancamentos);
+      const saldo = calcularSaldoRecebedor(parsed.data.idCampanha, lancamentos);
 
       span.setStatus({ code: SpanStatusCode.OK });
       return saldo;
