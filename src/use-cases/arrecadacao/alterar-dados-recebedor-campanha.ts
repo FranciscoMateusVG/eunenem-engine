@@ -1,28 +1,51 @@
+import { randomUUID } from 'node:crypto';
 import { SpanStatusCode } from '@opentelemetry/api';
 import type { CampanhaRepository } from '../../adapters/arrecadacao/campanha-repository.js';
+import type { RecebedorRepository } from '../../adapters/arrecadacao/recebedor-repository.js';
 import {
   type AlterarDadosRecebedorCampanhaInput,
   AlterarDadosRecebedorCampanhaInputSchema,
   type Campanha,
-  campanhaComDadosRecebedor,
+  campanhaComRecebedorAtivo,
 } from '../../domain/arrecadacao/campanha.js';
+import {
+  criarNovoRecebedor,
+  desativarRecebedor,
+  type IdRecebedor,
+} from '../../domain/arrecadacao/recebedor.js';
 import { ArrecadacaoCampanhaNaoEncontradaError } from '../../errors/arrecadacao/campanha-nao-encontrada.error.js';
 import { ArrecadacaoInputInvalidoError } from '../../errors/arrecadacao/input-invalido.error.js';
+import { ArrecadacaoRecebedorNaoEncontradoError } from '../../errors/arrecadacao/recebedor-nao-encontrado.error.js';
 import type { Observability } from '../../observability/observability.js';
+import {
+  type ExecutarTransacaoArrecadacao,
+  executarTransacaoSequencial,
+} from './executar-transacao-arrecadacao.js';
 
 export interface AlterarDadosRecebedorCampanhaDeps {
   readonly campanhaRepository: CampanhaRepository;
+  readonly recebedorRepository: RecebedorRepository;
+  readonly clock: () => Date;
+  readonly gerarIdRecebedor?: () => IdRecebedor;
+  readonly executarTransacao?: ExecutarTransacaoArrecadacao;
   readonly observability: Observability;
 }
 
 /**
- * Altera os dados PIX do recebedor de uma campanha existente (`idRecebedor` inalterado).
+ * Altera os dados PIX do recebedor: desativa o recebedor ativo e cria novo recebedor para a mesma campanha.
  */
 export async function alterarDadosRecebedorCampanha(
   deps: AlterarDadosRecebedorCampanhaDeps,
   input: AlterarDadosRecebedorCampanhaInput,
 ): Promise<Campanha> {
-  const { campanhaRepository, observability } = deps;
+  const {
+    campanhaRepository,
+    recebedorRepository,
+    clock,
+    gerarIdRecebedor = randomUUID,
+    executarTransacao = executarTransacaoSequencial,
+    observability,
+  } = deps;
   const { logger, tracer } = observability;
 
   return tracer.startActiveSpan('alterarDadosRecebedorCampanha', async (span) => {
@@ -43,9 +66,27 @@ export async function alterarDadosRecebedorCampanha(
         throw new ArrecadacaoCampanhaNaoEncontradaError(idCampanha);
       }
 
-      const updated = campanhaComDadosRecebedor(existing, dadosRecebedor);
+      const ativo = await recebedorRepository.findAtivoByCampanhaId(idCampanha);
+      if (!ativo) {
+        throw new ArrecadacaoRecebedorNaoEncontradoError(idCampanha);
+      }
 
-      await campanhaRepository.save(updated);
+      const desativado = desativarRecebedor(ativo);
+      const novo = criarNovoRecebedor({
+        idCampanha,
+        dadosRecebedor,
+        gerarId: gerarIdRecebedor,
+        criadaEm: clock(),
+      });
+
+      await executarTransacao(async (ctx) => {
+        await recebedorRepository.save(desativado, ctx);
+        await recebedorRepository.save(novo, ctx);
+      });
+
+      const updated = campanhaComRecebedorAtivo(existing, novo);
+
+      span.setAttribute('arrecadacao.recebedor.id', updated.idRecebedor);
 
       logger.info('arrecadacao.campanha.recebedor_alterado', {
         idCampanha,

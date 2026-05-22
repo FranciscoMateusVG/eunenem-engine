@@ -6,6 +6,8 @@ export { CampanhaRepositoryPostgres } from './adapters/arrecadacao/campanha-repo
 export type { ContribuicaoRepository } from './adapters/arrecadacao/contribuicao-repository.js';
 export { ContribuicaoRepositoryMemory } from './adapters/arrecadacao/contribuicao-repository.memory.js';
 export { ContribuicaoRepositoryPostgres } from './adapters/arrecadacao/contribuicao-repository.postgres.js';
+export type { RecebedorRepository } from './adapters/arrecadacao/recebedor-repository.js';
+export { RecebedorRepositoryMemory } from './adapters/arrecadacao/recebedor-repository.memory.js';
 // --- Adapter Interfaces (public contract — implement your own) ---
 export type { CatRepository } from './adapters/cat-repository.js';
 export type { Database } from './adapters/database.js';
@@ -47,8 +49,9 @@ export {
   AlterarDadosRecebedorCampanhaInputSchema,
   CriarCampanhaInputSchema,
   campanhaComAdministrador,
-  campanhaComDadosRecebedor,
   campanhaComOpcao,
+  campanhaComRecebedorAtivo,
+  campanhaComRecebedorInicial,
   campanhaPossuiAdministrador,
   campanhaSemAdministrador,
   DadosRecebedorSchema,
@@ -86,13 +89,19 @@ export {
   NomeContribuinteSchema,
   StatusContribuicaoSchema,
 } from './domain/arrecadacao/contribuicao.js';
+export type { Recebedor } from './domain/arrecadacao/recebedor.js';
+export {
+  criarNovoRecebedor,
+  criarRecebedorInicial,
+  desativarRecebedor,
+} from './domain/arrecadacao/recebedor.js';
 export type { Cat, CatId, CatName, CreateCatInput } from './domain/cat.js';
 export { CatIdSchema, CatNameSchema, CreateCatInputSchema } from './domain/cat.js';
 export type {
+  DadosRecebedorAtivo,
   IdContribuicaoReferencia as IdContribuicaoReferenciaFinanceiro,
   IdLancamentoFinanceiro,
   IdPagamentoReferencia,
-  IdRecebedorFinanceiro,
   IdRepasse,
   LancamentoFinanceiro,
   ObterSaldoRecebedorInput,
@@ -113,9 +122,9 @@ export {
   calcularSaldoRecebedor,
   criarLancamentosParaPagamentoAprovado,
   criarRepasseRecebedorSolicitado,
+  DadosRecebedorAtivoSchema,
   IdLancamentoFinanceiroSchema,
   IdPagamentoReferenciaSchema,
-  IdRecebedorFinanceiroSchema,
   IdRepasseSchema,
   IdsLancamentosFinanceirosSchema,
   LancamentoFinanceiroSchema,
@@ -244,6 +253,7 @@ export { ArrecadacaoContribuicaoNaoEncontradaError } from './errors/arrecadacao/
 export { ArrecadacaoInputInvalidoError } from './errors/arrecadacao/input-invalido.error.js';
 export { ArrecadacaoOpcaoContribuicaoNaoEncontradaError } from './errors/arrecadacao/opcao-contribuicao-nao-encontrada.error.js';
 export { ArrecadacaoOpcaoIdDuplicadoError } from './errors/arrecadacao/opcao-id-duplicado.error.js';
+export { ArrecadacaoRecebedorNaoEncontradoError } from './errors/arrecadacao/recebedor-nao-encontrado.error.js';
 export { ArrecadacaoUltimoAdministradorError } from './errors/arrecadacao/ultimo-administrador.error.js';
 export { CatAlreadyExistsError } from './errors/cat-already-exists.error.js';
 export { FinanceiroInputInvalidoError } from './errors/financeiro/input-invalido.error.js';

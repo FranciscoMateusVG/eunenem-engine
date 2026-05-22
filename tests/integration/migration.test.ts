@@ -48,8 +48,15 @@ describe('Migration round-trip', () => {
     const tableNames = tables.map((t: Record<string, unknown>) => t.table_name);
     expect(tableNames).toContain('cats');
     expect(tableNames).toContain('campanhas');
+    expect(tableNames).toContain('recebedores');
 
-    // Migrate down (latest migration first; two steps for arrecadacao)
+    // Migrate down (latest migration first; four steps for arrecadacao)
+    const downRecebedoresIdCarteira = await migrator.migrateDown();
+    expect(downRecebedoresIdCarteira.error).toBeUndefined();
+
+    const downRecebedores = await migrator.migrateDown();
+    expect(downRecebedores.error).toBeUndefined();
+
     const downArrecadacaoAlter = await migrator.migrateDown();
     expect(downArrecadacaoAlter.error).toBeUndefined();
 

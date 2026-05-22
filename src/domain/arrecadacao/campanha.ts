@@ -1,14 +1,14 @@
 import { z } from 'zod/v4';
+import type { IdRecebedor, Recebedor } from './recebedor.js';
+
+export { type IdRecebedor, IdRecebedorSchema } from './recebedor.js';
 
 /**
  * Agregado **Campanha** (BC Arrecadação): raiz que agrupa sacolas (opções por `tipo`).
- * Administradores referenciam contas do sistema; recebedor é destino PIX externo (`dadosRecebedor` + `idRecebedor`).
+ * Dados PIX do recebedor vivem em `Recebedor` (tabela `recebedores`, histórico por campanha).
  */
 export const IdContaSchema = z.uuid();
 export type IdConta = z.infer<typeof IdContaSchema>;
-
-export const IdRecebedorSchema = z.uuid();
-export type IdRecebedor = z.infer<typeof IdRecebedorSchema>;
 
 export const IdCampanhaSchema = z.uuid();
 export type IdCampanha = z.infer<typeof IdCampanhaSchema>;
@@ -175,13 +175,25 @@ export function campanhaComOpcao(campanha: Campanha, opcao: OpcaoContribuicao): 
   };
 }
 
-/** Substitui os dados do recebedor, imutavelmente. `idRecebedor` permanece inalterado. */
-export function campanhaComDadosRecebedor(
-  campanha: Campanha,
-  dadosRecebedor: DadosRecebedor,
-): Campanha {
+/** Projeta na campanha o recebedor ativo. */
+export function campanhaComRecebedorAtivo(campanha: Campanha, recebedor: Recebedor): Campanha {
   return {
     ...campanha,
-    dadosRecebedor,
+    idRecebedor: recebedor.id,
+    dadosRecebedor: recebedor.dadosRecebedor,
+  };
+}
+
+/** Monta campanha a partir de metadados e recebedor inicial ativo. */
+export function campanhaComRecebedorInicial(
+  params: Omit<Campanha, 'idRecebedor' | 'dadosRecebedor'> & {
+    readonly recebedor: Recebedor;
+  },
+): Campanha {
+  const { recebedor, ...rest } = params;
+  return {
+    ...rest,
+    idRecebedor: recebedor.id,
+    dadosRecebedor: recebedor.dadosRecebedor,
   };
 }

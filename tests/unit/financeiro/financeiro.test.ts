@@ -10,7 +10,7 @@ import {
 
 const idPagamento = '550e8400-e29b-41d4-a716-446655441001';
 const idContribuicao = '550e8400-e29b-41d4-a716-446655441002';
-const idRecebedor = '550e8400-e29b-41d4-a716-446655441003';
+const idCampanha = '550e8400-e29b-41d4-a716-446655441003';
 const idLancamentoRecebedor = '550e8400-e29b-41d4-a716-446655441004';
 const idLancamentoReceitaPlataforma = '550e8400-e29b-41d4-a716-446655441005';
 const idRepasse = '550e8400-e29b-41d4-a716-446655441006';
@@ -19,7 +19,7 @@ const criadoEm = new Date('2026-05-01T12:00:00.000Z');
 const inputPagamentoAprovado: RegistrarEfeitosFinanceirosPagamentoAprovadoInput = {
   idPagamento,
   idContribuicao,
-  idRecebedor,
+  idCampanha,
   statusPagamento: 'aprovado',
   composicaoValores: {
     contributionAmountCents: 8000,
@@ -43,7 +43,7 @@ describe('criarLancamentosParaPagamentoAprovado', () => {
         id: idLancamentoRecebedor,
         idPagamento,
         idContribuicao,
-        idRecebedor,
+        idCampanha,
         tipo: 'credito_saldo_recebedor',
         amountCents: 8000,
         status: 'pendente',
@@ -122,13 +122,11 @@ describe('financial summaries', () => {
       amountCents: 2000,
     };
 
-    expect(calcularSaldoRecebedor(idRecebedor, [lancamentoPendente, lancamentoDisponivel])).toEqual(
-      {
-        idRecebedor,
-        valorPendenteCents: 8000,
-        valorDisponivelCents: 2000,
-      },
-    );
+    expect(calcularSaldoRecebedor(idCampanha, [lancamentoPendente, lancamentoDisponivel])).toEqual({
+      idCampanha,
+      valorPendenteCents: 8000,
+      valorDisponivelCents: 2000,
+    });
   });
 
   it('accumulates only platform revenue entries', () => {
@@ -148,14 +146,14 @@ describe('criarRepasseRecebedorSolicitado', () => {
       criarRepasseRecebedorSolicitado(
         {
           idRepasse,
-          idRecebedor,
+          idCampanha,
           amountCents: 2000,
         },
         criadoEm,
       ),
     ).toEqual({
       id: idRepasse,
-      idRecebedor,
+      idCampanha,
       amountCents: 2000,
       status: 'solicitado',
       solicitadoEm: criadoEm,

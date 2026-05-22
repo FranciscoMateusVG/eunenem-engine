@@ -1,6 +1,12 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
-import type { Campanha, IdCampanha } from '../../domain/arrecadacao/campanha.js';
+import {
+  type Campanha,
+  campanhaComRecebedorAtivo,
+  type IdCampanha,
+} from '../../domain/arrecadacao/campanha.js';
 import type { CampanhaRepository } from './campanha-repository.js';
+import type { RecebedorRepository } from './recebedor-repository.js';
+import type { ArrecadacaoRepositoryContext } from './repository-context.js';
 
 const tracer = trace.getTracer('frame');
 
@@ -12,7 +18,9 @@ const DB_ATTRS = {
 export class CampanhaRepositoryMemory implements CampanhaRepository {
   private readonly campanhas = new Map<IdCampanha, Campanha>();
 
-  async save(campanha: Campanha): Promise<void> {
+  constructor(private readonly recebedorRepository?: RecebedorRepository) {}
+
+  async save(campanha: Campanha, _context?: ArrecadacaoRepositoryContext): Promise<void> {
     return tracer.startActiveSpan('db.arrecadacao_campanhas.save', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPSERT' });
       try {
@@ -28,13 +36,32 @@ export class CampanhaRepositoryMemory implements CampanhaRepository {
     });
   }
 
-  async findById(id: IdCampanha): Promise<Campanha | undefined> {
+  async findById(
+    id: IdCampanha,
+    _context?: ArrecadacaoRepositoryContext,
+  ): Promise<Campanha | undefined> {
     return tracer.startActiveSpan('db.arrecadacao_campanhas.findById', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
       try {
-        const result = this.campanhas.get(id);
+        const campanha = this.campanhas.get(id);
+        if (!campanha) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return undefined;
+        }
+
+        if (!this.recebedorRepository) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return campanha;
+        }
+
+        const recebedorAtivo = await this.recebedorRepository.findAtivoByCampanhaId(id);
+        if (!recebedorAtivo) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return undefined;
+        }
+
         span.setStatus({ code: SpanStatusCode.OK });
-        return result;
+        return campanhaComRecebedorAtivo(campanha, recebedorAtivo);
       } catch (error: unknown) {
         span.recordException(error as Error);
         span.setStatus({ code: SpanStatusCode.ERROR });

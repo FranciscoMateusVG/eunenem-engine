@@ -1,30 +1,45 @@
 import { randomUUID } from 'node:crypto';
 import { SpanStatusCode } from '@opentelemetry/api';
 import type { CampanhaRepository } from '../../adapters/arrecadacao/campanha-repository.js';
-import type {
-  Campanha,
-  CriarCampanhaInput,
-  IdRecebedor,
+import type { RecebedorRepository } from '../../adapters/arrecadacao/recebedor-repository.js';
+import {
+  type Campanha,
+  type CriarCampanhaInput,
+  CriarCampanhaInputSchema,
+  campanhaComRecebedorInicial,
 } from '../../domain/arrecadacao/campanha.js';
-import { CriarCampanhaInputSchema } from '../../domain/arrecadacao/campanha.js';
+import { criarRecebedorInicial, type IdRecebedor } from '../../domain/arrecadacao/recebedor.js';
 import { ArrecadacaoInputInvalidoError } from '../../errors/arrecadacao/input-invalido.error.js';
 import type { Observability } from '../../observability/observability.js';
+import {
+  type ExecutarTransacaoArrecadacao,
+  executarTransacaoSequencial,
+} from './executar-transacao-arrecadacao.js';
 
 export interface CriarCampanhaDeps {
   readonly campanhaRepository: CampanhaRepository;
+  readonly recebedorRepository: RecebedorRepository;
   readonly clock: () => Date;
   readonly gerarIdRecebedor?: () => IdRecebedor;
+  readonly executarTransacao?: ExecutarTransacaoArrecadacao;
   readonly observability: Observability;
 }
 
 /**
- * Cria uma campanha de arrecadação (agregado vazio de opções).
+ * Cria uma campanha de arrecadação (agregado vazio de opções) e o recebedor inicial ativo.
  */
 export async function criarCampanha(
   deps: CriarCampanhaDeps,
   input: CriarCampanhaInput,
 ): Promise<Campanha> {
-  const { campanhaRepository, clock, gerarIdRecebedor = randomUUID, observability } = deps;
+  const {
+    campanhaRepository,
+    recebedorRepository,
+    clock,
+    gerarIdRecebedor = randomUUID,
+    executarTransacao = executarTransacaoSequencial,
+    observability,
+  } = deps;
   const { logger, tracer } = observability;
 
   return tracer.startActiveSpan('criarCampanha', async (span) => {
@@ -46,19 +61,27 @@ export async function criarCampanha(
         parsed.data.dadosRecebedor.tipoChavePix,
       );
 
-      const idRecebedor = gerarIdRecebedor();
+      const criadaEm = clock();
+      const recebedor = criarRecebedorInicial({
+        id: gerarIdRecebedor(),
+        idCampanha: parsed.data.id,
+        dadosRecebedor: parsed.data.dadosRecebedor,
+        criadaEm,
+      });
 
-      const campanha: Campanha = {
+      const campanha = campanhaComRecebedorInicial({
         id: parsed.data.id,
         idsAdministradores: parsed.data.idsAdministradores,
-        idRecebedor,
-        dadosRecebedor: parsed.data.dadosRecebedor,
         titulo: parsed.data.titulo,
         opcoes: [],
-        criadaEm: clock(),
-      };
+        criadaEm,
+        recebedor,
+      });
 
-      await campanhaRepository.save(campanha);
+      await executarTransacao(async (ctx) => {
+        await campanhaRepository.save(campanha, ctx);
+        await recebedorRepository.save(recebedor, ctx);
+      });
 
       logger.info('arrecadacao.campanha.criada', {
         idCampanha: campanha.id,

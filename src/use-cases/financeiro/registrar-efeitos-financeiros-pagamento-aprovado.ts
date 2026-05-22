@@ -36,12 +36,12 @@ export async function registrarEfeitosFinanceirosPagamentoAprovado(
         throw new FinanceiroInputInvalidoError(message);
       }
 
-      const { idPagamento, idContribuicao, idRecebedor, statusPagamento, composicaoValores } =
+      const { idPagamento, idContribuicao, idCampanha, statusPagamento, composicaoValores } =
         parsed.data;
 
       span.setAttribute('financeiro.pagamento.id', idPagamento);
       span.setAttribute('financeiro.contribuicao.id', idContribuicao);
-      span.setAttribute('financeiro.recebedor.id', idRecebedor);
+      span.setAttribute('financeiro.campanha.id', idCampanha);
 
       if (statusPagamento !== 'aprovado') {
         throw new FinanceiroPagamentoNaoAprovadoError(idPagamento, statusPagamento);
@@ -73,7 +73,7 @@ export async function registrarEfeitosFinanceirosPagamentoAprovado(
       logger.info('financeiro.efeitos.registrados', {
         idPagamento,
         idContribuicao,
-        idRecebedor,
+        idCampanha,
         receiverAmountCents: composicaoValores.receiverAmountCents,
         platformRevenueAmountCents: composicaoValores.feeAmountCents,
       });
