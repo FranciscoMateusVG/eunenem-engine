@@ -1,8 +1,7 @@
-import { z } from 'zod/v4';
-import type { DadosRecebedor, IdCampanha } from './campanha.js';
+import type { DadosRecebedor } from './dados-recebedor.js';
+import type { IdCampanha, IdRecebedor } from './ids.js';
 
-export const IdRecebedorSchema = z.uuid();
-export type IdRecebedor = z.infer<typeof IdRecebedorSchema>;
+export { type IdRecebedor, IdRecebedorSchema } from './ids.js';
 
 /** Recebedor com dados PIX auditáveis; um recebedor ativo por `idCampanha`. */
 export interface Recebedor {
