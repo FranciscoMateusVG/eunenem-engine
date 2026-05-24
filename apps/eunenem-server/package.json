@@ -1,0 +1,31 @@
+{
+  "name": "eunenem-server",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "eunenem frontend — Hono serves SSR React with esbuild-bundled hydration. Side-deploy of the engine repo.",
+  "scripts": {
+    "dev": "concurrently -k -n build,server -c blue,magenta \"node build.mjs --watch\" \"tsx watch server.tsx\"",
+    "build": "node build.mjs",
+    "start": "NODE_ENV=production tsx server.tsx",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.7",
+    "hono": "^4.6.14",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "sonner": "^2.0.7"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.0.0",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "concurrently": "^9.1.0",
+    "esbuild": "^0.24.0",
+    "tailwindcss": "^4.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

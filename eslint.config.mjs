@@ -14,6 +14,13 @@ import { projectStructureParser, projectStructurePlugin } from 'eslint-plugin-pr
 import { folderStructureConfig } from './folder-structure.mjs';
 
 export default [
+  // Global ignores — in flat config, an entry with only `ignores` is global
+  // (vs `ignores` paired with `files`, which only filters within that block).
+  // Side-deploy apps under apps/ have their own tooling and must not be
+  // walked by the engine's structural gate.
+  {
+    ignores: ['apps/**', 'dist/**', 'coverage/**', 'node_modules/**', 'tmp/**'],
+  },
   {
     files: [
       'src/**/*.{ts,mts}',

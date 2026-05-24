@@ -1,0 +1,1063 @@
+@import "tailwindcss";
+
+@source "./pages/**/*.tsx";
+@source "./pages/**/*.ts";
+@source "./server.tsx";
+@source "./client.tsx";
+
+/* =================================================================
+ * EuNeném — Design tokens (Visual Identity Prompt §2)
+ * Scrapbook-of-maternity palette: cream paper, lilac primary,
+ * marca-texto yellow, plum-tinted shadows. Zero saturated baby pink/
+ * blue cliches. Treat this block as the design contract.
+ * ================================================================= */
+
+:root {
+  /* Papel / fundos */
+  --cream: #f8f7f6;
+  --cream-2: #efece9;
+  --paper: #ffffff;
+
+  /* Lilás (primária) — overridable via TweaksPanel */
+  --lilac: #c9a5d8;
+  --lilac-deep: #a77bbe;
+  --lilac-soft: #e8d5f0;
+
+  /* Acentos quentes */
+  --pink: #f4b6cd;
+  --pink-soft: #fbe0ea;
+  --coral-pink: #e78fa7;
+
+  /* Acentos frescos */
+  --green: #c7dc6e;
+  --yellow: #f7d560;
+  --blue: #9cd7dd;
+
+  /* Tinta (texto) — nunca preto puro; plum escuro como "preto" da marca */
+  --plum: #6b3c5e;
+  --ink: #5c3a4f;
+  --ink-soft: #7a5a6c;
+  --ink-mute: #a18a99;
+  --line: #efe2e9;
+
+  /* Sombras — sempre em tom plum, nunca cinza puro */
+  --shadow-sm: 0 2px 10px rgba(107, 60, 94, 0.06);
+  --shadow-md: 0 14px 36px rgba(107, 60, 94, 0.1);
+  --shadow-lg: 0 24px 56px rgba(107, 60, 94, 0.16);
+  --shadow-cta: 0 12px 28px rgba(167, 123, 190, 0.4);
+}
+
+/* =================================================================
+ * Tailwind v4 token bridge — `@theme inline` exposes the CSS vars as
+ * utility-class color values so `bg-cream`, `text-plum`, etc. work.
+ * ================================================================= */
+
+@theme inline {
+  --color-cream: var(--cream);
+  --color-cream-2: var(--cream-2);
+  --color-paper: var(--paper);
+
+  --color-lilac: var(--lilac);
+  --color-lilac-deep: var(--lilac-deep);
+  --color-lilac-soft: var(--lilac-soft);
+
+  --color-pink: var(--pink);
+  --color-pink-soft: var(--pink-soft);
+  --color-coral-pink: var(--coral-pink);
+
+  --color-green: var(--green);
+  --color-yellow: var(--yellow);
+  --color-blue: var(--blue);
+
+  --color-plum: var(--plum);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-ink-mute: var(--ink-mute);
+  --color-line: var(--line);
+
+  --font-patrick-hand: var(--font-patrick-hand);
+  --font-caveat: var(--font-caveat);
+  --font-dm-sans: var(--font-dm-sans);
+}
+
+/* =================================================================
+ * Base typography (Visual Identity Prompt §3)
+ * ================================================================= */
+
+body {
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  color: var(--ink);
+  background: var(--cream);
+  line-height: 1.55;
+  font-weight: 500;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-patrick-hand), cursive;
+  color: var(--plum);
+  font-weight: 600;
+  text-wrap: balance;
+}
+
+/* =================================================================
+ * Custom utility classes (Visual Identity Prompt §5)
+ * Used widely across components — keep them in sync with the spec.
+ * ================================================================= */
+
+/* Eyebrow — Caveat, rotated, coral-pink/lilac-deep accent.
+ * Used as section pretitle / scrapbook signature. */
+.eyebrow {
+  font-family: var(--font-caveat), cursive;
+  color: var(--lilac-deep);
+  font-size: 30px;
+  transform: rotate(-2deg);
+  display: inline-block;
+  line-height: 1;
+  font-weight: 600;
+}
+
+.eyebrow-coral {
+  color: var(--coral-pink);
+}
+
+/* Marca-texto — yellow highlight behind keywords in headings.
+ * Apply on <span> wrapping the keyword. Never on the full phrase. */
+.hl {
+  background: linear-gradient(
+    180deg,
+    transparent 62%,
+    var(--yellow) 62%,
+    var(--yellow) 92%,
+    transparent 92%
+  );
+  padding: 0 4px;
+}
+
+/* Primary CTA — pill, lilac → lilac-deep on hover, white uppercase
+ * text, plum-tinted shadow. */
+.btn-lilac {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 24px;
+  border-radius: 999px;
+  background: var(--lilac);
+  color: #fff;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  box-shadow: var(--shadow-cta);
+  transition: background 0.2s ease, transform 0.2s ease;
+  cursor: pointer;
+  border: none;
+}
+
+.btn-lilac:hover {
+  background: var(--lilac-deep);
+  transform: translateY(-1px);
+}
+
+.btn-lilac:disabled {
+  background: var(--cream-2);
+  color: var(--ink-mute);
+  box-shadow: none;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Outline CTA — white, lilac border, lilac-deep text. */
+.btn-outline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 22px;
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--lilac-deep);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 2px solid var(--lilac);
+  transition: background 0.2s ease;
+  cursor: pointer;
+}
+
+.btn-outline:hover {
+  background: var(--lilac-soft);
+}
+
+/* =================================================================
+ * Animations (Visual Identity Prompt §8)
+ * ================================================================= */
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+@keyframes livePulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scale(1.4);
+    opacity: 0.5;
+  }
+}
+
+@keyframes doodleSway {
+  0%,
+  100% {
+    transform: rotate(var(--r, 0deg)) translateY(0);
+  }
+  50% {
+    transform: rotate(var(--r, 0deg)) translateY(-6px);
+  }
+}
+
+@keyframes twinkle {
+  0%,
+  100% {
+    transform: scale(1) rotate(0deg);
+    opacity: 0.85;
+  }
+  50% {
+    transform: scale(1.15) rotate(15deg);
+    opacity: 1;
+  }
+}
+
+.anim-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+.anim-live-pulse {
+  animation: livePulse 2s ease-in-out infinite;
+}
+
+.anim-doodle-sway {
+  animation: doodleSway 6s ease-in-out infinite;
+}
+
+.anim-twinkle {
+  animation: twinkle 3.5s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .anim-float,
+  .anim-live-pulse,
+  .anim-doodle-sway,
+  .anim-twinkle {
+    animation: none;
+  }
+}
+
+/* =================================================================
+ * Page container helper — Visual Identity Prompt §4
+ * (max-width 1200, padding-x 24).
+ * ================================================================= */
+
+.eu-container {
+  max-width: 1200px;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 24px;
+  padding-right: 24px;
+}
+
+/* Section vertical rhythm (96px). */
+.eu-section {
+  padding-top: 96px;
+  padding-bottom: 96px;
+  position: relative;
+  /* aperture-hz7p — clip horizontal overflow per-section so scrapbook
+     decorations (rotated stickers, off-grid stamps, tape) do not
+     propagate to document-level scroll on mobile. Each section still
+     scrolls vertically; decorations are visibly clipped at the section
+     bounds when they would otherwise overflow viewport. */
+  overflow-x: clip;
+}
+
+@media (max-width: 640px) {
+  .eu-section {
+    padding-top: 64px;
+    padding-bottom: 64px;
+  }
+}
+
+/* =================================================================
+ * aperture-i01o — Painel do Criador (Thacy v3 mockup).
+ * Mobile-first scoped class block. Tokens come from :root above; no
+ * new colours added — palette flows through TweaksContext via the
+ * existing --lilac/--lilac-deep/--lilac-soft/--coral-pink vars.
+ * ================================================================= */
+
+/* ----- TOPBAR ----- */
+
+/* Wordmark — Thacy's logo.png at intrinsic 174×68; height-controlled
+ * so the topbar's vertical rhythm matches the rest of the v3 mockup.
+ * Operator picked Option B (real brand asset) over the v1 Patrick
+ * Hand + heart wordmark on 2026-05-17. `width: auto` preserves the
+ * 174/68 ratio (~2.56:1) — at 34px height the rendered width is
+ * ~87px, well within the topbar's mobile padding. */
+.painel-logo-img {
+  height: 34px;
+  width: auto;
+  display: block;
+}
+
+.painel-topbar-nav {
+  display: none;
+  align-items: center;
+  gap: 4px;
+}
+.painel-topbar-link {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 8px 14px;
+  border-radius: 999px;
+  transition: background 0.2s ease, color 0.2s ease;
+  white-space: nowrap;
+}
+.painel-topbar-link:hover,
+.painel-topbar-link.active {
+  background: var(--lilac-soft);
+  color: var(--lilac-deep);
+}
+.painel-icon-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  display: grid;
+  place-items: center;
+  color: var(--ink-soft);
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  position: relative;
+  transition: transform 0.2s ease, color 0.2s ease;
+}
+.painel-icon-btn:hover {
+  color: var(--lilac-deep);
+}
+.painel-icon-btn:active {
+  transform: scale(0.94);
+}
+
+/* ----- APP SHELL ----- */
+.painel-app {
+  max-width: 520px;
+  margin: 0 auto;
+  min-height: 100dvh;
+  /* aperture-gdjo — the TweaksPanel toggle (PR #1, TweaksPanel.tsx)
+   * is position:fixed bottom:20 right:20 and is ~36px tall, so its
+   * top edge sits at viewport-bottom - 56. The previous padding of
+   * 32px left the last interactive row at viewport-bottom - 32 when
+   * the user scrolled to the page bottom — squarely inside the
+   * toggle's vertical range, blocking taps and visually covering
+   * the last row's right-edge chevron/badge. Bumping to 96px
+   * guarantees the last row clears the toggle by 40px even on the
+   * narrowest phones, and env(safe-area-inset-bottom) is added on
+   * top so notched devices contribute their own physical inset
+   * rather than eating into the visual clearance.
+   *
+   * Route-scoped: .painel-app only exists on /painel/[slug], so this
+   * fix doesn't change the v1 surfaces (/ and /pagina/[slug]) where
+   * the toggle has decorative bottom-right space to sit on per
+   * Sterling's i01o review note. */
+  padding-bottom: calc(96px + env(safe-area-inset-bottom));
+  /* layout.tsx wraps the page in a `flex flex-col` body. Flex items
+   * default to `min-width: auto` which resolves to the intrinsic
+   * min-content of their contents — meaning the share-link pill's
+   * "compartilhar" button would force .painel-app past 520px even at
+   * 375px viewport (cascade-of-three-overflow pattern from
+   * aperture-hz7p). `min-width: 0` releases the flex item to shrink
+   * past its content's min-content; `width: 100%` makes the mobile
+   * fluid behaviour explicit. The horizontal-clip is the same
+   * defensive pattern .eu-section uses for the v1 scrapbook
+   * decorations — keeps any rogue child from inducing document-level
+   * horizontal scroll on mobile. */
+  min-width: 0;
+  width: 100%;
+  overflow-x: clip;
+}
+
+/* ----- HEADER CARD ----- */
+.painel-header-card {
+  margin: 18px 16px 0;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  position: relative;
+}
+.painel-header-card::after {
+  content: "";
+  position: absolute;
+  right: -60px;
+  top: -60px;
+  width: 240px;
+  height: 240px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    var(--lilac-soft) 0%,
+    transparent 70%
+  );
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.painel-hc-top {
+  padding: 22px 22px 16px;
+  position: relative;
+  z-index: 1;
+}
+.painel-hc-greeting {
+  font-family: var(--font-caveat), cursive;
+  color: var(--lilac-deep);
+  font-size: 22px;
+  line-height: 1;
+  display: inline-block;
+  transform: rotate(-1.5deg);
+  margin-bottom: 4px;
+}
+.painel-hc-title {
+  font-size: 34px;
+  line-height: 1.05;
+  margin: 4px 0 14px;
+}
+
+/* Share-link pill (URL + copy + share). */
+.painel-share-link {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: var(--cream);
+  border: 1.5px solid var(--lilac-soft);
+  border-radius: 999px;
+  padding: 5px 5px 5px 16px;
+  max-width: 100%;
+  overflow: hidden;
+}
+.painel-share-link-lbl {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--ink-mute);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-right: 10px;
+  white-space: nowrap;
+}
+.painel-share-link-url {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--plum);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.painel-share-link-url strong {
+  color: var(--lilac-deep);
+  font-weight: 700;
+}
+.painel-share-link-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-left: 6px;
+}
+.painel-share-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: transform 0.2s ease, background 0.2s ease;
+  font-family: inherit;
+}
+.painel-share-btn.primary {
+  background: var(--lilac);
+  color: #fff;
+  box-shadow: var(--shadow-cta);
+}
+.painel-share-btn.primary:hover {
+  background: var(--lilac-deep);
+  transform: translateY(-1px);
+}
+.painel-share-btn.ghost {
+  background: transparent;
+  color: var(--ink-soft);
+  padding: 8px 10px;
+}
+.painel-share-btn.ghost:hover {
+  background: var(--cream-2);
+  color: var(--lilac-deep);
+}
+.painel-share-btn.copied {
+  background: var(--green);
+  color: #3b4d12;
+  box-shadow: none;
+}
+.painel-share-btn-label-default,
+.painel-share-btn-label-copied {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.painel-share-btn-label-copied {
+  display: none;
+}
+.painel-share-btn.copied .painel-share-btn-label-default {
+  display: none;
+}
+.painel-share-btn.copied .painel-share-btn-label-copied {
+  display: inline-flex;
+}
+
+/* Stats strip (countdown · recebido + CTA). */
+.painel-hc-stats {
+  display: grid;
+  grid-template-columns: 1fr;
+  border-top: 1px solid var(--line);
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    color-mix(in srgb, var(--lilac-soft) 18%, transparent) 100%
+  );
+  position: relative;
+  z-index: 1;
+}
+.painel-hc-stat {
+  padding: 18px 20px;
+  position: relative;
+}
+.painel-hc-stat + .painel-hc-stat {
+  border-top: 1px solid var(--line);
+}
+.painel-hc-stat-lbl {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--ink-mute);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.painel-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #8aa53a; /* green-deep, used only here */
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.painel-live::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #2ba84a;
+  box-shadow: 0 0 0 0 rgba(43, 168, 74, 0.6);
+}
+
+/* Countdown numerals. */
+.painel-cd-units {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.painel-cd-unit {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+}
+.painel-cd-num {
+  font-family: var(--font-patrick-hand), cursive;
+  color: var(--plum);
+  font-size: 34px;
+  line-height: 1;
+}
+.painel-cd-lbl {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--plum);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-top: 2px;
+  opacity: 0.65;
+}
+.painel-cd-date {
+  margin-top: 8px;
+  font-family: var(--font-caveat), cursive;
+  font-size: 18px;
+  transform: rotate(-1deg);
+  display: inline-block;
+  color: var(--coral-pink);
+  white-space: nowrap;
+}
+
+/* Recebido amount + CTA. */
+.painel-hc-amount {
+  font-family: var(--font-patrick-hand), cursive;
+  color: var(--plum);
+  font-size: 34px;
+  line-height: 1;
+}
+.painel-hc-amount small {
+  font-size: 16px;
+  color: var(--ink-soft);
+  font-weight: 500;
+  font-family: var(--font-dm-sans), sans-serif;
+  margin-right: 4px;
+  vertical-align: 3px;
+}
+.painel-hc-cents {
+  font-size: 14px;
+  color: var(--ink-mute);
+  font-family: var(--font-dm-sans), sans-serif;
+  font-weight: 500;
+}
+.painel-hc-amount-sub {
+  font-size: 12px;
+  color: var(--ink-mute);
+  margin-top: 6px;
+}
+.painel-hc-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 14px;
+  align-self: flex-start;
+  background: var(--green);
+  color: #3b4d12;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 12px 22px;
+  border-radius: 999px;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(199, 220, 110, 0.45);
+  transition: transform 0.2s ease, box-shadow 0.2s ease,
+    background 0.2s ease;
+  position: relative;
+  z-index: 1;
+  font-family: inherit;
+}
+.painel-hc-cta:hover {
+  background: #bdd361;
+  transform: translateY(-2px);
+  box-shadow: 0 10px 24px rgba(199, 220, 110, 0.55);
+}
+.painel-hc-cta:active {
+  transform: translateY(0);
+}
+
+/* ----- MENU GRID ----- */
+.painel-menu-wrap {
+  padding: 8px 16px 0;
+}
+.painel-menu-grid {
+  display: grid;
+  /* `1fr` resolves to `minmax(auto, 1fr)` — `auto` minimum is the
+   * track's widest item's min-content. With Patrick Hand row labels
+   * the min-content of a .painel-row exceeds 375px on narrow phones,
+   * so the column grows past the container and rows visually bleed
+   * past the screen edge (clipped by .painel-app's overflow-x:clip,
+   * but the badges + chevron get clipped too — bad UX). `minmax(0,
+   * 1fr)` forces the column to allow shrinking below min-content;
+   * the .painel-row-sub's `overflow: hidden + text-overflow:
+   * ellipsis` then handles graceful truncation. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+}
+.painel-group-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-mute);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  margin: 18px 6px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.painel-group-title::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--line), transparent);
+}
+.painel-group:first-child .painel-group-title {
+  margin-top: 14px;
+}
+
+.painel-list {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+.painel-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  position: relative;
+  transition: background 0.18s ease;
+  min-height: 60px;
+  text-decoration: none;
+  color: inherit;
+}
+.painel-row + .painel-row {
+  border-top: 1px solid var(--line);
+}
+.painel-row:hover {
+  background: var(--cream-2);
+}
+.painel-row-icon {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 12px;
+  background: var(--cream-2);
+  display: grid;
+  place-items: center;
+  color: var(--ink-soft);
+  transition: background 0.18s ease, color 0.18s ease;
+}
+.painel-row:hover .painel-row-icon {
+  background: var(--lilac-soft);
+  color: var(--lilac-deep);
+}
+.painel-row-body {
+  flex: 1;
+  /* min-width:0 lets the flex item shrink past its content's
+   * min-content. The .painel-row-sub below has overflow:hidden +
+   * text-overflow:ellipsis so it truncates cleanly when squeezed. */
+  min-width: 0;
+}
+.painel-row-label {
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 19px;
+  color: var(--plum);
+  line-height: 1.15;
+  /* Belt-and-braces: even though .painel-row-body has min-width:0,
+   * Patrick Hand renders cursive glyphs wider than typical and a
+   * single long word like "presentes recebidos" can still drive the
+   * label past the body's allotted width. Allow word-breaking so
+   * extreme narrow viewports never clip a label mid-character. */
+  overflow-wrap: anywhere;
+}
+.painel-row-sub {
+  font-size: 12.5px;
+  color: var(--ink-mute);
+  margin-top: 2px;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.painel-row-trail {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.painel-row-chev {
+  color: var(--ink-mute);
+  opacity: 0.6;
+}
+
+/* Icon tint variants. */
+.painel-row.var-pink .painel-row-icon {
+  background: var(--pink-soft);
+  color: var(--coral-pink);
+}
+.painel-row.var-green .painel-row-icon {
+  background: #eef4d1;
+  color: #8aa53a;
+}
+.painel-row.var-blue .painel-row-icon {
+  background: #def1f3;
+  color: #3f8b92;
+}
+.painel-row.var-lilac .painel-row-icon {
+  background: var(--lilac-soft);
+  color: var(--lilac-deep);
+}
+.painel-row.var-yellow .painel-row-icon {
+  background: #fcefc1;
+  color: #9a7a1b;
+}
+
+.painel-row.featured {
+  background: linear-gradient(
+    180deg,
+    #fff 0%,
+    color-mix(in srgb, var(--pink-soft) 40%, transparent) 100%
+  );
+}
+.painel-row.featured .painel-row-label {
+  font-size: 21px;
+}
+
+/* Pill badges. */
+.painel-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 5px 10px;
+  border-radius: 999px;
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.painel-badge-soft {
+  background: var(--lilac-soft);
+  color: var(--lilac-deep);
+}
+.painel-badge-pink {
+  background: var(--pink-soft);
+  color: var(--coral-pink);
+}
+.painel-badge-soon {
+  background: transparent;
+  color: var(--lilac-deep);
+  border: 1px dashed var(--lilac);
+}
+.painel-badge-soon::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--lilac-deep);
+}
+.painel-badge-verified {
+  background: #def1f3;
+  color: #3f8b92;
+}
+
+.painel-row.soon .painel-row-label {
+  color: var(--lilac-deep);
+}
+.painel-row.soon .painel-row-sub {
+  font-style: italic;
+}
+.painel-row.soon {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--paper) 0px,
+    var(--paper) 14px,
+    color-mix(in srgb, var(--lilac-soft) 32%, transparent) 14px,
+    color-mix(in srgb, var(--lilac-soft) 32%, transparent) 15.5px
+  );
+  cursor: default;
+}
+.painel-row.soon:hover {
+  /* Override the generic row hover so the disabled-row affordance
+   * stays consistent — no cream-2 wash hinting at a tap target. */
+  background: repeating-linear-gradient(
+    135deg,
+    var(--paper) 0px,
+    var(--paper) 14px,
+    color-mix(in srgb, var(--lilac-soft) 32%, transparent) 14px,
+    color-mix(in srgb, var(--lilac-soft) 32%, transparent) 15.5px
+  );
+}
+.painel-row.soon:hover .painel-row-icon {
+  background: var(--lilac-soft);
+  color: var(--lilac-deep);
+}
+
+/* ----- BREAKPOINTS ----- */
+
+/* Narrow phones — collapse the share-button labels to icon-only so
+ * the "compartilhar" text doesn't force the share-link pill (and by
+ * extension .painel-app) past 375px. aria-label keeps the buttons
+ * screen-reader-accessible. The text-then-icon swap fires below
+ * 440px because the v3 mockup's min-content for the full pill is
+ * ~440px once the URL + label + 2 button texts are summed.
+ *
+ * aperture-46cs — earlier draft used `:not(svg)` on the label
+ * spans, which never matched anything because the button texts were
+ * bare text nodes (text nodes aren't element children). Texts are
+ * now wrapped in <span class="painel-share-label"> so this rule
+ * actually does what its comment promises. */
+@media (max-width: 440px) {
+  .painel-share-label {
+    display: none;
+  }
+  .painel-share-btn {
+    padding: 8px 10px;
+  }
+  /* Also tighten the share-link-lbl ("LINK DO EVENTO") so the pill
+   * doesn't ellipsis the URL too aggressively. */
+  .painel-share-link-lbl {
+    display: none;
+  }
+}
+
+/* Very small phones — drop the type a touch. */
+@media (max-width: 360px) {
+  .painel-hc-title {
+    font-size: 30px;
+  }
+  .painel-hc-amount,
+  .painel-cd-num {
+    font-size: 28px;
+  }
+  .painel-row-label {
+    font-size: 17px;
+  }
+}
+
+/* Desktop — header becomes wider, stats grid goes 2-col, menu goes
+ * 2-col. Per Thacy v3, this fires at >=900px (not the usual sm/md). */
+@media (min-width: 900px) {
+  body:has(.painel-app) {
+    background: radial-gradient(
+        circle at 16% 12%,
+        color-mix(in srgb, var(--lilac) 10%, transparent),
+        transparent 40%
+      ),
+      radial-gradient(
+        circle at 84% 80%,
+        color-mix(in srgb, var(--pink) 10%, transparent),
+        transparent 40%
+      ),
+      var(--cream);
+  }
+  .painel-app {
+    max-width: 1200px;
+    padding: 0 28px 64px;
+  }
+  .painel-topbar-nav {
+    display: flex;
+  }
+  /* Mirror Thacy v3's `.brand img { height: 40px }` at desktop. */
+  .painel-logo-img {
+    height: 40px;
+  }
+  .painel-header-card {
+    margin: 28px 0 0;
+    border-radius: 28px;
+  }
+  .painel-hc-top {
+    padding: 28px 32px 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    align-items: flex-start;
+  }
+  .painel-hc-title {
+    font-size: 48px;
+    margin: 6px 0 0;
+  }
+  .painel-share-link {
+    margin-top: 0;
+    max-width: 560px;
+    width: 100%;
+    padding: 6px 6px 6px 18px;
+  }
+  .painel-share-link-lbl {
+    font-size: 11px;
+  }
+  .painel-share-link-url {
+    font-size: 14.5px;
+  }
+  .painel-hc-stats {
+    grid-template-columns: 1fr 1fr;
+  }
+  .painel-hc-stat + .painel-hc-stat {
+    border-top: none;
+    border-left: 1px solid var(--line);
+  }
+  .painel-hc-stat {
+    padding: 24px 28px;
+    display: flex;
+    flex-direction: column;
+  }
+  .painel-hc-amount,
+  .painel-cd-num {
+    font-size: 40px;
+  }
+  .painel-cd-units {
+    gap: 14px;
+  }
+  .painel-menu-wrap {
+    padding: 0;
+    margin-top: 28px;
+  }
+  .painel-menu-grid {
+    /* Same `minmax(0, 1fr)` reasoning as the mobile single-col grid —
+     * prevents the widest row label from forcing a column past its
+     * fair share of the parent. */
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 28px;
+    align-items: start;
+  }
+  .painel-group:first-child .painel-group-title {
+    margin-top: 0;
+  }
+  .painel-group .painel-group-title {
+    margin-top: 0;
+  }
+}
+
+@media (min-width: 1100px) {
+  .painel-hc-title {
+    font-size: 54px;
+  }
+  .painel-hc-top {
+    padding: 32px 36px 24px;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    gap: 32px;
+  }
+  .painel-hc-top > div:first-child {
+    flex: 1 1 auto;
+  }
+  .painel-share-link {
+    width: auto;
+    flex: 0 1 520px;
+  }
+}
