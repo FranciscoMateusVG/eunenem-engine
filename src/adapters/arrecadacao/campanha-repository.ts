@@ -1,4 +1,5 @@
-import type { Campanha, IdCampanha } from '../../domain/arrecadacao/campanha.js';
+import type { Campanha } from '../../domain/arrecadacao/entities/campanha.js';
+import type { IdCampanha } from '../../domain/arrecadacao/value-objects/ids.js';
 import type { ArrecadacaoRepositoryContext } from './repository-context.js';
 
 /**

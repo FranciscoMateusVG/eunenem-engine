@@ -1,9 +1,18 @@
-import type { DadosRecebedor } from './dados-recebedor.js';
-import type { IdCampanha, IdRecebedor } from './ids.js';
+import type { DadosRecebedor } from '../value-objects/dados-recebedor.js';
+import type { IdCampanha, IdRecebedor } from '../value-objects/ids.js';
 
-export { type IdRecebedor, IdRecebedorSchema } from './ids.js';
-
-/** Recebedor com dados PIX auditáveis; um recebedor ativo por `idCampanha`. */
+/**
+ * @aggregateRoot Recebedor (BC Arrecadação)
+ *
+ * Auditable PIX-receiver record bound to a Campanha. Versioned: when the
+ * `DadosRecebedor` change, the active row is deactivated and a new one is
+ * created — full history is preserved (`is_active` per campanha).
+ *
+ * Persisted via: `RecebedorRepository`.
+ *
+ * Aggregate boundary: deactivation + new-active-row creation happen as a unit
+ * (orchestrated by the use case via the transaction port).
+ */
 export interface Recebedor {
   readonly id: IdRecebedor;
   readonly idCampanha: IdCampanha;

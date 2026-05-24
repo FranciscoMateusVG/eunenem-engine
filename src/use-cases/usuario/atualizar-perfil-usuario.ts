@@ -1,9 +1,18 @@
 import { SpanStatusCode } from '@opentelemetry/api';
+import { z } from 'zod/v4';
 import type { UsuarioRepository } from '../../adapters/usuario/repository.js';
-import type { AtualizarPerfilUsuarioInput, Usuario } from '../../domain/usuario/usuario.js';
-import { AtualizarPerfilUsuarioInputSchema } from '../../domain/usuario/usuario.js';
+import type { Usuario } from '../../domain/usuario/entities/usuario.js';
+import { IdUsuarioSchema } from '../../domain/usuario/value-objects/ids.js';
+import { NomeExibicaoUsuarioSchema } from '../../domain/usuario/value-objects/nome-exibicao-usuario.js';
 import { UsuarioInputInvalidoError } from '../../errors/usuario/input-invalido.error.js';
 import type { Observability } from '../../observability/observability.js';
+
+export const AtualizarPerfilUsuarioInputSchema = z.object({
+  idUsuario: IdUsuarioSchema,
+  nomeExibicao: NomeExibicaoUsuarioSchema,
+});
+
+export type AtualizarPerfilUsuarioInput = z.infer<typeof AtualizarPerfilUsuarioInputSchema>;
 
 export interface AtualizarPerfilUsuarioDeps {
   readonly usuarioRepository: UsuarioRepository;

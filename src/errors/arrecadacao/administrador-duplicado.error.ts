@@ -1,4 +1,4 @@
-import type { IdConta } from '../../domain/arrecadacao/campanha.js';
+import type { IdConta } from '../../domain/arrecadacao/value-objects/ids.js';
 
 export class ArrecadacaoAdministradorDuplicadoError extends Error {
   public readonly code = 'ARRECADACAO_ADMINISTRADOR_DUPLICADO' as const;

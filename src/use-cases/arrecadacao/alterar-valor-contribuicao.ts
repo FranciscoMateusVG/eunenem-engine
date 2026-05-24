@@ -1,18 +1,24 @@
 import { SpanStatusCode } from '@opentelemetry/api';
+import { z } from 'zod/v4';
 import type { ContribuicaoRepository } from '../../adapters/arrecadacao/contribuicao-repository.js';
-import type {
-  AlterarValorContribuicaoInput,
-  Contribuicao,
-} from '../../domain/arrecadacao/contribuicao.js';
+import type { Contribuicao } from '../../domain/arrecadacao/entities/contribuicao.js';
 import {
-  AlterarValorContribuicaoInputSchema,
   contribuicaoComValor,
   contribuicaoDisponivel,
-} from '../../domain/arrecadacao/contribuicao.js';
+} from '../../domain/arrecadacao/entities/contribuicao.js';
+import { IdContribuicaoSchema } from '../../domain/arrecadacao/value-objects/ids.js';
+import { MoneyCentsSchema } from '../../domain/money.js';
 import { ArrecadacaoContribuicaoNaoDisponivelError } from '../../errors/arrecadacao/contribuicao-nao-disponivel.error.js';
 import { ArrecadacaoContribuicaoNaoEncontradaError } from '../../errors/arrecadacao/contribuicao-nao-encontrada.error.js';
 import { ArrecadacaoInputInvalidoError } from '../../errors/arrecadacao/input-invalido.error.js';
 import type { Observability } from '../../observability/observability.js';
+
+export const AlterarValorContribuicaoInputSchema = z.object({
+  idContribuicao: IdContribuicaoSchema,
+  valor: MoneyCentsSchema,
+});
+
+export type AlterarValorContribuicaoInput = z.infer<typeof AlterarValorContribuicaoInputSchema>;
 
 export interface AlterarValorContribuicaoDeps {
   readonly contribuicaoRepository: ContribuicaoRepository;

@@ -1,15 +1,21 @@
 import { SpanStatusCode } from '@opentelemetry/api';
+import { z } from 'zod/v4';
 import type { UsuarioRepository } from '../../adapters/usuario/repository.js';
 import type { SessaoUsuarioRepository } from '../../adapters/usuario/sessao-repository.js';
-import type { AutorizarPermissaoUsuarioInput } from '../../domain/usuario/usuario.js';
-import {
-  AutorizarPermissaoUsuarioInputSchema,
-  contaTemPermissao,
-  sessaoExpirada,
-} from '../../domain/usuario/usuario.js';
+import { sessaoExpirada } from '../../domain/usuario/entities/sessao.js';
+import { contaTemPermissao } from '../../domain/usuario/entities/usuario.js';
+import { PermissaoSchema } from '../../domain/usuario/value-objects/permissao.js';
+import { TokenSessaoSchema } from '../../domain/usuario/value-objects/token-sessao.js';
 import { UsuarioNaoAutorizadoError } from '../../errors/usuario/nao-autorizado.error.js';
 import { UsuarioSessaoInvalidaError } from '../../errors/usuario/sessao-invalida.error.js';
 import type { Observability } from '../../observability/observability.js';
+
+export const AutorizarPermissaoUsuarioInputSchema = z.object({
+  token: TokenSessaoSchema,
+  permissao: PermissaoSchema,
+});
+
+export type AutorizarPermissaoUsuarioInput = z.infer<typeof AutorizarPermissaoUsuarioInputSchema>;
 
 export interface AutorizarPermissaoUsuarioDeps {
   readonly usuarioRepository: UsuarioRepository;

@@ -1,5 +1,6 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
-import type { Contribuicao, IdContribuicao } from '../../domain/arrecadacao/contribuicao.js';
+import type { Contribuicao } from '../../domain/arrecadacao/entities/contribuicao.js';
+import type { IdContribuicao } from '../../domain/arrecadacao/value-objects/ids.js';
 import type { ContribuicaoRepository } from './contribuicao-repository.js';
 
 const tracer = trace.getTracer('frame');

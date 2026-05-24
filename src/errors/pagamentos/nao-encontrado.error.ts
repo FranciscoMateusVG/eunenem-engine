@@ -1,4 +1,4 @@
-import type { IdPagamento } from '../../domain/pagamentos/pagamentos.js';
+import type { IdPagamento } from '../../domain/pagamentos/value-objects/ids.js';
 
 export class PagamentoNaoEncontradoError extends Error {
   public readonly code = 'PAGAMENTO_NAO_ENCONTRADO' as const;

@@ -1,16 +1,25 @@
 import { SpanStatusCode } from '@opentelemetry/api';
+import { z } from 'zod/v4';
 import type { CampanhaRepository } from '../../adapters/arrecadacao/campanha-repository.js';
 import {
-  type AdicionarAdministradorCampanhaInput,
-  AdicionarAdministradorCampanhaInputSchema,
   type Campanha,
   campanhaComAdministrador,
   campanhaPossuiAdministrador,
-} from '../../domain/arrecadacao/campanha.js';
+} from '../../domain/arrecadacao/entities/campanha.js';
+import { IdCampanhaSchema, IdContaSchema } from '../../domain/arrecadacao/value-objects/ids.js';
 import { ArrecadacaoAdministradorDuplicadoError } from '../../errors/arrecadacao/administrador-duplicado.error.js';
 import { ArrecadacaoCampanhaNaoEncontradaError } from '../../errors/arrecadacao/campanha-nao-encontrada.error.js';
 import { ArrecadacaoInputInvalidoError } from '../../errors/arrecadacao/input-invalido.error.js';
 import type { Observability } from '../../observability/observability.js';
+
+export const AdicionarAdministradorCampanhaInputSchema = z.object({
+  idCampanha: IdCampanhaSchema,
+  idConta: IdContaSchema,
+});
+
+export type AdicionarAdministradorCampanhaInput = z.infer<
+  typeof AdicionarAdministradorCampanhaInputSchema
+>;
 
 export interface AdicionarAdministradorCampanhaDeps {
   readonly campanhaRepository: CampanhaRepository;

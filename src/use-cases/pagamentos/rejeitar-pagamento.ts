@@ -4,18 +4,20 @@ import type { PagamentoEventPublisher } from '../../adapters/pagamentos/event-pu
 import type { PagamentoProvider } from '../../adapters/pagamentos/provider.js';
 import type { PagamentoRepository } from '../../adapters/pagamentos/repository.js';
 import {
-  type ComandoPagamentoInput,
-  ComandoPagamentoInputSchema,
   criarEventoPagamento,
   type Pagamento,
   podeRejeitarPagamento,
   rejeitarPagamentoPendente,
-} from '../../domain/pagamentos/pagamentos.js';
+} from '../../domain/pagamentos/entities/pagamento.js';
 import { PagamentosInputInvalidoError } from '../../errors/pagamentos/input-invalido.error.js';
 import { PagamentoNaoEncontradoError } from '../../errors/pagamentos/nao-encontrado.error.js';
 import { PagamentoTransicaoStatusInvalidaError } from '../../errors/pagamentos/transicao-status-invalida.error.js';
 import { PagamentoValorDivergenteError } from '../../errors/pagamentos/valor-divergente.error.js';
 import type { Observability } from '../../observability/observability.js';
+import {
+  type ComandoPagamentoInput,
+  ComandoPagamentoInputSchema,
+} from './obter-pagamento-por-id.js';
 
 export interface RejeitarPagamentoDeps {
   readonly pagamentoRepository: PagamentoRepository;

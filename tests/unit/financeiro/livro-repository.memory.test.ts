@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { LivroFinanceiroRepositoryMemory } from '../../../src/adapters/financeiro/livro-repository.memory.js';
 import {
   criarLancamentosParaPagamentoAprovado,
-  criarRepasseRecebedorSolicitado,
-  type RegistrarEfeitosFinanceirosPagamentoAprovadoInput,
-} from '../../../src/domain/financeiro/financeiro.js';
+  type EfeitosFinanceirosPagamentoAprovado,
+} from '../../../src/domain/financeiro/entities/lancamento-financeiro.js';
+import { criarRepasseRecebedorSolicitado } from '../../../src/domain/financeiro/entities/repasse-recebedor.js';
 import { FinanceiroPagamentoJaRegistradoError } from '../../../src/errors/financeiro/pagamento-ja-registrado.error.js';
 
 const idPagamento = '550e8400-e29b-41d4-a716-446655442001';
@@ -15,7 +15,7 @@ const idLancamentoReceitaPlataforma = '550e8400-e29b-41d4-a716-446655442005';
 const idRepasse = '550e8400-e29b-41d4-a716-446655442006';
 const criadoEm = new Date('2026-05-01T12:00:00.000Z');
 
-const approvedPaymentInput: RegistrarEfeitosFinanceirosPagamentoAprovadoInput = {
+const approvedPaymentInput: EfeitosFinanceirosPagamentoAprovado = {
   idPagamento,
   idContribuicao,
   idCampanha,

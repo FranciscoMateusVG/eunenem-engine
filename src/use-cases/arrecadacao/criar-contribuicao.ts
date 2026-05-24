@@ -1,20 +1,34 @@
 import { SpanStatusCode } from '@opentelemetry/api';
+import { z } from 'zod/v4';
 import type { CampanhaRepository } from '../../adapters/arrecadacao/campanha-repository.js';
 import type { ContribuicaoRepository } from '../../adapters/arrecadacao/contribuicao-repository.js';
-import { encontrarOpcaoContribuicao } from '../../domain/arrecadacao/campanha.js';
-import type {
-  Contribuicao,
-  CriarContribuicaoInput,
-} from '../../domain/arrecadacao/contribuicao.js';
+import { encontrarOpcaoContribuicao } from '../../domain/arrecadacao/entities/campanha.js';
+import type { Contribuicao } from '../../domain/arrecadacao/entities/contribuicao.js';
 import {
-  CriarContribuicaoInputSchema,
   criarContribuicaoDisponivel,
-} from '../../domain/arrecadacao/contribuicao.js';
+  NomeContribuicaoSchema,
+} from '../../domain/arrecadacao/entities/contribuicao.js';
+import {
+  IdCampanhaSchema,
+  IdContribuicaoSchema,
+  IdOpcaoContribuicaoSchema,
+} from '../../domain/arrecadacao/value-objects/ids.js';
+import { MoneyCentsSchema } from '../../domain/money.js';
 import { ArrecadacaoCampanhaNaoEncontradaError } from '../../errors/arrecadacao/campanha-nao-encontrada.error.js';
 import { ArrecadacaoContribuicaoJaExisteError } from '../../errors/arrecadacao/contribuicao-ja-existe.error.js';
 import { ArrecadacaoInputInvalidoError } from '../../errors/arrecadacao/input-invalido.error.js';
 import { ArrecadacaoOpcaoContribuicaoNaoEncontradaError } from '../../errors/arrecadacao/opcao-contribuicao-nao-encontrada.error.js';
 import type { Observability } from '../../observability/observability.js';
+
+export const CriarContribuicaoInputSchema = z.object({
+  id: IdContribuicaoSchema,
+  idCampanha: IdCampanhaSchema,
+  idOpcaoContribuicao: IdOpcaoContribuicaoSchema,
+  nome: NomeContribuicaoSchema,
+  valor: MoneyCentsSchema,
+});
+
+export type CriarContribuicaoInput = z.infer<typeof CriarContribuicaoInputSchema>;
 
 export interface CriarContribuicaoDeps {
   readonly campanhaRepository: CampanhaRepository;

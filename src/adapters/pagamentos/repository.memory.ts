@@ -1,5 +1,6 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
-import type { IdPagamento, Pagamento } from '../../domain/pagamentos/pagamentos.js';
+import type { Pagamento } from '../../domain/pagamentos/entities/pagamento.js';
+import type { IdPagamento } from '../../domain/pagamentos/value-objects/ids.js';
 import { PagamentoJaExisteError } from '../../errors/pagamentos/ja-existe.error.js';
 import { PagamentoNaoEncontradoError } from '../../errors/pagamentos/nao-encontrado.error.js';
 import type { PagamentoRepository } from './repository.js';

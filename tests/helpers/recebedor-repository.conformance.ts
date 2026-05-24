@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { ReadableSpan } from '@opentelemetry/sdk-trace-base';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { RecebedorRepository } from '../../src/adapters/arrecadacao/recebedor-repository.js';
-import { criarRecebedorInicial } from '../../src/domain/arrecadacao/recebedor.js';
+import { criarRecebedorInicial } from '../../src/domain/arrecadacao/entities/recebedor.js';
 import type { createArrecadacaoMemoryRepos } from './arrecadacao-repos.js';
 import { makeCampanha } from './campanha-repository.conformance.js';
 

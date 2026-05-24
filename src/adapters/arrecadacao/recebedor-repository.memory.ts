@@ -1,6 +1,6 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
-import type { IdCampanha } from '../../domain/arrecadacao/campanha.js';
-import type { IdRecebedor, Recebedor } from '../../domain/arrecadacao/recebedor.js';
+import type { Recebedor } from '../../domain/arrecadacao/entities/recebedor.js';
+import type { IdCampanha, IdRecebedor } from '../../domain/arrecadacao/value-objects/ids.js';
 import type { RecebedorRepository } from './recebedor-repository.js';
 import type { ArrecadacaoRepositoryContext } from './repository-context.js';
 

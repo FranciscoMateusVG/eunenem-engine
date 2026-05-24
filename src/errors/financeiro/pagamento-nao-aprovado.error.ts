@@ -1,7 +1,5 @@
-import type {
-  IdPagamentoReferencia,
-  StatusPagamentoFinanceiro,
-} from '../../domain/financeiro/financeiro.js';
+import type { StatusPagamentoFinanceiro } from '../../domain/financeiro/entities/lancamento-financeiro.js';
+import type { IdPagamentoReferencia } from '../../domain/financeiro/value-objects/ids.js';
 
 export class FinanceiroPagamentoNaoAprovadoError extends Error {
   public readonly code = 'FINANCEIRO_PAGAMENTO_NAO_APROVADO' as const;

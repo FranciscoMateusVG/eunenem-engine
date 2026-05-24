@@ -1,12 +1,11 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
+import type { Campanha } from '../../domain/arrecadacao/entities/campanha.js';
+import { campanhaComRecebedorInicial } from '../../domain/arrecadacao/entities/campanha.js';
+import type { IdCampanha, IdConta } from '../../domain/arrecadacao/value-objects/ids.js';
 import type {
-  Campanha,
-  IdCampanha,
-  IdConta,
   OpcaoContribuicao,
   TipoOpcaoContribuicao,
-} from '../../domain/arrecadacao/campanha.js';
-import { campanhaComRecebedorInicial } from '../../domain/arrecadacao/campanha.js';
+} from '../../domain/arrecadacao/value-objects/opcao-contribuicao.js';
 import type { Database } from '../database.js';
 import type { CampanhaRepository } from './campanha-repository.js';
 import type { RecebedorRepository } from './recebedor-repository.js';

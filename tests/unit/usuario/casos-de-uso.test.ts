@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { UsuarioRepositoryMemory } from '../../../src/adapters/usuario/repository.memory.js';
 import { SessaoUsuarioRepositoryMemory } from '../../../src/adapters/usuario/sessao-repository.memory.js';
-import { TokenSessaoSchema } from '../../../src/domain/usuario/usuario.js';
+import { TokenSessaoSchema } from '../../../src/domain/usuario/value-objects/token-sessao.js';
 import { UsuarioEmailJaExisteError } from '../../../src/errors/usuario/email-ja-existe.error.js';
 import { UsuarioInputInvalidoError } from '../../../src/errors/usuario/input-invalido.error.js';
 import { UsuarioNaoAutorizadoError } from '../../../src/errors/usuario/nao-autorizado.error.js';

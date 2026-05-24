@@ -1,15 +1,27 @@
 import { SpanStatusCode } from '@opentelemetry/api';
+import { z } from 'zod/v4';
 import type { LivroFinanceiroRepository } from '../../adapters/financeiro/livro-repository.js';
+import { IdCampanhaSchema } from '../../domain/arrecadacao/value-objects/ids.js';
 import {
-  calcularSaldoRecebedor,
   criarRepasseRecebedorSolicitado,
   type RepasseRecebedor,
-  type SolicitarRepasseRecebedorInput,
-  SolicitarRepasseRecebedorInputSchema,
-} from '../../domain/financeiro/financeiro.js';
+} from '../../domain/financeiro/entities/repasse-recebedor.js';
+import { IdRepasseSchema } from '../../domain/financeiro/value-objects/ids.js';
+import { calcularSaldoRecebedor } from '../../domain/financeiro/value-objects/saldo-recebedor.js';
+import { MoneyCentsSchema } from '../../domain/money.js';
 import { FinanceiroInputInvalidoError } from '../../errors/financeiro/input-invalido.error.js';
 import { FinanceiroSaldoDisponivelInsuficienteError } from '../../errors/financeiro/saldo-disponivel-insuficiente.error.js';
 import type { Observability } from '../../observability/observability.js';
+
+export const SolicitarRepasseRecebedorInputSchema = z.object({
+  idRepasse: IdRepasseSchema,
+  idCampanha: IdCampanhaSchema,
+  amountCents: MoneyCentsSchema,
+});
+
+export type SolicitarRepasseRecebedorInput = Readonly<
+  z.infer<typeof SolicitarRepasseRecebedorInputSchema>
+>;
 
 export interface SolicitarRepasseRecebedorDeps {
   readonly livroFinanceiroRepository: LivroFinanceiroRepository;

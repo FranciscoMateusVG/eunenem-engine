@@ -1,4 +1,4 @@
-import type { IdCampanha } from '../../domain/arrecadacao/campanha.js';
+import type { IdCampanha } from '../../domain/arrecadacao/value-objects/ids.js';
 
 export class ArrecadacaoCampanhaNaoEncontradaError extends Error {
   public readonly code = 'ARRECADACAO_CAMPANHA_NAO_ENCONTRADA' as const;

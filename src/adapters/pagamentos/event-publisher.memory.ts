@@ -1,5 +1,5 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
-import type { EventoPagamento } from '../../domain/pagamentos/pagamentos.js';
+import type { EventoPagamento } from '../../domain/pagamentos/value-objects/evento-pagamento.js';
 import type { PagamentoEventPublisher } from './event-publisher.js';
 
 const tracer = trace.getTracer('frame');

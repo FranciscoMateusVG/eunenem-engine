@@ -1,18 +1,26 @@
 import { SpanStatusCode } from '@opentelemetry/api';
+import { z } from 'zod/v4';
 import type { ContribuicaoRepository } from '../../adapters/arrecadacao/contribuicao-repository.js';
-import type {
-  AssociarContribuinteContribuicaoInput,
-  Contribuicao,
-} from '../../domain/arrecadacao/contribuicao.js';
+import type { Contribuicao } from '../../domain/arrecadacao/entities/contribuicao.js';
 import {
-  AssociarContribuinteContribuicaoInputSchema,
   contribuicaoComContribuinte,
   contribuicaoDisponivel,
-} from '../../domain/arrecadacao/contribuicao.js';
+} from '../../domain/arrecadacao/entities/contribuicao.js';
+import { DadosContribuinteSchema } from '../../domain/arrecadacao/value-objects/dados-contribuinte.js';
+import { IdContribuicaoSchema } from '../../domain/arrecadacao/value-objects/ids.js';
 import { ArrecadacaoContribuicaoNaoDisponivelError } from '../../errors/arrecadacao/contribuicao-nao-disponivel.error.js';
 import { ArrecadacaoContribuicaoNaoEncontradaError } from '../../errors/arrecadacao/contribuicao-nao-encontrada.error.js';
 import { ArrecadacaoInputInvalidoError } from '../../errors/arrecadacao/input-invalido.error.js';
 import type { Observability } from '../../observability/observability.js';
+
+export const AssociarContribuinteContribuicaoInputSchema = z.object({
+  idContribuicao: IdContribuicaoSchema,
+  contribuinte: DadosContribuinteSchema,
+});
+
+export type AssociarContribuinteContribuicaoInput = z.infer<
+  typeof AssociarContribuinteContribuicaoInputSchema
+>;
 
 export interface AssociarContribuinteContribuicaoDeps {
   readonly contribuicaoRepository: ContribuicaoRepository;

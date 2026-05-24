@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PagamentoRepositoryMemory } from '../../../src/adapters/pagamentos/repository.memory.js';
-import { criarPagamentoPendente } from '../../../src/domain/pagamentos/pagamentos.js';
+import { criarPagamentoPendente } from '../../../src/domain/pagamentos/entities/pagamento.js';
 import { PagamentoJaExisteError } from '../../../src/errors/pagamentos/ja-existe.error.js';
 import { PagamentoNaoEncontradoError } from '../../../src/errors/pagamentos/nao-encontrado.error.js';
 

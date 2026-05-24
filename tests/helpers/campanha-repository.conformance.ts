@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { ReadableSpan } from '@opentelemetry/sdk-trace-base';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { CampanhaRepository } from '../../src/adapters/arrecadacao/campanha-repository.js';
-import type { Campanha } from '../../src/domain/arrecadacao/campanha.js';
+import type { Campanha } from '../../src/domain/arrecadacao/entities/campanha.js';
 import { saveCampanhaComRecebedorAtivo } from './arrecadacao-repos.js';
 
 interface ConformanceOptions {

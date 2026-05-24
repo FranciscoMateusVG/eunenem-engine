@@ -30,7 +30,7 @@ import { createFolderStructure } from 'eslint-plugin-project-structure';
 const KEBAB = '{kebab-case}';
 
 /** Subpastas por bounded context (linguagem ubíqua do ENGINE-DDD). */
-const BC_FOLDERS = ['arrecadacao', 'taxas', 'pagamentos', 'financeiro', 'usuario'];
+const BC_FOLDERS = ['arrecadacao', 'taxas', 'pagamentos', 'financeiro', 'usuario', 'plataforma'];
 
 /** @param {{ withAdapterImpl?: boolean }} [opts] */
 function bcChildren(opts = {}) {
@@ -41,6 +41,24 @@ function bcChildren(opts = {}) {
   return BC_FOLDERS.map((name) => ({
     name,
     children: fileChildren,
+  }));
+}
+
+/**
+ * Domain BCs additionally allow `entities/` and `value-objects/` subfolders
+ * (DDD-textbook split — the layout itself documents what has identity and
+ * what doesn't). Files at the BC root are still allowed for backward
+ * compatibility during the migration.
+ */
+function bcDomainChildren() {
+  const subfolderChildren = [{ name: `${KEBAB}.ts` }];
+  return BC_FOLDERS.map((name) => ({
+    name,
+    children: [
+      { name: `${KEBAB}.ts` },
+      { name: 'entities', children: subfolderChildren },
+      { name: 'value-objects', children: subfolderChildren },
+    ],
   }));
 }
 
@@ -65,7 +83,7 @@ export const folderStructureConfig = createFolderStructure({
         { name: 'index.ts' },
         {
           name: 'domain',
-          children: [{ name: 'money.ts' }, { name: 'cat.ts' }, ...bcChildren()],
+          children: [{ name: 'money.ts' }, { name: 'cat.ts' }, ...bcDomainChildren()],
         },
         {
           name: 'use-cases',

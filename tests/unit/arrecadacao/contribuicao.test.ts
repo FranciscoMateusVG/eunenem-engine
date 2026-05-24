@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
-  AssociarContribuinteContribuicaoInputSchema,
-  CriarContribuicaoInputSchema,
   contribuicaoComContribuinte,
   contribuicaoComValor,
   contribuicaoDisponivel,
   criarContribuicaoDisponivel,
-} from '../../../src/domain/arrecadacao/contribuicao.js';
+} from '../../../src/domain/arrecadacao/entities/contribuicao.js';
+import { AssociarContribuinteContribuicaoInputSchema } from '../../../src/use-cases/arrecadacao/associar-contribuinte-contribuicao.js';
+import { CriarContribuicaoInputSchema } from '../../../src/use-cases/arrecadacao/criar-contribuicao.js';
 
 const idContribuicao = '550e8400-e29b-41d4-a716-446655440010';
 const idCampanha = '550e8400-e29b-41d4-a716-446655440011';

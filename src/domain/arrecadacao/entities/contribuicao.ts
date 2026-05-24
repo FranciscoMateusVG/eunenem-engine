@@ -1,37 +1,32 @@
 import { z } from 'zod/v4';
-import type { MoneyCents } from '../money.js';
-import { MoneyCentsSchema } from '../money.js';
-import type { IdCampanha, IdOpcaoContribuicao } from './campanha.js';
-import { IdCampanhaSchema, IdOpcaoContribuicaoSchema } from './campanha.js';
+import type { MoneyCents } from '../../money.js';
+import type { DadosContribuinte } from '../value-objects/dados-contribuinte.js';
+import type { IdCampanha, IdContribuicao, IdOpcaoContribuicao } from '../value-objects/ids.js';
 
 /**
- * **Contribuição** (BC Arrecadação): item dentro de uma opção (sacola).
- * Criada pelo administrador (`disponivel`); visitante associa dados e passa a `indisponivel`.
+ * @aggregateRoot Contribuição (BC Arrecadação)
+ *
+ * Item inside an opção (sacola). Created by the admin as `disponivel`; the
+ * visitor associates `DadosContribuinte` and the item flips to `indisponivel`.
+ *
+ * Persisted via: `ContribuicaoRepository`.
+ *
+ * Aggregate boundary: status transitions and contribuinte association happen
+ * atomically through this root. References Campanha + OpcaoContribuicao by ID
+ * only — never imports those aggregates.
+ *
+ * `StatusContribuicao` and `NomeContribuicao` are inlined here as intrinsic
+ * field schemas (tightly bound to this entity's invariants).
  */
-export const IdContribuicaoSchema = z.uuid();
-export type IdContribuicao = z.infer<typeof IdContribuicaoSchema>;
+
+export const StatusContribuicaoSchema = z.enum(['disponivel', 'indisponivel']);
+export type StatusContribuicao = z.infer<typeof StatusContribuicaoSchema>;
 
 export const NomeContribuicaoSchema = z
   .string()
   .trim()
   .min(1, 'Nome da contribuicao nao pode ser vazio')
   .max(120);
-
-export const NomeContribuinteSchema = z
-  .string()
-  .trim()
-  .min(1, 'Nome do contribuinte nao pode ser vazio')
-  .max(120);
-
-export const DadosContribuinteSchema = z.object({
-  nome: NomeContribuinteSchema,
-  email: z.string().trim().email('Email invalido').max(320),
-});
-
-export type DadosContribuinte = Readonly<z.infer<typeof DadosContribuinteSchema>>;
-
-export const StatusContribuicaoSchema = z.enum(['disponivel', 'indisponivel']);
-export type StatusContribuicao = z.infer<typeof StatusContribuicaoSchema>;
 
 export interface Contribuicao {
   readonly id: IdContribuicao;
@@ -43,32 +38,6 @@ export interface Contribuicao {
   readonly status: StatusContribuicao;
   readonly criadaEm: Date;
 }
-
-export const CriarContribuicaoInputSchema = z.object({
-  id: IdContribuicaoSchema,
-  idCampanha: IdCampanhaSchema,
-  idOpcaoContribuicao: IdOpcaoContribuicaoSchema,
-  nome: NomeContribuicaoSchema,
-  valor: MoneyCentsSchema,
-});
-
-export type CriarContribuicaoInput = z.infer<typeof CriarContribuicaoInputSchema>;
-
-export const AssociarContribuinteContribuicaoInputSchema = z.object({
-  idContribuicao: IdContribuicaoSchema,
-  contribuinte: DadosContribuinteSchema,
-});
-
-export type AssociarContribuinteContribuicaoInput = z.infer<
-  typeof AssociarContribuinteContribuicaoInputSchema
->;
-
-export const AlterarValorContribuicaoInputSchema = z.object({
-  idContribuicao: IdContribuicaoSchema,
-  valor: MoneyCentsSchema,
-});
-
-export type AlterarValorContribuicaoInput = z.infer<typeof AlterarValorContribuicaoInputSchema>;
 
 export function contribuicaoDisponivel(contribuicao: Contribuicao): boolean {
   return contribuicao.status === 'disponivel';

@@ -1,4 +1,5 @@
-import type { Contribuicao, IdContribuicao } from '../../domain/arrecadacao/contribuicao.js';
+import type { Contribuicao } from '../../domain/arrecadacao/entities/contribuicao.js';
+import type { IdContribuicao } from '../../domain/arrecadacao/value-objects/ids.js';
 
 /**
  * Persistência de Contribuições (porta). `save` faz upsert (insert ou update).

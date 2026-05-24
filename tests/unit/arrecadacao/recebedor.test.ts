@@ -3,7 +3,7 @@ import {
   criarNovoRecebedor,
   criarRecebedorInicial,
   desativarRecebedor,
-} from '../../../src/domain/arrecadacao/recebedor.js';
+} from '../../../src/domain/arrecadacao/entities/recebedor.js';
 
 const idCampanha = '550e8400-e29b-41d4-a716-446655440001';
 const idRecebedor1 = '550e8400-e29b-41d4-a716-446655440003';

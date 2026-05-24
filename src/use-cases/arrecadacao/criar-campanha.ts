@@ -1,20 +1,31 @@
 import { randomUUID } from 'node:crypto';
 import { SpanStatusCode } from '@opentelemetry/api';
+import { z } from 'zod/v4';
 import type { CampanhaRepository } from '../../adapters/arrecadacao/campanha-repository.js';
 import type { RecebedorRepository } from '../../adapters/arrecadacao/recebedor-repository.js';
 import {
   type Campanha,
-  type CriarCampanhaInput,
-  CriarCampanhaInputSchema,
   campanhaComRecebedorInicial,
-} from '../../domain/arrecadacao/campanha.js';
-import { criarRecebedorInicial, type IdRecebedor } from '../../domain/arrecadacao/recebedor.js';
+} from '../../domain/arrecadacao/entities/campanha.js';
+import { criarRecebedorInicial } from '../../domain/arrecadacao/entities/recebedor.js';
+import { DadosRecebedorSchema } from '../../domain/arrecadacao/value-objects/dados-recebedor.js';
+import { IdCampanhaSchema, type IdRecebedor } from '../../domain/arrecadacao/value-objects/ids.js';
+import { IdsAdministradoresSchema } from '../../domain/arrecadacao/value-objects/ids-administradores.js';
 import { ArrecadacaoInputInvalidoError } from '../../errors/arrecadacao/input-invalido.error.js';
 import type { Observability } from '../../observability/observability.js';
 import {
   type ExecutarTransacaoArrecadacao,
   executarTransacaoSequencial,
 } from './executar-transacao-arrecadacao.js';
+
+export const CriarCampanhaInputSchema = z.object({
+  id: IdCampanhaSchema,
+  idsAdministradores: IdsAdministradoresSchema,
+  dadosRecebedor: DadosRecebedorSchema,
+  titulo: z.string().trim().min(1, 'Titulo nao pode ser vazio').max(200),
+});
+
+export type CriarCampanhaInput = z.infer<typeof CriarCampanhaInputSchema>;
 
 export interface CriarCampanhaDeps {
   readonly campanhaRepository: CampanhaRepository;

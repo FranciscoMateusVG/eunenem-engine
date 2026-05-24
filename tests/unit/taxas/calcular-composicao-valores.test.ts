@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ProvedorRegraTaxa } from '../../../src/adapters/taxas/regra-provider.js';
 import { ProvedorRegraTaxaMemory } from '../../../src/adapters/taxas/regra-provider.memory.js';
-import type { RegraTaxa } from '../../../src/domain/taxas/taxas.js';
+import type { RegraTaxa } from '../../../src/domain/taxas/value-objects/regra-taxa.js';
 import { TaxasInputInvalidoError } from '../../../src/errors/taxas/input-invalido.error.js';
 import { NoopLogger } from '../../../src/observability/noop-logger.js';
 import { noopTracer } from '../../../src/observability/tracer.js';

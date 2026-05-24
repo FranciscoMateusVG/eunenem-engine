@@ -1,18 +1,34 @@
 import { randomUUID } from 'node:crypto';
 import { SpanStatusCode } from '@opentelemetry/api';
+import { z } from 'zod/v4';
 import type { PagamentoEventPublisher } from '../../adapters/pagamentos/event-publisher.js';
 import type { PagamentoRepository } from '../../adapters/pagamentos/repository.js';
+import { MoneyCentsSchema } from '../../domain/money.js';
 import {
-  type CriarIntencaoPagamentoInput,
-  CriarIntencaoPagamentoInputSchema,
   criarEventoPagamento,
   criarPagamentoPendente,
   type Pagamento,
-} from '../../domain/pagamentos/pagamentos.js';
+} from '../../domain/pagamentos/entities/pagamento.js';
+import {
+  IdIntencaoPagamentoSchema,
+  IdPagamentoSchema,
+} from '../../domain/pagamentos/value-objects/ids.js';
+import { MetodoPagamentoSchema } from '../../domain/pagamentos/value-objects/metodo-pagamento.js';
+import { SnapshotComposicaoValoresSchema } from '../../domain/pagamentos/value-objects/snapshot-composicao-valores.js';
 import { PagamentosInputInvalidoError } from '../../errors/pagamentos/input-invalido.error.js';
 import { PagamentoJaExisteError } from '../../errors/pagamentos/ja-existe.error.js';
 import { PagamentoValorDivergenteError } from '../../errors/pagamentos/valor-divergente.error.js';
 import type { Observability } from '../../observability/observability.js';
+
+export const CriarIntencaoPagamentoInputSchema = z.object({
+  idPagamento: IdPagamentoSchema,
+  idIntencaoPagamento: IdIntencaoPagamentoSchema,
+  composicaoValores: SnapshotComposicaoValoresSchema,
+  valorACobrarCents: MoneyCentsSchema,
+  metodo: MetodoPagamentoSchema,
+});
+
+export type CriarIntencaoPagamentoInput = z.infer<typeof CriarIntencaoPagamentoInputSchema>;
 
 export interface CriarIntencaoPagamentoDeps {
   readonly pagamentoRepository: PagamentoRepository;

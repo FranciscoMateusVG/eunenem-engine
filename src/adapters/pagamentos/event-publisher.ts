@@ -1,4 +1,4 @@
-import type { EventoPagamento } from '../../domain/pagamentos/pagamentos.js';
+import type { EventoPagamento } from '../../domain/pagamentos/value-objects/evento-pagamento.js';
 
 /**
  * Publicação de eventos de pagamento (porta).

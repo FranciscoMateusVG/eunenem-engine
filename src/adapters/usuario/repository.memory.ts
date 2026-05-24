@@ -1,13 +1,8 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
-import type {
-  Conta,
-  CredencialSimulada,
-  EmailUsuario,
-  IdContaUsuario,
-  IdUsuario,
-  NomeExibicaoUsuario,
-  Usuario,
-} from '../../domain/usuario/usuario.js';
+import type { Conta, CredencialSimulada, Usuario } from '../../domain/usuario/entities/usuario.js';
+import type { EmailUsuario } from '../../domain/usuario/value-objects/email-usuario.js';
+import type { IdContaUsuario, IdUsuario } from '../../domain/usuario/value-objects/ids.js';
+import type { NomeExibicaoUsuario } from '../../domain/usuario/value-objects/nome-exibicao-usuario.js';
 import { UsuarioEmailJaExisteError } from '../../errors/usuario/email-ja-existe.error.js';
 import type { UsuarioRepository } from './repository.js';
 

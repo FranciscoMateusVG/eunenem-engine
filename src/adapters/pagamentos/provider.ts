@@ -1,10 +1,10 @@
 import type { MoneyCents } from '../../domain/money.js';
+import type { TransacaoExterna } from '../../domain/pagamentos/entities/pagamento.js';
 import type {
   IdIntencaoPagamento,
   IdPagamento,
-  MetodoPagamento,
-  TransacaoExterna,
-} from '../../domain/pagamentos/pagamentos.js';
+} from '../../domain/pagamentos/value-objects/ids.js';
+import type { MetodoPagamento } from '../../domain/pagamentos/value-objects/metodo-pagamento.js';
 
 export interface SolicitarPagamentoInput {
   readonly idPagamento: IdPagamento;

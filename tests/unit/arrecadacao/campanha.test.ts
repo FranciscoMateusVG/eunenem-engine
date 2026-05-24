@@ -1,16 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
-  AlterarDadosRecebedorCampanhaInputSchema,
-  CriarCampanhaInputSchema,
   campanhaComAdministrador,
   campanhaComOpcao,
   campanhaComRecebedorAtivo,
   campanhaPossuiAdministrador,
   campanhaSemAdministrador,
-  DadosRecebedorSchema,
   encontrarOpcaoContribuicao,
-} from '../../../src/domain/arrecadacao/campanha.js';
-import { criarRecebedorInicial } from '../../../src/domain/arrecadacao/recebedor.js';
+} from '../../../src/domain/arrecadacao/entities/campanha.js';
+import { criarRecebedorInicial } from '../../../src/domain/arrecadacao/entities/recebedor.js';
+import { DadosRecebedorSchema } from '../../../src/domain/arrecadacao/value-objects/dados-recebedor.js';
+import { AlterarDadosRecebedorCampanhaInputSchema } from '../../../src/use-cases/arrecadacao/alterar-dados-recebedor-campanha.js';
+import { CriarCampanhaInputSchema } from '../../../src/use-cases/arrecadacao/criar-campanha.js';
 
 const idCampanha = '550e8400-e29b-41d4-a716-446655440001';
 const idAdministrador1 = '550e8400-e29b-41d4-a716-446655440002';

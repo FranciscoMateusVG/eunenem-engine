@@ -1,12 +1,7 @@
-import type {
-  Conta,
-  CredencialSimulada,
-  EmailUsuario,
-  IdContaUsuario,
-  IdUsuario,
-  NomeExibicaoUsuario,
-  Usuario,
-} from '../../domain/usuario/usuario.js';
+import type { Conta, CredencialSimulada, Usuario } from '../../domain/usuario/entities/usuario.js';
+import type { EmailUsuario } from '../../domain/usuario/value-objects/email-usuario.js';
+import type { IdContaUsuario, IdUsuario } from '../../domain/usuario/value-objects/ids.js';
+import type { NomeExibicaoUsuario } from '../../domain/usuario/value-objects/nome-exibicao-usuario.js';
 
 /**
  * Persistência de utilizador, conta e credencial simulada (porta).

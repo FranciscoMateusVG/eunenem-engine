@@ -1,4 +1,4 @@
-import type { IdContribuicao } from '../../domain/arrecadacao/contribuicao.js';
+import type { IdContribuicao } from '../../domain/arrecadacao/value-objects/ids.js';
 
 export class ArrecadacaoContribuicaoJaExisteError extends Error {
   public readonly code = 'ARRECADACAO_CONTRIBUICAO_JA_EXISTE' as const;

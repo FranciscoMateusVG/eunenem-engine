@@ -1,18 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import { SpanStatusCode } from '@opentelemetry/api';
+import { z } from 'zod/v4';
 import type { CampanhaRepository } from '../../adapters/arrecadacao/campanha-repository.js';
 import type { RecebedorRepository } from '../../adapters/arrecadacao/recebedor-repository.js';
 import {
-  type AlterarDadosRecebedorCampanhaInput,
-  AlterarDadosRecebedorCampanhaInputSchema,
   type Campanha,
   campanhaComRecebedorAtivo,
-} from '../../domain/arrecadacao/campanha.js';
+} from '../../domain/arrecadacao/entities/campanha.js';
 import {
   criarNovoRecebedor,
   desativarRecebedor,
-  type IdRecebedor,
-} from '../../domain/arrecadacao/recebedor.js';
+} from '../../domain/arrecadacao/entities/recebedor.js';
+import { DadosRecebedorSchema } from '../../domain/arrecadacao/value-objects/dados-recebedor.js';
+import { IdCampanhaSchema, type IdRecebedor } from '../../domain/arrecadacao/value-objects/ids.js';
 import { ArrecadacaoCampanhaNaoEncontradaError } from '../../errors/arrecadacao/campanha-nao-encontrada.error.js';
 import { ArrecadacaoInputInvalidoError } from '../../errors/arrecadacao/input-invalido.error.js';
 import { ArrecadacaoRecebedorNaoEncontradoError } from '../../errors/arrecadacao/recebedor-nao-encontrado.error.js';
@@ -21,6 +21,15 @@ import {
   type ExecutarTransacaoArrecadacao,
   executarTransacaoSequencial,
 } from './executar-transacao-arrecadacao.js';
+
+export const AlterarDadosRecebedorCampanhaInputSchema = z.object({
+  idCampanha: IdCampanhaSchema,
+  dadosRecebedor: DadosRecebedorSchema,
+});
+
+export type AlterarDadosRecebedorCampanhaInput = z.infer<
+  typeof AlterarDadosRecebedorCampanhaInputSchema
+>;
 
 export interface AlterarDadosRecebedorCampanhaDeps {
   readonly campanhaRepository: CampanhaRepository;

@@ -1,5 +1,11 @@
 import { z } from 'zod/v4';
 
+/**
+ * Value object: PIX data of the receiver (nome titular + chave PIX typed by `TipoChavePix`).
+ * Immutable, validated by value, no identity of its own — equality is structural.
+ * Lives inside the `Recebedor` aggregate root (one active per campaign, history preserved).
+ */
+
 export const TipoChavePixSchema = z.enum(['cpf', 'cnpj', 'email', 'telefone', 'aleatoria']);
 export type TipoChavePix = z.infer<typeof TipoChavePixSchema>;
 

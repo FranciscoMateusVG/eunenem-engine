@@ -1,5 +1,6 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
-import type { Sessao, TokenSessao } from '../../domain/usuario/usuario.js';
+import type { Sessao } from '../../domain/usuario/entities/sessao.js';
+import type { TokenSessao } from '../../domain/usuario/value-objects/token-sessao.js';
 import type { SessaoUsuarioRepository } from './sessao-repository.js';
 
 const tracer = trace.getTracer('frame');

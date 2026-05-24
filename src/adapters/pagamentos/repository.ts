@@ -1,4 +1,5 @@
-import type { IdPagamento, Pagamento } from '../../domain/pagamentos/pagamentos.js';
+import type { Pagamento } from '../../domain/pagamentos/entities/pagamento.js';
+import type { IdPagamento } from '../../domain/pagamentos/value-objects/ids.js';
 
 /**
  * Persistência de Pagamentos (porta).

@@ -1,6 +1,5 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
-import type { RegraTaxa } from '../../domain/taxas/taxas.js';
-import { REGRA_TAXA_PADRAO } from '../../domain/taxas/taxas.js';
+import { REGRA_TAXA_PADRAO, type RegraTaxa } from '../../domain/taxas/value-objects/regra-taxa.js';
 import type { ProvedorRegraTaxa } from './regra-provider.js';
 
 const tracer = trace.getTracer('frame');

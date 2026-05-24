@@ -1,4 +1,7 @@
-import type { IdCampanha, IdOpcaoContribuicao } from '../../domain/arrecadacao/campanha.js';
+import type {
+  IdCampanha,
+  IdOpcaoContribuicao,
+} from '../../domain/arrecadacao/value-objects/ids.js';
 
 export class ArrecadacaoOpcaoContribuicaoNaoEncontradaError extends Error {
   public readonly code = 'ARRECADACAO_OPCAO_CONTRIBUICAO_NAO_ENCONTRADA' as const;

@@ -2,8 +2,11 @@ import type { CampanhaRepository } from '../../src/adapters/arrecadacao/campanha
 import { CampanhaRepositoryMemory } from '../../src/adapters/arrecadacao/campanha-repository.memory.js';
 import type { RecebedorRepository } from '../../src/adapters/arrecadacao/recebedor-repository.js';
 import { RecebedorRepositoryMemory } from '../../src/adapters/arrecadacao/recebedor-repository.memory.js';
-import type { Campanha } from '../../src/domain/arrecadacao/campanha.js';
-import { criarRecebedorInicial, type Recebedor } from '../../src/domain/arrecadacao/recebedor.js';
+import type { Campanha } from '../../src/domain/arrecadacao/entities/campanha.js';
+import {
+  criarRecebedorInicial,
+  type Recebedor,
+} from '../../src/domain/arrecadacao/entities/recebedor.js';
 
 export function createArrecadacaoMemoryRepos(): {
   campanhaRepository: CampanhaRepository;

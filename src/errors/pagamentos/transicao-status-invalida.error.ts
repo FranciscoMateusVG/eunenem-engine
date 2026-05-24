@@ -1,4 +1,5 @@
-import type { IdPagamento, StatusPagamento } from '../../domain/pagamentos/pagamentos.js';
+import type { StatusPagamento } from '../../domain/pagamentos/entities/pagamento.js';
+import type { IdPagamento } from '../../domain/pagamentos/value-objects/ids.js';
 
 export class PagamentoTransicaoStatusInvalidaError extends Error {
   public readonly code = 'PAGAMENTO_TRANSICAO_STATUS_INVALIDA' as const;

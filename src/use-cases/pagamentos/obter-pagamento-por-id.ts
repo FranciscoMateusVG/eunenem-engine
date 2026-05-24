@@ -1,12 +1,22 @@
 import { SpanStatusCode } from '@opentelemetry/api';
+import { z } from 'zod/v4';
 import type { PagamentoRepository } from '../../adapters/pagamentos/repository.js';
-import {
-  type ComandoPagamentoInput,
-  ComandoPagamentoInputSchema,
-  type Pagamento,
-} from '../../domain/pagamentos/pagamentos.js';
+import type { Pagamento } from '../../domain/pagamentos/entities/pagamento.js';
+import { IdPagamentoSchema } from '../../domain/pagamentos/value-objects/ids.js';
 import { PagamentosInputInvalidoError } from '../../errors/pagamentos/input-invalido.error.js';
 import type { Observability } from '../../observability/observability.js';
+
+/**
+ * Shared command input for use cases that address a payment by id:
+ * `obterPagamentoPorId`, `aprovarPagamento`, `rejeitarPagamento`.
+ *
+ * Defined here as the simplest payment use case; the others import this shape
+ * to avoid duplicating the schema.
+ */
+export const ComandoPagamentoInputSchema = z.object({
+  idPagamento: IdPagamentoSchema,
+});
+export type ComandoPagamentoInput = z.infer<typeof ComandoPagamentoInputSchema>;
 
 export interface ObterPagamentoPorIdDeps {
   readonly pagamentoRepository: PagamentoRepository;

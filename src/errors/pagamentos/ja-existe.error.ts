@@ -1,4 +1,7 @@
-import type { IdIntencaoPagamento, IdPagamento } from '../../domain/pagamentos/pagamentos.js';
+import type {
+  IdIntencaoPagamento,
+  IdPagamento,
+} from '../../domain/pagamentos/value-objects/ids.js';
 
 export class PagamentoJaExisteError extends Error {
   public readonly code = 'PAGAMENTO_JA_EXISTE' as const;

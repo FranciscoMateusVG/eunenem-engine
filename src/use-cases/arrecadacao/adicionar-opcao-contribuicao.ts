@@ -1,16 +1,27 @@
 import { SpanStatusCode } from '@opentelemetry/api';
+import { z } from 'zod/v4';
 import type { CampanhaRepository } from '../../adapters/arrecadacao/campanha-repository.js';
+import { type Campanha, campanhaComOpcao } from '../../domain/arrecadacao/entities/campanha.js';
 import {
-  type AdicionarOpcaoContribuicaoInput,
-  AdicionarOpcaoContribuicaoInputSchema,
-  type Campanha,
-  campanhaComOpcao,
+  IdCampanhaSchema,
+  IdOpcaoContribuicaoSchema,
+} from '../../domain/arrecadacao/value-objects/ids.js';
+import {
   type OpcaoContribuicao,
-} from '../../domain/arrecadacao/campanha.js';
+  TipoOpcaoContribuicaoSchema,
+} from '../../domain/arrecadacao/value-objects/opcao-contribuicao.js';
 import { ArrecadacaoCampanhaNaoEncontradaError } from '../../errors/arrecadacao/campanha-nao-encontrada.error.js';
 import { ArrecadacaoInputInvalidoError } from '../../errors/arrecadacao/input-invalido.error.js';
 import { ArrecadacaoOpcaoIdDuplicadoError } from '../../errors/arrecadacao/opcao-id-duplicado.error.js';
 import type { Observability } from '../../observability/observability.js';
+
+export const AdicionarOpcaoContribuicaoInputSchema = z.object({
+  idCampanha: IdCampanhaSchema,
+  idOpcao: IdOpcaoContribuicaoSchema,
+  tipo: TipoOpcaoContribuicaoSchema,
+});
+
+export type AdicionarOpcaoContribuicaoInput = z.infer<typeof AdicionarOpcaoContribuicaoInputSchema>;
 
 export interface AdicionarOpcaoContribuicaoDeps {
   readonly campanhaRepository: CampanhaRepository;

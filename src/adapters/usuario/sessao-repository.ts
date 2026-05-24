@@ -1,4 +1,5 @@
-import type { Sessao, TokenSessao } from '../../domain/usuario/usuario.js';
+import type { Sessao } from '../../domain/usuario/entities/sessao.js';
+import type { TokenSessao } from '../../domain/usuario/value-objects/token-sessao.js';
 
 /**
  * Sessões autenticadas simuladas (porta).

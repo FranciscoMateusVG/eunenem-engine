@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { PagamentoEventPublisherMemory } from '../../../src/adapters/pagamentos/event-publisher.memory.js';
 import { PagamentoProviderFake } from '../../../src/adapters/pagamentos/provider.fake.js';
 import { PagamentoRepositoryMemory } from '../../../src/adapters/pagamentos/repository.memory.js';
-import type { CriarIntencaoPagamentoInput } from '../../../src/domain/pagamentos/pagamentos.js';
 import { PagamentosInputInvalidoError } from '../../../src/errors/pagamentos/input-invalido.error.js';
 import { PagamentoNaoEncontradoError } from '../../../src/errors/pagamentos/nao-encontrado.error.js';
 import { PagamentoTransicaoStatusInvalidaError } from '../../../src/errors/pagamentos/transicao-status-invalida.error.js';
@@ -10,6 +9,7 @@ import { PagamentoValorDivergenteError } from '../../../src/errors/pagamentos/va
 import { NoopLogger } from '../../../src/observability/noop-logger.js';
 import { noopTracer } from '../../../src/observability/tracer.js';
 import { aprovarPagamento } from '../../../src/use-cases/pagamentos/aprovar-pagamento.js';
+import type { CriarIntencaoPagamentoInput } from '../../../src/use-cases/pagamentos/criar-intencao-pagamento.js';
 import { criarIntencaoPagamento } from '../../../src/use-cases/pagamentos/criar-intencao-pagamento.js';
 import { obterPagamentoPorId } from '../../../src/use-cases/pagamentos/obter-pagamento-por-id.js';
 import { rejeitarPagamento } from '../../../src/use-cases/pagamentos/rejeitar-pagamento.js';

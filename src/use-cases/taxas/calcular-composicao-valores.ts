@@ -1,14 +1,22 @@
 import { SpanStatusCode } from '@opentelemetry/api';
+import { z } from 'zod/v4';
 import type { ProvedorRegraTaxa } from '../../adapters/taxas/regra-provider.js';
+import { MoneyCentsSchema } from '../../domain/money.js';
 import {
-  type CalcularComposicaoValoresInput,
-  CalcularComposicaoValoresInputSchema,
   type ComposicaoValores,
   calcularComposicaoValores as calcularComposicaoValoresDominio,
-  RegraTaxaSchema,
-} from '../../domain/taxas/taxas.js';
+} from '../../domain/taxas/value-objects/composicao-valores.js';
+import { IdContribuicaoReferenciaSchema } from '../../domain/taxas/value-objects/ids.js';
+import { RegraTaxaSchema } from '../../domain/taxas/value-objects/regra-taxa.js';
 import { TaxasInputInvalidoError } from '../../errors/taxas/input-invalido.error.js';
 import type { Observability } from '../../observability/observability.js';
+
+export const CalcularComposicaoValoresInputSchema = z.object({
+  idContribuicao: IdContribuicaoReferenciaSchema,
+  contributionAmountCents: MoneyCentsSchema,
+});
+
+export type CalcularComposicaoValoresInput = z.infer<typeof CalcularComposicaoValoresInputSchema>;
 
 export interface CalcularComposicaoValoresDeps {
   readonly provedorRegraTaxa: ProvedorRegraTaxa;

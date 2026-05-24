@@ -1,4 +1,4 @@
-import type { IdCampanha } from '../../domain/arrecadacao/campanha.js';
+import type { IdCampanha } from '../../domain/arrecadacao/value-objects/ids.js';
 
 export class ArrecadacaoRecebedorNaoEncontradoError extends Error {
   constructor(public readonly idCampanha: IdCampanha) {

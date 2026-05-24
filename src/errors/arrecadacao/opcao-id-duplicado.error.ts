@@ -1,4 +1,4 @@
-import type { IdOpcaoContribuicao } from '../../domain/arrecadacao/campanha.js';
+import type { IdOpcaoContribuicao } from '../../domain/arrecadacao/value-objects/ids.js';
 
 export class ArrecadacaoOpcaoIdDuplicadoError extends Error {
   public readonly code = 'ARRECADACAO_OPCAO_ID_DUPLICADO' as const;

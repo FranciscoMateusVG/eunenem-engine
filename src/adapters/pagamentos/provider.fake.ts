@@ -2,13 +2,15 @@ import { randomUUID } from 'node:crypto';
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 import type { MoneyCents } from '../../domain/money.js';
 import {
-  type IdTransacaoExterna,
-  IdTransacaoExternaSchema,
-  type NomeProvedorPagamento,
   type StatusTransacaoExterna,
   type TransacaoExterna,
   TransacaoExternaSchema,
-} from '../../domain/pagamentos/pagamentos.js';
+} from '../../domain/pagamentos/entities/pagamento.js';
+import type { NomeProvedorPagamento } from '../../domain/pagamentos/value-objects/evento-pagamento.js';
+import {
+  type IdTransacaoExterna,
+  IdTransacaoExternaSchema,
+} from '../../domain/pagamentos/value-objects/ids.js';
 import type { PagamentoProvider, SolicitarPagamentoInput } from './provider.js';
 
 const tracer = trace.getTracer('frame');

@@ -1,12 +1,24 @@
 import { SpanStatusCode } from '@opentelemetry/api';
+import { z } from 'zod/v4';
 import type { UsuarioRepository } from '../../adapters/usuario/repository.js';
-import type { Conta, RegistrarContaUsuarioInput, Usuario } from '../../domain/usuario/usuario.js';
-import {
-  PERMISSOES_PADRAO,
-  RegistrarContaUsuarioInputSchema,
-} from '../../domain/usuario/usuario.js';
+import type { Conta, Usuario } from '../../domain/usuario/entities/usuario.js';
+import { EmailUsuarioSchema } from '../../domain/usuario/value-objects/email-usuario.js';
+import { IdContaUsuarioSchema, IdUsuarioSchema } from '../../domain/usuario/value-objects/ids.js';
+import { NomeExibicaoUsuarioSchema } from '../../domain/usuario/value-objects/nome-exibicao-usuario.js';
+import { PERMISSOES_PADRAO } from '../../domain/usuario/value-objects/permissao.js';
+import { SenhaSimuladaSchema } from '../../domain/usuario/value-objects/senha-simulada.js';
 import { UsuarioInputInvalidoError } from '../../errors/usuario/input-invalido.error.js';
 import type { Observability } from '../../observability/observability.js';
+
+export const RegistrarContaUsuarioInputSchema = z.object({
+  idUsuario: IdUsuarioSchema,
+  idConta: IdContaUsuarioSchema,
+  email: EmailUsuarioSchema,
+  nomeExibicao: NomeExibicaoUsuarioSchema,
+  senhaSimulada: SenhaSimuladaSchema,
+});
+
+export type RegistrarContaUsuarioInput = z.infer<typeof RegistrarContaUsuarioInputSchema>;
 
 export interface RegistrarContaUsuarioDeps {
   readonly usuarioRepository: UsuarioRepository;

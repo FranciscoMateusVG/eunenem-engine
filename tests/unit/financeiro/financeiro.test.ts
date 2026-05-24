@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
-  calcularReceitaPlataforma,
-  calcularSaldoRecebedor,
   criarLancamentosParaPagamentoAprovado,
-  criarRepasseRecebedorSolicitado,
+  type EfeitosFinanceirosPagamentoAprovado,
   type LancamentoFinanceiro,
-  type RegistrarEfeitosFinanceirosPagamentoAprovadoInput,
-} from '../../../src/domain/financeiro/financeiro.js';
+} from '../../../src/domain/financeiro/entities/lancamento-financeiro.js';
+import { criarRepasseRecebedorSolicitado } from '../../../src/domain/financeiro/entities/repasse-recebedor.js';
+import { calcularReceitaPlataforma } from '../../../src/domain/financeiro/value-objects/receita-plataforma.js';
+import { calcularSaldoRecebedor } from '../../../src/domain/financeiro/value-objects/saldo-recebedor.js';
 
 const idPagamento = '550e8400-e29b-41d4-a716-446655441001';
 const idContribuicao = '550e8400-e29b-41d4-a716-446655441002';
@@ -16,7 +16,7 @@ const idLancamentoReceitaPlataforma = '550e8400-e29b-41d4-a716-446655441005';
 const idRepasse = '550e8400-e29b-41d4-a716-446655441006';
 const criadoEm = new Date('2026-05-01T12:00:00.000Z');
 
-const inputPagamentoAprovado: RegistrarEfeitosFinanceirosPagamentoAprovadoInput = {
+const inputPagamentoAprovado: EfeitosFinanceirosPagamentoAprovado = {
   idPagamento,
   idContribuicao,
   idCampanha,

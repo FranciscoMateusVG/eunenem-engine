@@ -1,11 +1,21 @@
 import { randomBytes } from 'node:crypto';
 import { SpanStatusCode } from '@opentelemetry/api';
+import { z } from 'zod/v4';
 import type { UsuarioRepository } from '../../adapters/usuario/repository.js';
 import type { SessaoUsuarioRepository } from '../../adapters/usuario/sessao-repository.js';
-import type { CriarSessaoUsuarioInput, Sessao } from '../../domain/usuario/usuario.js';
-import { CriarSessaoUsuarioInputSchema, TokenSessaoSchema } from '../../domain/usuario/usuario.js';
+import type { Sessao } from '../../domain/usuario/entities/sessao.js';
+import { EmailUsuarioSchema } from '../../domain/usuario/value-objects/email-usuario.js';
+import { SenhaSimuladaSchema } from '../../domain/usuario/value-objects/senha-simulada.js';
+import { TokenSessaoSchema } from '../../domain/usuario/value-objects/token-sessao.js';
 import { UsuarioInputInvalidoError } from '../../errors/usuario/input-invalido.error.js';
 import type { Observability } from '../../observability/observability.js';
+
+export const CriarSessaoUsuarioInputSchema = z.object({
+  email: EmailUsuarioSchema,
+  senhaSimulada: SenhaSimuladaSchema,
+});
+
+export type CriarSessaoUsuarioInput = z.infer<typeof CriarSessaoUsuarioInputSchema>;
 
 export interface CriarSessaoUsuarioDeps {
   readonly usuarioRepository: UsuarioRepository;

@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { calcularComposicaoValores } from '../../../src/domain/taxas/value-objects/composicao-valores.js';
 import {
-  CalcularComposicaoValoresInputSchema,
-  calcularComposicaoValores,
   calcularValorTaxaPercentual,
   REGRA_TAXA_PADRAO,
   RegraTaxaSchema,
-} from '../../../src/domain/taxas/taxas.js';
+} from '../../../src/domain/taxas/value-objects/regra-taxa.js';
+import { CalcularComposicaoValoresInputSchema } from '../../../src/use-cases/taxas/calcular-composicao-valores.js';
 
 const idContribuicao = '550e8400-e29b-41d4-a716-446655440020';
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ProvedorRegraTaxaMemory } from '../../../src/adapters/taxas/regra-provider.memory.js';
-import { REGRA_TAXA_PADRAO } from '../../../src/domain/taxas/taxas.js';
+import { REGRA_TAXA_PADRAO } from '../../../src/domain/taxas/value-objects/regra-taxa.js';
 
 describe('ProvedorRegraTaxaMemory', () => {
   it('returns the default fixed 5 percent rule', async () => {

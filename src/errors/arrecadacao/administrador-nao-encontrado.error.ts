@@ -1,4 +1,4 @@
-import type { IdConta } from '../../domain/arrecadacao/campanha.js';
+import type { IdConta } from '../../domain/arrecadacao/value-objects/ids.js';
 
 export class ArrecadacaoAdministradorNaoEncontradoError extends Error {
   public readonly code = 'ARRECADACAO_ADMINISTRADOR_NAO_ENCONTRADO' as const;

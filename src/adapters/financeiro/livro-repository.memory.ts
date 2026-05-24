@@ -1,13 +1,13 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
-import type { IdCampanha } from '../../domain/arrecadacao/campanha.js';
+import type { IdCampanha } from '../../domain/arrecadacao/value-objects/ids.js';
+import type { LancamentoFinanceiro } from '../../domain/financeiro/entities/lancamento-financeiro.js';
+import type { RepasseRecebedor } from '../../domain/financeiro/entities/repasse-recebedor.js';
+import type { DadosRecebedorAtivo } from '../../domain/financeiro/value-objects/dados-recebedor-ativo.js';
 import type {
-  DadosRecebedorAtivo,
   IdLancamentoFinanceiro,
   IdPagamentoReferencia,
   IdRepasse,
-  LancamentoFinanceiro,
-  RepasseRecebedor,
-} from '../../domain/financeiro/financeiro.js';
+} from '../../domain/financeiro/value-objects/ids.js';
 import { FinanceiroPagamentoJaRegistradoError } from '../../errors/financeiro/pagamento-ja-registrado.error.js';
 import type { RecebedorRepository } from '../arrecadacao/recebedor-repository.js';
 import type { LivroFinanceiroRepository } from './livro-repository.js';

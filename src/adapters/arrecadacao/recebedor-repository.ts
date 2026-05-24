@@ -1,5 +1,5 @@
-import type { IdCampanha } from '../../domain/arrecadacao/campanha.js';
-import type { Recebedor } from '../../domain/arrecadacao/recebedor.js';
+import type { Recebedor } from '../../domain/arrecadacao/entities/recebedor.js';
+import type { IdCampanha } from '../../domain/arrecadacao/value-objects/ids.js';
 import type { ArrecadacaoRepositoryContext } from './repository-context.js';
 
 /**

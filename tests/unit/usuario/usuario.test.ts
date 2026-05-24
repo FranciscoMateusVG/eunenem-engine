@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import {
-  contaTemPermissao,
-  EmailUsuarioSchema,
-  sessaoExpirada,
-} from '../../../src/domain/usuario/usuario.js';
+import { sessaoExpirada } from '../../../src/domain/usuario/entities/sessao.js';
+import { contaTemPermissao } from '../../../src/domain/usuario/entities/usuario.js';
+import { EmailUsuarioSchema } from '../../../src/domain/usuario/value-objects/email-usuario.js';
 
 describe('contaTemPermissao', () => {
   it('returns true when permission is present', () => {

@@ -3,7 +3,7 @@ import { PagamentoEventPublisherMemory } from '../../../src/adapters/pagamentos/
 import {
   criarEventoPagamento,
   criarPagamentoPendente,
-} from '../../../src/domain/pagamentos/pagamentos.js';
+} from '../../../src/domain/pagamentos/entities/pagamento.js';
 
 const idPagamento = '550e8400-e29b-41d4-a716-446655440401';
 const idIntencaoPagamento = '550e8400-e29b-41d4-a716-446655440402';

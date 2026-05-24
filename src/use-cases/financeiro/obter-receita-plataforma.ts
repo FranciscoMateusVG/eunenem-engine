@@ -3,7 +3,7 @@ import type { LivroFinanceiroRepository } from '../../adapters/financeiro/livro-
 import {
   calcularReceitaPlataforma,
   type ReceitaPlataforma,
-} from '../../domain/financeiro/financeiro.js';
+} from '../../domain/financeiro/value-objects/receita-plataforma.js';
 import type { Observability } from '../../observability/observability.js';
 
 export interface ObterReceitaPlataformaDeps {

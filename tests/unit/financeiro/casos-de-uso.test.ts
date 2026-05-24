@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { LivroFinanceiroRepositoryMemory } from '../../../src/adapters/financeiro/livro-repository.memory.js';
-import type {
-  LancamentoFinanceiro,
-  RegistrarEfeitosFinanceirosPagamentoAprovadoInput,
-} from '../../../src/domain/financeiro/financeiro.js';
+import type { LancamentoFinanceiro } from '../../../src/domain/financeiro/entities/lancamento-financeiro.js';
 import { FinanceiroInputInvalidoError } from '../../../src/errors/financeiro/input-invalido.error.js';
 import { FinanceiroPagamentoJaRegistradoError } from '../../../src/errors/financeiro/pagamento-ja-registrado.error.js';
 import { FinanceiroPagamentoNaoAprovadoError } from '../../../src/errors/financeiro/pagamento-nao-aprovado.error.js';
@@ -12,6 +9,7 @@ import { NoopLogger } from '../../../src/observability/noop-logger.js';
 import { noopTracer } from '../../../src/observability/tracer.js';
 import { obterReceitaPlataforma } from '../../../src/use-cases/financeiro/obter-receita-plataforma.js';
 import { obterSaldoRecebedor } from '../../../src/use-cases/financeiro/obter-saldo-recebedor.js';
+import type { RegistrarEfeitosFinanceirosPagamentoAprovadoInput } from '../../../src/use-cases/financeiro/registrar-efeitos-financeiros-pagamento-aprovado.js';
 import { registrarEfeitosFinanceirosPagamentoAprovado } from '../../../src/use-cases/financeiro/registrar-efeitos-financeiros-pagamento-aprovado.js';
 import { solicitarRepasseRecebedor } from '../../../src/use-cases/financeiro/solicitar-repasse-recebedor.js';
 

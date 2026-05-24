@@ -3,11 +3,11 @@ import {
   aprovarPagamentoPendente,
   criarEventoPagamento,
   criarPagamentoPendente,
-  MetodoPagamentoSchema,
   rejeitarPagamentoPendente,
-  SnapshotComposicaoValoresSchema,
   type TransacaoExterna,
-} from '../../../src/domain/pagamentos/pagamentos.js';
+} from '../../../src/domain/pagamentos/entities/pagamento.js';
+import { MetodoPagamentoSchema } from '../../../src/domain/pagamentos/value-objects/metodo-pagamento.js';
+import { SnapshotComposicaoValoresSchema } from '../../../src/domain/pagamentos/value-objects/snapshot-composicao-valores.js';
 
 const idPagamento = '550e8400-e29b-41d4-a716-446655440101';
 const idIntencaoPagamento = '550e8400-e29b-41d4-a716-446655440102';

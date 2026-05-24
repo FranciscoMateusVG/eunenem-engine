@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { ReadableSpan } from '@opentelemetry/sdk-trace-base';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { ContribuicaoRepository } from '../../src/adapters/arrecadacao/contribuicao-repository.js';
-import type { Contribuicao } from '../../src/domain/arrecadacao/contribuicao.js';
+import type { Contribuicao } from '../../src/domain/arrecadacao/entities/contribuicao.js';
 
 interface ConformanceOptions {
   factory: () => ContribuicaoRepository | Promise<ContribuicaoRepository>;
