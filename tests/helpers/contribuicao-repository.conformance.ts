@@ -116,6 +116,38 @@ export function describeContribuicaoRepositoryConformance(
       expect(span?.attributes['db.system']).toBe(options.expectedDbSystem);
       expect(span?.attributes['db.operation.name']).toBe('SELECT');
     });
+
+    it('countByOpcao returns the number of contributions for a (campanha, opção) pair', async () => {
+      // Use two campanhas so the Postgres seed (which creates one active
+      // recebedor per campanha) is invoked once per campanha — avoids
+      // unique-index collision on recebedores_campanha_ativo_unique.
+      const idCampanhaA = randomUUID();
+      const idOpcaoA = randomUUID();
+      const idCampanhaB = randomUUID();
+      const idOpcaoB = randomUUID();
+
+      const cA1 = makeContribuicao({ idCampanha: idCampanhaA, idOpcaoContribuicao: idOpcaoA });
+      const cA2 = makeContribuicao({ idCampanha: idCampanhaA, idOpcaoContribuicao: idOpcaoA });
+      const cB1 = makeContribuicao({ idCampanha: idCampanhaB, idOpcaoContribuicao: idOpcaoB });
+
+      await options.seedForContribuicao?.(cA1);
+      await options.seedForContribuicao?.(cB1);
+      await repo.save(cA1);
+      await repo.save(cA2);
+      await repo.save(cB1);
+
+      expect(await repo.countByOpcao(idCampanhaA, idOpcaoA)).toBe(2);
+      expect(await repo.countByOpcao(idCampanhaB, idOpcaoB)).toBe(1);
+      expect(await repo.countByOpcao(idCampanhaA, randomUUID())).toBe(0);
+    });
+
+    it('countByOpcao emits db.arrecadacao_contribuicoes.countByOpcao span', async () => {
+      await repo.countByOpcao(randomUUID(), randomUUID());
+      const span = findSpan(options.getSpans(), 'db.arrecadacao_contribuicoes.countByOpcao');
+      expect(span).toBeDefined();
+      expect(span?.attributes['db.system']).toBe(options.expectedDbSystem);
+      expect(span?.attributes['db.operation.name']).toBe('SELECT');
+    });
   });
 }
 
@@ -126,6 +158,8 @@ function makeContribuicao(overrides: Partial<Contribuicao> = {}): Contribuicao {
     idOpcaoContribuicao: randomUUID(),
     nome: 'Fralda',
     valor: 8000,
+    imagemUrl: null,
+    grupo: null,
     contribuinte: null,
     status: 'disponivel',
     criadaEm: new Date('2026-05-01T12:00:00.000Z'),

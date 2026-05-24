@@ -1,6 +1,10 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 import type { Contribuicao } from '../../domain/arrecadacao/entities/contribuicao.js';
-import type { IdCampanha, IdContribuicao } from '../../domain/arrecadacao/value-objects/ids.js';
+import type {
+  IdCampanha,
+  IdContribuicao,
+  IdOpcaoContribuicao,
+} from '../../domain/arrecadacao/value-objects/ids.js';
 import type { Database } from '../database.js';
 import type { ContribuicaoRepository } from './contribuicao-repository.js';
 
@@ -17,6 +21,8 @@ type ContribuicaoRow = {
   id_opcao_contribuicao: string;
   nome: string;
   valor: number;
+  imagem_url: string | null;
+  grupo: string | null;
   status: string;
   criada_em: Date;
   contribuinte_nome: string | null;
@@ -38,6 +44,8 @@ export class ContribuicaoRepositoryPostgres implements ContribuicaoRepository {
             id_opcao_contribuicao: contribuicao.idOpcaoContribuicao,
             nome: contribuicao.nome,
             valor: contribuicao.valor,
+            imagem_url: contribuicao.imagemUrl,
+            grupo: contribuicao.grupo,
             status: contribuicao.status,
             criada_em: contribuicao.criadaEm,
             contribuinte_nome: contribuicao.contribuinte?.nome ?? null,
@@ -47,6 +55,8 @@ export class ContribuicaoRepositoryPostgres implements ContribuicaoRepository {
             oc.column('id').doUpdateSet({
               nome: contribuicao.nome,
               valor: contribuicao.valor,
+              imagem_url: contribuicao.imagemUrl,
+              grupo: contribuicao.grupo,
               status: contribuicao.status,
               contribuinte_nome: contribuicao.contribuinte?.nome ?? null,
               contribuinte_email: contribuicao.contribuinte?.email ?? null,
@@ -105,6 +115,28 @@ export class ContribuicaoRepositoryPostgres implements ContribuicaoRepository {
       }
     });
   }
+
+  async countByOpcao(idCampanha: IdCampanha, idOpcao: IdOpcaoContribuicao): Promise<number> {
+    return tracer.startActiveSpan('db.arrecadacao_contribuicoes.countByOpcao', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        const row = await this.db
+          .selectFrom('contribuicoes')
+          .select((eb) => eb.fn.countAll<string>().as('total'))
+          .where('campanha_id', '=', idCampanha)
+          .where('id_opcao_contribuicao', '=', idOpcao)
+          .executeTakeFirstOrThrow();
+        span.setStatus({ code: SpanStatusCode.OK });
+        return Number(row.total);
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
 }
 
 function toContribuicao(row: ContribuicaoRow): Contribuicao {
@@ -122,6 +154,8 @@ function toContribuicao(row: ContribuicaoRow): Contribuicao {
     idOpcaoContribuicao: row.id_opcao_contribuicao,
     nome: row.nome,
     valor: row.valor,
+    imagemUrl: row.imagem_url,
+    grupo: row.grupo,
     contribuinte,
     status: row.status as Contribuicao['status'],
     criadaEm: row.criada_em,

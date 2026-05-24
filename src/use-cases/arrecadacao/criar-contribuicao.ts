@@ -6,6 +6,7 @@ import { encontrarOpcaoContribuicao } from '../../domain/arrecadacao/entities/ca
 import type { Contribuicao } from '../../domain/arrecadacao/entities/contribuicao.js';
 import {
   criarContribuicaoDisponivel,
+  LIMITE_CONTRIBUICOES_POR_OPCAO,
   NomeContribuicaoSchema,
 } from '../../domain/arrecadacao/entities/contribuicao.js';
 import {
@@ -17,6 +18,7 @@ import { MoneyCentsSchema } from '../../domain/money.js';
 import { ArrecadacaoCampanhaNaoEncontradaError } from '../../errors/arrecadacao/campanha-nao-encontrada.error.js';
 import { ArrecadacaoContribuicaoJaExisteError } from '../../errors/arrecadacao/contribuicao-ja-existe.error.js';
 import { ArrecadacaoInputInvalidoError } from '../../errors/arrecadacao/input-invalido.error.js';
+import { ArrecadacaoLimiteOpcaoExcedidoError } from '../../errors/arrecadacao/limite-opcao-excedido.error.js';
 import { ArrecadacaoOpcaoContribuicaoNaoEncontradaError } from '../../errors/arrecadacao/opcao-contribuicao-nao-encontrada.error.js';
 import type { Observability } from '../../observability/observability.js';
 
@@ -26,6 +28,8 @@ export const CriarContribuicaoInputSchema = z.object({
   idOpcaoContribuicao: IdOpcaoContribuicaoSchema,
   nome: NomeContribuicaoSchema,
   valor: MoneyCentsSchema,
+  imagemUrl: z.url().nullable().optional(),
+  grupo: z.string().trim().min(1).max(60).nullable().optional(),
 });
 
 export type CriarContribuicaoInput = z.infer<typeof CriarContribuicaoInputSchema>;
@@ -55,7 +59,7 @@ export async function criarContribuicao(
         throw new ArrecadacaoInputInvalidoError(message);
       }
 
-      const { id, idCampanha, idOpcaoContribuicao, nome, valor } = parsed.data;
+      const { id, idCampanha, idOpcaoContribuicao, nome, valor, imagemUrl, grupo } = parsed.data;
 
       span.setAttribute('arrecadacao.contribuicao.id', id);
       span.setAttribute('arrecadacao.campanha.id', idCampanha);
@@ -75,12 +79,24 @@ export async function criarContribuicao(
         throw new ArrecadacaoOpcaoContribuicaoNaoEncontradaError(idCampanha, idOpcaoContribuicao);
       }
 
+      const total = await contribuicaoRepository.countByOpcao(idCampanha, idOpcaoContribuicao);
+      if (total >= LIMITE_CONTRIBUICOES_POR_OPCAO) {
+        throw new ArrecadacaoLimiteOpcaoExcedidoError(
+          idCampanha,
+          idOpcaoContribuicao,
+          LIMITE_CONTRIBUICOES_POR_OPCAO,
+          total,
+        );
+      }
+
       const contribuicao = criarContribuicaoDisponivel({
         id,
         idCampanha,
         idOpcaoContribuicao,
         nome,
         valor,
+        imagemUrl: imagemUrl ?? null,
+        grupo: grupo ?? null,
         criadaEm: clock(),
       });
 

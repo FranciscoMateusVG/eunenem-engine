@@ -43,7 +43,11 @@ import { criarContribuicao } from '../src/use-cases/arrecadacao/criar-contribuic
 import { finalizarPagamentoAprovado } from '../src/use-cases/checkout/finalizar-pagamento-aprovado.js';
 import { iniciarPagamentoContribuicao } from '../src/use-cases/checkout/iniciar-pagamento-contribuicao.js';
 import { iniciarRepasseRecebedor } from '../src/use-cases/checkout/iniciar-repasse-recebedor.js';
-import { obterContribuicoesPrecalculadasCampanha } from '../src/use-cases/checkout/obter-contribuicoes-precalculadas-campanha.js';
+import {
+  type ContribuicaoPrecalculada,
+  type OpcaoComContribuicoes,
+  obterContribuicoesPrecalculadasCampanha,
+} from '../src/use-cases/checkout/obter-contribuicoes-precalculadas-campanha.js';
 import { registrarContaUsuario } from '../src/use-cases/usuario/registrar-conta-usuario.js';
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -150,6 +154,270 @@ function formatCents(cents: number): string {
 
 function errorPage(title: string, message: string): string {
   return page(title, `<p style="color:#a00"><strong>Erro:</strong> ${escapeHtml(message)}</p>`);
+}
+
+const LOJA_PAGE_SIZE = 30;
+
+// ──────────────────────────────────────────────────────────────────────────
+// Loja helpers — extracted so the route handler stays small and below the
+// cognitive-complexity cap. See the LOJA handler for the full story.
+// ──────────────────────────────────────────────────────────────────────────
+
+interface LojaFilters {
+  readonly grupoFiltro: string;
+  readonly incluirIndisponiveis: boolean;
+  readonly page: number;
+}
+
+interface CollapsedCard {
+  readonly key: string;
+  readonly nome: string;
+  readonly imagemUrl: string | null;
+  readonly grupo: string | null;
+  readonly composicao: ContribuicaoPrecalculada['composicao'];
+  readonly valorContribuicaoCents: number;
+  readonly disponiveis: string[];
+  indisponiveis: number;
+}
+
+function parseLojaPage(raw: string | undefined): number {
+  const n = Number(raw ?? 1);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 1;
+}
+
+function filterLojaContribs(
+  contribs: readonly ContribuicaoPrecalculada[],
+  filters: LojaFilters,
+): ContribuicaoPrecalculada[] {
+  let out: ContribuicaoPrecalculada[] = [...contribs];
+  if (!filters.incluirIndisponiveis) out = out.filter((ct) => ct.disponivel);
+  if (filters.grupoFiltro === '__sem_grupo__') {
+    return out.filter((ct) => ct.grupo === null);
+  }
+  if (filters.grupoFiltro) {
+    return out.filter((ct) => ct.grupo === filters.grupoFiltro);
+  }
+  return out;
+}
+
+function collapseLojaContribs(contribs: readonly ContribuicaoPrecalculada[]): CollapsedCard[] {
+  const map = new Map<string, CollapsedCard>();
+  for (const ct of contribs) {
+    const key = `${ct.nome}|${ct.valorContribuicaoCents}|${ct.imagemUrl ?? ''}|${ct.grupo ?? ''}`;
+    let card = map.get(key);
+    if (!card) {
+      card = {
+        key,
+        nome: ct.nome,
+        imagemUrl: ct.imagemUrl,
+        grupo: ct.grupo,
+        composicao: ct.composicao,
+        valorContribuicaoCents: ct.valorContribuicaoCents,
+        disponiveis: [],
+        indisponiveis: 0,
+      };
+      map.set(key, card);
+    }
+    if (ct.disponivel) card.disponiveis.push(ct.idContribuicao);
+    else card.indisponiveis++;
+  }
+  return [...map.values()];
+}
+
+function sortCardsByGrupoFirstSeen(cards: readonly CollapsedCard[]): CollapsedCard[] {
+  const grupoOrder = new Map<string | null, number>();
+  let idx = 0;
+  for (const card of cards) {
+    if (grupoOrder.has(card.grupo)) continue;
+    grupoOrder.set(card.grupo, card.grupo === null ? Number.POSITIVE_INFINITY : idx++);
+  }
+  return [...cards].sort((a, b) => {
+    const oa = grupoOrder.get(a.grupo) ?? 0;
+    const ob = grupoOrder.get(b.grupo) ?? 0;
+    return oa - ob;
+  });
+}
+
+function paginateCards(
+  cards: readonly CollapsedCard[],
+  page: number,
+  pageSize: number,
+): { totalPages: number; pageClamped: number; pageCards: CollapsedCard[] } {
+  const totalPages = Math.max(1, Math.ceil(cards.length / pageSize));
+  const pageClamped = Math.min(page, totalPages);
+  const start = (pageClamped - 1) * pageSize;
+  return { totalPages, pageClamped, pageCards: cards.slice(start, start + pageSize) };
+}
+
+function bucketCardsByGrupo(cards: readonly CollapsedCard[]): Map<string | null, CollapsedCard[]> {
+  const buckets = new Map<string | null, CollapsedCard[]>();
+  for (const card of cards) {
+    const list = buckets.get(card.grupo);
+    if (list) list.push(card);
+    else buckets.set(card.grupo, [card]);
+  }
+  return buckets;
+}
+
+function countLabelFor(card: CollapsedCard, total: number): string {
+  if (total !== 1) return `${card.disponiveis.length} de ${total} disponíveis`;
+  return card.disponiveis.length === 1 ? 'disponível' : 'esgotado';
+}
+
+function renderCollapsedCard(card: CollapsedCard, slug: string, idCampanha: string): string {
+  const total = card.disponiveis.length + card.indisponiveis;
+  const buyId = card.disponiveis[0];
+  const imgHtml = card.imagemUrl
+    ? `<img src="${escapeHtml(card.imagemUrl)}" alt="" height="60" style="vertical-align:middle; margin-right:8px; border:1px solid #ccc" /> `
+    : '';
+  const actionHtml = buyId
+    ? `<form method="get" action="/p/${escapeHtml(slug)}/loja/${escapeHtml(idCampanha)}/checkout/${escapeHtml(buyId)}" style="display:inline">
+        <button type="submit">${total > 1 ? 'Comprar 1' : 'Comprar'}</button>
+      </form>`
+    : '<em>(esgotado)</em>';
+  return `<li style="margin-bottom:8px">
+    ${imgHtml}
+    <strong>${escapeHtml(card.nome)}</strong> — base ${formatCents(card.valorContribuicaoCents)}
+    + taxa ${formatCents(card.composicao.feeAmountCents)} =
+    <strong>${formatCents(card.composicao.totalPaidCents)}</strong>
+    <span style="color:#555">(${escapeHtml(countLabelFor(card, total))})</span>
+    ${actionHtml}
+  </li>`;
+}
+
+function renderBucketsHtml(
+  buckets: Map<string | null, CollapsedCard[]>,
+  renderOne: (card: CollapsedCard) => string,
+): string {
+  const hasAnyGroup = [...buckets.keys()].some((k) => k !== null);
+  return [...buckets.entries()]
+    .map(([grupo, list]) => {
+      const heading = hasAnyGroup
+        ? `<h3>${grupo === null ? '<em>(sem grupo)</em>' : escapeHtml(grupo)}</h3>`
+        : '';
+      return `${heading}<ul>${list.map(renderOne).join('')}</ul>`;
+    })
+    .join('');
+}
+
+function renderPaginationHtml(
+  totalPages: number,
+  pageClamped: number,
+  totalCards: number,
+  buildQuery: (overrides: Record<string, string | undefined>) => string,
+): string {
+  if (totalPages <= 1) {
+    const label = totalCards === 1 ? 'item distinto' : 'itens distintos';
+    return `<p style="color:#777">${totalCards} ${label}</p>`;
+  }
+  const prev =
+    pageClamped > 1
+      ? ` <a href="${buildQuery({ page: String(pageClamped - 1) })}">← anterior</a>`
+      : '';
+  const next =
+    pageClamped < totalPages
+      ? ` <a href="${buildQuery({ page: String(pageClamped + 1) })}">próxima →</a>`
+      : '';
+  return `<p style="color:#555">
+    Página ${pageClamped} de ${totalPages} — ${totalCards} itens distintos
+    ${prev}
+    ${next}
+  </p>`;
+}
+
+function makeBuildQuery(
+  filters: LojaFilters,
+): (overrides: Record<string, string | undefined>) => string {
+  return (overrides) => {
+    const params = new URLSearchParams();
+    if (filters.grupoFiltro) params.set('grupo', filters.grupoFiltro);
+    if (filters.incluirIndisponiveis) params.set('incluir_indisponiveis', '1');
+    if (filters.page > 1) params.set('page', String(filters.page));
+    for (const [k, v] of Object.entries(overrides)) {
+      if (v === undefined) params.delete(k);
+      else params.set(k, v);
+    }
+    const s = params.toString();
+    return s ? `?${s}` : '';
+  };
+}
+
+function collectGruposDistintos(opcoes: readonly OpcaoComContribuicoes[]): {
+  grupos: readonly string[];
+  temUngrouped: boolean;
+} {
+  const grupos = new Set<string>();
+  let temUngrouped = false;
+  for (const o of opcoes) {
+    for (const ct of o.contribuicoes) {
+      if (ct.grupo) grupos.add(ct.grupo);
+      else temUngrouped = true;
+    }
+  }
+  return { grupos: [...grupos].sort(), temUngrouped };
+}
+
+function renderFilterFormHtml(
+  slug: string,
+  idCampanha: string,
+  grupos: readonly string[],
+  temUngrouped: boolean,
+  filters: LojaFilters,
+): string {
+  const opts = grupos
+    .map(
+      (g) =>
+        `<option value="${escapeHtml(g)}" ${g === filters.grupoFiltro ? 'selected' : ''}>${escapeHtml(g)}</option>`,
+    )
+    .join('');
+  const semGrupoOpt = temUngrouped
+    ? `<option value="__sem_grupo__" ${filters.grupoFiltro === '__sem_grupo__' ? 'selected' : ''}>(sem grupo)</option>`
+    : '';
+  const limparHtml =
+    filters.grupoFiltro || filters.incluirIndisponiveis || filters.page > 1
+      ? ` <a href="/p/${escapeHtml(slug)}/loja/${escapeHtml(idCampanha)}" style="margin-left:8px">limpar</a>`
+      : '';
+  return `<form method="get" style="background:#f5f5f5; padding:8px; margin-bottom:12px">
+    <label>Grupo:
+      <select name="grupo">
+        <option value="">(todos)</option>
+        ${opts}
+        ${semGrupoOpt}
+      </select>
+    </label>
+    <label style="margin-left:8px">
+      <input type="checkbox" name="incluir_indisponiveis" value="1" ${filters.incluirIndisponiveis ? 'checked' : ''} />
+      incluir indisponíveis
+    </label>
+    <button type="submit" style="margin-left:8px">Aplicar</button>
+    ${limparHtml}
+  </form>`;
+}
+
+function renderLojaOpcao(
+  opcao: OpcaoComContribuicoes,
+  filters: LojaFilters,
+  slug: string,
+  idCampanha: string,
+  buildQuery: (overrides: Record<string, string | undefined>) => string,
+): string {
+  const filtered = filterLojaContribs(opcao.contribuicoes, filters);
+  if (filtered.length === 0) {
+    return `<h2>${escapeHtml(opcao.tipo)}</h2><p><em>(nenhuma com os filtros atuais)</em></p>`;
+  }
+  const cards = collapseLojaContribs(filtered);
+  const sorted = sortCardsByGrupoFirstSeen(cards);
+  const { totalPages, pageClamped, pageCards } = paginateCards(
+    sorted,
+    filters.page,
+    LOJA_PAGE_SIZE,
+  );
+  const buckets = bucketCardsByGrupo(pageCards);
+  const bucketsHtml = renderBucketsHtml(buckets, (card) =>
+    renderCollapsedCard(card, slug, idCampanha),
+  );
+  const paginationHtml = renderPaginationHtml(totalPages, pageClamped, sorted.length, buildQuery);
+  return `<h2>${escapeHtml(opcao.tipo)}</h2>${bucketsHtml}${paginationHtml}`;
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -510,8 +778,10 @@ app.get('/p/:slug/admin/campanhas/:idCampanha', async (c) => {
         contribuicoes
           .map(
             (ct) => `<li>
+              ${ct.imagemUrl ? `<img src="${escapeHtml(ct.imagemUrl)}" alt="" height="40" style="vertical-align:middle; margin-right:6px" /> ` : ''}
               <strong>${escapeHtml(ct.nome)}</strong> — ${formatCents(ct.valor)} —
               <em>${escapeHtml(ct.status)}</em>
+              ${ct.grupo ? ` <span style="background:#eef; padding:1px 4px; border-radius:3px">grupo: ${escapeHtml(ct.grupo)}</span>` : ''}
               ${ct.contribuinte ? ` — contribuinte: ${escapeHtml(ct.contribuinte.nome)} &lt;${escapeHtml(ct.contribuinte.email)}&gt;` : ''}
               (id: <code>${escapeHtml(ct.id)}</code>)
             </li>`,
@@ -525,6 +795,8 @@ app.get('/p/:slug/admin/campanhas/:idCampanha', async (c) => {
     <form method="post" action="/p/${escapeHtml(slug)}/admin/campanhas/${escapeHtml(idCampanha)}/contribuicoes">
       <label>Nome: <input name="nome" required /></label><br />
       <label>Valor (em centavos): <input name="valor" type="number" min="1" required /></label><br />
+      <label>URL da imagem (opcional): <input name="imagemUrl" type="url" placeholder="https://..." /></label><br />
+      <label>Grupo (opcional, ex: "vestuário"): <input name="grupo" maxlength="60" placeholder="vestuário, alimentação..." /></label><br />
       <label>Opção:
         <select name="idOpcaoContribuicao" required>
           ${campanha.opcoes
@@ -566,6 +838,8 @@ app.post('/p/:slug/admin/campanhas/:idCampanha/contribuicoes', async (c) => {
   const slug = c.req.param('slug');
   const idCampanha = c.req.param('idCampanha');
   const form = await c.req.parseBody();
+  const imagemUrlRaw = String(form.imagemUrl ?? '').trim();
+  const grupoRaw = String(form.grupo ?? '').trim();
   try {
     await criarContribuicao(
       {
@@ -580,6 +854,8 @@ app.post('/p/:slug/admin/campanhas/:idCampanha/contribuicoes', async (c) => {
         idOpcaoContribuicao: String(form.idOpcaoContribuicao ?? ''),
         nome: String(form.nome ?? ''),
         valor: Number(form.valor ?? 0),
+        imagemUrl: imagemUrlRaw === '' ? null : imagemUrlRaw,
+        grupo: grupoRaw === '' ? null : grupoRaw,
       },
     );
     return c.redirect(`/p/${slug}/admin/campanhas/${idCampanha}`);
@@ -589,11 +865,30 @@ app.post('/p/:slug/admin/campanhas/:idCampanha/contribuicoes', async (c) => {
 });
 
 // ── LOJA (contribuinte): see + pay ─────────────────────────────────────────
+//
+// Filter + paginate + collapse identical items. With a real gift-registry
+// campanha we can easily have ~5k contribuições (e.g. 100 distinct items ×
+// up to 99 slots each). Three UI strategies handle that without changing
+// the engine:
+//
+//   1. Filter by grupo and "apenas disponíveis" — defaults to disponíveis only.
+//   2. Collapse identical items (nome+valor+imagemUrl+grupo) into a single
+//      card with "X de Y disponíveis", so 99 "Fralda" rows render as 1 card.
+//   3. Paginate the collapsed cards (LOJA_PAGE_SIZE per opção).
+//
+// The DTO from `obterContribuicoesPrecalculadasCampanha` still returns the
+// full set — pagination is a presentation choice, not an engine boundary.
 app.get('/p/:slug/loja/:idCampanha', async (c) => {
   const slug = c.req.param('slug');
   const idCampanha = c.req.param('idCampanha');
   const plataforma = await state.plataformaRepository.findBySlug(slug);
   if (!plataforma) return c.html(errorPage('loja', `Plataforma ${slug} nao encontrada.`), 404);
+
+  const filters: LojaFilters = {
+    grupoFiltro: c.req.query('grupo') ?? '',
+    incluirIndisponiveis: c.req.query('incluir_indisponiveis') === '1',
+    page: parseLojaPage(c.req.query('page')),
+  };
 
   try {
     const dto = await obterContribuicoesPrecalculadasCampanha(
@@ -606,32 +901,17 @@ app.get('/p/:slug/loja/:idCampanha', async (c) => {
       { idPlataforma: plataforma.id, idCampanha },
     );
 
+    const buildQuery = makeBuildQuery(filters);
+    const { grupos, temUngrouped } = collectGruposDistintos(dto.opcoes);
+    const filterFormHtml = renderFilterFormHtml(slug, idCampanha, grupos, temUngrouped, filters);
+    const opcoesHtml = dto.opcoes
+      .map((o) => renderLojaOpcao(o, filters, slug, idCampanha, buildQuery))
+      .join('');
+
     const body = `
       <p><strong>Campanha:</strong> ${escapeHtml(dto.tituloCampanha)}</p>
-      ${dto.opcoes
-        .map(
-          (o) => `<h2>${escapeHtml(o.tipo)}</h2>
-            ${o.contribuicoes.length === 0 ? '<p><em>(nenhuma)</em></p>' : ''}
-            <ul>
-              ${o.contribuicoes
-                .map(
-                  (ct) => `<li>
-                    <strong>${escapeHtml(ct.nome)}</strong> — base ${formatCents(ct.valorContribuicaoCents)}
-                    + taxa ${formatCents(ct.composicao.feeAmountCents)} =
-                    <strong>${formatCents(ct.composicao.totalPaidCents)}</strong>
-                    ${
-                      ct.disponivel
-                        ? `<form method="get" action="/p/${escapeHtml(slug)}/loja/${escapeHtml(idCampanha)}/checkout/${escapeHtml(ct.idContribuicao)}" style="display:inline">
-                      <button type="submit">Comprar</button>
-                    </form>`
-                        : '<em>(indisponivel)</em>'
-                    }
-                  </li>`,
-                )
-                .join('')}
-            </ul>`,
-        )
-        .join('')}
+      ${filterFormHtml}
+      ${opcoesHtml}
     `;
     return c.html(page(`loja — ${dto.tituloCampanha}`, body));
   } catch (err) {

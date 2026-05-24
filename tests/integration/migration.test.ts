@@ -50,7 +50,13 @@ describe('Migration round-trip', () => {
     expect(tableNames).toContain('campanhas');
     expect(tableNames).toContain('recebedores');
 
-    // Migrate down (latest migration first; five steps for arrecadacao)
+    // Migrate down (latest migration first; seven steps for arrecadacao)
+    const downGrupoContribuicoes = await migrator.migrateDown();
+    expect(downGrupoContribuicoes.error).toBeUndefined();
+
+    const downImagemUrlContribuicoes = await migrator.migrateDown();
+    expect(downImagemUrlContribuicoes.error).toBeUndefined();
+
     const downCampanhasIdPlataforma = await migrator.migrateDown();
     expect(downCampanhasIdPlataforma.error).toBeUndefined();
 

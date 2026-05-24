@@ -22,6 +22,16 @@ import type { IdCampanha, IdContribuicao, IdOpcaoContribuicao } from '../value-o
 export const StatusContribuicaoSchema = z.enum(['disponivel', 'indisponivel']);
 export type StatusContribuicao = z.infer<typeof StatusContribuicaoSchema>;
 
+/**
+ * Limite por opção de contribuição — guardrail de escala. Cap deliberadamente
+ * baixo porque ninguém precisa de mais que 10k items em uma única "sacola"
+ * (presentes/rifa/convite) e o cap protege a leitura full-list de virar um
+ * problema de payload/renderização antes de termos paginação no repo.
+ * Quando virar tight, o caminho é introduzir `listPaged` no
+ * `ContribuicaoRepository` (ver plano deferido `0004`).
+ */
+export const LIMITE_CONTRIBUICOES_POR_OPCAO = 10_000;
+
 export const NomeContribuicaoSchema = z
   .string()
   .trim()
@@ -34,6 +44,14 @@ export interface Contribuicao {
   readonly idOpcaoContribuicao: IdOpcaoContribuicao;
   readonly nome: string;
   readonly valor: MoneyCents;
+  readonly imagemUrl: string | null;
+  /**
+   * Agrupamento opcional para a UI da loja (ex: "vestuário", "alimentação"
+   * dentro de uma opção `presente`). Sem semântica de domínio — não afeta
+   * preço, status ou financeiro; só organiza a exibição. `null` quando o
+   * tipo da opção não se beneficia de grupos (ex: rifa).
+   */
+  readonly grupo: string | null;
   readonly contribuinte: DadosContribuinte | null;
   readonly status: StatusContribuicao;
   readonly criadaEm: Date;
@@ -50,6 +68,8 @@ export function criarContribuicaoDisponivel(params: {
   idOpcaoContribuicao: IdOpcaoContribuicao;
   nome: string;
   valor: MoneyCents;
+  imagemUrl?: string | null;
+  grupo?: string | null;
   criadaEm: Date;
 }): Contribuicao {
   return {
@@ -58,6 +78,8 @@ export function criarContribuicaoDisponivel(params: {
     idOpcaoContribuicao: params.idOpcaoContribuicao,
     nome: params.nome,
     valor: params.valor,
+    imagemUrl: params.imagemUrl ?? null,
+    grupo: params.grupo ?? null,
     contribuinte: null,
     status: 'disponivel',
     criadaEm: params.criadaEm,

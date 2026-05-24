@@ -40,6 +40,8 @@ export type ObterContribuicoesPrecalculadasCampanhaInput = z.infer<
 export interface ContribuicaoPrecalculada {
   readonly idContribuicao: IdContribuicao;
   readonly nome: string;
+  readonly imagemUrl: string | null;
+  readonly grupo: string | null;
   readonly valorContribuicaoCents: number;
   readonly disponivel: boolean;
   readonly composicao: ComposicaoValores;
@@ -155,6 +157,8 @@ export async function obterContribuicoesPrecalculadasCampanha(
       contribuicoes: contribuicoesDaOpcao.map((c) => ({
         idContribuicao: c.id,
         nome: c.nome,
+        imagemUrl: c.imagemUrl,
+        grupo: c.grupo,
         valorContribuicaoCents: c.valor,
         disponivel: contribuicaoDisponivel(c),
         composicao: calcularComposicaoValores(tarifa, {

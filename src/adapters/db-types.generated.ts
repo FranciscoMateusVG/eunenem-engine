@@ -34,8 +34,10 @@ export interface Contribuicoes {
   contribuinte_email: string | null;
   contribuinte_nome: string | null;
   criada_em: Generated<Timestamp>;
+  grupo: string | null;
   id: string;
   id_opcao_contribuicao: string;
+  imagem_url: string | null;
   nome: string;
   status: string;
   valor: number;
