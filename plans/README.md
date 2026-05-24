@@ -21,6 +21,7 @@ Read plans in dependency order, not file order — see the graph below.
 | 0011 | [postgres-conformance-sweep](./0011-postgres-conformance-sweep.md)            | 📝 drafted   | Adapter parity audit + CI lock-in                |
 | 0012 | [estorno-and-chargeback-cascade](./0012-estorno-and-chargeback-cascade.md)    | 📝 drafted   | Post-confirmation reversal across all BCs        |
 | 0013 | [provider-fee-passthrough](./0013-provider-fee-passthrough.md)                | 📝 drafted   | 3-part composition; surcharge for Stripe fees    |
+| 0014 | [banking-provider-and-repasse-execution](./0014-banking-provider-and-repasse-execution.md) | 📝 drafted | ⚠️ Real bank transfers (Inter/Nubank); HIGH-RISK |
 
 ## Dependency graph
 
@@ -44,7 +45,11 @@ Arrows mean "needs to be done (or partially done) before." Plans without arrows 
        │                       ┌──> 0013 (provider fee passthrough,
        │                       │         depends on 0002 + 0009)
        │                       │
-       └──> 0011 (hygiene — best run after 0005/0007/0010/0012/0013 add their adapters)
+       │                       └──> 0014 (banking provider / repasse execution
+       │                                  — HIGH-RISK; reuses 0004/0005/0007 patterns,
+       │                                  │ adds egress fee analog of 0013)
+       │
+       └──> 0011 (hygiene — best run after 0005/0007/0010/0012/0013/0014 add their adapters)
 ```
 
 Notes:
@@ -62,26 +67,28 @@ Two viable orderings depending on what you want to learn / unblock next:
 1. **0004** — async confirmation (most production-relevant gap)
 2. **0008** — concurrency safety (cheap, foundational, unlocks confidence)
 3. **0005** — durable event log + queue (turns 0004's manual flow into automatic)
-4. **0007** — webhook auth (mandatory before any real provider)
+4. **0007** — webhook auth (mandatory before any real provider, including bank)
 5. **0006** — maturation (kills the demo hack, finalizes Financeiro story)
 6. **0013** — provider fee passthrough (real margins; needed before onboarding Stripe seriously)
 7. **0012** — estorno cascade (now informed by 0013's passthrough lancamentos)
-8. **0010** — auth (unlocks safe admin)
-9. **0009** — admin UX (uses 0010's auth)
-10. **0011** — conformance sweep (catches everything in one pass)
+8. **0014** — banking provider / repasse execution (replaces manual Inter web UI; HIGH-RISK)
+9. **0010** — auth (unlocks safe admin)
+10. **0009** — admin UX (uses 0010's auth)
+11. **0011** — conformance sweep (catches everything in one pass)
 
 ### B. "Round out the model first, infra later" path
 
 1. **0004** — async confirmation
 2. **0009 Phases 1–3** — plataforma lifecycle + versioned RegraTaxa (no UI)
 3. **0013** — provider fee passthrough (composition becomes 3-part — anchor the pricing story)
-4. **0006** — maturation use case (without scheduler, manual)
-5. **0012** — estorno cascade (now informed by 0013's passthrough lancamentos)
-6. **0008** — concurrency safety
-7. **0010** — auth
-8. **0005** — durable queue + workers (now there's plenty to schedule)
-9. **0009 Phase 4 + 0007** — admin UI + webhook auth
-10. **0011** — sweep
+4. **0014 Phases 1–6** — banking provider port + use cases (no real Inter yet; fake adapter only)
+5. **0006** — maturation use case (without scheduler, manual)
+6. **0012** — estorno cascade (now informed by 0013's passthrough lancamentos)
+7. **0008** — concurrency safety
+8. **0010** — auth
+9. **0005** — durable queue + workers (now there's plenty to schedule)
+10. **0009 Phase 4 + 0007 + 0014 Phase 8 (Inter adapter)** — admin UI + webhook auth + real bank
+11. **0011** — sweep
 
 Path A is closer to "ship-ready"; path B is closer to "domain-rich learning trajectory" since it front-loads BC modeling work and pushes infra (queues, workers, auth) later.
 
