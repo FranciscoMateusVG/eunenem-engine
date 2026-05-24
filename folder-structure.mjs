@@ -32,6 +32,13 @@ const KEBAB = '{kebab-case}';
 /** Subpastas por bounded context (linguagem ubíqua do ENGINE-DDD). */
 const BC_FOLDERS = ['arrecadacao', 'taxas', 'pagamentos', 'financeiro', 'usuario', 'plataforma'];
 
+/**
+ * Application/orchestration folders — NOT BCs. They live only under
+ * `use-cases/`, `errors/`, and `tests/unit/` (no `domain/`, no `adapters/`).
+ * Reserved for layers that compose BCs by their ports.
+ */
+const APPLICATION_FOLDERS = ['checkout'];
+
 /** @param {{ withAdapterImpl?: boolean }} [opts] */
 function bcChildren(opts = {}) {
   const fileChildren = [{ name: `${KEBAB}.ts` }];
@@ -41,6 +48,14 @@ function bcChildren(opts = {}) {
   return BC_FOLDERS.map((name) => ({
     name,
     children: fileChildren,
+  }));
+}
+
+/** Application/orchestration folders — flat kebab-case files only. */
+function applicationChildren() {
+  return APPLICATION_FOLDERS.map((name) => ({
+    name,
+    children: [{ name: `${KEBAB}.ts` }],
   }));
 }
 
@@ -74,6 +89,14 @@ function bcTestChildren(opts = {}) {
   }));
 }
 
+/** Test folders for application/orchestration layers (e.g. checkout). */
+function applicationTestChildren() {
+  return APPLICATION_FOLDERS.map((name) => ({
+    name,
+    children: [{ name: `${KEBAB}.test.ts` }],
+  }));
+}
+
 export const folderStructureConfig = createFolderStructure({
   structure: [
     // ── src/ — the architecture proper ──
@@ -87,7 +110,7 @@ export const folderStructureConfig = createFolderStructure({
         },
         {
           name: 'use-cases',
-          children: [{ name: 'create-cat.ts' }, ...bcChildren()],
+          children: [{ name: 'create-cat.ts' }, ...bcChildren(), ...applicationChildren()],
         },
         {
           name: 'adapters',
@@ -108,6 +131,10 @@ export const folderStructureConfig = createFolderStructure({
             { name: 'cat-already-exists.error.ts' },
             { name: 'invalid-cat-name.error.ts' },
             ...BC_FOLDERS.map((name) => ({
+              name,
+              children: [{ name: `${KEBAB}.error.ts` }],
+            })),
+            ...APPLICATION_FOLDERS.map((name) => ({
               name,
               children: [{ name: `${KEBAB}.error.ts` }],
             })),
@@ -138,6 +165,7 @@ export const folderStructureConfig = createFolderStructure({
             { name: 'logger.test.ts' },
             { name: 'otel-logger.test.ts' },
             ...bcTestChildren({ withAdapterImpl: true }),
+            ...applicationTestChildren(),
           ],
         },
         {

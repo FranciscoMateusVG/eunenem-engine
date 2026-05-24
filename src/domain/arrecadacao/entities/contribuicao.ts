@@ -86,3 +86,20 @@ export function contribuicaoComValor(contribuicao: Contribuicao, valor: MoneyCen
   }
   return { ...contribuicao, valor };
 }
+
+/**
+ * Remove o contribuinte e devolve a contribuição ao estado `disponivel`.
+ * Usado como **compensação** na saga de checkout: se um passo posterior
+ * falhar (cálculo de composição, criação do pagamento), o orquestrador
+ * desfaz a associação. Exige `status === 'indisponivel'`.
+ */
+export function contribuicaoSemContribuinte(contribuicao: Contribuicao): Contribuicao {
+  if (contribuicaoDisponivel(contribuicao)) {
+    throw new Error('Contribuicao ja esta disponivel');
+  }
+  return {
+    ...contribuicao,
+    contribuinte: null,
+    status: 'disponivel',
+  };
+}

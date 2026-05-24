@@ -76,6 +76,46 @@ export function describeContribuicaoRepositoryConformance(
       expect(span?.attributes['db.system']).toBe(options.expectedDbSystem);
       expect(span?.attributes['db.operation.name']).toBe('SELECT');
     });
+
+    it('findByCampanhaId returns only contributions belonging to that campaign', async () => {
+      const idCampanhaA = randomUUID();
+      const idOpcaoA = randomUUID();
+      const idCampanhaB = randomUUID();
+      const idOpcaoB = randomUUID();
+
+      // Two contribuições share campanha A (and its single opção) so the
+      // Postgres seed (which inserts one active recebedor per campanha) is
+      // only invoked once per campanha.
+      const cA1 = makeContribuicao({ idCampanha: idCampanhaA, idOpcaoContribuicao: idOpcaoA });
+      const cA2 = makeContribuicao({ idCampanha: idCampanhaA, idOpcaoContribuicao: idOpcaoA });
+      const cB1 = makeContribuicao({ idCampanha: idCampanhaB, idOpcaoContribuicao: idOpcaoB });
+
+      await options.seedForContribuicao?.(cA1);
+      await options.seedForContribuicao?.(cB1);
+      await repo.save(cA1);
+      await repo.save(cA2);
+      await repo.save(cB1);
+
+      const foundForA = await repo.findByCampanhaId(idCampanhaA);
+      const idsForA = foundForA.map((c) => c.id).sort();
+      expect(idsForA).toEqual([cA1.id, cA2.id].sort());
+
+      const foundForB = await repo.findByCampanhaId(idCampanhaB);
+      expect(foundForB.map((c) => c.id)).toEqual([cB1.id]);
+    });
+
+    it('findByCampanhaId returns empty array when no contributions match', async () => {
+      const found = await repo.findByCampanhaId(randomUUID());
+      expect(found).toEqual([]);
+    });
+
+    it('findByCampanhaId emits db.arrecadacao_contribuicoes.findByCampanhaId span', async () => {
+      await repo.findByCampanhaId(randomUUID());
+      const span = findSpan(options.getSpans(), 'db.arrecadacao_contribuicoes.findByCampanhaId');
+      expect(span).toBeDefined();
+      expect(span?.attributes['db.system']).toBe(options.expectedDbSystem);
+      expect(span?.attributes['db.operation.name']).toBe('SELECT');
+    });
   });
 }
 

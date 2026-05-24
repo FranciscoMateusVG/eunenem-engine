@@ -1,5 +1,5 @@
 import type { Contribuicao } from '../../domain/arrecadacao/entities/contribuicao.js';
-import type { IdContribuicao } from '../../domain/arrecadacao/value-objects/ids.js';
+import type { IdCampanha, IdContribuicao } from '../../domain/arrecadacao/value-objects/ids.js';
 
 /**
  * Persistência de Contribuições (porta). `save` faz upsert (insert ou update).
@@ -7,4 +7,5 @@ import type { IdContribuicao } from '../../domain/arrecadacao/value-objects/ids.
 export interface ContribuicaoRepository {
   save(contribuicao: Contribuicao): Promise<void>;
   findById(id: IdContribuicao): Promise<Contribuicao | undefined>;
+  findByCampanhaId(idCampanha: IdCampanha): Promise<readonly Contribuicao[]>;
 }

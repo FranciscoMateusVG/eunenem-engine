@@ -1,6 +1,6 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 import type { Contribuicao } from '../../domain/arrecadacao/entities/contribuicao.js';
-import type { IdContribuicao } from '../../domain/arrecadacao/value-objects/ids.js';
+import type { IdCampanha, IdContribuicao } from '../../domain/arrecadacao/value-objects/ids.js';
 import type { Database } from '../database.js';
 import type { ContribuicaoRepository } from './contribuicao-repository.js';
 
@@ -75,6 +75,27 @@ export class ContribuicaoRepositoryPostgres implements ContribuicaoRepository {
           .executeTakeFirst();
         span.setStatus({ code: SpanStatusCode.OK });
         return row ? toContribuicao(row) : undefined;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  async findByCampanhaId(idCampanha: IdCampanha): Promise<readonly Contribuicao[]> {
+    return tracer.startActiveSpan('db.arrecadacao_contribuicoes.findByCampanhaId', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        const rows = await this.db
+          .selectFrom('contribuicoes')
+          .selectAll()
+          .where('campanha_id', '=', idCampanha)
+          .execute();
+        span.setStatus({ code: SpanStatusCode.OK });
+        return rows.map(toContribuicao);
       } catch (error: unknown) {
         span.recordException(error as Error);
         span.setStatus({ code: SpanStatusCode.ERROR });

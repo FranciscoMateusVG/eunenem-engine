@@ -56,6 +56,7 @@ export {
   contribuicaoComContribuinte,
   contribuicaoComValor,
   contribuicaoDisponivel,
+  contribuicaoSemContribuinte,
   criarContribuicaoDisponivel,
   NomeContribuicaoSchema,
   StatusContribuicaoSchema,
@@ -319,6 +320,7 @@ export { TokenSessaoSchema } from './domain/usuario/value-objects/token-sessao.j
 export { ArrecadacaoAdministradorDuplicadoError } from './errors/arrecadacao/administrador-duplicado.error.js';
 export { ArrecadacaoAdministradorNaoEncontradoError } from './errors/arrecadacao/administrador-nao-encontrado.error.js';
 export { ArrecadacaoCampanhaNaoEncontradaError } from './errors/arrecadacao/campanha-nao-encontrada.error.js';
+export { ArrecadacaoContribuicaoJaDisponivelError } from './errors/arrecadacao/contribuicao-ja-disponivel.error.js';
 export { ArrecadacaoContribuicaoJaExisteError } from './errors/arrecadacao/contribuicao-ja-existe.error.js';
 export { ArrecadacaoContribuicaoNaoDisponivelError } from './errors/arrecadacao/contribuicao-nao-disponivel.error.js';
 export { ArrecadacaoContribuicaoNaoEncontradaError } from './errors/arrecadacao/contribuicao-nao-encontrada.error.js';
@@ -329,6 +331,7 @@ export { ArrecadacaoPlataformaNaoEncontradaError } from './errors/arrecadacao/pl
 export { ArrecadacaoRecebedorNaoEncontradoError } from './errors/arrecadacao/recebedor-nao-encontrado.error.js';
 export { ArrecadacaoUltimoAdministradorError } from './errors/arrecadacao/ultimo-administrador.error.js';
 export { CatAlreadyExistsError } from './errors/cat-already-exists.error.js';
+export { CheckoutPlataformaMismatchError } from './errors/checkout/plataforma-mismatch.error.js';
 export { FinanceiroInputInvalidoError } from './errors/financeiro/input-invalido.error.js';
 export { FinanceiroPagamentoJaRegistradoError } from './errors/financeiro/pagamento-ja-registrado.error.js';
 export { FinanceiroPagamentoNaoAprovadoError } from './errors/financeiro/pagamento-nao-aprovado.error.js';
@@ -417,6 +420,14 @@ export {
   criarContribuicao,
 } from './use-cases/arrecadacao/criar-contribuicao.js';
 export type {
+  DesassociarContribuinteContribuicaoDeps,
+  DesassociarContribuinteContribuicaoInput,
+} from './use-cases/arrecadacao/desassociar-contribuinte-contribuicao.js';
+export {
+  DesassociarContribuinteContribuicaoInputSchema,
+  desassociarContribuinteContribuicao,
+} from './use-cases/arrecadacao/desassociar-contribuinte-contribuicao.js';
+export type {
   RemoverAdministradorCampanhaDeps,
   RemoverAdministradorCampanhaInput,
 } from './use-cases/arrecadacao/remover-administrador-campanha.js';
@@ -424,6 +435,17 @@ export {
   RemoverAdministradorCampanhaInputSchema,
   removerAdministradorCampanha,
 } from './use-cases/arrecadacao/remover-administrador-campanha.js';
+export type {
+  ContribuicaoPrecalculada,
+  ContribuicoesPrecalculadasCampanha,
+  ObterContribuicoesPrecalculadasCampanhaDeps,
+  ObterContribuicoesPrecalculadasCampanhaInput,
+  OpcaoComContribuicoes,
+} from './use-cases/checkout/obter-contribuicoes-precalculadas-campanha.js';
+export {
+  ObterContribuicoesPrecalculadasCampanhaInputSchema,
+  obterContribuicoesPrecalculadasCampanha,
+} from './use-cases/checkout/obter-contribuicoes-precalculadas-campanha.js';
 export type { CreateCatDeps } from './use-cases/create-cat.js';
 export { createCat } from './use-cases/create-cat.js';
 export type { ObterReceitaPlataformaDeps } from './use-cases/financeiro/obter-receita-plataforma.js';
