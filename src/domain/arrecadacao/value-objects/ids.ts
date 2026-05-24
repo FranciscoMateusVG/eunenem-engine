@@ -9,6 +9,14 @@ import { z } from 'zod/v4';
 export const IdContaSchema = z.uuid();
 export type IdConta = z.infer<typeof IdContaSchema>;
 
+/**
+ * Mirror VO: a public reference to a Plataforma. Same shape as the BC's
+ * own IdPlataforma, but defined locally so Arrecadação does NOT import from
+ * `src/domain/plataforma/`. Enforced by dependency-cruiser.
+ */
+export const IdPlataformaReferenciaSchema = z.uuid();
+export type IdPlataformaReferencia = z.infer<typeof IdPlataformaReferenciaSchema>;
+
 export const IdCampanhaSchema = z.uuid();
 export type IdCampanha = z.infer<typeof IdCampanhaSchema>;
 

@@ -13,3 +13,11 @@ export type IdUsuario = z.infer<typeof IdUsuarioSchema>;
 
 export const IdContaUsuarioSchema = z.uuid();
 export type IdContaUsuario = z.infer<typeof IdContaUsuarioSchema>;
+
+/**
+ * Mirror VO: a public reference to a Plataforma. Same shape as the BC's own
+ * IdPlataforma, but defined locally so Usuário does NOT import from
+ * `src/domain/plataforma/`. Enforced by dependency-cruiser.
+ */
+export const IdPlataformaReferenciaSchema = z.uuid();
+export type IdPlataformaReferencia = z.infer<typeof IdPlataformaReferenciaSchema>;

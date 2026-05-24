@@ -67,6 +67,39 @@ export function describeCampanhaRepositoryConformance(name: string, options: Con
       expect(span?.attributes['db.system']).toBe(options.expectedDbSystem);
       expect(span?.attributes['db.operation.name']).toBe('SELECT');
     });
+
+    it('findByPlataforma returns only campaigns belonging to the given plataforma', async () => {
+      const idPlataformaA = randomUUID();
+      const idPlataformaB = randomUUID();
+
+      const campanhaA1 = makeCampanha({ idPlataforma: idPlataformaA });
+      const campanhaA2 = makeCampanha({ idPlataforma: idPlataformaA });
+      const campanhaB1 = makeCampanha({ idPlataforma: idPlataformaB });
+
+      await options.saveCampanha(repo, campanhaA1);
+      await options.saveCampanha(repo, campanhaA2);
+      await options.saveCampanha(repo, campanhaB1);
+
+      const foundForA = await repo.findByPlataforma(idPlataformaA);
+      const idsForA = foundForA.map((c) => c.id).sort();
+      expect(idsForA).toEqual([campanhaA1.id, campanhaA2.id].sort());
+
+      const foundForB = await repo.findByPlataforma(idPlataformaB);
+      expect(foundForB.map((c) => c.id)).toEqual([campanhaB1.id]);
+    });
+
+    it('findByPlataforma returns empty array when no campaigns match', async () => {
+      const found = await repo.findByPlataforma(randomUUID());
+      expect(found).toEqual([]);
+    });
+
+    it('findByPlataforma emits db.arrecadacao_campanhas.findByPlataforma span', async () => {
+      await repo.findByPlataforma(randomUUID());
+      const span = findSpan(options.getSpans(), 'db.arrecadacao_campanhas.findByPlataforma');
+      expect(span).toBeDefined();
+      expect(span?.attributes['db.system']).toBe(options.expectedDbSystem);
+      expect(span?.attributes['db.operation.name']).toBe('SELECT');
+    });
   });
 }
 
@@ -74,6 +107,7 @@ export function makeCampanha(overrides: Partial<Campanha> = {}): Campanha {
   const idRecebedor = randomUUID();
   return {
     id: randomUUID(),
+    idPlataforma: randomUUID(),
     idsAdministradores: [randomUUID()],
     idRecebedor,
     dadosRecebedor: {

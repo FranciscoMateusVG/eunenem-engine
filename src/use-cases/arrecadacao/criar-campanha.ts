@@ -3,15 +3,21 @@ import { SpanStatusCode } from '@opentelemetry/api';
 import { z } from 'zod/v4';
 import type { CampanhaRepository } from '../../adapters/arrecadacao/campanha-repository.js';
 import type { RecebedorRepository } from '../../adapters/arrecadacao/recebedor-repository.js';
+import type { PlataformaRepository } from '../../adapters/plataforma/repository.js';
 import {
   type Campanha,
   campanhaComRecebedorInicial,
 } from '../../domain/arrecadacao/entities/campanha.js';
 import { criarRecebedorInicial } from '../../domain/arrecadacao/entities/recebedor.js';
 import { DadosRecebedorSchema } from '../../domain/arrecadacao/value-objects/dados-recebedor.js';
-import { IdCampanhaSchema, type IdRecebedor } from '../../domain/arrecadacao/value-objects/ids.js';
+import {
+  IdCampanhaSchema,
+  IdPlataformaReferenciaSchema,
+  type IdRecebedor,
+} from '../../domain/arrecadacao/value-objects/ids.js';
 import { IdsAdministradoresSchema } from '../../domain/arrecadacao/value-objects/ids-administradores.js';
 import { ArrecadacaoInputInvalidoError } from '../../errors/arrecadacao/input-invalido.error.js';
+import { ArrecadacaoPlataformaNaoEncontradaError } from '../../errors/arrecadacao/plataforma-nao-encontrada.error.js';
 import type { Observability } from '../../observability/observability.js';
 import {
   type ExecutarTransacaoArrecadacao,
@@ -20,6 +26,7 @@ import {
 
 export const CriarCampanhaInputSchema = z.object({
   id: IdCampanhaSchema,
+  idPlataforma: IdPlataformaReferenciaSchema,
   idsAdministradores: IdsAdministradoresSchema,
   dadosRecebedor: DadosRecebedorSchema,
   titulo: z.string().trim().min(1, 'Titulo nao pode ser vazio').max(200),
@@ -30,6 +37,7 @@ export type CriarCampanhaInput = z.infer<typeof CriarCampanhaInputSchema>;
 export interface CriarCampanhaDeps {
   readonly campanhaRepository: CampanhaRepository;
   readonly recebedorRepository: RecebedorRepository;
+  readonly plataformaRepository: PlataformaRepository;
   readonly clock: () => Date;
   readonly gerarIdRecebedor?: () => IdRecebedor;
   readonly executarTransacao?: ExecutarTransacaoArrecadacao;
@@ -46,6 +54,7 @@ export async function criarCampanha(
   const {
     campanhaRepository,
     recebedorRepository,
+    plataformaRepository,
     clock,
     gerarIdRecebedor = randomUUID,
     executarTransacao = executarTransacaoSequencial,
@@ -62,6 +71,7 @@ export async function criarCampanha(
       }
 
       span.setAttribute('arrecadacao.campanha.id', parsed.data.id);
+      span.setAttribute('arrecadacao.plataforma.id', parsed.data.idPlataforma);
       span.setAttribute('arrecadacao.campanha.titulo.length', parsed.data.titulo.length);
       span.setAttribute(
         'arrecadacao.campanha.administradores.count',
@@ -71,6 +81,11 @@ export async function criarCampanha(
         'arrecadacao.recebedor.tipoChavePix',
         parsed.data.dadosRecebedor.tipoChavePix,
       );
+
+      const plataforma = await plataformaRepository.findById(parsed.data.idPlataforma);
+      if (!plataforma) {
+        throw new ArrecadacaoPlataformaNaoEncontradaError(parsed.data.idPlataforma);
+      }
 
       const criadaEm = clock();
       const recebedor = criarRecebedorInicial({
@@ -82,6 +97,7 @@ export async function criarCampanha(
 
       const campanha = campanhaComRecebedorInicial({
         id: parsed.data.id,
+        idPlataforma: parsed.data.idPlataforma,
         idsAdministradores: parsed.data.idsAdministradores,
         titulo: parsed.data.titulo,
         opcoes: [],
@@ -96,6 +112,7 @@ export async function criarCampanha(
 
       logger.info('arrecadacao.campanha.criada', {
         idCampanha: campanha.id,
+        idPlataforma: campanha.idPlataforma,
         idRecebedor: campanha.idRecebedor,
         tipoChavePix: campanha.dadosRecebedor.tipoChavePix,
         tituloLength: campanha.titulo.length,

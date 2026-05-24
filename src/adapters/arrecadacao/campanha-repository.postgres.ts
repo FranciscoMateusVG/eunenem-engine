@@ -1,7 +1,11 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 import type { Campanha } from '../../domain/arrecadacao/entities/campanha.js';
 import { campanhaComRecebedorInicial } from '../../domain/arrecadacao/entities/campanha.js';
-import type { IdCampanha, IdConta } from '../../domain/arrecadacao/value-objects/ids.js';
+import type {
+  IdCampanha,
+  IdConta,
+  IdPlataformaReferencia,
+} from '../../domain/arrecadacao/value-objects/ids.js';
 import type {
   OpcaoContribuicao,
   TipoOpcaoContribuicao,
@@ -21,8 +25,9 @@ const DB_ATTRS = {
 type OpcaoRow = { id: string; campanha_id: string; tipo: string };
 
 /**
- * PostgreSQL CampanhaRepository: upsert da campanha, sync de administradores (delete-all + insert)
- * e upsert de opções por id. Recebedor ativo resolvido via RecebedorRepository.
+ * PostgreSQL CampanhaRepository: upsert da campanha (incluindo `id_plataforma`),
+ * sync de administradores (delete-all + insert) e upsert de opções por id.
+ * Recebedor ativo resolvido via RecebedorRepository.
  */
 export class CampanhaRepositoryPostgres implements CampanhaRepository {
   constructor(
@@ -39,12 +44,14 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
           .insertInto('campanhas')
           .values({
             id: campanha.id,
+            id_plataforma: campanha.idPlataforma,
             titulo: campanha.titulo,
             criada_em: campanha.criadaEm,
           })
           .onConflict((oc) =>
             oc.column('id').doUpdateSet({
               titulo: campanha.titulo,
+              id_plataforma: campanha.idPlataforma,
             }),
           )
           .execute();
@@ -134,12 +141,77 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
         span.setStatus({ code: SpanStatusCode.OK });
         return campanhaComRecebedorInicial({
           id: row.id as IdCampanha,
+          idPlataforma: row.id_plataforma as IdPlataformaReferencia,
           idsAdministradores: admins.map((a) => a.id_usuario as IdConta),
           titulo: row.titulo,
           opcoes: opcoes.map(toOpcao),
           criadaEm: row.criada_em,
           recebedor: recebedorAtivo,
         });
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  async findByPlataforma(
+    idPlataforma: IdPlataformaReferencia,
+    context?: ArrecadacaoRepositoryContext,
+  ): Promise<readonly Campanha[]> {
+    const executor = context?.trx ?? this.db;
+    return tracer.startActiveSpan('db.arrecadacao_campanhas.findByPlataforma', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        const rows = await executor
+          .selectFrom('campanhas')
+          .selectAll()
+          .where('id_plataforma', '=', idPlataforma)
+          .execute();
+
+        if (rows.length === 0) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return [];
+        }
+
+        const resultados: Campanha[] = [];
+        for (const row of rows) {
+          const recebedorAtivo = await this.recebedorRepository.findAtivoByCampanhaId(
+            row.id as IdCampanha,
+            context,
+          );
+          if (!recebedorAtivo) continue;
+
+          const admins = await executor
+            .selectFrom('campanha_administradores')
+            .selectAll()
+            .where('campanha_id', '=', row.id)
+            .execute();
+
+          const opcoes = await executor
+            .selectFrom('opcoes_contribuicao')
+            .selectAll()
+            .where('campanha_id', '=', row.id)
+            .execute();
+
+          resultados.push(
+            campanhaComRecebedorInicial({
+              id: row.id as IdCampanha,
+              idPlataforma: row.id_plataforma as IdPlataformaReferencia,
+              idsAdministradores: admins.map((a) => a.id_usuario as IdConta),
+              titulo: row.titulo,
+              opcoes: opcoes.map(toOpcao),
+              criadaEm: row.criada_em,
+              recebedor: recebedorAtivo,
+            }),
+          );
+        }
+
+        span.setStatus({ code: SpanStatusCode.OK });
+        return resultados;
       } catch (error: unknown) {
         span.recordException(error as Error);
         span.setStatus({ code: SpanStatusCode.ERROR });

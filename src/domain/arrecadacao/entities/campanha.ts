@@ -3,6 +3,7 @@ import type {
   IdCampanha,
   IdConta,
   IdOpcaoContribuicao,
+  IdPlataformaReferencia,
   IdRecebedor,
 } from '../value-objects/ids.js';
 import type { OpcaoContribuicao } from '../value-objects/opcao-contribuicao.js';
@@ -14,6 +15,10 @@ import type { Recebedor } from './recebedor.js';
  * Owns: `idsAdministradores`, `opcoes` (sacolas), `titulo`, plus a projection of
  * the active recebedor's data (`idRecebedor` + `dadosRecebedor` snapshot).
  *
+ * Belongs to exactly one Plataforma (multi-tenant boundary): the
+ * `idPlataforma` is immutable after creation and scopes all downstream
+ * pricing (RegraTaxa lookup) and authorization decisions.
+ *
  * Persisted via: `CampanhaRepository`.
  *
  * Aggregate boundary: changes to administradores, opções, or the active
@@ -21,6 +26,7 @@ import type { Recebedor } from './recebedor.js';
  */
 export interface Campanha {
   readonly id: IdCampanha;
+  readonly idPlataforma: IdPlataformaReferencia;
   readonly idsAdministradores: readonly IdConta[];
   readonly idRecebedor: IdRecebedor;
   readonly dadosRecebedor: DadosRecebedor;

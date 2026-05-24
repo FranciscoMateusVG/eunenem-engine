@@ -27,7 +27,10 @@ export {
   PlataformaRepositoryMemory,
 } from './adapters/plataforma/repository.memory.js';
 export type { ProvedorRegraTaxa } from './adapters/taxas/regra-provider.js';
-export { ProvedorRegraTaxaMemory } from './adapters/taxas/regra-provider.memory.js';
+export {
+  ProvedorRegraTaxaMemory,
+  REGRAS_TAXA_SEED,
+} from './adapters/taxas/regra-provider.memory.js';
 export type { UsuarioRepository } from './adapters/usuario/repository.js';
 export { UsuarioRepositoryMemory } from './adapters/usuario/repository.memory.js';
 export type { SessaoUsuarioRepository } from './adapters/usuario/sessao-repository.js';
@@ -81,6 +84,7 @@ export type {
   IdConta,
   IdContribuicao,
   IdOpcaoContribuicao,
+  IdPlataformaReferencia as IdPlataformaReferenciaArrecadacao,
   IdRecebedor,
 } from './domain/arrecadacao/value-objects/ids.js';
 export {
@@ -88,6 +92,7 @@ export {
   IdContaSchema,
   IdContribuicaoSchema,
   IdOpcaoContribuicaoSchema,
+  IdPlataformaReferenciaSchema as IdPlataformaReferenciaArrecadacaoSchema,
   IdRecebedorSchema,
 } from './domain/arrecadacao/value-objects/ids.js';
 export { IdsAdministradoresSchema } from './domain/arrecadacao/value-objects/ids-administradores.js';
@@ -233,29 +238,50 @@ export { SlugPlataformaSchema } from './domain/plataforma/value-objects/slug-pla
 
 // --- Domain: Taxas ---
 
+export type {
+  CriarRegraTaxaInput,
+  RegraTaxa,
+} from './domain/taxas/entities/regra-taxa.js';
+export {
+  criarRegraTaxa,
+  obterTarifaPorTipo,
+  RegraTaxaSchema,
+} from './domain/taxas/entities/regra-taxa.js';
+export type {
+  CalculoTaxa,
+  DadosCalculoTaxa,
+} from './domain/taxas/value-objects/calculo-taxa.js';
+export {
+  calcularTaxa,
+  calcularValorTaxaPercentual,
+} from './domain/taxas/value-objects/calculo-taxa.js';
 export type { ComposicaoValores } from './domain/taxas/value-objects/composicao-valores.js';
 export {
   calcularComposicaoValores as calcularComposicaoValoresDominio,
   comporComposicaoValores,
 } from './domain/taxas/value-objects/composicao-valores.js';
-export type { IdContribuicaoReferencia } from './domain/taxas/value-objects/ids.js';
-export { IdContribuicaoReferenciaSchema } from './domain/taxas/value-objects/ids.js';
 export type {
-  CalculoTaxa,
-  DadosCalculoTaxa,
-  PercentualTaxaBps,
-  RegraTaxa,
-  ResponsavelTaxa,
-} from './domain/taxas/value-objects/regra-taxa.js';
+  IdContribuicaoReferencia,
+  IdPlataformaReferencia as IdPlataformaReferenciaTaxas,
+  IdRegraTaxa,
+} from './domain/taxas/value-objects/ids.js';
 export {
-  calcularTaxa,
-  calcularValorTaxaPercentual,
-  DEFAULT_FEE_PERCENTAGE_BPS,
+  IdContribuicaoReferenciaSchema,
+  IdPlataformaReferenciaSchema as IdPlataformaReferenciaTaxasSchema,
+  IdRegraTaxaSchema,
+} from './domain/taxas/value-objects/ids.js';
+export type {
+  PercentualTaxaBps,
+  ResponsavelTaxa,
+  TarifaTipo,
+  TipoOpcaoContribuicaoReferencia,
+} from './domain/taxas/value-objects/tarifa-tipo.js';
+export {
   PercentualTaxaBpsSchema,
-  REGRA_TAXA_PADRAO,
-  RegraTaxaSchema,
   ResponsavelTaxaSchema,
-} from './domain/taxas/value-objects/regra-taxa.js';
+  TarifaTipoSchema,
+  TipoOpcaoContribuicaoReferenciaSchema,
+} from './domain/taxas/value-objects/tarifa-tipo.js';
 
 // --- Domain: Usuário ---
 
@@ -269,8 +295,16 @@ export type {
 export { contaTemPermissao } from './domain/usuario/entities/usuario.js';
 export type { EmailUsuario } from './domain/usuario/value-objects/email-usuario.js';
 export { EmailUsuarioSchema } from './domain/usuario/value-objects/email-usuario.js';
-export type { IdContaUsuario, IdUsuario } from './domain/usuario/value-objects/ids.js';
-export { IdContaUsuarioSchema, IdUsuarioSchema } from './domain/usuario/value-objects/ids.js';
+export type {
+  IdContaUsuario,
+  IdPlataformaReferencia as IdPlataformaReferenciaUsuario,
+  IdUsuario,
+} from './domain/usuario/value-objects/ids.js';
+export {
+  IdContaUsuarioSchema,
+  IdPlataformaReferenciaSchema as IdPlataformaReferenciaUsuarioSchema,
+  IdUsuarioSchema,
+} from './domain/usuario/value-objects/ids.js';
 export type { NomeExibicaoUsuario } from './domain/usuario/value-objects/nome-exibicao-usuario.js';
 export { NomeExibicaoUsuarioSchema } from './domain/usuario/value-objects/nome-exibicao-usuario.js';
 export type { Permissao } from './domain/usuario/value-objects/permissao.js';
@@ -291,6 +325,7 @@ export { ArrecadacaoContribuicaoNaoEncontradaError } from './errors/arrecadacao/
 export { ArrecadacaoInputInvalidoError } from './errors/arrecadacao/input-invalido.error.js';
 export { ArrecadacaoOpcaoContribuicaoNaoEncontradaError } from './errors/arrecadacao/opcao-contribuicao-nao-encontrada.error.js';
 export { ArrecadacaoOpcaoIdDuplicadoError } from './errors/arrecadacao/opcao-id-duplicado.error.js';
+export { ArrecadacaoPlataformaNaoEncontradaError } from './errors/arrecadacao/plataforma-nao-encontrada.error.js';
 export { ArrecadacaoRecebedorNaoEncontradoError } from './errors/arrecadacao/recebedor-nao-encontrado.error.js';
 export { ArrecadacaoUltimoAdministradorError } from './errors/arrecadacao/ultimo-administrador.error.js';
 export { CatAlreadyExistsError } from './errors/cat-already-exists.error.js';
@@ -306,9 +341,11 @@ export { PagamentoTransicaoStatusInvalidaError } from './errors/pagamentos/trans
 export { PagamentoValorDivergenteError } from './errors/pagamentos/valor-divergente.error.js';
 export { PlataformaNaoEncontradaError } from './errors/plataforma/nao-encontrada.error.js';
 export { TaxasInputInvalidoError } from './errors/taxas/input-invalido.error.js';
+export { RegraTaxaNaoEncontradaError } from './errors/taxas/regra-nao-encontrada.error.js';
 export { UsuarioEmailJaExisteError } from './errors/usuario/email-ja-existe.error.js';
 export { UsuarioInputInvalidoError } from './errors/usuario/input-invalido.error.js';
 export { UsuarioNaoAutorizadoError } from './errors/usuario/nao-autorizado.error.js';
+export { UsuarioPlataformaNaoEncontradaError } from './errors/usuario/plataforma-nao-encontrada.error.js';
 export { UsuarioSessaoInvalidaError } from './errors/usuario/sessao-invalida.error.js';
 
 // --- Observability ---

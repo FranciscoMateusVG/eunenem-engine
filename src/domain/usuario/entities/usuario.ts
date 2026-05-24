@@ -1,5 +1,5 @@
 import type { EmailUsuario } from '../value-objects/email-usuario.js';
-import type { IdContaUsuario, IdUsuario } from '../value-objects/ids.js';
+import type { IdContaUsuario, IdPlataformaReferencia, IdUsuario } from '../value-objects/ids.js';
 import type { NomeExibicaoUsuario } from '../value-objects/nome-exibicao-usuario.js';
 import type { Permissao } from '../value-objects/permissao.js';
 import type { SenhaSimulada } from '../value-objects/senha-simulada.js';
@@ -11,6 +11,10 @@ import type { SenhaSimulada } from '../value-objects/senha-simulada.js';
  * `CredencialSimulada`. Persisted as a unit via
  * `UsuarioRepository.saveRegistro({usuario, conta, credencial})`.
  *
+ * Belongs to exactly one Plataforma (multi-tenant boundary). Email
+ * uniqueness is composite — `(idPlataforma, email)` — so the same person
+ * can register on eunenem AND eucasei as two separate `Usuario` rows.
+ *
  * `Conta` and `CredencialSimulada` are **entities inside this aggregate** —
  * they have their own identity (id / idUsuario) but are loaded and saved with
  * the Usuario root, never independently.
@@ -20,6 +24,7 @@ import type { SenhaSimulada } from '../value-objects/senha-simulada.js';
  */
 export interface Usuario {
   readonly id: IdUsuario;
+  readonly idPlataforma: IdPlataformaReferencia;
   readonly idConta: IdContaUsuario;
   readonly email: EmailUsuario;
   readonly nomeExibicao: NomeExibicaoUsuario;

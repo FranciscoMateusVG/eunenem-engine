@@ -19,6 +19,7 @@ export interface CampanhaAdministradores {
 export interface Campanhas {
   criada_em: Generated<Timestamp>;
   id: string;
+  id_plataforma: string;
   titulo: string;
 }
 

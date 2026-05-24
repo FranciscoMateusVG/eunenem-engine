@@ -1,5 +1,8 @@
 import type { Campanha } from '../../domain/arrecadacao/entities/campanha.js';
-import type { IdCampanha } from '../../domain/arrecadacao/value-objects/ids.js';
+import type {
+  IdCampanha,
+  IdPlataformaReferencia,
+} from '../../domain/arrecadacao/value-objects/ids.js';
 import type { ArrecadacaoRepositoryContext } from './repository-context.js';
 
 /**
@@ -8,4 +11,8 @@ import type { ArrecadacaoRepositoryContext } from './repository-context.js';
 export interface CampanhaRepository {
   save(campanha: Campanha, context?: ArrecadacaoRepositoryContext): Promise<void>;
   findById(id: IdCampanha, context?: ArrecadacaoRepositoryContext): Promise<Campanha | undefined>;
+  findByPlataforma(
+    idPlataforma: IdPlataformaReferencia,
+    context?: ArrecadacaoRepositoryContext,
+  ): Promise<readonly Campanha[]>;
 }

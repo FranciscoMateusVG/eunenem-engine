@@ -2,6 +2,8 @@ import type { CampanhaRepository } from '../../src/adapters/arrecadacao/campanha
 import { CampanhaRepositoryMemory } from '../../src/adapters/arrecadacao/campanha-repository.memory.js';
 import type { RecebedorRepository } from '../../src/adapters/arrecadacao/recebedor-repository.js';
 import { RecebedorRepositoryMemory } from '../../src/adapters/arrecadacao/recebedor-repository.memory.js';
+import type { PlataformaRepository } from '../../src/adapters/plataforma/repository.js';
+import { PlataformaRepositoryMemory } from '../../src/adapters/plataforma/repository.memory.js';
 import type { Campanha } from '../../src/domain/arrecadacao/entities/campanha.js';
 import {
   criarRecebedorInicial,
@@ -11,10 +13,12 @@ import {
 export function createArrecadacaoMemoryRepos(): {
   campanhaRepository: CampanhaRepository;
   recebedorRepository: RecebedorRepository;
+  plataformaRepository: PlataformaRepository;
 } {
   const recebedorRepository = new RecebedorRepositoryMemory();
   const campanhaRepository = new CampanhaRepositoryMemory(recebedorRepository);
-  return { campanhaRepository, recebedorRepository };
+  const plataformaRepository = new PlataformaRepositoryMemory();
+  return { campanhaRepository, recebedorRepository, plataformaRepository };
 }
 
 /** Persiste campanha e o recebedor ativo (necessário para findById em Postgres). */

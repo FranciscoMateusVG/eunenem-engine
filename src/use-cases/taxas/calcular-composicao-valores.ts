@@ -2,17 +2,23 @@ import { SpanStatusCode } from '@opentelemetry/api';
 import { z } from 'zod/v4';
 import type { ProvedorRegraTaxa } from '../../adapters/taxas/regra-provider.js';
 import { MoneyCentsSchema } from '../../domain/money.js';
+import { obterTarifaPorTipo } from '../../domain/taxas/entities/regra-taxa.js';
 import {
   type ComposicaoValores,
   calcularComposicaoValores as calcularComposicaoValoresDominio,
 } from '../../domain/taxas/value-objects/composicao-valores.js';
-import { IdContribuicaoReferenciaSchema } from '../../domain/taxas/value-objects/ids.js';
-import { RegraTaxaSchema } from '../../domain/taxas/value-objects/regra-taxa.js';
+import {
+  IdContribuicaoReferenciaSchema,
+  IdPlataformaReferenciaSchema,
+} from '../../domain/taxas/value-objects/ids.js';
+import { TipoOpcaoContribuicaoReferenciaSchema } from '../../domain/taxas/value-objects/tarifa-tipo.js';
 import { TaxasInputInvalidoError } from '../../errors/taxas/input-invalido.error.js';
 import type { Observability } from '../../observability/observability.js';
 
 export const CalcularComposicaoValoresInputSchema = z.object({
+  idPlataforma: IdPlataformaReferenciaSchema,
   idContribuicao: IdContribuicaoReferenciaSchema,
+  tipo: TipoOpcaoContribuicaoReferenciaSchema,
   contributionAmountCents: MoneyCentsSchema,
 });
 
@@ -24,7 +30,9 @@ export interface CalcularComposicaoValoresDeps {
 }
 
 /**
- * Calcula a composição de valores do BC Taxas sem conhecer entidades de Arrecadação.
+ * Calcula a composição de valores do BC Taxas para uma contribuição de uma
+ * plataforma específica. Carrega a RegraTaxa da plataforma, resolve a
+ * TarifaTipo para o tipo informado, e aplica os cálculos puros do domínio.
  */
 export async function calcularComposicaoValores(
   deps: CalcularComposicaoValoresDeps,
@@ -41,23 +49,25 @@ export async function calcularComposicaoValores(
         throw new TaxasInputInvalidoError(message);
       }
 
-      span.setAttribute('taxas.contribuicao.id', parsedInput.data.idContribuicao);
-      span.setAttribute(
-        'taxas.contribuicao.amount_cents',
-        parsedInput.data.contributionAmountCents,
-      );
+      const { idPlataforma, idContribuicao, tipo, contributionAmountCents } = parsedInput.data;
 
-      const regraAtiva = await provedorRegraTaxa.getRegraAtiva();
-      const parsedRule = RegraTaxaSchema.safeParse(regraAtiva);
-      if (!parsedRule.success) {
-        const message = parsedRule.error.issues.map((i) => i.message).join('; ');
-        throw new TaxasInputInvalidoError(message);
-      }
+      span.setAttribute('taxas.plataforma.id', idPlataforma);
+      span.setAttribute('taxas.contribuicao.id', idContribuicao);
+      span.setAttribute('taxas.contribuicao.tipo', tipo);
+      span.setAttribute('taxas.contribuicao.amount_cents', contributionAmountCents);
 
-      const composicao = calcularComposicaoValoresDominio(parsedRule.data, parsedInput.data);
+      const regraAtiva = await provedorRegraTaxa.getRegraAtiva(idPlataforma);
+      const tarifa = obterTarifaPorTipo(regraAtiva, tipo);
+
+      const composicao = calcularComposicaoValoresDominio(tarifa, {
+        idContribuicao,
+        contributionAmountCents,
+      });
 
       logger.info('taxas.composicao.calculada', {
+        idPlataforma,
         idContribuicao: composicao.idContribuicao,
+        tipo,
         contributionAmountCents: composicao.contributionAmountCents,
         feeAmountCents: composicao.feeAmountCents,
         totalPaidCents: composicao.totalPaidCents,

@@ -1,12 +1,7 @@
 import type { MoneyCents } from '../../money.js';
+import { type CalculoTaxa, calcularTaxa, type DadosCalculoTaxa } from './calculo-taxa.js';
 import type { IdContribuicaoReferencia } from './ids.js';
-import {
-  type CalculoTaxa,
-  calcularTaxa,
-  type DadosCalculoTaxa,
-  type RegraTaxa,
-  type ResponsavelTaxa,
-} from './regra-taxa.js';
+import type { ResponsavelTaxa, TarifaTipo } from './tarifa-tipo.js';
 
 /**
  * Value object: the immutable breakdown of values produced by the Taxas BC.
@@ -35,8 +30,8 @@ export function comporComposicaoValores(calculo: CalculoTaxa): ComposicaoValores
 }
 
 export function calcularComposicaoValores(
-  regra: RegraTaxa,
+  tarifa: TarifaTipo,
   input: DadosCalculoTaxa,
 ): ComposicaoValores {
-  return comporComposicaoValores(calcularTaxa(regra, input));
+  return comporComposicaoValores(calcularTaxa(tarifa, input));
 }

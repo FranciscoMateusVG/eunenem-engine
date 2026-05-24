@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ID_PLATAFORMA_EUNENEM } from '../../../src/adapters/plataforma/repository.memory.js';
 import {
   campanhaComAdministrador,
   campanhaComOpcao,
@@ -33,6 +34,7 @@ const recebedorAtivo = criarRecebedorInicial({
 
 const baseCampanha = {
   id: idCampanha,
+  idPlataforma: ID_PLATAFORMA_EUNENEM,
   idsAdministradores: [idAdministrador1] as const,
   idRecebedor,
   dadosRecebedor: dadosRecebedorEmail,
@@ -76,6 +78,7 @@ describe('CriarCampanhaInputSchema', () => {
   it('accepts valid input with one administrator', () => {
     const r = CriarCampanhaInputSchema.safeParse({
       id: idCampanha,
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
       idsAdministradores: [idAdministrador1],
       dadosRecebedor: dadosRecebedorEmail,
       titulo: 'Ajuda ao Joao',
@@ -86,6 +89,7 @@ describe('CriarCampanhaInputSchema', () => {
   it('accepts valid input with multiple administrators', () => {
     const r = CriarCampanhaInputSchema.safeParse({
       id: idCampanha,
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
       idsAdministradores: [idAdministrador1, idAdministrador2],
       dadosRecebedor: dadosRecebedorEmail,
       titulo: 'Ajuda ao Joao',
@@ -96,6 +100,7 @@ describe('CriarCampanhaInputSchema', () => {
   it('rejects empty administrators array', () => {
     const r = CriarCampanhaInputSchema.safeParse({
       id: idCampanha,
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
       idsAdministradores: [],
       dadosRecebedor: dadosRecebedorEmail,
       titulo: 'Ajuda ao Joao',
@@ -106,6 +111,7 @@ describe('CriarCampanhaInputSchema', () => {
   it('rejects duplicate administrator ids', () => {
     const r = CriarCampanhaInputSchema.safeParse({
       id: idCampanha,
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
       idsAdministradores: [idAdministrador1, idAdministrador1],
       dadosRecebedor: dadosRecebedorEmail,
       titulo: 'Ajuda ao Joao',
@@ -116,6 +122,7 @@ describe('CriarCampanhaInputSchema', () => {
   it('rejects empty title', () => {
     const r = CriarCampanhaInputSchema.safeParse({
       id: idCampanha,
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
       idsAdministradores: [idAdministrador1],
       dadosRecebedor: dadosRecebedorEmail,
       titulo: '   ',

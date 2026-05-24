@@ -3,7 +3,10 @@ import {
   type Campanha,
   campanhaComRecebedorAtivo,
 } from '../../domain/arrecadacao/entities/campanha.js';
-import type { IdCampanha } from '../../domain/arrecadacao/value-objects/ids.js';
+import type {
+  IdCampanha,
+  IdPlataformaReferencia,
+} from '../../domain/arrecadacao/value-objects/ids.js';
 import type { CampanhaRepository } from './campanha-repository.js';
 import type { RecebedorRepository } from './recebedor-repository.js';
 import type { ArrecadacaoRepositoryContext } from './repository-context.js';
@@ -62,6 +65,42 @@ export class CampanhaRepositoryMemory implements CampanhaRepository {
 
         span.setStatus({ code: SpanStatusCode.OK });
         return campanhaComRecebedorAtivo(campanha, recebedorAtivo);
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  async findByPlataforma(
+    idPlataforma: IdPlataformaReferencia,
+    _context?: ArrecadacaoRepositoryContext,
+  ): Promise<readonly Campanha[]> {
+    return tracer.startActiveSpan('db.arrecadacao_campanhas.findByPlataforma', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        const campanhasDaPlataforma = [...this.campanhas.values()].filter(
+          (c) => c.idPlataforma === idPlataforma,
+        );
+
+        if (!this.recebedorRepository) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return campanhasDaPlataforma;
+        }
+
+        const resultados: Campanha[] = [];
+        for (const campanha of campanhasDaPlataforma) {
+          const recebedorAtivo = await this.recebedorRepository.findAtivoByCampanhaId(campanha.id);
+          if (recebedorAtivo) {
+            resultados.push(campanhaComRecebedorAtivo(campanha, recebedorAtivo));
+          }
+        }
+
+        span.setStatus({ code: SpanStatusCode.OK });
+        return resultados;
       } catch (error: unknown) {
         span.recordException(error as Error);
         span.setStatus({ code: SpanStatusCode.ERROR });

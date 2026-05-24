@@ -5,12 +5,14 @@ import type { UsuarioRepository } from '../../adapters/usuario/repository.js';
 import type { SessaoUsuarioRepository } from '../../adapters/usuario/sessao-repository.js';
 import type { Sessao } from '../../domain/usuario/entities/sessao.js';
 import { EmailUsuarioSchema } from '../../domain/usuario/value-objects/email-usuario.js';
+import { IdPlataformaReferenciaSchema } from '../../domain/usuario/value-objects/ids.js';
 import { SenhaSimuladaSchema } from '../../domain/usuario/value-objects/senha-simulada.js';
 import { TokenSessaoSchema } from '../../domain/usuario/value-objects/token-sessao.js';
 import { UsuarioInputInvalidoError } from '../../errors/usuario/input-invalido.error.js';
 import type { Observability } from '../../observability/observability.js';
 
 export const CriarSessaoUsuarioInputSchema = z.object({
+  idPlataforma: IdPlataformaReferenciaSchema,
   email: EmailUsuarioSchema,
   senhaSimulada: SenhaSimuladaSchema,
 });
@@ -31,7 +33,9 @@ function newOpaqueSessionToken(): string {
 }
 
 /**
- * Cria uma sessão fake após validar email + palavra-passe simulada.
+ * Cria uma sessão fake após validar (idPlataforma, email) + palavra-passe
+ * simulada. A sessão criada é stampedada com a `idPlataforma`, tornando a
+ * tenancia explícita no token (sem hops via Conta → Usuario).
  */
 export async function criarSessaoUsuario(
   deps: CriarSessaoUsuarioDeps,
@@ -48,11 +52,12 @@ export async function criarSessaoUsuario(
         throw new UsuarioInputInvalidoError(message);
       }
 
-      const { email, senhaSimulada } = parsed.data;
+      const { idPlataforma, email, senhaSimulada } = parsed.data;
 
+      span.setAttribute('usuario.plataforma.id', idPlataforma);
       span.setAttribute('usuario.email.length', email.length);
 
-      const usuario = await usuarioRepository.findUsuarioByEmail(email);
+      const usuario = await usuarioRepository.findUsuarioByEmail(idPlataforma, email);
       const credencial = usuario
         ? await usuarioRepository.findCredencialByIdUsuario(usuario.id)
         : undefined;
@@ -67,6 +72,7 @@ export async function criarSessaoUsuario(
 
       const sessao: Sessao = {
         token,
+        idPlataforma: usuario.idPlataforma,
         idConta: usuario.idConta,
         expiraEm: new Date(now.getTime() + sessionTtlMs),
       };
@@ -75,6 +81,7 @@ export async function criarSessaoUsuario(
 
       logger.info('usuario.sessao.criada', {
         idUsuario: usuario.id,
+        idPlataforma: usuario.idPlataforma,
         idConta: usuario.idConta,
       });
 
