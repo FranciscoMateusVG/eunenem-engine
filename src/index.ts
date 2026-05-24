@@ -436,6 +436,32 @@ export {
   removerAdministradorCampanha,
 } from './use-cases/arrecadacao/remover-administrador-campanha.js';
 export type {
+  FinalizarPagamentoAprovadoDeps,
+  FinalizarPagamentoAprovadoInput,
+  FinalizarPagamentoAprovadoResult,
+} from './use-cases/checkout/finalizar-pagamento-aprovado.js';
+export {
+  FinalizarPagamentoAprovadoInputSchema,
+  finalizarPagamentoAprovado,
+} from './use-cases/checkout/finalizar-pagamento-aprovado.js';
+export type {
+  IniciarPagamentoContribuicaoDeps,
+  IniciarPagamentoContribuicaoInput,
+  IniciarPagamentoContribuicaoResult,
+} from './use-cases/checkout/iniciar-pagamento-contribuicao.js';
+export {
+  IniciarPagamentoContribuicaoInputSchema,
+  iniciarPagamentoContribuicao,
+} from './use-cases/checkout/iniciar-pagamento-contribuicao.js';
+export type {
+  IniciarRepasseRecebedorDeps,
+  IniciarRepasseRecebedorInput,
+} from './use-cases/checkout/iniciar-repasse-recebedor.js';
+export {
+  IniciarRepasseRecebedorInputSchema,
+  iniciarRepasseRecebedor,
+} from './use-cases/checkout/iniciar-repasse-recebedor.js';
+export type {
   ContribuicaoPrecalculada,
   ContribuicoesPrecalculadasCampanha,
   ObterContribuicoesPrecalculadasCampanhaDeps,

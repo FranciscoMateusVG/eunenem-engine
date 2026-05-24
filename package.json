@@ -59,6 +59,7 @@
     "db:reset": "docker compose -f docker/docker-compose.yml down -v && docker compose -f docker/docker-compose.yml up -d && sleep 2 && pnpm db:migrate",
     "db:migrate": "tsx scripts/migrate.ts",
     "db:codegen": "kysely-codegen --url postgresql://frame:frame@localhost:54320/frame --out-file src/adapters/db-types.generated.ts",
+    "example:web": "tsx examples/fluxo-completo.web.ts",
     "prepare": "husky"
   },
   "keywords": [
