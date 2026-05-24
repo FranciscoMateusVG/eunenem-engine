@@ -3,8 +3,8 @@
 **Status:** awaiting confirmation (revised 2026-05-24 after plan 0003 landed)
 **Decided:** 2026-05-24 (revised after multi-tenant introduced)
 **Depends on:**
-- [0001](./0001-domain-vo-entity-split.md) — domain layout split — ✅ done
-- [0003](./0003-plataforma-multi-tenant.md) — Plataforma multi-tenant boundary — ✅ done (phases A/B/C/D)
+- [0001](./0001-domain-vo-entity-split-done.md) — domain layout split — ✅ done
+- [0003](./0003-plataforma-multi-tenant-done.md) — Plataforma multi-tenant boundary — ✅ done (phases A/B/C/D)
 
 **Scope:** Build the application/orchestration layer that the contribuinte and recebedor interact with end-to-end — Arrecadação → Taxas → Pagamentos → Financeiro → Repasse — **all of it scoped to a Plataforma** (eunenem / eucasei / future).
 

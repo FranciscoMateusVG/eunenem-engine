@@ -1,7 +1,7 @@
 # Plan 0003 — Plataforma (multi-tenant boundary)
 
-> **Status**: drafted 2026-05-24, awaiting confirmation.
-> **Blocks**: plan `0002-checkout-orchestration-layer.md` — every Checkout flow needs `idPlataforma`. This plan lands first; 0002 gets a small revision pass; then Phase 1 of Checkout proceeds.
+> **Status**: ✅ done (phases A/B/C/D landed 2026-05-24).
+> **Blocked**: plan `0002-checkout-orchestration-layer-done.md` — every Checkout flow needs `idPlataforma`. This plan landed first; 0002 was revised after; then Phase 1 of Checkout proceeded.
 
 ## Goal
 

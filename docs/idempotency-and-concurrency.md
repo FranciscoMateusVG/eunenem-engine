@@ -208,6 +208,6 @@ If we go optimistic (Design B above), every Pagamento, Contribuicao, etc. needs 
 ## Cross-references
 
 - `docs/ddd-conventions.md` — folder layout + entity/VO rules
-- `plans/0002-checkout-orchestration-layer.md` — defines Phases 1-6 with deferred concerns explicitly listed
+- `plans/0002-checkout-orchestration-layer-done.md` — defines Phases 1-6 with deferred concerns explicitly listed
 - `src/use-cases/checkout/finalizar-pagamento-aprovado.ts` — concrete reference implementation
 - `src/use-cases/checkout/iniciar-pagamento-contribuicao.ts` — the saga example (compensation, not idempotency)
