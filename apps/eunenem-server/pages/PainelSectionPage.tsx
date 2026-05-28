@@ -6,6 +6,7 @@ import { PainelLayout } from "@/components/eunenem/painel/PainelLayout";
 import { PainelPlaceholder } from "@/components/eunenem/painel/PainelPlaceholder";
 import { ListaPresentesBody } from "@/components/eunenem/painel/ListaPresentesBody";
 import { PerfilBody } from "@/components/eunenem/painel/PerfilBody";
+import { PresentesBody } from "@/components/eunenem/painel/PresentesBody";
 import type { PainelSection } from "@/lib/painelRoutes";
 
 // aperture-vv3i — Painel sub-page dispatch + section registry.
@@ -35,7 +36,7 @@ type PainelSectionBody = (props: PainelSectionBodyProps) => ReactNode;
 export const PAINEL_SECTION_PAGES: Partial<
   Record<PainelSection, PainelSectionBody>
 > = {
-  // presentes: PresentesBody,        // aperture-xjwc
+  presentes: PresentesBody,           // aperture-xjwc
   lista: ListaPresentesBody,          // aperture-4je0p
   // convite: ConviteBody,            // aperture-q8rr
   convidados: ConvidadosBody,         // aperture-x1b3u
