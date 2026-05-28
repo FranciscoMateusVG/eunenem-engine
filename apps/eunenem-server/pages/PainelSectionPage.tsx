@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { ConvidadosBody } from "@/components/eunenem/painel/ConvidadosBody";
 import { PainelLayout } from "@/components/eunenem/painel/PainelLayout";
 import { PainelPlaceholder } from "@/components/eunenem/painel/PainelPlaceholder";
+import { PerfilBody } from "@/components/eunenem/painel/PerfilBody";
 import type { PainelSection } from "@/lib/painelRoutes";
 
 // aperture-vv3i — Painel sub-page dispatch + section registry.
@@ -37,7 +38,7 @@ export const PAINEL_SECTION_PAGES: Partial<
   // convite: ConviteBody,            // aperture-q8rr
   convidados: ConvidadosBody,         // aperture-x1b3u
   // mensagens: MensagensBody,
-  // perfil: PerfilBody,              // aperture-1z6xa
+  perfil: PerfilBody, // aperture-1z6xa
   // bancarios: BancariosBody,        // aperture-6xjcw
 };
 

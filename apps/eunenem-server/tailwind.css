@@ -32,7 +32,10 @@
   --green: #c7dc6e;
   --green-deep: #8aa53a; /* texto "ao vivo" / confirmação (Sistema §2) */
   --yellow: #f7d560;
+  --yellow-soft: #fcefc1;
   --blue: #9cd7dd;
+  --blue-soft: #def1f3;
+  --blue-deep: #3f8b92;
 
   /* Tinta (texto) — nunca preto puro; plum escuro como "preto" da marca */
   --plum: #6b3c5e;
@@ -1061,5 +1064,469 @@ h4 {
   .painel-share-link {
     width: auto;
     flex: 0 1 520px;
+  }
+}
+
+/* =================================================================
+ * aperture-1z6xa — Editar Perfil (/painel/[slug]/perfil).
+ * Body-only styles: hero + scrapbook form cards. Lives inside
+ * .painel-app (520px mobile / 1200px desktop). Faithful to the
+ * "Editar Perfil" export — section chips, cream-filled inputs with
+ * lilás focus ring, dashed-lilás photo slots, lilás save CTA. All
+ * classes are `perfil-`-prefixed so parallel painel page PRs never
+ * collide on selectors.
+ * ================================================================= */
+.perfil-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 18px 0 0;
+}
+
+/* ----- HERO ----- */
+.perfil-hero {
+  padding: 4px 16px 2px;
+}
+.perfil-eyebrow {
+  font-family: var(--font-caveat), cursive;
+  color: var(--coral-pink);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1;
+  display: inline-block;
+  transform: rotate(-2.2deg);
+  transform-origin: left;
+}
+.perfil-hero-title {
+  font-family: var(--font-patrick-hand), cursive;
+  color: var(--plum);
+  font-size: 34px;
+  line-height: 1.05;
+  margin: 8px 0 0;
+  text-wrap: balance;
+}
+
+/* ----- CARD ----- */
+.perfil-card {
+  position: relative;
+  overflow: hidden;
+  margin: 0 16px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  box-shadow: var(--shadow-sm);
+  padding: 20px 18px 22px;
+}
+.perfil-card::after {
+  content: "";
+  position: absolute;
+  top: -60px;
+  right: -60px;
+  width: 200px;
+  height: 200px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--lilac-soft) 0%, transparent 65%);
+  opacity: 0.5;
+  pointer-events: none;
+}
+.perfil-card-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.perfil-card-title {
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 22px;
+  line-height: 1.1;
+  color: var(--plum);
+  margin: 0;
+}
+.perfil-card-body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Chip */
+.perfil-chip {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transform: rotate(-3deg);
+}
+.perfil-chip svg {
+  width: 20px;
+  height: 20px;
+}
+.perfil-chip-lilac {
+  background: var(--lilac-soft);
+  color: var(--lilac-deep);
+}
+.perfil-chip-pink {
+  background: var(--pink-soft);
+  color: var(--coral-pink);
+}
+.perfil-chip-yellow {
+  background: var(--yellow-soft);
+  color: #9a7a1b;
+}
+.perfil-chip-blue {
+  background: var(--blue-soft);
+  color: var(--blue-deep);
+}
+.perfil-chip-green {
+  background: #eef4d1;
+  color: var(--green-deep);
+}
+
+/* ----- FIELD ----- */
+.perfil-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.perfil-field-label {
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--ink-mute);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.perfil-req {
+  color: var(--coral-pink);
+  margin-left: 4px;
+  font-size: 13px;
+}
+.perfil-field-hint {
+  font-size: 12px;
+  color: var(--ink-mute);
+  margin-top: 2px;
+  align-self: flex-end;
+}
+
+/* ----- INPUTS ----- */
+.perfil-input {
+  width: 100%;
+  background: var(--cream);
+  border: 1.5px solid var(--line);
+  border-radius: 14px;
+  padding: 13px 14px;
+  color: var(--ink);
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 15.5px;
+  line-height: 1.4;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  transition: border-color 0.18s ease, background 0.18s ease,
+    box-shadow 0.18s ease;
+}
+.perfil-input:focus,
+.perfil-input:focus-within {
+  border-color: var(--lilac);
+  background: var(--paper);
+  box-shadow: 0 0 0 4px rgba(201, 165, 216, 0.18);
+}
+.perfil-input::placeholder {
+  color: var(--ink-mute);
+  opacity: 1;
+}
+.perfil-textarea {
+  resize: vertical;
+  min-height: 130px;
+  line-height: 1.5;
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+}
+
+/* Prefix input (eunenem.com/slug) */
+.perfil-input-prefix {
+  display: flex;
+  align-items: stretch;
+  background: var(--cream);
+  border: 1.5px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+.perfil-input-prefix:focus-within {
+  border-color: var(--lilac);
+  box-shadow: 0 0 0 4px rgba(201, 165, 216, 0.18);
+}
+.perfil-prefix {
+  padding: 13px 0 13px 14px;
+  color: var(--ink-mute);
+  font-size: 14.5px;
+  white-space: nowrap;
+  align-self: center;
+}
+.perfil-input-slug {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 13px 14px 13px 2px;
+  box-shadow: none !important;
+  color: var(--plum);
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 18px;
+}
+.perfil-input-slug:focus {
+  box-shadow: none !important;
+  background: transparent;
+}
+
+/* Date */
+.perfil-date {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 10px;
+}
+.perfil-date-field {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  outline: none;
+  color: var(--ink);
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 15.5px;
+}
+.perfil-date-field::placeholder {
+  color: var(--ink-mute);
+}
+.perfil-date-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-mute);
+  flex-shrink: 0;
+}
+.perfil-date-clear {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-mute);
+  background: transparent;
+}
+.perfil-date-clear:hover {
+  background: var(--cream-2);
+  color: var(--coral-pink);
+}
+.perfil-date-clear svg {
+  width: 14px;
+  height: 14px;
+}
+.perfil-date-cal {
+  display: inline-flex;
+  color: var(--lilac-deep);
+}
+.perfil-date-cal svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* Select */
+.perfil-select-wrap {
+  position: relative;
+}
+.perfil-select {
+  padding-right: 42px;
+  cursor: pointer;
+}
+.perfil-select-chev {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--lilac-deep);
+  pointer-events: none;
+}
+.perfil-select-chev svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* Share row (read-only link echo) */
+.perfil-share {
+  background: var(--cream);
+  border: 1.5px solid var(--lilac-soft);
+  border-radius: 14px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.perfil-share-eyebrow {
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 10px;
+  color: var(--lilac-deep);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+.perfil-share-url {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-patrick-hand), cursive;
+  color: var(--plum);
+  font-size: 17px;
+}
+
+/* ----- PHOTOS ----- */
+.perfil-photo-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.perfil-photo {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.perfil-photo-title {
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 18px;
+  color: var(--plum);
+}
+.perfil-photo-slot {
+  border-radius: 18px;
+  overflow: hidden;
+}
+.perfil-photo-avatar {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+}
+.perfil-photo-cover {
+  width: 100%;
+  height: 160px;
+}
+
+/* ----- ACTIONS ----- */
+.perfil-actions {
+  margin: 4px 16px 0;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 10px;
+  align-items: stretch;
+}
+.perfil-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px 22px;
+  border-radius: 999px;
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  text-decoration: none;
+  transition: transform 0.18s ease, background 0.18s ease,
+    box-shadow 0.18s ease, color 0.18s ease;
+}
+.perfil-btn svg {
+  width: 16px;
+  height: 16px;
+}
+.perfil-btn-primary {
+  background: var(--lilac);
+  color: #fff;
+  border: 0;
+  box-shadow: var(--shadow-cta);
+}
+.perfil-btn-primary:hover {
+  background: var(--lilac-deep);
+  transform: translateY(-1px);
+}
+.perfil-btn-primary:active {
+  transform: scale(0.985);
+}
+.perfil-btn-primary:disabled {
+  opacity: 0.85;
+  cursor: wait;
+}
+.perfil-btn-ghost {
+  background: transparent;
+  color: var(--ink-soft);
+  border: 1.5px solid var(--line);
+}
+.perfil-btn-ghost:hover {
+  background: var(--cream-2);
+  color: var(--plum);
+}
+.perfil-spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-top-color: #fff;
+  animation: perfilSpin 0.7s linear infinite;
+}
+@keyframes perfilSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .perfil-spinner {
+    animation: none;
+  }
+}
+
+/* ----- DESKTOP ----- */
+@media (min-width: 900px) {
+  .perfil-body {
+    margin: 28px 0 0;
+    max-width: 760px;
+  }
+  .perfil-hero {
+    padding: 4px 0 2px;
+  }
+  .perfil-hero-title {
+    font-size: 44px;
+  }
+  .perfil-card {
+    margin: 0;
+    border-radius: 28px;
+    padding: 26px 28px 28px;
+  }
+  .perfil-photo-grid {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: flex-end;
+  }
+  .perfil-photo-avatar {
+    width: 140px;
+    height: 140px;
+  }
+  .perfil-photo:first-child {
+    flex: 0 0 auto;
+  }
+  .perfil-photo:not(:first-child) {
+    flex: 1 1 220px;
+    min-width: 0;
+  }
+  .perfil-actions {
+    margin: 6px 0 0;
+    flex-direction: row;
+    justify-content: flex-end;
+  }
+  .perfil-btn {
+    flex: 0 0 auto;
   }
 }
