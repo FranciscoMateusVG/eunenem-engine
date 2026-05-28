@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { ConvidadosBody } from "@/components/eunenem/painel/ConvidadosBody";
 import { PainelLayout } from "@/components/eunenem/painel/PainelLayout";
 import { PainelPlaceholder } from "@/components/eunenem/painel/PainelPlaceholder";
+import { ListaPresentesBody } from "@/components/eunenem/painel/ListaPresentesBody";
 import { PerfilBody } from "@/components/eunenem/painel/PerfilBody";
 import type { PainelSection } from "@/lib/painelRoutes";
 
@@ -34,7 +35,7 @@ export const PAINEL_SECTION_PAGES: Partial<
   Record<PainelSection, PainelSectionBody>
 > = {
   // presentes: PresentesBody,        // aperture-xjwc
-  // lista: ListaPresentesBody,       // aperture-4je0p
+  lista: ListaPresentesBody,          // aperture-4je0p
   // convite: ConviteBody,            // aperture-q8rr
   convidados: ConvidadosBody,         // aperture-x1b3u
   // mensagens: MensagensBody,

@@ -1047,6 +1047,894 @@ h4 {
   }
 }
 
+/* =================================================================
+ * aperture-4je0p — Minha lista de presentes (creator gift-list mgmt)
+ * Adapted from the standalone "Lista de Presentes" export recipe into
+ * the 520px-mobile / fluid-desktop painel shell. Scoped under .lista-*
+ * so it never collides with the v1 surfaces or sibling painel pages.
+ * ================================================================= */
+
+.lista-body {
+  margin: 0 16px;
+}
+@media (min-width: 900px) {
+  .lista-body {
+    margin: 0;
+  }
+}
+
+/* Local coral eyebrow variant (export used `.eyebrow.coral`; the
+ * project ships `.eyebrow-coral`). Sized down from the global 30px
+ * eyebrow for the denser lista surfaces. */
+.lista-body .eyebrow,
+.lista-modal .eyebrow {
+  font-size: 22px;
+  margin-bottom: 4px;
+}
+.lista-body .eyebrow.coral,
+.lista-modal .eyebrow.coral {
+  color: var(--coral-pink);
+}
+
+/* Generic buttons used by this page (project ships .btn-lilac/.btn-outline,
+ * but the export's recipe uses .btn/.btn-primary/.btn-ghost). Scoped to
+ * the lista surfaces to avoid leaking a second button system globally. */
+.lista-body .btn,
+.lista-modal .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 13px 22px;
+  border: 0;
+  border-radius: 999px;
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: transform 0.2s ease, background 0.2s ease, box-shadow 0.2s ease,
+    border-color 0.2s ease;
+}
+.lista-body .btn:active,
+.lista-modal .btn:active {
+  transform: scale(0.97);
+}
+.lista-body .btn-primary,
+.lista-modal .btn-primary {
+  background: var(--lilac);
+  color: #fff;
+  box-shadow: var(--shadow-cta);
+}
+.lista-body .btn-primary:hover,
+.lista-modal .btn-primary:hover {
+  background: var(--lilac-deep);
+  transform: translateY(-2px);
+}
+.lista-body .btn-primary:disabled,
+.lista-modal .btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+.lista-body .btn-ghost,
+.lista-modal .btn-ghost {
+  background: var(--paper);
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+.lista-body .btn-ghost:hover,
+.lista-modal .btn-ghost:hover {
+  background: var(--cream-2);
+  border-color: var(--lilac-soft);
+  color: var(--lilac-deep);
+}
+.lista-modal .btn-danger {
+  background: var(--coral-pink);
+  color: #fff;
+  box-shadow: 0 8px 20px rgba(231, 143, 167, 0.45);
+}
+.lista-modal .btn-danger:hover {
+  transform: translateY(-2px);
+}
+.lista-btn-ic {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+}
+.lista-btn-ic svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* ----- Header card ----- */
+.lista-header-card {
+  position: relative;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  padding: 22px 22px 20px;
+  margin-top: 18px;
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+.lista-header-card::after {
+  content: "";
+  position: absolute;
+  top: -60px;
+  right: -40px;
+  width: 240px;
+  height: 240px;
+  border-radius: 50%;
+  background: radial-gradient(
+    closest-side,
+    var(--lilac-soft) 0%,
+    transparent 70%
+  );
+  opacity: 0.55;
+  pointer-events: none;
+}
+.lista-header-top {
+  position: relative;
+  z-index: 1;
+}
+.lista-header-card h1 {
+  font-family: var(--font-patrick-hand), cursive;
+  color: var(--plum);
+  font-size: 32px;
+  line-height: 1.05;
+  margin: 4px 0 10px;
+  text-wrap: balance;
+}
+.lista-header-sub {
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 14px;
+  color: var(--ink-soft);
+  margin: 0 0 18px;
+}
+.lista-header-sub b {
+  font-family: var(--font-patrick-hand), cursive;
+  color: var(--plum);
+  font-weight: 600;
+  font-size: 16px;
+}
+.lista-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* ----- Stats visor ----- */
+.lista-visor {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-areas:
+    "received total"
+    "progress progress";
+  row-gap: 16px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  padding: 16px;
+  margin-top: 18px;
+  box-shadow: var(--shadow-sm);
+  position: relative;
+  overflow: hidden;
+}
+.lista-visor::after {
+  content: "";
+  position: absolute;
+  top: -50px;
+  right: -40px;
+  width: 200px;
+  height: 200px;
+  background: radial-gradient(closest-side, var(--pink-soft) 0%, transparent 70%);
+  opacity: 0.45;
+  border-radius: 50%;
+  pointer-events: none;
+}
+.lista-visor-side {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 2px 6px;
+}
+.lista-visor-received {
+  grid-area: received;
+}
+.lista-visor-total {
+  grid-area: total;
+  text-align: right;
+  align-items: flex-end;
+}
+.lista-visor-eyebrow {
+  font-family: var(--font-caveat), cursive;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--coral-pink);
+  transform: rotate(-2deg);
+  transform-origin: left center;
+  line-height: 1;
+  white-space: nowrap;
+}
+.lista-visor-total .lista-visor-eyebrow {
+  color: var(--lilac-deep);
+  transform-origin: right center;
+}
+.lista-visor-amount {
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 28px;
+  line-height: 1;
+  color: var(--plum);
+  white-space: nowrap;
+}
+.lista-visor-received .lista-visor-amount {
+  color: var(--green-deep);
+}
+.lista-visor-meta {
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 12px;
+  color: var(--ink-mute);
+}
+.lista-visor-progress {
+  grid-area: progress;
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line);
+}
+.lista-visor-bar {
+  position: relative;
+  height: 10px;
+  background: var(--cream-2);
+  border-radius: 999px;
+  overflow: visible;
+}
+.lista-visor-fill {
+  position: relative;
+  height: 100%;
+  background: linear-gradient(90deg, var(--green) 0%, var(--lilac) 100%);
+  border-radius: 999px;
+  transition: width 0.8s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.lista-visor-knob {
+  position: absolute;
+  top: 50%;
+  right: -10px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--paper);
+  border: 3px solid var(--lilac);
+  transform: translateY(-50%);
+  box-shadow: 0 4px 10px rgba(167, 123, 190, 0.35);
+}
+.lista-visor-progress-meta {
+  text-align: center;
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 12px;
+  color: var(--ink-mute);
+}
+.lista-visor-progress-meta b {
+  font-family: var(--font-patrick-hand), cursive;
+  color: var(--plum);
+  font-size: 18px;
+  font-weight: 600;
+  margin-right: 2px;
+}
+
+/* ----- Group title ----- */
+.lista-group-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-mute);
+  margin: 28px 0 14px;
+}
+.lista-group-title::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--line), transparent);
+}
+
+/* ----- List frame ----- */
+.lista-frame {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  padding: 18px;
+  box-shadow: var(--shadow-sm);
+}
+.lista-toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.lista-search {
+  position: relative;
+  flex: 1;
+  min-width: 200px;
+}
+.lista-search input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--cream);
+  border: 1.5px solid transparent;
+  border-radius: 999px;
+  padding: 12px 16px 12px 42px;
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 14px;
+  color: var(--ink);
+  outline: none;
+}
+.lista-search input::placeholder {
+  color: var(--ink-mute);
+}
+.lista-search input:focus {
+  border-color: var(--lilac-soft);
+  background: var(--paper);
+}
+.lista-search > svg {
+  position: absolute;
+  left: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  color: var(--ink-mute);
+  pointer-events: none;
+}
+.lista-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.lista-chip {
+  border: 1px solid var(--line);
+  background: var(--paper);
+  padding: 7px 14px;
+  border-radius: 999px;
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.lista-chip:hover {
+  color: var(--lilac-deep);
+  border-color: var(--lilac-soft);
+}
+.lista-chip.active {
+  background: var(--lilac);
+  color: #fff;
+  border-color: var(--lilac);
+}
+.lista-chip-count {
+  margin-left: 4px;
+  color: inherit;
+  opacity: 0.65;
+  font-weight: 500;
+}
+
+/* ----- Gift card grid ----- */
+.lista-grid {
+  margin-top: 18px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+}
+.lista-card {
+  position: relative;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.lista-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-md);
+  border-color: var(--lilac-soft);
+}
+.lista-card-thumb {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  border-radius: 14px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+}
+.lista-card-emoji {
+  font-size: 52px;
+  line-height: 1;
+  transform: rotate(-3deg);
+  filter: drop-shadow(0 4px 8px rgba(107, 60, 94, 0.12));
+}
+.lista-card-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--ink-soft);
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 5px 10px;
+  border-radius: 999px;
+  text-transform: lowercase;
+}
+.lista-card-badge.is-custom {
+  background: var(--pink-soft);
+  color: var(--coral-pink);
+}
+.lista-card-actions {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  gap: 4px;
+}
+.lista-card-actions button {
+  width: 32px;
+  height: 32px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 0;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  color: var(--ink-soft);
+  cursor: pointer;
+  box-shadow: 0 4px 10px rgba(107, 60, 94, 0.12);
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.lista-card-actions button svg {
+  width: 15px;
+  height: 15px;
+}
+.lista-card-actions button:hover {
+  background: var(--lilac-soft);
+  color: var(--lilac-deep);
+}
+.lista-card-actions button.danger:hover {
+  background: var(--pink-soft);
+  color: var(--coral-pink);
+}
+.lista-card-stamp {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  font-family: var(--font-caveat), cursive;
+  font-size: 22px;
+  color: var(--green-deep);
+  background: rgba(238, 244, 209, 0.94);
+  padding: 2px 12px;
+  border-radius: 999px;
+  transform: rotate(-4deg);
+  font-weight: 700;
+  white-space: nowrap;
+}
+.lista-card-body {
+  display: flex;
+  flex-direction: column;
+  padding: 12px 4px 4px;
+  flex: 1;
+}
+.lista-card-title {
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 19px;
+  color: var(--plum);
+  line-height: 1.2;
+  margin: 0 0 10px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 46px;
+}
+.lista-card-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.lista-card-price {
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 22px;
+  color: var(--plum);
+  line-height: 1;
+  white-space: nowrap;
+}
+.lista-card-price small {
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 11px;
+  color: var(--ink-mute);
+  font-weight: 500;
+  margin-left: 2px;
+}
+.lista-card-qty {
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: lowercase;
+  color: var(--lilac-deep);
+  background: var(--lilac-soft);
+  padding: 5px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+  flex: none;
+}
+.lista-card-progress {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--cream-2);
+  overflow: hidden;
+  margin-top: auto;
+}
+.lista-card-progress > i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--green) 0%, var(--lilac) 100%);
+  border-radius: 999px;
+}
+.lista-card-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 11.5px;
+  color: var(--ink-mute);
+  margin-top: 6px;
+}
+.lista-card-progress-meta b {
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 15px;
+  color: var(--plum);
+  font-weight: 600;
+}
+.lista-card.is-complete .lista-card-title {
+  opacity: 0.75;
+}
+.lista-card.is-complete .lista-card-progress > i {
+  background: var(--green);
+}
+
+/* Add tile in grid */
+.lista-card-add {
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1.5px dashed var(--lilac-soft);
+  cursor: pointer;
+  text-align: center;
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  color: var(--lilac-deep);
+  min-height: 220px;
+  padding: 20px;
+}
+.lista-card-add:hover {
+  background: rgba(232, 213, 240, 0.18);
+  border-color: var(--lilac);
+}
+.lista-card-add-plus {
+  width: 48px;
+  height: 48px;
+  background: var(--lilac-soft);
+  color: var(--lilac-deep);
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 12px;
+  transform: rotate(-4deg);
+}
+.lista-card-add-plus svg {
+  width: 16px;
+  height: 16px;
+}
+.lista-card-add-label {
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 18px;
+  color: var(--plum);
+}
+.lista-card-add-sub {
+  font-size: 12px;
+  color: var(--ink-mute);
+  margin-top: 4px;
+}
+
+/* ----- Empty state ----- */
+.lista-empty {
+  text-align: center;
+  padding: 44px 20px 28px;
+}
+.lista-empty-sm {
+  padding: 32px 12px 20px;
+}
+.lista-empty-doodle {
+  width: 80px;
+  height: 80px;
+  margin: 0 auto 14px;
+  background: var(--lilac-soft);
+  border-radius: 20px;
+  display: grid;
+  place-items: center;
+  color: var(--lilac-deep);
+  transform: rotate(-4deg);
+}
+.lista-empty-doodle svg {
+  width: 34px;
+  height: 34px;
+}
+.lista-empty h3 {
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 26px;
+  color: var(--plum);
+  margin: 0 0 6px;
+}
+.lista-empty .eyebrow {
+  display: block;
+  margin-bottom: 4px;
+}
+.lista-empty p {
+  color: var(--ink-soft);
+  margin: 0 auto 18px;
+  font-size: 14.5px;
+  max-width: 360px;
+}
+
+/* ----- Modal ----- */
+.lista-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(107, 60, 94, 0.32);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  animation: lista-fade 0.2s ease;
+}
+@keyframes lista-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.lista-modal {
+  background: var(--paper);
+  border-radius: 24px;
+  width: min(560px, 100%);
+  max-height: calc(100dvh - 32px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: var(--shadow-lg);
+  animation: lista-rise 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes lista-rise {
+  from {
+    transform: translateY(16px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+.lista-modal-sm {
+  width: min(440px, 100%);
+}
+.lista-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 22px 22px 10px;
+  gap: 16px;
+}
+.lista-modal-head h3 {
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 28px;
+  color: var(--plum);
+  margin: 0;
+}
+.lista-modal-x {
+  width: 36px;
+  height: 36px;
+  background: var(--cream);
+  border: 0;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  color: var(--ink-soft);
+  cursor: pointer;
+  flex: none;
+}
+.lista-modal-x svg {
+  width: 16px;
+  height: 16px;
+}
+.lista-modal-x:hover {
+  background: var(--lilac-soft);
+  color: var(--lilac-deep);
+}
+.lista-modal-body {
+  padding: 6px 22px 18px;
+  overflow-y: auto;
+}
+.lista-remove-text {
+  color: var(--ink-soft);
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.5;
+}
+.lista-remove-text b {
+  font-family: var(--font-patrick-hand), cursive;
+  color: var(--plum);
+  font-size: 18px;
+  font-weight: 600;
+}
+.lista-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-top: 8px;
+}
+.lista-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.lista-field-full {
+  grid-column: 1 / -1;
+}
+.lista-field label {
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-mute);
+}
+.lista-field input,
+.lista-field select {
+  border: 1.5px solid var(--line);
+  background: var(--paper);
+  border-radius: 12px;
+  padding: 11px 14px;
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 14.5px;
+  color: var(--ink);
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+.lista-field input:focus,
+.lista-field select:focus {
+  border-color: var(--lilac);
+}
+.lista-hint {
+  font-size: 11.5px;
+  color: var(--ink-mute);
+}
+.lista-stepper {
+  display: inline-flex;
+  align-items: center;
+  border: 1.5px solid var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--paper);
+  width: max-content;
+}
+.lista-stepper button {
+  width: 38px;
+  height: 38px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  color: var(--ink);
+  font-size: 20px;
+  font-family: var(--font-patrick-hand), cursive;
+}
+.lista-stepper button:hover {
+  background: var(--cream);
+}
+.lista-stepper input {
+  width: 44px;
+  border: 0;
+  text-align: center;
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 19px;
+  color: var(--plum);
+  background: transparent;
+  outline: none;
+}
+.lista-modal-foot {
+  border-top: 1px solid var(--line);
+  padding: 14px 22px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: linear-gradient(180deg, transparent, rgba(232, 213, 240, 0.18));
+}
+.lista-sel-count {
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+.lista-sel-count b {
+  font-family: var(--font-patrick-hand), cursive;
+  color: var(--plum);
+  font-size: 18px;
+  font-weight: 600;
+}
+.lista-foot-actions {
+  display: flex;
+  gap: 8px;
+}
+.lista-foot-actions-end {
+  margin-left: auto;
+}
+
+@media (max-width: 540px) {
+  .lista-form {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Desktop — header type scales up, sits in the wider 1200px shell. */
+@media (min-width: 900px) {
+  .lista-header-card {
+    padding: 32px 36px 28px;
+    border-radius: 28px;
+    margin-top: 22px;
+  }
+  .lista-header-card h1 {
+    font-size: 44px;
+    margin-bottom: 14px;
+  }
+  .lista-visor {
+    grid-template-columns: 1fr 1.2fr 1fr;
+    grid-template-areas: "received progress total";
+    row-gap: 0;
+    padding: 18px;
+  }
+  .lista-visor-progress {
+    border-top: 0;
+    border-left: 1px dashed var(--line);
+    border-right: 1px dashed var(--line);
+    padding: 6px 18px;
+  }
+  .lista-visor-amount {
+    font-size: 34px;
+  }
+  .lista-frame {
+    padding: 24px;
+  }
+}
+
 @media (min-width: 1100px) {
   .painel-hc-title {
     font-size: 54px;
