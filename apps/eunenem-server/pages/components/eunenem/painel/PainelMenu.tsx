@@ -16,9 +16,12 @@ import { PainelMenuRow } from "./PainelMenuRow";
 
 interface Props {
   groups: PainelMenuGroup[];
+  /** Creator slug — threaded to each row so it can resolve its destination
+   *  href via the painelRoutes convention (aperture-vv3i). */
+  slug: string;
 }
 
-export function PainelMenu({ groups }: Props) {
+export function PainelMenu({ groups, slug }: Props) {
   return (
     <div className="painel-menu-wrap">
       <div className="painel-menu-grid">
@@ -27,7 +30,7 @@ export function PainelMenu({ groups }: Props) {
             <div className="painel-group-title">{group.title}</div>
             <div className="painel-list">
               {group.items.map((item) => (
-                <PainelMenuRow key={item.id} item={item} />
+                <PainelMenuRow key={item.id} item={item} slug={slug} />
               ))}
             </div>
           </section>

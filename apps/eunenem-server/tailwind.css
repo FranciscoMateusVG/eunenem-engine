@@ -30,6 +30,7 @@
 
   /* Acentos frescos */
   --green: #c7dc6e;
+  --green-deep: #8aa53a; /* texto "ao vivo" / confirmação (Sistema §2) */
   --yellow: #f7d560;
   --blue: #9cd7dd;
 
@@ -66,6 +67,7 @@
   --color-coral-pink: var(--coral-pink);
 
   --color-green: var(--green);
+  --color-green-deep: var(--green-deep);
   --color-yellow: var(--yellow);
   --color-blue: var(--blue);
 
@@ -578,7 +580,7 @@ h4 {
   gap: 5px;
   font-size: 10px;
   font-weight: 700;
-  color: #8aa53a; /* green-deep, used only here */
+  color: var(--green-deep); /* aperture-vv3i — promoted to a token */
   text-transform: uppercase;
   letter-spacing: 0.1em;
 }

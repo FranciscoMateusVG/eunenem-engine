@@ -1,5 +1,6 @@
 
 import type { PainelMenuItem } from "@/lib/mocks/painelDemo";
+import { menuItemHref } from "@/lib/painelRoutes";
 
 // aperture-i01o — single row in the painel menu list.
 //
@@ -16,13 +17,23 @@ import type { PainelMenuItem } from "@/lib/mocks/painelDemo";
 
 interface Props {
   item: PainelMenuItem;
-  /** href is centralised here so we can later route off item.id. For
-   *  v1 every row points at "#" because the painel sub-pages don't
-   *  exist yet — this matches Thacy's mockup verbatim. */
+  /** Creator slug of the current painel (mock: "helena"). Used to build the
+   *  row's destination href via the painelRoutes convention. */
+  slug: string;
+  /** Optional explicit href override (rarely needed — defaults to the route
+   *  resolved from `item.id` + `slug`). */
   href?: string;
 }
 
-export function PainelMenuRow({ item, href = "#" }: Props) {
+export function PainelMenuRow({ item, slug, href }: Props) {
+  // aperture-vv3i — hrefs are resolved from the route convention
+  // (lib/painelRoutes.ts), not hardcoded "#". `soon` rows stay non-navigable;
+  // ids with no destination (e.g. nothing yet) fall back to "#".
+  const resolvedHref = item.soon
+    ? "#"
+    : (href ?? menuItemHref(slug, item.id) ?? "#");
+  const isExternal = resolvedHref.startsWith("http");
+
   const variantClass = item.variant ? `var-${item.variant}` : "";
   const rowClass = [
     "painel-row",
@@ -35,10 +46,11 @@ export function PainelMenuRow({ item, href = "#" }: Props) {
 
   return (
     <a
-      href={href}
+      href={resolvedHref}
       className={rowClass}
       aria-disabled={item.soon || undefined}
       onClick={item.soon ? (e) => e.preventDefault() : undefined}
+      {...(isExternal ? { target: "_blank", rel: "noopener noreferrer" } : {})}
     >
       <span className="painel-row-icon">
         <PainelRowIcon kind={item.icon} />

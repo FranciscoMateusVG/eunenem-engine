@@ -1,0 +1,117 @@
+// aperture-vv3i — Painel routing convention (single source of truth).
+//
+// The router is hand-rolled (App.tsx resolveRoute + server.tsx status). This
+// module is the ONE place that knows the set of authenticated /painel/:slug/
+// :section sub-pages, how to build their hrefs, and which dashboard menu row
+// points where. resolveRoute (validation/404), App.tsx (component dispatch via
+// painelSections.tsx), and PainelMenuRow (href) all import from here so the
+// three never drift.
+//
+// Mock-first: the only real creator slug is "helena" (matches App.tsx's
+// existing hardcoded check). Backend/auth that resolves the signed-in user's
+// real slug is a separate later epic.
+
+/** Canonical authenticated painel sub-pages. Add a section here AND a page in
+ *  painelSections.tsx when a page bead lands — both are required for the route
+ *  to render its real component (otherwise it falls back to the placeholder). */
+export const PAINEL_SECTIONS = [
+  "presentes", // Presentes recebidos (statement + payout) — aperture-xjwc
+  "lista", // Minha lista de presentes — aperture-4je0p
+  "convite", // Convites (invite builder/preview) — aperture-q8rr
+  "convidados", // Lista de convidados (RSVP) — aperture-x1b3u
+  "mensagens", // Mensagens recebidas
+  "perfil", // Editar perfil — aperture-1z6xa
+  "bancarios", // Dados bancários (Pix/bank) — aperture-6xjcw
+] as const;
+
+export type PainelSection = (typeof PAINEL_SECTIONS)[number];
+
+export function isPainelSection(value: string): value is PainelSection {
+  return (PAINEL_SECTIONS as readonly string[]).includes(value);
+}
+
+/** Build the canonical href for the dashboard root or a sub-section. */
+export function painelHref(slug: string, section?: PainelSection): string {
+  return section ? `/painel/${slug}/${section}` : `/painel/${slug}`;
+}
+
+/**
+ * Map a dashboard menu-row `id` (from painelDemo.buildPainelMenu) to its
+ * destination href. Most ids map to a painel section; a couple are special:
+ *   - `preview` ("ver como convidado") → the public contributor page
+ *   - `suporte` ("fale com a gente") → external WhatsApp (no in-app page)
+ *   - `rifa` is `soon` and never linked (PainelMenuRow disables it)
+ * Returns `undefined` when the row should stay non-navigable.
+ */
+export function menuItemHref(slug: string, id: string): string | undefined {
+  switch (id) {
+    case "presentes":
+      return painelHref(slug, "presentes");
+    case "lista":
+      return painelHref(slug, "lista");
+    case "convite":
+      return painelHref(slug, "convite");
+    case "lista-convidados":
+      return painelHref(slug, "convidados");
+    case "mensagens":
+      return painelHref(slug, "mensagens");
+    case "perfil":
+      return painelHref(slug, "perfil");
+    case "bancarios":
+      return painelHref(slug, "bancarios");
+    case "preview":
+      // "ver como convidado" → the public contributor experience.
+      return "/pagina/francisco";
+    case "suporte":
+      // External support channel — no in-app page in scope.
+      return "https://wa.me/5531999999999";
+    default:
+      return undefined; // e.g. `rifa` (soon) — not navigable yet.
+  }
+}
+
+/**
+ * Copy for the not-yet-built section placeholder, keyed by section. Tone
+ * follows the Sistema de Design §10 (pt-BR, afetivo). Each page bead removes
+ * its reliance on this by registering a real component in painelSections.tsx.
+ */
+export const PAINEL_SECTION_META: Record<
+  PainelSection,
+  { eyebrow: string; title: string; note: string }
+> = {
+  presentes: {
+    eyebrow: "quase lá ♡",
+    title: "presentes recebidos",
+    note: "Seu extrato de presentes e repasses está chegando.",
+  },
+  lista: {
+    eyebrow: "feito com carinho ♡",
+    title: "minha lista de presentes",
+    note: "A edição da sua lista de presentes está a caminho.",
+  },
+  convite: {
+    eyebrow: "um instante ♡",
+    title: "ver meu convite",
+    note: "O criador de convites está sendo preparado com carinho.",
+  },
+  convidados: {
+    eyebrow: "quem vem ♡",
+    title: "lista de convidados",
+    note: "A lista de confirmações e convites está chegando.",
+  },
+  mensagens: {
+    eyebrow: "recadinhos ♡",
+    title: "mensagens recebidas",
+    note: "Em breve você lê aqui todos os recados carinhosos.",
+  },
+  perfil: {
+    eyebrow: "sobre você ♡",
+    title: "editar meu perfil",
+    note: "A edição de nome, foto e história do bebê está chegando.",
+  },
+  bancarios: {
+    eyebrow: "seguro ♡",
+    title: "dados bancários",
+    note: "O cadastro de Pix e conta para repasse está a caminho.",
+  },
+};
