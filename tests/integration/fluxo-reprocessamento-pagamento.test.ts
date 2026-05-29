@@ -1,9 +1,12 @@
 /**
- * Integration test for fluxo-jornada-completa.
+ * Integration test for fluxo-reprocessamento-pagamento-aprovado (fluxo 6).
  *
- * Validates the happy-path orchestration across Usuário, Plataforma, Arrecadação,
- * Taxas, Pagamentos and Financeiro. Arrecadação persists in Postgres via
- * Testcontainers; other bounded contexts use in-memory adapters.
+ * Validates idempotent replay when the same payment approval is processed twice:
+ * Pagamento stays approved, Financeiro does not duplicate lancamentos, receiver
+ * balance or platform revenue.
+ *
+ * Arrecadação persists in Postgres via Testcontainers; Taxas/Pagamentos/Financeiro
+ * use in-memory adapters.
  *
  * Test isolation: beforeEach truncates arrecadação tables and rebuilds in-memory
  * state through makeDeps(). Any test can run independently in any order.
@@ -28,11 +31,9 @@ import { criarCampanha } from '../../src/use-cases/arrecadacao/criar-campanha.js
 import { criarContribuicao } from '../../src/use-cases/arrecadacao/criar-contribuicao.js';
 import { finalizarPagamentoAprovado } from '../../src/use-cases/checkout/finalizar-pagamento-aprovado.js';
 import { iniciarPagamentoContribuicao } from '../../src/use-cases/checkout/iniciar-pagamento-contribuicao.js';
-import { iniciarRepasseRecebedor } from '../../src/use-cases/checkout/iniciar-repasse-recebedor.js';
-import { obterContribuicoesPrecalculadasCampanha } from '../../src/use-cases/checkout/obter-contribuicoes-precalculadas-campanha.js';
+import { obterReceitaPlataforma } from '../../src/use-cases/financeiro/obter-receita-plataforma.js';
 import { obterSaldoRecebedor } from '../../src/use-cases/financeiro/obter-saldo-recebedor.js';
 import { registrarContaUsuario } from '../../src/use-cases/usuario/registrar-conta-usuario.js';
-import { matureLancamentosRecebedorForCampanha } from '../helpers/mature-lancamentos-financeiros.js';
 import { createTestObservability } from '../helpers/observability.js';
 import { createTestDatabase, type TestDatabase } from '../helpers/test-db.js';
 import { truncateArrecadacaoTables } from '../helpers/truncate-arrecadacao.js';
@@ -45,7 +46,6 @@ const clock = () => fixedDate;
 
 const VALOR_CONTRIBUICAO_CENTS = 8000;
 const VALOR_TAXA_CENTS = 400;
-const VALOR_TOTAL_CENTS = 8400;
 
 const dadosRecebedorPadrao = () => ({
   nomeTitular: 'Maria Silva',
@@ -94,7 +94,6 @@ async function seedFluxoBase() {
   const idOpcao = randomUUID();
   const idContribuicao = randomUUID();
   const idPagamento = randomUUID();
-  const idRepasse = randomUUID();
 
   const { conta } = await registrarContaUsuario(
     {
@@ -126,7 +125,7 @@ async function seedFluxoBase() {
       idPlataforma: ID_PLATAFORMA_EUNENEM,
       idsAdministradores: [conta.id],
       dadosRecebedor: dadosRecebedorPadrao(),
-      titulo: 'Campanha Teste',
+      titulo: 'Campanha Reprocessamento',
     },
   );
 
@@ -154,10 +153,8 @@ async function seedFluxoBase() {
   return {
     deps,
     idCampanha,
-    idOpcao,
     idContribuicao,
     idPagamento,
-    idRepasse,
   };
 }
 
@@ -175,152 +172,104 @@ beforeEach(async () => {
   testObs.reset();
 });
 
-describe('Fluxo — jornada completa de criação de campanha até repasse de saldo do recebedor', () => {
-  it('percorre o caminho ideal ponta a ponta entre contextos', async () => {
-    const { deps, idCampanha, idContribuicao, idPagamento, idRepasse } = await seedFluxoBase();
+describe('Fluxo — reprocessamento de pagamento aprovado', () => {
+  it('Mantém pagamento aprovado e não duplica efeitos entre Pagamentos e Financeiro ao reprocessar', async () => {
+    const { deps, idCampanha, idContribuicao, idPagamento } = await seedFluxoBase();
 
-    const vitrine = await obterContribuicoesPrecalculadasCampanha(
-      {
-        campanhaRepository: deps.campanhaRepository,
-        contribuicaoRepository: deps.contribuicaoRepository,
-        provedorRegraTaxa: deps.provedorRegraTaxa,
-        observability: deps.observability,
-      },
-      { idPlataforma: ID_PLATAFORMA_EUNENEM, idCampanha },
-    );
+    const checkoutDeps = {
+      campanhaRepository: deps.campanhaRepository,
+      contribuicaoRepository: deps.contribuicaoRepository,
+      provedorRegraTaxa: deps.provedorRegraTaxa,
+      pagamentoRepository: deps.pagamentoRepository,
+      pagamentoEventPublisher: deps.pagamentoEventPublisher,
+      clock,
+      observability: deps.observability,
+    };
 
-    expect(vitrine.tituloCampanha).toBe('Campanha Teste');
-    expect(vitrine.opcoes).toHaveLength(1);
-    expect(vitrine.opcoes[0]?.contribuicoes).toHaveLength(1);
-    expect(vitrine.opcoes[0]?.contribuicoes[0]).toMatchObject({
+    const finalizeDeps = {
+      pagamentoRepository: deps.pagamentoRepository,
+      pagamentoProvider: deps.pagamentoProvider,
+      pagamentoEventPublisher: deps.pagamentoEventPublisher,
+      contribuicaoRepository: deps.contribuicaoRepository,
+      campanhaRepository: deps.campanhaRepository,
+      livroFinanceiroRepository: deps.livroFinanceiroRepository,
+      clock,
+      observability: deps.observability,
+    };
+
+    const { pagamento } = await iniciarPagamentoContribuicao(checkoutDeps, {
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
+      idCampanha,
       idContribuicao,
-      disponivel: true,
-      valorContribuicaoCents: VALOR_CONTRIBUICAO_CENTS,
-      composicao: {
-        feeAmountCents: VALOR_TAXA_CENTS,
-        totalPaidCents: VALOR_TOTAL_CENTS,
-        receiverAmountCents: VALOR_CONTRIBUICAO_CENTS,
-      },
+      contribuinte: contribuinteValido(),
+      metodo: 'pix',
+      idPagamento,
+      idIntencaoPagamento: randomUUID(),
     });
 
-    const { contribuicao, pagamento } = await iniciarPagamentoContribuicao(
-      {
-        campanhaRepository: deps.campanhaRepository,
-        contribuicaoRepository: deps.contribuicaoRepository,
-        provedorRegraTaxa: deps.provedorRegraTaxa,
-        pagamentoRepository: deps.pagamentoRepository,
-        pagamentoEventPublisher: deps.pagamentoEventPublisher,
-        clock,
-        observability: deps.observability,
-      },
-      {
-        idPlataforma: ID_PLATAFORMA_EUNENEM,
-        idCampanha,
-        idContribuicao,
-        contribuinte: contribuinteValido(),
-        metodo: 'pix',
-        idPagamento,
-        idIntencaoPagamento: randomUUID(),
-      },
-    );
-
-    expect(contribuicao.status).toBe('indisponivel');
-    expect(contribuicao.contribuinte).toEqual(contribuinteValido());
     expect(pagamento.status).toBe('pendente');
-    expect(pagamento.intencao.composicaoValores.totalPaidCents).toBe(VALOR_TOTAL_CENTS);
 
-    const persistedContribuicao = await deps.contribuicaoRepository.findById(idContribuicao);
-    expect(persistedContribuicao?.status).toBe('indisponivel');
+    const first = await finalizarPagamentoAprovado(finalizeDeps, { idPagamento });
 
-    const { pagamento: pagamentoAprovado, lancamentos } = await finalizarPagamentoAprovado(
-      {
-        pagamentoRepository: deps.pagamentoRepository,
-        pagamentoProvider: deps.pagamentoProvider,
-        pagamentoEventPublisher: deps.pagamentoEventPublisher,
-        contribuicaoRepository: deps.contribuicaoRepository,
-        campanhaRepository: deps.campanhaRepository,
-        livroFinanceiroRepository: deps.livroFinanceiroRepository,
-        clock,
-        observability: deps.observability,
-      },
-      { idPagamento },
-    );
-
-    expect(pagamentoAprovado.status).toBe('aprovado');
-    expect(lancamentos).toHaveLength(2);
-    expect(lancamentos.map((l) => l.tipo)).toEqual([
+    expect(first.pagamento.status).toBe('aprovado');
+    expect(first.lancamentos).toHaveLength(2);
+    expect(first.lancamentos.map((l) => l.tipo)).toEqual([
       'credito_saldo_recebedor',
       'credito_receita_plataforma',
     ]);
-    expect(lancamentos.find((l) => l.tipo === 'credito_saldo_recebedor')).toMatchObject({
+    expect(first.lancamentos.find((l) => l.tipo === 'credito_saldo_recebedor')).toMatchObject({
       amountCents: VALOR_CONTRIBUICAO_CENTS,
-      status: 'pendente',
     });
-    expect(lancamentos.find((l) => l.tipo === 'credito_receita_plataforma')).toMatchObject({
+    expect(first.lancamentos.find((l) => l.tipo === 'credito_receita_plataforma')).toMatchObject({
       amountCents: VALOR_TAXA_CENTS,
-      status: 'disponivel',
     });
 
-    const saldoPendente = await obterSaldoRecebedor(
+    const saldoBaseline = await obterSaldoRecebedor(
       {
         livroFinanceiroRepository: deps.livroFinanceiroRepository,
         observability: deps.observability,
       },
       { idCampanha },
     );
-    expect(saldoPendente).toEqual({
+    expect(saldoBaseline).toEqual({
       idCampanha,
       valorPendenteCents: VALOR_CONTRIBUICAO_CENTS,
       valorDisponivelCents: 0,
     });
 
-    const maturados = matureLancamentosRecebedorForCampanha(
-      deps.livroFinanceiroRepository,
-      idCampanha,
-    );
-    expect(maturados).toBe(1);
+    const receitaBaseline = await obterReceitaPlataforma({
+      livroFinanceiroRepository: deps.livroFinanceiroRepository,
+      observability: deps.observability,
+    });
+    expect(receitaBaseline).toEqual({ totalAmountCents: VALOR_TAXA_CENTS });
 
-    const saldoDisponivel = await obterSaldoRecebedor(
+    // Reprocessing payment
+    const second = await finalizarPagamentoAprovado(finalizeDeps, { idPagamento });
+
+    expect(second.pagamento.status).toBe('aprovado');
+    expect(second.lancamentos).toHaveLength(2);
+    expect(second.lancamentos.map((l) => l.id)).toEqual(first.lancamentos.map((l) => l.id));
+
+    const pagamentoPersistido = await deps.pagamentoRepository.findById(idPagamento);
+    expect(pagamentoPersistido?.status).toBe('aprovado');
+
+    const lancamentosPersistidos =
+      await deps.livroFinanceiroRepository.findLancamentosByIdPagamento(idPagamento);
+    expect(lancamentosPersistidos).toHaveLength(2);
+
+    const saldoAposReplay = await obterSaldoRecebedor(
       {
         livroFinanceiroRepository: deps.livroFinanceiroRepository,
         observability: deps.observability,
       },
       { idCampanha },
     );
-    expect(saldoDisponivel).toEqual({
-      idCampanha,
-      valorPendenteCents: 0,
-      valorDisponivelCents: VALOR_CONTRIBUICAO_CENTS,
+    expect(saldoAposReplay).toEqual(saldoBaseline);
+
+    const receitaAposReplay = await obterReceitaPlataforma({
+      livroFinanceiroRepository: deps.livroFinanceiroRepository,
+      observability: deps.observability,
     });
-
-    const repasse = await iniciarRepasseRecebedor(
-      {
-        campanhaRepository: deps.campanhaRepository,
-        recebedorRepository: deps.recebedorRepository,
-        livroFinanceiroRepository: deps.livroFinanceiroRepository,
-        clock,
-        observability: deps.observability,
-      },
-      {
-        idPlataforma: ID_PLATAFORMA_EUNENEM,
-        idCampanha,
-        idRepasse,
-        amountCents: VALOR_CONTRIBUICAO_CENTS,
-      },
-    );
-
-    expect(repasse).toMatchObject({
-      id: idRepasse,
-      idCampanha,
-      amountCents: VALOR_CONTRIBUICAO_CENTS,
-      status: 'solicitado',
-    });
-
-    const repassePersistido = await deps.livroFinanceiroRepository.findRepasseById(idRepasse);
-    expect(repassePersistido?.status).toBe('solicitado');
-
-    const lancamentosPersistidos =
-      await deps.livroFinanceiroRepository.findLancamentosByIdPagamento(idPagamento);
-    expect(lancamentosPersistidos).toHaveLength(2);
+    expect(receitaAposReplay).toEqual(receitaBaseline);
   });
 });
