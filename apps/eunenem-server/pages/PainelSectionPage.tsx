@@ -5,6 +5,7 @@ import { ConvidadosBody } from "@/components/eunenem/painel/ConvidadosBody";
 import { PainelLayout } from "@/components/eunenem/painel/PainelLayout";
 import { PainelPlaceholder } from "@/components/eunenem/painel/PainelPlaceholder";
 import { ListaPresentesBody } from "@/components/eunenem/painel/ListaPresentesBody";
+import { MensagensBody } from "@/components/eunenem/painel/MensagensBody";
 import { PerfilBody } from "@/components/eunenem/painel/PerfilBody";
 import { PresentesBody } from "@/components/eunenem/painel/PresentesBody";
 import type { PainelSection } from "@/lib/painelRoutes";
@@ -40,7 +41,7 @@ export const PAINEL_SECTION_PAGES: Partial<
   lista: ListaPresentesBody,          // aperture-4je0p
   // convite: ConviteBody,            // aperture-q8rr
   convidados: ConvidadosBody,         // aperture-x1b3u
-  // mensagens: MensagensBody,
+  mensagens: MensagensBody,           // aperture-1oafq
   perfil: PerfilBody, // aperture-1z6xa
   bancarios: BancariosBody, // aperture-6xjcw
 };
