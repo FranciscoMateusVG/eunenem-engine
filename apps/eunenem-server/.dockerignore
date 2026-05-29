@@ -1,0 +1,9 @@
+node_modules
+**/node_modules
+.git
+*.log
+public/client.js
+public/client.js.map
+public/styles.css
+Dockerfile
+.dockerignore

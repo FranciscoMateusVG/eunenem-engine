@@ -1,0 +1,8 @@
+services:
+  eunenem-server-cffaa0:
+    build: .
+    container_name: eunenem-server-cffaa0
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
