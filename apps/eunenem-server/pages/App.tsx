@@ -1,4 +1,5 @@
 import { Toaster } from 'sonner';
+import { LandingPage } from './LandingPage.js';
 import { NotFoundPage } from './NotFoundPage.js';
 import { PaginaPage } from './PaginaPage.js';
 import { PainelPage } from './PainelPage.js';
@@ -18,10 +19,15 @@ const PAINEL_SLUG = 'helena';
 // /painel/:slug/:section is an authenticated sub-page. Valid sections live in
 // lib/painelRoutes.ts — an unknown sub-section 404s honestly.
 export function resolveRoute(pathname: string):
+  | { kind: 'landing' }
   | { kind: 'pagina'; slug: string }
   | { kind: 'painel'; slug: string }
   | { kind: 'painel-section'; slug: string; section: PainelSection }
   | { kind: 'not-found' } {
+  // Marketing landing page (aperture-q1j2) — exact "/" only.
+  if (pathname === '/') {
+    return { kind: 'landing' };
+  }
   const paginaMatch = pathname.match(/^\/pagina\/([^/]+)\/?$/);
   if (paginaMatch && paginaMatch[1] === 'francisco') {
     return { kind: 'pagina', slug: paginaMatch[1] };
@@ -60,6 +66,7 @@ export function App({ pathname }: { pathname: string }) {
 }
 
 function pickPage(route: ReturnType<typeof resolveRoute>, pathname: string) {
+  if (route.kind === 'landing') return <LandingPage />;
   if (route.kind === 'pagina') return <PaginaPage slug={route.slug} />;
   if (route.kind === 'painel') return <PainelPage slug={route.slug} />;
   if (route.kind === 'painel-section')

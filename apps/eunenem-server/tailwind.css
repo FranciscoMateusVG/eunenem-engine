@@ -2418,3 +2418,161 @@ h4 {
     flex: 0 0 auto;
   }
 }
+
+/* =================================================================
+ * aperture-q1j2 — Marketing Landing page (/)
+ * Ported from the EuNeném Next.js prototype. Reuses the existing
+ * design tokens (--lilac*, --plum, --cream*, --shadow-*, float
+ * keyframe) — the rules below only bridge the prototype's utility
+ * names + the landing-specific structural decorations.
+ *
+ * FONTS: the prototype's components use font-display / font-script /
+ * font-sans. Per the craft decision these map to the canonical brand
+ * faces (Patrick Hand / Caveat / DM Sans), NOT the prototype's stale
+ * Fredoka + Quicksand. Defined as plain utilities so Tailwind's own
+ * font-sans default is left untouched elsewhere.
+ * ================================================================= */
+
+.font-display {
+  font-family: var(--font-patrick-hand), cursive;
+}
+.font-script {
+  font-family: var(--font-caveat), cursive;
+}
+.font-sans {
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+}
+
+/* Soft, plum-tinted shadows (prototype names → existing --shadow-* vars). */
+.shadow-soft-sm {
+  box-shadow: var(--shadow-sm);
+}
+.shadow-soft-md {
+  box-shadow: var(--shadow-md);
+}
+.shadow-soft-lg {
+  box-shadow: var(--shadow-lg);
+}
+
+/* Floating "presente recebido" cards in the hero — reuses the float keyframe. */
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+/* Hero CTA size modifier + trust seals (prototype @layer components). */
+.btn-lilac-lg {
+  padding: 20px 36px;
+  font-size: 15px;
+}
+.seal {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+/* Hero marca-texto highlight (prototype variant — different stops than .hl). */
+.yellow-hl {
+  background: linear-gradient(
+    180deg,
+    transparent 65%,
+    #f7d560 65%,
+    #f7d560 92%,
+    transparent 92%
+  );
+  padding: 0 6px;
+}
+
+/* Fade-up scroll reveal (driven by the IntersectionObserver in LandingPage).
+ * aperture-q1j2 (Vance polish): PROGRESSIVE ENHANCEMENT — the hidden-initial
+ * state only applies when JS is active (the inline `document.documentElement
+ * .classList.add('js')` in server.tsx runs before paint). Without JS — or
+ * before hydration — content is fully visible, so no-JS users and crawlers
+ * never see a blank page. prefers-reduced-motion users get content immediately
+ * with no transform/transition. */
+.js .fade-up {
+  opacity: 0;
+  transform: translateY(28px);
+  transition: opacity 0.8s ease, transform 0.8s ease;
+}
+.js .fade-up.in {
+  opacity: 1;
+  transform: translateY(0);
+}
+@media (prefers-reduced-motion: reduce) {
+  .js .fade-up,
+  .js .fade-up.in {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+/* Dashed step connector behind the "como funciona" 3-step row. */
+.steps-line::before {
+  content: '';
+  position: absolute;
+  top: 60px;
+  left: 18%;
+  right: 18%;
+  height: 3px;
+  background-image: linear-gradient(90deg, #c9a5d8 50%, transparent 50%);
+  background-size: 16px 3px;
+  z-index: 0;
+}
+@media (max-width: 960px) {
+  .steps-line::before {
+    display: none;
+  }
+}
+
+/* Stat band dashed vertical dividers (collapse to a bottom rule on mobile). */
+.stat-divider:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  right: -12px;
+  top: 14%;
+  height: 72%;
+  width: 2px;
+  background: repeating-linear-gradient(
+    180deg,
+    #c9a5d8 0 4px,
+    transparent 4px 10px
+  );
+}
+@media (max-width: 960px) {
+  .stat-divider:not(:last-child)::after {
+    display: none;
+  }
+  .stat-divider:not(:last-child) {
+    padding-bottom: 22px;
+    border-bottom: 2px dashed #e8d5f0;
+  }
+}
+
+/* FAQ accordion animation (CTAFinal). */
+.faq-a {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.4s ease;
+}
+.faq-item.open .faq-a {
+  max-height: 400px;
+}
+.faq-item.open .chev {
+  transform: rotate(45deg);
+}
+.chev {
+  transition: transform 0.3s ease;
+}
+
+/* Smooth in-page anchor scrolling for the landing nav links. */
+html {
+  scroll-behavior: smooth;
+}

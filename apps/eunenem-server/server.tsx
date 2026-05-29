@@ -16,9 +16,9 @@ app.use('/public/*', serveStatic({ root: './' }));
 // Health check.
 app.get('/healthz', (c) => c.text('ok'));
 
-// Root → demo route. v1 only knows /pagina/francisco; future v3 will resolve
-// the signed-in user's actual slug.
-app.get('/', (c) => c.redirect('/pagina/francisco'));
+// "/" now SSRs the marketing landing page (aperture-q1j2) via the catch-all
+// below — resolveRoute maps the exact "/" pathname to { kind: 'landing' }.
+// (Previously redirected to /pagina/francisco.)
 
 // SSR catch-all: every other route renders the React app. Status is decided
 // from the resolved route (200 for known pages, 404 for anything else) BEFORE
@@ -42,6 +42,10 @@ function envelope(ssrHtml: string, pathname: string): string {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- aperture-q1j2 (Vance): mark JS-active before paint so the landing
+         .fade-up reveal only hides content when JS can reveal it. No-JS /
+         pre-hydration keeps all content visible. -->
+    <script>document.documentElement.classList.add('js')</script>
     <title>eunenem · ${escapeHtml(pathname)}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -78,7 +82,7 @@ serve({ fetch: app.fetch, port: PORT }, (info) => {
   console.log(`✅ Listening on http://localhost:${info.port}`);
   console.log('');
   console.log('Routes:');
-  console.log('  /                  → redirect to /pagina/francisco');
+  console.log('  /                  → marketing landing page (SSR + hydration)');
   console.log('  /pagina/francisco  → contributor event page (SSR + hydration)');
   console.log('  /painel/helena     → creator dashboard (SSR + hydration)');
   console.log('  /healthz           → plain text health check');
