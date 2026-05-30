@@ -4443,3 +4443,349 @@ html {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* ================================================================
+ * aperture-5mgiw — landing calculadora section
+ * Section 05 (Calculadora) of the v2 landing. Two-slider income
+ * calculator with a tactile track + custom thumb. The fill % is
+ * passed in from the component via the --pct CSS custom property
+ * so the linear-gradient track tracks the thumb without a JS-
+ * driven background. All selectors are .calculadora-* scoped so
+ * they don't collide with the prototype's .calc / .calc-* names
+ * or with any other landing component.
+ * ================================================================ */
+
+.calculadora-section {
+  background: var(--cream);
+  position: relative;
+}
+
+.calculadora-section::before {
+  content: '✨';
+  position: absolute;
+  top: 60px;
+  left: 6%;
+  font-size: 28px;
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.calculadora-section::after {
+  content: '✿';
+  position: absolute;
+  bottom: 80px;
+  right: 6%;
+  font-size: 60px;
+  color: var(--lilac);
+  opacity: 0.18;
+  font-family: var(--font-patrick-hand), cursive;
+  pointer-events: none;
+}
+
+.calculadora-card {
+  max-width: 1080px;
+  margin: 0 auto;
+  background: #fff;
+  border-radius: 32px;
+  box-shadow: 0 30px 60px rgba(107, 60, 94, 0.1);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: 1fr 1.05fr;
+}
+
+.calculadora-controls {
+  padding: 44px 40px;
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.calculadora-block-sub {
+  font-size: 13.5px;
+  color: var(--ink-mute);
+}
+
+.calculadora-slider-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 12px;
+}
+
+.calculadora-slider-label {
+  font-size: 13px;
+  color: var(--ink-soft);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.calculadora-slider-value {
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 32px;
+  color: var(--plum);
+  line-height: 1;
+}
+
+/* Native range with custom skin. --pct comes from the component's
+   inline style so the gradient fill tracks the thumb live. */
+.calculadora-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 8px;
+  background: linear-gradient(
+    90deg,
+    var(--lilac) 0%,
+    var(--lilac) var(--pct, 25%),
+    var(--cream-2) var(--pct, 25%),
+    var(--cream-2) 100%
+  );
+  border-radius: 999px;
+  outline: none;
+  cursor: pointer;
+}
+
+.calculadora-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 28px;
+  height: 28px;
+  background: #fff;
+  border: 3px solid var(--lilac);
+  border-radius: 50%;
+  cursor: grab;
+  box-shadow: var(--shadow-md);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.calculadora-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.12);
+}
+
+.calculadora-slider::-webkit-slider-thumb:active {
+  cursor: grabbing;
+  transform: scale(1.18);
+  box-shadow: 0 6px 18px rgba(167, 123, 190, 0.45);
+}
+
+.calculadora-slider::-moz-range-thumb {
+  width: 28px;
+  height: 28px;
+  background: #fff;
+  border: 3px solid var(--lilac);
+  border-radius: 50%;
+  cursor: grab;
+  box-shadow: var(--shadow-md);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.calculadora-slider::-moz-range-thumb:hover {
+  transform: scale(1.12);
+}
+
+.calculadora-slider::-moz-range-thumb:active {
+  cursor: grabbing;
+  transform: scale(1.18);
+  box-shadow: 0 6px 18px rgba(167, 123, 190, 0.45);
+}
+
+.calculadora-slider:focus-visible::-webkit-slider-thumb {
+  outline: 2px solid var(--lilac-deep);
+  outline-offset: 3px;
+}
+
+.calculadora-slider:focus-visible::-moz-range-thumb {
+  outline: 2px solid var(--lilac-deep);
+  outline-offset: 3px;
+}
+
+.calculadora-presets {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.calculadora-preset {
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: var(--cream);
+  border: 1.5px solid var(--line);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition: all 0.2s;
+  min-height: 44px; /* touch target */
+}
+
+.calculadora-preset:hover {
+  border-color: var(--lilac);
+  color: var(--lilac-deep);
+}
+
+.calculadora-preset--active {
+  background: var(--lilac);
+  color: #fff;
+  border-color: var(--lilac);
+  box-shadow: 0 4px 10px rgba(167, 123, 190, 0.35);
+}
+
+.calculadora-mini-fact {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  background: var(--cream);
+  border-radius: 14px;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.calculadora-mini-fact-ico {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--green);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.calculadora-mini-fact-ico svg {
+  width: 14px;
+  height: 14px;
+}
+
+.calculadora-mini-fact strong {
+  color: var(--plum);
+  font-weight: 700;
+}
+
+.calculadora-result {
+  padding: 44px 40px;
+  background: linear-gradient(160deg, var(--lilac-soft) 0%, #fff 70%);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  position: relative;
+}
+
+.calculadora-result-eyebrow {
+  font-family: var(--font-caveat), cursive;
+  font-size: 22px;
+  color: var(--coral-pink);
+  transform: rotate(-2deg);
+  display: inline-block;
+}
+
+.calculadora-result-big {
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: clamp(48px, 8vw, 96px);
+  color: var(--plum);
+  line-height: 0.95;
+  letter-spacing: -0.01em;
+}
+
+.calculadora-result-big small {
+  display: block;
+  font-size: 0.28em;
+  color: var(--ink-mute);
+  font-weight: 400;
+  margin-top: 6px;
+  letter-spacing: 0;
+}
+
+.calculadora-formula {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--ink-soft);
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.6);
+  border-radius: 12px;
+  border: 1px dashed rgba(167, 123, 190, 0.4);
+}
+
+.calculadora-formula b {
+  color: var(--plum);
+  font-weight: 700;
+}
+
+.calculadora-buys {
+  margin-top: auto;
+  padding-top: 14px;
+  border-top: 1.5px dashed rgba(167, 123, 190, 0.3);
+}
+
+.calculadora-buys-label {
+  font-family: var(--font-caveat), cursive;
+  font-size: 22px;
+  color: var(--plum);
+  margin-bottom: 12px;
+  transform: rotate(-1deg);
+  display: inline-block;
+}
+
+.calculadora-buys-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.calculadora-buy {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.calculadora-buy-emoji {
+  font-size: 22px;
+  flex-shrink: 0;
+}
+
+.calculadora-buy-qty {
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 22px;
+  color: var(--plum);
+  line-height: 1;
+}
+
+.calculadora-buy-item {
+  font-size: 12px;
+  color: var(--ink-soft);
+  line-height: 1.25;
+}
+
+.calculadora-cta {
+  margin-top: 22px;
+}
+
+@media (max-width: 860px) {
+  .calculadora-card {
+    grid-template-columns: 1fr;
+  }
+  .calculadora-controls {
+    padding: 28px 22px;
+    gap: 26px;
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+  }
+  .calculadora-result {
+    padding: 28px 22px;
+  }
+  .calculadora-slider-value {
+    font-size: 26px;
+  }
+}
