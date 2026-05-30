@@ -12,6 +12,7 @@ import {
   type Convidado,
   type ConvidadoRsvp,
 } from "@/lib/mocks/convidados";
+import { PREVIEW_EVENT } from "@/lib/mocks/eventPreview";
 
 // aperture-x1b3u — Lista de convidados (RSVP + convites por WhatsApp).
 //
@@ -129,6 +130,49 @@ const IconEye = (p: { size?: number }) => (
   <Icon size={p.size} sw={1.9}>
     <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />
     <circle cx="12" cy="12" r="3" />
+  </Icon>
+);
+// aperture-8qg1s — icons for the VER LINK preview modal: copy
+// (clipboard COPIAR action), calendar + map-pin (preview chips),
+// heart (primary RSVP), question (maybe RSVP), x (decline + close
+// button). All stroke-based, currentColor, viewBox 24, matching
+// the in-file Icon helper.
+const IconCopy = (p: { size?: number }) => (
+  <Icon size={p.size} sw={1.9}>
+    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+  </Icon>
+);
+const IconCalendar = (p: { size?: number }) => (
+  <Icon size={p.size} sw={1.9}>
+    <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+    <line x1="16" y1="2" x2="16" y2="6" />
+    <line x1="8" y1="2" x2="8" y2="6" />
+    <line x1="3" y1="10" x2="21" y2="10" />
+  </Icon>
+);
+const IconPin = (p: { size?: number }) => (
+  <Icon size={p.size} sw={1.9}>
+    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+    <circle cx="12" cy="10" r="3" />
+  </Icon>
+);
+const IconHeart = (p: { size?: number; fill?: string }) => (
+  <Icon size={p.size} sw={1.9} fill={p.fill ?? "none"}>
+    <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+  </Icon>
+);
+const IconQuestion = (p: { size?: number }) => (
+  <Icon size={p.size} sw={1.9}>
+    <circle cx="12" cy="12" r="10" />
+    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+    <line x1="12" y1="17" x2="12.01" y2="17" />
+  </Icon>
+);
+const IconX = (p: { size?: number }) => (
+  <Icon size={p.size} sw={2}>
+    <line x1="18" y1="6" x2="6" y2="18" />
+    <line x1="6" y1="6" x2="18" y2="18" />
   </Icon>
 );
 const IconWhatsapp = (p: { size?: number }) => (
@@ -847,6 +891,354 @@ function AddGuestModal({
   );
 }
 
+// ---------- aperture-8qg1s — VER LINK preview modal ----------
+//
+// Replaces the placeholder toast shipped by aperture-gnxal with the
+// real preview modal: URL display row (with working COPIAR) + a
+// preview card showing what guests will see on the public confirmation
+// page. RSVP buttons inside the preview are DECORATIVE — clicking them
+// must not fire any real action (this is a "what your guests see"
+// preview, not the live page).
+//
+// Modal shell intentionally duplicated inline (not lifted to a shared
+// file) per the task brief — keeps the diff scoped to one component;
+// the dedupe with ListaPresentesBody's Modal is a separate concern.
+//
+// Event data sourced from the shared PREVIEW_EVENT mock so aperture-ch1kr
+// (VER CONVITE modal) can lift the same fields without re-deriving them.
+
+function Modal({
+  children,
+  onClose,
+  sm,
+}: {
+  children: React.ReactNode;
+  onClose: () => void;
+  sm?: boolean;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = "";
+    };
+  }, [onClose]);
+  return (
+    <div className="lista-scrim" onClick={onClose}>
+      <div
+        className={"lista-modal" + (sm ? " lista-modal-sm" : "")}
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function VerLinkModal({ onClose }: { onClose: () => void }) {
+  const fullUrl = `${PREVIEW_EVENT.shareDomain}${PREVIEW_EVENT.hostSlug}`;
+  const { eventName, eventNameHighlight, greeting, dateLabel, locationLabel } =
+    PREVIEW_EVENT;
+
+  // Render the event name with the highlight substring wrapped in <span.hl>.
+  // Splits on first occurrence so the marca-texto sits exactly on the keyword.
+  const renderHighlighted = () => {
+    const idx = eventName.indexOf(eventNameHighlight);
+    if (idx < 0) return eventName;
+    const before = eventName.slice(0, idx);
+    const after = eventName.slice(idx + eventNameHighlight.length);
+    return (
+      <>
+        {before}
+        <span className="hl">{eventNameHighlight}</span>
+        {after}
+      </>
+    );
+  };
+
+  const copyUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(fullUrl);
+      toast.success("link copiado ♡");
+    } catch {
+      toast("não consegui copiar — copie manualmente ♡");
+    }
+  };
+
+  const chipStyle: CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "6px 12px",
+    borderRadius: 999,
+    background: "var(--cream)",
+    color: "var(--ink-soft)",
+    fontFamily: FONT_SANS,
+    fontSize: 13,
+    fontWeight: 500,
+    border: "1px solid var(--line)",
+  };
+
+  const previewBtnBase: CSSProperties = {
+    fontFamily: FONT_SANS,
+    textTransform: "uppercase",
+    letterSpacing: "0.08em",
+    fontWeight: 600,
+    fontSize: 12,
+    padding: "12px 18px",
+    borderRadius: 999,
+    width: "100%",
+    cursor: "default",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    border: "1px solid var(--line)",
+    background: "var(--paper)",
+    color: "var(--ink)",
+  };
+
+  const noop = (e: React.MouseEvent) => e.preventDefault();
+
+  return (
+    <Modal onClose={onClose}>
+      <div className="lista-modal-head">
+        <div>
+          <span
+            style={{
+              fontFamily: FONT_CAVEAT,
+              color: "var(--plum)",
+              fontSize: 22,
+              display: "inline-block",
+              transform: "rotate(-2deg)",
+              lineHeight: 1,
+              fontWeight: 600,
+            }}
+          >
+            prévia da página ♡
+          </span>
+          <h3>
+            link de <span className="hl">confirmação</span>
+          </h3>
+          <p
+            style={{
+              margin: "8px 0 0",
+              fontFamily: FONT_SANS,
+              fontSize: 13.5,
+              color: "var(--ink-soft)",
+            }}
+          >
+            é assim que seus convidados vão ver — limpinho e direto.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="lista-modal-x"
+          onClick={onClose}
+          aria-label="Fechar"
+        >
+          <IconX size={16} />
+        </button>
+      </div>
+
+      <div className="lista-modal-body">
+        {/* URL display row */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            padding: "12px 14px",
+            border: "1px solid var(--line)",
+            borderRadius: 14,
+            background: "var(--cream)",
+            marginTop: 4,
+          }}
+        >
+          <IconLink size={16} />
+          <span
+            style={{
+              flex: 1,
+              fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+              fontSize: 13.5,
+              color: "var(--plum)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+            title={fullUrl}
+          >
+            {fullUrl}
+          </span>
+          <button
+            type="button"
+            onClick={copyUrl}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "8px 14px",
+              borderRadius: 999,
+              border: "1px solid var(--line)",
+              background: "var(--paper)",
+              color: "var(--ink)",
+              fontFamily: FONT_SANS,
+              fontSize: 11,
+              fontWeight: 600,
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+              cursor: "pointer",
+              flexShrink: 0,
+            }}
+            aria-label="Copiar link"
+          >
+            <IconCopy size={13} /> copiar
+          </button>
+        </div>
+
+        {/* Preview card — what guests see on the public RSVP page */}
+        <div
+          style={{
+            marginTop: 18,
+            padding: "22px 20px",
+            borderRadius: 22,
+            background:
+              "linear-gradient(135deg, var(--lilac-soft) 0%, var(--pink-soft) 100%)",
+            border: "1px solid var(--line)",
+            textAlign: "center",
+          }}
+        >
+          <div
+            style={{
+              fontFamily: FONT_CAVEAT,
+              color: "var(--plum)",
+              fontSize: 22,
+              display: "inline-block",
+              transform: "rotate(-2deg)",
+              lineHeight: 1,
+              fontWeight: 600,
+            }}
+          >
+            {greeting}
+          </div>
+          <h4
+            style={{
+              fontFamily: FONT_HAND,
+              fontSize: 32,
+              color: "var(--plum)",
+              margin: "8px 0 14px",
+              fontWeight: 400,
+            }}
+          >
+            {renderHighlighted()}
+          </h4>
+
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 8,
+              marginBottom: 18,
+            }}
+          >
+            <span style={chipStyle}>
+              <IconCalendar size={13} /> {dateLabel}
+            </span>
+            <span style={chipStyle}>
+              <IconPin size={13} /> {locationLabel}
+            </span>
+          </div>
+
+          <div
+            style={{
+              fontFamily: FONT_SANS,
+              fontSize: 11,
+              fontWeight: 700,
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+              color: "var(--ink-mute)",
+              marginBottom: 10,
+            }}
+          >
+            você vem?
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+            }}
+          >
+            <button
+              type="button"
+              onClick={noop}
+              style={{
+                ...previewBtnBase,
+                background:
+                  "linear-gradient(135deg, var(--lilac), var(--lilac-deep))",
+                color: "#fff",
+                borderColor: "transparent",
+                boxShadow: "var(--shadow-cta)",
+              }}
+              aria-hidden="true"
+              tabIndex={-1}
+            >
+              <IconHeart size={13} fill="currentColor" /> sim, eu vou
+              <IconHeart size={13} fill="currentColor" />
+            </button>
+            <button
+              type="button"
+              onClick={noop}
+              style={previewBtnBase}
+              aria-hidden="true"
+              tabIndex={-1}
+            >
+              <IconQuestion size={13} /> talvez
+            </button>
+            <button
+              type="button"
+              onClick={noop}
+              style={previewBtnBase}
+              aria-hidden="true"
+              tabIndex={-1}
+            >
+              <IconX size={13} /> não consigo dessa vez
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="lista-modal-foot">
+        <div className="lista-foot-actions">
+          <button type="button" className="btn btn-ghost" onClick={onClose}>
+            fechar
+          </button>
+        </div>
+        <div className="lista-foot-actions lista-foot-actions-end">
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => {
+              toast.success("ficou mesmo ♡");
+              onClose();
+            }}
+          >
+            <IconEye size={14} /> ficou lindo ♡
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ---------- page body ----------
 export function ConvidadosBody({ slug: _slug }: PainelSectionBodyProps) {
   const [guests, setGuests] = useState<Convidado[]>(CONVIDADOS_SEED);
@@ -857,6 +1249,8 @@ export function ConvidadosBody({ slug: _slug }: PainelSectionBodyProps) {
   >("all");
   const [query, setQuery] = useState("");
   const [showAdd, setShowAdd] = useState(false);
+  // aperture-8qg1s — controls the VER LINK preview modal
+  const [verLinkOpen, setVerLinkOpen] = useState(false);
 
   const counts = useMemo(
     () => ({
@@ -1180,7 +1574,7 @@ export function ConvidadosBody({ slug: _slug }: PainelSectionBodyProps) {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => toast("Em breve — preview do link de confirmação ♡")}
+            onClick={() => setVerLinkOpen(true)}
             title="Ver link de confirmação"
             ariaLabel="Ver link de confirmação"
           >
@@ -1347,6 +1741,9 @@ export function ConvidadosBody({ slug: _slug }: PainelSectionBodyProps) {
           .convidados-msg-grid { grid-template-columns: 1fr auto; }
         }
       `}</style>
+
+      {/* aperture-8qg1s — VER LINK preview modal */}
+      {verLinkOpen && <VerLinkModal onClose={() => setVerLinkOpen(false)} />}
     </section>
   );
 }
