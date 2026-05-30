@@ -46,6 +46,15 @@ app.use(
 // and any files copied into public/ (logo.png, svgs, etc.).
 app.use('/public/*', serveStatic({ root: './' }));
 
+// aperture-cdwdt: real product images + lista pronta covers live under
+// public/products/ and public/listas-prontas/. The catalog JSON (and the
+// derived contribuicao.imagemUrl values) reference them at URL-root paths
+// without the `/public/` prefix so the deployed CDN swap is one config
+// change instead of a bundle rebuild. These two mounts serve the same
+// on-disk files at the prefix-less URLs the client expects.
+app.use('/products/*', serveStatic({ root: './public' }));
+app.use('/listas-prontas/*', serveStatic({ root: './public' }));
+
 // Health check.
 app.get('/healthz', (c) => c.text('ok'));
 
