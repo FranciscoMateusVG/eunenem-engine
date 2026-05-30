@@ -1,15 +1,20 @@
 import { useRef } from "react";
 
 import { useAuthModal } from "./components/eunenem/auth/AuthModalProvider.js";
-import { AUTH_DEMO_HINTS } from "./lib/mocks/auth.js";
+import { MIN_PASSWORD_LENGTH, useMe, useSignOut } from "./lib/auth.js";
 
-// aperture-ubpnl — Dev-only demo surface for the auth modals.
+// aperture-ubpnl + aperture-d0x1w — Dev demo surface for the auth modals.
 //
 // The bead is explicit that WHERE the trigger lives in production app chrome
 // is out of scope. This page is the verification surface: 2 trigger buttons
-// (signin + signup), plus a hint card with the demo credentials so an
-// operator (or QA) can exercise the success + error paths end-to-end without
-// guessing what the mock contract accepts.
+// (signin + signup), plus a "current session" card so an operator (or QA)
+// can exercise the success + error paths end-to-end against the real
+// backend.
+//
+// aperture-d0x1w: removed the mock-creds hint card (mock contract is gone —
+// every signup creates a real user row in Postgres). Added a live session
+// card that reads `auth.me` so you can see the cookie round-trip without
+// shelling into psql for each verify.
 //
 // Routed at /auth-demo via App.tsx::resolveRoute. The route is unlisted in
 // any nav — it's reachable only by typing the URL, which is the right
@@ -19,6 +24,9 @@ export function AuthDemoPage() {
   const auth = useAuthModal();
   const signinBtnRef = useRef<HTMLButtonElement | null>(null);
   const signupBtnRef = useRef<HTMLButtonElement | null>(null);
+
+  const me = useMe();
+  const { signOut, isPending: isSigningOut } = useSignOut();
 
   return (
     <main
@@ -59,9 +67,13 @@ export function AuthDemoPage() {
             lineHeight: 1.55,
           }}
         >
-          Surface for verifying the <code style={{ fontFamily: "var(--font-dm-sans), monospace", fontSize: 12, background: "var(--cream-2)", padding: "1px 6px", borderRadius: 4 }}>aperture-ubpnl</code>{" "}
-          AuthModalShell against the mock tRPC contract. Both modes share 90%
-          of the chrome; mode toggles in-place via the footer cross-link.
+          Surface for verifying the{" "}
+          <code style={inlineCode}>aperture-ubpnl</code> AuthModalShell against
+          the real tRPC contract (
+          <code style={inlineCode}>aperture-d0x1w</code> swap from mock →{" "}
+          <code style={inlineCode}>auth.signUp / signIn / signOut / me</code>).
+          Both modes share 90% of the chrome; mode toggles in-place via the
+          footer cross-link.
         </p>
 
         <div
@@ -138,50 +150,92 @@ export function AuthDemoPage() {
               lineHeight: 1.1,
             }}
           >
-            Credenciais mock pra exercitar
+            Sessão atual
           </h2>
-          <dl
-            style={{
-              margin: 0,
-              fontFamily: "var(--font-dm-sans), sans-serif",
-              fontSize: 13,
-              color: "var(--ink)",
-              lineHeight: 1.7,
-            }}
-          >
-            <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
-              <dt style={{ fontWeight: 600, color: "var(--plum)", minWidth: 130 }}>Login ok →</dt>
-              <dd style={{ margin: 0 }}>
-                <code style={codeStyle}>{AUTH_DEMO_HINTS.signInEmail}</code>{" "}
-                + senha <code style={codeStyle}>{AUTH_DEMO_HINTS.signInPassword}</code>
-              </dd>
-            </div>
-            <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
-              <dt style={{ fontWeight: 600, color: "var(--plum)", minWidth: 130 }}>Login falha →</dt>
-              <dd style={{ margin: 0 }}>
-                qualquer outro e-mail + senha (≥ {AUTH_DEMO_HINTS.minPasswordLength} chars)
-              </dd>
-            </div>
-            <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
-              <dt style={{ fontWeight: 600, color: "var(--plum)", minWidth: 130 }}>Cadastro ok →</dt>
-              <dd style={{ margin: 0 }}>
-                qualquer e-mail novo + nome + senha (≥ {AUTH_DEMO_HINTS.minPasswordLength} chars)
-              </dd>
-            </div>
-            <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
-              <dt style={{ fontWeight: 600, color: "var(--plum)", minWidth: 130 }}>Email tomado →</dt>
-              <dd style={{ margin: 0 }}>
-                <code style={codeStyle}>{AUTH_DEMO_HINTS.takenSignupEmail}</code>
-              </dd>
-            </div>
-            <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
-              <dt style={{ fontWeight: 600, color: "var(--plum)", minWidth: 130 }}>OAuth →</dt>
-              <dd style={{ margin: 0 }}>
-                qualquer botão dispara toast{" "}
-                <code style={codeStyle}>em breve ♡</code>
-              </dd>
-            </div>
-          </dl>
+          {me.isLoading ? (
+            <p style={{ ...textBody, color: "var(--ink-mute)" }}>
+              Verificando sessão…
+            </p>
+          ) : me.data ? (
+            <>
+              <dl
+                style={{
+                  margin: 0,
+                  fontFamily: "var(--font-dm-sans), sans-serif",
+                  fontSize: 13,
+                  color: "var(--ink)",
+                  lineHeight: 1.7,
+                }}
+              >
+                <Row label="Nome">
+                  <code style={codeStyle}>{me.data.nomeExibicao}</code>
+                </Row>
+                <Row label="E-mail">
+                  <code style={codeStyle}>{me.data.email}</code>
+                </Row>
+                <Row label="idUsuario">
+                  <code style={codeStyle}>{me.data.idUsuario}</code>
+                </Row>
+                <Row label="idConta">
+                  <code style={codeStyle}>{me.data.idConta}</code>
+                </Row>
+                <Row label="Plataforma">
+                  <code style={codeStyle}>{me.data.idPlataforma}</code>
+                </Row>
+                <Row label="Sessão expira">
+                  <code style={codeStyle}>
+                    {new Date(me.data.expiraEm).toLocaleString("pt-BR")}
+                  </code>
+                </Row>
+              </dl>
+              <button
+                type="button"
+                onClick={() => void signOut()}
+                disabled={isSigningOut}
+                style={{
+                  marginTop: 16,
+                  padding: "10px 18px",
+                  background: "transparent",
+                  color: "var(--plum)",
+                  border: "1.5px solid var(--lilac-deep)",
+                  borderRadius: 10,
+                  fontFamily: "var(--font-dm-sans), sans-serif",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  letterSpacing: ".08em",
+                  textTransform: "uppercase",
+                  cursor: isSigningOut ? "not-allowed" : "pointer",
+                  opacity: isSigningOut ? 0.6 : 1,
+                  transition: "background .15s ease, color .15s ease",
+                }}
+              >
+                {isSigningOut ? "Saindo…" : "Sair"}
+              </button>
+            </>
+          ) : (
+            <>
+              <p style={textBody}>
+                Sem sessão ativa. Use{" "}
+                <strong style={{ color: "var(--plum)" }}>Abrir cadastro</strong>{" "}
+                pra criar uma conta real (a linha aparece em{" "}
+                <code style={codeStyle}>users</code> no Postgres) ou{" "}
+                <strong style={{ color: "var(--plum)" }}>Abrir login</strong>{" "}
+                pra entrar com uma conta existente.
+              </p>
+              <p
+                style={{
+                  ...textBody,
+                  marginTop: 12,
+                  fontSize: 12,
+                  color: "var(--ink-mute)",
+                }}
+              >
+                Senhas precisam de no mínimo <strong>{MIN_PASSWORD_LENGTH}</strong>{" "}
+                caracteres. OAuth (Google / Apple / Microsoft) ainda é stub —
+                clicar dispara toast <code style={codeStyle}>em breve ♡</code>.
+              </p>
+            </>
+          )}
         </aside>
 
         <p
@@ -193,14 +247,26 @@ export function AuthDemoPage() {
             lineHeight: 1.3,
           }}
         >
-          troca de modo: rodapé "Já tem conta? <strong>Entrar</strong>" / "Ainda não tem conta?{" "}
-          <strong>Criar grátis</strong>" — sem remount, mantém o e-mail digitado.
+          troca de modo: rodapé "Já tem conta? <strong>Entrar</strong>" / "Ainda
+          não tem conta? <strong>Criar grátis</strong>" — sem remount, mantém o
+          e-mail digitado.
         </p>
       </div>
 
       {/* Modal mounted by AuthModalProvider at the App.tsx root —
        *  this page no longer renders it directly. */}
     </main>
+  );
+}
+
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
+      <dt style={{ fontWeight: 600, color: "var(--plum)", minWidth: 130 }}>
+        {label} →
+      </dt>
+      <dd style={{ margin: 0 }}>{children}</dd>
+    </div>
   );
 }
 
@@ -211,4 +277,20 @@ const codeStyle: React.CSSProperties = {
   padding: "1px 6px",
   borderRadius: 4,
   color: "var(--plum)",
+};
+
+const inlineCode: React.CSSProperties = {
+  fontFamily: "var(--font-dm-sans), monospace",
+  fontSize: 12,
+  background: "var(--cream-2)",
+  padding: "1px 6px",
+  borderRadius: 4,
+};
+
+const textBody: React.CSSProperties = {
+  margin: 0,
+  fontFamily: "var(--font-dm-sans), sans-serif",
+  fontSize: 13,
+  color: "var(--ink)",
+  lineHeight: 1.55,
 };

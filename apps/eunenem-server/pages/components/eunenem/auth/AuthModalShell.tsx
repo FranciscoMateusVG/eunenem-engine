@@ -2,15 +2,20 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import {
-  AUTH_DEMO_HINTS,
   authErrorMessage,
-  auth as authClient,
   isValidEmail,
+  MIN_PASSWORD_LENGTH,
+  useSignIn,
+  useSignUp,
   type AuthError,
   type AuthSession,
-} from "@/lib/mocks/auth";
+} from "@/lib/auth";
 
-// aperture-ubpnl — AuthModalShell.
+// aperture-ubpnl + aperture-d0x1w — AuthModalShell.
+//
+// aperture-d0x1w: swapped the mock contract at `lib/mocks/auth.ts` for the
+// real tRPC procedures (Rex's PR #61). Same UX, same per-field error
+// routing — just real network calls + real Postgres now.
 //
 // One component, two modes: "signup" and "signin". The shell is ~90% shared
 // between the two reference PNGs (tape, close X, OAuth row, "ou" divider,
@@ -118,6 +123,11 @@ export function AuthModalShell({
   const [nameError, setNameError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Real tRPC mutations (aperture-d0x1w). Hooks at top-level so React's
+  // rules-of-hooks holds across mode swaps + step changes.
+  const { signUp } = useSignUp();
+  const { signIn } = useSignIn();
 
   const copy = COPY[mode];
 
@@ -228,9 +238,9 @@ export function AuthModalShell({
     if (!password) {
       setPasswordError("escolhe uma senha pra fechar a porta ♡");
       bad = true;
-    } else if (password.length < AUTH_DEMO_HINTS.minPasswordLength) {
+    } else if (password.length < MIN_PASSWORD_LENGTH) {
       setPasswordError(
-        `a senha precisa ter pelo menos ${AUTH_DEMO_HINTS.minPasswordLength} caracteres ♡`,
+        `a senha precisa ter pelo menos ${MIN_PASSWORD_LENGTH} caracteres ♡`,
       );
       bad = true;
     }
@@ -240,8 +250,8 @@ export function AuthModalShell({
     try {
       const session =
         mode === "signup"
-          ? await authClient.signUp({ email, password, name })
-          : await authClient.signIn({ email, password });
+          ? await signUp({ email, password, name })
+          : await signIn({ email, password });
       toast.success(
         mode === "signup" ? "conta criada ♡" : "bem-vinda de volta ♡",
         { description: session.user.email },
@@ -541,7 +551,7 @@ function StepTwo({
           onChange={(e) => setPassword(e.target.value)}
           placeholder={
             mode === "signup"
-              ? `Mínimo ${AUTH_DEMO_HINTS.minPasswordLength} caracteres`
+              ? `Mínimo ${MIN_PASSWORD_LENGTH} caracteres`
               : "Digite sua senha"
           }
           aria-required="true"
