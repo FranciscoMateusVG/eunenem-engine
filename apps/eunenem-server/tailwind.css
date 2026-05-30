@@ -2694,6 +2694,101 @@ h4 {
 }
 
 /* =================================================================
+ * aperture-rjxkg — /painel/[slug]/perfil positioning pass.
+ *
+ * Operator brief was positioning-only: widen the page from the
+ * mobile-shaped 760px to a desktop-wide layout, drop the redundant
+ * "olá, <nome>" eyebrow above the hero (deleted at the JSX layer —
+ * .perfil-eyebrow is now unused but left in place for any other
+ * caller that may still render it), put sections 2 + 3 (datas
+ * importantes + informações do neném) side-by-side at desktop, and
+ * add an inline COPIAR button to the LINK DA PÁGINA pill.
+ *
+ * Append-only: every rule below either targets a NEW selector or
+ * uses higher specificity / later cascade order to widen an existing
+ * desktop rule. The original .perfil-* block above (1960-2420) is
+ * left untouched so this PR can land independently of any parallel
+ * perfil work in flight. Container caps at 1180px — sits comfortably
+ * inside .painel-app's 1200px desktop max-width with the 28px
+ * gutters that .painel-app already applies. The 2-col grid collapses
+ * to single-col at <=768px where the two cards' inputs (date pickers,
+ * selects) start to crowd each other.
+ * ================================================================= */
+
+/* Widen the page container at desktop. */
+@media (min-width: 900px) {
+  .perfil-body {
+    max-width: 1180px;
+  }
+}
+
+/* Sections 2 + 3 row — mobile stacks, desktop splits 50/50. */
+.perfil-row-2 {
+  display: contents;
+}
+/* Match the painel desktop breakpoint (900px) — below this, .painel-app
+ * is still capped at 520px so a 2-col split would crush both cards. */
+@media (min-width: 900px) {
+  .perfil-row-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 28px;
+    align-items: start;
+  }
+}
+
+/* LINK DA PÁGINA — copy CTA row. The original .perfil-share is a
+ * flex-column with the eyebrow stacked above the URL; this new
+ * inner row keeps that vertical structure but turns the URL line
+ * into a horizontal flex (url flex:1 to ellipsis on overflow, button
+ * pinned right, gap so the button never touches the text). */
+.perfil-share-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.perfil-share-row .perfil-share-url {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.perfil-share-copy {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: transparent;
+  border: 1.5px solid var(--lilac);
+  color: var(--lilac-deep);
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease,
+    border-color 0.18s ease, transform 0.18s ease;
+}
+.perfil-share-copy svg {
+  width: 14px;
+  height: 14px;
+}
+.perfil-share-copy:hover {
+  background: var(--lilac-soft);
+  color: var(--lilac-deep);
+  border-color: var(--lilac-deep);
+}
+.perfil-share-copy:active {
+  transform: scale(0.97);
+}
+.perfil-share-copy:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(201, 165, 216, 0.28);
+}
+
+/* =================================================================
  * aperture-q1j2 — Marketing Landing page (/)
  * Ported from the EuNeném Next.js prototype. Reuses the existing
  * design tokens (--lilac*, --plum, --cream*, --shadow-*, float

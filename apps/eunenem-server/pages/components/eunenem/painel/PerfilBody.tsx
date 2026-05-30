@@ -148,8 +148,6 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
   const [story, setStory] = useState(PERFIL_DEMO.story);
   const [saving, setSaving] = useState(false);
 
-  const greeting = creatorName.trim() || "você";
-
   const handleSave = () => {
     if (!babyName.trim()) {
       toast.error("Conta pra gente o nome do neném ♡");
@@ -169,7 +167,6 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
   return (
     <div className="perfil-body">
       <div className="perfil-hero">
-        <span className="perfil-eyebrow">olá, {greeting} ♡</span>
         <h1 className="perfil-hero-title">
           edite o <span className="hl">perfil</span> do seu&nbsp;neném
         </h1>
@@ -197,13 +194,35 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
 
         <div className="perfil-share">
           <span className="perfil-share-eyebrow">link da página</span>
-          <span className="perfil-share-url" title={`${PERFIL_DEMO.shareBase}${profileSlug}`}>
-            {PERFIL_DEMO.shareBase}
-            {profileSlug}
-          </span>
+          <div className="perfil-share-row">
+            <span className="perfil-share-url" title={`${PERFIL_DEMO.shareBase}${profileSlug}`}>
+              {PERFIL_DEMO.shareBase}
+              {profileSlug}
+            </span>
+            <button
+              type="button"
+              className="perfil-share-copy"
+              onClick={() => {
+                const link = `${PERFIL_DEMO.shareBase}${profileSlug}`;
+                void navigator.clipboard
+                  .writeText(link)
+                  .then(() => toast.success("link copiado ♡"))
+                  .catch(() => toast.error("não consegui copiar o link"));
+              }}
+              aria-label="Copiar link da página"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="9" y="9" width="11" height="11" rx="2.5" />
+                <path d="M5 15V6.5A2.5 2.5 0 0 1 7.5 4H15" />
+              </svg>
+              <span>copiar</span>
+            </button>
+          </div>
         </div>
       </PerfilSection>
 
+      {/* 2 + 3 — Two-column row at desktop (datas + neném) */}
+      <div className="perfil-row-2">
       {/* 2 — Datas importantes */}
       <PerfilSection icon={ico.calendar} title="datas importantes" variant="pink">
         <Field label="data do chá" htmlFor="perfil-tea">
@@ -321,6 +340,7 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
           </div>
         </Field>
       </PerfilSection>
+      </div>
 
       {/* 4 — Minha história */}
       <PerfilSection icon={ico.heart} title="minha história" variant="blue">
