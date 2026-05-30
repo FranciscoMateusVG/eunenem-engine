@@ -1,26 +1,30 @@
 /**
- * tRPC router for eunenem-server.
+ * tRPC router for eunenem-server (aperture-kungg + aperture-ht7sq).
  *
- * Smoke procedure (`listFruits`) introduced in aperture-kungg as the first
- * end-to-end tRPC integration. Lives server-side only; the client imports
- * the `AppRouter` *type* (zero runtime cost) via @trpc/client to get
- * full type inference on procedure inputs and outputs.
+ * Procedures:
+ *   - `listFruits`    — original smoke test from aperture-kungg
+ *   - `auth.signUp`   — wraps `registrarContaUsuario` (Mount-Option-A2)
+ *   - `auth.signIn`   — wraps `criarSessaoUsuario`
+ *   - `auth.signOut`  — revokes the session + clears cookie
+ *   - `auth.me`       — returns the current Usuario or null
  *
- * Pattern: vanilla tRPC v11 — no react-query, no Zod schemas yet. Add those
- * deps when a real procedure needs input validation.
+ * Client side imports `AppRouter` as a type only — zero runtime coupling.
  */
 import { initTRPC } from '@trpc/server';
+import { authRouter } from './auth-router.js';
+import type { TrpcContext } from './context.js';
 
-const t = initTRPC.create();
+const t = initTRPC.context<TrpcContext>().create();
 
 export const appRouter = t.router({
   /**
    * Smoke: returns a fixed list of Brazilian fruit names. Operator's
-   * verification gate for the tRPC pipeline.
+   * verification gate for the tRPC pipeline (aperture-kungg, PR #44).
    */
   listFruits: t.procedure.query(() => {
     return ['maçã', 'banana', 'morango', 'abacaxi', 'manga'] as const;
   }),
+  auth: authRouter,
 });
 
 export type AppRouter = typeof appRouter;

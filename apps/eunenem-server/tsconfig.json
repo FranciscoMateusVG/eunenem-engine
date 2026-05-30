@@ -21,6 +21,14 @@
       "@/*": ["./pages/*"]
     }
   },
-  "include": ["server.tsx", "client.tsx", "pages/**/*", "build.mjs"],
-  "exclude": ["node_modules", "public"]
+  "include": [
+    "server.tsx",
+    "client.tsx",
+    "pages/**/*",
+    "server/**/*",
+    "scripts/**/*",
+    "build.mjs",
+    "../../src/**/*.ts"
+  ],
+  "exclude": ["node_modules", "public", "../../src/**/*.test.ts"]
 }

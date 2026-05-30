@@ -8,22 +8,29 @@
     "dev": "concurrently -k -n build,server -c blue,magenta \"node build.mjs --watch\" \"tsx watch server.tsx\"",
     "build": "node build.mjs",
     "start": "NODE_ENV=production tsx server.tsx",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "auth-smoke": "tsx scripts/auth-smoke.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",
+    "@opentelemetry/api": "^1.9.1",
     "@tanstack/react-query": "^5.100.14",
     "@trpc/client": "^11.17.0",
     "@trpc/react-query": "^11.17.0",
     "@trpc/server": "^11.17.0",
+    "better-auth": "^1.6.12",
     "hono": "^4.6.14",
+    "kysely": "^0.28.7",
+    "pg": "^8.20.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "sonner": "^2.0.7"
+    "sonner": "^2.0.7",
+    "zod": "^4.1.13"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.0.0",
     "@types/node": "^22.10.0",
+    "@types/pg": "^8.20.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "concurrently": "^9.1.0",
