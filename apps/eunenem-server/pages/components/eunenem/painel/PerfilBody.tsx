@@ -1,8 +1,7 @@
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
-import { ImageSlot } from "@/components/eunenem/ImageSlot";
 import { useTweaks } from "@/components/eunenem/TweaksContext";
 import { painelHref } from "@/lib/painelRoutes";
 import {
@@ -80,6 +79,21 @@ const ico = {
       <path d="M5 12l4.5 4.5L19 7" />
     </svg>
   ),
+  // aperture-ou9bp — tiny photo glyph for per-slot header tile + plus glyph
+  // for the dropzone CTA circle.
+  photo: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3.5" y="5.5" width="17" height="13" rx="2.5" />
+      <path d="M7 15.5l3.2-3.2a1.5 1.5 0 0 1 2.1 0L17 17" />
+      <path d="M14.5 13l1.4-1.4a1.5 1.5 0 0 1 2.1 0L20.5 13.6" />
+      <circle cx="9" cy="10" r="1.3" />
+    </svg>
+  ),
+  plus: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 6v12M6 12h12" />
+    </svg>
+  ),
 } as const;
 
 type ChipVariant = "lilac" | "pink" | "yellow" | "blue" | "green";
@@ -131,6 +145,103 @@ function Field({
   );
 }
 
+// aperture-ou9bp — single upload slot for the "fotos da página" 3-grid.
+// Header row (pink mini-tile + plum label) over a dashed-border dropzone
+// with a + circle + CTA. Stub upload only: file becomes a local
+// URL.createObjectURL preview, no fetch.
+function PhotoSlot({
+  id,
+  label,
+  cta,
+  toastLabel,
+  file,
+  onFile,
+}: {
+  id: string;
+  label: string;
+  cta: string;
+  toastLabel: string;
+  file: File | null;
+  onFile: (file: File | null) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  // Mint/revoke object URLs in sync with the chosen file. Revoking on
+  // unmount + on swap keeps blob: URLs from leaking.
+  useEffect(() => {
+    if (!file) {
+      setPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+
+  const openPicker = () => inputRef.current?.click();
+  const handleKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      openPicker();
+    }
+  };
+
+  const filled = !!file && !!previewUrl;
+
+  return (
+    <div className="perfil-foto-slot">
+      <div className="perfil-foto-header">
+        <span className="perfil-foto-icon" aria-hidden="true">
+          {ico.photo}
+        </span>
+        <span className="perfil-foto-label">{label}</span>
+      </div>
+
+      <div
+        className={`perfil-foto-dropzone${filled ? " perfil-foto-dropzone--filled" : ""}`}
+        role="button"
+        tabIndex={0}
+        aria-label={cta}
+        onClick={openPicker}
+        onKeyDown={handleKey}
+      >
+        {filled ? (
+          <img
+            className="perfil-foto-preview"
+            src={previewUrl ?? undefined}
+            alt={`${toastLabel} — pré-visualização`}
+          />
+        ) : (
+          <>
+            <span className="perfil-foto-plus-circle" aria-hidden="true">
+              {ico.plus}
+            </span>
+            <span className="perfil-foto-cta">{cta}</span>
+          </>
+        )}
+      </div>
+
+      <input
+        ref={inputRef}
+        id={id}
+        className="perfil-foto-input"
+        type="file"
+        accept="image/*"
+        onChange={(e) => {
+          const next = e.target.files?.[0] ?? null;
+          if (next) {
+            onFile(next);
+            toast.success(`foto carregada — ${toastLabel}`);
+          }
+          // reset so picking the same file again still fires
+          e.target.value = "";
+        }}
+      />
+    </div>
+  );
+}
+
 export function PerfilBody({ slug }: PainelSectionBodyProps) {
   const { tweaks, setTweaks } = useTweaks();
 
@@ -147,6 +258,13 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
   const [birthDate, setBirthDate] = useState(PERFIL_DEMO.birthDate);
   const [story, setStory] = useState(PERFIL_DEMO.story);
   const [saving, setSaving] = useState(false);
+
+  // aperture-ou9bp — stub photo uploads. Each slot is independent state;
+  // no fetch, no persistence, swap-on-pick + sonner toast only.
+  const [fotoPerfil, setFotoPerfil] = useState<File | null>(null);
+  const [fotoCapa, setFotoCapa] = useState<File | null>(null);
+  const [fotoHistoria, setFotoHistoria] = useState<File | null>(null);
+
 
   const handleSave = () => {
     if (!babyName.trim()) {
@@ -362,39 +480,33 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
         </Field>
       </PerfilSection>
 
-      {/* 5 — Fotos da página */}
-      <PerfilSection icon={ico.camera} title="fotos da página" variant="green">
-        <div className="perfil-photo-grid">
-          <div className="perfil-photo">
-            <span className="perfil-photo-title">Foto de perfil</span>
-            <div className="perfil-photo-slot perfil-photo-avatar">
-              <ImageSlot
-                id="perfil-foto-avatar"
-                placeholder="escolher foto de perfil"
-                fit="cover"
-              />
-            </div>
-          </div>
-          <div className="perfil-photo">
-            <span className="perfil-photo-title">Foto de capa</span>
-            <div className="perfil-photo-slot perfil-photo-cover">
-              <ImageSlot
-                id="perfil-foto-capa"
-                placeholder="escolher foto de capa"
-                fit="cover"
-              />
-            </div>
-          </div>
-          <div className="perfil-photo">
-            <span className="perfil-photo-title">Foto da história</span>
-            <div className="perfil-photo-slot perfil-photo-cover">
-              <ImageSlot
-                id="perfil-foto-historia"
-                placeholder="escolher foto da história"
-                fit="cover"
-              />
-            </div>
-          </div>
+      {/* 5 — Fotos da página (aperture-ou9bp) */}
+      <PerfilSection icon={ico.camera} title="fotos da página" variant="pink">
+        <div className="perfil-fotos-grid">
+          <PhotoSlot
+            id="perfil-foto-avatar"
+            label="Foto de Perfil"
+            cta="escolher foto para Perfil"
+            toastLabel="Perfil"
+            file={fotoPerfil}
+            onFile={setFotoPerfil}
+          />
+          <PhotoSlot
+            id="perfil-foto-capa"
+            label="Foto de Capa"
+            cta="escolher foto para Capa"
+            toastLabel="Capa"
+            file={fotoCapa}
+            onFile={setFotoCapa}
+          />
+          <PhotoSlot
+            id="perfil-foto-historia"
+            label="Foto de História"
+            cta="escolher foto para História"
+            toastLabel="História"
+            file={fotoHistoria}
+            onFile={setFotoHistoria}
+          />
         </div>
       </PerfilSection>
 
