@@ -1,4 +1,5 @@
 import { Toaster } from 'sonner';
+import { AuthDemoPage } from './AuthDemoPage.js';
 import { LandingPage } from './LandingPage.js';
 import { NotFoundPage } from './NotFoundPage.js';
 import { PaginaPage } from './PaginaPage.js';
@@ -26,6 +27,7 @@ export function resolveRoute(pathname: string):
   | { kind: 'painel'; slug: string }
   | { kind: 'painel-section'; slug: string; section: PainelSection }
   | { kind: 'trpc-smoke' }
+  | { kind: 'auth-demo' }
   | { kind: 'not-found' } {
   // Marketing landing page (aperture-q1j2) — exact "/" only.
   if (pathname === '/') {
@@ -34,6 +36,11 @@ export function resolveRoute(pathname: string):
   // tRPC smoke test (aperture-kungg) — dev-only verification surface.
   if (pathname === '/trpc-smoke') {
     return { kind: 'trpc-smoke' };
+  }
+  // Auth modal demo (aperture-ubpnl) — dev-only verification surface for the
+  // AuthModalShell. Unlisted in nav; reachable only by typing the URL.
+  if (pathname === '/auth-demo') {
+    return { kind: 'auth-demo' };
   }
   const paginaMatch = pathname.match(/^\/pagina\/([^/]+)\/?$/);
   if (paginaMatch && paginaMatch[1] === 'francisco') {
@@ -82,5 +89,6 @@ function pickPage(route: ReturnType<typeof resolveRoute>, pathname: string) {
   if (route.kind === 'painel-section')
     return <PainelSectionPage slug={route.slug} section={route.section} />;
   if (route.kind === 'trpc-smoke') return <TrpcSmokePage />;
+  if (route.kind === 'auth-demo') return <AuthDemoPage />;
   return <NotFoundPage pathname={pathname} />;
 }
