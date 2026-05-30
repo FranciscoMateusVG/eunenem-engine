@@ -1898,9 +1898,238 @@ h4 {
   margin-left: auto;
 }
 
+/* =================================================================
+ * aperture-17cls — "Adicionar à minha lista" tabbed modal.
+ * Adds CATÁLOGO + PERSONALIZADO tab pills below the modal head, an
+ * info banner on the PERSONALIZADO tab, and the catalog item cards.
+ * All new selectors live under the existing `.lista-modal` shell —
+ * they don't touch any pre-existing rules so the edit-modal path
+ * (still single-form, no tabs) inherits the original chrome unchanged.
+ * ================================================================= */
+
+.lista-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 0 22px;
+  margin-top: 2px;
+}
+.lista-tab {
+  border: 0;
+  background: transparent;
+  padding: 9px 18px;
+  border-radius: 999px;
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-mute);
+  cursor: pointer;
+  transition: background 0.16s ease, color 0.16s ease;
+}
+.lista-tab:hover {
+  color: var(--lilac-deep);
+  background: var(--cream);
+}
+.lista-tab.is-active {
+  background: var(--lilac-soft);
+  color: var(--lilac-deep);
+}
+
+/* PERSONALIZADO info banner — ✦ + heading + body copy. Sits above the
+   form fields, soft yellow→lilac wash so it reads as an invitation,
+   not an alert. */
+.lista-info-banner {
+  display: grid;
+  grid-template-columns: 32px 1fr;
+  gap: 12px;
+  align-items: start;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(247, 213, 96, 0.18), rgba(232, 213, 240, 0.22));
+  border: 1px solid rgba(232, 213, 240, 0.6);
+  margin: 12px 0 8px;
+}
+.lista-info-banner-ic {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--yellow);
+  display: grid;
+  place-items: center;
+  color: var(--plum);
+}
+.lista-info-banner-ic svg {
+  width: 16px;
+  height: 16px;
+}
+.lista-info-banner-text strong {
+  display: block;
+  font-family: var(--font-patrick-hand), cursive;
+  color: var(--plum);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.15;
+}
+.lista-info-banner-text p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--ink-soft);
+  line-height: 1.45;
+}
+
+/* CATÁLOGO tab — search + grouped sections of item cards. */
+.lista-catalogo {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding-top: 6px;
+}
+.lista-cat-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.lista-cat-search-ic {
+  position: absolute;
+  left: 14px;
+  width: 16px;
+  height: 16px;
+  color: var(--ink-mute);
+  pointer-events: none;
+  display: grid;
+  place-items: center;
+}
+.lista-cat-search-ic svg {
+  width: 100%;
+  height: 100%;
+}
+.lista-cat-search input {
+  flex: 1;
+  border: 1.5px solid var(--line);
+  background: var(--paper);
+  border-radius: 14px;
+  padding: 11px 14px 11px 38px;
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 14px;
+  color: var(--ink);
+  outline: none;
+}
+.lista-cat-search input:focus {
+  border-color: var(--lilac);
+}
+.lista-cat-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.lista-cat-section-hd {
+  margin: 0;
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-mute);
+}
+.lista-cat-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.lista-cat-item {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 44px 1fr 24px;
+  gap: 12px;
+  align-items: center;
+  border: 1.5px solid var(--line);
+  background: var(--paper);
+  border-radius: 14px;
+  padding: 10px 12px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.14s ease, background 0.14s ease, transform 0.14s ease;
+}
+.lista-cat-item:hover {
+  border-color: var(--lilac-soft);
+  background: var(--cream);
+}
+.lista-cat-item.is-selected {
+  border-color: var(--lilac);
+  background: rgba(232, 213, 240, 0.32);
+}
+.lista-cat-item:active {
+  transform: scale(0.99);
+}
+.lista-cat-thumb {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+}
+.lista-cat-emoji {
+  font-size: 22px;
+  line-height: 1;
+}
+.lista-cat-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.lista-cat-name {
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--ink);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+.lista-cat-sub {
+  font-size: 12px;
+  color: var(--ink-mute);
+  margin-top: 2px;
+}
+.lista-cat-check {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1.5px solid var(--line);
+  background: var(--paper);
+  display: grid;
+  place-items: center;
+  color: #fff;
+  transition: background 0.14s ease, border-color 0.14s ease;
+}
+.lista-cat-check.is-on {
+  background: var(--lilac);
+  border-color: var(--lilac);
+}
+.lista-cat-check svg {
+  width: 14px;
+  height: 14px;
+}
+.lista-cat-empty {
+  text-align: center;
+  padding: 22px 12px;
+  color: var(--ink-soft);
+}
+.lista-cat-empty p {
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+
 @media (max-width: 540px) {
   .lista-form {
     grid-template-columns: 1fr;
+  }
+  .lista-tabs {
+    padding: 0 16px;
   }
 }
 
