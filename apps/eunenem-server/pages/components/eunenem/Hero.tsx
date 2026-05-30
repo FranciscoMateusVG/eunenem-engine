@@ -23,12 +23,15 @@ export function Hero() {
   const { babyName, targetDate } = tweaks;
 
   return (
-    <section className="relative overflow-hidden pt-28 pb-14 sm:pt-36 sm:pb-16">
-      {/* Decorative doodles in the corners */}
+    <section className="relative overflow-hidden pt-4 pb-14 sm:pt-36 sm:pb-16">
+      {/* Decorative doodles in the corners — hidden on mobile (aperture-wupjr).
+          They use absolute top: 64 / 100 inside the section padding region, so
+          shrinking the mobile padding-top would collide them with the badge
+          and title. Desktop keeps the original sm:pt-36 padding and the doodles. */}
       <StarDoodle
         size={24}
         color="var(--yellow)"
-        className="anim-twinkle"
+        className="anim-twinkle hidden sm:block"
         style={{
           position: "absolute",
           top: 100,
@@ -37,7 +40,7 @@ export function Hero() {
       />
       <FlowerDoodle
         size={30}
-        className="anim-doodle-sway"
+        className="anim-doodle-sway hidden sm:block"
         style={{
           position: "absolute",
           top: 64,
