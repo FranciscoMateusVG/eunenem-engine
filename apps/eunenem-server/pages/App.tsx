@@ -5,6 +5,7 @@ import { PaginaPage } from './PaginaPage.js';
 import { PainelPage } from './PainelPage.js';
 import { PainelSectionPage } from './PainelSectionPage.js';
 import { TrpcSmokePage } from './TrpcSmokePage.js';
+import { TrpcProvider } from './lib/TrpcProvider.js';
 import { isPainelSection, type PainelSection } from './lib/painelRoutes.js';
 
 // Mock-first: the only recognised creator slug is "helena" (the public
@@ -56,8 +57,11 @@ export function resolveRoute(pathname: string):
 
 export function App({ pathname }: { pathname: string }) {
   const route = resolveRoute(pathname);
+  // TrpcProvider is mounted at the root so every route can call
+  // `trpc.X.useQuery()` (aperture-7337j). Same tree on server + client
+  // → no hydration mismatch.
   return (
-    <>
+    <TrpcProvider>
       {pickPage(route, pathname)}
       <Toaster
         position="bottom-center"
@@ -67,7 +71,7 @@ export function App({ pathname }: { pathname: string }) {
           style: { fontFamily: 'var(--font-dm-sans), system-ui, sans-serif' },
         }}
       />
-    </>
+    </TrpcProvider>
   );
 }
 
