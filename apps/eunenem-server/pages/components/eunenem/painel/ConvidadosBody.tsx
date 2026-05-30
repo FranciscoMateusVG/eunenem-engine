@@ -639,8 +639,27 @@ function StatsStrip({ guests }: { guests: Convidado[] }) {
   );
 }
 
-// ---------- add guest inline form ----------
-function AddGuestForm({
+// ---------- add guest modal ----------
+//
+// Modal chrome reuses the `.lista-scrim` / `.lista-modal` recipe that
+// ListaPresentesBody ships in tailwind.css — same scrim, same paper card,
+// same 24px radius, same head/body/foot structure, same `.btn .btn-ghost` +
+// `.btn .btn-primary` recipe. Keeps this surface visually harmonised with
+// the rest of the painel without adding new CSS.
+
+// Format a digits-only string into Brazilian phone "(NN) NNNNN-NNNN" /
+// "(NN) NNNN-NNNN". Caps at 11 digits.
+function formatBrPhone(raw: string): string {
+  const d = raw.replace(/\D/g, "").slice(0, 11);
+  if (d.length === 0) return "";
+  if (d.length <= 2) return `(${d}`;
+  if (d.length <= 6) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
+  if (d.length <= 10)
+    return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+}
+
+function AddGuestModal({
   onAdd,
   onClose,
 }: {
@@ -650,17 +669,18 @@ function AddGuestForm({
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
 
-  const inputStyle: CSSProperties = {
-    fontFamily: FONT_SANS,
-    fontSize: 15,
-    color: "var(--ink)",
-    background: "var(--cream)",
-    border: "1px solid var(--line)",
-    borderRadius: 14,
-    padding: "12px 14px",
-    width: "100%",
-    outline: "none",
-  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [onClose]);
 
   const submit = () => {
     const n = name.trim();
@@ -672,49 +692,136 @@ function AddGuestForm({
   };
 
   return (
-    <div
-      style={{
-        background: "var(--cream)",
-        border: "1px dashed var(--lilac)",
-        borderRadius: 18,
-        padding: 16,
-        display: "flex",
-        gap: 10,
-        flexWrap: "wrap",
-        alignItems: "flex-end",
-        marginTop: 14,
-      }}
-    >
-      <div style={{ display: "flex", flexDirection: "column", gap: 6, flex: "2 1 200px" }}>
-        <label style={{ fontFamily: FONT_SANS, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--ink-soft)" }}>
-          nome
-        </label>
-        <input
-          style={inputStyle}
-          placeholder="nome da convidada"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && submit()}
-        />
+    <div className="lista-scrim" onClick={onClose}>
+      <div
+        className="lista-modal lista-modal-sm"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="convidado-modal-title"
+      >
+        <div className="lista-modal-head">
+          <div>
+            <span className="eyebrow coral">um novo mimo ♡</span>
+            <h3 id="convidado-modal-title">
+              adicionar <span className="hl">convidado</span>
+            </h3>
+            <p
+              style={{
+                fontFamily: FONT_SANS,
+                fontSize: 13.5,
+                color: "var(--ink-soft)",
+                margin: "6px 0 0",
+                lineHeight: 1.5,
+              }}
+            >
+              só precisamos do nome e do telefone — o resto a gente cuida.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="lista-modal-x"
+            onClick={onClose}
+            aria-label="Fechar"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              aria-hidden="true"
+            >
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="lista-modal-body">
+          <div className="lista-form">
+            <div className="lista-field lista-field-full">
+              <label htmlFor="convidado-name">nome do convidado</label>
+              <div style={{ position: "relative" }}>
+                <input
+                  id="convidado-name"
+                  placeholder="ex: ana clara"
+                  value={name}
+                  autoFocus
+                  onChange={(e) => setName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && submit()}
+                  style={{ paddingRight: 40 }}
+                />
+                <span
+                  aria-hidden="true"
+                  style={{
+                    position: "absolute",
+                    right: 12,
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    color: "var(--ink-mute)",
+                    display: "inline-flex",
+                    pointerEvents: "none",
+                  }}
+                >
+                  <svg
+                    width={18}
+                    height={18}
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={1.7}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                    <circle cx="12" cy="7" r="4" />
+                  </svg>
+                </span>
+              </div>
+            </div>
+            <div className="lista-field lista-field-full">
+              <label htmlFor="convidado-phone">telefone (com ddd)</label>
+              <input
+                id="convidado-phone"
+                inputMode="tel"
+                placeholder="(11) 99999-9999"
+                value={phone}
+                onChange={(e) => setPhone(formatBrPhone(e.target.value))}
+                onKeyDown={(e) => e.key === "Enter" && submit()}
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="lista-modal-foot">
+          <div className="lista-foot-actions" style={{ marginLeft: "auto" }}>
+            <button type="button" className="btn btn-ghost" onClick={onClose}>
+              Cancelar
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={!name.trim()}
+              onClick={submit}
+            >
+              <svg
+                width={14}
+                height={14}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                aria-hidden="true"
+                style={{ marginRight: 6 }}
+              >
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              Adicionar à lista
+            </button>
+          </div>
+        </div>
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6, flex: "1 1 160px" }}>
-        <label style={{ fontFamily: FONT_SANS, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--ink-soft)" }}>
-          telefone
-        </label>
-        <input
-          style={inputStyle}
-          placeholder="(11) 90000-0000"
-          value={phone}
-          onChange={(e) => setPhone(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && submit()}
-        />
-      </div>
-      <Button variant="primary" onClick={submit}>
-        <IconPlus size={14} /> adicionar
-      </Button>
-      <Button variant="ghost" onClick={onClose}>
-        cancelar
-      </Button>
     </div>
   );
 }
@@ -855,10 +962,14 @@ export function ConvidadosBody({ slug: _slug }: PainelSectionBodyProps) {
             {CONVIDADOS_EVENT.location}
           </p>
         </div>
-        <Button variant="primary" onClick={() => setShowAdd((v) => !v)}>
+        <Button variant="primary" onClick={() => setShowAdd(true)}>
           <IconPlus size={16} /> adicionar convidado
         </Button>
       </div>
+
+      {showAdd && (
+        <AddGuestModal onAdd={addGuest} onClose={() => setShowAdd(false)} />
+      )}
 
       {/* 3. mensagem padrão */}
       <div style={cardStyle}>
@@ -1093,10 +1204,6 @@ export function ConvidadosBody({ slug: _slug }: PainelSectionBodyProps) {
             </Button>
           </div>
         </div>
-
-        {showAdd && (
-          <AddGuestForm onAdd={addGuest} onClose={() => setShowAdd(false)} />
-        )}
 
         {/* filter chips */}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "16px 0" }}>
