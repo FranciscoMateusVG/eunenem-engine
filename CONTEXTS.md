@@ -1,18 +1,84 @@
 # Contextos da engine — documentação consolidada
 
-Este arquivo reúne a documentação dos **bounded contexts** já implementados na engine de intermediação financeira (skeleton Frame). A ordem segue o fluxo natural do negócio: arrecadação → taxas → pagamentos → financeiro, com **usuário** como contexto transversal de administração.
+Este arquivo reúne a documentação dos **bounded contexts** já implementados na engine de intermediação financeira (skeleton Frame). A **Plataforma** é o BC fundacional **multi-tenant**: todo Usuário, Campanha, Sessão e regra de Taxa pertence a exatamente uma plataforma (eunenem, eucasei, ...). A seguir vem o fluxo natural do negócio: arrecadação → taxas → pagamentos → financeiro, com **usuário** como contexto transversal de administração. Por fim, **Checkout** é um pseudo-BC de orquestração (apenas casos de uso + erros, sem domínio nem adaptadores próprios) que costura os BCs em sagas com compensação.
 
-**Persistência hoje:** **Arrecadação** tem adaptadores em memória e **Postgres** (Kysely); **Taxas**, **Pagamentos**, **Financeiro** e **Usuário** usam apenas adaptadores em memória nesta fase.
+**Persistência hoje:** **Arrecadação** tem adaptadores em memória e **Postgres** (Kysely); **Plataforma**, **Taxas**, **Pagamentos**, **Financeiro** e **Usuário** usam apenas adaptadores em memória nesta fase.
 
 ---
 
 ## Índice
 
-1. [BC Arrecadação](#bc-arrecadação--o-que-foi-implementado)
-2. [BC Taxas](#bc-taxas--o-que-foi-implementado)
-3. [BC Pagamentos](#bc-pagamentos--o-que-foi-implementado)
-4. [BC Financeiro](#bc-financeiro--o-que-foi-implementado)
-5. [BC Usuário](#bc-usuário--o-que-foi-implementado)
+1. [BC Plataforma](#bc-plataforma--o-que-foi-implementado)
+2. [BC Arrecadação](#bc-arrecadação--o-que-foi-implementado)
+3. [BC Taxas](#bc-taxas--o-que-foi-implementado)
+4. [BC Pagamentos](#bc-pagamentos--o-que-foi-implementado)
+5. [BC Financeiro](#bc-financeiro--o-que-foi-implementado)
+6. [BC Usuário](#bc-usuário--o-que-foi-implementado)
+7. [Orquestração — Checkout (pseudo-BC)](#orquestração--checkout-pseudo-bc)
+
+---
+
+# BC Plataforma — o que foi implementado
+
+Este documento descreve o **bounded context Plataforma** — a fronteira **multi-tenant** da engine. Cada plataforma (eunenem, eucasei, ...) é um produto white-label rodando sobre a mesma engine, com **sua própria base de usuários, suas próprias campanhas e sua própria política de taxas**. Os demais BCs trazem a referência por **mirror VO** (`IdPlataformaReferencia`); o domínio deles nunca importa de `src/domain/plataforma/`.
+
+## Resumo em linguagem simples
+
+1. Uma **Plataforma** representa um produto white-label (ex.: `eunenem`, `eucasei`). Tem `id` (UUID), `slug` (identificador legível, único), `nome` (exibição) e `criadaEm`.
+2. O ciclo de vida (criar, suspender, arquivar) é **deferido** — hoje as plataformas são **seedadas** em memória e o repositório expõe apenas leitura (`findById`, `findBySlug`, `listAtivas`).
+3. Duas plataformas seed estão disponíveis para desenvolvimento e testes: **EuNenem** (`ID_PLATAFORMA_EUNENEM`) e **EuCasei** (`ID_PLATAFORMA_EUCASEI`), com UUIDs determinísticos para reprodutibilidade entre runs.
+4. Outros BCs **não importam** `Plataforma` nem `IdPlataforma`. Eles trazem um **mirror VO** local — `IdPlataformaReferencia` — com o mesmo shape (UUID). A separação é enforçada pelo `dependency-cruiser`.
+5. O BC valida referências: quando Arrecadação cria uma campanha ou Usuário registra uma conta, o caso de uso consulta `plataformaRepository.findById` e falha com erro tipado se a plataforma não existir.
+
+---
+
+## Mapa conceito de negócio → código
+
+| Conceito | Onde está |
+|----------|-----------|
+| Plataforma (agregado raiz) | [`src/domain/plataforma/entities/plataforma.ts`](src/domain/plataforma/entities/plataforma.ts) — `Plataforma`, `criarPlataforma` |
+| Identificador da Plataforma (UUID) | [`src/domain/plataforma/value-objects/ids.ts`](src/domain/plataforma/value-objects/ids.ts) — `IdPlataforma`, `IdPlataformaSchema` |
+| Slug da Plataforma (legível, único) | [`src/domain/plataforma/value-objects/slug-plataforma.ts`](src/domain/plataforma/value-objects/slug-plataforma.ts) — `SlugPlataforma`, `SlugPlataformaSchema` |
+| Porta de persistência (read-only por enquanto) | [`src/adapters/plataforma/repository.ts`](src/adapters/plataforma/repository.ts) — `PlataformaRepository` |
+| Adaptador em memória + plataformas seed | [`src/adapters/plataforma/repository.memory.ts`](src/adapters/plataforma/repository.memory.ts) — `PlataformaRepositoryMemory`, `PLATAFORMAS_SEED`, `ID_PLATAFORMA_EUNENEM`, `ID_PLATAFORMA_EUCASEI` |
+| Erro tipado (plataforma não encontrada) | [`src/errors/plataforma/nao-encontrada.error.ts`](src/errors/plataforma/nao-encontrada.error.ts) — `PlataformaNaoEncontradaError` |
+| API pública do pacote | [`src/index.ts`](src/index.ts) — seção `// --- Domain: Plataforma ---` |
+
+---
+
+## DDD
+
+- **Bounded context:** o vocabulário `Plataforma`, `IdPlataforma`, `SlugPlataforma` vive aqui; não há campanhas, taxas, pagamentos ou usuários no domínio da Plataforma.
+
+- **Agregado:** `Plataforma` é uma raiz **sem entidades-filhas internas**. O ciclo de vida é minimalista (criar + ler) porque o BC funciona hoje como um catálogo seedado.
+
+- **Value Objects:** `IdPlataforma` (UUID) e `SlugPlataforma` (regex `[a-z][a-z0-9-]{2,29}`, único). O slug é o que aparece em URLs, config e conversas humanas; o id é a referência persistente.
+
+- **Repositório (porta + adaptador):** `PlataformaRepository` expõe apenas leitura — `findById`, `findBySlug`, `listAtivas`. `PlataformaRepositoryMemory` carrega `PLATAFORMAS_SEED` no construtor (sobrescritível em testes).
+
+- **Mirror VOs cross-BC:** Arrecadação, Taxas e Usuário definem cada um o seu `IdPlataformaReferencia` (mesmo shape UUID), garantindo que nenhum domínio importe do outro. A regra é enforçada pelo `.dependency-cruiser.cjs`.
+
+- **Integração:** casos de uso de outros BCs que dependem da existência de uma plataforma (ex.: `registrarContaUsuario`, `criarCampanha`) recebem `plataformaRepository` nas deps e consultam `findById` como gate de validação, lançando um erro tipado próprio se a plataforma não existir (`UsuarioPlataformaNaoEncontradaError`, `ArrecadacaoPlataformaNaoEncontradaError`).
+
+- **Invariantes (didático):** plataformas seedadas têm UUIDs determinísticos para evitar drift entre testes; o slug é único entre plataformas ativas.
+
+---
+
+## O que Plataforma não conhece
+
+Plataforma não conhece:
+
+- Usuário, conta, sessão, permissão
+- Campanha, contribuição, recebedor
+- Regra de taxa, composição de valores
+- Pagamento, intenção, provedor
+- Lançamento financeiro, repasse
+
+Ela conhece apenas o necessário para servir de **referência multi-tenant**:
+
+- `id`, `slug`, `nome`, `criadaEm`
+
+Tudo que diz respeito ao que cada plataforma **faz** (suas campanhas, seus usuários, sua taxa) vive nos BCs respectivos, ligado por `IdPlataformaReferencia`.
 
 ---
 
@@ -352,15 +418,17 @@ Ele conhece apenas o necessário para registrar efeitos financeiros:
 
 # BC Usuário — o que foi implementado
 
-Este documento descreve a primeira fatia do **bounded context Usuário** na engine didática: usuários que **administram campanhas**, com persistência **em memória**, **sem autenticação real** e **sem base de dados nova**. O **contribuinte** continua sem conta (isso pertence ao produto, não a este BC).
+Este documento descreve a primeira fatia do **bounded context Usuário** na engine didática: usuários que **administram campanhas**, com persistência **em memória**, **sem autenticação real** e **sem base de dados nova**. O **contribuinte** continua sem conta (isso pertence ao produto, não a este BC). O BC é **multi-tenant**: toda conta de administrador pertence a exatamente **uma Plataforma**, e o mesmo email pode coexistir em plataformas diferentes como contas distintas.
 
 ## Resumo em linguagem simples
 
-1. Um **administrador** se cadastra com email, nome de exibição e uma **senha simulada** (não é segurança real). O sistema cria um **usuário**, uma **conta** (1:1), uma **credencial** em texto para demo e atribui a permissão `campaign:admin`.
-2. O **`idConta`** (UUID) da conta é o mesmo tipo de identificador que o BC **Arrecadação** usa em `idsAdministradores` — a ligação é por **ID**, sem importar modelos entre contextos.
-3. É possível **atualizar o perfil** (nome de exibição).
-4. É possível abrir uma **sessão fake**: email + senha simulada devolvem um **token opaco** em memória com expiração.
-5. É possível **verificar uma permissão** com esse token; sessão inválida ou expirada não autoriza; falta de permissão devolve erro explícito.
+1. Um **administrador** se cadastra **dentro de uma plataforma** (ex.: eunenem) com email, nome de exibição e uma **senha simulada** (não é segurança real). O sistema cria um **usuário** (com `idPlataforma`), uma **conta** (1:1), uma **credencial** em texto para demo e atribui a permissão padrão.
+2. O cadastro **valida que a plataforma existe** consultando o `plataformaRepository.findById`. Se a plataforma não existir, o caso de uso falha com `UsuarioPlataformaNaoEncontradaError` antes de qualquer escrita.
+3. O **email é único por plataforma**, não globalmente — a uniqueness é composta `(idPlataforma, email)`. A mesma pessoa pode registrar-se em `eunenem` e `eucasei` como duas contas separadas; cada `Usuario` é um registro distinto.
+4. O **`idConta`** (UUID) da conta é o mesmo tipo de identificador que o BC **Arrecadação** usa em `idsAdministradores` — a ligação é por **ID**, sem importar modelos entre contextos.
+5. É possível **atualizar o perfil** (nome de exibição).
+6. É possível abrir uma **sessão fake**: email + senha simulada devolvem um **token opaco** em memória com expiração. A `Sessao` carrega `idPlataforma` diretamente (não derivado via Conta → Usuario) para que verificações de autorização downstream não precisem de múltiplos hops.
+7. É possível **verificar uma permissão** com esse token; sessão inválida ou expirada não autoriza; falta de permissão devolve erro explícito.
 
 ---
 
@@ -368,30 +436,85 @@ Este documento descreve a primeira fatia do **bounded context Usuário** na engi
 
 | Conceito | Onde está |
 |----------|-----------|
-| Usuário, conta, email, perfil (nome de exibição), sessão, permissão, credencial simulada | [`src/domain/usuario/usuario.ts`](src/domain/usuario/usuario.ts) |
-| Regras puras (sessão expirada?, tem permissão?) | [`src/domain/usuario/usuario.ts`](src/domain/usuario/usuario.ts) — `sessaoExpirada`, `contaTemPermissao` |
-| Porta de persistência de usuário/conta/credencial | [`src/adapters/usuario/repository.ts`](src/adapters/usuario/repository.ts) — `UsuarioRepository` |
+| Usuário (raiz do agregado, com `idPlataforma`) | [`src/domain/usuario/entities/usuario.ts`](src/domain/usuario/entities/usuario.ts) — `Usuario`, `Conta`, `CredencialSimulada`, `contaTemPermissao` |
+| Sessão (agregado separado, escopado por plataforma) | [`src/domain/usuario/entities/sessao.ts`](src/domain/usuario/entities/sessao.ts) — `Sessao`, `sessaoExpirada` |
+| Identificadores (`IdUsuario`, `IdContaUsuario`, mirror VO `IdPlataformaReferencia`) | [`src/domain/usuario/value-objects/ids.ts`](src/domain/usuario/value-objects/ids.ts) |
+| Demais value objects (email, nome de exibição, permissão, senha simulada, token de sessão) | [`src/domain/usuario/value-objects/`](src/domain/usuario/value-objects) |
+| Porta de persistência de usuário/conta/credencial (uniqueness composta) | [`src/adapters/usuario/repository.ts`](src/adapters/usuario/repository.ts) — `UsuarioRepository` (`findUsuarioByEmail(idPlataforma, email)`) |
 | Porta de sessões | [`src/adapters/usuario/sessao-repository.ts`](src/adapters/usuario/sessao-repository.ts) — `SessaoUsuarioRepository` |
 | Implementações em memória | [`src/adapters/usuario/repository.memory.ts`](src/adapters/usuario/repository.memory.ts), [`src/adapters/usuario/sessao-repository.memory.ts`](src/adapters/usuario/sessao-repository.memory.ts) |
-| Caso de uso: cadastro | [`src/use-cases/usuario/registrar-conta-usuario.ts`](src/use-cases/usuario/registrar-conta-usuario.ts) — `registrarContaUsuario` |
+| Caso de uso: cadastro (gate de plataforma) | [`src/use-cases/usuario/registrar-conta-usuario.ts`](src/use-cases/usuario/registrar-conta-usuario.ts) — `registrarContaUsuario` (deps incluem `plataformaRepository`) |
 | Caso de uso: atualizar perfil | [`src/use-cases/usuario/atualizar-perfil-usuario.ts`](src/use-cases/usuario/atualizar-perfil-usuario.ts) — `atualizarPerfilUsuario` |
 | Caso de uso: sessão fake | [`src/use-cases/usuario/criar-sessao-usuario.ts`](src/use-cases/usuario/criar-sessao-usuario.ts) — `criarSessaoUsuario` |
 | Caso de uso: autorizar permissão | [`src/use-cases/usuario/autorizar-permissao-usuario.ts`](src/use-cases/usuario/autorizar-permissao-usuario.ts) — `autorizarPermissaoUsuario` |
-| Erros | [`src/errors/usuario/`](src/errors/usuario) |
+| Erros (inclui `UsuarioPlataformaNaoEncontradaError`) | [`src/errors/usuario/`](src/errors/usuario) |
 | API pública do pacote | [`src/index.ts`](src/index.ts) |
-| Testes unitários | [`tests/unit/usuario/usuario.test.ts`](tests/unit/usuario/usuario.test.ts), [`tests/unit/usuario/repository.memory.test.ts`](tests/unit/usuario/repository.memory.test.ts), [`tests/unit/usuario/casos-de-uso.test.ts`](tests/unit/usuario/casos-de-uso.test.ts) |
+| Testes unitários | [`tests/unit/usuario/`](tests/unit/usuario) — predicados de domínio, contrato do repositório em memória, 4 casos de uso (incluindo modos de falha) |
 
 ---
 
 ## DDD
 
 - **Bounded context:** o vocabulário de usuário, conta, sessão e permissão vive aqui; **não** aparecem campanhas, contribuições, taxas ou pagamentos no domínio do Usuário.
-- **Linguagem ubíqua:** nomes em código (`Usuario`, `Conta`, `registrarContaUsuario`) alinham com o produto descrito em [`PROMTP-BASE.md`](PROMTP-BASE.md) e [`ENGINE-DDD.md`](ENGINE-DDD.md).
-- **Agregado / invariantes (didático):** nesta fatia, **uma conta pertence a um usuário** (relação 1:1); o email é **único**; sessão inválida ou expirada **não autoriza**.
-- **Value objects / validação na fronteira:** email normalizado, token de sessão com comprimento mínimo, permissões enumeradas — validados com Zod nos inputs dos casos de uso.
-- **Repositório (porta + adaptador):** interfaces em `adapters/` e `*.memory.ts` para testes e demos sem Postgres.
-- **Serviço de aplicação:** cada arquivo em `use-cases/` orquestra validação, leituras e persistência; a “autenticação” é **consciente de ser fake** (senha simulada, token opaco).
+- **Linguagem ubíqua:** nomes em código (`Usuario`, `Conta`, `registrarContaUsuario`) alinham com o produto descrito em [`ENGINE-DDD.md`](ENGINE-DDD.md).
+- **Multi-tenant por design:** todo `Usuario` carrega `idPlataforma`; toda `Sessao` carrega `idPlataforma`; a uniqueness de email é **composta** `(idPlataforma, email)`, não global. O `IdPlataformaReferencia` é um **mirror VO** local (mesmo shape UUID que `IdPlataforma`) — o domínio do Usuário **não importa** de `src/domain/plataforma/`. A regra é enforçada pelo `dependency-cruiser`.
+- **Agregados / invariantes (didático):** **uma conta pertence a um usuário** (1:1) e é persistida **atomicamente** com a credencial via `saveRegistro({usuario, conta, credencial})`; sessão inválida ou expirada **não autoriza**; sessão tem o **`idConta` como principal de autenticação** (não o `idUsuario`).
+- **Value objects / validação na fronteira:** email normalizado, token de sessão opaco (`base64url(32)`), permissões enumeradas — validados com Zod nos inputs dos casos de uso.
+- **Repositório (porta + adaptador):** interfaces em `adapters/` e `*.memory.ts` para testes e demos sem Postgres. `findUsuarioByEmail` recebe `(idPlataforma, email)` para refletir a uniqueness composta na assinatura.
+- **Serviço de aplicação:** cada arquivo em `use-cases/` orquestra validação, leituras e persistência; a “autenticação” é **consciente de ser fake** (senha simulada, token opaco). `registrarContaUsuario` consulta `plataformaRepository.findById` antes de qualquer escrita — gate cross-BC explícito.
+- **Integração com Plataforma:** dependência soft via `IdPlataformaReferencia` no domínio + gate explícito (`plataformaRepository.findById`) na aplicação. Cadastros com plataforma inexistente falham com `UsuarioPlataformaNaoEncontradaError`.
 - **Integração com Arrecadação:** o BC Arrecadação guarda uma lista de UUIDs (`idsAdministradores`). O significado “conta registrada no Usuário” é responsabilidade da **aplicação** (orquestração) ou de testes que chamam primeiro `registrarContaUsuario` e depois `criarCampanha` com o mesmo `idConta` na lista — **sem** acoplar o domínio de campanhas ao de usuários.
+
+---
+
+# Orquestração — Checkout (pseudo-BC)
+
+O **Checkout** é um **pseudo-bounded-context**: existe apenas como casos de uso em [`src/use-cases/checkout/`](src/use-cases/checkout) e erros tipados em [`src/errors/checkout/`](src/errors/checkout). **Não há `src/domain/checkout/` nem `src/adapters/checkout/`** — Checkout não tem entidades, value objects, agregados nem repositórios próprios. Sua única responsabilidade é **orquestrar BCs reais (Arrecadação, Taxas, Pagamentos, Financeiro)** em sagas multi-passo com **compensação explícita** quando algum passo falha.
+
+## Resumo em linguagem simples
+
+1. Quando o contribuinte clica “quero este item”, o sistema precisa: validar a plataforma da campanha, **reservar** a contribuição (Arrecadação), **calcular** a composição de valores (Taxas) e **criar** a intenção de pagamento (Pagamentos). Se qualquer passo a partir da reserva falhar, a contribuição precisa **voltar a `disponivel`**. Esse é o trabalho do Checkout.
+2. Os passos vivem em BCs separados. O Checkout **não** estende o domínio de nenhum deles — apenas chama os casos de uso já existentes na ordem certa e desfaz o que precisar via casos de uso de **compensação** (`desassociarContribuinteContribuicao`, etc.).
+3. Todas as sagas que cruzam plataformas (write-side e leituras pré-calculadas) **verificam coerência multi-tenant** comparando `input.idPlataforma` com `campanha.idPlataforma` e lançando `CheckoutPlataformaMismatchError` se houver mismatch. É o **guard cross-tenant** explícito no orquestrador.
+
+---
+
+## Casos de uso implementados
+
+| Caso de uso | Responsabilidade |
+|-------------|------------------|
+| [`iniciarPagamentoContribuicao`](src/use-cases/checkout/iniciar-pagamento-contribuicao.ts) | Saga write-side principal: gate de plataforma → `associarContribuinteContribuicao` (Arrecadação) → `calcularComposicaoValores` (Taxas, plataforma + tipo escopados) → `criarIntencaoPagamento` (Pagamentos). **Compensa** com `desassociarContribuinteContribuicao` se passo 3 ou 4 falhar. Compensação falhar é logado mas não substitui o erro original. |
+| [`finalizarPagamentoAprovado`](src/use-cases/checkout/finalizar-pagamento-aprovado.ts) | Saga de confirmação: `aprovarPagamento` (Pagamentos) → `registrarEfeitosFinanceirosPagamentoAprovado` (Financeiro). Devolve o pagamento atualizado + lançamentos criados. |
+| [`finalizarPagamentoRejeitado`](src/use-cases/checkout/finalizar-pagamento-rejeitado.ts) | Saga de rejeição: `rejeitarPagamento` (Pagamentos) → `desassociarContribuinteContribuicao` (Arrecadação). Libera a contribuição para reuso. |
+| [`iniciarRepasseRecebedor`](src/use-cases/checkout/iniciar-repasse-recebedor.ts) | Saga de repasse: gate de plataforma → resolve o recebedor ativo (Arrecadação) → `solicitarRepasseRecebedor` (Financeiro). |
+| [`obterContribuicoesPrecalculadasCampanha`](src/use-cases/checkout/obter-contribuicoes-precalculadas-campanha.ts) | Read-side: gate de plataforma → lista contribuições disponíveis + aplica `calcularComposicaoValores` em cada uma. Pré-monta o snapshot para a UI sem efeitos colaterais. |
+
+---
+
+## DDD
+
+- **Pseudo-BC, não BC real:** sem domínio próprio. Toda regra de negócio vive nos BCs orquestrados (Arrecadação, Taxas, Pagamentos, Financeiro). O Checkout adiciona **apenas** orquestração + um erro cross-tenant (`CheckoutPlataformaMismatchError`).
+
+- **Padrão saga com compensação:** o write-side principal (`iniciarPagamentoContribuicao`) ilustra a disciplina: o **primeiro passo com efeito colateral** (associar contribuição) tem uma **compensação registrada explicitamente** num `try/catch` que envolve os passos subsequentes. Se qualquer passo posterior falha, a compensação é chamada antes de o erro original ser re-lançado.
+
+- **Guard cross-tenant:** toda saga que recebe `idPlataforma` no input compara com o `campanha.idPlataforma` carregado do repositório e lança `CheckoutPlataformaMismatchError` se forem diferentes. Isso fecha a superfície de ataque “consigo um id de campanha de outra plataforma e tento pagá-la pela minha”. O erro tipado torna a intenção visível no call-site (vs. um 404 genérico) e o span registra o mismatch com atributos estruturados para auditoria.
+
+- **Sem novos modelos:** Checkout não cria entidades, agregados, value objects nem ports. Ele consome os modelos públicos dos BCs (`Campanha`, `Contribuicao`, `Pagamento`, `LancamentoFinanceiro`, etc.) e devolve composições deles ao chamador.
+
+- **Observabilidade:** cada saga abre um span próprio (`iniciarPagamentoContribuicao`, `finalizarPagamentoAprovado`, ...) com atributos `checkout.*` para correlacionar os passos. Eventos de compensação são logados em chave própria (`checkout.pagamento.compensado`, `checkout.pagamento.compensacao_falhou`).
+
+---
+
+## O que Checkout não conhece
+
+Checkout não conhece detalhes internos de nenhum BC. Em particular, ele não conhece:
+
+- A estrutura das opções de contribuição além de saber que existe um `tipo` que Taxas precisa para resolver a tarifa
+- A política de cálculo de taxa (delega 100% a Taxas)
+- O provedor de pagamento ou como aprovação acontece (chama os casos de uso de Pagamentos)
+- A representação interna de lançamentos financeiros (recebe o array que Financeiro devolve e repassa)
+
+Ele conhece apenas a **ordem dos passos**, as **deps necessárias para chamá-los**, e a **regra de compensação** quando um passo intermediário falha.
 
 ---
 
