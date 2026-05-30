@@ -3511,3 +3511,281 @@ html {
     min-height: 120px;
   }
 }
+
+/* =================================================================
+ * aperture-9qu7k — painel root layout (restructure per target #32)
+ *
+ * Three blocks stacked inside .painel-app:
+ *   .painel-top-strip   — countdown eyebrow (left) + share CTA (right)
+ *   .painel-title-row   — greeting + h1 + url chip line
+ *   .painel-recebido-card — amount + RESGATAR + 3-col stats
+ *
+ * All tokens used are verified against tailwind.css :root:
+ *   --paper, --cream, --line, --plum, --ink, --ink-soft, --ink-mute,
+ *   --lilac, --lilac-deep, --lilac-soft, --coral-pink, --pink-soft,
+ *   --green, --green-deep, --yellow.
+ *
+ * Older aperture-i01o selectors (.painel-header-card, .painel-hc-top,
+ * .painel-hc-stats, .painel-share-link*) are intentionally left in
+ * place — they are no longer referenced by the root page but other
+ * components may still touch them.
+ * ================================================================= */
+
+/* ----- 1. TOP STRIP — countdown + COMPARTILHE pill ----- */
+.painel-top-strip {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 14px;
+  padding: 18px 16px 6px;
+}
+.painel-top-strip-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.painel-top-strip-eyebrow {
+  font-family: var(--font-caveat), cursive;
+  color: var(--coral-pink);
+  font-size: 22px;
+  line-height: 1;
+  transform: rotate(-2deg);
+  display: inline-block;
+  align-self: flex-start;
+}
+.painel-top-strip-line {
+  color: var(--plum);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.painel-share-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--lilac);
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  padding: 12px 20px;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: 0 8px 22px rgba(167, 123, 190, 0.35);
+  transition: background 0.2s ease, transform 0.2s ease,
+    box-shadow 0.2s ease;
+  white-space: nowrap;
+}
+.painel-share-cta:hover {
+  background: var(--lilac-deep);
+  transform: translateY(-1px);
+  box-shadow: 0 12px 28px rgba(167, 123, 190, 0.45);
+}
+.painel-share-cta:active {
+  transform: translateY(0);
+}
+
+/* ----- 2. TITLE ROW — greeting + h1 + url chip ----- */
+.painel-title-row {
+  padding: 6px 16px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.painel-title-row .painel-hc-greeting {
+  font-family: var(--font-caveat), cursive;
+  color: var(--coral-pink);
+  font-size: 22px;
+  transform: rotate(-2deg);
+  align-self: flex-start;
+  line-height: 1;
+}
+.painel-title-row .painel-hc-title {
+  font-family: var(--font-patrick-hand), cursive;
+  color: var(--plum);
+  font-size: 38px;
+  line-height: 1.05;
+  margin: 0;
+}
+.painel-url-row {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+.painel-url-cal {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--lilac-deep);
+}
+.painel-url-date {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--lilac-soft);
+  color: var(--plum);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+.painel-url-dot {
+  color: var(--ink-mute);
+  font-weight: 700;
+}
+.painel-url-link {
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+.painel-url-slug {
+  color: var(--coral-pink);
+  font-weight: 700;
+  text-decoration: none;
+}
+.painel-url-slug:hover {
+  text-decoration: underline;
+}
+
+/* ----- 3. RECEBIDO CARD ----- */
+.painel-recebido-card {
+  margin: 10px 16px 6px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  padding: 18px 20px 6px;
+  box-shadow: 0 10px 28px rgba(107, 60, 94, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.painel-recebido-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--ink-mute);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+.painel-recebido-lbl {
+  flex: 0 1 auto;
+}
+.painel-recebido-amount {
+  font-family: var(--font-patrick-hand), cursive;
+  color: var(--plum);
+  font-size: 40px;
+  line-height: 1;
+  text-align: left;
+}
+.painel-recebido-amount small {
+  font-size: 18px;
+  color: var(--ink-soft);
+  font-weight: 500;
+  font-family: var(--font-dm-sans), sans-serif;
+  margin-right: 6px;
+  vertical-align: 4px;
+}
+.painel-recebido-cents {
+  font-size: 16px;
+  color: var(--ink-mute);
+  font-family: var(--font-dm-sans), sans-serif;
+  font-weight: 500;
+}
+.painel-recebido-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  background: var(--green);
+  color: #3b4d12;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 14px 22px;
+  border-radius: 999px;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(199, 220, 110, 0.45);
+  transition: transform 0.2s ease, box-shadow 0.2s ease,
+    background 0.2s ease;
+  font-family: inherit;
+  margin-top: 4px;
+}
+.painel-recebido-cta:hover {
+  background: #bdd361;
+  transform: translateY(-2px);
+  box-shadow: 0 10px 24px rgba(199, 220, 110, 0.55);
+}
+.painel-recebido-cta:active {
+  transform: translateY(0);
+}
+
+.painel-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  align-items: stretch;
+  margin-top: 12px;
+  padding: 12px 0 6px;
+  border-top: 1px solid var(--line);
+}
+.painel-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 4px 12px;
+}
+.painel-stat + .painel-stat {
+  border-left: 1px solid var(--line);
+}
+.painel-stat-num {
+  font-family: var(--font-patrick-hand), cursive;
+  color: var(--plum);
+  font-size: 26px;
+  line-height: 1;
+  font-weight: 700;
+}
+.painel-stat-lbl {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--ink-mute);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* ----- DESKTOP — top strip becomes a row ----- */
+@media (min-width: 720px) {
+  .painel-top-strip {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 20px 4px;
+  }
+  .painel-title-row {
+    padding: 8px 20px 10px;
+  }
+  .painel-title-row .painel-hc-title {
+    font-size: 44px;
+  }
+  .painel-recebido-card {
+    margin: 12px 20px 8px;
+    padding: 22px 24px 10px;
+  }
+  .painel-recebido-amount {
+    font-size: 48px;
+  }
+  .painel-stat-num {
+    font-size: 30px;
+  }
+}
