@@ -928,8 +928,9 @@ function StepContent({
   ownerBead: string;
   stepProps: StepViewProps;
 }) {
-  // aperture-sonyh — real step views for tipo/quem/quando/visual; fundo and
-  // pronto keep the placeholder until their sibling beads (hzcy5/iopmm) ship.
+  // aperture-sonyh + aperture-iopmm — real step views for
+  // tipo/quem/quando/visual/pronto; fundo keeps the placeholder until
+  // sibling bead hzcy5 ships.
   switch (stepId) {
     case "tipo":
       return <StepTipo {...stepProps} />;
@@ -939,6 +940,8 @@ function StepContent({
       return <StepQuando {...stepProps} />;
     case "visual":
       return <StepVisual {...stepProps} />;
+    case "pronto":
+      return <StepPronto {...stepProps} />;
     default:
       return <StepPlaceholder stepId={stepId} ownerBead={ownerBead} />;
   }
@@ -1250,6 +1253,115 @@ function StepVisual({ state, update, fidelity, setFidelity }: StepViewProps) {
           >
             {d === "media" ? "média" : d}
           </button>
+        ))}
+      </div>
+    </>
+  );
+}
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// StepPronto — aperture-iopmm — review & export (step 6/6).
+// Ports direction-b.jsx L643-677: a blurb + 3 vertical export-format cards
+// (story / square / link). Each card embeds a mini InvitePreview thumbnail
+// at scale 0.22, labels the format, and offers a stub "baixar" button that
+// toasts. Real PNG export / share-link generation is out of scope for this
+// bead — the buttons are mock; the footer's "enviar convite ♡" stays wired
+// by the shell.
+// ════════════════════════════════════════════════════════════════════════════
+
+const PRONTO_FORMATS: ReadonlyArray<{ f: PreviewFormat; label: string; sub: string }> = [
+  { f: "story", label: "story · 9:16", sub: "pro whatsapp e instagram stories" },
+  { f: "square", label: "quadrado · 1:1", sub: "pro feed e grupos" },
+  { f: "link", label: "link único", sub: "compartilhe um endereço bonitinho" },
+];
+
+function StepPronto({ state, fidelity }: StepViewProps) {
+  const onDownload = (label: string) => {
+    toast.success("seu convite foi gerado ♡", { description: label });
+  };
+
+  return (
+    <>
+      <p
+        style={{
+          color: "var(--ink-soft)",
+          fontSize: 14,
+          fontFamily: "var(--font-dm-sans), sans-serif",
+          lineHeight: 1.55,
+          marginTop: -12,
+          marginBottom: 22,
+        }}
+      >
+        seu convite vai chegar nos 3 formatos pra mandar onde quiser ♡
+      </p>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        {PRONTO_FORMATS.map(({ f, label, sub }) => (
+          <div
+            key={f}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 14,
+              background: "white",
+              border: "1px solid var(--line)",
+              borderRadius: 14,
+              padding: 12,
+              position: "relative",
+            }}
+          >
+            <InvitePreview state={state} format={f} fidelity={fidelity} scale={0.22} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div
+                style={{
+                  fontFamily: "var(--font-patrick-hand), cursive",
+                  fontSize: 19,
+                  color: "var(--plum)",
+                  lineHeight: 1.1,
+                }}
+              >
+                {label}
+              </div>
+              <div
+                style={{
+                  fontFamily: "var(--font-dm-sans), sans-serif",
+                  fontSize: 12,
+                  color: "var(--ink-soft)",
+                  marginTop: 2,
+                  lineHeight: 1.35,
+                }}
+              >
+                {sub}
+              </div>
+              <div style={{ marginTop: 8 }}>
+                <span
+                  style={{
+                    display: "inline-block",
+                    background: "var(--green)",
+                    color: "var(--plum)",
+                    borderRadius: 999,
+                    padding: "2px 10px 3px",
+                    fontFamily: "var(--font-caveat), cursive",
+                    fontSize: 14,
+                    lineHeight: 1.1,
+                    transform: "rotate(-2deg)",
+                    transformOrigin: "left center",
+                  }}
+                >
+                  pronto ♡
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="cv-btn ghost sm"
+              onClick={() => onDownload(label)}
+              aria-label={`baixar formato ${label}`}
+            >
+              baixar
+            </button>
+          </div>
         ))}
       </div>
     </>
