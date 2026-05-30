@@ -4,6 +4,7 @@ import type { PlataformaRepository } from '../../adapters/plataforma/repository.
 import type { AuthService } from '../../adapters/usuario/auth-service.js';
 import type { UsuarioRepository } from '../../adapters/usuario/repository.js';
 import type { Conta, Usuario } from '../../domain/usuario/entities/usuario.js';
+import { deriveSlugBase, slugWithSuffix } from '../../domain/usuario/slug-derivation.js';
 import { EmailUsuarioSchema } from '../../domain/usuario/value-objects/email-usuario.js';
 import {
   IdContaUsuarioSchema,
@@ -12,10 +13,19 @@ import {
 } from '../../domain/usuario/value-objects/ids.js';
 import { NomeExibicaoUsuarioSchema } from '../../domain/usuario/value-objects/nome-exibicao-usuario.js';
 import { PERMISSOES_PADRAO } from '../../domain/usuario/value-objects/permissao.js';
+import type { SlugUsuario } from '../../domain/usuario/value-objects/slug-usuario.js';
 import { UsuarioEmailJaExisteError } from '../../errors/usuario/email-ja-existe.error.js';
 import { UsuarioInputInvalidoError } from '../../errors/usuario/input-invalido.error.js';
 import { UsuarioPlataformaNaoEncontradaError } from '../../errors/usuario/plataforma-nao-encontrada.error.js';
 import type { Observability } from '../../observability/observability.js';
+
+/**
+ * Defensive cap on slug-collision retries (aperture-khbow). 50 is well past
+ * any realistic congestion ("francisco", "francisco-2", … "francisco-50")
+ * but bounded so a pathological loop can't run forever. If we ever hit it,
+ * something is wrong with the derivation or the repo lookup.
+ */
+const MAX_SLUG_COLLISION_ATTEMPTS = 50;
 
 export const RegistrarContaUsuarioInputSchema = z.object({
   idUsuario: IdUsuarioSchema,
@@ -109,6 +119,14 @@ export async function registrarContaUsuario(
         throw new UsuarioEmailJaExisteError(data.email);
       }
 
+      // step 2b: derive slug + walk suffix collisions within the plataforma
+      // (aperture-khbow). Pre-check is best-effort — a concurrent race could
+      // still slip through, in which case the Postgres unique constraint
+      // raises UsuarioSlugJaExisteError and the caller can retry.
+      const base = deriveSlugBase(data.nomeExibicao);
+      const slug = await resolveSlugInPlataforma(usuarioRepository, data.idPlataforma, base);
+      span.setAttribute('usuario.slug', slug);
+
       // step 3: auth principal (BetterAuth-side, can NOT be rolled back via tx)
       await authService.criarConta({
         idUsuario: data.idUsuario,
@@ -125,6 +143,7 @@ export async function registrarContaUsuario(
         idConta: data.idConta,
         email: data.email,
         nomeExibicao: data.nomeExibicao,
+        slug,
         criadoEm,
       };
 
@@ -163,6 +182,7 @@ export async function registrarContaUsuario(
         idUsuario: usuario.id,
         idPlataforma: usuario.idPlataforma,
         idConta: conta.id,
+        slug: usuario.slug,
       });
 
       span.setStatus({ code: SpanStatusCode.OK });
@@ -175,4 +195,25 @@ export async function registrarContaUsuario(
       span.end();
     }
   });
+}
+
+/**
+ * Walk `base`, `base-2`, `base-3`… within `idPlataforma` until
+ * `findUsuarioBySlug` returns undefined. Pre-check only — the eventual
+ * `saveRegistroDomain` still relies on the Postgres unique constraint as
+ * the source of truth in case a concurrent register raced us.
+ */
+async function resolveSlugInPlataforma(
+  repo: UsuarioRepository,
+  idPlataforma: string,
+  base: SlugUsuario,
+): Promise<SlugUsuario> {
+  for (let attempt = 1; attempt <= MAX_SLUG_COLLISION_ATTEMPTS; attempt++) {
+    const candidate = slugWithSuffix(base, attempt);
+    const taken = await repo.findUsuarioBySlug(idPlataforma, candidate);
+    if (!taken) return candidate;
+  }
+  throw new UsuarioInputInvalidoError(
+    `Não foi possível gerar um slug único para "${base}" em ${MAX_SLUG_COLLISION_ATTEMPTS} tentativas`,
+  );
 }

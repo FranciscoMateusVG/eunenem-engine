@@ -8,7 +8,9 @@ import type {
 } from '../../domain/usuario/value-objects/ids.js';
 import type { NomeExibicaoUsuario } from '../../domain/usuario/value-objects/nome-exibicao-usuario.js';
 import type { Permissao } from '../../domain/usuario/value-objects/permissao.js';
+import type { SlugUsuario } from '../../domain/usuario/value-objects/slug-usuario.js';
 import { UsuarioEmailJaExisteError } from '../../errors/usuario/email-ja-existe.error.js';
+import { UsuarioSlugJaExisteError } from '../../errors/usuario/slug-ja-existe.error.js';
 import type { Database } from '../database.js';
 import type { UsuarioRepository } from './repository.js';
 
@@ -31,12 +33,21 @@ const DB_CONTAS_ATTRS = {
  */
 const UNIQUE_PLATAFORMA_EMAIL = 'usuarios_plataforma_email_uniq';
 
+/**
+ * Constraint name from migration 20260530_010_add_slug_to_usuarios — matched
+ * verbatim to surface `UsuarioSlugJaExisteError` (aperture-khbow). The
+ * use-case `registrarContaUsuario` already walks suffixes pre-write so this
+ * should only fire on a concurrent-registration race.
+ */
+const UNIQUE_PLATAFORMA_SLUG = 'usuarios_plataforma_slug_uniq';
+
 type UsuarioRow = {
   id: string;
   id_plataforma: string;
   id_conta: string;
   email: string;
   nome_exibicao: string;
+  slug: string;
   criado_em: Date;
 };
 
@@ -105,6 +116,7 @@ export class UsuarioRepositoryPostgres implements UsuarioRepository {
               id_conta: usuario.idConta,
               email: usuario.email,
               nome_exibicao: usuario.nomeExibicao,
+              slug: usuario.slug,
               criado_em: usuario.criadoEm,
             })
             .execute();
@@ -124,6 +136,12 @@ export class UsuarioRepositoryPostgres implements UsuarioRepository {
       } catch (error: unknown) {
         if (isUniqueViolation(error, UNIQUE_PLATAFORMA_EMAIL)) {
           const typed = new UsuarioEmailJaExisteError(bundle.usuario.email);
+          span.recordException(typed);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw typed;
+        }
+        if (isUniqueViolation(error, UNIQUE_PLATAFORMA_SLUG)) {
+          const typed = new UsuarioSlugJaExisteError(bundle.usuario.slug);
           span.recordException(typed);
           span.setStatus({ code: SpanStatusCode.ERROR });
           throw typed;
@@ -170,6 +188,31 @@ export class UsuarioRepositoryPostgres implements UsuarioRepository {
           .selectAll()
           .where('id_plataforma', '=', idPlataforma)
           .where('email', '=', email)
+          .executeTakeFirst();
+        span.setStatus({ code: SpanStatusCode.OK });
+        return row ? toUsuario(row) : undefined;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  async findUsuarioBySlug(
+    idPlataforma: IdPlataformaReferencia,
+    slug: SlugUsuario,
+  ): Promise<Usuario | undefined> {
+    return tracer.startActiveSpan('db.usuarios.findUsuarioBySlug', async (span) => {
+      span.setAttributes({ ...DB_USUARIOS_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        const row = await this.db
+          .selectFrom('usuarios')
+          .selectAll()
+          .where('id_plataforma', '=', idPlataforma)
+          .where('slug', '=', slug)
           .executeTakeFirst();
         span.setStatus({ code: SpanStatusCode.OK });
         return row ? toUsuario(row) : undefined;
@@ -238,6 +281,7 @@ function toUsuario(row: UsuarioRow): Usuario {
     idConta: row.id_conta,
     email: row.email,
     nomeExibicao: row.nome_exibicao,
+    slug: row.slug,
     criadoEm: row.criado_em,
   };
 }

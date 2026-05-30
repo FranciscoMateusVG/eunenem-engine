@@ -11,7 +11,8 @@
 //   auth.signIn({ email, senha, idPlataforma }) ->
 //     { idUsuario, idConta, expiraEm } + Set-Cookie
 //   auth.signOut() -> { ok: true } + Set-Cookie (cleared)
-//   auth.me() -> { idUsuario, idConta, idPlataforma, email, nomeExibicao, expiraEm } | null
+//   auth.me() -> { idUsuario, idConta, idPlataforma, email, nomeExibicao, slug, expiraEm } | null
+//                                                                          ^^^^ aperture-khbow
 //
 // Errors are mapped server-side to tRPC codes; the mapping is
 // OPERATION-AWARE because BAD_REQUEST is overloaded:
@@ -52,6 +53,11 @@ export interface AuthUser {
   idPlataforma: string;
   email: string;
   nomeExibicao: string;
+  /**
+   * Public URL slug (aperture-khbow). Use to redirect post-auth to
+   * `/painel/<slug>` without a follow-up request.
+   */
+  slug: string;
 }
 
 /** Result of a successful signUp / signIn. */

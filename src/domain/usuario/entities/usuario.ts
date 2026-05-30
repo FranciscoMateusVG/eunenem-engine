@@ -2,6 +2,7 @@ import type { EmailUsuario } from '../value-objects/email-usuario.js';
 import type { IdContaUsuario, IdPlataformaReferencia, IdUsuario } from '../value-objects/ids.js';
 import type { NomeExibicaoUsuario } from '../value-objects/nome-exibicao-usuario.js';
 import type { Permissao } from '../value-objects/permissao.js';
+import type { SlugUsuario } from '../value-objects/slug-usuario.js';
 
 /**
  * @aggregateRoot Usuario (BC Usuário)
@@ -31,6 +32,14 @@ export interface Usuario {
   readonly idConta: IdContaUsuario;
   readonly email: EmailUsuario;
   readonly nomeExibicao: NomeExibicaoUsuario;
+  /**
+   * Public URL-segment slug (aperture-khbow). Unique composite with
+   * `idPlataforma` — `(idPlataforma, slug)` is the natural-key lookup for
+   * `/painel/[slug]`. Derived from `nomeExibicao` at registration time
+   * and never edited automatically afterwards (a future bead may add a
+   * slug-edit use case).
+   */
+  readonly slug: SlugUsuario;
   readonly criadoEm: Date;
 }
 

@@ -6,7 +6,7 @@ import { cors } from 'hono/cors';
 import { StrictMode } from 'react';
 import { renderToString } from 'react-dom/server';
 import { App, resolveRoute } from './pages/App.js';
-import { buildServerDeps, loadEnv } from './server/auth/setup.js';
+import { buildServerDeps, ID_PLATAFORMA_EUNENEM, loadEnv } from './server/auth/setup.js';
 import { appRouter } from './server/trpc/router.js';
 
 const PORT = Number(process.env.PORT ?? 3001);
@@ -83,16 +83,38 @@ app.all('/api/trpc/*', (c) =>
 // SSR catch-all: every other route renders the React app. Status is
 // decided from the resolved route (200 for known pages, 404 for
 // anything else) BEFORE renderToString so the response code is honest.
-app.get('*', (c) => {
+//
+// aperture-khbow: /painel/[slug] is now syntactically permissive — any
+// well-shaped slug parses to { kind: 'painel', slug }. Existence is
+// resolved at SSR time via `findUsuarioBySlug(idPlataforma, slug)`.
+// Unknown slug → flip status to 404 BEFORE renderToString so the response
+// is honest (matches the rest of the catch-all's discipline).
+app.get('*', async (c) => {
   const url = new URL(c.req.url);
   const route = resolveRoute(url.pathname);
-  const status = route.kind === 'not-found' ? 404 : 200;
+
+  let status = route.kind === 'not-found' ? 404 : 200;
+
+  // Painel routes: confirm the slug's owner exists in the eunenem plataforma.
+  // If not, the URL is structurally valid but unowned → 404. The React tree
+  // still renders the painel chrome (helps debugging in dev — see the slug
+  // we tried), but the HTTP status is honest.
+  if (route.kind === 'painel' || route.kind === 'painel-section') {
+    const owner = await deps.usuarioRepository.findUsuarioBySlug(
+      ID_PLATAFORMA_EUNENEM,
+      route.slug,
+    );
+    if (!owner) {
+      status = 404;
+    }
+  }
+
   const ssrHtml = renderToString(
     <StrictMode>
       <App pathname={url.pathname} />
     </StrictMode>,
   );
-  c.status(status);
+  c.status(status as 200 | 404);
   return c.html(envelope(ssrHtml, url.pathname));
 });
 
@@ -144,7 +166,7 @@ serve({ fetch: app.fetch, port: PORT }, (info) => {
   console.log('Routes:');
   console.log('  /                  → marketing landing page (SSR + hydration)');
   console.log('  /pagina/francisco  → contributor event page (SSR + hydration)');
-  console.log('  /painel/helena     → creator dashboard (SSR + hydration)');
+  console.log('  /painel/<slug>     → creator dashboard (SSR + hydration; aperture-khbow)');
   console.log('  /trpc-smoke        → tRPC smoke test (aperture-kungg)');
   console.log('  /api/trpc/*        → tRPC procedures (listFruits, auth.*)');
   console.log('  /api/auth/*        → BetterAuth handler (sign-in/sign-up/sign-out/...)');

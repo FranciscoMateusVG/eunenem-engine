@@ -295,6 +295,7 @@ export type {
   Usuario,
 } from './domain/usuario/entities/usuario.js';
 export { contaTemPermissao } from './domain/usuario/entities/usuario.js';
+export { deriveSlugBase, slugWithSuffix } from './domain/usuario/slug-derivation.js';
 export type { EmailUsuario } from './domain/usuario/value-objects/email-usuario.js';
 export { EmailUsuarioSchema } from './domain/usuario/value-objects/email-usuario.js';
 export type {
@@ -311,6 +312,11 @@ export type { NomeExibicaoUsuario } from './domain/usuario/value-objects/nome-ex
 export { NomeExibicaoUsuarioSchema } from './domain/usuario/value-objects/nome-exibicao-usuario.js';
 export type { Permissao } from './domain/usuario/value-objects/permissao.js';
 export { PERMISSOES_PADRAO, PermissaoSchema } from './domain/usuario/value-objects/permissao.js';
+export type { SlugUsuario } from './domain/usuario/value-objects/slug-usuario.js';
+export {
+  SLUG_USUARIO_REGEX,
+  SlugUsuarioSchema,
+} from './domain/usuario/value-objects/slug-usuario.js';
 export type { TokenSessao } from './domain/usuario/value-objects/token-sessao.js';
 export { TokenSessaoSchema } from './domain/usuario/value-objects/token-sessao.js';
 
@@ -349,6 +355,7 @@ export { UsuarioInputInvalidoError } from './errors/usuario/input-invalido.error
 export { UsuarioNaoAutorizadoError } from './errors/usuario/nao-autorizado.error.js';
 export { UsuarioPlataformaNaoEncontradaError } from './errors/usuario/plataforma-nao-encontrada.error.js';
 export { UsuarioSessaoInvalidaError } from './errors/usuario/sessao-invalida.error.js';
+export { UsuarioSlugJaExisteError } from './errors/usuario/slug-ja-existe.error.js';
 
 // --- Observability ---
 

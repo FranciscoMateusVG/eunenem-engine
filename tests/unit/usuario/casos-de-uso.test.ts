@@ -205,6 +205,183 @@ describe('registrarContaUsuario', () => {
     expect(eucasei.usuario.idPlataforma).toBe(ID_PLATAFORMA_EUCASEI);
   });
 
+  // --- slug derivation + collision (aperture-khbow) ---
+
+  it('derives slug from first word of nomeExibicao (stripping diacritics)', async () => {
+    const { usuarioRepository, plataformaRepository, authService } = makeUsuarioRepos();
+
+    const result = await registrarContaUsuario(
+      {
+        usuarioRepository,
+        plataformaRepository,
+        authService,
+        clock,
+        observability: silentObservability,
+      },
+      {
+        idUsuario: randomUUID(),
+        idPlataforma: ID_PLATAFORMA_EUNENEM,
+        idConta: randomUUID(),
+        email: 'andre@example.com',
+        nomeExibicao: 'André Souza',
+        senhaSimulada: 'p',
+      },
+    );
+
+    expect(result.usuario.slug).toBe('andre');
+    expect((await usuarioRepository.findUsuarioBySlug(ID_PLATAFORMA_EUNENEM, 'andre'))?.id).toBe(
+      result.usuario.id,
+    );
+  });
+
+  it('suffixes the slug with -N on intra-plataforma collisions', async () => {
+    const { usuarioRepository, plataformaRepository, authService } = makeUsuarioRepos();
+
+    const helena1 = await registrarContaUsuario(
+      {
+        usuarioRepository,
+        plataformaRepository,
+        authService,
+        clock,
+        observability: silentObservability,
+      },
+      {
+        idUsuario: randomUUID(),
+        idPlataforma: ID_PLATAFORMA_EUNENEM,
+        idConta: randomUUID(),
+        email: 'helena1@example.com',
+        nomeExibicao: 'Helena Silva',
+        senhaSimulada: 'p',
+      },
+    );
+
+    const helena2 = await registrarContaUsuario(
+      {
+        usuarioRepository,
+        plataformaRepository,
+        authService,
+        clock,
+        observability: silentObservability,
+      },
+      {
+        idUsuario: randomUUID(),
+        idPlataforma: ID_PLATAFORMA_EUNENEM,
+        idConta: randomUUID(),
+        email: 'helena2@example.com',
+        nomeExibicao: 'Helena Costa',
+        senhaSimulada: 'p',
+      },
+    );
+
+    const helena3 = await registrarContaUsuario(
+      {
+        usuarioRepository,
+        plataformaRepository,
+        authService,
+        clock,
+        observability: silentObservability,
+      },
+      {
+        idUsuario: randomUUID(),
+        idPlataforma: ID_PLATAFORMA_EUNENEM,
+        idConta: randomUUID(),
+        email: 'helena3@example.com',
+        nomeExibicao: 'Helena Lima',
+        senhaSimulada: 'p',
+      },
+    );
+
+    expect(helena1.usuario.slug).toBe('helena');
+    expect(helena2.usuario.slug).toBe('helena-2');
+    expect(helena3.usuario.slug).toBe('helena-3');
+  });
+
+  it('allows the same slug across different plataformas (multi-tenant)', async () => {
+    const { usuarioRepository, plataformaRepository, authService } = makeUsuarioRepos();
+
+    const onEunenem = await registrarContaUsuario(
+      {
+        usuarioRepository,
+        plataformaRepository,
+        authService,
+        clock,
+        observability: silentObservability,
+      },
+      {
+        idUsuario: randomUUID(),
+        idPlataforma: ID_PLATAFORMA_EUNENEM,
+        idConta: randomUUID(),
+        email: 'helena@eunenem.example',
+        nomeExibicao: 'Helena',
+        senhaSimulada: 'p',
+      },
+    );
+
+    const onEucasei = await registrarContaUsuario(
+      {
+        usuarioRepository,
+        plataformaRepository,
+        authService,
+        clock,
+        observability: silentObservability,
+      },
+      {
+        idUsuario: randomUUID(),
+        idPlataforma: ID_PLATAFORMA_EUCASEI,
+        idConta: randomUUID(),
+        email: 'helena@eucasei.example',
+        nomeExibicao: 'Helena',
+        senhaSimulada: 'p',
+      },
+    );
+
+    expect(onEunenem.usuario.slug).toBe('helena');
+    expect(onEucasei.usuario.slug).toBe('helena'); // same slug, different plataforma → fine
+  });
+
+  it('falls back to "usuario" / "usuario-2" when name yields no valid base', async () => {
+    const { usuarioRepository, plataformaRepository, authService } = makeUsuarioRepos();
+
+    const a = await registrarContaUsuario(
+      {
+        usuarioRepository,
+        plataformaRepository,
+        authService,
+        clock,
+        observability: silentObservability,
+      },
+      {
+        idUsuario: randomUUID(),
+        idPlataforma: ID_PLATAFORMA_EUNENEM,
+        idConta: randomUUID(),
+        email: 'a@example.com',
+        nomeExibicao: 'X', // single char → fallback "usuario"
+        senhaSimulada: 'p',
+      },
+    );
+
+    const b = await registrarContaUsuario(
+      {
+        usuarioRepository,
+        plataformaRepository,
+        authService,
+        clock,
+        observability: silentObservability,
+      },
+      {
+        idUsuario: randomUUID(),
+        idPlataforma: ID_PLATAFORMA_EUNENEM,
+        idConta: randomUUID(),
+        email: 'b@example.com',
+        nomeExibicao: '123', // digits-only → fallback "usuario", collides with a
+        senhaSimulada: 'p',
+      },
+    );
+
+    expect(a.usuario.slug).toBe('usuario');
+    expect(b.usuario.slug).toBe('usuario-2');
+  });
+
   it('compensates the AuthService write when saveRegistroDomain throws (T3 saga)', async () => {
     // Stage: a user already exists in the domain repo for (plataforma, email)
     // but NOT in the AuthService. Then attempt a second registration that
@@ -221,6 +398,7 @@ describe('registrarContaUsuario', () => {
       saveRegistroDomain: () => Promise.reject(new Error('domain write blew up')),
       findUsuarioById: baseRepo.findUsuarioById.bind(baseRepo),
       findUsuarioByEmail: baseRepo.findUsuarioByEmail.bind(baseRepo),
+      findUsuarioBySlug: baseRepo.findUsuarioBySlug.bind(baseRepo),
       findContaById: baseRepo.findContaById.bind(baseRepo),
       atualizarNomeExibicaoUsuario: baseRepo.atualizarNomeExibicaoUsuario.bind(baseRepo),
     };

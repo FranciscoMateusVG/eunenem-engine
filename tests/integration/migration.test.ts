@@ -57,9 +57,11 @@ describe('Migration round-trip', () => {
     expect(tableNames).toContain('verifications');
     expect(tableNames).toContain('rate_limit');
 
-    // Migrate down (latest migration first; one step for better-auth, one
-    // step for usuario, then seven steps for arrecadacao). aperture-g7f68
-    // added the BetterAuth migration on top of the usuario stack.
+    // Migrate down (latest migration first). aperture-khbow added the
+    // slug migration (010) on top of usuario (008) + better-auth (009).
+    const downSlug = await migrator.migrateDown();
+    expect(downSlug.error).toBeUndefined();
+
     const downBetterAuth = await migrator.migrateDown();
     expect(downBetterAuth.error).toBeUndefined();
 
