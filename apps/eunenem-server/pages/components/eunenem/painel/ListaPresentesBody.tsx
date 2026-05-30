@@ -110,6 +110,57 @@ const icon = {
   ),
 };
 
+// aperture-g70uv — hardcoded curated presets surfaced by the
+// "Usar lista pronta" expand/collapse panel. Operator will refine
+// the copy + item counts later; the icon-tile background tokens
+// match the soft-surface palette already used elsewhere on /painel.
+// NOTE: the brief listed --peach-soft / --mint-soft as available
+// tokens, but the design system only ships --pink-soft + --green
+// (no -soft variant) — so we map peach→pink-soft and mint to a
+// softened green via color-mix to land in the same pastel range.
+interface ListaProntaPreset {
+  id: string;
+  title: string;
+  emoji: string;
+  tileVar: string; // CSS custom-property name for icon-tile background
+  desc: string;
+  count: number;
+}
+const LISTA_PRONTAS: ListaProntaPreset[] = [
+  {
+    id: "essenciais",
+    title: "Essenciais do Dia",
+    emoji: "☀️",
+    tileVar: "var(--lilac-soft)",
+    desc: "Tudo que você mais vai precisar no primeiro mês — fraldas, lencinhos e pomada na medida certa.",
+    count: 6,
+  },
+  {
+    id: "banho",
+    title: "Hora do Banho",
+    emoji: "🛁",
+    tileVar: "var(--pink-soft)",
+    desc: "Banheira, toalha felpuda e cosméticos suaves para esses primeiros mergulhos.",
+    count: 4,
+  },
+  {
+    id: "soninho",
+    title: "Hora do Soninho",
+    emoji: "🌙",
+    tileVar: "color-mix(in srgb, var(--green) 40%, var(--paper))",
+    desc: "Mantinhas macias, chupetas e tudo pra noite render mais (pra você também).",
+    count: 4,
+  },
+  {
+    id: "papinha",
+    title: "Hora da Papinha",
+    emoji: "🍼",
+    tileVar: "var(--cream-2)",
+    desc: "Mamadeira, babadores e itens para as primeiras refeições com calma.",
+    count: 3,
+  },
+];
+
 type CatFilter = "all" | ListaCategory;
 type AddTab = "catalogo" | "personalizado";
 
@@ -720,6 +771,10 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
   const [addModalTab, setAddModalTab] = useState<AddTab | null>(null);
   const [editItem, setEditItem] = useState<ListaGift | null>(null);
   const [removeItem, setRemoveItem] = useState<ListaGift | null>(null);
+  // aperture-g70uv — controls the curated preset panel that expands
+  // beneath the .lista-header-actions strip when the operator taps
+  // "Usar lista pronta". Replaces the previous toast placeholder.
+  const [presetsOpen, setPresetsOpen] = useState(false);
   const idRef = useRef(0);
 
   const counts = useMemo(() => {
@@ -861,15 +916,75 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
             <button
               type="button"
               className="btn btn-ghost"
-              onClick={() => toast("Em breve — listas prontas curadas ♡")}
+              onClick={() => setPresetsOpen((v) => !v)}
               aria-label="Usar lista pronta"
-              aria-expanded={false}
+              aria-expanded={presetsOpen}
+              aria-controls="lista-prontas-panel"
             >
               <span className="lista-btn-ic">{icon.listLines}</span>
               Usar lista pronta
-              <span className="lista-btn-ic">{icon.caretDown}</span>
+              <span
+                className="lista-btn-ic"
+                style={{
+                  transform: presetsOpen ? "rotate(180deg)" : "none",
+                  transition: "transform 0.2s ease",
+                }}
+              >
+                {icon.caretDown}
+              </span>
             </button>
           </div>
+          {/* aperture-g70uv — curated preset panel revealed by the
+              "Usar lista pronta" toggle above. Sits inside
+              .lista-header-card so the panel inherits the card's soft
+              lilac chrome but reads as its own surface. */}
+          {presetsOpen && (
+            <div
+              id="lista-prontas-panel"
+              className="lista-prontas-panel"
+              role="region"
+              aria-label="Listas prontas curadas"
+            >
+              <span className="eyebrow">listas prontas pra começar</span>
+              <h2 className="lista-prontas-title">
+                Curadoria com o <span className="hl">essencial para cada fase</span>
+              </h2>
+              <p className="lista-prontas-sub">Toque pra ver os mimos antes de adicionar.</p>
+              <div className="lista-prontas-grid">
+                {LISTA_PRONTAS.map((preset) => (
+                  <article key={preset.id} className="lista-pronta-card">
+                    <div
+                      className="lista-pronta-icon"
+                      style={{ background: preset.tileVar }}
+                      aria-hidden="true"
+                    >
+                      <span>{preset.emoji}</span>
+                    </div>
+                    <h3 className="lista-pronta-title">{preset.title}</h3>
+                    <p className="lista-pronta-desc">{preset.desc}</p>
+                    <div className="lista-pronta-foot">
+                      <span className="lista-pronta-count">
+                        {preset.count} {preset.count === 1 ? "item" : "itens"}
+                      </span>
+                      {/* aperture-g70uv — placeholder wiring. aperture-wo5ql
+                          will replace this toast with the real preset-detail
+                          modal (a dedicated surface, NOT the aperture-17cls
+                          tabbed AddGiftModal). Until that lands, keep the
+                          affordance live so the panel feels real. */}
+                      <button
+                        type="button"
+                        className="lista-pronta-cta"
+                        onClick={() => toast("Em breve — preview da lista pronta ♡")}
+                        aria-label={`Ver lista pronta: ${preset.title}`}
+                      >
+                        VER LISTA →
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </section>
 

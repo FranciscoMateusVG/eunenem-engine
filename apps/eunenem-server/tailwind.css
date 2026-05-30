@@ -2967,3 +2967,140 @@ html {
     gap: 8px;
   }
 }
+
+/* =================================================================
+ * aperture-g70uv — lista pronta curation panel
+ * Expand/collapse panel that lives inside .lista-header-card and
+ * surfaces 4 curated preset cards under the action strip. Selectors
+ * are namespaced under .lista-prontas-* / .lista-pronta-* so they
+ * don't collide with any pre-existing .lista-* chrome (header, visor,
+ * group-title, frame, toolbar, chips, card, etc.).
+ * ================================================================= */
+.lista-prontas-panel {
+  position: relative;
+  z-index: 1;
+  margin-top: 16px;
+  padding: 18px 18px 16px;
+  background: color-mix(in srgb, var(--lilac-soft) 22%, var(--paper));
+  border: 1px solid color-mix(in srgb, var(--lilac-soft) 70%, var(--line));
+  border-radius: 20px;
+  box-shadow: var(--shadow-sm);
+  animation: lista-prontas-in 0.22s ease both;
+}
+@keyframes lista-prontas-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.lista-prontas-title {
+  font-family: var(--font-patrick-hand), cursive;
+  color: var(--plum);
+  font-size: 22px;
+  line-height: 1.1;
+  margin: 6px 0 6px;
+  text-wrap: balance;
+}
+.lista-prontas-sub {
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 13.5px;
+  color: var(--ink-soft);
+  margin: 0 0 14px;
+}
+.lista-prontas-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+.lista-pronta-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow-sm);
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    border-color 0.18s ease;
+}
+.lista-pronta-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--lilac-soft) 80%, var(--line));
+  box-shadow: var(--shadow-md);
+}
+.lista-pronta-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  line-height: 1;
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--plum) 6%, transparent);
+}
+.lista-pronta-title {
+  font-family: var(--font-patrick-hand), cursive;
+  color: var(--plum);
+  font-size: 18px;
+  line-height: 1.1;
+  margin: 2px 0 0;
+}
+.lista-pronta-desc {
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-soft);
+  margin: 0;
+  flex: 1 1 auto;
+}
+.lista-pronta-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed
+    color-mix(in srgb, var(--lilac-soft) 60%, var(--line));
+}
+.lista-pronta-count {
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 12px;
+  color: var(--ink-mute);
+}
+.lista-pronta-cta {
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--lilac-deep);
+  background: transparent;
+  border: 0;
+  padding: 4px 2px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+.lista-pronta-cta:hover {
+  color: var(--plum);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+@media (max-width: 1099px) {
+  .lista-prontas-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (max-width: 599px) {
+  .lista-prontas-grid {
+    grid-template-columns: 1fr;
+  }
+}
