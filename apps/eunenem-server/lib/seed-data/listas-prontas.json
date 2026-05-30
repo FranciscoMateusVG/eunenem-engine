@@ -1,47 +1,735 @@
-{
-  "essenciais": {
-    "id": "essenciais",
-    "title": "Essenciais do Dia",
-    "description": "Tudo que você mais vai precisar no primeiro mês — fraldas, lencinhos e pomada na medida certa.",
+[
+  {
+    "id": "ilustrativa-especial",
+    "title": "Lista super especial editada",
+    "description": "Roupinhas selecionadas pros primeiros meses — uma seleção carinhosa pra você não precisar pensar em cada peça.",
+    "imageUrl": "/listas-prontas/lista-9.jpg",
     "items": [
-      { "id": "ed-1", "name": "Pacote de Fraldas RN", "price": 49.9, "suggestedQty": 6, "emoji": "🧷", "bgColor": "var(--lilac-soft)" },
-      { "id": "ed-2", "name": "Lenço Umedecido (kit 3)", "price": 38.5, "suggestedQty": 3, "emoji": "🧻", "bgColor": "var(--cream-2)" },
-      { "id": "ed-3", "name": "Pomada de Assadura", "price": 32.0, "suggestedQty": 2, "emoji": "🧴", "bgColor": "var(--pink-soft)" },
-      { "id": "ed-4", "name": "Sabonete Líquido Suave", "price": 28.9, "suggestedQty": 2, "emoji": "🧼", "bgColor": "var(--lilac-soft)" },
-      { "id": "ed-5", "name": "Algodão Hidrófilo (500g)", "price": 18.9, "suggestedQty": 2, "emoji": "☁️", "bgColor": "var(--cream-2)" },
-      { "id": "ed-6", "name": "Cortador de Unha Bebê", "price": 22.9, "suggestedQty": 1, "emoji": "✂️", "bgColor": "var(--pink-soft)" }
+      {
+        "id": "558361",
+        "name": "1 Calça 0-3M",
+        "price": 49.99,
+        "suggestedQty": 1,
+        "emoji": "👕",
+        "bgColor": "var(--lilac-soft)",
+        "imageUrl": "/products/558361.png"
+      },
+      {
+        "id": "558393",
+        "name": "1 Casaco de Linha 0-3M",
+        "price": 69.99,
+        "suggestedQty": 1,
+        "emoji": "👕",
+        "bgColor": "var(--lilac-soft)",
+        "imageUrl": "/products/558393.png"
+      },
+      {
+        "id": "444373",
+        "name": "1 Casaco Rosa Bebê",
+        "price": 40,
+        "suggestedQty": 1,
+        "emoji": "👕",
+        "bgColor": "var(--lilac-soft)",
+        "imageUrl": "/products/444373.jpg"
+      }
     ]
   },
-  "banho": {
-    "id": "banho",
-    "title": "Hora do Banho",
-    "description": "Banheira, toalha felpuda e cosméticos suaves para esses primeiros mergulhos.",
+  {
+    "id": "cha-de-fralda",
+    "title": "Chá de fralda especial",
+    "description": "Tudo pro chá de fralda mais completo — pacotes, lencinhos e cuidado pra muitos meses.",
+    "imageUrl": "/listas-prontas/lista-12.jpg",
     "items": [
-      { "id": "hb-1", "name": "Banheira Inflável", "price": 159.0, "suggestedQty": 1, "emoji": "🛁", "bgColor": "var(--pink-soft)" },
-      { "id": "hb-2", "name": "Toalha com Capuz", "price": 89.9, "suggestedQty": 2, "emoji": "🧺", "bgColor": "var(--cream-2)" },
-      { "id": "hb-3", "name": "Shampoo sem Lágrimas", "price": 34.5, "suggestedQty": 1, "emoji": "🧴", "bgColor": "var(--lilac-soft)" },
-      { "id": "hb-4", "name": "Termômetro de Banho", "price": 49.9, "suggestedQty": 1, "emoji": "🌡️", "bgColor": "var(--pink-soft)" }
+      {
+        "id": "436256",
+        "name": "Fralda de pano",
+        "price": 30,
+        "suggestedQty": 1,
+        "emoji": "🧷",
+        "bgColor": "var(--pink-soft)",
+        "imageUrl": "/products/436256.jpg"
+      },
+      {
+        "id": "457253",
+        "name": "Fralda de pano",
+        "price": 15,
+        "suggestedQty": 1,
+        "emoji": "🧷",
+        "bgColor": "var(--pink-soft)",
+        "imageUrl": "/products/457253.jpg"
+      },
+      {
+        "id": "487487",
+        "name": "Fralda Descartável",
+        "price": 20,
+        "suggestedQty": 1,
+        "emoji": "🧷",
+        "bgColor": "var(--pink-soft)",
+        "imageUrl": "/products/487487.jpg"
+      },
+      {
+        "id": "494549",
+        "name": "Fralda descartável",
+        "price": 49,
+        "suggestedQty": 1,
+        "emoji": "🧷",
+        "bgColor": "var(--pink-soft)",
+        "imageUrl": "/products/494549.jpg"
+      },
+      {
+        "id": "573208",
+        "name": "Fralda descartável",
+        "price": 20,
+        "suggestedQty": 1,
+        "emoji": "🧷",
+        "bgColor": "var(--pink-soft)",
+        "imageUrl": "/products/573208.jpg"
+      },
+      {
+        "id": "573210",
+        "name": "Fralda descartável",
+        "price": 20,
+        "suggestedQty": 1,
+        "emoji": "🧷",
+        "bgColor": "var(--pink-soft)",
+        "imageUrl": "/products/573210.jpg"
+      },
+      {
+        "id": "573202",
+        "name": "Fralda descartável",
+        "price": 30,
+        "suggestedQty": 1,
+        "emoji": "🧷",
+        "bgColor": "var(--pink-soft)",
+        "imageUrl": "/products/573202.jpg"
+      },
+      {
+        "id": "526015",
+        "name": "Fralda descartável",
+        "price": 50,
+        "suggestedQty": 1,
+        "emoji": "🧷",
+        "bgColor": "var(--pink-soft)",
+        "imageUrl": "/products/526015.jpg"
+      },
+      {
+        "id": "543141",
+        "name": "Fralda descartável",
+        "price": 23.9,
+        "suggestedQty": 1,
+        "emoji": "🧷",
+        "bgColor": "var(--pink-soft)",
+        "imageUrl": "/products/543141.jpg"
+      },
+      {
+        "id": "573198",
+        "name": "Fralda descartável",
+        "price": 50,
+        "suggestedQty": 1,
+        "emoji": "🧷",
+        "bgColor": "var(--pink-soft)",
+        "imageUrl": "/products/573198.jpg"
+      },
+      {
+        "id": "573199",
+        "name": "Fralda descartável",
+        "price": 30,
+        "suggestedQty": 1,
+        "emoji": "🧷",
+        "bgColor": "var(--pink-soft)",
+        "imageUrl": "/products/573199.jpg"
+      },
+      {
+        "id": "573247",
+        "name": "Fralda descartável",
+        "price": 30,
+        "suggestedQty": 1,
+        "emoji": "🧷",
+        "bgColor": "var(--pink-soft)",
+        "imageUrl": "/products/573247.jpg"
+      },
+      {
+        "id": "573249",
+        "name": "Fralda descartável",
+        "price": 50,
+        "suggestedQty": 1,
+        "emoji": "🧷",
+        "bgColor": "var(--pink-soft)",
+        "imageUrl": "/products/573249.jpg"
+      },
+      {
+        "id": "573201",
+        "name": "Fralda descartável",
+        "price": 50,
+        "suggestedQty": 1,
+        "emoji": "🧷",
+        "bgColor": "var(--pink-soft)",
+        "imageUrl": "/products/573201.jpg"
+      },
+      {
+        "id": "403955",
+        "name": "Fralda Descartável",
+        "price": 20,
+        "suggestedQty": 1,
+        "emoji": "🧷",
+        "bgColor": "var(--pink-soft)",
+        "imageUrl": "/products/403955.jpg"
+      },
+      {
+        "id": "345472",
+        "name": "Fralda Descartável Huggies  M 40 Unidades",
+        "price": 42.99,
+        "suggestedQty": 1,
+        "emoji": "🧷",
+        "bgColor": "var(--pink-soft)",
+        "imageUrl": "/products/345472.jpg"
+      },
+      {
+        "id": "376538",
+        "name": "Fralda Ecológica",
+        "price": 60,
+        "suggestedQty": 1,
+        "emoji": "🧷",
+        "bgColor": "var(--pink-soft)",
+        "imageUrl": "/products/376538.jpg"
+      },
+      {
+        "id": "555949",
+        "name": "CADEIRA BALANÇO INTERATIVA",
+        "price": 1279.9,
+        "suggestedQty": 1,
+        "emoji": "🛏️",
+        "bgColor": "var(--lilac-soft)",
+        "imageUrl": "/products/555949.jpg"
+      },
+      {
+        "id": "518252",
+        "name": "CADEIRA BALANÇO MADEIRA - WIND",
+        "price": 1100,
+        "suggestedQty": 1,
+        "emoji": "🛏️",
+        "bgColor": "var(--lilac-soft)",
+        "imageUrl": "/products/518252.jpg"
+      },
+      {
+        "id": "499518",
+        "name": "Cadeira de Alimentação",
+        "price": 790,
+        "suggestedQty": 1,
+        "emoji": "🍼",
+        "bgColor": "var(--cream-2)",
+        "imageUrl": "/products/499518.jpg"
+      },
+      {
+        "id": "79211",
+        "name": "Cadeira de Descanso - MamaRoo 3.0 - 2a Geração - Silver Push - 4 Moms",
+        "price": 1999,
+        "suggestedQty": 1,
+        "emoji": "🛏️",
+        "bgColor": "var(--lilac-soft)",
+        "imageUrl": "/products/79211.jpg"
+      },
+      {
+        "id": "558359",
+        "name": "1 calça 0-3M",
+        "price": 39.99,
+        "suggestedQty": 1,
+        "emoji": "👕",
+        "bgColor": "var(--lilac-soft)",
+        "imageUrl": "/products/558359.png"
+      },
+      {
+        "id": "558363",
+        "name": "1 Calça 3-6M",
+        "price": 39.99,
+        "suggestedQty": 1,
+        "emoji": "👕",
+        "bgColor": "var(--lilac-soft)",
+        "imageUrl": "/products/558363.png"
+      },
+      {
+        "id": "334204",
+        "name": "1 mamadeira fase 03 + 1 pct de lenço umidecido",
+        "price": 0,
+        "suggestedQty": 1,
+        "emoji": "🧴",
+        "bgColor": "var(--blue-soft)",
+        "imageUrl": "/products/334204.jpg"
+      },
+      {
+        "id": "558420",
+        "name": "1 Sapatinho",
+        "price": 45.99,
+        "suggestedQty": 1,
+        "emoji": "👕",
+        "bgColor": "var(--lilac-soft)",
+        "imageUrl": "/products/558420.png"
+      },
+      {
+        "id": "587502",
+        "name": "2 BICOS DE MAMADEIRA KUKA.",
+        "price": 8.6,
+        "suggestedQty": 1,
+        "emoji": "🍼",
+        "bgColor": "var(--cream-2)",
+        "imageUrl": "/products/587502.jpg"
+      },
+      {
+        "id": "338948",
+        "name": "3 calças simples tamanho P",
+        "price": 0,
+        "suggestedQty": 1,
+        "emoji": "👕",
+        "bgColor": "var(--lilac-soft)",
+        "imageUrl": "/products/338948.jpg"
+      },
+      {
+        "id": "375664",
+        "name": "3 Pares de Meia RN/PP",
+        "price": 1,
+        "suggestedQty": 1,
+        "emoji": "👕",
+        "bgColor": "var(--lilac-soft)",
+        "imageUrl": "/products/375664.jpg"
+      },
+      {
+        "id": "533008",
+        "name": "Abajur",
+        "price": 70,
+        "suggestedQty": 1,
+        "emoji": "🛏️",
+        "bgColor": "var(--lilac-soft)",
+        "imageUrl": "/products/533008.jpg"
+      },
+      {
+        "id": "465654",
+        "name": "Abajur Azul Bebê",
+        "price": 80,
+        "suggestedQty": 1,
+        "emoji": "🛏️",
+        "bgColor": "var(--lilac-soft)",
+        "imageUrl": "/products/465654.jpg"
+      },
+      {
+        "id": "470158",
+        "name": "Abajur Infantil - Rosa",
+        "price": 20.5,
+        "suggestedQty": 1,
+        "emoji": "🛏️",
+        "bgColor": "var(--lilac-soft)",
+        "imageUrl": "/products/470158.jpg"
+      },
+      {
+        "id": "471462",
+        "name": "2 Calças",
+        "price": 53.66,
+        "suggestedQty": 1,
+        "emoji": "👕",
+        "bgColor": "var(--lilac-soft)",
+        "imageUrl": "/products/471462.jpg"
+      },
+      {
+        "id": "536093",
+        "name": "2 Conjuntos de Cueiro Papi Composê Estampado Azul - Papi Têxtil",
+        "price": 24.99,
+        "suggestedQty": 1,
+        "emoji": "👕",
+        "bgColor": "var(--lilac-soft)",
+        "imageUrl": "/products/536093.jpg"
+      }
     ]
   },
-  "soninho": {
-    "id": "soninho",
-    "title": "Hora do Soninho",
-    "description": "Mantinhas macias, chupetas e tudo pra noite render mais (pra você também).",
+  {
+    "id": "cha-de-rifa",
+    "title": "Chá de rifa para o bebê",
+    "description": "Mimos variados pro chá de rifa — itens grandes e pequenos pra todos os bolsos.",
+    "imageUrl": "/listas-prontas/lista-13.jpg",
     "items": [
-      { "id": "hs-1", "name": "Ninho Redutor de Berço", "price": 189.0, "suggestedQty": 1, "emoji": "🛌", "bgColor": "var(--lilac-soft)" },
-      { "id": "hs-2", "name": "Manta Soft", "price": 89.9, "suggestedQty": 2, "emoji": "🪶", "bgColor": "var(--cream-2)" },
-      { "id": "hs-3", "name": "Chupeta de Silicone", "price": 34.9, "suggestedQty": 2, "emoji": "🍭", "bgColor": "var(--pink-soft)" },
-      { "id": "hs-4", "name": "Móbile Musical", "price": 129.0, "suggestedQty": 1, "emoji": "🎶", "bgColor": "var(--lilac-soft)" }
+      {
+        "id": "510289",
+        "name": "?\tMACACÃO 100% ALGODÃO RN MANGA LONGA PRETO S/ PÉZINHO",
+        "price": 165,
+        "suggestedQty": 1,
+        "emoji": "🧴",
+        "bgColor": "var(--blue-soft)",
+        "imageUrl": "/products/510289.jpg"
+      },
+      {
+        "id": "597912",
+        "name": " Berço Portátil Desmontável ",
+        "price": 549,
+        "suggestedQty": 1,
+        "emoji": "🛏️",
+        "bgColor": "var(--lilac-soft)",
+        "imageUrl": "/products/597912.jpg"
+      },
+      {
+        "id": "333972",
+        "name": "02 babadores",
+        "price": 15,
+        "suggestedQty": 1,
+        "emoji": "🍼",
+        "bgColor": "var(--cream-2)",
+        "imageUrl": "/products/333972.jpg"
+      },
+      {
+        "id": "344047",
+        "name": "02 calças culote ou mijão com pé tamanho RN",
+        "price": 20,
+        "suggestedQty": 1,
+        "emoji": "👕",
+        "bgColor": "var(--lilac-soft)",
+        "imageUrl": "/products/344047.jpg"
+      },
+      {
+        "id": "449001",
+        "name": "011 Babador Bandana Kit com 3 unidades Super Confort Navy",
+        "price": 25,
+        "suggestedQty": 1,
+        "emoji": "🍼",
+        "bgColor": "var(--cream-2)",
+        "imageUrl": "/products/449001.jpg"
+      },
+      {
+        "id": "558359",
+        "name": "1 calça 0-3M",
+        "price": 39.99,
+        "suggestedQty": 1,
+        "emoji": "👕",
+        "bgColor": "var(--lilac-soft)",
+        "imageUrl": "/products/558359.png"
+      },
+      {
+        "id": "558361",
+        "name": "1 Calça 0-3M",
+        "price": 49.99,
+        "suggestedQty": 1,
+        "emoji": "👕",
+        "bgColor": "var(--lilac-soft)",
+        "imageUrl": "/products/558361.png"
+      },
+      {
+        "id": "348655",
+        "name": "1 Álcool em gel+ 2 sabonetes líquido",
+        "price": 1,
+        "suggestedQty": 1,
+        "emoji": "🧴",
+        "bgColor": "var(--blue-soft)",
+        "imageUrl": "/products/348655.jpg"
+      },
+      {
+        "id": "558362",
+        "name": "1 Calça 3-6M",
+        "price": 39.99,
+        "suggestedQty": 1,
+        "emoji": "👕",
+        "bgColor": "var(--lilac-soft)",
+        "imageUrl": "/products/558362.png"
+      },
+      {
+        "id": "375630",
+        "name": "1 kit bico de mamadeira ortodontico - avent",
+        "price": 40,
+        "suggestedQty": 1,
+        "emoji": "🍼",
+        "bgColor": "var(--cream-2)",
+        "imageUrl": "/products/375630.jpg"
+      },
+      {
+        "id": "449605",
+        "name": "1 fralda M + 1 cueiro",
+        "price": 24,
+        "suggestedQty": 1,
+        "emoji": "🧷",
+        "bgColor": "var(--pink-soft)",
+        "imageUrl": "/products/449605.jpg"
+      },
+      {
+        "id": "444373",
+        "name": "1 Casaco Rosa Bebê",
+        "price": 40,
+        "suggestedQty": 1,
+        "emoji": "👕",
+        "bgColor": "var(--lilac-soft)",
+        "imageUrl": "/products/444373.jpg"
+      },
+      {
+        "id": "571413",
+        "name": "1 kit Shampoo e Condicionador Johnson's- 200ml",
+        "price": 20,
+        "suggestedQty": 1,
+        "emoji": "🧴",
+        "bgColor": "var(--blue-soft)",
+        "imageUrl": "/products/571413.jpg"
+      },
+      {
+        "id": "334204",
+        "name": "1 mamadeira fase 03 + 1 pct de lenço umidecido",
+        "price": 0,
+        "suggestedQty": 1,
+        "emoji": "🧴",
+        "bgColor": "var(--blue-soft)",
+        "imageUrl": "/products/334204.jpg"
+      },
+      {
+        "id": "560600",
+        "name": "1 Par de Meia Antiderrapante",
+        "price": 10,
+        "suggestedQty": 1,
+        "emoji": "👕",
+        "bgColor": "var(--lilac-soft)",
+        "imageUrl": "/products/560600.png"
+      },
+      {
+        "id": "240252",
+        "name": "1 par de meia baby",
+        "price": 5.9,
+        "suggestedQty": 1,
+        "emoji": "👕",
+        "bgColor": "var(--lilac-soft)",
+        "imageUrl": "/products/240252.png"
+      },
+      {
+        "id": "585793",
+        "name": "10un toalha fralda algodão 40x40",
+        "price": 55,
+        "suggestedQty": 1,
+        "emoji": "🧴",
+        "bgColor": "var(--blue-soft)",
+        "imageUrl": "/products/585793.jpg"
+      },
+      {
+        "id": "432472",
+        "name": "2 Babadores Azuis",
+        "price": 20,
+        "suggestedQty": 1,
+        "emoji": "🍼",
+        "bgColor": "var(--cream-2)",
+        "imageUrl": "/products/432472.jpg"
+      },
+      {
+        "id": "564241",
+        "name": "2 babadores impermeável",
+        "price": 46,
+        "suggestedQty": 1,
+        "emoji": "🍼",
+        "bgColor": "var(--cream-2)",
+        "imageUrl": "/products/564241.jpg"
+      },
+      {
+        "id": "471462",
+        "name": "2 Calças",
+        "price": 53.66,
+        "suggestedQty": 1,
+        "emoji": "👕",
+        "bgColor": "var(--lilac-soft)",
+        "imageUrl": "/products/471462.jpg"
+      },
+      {
+        "id": "574001",
+        "name": "2 pçs macacão estrela/lua",
+        "price": 105,
+        "suggestedQty": 1,
+        "emoji": "👕",
+        "bgColor": "var(--lilac-soft)",
+        "imageUrl": "/products/574001.jpg"
+      },
+      {
+        "id": "375587",
+        "name": "2 Sapatos G",
+        "price": 1,
+        "suggestedQty": 1,
+        "emoji": "👕",
+        "bgColor": "var(--lilac-soft)",
+        "imageUrl": "/products/375587.jpg"
+      },
+      {
+        "id": "338948",
+        "name": "3 calças simples tamanho P",
+        "price": 0,
+        "suggestedQty": 1,
+        "emoji": "👕",
+        "bgColor": "var(--lilac-soft)",
+        "imageUrl": "/products/338948.jpg"
+      },
+      {
+        "id": "491125",
+        "name": "2 Touca Unissex",
+        "price": 62,
+        "suggestedQty": 1,
+        "emoji": "👕",
+        "bgColor": "var(--lilac-soft)",
+        "imageUrl": "/products/491125.jpg"
+      },
+      {
+        "id": "531481",
+        "name": "32- Kit Cueiro com 2 Peças",
+        "price": 1,
+        "suggestedQty": 1,
+        "emoji": "👕",
+        "bgColor": "var(--lilac-soft)",
+        "imageUrl": "/products/531481.jpg"
+      },
+      {
+        "id": "512923",
+        "name": "4x Suprimentos De Alimentação Para Bebês Com Placa De Bebê, Colheres, Babador De Silicone E Tigela De Bebê",
+        "price": 120,
+        "suggestedQty": 1,
+        "emoji": "🍼",
+        "bgColor": "var(--cream-2)",
+        "imageUrl": "/products/512923.png"
+      },
+      {
+        "id": "577511",
+        "name": "5 peças/conjunto de panos de musselina para bebês toalha macia absorvente babador roupas lenço para bebês unissex",
+        "price": 61,
+        "suggestedQty": 1,
+        "emoji": "🧴",
+        "bgColor": "var(--blue-soft)",
+        "imageUrl": "/products/577511.jpg"
+      },
+      {
+        "id": "427616",
+        "name": "6 Mijão - Culote - Calça Com Pé RN",
+        "price": 45,
+        "suggestedQty": 1,
+        "emoji": "👕",
+        "bgColor": "var(--lilac-soft)",
+        "imageUrl": "/products/427616.png"
+      },
+      {
+        "id": "334287",
+        "name": "Abajur Harmonia",
+        "price": 105,
+        "suggestedQty": 1,
+        "emoji": "🛏️",
+        "bgColor": "var(--lilac-soft)",
+        "imageUrl": "/products/334287.jpg"
+      },
+      {
+        "id": "3962",
+        "name": "Abajur Hello Baby Carrinhos 006.008913 - Cor: AZUL - Tam.: UN",
+        "price": 59.45,
+        "suggestedQty": 1,
+        "emoji": "🚼",
+        "bgColor": "var(--blue-soft)",
+        "imageUrl": "/products/3962.jpg"
+      }
     ]
   },
-  "papinha": {
-    "id": "papinha",
-    "title": "Hora da Papinha",
-    "description": "Mamadeira, babadores e itens para as primeiras refeições com calma.",
+  {
+    "id": "ilustrativa",
+    "title": "Lista Ilustrativa",
+    "description": "Uma lista pequena pra ver como funciona — adicione, edite ou troque depois.",
+    "imageUrl": "/listas-prontas/lista-14.jpg",
     "items": [
-      { "id": "hp-1", "name": "Mamadeira Anticólica (kit 3)", "price": 119.0, "suggestedQty": 2, "emoji": "🍼", "bgColor": "var(--cream-2)" },
-      { "id": "hp-2", "name": "Babador Bandana (kit 6)", "price": 49.9, "suggestedQty": 2, "emoji": "🌼", "bgColor": "var(--pink-soft)" },
-      { "id": "hp-3", "name": "Esterilizador de Mamadeira", "price": 249.0, "suggestedQty": 1, "emoji": "♨️", "bgColor": "var(--lilac-soft)" }
+      {
+        "id": "518723",
+        "name": "Babador",
+        "price": 10,
+        "suggestedQty": 1,
+        "emoji": "🍼",
+        "bgColor": "var(--cream-2)",
+        "imageUrl": "/products/518723.jpg"
+      },
+      {
+        "id": "547061",
+        "name": "BABADOR B",
+        "price": 1,
+        "suggestedQty": 1,
+        "emoji": "🍼",
+        "bgColor": "var(--cream-2)",
+        "imageUrl": "/products/547061.jpg"
+      },
+      {
+        "id": "366638",
+        "name": "Babador Bandana",
+        "price": 30,
+        "suggestedQty": 1,
+        "emoji": "🍼",
+        "bgColor": "var(--cream-2)",
+        "imageUrl": "/products/366638.jpg"
+      },
+      {
+        "id": "353311",
+        "name": "BABADOR BANDANA BABY DELUXE POAP VERMELHO",
+        "price": 20.99,
+        "suggestedQty": 1,
+        "emoji": "🍼",
+        "bgColor": "var(--cream-2)",
+        "imageUrl": "/products/353311.jpg"
+      },
+      {
+        "id": "232976",
+        "name": "Babador Bandana - Azul Marinho - KaBaby",
+        "price": 24.9,
+        "suggestedQty": 1,
+        "emoji": "🍼",
+        "bgColor": "var(--cream-2)",
+        "imageUrl": "/products/232976.jpg"
+      }
+    ]
+  },
+  {
+    "id": "carrinhos",
+    "title": "Carrinhos para o bebê",
+    "description": "Carrinhos e mochilas-canguru — escolha o jeito de levar o bebê pelo mundo.",
+    "imageUrl": "/listas-prontas/lista-15.jpg",
+    "items": [
+      {
+        "id": "357798",
+        "name": "Carrinho Chicco® Bravo® LE Trio Travel System in Genesis",
+        "price": 1500,
+        "suggestedQty": 1,
+        "emoji": "🚼",
+        "bgColor": "var(--blue-soft)",
+        "imageUrl": "/products/357798.png"
+      },
+      {
+        "id": "476198",
+        "name": "Carrinho Berço de Gêmeos Hercules",
+        "price": 600,
+        "suggestedQty": 1,
+        "emoji": "🚼",
+        "bgColor": "var(--blue-soft)",
+        "imageUrl": "/products/476198.jpg"
+      },
+      {
+        "id": "499535",
+        "name": "Bolsa Organizadora para Carrinho",
+        "price": 139.43,
+        "suggestedQty": 1,
+        "emoji": "🚼",
+        "bgColor": "var(--blue-soft)",
+        "imageUrl": "/products/499535.jpg"
+      },
+      {
+        "id": "583061",
+        "name": "Capa de chuva para carrinho",
+        "price": 170,
+        "suggestedQty": 1,
+        "emoji": "🚼",
+        "bgColor": "var(--blue-soft)",
+        "imageUrl": "/products/583061.png"
+      },
+      {
+        "id": "288027",
+        "name": "Carrinho de Passeio para Gêmeos - Zoom - Black - ABC Design",
+        "price": 3799,
+        "suggestedQty": 1,
+        "emoji": "🚼",
+        "bgColor": "var(--blue-soft)",
+        "imageUrl": "/products/288027.jpg"
+      },
+      {
+        "id": "72721",
+        "name": "Turminha do Resgate - Carrinho de Polícia - Dican",
+        "price": 59.99,
+        "suggestedQty": 1,
+        "emoji": "🚼",
+        "bgColor": "var(--blue-soft)",
+        "imageUrl": "/products/72721.jpg"
+      }
     ]
   }
-}
+]

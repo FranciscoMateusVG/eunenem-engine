@@ -55,7 +55,10 @@ export interface ListaGift {
 }
 
 /** pt-BR display labels for the category chips/badges. UI vocabulary,
- *  kept in code (operator decision; per aperture-cwcn0). */
+ *  kept in code (operator decision; per aperture-cwcn0). Widened in
+ *  aperture-cdwdt — see `lib/templates` for the canonical label map
+ *  exposed via `loadCategoryLabel()`. Kept here as a re-export-ish copy
+ *  for legacy callers that import directly from this mock module. */
 export const LISTA_CATEGORY_LABEL: Record<ListaCategory, string> = {
   fraldas: "fraldas",
   higiene: "higiene",
@@ -63,6 +66,8 @@ export const LISTA_CATEGORY_LABEL: Record<ListaCategory, string> = {
   soninho: "soninho",
   alimentacao: "alimentação",
   passeio: "passeio",
+  brinquedo: "brinquedos",
+  outros: "outros",
   personalizado: "personalizado",
 };
 

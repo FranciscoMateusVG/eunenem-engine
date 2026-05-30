@@ -61,8 +61,12 @@ const brl = (n: number) =>
     maximumFractionDigits: 2,
   });
 
-// aperture-0ph83 — UI vocabulary for the category chips/badges. Kept in code
-// (not in templates JSON) per operator decision recorded on aperture-cwcn0.
+// aperture-0ph83 / aperture-cdwdt — UI vocabulary for the category chips/badges.
+// Kept in code (not in templates JSON) per operator decision on aperture-cwcn0.
+// `outros` + `brinquedo` added in aperture-cdwdt when the real eunenem catalog
+// taxonomy landed. `personalizado` stays in the local options list because the
+// PersonalizadoForm uses it as the default category for user-authored items
+// (the seed catalog itself never contains personalizado — validator enforces).
 const LISTA_CATEGORY_LABEL: Record<ListaCategory, string> = {
   fraldas: "fraldas",
   higiene: "higiene",
@@ -70,6 +74,8 @@ const LISTA_CATEGORY_LABEL: Record<ListaCategory, string> = {
   soninho: "soninho",
   alimentacao: "alimentação",
   passeio: "passeio",
+  brinquedo: "brinquedos",
+  outros: "outros",
   personalizado: "personalizado",
 };
 
@@ -80,6 +86,8 @@ const CATEGORY_OPTIONS: ListaCategory[] = [
   "soninho",
   "alimentacao",
   "passeio",
+  "brinquedo",
+  "outros",
   "personalizado",
 ];
 
@@ -144,46 +152,43 @@ const icon = {
   ),
 };
 
-// aperture-g70uv / aperture-0ph83 — curated preset cards surfaced by the
-// "Usar lista pronta" expand/collapse panel. Title/emoji/tile/desc are
-// presentation vocabulary (live in code); item count is derived from the
-// bundle's actual items at render time so they stay in lock-step with the
-// JSON template.
+// aperture-g70uv / aperture-0ph83 / aperture-cdwdt — visual identity overlay
+// for the curated preset cards surfaced by the "Usar lista pronta" expand/
+// collapse panel. Title + description + cover imageUrl now live in the JSON
+// template (loaded via loadListasProntas), so the array below only carries
+// the presentation deltas (emoji + backdrop tint). Item count + title +
+// description + cover all come from the loaded detail at render time, so
+// the data and the UI stay in lock-step.
 interface ListaProntaPreset {
   id: ListaProntaId;
-  title: string;
   emoji: string;
   tileVar: string;
-  desc: string;
 }
 const LISTA_PRONTAS: ListaProntaPreset[] = [
   {
-    id: "essenciais",
-    title: "Essenciais do Dia",
-    emoji: "☀️",
+    id: "ilustrativa-especial",
+    emoji: "👕",
     tileVar: "var(--lilac-soft)",
-    desc: "Tudo que você mais vai precisar no primeiro mês — fraldas, lencinhos e pomada na medida certa.",
   },
   {
-    id: "banho",
-    title: "Hora do Banho",
-    emoji: "🛁",
+    id: "cha-de-fralda",
+    emoji: "🧷",
     tileVar: "var(--pink-soft)",
-    desc: "Banheira, toalha felpuda e cosméticos suaves para esses primeiros mergulhos.",
   },
   {
-    id: "soninho",
-    title: "Hora do Soninho",
-    emoji: "🌙",
-    tileVar: "color-mix(in srgb, var(--green) 40%, var(--paper))",
-    desc: "Mantinhas macias, chupetas e tudo pra noite render mais (pra você também).",
+    id: "cha-de-rifa",
+    emoji: "🎁",
+    tileVar: "var(--yellow-soft)",
   },
   {
-    id: "papinha",
-    title: "Hora da Papinha",
-    emoji: "🍼",
+    id: "ilustrativa",
+    emoji: "✨",
     tileVar: "var(--cream-2)",
-    desc: "Mamadeira, babadores e itens para as primeiras refeições com calma.",
+  },
+  {
+    id: "carrinhos",
+    emoji: "🚼",
+    tileVar: "var(--blue-soft)",
   },
 ];
 
@@ -228,6 +233,8 @@ const isListaCategory = (g: string | null | undefined): g is ListaCategory => {
     g === "soninho" ||
     g === "alimentacao" ||
     g === "passeio" ||
+    g === "brinquedo" ||
+    g === "outros" ||
     g === "personalizado"
   );
 };
@@ -565,7 +572,24 @@ function CatalogoView({
                       aria-pressed={on}
                     >
                       <span className="lista-cat-thumb" style={{ background: it.bgColor }}>
-                        <span className="lista-cat-emoji" aria-hidden="true">{it.emoji}</span>
+                        {/* aperture-cdwdt: real product image when available; emoji fallback for the 67 null-image items. */}
+                        {it.imageUrl ? (
+                          <img
+                            src={it.imageUrl}
+                            alt=""
+                            loading="lazy"
+                            className="lista-cat-img"
+                            style={{
+                              width: "100%",
+                              height: "100%",
+                              objectFit: "cover",
+                              borderRadius: "inherit",
+                              display: "block",
+                            }}
+                          />
+                        ) : (
+                          <span className="lista-cat-emoji" aria-hidden="true">{it.emoji}</span>
+                        )}
                       </span>
                       <span className="lista-cat-meta">
                         <span className="lista-cat-name">{it.name}</span>
@@ -922,7 +946,23 @@ function PresetDetailModal({
                   style={{ background: it.bgColor }}
                   aria-hidden="true"
                 >
-                  <span className="lista-preset-emoji">{it.emoji}</span>
+                  {/* aperture-cdwdt: real product image when available, emoji fallback otherwise. */}
+                  {it.imageUrl ? (
+                    <img
+                      src={it.imageUrl}
+                      alt=""
+                      loading="lazy"
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "cover",
+                        borderRadius: "inherit",
+                        display: "block",
+                      }}
+                    />
+                  ) : (
+                    <span className="lista-preset-emoji">{it.emoji}</span>
+                  )}
                 </div>
                 <div className="lista-preset-meta">
                   <span className="lista-preset-name">{it.name}</span>
@@ -1132,11 +1172,13 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
         items: picked.map((it) => ({
           nome: it.name,
           valor: centsFromBRL(it.price),
-          // imagemUrl is for real product image URLs only — server validates via z.string().url().
-          // The emoji glyph is a display fallback the UI derives from `grupo` (see deriveBgColor +
-          // CATEGORY_EMOJI maps). When the real catalog refresh ships (aperture-cdwdt), items
-          // will carry `image_url` paths like "/products/1468.jpg" and we'll pass them here.
-          imagemUrl: undefined,
+          // aperture-cdwdt: catalog items now carry real local product image
+          // paths (e.g. "/products/1468.jpg"). 67 of 355 items still have a
+          // null imageUrl from the dead cdnna.eunenem.com domain — those fall
+          // back to the emoji glyph the UI derives from `grupo`. `null` would
+          // fail the server's z.string().url() validator, so we pass undefined
+          // to keep the field unset for image-less items.
+          imagemUrl: it.imageUrl ?? undefined,
           grupo: it.category,
           qty: it.suggestedQty,
         })),
@@ -1159,8 +1201,10 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
         items: picked.map((it) => ({
           nome: it.name,
           valor: centsFromBRL(it.price),
-          // See comment in addCatalogItems — emoji isn't a URL, gets derived from `grupo` UI-side.
-          imagemUrl: undefined,
+          // aperture-cdwdt: preset items carry real /products/<id>.<ext>
+          // paths; null falls back to the emoji glyph UI-side. See note in
+          // addCatalogItems for the undefined-vs-null reasoning.
+          imagemUrl: it.imageUrl ?? undefined,
           grupo: presetId,
           qty: it.suggestedQty,
         })),
@@ -1300,6 +1344,12 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
                 {LISTA_PRONTAS.map((preset) => {
                   const detail = listasProntas[preset.id];
                   const itemCount = detail?.items.length ?? 0;
+                  // aperture-cdwdt: title/desc/cover now live in the JSON
+                  // template — UI only carries the emoji + tile-tint deltas.
+                  // Fall back to safe defaults if the loader is somehow stale.
+                  const title = detail?.title ?? preset.id;
+                  const desc = detail?.description ?? "";
+                  const cover = detail?.imageUrl ?? null;
                   return (
                     <article key={preset.id} className="lista-pronta-card">
                       <div
@@ -1307,10 +1357,25 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
                         style={{ background: preset.tileVar }}
                         aria-hidden="true"
                       >
-                        <span>{preset.emoji}</span>
+                        {cover ? (
+                          <img
+                            src={cover}
+                            alt=""
+                            loading="lazy"
+                            style={{
+                              width: "100%",
+                              height: "100%",
+                              objectFit: "cover",
+                              borderRadius: "inherit",
+                              display: "block",
+                            }}
+                          />
+                        ) : (
+                          <span>{preset.emoji}</span>
+                        )}
                       </div>
-                      <h3 className="lista-pronta-title">{preset.title}</h3>
-                      <p className="lista-pronta-desc">{preset.desc}</p>
+                      <h3 className="lista-pronta-title">{title}</h3>
+                      <p className="lista-pronta-desc">{desc}</p>
                       <div className="lista-pronta-foot">
                         <span className="lista-pronta-count">
                           {itemCount} {itemCount === 1 ? "item" : "itens"}
@@ -1319,7 +1384,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
                           type="button"
                           className="lista-pronta-cta"
                           onClick={() => setPresetDetail(preset.id)}
-                          aria-label={`Ver lista pronta: ${preset.title}`}
+                          aria-label={`Ver lista pronta: ${title}`}
                         >
                           VER LISTA →
                         </button>
