@@ -4,6 +4,7 @@ import { NotFoundPage } from './NotFoundPage.js';
 import { PaginaPage } from './PaginaPage.js';
 import { PainelPage } from './PainelPage.js';
 import { PainelSectionPage } from './PainelSectionPage.js';
+import { TrpcSmokePage } from './TrpcSmokePage.js';
 import { isPainelSection, type PainelSection } from './lib/painelRoutes.js';
 
 // Mock-first: the only recognised creator slug is "helena" (the public
@@ -23,10 +24,15 @@ export function resolveRoute(pathname: string):
   | { kind: 'pagina'; slug: string }
   | { kind: 'painel'; slug: string }
   | { kind: 'painel-section'; slug: string; section: PainelSection }
+  | { kind: 'trpc-smoke' }
   | { kind: 'not-found' } {
   // Marketing landing page (aperture-q1j2) — exact "/" only.
   if (pathname === '/') {
     return { kind: 'landing' };
+  }
+  // tRPC smoke test (aperture-kungg) — dev-only verification surface.
+  if (pathname === '/trpc-smoke') {
+    return { kind: 'trpc-smoke' };
   }
   const paginaMatch = pathname.match(/^\/pagina\/([^/]+)\/?$/);
   if (paginaMatch && paginaMatch[1] === 'francisco') {
@@ -71,5 +77,6 @@ function pickPage(route: ReturnType<typeof resolveRoute>, pathname: string) {
   if (route.kind === 'painel') return <PainelPage slug={route.slug} />;
   if (route.kind === 'painel-section')
     return <PainelSectionPage slug={route.slug} section={route.section} />;
+  if (route.kind === 'trpc-smoke') return <TrpcSmokePage />;
   return <NotFoundPage pathname={pathname} />;
 }

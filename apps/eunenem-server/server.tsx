@@ -1,9 +1,11 @@
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
+import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
 import { Hono } from 'hono';
 import { StrictMode } from 'react';
 import { renderToString } from 'react-dom/server';
 import { App, resolveRoute } from './pages/App.js';
+import { appRouter } from './server/trpc/router.js';
 
 const PORT = Number(process.env.PORT ?? 3001);
 
@@ -15,6 +17,19 @@ app.use('/public/*', serveStatic({ root: './' }));
 
 // Health check.
 app.get('/healthz', (c) => c.text('ok'));
+
+// tRPC handler (aperture-kungg) — vanilla @trpc/server v11 over Hono via the
+// fetch adapter. Routes under /api/trpc/* are dispatched to procedures on
+// `appRouter`. Client side uses @trpc/client with the AppRouter *type* only
+// (zero runtime coupling).
+app.all('/api/trpc/*', (c) =>
+  fetchRequestHandler({
+    endpoint: '/api/trpc',
+    req: c.req.raw,
+    router: appRouter,
+    createContext: () => ({}),
+  }),
+);
 
 // "/" now SSRs the marketing landing page (aperture-q1j2) via the catch-all
 // below — resolveRoute maps the exact "/" pathname to { kind: 'landing' }.
@@ -85,6 +100,8 @@ serve({ fetch: app.fetch, port: PORT }, (info) => {
   console.log('  /                  → marketing landing page (SSR + hydration)');
   console.log('  /pagina/francisco  → contributor event page (SSR + hydration)');
   console.log('  /painel/helena     → creator dashboard (SSR + hydration)');
+  console.log('  /trpc-smoke        → tRPC smoke test (aperture-kungg)');
+  console.log('  /api/trpc/*        → tRPC procedures (listFruits, ...)');
   console.log('  /healthz           → plain text health check');
   console.log('');
 });
