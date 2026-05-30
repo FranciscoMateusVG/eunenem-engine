@@ -1,17 +1,22 @@
 /**
- * tRPC router for eunenem-server (aperture-kungg + aperture-ht7sq).
+ * tRPC router for eunenem-server (aperture-kungg + aperture-ht7sq + aperture-d6atj).
  *
  * Procedures:
- *   - `listFruits`    — original smoke test from aperture-kungg
- *   - `auth.signUp`   — wraps `registrarContaUsuario` (Mount-Option-A2)
- *   - `auth.signIn`   — wraps `criarSessaoUsuario`
- *   - `auth.signOut`  — revokes the session + clears cookie
- *   - `auth.me`       — returns the current Usuario or null
+ *   - `listFruits`              — original smoke test from aperture-kungg
+ *   - `auth.signUp`             — wraps `registrarContaUsuario` (Mount-Option-A2)
+ *   - `auth.signIn`             — wraps `criarSessaoUsuario`
+ *   - `auth.signOut`            — revokes the session + clears cookie
+ *   - `auth.me`                 — returns the current Usuario or null
+ *   - `contribuicao.list`       — list caller's presentes (aperture-d6atj)
+ *   - `contribuicao.create`     — batched create-by-qty
+ *   - `contribuicao.update`     — single update with status + tenant guards
+ *   - `contribuicao.delete`     — batched delete by ids
  *
  * Client side imports `AppRouter` as a type only — zero runtime coupling.
  */
 import { initTRPC } from '@trpc/server';
 import { authRouter } from './auth-router.js';
+import { contribuicaoRouter } from './contribuicao-router.js';
 import type { TrpcContext } from './context.js';
 
 const t = initTRPC.context<TrpcContext>().create();
@@ -25,6 +30,7 @@ export const appRouter = t.router({
     return ['maçã', 'banana', 'morango', 'abacaxi', 'manga'] as const;
   }),
   auth: authRouter,
+  contribuicao: contribuicaoRouter,
 });
 
 export type AppRouter = typeof appRouter;

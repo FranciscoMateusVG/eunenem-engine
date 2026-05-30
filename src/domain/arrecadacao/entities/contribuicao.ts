@@ -110,6 +110,36 @@ export function contribuicaoComValor(contribuicao: Contribuicao, valor: MoneyCen
 }
 
 /**
+ * Patch de campos administrativos editáveis enquanto `disponivel`. Aplica
+ * apenas as chaves presentes em `patch` — campos omitidos preservam o valor
+ * atual. `null` em `imagemUrl`/`grupo` é tratado como "limpar"; `undefined`
+ * é "não alterar". Exige `status === 'disponivel'`.
+ *
+ * O caso de uso `atualizarContribuicao` (aperture-d6atj) consome este helper
+ * para concentrar a regra de invariante (status) no agregado.
+ */
+export function contribuicaoAtualizada(
+  contribuicao: Contribuicao,
+  patch: {
+    readonly nome?: string | undefined;
+    readonly valor?: MoneyCents | undefined;
+    readonly imagemUrl?: string | null | undefined;
+    readonly grupo?: string | null | undefined;
+  },
+): Contribuicao {
+  if (!contribuicaoDisponivel(contribuicao)) {
+    throw new Error('Contribuicao nao esta disponivel');
+  }
+  return {
+    ...contribuicao,
+    nome: patch.nome ?? contribuicao.nome,
+    valor: patch.valor ?? contribuicao.valor,
+    imagemUrl: patch.imagemUrl === undefined ? contribuicao.imagemUrl : patch.imagemUrl,
+    grupo: patch.grupo === undefined ? contribuicao.grupo : patch.grupo,
+  };
+}
+
+/**
  * Remove o contribuinte e devolve a contribuição ao estado `disponivel`.
  * Usado como **compensação** na saga de checkout: se um passo posterior
  * falhar (cálculo de composição, criação do pagamento), o orquestrador

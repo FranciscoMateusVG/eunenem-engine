@@ -61,6 +61,7 @@ export type {
   StatusContribuicao,
 } from './domain/arrecadacao/entities/contribuicao.js';
 export {
+  contribuicaoAtualizada,
   contribuicaoComContribuinte,
   contribuicaoComValor,
   contribuicaoDisponivel,
@@ -334,6 +335,7 @@ export { ArrecadacaoContribuicaoJaExisteError } from './errors/arrecadacao/contr
 export { ArrecadacaoContribuicaoNaoDisponivelError } from './errors/arrecadacao/contribuicao-nao-disponivel.error.js';
 export { ArrecadacaoContribuicaoNaoEncontradaError } from './errors/arrecadacao/contribuicao-nao-encontrada.error.js';
 export { ArrecadacaoInputInvalidoError } from './errors/arrecadacao/input-invalido.error.js';
+export { ArrecadacaoNaoAutorizadoError } from './errors/arrecadacao/nao-autorizado.error.js';
 export { ArrecadacaoOpcaoContribuicaoNaoEncontradaError } from './errors/arrecadacao/opcao-contribuicao-nao-encontrada.error.js';
 export { ArrecadacaoOpcaoIdDuplicadoError } from './errors/arrecadacao/opcao-id-duplicado.error.js';
 export { ArrecadacaoPlataformaNaoEncontradaError } from './errors/arrecadacao/plataforma-nao-encontrada.error.js';
@@ -415,6 +417,14 @@ export {
   associarContribuinteContribuicao,
 } from './use-cases/arrecadacao/associar-contribuinte-contribuicao.js';
 export type {
+  AtualizarContribuicaoDeps,
+  AtualizarContribuicaoInput,
+} from './use-cases/arrecadacao/atualizar-contribuicao.js';
+export {
+  AtualizarContribuicaoInputSchema,
+  atualizarContribuicao,
+} from './use-cases/arrecadacao/atualizar-contribuicao.js';
+export type {
   CriarCampanhaDeps,
   CriarCampanhaInput,
 } from './use-cases/arrecadacao/criar-campanha.js';
@@ -431,6 +441,17 @@ export {
   criarContribuicao,
 } from './use-cases/arrecadacao/criar-contribuicao.js';
 export type {
+  CriarContribuicoesEmLoteDeps,
+  CriarContribuicoesEmLoteInput,
+  CriarContribuicoesEmLoteResult,
+  ItemLote,
+} from './use-cases/arrecadacao/criar-contribuicoes-em-lote.js';
+export {
+  CriarContribuicoesEmLoteInputSchema,
+  criarContribuicoesEmLote,
+  ItemLoteSchema,
+} from './use-cases/arrecadacao/criar-contribuicoes-em-lote.js';
+export type {
   DesassociarContribuinteContribuicaoDeps,
   DesassociarContribuinteContribuicaoInput,
 } from './use-cases/arrecadacao/desassociar-contribuinte-contribuicao.js';
@@ -439,6 +460,14 @@ export {
   desassociarContribuinteContribuicao,
 } from './use-cases/arrecadacao/desassociar-contribuinte-contribuicao.js';
 export type {
+  ListarContribuicoesDeOpcaoDeps,
+  ListarContribuicoesDeOpcaoInput,
+} from './use-cases/arrecadacao/listar-contribuicoes-de-opcao.js';
+export {
+  ListarContribuicoesDeOpcaoInputSchema,
+  listarContribuicoesDeOpcao,
+} from './use-cases/arrecadacao/listar-contribuicoes-de-opcao.js';
+export type {
   RemoverAdministradorCampanhaDeps,
   RemoverAdministradorCampanhaInput,
 } from './use-cases/arrecadacao/remover-administrador-campanha.js';
@@ -446,6 +475,14 @@ export {
   RemoverAdministradorCampanhaInputSchema,
   removerAdministradorCampanha,
 } from './use-cases/arrecadacao/remover-administrador-campanha.js';
+export type {
+  RemoverContribuicaoDeps,
+  RemoverContribuicaoInput,
+} from './use-cases/arrecadacao/remover-contribuicao.js';
+export {
+  RemoverContribuicaoInputSchema,
+  removerContribuicao,
+} from './use-cases/arrecadacao/remover-contribuicao.js';
 export type {
   FinalizarPagamentoAprovadoDeps,
   FinalizarPagamentoAprovadoInput,

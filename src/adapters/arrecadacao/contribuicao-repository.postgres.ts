@@ -7,6 +7,7 @@ import type {
 } from '../../domain/arrecadacao/value-objects/ids.js';
 import type { Database } from '../database.js';
 import type { ContribuicaoRepository } from './contribuicao-repository.js';
+import type { ArrecadacaoRepositoryContext } from './repository-context.js';
 
 const tracer = trace.getTracer('frame');
 
@@ -74,6 +75,62 @@ export class ContribuicaoRepositoryPostgres implements ContribuicaoRepository {
     });
   }
 
+  /**
+   * Bulk insert via Kysely (aperture-d6atj fix-up). Compiles down to a
+   * single `INSERT INTO contribuicoes (...) VALUES (...), (...), ...`
+   * statement — UMA round-trip, all-or-nothing.
+   *
+   * Empty input is a no-op (Kysely's `.values([])` rejects an empty array;
+   * we short-circuit before producing SQL).
+   *
+   * Honra `context.trx` se fornecido — permite que o caller component este
+   * INSERT junto com outras mutations em uma única transação.
+   */
+  async saveBulk(
+    contribuicoes: readonly Contribuicao[],
+    context?: ArrecadacaoRepositoryContext,
+  ): Promise<void> {
+    return tracer.startActiveSpan('db.arrecadacao_contribuicoes.saveBulk', async (span) => {
+      span.setAttributes({
+        ...DB_ATTRS,
+        'db.operation.name': 'INSERT',
+        'batch.size': contribuicoes.length,
+      });
+      try {
+        if (contribuicoes.length === 0) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return;
+        }
+        const executor = context?.trx ?? this.db;
+        await executor
+          .insertInto('contribuicoes')
+          .values(
+            contribuicoes.map((c) => ({
+              id: c.id,
+              campanha_id: c.idCampanha,
+              id_opcao_contribuicao: c.idOpcaoContribuicao,
+              nome: c.nome,
+              valor: c.valor,
+              imagem_url: c.imagemUrl,
+              grupo: c.grupo,
+              status: c.status,
+              criada_em: c.criadaEm,
+              contribuinte_nome: c.contribuinte?.nome ?? null,
+              contribuinte_email: c.contribuinte?.email ?? null,
+            })),
+          )
+          .execute();
+        span.setStatus({ code: SpanStatusCode.OK });
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
   async findById(id: IdContribuicao): Promise<Contribuicao | undefined> {
     return tracer.startActiveSpan('db.arrecadacao_contribuicoes.findById', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
@@ -106,6 +163,47 @@ export class ContribuicaoRepositoryPostgres implements ContribuicaoRepository {
           .execute();
         span.setStatus({ code: SpanStatusCode.OK });
         return rows.map(toContribuicao);
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  async findByOpcao(
+    idCampanha: IdCampanha,
+    idOpcao: IdOpcaoContribuicao,
+  ): Promise<readonly Contribuicao[]> {
+    return tracer.startActiveSpan('db.arrecadacao_contribuicoes.findByOpcao', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        const rows = await this.db
+          .selectFrom('contribuicoes')
+          .selectAll()
+          .where('campanha_id', '=', idCampanha)
+          .where('id_opcao_contribuicao', '=', idOpcao)
+          .execute();
+        span.setStatus({ code: SpanStatusCode.OK });
+        return rows.map(toContribuicao);
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  async deleteById(id: IdContribuicao): Promise<void> {
+    return tracer.startActiveSpan('db.arrecadacao_contribuicoes.deleteById', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'DELETE' });
+      try {
+        await this.db.deleteFrom('contribuicoes').where('id', '=', id).execute();
+        span.setStatus({ code: SpanStatusCode.OK });
       } catch (error: unknown) {
         span.recordException(error as Error);
         span.setStatus({ code: SpanStatusCode.ERROR });

@@ -33,6 +33,22 @@ export interface CampanhaRepository {
   ): Promise<Campanha | undefined>;
 
   /**
+   * Resolve a Campanha onde `idConta` é administrador (aperture-d6atj). Hoje
+   * a relação é 0..1 (um usuário admin de uma única campanha) — quando isso
+   * mudar, este método precisa virar `findManyByAdministrador` e os callers
+   * lidarem com seleção. Retorna `undefined` quando o usuário não administra
+   * nenhuma campanha OU quando a campanha não tem recebedor ativo. Usado
+   * pelo tRPC do eunenem-server (contribuicao-router) para resolver a
+   * campanha-do-usuário a partir da sessão, exigindo recebedor ativo para
+   * que contribuições possam ser criadas. Difere de `findFirstByAdministrador`
+   * (p8i01) que retorna wrapper `campanhaSemRecebedor` nesse caso.
+   */
+  findByAdministrador(
+    idConta: IdConta,
+    context?: ArrecadacaoRepositoryContext,
+  ): Promise<Campanha | undefined>;
+
+  /**
    * Deletes the Campanha aggregate. Used by the `registrarContaUsuario`
    * saga as a T3 compensation when adding the initial 'presentes' opcao
    * fails after the campanha row has been written. Idempotent.

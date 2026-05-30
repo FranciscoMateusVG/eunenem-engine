@@ -148,6 +148,58 @@ export function describeContribuicaoRepositoryConformance(
       expect(span?.attributes['db.system']).toBe(options.expectedDbSystem);
       expect(span?.attributes['db.operation.name']).toBe('SELECT');
     });
+
+    // ── saveBulk conformance (aperture-d6atj fix-up) ────────────────────
+    it('saveBulk persists N contribuicoes (same end state as N saves)', async () => {
+      const idCampanha = randomUUID();
+      const idOpcao = randomUUID();
+      const cs = [
+        makeContribuicao({ idCampanha, idOpcaoContribuicao: idOpcao }),
+        makeContribuicao({ idCampanha, idOpcaoContribuicao: idOpcao }),
+        makeContribuicao({ idCampanha, idOpcaoContribuicao: idOpcao }),
+      ];
+      await options.seedForContribuicao?.(cs[0] as Contribuicao);
+
+      await repo.saveBulk(cs);
+
+      for (const c of cs) {
+        const found = await repo.findById(c.id);
+        expect(found).toEqual(c);
+      }
+      expect(await repo.countByOpcao(idCampanha, idOpcao)).toBe(3);
+    });
+
+    it('saveBulk([single]) produces same state as save(single)', async () => {
+      const c = makeContribuicao();
+      await options.seedForContribuicao?.(c);
+      await repo.saveBulk([c]);
+
+      const found = await repo.findById(c.id);
+      expect(found).toEqual(c);
+    });
+
+    it('saveBulk with empty array is a no-op', async () => {
+      await repo.saveBulk([]);
+      // Sanity: no crash, no rows.
+      expect(await repo.countByOpcao(randomUUID(), randomUUID())).toBe(0);
+    });
+
+    it('saveBulk emits db.arrecadacao_contribuicoes.saveBulk span with batch.size', async () => {
+      const idCampanha = randomUUID();
+      const idOpcao = randomUUID();
+      const cs = [
+        makeContribuicao({ idCampanha, idOpcaoContribuicao: idOpcao }),
+        makeContribuicao({ idCampanha, idOpcaoContribuicao: idOpcao }),
+      ];
+      await options.seedForContribuicao?.(cs[0] as Contribuicao);
+
+      await repo.saveBulk(cs);
+      const span = findSpan(options.getSpans(), 'db.arrecadacao_contribuicoes.saveBulk');
+      expect(span).toBeDefined();
+      expect(span?.attributes['db.system']).toBe(options.expectedDbSystem);
+      expect(span?.attributes['db.operation.name']).toBe('INSERT');
+      expect(span?.attributes['batch.size']).toBe(2);
+    });
   });
 }
 

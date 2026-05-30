@@ -154,6 +154,44 @@ export class CampanhaRepositoryMemory implements CampanhaRepository {
     );
   }
 
+  async findByAdministrador(
+    idConta: IdConta,
+    _context?: ArrecadacaoRepositoryContext,
+  ): Promise<Campanha | undefined> {
+    return tracer.startActiveSpan('db.arrecadacao_campanhas.findByAdministrador', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        const campanha = [...this.campanhas.values()].find((c) =>
+          c.idsAdministradores.includes(idConta),
+        );
+        if (!campanha) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return undefined;
+        }
+
+        if (!this.recebedorRepository) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return campanha;
+        }
+
+        const recebedorAtivo = await this.recebedorRepository.findAtivoByCampanhaId(campanha.id);
+        if (!recebedorAtivo) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return undefined;
+        }
+
+        span.setStatus({ code: SpanStatusCode.OK });
+        return campanhaComRecebedorAtivo(campanha, recebedorAtivo);
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
   async delete(idCampanha: IdCampanha, _context?: ArrecadacaoRepositoryContext): Promise<void> {
     return tracer.startActiveSpan('db.arrecadacao_campanhas.delete', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'DELETE' });

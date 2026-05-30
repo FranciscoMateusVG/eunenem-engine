@@ -307,6 +307,45 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
     );
   }
 
+  async findByAdministrador(
+    idConta: IdConta,
+    context?: ArrecadacaoRepositoryContext,
+  ): Promise<Campanha | undefined> {
+    const executor = context?.trx ?? this.db;
+    return tracer.startActiveSpan('db.arrecadacao_campanhas.findByAdministrador', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        // 0..1 by today's invariant (one campanha per user). If/when the
+        // relationship loosens, this becomes findMany; the port comment
+        // documents the migration shape.
+        const adminRow = await executor
+          .selectFrom('campanha_administradores')
+          .select('campanha_id')
+          .where('id_usuario', '=', idConta)
+          .limit(1)
+          .executeTakeFirst();
+
+        if (!adminRow) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return undefined;
+        }
+
+        // Reuse findById to avoid duplicating the recebedor + opcoes +
+        // admins assembly. Cheap second SELECT — this method is invoked
+        // once per authenticated request, not per row.
+        const campanha = await this.findById(adminRow.campanha_id as IdCampanha, context);
+        span.setStatus({ code: SpanStatusCode.OK });
+        return campanha;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
   async delete(idCampanha: IdCampanha, context?: ArrecadacaoRepositoryContext): Promise<void> {
     const executor = context?.trx ?? this.db;
     return tracer.startActiveSpan('db.arrecadacao_campanhas.delete', async (span) => {
