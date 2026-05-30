@@ -1,42 +1,37 @@
-import { useEffect, useState } from 'react';
-import { trpc } from './lib/trpcClient.js';
+import { trpc } from './lib/trpc.js';
 
 /**
- * tRPC smoke test page (aperture-kungg) — proves the end-to-end pipeline:
+ * tRPC smoke test page (aperture-kungg, refactored under aperture-7337j).
  *
- *   SSR placeholder → hydration → @trpc/client httpBatchLink →
- *   POST /api/trpc/listFruits → @trpc/server fetchRequestHandler →
- *   appRouter.listFruits.query() → typed response → render
+ * Now uses the @trpc/react-query hook path — the baseline for every future
+ * tRPC procedure in eunenem-server. Compare this body to the original
+ * vanilla @trpc/client version (PR #44, git history): all the
+ * useState / useEffect / loading / error / cleanup boilerplate is gone.
+ * react-query handles it.
  *
- * Status surfaces (loading / error / fruits) make it obvious in a browser
- * whether the fetch succeeded. Type of `fruits` is inferred from the
- * AppRouter procedure — no manual interface needed.
+ * Pipeline still proves the same e2e wire:
+ *   SSR placeholder → hydration → trpc.listFruits.useQuery() →
+ *   react-query schedules fetch → @trpc/client httpBatchLink →
+ *   GET /api/trpc/listFruits?batch=1 → @trpc/server fetchRequestHandler →
+ *   appRouter.listFruits.query() → typed response → react-query cache →
+ *   re-render with data
+ *
+ * `fruits` is typed `readonly ["maçã", "banana", ...] | undefined` from
+ * the AppRouter procedure return type. Zero manual interfaces.
  */
 export function TrpcSmokePage() {
-  const [fruits, setFruits] = useState<readonly string[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    trpc.listFruits
-      .query()
-      .then((data) => {
-        if (!cancelled) setFruits(data);
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { data: fruits, error, isLoading } = trpc.listFruits.useQuery();
 
   return (
     <main className="mx-auto max-w-2xl px-6 py-16">
       <h1 className="text-3xl font-bold text-ink mb-2">tRPC smoke test</h1>
       <p className="text-sm text-ink/60 mb-8">
         Calls <code className="font-mono text-xs bg-cream px-1.5 py-0.5 rounded">listFruits</code>{' '}
-        via @trpc/client → POST /api/trpc/listFruits. Renders the response below.
+        via{' '}
+        <code className="font-mono text-xs bg-cream px-1.5 py-0.5 rounded">
+          trpc.listFruits.useQuery()
+        </code>{' '}
+        — @trpc/react-query hook with automatic caching, refetch, and retry.
       </p>
 
       {error && (
@@ -44,11 +39,11 @@ export function TrpcSmokePage() {
           data-testid="trpc-smoke-error"
           className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-red-800"
         >
-          <strong className="font-semibold">tRPC error:</strong> {error}
+          <strong className="font-semibold">tRPC error:</strong> {error.message}
         </div>
       )}
 
-      {!fruits && !error && (
+      {isLoading && (
         <div data-testid="trpc-smoke-loading" className="text-ink/60 italic">
           Loading fruits…
         </div>
