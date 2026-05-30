@@ -2,14 +2,44 @@ import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
 import { Hono } from 'hono';
+import { cors } from 'hono/cors';
 import { StrictMode } from 'react';
 import { renderToString } from 'react-dom/server';
 import { App, resolveRoute } from './pages/App.js';
+import { buildServerDeps, loadEnv } from './server/auth/setup.js';
 import { appRouter } from './server/trpc/router.js';
 
 const PORT = Number(process.env.PORT ?? 3001);
 
+// Boot-time gate (aperture-ht7sq) — fail fast if BETTER_AUTH_SECRET,
+// BETTER_AUTH_URL, TRUSTED_ORIGINS, or DATABASE_URL is missing /
+// malformed. Throwing here surfaces a readable error in the process
+// log instead of a cryptic auth failure on the first request.
+const env = loadEnv();
+const deps = buildServerDeps(env);
+
 const app = new Hono();
+
+// CORS for the API surface (aperture-ht7sq). Explicit origin list — NO
+// wildcards (T6 from recon §4). `credentials: true` is required for the
+// session cookie to round-trip on cross-origin XHR (e.g. local-dev
+// front-end on a different port hitting this server's /api/auth/*).
+//
+// CORS runs ONLY on /api/* — SSR catch-all serves first-party HTML where
+// browser CORS doesn't apply.
+const allowedOrigins = [env.BETTER_AUTH_URL, ...env.TRUSTED_ORIGINS.split(',').map((s) => s.trim())]
+  .filter(Boolean);
+app.use(
+  '/api/*',
+  cors({
+    origin: (origin) => (allowedOrigins.includes(origin) ? origin : null),
+    credentials: true,
+    allowMethods: ['GET', 'POST', 'OPTIONS'],
+    allowHeaders: ['Content-Type', 'Authorization', 'Cookie'],
+    exposeHeaders: ['Set-Cookie'],
+    maxAge: 600,
+  }),
+);
 
 // Static assets — esbuild output (client.js), tailwind output (styles.css),
 // and any files copied into public/ (logo.png, svgs, etc.).
@@ -18,26 +48,41 @@ app.use('/public/*', serveStatic({ root: './' }));
 // Health check.
 app.get('/healthz', (c) => c.text('ok'));
 
-// tRPC handler (aperture-kungg) — vanilla @trpc/server v11 over Hono via the
-// fetch adapter. Routes under /api/trpc/* are dispatched to procedures on
-// `appRouter`. Client side uses @trpc/client with the AppRouter *type* only
-// (zero runtime coupling).
+// BetterAuth handler mount (aperture-ht7sq) — MUST come before any
+// body-consuming middleware (T4 anti-trap §8 #6). BetterAuth reads
+// `c.req.raw.body` directly via the Fetch Request and bypasses Hono's
+// body cache; if a middleware upstream calls `c.req.json()` or
+// `c.req.parseBody()`, BetterAuth's stream is already drained.
+//
+// We DON'T install any body-parsing middleware globally, so the order
+// here is safe. The CORS middleware above only reads headers + sets
+// response headers — never reads the body.
+app.on(['POST', 'GET'], '/api/auth/*', (c) => deps.auth.handler(c.req.raw));
+
+// tRPC handler (aperture-kungg + aperture-ht7sq) — routes under
+// /api/trpc/* dispatched to procedures on `appRouter`. The fetch
+// adapter passes the raw Request to BetterAuth via the AuthService
+// in `deps`; same body-cache discipline (T4) applies to procedures
+// that read cookies.
 app.all('/api/trpc/*', (c) =>
   fetchRequestHandler({
     endpoint: '/api/trpc',
     req: c.req.raw,
     router: appRouter,
-    createContext: () => ({}),
+    createContext: ({ req, resHeaders }) => ({
+      deps,
+      headers: req.headers,
+      resHeaders,
+    }),
   }),
 );
 
-// "/" now SSRs the marketing landing page (aperture-q1j2) via the catch-all
-// below — resolveRoute maps the exact "/" pathname to { kind: 'landing' }.
-// (Previously redirected to /pagina/francisco.)
-
-// SSR catch-all: every other route renders the React app. Status is decided
-// from the resolved route (200 for known pages, 404 for anything else) BEFORE
-// renderToString so the response code is honest.
+// "/" SSRs the marketing landing page via the catch-all below —
+// resolveRoute maps the exact "/" pathname to { kind: 'landing' }.
+//
+// SSR catch-all: every other route renders the React app. Status is
+// decided from the resolved route (200 for known pages, 404 for
+// anything else) BEFORE renderToString so the response code is honest.
 app.get('*', (c) => {
   const url = new URL(c.req.url);
   const route = resolveRoute(url.pathname);
@@ -101,7 +146,8 @@ serve({ fetch: app.fetch, port: PORT }, (info) => {
   console.log('  /pagina/francisco  → contributor event page (SSR + hydration)');
   console.log('  /painel/helena     → creator dashboard (SSR + hydration)');
   console.log('  /trpc-smoke        → tRPC smoke test (aperture-kungg)');
-  console.log('  /api/trpc/*        → tRPC procedures (listFruits, ...)');
+  console.log('  /api/trpc/*        → tRPC procedures (listFruits, auth.*)');
+  console.log('  /api/auth/*        → BetterAuth handler (sign-in/sign-up/sign-out/...)');
   console.log('  /healthz           → plain text health check');
   console.log('');
 });
