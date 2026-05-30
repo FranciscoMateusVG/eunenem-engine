@@ -31,10 +31,10 @@ export {
   ProvedorRegraTaxaMemory,
   REGRAS_TAXA_SEED,
 } from './adapters/taxas/regra-provider.memory.js';
+export type { AuthService } from './adapters/usuario/auth-service.js';
+export { AuthServiceMemoria } from './adapters/usuario/auth-service.memory.js';
 export type { UsuarioRepository } from './adapters/usuario/repository.js';
 export { UsuarioRepositoryMemory } from './adapters/usuario/repository.memory.js';
-export type { SessaoUsuarioRepository } from './adapters/usuario/sessao-repository.js';
-export { SessaoUsuarioRepositoryMemory } from './adapters/usuario/sessao-repository.memory.js';
 
 // --- Domain: Arrecadação ---
 
@@ -286,11 +286,8 @@ export {
 
 // --- Domain: Usuário ---
 
-export type { Sessao } from './domain/usuario/entities/sessao.js';
-export { sessaoExpirada } from './domain/usuario/entities/sessao.js';
 export type {
   Conta,
-  CredencialSimulada,
   Usuario,
 } from './domain/usuario/entities/usuario.js';
 export { contaTemPermissao } from './domain/usuario/entities/usuario.js';
@@ -310,8 +307,6 @@ export type { NomeExibicaoUsuario } from './domain/usuario/value-objects/nome-ex
 export { NomeExibicaoUsuarioSchema } from './domain/usuario/value-objects/nome-exibicao-usuario.js';
 export type { Permissao } from './domain/usuario/value-objects/permissao.js';
 export { PERMISSOES_PADRAO, PermissaoSchema } from './domain/usuario/value-objects/permissao.js';
-export type { SenhaSimulada } from './domain/usuario/value-objects/senha-simulada.js';
-export { SenhaSimuladaSchema } from './domain/usuario/value-objects/senha-simulada.js';
 export type { TokenSessao } from './domain/usuario/value-objects/token-sessao.js';
 export { TokenSessaoSchema } from './domain/usuario/value-objects/token-sessao.js';
 
@@ -556,6 +551,7 @@ export {
 export type {
   CriarSessaoUsuarioDeps,
   CriarSessaoUsuarioInput,
+  CriarSessaoUsuarioResult,
 } from './use-cases/usuario/criar-sessao-usuario.js';
 export {
   CriarSessaoUsuarioInputSchema,

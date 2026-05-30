@@ -28,16 +28,14 @@ describe('UsuarioRepositoryMemory', () => {
       permissoes: ['campaign:admin'] as const,
       criadaEm: fixedDate,
     };
-    const credencial = { idUsuario, senhaSimulada: 'stub-secret' };
 
-    await repo.saveRegistro({ usuario, conta, credencial });
+    await repo.saveRegistroDomain({ usuario, conta });
 
     expect(await repo.findUsuarioById(idUsuario)).toEqual(usuario);
     expect(await repo.findUsuarioByEmail(ID_PLATAFORMA_EUNENEM, 'owner@example.com')).toEqual(
       usuario,
     );
     expect(await repo.findContaById(idConta)).toEqual(conta);
-    expect(await repo.findCredencialByIdUsuario(idUsuario)).toEqual(credencial);
   });
 
   it('throws UsuarioEmailJaExisteError on duplicate (idPlataforma, email)', async () => {
@@ -57,17 +55,16 @@ describe('UsuarioRepositoryMemory', () => {
         permissoes: ['campaign:admin'] as const,
         criadaEm: fixedDate,
       },
-      credencial: { idUsuario: uid, senhaSimulada: 'p' },
     });
 
     const u1 = randomUUID();
     const a1 = randomUUID();
-    await repo.saveRegistro(bundle(u1, a1, ID_PLATAFORMA_EUNENEM, 'dup@example.com'));
+    await repo.saveRegistroDomain(bundle(u1, a1, ID_PLATAFORMA_EUNENEM, 'dup@example.com'));
 
     const u2 = randomUUID();
     const a2 = randomUUID();
     await expect(
-      repo.saveRegistro(bundle(u2, a2, ID_PLATAFORMA_EUNENEM, 'dup@example.com')),
+      repo.saveRegistroDomain(bundle(u2, a2, ID_PLATAFORMA_EUNENEM, 'dup@example.com')),
     ).rejects.toThrow(UsuarioEmailJaExisteError);
   });
 
@@ -89,16 +86,17 @@ describe('UsuarioRepositoryMemory', () => {
         permissoes: ['campaign:admin'] as const,
         criadaEm: fixedDate,
       },
-      credencial: { idUsuario: uid, senhaSimulada: 'p' },
     });
 
     const u1 = randomUUID();
     const a1 = randomUUID();
-    await repo.saveRegistro(bundle(u1, a1, ID_PLATAFORMA_EUNENEM));
+    await repo.saveRegistroDomain(bundle(u1, a1, ID_PLATAFORMA_EUNENEM));
 
     const u2 = randomUUID();
     const a2 = randomUUID();
-    await expect(repo.saveRegistro(bundle(u2, a2, ID_PLATAFORMA_EUCASEI))).resolves.toBeUndefined();
+    await expect(
+      repo.saveRegistroDomain(bundle(u2, a2, ID_PLATAFORMA_EUCASEI)),
+    ).resolves.toBeUndefined();
 
     const onEunenem = await repo.findUsuarioByEmail(ID_PLATAFORMA_EUNENEM, email);
     const onEucasei = await repo.findUsuarioByEmail(ID_PLATAFORMA_EUCASEI, email);
@@ -110,7 +108,7 @@ describe('UsuarioRepositoryMemory', () => {
     const repo = new UsuarioRepositoryMemory();
     const idUsuario = randomUUID();
     const idConta = randomUUID();
-    await repo.saveRegistro({
+    await repo.saveRegistroDomain({
       usuario: {
         id: idUsuario,
         idPlataforma: ID_PLATAFORMA_EUNENEM,
@@ -125,7 +123,6 @@ describe('UsuarioRepositoryMemory', () => {
         permissoes: ['campaign:admin'] as const,
         criadaEm: fixedDate,
       },
-      credencial: { idUsuario, senhaSimulada: 'p' },
     });
 
     expect(
@@ -137,7 +134,7 @@ describe('UsuarioRepositoryMemory', () => {
     const repo = new UsuarioRepositoryMemory();
     const idUsuario = randomUUID();
     const idConta = randomUUID();
-    await repo.saveRegistro({
+    await repo.saveRegistroDomain({
       usuario: {
         id: idUsuario,
         idPlataforma: ID_PLATAFORMA_EUNENEM,
@@ -152,7 +149,6 @@ describe('UsuarioRepositoryMemory', () => {
         permissoes: ['campaign:admin'] as const,
         criadaEm: fixedDate,
       },
-      credencial: { idUsuario, senhaSimulada: 'p' },
     });
 
     await repo.atualizarNomeExibicaoUsuario(idUsuario, 'New Name');

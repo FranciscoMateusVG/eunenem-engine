@@ -1,4 +1,4 @@
-import type { Conta, CredencialSimulada, Usuario } from '../../domain/usuario/entities/usuario.js';
+import type { Conta, Usuario } from '../../domain/usuario/entities/usuario.js';
 import type { EmailUsuario } from '../../domain/usuario/value-objects/email-usuario.js';
 import type {
   IdContaUsuario,
@@ -8,17 +8,26 @@ import type {
 import type { NomeExibicaoUsuario } from '../../domain/usuario/value-objects/nome-exibicao-usuario.js';
 
 /**
- * Persistência de utilizador, conta e credencial simulada (porta).
+ * Persistência da raiz Usuario + Conta (porta).
+ *
+ * **Auth credentials are NOT persisted here** (aperture-ibbet) — they live
+ * on the `AuthService` port + adapter. This repository owns ONLY the
+ * domain Usuario aggregate (Usuario + Conta).
  *
  * Uniqueness de email é composta `(idPlataforma, email)` — a mesma pessoa
  * pode registrar-se em eunenem E eucasei como dois `Usuario` distintos.
  */
 export interface UsuarioRepository {
-  saveRegistro(bundle: {
-    readonly usuario: Usuario;
-    readonly conta: Conta;
-    readonly credencial: CredencialSimulada;
-  }): Promise<void>;
+  /**
+   * Persists the domain Usuario aggregate (Usuario root + Conta inner
+   * entity) atomically. Throws `UsuarioEmailJaExisteError` if
+   * `(idPlataforma, email)` is already taken.
+   *
+   * Renamed from the old `saveRegistro(bundle)` which also carried a
+   * `credencial` field — credentials now live on the `AuthService`
+   * adapter and are written by `registrarContaUsuario` BEFORE this call.
+   */
+  saveRegistroDomain(bundle: { readonly usuario: Usuario; readonly conta: Conta }): Promise<void>;
 
   findUsuarioById(id: IdUsuario): Promise<Usuario | undefined>;
   findUsuarioByEmail(
@@ -26,7 +35,6 @@ export interface UsuarioRepository {
     email: EmailUsuario,
   ): Promise<Usuario | undefined>;
   findContaById(id: IdContaUsuario): Promise<Conta | undefined>;
-  findCredencialByIdUsuario(idUsuario: IdUsuario): Promise<CredencialSimulada | undefined>;
   atualizarNomeExibicaoUsuario(
     idUsuario: IdUsuario,
     nomeExibicao: NomeExibicaoUsuario,

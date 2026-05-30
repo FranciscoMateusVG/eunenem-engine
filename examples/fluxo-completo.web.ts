@@ -32,8 +32,8 @@ import { PagamentoProviderFake } from '../src/adapters/pagamentos/provider.fake.
 import { PagamentoRepositoryMemory } from '../src/adapters/pagamentos/repository.memory.js';
 import { PlataformaRepositoryMemory } from '../src/adapters/plataforma/repository.memory.js';
 import { ProvedorRegraTaxaMemory } from '../src/adapters/taxas/regra-provider.memory.js';
+import { AuthServiceMemoria } from '../src/adapters/usuario/auth-service.memory.js';
 import { UsuarioRepositoryMemory } from '../src/adapters/usuario/repository.memory.js';
-import { SessaoUsuarioRepositoryMemory } from '../src/adapters/usuario/sessao-repository.memory.js';
 import type { LancamentoFinanceiro } from '../src/domain/financeiro/entities/lancamento-financeiro.js';
 import { ConsoleLogger } from '../src/observability/console-logger.js';
 import { noopTracer } from '../src/observability/tracer.js';
@@ -62,7 +62,7 @@ const observability = {
 interface State {
   readonly plataformaRepository: PlataformaRepositoryMemory;
   readonly usuarioRepository: UsuarioRepositoryMemory;
-  readonly sessaoUsuarioRepository: SessaoUsuarioRepositoryMemory;
+  readonly authService: AuthServiceMemoria;
   readonly recebedorRepository: RecebedorRepositoryMemory;
   readonly campanhaRepository: CampanhaRepositoryMemory;
   readonly contribuicaoRepository: ContribuicaoRepositoryMemory;
@@ -78,7 +78,7 @@ function createState(): State {
   return {
     plataformaRepository: new PlataformaRepositoryMemory(),
     usuarioRepository: new UsuarioRepositoryMemory(),
-    sessaoUsuarioRepository: new SessaoUsuarioRepositoryMemory(),
+    authService: new AuthServiceMemoria(),
     recebedorRepository,
     campanhaRepository: new CampanhaRepositoryMemory(recebedorRepository),
     contribuicaoRepository: new ContribuicaoRepositoryMemory(),
@@ -618,6 +618,7 @@ app.post('/p/:slug/usuarios', async (c) => {
       {
         usuarioRepository: state.usuarioRepository,
         plataformaRepository: state.plataformaRepository,
+        authService: state.authService,
         clock,
         observability,
       },

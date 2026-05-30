@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { sessaoExpirada } from '../../../src/domain/usuario/entities/sessao.js';
 import { contaTemPermissao } from '../../../src/domain/usuario/entities/usuario.js';
 import { EmailUsuarioSchema } from '../../../src/domain/usuario/value-objects/email-usuario.js';
 
@@ -25,29 +24,13 @@ describe('contaTemPermissao', () => {
   });
 });
 
-describe('sessaoExpirada', () => {
-  it('returns false before expiraEm', () => {
-    const sessao = {
-      token: 'x'.repeat(32),
-      idConta: '00000000-0000-4000-8000-000000000001',
-      expiraEm: new Date('2026-06-01T00:00:00.000Z'),
-    };
-    expect(sessaoExpirada(sessao, new Date('2026-05-01T00:00:00.000Z'))).toBe(false);
-  });
-
-  it('returns true at or after expiraEm', () => {
-    const sessao = {
-      token: 'x'.repeat(32),
-      idConta: '00000000-0000-4000-8000-000000000001',
-      expiraEm: new Date('2026-05-01T00:00:00.000Z'),
-    };
-    expect(sessaoExpirada(sessao, new Date('2026-05-01T00:00:00.000Z'))).toBe(true);
-    expect(sessaoExpirada(sessao, new Date('2026-06-01T00:00:00.000Z'))).toBe(true);
-  });
-});
-
 describe('EmailUsuarioSchema', () => {
   it('normalizes email to lowercase', () => {
     expect(EmailUsuarioSchema.parse('  Test@Example.COM ')).toBe('test@example.com');
   });
 });
+
+// `sessaoExpirada` tests removed (aperture-ibbet) — the Sessao entity +
+// predicate were deleted; session expiry is now adapter-internal (handled
+// by AuthServiceMemoria.validarSessao, which auto-revokes expired tokens).
+// Session expiry behavior is covered end-to-end by casos-de-uso.test.ts.
