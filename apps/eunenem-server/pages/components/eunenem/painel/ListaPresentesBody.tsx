@@ -74,6 +74,31 @@ const icon = {
       <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 0 0 0-7.78z" />
     </svg>
   ),
+  // aperture-2eq0f — sparkle for "criar item personalizado" CTA.
+  // Four-point sparkle with a soft accent dot top-right reads as a
+  // creative-action affordance without competing with the plus icon.
+  sparkle: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" />
+    </svg>
+  ),
+  // aperture-2eq0f — hamburger/list lines for "usar lista pronta".
+  // Three short lines read instantly as "a curated list" — paired
+  // with the caret below it telegraphs the expand/collapse panel
+  // (operator confirmed in the follow-up bead that this opens a
+  // preset-list panel below the action strip, not a dropdown menu).
+  listLines: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" aria-hidden="true">
+      <path d="M4 6h16M4 12h16M4 18h10" />
+    </svg>
+  ),
+  // aperture-2eq0f — downward caret. Sits on the right side of the
+  // "usar lista pronta" CTA to signal the expand-below behaviour.
+  caretDown: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m6 9 6 6 6-6" />
+    </svg>
+  ),
 };
 
 type CatFilter = "all" | ListaCategory;
@@ -491,6 +516,38 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
           <div className="lista-header-actions">
             <button type="button" className="btn btn-primary" onClick={() => setAddOpen(true)}>
               <span className="lista-btn-ic">{icon.plus}</span> Adicionar presente
+            </button>
+            {/* aperture-2eq0f — two outlined CTAs flanking the primary:
+                "criar item personalizado" (sparkle) + "usar lista pronta"
+                (list-lines + caret). Wiring is intentionally light until
+                the follow-up beads land:
+                  - aperture-17cls will replace the existing AddModal with
+                    a tabbed CATÁLOGO/PERSONALIZADO modal; the personalized
+                    button will open that modal on the PERSONALIZADO tab.
+                  - aperture-g70uv will turn "usar lista pronta" into an
+                    expand/collapse toggle revealing a curated preset panel
+                    below this action strip.
+                For now: personalized opens the existing AddModal (already a
+                personalized form); usar-lista-pronta is a toast placeholder
+                so the surface communicates intent without dead UI. */}
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => setAddOpen(true)}
+              aria-label="Criar item personalizado"
+            >
+              <span className="lista-btn-ic">{icon.sparkle}</span> Criar item personalizado
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => toast("Em breve — listas prontas curadas ♡")}
+              aria-label="Usar lista pronta"
+              aria-expanded={false}
+            >
+              <span className="lista-btn-ic">{icon.listLines}</span>
+              Usar lista pronta
+              <span className="lista-btn-ic">{icon.caretDown}</span>
             </button>
           </div>
         </div>
