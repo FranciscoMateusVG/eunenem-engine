@@ -24,6 +24,8 @@ import {
   type Template,
 } from "@/lib/mocks/templates";
 
+import { MobileConviteBody } from "./MobileConviteBody";
+
 // aperture-ghvfn — Convites wizard FOUNDATION shell.
 //
 // Replaces the aperture-q8rr flat 6-card scrollable form with the multi-step
@@ -1291,7 +1293,33 @@ export interface StepViewProps {
 // ConviteBody — wizard shell.
 // ════════════════════════════════════════════════════════════════════════════
 
-export function ConviteBody(_props: PainelSectionBodyProps) {
+const MOBILE_BREAKPOINT_PX = 640;
+
+/** SSR-safe viewport hook — initial render returns false (desktop default)
+ *  so the server-rendered HTML stays consistent. Mount effect swaps once.
+ *  aperture-zlrd2 — boots the mobile dispatch in this shell. */
+function useIsMobile(): boolean {
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT_PX}px)`);
+    const onChange = () => setIsMobile(mq.matches);
+    onChange();
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  return isMobile;
+}
+
+export function ConviteBody(props: PainelSectionBodyProps) {
+  const isMobile = useIsMobile();
+  if (isMobile) {
+    // aperture-zlrd2 — mobile wizard ships in MobileConviteBody.
+    return <MobileConviteBody {...props} />;
+  }
+  return <DesktopConviteBody {...props} />;
+}
+
+function DesktopConviteBody(_props: PainelSectionBodyProps) {
   const [state, setState] = useState<ConviteState>({ ...DEFAULT_STATE });
   const [step, setStep] = useState<number>(0);
   const [fidelity, setFidelity] = useState<Fidelity>("scrapbook");

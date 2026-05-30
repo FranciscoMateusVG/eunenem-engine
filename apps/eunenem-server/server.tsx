@@ -56,7 +56,7 @@ function envelope(ssrHtml: string, pathname: string): string {
 <html lang="pt-BR" class="h-full antialiased">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <!-- aperture-q1j2 (Vance): mark JS-active before paint so the landing
          .fade-up reveal only hides content when JS can reveal it. No-JS /
          pre-hydration keeps all content visible. -->
