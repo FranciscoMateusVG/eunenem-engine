@@ -113,7 +113,9 @@ export function buildPainelMenu(
         {
           id: "presentes",
           label: "presentes recebidos",
-          sub: `${snapshot.giftsClaimed} mimos · R$ ${reais} · ver extrato`,
+          // aperture-9qu7k — "presentes" reads more direct than "mimos"
+          // for the dashboard row sub (target screenshot 32).
+          sub: `${snapshot.giftsClaimed} presentes · R$ ${reais} · ver extrato`,
           variant: "pink",
           icon: "gift",
           featured: true,
