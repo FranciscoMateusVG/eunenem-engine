@@ -6,6 +6,7 @@ import {
 } from '../../src/adapters/plataforma/repository.memory.js';
 import type { UsuarioRepository } from '../../src/adapters/usuario/repository.js';
 import { UsuarioEmailJaExisteError } from '../../src/errors/usuario/email-ja-existe.error.js';
+import { UsuarioSlugJaExisteError } from '../../src/errors/usuario/slug-ja-existe.error.js';
 
 const fixedDate = new Date('2026-05-01T12:00:00.000Z');
 
@@ -38,7 +39,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
       repo = await options.factory();
     });
 
-    it('persists registration and resolves by id and (idPlataforma, email)', async () => {
+    it('persists registration and resolves by id, (idPlataforma, email), and (idPlataforma, slug)', async () => {
       const idUsuario = randomUUID();
       const idConta = randomUUID();
       const usuario = {
@@ -47,6 +48,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
         idConta,
         email: 'owner@example.com',
         nomeExibicao: 'Owner',
+        slug: 'owner',
         criadoEm: fixedDate,
       };
       const conta = {
@@ -62,6 +64,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
       expect(await repo.findUsuarioByEmail(ID_PLATAFORMA_EUNENEM, 'owner@example.com')).toEqual(
         usuario,
       );
+      expect(await repo.findUsuarioBySlug(ID_PLATAFORMA_EUNENEM, 'owner')).toEqual(usuario);
       const loadedConta = await repo.findContaById(idConta);
       expect(loadedConta).toBeDefined();
       expect(loadedConta?.id).toBe(idConta);
@@ -70,13 +73,20 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
     });
 
     it('throws UsuarioEmailJaExisteError on duplicate (idPlataforma, email)', async () => {
-      const bundle = (uid: string, aid: string, idPlataforma: string, email: string) => ({
+      const bundle = (
+        uid: string,
+        aid: string,
+        idPlataforma: string,
+        email: string,
+        slug: string,
+      ) => ({
         usuario: {
           id: uid,
           idPlataforma,
           idConta: aid,
           email,
           nomeExibicao: 'A',
+          slug,
           criadoEm: fixedDate,
         },
         conta: {
@@ -89,24 +99,109 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
 
       const u1 = randomUUID();
       const a1 = randomUUID();
-      await repo.saveRegistroDomain(bundle(u1, a1, ID_PLATAFORMA_EUNENEM, 'dup@example.com'));
+      await repo.saveRegistroDomain(
+        bundle(u1, a1, ID_PLATAFORMA_EUNENEM, 'dup@example.com', 'dup-a'),
+      );
 
       const u2 = randomUUID();
       const a2 = randomUUID();
       await expect(
-        repo.saveRegistroDomain(bundle(u2, a2, ID_PLATAFORMA_EUNENEM, 'dup@example.com')),
+        repo.saveRegistroDomain(bundle(u2, a2, ID_PLATAFORMA_EUNENEM, 'dup@example.com', 'dup-b')),
       ).rejects.toThrow(UsuarioEmailJaExisteError);
+    });
+
+    it('throws UsuarioSlugJaExisteError on duplicate (idPlataforma, slug)', async () => {
+      const u1 = randomUUID();
+      const a1 = randomUUID();
+      await repo.saveRegistroDomain({
+        usuario: {
+          id: u1,
+          idPlataforma: ID_PLATAFORMA_EUNENEM,
+          idConta: a1,
+          email: 'first@example.com',
+          nomeExibicao: 'First',
+          slug: 'shared-slug',
+          criadoEm: fixedDate,
+        },
+        conta: {
+          id: a1,
+          idUsuario: u1,
+          permissoes: ['campaign:admin'] as const,
+          criadaEm: fixedDate,
+        },
+      });
+
+      const u2 = randomUUID();
+      const a2 = randomUUID();
+      await expect(
+        repo.saveRegistroDomain({
+          usuario: {
+            id: u2,
+            idPlataforma: ID_PLATAFORMA_EUNENEM,
+            idConta: a2,
+            email: 'second@example.com',
+            nomeExibicao: 'Second',
+            slug: 'shared-slug',
+            criadoEm: fixedDate,
+          },
+          conta: {
+            id: a2,
+            idUsuario: u2,
+            permissoes: ['campaign:admin'] as const,
+            criadaEm: fixedDate,
+          },
+        }),
+      ).rejects.toThrow(UsuarioSlugJaExisteError);
+    });
+
+    it('allows the same slug across different plataformas', async () => {
+      const slug = 'helena';
+      const mk = (uid: string, aid: string, idPlataforma: string, email: string) => ({
+        usuario: {
+          id: uid,
+          idPlataforma,
+          idConta: aid,
+          email,
+          nomeExibicao: 'H',
+          slug,
+          criadoEm: fixedDate,
+        },
+        conta: {
+          id: aid,
+          idUsuario: uid,
+          permissoes: ['campaign:admin'] as const,
+          criadaEm: fixedDate,
+        },
+      });
+
+      const u1 = randomUUID();
+      const a1 = randomUUID();
+      await repo.saveRegistroDomain(mk(u1, a1, ID_PLATAFORMA_EUNENEM, 'h@eunenem.test'));
+
+      const u2 = randomUUID();
+      const a2 = randomUUID();
+      await expect(
+        repo.saveRegistroDomain(mk(u2, a2, ID_PLATAFORMA_EUCASEI, 'h@eucasei.test')),
+      ).resolves.toBeUndefined();
+
+      expect((await repo.findUsuarioBySlug(ID_PLATAFORMA_EUNENEM, slug))?.id).toBe(u1);
+      expect((await repo.findUsuarioBySlug(ID_PLATAFORMA_EUCASEI, slug))?.id).toBe(u2);
+    });
+
+    it('findUsuarioBySlug returns undefined for unknown slugs', async () => {
+      expect(await repo.findUsuarioBySlug(ID_PLATAFORMA_EUNENEM, 'never-existed')).toBeUndefined();
     });
 
     it('allows the same email across different plataformas (operator decision #2)', async () => {
       const email = 'shared@example.com';
-      const bundle = (uid: string, aid: string, idPlataforma: string) => ({
+      const bundle = (uid: string, aid: string, idPlataforma: string, slug: string) => ({
         usuario: {
           id: uid,
           idPlataforma,
           idConta: aid,
           email,
           nomeExibicao: 'Shared',
+          slug,
           criadoEm: fixedDate,
         },
         conta: {
@@ -119,12 +214,12 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
 
       const u1 = randomUUID();
       const a1 = randomUUID();
-      await repo.saveRegistroDomain(bundle(u1, a1, ID_PLATAFORMA_EUNENEM));
+      await repo.saveRegistroDomain(bundle(u1, a1, ID_PLATAFORMA_EUNENEM, 'shared-a'));
 
       const u2 = randomUUID();
       const a2 = randomUUID();
       await expect(
-        repo.saveRegistroDomain(bundle(u2, a2, ID_PLATAFORMA_EUCASEI)),
+        repo.saveRegistroDomain(bundle(u2, a2, ID_PLATAFORMA_EUCASEI, 'shared-b')),
       ).resolves.toBeUndefined();
 
       const onEunenem = await repo.findUsuarioByEmail(ID_PLATAFORMA_EUNENEM, email);
@@ -143,6 +238,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
           idConta,
           email: 'isolated@example.com',
           nomeExibicao: 'I',
+          slug: 'isolated',
           criadoEm: fixedDate,
         },
         conta: {
@@ -168,6 +264,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
           idConta,
           email: 'x@example.com',
           nomeExibicao: 'Old',
+          slug: 'old-name',
           criadoEm: fixedDate,
         },
         conta: {

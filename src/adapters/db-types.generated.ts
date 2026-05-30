@@ -120,6 +120,7 @@ export interface Usuarios {
   id_conta: string;
   id_plataforma: string;
   nome_exibicao: string;
+  slug: string;
 }
 
 export interface Verifications {

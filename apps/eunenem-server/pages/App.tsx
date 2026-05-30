@@ -10,10 +10,11 @@ import { TrpcSmokePage } from './TrpcSmokePage.js';
 import { TrpcProvider } from './lib/TrpcProvider.js';
 import { isPainelSection, type PainelSection } from './lib/painelRoutes.js';
 
-// Mock-first: the only recognised creator slug is "helena" (the public
-// contributor page uses "francisco"). A later auth epic resolves the
-// signed-in user's real slug.
-const PAINEL_SLUG = 'helena';
+// Slug shape — matches the SlugUsuario VO (src/domain/usuario/value-objects/
+// slug-usuario.ts). Kept duplicated here so resolveRoute remains a pure
+// no-engine-dep function (App.tsx is shared SSR + client). The VO is the
+// source of truth; if it ever changes shape, update this regex too.
+const SLUG_REGEX = /^[a-z][a-z0-9-]{2,29}$/;
 
 // Route map (single source of truth, used by both server.tsx and client.tsx).
 // Server uses this to decide HTTP status (404 vs 200) before rendering.
@@ -22,6 +23,13 @@ const PAINEL_SLUG = 'helena';
 // Painel convention (aperture-vv3i): /painel/:slug is the dashboard;
 // /painel/:slug/:section is an authenticated sub-page. Valid sections live in
 // lib/painelRoutes.ts — an unknown sub-section 404s honestly.
+//
+// Slug shape (aperture-khbow): /painel/:slug now accepts ANY syntactically
+// valid slug (regex-matched). The router doesn't know if the slug owner
+// actually exists — that's an SSR-time DB lookup in server.tsx, which
+// flips the status to 404 when findUsuarioBySlug returns undefined.
+// Pure-client navigation (e.g. /painel/unknown typed in a fresh tab without
+// SSR) will still hit the SSR catch-all and get its 404 honestly.
 export function resolveRoute(pathname: string):
   | { kind: 'landing' }
   | { kind: 'pagina'; slug: string }
@@ -48,7 +56,7 @@ export function resolveRoute(pathname: string):
     return { kind: 'pagina', slug: paginaMatch[1] };
   }
   const painelMatch = pathname.match(/^\/painel\/([^/]+)(?:\/([^/]+))?\/?$/);
-  if (painelMatch && painelMatch[1] === PAINEL_SLUG) {
+  if (painelMatch && painelMatch[1] && SLUG_REGEX.test(painelMatch[1])) {
     const slug = painelMatch[1];
     const section = painelMatch[2];
     if (!section) {
@@ -57,7 +65,7 @@ export function resolveRoute(pathname: string):
     if (isPainelSection(section)) {
       return { kind: 'painel-section', slug, section };
     }
-    // Known slug, unknown sub-section → honest 404.
+    // Known-shape slug, unknown sub-section → honest 404.
     return { kind: 'not-found' };
   }
   return { kind: 'not-found' };

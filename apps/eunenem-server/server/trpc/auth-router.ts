@@ -282,6 +282,12 @@ export const authRouter = t.router({
       idPlataforma: usuario.idPlataforma,
       email: usuario.email,
       nomeExibicao: usuario.nomeExibicao,
+      /**
+       * Public URL slug (aperture-khbow). Lets the client redirect to
+       * `/painel/<slug>` post-auth in one round-trip — no follow-up call
+       * to fetch the user's own slug.
+       */
+      slug: usuario.slug,
       expiraEm: sessao.expiraEm,
     };
   }),

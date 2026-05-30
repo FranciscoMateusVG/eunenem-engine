@@ -6,6 +6,7 @@ import type {
   IdUsuario,
 } from '../../domain/usuario/value-objects/ids.js';
 import type { NomeExibicaoUsuario } from '../../domain/usuario/value-objects/nome-exibicao-usuario.js';
+import type { SlugUsuario } from '../../domain/usuario/value-objects/slug-usuario.js';
 
 /**
  * Persistência da raiz Usuario + Conta (porta).
@@ -33,6 +34,16 @@ export interface UsuarioRepository {
   findUsuarioByEmail(
     idPlataforma: IdPlataformaReferencia,
     email: EmailUsuario,
+  ): Promise<Usuario | undefined>;
+  /**
+   * Lookup by composite `(idPlataforma, slug)` (aperture-khbow). Used by the
+   * eunenem-server SSR route `/painel/[slug]` to resolve the owner of a
+   * public dashboard URL. Returns `undefined` for unknown slugs (caller
+   * decides whether to 404 or show a public placeholder).
+   */
+  findUsuarioBySlug(
+    idPlataforma: IdPlataformaReferencia,
+    slug: SlugUsuario,
   ): Promise<Usuario | undefined>;
   findContaById(id: IdContaUsuario): Promise<Conta | undefined>;
   atualizarNomeExibicaoUsuario(
