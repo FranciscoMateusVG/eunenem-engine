@@ -1,156 +1,141 @@
-// next/image and next/link aren't available here (no Next). Use plain <a> and
-// <img>. Width/height attributes preserve layout to avoid CLS.
+import { painelHref, type PainelSection } from "@/lib/painelRoutes";
 
-// aperture-i01o — Painel topbar (sticky, blur backdrop).
+// aperture-fx2iz — Common full-width painel topbar.
 //
-// Logo (Thacy's logo.png asset) on the left; "minha página / TUTORIAL
-// / ajuda" desktop nav in the middle (hidden under 900px per Thacy
-// v3); two icon buttons (notifications, account) on the right. The
-// notifications icon carries a coral-pink dot indicator when there's
-// anything unread — wired off `hasNotif`.
+// Single header used by every /painel/:slug(/:section) route. Three zones,
+// rendered in a centered max-width row that sits inside a full-viewport-width
+// background band:
+//   • Brand block on the left — Thacy's logo.png wordmark, linking back to the
+//     painel root.
+//   • 4 centered nav links — MINHA ÁREA / EXTRATO / CONVIDADOS / CONVITE.
+//     Operator-confirmed exactly 4 buttons (no LISTA, no PERFIL); see the bead
+//     brief — earlier sketches mentioned a 5th-button placeholder, dropped.
+//   • Circular icon-buttons on the right — notifications bell (carries a coral
+//     dot when `unread` is true; wired static for now) + logout (arrow-out-of-
+//     box). Same visual treatment as the existing painel header (see 26.png).
 //
-// Translates Thacy's `.topbar` block from the v3 HTML mockup to
-// Tailwind + design-token CSS vars. Wordmark was previously the
-// Patrick Hand + heart-circle that Navbar.tsx uses on the marketing
-// site — operator picked Thacy's actual brand asset (Option B,
-// 2026-05-17) so the signed-in painel reads as the brand mark the
-// rest of Thacy's deliverables use. Rendered via next/image so the
-// 174×68 source asset gets webp/avif transcoding + lazy/eager
-// loading control; `priority` is on because the logo is above the
-// fold and visually anchors the topbar. CSS in globals.css scales
-// height to 34px mobile, 40px desktop (>=900px).
+// Active state: the link matching `activeSection` (or the MINHA ÁREA link when
+// `activeSection` is undefined, i.e. the painel root) renders as a soft-purple
+// pill — `var(--lilac-soft)` background, `var(--plum)` text. Inactive links
+// stay plain text in `var(--ink)`.
+//
+// Hrefs come from painelHref() so paths never drift from the routing source of
+// truth in lib/painelRoutes.ts.
 
 interface PainelTopbarProps {
-  hasNotif?: boolean;
-  activeTab?: "minha-pagina" | "tutorial" | "ajuda";
+  /** Creator slug — drives every nav href. */
+  slug: string;
+  /** Current section, or undefined when on the painel root (PainelPage). */
+  activeSection?: PainelSection;
+  /** Whether the bell shows the unread dot. Static-wired for now. */
+  unread?: boolean;
 }
 
-const NAV_ITEMS: { id: PainelTopbarProps["activeTab"]; label: string }[] = [
-  { id: "minha-pagina", label: "minha página" },
-  { id: "tutorial", label: "TUTORIAL" },
-  { id: "ajuda", label: "ajuda" },
+interface NavItem {
+  label: string;
+  /** undefined → MINHA ÁREA (the painel root). */
+  section?: PainelSection;
+}
+
+// Order matters — left-to-right per the brief.
+const NAV_ITEMS: NavItem[] = [
+  { label: "MINHA ÁREA" },
+  { label: "EXTRATO", section: "presentes" },
+  { label: "CONVIDADOS", section: "convidados" },
+  { label: "CONVITE", section: "convite" },
 ];
 
 export function PainelTopbar({
-  hasNotif = true,
-  activeTab = "minha-pagina",
+  slug,
+  activeSection,
+  unread = true,
 }: PainelTopbarProps) {
   return (
-    <header
-      className="painel-topbar"
-      style={{
-        position: "sticky",
-        top: 0,
-        zIndex: 30,
-        background: "rgba(248, 247, 246, 0.86)",
-        backdropFilter: "blur(16px) saturate(140%)",
-        WebkitBackdropFilter: "blur(16px) saturate(140%)",
-        borderBottom: "1px solid var(--line)",
-        padding: "12px 18px",
-        paddingTop: "calc(12px + env(safe-area-inset-top))",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: 12,
-      }}
-    >
-      {/* Wordmark — Thacy's logo.png brand asset (operator picked
-          Option B, 2026-05-17). Source is 174×68 RGBA; rendered at
-          intrinsic ratio with CSS-controlled height (34px mobile /
-          40px desktop) so the topbar's vertical rhythm matches the
-          rest of the v3 mockup. `priority` because it's above the
-          fold and visually anchors the topbar — Lighthouse LCP
-          benefits, and avoids a paint flash on dev refresh. */}
-      <a
-        href="/painel/helena"
-        className="painel-logo flex items-center no-underline"
-        aria-label="EuNeném — início"
-      >
-        <img
-          src="/public/logo.png"
-          alt="EuNeném"
-          width={174}
-          height={68}
-          className="painel-logo-img"
-        />
-      </a>
-
-      {/* Desktop nav — appears at >=900px per Thacy v3 mockup. */}
-      <nav aria-label="Painel — seções" className="painel-topbar-nav">
-        <ul className="flex items-center gap-1 m-0 p-0 list-none">
-          {NAV_ITEMS.map((item) => {
-            const active = item.id === activeTab;
-            return (
-              <li key={item.id}>
-                <a
-                  href="#"
-                  aria-current={active ? "page" : undefined}
-                  className={`painel-topbar-link ${active ? "active" : ""}`}
-                >
-                  {item.label}
-                </a>
-              </li>
-            );
-          })}
-        </ul>
-      </nav>
-
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          aria-label={
-            hasNotif ? "notificações (novas)" : "notificações"
-          }
-          className="painel-icon-btn"
+    <header className="painel-topbar" aria-label="Painel — navegação">
+      <div className="painel-topbar-inner">
+        <a
+          href={painelHref(slug)}
+          className="painel-topbar-brand"
+          aria-label="EuNeném — painel"
         >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={1.7}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-            style={{ width: 18, height: 18 }}
+          {/* Thacy's logo asset — the "ee NENEM" colorful wordmark. The
+              .painel-logo-img rule already height-controls it (34px mobile /
+              40px desktop) so we keep the same visual rhythm. */}
+          <img
+            src="/public/logo.png"
+            alt="EuNeném"
+            width={174}
+            height={68}
+            className="painel-logo-img"
+          />
+        </a>
+
+        <nav className="painel-topbar-nav" aria-label="Seções do painel">
+          <ul>
+            {NAV_ITEMS.map((item) => {
+              const active = item.section === activeSection;
+              return (
+                <li key={item.label}>
+                  <a
+                    href={painelHref(slug, item.section)}
+                    aria-current={active ? "page" : undefined}
+                    className={`painel-topbar-link${
+                      active ? " is-active" : ""
+                    }`}
+                  >
+                    {item.label}
+                  </a>
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
+
+        <div className="painel-topbar-actions">
+          <button
+            type="button"
+            aria-label={unread ? "notificações (novas)" : "notificações"}
+            className="painel-topbar-icon-btn"
           >
-            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-            <path d="M13.7 21a2 2 0 0 1-3.4 0" />
-          </svg>
-          {hasNotif && (
-            <span
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.8}
+              strokeLinecap="round"
+              strokeLinejoin="round"
               aria-hidden="true"
-              style={{
-                position: "absolute",
-                top: 8,
-                right: 8,
-                width: 8,
-                height: 8,
-                borderRadius: "50%",
-                background: "var(--coral-pink)",
-                border: "1.5px solid var(--paper)",
-              }}
-            />
-          )}
-        </button>
-        <button
-          type="button"
-          aria-label="minha conta"
-          className="painel-icon-btn"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={1.7}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-            style={{ width: 18, height: 18 }}
+              width={18}
+              height={18}
+            >
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+              <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+            </svg>
+            {unread && <span aria-hidden="true" className="badge-dot" />}
+          </button>
+          <button
+            type="button"
+            aria-label="sair"
+            className="painel-topbar-icon-btn"
           >
-            <circle cx="12" cy="8" r="4" />
-            <path d="M4 21a8 8 0 0 1 16 0" />
-          </svg>
-        </button>
+            {/* Logout — arrow-out-of-box (door + arrow pointing right). */}
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.8}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+              width={18}
+              height={18}
+            >
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <polyline points="16 17 21 12 16 7" />
+              <line x1="21" y1="12" x2="9" y2="12" />
+            </svg>
+          </button>
+        </div>
       </div>
     </header>
   );
