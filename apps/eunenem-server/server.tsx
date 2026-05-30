@@ -7,6 +7,7 @@ import { StrictMode } from 'react';
 import { renderToString } from 'react-dom/server';
 import { App, resolveRoute } from './pages/App.js';
 import { buildServerDeps, ID_PLATAFORMA_EUNENEM, loadEnv } from './server/auth/setup.js';
+import { installBlockedAuthHandlerGuard } from './server/blocked-auth-handler.js';
 import { appRouter } from './server/trpc/router.js';
 
 const PORT = Number(process.env.PORT ?? 3001);
@@ -48,6 +49,14 @@ app.use('/public/*', serveStatic({ root: './' }));
 // Health check.
 app.get('/healthz', (c) => c.text('ok'));
 
+// Block guard (aperture-ln3de) — install BEFORE the `auth.handler`
+// catch-all so specific blocked paths short-circuit with byte-identical
+// 410 Gone responses. Closes the C1 enumeration oracle on
+// /api/auth/sign-in/email and the H1 saga-bypass surface on
+// /api/auth/sign-up/email + sign-out + forget-password. See
+// server/blocked-auth-handler.ts for the full rationale + path list.
+installBlockedAuthHandlerGuard(app);
+
 // BetterAuth handler mount (aperture-ht7sq) — MUST come before any
 // body-consuming middleware (T4 anti-trap §8 #6). BetterAuth reads
 // `c.req.raw.body` directly via the Fetch Request and bypasses Hono's
@@ -57,6 +66,11 @@ app.get('/healthz', (c) => c.text('ok'));
 // We DON'T install any body-parsing middleware globally, so the order
 // here is safe. The CORS middleware above only reads headers + sets
 // response headers — never reads the body.
+//
+// Endpoints actually intended to flow through here: verify-email +
+// callback/*. The four HTTP authn flows (sign-up/email, sign-in/email,
+// sign-out, forget-password) are intercepted above by the block guard
+// and never reach this catch-all (aperture-ln3de).
 app.on(['POST', 'GET'], '/api/auth/*', (c) => deps.auth.handler(c.req.raw));
 
 // tRPC handler (aperture-kungg + aperture-ht7sq) — routes under
