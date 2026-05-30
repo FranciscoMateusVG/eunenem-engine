@@ -157,6 +157,15 @@ const IconPin = (p: { size?: number }) => (
     <circle cx="12" cy="10" r="3" />
   </Icon>
 );
+// aperture-ch1kr — clock icon for the VER CONVITE preview card's
+// time pill chip. Same stroke style + currentColor as the other
+// preview-card icons (calendar / pin) so the chip row stays cohesive.
+const IconClock = (p: { size?: number }) => (
+  <Icon size={p.size} sw={1.9}>
+    <circle cx="12" cy="12" r="9" />
+    <polyline points="12 7 12 12 16 14" />
+  </Icon>
+);
 const IconHeart = (p: { size?: number; fill?: string }) => (
   <Icon size={p.size} sw={1.9} fill={p.fill ?? "none"}>
     <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
@@ -1132,6 +1141,226 @@ function VerLinkModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+// ---------- aperture-ch1kr — VER CONVITE preview modal ----------
+//
+// Replaces the placeholder toast shipped by aperture-gnxal with the
+// real "prévia do convite" modal: a single rounded purple-gradient
+// card showing the invite hero (greeting, event title with marca-texto,
+// host attribution, date/time/location pill chips, decorative CONFIRMAR
+// PRESENÇA button, handwritten footer).
+//
+// Mirrors VerLinkModal's chrome + inline-style approach for visual
+// cohesion. The CONFIRMAR PRESENÇA CTA inside the preview is purely
+// DECORATIVE — triple-guarded (aria-hidden + tabIndex=-1 + preventDefault)
+// so screen readers + keyboard nav aren't fooled into thinking it's a
+// real RSVP action. The modal's own "USAR ESTE CONVITE" foot button is
+// the real action.
+//
+// Event data sourced from the shared PREVIEW_EVENT mock (added in
+// aperture-8qg1s, extended here with timeLabel). NO redefining the data.
+
+function VerConviteModal({ onClose }: { onClose: () => void }) {
+  const { eventName, eventNameHighlight, hostName, dateLabel, timeLabel, locationLabel } =
+    PREVIEW_EVENT;
+
+  // Duplicated from VerLinkModal — keeps each modal self-contained while
+  // both consume the same shared PREVIEW_EVENT mock. If a third modal
+  // ever needs this it's worth lifting to a module-level helper.
+  const renderHighlighted = () => {
+    const idx = eventName.indexOf(eventNameHighlight);
+    if (idx < 0) return eventName;
+    const before = eventName.slice(0, idx);
+    const after = eventName.slice(idx + eventNameHighlight.length);
+    return (
+      <>
+        {before}
+        <span className="hl">{eventNameHighlight}</span>
+        {after}
+      </>
+    );
+  };
+
+  const chipStyle: CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "6px 12px",
+    borderRadius: 999,
+    background: "var(--cream)",
+    color: "var(--ink-soft)",
+    fontFamily: FONT_SANS,
+    fontSize: 13,
+    fontWeight: 500,
+    border: "1px solid var(--line)",
+  };
+
+  const noop = (e: React.MouseEvent) => e.preventDefault();
+
+  return (
+    <Modal onClose={onClose}>
+      <div className="lista-modal-head">
+        <div>
+          <span
+            style={{
+              fontFamily: FONT_CAVEAT,
+              color: "var(--plum)",
+              fontSize: 22,
+              display: "inline-block",
+              transform: "rotate(-2deg)",
+              lineHeight: 1,
+              fontWeight: 600,
+            }}
+          >
+            convite virtual ♡
+          </span>
+          <h3>
+            prévia do <span className="hl">convite</span>
+          </h3>
+        </div>
+        <button
+          type="button"
+          className="lista-modal-x"
+          onClick={onClose}
+          aria-label="Fechar"
+        >
+          <IconX size={16} />
+        </button>
+      </div>
+
+      <div className="lista-modal-body">
+        {/* Preview card — what the convite itself looks like */}
+        <div
+          style={{
+            marginTop: 4,
+            padding: "26px 22px",
+            borderRadius: 22,
+            background:
+              "linear-gradient(135deg, var(--lilac-soft) 0%, var(--pink-soft) 100%)",
+            border: "1px solid var(--line)",
+            textAlign: "center",
+          }}
+        >
+          <div
+            style={{
+              fontFamily: FONT_CAVEAT,
+              color: "var(--plum)",
+              fontSize: 26,
+              lineHeight: 1.1,
+              fontWeight: 600,
+            }}
+          >
+            olá ♡ você foi convidada
+          </div>
+
+          <h4
+            style={{
+              fontFamily: FONT_HAND,
+              fontSize: 34,
+              color: "var(--plum)",
+              margin: "10px 0 6px",
+              fontWeight: 400,
+            }}
+          >
+            {renderHighlighted()}
+          </h4>
+
+          <div
+            style={{
+              fontFamily: FONT_CAVEAT,
+              color: "var(--plum)",
+              fontSize: 20,
+              marginBottom: 16,
+              fontStyle: "italic",
+            }}
+          >
+            por {hostName}
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 8,
+              marginBottom: 18,
+            }}
+          >
+            <span style={chipStyle}>
+              <IconCalendar size={13} /> {dateLabel}
+            </span>
+            <span style={chipStyle}>
+              <IconClock size={13} /> {timeLabel}
+            </span>
+            <span style={chipStyle}>
+              <IconPin size={13} /> {locationLabel}
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={noop}
+            aria-hidden="true"
+            tabIndex={-1}
+            style={{
+              fontFamily: FONT_SANS,
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+              fontWeight: 600,
+              fontSize: 12,
+              padding: "12px 22px",
+              borderRadius: 999,
+              cursor: "default",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+              border: "1px solid transparent",
+              background:
+                "linear-gradient(135deg, var(--lilac), var(--lilac-deep))",
+              color: "#fff",
+              boxShadow: "var(--shadow-cta)",
+              marginBottom: 14,
+            }}
+          >
+            <IconHeart size={13} fill="currentColor" /> confirmar presença
+          </button>
+
+          <div
+            style={{
+              fontFamily: FONT_CAVEAT,
+              color: "var(--plum)",
+              fontSize: 18,
+              lineHeight: 1.1,
+            }}
+          >
+            mal posso esperar pra te ver ♡
+          </div>
+        </div>
+      </div>
+
+      <div className="lista-modal-foot">
+        <div className="lista-foot-actions">
+          <button type="button" className="btn btn-ghost" onClick={onClose}>
+            fechar
+          </button>
+        </div>
+        <div className="lista-foot-actions lista-foot-actions-end">
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => {
+              toast.success("convite escolhido ♡");
+              onClose();
+            }}
+          >
+            <IconSparkle size={14} /> usar este convite
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ---------- page body ----------
 export function ConvidadosBody({ slug: _slug }: PainelSectionBodyProps) {
   const [guests, setGuests] = useState<Convidado[]>(CONVIDADOS_SEED);
@@ -1144,6 +1373,8 @@ export function ConvidadosBody({ slug: _slug }: PainelSectionBodyProps) {
   const [showAdd, setShowAdd] = useState(false);
   // aperture-8qg1s — controls the VER LINK preview modal
   const [verLinkOpen, setVerLinkOpen] = useState(false);
+  // aperture-ch1kr — controls the VER CONVITE preview modal
+  const [verConviteOpen, setVerConviteOpen] = useState(false);
 
   const counts = useMemo(
     () => ({
@@ -1472,7 +1703,7 @@ export function ConvidadosBody({ slug: _slug }: PainelSectionBodyProps) {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => toast("Em breve — preview do convite ♡")}
+            onClick={() => setVerConviteOpen(true)}
             title="Ver convite"
             ariaLabel="Ver convite"
           >
@@ -1637,6 +1868,9 @@ export function ConvidadosBody({ slug: _slug }: PainelSectionBodyProps) {
 
       {/* aperture-8qg1s — VER LINK preview modal */}
       {verLinkOpen && <VerLinkModal onClose={() => setVerLinkOpen(false)} />}
+
+      {/* aperture-ch1kr — VER CONVITE preview modal */}
+      {verConviteOpen && <VerConviteModal onClose={() => setVerConviteOpen(false)} />}
     </section>
   );
 }

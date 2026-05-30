@@ -10,6 +10,7 @@ export interface PreviewEvent {
   eventNameHighlight: string; // the substring to wrap in <span class="hl"> — e.g. "chá"
   greeting: string;       // e.g. "olá ♡"
   dateLabel: string;      // e.g. "sábado, 14 de junho"
+  timeLabel: string;      // e.g. "16h às 19h" — used by aperture-ch1kr's VER CONVITE preview card
   locationLabel: string;  // e.g. "laranjeiras / rj"
   shareDomain: string;    // e.g. "festa.app/r/"  — produces full URL = shareDomain + hostSlug
 }
@@ -21,6 +22,7 @@ export const PREVIEW_EVENT: PreviewEvent = {
   eventNameHighlight: "chá",
   greeting: "olá ♡",
   dateLabel: "sábado, 14 de junho",
+  timeLabel: "16h às 19h",
   locationLabel: "laranjeiras / rj",
   shareDomain: "festa.app/r/",
 };
