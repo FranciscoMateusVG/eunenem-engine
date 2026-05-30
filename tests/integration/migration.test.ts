@@ -51,10 +51,18 @@ describe('Migration round-trip', () => {
     expect(tableNames).toContain('recebedores');
     expect(tableNames).toContain('usuarios');
     expect(tableNames).toContain('contas');
+    expect(tableNames).toContain('users');
+    expect(tableNames).toContain('sessions');
+    expect(tableNames).toContain('accounts');
+    expect(tableNames).toContain('verifications');
+    expect(tableNames).toContain('rate_limit');
 
-    // Migrate down (latest migration first; one step for usuario, then
-    // seven steps for arrecadacao). aperture-xyhjr added the usuario
-    // migration on top of the arrecadacao stack.
+    // Migrate down (latest migration first; one step for better-auth, one
+    // step for usuario, then seven steps for arrecadacao). aperture-g7f68
+    // added the BetterAuth migration on top of the usuario stack.
+    const downBetterAuth = await migrator.migrateDown();
+    expect(downBetterAuth.error).toBeUndefined();
+
     const downUsuario = await migrator.migrateDown();
     expect(downUsuario.error).toBeUndefined();
 

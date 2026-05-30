@@ -31,8 +31,11 @@ export {
   ProvedorRegraTaxaMemory,
   REGRAS_TAXA_SEED,
 } from './adapters/taxas/regra-provider.memory.js';
+export { AuthServiceBetterAuth } from './adapters/usuario/auth-service.better-auth.js';
 export type { AuthService } from './adapters/usuario/auth-service.js';
 export { AuthServiceMemoria } from './adapters/usuario/auth-service.memory.js';
+export type { Auth, CriarAuthConfig } from './adapters/usuario/criar-auth.js';
+export { criarAuth } from './adapters/usuario/criar-auth.js';
 export type { UsuarioRepository } from './adapters/usuario/repository.js';
 export { UsuarioRepositoryMemory } from './adapters/usuario/repository.memory.js';
 export { UsuarioRepositoryPostgres } from './adapters/usuario/repository.postgres.js';

@@ -9,7 +9,25 @@ export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
   ? ColumnType<S, I | undefined, U>
   : ColumnType<T, T | undefined, T>;
 
+export type Int8 = ColumnType<string, bigint | number | string, bigint | number | string>;
+
 export type Timestamp = ColumnType<Date, Date | string, Date | string>;
+
+export interface Accounts {
+  access_token: string | null;
+  access_token_expires_at: Timestamp | null;
+  account_id: string;
+  created_at: Generated<Timestamp>;
+  id: string;
+  id_token: string | null;
+  password: string | null;
+  provider_id: string;
+  refresh_token: string | null;
+  refresh_token_expires_at: Timestamp | null;
+  scope: string | null;
+  updated_at: Generated<Timestamp>;
+  user_id: string;
+}
 
 export interface CampanhaAdministradores {
   campanha_id: string;
@@ -56,6 +74,13 @@ export interface OpcoesContribuicao {
   tipo: string;
 }
 
+export interface RateLimit {
+  count: Generated<number>;
+  id: string;
+  key: string;
+  last_request: Int8;
+}
+
 export interface Recebedores {
   campanha_id: string;
   chave_pix: string;
@@ -64,6 +89,28 @@ export interface Recebedores {
   is_active: Generated<boolean>;
   nome_titular: string;
   tipo_chave_pix: string;
+}
+
+export interface Sessions {
+  created_at: Generated<Timestamp>;
+  expires_at: Timestamp;
+  id: string;
+  ip_address: string | null;
+  token: string;
+  updated_at: Generated<Timestamp>;
+  user_agent: string | null;
+  user_id: string;
+}
+
+export interface Users {
+  created_at: Generated<Timestamp>;
+  email: string;
+  email_verified: Generated<boolean>;
+  id: string;
+  id_plataforma: string;
+  image: string | null;
+  name: string;
+  updated_at: Generated<Timestamp>;
 }
 
 export interface Usuarios {
@@ -75,13 +122,27 @@ export interface Usuarios {
   nome_exibicao: string;
 }
 
+export interface Verifications {
+  created_at: Generated<Timestamp>;
+  expires_at: Timestamp;
+  id: string;
+  identifier: string;
+  updated_at: Generated<Timestamp>;
+  value: string;
+}
+
 export interface DB {
+  accounts: Accounts;
   campanha_administradores: CampanhaAdministradores;
   campanhas: Campanhas;
   cats: Cats;
   contas: Contas;
   contribuicoes: Contribuicoes;
   opcoes_contribuicao: OpcoesContribuicao;
+  rate_limit: RateLimit;
   recebedores: Recebedores;
+  sessions: Sessions;
+  users: Users;
   usuarios: Usuarios;
+  verifications: Verifications;
 }
