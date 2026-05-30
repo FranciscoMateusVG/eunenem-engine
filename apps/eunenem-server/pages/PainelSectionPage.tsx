@@ -56,7 +56,7 @@ export function PainelSectionPage({
 }) {
   const Body = PAINEL_SECTION_PAGES[section];
   return (
-    <PainelLayout slug={slug}>
+    <PainelLayout slug={slug} activeSection={section}>
       {Body ? <Body slug={slug} /> : <PainelPlaceholder slug={slug} section={section} />}
     </PainelLayout>
   );

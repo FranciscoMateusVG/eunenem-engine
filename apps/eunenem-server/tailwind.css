@@ -2576,3 +2576,165 @@ h4 {
 html {
   scroll-behavior: smooth;
 }
+
+/* =================================================================
+ * aperture-fx2iz — common painel topbar.
+ *
+ * Replaces the original .painel-topbar block (still living above) with
+ * a full-viewport-width header used by every /painel/:slug(/:section)
+ * route. Outer <header class="painel-topbar"> paints the edge-to-edge
+ * background band; the inner .painel-topbar-inner constrains content
+ * to a 1200px max-width row that visually aligns with the .painel-app
+ * body shell. Selectors below are intentionally appended AFTER the
+ * earlier .painel-topbar-link / .painel-icon-btn rules so source-order
+ * specificity wins for the new component without modifying the legacy
+ * declarations.
+ *
+ * Active state mirrors PR #25's lista-tab pattern (lilac-soft pill +
+ * plum text). Bell + logout use the outlined .btn-ghost / stroke-SVG
+ * convention from PR #22 — circular 40px paper buttons with a 1px
+ * border, no fill on the icons.
+ *
+ * Mobile (<900px) collapses the nav to a horizontal scroll strip so
+ * all 4 buttons remain reachable without adding a hamburger (the
+ * brief allowed either, and overflow-x:auto is the simpler ship).
+ * ================================================================= */
+
+.painel-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  width: 100%;
+  background: rgba(248, 247, 246, 0.86);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  border-bottom: 1px solid var(--line);
+  padding-top: env(safe-area-inset-top);
+}
+
+.painel-topbar-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 12px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.painel-topbar-brand {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+  flex-shrink: 0;
+}
+
+.painel-topbar-nav {
+  flex: 1 1 auto;
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+  /* Below the 900px desktop breakpoint the nav becomes a horizontally
+   * scrollable strip so all 4 buttons remain reachable without forcing
+   * a hamburger. Scrollbar hidden because the visual cue is the pill
+   * shapes themselves. */
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.painel-topbar-nav::-webkit-scrollbar {
+  display: none;
+}
+.painel-topbar-nav ul {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* New selector — intentionally appended after the legacy .painel-topbar-link
+ * rule so source order resolves the cascade in favour of the spec colors
+ * (--ink for inactive, --lilac-soft + --plum for the active pill). */
+.painel-topbar a.painel-topbar-link {
+  display: inline-block;
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: transparent;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+.painel-topbar a.painel-topbar-link:hover {
+  background: color-mix(in srgb, var(--lilac-soft) 55%, transparent);
+  color: var(--plum);
+}
+.painel-topbar a.painel-topbar-link.is-active {
+  background: var(--lilac-soft);
+  color: var(--plum);
+}
+
+.painel-topbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.painel-topbar-icon-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  display: grid;
+  place-items: center;
+  color: var(--ink-soft);
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  position: relative;
+  padding: 0;
+  transition: transform 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+.painel-topbar-icon-btn:hover {
+  color: var(--plum);
+  border-color: color-mix(in srgb, var(--plum) 30%, var(--line));
+}
+.painel-topbar-icon-btn:active {
+  transform: scale(0.94);
+}
+
+/* Static unread dot — coral pip in the top-right of the bell button,
+ * ringed by the paper background so it reads against any topbar
+ * scroll-position. Wired statically for now; live state arrives with
+ * the notifications feed. */
+.painel-topbar-icon-btn .badge-dot {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--coral-pink);
+  border: 1.5px solid var(--paper);
+}
+
+@media (min-width: 900px) {
+  .painel-topbar-inner {
+    padding: 14px 28px;
+  }
+  .painel-topbar-nav {
+    /* Desktop: no overflow scroll — links fit comfortably in the
+     * centered region between brand and actions. */
+    overflow-x: visible;
+  }
+  .painel-topbar-nav ul {
+    gap: 8px;
+  }
+}
