@@ -1132,7 +1132,11 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
         items: picked.map((it) => ({
           nome: it.name,
           valor: centsFromBRL(it.price),
-          imagemUrl: it.emoji,
+          // imagemUrl is for real product image URLs only — server validates via z.string().url().
+          // The emoji glyph is a display fallback the UI derives from `grupo` (see deriveBgColor +
+          // CATEGORY_EMOJI maps). When the real catalog refresh ships (aperture-cdwdt), items
+          // will carry `image_url` paths like "/products/1468.jpg" and we'll pass them here.
+          imagemUrl: undefined,
           grupo: it.category,
           qty: it.suggestedQty,
         })),
@@ -1155,7 +1159,8 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
         items: picked.map((it) => ({
           nome: it.name,
           valor: centsFromBRL(it.price),
-          imagemUrl: it.emoji,
+          // See comment in addCatalogItems — emoji isn't a URL, gets derived from `grupo` UI-side.
+          imagemUrl: undefined,
           grupo: presetId,
           qty: it.suggestedQty,
         })),
