@@ -10,6 +10,12 @@ import {
   type ListaCategory,
   type ListaGift,
 } from "@/lib/mocks/listaPresentes";
+import {
+  LISTA_PRONTAS_DETAIL,
+  type ListaProntaDetail,
+  type ListaProntaId,
+  type PresetItem,
+} from "@/lib/mocks/listaProntas";
 
 // aperture-4je0p — "Minha lista de presentes" (creator gift-list management).
 //
@@ -103,6 +109,7 @@ const icon = {
   ),
   // aperture-17cls — checkmark for the catalog item's selected state.
   // Pairs with `.lista-cat-check.is-on` (filled lilac circle).
+  // Also reused by aperture-wo5ql's preset-detail modal selection circles.
   check: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="m5 12 5 5L20 7" />
@@ -757,6 +764,124 @@ function ConfirmRemove({
   );
 }
 
+/* ─── Preset detail modal (aperture-wo5ql) ───
+   Opened by each curated preset card's "VER LISTA →" CTA. Shows a
+   curated grid of items pre-selected on open; user can deselect any
+   item to drop it before tapping "ADICIONAR À MINHA LISTA →". Submit
+   is a stub for now (toast + close) — real add-to-list wiring will
+   come post-17cls-merge once the canonical catalog seed exists. */
+function PresetDetailModal({
+  preset,
+  onClose,
+  onSubmit,
+}: {
+  preset: ListaProntaDetail;
+  onClose: () => void;
+  onSubmit: (selected: PresetItem[]) => void;
+}) {
+  const [selected, setSelected] = useState<Set<string>>(
+    () => new Set(preset.items.map((it) => it.id)),
+  );
+
+  const toggle = (id: string) => {
+    setSelected((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectedItems = preset.items.filter((it) => selected.has(it.id));
+  const total = selectedItems.reduce(
+    (s, it) => s + it.price * it.suggestedQty,
+    0,
+  );
+  const count = selectedItems.length;
+
+  const submit = () => {
+    if (count === 0) return;
+    onSubmit(selectedItems);
+  };
+
+  return (
+    <Modal onClose={onClose}>
+      <div className="lista-modal-head">
+        <div>
+          <span className="eyebrow">curadoria EuNeném</span>
+          <h3>{preset.title}</h3>
+          <p className="lista-preset-desc">{preset.description}</p>
+        </div>
+        <button type="button" className="lista-modal-x" onClick={onClose} aria-label="Fechar">
+          {icon.x}
+        </button>
+      </div>
+
+      <div className="lista-modal-body">
+        <div className="lista-preset-section-label">
+          O QUE TEM NESSA LISTA · {count} DE {preset.items.length} SELECIONADOS
+        </div>
+        <div className="lista-preset-grid">
+          {preset.items.map((it) => {
+            const on = selected.has(it.id);
+            return (
+              <button
+                type="button"
+                key={it.id}
+                className={"lista-preset-item" + (on ? " is-selected" : "")}
+                onClick={() => toggle(it.id)}
+                aria-pressed={on}
+                aria-label={`${on ? "Remover" : "Adicionar"} ${it.name}`}
+              >
+                <div
+                  className="lista-preset-thumb"
+                  style={{ background: it.bgColor }}
+                  aria-hidden="true"
+                >
+                  <span className="lista-preset-emoji">{it.emoji}</span>
+                </div>
+                <div className="lista-preset-meta">
+                  <span className="lista-preset-name">{it.name}</span>
+                  <span className="lista-preset-sub">
+                    {brl(it.price)} · sugerido {it.suggestedQty} un
+                  </span>
+                </div>
+                <span
+                  className={"lista-preset-check" + (on ? " is-on" : "")}
+                  aria-hidden="true"
+                >
+                  {on && icon.check}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="lista-modal-foot">
+        <div className="lista-sel-count">
+          {count} {count === 1 ? "mimo selecionado" : "mimos selecionados"} ·{" "}
+          <b>{brl(total)}</b>
+        </div>
+        <div className="lista-foot-actions">
+          <button type="button" className="btn btn-ghost" onClick={onClose}>
+            Cancelar
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={count === 0}
+            onClick={submit}
+          >
+            <span className="lista-btn-ic">{icon.heart}</span>
+            Adicionar à minha lista →
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 /* ─── Body ─── */
 export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
   void slug; // mock-first: the only creator is "helena"; slug not yet used.
@@ -775,6 +900,11 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
   // beneath the .lista-header-actions strip when the operator taps
   // "Usar lista pronta". Replaces the previous toast placeholder.
   const [presetsOpen, setPresetsOpen] = useState(false);
+  // aperture-wo5ql — id of the curated preset whose detail modal is
+  // currently open (null = closed). Set by tapping any preset card's
+  // "VER LISTA →" CTA below; the modal renders the matching detail
+  // payload from LISTA_PRONTAS_DETAIL.
+  const [presetDetail, setPresetDetail] = useState<ListaProntaId | null>(null);
   const idRef = useRef(0);
 
   const counts = useMemo(() => {
@@ -966,15 +1096,14 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
                       <span className="lista-pronta-count">
                         {preset.count} {preset.count === 1 ? "item" : "itens"}
                       </span>
-                      {/* aperture-g70uv — placeholder wiring. aperture-wo5ql
-                          will replace this toast with the real preset-detail
-                          modal (a dedicated surface, NOT the aperture-17cls
-                          tabbed AddGiftModal). Until that lands, keep the
-                          affordance live so the panel feels real. */}
+                      {/* aperture-wo5ql — opens the preset-detail modal
+                          for this curated list. The modal renders the
+                          full item grid (pre-selected on open) so the
+                          operator can drop items before adding. */}
                       <button
                         type="button"
                         className="lista-pronta-cta"
-                        onClick={() => toast("Em breve — preview da lista pronta ♡")}
+                        onClick={() => setPresetDetail(preset.id as ListaProntaId)}
                         aria-label={`Ver lista pronta: ${preset.title}`}
                       >
                         VER LISTA →
@@ -1086,6 +1215,22 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
       )}
       {removeItem && (
         <ConfirmRemove item={removeItem} onClose={() => setRemoveItem(null)} onConfirm={confirmRemove} />
+      )}
+      {presetDetail && (
+        <PresetDetailModal
+          preset={LISTA_PRONTAS_DETAIL[presetDetail]}
+          onClose={() => setPresetDetail(null)}
+          onSubmit={(selected) => {
+            // aperture-wo5ql — stub: the real add-to-list wiring waits
+            // for the canonical catalog seed (aperture-17cls). For now,
+            // just toast + close so the surface communicates intent.
+            const n = selected.length;
+            toast.success(
+              `${n} ${n === 1 ? "mimo adicionado" : "mimos adicionados"} à sua lista ♡`,
+            );
+            setPresetDetail(null);
+          }}
+        />
       )}
     </div>
   );
