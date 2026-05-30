@@ -49,8 +49,15 @@ describe('Migration round-trip', () => {
     expect(tableNames).toContain('cats');
     expect(tableNames).toContain('campanhas');
     expect(tableNames).toContain('recebedores');
+    expect(tableNames).toContain('usuarios');
+    expect(tableNames).toContain('contas');
 
-    // Migrate down (latest migration first; seven steps for arrecadacao)
+    // Migrate down (latest migration first; one step for usuario, then
+    // seven steps for arrecadacao). aperture-xyhjr added the usuario
+    // migration on top of the arrecadacao stack.
+    const downUsuario = await migrator.migrateDown();
+    expect(downUsuario.error).toBeUndefined();
+
     const downGrupoContribuicoes = await migrator.migrateDown();
     expect(downGrupoContribuicoes.error).toBeUndefined();
 

@@ -29,6 +29,13 @@ export interface Cats {
   name: string;
 }
 
+export interface Contas {
+  criada_em: Generated<Timestamp>;
+  id: string;
+  id_usuario: string;
+  permissoes: Generated<string[]>;
+}
+
 export interface Contribuicoes {
   campanha_id: string;
   contribuinte_email: string | null;
@@ -59,11 +66,22 @@ export interface Recebedores {
   tipo_chave_pix: string;
 }
 
+export interface Usuarios {
+  criado_em: Generated<Timestamp>;
+  email: string;
+  id: string;
+  id_conta: string;
+  id_plataforma: string;
+  nome_exibicao: string;
+}
+
 export interface DB {
   campanha_administradores: CampanhaAdministradores;
   campanhas: Campanhas;
   cats: Cats;
+  contas: Contas;
   contribuicoes: Contribuicoes;
   opcoes_contribuicao: OpcoesContribuicao;
   recebedores: Recebedores;
+  usuarios: Usuarios;
 }
