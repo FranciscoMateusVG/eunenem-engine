@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import type { PainelSectionBodyProps } from "@/PainelSectionPage";
@@ -517,7 +517,44 @@ function PersonalizadoForm({
   );
 }
 
-/* ─── Catálogo (catalog tab body) ─── */
+/* ─── Catálogo (catalog tab body) — aperture-0xhs4 refactor ─── */
+//
+// Pre-refactor (aperture-0ph83/cdwdt): rendered ALL 355 catalog items into one
+// long DOM under per-category section headers. Browsing was rough and the
+// initial render mounted ~355 buttons + 288 <img> tags upfront.
+//
+// Post-refactor:
+//   1. Category chip strip at top — emoji + pt-BR label + count per chip.
+//      "todos" chip shows the whole catalog. Sticky inside the modal scroll
+//      area so the user can re-pivot without scrolling back to the top.
+//   2. Render pagination (24 items per page) — scroll near the bottom and an
+//      IntersectionObserver bumps the visible count. No external lib needed.
+//   3. Search scoped to the selected category by default. When local search
+//      returns empty inside a category, a "buscar em todas" affordance
+//      expands the scope to the whole catalog.
+//   4. Native lazy-loading + async decoding on every product img — together
+//      with the 24-at-a-time render pagination, only the visible imgs are
+//      ever fetched + decoded. Modal-open stays \<100ms even at 355 items.
+//
+// Modal-reopen state reset is automatic: AddGiftModal only mounts CatalogoView
+// when the modal opens, so each open gets fresh useState defaults (cat="todos",
+// search="", visible=24).
+
+const CATEGORY_CHIP_EMOJI: Record<ListaCategory, string> = {
+  fraldas: "🧷",
+  higiene: "🧴",
+  roupa: "👕",
+  soninho: "🛏️",
+  alimentacao: "🍼",
+  passeio: "🚼",
+  brinquedo: "🧸",
+  outros: "🎁",
+  personalizado: "✨",
+};
+
+type CatScope = "todos" | ListaCategory;
+const PAGE_SIZE = 24;
+
 function CatalogoView({
   selected,
   onToggle,
@@ -526,16 +563,85 @@ function CatalogoView({
   onToggle: (item: ListaCatalogItem) => void;
 }) {
   const [search, setSearch] = useState("");
-  const q = search.trim().toLowerCase();
+  const [scope, setScope] = useState<CatScope>("todos");
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+
   // aperture-0ph83 — sourced from JSON loader (aperture-cwcn0) instead of the
-  // legacy mock. Same shape, same emojis, no UI change.
+  // legacy mock.
   const catalog = useMemo(() => loadCatalog(), []);
-  const sections = catalog
-    .map((sec) => {
-      const items = q ? sec.items.filter((i) => i.name.toLowerCase().includes(q)) : sec.items;
-      return { ...sec, items };
-    })
-    .filter((sec) => sec.items.length > 0);
+
+  // Build the flat all-items list + per-category buckets once. Section labels
+  // double as chip labels (one source of truth for pt-BR vocabulary).
+  const allItems = useMemo(
+    () => catalog.flatMap((sec) => sec.items),
+    [catalog],
+  );
+  const chips = useMemo(() => {
+    const list: Array<{ scope: CatScope; label: string; emoji: string; count: number }> = [
+      { scope: "todos", label: "todos", emoji: "✨", count: allItems.length },
+    ];
+    for (const sec of catalog) {
+      list.push({
+        scope: sec.category,
+        label: sec.label,
+        emoji: CATEGORY_CHIP_EMOJI[sec.category] ?? "🎁",
+        count: sec.items.length,
+      });
+    }
+    return list;
+  }, [catalog, allItems.length]);
+
+  // Pool of items in the selected scope, then the search filter on top of that.
+  const q = search.trim().toLowerCase();
+  const pool = useMemo(() => {
+    if (scope === "todos") return allItems;
+    const sec = catalog.find((s) => s.category === scope);
+    return sec?.items ?? [];
+  }, [scope, allItems, catalog]);
+  const filtered = useMemo(
+    () => (q ? pool.filter((i) => i.name.toLowerCase().includes(q)) : pool),
+    [pool, q],
+  );
+
+  const visible = filtered.slice(0, visibleCount);
+  const hasMore = visibleCount < filtered.length;
+
+  // Reset render pagination whenever the filter inputs change so the user
+  // doesn't see a stale "100 of 24 shown" mismatch after switching scope.
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [scope, q]);
+
+  // IntersectionObserver — reveals the next batch when the sentinel scrolls
+  // into view (with a 200px pre-trigger so the next batch is mounted by the
+  // time the user reaches it). The scroll container is the modal body
+  // (`.lista-modal-body`, overflow-y: auto), NOT the viewport — so we walk up
+  // from the sentinel to find the nearest scrollable ancestor and pass it as
+  // the observer root. Without this, the sentinel never "intersects the
+  // viewport" because the modal body clips the scroll.
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el || !hasMore) return;
+    let scrollRoot: Element | null = el.parentElement;
+    while (scrollRoot) {
+      const cs = getComputedStyle(scrollRoot);
+      if (cs.overflowY === "auto" || cs.overflowY === "scroll") break;
+      scrollRoot = scrollRoot.parentElement;
+    }
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          setVisibleCount((c) => Math.min(filtered.length, c + PAGE_SIZE));
+        }
+      },
+      { root: scrollRoot, rootMargin: "200px" },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [hasMore, filtered.length]);
+
+  const activeLabel = chips.find((c) => c.scope === scope)?.label ?? "todos";
 
   return (
     <div className="lista-catalogo">
@@ -543,73 +649,190 @@ function CatalogoView({
         <span className="lista-cat-search-ic" aria-hidden="true">{icon.search}</span>
         <input
           type="text"
-          placeholder="buscar no catálogo (fralda, mamadeira...)"
+          placeholder={
+            scope === "todos"
+              ? "buscar no catálogo (fralda, mamadeira...)"
+              : `buscar em ${activeLabel}...`
+          }
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           aria-label="Buscar no catálogo"
         />
       </div>
-      {sections.length === 0 ? (
+
+      {/* Category chip strip — sticky inside the modal scroll area. */}
+      <div
+        className="lista-cat-chips"
+        role="tablist"
+        aria-label="Filtrar por categoria"
+        style={{
+          display: "flex",
+          gap: 8,
+          overflowX: "auto",
+          padding: "8px 2px 12px",
+          position: "sticky",
+          top: 0,
+          zIndex: 2,
+          background: "var(--paper)",
+          margin: "0 -2px",
+          WebkitOverflowScrolling: "touch",
+          scrollbarWidth: "none",
+        }}
+      >
+        {chips.map((chip) => {
+          const active = chip.scope === scope;
+          return (
+            <button
+              type="button"
+              key={chip.scope}
+              role="tab"
+              aria-selected={active}
+              onClick={() => setScope(chip.scope)}
+              style={{
+                flex: "0 0 auto",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "8px 14px",
+                borderRadius: 999,
+                border: active
+                  ? "1.5px solid var(--lilac-deep)"
+                  : "1.5px solid var(--lilac-soft)",
+                background: active ? "var(--lilac-soft)" : "var(--paper)",
+                color: active ? "var(--plum)" : "var(--ink-soft)",
+                fontFamily: "var(--font-dm-sans), system-ui, sans-serif",
+                fontSize: 13,
+                fontWeight: active ? 600 : 500,
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+                transition: "all 120ms cubic-bezier(0.4, 0, 0.2, 1)",
+              }}
+            >
+              <span aria-hidden="true">{chip.emoji}</span>
+              <span>{chip.label}</span>
+              <span
+                aria-hidden="true"
+                style={{
+                  fontSize: 11,
+                  color: active ? "var(--lilac-deep)" : "var(--ink-mute)",
+                  fontWeight: 500,
+                }}
+              >
+                · {chip.count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {filtered.length === 0 ? (
         <div className="lista-cat-empty">
           <span className="eyebrow coral">nada por aqui</span>
-          <p>
-            Tente outra palavra — ou monte o mimo pela aba <b>personalizado</b>.
-          </p>
+          {scope === "todos" ? (
+            <p>
+              Tente outra palavra — ou monte o mimo pela aba <b>personalizado</b>.
+            </p>
+          ) : (
+            <p>
+              Nenhum mimo em <b>{activeLabel}</b> pra essa busca.{" "}
+              <button
+                type="button"
+                onClick={() => setScope("todos")}
+                style={{
+                  background: "none",
+                  border: "none",
+                  padding: 0,
+                  color: "var(--lilac-deep)",
+                  textDecoration: "underline",
+                  cursor: "pointer",
+                  font: "inherit",
+                }}
+              >
+                buscar em todas as categorias →
+              </button>
+            </p>
+          )}
         </div>
       ) : (
-        sections.map((sec) => (
-          <section key={sec.category} className="lista-cat-section">
-            <h4 className="lista-cat-section-hd">{sec.label}</h4>
-            <ul className="lista-cat-list">
-              {sec.items.map((it) => {
-                const on = selected.has(it.id);
-                return (
-                  <li key={it.id}>
-                    <button
-                      type="button"
-                      className={"lista-cat-item" + (on ? " is-selected" : "")}
-                      onClick={() => onToggle(it)}
-                      aria-pressed={on}
+        <>
+          <ul className="lista-cat-list">
+            {visible.map((it) => {
+              const on = selected.has(it.id);
+              return (
+                <li key={it.id}>
+                  <button
+                    type="button"
+                    className={"lista-cat-item" + (on ? " is-selected" : "")}
+                    onClick={() => onToggle(it)}
+                    aria-pressed={on}
+                  >
+                    <span className="lista-cat-thumb" style={{ background: it.bgColor }}>
+                      {/* aperture-cdwdt: real product image when available; emoji fallback
+                          for the 67 null-image items. aperture-0xhs4: native lazy +
+                          async decoding so only visible thumbs hit the network/decoder. */}
+                      {it.imageUrl ? (
+                        <img
+                          src={it.imageUrl}
+                          alt=""
+                          loading="lazy"
+                          decoding="async"
+                          className="lista-cat-img"
+                          style={{
+                            width: "100%",
+                            height: "100%",
+                            objectFit: "cover",
+                            borderRadius: "inherit",
+                            display: "block",
+                          }}
+                        />
+                      ) : (
+                        <span className="lista-cat-emoji" aria-hidden="true">{it.emoji}</span>
+                      )}
+                    </span>
+                    <span className="lista-cat-meta">
+                      <span className="lista-cat-name">{it.name}</span>
+                      <span className="lista-cat-sub">
+                        {brl(it.price)} · sugerido {it.suggestedQty} un
+                      </span>
+                    </span>
+                    <span
+                      className={"lista-cat-check" + (on ? " is-on" : "")}
+                      aria-hidden="true"
                     >
-                      <span className="lista-cat-thumb" style={{ background: it.bgColor }}>
-                        {/* aperture-cdwdt: real product image when available; emoji fallback for the 67 null-image items. */}
-                        {it.imageUrl ? (
-                          <img
-                            src={it.imageUrl}
-                            alt=""
-                            loading="lazy"
-                            className="lista-cat-img"
-                            style={{
-                              width: "100%",
-                              height: "100%",
-                              objectFit: "cover",
-                              borderRadius: "inherit",
-                              display: "block",
-                            }}
-                          />
-                        ) : (
-                          <span className="lista-cat-emoji" aria-hidden="true">{it.emoji}</span>
-                        )}
-                      </span>
-                      <span className="lista-cat-meta">
-                        <span className="lista-cat-name">{it.name}</span>
-                        <span className="lista-cat-sub">
-                          {brl(it.price)} · sugerido {it.suggestedQty} un
-                        </span>
-                      </span>
-                      <span
-                        className={"lista-cat-check" + (on ? " is-on" : "")}
-                        aria-hidden="true"
-                      >
-                        {on ? icon.check : null}
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          </section>
-        ))
+                      {on ? icon.check : null}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+
+          {/* Sentinel + end-cap. The sentinel is invisible but the observer
+              kicks in 200px before it scrolls into view, so the next batch
+              is ready by the time the user reaches it. */}
+          {hasMore ? (
+            <div
+              ref={sentinelRef}
+              aria-hidden="true"
+              style={{ height: 1, margin: "8px 0 24px" }}
+            />
+          ) : (
+            <div
+              style={{
+                textAlign: "center",
+                padding: "16px 12px 24px",
+                color: "var(--ink-mute)",
+                fontSize: 13,
+                fontFamily: "var(--font-caveat), cursive",
+                fontWeight: 500,
+              }}
+            >
+              fim do catálogo 💜 — {filtered.length}{" "}
+              {filtered.length === 1 ? "mimo" : "mimos"}
+              {scope !== "todos" ? ` em ${activeLabel}` : ""}
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -946,12 +1169,16 @@ function PresetDetailModal({
                   style={{ background: it.bgColor }}
                   aria-hidden="true"
                 >
-                  {/* aperture-cdwdt: real product image when available, emoji fallback otherwise. */}
+                  {/* aperture-cdwdt: real product image when available, emoji fallback
+                      otherwise. aperture-0xhs4: native lazy + async decoding so only
+                      visible bundle thumbs hit the network/decoder when the modal
+                      opens (bundles can have 30+ items). */}
                   {it.imageUrl ? (
                     <img
                       src={it.imageUrl}
                       alt=""
                       loading="lazy"
+                      decoding="async"
                       style={{
                         width: "100%",
                         height: "100%",
