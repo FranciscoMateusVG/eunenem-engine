@@ -1,4 +1,3 @@
-import { ArrecadacaoCampanhaRecebedorInvarianteError } from '../../../errors/arrecadacao/campanha-recebedor-invariante.error.js';
 import type { DadosRecebedor } from '../value-objects/dados-recebedor.js';
 import type {
   IdCampanha,
@@ -26,7 +25,9 @@ import type { Recebedor } from './recebedor.js';
  * TOGETHER invariant:
  *   `idRecebedor` and `dadosRecebedor` are either BOTH null or BOTH set —
  *   never half. The aggregate enforces this in its constructors and projection
- *   helpers; violation raises `ArrecadacaoCampanhaRecebedorInvarianteError`.
+ *   helpers; violation throws a plain `Error` (matches the convention used by
+ *   other domain invariants — see `contribuicao.ts`). Structured-error classes
+ *   live in `src/errors/` for use-case-level throws, not domain-level.
  *
  * Belongs to exactly one Plataforma (multi-tenant boundary): the
  * `idPlataforma` is immutable after creation and scopes all downstream
@@ -58,14 +59,17 @@ export function campanhaTemRecebedor(campanha: Campanha): campanha is Campanha &
 
 /**
  * Asserta o invariante TOGETHER: idRecebedor e dadosRecebedor ambos nulos
- * ou ambos preenchidos. Lança `ArrecadacaoCampanhaRecebedorInvarianteError`
- * em estado meio-nulo. Usado por todos os construtores/projeções do agregado.
+ * ou ambos preenchidos. Lança Error em estado meio-nulo. Usado por todos
+ * os construtores/projeções do agregado como defense-in-depth contra
+ * futuras helpers que mutem só um dos campos.
  */
 function assertInvarianteRecebedor(campanha: Campanha): void {
   const idVazio = campanha.idRecebedor === null;
   const dadosVazios = campanha.dadosRecebedor === null;
   if (idVazio !== dadosVazios) {
-    throw new ArrecadacaoCampanhaRecebedorInvarianteError(campanha.id);
+    throw new Error(
+      `Invariante TOGETHER violado: campanha "${campanha.id}" deve ter idRecebedor e dadosRecebedor ambos nulos ou ambos preenchidos.`,
+    );
   }
 }
 
