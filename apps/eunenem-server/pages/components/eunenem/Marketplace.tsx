@@ -166,12 +166,13 @@ export function Marketplace() {
           </div>
         </header>
 
-        <div
-          className="grid gap-6 mt-12"
-          style={{
-            gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
-          }}
-        >
+        {/* aperture-rdr8u — Mobile renders 2 columns (was 1) because the
+            inline auto-fill minmax(260px, 1fr) couldn't fit 2 columns under
+            ~544px viewport. From sm: up we restore the original auto-fill
+            behavior so tablet (sm: 2-3 cols) and desktop (lg: 3-4 cols) stay
+            unchanged. Mobile gap tightens to gap-4 to give half-width cards
+            more breathing room. */}
+        <div className="grid gap-4 sm:gap-6 mt-12 grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(260px,1fr))]">
           {filtered.map((g) => (
             <GiftCard key={g.id} gift={g} onPick={onPick} />
           ))}
