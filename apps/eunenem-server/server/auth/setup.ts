@@ -6,6 +6,8 @@ import {
   type CampanhaRepository,
   CampanhaRepositoryPostgres,
   ConsoleLogger,
+  type ContribuicaoRepository,
+  ContribuicaoRepositoryPostgres,
   type CriarAuthConfig,
   createDatabase,
   criarAuth,
@@ -35,7 +37,13 @@ export interface ServerDeps {
   readonly authService: AuthService;
   readonly usuarioRepository: UsuarioRepository;
   readonly plataformaRepository: PlataformaRepository;
+  /**
+   * Arrecadação adapters (aperture-d6atj). Needed by `contribuicao.*` tRPC
+   * procedures + the eventual `pagina.*` SSR loader. Repository ports are
+   * shared single instances built at boot — they hold no per-request state.
+   */
   readonly campanhaRepository: CampanhaRepository;
+  readonly contribuicaoRepository: ContribuicaoRepository;
   readonly recebedorRepository: RecebedorRepository;
   readonly observability: Observability;
   readonly clock: () => Date;
@@ -147,11 +155,15 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
   // ID_PLATAFORMA_EUNENEM + ID_PLATAFORMA_EUCASEI via the seed array.
   const plataformaRepository = new PlataformaRepositoryMemory();
 
-  // Arrecadação BC — Campanha + Recebedor on Postgres, sharing the same
-  // Kysely instance as the engine's domain repos (§8 #2 anti-trap).
-  // p8i01 made these required deps for the signup saga.
+  // Arrecadação BC — Campanha + Recebedor + Contribuicao on Postgres, sharing
+  // the same Kysely instance as the engine's domain repos (§8 #2 anti-trap).
+  // p8i01 made Campanha+Recebedor required deps for the signup saga;
+  // d6atj adds Contribuicao for the tRPC `contribuicao.*` procedures.
+  // Order matters: CampanhaRepository depends on RecebedorRepository to
+  // resolve the active recebedor.
   const recebedorRepository = new RecebedorRepositoryPostgres(db);
   const campanhaRepository = new CampanhaRepositoryPostgres(db, recebedorRepository);
+  const contribuicaoRepository = new ContribuicaoRepositoryPostgres(db);
 
   return {
     db,
@@ -160,6 +172,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     usuarioRepository,
     plataformaRepository,
     campanhaRepository,
+    contribuicaoRepository,
     recebedorRepository,
     observability,
     clock: () => new Date(),

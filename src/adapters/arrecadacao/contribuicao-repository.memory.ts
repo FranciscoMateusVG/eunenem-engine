@@ -67,6 +67,44 @@ export class ContribuicaoRepositoryMemory implements ContribuicaoRepository {
     });
   }
 
+  async findByOpcao(
+    idCampanha: IdCampanha,
+    idOpcao: IdOpcaoContribuicao,
+  ): Promise<readonly Contribuicao[]> {
+    return tracer.startActiveSpan('db.arrecadacao_contribuicoes.findByOpcao', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        const result = [...this.contribuicoes.values()].filter(
+          (c) => c.idCampanha === idCampanha && c.idOpcaoContribuicao === idOpcao,
+        );
+        span.setStatus({ code: SpanStatusCode.OK });
+        return result;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  async deleteById(id: IdContribuicao): Promise<void> {
+    return tracer.startActiveSpan('db.arrecadacao_contribuicoes.deleteById', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'DELETE' });
+      try {
+        this.contribuicoes.delete(id);
+        span.setStatus({ code: SpanStatusCode.OK });
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
   async countByOpcao(idCampanha: IdCampanha, idOpcao: IdOpcaoContribuicao): Promise<number> {
     return tracer.startActiveSpan('db.arrecadacao_contribuicoes.countByOpcao', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
