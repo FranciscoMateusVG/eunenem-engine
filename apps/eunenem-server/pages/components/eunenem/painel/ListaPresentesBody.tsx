@@ -3,8 +3,10 @@ import { toast } from "sonner";
 
 import type { PainelSectionBodyProps } from "@/PainelSectionPage";
 import {
+  LISTA_CATALOGO_SEED,
   LISTA_CATEGORY_LABEL,
   LISTA_PRESENTES_SEED,
+  type ListaCatalogItem,
   type ListaCategory,
   type ListaGift,
 } from "@/lib/mocks/listaPresentes";
@@ -99,19 +101,31 @@ const icon = {
       <path d="m6 9 6 6 6-6" />
     </svg>
   ),
+  // aperture-17cls — checkmark for the catalog item's selected state.
+  // Pairs with `.lista-cat-check.is-on` (filled lilac circle).
+  check: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m5 12 5 5L20 7" />
+    </svg>
+  ),
 };
 
 type CatFilter = "all" | ListaCategory;
+type AddTab = "catalogo" | "personalizado";
 
 interface DraftFields {
   title: string;
   price: string;
   qty: number;
   category: ListaCategory;
+  // aperture-17cls — recadinho field on the PERSONALIZADO tab. Optional
+  // free-text the creator can leave for guests ("a do quarto verde-musgo!").
+  // Empty string when absent. Edit modal reuses the form but starts blank.
+  note: string;
 }
 
 function emptyDraft(): DraftFields {
-  return { title: "", price: "", qty: 1, category: "personalizado" };
+  return { title: "", price: "", qty: 1, category: "personalizado", note: "" };
 }
 
 /* ─── Stats visor ─── */
@@ -249,14 +263,363 @@ function Modal({
   );
 }
 
-/* ─── Add / edit form modal ─── */
-function ItemFormModal({
-  mode,
+/* ─── Personalizado form (shared by Adicionar→Personalizado + Editar) ─── */
+//
+// aperture-17cls — lifted the form body out of the old ItemFormModal so both
+// the EDIT modal and the new ADD modal's PERSONALIZADO tab share one source
+// of truth for the field layout. The optional ✦ info banner only renders on
+// the ADD path (operator's PERSONALIZADO tab spec calls for it explicitly).
+function PersonalizadoForm({
+  f,
+  setF,
+  showBanner,
+}: {
+  f: DraftFields;
+  setF: (next: DraftFields) => void;
+  showBanner?: boolean;
+}) {
+  return (
+    <>
+      {showBanner && (
+        <div className="lista-info-banner">
+          <span className="lista-info-banner-ic" aria-hidden="true">{icon.sparkle}</span>
+          <div className="lista-info-banner-text">
+            <strong>Algo único da sua história?</strong>
+            <p>
+              Adicione mimos que não estão no catálogo — uma cadeirinha específica,
+              decoração do quartinho ou aquele item dos sonhos.
+            </p>
+          </div>
+        </div>
+      )}
+      <div className="lista-form">
+        <div className="lista-field lista-field-full">
+          <label htmlFor="lista-title">nome do mimo</label>
+          <input
+            id="lista-title"
+            placeholder="ex.: Cadeirinha de carro Maxi-Cosi"
+            value={f.title}
+            onChange={(e) => setF({ ...f, title: e.target.value })}
+          />
+        </div>
+        <div className="lista-field">
+          <label htmlFor="lista-price">valor por unidade</label>
+          <input
+            id="lista-price"
+            inputMode="decimal"
+            placeholder="R$ 0,00"
+            value={f.price}
+            onChange={(e) => setF({ ...f, price: e.target.value })}
+          />
+          <span className="lista-hint">quanto cada convidado vai contribuir</span>
+        </div>
+        <div className="lista-field">
+          <label>quantidade</label>
+          <div className="lista-stepper">
+            <button
+              type="button"
+              onClick={() => setF({ ...f, qty: Math.max(1, (Number(f.qty) || 1) - 1) })}
+              aria-label="Diminuir quantidade"
+            >
+              −
+            </button>
+            <input
+              value={f.qty}
+              inputMode="numeric"
+              onChange={(e) =>
+                setF({ ...f, qty: Number(e.target.value.replace(/\D/g, "")) || 1 })
+              }
+              aria-label="Quantidade"
+            />
+            <button
+              type="button"
+              onClick={() => setF({ ...f, qty: (Number(f.qty) || 1) + 1 })}
+              aria-label="Aumentar quantidade"
+            >
+              +
+            </button>
+          </div>
+          <span className="lista-hint">convidados podem dividir o valor</span>
+        </div>
+        <div className="lista-field lista-field-full">
+          <label htmlFor="lista-cat">categoria</label>
+          <select
+            id="lista-cat"
+            value={f.category}
+            onChange={(e) => setF({ ...f, category: e.target.value as ListaCategory })}
+          >
+            {CATEGORY_OPTIONS.map((c) => (
+              <option key={c} value={c}>
+                {LISTA_CATEGORY_LABEL[c]}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="lista-field lista-field-full">
+          <label htmlFor="lista-note">recadinho opcional</label>
+          <input
+            id="lista-note"
+            placeholder="um detalhe pra contar pros convidados..."
+            value={f.note}
+            onChange={(e) => setF({ ...f, note: e.target.value })}
+          />
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ─── Catálogo (catalog tab body) ─── */
+//
+// aperture-17cls — search + grouped sections of catalog cards with
+// multi-select via aria-pressed buttons. Selection state lives in the
+// parent AddGiftModal so the footer can show count/total and the submit
+// path can hand them off to the body's addCatalogItems().
+function CatalogoView({
+  selected,
+  onToggle,
+}: {
+  selected: Set<string>;
+  onToggle: (item: ListaCatalogItem) => void;
+}) {
+  const [search, setSearch] = useState("");
+  const q = search.trim().toLowerCase();
+  const sections = LISTA_CATALOGO_SEED.map((sec) => {
+    const items = q ? sec.items.filter((i) => i.name.toLowerCase().includes(q)) : sec.items;
+    return { ...sec, items };
+  }).filter((sec) => sec.items.length > 0);
+
+  return (
+    <div className="lista-catalogo">
+      <div className="lista-cat-search">
+        <span className="lista-cat-search-ic" aria-hidden="true">{icon.search}</span>
+        <input
+          type="text"
+          placeholder="buscar no catálogo (fralda, mamadeira...)"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          aria-label="Buscar no catálogo"
+        />
+      </div>
+      {sections.length === 0 ? (
+        <div className="lista-cat-empty">
+          <span className="eyebrow coral">nada por aqui</span>
+          <p>
+            Tente outra palavra — ou monte o mimo pela aba <b>personalizado</b>.
+          </p>
+        </div>
+      ) : (
+        sections.map((sec) => (
+          <section key={sec.category} className="lista-cat-section">
+            <h4 className="lista-cat-section-hd">{sec.label}</h4>
+            <ul className="lista-cat-list">
+              {sec.items.map((it) => {
+                const on = selected.has(it.id);
+                return (
+                  <li key={it.id}>
+                    <button
+                      type="button"
+                      className={"lista-cat-item" + (on ? " is-selected" : "")}
+                      onClick={() => onToggle(it)}
+                      aria-pressed={on}
+                    >
+                      <span className="lista-cat-thumb" style={{ background: it.bgColor }}>
+                        <span className="lista-cat-emoji" aria-hidden="true">{it.emoji}</span>
+                      </span>
+                      <span className="lista-cat-meta">
+                        <span className="lista-cat-name">{it.name}</span>
+                        <span className="lista-cat-sub">
+                          {brl(it.price)} · sugerido {it.suggestedQty} un
+                        </span>
+                      </span>
+                      <span
+                        className={"lista-cat-check" + (on ? " is-on" : "")}
+                        aria-hidden="true"
+                      >
+                        {on ? icon.check : null}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ))
+      )}
+    </div>
+  );
+}
+
+/* ─── Add gift modal — tabbed CATÁLOGO + PERSONALIZADO ─── */
+//
+// aperture-17cls — opened from the four ADD callsites in the body (primary
+// CTA, sparkle ghost from aperture-2eq0f, empty-state primary, add-card).
+// `defaultTab` is set by each callsite so the sparkle button lands on
+// PERSONALIZADO and the others land on CATÁLOGO. The PERSONALIZADO and
+// CATÁLOGO drafts are kept in separate state so switching tabs preserves
+// each tab's in-flight input.
+function AddGiftModal({
+  defaultTab,
+  onClose,
+  onSubmitPersonalizado,
+  onSubmitCatalogo,
+}: {
+  defaultTab: AddTab;
+  onClose: () => void;
+  onSubmitPersonalizado: (draft: DraftFields) => void;
+  onSubmitCatalogo: (items: ListaCatalogItem[]) => void;
+}) {
+  const [tab, setTab] = useState<AddTab>(defaultTab);
+  const [f, setF] = useState<DraftFields>(emptyDraft);
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+
+  const personPriceNum = parseFloat(f.price.replace(",", ".")) || 0;
+  const personValid = f.title.trim().length > 0 && personPriceNum > 0;
+
+  // Collect selected items in catalog order so the body's addCatalogItems
+  // adds them in the same visual order the user saw them.
+  const selectedItems = useMemo(() => {
+    const out: ListaCatalogItem[] = [];
+    LISTA_CATALOGO_SEED.forEach((sec) =>
+      sec.items.forEach((it) => {
+        if (selected.has(it.id)) out.push(it);
+      }),
+    );
+    return out;
+  }, [selected]);
+  const catTotal = selectedItems.reduce((s, i) => s + i.price * i.suggestedQty, 0);
+
+  const toggleCatItem = (it: ListaCatalogItem) => {
+    setSelected((cur) => {
+      const next = new Set(cur);
+      if (next.has(it.id)) next.delete(it.id);
+      else next.add(it.id);
+      return next;
+    });
+  };
+
+  const submitPersonalizado = () => {
+    if (!personValid) return;
+    onSubmitPersonalizado({ ...f, title: f.title.trim(), note: f.note.trim() });
+  };
+
+  const submitCatalogo = () => {
+    if (selectedItems.length === 0) return;
+    onSubmitCatalogo(selectedItems);
+  };
+
+  return (
+    <Modal onClose={onClose}>
+      <div className="lista-modal-head">
+        <div>
+          <span className="eyebrow coral">um novo mimo ♡</span>
+          <h3>
+            Adicionar à minha <span className="hl">lista</span>
+          </h3>
+        </div>
+        <button type="button" className="lista-modal-x" onClick={onClose} aria-label="Fechar">
+          {icon.x}
+        </button>
+      </div>
+
+      <div className="lista-tabs" role="tablist" aria-label="Modo de adicionar">
+        <button
+          type="button"
+          role="tab"
+          id="lista-tab-catalogo"
+          aria-selected={tab === "catalogo"}
+          aria-controls="lista-tabpanel-catalogo"
+          className={"lista-tab" + (tab === "catalogo" ? " is-active" : "")}
+          onClick={() => setTab("catalogo")}
+        >
+          Catálogo
+        </button>
+        <button
+          type="button"
+          role="tab"
+          id="lista-tab-personalizado"
+          aria-selected={tab === "personalizado"}
+          aria-controls="lista-tabpanel-personalizado"
+          className={"lista-tab" + (tab === "personalizado" ? " is-active" : "")}
+          onClick={() => setTab("personalizado")}
+        >
+          Personalizado
+        </button>
+      </div>
+
+      <div className="lista-modal-body">
+        {tab === "catalogo" ? (
+          <div
+            role="tabpanel"
+            id="lista-tabpanel-catalogo"
+            aria-labelledby="lista-tab-catalogo"
+          >
+            <CatalogoView selected={selected} onToggle={toggleCatItem} />
+          </div>
+        ) : (
+          <div
+            role="tabpanel"
+            id="lista-tabpanel-personalizado"
+            aria-labelledby="lista-tab-personalizado"
+          >
+            <PersonalizadoForm f={f} setF={setF} showBanner />
+          </div>
+        )}
+      </div>
+
+      <div className="lista-modal-foot">
+        {tab === "catalogo" ? (
+          <div className="lista-sel-count">
+            {selectedItems.length === 0 ? (
+              <>0 mimos selecionados</>
+            ) : (
+              <>
+                {selectedItems.length}{" "}
+                {selectedItems.length === 1 ? "mimo selecionado" : "mimos selecionados"} ·{" "}
+                <b>{brl(catTotal)}</b>
+              </>
+            )}
+          </div>
+        ) : (
+          <div className="lista-sel-count">
+            novo mimo: <b>{f.title.trim() || "—"}</b>
+          </div>
+        )}
+        <div className="lista-foot-actions">
+          <button type="button" className="btn btn-ghost" onClick={onClose}>
+            Cancelar
+          </button>
+          {tab === "catalogo" ? (
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={selectedItems.length === 0}
+              onClick={submitCatalogo}
+            >
+              <span className="lista-btn-ic">{icon.plus}</span> Adicionar
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={!personValid}
+              onClick={submitPersonalizado}
+            >
+              <span className="lista-btn-ic">{icon.plus}</span> Adicionar à lista
+            </button>
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/* ─── Edit item modal (single form, no tabs) ─── */
+function EditItemModal({
   initial,
   onClose,
   onSubmit,
 }: {
-  mode: "add" | "edit";
   initial: DraftFields;
   onClose: () => void;
   onSubmit: (draft: DraftFields) => void;
@@ -268,96 +631,23 @@ function ItemFormModal({
 
   const submit = () => {
     if (!valid) return;
-    onSubmit({ ...f, title: f.title.trim() });
+    onSubmit({ ...f, title: f.title.trim(), note: f.note.trim() });
   };
 
   return (
     <Modal onClose={onClose}>
       <div className="lista-modal-head">
         <div>
-          <span className="eyebrow coral">{mode === "add" ? "um novo mimo ♡" : "ajuste fininho ♡"}</span>
-          <h3>
-            {mode === "add" ? (
-              <>
-                Adicionar à minha <span className="hl">lista</span>
-              </>
-            ) : (
-              "Editar mimo"
-            )}
-          </h3>
+          <span className="eyebrow coral">ajuste fininho ♡</span>
+          <h3>Editar mimo</h3>
         </div>
         <button type="button" className="lista-modal-x" onClick={onClose} aria-label="Fechar">
           {icon.x}
         </button>
       </div>
-
       <div className="lista-modal-body">
-        <div className="lista-form">
-          <div className="lista-field lista-field-full">
-            <label htmlFor="lista-title">nome do mimo</label>
-            <input
-              id="lista-title"
-              placeholder="ex.: Cadeirinha de carro Maxi-Cosi"
-              value={f.title}
-              onChange={(e) => setF({ ...f, title: e.target.value })}
-            />
-          </div>
-          <div className="lista-field">
-            <label htmlFor="lista-price">valor por unidade</label>
-            <input
-              id="lista-price"
-              inputMode="decimal"
-              placeholder="R$ 0,00"
-              value={f.price}
-              onChange={(e) => setF({ ...f, price: e.target.value })}
-            />
-            <span className="lista-hint">quanto cada convidado contribui</span>
-          </div>
-          <div className="lista-field">
-            <label>quantidade</label>
-            <div className="lista-stepper">
-              <button
-                type="button"
-                onClick={() => setF({ ...f, qty: Math.max(1, (Number(f.qty) || 1) - 1) })}
-                aria-label="Diminuir quantidade"
-              >
-                −
-              </button>
-              <input
-                value={f.qty}
-                inputMode="numeric"
-                onChange={(e) =>
-                  setF({ ...f, qty: Number(e.target.value.replace(/\D/g, "")) || 1 })
-                }
-                aria-label="Quantidade"
-              />
-              <button
-                type="button"
-                onClick={() => setF({ ...f, qty: (Number(f.qty) || 1) + 1 })}
-                aria-label="Aumentar quantidade"
-              >
-                +
-              </button>
-            </div>
-            <span className="lista-hint">convidados podem dividir</span>
-          </div>
-          <div className="lista-field lista-field-full">
-            <label htmlFor="lista-cat">categoria</label>
-            <select
-              id="lista-cat"
-              value={f.category}
-              onChange={(e) => setF({ ...f, category: e.target.value as ListaCategory })}
-            >
-              {CATEGORY_OPTIONS.map((c) => (
-                <option key={c} value={c}>
-                  {LISTA_CATEGORY_LABEL[c]}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
+        <PersonalizadoForm f={f} setF={setF} />
       </div>
-
       <div className="lista-modal-foot">
         <div className="lista-sel-count">
           total estimado · <b>{brl(previewTotal)}</b>
@@ -367,7 +657,7 @@ function ItemFormModal({
             Cancelar
           </button>
           <button type="button" className="btn btn-primary" disabled={!valid} onClick={submit}>
-            {mode === "add" ? "Adicionar à lista" : "Salvar alterações"}
+            Salvar alterações
           </button>
         </div>
       </div>
@@ -423,7 +713,11 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
   const [items, setItems] = useState<ListaGift[]>(LISTA_PRESENTES_SEED);
   const [search, setSearch] = useState("");
   const [cat, setCat] = useState<CatFilter>("all");
-  const [addOpen, setAddOpen] = useState(false);
+  // aperture-17cls — addModalTab encodes BOTH open state and the default tab.
+  // null = closed; "catalogo" or "personalizado" = open on that tab. Replaces
+  // the old addOpen boolean so the sparkle CTA (aperture-2eq0f) can land on
+  // PERSONALIZADO while the primary CTA lands on CATÁLOGO from one setter.
+  const [addModalTab, setAddModalTab] = useState<AddTab | null>(null);
   const [editItem, setEditItem] = useState<ListaGift | null>(null);
   const [removeItem, setRemoveItem] = useState<ListaGift | null>(null);
   const idRef = useRef(0);
@@ -465,8 +759,38 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
       custom: draft.category === "personalizado",
     };
     setItems((cur) => [next, ...cur]);
-    setAddOpen(false);
+    setAddModalTab(null);
+    // aperture-17cls: the optional `note` (recadinho) is collected but not
+    // yet rendered on the gift cards — keeps this PR's scope to the modal
+    // shape. A follow-up can wire the note onto the card body when the
+    // operator confirms how prominent the note should be on the public
+    // marketplace surface.
+    void draft.note;
     toast.success("1 mimo adicionado à sua lista ♡");
+  };
+
+  // aperture-17cls — CATÁLOGO multi-select submit. Each selected item turns
+  // into a ListaGift with the catalog's suggestedQty + the catalog's emoji
+  // and tint (so the cards look authored, not stock). Inserted at the top of
+  // the list in catalog order, preserving the visual order the user saw.
+  const addCatalogItems = (picked: ListaCatalogItem[]) => {
+    const newGifts: ListaGift[] = picked.map((it) => ({
+      id: uid(),
+      title: it.name,
+      price: it.price,
+      qty: it.suggestedQty,
+      received: 0,
+      category: it.category,
+      emoji: it.emoji,
+      bgColor: it.bgColor,
+    }));
+    setItems((cur) => [...newGifts, ...cur]);
+    setAddModalTab(null);
+    toast.success(
+      picked.length === 1
+        ? "1 mimo adicionado à sua lista ♡"
+        : `${picked.length} mimos adicionados à sua lista ♡`,
+    );
   };
 
   const saveEdit = (draft: DraftFields) => {
@@ -514,26 +838,22 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
             mimos já recebidos
           </p>
           <div className="lista-header-actions">
-            <button type="button" className="btn btn-primary" onClick={() => setAddOpen(true)}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => setAddModalTab("catalogo")}
+            >
               <span className="lista-btn-ic">{icon.plus}</span> Adicionar presente
             </button>
-            {/* aperture-2eq0f — two outlined CTAs flanking the primary:
-                "criar item personalizado" (sparkle) + "usar lista pronta"
-                (list-lines + caret). Wiring is intentionally light until
-                the follow-up beads land:
-                  - aperture-17cls will replace the existing AddModal with
-                    a tabbed CATÁLOGO/PERSONALIZADO modal; the personalized
-                    button will open that modal on the PERSONALIZADO tab.
-                  - aperture-g70uv will turn "usar lista pronta" into an
-                    expand/collapse toggle revealing a curated preset panel
-                    below this action strip.
-                For now: personalized opens the existing AddModal (already a
-                personalized form); usar-lista-pronta is a toast placeholder
-                so the surface communicates intent without dead UI. */}
+            {/* aperture-2eq0f — two outlined CTAs flanking the primary.
+                aperture-17cls wired the sparkle CTA to the new tabbed modal's
+                PERSONALIZADO tab; the primary above opens the same modal on
+                CATÁLOGO. The lista-pronta CTA still toasts until aperture-g70uv
+                lands the curated preset panel below this action strip. */}
             <button
               type="button"
               className="btn btn-ghost"
-              onClick={() => setAddOpen(true)}
+              onClick={() => setAddModalTab("personalizado")}
               aria-label="Criar item personalizado"
             >
               <span className="lista-btn-ic">{icon.sparkle}</span> Criar item personalizado
@@ -596,7 +916,11 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
             <span className="eyebrow coral">primeira página em branco ♡</span>
             <h3>Sua lista está pronta pra começar</h3>
             <p>Adicione os mimos que vão contar a história do seu bebê.</p>
-            <button type="button" className="btn btn-primary" onClick={() => setAddOpen(true)}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => setAddModalTab("catalogo")}
+            >
               <span className="lista-btn-ic">{icon.plus}</span> Adicionar primeiro item
             </button>
           </div>
@@ -614,7 +938,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
             <button
               type="button"
               className="lista-card lista-card-add"
-              onClick={() => setAddOpen(true)}
+              onClick={() => setAddModalTab("catalogo")}
             >
               <span className="lista-card-add-plus">{icon.plus}</span>
               <span className="lista-card-add-label">adicionar outro mimo</span>
@@ -624,17 +948,22 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
         )}
       </div>
 
-      {addOpen && (
-        <ItemFormModal mode="add" initial={emptyDraft()} onClose={() => setAddOpen(false)} onSubmit={addItem} />
+      {addModalTab && (
+        <AddGiftModal
+          defaultTab={addModalTab}
+          onClose={() => setAddModalTab(null)}
+          onSubmitPersonalizado={addItem}
+          onSubmitCatalogo={addCatalogItems}
+        />
       )}
       {editItem && (
-        <ItemFormModal
-          mode="edit"
+        <EditItemModal
           initial={{
             title: editItem.title,
             price: editItem.price.toFixed(2).replace(".", ","),
             qty: editItem.qty,
             category: editItem.category,
+            note: "",
           }}
           onClose={() => setEditItem(null)}
           onSubmit={saveEdit}
