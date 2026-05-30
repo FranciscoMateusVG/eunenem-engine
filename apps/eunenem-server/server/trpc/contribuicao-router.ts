@@ -187,10 +187,27 @@ function toTRPCError(err: unknown): TRPCError {
 
 // ── Input schemas ─────────────────────────────────────────────────────────
 
+/**
+ * imagemUrl accepts EITHER:
+ *   - absolute http(s) URLs (legacy + future CDN URLs)
+ *   - same-origin paths starting with `/` (e.g. `/products/1468.jpg` — used
+ *     by aperture-cdwdt's static-hosted catalog images until CDN is wired)
+ *
+ * Was originally `z.string().url()` but that rejected the local-path shape
+ * the catalog refresh (PR #71) ships. React img src tag treats both shapes
+ * identically; the strict URL validation was over-tight for this field.
+ */
+const ImagemUrlSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(500)
+  .regex(/^(\/|https?:\/\/)/, 'imagemUrl must be an http(s) URL or a same-origin path starting with /');
+
 const CreateInputSchema = z.object({
   nome: z.string().trim().min(1).max(120),
   valor: z.number().int().nonnegative(),
-  imagemUrl: z.string().url().optional(),
+  imagemUrl: ImagemUrlSchema.optional(),
   grupo: z.string().trim().min(1).max(60).optional(),
   qty: z.number().int().min(1).max(100),
 });
@@ -209,7 +226,7 @@ const CreateBulkInputSchema = z.object({
       z.object({
         nome: z.string().trim().min(1).max(120),
         valor: z.number().int().nonnegative(),
-        imagemUrl: z.string().url().optional(),
+        imagemUrl: ImagemUrlSchema.optional(),
         grupo: z.string().trim().min(1).max(60).optional(),
         qty: z.number().int().min(1).max(100),
       }),
@@ -222,7 +239,7 @@ const UpdateInputSchema = z.object({
   id: z.string().uuid(),
   nome: z.string().trim().min(1).max(120).optional(),
   valor: z.number().int().nonnegative().optional(),
-  imagemUrl: z.string().url().nullable().optional(),
+  imagemUrl: ImagemUrlSchema.nullable().optional(),
   grupo: z.string().trim().min(1).max(60).nullable().optional(),
 });
 
