@@ -1659,6 +1659,51 @@ h4 {
   margin-top: 4px;
 }
 
+/* aperture-tqb05 — Mobile (< sm:) renders 2 cards per row.
+   The base auto-fill minmax(220px, 1fr) couldn't fit 2 columns under
+   ~468px viewport (220*2 + 14 gap = 454 > available). Using
+   minmax(0, 1fr) instead of plain 1fr is critical here: 1fr is shorthand
+   for minmax(auto, 1fr), and the card's white-space: nowrap price + qty
+   pill pushed min-content past half-width, overflowing the viewport on
+   the right column. minmax(0, 1fr) forces a strict equal split.
+
+   The action buttons (edit/delete) bump from 32px to 44px — they were
+   below the mobile touch-target minimum at any width, and at half-width
+   that's more pronounced. SVG icon stays 15px.
+
+   Price font-size + qty pill padding scale down a touch so the row
+   reads comfortably without forcing horizontal scroll. Card padding
+   tightens to reclaim breathing room.
+
+   Desktop (≥sm) keeps the original auto-fill + 32px buttons. */
+@media (max-width: 639px) {
+  .lista-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px;
+  }
+  .lista-card {
+    padding: 10px;
+    min-width: 0;
+  }
+  .lista-card-actions button {
+    width: 44px;
+    height: 44px;
+  }
+  .lista-card-price {
+    font-size: 18px;
+  }
+  .lista-card-qty {
+    padding: 4px 8px;
+    font-size: 10.5px;
+  }
+  .lista-card-progress-meta b {
+    font-size: 13px;
+  }
+  .lista-card-add {
+    min-height: 180px;
+  }
+}
+
 /* ----- Empty state ----- */
 .lista-empty {
   text-align: center;
