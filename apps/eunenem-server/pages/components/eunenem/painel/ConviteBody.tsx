@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import type { PainelSectionBodyProps } from "@/PainelSectionPage";
@@ -19,29 +19,48 @@ import {
   type PreviewFormat,
 } from "@/lib/mocks/convite";
 
-// aperture-q8rr — Convites: the invite-builder wizard for /painel/:slug/convite.
+// aperture-ghvfn — Convites wizard FOUNDATION shell.
 //
-// CONTENT ONLY — the painel topbar / sidebar / shell come from PainelLayout.
-// Ported from the "Convites Desktop" + "Convites Mobile" exports into the
-// painel foundation. The interaction model is the dual-pane live-preview
-// wizard (Direction A): a scrollable scrapbook form on the left whose every
-// keystroke re-renders the invite card on the right, in real time. On narrow
-// screens it collapses to a sticky preview hero on top of the form, plus a
-// tap-to-expand fullscreen sheet (the Convites Mobile pattern).
+// Replaces the aperture-q8rr flat 6-card scrollable form with the multi-step
+// progressive-configuration wizard from direction-b.jsx: a full-viewport "open
+// book" layout with a dashed-spine divider, a 6-dot clickable stepper across
+// the top (any-step jump, not just linear next/prev), a footer with back/next
+// + a coral "enviar convite ♡" CTA on the final step, and a sticky live
+// preview on the right that reacts to every keystroke. Each step contributes
+// one formatting piece (event type → who → when → background → visual →
+// review).
 //
-// Mock-first: "enviar" / "baixar" / the ✦ copy-suggest buttons fire a sonner
-// toast and mutate local state; nothing persists. The preview ships two
-// asset-free fidelities — scrapbook (caderninho, default) + clean (tipográfico
-// minimalista). The export's watercolor-template and photo-upload modes need
-// PNG assets this repo doesn't carry, so they're intentionally out of scope.
+// THIS BEAD lands the SHELL only. Step content for tipo/quem/quando/visual
+// ships in aperture-sonyh (mechanical port from the old cards); fundo +
+// templates + upload + 2 new preview renderers ship in aperture-hzcy5; pronto
+// review/export thumbs ship in aperture-iopmm. Until those land each step
+// renders an on-brand placeholder card pointing at its sibling bead — the
+// stepper, navigation, state machine, and live preview are all live and
+// usable today.
 //
-// Styling is a scoped <style> block (cv- prefix) reusing the shared design
-// tokens from tailwind.css; the few export-only shades not in the token set
-// (--cv-line-strong etc.) are declared locally on .cv.
+// PRESERVED FROM aperture-q8rr:
+//   • InvitePreview + ScrapbookInvite + CleanInvite preview renderers — they
+//     are tuned and ship as-is on the right pane (story format).
+//   • CV_CSS scrapbook token sheet (.cv tokens, .cv-card, .cv-label, etc).
+//     Most are unused by the shell but kept so sibling step beads can drop
+//     their card content in without reinventing primitives.
+//   • The Sparkle inline svg + per-event SUGGEST copy table — sibling step
+//     `quem` (aperture-sonyh) will resurrect them when it ports the ✦ AI
+//     pill.
+//
+// DROPPED:
+//   • The flat ConviteBody body (FormCard stack, formatTabs, expanded modal,
+//     mobile sticky CTA) — the wizard model supersedes it. Sibling beads
+//     port the field-level content into per-step components.
+//   • previewScale(format, ctx) helper — replaced by a useEffect-driven
+//     resize-aware scale state (matches direction-b L11-23).
 
-// ── canned copy suggestions (mock — replaces the export's AI calls) ─────────
-
-const SUGGEST: Record<string, { message: string; hashtag: string }> = {
+// ── canned copy suggestions (mock — sibling `quem` will wire) ───────────────
+// Preserved from q8rr so aperture-sonyh's StepQuem can import { SUGGEST }
+// instead of re-deriving the per-event fallbacks. Operator removed the AI
+// integration (aperture-4a2eh deleted), so this stays as the only source of
+// suggestion copy.
+export const SUGGEST: Record<string, { message: string; hashtag: string }> = {
   "cha-bebe": {
     message:
       "a gente já te ama tanto. vem celebrar com a gente essa nova fase, prometemos café e mimos ♡",
@@ -74,9 +93,9 @@ const SUGGEST: Record<string, { message: string; hashtag: string }> = {
   },
 };
 
-// ── tiny inline icons ───────────────────────────────────────────────────────
+// ── tiny inline icons (siblings import) ─────────────────────────────────────
 
-function Sparkle() {
+export function Sparkle() {
   return (
     <svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" aria-hidden="true">
       <path d="M5.5 0L6.6 4.4 11 5.5 6.6 6.6 5.5 11 4.4 6.6 0 5.5 4.4 4.4z" />
@@ -84,20 +103,14 @@ function Sparkle() {
   );
 }
 
-function previewScale(format: PreviewFormat, ctx: "pane" | "hero" | "modal"): number {
-  const table: Record<typeof ctx, Record<PreviewFormat, number>> = {
-    pane: { story: 0.85, square: 0.78, link: 0.72 },
-    hero: { story: 0.5, square: 0.46, link: 0.5 },
-    modal: { story: 0.92, square: 0.82, link: 0.74 },
-  };
-  return table[ctx][format];
-}
-
 // ════════════════════════════════════════════════════════════════════════════
 // Live invite preview — scrapbook (default) + clean modes.
+// Carried over verbatim from aperture-q8rr; the wizard's right pane drives
+// it at format="story" only (matches direction-b). Sibling `fundo` bead adds
+// TemplateInvite + UploadedInvite modes.
 // ════════════════════════════════════════════════════════════════════════════
 
-interface PreviewProps {
+export interface PreviewProps {
   state: ConviteState;
   format: PreviewFormat;
   fidelity: Fidelity;
@@ -110,7 +123,7 @@ const DIMS: Record<PreviewFormat, { w: number; h: number }> = {
   link: { w: 540, h: 360 },
 };
 
-function InvitePreview({ state, format, fidelity, scale }: PreviewProps) {
+export function InvitePreview({ state, format, fidelity, scale }: PreviewProps) {
   const ev = EVENT_BY_ID[state.eventType] ?? EVENT_TYPES[0]!;
   const pal = PALETTE_BY_ID[state.palette] ?? PALETTES[0]!;
   const date = formatDateScrap(state.date);
@@ -708,538 +721,274 @@ function CleanInvite({
   );
 }
 
-// ── small form primitives ───────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════
+// Wizard step machine
+// ════════════════════════════════════════════════════════════════════════════
 
-function FormCard({
-  step,
-  title,
-  rightSlot,
-  children,
-}: {
-  step: string;
+/** Stable step IDs — siblings import this union when wiring per-step views. */
+export type WizardStepId = "tipo" | "quem" | "quando" | "fundo" | "visual" | "pronto";
+
+interface WizardStep {
+  id: WizardStepId;
+  /** H1 shown on the left page above step content. */
   title: string;
-  rightSlot?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="cv-card">
-      <div className="cv-card-head">
-        <div className="cv-step">{step}</div>
-        <div className="cv-card-title">{title}</div>
-        <div style={{ flex: 1 }} />
-        {rightSlot}
-      </div>
-      {children}
-    </div>
-  );
+  /** Decorative inline glyph for the stepper dot tooltip / future use. */
+  icon: string;
+  /** Which sibling bead will fill this step's content. */
+  ownerBead: string;
 }
 
-function ToggleRow({
-  label,
-  sub,
-  on,
-  onToggle,
-}: {
-  label: string;
-  sub?: string;
-  on: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <div className="cv-toggle-row">
-      <button
-        type="button"
-        className={`cv-switch ${on ? "on" : ""}`}
-        onClick={onToggle}
-        role="switch"
-        aria-checked={on}
-        aria-label={label}
-      >
-        <span className="cv-knob" />
-      </button>
-      <div style={{ flex: 1 }}>
-        <div className="cv-toggle-label">{label}</div>
-        {sub && <div className="cv-toggle-sub">{sub}</div>}
-      </div>
-    </div>
-  );
+const STEPS: readonly WizardStep[] = [
+  { id: "tipo", title: "que mimo é esse?", icon: "🍼", ownerBead: "aperture-sonyh" },
+  { id: "quem", title: "pra quem?", icon: "♡", ownerBead: "aperture-sonyh" },
+  { id: "quando", title: "quando e onde?", icon: "☁", ownerBead: "aperture-sonyh" },
+  { id: "fundo", title: "fundo do convite", icon: "✨", ownerBead: "aperture-hzcy5" },
+  { id: "visual", title: "a cara do convite", icon: "✿", ownerBead: "aperture-sonyh" },
+  { id: "pronto", title: "pronto pra enviar", icon: "✨", ownerBead: "aperture-iopmm" },
+] as const;
+
+/** Props shared by every step-view component (sibling beads consume these). */
+export interface StepViewProps {
+  state: ConviteState;
+  update: <K extends keyof ConviteState>(k: K, v: ConviteState[K]) => void;
+  fidelity: Fidelity;
+  setFidelity: (f: Fidelity) => void;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// ConviteBody
+// ConviteBody — wizard shell.
 // ════════════════════════════════════════════════════════════════════════════
 
 export function ConviteBody(_props: PainelSectionBodyProps) {
   const [state, setState] = useState<ConviteState>({ ...DEFAULT_STATE });
-  const [format, setFormat] = useState<PreviewFormat>("story");
+  const [step, setStep] = useState<number>(0);
   const [fidelity, setFidelity] = useState<Fidelity>("scrapbook");
-  const [showExtras, setShowExtras] = useState(false);
-  const [expanded, setExpanded] = useState(false);
+  const [previewScale, setPreviewScale] = useState<number>(0.7);
+
+  // Resize-aware preview scale — mirrors direction-b.jsx L11-23 with painel
+  // chrome subtracted (topbar + side padding). Bounded so the preview never
+  // collapses on short viewports nor blows past the right pane on tall ones.
+  useEffect(() => {
+    const onResize = () => {
+      const h = window.innerHeight;
+      const avail = h - 220; // painel topbar + wizard topbar + wizard footer + paddings
+      const s = Math.min(0.95, Math.max(0.5, avail / 680));
+      setPreviewScale(s);
+    };
+    onResize();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   const update = <K extends keyof ConviteState>(k: K, v: ConviteState[K]) =>
     setState((s) => ({ ...s, [k]: v }));
 
-  const ev = EVENT_BY_ID[state.eventType] ?? EVENT_TYPES[0]!;
+  const cur = STEPS[step]!;
+  const isLast = step === STEPS.length - 1;
+  const pct = ((step + 1) / STEPS.length) * 100;
 
-  const suggestCopy = () => {
-    const s = SUGGEST[state.eventType] ?? SUGGEST["cha-bebe"]!;
-    setState((prev) => ({ ...prev, message: s.message, hashtag: s.hashtag }));
-    toast.success("escrevemos uma sugestão pra você ♡");
-  };
-
+  const goPrev = () => setStep((s) => Math.max(0, s - 1));
+  const goNext = () => setStep((s) => Math.min(STEPS.length - 1, s + 1));
+  const onSave = () => toast.success("rascunho salvo com carinho ♡");
   const onSend = () => toast.success("convite pronto! agora é só compartilhar ♡");
-  const onSaveDraft = () => toast.success("rascunho salvo com carinho ♡");
-  const onDownloadAll = () => toast.success("seus 3 formatos foram gerados ♡");
 
-  const nameLabel =
-    ev.id === "aniversario"
-      ? "de quem é o dia?"
-      : ev.id === "batizado"
-        ? "nome do(a) batizando(a)"
-        : "nome do bebê";
-
-  const formatTabs = (
-    <div className="cv-seg" role="tablist" aria-label="formato do convite">
-      {(
-        [
-          ["story", "story"],
-          ["square", "quadrado"],
-          ["link", "link"],
-        ] as const
-      ).map(([k, l]) => (
-        <button
-          key={k}
-          type="button"
-          role="tab"
-          aria-selected={format === k}
-          className={format === k ? "on" : ""}
-          onClick={() => setFormat(k)}
-        >
-          {l}
-        </button>
-      ))}
-    </div>
-  );
+  const stepProps: StepViewProps = { state, update, fidelity, setFidelity };
 
   return (
-    <div className="cv">
+    <div className="cv-wiz">
       <style>{CV_CSS}</style>
+      <style>{CV_WIZ_CSS}</style>
 
-      {/* heading */}
-      <header className="cv-head">
-        <span className="cv-eyebrow">um novo mimo ♡</span>
-        <h1>
-          vamos criar seu <span className="hl">convite</span>
-        </h1>
-        <p>
-          preencha pouquinho por vez — o preview já vai se ajustando ao lado. quando travar na
-          escrita, o ✦ dá uma mãozinha ♡
-        </p>
+      {/* spine — dashed vertical "caderninho" divider down the middle */}
+      <div className="cv-wiz-spine" aria-hidden="true" />
+
+      {/* topbar — brand + stepper + save */}
+      <header className="cv-wiz-topbar">
+        <div className="cv-wiz-mark" aria-hidden="true">m</div>
+        <div className="cv-wiz-brand">
+          <div className="cv-wiz-brand-name">convitinhos</div>
+          <div className="cv-wiz-brand-step">
+            passo {step + 1} de {STEPS.length}
+          </div>
+        </div>
+
+        <div className="cv-wiz-stepper" role="tablist" aria-label="passos do wizard">
+          <div className="cv-wiz-stepper-track" aria-hidden="true" />
+          <div
+            className="cv-wiz-stepper-fill"
+            aria-hidden="true"
+            style={{ width: `calc((100% - 24px) * ${pct / 100})` }}
+          />
+          <div className="cv-wiz-stepper-dots">
+            {STEPS.map((s, i) => {
+              const status: "done" | "on" | "todo" =
+                i < step ? "done" : i === step ? "on" : "todo";
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={status === "on"}
+                  aria-label={`passo ${i + 1}: ${s.title}`}
+                  className={`cv-wiz-dot ${status}`}
+                  onClick={() => setStep(i)}
+                >
+                  {status === "done" ? "✓" : i + 1}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <button
+          type="button"
+          className="cv-btn ghost sm cv-wiz-save"
+          onClick={onSave}
+          aria-label="salvar rascunho"
+        >
+          salvar
+        </button>
       </header>
 
-      <div className="cv-shell">
-        {/* ── FORM (left on desktop) ── */}
-        <div className="cv-form">
-          <FormCard step="1" title="que mimo é esse?">
-            <div className="cv-event-grid">
-              {EVENT_TYPES.map((e, i) => {
-                const on = state.eventType === e.id;
-                return (
-                  <button
-                    key={e.id}
-                    type="button"
-                    className={`cv-event ${on ? "on" : ""}`}
-                    style={{ transform: `rotate(${[-1.5, 0.5, -0.8, 1, -0.4, 0.8][i]}deg)` }}
-                    onClick={() => update("eventType", e.id)}
-                    aria-pressed={on}
-                  >
-                    <span className="cv-event-ico">{e.icon}</span>
-                    <span className="cv-event-label">{e.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </FormCard>
+      {/* body — open book: form left, preview right */}
+      <div className="cv-wiz-body">
+        <section className="cv-wiz-page cv-wiz-page-left" aria-label="formulário">
+          <span className="cv-eyebrow">passo {step + 1} ♡</span>
+          <h1 className="cv-wiz-step-title">{cur.title}</h1>
 
-          <FormCard step="2" title={nameLabel}>
-            <label className="cv-label">nome</label>
-            <input
-              className="cv-input"
-              value={state.babyName}
-              onChange={(e) => update("babyName", e.target.value)}
-              placeholder="Maria Helena, Pedro, …"
-              aria-label="nome"
+          <StepContent stepId={cur.id} ownerBead={cur.ownerBead} stepProps={stepProps} />
+        </section>
+
+        <section className="cv-wiz-page cv-wiz-page-right" aria-label="preview ao vivo">
+          <div className="cv-wiz-preview-card">
+            <div className="cv-wiz-tape" aria-hidden="true" />
+            <InvitePreview
+              state={state}
+              format="story"
+              fidelity={fidelity}
+              scale={previewScale}
             />
-            <div style={{ height: 14 }} />
-            <label className="cv-label" style={{ transform: "rotate(1deg)" }}>
-              de quem vem o convite
-            </label>
-            <input
-              className="cv-input"
-              value={state.host}
-              onChange={(e) => update("host", e.target.value)}
-              placeholder="Mariana & Tiago"
-              aria-label="de quem vem o convite"
-            />
-          </FormCard>
-
-          <FormCard step="3" title="quando e onde?">
-            <div className="cv-seg" style={{ marginBottom: 14 }}>
-              <button
-                type="button"
-                className={state.mode === "presencial" ? "on" : ""}
-                onClick={() => update("mode", "presencial")}
-              >
-                presencial
-              </button>
-              <button
-                type="button"
-                className={state.mode === "online" ? "on" : ""}
-                onClick={() => update("mode", "online")}
-              >
-                só online
-              </button>
-            </div>
-
-            {state.mode === "online" && (
-              <div className="cv-note">
-                ✨ você pode deixar a data em branco — o convite só mostra o link e um countdown
-                opcional.
-              </div>
-            )}
-
-            <div className="cv-grid-2" style={{ marginBottom: 12 }}>
-              <div>
-                <label className="cv-label">
-                  data{" "}
-                  {state.mode === "online" && <span className="cv-opt">(opcional)</span>}
-                </label>
-                <input
-                  className="cv-input"
-                  type="date"
-                  value={state.date}
-                  onChange={(e) => update("date", e.target.value)}
-                  aria-label="data"
-                />
-              </div>
-              <div>
-                <label className="cv-label" style={{ transform: "rotate(1deg)" }}>
-                  horário{" "}
-                  {state.mode === "online" && <span className="cv-opt">(opcional)</span>}
-                </label>
-                <input
-                  className="cv-input"
-                  type="time"
-                  value={state.time}
-                  onChange={(e) => update("time", e.target.value)}
-                  aria-label="horário"
-                />
-              </div>
-            </div>
-
-            {state.mode === "presencial" ? (
-              <>
-                <label className="cv-label">endereço</label>
-                <textarea
-                  className="cv-textarea"
-                  rows={2}
-                  value={state.address}
-                  onChange={(e) => update("address", e.target.value)}
-                  placeholder="Rua, número, bairro, cidade"
-                  aria-label="endereço"
-                />
-              </>
-            ) : (
-              <>
-                <label className="cv-label">link da sala</label>
-                <input
-                  className="cv-input"
-                  value={state.onlineLink}
-                  onChange={(e) => update("onlineLink", e.target.value)}
-                  placeholder="meet.google.com/abc-xyz"
-                  aria-label="link da sala"
-                />
-              </>
-            )}
-          </FormCard>
-
-          <FormCard
-            step="4"
-            title="mensagem do convite"
-            rightSlot={
-              <button type="button" className="cv-pill" onClick={suggestCopy}>
-                <Sparkle /> pedir ajuda
-              </button>
-            }
-          >
-            <textarea
-              className="cv-textarea"
-              rows={3}
-              value={state.message}
-              onChange={(e) => update("message", e.target.value)}
-              placeholder="a gente já te ama tanto…"
-              aria-label="mensagem do convite"
-            />
-          </FormCard>
-
-          <FormCard step="5" title="a cara do convite">
-            <label className="cv-label">paleta</label>
-            <div className="cv-swatches">
-              {PALETTES.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  className={`cv-swatch ${state.palette === p.id ? "on" : ""}`}
-                  title={p.label}
-                  aria-label={`paleta ${p.label}`}
-                  aria-pressed={state.palette === p.id}
-                  onClick={() => update("palette", p.id)}
-                  style={{ background: `linear-gradient(135deg, ${p.primary}, ${p.deep})` }}
-                />
-              ))}
-              <button
-                type="button"
-                className="cv-swatch surprise"
-                title="surpreenda-me"
-                aria-label="paleta surpresa"
-                onClick={() =>
-                  update("palette", PALETTES[Math.floor(Math.random() * PALETTES.length)]!.id)
-                }
-              />
-              <span className="cv-swatch-name">{PALETTE_BY_ID[state.palette]?.label}</span>
-            </div>
-
-            <hr className="cv-dotline" />
-
-            <label className="cv-label">estilo</label>
-            <div className="cv-seg">
-              <button
-                type="button"
-                className={fidelity === "scrapbook" ? "on" : ""}
-                onClick={() => setFidelity("scrapbook")}
-              >
-                scrapbook
-              </button>
-              <button
-                type="button"
-                className={fidelity === "clean" ? "on" : ""}
-                onClick={() => setFidelity("clean")}
-              >
-                limpo
-              </button>
-            </div>
-
-            <hr className="cv-dotline" />
-
-            <label className="cv-label">fonte do nome</label>
-            <div className="cv-fonts">
-              {NAME_FONTS.map((f) => (
-                <button
-                  key={f.id}
-                  type="button"
-                  className={`cv-font ${state.nameFont === f.id ? "on" : ""}`}
-                  style={{ fontFamily: f.css }}
-                  onClick={() => update("nameFont", f.id)}
-                  aria-pressed={state.nameFont === f.id}
-                >
-                  {state.babyName.split(" ")[0] || f.label}
-                </button>
-              ))}
-            </div>
-
-            <hr className="cv-dotline" />
-
-            <label className="cv-label">decoração</label>
-            <div className="cv-seg">
-              {(["pouca", "media", "muita"] as const).map((d) => (
-                <button
-                  key={d}
-                  type="button"
-                  className={state.density === d ? "on" : ""}
-                  onClick={() => update("density", d)}
-                >
-                  {d === "media" ? "média" : d}
-                </button>
-              ))}
-            </div>
-          </FormCard>
-
-          <FormCard
-            step="+"
-            title="mais detalhinhos"
-            rightSlot={
-              <button type="button" className="cv-pill" onClick={() => setShowExtras((v) => !v)}>
-                {showExtras ? "recolher" : "expandir"}
-              </button>
-            }
-          >
-            {showExtras && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                <ToggleRow
-                  label="lista de presentes / chá de fraldas"
-                  sub="vamos sugerir tamanhos pp/p/m/g"
-                  on={state.gifts}
-                  onToggle={() => update("gifts", !state.gifts)}
-                />
-                <ToggleRow
-                  label="confirmar presença (rsvp)"
-                  sub="os convidados respondem no link"
-                  on={state.rsvp}
-                  onToggle={() => update("rsvp", !state.rsvp)}
-                />
-                <ToggleRow
-                  label="mostrar hashtag no convite"
-                  sub="aparece no rodapé do card"
-                  on={state.showHashtag}
-                  onToggle={() => update("showHashtag", !state.showHashtag)}
-                />
-                <div>
-                  <label className="cv-label">hashtag do evento</label>
-                  <input
-                    className="cv-input"
-                    value={state.hashtag}
-                    onChange={(e) => update("hashtag", e.target.value)}
-                    placeholder="#chegadaDaMari"
-                    aria-label="hashtag do evento"
-                  />
-                </div>
-              </div>
-            )}
-          </FormCard>
-        </div>
-
-        {/* ── PREVIEW (right on desktop, hero on mobile) ── */}
-        <div className="cv-preview-pane">
-          <div className="cv-preview-sticky">
-            <div className="cv-preview-head">
-              <div>
-                <span className="cv-eyebrow sm">é assim que vão ver ♡</span>
-                <h2>preview ao vivo</h2>
-              </div>
-              <div style={{ flex: 1 }} />
-              {formatTabs}
-            </div>
-
-            <div className="cv-preview-stage">
-              <button
-                type="button"
-                className="cv-preview-card"
-                onClick={() => setExpanded(true)}
-                aria-label="ampliar preview"
-              >
-                <span className="cv-tape" aria-hidden="true" />
-                <InvitePreview
-                  state={state}
-                  format={format}
-                  fidelity={fidelity}
-                  scale={previewScale(format, "pane")}
-                />
-                <span className="cv-expand-badge" aria-hidden="true">
-                  ⤢
-                </span>
-              </button>
-            </div>
-
-            <div className="cv-preview-foot">
-              <div>
-                <div className="cv-foot-script">tudo pronto ↓</div>
-                <div className="cv-foot-sub">3 formatos gerados</div>
-              </div>
-              <button type="button" className="cv-btn ghost sm" onClick={onSaveDraft}>
-                salvar rascunho
-              </button>
-              <button type="button" className="cv-btn primary sm" onClick={onDownloadAll}>
-                baixar tudo
-              </button>
-            </div>
+            <span className="cv-wiz-preview-tag">preview ♡</span>
           </div>
-        </div>
+        </section>
       </div>
 
-      {/* sticky mobile CTA */}
-      <div className="cv-mobile-cta">
-        <button type="button" className="cv-btn ghost" onClick={() => setExpanded(true)}>
-          ver convite ♡
-        </button>
-        <button type="button" className="cv-btn coral" onClick={onSend}>
-          enviar convite →
-        </button>
-      </div>
-
-      {/* expand modal */}
-      {expanded && (
-        <div
-          className="cv-modal"
-          role="dialog"
-          aria-modal="true"
-          aria-label="preview do convite"
-          onClick={() => setExpanded(false)}
+      {/* footer — back / encouragement / next or send */}
+      <footer className="cv-wiz-footer">
+        <button
+          type="button"
+          className="cv-btn ghost"
+          disabled={step === 0}
+          onClick={goPrev}
+          aria-label="passo anterior"
         >
-          <div className="cv-modal-bar">
-            <span className="cv-modal-title">seu convite ♡</span>
-            <div style={{ flex: 1 }} />
-            <div onClick={(e) => e.stopPropagation()}>{formatTabs}</div>
-            <button
-              type="button"
-              className="cv-modal-close"
-              onClick={(e) => {
-                e.stopPropagation();
-                setExpanded(false);
-              }}
-              aria-label="fechar"
-            >
-              ×
-            </button>
-          </div>
-          <div className="cv-modal-stage" onClick={(e) => e.stopPropagation()}>
-            <div className="cv-modal-card">
-              <span className="cv-tape" aria-hidden="true" />
-              <InvitePreview
-                state={state}
-                format={format}
-                fidelity={fidelity}
-                scale={previewScale(format, "modal")}
-              />
-            </div>
-          </div>
-          <div className="cv-modal-foot" onClick={(e) => e.stopPropagation()}>
-            <button type="button" className="cv-btn ghost" onClick={onSaveDraft}>
-              copiar link
-            </button>
-            <button type="button" className="cv-btn primary" onClick={onDownloadAll}>
-              baixar ↓
-            </button>
-          </div>
+          ← voltar
+        </button>
+
+        <div className="cv-wiz-footer-mid">
+          <span className="cv-wiz-script">
+            {isLast ? "tudo pronto!" : "tá indo bonito ♡"}
+          </span>
         </div>
-      )}
+
+        {isLast ? (
+          <button
+            type="button"
+            className="cv-btn coral"
+            onClick={onSend}
+            aria-label="enviar convite"
+          >
+            enviar convite ♡
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="cv-btn"
+            onClick={goNext}
+            aria-label="próximo passo"
+          >
+            próximo passo →
+          </button>
+        )}
+      </footer>
     </div>
   );
 }
 
-// ── scoped CSS (cv- prefix) — reuses tailwind.css tokens ─────────────────────
+// ════════════════════════════════════════════════════════════════════════════
+// Step content dispatch — placeholders for siblings.
+// ════════════════════════════════════════════════════════════════════════════
 
-const CV_CSS = `
-.cv{--cv-line-strong:#e2cfd8;--cv-paper:#fffcf8}
-.cv *{box-sizing:border-box}
-
-.cv-head{margin:2px 2px 18px}
-.cv-eyebrow{font-family:var(--font-caveat),cursive;color:var(--ink-soft);font-size:19px;letter-spacing:.01em;transform:rotate(-3deg);display:inline-block;transform-origin:left bottom}
-.cv-eyebrow.sm{font-size:16px}
-.cv-head h1{font-family:var(--font-patrick-hand),cursive;font-size:40px;color:var(--plum);margin:6px 0 4px;line-height:1;letter-spacing:-.01em;font-weight:600}
-.cv-head .hl{background:linear-gradient(180deg,transparent 0,transparent 58%,var(--yellow) 58%,var(--yellow) 94%,transparent 94%);padding:0 4px}
-.cv-head p{font-family:var(--font-dm-sans),sans-serif;font-size:13.5px;color:var(--ink-soft);margin:4px 0 0;max-width:460px;line-height:1.5}
-
-/* shell — single column on mobile, dual-pane on desktop */
-.cv-shell{display:grid;grid-template-columns:1fr;gap:20px}
-.cv-form{order:2;display:flex;flex-direction:column;gap:16px;min-width:0}
-.cv-preview-pane{order:1;min-width:0}
-@media (min-width:1040px){
-  .cv-shell{grid-template-columns:minmax(0,1fr) minmax(380px,430px);align-items:start}
-  .cv-form{order:1}
-  .cv-preview-pane{order:2}
+function StepContent({
+  stepId,
+  ownerBead,
+  stepProps: _stepProps,
+}: {
+  stepId: WizardStepId;
+  ownerBead: string;
+  stepProps: StepViewProps;
+}) {
+  // Sibling beads will replace this dispatch with their step components —
+  // each one receives `stepProps` (state + update + fidelity + setFidelity)
+  // so they can read/write the cumulative form state and the preview keeps
+  // updating per keystroke. Until then, every step renders the same
+  // on-brand "coming soon" card pointed at the owner bead.
+  return <StepPlaceholder stepId={stepId} ownerBead={ownerBead} />;
 }
 
-/* form cards */
+function StepPlaceholder({
+  stepId,
+  ownerBead,
+}: {
+  stepId: WizardStepId;
+  ownerBead: string;
+}) {
+  const blurb: Record<WizardStepId, string> = {
+    tipo: "a gente adapta a copy, a paleta e os carimbos pra cada tipo de evento.",
+    quem: "nome do(a) bebê, quem assina o convite e a mensagem afetiva ficam por aqui.",
+    quando: "presencial ou online, data, horário e endereço (ou link da sala).",
+    fundo:
+      "ilustrações watercolor, ou uma foto sua de fundo. cada template já vem com paleta e fonte sugeridas.",
+    visual: "paleta, estilo (scrapbook ou limpo), fonte do nome e densidade da decoração.",
+    pronto: "revisão final em story, quadrado e link — pronto pra mandar onde quiser ♡",
+  };
+
+  return (
+    <div className="cv-wiz-placeholder">
+      <p className="cv-wiz-placeholder-blurb">{blurb[stepId]}</p>
+      <div className="cv-wiz-placeholder-card">
+        <span className="cv-eyebrow sm">a caminho</span>
+        <p className="cv-wiz-placeholder-body">
+          o conteúdo deste passo (<code>{stepId}</code>) chega na próxima entrega
+          <strong> {ownerBead}</strong>. enquanto isso, a navegação acima já
+          funciona — pode pular entre passos pra ver o preview reagindo.
+        </p>
+        <p className="cv-wiz-placeholder-foot">
+          ✦ a fundação (esta entrega) trouxe a estrutura: o passa-página, o stepper, a
+          navegação, o estado cumulativo e o preview do lado direito.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// CSS — scrapbook tokens (carried over from q8rr) + wizard chrome (new).
+// ════════════════════════════════════════════════════════════════════════════
+//
+// CV_CSS keeps the .cv-card / .cv-label / .cv-input / .cv-seg / .cv-swatch /
+// .cv-event-grid primitives so sibling step beads (sonyh/hzcy5/iopmm) can
+// drop in step content without reinventing chrome. Unused-by-shell selectors
+// stay because the cost of removing them now and re-adding them in three
+// sibling PRs is higher than the carry cost.
+const CV_CSS = `
+.cv,.cv-wiz{--cv-line-strong:#e2cfd8;--cv-paper:#fffcf8}
+.cv *,.cv-wiz *{box-sizing:border-box}
+
+.cv-eyebrow{font-family:var(--font-caveat),cursive;color:var(--ink-soft);font-size:19px;letter-spacing:.01em;transform:rotate(-3deg);display:inline-block;transform-origin:left bottom}
+.cv-eyebrow.sm{font-size:14px;letter-spacing:.06em;text-transform:uppercase;color:var(--lilac-deep);font-family:var(--font-dm-sans),sans-serif;transform:none}
+
+/* form-card primitives — siblings reuse */
 .cv-card{background:var(--paper);border:1px solid var(--line);border-radius:18px;padding:16px 18px 18px;box-shadow:var(--shadow-sm);position:relative}
 .cv-card-head{display:flex;align-items:center;gap:10px;margin-bottom:10px}
 .cv-step{width:28px;height:28px;border-radius:50%;background:var(--cream-2);color:var(--plum);display:flex;align-items:center;justify-content:center;font-family:var(--font-patrick-hand),cursive;font-size:17px;line-height:1;transform:rotate(-4deg);border:1.5px dashed var(--cv-line-strong);flex:0 0 auto}
@@ -1260,12 +1009,12 @@ const CV_CSS = `
 .cv-note{background:var(--lilac-soft);border:1px dashed var(--lilac);border-radius:12px;padding:10px 12px;margin-bottom:14px;font-family:var(--font-caveat),cursive;font-size:17px;color:var(--plum);line-height:1.3}
 
 /* event grid */
-.cv-event-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:6px}
-.cv-event{border:1px dashed var(--cv-line-strong);background:#fff;border-radius:14px;padding:12px 8px 10px;cursor:pointer;font-family:var(--font-patrick-hand),cursive;text-align:center;transition:all .15s ease;display:flex;flex-direction:column;align-items:center;gap:4px}
+.cv-event-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-top:6px}
+.cv-event{border:1px dashed var(--cv-line-strong);background:#fff;border-radius:14px;padding:14px;cursor:pointer;font-family:var(--font-patrick-hand),cursive;text-align:left;transition:all .15s ease;display:flex;align-items:center;gap:12px}
 .cv-event:hover{border-color:var(--lilac)}
 .cv-event.on{border:1.5px solid var(--lilac-deep);background:var(--lilac-soft);box-shadow:var(--shadow-sm)}
-.cv-event-ico{font-size:26px;line-height:1}
-.cv-event-label{font-size:15px;color:var(--ink);line-height:1.1}
+.cv-event-ico{font-size:26px;line-height:1;flex:0 0 auto}
+.cv-event-label{font-size:16px;color:var(--ink);line-height:1.1}
 .cv-event.on .cv-event-label{color:var(--plum)}
 
 /* segmented */
@@ -1282,7 +1031,7 @@ const CV_CSS = `
 .cv-swatch{width:36px;height:36px;border-radius:50%;border:2.5px solid #fff;box-shadow:0 0 0 1.5px var(--cv-line-strong);cursor:pointer;transition:transform .15s;padding:0}
 .cv-swatch:hover{transform:scale(1.08)}
 .cv-swatch.on{box-shadow:0 0 0 2.5px var(--plum)}
-.cv-swatch.surprise{background:conic-gradient(from 0deg,var(--lilac),var(--coral-pink),var(--yellow),var(--green),var(--blue),var(--lilac))}
+.cv-swatch.surprise{background:conic-gradient(from 0deg,var(--lilac),var(--coral-pink),var(--yellow),var(--green),var(--lilac))}
 .cv-swatch-name{font-family:var(--font-caveat),cursive;font-size:17px;color:var(--ink-soft);margin-left:4px}
 
 .cv-dotline{height:1px;border:0;background-image:linear-gradient(to right,var(--cv-line-strong) 50%,transparent 50%);background-size:8px 1px;background-repeat:repeat-x;margin:18px 0}
@@ -1292,60 +1041,268 @@ const CV_CSS = `
 .cv-font{border:1px solid var(--cv-line-strong);background:#fff;border-radius:12px;padding:8px 14px;cursor:pointer;font-size:22px;line-height:1;color:var(--plum)}
 .cv-font.on{border:1.5px solid var(--lilac-deep);background:var(--lilac-soft)}
 
-/* toggle row */
-.cv-toggle-row{display:flex;align-items:center;gap:12px}
-.cv-switch{flex:0 0 auto;width:44px;height:26px;padding:0;border-radius:999px;border:none;cursor:pointer;background:var(--cream-2);position:relative;transition:background .15s}
-.cv-switch.on{background:var(--lilac);box-shadow:var(--shadow-cta)}
-.cv-knob{width:20px;height:20px;border-radius:50%;background:#fff;border:1.5px solid var(--cv-line-strong);position:absolute;top:2px;left:2px;transition:left .15s}
-.cv-switch.on .cv-knob{left:22px;border-color:var(--lilac-deep)}
-.cv-toggle-label{font-family:var(--font-patrick-hand),cursive;font-size:18px;color:var(--ink);line-height:1.15}
-.cv-toggle-sub{font-family:var(--font-dm-sans),sans-serif;font-size:11.5px;color:var(--ink-soft);margin-top:2px}
-
-/* preview pane */
-.cv-preview-sticky{background:var(--cream);border:1px solid var(--line);border-radius:20px;padding:18px;background-image:radial-gradient(at 100% 0%,rgba(232,213,240,.5) 0,transparent 45%),radial-gradient(at 0% 100%,rgba(251,224,234,.4) 0,transparent 40%)}
-@media (min-width:1040px){.cv-preview-sticky{position:sticky;top:18px}}
-.cv-preview-head{display:flex;align-items:flex-end;margin-bottom:14px;gap:10px}
-.cv-preview-head h2{font-family:var(--font-patrick-hand),cursive;font-size:26px;color:var(--plum);margin:2px 0 0;line-height:1}
-.cv-preview-stage{display:flex;align-items:center;justify-content:center;min-height:280px}
-.cv-preview-card{position:relative;background:transparent;border:none;padding:0;cursor:pointer;transform:rotate(-1deg);transition:transform .2s ease}
-.cv-preview-card:hover{transform:rotate(-1deg) translateY(-2px)}
-.cv-tape{position:absolute;top:-8px;left:50%;transform:translateX(-50%) rotate(-3deg);width:64px;height:18px;background:repeating-linear-gradient(45deg,rgba(255,255,255,.45) 0,rgba(255,255,255,.45) 3px,transparent 3px,transparent 7px),var(--lilac-soft);box-shadow:0 1px 3px rgba(107,60,94,.15);z-index:2}
-.cv-expand-badge{position:absolute;bottom:6px;right:6px;background:rgba(107,60,94,.8);color:#fff;width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;line-height:1;backdrop-filter:blur(4px)}
-.cv-preview-foot{margin-top:16px;padding:12px 14px;background:rgba(255,255,255,.6);border:1px solid var(--line);border-radius:16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.cv-foot-script{font-family:var(--font-caveat),cursive;font-size:17px;color:var(--plum);line-height:1}
-.cv-foot-sub{font-family:var(--font-dm-sans),sans-serif;font-size:10px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.1em;margin-top:3px}
-
-/* buttons */
+/* buttons — shared with wizard chrome below */
 .cv-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:11px 18px;border-radius:999px;border:1px solid transparent;background:var(--lilac);color:#fff;font-family:var(--font-dm-sans),sans-serif;font-weight:600;font-size:12.5px;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;transition:transform .12s,box-shadow .15s,background .15s;box-shadow:var(--shadow-cta);white-space:nowrap}
-.cv-btn:hover{transform:translateY(-1px);background:var(--lilac-deep)}
+.cv-btn:hover:not(:disabled){transform:translateY(-1px);background:var(--lilac-deep)}
+.cv-btn:disabled{opacity:.4;cursor:not-allowed;box-shadow:none}
 .cv-btn.sm{padding:8px 13px;font-size:11px}
 .cv-btn.ghost{background:transparent;color:var(--ink);border-color:var(--cv-line-strong);box-shadow:none}
-.cv-btn.ghost:hover{background:var(--cream-2);color:var(--plum)}
+.cv-btn.ghost:hover:not(:disabled){background:var(--cream-2);color:var(--plum)}
 .cv-btn.coral{background:var(--coral-pink);box-shadow:0 8px 20px rgba(231,143,167,.4)}
-.cv-btn.coral:hover{background:#d4789a}
-.cv-btn.primary{margin-left:auto}
-
-/* mobile sticky CTA — hidden on desktop (preview always visible) */
-.cv-mobile-cta{position:sticky;bottom:0;margin:18px -4px 0;padding:12px 4px;display:flex;gap:10px;background:linear-gradient(180deg,transparent,var(--cream) 40%);align-items:center}
-.cv-mobile-cta .cv-btn{flex:1}
-@media (min-width:1040px){.cv-mobile-cta{display:none}}
-
-/* expand modal */
-.cv-modal{position:fixed;inset:0;z-index:120;background:rgba(40,24,36,.62);backdrop-filter:blur(12px);display:flex;flex-direction:column;animation:cvFade .2s ease}
-@keyframes cvFade{from{opacity:0}to{opacity:1}}
-.cv-modal-bar{flex:0 0 auto;padding:18px 20px 6px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-.cv-modal-bar .cv-seg{background:rgba(255,255,255,.15)}
-.cv-modal-bar .cv-seg button{color:rgba(255,255,255,.9)}
-.cv-modal-bar .cv-seg button.on{background:#fff;color:var(--plum)}
-.cv-modal-title{font-family:var(--font-caveat),cursive;font-size:24px;color:#fff;transform:rotate(-3deg);display:inline-block}
-.cv-modal-close{width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,.2);color:#fff;border:none;cursor:pointer;font-size:22px;line-height:1;display:flex;align-items:center;justify-content:center}
-.cv-modal-stage{flex:1;display:flex;align-items:center;justify-content:center;padding:8px 24px;overflow:auto}
-.cv-modal-card{position:relative;transform:rotate(-1.5deg)}
-.cv-modal-foot{flex:0 0 auto;padding:14px 20px 28px;display:flex;gap:10px}
-.cv-modal-foot .cv-btn{flex:1;margin-left:0}
-.cv-modal-foot .cv-btn.ghost{background:#fff;color:var(--plum);border-color:transparent}
+.cv-btn.coral:hover:not(:disabled){background:#d4789a}
 
 @media (prefers-reduced-motion:reduce){
-  .cv-preview-card,.cv-btn,.cv-modal{transition:none;animation:none}
+  .cv-btn{transition:none}
+}
+`;
+
+// CV_WIZ_CSS = the new wizard chrome (shell, spine, topbar, stepper, body
+// dual-pane, preview card, footer, placeholder). Everything is namespaced
+// under .cv-wiz so it never collides with the q8rr .cv selectors.
+const CV_WIZ_CSS = `
+.cv-wiz{
+  position:relative;
+  background:var(--paper);
+  border:1px solid var(--line);
+  border-radius:20px;
+  box-shadow:var(--shadow-sm);
+  overflow:hidden;
+  display:flex;
+  flex-direction:column;
+  min-height:700px;
+}
+
+/* dashed vertical "caderninho" spine — desktop only */
+.cv-wiz-spine{
+  position:absolute;
+  top:80px;bottom:80px;left:50%;
+  width:2px;margin-left:-1px;
+  background:repeating-linear-gradient(to bottom,
+    var(--cv-line-strong) 0,var(--cv-line-strong) 6px,
+    transparent 6px,transparent 12px);
+  opacity:.55;
+  pointer-events:none;
+  z-index:1;
+}
+@media (max-width:1039px){
+  .cv-wiz-spine{display:none}
+}
+
+/* ── topbar ─────────────────────────────────────────────────────────── */
+.cv-wiz-topbar{
+  position:relative;z-index:5;
+  padding:18px 24px 14px;
+  display:flex;align-items:center;gap:16px;
+  border-bottom:1px solid var(--line);
+  background:rgba(255,255,255,.55);
+  flex-wrap:wrap;
+}
+.cv-wiz-mark{
+  width:36px;height:36px;border-radius:10px;
+  background:var(--lilac);color:#fff;
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--font-patrick-hand),cursive;font-size:22px;line-height:1;
+  transform:rotate(-4deg);
+  box-shadow:var(--shadow-cta);
+  flex:0 0 auto;
+}
+.cv-wiz-brand{flex:0 0 auto;min-width:0}
+.cv-wiz-brand-name{font-family:var(--font-patrick-hand),cursive;font-size:20px;color:var(--plum);line-height:1}
+.cv-wiz-brand-step{font-family:var(--font-dm-sans),sans-serif;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-soft);margin-top:4px}
+
+/* stepper — track + fill + 6 clickable dots */
+.cv-wiz-stepper{
+  flex:1 1 280px;
+  position:relative;
+  padding:0 20px;
+  height:30px;
+  min-width:240px;
+}
+.cv-wiz-stepper-track{
+  position:absolute;
+  top:13px;left:32px;right:32px;
+  height:3px;border-radius:2px;
+  background:var(--cv-line-strong);
+}
+.cv-wiz-stepper-fill{
+  position:absolute;
+  top:13px;left:32px;
+  height:3px;border-radius:2px;
+  background:linear-gradient(90deg,var(--green),var(--lilac));
+  transition:width .35s ease;
+}
+.cv-wiz-stepper-dots{
+  position:relative;
+  display:flex;justify-content:space-between;align-items:center;
+  height:30px;
+  z-index:1;
+}
+.cv-wiz-dot{
+  width:30px;height:30px;border-radius:50%;
+  border:2px solid #fff;
+  cursor:pointer;padding:0;
+  font-family:var(--font-patrick-hand),cursive;font-size:14px;line-height:1;
+  display:flex;align-items:center;justify-content:center;
+  transition:transform .15s ease,box-shadow .2s ease,background .2s ease;
+}
+.cv-wiz-dot.todo{background:var(--cream-2);color:var(--ink-mute)}
+.cv-wiz-dot.done{background:var(--green-deep,#8AA53A);color:#fff}
+.cv-wiz-dot.on{
+  background:var(--lilac-deep);color:#fff;
+  box-shadow:0 0 0 4px rgba(167,123,190,.25);
+  transform:scale(1.1);
+}
+.cv-wiz-dot:hover:not(.on){transform:scale(1.08)}
+.cv-wiz-dot:focus-visible{outline:2px solid var(--lilac-deep);outline-offset:3px}
+
+.cv-wiz-save{flex:0 0 auto;margin-left:auto}
+
+/* ── body — open book ────────────────────────────────────────────── */
+.cv-wiz-body{
+  position:relative;
+  flex:1 1 auto;
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  min-height:0;
+  z-index:2;
+}
+.cv-wiz-page{
+  position:relative;
+  min-width:0;
+  padding:32px 40px 36px;
+  overflow-y:auto;
+}
+.cv-wiz-page-left{
+  border-right:none;
+}
+.cv-wiz-page-right{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:24px 40px;
+  background:linear-gradient(180deg,transparent 0,rgba(232,213,240,.18) 100%);
+}
+
+.cv-wiz-step-title{
+  font-family:var(--font-patrick-hand),cursive;
+  font-size:38px;
+  color:var(--plum);
+  margin:6px 0 22px;
+  line-height:1;
+  letter-spacing:-.01em;
+  font-weight:600;
+}
+
+/* preview card on the right pane — washi-taped polaroid frame */
+.cv-wiz-preview-card{
+  position:relative;
+  transform:rotate(-1.5deg);
+  padding:16px;
+  background:#fff;
+  border:1px solid var(--line);
+  border-radius:14px;
+  box-shadow:0 6px 18px rgba(107,60,94,.16),0 1px 0 rgba(107,60,94,.04);
+}
+.cv-wiz-tape{
+  position:absolute;
+  top:-11px;left:42px;
+  width:72px;height:22px;
+  background:repeating-linear-gradient(45deg,
+    rgba(255,255,255,.42) 0,rgba(255,255,255,.42) 4px,
+    transparent 4px,transparent 9px),
+    var(--lilac-soft);
+  transform:rotate(-4deg);
+  box-shadow:0 1px 3px rgba(107,60,94,.12);
+}
+.cv-wiz-preview-tag{
+  position:absolute;
+  bottom:-22px;right:10px;
+  transform:rotate(4deg);
+  font-family:var(--font-caveat),cursive;
+  font-size:17px;color:var(--ink-soft);
+}
+
+/* mobile / narrow — collapse to a single column with preview hero on top */
+@media (max-width:1039px){
+  .cv-wiz-body{
+    grid-template-columns:1fr;
+  }
+  .cv-wiz-page-right{
+    order:-1;
+    padding:24px 24px 8px;
+    min-height:0;
+  }
+  .cv-wiz-page-left{
+    padding:24px 24px 32px;
+  }
+  .cv-wiz-step-title{font-size:32px}
+}
+
+/* very narrow — relax the stepper so it never overflows */
+@media (max-width:640px){
+  .cv-wiz-topbar{padding:14px 16px 12px;gap:12px}
+  .cv-wiz-brand{flex:1 1 auto}
+  .cv-wiz-stepper{flex:1 1 100%;order:3;padding:0 4px}
+  .cv-wiz-save{margin-left:0}
+  .cv-wiz-page-left{padding:20px}
+  .cv-wiz-page-right{padding:20px 20px 4px}
+}
+
+/* ── footer — back / encouragement / next ─────────────────────────── */
+.cv-wiz-footer{
+  position:relative;z-index:3;
+  padding:14px 24px;
+  border-top:1px solid var(--line);
+  background:rgba(255,255,255,.7);
+  display:flex;align-items:center;gap:16px;
+  flex-wrap:wrap;
+}
+.cv-wiz-footer-mid{flex:1 1 auto;text-align:center;min-width:80px}
+.cv-wiz-script{
+  font-family:var(--font-caveat),cursive;
+  font-size:18px;
+  color:var(--ink-soft);
+}
+
+/* ── placeholder card (until step content lands in sibling beads) ──── */
+.cv-wiz-placeholder{display:flex;flex-direction:column;gap:18px;max-width:520px}
+.cv-wiz-placeholder-blurb{
+  color:var(--ink-soft);
+  font-family:var(--font-dm-sans),sans-serif;
+  font-size:13.5px;line-height:1.55;
+  margin:-12px 0 0;
+}
+.cv-wiz-placeholder-card{
+  background:linear-gradient(135deg,var(--lilac-soft),#fff 90%);
+  border:1.5px dashed var(--lilac);
+  border-radius:18px;
+  padding:18px 20px;
+  display:flex;flex-direction:column;gap:10px;
+}
+.cv-wiz-placeholder-body{
+  margin:0;
+  font-family:var(--font-patrick-hand),cursive;
+  font-size:17px;line-height:1.45;
+  color:var(--ink);
+}
+.cv-wiz-placeholder-body code{
+  font-family:var(--font-dm-sans),monospace;
+  background:rgba(255,255,255,.6);
+  border:1px solid var(--line);
+  border-radius:6px;
+  padding:0 6px;
+  font-size:13px;
+  color:var(--plum);
+}
+.cv-wiz-placeholder-body strong{color:var(--lilac-deep);font-weight:600}
+.cv-wiz-placeholder-foot{
+  margin:0;
+  font-family:var(--font-caveat),cursive;
+  font-size:16px;line-height:1.4;
+  color:var(--plum);
+}
+
+@media (prefers-reduced-motion:reduce){
+  .cv-wiz-stepper-fill,.cv-wiz-dot{transition:none}
 }
 `;

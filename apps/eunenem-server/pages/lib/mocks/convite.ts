@@ -105,6 +105,14 @@ export interface ConviteState {
   palette: string;
   nameFont: NameFontId;
   density: Density;
+  /** aperture-ghvfn — selected background template id, or "none" for plain
+   *  scrapbook paper. The actual watercolor PNGs + template registry land in
+   *  the sibling `fundo` bead (aperture-hzcy5); the shell carries the field. */
+  bgTemplate: string;
+  /** aperture-ghvfn — user-uploaded background image as a data URL, or null.
+   *  Mutually exclusive with bgTemplate (set one, clear the other). The upload
+   *  pipeline + preview renderer for it ship in aperture-hzcy5. */
+  bgUpload: string | null;
 }
 
 export const DEFAULT_STATE: ConviteState = {
@@ -124,6 +132,8 @@ export const DEFAULT_STATE: ConviteState = {
   palette: "lilas",
   nameFont: "patrick",
   density: "media",
+  bgTemplate: "none",
+  bgUpload: null,
 };
 
 // ── date helpers ──────────────────────────────────────────────────────────
