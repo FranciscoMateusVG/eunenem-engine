@@ -1,11 +1,17 @@
-import { useEffect, useState } from 'react';
-import { LANDING_LINKS, NAV_LINKS } from '@/lib/mocks/landing';
+import { useEffect, useRef, useState } from 'react';
+import { NAV_LINKS } from '@/lib/mocks/landing';
+import { useAuthModal } from '@/components/eunenem/auth/AuthModalProvider';
 
-// aperture-q1j2 — marketing landing navbar (ported from the Next.js
-// prototype). Sticky, transparent at top, frosted + bordered once
-// scrolled. Mock-first: every CTA points at the real eunenem.com app.
+// aperture-q1j2 — marketing landing navbar.
+// aperture-nop8l — CTA wiring: "Entrar" + "criar minha lista" now both
+// open the AuthModalShell instead of linking out to eunenem.com. Trigger
+// refs are passed to useAuthModal().open() so focus restores correctly
+// when the modal closes.
 export function Navbar() {
   const [scrolled, setScrolled] = useState(false);
+  const auth = useAuthModal();
+  const signinBtnRef = useRef<HTMLButtonElement | null>(null);
+  const signupBtnRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 12);
@@ -44,12 +50,24 @@ export function Navbar() {
             </li>
           ))}
         </ul>
-        <a
-          href={LANDING_LINKS.criarLista}
-          className="btn-lilac !py-3 !px-5 !text-[12px]"
-        >
-          criar minha lista
-        </a>
+        <div className="flex items-center gap-2 sm:gap-3">
+          <button
+            ref={signinBtnRef}
+            type="button"
+            onClick={() => auth.open('signin', signinBtnRef.current)}
+            className="text-[13px] font-semibold text-ink hover:text-lilac-deep transition-colors tracking-wide px-2 py-2 rounded-lg focus-visible:outline-2 focus-visible:outline-lilac-deep focus-visible:outline-offset-2"
+          >
+            Entrar
+          </button>
+          <button
+            ref={signupBtnRef}
+            type="button"
+            onClick={() => auth.open('signup', signupBtnRef.current)}
+            className="btn-lilac !py-3 !px-5 !text-[12px]"
+          >
+            criar minha lista
+          </button>
+        </div>
       </div>
     </nav>
   );

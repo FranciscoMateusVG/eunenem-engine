@@ -1,5 +1,6 @@
 import { Toaster } from 'sonner';
 import { AuthDemoPage } from './AuthDemoPage.js';
+import { AuthModalProvider } from './components/eunenem/auth/AuthModalProvider.js';
 import { LandingPage } from './LandingPage.js';
 import { NotFoundPage } from './NotFoundPage.js';
 import { PaginaPage } from './PaginaPage.js';
@@ -69,15 +70,20 @@ export function App({ pathname }: { pathname: string }) {
   // → no hydration mismatch.
   return (
     <TrpcProvider>
-      {pickPage(route, pathname)}
-      <Toaster
-        position="bottom-center"
-        theme="light"
-        richColors
-        toastOptions={{
-          style: { fontFamily: 'var(--font-dm-sans), system-ui, sans-serif' },
-        }}
-      />
+      {/* AuthModalProvider (aperture-nop8l) — singleton modal mounted at the
+       *  tree root so any landing CTA or painel control can summon it via
+       *  `useAuthModal()`. Renders the AuthModalShell itself when open. */}
+      <AuthModalProvider>
+        {pickPage(route, pathname)}
+        <Toaster
+          position="bottom-center"
+          theme="light"
+          richColors
+          toastOptions={{
+            style: { fontFamily: 'var(--font-dm-sans), system-ui, sans-serif' },
+          }}
+        />
+      </AuthModalProvider>
     </TrpcProvider>
   );
 }

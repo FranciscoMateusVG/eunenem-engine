@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react';
-import { LANDING_LINKS } from '@/lib/mocks/landing';
+import { useRef, type ReactNode } from 'react';
+import { useAuthModal } from '@/components/eunenem/auth/AuthModalProvider';
 
 // aperture-b8yn3 — v2 rewrite of section 03 "Como funciona".
 // Same 3-step structure + icons + tilted scrapbook tiles as v1, but tighter
@@ -90,6 +90,9 @@ const STEPS: ReadonlyArray<Step> = [
 ];
 
 export function HowItWorks() {
+  // aperture-nop8l — CTA opens signup modal.
+  const auth = useAuthModal();
+  const ctaRef = useRef<HTMLButtonElement | null>(null);
   return (
     <section id="como-funciona" className="fade-up py-22 bg-cream">
       <div className="mx-auto max-w-[1200px] px-6">
@@ -126,9 +129,14 @@ export function HowItWorks() {
           ))}
         </div>
         <div className="text-center mt-14">
-          <a href={LANDING_LINKS.criarLista} className="btn-outline">
+          <button
+            ref={ctaRef}
+            type="button"
+            onClick={() => auth.open('signup', ctaRef.current)}
+            className="btn-outline"
+          >
             começar agora →
-          </a>
+          </button>
         </div>
       </div>
     </section>

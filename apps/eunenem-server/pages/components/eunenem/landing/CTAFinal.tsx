@@ -1,10 +1,14 @@
-import { useState } from 'react';
-import { LANDING_FAQS, LANDING_LINKS } from '@/lib/mocks/landing';
+import { useRef, useState } from 'react';
+import { LANDING_FAQS } from '@/lib/mocks/landing';
+import { useAuthModal } from '@/components/eunenem/auth/AuthModalProvider';
 
 // aperture-q1j2 — final CTA on a tri-stop gradient with an accordion FAQ.
 // Accordion is interactive (useState), so it hydrates on the client.
+// aperture-nop8l — CTA opens signup modal.
 export function CTAFinal() {
   const [open, setOpen] = useState<number | null>(null);
+  const auth = useAuthModal();
+  const ctaRef = useRef<HTMLButtonElement | null>(null);
 
   return (
     <section
@@ -42,9 +46,14 @@ export function CTAFinal() {
         <p className="text-[17px] text-ink-soft my-6 max-w-[540px] mx-auto text-pretty">
           Junte-se a mais de 300 mil famílias que celebraram com a EuNeném.
         </p>
-        <a href={LANDING_LINKS.criarLista} className="btn-lilac btn-lilac-lg">
+        <button
+          ref={ctaRef}
+          type="button"
+          onClick={() => auth.open('signup', ctaRef.current)}
+          className="btn-lilac btn-lilac-lg"
+        >
           → criar minha lista agora — é grátis
-        </a>
+        </button>
         <p className="text-[13px] text-ink-mute mt-4.5">
           Menos de 2 minutos · transparência total em taxas · suporte via
           WhatsApp

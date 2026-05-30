@@ -1,8 +1,8 @@
 'use client';
 
-import { useMemo, useState, type CSSProperties } from 'react';
+import { useMemo, useRef, useState, type CSSProperties } from 'react';
 
-import { LANDING_LINKS } from '@/lib/mocks/landing';
+import { useAuthModal } from '@/components/eunenem/auth/AuthModalProvider';
 
 // aperture-5mgiw — Section 05 (Calculadora) of the v2 landing.
 // Interactive two-slider income calculator: guests x ticket = total
@@ -39,6 +39,10 @@ function pluralize(n: number, singular: string, plural: string): string {
 export function Calculadora() {
   const [guests, setGuests] = useState<number>(40);
   const [ticket, setTicket] = useState<number>(120);
+
+  // aperture-nop8l — CTA opens signup modal.
+  const auth = useAuthModal();
+  const ctaRef = useRef<HTMLButtonElement | null>(null);
 
   // BRL formatter — Brazilian thousands/decimals, R$ prefix.
   // Whole-real granularity (no centavos) because the ticket slider
@@ -270,9 +274,14 @@ export function Calculadora() {
             </div>
 
             <div className="calculadora-cta">
-              <a href={LANDING_LINKS.criarLista} className="btn-lilac">
+              <button
+                ref={ctaRef}
+                type="button"
+                onClick={() => auth.open('signup', ctaRef.current)}
+                className="btn-lilac"
+              >
                 → criar minha lista grátis
-              </a>
+              </button>
             </div>
           </div>
         </div>

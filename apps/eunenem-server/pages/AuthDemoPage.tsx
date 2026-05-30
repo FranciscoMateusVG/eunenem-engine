@@ -1,7 +1,6 @@
 import { useRef } from "react";
 
-import { AuthModalShell } from "./components/eunenem/auth/AuthModalShell.js";
-import { useAuthModal } from "./components/eunenem/auth/useAuthModal.js";
+import { useAuthModal } from "./components/eunenem/auth/AuthModalProvider.js";
 import { AUTH_DEMO_HINTS } from "./lib/mocks/auth.js";
 
 // aperture-ubpnl — Dev-only demo surface for the auth modals.
@@ -199,13 +198,8 @@ export function AuthDemoPage() {
         </p>
       </div>
 
-      {auth.state.isOpen && (
-        <AuthModalShell
-          mode={auth.state.mode}
-          onClose={auth.close}
-          onModeChange={auth.setMode}
-        />
-      )}
+      {/* Modal mounted by AuthModalProvider at the App.tsx root —
+       *  this page no longer renders it directly. */}
     </main>
   );
 }
