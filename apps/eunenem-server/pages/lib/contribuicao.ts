@@ -1,17 +1,9 @@
-// aperture-0ph83 — Contribuicao adapter.
+// aperture-0ph83 — Contribuicao adapter (REAL tRPC).
 //
 // Single seam between the lista UI and the contribuicao data layer.
-// Currently re-exports a MOCK implementation (lib/mocks/contribuicao-mock.ts)
-// so the UI can be built and tested against the locked contract while
-// Rex's tRPC procedures (aperture-d6atj, PR #68) finish merging.
+// SWAPPED from mock → real tRPC by GLaDOS post-PR #68 merge.
 //
-// SWAP: when PR #68 merges, flip the internals of this file to:
-//   const trpc = useTrpc(); // however the client surface is named
-//   return trpc.contribuicao.list.useQuery();
-// (etc for each hook). The export surface stays identical, so
-// ListaPresentesBody.tsx never changes.
-//
-// Contract Rex's d6atj ships (LOCKED — see aperture-0ph83 BEADS notes):
+// Contract Rex's d6atj shipped (LOCKED — matches mock perfectly):
 //   contribuicao.list -> ContribuicaoDTO[]
 //   contribuicao.create({ nome, valor, imagemUrl, grupo, qty }) -> { ids }
 //   contribuicao.createBulk({ items: [...] }) -> { ids }
@@ -22,24 +14,21 @@
 //
 // Errors: BAD_REQUEST 'contribuicao_locked' | NOT_FOUND | UNAUTHORIZED
 //         mapped to ContribuicaoError discriminated union.
+//
+// Invalidation: every mutation invalidates `trpc.contribuicao.list` via
+// `trpc.useUtils().contribuicao.list.invalidate()`. Mock-era manual
+// queryKey + useQueryClient dropped — trpc-react-query manages its own keys.
 
 import { TRPCClientError } from "@trpc/client";
-import {
-  useMutation,
-  useQuery,
-  useQueryClient,
-  type UseMutationResult,
-  type UseQueryResult,
-} from "@tanstack/react-query";
 
 import {
-  mockContribuicao,
   type BulkCreateInput,
   type ContribuicaoDTO,
   type CreateInput,
   type DeleteInput,
   type UpdateInput,
 } from "./mocks/contribuicao-mock.js";
+import { trpc } from "./trpc.js";
 
 // ── Re-exported contract types ─────────────────────────────────────────────
 
@@ -118,15 +107,10 @@ export function contribuicaoErrorMessage(err: ContribuicaoError): string {
 }
 
 /**
- * Translate a thrown tRPC error into the UI's `ContribuicaoError`
- * shape. Handles BOTH error sources we'll see across the swap:
- *   - `TRPCClientError` (from @trpc/client) — what the real wire client
- *     throws when the swap lands. Code lives at `err.data.code`.
- *   - `TRPCError` (from @trpc/server) — what the mock throws inline
- *     during the in-flight period before PR #68 merges. Code lives at
- *     `err.code` directly.
- * Anything else collapses to `network` so the user sees a friendly
- * retry instead of a stack trace.
+ * Translate a thrown tRPC error into the UI's `ContribuicaoError` shape.
+ * `TRPCClientError` (from @trpc/client) is the real wire client error type;
+ * code lives at `err.data.code`. Anything else collapses to `network` so
+ * the user sees a friendly retry instead of a stack trace.
  */
 export function toContribuicaoError(err: unknown): ContribuicaoError {
   const code = extractTrpcCode(err);
@@ -146,139 +130,83 @@ export function toContribuicaoError(err: unknown): ContribuicaoError {
   }
 }
 
-/**
- * Duck-typed code extraction across both TRPCClientError and TRPCError
- * shapes. Returns null for non-tRPC errors.
- */
+/** Duck-typed code extraction. Returns null for non-tRPC errors. */
 function extractTrpcCode(err: unknown): string | null {
   if (err instanceof TRPCClientError) {
     return typeof err.data?.code === "string" ? err.data.code : null;
   }
-  // TRPCError (server-side) carries `.code` directly. We don't `instanceof`
-  // it to avoid importing @trpc/server into the client bundle solely for
-  // a type guard the mock will use.
-  if (
-    err !== null &&
-    typeof err === "object" &&
-    "code" in err &&
-    typeof (err as { code: unknown }).code === "string"
-  ) {
-    return (err as { code: string }).code;
-  }
   return null;
 }
 
-// ── React Query hooks ──────────────────────────────────────────────────────
+// ── React Query hooks (real tRPC) ──────────────────────────────────────────
 //
-// Every mutation invalidates the list query on success — the UI
-// re-fetches and renders the new world. No optimistic updates yet
-// (d0x1w's optimistic pattern is documented but not shipped in this
-// codebase; introducing it here would couple the swap-to-real change
-// to a pattern that hasn't landed). When PR #68 merges, the internals
-// flip from `mockContribuicao.*` to `trpc.contribuicao.*.useMutation`
-// and the query key + invalidation strategy stays identical.
-
-const CONTRIBUICAO_LIST_KEY = ["contribuicao.list"] as const;
+// Every mutation invalidates the contribuicao.list query on success
+// via trpc.useUtils() — the UI re-fetches and renders the new world.
+// No optimistic updates yet (intentionally — match the documented
+// pattern; introducing optimistic logic here would couple to a
+// pattern that hasn't landed elsewhere in this codebase).
 
 /** Live list query — drives the gift-grid render. */
-export function useContribuicaoList(): UseQueryResult<ContribuicaoDTO[], Error> {
-  return useQuery({
-    queryKey: CONTRIBUICAO_LIST_KEY,
-    queryFn: () => mockContribuicao.list(),
-  });
+export function useContribuicaoList() {
+  return trpc.contribuicao.list.useQuery();
 }
 
 /** Single-item create. Multiplied by `input.qty` server-side. */
-export function useContribuicaoCreate(): UseMutationResult<
-  { ids: string[] },
-  Error,
-  CreateInput
-> {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (input: CreateInput) => mockContribuicao.create(input),
+export function useContribuicaoCreate() {
+  const utils = trpc.useUtils();
+  return trpc.contribuicao.create.useMutation({
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: CONTRIBUICAO_LIST_KEY });
+      void utils.contribuicao.list.invalidate();
     },
   });
 }
 
 /** Bulk create — each input.items[i] gets `items[i].qty` rows. */
-export function useContribuicaoCreateBulk(): UseMutationResult<
-  { ids: string[] },
-  Error,
-  BulkCreateInput
-> {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (input: BulkCreateInput) => mockContribuicao.createBulk(input),
+export function useContribuicaoCreateBulk() {
+  const utils = trpc.useUtils();
+  return trpc.contribuicao.createBulk.useMutation({
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: CONTRIBUICAO_LIST_KEY });
+      void utils.contribuicao.list.invalidate();
     },
   });
 }
 
 /** Add `qty` units of one catalog item, with optional overrides. */
-export function useContribuicaoCreateFromCatalog(): UseMutationResult<
-  { ids: string[] },
-  Error,
-  { catalogItemId: string; qty: number; overrides?: Partial<CreateInput> }
-> {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (input: {
-      catalogItemId: string;
-      qty: number;
-      overrides?: Partial<CreateInput>;
-    }) => mockContribuicao.createFromCatalog(input),
+export function useContribuicaoCreateFromCatalog() {
+  const utils = trpc.useUtils();
+  return trpc.contribuicao.createFromCatalog.useMutation({
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: CONTRIBUICAO_LIST_KEY });
+      void utils.contribuicao.list.invalidate();
     },
   });
 }
 
 /** Expand a "lista pronta" bundle into individual contribuicoes. */
-export function useContribuicaoCreateFromListaPronta(): UseMutationResult<
-  { ids: string[] },
-  Error,
-  { listaProntaId: string }
-> {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (input: { listaProntaId: string }) =>
-      mockContribuicao.createFromListaPronta(input),
+export function useContribuicaoCreateFromListaPronta() {
+  const utils = trpc.useUtils();
+  return trpc.contribuicao.createFromListaPronta.useMutation({
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: CONTRIBUICAO_LIST_KEY });
+      void utils.contribuicao.list.invalidate();
     },
   });
 }
 
 /** Patch a single contribuicao. Throws `locked` on indisponivel rows. */
-export function useContribuicaoUpdate(): UseMutationResult<
-  { id: string },
-  Error,
-  UpdateInput
-> {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (input: UpdateInput) => mockContribuicao.update(input),
+export function useContribuicaoUpdate() {
+  const utils = trpc.useUtils();
+  return trpc.contribuicao.update.useMutation({
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: CONTRIBUICAO_LIST_KEY });
+      void utils.contribuicao.list.invalidate();
     },
   });
 }
 
 /** Bulk delete by ids. Missing ids are silently skipped. */
-export function useContribuicaoDelete(): UseMutationResult<
-  { count: number },
-  Error,
-  DeleteInput
-> {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (input: DeleteInput) => mockContribuicao.delete(input),
+export function useContribuicaoDelete() {
+  const utils = trpc.useUtils();
+  return trpc.contribuicao.delete.useMutation({
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: CONTRIBUICAO_LIST_KEY });
+      void utils.contribuicao.list.invalidate();
     },
   });
 }
