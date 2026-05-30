@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import type { PainelSectionBodyProps } from "@/PainelSectionPage";
@@ -18,6 +18,11 @@ import {
   type Palette,
   type PreviewFormat,
 } from "@/lib/mocks/convite";
+import {
+  TEMPLATE_BY_ID,
+  TEMPLATES,
+  type Template,
+} from "@/lib/mocks/templates";
 
 // aperture-ghvfn — Convites wizard FOUNDATION shell.
 //
@@ -131,6 +136,48 @@ export function InvitePreview({ state, format, fidelity, scale }: PreviewProps) 
   const isOnline = state.mode === "online";
   const cd = isOnline ? countdownTo(state.date, state.time) : null;
   const dims = DIMS[format];
+
+  // aperture-hzcy5 — bg-driven dispatch takes priority over fidelity. Upload
+  // wins over template (both are mutually exclusive in StepFundo, but if both
+  // are set we prefer the user-uploaded photo).
+  if (state.bgUpload) {
+    return (
+      <UploadedInvite
+        state={state}
+        dims={dims}
+        scale={scale}
+        pal={pal}
+        evLabel={ev.label}
+        date={date}
+        isOnline={isOnline}
+        cd={cd}
+        nameFontCss={nameFontCss}
+        format={format}
+      />
+    );
+  }
+
+  const tpl =
+    state.bgTemplate && state.bgTemplate !== "none"
+      ? TEMPLATE_BY_ID[state.bgTemplate]
+      : undefined;
+  if (tpl) {
+    return (
+      <TemplateInvite
+        state={state}
+        dims={dims}
+        scale={scale}
+        pal={pal}
+        evLabel={ev.label}
+        tpl={tpl}
+        date={date}
+        isOnline={isOnline}
+        cd={cd}
+        nameFontCss={nameFontCss}
+        format={format}
+      />
+    );
+  }
 
   if (fidelity === "clean") {
     return (
@@ -721,6 +768,491 @@ function CleanInvite({
   );
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// aperture-hzcy5 — TemplateInvite: watercolor PNG full-bleed + text routed
+// into the template's safeArea fractions. Sibling of ScrapbookInvite /
+// CleanInvite — same ModeProps shape, same scale handling, same DIMS table.
+// Optional `soft` scrim renders a frosted backdrop over the safe area for
+// templates whose illustration occupies the center (e.g. berco-floral).
+// ────────────────────────────────────────────────────────────────────────────
+
+function TemplateInvite({
+  state,
+  dims,
+  scale,
+  pal,
+  evLabel,
+  tpl,
+  date,
+  isOnline,
+  cd,
+  nameFontCss,
+  format,
+}: ModeProps & { tpl: Template }) {
+  const sa = tpl.safeArea;
+  const safe = {
+    top: sa.top * dims.h,
+    bottom: sa.bottom * dims.h,
+    left: sa.left * dims.w,
+    right: sa.right * dims.w,
+  };
+  const safeH = dims.h - safe.top - safe.bottom;
+  // berco-floral and similar tight-center templates: drop secondary copy.
+  const isCompact = safeH < dims.h * 0.4;
+  const align = tpl.align;
+  const nameSize = isCompact ? 36 : format === "square" ? 48 : format === "link" ? 38 : 54;
+
+  return (
+    <div
+      style={{
+        width: dims.w * scale,
+        height: dims.h * scale,
+        position: "relative",
+        overflow: "hidden",
+        borderRadius: 14 * scale,
+        boxShadow: "0 1px 0 rgba(107,60,94,.06), 0 8px 24px rgba(107,60,94,.16)",
+        background: "#FFFCF8",
+      }}
+    >
+      {/* bg image — full-bleed cover */}
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          backgroundImage: `url("${tpl.img}")`,
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+        }}
+      />
+
+      {/* scrim — only for templates whose illustration crowds the center */}
+      {tpl.scrim === "soft" && (
+        <div
+          style={{
+            position: "absolute",
+            top: (safe.top + 0.04 * dims.h) * scale,
+            bottom: (safe.bottom + 0.04 * dims.h) * scale,
+            left: (safe.left + 0.04 * dims.w) * scale,
+            right: (safe.right + 0.04 * dims.w) * scale,
+            background: "rgba(255,252,248,.55)",
+            backdropFilter: "blur(4px)",
+            WebkitBackdropFilter: "blur(4px)",
+            borderRadius: 10 * scale,
+            pointerEvents: "none",
+          }}
+        />
+      )}
+
+      {/* safe area — text container */}
+      <div
+        style={{
+          position: "absolute",
+          top: safe.top * scale,
+          bottom: safe.bottom * scale,
+          left: safe.left * scale,
+          right: safe.right * scale,
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "center",
+          textAlign: align,
+          alignItems: align === "left" ? "flex-start" : "center",
+        }}
+      >
+        <div
+          style={{
+            transform: `scale(${scale})`,
+            transformOrigin: align === "left" ? "0 50%" : "center",
+            width:
+              align === "left"
+                ? `${dims.w - (safe.left + safe.right)}px`
+                : "auto",
+          }}
+        >
+          {/* eyebrow */}
+          <div
+            style={{
+              fontFamily: "var(--font-dm-sans), sans-serif",
+              fontSize: 10,
+              letterSpacing: ".22em",
+              textTransform: "uppercase",
+              color: pal.deep,
+              marginBottom: 8,
+            }}
+          >
+            {evLabel}
+          </div>
+
+          {/* baby name */}
+          <div
+            style={{
+              fontFamily: nameFontCss,
+              color: pal.ink,
+              fontSize: nameSize,
+              lineHeight: 1,
+              letterSpacing: "-0.005em",
+              marginBottom: isCompact ? 4 : 12,
+              textWrap: "pretty",
+            }}
+          >
+            {state.babyName || (state.eventType === "aniversario" ? "Mariana" : "Maria Helena")}
+          </div>
+
+          {/* date or online */}
+          {isOnline ? (
+            <div style={{ marginBottom: 10 }}>
+              <div
+                style={{
+                  display: "inline-block",
+                  fontFamily: "var(--font-dm-sans), sans-serif",
+                  fontSize: 9,
+                  letterSpacing: ".2em",
+                  textTransform: "uppercase",
+                  color: pal.deep,
+                  border: `1px solid ${pal.deep}`,
+                  padding: "3px 10px",
+                  marginBottom: 8,
+                }}
+              >
+                evento online
+              </div>
+              {cd && (
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 14,
+                    justifyContent: align === "left" ? "flex-start" : "center",
+                    marginBottom: 8,
+                  }}
+                >
+                  {([["DIAS", cd.days], ["HORAS", cd.hours], ["MIN", cd.mins]] as const).map(
+                    ([l, v]) => (
+                      <div key={l}>
+                        <div
+                          style={{
+                            fontFamily: nameFontCss,
+                            fontSize: 24,
+                            color: pal.ink,
+                            lineHeight: 1,
+                          }}
+                        >
+                          {String(v).padStart(2, "0")}
+                        </div>
+                        <div
+                          style={{
+                            fontFamily: "var(--font-dm-sans), sans-serif",
+                            fontSize: 7.5,
+                            letterSpacing: ".18em",
+                            color: pal.deep,
+                            marginTop: 2,
+                          }}
+                        >
+                          {l}
+                        </div>
+                      </div>
+                    ),
+                  )}
+                </div>
+              )}
+              {state.onlineLink && (
+                <div
+                  style={{
+                    fontFamily: "var(--font-dm-sans), sans-serif",
+                    fontSize: 9.5,
+                    color: pal.deep,
+                    wordBreak: "break-all",
+                  }}
+                >
+                  {state.onlineLink}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div style={{ marginBottom: isCompact ? 6 : 12 }}>
+              {date && (
+                <div
+                  style={{
+                    fontFamily: "var(--font-dm-sans), sans-serif",
+                    fontSize: isCompact ? 10 : 11,
+                    letterSpacing: ".16em",
+                    textTransform: "uppercase",
+                    color: pal.deep,
+                    lineHeight: 1.5,
+                  }}
+                >
+                  {date.day} {date.monthFull} {date.year}
+                  {state.time ? ` · ${state.time}` : ""}
+                </div>
+              )}
+              {state.address && !isCompact && (
+                <div
+                  style={{
+                    fontFamily: "var(--font-dm-sans), sans-serif",
+                    fontSize: 10,
+                    color: pal.ink,
+                    lineHeight: 1.55,
+                    marginTop: 8,
+                    maxWidth: 280,
+                    textWrap: "pretty",
+                    whiteSpace: "pre-line",
+                  }}
+                >
+                  {state.address.replace(/\n/g, " · ")}
+                </div>
+              )}
+            </div>
+          )}
+
+          {state.message && !isCompact && (
+            <div
+              style={{
+                fontFamily: "var(--font-dm-sans), sans-serif",
+                fontStyle: "italic",
+                fontSize: 11,
+                color: pal.ink,
+                lineHeight: 1.55,
+                marginBottom: 10,
+                maxWidth: 320,
+                textWrap: "pretty",
+              }}
+            >
+              {state.message}
+            </div>
+          )}
+
+          {!isCompact && (
+            <div
+              style={{
+                width: 32,
+                height: 1,
+                background: pal.deep,
+                opacity: 0.4,
+                margin: align === "left" ? "8px 0" : "8px auto",
+              }}
+            />
+          )}
+
+          {state.host && (
+            <div
+              style={{
+                fontFamily: "var(--font-dm-sans), sans-serif",
+                fontSize: 9,
+                letterSpacing: ".2em",
+                textTransform: "uppercase",
+                color: pal.deep,
+              }}
+            >
+              {state.host}
+              {state.hashtag && state.showHashtag ? ` · ${state.hashtag}` : ""}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// aperture-hzcy5 — UploadedInvite: user-supplied photo as full-bleed bg,
+// dark gradient scrim, text anchored to the bottom 40% of the card so it
+// stays legible against any image. Sibling of TemplateInvite — same
+// ModeProps shape.
+// ────────────────────────────────────────────────────────────────────────────
+
+function UploadedInvite({
+  state,
+  dims,
+  scale,
+  pal: _pal,
+  evLabel,
+  date,
+  isOnline,
+  cd,
+  nameFontCss,
+  format,
+}: ModeProps) {
+  return (
+    <div
+      style={{
+        width: dims.w * scale,
+        height: dims.h * scale,
+        position: "relative",
+        overflow: "hidden",
+        borderRadius: 14 * scale,
+        boxShadow: "0 1px 0 rgba(107,60,94,.06), 0 8px 24px rgba(107,60,94,.16)",
+        background: "#FFFCF8",
+      }}
+    >
+      {/* uploaded photo full-bleed */}
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          backgroundImage: `url("${state.bgUpload ?? ""}")`,
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+        }}
+      />
+      {/* dark gradient scrim — keeps text readable against any photo */}
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          background:
+            "linear-gradient(180deg, rgba(20, 10, 25, .15), rgba(20, 10, 25, .55))",
+        }}
+      />
+      {/* text — anchored to the bottom 40% of the card */}
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: 0,
+          padding: `${20 * scale}px ${24 * scale}px ${24 * scale}px`,
+          color: "white",
+        }}
+      >
+        <div
+          style={{
+            transform: `scale(${scale})`,
+            transformOrigin: "0 100%",
+            width: `calc(100% / ${scale})`,
+          }}
+        >
+          <div
+            style={{
+              fontFamily: "var(--font-dm-sans), sans-serif",
+              fontSize: 10,
+              letterSpacing: ".22em",
+              textTransform: "uppercase",
+              opacity: 0.85,
+              marginBottom: 6,
+            }}
+          >
+            {evLabel}
+          </div>
+
+          <div
+            style={{
+              fontFamily: nameFontCss,
+              fontSize: format === "square" ? 52 : 56,
+              lineHeight: 1,
+              marginBottom: 12,
+              textShadow: "0 2px 14px rgba(0,0,0,.4)",
+            }}
+          >
+            {state.babyName || "Maria Helena"}
+          </div>
+
+          {isOnline ? (
+            <div>
+              <div
+                style={{
+                  display: "inline-block",
+                  fontFamily: "var(--font-dm-sans), sans-serif",
+                  fontSize: 9,
+                  letterSpacing: ".2em",
+                  textTransform: "uppercase",
+                  border: "1px solid rgba(255,255,255,.8)",
+                  padding: "3px 10px",
+                  marginBottom: 8,
+                }}
+              >
+                evento online
+              </div>
+              {cd && (
+                <div style={{ display: "flex", gap: 14, marginBottom: 8 }}>
+                  {([["DIAS", cd.days], ["HORAS", cd.hours], ["MIN", cd.mins]] as const).map(
+                    ([l, v]) => (
+                      <div key={l}>
+                        <div style={{ fontFamily: nameFontCss, fontSize: 26, lineHeight: 1 }}>
+                          {String(v).padStart(2, "0")}
+                        </div>
+                        <div
+                          style={{
+                            fontFamily: "var(--font-dm-sans), sans-serif",
+                            fontSize: 7.5,
+                            letterSpacing: ".18em",
+                            opacity: 0.8,
+                            marginTop: 2,
+                          }}
+                        >
+                          {l}
+                        </div>
+                      </div>
+                    ),
+                  )}
+                </div>
+              )}
+              {state.onlineLink && (
+                <div
+                  style={{
+                    fontFamily: "var(--font-dm-sans), sans-serif",
+                    fontSize: 10,
+                    opacity: 0.9,
+                    wordBreak: "break-all",
+                  }}
+                >
+                  {state.onlineLink}
+                </div>
+              )}
+            </div>
+          ) : (
+            <>
+              {date && (
+                <div
+                  style={{
+                    fontFamily: "var(--font-dm-sans), sans-serif",
+                    fontSize: 11,
+                    letterSpacing: ".16em",
+                    textTransform: "uppercase",
+                    opacity: 0.95,
+                    marginBottom: 6,
+                  }}
+                >
+                  {date.day} {date.monthFull} {date.year}
+                  {state.time ? ` · ${state.time}` : ""}
+                </div>
+              )}
+              {state.address && (
+                <div
+                  style={{
+                    fontFamily: "var(--font-dm-sans), sans-serif",
+                    fontSize: 11,
+                    opacity: 0.9,
+                    lineHeight: 1.5,
+                    marginBottom: 8,
+                    textWrap: "pretty",
+                    whiteSpace: "pre-line",
+                  }}
+                >
+                  {state.address.replace(/\n/g, " · ")}
+                </div>
+              )}
+            </>
+          )}
+
+          {state.host && (
+            <div
+              style={{
+                fontFamily: "var(--font-dm-sans), sans-serif",
+                fontSize: 9.5,
+                letterSpacing: ".2em",
+                textTransform: "uppercase",
+                opacity: 0.8,
+                marginTop: 8,
+              }}
+            >
+              {state.host}
+              {state.hashtag && state.showHashtag ? ` · ${state.hashtag}` : ""}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // Wizard step machine
 // ════════════════════════════════════════════════════════════════════════════
@@ -928,9 +1460,10 @@ function StepContent({
   ownerBead: string;
   stepProps: StepViewProps;
 }) {
-  // aperture-sonyh + aperture-iopmm — real step views for
-  // tipo/quem/quando/visual/pronto; fundo keeps the placeholder until
-  // sibling bead hzcy5 ships.
+  // aperture-sonyh + aperture-iopmm + aperture-hzcy5 — real step views for
+  // all 6 wizard steps. Each step receives stepProps (state + update +
+  // fidelity + setFidelity) so they can read/write the cumulative form state
+  // and the preview keeps updating per keystroke.
   switch (stepId) {
     case "tipo":
       return <StepTipo {...stepProps} />;
@@ -938,6 +1471,9 @@ function StepContent({
       return <StepQuem {...stepProps} />;
     case "quando":
       return <StepQuando {...stepProps} />;
+    case "fundo":
+      // aperture-hzcy5 — watercolor template gallery + photo upload.
+      return <StepFundo {...stepProps} />;
     case "visual":
       return <StepVisual {...stepProps} />;
     case "pronto":
@@ -1365,6 +1901,162 @@ function StepPronto({ state, fidelity }: StepViewProps) {
         ))}
       </div>
     </>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// aperture-hzcy5 — StepFundo: 12 watercolor templates + "papel" (no bg) +
+// photo upload. Picking a template silently cascades its suggested palette
+// and nameFont into state (default behaviour per direction-b — preserve the
+// pick, no warn, no block). bgTemplate and bgUpload are mutually exclusive
+// — setting one clears the other.
+//
+// DROPPED from direction-b: the AI-suggest CTA (and the matching pulse-ring
+// animation + "combina ♡" suggested-badge that depended on it). Operator
+// removed AI integration; the suggestTemplates() pure helper still lives in
+// templates.ts for future consumers.
+// ────────────────────────────────────────────────────────────────────────────
+
+function StepFundo({ state, update }: StepViewProps) {
+  const fileRef = useRef<HTMLInputElement | null>(null);
+
+  const onUpload = (file: File | undefined | null) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const result = e.target?.result;
+      if (typeof result === "string") {
+        update("bgUpload", result);
+        update("bgTemplate", "none");
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const removeUpload = () => update("bgUpload", null);
+
+  const selectTemplate = (tpl: Template) => {
+    update("bgTemplate", tpl.id);
+    update("bgUpload", null);
+    // Silent palette + font cascade (preserve default per direction-b).
+    update("palette", tpl.suggestedPalette);
+    update("nameFont", tpl.suggestedNameFont);
+  };
+
+  const selectNone = () => {
+    update("bgTemplate", "none");
+    update("bgUpload", null);
+  };
+
+  const isNoneActive = state.bgTemplate === "none" && !state.bgUpload;
+
+  return (
+    <div className="cv-fundo">
+      <p className="cv-fundo-intro">
+        escolhe uma ilustração watercolor ou manda uma foto sua — cada template
+        já vem com paleta e fonte sugeridas ♡
+      </p>
+
+      <label className="cv-label">templates de convite</label>
+      <div className="cv-fundo-grid">
+        {/* "papel" — no template, use the scrapbook/clean fidelity branch */}
+        <button
+          type="button"
+          onClick={selectNone}
+          className={`cv-tpl ${isNoneActive ? "on" : ""}`}
+          aria-pressed={isNoneActive}
+          aria-label="sem template — papel scrapbook"
+        >
+          <div className="cv-tpl-thumb cv-tpl-thumb-none" aria-hidden="true">
+            papel
+          </div>
+          <div className="cv-tpl-label">scrapbook</div>
+        </button>
+
+        {TEMPLATES.map((tpl) => {
+          const active = state.bgTemplate === tpl.id && !state.bgUpload;
+          return (
+            <button
+              type="button"
+              key={tpl.id}
+              onClick={() => selectTemplate(tpl)}
+              className={`cv-tpl ${active ? "on" : ""}`}
+              aria-pressed={active}
+              aria-label={`template ${tpl.label}`}
+            >
+              <div
+                className="cv-tpl-thumb"
+                style={{ background: `url("${tpl.img}") center/cover, white` }}
+                aria-hidden="true"
+              />
+              <div className="cv-tpl-label">
+                {tpl.emoji} {tpl.label}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      <label className="cv-label">ou usa uma foto sua</label>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        onChange={(e) => onUpload(e.target.files?.[0])}
+        style={{ display: "none" }}
+      />
+
+      {state.bgUpload ? (
+        <div className="cv-upload-chip">
+          <div
+            className="cv-upload-chip-thumb"
+            style={{
+              background: `url("${state.bgUpload}") center/cover, var(--cream-2)`,
+            }}
+            aria-hidden="true"
+          />
+          <div className="cv-upload-chip-meta">
+            <div className="cv-upload-chip-title">imagem da família ♡</div>
+            <div className="cv-upload-chip-sub">
+              vai virar o fundo do convite — o texto aparece embaixo com um
+              scrim suave.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            className="cv-btn ghost sm"
+          >
+            trocar
+          </button>
+          <button
+            type="button"
+            onClick={removeUpload}
+            className="cv-upload-chip-remove"
+            aria-label="remover imagem"
+          >
+            remover
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          className="cv-upload-empty"
+          aria-label="enviar uma imagem"
+        >
+          <div className="cv-upload-empty-ico" aria-hidden="true">
+            ＋
+          </div>
+          <div>
+            <div className="cv-upload-empty-title">enviar uma imagem</div>
+            <div className="cv-upload-empty-sub">
+              jpg ou png — fica de fundo, o texto aparece embaixo com scrim
+            </div>
+          </div>
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -1829,5 +2521,141 @@ const CV_WIZ_CSS = `
 
 @media (prefers-reduced-motion:reduce){
   .cv-wiz-stepper-fill,.cv-wiz-dot{transition:none}
+}
+
+/* ── hzcy5 — fundo step (templates + upload) ───────────────────────── */
+.cv-fundo{display:flex;flex-direction:column;gap:14px}
+.cv-fundo-intro{
+  color:var(--ink-soft);
+  font-family:var(--font-dm-sans),sans-serif;
+  font-size:13.5px;line-height:1.55;
+  margin:-12px 0 6px;max-width:440px;
+}
+
+.cv-fundo-grid{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:10px;
+  margin-bottom:14px;
+}
+
+.cv-tpl{
+  background:#fff;
+  border:1px solid var(--line);
+  border-radius:12px;
+  padding:6px;
+  cursor:pointer;
+  text-align:center;
+  box-shadow:0 1px 3px rgba(107,60,94,.06);
+  transition:all .15s ease;
+  display:flex;flex-direction:column;gap:6px;
+  position:relative;
+}
+.cv-tpl:hover{border-color:var(--lilac);transform:translateY(-1px)}
+.cv-tpl.on{
+  border:1.8px solid var(--lilac-deep);
+  box-shadow:0 6px 16px rgba(167,123,190,.22);
+}
+.cv-tpl:focus-visible{outline:2px solid var(--lilac-deep);outline-offset:2px}
+
+.cv-tpl-thumb{
+  width:100%;aspect-ratio:2 / 3;
+  border-radius:8px;
+  border:1px solid var(--line);
+  background:#fff;
+}
+.cv-tpl-thumb-none{
+  background:var(--paper);
+  background-image:radial-gradient(rgba(107,60,94,.06) 1px,transparent 1px);
+  background-size:8px 8px;
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--font-caveat),cursive;
+  font-size:14px;color:var(--ink-soft);
+}
+.cv-tpl-label{
+  font-family:var(--font-patrick-hand),cursive;
+  font-size:13.5px;
+  color:var(--ink);
+  line-height:1;
+}
+.cv-tpl.on .cv-tpl-label{color:var(--plum)}
+
+/* upload — empty state */
+.cv-upload-empty{
+  width:100%;
+  background:rgba(255,255,255,.5);
+  border:1.5px dashed var(--cv-line-strong);
+  border-radius:14px;
+  padding:18px 16px;
+  cursor:pointer;text-align:left;
+  display:flex;align-items:center;gap:14px;
+  transition:all .15s ease;
+}
+.cv-upload-empty:hover{
+  border-color:var(--lilac);
+  background:var(--lilac-soft);
+}
+.cv-upload-empty:focus-visible{outline:2px solid var(--lilac-deep);outline-offset:2px}
+.cv-upload-empty-ico{
+  width:44px;height:44px;border-radius:12px;
+  border:1.5px dashed var(--lilac);
+  display:flex;align-items:center;justify-content:center;
+  font-size:22px;color:var(--lilac-deep);
+  transform:rotate(-4deg);
+  background:#fff;
+  flex:0 0 auto;
+}
+.cv-upload-empty-title{
+  font-family:var(--font-patrick-hand),cursive;
+  font-size:19px;color:var(--plum);line-height:1;
+}
+.cv-upload-empty-sub{
+  font-family:var(--font-dm-sans),sans-serif;
+  font-size:11px;color:var(--ink-soft);
+  margin-top:4px;
+}
+
+/* upload — populated chip */
+.cv-upload-chip{
+  display:flex;align-items:center;gap:14px;
+  background:#fff;
+  border:1.5px solid var(--lilac-deep);
+  border-radius:14px;
+  padding:12px;
+  box-shadow:0 6px 16px rgba(167,123,190,.18);
+  flex-wrap:wrap;
+}
+.cv-upload-chip-thumb{
+  width:60px;height:90px;border-radius:8px;
+  border:1px solid var(--line);
+  flex:0 0 auto;
+}
+.cv-upload-chip-meta{flex:1 1 160px;min-width:0}
+.cv-upload-chip-title{
+  font-family:var(--font-patrick-hand),cursive;
+  font-size:19px;color:var(--plum);line-height:1;
+}
+.cv-upload-chip-sub{
+  font-family:var(--font-dm-sans),sans-serif;
+  font-size:11px;color:var(--ink-soft);
+  margin-top:4px;line-height:1.3;
+}
+.cv-upload-chip-remove{
+  background:transparent;
+  border:1px solid var(--coral-pink);
+  color:var(--coral-pink);
+  border-radius:999px;
+  padding:7px 12px;
+  font-family:var(--font-dm-sans),sans-serif;
+  font-weight:600;font-size:11px;
+  letter-spacing:.08em;text-transform:uppercase;
+  cursor:pointer;
+  transition:background .15s,color .15s;
+}
+.cv-upload-chip-remove:hover{background:var(--coral-pink);color:#fff}
+.cv-upload-chip-remove:focus-visible{outline:2px solid var(--coral-pink);outline-offset:2px}
+
+@media (max-width:640px){
+  .cv-fundo-grid{grid-template-columns:repeat(2,1fr)}
 }
 `;
