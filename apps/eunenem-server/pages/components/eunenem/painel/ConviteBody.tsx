@@ -922,18 +922,338 @@ export function ConviteBody(_props: PainelSectionBodyProps) {
 function StepContent({
   stepId,
   ownerBead,
-  stepProps: _stepProps,
+  stepProps,
 }: {
   stepId: WizardStepId;
   ownerBead: string;
   stepProps: StepViewProps;
 }) {
-  // Sibling beads will replace this dispatch with their step components —
-  // each one receives `stepProps` (state + update + fidelity + setFidelity)
-  // so they can read/write the cumulative form state and the preview keeps
-  // updating per keystroke. Until then, every step renders the same
-  // on-brand "coming soon" card pointed at the owner bead.
-  return <StepPlaceholder stepId={stepId} ownerBead={ownerBead} />;
+  // aperture-sonyh — real step views for tipo/quem/quando/visual; fundo and
+  // pronto keep the placeholder until their sibling beads (hzcy5/iopmm) ship.
+  switch (stepId) {
+    case "tipo":
+      return <StepTipo {...stepProps} />;
+    case "quem":
+      return <StepQuem {...stepProps} />;
+    case "quando":
+      return <StepQuando {...stepProps} />;
+    case "visual":
+      return <StepVisual {...stepProps} />;
+    default:
+      return <StepPlaceholder stepId={stepId} ownerBead={ownerBead} />;
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// aperture-sonyh — Per-step view components
+// ════════════════════════════════════════════════════════════════════════════
+//
+// Mechanical port of the four data-entry steps from direction-b.jsx
+// (StepTipo L203, StepQuem L243, StepQuando L275, StepVisual L325) onto the
+// CV_CSS primitives carried over from q8rr. Visual fidelity (rotation,
+// dashed borders, eyebrow text, gradient washi tape, ✦ AI pill) matches
+// direction-b; CSS comes from the existing .cv-event, .cv-pill, .cv-input,
+// .cv-textarea, .cv-seg, .cv-note, .cv-swatches, .cv-swatch, .cv-fonts,
+// .cv-font, .cv-grid-2, .cv-dotline, .cv-label primitives — no new
+// selectors needed for these four steps.
+//
+// The ✦ "pedir ajuda à ia" pill on StepQuem calls into the existing SUGGEST
+// lookup table (per-event fallback copy) — operator removed the real AI
+// integration (aperture-4a2eh), so this stays as the only copy source.
+// Mirrors the q8rr `suggestCopy` UX: write the suggestion into
+// state.message AND fire a sonner success toast.
+
+function StepTipo({ state, update }: StepViewProps) {
+  // ROTATIONS — mirrors direction-b L220's per-card rotation array so each
+  // event card sits a touch off-axis (scrapbook feel). Indexes wrap if
+  // EVENT_TYPES ever grows past 6.
+  const ROT = [-1.5, 1, -0.6, 1.2, -1, 0.8];
+  return (
+    <>
+      <p className="cv-step-blurb">
+        a gente adapta a copy, a paleta e os carimbos pra cada tipo de evento.
+      </p>
+      <div className="cv-event-grid">
+        {EVENT_TYPES.map((e, i) => {
+          const on = state.eventType === e.id;
+          const rot = ROT[i % ROT.length];
+          return (
+            <button
+              key={e.id}
+              type="button"
+              className={`cv-event ${on ? "on" : ""}`}
+              aria-pressed={on}
+              aria-label={`tipo de evento: ${e.label}`}
+              onClick={() => update("eventType", e.id)}
+              style={{ transform: `rotate(${rot}deg)` }}
+            >
+              <div className="cv-event-ico" aria-hidden="true">{e.icon}</div>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div className="cv-event-label">{e.label}</div>
+                <div className="cv-event-hint">{e.emojiHint}</div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+function StepQuem({ state, update }: StepViewProps) {
+  const ev = EVENT_BY_ID[state.eventType] ?? EVENT_TYPES[0]!;
+  const isAniversario = ev.id === "aniversario";
+
+  const suggestCopy = () => {
+    const pick = SUGGEST[ev.id] ?? SUGGEST["cha-bebe"]!;
+    update("message", pick.message);
+    toast.success("sugestão aplicada com carinho ♡");
+  };
+
+  return (
+    <>
+      <label className="cv-label" htmlFor="cv-baby-name">
+        {isAniversario ? "de quem é o dia" : "nome do(a) bebê"}
+      </label>
+      <input
+        id="cv-baby-name"
+        className="cv-input cv-input-lg"
+        value={state.babyName}
+        onChange={(e) => update("babyName", e.target.value)}
+        placeholder="Maria Helena"
+      />
+
+      <hr className="cv-dotline" />
+
+      <label className="cv-label" htmlFor="cv-host">
+        de quem vem o convite
+      </label>
+      <input
+        id="cv-host"
+        className="cv-input cv-input-md"
+        value={state.host}
+        onChange={(e) => update("host", e.target.value)}
+        placeholder="Mariana & Tiago"
+      />
+
+      <hr className="cv-dotline" />
+
+      <div className="cv-label-row">
+        <label className="cv-label" htmlFor="cv-message">
+          mensagem afetiva
+        </label>
+        <button
+          type="button"
+          className="cv-pill"
+          onClick={suggestCopy}
+          aria-label="pedir sugestão de mensagem"
+          style={{ transform: "rotate(2deg)" }}
+        >
+          <Sparkle /> pedir ajuda à ia
+        </button>
+      </div>
+      <textarea
+        id="cv-message"
+        className="cv-textarea"
+        rows={3}
+        value={state.message}
+        onChange={(e) => update("message", e.target.value)}
+        placeholder="uma mensagem curtinha, do coração ♡"
+      />
+    </>
+  );
+}
+
+function StepQuando({ state, update }: StepViewProps) {
+  const isOnline = state.mode === "online";
+  return (
+    <>
+      <div className="cv-card cv-mode-card">
+        <label className="cv-label" style={{ marginBottom: 10 }}>
+          tipo de evento
+        </label>
+        <div className="cv-seg" role="group" aria-label="modalidade do evento">
+          <button
+            type="button"
+            className={state.mode === "presencial" ? "on" : ""}
+            aria-pressed={state.mode === "presencial"}
+            onClick={() => update("mode", "presencial")}
+          >
+            presencial
+          </button>
+          <button
+            type="button"
+            className={state.mode === "online" ? "on" : ""}
+            aria-pressed={state.mode === "online"}
+            onClick={() => update("mode", "online")}
+          >
+            só online
+          </button>
+        </div>
+        {isOnline && (
+          <div className="cv-note" style={{ marginTop: 12, marginBottom: 0 }}>
+            ✨ data e hora ficam opcionais — se preencher, vira countdown.
+          </div>
+        )}
+      </div>
+
+      <div className="cv-grid-2" style={{ marginBottom: 18 }}>
+        <div>
+          <label className="cv-label" htmlFor="cv-date">
+            data
+          </label>
+          <input
+            id="cv-date"
+            type="date"
+            className="cv-input"
+            value={state.date}
+            onChange={(e) => update("date", e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="cv-label" htmlFor="cv-time" style={{ transform: "rotate(1deg)" }}>
+            horário
+          </label>
+          <input
+            id="cv-time"
+            type="time"
+            className="cv-input"
+            value={state.time}
+            onChange={(e) => update("time", e.target.value)}
+          />
+        </div>
+      </div>
+
+      {isOnline ? (
+        <>
+          <label className="cv-label" htmlFor="cv-online-link">
+            link da sala
+          </label>
+          <input
+            id="cv-online-link"
+            className="cv-input"
+            value={state.onlineLink}
+            placeholder="meet.google.com/..."
+            onChange={(e) => update("onlineLink", e.target.value)}
+          />
+        </>
+      ) : (
+        <>
+          <label className="cv-label" htmlFor="cv-address">
+            endereço
+          </label>
+          <textarea
+            id="cv-address"
+            className="cv-textarea"
+            rows={2}
+            value={state.address}
+            onChange={(e) => update("address", e.target.value)}
+            placeholder="rua, número, bairro — cidade"
+          />
+        </>
+      )}
+    </>
+  );
+}
+
+function StepVisual({ state, update, fidelity, setFidelity }: StepViewProps) {
+  const firstName = state.babyName.split(" ")[0] ?? "";
+  const surprisePalette = () => {
+    const pool = PALETTES.filter((p) => p.id !== state.palette);
+    const pick = pool[Math.floor(Math.random() * pool.length)] ?? PALETTES[0]!;
+    update("palette", pick.id);
+  };
+
+  return (
+    <>
+      <label className="cv-label">paleta</label>
+      <div className="cv-palette-grid">
+        {PALETTES.map((p) => {
+          const on = state.palette === p.id;
+          return (
+            <button
+              key={p.id}
+              type="button"
+              className={`cv-palette ${on ? "on" : ""}`}
+              aria-pressed={on}
+              aria-label={`paleta: ${p.label}`}
+              onClick={() => update("palette", p.id)}
+            >
+              <div className="cv-palette-dots" aria-hidden="true">
+                {[p.primary, p.deep, p.soft, p.accent].map((c, i) => (
+                  <span key={i} className="cv-palette-dot" style={{ background: c }} />
+                ))}
+              </div>
+              <div className="cv-palette-label">{p.label}</div>
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          className="cv-palette cv-palette-surprise"
+          aria-label="paleta aleatória"
+          onClick={surprisePalette}
+        >
+          <div className="cv-palette-surprise-ico" aria-hidden="true">✨</div>
+          <div className="cv-palette-label">surpresa</div>
+        </button>
+      </div>
+
+      <label className="cv-label">estilo do convite</label>
+      <div className="cv-grid-2" style={{ marginBottom: 22 }}>
+        <button
+          type="button"
+          className={`cv-fidelity ${fidelity === "scrapbook" ? "on" : ""}`}
+          aria-pressed={fidelity === "scrapbook"}
+          onClick={() => setFidelity("scrapbook")}
+        >
+          <div className="cv-fidelity-title">scrapbook</div>
+          <div className="cv-fidelity-hint">manuscrito, com washi tape, polaroid e carimbos</div>
+        </button>
+        <button
+          type="button"
+          className={`cv-fidelity ${fidelity === "clean" ? "on" : ""}`}
+          aria-pressed={fidelity === "clean"}
+          onClick={() => setFidelity("clean")}
+        >
+          <div className="cv-fidelity-title">limpo</div>
+          <div className="cv-fidelity-hint">tipográfico, elegante, com pouca decoração</div>
+        </button>
+      </div>
+
+      <label className="cv-label">fonte do nome</label>
+      <div className="cv-fonts" style={{ marginBottom: 22 }}>
+        {NAME_FONTS.map((f) => (
+          <button
+            key={f.id}
+            type="button"
+            className={`cv-font ${state.nameFont === f.id ? "on" : ""}`}
+            aria-pressed={state.nameFont === f.id}
+            aria-label={`fonte: ${f.label}`}
+            onClick={() => update("nameFont", f.id)}
+            style={{ fontFamily: f.css }}
+          >
+            {firstName || f.label}
+          </button>
+        ))}
+      </div>
+
+      <label className="cv-label">densidade de decoração</label>
+      <div className="cv-seg" role="group" aria-label="densidade de decoração">
+        {(["pouca", "media", "muita"] as const).map((d) => (
+          <button
+            key={d}
+            type="button"
+            className={state.density === d ? "on" : ""}
+            aria-pressed={state.density === d}
+            onClick={() => update("density", d)}
+          >
+            {d === "media" ? "média" : d}
+          </button>
+        ))}
+      </div>
+    </>
+  );
 }
 
 function StepPlaceholder({
@@ -1053,6 +1373,99 @@ const CV_CSS = `
 
 @media (prefers-reduced-motion:reduce){
   .cv-btn{transition:none}
+}
+
+/* sonyh — step-view augmentations (additive only; no overrides of q8rr base) */
+.cv-step-blurb{
+  color:var(--ink-soft);
+  font-family:var(--font-dm-sans),sans-serif;
+  font-size:13.5px;line-height:1.55;
+  margin:-12px 0 18px;
+  max-width:420px;
+}
+.cv-event-hint{
+  font-family:var(--font-caveat),cursive;
+  font-size:13px;color:var(--ink-soft);
+  line-height:1;margin-top:4px;
+}
+.cv-input-lg{font-size:28px}
+.cv-input-md{font-size:23px}
+.cv-label-row{
+  display:flex;align-items:flex-end;justify-content:space-between;gap:12px;
+  margin-bottom:6px;
+}
+.cv-label-row .cv-label{margin-bottom:0}
+.cv-mode-card{margin-bottom:18px}
+
+/* palette picker — 4-col + surprise tile, slightly taller than .cv-swatches */
+.cv-palette-grid{
+  display:grid;grid-template-columns:repeat(4,1fr);gap:10px;
+  margin-bottom:22px;
+}
+.cv-palette{
+  border:1px solid var(--line);
+  background:#fff;
+  border-radius:12px;
+  padding:10px 6px 8px;
+  cursor:pointer;
+  text-align:center;
+  font-family:var(--font-patrick-hand),cursive;
+  transition:box-shadow .15s ease,border-color .15s ease,transform .12s ease;
+}
+.cv-palette:hover{transform:translateY(-1px)}
+.cv-palette.on{
+  border:1.8px solid var(--lilac-deep);
+  box-shadow:0 2px 8px rgba(167,123,190,.18);
+}
+.cv-palette-dots{display:flex;justify-content:center;gap:3px;margin-bottom:6px}
+.cv-palette-dot{
+  width:12px;height:12px;border-radius:50%;
+  border:1.5px solid #fff;
+  box-shadow:0 0 0 1px var(--cv-line-strong);
+  display:inline-block;
+}
+.cv-palette-label{
+  font-family:var(--font-patrick-hand),cursive;
+  font-size:14px;color:var(--ink);line-height:1;
+}
+.cv-palette.on .cv-palette-label{color:var(--plum)}
+.cv-palette-surprise{
+  border:1px dashed var(--lilac);
+  background:var(--lilac-soft);
+}
+.cv-palette-surprise .cv-palette-label{color:var(--plum)}
+.cv-palette-surprise-ico{font-size:20px;margin-bottom:4px;line-height:1}
+
+/* fidelity tiles — 2-up with eyebrow title + ink-soft hint */
+.cv-fidelity{
+  border:1px dashed var(--cv-line-strong);
+  background:#fff;
+  border-radius:14px;
+  padding:14px;
+  cursor:pointer;
+  text-align:left;
+  font-family:var(--font-patrick-hand),cursive;
+  transition:border-color .15s ease,background .15s ease,box-shadow .15s ease;
+}
+.cv-fidelity:hover{border-color:var(--lilac)}
+.cv-fidelity.on{
+  border:1.8px solid var(--lilac-deep);
+  background:var(--lilac-soft);
+  box-shadow:var(--shadow-sm);
+}
+.cv-fidelity-title{
+  font-family:var(--font-patrick-hand),cursive;
+  font-size:19px;color:var(--plum);line-height:1;
+}
+.cv-fidelity-hint{
+  font-family:var(--font-dm-sans),sans-serif;
+  font-size:11px;color:var(--ink-soft);
+  margin-top:4px;line-height:1.3;
+}
+
+@media (prefers-reduced-motion:reduce){
+  .cv-palette,.cv-fidelity{transition:none}
+  .cv-palette:hover{transform:none}
 }
 `;
 
