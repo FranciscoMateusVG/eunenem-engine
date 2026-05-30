@@ -1,90 +1,148 @@
-import type { ReactNode } from 'react';
-import { LANDING_DIFFERENTIALS } from '@/lib/mocks/landing';
-
-// aperture-q1j2 — "por que dinheiro é melhor" 3-card section on a
-// pink→lilac gradient. Card copy lives in the mock; icon SVGs (whose
-// stroke must match the chip contrast) stay here, indexed by position.
-const DIFF_ICONS: ReactNode[] = [
-  <svg
-    key="0"
-    viewBox="0 0 32 32"
-    fill="none"
-    stroke="#fff"
-    strokeWidth="2.4"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className="w-8 h-8"
-  >
-    <path d="M5 8h3l3 14h14l2.5-10H10" />
-    <circle cx="13" cy="26" r="2" />
-    <circle cx="22" cy="26" r="2" />
-  </svg>,
-  <svg
-    key="1"
-    viewBox="0 0 32 32"
-    fill="none"
-    stroke="#5C3A4F"
-    strokeWidth="2.4"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className="w-8 h-8"
-  >
-    <rect x="8" y="3" width="16" height="26" rx="3" />
-    <path d="M14 25h4" />
-    <circle cx="22" cy="6" r="2.5" fill="#E78FA7" stroke="none" />
-  </svg>,
-  <svg
-    key="2"
-    viewBox="0 0 32 32"
-    fill="none"
-    stroke="#fff"
-    strokeWidth="2.4"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className="w-8 h-8"
-  >
-    <rect x="3" y="9" width="26" height="16" rx="2" />
-    <circle cx="16" cy="17" r="4" fill="#F7D560" stroke="#fff" />
-  </svg>,
-];
-
+// aperture-hsm41 — v2 §04 Diferenciais
+// 5-card bento grid on a lilac-soft background. Card 1 is a plum hero with
+// the headline "7,5%" stat; cards 2-5 are white with category icons. Content
+// is inlined (not driven from LANDING_DIFFERENTIALS) because each card has a
+// bespoke shape — a uniform mock array can't carry the hero/timeline/world/
+// icon variants. Bespoke layout lives in tailwind.css under the
+// /* aperture-hsm41 */ block (diff-grid, diff-hero, diff-num, timeline-*,
+// world-vis, currency, globe, floaty).
 export function Differential() {
   return (
     <section
-      id="diferencial"
-      className="fade-up py-22 overflow-hidden"
-      style={{ background: 'linear-gradient(180deg, #FBE0EA 0%, #E8D5F0 100%)' }}
+      id="diferenciais"
+      className="diff-section fade-up py-22 overflow-hidden bg-lilac-soft"
     >
       <div className="mx-auto max-w-[1200px] px-6 relative z-10">
         <div className="text-center max-w-[760px] mx-auto mb-14">
           <span className="font-script text-[28px] text-lilac-deep font-semibold inline-block -rotate-2 mb-1">
-            o diferencial
+            por que escolher a EuNeném
           </span>
           <h2 className="font-display text-3xl sm:text-4xl lg:text-[44px] font-semibold text-plum leading-tight text-balance">
-            por que receber em{' '}
-            <em className="not-italic text-lilac-deep">dinheiro</em> é melhor?
+            o que <em className="not-italic text-lilac-deep">só a gente</em> faz
+            por você
           </h2>
           <p className="text-[17px] text-ink-soft mt-3.5 text-pretty">
-            Porque cada bebê é único — e quem decide o que ele precisa é você.
+            Não é só uma lista de presentes. É uma plataforma sólida, feita há
+            mais de uma década ouvindo mães de verdade.
           </p>
         </div>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {LANDING_DIFFERENTIALS.map((c, i) => (
-            <div
-              key={i}
-              className="bg-white rounded-3xl p-8 shadow-soft-sm hover:shadow-soft-md hover:-translate-y-1.5 transition-all"
-            >
-              <div
-                className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-5 ${c.bg}`}
-              >
-                {DIFF_ICONS[i]}
+
+        <div className="diff-grid">
+          {/* 1. HERO — taxa */}
+          <div className="diff-card diff-hero">
+            <span className="diff-tag">menor taxa do mercado</span>
+            <h3 className="font-display">7,5% — e você ainda recebe 100%</h3>
+            <p>
+              Concorrentes cobram entre 8% e 12% (ou nem dizem o preço). A
+              gente embute no convidado e não tira um centavo do seu bolso.
+            </p>
+            <div className="diff-hero-row">
+              <div className="diff-num font-display">
+                7,5<small>%</small>
               </div>
-              <h3 className="font-display text-[22px] font-semibold text-plum mb-2 leading-tight">
-                {c.title}
-              </h3>
-              <p className="text-ink-soft text-[15px] text-pretty">{c.desc}</p>
+              <div className="flex-1 min-w-[180px]">
+                <p className="text-[14px] m-0">
+                  taxa total · embutida no convidado · sem mensalidade · sem
+                  taxa de saque
+                </p>
+              </div>
             </div>
-          ))}
+          </div>
+
+          {/* 2. Pioneira 2014 */}
+          <div className="diff-card diff-since">
+            <div className="diff-icon c2">
+              <svg
+                viewBox="0 0 32 32"
+                fill="none"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M6 14c0-6 5-10 10-10s10 4 10 10v6l3 4H3l3-4v-6z" />
+                <path d="M13 28a3 3 0 006 0" />
+              </svg>
+            </div>
+            <span className="diff-eyebrow">pioneira no Brasil</span>
+            <h3 className="font-display">
+              no ar desde{' '}
+              <em className="not-italic text-coral-pink">2014</em>
+            </h3>
+            <p>
+              Mais de uma década cuidando do enxoval de mais de 300 mil bebês.
+              A gente sabe o que dá certo — e o que dá errado.
+            </p>
+            <div className="flex flex-col gap-2 mt-3.5">
+              <div className="timeline-bar">
+                <div className="timeline-fill" />
+              </div>
+              <div className="timeline-ticks">
+                <span>2014</span>
+                <span>2018</span>
+                <span>2022</span>
+                <span>hoje</span>
+              </div>
+            </div>
+          </div>
+
+          {/* 3. Multimoedas */}
+          <div className="diff-card diff-world">
+            <span className="diff-tag diff-tag-lilac">único no Brasil</span>
+            <h3 className="font-display">família no exterior? sem problema</h3>
+            <p>
+              Aceita pagamento em USD, EUR, GBP, JPY e mais. Convidado paga na
+              moeda dele, você recebe em real via Pix.
+            </p>
+            <div className="world-vis" aria-hidden="true">
+              <span className="currency c1">USD $</span>
+              <span className="currency c2">EUR €</span>
+              <span className="currency c3">GBP £</span>
+              <span className="currency c4">JPY ¥</span>
+              <span className="globe">🌎</span>
+            </div>
+          </div>
+
+          {/* 4. Sem taxa de resgate */}
+          <div className="diff-card diff-no-fee">
+            <div className="diff-icon c1">
+              <svg
+                viewBox="0 0 32 32"
+                fill="none"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <rect x="4" y="9" width="24" height="16" rx="2" />
+                <circle cx="16" cy="17" r="3.5" />
+                <path d="M8 14h2M22 14h2M8 22h2M22 22h2" />
+              </svg>
+            </div>
+            <span className="diff-eyebrow">resgate</span>
+            <h3 className="font-display">saque ilimitado, taxa zero</h3>
+            <p>
+              Pix em até 10 minutos. Quantos saques você quiser, sem custo. Os
+              outros cobram R$ 7,90 por saque.
+            </p>
+          </div>
+
+          {/* 5. Suporte humano */}
+          <div className="diff-card diff-support">
+            <div className="diff-icon c3">
+              <svg
+                viewBox="0 0 32 32"
+                fill="none"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M6 19c0-6 4-11 10-11s10 5 10 11v3a3 3 0 01-3 3h-2v-7h5" />
+                <path d="M6 22v-7h5v7H8a2 2 0 01-2-2z" />
+              </svg>
+            </div>
+            <span className="diff-eyebrow">atendimento</span>
+            <h3 className="font-display">gente de verdade no WhatsApp</h3>
+            <p>
+              Convidado não conseguiu pagar? Esqueceu a senha? Manda mensagem —
+              quem responde é gente, não robô.
+            </p>
+          </div>
         </div>
       </div>
     </section>

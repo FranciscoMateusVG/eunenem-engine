@@ -3912,3 +3912,302 @@ html {
     gap: 24px;
   }
 }
+
+/* =================================================================
+ * aperture-hsm41 — Landing §04 Diferenciais (5-card bento)
+ * Ported from EuNeném Landing v2.html. The bento needs bespoke grid
+ * spans, a plum hero variant, a timeline progress bar, and a floating
+ * currency cluster — none of which map cleanly to existing utilities.
+ * All colors resolve to canonical tokens (--lilac-soft, --plum,
+ * --coral-pink, --yellow, --pink-soft, --line, --ink-mute, --ink-soft,
+ * --cream-2, --shadow-sm, --shadow-md).
+ * ================================================================= */
+
+.diff-grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 18px;
+  max-width: 1140px;
+  margin: 0 auto;
+}
+.diff-card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  padding: 28px;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: transform 0.25s, box-shadow 0.25s;
+  position: relative;
+  overflow: hidden;
+}
+.diff-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-md);
+}
+.diff-eyebrow {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--ink-mute);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.diff-card h3 {
+  font-size: 26px;
+  color: var(--plum);
+  line-height: 1.1;
+  text-wrap: balance;
+}
+.diff-card p {
+  font-size: 15px;
+  color: var(--ink-soft);
+  line-height: 1.55;
+  text-wrap: pretty;
+  margin-top: auto;
+}
+.diff-num {
+  font-size: clamp(72px, 9vw, 110px);
+  line-height: 0.9;
+  color: var(--plum);
+}
+.diff-num small {
+  font-size: 0.38em;
+  color: var(--ink-mute);
+  font-weight: 400;
+}
+.diff-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--yellow);
+  color: var(--plum);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  align-self: flex-start;
+}
+.diff-tag-lilac {
+  background: var(--lilac-deep);
+  color: #fff;
+}
+.diff-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.diff-icon.c1 {
+  background: var(--lilac-soft);
+}
+.diff-icon.c1 svg {
+  stroke: var(--lilac-deep);
+}
+.diff-icon.c2 {
+  background: var(--pink-soft);
+}
+.diff-icon.c2 svg {
+  stroke: var(--coral-pink);
+}
+.diff-icon.c3 {
+  background: var(--yellow-soft);
+}
+.diff-icon.c3 svg {
+  stroke: #c8a340;
+}
+.diff-icon svg {
+  width: 26px;
+  height: 26px;
+  fill: none;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* 5-card bento: hero (span 7) + since (span 5) / world-no-fee-support (4/4/4) */
+.diff-hero {
+  grid-column: span 7;
+  background: var(--plum);
+  color: #fff;
+  border: none;
+  padding: 36px;
+  min-height: 280px;
+}
+.diff-hero .diff-eyebrow {
+  color: rgba(255, 255, 255, 0.75);
+}
+.diff-hero h3 {
+  color: #fff;
+  font-size: 32px;
+}
+.diff-hero p {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 16px;
+}
+.diff-hero-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 24px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.diff-hero .diff-num {
+  color: #fff;
+}
+.diff-hero .diff-num small {
+  color: rgba(255, 255, 255, 0.7);
+}
+.diff-hero .diff-tag {
+  background: #fff;
+  color: var(--plum);
+}
+
+.diff-since {
+  grid-column: span 5;
+  background: var(--cream-2);
+}
+.timeline-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: #fff;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  margin-top: auto;
+}
+.timeline-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  background: var(--lilac);
+  border-radius: 999px;
+}
+.timeline-ticks {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--ink-mute);
+  font-weight: 700;
+}
+.timeline-ticks span:first-child {
+  color: var(--plum);
+}
+
+.diff-world {
+  grid-column: span 4;
+  background: var(--lilac-soft);
+}
+.world-vis {
+  position: relative;
+  height: 90px;
+  margin-top: 4px;
+}
+.world-vis .globe {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 70px;
+  height: 70px;
+  border-radius: 50%;
+  background: var(--coral-pink);
+  box-shadow: 0 10px 30px rgba(167, 123, 190, 0.35);
+  display: grid;
+  place-items: center;
+  font-size: 28px;
+}
+.world-vis .currency {
+  position: absolute;
+  padding: 5px 10px;
+  background: #fff;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: var(--shadow-sm);
+  color: var(--plum);
+  border: 1px solid var(--line);
+  animation: floaty 4s ease-in-out infinite;
+}
+.world-vis .c1 {
+  top: 0;
+  left: 4%;
+}
+.world-vis .c2 {
+  top: 8px;
+  right: 6%;
+  animation-delay: 0.5s;
+}
+.world-vis .c3 {
+  bottom: 4px;
+  left: 18%;
+  animation-delay: 1s;
+}
+.world-vis .c4 {
+  bottom: 0;
+  right: 14%;
+  animation-delay: 1.5s;
+}
+@keyframes floaty {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .world-vis .currency {
+    animation: none;
+  }
+}
+
+.diff-no-fee {
+  grid-column: span 4;
+}
+.diff-support {
+  grid-column: span 4;
+  background: var(--yellow-soft);
+}
+
+@media (max-width: 900px) {
+  .diff-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 14px;
+  }
+  .diff-hero,
+  .diff-since,
+  .diff-world,
+  .diff-no-fee,
+  .diff-support {
+    grid-column: span 2;
+  }
+  .diff-hero {
+    padding: 28px;
+    min-height: auto;
+  }
+  .diff-hero h3 {
+    font-size: 26px;
+  }
+}
+@media (max-width: 540px) {
+  .diff-grid {
+    grid-template-columns: 1fr;
+  }
+  .diff-hero,
+  .diff-since,
+  .diff-world,
+  .diff-no-fee,
+  .diff-support {
+    grid-column: span 1;
+  }
+}
