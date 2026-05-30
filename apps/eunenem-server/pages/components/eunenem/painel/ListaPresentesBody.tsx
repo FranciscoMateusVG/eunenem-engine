@@ -1,34 +1,58 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import type { PainelSectionBodyProps } from "@/PainelSectionPage";
 import {
-  LISTA_CATALOGO_SEED,
-  LISTA_CATEGORY_LABEL,
-  LISTA_PRESENTES_SEED,
+  loadCatalog,
+  loadListasProntas,
   type ListaCatalogItem,
   type ListaCategory,
-  type ListaGift,
-} from "@/lib/mocks/listaPresentes";
-import {
-  LISTA_PRONTAS_DETAIL,
   type ListaProntaDetail,
   type ListaProntaId,
   type PresetItem,
-} from "@/lib/mocks/listaProntas";
+} from "../../../../lib/templates/index.js";
+import {
+  brlFromCents,
+  centsFromBRL,
+  contribuicaoErrorMessage,
+  deriveBgColor,
+  toContribuicaoError,
+  useContribuicaoCreate,
+  useContribuicaoCreateBulk,
+  useContribuicaoDelete,
+  useContribuicaoList,
+  type ContribuicaoDTO,
+} from "@/lib/contribuicao.js";
 
-// aperture-4je0p — "Minha lista de presentes" (creator gift-list management).
+// aperture-0ph83 — "Minha lista de presentes" (creator gift-list management).
 //
 // CONTENT ONLY — topbar / shell / TweaksPanel come from PainelLayout. This is
 // the creator side: add / edit / remove gift items, set price + quantity, see
 // how many units each item has already received. Distinct from the public
 // marketplace (/pagina/:slug) which is the read-only buy view.
 //
-// All mutations are local React state (mock-first, no backend). The visual
-// recipe is adapted from the standalone "Lista de Presentes" export (Patrick
-// Hand titles, lilás thumbs, yellow marca-texto, plum-tinted shadows) into the
-// 520px-mobile / fluid-desktop painel shell. CSS lives in tailwind.css under
-// the `.lista-*` namespace.
+// Data flow (the wire-up that aperture-4je0p stubbed with React state +
+// LISTA_PRESENTES_SEED is now real):
+//   - List query: `useContribuicaoList()` → ContribuicaoDTO[] from backend
+//   - One contribuicao = one UNIT. The UI groups by `nome` so each card
+//     represents an item shape and qty = group size, received = group's
+//     indisponivel count. Edits/deletes operate on the whole group.
+//   - Create: custom items via `useContribuicaoCreate`; catalog/preset
+//     selections via `useContribuicaoCreateBulk` (single INSERT for N items).
+//   - Edit: delete-and-recreate the group. Safe because edits are disabled
+//     when any unit is claimed (status='indisponivel'), so no contribuinte
+//     data is lost. Simpler than per-id update + qty delta math.
+//   - Remove: batch delete all ids in the group.
+//   - All mutations invalidate the list query → UI re-fetches automatically.
+//   - Errors map through `toContribuicaoError` → user-facing pt-BR toast.
+//
+// During PR #68 (Rex's aperture-d6atj) being in-flight, the adapter at
+// `@/lib/contribuicao` re-exports a mock impl with 200ms artificial delay.
+// When PR #68 merges, ONLY the adapter's internals flip to `trpc.contribuicao.*`
+// — this file stays unchanged. Single-file swap.
+//
+// CSS lives in tailwind.css under the `.lista-*` namespace (unchanged from
+// the seed-driven era — visual recipe is byte-identical per OUT OF SCOPE).
 
 const brl = (n: number) =>
   "R$ " +
@@ -37,7 +61,17 @@ const brl = (n: number) =>
     maximumFractionDigits: 2,
   });
 
-const uid = () => "g" + Math.random().toString(36).slice(2, 9);
+// aperture-0ph83 — UI vocabulary for the category chips/badges. Kept in code
+// (not in templates JSON) per operator decision recorded on aperture-cwcn0.
+const LISTA_CATEGORY_LABEL: Record<ListaCategory, string> = {
+  fraldas: "fraldas",
+  higiene: "higiene",
+  roupa: "roupinhas",
+  soninho: "soninho",
+  alimentacao: "alimentação",
+  passeio: "passeio",
+  personalizado: "personalizado",
+};
 
 const CATEGORY_OPTIONS: ListaCategory[] = [
   "fraldas",
@@ -82,56 +116,45 @@ const icon = {
       <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 0 0 0-7.78z" />
     </svg>
   ),
-  // aperture-2eq0f — sparkle for "criar item personalizado" CTA.
-  // Four-point sparkle with a soft accent dot top-right reads as a
-  // creative-action affordance without competing with the plus icon.
   sparkle: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" />
     </svg>
   ),
-  // aperture-2eq0f — hamburger/list lines for "usar lista pronta".
-  // Three short lines read instantly as "a curated list" — paired
-  // with the caret below it telegraphs the expand/collapse panel
-  // (operator confirmed in the follow-up bead that this opens a
-  // preset-list panel below the action strip, not a dropdown menu).
   listLines: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" aria-hidden="true">
       <path d="M4 6h16M4 12h16M4 18h10" />
     </svg>
   ),
-  // aperture-2eq0f — downward caret. Sits on the right side of the
-  // "usar lista pronta" CTA to signal the expand-below behaviour.
   caretDown: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="m6 9 6 6 6-6" />
     </svg>
   ),
-  // aperture-17cls — checkmark for the catalog item's selected state.
-  // Pairs with `.lista-cat-check.is-on` (filled lilac circle).
-  // Also reused by aperture-wo5ql's preset-detail modal selection circles.
   check: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="m5 12 5 5L20 7" />
     </svg>
   ),
+  alert: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 8v4M12 16h.01" />
+    </svg>
+  ),
 };
 
-// aperture-g70uv — hardcoded curated presets surfaced by the
-// "Usar lista pronta" expand/collapse panel. Operator will refine
-// the copy + item counts later; the icon-tile background tokens
-// match the soft-surface palette already used elsewhere on /painel.
-// NOTE: the brief listed --peach-soft / --mint-soft as available
-// tokens, but the design system only ships --pink-soft + --green
-// (no -soft variant) — so we map peach→pink-soft and mint to a
-// softened green via color-mix to land in the same pastel range.
+// aperture-g70uv / aperture-0ph83 — curated preset cards surfaced by the
+// "Usar lista pronta" expand/collapse panel. Title/emoji/tile/desc are
+// presentation vocabulary (live in code); item count is derived from the
+// bundle's actual items at render time so they stay in lock-step with the
+// JSON template.
 interface ListaProntaPreset {
-  id: string;
+  id: ListaProntaId;
   title: string;
   emoji: string;
-  tileVar: string; // CSS custom-property name for icon-tile background
+  tileVar: string;
   desc: string;
-  count: number;
 }
 const LISTA_PRONTAS: ListaProntaPreset[] = [
   {
@@ -140,7 +163,6 @@ const LISTA_PRONTAS: ListaProntaPreset[] = [
     emoji: "☀️",
     tileVar: "var(--lilac-soft)",
     desc: "Tudo que você mais vai precisar no primeiro mês — fraldas, lencinhos e pomada na medida certa.",
-    count: 6,
   },
   {
     id: "banho",
@@ -148,7 +170,6 @@ const LISTA_PRONTAS: ListaProntaPreset[] = [
     emoji: "🛁",
     tileVar: "var(--pink-soft)",
     desc: "Banheira, toalha felpuda e cosméticos suaves para esses primeiros mergulhos.",
-    count: 4,
   },
   {
     id: "soninho",
@@ -156,7 +177,6 @@ const LISTA_PRONTAS: ListaProntaPreset[] = [
     emoji: "🌙",
     tileVar: "color-mix(in srgb, var(--green) 40%, var(--paper))",
     desc: "Mantinhas macias, chupetas e tudo pra noite render mais (pra você também).",
-    count: 4,
   },
   {
     id: "papinha",
@@ -164,7 +184,6 @@ const LISTA_PRONTAS: ListaProntaPreset[] = [
     emoji: "🍼",
     tileVar: "var(--cream-2)",
     desc: "Mamadeira, babadores e itens para as primeiras refeições com calma.",
-    count: 3,
   },
 ];
 
@@ -176,9 +195,6 @@ interface DraftFields {
   price: string;
   qty: number;
   category: ListaCategory;
-  // aperture-17cls — recadinho field on the PERSONALIZADO tab. Optional
-  // free-text the creator can leave for guests ("a do quarto verde-musgo!").
-  // Empty string when absent. Edit modal reuses the form but starts blank.
   note: string;
 }
 
@@ -186,8 +202,68 @@ function emptyDraft(): DraftFields {
   return { title: "", price: "", qty: 1, category: "personalizado", note: "" };
 }
 
+/* ─── Grouping ─── */
+//
+// aperture-0ph83 — one contribuicao = one UNIT. The UI groups by `nome` so
+// each card represents an item shape with aggregated qty/received counts.
+// Edits/deletes operate on the whole group (all ids).
+interface GroupedGift {
+  ids: string[];
+  nome: string;
+  price: number; // BRL (converted from valor cents at the adapter boundary)
+  category: ListaCategory;
+  emoji: string;
+  bgColor: string;
+  qty: number;
+  received: number;
+  hasClaimed: boolean;
+  custom: boolean;
+}
+
+const isListaCategory = (g: string | null | undefined): g is ListaCategory => {
+  return (
+    g === "fraldas" ||
+    g === "higiene" ||
+    g === "roupa" ||
+    g === "soninho" ||
+    g === "alimentacao" ||
+    g === "passeio" ||
+    g === "personalizado"
+  );
+};
+
+function groupContribuicoes(items: ContribuicaoDTO[]): GroupedGift[] {
+  const map = new Map<string, GroupedGift>();
+  for (const c of items) {
+    const category: ListaCategory = isListaCategory(c.grupo) ? c.grupo : "personalizado";
+    const existing = map.get(c.nome);
+    if (existing) {
+      existing.ids.push(c.id);
+      existing.qty += 1;
+      if (c.status === "indisponivel") existing.received += 1;
+    } else {
+      map.set(c.nome, {
+        ids: [c.id],
+        nome: c.nome,
+        price: brlFromCents(c.valor),
+        category,
+        emoji: c.imagemUrl ?? "🎁",
+        bgColor: deriveBgColor(c.grupo),
+        qty: 1,
+        received: c.status === "indisponivel" ? 1 : 0,
+        hasClaimed: c.status === "indisponivel",
+        custom: category === "personalizado",
+      });
+    }
+  }
+  for (const g of map.values()) {
+    g.hasClaimed = g.received > 0;
+  }
+  return [...map.values()];
+}
+
 /* ─── Stats visor ─── */
-function Visor({ items }: { items: ListaGift[] }) {
+function Visor({ items }: { items: GroupedGift[] }) {
   const totalValue = items.reduce((s, i) => s + i.price * i.qty, 0);
   const receivedValue = items.reduce((s, i) => s + i.price * i.received, 0);
   const pct = totalValue > 0 ? Math.min(100, (receivedValue / totalValue) * 100) : 0;
@@ -232,12 +308,17 @@ function GiftCard({
   onEdit,
   onRemove,
 }: {
-  item: ListaGift;
-  onEdit: (i: ListaGift) => void;
-  onRemove: (i: ListaGift) => void;
+  item: GroupedGift;
+  onEdit: (i: GroupedGift) => void;
+  onRemove: (i: GroupedGift) => void;
 }) {
   const pct = item.qty > 0 ? Math.min(100, (item.received / item.qty) * 100) : 0;
   const isComplete = item.received >= item.qty;
+  // aperture-0ph83 — Edit/Remove disabled when any unit is claimed
+  // (status='indisponivel'). The tooltip explains why the buttons are inert.
+  const lockedTip = item.hasClaimed
+    ? "não dá pra mexer — algum mimo desse grupo já foi reservado ♡"
+    : undefined;
   return (
     <div className={"lista-card" + (isComplete ? " is-complete" : "")}>
       <div className="lista-card-thumb" style={{ background: item.bgColor }}>
@@ -248,14 +329,21 @@ function GiftCard({
           {item.custom ? "personalizado" : LISTA_CATEGORY_LABEL[item.category]}
         </span>
         <div className="lista-card-actions">
-          <button type="button" onClick={() => onEdit(item)} aria-label={`Editar ${item.title}`}>
+          <button
+            type="button"
+            onClick={() => onEdit(item)}
+            aria-label={`Editar ${item.nome}`}
+            disabled={item.hasClaimed}
+            title={lockedTip}
+          >
             {icon.edit}
           </button>
           <button
             type="button"
             className="danger"
             onClick={() => onRemove(item)}
-            aria-label={`Remover ${item.title}`}
+            aria-label={`Remover ${item.nome}`}
+            title={lockedTip}
           >
             {icon.trash}
           </button>
@@ -263,7 +351,7 @@ function GiftCard({
         {isComplete && <span className="lista-card-stamp">recebido ♡</span>}
       </div>
       <div className="lista-card-body">
-        <h5 className="lista-card-title">{item.title}</h5>
+        <h5 className="lista-card-title">{item.nome}</h5>
         <div className="lista-card-row">
           <span className="lista-card-price">
             {brl(item.price)} <small>· cada</small>
@@ -322,11 +410,6 @@ function Modal({
 }
 
 /* ─── Personalizado form (shared by Adicionar→Personalizado + Editar) ─── */
-//
-// aperture-17cls — lifted the form body out of the old ItemFormModal so both
-// the EDIT modal and the new ADD modal's PERSONALIZADO tab share one source
-// of truth for the field layout. The optional ✦ info banner only renders on
-// the ADD path (operator's PERSONALIZADO tab spec calls for it explicitly).
 function PersonalizadoForm({
   f,
   setF,
@@ -428,11 +511,6 @@ function PersonalizadoForm({
 }
 
 /* ─── Catálogo (catalog tab body) ─── */
-//
-// aperture-17cls — search + grouped sections of catalog cards with
-// multi-select via aria-pressed buttons. Selection state lives in the
-// parent AddGiftModal so the footer can show count/total and the submit
-// path can hand them off to the body's addCatalogItems().
 function CatalogoView({
   selected,
   onToggle,
@@ -442,10 +520,15 @@ function CatalogoView({
 }) {
   const [search, setSearch] = useState("");
   const q = search.trim().toLowerCase();
-  const sections = LISTA_CATALOGO_SEED.map((sec) => {
-    const items = q ? sec.items.filter((i) => i.name.toLowerCase().includes(q)) : sec.items;
-    return { ...sec, items };
-  }).filter((sec) => sec.items.length > 0);
+  // aperture-0ph83 — sourced from JSON loader (aperture-cwcn0) instead of the
+  // legacy mock. Same shape, same emojis, no UI change.
+  const catalog = useMemo(() => loadCatalog(), []);
+  const sections = catalog
+    .map((sec) => {
+      const items = q ? sec.items.filter((i) => i.name.toLowerCase().includes(q)) : sec.items;
+      return { ...sec, items };
+    })
+    .filter((sec) => sec.items.length > 0);
 
   return (
     <div className="lista-catalogo">
@@ -509,42 +592,37 @@ function CatalogoView({
 }
 
 /* ─── Add gift modal — tabbed CATÁLOGO + PERSONALIZADO ─── */
-//
-// aperture-17cls — opened from the four ADD callsites in the body (primary
-// CTA, sparkle ghost from aperture-2eq0f, empty-state primary, add-card).
-// `defaultTab` is set by each callsite so the sparkle button lands on
-// PERSONALIZADO and the others land on CATÁLOGO. The PERSONALIZADO and
-// CATÁLOGO drafts are kept in separate state so switching tabs preserves
-// each tab's in-flight input.
 function AddGiftModal({
   defaultTab,
   onClose,
   onSubmitPersonalizado,
   onSubmitCatalogo,
+  submitting,
 }: {
   defaultTab: AddTab;
   onClose: () => void;
   onSubmitPersonalizado: (draft: DraftFields) => void;
   onSubmitCatalogo: (items: ListaCatalogItem[]) => void;
+  submitting: boolean;
 }) {
   const [tab, setTab] = useState<AddTab>(defaultTab);
   const [f, setF] = useState<DraftFields>(emptyDraft);
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
 
+  const catalog = useMemo(() => loadCatalog(), []);
+
   const personPriceNum = parseFloat(f.price.replace(",", ".")) || 0;
   const personValid = f.title.trim().length > 0 && personPriceNum > 0;
 
-  // Collect selected items in catalog order so the body's addCatalogItems
-  // adds them in the same visual order the user saw them.
   const selectedItems = useMemo(() => {
     const out: ListaCatalogItem[] = [];
-    LISTA_CATALOGO_SEED.forEach((sec) =>
+    catalog.forEach((sec) =>
       sec.items.forEach((it) => {
         if (selected.has(it.id)) out.push(it);
       }),
     );
     return out;
-  }, [selected]);
+  }, [catalog, selected]);
   const catTotal = selectedItems.reduce((s, i) => s + i.price * i.suggestedQty, 0);
 
   const toggleCatItem = (it: ListaCatalogItem) => {
@@ -557,12 +635,12 @@ function AddGiftModal({
   };
 
   const submitPersonalizado = () => {
-    if (!personValid) return;
+    if (!personValid || submitting) return;
     onSubmitPersonalizado({ ...f, title: f.title.trim(), note: f.note.trim() });
   };
 
   const submitCatalogo = () => {
-    if (selectedItems.length === 0) return;
+    if (selectedItems.length === 0 || submitting) return;
     onSubmitCatalogo(selectedItems);
   };
 
@@ -644,26 +722,28 @@ function AddGiftModal({
           </div>
         )}
         <div className="lista-foot-actions">
-          <button type="button" className="btn btn-ghost" onClick={onClose}>
+          <button type="button" className="btn btn-ghost" onClick={onClose} disabled={submitting}>
             Cancelar
           </button>
           {tab === "catalogo" ? (
             <button
               type="button"
               className="btn btn-primary"
-              disabled={selectedItems.length === 0}
+              disabled={selectedItems.length === 0 || submitting}
               onClick={submitCatalogo}
             >
-              <span className="lista-btn-ic">{icon.plus}</span> Adicionar
+              <span className="lista-btn-ic">{icon.plus}</span>{" "}
+              {submitting ? "Adicionando..." : "Adicionar"}
             </button>
           ) : (
             <button
               type="button"
               className="btn btn-primary"
-              disabled={!personValid}
+              disabled={!personValid || submitting}
               onClick={submitPersonalizado}
             >
-              <span className="lista-btn-ic">{icon.plus}</span> Adicionar à lista
+              <span className="lista-btn-ic">{icon.plus}</span>{" "}
+              {submitting ? "Adicionando..." : "Adicionar à lista"}
             </button>
           )}
         </div>
@@ -677,10 +757,12 @@ function EditItemModal({
   initial,
   onClose,
   onSubmit,
+  submitting,
 }: {
   initial: DraftFields;
   onClose: () => void;
   onSubmit: (draft: DraftFields) => void;
+  submitting: boolean;
 }) {
   const [f, setF] = useState<DraftFields>(initial);
   const priceNum = parseFloat(f.price.replace(",", ".")) || 0;
@@ -688,7 +770,7 @@ function EditItemModal({
   const previewTotal = priceNum * (Number(f.qty) || 0);
 
   const submit = () => {
-    if (!valid) return;
+    if (!valid || submitting) return;
     onSubmit({ ...f, title: f.title.trim(), note: f.note.trim() });
   };
 
@@ -711,11 +793,16 @@ function EditItemModal({
           total estimado · <b>{brl(previewTotal)}</b>
         </div>
         <div className="lista-foot-actions">
-          <button type="button" className="btn btn-ghost" onClick={onClose}>
+          <button type="button" className="btn btn-ghost" onClick={onClose} disabled={submitting}>
             Cancelar
           </button>
-          <button type="button" className="btn btn-primary" disabled={!valid} onClick={submit}>
-            Salvar alterações
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={!valid || submitting}
+            onClick={submit}
+          >
+            {submitting ? "Salvando..." : "Salvar alterações"}
           </button>
         </div>
       </div>
@@ -728,10 +815,12 @@ function ConfirmRemove({
   item,
   onClose,
   onConfirm,
+  submitting,
 }: {
-  item: ListaGift;
+  item: GroupedGift;
   onClose: () => void;
   onConfirm: () => void;
+  submitting: boolean;
 }) {
   return (
     <Modal onClose={onClose} sm>
@@ -746,17 +835,18 @@ function ConfirmRemove({
       </div>
       <div className="lista-modal-body">
         <p className="lista-remove-text">
-          <b>&ldquo;{item.title}&rdquo;</b> será removido da sua lista. Você pode adicionar de novo a
+          <b>&ldquo;{item.nome}&rdquo;</b> será removido da sua lista
+          {item.qty > 1 ? <> ({item.qty} unidades)</> : null}. Você pode adicionar de novo a
           qualquer momento.
         </p>
       </div>
       <div className="lista-modal-foot">
         <div className="lista-foot-actions lista-foot-actions-end">
-          <button type="button" className="btn btn-ghost" onClick={onClose}>
+          <button type="button" className="btn btn-ghost" onClick={onClose} disabled={submitting}>
             Manter na lista
           </button>
-          <button type="button" className="btn btn-danger" onClick={onConfirm}>
-            Sim, remover
+          <button type="button" className="btn btn-danger" onClick={onConfirm} disabled={submitting}>
+            {submitting ? "Removendo..." : "Sim, remover"}
           </button>
         </div>
       </div>
@@ -764,20 +854,17 @@ function ConfirmRemove({
   );
 }
 
-/* ─── Preset detail modal (aperture-wo5ql) ───
-   Opened by each curated preset card's "VER LISTA →" CTA. Shows a
-   curated grid of items pre-selected on open; user can deselect any
-   item to drop it before tapping "ADICIONAR À MINHA LISTA →". Submit
-   is a stub for now (toast + close) — real add-to-list wiring will
-   come post-17cls-merge once the canonical catalog seed exists. */
+/* ─── Preset detail modal (aperture-wo5ql) ─── */
 function PresetDetailModal({
   preset,
   onClose,
   onSubmit,
+  submitting,
 }: {
   preset: ListaProntaDetail;
   onClose: () => void;
   onSubmit: (selected: PresetItem[]) => void;
+  submitting: boolean;
 }) {
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(preset.items.map((it) => it.id)),
@@ -793,14 +880,11 @@ function PresetDetailModal({
   };
 
   const selectedItems = preset.items.filter((it) => selected.has(it.id));
-  const total = selectedItems.reduce(
-    (s, it) => s + it.price * it.suggestedQty,
-    0,
-  );
+  const total = selectedItems.reduce((s, it) => s + it.price * it.suggestedQty, 0);
   const count = selectedItems.length;
 
   const submit = () => {
-    if (count === 0) return;
+    if (count === 0 || submitting) return;
     onSubmit(selectedItems);
   };
 
@@ -864,17 +948,17 @@ function PresetDetailModal({
           <b>{brl(total)}</b>
         </div>
         <div className="lista-foot-actions">
-          <button type="button" className="btn btn-ghost" onClick={onClose}>
+          <button type="button" className="btn btn-ghost" onClick={onClose} disabled={submitting}>
             Cancelar
           </button>
           <button
             type="button"
             className="btn btn-primary"
-            disabled={count === 0}
+            disabled={count === 0 || submitting}
             onClick={submit}
           >
             <span className="lista-btn-ic">{icon.heart}</span>
-            Adicionar à minha lista →
+            {submitting ? "Adicionando..." : "Adicionar à minha lista →"}
           </button>
         </div>
       </div>
@@ -882,30 +966,115 @@ function PresetDetailModal({
   );
 }
 
+/* ─── Skeleton (initial list load) ─── */
+//
+// aperture-0ph83 — same animate-pulse approach Vance used in tgkh3 navbar:
+// blocked-out divs that match the eventual layout so there's no layout shift
+// when the query resolves. Three card placeholders feel like "stuff is on
+// the way" without committing to a count.
+function ListaSkeleton() {
+  return (
+    <div className="lista-body" aria-busy="true" aria-live="polite">
+      <section className="lista-header-card">
+        <div className="lista-header-top">
+          <span className="eyebrow">sua coleção de mimos ♡</span>
+          <h1>
+            Minha <span className="hl">lista de presentes</span>
+          </h1>
+          <div
+            aria-hidden="true"
+            className="lista-skeleton-line"
+            style={{
+              height: 14,
+              width: "60%",
+              background: "var(--lilac-soft)",
+              borderRadius: 6,
+              opacity: 0.5,
+              margin: "12px 0 16px",
+            }}
+          />
+          <div className="lista-header-actions" aria-hidden="true">
+            {[140, 200, 180].map((w, i) => (
+              <div
+                key={i}
+                className="lista-skeleton-btn"
+                style={{
+                  height: 40,
+                  width: w,
+                  background: "var(--lilac-soft)",
+                  borderRadius: 999,
+                  opacity: 0.5,
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      </section>
+      <div className="lista-grid" aria-hidden="true">
+        {[0, 1, 2].map((i) => (
+          <div
+            key={i}
+            className="lista-card"
+            style={{
+              minHeight: 240,
+              background: "var(--paper)",
+              opacity: 0.5,
+              animation: "pulse 1.6s ease-in-out infinite",
+            }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Error banner (list query failure) ─── */
+function ListaErrorBanner({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="lista-body">
+      <section className="lista-header-card">
+        <div className="lista-header-top">
+          <span className="eyebrow coral">opa</span>
+          <h1>
+            Não rolou de carregar <span className="hl">sua lista</span>
+          </h1>
+          <p className="lista-header-sub">
+            Algo travou aqui do nosso lado — bora tentar de novo?
+          </p>
+          <div className="lista-header-actions">
+            <button type="button" className="btn btn-primary" onClick={onRetry}>
+              <span className="lista-btn-ic">{icon.alert}</span> Tentar de novo
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 /* ─── Body ─── */
 export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
-  void slug; // mock-first: the only creator is "helena"; slug not yet used.
+  void slug; // session-driven on the server; slug here is just for routing.
 
-  const [items, setItems] = useState<ListaGift[]>(LISTA_PRESENTES_SEED);
+  const listQuery = useContribuicaoList();
+  const createMut = useContribuicaoCreate();
+  const createBulkMut = useContribuicaoCreateBulk();
+  const deleteMut = useContribuicaoDelete();
+
   const [search, setSearch] = useState("");
   const [cat, setCat] = useState<CatFilter>("all");
-  // aperture-17cls — addModalTab encodes BOTH open state and the default tab.
-  // null = closed; "catalogo" or "personalizado" = open on that tab. Replaces
-  // the old addOpen boolean so the sparkle CTA (aperture-2eq0f) can land on
-  // PERSONALIZADO while the primary CTA lands on CATÁLOGO from one setter.
   const [addModalTab, setAddModalTab] = useState<AddTab | null>(null);
-  const [editItem, setEditItem] = useState<ListaGift | null>(null);
-  const [removeItem, setRemoveItem] = useState<ListaGift | null>(null);
-  // aperture-g70uv — controls the curated preset panel that expands
-  // beneath the .lista-header-actions strip when the operator taps
-  // "Usar lista pronta". Replaces the previous toast placeholder.
+  const [editItem, setEditItem] = useState<GroupedGift | null>(null);
+  const [removeItem, setRemoveItem] = useState<GroupedGift | null>(null);
   const [presetsOpen, setPresetsOpen] = useState(false);
-  // aperture-wo5ql — id of the curated preset whose detail modal is
-  // currently open (null = closed). Set by tapping any preset card's
-  // "VER LISTA →" CTA below; the modal renders the matching detail
-  // payload from LISTA_PRONTAS_DETAIL.
   const [presetDetail, setPresetDetail] = useState<ListaProntaId | null>(null);
-  const idRef = useRef(0);
+
+  const listasProntas = useMemo(() => loadListasProntas(), []);
+
+  const items = useMemo<GroupedGift[]>(
+    () => groupContribuicoes(listQuery.data ?? []),
+    [listQuery.data],
+  );
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: items.length };
@@ -922,89 +1091,140 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
 
   const filtered = items.filter((i) => {
     if (cat !== "all" && i.category !== cat) return false;
-    if (search && !i.title.toLowerCase().includes(search.toLowerCase())) return false;
+    if (search && !i.nome.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
 
   const claimedUnits = items.reduce((s, i) => s + i.received, 0);
   const totalUnits = items.reduce((s, i) => s + i.qty, 0);
 
-  const addItem = (draft: DraftFields) => {
+  // ── Mutations ─────────────────────────────────────────────────────────────
+
+  const addItem = async (draft: DraftFields) => {
     const price = parseFloat(draft.price.replace(",", ".")) || 0;
-    idRef.current += 1;
-    const next: ListaGift = {
-      id: uid(),
-      title: draft.title,
-      price,
-      qty: Number(draft.qty) || 1,
-      received: 0,
-      category: draft.category,
-      emoji: "🎁",
-      bgColor: "var(--lilac-soft)",
-      custom: draft.category === "personalizado",
-    };
-    setItems((cur) => [next, ...cur]);
-    setAddModalTab(null);
-    // aperture-17cls: the optional `note` (recadinho) is collected but not
-    // yet rendered on the gift cards — keeps this PR's scope to the modal
-    // shape. A follow-up can wire the note onto the card body when the
-    // operator confirms how prominent the note should be on the public
-    // marketplace surface.
-    void draft.note;
-    toast.success("1 mimo adicionado à sua lista ♡");
+    try {
+      await createMut.mutateAsync({
+        nome: draft.title,
+        valor: centsFromBRL(price),
+        imagemUrl: null,
+        grupo: draft.category,
+        qty: Number(draft.qty) || 1,
+      });
+      setAddModalTab(null);
+      const n = Number(draft.qty) || 1;
+      toast.success(
+        n === 1
+          ? "1 mimo adicionado à sua lista ♡"
+          : `${n} mimos adicionados à sua lista ♡`,
+      );
+      // aperture-0ph83: the optional `note` (recadinho) is collected but not
+      // yet persisted server-side — the contribuicao contract doesn't carry
+      // a note field. Follow-up bead can wire it once the schema accepts it.
+      void draft.note;
+    } catch (err) {
+      toast.error(contribuicaoErrorMessage(toContribuicaoError(err)));
+    }
   };
 
-  // aperture-17cls — CATÁLOGO multi-select submit. Each selected item turns
-  // into a ListaGift with the catalog's suggestedQty + the catalog's emoji
-  // and tint (so the cards look authored, not stock). Inserted at the top of
-  // the list in catalog order, preserving the visual order the user saw.
-  const addCatalogItems = (picked: ListaCatalogItem[]) => {
-    const newGifts: ListaGift[] = picked.map((it) => ({
-      id: uid(),
-      title: it.name,
-      price: it.price,
-      qty: it.suggestedQty,
-      received: 0,
-      category: it.category,
-      emoji: it.emoji,
-      bgColor: it.bgColor,
-    }));
-    setItems((cur) => [...newGifts, ...cur]);
-    setAddModalTab(null);
-    toast.success(
-      picked.length === 1
-        ? "1 mimo adicionado à sua lista ♡"
-        : `${picked.length} mimos adicionados à sua lista ♡`,
-    );
+  const addCatalogItems = async (picked: ListaCatalogItem[]) => {
+    try {
+      await createBulkMut.mutateAsync({
+        items: picked.map((it) => ({
+          nome: it.name,
+          valor: centsFromBRL(it.price),
+          imagemUrl: it.emoji,
+          grupo: it.category,
+          qty: it.suggestedQty,
+        })),
+      });
+      setAddModalTab(null);
+      const totalUnits = picked.reduce((s, it) => s + it.suggestedQty, 0);
+      toast.success(
+        totalUnits === 1
+          ? "1 mimo adicionado à sua lista ♡"
+          : `${totalUnits} mimos adicionados à sua lista ♡`,
+      );
+    } catch (err) {
+      toast.error(contribuicaoErrorMessage(toContribuicaoError(err)));
+    }
   };
 
-  const saveEdit = (draft: DraftFields) => {
+  const addPresetItems = async (picked: PresetItem[], presetId: ListaProntaId) => {
+    try {
+      await createBulkMut.mutateAsync({
+        items: picked.map((it) => ({
+          nome: it.name,
+          valor: centsFromBRL(it.price),
+          imagemUrl: it.emoji,
+          grupo: presetId,
+          qty: it.suggestedQty,
+        })),
+      });
+      setPresetDetail(null);
+      setPresetsOpen(false);
+      const n = picked.reduce((s, it) => s + it.suggestedQty, 0);
+      toast.success(
+        `${n} ${n === 1 ? "mimo adicionado" : "mimos adicionados"} à sua lista ♡`,
+      );
+    } catch (err) {
+      toast.error(contribuicaoErrorMessage(toContribuicaoError(err)));
+    }
+  };
+
+  // Edit strategy: delete the group, then createBulk with the new shape.
+  // Safe because edits are disabled when received > 0 (no contribuinte data
+  // to preserve). One delete + one createBulk = two round-trips total, much
+  // simpler than per-id update + qty delta math.
+  const saveEdit = async (draft: DraftFields) => {
     if (!editItem) return;
     const price = parseFloat(draft.price.replace(",", ".")) || 0;
-    setItems((cur) =>
-      cur.map((x) =>
-        x.id === editItem.id
-          ? {
-              ...x,
-              title: draft.title,
-              price,
-              qty: Number(draft.qty) || 1,
-              category: draft.category,
-              custom: draft.category === "personalizado",
-            }
-          : x,
-      ),
-    );
-    setEditItem(null);
-    toast.success("Alterações salvas ♡");
+    const newQty = Number(draft.qty) || 1;
+    try {
+      await deleteMut.mutateAsync({ ids: editItem.ids });
+      await createBulkMut.mutateAsync({
+        items: [
+          {
+            nome: draft.title,
+            valor: centsFromBRL(price),
+            imagemUrl: editItem.emoji,
+            grupo: draft.category,
+            qty: newQty,
+          },
+        ],
+      });
+      setEditItem(null);
+      toast.success("Alterações salvas ♡");
+    } catch (err) {
+      toast.error(contribuicaoErrorMessage(toContribuicaoError(err)));
+    }
   };
 
-  const confirmRemove = () => {
+  const confirmRemove = async () => {
     if (!removeItem) return;
-    setItems((cur) => cur.filter((x) => x.id !== removeItem.id));
-    toast("Mimo removido");
-    setRemoveItem(null);
+    try {
+      await deleteMut.mutateAsync({ ids: removeItem.ids });
+      toast("Mimo removido");
+      setRemoveItem(null);
+    } catch (err) {
+      toast.error(contribuicaoErrorMessage(toContribuicaoError(err)));
+    }
   };
+
+  // ── Initial loading + error gates ────────────────────────────────────────
+
+  if (listQuery.isPending) {
+    return <ListaSkeleton />;
+  }
+  if (listQuery.error) {
+    return <ListaErrorBanner onRetry={() => void listQuery.refetch()} />;
+  }
+
+  const addSubmitting = createMut.isPending || createBulkMut.isPending;
+  const editSubmitting = deleteMut.isPending || createBulkMut.isPending;
+  const removeSubmitting = deleteMut.isPending;
+  const presetSubmitting = createBulkMut.isPending;
+
+  // ── Render ───────────────────────────────────────────────────────────────
 
   return (
     <div className="lista-body">
@@ -1030,11 +1250,6 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
             >
               <span className="lista-btn-ic">{icon.plus}</span> Adicionar presente
             </button>
-            {/* aperture-2eq0f — two outlined CTAs flanking the primary.
-                aperture-17cls wired the sparkle CTA to the new tabbed modal's
-                PERSONALIZADO tab; the primary above opens the same modal on
-                CATÁLOGO. The lista-pronta CTA still toasts until aperture-g70uv
-                lands the curated preset panel below this action strip. */}
             <button
               type="button"
               className="btn btn-ghost"
@@ -1064,10 +1279,6 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
               </span>
             </button>
           </div>
-          {/* aperture-g70uv — curated preset panel revealed by the
-              "Usar lista pronta" toggle above. Sits inside
-              .lista-header-card so the panel inherits the card's soft
-              lilac chrome but reads as its own surface. */}
           {presetsOpen && (
             <div
               id="lista-prontas-panel"
@@ -1081,36 +1292,36 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
               </h2>
               <p className="lista-prontas-sub">Toque pra ver os mimos antes de adicionar.</p>
               <div className="lista-prontas-grid">
-                {LISTA_PRONTAS.map((preset) => (
-                  <article key={preset.id} className="lista-pronta-card">
-                    <div
-                      className="lista-pronta-icon"
-                      style={{ background: preset.tileVar }}
-                      aria-hidden="true"
-                    >
-                      <span>{preset.emoji}</span>
-                    </div>
-                    <h3 className="lista-pronta-title">{preset.title}</h3>
-                    <p className="lista-pronta-desc">{preset.desc}</p>
-                    <div className="lista-pronta-foot">
-                      <span className="lista-pronta-count">
-                        {preset.count} {preset.count === 1 ? "item" : "itens"}
-                      </span>
-                      {/* aperture-wo5ql — opens the preset-detail modal
-                          for this curated list. The modal renders the
-                          full item grid (pre-selected on open) so the
-                          operator can drop items before adding. */}
-                      <button
-                        type="button"
-                        className="lista-pronta-cta"
-                        onClick={() => setPresetDetail(preset.id as ListaProntaId)}
-                        aria-label={`Ver lista pronta: ${preset.title}`}
+                {LISTA_PRONTAS.map((preset) => {
+                  const detail = listasProntas[preset.id];
+                  const itemCount = detail?.items.length ?? 0;
+                  return (
+                    <article key={preset.id} className="lista-pronta-card">
+                      <div
+                        className="lista-pronta-icon"
+                        style={{ background: preset.tileVar }}
+                        aria-hidden="true"
                       >
-                        VER LISTA →
-                      </button>
-                    </div>
-                  </article>
-                ))}
+                        <span>{preset.emoji}</span>
+                      </div>
+                      <h3 className="lista-pronta-title">{preset.title}</h3>
+                      <p className="lista-pronta-desc">{preset.desc}</p>
+                      <div className="lista-pronta-foot">
+                        <span className="lista-pronta-count">
+                          {itemCount} {itemCount === 1 ? "item" : "itens"}
+                        </span>
+                        <button
+                          type="button"
+                          className="lista-pronta-cta"
+                          onClick={() => setPresetDetail(preset.id)}
+                          aria-label={`Ver lista pronta: ${preset.title}`}
+                        >
+                          VER LISTA →
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -1177,7 +1388,12 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
         ) : (
           <div className="lista-grid">
             {filtered.map((it) => (
-              <GiftCard key={it.id} item={it} onEdit={setEditItem} onRemove={setRemoveItem} />
+              <GiftCard
+                key={it.nome}
+                item={it}
+                onEdit={setEditItem}
+                onRemove={setRemoveItem}
+              />
             ))}
             <button
               type="button"
@@ -1198,12 +1414,13 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
           onClose={() => setAddModalTab(null)}
           onSubmitPersonalizado={addItem}
           onSubmitCatalogo={addCatalogItems}
+          submitting={addSubmitting}
         />
       )}
       {editItem && (
         <EditItemModal
           initial={{
-            title: editItem.title,
+            title: editItem.nome,
             price: editItem.price.toFixed(2).replace(".", ","),
             qty: editItem.qty,
             category: editItem.category,
@@ -1211,25 +1428,23 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
           }}
           onClose={() => setEditItem(null)}
           onSubmit={saveEdit}
+          submitting={editSubmitting}
         />
       )}
       {removeItem && (
-        <ConfirmRemove item={removeItem} onClose={() => setRemoveItem(null)} onConfirm={confirmRemove} />
+        <ConfirmRemove
+          item={removeItem}
+          onClose={() => setRemoveItem(null)}
+          onConfirm={confirmRemove}
+          submitting={removeSubmitting}
+        />
       )}
-      {presetDetail && (
+      {presetDetail && listasProntas[presetDetail] && (
         <PresetDetailModal
-          preset={LISTA_PRONTAS_DETAIL[presetDetail]}
+          preset={listasProntas[presetDetail]}
           onClose={() => setPresetDetail(null)}
-          onSubmit={(selected) => {
-            // aperture-wo5ql — stub: the real add-to-list wiring waits
-            // for the canonical catalog seed (aperture-17cls). For now,
-            // just toast + close so the surface communicates intent.
-            const n = selected.length;
-            toast.success(
-              `${n} ${n === 1 ? "mimo adicionado" : "mimos adicionados"} à sua lista ♡`,
-            );
-            setPresetDetail(null);
-          }}
+          onSubmit={(selected) => void addPresetItems(selected, presetDetail)}
+          submitting={presetSubmitting}
         />
       )}
     </div>
