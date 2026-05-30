@@ -441,6 +441,17 @@ export {
   criarContribuicao,
 } from './use-cases/arrecadacao/criar-contribuicao.js';
 export type {
+  CriarContribuicoesEmLoteDeps,
+  CriarContribuicoesEmLoteInput,
+  CriarContribuicoesEmLoteResult,
+  ItemLote,
+} from './use-cases/arrecadacao/criar-contribuicoes-em-lote.js';
+export {
+  CriarContribuicoesEmLoteInputSchema,
+  criarContribuicoesEmLote,
+  ItemLoteSchema,
+} from './use-cases/arrecadacao/criar-contribuicoes-em-lote.js';
+export type {
   DesassociarContribuinteContribuicaoDeps,
   DesassociarContribuinteContribuicaoInput,
 } from './use-cases/arrecadacao/desassociar-contribuinte-contribuicao.js';

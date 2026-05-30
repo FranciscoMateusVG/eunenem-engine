@@ -33,6 +33,39 @@ export class ContribuicaoRepositoryMemory implements ContribuicaoRepository {
     });
   }
 
+  /**
+   * Bulk insert (aperture-d6atj fix-up). Memory has no real "bulk" — the
+   * for-loop over single-save logic preserves the contract: same end state
+   * as N `save` calls. The span (`db.arrecadacao_contribuicoes.saveBulk`,
+   * attribute `batch.size: N`) matches the Postgres adapter so observability
+   * is portable across environments.
+   */
+  async saveBulk(contribuicoes: readonly Contribuicao[]): Promise<void> {
+    return tracer.startActiveSpan('db.arrecadacao_contribuicoes.saveBulk', async (span) => {
+      span.setAttributes({
+        ...DB_ATTRS,
+        'db.operation.name': 'INSERT',
+        'batch.size': contribuicoes.length,
+      });
+      try {
+        if (contribuicoes.length === 0) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return;
+        }
+        for (const c of contribuicoes) {
+          this.contribuicoes.set(c.id, c);
+        }
+        span.setStatus({ code: SpanStatusCode.OK });
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
   async findById(id: IdContribuicao): Promise<Contribuicao | undefined> {
     return tracer.startActiveSpan('db.arrecadacao_contribuicoes.findById', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });

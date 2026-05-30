@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { initTRPC, TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import {
@@ -13,7 +12,7 @@ import {
   atualizarContribuicao,
   type Campanha,
   type Contribuicao,
-  criarContribuicao,
+  criarContribuicoesEmLote,
   type IdCampanha,
   type IdContribuicao,
   type IdOpcaoContribuicao,
@@ -196,6 +195,29 @@ const CreateInputSchema = z.object({
   qty: z.number().int().min(1).max(100),
 });
 
+/**
+ * Bulk creation input (aperture-d6atj fix-up). One mutation creates N
+ * contribuicoes across M catalog items in a single SQL INSERT.
+ *
+ * Use case: operator picks "Pacote de Fraldas RN qty=8" + "Mamadeira qty=4"
+ * + "kit chá de bebê" (10 items × qty=3) → ONE INSERT of N rows, not N
+ * round-trips.
+ */
+const CreateBulkInputSchema = z.object({
+  items: z
+    .array(
+      z.object({
+        nome: z.string().trim().min(1).max(120),
+        valor: z.number().int().nonnegative(),
+        imagemUrl: z.string().url().optional(),
+        grupo: z.string().trim().min(1).max(60).optional(),
+        qty: z.number().int().min(1).max(100),
+      }),
+    )
+    .min(1)
+    .max(50),
+});
+
 const UpdateInputSchema = z.object({
   id: z.string().uuid(),
   nome: z.string().trim().min(1).max(120).optional(),
@@ -270,44 +292,95 @@ export const contribuicaoRouter = t.router({
   }),
 
   /**
-   * Creates `qty` separate contribuicoes (engine is unit-level — each
-   * Contribuicao row is ONE unit). Server derives `idCampanha` +
-   * `idOpcaoContribuicao` from the session — client only supplies the
-   * shape of the unit + how many copies to create.
+   * Creates `qty` separate contribuicoes for a single catalog item shape.
+   * Server derives `idCampanha` + `idOpcaoContribuicao` from the session —
+   * client only supplies the shape + qty.
    *
-   * Atomicity caveat: today the create loop is NOT transactional — partial
-   * failure leaves N-of-qty rows persisted. The B2 era's batch-tx port
-   * (deferred per recon §3) would make this all-or-nothing. Until then,
-   * caller can re-issue the request with the missing qty (idempotency
-   * doesn't bite because we mint fresh ids server-side).
+   * Backward-compat wrapper (aperture-d6atj fix-up): delegates to
+   * `createBulk` with a single-item array. There is now exactly ONE write
+   * path (the bulk path) so single-item creates also go through the
+   * single-INSERT use-case — the wrapper exists only to preserve the
+   * legacy procedure shape for callers that haven't migrated yet.
+   *
+   * All-or-nothing semantics via the bulk repo: if any row fails, none
+   * persist (no partial state).
    */
   create: t.procedure
     .input(CreateInputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
         const { campanha, idOpcaoPresentes } = await resolveCallerCampanha(ctx);
-        const deps = {
-          campanhaRepository: ctx.deps.campanhaRepository,
-          contribuicaoRepository: ctx.deps.contribuicaoRepository,
-          clock: ctx.deps.clock,
-          observability: ctx.deps.observability,
-        };
-
-        const ids: IdContribuicao[] = [];
-        for (let i = 0; i < input.qty; i++) {
-          const id = randomUUID() as IdContribuicao;
-          await criarContribuicao(deps, {
-            id,
+        const result = await criarContribuicoesEmLote(
+          {
+            campanhaRepository: ctx.deps.campanhaRepository,
+            contribuicaoRepository: ctx.deps.contribuicaoRepository,
+            clock: ctx.deps.clock,
+            observability: ctx.deps.observability,
+          },
+          {
             idCampanha: campanha.id,
             idOpcaoContribuicao: idOpcaoPresentes,
-            nome: input.nome,
-            valor: input.valor,
-            imagemUrl: input.imagemUrl ?? null,
-            grupo: input.grupo ?? null,
-          });
-          ids.push(id);
-        }
-        return { ids };
+            items: [
+              {
+                nome: input.nome,
+                valor: input.valor,
+                imagemUrl: input.imagemUrl ?? null,
+                grupo: input.grupo ?? null,
+                qty: input.qty,
+              },
+            ],
+          },
+        );
+        return { ids: result.ids };
+      } catch (err) {
+        throw toTRPCError(err);
+      }
+    }),
+
+  /**
+   * Bulk creation across M catalog items (aperture-d6atj fix-up). Each
+   * item is expanded to `qty` contribuicoes; all expand into ONE SQL
+   * INSERT statement (single round-trip, atomic).
+   *
+   * Concrete shape: operator picks a "kit chá de bebê" of 10 items × qty=3
+   * → 30 contribuicoes in ONE INSERT. Without this procedure the legacy
+   * single-create loop would emit 30 round-trips.
+   *
+   * Server derives `idCampanha` + `idOpcaoPresentes` from the session —
+   * the client never specifies them, and every item in the batch is
+   * scoped to the same tenant.
+   *
+   * Future follow-up: `createFromCatalog` / `createFromListaPronta`
+   * (convenience procedures that resolve a template id → items[]) are
+   * DEFERRED — the catalog→contribuicao mapping ambiguity from the
+   * original d6atj recon still needs operator alignment. Once resolved,
+   * those procedures will compose `criarContribuicoesEmLote` directly.
+   */
+  createBulk: t.procedure
+    .input(CreateBulkInputSchema)
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { campanha, idOpcaoPresentes } = await resolveCallerCampanha(ctx);
+        const result = await criarContribuicoesEmLote(
+          {
+            campanhaRepository: ctx.deps.campanhaRepository,
+            contribuicaoRepository: ctx.deps.contribuicaoRepository,
+            clock: ctx.deps.clock,
+            observability: ctx.deps.observability,
+          },
+          {
+            idCampanha: campanha.id,
+            idOpcaoContribuicao: idOpcaoPresentes,
+            items: input.items.map((item) => ({
+              nome: item.nome,
+              valor: item.valor,
+              imagemUrl: item.imagemUrl ?? null,
+              grupo: item.grupo ?? null,
+              qty: item.qty,
+            })),
+          },
+        );
+        return { ids: result.ids };
       } catch (err) {
         throw toTRPCError(err);
       }

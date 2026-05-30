@@ -472,6 +472,165 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
     });
   });
 
+  describe('createBulk — bulk insert across M items × qty (aperture-d6atj fix-up)', () => {
+    it('N=1 item, qty=1 → produces 1 contribuicao via single INSERT', async () => {
+      const alice = await seedUserWithCampanha(rig, {
+        handle: 'alice',
+        email: 'alice@test.local',
+      });
+      const caller = rig.callerFor(alice.cookieHeader);
+
+      const result = (await caller.contribuicao.createBulk({
+        items: [{ nome: 'Fralda P', valor: 5000, qty: 1 }],
+      })) as { ids: string[] };
+      expect(result.ids).toHaveLength(1);
+
+      const list = (await caller.contribuicao.list()) as Array<{ nome: string }>;
+      expect(list).toHaveLength(1);
+      expect(list[0]?.nome).toBe('Fralda P');
+    });
+
+    it('N=1 item, qty=10 → produces 10 contribuicoes from ONE bulk call', async () => {
+      const alice = await seedUserWithCampanha(rig, {
+        handle: 'alice',
+        email: 'alice@test.local',
+      });
+      const caller = rig.callerFor(alice.cookieHeader);
+
+      const result = (await caller.contribuicao.createBulk({
+        items: [{ nome: 'Pacote Fraldas RN', valor: 8000, qty: 10 }],
+      })) as { ids: string[] };
+      expect(result.ids).toHaveLength(10);
+      // Unique ids (no accidental dedup or repetition).
+      expect(new Set(result.ids).size).toBe(10);
+
+      const list = (await caller.contribuicao.list()) as Array<{ nome: string; valor: number }>;
+      expect(list).toHaveLength(10);
+      expect(list.every((i) => i.nome === 'Pacote Fraldas RN' && i.valor === 8000)).toBe(true);
+    });
+
+    it('N=10 items × qty=3 → produces 30 contribuicoes from one bulk call (kit chá de bebê)', async () => {
+      const alice = await seedUserWithCampanha(rig, {
+        handle: 'alice',
+        email: 'alice@test.local',
+      });
+      const caller = rig.callerFor(alice.cookieHeader);
+
+      const items = Array.from({ length: 10 }, (_, i) => ({
+        nome: `Item kit ${i}`,
+        valor: 1000 + i * 100,
+        qty: 3,
+      }));
+
+      const result = (await caller.contribuicao.createBulk({ items })) as { ids: string[] };
+      expect(result.ids).toHaveLength(30);
+      expect(new Set(result.ids).size).toBe(30);
+
+      const list = (await caller.contribuicao.list()) as Array<{ nome: string }>;
+      expect(list).toHaveLength(30);
+      // Every catalog name appears exactly qty=3 times.
+      for (let i = 0; i < 10; i++) {
+        const matches = list.filter((c) => c.nome === `Item kit ${i}`);
+        expect(matches).toHaveLength(3);
+      }
+    });
+
+    it('N=50 items × qty=1 → single bulk INSERT of 50 rows', async () => {
+      const alice = await seedUserWithCampanha(rig, {
+        handle: 'alice',
+        email: 'alice@test.local',
+      });
+      const caller = rig.callerFor(alice.cookieHeader);
+
+      const items = Array.from({ length: 50 }, (_, i) => ({
+        nome: `Single ${i}`,
+        valor: 100,
+        qty: 1,
+      }));
+
+      const result = (await caller.contribuicao.createBulk({ items })) as { ids: string[] };
+      expect(result.ids).toHaveLength(50);
+
+      const list = (await caller.contribuicao.list()) as Array<unknown>;
+      expect(list).toHaveLength(50);
+    });
+
+    it('authorization: bulk items share the session-derived idCampanha/idOpcao', async () => {
+      const alice = await seedUserWithCampanha(rig, {
+        handle: 'alice',
+        email: 'alice@test.local',
+      });
+      const deps = (rig as TestRig & { deps: ServerDeps }).deps;
+      const caller = rig.callerFor(alice.cookieHeader);
+
+      const result = (await caller.contribuicao.createBulk({
+        items: [
+          { nome: 'A', valor: 100, qty: 2 },
+          { nome: 'B', valor: 200, qty: 3 },
+        ],
+      })) as { ids: string[] };
+
+      // Every persisted row carries alice's idCampanha + idOpcaoPresentes —
+      // procedure derives them from session, client cannot override.
+      for (const id of result.ids) {
+        const row = await deps.contribuicaoRepository.findById(id);
+        expect(row?.idCampanha).toBe(alice.idCampanha);
+        expect(row?.idOpcaoContribuicao).toBe(alice.idOpcaoPresentes);
+      }
+    });
+
+    it('all-or-nothing: invalid item (negative valor) → none persist', async () => {
+      const alice = await seedUserWithCampanha(rig, {
+        handle: 'alice',
+        email: 'alice@test.local',
+      });
+      const caller = rig.callerFor(alice.cookieHeader);
+
+      const err = await expectTrpcError(() =>
+        caller.contribuicao.createBulk({
+          items: [
+            { nome: 'Valid', valor: 100, qty: 5 },
+            { nome: 'Invalid', valor: -1, qty: 1 },
+          ],
+        }),
+      );
+      expect(err.code).toBe('BAD_REQUEST');
+
+      // Zero rows persisted — the "Valid" item did NOT slip through.
+      const list = (await caller.contribuicao.list()) as Array<unknown>;
+      expect(list).toEqual([]);
+    });
+
+    it('anonymous createBulk → UNAUTHORIZED', async () => {
+      const caller = rig.callerFor();
+      const err = await expectTrpcError(() =>
+        caller.contribuicao.createBulk({
+          items: [{ nome: 'X', valor: 100, qty: 1 }],
+        }),
+      );
+      expect(err.code).toBe('UNAUTHORIZED');
+    });
+
+    it('regression: legacy `create` procedure still works (now delegates to createBulk internally)', async () => {
+      const alice = await seedUserWithCampanha(rig, {
+        handle: 'alice',
+        email: 'alice@test.local',
+      });
+      const caller = rig.callerFor(alice.cookieHeader);
+
+      const created = (await caller.contribuicao.create({
+        nome: 'Fralda P',
+        valor: 5000,
+        qty: 4,
+      })) as { ids: string[] };
+      expect(created.ids).toHaveLength(4);
+
+      const list = (await caller.contribuicao.list()) as Array<{ nome: string }>;
+      expect(list).toHaveLength(4);
+      expect(list.every((i) => i.nome === 'Fralda P')).toBe(true);
+    });
+  });
+
   describe('cross-campanha unknown id', () => {
     it('update with id that exists in another campanha → UNAUTHORIZED (not NOT_FOUND)', async () => {
       const alice = await seedUserWithCampanha(rig, {
