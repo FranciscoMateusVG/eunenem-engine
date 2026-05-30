@@ -1,5 +1,5 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
-import type { Conta, CredencialSimulada, Usuario } from '../../domain/usuario/entities/usuario.js';
+import type { Conta, Usuario } from '../../domain/usuario/entities/usuario.js';
 import type { EmailUsuario } from '../../domain/usuario/value-objects/email-usuario.js';
 import type {
   IdContaUsuario,
@@ -25,25 +25,19 @@ function emailKey(idPlataforma: IdPlataformaReferencia, email: EmailUsuario): st
 export class UsuarioRepositoryMemory implements UsuarioRepository {
   private readonly usuarios = new Map<IdUsuario, Usuario>();
   private readonly contas = new Map<IdContaUsuario, Conta>();
-  private readonly credenciais = new Map<IdUsuario, CredencialSimulada>();
   private readonly idUsuarioByEmail = new Map<string, IdUsuario>();
 
-  async saveRegistro(bundle: {
+  async saveRegistroDomain(bundle: {
     readonly usuario: Usuario;
     readonly conta: Conta;
-    readonly credencial: CredencialSimulada;
   }): Promise<void> {
-    return tracer.startActiveSpan('db.usuarios.saveRegistro', async (span) => {
+    return tracer.startActiveSpan('db.usuarios.saveRegistroDomain', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'INSERT' });
       try {
-        const { usuario, conta, credencial } = bundle;
+        const { usuario, conta } = bundle;
 
         if (conta.idUsuario !== usuario.id || conta.id !== usuario.idConta) {
           throw new Error('Invariante violada: conta deve referenciar usuario e usuario.idConta');
-        }
-
-        if (credencial.idUsuario !== usuario.id) {
-          throw new Error('Invariante violada: credencial deve referenciar usuario');
         }
 
         const key = emailKey(usuario.idPlataforma, usuario.email);
@@ -53,7 +47,6 @@ export class UsuarioRepositoryMemory implements UsuarioRepository {
 
         this.usuarios.set(usuario.id, usuario);
         this.contas.set(conta.id, conta);
-        this.credenciais.set(usuario.id, credencial);
         this.idUsuarioByEmail.set(key, usuario.id);
 
         span.setStatus({ code: SpanStatusCode.OK });
@@ -110,23 +103,6 @@ export class UsuarioRepositoryMemory implements UsuarioRepository {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
       try {
         const result = this.contas.get(id);
-        span.setStatus({ code: SpanStatusCode.OK });
-        return result;
-      } catch (error: unknown) {
-        span.recordException(error as Error);
-        span.setStatus({ code: SpanStatusCode.ERROR });
-        throw error;
-      } finally {
-        span.end();
-      }
-    });
-  }
-
-  async findCredencialByIdUsuario(idUsuario: IdUsuario): Promise<CredencialSimulada | undefined> {
-    return tracer.startActiveSpan('db.usuarios.findCredencialByIdUsuario', async (span) => {
-      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
-      try {
-        const result = this.credenciais.get(idUsuario);
         span.setStatus({ code: SpanStatusCode.OK });
         return result;
       } catch (error: unknown) {

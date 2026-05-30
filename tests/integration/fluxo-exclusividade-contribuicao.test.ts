@@ -23,6 +23,7 @@ import {
   PlataformaRepositoryMemory,
 } from '../../src/adapters/plataforma/repository.memory.js';
 import { ProvedorRegraTaxaMemory } from '../../src/adapters/taxas/regra-provider.memory.js';
+import { AuthServiceMemoria } from '../../src/adapters/usuario/auth-service.memory.js';
 import { UsuarioRepositoryMemory } from '../../src/adapters/usuario/repository.memory.js';
 import { ArrecadacaoContribuicaoNaoDisponivelError } from '../../src/errors/arrecadacao/contribuicao-nao-disponivel.error.js';
 import { adicionarOpcaoContribuicao } from '../../src/use-cases/arrecadacao/adicionar-opcao-contribuicao.js';
@@ -96,6 +97,7 @@ async function seedFluxoBase() {
     {
       usuarioRepository: deps.usuarioRepository,
       plataformaRepository: deps.plataformaRepository,
+      authService: new AuthServiceMemoria(),
       clock,
       observability: deps.observability,
     },

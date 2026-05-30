@@ -1,8 +1,7 @@
 import { SpanStatusCode } from '@opentelemetry/api';
 import { z } from 'zod/v4';
+import type { AuthService } from '../../adapters/usuario/auth-service.js';
 import type { UsuarioRepository } from '../../adapters/usuario/repository.js';
-import type { SessaoUsuarioRepository } from '../../adapters/usuario/sessao-repository.js';
-import { sessaoExpirada } from '../../domain/usuario/entities/sessao.js';
 import { contaTemPermissao } from '../../domain/usuario/entities/usuario.js';
 import { PermissaoSchema } from '../../domain/usuario/value-objects/permissao.js';
 import { TokenSessaoSchema } from '../../domain/usuario/value-objects/token-sessao.js';
@@ -19,19 +18,33 @@ export type AutorizarPermissaoUsuarioInput = z.infer<typeof AutorizarPermissaoUs
 
 export interface AutorizarPermissaoUsuarioDeps {
   readonly usuarioRepository: UsuarioRepository;
-  readonly sessaoRepository: SessaoUsuarioRepository;
-  readonly clock: () => Date;
+  readonly authService: AuthService;
   readonly observability: Observability;
 }
 
 /**
  * Verifica se o token de sessão é válido e se a conta tem a permissão pedida.
+ *
+ * Post-aperture-ibbet flow:
+ *   1. `authService.validarSessao(token)` — collapses unknown / expired /
+ *      revoked into a single `null` return (port contract). Expiry is now
+ *      adapter-internal — the use-case no longer carries a clock dep.
+ *   2. Load `Usuario` by `idUsuario` from the session — engine's auth
+ *      principal is `Conta`, but auth identity is `Usuario`. Conta is
+ *      derived via `Usuario.idConta` (1:1).
+ *   3. Load `Conta` and run the pure `contaTemPermissao` predicate.
+ *
+ * Failure modes:
+ *   - `null` session → `UsuarioSessaoInvalidaError('Token de sessao invalido')`
+ *   - missing Usuario for the session's idUsuario → `UsuarioSessaoInvalidaError`
+ *   - missing Conta for the Usuario → `UsuarioSessaoInvalidaError`
+ *   - permission absent on Conta → `UsuarioNaoAutorizadoError`
  */
 export async function autorizarPermissaoUsuario(
   deps: AutorizarPermissaoUsuarioDeps,
   input: AutorizarPermissaoUsuarioInput,
 ): Promise<void> {
-  const { usuarioRepository, sessaoRepository, clock, observability } = deps;
+  const { usuarioRepository, authService, observability } = deps;
   const { logger, tracer } = observability;
 
   return tracer.startActiveSpan('autorizarPermissaoUsuario', async (span) => {
@@ -44,16 +57,17 @@ export async function autorizarPermissaoUsuario(
 
       const { token, permissao } = parsed.data;
 
-      const sessao = await sessaoRepository.findByToken(token);
+      const sessao = await authService.validarSessao(token);
       if (!sessao) {
-        throw new UsuarioSessaoInvalidaError('Token de sessao desconhecido');
+        throw new UsuarioSessaoInvalidaError('Token de sessao invalido');
       }
 
-      if (sessaoExpirada(sessao, clock())) {
-        throw new UsuarioSessaoInvalidaError('Sessao expirada');
+      const usuario = await usuarioRepository.findUsuarioById(sessao.idUsuario);
+      if (!usuario) {
+        throw new UsuarioSessaoInvalidaError('Usuario nao encontrado para a sessao');
       }
 
-      const conta = await usuarioRepository.findContaById(sessao.idConta);
+      const conta = await usuarioRepository.findContaById(usuario.idConta);
       if (!conta) {
         throw new UsuarioSessaoInvalidaError('Conta nao encontrada para a sessao');
       }

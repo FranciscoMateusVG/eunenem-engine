@@ -5,8 +5,8 @@ import {
   ID_PLATAFORMA_EUNENEM,
   PlataformaRepositoryMemory,
 } from '../../../src/adapters/plataforma/repository.memory.js';
+import { AuthServiceMemoria } from '../../../src/adapters/usuario/auth-service.memory.js';
 import { UsuarioRepositoryMemory } from '../../../src/adapters/usuario/repository.memory.js';
-import { SessaoUsuarioRepositoryMemory } from '../../../src/adapters/usuario/sessao-repository.memory.js';
 import { TokenSessaoSchema } from '../../../src/domain/usuario/value-objects/token-sessao.js';
 import { UsuarioEmailJaExisteError } from '../../../src/errors/usuario/email-ja-existe.error.js';
 import { UsuarioInputInvalidoError } from '../../../src/errors/usuario/input-invalido.error.js';
@@ -28,21 +28,31 @@ const silentObservability = {
 const fixedDate = new Date('2026-05-01T12:00:00.000Z');
 const clock = () => fixedDate;
 
-function makeUsuarioRepos() {
+function makeUsuarioRepos(authServiceOpts: { sessionTtlMs?: number } = {}) {
   return {
     usuarioRepository: new UsuarioRepositoryMemory(),
     plataformaRepository: new PlataformaRepositoryMemory(),
+    authService: new AuthServiceMemoria({
+      clock,
+      sessionTtlMs: authServiceOpts.sessionTtlMs ?? 60_000,
+    }),
   };
 }
 
 describe('registrarContaUsuario', () => {
   it('registers user, account and simulated credential scoped to plataforma', async () => {
-    const { usuarioRepository, plataformaRepository } = makeUsuarioRepos();
+    const { usuarioRepository, plataformaRepository, authService } = makeUsuarioRepos();
     const idUsuario = randomUUID();
     const idConta = randomUUID();
 
     const result = await registrarContaUsuario(
-      { usuarioRepository, plataformaRepository, clock, observability: silentObservability },
+      {
+        usuarioRepository,
+        plataformaRepository,
+        authService,
+        clock,
+        observability: silentObservability,
+      },
       {
         idUsuario,
         idPlataforma: ID_PLATAFORMA_EUNENEM,
@@ -63,10 +73,16 @@ describe('registrarContaUsuario', () => {
   });
 
   it('throws UsuarioPlataformaNaoEncontradaError when idPlataforma is unknown', async () => {
-    const { usuarioRepository, plataformaRepository } = makeUsuarioRepos();
+    const { usuarioRepository, plataformaRepository, authService } = makeUsuarioRepos();
     await expect(
       registrarContaUsuario(
-        { usuarioRepository, plataformaRepository, clock, observability: silentObservability },
+        {
+          usuarioRepository,
+          plataformaRepository,
+          authService,
+          clock,
+          observability: silentObservability,
+        },
         {
           idUsuario: randomUUID(),
           idPlataforma: '99999999-9999-4999-8999-999999999999',
@@ -80,10 +96,16 @@ describe('registrarContaUsuario', () => {
   });
 
   it('throws UsuarioInputInvalidoError on invalid email', async () => {
-    const { usuarioRepository, plataformaRepository } = makeUsuarioRepos();
+    const { usuarioRepository, plataformaRepository, authService } = makeUsuarioRepos();
     await expect(
       registrarContaUsuario(
-        { usuarioRepository, plataformaRepository, clock, observability: silentObservability },
+        {
+          usuarioRepository,
+          plataformaRepository,
+          authService,
+          clock,
+          observability: silentObservability,
+        },
         {
           idUsuario: randomUUID(),
           idPlataforma: ID_PLATAFORMA_EUNENEM,
@@ -97,10 +119,16 @@ describe('registrarContaUsuario', () => {
   });
 
   it('throws UsuarioEmailJaExisteError when email is taken on the same plataforma', async () => {
-    const { usuarioRepository, plataformaRepository } = makeUsuarioRepos();
+    const { usuarioRepository, plataformaRepository, authService } = makeUsuarioRepos();
     const email = 'taken@example.com';
     await registrarContaUsuario(
-      { usuarioRepository, plataformaRepository, clock, observability: silentObservability },
+      {
+        usuarioRepository,
+        plataformaRepository,
+        authService,
+        clock,
+        observability: silentObservability,
+      },
       {
         idUsuario: randomUUID(),
         idPlataforma: ID_PLATAFORMA_EUNENEM,
@@ -113,7 +141,13 @@ describe('registrarContaUsuario', () => {
 
     await expect(
       registrarContaUsuario(
-        { usuarioRepository, plataformaRepository, clock, observability: silentObservability },
+        {
+          usuarioRepository,
+          plataformaRepository,
+          authService,
+          clock,
+          observability: silentObservability,
+        },
         {
           idUsuario: randomUUID(),
           idPlataforma: ID_PLATAFORMA_EUNENEM,
@@ -127,11 +161,17 @@ describe('registrarContaUsuario', () => {
   });
 
   it('allows the same email across different plataformas (two distinct accounts)', async () => {
-    const { usuarioRepository, plataformaRepository } = makeUsuarioRepos();
+    const { usuarioRepository, plataformaRepository, authService } = makeUsuarioRepos();
     const email = 'multi@example.com';
 
     const eunenem = await registrarContaUsuario(
-      { usuarioRepository, plataformaRepository, clock, observability: silentObservability },
+      {
+        usuarioRepository,
+        plataformaRepository,
+        authService,
+        clock,
+        observability: silentObservability,
+      },
       {
         idUsuario: randomUUID(),
         idPlataforma: ID_PLATAFORMA_EUNENEM,
@@ -143,7 +183,13 @@ describe('registrarContaUsuario', () => {
     );
 
     const eucasei = await registrarContaUsuario(
-      { usuarioRepository, plataformaRepository, clock, observability: silentObservability },
+      {
+        usuarioRepository,
+        plataformaRepository,
+        authService,
+        clock,
+        observability: silentObservability,
+      },
       {
         idUsuario: randomUUID(),
         idPlataforma: ID_PLATAFORMA_EUCASEI,
@@ -158,15 +204,98 @@ describe('registrarContaUsuario', () => {
     expect(eunenem.usuario.idPlataforma).toBe(ID_PLATAFORMA_EUNENEM);
     expect(eucasei.usuario.idPlataforma).toBe(ID_PLATAFORMA_EUCASEI);
   });
+
+  it('compensates the AuthService write when saveRegistroDomain throws (T3 saga)', async () => {
+    // Stage: a user already exists in the domain repo for (plataforma, email)
+    // but NOT in the AuthService. Then attempt a second registration that
+    // collides at the domain layer AFTER auth.criarConta succeeded.
+    //
+    // The use-case's pre-check (findUsuarioByEmail) catches the collision
+    // BEFORE auth — so to drive the compensation path we need to make
+    // saveRegistroDomain itself fail post-pre-check. Easiest way: wrap
+    // the repo with a saveRegistroDomain that throws on the first call.
+    const { plataformaRepository, authService } = makeUsuarioRepos();
+    const baseRepo = new UsuarioRepositoryMemory();
+    const repoWithFailingSave = {
+      ...baseRepo,
+      saveRegistroDomain: () => Promise.reject(new Error('domain write blew up')),
+      findUsuarioById: baseRepo.findUsuarioById.bind(baseRepo),
+      findUsuarioByEmail: baseRepo.findUsuarioByEmail.bind(baseRepo),
+      findContaById: baseRepo.findContaById.bind(baseRepo),
+      atualizarNomeExibicaoUsuario: baseRepo.atualizarNomeExibicaoUsuario.bind(baseRepo),
+    };
+
+    const idUsuario = randomUUID();
+    const email = 'compensate@example.com';
+
+    await expect(
+      registrarContaUsuario(
+        {
+          usuarioRepository: repoWithFailingSave,
+          plataformaRepository,
+          authService,
+          clock,
+          observability: silentObservability,
+        },
+        {
+          idUsuario,
+          idPlataforma: ID_PLATAFORMA_EUNENEM,
+          idConta: randomUUID(),
+          email,
+          nomeExibicao: 'Bob',
+          senhaSimulada: 'p',
+        },
+      ),
+    ).rejects.toThrow('domain write blew up');
+
+    // The compensation MUST have torn down the auth principal. We verify
+    // by attempting to sign in with the credentials we created — if
+    // compensation ran, this fails (no such auth principal).
+    await expect(
+      authService.iniciarSessao({
+        idPlataforma: ID_PLATAFORMA_EUNENEM,
+        email,
+        senha: 'p',
+      }),
+    ).rejects.toThrow(UsuarioInputInvalidoError);
+
+    // And we should be able to re-register with the same email + idUsuario
+    // since the auth-side row was cleaned up.
+    await expect(
+      registrarContaUsuario(
+        {
+          usuarioRepository: new UsuarioRepositoryMemory(),
+          plataformaRepository,
+          authService,
+          clock,
+          observability: silentObservability,
+        },
+        {
+          idUsuario,
+          idPlataforma: ID_PLATAFORMA_EUNENEM,
+          idConta: randomUUID(),
+          email,
+          nomeExibicao: 'Bob retry',
+          senhaSimulada: 'p',
+        },
+      ),
+    ).resolves.toBeDefined();
+  });
 });
 
 describe('atualizarPerfilUsuario', () => {
   it('updates display name', async () => {
-    const { usuarioRepository, plataformaRepository } = makeUsuarioRepos();
+    const { usuarioRepository, plataformaRepository, authService } = makeUsuarioRepos();
     const idUsuario = randomUUID();
     const idConta = randomUUID();
     await registrarContaUsuario(
-      { usuarioRepository, plataformaRepository, clock, observability: silentObservability },
+      {
+        usuarioRepository,
+        plataformaRepository,
+        authService,
+        clock,
+        observability: silentObservability,
+      },
       {
         idUsuario,
         idPlataforma: ID_PLATAFORMA_EUNENEM,
@@ -208,12 +337,17 @@ describe('atualizarPerfilUsuario', () => {
 
 describe('criarSessaoUsuario', () => {
   it('creates a plataforma-scoped session when simulated password matches', async () => {
-    const { usuarioRepository, plataformaRepository } = makeUsuarioRepos();
-    const sessaoRepository = new SessaoUsuarioRepositoryMemory();
+    const { usuarioRepository, plataformaRepository, authService } = makeUsuarioRepos();
     const email = 'login@example.com';
     const password = 'secret-stub';
     await registrarContaUsuario(
-      { usuarioRepository, plataformaRepository, clock, observability: silentObservability },
+      {
+        usuarioRepository,
+        plataformaRepository,
+        authService,
+        clock,
+        observability: silentObservability,
+      },
       {
         idUsuario: randomUUID(),
         idPlataforma: ID_PLATAFORMA_EUNENEM,
@@ -227,9 +361,7 @@ describe('criarSessaoUsuario', () => {
     const sessao = await criarSessaoUsuario(
       {
         usuarioRepository,
-        sessaoRepository,
-        clock,
-        sessionTtlMs: 60_000,
+        authService,
         observability: silentObservability,
       },
       { idPlataforma: ID_PLATAFORMA_EUNENEM, email, senhaSimulada: password },
@@ -241,11 +373,16 @@ describe('criarSessaoUsuario', () => {
   });
 
   it('refuses to log in against a plataforma where the email is not registered', async () => {
-    const { usuarioRepository, plataformaRepository } = makeUsuarioRepos();
-    const sessaoRepository = new SessaoUsuarioRepositoryMemory();
+    const { usuarioRepository, plataformaRepository, authService } = makeUsuarioRepos();
     const email = 'only-eunenem@example.com';
     await registrarContaUsuario(
-      { usuarioRepository, plataformaRepository, clock, observability: silentObservability },
+      {
+        usuarioRepository,
+        plataformaRepository,
+        authService,
+        clock,
+        observability: silentObservability,
+      },
       {
         idUsuario: randomUUID(),
         idPlataforma: ID_PLATAFORMA_EUNENEM,
@@ -260,9 +397,7 @@ describe('criarSessaoUsuario', () => {
       criarSessaoUsuario(
         {
           usuarioRepository,
-          sessaoRepository,
-          clock,
-          sessionTtlMs: 60_000,
+          authService,
           observability: silentObservability,
         },
         { idPlataforma: ID_PLATAFORMA_EUCASEI, email, senhaSimulada: 'right' },
@@ -271,10 +406,15 @@ describe('criarSessaoUsuario', () => {
   });
 
   it('throws on bad credentials', async () => {
-    const { usuarioRepository, plataformaRepository } = makeUsuarioRepos();
-    const sessaoRepository = new SessaoUsuarioRepositoryMemory();
+    const { usuarioRepository, plataformaRepository, authService } = makeUsuarioRepos();
     await registrarContaUsuario(
-      { usuarioRepository, plataformaRepository, clock, observability: silentObservability },
+      {
+        usuarioRepository,
+        plataformaRepository,
+        authService,
+        clock,
+        observability: silentObservability,
+      },
       {
         idUsuario: randomUUID(),
         idPlataforma: ID_PLATAFORMA_EUNENEM,
@@ -289,9 +429,7 @@ describe('criarSessaoUsuario', () => {
       criarSessaoUsuario(
         {
           usuarioRepository,
-          sessaoRepository,
-          clock,
-          sessionTtlMs: 60_000,
+          authService,
           observability: silentObservability,
         },
         {
@@ -304,15 +442,12 @@ describe('criarSessaoUsuario', () => {
   });
 
   it('throws UsuarioInputInvalidoError on invalid session input', async () => {
-    const { usuarioRepository } = makeUsuarioRepos();
-    const sessaoRepository = new SessaoUsuarioRepositoryMemory();
+    const { usuarioRepository, authService } = makeUsuarioRepos();
     await expect(
       criarSessaoUsuario(
         {
           usuarioRepository,
-          sessaoRepository,
-          clock,
-          sessionTtlMs: 60_000,
+          authService,
           observability: silentObservability,
         },
         { idPlataforma: ID_PLATAFORMA_EUNENEM, email: 'bad-email', senhaSimulada: 'x' },
@@ -323,12 +458,17 @@ describe('criarSessaoUsuario', () => {
 
 describe('autorizarPermissaoUsuario', () => {
   it('authorizes when session is valid and permission exists', async () => {
-    const { usuarioRepository, plataformaRepository } = makeUsuarioRepos();
-    const sessaoRepository = new SessaoUsuarioRepositoryMemory();
+    const { usuarioRepository, plataformaRepository, authService } = makeUsuarioRepos();
     const idUsuario = randomUUID();
     const idConta = randomUUID();
     await registrarContaUsuario(
-      { usuarioRepository, plataformaRepository, clock, observability: silentObservability },
+      {
+        usuarioRepository,
+        plataformaRepository,
+        authService,
+        clock,
+        observability: silentObservability,
+      },
       {
         idUsuario,
         idPlataforma: ID_PLATAFORMA_EUNENEM,
@@ -342,9 +482,7 @@ describe('autorizarPermissaoUsuario', () => {
     const { token } = await criarSessaoUsuario(
       {
         usuarioRepository,
-        sessaoRepository,
-        clock,
-        sessionTtlMs: 60_000,
+        authService,
         observability: silentObservability,
       },
       {
@@ -356,62 +494,64 @@ describe('autorizarPermissaoUsuario', () => {
 
     await expect(
       autorizarPermissaoUsuario(
-        { usuarioRepository, sessaoRepository, clock, observability: silentObservability },
+        { usuarioRepository, authService, observability: silentObservability },
         { token, permissao: 'campaign:admin' },
       ),
     ).resolves.toBeUndefined();
   });
 
   it('throws UsuarioSessaoInvalidaError when token unknown', async () => {
-    const { usuarioRepository } = makeUsuarioRepos();
-    const sessaoRepository = new SessaoUsuarioRepositoryMemory();
+    const { usuarioRepository, authService } = makeUsuarioRepos();
     const token = TokenSessaoSchema.parse(randomBytes(32).toString('base64url'));
 
     await expect(
       autorizarPermissaoUsuario(
-        { usuarioRepository, sessaoRepository, clock, observability: silentObservability },
+        { usuarioRepository, authService, observability: silentObservability },
         { token, permissao: 'campaign:admin' },
       ),
     ).rejects.toThrow(UsuarioSessaoInvalidaError);
   });
 
   it('throws UsuarioSessaoInvalidaError on malformed input token', async () => {
-    const { usuarioRepository } = makeUsuarioRepos();
-    const sessaoRepository = new SessaoUsuarioRepositoryMemory();
+    const { usuarioRepository, authService } = makeUsuarioRepos();
     await expect(
       autorizarPermissaoUsuario(
-        { usuarioRepository, sessaoRepository, clock, observability: silentObservability },
+        { usuarioRepository, authService, observability: silentObservability },
         { token: 'short', permissao: 'campaign:admin' },
       ),
     ).rejects.toThrow(UsuarioSessaoInvalidaError);
   });
 
-  it('throws UsuarioSessaoInvalidaError when account is missing for session', async () => {
-    const { usuarioRepository } = makeUsuarioRepos();
-    const sessaoRepository = new SessaoUsuarioRepositoryMemory();
+  it('throws UsuarioSessaoInvalidaError when usuario is missing for session', async () => {
+    const { usuarioRepository, authService } = makeUsuarioRepos();
     const token = TokenSessaoSchema.parse(randomBytes(32).toString('base64url'));
-    await sessaoRepository.save({
+    // Seed a session whose idUsuario points at nothing in the repo.
+    authService.seedSession({
       token,
-      idPlataforma: ID_PLATAFORMA_EUNENEM,
-      idConta: randomUUID(),
+      idUsuario: randomUUID(),
       expiraEm: new Date(fixedDate.getTime() + 60_000),
     });
 
     await expect(
       autorizarPermissaoUsuario(
-        { usuarioRepository, sessaoRepository, clock, observability: silentObservability },
+        { usuarioRepository, authService, observability: silentObservability },
         { token, permissao: 'campaign:admin' },
       ),
     ).rejects.toThrow(UsuarioSessaoInvalidaError);
   });
 
   it('throws UsuarioSessaoInvalidaError when session expired', async () => {
-    const { usuarioRepository, plataformaRepository } = makeUsuarioRepos();
-    const sessaoRepository = new SessaoUsuarioRepositoryMemory();
+    const { usuarioRepository, plataformaRepository, authService } = makeUsuarioRepos();
     const idUsuario = randomUUID();
     const idConta = randomUUID();
     await registrarContaUsuario(
-      { usuarioRepository, plataformaRepository, clock, observability: silentObservability },
+      {
+        usuarioRepository,
+        plataformaRepository,
+        authService,
+        clock,
+        observability: silentObservability,
+      },
       {
         idUsuario,
         idPlataforma: ID_PLATAFORMA_EUNENEM,
@@ -423,27 +563,25 @@ describe('autorizarPermissaoUsuario', () => {
     );
 
     const token = TokenSessaoSchema.parse(randomBytes(32).toString('base64url'));
-    await sessaoRepository.save({
+    authService.seedSession({
       token,
-      idPlataforma: ID_PLATAFORMA_EUNENEM,
-      idConta,
+      idUsuario,
       expiraEm: new Date(fixedDate.getTime() - 1),
     });
 
     await expect(
       autorizarPermissaoUsuario(
-        { usuarioRepository, sessaoRepository, clock, observability: silentObservability },
+        { usuarioRepository, authService, observability: silentObservability },
         { token, permissao: 'campaign:admin' },
       ),
     ).rejects.toThrow(UsuarioSessaoInvalidaError);
   });
 
   it('throws UsuarioNaoAutorizadoError when permission missing on account', async () => {
-    const { usuarioRepository } = makeUsuarioRepos();
-    const sessaoRepository = new SessaoUsuarioRepositoryMemory();
+    const { usuarioRepository, authService } = makeUsuarioRepos();
     const idUsuario = randomUUID();
     const idConta = randomUUID();
-    await usuarioRepository.saveRegistro({
+    await usuarioRepository.saveRegistroDomain({
       usuario: {
         id: idUsuario,
         idPlataforma: ID_PLATAFORMA_EUNENEM,
@@ -458,20 +596,18 @@ describe('autorizarPermissaoUsuario', () => {
         permissoes: [],
         criadaEm: fixedDate,
       },
-      credencial: { idUsuario, senhaSimulada: 'p' },
     });
 
     const token = TokenSessaoSchema.parse(randomBytes(32).toString('base64url'));
-    await sessaoRepository.save({
+    authService.seedSession({
       token,
-      idPlataforma: ID_PLATAFORMA_EUNENEM,
-      idConta,
+      idUsuario,
       expiraEm: new Date(fixedDate.getTime() + 60_000),
     });
 
     await expect(
       autorizarPermissaoUsuario(
-        { usuarioRepository, sessaoRepository, clock, observability: silentObservability },
+        { usuarioRepository, authService, observability: silentObservability },
         { token, permissao: 'campaign:admin' },
       ),
     ).rejects.toThrow(UsuarioNaoAutorizadoError);

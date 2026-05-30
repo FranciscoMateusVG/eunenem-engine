@@ -22,6 +22,7 @@ import {
   PlataformaRepositoryMemory,
 } from '../../src/adapters/plataforma/repository.memory.js';
 import { ProvedorRegraTaxaMemory } from '../../src/adapters/taxas/regra-provider.memory.js';
+import { AuthServiceMemoria } from '../../src/adapters/usuario/auth-service.memory.js';
 import { UsuarioRepositoryMemory } from '../../src/adapters/usuario/repository.memory.js';
 import { adicionarOpcaoContribuicao } from '../../src/use-cases/arrecadacao/adicionar-opcao-contribuicao.js';
 import { criarCampanha } from '../../src/use-cases/arrecadacao/criar-campanha.js';
@@ -100,6 +101,7 @@ async function seedFluxoBase() {
     {
       usuarioRepository: deps.usuarioRepository,
       plataformaRepository: deps.plataformaRepository,
+      authService: new AuthServiceMemoria(),
       clock,
       observability: deps.observability,
     },

@@ -17,6 +17,7 @@ import {
   ID_PLATAFORMA_EUNENEM,
   PlataformaRepositoryMemory,
 } from '../../src/adapters/plataforma/repository.memory.js';
+import { AuthServiceMemoria } from '../../src/adapters/usuario/auth-service.memory.js';
 import { UsuarioRepositoryMemory } from '../../src/adapters/usuario/repository.memory.js';
 import { ArrecadacaoUltimoAdministradorError } from '../../src/errors/arrecadacao/ultimo-administrador.error.js';
 import { adicionarAdministradorCampanha } from '../../src/use-cases/arrecadacao/adicionar-administrador-campanha.js';
@@ -88,6 +89,7 @@ describe('Fluxo — administração de campanha', () => {
       {
         usuarioRepository: deps.usuarioRepository,
         plataformaRepository: deps.plataformaRepository,
+        authService: new AuthServiceMemoria(),
         clock,
         observability: deps.observability,
       },
@@ -105,6 +107,7 @@ describe('Fluxo — administração de campanha', () => {
       {
         usuarioRepository: deps.usuarioRepository,
         plataformaRepository: deps.plataformaRepository,
+        authService: new AuthServiceMemoria(),
         clock,
         observability: deps.observability,
       },
