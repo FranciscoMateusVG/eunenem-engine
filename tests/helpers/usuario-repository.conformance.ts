@@ -279,5 +279,64 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
       const loaded = await repo.findUsuarioById(idUsuario);
       expect(loaded?.nomeExibicao).toBe('New Name');
     });
+
+    it('removeRegistroDomain deletes Usuario + Conta + frees composite-uniqueness slots (aperture-p8i01)', async () => {
+      const idUsuario = randomUUID();
+      const idConta = randomUUID();
+      const email = 'cleanup-target@example.com';
+      const slug = 'cleanup-target';
+
+      await repo.saveRegistroDomain({
+        usuario: {
+          id: idUsuario,
+          idPlataforma: ID_PLATAFORMA_EUNENEM,
+          idConta,
+          email,
+          nomeExibicao: 'Clean',
+          slug,
+          criadoEm: fixedDate,
+        },
+        conta: {
+          id: idConta,
+          idUsuario,
+          permissoes: ['campaign:admin'] as const,
+          criadaEm: fixedDate,
+        },
+      });
+
+      await repo.removeRegistroDomain(idUsuario);
+
+      expect(await repo.findUsuarioById(idUsuario)).toBeUndefined();
+      expect(await repo.findUsuarioByEmail(ID_PLATAFORMA_EUNENEM, email)).toBeUndefined();
+      expect(await repo.findContaById(idConta)).toBeUndefined();
+
+      // The composite-uniqueness slot is freed — re-registering with the
+      // same (idPlataforma, email) and (idPlataforma, slug) succeeds.
+      const idUsuario2 = randomUUID();
+      const idConta2 = randomUUID();
+      await expect(
+        repo.saveRegistroDomain({
+          usuario: {
+            id: idUsuario2,
+            idPlataforma: ID_PLATAFORMA_EUNENEM,
+            idConta: idConta2,
+            email,
+            nomeExibicao: 'Clean Again',
+            slug,
+            criadoEm: fixedDate,
+          },
+          conta: {
+            id: idConta2,
+            idUsuario: idUsuario2,
+            permissoes: ['campaign:admin'] as const,
+            criadaEm: fixedDate,
+          },
+        }),
+      ).resolves.toBeUndefined();
+    });
+
+    it('removeRegistroDomain is idempotent on unknown id (aperture-p8i01)', async () => {
+      await expect(repo.removeRegistroDomain(randomUUID())).resolves.not.toThrow();
+    });
   });
 }

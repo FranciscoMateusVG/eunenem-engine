@@ -50,4 +50,18 @@ export interface UsuarioRepository {
     idUsuario: IdUsuario,
     nomeExibicao: NomeExibicaoUsuario,
   ): Promise<void>;
+
+  /**
+   * Removes the domain Usuario aggregate (Usuario root + Conta inner entity).
+   * Used by the `registrarContaUsuario` saga as a T3 compensation when a
+   * downstream step (e.g. campanha creation) fails after `saveRegistroDomain`
+   * has already written the rows. Idempotent — deleting an unknown id is a
+   * no-op (DELETE affects zero rows). The FK `contas.id_usuario ON DELETE
+   * CASCADE` cleans up the Conta row in one statement.
+   *
+   * Does NOT touch the BetterAuth-side `users` table — that's owned by
+   * `AuthService.removerConta`. The saga calls both in LIFO compensation
+   * order.
+   */
+  removeRegistroDomain(idUsuario: IdUsuario): Promise<void>;
 }

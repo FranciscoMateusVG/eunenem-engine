@@ -152,11 +152,16 @@ export const authRouter = t.router({
       const idConta = randomUUID();
       try {
         // Mount-Option-A2: registrarContaUsuario carries the T3 saga
-        // (engine domain rules + auth.criarConta + compensation).
+        // (engine domain rules + auth.criarConta + Campanha + 'presente'
+        // opcao + compensation cascade). After p8i01 the saga also returns
+        // the default Campanha — every signed-up user owns exactly one
+        // "Lista de <nome>" with one initial OpcaoContribuicao.
         await registrarContaUsuario(
           {
             usuarioRepository: deps.usuarioRepository,
             plataformaRepository: deps.plataformaRepository,
+            campanhaRepository: deps.campanhaRepository,
+            recebedorRepository: deps.recebedorRepository,
             authService: deps.authService,
             clock: deps.clock,
             observability: deps.observability,
@@ -261,6 +266,14 @@ export const authRouter = t.router({
    * Probe: returns the currently-authenticated user's id + session expiry
    * if the cookie maps to a live session, or `null` otherwise.
    * Frontend's "am I logged in?" check.
+   *
+   * Post-aperture-p8i01: also returns `idCampanha` + `idOpcaoPresentes`
+   * so the frontend can render the user's Lista de presentes without a
+   * follow-up round-trip. The signup saga guarantees both exist for
+   * every signed-up user. For backfilled users (pre-p8i01) the values
+   * resolve via `campanhaRepository.findFirstByAdministrador`; if the
+   * backfill hasn't run yet (or somehow missed a user) both fields are
+   * `null` and the client falls back to an empty-list UX.
    */
   me: t.procedure.query(async ({ ctx }) => {
     const { deps, headers } = ctx;
@@ -276,6 +289,13 @@ export const authRouter = t.router({
     if (!sessao) return null;
     const usuario = await deps.usuarioRepository.findUsuarioById(sessao.idUsuario);
     if (!usuario) return null;
+
+    // p8i01: resolve the user's default Campanha + the 'presente' opcao
+    // inside it. Single DB hit (findFirstByAdministrador joins
+    // campanhas + campanha_administradores + opcoes_contribuicao).
+    const campanha = await deps.campanhaRepository.findFirstByAdministrador(usuario.idConta);
+    const opcaoPresentes = campanha?.opcoes.find((o) => o.tipo === 'presente');
+
     return {
       idUsuario: usuario.id,
       idConta: usuario.idConta,
@@ -288,6 +308,16 @@ export const authRouter = t.router({
        * to fetch the user's own slug.
        */
       slug: usuario.slug,
+      /**
+       * Default Campanha id (aperture-p8i01). null only if backfill
+       * has not yet been applied to a pre-p8i01 user.
+       */
+      idCampanha: campanha?.id ?? null,
+      /**
+       * Initial 'presente' OpcaoContribuicao id inside the default
+       * Campanha (aperture-p8i01). Same caveat as idCampanha.
+       */
+      idOpcaoPresentes: opcaoPresentes?.id ?? null,
       expiraEm: sessao.expiraEm,
     };
   }),

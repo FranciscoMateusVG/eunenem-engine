@@ -3,6 +3,8 @@ import {
   AuthServiceBetterAuth,
   type AuthService,
   type Auth,
+  type CampanhaRepository,
+  CampanhaRepositoryPostgres,
   ConsoleLogger,
   type CriarAuthConfig,
   createDatabase,
@@ -12,6 +14,8 @@ import {
   type Observability,
   PlataformaRepositoryMemory,
   type PlataformaRepository,
+  type RecebedorRepository,
+  RecebedorRepositoryPostgres,
   UsuarioRepositoryPostgres,
   type UsuarioRepository,
 } from '../../../../src/index.js';
@@ -31,6 +35,8 @@ export interface ServerDeps {
   readonly authService: AuthService;
   readonly usuarioRepository: UsuarioRepository;
   readonly plataformaRepository: PlataformaRepository;
+  readonly campanhaRepository: CampanhaRepository;
+  readonly recebedorRepository: RecebedorRepository;
   readonly observability: Observability;
   readonly clock: () => Date;
   /** Cookie name shared by the engine's BetterAuth sessions table + our tRPC procedures. */
@@ -141,12 +147,20 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
   // ID_PLATAFORMA_EUNENEM + ID_PLATAFORMA_EUCASEI via the seed array.
   const plataformaRepository = new PlataformaRepositoryMemory();
 
+  // Arrecadação BC — Campanha + Recebedor on Postgres, sharing the same
+  // Kysely instance as the engine's domain repos (§8 #2 anti-trap).
+  // p8i01 made these required deps for the signup saga.
+  const recebedorRepository = new RecebedorRepositoryPostgres(db);
+  const campanhaRepository = new CampanhaRepositoryPostgres(db, recebedorRepository);
+
   return {
     db,
     auth,
     authService,
     usuarioRepository,
     plataformaRepository,
+    campanhaRepository,
+    recebedorRepository,
     observability,
     clock: () => new Date(),
     // BetterAuth's default cookie name — keep parity with `auth.handler`
