@@ -89,7 +89,7 @@ async function resolveCallerCampanha(ctx: TrpcContext): Promise<{
   // (matches `auth.me` returning null in the same scenario).
   if (!usuario) throw new SessaoAusenteError('Usuario nao encontrado');
 
-  const campanha = await deps.campanhaRepository.findFirstByAdministrador(usuario.idConta);
+  const campanha = await deps.campanhaRepository.findByAdministrador(usuario.idConta);
   if (!campanha) {
     // Defensive: by convention every signed-up user owns one campanha.
     // If they don't, the data model is in an inconsistent state — fail

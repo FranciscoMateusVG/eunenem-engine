@@ -28,11 +28,10 @@ import {
 } from '../../src/adapters/plataforma/repository.memory.js';
 import { AuthServiceMemoria } from '../../src/adapters/usuario/auth-service.memory.js';
 import { UsuarioRepositoryMemory } from '../../src/adapters/usuario/repository.memory.js';
+import { criarRecebedorInicial } from '../../src/domain/arrecadacao/entities/recebedor.js';
 import { NoopLogger } from '../../src/observability/noop-logger.js';
 import type { Observability } from '../../src/observability/observability.js';
 import { noopTracer } from '../../src/observability/tracer.js';
-import { adicionarOpcaoContribuicao } from '../../src/use-cases/arrecadacao/adicionar-opcao-contribuicao.js';
-import { criarCampanha } from '../../src/use-cases/arrecadacao/criar-campanha.js';
 import { criarSessaoUsuario } from '../../src/use-cases/usuario/criar-sessao-usuario.js';
 import { registrarContaUsuario } from '../../src/use-cases/usuario/registrar-conta-usuario.js';
 
@@ -127,13 +126,18 @@ async function seedUserWithCampanha(
   const deps = (rig as TestRig & { deps: ServerDeps }).deps;
   const idUsuario = randomUUID();
   const idConta = randomUUID();
-  const idCampanha = randomUUID();
-  const idOpcaoPresentes = randomUUID();
 
-  await registrarContaUsuario(
+  // Post-rebase onto aperture-p8i01: `registrarContaUsuario` is now a saga
+  // that auto-creates the default Campanha + 'presente' OpcaoContribuicao.
+  // We extract idCampanha/idOpcaoPresentes from the saga result rather than
+  // calling `criarCampanha` + `adicionarOpcaoContribuicao` ourselves (which
+  // would produce a second campanha and confuse `findByAdministrador`).
+  const { campanha } = await registrarContaUsuario(
     {
       usuarioRepository: deps.usuarioRepository,
       plataformaRepository: deps.plataformaRepository,
+      campanhaRepository: deps.campanhaRepository,
+      recebedorRepository: deps.recebedorRepository,
       authService: deps.authService,
       clock: deps.clock,
       observability: deps.observability,
@@ -148,34 +152,30 @@ async function seedUserWithCampanha(
     },
   );
 
-  await criarCampanha(
-    {
-      campanhaRepository: deps.campanhaRepository,
-      recebedorRepository: deps.recebedorRepository,
-      plataformaRepository: deps.plataformaRepository,
-      clock: deps.clock,
-      observability: deps.observability,
-    },
-    {
-      id: idCampanha,
-      idPlataforma: ID_PLATAFORMA_EUNENEM,
-      idsAdministradores: [idConta],
-      dadosRecebedor: {
-        nomeTitular: params.handle,
-        tipoChavePix: 'email',
-        chavePix: params.email,
-      },
-      titulo: `Campanha ${params.handle}`,
-    },
-  );
+  const idCampanha = campanha.id;
+  const opcaoPresentes = campanha.opcoes.find((o) => o.tipo === 'presente');
+  if (!opcaoPresentes) {
+    throw new Error('Saga did not create the presente opcao');
+  }
+  const idOpcaoPresentes = opcaoPresentes.id;
 
-  await adicionarOpcaoContribuicao(
-    {
-      campanhaRepository: deps.campanhaRepository,
-      observability: deps.observability,
+  // Saga creates campanha WITHOUT a recebedor (user has no PIX at signup).
+  // The d6atj `findByAdministrador` (memory adapter) returns undefined when
+  // there's no active recebedor — would surface as CampanhaAusenteError in
+  // the contribuicao-router. Attach an initial recebedor directly so the
+  // rig represents a user with PIX configured (don't re-run `criarCampanha`
+  // — that would wipe the saga's opcoes by re-saving with `opcoes: []`).
+  const recebedorInicial = criarRecebedorInicial({
+    id: randomUUID(),
+    idCampanha,
+    dadosRecebedor: {
+      nomeTitular: params.handle,
+      tipoChavePix: 'email',
+      chavePix: params.email,
     },
-    { idCampanha, idOpcao: idOpcaoPresentes, tipo: 'presente' },
-  );
+    criadaEm: deps.clock(),
+  });
+  await deps.recebedorRepository.save(recebedorInicial);
 
   const sessao = await criarSessaoUsuario(
     {
