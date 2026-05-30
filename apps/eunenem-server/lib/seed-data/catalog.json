@@ -1,0 +1,64 @@
+[
+  {
+    "category": "fraldas",
+    "label": "fraldas",
+    "items": [
+      { "id": "c-fr-1", "name": "Pacote de Fraldas RN", "price": 49.9, "suggestedQty": 6, "emoji": "🧷", "bgColor": "var(--lilac-soft)", "category": "fraldas" },
+      { "id": "c-fr-2", "name": "Pacote de Fraldas P", "price": 54.9, "suggestedQty": 6, "emoji": "🧷", "bgColor": "var(--cream-2)", "category": "fraldas" },
+      { "id": "c-fr-3", "name": "Pacote de Fraldas M", "price": 59.9, "suggestedQty": 4, "emoji": "🧷", "bgColor": "var(--peach-soft)", "category": "fraldas" },
+      { "id": "c-fr-4", "name": "Lenço Umedecido (kit 3)", "price": 38.5, "suggestedQty": 3, "emoji": "🧻", "bgColor": "var(--mint-soft)", "category": "fraldas" }
+    ]
+  },
+  {
+    "category": "higiene",
+    "label": "higiene",
+    "items": [
+      { "id": "c-hi-1", "name": "Pomada de Assadura", "price": 32.0, "suggestedQty": 2, "emoji": "🧴", "bgColor": "var(--cream-2)", "category": "higiene" },
+      { "id": "c-hi-2", "name": "Sabonete Líquido Suave", "price": 28.9, "suggestedQty": 2, "emoji": "🧼", "bgColor": "var(--lilac-soft)", "category": "higiene" },
+      { "id": "c-hi-3", "name": "Shampoo sem Lágrimas", "price": 34.5, "suggestedQty": 1, "emoji": "🧴", "bgColor": "var(--peach-soft)", "category": "higiene" },
+      { "id": "c-hi-4", "name": "Algodão Hidrófilo (500g)", "price": 18.9, "suggestedQty": 2, "emoji": "☁️", "bgColor": "var(--mint-soft)", "category": "higiene" },
+      { "id": "c-hi-5", "name": "Cortador de Unha Bebê", "price": 22.9, "suggestedQty": 1, "emoji": "✂️", "bgColor": "var(--cream-2)", "category": "higiene" }
+    ]
+  },
+  {
+    "category": "roupa",
+    "label": "roupinhas",
+    "items": [
+      { "id": "c-ro-1", "name": "Body Manga Curta (kit 5)", "price": 89.0, "suggestedQty": 3, "emoji": "👕", "bgColor": "var(--peach-soft)", "category": "roupa" },
+      { "id": "c-ro-2", "name": "Macacão de Plush", "price": 79.9, "suggestedQty": 2, "emoji": "🧸", "bgColor": "var(--lilac-soft)", "category": "roupa" },
+      { "id": "c-ro-3", "name": "Mijão Algodão (kit 4)", "price": 64.9, "suggestedQty": 3, "emoji": "👖", "bgColor": "var(--mint-soft)", "category": "roupa" },
+      { "id": "c-ro-4", "name": "Manta Soft", "price": 89.9, "suggestedQty": 2, "emoji": "🪶", "bgColor": "var(--cream-2)", "category": "roupa" },
+      { "id": "c-ro-5", "name": "Pijama Comprido (kit 2)", "price": 99.0, "suggestedQty": 2, "emoji": "🌙", "bgColor": "var(--peach-soft)", "category": "roupa" }
+    ]
+  },
+  {
+    "category": "soninho",
+    "label": "soninho",
+    "items": [
+      { "id": "c-so-1", "name": "Ninho Redutor de Berço", "price": 189.0, "suggestedQty": 1, "emoji": "🛌", "bgColor": "var(--lilac-soft)", "category": "soninho" },
+      { "id": "c-so-2", "name": "Edredom de Berço", "price": 159.0, "suggestedQty": 1, "emoji": "🛏️", "bgColor": "var(--mint-soft)", "category": "soninho" },
+      { "id": "c-so-3", "name": "Móbile Musical", "price": 129.0, "suggestedQty": 1, "emoji": "🎶", "bgColor": "var(--peach-soft)", "category": "soninho" },
+      { "id": "c-so-4", "name": "Lençol de Berço (kit 2)", "price": 79.9, "suggestedQty": 2, "emoji": "🌸", "bgColor": "var(--cream-2)", "category": "soninho" }
+    ]
+  },
+  {
+    "category": "alimentacao",
+    "label": "alimentação",
+    "items": [
+      { "id": "c-al-1", "name": "Mamadeira Anticólica (kit 3)", "price": 119.0, "suggestedQty": 2, "emoji": "🍼", "bgColor": "var(--mint-soft)", "category": "alimentacao" },
+      { "id": "c-al-2", "name": "Chupeta de Silicone", "price": 34.9, "suggestedQty": 2, "emoji": "🍭", "bgColor": "var(--lilac-soft)", "category": "alimentacao" },
+      { "id": "c-al-3", "name": "Babador Bandana (kit 6)", "price": 49.9, "suggestedQty": 2, "emoji": "🌼", "bgColor": "var(--peach-soft)", "category": "alimentacao" },
+      { "id": "c-al-4", "name": "Esterilizador de Mamadeira", "price": 249.0, "suggestedQty": 1, "emoji": "♨️", "bgColor": "var(--cream-2)", "category": "alimentacao" }
+    ]
+  },
+  {
+    "category": "passeio",
+    "label": "passeio",
+    "items": [
+      { "id": "c-pa-1", "name": "Bebê Conforto", "price": 599.0, "suggestedQty": 1, "emoji": "🚗", "bgColor": "var(--peach-soft)", "category": "passeio" },
+      { "id": "c-pa-2", "name": "Mochila Canguru", "price": 349.0, "suggestedQty": 1, "emoji": "🎒", "bgColor": "var(--lilac-soft)", "category": "passeio" },
+      { "id": "c-pa-3", "name": "Saída de Maternidade", "price": 189.0, "suggestedQty": 1, "emoji": "🎀", "bgColor": "var(--cream-2)", "category": "passeio" },
+      { "id": "c-pa-4", "name": "Manta de Carrinho", "price": 99.0, "suggestedQty": 1, "emoji": "🌷", "bgColor": "var(--mint-soft)", "category": "passeio" }
+    ]
+  }
+]
