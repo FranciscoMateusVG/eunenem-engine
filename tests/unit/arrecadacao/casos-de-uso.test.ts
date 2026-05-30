@@ -119,6 +119,42 @@ describe('criarCampanha', () => {
       ),
     ).rejects.toThrow(ArrecadacaoInputInvalidoError);
   });
+
+  it('creates a campaign WITHOUT Recebedor (pre-bank-info lifecycle)', async () => {
+    const { campanhaRepository, recebedorRepository, plataformaRepository } =
+      createArrecadacaoMemoryRepos();
+    const id = randomUUID();
+    const idsAdministradores = [randomUUID()];
+    const campanha = await criarCampanha(
+      {
+        campanhaRepository,
+        recebedorRepository,
+        plataformaRepository,
+        clock,
+        observability: silentObservability,
+      },
+      {
+        id,
+        idPlataforma: ID_PLATAFORMA_EUNENEM,
+        idsAdministradores,
+        titulo: 'Lista de Casamento sem PIX',
+      },
+    );
+
+    expect(campanha.id).toBe(id);
+    expect(campanha.idRecebedor).toBeNull();
+    expect(campanha.dadosRecebedor).toBeNull();
+    expect(campanha.opcoes).toEqual([]);
+
+    const loaded = await campanhaRepository.findById(id);
+    expect(loaded?.idRecebedor).toBeNull();
+    expect(loaded?.dadosRecebedor).toBeNull();
+    expect(loaded?.titulo).toBe('Lista de Casamento sem PIX');
+
+    // No recebedor row should have been persisted for this campanha
+    const recebedores = await recebedorRepository.findByCampanhaId(id);
+    expect(recebedores).toEqual([]);
+  });
 });
 
 describe('adicionarAdministradorCampanha', () => {
