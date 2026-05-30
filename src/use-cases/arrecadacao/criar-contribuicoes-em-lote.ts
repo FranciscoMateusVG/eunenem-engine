@@ -32,7 +32,9 @@ import type { Observability } from '../../observability/observability.js';
 export const ItemLoteSchema = z.object({
   nome: NomeContribuicaoSchema,
   valor: MoneyCentsSchema,
-  imagemUrl: z.url().nullable().optional(),
+  // See criar-contribuicao.ts for the rationale: engine is consumer-agnostic
+  // on imagemUrl shape; consumers enforce format at their API edge.
+  imagemUrl: z.string().trim().min(1).max(500).nullable().optional(),
   grupo: z.string().trim().min(1).max(60).nullable().optional(),
   qty: z.number().int().min(1).max(100),
 });

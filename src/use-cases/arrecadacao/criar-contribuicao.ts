@@ -28,7 +28,13 @@ export const CriarContribuicaoInputSchema = z.object({
   idOpcaoContribuicao: IdOpcaoContribuicaoSchema,
   nome: NomeContribuicaoSchema,
   valor: MoneyCentsSchema,
-  imagemUrl: z.url().nullable().optional(),
+  // imagemUrl is a consumer-facing display reference — engine doesn't enforce
+  // a URL shape because consumers may pass: absolute http(s) URLs (legacy/CDN),
+  // same-origin paths (e.g. eunenem-server's /products/<id>.jpg), or future
+  // opaque references (S3 keys, image-service ids). Length-bounded string only;
+  // shape enforcement belongs at the consumer's API edge (e.g. eunenem-server's
+  // tRPC router schema).
+  imagemUrl: z.string().trim().min(1).max(500).nullable().optional(),
   grupo: z.string().trim().min(1).max(60).nullable().optional(),
 });
 
