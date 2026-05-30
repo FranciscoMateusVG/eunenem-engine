@@ -100,6 +100,36 @@ export function describeCampanhaRepositoryConformance(name: string, options: Con
       expect(span?.attributes['db.system']).toBe(options.expectedDbSystem);
       expect(span?.attributes['db.operation.name']).toBe('SELECT');
     });
+
+    it('round-trips a campaign WITHOUT Recebedor (pre-bank-info lifecycle)', async () => {
+      const campanha = makeCampanhaSemRecebedor();
+      await options.saveCampanha(repo, campanha);
+
+      const found = await repo.findById(campanha.id);
+      expect(found).toBeDefined();
+      expect(found?.idRecebedor).toBeNull();
+      expect(found?.dadosRecebedor).toBeNull();
+      expect(found?.id).toBe(campanha.id);
+      expect(found?.titulo).toBe(campanha.titulo);
+      expect(found?.idsAdministradores).toEqual(campanha.idsAdministradores);
+    });
+
+    it('findByPlataforma includes campaigns WITHOUT Recebedor', async () => {
+      const idPlataforma = randomUUID();
+      const comRecebedor = makeCampanha({ idPlataforma });
+      const semRecebedor = makeCampanhaSemRecebedor({ idPlataforma });
+
+      await options.saveCampanha(repo, comRecebedor);
+      await options.saveCampanha(repo, semRecebedor);
+
+      const found = await repo.findByPlataforma(idPlataforma);
+      const ids = found.map((c) => c.id).sort();
+      expect(ids).toEqual([comRecebedor.id, semRecebedor.id].sort());
+
+      const noRec = found.find((c) => c.id === semRecebedor.id);
+      expect(noRec?.idRecebedor).toBeNull();
+      expect(noRec?.dadosRecebedor).toBeNull();
+    });
   });
 }
 
@@ -116,6 +146,21 @@ export function makeCampanha(overrides: Partial<Campanha> = {}): Campanha {
       chavePix: 'maria@exemplo.com',
     },
     titulo: 'Campanha teste',
+    opcoes: [],
+    criadaEm: new Date('2026-05-01T12:00:00.000Z'),
+    ...overrides,
+  };
+}
+
+/** Builds a Campanha in the post-66klh "pre-bank-info" lifecycle state. */
+export function makeCampanhaSemRecebedor(overrides: Partial<Campanha> = {}): Campanha {
+  return {
+    id: randomUUID(),
+    idPlataforma: randomUUID(),
+    idsAdministradores: [randomUUID()],
+    idRecebedor: null,
+    dadosRecebedor: null,
+    titulo: 'Campanha sem recebedor',
     opcoes: [],
     criadaEm: new Date('2026-05-01T12:00:00.000Z'),
     ...overrides,

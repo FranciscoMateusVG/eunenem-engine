@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { ID_PLATAFORMA_EUNENEM } from '../../../src/adapters/plataforma/repository.memory.js';
 import {
+  type Campanha,
   campanhaComAdministrador,
   campanhaComOpcao,
   campanhaComRecebedorAtivo,
   campanhaPossuiAdministrador,
   campanhaSemAdministrador,
+  campanhaSemRecebedor,
+  campanhaTemRecebedor,
+  criarCampanhaSemRecebedor,
   encontrarOpcaoContribuicao,
 } from '../../../src/domain/arrecadacao/entities/campanha.js';
 import { criarRecebedorInicial } from '../../../src/domain/arrecadacao/entities/recebedor.js';
@@ -211,4 +215,167 @@ describe('AlterarDadosRecebedorCampanhaInputSchema', () => {
     });
     expect(r.success).toBe(true);
   });
+});
+
+describe('CriarCampanhaInputSchema — Recebedor opcional', () => {
+  it('accepts input without dadosRecebedor (pre-bank-info lifecycle)', () => {
+    const r = CriarCampanhaInputSchema.safeParse({
+      id: idCampanha,
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
+      idsAdministradores: [idAdministrador1],
+      titulo: 'Lista de Casamento sem PIX cadastrado',
+    });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.dadosRecebedor).toBeUndefined();
+    }
+  });
+
+  it('still accepts input WITH dadosRecebedor (legacy / full create)', () => {
+    const r = CriarCampanhaInputSchema.safeParse({
+      id: idCampanha,
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
+      idsAdministradores: [idAdministrador1],
+      dadosRecebedor: dadosRecebedorEmail,
+      titulo: 'Ajuda ao Joao',
+    });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.dadosRecebedor).toEqual(dadosRecebedorEmail);
+    }
+  });
+});
+
+describe('campanhaTemRecebedor', () => {
+  it('returns true when both idRecebedor and dadosRecebedor are set', () => {
+    expect(campanhaTemRecebedor(baseCampanha)).toBe(true);
+  });
+
+  it('returns false when both fields are null', () => {
+    const semRecebedor: Campanha = {
+      ...baseCampanha,
+      idRecebedor: null,
+      dadosRecebedor: null,
+    };
+    expect(campanhaTemRecebedor(semRecebedor)).toBe(false);
+  });
+
+  it('narrows the type predicate so dadosRecebedor is accessible without null check', () => {
+    const c: Campanha = baseCampanha;
+    if (campanhaTemRecebedor(c)) {
+      // TypeScript narrowing — c.dadosRecebedor is non-null here.
+      expect(c.dadosRecebedor.nomeTitular).toBe('Maria Silva');
+    } else {
+      throw new Error('expected baseCampanha to have a Recebedor');
+    }
+  });
+});
+
+describe('criarCampanhaSemRecebedor', () => {
+  it('produces a Campanha with idRecebedor=null and dadosRecebedor=null', () => {
+    const campanha = criarCampanhaSemRecebedor({
+      id: idCampanha,
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
+      idsAdministradores: [idAdministrador1],
+      titulo: 'Campanha sem PIX',
+      opcoes: [],
+      criadaEm: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    expect(campanha.idRecebedor).toBeNull();
+    expect(campanha.dadosRecebedor).toBeNull();
+    expect(campanhaTemRecebedor(campanha)).toBe(false);
+    expect(campanha.titulo).toBe('Campanha sem PIX');
+  });
+
+  it('preserves immutable identity (returns plain Campanha, no extra fields)', () => {
+    const campanha = criarCampanhaSemRecebedor({
+      id: idCampanha,
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
+      idsAdministradores: [idAdministrador1],
+      titulo: 'Campanha',
+      opcoes: [],
+      criadaEm: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    expect(Object.keys(campanha).sort()).toEqual(
+      [
+        'criadaEm',
+        'dadosRecebedor',
+        'id',
+        'idPlataforma',
+        'idRecebedor',
+        'idsAdministradores',
+        'opcoes',
+        'titulo',
+      ].sort(),
+    );
+  });
+});
+
+describe('campanhaSemRecebedor', () => {
+  it('clears Recebedor projection from a campanha that had one', () => {
+    expect(campanhaTemRecebedor(baseCampanha)).toBe(true);
+    const next = campanhaSemRecebedor(baseCampanha);
+    expect(next.idRecebedor).toBeNull();
+    expect(next.dadosRecebedor).toBeNull();
+    expect(campanhaTemRecebedor(next)).toBe(false);
+  });
+
+  it('is idempotent when called on a campanha without Recebedor', () => {
+    const semRecebedor = criarCampanhaSemRecebedor({
+      id: idCampanha,
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
+      idsAdministradores: [idAdministrador1],
+      titulo: 'Campanha',
+      opcoes: [],
+      criadaEm: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    const next = campanhaSemRecebedor(semRecebedor);
+    expect(next.idRecebedor).toBeNull();
+    expect(next.dadosRecebedor).toBeNull();
+  });
+
+  it('preserves non-recebedor fields immutably', () => {
+    const next = campanhaSemRecebedor(baseCampanha);
+    expect(next.id).toBe(baseCampanha.id);
+    expect(next.titulo).toBe(baseCampanha.titulo);
+    expect(next.idPlataforma).toBe(baseCampanha.idPlataforma);
+    expect(next.idsAdministradores).toEqual(baseCampanha.idsAdministradores);
+    // Original is untouched (immutability check)
+    expect(baseCampanha.idRecebedor).toBe(idRecebedor);
+    expect(baseCampanha.dadosRecebedor).toEqual(dadosRecebedorEmail);
+  });
+});
+
+describe('TOGETHER invariant — defense in depth', () => {
+  // The invariant assertInvarianteRecebedor (private to the entity module)
+  // is enforced by every projection helper. Under the current public API,
+  // ALL helpers set idRecebedor + dadosRecebedor together (both null OR
+  // both non-null), so the assertion cannot fire from normal call sites.
+  // These tests lock in that invariant for future contributors: every
+  // public projection helper must produce coherent state.
+
+  it('campanhaComRecebedorAtivo always sets both fields from the recebedor', () => {
+    const semRecebedor = criarCampanhaSemRecebedor({
+      id: idCampanha,
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
+      idsAdministradores: [idAdministrador1],
+      titulo: 'Campanha',
+      opcoes: [],
+      criadaEm: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    const next = campanhaComRecebedorAtivo(semRecebedor, recebedorAtivo);
+    expect(next.idRecebedor).toBe(idRecebedor);
+    expect(next.dadosRecebedor).toEqual(dadosRecebedorEmail);
+    expect(campanhaTemRecebedor(next)).toBe(true);
+  });
+
+  // NOTE: the assertInvarianteRecebedor helper inside the entity module
+  // is unreachable from the current public API (every projection helper
+  // sets idRecebedor + dadosRecebedor together from a coherent source).
+  // The assertion remains as defense-in-depth for any future helper that
+  // mutates one field without the other. No direct unit test exists
+  // because the path can't be exercised without exposing the private
+  // helper or casting to an invalid Campanha shape — both worse than
+  // leaving the assertion as a structural guard. The 3 tests above
+  // lock the COHERENT-state property of every public projection helper.
 });

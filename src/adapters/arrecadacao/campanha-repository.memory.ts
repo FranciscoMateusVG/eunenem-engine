@@ -2,6 +2,7 @@ import { SpanStatusCode, trace } from '@opentelemetry/api';
 import {
   type Campanha,
   campanhaComRecebedorAtivo,
+  campanhaSemRecebedor,
 } from '../../domain/arrecadacao/entities/campanha.js';
 import type {
   IdCampanha,
@@ -58,13 +59,10 @@ export class CampanhaRepositoryMemory implements CampanhaRepository {
         }
 
         const recebedorAtivo = await this.recebedorRepository.findAtivoByCampanhaId(id);
-        if (!recebedorAtivo) {
-          span.setStatus({ code: SpanStatusCode.OK });
-          return undefined;
-        }
-
         span.setStatus({ code: SpanStatusCode.OK });
-        return campanhaComRecebedorAtivo(campanha, recebedorAtivo);
+        return recebedorAtivo
+          ? campanhaComRecebedorAtivo(campanha, recebedorAtivo)
+          : campanhaSemRecebedor(campanha);
       } catch (error: unknown) {
         span.recordException(error as Error);
         span.setStatus({ code: SpanStatusCode.ERROR });
@@ -94,9 +92,11 @@ export class CampanhaRepositoryMemory implements CampanhaRepository {
         const resultados: Campanha[] = [];
         for (const campanha of campanhasDaPlataforma) {
           const recebedorAtivo = await this.recebedorRepository.findAtivoByCampanhaId(campanha.id);
-          if (recebedorAtivo) {
-            resultados.push(campanhaComRecebedorAtivo(campanha, recebedorAtivo));
-          }
+          resultados.push(
+            recebedorAtivo
+              ? campanhaComRecebedorAtivo(campanha, recebedorAtivo)
+              : campanhaSemRecebedor(campanha),
+          );
         }
 
         span.setStatus({ code: SpanStatusCode.OK });

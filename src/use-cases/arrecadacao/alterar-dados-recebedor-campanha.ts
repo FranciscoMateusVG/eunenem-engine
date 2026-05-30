@@ -95,7 +95,7 @@ export async function alterarDadosRecebedorCampanha(
 
       const updated = campanhaComRecebedorAtivo(existing, novo);
 
-      span.setAttribute('arrecadacao.recebedor.id', updated.idRecebedor);
+      span.setAttribute('arrecadacao.recebedor.id', novo.id);
 
       logger.info('arrecadacao.campanha.recebedor_alterado', {
         idCampanha,

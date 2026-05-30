@@ -3,6 +3,7 @@ import { z } from 'zod/v4';
 import type { CampanhaRepository } from '../../adapters/arrecadacao/campanha-repository.js';
 import type { RecebedorRepository } from '../../adapters/arrecadacao/recebedor-repository.js';
 import type { LivroFinanceiroRepository } from '../../adapters/financeiro/livro-repository.js';
+import { campanhaTemRecebedor } from '../../domain/arrecadacao/entities/campanha.js';
 import {
   IdCampanhaSchema,
   IdPlataformaReferenciaSchema,
@@ -12,6 +13,7 @@ import { IdRepasseSchema } from '../../domain/financeiro/value-objects/ids.js';
 import { MoneyCentsSchema } from '../../domain/money.js';
 import { ArrecadacaoCampanhaNaoEncontradaError } from '../../errors/arrecadacao/campanha-nao-encontrada.error.js';
 import { ArrecadacaoRecebedorNaoEncontradoError } from '../../errors/arrecadacao/recebedor-nao-encontrado.error.js';
+import { CheckoutCampanhaSemRecebedorError } from '../../errors/checkout/campanha-sem-recebedor.error.js';
 import { CheckoutPlataformaMismatchError } from '../../errors/checkout/plataforma-mismatch.error.js';
 import type { Observability } from '../../observability/observability.js';
 import { solicitarRepasseRecebedor } from '../financeiro/solicitar-repasse-recebedor.js';
@@ -45,15 +47,16 @@ export interface IniciarRepasseRecebedorDeps {
  *      Caso contrário lança `CheckoutPlataformaMismatchError` antes de
  *      qualquer leitura ao Financeiro — bloqueia tentativas cross-tenant.
  *
- *   2. **Recebedor ativo presente**: a campanha precisa ter um recebedor
- *      ativo (via `RecebedorRepository.findAtivoByCampanhaId`). Pega o bug
- *      de "repasse pedido para campanha cujo recebedor foi desativado".
+ *   2. **Recebedor presente na campanha** (TOGETHER invariant): a campanha
+ *      precisa ter `idRecebedor + dadosRecebedor` projetados. Se a campanha
+ *      foi criada sem Recebedor (lifecycle pré-bank-info), o repasse é
+ *      bloqueado com `CheckoutCampanhaSemRecebedorError`. Outras operações
+ *      (contribuição, pagamento aprovado) continuam funcionando sem ele.
  *
- *      NOTA: hoje `CampanhaRepository.findById` já filtra por recebedor
- *      ativo (acoplamento conhecido — ver `plans/0002` deferred concerns),
- *      então este check é defensivo e só será exercido quando essa leitura
- *      for desacoplada. Mantido para que o orquestrador esteja correto
- *      independentemente da implementação do repo.
+ *   3. **Recebedor ativo persistido**: defensiva — verifica que existe
+ *      uma linha `is_active = true` em `recebedores` para a campanha. Pega
+ *      o bug de "repasse pedido para campanha cujo recebedor foi desativado
+ *      depois da projeção ter sido lida".
  *
  * Depois delega para `solicitarRepasseRecebedor`, que internamente verifica
  * o saldo disponível e cria o repasse em status `solicitado`.
@@ -89,7 +92,12 @@ export async function iniciarRepasseRecebedor(
         throw new CheckoutPlataformaMismatchError(parsed.idPlataforma, campanha.idPlataforma);
       }
 
-      // pre-validation 2: active recebedor exists
+      // pre-validation 2: campanha has a Recebedor projected (TOGETHER invariant)
+      if (!campanhaTemRecebedor(campanha)) {
+        throw new CheckoutCampanhaSemRecebedorError(parsed.idCampanha);
+      }
+
+      // pre-validation 3: active recebedor row still exists in persistence
       const recebedorAtivo = await recebedorRepository.findAtivoByCampanhaId(parsed.idCampanha);
       if (!recebedorAtivo) {
         throw new ArrecadacaoRecebedorNaoEncontradoError(parsed.idCampanha);

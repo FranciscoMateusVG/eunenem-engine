@@ -748,7 +748,11 @@ app.get('/p/:slug/admin/campanhas/:idCampanha', async (c) => {
 
   const body = `
     <p><strong>Título:</strong> ${escapeHtml(campanha.titulo)}</p>
-    <p><strong>Recebedor:</strong> ${escapeHtml(campanha.dadosRecebedor.nomeTitular)} — ${escapeHtml(campanha.dadosRecebedor.tipoChavePix)}: ${escapeHtml(campanha.dadosRecebedor.chavePix)}</p>
+    <p><strong>Recebedor:</strong> ${
+      campanha.dadosRecebedor
+        ? `${escapeHtml(campanha.dadosRecebedor.nomeTitular)} — ${escapeHtml(campanha.dadosRecebedor.tipoChavePix)}: ${escapeHtml(campanha.dadosRecebedor.chavePix)}`
+        : '<em>nao cadastrado</em>'
+    }</p>
 
     <h2>Opções (sacolas)</h2>
     <ul>
