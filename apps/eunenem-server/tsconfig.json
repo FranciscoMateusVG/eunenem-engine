@@ -26,6 +26,7 @@
     "client.tsx",
     "pages/**/*",
     "server/**/*",
+    "lib/**/*",
     "scripts/**/*",
     "build.mjs",
     "../../src/**/*.ts"
