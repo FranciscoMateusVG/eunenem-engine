@@ -1,0 +1,80 @@
+// aperture-wo5ql — preset → item mock for the preset-detail modal.
+// Items are inlined here because this PR is parallel to aperture-17cls
+// (which adds LISTA_CATALOGO_SEED). After both merge, a follow-up should
+// dedupe by replacing these inline items with references into the
+// canonical catalog seed.
+//
+// NOTE on ids: the preset ids here (essenciais / banho / soninho / papinha)
+// intentionally match the ids already used by g70uv's LISTA_PRONTAS array
+// in ListaPresentesBody.tsx so the panel cards can look up their detail
+// payload by the same key.
+
+export interface PresetItem {
+  id: string;
+  name: string;
+  price: number;
+  suggestedQty: number;
+  emoji: string;
+  bgColor: string;
+}
+
+export type ListaProntaId = "essenciais" | "banho" | "soninho" | "papinha";
+
+export interface ListaProntaDetail {
+  id: ListaProntaId;
+  title: string;
+  description: string;
+  items: PresetItem[];
+}
+
+export const LISTA_PRONTAS_DETAIL: Record<ListaProntaId, ListaProntaDetail> = {
+  essenciais: {
+    id: "essenciais",
+    title: "Essenciais do Dia",
+    description:
+      "Tudo que você mais vai precisar no primeiro mês — fraldas, lencinhos e pomada na medida certa.",
+    items: [
+      { id: "ed-1", name: "Pacote de Fraldas RN", price: 49.9, suggestedQty: 6, emoji: "🧷", bgColor: "var(--lilac-soft)" },
+      { id: "ed-2", name: "Lenço Umedecido (kit 3)", price: 38.5, suggestedQty: 3, emoji: "🧻", bgColor: "var(--cream-2)" },
+      { id: "ed-3", name: "Pomada de Assadura", price: 32.0, suggestedQty: 2, emoji: "🧴", bgColor: "var(--pink-soft)" },
+      { id: "ed-4", name: "Sabonete Líquido Suave", price: 28.9, suggestedQty: 2, emoji: "🧼", bgColor: "var(--lilac-soft)" },
+      { id: "ed-5", name: "Algodão Hidrófilo (500g)", price: 18.9, suggestedQty: 2, emoji: "☁️", bgColor: "var(--cream-2)" },
+      { id: "ed-6", name: "Cortador de Unha Bebê", price: 22.9, suggestedQty: 1, emoji: "✂️", bgColor: "var(--pink-soft)" },
+    ],
+  },
+  banho: {
+    id: "banho",
+    title: "Hora do Banho",
+    description:
+      "Banheira, toalha felpuda e cosméticos suaves para esses primeiros mergulhos.",
+    items: [
+      { id: "hb-1", name: "Banheira Inflável", price: 159.0, suggestedQty: 1, emoji: "🛁", bgColor: "var(--pink-soft)" },
+      { id: "hb-2", name: "Toalha com Capuz", price: 89.9, suggestedQty: 2, emoji: "🧺", bgColor: "var(--cream-2)" },
+      { id: "hb-3", name: "Shampoo sem Lágrimas", price: 34.5, suggestedQty: 1, emoji: "🧴", bgColor: "var(--lilac-soft)" },
+      { id: "hb-4", name: "Termômetro de Banho", price: 49.9, suggestedQty: 1, emoji: "🌡️", bgColor: "var(--pink-soft)" },
+    ],
+  },
+  soninho: {
+    id: "soninho",
+    title: "Hora do Soninho",
+    description:
+      "Mantinhas macias, chupetas e tudo pra noite render mais (pra você também).",
+    items: [
+      { id: "hs-1", name: "Ninho Redutor de Berço", price: 189.0, suggestedQty: 1, emoji: "🛌", bgColor: "var(--lilac-soft)" },
+      { id: "hs-2", name: "Manta Soft", price: 89.9, suggestedQty: 2, emoji: "🪶", bgColor: "var(--cream-2)" },
+      { id: "hs-3", name: "Chupeta de Silicone", price: 34.9, suggestedQty: 2, emoji: "🍭", bgColor: "var(--pink-soft)" },
+      { id: "hs-4", name: "Móbile Musical", price: 129.0, suggestedQty: 1, emoji: "🎶", bgColor: "var(--lilac-soft)" },
+    ],
+  },
+  papinha: {
+    id: "papinha",
+    title: "Hora da Papinha",
+    description:
+      "Mamadeira, babadores e itens para as primeiras refeições com calma.",
+    items: [
+      { id: "hp-1", name: "Mamadeira Anticólica (kit 3)", price: 119.0, suggestedQty: 2, emoji: "🍼", bgColor: "var(--cream-2)" },
+      { id: "hp-2", name: "Babador Bandana (kit 6)", price: 49.9, suggestedQty: 2, emoji: "🌼", bgColor: "var(--pink-soft)" },
+      { id: "hp-3", name: "Esterilizador de Mamadeira", price: 249.0, suggestedQty: 1, emoji: "♨️", bgColor: "var(--lilac-soft)" },
+    ],
+  },
+};
