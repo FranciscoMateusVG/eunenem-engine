@@ -4210,6 +4210,8 @@ html {
   .diff-support {
     grid-column: span 1;
   }
+}
+
 /* aperture-397x0 — landing chá rifa section.
  * Plum slab with a tilted paper raffle-ticket mock + email teaser form.
  * All selectors are .cha-rifa-* to stay disjoint from other landing
