@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
-import { LANDING_LINKS } from '@/lib/mocks/landing';
+import { useAuthModal } from '@/components/eunenem/auth/AuthModalProvider';
 
 // aperture-ospu7 — v2 rewrite of section 01 "Hero" (data-screen-label="01 Hero"
 // in EuNenem Landing v2.html). Out goes the hero-bg.jpg page background +
@@ -33,6 +33,10 @@ export function Hero() {
     }, 45_000);
     return () => window.clearInterval(t);
   }, []);
+
+  // aperture-nop8l — CTA opens the signup modal instead of linking out.
+  const auth = useAuthModal();
+  const ctaRef = useRef<HTMLButtonElement | null>(null);
 
   return (
     <header className="hero-section relative isolate overflow-hidden bg-cream pt-14 pb-20">
@@ -79,12 +83,14 @@ export function Hero() {
           </ul>
 
           <div className="mt-7 flex flex-wrap items-center justify-center gap-4 lg:justify-start">
-            <a
-              href={LANDING_LINKS.criarLista}
+            <button
+              ref={ctaRef}
+              type="button"
+              onClick={() => auth.open('signup', ctaRef.current)}
               className="btn-lilac btn-lilac-lg"
             >
               → criar minha lista grátis
-            </a>
+            </button>
             <a
               href="#calculadora"
               className="text-[14px] font-semibold text-lilac-deep hover:text-plum transition-colors"
