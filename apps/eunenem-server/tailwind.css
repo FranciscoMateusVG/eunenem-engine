@@ -4789,3 +4789,276 @@ html {
     font-size: 26px;
   }
 }
+
+
+/* =================================================================
+ * aperture-ospu7 — Hero v2 (section 01).
+ *
+ * Polaroid + 3 floating cards visual, live-badge, hero bullets, avatar
+ * stack. Pseudo-element-driven so no extra assets beyond hero-bg.jpg
+ * (already in /public). All selectors prefixed .hero-* to keep this
+ * block self-contained and easy to find / replace.
+ * ================================================================= */
+
+/* ----- LIVE BADGE ----- */
+.hero-live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #fff;
+  padding: 7px 14px 7px 12px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--plum);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--line);
+}
+.hero-live-badge strong {
+  font-weight: 700;
+}
+.hero-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #2ba84a;
+  box-shadow: 0 0 0 0 rgba(43, 168, 74, 0.5);
+  animation: heroLivePulse 2s infinite;
+}
+@keyframes heroLivePulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(43, 168, 74, 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(43, 168, 74, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(43, 168, 74, 0);
+  }
+}
+
+/* ----- BULLET CHECKS ----- */
+.hero-check {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--green);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* ----- AVATAR STACK ----- */
+.hero-stack-av {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 2.5px solid var(--cream);
+  object-fit: cover;
+  margin-left: -10px;
+  box-shadow: var(--shadow-sm);
+}
+.hero-stack-av:first-child {
+  margin-left: 0;
+}
+
+/* ----- VISUAL STAGE ----- */
+.hero-visual {
+  min-height: 520px;
+}
+
+/* ----- POLAROID ----- */
+.hero-polaroid {
+  position: relative;
+  aspect-ratio: 1 / 1.16;
+  max-width: 420px;
+  width: 100%;
+  margin: 30px auto 0;
+  background: #fffdf9;
+  padding: 16px 16px 60px;
+  border-radius: 4px;
+  box-shadow:
+    0 1px 0 rgba(107, 60, 94, 0.05),
+    0 18px 36px rgba(107, 60, 94, 0.16),
+    0 36px 60px rgba(107, 60, 94, 0.1);
+  transform: rotate(-3.5deg);
+  transform-origin: 50% 0%;
+  animation: heroPolaroidFloat 9s ease-in-out infinite;
+}
+.hero-polaroid::after {
+  content: 'nosso bebê ♡';
+  position: absolute;
+  bottom: 14px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-family: var(--font-caveat), cursive;
+  font-size: 26px;
+  color: var(--coral-pink);
+  transform: rotate(-1.5deg);
+  pointer-events: none;
+}
+.hero-photo {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  right: 16px;
+  bottom: 60px;
+  background-image: url('/hero-bg.jpg');
+  background-size: cover;
+  background-position: center 18%;
+  background-color: var(--cream-2);
+}
+.hero-tape {
+  position: absolute;
+  top: -18px;
+  left: 50%;
+  width: 130px;
+  height: 34px;
+  transform: translateX(-50%) rotate(-6deg);
+  z-index: 5;
+  background:
+    repeating-linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.55) 0 6px,
+      rgba(255, 255, 255, 0.12) 6px 12px
+    ),
+    linear-gradient(180deg, var(--pink) 0%, var(--coral-pink) 100%);
+  opacity: 0.9;
+  box-shadow: 0 4px 10px rgba(107, 60, 94, 0.14);
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: 16px;
+}
+@keyframes heroPolaroidFloat {
+  0%,
+  100% {
+    transform: rotate(-3.5deg) translateY(0);
+  }
+  50% {
+    transform: rotate(-3deg) translateY(-6px);
+  }
+}
+
+/* ----- FLOATING CARDS (Ana presenteou / Pix recebido) ----- */
+.hero-fcard {
+  position: absolute;
+  background: #fff;
+  border-radius: 18px;
+  padding: 14px 18px;
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  z-index: 3;
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  animation: heroFloat 6s ease-in-out infinite;
+}
+.hero-fcard--top {
+  top: 4%;
+  right: -6%;
+  animation-delay: 0s;
+}
+.hero-fcard--mid {
+  top: 42%;
+  left: -8%;
+  animation-delay: 1.5s;
+}
+.hero-fcard--bot {
+  bottom: 6%;
+  right: -2%;
+  animation-delay: 3s;
+}
+@keyframes heroFloat {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+.hero-fcard-title {
+  font-weight: 700;
+  color: var(--plum);
+  font-size: 13px;
+}
+.hero-fcard-meta {
+  color: var(--ink-mute);
+  font-size: 11.5px;
+  margin-top: 2px;
+}
+.hero-av-mini {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 700;
+  font-size: 13px;
+  font-family: var(--font-patrick-hand), cursive;
+  flex-shrink: 0;
+}
+
+/* ----- COUNTER CARD (presentes hoje) ----- */
+.hero-counter {
+  position: absolute;
+  background: #fff;
+  border-radius: 22px;
+  padding: 16px 22px;
+  box-shadow: var(--shadow-lg);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  z-index: 3;
+  animation: heroFloat 6s ease-in-out infinite;
+}
+.hero-counter-label {
+  font-size: 11.5px;
+  color: var(--ink-mute);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.hero-counter-num {
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--plum);
+  line-height: 1;
+}
+.hero-counter-meta {
+  font-size: 12px;
+  color: var(--ink-mute);
+  margin-top: 4px;
+}
+.hero-counter-up {
+  color: #2ba84a;
+  font-weight: 700;
+}
+
+/* ----- Responsive ----- */
+@media (max-width: 900px) {
+  .hero-visual {
+    min-height: 420px;
+  }
+  .hero-fcard--top {
+    top: 0;
+    right: 2%;
+  }
+  .hero-fcard--mid {
+    top: 38%;
+    left: 0;
+  }
+  .hero-fcard--bot {
+    bottom: 2%;
+    right: 4%;
+  }
+  .hero-polaroid {
+    max-width: 320px;
+  }
+}
