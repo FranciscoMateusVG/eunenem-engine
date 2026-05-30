@@ -206,10 +206,11 @@ export function PainelHeaderCard({ snapshot }: Props) {
         </div>
 
         <div className="painel-hc-stat">
-          <div className="painel-hc-stat-lbl">
-            recebido até agora
-            <span className="painel-live anim-live-pulse">ao vivo</span>
-          </div>
+          {/* aperture-dmur2 — removed the "ao vivo" pulse badge that
+              sat next to this label. The amount already updates
+              implicitly on data refresh, and the badge was reading
+              as marketing noise next to a private dashboard figure. */}
+          <div className="painel-hc-stat-lbl">recebido até agora</div>
           <div className="painel-hc-amount">
             <small>R$</small>
             {reaisInt}
