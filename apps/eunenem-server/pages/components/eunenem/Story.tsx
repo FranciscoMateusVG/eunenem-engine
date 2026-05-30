@@ -7,9 +7,14 @@ import { useTweaks } from "./TweaksContext";
 //
 // Two-column on desktop, stacked on mobile. Left: Caveat manuscript
 // heading + 3 paragraphs of DM Sans body text + Caveat signature.
-// Right: single polaroid (rotated -3deg) with tape decoration + a
-// yellow "post-it" sticker note. Body copy is faithfully ported from
-// the design reference and frames the parents' voice.
+// Right: single polaroid (rotated -3deg) with tape decoration. Body
+// copy is faithfully ported from the design reference and frames the
+// parents' voice.
+//
+// aperture-uxjo4 — removed the yellow "previsto pra junho de 2026"
+// post-it sticker per operator request. The launch-date callout was
+// drifting (any operator override of targetDate left it stale) and
+// the layout reads cleaner without it.
 
 export function Story() {
   const { tweaks } = useTweaks();
@@ -135,7 +140,7 @@ export function Story() {
             </div>
           </div>
 
-          {/* Right — single polaroid + tape + post-it sticker */}
+          {/* Right — single polaroid + tape */}
           <div className="flex items-center justify-center py-5">
             <div className="relative inline-block">
               <Polaroid rotate={-3} caption="primeira ecografia ♡">
@@ -161,29 +166,6 @@ export function Story() {
                 rotate={-6}
                 style={{ top: -10, left: 80 }}
               />
-
-              {/* Yellow post-it sticker */}
-              <div
-                style={{
-                  position: "absolute",
-                  bottom: -22,
-                  right: -40,
-                  background: "var(--yellow)",
-                  padding: "12px 18px",
-                  fontFamily: "var(--font-caveat), cursive",
-                  fontSize: 22,
-                  color: "var(--plum)",
-                  transform: "rotate(-6deg)",
-                  boxShadow: "var(--shadow-sm)",
-                  borderRadius: 4,
-                  maxWidth: 180,
-                  lineHeight: 1.15,
-                }}
-              >
-                previsto pra junho
-                <br />
-                de 2026 ✨
-              </div>
             </div>
           </div>
         </div>
