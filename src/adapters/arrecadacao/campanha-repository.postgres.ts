@@ -225,6 +225,108 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
       }
     });
   }
+
+  async findFirstByAdministrador(
+    idConta: IdConta,
+    context?: ArrecadacaoRepositoryContext,
+  ): Promise<Campanha | undefined> {
+    const executor = context?.trx ?? this.db;
+    return tracer.startActiveSpan(
+      'db.arrecadacao_campanhas.findFirstByAdministrador',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+        try {
+          // Join through campanha_administradores; pick the oldest matching
+          // campanha (criada_em ASC, then id ASC for tie-breaks). Today
+          // each user has exactly one campanha, but the deterministic
+          // ordering future-proofs the contract.
+          const row = await executor
+            .selectFrom('campanhas')
+            .innerJoin(
+              'campanha_administradores',
+              'campanha_administradores.campanha_id',
+              'campanhas.id',
+            )
+            .select([
+              'campanhas.id',
+              'campanhas.id_plataforma',
+              'campanhas.titulo',
+              'campanhas.criada_em',
+            ])
+            .where('campanha_administradores.id_usuario', '=', idConta)
+            .orderBy('campanhas.criada_em', 'asc')
+            .orderBy('campanhas.id', 'asc')
+            .limit(1)
+            .executeTakeFirst();
+
+          if (!row) {
+            span.setStatus({ code: SpanStatusCode.OK });
+            return undefined;
+          }
+
+          const idCampanha = row.id as IdCampanha;
+
+          const recebedorAtivo = await this.recebedorRepository.findAtivoByCampanhaId(
+            idCampanha,
+            context,
+          );
+
+          const admins = await executor
+            .selectFrom('campanha_administradores')
+            .selectAll()
+            .where('campanha_id', '=', idCampanha)
+            .execute();
+
+          const opcoes = await executor
+            .selectFrom('opcoes_contribuicao')
+            .selectAll()
+            .where('campanha_id', '=', idCampanha)
+            .execute();
+
+          const base = {
+            id: idCampanha,
+            idPlataforma: row.id_plataforma as IdPlataformaReferencia,
+            idsAdministradores: admins.map((a) => a.id_usuario as IdConta),
+            titulo: row.titulo,
+            opcoes: opcoes.map(toOpcao),
+            criadaEm: row.criada_em,
+          };
+
+          span.setStatus({ code: SpanStatusCode.OK });
+          return recebedorAtivo
+            ? campanhaComRecebedorInicial({ ...base, recebedor: recebedorAtivo })
+            : criarCampanhaSemRecebedor(base);
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  async delete(idCampanha: IdCampanha, context?: ArrecadacaoRepositoryContext): Promise<void> {
+    const executor = context?.trx ?? this.db;
+    return tracer.startActiveSpan('db.arrecadacao_campanhas.delete', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'DELETE' });
+      try {
+        // FKs ON DELETE CASCADE on campanha_administradores.campanha_id,
+        // opcoes_contribuicao.campanha_id, recebedores.campanha_id all
+        // clean up in one statement. Idempotent — affects zero rows for
+        // unknown id.
+        await executor.deleteFrom('campanhas').where('id', '=', idCampanha).execute();
+        span.setStatus({ code: SpanStatusCode.OK });
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
 }
 
 function toOpcao(row: OpcaoRow): OpcaoContribuicao {

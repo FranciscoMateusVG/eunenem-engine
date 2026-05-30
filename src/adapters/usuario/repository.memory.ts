@@ -178,4 +178,34 @@ export class UsuarioRepositoryMemory implements UsuarioRepository {
       }
     });
   }
+
+  async removeRegistroDomain(idUsuario: IdUsuario): Promise<void> {
+    return tracer.startActiveSpan('db.usuarios.removeRegistroDomain', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'DELETE' });
+      try {
+        const usuario = this.usuarios.get(idUsuario);
+        if (!usuario) {
+          // Idempotent — no-op on unknown id.
+          span.setStatus({ code: SpanStatusCode.OK });
+          return;
+        }
+
+        // Cascade in the in-memory adapter: remove Conta + drop both
+        // composite-uniqueness index entries so a fresh signup with the
+        // same email/slug succeeds.
+        this.contas.delete(usuario.idConta);
+        this.idUsuarioByEmail.delete(emailKey(usuario.idPlataforma, usuario.email));
+        this.idUsuarioBySlug.delete(slugKey(usuario.idPlataforma, usuario.slug));
+        this.usuarios.delete(idUsuario);
+
+        span.setStatus({ code: SpanStatusCode.OK });
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
 }

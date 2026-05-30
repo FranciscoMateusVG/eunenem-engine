@@ -8,6 +8,7 @@ export { ContribuicaoRepositoryMemory } from './adapters/arrecadacao/contribuica
 export { ContribuicaoRepositoryPostgres } from './adapters/arrecadacao/contribuicao-repository.postgres.js';
 export type { RecebedorRepository } from './adapters/arrecadacao/recebedor-repository.js';
 export { RecebedorRepositoryMemory } from './adapters/arrecadacao/recebedor-repository.memory.js';
+export { RecebedorRepositoryPostgres } from './adapters/arrecadacao/recebedor-repository.postgres.js';
 export type { CatRepository } from './adapters/cat-repository.js';
 export type { Database } from './adapters/database.js';
 export { createDatabase } from './adapters/database.js';

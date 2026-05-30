@@ -1,8 +1,16 @@
+import { randomUUID } from 'node:crypto';
 import { SpanStatusCode } from '@opentelemetry/api';
 import { z } from 'zod/v4';
+import type { CampanhaRepository } from '../../adapters/arrecadacao/campanha-repository.js';
+import type { RecebedorRepository } from '../../adapters/arrecadacao/recebedor-repository.js';
 import type { PlataformaRepository } from '../../adapters/plataforma/repository.js';
 import type { AuthService } from '../../adapters/usuario/auth-service.js';
 import type { UsuarioRepository } from '../../adapters/usuario/repository.js';
+import type { Campanha } from '../../domain/arrecadacao/entities/campanha.js';
+import type {
+  IdCampanha,
+  IdOpcaoContribuicao,
+} from '../../domain/arrecadacao/value-objects/ids.js';
 import type { Conta, Usuario } from '../../domain/usuario/entities/usuario.js';
 import { deriveSlugBase, slugWithSuffix } from '../../domain/usuario/slug-derivation.js';
 import { EmailUsuarioSchema } from '../../domain/usuario/value-objects/email-usuario.js';
@@ -18,6 +26,8 @@ import { UsuarioEmailJaExisteError } from '../../errors/usuario/email-ja-existe.
 import { UsuarioInputInvalidoError } from '../../errors/usuario/input-invalido.error.js';
 import { UsuarioPlataformaNaoEncontradaError } from '../../errors/usuario/plataforma-nao-encontrada.error.js';
 import type { Observability } from '../../observability/observability.js';
+import { adicionarOpcaoContribuicao } from '../arrecadacao/adicionar-opcao-contribuicao.js';
+import { criarCampanha } from '../arrecadacao/criar-campanha.js';
 
 /**
  * Defensive cap on slug-collision retries (aperture-khbow). 50 is well past
@@ -47,27 +57,44 @@ export type RegistrarContaUsuarioInput = z.infer<typeof RegistrarContaUsuarioInp
 export interface RegistrarContaUsuarioDeps {
   readonly usuarioRepository: UsuarioRepository;
   readonly plataformaRepository: PlataformaRepository;
+  readonly campanhaRepository: CampanhaRepository;
+  readonly recebedorRepository: RecebedorRepository;
   readonly authService: AuthService;
   readonly clock: () => Date;
+  /** Optional override for deterministic id generation in tests. */
+  readonly gerarIdCampanha?: () => IdCampanha;
+  /** Optional override for deterministic id generation in tests. */
+  readonly gerarIdOpcao?: () => IdOpcaoContribuicao;
   readonly observability: Observability;
 }
 
 export interface RegistrarContaUsuarioResult {
   readonly usuario: Usuario;
   readonly conta: Conta;
+  /**
+   * The default "Lista de presentes" Campanha auto-created for this user
+   * (aperture-p8i01). Always present post-saga — every new user owns
+   * exactly one campanha with one OpcaoContribuicao of tipo 'presente'.
+   * Recebedor is null at creation; the user adds bank info later through
+   * a separate flow.
+   */
+  readonly campanha: Campanha;
 }
 
 /**
- * Regista utilizador, conta administrativa (1:1), perfil inicial e
- * credencial via `AuthService`, escopado à plataforma informada.
+ * Regista utilizador, conta administrativa (1:1), perfil inicial,
+ * credencial via `AuthService`, e a Campanha padrão "Lista de <nome>"
+ * com uma OpcaoContribuicao do tipo 'presente'. Escopado à plataforma
+ * informada.
  *
- * **Saga shape** (aperture-ibbet — bakes the T3 compensation discipline
- * from monorepo-incluir's BetterAuth prod usage, see recon aperture-q2i8l
- * §8 #3): BetterAuth-future adapter writes commit on their own connection,
- * outside any wrapping Kysely transaction. The only safe undo path is
- * compensation. We honor that discipline NOW with the in-memory adapter
- * so the choreography is correct from day one — when bead 3 swaps in
- * `AuthServiceBetterAuth`, this use-case does not need to change.
+ * **Saga shape** (aperture-ibbet + aperture-p8i01 — bakes the T3
+ * compensation discipline from monorepo-incluir's BetterAuth prod usage,
+ * see recon aperture-q2i8l §8 #3): BetterAuth's connection commits on
+ * its own outside any wrapping Kysely transaction. The only safe undo
+ * path is compensation. We honor that discipline ACROSS all five mutating
+ * steps via a LIFO compensation list — each successful step pushes its
+ * own undo onto the list; any subsequent failure walks the list in
+ * reverse and runs every undo (best-effort, logged-but-not-rethrown).
  *
  * Flow:
  *   1. Validate input + plataforma exists.
@@ -75,11 +102,18 @@ export interface RegistrarContaUsuarioResult {
  *      domain Usuario already exists for the composite key, throw
  *      `UsuarioEmailJaExisteError` BEFORE touching the auth side. Spares
  *      the auth adapter a doomed write + compensation cycle.
- *   3. `authService.criarConta(...)` — creates the auth principal.
- *   4. Try `usuarioRepository.saveRegistroDomain(...)` — writes the
- *      domain aggregate.
- *   5. On (4) failure: `authService.removerConta(idUsuario)` to undo (3),
- *      then rethrow the domain error.
+ *   3. `authService.criarConta(...)` → push undo: `authService.removerConta`
+ *   4. `usuarioRepository.saveRegistroDomain(...)` → push undo:
+ *      `usuarioRepository.removeRegistroDomain`
+ *   5. `criarCampanha(...)` (no Recebedor — user has no PIX yet) → push
+ *      undo: `campanhaRepository.delete`
+ *   6. `adicionarOpcaoContribuicao(... 'presente' ...)` — no separate
+ *      undo needed because step 5's delete cascades to opcoes_contribuicao
+ *      via the FK ON DELETE CASCADE (migration 001).
+ *
+ * Any failure at step 4, 5, or 6 walks the compensation list in LIFO
+ * order so the system never ends up with an auth principal lacking a
+ * domain Usuario, or a domain Usuario lacking a Campanha.
  *
  * Email é único por `(idPlataforma, email)` — a mesma pessoa pode
  * registrar em eunenem e eucasei como contas separadas.
@@ -88,10 +122,49 @@ export async function registrarContaUsuario(
   deps: RegistrarContaUsuarioDeps,
   input: RegistrarContaUsuarioInput,
 ): Promise<RegistrarContaUsuarioResult> {
-  const { usuarioRepository, plataformaRepository, authService, clock, observability } = deps;
+  const {
+    usuarioRepository,
+    plataformaRepository,
+    campanhaRepository,
+    recebedorRepository,
+    authService,
+    clock,
+    gerarIdCampanha = randomUUID,
+    gerarIdOpcao = randomUUID,
+    observability,
+  } = deps;
   const { logger, tracer } = observability;
 
   return tracer.startActiveSpan('registrarContaUsuario', async (span) => {
+    /**
+     * LIFO compensation list. Each successful mutating step pushes its
+     * own undo. On any subsequent failure we walk this list in reverse
+     * and execute each entry best-effort (errors logged, not rethrown —
+     * the ORIGINAL failure is what the caller sees).
+     */
+    const compensations: Array<{
+      readonly label: string;
+      readonly undo: () => Promise<void>;
+    }> = [];
+
+    const runCompensations = async (originalError: Error): Promise<void> => {
+      for (const { label, undo } of [...compensations].reverse()) {
+        try {
+          await undo();
+          logger.info('usuario.conta.compensacao_executada', {
+            etapa: label,
+            erroOriginal: originalError.message,
+          });
+        } catch (compensationError) {
+          logger.info('usuario.conta.compensacao_falhou', {
+            etapa: label,
+            erroOriginal: originalError.message,
+            erroCompensacao: (compensationError as Error).message,
+          });
+        }
+      }
+    };
+
     try {
       const parsed = RegistrarContaUsuarioInputSchema.safeParse(input);
       if (!parsed.success) {
@@ -135,8 +208,12 @@ export async function registrarContaUsuario(
         senha: data.senhaSimulada,
         nome: data.nomeExibicao,
       });
+      compensations.push({
+        label: 'authService.removerConta',
+        undo: () => authService.removerConta(data.idUsuario),
+      });
 
-      // step 4: domain aggregate. On failure, compensate the auth write.
+      // step 4: domain aggregate
       const usuario: Usuario = {
         id: data.idUsuario,
         idPlataforma: data.idPlataforma,
@@ -154,40 +231,70 @@ export async function registrarContaUsuario(
         criadaEm: criadoEm,
       };
 
-      try {
-        await usuarioRepository.saveRegistroDomain({ usuario, conta });
-      } catch (domainError) {
-        // Compensation (T3): undo the auth.criarConta write so the system
-        // does not end up with an auth principal that has no domain
-        // counterpart. Best-effort — log the compensation outcome but
-        // surface the ORIGINAL domain error to the caller (more useful
-        // than a "compensation also failed" wrap).
-        try {
-          await authService.removerConta(data.idUsuario);
-          logger.info('usuario.conta.registro_compensado', {
-            idUsuario: data.idUsuario,
-            motivo: (domainError as Error).message,
-          });
-        } catch (compensationError) {
-          logger.info('usuario.conta.compensacao_falhou', {
-            idUsuario: data.idUsuario,
-            erroOriginal: (domainError as Error).message,
-            erroCompensacao: (compensationError as Error).message,
-          });
-        }
-        throw domainError;
-      }
+      await usuarioRepository.saveRegistroDomain({ usuario, conta });
+      compensations.push({
+        label: 'usuarioRepository.removeRegistroDomain',
+        undo: () => usuarioRepository.removeRegistroDomain(data.idUsuario),
+      });
+
+      // step 5: default Campanha (no Recebedor — user has no PIX at signup)
+      const idCampanha = gerarIdCampanha();
+      const titulo = construirTituloListaPadrao(data.nomeExibicao);
+      span.setAttribute('arrecadacao.campanha.id', idCampanha);
+      span.setAttribute('arrecadacao.campanha.titulo.length', titulo.length);
+
+      // criarCampanha writes the campanha row with empty opcoes; the
+      // intermediate return value is discarded because step 6 immediately
+      // re-saves the same campanha with the initial opcao appended.
+      await criarCampanha(
+        {
+          campanhaRepository,
+          recebedorRepository,
+          plataformaRepository,
+          clock,
+          observability,
+        },
+        {
+          id: idCampanha,
+          idPlataforma: data.idPlataforma,
+          idsAdministradores: [data.idConta],
+          titulo,
+          // No dadosRecebedor — see aperture-66klh: campanha can exist
+          // without bank info; only withdrawal use-case gates on presence.
+        },
+      );
+      compensations.push({
+        label: 'campanhaRepository.delete',
+        undo: () => campanhaRepository.delete(idCampanha),
+      });
+
+      // step 6: initial 'presente' OpcaoContribuicao. NO separate
+      // compensation — step 5's campanhaRepository.delete cascades to
+      // opcoes_contribuicao via the FK ON DELETE CASCADE (migration 001).
+      const idOpcao = gerarIdOpcao();
+      span.setAttribute('arrecadacao.opcao.id', idOpcao);
+
+      const campanhaComOpcao = await adicionarOpcaoContribuicao(
+        { campanhaRepository, observability },
+        { idCampanha, idOpcao, tipo: 'presente' },
+      );
 
       logger.info('usuario.conta.registrada', {
         idUsuario: usuario.id,
         idPlataforma: usuario.idPlataforma,
         idConta: conta.id,
         slug: usuario.slug,
+        idCampanha: campanhaComOpcao.id,
+        idOpcao,
       });
 
       span.setStatus({ code: SpanStatusCode.OK });
-      return { usuario, conta };
+      return { usuario, conta, campanha: campanhaComOpcao };
     } catch (error) {
+      // Compensation path. Best-effort — runCompensations logs failures
+      // but never throws; the ORIGINAL error is what propagates.
+      await runCompensations(error as Error);
+
       span.recordException(error as Error);
       span.setStatus({ code: SpanStatusCode.ERROR, message: (error as Error).message });
       throw error;
@@ -195,6 +302,27 @@ export async function registrarContaUsuario(
       span.end();
     }
   });
+}
+
+/**
+ * Constrói o título padrão da lista de presentes para um novo usuário.
+ * Formato: "Lista de <nomeExibicao>". Truncado para caber no limite
+ * do schema (200 chars — ver criar-campanha.ts).
+ *
+ * Exportado para reuso pelo script de backfill p8i01
+ * (`scripts/p8i01-backfill-campanhas.ts`), que precisa produzir o
+ * mesmo título para usuários pré-saga. Mantém uma única fonte de
+ * verdade da regra de formatação.
+ */
+export function construirTituloListaPadrao(nomeExibicao: string): string {
+  const prefix = 'Lista de ';
+  const MAX = 200;
+  const orcamento = MAX - prefix.length;
+  const nomeAjustado =
+    nomeExibicao.length > orcamento
+      ? `${nomeExibicao.slice(0, orcamento - 1).trimEnd()}…`
+      : nomeExibicao;
+  return `${prefix}${nomeAjustado}`;
 }
 
 /**

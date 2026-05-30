@@ -272,6 +272,26 @@ export class UsuarioRepositoryPostgres implements UsuarioRepository {
       }
     });
   }
+
+  async removeRegistroDomain(idUsuario: IdUsuario): Promise<void> {
+    return tracer.startActiveSpan('db.usuarios.removeRegistroDomain', async (span) => {
+      span.setAttributes({ ...DB_USUARIOS_ATTRS, 'db.operation.name': 'DELETE' });
+      try {
+        // FK `contas.id_usuario` references `usuarios.id ON DELETE CASCADE`
+        // (migration 008 line 50), so a single DELETE on usuarios cleans
+        // up the matching Conta row. Idempotent — affects zero rows for
+        // an unknown id, no error thrown.
+        await this.db.deleteFrom('usuarios').where('id', '=', idUsuario).execute();
+        span.setStatus({ code: SpanStatusCode.OK });
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
 }
 
 function toUsuario(row: UsuarioRow): Usuario {

@@ -1,5 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
+import { CampanhaRepositoryMemory } from '../../../src/adapters/arrecadacao/campanha-repository.memory.js';
+import { RecebedorRepositoryMemory } from '../../../src/adapters/arrecadacao/recebedor-repository.memory.js';
 import {
   ID_PLATAFORMA_EUCASEI,
   ID_PLATAFORMA_EUNENEM,
@@ -29,9 +31,12 @@ const fixedDate = new Date('2026-05-01T12:00:00.000Z');
 const clock = () => fixedDate;
 
 function makeUsuarioRepos(authServiceOpts: { sessionTtlMs?: number } = {}) {
+  const recebedorRepository = new RecebedorRepositoryMemory();
   return {
     usuarioRepository: new UsuarioRepositoryMemory(),
     plataformaRepository: new PlataformaRepositoryMemory(),
+    campanhaRepository: new CampanhaRepositoryMemory(recebedorRepository),
+    recebedorRepository,
     authService: new AuthServiceMemoria({
       clock,
       sessionTtlMs: authServiceOpts.sessionTtlMs ?? 60_000,
@@ -41,7 +46,13 @@ function makeUsuarioRepos(authServiceOpts: { sessionTtlMs?: number } = {}) {
 
 describe('registrarContaUsuario', () => {
   it('registers user, account and simulated credential scoped to plataforma', async () => {
-    const { usuarioRepository, plataformaRepository, authService } = makeUsuarioRepos();
+    const {
+      usuarioRepository,
+      plataformaRepository,
+      campanhaRepository,
+      recebedorRepository,
+      authService,
+    } = makeUsuarioRepos();
     const idUsuario = randomUUID();
     const idConta = randomUUID();
 
@@ -49,6 +60,8 @@ describe('registrarContaUsuario', () => {
       {
         usuarioRepository,
         plataformaRepository,
+        campanhaRepository,
+        recebedorRepository,
         authService,
         clock,
         observability: silentObservability,
@@ -73,12 +86,20 @@ describe('registrarContaUsuario', () => {
   });
 
   it('throws UsuarioPlataformaNaoEncontradaError when idPlataforma is unknown', async () => {
-    const { usuarioRepository, plataformaRepository, authService } = makeUsuarioRepos();
+    const {
+      usuarioRepository,
+      plataformaRepository,
+      campanhaRepository,
+      recebedorRepository,
+      authService,
+    } = makeUsuarioRepos();
     await expect(
       registrarContaUsuario(
         {
           usuarioRepository,
           plataformaRepository,
+          campanhaRepository,
+          recebedorRepository,
           authService,
           clock,
           observability: silentObservability,
@@ -96,12 +117,20 @@ describe('registrarContaUsuario', () => {
   });
 
   it('throws UsuarioInputInvalidoError on invalid email', async () => {
-    const { usuarioRepository, plataformaRepository, authService } = makeUsuarioRepos();
+    const {
+      usuarioRepository,
+      plataformaRepository,
+      campanhaRepository,
+      recebedorRepository,
+      authService,
+    } = makeUsuarioRepos();
     await expect(
       registrarContaUsuario(
         {
           usuarioRepository,
           plataformaRepository,
+          campanhaRepository,
+          recebedorRepository,
           authService,
           clock,
           observability: silentObservability,
@@ -119,12 +148,20 @@ describe('registrarContaUsuario', () => {
   });
 
   it('throws UsuarioEmailJaExisteError when email is taken on the same plataforma', async () => {
-    const { usuarioRepository, plataformaRepository, authService } = makeUsuarioRepos();
+    const {
+      usuarioRepository,
+      plataformaRepository,
+      campanhaRepository,
+      recebedorRepository,
+      authService,
+    } = makeUsuarioRepos();
     const email = 'taken@example.com';
     await registrarContaUsuario(
       {
         usuarioRepository,
         plataformaRepository,
+        campanhaRepository,
+        recebedorRepository,
         authService,
         clock,
         observability: silentObservability,
@@ -144,6 +181,8 @@ describe('registrarContaUsuario', () => {
         {
           usuarioRepository,
           plataformaRepository,
+          campanhaRepository,
+          recebedorRepository,
           authService,
           clock,
           observability: silentObservability,
@@ -161,13 +200,21 @@ describe('registrarContaUsuario', () => {
   });
 
   it('allows the same email across different plataformas (two distinct accounts)', async () => {
-    const { usuarioRepository, plataformaRepository, authService } = makeUsuarioRepos();
+    const {
+      usuarioRepository,
+      plataformaRepository,
+      campanhaRepository,
+      recebedorRepository,
+      authService,
+    } = makeUsuarioRepos();
     const email = 'multi@example.com';
 
     const eunenem = await registrarContaUsuario(
       {
         usuarioRepository,
         plataformaRepository,
+        campanhaRepository,
+        recebedorRepository,
         authService,
         clock,
         observability: silentObservability,
@@ -186,6 +233,8 @@ describe('registrarContaUsuario', () => {
       {
         usuarioRepository,
         plataformaRepository,
+        campanhaRepository,
+        recebedorRepository,
         authService,
         clock,
         observability: silentObservability,
@@ -208,12 +257,20 @@ describe('registrarContaUsuario', () => {
   // --- slug derivation + collision (aperture-khbow) ---
 
   it('derives slug from first word of nomeExibicao (stripping diacritics)', async () => {
-    const { usuarioRepository, plataformaRepository, authService } = makeUsuarioRepos();
+    const {
+      usuarioRepository,
+      plataformaRepository,
+      campanhaRepository,
+      recebedorRepository,
+      authService,
+    } = makeUsuarioRepos();
 
     const result = await registrarContaUsuario(
       {
         usuarioRepository,
         plataformaRepository,
+        campanhaRepository,
+        recebedorRepository,
         authService,
         clock,
         observability: silentObservability,
@@ -235,12 +292,20 @@ describe('registrarContaUsuario', () => {
   });
 
   it('suffixes the slug with -N on intra-plataforma collisions', async () => {
-    const { usuarioRepository, plataformaRepository, authService } = makeUsuarioRepos();
+    const {
+      usuarioRepository,
+      plataformaRepository,
+      campanhaRepository,
+      recebedorRepository,
+      authService,
+    } = makeUsuarioRepos();
 
     const helena1 = await registrarContaUsuario(
       {
         usuarioRepository,
         plataformaRepository,
+        campanhaRepository,
+        recebedorRepository,
         authService,
         clock,
         observability: silentObservability,
@@ -259,6 +324,8 @@ describe('registrarContaUsuario', () => {
       {
         usuarioRepository,
         plataformaRepository,
+        campanhaRepository,
+        recebedorRepository,
         authService,
         clock,
         observability: silentObservability,
@@ -277,6 +344,8 @@ describe('registrarContaUsuario', () => {
       {
         usuarioRepository,
         plataformaRepository,
+        campanhaRepository,
+        recebedorRepository,
         authService,
         clock,
         observability: silentObservability,
@@ -297,12 +366,20 @@ describe('registrarContaUsuario', () => {
   });
 
   it('allows the same slug across different plataformas (multi-tenant)', async () => {
-    const { usuarioRepository, plataformaRepository, authService } = makeUsuarioRepos();
+    const {
+      usuarioRepository,
+      plataformaRepository,
+      campanhaRepository,
+      recebedorRepository,
+      authService,
+    } = makeUsuarioRepos();
 
     const onEunenem = await registrarContaUsuario(
       {
         usuarioRepository,
         plataformaRepository,
+        campanhaRepository,
+        recebedorRepository,
         authService,
         clock,
         observability: silentObservability,
@@ -321,6 +398,8 @@ describe('registrarContaUsuario', () => {
       {
         usuarioRepository,
         plataformaRepository,
+        campanhaRepository,
+        recebedorRepository,
         authService,
         clock,
         observability: silentObservability,
@@ -340,12 +419,20 @@ describe('registrarContaUsuario', () => {
   });
 
   it('falls back to "usuario" / "usuario-2" when name yields no valid base', async () => {
-    const { usuarioRepository, plataformaRepository, authService } = makeUsuarioRepos();
+    const {
+      usuarioRepository,
+      plataformaRepository,
+      campanhaRepository,
+      recebedorRepository,
+      authService,
+    } = makeUsuarioRepos();
 
     const a = await registrarContaUsuario(
       {
         usuarioRepository,
         plataformaRepository,
+        campanhaRepository,
+        recebedorRepository,
         authService,
         clock,
         observability: silentObservability,
@@ -364,6 +451,8 @@ describe('registrarContaUsuario', () => {
       {
         usuarioRepository,
         plataformaRepository,
+        campanhaRepository,
+        recebedorRepository,
         authService,
         clock,
         observability: silentObservability,
@@ -391,7 +480,8 @@ describe('registrarContaUsuario', () => {
     // BEFORE auth — so to drive the compensation path we need to make
     // saveRegistroDomain itself fail post-pre-check. Easiest way: wrap
     // the repo with a saveRegistroDomain that throws on the first call.
-    const { plataformaRepository, authService } = makeUsuarioRepos();
+    const { plataformaRepository, campanhaRepository, recebedorRepository, authService } =
+      makeUsuarioRepos();
     const baseRepo = new UsuarioRepositoryMemory();
     const repoWithFailingSave = {
       ...baseRepo,
@@ -401,6 +491,7 @@ describe('registrarContaUsuario', () => {
       findUsuarioBySlug: baseRepo.findUsuarioBySlug.bind(baseRepo),
       findContaById: baseRepo.findContaById.bind(baseRepo),
       atualizarNomeExibicaoUsuario: baseRepo.atualizarNomeExibicaoUsuario.bind(baseRepo),
+      removeRegistroDomain: baseRepo.removeRegistroDomain.bind(baseRepo),
     };
 
     const idUsuario = randomUUID();
@@ -411,6 +502,8 @@ describe('registrarContaUsuario', () => {
         {
           usuarioRepository: repoWithFailingSave,
           plataformaRepository,
+          campanhaRepository,
+          recebedorRepository,
           authService,
           clock,
           observability: silentObservability,
@@ -444,6 +537,8 @@ describe('registrarContaUsuario', () => {
         {
           usuarioRepository: new UsuarioRepositoryMemory(),
           plataformaRepository,
+          campanhaRepository,
+          recebedorRepository,
           authService,
           clock,
           observability: silentObservability,
@@ -459,17 +554,191 @@ describe('registrarContaUsuario', () => {
       ),
     ).resolves.toBeDefined();
   });
+
+  it('compensates auth + domain writes when criarCampanha (step 5) throws (aperture-p8i01)', async () => {
+    // Drive the new step-5 compensation path: wrap CampanhaRepositoryMemory
+    // so save() throws. The saga should walk the compensation list LIFO:
+    //   1. usuarioRepository.removeRegistroDomain (undo step 4)
+    //   2. authService.removerConta (undo step 3)
+    // Final state: no campanha, no usuario, no auth principal.
+    const { usuarioRepository, plataformaRepository, recebedorRepository, authService } =
+      makeUsuarioRepos();
+    const failingCampanhaRepository = new CampanhaRepositoryMemory(recebedorRepository);
+    failingCampanhaRepository.save = () => Promise.reject(new Error('campanha write blew up'));
+
+    const idUsuario = randomUUID();
+    const email = 'compensate-step5@example.com';
+
+    await expect(
+      registrarContaUsuario(
+        {
+          usuarioRepository,
+          plataformaRepository,
+          campanhaRepository: failingCampanhaRepository,
+          recebedorRepository,
+          authService,
+          clock,
+          observability: silentObservability,
+        },
+        {
+          idUsuario,
+          idPlataforma: ID_PLATAFORMA_EUNENEM,
+          idConta: randomUUID(),
+          email,
+          nomeExibicao: 'Carla',
+          senhaSimulada: 'p',
+        },
+      ),
+    ).rejects.toThrow('campanha write blew up');
+
+    // Compensation: domain Usuario gone
+    expect(
+      await usuarioRepository.findUsuarioByEmail(ID_PLATAFORMA_EUNENEM, email),
+    ).toBeUndefined();
+    expect(await usuarioRepository.findUsuarioById(idUsuario)).toBeUndefined();
+
+    // Compensation: auth principal gone (signIn fails)
+    await expect(
+      authService.iniciarSessao({
+        idPlataforma: ID_PLATAFORMA_EUNENEM,
+        email,
+        senha: 'p',
+      }),
+    ).rejects.toThrow(UsuarioInputInvalidoError);
+  });
+
+  it('compensates all prior writes when adicionarOpcaoContribuicao (step 6) throws (aperture-p8i01)', async () => {
+    // Drive the step-6 compensation path: the campanha was saved
+    // successfully, but adding the initial 'presente' opcao fails. The
+    // saga should walk LIFO:
+    //   1. campanhaRepository.delete (undo step 5)
+    //   2. usuarioRepository.removeRegistroDomain (undo step 4)
+    //   3. authService.removerConta (undo step 3)
+    const { usuarioRepository, plataformaRepository, recebedorRepository, authService } =
+      makeUsuarioRepos();
+    const campanhaRepository = new CampanhaRepositoryMemory(recebedorRepository);
+
+    // Wrap save() so the FIRST call (criarCampanha) succeeds but the
+    // SECOND call (adicionarOpcaoContribuicao re-save with opcao) fails.
+    let callCount = 0;
+    const originalSave = campanhaRepository.save.bind(campanhaRepository);
+    campanhaRepository.save = (campanha, ctx) => {
+      callCount += 1;
+      if (callCount === 2) {
+        return Promise.reject(new Error('opcao write blew up'));
+      }
+      return originalSave(campanha, ctx);
+    };
+
+    const idUsuario = randomUUID();
+    const idCampanha = randomUUID();
+    const email = 'compensate-step6@example.com';
+
+    await expect(
+      registrarContaUsuario(
+        {
+          usuarioRepository,
+          plataformaRepository,
+          campanhaRepository,
+          recebedorRepository,
+          authService,
+          clock,
+          gerarIdCampanha: () => idCampanha,
+          observability: silentObservability,
+        },
+        {
+          idUsuario,
+          idPlataforma: ID_PLATAFORMA_EUNENEM,
+          idConta: randomUUID(),
+          email,
+          nomeExibicao: 'Dani',
+          senhaSimulada: 'p',
+        },
+      ),
+    ).rejects.toThrow('opcao write blew up');
+
+    // Compensation 1: campanha deleted
+    expect(await campanhaRepository.findById(idCampanha)).toBeUndefined();
+
+    // Compensation 2: domain Usuario gone
+    expect(
+      await usuarioRepository.findUsuarioByEmail(ID_PLATAFORMA_EUNENEM, email),
+    ).toBeUndefined();
+
+    // Compensation 3: auth principal gone
+    await expect(
+      authService.iniciarSessao({
+        idPlataforma: ID_PLATAFORMA_EUNENEM,
+        email,
+        senha: 'p',
+      }),
+    ).rejects.toThrow(UsuarioInputInvalidoError);
+  });
+
+  it('happy path returns campanha with a single presente opcao + administrator (aperture-p8i01)', async () => {
+    const {
+      usuarioRepository,
+      plataformaRepository,
+      campanhaRepository,
+      recebedorRepository,
+      authService,
+    } = makeUsuarioRepos();
+
+    const idUsuario = randomUUID();
+    const idConta = randomUUID();
+
+    const result = await registrarContaUsuario(
+      {
+        usuarioRepository,
+        plataformaRepository,
+        campanhaRepository,
+        recebedorRepository,
+        authService,
+        clock,
+        observability: silentObservability,
+      },
+      {
+        idUsuario,
+        idPlataforma: ID_PLATAFORMA_EUNENEM,
+        idConta,
+        email: 'happy-path@example.com',
+        nomeExibicao: 'Eva',
+        senhaSimulada: 'p',
+      },
+    );
+
+    expect(result.campanha).toBeDefined();
+    expect(result.campanha.idPlataforma).toBe(ID_PLATAFORMA_EUNENEM);
+    expect(result.campanha.idsAdministradores).toEqual([idConta]);
+    expect(result.campanha.idRecebedor).toBeNull();
+    expect(result.campanha.dadosRecebedor).toBeNull();
+    expect(result.campanha.titulo).toBe('Lista de Eva');
+    expect(result.campanha.opcoes).toHaveLength(1);
+    expect(result.campanha.opcoes[0]?.tipo).toBe('presente');
+
+    // findFirstByAdministrador resolves the campanha by the user's conta id
+    const found = await campanhaRepository.findFirstByAdministrador(idConta);
+    expect(found?.id).toBe(result.campanha.id);
+  });
 });
 
 describe('atualizarPerfilUsuario', () => {
   it('updates display name', async () => {
-    const { usuarioRepository, plataformaRepository, authService } = makeUsuarioRepos();
+    const {
+      usuarioRepository,
+      plataformaRepository,
+      campanhaRepository,
+      recebedorRepository,
+      authService,
+    } = makeUsuarioRepos();
     const idUsuario = randomUUID();
     const idConta = randomUUID();
     await registrarContaUsuario(
       {
         usuarioRepository,
         plataformaRepository,
+        campanhaRepository,
+        recebedorRepository,
         authService,
         clock,
         observability: silentObservability,
@@ -515,13 +784,21 @@ describe('atualizarPerfilUsuario', () => {
 
 describe('criarSessaoUsuario', () => {
   it('creates a plataforma-scoped session when simulated password matches', async () => {
-    const { usuarioRepository, plataformaRepository, authService } = makeUsuarioRepos();
+    const {
+      usuarioRepository,
+      plataformaRepository,
+      campanhaRepository,
+      recebedorRepository,
+      authService,
+    } = makeUsuarioRepos();
     const email = 'login@example.com';
     const password = 'secret-stub';
     await registrarContaUsuario(
       {
         usuarioRepository,
         plataformaRepository,
+        campanhaRepository,
+        recebedorRepository,
         authService,
         clock,
         observability: silentObservability,
@@ -551,12 +828,20 @@ describe('criarSessaoUsuario', () => {
   });
 
   it('refuses to log in against a plataforma where the email is not registered', async () => {
-    const { usuarioRepository, plataformaRepository, authService } = makeUsuarioRepos();
+    const {
+      usuarioRepository,
+      plataformaRepository,
+      campanhaRepository,
+      recebedorRepository,
+      authService,
+    } = makeUsuarioRepos();
     const email = 'only-eunenem@example.com';
     await registrarContaUsuario(
       {
         usuarioRepository,
         plataformaRepository,
+        campanhaRepository,
+        recebedorRepository,
         authService,
         clock,
         observability: silentObservability,
@@ -584,11 +869,19 @@ describe('criarSessaoUsuario', () => {
   });
 
   it('throws on bad credentials', async () => {
-    const { usuarioRepository, plataformaRepository, authService } = makeUsuarioRepos();
+    const {
+      usuarioRepository,
+      plataformaRepository,
+      campanhaRepository,
+      recebedorRepository,
+      authService,
+    } = makeUsuarioRepos();
     await registrarContaUsuario(
       {
         usuarioRepository,
         plataformaRepository,
+        campanhaRepository,
+        recebedorRepository,
         authService,
         clock,
         observability: silentObservability,
@@ -636,13 +929,21 @@ describe('criarSessaoUsuario', () => {
 
 describe('autorizarPermissaoUsuario', () => {
   it('authorizes when session is valid and permission exists', async () => {
-    const { usuarioRepository, plataformaRepository, authService } = makeUsuarioRepos();
+    const {
+      usuarioRepository,
+      plataformaRepository,
+      campanhaRepository,
+      recebedorRepository,
+      authService,
+    } = makeUsuarioRepos();
     const idUsuario = randomUUID();
     const idConta = randomUUID();
     await registrarContaUsuario(
       {
         usuarioRepository,
         plataformaRepository,
+        campanhaRepository,
+        recebedorRepository,
         authService,
         clock,
         observability: silentObservability,
@@ -719,13 +1020,21 @@ describe('autorizarPermissaoUsuario', () => {
   });
 
   it('throws UsuarioSessaoInvalidaError when session expired', async () => {
-    const { usuarioRepository, plataformaRepository, authService } = makeUsuarioRepos();
+    const {
+      usuarioRepository,
+      plataformaRepository,
+      campanhaRepository,
+      recebedorRepository,
+      authService,
+    } = makeUsuarioRepos();
     const idUsuario = randomUUID();
     const idConta = randomUUID();
     await registrarContaUsuario(
       {
         usuarioRepository,
         plataformaRepository,
+        campanhaRepository,
+        recebedorRepository,
         authService,
         clock,
         observability: silentObservability,

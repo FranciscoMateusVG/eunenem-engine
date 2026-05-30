@@ -100,6 +100,8 @@ async function seedFluxoBase() {
     {
       usuarioRepository: deps.usuarioRepository,
       plataformaRepository: deps.plataformaRepository,
+      campanhaRepository: deps.campanhaRepository,
+      recebedorRepository: deps.recebedorRepository,
       authService: new AuthServiceMemoria(),
       clock,
       observability: deps.observability,

@@ -6,6 +6,7 @@ import {
 } from '../../domain/arrecadacao/entities/campanha.js';
 import type {
   IdCampanha,
+  IdConta,
   IdPlataformaReferencia,
 } from '../../domain/arrecadacao/value-objects/ids.js';
 import type { CampanhaRepository } from './campanha-repository.js';
@@ -101,6 +102,65 @@ export class CampanhaRepositoryMemory implements CampanhaRepository {
 
         span.setStatus({ code: SpanStatusCode.OK });
         return resultados;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  async findFirstByAdministrador(
+    idConta: IdConta,
+    _context?: ArrecadacaoRepositoryContext,
+  ): Promise<Campanha | undefined> {
+    return tracer.startActiveSpan(
+      'db.arrecadacao_campanhas.findFirstByAdministrador',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+        try {
+          // Deterministic ordering by criadaEm ASC (oldest first) — matches
+          // the Postgres adapter contract so callers see a stable result.
+          const matches = [...this.campanhas.values()]
+            .filter((c) => c.idsAdministradores.includes(idConta))
+            .sort((a, b) => a.criadaEm.getTime() - b.criadaEm.getTime());
+
+          const first = matches[0];
+          if (!first) {
+            span.setStatus({ code: SpanStatusCode.OK });
+            return undefined;
+          }
+
+          if (!this.recebedorRepository) {
+            span.setStatus({ code: SpanStatusCode.OK });
+            return first;
+          }
+
+          const recebedorAtivo = await this.recebedorRepository.findAtivoByCampanhaId(first.id);
+          span.setStatus({ code: SpanStatusCode.OK });
+          return recebedorAtivo
+            ? campanhaComRecebedorAtivo(first, recebedorAtivo)
+            : campanhaSemRecebedor(first);
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  async delete(idCampanha: IdCampanha, _context?: ArrecadacaoRepositoryContext): Promise<void> {
+    return tracer.startActiveSpan('db.arrecadacao_campanhas.delete', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'DELETE' });
+      try {
+        // Idempotent — no-op if id is unknown.
+        this.campanhas.delete(idCampanha);
+        span.setStatus({ code: SpanStatusCode.OK });
       } catch (error: unknown) {
         span.recordException(error as Error);
         span.setStatus({ code: SpanStatusCode.ERROR });

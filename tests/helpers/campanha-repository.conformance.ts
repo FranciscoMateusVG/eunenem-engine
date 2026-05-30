@@ -130,6 +130,73 @@ export function describeCampanhaRepositoryConformance(name: string, options: Con
       expect(noRec?.idRecebedor).toBeNull();
       expect(noRec?.dadosRecebedor).toBeNull();
     });
+
+    it('findFirstByAdministrador returns undefined when nothing matches (aperture-p8i01)', async () => {
+      const found = await repo.findFirstByAdministrador(randomUUID());
+      expect(found).toBeUndefined();
+    });
+
+    it('findFirstByAdministrador returns the matching campaign by conta id (aperture-p8i01)', async () => {
+      const idConta = randomUUID();
+      const campanha = makeCampanha({ idsAdministradores: [idConta] });
+      await options.saveCampanha(repo, campanha);
+
+      const found = await repo.findFirstByAdministrador(idConta);
+      expect(found?.id).toBe(campanha.id);
+      expect(found?.idsAdministradores).toContain(idConta);
+    });
+
+    it('findFirstByAdministrador returns the OLDEST matching campaign (aperture-p8i01)', async () => {
+      const idConta = randomUUID();
+      const idPlataforma = randomUUID();
+
+      const older = makeCampanha({
+        idPlataforma,
+        idsAdministradores: [idConta],
+        criadaEm: new Date('2026-04-01T00:00:00.000Z'),
+      });
+      const newer = makeCampanha({
+        idPlataforma,
+        idsAdministradores: [idConta],
+        criadaEm: new Date('2026-05-01T00:00:00.000Z'),
+      });
+
+      // Save NEWER first to verify ordering is by criada_em ASC, not insertion order.
+      await options.saveCampanha(repo, newer);
+      await options.saveCampanha(repo, older);
+
+      const found = await repo.findFirstByAdministrador(idConta);
+      expect(found?.id).toBe(older.id);
+    });
+
+    it('delete removes the campaign + cascades to admins/opcoes (aperture-p8i01)', async () => {
+      const campanha = makeCampanha({
+        idsAdministradores: [randomUUID(), randomUUID()],
+        opcoes: [
+          { id: randomUUID(), tipo: 'presente' },
+          { id: randomUUID(), tipo: 'rifa' },
+        ],
+      });
+      await options.saveCampanha(repo, campanha);
+      expect(await repo.findById(campanha.id)).toBeDefined();
+
+      await repo.delete(campanha.id);
+
+      expect(await repo.findById(campanha.id)).toBeUndefined();
+      expect(await repo.findByPlataforma(campanha.idPlataforma)).toEqual([]);
+    });
+
+    it('delete is idempotent on unknown id (aperture-p8i01)', async () => {
+      await expect(repo.delete(randomUUID())).resolves.not.toThrow();
+    });
+
+    it('delete emits db.arrecadacao_campanhas.delete span (aperture-p8i01)', async () => {
+      await repo.delete(randomUUID());
+      const span = findSpan(options.getSpans(), 'db.arrecadacao_campanhas.delete');
+      expect(span).toBeDefined();
+      expect(span?.attributes['db.system']).toBe(options.expectedDbSystem);
+      expect(span?.attributes['db.operation.name']).toBe('DELETE');
+    });
   });
 }
 

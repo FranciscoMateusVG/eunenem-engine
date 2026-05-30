@@ -618,6 +618,8 @@ app.post('/p/:slug/usuarios', async (c) => {
       {
         usuarioRepository: state.usuarioRepository,
         plataformaRepository: state.plataformaRepository,
+        campanhaRepository: state.campanhaRepository,
+        recebedorRepository: state.recebedorRepository,
         authService: state.authService,
         clock,
         observability,
