@@ -335,6 +335,7 @@ export { ArrecadacaoContribuicaoJaExisteError } from './errors/arrecadacao/contr
 export { ArrecadacaoContribuicaoNaoDisponivelError } from './errors/arrecadacao/contribuicao-nao-disponivel.error.js';
 export { ArrecadacaoContribuicaoNaoEncontradaError } from './errors/arrecadacao/contribuicao-nao-encontrada.error.js';
 export { ArrecadacaoInputInvalidoError } from './errors/arrecadacao/input-invalido.error.js';
+export { ArrecadacaoLimiteOpcaoExcedidoError } from './errors/arrecadacao/limite-opcao-excedido.error.js';
 export { ArrecadacaoNaoAutorizadoError } from './errors/arrecadacao/nao-autorizado.error.js';
 export { ArrecadacaoOpcaoContribuicaoNaoEncontradaError } from './errors/arrecadacao/opcao-contribuicao-nao-encontrada.error.js';
 export { ArrecadacaoOpcaoIdDuplicadoError } from './errors/arrecadacao/opcao-id-duplicado.error.js';
