@@ -4,14 +4,12 @@
  * Desired behavior (fluxos.txt item 5): checkout started → provider rejects →
  * pagamento `rejeitado`, no Financeiro effects, contribuição `disponivel` again.
  *
- * Uses existing use cases only: `iniciarPagamentoContribuicao` + `rejeitarPagamento`.
- * Does NOT call `desassociarContribuinteContribuicao` manually (that would mask
- * the missing checkout orchestrator from plan 0004).
- *
- * Vitest status (last run):
- * - PASS: pagamento `rejeitado`, events, Financeiro empty (no lancamentos/saldo/receita)
- * - FAIL: contribuição still `indisponivel` after `rejeitarPagamento` (rejeitarPagamento
- *   does not release the Arrecadação claim today)
+ * Uses the checkout orchestrators `iniciarPagamentoContribuicao` +
+ * `finalizarPagamentoRejeitado`. The orchestrator is the symmetric
+ * counterpart of `finalizarPagamentoAprovado` from plan 0002 — it sequences
+ * the Pagamentos rejection AND releases the Arrecadação claim (cross-BC
+ * compensation), so the test does NOT need to call
+ * `desassociarContribuinteContribuicao` manually.
  *
  * Arrecadação persists in Postgres via Testcontainers; Taxas/Pagamentos/Financeiro/Usuário
  * use in-memory adapters.
@@ -37,9 +35,9 @@ import { UsuarioRepositoryMemory } from '../../src/adapters/usuario/repository.m
 import { adicionarOpcaoContribuicao } from '../../src/use-cases/arrecadacao/adicionar-opcao-contribuicao.js';
 import { criarCampanha } from '../../src/use-cases/arrecadacao/criar-campanha.js';
 import { criarContribuicao } from '../../src/use-cases/arrecadacao/criar-contribuicao.js';
+import { finalizarPagamentoRejeitado } from '../../src/use-cases/checkout/finalizar-pagamento-rejeitado.js';
 import { iniciarPagamentoContribuicao } from '../../src/use-cases/checkout/iniciar-pagamento-contribuicao.js';
 import { obterSaldoRecebedor } from '../../src/use-cases/financeiro/obter-saldo-recebedor.js';
-import { rejeitarPagamento } from '../../src/use-cases/pagamentos/rejeitar-pagamento.js';
 import { registrarContaUsuario } from '../../src/use-cases/usuario/registrar-conta-usuario.js';
 import { createTestObservability } from '../helpers/observability.js';
 import { createTestDatabase, type TestDatabase } from '../helpers/test-db.js';
@@ -217,11 +215,13 @@ describe('Fluxo — pagamento rejeitado pelo provedor', () => {
       'payment.intent_created',
     );
 
-    const pagamentoRejeitado = await rejeitarPagamento(
+    const { pagamento: pagamentoRejeitado } = await finalizarPagamentoRejeitado(
       {
         pagamentoRepository: deps.pagamentoRepository,
         pagamentoProvider: deps.pagamentoProvider,
         pagamentoEventPublisher: deps.pagamentoEventPublisher,
+        contribuicaoRepository: deps.contribuicaoRepository,
+        campanhaRepository: deps.campanhaRepository,
         clock,
         observability: deps.observability,
       },

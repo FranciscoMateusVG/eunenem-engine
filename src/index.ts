@@ -445,6 +445,15 @@ export {
   finalizarPagamentoAprovado,
 } from './use-cases/checkout/finalizar-pagamento-aprovado.js';
 export type {
+  FinalizarPagamentoRejeitadoDeps,
+  FinalizarPagamentoRejeitadoInput,
+  FinalizarPagamentoRejeitadoResult,
+} from './use-cases/checkout/finalizar-pagamento-rejeitado.js';
+export {
+  FinalizarPagamentoRejeitadoInputSchema,
+  finalizarPagamentoRejeitado,
+} from './use-cases/checkout/finalizar-pagamento-rejeitado.js';
+export type {
   IniciarPagamentoContribuicaoDeps,
   IniciarPagamentoContribuicaoInput,
   IniciarPagamentoContribuicaoResult,
