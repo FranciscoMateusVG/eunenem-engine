@@ -21,17 +21,25 @@ export function createArrecadacaoMemoryRepos(): {
   return { campanhaRepository, recebedorRepository, plataformaRepository };
 }
 
-/** Persiste campanha e o recebedor ativo (necessário para findById em Postgres). */
+/**
+ * Persiste campanha e o recebedor ativo (necessário para findById em Postgres).
+ *
+ * Pós aperture-66klh: a campanha pode existir sem Recebedor. Quando
+ * `idRecebedor`/`dadosRecebedor` são `null` (lifecycle pré-bank-info),
+ * apenas a campanha é persistida — nenhum recebedor é criado.
+ */
 export async function saveCampanhaComRecebedorAtivo(
   repos: ReturnType<typeof createArrecadacaoMemoryRepos>,
   campanha: Campanha,
 ): Promise<void> {
-  const recebedor: Recebedor = criarRecebedorInicial({
-    id: campanha.idRecebedor,
-    idCampanha: campanha.id,
-    dadosRecebedor: campanha.dadosRecebedor,
-    criadaEm: campanha.criadaEm,
-  });
   await repos.campanhaRepository.save(campanha);
-  await repos.recebedorRepository.save(recebedor);
+  if (campanha.idRecebedor !== null && campanha.dadosRecebedor !== null) {
+    const recebedor: Recebedor = criarRecebedorInicial({
+      id: campanha.idRecebedor,
+      idCampanha: campanha.id,
+      dadosRecebedor: campanha.dadosRecebedor,
+      criadaEm: campanha.criadaEm,
+    });
+    await repos.recebedorRepository.save(recebedor);
+  }
 }

@@ -8,6 +8,7 @@ import {
 import { desativarRecebedor } from '../../../src/domain/arrecadacao/entities/recebedor.js';
 import type { LancamentoFinanceiro } from '../../../src/domain/financeiro/entities/lancamento-financeiro.js';
 import { ArrecadacaoCampanhaNaoEncontradaError } from '../../../src/errors/arrecadacao/campanha-nao-encontrada.error.js';
+import { CheckoutCampanhaSemRecebedorError } from '../../../src/errors/checkout/campanha-sem-recebedor.error.js';
 import { CheckoutPlataformaMismatchError } from '../../../src/errors/checkout/plataforma-mismatch.error.js';
 import { FinanceiroSaldoDisponivelInsuficienteError } from '../../../src/errors/financeiro/saldo-disponivel-insuficiente.error.js';
 import { NoopLogger } from '../../../src/observability/noop-logger.js';
@@ -153,15 +154,11 @@ describe('iniciarRepasseRecebedor — pre-validation failures', () => {
     ).rejects.toThrow(ArrecadacaoCampanhaNaoEncontradaError);
   });
 
-  it('rejects when the campanha has no active recebedor (currently surfaces as CampanhaNaoEncontrada via repo coupling)', async () => {
-    // KNOWN COUPLING: `CampanhaRepository.findById` returns undefined when
-    // there's no active recebedor for the campanha (the join is baked into
-    // the read). So the orchestrator's plataforma-check throws
-    // `ArrecadacaoCampanhaNaoEncontradaError` BEFORE its explicit recebedor
-    // check is reached. The recebedor check in the orchestrator remains as
-    // defensive code — it'll fire correctly the day `findById` is split
-    // into "find campanha" + "find active recebedor" (deferred — see
-    // plans/0002 deferred concerns).
+  it('throws CheckoutCampanhaSemRecebedorError when the campanha has no projected Recebedor', async () => {
+    // Após `aperture-66klh`, `CampanhaRepository.findById` retorna a campanha
+    // mesmo sem recebedor ativo (projeção null). O orquestrador detecta o
+    // estado via `campanhaTemRecebedor(campanha)` e lança o erro de domínio
+    // específico — o repasse é gated em presença, sem coerção silenciosa.
     const { deps, idCampanha } = await setupCampanhaComSaldoDisponivel(ID_PLATAFORMA_EUNENEM, 8000);
 
     const recebedoresDaCampanha = await deps.recebedorRepository.findByCampanhaId(idCampanha);
@@ -178,7 +175,7 @@ describe('iniciarRepasseRecebedor — pre-validation failures', () => {
         idRepasse: randomUUID(),
         amountCents: 1000,
       }),
-    ).rejects.toThrow(ArrecadacaoCampanhaNaoEncontradaError);
+    ).rejects.toThrow(CheckoutCampanhaSemRecebedorError);
   });
 });
 

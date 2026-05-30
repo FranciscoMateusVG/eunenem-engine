@@ -7,6 +7,7 @@ import type { PlataformaRepository } from '../../adapters/plataforma/repository.
 import {
   type Campanha,
   campanhaComRecebedorInicial,
+  criarCampanhaSemRecebedor,
 } from '../../domain/arrecadacao/entities/campanha.js';
 import { criarRecebedorInicial } from '../../domain/arrecadacao/entities/recebedor.js';
 import { DadosRecebedorSchema } from '../../domain/arrecadacao/value-objects/dados-recebedor.js';
@@ -28,7 +29,11 @@ export const CriarCampanhaInputSchema = z.object({
   id: IdCampanhaSchema,
   idPlataforma: IdPlataformaReferenciaSchema,
   idsAdministradores: IdsAdministradoresSchema,
-  dadosRecebedor: DadosRecebedorSchema,
+  /**
+   * Recebedor é opcional: uma campanha pode existir sem dados PIX
+   * (auto-create no signup, p.ex.). Só o repasse exige presença.
+   */
+  dadosRecebedor: DadosRecebedorSchema.optional(),
   titulo: z.string().trim().min(1, 'Titulo nao pode ser vazio').max(200),
 });
 
@@ -45,7 +50,10 @@ export interface CriarCampanhaDeps {
 }
 
 /**
- * Cria uma campanha de arrecadação (agregado vazio de opções) e o recebedor inicial ativo.
+ * Cria uma campanha de arrecadação (agregado vazio de opções). Quando
+ * `dadosRecebedor` é fornecido, o recebedor inicial ativo é criado na
+ * mesma transação. Sem `dadosRecebedor`, a campanha nasce sem projeção
+ * de Recebedor — válido para o ciclo de vida pré-bank-info.
  */
 export async function criarCampanha(
   deps: CriarCampanhaDeps,
@@ -78,9 +86,15 @@ export async function criarCampanha(
         parsed.data.idsAdministradores.length,
       );
       span.setAttribute(
-        'arrecadacao.recebedor.tipoChavePix',
-        parsed.data.dadosRecebedor.tipoChavePix,
+        'arrecadacao.campanha.com_recebedor',
+        parsed.data.dadosRecebedor !== undefined,
       );
+      if (parsed.data.dadosRecebedor) {
+        span.setAttribute(
+          'arrecadacao.recebedor.tipoChavePix',
+          parsed.data.dadosRecebedor.tipoChavePix,
+        );
+      }
 
       const plataforma = await plataformaRepository.findById(parsed.data.idPlataforma);
       if (!plataforma) {
@@ -88,34 +102,45 @@ export async function criarCampanha(
       }
 
       const criadaEm = clock();
-      const recebedor = criarRecebedorInicial({
-        id: gerarIdRecebedor(),
-        idCampanha: parsed.data.id,
-        dadosRecebedor: parsed.data.dadosRecebedor,
-        criadaEm,
-      });
 
-      const campanha = campanhaComRecebedorInicial({
+      const baseCampanha = {
         id: parsed.data.id,
         idPlataforma: parsed.data.idPlataforma,
         idsAdministradores: parsed.data.idsAdministradores,
         titulo: parsed.data.titulo,
         opcoes: [],
         criadaEm,
-        recebedor,
-      });
+      };
 
-      await executarTransacao(async (ctx) => {
-        await campanhaRepository.save(campanha, ctx);
-        await recebedorRepository.save(recebedor, ctx);
-      });
+      let campanha: Campanha;
+      if (parsed.data.dadosRecebedor) {
+        const recebedor = criarRecebedorInicial({
+          id: gerarIdRecebedor(),
+          idCampanha: parsed.data.id,
+          dadosRecebedor: parsed.data.dadosRecebedor,
+          criadaEm,
+        });
+        campanha = campanhaComRecebedorInicial({ ...baseCampanha, recebedor });
+
+        await executarTransacao(async (ctx) => {
+          await campanhaRepository.save(campanha, ctx);
+          await recebedorRepository.save(recebedor, ctx);
+        });
+      } else {
+        campanha = criarCampanhaSemRecebedor(baseCampanha);
+
+        await executarTransacao(async (ctx) => {
+          await campanhaRepository.save(campanha, ctx);
+        });
+      }
 
       logger.info('arrecadacao.campanha.criada', {
         idCampanha: campanha.id,
         idPlataforma: campanha.idPlataforma,
         idRecebedor: campanha.idRecebedor,
-        tipoChavePix: campanha.dadosRecebedor.tipoChavePix,
+        tipoChavePix: campanha.dadosRecebedor?.tipoChavePix ?? null,
         tituloLength: campanha.titulo.length,
+        comRecebedor: campanha.idRecebedor !== null,
       });
 
       span.setStatus({ code: SpanStatusCode.OK });

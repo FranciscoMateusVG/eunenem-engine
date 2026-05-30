@@ -50,6 +50,9 @@ export {
   campanhaComRecebedorInicial,
   campanhaPossuiAdministrador,
   campanhaSemAdministrador,
+  campanhaSemRecebedor,
+  campanhaTemRecebedor,
+  criarCampanhaSemRecebedor,
   encontrarOpcaoContribuicao,
 } from './domain/arrecadacao/entities/campanha.js';
 export type {
@@ -325,6 +328,7 @@ export { TokenSessaoSchema } from './domain/usuario/value-objects/token-sessao.j
 export { ArrecadacaoAdministradorDuplicadoError } from './errors/arrecadacao/administrador-duplicado.error.js';
 export { ArrecadacaoAdministradorNaoEncontradoError } from './errors/arrecadacao/administrador-nao-encontrado.error.js';
 export { ArrecadacaoCampanhaNaoEncontradaError } from './errors/arrecadacao/campanha-nao-encontrada.error.js';
+export { ArrecadacaoCampanhaRecebedorInvarianteError } from './errors/arrecadacao/campanha-recebedor-invariante.error.js';
 export { ArrecadacaoContribuicaoJaDisponivelError } from './errors/arrecadacao/contribuicao-ja-disponivel.error.js';
 export { ArrecadacaoContribuicaoJaExisteError } from './errors/arrecadacao/contribuicao-ja-existe.error.js';
 export { ArrecadacaoContribuicaoNaoDisponivelError } from './errors/arrecadacao/contribuicao-nao-disponivel.error.js';
@@ -336,6 +340,7 @@ export { ArrecadacaoPlataformaNaoEncontradaError } from './errors/arrecadacao/pl
 export { ArrecadacaoRecebedorNaoEncontradoError } from './errors/arrecadacao/recebedor-nao-encontrado.error.js';
 export { ArrecadacaoUltimoAdministradorError } from './errors/arrecadacao/ultimo-administrador.error.js';
 export { CatAlreadyExistsError } from './errors/cat-already-exists.error.js';
+export { CheckoutCampanhaSemRecebedorError } from './errors/checkout/campanha-sem-recebedor.error.js';
 export { CheckoutPlataformaMismatchError } from './errors/checkout/plataforma-mismatch.error.js';
 export { FinanceiroInputInvalidoError } from './errors/financeiro/input-invalido.error.js';
 export { FinanceiroPagamentoJaRegistradoError } from './errors/financeiro/pagamento-ja-registrado.error.js';

@@ -1,6 +1,9 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 import type { Campanha } from '../../domain/arrecadacao/entities/campanha.js';
-import { campanhaComRecebedorInicial } from '../../domain/arrecadacao/entities/campanha.js';
+import {
+  campanhaComRecebedorInicial,
+  criarCampanhaSemRecebedor,
+} from '../../domain/arrecadacao/entities/campanha.js';
 import type {
   IdCampanha,
   IdConta,
@@ -121,10 +124,6 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
         }
 
         const recebedorAtivo = await this.recebedorRepository.findAtivoByCampanhaId(id, context);
-        if (!recebedorAtivo) {
-          span.setStatus({ code: SpanStatusCode.OK });
-          return undefined;
-        }
 
         const admins = await executor
           .selectFrom('campanha_administradores')
@@ -138,16 +137,19 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
           .where('campanha_id', '=', id)
           .execute();
 
-        span.setStatus({ code: SpanStatusCode.OK });
-        return campanhaComRecebedorInicial({
+        const base = {
           id: row.id as IdCampanha,
           idPlataforma: row.id_plataforma as IdPlataformaReferencia,
           idsAdministradores: admins.map((a) => a.id_usuario as IdConta),
           titulo: row.titulo,
           opcoes: opcoes.map(toOpcao),
           criadaEm: row.criada_em,
-          recebedor: recebedorAtivo,
-        });
+        };
+
+        span.setStatus({ code: SpanStatusCode.OK });
+        return recebedorAtivo
+          ? campanhaComRecebedorInicial({ ...base, recebedor: recebedorAtivo })
+          : criarCampanhaSemRecebedor(base);
       } catch (error: unknown) {
         span.recordException(error as Error);
         span.setStatus({ code: SpanStatusCode.ERROR });
@@ -183,7 +185,6 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
             row.id as IdCampanha,
             context,
           );
-          if (!recebedorAtivo) continue;
 
           const admins = await executor
             .selectFrom('campanha_administradores')
@@ -197,16 +198,19 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
             .where('campanha_id', '=', row.id)
             .execute();
 
+          const base = {
+            id: row.id as IdCampanha,
+            idPlataforma: row.id_plataforma as IdPlataformaReferencia,
+            idsAdministradores: admins.map((a) => a.id_usuario as IdConta),
+            titulo: row.titulo,
+            opcoes: opcoes.map(toOpcao),
+            criadaEm: row.criada_em,
+          };
+
           resultados.push(
-            campanhaComRecebedorInicial({
-              id: row.id as IdCampanha,
-              idPlataforma: row.id_plataforma as IdPlataformaReferencia,
-              idsAdministradores: admins.map((a) => a.id_usuario as IdConta),
-              titulo: row.titulo,
-              opcoes: opcoes.map(toOpcao),
-              criadaEm: row.criada_em,
-              recebedor: recebedorAtivo,
-            }),
+            recebedorAtivo
+              ? campanhaComRecebedorInicial({ ...base, recebedor: recebedorAtivo })
+              : criarCampanhaSemRecebedor(base),
           );
         }
 

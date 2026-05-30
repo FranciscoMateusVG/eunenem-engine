@@ -1,3 +1,4 @@
+import { ArrecadacaoCampanhaRecebedorInvarianteError } from '../../../errors/arrecadacao/campanha-recebedor-invariante.error.js';
 import type { DadosRecebedor } from '../value-objects/dados-recebedor.js';
 import type {
   IdCampanha,
@@ -15,6 +16,18 @@ import type { Recebedor } from './recebedor.js';
  * Owns: `idsAdministradores`, `opcoes` (sacolas), `titulo`, plus a projection of
  * the active recebedor's data (`idRecebedor` + `dadosRecebedor` snapshot).
  *
+ * Lifecycle — Recebedor is OPTIONAL:
+ *   A campanha CAN exist without a Recebedor (e.g. just after signup, before the
+ *   user has provided bank info). Creation, contributions, payment-aproval flows
+ *   all work without one. Only the withdrawal flow (`iniciarRepasseRecebedor`)
+ *   gates on its presence — it throws `CheckoutCampanhaSemRecebedorError` when
+ *   absent. Helper: `campanhaTemRecebedor(campanha)`.
+ *
+ * TOGETHER invariant:
+ *   `idRecebedor` and `dadosRecebedor` are either BOTH null or BOTH set —
+ *   never half. The aggregate enforces this in its constructors and projection
+ *   helpers; violation raises `ArrecadacaoCampanhaRecebedorInvarianteError`.
+ *
  * Belongs to exactly one Plataforma (multi-tenant boundary): the
  * `idPlataforma` is immutable after creation and scopes all downstream
  * pricing (RegraTaxa lookup) and authorization decisions.
@@ -28,11 +41,32 @@ export interface Campanha {
   readonly id: IdCampanha;
   readonly idPlataforma: IdPlataformaReferencia;
   readonly idsAdministradores: readonly IdConta[];
-  readonly idRecebedor: IdRecebedor;
-  readonly dadosRecebedor: DadosRecebedor;
+  readonly idRecebedor: IdRecebedor | null;
+  readonly dadosRecebedor: DadosRecebedor | null;
   readonly titulo: string;
   readonly opcoes: readonly OpcaoContribuicao[];
   readonly criadaEm: Date;
+}
+
+/** True quando a campanha tem um Recebedor ativo projetado. */
+export function campanhaTemRecebedor(campanha: Campanha): campanha is Campanha & {
+  idRecebedor: IdRecebedor;
+  dadosRecebedor: DadosRecebedor;
+} {
+  return campanha.idRecebedor !== null && campanha.dadosRecebedor !== null;
+}
+
+/**
+ * Asserta o invariante TOGETHER: idRecebedor e dadosRecebedor ambos nulos
+ * ou ambos preenchidos. Lança `ArrecadacaoCampanhaRecebedorInvarianteError`
+ * em estado meio-nulo. Usado por todos os construtores/projeções do agregado.
+ */
+function assertInvarianteRecebedor(campanha: Campanha): void {
+  const idVazio = campanha.idRecebedor === null;
+  const dadosVazios = campanha.dadosRecebedor === null;
+  if (idVazio !== dadosVazios) {
+    throw new ArrecadacaoCampanhaRecebedorInvarianteError(campanha.id);
+  }
 }
 
 /** Indica se a conta é administradora da campanha. */
@@ -74,11 +108,24 @@ export function campanhaComOpcao(campanha: Campanha, opcao: OpcaoContribuicao): 
 
 /** Projeta na campanha o recebedor ativo. */
 export function campanhaComRecebedorAtivo(campanha: Campanha, recebedor: Recebedor): Campanha {
-  return {
+  const next: Campanha = {
     ...campanha,
     idRecebedor: recebedor.id,
     dadosRecebedor: recebedor.dadosRecebedor,
   };
+  assertInvarianteRecebedor(next);
+  return next;
+}
+
+/** Limpa a projeção de Recebedor da campanha (mantém o invariante TOGETHER). */
+export function campanhaSemRecebedor(campanha: Campanha): Campanha {
+  const next: Campanha = {
+    ...campanha,
+    idRecebedor: null,
+    dadosRecebedor: null,
+  };
+  assertInvarianteRecebedor(next);
+  return next;
 }
 
 /** Monta campanha a partir de metadados e recebedor inicial ativo. */
@@ -88,9 +135,24 @@ export function campanhaComRecebedorInicial(
   },
 ): Campanha {
   const { recebedor, ...rest } = params;
-  return {
+  const next: Campanha = {
     ...rest,
     idRecebedor: recebedor.id,
     dadosRecebedor: recebedor.dadosRecebedor,
   };
+  assertInvarianteRecebedor(next);
+  return next;
+}
+
+/** Monta campanha sem recebedor (lifecycle: pre-bank-info). */
+export function criarCampanhaSemRecebedor(
+  params: Omit<Campanha, 'idRecebedor' | 'dadosRecebedor'>,
+): Campanha {
+  const next: Campanha = {
+    ...params,
+    idRecebedor: null,
+    dadosRecebedor: null,
+  };
+  assertInvarianteRecebedor(next);
+  return next;
 }
