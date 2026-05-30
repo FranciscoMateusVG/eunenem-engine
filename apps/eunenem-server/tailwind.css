@@ -3789,3 +3789,126 @@ html {
     font-size: 30px;
   }
 }
+
+/* ================================================================
+ * aperture-cvhlm — landing taxas section
+ * Section 06 (Taxas) of the v2 landing. Cream-tinted band with a
+ * white card holding the 100% headline on the left + a 3-up payout-
+ * method grid on the right. All selectors are .taxas-* scoped so
+ * they don't collide with the prototype's .fees / .fee-* names or
+ * with any other landing component.
+ * ================================================================ */
+
+.taxas-section {
+  background: var(--lilac-soft);
+}
+
+.taxas-band {
+  max-width: 1000px;
+  margin: 0 auto;
+  background: #fff;
+  border-radius: 28px;
+  padding: 36px 40px;
+  box-shadow: var(--shadow-md);
+  border: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: 36px;
+  align-items: center;
+}
+
+.taxas-headline {
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: clamp(40px, 5.5vw, 64px);
+  font-weight: 600;
+  color: var(--plum);
+  line-height: 0.95;
+}
+
+.taxas-pct {
+  color: var(--lilac-deep);
+  background: linear-gradient(
+    180deg,
+    transparent 62%,
+    rgba(247, 213, 96, 0.45) 62%,
+    rgba(247, 213, 96, 0.45) 92%,
+    transparent 92%
+  );
+  padding: 0 6px;
+}
+
+.taxas-band p {
+  font-size: 15px;
+  color: var(--ink-soft);
+  margin-top: 10px;
+}
+
+.taxas-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+}
+
+.taxas-item {
+  text-align: center;
+  padding: 18px 12px;
+  border-radius: 16px;
+  background: var(--cream);
+}
+
+.taxas-icon-wrap {
+  width: 44px;
+  height: 44px;
+  margin: 0 auto 10px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.taxas-icon-wrap--f1 {
+  background: var(--lilac-soft);
+}
+
+.taxas-icon-wrap--f2 {
+  background: var(--pink-soft);
+}
+
+.taxas-icon-wrap--f3 {
+  background: #fff4d1;
+}
+
+.taxas-icon-wrap svg {
+  width: 22px;
+  height: 22px;
+}
+
+.taxas-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-mute);
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.taxas-value {
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--plum);
+  line-height: 1.1;
+  margin-bottom: 4px;
+}
+
+.taxas-detail {
+  font-size: 11.5px;
+  color: var(--ink-soft);
+}
+
+@media (max-width: 860px) {
+  .taxas-band {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+}
