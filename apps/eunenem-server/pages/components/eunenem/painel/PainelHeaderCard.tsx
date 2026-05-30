@@ -15,10 +15,13 @@ import type { PainelEventSnapshot } from "@/lib/mocks/painelDemo";
 //      + a compact URL chip row (calendar icon · date pill · middle
 //      dot · eunenem.com/<colored slug>). The dedicated copy + share
 //      circle previously sitting in this row are GONE.
-//   3. Recebido card — single white rounded card with the AO VIVO
-//      label, a centered plum amount, a full-width green RESGATAR
-//      VALORES pill, and a 3-column PRESENTES / CONFIRMADOS / RECADOS
-//      stat strip beneath.
+//   3. Recebido card — single white rounded card with the
+//      "recebido até agora" label, a centered plum amount, a
+//      full-width green RESGATAR VALORES pill, and a 3-column
+//      PRESENTES / CONFIRMADOS / RECADOS stat strip beneath.
+//      (aperture-rxsm7 dropped the inline AO VIVO badge that the
+//      original 9qu7k spec called for — matches dmur2's earlier
+//      removal of the same badge on the prior hero card.)
 //
 // Wiring:
 // - babyName + targetDate come from TweaksContext (drives countdown
@@ -166,11 +169,17 @@ export function PainelHeaderCard({ snapshot }: Props) {
         </div>
       </header>
 
-      {/* 3. Recebido card — amount + RESGATAR + 3-col stats */}
+      {/* 3. Recebido card — amount + RESGATAR + 3-col stats.
+          aperture-rxsm7 — removed the "ao vivo" pulse badge. dmur2
+          (PR #20) already killed the same badge on the prior
+          hero-card layout; the 9qu7k spec accidentally reintroduced
+          it inside this new recebido card. The dashboard is private
+          and the amount updates implicitly on snapshot refresh, so
+          the live-stream framing was marketing noise on a private
+          figure both times. */}
       <section className="painel-recebido-card" aria-label="recebido até agora">
         <div className="painel-recebido-head">
           <span className="painel-recebido-lbl">recebido até agora</span>
-          <span className="painel-live anim-live-pulse">ao vivo</span>
         </div>
         <div className="painel-recebido-amount">
           <small>R$</small>
