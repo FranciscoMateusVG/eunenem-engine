@@ -17,10 +17,11 @@ import {
 //
 // A cream paper "ticket sheet" (washi tape, scalloped bottom edge, paper noise)
 // holding: a summary header (RECEBIDO / RESGATADO + a full-width DISPONÍVEL
-// block with yellow marca-texto), a green "resgatar" CTA in the header card,
-// a lilás "solicitar transferência" CTA inside the sheet, aux pills, a status
-// filter popover, and the status-tinted ticket rows. Clicking a row opens a
-// detail drawer; the resgatado summary opens a wide modal; the CTAs open the
+// block with yellow marca-texto), a single green "solicitar transferência"
+// CTA inside the sheet (aperture-fxfbk collapsed the previous dual CTA pair
+// — both buttons opened the same transfer modal), aux pills, a status filter
+// popover, and the status-tinted ticket rows. Clicking a row opens a detail
+// drawer; the resgatado summary opens a wide modal; the CTA opens the
 // transfer modal. All interactivity is local React state — mock-first, no
 // fetch/auth/backend. Faithful port of the design export (statement.jsx +
 // decorations.jsx + app.jsx + styles.css).
@@ -68,15 +69,6 @@ function IconDownload() {
       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
       <path d="m7 10 5 5 5-5" />
       <path d="M12 15V3" />
-    </svg>
-  );
-}
-
-function IconWallet() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-1" />
-      <path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4" />
     </svg>
   );
 }
@@ -500,12 +492,16 @@ export function PresentesBody(_props: PainelSectionBodyProps) {
               </div>
             </div>
 
+            {/* aperture-fxfbk — collapsed two side-by-side CTAs (green
+                "resgatar valores" + lilac "solicitar transferência") into
+                one full-width green pill. Both buttons fired the same
+                onClick → setTransferOpen(true), so the dual surface was
+                pure noise. Single CTA reads cleaner and matches what
+                payout actually does (one path: request a transfer).
+                The existing `.ex-sheet-cta` rule has `flex: 1 1 200px`,
+                so one child = full-width row by default. */}
             <div className="ex-sheet-cta-row">
               <button type="button" className="ex-sheet-cta green" onClick={() => setTransferOpen(true)}>
-                <IconWallet />
-                resgatar valores
-              </button>
-              <button type="button" className="ex-sheet-cta lilac" onClick={() => setTransferOpen(true)}>
                 <IconArrowUpRight />
                 solicitar transferência
               </button>
