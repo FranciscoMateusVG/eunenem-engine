@@ -113,6 +113,24 @@ const IconSparkle = (p: { size?: number }) => (
     <path d="M17 7l2-2" />
   </Icon>
 );
+// aperture-gnxal — two interlocking links for the "ver link" CTA on
+// the mensagem-padrão section. Stroke-based + currentColor so it
+// inherits the section's ghost-button ink colour.
+const IconLink = (p: { size?: number }) => (
+  <Icon size={p.size} sw={1.9}>
+    <path d="M10 14a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.5 1.5" />
+    <path d="M14 10a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5" />
+  </Icon>
+);
+// aperture-gnxal — eye outline + center pupil for the "ver convite"
+// CTA. Same stroke style as the rest of the section's icons so the
+// two new buttons read as a paired affordance.
+const IconEye = (p: { size?: number }) => (
+  <Icon size={p.size} sw={1.9}>
+    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />
+    <circle cx="12" cy="12" r="3" />
+  </Icon>
+);
 const IconWhatsapp = (p: { size?: number }) => (
   <svg
     width={p.size ?? 14}
@@ -181,6 +199,7 @@ function Button({
   disabled,
   onClick,
   title,
+  ariaLabel,
   children,
 }: {
   variant: BtnVariant;
@@ -188,12 +207,14 @@ function Button({
   disabled?: boolean;
   onClick?: () => void;
   title?: string;
+  ariaLabel?: string;
   children: React.ReactNode;
 }) {
   return (
     <button
       type="button"
       title={title}
+      aria-label={ariaLabel}
       disabled={disabled}
       onClick={onClick}
       style={{ ...btnStyle(variant, size), opacity: disabled ? 0.5 : 1 }}
@@ -1133,6 +1154,48 @@ export function ConvidadosBody({ slug: _slug }: PainelSectionBodyProps) {
           <b style={{ color: "var(--coral-pink)" }}>[link]</b> — vamos preencher
           pra cada um.
         </p>
+
+        {/* aperture-gnxal — preview-action strip. Two outlined CTAs
+            below the textarea hint so the section communicates
+            "you can see what this looks like" without competing with
+            the inline VARIÁVEIS panel. Follow-up beads land the
+            actual previews:
+              - aperture-8qg1s replaces VER LINK's toast with the
+                confirmation-link preview modal
+              - aperture-ch1kr replaces VER CONVITE's toast with the
+                convite preview modal
+            Until those land, both fire a placeholder toast so the
+            surface communicates intent without dead UI. Reuses the
+            section's own Button variant="ghost" (NOT the global
+            .btn-ghost — this file is fully inline-styled) so the
+            chrome stays harmonious with adjacente buttons. */}
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            marginTop: 14,
+            flexWrap: "wrap",
+          }}
+        >
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => toast("Em breve — preview do link de confirmação ♡")}
+            title="Ver link de confirmação"
+            ariaLabel="Ver link de confirmação"
+          >
+            <IconLink size={14} /> ver link
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => toast("Em breve — preview do convite ♡")}
+            title="Ver convite"
+            ariaLabel="Ver convite"
+          >
+            <IconEye size={14} /> ver convite
+          </Button>
+        </div>
       </div>
 
       {/* 4. guest list */}
