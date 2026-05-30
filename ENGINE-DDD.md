@@ -31,6 +31,8 @@ A engine permite que **uma pessoa contribua dinheiro para outra**, enquanto a **
 
 Cada contexto tem **responsabilidades claras** e um **vocabulário** próprio. Contextos distintos **não** devem misturar entidades de domínio entre si; a comunicação ocorre por **identificadores**, **DTOs públicos** e **eventos**, com **casos de uso** orquestrando o que for necessário entre contextos.
 
+A **Plataforma** (§2.6) é o BC fundacional **multi-tenant**: cada Usuário, Campanha, Sessão e regra de Taxa pertence a exatamente uma plataforma (eunenem, eucasei, ...). Os demais BCs referenciam-na por **mirror VO** (`IdPlataformaReferencia`) — o domínio deles nunca importa de `src/domain/plataforma/`. A regra é enforçada pelo `dependency-cruiser`.
+
 ### 2.1 Usuário
 
 **Responsabilidade:** usuários autenticados que **administram campanhas**.
@@ -138,6 +140,28 @@ Isso mantém o núcleo de cobrança **estável** enquanto a UX de arrecadação 
 
 ---
 
+### 2.6 Plataforma
+
+**Responsabilidade:** definir a **fronteira multi-tenant** da engine. Cada plataforma (ex.: `eunenem`, `eucasei`) é um produto white-label rodando sobre a mesma engine, com sua própria base de usuários, suas próprias campanhas e sua própria política de taxas.
+
+> Listada por último para preservar âncoras existentes, mas é o BC **fundacional** — todos os outros BCs trazem `IdPlataformaReferencia` (mirror VO) nas suas raízes e validam coerência multi-tenant nos casos de uso (`registrarContaUsuario`, `criarCampanha`, sagas de Checkout).
+
+**Conceitos principais**
+
+| Conceito | Papel no domínio |
+|----------|------------------|
+| Plataforma | Produto white-label; raiz do agregado (id, slug, nome) |
+| Slug da Plataforma | Identificador legível e único (`eunenem`, `eucasei`, ...) usado em URLs e config |
+| IdPlataformaReferencia | Mirror VO local em cada BC consumidor — evita acoplamento de domínio entre contextos |
+
+**Estado atual (didático)**
+
+- Ciclo de vida deferido — não há `criarPlataforma`/`suspenderPlataforma` como caso de uso público; as plataformas são **seedadas** (`PLATAFORMAS_SEED` em `repository.memory.ts`) com UUIDs determinísticos (`ID_PLATAFORMA_EUNENEM`, `ID_PLATAFORMA_EUCASEI`).
+- Persistência apenas em memória; a porta `PlataformaRepository` expõe **somente leitura** (`findById`, `findBySlug`, `listAtivas`).
+- Casos de uso de outros BCs que dependem de plataforma (ex.: cadastrar usuário, criar campanha) consultam `plataformaRepository.findById` como gate e lançam erro tipado próprio se a referência não existir.
+
+---
+
 ## 3. Fluxo principal (ponta a ponta)
 
 Ordem lógica dos passos, do ponto de vista do domínio:
@@ -196,9 +220,10 @@ flowchart LR
 
 ## 4. Integração entre contextos (regras DDD)
 
-- **Domínio:** cada contexto mantém seu modelo; **não** importar entidades de outro contexto dentro do núcleo de domínio.
+- **Domínio:** cada contexto mantém seu modelo; **não** importar entidades de outro contexto dentro do núcleo de domínio. A regra é enforçada pelo `dependency-cruiser` (`.dependency-cruiser.cjs`), inclusive para o **mirror VO** `IdPlataformaReferencia` que cada BC consumidor define localmente.
 - **Fronteiras:** troca de informação via **IDs**, **contratos públicos (DTOs)** e **eventos de domínio/aplicação** quando fizer sentido.
-- **Orquestração:** **casos de uso** podem coordenar vários contextos (ex.: após criar contribuição, pedir composição de valores e criar intenção de pagamento).
+- **Orquestração:** **casos de uso** podem coordenar vários contextos (ex.: após reservar contribuição, pedir composição de valores e criar intenção de pagamento). Quando a coordenação envolve **múltiplos passos com efeitos colaterais e precisa desfazer parcialmente em caso de falha**, ela vive no pseudo-BC **Checkout** (`src/use-cases/checkout/`) — orquestração com **padrão saga + compensação explícita**, sem domínio próprio. Ver `CONTEXTS.md` § _Orquestração — Checkout_.
+- **Guard multi-tenant:** sagas e use-cases que recebem `idPlataforma` no input comparam-no com o `idPlataforma` carregado dos agregados referenciados (campanha, contribuição) e falham com erro tipado se houver mismatch (`CheckoutPlataformaMismatchError`). Esse é o gate cross-tenant explícito em código.
 - **Evolução:** começar com **implementações em memória** e adapters simples; integrações reais (banco dedicado, auth, gateway) entram de forma incremental, sem obliterar o modelo acima.
 
 ---
