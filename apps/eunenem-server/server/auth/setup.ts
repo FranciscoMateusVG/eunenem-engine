@@ -80,6 +80,15 @@ export interface ServerDeps {
   readonly clock: () => Date;
   /** Cookie name shared by the engine's BetterAuth sessions table + our tRPC procedures. */
   readonly sessionCookieName: string;
+  /**
+   * Public origin of the eunenem-server (= `env.BETTER_AUTH_URL`), passed
+   * through so the visitor-checkout tRPC procedures can build a
+   * `returnUrl` for Stripe's embedded checkout without reading
+   * `process.env` at call time (aperture-vkrkm). Same value the BetterAuth
+   * runtime uses for its `baseURL`; centralised here so a single env
+   * change moves both surfaces in lockstep.
+   */
+  readonly publicOrigin: string;
 }
 
 /**
@@ -294,6 +303,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     // whether the request hits the BetterAuth runtime OR the engine's
     // AuthService through our tRPC procedures.
     sessionCookieName: 'better-auth.session_token',
+    publicOrigin: env.BETTER_AUTH_URL,
   };
 }
 

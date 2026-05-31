@@ -18,6 +18,7 @@ import { initTRPC } from '@trpc/server';
 import { authRouter } from './auth-router.js';
 import { contribuicaoRouter } from './contribuicao-router.js';
 import type { TrpcContext } from './context.js';
+import { paginaRouter } from './pagina-router.js';
 
 const t = initTRPC.context<TrpcContext>().create();
 
@@ -31,6 +32,7 @@ export const appRouter = t.router({
   }),
   auth: authRouter,
   contribuicao: contribuicaoRouter,
+  pagina: paginaRouter,
 });
 
 export type AppRouter = typeof appRouter;
