@@ -325,15 +325,35 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
 
   let pagamentoProvider: PagamentoProvider;
   let checkoutSessionProvider: CheckoutSessionProvider;
-  if (env.NODE_ENV === 'production') {
+  // aperture-ozlcr: gate on STRIPE_SECRET_KEY presence, NOT NODE_ENV.
+  //
+  // Originally this gated on `NODE_ENV === 'production'`. That broke
+  // operator's daily dev workflow: to exercise the real Stripe integration
+  // locally (test-mode keys + `stripe listen --forward-to ...`), the
+  // operator would have to flip NODE_ENV=production, which has side
+  // effects (Secure cookie flag rejects HTTP cookies on localhost, log
+  // verbosity drops, etc). Stripe.js then rejects the fake adapter's
+  // `cs_fake_xxx` clientSecrets with:
+  //   IntegrationError: Unable to parse client secret. Please ensure you
+  //   are using a valid embedded Checkout client secret.
+  //
+  // Better gate: bind the real Stripe adapter whenever STRIPE_SECRET_KEY
+  // is configured (test-mode in dev, live in prod). Fall back to the fake
+  // adapter only for fresh-clone configurations where no Stripe secret is
+  // present — a brand-new repo clone can still `pnpm dev` without
+  // crashing on missing-key boot validation.
+  //
+  // Production safety is preserved by the env-schema superRefine above:
+  // NODE_ENV=production STILL requires STRIPE_SECRET_KEY (and prevents
+  // the empty-string branch from firing in prod).
+  if (env.STRIPE_SECRET_KEY.length > 0) {
     const stripeAdapter = new PagamentoProviderStripe({ stripe: getStripe() });
     pagamentoProvider = stripeAdapter;
     checkoutSessionProvider = stripeAdapter;
   } else {
-    // Dev / test default: deterministic fake. No network calls, no Stripe
-    // secret required. Set NODE_ENV=production locally to exercise the
-    // real Stripe path (alongside `stripe listen --forward-to ...` for
-    // the webhook half).
+    // Fresh-clone / unconfigured-dev fallback: deterministic fake. No
+    // network, no real Stripe account needed. Drop test-mode keys into
+    // .env to flip to the real adapter automatically on next boot.
     const fakeAdapter = new PagamentoProviderFake();
     pagamentoProvider = fakeAdapter;
     checkoutSessionProvider = fakeAdapter;
