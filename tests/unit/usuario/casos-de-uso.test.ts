@@ -925,6 +925,71 @@ describe('criarSessaoUsuario', () => {
       ),
     ).rejects.toThrow(UsuarioInputInvalidoError);
   });
+
+  /**
+   * aperture-swmpm defensive branch: auth row + domain row out of sync.
+   *
+   * Engineered by registering the user (creates both auth + domain rows
+   * via the saga) then directly deleting the domain Usuario row while
+   * leaving the auth row intact. Subsequent criarSessaoUsuario succeeds
+   * at iniciarSessao but findUsuarioById returns undefined → we throw a
+   * generic Error so the inconsistency surfaces loudly, NOT the ambiguous
+   * bad-credentials error (which would mask the data-model drift).
+   *
+   * Unreachable in healthy production systems — every auth row is created
+   * via the saga that also writes the matching domain row, with
+   * compensation on partial failure. This test exists to lock the
+   * defensive branch in place so future refactors don't silently drop it.
+   */
+  it('throws generic Error when authService succeeds but domain Usuario is missing (data-model drift)', async () => {
+    const {
+      usuarioRepository,
+      plataformaRepository,
+      campanhaRepository,
+      recebedorRepository,
+      authService,
+    } = makeUsuarioRepos();
+
+    const registered = await registrarContaUsuario(
+      {
+        usuarioRepository,
+        plataformaRepository,
+        campanhaRepository,
+        recebedorRepository,
+        authService,
+        clock,
+        observability: silentObservability,
+      },
+      {
+        idUsuario: randomUUID(),
+        idPlataforma: ID_PLATAFORMA_EUNENEM,
+        idConta: randomUUID(),
+        email: 'drift@example.com',
+        nomeExibicao: 'Drift',
+        senhaSimulada: 'right',
+      },
+    );
+
+    // Engineer the drift: delete the domain Usuario but leave the auth
+    // credential intact. removeRegistroDomain is the saga's compensation
+    // path; calling it manually simulates a half-rolled-back saga state.
+    await usuarioRepository.removeRegistroDomain(registered.usuario.id);
+
+    await expect(
+      criarSessaoUsuario(
+        {
+          usuarioRepository,
+          authService,
+          observability: silentObservability,
+        },
+        {
+          idPlataforma: ID_PLATAFORMA_EUNENEM,
+          email: 'drift@example.com',
+          senhaSimulada: 'right',
+        },
+      ),
+    ).rejects.toThrow(/inconsistencia auth\+dominio/);
+  });
 });
 
 describe('autorizarPermissaoUsuario', () => {
