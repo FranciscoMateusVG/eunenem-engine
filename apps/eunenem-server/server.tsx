@@ -9,6 +9,7 @@ import { App, resolveRoute } from './pages/App.js';
 import { buildServerDeps, ID_PLATAFORMA_EUNENEM, loadEnv } from './server/auth/setup.js';
 import { installBlockedAuthHandlerGuard } from './server/blocked-auth-handler.js';
 import { appRouter } from './server/trpc/router.js';
+import { createStripeWebhookHandler } from './server/webhooks/stripe-webhook.js';
 
 const PORT = Number(process.env.PORT ?? 3001);
 
@@ -99,6 +100,16 @@ app.all('/api/trpc/*', (c) =>
     }),
   }),
 );
+
+// Stripe webhook (aperture-24n36) — signature-verified handler that
+// dispatches verified events to finalizar* use-cases. MUST be mounted
+// AFTER /api/auth/* + /api/trpc/* (those are body-cache sensitive too,
+// see T4 anti-trap §8 #6) and BEFORE the SSR catch-all. The handler
+// itself reads the raw body via c.req.text() — required so the bytes
+// match the HMAC payload Stripe signed. See
+// server/webhooks/stripe-webhook.ts for the full security rationale +
+// the local `stripe listen` dev workflow.
+app.post('/api/webhooks/stripe', createStripeWebhookHandler(deps));
 
 // "/" SSRs the marketing landing page via the catch-all below —
 // resolveRoute maps the exact "/" pathname to { kind: 'landing' }.
@@ -194,6 +205,7 @@ serve({ fetch: app.fetch, port: PORT }, (info) => {
   console.log('  /trpc-smoke        → tRPC smoke test (aperture-kungg)');
   console.log('  /api/trpc/*        → tRPC procedures (listFruits, auth.*)');
   console.log('  /api/auth/*        → BetterAuth handler (sign-in/sign-up/sign-out/...)');
+  console.log('  /api/webhooks/stripe → Stripe webhook (sig-verified; aperture-24n36)');
   console.log('  /healthz           → plain text health check');
   console.log('');
 });

@@ -67,6 +67,45 @@ apps/eunenem-server/
 
 Resultado: `pnpm check` do engine não vê este app. Alterações aqui não quebram o engine; alterações no engine não quebram este app.
 
+## Local Stripe webhook (aperture-24n36)
+
+O handler em `POST /api/webhooks/stripe` verifica a assinatura via
+`stripe.webhooks.constructEvent` antes de despachar para os use-cases
+de finalização. Para testar localmente:
+
+```bash
+# Em outro terminal, com a Stripe CLI logada (stripe login):
+stripe listen --forward-to localhost:3001/api/webhooks/stripe
+# > Ready! Your webhook signing secret is whsec_xxx (^C to quit)
+```
+
+Cole o `whsec_xxx` no `.env` como `STRIPE_WEBHOOK_SECRET` e reinicie o
+servidor de dev (`pnpm dev`) para o env recarregar. O secret muda a
+cada `stripe listen` — não compartilhe entre máquinas.
+
+Triggers úteis:
+
+```bash
+stripe trigger checkout.session.completed
+stripe trigger checkout.session.expired
+stripe trigger payment_intent.payment_failed
+```
+
+Smoke test de assinatura inválida (deve retornar 400 com
+`signature mismatch`, NUNCA vazando a mensagem do SDK):
+
+```bash
+curl -s -X POST -H "Content-Type: application/json" \
+  -d '{"id":"evt_fake","type":"checkout.session.completed"}' \
+  http://localhost:3001/api/webhooks/stripe -w "\n%{http_code}\n"
+# → signature mismatch
+# → 400
+```
+
+Em produção, configure o webhook endpoint no Stripe Dashboard (URL
+pública do server + path `/api/webhooks/stripe`) e use o signing
+secret que o Stripe gera lá.
+
 ## Próximos passos sugeridos
 
 - **Integrar o engine**: importar `../../src/...` direto (ou converter o repo em pnpm workspace) e renderizar dados reais.

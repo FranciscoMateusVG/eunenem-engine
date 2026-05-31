@@ -14,6 +14,8 @@ import {
   criarAuth,
   type Database,
   ID_PLATAFORMA_EUNENEM,
+  type LivroFinanceiroRepository,
+  LivroFinanceiroRepositoryMemory,
   type Observability,
   type PagamentoEventPublisher,
   PagamentoEventPublisherMemory,
@@ -70,6 +72,15 @@ export interface ServerDeps {
   readonly pagamentoProvider: PagamentoProvider;
   readonly checkoutSessionProvider: CheckoutSessionProvider;
   readonly pagamentoEventPublisher: PagamentoEventPublisher;
+  /**
+   * Financeiro BC — livro de lançamentos. Required by the
+   * `finalizarPagamentoAprovado` use-case dispatched by the Stripe
+   * webhook handler (aperture-24n36). In-memory for now: no Postgres
+   * adapter exists yet for this BC (same trade-off as
+   * `pagamentoEventPublisher` above). Swap when the Postgres adapter
+   * lands.
+   */
+  readonly livroFinanceiroRepository: LivroFinanceiroRepository;
   /**
    * Taxas BC — provider of fee rules per plataforma+tipo. v1 uses the
    * in-memory seed (eunenem: 10% on presentes). When operators need
@@ -260,6 +271,14 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
   const pagamentoRepository = new PagamentoRepositoryPostgres(db);
   const pagamentoEventPublisher = new PagamentoEventPublisherMemory();
 
+  // Financeiro BC — in-memory livro for now (aperture-24n36). The
+  // finalizarPagamentoAprovado use-case dispatched by the Stripe
+  // webhook handler requires this repo. Postgres adapter is future
+  // work; until then lancamentos are process-local (acceptable for
+  // visitor checkout v1; saldo/relatórios via Financeiro are not yet
+  // exposed to operators).
+  const livroFinanceiroRepository = new LivroFinanceiroRepositoryMemory();
+
   let pagamentoProvider: PagamentoProvider;
   let checkoutSessionProvider: CheckoutSessionProvider;
   if (env.NODE_ENV === 'production') {
@@ -295,6 +314,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     pagamentoProvider,
     checkoutSessionProvider,
     pagamentoEventPublisher,
+    livroFinanceiroRepository,
     provedorRegraTaxa,
     observability,
     clock: () => new Date(),
