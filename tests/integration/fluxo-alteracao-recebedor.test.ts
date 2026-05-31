@@ -198,6 +198,7 @@ describe('Fluxo — alteração de recebedor', () => {
         provedorRegraTaxa: deps.provedorRegraTaxa,
         pagamentoRepository: deps.pagamentoRepository,
         pagamentoEventPublisher: deps.pagamentoEventPublisher,
+        checkoutSessionProvider: deps.pagamentoProvider,
         clock,
         observability: deps.observability,
       },
@@ -209,6 +210,7 @@ describe('Fluxo — alteração de recebedor', () => {
         metodo: 'pix',
         idPagamento,
         idIntencaoPagamento: randomUUID(),
+        returnUrl: 'https://test.example/sucesso?session_id={CHECKOUT_SESSION_ID}',
       },
     );
 

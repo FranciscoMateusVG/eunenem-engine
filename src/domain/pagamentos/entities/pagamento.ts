@@ -42,13 +42,27 @@ export type StatusPagamento = z.infer<typeof StatusPagamentoSchema>;
 export const StatusTransacaoExternaSchema = z.enum(['aprovado', 'rejeitado']);
 export type StatusTransacaoExterna = z.infer<typeof StatusTransacaoExternaSchema>;
 
-/** @entity IntencaoPagamento (within Pagamento aggregate) */
+/**
+ * @entity IntencaoPagamento (within Pagamento aggregate)
+ *
+ * `externalRef` (aperture-xaha2): provider-side reference to a
+ * pre-authorisation session — for Stripe embedded checkout this is the
+ * `cs_test_...` / `cs_live_...` session id. Populated when the
+ * IntencaoPagamento is created via the CheckoutSessionProvider flow;
+ * remains `null` for the synchronous solicitarPagamento topology
+ * (Pagarme / Pix-direct, where the provider mints the transaction
+ * on-demand without a pre-session). Stored on IntencaoPagamento (not
+ * Pagamento root or TransacaoExterna) because the pre-authorisation
+ * session lives at "intent" granularity; TransacaoExterna.id is the
+ * post-settlement provider id (payment_intent / transaction).
+ */
 export const IntencaoPagamentoSchema = z.object({
   id: IdIntencaoPagamentoSchema,
   idContribuicao: IdContribuicaoPagamentoSchema,
   amountCents: MoneyCentsSchema,
   metodo: MetodoPagamentoSchema,
   composicaoValores: SnapshotComposicaoValoresSchema,
+  externalRef: z.string().trim().min(1).max(255).nullable(),
   criadaEm: z.date(),
 });
 export type IntencaoPagamento = Readonly<z.infer<typeof IntencaoPagamentoSchema>>;
@@ -81,6 +95,14 @@ export interface CriarPagamentoPendenteInput {
   readonly valorACobrarCents: MoneyCents;
   readonly metodo: MetodoPagamento;
   readonly criadoEm: Date;
+  /**
+   * Provider-side session reference (Stripe checkout session id, etc.)
+   * for the pre-authorisation flow. Pass `null` for the synchronous
+   * solicitarPagamento topology. Optional with `null` default keeps
+   * existing callers backward-compatible (tests using PagamentoProviderFake
+   * don't have to thread this through).
+   */
+  readonly externalRef?: string | null;
 }
 
 export function criarPagamentoPendente(input: CriarPagamentoPendenteInput): Pagamento {
@@ -96,6 +118,7 @@ export function criarPagamentoPendente(input: CriarPagamentoPendenteInput): Paga
       amountCents: input.valorACobrarCents,
       metodo: input.metodo,
       composicaoValores: input.composicaoValores,
+      externalRef: input.externalRef ?? null,
       criadaEm: input.criadoEm,
     },
     status: 'pendente',

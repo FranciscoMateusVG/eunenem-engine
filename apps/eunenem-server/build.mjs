@@ -15,6 +15,19 @@ async function buildClient() {
     sourcemap: watch,
     logLevel: 'info',
     tsconfig: './tsconfig.json',
+    // aperture-xaha2: inline STRIPE_PUBLISHABLE_KEY into the client bundle
+    // so `loadStripe(import.meta.env...)` / `loadStripe(process.env...)`
+    // resolves to the real test-mode publishable key at build time. The
+    // SECRET_KEY and WEBHOOK_SECRET intentionally STAY server-only — they
+    // are never referenced in client.tsx and never appear in this define
+    // block. If `STRIPE_PUBLISHABLE_KEY` is unset at build time, an empty
+    // string is inlined; the embedded checkout call will fail at runtime
+    // with a clear Stripe error rather than silently breaking.
+    define: {
+      'process.env.STRIPE_PUBLISHABLE_KEY': JSON.stringify(
+        process.env.STRIPE_PUBLISHABLE_KEY ?? '',
+      ),
+    },
   };
 
   if (watch) {

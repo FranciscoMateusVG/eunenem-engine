@@ -11,6 +11,18 @@ export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
 
 export type Int8 = ColumnType<string, bigint | number | string, bigint | number | string>;
 
+export type Json = JsonValue;
+
+export type JsonArray = JsonValue[];
+
+export type JsonObject = {
+  [x: string]: JsonValue | undefined;
+};
+
+export type JsonPrimitive = boolean | number | string | null;
+
+export type JsonValue = JsonArray | JsonObject | JsonPrimitive;
+
 export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
 export interface Accounts {
@@ -72,6 +84,21 @@ export interface OpcoesContribuicao {
   campanha_id: string;
   id: string;
   tipo: string;
+}
+
+export interface Pagamentos {
+  atualizado_em: Timestamp;
+  criado_em: Timestamp;
+  id: string;
+  intencao_amount_cents: number;
+  intencao_composicao_valores: Json;
+  intencao_criada_em: Timestamp;
+  intencao_external_ref: string | null;
+  intencao_id: string;
+  intencao_id_contribuicao: string;
+  intencao_metodo: string;
+  status: string;
+  transacao_externa: Json | null;
 }
 
 export interface RateLimit {
@@ -140,6 +167,7 @@ export interface DB {
   contas: Contas;
   contribuicoes: Contribuicoes;
   opcoes_contribuicao: OpcoesContribuicao;
+  pagamentos: Pagamentos;
   rate_limit: RateLimit;
   recebedores: Recebedores;
   sessions: Sessions;

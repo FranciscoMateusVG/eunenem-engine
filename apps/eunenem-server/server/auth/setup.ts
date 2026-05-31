@@ -5,6 +5,7 @@ import {
   type Auth,
   type CampanhaRepository,
   CampanhaRepositoryPostgres,
+  type CheckoutSessionProvider,
   ConsoleLogger,
   type ContribuicaoRepository,
   ContribuicaoRepositoryPostgres,
@@ -14,17 +15,29 @@ import {
   type Database,
   ID_PLATAFORMA_EUNENEM,
   type Observability,
+  type PagamentoEventPublisher,
+  PagamentoEventPublisherMemory,
+  type PagamentoProvider,
+  PagamentoProviderFake,
+  PagamentoProviderStripe,
+  type PagamentoRepository,
+  PagamentoRepositoryPostgres,
   PlataformaRepositoryMemory,
   type PlataformaRepository,
+  type ProvedorRegraTaxa,
+  ProvedorRegraTaxaMemory,
+  REGRAS_TAXA_SEED,
   type RecebedorRepository,
   RecebedorRepositoryPostgres,
   UsuarioRepositoryPostgres,
   type UsuarioRepository,
 } from '../../../../src/index.js';
 import { noopTracer } from '../../../../src/observability/tracer.js';
+import { getStripe } from '../../src/lib/stripe/stripe.js';
 
 /**
- * Engine-side dependencies wired for the eunenem-server (aperture-ht7sq).
+ * Engine-side dependencies wired for the eunenem-server (aperture-ht7sq +
+ * aperture-xaha2 visitor checkout wiring).
  *
  * Constructed ONCE at boot — the same instances are reused across every
  * request via the tRPC `createContext` factory. tRPC procedures grab
@@ -45,6 +58,24 @@ export interface ServerDeps {
   readonly campanhaRepository: CampanhaRepository;
   readonly contribuicaoRepository: ContribuicaoRepository;
   readonly recebedorRepository: RecebedorRepository;
+  /**
+   * Pagamentos / Checkout adapters (aperture-xaha2). Wired for the FIRST
+   * time here — the engine's pagamentos BC has been in-memory-test-only
+   * until visitor checkout. `pagamentoProvider` AND `checkoutSessionProvider`
+   * are the SAME instance (PagamentoProviderStripe in prod / fake otherwise),
+   * which implements both ports. Repository persisted to Postgres. Event
+   * publisher in-memory for now — no event consumers yet.
+   */
+  readonly pagamentoRepository: PagamentoRepository;
+  readonly pagamentoProvider: PagamentoProvider;
+  readonly checkoutSessionProvider: CheckoutSessionProvider;
+  readonly pagamentoEventPublisher: PagamentoEventPublisher;
+  /**
+   * Taxas BC — provider of fee rules per plataforma+tipo. v1 uses the
+   * in-memory seed (eunenem: 10% on presentes). When operators need
+   * dynamic per-plataforma fees, swap for a Postgres-backed provider.
+   */
+  readonly provedorRegraTaxa: ProvedorRegraTaxa;
   readonly observability: Observability;
   readonly clock: () => Date;
   /** Cookie name shared by the engine's BetterAuth sessions table + our tRPC procedures. */
@@ -57,31 +88,75 @@ export interface ServerDeps {
  * so a fresh clone can `pnpm dev` without crashing on missing secrets;
  * production deploys MUST override every value.
  */
-const ServerEnvSchema = z.object({
-  /** ≥32 chars per BetterAuth's signing requirements (T6 from recon §4). */
-  BETTER_AUTH_SECRET: z
-    .string()
-    .min(32, 'BETTER_AUTH_SECRET must be at least 32 chars (HMAC signing key)'),
-  /** Public origin of the eunenem-server (e.g. https://eunenem.programaincluir.org). */
-  BETTER_AUTH_URL: z.url('BETTER_AUTH_URL must be a valid URL'),
-  /**
-   * Comma-separated explicit allowlist of trusted origins (T6 — no wildcards,
-   * append don't replace). Engine appends BETTER_AUTH_URL automatically;
-   * this list is additive for cross-origin cookie-bearing requests (e.g.
-   * local-dev front-end on a different port).
-   */
-  TRUSTED_ORIGINS: z.string().min(1, 'TRUSTED_ORIGINS required (comma-separated)'),
-  /**
-   * Postgres connection string for the engine's domain + BetterAuth tables.
-   * Both schemas live in the same DB. Migrations are owned by the engine
-   * repo (`pnpm db:migrate` from the engine root) — eunenem-server is a
-   * consumer, not a schema owner.
-   */
-  DATABASE_URL: z
-    .string()
-    .min(1, 'DATABASE_URL required (postgres connection string for the engine schema)'),
-  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-});
+const ServerEnvSchema = z
+  .object({
+    /** ≥32 chars per BetterAuth's signing requirements (T6 from recon §4). */
+    BETTER_AUTH_SECRET: z
+      .string()
+      .min(32, 'BETTER_AUTH_SECRET must be at least 32 chars (HMAC signing key)'),
+    /** Public origin of the eunenem-server (e.g. https://eunenem.programaincluir.org). */
+    BETTER_AUTH_URL: z.url('BETTER_AUTH_URL must be a valid URL'),
+    /**
+     * Comma-separated explicit allowlist of trusted origins (T6 — no wildcards,
+     * append don't replace). Engine appends BETTER_AUTH_URL automatically;
+     * this list is additive for cross-origin cookie-bearing requests (e.g.
+     * local-dev front-end on a different port).
+     */
+    TRUSTED_ORIGINS: z.string().min(1, 'TRUSTED_ORIGINS required (comma-separated)'),
+    /**
+     * Postgres connection string for the engine's domain + BetterAuth tables.
+     * Both schemas live in the same DB. Migrations are owned by the engine
+     * repo (`pnpm db:migrate` from the engine root) — eunenem-server is a
+     * consumer, not a schema owner.
+     */
+    DATABASE_URL: z
+      .string()
+      .min(1, 'DATABASE_URL required (postgres connection string for the engine schema)'),
+    NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+    /**
+     * Stripe server-side keys (aperture-xaha2). REQUIRED in production
+     * for the PagamentoProviderStripe DI gate. In development/test the
+     * fake provider is wired instead and these stay optional (empty
+     * strings allowed for fresh-clone `pnpm dev` workflows).
+     *
+     * STRIPE_PUBLISHABLE_KEY is consumed by the client bundle via
+     * esbuild's `define` (see build.mjs) — it must be set at BUILD time,
+     * not just runtime, for the embedded checkout to mount.
+     *
+     * STRIPE_WEBHOOK_SECRET is consumed by the /api/webhooks/stripe
+     * handler (aperture-24n36) for signature verification. Local dev:
+     * `stripe listen --forward-to localhost:3001/api/webhooks/stripe`
+     * prints a per-session whsec_xxx; paste it into .env.
+     */
+    STRIPE_PUBLISHABLE_KEY: z.string().default(''),
+    STRIPE_SECRET_KEY: z.string().default(''),
+    STRIPE_WEBHOOK_SECRET: z.string().default(''),
+  })
+  .superRefine((env, ctx) => {
+    if (env.NODE_ENV === 'production') {
+      if (env.STRIPE_SECRET_KEY.length === 0) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['STRIPE_SECRET_KEY'],
+          message: 'STRIPE_SECRET_KEY required in production (Stripe adapter is the prod default).',
+        });
+      }
+      if (env.STRIPE_PUBLISHABLE_KEY.length === 0) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['STRIPE_PUBLISHABLE_KEY'],
+          message: 'STRIPE_PUBLISHABLE_KEY required in production (client bundle needs it at build time).',
+        });
+      }
+      if (env.STRIPE_WEBHOOK_SECRET.length === 0) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['STRIPE_WEBHOOK_SECRET'],
+          message: 'STRIPE_WEBHOOK_SECRET required in production (signature verification gate).',
+        });
+      }
+    }
+  });
 
 export type ServerEnv = z.infer<typeof ServerEnvSchema>;
 
@@ -116,6 +191,10 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): ServerEnv {
  * - `PlataformaRepository` is in-memory (the seeded plataformas
  *   eunenem + eucasei live in the engine package). When Plataforma BC
  *   gets a Postgres adapter, swap it here.
+ * - Pagamento provider DI is gated by NODE_ENV: Stripe in production,
+ *   PagamentoProviderFake otherwise. The fake implements BOTH ports
+ *   (PagamentoProvider + CheckoutSessionProvider) so dev/test flows
+ *   exercise the same code paths the prod adapter takes.
  */
 export function buildServerDeps(env: ServerEnv): ServerDeps {
   const observability: Observability = {
@@ -165,6 +244,35 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
   const campanhaRepository = new CampanhaRepositoryPostgres(db, recebedorRepository);
   const contribuicaoRepository = new ContribuicaoRepositoryPostgres(db);
 
+  // Pagamentos BC — first wiring (aperture-xaha2). Repository persisted
+  // to Postgres (migration 011). Event publisher in-memory; no consumers
+  // yet. Provider gated by NODE_ENV — same instance covers both ports
+  // (PagamentoProvider + CheckoutSessionProvider).
+  const pagamentoRepository = new PagamentoRepositoryPostgres(db);
+  const pagamentoEventPublisher = new PagamentoEventPublisherMemory();
+
+  let pagamentoProvider: PagamentoProvider;
+  let checkoutSessionProvider: CheckoutSessionProvider;
+  if (env.NODE_ENV === 'production') {
+    const stripeAdapter = new PagamentoProviderStripe({ stripe: getStripe() });
+    pagamentoProvider = stripeAdapter;
+    checkoutSessionProvider = stripeAdapter;
+  } else {
+    // Dev / test default: deterministic fake. No network calls, no Stripe
+    // secret required. Set NODE_ENV=production locally to exercise the
+    // real Stripe path (alongside `stripe listen --forward-to ...` for
+    // the webhook half).
+    const fakeAdapter = new PagamentoProviderFake();
+    pagamentoProvider = fakeAdapter;
+    checkoutSessionProvider = fakeAdapter;
+  }
+
+  // Taxas BC — in-memory seed (10% on eunenem presentes; see REGRAS_TAXA_SEED).
+  // Default-construction is also seed-backed; passing explicitly for clarity.
+  const provedorRegraTaxa = new ProvedorRegraTaxaMemory(REGRAS_TAXA_SEED);
+  // Silence the "unused import" complaint if we ever drop REGRAS_TAXA_SEED above.
+  void REGRAS_TAXA_SEED;
+
   return {
     db,
     auth,
@@ -174,6 +282,11 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     campanhaRepository,
     contribuicaoRepository,
     recebedorRepository,
+    pagamentoRepository,
+    pagamentoProvider,
+    checkoutSessionProvider,
+    pagamentoEventPublisher,
+    provedorRegraTaxa,
     observability,
     clock: () => new Date(),
     // BetterAuth's default cookie name — keep parity with `auth.handler`

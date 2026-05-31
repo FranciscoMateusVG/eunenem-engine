@@ -186,6 +186,7 @@ describe('Fluxo — reprocessamento de pagamento aprovado', () => {
       provedorRegraTaxa: deps.provedorRegraTaxa,
       pagamentoRepository: deps.pagamentoRepository,
       pagamentoEventPublisher: deps.pagamentoEventPublisher,
+      checkoutSessionProvider: deps.pagamentoProvider,
       clock,
       observability: deps.observability,
     };
@@ -209,6 +210,7 @@ describe('Fluxo — reprocessamento de pagamento aprovado', () => {
       metodo: 'pix',
       idPagamento,
       idIntencaoPagamento: randomUUID(),
+      returnUrl: 'https://test.example/sucesso?session_id={CHECKOUT_SESSION_ID}',
     });
 
     expect(pagamento.status).toBe('pendente');

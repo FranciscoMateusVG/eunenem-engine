@@ -17,6 +17,7 @@ import { CampanhaRepositoryPostgres } from '../../src/adapters/arrecadacao/campa
 import { ContribuicaoRepositoryPostgres } from '../../src/adapters/arrecadacao/contribuicao-repository.postgres.js';
 import { RecebedorRepositoryPostgres } from '../../src/adapters/arrecadacao/recebedor-repository.postgres.js';
 import { PagamentoEventPublisherMemory } from '../../src/adapters/pagamentos/event-publisher.memory.js';
+import { PagamentoProviderFake } from '../../src/adapters/pagamentos/provider.fake.js';
 import { PagamentoRepositoryMemory } from '../../src/adapters/pagamentos/repository.memory.js';
 import {
   ID_PLATAFORMA_EUNENEM,
@@ -66,6 +67,7 @@ function makeDeps() {
   const provedorRegraTaxa = new ProvedorRegraTaxaMemory();
   const pagamentoRepository = new PagamentoRepositoryMemory();
   const pagamentoEventPublisher = new PagamentoEventPublisherMemory();
+  const pagamentoProvider = new PagamentoProviderFake();
   const observability = testObs.observability;
 
   return {
@@ -77,6 +79,7 @@ function makeDeps() {
     provedorRegraTaxa,
     pagamentoRepository,
     pagamentoEventPublisher,
+    pagamentoProvider,
     observability,
   };
 }
@@ -197,6 +200,7 @@ describe('Fluxo — alteração de valor antes e depois do checkout', () => {
       provedorRegraTaxa: deps.provedorRegraTaxa,
       pagamentoRepository: deps.pagamentoRepository,
       pagamentoEventPublisher: deps.pagamentoEventPublisher,
+      checkoutSessionProvider: deps.pagamentoProvider,
       clock,
       observability: deps.observability,
     };
@@ -213,6 +217,7 @@ describe('Fluxo — alteração de valor antes e depois do checkout', () => {
         metodo: 'pix',
         idPagamento,
         idIntencaoPagamento,
+        returnUrl: 'https://test.example/sucesso?session_id={CHECKOUT_SESSION_ID}',
       },
     );
 

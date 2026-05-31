@@ -57,11 +57,16 @@ export async function aprovarPagamento(
         throw new PagamentoTransicaoStatusInvalidaError(pagamento.id, pagamento.status, 'aprovado');
       }
 
+      // Thread externalRef (aperture-xaha2): when the Pagamento was created
+      // via the CheckoutSessionProvider flow, the Stripe adapter needs the
+      // session id to look up the actual `payment_intent` rather than minting
+      // a synthetic transaction. The fake adapter ignores this field.
       const transacao = await pagamentoProvider.solicitarPagamento({
         idPagamento: pagamento.id,
         idIntencaoPagamento: pagamento.intencao.id,
         amountCents: pagamento.intencao.amountCents,
         metodo: pagamento.intencao.metodo,
+        externalRef: pagamento.intencao.externalRef,
       });
 
       if (transacao.status !== 'aprovado') {

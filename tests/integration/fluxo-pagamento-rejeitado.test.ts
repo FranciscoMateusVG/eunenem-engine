@@ -196,6 +196,7 @@ describe('Fluxo — pagamento rejeitado pelo provedor', () => {
       provedorRegraTaxa: deps.provedorRegraTaxa,
       pagamentoRepository: deps.pagamentoRepository,
       pagamentoEventPublisher: deps.pagamentoEventPublisher,
+      checkoutSessionProvider: deps.pagamentoProvider,
       clock,
       observability: deps.observability,
     };
@@ -209,6 +210,7 @@ describe('Fluxo — pagamento rejeitado pelo provedor', () => {
         metodo: 'pix',
         idPagamento,
         idIntencaoPagamento,
+        returnUrl: 'https://test.example/sucesso?session_id={CHECKOUT_SESSION_ID}',
       });
 
     expect(contribuicaoReservada.status).toBe('indisponivel');

@@ -14,12 +14,20 @@ export type { Database } from './adapters/database.js';
 export { createDatabase } from './adapters/database.js';
 export type { LivroFinanceiroRepository } from './adapters/financeiro/livro-repository.js';
 export { LivroFinanceiroRepositoryMemory } from './adapters/financeiro/livro-repository.memory.js';
+export type {
+  CheckoutSessionProvider,
+  CriarSessaoCheckoutInput,
+  CriarSessaoCheckoutResult,
+  ObterSessaoCheckoutResult,
+} from './adapters/pagamentos/checkout-session-provider.js';
 export type { PagamentoEventPublisher } from './adapters/pagamentos/event-publisher.js';
 export { PagamentoEventPublisherMemory } from './adapters/pagamentos/event-publisher.memory.js';
 export { PagamentoProviderFake } from './adapters/pagamentos/provider.fake.js';
 export type { PagamentoProvider, SolicitarPagamentoInput } from './adapters/pagamentos/provider.js';
+export { PagamentoProviderStripe } from './adapters/pagamentos/provider.stripe.js';
 export type { PagamentoRepository } from './adapters/pagamentos/repository.js';
 export { PagamentoRepositoryMemory } from './adapters/pagamentos/repository.memory.js';
+export { PagamentoRepositoryPostgres } from './adapters/pagamentos/repository.postgres.js';
 export type { PlataformaRepository } from './adapters/plataforma/repository.js';
 export {
   ID_PLATAFORMA_EUCASEI,

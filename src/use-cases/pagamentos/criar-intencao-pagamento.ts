@@ -26,6 +26,12 @@ export const CriarIntencaoPagamentoInputSchema = z.object({
   composicaoValores: SnapshotComposicaoValoresSchema,
   valorACobrarCents: MoneyCentsSchema,
   metodo: MetodoPagamentoSchema,
+  /**
+   * Provider-side session reference (aperture-xaha2). Pass the Stripe
+   * checkout session id when creating via the CheckoutSessionProvider
+   * flow; omit / pass null for the synchronous solicitarPagamento flow.
+   */
+  externalRef: z.string().trim().min(1).max(255).nullable().optional(),
 });
 
 export type CriarIntencaoPagamentoInput = z.infer<typeof CriarIntencaoPagamentoInputSchema>;
@@ -55,14 +61,23 @@ export async function criarIntencaoPagamento(
         throw new PagamentosInputInvalidoError(message);
       }
 
-      const { idPagamento, idIntencaoPagamento, composicaoValores, valorACobrarCents, metodo } =
-        parsed.data;
+      const {
+        idPagamento,
+        idIntencaoPagamento,
+        composicaoValores,
+        valorACobrarCents,
+        metodo,
+        externalRef,
+      } = parsed.data;
 
       span.setAttribute('pagamento.id', idPagamento);
       span.setAttribute('pagamento.intencao.id', idIntencaoPagamento);
       span.setAttribute('pagamento.contribuicao.id', composicaoValores.idContribuicao);
       span.setAttribute('pagamento.amount_cents', valorACobrarCents);
       span.setAttribute('pagamento.method', metodo);
+      if (externalRef) {
+        span.setAttribute('pagamento.external_ref.present', true);
+      }
 
       if (valorACobrarCents !== composicaoValores.totalPaidCents) {
         throw new PagamentoValorDivergenteError(
@@ -83,6 +98,7 @@ export async function criarIntencaoPagamento(
         composicaoValores,
         valorACobrarCents,
         metodo,
+        externalRef: externalRef ?? null,
         criadoEm: now,
       });
 

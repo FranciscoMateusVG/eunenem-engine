@@ -96,6 +96,7 @@ async function setupPagamentoPendente(idPlataforma: string, tipoOpcao: 'presente
       provedorRegraTaxa,
       pagamentoRepository,
       pagamentoEventPublisher,
+      checkoutSessionProvider: pagamentoProvider,
       clock,
       observability: silentObservability,
     },
@@ -107,6 +108,7 @@ async function setupPagamentoPendente(idPlataforma: string, tipoOpcao: 'presente
       metodo: 'pix',
       idPagamento,
       idIntencaoPagamento: randomUUID(),
+      returnUrl: 'https://test.example/sucesso?session_id={CHECKOUT_SESSION_ID}',
     },
   );
 

@@ -56,9 +56,14 @@ describe('Migration round-trip', () => {
     expect(tableNames).toContain('accounts');
     expect(tableNames).toContain('verifications');
     expect(tableNames).toContain('rate_limit');
+    expect(tableNames).toContain('pagamentos');
 
-    // Migrate down (latest migration first). aperture-khbow added the
-    // slug migration (010) on top of usuario (008) + better-auth (009).
+    // Migrate down (latest migration first). aperture-xaha2 added the
+    // pagamentos migration (011) on top of slug (010), better-auth (009),
+    // and usuario (008).
+    const downPagamentos = await migrator.migrateDown();
+    expect(downPagamentos.error).toBeUndefined();
+
     const downSlug = await migrator.migrateDown();
     expect(downSlug.error).toBeUndefined();
 

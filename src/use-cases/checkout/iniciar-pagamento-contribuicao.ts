@@ -2,6 +2,7 @@ import { SpanStatusCode } from '@opentelemetry/api';
 import { z } from 'zod/v4';
 import type { CampanhaRepository } from '../../adapters/arrecadacao/campanha-repository.js';
 import type { ContribuicaoRepository } from '../../adapters/arrecadacao/contribuicao-repository.js';
+import type { CheckoutSessionProvider } from '../../adapters/pagamentos/checkout-session-provider.js';
 import type { PagamentoEventPublisher } from '../../adapters/pagamentos/event-publisher.js';
 import type { PagamentoRepository } from '../../adapters/pagamentos/repository.js';
 import type { ProvedorRegraTaxa } from '../../adapters/taxas/regra-provider.js';
@@ -37,15 +38,32 @@ export const IniciarPagamentoContribuicaoInputSchema = z.object({
   metodo: MetodoPagamentoSchema,
   idPagamento: IdPagamentoSchema,
   idIntencaoPagamento: IdIntencaoPagamentoSchema,
+  /**
+   * URL the provider redirects the visitor to after they submit payment.
+   * Use the literal `{CHECKOUT_SESSION_ID}` placeholder if the provider
+   * supports it (Stripe substitutes it server-side). The caller (tRPC
+   * layer) constructs this from the slug + sucesso route shape; the
+   * use-case doesn't know URL conventions.
+   *
+   * Example: `https://eunenem.example/pagina/francisco/sucesso?session_id={CHECKOUT_SESSION_ID}`
+   */
+  returnUrl: z.string().trim().min(1).max(2000),
 });
 
 export type IniciarPagamentoContribuicaoInput = z.infer<
   typeof IniciarPagamentoContribuicaoInputSchema
 >;
 
+/**
+ * Result includes the provider-side session details (`sessionId` +
+ * `clientSecret`) that the frontend needs to mount the embedded checkout
+ * iframe. The clientSecret is opaque on our side — never log it.
+ */
 export interface IniciarPagamentoContribuicaoResult {
   readonly contribuicao: Contribuicao;
   readonly pagamento: Pagamento;
+  readonly sessionId: string;
+  readonly clientSecret: string;
 }
 
 export interface IniciarPagamentoContribuicaoDeps {
@@ -54,23 +72,46 @@ export interface IniciarPagamentoContribuicaoDeps {
   readonly provedorRegraTaxa: ProvedorRegraTaxa;
   readonly pagamentoRepository: PagamentoRepository;
   readonly pagamentoEventPublisher: PagamentoEventPublisher;
+  /**
+   * Sibling-port checkout-session adapter (aperture-xaha2). Stripe adapter
+   * in production, PagamentoProviderFake (which implements both ports)
+   * in tests / non-prod. The saga depends on the abstraction — Stripe is
+   * never imported here.
+   */
+  readonly checkoutSessionProvider: CheckoutSessionProvider;
   readonly clock: () => Date;
   readonly observability: Observability;
 }
 
 /**
- * Saga de checkout (write-side): o contribuinte clica "quero este item" e o
- * orquestrador compõe três BCs em sequência:
+ * Saga de checkout (write-side) — async session topology (aperture-xaha2).
+ *
+ * Step order:
  *   1. plataforma membership check (campanha.idPlataforma === input.idPlataforma)
  *   2. associarContribuinteContribuicao (Arrecadação) → status passa a `indisponivel`
- *   3. calcularComposicaoValores (Taxas, plataforma+tipo escopado) → snapshot
- *   4. criarIntencaoPagamento (Pagamentos) → pagamento pendente com snapshot
+ *   3. encontrarOpcaoContribuicao + calcularComposicaoValores (no DB writes)
+ *   4. **checkoutSessionProvider.criarSessaoCheckout** → provider session,
+ *      returns { sessionId, clientSecret, externalRef }
+ *   5. criarIntencaoPagamento (Pagamentos) → pagamento pendente com snapshot
+ *      + externalRef populated
  *
- * Se o passo 3 ou 4 falhar, **compensa** chamando desassociarContribuinte
- * (Arrecadação) — a contribuição volta a `disponivel`, nenhum pagamento
- * é criado. Falha de compensação é logada mas não substitui o erro original.
+ * **Compensation:** if step 4 OR step 5 fails, call desassociarContribuinte
+ * to revert step 2 — the contribuicao goes back to `disponivel`. A failed
+ * step 4 leaves no provider-side state (Stripe session create is one-shot
+ * with idempotencyKey = idPagamento, so a half-created session can't exist).
+ * A failed step 5 leaves an orphaned provider session — it expires by the
+ * provider's default TTL (Stripe: 24h) and self-cleans; no compensation
+ * call needed.
  *
- * Para no estado "intenção pendente criada"; aprovação é Phase 3.
+ * **Why criarSessaoCheckout before criarIntencaoPagamento, not after:**
+ * Doing the network call first means a Stripe failure → no DB write for
+ * Pagamento at all (cleaner state). Doing it after would leave an orphaned
+ * pendente Pagamento with externalRef=null forever. We prefer "the
+ * checkout never happened" over "the checkout half-happened."
+ *
+ * Returns the full set the tRPC layer needs to respond to the visitor.
+ * The actual settlement (status → aprovado/rejeitado) is async via the
+ * webhook (aperture-24n36).
  */
 export async function iniciarPagamentoContribuicao(
   deps: IniciarPagamentoContribuicaoDeps,
@@ -82,6 +123,7 @@ export async function iniciarPagamentoContribuicao(
     provedorRegraTaxa,
     pagamentoRepository,
     pagamentoEventPublisher,
+    checkoutSessionProvider,
     clock,
     observability,
   } = deps;
@@ -138,7 +180,27 @@ export async function iniciarPagamentoContribuicao(
           },
         );
 
-        // step 4: create the payment intent (snapshot locked here)
+        // step 4: create the provider-side checkout session BEFORE the
+        // Pagamento DB write. If this fails (network, auth, provider 5xx),
+        // we compensate step 2 and exit cleanly — no orphan Pagamento row.
+        const sessao = await checkoutSessionProvider.criarSessaoCheckout({
+          idPagamento: parsed.idPagamento,
+          idIntencaoPagamento: parsed.idIntencaoPagamento,
+          idContribuicao: parsed.idContribuicao,
+          idOpcaoContribuicao: updated.idOpcaoContribuicao,
+          tipoOpcao: opcao.tipo,
+          nomeItem: updated.nome,
+          amountCents: composicao.totalPaidCents,
+          metodo: parsed.metodo,
+          contribuinte: parsed.contribuinte,
+          returnUrl: parsed.returnUrl,
+        });
+
+        span.setAttribute('checkout.session.id', sessao.sessionId);
+
+        // step 5: create the payment intent (snapshot locked here) with
+        // externalRef populated so the webhook can resolve back to this
+        // pagamento via PagamentoRepository.findByExternalRef.
         const pagamento = await criarIntencaoPagamento(
           { pagamentoRepository, pagamentoEventPublisher, clock, observability },
           {
@@ -147,6 +209,7 @@ export async function iniciarPagamentoContribuicao(
             composicaoValores: composicao,
             valorACobrarCents: composicao.totalPaidCents,
             metodo: parsed.metodo,
+            externalRef: sessao.externalRef,
           },
         );
 
@@ -155,12 +218,18 @@ export async function iniciarPagamentoContribuicao(
           idCampanha: campanha.id,
           idContribuicao: parsed.idContribuicao,
           idPagamento: pagamento.id,
+          sessionId: sessao.sessionId,
           tipoOpcao: opcao.tipo,
           totalPaidCents: composicao.totalPaidCents,
         });
 
         span.setStatus({ code: SpanStatusCode.OK });
-        return { contribuicao: updated, pagamento };
+        return {
+          contribuicao: updated,
+          pagamento,
+          sessionId: sessao.sessionId,
+          clientSecret: sessao.clientSecret,
+        };
       } catch (downstreamError) {
         // compensation: revert the claim from step 2
         try {

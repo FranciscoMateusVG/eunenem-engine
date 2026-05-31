@@ -71,4 +71,31 @@ export class PagamentoRepositoryMemory implements PagamentoRepository {
       }
     });
   }
+
+  /**
+   * Linear scan over the in-memory map (aperture-xaha2). Fine for tests
+   * and learning examples — the Postgres adapter uses an indexed query.
+   * Returns the first match (externalRef is logically unique).
+   */
+  async findByExternalRef(externalRef: string): Promise<Pagamento | undefined> {
+    return tracer.startActiveSpan('db.pagamentos.findByExternalRef', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        for (const pagamento of this.pagamentos.values()) {
+          if (pagamento.intencao.externalRef === externalRef) {
+            span.setStatus({ code: SpanStatusCode.OK });
+            return pagamento;
+          }
+        }
+        span.setStatus({ code: SpanStatusCode.OK });
+        return undefined;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
 }

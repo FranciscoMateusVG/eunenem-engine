@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { ContribuicaoRepositoryMemory } from '../../../src/adapters/arrecadacao/contribuicao-repository.memory.js';
 import { PagamentoEventPublisherMemory } from '../../../src/adapters/pagamentos/event-publisher.memory.js';
+import { PagamentoProviderFake } from '../../../src/adapters/pagamentos/provider.fake.js';
 import { PagamentoRepositoryMemory } from '../../../src/adapters/pagamentos/repository.memory.js';
 import {
   ID_PLATAFORMA_EUCASEI,
@@ -39,6 +40,8 @@ const contribuinteValido = () => ({
   email: 'joao@exemplo.com',
 });
 
+const TEST_RETURN_URL = 'https://test.example/sucesso?session_id={CHECKOUT_SESSION_ID}';
+
 async function seedCheckoutCenario(idPlataforma: string, tipoOpcao: 'presente' | 'rifa') {
   const repos = createArrecadacaoMemoryRepos();
   const { campanhaRepository, recebedorRepository, plataformaRepository } = repos;
@@ -46,6 +49,7 @@ async function seedCheckoutCenario(idPlataforma: string, tipoOpcao: 'presente' |
   const provedorRegraTaxa = new ProvedorRegraTaxaMemory();
   const pagamentoRepository = new PagamentoRepositoryMemory();
   const pagamentoEventPublisher = new PagamentoEventPublisherMemory();
+  const checkoutSessionProvider = new PagamentoProviderFake();
 
   const idCampanha = randomUUID();
   const idOpcao = randomUUID();
@@ -89,6 +93,7 @@ async function seedCheckoutCenario(idPlataforma: string, tipoOpcao: 'presente' |
       provedorRegraTaxa,
       pagamentoRepository,
       pagamentoEventPublisher,
+      checkoutSessionProvider,
       clock,
       observability: silentObservability,
     },
@@ -116,6 +121,7 @@ describe('iniciarPagamentoContribuicao — happy path', () => {
       metodo: 'pix',
       idPagamento,
       idIntencaoPagamento,
+      returnUrl: TEST_RETURN_URL,
     });
 
     expect(contribuicao.id).toBe(idContribuicao);
@@ -146,6 +152,7 @@ describe('iniciarPagamentoContribuicao — happy path', () => {
       metodo: 'pix',
       idPagamento: randomUUID(),
       idIntencaoPagamento: randomUUID(),
+      returnUrl: TEST_RETURN_URL,
     });
 
     expect(pagamento.intencao.amountCents).toBe(8640);
@@ -172,6 +179,7 @@ describe('iniciarPagamentoContribuicao — cross-tenant guard', () => {
         metodo: 'pix',
         idPagamento: randomUUID(),
         idIntencaoPagamento: randomUUID(),
+        returnUrl: TEST_RETURN_URL,
       }),
     ).rejects.toThrow(CheckoutPlataformaMismatchError);
 
@@ -218,6 +226,7 @@ describe('iniciarPagamentoContribuicao — saga compensation', () => {
         metodo: 'pix',
         idPagamento, // collides with the pre-seeded pagamento
         idIntencaoPagamento: randomUUID(),
+        returnUrl: TEST_RETURN_URL,
       }),
     ).rejects.toThrow(PagamentoJaExisteError);
 
@@ -242,6 +251,7 @@ describe('iniciarPagamentoContribuicao — saga compensation', () => {
       metodo: 'pix',
       idPagamento: randomUUID(),
       idIntencaoPagamento: randomUUID(),
+      returnUrl: TEST_RETURN_URL,
     });
 
     // second checkout for the same contribuição: associar throws nao-disponivel
@@ -254,6 +264,7 @@ describe('iniciarPagamentoContribuicao — saga compensation', () => {
         metodo: 'pix',
         idPagamento: randomUUID(),
         idIntencaoPagamento: randomUUID(),
+        returnUrl: TEST_RETURN_URL,
       }),
     ).rejects.toThrow(ArrecadacaoContribuicaoNaoDisponivelError);
 

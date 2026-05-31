@@ -61,11 +61,13 @@ export async function rejeitarPagamento(
         );
       }
 
+      // Thread externalRef (aperture-xaha2): see aprovar-pagamento.ts.
       const transacao = await pagamentoProvider.solicitarPagamento({
         idPagamento: pagamento.id,
         idIntencaoPagamento: pagamento.intencao.id,
         amountCents: pagamento.intencao.amountCents,
         metodo: pagamento.intencao.metodo,
+        externalRef: pagamento.intencao.externalRef,
       });
 
       if (transacao.status !== 'rejeitado') {
