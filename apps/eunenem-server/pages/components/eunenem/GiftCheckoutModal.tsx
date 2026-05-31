@@ -56,17 +56,20 @@ export function GiftCheckoutModal({
   const iniciarPagamento = useIniciarPagamentoContribuicao();
   const stripePromise = useMemo(() => getStripePromise(), []);
 
-  // Esc to close. Allowed on metodo; blocked once Stripe is mounted or a
-  // mutation is in flight.
+  // Esc to close. Blocked only during the brief iniciar mutation window —
+  // operator's mental model is "Esc closes the modal" and Stripe abandons
+  // sessions naturally on close. Pagamento stays pending and is webhook-
+  // finalized only on real payment success, so closing mid-Stripe is safe
+  // (aperture-4e4jt).
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      if (step === "stripe" || iniciarPagamento.isPending) return;
+      if (iniciarPagamento.isPending) return;
       onClose();
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [onClose, step, iniciarPagamento.isPending]);
+  }, [onClose, iniciarPagamento.isPending]);
 
   // Lock body scroll while modal is open.
   useEffect(() => {
@@ -77,7 +80,12 @@ export function GiftCheckoutModal({
     };
   }, []);
 
-  const canClose = step !== "stripe" && !iniciarPagamento.isPending;
+  // X / backdrop / Esc all share this gate. Blocked only during the brief
+  // iniciar mutation network call (we'd corrupt the saga compensation
+  // window). Open during Stripe — visitor can always abandon; Stripe's
+  // session expires + our Pagamento stays pending until the webhook
+  // finalizes a real payment (aperture-4e4jt).
+  const canClose = !iniciarPagamento.isPending;
 
   async function onConfirmMetodo() {
     if (!gift.availableId || iniciarPagamento.isPending) return;
@@ -170,9 +178,17 @@ export function GiftCheckoutModal({
         {step === "stripe" && clientSecret && (
           <div
             style={{
-              minHeight: 480,
+              // aperture-4e4jt — Stripe iframe content can exceed the
+              // modal's maxHeight on cramped viewports (mobile after URL
+              // bar, short windows). flex: 1 lets this wrapper claim the
+              // remaining height inside the modal's flex column;
+              // minHeight: 0 unlocks the standard flex-item shrink
+              // behaviour; overflowY: auto turns the wrapper into a
+              // scroll container so the Stripe iframe is always reachable.
+              flex: 1,
+              minHeight: 0,
+              overflowY: "auto",
               padding: 18,
-              overflow: "hidden",
               borderRadius: 24,
             }}
           >
