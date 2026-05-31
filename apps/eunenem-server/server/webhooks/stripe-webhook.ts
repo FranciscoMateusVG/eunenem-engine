@@ -80,6 +80,43 @@ const tracer = trace.getTracer('eunenem-server');
  * Builds the webhook handler closed over `deps`. Returned as a Hono
  * handler so server.tsx can mount it directly.
  */
+/**
+ * Pull contribuinte (nome + email + optional mensagem/recadinho) from a
+ * Stripe Checkout Session payload (aperture-m95f3).
+ *
+ * Stripe surfaces the visitor's data in three places:
+ *   - `customer_details.email` — Stripe-native field, set by
+ *     `customer_creation: 'if_required'`. The receipt also lands here.
+ *   - `custom_fields[key=nome]` — required field configured in the
+ *     embedded UI by provider.stripe.ts.
+ *   - `custom_fields[key=mensagem]` — optional recadinho.
+ *
+ * Returns `undefined` if either nome or email is missing — the contribuinte
+ * VO requires both. In that case the finalize still proceeds (just without
+ * the association); operator alerted via the `webhook.stripe.contribuinte_missing`
+ * log emission below.
+ */
+function extractContribuinteFromSession(
+  session: Stripe.Checkout.Session,
+): { nome: string; email: string; mensagem?: string } | undefined {
+  const email = session.customer_details?.email ?? session.customer_email ?? null;
+  const customFields = session.custom_fields ?? [];
+  const nomeField = customFields.find((f) => f.key === 'nome');
+  const mensagemField = customFields.find((f) => f.key === 'mensagem');
+  const nome = nomeField?.text?.value?.trim() ?? '';
+  const mensagem = mensagemField?.text?.value?.trim() ?? '';
+
+  if (nome.length === 0 || !email || email.length === 0) {
+    return undefined;
+  }
+
+  return {
+    nome,
+    email,
+    ...(mensagem.length > 0 ? { mensagem } : {}),
+  };
+}
+
 export function createStripeWebhookHandler(deps: ServerDeps) {
   return async (c: Context): Promise<Response> => {
     return tracer.startActiveSpan('webhook.stripe', async (span) => {
@@ -152,6 +189,13 @@ export function createStripeWebhookHandler(deps: ServerDeps) {
             }
             span.setAttribute('pagamento.id', pagamento.id);
             try {
+              // aperture-m95f3: extract contribuinte data from the Stripe
+              // session itself — Stripe collects nome + mensagem via
+              // custom_fields and email via customer_creation. Pass to
+              // finalize so the contribuicao gets claimed at the
+              // payment-settled moment (NOT at session-create — see
+              // iniciar-pagamento-contribuicao.ts header for rationale).
+              const contribuinte = extractContribuinteFromSession(session);
               await finalizarPagamentoAprovado(
                 {
                   pagamentoRepository: deps.pagamentoRepository,
@@ -163,7 +207,10 @@ export function createStripeWebhookHandler(deps: ServerDeps) {
                   clock: deps.clock,
                   observability: deps.observability,
                 },
-                { idPagamento: pagamento.id },
+                {
+                  idPagamento: pagamento.id,
+                  ...(contribuinte ? { contribuinte } : {}),
+                },
               );
               logger.info('webhook.stripe.dispatched', {
                 eventId: event.id,

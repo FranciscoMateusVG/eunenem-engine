@@ -1,4 +1,3 @@
-import type { DadosContribuinte } from '../../domain/arrecadacao/value-objects/dados-contribuinte.js';
 import type {
   IdContribuicao,
   IdOpcaoContribuicao,
@@ -59,14 +58,16 @@ export interface CriarSessaoCheckoutInput {
   readonly amountCents: MoneyCents;
   readonly metodo: MetodoPagamento;
   /**
-   * Contribuinte data — used to PREFILL Stripe's custom_fields nome,
-   * NOT collected by the saga itself. Provider may or may not honor it.
-   */
-  readonly contribuinte: DadosContribuinte;
-  /**
    * URL Stripe redirects to after payment. Use `{CHECKOUT_SESSION_ID}`
    * literal as the placeholder — Stripe substitutes it server-side.
    * Example: `https://eunenem.example/pagina/francisco/sucesso?session_id={CHECKOUT_SESSION_ID}`.
+   *
+   * **Note (aperture-m95f3):** the visitor's nome + email + recadinho
+   * are NOT passed in. The provider collects all three natively (Stripe
+   * via `customer_creation: 'if_required'` + `custom_fields[nome,mensagem]`).
+   * The webhook handler reads them from the completed session and threads
+   * them into the finalize use-case at association time. Source-of-truth
+   * is the provider, not our pre-iframe form (operator decision, 2026-05-30).
    */
   readonly returnUrl: string;
   /**

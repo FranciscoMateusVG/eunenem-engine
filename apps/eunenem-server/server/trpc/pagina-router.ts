@@ -3,7 +3,6 @@ import { initTRPC, TRPCError } from '@trpc/server';
 import { z } from 'zod/v4';
 import {
   type Campanha,
-  DadosContribuinteSchema,
   type IdContribuicao,
   type IdIntencaoPagamento,
   type IdOpcaoContribuicao,
@@ -68,10 +67,11 @@ export const ObterListaPresentesOutputItemSchema = z.object({
 export const IniciarPagamentoContribuicaoInputSchema = z.object({
   slug: z.string().trim().min(1).max(60),
   idContribuicao: z.string().uuid(),
-  contribuinte: z.object({
-    nome: z.string().trim().min(1).max(120),
-    email: z.string().trim().email().max(320),
-  }),
+  // aperture-m95f3: no contribuinte input. Stripe collects nome + email
+  // + mensagem inside the embedded iframe via custom_fields +
+  // customer_creation. The webhook reads them from the completed session
+  // and finalize associates at payment-settled time. Operator decision —
+  // mirrors legacy eunenem.
   metodo: z.enum(['pix', 'credit_card']),
 });
 
@@ -229,7 +229,6 @@ export const paginaRouter = t.router({
             idPlataforma: ID_PLATAFORMA_EUNENEM,
             idCampanha: campanha.id,
             idContribuicao: input.idContribuicao as IdContribuicao,
-            contribuinte: DadosContribuinteSchema.parse(input.contribuinte),
             metodo: input.metodo,
             idPagamento,
             idIntencaoPagamento,
@@ -292,15 +291,23 @@ export const paginaRouter = t.router({
         status = 'unknown';
       }
 
+      // aperture-m95f3: post-webhook the Contribuicao.contribuinte (set
+      // by finalize → associarContribuinteContribuicao) is canonical for
+      // nome / email / mensagem. Fall back to the provider session for the
+      // pre-webhook window (visitor hit success before webhook fired) so
+      // the page still shows something during the pending state.
+      const persistedContribuinte = contribuicao?.contribuinte ?? null;
+
       return {
         giftName: contribuicao?.nome ?? '',
         valor: pagamento.intencao.amountCents,
-        recadinho: sessao?.customFields.mensagem ?? null,
+        recadinho:
+          persistedContribuinte?.mensagem ?? sessao?.customFields.mensagem ?? null,
         babyName: usuario.nomeExibicao,
         status,
         contribuinte: {
-          nome: sessao?.contribuinteNome ?? null,
-          email: sessao?.contribuinteEmail ?? null,
+          nome: persistedContribuinte?.nome ?? sessao?.contribuinteNome ?? null,
+          email: persistedContribuinte?.email ?? sessao?.contribuinteEmail ?? null,
         },
       };
     }),

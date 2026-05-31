@@ -222,7 +222,6 @@ describe('Fluxo — jornada completa de criação de campanha até repasse de sa
         idPlataforma: ID_PLATAFORMA_EUNENEM,
         idCampanha,
         idContribuicao,
-        contribuinte: contribuinteValido(),
         metodo: 'pix',
         idPagamento,
         idIntencaoPagamento: randomUUID(),
@@ -230,13 +229,16 @@ describe('Fluxo — jornada completa de criação de campanha até repasse de sa
       },
     );
 
-    expect(contribuicao.status).toBe('indisponivel');
-    expect(contribuicao.contribuinte).toEqual(contribuinteValido());
+    // aperture-m95f3: saga no longer claims the contribuição — that happens
+    // during finalizarPagamentoAprovado when the webhook delivers the
+    // contribuinte data Stripe collected inside the iframe.
+    expect(contribuicao.status).toBe('disponivel');
+    expect(contribuicao.contribuinte).toBeNull();
     expect(pagamento.status).toBe('pendente');
     expect(pagamento.intencao.composicaoValores.totalPaidCents).toBe(VALOR_TOTAL_CENTS);
 
     const persistedContribuicao = await deps.contribuicaoRepository.findById(idContribuicao);
-    expect(persistedContribuicao?.status).toBe('indisponivel');
+    expect(persistedContribuicao?.status).toBe('disponivel');
 
     const { pagamento: pagamentoAprovado, lancamentos } = await finalizarPagamentoAprovado(
       {
@@ -249,8 +251,13 @@ describe('Fluxo — jornada completa de criação de campanha até repasse de sa
         clock,
         observability: deps.observability,
       },
-      { idPagamento },
+      { idPagamento, contribuinte: contribuinteValido() },
     );
+
+    // Webhook-driven claim happens inside finalize when contribuinte is present.
+    const contribuicaoAposFinalize = await deps.contribuicaoRepository.findById(idContribuicao);
+    expect(contribuicaoAposFinalize?.status).toBe('indisponivel');
+    expect(contribuicaoAposFinalize?.contribuinte).toEqual(contribuinteValido());
 
     expect(pagamentoAprovado.status).toBe('aprovado');
     expect(lancamentos).toHaveLength(2);

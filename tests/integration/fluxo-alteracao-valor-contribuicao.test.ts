@@ -29,6 +29,7 @@ import { UsuarioRepositoryMemory } from '../../src/adapters/usuario/repository.m
 import { ArrecadacaoContribuicaoNaoDisponivelError } from '../../src/errors/arrecadacao/contribuicao-nao-disponivel.error.js';
 import { adicionarOpcaoContribuicao } from '../../src/use-cases/arrecadacao/adicionar-opcao-contribuicao.js';
 import { alterarValorContribuicao } from '../../src/use-cases/arrecadacao/alterar-valor-contribuicao.js';
+import { associarContribuinteContribuicao } from '../../src/use-cases/arrecadacao/associar-contribuinte-contribuicao.js';
 import { criarCampanha } from '../../src/use-cases/arrecadacao/criar-campanha.js';
 import { criarContribuicao } from '../../src/use-cases/arrecadacao/criar-contribuicao.js';
 import { iniciarPagamentoContribuicao } from '../../src/use-cases/checkout/iniciar-pagamento-contribuicao.js';
@@ -207,13 +208,14 @@ describe('Fluxo — alteração de valor antes e depois do checkout', () => {
 
     const contribuinte = contribuinteVisitante();
 
-    const { contribuicao: contribuicaoReservada, pagamento } = await iniciarPagamentoContribuicao(
+    // aperture-m95f3: saga no longer claims the contribuição (claim moved to
+    // finalize via webhook). The saga leaves the contribuição disponivel.
+    const { contribuicao: contribuicaoAposSaga, pagamento } = await iniciarPagamentoContribuicao(
       checkoutDeps,
       {
         idPlataforma: ID_PLATAFORMA_EUNENEM,
         idCampanha,
         idContribuicao,
-        contribuinte,
         metodo: 'pix',
         idPagamento,
         idIntencaoPagamento,
@@ -221,9 +223,18 @@ describe('Fluxo — alteração de valor antes e depois do checkout', () => {
       },
     );
 
+    expect(contribuicaoAposSaga.status).toBe('disponivel');
+    expect(contribuicaoAposSaga.valor).toBe(VALOR_APOS_ALTERACAO_CENTS);
+    expect(pagamento.status).toBe('pendente');
+
+    // Simulate the webhook firing: payment settled → contribuição claimed
+    // (this is what finalizarPagamentoAprovado does in prod with `contribuinte`).
+    const contribuicaoReservada = await associarContribuinteContribuicao(
+      { contribuicaoRepository: deps.contribuicaoRepository, observability: deps.observability },
+      { idContribuicao, contribuinte },
+    );
     expect(contribuicaoReservada.status).toBe('indisponivel');
     expect(contribuicaoReservada.valor).toBe(VALOR_APOS_ALTERACAO_CENTS);
-    expect(pagamento.status).toBe('pendente');
 
     await expect(
       alterarValorContribuicao(

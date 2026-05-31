@@ -58,11 +58,6 @@ const dadosRecebedorPadrao = () => ({
   chavePix: 'maria@exemplo.com',
 });
 
-const contribuinteValido = () => ({
-  nome: 'Joao Visitante',
-  email: 'joao@exemplo.com',
-});
-
 function makeDeps() {
   const recebedorRepository = new RecebedorRepositoryPostgres(testDb.db);
   const campanhaRepository = new CampanhaRepositoryPostgres(testDb.db, recebedorRepository);
@@ -201,19 +196,21 @@ describe('Fluxo — pagamento rejeitado pelo provedor', () => {
       observability: deps.observability,
     };
 
-    const { contribuicao: contribuicaoReservada, pagamento: pagamentoPendente } =
+    // aperture-m95f3: saga no longer claims the contribuição — claim moves to
+    // finalize via webhook. A rejected payment therefore never had a claim to
+    // release; the contribuição simply stays disponivel end-to-end.
+    const { contribuicao: contribuicaoAposSaga, pagamento: pagamentoPendente } =
       await iniciarPagamentoContribuicao(checkoutDeps, {
         idPlataforma: ID_PLATAFORMA_EUNENEM,
         idCampanha,
         idContribuicao,
-        contribuinte: contribuinteValido(),
         metodo: 'pix',
         idPagamento,
         idIntencaoPagamento,
         returnUrl: 'https://test.example/sucesso?session_id={CHECKOUT_SESSION_ID}',
       });
 
-    expect(contribuicaoReservada.status).toBe('indisponivel');
+    expect(contribuicaoAposSaga.status).toBe('disponivel');
     expect(pagamentoPendente.status).toBe('pendente');
 
     expect(deps.pagamentoEventPublisher.getEventosPublicados()).toHaveLength(1);

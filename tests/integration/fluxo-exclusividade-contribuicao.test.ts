@@ -28,6 +28,7 @@ import { AuthServiceMemoria } from '../../src/adapters/usuario/auth-service.memo
 import { UsuarioRepositoryMemory } from '../../src/adapters/usuario/repository.memory.js';
 import { ArrecadacaoContribuicaoNaoDisponivelError } from '../../src/errors/arrecadacao/contribuicao-nao-disponivel.error.js';
 import { adicionarOpcaoContribuicao } from '../../src/use-cases/arrecadacao/adicionar-opcao-contribuicao.js';
+import { associarContribuinteContribuicao } from '../../src/use-cases/arrecadacao/associar-contribuinte-contribuicao.js';
 import { criarCampanha } from '../../src/use-cases/arrecadacao/criar-campanha.js';
 import { criarContribuicao } from '../../src/use-cases/arrecadacao/criar-contribuicao.js';
 import { iniciarPagamentoContribuicao } from '../../src/use-cases/checkout/iniciar-pagamento-contribuicao.js';
@@ -53,11 +54,6 @@ const dadosRecebedorPadrao = () => ({
 const contribuinteVisitanteA = () => ({
   nome: 'Visitante A',
   email: 'visitante.a@exemplo.com',
-});
-
-const contribuinteVisitanteB = () => ({
-  nome: 'Visitante B',
-  email: 'visitante.b@exemplo.com',
 });
 
 function makeDeps() {
@@ -206,32 +202,41 @@ describe('Fluxo — exclusividade de contribuição entre visitantes', () => {
       observability: deps.observability,
     };
 
-    const { contribuicao: contribuicaoReservada, pagamento: pagamentoA } =
+    // aperture-m95f3: saga no longer claims the contribuição — claim moves
+    // to finalize via webhook. Two visitors can BOTH start a session; the
+    // first whose webhook fires wins. The saga's new step-2 read-only check
+    // refuses to mount a checkout for a contribuição already claimed.
+    const { contribuicao: contribuicaoAposCheckoutASaga, pagamento: pagamentoA } =
       await iniciarPagamentoContribuicao(checkoutDeps, {
         idPlataforma: ID_PLATAFORMA_EUNENEM,
         idCampanha,
         idContribuicao,
-        contribuinte: contribuinteVisitanteA(),
         metodo: 'pix',
         idPagamento: idPagamentoA,
         idIntencaoPagamento: idIntencaoA,
         returnUrl: 'https://test.example/sucesso?session_id={CHECKOUT_SESSION_ID}',
       });
 
-    expect(contribuicaoReservada.status).toBe('indisponivel');
-    expect(contribuicaoReservada.contribuinte).toEqual(contribuinteVisitanteA());
+    expect(contribuicaoAposCheckoutASaga.status).toBe('disponivel');
+    expect(contribuicaoAposCheckoutASaga.contribuinte).toBeNull();
     expect(pagamentoA.status).toBe('pendente');
 
-    const contribuicaoAposCheckoutA = await deps.contribuicaoRepository.findById(idContribuicao);
-    expect(contribuicaoAposCheckoutA?.status).toBe('indisponivel');
-    expect(contribuicaoAposCheckoutA?.contribuinte).toEqual(contribuinteVisitanteA());
+    // Simulate visitor A's webhook firing first — claim the contribuição.
+    await associarContribuinteContribuicao(
+      { contribuicaoRepository: deps.contribuicaoRepository, observability: deps.observability },
+      { idContribuicao, contribuinte: contribuinteVisitanteA() },
+    );
 
+    const contribuicaoAposClaimA = await deps.contribuicaoRepository.findById(idContribuicao);
+    expect(contribuicaoAposClaimA?.status).toBe('indisponivel');
+    expect(contribuicaoAposClaimA?.contribuinte).toEqual(contribuinteVisitanteA());
+
+    // Visitor B now attempts to start checkout — refused by step-2 early-fail.
     await expect(
       iniciarPagamentoContribuicao(checkoutDeps, {
         idPlataforma: ID_PLATAFORMA_EUNENEM,
         idCampanha,
         idContribuicao,
-        contribuinte: contribuinteVisitanteB(),
         metodo: 'pix',
         idPagamento: idPagamentoB,
         idIntencaoPagamento: idIntencaoB,

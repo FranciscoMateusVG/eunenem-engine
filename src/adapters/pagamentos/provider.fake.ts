@@ -161,20 +161,22 @@ export class PagamentoProviderFake implements PagamentoProvider, CheckoutSession
         }
 
         // Default fake behaviour: session completed, payment approved.
-        // Tests that need 'pending' / 'rejected' / 'expired' shape can
-        // post-process via __setStubObterSessao below.
+        // aperture-m95f3: contribuinte data no longer comes through the
+        // CriarSessaoCheckoutInput — the real provider (Stripe) collects
+        // it in the iframe. The fake returns deterministic stub values
+        // for tests that assert on the post-session read shape.
         const result: ObterSessaoCheckoutResult = {
           sessionId: entry.result.sessionId,
           externalRef: entry.result.externalRef,
           status: 'complete',
           paymentStatus: this.statusResultado === 'aprovado' ? 'approved' : 'rejected',
           customFields: {
-            nome: entry.input.contribuinte.nome,
+            nome: 'Fake Visitor',
             mensagem: '',
           },
           amountTotalCents: entry.input.amountCents,
-          contribuinteEmail: entry.input.contribuinte.email,
-          contribuinteNome: entry.input.contribuinte.nome,
+          contribuinteEmail: 'fake-visitor@example.com',
+          contribuinteNome: 'Fake Visitor',
         };
 
         span.setStatus({ code: SpanStatusCode.OK });

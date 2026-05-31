@@ -6,6 +6,8 @@ import type { LivroFinanceiroRepository } from '../../adapters/financeiro/livro-
 import type { PagamentoEventPublisher } from '../../adapters/pagamentos/event-publisher.js';
 import type { PagamentoProvider } from '../../adapters/pagamentos/provider.js';
 import type { PagamentoRepository } from '../../adapters/pagamentos/repository.js';
+import { contribuicaoDisponivel } from '../../domain/arrecadacao/entities/contribuicao.js';
+import { DadosContribuinteSchema } from '../../domain/arrecadacao/value-objects/dados-contribuinte.js';
 import type { LancamentoFinanceiro } from '../../domain/financeiro/entities/lancamento-financeiro.js';
 import type { Pagamento } from '../../domain/pagamentos/entities/pagamento.js';
 import { IdPagamentoSchema } from '../../domain/pagamentos/value-objects/ids.js';
@@ -13,11 +15,27 @@ import { ArrecadacaoCampanhaNaoEncontradaError } from '../../errors/arrecadacao/
 import { ArrecadacaoContribuicaoNaoEncontradaError } from '../../errors/arrecadacao/contribuicao-nao-encontrada.error.js';
 import { PagamentoTransicaoStatusInvalidaError } from '../../errors/pagamentos/transicao-status-invalida.error.js';
 import type { Observability } from '../../observability/observability.js';
+import { associarContribuinteContribuicao } from '../arrecadacao/associar-contribuinte-contribuicao.js';
 import { registrarEfeitosFinanceirosPagamentoAprovado } from '../financeiro/registrar-efeitos-financeiros-pagamento-aprovado.js';
 import { aprovarPagamento } from '../pagamentos/aprovar-pagamento.js';
 
 export const FinalizarPagamentoAprovadoInputSchema = z.object({
   idPagamento: IdPagamentoSchema,
+  /**
+   * Contribuinte data collected by the payment provider in the checkout
+   * flow (Stripe iframe via custom_fields + customer_creation). Passed
+   * in by the webhook handler at finalize time — this is the moment the
+   * contribuicao gets claimed (status: disponivel → indisponivel)
+   * (aperture-m95f3 rework — the claim used to happen in the saga at
+   * session-create time; that left abandoned-checkout state locking
+   * contribuicoes; operator moved it here).
+   *
+   * Optional for backward-compat with non-Stripe call sites + retry
+   * paths where the contribuicao is already claimed. When absent the
+   * finalize still runs (Pagamento aprovado + Financeiro effects) but
+   * doesn't touch the contribuicao state.
+   */
+  contribuinte: DadosContribuinteSchema.optional(),
 });
 
 export type FinalizarPagamentoAprovadoInput = z.infer<typeof FinalizarPagamentoAprovadoInputSchema>;
@@ -128,6 +146,42 @@ export async function finalizarPagamentoAprovado(
       span.setAttribute('checkout.contribuicao.id', idContribuicao);
       span.setAttribute('checkout.campanha.id', campanha.id);
       span.setAttribute('checkout.plataforma.id', campanha.idPlataforma);
+
+      // step 2b (aperture-m95f3): associate contribuinte to contribuicao
+      // — the claim moves from the saga (session-create) to here (post-
+      // payment). Three branches:
+      //   a) contribuicao still disponivel + we have contribuinte data
+      //      → associate (flips status to indisponivel)
+      //   b) contribuicao already indisponivel
+      //      → "double-claim race" — first visitor's webhook fired first.
+      //         Log it, but CONTINUE the finalize (the payment IS valid;
+      //         we still want to record it as aprovado + run Financeiro
+      //         effects). UX-wise the second visitor paid for an
+      //         already-claimed gift — operator-acknowledged v1 trade-off;
+      //         refund flow is out of scope here.
+      //   c) contribuinte absent (retry path; webhook replay)
+      //      → skip association; the existing state stands.
+      if (parsed.contribuinte) {
+        if (contribuicaoDisponivel(contribuicao)) {
+          await associarContribuinteContribuicao(
+            { contribuicaoRepository, observability },
+            {
+              idContribuicao,
+              contribuinte: parsed.contribuinte,
+            },
+          );
+        } else {
+          logger.info('checkout.pagamento.double_claim_race', {
+            idPlataforma: campanha.idPlataforma,
+            idCampanha: campanha.id,
+            idContribuicao,
+            idPagamento: aprovado.id,
+            // Don't log raw nome/email — drift hash via the observability
+            // emission path on the eunenem-server side if forensics need
+            // it. Here we only emit the structural fact.
+          });
+        }
+      }
 
       // step 3: register Financeiro effects — with idempotent replay
       // ------------------------------------------------------------

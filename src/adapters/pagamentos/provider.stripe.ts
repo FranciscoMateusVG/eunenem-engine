@@ -141,16 +141,19 @@ export class PagamentoProviderStripe implements PagamentoProvider, CheckoutSessi
           paymentMethodOptions.card = { installments: { enabled: true } };
         }
 
-        // Custom fields that Stripe collects in the embedded UI. The
-        // visitor's nome is prefilled (we already have it from the saga);
-        // mensagem (recadinho) is the visitor's free-text gift message —
-        // the legacy pattern operator wants preserved.
+        // Custom fields Stripe collects in the embedded UI (aperture-m95f3).
+        // Both nome AND mensagem (recadinho) are visitor-provided inside the
+        // iframe — we don't prefill from upstream state because the upstream
+        // no longer collects them (operator: "Stripe is source of truth").
+        // Email is collected via `customer_creation: 'if_required'` (Stripe
+        // native field, NOT a custom_field — that path also sends Stripe's
+        // native receipt email).
         const customFields: Stripe.Checkout.SessionCreateParams.CustomField[] = [
           {
             key: 'nome',
             label: { custom: 'Seu nome', type: 'custom' },
             optional: false,
-            text: { default_value: input.contribuinte.nome, maximum_length: 120 },
+            text: { maximum_length: 120 },
             type: 'text',
           },
           {
@@ -188,7 +191,11 @@ export class PagamentoProviderStripe implements PagamentoProvider, CheckoutSessi
             payment_method_options: paymentMethodOptions,
             custom_fields: customFields,
             metadata,
-            customer_email: input.contribuinte.email,
+            // aperture-m95f3: native Stripe email collection (sends receipt
+            // automatically). NOT customer_email anymore — we no longer
+            // know the visitor's email at session-create time. Stripe asks
+            // for it in the iframe and stores it on the resulting Customer.
+            customer_creation: 'if_required',
             return_url: input.returnUrl,
           },
           {

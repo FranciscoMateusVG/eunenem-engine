@@ -16,6 +16,7 @@ import { PagamentoJaExisteError } from '../../../src/errors/pagamentos/ja-existe
 import { NoopLogger } from '../../../src/observability/noop-logger.js';
 import { noopTracer } from '../../../src/observability/tracer.js';
 import { adicionarOpcaoContribuicao } from '../../../src/use-cases/arrecadacao/adicionar-opcao-contribuicao.js';
+import { associarContribuinteContribuicao } from '../../../src/use-cases/arrecadacao/associar-contribuinte-contribuicao.js';
 import { criarCampanha } from '../../../src/use-cases/arrecadacao/criar-campanha.js';
 import { criarContribuicao } from '../../../src/use-cases/arrecadacao/criar-contribuicao.js';
 import { iniciarPagamentoContribuicao } from '../../../src/use-cases/checkout/iniciar-pagamento-contribuicao.js';
@@ -104,7 +105,11 @@ async function seedCheckoutCenario(idPlataforma: string, tipoOpcao: 'presente' |
 }
 
 describe('iniciarPagamentoContribuicao — happy path', () => {
-  it('claims contribuição, computes plataforma-scoped composição, creates pagamento pendente (eunenem presente, 5%)', async () => {
+  it('leaves contribuição disponivel, computes plataforma-scoped composição, creates pagamento pendente (eunenem presente, 5%)', async () => {
+    // aperture-m95f3: the saga no longer claims the contribuição — claim
+    // happens later in finalizarPagamentoAprovado via the webhook. Visitor
+    // identity is collected by Stripe inside the iframe, so no contribuinte
+    // input here either.
     const { deps, idCampanha, idContribuicao } = await seedCheckoutCenario(
       ID_PLATAFORMA_EUNENEM,
       'presente',
@@ -117,7 +122,6 @@ describe('iniciarPagamentoContribuicao — happy path', () => {
       idPlataforma: ID_PLATAFORMA_EUNENEM,
       idCampanha,
       idContribuicao,
-      contribuinte: contribuinteValido(),
       metodo: 'pix',
       idPagamento,
       idIntencaoPagamento,
@@ -125,8 +129,8 @@ describe('iniciarPagamentoContribuicao — happy path', () => {
     });
 
     expect(contribuicao.id).toBe(idContribuicao);
-    expect(contribuicao.status).toBe('indisponivel');
-    expect(contribuicao.contribuinte).toEqual(contribuinteValido());
+    expect(contribuicao.status).toBe('disponivel');
+    expect(contribuicao.contribuinte).toBeNull();
 
     expect(pagamento.id).toBe(idPagamento);
     expect(pagamento.status).toBe('pendente');
@@ -148,7 +152,6 @@ describe('iniciarPagamentoContribuicao — happy path', () => {
       idPlataforma: ID_PLATAFORMA_EUCASEI,
       idCampanha,
       idContribuicao,
-      contribuinte: contribuinteValido(),
       metodo: 'pix',
       idPagamento: randomUUID(),
       idIntencaoPagamento: randomUUID(),
@@ -175,7 +178,6 @@ describe('iniciarPagamentoContribuicao — cross-tenant guard', () => {
         idPlataforma: ID_PLATAFORMA_EUCASEI,
         idCampanha,
         idContribuicao,
-        contribuinte: contribuinteValido(),
         metodo: 'pix',
         idPagamento: randomUUID(),
         idIntencaoPagamento: randomUUID(),
@@ -190,14 +192,17 @@ describe('iniciarPagamentoContribuicao — cross-tenant guard', () => {
   });
 });
 
-describe('iniciarPagamentoContribuicao — saga compensation', () => {
-  it('reverts contribuição to disponivel when criarIntencaoPagamento fails (idPagamento collision)', async () => {
+describe('iniciarPagamentoContribuicao — failure paths leave contribuição untouched', () => {
+  it('contribuição stays disponivel when criarIntencaoPagamento fails (idPagamento collision)', async () => {
+    // aperture-m95f3: saga never claims the contribuição (claim moves to
+    // finalize via webhook). Failures in later saga steps therefore have
+    // nothing to compensate — verify the contribuição is untouched.
     const { deps, idCampanha, idContribuicao } = await seedCheckoutCenario(
       ID_PLATAFORMA_EUNENEM,
       'presente',
     );
 
-    // pre-seed a Pagamento with the idPagamento we'll try to use, so step 4 throws
+    // pre-seed a Pagamento with the idPagamento we'll try to use, so step 5 throws
     const idPagamento = randomUUID();
     await deps.pagamentoRepository.save(
       criarPagamentoPendente({
@@ -222,7 +227,6 @@ describe('iniciarPagamentoContribuicao — saga compensation', () => {
         idPlataforma: ID_PLATAFORMA_EUNENEM,
         idCampanha,
         idContribuicao,
-        contribuinte: contribuinteValido(),
         metodo: 'pix',
         idPagamento, // collides with the pre-seeded pagamento
         idIntencaoPagamento: randomUUID(),
@@ -230,37 +234,34 @@ describe('iniciarPagamentoContribuicao — saga compensation', () => {
       }),
     ).rejects.toThrow(PagamentoJaExisteError);
 
-    // compensation must have reverted the contribuição claim
+    // nothing to revert — saga never wrote to the contribuição
     const contribuicao = await deps.contribuicaoRepository.findById(idContribuicao);
     expect(contribuicao?.status).toBe('disponivel');
     expect(contribuicao?.contribuinte).toBeNull();
   });
 
-  it('does NOT compensate when step 2 (associar) itself fails (no write happened)', async () => {
+  it('early-fails with ArrecadacaoContribuicaoNaoDisponivelError when contribuição is already claimed (step 2 read-only check)', async () => {
+    // aperture-m95f3 rephrase: the saga's new step 2 reads the contribuição
+    // and refuses to mount a Stripe iframe for a gift already claimed by
+    // someone else's webhook. UX win — visitor doesn't pay for something
+    // they can't keep. Webhook finalize still owns the correctness race.
     const { deps, idCampanha, idContribuicao } = await seedCheckoutCenario(
       ID_PLATAFORMA_EUNENEM,
       'presente',
     );
 
-    // first checkout: associates the contribuição
-    const _firstPagamento = await iniciarPagamentoContribuicao(deps, {
-      idPlataforma: ID_PLATAFORMA_EUNENEM,
-      idCampanha,
-      idContribuicao,
-      contribuinte: contribuinteValido(),
-      metodo: 'pix',
-      idPagamento: randomUUID(),
-      idIntencaoPagamento: randomUUID(),
-      returnUrl: TEST_RETURN_URL,
-    });
+    // simulate an earlier visitor's webhook having claimed the contribuição
+    await associarContribuinteContribuicao(
+      { contribuicaoRepository: deps.contribuicaoRepository, observability: silentObservability },
+      { idContribuicao, contribuinte: contribuinteValido() },
+    );
 
-    // second checkout for the same contribuição: associar throws nao-disponivel
+    // a new visitor attempting to mount checkout is refused at session-create
     await expect(
       iniciarPagamentoContribuicao(deps, {
         idPlataforma: ID_PLATAFORMA_EUNENEM,
         idCampanha,
         idContribuicao,
-        contribuinte: contribuinteValido(),
         metodo: 'pix',
         idPagamento: randomUUID(),
         idIntencaoPagamento: randomUUID(),
@@ -268,7 +269,7 @@ describe('iniciarPagamentoContribuicao — saga compensation', () => {
       }),
     ).rejects.toThrow(ArrecadacaoContribuicaoNaoDisponivelError);
 
-    // contribuição still claimed by the FIRST checkout (compensation did NOT run)
+    // contribuição still belongs to the original claimant — untouched
     const contribuicao = await deps.contribuicaoRepository.findById(idContribuicao);
     expect(contribuicao?.status).toBe('indisponivel');
     expect(contribuicao?.contribuinte).toEqual(contribuinteValido());
