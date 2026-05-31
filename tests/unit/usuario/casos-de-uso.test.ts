@@ -990,6 +990,61 @@ describe('criarSessaoUsuario', () => {
       ),
     ).rejects.toThrow(/inconsistencia auth\+dominio/);
   });
+
+  /**
+   * aperture-3pqt7 — exercises the optional ipHashed input field +
+   * conditional-spread branch into AuthService.iniciarSessao. The fake
+   * AuthService ignores ipHashed (port-conformance: tests don't depend
+   * on adapter persistence), so this test just verifies the input is
+   * accepted and the happy path completes. Production behaviour (writing
+   * the hash to sessions.ip_address) is exercised end-to-end by the
+   * postgres adapter at runtime.
+   */
+  it('accepts optional ipHashed input and completes happy path', async () => {
+    const {
+      usuarioRepository,
+      plataformaRepository,
+      campanhaRepository,
+      recebedorRepository,
+      authService,
+    } = makeUsuarioRepos();
+    await registrarContaUsuario(
+      {
+        usuarioRepository,
+        plataformaRepository,
+        campanhaRepository,
+        recebedorRepository,
+        authService,
+        clock,
+        observability: silentObservability,
+      },
+      {
+        idUsuario: randomUUID(),
+        idPlataforma: ID_PLATAFORMA_EUNENEM,
+        idConta: randomUUID(),
+        email: 'with-ip@example.com',
+        nomeExibicao: 'IP Tracker',
+        senhaSimulada: 'right',
+      },
+    );
+
+    const result = await criarSessaoUsuario(
+      {
+        usuarioRepository,
+        authService,
+        observability: silentObservability,
+      },
+      {
+        idPlataforma: ID_PLATAFORMA_EUNENEM,
+        email: 'with-ip@example.com',
+        senhaSimulada: 'right',
+        ipHashed: 'a'.repeat(64), // sha256-hex shape
+      },
+    );
+
+    expect(result.idUsuario).toBeDefined();
+    expect(result.token).toBeDefined();
+  });
 });
 
 describe('autorizarPermissaoUsuario', () => {

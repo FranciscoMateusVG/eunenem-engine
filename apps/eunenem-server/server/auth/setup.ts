@@ -100,6 +100,22 @@ export interface ServerDeps {
    * change moves both surfaces in lockstep.
    */
   readonly publicOrigin: string;
+  /**
+   * Number of trusted reverse-proxy hops between the origin process and
+   * the public internet (aperture-uc2ix + aperture-3pqt7). Used by
+   * `trustedClientIp` to read the rightmost-N entries of `X-Forwarded-For`.
+   * Dev (no proxy): 0. Single-proxy prod (Dokploy/Nginx): 1.
+   * Cloudflare → Nginx → app: 2. Pick wrong = security failure; see
+   * `trusted-client-ip.ts` for rationale.
+   */
+  readonly trustedHopCount: number;
+  /**
+   * Per-deployment salt for hashing client PII (email, IP) in structured
+   * logs + sessions.ip_address (aperture-3pqt7 / T9). REQUIRED in production
+   * (≥32 chars). Rotating breaks log correlation across rotations —
+   * intentional; treat as tier-1 secret alongside session signing keys.
+   */
+  readonly logPiiHashSalt: string;
 }
 
 /**
@@ -151,6 +167,18 @@ const ServerEnvSchema = z
     STRIPE_PUBLISHABLE_KEY: z.string().default(''),
     STRIPE_SECRET_KEY: z.string().default(''),
     STRIPE_WEBHOOK_SECRET: z.string().default(''),
+    /**
+     * Trusted reverse-proxy hop count (aperture-uc2ix). Default 0 for
+     * dev (no proxy in front of localhost:3001). Prod MUST set this
+     * to 1+ matching deploy topology — see ServerDeps.trustedHopCount.
+     */
+    TRUSTED_HOP_COUNT: z.coerce.number().int().nonnegative().default(0),
+    /**
+     * Per-deployment salt for client-PII hashing (aperture-3pqt7).
+     * REQUIRED in production (≥32 chars). Generate via
+     * `openssl rand -hex 32`.
+     */
+    LOG_PII_HASH_SALT: z.string().default(''),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === 'production') {
@@ -173,6 +201,22 @@ const ServerEnvSchema = z
           code: 'custom',
           path: ['STRIPE_WEBHOOK_SECRET'],
           message: 'STRIPE_WEBHOOK_SECRET required in production (signature verification gate).',
+        });
+      }
+      if (env.LOG_PII_HASH_SALT.length < 32) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['LOG_PII_HASH_SALT'],
+          message:
+            'LOG_PII_HASH_SALT required in production (≥32 chars; client-PII hashing salt).',
+        });
+      }
+      if (env.TRUSTED_HOP_COUNT < 1) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['TRUSTED_HOP_COUNT'],
+          message:
+            'TRUSTED_HOP_COUNT must be ≥1 in production (set to the number of trusted reverse-proxy hops; rate-limit + audit log accuracy depends on it).',
         });
       }
     }
@@ -324,6 +368,8 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     // AuthService through our tRPC procedures.
     sessionCookieName: 'better-auth.session_token',
     publicOrigin: env.BETTER_AUTH_URL,
+    trustedHopCount: env.TRUSTED_HOP_COUNT,
+    logPiiHashSalt: env.LOG_PII_HASH_SALT,
   };
 }
 

@@ -135,6 +135,8 @@ export class AuthServiceMemoria implements AuthService {
     readonly idPlataforma: IdPlataformaReferencia;
     readonly email: EmailUsuario;
     readonly senha: string;
+    /** Ignored by the memory adapter (no sessions table). aperture-3pqt7. */
+    readonly ipHashed?: string;
   }): Promise<{
     readonly idUsuario: IdUsuario;
     readonly token: TokenSessao;

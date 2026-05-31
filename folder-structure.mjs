@@ -164,6 +164,7 @@ export const folderStructureConfig = createFolderStructure({
             { name: 'cat-repository.memory.test.ts' },
             { name: 'logger.test.ts' },
             { name: 'otel-logger.test.ts' },
+            { name: 'hash-client-pii.test.ts' },
             ...bcTestChildren({ withAdapterImpl: true }),
             ...applicationTestChildren(),
           ],

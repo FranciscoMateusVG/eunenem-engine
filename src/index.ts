@@ -48,6 +48,7 @@ export { criarAuth } from './adapters/usuario/criar-auth.js';
 export type { UsuarioRepository } from './adapters/usuario/repository.js';
 export { UsuarioRepositoryMemory } from './adapters/usuario/repository.memory.js';
 export { UsuarioRepositoryPostgres } from './adapters/usuario/repository.postgres.js';
+export { hashClientPII } from './observability/hash-client-pii.js';
 
 // --- Domain: Arrecadação ---
 

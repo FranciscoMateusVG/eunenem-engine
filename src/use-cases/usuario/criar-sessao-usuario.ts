@@ -21,6 +21,15 @@ export const CriarSessaoUsuarioInputSchema = z.object({
    * Field name preserved for backward compatibility.
    */
   senhaSimulada: z.string().min(1, 'Senha nao pode ser vazia').max(200, 'Senha e longa demais'),
+  /**
+   * Optional already-hashed client IP for forensic correlation
+   * (aperture-3pqt7). Forwarded as-is to `AuthService.iniciarSessao` so
+   * BetterAuth-side persistence writes it to `sessions.ip_address`.
+   * Hashing happens at the HTTP boundary (eunenem-server tRPC layer via
+   * `hashClientPII`) — this use-case treats the value as opaque. Tests
+   * and internal flows without IP context pass `undefined`.
+   */
+  ipHashed: z.string().min(1).max(128).optional(),
 });
 
 export type CriarSessaoUsuarioInput = z.infer<typeof CriarSessaoUsuarioInputSchema>;
@@ -98,7 +107,7 @@ export async function criarSessaoUsuario(
         throw new UsuarioInputInvalidoError(message);
       }
 
-      const { idPlataforma, email, senhaSimulada } = parsed.data;
+      const { idPlataforma, email, senhaSimulada, ipHashed } = parsed.data;
 
       span.setAttribute('usuario.plataforma.id', idPlataforma);
       span.setAttribute('usuario.email.length', email.length);
@@ -109,10 +118,14 @@ export async function criarSessaoUsuario(
       // paths exit through the same constant-time error throw. NEVER add
       // a pre-check here that lets one path skip the scrypt verify
       // (regression would re-introduce the H4 user-enumeration oracle).
+      // Spread the optional ipHashed conditionally — tsconfig has
+      // `exactOptionalPropertyTypes: true` so passing `undefined`
+      // explicitly is a type error. Omit the key when not present.
       const sessao = await authService.iniciarSessao({
         idPlataforma,
         email,
         senha: senhaSimulada,
+        ...(ipHashed ? { ipHashed } : {}),
       });
 
       // Resolve domain Usuario by id (auth principal → domain principal).

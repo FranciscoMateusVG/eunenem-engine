@@ -190,6 +190,7 @@ export class AuthServiceBetterAuth implements AuthService {
     readonly idPlataforma: IdPlataformaReferencia;
     readonly email: EmailUsuario;
     readonly senha: string;
+    readonly ipHashed?: string;
   }): Promise<{
     readonly idUsuario: IdUsuario;
     readonly token: TokenSessao;
@@ -229,7 +230,18 @@ export class AuthServiceBetterAuth implements AuthService {
             user_id: row.id,
             token,
             expires_at: expiraEm,
-            ip_address: null,
+            // aperture-3pqt7: store the HASHED client IP (sha256+salt;
+            // hashing done at the tRPC layer via hashClientPII). Storing
+            // raw IPs would create a GDPR-grade liability for log/DB
+            // dumps; storing nothing kills our forensic ability to
+            // correlate credential-stuffing across sessions. Hashed IP
+            // is the right compromise — same client deterministically
+            // produces same hash, but a dump leak doesn't expose
+            // raw addresses. Empty string surfaces from
+            // hashClientPII("") on unknown IP — we treat that as null
+            // here so the column distinguishes "no IP context provided"
+            // from "IP captured but unknown bucket".
+            ip_address: input.ipHashed && input.ipHashed.length > 0 ? input.ipHashed : null,
             user_agent: null,
             created_at: now,
             updated_at: now,

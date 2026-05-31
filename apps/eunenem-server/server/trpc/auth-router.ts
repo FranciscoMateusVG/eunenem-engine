@@ -3,13 +3,81 @@ import { initTRPC, TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import {
   criarSessaoUsuario,
+  hashClientPII,
   registrarContaUsuario,
   UsuarioEmailJaExisteError,
   UsuarioInputInvalidoError,
   UsuarioPlataformaNaoEncontradaError,
   UsuarioSessaoInvalidaError,
 } from '../../../../src/index.js';
+import { trustedClientIp } from '../lib/security/trusted-client-ip.js';
 import type { TrpcContext } from './context.js';
+import { enforceRateLimit } from './rate-limit.js';
+
+/**
+ * Rate-limit posture (aperture-uc2ix) — matches Cipher's recommendation:
+ *   signIn: 10 attempts per 60s per (ip, email)
+ *   signUp:  3 attempts per 60s per ip
+ * Buckets are DB-backed (rate_limit table from migration 009; multi-instance
+ * safe, survives container restart). Per-(ip,email) on signIn means a botnet
+ * spreading across distributed IPs hits the per-email cap even if no
+ * individual IP exceeds the limit; per-ip on signUp protects against a
+ * single attacker mass-registering accounts.
+ */
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_SIGN_IN_MAX = 10;
+const RATE_LIMIT_SIGN_UP_MAX = 3;
+
+/**
+ * Structured emission shape (aperture-3pqt7 / T9). Fired BEFORE
+ * rate-limit rejection so rate-limited attempts are still observable —
+ * without that ordering you can't detect a credential-stuffing burst
+ * just by reading logs (it would silently 429 with no audit trail).
+ */
+type SignInEmissionStatus =
+  | 'success'
+  | 'failed'
+  | 'rate_limited'
+  | 'inconsistencia_dominio'
+  | 'error';
+
+function emitSignInAttempt(
+  ctx: TrpcContext,
+  fields: {
+    readonly idPlataforma: string;
+    readonly emailHash: string;
+    readonly ipHashed: string;
+    readonly status: SignInEmissionStatus;
+  },
+): void {
+  ctx.deps.observability.logger.info('usuario.sessao.tentativa', {
+    idPlataforma: fields.idPlataforma,
+    emailHash: fields.emailHash,
+    ipHashed: fields.ipHashed,
+    timestampIso: new Date().toISOString(),
+    status: fields.status,
+  });
+}
+
+type SignUpEmissionStatus = 'success' | 'failed' | 'rate_limited' | 'error';
+
+function emitSignUpAttempt(
+  ctx: TrpcContext,
+  fields: {
+    readonly idPlataforma: string;
+    readonly emailHash: string;
+    readonly ipHashed: string;
+    readonly status: SignUpEmissionStatus;
+  },
+): void {
+  ctx.deps.observability.logger.info('usuario.conta.registro_tentativa', {
+    idPlataforma: fields.idPlataforma,
+    emailHash: fields.emailHash,
+    ipHashed: fields.ipHashed,
+    timestampIso: new Date().toISOString(),
+    status: fields.status,
+  });
+}
 
 const t = initTRPC.context<TrpcContext>().create();
 
@@ -147,9 +215,43 @@ export const authRouter = t.router({
   signUp: t.procedure
     .input(SignUpInputSchema)
     .mutation(async ({ ctx, input }) => {
-      const { deps, resHeaders } = ctx;
+      const { deps, headers, resHeaders } = ctx;
       const idUsuario = randomUUID();
       const idConta = randomUUID();
+
+      // aperture-3pqt7: capture + hash trusted client IP BEFORE any
+      // side-effect-bearing call. emailHash + ipHashed are derived once
+      // and reused across the rate-limit + emission paths so the
+      // structured log carries the same identifier regardless of which
+      // exit branch fires.
+      const rawIp = trustedClientIp(headers, deps.trustedHopCount);
+      const ipHashed = hashClientPII(rawIp, deps.logPiiHashSalt);
+      const emailHash = hashClientPII(input.email, deps.logPiiHashSalt);
+
+      // aperture-uc2ix: rate-limit signUp per IP only — no email key
+      // (the attacker WANTS to register new emails; per-email throttle
+      // would be vacuous). 3 per 60s per IP per Cipher's recommended
+      // posture.
+      try {
+        await enforceRateLimit(deps.db, {
+          key: `trpc:signUp:${ipHashed}`,
+          max: RATE_LIMIT_SIGN_UP_MAX,
+          windowMs: RATE_LIMIT_WINDOW_MS,
+          clock: deps.clock,
+        });
+      } catch (err) {
+        // Emit BEFORE re-throw (GLaDOS ordering — don't lose visibility
+        // into rate-limited attempts; otherwise an attacker pacing just
+        // over the cap leaves no audit trail).
+        emitSignUpAttempt(ctx, {
+          idPlataforma: input.idPlataforma,
+          emailHash,
+          ipHashed,
+          status: 'rate_limited',
+        });
+        throw err;
+      }
+
       try {
         // Mount-Option-A2: registrarContaUsuario carries the T3 saga
         // (engine domain rules + auth.criarConta + Campanha + 'presente'
@@ -179,11 +281,13 @@ export const authRouter = t.router({
         // Immediately sign in so the response carries a session cookie —
         // matches BetterAuth's HTTP signup flow (account created +
         // logged in in one request). Caller doesn't have to follow up
-        // with a separate signIn call.
+        // with a separate signIn call. Pass ipHashed so the new session
+        // row gets the hashed IP for forensic correlation.
         const sessao = await deps.authService.iniciarSessao({
           idPlataforma: input.idPlataforma,
           email: input.email,
           senha: input.senha,
+          ipHashed,
         });
 
         setSessionCookie(
@@ -194,12 +298,25 @@ export const authRouter = t.router({
           deps.auth.options.advanced?.useSecureCookies ?? false,
         );
 
+        emitSignUpAttempt(ctx, {
+          idPlataforma: input.idPlataforma,
+          emailHash,
+          ipHashed,
+          status: 'success',
+        });
+
         return {
           idUsuario,
           idConta,
           expiraEm: sessao.expiraEm,
         };
       } catch (err) {
+        emitSignUpAttempt(ctx, {
+          idPlataforma: input.idPlataforma,
+          emailHash,
+          ipHashed,
+          status: err instanceof UsuarioInputInvalidoError ? 'failed' : 'error',
+        });
         throw toTRPCError(err);
       }
     }),
@@ -207,7 +324,36 @@ export const authRouter = t.router({
   signIn: t.procedure
     .input(SignInInputSchema)
     .mutation(async ({ ctx, input }) => {
-      const { deps, resHeaders } = ctx;
+      const { deps, headers, resHeaders } = ctx;
+
+      // aperture-3pqt7: capture + hash BEFORE any decision (see signUp
+      // comments for rationale). Same shape, different bucket strategy
+      // for the rate-limit key.
+      const rawIp = trustedClientIp(headers, deps.trustedHopCount);
+      const ipHashed = hashClientPII(rawIp, deps.logPiiHashSalt);
+      const emailHash = hashClientPII(input.email, deps.logPiiHashSalt);
+
+      // aperture-uc2ix: rate-limit signIn per (ip, email) — catches both
+      // single-IP brute-force AND distributed credential stuffing (a
+      // botnet hitting the same email from 1000 IPs still trips the
+      // per-email cap). 10 per 60s per (ip, email) per Cipher's posture.
+      try {
+        await enforceRateLimit(deps.db, {
+          key: `trpc:signIn:${ipHashed}:${emailHash}`,
+          max: RATE_LIMIT_SIGN_IN_MAX,
+          windowMs: RATE_LIMIT_WINDOW_MS,
+          clock: deps.clock,
+        });
+      } catch (err) {
+        emitSignInAttempt(ctx, {
+          idPlataforma: input.idPlataforma,
+          emailHash,
+          ipHashed,
+          status: 'rate_limited',
+        });
+        throw err;
+      }
+
       try {
         const sessao = await criarSessaoUsuario(
           {
@@ -219,6 +365,7 @@ export const authRouter = t.router({
             idPlataforma: input.idPlataforma,
             email: input.email,
             senhaSimulada: input.senha,
+            ipHashed,
           },
         );
 
@@ -230,12 +377,34 @@ export const authRouter = t.router({
           deps.auth.options.advanced?.useSecureCookies ?? false,
         );
 
+        emitSignInAttempt(ctx, {
+          idPlataforma: input.idPlataforma,
+          emailHash,
+          ipHashed,
+          status: 'success',
+        });
+
         return {
           idUsuario: sessao.idUsuario,
           idConta: sessao.idConta,
           expiraEm: sessao.expiraEm,
         };
       } catch (err) {
+        // Map error to status taxonomy. The defensive auth+domain drift
+        // path throws a plain Error with a known marker substring (see
+        // criar-sessao-usuario.ts header).
+        const status: SignInEmissionStatus =
+          err instanceof UsuarioInputInvalidoError
+            ? 'failed'
+            : err instanceof Error && err.message.includes('inconsistencia auth+dominio')
+              ? 'inconsistencia_dominio'
+              : 'error';
+        emitSignInAttempt(ctx, {
+          idPlataforma: input.idPlataforma,
+          emailHash,
+          ipHashed,
+          status,
+        });
         throw toTRPCError(err);
       }
     }),

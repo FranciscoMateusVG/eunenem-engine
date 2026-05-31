@@ -65,6 +65,16 @@ export interface AuthService {
     readonly idPlataforma: IdPlataformaReferencia;
     readonly email: EmailUsuario;
     readonly senha: string;
+    /**
+     * Optional hashed client IP for forensic correlation
+     * (aperture-3pqt7 / T9). Adapter MAY persist into the session row's
+     * ip_address column on INSERT. Pass `undefined` (or omit) when the
+     * caller has no IP context (tests, internal flows). NEVER pass raw
+     * IP — the eunenem-server tRPC layer hashes via `hashClientPII`
+     * before invoking this port so log/DB dumps don't leak GDPR-grade
+     * source data.
+     */
+    readonly ipHashed?: string;
   }): Promise<{
     readonly idUsuario: IdUsuario;
     readonly token: TokenSessao;
