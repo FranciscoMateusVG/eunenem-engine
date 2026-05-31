@@ -4,6 +4,7 @@ import { AuthModalProvider } from './components/eunenem/auth/AuthModalProvider.j
 import { LandingPage } from './LandingPage.js';
 import { NotFoundPage } from './NotFoundPage.js';
 import { PaginaPage } from './PaginaPage.js';
+import { PaginaSucessoPage } from './PaginaSucessoPage.js';
 import { PainelPage } from './PainelPage.js';
 import { PainelSectionPage } from './PainelSectionPage.js';
 import { TrpcSmokePage } from './TrpcSmokePage.js';
@@ -33,6 +34,7 @@ const SLUG_REGEX = /^[a-z][a-z0-9-]{2,29}$/;
 export function resolveRoute(pathname: string):
   | { kind: 'landing' }
   | { kind: 'pagina'; slug: string }
+  | { kind: 'pagina-sucesso'; slug: string }
   | { kind: 'painel'; slug: string }
   | { kind: 'painel-section'; slug: string; section: PainelSection }
   | { kind: 'trpc-smoke' }
@@ -50,6 +52,15 @@ export function resolveRoute(pathname: string):
   // AuthModalShell. Unlisted in nav; reachable only by typing the URL.
   if (pathname === '/auth-demo') {
     return { kind: 'auth-demo' };
+  }
+  // /pagina/<slug>/sucesso — post-Stripe-checkout thank-you page
+  // (aperture-xh4jk). Matched BEFORE the bare /pagina/<slug> rule so the
+  // sub-path takes precedence. sessionId travels as a query param and is
+  // read client-side from window.location (server can't see it through
+  // pathname alone).
+  const sucessoMatch = pathname.match(/^\/pagina\/([^/]+)\/sucesso\/?$/);
+  if (sucessoMatch && sucessoMatch[1] === 'francisco') {
+    return { kind: 'pagina-sucesso', slug: sucessoMatch[1] };
   }
   const paginaMatch = pathname.match(/^\/pagina\/([^/]+)\/?$/);
   if (paginaMatch && paginaMatch[1] === 'francisco') {
@@ -99,6 +110,7 @@ export function App({ pathname }: { pathname: string }) {
 function pickPage(route: ReturnType<typeof resolveRoute>, pathname: string) {
   if (route.kind === 'landing') return <LandingPage />;
   if (route.kind === 'pagina') return <PaginaPage slug={route.slug} />;
+  if (route.kind === 'pagina-sucesso') return <PaginaSucessoPage slug={route.slug} />;
   if (route.kind === 'painel') return <PainelPage slug={route.slug} />;
   if (route.kind === 'painel-section')
     return <PainelSectionPage slug={route.slug} section={route.section} />;

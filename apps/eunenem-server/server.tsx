@@ -188,7 +188,8 @@ serve({ fetch: app.fetch, port: PORT }, (info) => {
   console.log('');
   console.log('Routes:');
   console.log('  /                  → marketing landing page (SSR + hydration)');
-  console.log('  /pagina/francisco  → contributor event page (SSR + hydration)');
+  console.log('  /pagina/francisco           → contributor event page (SSR + hydration)');
+  console.log('  /pagina/francisco/sucesso   → post-Stripe thank-you page (aperture-xh4jk)');
   console.log('  /painel/<slug>     → creator dashboard (SSR + hydration; aperture-khbow)');
   console.log('  /trpc-smoke        → tRPC smoke test (aperture-kungg)');
   console.log('  /api/trpc/*        → tRPC procedures (listFruits, auth.*)');

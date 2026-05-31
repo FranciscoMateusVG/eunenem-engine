@@ -126,19 +126,30 @@ export function useIniciarPagamentoContribuicao() {
 }
 
 /**
- * Success-page read — used by aperture-xh4jk (sibling bead C5). Resolves a
- * Stripe session and returns the gift + recadinho + status.
+ * Success-page read — used by aperture-xh4jk. Resolves a Stripe session and
+ * returns the gift + recadinho + status.
+ *
+ * Two opt flags:
+ *   - `enabled` (default true) — gate the query for cases like SSR where
+ *     sessionId can't be read yet (window.location). Combined with the
+ *     intrinsic Boolean(sessionId) check.
+ *   - `pollWhilePending` (default false) — when true, status='pending' auto-
+ *     refetches every 3s; clears once the webhook flips status to a terminal
+ *     value (approved | failed | expired).
  *
  * REAL implementation (post-vkrkm):
  *   return trpc.pagina.obterSucessoPagamento.useQuery(
  *     { slug, sessionId },
- *     { refetchInterval: opts.refetchInterval },
+ *     {
+ *       enabled: (opts.enabled ?? true) && Boolean(sessionId),
+ *       refetchInterval: opts.pollWhilePending ? ((q) => ...) : false,
+ *     },
  *   );
  */
 export function useObterSucessoPagamento(
   slug: string,
-  sessionId: string,
-  opts: { refetchInterval?: number | false } = {},
+  sessionId: string | null,
+  opts: { enabled?: boolean; pollWhilePending?: boolean } = {},
 ) {
   return useQuery<ObterSucessoResult>({
     queryKey: ["pagina", "obterSucessoPagamento", slug, sessionId],
@@ -156,7 +167,20 @@ export function useObterSucessoPagamento(
         contribuinte: { nome: "Visitante" },
       };
     },
-    refetchInterval: opts.refetchInterval ?? false,
+    enabled: (opts.enabled ?? true) && Boolean(sessionId),
+    refetchInterval: opts.pollWhilePending
+      ? (query) => {
+          const status = query.state.data?.status;
+          if (
+            status === "approved" ||
+            status === "failed" ||
+            status === "expired"
+          ) {
+            return false;
+          }
+          return 3000;
+        }
+      : false,
     staleTime: 5_000,
   });
 }
