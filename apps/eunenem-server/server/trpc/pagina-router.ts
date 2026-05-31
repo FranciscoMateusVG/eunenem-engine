@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { initTRPC, TRPCError } from '@trpc/server';
 import { z } from 'zod/v4';
 import {
+  calcularValorTaxaPercentual,
   type Campanha,
   computeCardSurchargeCents,
   type IdContribuicao,
@@ -10,6 +11,7 @@ import {
   type IdPagamento,
   iniciarPagamentoContribuicao,
   listarContribuicoesDeOpcao,
+  obterTarifaPorTipo,
   type SlugUsuario,
   type Usuario,
 } from '../../../../src/index.js';
@@ -58,18 +60,33 @@ export const ObterListaPresentesInputSchema = z.object({
 
 export const ObterListaPresentesOutputItemSchema = z.object({
   id: z.string().uuid(),
+  /**
+   * Visitor-facing item name. Visitor-safe (no PII / no idCampanha).
+   */
   nome: z.string(),
+  /**
+   * Visitor-paid total in cents for the **Pix** path (aperture-ines9 —
+   * semantic shift). Equals `contributionAmountCents + feeAmountCents`
+   * where `feeAmountCents` is the platform fee from the active RegraTaxa
+   * (eunenem presente = 5%). Matches the Stripe gift line item charged
+   * on the iframe. **NOT the bare contribuicao.valor** — the operator's
+   * intent is that the visible price already includes the platform fee
+   * (the fee is invisible to the visitor; it "lives in" the price they
+   * pay).
+   *
+   * Internal Pagamento + Financeiro bookkeeping still uses the bare
+   * contribution + fee separately (composicaoValores carries both fields
+   * distinctly). Only this projection layer surfaces the visible total.
+   */
   valor: z.number().int().nonnegative(),
   /**
-   * Buyer's total cost in cents when paying by credit card (aperture-uyw8i).
-   * Includes the Stripe Brazil card surcharge (3.9% + R$0.39 gross-up)
-   * computed via the shared backend helper. Frontend renders the
-   * differential on the metodo picker so visitors see Cartão cost
-   * BEFORE iniciar is called (no surprise at iframe-mount time).
-   *
-   * Equal to `valor` when card surcharge is zero (defensive; pre-launch
-   * configurability). Frontend's pattern `valorComTaxaCartaoCents ?? valorCents`
-   * (kx9bl) graceful-falls-back if the field is null on older clients.
+   * Visitor-paid total in cents for the **Cartão** path (aperture-uyw8i
+   * + aperture-ines9 semantic update). Equals `valor + cardSurcharge`
+   * where cardSurcharge is the Stripe Brazil 3.9% + R$0.39 gross-up.
+   * Matches the sum of the gift + surcharge line items the visitor sees
+   * inside the Stripe iframe. Frontend's pattern
+   * `valorComTaxaCartaoCents ?? valorCents` (kx9bl) graceful-falls-back
+   * if the field is null on older clients.
    */
   valorComTaxaCartao: z.number().int().nonnegative(),
 });
@@ -175,6 +192,16 @@ export const paginaRouter = t.router({
     .input(ObterListaPresentesInputSchema)
     .query(async ({ ctx, input }) => {
       const { campanha, idOpcaoPresentes } = await resolvePaginaBySlug(ctx, input.slug);
+
+      // aperture-ines9: load the active RegraTaxa for this plataforma so
+      // we can fold the platform fee into the visible-to-visitor prices.
+      // The fee is invisible to the visitor; their displayed price already
+      // includes it. obterTarifaPorTipo throws if the opção tipo isn't
+      // covered by the regra (defensive — every seed-plataforma covers
+      // all three tipos today, but a future custom regra might omit one).
+      const regraAtiva = await ctx.deps.provedorRegraTaxa.getRegraAtiva(ID_PLATAFORMA_EUNENEM);
+      const tarifaPresente = obterTarifaPorTipo(regraAtiva, 'presente');
+
       const items = await listarContribuicoesDeOpcao(
         {
           contribuicaoRepository: ctx.deps.contribuicaoRepository,
@@ -185,20 +212,35 @@ export const paginaRouter = t.router({
           idOpcaoContribuicao: idOpcaoPresentes,
         },
       );
-      // aperture-uyw8i: include valorComTaxaCartao so Vance's metodo
-       // picker can show the Cartão differential BEFORE iniciar is called.
-       // Single source of truth — the same `computeCardSurchargeCents`
-       // helper feeds this AND the Stripe line item; no frontend/backend
-       // drift surface.
-      return items.map((c) => ({
-        id: c.id as string,
-        nome: c.nome,
-        valor: c.valor,
-        valorComTaxaCartao: c.valor + computeCardSurchargeCents(c.valor),
-        imagemUrl: c.imagemUrl,
-        grupo: c.grupo,
-        status: c.status,
-      }));
+
+      // aperture-uyw8i + aperture-ines9: surface visitor-paid totals.
+      // `valor` includes the platform fee (matches the Stripe gift line
+      // item the visitor sees on the Pix path); `valorComTaxaCartao`
+      // additionally includes the Stripe Brazil card surcharge (matches
+      // the sum of the gift + surcharge line items on the Cartão path).
+      // Single source of truth — same calcularValorTaxaPercentual +
+      // computeCardSurchargeCents helpers feed Stripe AND this
+      // projection; no frontend/backend drift surface.
+      return items.map((c) => {
+        const feeAmountCents = calcularValorTaxaPercentual(c.valor, tarifaPresente.percentageBps);
+        const valorComTaxa = c.valor + feeAmountCents;
+        return {
+          id: c.id as string,
+          nome: c.nome,
+          valor: valorComTaxa,
+          // Surcharge is computed off the bare contribution amount —
+          // matches what the Stripe adapter sends as the surcharge line
+          // item via composicao.surchargeCents (which is also computed
+          // off contributionAmountCents in calcularComposicaoValores).
+          // Keeping the surcharge base aligned across backend + projection
+          // preserves the "what we display equals what Stripe charges"
+          // invariant the operator caught the original bug under.
+          valorComTaxaCartao: valorComTaxa + computeCardSurchargeCents(c.valor),
+          imagemUrl: c.imagemUrl,
+          grupo: c.grupo,
+          status: c.status,
+        };
+      });
     }),
 
   /**
