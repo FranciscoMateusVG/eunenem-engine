@@ -336,6 +336,124 @@ h4 {
  * desktop without a mid-breakpoint redesign.
  * ================================================================= */
 
+/* =================================================================
+ * aperture-ra027 — Metodo picker (Pix vs Cartão) inside GiftCheckoutModal
+ * Two icon-cards on desktop, stacked on mobile. Pix is default-selected;
+ * the default IS the recommendation — no explicit "recomendado" badge.
+ * Radiogroup keyboard pattern (arrow keys cycle, tabindex managed by JS).
+ * ================================================================= */
+
+.metodo-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.metodo-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 22px 14px;
+  min-height: 180px;
+  background: var(--paper);
+  border: 1.5px solid var(--line);
+  border-radius: 18px;
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  text-align: center;
+  transition: transform 0.22s ease, box-shadow 0.22s ease,
+    border-color 0.18s ease, background-color 0.18s ease;
+  outline: none;
+  font-family: inherit;
+  color: inherit;
+}
+
+.metodo-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-md);
+}
+
+.metodo-card:focus-visible {
+  outline: 3px solid var(--lilac-deep);
+  outline-offset: 2px;
+}
+
+.metodo-card--selected {
+  border: 2px solid var(--lilac-deep);
+  background: var(--lilac-soft);
+  box-shadow: var(--shadow-cta);
+}
+
+.metodo-card-icon {
+  font-size: 38px;
+  line-height: 1;
+  margin-bottom: 6px;
+}
+
+.metodo-card-title {
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 28px;
+  color: var(--plum);
+  line-height: 1.05;
+}
+
+.metodo-card-micro {
+  font-family: var(--font-caveat), cursive;
+  font-size: 18px;
+  color: var(--coral-pink);
+  transform: rotate(-1deg);
+  margin-top: 2px;
+}
+
+.metodo-card-sub {
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 11px;
+  color: var(--ink-mute);
+  letter-spacing: 0.04em;
+  margin-top: 4px;
+}
+
+@media (max-width: 480px) {
+  .metodo-grid {
+    grid-template-columns: 1fr;
+  }
+  .metodo-card {
+    min-height: 120px;
+    padding: 18px 14px;
+    flex-direction: row;
+    justify-content: flex-start;
+    align-items: center;
+    text-align: left;
+    gap: 16px;
+  }
+  .metodo-card-icon {
+    font-size: 36px;
+    margin: 0;
+  }
+  .metodo-card-title,
+  .metodo-card-micro,
+  .metodo-card-sub {
+    margin: 0;
+  }
+  .metodo-actions {
+    flex-direction: column-reverse;
+    align-items: stretch !important;
+  }
+  .metodo-actions > button {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .metodo-card,
+  .metodo-card:hover {
+    transition: none;
+    transform: none;
+  }
+}
+
 .sucesso-bg {
   /* Soft top-fade so the page reads as "different" from the busy
      visitor marketplace below it — cream blending into a barely-there

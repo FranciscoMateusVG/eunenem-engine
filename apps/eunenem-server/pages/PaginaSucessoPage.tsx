@@ -84,10 +84,13 @@ export function PaginaSucessoPage({ slug }: { slug: string }) {
               <ApprovedState data={data} slug={slug} />
             ) : data.status === "pending" ? (
               <PendingState data={data} elapsedSec={elapsedSec} />
-            ) : data.status === "expired" ? (
-              <ExpiredState slug={slug} />
-            ) : (
+            ) : data.status === "rejected" ? (
               <FailedState slug={slug} />
+            ) : (
+              // status === 'unknown' — sessionId resolved but nothing has
+              // settled yet (webhook hasn't fired AND provider sessao is
+              // missing). Render as the friendly "sessão expirada" state.
+              <ExpiredState slug={slug} />
             )}
           </div>
         </main>
@@ -137,7 +140,13 @@ function ApprovedState({
         recebemos seu carinho ♡
       </span>
       <h1 className="sucesso-h1">
-        obrigado, <span className="sucesso-h1-name">{firstName(data.contribuinte.nome)}</span>!
+        obrigado
+        {data.contribuinte.nome ? (
+          <>
+            , <span className="sucesso-h1-name">{firstName(data.contribuinte.nome)}</span>
+          </>
+        ) : null}
+        !
       </h1>
 
       {/* Polaroid — the visual anchor. Tilted 1.8deg, soft-shadow, paper
@@ -161,14 +170,16 @@ function ApprovedState({
       </article>
 
       {/* Recadinho — the moment of warmth. Caveat, rotated -1.5deg, max
-          width tight so the line breaks like a handwritten note. */}
-      {data.recadinho && data.recadinho.trim().length > 0 && (
-        <blockquote className="sucesso-recadinho anim-recadinho-in">
-          <span aria-hidden="true" className="sucesso-recadinho-quote">"</span>
-          {data.recadinho}
-          <span aria-hidden="true" className="sucesso-recadinho-quote sucesso-recadinho-quote--end">"</span>
-        </blockquote>
-      )}
+          width tight so the line breaks like a handwritten note. Falls back
+          to a polite default when Stripe's custom_fields.mensagem is empty
+          (operator decision 2026-05-31: never render blank). */}
+      <blockquote className="sucesso-recadinho anim-recadinho-in">
+        <span aria-hidden="true" className="sucesso-recadinho-quote">"</span>
+        {data.recadinho && data.recadinho.trim().length > 0
+          ? data.recadinho
+          : `um abraço apertado pro ${data.babyName} ♡`}
+        <span aria-hidden="true" className="sucesso-recadinho-quote sucesso-recadinho-quote--end">"</span>
+      </blockquote>
 
       <p className="sucesso-tagline">
         ...e o <span className="sucesso-tagline-name">{data.babyName}</span> já vai saber! ♡

@@ -1,4 +1,4 @@
-// aperture-3xgch — singleton Stripe.js loader for the embedded checkout.
+// aperture-3xgch (scaffold) + aperture-ra027 (build-define swap).
 //
 // loadStripe() returns a Promise<Stripe | null>. The Stripe team recommends
 // calling it ONCE outside any component (or once memoised inside the
@@ -6,20 +6,20 @@
 // `stripePromise` as the module-level singleton and let EmbeddedCheckout-
 // Provider await it.
 //
-// STRIPE_PUBLISHABLE_KEY wiring:
-//   - Today (scaffold mode): hardcoded TEST-mode pk per GLaDOS dispatch
-//     2026-05-30. Operator-banked key; safe to commit (test mode only).
-//   - Post-aperture-xaha2 (Rex's C2): esbuild `define` will replace the
-//     identifier `STRIPE_PUBLISHABLE_KEY` at build time with the value from
-//     process.env.STRIPE_PUBLISHABLE_KEY. Swap the const below to read
-//     from the injected identifier with a typed declare.
+// STRIPE_PUBLISHABLE_KEY wiring (aperture-xaha2 / build.mjs):
+//   The esbuild define block in build.mjs replaces
+//   `process.env.STRIPE_PUBLISHABLE_KEY` at build time with the value of
+//   the same env var on the build host. Empty string falls through if the
+//   env var is unset at build time — `loadStripe('')` rejects with a clear
+//   Stripe error rather than silently breaking, which is exactly what we
+//   want for a config-miss in CI / staging deploys.
 
 import { loadStripe, type Stripe } from "@stripe/stripe-js";
 
-// TEST-mode pk_test key. Operator-banked; switch to build-injected value
-// once Rex's C2 (aperture-xaha2) wires the esbuild define + .env loading.
-const STRIPE_PUBLISHABLE_KEY =
-  "pk_test_51R28Bb2cuvGrl3yeeNLOzZ46afkz2N3DofgpTajlf4hpdp3BCRIwtv5vh3AUJjwKhIC2709dE9AfFMhuyyBwdhWG00edMxbmw9";
+// Build-time inlined by esbuild define (see apps/eunenem-server/build.mjs).
+// At runtime in the bundle this is a string literal — the `process.env`
+// reference does not exist on the client.
+const STRIPE_PUBLISHABLE_KEY = process.env.STRIPE_PUBLISHABLE_KEY ?? "";
 
 let stripePromise: Promise<Stripe | null> | null = null;
 
