@@ -55,8 +55,22 @@ export interface CriarSessaoCheckoutInput {
   readonly idOpcaoContribuicao: IdOpcaoContribuicao;
   readonly tipoOpcao: TipoOpcaoContribuicao;
   readonly nomeItem: string;
+  /**
+   * Total the buyer is charged (cents). Equals
+   * `contributionAmountCents + feeAmountCents + surchargeCents`
+   * per the composicao invariant.
+   */
   readonly amountCents: MoneyCents;
   readonly metodo: MetodoPagamento;
+  /**
+   * Provider-side surcharge component of `amountCents` (aperture-uyw8i).
+   * When > 0, the adapter MUST surface it as a separate line item so
+   * the buyer's Stripe receipt itemises gift price vs surcharge. Zero
+   * for Pix flows + non-surcharge providers. Typed `number` (not
+   * MoneyCents) because surcharge can legitimately be 0 — MoneyCents
+   * is positive-only.
+   */
+  readonly surchargeCents: number;
   /**
    * URL Stripe redirects to after payment. Use `{CHECKOUT_SESSION_ID}`
    * literal as the placeholder — Stripe substitutes it server-side.

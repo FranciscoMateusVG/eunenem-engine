@@ -3,6 +3,7 @@ import { initTRPC, TRPCError } from '@trpc/server';
 import { z } from 'zod/v4';
 import {
   type Campanha,
+  computeCardSurchargeCents,
   type IdContribuicao,
   type IdIntencaoPagamento,
   type IdOpcaoContribuicao,
@@ -59,9 +60,18 @@ export const ObterListaPresentesOutputItemSchema = z.object({
   id: z.string().uuid(),
   nome: z.string(),
   valor: z.number().int().nonnegative(),
-  imagemUrl: z.string().nullable(),
-  grupo: z.string().nullable(),
-  status: z.enum(['disponivel', 'indisponivel']),
+  /**
+   * Buyer's total cost in cents when paying by credit card (aperture-uyw8i).
+   * Includes the Stripe Brazil card surcharge (3.9% + R$0.39 gross-up)
+   * computed via the shared backend helper. Frontend renders the
+   * differential on the metodo picker so visitors see Cartão cost
+   * BEFORE iniciar is called (no surprise at iframe-mount time).
+   *
+   * Equal to `valor` when card surcharge is zero (defensive; pre-launch
+   * configurability). Frontend's pattern `valorComTaxaCartaoCents ?? valorCents`
+   * (kx9bl) graceful-falls-back if the field is null on older clients.
+   */
+  valorComTaxaCartao: z.number().int().nonnegative(),
 });
 
 export const IniciarPagamentoContribuicaoInputSchema = z.object({
@@ -175,10 +185,16 @@ export const paginaRouter = t.router({
           idOpcaoContribuicao: idOpcaoPresentes,
         },
       );
+      // aperture-uyw8i: include valorComTaxaCartao so Vance's metodo
+       // picker can show the Cartão differential BEFORE iniciar is called.
+       // Single source of truth — the same `computeCardSurchargeCents`
+       // helper feeds this AND the Stripe line item; no frontend/backend
+       // drift surface.
       return items.map((c) => ({
         id: c.id as string,
         nome: c.nome,
         valor: c.valor,
+        valorComTaxaCartao: c.valor + computeCardSurchargeCents(c.valor),
         imagemUrl: c.imagemUrl,
         grupo: c.grupo,
         status: c.status,

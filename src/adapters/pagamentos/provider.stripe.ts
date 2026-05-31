@@ -9,6 +9,7 @@ import {
   type IdTransacaoExterna,
   IdTransacaoExternaSchema,
 } from '../../domain/pagamentos/value-objects/ids.js';
+import { SURCHARGE_LINE_ITEM_NAME } from './card-surcharge.js';
 import type {
   CheckoutSessionProvider,
   CriarSessaoCheckoutInput,
@@ -96,10 +97,19 @@ export class PagamentoProviderStripe implements PagamentoProvider, CheckoutSessi
       span.setAttribute('checkout.tipo_opcao', input.tipoOpcao);
 
       try {
-        // Build the single line item from the gift contribuicao. We don't
-        // (yet) support multi-item Stripe carts — the visitor picks ONE
-        // gift per checkout session. nomeItem comes from contribuicao.nome
-        // (visitor-safe field already projected upstream).
+        // Build line items. The visitor picks ONE gift per checkout
+        // session, so the gift itself is a single line item. The platform
+        // fee (eunenem 10%) is bundled INTO the gift line item — buyer
+        // sees an opaque "gift price" that already includes the fee
+        // (matches operator's "mirror legacy UX" intent; legacy never
+        // surfaced the platform fee to the buyer).
+        //
+        // When metodo === 'credit_card', a SECOND line item surfaces
+        // the Stripe card surcharge (aperture-uyw8i — 3.9% + R$0.39
+        // gross-up). Visible to the buyer so they understand why card
+        // costs more than Pix; itemised on the receipt for clarity.
+        // surchargeCents = 0 for Pix → only the gift line item ships.
+        const nonSurchargeAmountCents = (input.amountCents - input.surchargeCents) as MoneyCents;
         const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [
           {
             price_data: {
@@ -116,11 +126,23 @@ export class PagamentoProviderStripe implements PagamentoProvider, CheckoutSessi
                   tipoOpcao: input.tipoOpcao,
                 },
               },
-              unit_amount: input.amountCents,
+              unit_amount: nonSurchargeAmountCents,
             },
             quantity: 1,
           },
         ];
+        if (input.surchargeCents > 0) {
+          lineItems.push({
+            price_data: {
+              currency: CURRENCY,
+              product_data: {
+                name: SURCHARGE_LINE_ITEM_NAME,
+              },
+              unit_amount: input.surchargeCents,
+            },
+            quantity: 1,
+          });
+        }
 
         // Payment-method shaping. v1 supports card + pix only. Apple/Google
         // Pay deliberately omitted — operator decision.

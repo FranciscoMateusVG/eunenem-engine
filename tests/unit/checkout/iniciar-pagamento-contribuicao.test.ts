@@ -212,6 +212,7 @@ describe('iniciarPagamentoContribuicao — failure paths leave contribuição un
           idContribuicao: randomUUID(),
           contributionAmountCents: 1000,
           feeAmountCents: 50,
+          surchargeCents: 0,
           totalPaidCents: 1050,
           receiverAmountCents: 1000,
           responsavelTaxa: 'contribuinte',

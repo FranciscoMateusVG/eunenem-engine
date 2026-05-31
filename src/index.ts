@@ -14,6 +14,12 @@ export type { Database } from './adapters/database.js';
 export { createDatabase } from './adapters/database.js';
 export type { LivroFinanceiroRepository } from './adapters/financeiro/livro-repository.js';
 export { LivroFinanceiroRepositoryMemory } from './adapters/financeiro/livro-repository.memory.js';
+export {
+  computeCardSurchargeCents,
+  STRIPE_CARD_FIXED_CENTS,
+  STRIPE_CARD_RATE,
+  SURCHARGE_LINE_ITEM_NAME,
+} from './adapters/pagamentos/card-surcharge.js';
 export type {
   CheckoutSessionProvider,
   CriarSessaoCheckoutInput,

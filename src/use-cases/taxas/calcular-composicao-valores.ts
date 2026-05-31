@@ -1,7 +1,9 @@
 import { SpanStatusCode } from '@opentelemetry/api';
 import { z } from 'zod/v4';
+import { computeCardSurchargeCents } from '../../adapters/pagamentos/card-surcharge.js';
 import type { ProvedorRegraTaxa } from '../../adapters/taxas/regra-provider.js';
 import { MoneyCentsSchema } from '../../domain/money.js';
+import { MetodoPagamentoSchema } from '../../domain/pagamentos/value-objects/metodo-pagamento.js';
 import { obterTarifaPorTipo } from '../../domain/taxas/entities/regra-taxa.js';
 import {
   type ComposicaoValores,
@@ -20,6 +22,14 @@ export const CalcularComposicaoValoresInputSchema = z.object({
   idContribuicao: IdContribuicaoReferenciaSchema,
   tipo: TipoOpcaoContribuicaoReferenciaSchema,
   contributionAmountCents: MoneyCentsSchema,
+  /**
+   * Payment method (aperture-uyw8i) — drives provider-side surcharge
+   * inclusion. `credit_card` triggers Stripe Brazil's 3.9% + R$0.39
+   * gross-up; `pix` is fee-free; absent means no surcharge (backward
+   * compat with non-checkout-saga call sites that don't have metodo
+   * context yet — e.g. operator-side admin tools).
+   */
+  metodo: MetodoPagamentoSchema.optional(),
 });
 
 export type CalcularComposicaoValoresInput = z.infer<typeof CalcularComposicaoValoresInputSchema>;
@@ -49,33 +59,45 @@ export async function calcularComposicaoValores(
         throw new TaxasInputInvalidoError(message);
       }
 
-      const { idPlataforma, idContribuicao, tipo, contributionAmountCents } = parsedInput.data;
+      const { idPlataforma, idContribuicao, tipo, contributionAmountCents, metodo } =
+        parsedInput.data;
 
       span.setAttribute('taxas.plataforma.id', idPlataforma);
       span.setAttribute('taxas.contribuicao.id', idContribuicao);
       span.setAttribute('taxas.contribuicao.tipo', tipo);
       span.setAttribute('taxas.contribuicao.amount_cents', contributionAmountCents);
+      if (metodo) span.setAttribute('taxas.metodo', metodo);
 
       const regraAtiva = await provedorRegraTaxa.getRegraAtiva(idPlataforma);
       const tarifa = obterTarifaPorTipo(regraAtiva, tipo);
 
+      // aperture-uyw8i: card payments include a Stripe Brazil surcharge
+      // (3.9% + R$0.39 gross-up — see src/adapters/pagamentos/card-surcharge.ts).
+      // Pix flows + absent metodo → 0 surcharge.
+      const surchargeCents: number =
+        metodo === 'credit_card' ? computeCardSurchargeCents(contributionAmountCents) : 0;
+
       const composicao = calcularComposicaoValoresDominio(tarifa, {
         idContribuicao,
         contributionAmountCents,
+        surchargeCents,
       });
 
       logger.info('taxas.composicao.calculada', {
         idPlataforma,
         idContribuicao: composicao.idContribuicao,
         tipo,
+        metodo: metodo ?? 'omitted',
         contributionAmountCents: composicao.contributionAmountCents,
         feeAmountCents: composicao.feeAmountCents,
+        surchargeCents: composicao.surchargeCents,
         totalPaidCents: composicao.totalPaidCents,
         receiverAmountCents: composicao.receiverAmountCents,
         responsavelTaxa: composicao.responsavelTaxa,
       });
 
       span.setAttribute('taxas.taxa.amount_cents', composicao.feeAmountCents);
+      span.setAttribute('taxas.surcharge.amount_cents', composicao.surchargeCents);
       span.setAttribute('taxas.total_pago.amount_cents', composicao.totalPaidCents);
       span.setStatus({ code: SpanStatusCode.OK });
       return composicao;

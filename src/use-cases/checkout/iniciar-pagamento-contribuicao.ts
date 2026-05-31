@@ -186,7 +186,10 @@ export async function iniciarPagamentoContribuicao(
         );
       }
 
-      // step 3b: compute composição (Taxas, plataforma + tipo scoped)
+      // step 3b: compute composição (Taxas, plataforma + tipo + metodo
+      // scoped). Passing `metodo` triggers Stripe Brazil's card
+      // surcharge inclusion in the composicao snapshot (aperture-uyw8i).
+      // Pix flows resolve to 0 surcharge.
       const composicao = await calcularComposicaoValores(
         { provedorRegraTaxa, observability },
         {
@@ -194,11 +197,15 @@ export async function iniciarPagamentoContribuicao(
           idContribuicao: parsed.idContribuicao,
           tipo: opcao.tipo,
           contributionAmountCents: contribuicao.valor,
+          metodo: parsed.metodo,
         },
       );
 
       // step 4: provider-side checkout session. If this fails (network,
       // auth, provider 5xx), we just throw — nothing to compensate.
+      // surchargeCents threaded so the adapter can surface it as a
+      // separate line item (aperture-uyw8i — buyer sees an itemised
+      // receipt: gift price + processing surcharge).
       const sessao = await checkoutSessionProvider.criarSessaoCheckout({
         idPagamento: parsed.idPagamento,
         idIntencaoPagamento: parsed.idIntencaoPagamento,
@@ -207,6 +214,7 @@ export async function iniciarPagamentoContribuicao(
         tipoOpcao: opcao.tipo,
         nomeItem: contribuicao.nome,
         amountCents: composicao.totalPaidCents,
+        surchargeCents: composicao.surchargeCents,
         metodo: parsed.metodo,
         returnUrl: parsed.returnUrl,
       });
