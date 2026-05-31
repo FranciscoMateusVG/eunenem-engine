@@ -36,6 +36,12 @@ export interface VisitorGift {
   bgColor: string;
   /** Display price in BRL (integer reais — backend stores cents). */
   priceBRL: number;
+  /** Raw Pix-method price in cents (backend canonical). */
+  valorCents: number;
+  /** Raw Cartão-method price in cents (valor + Stripe card surcharge),
+   *  backend-computed (single source of truth, no client-side math).
+   *  Null until aperture-m95f3 (Rex) lands the field on the router output. */
+  valorComTaxaCartaoCents: number | null;
   /** Total units in the group. */
   qtyTotal: number;
   /** Units still available. */
@@ -144,6 +150,12 @@ export function groupVisitorGifts(items: PaginaContribuicao[]): VisitorGift[] {
       }
     } else {
       const isAvailable = c.status === "disponivel";
+      // aperture-kx9bl: `valorComTaxaCartao` is on Rex's m95f3-extended
+      // PaginaContribuicao output. Until that branch is in flight against
+      // staging, the inferred type doesn't carry the field. The cast
+      // disappears when m95f3 lands and the RouterOutputs picks it up.
+      const valorComTaxa = (c as { valorComTaxaCartao?: number })
+        .valorComTaxaCartao;
       map.set(c.nome, {
         ids: [c.id],
         availableId: isAvailable ? c.id : null,
@@ -154,6 +166,9 @@ export function groupVisitorGifts(items: PaginaContribuicao[]): VisitorGift[] {
         emoji: deriveEmoji(c.grupo),
         bgColor: deriveBgColor(c.grupo),
         priceBRL: Math.round(c.valor / 100), // cents → BRL int
+        valorCents: c.valor,
+        valorComTaxaCartaoCents:
+          typeof valorComTaxa === "number" ? valorComTaxa : null,
         qtyTotal: 1,
         qtyAvailable: isAvailable ? 1 : 0,
         status: isAvailable ? "available" : "presenteado",

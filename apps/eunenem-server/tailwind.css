@@ -399,6 +399,15 @@ h4 {
   line-height: 1.05;
 }
 
+.metodo-card-price {
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 22px;
+  color: var(--plum);
+  line-height: 1.05;
+  margin-top: 4px;
+  letter-spacing: 0.01em;
+}
+
 .metodo-card-micro {
   font-family: var(--font-caveat), cursive;
   font-size: 18px;

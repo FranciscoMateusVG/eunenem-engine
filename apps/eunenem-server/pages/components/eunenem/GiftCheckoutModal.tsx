@@ -11,25 +11,29 @@ import {
 import { getStripePromise } from "@/lib/stripeClient";
 import type { VisitorGift } from "@/lib/visitorGift";
 
-// aperture-3xgch (scaffold) + aperture-ra027 (real wiring + metodo step).
+// aperture-3xgch (scaffold) → aperture-ra027 (real wiring + metodo step)
+// → aperture-kx9bl (drop contribuinte form — Stripe is source of truth).
 //
-// THREE-STEP checkout flow:
+// TWO-STEP checkout flow (was three steps, the contribuinte form is gone):
 //
-//   1. form    — visitor enters nome + email (needed by the saga to attach
-//                the contribuinte to the contribuicao server-side).
-//   2. metodo  — visitor picks Pix vs Cartão. The mutation needs `metodo` as
-//                input so Rex's iniciarPagamentoContribuicao saga can build
-//                the right Stripe session shape. UI defaults to Pix (the
+//   1. metodo  — visitor picks Pix vs Cartão. Pix default-selected (the
 //                fee-free path for our 10% margin); both methods feel valid
-//                — no badge, no surcharge UI, the default IS the recommendation.
-//   3. stripe  — EmbeddedCheckoutProvider mounts with the clientSecret
-//                returned from the mutation. Stripe collects recadinho via
-//                custom_fields and redirects to /pagina/<slug>/sucesso?
-//                sessionId={CHECKOUT_SESSION_ID} on completion.
+//                — no badge, no surcharge UI, the default IS the
+//                recommendation.
+//   2. stripe  — EmbeddedCheckoutProvider mounts with the clientSecret
+//                returned from the mutation. Stripe collects nome + email +
+//                mensagem (recadinho) NATIVELY inside the iframe via
+//                custom_fields + customer_creation. The webhook then
+//                persists those fields server-side.
 //
-// Esc/backdrop: allowed on form + metodo (no payment in flight), BLOCKED on
-// stripe (don't drop a half-completed payment). Also blocked while the
-// mutation is pending.
+// Operator caught the scope drift during the live walk: collecting nome +
+// email in our modal before mounting Stripe asked the visitor for the same
+// info twice (once from us, once from Stripe). One place is enough — let
+// Stripe do it. See aperture-kx9bl + sibling backend bead aperture-m95f3.
+//
+// Esc/backdrop: allowed on metodo (no payment in flight), BLOCKED on stripe
+// (don't drop a half-completed payment). Also blocked while the mutation is
+// pending.
 
 interface GiftCheckoutModalProps {
   gift: VisitorGift;
@@ -38,24 +42,22 @@ interface GiftCheckoutModalProps {
   onClose: () => void;
 }
 
-type Step = "form" | "metodo" | "stripe";
+type Step = "metodo" | "stripe";
 
 export function GiftCheckoutModal({
   gift,
-  babyName,
+  babyName: _babyName,
   slug,
   onClose,
 }: GiftCheckoutModalProps) {
-  const [step, setStep] = useState<Step>("form");
-  const [nome, setNome] = useState("");
-  const [email, setEmail] = useState("");
+  const [step, setStep] = useState<Step>("metodo");
   const [metodo, setMetodo] = useState<MetodoPagamento>("pix");
 
   const iniciarPagamento = useIniciarPagamentoContribuicao();
   const stripePromise = useMemo(() => getStripePromise(), []);
 
-  // Esc to close. Allowed on form + metodo; blocked once Stripe is mounted
-  // or a mutation is in flight.
+  // Esc to close. Allowed on metodo; blocked once Stripe is mounted or a
+  // mutation is in flight.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
@@ -76,13 +78,6 @@ export function GiftCheckoutModal({
   }, []);
 
   const canClose = step !== "stripe" && !iniciarPagamento.isPending;
-  const formInvalid = nome.trim().length < 2 || !email.includes("@");
-
-  function onSubmitForm(e: React.FormEvent) {
-    e.preventDefault();
-    if (formInvalid || !gift.availableId) return;
-    setStep("metodo");
-  }
 
   async function onConfirmMetodo() {
     if (!gift.availableId || iniciarPagamento.isPending) return;
@@ -90,13 +85,12 @@ export function GiftCheckoutModal({
       await iniciarPagamento.mutateAsync({
         slug,
         idContribuicao: gift.availableId,
-        contribuinte: { nome: nome.trim(), email: email.trim() },
         metodo,
       });
       setStep("stripe");
     } catch {
       // Error state surfaces via iniciarPagamento.isError on the metodo step.
-      // Stay on the metodo step so the visitor can retry or go back.
+      // Stay on the metodo step so the visitor can retry or close.
     }
   }
 
@@ -162,25 +156,11 @@ export function GiftCheckoutModal({
           ×
         </button>
 
-        {step === "form" && (
-          <FormStep
-            gift={gift}
-            babyName={babyName}
-            nome={nome}
-            setNome={setNome}
-            email={email}
-            setEmail={setEmail}
-            formInvalid={formInvalid}
-            onSubmit={onSubmitForm}
-          />
-        )}
-
         {step === "metodo" && (
           <MetodoStep
             gift={gift}
             metodo={metodo}
             setMetodo={setMetodo}
-            onBack={() => setStep("form")}
             onContinue={onConfirmMetodo}
             isPending={iniciarPagamento.isPending}
             isError={iniciarPagamento.isError}
@@ -209,126 +189,12 @@ export function GiftCheckoutModal({
   );
 }
 
-// ── Step: contribuinte form ───────────────────────────────────────────────
-
-function FormStep({
-  gift,
-  babyName,
-  nome,
-  setNome,
-  email,
-  setEmail,
-  formInvalid,
-  onSubmit,
-}: {
-  gift: VisitorGift;
-  babyName: string;
-  nome: string;
-  setNome: (v: string) => void;
-  email: string;
-  setEmail: (v: string) => void;
-  formInvalid: boolean;
-  onSubmit: (e: React.FormEvent) => void;
-}) {
-  return (
-    <form onSubmit={onSubmit} style={{ display: "flex", flexDirection: "column" }}>
-      <span className="eyebrow eyebrow-coral" style={{ fontSize: 22 }}>
-        presentear
-      </span>
-      <h3
-        id="gift-checkout-title"
-        style={{
-          fontSize: 28,
-          color: "var(--plum)",
-          marginTop: 8,
-          marginBottom: 8,
-          lineHeight: 1.1,
-        }}
-      >
-        {gift.nome}
-      </h3>
-      <p
-        style={{
-          color: "var(--ink-soft)",
-          fontSize: 14.5,
-          lineHeight: 1.5,
-          marginBottom: 18,
-        }}
-      >
-        R$ {gift.priceBRL} — vai direto pros papais do {babyName}. Em
-        seguida você escolhe como pagar e deixa um recadinho ♡
-      </p>
-
-      <label
-        htmlFor="checkout-nome"
-        style={LABEL_STYLE}
-      >
-        seu nome ♡
-      </label>
-      <input
-        id="checkout-nome"
-        type="text"
-        value={nome}
-        onChange={(e) => setNome(e.target.value)}
-        autoFocus
-        required
-        minLength={2}
-        maxLength={80}
-        placeholder="Como vai assinar o recadinho"
-        style={INPUT_STYLE}
-      />
-
-      <label
-        htmlFor="checkout-email"
-        style={{ ...LABEL_STYLE, marginTop: 14 }}
-      >
-        seu email ♡
-      </label>
-      <input
-        id="checkout-email"
-        type="email"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        required
-        maxLength={120}
-        placeholder="pra mandar o comprovante"
-        style={INPUT_STYLE}
-      />
-      <p
-        style={{
-          fontSize: 12,
-          color: "var(--ink-mute)",
-          marginTop: 6,
-          marginBottom: 18,
-        }}
-      >
-        Usamos só pra te mandar o comprovante. Não enviamos newsletter,
-        prometido.
-      </p>
-
-      <button
-        type="submit"
-        disabled={formInvalid || !gift.availableId}
-        className="btn-lilac"
-        style={{
-          width: "100%",
-          justifyContent: "center",
-          opacity: formInvalid || !gift.availableId ? 0.7 : 1,
-        }}
-      >
-        Continuar →
-      </button>
-    </form>
-  );
-}
-
-// ── Step: metodo picker (Pix vs Cartão) ───────────────────────────────────
+// ── Step: metodo picker (Pix vs Cartão) — now the entry surface ───────────
 
 function MetodoStep({
   gift,
   metodo,
   setMetodo,
-  onBack,
   onContinue,
   isPending,
   isError,
@@ -336,7 +202,6 @@ function MetodoStep({
   gift: VisitorGift;
   metodo: MetodoPagamento;
   setMetodo: (m: MetodoPagamento) => void;
-  onBack: () => void;
   onContinue: () => void;
   isPending: boolean;
   isError: boolean;
@@ -359,7 +224,7 @@ function MetodoStep({
   return (
     <div style={{ display: "flex", flexDirection: "column" }}>
       <span className="eyebrow eyebrow-coral" style={{ fontSize: 22 }}>
-        como você quer pagar?
+        presentear
       </span>
       <h3
         id="gift-checkout-title"
@@ -381,7 +246,7 @@ function MetodoStep({
           marginBottom: 22,
         }}
       >
-        R$ {gift.priceBRL} — os dois caem direto no Pix dos papais ♡
+        escolhe como pagar. Você deixa um recadinho bonito no checkout ♡
       </p>
 
       <div
@@ -396,6 +261,7 @@ function MetodoStep({
           onSelect={() => setMetodo("pix")}
           icon="⚡"
           title="Pix"
+          priceLabel={formatBRL(gift.valorCents)}
           micro="na hora ♡"
           sub="aprovado em segundos"
         />
@@ -405,8 +271,16 @@ function MetodoStep({
           onSelect={() => setMetodo("credit_card")}
           icon="💳"
           title="Cartão"
-          micro="até 12x"
-          sub="Visa, Master, Elo, Amex"
+          priceLabel={formatBRL(gift.valorComTaxaCartaoCents ?? gift.valorCents)}
+          micro={
+            gift.valorComTaxaCartaoCents !== null &&
+            gift.valorComTaxaCartaoCents > gift.valorCents
+              ? `+${formatBRL(
+                  gift.valorComTaxaCartaoCents - gift.valorCents,
+                )} taxa cartão`
+              : "até 12x"
+          }
+          sub="Visa, Master, Elo, Amex · até 12x"
         />
       </div>
 
@@ -427,47 +301,20 @@ function MetodoStep({
         </div>
       )}
 
-      <div
+      <button
+        type="button"
+        onClick={onContinue}
+        disabled={isPending}
+        className="btn-lilac"
         style={{
-          display: "flex",
-          gap: 12,
+          width: "100%",
+          justifyContent: "center",
           marginTop: 22,
-          alignItems: "center",
+          opacity: isPending ? 0.7 : 1,
         }}
-        className="metodo-actions"
       >
-        <button
-          type="button"
-          onClick={onBack}
-          disabled={isPending}
-          style={{
-            background: "transparent",
-            border: "none",
-            color: "var(--ink-soft)",
-            fontFamily: "var(--font-dm-sans), system-ui, sans-serif",
-            fontSize: 14,
-            fontWeight: 600,
-            cursor: isPending ? "not-allowed" : "pointer",
-            padding: "10px 4px",
-            opacity: isPending ? 0.5 : 1,
-          }}
-        >
-          ← voltar
-        </button>
-        <button
-          type="button"
-          onClick={onContinue}
-          disabled={isPending}
-          className="btn-lilac"
-          style={{
-            flex: 1,
-            justifyContent: "center",
-            opacity: isPending ? 0.7 : 1,
-          }}
-        >
-          {isPending ? "Abrindo checkout..." : "Continuar →"}
-        </button>
-      </div>
+        {isPending ? "Abrindo checkout..." : "Continuar →"}
+      </button>
       <p
         style={{
           fontSize: 11,
@@ -489,6 +336,9 @@ interface MetodoCardProps {
   onSelect: () => void;
   icon: string;
   title: string;
+  /** Final price label shown under the title — Patrick Hand, plum, bold.
+   *  Includes any surcharge (Cartão card shows valor + taxa total). */
+  priceLabel: string;
   micro: string;
   sub: string;
 }
@@ -499,15 +349,22 @@ const MetodoCard = function MetodoCardInner({
   onSelect,
   icon,
   title,
+  priceLabel,
   micro,
   sub,
 }: MetodoCardProps & { ref?: React.Ref<HTMLButtonElement> }) {
+  // Compose an accessible name so screen readers reading the radio surface
+  // include the final price + the microcopy summary, not just "Pix" /
+  // "Cartão". The visible price line is also exposed; this is belt-and-
+  // suspenders for the surcharge announcement on selection.
+  const accessibleLabel = `${title}, ${priceLabel}, ${micro}`;
   return (
     <button
       ref={ref}
       type="button"
       role="radio"
       aria-checked={selected}
+      aria-label={accessibleLabel}
       tabIndex={selected ? 0 : -1}
       onClick={onSelect}
       className={selected ? "metodo-card metodo-card--selected" : "metodo-card"}
@@ -516,33 +373,18 @@ const MetodoCard = function MetodoCardInner({
         {icon}
       </span>
       <span className="metodo-card-title">{title}</span>
+      <span className="metodo-card-price">{priceLabel}</span>
       <span className="metodo-card-micro">{micro}</span>
       <span className="metodo-card-sub">{sub}</span>
     </button>
   );
 };
 
-// ── Shared styles ─────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────
 
-const INPUT_STYLE: React.CSSProperties = {
-  width: "100%",
-  padding: 14,
-  borderRadius: 16,
-  border: "1.5px solid var(--line)",
-  fontSize: 15,
-  fontFamily: "var(--font-dm-sans), system-ui, sans-serif",
-  color: "var(--ink)",
-  lineHeight: 1.5,
-  background: "var(--cream)",
-  outline: "none",
-  transition: "border-color 0.2s ease",
-};
-
-const LABEL_STYLE: React.CSSProperties = {
-  display: "block",
-  fontFamily: "var(--font-caveat), cursive",
-  fontSize: 22,
-  color: "var(--plum)",
-  marginBottom: 6,
-  transform: "rotate(-1deg)",
-};
+/** Format integer cents as BRL with comma decimal separator (Brazilian
+ *  convention). 4500 → "R$ 45,00", 4723 → "R$ 47,23". */
+function formatBRL(cents: number): string {
+  const reais = cents / 100;
+  return `R$ ${reais.toFixed(2).replace(".", ",")}`;
+}
