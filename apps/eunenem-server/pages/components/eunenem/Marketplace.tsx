@@ -1,76 +1,51 @@
 
-import { useCallback, useState } from "react";
-import { toast } from "sonner";
+import { useCallback, useMemo, useState } from "react";
 import { BottleDoodle, FlowerDoodle } from "./Doodles";
 import { GiftCard } from "./GiftCard";
 import { GiftCheckoutModal } from "./GiftCheckoutModal";
 import { useTweaks } from "./TweaksContext";
-import { GIFT_CATEGORIES, GIFTS, type Gift } from "@/lib/mocks/gifts";
-import { useMural } from "./MuralContext";
+import { usePaginaListaPresentes } from "@/lib/paginaApi";
+import {
+  deriveCategoryChips,
+  groupVisitorGifts,
+  type VisitorGift,
+} from "@/lib/visitorGift";
 
-// aperture-3d9t — Marketplace section ("Escolhe um presentinho ♡").
+// aperture-3d9t (original visual scaffold) + aperture-3xgch (data swap).
 //
-// Category chip filter + responsive gift grid. State managed locally:
-// - active category filter
-// - gift "presenteado" status (clicking PRESENTEAR flips a gift to
-//   presenteado after the modal flow)
-// - checkout modal selection
+// Real contribuicoes from postgres replace the GIFTS mock. The mock-era
+// "1-second Pix delay + mural insert + toast" closure is gone — Stripe
+// Embedded Checkout handles the payment, and the mural update happens
+// server-side via the webhook (see aperture-24n36) so it's the single
+// source of truth for any visitor across the world.
 //
-// On successful PRESENTEAR:
-// 1. Modal closes
-// 2. Sonner toast: "Presente registrado! Obrigado ♡"
-// 3. Gift card flips to "JÁ PRESENTEADO ♡"
-// 4. New mural message added with the contributor's note (author "Você")
+// Slug threads down from PaginaPage → Marketplace → GiftCheckoutModal so
+// the mutation can resolve the campanha server-side.
+//
+// Loading + empty states mirror the EuNeném tone — handwritten Caveat
+// copy, no spinner-on-grey-card business.
 
-export function Marketplace() {
+interface MarketplaceProps {
+  slug: string;
+}
+
+export function Marketplace({ slug }: MarketplaceProps) {
   const { tweaks } = useTweaks();
-  const { addMessage } = useMural();
-  const [gifts, setGifts] = useState<Gift[]>(GIFTS);
+  const { data, isLoading, isError } = usePaginaListaPresentes(slug);
   const [activeCat, setActiveCat] = useState<string>("Todos");
-  const [selectedGift, setSelectedGift] = useState<Gift | null>(null);
+  const [selectedGift, setSelectedGift] = useState<VisitorGift | null>(null);
+
+  const gifts = useMemo(() => (data ? groupVisitorGifts(data) : []), [data]);
+  const chips = useMemo(() => deriveCategoryChips(gifts), [gifts]);
 
   const filtered =
     activeCat === "Todos"
       ? gifts
-      : gifts.filter((g) => g.category === activeCat);
+      : gifts.filter((g) => g.grupoKey === activeCat);
 
-  const onPick = useCallback((gift: Gift) => {
+  const onPick = useCallback((gift: VisitorGift) => {
     setSelectedGift(gift);
   }, []);
-
-  const onConfirm = useCallback(
-    async (note: string) => {
-      if (!selectedGift) return;
-      // Simulated 1-second checkout delay — see Step 8 of the build plan.
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      setGifts((prev) =>
-        prev.map((g) =>
-          g.id === selectedGift.id ? { ...g, status: "presenteado" } : g,
-        ),
-      );
-
-      // Add a mural message with the contributor's note (mock author "Você").
-      addMessage({
-        authorName: "Você",
-        avatarBg: "var(--lilac-deep)",
-        avatarInitials: "VC",
-        timeAgo: "agora há pouco",
-        message:
-          note.trim() ||
-          `Mandando um abraço apertado pro ${tweaks.babyName} ♡`,
-        style: "caveat",
-        rotation: -1,
-      });
-
-      toast.success("Presente registrado! Obrigado ♡", {
-        description: `${selectedGift.name} — recadinho enviado pro mural do ${tweaks.babyName}.`,
-        duration: 4500,
-      });
-      setSelectedGift(null);
-    },
-    [selectedGift, addMessage, tweaks.babyName],
-  );
 
   return (
     <section
@@ -129,41 +104,42 @@ export function Marketplace() {
             cartão, em checkout seguro.
           </p>
 
-          {/* Category chips */}
-          <div
-            role="tablist"
-            aria-label="Categorias de presentes"
-            className="flex justify-center gap-2 flex-wrap mt-7 mb-2"
-          >
-            {GIFT_CATEGORIES.map((c) => {
-              const active = activeCat === c;
-              return (
-                <button
-                  key={c}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  onClick={() => setActiveCat(c)}
-                  style={{
-                    padding: "9px 18px",
-                    borderRadius: 999,
-                    border: `1px solid ${active ? "var(--lilac-deep)" : "var(--line)"}`,
-                    background: active
-                      ? "var(--lilac-deep)"
-                      : "var(--paper)",
-                    color: active ? "#fff" : "var(--ink-soft)",
-                    fontWeight: 600,
-                    fontSize: 13,
-                    cursor: "pointer",
-                    transition: "all 0.2s ease",
-                    boxShadow: active ? "var(--shadow-cta)" : "none",
-                  }}
-                >
-                  {c}
-                </button>
-              );
-            })}
-          </div>
+          {chips.length > 1 && (
+            <div
+              role="tablist"
+              aria-label="Categorias de presentes"
+              className="flex justify-center gap-2 flex-wrap mt-7 mb-2"
+            >
+              {chips.map((c) => {
+                const active = activeCat === c;
+                return (
+                  <button
+                    key={c}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setActiveCat(c)}
+                    style={{
+                      padding: "9px 18px",
+                      borderRadius: 999,
+                      border: `1px solid ${active ? "var(--lilac-deep)" : "var(--line)"}`,
+                      background: active
+                        ? "var(--lilac-deep)"
+                        : "var(--paper)",
+                      color: active ? "#fff" : "var(--ink-soft)",
+                      fontWeight: 600,
+                      fontSize: 13,
+                      cursor: "pointer",
+                      transition: "all 0.2s ease",
+                      boxShadow: active ? "var(--shadow-cta)" : "none",
+                    }}
+                  >
+                    {c}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </header>
 
         {/* aperture-rdr8u — Mobile renders 2 columns (was 1) because the
@@ -172,13 +148,9 @@ export function Marketplace() {
             behavior so tablet (sm: 2-3 cols) and desktop (lg: 3-4 cols) stay
             unchanged. Mobile gap tightens to gap-4 to give half-width cards
             more breathing room. */}
-        <div className="grid gap-4 sm:gap-6 mt-12 grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(260px,1fr))]">
-          {filtered.map((g) => (
-            <GiftCard key={g.id} gift={g} onPick={onPick} />
-          ))}
-        </div>
-
-        {filtered.length === 0 && (
+        {isLoading ? (
+          <MarketplaceSkeleton />
+        ) : isError ? (
           <p
             className="text-center mt-10"
             style={{
@@ -187,8 +159,27 @@ export function Marketplace() {
               fontSize: 22,
             }}
           >
-            ainda não tem nada nessa categoria — escolhe outra ♡
+            ainda não consegui carregar a listinha — recarrega a página ♡
           </p>
+        ) : filtered.length === 0 ? (
+          <p
+            className="text-center mt-10"
+            style={{
+              color: "var(--ink-mute)",
+              fontFamily: "var(--font-caveat), cursive",
+              fontSize: 22,
+            }}
+          >
+            {gifts.length === 0
+              ? `ainda não tem presentes aqui — volte daqui a pouco ♡`
+              : "ainda não tem nada nessa categoria — escolhe outra ♡"}
+          </p>
+        ) : (
+          <div className="grid gap-4 sm:gap-6 mt-12 grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(260px,1fr))]">
+            {filtered.map((g) => (
+              <GiftCard key={g.nome} gift={g} onPick={onPick} />
+            ))}
+          </div>
         )}
       </div>
 
@@ -196,10 +187,79 @@ export function Marketplace() {
         <GiftCheckoutModal
           gift={selectedGift}
           babyName={tweaks.babyName}
+          slug={slug}
           onClose={() => setSelectedGift(null)}
-          onConfirm={onConfirm}
         />
       )}
     </section>
+  );
+}
+
+// ── Skeleton ──────────────────────────────────────────────────────────────
+// Six placeholder cards — same grid + radius + paper as real cards so the
+// layout doesn't jump. Animated lilac shimmer pulled in via CSS class
+// `anim-skeleton-pulse` (added to tailwind.css alongside this bead).
+
+function MarketplaceSkeleton() {
+  return (
+    <div
+      aria-hidden="true"
+      className="grid gap-4 sm:gap-6 mt-12 grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(260px,1fr))]"
+    >
+      {Array.from({ length: 6 }, (_, i) => (
+        <article
+          key={i}
+          style={{
+            background: "var(--paper)",
+            border: "1px solid var(--line)",
+            borderRadius: 24,
+            padding: 18,
+            boxShadow: "var(--shadow-sm)",
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
+          <div
+            className="anim-skeleton-pulse"
+            style={{
+              width: "100%",
+              aspectRatio: "1 / 1",
+              borderRadius: 18,
+              background: "var(--cream-2)",
+            }}
+          />
+          <div
+            className="anim-skeleton-pulse"
+            style={{
+              height: 22,
+              width: "70%",
+              borderRadius: 8,
+              background: "var(--cream-2)",
+              marginTop: 16,
+            }}
+          />
+          <div
+            className="anim-skeleton-pulse"
+            style={{
+              height: 30,
+              width: "40%",
+              borderRadius: 8,
+              background: "var(--cream-2)",
+              marginTop: 16,
+            }}
+          />
+          <div
+            style={{
+              height: 44,
+              width: "100%",
+              borderRadius: 999,
+              background: "var(--cream-2)",
+              marginTop: 16,
+            }}
+            className="anim-skeleton-pulse"
+          />
+        </article>
+      ))}
+    </div>
   );
 }

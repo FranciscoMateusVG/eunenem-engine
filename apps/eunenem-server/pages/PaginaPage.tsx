@@ -14,10 +14,10 @@ import { TweaksProvider } from '@/components/eunenem/TweaksContext';
 // 404s at the App.tsx router level (server returns 404 status; this
 // component is never rendered for unknown slugs).
 //
-// Slug is accepted as prop in case we want to thread it into child components
-// later (e.g. seed TweaksProvider with a slug-derived baby name like
-// PainelPage does). For now it's unused beyond signature.
-export function PaginaPage(_: { slug: string }) {
+// Slug threads down to Marketplace (aperture-3xgch) so the visitor read +
+// embedded Stripe checkout can resolve the campanha server-side. Other
+// children (Hero, Story, Messages) still don't need it.
+export function PaginaPage({ slug }: { slug: string }) {
   return (
     <TweaksProvider>
       <MuralProvider>
@@ -25,7 +25,7 @@ export function PaginaPage(_: { slug: string }) {
         <main className="flex-1 pt-16">
           <Hero />
           <Story />
-          <Marketplace />
+          <Marketplace slug={slug} />
           <HowTo />
           <Messages />
         </main>

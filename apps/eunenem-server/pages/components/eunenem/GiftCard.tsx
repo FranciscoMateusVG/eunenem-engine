@@ -1,28 +1,35 @@
 
 import { useState } from "react";
-import type { Gift } from "@/lib/mocks/gifts";
+import type { VisitorGift } from "@/lib/visitorGift";
 
-// aperture-3d9t — single gift card.
+// aperture-3d9t (visual) + aperture-3xgch (data shape swap — VisitorGift).
 //
-// Renders a paper card with: emoji-icon thumb (colored bg) + category
-// badge + name + description + price + CTA. Hover lifts the card 4px
-// + bumps the shadow.
+// Renders one gift card on the public /pagina/<slug>. Now consumes the
+// grouped-by-nome VisitorGift shape (see lib/visitorGift.ts). Real product
+// image takes over the thumb when imagemUrl is set; otherwise we render the
+// grupo-derived emoji on the colored square. CTA disabled when all units
+// in the group are presenteado.
 //
-// CTA states:
-//   - 'available' → "Presentear →" (primary lilac CTA)
-//   - 'presenteado' → "Já presenteado ♡" (disabled, muted)
+// Visual contract (unchanged from aperture-3d9t):
+//   - Paper card, 24px radius, hover lifts 4px + bumps shadow
+//   - Square thumb with emoji or image, category chip top-left
+//   - "✓ Presenteado" badge top-right when status = presenteado
+//   - Patrick Hand for the price, Caveat for the "presente" flourish
+//   - btn-lilac CTA → "Presentear →", muted disabled CTA → "Já presenteado ♡"
 //
-// All visual decisions are inline-style on purpose — match the
-// design's pixel-level rotations, gradients, and shadow values.
+// New affordance: when qtyTotal > 1, render a "X de Y disponíveis" tag
+// below the price so the visitor knows there's more than one unit of this
+// gift on the list.
 
 interface GiftCardProps {
-  gift: Gift;
-  onPick: (gift: Gift) => void;
+  gift: VisitorGift;
+  onPick: (gift: VisitorGift) => void;
 }
 
 export function GiftCard({ gift, onPick }: GiftCardProps) {
   const [hover, setHover] = useState(false);
   const isTaken = gift.status === "presenteado";
+  const showQtyTag = gift.qtyTotal > 1;
 
   return (
     <article
@@ -70,9 +77,10 @@ export function GiftCard({ gift, onPick }: GiftCardProps) {
             letterSpacing: "0.08em",
             textTransform: "uppercase",
             color: "var(--ink-soft)",
+            zIndex: 2,
           }}
         >
-          {gift.category}
+          {gift.displayCategory}
         </span>
         {isTaken && (
           <span
@@ -88,19 +96,34 @@ export function GiftCard({ gift, onPick }: GiftCardProps) {
               fontWeight: 700,
               letterSpacing: "0.06em",
               textTransform: "uppercase",
+              zIndex: 2,
             }}
           >
             ✓ Presenteado
           </span>
         )}
-        <span
-          aria-hidden="true"
-          style={{
-            filter: isTaken ? "grayscale(0.4) opacity(.55)" : "none",
-          }}
-        >
-          {gift.emoji}
-        </span>
+        {gift.imagemUrl ? (
+          <img
+            src={gift.imagemUrl}
+            alt={gift.nome}
+            loading="lazy"
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              filter: isTaken ? "grayscale(0.4) opacity(.55)" : "none",
+            }}
+          />
+        ) : (
+          <span
+            aria-hidden="true"
+            style={{
+              filter: isTaken ? "grayscale(0.4) opacity(.55)" : "none",
+            }}
+          >
+            {gift.emoji}
+          </span>
+        )}
       </div>
 
       <h3
@@ -108,30 +131,19 @@ export function GiftCard({ gift, onPick }: GiftCardProps) {
           fontSize: 24,
           color: "var(--plum)",
           marginTop: 16,
-          marginBottom: 6,
+          marginBottom: 10,
           lineHeight: 1.1,
         }}
       >
-        {gift.name}
+        {gift.nome}
       </h3>
-      <p
-        style={{
-          fontSize: 14,
-          color: "var(--ink-soft)",
-          lineHeight: 1.4,
-          marginBottom: 16,
-          minHeight: 38,
-        }}
-      >
-        {gift.description}
-      </p>
 
       <div
         style={{
           display: "flex",
           alignItems: "baseline",
           justifyContent: "space-between",
-          marginBottom: 16,
+          marginBottom: showQtyTag ? 8 : 16,
         }}
       >
         <span
@@ -155,6 +167,23 @@ export function GiftCard({ gift, onPick }: GiftCardProps) {
           presente
         </span>
       </div>
+
+      {showQtyTag && (
+        <p
+          style={{
+            fontFamily: "var(--font-caveat), cursive",
+            fontSize: 17,
+            color: "var(--ink-soft)",
+            marginBottom: 14,
+            marginTop: 0,
+            lineHeight: 1.2,
+          }}
+        >
+          {gift.qtyAvailable > 0
+            ? `${gift.qtyAvailable} de ${gift.qtyTotal} disponíveis ♡`
+            : `todos os ${gift.qtyTotal} já foram ♡`}
+        </p>
+      )}
 
       <button
         type="button"

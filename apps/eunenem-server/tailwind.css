@@ -260,11 +260,29 @@ h4 {
   animation: twinkle 3.5s ease-in-out infinite;
 }
 
+/* aperture-3xgch — gentle lilac shimmer for the marketplace loading state.
+ * The skeleton cards inherit cream-2 fills; we breathe between cream-2 and
+ * the slightly cooler cream tint to read as "loading" without screaming. */
+@keyframes skeletonPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.anim-skeleton-pulse {
+  animation: skeletonPulse 1.4s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .anim-float,
   .anim-live-pulse,
   .anim-doodle-sway,
-  .anim-twinkle {
+  .anim-twinkle,
+  .anim-skeleton-pulse {
     animation: none;
   }
 }
