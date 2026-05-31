@@ -8,6 +8,7 @@ import {
   useIniciarPagamentoContribuicao,
   type MetodoPagamento,
 } from "@/lib/paginaApi";
+import { formatBRL } from "@/lib/formatBRL";
 import { getStripePromise } from "@/lib/stripeClient";
 import type { VisitorGift } from "@/lib/visitorGift";
 
@@ -396,11 +397,3 @@ const MetodoCard = function MetodoCardInner({
   );
 };
 
-// ── Helpers ───────────────────────────────────────────────────────────────
-
-/** Format integer cents as BRL with comma decimal separator (Brazilian
- *  convention). 4500 → "R$ 45,00", 4723 → "R$ 47,23". */
-function formatBRL(cents: number): string {
-  const reais = cents / 100;
-  return `R$ ${reais.toFixed(2).replace(".", ",")}`;
-}

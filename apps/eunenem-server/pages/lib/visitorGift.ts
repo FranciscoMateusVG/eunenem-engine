@@ -34,9 +34,11 @@ export interface VisitorGift {
   emoji: string;
   /** Background-color token (CSS var name) for the thumb square. */
   bgColor: string;
-  /** Display price in BRL (integer reais — backend stores cents). */
-  priceBRL: number;
-  /** Raw Pix-method price in cents (backend canonical). */
+  /** Raw Pix-method price in cents (backend canonical). Render with
+   *  `formatBRL(valorCents)` for the display string — see
+   *  pages/lib/formatBRL.ts. The legacy `priceBRL` integer-reais field
+   *  was dropped in aperture-dikki because Math.round-to-int truncated
+   *  the cents introduced by the fee-inclusive projection (aperture-ines9). */
   valorCents: number;
   /** Raw Cartão-method price in cents (valor + Stripe card surcharge),
    *  backend-computed (single source of truth, no client-side math).
@@ -165,7 +167,6 @@ export function groupVisitorGifts(items: PaginaContribuicao[]): VisitorGift[] {
         imagemUrl: c.imagemUrl,
         emoji: deriveEmoji(c.grupo),
         bgColor: deriveBgColor(c.grupo),
-        priceBRL: Math.round(c.valor / 100), // cents → BRL int
         valorCents: c.valor,
         valorComTaxaCartaoCents:
           typeof valorComTaxa === "number" ? valorComTaxa : null,

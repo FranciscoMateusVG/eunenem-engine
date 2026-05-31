@@ -1,5 +1,6 @@
 
 import { useState } from "react";
+import { formatBRL } from "@/lib/formatBRL";
 import type { VisitorGift } from "@/lib/visitorGift";
 
 // aperture-3d9t (visual) + aperture-3xgch (data shape swap — VisitorGift).
@@ -155,7 +156,7 @@ export function GiftCard({ gift, onPick }: GiftCardProps) {
             whiteSpace: "nowrap",
           }}
         >
-          R$ {gift.priceBRL}
+          {formatBRL(gift.valorCents)}
         </span>
         <span
           style={{
