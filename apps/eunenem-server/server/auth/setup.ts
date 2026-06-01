@@ -15,7 +15,7 @@ import {
   type Database,
   ID_PLATAFORMA_EUNENEM,
   type LivroFinanceiroRepository,
-  LivroFinanceiroRepositoryMemory,
+  LivroFinanceiroRepositoryPostgres,
   type Observability,
   type PagamentoEventPublisher,
   PagamentoEventPublisherMemory,
@@ -315,13 +315,17 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
   const pagamentoRepository = new PagamentoRepositoryPostgres(db);
   const pagamentoEventPublisher = new PagamentoEventPublisherMemory();
 
-  // Financeiro BC — in-memory livro for now (aperture-24n36). The
-  // finalizarPagamentoAprovado use-case dispatched by the Stripe
-  // webhook handler requires this repo. Postgres adapter is future
-  // work; until then lancamentos are process-local (acceptable for
-  // visitor checkout v1; saldo/relatórios via Financeiro are not yet
-  // exposed to operators).
-  const livroFinanceiroRepository = new LivroFinanceiroRepositoryMemory();
+  // Financeiro BC — postgres-backed livro (aperture-id3ay, migration
+  // 012). Before this swap, the memory adapter was losing every
+  // saga's lancamentos on tsx-watch reload / production deploy. The
+  // recebedorRepository is passed so the adapter can delegate
+  // `findRecebedorAtivoPorIdCampanha` to Arrecadação (cross-BC read;
+  // Financeiro doesn't own recebedor data — same pattern as the
+  // memory adapter).
+  const livroFinanceiroRepository = new LivroFinanceiroRepositoryPostgres(
+    db,
+    recebedorRepository,
+  );
 
   let pagamentoProvider: PagamentoProvider;
   let checkoutSessionProvider: CheckoutSessionProvider;

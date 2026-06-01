@@ -14,6 +14,7 @@ export type { Database } from './adapters/database.js';
 export { createDatabase } from './adapters/database.js';
 export type { LivroFinanceiroRepository } from './adapters/financeiro/livro-repository.js';
 export { LivroFinanceiroRepositoryMemory } from './adapters/financeiro/livro-repository.memory.js';
+export { LivroFinanceiroRepositoryPostgres } from './adapters/financeiro/livro-repository.postgres.js';
 export {
   computeCardSurchargeCents,
   STRIPE_CARD_FIXED_CENTS,

@@ -80,6 +80,17 @@ export interface Contribuicoes {
   valor: number;
 }
 
+export interface LancamentosFinanceiros {
+  amount_cents: number;
+  criado_em: Timestamp;
+  id: string;
+  id_campanha: string | null;
+  id_contribuicao: string;
+  id_pagamento: string;
+  status: string;
+  tipo: string;
+}
+
 export interface OpcoesContribuicao {
   campanha_id: string;
   id: string;
@@ -116,6 +127,14 @@ export interface Recebedores {
   is_active: Generated<boolean>;
   nome_titular: string;
   tipo_chave_pix: string;
+}
+
+export interface RepassesRecebedor {
+  amount_cents: number;
+  id: string;
+  id_campanha: string;
+  solicitado_em: Timestamp;
+  status: string;
 }
 
 export interface Sessions {
@@ -166,10 +185,12 @@ export interface DB {
   cats: Cats;
   contas: Contas;
   contribuicoes: Contribuicoes;
+  lancamentos_financeiros: LancamentosFinanceiros;
   opcoes_contribuicao: OpcoesContribuicao;
   pagamentos: Pagamentos;
   rate_limit: RateLimit;
   recebedores: Recebedores;
+  repasses_recebedor: RepassesRecebedor;
   sessions: Sessions;
   users: Users;
   usuarios: Usuarios;

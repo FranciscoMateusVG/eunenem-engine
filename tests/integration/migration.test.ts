@@ -57,10 +57,16 @@ describe('Migration round-trip', () => {
     expect(tableNames).toContain('verifications');
     expect(tableNames).toContain('rate_limit');
     expect(tableNames).toContain('pagamentos');
+    // aperture-id3ay added the financeiro migration (012).
+    expect(tableNames).toContain('lancamentos_financeiros');
+    expect(tableNames).toContain('repasses_recebedor');
 
-    // Migrate down (latest migration first). aperture-xaha2 added the
-    // pagamentos migration (011) on top of slug (010), better-auth (009),
-    // and usuario (008).
+    // Migrate down (latest migration first). aperture-id3ay added the
+    // financeiro migration (012) on top of pagamentos (011), slug (010),
+    // better-auth (009), and usuario (008).
+    const downFinanceiro = await migrator.migrateDown();
+    expect(downFinanceiro.error).toBeUndefined();
+
     const downPagamentos = await migrator.migrateDown();
     expect(downPagamentos.error).toBeUndefined();
 
