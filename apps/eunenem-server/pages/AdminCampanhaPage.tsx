@@ -1,4 +1,5 @@
 import { AdminShell } from "@/components/eunenem/admin/AdminShell";
+import { ContribuicoesList } from "@/components/eunenem/admin/ContribuicoesList";
 import { DddBadge } from "@/components/eunenem/admin/DddBadge";
 import { trpc } from "@/lib/trpc.js";
 
@@ -204,14 +205,18 @@ function FactsGrid({
 }
 
 /**
- * W2 ships the seam, not the list. /admin/campanha/:idCampanha is the
- * canonical embed point for the contribuicoes drill — W3 (aperture-rsidz.4)
- * file-swaps this section's body with the real ContribuicoesList. The
- * placeholder is the same affordance pattern W1 used for the campanhas
- * placeholder: operator sees the seam clearly, no confusing empty box, and
- * the data-bc + section shell stay stable across the W2 → W3 boundary.
+ * Contribuições drill embedded in the campanha detail page (aperture-rsidz.4,
+ * W3). W2 shipped the seam (the section shell + data-bc wrapper + heading);
+ * W3 fills the body with the real ContribuicoesList — a filterable list of
+ * every contribuicao for this campanha, with status/opção/período chips,
+ * a counter, and a clear-link. Rows navigate to
+ * /admin/contribuicao/:idContribuicao (the W3 detail route).
+ *
+ * The data-bc="arrecadacao" wrapper + the heading are preserved verbatim
+ * from W2 — the embed contract held across the W2 → W3 boundary exactly as
+ * designed.
  */
-function ContribuicoesSection({ idCampanha: _idCampanha }: { idCampanha: string }) {
+function ContribuicoesSection({ idCampanha }: { idCampanha: string }) {
   return (
     <section data-bc="arrecadacao" className="space-y-3">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
@@ -219,14 +224,10 @@ function ContribuicoesSection({ idCampanha: _idCampanha }: { idCampanha: string 
           contribuições
         </h2>
         <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-mute">
-          preenchida por W3 (aperture-rsidz.4)
+          arrecadação · drill
         </span>
       </div>
-      <div className="rounded-md border border-dashed border-line bg-paper px-5 py-12 text-center">
-        <p className="font-mono text-[12px] italic tracking-[0.04em] text-ink-mute">
-          (lista de contribuições — W3 fills this)
-        </p>
-      </div>
+      <ContribuicoesList idCampanha={idCampanha} />
     </section>
   );
 }

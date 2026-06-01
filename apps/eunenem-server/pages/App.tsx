@@ -1,5 +1,6 @@
 import { Toaster } from 'sonner';
 import { AdminCampanhaPage } from './AdminCampanhaPage.js';
+import { AdminContribuicaoPage } from './AdminContribuicaoPage.js';
 import { AdminPage } from './AdminPage.js';
 import { AdminUsuarioPage } from './AdminUsuarioPage.js';
 import { AuthDemoPage } from './AuthDemoPage.js';
@@ -45,6 +46,7 @@ export function resolveRoute(pathname: string):
   | { kind: 'admin' }
   | { kind: 'admin-usuario'; idConta: string }
   | { kind: 'admin-campanha'; idCampanha: string }
+  | { kind: 'admin-contribuicao'; idContribuicao: string }
   | { kind: 'not-found' } {
   // Marketing landing page (aperture-q1j2) — exact "/" only.
   if (pathname === '/') {
@@ -81,6 +83,20 @@ export function resolveRoute(pathname: string):
   const adminCampanhaMatch = pathname.match(/^\/admin\/campanha\/([^/]+)\/?$/);
   if (adminCampanhaMatch && adminCampanhaMatch[1]) {
     return { kind: 'admin-campanha', idCampanha: adminCampanhaMatch[1] };
+  }
+  // /admin/contribuicao/<idContribuicao> (rsidz.4, W3) — contribuição detail
+  // page (triple-BC layout). Matched BEFORE the bare /admin rule for the
+  // same specificity reason as /admin/usuario + /admin/campanha above.
+  // idContribuicao is a free-shape string here; the tRPC fetch returns
+  // null for unknown ids and ArrecadacaoSection renders a not-found body.
+  const adminContribuicaoMatch = pathname.match(
+    /^\/admin\/contribuicao\/([^/]+)\/?$/,
+  );
+  if (adminContribuicaoMatch && adminContribuicaoMatch[1]) {
+    return {
+      kind: 'admin-contribuicao',
+      idContribuicao: adminContribuicaoMatch[1],
+    };
   }
   if (pathname === '/admin' || pathname === '/admin/') {
     return { kind: 'admin' };
@@ -153,5 +169,7 @@ function pickPage(route: ReturnType<typeof resolveRoute>, pathname: string) {
     return <AdminUsuarioPage idConta={route.idConta} />;
   if (route.kind === 'admin-campanha')
     return <AdminCampanhaPage idCampanha={route.idCampanha} />;
+  if (route.kind === 'admin-contribuicao')
+    return <AdminContribuicaoPage idContribuicao={route.idContribuicao} />;
   return <NotFoundPage pathname={pathname} />;
 }

@@ -24,7 +24,12 @@
 import { initTRPC } from "@trpc/server";
 import { z } from "zod";
 import type { Campanha } from "../../../../src/domain/arrecadacao/entities/campanha.js";
-import type { IdConta } from "../../../../src/domain/arrecadacao/value-objects/ids.js";
+import type { Contribuicao } from "../../../../src/domain/arrecadacao/entities/contribuicao.js";
+import type {
+  IdCampanha,
+  IdConta,
+  IdContribuicao,
+} from "../../../../src/domain/arrecadacao/value-objects/ids.js";
 import { ID_PLATAFORMA_EUNENEM } from "../../../../src/index.js";
 import type { TrpcContext } from "./context.js";
 
@@ -238,6 +243,187 @@ const campanhasRouter = t.router({
     }),
 });
 
+/* ─────────────────────────────────────────────────────────────────────────
+ * contribuicoes — W3 (aperture-rsidz.4).
+ *
+ * Two procedures, both tenant-guarded against ID_PLATAFORMA_EUNENEM:
+ *   - listByCampanha({ idCampanha }) → all contribuicoes for the campanha,
+ *     used by the embedded ContribuicoesList on /admin/campanha/:idCampanha.
+ *     v1 has NO server-side pagination/filtering — filters apply client-side
+ *     in the list component. Documented in §2 of Wheatley's scope: if a
+ *     campanha grows past ~500 contribuicoes, file a paging follow-up bead.
+ *   - findById({ idContribuicao }) → multi-aggregate lookup for the detail
+ *     page (/admin/contribuicao/:idContribuicao). Returns the contribuicao
+ *     plus its campanha + recebedor (from the campanha snapshot) + the
+ *     contribuinte (if a usuario with that email exists on this plataforma).
+ *
+ * Wire shape is intentionally narrow — never leaks the full Contribuicao
+ * aggregate. Mirrors the projection discipline established by
+ * `toCampanhaAdminDTO` above.
+ * ────────────────────────────────────────────────────────────────────── */
+
+const ContribuinteDTOSchema = z
+  .object({
+    nome: z.string(),
+    email: z.string(),
+    mensagem: z.string().nullable(),
+  })
+  .nullable();
+
+const ContribuicaoAdminDTOSchema = z.object({
+  id: z.string(),
+  nome: z.string(),
+  valorCentavos: z.number().int().nonnegative(),
+  status: z.enum(["disponivel", "indisponivel"]),
+  grupo: z.string().nullable(),
+  idOpcaoContribuicao: z.string(),
+  criadaEm: z.string(),
+  contribuinte: ContribuinteDTOSchema,
+});
+export type ContribuicaoAdminDTO = z.infer<typeof ContribuicaoAdminDTOSchema>;
+
+const CampanhaSummaryDTOSchema = z.object({
+  id: z.string(),
+  titulo: z.string(),
+});
+export type CampanhaSummaryDTO = z.infer<typeof CampanhaSummaryDTOSchema>;
+
+const RecebedorSummaryDTOSchema = z.object({
+  nome: z.string(),
+});
+export type RecebedorSummaryDTO = z.infer<typeof RecebedorSummaryDTOSchema>;
+
+const UsuarioSummaryDTOSchema = z.object({
+  idConta: z.string(),
+  nomeExibicao: z.string(),
+  email: z.string(),
+});
+export type UsuarioSummaryDTO = z.infer<typeof UsuarioSummaryDTOSchema>;
+
+function toContribuicaoAdminDTO(c: Contribuicao): ContribuicaoAdminDTO {
+  return {
+    id: c.id,
+    nome: c.nome,
+    valorCentavos: c.valor as unknown as number,
+    status: c.status,
+    grupo: c.grupo,
+    idOpcaoContribuicao: c.idOpcaoContribuicao,
+    criadaEm: c.criadaEm.toISOString(),
+    contribuinte:
+      c.contribuinte === null
+        ? null
+        : {
+            nome: c.contribuinte.nome,
+            email: c.contribuinte.email,
+            mensagem: c.contribuinte.mensagem ?? null,
+          },
+  };
+}
+
+const contribuicoesRouter = t.router({
+  /**
+   * All contribuicoes for a campanha. Tenant-guarded: resolves the campanha
+   * first and verifies idPlataforma; an unknown or cross-tenant campanha
+   * returns an empty array (defensive, matches the campanhas.findById null
+   * behavior on cross-tenant lookups).
+   *
+   * NOT paginated server-side (see file header §2). Filters live in the
+   * client-side ContribuicoesList state machine.
+   */
+  listByCampanha: t.procedure
+    .input(z.object({ idCampanha: z.string() }))
+    .output(z.object({ contribuicoes: z.array(ContribuicaoAdminDTOSchema) }))
+    .query(async ({ ctx, input }) => {
+      const campanha = await ctx.deps.campanhaRepository.findById(
+        input.idCampanha as IdCampanha,
+      );
+      if (!campanha) return { contribuicoes: [] };
+      if (campanha.idPlataforma !== ID_PLATAFORMA_EUNENEM) {
+        return { contribuicoes: [] };
+      }
+      const contribuicoes =
+        await ctx.deps.contribuicaoRepository.findByCampanhaId(
+          input.idCampanha as IdCampanha,
+        );
+      return {
+        contribuicoes: contribuicoes.map(toContribuicaoAdminDTO),
+      };
+    }),
+
+  /**
+   * Multi-aggregate lookup for the contribuicao detail page (W3).
+   *
+   * Returns null when:
+   *   - the contribuicao does not exist
+   *   - the resolving campanha lives on another plataforma (tenant guard)
+   *
+   * Includes:
+   *   - contribuicao: lean DTO of the Arrecadacao aggregate
+   *   - campanha: { id, titulo } summary (link target for the campanha block)
+   *   - recebedor: { nome } | null — taken from the campanha's dadosRecebedor
+   *     snapshot (the active recebedor projection). Null when the campanha
+   *     has no recebedor yet ("gift-not-claimed" affordance).
+   *   - contribuinte: { idConta, nomeExibicao, email } | null — resolved
+   *     via findUsuarioByEmail(plataforma, contribuinte.email). Anonymous
+   *     visitor checkouts (no contribuinte attached) → null. Identified
+   *     contribuinte whose email is NOT a registered usuario on this
+   *     plataforma → also null (rendered as "(sem contribuinte identificado)"
+   *     by the page).
+   */
+  findById: t.procedure
+    .input(z.object({ idContribuicao: z.string() }))
+    .output(
+      z
+        .object({
+          contribuicao: ContribuicaoAdminDTOSchema,
+          campanha: CampanhaSummaryDTOSchema,
+          recebedor: RecebedorSummaryDTOSchema.nullable(),
+          contribuinte: UsuarioSummaryDTOSchema.nullable(),
+        })
+        .nullable(),
+    )
+    .query(async ({ ctx, input }) => {
+      const contribuicao = await ctx.deps.contribuicaoRepository.findById(
+        input.idContribuicao as IdContribuicao,
+      );
+      if (!contribuicao) return null;
+
+      const campanha = await ctx.deps.campanhaRepository.findById(
+        contribuicao.idCampanha,
+      );
+      if (!campanha) return null;
+      // Tenant guard — never cross the multi-tenant boundary.
+      if (campanha.idPlataforma !== ID_PLATAFORMA_EUNENEM) return null;
+
+      const recebedor: RecebedorSummaryDTO | null =
+        campanha.dadosRecebedor === null
+          ? null
+          : { nome: campanha.dadosRecebedor.nomeTitular };
+
+      let contribuinteSummary: UsuarioSummaryDTO | null = null;
+      if (contribuicao.contribuinte !== null) {
+        const usuario = await ctx.deps.usuarioRepository.findUsuarioByEmail(
+          ID_PLATAFORMA_EUNENEM,
+          contribuicao.contribuinte.email as never,
+        );
+        if (usuario) {
+          contribuinteSummary = {
+            idConta: usuario.idConta,
+            nomeExibicao: usuario.nomeExibicao,
+            email: usuario.email,
+          };
+        }
+      }
+
+      return {
+        contribuicao: toContribuicaoAdminDTO(contribuicao),
+        campanha: { id: campanha.id, titulo: campanha.titulo },
+        recebedor,
+        contribuinte: contribuinteSummary,
+      };
+    }),
+});
+
 export const adminRouter = t.router({
   /** Nested sub-router for usuarios browse + paginated list. */
   usuarios: usuariosRouter,
@@ -320,4 +506,7 @@ export const adminRouter = t.router({
     }),
 
   campanhas: campanhasRouter,
+
+  /** Nested sub-router for contribuicoes drill + multi-aggregate detail (W3). */
+  contribuicoes: contribuicoesRouter,
 });
