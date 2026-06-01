@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { hashClientPII } from '../../src/observability/hash-client-pii.js';
 
 describe('hashClientPII (aperture-3pqt7)', () => {
@@ -8,8 +8,46 @@ describe('hashClientPII (aperture-3pqt7)', () => {
     expect(hashClientPII('', SALT)).toBe('');
   });
 
-  it('throws when salt is empty (guard against forgotten env var)', () => {
-    expect(() => hashClientPII('user@example.com', '')).toThrow(/LOG_PII_HASH_SALT/);
+  describe('empty-salt posture (aperture-j0ccg)', () => {
+    // Save + restore NODE_ENV around each case so the suite is
+    // order-independent and a production assertion can't leak into other
+    // tests that run after.
+    let savedNodeEnv: string | undefined;
+    beforeEach(() => {
+      savedNodeEnv = process.env.NODE_ENV;
+    });
+    afterEach(() => {
+      if (savedNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = savedNodeEnv;
+      }
+    });
+
+    it('throws when salt is empty in NODE_ENV=production (prod posture: forgotten env var is a boot-time failure)', () => {
+      process.env.NODE_ENV = 'production';
+      expect(() => hashClientPII('user@example.com', '')).toThrow(/LOG_PII_HASH_SALT/);
+    });
+
+    it('returns "unhashed:" marker when salt is empty in dev mode (zero-config dev startup)', () => {
+      process.env.NODE_ENV = 'development';
+      expect(hashClientPII('user@example.com', '')).toBe('unhashed:user@example.com');
+    });
+
+    it('returns "unhashed:" marker when salt is empty and NODE_ENV is unset (treat as non-prod)', () => {
+      delete process.env.NODE_ENV;
+      expect(hashClientPII('user@example.com', '')).toBe('unhashed:user@example.com');
+    });
+
+    it('returns "unhashed:" marker when salt is empty in test mode (so this very test suite would not 500)', () => {
+      process.env.NODE_ENV = 'test';
+      expect(hashClientPII('203.0.113.45', '')).toBe('unhashed:203.0.113.45');
+    });
+
+    it('still returns empty for empty input even when salt is empty (the empty-input short-circuit wins)', () => {
+      process.env.NODE_ENV = 'development';
+      expect(hashClientPII('', '')).toBe('');
+    });
   });
 
   it('is deterministic — same input + same salt produces same hash', () => {
