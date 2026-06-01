@@ -346,6 +346,65 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
     });
   }
 
+  async findCampanhasByAdministrador(
+    idConta: IdConta,
+    context?: ArrecadacaoRepositoryContext,
+  ): Promise<readonly Campanha[]> {
+    const executor = context?.trx ?? this.db;
+    return tracer.startActiveSpan(
+      'db.arrecadacao_campanhas.findCampanhasByAdministrador',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+        try {
+          // 1..N counterpart to findFirstByAdministrador. Same join, same
+          // ORDER BY — no LIMIT. Returns ALL campanha ids the conta
+          // administers, including those without a recebedor row
+          // (LEFT-side of the join is campanhas; we don't gate on
+          // recebedores at all here — that's findByAdministrador's job).
+          const idRows = await executor
+            .selectFrom('campanhas')
+            .innerJoin(
+              'campanha_administradores',
+              'campanha_administradores.campanha_id',
+              'campanhas.id',
+            )
+            .select(['campanhas.id'])
+            .where('campanha_administradores.id_usuario', '=', idConta)
+            .orderBy('campanhas.criada_em', 'asc')
+            .orderBy('campanhas.id', 'asc')
+            .execute();
+
+          if (idRows.length === 0) {
+            span.setStatus({ code: SpanStatusCode.OK });
+            return [];
+          }
+
+          // Hydrate each via findById — preserves the recebedor + opcoes
+          // + admins assembly logic without duplicating it. Same N+1
+          // shape as findCampanhasByContribuinte; N is bounded by the
+          // number of campanhas this single user administers (typically
+          // ≤handful, dozens at the absolute extreme).
+          const campanhas: Campanha[] = [];
+          for (const { id } of idRows) {
+            const campanha = await this.findById(id as IdCampanha, context);
+            if (campanha) {
+              campanhas.push(campanha);
+            }
+          }
+
+          span.setStatus({ code: SpanStatusCode.OK });
+          return campanhas;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
   async findCampanhasByContribuinte(
     idPlataforma: IdPlataformaReferencia,
     emailContribuinte: string,

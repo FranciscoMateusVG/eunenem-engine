@@ -49,6 +49,40 @@ export interface CampanhaRepository {
   ): Promise<Campanha | undefined>;
 
   /**
+   * Returns ALL Campanhas where `idConta` is in `idsAdministradores`
+   * (aperture-u2tko). The 1..N counterpart to `findFirstByAdministrador`
+   * — used by the admin "Administra" tab on /admin/usuario/:idConta to
+   * list every campanha the usuario owns, anticipating the future
+   * model where a single user can administer multiple campanhas.
+   *
+   * Contract:
+   *   - Returns ALL campanhas with `idConta` among administradores.
+   *   - Ordered by `criadaEm` ASC, then `id` ASC for ties (matches
+   *     `findFirstByAdministrador`).
+   *   - Tenant-scoped implicitly via the join (`campanha_administradores`
+   *     is per-campanha, which is per-plataforma). Callers MAY still
+   *     want a belt-and-braces `idPlataforma` filter when surfacing
+   *     across the tRPC tenant boundary.
+   *   - Returns campanhas WITHOUT recebedor too — mirrors
+   *     `findFirstByAdministrador` semantics, NOT `findByAdministrador`.
+   *     The admin view needs to see ALL administered campanhas
+   *     regardless of bank-info readiness.
+   *   - Empty array (NOT undefined) when usuario administra nothing.
+   *     The multi-result contract is "list" — empty list is a valid
+   *     answer.
+   *
+   * Does NOT replace `findFirstByAdministrador` (still used by
+   * `auth.me` + p8i01 backfill, which want exactly one row) or
+   * `findByAdministrador` (still used by contribuicao-router, which
+   * requires recebedor presence). This is the third sibling for the
+   * admin-tier "show all administered" surface.
+   */
+  findCampanhasByAdministrador(
+    idConta: IdConta,
+    context?: ArrecadacaoRepositoryContext,
+  ): Promise<readonly Campanha[]>;
+
+  /**
    * Returns the DISTINCT set of Campanhas this email-identified
    * contribuinte has given to (aperture-2ma52). Tenant-scoped. Includes
    * campanhas with any contribuicao status — paid, pending, failed all

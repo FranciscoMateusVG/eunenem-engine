@@ -192,6 +192,69 @@ export class CampanhaRepositoryMemory implements CampanhaRepository {
     });
   }
 
+  async findCampanhasByAdministrador(
+    idConta: IdConta,
+    _context?: ArrecadacaoRepositoryContext,
+  ): Promise<readonly Campanha[]> {
+    return tracer.startActiveSpan(
+      'db.arrecadacao_campanhas.findCampanhasByAdministrador',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+        try {
+          // 1..N filter, deterministic ordering by criadaEm ASC then id ASC
+          // for ties. Matches findFirstByAdministrador's contract so the
+          // single-result port and the multi-result port agree on which
+          // campanha is "first."
+          const matches = [...this.campanhas.values()]
+            .filter((c) => c.idsAdministradores.includes(idConta))
+            .sort((a, b) => {
+              const dt = a.criadaEm.getTime() - b.criadaEm.getTime();
+              if (dt !== 0) return dt;
+              if (a.id < b.id) return -1;
+              if (a.id > b.id) return 1;
+              return 0;
+            });
+
+          if (matches.length === 0) {
+            span.setStatus({ code: SpanStatusCode.OK });
+            return [];
+          }
+
+          if (!this.recebedorRepository) {
+            span.setStatus({ code: SpanStatusCode.OK });
+            return matches;
+          }
+
+          // Apply recebedor wrapper per row — same pattern as
+          // findByPlataforma / findFirstByAdministrador. Returns
+          // campanhaSemRecebedor (NOT undefined) when no recebedor is
+          // active, so the admin view sees every campanha regardless of
+          // bank-info readiness.
+          const resultados: Campanha[] = [];
+          for (const campanha of matches) {
+            const recebedorAtivo = await this.recebedorRepository.findAtivoByCampanhaId(
+              campanha.id,
+            );
+            resultados.push(
+              recebedorAtivo
+                ? campanhaComRecebedorAtivo(campanha, recebedorAtivo)
+                : campanhaSemRecebedor(campanha),
+            );
+          }
+
+          span.setStatus({ code: SpanStatusCode.OK });
+          return resultados;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
   async findCampanhasByContribuinte(
     _idPlataforma: IdPlataformaReferencia,
     _emailContribuinte: string,

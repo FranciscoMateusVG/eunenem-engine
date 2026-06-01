@@ -161,35 +161,31 @@ const campanhasRouter = t.router({
   /**
    * Campanhas administered by the usuario identified by `idConta`.
    *
-   * Today the engine port models the relation as 0..1 — a single user owns
-   * at most one campanha (per the `findByAdministrador` port comment and
-   * the `findFirstByAdministrador` semantics). We call
-   * `findFirstByAdministrador` (which returns the campanha regardless of
-   * recebedor presence — `findByAdministrador` would filter it out when
-   * the user hasn't added bank info yet) and wrap the result in a 0-or-1
-   * array. The UI is already shaped for N rows — when the 1..N port
-   * (`aperture-u2tko`) lands, this call site swaps to it and the UI gets
-   * "free" multi-row support.
+   * Uses the 1..N port `findCampanhasByAdministrador` (aperture-u2tko) —
+   * returns ALL campanhas the usuario administers, ordered criadaEm ASC.
+   * Includes campanhas without a recebedor (mirrors
+   * `findFirstByAdministrador` semantics: bank-info readiness does NOT
+   * gate visibility in the admin "Administra" tab).
    *
-   * Tenant guard: the engine resolves the campanha through the
+   * Tenant guard: the engine resolves campanhas through the
    * `campanha_administradores` join, which is scoped by `campanha_id` to
-   * a single plataforma row. We still verify `idPlataforma` matches
-   * eunenem on the returned aggregate — belt and braces for the multi-
-   * tenancy boundary.
+   * a single plataforma row. We still filter the returned aggregate by
+   * `idPlataforma === ID_PLATAFORMA_EUNENEM` — belt and braces for the
+   * multi-tenancy boundary, in case a usuario has memberships across
+   * plataformas in the future.
    */
   listByUsuario: t.procedure
     .input(z.object({ idConta: z.string() }))
     .output(z.object({ campanhas: z.array(CampanhaAdminDTOSchema) }))
     .query(async ({ ctx, input }) => {
-      const campanha =
-        await ctx.deps.campanhaRepository.findFirstByAdministrador(
+      const campanhas =
+        await ctx.deps.campanhaRepository.findCampanhasByAdministrador(
           input.idConta as IdConta,
         );
-      if (!campanha) return { campanhas: [] };
-      if (campanha.idPlataforma !== ID_PLATAFORMA_EUNENEM) {
-        return { campanhas: [] };
-      }
-      return { campanhas: [toCampanhaAdminDTO(campanha)] };
+      const visiveis = campanhas.filter(
+        (c) => c.idPlataforma === ID_PLATAFORMA_EUNENEM,
+      );
+      return { campanhas: visiveis.map(toCampanhaAdminDTO) };
     }),
 
   /**

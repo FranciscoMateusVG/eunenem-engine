@@ -198,6 +198,105 @@ export function describeCampanhaRepositoryConformance(name: string, options: Con
       expect(span?.attributes['db.operation.name']).toBe('DELETE');
     });
 
+    // ───── findCampanhasByAdministrador (aperture-u2tko) ─────
+
+    it('findCampanhasByAdministrador returns empty array when usuario administra nothing (aperture-u2tko)', async () => {
+      const found = await repo.findCampanhasByAdministrador(randomUUID());
+      expect(found).toEqual([]);
+    });
+
+    it('findCampanhasByAdministrador returns the matching campaign for 1 administered (aperture-u2tko)', async () => {
+      const idConta = randomUUID();
+      const campanha = makeCampanha({ idsAdministradores: [idConta] });
+      await options.saveCampanha(repo, campanha);
+
+      const found = await repo.findCampanhasByAdministrador(idConta);
+      expect(found).toHaveLength(1);
+      expect(found[0]?.id).toBe(campanha.id);
+      expect(found[0]?.idsAdministradores).toContain(idConta);
+    });
+
+    it('findCampanhasByAdministrador returns ALL matching campaigns for 2 administered, ordered criadaEm ASC (aperture-u2tko)', async () => {
+      const idConta = randomUUID();
+      const idPlataforma = randomUUID();
+
+      const older = makeCampanha({
+        idPlataforma,
+        idsAdministradores: [idConta],
+        criadaEm: new Date('2026-04-01T00:00:00.000Z'),
+      });
+      const newer = makeCampanha({
+        idPlataforma,
+        idsAdministradores: [idConta],
+        criadaEm: new Date('2026-05-01T00:00:00.000Z'),
+      });
+
+      // Save NEWER first to verify ordering is by criada_em ASC, not insertion order.
+      await options.saveCampanha(repo, newer);
+      await options.saveCampanha(repo, older);
+
+      const found = await repo.findCampanhasByAdministrador(idConta);
+      expect(found).toHaveLength(2);
+      expect(found.map((c) => c.id)).toEqual([older.id, newer.id]);
+    });
+
+    it('findCampanhasByAdministrador ignores campaigns where idConta is NOT an administrador (aperture-u2tko)', async () => {
+      const idContaAlvo = randomUUID();
+      const idContaOutro = randomUUID();
+
+      const adminAlvo = makeCampanha({ idsAdministradores: [idContaAlvo] });
+      const adminOutro = makeCampanha({ idsAdministradores: [idContaOutro] });
+      const adminAmbos = makeCampanha({
+        idsAdministradores: [idContaAlvo, idContaOutro],
+      });
+
+      await options.saveCampanha(repo, adminAlvo);
+      await options.saveCampanha(repo, adminOutro);
+      await options.saveCampanha(repo, adminAmbos);
+
+      const found = await repo.findCampanhasByAdministrador(idContaAlvo);
+      const ids = found.map((c) => c.id).sort();
+      expect(ids).toEqual([adminAlvo.id, adminAmbos.id].sort());
+      expect(ids).not.toContain(adminOutro.id);
+    });
+
+    it('findCampanhasByAdministrador includes campaigns WITHOUT recebedor (aperture-u2tko)', async () => {
+      const idConta = randomUUID();
+      const idPlataforma = randomUUID();
+
+      const comRecebedor = makeCampanha({
+        idPlataforma,
+        idsAdministradores: [idConta],
+        criadaEm: new Date('2026-04-01T00:00:00.000Z'),
+      });
+      const semRecebedor = makeCampanhaSemRecebedor({
+        idPlataforma,
+        idsAdministradores: [idConta],
+        criadaEm: new Date('2026-05-01T00:00:00.000Z'),
+      });
+
+      await options.saveCampanha(repo, comRecebedor);
+      await options.saveCampanha(repo, semRecebedor);
+
+      const found = await repo.findCampanhasByAdministrador(idConta);
+      expect(found).toHaveLength(2);
+      const sem = found.find((c) => c.id === semRecebedor.id);
+      expect(sem).toBeDefined();
+      expect(sem?.idRecebedor).toBeNull();
+      expect(sem?.dadosRecebedor).toBeNull();
+    });
+
+    it('findCampanhasByAdministrador emits db.arrecadacao_campanhas.findCampanhasByAdministrador span (aperture-u2tko)', async () => {
+      await repo.findCampanhasByAdministrador(randomUUID());
+      const span = findSpan(
+        options.getSpans(),
+        'db.arrecadacao_campanhas.findCampanhasByAdministrador',
+      );
+      expect(span).toBeDefined();
+      expect(span?.attributes['db.system']).toBe(options.expectedDbSystem);
+      expect(span?.attributes['db.operation.name']).toBe('SELECT');
+    });
+
     // ───── findCampanhasByContribuinte (aperture-2ma52) ─────
     // Memory mode returns [] honestly (no contribuicoes data). Postgres
     // adapter is exercised in campanha-repository.postgres.test.ts with
