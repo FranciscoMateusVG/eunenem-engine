@@ -5,6 +5,17 @@ export default defineConfig({
     globals: false,
     environment: 'node',
     include: ['tests/**/*.test.ts'],
+    // ONE Postgres container shared across every test file
+    // (aperture-m4xaj). Spun up before any file runs; torn down after
+    // all files complete. See tests/helpers/global-setup.ts.
+    globalSetup: ['tests/helpers/global-setup.ts'],
+    // Run test files sequentially so per-file beforeEach TRUNCATEs
+    // don't race across files that touch overlapping tables. Tests
+    // *within* a file still run sequentially per vitest's default.
+    // Trade-off: total wall-clock is the sum of file runtimes (no
+    // file-level parallelism). Acceptable today; revisit with
+    // schema-per-file isolation if speed becomes a problem.
+    fileParallelism: false,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'text-summary', 'json', 'html'],
@@ -63,6 +74,10 @@ export default defineConfig({
         },
       },
     },
-    testTimeout: 30000, // Testcontainers needs time to spin up
+    // No more per-file container startup — tests just connect to the
+    // already-running shared container. testTimeout can come back down
+    // closer to the actual test runtime; keep some headroom for
+    // migration runs on cold-cache CI.
+    testTimeout: 30000,
   },
 });
