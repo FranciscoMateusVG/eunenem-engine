@@ -291,6 +291,12 @@ export const paginaRouter = t.router({
             idPagamento,
             idIntencaoPagamento,
             returnUrl,
+            // aperture-6g58e: browser-originated checkout uses inline
+            // success — Stripe fires onComplete in the iframe instead of
+            // redirecting. The /sucesso page remains the fallback for
+            // payment methods that DO need a redirect (some bank-redirect
+            // flows) and for direct-URL visits.
+            redirectOnCompletion: 'if_required' as const,
           },
         );
         return { sessionId: result.sessionId, clientSecret: result.clientSecret };

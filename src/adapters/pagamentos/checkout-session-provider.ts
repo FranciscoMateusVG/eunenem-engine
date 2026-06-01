@@ -92,6 +92,25 @@ export interface CriarSessaoCheckoutInput {
    * always stamped by the adapter, do NOT pass them here.
    */
   readonly metadata?: Readonly<Record<string, string>>;
+  /**
+   * Completion-redirect policy passed through to the provider (aperture-6g58e).
+   *
+   *   - `always` (default): provider redirects browser to returnUrl after
+   *     payment confirms. Legacy behavior. Has a race with the webhook —
+   *     the success page can render before the webhook finalizes.
+   *   - `if_required`: provider redirects ONLY when the chosen payment
+   *     method demands it (some bank-redirect flows). Card/Pix stay inline
+   *     and the SDK fires an `onComplete` callback in the iframe instead.
+   *     This is what eunenem's inline-success modal uses.
+   *   - `never`: provider never redirects; SDK always fires onComplete.
+   *     Stricter — use only when the consumer is certain it can handle
+   *     every payment method inline.
+   *
+   * Adapters that don't support inline completion (e.g. a future Pagarme
+   * direct adapter that's all redirect-based) MAY ignore this hint and
+   * always redirect — it's a hint, not a hard contract. Stripe respects it.
+   */
+  readonly redirectOnCompletion?: 'always' | 'if_required' | 'never';
 }
 
 export interface CriarSessaoCheckoutResult {

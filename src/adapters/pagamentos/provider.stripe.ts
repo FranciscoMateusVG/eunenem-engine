@@ -204,6 +204,12 @@ export class PagamentoProviderStripe implements PagamentoProvider, CheckoutSessi
         // create-session call (same idPagamento) return the same session
         // rather than creating a duplicate. Legacy eunenem skipped this —
         // we fix it here.
+        // aperture-6g58e: redirect_on_completion threaded from the
+        // consumer. 'if_required' lets card+Pix stay inline (Stripe fires
+        // onComplete on the iframe) instead of redirecting to return_url —
+        // the eunenem inline-success modal depends on this. Default
+        // 'always' preserves legacy behavior for any consumer that doesn't
+        // opt in.
         const session = await this.stripe.checkout.sessions.create(
           {
             mode: 'payment',
@@ -219,6 +225,7 @@ export class PagamentoProviderStripe implements PagamentoProvider, CheckoutSessi
             // for it in the iframe and stores it on the resulting Customer.
             customer_creation: 'if_required',
             return_url: input.returnUrl,
+            redirect_on_completion: input.redirectOnCompletion ?? 'always',
           },
           {
             idempotencyKey: `pagamento:${input.idPagamento}:create-session`,

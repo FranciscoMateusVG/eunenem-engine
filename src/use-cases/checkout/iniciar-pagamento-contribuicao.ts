@@ -44,6 +44,12 @@ export const IniciarPagamentoContribuicaoInputSchema = z.object({
    * supports it (Stripe substitutes it server-side).
    */
   returnUrl: z.string().trim().min(1).max(2000),
+  /**
+   * Completion-redirect policy threaded through to the provider session
+   * (aperture-6g58e). See CheckoutSessionProvider.CriarSessaoCheckoutInput
+   * for the full rationale. Default `always` preserves legacy behavior.
+   */
+  redirectOnCompletion: z.enum(['always', 'if_required', 'never']).optional(),
 });
 
 export type IniciarPagamentoContribuicaoInput = z.infer<
@@ -217,6 +223,9 @@ export async function iniciarPagamentoContribuicao(
         surchargeCents: composicao.surchargeCents,
         metodo: parsed.metodo,
         returnUrl: parsed.returnUrl,
+        ...(parsed.redirectOnCompletion
+          ? { redirectOnCompletion: parsed.redirectOnCompletion }
+          : {}),
       });
 
       span.setAttribute('checkout.session.id', sessao.sessionId);
