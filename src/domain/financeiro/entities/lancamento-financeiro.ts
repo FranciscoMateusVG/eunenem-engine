@@ -71,10 +71,22 @@ export function validarComposicaoFinanceiraPagamentoAprovado(
     throw new Error('Apenas pagamentos aprovados podem gerar lancamentos financeiros.');
   }
 
-  const { contributionAmountCents, feeAmountCents, receiverAmountCents, totalPaidCents } =
-    input.composicaoValores;
+  const {
+    contributionAmountCents,
+    feeAmountCents,
+    surchargeCents,
+    receiverAmountCents,
+    totalPaidCents,
+  } = input.composicaoValores;
 
-  if (receiverAmountCents + feeAmountCents !== totalPaidCents) {
+  // aperture-uyw8i extension: buyer-paid card surcharge is part of the
+  // total paid by the contribuinte but NOT counted toward platform fee
+  // or receiver amount. Invariant per SnapshotComposicaoValoresFinanceiro:
+  //   receiverAmountCents + feeAmountCents + surchargeCents === totalPaidCents
+  // The original equality check missed surchargeCents → every card
+  // payment threw here despite the saga steps 1+2 succeeding upstream
+  // (operator-caught aperture-6g58e verify session 2026-05-31).
+  if (receiverAmountCents + feeAmountCents + surchargeCents !== totalPaidCents) {
     throw new Error('Composicao de valores financeira nao confere com o total pago.');
   }
 
