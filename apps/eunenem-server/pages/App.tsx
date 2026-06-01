@@ -1,4 +1,5 @@
 import { Toaster } from 'sonner';
+import { AdminCampanhaPage } from './AdminCampanhaPage.js';
 import { AdminPage } from './AdminPage.js';
 import { AdminUsuarioPage } from './AdminUsuarioPage.js';
 import { AuthDemoPage } from './AuthDemoPage.js';
@@ -43,6 +44,7 @@ export function resolveRoute(pathname: string):
   | { kind: 'auth-demo' }
   | { kind: 'admin' }
   | { kind: 'admin-usuario'; idConta: string }
+  | { kind: 'admin-campanha'; idCampanha: string }
   | { kind: 'not-found' } {
   // Marketing landing page (aperture-q1j2) — exact "/" only.
   if (pathname === '/') {
@@ -70,6 +72,15 @@ export function resolveRoute(pathname: string):
   const adminUsuarioMatch = pathname.match(/^\/admin\/usuario\/([^/]+)\/?$/);
   if (adminUsuarioMatch && adminUsuarioMatch[1]) {
     return { kind: 'admin-usuario', idConta: adminUsuarioMatch[1] };
+  }
+  // /admin/campanha/<idCampanha> (rsidz.3, W2) — campanha detail page.
+  // Matched BEFORE the bare /admin rule for the same specificity reason
+  // as /admin/usuario above. idCampanha is a free-shape string here;
+  // the tRPC fetch returns null for unknown ids and the page renders a
+  // not-found body.
+  const adminCampanhaMatch = pathname.match(/^\/admin\/campanha\/([^/]+)\/?$/);
+  if (adminCampanhaMatch && adminCampanhaMatch[1]) {
+    return { kind: 'admin-campanha', idCampanha: adminCampanhaMatch[1] };
   }
   if (pathname === '/admin' || pathname === '/admin/') {
     return { kind: 'admin' };
@@ -140,5 +151,7 @@ function pickPage(route: ReturnType<typeof resolveRoute>, pathname: string) {
   if (route.kind === 'admin') return <AdminPage />;
   if (route.kind === 'admin-usuario')
     return <AdminUsuarioPage idConta={route.idConta} />;
+  if (route.kind === 'admin-campanha')
+    return <AdminCampanhaPage idCampanha={route.idCampanha} />;
   return <NotFoundPage pathname={pathname} />;
 }

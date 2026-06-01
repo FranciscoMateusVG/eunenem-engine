@@ -1,9 +1,13 @@
 /**
- * Admin tRPC router (aperture-rsidz.2, W1; aperture-tinly, W-tsrd4b prep).
+ * Admin tRPC router (rsidz.2 + tinly + rsidz.3).
  *
- * The data layer for the operator's DDD-trace drill-down. v1 is read-only:
- * `searchUsers` for the picker, `findUsuarioByConta` for the detail page,
- * and `usuarios.listPaginated` for the browse-as-default landing table.
+ * The data layer for the operator's DDD-trace drill-down. v1 is read-only.
+ *
+ *   W1 (rsidz.2): `searchUsers`, `findUsuarioByConta`
+ *   tinly:        nested `usuarios.listPaginated` (browse-as-default table)
+ *   W2 (rsidz.3): nested `campanhas` sub-router —
+ *                 `listByUsuario`, `listByContribuinte`, `findById`
+ *                 (contribuicoes lookups are W3 territory — rsidz.4)
  *
  * v1 has NO auth gate (operator directive). Anyone with the URL gets in.
  * When auth lands in v2, this is one of the boundaries that gates against
@@ -12,14 +16,15 @@
  * Tenant scope is hardcoded to `ID_PLATAFORMA_EUNENEM`. Multi-tenancy is
  * deferred; for v1 every admin query is implicitly scoped to eunenem.
  *
- * Procedures intentionally project the engine `Usuario` aggregate down to
- * a flat result shape with just the fields the UI needs. We don't leak
- * the full aggregate (permissions, conta, slug, ...) over the wire —
- * that's both a footprint and a discipline win: the wire contract is
- * decoupled from the domain model.
+ * Procedures intentionally project the engine aggregates down to flat
+ * result shapes with just the fields the UI needs. We don't leak the full
+ * aggregate over the wire — that's both a footprint and a discipline win:
+ * the wire contract is decoupled from the domain model.
  */
 import { initTRPC } from "@trpc/server";
 import { z } from "zod";
+import type { Campanha } from "../../../../src/domain/arrecadacao/entities/campanha.js";
+import type { IdConta } from "../../../../src/domain/arrecadacao/value-objects/ids.js";
 import { ID_PLATAFORMA_EUNENEM } from "../../../../src/index.js";
 import type { TrpcContext } from "./context.js";
 
@@ -41,12 +46,6 @@ export type UsuarioMatch = z.infer<typeof UsuarioMatchSchema>;
  * eunenem-specific shape — the wire output trims the full Usuario aggregate
  * down to the six fields the UI consumes (id, idConta, email, nomeExibicao,
  * slug, criadoEm) so we never leak the aggregate over the wire.
- *
- * The cursor format + sort tuple + filter semantics are owned by the
- * engine adapter — this proc just passes input through and projects the
- * output. base64url opaque cursors, tuple-comparison tie-break on
- * idUsuario, LIKE-escape on emailPrefix, exact tenant-scoped totalCount.
- * Documentation lives on the port itself.
  * ────────────────────────────────────────────────────────────────────── */
 
 const UsuarioAdminDTOSchema = z.object({
@@ -117,7 +116,131 @@ const usuariosRouter = t.router({
     }),
 });
 
+/**
+ * Wire shape for a campanha row in the admin lists. Projection of the
+ * Campanha aggregate down to the fields the admin UI actually renders.
+ * NEVER widens to the full aggregate (opcoes, idsAdministradores, etc).
+ */
+const CampanhaAdminDTOSchema = z.object({
+  id: z.string(),
+  titulo: z.string(),
+  status: z.enum(["com-recebedor", "sem-recebedor"]),
+  criadaEm: z.string(), // ISO 8601 — clients can parse to Date.
+  recebedor: z
+    .object({
+      nome: z.string(),
+    })
+    .nullable(),
+});
+export type CampanhaAdminDTO = z.infer<typeof CampanhaAdminDTOSchema>;
+
+/** Detail wire shape — superset of the row DTO, adds idPlataforma + opcoes count. */
+const CampanhaDetailDTOSchema = CampanhaAdminDTOSchema.extend({
+  idPlataforma: z.string(),
+  qtdOpcoes: z.number().int().min(0),
+});
+export type CampanhaDetailDTO = z.infer<typeof CampanhaDetailDTOSchema>;
+
 const SEARCH_LIMIT = 20;
+
+/** Project a Campanha aggregate down to the admin row DTO. */
+function toCampanhaAdminDTO(c: Campanha): CampanhaAdminDTO {
+  return {
+    id: c.id,
+    titulo: c.titulo,
+    status: c.dadosRecebedor === null ? "sem-recebedor" : "com-recebedor",
+    criadaEm: c.criadaEm.toISOString(),
+    recebedor:
+      c.dadosRecebedor === null
+        ? null
+        : { nome: c.dadosRecebedor.nomeTitular },
+  };
+}
+
+const campanhasRouter = t.router({
+  /**
+   * Campanhas administered by the usuario identified by `idConta`.
+   *
+   * Today the engine port models the relation as 0..1 — a single user owns
+   * at most one campanha (per the `findByAdministrador` port comment and
+   * the `findFirstByAdministrador` semantics). We call
+   * `findFirstByAdministrador` (which returns the campanha regardless of
+   * recebedor presence — `findByAdministrador` would filter it out when
+   * the user hasn't added bank info yet) and wrap the result in a 0-or-1
+   * array. The UI is already shaped for N rows — when the 1..N port
+   * (`aperture-u2tko`) lands, this call site swaps to it and the UI gets
+   * "free" multi-row support.
+   *
+   * Tenant guard: the engine resolves the campanha through the
+   * `campanha_administradores` join, which is scoped by `campanha_id` to
+   * a single plataforma row. We still verify `idPlataforma` matches
+   * eunenem on the returned aggregate — belt and braces for the multi-
+   * tenancy boundary.
+   */
+  listByUsuario: t.procedure
+    .input(z.object({ idConta: z.string() }))
+    .output(z.object({ campanhas: z.array(CampanhaAdminDTOSchema) }))
+    .query(async ({ ctx, input }) => {
+      const campanha =
+        await ctx.deps.campanhaRepository.findFirstByAdministrador(
+          input.idConta as IdConta,
+        );
+      if (!campanha) return { campanhas: [] };
+      if (campanha.idPlataforma !== ID_PLATAFORMA_EUNENEM) {
+        return { campanhas: [] };
+      }
+      return { campanhas: [toCampanhaAdminDTO(campanha)] };
+    }),
+
+  /**
+   * Campanhas this email has CONTRIBUTED to (any status). Reuses the
+   * engine port shipped in aperture-2ma52 / PR #94. Tenant-scoped via
+   * the explicit `idPlataforma` arg — the SQL filters at the campanhas
+   * row level.
+   *
+   * Email-based by design: visitor checkouts identify the contribuinte by
+   * email only (no idConta on `contribuicoes`). The caller passes the
+   * usuario's email (already resolved by the picker / detail page).
+   */
+  listByContribuinte: t.procedure
+    .input(z.object({ email: z.string() }))
+    .output(z.object({ campanhas: z.array(CampanhaAdminDTOSchema) }))
+    .query(async ({ ctx, input }) => {
+      const cleaned = input.email.trim();
+      if (cleaned === "") return { campanhas: [] };
+      const campanhas =
+        await ctx.deps.campanhaRepository.findCampanhasByContribuinte(
+          ID_PLATAFORMA_EUNENEM,
+          cleaned,
+        );
+      return {
+        campanhas: campanhas.map(toCampanhaAdminDTO),
+      };
+    }),
+
+  /**
+   * Single campanha lookup by id. Used by /admin/campanha/:idCampanha.
+   * Tenant-guarded — returns null when the campanha lives on another
+   * plataforma (defensive; the engine `findById` does NOT pre-filter
+   * by tenant).
+   */
+  findById: t.procedure
+    .input(z.object({ idCampanha: z.string() }))
+    .output(CampanhaDetailDTOSchema.nullable())
+    .query(async ({ ctx, input }) => {
+      const campanha = await ctx.deps.campanhaRepository.findById(
+        input.idCampanha as never,
+      );
+      if (!campanha) return null;
+      if (campanha.idPlataforma !== ID_PLATAFORMA_EUNENEM) return null;
+      const row = toCampanhaAdminDTO(campanha);
+      return {
+        ...row,
+        idPlataforma: campanha.idPlataforma,
+        qtdOpcoes: campanha.opcoes.length,
+      };
+    }),
+});
 
 export const adminRouter = t.router({
   /** Nested sub-router for usuarios browse + paginated list. */
@@ -199,4 +322,6 @@ export const adminRouter = t.router({
         nomeExibicao: usuario.nomeExibicao,
       };
     }),
+
+  campanhas: campanhasRouter,
 });

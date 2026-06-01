@@ -1,4 +1,5 @@
 import { AdminShell } from "@/components/eunenem/admin/AdminShell";
+import { CampanhasTabs } from "@/components/eunenem/admin/CampanhasTabs";
 import { DddBadge } from "@/components/eunenem/admin/DddBadge";
 import { trpc } from "@/lib/trpc.js";
 
@@ -56,7 +57,7 @@ export function AdminUsuarioPage({ idConta }: { idConta: string }) {
         <section className="space-y-10">
           <UsuarioHeader usuario={data} />
           <FactsGrid usuario={data} idConta={idConta} />
-          <CampanhasPlaceholder />
+          <CampanhasSection idConta={idConta} email={data.email} />
           <RawRecord usuario={data} idConta={idConta} />
         </section>
       )}
@@ -177,13 +178,20 @@ function FactsGrid({
   );
 }
 
-function CampanhasPlaceholder() {
+function CampanhasSection({
+  idConta,
+  email,
+}: {
+  idConta: string;
+  email: string;
+}) {
   /*
    * Section-per-BC scaffold (Wheatley directive, banked 2026-06-01).
-   * Future waves append IN PLACE — no restructure. When W2 (rsidz.3)
-   * lands, it fills this section with `<CampanhasTabs>` and a real
-   * Arrecadação fetch. The DddBadge marks the BC boundary so the
-   * operator's wayfinding stays consistent.
+   * W2 (rsidz.3) lands the real Arrecadação fetch — two tabs
+   * (Administra / Contribuiu) inside the BC-bounded section. The
+   * DddBadge marks the BC boundary so the operator's wayfinding stays
+   * consistent. The wrapper keeps `data-bc="arrecadacao"` for downstream
+   * BC-aware tooling (E2E selectors, CSS scoping if needed).
    */
   return (
     <div
@@ -198,15 +206,12 @@ function CampanhasPlaceholder() {
           </h2>
         </div>
         <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-mute">
-          W2 (rsidz.3) — coming soon
+          arrecadação · drill
         </span>
       </div>
-      <p className="mt-3 max-w-2xl text-[13px] leading-relaxed text-ink-soft">
-        Two tabs will live here: <span className="text-ink">administra</span>{" "}
-        (campanhas owned by this usuário) and{" "}
-        <span className="text-ink">contribuiu</span> (campanhas this usuário
-        contributed to). Both lists hit the Arrecadação BC.
-      </p>
+      <div className="mt-4">
+        <CampanhasTabs idConta={idConta} email={email} />
+      </div>
     </div>
   );
 }
