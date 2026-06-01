@@ -1,4 +1,68 @@
 echo "🔬 Pre-push gate: running pnpm check..."
+echo ""
+
+# ─── Docker pre-flight (aperture-u67g8) ───────────────────────────────────
+#
+# `pnpm check` includes `check:codegen-drift` + `test:coverage`, both of
+# which spin postgres containers via testcontainers. If the docker daemon
+# is wedged (OrbStack frozen, Docker Desktop unresponsive, daemon
+# overloaded), the testcontainers call blocks indefinitely on the docker
+# socket. Without this guard, the pre-push hook can silently hang for
+# 15+ minutes with no output — Rex hit this on 2026-06-01 in the
+# 5d3yz/2ma52 push sequence (8 background pushes stuck at 0 bytes).
+#
+# This probe times out at 5s — well under the cost of the full check
+# chain (~minutes) — and prints an actionable message pointing at the
+# operator-approved bypass. Healthy daemon: probe returns in ms; nothing
+# changes for the normal path.
+#
+# Portability: prefer GNU `timeout` (coreutils), fall back to macOS
+# `gtimeout` (brew), fall back to a pure-bash background-process trick
+# for systems with neither.
+
+echo "🐳 Probing docker daemon (≤5s)..."
+
+docker_probe() {
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 5 docker info >/dev/null 2>&1
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout 5 docker info >/dev/null 2>&1
+  else
+    # Pure-bash timeout: fire docker info in background, schedule a
+    # killer at 5s, wait for whichever finishes first. The probe_exit
+    # captures docker info's actual exit code so a docker-down system
+    # returns non-zero, not just a "killed by signal" code.
+    docker info >/dev/null 2>&1 &
+    probe_pid=$!
+    ( sleep 5 && kill -9 "$probe_pid" 2>/dev/null ) &
+    killer_pid=$!
+    wait "$probe_pid" 2>/dev/null
+    probe_exit=$?
+    kill "$killer_pid" 2>/dev/null
+    wait "$killer_pid" 2>/dev/null
+    return $probe_exit
+  fi
+}
+
+if ! docker_probe; then
+  echo ""
+  echo "❌ Docker daemon unresponsive (or not installed)."
+  echo ""
+  echo "   The pre-push chain runs:"
+  echo "     - pnpm check:codegen-drift  (testcontainers: postgres)"
+  echo "     - pnpm test:coverage         (testcontainers: postgres via globalSetup)"
+  echo "   Both would hang indefinitely on a wedged docker socket."
+  echo ""
+  echo "   Resolve by one of:"
+  echo "     1. Start docker (Docker Desktop / OrbStack / colima) and retry"
+  echo "     2. Push with --no-verify (operator-approved bypass when you've"
+  echo "        already verified locally with docker up)"
+  echo ""
+  exit 1
+fi
+echo "✅ Docker daemon responsive."
+echo ""
+
 echo "This is the canonical quality gate. Do NOT bypass with --no-verify."
 echo ""
 pnpm check
