@@ -23,6 +23,7 @@ const approvedPaymentInput: EfeitosFinanceirosPagamentoAprovado = {
   composicaoValores: {
     contributionAmountCents: 8000,
     feeAmountCents: 400,
+    surchargeCents: 0,
     totalPaidCents: 8400,
     receiverAmountCents: 8000,
     responsavelTaxa: 'contribuinte',
