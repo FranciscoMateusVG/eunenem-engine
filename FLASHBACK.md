@@ -1,9 +1,11 @@
 # FLASHBACK — Engine / EuNeném Session Context
 
 > **Purpose:** Cold-start anchor for GLaDOS (or any agent) resuming work after a restart, compact, or context wipe. Read top to bottom. Update at session-close.
-> **Last updated:** 2026-05-30
+> **Last updated:** 2026-05-31
 > **Active branch:** `staging`
 > **Active worktree path:** `~/projects/engine` (main checkout — operator works here directly during dev)
+
+> **2026-05-31 headline:** `aperture-aiipy` (visitor Stripe checkout) **CLOSED end-to-end** + `aperture-6g58e` (inline-success modal, kill the redirect-race) **CLOSED end-to-end**. Full Layer D verified by operator-walked test transactions. Lots banked — read §2 + §5.
 
 ---
 
@@ -41,7 +43,26 @@ Chain that made it work (in commit order, all merged to staging):
 
 **Verified working:** `curl -X POST /api/trpc/contribuicao.createBulk` with `imagemUrl: "/products/240252.png"` returned `{"ids":["aa96b401-..."]}` ✓
 
-**Operator's last test before context ran out:** screenshot of "Sapatinho Bebê Kit 2 Pares" showing "deu ruim na conexão" toast — that's what triggered the engine-domain fix (`9512b4a`). After the fix + tsx reload + curl verify, awaiting browser confirmation from operator.
+---
+
+### 2.5. 2026-05-31 — aiipy + 6g58e ship + cascade
+
+| Commit | What |
+|---|---|
+| `cd0a63f` | **Engine domain:** `IdTransacaoExternaSchema` loosened from `z.uuid()` to `z.string().min(1).max(200)` — Stripe `pi_xxx` ids aren't UUIDs. Unblocked aiipy. (aperture-43p4y record bead.) |
+| `f6a2dde` | **Inline-success state machine** on `GiftCheckoutModal` (aperture-6g58e). Engine port `CheckoutSessionProvider` gains optional `redirectOnCompletion`. Stripe adapter passes `redirect_on_completion: 'if_required'`. tRPC pagina-router passes it through. Frontend state machine: `idle → checkout → completed_pending → completed_confirmed → completed_slow`. Kills the redirect to `/sucesso` + the post-redirect race. |
+| `88bf36d` | **Financeiro domain validator** — `validarComposicaoFinanceiraPagamentoAprovado` was missing `surchargeCents` from the invariant equation. Every card payment 500'd at saga step 3 (`registrarEfeitosFinanceirosPagamentoAprovado`). Schema was updated for aperture-uyw8i but validator was left stale. Classic. (aperture-3kr4g record bead.) |
+| `75cc09f` | Test fixtures catch-up for the validator fix (3 fixtures gain `surchargeCents: 0`). |
+| `3c5bc43` | `useInvalidarListaPresentes` hook + Marketplace cache invalidation on `completed_confirmed` — gift grid was staying stale until manual refresh after a purchase. Pushed `--no-verify` (operator-OK'd) because of a pre-existing testcontainers flake — see §6. |
+
+**Verified end-to-end (operator-walked 2026-05-31 22:20 BRT):**
+Card payment on /pagina/francisco → Stripe iframe → inline ✓ modal with polaroid + recadinho + PRESENTEADO stamp → CTAs enabled in ~1s. `stripe listen` showed `checkout.session.completed → 200` (vs 500 pre-fix). DB: pagamento aprovado, transacao_externa populated, contribuicao indisponivel, contribuinte stamped, saga `lancamentosCount: 2`. Full Layer D table banked on aiipy + 6g58e bead notes.
+
+**Stripe sandbox standup (this session):**
+- Created fresh sandbox "Violet Carousel" (account `acct_1TdJJxKIu0136XVg`). Replaces the old `acct_51R28Bb…` keys.
+- Stripe CLI installed via `brew install stripe/stripe-cli/stripe` → `stripe login` → `stripe listen --forward-to localhost:3001/api/webhooks/stripe`
+- `pk_test_` / `sk_test_` / `whsec_` all live in `apps/eunenem-server/.env` (gitignored)
+- `whsec_` is per-CLI-session — re-run `stripe listen` after restart, paste new whsec, bounce `pnpm dev`
 
 ---
 
@@ -87,20 +108,41 @@ Chain that made it work (in commit order, all merged to staging):
 
 ## 5. Outstanding Work (BEADS — project:engine label)
 
-| Bead | Assignee | Pri | What |
-|---|---|---|---|
-| `aperture-3chj2` | Rex | P3 | Boot-time barrel-export smoke test (post-d6atj footgun prevention) |
-| `aperture-1y1os` | Rex | P3 | Wrong-creds → UNAUTHORIZED domain cleanup |
-| `aperture-u2y3x` | Vance | P3 | Collapse op-aware error mapper (blocked-by 1y1os) |
-| `aperture-uc2ix` | Rex | P1 (Cipher) | Rate-limiting |
-| `aperture-3pqt7` | Rex | P1 (Cipher) | Structured failed-login + IP capture |
-| `aperture-swmpm` | Rex | P1 (Cipher) | Timing leak |
-| `aperture-haakf` | Rex | P2 (Cipher) | Hardening bundle |
-| `aperture-wshvw` | Rex | P2 (Cipher) | Freshness gate |
-| `aperture-85n6u` | Rex | P2 (Cipher) | Prod headers |
-| `aperture-jxul` | Vance | P3 | Bank zod URL validator recursive gotcha into a skill |
+**Shipped 2026-05-30:** uc2ix + 3pqt7 + swmpm + 3chj2 + much more (PRs #79–#90). Listed in §2 of earlier flashback rev.
 
-Cipher's P1s on Rex are NOT blocking the lista feature — they're parallel security hardening.
+**Shipped 2026-05-31:** aiipy + 6g58e (both CLOSED) + 43p4y + 3kr4g (record beads).
+
+### Currently open (P1)
+
+| Bead | Assignee | What |
+|---|---|---|
+| `aperture-id3ay` | **rex** | Wire `LivroFinanceiroRepository` to postgres (lancamentos written to RAM, lost on restart — same wire-the-adapter gap aiipy had for Pagamentos). Blocks the lancamentos leaf of the admin-trace epic. |
+| `aperture-m4xaj` | **rex** | Testcontainers integration tests time out under v8 coverage instrumentation. Pre-push gate flake. 4 proposed fixes on bead; globalSetup with shared container probably cleanest. |
+| `aperture-rsidz` | **wheatley** (epic) | Admin DDD-trace drill-down page: user → campanhas → contribuicoes → pagamentos → lancamentos. Operator-direct request 2026-05-31. Hard-blocked-by id3ay for the leaf step (W5); W0–W4 can scope + start in parallel. 5 open questions for operator on the bead. |
+| `aperture-pgqih` | glados | [EPIC] BetterAuth integration on engine (Pattern A) + eunenem-server consumer wiring. Not touched this session. |
+
+### Currently open (P2)
+
+| Bead | Assignee | What |
+|---|---|---|
+| `aperture-haakf` | rex (Cipher) | auth-router hardening bundle (M1+M2+M4) |
+| `aperture-wshvw` | rex (Cipher) | Freshness gate (M3) on alterarSenha |
+| `aperture-85n6u` | peppy (Cipher) | Prod security headers (L1) |
+
+### Currently open (P3 + record)
+
+| Bead | Assignee | What |
+|---|---|---|
+| `aperture-d52he` | unassigned | `/sucesso` direct-URL race condition (inline modal mitigates most paths; rare edge cases still hit it) |
+| `aperture-1y1os` | rex | Wrong-creds → UNAUTHORIZED domain cleanup |
+| `aperture-u2y3x` | vance | Collapse op-aware error mapper (blocked-by 1y1os) |
+| `aperture-kwvyk` | rex | Content-length equality regression test on blocked-auth-handler |
+| `aperture-jxul` | vance | Bank zod URL validator recursive gotcha into a skill |
+| `aperture-grxsh` | unassigned | Hero.tsx avatar paths bug |
+| `aperture-6fwq3` | unassigned | P4 — split tailwind.css EOF appends into modules |
+| `aperture-6ay8k` | unassigned | P4 — orphan CSS sweep |
+
+**Rex and Wheatley were both pinged via send_message at 2026-05-31 ~22:30 BRT with full context for their P1s.**
 
 ---
 
@@ -113,6 +155,15 @@ Cipher's P1s on Rex are NOT blocking the lista feature — they're parallel secu
 
 ### z.string().url() vs paths
 **Already bit us twice.** Zod's `z.url()` rejects relative paths (`/products/240252.png`). If you see "Invalid URL" in a BAD_REQUEST, grep for `.url(` in the call chain — likely a stale validator we missed.
+
+### z.uuid() vs provider-native ids (banked 2026-05-31)
+**Same shape as the z.url() footgun.** External payment provider ids are NOT UUIDs (Stripe = `pi_xxx`, `cs_test_xxx`; Pagarme = numeric tid). `IdTransacaoExternaSchema = z.uuid()` rejected Stripe pi_xxx ids and 500'd every webhook before cd0a63f fixed it. If a new adapter is being wired and you see `Invalid UUID` at path:[] in a webhook log, grep for `z.uuid()` on whatever the adapter is trying to thread through.
+
+### Stale validator next to updated schema (banked 2026-05-31)
+`SnapshotComposicaoValoresFinanceiroSchema` was correctly updated for aperture-uyw8i (added `surchargeCents` field + documented invariant in JSDoc), but the pure-function validator `validarComposicaoFinanceiraPagamentoAprovado` colocated with the entity was left stale — checked `receiverAmountCents + feeAmountCents !== totalPaidCents` without surchargeCents. Every card payment 500'd. When updating a domain schema's invariant, grep for every site that asserts it.
+
+### Testcontainers parallelism flake on pre-push (banked 2026-05-31)
+`pnpm check` runs `pnpm test:coverage` which spins up postgres containers per integration test file. Under v8 coverage instrumentation + default vitest parallelism, 15+ concurrent container starts overwhelm OrbStack/Docker → `beforeAll` times out at 60s → every `afterAll` fails on `testDb.teardown()` undefined. Symptom is misleading; root cause is in the test log. Filed as aperture-m4xaj for Rex with 4 proposed fixes. **Workaround:** `git push --no-verify` is operator-approved for engine when the failing test files are integration-only AND pass on isolated runs.
 
 ### Stacked-PR aftermath
 The p8i01/d6atj stacked-PR conflicts taught us: when rebasing a stacked branch after the parent squash-merges, use `git rebase --onto origin/main <last-parent-sha>` not plain `git rebase origin/main`. See `aperture:worktree-discipline` §8.1.
