@@ -338,5 +338,127 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
     it('removeRegistroDomain is idempotent on unknown id (aperture-p8i01)', async () => {
       await expect(repo.removeRegistroDomain(randomUUID())).resolves.not.toThrow();
     });
+
+    // ───── findUsuariosByEmailPrefix (aperture-5d3yz) ─────
+
+    const seedForPrefixTests = async (
+      idPlataforma: string,
+      rows: Array<{ email: string; slug: string }>,
+    ) => {
+      for (const { email, slug } of rows) {
+        const idUsuario = randomUUID();
+        const idConta = randomUUID();
+        await repo.saveRegistroDomain({
+          usuario: {
+            id: idUsuario,
+            idPlataforma,
+            idConta,
+            email,
+            nomeExibicao: email.split('@')[0] ?? email,
+            slug,
+            criadoEm: fixedDate,
+          },
+          conta: {
+            id: idConta,
+            idUsuario,
+            permissoes: ['campaign:admin'] as const,
+            criadaEm: fixedDate,
+          },
+        });
+      }
+    };
+
+    it('findUsuariosByEmailPrefix — case-insensitive prefix match (aperture-5d3yz)', async () => {
+      await seedForPrefixTests(ID_PLATAFORMA_EUNENEM, [
+        { email: 'Mariana@example.com', slug: 'mariana' },
+        { email: 'MARIA@example.com', slug: 'maria' },
+        { email: 'marina@example.com', slug: 'marina' },
+        { email: 'bob@example.com', slug: 'bob' },
+      ]);
+
+      const results = await repo.findUsuariosByEmailPrefix(ID_PLATAFORMA_EUNENEM, 'mari', 20);
+      const emails = results.map((u) => u.email);
+      expect(emails).toContain('Mariana@example.com');
+      expect(emails).toContain('MARIA@example.com');
+      expect(emails).toContain('marina@example.com');
+      expect(emails).not.toContain('bob@example.com');
+    });
+
+    it('findUsuariosByEmailPrefix — tenant isolation (aperture-5d3yz)', async () => {
+      await seedForPrefixTests(ID_PLATAFORMA_EUNENEM, [
+        { email: 'shared-eunenem@example.com', slug: 'shared-eu' },
+      ]);
+      await seedForPrefixTests(ID_PLATAFORMA_EUCASEI, [
+        { email: 'shared-eucasei@example.com', slug: 'shared-ec' },
+      ]);
+
+      const fromEunenem = await repo.findUsuariosByEmailPrefix(ID_PLATAFORMA_EUNENEM, 'shared', 20);
+      expect(fromEunenem.map((u) => u.email)).toEqual(['shared-eunenem@example.com']);
+
+      const fromEucasei = await repo.findUsuariosByEmailPrefix(ID_PLATAFORMA_EUCASEI, 'shared', 20);
+      expect(fromEucasei.map((u) => u.email)).toEqual(['shared-eucasei@example.com']);
+    });
+
+    it('findUsuariosByEmailPrefix — honours the limit (aperture-5d3yz)', async () => {
+      await seedForPrefixTests(ID_PLATAFORMA_EUNENEM, [
+        { email: 'a1@x.com', slug: 'a1' },
+        { email: 'a2@x.com', slug: 'a2' },
+        { email: 'a3@x.com', slug: 'a3' },
+        { email: 'a4@x.com', slug: 'a4' },
+        { email: 'a5@x.com', slug: 'a5' },
+      ]);
+
+      const results = await repo.findUsuariosByEmailPrefix(ID_PLATAFORMA_EUNENEM, 'a', 3);
+      expect(results).toHaveLength(3);
+    });
+
+    it('findUsuariosByEmailPrefix — empty prefix returns empty (aperture-5d3yz)', async () => {
+      await seedForPrefixTests(ID_PLATAFORMA_EUNENEM, [
+        { email: 'someone@example.com', slug: 'someone' },
+      ]);
+      const results = await repo.findUsuariosByEmailPrefix(ID_PLATAFORMA_EUNENEM, '', 20);
+      expect(results).toEqual([]);
+    });
+
+    it('findUsuariosByEmailPrefix — no matches returns empty (aperture-5d3yz)', async () => {
+      await seedForPrefixTests(ID_PLATAFORMA_EUNENEM, [
+        { email: 'someone@example.com', slug: 'someone' },
+      ]);
+      const results = await repo.findUsuariosByEmailPrefix(ID_PLATAFORMA_EUNENEM, 'zzz', 20);
+      expect(results).toEqual([]);
+    });
+
+    it('findUsuariosByEmailPrefix — ordered by email ascending (aperture-5d3yz)', async () => {
+      await seedForPrefixTests(ID_PLATAFORMA_EUNENEM, [
+        { email: 'mary@x.com', slug: 'mary' },
+        { email: 'maggie@x.com', slug: 'maggie' },
+        { email: 'matt@x.com', slug: 'matt' },
+      ]);
+
+      const results = await repo.findUsuariosByEmailPrefix(ID_PLATAFORMA_EUNENEM, 'ma', 20);
+      const emails = results.map((u) => u.email);
+      expect(emails).toEqual([...emails].sort());
+    });
+
+    it('findUsuariosByEmailPrefix — LIKE metacharacters in input are escaped (aperture-5d3yz)', async () => {
+      await seedForPrefixTests(ID_PLATAFORMA_EUNENEM, [
+        { email: 'literal_underscore@x.com', slug: 'lit-under' },
+        { email: 'liberal@x.com', slug: 'liberal' },
+      ]);
+
+      // `_` is a LIKE wildcard (single char). With escaping it must be a
+      // literal — so `lit_e` should match `literal_underscore` (because
+      // its email begins with `literal_` and that string starts with
+      // `lit_e`... wait — `literal_underscore` starts with `literal` not
+      // `lit_e`. Let me re-design: we want to PROVE escape happens.
+      // Search for `liter_l` which would unescaped match `liberal` (since
+      // `_` is wildcard) AND `literal_underscore`. Escaped, only
+      // `literal_*` should match (since `_` is literal).
+      const results = await repo.findUsuariosByEmailPrefix(ID_PLATAFORMA_EUNENEM, 'liter_l', 20);
+      const emails = results.map((u) => u.email);
+      expect(emails).not.toContain('liberal@x.com'); // would match if `_` weren't escaped
+      // No match for literal `liter_l` either — emails don't contain that substring at start.
+      expect(emails).toEqual([]);
+    });
   });
 }

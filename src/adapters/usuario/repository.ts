@@ -36,6 +36,27 @@ export interface UsuarioRepository {
     email: EmailUsuario,
   ): Promise<Usuario | undefined>;
   /**
+   * Case-insensitive prefix search on email, scoped to a single
+   * plataforma, bounded by `limit` (aperture-5d3yz). Used by the
+   * eunenem-v2 admin user picker for autocomplete: operator types "mari"
+   * and gets back the first N matching usuarios for the tenant.
+   *
+   * Contract:
+   *   - Case-insensitive: "mari" matches "Mariana" and "MARIA".
+   *   - Pure prefix — does NOT match substring (no leading wildcard).
+   *   - Empty `prefix` → empty result (does NOT return all users).
+   *   - LIKE-metacharacters in `prefix` (`%`, `_`, `\`) are escaped and
+   *     treated as literals — caller-supplied input is not a pattern.
+   *   - Results ordered by email ascending for deterministic UX.
+   *   - Tenant-scoped: only returns usuarios whose `idPlataforma` matches.
+   *   - At most `limit` rows. Caller picks the limit (e.g. 20).
+   */
+  findUsuariosByEmailPrefix(
+    idPlataforma: IdPlataformaReferencia,
+    prefix: string,
+    limit: number,
+  ): Promise<readonly Usuario[]>;
+  /**
    * Lookup by composite `(idPlataforma, slug)` (aperture-khbow). Used by the
    * eunenem-server SSR route `/painel/[slug]` to resolve the owner of a
    * public dashboard URL. Returns `undefined` for unknown slugs (caller

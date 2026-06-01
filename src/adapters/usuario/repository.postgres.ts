@@ -201,6 +201,43 @@ export class UsuarioRepositoryPostgres implements UsuarioRepository {
     });
   }
 
+  async findUsuariosByEmailPrefix(
+    idPlataforma: IdPlataformaReferencia,
+    prefix: string,
+    limit: number,
+  ): Promise<readonly Usuario[]> {
+    return tracer.startActiveSpan('db.usuarios.findUsuariosByEmailPrefix', async (span) => {
+      span.setAttributes({ ...DB_USUARIOS_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        if (prefix === '' || limit <= 0) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return [];
+        }
+        // Escape LIKE metacharacters in caller-supplied input so user
+        // typing `%` or `_` doesn't smuggle a wildcard into the pattern.
+        // The trailing `%` is the actual prefix wildcard.
+        const escaped = escapeLikePattern(prefix);
+        const pattern = `${escaped}%`;
+        const rows = await this.db
+          .selectFrom('usuarios')
+          .selectAll()
+          .where('id_plataforma', '=', idPlataforma)
+          .where('email', 'ilike', pattern)
+          .orderBy('email', 'asc')
+          .limit(limit)
+          .execute();
+        span.setStatus({ code: SpanStatusCode.OK });
+        return rows.map(toUsuario);
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
   async findUsuarioBySlug(
     idPlataforma: IdPlataformaReferencia,
     slug: SlugUsuario,
@@ -292,6 +329,16 @@ export class UsuarioRepositoryPostgres implements UsuarioRepository {
       }
     });
   }
+}
+
+/**
+ * Escape LIKE/ILIKE metacharacters (`%`, `_`, `\`) so caller-supplied
+ * text becomes a literal match. The default escape character in Postgres
+ * LIKE is backslash; we double-escape backslash first so existing
+ * backslashes don't unintentionally activate the escape sequence.
+ */
+function escapeLikePattern(s: string): string {
+  return s.replace(/\\/g, '\\\\').replace(/[%_]/g, (c) => `\\${c}`);
 }
 
 function toUsuario(row: UsuarioRow): Usuario {

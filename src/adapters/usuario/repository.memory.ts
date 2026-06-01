@@ -112,6 +112,37 @@ export class UsuarioRepositoryMemory implements UsuarioRepository {
     });
   }
 
+  async findUsuariosByEmailPrefix(
+    idPlataforma: IdPlataformaReferencia,
+    prefix: string,
+    limit: number,
+  ): Promise<readonly Usuario[]> {
+    return tracer.startActiveSpan('db.usuarios.findUsuariosByEmailPrefix', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        if (prefix === '' || limit <= 0) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return [];
+        }
+        const lowerPrefix = prefix.toLowerCase();
+        const matches = [...this.usuarios.values()]
+          .filter(
+            (u) => u.idPlataforma === idPlataforma && u.email.toLowerCase().startsWith(lowerPrefix),
+          )
+          .sort((a, b) => a.email.localeCompare(b.email))
+          .slice(0, limit);
+        span.setStatus({ code: SpanStatusCode.OK });
+        return matches;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
   async findUsuarioBySlug(
     idPlataforma: IdPlataformaReferencia,
     slug: SlugUsuario,
