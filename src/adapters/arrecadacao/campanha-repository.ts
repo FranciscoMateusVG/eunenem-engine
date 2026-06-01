@@ -49,6 +49,32 @@ export interface CampanhaRepository {
   ): Promise<Campanha | undefined>;
 
   /**
+   * Returns the DISTINCT set of Campanhas this email-identified
+   * contribuinte has given to (aperture-2ma52). Tenant-scoped. Includes
+   * campanhas with any contribuicao status — paid, pending, failed all
+   * count; the admin wants the full picture.
+   *
+   * NOTE — parameter shape: the bead originally proposed `(idPlataforma,
+   * idConta)`, but the live `contribuicoes` schema has no
+   * `id_conta_contribuinte` column. Visitor checkouts identify the
+   * contribuinte by email only (`contribuinte_email`, `contribuinte_nome`).
+   * Taking `emailContribuinte` directly keeps this port honest with the
+   * schema; the caller (eunenem-v2 admin server action) resolves
+   * `idConta → email` via `UsuarioRepository.findUsuarioById` first.
+   *
+   * MEMORY ADAPTER LIMITATION: the in-memory `CampanhaRepository` does
+   * not own contribuicoes data (that's a separate aggregate). The
+   * memory implementation returns `[]` — the JOIN is only meaningful
+   * against the postgres adapter. Postgres-specific tests cover the
+   * substantive behavior.
+   */
+  findCampanhasByContribuinte(
+    idPlataforma: IdPlataformaReferencia,
+    emailContribuinte: string,
+    context?: ArrecadacaoRepositoryContext,
+  ): Promise<readonly Campanha[]>;
+
+  /**
    * Deletes the Campanha aggregate. Used by the `registrarContaUsuario`
    * saga as a T3 compensation when adding the initial 'presentes' opcao
    * fails after the campanha row has been written. Idempotent.

@@ -346,6 +346,67 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
     });
   }
 
+  async findCampanhasByContribuinte(
+    idPlataforma: IdPlataformaReferencia,
+    emailContribuinte: string,
+    context?: ArrecadacaoRepositoryContext,
+  ): Promise<readonly Campanha[]> {
+    const executor = context?.trx ?? this.db;
+    return tracer.startActiveSpan(
+      'db.arrecadacao_campanhas.findCampanhasByContribuinte',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+        try {
+          if (emailContribuinte === '') {
+            span.setStatus({ code: SpanStatusCode.OK });
+            return [];
+          }
+
+          // DISTINCT campanha ids reached through contribuicoes by the
+          // given contribuinte_email, scoped to the tenant. Case-
+          // insensitive on email — the contribuicoes table stores raw
+          // user input and a future signup/visitor mismatch on casing
+          // shouldn't fragment the lookup.
+          const idRows = await executor
+            .selectFrom('campanhas')
+            .innerJoin('contribuicoes', 'contribuicoes.campanha_id', 'campanhas.id')
+            .select('campanhas.id')
+            .distinct()
+            .where('campanhas.id_plataforma', '=', idPlataforma)
+            .where('contribuicoes.contribuinte_email', 'ilike', emailContribuinte)
+            .execute();
+
+          if (idRows.length === 0) {
+            span.setStatus({ code: SpanStatusCode.OK });
+            return [];
+          }
+
+          // Hydrate each campanha via findById — preserves the
+          // recebedor + opcoes + admins assembly without duplicating the
+          // logic. N+1 here is bounded by N = number of distinct
+          // campanhas this single user has contributed to (typically a
+          // handful per user, in the dozens at the absolute extreme).
+          const campanhas: Campanha[] = [];
+          for (const { id } of idRows) {
+            const campanha = await this.findById(id as IdCampanha, context);
+            if (campanha) {
+              campanhas.push(campanha);
+            }
+          }
+
+          span.setStatus({ code: SpanStatusCode.OK });
+          return campanhas;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
   async delete(idCampanha: IdCampanha, context?: ArrecadacaoRepositoryContext): Promise<void> {
     const executor = context?.trx ?? this.db;
     return tracer.startActiveSpan('db.arrecadacao_campanhas.delete', async (span) => {

@@ -192,6 +192,38 @@ export class CampanhaRepositoryMemory implements CampanhaRepository {
     });
   }
 
+  async findCampanhasByContribuinte(
+    _idPlataforma: IdPlataformaReferencia,
+    _emailContribuinte: string,
+    _context?: ArrecadacaoRepositoryContext,
+  ): Promise<readonly Campanha[]> {
+    return tracer.startActiveSpan(
+      'db.arrecadacao_campanhas.findCampanhasByContribuinte',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+        try {
+          // Cross-aggregate lookup (aperture-2ma52). The memory
+          // CampanhaRepository has no access to contribuicoes data —
+          // that lives in ContribuicaoRepository, a different
+          // aggregate. The postgres adapter resolves this via a JOIN
+          // through `contribuicoes` on `contribuinte_email`. In memory
+          // mode, the honest answer is "I don't know" → empty array.
+          // Saga / use-case tests that need this lookup must use the
+          // postgres adapter (or compose ContribuicaoRepository at the
+          // caller).
+          span.setStatus({ code: SpanStatusCode.OK });
+          return [];
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
   async delete(idCampanha: IdCampanha, _context?: ArrecadacaoRepositoryContext): Promise<void> {
     return tracer.startActiveSpan('db.arrecadacao_campanhas.delete', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'DELETE' });

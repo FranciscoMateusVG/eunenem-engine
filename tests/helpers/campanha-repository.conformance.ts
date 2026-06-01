@@ -197,6 +197,21 @@ export function describeCampanhaRepositoryConformance(name: string, options: Con
       expect(span?.attributes['db.system']).toBe(options.expectedDbSystem);
       expect(span?.attributes['db.operation.name']).toBe('DELETE');
     });
+
+    // ───── findCampanhasByContribuinte (aperture-2ma52) ─────
+    // Memory mode returns [] honestly (no contribuicoes data). Postgres
+    // adapter is exercised in campanha-repository.postgres.test.ts with
+    // real seeded contribuicoes rows.
+
+    it('findCampanhasByContribuinte — empty email returns empty (aperture-2ma52)', async () => {
+      const found = await repo.findCampanhasByContribuinte(randomUUID(), '');
+      expect(found).toEqual([]);
+    });
+
+    it('findCampanhasByContribuinte — no contributions returns empty (aperture-2ma52)', async () => {
+      const found = await repo.findCampanhasByContribuinte(randomUUID(), 'noone@example.com');
+      expect(found).toEqual([]);
+    });
   });
 }
 
