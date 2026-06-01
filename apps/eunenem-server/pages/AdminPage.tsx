@@ -1,5 +1,6 @@
 import { AdminShell } from "@/components/eunenem/admin/AdminShell";
 import { DddBadgeLegend } from "@/components/eunenem/admin/DddBadge";
+import { UserPicker } from "@/components/eunenem/admin/UserPicker";
 import { ADMIN_PLATAFORMA_ID } from "@/lib/adminTenant";
 
 // /admin — operator's DDD-trace drill-down landing (aperture-rsidz.1).
@@ -34,6 +35,7 @@ export function AdminPage() {
     >
       <section className="space-y-12">
         <Header />
+        <UserSearch />
         <Legend />
         <ComingSoon />
       </section>
@@ -56,6 +58,26 @@ function Header() {
         pagamentos on their behalf, lançamentos financeiros that
         resulted. Every page carries the active BC badge so the model
         boundary stays visible.
+      </p>
+    </div>
+  );
+}
+
+function UserSearch() {
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <label className="font-mono text-[11px] uppercase tracking-[0.14em] text-ink-soft">
+          buscar usuário
+        </label>
+        <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-mute">
+          email prefix · até 20 resultados
+        </span>
+      </div>
+      <UserPicker />
+      <p className="font-mono text-[10px] tracking-[0.04em] text-ink-mute">
+        Selecting a result navigates to{" "}
+        <code>/admin/usuario/[idConta]</code>.
       </p>
     </div>
   );

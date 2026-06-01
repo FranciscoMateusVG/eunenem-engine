@@ -1,5 +1,6 @@
 import { Toaster } from 'sonner';
 import { AdminPage } from './AdminPage.js';
+import { AdminUsuarioPage } from './AdminUsuarioPage.js';
 import { AuthDemoPage } from './AuthDemoPage.js';
 import { AuthModalProvider } from './components/eunenem/auth/AuthModalProvider.js';
 import { LandingPage } from './LandingPage.js';
@@ -41,6 +42,7 @@ export function resolveRoute(pathname: string):
   | { kind: 'trpc-smoke' }
   | { kind: 'auth-demo' }
   | { kind: 'admin' }
+  | { kind: 'admin-usuario'; idConta: string }
   | { kind: 'not-found' } {
   // Marketing landing page (aperture-q1j2) — exact "/" only.
   if (pathname === '/') {
@@ -56,9 +58,19 @@ export function resolveRoute(pathname: string):
     return { kind: 'auth-demo' };
   }
   // Operator admin — DDD-trace drill-down (aperture-rsidz.1, W0). No auth
-  // gate per operator directive; matched as a single root for now. Future
-  // waves (rsidz.2+) will add /admin/usuario/:idConta etc. via additional
-  // matches above the not-found fallthrough.
+  // gate per operator directive. Sub-routes for the drills follow below
+  // (rsidz.2+); they MUST be matched BEFORE the bare /admin so the more
+  // specific match wins.
+  //
+  // /admin/usuario/<idConta> (rsidz.2, W1) — user detail page.
+  // idConta is a free-shape string here; the tRPC fetch returns null
+  // for unknown ids and the page renders a not-found body. We don't
+  // pre-validate the UUID shape because the engine's id format may
+  // evolve and the page handles the empty result honestly.
+  const adminUsuarioMatch = pathname.match(/^\/admin\/usuario\/([^/]+)\/?$/);
+  if (adminUsuarioMatch && adminUsuarioMatch[1]) {
+    return { kind: 'admin-usuario', idConta: adminUsuarioMatch[1] };
+  }
   if (pathname === '/admin' || pathname === '/admin/') {
     return { kind: 'admin' };
   }
@@ -126,5 +138,7 @@ function pickPage(route: ReturnType<typeof resolveRoute>, pathname: string) {
   if (route.kind === 'trpc-smoke') return <TrpcSmokePage />;
   if (route.kind === 'auth-demo') return <AuthDemoPage />;
   if (route.kind === 'admin') return <AdminPage />;
+  if (route.kind === 'admin-usuario')
+    return <AdminUsuarioPage idConta={route.idConta} />;
   return <NotFoundPage pathname={pathname} />;
 }

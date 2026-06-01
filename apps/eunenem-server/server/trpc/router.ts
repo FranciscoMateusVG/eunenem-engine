@@ -15,6 +15,7 @@
  * Client side imports `AppRouter` as a type only — zero runtime coupling.
  */
 import { initTRPC } from '@trpc/server';
+import { adminRouter } from './admin-router.js';
 import { authRouter } from './auth-router.js';
 import { contribuicaoRouter } from './contribuicao-router.js';
 import type { TrpcContext } from './context.js';
@@ -30,6 +31,7 @@ export const appRouter = t.router({
   listFruits: t.procedure.query(() => {
     return ['maçã', 'banana', 'morango', 'abacaxi', 'manga'] as const;
   }),
+  admin: adminRouter,
   auth: authRouter,
   contribuicao: contribuicaoRouter,
   pagina: paginaRouter,
