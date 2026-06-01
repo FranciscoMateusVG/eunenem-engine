@@ -1,6 +1,9 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 import { type Pagamento, PagamentoSchema } from '../../domain/pagamentos/entities/pagamento.js';
-import type { IdPagamento } from '../../domain/pagamentos/value-objects/ids.js';
+import type {
+  IdContribuicaoPagamento,
+  IdPagamento,
+} from '../../domain/pagamentos/value-objects/ids.js';
 import { PagamentoJaExisteError } from '../../errors/pagamentos/ja-existe.error.js';
 import { PagamentoNaoEncontradoError } from '../../errors/pagamentos/nao-encontrado.error.js';
 import type { Database } from '../database.js';
@@ -155,6 +158,32 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
           .executeTakeFirst()) as PagamentoRow | undefined;
         span.setStatus({ code: SpanStatusCode.OK });
         return row ? pagamentoFromRow(row) : undefined;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  async findByContribuicao(idContribuicao: IdContribuicaoPagamento): Promise<readonly Pagamento[]> {
+    return tracer.startActiveSpan('db.pagamentos.findByContribuicao', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        // The pagamentos_intencao_id_contribuicao_idx (migration 011)
+        // makes this an indexed scan even on a large table.
+        // biome-ignore lint/suspicious/noExplicitAny: see save()
+        const rows = (await (this.db as any)
+          .selectFrom('pagamentos')
+          .selectAll()
+          .where('intencao_id_contribuicao', '=', idContribuicao)
+          .orderBy('criado_em', 'asc')
+          .execute()) as PagamentoRow[];
+        const result = rows.map(pagamentoFromRow);
+        span.setStatus({ code: SpanStatusCode.OK });
+        return result;
       } catch (error: unknown) {
         span.recordException(error as Error);
         span.setStatus({ code: SpanStatusCode.ERROR });
