@@ -100,3 +100,19 @@ export function useObterSucessoPagamento(
     },
   );
 }
+
+/**
+ * Invalidate the visitor's lista de presentes cache so the gift grid
+ * (Marketplace) refetches and shows the just-purchased gift as PRESENTEADO.
+ * Returns a function the caller invokes when a webhook-finalized purchase
+ * has been confirmed (e.g. modal phase → completed_confirmed).
+ *
+ * aperture-6g58e walkthrough caught the staleness: 30s staleTime + no
+ * post-purchase invalidation meant the grid stayed stale until manual
+ * refresh. This closes that gap without dropping the 30s staleTime for
+ * the page's idle reads.
+ */
+export function useInvalidarListaPresentes() {
+  const utils = trpc.useUtils();
+  return (slug: string) => utils.pagina.obterListaPresentes.invalidate({ slug });
+}

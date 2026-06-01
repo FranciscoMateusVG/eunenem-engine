@@ -6,6 +6,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   useIniciarPagamentoContribuicao,
+  useInvalidarListaPresentes,
   useObterSucessoPagamento,
   type MetodoPagamento,
 } from "@/lib/paginaApi";
@@ -78,6 +79,7 @@ export function GiftCheckoutModal({
   const [metodo, setMetodo] = useState<MetodoPagamento>("pix");
 
   const iniciarPagamento = useIniciarPagamentoContribuicao();
+  const invalidarListaPresentes = useInvalidarListaPresentes();
   const stripePromise = useMemo(() => getStripePromise(), []);
 
   // Captured at session-create time and held for the success phase so we
@@ -117,8 +119,14 @@ export function GiftCheckoutModal({
     }
     if (successQuery.data?.status === "approved") {
       setPhase({ kind: "completed_confirmed" });
+      // aperture-6g58e operator follow-up: invalidate the Marketplace
+      // cache so the gift grid re-renders the just-purchased gift as
+      // PRESENTEADO without a manual page refresh. Fire-and-forget — the
+      // grid is behind the modal so the refetch happens while the user
+      // is still in the success panel.
+      void invalidarListaPresentes(slug);
     }
-  }, [successQuery.data?.status, phase.kind]);
+  }, [successQuery.data?.status, phase.kind, invalidarListaPresentes, slug]);
 
   // 30s timeout: pending → slow. Cleared if the phase changes before then
   // (confirmed lands, or visitor closes + reopens which remounts).
