@@ -1,4 +1,5 @@
 import { Toaster } from 'sonner';
+import { AdminPage } from './AdminPage.js';
 import { AuthDemoPage } from './AuthDemoPage.js';
 import { AuthModalProvider } from './components/eunenem/auth/AuthModalProvider.js';
 import { LandingPage } from './LandingPage.js';
@@ -39,6 +40,7 @@ export function resolveRoute(pathname: string):
   | { kind: 'painel-section'; slug: string; section: PainelSection }
   | { kind: 'trpc-smoke' }
   | { kind: 'auth-demo' }
+  | { kind: 'admin' }
   | { kind: 'not-found' } {
   // Marketing landing page (aperture-q1j2) — exact "/" only.
   if (pathname === '/') {
@@ -52,6 +54,13 @@ export function resolveRoute(pathname: string):
   // AuthModalShell. Unlisted in nav; reachable only by typing the URL.
   if (pathname === '/auth-demo') {
     return { kind: 'auth-demo' };
+  }
+  // Operator admin — DDD-trace drill-down (aperture-rsidz.1, W0). No auth
+  // gate per operator directive; matched as a single root for now. Future
+  // waves (rsidz.2+) will add /admin/usuario/:idConta etc. via additional
+  // matches above the not-found fallthrough.
+  if (pathname === '/admin' || pathname === '/admin/') {
+    return { kind: 'admin' };
   }
   // /pagina/<slug>/sucesso — post-Stripe-checkout thank-you page
   // (aperture-xh4jk). Matched BEFORE the bare /pagina/<slug> rule so the
@@ -116,5 +125,6 @@ function pickPage(route: ReturnType<typeof resolveRoute>, pathname: string) {
     return <PainelSectionPage slug={route.slug} section={route.section} />;
   if (route.kind === 'trpc-smoke') return <TrpcSmokePage />;
   if (route.kind === 'auth-demo') return <AuthDemoPage />;
+  if (route.kind === 'admin') return <AdminPage />;
   return <NotFoundPage pathname={pathname} />;
 }
