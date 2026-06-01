@@ -10,7 +10,17 @@ import type { NomeExibicaoUsuario } from '../../domain/usuario/value-objects/nom
 import type { SlugUsuario } from '../../domain/usuario/value-objects/slug-usuario.js';
 import { UsuarioEmailJaExisteError } from '../../errors/usuario/email-ja-existe.error.js';
 import { UsuarioSlugJaExisteError } from '../../errors/usuario/slug-ja-existe.error.js';
-import type { UsuarioRepository } from './repository.js';
+import type {
+  FindUsuariosPaginadosInput,
+  FindUsuariosPaginadosOutput,
+  UsuarioRepository,
+} from './repository.js';
+import {
+  clampUsuariosPaginadosLimit,
+  decodeUsuariosPaginadosCursor,
+  encodeUsuariosPaginadosCursor,
+  usuarioSortValue,
+} from './repository.js';
 
 const tracer = trace.getTracer('frame');
 
@@ -133,6 +143,82 @@ export class UsuarioRepositoryMemory implements UsuarioRepository {
           .slice(0, limit);
         span.setStatus({ code: SpanStatusCode.OK });
         return matches;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  async findUsuariosPaginated(
+    idPlataforma: IdPlataformaReferencia,
+    input: FindUsuariosPaginadosInput,
+  ): Promise<FindUsuariosPaginadosOutput> {
+    return tracer.startActiveSpan('db.usuarios.findUsuariosPaginated', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        const limit = clampUsuariosPaginadosLimit(input.limit);
+        const { sortBy, sortDir } = input;
+
+        // 1. Tenant + filter (BEFORE pagination). LIKE-metachar escape is
+        //    implicit here: we do a literal `startsWith` after lowercasing,
+        //    so `%` and `_` in input are treated as literal chars (memory
+        //    adapter has no pattern language to leak into).
+        const filterPrefix = input.emailPrefix?.toLowerCase() ?? '';
+        const allMatching = [...this.usuarios.values()].filter((u) => {
+          if (u.idPlataforma !== idPlataforma) return false;
+          if (filterPrefix === '') return true;
+          return u.email.toLowerCase().startsWith(filterPrefix);
+        });
+
+        const totalCount = allMatching.length;
+
+        // 2. Sort by (sortColumn, id) tuple in requested direction.
+        const sorted = [...allMatching].sort((a, b) => {
+          const av = usuarioSortValue(a, sortBy);
+          const bv = usuarioSortValue(b, sortBy);
+          let cmp = 0;
+          if (av < bv) cmp = -1;
+          else if (av > bv) cmp = 1;
+          else if (a.id < b.id) cmp = -1;
+          else if (a.id > b.id) cmp = 1;
+          return sortDir === 'asc' ? cmp : -cmp;
+        });
+
+        // 3. Skip past cursor if present (filter rows strictly AFTER the
+        //    cursor in the current sort direction).
+        let postCursor = sorted;
+        if (input.cursor !== null) {
+          const cursor = decodeUsuariosPaginadosCursor(input.cursor);
+          postCursor = sorted.filter((u) => {
+            const sv = usuarioSortValue(u, sortBy);
+            let cmp = 0;
+            if (sv < cursor.sortValue) cmp = -1;
+            else if (sv > cursor.sortValue) cmp = 1;
+            else if (u.id < cursor.idUsuario) cmp = -1;
+            else if (u.id > cursor.idUsuario) cmp = 1;
+            // For ASC we want rows whose tuple > cursor; for DESC we want < cursor.
+            return sortDir === 'asc' ? cmp > 0 : cmp < 0;
+          });
+        }
+
+        // 4. Slice page + compute nextCursor from boundary row.
+        const usuarios = postCursor.slice(0, limit);
+        const hasMore = postCursor.length > limit;
+        const last = usuarios[usuarios.length - 1];
+        const nextCursor =
+          hasMore && last
+            ? encodeUsuariosPaginadosCursor({
+                sortValue: usuarioSortValue(last, sortBy),
+                idUsuario: last.id,
+              })
+            : null;
+
+        span.setStatus({ code: SpanStatusCode.OK });
+        return { usuarios, nextCursor, totalCount };
       } catch (error: unknown) {
         span.recordException(error as Error);
         span.setStatus({ code: SpanStatusCode.ERROR });

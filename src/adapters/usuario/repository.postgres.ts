@@ -1,4 +1,5 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
+import { sql } from 'kysely';
 import type { Conta, Usuario } from '../../domain/usuario/entities/usuario.js';
 import type { EmailUsuario } from '../../domain/usuario/value-objects/email-usuario.js';
 import type {
@@ -12,7 +13,18 @@ import type { SlugUsuario } from '../../domain/usuario/value-objects/slug-usuari
 import { UsuarioEmailJaExisteError } from '../../errors/usuario/email-ja-existe.error.js';
 import { UsuarioSlugJaExisteError } from '../../errors/usuario/slug-ja-existe.error.js';
 import type { Database } from '../database.js';
-import type { UsuarioRepository } from './repository.js';
+import type {
+  FindUsuariosPaginadosInput,
+  FindUsuariosPaginadosOutput,
+  UsuarioPaginadoSortBy,
+  UsuarioRepository,
+} from './repository.js';
+import {
+  clampUsuariosPaginadosLimit,
+  decodeUsuariosPaginadosCursor,
+  encodeUsuariosPaginadosCursor,
+  usuarioSortValue,
+} from './repository.js';
 
 const tracer = trace.getTracer('frame');
 
@@ -238,6 +250,93 @@ export class UsuarioRepositoryPostgres implements UsuarioRepository {
     });
   }
 
+  async findUsuariosPaginated(
+    idPlataforma: IdPlataformaReferencia,
+    input: FindUsuariosPaginadosInput,
+  ): Promise<FindUsuariosPaginadosOutput> {
+    return tracer.startActiveSpan('db.usuarios.findUsuariosPaginated', async (span) => {
+      span.setAttributes({ ...DB_USUARIOS_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        const limit = clampUsuariosPaginadosLimit(input.limit);
+        const { sortBy, sortDir } = input;
+        const dbCol = sortColumnFor(sortBy);
+
+        const hasFilter =
+          typeof input.emailPrefix === 'string' && input.emailPrefix.length > 0;
+        const pattern = hasFilter
+          ? `${escapeLikePattern(input.emailPrefix as string)}%`
+          : null;
+
+        // ─── 1. Page query (limit+1 to detect "has more"). ────────────────
+        let pageQb = this.db
+          .selectFrom('usuarios')
+          .selectAll()
+          .where('id_plataforma', '=', idPlataforma);
+
+        if (pattern !== null) {
+          pageQb = pageQb.where('email', 'ilike', pattern);
+        }
+
+        if (input.cursor !== null) {
+          const cursor = decodeUsuariosPaginadosCursor(input.cursor);
+          // Tuple-comparison cursor: rows whose (sortColumn, id) tuple is
+          // strictly AFTER the cursor in the current sort direction.
+          // Postgres supports tuple comparison natively. The text-cast on
+          // the cursor sortValue lets one parameter shape serve all sort
+          // columns; criadoEm needs an explicit timestamptz cast because
+          // the comparison with `criado_em timestamptz` requires matched
+          // types (text <=> timestamptz is not implicit).
+          const castType = sortBy === 'criadoEm' ? sql`::timestamptz` : sql`::text`;
+          const op = sortDir === 'asc' ? sql`>` : sql`<`;
+          pageQb = pageQb.where(
+            sql<boolean>`(${sql.ref(dbCol)}, ${sql.ref('id')}) ${op} (${cursor.sortValue}${castType}, ${cursor.idUsuario}::uuid)`,
+          );
+        }
+
+        const pageRows = await pageQb
+          .orderBy(dbCol, sortDir)
+          .orderBy('id', sortDir)
+          .limit(limit + 1)
+          .execute();
+
+        const hasMore = pageRows.length > limit;
+        const sliced = hasMore ? pageRows.slice(0, limit) : pageRows;
+        const usuarios = sliced.map(toUsuario);
+
+        const last = usuarios[usuarios.length - 1];
+        const nextCursor =
+          hasMore && last
+            ? encodeUsuariosPaginadosCursor({
+                sortValue: usuarioSortValue(last, sortBy),
+                idUsuario: last.id,
+              })
+            : null;
+
+        // ─── 2. Total count query (filter-aware, tenant-scoped). ──────────
+        // Uses the (id_plataforma, ...) prefix on the sort indexes (or the
+        // existing usuarios_plataforma_email_uniq) for an index-only scan.
+        let countQb = this.db
+          .selectFrom('usuarios')
+          .select(({ fn }) => fn.countAll<string>().as('count'))
+          .where('id_plataforma', '=', idPlataforma);
+        if (pattern !== null) {
+          countQb = countQb.where('email', 'ilike', pattern);
+        }
+        const countRow = await countQb.executeTakeFirstOrThrow();
+        const totalCount = Number(countRow.count);
+
+        span.setStatus({ code: SpanStatusCode.OK });
+        return { usuarios, nextCursor, totalCount };
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
   async findUsuarioBySlug(
     idPlataforma: IdPlataformaReferencia,
     slug: SlugUsuario,
@@ -339,6 +438,22 @@ export class UsuarioRepositoryPostgres implements UsuarioRepository {
  */
 function escapeLikePattern(s: string): string {
   return s.replace(/\\/g, '\\\\').replace(/[%_]/g, (c) => `\\${c}`);
+}
+
+/**
+ * Map the port-level sort key to the snake_case db column name. Single
+ * source of truth — used by both the page query (orderBy + cursor tuple)
+ * and the conformance assertions.
+ */
+function sortColumnFor(sortBy: UsuarioPaginadoSortBy): 'criado_em' | 'email' | 'nome_exibicao' {
+  switch (sortBy) {
+    case 'criadoEm':
+      return 'criado_em';
+    case 'email':
+      return 'email';
+    case 'nomeExibicao':
+      return 'nome_exibicao';
+  }
 }
 
 function toUsuario(row: UsuarioRow): Usuario {

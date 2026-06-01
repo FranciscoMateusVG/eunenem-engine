@@ -61,9 +61,35 @@ describe('Migration round-trip', () => {
     expect(tableNames).toContain('lancamentos_financeiros');
     expect(tableNames).toContain('repasses_recebedor');
 
-    // Migrate down (latest migration first). aperture-id3ay added the
-    // financeiro migration (012) on top of pagamentos (011), slug (010),
-    // better-auth (009), and usuario (008).
+    // aperture-qatwz added two paginated-browse indexes on usuarios (013).
+    // Verify the indexes exist (no new tables here — pure index migration).
+    const indexes = await db
+      .selectFrom('pg_indexes' as never)
+      .select('indexname' as never)
+      .where('schemaname' as never, '=', 'public' as never)
+      .where('tablename' as never, '=', 'usuarios' as never)
+      .execute();
+    const indexNames = indexes.map((i: Record<string, unknown>) => i.indexname);
+    expect(indexNames).toContain('usuarios_plataforma_criado_em_id_idx');
+    expect(indexNames).toContain('usuarios_plataforma_nome_id_idx');
+
+    // Migrate down (latest migration first). aperture-qatwz added the
+    // paginated-indexes migration (013) on top of financeiro (012),
+    // pagamentos (011), slug (010), better-auth (009), and usuario (008).
+    const downPaginatedIndexes = await migrator.migrateDown();
+    expect(downPaginatedIndexes.error).toBeUndefined();
+
+    // After down on 013, both indexes should be gone.
+    const indexesAfterDown = await db
+      .selectFrom('pg_indexes' as never)
+      .select('indexname' as never)
+      .where('schemaname' as never, '=', 'public' as never)
+      .where('tablename' as never, '=', 'usuarios' as never)
+      .execute();
+    const namesAfterDown = indexesAfterDown.map((i: Record<string, unknown>) => i.indexname);
+    expect(namesAfterDown).not.toContain('usuarios_plataforma_criado_em_id_idx');
+    expect(namesAfterDown).not.toContain('usuarios_plataforma_nome_id_idx');
+
     const downFinanceiro = await migrator.migrateDown();
     expect(downFinanceiro.error).toBeUndefined();
 

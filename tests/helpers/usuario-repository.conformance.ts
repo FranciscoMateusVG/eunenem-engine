@@ -5,6 +5,10 @@ import {
   ID_PLATAFORMA_EUNENEM,
 } from '../../src/adapters/plataforma/repository.memory.js';
 import type { UsuarioRepository } from '../../src/adapters/usuario/repository.js';
+import {
+  decodeUsuariosPaginadosCursor,
+  encodeUsuariosPaginadosCursor,
+} from '../../src/adapters/usuario/repository.js';
 import { UsuarioEmailJaExisteError } from '../../src/errors/usuario/email-ja-existe.error.js';
 import { UsuarioSlugJaExisteError } from '../../src/errors/usuario/slug-ja-existe.error.js';
 
@@ -459,6 +463,385 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
       expect(emails).not.toContain('liberal@x.com'); // would match if `_` weren't escaped
       // No match for literal `liter_l` either — emails don't contain that substring at start.
       expect(emails).toEqual([]);
+    });
+
+    // ───── findUsuariosPaginated (aperture-qatwz) ─────
+
+    /**
+     * Seed N usuarios with predictable email + nome_exibicao + criado_em
+     * values for paginated browse tests. `n` rows numbered 01..N (or 001..N
+     * for n>=100) so emails sort lexicographically the same way as the
+     * numeric index. `criadoEm` increases by 1 second per row so it's also
+     * monotone with the index.
+     */
+    const seedForPaginatedTests = async (
+      idPlataforma: string,
+      n: number,
+      opts?: { readonly emailPrefix?: string; readonly basePadding?: number },
+    ): Promise<readonly { id: string; email: string; nomeExibicao: string; criadoEm: Date }[]> => {
+      const prefix = opts?.emailPrefix ?? 'user';
+      const pad = opts?.basePadding ?? Math.max(2, String(n).length);
+      const out: { id: string; email: string; nomeExibicao: string; criadoEm: Date }[] = [];
+      for (let i = 1; i <= n; i++) {
+        const idx = String(i).padStart(pad, '0');
+        const id = randomUUID();
+        const idConta = randomUUID();
+        const email = `${prefix}${idx}@example.com`;
+        const nomeExibicao = `Nome ${idx}`;
+        const criadoEm = new Date(Date.UTC(2026, 0, 1, 0, 0, i));
+        await repo.saveRegistroDomain({
+          usuario: {
+            id,
+            idPlataforma,
+            idConta,
+            email,
+            nomeExibicao,
+            slug: `${prefix}-${idx}-${id.slice(0, 8)}`,
+            criadoEm,
+          },
+          conta: {
+            id: idConta,
+            idUsuario: id,
+            permissoes: ['campaign:admin'] as const,
+            criadaEm: criadoEm,
+          },
+        });
+        out.push({ id, email, nomeExibicao, criadoEm });
+      }
+      return out;
+    };
+
+    it('findUsuariosPaginated — page boundaries: last row of page N == cursor source for page N+1 (aperture-qatwz)', async () => {
+      const rows = await seedForPaginatedTests(ID_PLATAFORMA_EUNENEM, 7);
+
+      const page1 = await repo.findUsuariosPaginated(ID_PLATAFORMA_EUNENEM, {
+        cursor: null,
+        limit: 3,
+        sortBy: 'email',
+        sortDir: 'asc',
+      });
+      expect(page1.usuarios.map((u) => u.email)).toEqual(
+        rows.slice(0, 3).map((r) => r.email),
+      );
+      expect(page1.nextCursor).not.toBeNull();
+      expect(page1.totalCount).toBe(7);
+
+      const page2 = await repo.findUsuariosPaginated(ID_PLATAFORMA_EUNENEM, {
+        cursor: page1.nextCursor,
+        limit: 3,
+        sortBy: 'email',
+        sortDir: 'asc',
+      });
+      expect(page2.usuarios.map((u) => u.email)).toEqual(
+        rows.slice(3, 6).map((r) => r.email),
+      );
+      expect(page2.nextCursor).not.toBeNull();
+
+      const page3 = await repo.findUsuariosPaginated(ID_PLATAFORMA_EUNENEM, {
+        cursor: page2.nextCursor,
+        limit: 3,
+        sortBy: 'email',
+        sortDir: 'asc',
+      });
+      expect(page3.usuarios.map((u) => u.email)).toEqual([rows[6]?.email]);
+      expect(page3.nextCursor).toBeNull();
+    });
+
+    it('findUsuariosPaginated — tie-break on idUsuario when sort column has duplicates (aperture-qatwz)', async () => {
+      // Force a tie on nomeExibicao: all 5 rows share the same name.
+      const sharedName = 'Mesmo Nome';
+      const sharedDate = new Date('2026-03-01T00:00:00.000Z');
+      const ids: string[] = [];
+      for (let i = 1; i <= 5; i++) {
+        const id = randomUUID();
+        const idConta = randomUUID();
+        await repo.saveRegistroDomain({
+          usuario: {
+            id,
+            idPlataforma: ID_PLATAFORMA_EUNENEM,
+            idConta,
+            email: `tied-${i}@example.com`,
+            nomeExibicao: sharedName,
+            slug: `tied-${i}-${id.slice(0, 8)}`,
+            criadoEm: sharedDate,
+          },
+          conta: {
+            id: idConta,
+            idUsuario: id,
+            permissoes: ['campaign:admin'] as const,
+            criadaEm: sharedDate,
+          },
+        });
+        ids.push(id);
+      }
+      const sortedIds = [...ids].sort();
+
+      // Traverse all pages, asserting strict id-ascending order (the
+      // tie-break) and no duplicates / skips.
+      const visited: string[] = [];
+      let cursor: string | null = null;
+      for (let i = 0; i < 10; i++) {
+        const page = await repo.findUsuariosPaginated(ID_PLATAFORMA_EUNENEM, {
+          cursor,
+          limit: 2,
+          sortBy: 'nomeExibicao',
+          sortDir: 'asc',
+        });
+        visited.push(...page.usuarios.map((u) => u.id));
+        if (page.nextCursor === null) break;
+        cursor = page.nextCursor;
+      }
+      expect(visited).toEqual(sortedIds);
+    });
+
+    it('findUsuariosPaginated — emailPrefix filter narrows the set; cursor still walks the narrowed set (aperture-qatwz)', async () => {
+      // 4 'mari*' + 3 'bob*' rows
+      const mariRows = await seedForPaginatedTests(ID_PLATAFORMA_EUNENEM, 4, {
+        emailPrefix: 'mari',
+      });
+      await seedForPaginatedTests(ID_PLATAFORMA_EUNENEM, 3, { emailPrefix: 'bob' });
+
+      const page1 = await repo.findUsuariosPaginated(ID_PLATAFORMA_EUNENEM, {
+        cursor: null,
+        limit: 2,
+        sortBy: 'email',
+        sortDir: 'asc',
+        emailPrefix: 'mari',
+      });
+      expect(page1.totalCount).toBe(4);
+      expect(page1.usuarios.map((u) => u.email)).toEqual([
+        mariRows[0]?.email,
+        mariRows[1]?.email,
+      ]);
+
+      const page2 = await repo.findUsuariosPaginated(ID_PLATAFORMA_EUNENEM, {
+        cursor: page1.nextCursor,
+        limit: 2,
+        sortBy: 'email',
+        sortDir: 'asc',
+        emailPrefix: 'mari',
+      });
+      expect(page2.usuarios.map((u) => u.email)).toEqual([
+        mariRows[2]?.email,
+        mariRows[3]?.email,
+      ]);
+      expect(page2.nextCursor).toBeNull();
+    });
+
+    it('findUsuariosPaginated — empty/undefined emailPrefix returns full tenant (different from findUsuariosByEmailPrefix) (aperture-qatwz)', async () => {
+      await seedForPaginatedTests(ID_PLATAFORMA_EUNENEM, 3);
+
+      const withUndefined = await repo.findUsuariosPaginated(ID_PLATAFORMA_EUNENEM, {
+        cursor: null,
+        limit: 50,
+        sortBy: 'email',
+        sortDir: 'asc',
+      });
+      expect(withUndefined.totalCount).toBe(3);
+      expect(withUndefined.usuarios.length).toBe(3);
+
+      const withEmpty = await repo.findUsuariosPaginated(ID_PLATAFORMA_EUNENEM, {
+        cursor: null,
+        limit: 50,
+        sortBy: 'email',
+        sortDir: 'asc',
+        emailPrefix: '',
+      });
+      expect(withEmpty.totalCount).toBe(3);
+      expect(withEmpty.usuarios.length).toBe(3);
+    });
+
+    it('findUsuariosPaginated — filter matches nothing: empty array, null cursor, totalCount 0 (aperture-qatwz)', async () => {
+      await seedForPaginatedTests(ID_PLATAFORMA_EUNENEM, 3);
+      const result = await repo.findUsuariosPaginated(ID_PLATAFORMA_EUNENEM, {
+        cursor: null,
+        limit: 50,
+        sortBy: 'email',
+        sortDir: 'asc',
+        emailPrefix: 'zzz-nothing-here',
+      });
+      expect(result.usuarios).toEqual([]);
+      expect(result.nextCursor).toBeNull();
+      expect(result.totalCount).toBe(0);
+    });
+
+    it('findUsuariosPaginated — cursor opacity: round-trip preserves; invalid cursor throws (aperture-qatwz)', async () => {
+      await seedForPaginatedTests(ID_PLATAFORMA_EUNENEM, 4);
+      const page1 = await repo.findUsuariosPaginated(ID_PLATAFORMA_EUNENEM, {
+        cursor: null,
+        limit: 2,
+        sortBy: 'email',
+        sortDir: 'asc',
+      });
+      expect(page1.nextCursor).toBeTypeOf('string');
+      // base64url should not contain `+`, `/`, or `=` padding.
+      expect(page1.nextCursor).not.toMatch(/[+/=]/);
+      // Round-trip through decode should yield a string sortValue + uuid.
+      const decoded = decodeUsuariosPaginadosCursor(page1.nextCursor as string);
+      expect(typeof decoded.sortValue).toBe('string');
+      expect(decoded.idUsuario).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+      );
+
+      // Garbage cursor → throws "Invalid pagination cursor: ..."
+      await expect(
+        repo.findUsuariosPaginated(ID_PLATAFORMA_EUNENEM, {
+          cursor: '!!!not-base64url!!!',
+          limit: 2,
+          sortBy: 'email',
+          sortDir: 'asc',
+        }),
+      ).rejects.toThrow(/Invalid pagination cursor/);
+    });
+
+    it('findUsuariosPaginated — limit clamping: >100 → 100, <1 → 1, non-integer floored (aperture-qatwz)', async () => {
+      await seedForPaginatedTests(ID_PLATAFORMA_EUNENEM, 5);
+
+      const overflow = await repo.findUsuariosPaginated(ID_PLATAFORMA_EUNENEM, {
+        cursor: null,
+        limit: 500, // clamp to 100; only 5 rows exist so we get all 5
+        sortBy: 'email',
+        sortDir: 'asc',
+      });
+      expect(overflow.usuarios.length).toBe(5);
+      expect(overflow.nextCursor).toBeNull();
+
+      const underflow = await repo.findUsuariosPaginated(ID_PLATAFORMA_EUNENEM, {
+        cursor: null,
+        limit: 0, // clamp to 1
+        sortBy: 'email',
+        sortDir: 'asc',
+      });
+      expect(underflow.usuarios.length).toBe(1);
+      expect(underflow.nextCursor).not.toBeNull();
+
+      const negative = await repo.findUsuariosPaginated(ID_PLATAFORMA_EUNENEM, {
+        cursor: null,
+        limit: -10, // clamp to 1
+        sortBy: 'email',
+        sortDir: 'asc',
+      });
+      expect(negative.usuarios.length).toBe(1);
+
+      const fractional = await repo.findUsuariosPaginated(ID_PLATAFORMA_EUNENEM, {
+        cursor: null,
+        limit: 2.9, // floor → 2
+        sortBy: 'email',
+        sortDir: 'asc',
+      });
+      expect(fractional.usuarios.length).toBe(2);
+    });
+
+    it('findUsuariosPaginated — LIKE metacharacters in emailPrefix are escaped (aperture-qatwz)', async () => {
+      // Same proof-of-escape pattern as findUsuariosByEmailPrefix test:
+      // unescaped `_` would let "liter_l" match "liberal" (`_` = single
+      // wildcard char). Escaped, it's a literal and matches nothing here.
+      await seedForPaginatedTests(ID_PLATAFORMA_EUNENEM, 0); // seed nothing first
+
+      // Manual two-row seed with metachar-bait emails.
+      const seedOne = async (email: string, slug: string) => {
+        const id = randomUUID();
+        const idConta = randomUUID();
+        await repo.saveRegistroDomain({
+          usuario: {
+            id,
+            idPlataforma: ID_PLATAFORMA_EUNENEM,
+            idConta,
+            email,
+            nomeExibicao: email,
+            slug,
+            criadoEm: fixedDate,
+          },
+          conta: {
+            id: idConta,
+            idUsuario: id,
+            permissoes: ['campaign:admin'] as const,
+            criadaEm: fixedDate,
+          },
+        });
+      };
+      await seedOne('literal_underscore@x.com', 'lit-under-qatwz');
+      await seedOne('liberal@x.com', 'liberal-qatwz');
+
+      const result = await repo.findUsuariosPaginated(ID_PLATAFORMA_EUNENEM, {
+        cursor: null,
+        limit: 50,
+        sortBy: 'email',
+        sortDir: 'asc',
+        emailPrefix: 'liter_l',
+      });
+      expect(result.usuarios.map((u) => u.email)).not.toContain('liberal@x.com');
+      expect(result.usuarios).toEqual([]);
+      expect(result.totalCount).toBe(0);
+    });
+
+    it('findUsuariosPaginated — multi-page traversal visits each row exactly once across all sort modes (aperture-qatwz)', async () => {
+      const rows = await seedForPaginatedTests(ID_PLATAFORMA_EUNENEM, 11);
+      const expectedIds = new Set(rows.map((r) => r.id));
+
+      for (const sortBy of ['criadoEm', 'email', 'nomeExibicao'] as const) {
+        for (const sortDir of ['asc', 'desc'] as const) {
+          const visited: string[] = [];
+          let cursor: string | null = null;
+          let guard = 0;
+          while (guard++ < 20) {
+            const page = await repo.findUsuariosPaginated(ID_PLATAFORMA_EUNENEM, {
+              cursor,
+              limit: 4,
+              sortBy,
+              sortDir,
+            });
+            visited.push(...page.usuarios.map((u) => u.id));
+            if (page.nextCursor === null) break;
+            cursor = page.nextCursor;
+          }
+          expect(new Set(visited)).toEqual(expectedIds);
+          expect(visited.length).toBe(11); // no duplicates
+        }
+      }
+    });
+
+    it('findUsuariosPaginated — tenant isolation: other-plataforma rows never leak (aperture-qatwz)', async () => {
+      await seedForPaginatedTests(ID_PLATAFORMA_EUNENEM, 3, { emailPrefix: 'eu' });
+      await seedForPaginatedTests(ID_PLATAFORMA_EUCASEI, 5, { emailPrefix: 'ec' });
+
+      const eunenemPage = await repo.findUsuariosPaginated(ID_PLATAFORMA_EUNENEM, {
+        cursor: null,
+        limit: 50,
+        sortBy: 'email',
+        sortDir: 'asc',
+      });
+      expect(eunenemPage.totalCount).toBe(3);
+      expect(eunenemPage.usuarios.every((u) => u.idPlataforma === ID_PLATAFORMA_EUNENEM)).toBe(
+        true,
+      );
+
+      const eucaseiPage = await repo.findUsuariosPaginated(ID_PLATAFORMA_EUCASEI, {
+        cursor: null,
+        limit: 50,
+        sortBy: 'email',
+        sortDir: 'asc',
+      });
+      expect(eucaseiPage.totalCount).toBe(5);
+      expect(eucaseiPage.usuarios.every((u) => u.idPlataforma === ID_PLATAFORMA_EUCASEI)).toBe(
+        true,
+      );
+    });
+
+    it('findUsuariosPaginated — cursor encode round-trip is canonical across adapters (aperture-qatwz)', async () => {
+      // The cursor helpers are SHARED between memory + postgres adapters
+      // — assert that the encoder/decoder pair is a pure round-trip so
+      // cursors emitted by one adapter would decode the same way (relevant
+      // if we ever swap adapters mid-session or build a test harness that
+      // composes both).
+      const payload = {
+        sortValue: '2026-05-12T15:30:45.123Z',
+        idUsuario: '11111111-2222-3333-4444-555555555555',
+      };
+      const encoded = encodeUsuariosPaginadosCursor(payload);
+      expect(encoded).not.toMatch(/[+/=]/);
+      const decoded = decodeUsuariosPaginadosCursor(encoded);
+      expect(decoded).toEqual(payload);
     });
   });
 }
