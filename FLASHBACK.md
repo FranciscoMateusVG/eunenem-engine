@@ -118,7 +118,7 @@ Card payment on /pagina/francisco → Stripe iframe → inline ✓ modal with po
 |---|---|---|
 | `aperture-id3ay` | **rex** | Wire `LivroFinanceiroRepository` to postgres (lancamentos written to RAM, lost on restart — same wire-the-adapter gap aiipy had for Pagamentos). Blocks the lancamentos leaf of the admin-trace epic. |
 | `aperture-m4xaj` | **rex** | Testcontainers integration tests time out under v8 coverage instrumentation. Pre-push gate flake. 4 proposed fixes on bead; globalSetup with shared container probably cleanest. |
-| `aperture-rsidz` | **wheatley** (epic) | Admin DDD-trace drill-down page: user → campanhas → contribuicoes → pagamentos → lancamentos. Operator-direct request 2026-05-31. Hard-blocked-by id3ay for the leaf step (W5); W0–W4 can scope + start in parallel. 5 open questions for operator on the bead. |
+| `aperture-rsidz` | **wheatley** (epic) | Admin DDD-trace drill-down page. Operator-direct request 2026-05-31. **v1.1 scope approved + 7 children filed late 2026-05-31:** vempq (W0 admin shell, Vance), 5d3yz (W1-engine prefix-search, Rex), 2ma52 (W2-engine findCampanhasByContribuinte, Rex), pu3h7 (W1-frontend user picker, Vance, blocked-by 5d3yz), vlusq (W2 campanhas, Vance), 0wlmy (W3 contribuicoes, Vance), 3igbj (W4 pagamentos + JsonViewer, Vance). W5 lancamentos deferred-filing pending id3ay close. Operator locks: read-only v1, no auth, eunenem-only, collapsed JSON viewer + raw toggle, engine prefix-search > exact-match. Rex bundled-dispatched on id3ay + W1-engine + W2-engine. Vance dispatched on W0 first. |
 | `aperture-pgqih` | glados | [EPIC] BetterAuth integration on engine (Pattern A) + eunenem-server consumer wiring. Not touched this session. |
 
 ### Currently open (P2)
