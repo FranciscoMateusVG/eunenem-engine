@@ -217,8 +217,17 @@ interface GroupedGift {
   nome: string;
   price: number; // BRL (converted from valor cents at the adapter boundary)
   category: ListaCategory;
+  // aperture-intake-grxsh-followup — split emoji vs real image. `imageUrl` is a
+  // same-origin path or absolute http(s) URL; when set, the card renders an
+  // <img>. Otherwise `emoji` (a per-grupo glyph fallback) is rendered as text.
   emoji: string;
+  imageUrl: string | null;
   bgColor: string;
+  // aperture-intake-grxsh-followup — when `grupo` isn't a known
+  // LISTA_CATEGORY, we surface the raw value as the chip text instead of
+  // collapsing it to "personalizado" (which is reserved for true user-created
+  // items per FLASHBACK §4.5).
+  chipLabel: string;
   qty: number;
   received: number;
   hasClaimed: boolean;
@@ -239,10 +248,27 @@ const isListaCategory = (g: string | null | undefined): g is ListaCategory => {
   );
 };
 
+// aperture-intake-grxsh-followup — `imagemUrl` is an image when it starts with
+// `/` (same-origin) or `http(s)://`. Anything else (a stray emoji from legacy
+// rows, etc.) is treated as text content. Mirrors the catalog modal's
+// it.imageUrl rendering at line ~1176.
+const isImagePath = (v: string | null | undefined): v is string =>
+  typeof v === "string" && /^(\/|https?:\/\/)/.test(v);
+
 function groupContribuicoes(items: ContribuicaoDTO[]): GroupedGift[] {
   const map = new Map<string, GroupedGift>();
   for (const c of items) {
-    const category: ListaCategory = isListaCategory(c.grupo) ? c.grupo : "personalizado";
+    // aperture-intake-grxsh-followup — Only collapse to "personalizado" when
+    // the category is genuinely a known one we want to style as a chip. For
+    // unknown grupos (e.g. lista-pronta IDs like "ilustrativa" that the seed
+    // path stuffed into the column) we use "outros" as the typed bucket but
+    // render the raw grupo as the chip text below — see chipLabel.
+    const category: ListaCategory = isListaCategory(c.grupo) ? c.grupo : "outros";
+    const knownLabel = isListaCategory(c.grupo) ? LISTA_CATEGORY_LABEL[c.grupo] : null;
+    const chipLabel =
+      knownLabel ?? (typeof c.grupo === "string" && c.grupo.trim() !== "" ? c.grupo.toLowerCase() : "outros");
+    const imageUrl = isImagePath(c.imagemUrl) ? c.imagemUrl : null;
+    const emoji = imageUrl ? "🎁" : c.imagemUrl ?? "🎁";
     const existing = map.get(c.nome);
     if (existing) {
       existing.ids.push(c.id);
@@ -254,12 +280,17 @@ function groupContribuicoes(items: ContribuicaoDTO[]): GroupedGift[] {
         nome: c.nome,
         price: brlFromCents(c.valor),
         category,
-        emoji: c.imagemUrl ?? "🎁",
+        emoji,
+        imageUrl,
         bgColor: deriveBgColor(c.grupo),
+        chipLabel,
         qty: 1,
         received: c.status === "indisponivel" ? 1 : 0,
         hasClaimed: c.status === "indisponivel",
-        custom: category === "personalizado",
+        // `custom` styling (pink chip + locked semantics) is reserved for true
+        // user-created items, i.e. grupo === "personalizado". Don't flag rows
+        // we merely couldn't categorize.
+        custom: c.grupo === "personalizado",
       });
     }
   }
@@ -329,11 +360,30 @@ function GiftCard({
   return (
     <div className={"lista-card" + (isComplete ? " is-complete" : "")}>
       <div className="lista-card-thumb" style={{ background: item.bgColor }}>
-        <span className="lista-card-emoji" aria-hidden="true">
-          {item.emoji}
-        </span>
+        {/* aperture-intake-grxsh-followup — real product image when imagemUrl
+            is a same-origin path or absolute URL; emoji fallback otherwise.
+            Mirrors the catalog modal's it.imageUrl pattern. */}
+        {item.imageUrl ? (
+          <img
+            src={item.imageUrl}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              borderRadius: "inherit",
+              display: "block",
+            }}
+          />
+        ) : (
+          <span className="lista-card-emoji" aria-hidden="true">
+            {item.emoji}
+          </span>
+        )}
         <span className={"lista-card-badge" + (item.custom ? " is-custom" : "")}>
-          {item.custom ? "personalizado" : LISTA_CATEGORY_LABEL[item.category]}
+          {item.chipLabel}
         </span>
         <div className="lista-card-actions">
           <button
@@ -1462,7 +1512,10 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
           {
             nome: draft.title,
             valor: centsFromBRL(price),
-            imagemUrl: editItem.emoji,
+            // aperture-intake-grxsh-followup — preserve the real product
+            // image URL (if any) on edit; fall back to whatever was in `emoji`
+            // (legacy rows used this slot for a glyph or url).
+            imagemUrl: editItem.imageUrl ?? editItem.emoji,
             grupo: draft.category,
             qty: newQty,
           },
