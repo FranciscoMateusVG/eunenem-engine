@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { DddBadge, type Bc } from "./DddBadge";
+import { UserPicker } from "./UserPicker";
 
 /**
  * AdminShell — the engineering view's frame on eunenem-server.
@@ -121,10 +122,29 @@ function Sidebar({ activeNav }: { activeNav: NavKey }) {
           })}
         </nav>
 
+        <QuickJump />
+
         <NoAuthChip />
         <ConsumerLink />
       </div>
     </aside>
+  );
+}
+
+/**
+ * Sidebar quick-jump. Embeds the W1 UserPicker combobox as a "jump to a
+ * user by email" affordance available from every admin page. The browse
+ * table on /admin landing is the default for discovery; this is the
+ * shortcut for operators who already know the email they want.
+ */
+function QuickJump() {
+  return (
+    <div className="mt-6 hidden lg:block">
+      <p className="mb-2 font-mono text-[10px] uppercase tracking-[0.18em] text-ink-mute">
+        Jump to user
+      </p>
+      <UserPicker />
+    </div>
   );
 }
 
