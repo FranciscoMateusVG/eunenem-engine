@@ -6,6 +6,17 @@
 # `../../../../src/domain/...` (engine BCs + observability). The app is
 # not workspace-packaged; the imports resolve via the actual filesystem
 # layout. So the container must mirror the repo layout under /app.
+#
+# Two dep installs needed because the engine repo does NOT use pnpm
+# workspaces (no pnpm-workspace.yaml). Each level has its own
+# package.json + lockfile:
+#   1. Repo root package.json — runtime deps used by src/ (engine BCs):
+#      @opentelemetry/api, better-auth, kysely, pg, stripe, zod
+#   2. apps/eunenem-server/package.json — Hono SSR app deps + esbuild
+#      + tsx + Tailwind
+# Node module resolution from /app/src/foo.ts walks up to /app/node_modules
+# for the root deps, then /app/apps/eunenem-server/node_modules for the
+# app deps. Both must exist.
 FROM node:22-slim
 
 WORKDIR /app
@@ -13,14 +24,23 @@ WORKDIR /app
 # Match the repo's pinned package manager (engine/package.json: pnpm@10.33.0).
 RUN npm install -g pnpm@10.33.0
 
-# Layer-cache the dep install: copy ONLY the app's package files first.
+# Layer 1: install ROOT deps (production-only) — used by src/ at runtime.
+# Layer-cache friendly: only invalidates when root package.json/lockfile
+# changes, not on app-side code changes.
+# --ignore-scripts skips the husky prepare lifecycle (husky is a devDep,
+# not installed in --prod, but the prepare hook would still try to run
+# it and crash the install).
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile --prod --ignore-scripts
+
+# Layer 2: install APP deps — full set (devDeps include tsx + esbuild
+# + Tailwind, needed at both build and runtime).
 COPY apps/eunenem-server/package.json apps/eunenem-server/pnpm-lock.yaml ./apps/eunenem-server/
 WORKDIR /app/apps/eunenem-server
 RUN pnpm install --frozen-lockfile
 
-# Now copy the actual source: the app + the engine root src/ (cross-app
-# imports walk up to it via ../../../../src/...). node_modules + generated
-# public/ excluded via .dockerignore.
+# Layer 3: source. node_modules + generated public/ excluded via
+# .dockerignore so the COPY doesn't blow away the installed deps.
 WORKDIR /app
 COPY apps/eunenem-server ./apps/eunenem-server/
 COPY src ./src/
