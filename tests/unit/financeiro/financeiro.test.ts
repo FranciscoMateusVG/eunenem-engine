@@ -107,6 +107,105 @@ describe('criarLancamentosParaPagamentoAprovado', () => {
 
     expect(lancamentos[1].amountCents).toBe(500);
   });
+
+  // ───── aperture-bjshv: credito_passthrough_surcharge ─────────────
+
+  const idLancamentoPassthroughSurcharge = '550e8400-e29b-41d4-a716-446655441099';
+
+  it('PIX (surchargeCents=0) emits exactly 2 lancamentos and book balances (aperture-bjshv)', () => {
+    const lancamentos = criarLancamentosParaPagamentoAprovado(
+      inputPagamentoAprovado,
+      { idLancamentoRecebedor, idLancamentoReceitaPlataforma },
+      criadoEm,
+    );
+    expect(lancamentos).toHaveLength(2);
+    expect(lancamentos.map((l) => l.tipo)).toEqual([
+      'credito_saldo_recebedor',
+      'credito_receita_plataforma',
+    ]);
+    // Book-balance invariant on the PIX path.
+    const sum = lancamentos.reduce((acc, l) => acc + l.amountCents, 0);
+    expect(sum).toBe(inputPagamentoAprovado.composicaoValores.totalPaidCents);
+  });
+
+  it('cartao (surchargeCents>0) emits 3 lancamentos and book balances (aperture-bjshv)', () => {
+    const inputCartao = {
+      ...inputPagamentoAprovado,
+      composicaoValores: {
+        contributionAmountCents: 4500,
+        feeAmountCents: 225,
+        surchargeCents: 224,
+        totalPaidCents: 4949,
+        receiverAmountCents: 4500,
+        responsavelTaxa: 'contribuinte' as const,
+      },
+    };
+    const lancamentos = criarLancamentosParaPagamentoAprovado(
+      inputCartao,
+      {
+        idLancamentoRecebedor,
+        idLancamentoReceitaPlataforma,
+        idLancamentoPassthroughSurcharge,
+      },
+      criadoEm,
+    );
+    expect(lancamentos).toHaveLength(3);
+    expect(lancamentos.map((l) => l.tipo)).toEqual([
+      'credito_saldo_recebedor',
+      'credito_receita_plataforma',
+      'credito_passthrough_surcharge',
+    ]);
+    // Per-row shape checks for the new passthrough lancamento.
+    const passthrough = lancamentos[2];
+    expect(passthrough.id).toBe(idLancamentoPassthroughSurcharge);
+    expect(passthrough.amountCents).toBe(224);
+    expect(passthrough.status).toBe('pendente');
+    expect(passthrough.idCampanha).toBe(idCampanha); // inherit from input per bead
+    expect(passthrough.idPagamento).toBe(idPagamento);
+    expect(passthrough.idContribuicao).toBe(idContribuicao);
+    expect(passthrough.criadoEm).toBe(criadoEm);
+    // Book-balance invariant on the cartao path — the whole reason this exists.
+    const sum = lancamentos.reduce((acc, l) => acc + l.amountCents, 0);
+    expect(sum).toBe(inputCartao.composicaoValores.totalPaidCents);
+    expect(sum).toBe(4949);
+  });
+
+  it('cartao without idLancamentoPassthroughSurcharge throws a clear error (aperture-bjshv)', () => {
+    expect(() =>
+      criarLancamentosParaPagamentoAprovado(
+        {
+          ...inputPagamentoAprovado,
+          composicaoValores: {
+            contributionAmountCents: 4500,
+            feeAmountCents: 225,
+            surchargeCents: 224,
+            totalPaidCents: 4949,
+            receiverAmountCents: 4500,
+            responsavelTaxa: 'contribuinte',
+          },
+        },
+        { idLancamentoRecebedor, idLancamentoReceitaPlataforma },
+        criadoEm,
+      ),
+    ).toThrow(/idLancamentoPassthroughSurcharge/);
+  });
+
+  it('PIX accepts a present idLancamentoPassthroughSurcharge but ignores it (no-op when surchargeCents=0)', () => {
+    // Defensive: caller minted an extra UUID for a PIX payment. Factory
+    // should NOT emit a 3rd lancamento — the surchargeCents===0 check
+    // wins before the optional id is consumed.
+    const lancamentos = criarLancamentosParaPagamentoAprovado(
+      inputPagamentoAprovado,
+      {
+        idLancamentoRecebedor,
+        idLancamentoReceitaPlataforma,
+        idLancamentoPassthroughSurcharge,
+      },
+      criadoEm,
+    );
+    expect(lancamentos).toHaveLength(2);
+    expect(lancamentos.find((l) => l.tipo === 'credito_passthrough_surcharge')).toBeUndefined();
+  });
 });
 
 describe('financial summaries', () => {

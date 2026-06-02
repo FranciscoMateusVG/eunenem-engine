@@ -29,6 +29,14 @@ export type StatusLancamento = z.infer<typeof StatusLancamentoSchema>;
 export const TipoLancamentoFinanceiroSchema = z.enum([
   'credito_saldo_recebedor',
   'credito_receita_plataforma',
+  // aperture-bjshv: third tipo for buyer-paid card surcharge accounting.
+  // Naming rationale: matches composicao field name `surchargeCents` (single
+  // source of truth in the codebase). NOT `credito_taxa_cartao` — would
+  // conflate with `feeAmountCents` which is OUR platform fee, semantically
+  // distinct. "Passthrough" describes the accounting role: money the
+  // visitante paid that flows through us to the provider; we never own it.
+  // Only emitted when surchargeCents > 0 (cartao); PIX pagamentos omit it.
+  'credito_passthrough_surcharge',
 ]);
 export type TipoLancamentoFinanceiro = z.infer<typeof TipoLancamentoFinanceiroSchema>;
 
@@ -51,6 +59,13 @@ export type LancamentoFinanceiro = Readonly<z.infer<typeof LancamentoFinanceiroS
 export const IdsLancamentosFinanceirosSchema = z.object({
   idLancamentoRecebedor: IdLancamentoFinanceiroSchema,
   idLancamentoReceitaPlataforma: IdLancamentoFinanceiroSchema,
+  /**
+   * Optional id for the passthrough_surcharge lancamento (aperture-bjshv).
+   * REQUIRED when `composicaoValores.surchargeCents > 0` (cartao payments) —
+   * absence under that condition surfaces a clear factory-side error.
+   * Absent for PIX payments where surchargeCents === 0.
+   */
+  idLancamentoPassthroughSurcharge: IdLancamentoFinanceiroSchema.optional(),
 });
 
 export type IdsLancamentosFinanceiros = Readonly<z.infer<typeof IdsLancamentosFinanceirosSchema>>;
@@ -97,11 +112,44 @@ export function validarComposicaoFinanceiraPagamentoAprovado(
   }
 }
 
+/**
+ * Build the lancamentos for a freshly-aprovado pagamento.
+ *
+ * Returns 2 lancamentos for PIX (`surchargeCents === 0`) — recebedor +
+ * receita_plataforma — preserving the pre-bjshv behavior. Returns 3
+ * lancamentos for cartao (`surchargeCents > 0`) — adds a
+ * `credito_passthrough_surcharge` entry so the book balances against
+ * `totalPaidCents` (aperture-bjshv).
+ *
+ * Book-balance invariant (aperture-bjshv): once this returns,
+ * `SUM(amountCents over all returned lancamentos) === totalPaidCents` for
+ * BOTH paths. The composicao-input invariant
+ * (`receiverAmountCents + feeAmountCents + surchargeCents === totalPaidCents`)
+ * is enforced upstream by `validarComposicaoFinanceiraPagamentoAprovado`.
+ *
+ * When `surchargeCents > 0`, `idsLancamentos.idLancamentoPassthroughSurcharge`
+ * MUST be defined — absence under that condition throws a clear error so
+ * use-case-level UUID minting bugs surface at factory-time, not at
+ * adapter-time with a confusing schema error.
+ *
+ * The passthrough lancamento starts `pendente` per the bead spec (Stripe
+ * hasn't actually deducted the surcharge from us at aprovado-time — the
+ * maturation rule per plano 0006 is Finding #2's territory; this factory
+ * does NOT speculate). The existing `receita_plataforma` entry retains
+ * its current `disponivel` status to avoid touching the maturation
+ * question here.
+ *
+ * idCampanha is populated on `recebedor` (today's behavior) AND on
+ * `passthrough` (per bead spec — "inherit from input"), but NOT on
+ * `receita_plataforma` (today's behavior — platform revenue isn't tied
+ * to a specific campanha at the lancamento level). The receita
+ * exclusion is unchanged to keep this bead's blast radius minimal.
+ */
 export function criarLancamentosParaPagamentoAprovado(
   input: EfeitosFinanceirosPagamentoAprovado,
   idsLancamentos: IdsLancamentosFinanceiros,
   criadoEm: Date,
-): readonly [LancamentoFinanceiro, LancamentoFinanceiro] {
+): readonly LancamentoFinanceiro[] {
   validarComposicaoFinanceiraPagamentoAprovado(input);
 
   const lancamentoRecebedor: LancamentoFinanceiro = {
@@ -125,5 +173,32 @@ export function criarLancamentosParaPagamentoAprovado(
     criadoEm,
   };
 
-  return [lancamentoRecebedor, lancamentoReceita];
+  // PIX path — no surcharge, no third lancamento. Book balance:
+  //   recebedor (= contribution) + receita (= fee) === totalPaid.
+  if (input.composicaoValores.surchargeCents === 0) {
+    return [lancamentoRecebedor, lancamentoReceita];
+  }
+
+  // Cartao path — surcharge > 0 requires the third lancamento.
+  if (!idsLancamentos.idLancamentoPassthroughSurcharge) {
+    throw new Error(
+      'idLancamentoPassthroughSurcharge é obrigatório quando composicaoValores.surchargeCents > 0 (aperture-bjshv).',
+    );
+  }
+  const lancamentoPassthrough: LancamentoFinanceiro = {
+    id: idsLancamentos.idLancamentoPassthroughSurcharge,
+    idPagamento: input.idPagamento,
+    idContribuicao: input.idContribuicao,
+    idCampanha: input.idCampanha,
+    tipo: 'credito_passthrough_surcharge',
+    amountCents: input.composicaoValores.surchargeCents,
+    status: 'pendente',
+    criadoEm,
+  };
+
+  // Book balance (cartao): recebedor (= contribution) + receita (= fee) +
+  // passthrough (= surcharge) === totalPaid. Validated upstream on the
+  // composicao input; the third lancamento makes it true on the
+  // OUTPUT side too.
+  return [lancamentoRecebedor, lancamentoReceita, lancamentoPassthrough];
 }

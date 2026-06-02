@@ -211,6 +211,120 @@ describe('LivroFinanceiroRepositoryPostgres — lancamentos', () => {
     const totalReceita = receitas.reduce((acc, l) => acc + l.amountCents, 0);
     expect(totalReceita).toBe(125);
   });
+
+  // ───── aperture-bjshv: passthrough_surcharge persistence ─────────────
+
+  function makeLancamentoPassthrough(
+    overrides?: Partial<LancamentoFinanceiro>,
+  ): LancamentoFinanceiro {
+    return {
+      id: randomUUID() as IdLancamentoFinanceiro,
+      idPagamento: randomUUID() as IdPagamentoReferencia,
+      idContribuicao: randomUUID() as IdContribuicaoReferencia,
+      idCampanha: randomUUID() as IdCampanha, // passthrough inherits idCampanha
+      tipo: 'credito_passthrough_surcharge',
+      amountCents: 224,
+      status: 'pendente',
+      criadoEm: new Date('2026-06-02T12:00:00Z'),
+      ...overrides,
+    };
+  }
+
+  it('cartao 3-lancamento round-trip — passthrough row persists with correct tipo (aperture-bjshv)', async () => {
+    const idPagamento = randomUUID() as IdPagamentoReferencia;
+    const idContribuicao = randomUUID() as IdContribuicaoReferencia;
+    const idCampanha = randomUUID() as IdCampanha;
+
+    const recebedor = makeLancamentoRecebedor({
+      idPagamento,
+      idContribuicao,
+      idCampanha,
+      amountCents: 4500,
+    });
+    const receita = makeLancamentoReceita({ idPagamento, idContribuicao, amountCents: 225 });
+    const passthrough = makeLancamentoPassthrough({
+      idPagamento,
+      idContribuicao,
+      idCampanha,
+      amountCents: 224,
+    });
+
+    await repo.saveLancamentos([recebedor, receita, passthrough]);
+
+    const found = await repo.findLancamentosByIdPagamento(idPagamento);
+    expect(found).toHaveLength(3);
+    const tipos = found.map((l) => l.tipo).sort();
+    expect(tipos).toEqual(
+      [
+        'credito_passthrough_surcharge',
+        'credito_receita_plataforma',
+        'credito_saldo_recebedor',
+      ].sort(),
+    );
+
+    const foundPassthrough = found.find((l) => l.tipo === 'credito_passthrough_surcharge');
+    expect(foundPassthrough).toMatchObject({
+      id: passthrough.id,
+      idPagamento,
+      idContribuicao,
+      idCampanha,
+      tipo: 'credito_passthrough_surcharge',
+      amountCents: 224,
+      status: 'pendente',
+    });
+
+    // Book-balance invariant survives postgres round-trip.
+    const sum = found.reduce((acc, l) => acc + l.amountCents, 0);
+    expect(sum).toBe(4500 + 225 + 224); // 4949
+  });
+
+  it('findLancamentosByIdCampanha — includes passthrough rows (they carry idCampanha) (aperture-bjshv)', async () => {
+    const idCampanha = randomUUID() as IdCampanha;
+    const idPagamento = randomUUID() as IdPagamentoReferencia;
+    const idContribuicao = randomUUID() as IdContribuicaoReferencia;
+
+    await repo.saveLancamentos([
+      makeLancamentoRecebedor({ idPagamento, idContribuicao, idCampanha }),
+      makeLancamentoReceita({ idPagamento, idContribuicao }),
+      makeLancamentoPassthrough({ idPagamento, idContribuicao, idCampanha }),
+    ]);
+
+    const byCampanha = await repo.findLancamentosByIdCampanha(idCampanha);
+    expect(byCampanha).toHaveLength(2);
+    const tipos = byCampanha.map((l) => l.tipo).sort();
+    expect(tipos).toEqual(['credito_passthrough_surcharge', 'credito_saldo_recebedor'].sort());
+  });
+
+  it('findLancamentosReceitaPlataforma — passthrough rows NOT included (different tipo) (aperture-bjshv)', async () => {
+    const idPagamento = randomUUID() as IdPagamentoReferencia;
+    const idContribuicao = randomUUID() as IdContribuicaoReferencia;
+    const idCampanha = randomUUID() as IdCampanha;
+
+    await repo.saveLancamentos([
+      makeLancamentoRecebedor({ idPagamento, idContribuicao, idCampanha, amountCents: 4500 }),
+      makeLancamentoReceita({ idPagamento, idContribuicao, amountCents: 225 }),
+      makeLancamentoPassthrough({ idPagamento, idContribuicao, idCampanha, amountCents: 224 }),
+    ]);
+
+    const receitas = await repo.findLancamentosReceitaPlataforma();
+    expect(receitas).toHaveLength(1);
+    expect(receitas[0]?.tipo).toBe('credito_receita_plataforma');
+    expect(receitas[0]?.amountCents).toBe(225);
+    expect(receitas.find((l) => l.tipo === 'credito_passthrough_surcharge')).toBeUndefined();
+  });
+
+  it('CHECK constraint accepts credito_passthrough_surcharge (migration 015 applied) (aperture-bjshv)', async () => {
+    // Direct probe: insert the new tipo with a hand-crafted row and
+    // assert it doesn't trip the tipo CHECK constraint. If the migration
+    // wasn't applied, the INSERT would raise a 23514 violation naming
+    // `lancamentos_financeiros_tipo_check`.
+    const passthrough = makeLancamentoPassthrough();
+    await expect(repo.saveLancamentos([passthrough])).resolves.not.toThrow();
+
+    const found = await repo.findLancamentosByIdPagamento(passthrough.idPagamento);
+    expect(found).toHaveLength(1);
+    expect(found[0]?.tipo).toBe('credito_passthrough_surcharge');
+  });
 });
 
 describe('LivroFinanceiroRepositoryPostgres — repasses', () => {

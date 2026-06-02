@@ -1,5 +1,5 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import { Kysely, Migrator, PostgresDialect } from 'kysely';
+import { Kysely, Migrator, PostgresDialect, sql } from 'kysely';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createMigrationProvider } from '../helpers/migration-provider.js';
@@ -85,10 +85,39 @@ describe('Migration round-trip', () => {
       .executeTakeFirst()) as { character_maximum_length: number } | undefined;
     expect(ipColBefore?.character_maximum_length).toBe(128);
 
-    // Migrate down (latest migration first). aperture-vcen4 added the
-    // ip_address widen migration (014) on top of paginated-indexes
-    // (013), financeiro (012), pagamentos (011), slug (010), better-auth
-    // (009), and usuario (008).
+    // aperture-bjshv added the passthrough_surcharge tipo CHECK extension
+    // (015). Verify the constraint allows the new literal — Postgres
+    // surfaces pg_constraint rows for CHECK constraints; we read the
+    // definition via pg_get_constraintdef.
+    const tipoConstraint = (await db
+      .selectFrom('pg_constraint' as never)
+      .select((eb) => [
+        // biome-ignore lint/suspicious/noExplicitAny: pg_constraint not in DB types
+        sql<string>`pg_get_constraintdef(oid)`.as('def') as any,
+      ])
+      .where('conname' as never, '=', 'lancamentos_financeiros_tipo_check' as never)
+      .executeTakeFirst()) as { def: string } | undefined;
+    expect(tipoConstraint?.def).toContain('credito_passthrough_surcharge');
+
+    // Migrate down (latest migration first). aperture-bjshv added the
+    // passthrough_surcharge tipo extension (015) on top of vcen4 ip
+    // widen (014), paginated-indexes (013), financeiro (012), pagamentos
+    // (011), slug (010), better-auth (009), and usuario (008).
+    const downPassthroughTipo = await migrator.migrateDown();
+    expect(downPassthroughTipo.error).toBeUndefined();
+
+    // After down on 015, the constraint is back to the 2-literal enum.
+    const tipoConstraintAfterDown = (await db
+      .selectFrom('pg_constraint' as never)
+      .select((eb) => [
+        // biome-ignore lint/suspicious/noExplicitAny: same
+        sql<string>`pg_get_constraintdef(oid)`.as('def') as any,
+      ])
+      .where('conname' as never, '=', 'lancamentos_financeiros_tipo_check' as never)
+      .executeTakeFirst()) as { def: string } | undefined;
+    expect(tipoConstraintAfterDown?.def).not.toContain('credito_passthrough_surcharge');
+    expect(tipoConstraintAfterDown?.def).toContain('credito_saldo_recebedor');
+
     const downIpAddressWiden = await migrator.migrateDown();
     expect(downIpAddressWiden.error).toBeUndefined();
 

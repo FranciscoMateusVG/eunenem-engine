@@ -74,11 +74,16 @@ export async function registrarEfeitosFinanceirosPagamentoAprovado(
       const now = clock();
       let lancamentos: readonly LancamentoFinanceiro[];
       try {
+        // aperture-bjshv: mint the third UUID only when the composicao
+        // carries a non-zero surcharge (cartao). PIX (surchargeCents===0)
+        // keeps the 2-UUID shape and the factory returns 2 lancamentos.
         lancamentos = criarLancamentosParaPagamentoAprovado(
           parsed.data,
           {
             idLancamentoRecebedor: randomUUID(),
             idLancamentoReceitaPlataforma: randomUUID(),
+            idLancamentoPassthroughSurcharge:
+              composicaoValores.surchargeCents > 0 ? randomUUID() : undefined,
           },
           now,
         );
@@ -94,6 +99,10 @@ export async function registrarEfeitosFinanceirosPagamentoAprovado(
         idCampanha,
         receiverAmountCents: composicaoValores.receiverAmountCents,
         platformRevenueAmountCents: composicaoValores.feeAmountCents,
+        // aperture-bjshv: surface the third lancamento amount in audit logs
+        // so operators can correlate the new book entry against the
+        // composicao snapshot without joining tables. 0 for PIX.
+        passthroughSurchargeAmountCents: composicaoValores.surchargeCents,
       });
 
       span.setStatus({ code: SpanStatusCode.OK });
