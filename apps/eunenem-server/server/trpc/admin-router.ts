@@ -429,6 +429,13 @@ const contribuicoesRouter = t.router({
 });
 
 /* ─────────────────────────────────────────────────────────────────────────
+ * Shared cross-BC schema — used by both `pagamentos` (W4) and
+ * `financeiro` (W5) sub-routers.
+ * ────────────────────────────────────────────────────────────────────── */
+
+const PagamentoStatusSchema = z.enum(["pendente", "aprovado", "rejeitado"]);
+
+/* ─────────────────────────────────────────────────────────────────────────
  * financeiro — W5 (aperture-rsidz.6).
  *
  * Fills the bottom section of the contribuicao detail page. The Financeiro
@@ -474,8 +481,6 @@ const LancamentoFinanceiroAdminDTOSchema = z.object({
 export type LancamentoFinanceiroAdminDTO = z.infer<
   typeof LancamentoFinanceiroAdminDTOSchema
 >;
-
-const PagamentoStatusSchema = z.enum(["pendente", "aprovado", "rejeitado"]);
 
 const LancamentosByPagamentoSchema = z.object({
   idPagamento: z.string(),
@@ -570,6 +575,151 @@ const financeiroRouter = t.router({
     }),
 });
 
+/* ─────────────────────────────────────────────────────────────────────────
+ * pagamentos — W4 (aperture-rsidz.5).
+ *
+ * One procedure: `listByContribuicao({ idContribuicao })` →
+ * `{ pagamentos: PagamentoAdminDTO[] }` sorted by `criadoEm desc`.
+ *
+ * Tenant guard: Pagamento has no idPlataforma directly. We resolve the
+ * owning contribuicao first (Arrecadação aggregate) and walk up to the
+ * campanha to verify `idPlataforma === ID_PLATAFORMA_EUNENEM`. An
+ * unknown / cross-tenant contribuicao returns an empty list (defensive,
+ * matches the contribuicoes.listByCampanha pattern).
+ *
+ * The wire DTO mirrors the Pagamento aggregate but turns Dates into ISO
+ * strings (JSON-safe) and inlines the IntencaoPagamento + TransacaoExterna
+ * entities. We deliberately ship the FULL aggregate to the client — the
+ * UI renders a structured composição table AND a raw JSON viewer for
+ * operator inspection, so projecting down would just make us round-trip
+ * for the same data.
+ *
+ * Sort: `findByContribuicao` returns `criadoEm ASC` (aperture-i0pz8); we
+ * reverse to DESC so the latest attempt sits first in the admin card list
+ * (visitor-retry flow: pendente → rejeitado → new pendente → aprovado).
+ *
+ * `PagamentoStatusSchema` is hoisted above the financeiro block (shared
+ * with W5's per-block header chip).
+ * ────────────────────────────────────────────────────────────────────── */
+
+const TransacaoExternaStatusSchema = z.enum(["aprovado", "rejeitado"]);
+
+const SnapshotComposicaoValoresDTOSchema = z.object({
+  idContribuicao: z.string(),
+  contributionAmountCents: z.number().int().nonnegative(),
+  feeAmountCents: z.number().int().nonnegative(),
+  surchargeCents: z.number().int().nonnegative(),
+  totalPaidCents: z.number().int().nonnegative(),
+  receiverAmountCents: z.number().int().nonnegative(),
+  responsavelTaxa: z.literal("contribuinte"),
+});
+
+const IntencaoPagamentoDTOSchema = z.object({
+  id: z.string(),
+  idContribuicao: z.string(),
+  amountCents: z.number().int().nonnegative(),
+  metodo: z.enum(["pix", "credit_card"]),
+  externalRef: z.string().nullable(),
+  criadaEm: z.string(),
+  composicaoValores: SnapshotComposicaoValoresDTOSchema,
+});
+
+const TransacaoExternaDTOSchema = z.object({
+  id: z.string(),
+  provedor: z.string(),
+  status: TransacaoExternaStatusSchema,
+  amountCents: z.number().int().nonnegative(),
+  criadaEm: z.string(),
+  statusBruto: z.string().optional(),
+});
+
+const PagamentoAdminDTOSchema = z.object({
+  id: z.string(),
+  status: PagamentoStatusSchema,
+  criadoEm: z.string(),
+  atualizadoEm: z.string(),
+  intencao: IntencaoPagamentoDTOSchema,
+  transacaoExterna: TransacaoExternaDTOSchema.optional(),
+});
+export type PagamentoAdminDTO = z.infer<typeof PagamentoAdminDTOSchema>;
+
+function toPagamentoAdminDTO(p: Pagamento): PagamentoAdminDTO {
+  return {
+    id: p.id,
+    status: p.status,
+    criadoEm: p.criadoEm.toISOString(),
+    atualizadoEm: p.atualizadoEm.toISOString(),
+    intencao: {
+      id: p.intencao.id,
+      idContribuicao: p.intencao.idContribuicao,
+      amountCents: p.intencao.amountCents as unknown as number,
+      metodo: p.intencao.metodo,
+      externalRef: p.intencao.externalRef,
+      criadaEm: p.intencao.criadaEm.toISOString(),
+      composicaoValores: {
+        idContribuicao: p.intencao.composicaoValores.idContribuicao,
+        contributionAmountCents: p.intencao.composicaoValores
+          .contributionAmountCents as unknown as number,
+        feeAmountCents: p.intencao.composicaoValores
+          .feeAmountCents as unknown as number,
+        surchargeCents: p.intencao.composicaoValores.surchargeCents,
+        totalPaidCents: p.intencao.composicaoValores
+          .totalPaidCents as unknown as number,
+        receiverAmountCents: p.intencao.composicaoValores
+          .receiverAmountCents as unknown as number,
+        responsavelTaxa: p.intencao.composicaoValores.responsavelTaxa,
+      },
+    },
+    transacaoExterna:
+      p.transacaoExterna === undefined
+        ? undefined
+        : {
+            id: p.transacaoExterna.id,
+            provedor: p.transacaoExterna.provedor,
+            status: p.transacaoExterna.status,
+            amountCents: p.transacaoExterna.amountCents as unknown as number,
+            criadaEm: p.transacaoExterna.criadaEm.toISOString(),
+            statusBruto: p.transacaoExterna.statusBruto,
+          },
+  };
+}
+
+const pagamentosRouter = t.router({
+  /**
+   * All pagamentos for a contribuicao, sorted criadoEm DESC (latest first).
+   *
+   * Tenant guard: resolves the contribuicao → campanha → idPlataforma chain.
+   * Unknown contribuicao or cross-tenant campanha → empty list (no leak).
+   */
+  listByContribuicao: t.procedure
+    .input(z.object({ idContribuicao: z.string() }))
+    .output(z.object({ pagamentos: z.array(PagamentoAdminDTOSchema) }))
+    .query(async ({ ctx, input }) => {
+      const contribuicao = await ctx.deps.contribuicaoRepository.findById(
+        input.idContribuicao as IdContribuicao,
+      );
+      if (!contribuicao) return { pagamentos: [] };
+
+      const campanha = await ctx.deps.campanhaRepository.findById(
+        contribuicao.idCampanha,
+      );
+      if (!campanha) return { pagamentos: [] };
+      if (campanha.idPlataforma !== ID_PLATAFORMA_EUNENEM) {
+        return { pagamentos: [] };
+      }
+
+      const pagamentos =
+        await ctx.deps.pagamentoRepository.findByContribuicao(
+          input.idContribuicao as IdContribuicaoPagamento,
+        );
+      // Engine port returns criadoEm ASC; admin UI wants DESC (latest first).
+      const sorted = [...pagamentos].sort(
+        (a, b) => b.criadoEm.getTime() - a.criadoEm.getTime(),
+      );
+      return { pagamentos: sorted.map(toPagamentoAdminDTO) };
+    }),
+});
+
 export const adminRouter = t.router({
   /** Nested sub-router for usuarios browse + paginated list. */
   usuarios: usuariosRouter,
@@ -655,6 +805,9 @@ export const adminRouter = t.router({
 
   /** Nested sub-router for contribuicoes drill + multi-aggregate detail (W3). */
   contribuicoes: contribuicoesRouter,
+
+  /** Nested sub-router for pagamentos lifecycle list per contribuicao (W4). */
+  pagamentos: pagamentosRouter,
 
   /** Nested sub-router for the Financeiro BC lancamentos drill (W5). */
   financeiro: financeiroRouter,
