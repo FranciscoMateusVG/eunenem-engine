@@ -15,6 +15,22 @@ export { createDatabase } from './adapters/database.js';
 export type { LivroFinanceiroRepository } from './adapters/financeiro/livro-repository.js';
 export { LivroFinanceiroRepositoryMemory } from './adapters/financeiro/livro-repository.memory.js';
 export { LivroFinanceiroRepositoryPostgres } from './adapters/financeiro/livro-repository.postgres.js';
+// aperture-1n6u8: payment webhook event archive (infrastructure boundary).
+export type {
+  SaveReceivedInput,
+  SaveReceivedResult,
+  WebhookEventArchive,
+  WebhookEventRecord,
+} from './adapters/webhook-archive/webhook-event-archive.js';
+export { PROCESSING_ERROR_MAX_LENGTH } from './adapters/webhook-archive/webhook-event-archive.js';
+export { WebhookEventArchiveMemory } from './adapters/webhook-archive/webhook-event-archive.memory.js';
+export { WebhookEventArchivePostgres } from './adapters/webhook-archive/webhook-event-archive.postgres.js';
+export type {
+  StripeDispatchResult,
+  StripePipelineArgs,
+  StripePipelineResult,
+} from './adapters/webhook-archive/stripe-webhook-pipeline.js';
+export { archiveAndDispatchStripeEvent } from './adapters/webhook-archive/stripe-webhook-pipeline.js';
 export {
   computeCardSurchargeCents,
   STRIPE_CARD_FIXED_CENTS,

@@ -99,10 +99,35 @@ describe('Migration round-trip', () => {
       .executeTakeFirst()) as { def: string } | undefined;
     expect(tipoConstraint?.def).toContain('credito_passthrough_surcharge');
 
-    // Migrate down (latest migration first). aperture-bjshv added the
-    // passthrough_surcharge tipo extension (015) on top of vcen4 ip
-    // widen (014), paginated-indexes (013), financeiro (012), pagamentos
-    // (011), slug (010), better-auth (009), and usuario (008).
+    // aperture-1n6u8 created the payment_webhook_events archive table
+    // (016). Verify the table + UNIQUE constraint exist.
+    expect(tableNames).toContain('payment_webhook_events');
+    const webhookConstraints = await db
+      .selectFrom('pg_constraint' as never)
+      .select('conname' as never)
+      .where('conrelid' as never, '=', sql`'payment_webhook_events'::regclass`)
+      .execute();
+    const conNames = webhookConstraints.map((c: Record<string, unknown>) => c.conname);
+    expect(conNames).toContain('payment_webhook_events_provider_event_id_uniq');
+
+    // Migrate down (latest migration first). aperture-1n6u8 added the
+    // payment_webhook_events table (016) on top of bjshv passthrough_surcharge
+    // (015), vcen4 ip widen (014), paginated-indexes (013), financeiro
+    // (012), pagamentos (011), slug (010), better-auth (009), usuario (008).
+    const downWebhookEvents = await migrator.migrateDown();
+    expect(downWebhookEvents.error).toBeUndefined();
+
+    // After down on 016, the table should be gone.
+    const tablesAfterWebhookDown = await db
+      .selectFrom('information_schema.tables' as never)
+      .select('table_name' as never)
+      .where('table_schema' as never, '=', 'public' as never)
+      .execute();
+    const namesAfterWebhookDown = tablesAfterWebhookDown.map(
+      (t: Record<string, unknown>) => t.table_name,
+    );
+    expect(namesAfterWebhookDown).not.toContain('payment_webhook_events');
+
     const downPassthroughTipo = await migrator.migrateDown();
     expect(downPassthroughTipo.error).toBeUndefined();
 

@@ -112,6 +112,20 @@ export interface Pagamentos {
   transacao_externa: Json | null;
 }
 
+export interface PaymentWebhookEvents {
+  event_type: string;
+  id: string;
+  pagamento_id: string | null;
+  processed_at: Timestamp | null;
+  processing_error: string | null;
+  provider: Generated<string>;
+  provider_event_id: string;
+  raw_payload: Json;
+  received_at: Generated<Timestamp>;
+  signature_header: string;
+  signature_valid: boolean;
+}
+
 export interface RateLimit {
   count: Generated<number>;
   id: string;
@@ -188,6 +202,7 @@ export interface DB {
   lancamentos_financeiros: LancamentosFinanceiros;
   opcoes_contribuicao: OpcoesContribuicao;
   pagamentos: Pagamentos;
+  payment_webhook_events: PaymentWebhookEvents;
   rate_limit: RateLimit;
   recebedores: Recebedores;
   repasses_recebedor: RepassesRecebedor;

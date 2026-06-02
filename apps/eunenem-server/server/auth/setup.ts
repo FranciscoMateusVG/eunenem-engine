@@ -16,6 +16,8 @@ import {
   ID_PLATAFORMA_EUNENEM,
   type LivroFinanceiroRepository,
   LivroFinanceiroRepositoryPostgres,
+  type WebhookEventArchive,
+  WebhookEventArchivePostgres,
   type Observability,
   type PagamentoEventPublisher,
   PagamentoEventPublisherMemory,
@@ -116,6 +118,13 @@ export interface ServerDeps {
    * intentional; treat as tier-1 secret alongside session signing keys.
    */
   readonly logPiiHashSalt: string;
+  /**
+   * Webhook event archive (aperture-1n6u8). Stripe webhook handler
+   * writes raw events here BEFORE signature verification for forensic
+   * audit + retry idempotency + provider-migration survival. NOT a
+   * domain concept — lives at the infrastructure boundary.
+   */
+  readonly webhookEventArchive: WebhookEventArchive;
 }
 
 /**
@@ -327,6 +336,12 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     recebedorRepository,
   );
 
+  // Payment webhook archive (aperture-1n6u8) — postgres-backed by
+  // migration 016. The Stripe webhook handler writes to this BEFORE
+  // signature verification (write-before-verify discipline; see
+  // src/adapters/webhook-archive/stripe-webhook-pipeline.ts).
+  const webhookEventArchive = new WebhookEventArchivePostgres(db);
+
   let pagamentoProvider: PagamentoProvider;
   let checkoutSessionProvider: CheckoutSessionProvider;
   // aperture-ozlcr: gate on STRIPE_SECRET_KEY presence, NOT NODE_ENV.
@@ -394,6 +409,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     publicOrigin: env.BETTER_AUTH_URL,
     trustedHopCount: env.TRUSTED_HOP_COUNT,
     logPiiHashSalt: env.LOG_PII_HASH_SALT,
+    webhookEventArchive,
   };
 }
 
