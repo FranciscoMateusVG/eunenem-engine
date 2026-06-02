@@ -145,6 +145,26 @@ export interface UsuarioRepository {
     slug: SlugUsuario,
   ): Promise<Usuario | undefined>;
   findContaById(id: IdContaUsuario): Promise<Conta | undefined>;
+  /**
+   * Resolve a Usuario from its Conta id, tenant-scoped (aperture-lp9cw).
+   * Returns the Usuario when `idConta` belongs to a Conta whose Usuario
+   * is on `idPlataforma`; returns `undefined` for unknown idConta OR for
+   * idConta whose Usuario is on a different plataforma.
+   *
+   * This collapses the legacy 2-hop fetch pattern (findContaById →
+   * findUsuarioById → tenant-guard) into a single port call. Used by the
+   * admin /admin/usuario/:idConta page on every load — one round-trip
+   * instead of two.
+   *
+   * Tenant isolation is part of the contract: a wrong-tenant idConta
+   * MUST NOT return a Usuario from another plataforma. Postgres adapter
+   * enforces via JOIN + WHERE filter; memory adapter checks the
+   * resolved Usuario's idPlataforma before returning.
+   */
+  findUsuarioByConta(
+    idConta: IdContaUsuario,
+    idPlataforma: IdPlataformaReferencia,
+  ): Promise<Usuario | undefined>;
   atualizarNomeExibicaoUsuario(
     idUsuario: IdUsuario,
     nomeExibicao: NomeExibicaoUsuario,

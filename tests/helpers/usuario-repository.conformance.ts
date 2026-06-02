@@ -196,6 +196,123 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
       expect(await repo.findUsuarioBySlug(ID_PLATAFORMA_EUNENEM, 'never-existed')).toBeUndefined();
     });
 
+    // ───── findUsuarioByConta (aperture-lp9cw) ────────────────────────
+
+    it('findUsuarioByConta returns the Usuario when idConta + idPlataforma match (aperture-lp9cw)', async () => {
+      const idUsuario = randomUUID();
+      const idConta = randomUUID();
+      await repo.saveRegistroDomain({
+        usuario: {
+          id: idUsuario,
+          idPlataforma: ID_PLATAFORMA_EUNENEM,
+          idConta,
+          email: 'lookup@example.com',
+          nomeExibicao: 'Lookup',
+          slug: 'lookup',
+          criadoEm: fixedDate,
+        },
+        conta: {
+          id: idConta,
+          idUsuario,
+          permissoes: ['campaign:admin'] as const,
+          criadaEm: fixedDate,
+        },
+      });
+
+      const found = await repo.findUsuarioByConta(idConta, ID_PLATAFORMA_EUNENEM);
+      expect(found?.id).toBe(idUsuario);
+      expect(found?.email).toBe('lookup@example.com');
+      expect(found?.idPlataforma).toBe(ID_PLATAFORMA_EUNENEM);
+    });
+
+    it('findUsuarioByConta returns undefined when idConta does not exist (aperture-lp9cw)', async () => {
+      expect(
+        await repo.findUsuarioByConta(randomUUID(), ID_PLATAFORMA_EUNENEM),
+      ).toBeUndefined();
+    });
+
+    it('findUsuarioByConta returns undefined when the resolved Usuario is on a different plataforma (aperture-lp9cw)', async () => {
+      // Seed a Usuario on EUNENEM, then query with EUCASEI — tenant
+      // isolation MUST prevent cross-tenant leak.
+      const idUsuario = randomUUID();
+      const idConta = randomUUID();
+      await repo.saveRegistroDomain({
+        usuario: {
+          id: idUsuario,
+          idPlataforma: ID_PLATAFORMA_EUNENEM,
+          idConta,
+          email: 'cross-tenant-target@example.com',
+          nomeExibicao: 'Target',
+          slug: 'cross-tenant-target',
+          criadoEm: fixedDate,
+        },
+        conta: {
+          id: idConta,
+          idUsuario,
+          permissoes: ['campaign:admin'] as const,
+          criadaEm: fixedDate,
+        },
+      });
+
+      // Right plataforma — resolves.
+      const right = await repo.findUsuarioByConta(idConta, ID_PLATAFORMA_EUNENEM);
+      expect(right?.id).toBe(idUsuario);
+
+      // Wrong plataforma — undefined, NOT the EUNENEM user.
+      const wrong = await repo.findUsuarioByConta(idConta, ID_PLATAFORMA_EUCASEI);
+      expect(wrong).toBeUndefined();
+    });
+
+    it('findUsuarioByConta does not leak between same-slug-different-plataforma usuarios (aperture-lp9cw)', async () => {
+      // Two distinct usuarios with the SAME slug on different plataformas
+      // (allowed per operator decision #2). The idConta-keyed lookup must
+      // route to the correct one per tenant filter.
+      const u1 = randomUUID();
+      const a1 = randomUUID();
+      const u2 = randomUUID();
+      const a2 = randomUUID();
+      await repo.saveRegistroDomain({
+        usuario: {
+          id: u1,
+          idPlataforma: ID_PLATAFORMA_EUNENEM,
+          idConta: a1,
+          email: 'a@eunenem.test',
+          nomeExibicao: 'A',
+          slug: 'twin-slug',
+          criadoEm: fixedDate,
+        },
+        conta: {
+          id: a1,
+          idUsuario: u1,
+          permissoes: ['campaign:admin'] as const,
+          criadaEm: fixedDate,
+        },
+      });
+      await repo.saveRegistroDomain({
+        usuario: {
+          id: u2,
+          idPlataforma: ID_PLATAFORMA_EUCASEI,
+          idConta: a2,
+          email: 'b@eucasei.test',
+          nomeExibicao: 'B',
+          slug: 'twin-slug',
+          criadoEm: fixedDate,
+        },
+        conta: {
+          id: a2,
+          idUsuario: u2,
+          permissoes: ['campaign:admin'] as const,
+          criadaEm: fixedDate,
+        },
+      });
+
+      expect((await repo.findUsuarioByConta(a1, ID_PLATAFORMA_EUNENEM))?.id).toBe(u1);
+      expect((await repo.findUsuarioByConta(a2, ID_PLATAFORMA_EUCASEI))?.id).toBe(u2);
+      // Cross-routing must NOT happen.
+      expect(await repo.findUsuarioByConta(a1, ID_PLATAFORMA_EUCASEI)).toBeUndefined();
+      expect(await repo.findUsuarioByConta(a2, ID_PLATAFORMA_EUNENEM)).toBeUndefined();
+    });
+
     it('allows the same email across different plataformas (operator decision #2)', async () => {
       const email = 'shared@example.com';
       const bundle = (uid: string, aid: string, idPlataforma: string, slug: string) => ({

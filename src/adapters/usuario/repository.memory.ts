@@ -267,6 +267,39 @@ export class UsuarioRepositoryMemory implements UsuarioRepository {
     });
   }
 
+  async findUsuarioByConta(
+    idConta: IdContaUsuario,
+    idPlataforma: IdPlataformaReferencia,
+  ): Promise<Usuario | undefined> {
+    return tracer.startActiveSpan('db.usuarios.findUsuarioByConta', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        // aperture-lp9cw: in-memory equivalent of the postgres JOIN. The
+        // tenant filter (idPlataforma match) is applied AFTER resolving
+        // the Usuario — semantically identical to the WHERE clause on
+        // usuarios.id_plataforma in the postgres query.
+        const conta = this.contas.get(idConta);
+        if (!conta) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return undefined;
+        }
+        const usuario = this.usuarios.get(conta.idUsuario);
+        if (!usuario || usuario.idPlataforma !== idPlataforma) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return undefined;
+        }
+        span.setStatus({ code: SpanStatusCode.OK });
+        return usuario;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
   async atualizarNomeExibicaoUsuario(
     idUsuario: IdUsuario,
     nomeExibicao: NomeExibicaoUsuario,

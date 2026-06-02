@@ -383,6 +383,52 @@ export class UsuarioRepositoryPostgres implements UsuarioRepository {
     });
   }
 
+  async findUsuarioByConta(
+    idConta: IdContaUsuario,
+    idPlataforma: IdPlataformaReferencia,
+  ): Promise<Usuario | undefined> {
+    return tracer.startActiveSpan('db.usuarios.findUsuarioByConta', async (span) => {
+      span.setAttributes({ ...DB_USUARIOS_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        // aperture-lp9cw: single-query JOIN — collapses the legacy
+        // 2-hop fetch (findContaById → findUsuarioById → tenant filter)
+        // to one round-trip. Index coverage:
+        //   - contas (PK on id) for the equality filter on contas.id
+        //   - usuarios_plataforma_email_uniq (composite on
+        //     (id_plataforma, email)) does NOT help here since we filter
+        //     on usuarios.id_plataforma without email. Postgres falls
+        //     back to a sequential scan on the usuarios join, which is
+        //     fine for current scale (single-tenant; small contas table).
+        //     If that ever matters, add an index on usuarios.id_plataforma.
+        // Project only usuarios columns — we don't need conta fields here
+        // (the caller is tenant-guarded admin lookups).
+        const row = await this.db
+          .selectFrom('contas')
+          .innerJoin('usuarios', 'usuarios.id', 'contas.id_usuario')
+          .select([
+            'usuarios.id as id',
+            'usuarios.id_plataforma as id_plataforma',
+            'usuarios.id_conta as id_conta',
+            'usuarios.email as email',
+            'usuarios.nome_exibicao as nome_exibicao',
+            'usuarios.slug as slug',
+            'usuarios.criado_em as criado_em',
+          ])
+          .where('contas.id', '=', idConta)
+          .where('usuarios.id_plataforma', '=', idPlataforma)
+          .executeTakeFirst();
+        span.setStatus({ code: SpanStatusCode.OK });
+        return row ? toUsuario(row) : undefined;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
   async atualizarNomeExibicaoUsuario(
     idUsuario: IdUsuario,
     nomeExibicao: NomeExibicaoUsuario,

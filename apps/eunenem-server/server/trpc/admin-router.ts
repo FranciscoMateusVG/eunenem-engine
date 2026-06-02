@@ -958,18 +958,17 @@ export const adminRouter = t.router({
   /**
    * Single usuario lookup by `idConta` (the public conta id from URL).
    * Used by the /admin/usuario/:idConta detail page after the picker
-   * hands off the id. Returns null when nothing matches — the page
-   * renders a 404.
+   * hands off the id. Returns null when nothing matches OR when the
+   * resolved Usuario is on a different plataforma — the page renders
+   * a 404 either way.
    *
-   * The engine has no direct `findUsuarioByContaId` port yet, so we
-   * cascade through two existing ports:
-   *   1. `findContaById(idConta)`  → Conta (which carries idUsuario)
-   *   2. `findUsuarioById(idUsuario)` → Usuario
-   *
-   * Both are bounded postgres lookups, so the latency cost is two
-   * round-trips — acceptable for v1's read-only admin surface. If the
-   * page gets hot enough to matter, file a follow-up bead for a single
-   * direct port and collapse this to a one-liner.
+   * Backed by `UsuarioRepository.findUsuarioByConta` (aperture-lp9cw):
+   * single-query JOIN that collapses the legacy 2-hop pattern
+   * (findContaById → findUsuarioById → manual tenant filter) into one
+   * round-trip. Tenant guard is enforced by the port itself — the
+   * `idPlataforma` arg is part of the WHERE clause, so a wrong-tenant
+   * idConta returns undefined rather than leaking a cross-plataforma
+   * Usuario.
    */
   findUsuarioByConta: t.procedure
     .input(
@@ -979,19 +978,11 @@ export const adminRouter = t.router({
     )
     .output(UsuarioMatchSchema.nullable())
     .query(async ({ ctx, input }) => {
-      const conta = await ctx.deps.usuarioRepository.findContaById(
+      const usuario = await ctx.deps.usuarioRepository.findUsuarioByConta(
         input.idConta as never,
-      );
-      if (!conta) return null;
-
-      const usuario = await ctx.deps.usuarioRepository.findUsuarioById(
-        conta.idUsuario,
+        ID_PLATAFORMA_EUNENEM as never,
       );
       if (!usuario) return null;
-
-      // Tenant guard — never cross the multi-tenant boundary.
-      if (usuario.idPlataforma !== ID_PLATAFORMA_EUNENEM) return null;
-
       return {
         idConta: usuario.idConta,
         email: usuario.email,
