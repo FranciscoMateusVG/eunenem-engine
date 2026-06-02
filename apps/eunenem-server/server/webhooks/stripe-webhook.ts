@@ -257,7 +257,11 @@ export function createStripeWebhookHandler(deps: ServerDeps) {
 //  for operator inspection).
 // ─────────────────────────────────────────────────────────────────────
 
-async function dispatchVerifiedStripeEvent(
+// Exported for aperture-wif8s tests so the per-event-type resolution
+// behaviour can be unit-tested without spinning up Hono. The handler's
+// outer shell (createStripeWebhookHandler) is still the only entry
+// point used in production wiring.
+export async function dispatchVerifiedStripeEvent(
   deps: ServerDeps,
   span: Span,
   event: Stripe.Event,
@@ -280,6 +284,24 @@ async function dispatchVerifiedStripeEvent(
         return { pagamentoId: null };
       }
       span.setAttribute('pagamento.id', pagamento.id);
+
+      // aperture-wif8s: persist the pi_xxx reference NOW so subsequent
+      // payment_intent.* / charge.* events can resolve back to this
+      // pagamento via the new findByPaymentIntentExternalRef port.
+      // session.payment_intent can be a string OR an expanded object;
+      // we only need the id.
+      const piId = extractStripeId(session.payment_intent);
+      if (piId !== null && pagamento.intencao.paymentIntentExternalRef !== piId) {
+        await deps.pagamentoRepository.update(
+          withPaymentIntentRef(pagamento, piId),
+        );
+        logger.info('webhook.stripe.pi_ref_persisted', {
+          eventId: event.id,
+          idPagamento: pagamento.id,
+          paymentIntentId: piId,
+        });
+      }
+
       // aperture-m95f3: extract contribuinte data from the Stripe
       // session itself — Stripe collects nome + mensagem via
       // custom_fields and email via customer_creation. Pass to
@@ -303,6 +325,82 @@ async function dispatchVerifiedStripeEvent(
           ...(contribuinte ? { contribuinte } : {}),
         },
       );
+      logger.info('webhook.stripe.dispatched', {
+        eventId: event.id,
+        eventType: event.type,
+        idPagamento: pagamento.id,
+      });
+      return { pagamentoId: pagamento.id };
+    }
+
+    // aperture-wif8s: link-only handlers for payment_intent.* events
+    // that don't trigger finalize. Resolves via findByPaymentIntentExternalRef
+    // so the archive row gets pagamento_id populated. On succeeded
+    // events we also persist the charge ref for downstream charge.*
+    // resolution. No domain dispatch — domain state was already settled
+    // by checkout.session.completed; these events exist only to populate
+    // the archive trail for the admin UI.
+    case 'payment_intent.created':
+    case 'payment_intent.succeeded':
+    case 'payment_intent.processing': {
+      const pi = event.data.object as Stripe.PaymentIntent;
+      const pagamento = await resolvePagamentoFromPaymentIntent(deps, pi);
+      if (!pagamento) {
+        logger.info('webhook.stripe.unknown_payment_intent', {
+          eventId: event.id,
+          eventType: event.type,
+          paymentIntentId: pi.id,
+        });
+        return { pagamentoId: null };
+      }
+      span.setAttribute('pagamento.id', pagamento.id);
+
+      // On succeeded: persist the latest_charge ref so charge.* events
+      // can resolve via the ch_xxx path. latest_charge can be a string
+      // OR an expanded object.
+      if (event.type === 'payment_intent.succeeded') {
+        const chId = extractStripeId(pi.latest_charge);
+        if (chId !== null && pagamento.intencao.chargeExternalRef !== chId) {
+          await deps.pagamentoRepository.update(withChargeRef(pagamento, chId));
+          logger.info('webhook.stripe.ch_ref_persisted', {
+            eventId: event.id,
+            idPagamento: pagamento.id,
+            chargeId: chId,
+          });
+        }
+      }
+
+      logger.info('webhook.stripe.dispatched', {
+        eventId: event.id,
+        eventType: event.type,
+        idPagamento: pagamento.id,
+      });
+      return { pagamentoId: pagamento.id };
+    }
+
+    // aperture-wif8s: charge events resolve primarily via pi (most
+    // reliable — charge.* always carries payment_intent in the
+    // payload), with a fallback to ch lookup when the pi link is
+    // missing (rare — only happens if charge.* arrives BEFORE
+    // payment_intent.succeeded backfilled the ch ref via a separate
+    // re-link sweep). Domain state isn't mutated; the archive trail
+    // is the value.
+    case 'charge.succeeded':
+    case 'charge.updated':
+    case 'charge.failed':
+    case 'charge.refunded': {
+      const charge = event.data.object as Stripe.Charge;
+      const pagamento = await resolvePagamentoFromCharge(deps, charge);
+      if (!pagamento) {
+        logger.info('webhook.stripe.unknown_charge', {
+          eventId: event.id,
+          eventType: event.type,
+          chargeId: charge.id,
+          paymentIntentId: extractStripeId(charge.payment_intent),
+        });
+        return { pagamentoId: null };
+      }
+      span.setAttribute('pagamento.id', pagamento.id);
       logger.info('webhook.stripe.dispatched', {
         eventId: event.id,
         eventType: event.type,
@@ -344,42 +442,48 @@ async function dispatchVerifiedStripeEvent(
     }
 
     case 'payment_intent.payment_failed': {
-      // The session id is NOT in the PI payload. Stripe does not
-      // backlink PI → Session in webhook events. We read
-      // metadata.idPagamento (stamped at session create time in
-      // provider.stripe.ts; it propagates to the PI's metadata).
+      // aperture-wif8s: prefer pi-keyed lookup (matches the new
+      // resolver pattern for all payment_intent.* events). Fall back
+      // to the legacy metadata-based path when pi lookup misses —
+      // covers the edge case where payment_intent.payment_failed
+      // arrives BEFORE checkout.session.completed populated the pi
+      // ref (rare Stripe webhook reordering).
       const pi = event.data.object as Stripe.PaymentIntent;
-      const rawIdPagamento = pi.metadata?.idPagamento;
-      if (!rawIdPagamento) {
-        logger.info('webhook.stripe.missing_metadata', {
-          eventId: event.id,
-          eventType: event.type,
-          paymentIntentId: pi.id,
-        });
-        return { pagamentoId: null };
-      }
-      // Defensive: metadata is arbitrary string-keyed bag. Validate
-      // the shape before handing it to findById so a malformed
-      // upstream event becomes a logged no-op, not a crash.
-      const parsedIdPagamento = IdPagamentoSchema.safeParse(rawIdPagamento);
-      if (!parsedIdPagamento.success) {
-        logger.warn('webhook.stripe.malformed_metadata', {
-          eventId: event.id,
-          eventType: event.type,
-          paymentIntentId: pi.id,
-        });
-        return { pagamentoId: null };
-      }
-      const idPagamento = parsedIdPagamento.data;
-      const pagamento = await deps.pagamentoRepository.findById(idPagamento);
+      let pagamento = await resolvePagamentoFromPaymentIntent(deps, pi);
       if (!pagamento) {
-        logger.info('webhook.stripe.unknown_pagamento', {
-          eventId: event.id,
-          eventType: event.type,
-          paymentIntentId: pi.id,
-          idPagamento,
-        });
-        return { pagamentoId: null };
+        // Legacy fallback: metadata.idPagamento stamped at session
+        // create time in provider.stripe.ts. Useful when the pi has
+        // not yet been bound to a pagamento via the cs.completed
+        // path (the ordering edge case).
+        const rawIdPagamento = pi.metadata?.idPagamento;
+        if (!rawIdPagamento) {
+          logger.info('webhook.stripe.unknown_payment_intent', {
+            eventId: event.id,
+            eventType: event.type,
+            paymentIntentId: pi.id,
+          });
+          return { pagamentoId: null };
+        }
+        const parsedIdPagamento = IdPagamentoSchema.safeParse(rawIdPagamento);
+        if (!parsedIdPagamento.success) {
+          logger.warn('webhook.stripe.malformed_metadata', {
+            eventId: event.id,
+            eventType: event.type,
+            paymentIntentId: pi.id,
+          });
+          return { pagamentoId: null };
+        }
+        const idPagamento = parsedIdPagamento.data;
+        pagamento = await deps.pagamentoRepository.findById(idPagamento);
+        if (!pagamento) {
+          logger.info('webhook.stripe.unknown_pagamento', {
+            eventId: event.id,
+            eventType: event.type,
+            paymentIntentId: pi.id,
+            idPagamento,
+          });
+          return { pagamentoId: null };
+        }
       }
       span.setAttribute('pagamento.id', pagamento.id);
       await finalizarPagamentoRejeitado(
@@ -410,4 +514,90 @@ async function dispatchVerifiedStripeEvent(
       return { pagamentoId: null };
     }
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+//  aperture-wif8s helpers — pi_xxx + ch_xxx resolution + persistence.
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Stripe API surfaces some fields as either a bare string id OR an
+ * expanded sub-object (depending on the API request's `expand`). The
+ * webhook payload typically carries strings, but the SDK types model
+ * both. This helper normalises to "the string id we care about" so
+ * the resolver doesn't need expand-vs-bare branches everywhere.
+ *
+ * Returns null when the field is missing OR carries an unexpected
+ * shape — caller logs + treats as "not resolvable" (which archives
+ * the event as orphan, the right outcome).
+ */
+function extractStripeId(value: unknown): string | null {
+  if (typeof value === 'string' && value.length > 0) return value;
+  if (
+    value !== null &&
+    typeof value === 'object' &&
+    typeof (value as { id?: unknown }).id === 'string'
+  ) {
+    return (value as { id: string }).id;
+  }
+  return null;
+}
+
+/** Return a new Pagamento with the payment_intent ref set on intencao. */
+function withPaymentIntentRef(
+  pagamento: import('../../../../src/index.js').Pagamento,
+  pi: string,
+): import('../../../../src/index.js').Pagamento {
+  return {
+    ...pagamento,
+    intencao: { ...pagamento.intencao, paymentIntentExternalRef: pi },
+  };
+}
+
+/** Return a new Pagamento with the charge ref set on intencao. */
+function withChargeRef(
+  pagamento: import('../../../../src/index.js').Pagamento,
+  ch: string,
+): import('../../../../src/index.js').Pagamento {
+  return {
+    ...pagamento,
+    intencao: { ...pagamento.intencao, chargeExternalRef: ch },
+  };
+}
+
+/**
+ * Resolve a Pagamento from a Stripe PaymentIntent event payload via
+ * the new pi_xxx-keyed port. Returns undefined when the pi hasn't
+ * been bound yet (rare ordering edge case — handler archives as
+ * orphan). The PaymentIntent's `id` field IS the pi_xxx string.
+ */
+async function resolvePagamentoFromPaymentIntent(
+  deps: ServerDeps,
+  pi: Stripe.PaymentIntent,
+): Promise<import('../../../../src/index.js').Pagamento | undefined> {
+  if (typeof pi.id !== 'string' || pi.id.length === 0) return undefined;
+  return deps.pagamentoRepository.findByPaymentIntentExternalRef(pi.id);
+}
+
+/**
+ * Resolve a Pagamento from a Stripe Charge event payload. Primary:
+ * lookup via the parent payment_intent ref (charge.payment_intent
+ * carries pi_xxx). Fallback: lookup via the charge id itself (when
+ * the pi ref hasn't been backfilled — handles the post-backfill
+ * re-process case). Returns undefined when neither resolves.
+ */
+async function resolvePagamentoFromCharge(
+  deps: ServerDeps,
+  charge: Stripe.Charge,
+): Promise<import('../../../../src/index.js').Pagamento | undefined> {
+  const piId = extractStripeId(charge.payment_intent);
+  if (piId !== null) {
+    const viaPi = await deps.pagamentoRepository.findByPaymentIntentExternalRef(piId);
+    if (viaPi) return viaPi;
+  }
+  if (typeof charge.id === 'string' && charge.id.length > 0) {
+    const viaCh = await deps.pagamentoRepository.findByChargeExternalRef(charge.id);
+    if (viaCh) return viaCh;
+  }
+  return undefined;
 }

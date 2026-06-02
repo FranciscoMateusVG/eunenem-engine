@@ -37,6 +37,11 @@ type PagamentoRow = {
   // which enforces the shape end-to-end.
   intencao_composicao_valores: unknown;
   intencao_external_ref: string | null;
+  // aperture-wif8s: pi_xxx + ch_xxx provider refs populated by the
+  // webhook handler post-aprovado. Both nullable; partial indexes on
+  // each WHERE NOT NULL via migration 018.
+  intencao_payment_intent_external_ref: string | null;
+  intencao_charge_external_ref: string | null;
   intencao_criada_em: Date;
   transacao_externa: unknown;
 };
@@ -215,6 +220,64 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
       }
     });
   }
+
+  async findByPaymentIntentExternalRef(pi: string): Promise<Pagamento | undefined> {
+    return tracer.startActiveSpan(
+      'db.pagamentos.findByPaymentIntentExternalRef',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+        try {
+          // aperture-wif8s: uses partial index
+          // `pagamentos_intencao_pi_ref_idx ON
+          // (intencao_payment_intent_external_ref) WHERE … IS NOT NULL`
+          // (migration 018) for selective scan.
+          // biome-ignore lint/suspicious/noExplicitAny: see save()
+          const row = (await (this.db as any)
+            .selectFrom('pagamentos')
+            .selectAll()
+            .where('intencao_payment_intent_external_ref', '=', pi)
+            .executeTakeFirst()) as PagamentoRow | undefined;
+          span.setStatus({ code: SpanStatusCode.OK });
+          return row ? pagamentoFromRow(row) : undefined;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  async findByChargeExternalRef(ch: string): Promise<Pagamento | undefined> {
+    return tracer.startActiveSpan(
+      'db.pagamentos.findByChargeExternalRef',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+        try {
+          // aperture-wif8s: uses partial index
+          // `pagamentos_intencao_ch_ref_idx ON
+          // (intencao_charge_external_ref) WHERE … IS NOT NULL`
+          // (migration 018).
+          // biome-ignore lint/suspicious/noExplicitAny: see save()
+          const row = (await (this.db as any)
+            .selectFrom('pagamentos')
+            .selectAll()
+            .where('intencao_charge_external_ref', '=', ch)
+            .executeTakeFirst()) as PagamentoRow | undefined;
+          span.setStatus({ code: SpanStatusCode.OK });
+          return row ? pagamentoFromRow(row) : undefined;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
 }
 
 /** Aggregate → row mapper. Used by save + update. */
@@ -230,6 +293,10 @@ function rowFromPagamento(p: Pagamento): Record<string, unknown> {
     intencao_metodo: p.intencao.metodo,
     intencao_composicao_valores: JSON.stringify(p.intencao.composicaoValores),
     intencao_external_ref: p.intencao.externalRef,
+    // aperture-wif8s: webhook-populated provider refs. New rows always
+    // start null; update() rewrites them when the handler sets them.
+    intencao_payment_intent_external_ref: p.intencao.paymentIntentExternalRef,
+    intencao_charge_external_ref: p.intencao.chargeExternalRef,
     intencao_criada_em: p.intencao.criadaEm,
     transacao_externa: p.transacaoExterna ? JSON.stringify(p.transacaoExterna) : null,
   };
@@ -268,6 +335,8 @@ function pagamentoFromRow(row: PagamentoRow): Pagamento {
       metodo: row.intencao_metodo,
       composicaoValores,
       externalRef: row.intencao_external_ref,
+      paymentIntentExternalRef: row.intencao_payment_intent_external_ref,
+      chargeExternalRef: row.intencao_charge_external_ref,
       criadaEm: row.intencao_criada_em,
     },
     transacaoExterna,

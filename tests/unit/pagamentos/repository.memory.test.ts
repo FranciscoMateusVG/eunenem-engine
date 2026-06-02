@@ -145,4 +145,87 @@ describe('PagamentoRepositoryMemory', () => {
     const statuses = found.map((p) => p.status).sort();
     expect(statuses).toEqual(['aprovado', 'pendente', 'rejeitado']);
   });
+
+  // ───── findByPaymentIntentExternalRef + findByChargeExternalRef (aperture-wif8s) ─────
+
+  it('findByPaymentIntentExternalRef — returns the pagamento whose intencao carries the pi (aperture-wif8s)', async () => {
+    const repository = new PagamentoRepositoryMemory();
+    const pagamento = makePagamento();
+    const withPi = {
+      ...pagamento,
+      intencao: { ...pagamento.intencao, paymentIntentExternalRef: 'pi_test_abc123' },
+    };
+    await repository.save(withPi);
+
+    const found = await repository.findByPaymentIntentExternalRef('pi_test_abc123');
+    expect(found?.id).toBe(pagamento.id);
+    expect(found?.intencao.paymentIntentExternalRef).toBe('pi_test_abc123');
+  });
+
+  it('findByPaymentIntentExternalRef — returns undefined for unknown pi_xxx (aperture-wif8s)', async () => {
+    const repository = new PagamentoRepositoryMemory();
+    await repository.save(makePagamento());
+    await expect(
+      repository.findByPaymentIntentExternalRef('pi_does_not_exist'),
+    ).resolves.toBeUndefined();
+  });
+
+  it('findByPaymentIntentExternalRef — does NOT match pagamentos with null intencao.paymentIntentExternalRef (aperture-wif8s)', async () => {
+    const repository = new PagamentoRepositoryMemory();
+    await repository.save(makePagamento()); // intencao.paymentIntentExternalRef === null
+    // An empty/missing pi must NOT match the null-default row — every pre-bead
+    // pagamento has null on this field, and a stray empty lookup should not
+    // surface them all.
+    await expect(repository.findByPaymentIntentExternalRef('')).resolves.toBeUndefined();
+  });
+
+  it('findByChargeExternalRef — returns the pagamento whose intencao carries the ch (aperture-wif8s)', async () => {
+    const repository = new PagamentoRepositoryMemory();
+    const pagamento = makePagamento();
+    const withCh = {
+      ...pagamento,
+      intencao: { ...pagamento.intencao, chargeExternalRef: 'ch_test_xyz789' },
+    };
+    await repository.save(withCh);
+
+    const found = await repository.findByChargeExternalRef('ch_test_xyz789');
+    expect(found?.id).toBe(pagamento.id);
+    expect(found?.intencao.chargeExternalRef).toBe('ch_test_xyz789');
+  });
+
+  it('findByChargeExternalRef — returns undefined for unknown ch_xxx (aperture-wif8s)', async () => {
+    const repository = new PagamentoRepositoryMemory();
+    await repository.save(makePagamento());
+    await expect(
+      repository.findByChargeExternalRef('ch_does_not_exist'),
+    ).resolves.toBeUndefined();
+  });
+
+  it('pi + ch refs round-trip through save/update (aperture-wif8s)', async () => {
+    const repository = new PagamentoRepositoryMemory();
+    const pagamento = makePagamento();
+    await repository.save(pagamento); // both refs null at creation
+
+    const updated = {
+      ...pagamento,
+      intencao: {
+        ...pagamento.intencao,
+        paymentIntentExternalRef: 'pi_test_round_trip',
+        chargeExternalRef: 'ch_test_round_trip',
+      },
+    };
+    await repository.update(updated);
+
+    const reloaded = await repository.findById(pagamento.id);
+    expect(reloaded?.intencao.paymentIntentExternalRef).toBe('pi_test_round_trip');
+    expect(reloaded?.intencao.chargeExternalRef).toBe('ch_test_round_trip');
+
+    // And the new lookups resolve.
+    expect(
+      (await repository.findByPaymentIntentExternalRef('pi_test_round_trip'))?.id,
+    ).toBe(pagamento.id);
+    expect((await repository.findByChargeExternalRef('ch_test_round_trip'))?.id).toBe(
+      pagamento.id,
+    );
+  });
 });

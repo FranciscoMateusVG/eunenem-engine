@@ -55,6 +55,25 @@ export type StatusTransacaoExterna = z.infer<typeof StatusTransacaoExternaSchema
  * Pagamento root or TransacaoExterna) because the pre-authorisation
  * session lives at "intent" granularity; TransacaoExterna.id is the
  * post-settlement provider id (payment_intent / transaction).
+ *
+ * `paymentIntentExternalRef` + `chargeExternalRef` (aperture-wif8s):
+ * the Stripe `pi_xxx` and `ch_xxx` references for the same intent's
+ * provider chain. Both nullable. Populated as the webhook lifecycle
+ * advances:
+ *   - `paymentIntentExternalRef` is set on `checkout.session.completed`
+ *     (event payload carries `data.object.payment_intent`).
+ *   - `chargeExternalRef` is set on `payment_intent.succeeded`
+ *     (event payload carries `data.object.latest_charge`).
+ *
+ * The handler then uses these as additional lookup keys so future
+ * `payment_intent.*` and `charge.*` events can resolve back to the
+ * Pagamento that owns them — closes the orphan-event gap operator
+ * surfaced via 3zxkn. PagamentoRepository exposes
+ * `findByPaymentIntentExternalRef` + `findByChargeExternalRef` for the
+ * resolver. Both fields stay on IntencaoPagamento (NOT Pagamento root)
+ * because they belong to the provider-transport boundary — the
+ * post-settlement TransacaoExterna ID is a separate concept owned by
+ * the provider's terminal flow.
  */
 export const IntencaoPagamentoSchema = z.object({
   id: IdIntencaoPagamentoSchema,
@@ -63,6 +82,8 @@ export const IntencaoPagamentoSchema = z.object({
   metodo: MetodoPagamentoSchema,
   composicaoValores: SnapshotComposicaoValoresSchema,
   externalRef: z.string().trim().min(1).max(255).nullable(),
+  paymentIntentExternalRef: z.string().trim().min(1).max(255).nullable(),
+  chargeExternalRef: z.string().trim().min(1).max(255).nullable(),
   criadaEm: z.date(),
 });
 export type IntencaoPagamento = Readonly<z.infer<typeof IntencaoPagamentoSchema>>;
@@ -119,6 +140,13 @@ export function criarPagamentoPendente(input: CriarPagamentoPendenteInput): Paga
       metodo: input.metodo,
       composicaoValores: input.composicaoValores,
       externalRef: input.externalRef ?? null,
+      // aperture-wif8s: pi_xxx + ch_xxx populated post-creation by the
+      // webhook handler as Stripe events arrive. Always start null at
+      // intent-creation time — checkout flow hasn't talked to Stripe
+      // about a payment_intent yet (that happens after the user
+      // confirms in the Stripe-hosted UI).
+      paymentIntentExternalRef: null,
+      chargeExternalRef: null,
       criadaEm: input.criadoEm,
     },
     status: 'pendente',

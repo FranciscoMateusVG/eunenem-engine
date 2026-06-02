@@ -131,11 +131,56 @@ describe('Migration round-trip', () => {
     );
     expect(lancamentoIdxNames).toContain('lancamentos_pendentes_maturos_idx');
 
-    // Migrate down (latest migration first). aperture-led0r added the
-    // matura_em column (017) on top of webhook archive (016), bjshv
-    // passthrough_surcharge (015), vcen4 ip widen (014), paginated-indexes
-    // (013), financeiro (012), pagamentos (011), slug (010), better-auth
-    // (009), usuario (008).
+    // aperture-wif8s added intencao_payment_intent_external_ref +
+    // intencao_charge_external_ref + 2 partial indexes (018).
+    const piCol = (await db
+      .selectFrom('information_schema.columns' as never)
+      .select(['data_type' as never, 'is_nullable' as never])
+      .where('table_schema' as never, '=', 'public' as never)
+      .where('table_name' as never, '=', 'pagamentos' as never)
+      .where('column_name' as never, '=', 'intencao_payment_intent_external_ref' as never)
+      .executeTakeFirst()) as { data_type: string; is_nullable: string } | undefined;
+    expect(piCol?.data_type).toBe('text');
+    expect(piCol?.is_nullable).toBe('YES');
+    const chCol = (await db
+      .selectFrom('information_schema.columns' as never)
+      .select(['data_type' as never, 'is_nullable' as never])
+      .where('table_schema' as never, '=', 'public' as never)
+      .where('table_name' as never, '=', 'pagamentos' as never)
+      .where('column_name' as never, '=', 'intencao_charge_external_ref' as never)
+      .executeTakeFirst()) as { data_type: string; is_nullable: string } | undefined;
+    expect(chCol?.data_type).toBe('text');
+    expect(chCol?.is_nullable).toBe('YES');
+    const pagamentoIndexes = await db
+      .selectFrom('pg_indexes' as never)
+      .select('indexname' as never)
+      .where('schemaname' as never, '=', 'public' as never)
+      .where('tablename' as never, '=', 'pagamentos' as never)
+      .execute();
+    const pagamentoIdxNames = pagamentoIndexes.map(
+      (i: Record<string, unknown>) => i.indexname,
+    );
+    expect(pagamentoIdxNames).toContain('pagamentos_intencao_pi_ref_idx');
+    expect(pagamentoIdxNames).toContain('pagamentos_intencao_ch_ref_idx');
+
+    // Migrate down (latest migration first). aperture-wif8s added pi+ch
+    // columns + indexes (018) on top of led0r matura_em (017), webhook
+    // archive (016), bjshv passthrough (015), vcen4 ip widen (014),
+    // paginated-indexes (013), financeiro (012), pagamentos (011), slug
+    // (010), better-auth (009), usuario (008).
+    const downPiCh = await migrator.migrateDown();
+    expect(downPiCh.error).toBeUndefined();
+
+    // After down on 018, both columns + partial indexes are gone.
+    const piColAfterDown = await db
+      .selectFrom('information_schema.columns' as never)
+      .select(['column_name' as never])
+      .where('table_schema' as never, '=', 'public' as never)
+      .where('table_name' as never, '=', 'pagamentos' as never)
+      .where('column_name' as never, '=', 'intencao_payment_intent_external_ref' as never)
+      .execute();
+    expect(piColAfterDown).toHaveLength(0);
+
     const downMaturaEm = await migrator.migrateDown();
     expect(downMaturaEm.error).toBeUndefined();
 

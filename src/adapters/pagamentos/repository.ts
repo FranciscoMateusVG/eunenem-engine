@@ -40,4 +40,31 @@ export interface PagamentoRepository {
    * (caller decides whether that's a 404 or just an empty admin row).
    */
   findByContribuicao(idContribuicao: IdContribuicaoPagamento): Promise<readonly Pagamento[]>;
+  /**
+   * Lookup by the Stripe `pi_xxx` reference stored on
+   * `intencao.paymentIntentExternalRef` (aperture-wif8s). Populated by
+   * the webhook handler when `checkout.session.completed` arrives. Used
+   * by the resolver for subsequent `payment_intent.*` events (which
+   * carry pi_xxx in `event.data.object.id`) and as the primary lookup
+   * path for `charge.*` events (which carry pi_xxx in
+   * `event.data.object.payment_intent`).
+   *
+   * Postgres adapter uses the partial index
+   * `pagamentos_intencao_pi_ref_idx ON (intencao_payment_intent_external_ref)
+   * WHERE intencao_payment_intent_external_ref IS NOT NULL` for
+   * selective scan. Returns `undefined` for unknown pi_xxx (handler
+   * archives as orphan and exits cleanly — no error).
+   */
+  findByPaymentIntentExternalRef(pi: string): Promise<Pagamento | undefined>;
+  /**
+   * Lookup by the Stripe `ch_xxx` reference stored on
+   * `intencao.chargeExternalRef` (aperture-wif8s). Populated by the
+   * webhook handler when `payment_intent.succeeded` arrives (payload
+   * carries `data.object.latest_charge`). Used by the resolver as a
+   * FALLBACK for `charge.*` events when the primary
+   * findByPaymentIntentExternalRef lookup misses (e.g. a re-processed
+   * charge event after backfill populated ch but the pi link is
+   * missing). Returns `undefined` for unknown ch_xxx.
+   */
+  findByChargeExternalRef(ch: string): Promise<Pagamento | undefined>;
 }

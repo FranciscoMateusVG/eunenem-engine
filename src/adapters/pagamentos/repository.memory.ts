@@ -130,4 +130,54 @@ export class PagamentoRepositoryMemory implements PagamentoRepository {
       }
     });
   }
+
+  async findByPaymentIntentExternalRef(pi: string): Promise<Pagamento | undefined> {
+    return tracer.startActiveSpan(
+      'db.pagamentos.findByPaymentIntentExternalRef',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+        try {
+          for (const pagamento of this.pagamentos.values()) {
+            if (pagamento.intencao.paymentIntentExternalRef === pi) {
+              span.setStatus({ code: SpanStatusCode.OK });
+              return pagamento;
+            }
+          }
+          span.setStatus({ code: SpanStatusCode.OK });
+          return undefined;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  async findByChargeExternalRef(ch: string): Promise<Pagamento | undefined> {
+    return tracer.startActiveSpan(
+      'db.pagamentos.findByChargeExternalRef',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+        try {
+          for (const pagamento of this.pagamentos.values()) {
+            if (pagamento.intencao.chargeExternalRef === ch) {
+              span.setStatus({ code: SpanStatusCode.OK });
+              return pagamento;
+            }
+          }
+          span.setStatus({ code: SpanStatusCode.OK });
+          return undefined;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
 }

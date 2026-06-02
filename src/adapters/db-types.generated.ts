@@ -103,12 +103,14 @@ export interface Pagamentos {
   criado_em: Timestamp;
   id: string;
   intencao_amount_cents: number;
+  intencao_charge_external_ref: string | null;
   intencao_composicao_valores: Json;
   intencao_criada_em: Timestamp;
   intencao_external_ref: string | null;
   intencao_id: string;
   intencao_id_contribuicao: string;
   intencao_metodo: string;
+  intencao_payment_intent_external_ref: string | null;
   status: string;
   transacao_externa: Json | null;
 }
