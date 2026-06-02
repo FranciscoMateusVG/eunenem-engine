@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import JsonViewer from "@/components/eunenem/admin/JsonViewer";
+import { PagamentoWebhookList } from "@/components/eunenem/admin/PagamentoWebhookList";
 import { trpc } from "@/lib/trpc.js";
 
 /**
@@ -25,11 +26,50 @@ import { trpc } from "@/lib/trpc.js";
  */
 export default function PagamentosList({
   idContribuicao,
+  onWebhookIssueCountChange,
 }: {
   idContribuicao: string;
+  /**
+   * Called whenever the aggregate webhook-issue count (across all
+   * pagamento cards) changes. PagamentosSection uses this to render its
+   * "⚠ N webhooks com erro" header chip without a server-side aggregate
+   * (aperture-pf348 §quick-scan affordance).
+   */
+  onWebhookIssueCountChange?: (count: number) => void;
 }) {
   const { data, isLoading, error } =
     trpc.admin.pagamentos.listByContribuicao.useQuery({ idContribuicao });
+
+  /**
+   * Per-pagamento issue count map. Each PagamentoCard's webhook subsection
+   * reports its own count up; we sum the map values + push to the parent
+   * (PagamentosSection). useState (not useRef) so the sum recomputes on
+   * each card's update.
+   */
+  const [issueCountsByPagamento, setIssueCountsByPagamento] = useState<
+    Record<string, number>
+  >({});
+
+  const reportIssueCount = useCallback(
+    (idPagamento: string, count: number) => {
+      setIssueCountsByPagamento((prev) => {
+        if (prev[idPagamento] === count) return prev;
+        return { ...prev, [idPagamento]: count };
+      });
+    },
+    [],
+  );
+
+  // Push aggregate up to PagamentosSection whenever the sum changes.
+  // Effect (not inline call) avoids infinite render loops — the parent
+  // owns the setState; we just notify on change.
+  const total = Object.values(issueCountsByPagamento).reduce(
+    (a, b) => a + b,
+    0,
+  );
+  useEffect(() => {
+    onWebhookIssueCountChange?.(total);
+  }, [total, onWebhookIssueCountChange]);
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
@@ -38,11 +78,16 @@ export default function PagamentosList({
   return (
     <div className="space-y-4">
       {data.pagamentos.map((p) => (
-        <PagamentoCard key={p.id} pagamento={p} />
+        <PagamentoCard
+          key={p.id}
+          pagamento={p}
+          onWebhookIssueCountChange={(count) => reportIssueCount(p.id, count)}
+        />
       ))}
     </div>
   );
 }
+
 
 function LoadingState() {
   return (
@@ -105,7 +150,13 @@ type PagamentoDTO = {
   };
 };
 
-function PagamentoCard({ pagamento }: { pagamento: PagamentoDTO }) {
+function PagamentoCard({
+  pagamento,
+  onWebhookIssueCountChange,
+}: {
+  pagamento: PagamentoDTO;
+  onWebhookIssueCountChange?: (count: number) => void;
+}) {
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -129,6 +180,13 @@ function PagamentoCard({ pagamento }: { pagamento: PagamentoDTO }) {
           <JsonViewer label="intencao (raw)" data={pagamento.intencao} />
         </div>
       )}
+      {/* Webhook event trail (aperture-pf348) — sub-diagnostics below the
+          domain VO snapshots. Collapsed by default; reports issue count
+          upward so the section header can render the aggregate alert. */}
+      <PagamentoWebhookList
+        idPagamento={pagamento.id}
+        onIssueCountChange={onWebhookIssueCountChange}
+      />
     </article>
   );
 }
