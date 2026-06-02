@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { PROCESSING_ERROR_MAX_LENGTH } from '../../src/adapters/webhook-archive/webhook-event-archive.js';
-import type { WebhookEventArchive } from '../../src/adapters/webhook-archive/webhook-event-archive.js';
+import type {
+  SaveReceivedInput,
+  WebhookEventArchive,
+} from '../../src/adapters/webhook-archive/webhook-event-archive.js';
 
 interface ConformanceOptions {
   readonly factory: () => WebhookEventArchive | Promise<WebhookEventArchive>;
@@ -188,6 +191,109 @@ export function describeWebhookEventArchiveConformance(name: string, options: Co
       // Unknown event id returns undefined.
       const unknown = await archive.findByProviderEventId('stripe', 'evt_does_not_exist');
       expect(unknown).toBeUndefined();
+    });
+
+    // ───── findByPagamentoId (aperture-2sp6m) ─────────────────────────────
+
+    /**
+     * Insert a fresh event then bind it to a pagamento via markProcessed.
+     * Returns the row id for cross-assertion.
+     */
+    const seedEventLinkedToPagamento = async (
+      pagamentoId: string,
+      overrides: Partial<SaveReceivedInput> = {},
+    ): Promise<string> => {
+      const result = await archive.saveReceived({
+        provider: 'stripe',
+        providerEventId: `evt_${randomUUID()}`,
+        eventType: 'checkout.session.completed',
+        rawPayload: { id: 'sess_abc' },
+        signatureHeader: 't=ok',
+        signatureValid: true,
+        ...overrides,
+      });
+      await archive.markProcessed(result.id, pagamentoId);
+      return result.id;
+    };
+
+    it('findByPagamentoId returns events linked to the pagamento, ordered received_at ASC by default (aperture-2sp6m)', async () => {
+      const pagId = randomUUID();
+      const id1 = await seedEventLinkedToPagamento(pagId, {
+        eventType: 'checkout.session.created',
+      });
+      const id2 = await seedEventLinkedToPagamento(pagId, {
+        eventType: 'checkout.session.completed',
+      });
+      const id3 = await seedEventLinkedToPagamento(pagId, {
+        eventType: 'payment_intent.succeeded',
+      });
+
+      const found = await archive.findByPagamentoId(pagId);
+      expect(found).toHaveLength(3);
+      // Default ASC: insertion order is preserved because received_at
+      // monotonically increases with insertion time.
+      expect(found.map((e) => e.id)).toEqual([id1, id2, id3]);
+      expect(found.every((e) => e.pagamentoId === pagId)).toBe(true);
+    });
+
+    it('findByPagamentoId returns empty array when no events exist for the pagamento (aperture-2sp6m)', async () => {
+      const found = await archive.findByPagamentoId(randomUUID());
+      expect(found).toEqual([]);
+    });
+
+    it('findByPagamentoId excludes orphan events (pagamento_id IS NULL) — orphans never leak through this surface (aperture-2sp6m)', async () => {
+      const pagId = randomUUID();
+      await seedEventLinkedToPagamento(pagId);
+      await seedEventLinkedToPagamento(pagId);
+      // Orphan: saveReceived without markProcessed leaves pagamento_id NULL.
+      await archive.saveReceived({
+        provider: 'stripe',
+        providerEventId: `evt_${randomUUID()}`,
+        eventType: 'invoice.created',
+        rawPayload: { id: 'inv_orphan' },
+        signatureHeader: 't=ok',
+        signatureValid: true,
+      });
+
+      const found = await archive.findByPagamentoId(pagId);
+      expect(found).toHaveLength(2);
+      expect(found.every((e) => e.pagamentoId === pagId)).toBe(true);
+    });
+
+    it('findByPagamentoId honours orderBy=received_at_desc (aperture-2sp6m)', async () => {
+      const pagId = randomUUID();
+      const id1 = await seedEventLinkedToPagamento(pagId);
+      const id2 = await seedEventLinkedToPagamento(pagId);
+      const id3 = await seedEventLinkedToPagamento(pagId);
+
+      const found = await archive.findByPagamentoId(pagId, {
+        orderBy: 'received_at_desc',
+      });
+      expect(found.map((e) => e.id)).toEqual([id3, id2, id1]);
+    });
+
+    it('findByPagamentoId honours an explicit limit (aperture-2sp6m)', async () => {
+      const pagId = randomUUID();
+      for (let i = 0; i < 5; i++) {
+        await seedEventLinkedToPagamento(pagId);
+      }
+      const found = await archive.findByPagamentoId(pagId, { limit: 2 });
+      expect(found).toHaveLength(2);
+    });
+
+    it('findByPagamentoId scopes to the requested pagamento — other pagamentos\' events do not leak (aperture-2sp6m)', async () => {
+      const pagA = randomUUID();
+      const pagB = randomUUID();
+      const idA1 = await seedEventLinkedToPagamento(pagA);
+      const idA2 = await seedEventLinkedToPagamento(pagA);
+      await seedEventLinkedToPagamento(pagB);
+      await seedEventLinkedToPagamento(pagB);
+
+      const foundA = await archive.findByPagamentoId(pagA);
+      expect([...foundA.map((e) => e.id)].sort()).toEqual([idA1, idA2].sort());
+      const foundB = await archive.findByPagamentoId(pagB);
+      expect(foundB).toHaveLength(2);
+      expect(foundB.every((e) => e.pagamentoId === pagB)).toBe(true);
     });
   });
 }

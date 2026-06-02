@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 import {
+  type FindByPagamentoIdOptions,
   PROCESSING_ERROR_MAX_LENGTH,
   type SaveReceivedInput,
   type SaveReceivedResult,
@@ -26,6 +27,14 @@ export class WebhookEventArchiveMemory implements WebhookEventArchive {
   private readonly rows = new Map<string, WebhookEventRecord>();
   /** Composite (provider, providerEventId) → row id index for fast retry detection. */
   private readonly byProviderEventId = new Map<string, string>();
+  /**
+   * Monotone receivedAt floor: each new saveReceived gets a Date strictly
+   * later than the previous insert, so test ordering (aperture-2sp6m
+   * findByPagamentoId orderBy) is stable even when multiple inserts
+   * happen within the same millisecond. The postgres adapter doesn't
+   * need this — Postgres `now()` advances naturally with each call.
+   */
+  private lastReceivedAtMs = 0;
 
   constructor(private readonly clock: () => Date = () => new Date()) {}
 
@@ -46,6 +55,11 @@ export class WebhookEventArchiveMemory implements WebhookEventArchive {
         }
 
         const id = randomUUID();
+        // Monotone receivedAt floor (aperture-2sp6m): ensures stable
+        // ordering for findByPagamentoId across rapid-fire inserts.
+        const nowMs = this.clock().getTime();
+        const receivedAtMs = Math.max(nowMs, this.lastReceivedAtMs + 1);
+        this.lastReceivedAtMs = receivedAtMs;
         const record: WebhookEventRecord = {
           id,
           provider: input.provider,
@@ -54,7 +68,7 @@ export class WebhookEventArchiveMemory implements WebhookEventArchive {
           rawPayload: input.rawPayload,
           signatureHeader: input.signatureHeader,
           signatureValid: input.signatureValid,
-          receivedAt: this.clock(),
+          receivedAt: new Date(receivedAtMs),
           processedAt: null,
           processingError: null,
           pagamentoId: null,
@@ -156,6 +170,43 @@ export class WebhookEventArchiveMemory implements WebhookEventArchive {
         try {
           const id = this.byProviderEventId.get(this.compositeKey(provider, providerEventId));
           const result = id !== undefined ? this.rows.get(id) : undefined;
+          span.setStatus({ code: SpanStatusCode.OK });
+          return result;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  async findByPagamentoId(
+    idPagamento: string,
+    options?: FindByPagamentoIdOptions,
+  ): Promise<readonly WebhookEventRecord[]> {
+    return tracer.startActiveSpan(
+      'db.payment_webhook_events.findByPagamentoId',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+        try {
+          // aperture-2sp6m: filter by pagamento_id. Orphan rows
+          // (pagamento_id === null) excluded by the strict-equality
+          // match; matches the postgres adapter's WHERE pagamento_id = $1
+          // semantics (NULL never satisfies the equality).
+          const orderBy = options?.orderBy ?? 'received_at_asc';
+          const limit = options?.limit;
+          const filtered = [...this.rows.values()].filter(
+            (r) => r.pagamentoId === idPagamento,
+          );
+          filtered.sort((a, b) => {
+            const dt = a.receivedAt.getTime() - b.receivedAt.getTime();
+            return orderBy === 'received_at_desc' ? -dt : dt;
+          });
+          const result =
+            typeof limit === 'number' && limit >= 0 ? filtered.slice(0, limit) : filtered;
           span.setStatus({ code: SpanStatusCode.OK });
           return result;
         } catch (error: unknown) {

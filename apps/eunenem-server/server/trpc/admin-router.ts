@@ -21,7 +21,7 @@
  * aggregate over the wire — that's both a footprint and a discipline win:
  * the wire contract is decoupled from the domain model.
  */
-import { initTRPC } from "@trpc/server";
+import { initTRPC, TRPCError } from "@trpc/server";
 import { z } from "zod";
 import type { Campanha } from "../../../../src/domain/arrecadacao/entities/campanha.js";
 import type { Contribuicao } from "../../../../src/domain/arrecadacao/entities/contribuicao.js";
@@ -733,6 +733,191 @@ const pagamentosRouter = t.router({
     }),
 });
 
+/* ─────────────────────────────────────────────────────────────────────────
+ * webhooks — payment_webhook_events trail per pagamento (aperture-2sp6m).
+ *
+ * Parent epic: aperture-3zxkn (operator wants webhook trails visible on
+ * /admin/contribuicao/:id detail page).
+ *
+ * Two procedures:
+ *   - `listByPagamento({ idPagamento })` — LEAN DTO array (no rawPayload,
+ *     no signatureHeader). Tenant guard returns 403 on cross-plataforma.
+ *   - `getEventDetail({ idEvent })` — FULL DTO including rawPayload +
+ *     signatureHeader for the "Ver payload" modal. Orphan events
+ *     (pagamento_id NULL) throw 403; unknown ids throw 404.
+ *
+ * Tenant guard: webhook event → pagamento → contribuicao → campanha →
+ * idPlataforma. The helper `resolveAdminPagamentoContext` factors this
+ * out — both procedures use it, and a future admin.pagamentos refactor
+ * can adopt it too. Distinct from the silent-empty-array pattern in
+ * pagamentos.listByContribuicao + financeiro.listByContribuicao: those
+ * procedures take a contribuicao id and return empty on miss/cross-tenant
+ * (matches contribuicoes.findById null behavior); these throw concrete
+ * 404/403/500 so the admin UI can distinguish "no events yet" (empty
+ * array, success) from "you don't have access" (403).
+ * ────────────────────────────────────────────────────────────────────── */
+
+const WebhookEventAdminDTOSchema = z.object({
+  id: z.string(),
+  provider: z.string(),
+  eventType: z.string(),
+  receivedAt: z.string(), // ISO
+  signatureValid: z.boolean(),
+  processedAt: z.string().nullable(), // ISO | null
+  processingError: z.string().nullable(),
+  pagamentoId: z.string().nullable(),
+});
+export type WebhookEventAdminDTO = z.infer<typeof WebhookEventAdminDTOSchema>;
+
+const WebhookEventDetailDTOSchema = WebhookEventAdminDTOSchema.extend({
+  rawPayload: z.unknown(),
+  signatureHeader: z.string(),
+});
+export type WebhookEventDetailDTO = z.infer<typeof WebhookEventDetailDTOSchema>;
+
+/**
+ * Resolve the admin tenant-guard chain from a `pagamentoId`. Throws:
+ *   - 404 `pagamento_nao_encontrado` when the pagamento doesn't exist
+ *   - 500 `dados_corrompidos` when the contribuicao/campanha chain is broken
+ *   - 403 `tenant_mismatch` when the campanha is on a different plataforma
+ *
+ * Returns the resolved `{ pagamento, contribuicao, campanha }` triple so
+ * callers can pass any of them to downstream queries without re-fetching.
+ */
+async function resolveAdminPagamentoContext(
+  ctx: TrpcContext,
+  idPagamento: string,
+): Promise<{
+  pagamento: Pagamento;
+  contribuicao: Contribuicao;
+  campanha: Campanha;
+}> {
+  const pagamento = await ctx.deps.pagamentoRepository.findById(
+    idPagamento as never,
+  );
+  if (!pagamento) {
+    throw new TRPCError({
+      code: "NOT_FOUND",
+      message: "pagamento_nao_encontrado",
+    });
+  }
+  const contribuicao = await ctx.deps.contribuicaoRepository.findById(
+    pagamento.intencao.idContribuicao as unknown as IdContribuicao,
+  );
+  if (!contribuicao) {
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "dados_corrompidos: contribuicao_nao_encontrada",
+    });
+  }
+  const campanha = await ctx.deps.campanhaRepository.findById(
+    contribuicao.idCampanha,
+  );
+  if (!campanha) {
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "dados_corrompidos: campanha_nao_encontrada",
+    });
+  }
+  if (campanha.idPlataforma !== ID_PLATAFORMA_EUNENEM) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "tenant_mismatch",
+    });
+  }
+  return { pagamento, contribuicao, campanha };
+}
+
+function toWebhookEventAdminDTO(record: {
+  id: string;
+  provider: string;
+  eventType: string;
+  receivedAt: Date;
+  signatureValid: boolean;
+  processedAt: Date | null;
+  processingError: string | null;
+  pagamentoId: string | null;
+}): WebhookEventAdminDTO {
+  return {
+    id: record.id,
+    provider: record.provider,
+    eventType: record.eventType,
+    receivedAt: record.receivedAt.toISOString(),
+    signatureValid: record.signatureValid,
+    processedAt: record.processedAt ? record.processedAt.toISOString() : null,
+    processingError: record.processingError ?? null,
+    pagamentoId: record.pagamentoId ?? null,
+  };
+}
+
+const webhooksRouter = t.router({
+  /**
+   * All payment_webhook_events linked to a pagamento, ordered
+   * `received_at ASC` (oldest first — visitor lifecycle reads top-to-
+   * bottom). LEAN DTO: no rawPayload, no signatureHeader. The
+   * "Ver payload" affordance fetches getEventDetail on demand.
+   */
+  listByPagamento: t.procedure
+    .input(z.object({ idPagamento: z.string() }))
+    .output(z.object({ events: z.array(WebhookEventAdminDTOSchema) }))
+    .query(async ({ ctx, input }) => {
+      // Tenant guard: resolves pagamento → contribuicao → campanha →
+      // plataforma. Throws 404 if pagamento missing, 403 if cross-tenant.
+      await resolveAdminPagamentoContext(ctx, input.idPagamento);
+
+      const records = await ctx.deps.webhookEventArchive.findByPagamentoId(
+        input.idPagamento,
+        { orderBy: "received_at_asc" },
+      );
+      return { events: records.map(toWebhookEventAdminDTO) };
+    }),
+
+  /**
+   * Full webhook event including rawPayload + signatureHeader. Powers
+   * the "Ver payload" modal on the per-pagamento webhook list.
+   *
+   * Lifecycle:
+   *   - 404 when the event id doesn't exist
+   *   - 403 when the event is orphan (pagamento_id NULL) — orphan
+   *     browsing is explicitly out of scope on the per-pagamento surface
+   *   - 403 when the linked pagamento's campanha is on a different
+   *     plataforma
+   */
+  getEventDetail: t.procedure
+    .input(z.object({ idEvent: z.string() }))
+    .output(z.object({ event: WebhookEventDetailDTOSchema }))
+    .query(async ({ ctx, input }) => {
+      const event = await ctx.deps.webhookEventArchive.findById(input.idEvent);
+      if (!event) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "evento_nao_encontrado",
+        });
+      }
+      if (event.pagamentoId === null) {
+        // Orphan event — never expose via the per-pagamento surface.
+        // Operator browses orphans via a separate (out-of-scope) page.
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "evento_orfao_fora_do_escopo",
+        });
+      }
+      // Tenant guard — same chain as listByPagamento; throws 403 on
+      // cross-tenant. We don't read the resolved triple here (the event
+      // itself carries everything we need), but the guard is what
+      // enforces the boundary.
+      await resolveAdminPagamentoContext(ctx, event.pagamentoId);
+
+      return {
+        event: {
+          ...toWebhookEventAdminDTO(event),
+          rawPayload: event.rawPayload,
+          signatureHeader: event.signatureHeader,
+        },
+      };
+    }),
+});
+
 export const adminRouter = t.router({
   /** Nested sub-router for usuarios browse + paginated list. */
   usuarios: usuariosRouter,
@@ -824,4 +1009,11 @@ export const adminRouter = t.router({
 
   /** Nested sub-router for the Financeiro BC lancamentos drill (W5). */
   financeiro: financeiroRouter,
+
+  /**
+   * Per-pagamento webhook event trail (aperture-2sp6m). Powers the
+   * "Eventos webhook" expandable affordance on /admin/contribuicao/:id
+   * (Vance bead aperture-pf348).
+   */
+  webhooks: webhooksRouter,
 });

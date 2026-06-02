@@ -16,7 +16,9 @@ export type { LivroFinanceiroRepository } from './adapters/financeiro/livro-repo
 export { LivroFinanceiroRepositoryMemory } from './adapters/financeiro/livro-repository.memory.js';
 export { LivroFinanceiroRepositoryPostgres } from './adapters/financeiro/livro-repository.postgres.js';
 // aperture-1n6u8: payment webhook event archive (infrastructure boundary).
+// aperture-2sp6m: findByPagamentoId + FindByPagamentoIdOptions for admin trail.
 export type {
+  FindByPagamentoIdOptions,
   SaveReceivedInput,
   SaveReceivedResult,
   WebhookEventArchive,

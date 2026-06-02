@@ -123,4 +123,37 @@ export interface WebhookEventArchive {
     provider: string,
     providerEventId: string,
   ): Promise<WebhookEventRecord | undefined>;
+
+  /**
+   * Enumerate webhook events linked to a specific `pagamento_id`
+   * (aperture-2sp6m). Powers the admin UI's per-pagamento webhook
+   * trail on /admin/contribuicao/:id (aperture-3zxkn parent).
+   *
+   * Orphan events (rows with `pagamento_id IS NULL`) are NEVER
+   * returned here — they're filtered out by the WHERE clause
+   * naturally. Orphan browsing requires a separate surface (out of
+   * scope per the parent epic).
+   *
+   * Default ordering: `received_at ASC` — oldest first, so the visitor
+   * lifecycle reads top-to-bottom in the UI (created → processing →
+   * succeeded). Override via `options.orderBy` when DESC is wanted.
+   *
+   * Default limit: unbounded for v1. Per-pagamento event counts are
+   * bounded small in practice (Stripe sends ~3-5 events per pagamento
+   * lifecycle). If a pagamento accumulates pathological retry storms,
+   * add an explicit limit via `options.limit`.
+   *
+   * Postgres adapter uses the partial index
+   * `payment_webhook_events_pagamento_id_idx ON (pagamento_id) WHERE
+   * pagamento_id IS NOT NULL` (1n6u8 migration 016) for selective scan.
+   */
+  findByPagamentoId(
+    idPagamento: string,
+    options?: FindByPagamentoIdOptions,
+  ): Promise<readonly WebhookEventRecord[]>;
+}
+
+export interface FindByPagamentoIdOptions {
+  readonly orderBy?: 'received_at_asc' | 'received_at_desc';
+  readonly limit?: number;
 }
