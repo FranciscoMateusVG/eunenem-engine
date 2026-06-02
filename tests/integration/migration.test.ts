@@ -73,9 +73,38 @@ describe('Migration round-trip', () => {
     expect(indexNames).toContain('usuarios_plataforma_criado_em_id_idx');
     expect(indexNames).toContain('usuarios_plataforma_nome_id_idx');
 
-    // Migrate down (latest migration first). aperture-qatwz added the
-    // paginated-indexes migration (013) on top of financeiro (012),
-    // pagamentos (011), slug (010), better-auth (009), and usuario (008).
+    // aperture-vcen4 widened sessions.ip_address to varchar(128) on top
+    // of the BetterAuth migration 009 default of varchar(45) (014).
+    // Verify the widened length is in effect.
+    const ipColBefore = (await db
+      .selectFrom('information_schema.columns' as never)
+      .select(['character_maximum_length' as never])
+      .where('table_schema' as never, '=', 'public' as never)
+      .where('table_name' as never, '=', 'sessions' as never)
+      .where('column_name' as never, '=', 'ip_address' as never)
+      .executeTakeFirst()) as { character_maximum_length: number } | undefined;
+    expect(ipColBefore?.character_maximum_length).toBe(128);
+
+    // Migrate down (latest migration first). aperture-vcen4 added the
+    // ip_address widen migration (014) on top of paginated-indexes
+    // (013), financeiro (012), pagamentos (011), slug (010), better-auth
+    // (009), and usuario (008).
+    const downIpAddressWiden = await migrator.migrateDown();
+    expect(downIpAddressWiden.error).toBeUndefined();
+
+    // After down on 014, the column is back to varchar(45). The down()
+    // carries a pre-flight guard (aperture-vcen4 follow-up) that throws
+    // when any row exceeds 45 chars — vacuously safe here because the
+    // sessions table is empty in this round-trip.
+    const ipColAfterDown = (await db
+      .selectFrom('information_schema.columns' as never)
+      .select(['character_maximum_length' as never])
+      .where('table_schema' as never, '=', 'public' as never)
+      .where('table_name' as never, '=', 'sessions' as never)
+      .where('column_name' as never, '=', 'ip_address' as never)
+      .executeTakeFirst()) as { character_maximum_length: number } | undefined;
+    expect(ipColAfterDown?.character_maximum_length).toBe(45);
+
     const downPaginatedIndexes = await migrator.migrateDown();
     expect(downPaginatedIndexes.error).toBeUndefined();
 
