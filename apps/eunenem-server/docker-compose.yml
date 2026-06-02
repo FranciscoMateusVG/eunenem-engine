@@ -1,7 +1,56 @@
 services:
+  # Hono SSR app — serves both the user-facing React frontend and the
+  # tRPC + BetterAuth + Stripe-webhook API. esbuild bakes the client
+  # bundle at build time (STRIPE_PUBLISHABLE_KEY must be present then —
+  # see Dockerfile + setup.ts:167-169 for the build-time-inline rationale).
   eunenem-server:
-    build: .
+    build:
+      context: .
+      args:
+        STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
     restart: unless-stopped
+    depends_on:
+      eunenem-db:
+        condition: service_healthy
     environment:
       - NODE_ENV=production
       - PORT=3001
+
+  # Postgres sidecar — holds the engine domain schema (Arrecadação,
+  # Pagamentos, Financeiro, Usuário) + BetterAuth's tables (users,
+  # sessions, accounts, verifications, rate_limit). Migrations live in
+  # the engine repo root; run `pnpm db:migrate` against this DB after
+  # first deploy and on every schema change.
+  eunenem-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: eunenem
+      POSTGRES_USER: eunenem
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - eunenem-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "eunenem"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Minio sidecar — pre-provisioned object storage for future use
+  # (engine does not yet read MINIO_* env vars, but operator wants the
+  # infra in place so the first feature that needs blob storage doesn't
+  # block on Peppy re-shaping the compose). Console exposed at :9001
+  # for admin; data persists across deploys via the named volume.
+  eunenem-minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - eunenem-minio-data:/data
+
+volumes:
+  eunenem-db-data:
+  eunenem-minio-data:

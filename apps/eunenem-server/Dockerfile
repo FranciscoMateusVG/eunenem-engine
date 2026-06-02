@@ -16,6 +16,14 @@ RUN pnpm install --frozen-lockfile
 # App source (node_modules + generated public assets excluded via .dockerignore).
 COPY . .
 
+# STRIPE_PUBLISHABLE_KEY is consumed by esbuild's `define` at BUILD time
+# and inlined into the client bundle (see build.mjs / setup.ts:167-169).
+# Without it the client bundle ships with an empty value and the Stripe
+# iframe never mounts. Pass via docker-compose build.args (or `docker build
+# --build-arg`) so the value reaches `pnpm build` below.
+ARG STRIPE_PUBLISHABLE_KEY=""
+ENV STRIPE_PUBLISHABLE_KEY=$STRIPE_PUBLISHABLE_KEY
+
 # Bundle public/client.js (esbuild) + public/styles.css (Tailwind) into ./public.
 RUN pnpm build
 
