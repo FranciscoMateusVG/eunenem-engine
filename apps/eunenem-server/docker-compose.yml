@@ -1,7 +1,6 @@
 services:
-  eunenem-server-cffaa0:
+  eunenem-server:
     build: .
-    container_name: eunenem-server-cffaa0
     restart: unless-stopped
     environment:
       - NODE_ENV=production
