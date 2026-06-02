@@ -5,11 +5,11 @@
   "type": "module",
   "description": "eunenem frontend — Hono serves SSR React with esbuild-bundled hydration. Side-deploy of the engine repo.",
   "scripts": {
-    "dev": "concurrently -k -n build,server -c blue,magenta \"node --env-file=.env build.mjs --watch\" \"tsx watch --env-file=.env server.tsx\"",
-    "build": "node --env-file=.env build.mjs",
-    "start": "NODE_ENV=production tsx --env-file=.env server.tsx",
+    "dev": "concurrently -k -n build,server -c blue,magenta \"node --env-file-if-exists=.env build.mjs --watch\" \"tsx watch --env-file-if-exists=.env server.tsx\"",
+    "build": "node --env-file-if-exists=.env build.mjs",
+    "start": "NODE_ENV=production tsx --env-file-if-exists=.env server.tsx",
     "typecheck": "tsc --noEmit",
-    "auth-smoke": "tsx --env-file=.env scripts/auth-smoke.ts"
+    "auth-smoke": "tsx --env-file-if-exists=.env scripts/auth-smoke.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",

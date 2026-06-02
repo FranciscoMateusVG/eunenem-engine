@@ -5,7 +5,10 @@ services:
   # see Dockerfile + setup.ts:167-169 for the build-time-inline rationale).
   eunenem-server:
     build:
-      context: .
+      # Repo root — Dockerfile COPYs both apps/eunenem-server/ AND src/
+      # because the app uses relative cross-app imports (../../../../src/...).
+      context: ../../
+      dockerfile: apps/eunenem-server/Dockerfile
       args:
         STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
     restart: unless-stopped
