@@ -20,6 +20,7 @@ const approvedPaymentInput: EfeitosFinanceirosPagamentoAprovado = {
   idContribuicao,
   idCampanha,
   statusPagamento: 'aprovado',
+  metodo: 'pix', // aperture-led0r
   composicaoValores: {
     contributionAmountCents: 8000,
     feeAmountCents: 400,
@@ -87,6 +88,7 @@ describe('LivroFinanceiroRepositoryMemory', () => {
     idContribuicao: '550e8400-e29b-41d4-a716-446655443102',
     idCampanha: '550e8400-e29b-41d4-a716-446655443103',
     statusPagamento: 'aprovado',
+    metodo: 'credit_card', // aperture-led0r — cartao path
     composicaoValores: {
       contributionAmountCents: 4500,
       feeAmountCents: 225,

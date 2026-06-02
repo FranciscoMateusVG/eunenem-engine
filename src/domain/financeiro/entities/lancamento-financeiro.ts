@@ -1,6 +1,7 @@
 import { z } from 'zod/v4';
 import { type IdCampanha, IdCampanhaSchema } from '../../arrecadacao/value-objects/ids.js';
 import { MoneyCentsSchema } from '../../money.js';
+import type { MetodoPagamento } from '../../pagamentos/value-objects/metodo-pagamento.js';
 import {
   type IdContribuicaoReferencia,
   IdContribuicaoReferenciaSchema,
@@ -8,6 +9,7 @@ import {
   type IdPagamentoReferencia,
   IdPagamentoReferenciaSchema,
 } from '../value-objects/ids.js';
+import { calcularMaturaEm } from '../value-objects/regra-maturacao.js';
 import type { SnapshotComposicaoValoresFinanceiro } from '../value-objects/snapshot-composicao-valores-financeiro.js';
 
 /**
@@ -52,6 +54,15 @@ export const LancamentoFinanceiroSchema = z.object({
   amountCents: MoneyCentsSchema,
   status: StatusLancamentoSchema,
   criadoEm: z.date(),
+  /**
+   * The moment at which this lancamento may flip from `pendente` to
+   * `disponivel` (aperture-led0r, plano 0006). Computed at factory time
+   * via `calcularMaturaEm(metodo, criadoEm)`; the maturation use-case
+   * queries `WHERE status='pendente' AND matura_em <= now()`. Persisted
+   * (not derived) so historical lancamentos retain their original
+   * maturation date even if the rule changes later.
+   */
+  maturaEm: z.date(),
 });
 
 export type LancamentoFinanceiro = Readonly<z.infer<typeof LancamentoFinanceiroSchema>>;
@@ -77,6 +88,13 @@ export interface EfeitosFinanceirosPagamentoAprovado {
   readonly idCampanha: IdCampanha;
   readonly statusPagamento: StatusPagamentoFinanceiro;
   readonly composicaoValores: SnapshotComposicaoValoresFinanceiro;
+  /**
+   * The pagamento `metodo` (aperture-led0r). Required to compute
+   * `maturaEm` per `REGRAS_MATURACAO_PADRAO`. The use-case caller
+   * (Stripe webhook handler / finalizarPagamentoAprovado) already has
+   * this on the Pagamento aggregate and passes it through.
+   */
+  readonly metodo: MetodoPagamento;
 }
 
 export function validarComposicaoFinanceiraPagamentoAprovado(
@@ -116,34 +134,34 @@ export function validarComposicaoFinanceiraPagamentoAprovado(
  * Build the lancamentos for a freshly-aprovado pagamento.
  *
  * Returns 2 lancamentos for PIX (`surchargeCents === 0`) — recebedor +
- * receita_plataforma — preserving the pre-bjshv behavior. Returns 3
- * lancamentos for cartao (`surchargeCents > 0`) — adds a
- * `credito_passthrough_surcharge` entry so the book balances against
- * `totalPaidCents` (aperture-bjshv).
+ * receita_plataforma. Returns 3 for cartao (`surchargeCents > 0`) —
+ * adds a `credito_passthrough_surcharge` entry so the book balances
+ * against `totalPaidCents` (aperture-bjshv).
  *
- * Book-balance invariant (aperture-bjshv): once this returns,
- * `SUM(amountCents over all returned lancamentos) === totalPaidCents` for
- * BOTH paths. The composicao-input invariant
+ * Book-balance invariant: once this returns,
+ * `SUM(amountCents over all returned lancamentos) === totalPaidCents`
+ * for BOTH paths. The composicao-input invariant
  * (`receiverAmountCents + feeAmountCents + surchargeCents === totalPaidCents`)
- * is enforced upstream by `validarComposicaoFinanceiraPagamentoAprovado`.
+ * is enforced upstream by `validarComposicaoFinanceiraPagamentoAprovado`;
+ * the third lancamento makes it true on the OUTPUT side too.
  *
- * When `surchargeCents > 0`, `idsLancamentos.idLancamentoPassthroughSurcharge`
- * MUST be defined — absence under that condition throws a clear error so
- * use-case-level UUID minting bugs surface at factory-time, not at
- * adapter-time with a confusing schema error.
- *
- * The passthrough lancamento starts `pendente` per the bead spec (Stripe
- * hasn't actually deducted the surcharge from us at aprovado-time — the
- * maturation rule per plano 0006 is Finding #2's territory; this factory
- * does NOT speculate). The existing `receita_plataforma` entry retains
- * its current `disponivel` status to avoid touching the maturation
- * question here.
+ * Maturation (aperture-led0r, plano 0006): every emitted lancamento
+ * starts `status: 'pendente'` — including `credito_receita_plataforma`,
+ * which prior to led0r hardcoded `disponivel` (the Finding #2 bug). The
+ * `maturaEm` field is computed ONCE per pagamento via
+ * `calcularMaturaEm(input.metodo, criadoEm)` and stamped on every
+ * emitted row (same Stripe payout governs all of them). The
+ * `maturarLancamentosPendentes` use-case flips matured rows to
+ * `disponivel`. Until the cron lands per plano 0005, the flip is
+ * manual; the admin UI surfaces the gap.
  *
  * idCampanha is populated on `recebedor` (today's behavior) AND on
- * `passthrough` (per bead spec — "inherit from input"), but NOT on
+ * `passthrough` (per bjshv spec — "inherit from input"), but NOT on
  * `receita_plataforma` (today's behavior — platform revenue isn't tied
- * to a specific campanha at the lancamento level). The receita
- * exclusion is unchanged to keep this bead's blast radius minimal.
+ * to a specific campanha at the lancamento level).
+ *
+ * When `surchargeCents > 0`, `idsLancamentos.idLancamentoPassthroughSurcharge`
+ * MUST be defined — absence under that condition throws a clear error.
  */
 export function criarLancamentosParaPagamentoAprovado(
   input: EfeitosFinanceirosPagamentoAprovado,
@@ -151,6 +169,12 @@ export function criarLancamentosParaPagamentoAprovado(
   criadoEm: Date,
 ): readonly LancamentoFinanceiro[] {
   validarComposicaoFinanceiraPagamentoAprovado(input);
+
+  // aperture-led0r: compute maturaEm ONCE per pagamento. All emitted
+  // lancamentos share the same maturation date because they're
+  // governed by the same Stripe payout schedule. Throws on unknown
+  // metodo (e.g. boleto added without an entry in REGRAS_MATURACAO_PADRAO).
+  const maturaEm = calcularMaturaEm(input.metodo, criadoEm);
 
   const lancamentoRecebedor: LancamentoFinanceiro = {
     id: idsLancamentos.idLancamentoRecebedor,
@@ -161,16 +185,21 @@ export function criarLancamentosParaPagamentoAprovado(
     amountCents: input.composicaoValores.receiverAmountCents,
     status: 'pendente',
     criadoEm,
+    maturaEm,
   };
 
+  // aperture-led0r Finding #2 fix: receita_plataforma now starts
+  // 'pendente'. Prior to led0r this hardcoded 'disponivel' — the bug.
+  // All tipos governed by the same Stripe payout schedule per the epic.
   const lancamentoReceita: LancamentoFinanceiro = {
     id: idsLancamentos.idLancamentoReceitaPlataforma,
     idPagamento: input.idPagamento,
     idContribuicao: input.idContribuicao,
     tipo: 'credito_receita_plataforma',
     amountCents: input.composicaoValores.feeAmountCents,
-    status: 'disponivel',
+    status: 'pendente',
     criadoEm,
+    maturaEm,
   };
 
   // PIX path — no surcharge, no third lancamento. Book balance:
@@ -194,11 +223,10 @@ export function criarLancamentosParaPagamentoAprovado(
     amountCents: input.composicaoValores.surchargeCents,
     status: 'pendente',
     criadoEm,
+    maturaEm,
   };
 
   // Book balance (cartao): recebedor (= contribution) + receita (= fee) +
-  // passthrough (= surcharge) === totalPaid. Validated upstream on the
-  // composicao input; the third lancamento makes it true on the
-  // OUTPUT side too.
+  // passthrough (= surcharge) === totalPaid.
   return [lancamentoRecebedor, lancamentoReceita, lancamentoPassthrough];
 }

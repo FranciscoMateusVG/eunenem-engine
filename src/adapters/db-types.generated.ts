@@ -87,6 +87,7 @@ export interface LancamentosFinanceiros {
   id_campanha: string | null;
   id_contribuicao: string;
   id_pagamento: string;
+  matura_em: Timestamp;
   status: string;
   tipo: string;
 }

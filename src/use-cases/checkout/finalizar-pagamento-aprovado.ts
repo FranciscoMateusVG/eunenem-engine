@@ -208,6 +208,10 @@ export async function finalizarPagamentoAprovado(
             idCampanha: campanha.id,
             statusPagamento: 'aprovado',
             composicaoValores: aprovado.intencao.composicaoValores,
+            // aperture-led0r: pass metodo through so Financeiro can
+            // compute maturaEm per REGRAS_MATURACAO_PADRAO. Already on
+            // the Pagamento aggregate's intencao.
+            metodo: aprovado.intencao.metodo,
           },
         );
       }

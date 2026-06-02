@@ -21,6 +21,8 @@ const inputPagamentoAprovado: EfeitosFinanceirosPagamentoAprovado = {
   idContribuicao,
   idCampanha,
   statusPagamento: 'aprovado',
+  // aperture-led0r: metodo required to compute maturaEm via REGRAS_MATURACAO_PADRAO.
+  metodo: 'pix',
   composicaoValores: {
     contributionAmountCents: 8000,
     feeAmountCents: 400,
@@ -31,6 +33,9 @@ const inputPagamentoAprovado: EfeitosFinanceirosPagamentoAprovado = {
   },
 };
 
+// aperture-led0r: PIX maturaEm = criadoEm + 1h per REGRAS_MATURACAO_PADRAO.
+const maturaEmPix = new Date('2026-05-01T13:00:00.000Z');
+
 describe('criarLancamentosParaPagamentoAprovado', () => {
   it('creates receiver balance and platform revenue entries for the canonical flow', () => {
     const lancamentos = criarLancamentosParaPagamentoAprovado(
@@ -39,6 +44,8 @@ describe('criarLancamentosParaPagamentoAprovado', () => {
       criadoEm,
     );
 
+    // aperture-led0r: receita_plataforma now starts 'pendente' (Finding #2 fix);
+    // both lancamentos carry maturaEm = criadoEm + 1h (PIX rule).
     expect(lancamentos).toEqual([
       {
         id: idLancamentoRecebedor,
@@ -49,6 +56,7 @@ describe('criarLancamentosParaPagamentoAprovado', () => {
         amountCents: 8000,
         status: 'pendente',
         criadoEm,
+        maturaEm: maturaEmPix,
       },
       {
         id: idLancamentoReceitaPlataforma,
@@ -56,8 +64,9 @@ describe('criarLancamentosParaPagamentoAprovado', () => {
         idContribuicao,
         tipo: 'credito_receita_plataforma',
         amountCents: 400,
-        status: 'disponivel',
+        status: 'pendente',
         criadoEm,
+        maturaEm: maturaEmPix,
       },
     ]);
   });
@@ -131,6 +140,8 @@ describe('criarLancamentosParaPagamentoAprovado', () => {
   it('cartao (surchargeCents>0) emits 3 lancamentos and book balances (aperture-bjshv)', () => {
     const inputCartao = {
       ...inputPagamentoAprovado,
+      // aperture-led0r: cartao path → credit_card metodo → maturaEm = +30 days.
+      metodo: 'credit_card' as const,
       composicaoValores: {
         contributionAmountCents: 4500,
         feeAmountCents: 225,
@@ -175,6 +186,8 @@ describe('criarLancamentosParaPagamentoAprovado', () => {
       criarLancamentosParaPagamentoAprovado(
         {
           ...inputPagamentoAprovado,
+          // aperture-led0r: cartao → credit_card.
+          metodo: 'credit_card',
           composicaoValores: {
             contributionAmountCents: 4500,
             feeAmountCents: 225,

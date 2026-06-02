@@ -1,4 +1,5 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
+import { sql } from 'kysely';
 import type { IdCampanha } from '../../domain/arrecadacao/value-objects/ids.js';
 import {
   type LancamentoFinanceiro,
@@ -10,6 +11,7 @@ import {
 } from '../../domain/financeiro/entities/repasse-recebedor.js';
 import type { DadosRecebedorAtivo } from '../../domain/financeiro/value-objects/dados-recebedor-ativo.js';
 import type {
+  IdLancamentoFinanceiro,
   IdPagamentoReferencia,
   IdRepasse,
 } from '../../domain/financeiro/value-objects/ids.js';
@@ -57,6 +59,7 @@ type LancamentoRow = {
   amount_cents: number;
   status: string;
   criado_em: Date;
+  matura_em: Date;
 };
 
 type RepasseRow = {
@@ -217,6 +220,65 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
     );
   }
 
+  async findPendentesMaturos(now: Date): Promise<readonly LancamentoFinanceiro[]> {
+    return tracer.startActiveSpan(
+      'db.financeiro_livro.lancamentos.findPendentesMaturos',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+        try {
+          // aperture-led0r: status='pendente' AND matura_em ≤ now.
+          // Postgres uses the partial index
+          // `lancamentos_pendentes_maturos_idx ON (matura_em) WHERE
+          // status='pendente'` (migration 017) for selective scan.
+          // biome-ignore lint/suspicious/noExplicitAny: lancamentos_financeiros not yet in DB types
+          const rows = (await (this.db as any)
+            .selectFrom('lancamentos_financeiros')
+            .selectAll()
+            .where('status', '=', 'pendente')
+            .where('matura_em', '<=', now)
+            .execute()) as LancamentoRow[];
+
+          const result = rows.map(lancamentoFromRow);
+          span.setStatus({ code: SpanStatusCode.OK });
+          return result;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  async marcarComoDisponivel(idLancamento: IdLancamentoFinanceiro): Promise<void> {
+    return tracer.startActiveSpan(
+      'db.financeiro_livro.lancamentos.marcarComoDisponivel',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+        try {
+          // aperture-led0r: idempotent flip — UPDATE matches zero rows
+          // when the row is already disponivel (the WHERE clause filters
+          // by current status). No exception, no audit-trail noise.
+          await sql`
+            UPDATE lancamentos_financeiros
+              SET status = 'disponivel'
+              WHERE id = ${idLancamento}
+                AND status = 'pendente'
+          `.execute(this.db);
+          span.setStatus({ code: SpanStatusCode.OK });
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
   async saveRepasse(repasse: RepasseRecebedor): Promise<void> {
     return tracer.startActiveSpan('db.financeiro_livro.repasses.save', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'INSERT' });
@@ -325,6 +387,7 @@ function rowFromLancamento(l: LancamentoFinanceiro): Record<string, unknown> {
     amount_cents: l.amountCents,
     status: l.status,
     criado_em: l.criadoEm,
+    matura_em: l.maturaEm,
   };
 }
 
@@ -339,6 +402,7 @@ function lancamentoFromRow(row: LancamentoRow): LancamentoFinanceiro {
     amountCents: row.amount_cents,
     status: row.status,
     criadoEm: row.criado_em,
+    maturaEm: row.matura_em,
   });
 }
 

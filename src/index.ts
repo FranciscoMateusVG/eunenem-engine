@@ -183,6 +183,12 @@ export {
 } from './domain/financeiro/entities/repasse-recebedor.js';
 export type { DadosRecebedorAtivo } from './domain/financeiro/value-objects/dados-recebedor-ativo.js';
 export { DadosRecebedorAtivoSchema } from './domain/financeiro/value-objects/dados-recebedor-ativo.js';
+// aperture-led0r: maturation rule.
+export type { RegraMaturacao } from './domain/financeiro/value-objects/regra-maturacao.js';
+export {
+  calcularMaturaEm,
+  REGRAS_MATURACAO_PADRAO,
+} from './domain/financeiro/value-objects/regra-maturacao.js';
 export type {
   IdContribuicaoReferencia as IdContribuicaoReferenciaFinanceiro,
   IdLancamentoFinanceiro,
@@ -574,6 +580,13 @@ export {
   ObterSaldoRecebedorInputSchema,
   obterSaldoRecebedor,
 } from './use-cases/financeiro/obter-saldo-recebedor.js';
+// aperture-led0r: maturation use-case.
+export type {
+  MaturarLancamentosPendentesDeps,
+  MaturarLancamentosPendentesInput,
+  MaturarLancamentosPendentesOutput,
+} from './use-cases/financeiro/maturar-lancamentos-pendentes.js';
+export { maturarLancamentosPendentes } from './use-cases/financeiro/maturar-lancamentos-pendentes.js';
 export type {
   RegistrarEfeitosFinanceirosPagamentoAprovadoDeps,
   RegistrarEfeitosFinanceirosPagamentoAprovadoInput,

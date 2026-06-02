@@ -57,6 +57,10 @@ function makeLancamentoRecebedor(overrides?: Partial<LancamentoFinanceiro>): Lan
     amountCents: 1000,
     status: 'pendente',
     criadoEm: new Date('2026-05-31T12:00:00Z'),
+    // aperture-led0r: maturaEm required post-led0r. Default to criadoEm
+    // for fixtures — tests that care about pendente/disponivel maturation
+    // boundary override per-row.
+    maturaEm: new Date('2026-05-31T12:00:00Z'),
     ...overrides,
   };
 }
@@ -71,6 +75,7 @@ function makeLancamentoReceita(overrides?: Partial<LancamentoFinanceiro>): Lanca
     amountCents: 100,
     status: 'disponivel',
     criadoEm: new Date('2026-05-31T12:00:00Z'),
+    maturaEm: new Date('2026-05-31T12:00:00Z'),
     ...overrides,
   };
 }
@@ -226,6 +231,8 @@ describe('LivroFinanceiroRepositoryPostgres — lancamentos', () => {
       amountCents: 224,
       status: 'pendente',
       criadoEm: new Date('2026-06-02T12:00:00Z'),
+      // aperture-led0r: maturaEm required post-led0r.
+      maturaEm: new Date('2026-06-02T12:00:00Z'),
       ...overrides,
     };
   }
@@ -386,4 +393,74 @@ describe('LivroFinanceiroRepositoryPostgres — findRecebedorAtivoPorIdCampanha'
   // tests for the Arrecadação postgres adapter + the broader saga flow
   // tests (fluxo-jornada-completa.test.ts). Kept here as a focused unit
   // would duplicate that coverage without adding signal.
+});
+
+// ───── aperture-led0r: findPendentesMaturos + marcarComoDisponivel ─────
+
+describe('LivroFinanceiroRepositoryPostgres — maturation (aperture-led0r)', () => {
+  let repo: LivroFinanceiroRepositoryPostgres;
+
+  beforeEach(async () => {
+    // biome-ignore lint/suspicious/noExplicitAny: tables not yet in generated types
+    await (testDb.db as any).deleteFrom('lancamentos_financeiros').execute();
+    repo = new LivroFinanceiroRepositoryPostgres(testDb.db);
+  });
+
+  function makeMaturedRow(maturaEm: Date, status: 'pendente' | 'disponivel' = 'pendente') {
+    return {
+      id: randomUUID() as IdLancamentoFinanceiro,
+      idPagamento: randomUUID() as IdPagamentoReferencia,
+      idContribuicao: randomUUID() as IdContribuicaoReferencia,
+      idCampanha: randomUUID() as IdCampanha,
+      tipo: 'credito_saldo_recebedor' as const,
+      amountCents: 1000,
+      status,
+      criadoEm: new Date('2026-05-01T00:00:00Z'),
+      maturaEm,
+    };
+  }
+
+  it('findPendentesMaturos returns ONLY pendente rows with maturaEm ≤ now (aperture-led0r)', async () => {
+    const matureInPast = makeMaturedRow(new Date('2026-05-15T00:00:00Z'));
+    const matureExactlyNow = makeMaturedRow(new Date('2026-06-01T00:00:00Z'));
+    const futureMature = makeMaturedRow(new Date('2026-12-31T00:00:00Z'));
+    const alreadyDisponivelStale = makeMaturedRow(
+      new Date('2026-01-01T00:00:00Z'),
+      'disponivel',
+    );
+
+    await repo.saveLancamentos([matureInPast, matureExactlyNow, futureMature, alreadyDisponivelStale]);
+
+    const found = await repo.findPendentesMaturos(new Date('2026-06-01T00:00:00Z'));
+    const ids = found.map((l) => l.id).sort();
+    expect(ids).toEqual([matureInPast.id, matureExactlyNow.id].sort());
+  });
+
+  it('marcarComoDisponivel flips a pendente row to disponivel (aperture-led0r)', async () => {
+    const pendente = makeMaturedRow(new Date('2026-05-15T00:00:00Z'));
+    await repo.saveLancamentos([pendente]);
+
+    await repo.marcarComoDisponivel(pendente.id);
+
+    const found = await repo.findLancamentosByIdPagamento(pendente.idPagamento);
+    expect(found[0]?.status).toBe('disponivel');
+  });
+
+  it('marcarComoDisponivel is idempotent on already-disponivel rows (aperture-led0r)', async () => {
+    const disponivel = makeMaturedRow(new Date('2026-05-15T00:00:00Z'), 'disponivel');
+    await repo.saveLancamentos([disponivel]);
+
+    // Call twice — neither should throw, neither should mutate (already disponivel).
+    await expect(repo.marcarComoDisponivel(disponivel.id)).resolves.not.toThrow();
+    await expect(repo.marcarComoDisponivel(disponivel.id)).resolves.not.toThrow();
+
+    const found = await repo.findLancamentosByIdPagamento(disponivel.idPagamento);
+    expect(found[0]?.status).toBe('disponivel');
+  });
+
+  it('marcarComoDisponivel on unknown id is a no-op (aperture-led0r)', async () => {
+    await expect(
+      repo.marcarComoDisponivel(randomUUID() as IdLancamentoFinanceiro),
+    ).resolves.not.toThrow();
+  });
 });

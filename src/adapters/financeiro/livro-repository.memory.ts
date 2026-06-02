@@ -119,6 +119,58 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
     );
   }
 
+  async findPendentesMaturos(now: Date): Promise<readonly LancamentoFinanceiro[]> {
+    return tracer.startActiveSpan(
+      'db.financeiro_livro.lancamentos.findPendentesMaturos',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+        try {
+          // aperture-led0r: status='pendente' AND maturaEm ≤ now.
+          // Less-than-or-equal-to semantics — a row whose maturaEm
+          // equals exactly `now` is considered matured (the bead's
+          // boundary test pins this).
+          const result = [...this.lancamentos.values()].filter(
+            (l) => l.status === 'pendente' && l.maturaEm.getTime() <= now.getTime(),
+          );
+          span.setStatus({ code: SpanStatusCode.OK });
+          return result;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  async marcarComoDisponivel(idLancamento: IdLancamentoFinanceiro): Promise<void> {
+    return tracer.startActiveSpan(
+      'db.financeiro_livro.lancamentos.marcarComoDisponivel',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+        try {
+          const existing = this.lancamentos.get(idLancamento);
+          if (!existing || existing.status === 'disponivel') {
+            // Idempotent — no-op on unknown id OR already-disponivel
+            // (matches the postgres UPDATE-matches-zero-rows semantics).
+            span.setStatus({ code: SpanStatusCode.OK });
+            return;
+          }
+          this.lancamentos.set(idLancamento, { ...existing, status: 'disponivel' });
+          span.setStatus({ code: SpanStatusCode.OK });
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
   async saveRepasse(repasse: RepasseRecebedor): Promise<void> {
     return tracer.startActiveSpan('db.financeiro_livro.repasses.save', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'INSERT' });

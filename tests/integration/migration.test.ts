@@ -110,10 +110,45 @@ describe('Migration round-trip', () => {
     const conNames = webhookConstraints.map((c: Record<string, unknown>) => c.conname);
     expect(conNames).toContain('payment_webhook_events_provider_event_id_uniq');
 
-    // Migrate down (latest migration first). aperture-1n6u8 added the
-    // payment_webhook_events table (016) on top of bjshv passthrough_surcharge
-    // (015), vcen4 ip widen (014), paginated-indexes (013), financeiro
-    // (012), pagamentos (011), slug (010), better-auth (009), usuario (008).
+    // aperture-led0r added matura_em column + partial index (017).
+    const maturaEmCol = (await db
+      .selectFrom('information_schema.columns' as never)
+      .select(['is_nullable' as never, 'data_type' as never])
+      .where('table_schema' as never, '=', 'public' as never)
+      .where('table_name' as never, '=', 'lancamentos_financeiros' as never)
+      .where('column_name' as never, '=', 'matura_em' as never)
+      .executeTakeFirst()) as { is_nullable: string; data_type: string } | undefined;
+    expect(maturaEmCol?.data_type).toBe('timestamp with time zone');
+    expect(maturaEmCol?.is_nullable).toBe('NO');
+    const lancamentoIndexes = await db
+      .selectFrom('pg_indexes' as never)
+      .select('indexname' as never)
+      .where('schemaname' as never, '=', 'public' as never)
+      .where('tablename' as never, '=', 'lancamentos_financeiros' as never)
+      .execute();
+    const lancamentoIdxNames = lancamentoIndexes.map(
+      (i: Record<string, unknown>) => i.indexname,
+    );
+    expect(lancamentoIdxNames).toContain('lancamentos_pendentes_maturos_idx');
+
+    // Migrate down (latest migration first). aperture-led0r added the
+    // matura_em column (017) on top of webhook archive (016), bjshv
+    // passthrough_surcharge (015), vcen4 ip widen (014), paginated-indexes
+    // (013), financeiro (012), pagamentos (011), slug (010), better-auth
+    // (009), usuario (008).
+    const downMaturaEm = await migrator.migrateDown();
+    expect(downMaturaEm.error).toBeUndefined();
+
+    // After down on 017, matura_em column + partial index are gone.
+    const maturaEmAfterDown = await db
+      .selectFrom('information_schema.columns' as never)
+      .select(['column_name' as never])
+      .where('table_schema' as never, '=', 'public' as never)
+      .where('table_name' as never, '=', 'lancamentos_financeiros' as never)
+      .where('column_name' as never, '=', 'matura_em' as never)
+      .execute();
+    expect(maturaEmAfterDown).toHaveLength(0);
+
     const downWebhookEvents = await migrator.migrateDown();
     expect(downWebhookEvents.error).toBeUndefined();
 

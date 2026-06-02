@@ -76,6 +76,10 @@ async function setupCampanhaComSaldoDisponivel(
       amountCents: disponivelAmountCents,
       status: 'disponivel',
       criadoEm: fixedDate,
+      // aperture-led0r: maturaEm required on all lancamentos. Already
+      // matured here (= criadoEm) so the test continues to exercise the
+      // disponivel path.
+      maturaEm: fixedDate,
     };
     await livroFinanceiroRepository.saveLancamentos([lancamento]);
   }

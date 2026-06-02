@@ -34,9 +34,12 @@ function makeApprovedPaymentInput(
     idContribuicao,
     idCampanha,
     statusPagamento: 'aprovado',
+    // aperture-led0r: metodo required to compute maturaEm.
+    metodo: 'pix',
     composicaoValores: {
       contributionAmountCents: 8000,
       feeAmountCents: 400,
+      surchargeCents: 0,
       totalPaidCents: 8400,
       receiverAmountCents: 8000,
       responsavelTaxa: 'contribuinte',
@@ -127,6 +130,9 @@ describe('financial use cases', () => {
       amountCents: 5000,
       status: 'disponivel',
       criadoEm: fixedDate,
+      // aperture-led0r: maturaEm required on all lancamentos post-led0r.
+      // Already matured (= criadoEm) since this entry is meant to be `disponivel`.
+      maturaEm: fixedDate,
     };
     await livroFinanceiroRepository.saveLancamentos([availableEntry]);
 
