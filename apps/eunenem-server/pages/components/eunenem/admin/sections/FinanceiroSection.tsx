@@ -1,27 +1,34 @@
 import { DddBadge } from "@/components/eunenem/admin/DddBadge";
+import { LancamentosList } from "@/components/eunenem/admin/LancamentosList";
 
 /**
- * FinanceiroSection — PLACEHOLDER ship (aperture-rsidz.4, W3).
+ * FinanceiroSection — FILLED ship (aperture-rsidz.6, W5).
  *
- * Part of the locked W3 → W4 → W5 seam contract on /admin/contribuicao/:idContribuicao.
- * W3 ships this file as a pure placeholder shell so the operator sees the
- * Financeiro BC color identity (purple DddBadge) is already present —
- * no visual jump when W5 (aperture-rsidz.6) file-swaps the final
- * implementation in. The default-export signature is non-negotiable;
- * W5 reuses it verbatim.
+ * Bottom section of /admin/contribuicao/:idContribuicao. Renders the
+ * Financeiro BC's lancamento ledger for the contribuicao: one block per
+ * pagamento, double-entry row pair (saldo do recebedor + receita da
+ * plataforma) for aprovado pagamentos, explicit "sem lançamentos"
+ * affordance for pendente/rejeitado.
  *
- * Contract (seam-locked):
+ * This is the LEAF of the DDD-trace drill-down (Arrecadação → Pagamentos
+ * → Financeiro) — the operator-visible payoff of the BC discipline. The
+ * double-entry visualization is intentional: every aprovado pagamento
+ * books two ledger entries, and the UI makes that booking discipline
+ * legible at a glance.
+ *
+ * File-swaps the W3 placeholder ship (aperture-rsidz.4). Seam contract is
+ * preserved verbatim:
  *   - Default export `({ idContribuicao }) => JSX.Element`
  *   - Root element carries `data-bc="financeiro"`
- *   - Renders the DddBadge header so BC wayfinding stays consistent
- *   - No internal state, no tRPC, no side effects — pure shell
+ *   - DddBadge header (purple/Financeiro) stays for BC wayfinding
  *
- * When W5 lands, this file is overwritten in full. Do NOT couple any
- * downstream code to its current shape — only to the section name +
- * default-export prop shape.
+ * Data layer: trpc.admin.financeiro.listByContribuicao composes server-side
+ * across Pagamentos → Financeiro (LivroFinanceiroRepositoryPostgres,
+ * aperture-id3ay). See LancamentosList for the rendering details and the
+ * status-lifecycle affordances.
  */
 export default function FinanceiroSection({
-  idContribuicao: _idContribuicao,
+  idContribuicao,
 }: {
   idContribuicao: string;
 }) {
@@ -35,14 +42,10 @@ export default function FinanceiroSection({
           </h2>
         </div>
         <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-mute">
-          preenchida por W5 (aperture-rsidz.6)
+          livro · lançamentos por pagamento
         </span>
       </div>
-      <div className="rounded-md border border-dashed border-line bg-paper px-5 py-12 text-center">
-        <p className="font-mono text-[12px] italic tracking-[0.04em] text-ink-mute">
-          Esta seção será preenchida por W5 (Financeiro).
-        </p>
-      </div>
+      <LancamentosList idContribuicao={idContribuicao} />
     </section>
   );
 }
