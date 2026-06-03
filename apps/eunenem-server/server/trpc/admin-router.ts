@@ -30,8 +30,8 @@ import type {
   IdConta,
   IdContribuicao,
 } from "../../../../src/domain/arrecadacao/value-objects/ids.js";
-import type { LancamentoFinanceiro } from "../../../../src/domain/financeiro/entities/lancamento-financeiro.js";
-import type { IdPagamentoReferencia } from "../../../../src/domain/financeiro/value-objects/ids.js";
+import type { LancamentoFinanceiro } from "../../../../src/domain/pagamentos/financeiro/entities/lancamento-financeiro.js";
+import type { IdPagamentoReferencia } from "../../../../src/domain/pagamentos/financeiro/value-objects/ids.js";
 import type { Pagamento } from "../../../../src/domain/pagamentos/entities/pagamento.js";
 import type { IdContribuicaoPagamento } from "../../../../src/domain/pagamentos/value-objects/ids.js";
 import { ID_PLATAFORMA_EUNENEM } from "../../../../src/index.js";

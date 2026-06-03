@@ -1,5 +1,5 @@
 import { z } from 'zod/v4';
-import { type IdCampanha, IdCampanhaSchema } from '../../arrecadacao/value-objects/ids.js';
+import { type IdCampanha, IdCampanhaSchema } from '../../../arrecadacao/value-objects/ids.js';
 import type { LancamentoFinanceiro } from '../entities/lancamento-financeiro.js';
 
 /**

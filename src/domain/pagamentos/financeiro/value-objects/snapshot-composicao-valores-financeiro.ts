@@ -1,5 +1,5 @@
 import { z } from 'zod/v4';
-import { MoneyCentsSchema } from '../../money.js';
+import { MoneyCentsSchema } from '../../../money.js';
 
 /**
  * Value object: snapshot of the value composition received by Financeiro from

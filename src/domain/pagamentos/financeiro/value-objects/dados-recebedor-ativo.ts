@@ -1,5 +1,5 @@
-import type { DadosRecebedor } from '../../arrecadacao/value-objects/dados-recebedor.js';
-import { DadosRecebedorSchema } from '../../arrecadacao/value-objects/dados-recebedor.js';
+import type { DadosRecebedor } from '../../../arrecadacao/value-objects/dados-recebedor.js';
+import { DadosRecebedorSchema } from '../../../arrecadacao/value-objects/dados-recebedor.js';
 
 /**
  * Value object: snapshot of the currently-active receiver's PIX data, as

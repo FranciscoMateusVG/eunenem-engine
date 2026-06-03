@@ -1,10 +1,10 @@
 import { SpanStatusCode } from '@opentelemetry/api';
-import type { LivroFinanceiroRepository } from '../../adapters/financeiro/livro-repository.js';
+import type { LivroFinanceiroRepository } from '../../../adapters/pagamentos/financeiro/livro-repository.js';
 import {
   calcularReceitaPlataforma,
   type ReceitaPlataforma,
-} from '../../domain/financeiro/value-objects/receita-plataforma.js';
-import type { Observability } from '../../observability/observability.js';
+} from '../../../domain/pagamentos/financeiro/value-objects/receita-plataforma.js';
+import type { Observability } from '../../../observability/observability.js';
 
 export interface ObterReceitaPlataformaDeps {
   readonly livroFinanceiroRepository: LivroFinanceiroRepository;

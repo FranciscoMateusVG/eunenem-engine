@@ -1,5 +1,5 @@
-import type { IdCampanha } from '../../domain/arrecadacao/value-objects/ids.js';
-import type { SaldoCentavos } from '../../domain/financeiro/value-objects/saldo-recebedor.js';
+import type { IdCampanha } from '../../../domain/arrecadacao/value-objects/ids.js';
+import type { SaldoCentavos } from '../../../domain/pagamentos/financeiro/value-objects/saldo-recebedor.js';
 
 export class FinanceiroSaldoDisponivelInsuficienteError extends Error {
   readonly name = 'FinanceiroSaldoDisponivelInsuficienteError';

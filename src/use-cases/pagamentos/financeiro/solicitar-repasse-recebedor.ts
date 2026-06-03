@@ -1,17 +1,17 @@
 import { SpanStatusCode } from '@opentelemetry/api';
 import { z } from 'zod/v4';
-import type { LivroFinanceiroRepository } from '../../adapters/financeiro/livro-repository.js';
-import { IdCampanhaSchema } from '../../domain/arrecadacao/value-objects/ids.js';
+import type { LivroFinanceiroRepository } from '../../../adapters/pagamentos/financeiro/livro-repository.js';
+import { IdCampanhaSchema } from '../../../domain/arrecadacao/value-objects/ids.js';
 import {
   criarRepasseRecebedorSolicitado,
   type RepasseRecebedor,
-} from '../../domain/financeiro/entities/repasse-recebedor.js';
-import { IdRepasseSchema } from '../../domain/financeiro/value-objects/ids.js';
-import { calcularSaldoRecebedor } from '../../domain/financeiro/value-objects/saldo-recebedor.js';
-import { MoneyCentsSchema } from '../../domain/money.js';
-import { FinanceiroInputInvalidoError } from '../../errors/financeiro/input-invalido.error.js';
-import { FinanceiroSaldoDisponivelInsuficienteError } from '../../errors/financeiro/saldo-disponivel-insuficiente.error.js';
-import type { Observability } from '../../observability/observability.js';
+} from '../../../domain/pagamentos/financeiro/entities/repasse-recebedor.js';
+import { IdRepasseSchema } from '../../../domain/pagamentos/financeiro/value-objects/ids.js';
+import { calcularSaldoRecebedor } from '../../../domain/pagamentos/financeiro/value-objects/saldo-recebedor.js';
+import { MoneyCentsSchema } from '../../../domain/money.js';
+import { FinanceiroInputInvalidoError } from '../../../errors/pagamentos/financeiro/input-invalido.error.js';
+import { FinanceiroSaldoDisponivelInsuficienteError } from '../../../errors/pagamentos/financeiro/saldo-disponivel-insuficiente.error.js';
+import type { Observability } from '../../../observability/observability.js';
 
 export const SolicitarRepasseRecebedorInputSchema = z.object({
   idRepasse: IdRepasseSchema,

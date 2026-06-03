@@ -1,12 +1,12 @@
-import type { IdCampanha } from '../../domain/arrecadacao/value-objects/ids.js';
-import type { LancamentoFinanceiro } from '../../domain/financeiro/entities/lancamento-financeiro.js';
-import type { RepasseRecebedor } from '../../domain/financeiro/entities/repasse-recebedor.js';
-import type { DadosRecebedorAtivo } from '../../domain/financeiro/value-objects/dados-recebedor-ativo.js';
+import type { IdCampanha } from '../../../domain/arrecadacao/value-objects/ids.js';
+import type { LancamentoFinanceiro } from '../../../domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
+import type { RepasseRecebedor } from '../../../domain/pagamentos/financeiro/entities/repasse-recebedor.js';
+import type { DadosRecebedorAtivo } from '../../../domain/pagamentos/financeiro/value-objects/dados-recebedor-ativo.js';
 import type {
   IdLancamentoFinanceiro,
   IdPagamentoReferencia,
   IdRepasse,
-} from '../../domain/financeiro/value-objects/ids.js';
+} from '../../../domain/pagamentos/financeiro/value-objects/ids.js';
 
 /**
  * Persistência do livro financeiro (porta).

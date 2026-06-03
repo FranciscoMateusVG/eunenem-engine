@@ -1,16 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { LivroFinanceiroRepositoryMemory } from '../../../src/adapters/financeiro/livro-repository.memory.js';
+import { LivroFinanceiroRepositoryMemory } from '../../../src/adapters/pagamentos/financeiro/livro-repository.memory.js';
 import {
   ID_PLATAFORMA_EUCASEI,
   ID_PLATAFORMA_EUNENEM,
 } from '../../../src/adapters/plataforma/repository.memory.js';
 import { desativarRecebedor } from '../../../src/domain/arrecadacao/entities/recebedor.js';
-import type { LancamentoFinanceiro } from '../../../src/domain/financeiro/entities/lancamento-financeiro.js';
+import type { LancamentoFinanceiro } from '../../../src/domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
 import { ArrecadacaoCampanhaNaoEncontradaError } from '../../../src/errors/arrecadacao/campanha-nao-encontrada.error.js';
 import { CheckoutCampanhaSemRecebedorError } from '../../../src/errors/checkout/campanha-sem-recebedor.error.js';
 import { CheckoutPlataformaMismatchError } from '../../../src/errors/checkout/plataforma-mismatch.error.js';
-import { FinanceiroSaldoDisponivelInsuficienteError } from '../../../src/errors/financeiro/saldo-disponivel-insuficiente.error.js';
+import { FinanceiroSaldoDisponivelInsuficienteError } from '../../../src/errors/pagamentos/financeiro/saldo-disponivel-insuficiente.error.js';
 import { NoopLogger } from '../../../src/observability/noop-logger.js';
 import { noopTracer } from '../../../src/observability/tracer.js';
 import { criarCampanha } from '../../../src/use-cases/arrecadacao/criar-campanha.js';

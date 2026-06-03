@@ -1,6 +1,6 @@
 import { z } from 'zod/v4';
-import { type IdCampanha, IdCampanhaSchema } from '../../arrecadacao/value-objects/ids.js';
-import { MoneyCentsSchema } from '../../money.js';
+import { type IdCampanha, IdCampanhaSchema } from '../../../arrecadacao/value-objects/ids.js';
+import { MoneyCentsSchema } from '../../../money.js';
 import {
   type IdContribuicaoReferencia,
   IdContribuicaoReferenciaSchema,

@@ -12,9 +12,9 @@ export { RecebedorRepositoryPostgres } from './adapters/arrecadacao/recebedor-re
 export type { CatRepository } from './adapters/cat-repository.js';
 export type { Database } from './adapters/database.js';
 export { createDatabase } from './adapters/database.js';
-export type { LivroFinanceiroRepository } from './adapters/financeiro/livro-repository.js';
-export { LivroFinanceiroRepositoryMemory } from './adapters/financeiro/livro-repository.memory.js';
-export { LivroFinanceiroRepositoryPostgres } from './adapters/financeiro/livro-repository.postgres.js';
+export type { LivroFinanceiroRepository } from './adapters/pagamentos/financeiro/livro-repository.js';
+export { LivroFinanceiroRepositoryMemory } from './adapters/pagamentos/financeiro/livro-repository.memory.js';
+export { LivroFinanceiroRepositoryPostgres } from './adapters/pagamentos/financeiro/livro-repository.postgres.js';
 // aperture-1n6u8: payment webhook event archive (infrastructure boundary).
 // aperture-2sp6m: findByPagamentoId + FindByPagamentoIdOptions for admin trail.
 export type {
@@ -163,7 +163,7 @@ export type {
   LancamentoFinanceiro,
   StatusPagamentoFinanceiro,
   TipoLancamentoFinanceiro,
-} from './domain/financeiro/entities/lancamento-financeiro.js';
+} from './domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
 export {
   criarLancamentosParaPagamentoAprovado,
   IdsLancamentosFinanceirosSchema,
@@ -171,19 +171,19 @@ export {
   StatusPagamentoFinanceiroSchema,
   TipoLancamentoFinanceiroSchema,
   validarComposicaoFinanceiraPagamentoAprovado,
-} from './domain/financeiro/entities/lancamento-financeiro.js';
+} from './domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
 export type {
   RepasseRecebedor,
   SolicitacaoRepasse,
   StatusRepasse,
-} from './domain/financeiro/entities/repasse-recebedor.js';
+} from './domain/pagamentos/financeiro/entities/repasse-recebedor.js';
 export {
   criarRepasseRecebedorSolicitado,
   RepasseRecebedorSchema,
   StatusRepasseSchema,
-} from './domain/financeiro/entities/repasse-recebedor.js';
-export type { DadosRecebedorAtivo } from './domain/financeiro/value-objects/dados-recebedor-ativo.js';
-export { DadosRecebedorAtivoSchema } from './domain/financeiro/value-objects/dados-recebedor-ativo.js';
+} from './domain/pagamentos/financeiro/entities/repasse-recebedor.js';
+export type { DadosRecebedorAtivo } from './domain/pagamentos/financeiro/value-objects/dados-recebedor-ativo.js';
+export { DadosRecebedorAtivoSchema } from './domain/pagamentos/financeiro/value-objects/dados-recebedor-ativo.js';
 // Plan 0015 (aperture-7pqee): maturation rule removed. Lançamento has no
 // FSM; predicted maturation dates replaced by observed transferidoEm /
 // canceladoEm columns. See plans/0015-contribuicao-pagamento-financeiro-collapse.md.
@@ -192,28 +192,28 @@ export type {
   IdLancamentoFinanceiro,
   IdPagamentoReferencia,
   IdRepasse,
-} from './domain/financeiro/value-objects/ids.js';
+} from './domain/pagamentos/financeiro/value-objects/ids.js';
 export {
   IdLancamentoFinanceiroSchema,
   IdPagamentoReferenciaSchema,
   IdRepasseSchema,
-} from './domain/financeiro/value-objects/ids.js';
-export type { ReceitaPlataforma } from './domain/financeiro/value-objects/receita-plataforma.js';
+} from './domain/pagamentos/financeiro/value-objects/ids.js';
+export type { ReceitaPlataforma } from './domain/pagamentos/financeiro/value-objects/receita-plataforma.js';
 export {
   calcularReceitaPlataforma,
   ReceitaPlataformaSchema,
-} from './domain/financeiro/value-objects/receita-plataforma.js';
+} from './domain/pagamentos/financeiro/value-objects/receita-plataforma.js';
 export type {
   SaldoCentavos,
   SaldoRecebedor,
-} from './domain/financeiro/value-objects/saldo-recebedor.js';
+} from './domain/pagamentos/financeiro/value-objects/saldo-recebedor.js';
 export {
   calcularSaldoRecebedor,
   SaldoCentavosSchema,
   SaldoRecebedorSchema,
-} from './domain/financeiro/value-objects/saldo-recebedor.js';
-export type { SnapshotComposicaoValoresFinanceiro } from './domain/financeiro/value-objects/snapshot-composicao-valores-financeiro.js';
-export { SnapshotComposicaoValoresFinanceiroSchema } from './domain/financeiro/value-objects/snapshot-composicao-valores-financeiro.js';
+} from './domain/pagamentos/financeiro/value-objects/saldo-recebedor.js';
+export type { SnapshotComposicaoValoresFinanceiro } from './domain/pagamentos/financeiro/value-objects/snapshot-composicao-valores-financeiro.js';
+export { SnapshotComposicaoValoresFinanceiroSchema } from './domain/pagamentos/financeiro/value-objects/snapshot-composicao-valores-financeiro.js';
 
 // --- Domain: Money ---
 
@@ -385,10 +385,10 @@ export { ArrecadacaoUltimoAdministradorError } from './errors/arrecadacao/ultimo
 export { CatAlreadyExistsError } from './errors/cat-already-exists.error.js';
 export { CheckoutCampanhaSemRecebedorError } from './errors/checkout/campanha-sem-recebedor.error.js';
 export { CheckoutPlataformaMismatchError } from './errors/checkout/plataforma-mismatch.error.js';
-export { FinanceiroInputInvalidoError } from './errors/financeiro/input-invalido.error.js';
-export { FinanceiroPagamentoJaRegistradoError } from './errors/financeiro/pagamento-ja-registrado.error.js';
-export { FinanceiroPagamentoNaoAprovadoError } from './errors/financeiro/pagamento-nao-aprovado.error.js';
-export { FinanceiroSaldoDisponivelInsuficienteError } from './errors/financeiro/saldo-disponivel-insuficiente.error.js';
+export { FinanceiroInputInvalidoError } from './errors/pagamentos/financeiro/input-invalido.error.js';
+export { FinanceiroPagamentoJaRegistradoError } from './errors/pagamentos/financeiro/pagamento-ja-registrado.error.js';
+export { FinanceiroPagamentoNaoAprovadoError } from './errors/pagamentos/financeiro/pagamento-nao-aprovado.error.js';
+export { FinanceiroSaldoDisponivelInsuficienteError } from './errors/pagamentos/financeiro/saldo-disponivel-insuficiente.error.js';
 export { InvalidCatNameError } from './errors/invalid-cat-name.error.js';
 export { PagamentosInputInvalidoError } from './errors/pagamentos/input-invalido.error.js';
 export { PagamentoJaExisteError } from './errors/pagamentos/ja-existe.error.js';
@@ -566,11 +566,11 @@ export type {
   MarcarLancamentoTransferidoDeps,
   MarcarLancamentoTransferidoInput,
   MarcarLancamentoTransferidoResult,
-} from './use-cases/financeiro/marcar-lancamento-transferido.js';
+} from './use-cases/pagamentos/financeiro/marcar-lancamento-transferido.js';
 export {
   MarcarLancamentoTransferidoInputSchema,
   marcarLancamentoTransferido,
-} from './use-cases/financeiro/marcar-lancamento-transferido.js';
+} from './use-cases/pagamentos/financeiro/marcar-lancamento-transferido.js';
 export type {
   IniciarRepasseRecebedorDeps,
   IniciarRepasseRecebedorInput,
@@ -592,35 +592,35 @@ export {
 } from './use-cases/checkout/obter-contribuicoes-precalculadas-campanha.js';
 export type { CreateCatDeps } from './use-cases/create-cat.js';
 export { createCat } from './use-cases/create-cat.js';
-export type { ObterReceitaPlataformaDeps } from './use-cases/financeiro/obter-receita-plataforma.js';
-export { obterReceitaPlataforma } from './use-cases/financeiro/obter-receita-plataforma.js';
+export type { ObterReceitaPlataformaDeps } from './use-cases/pagamentos/financeiro/obter-receita-plataforma.js';
+export { obterReceitaPlataforma } from './use-cases/pagamentos/financeiro/obter-receita-plataforma.js';
 export type {
   ObterSaldoRecebedorDeps,
   ObterSaldoRecebedorInput,
-} from './use-cases/financeiro/obter-saldo-recebedor.js';
+} from './use-cases/pagamentos/financeiro/obter-saldo-recebedor.js';
 export {
   ObterSaldoRecebedorInputSchema,
   obterSaldoRecebedor,
-} from './use-cases/financeiro/obter-saldo-recebedor.js';
+} from './use-cases/pagamentos/financeiro/obter-saldo-recebedor.js';
 // Plan 0015 (aperture-7pqee): maturarLancamentosPendentes removed.
 // Lançamento has no FSM; admin manually marks transferidoEm via the new
 // marcar-lancamento-transferido use-case (Phase 2).
 export type {
   RegistrarEfeitosFinanceirosPagamentoAprovadoDeps,
   RegistrarEfeitosFinanceirosPagamentoAprovadoInput,
-} from './use-cases/financeiro/registrar-efeitos-financeiros-pagamento-aprovado.js';
+} from './use-cases/pagamentos/financeiro/registrar-efeitos-financeiros-pagamento-aprovado.js';
 export {
   RegistrarEfeitosFinanceirosPagamentoAprovadoInputSchema,
   registrarEfeitosFinanceirosPagamentoAprovado,
-} from './use-cases/financeiro/registrar-efeitos-financeiros-pagamento-aprovado.js';
+} from './use-cases/pagamentos/financeiro/registrar-efeitos-financeiros-pagamento-aprovado.js';
 export type {
   SolicitarRepasseRecebedorDeps,
   SolicitarRepasseRecebedorInput,
-} from './use-cases/financeiro/solicitar-repasse-recebedor.js';
+} from './use-cases/pagamentos/financeiro/solicitar-repasse-recebedor.js';
 export {
   SolicitarRepasseRecebedorInputSchema,
   solicitarRepasseRecebedor,
-} from './use-cases/financeiro/solicitar-repasse-recebedor.js';
+} from './use-cases/pagamentos/financeiro/solicitar-repasse-recebedor.js';
 export type { AprovarPagamentoDeps } from './use-cases/pagamentos/aprovar-pagamento.js';
 export { aprovarPagamento } from './use-cases/pagamentos/aprovar-pagamento.js';
 export type {

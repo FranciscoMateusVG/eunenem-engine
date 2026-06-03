@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { LivroFinanceiroRepositoryMemory } from '../../../src/adapters/financeiro/livro-repository.memory.js';
+import { LivroFinanceiroRepositoryMemory } from '../../../src/adapters/pagamentos/financeiro/livro-repository.memory.js';
 import {
   criarLancamentosParaPagamentoAprovado,
   type EfeitosFinanceirosPagamentoAprovado,
-} from '../../../src/domain/financeiro/entities/lancamento-financeiro.js';
-import { criarRepasseRecebedorSolicitado } from '../../../src/domain/financeiro/entities/repasse-recebedor.js';
-import { FinanceiroPagamentoJaRegistradoError } from '../../../src/errors/financeiro/pagamento-ja-registrado.error.js';
+} from '../../../src/domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
+import { criarRepasseRecebedorSolicitado } from '../../../src/domain/pagamentos/financeiro/entities/repasse-recebedor.js';
+import { FinanceiroPagamentoJaRegistradoError } from '../../../src/errors/pagamentos/financeiro/pagamento-ja-registrado.error.js';
 
 const idPagamento = '550e8400-e29b-41d4-a716-446655442001';
 const idContribuicao = '550e8400-e29b-41d4-a716-446655442002';

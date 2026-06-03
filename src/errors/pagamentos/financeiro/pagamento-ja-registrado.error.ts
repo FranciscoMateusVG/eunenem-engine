@@ -1,4 +1,4 @@
-import type { IdPagamentoReferencia } from '../../domain/financeiro/value-objects/ids.js';
+import type { IdPagamentoReferencia } from '../../../domain/pagamentos/financeiro/value-objects/ids.js';
 
 export class FinanceiroPagamentoJaRegistradoError extends Error {
   public readonly code = 'FINANCEIRO_PAGAMENTO_JA_REGISTRADO' as const;

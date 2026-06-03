@@ -2,11 +2,11 @@ import { SpanStatusCode } from '@opentelemetry/api';
 import { z } from 'zod/v4';
 import type { CampanhaRepository } from '../../adapters/arrecadacao/campanha-repository.js';
 import type { ContribuicaoRepository } from '../../adapters/arrecadacao/contribuicao-repository.js';
-import type { LivroFinanceiroRepository } from '../../adapters/financeiro/livro-repository.js';
+import type { LivroFinanceiroRepository } from '../../adapters/pagamentos/financeiro/livro-repository.js';
 import type { PagamentoEventPublisher } from '../../adapters/pagamentos/event-publisher.js';
 import type { PagamentoProvider } from '../../adapters/pagamentos/provider.js';
 import type { PagamentoRepository } from '../../adapters/pagamentos/repository.js';
-import type { LancamentoFinanceiro } from '../../domain/financeiro/entities/lancamento-financeiro.js';
+import type { LancamentoFinanceiro } from '../../domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
 import type { Pagamento } from '../../domain/pagamentos/entities/pagamento.js';
 import { IdPagamentoSchema } from '../../domain/pagamentos/value-objects/ids.js';
 import { DadosContribuinteSchema } from '../../domain/pagamentos/value-objects/dados-contribuinte.js';
@@ -15,7 +15,7 @@ import { ArrecadacaoContribuicaoNaoEncontradaError } from '../../errors/arrecada
 import { PagamentoTransicaoStatusInvalidaError } from '../../errors/pagamentos/transicao-status-invalida.error.js';
 import type { Observability } from '../../observability/observability.js';
 import { aprovarPagamento } from '../pagamentos/aprovar-pagamento.js';
-import { registrarEfeitosFinanceirosPagamentoAprovado } from '../financeiro/registrar-efeitos-financeiros-pagamento-aprovado.js';
+import { registrarEfeitosFinanceirosPagamentoAprovado } from '../pagamentos/financeiro/registrar-efeitos-financeiros-pagamento-aprovado.js';
 
 export const FinalizarPagamentoAprovadoInputSchema = z.object({
   idPagamento: IdPagamentoSchema,

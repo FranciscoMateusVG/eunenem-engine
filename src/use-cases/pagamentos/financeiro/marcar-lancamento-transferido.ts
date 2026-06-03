@@ -1,9 +1,9 @@
 import { SpanStatusCode } from '@opentelemetry/api';
 import { z } from 'zod/v4';
-import type { LivroFinanceiroRepository } from '../../adapters/financeiro/livro-repository.js';
-import { IdLancamentoFinanceiroSchema } from '../../domain/financeiro/value-objects/ids.js';
-import { FinanceiroInputInvalidoError } from '../../errors/financeiro/input-invalido.error.js';
-import type { Observability } from '../../observability/observability.js';
+import type { LivroFinanceiroRepository } from '../../../adapters/pagamentos/financeiro/livro-repository.js';
+import { IdLancamentoFinanceiroSchema } from '../../../domain/pagamentos/financeiro/value-objects/ids.js';
+import { FinanceiroInputInvalidoError } from '../../../errors/pagamentos/financeiro/input-invalido.error.js';
+import type { Observability } from '../../../observability/observability.js';
 
 export const MarcarLancamentoTransferidoInputSchema = z.object({
   idsLancamentos: z.array(IdLancamentoFinanceiroSchema).min(1).max(500),

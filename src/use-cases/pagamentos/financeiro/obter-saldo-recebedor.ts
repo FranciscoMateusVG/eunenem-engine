@@ -1,13 +1,13 @@
 import { SpanStatusCode } from '@opentelemetry/api';
 import { z } from 'zod/v4';
-import type { LivroFinanceiroRepository } from '../../adapters/financeiro/livro-repository.js';
-import { IdCampanhaSchema } from '../../domain/arrecadacao/value-objects/ids.js';
+import type { LivroFinanceiroRepository } from '../../../adapters/pagamentos/financeiro/livro-repository.js';
+import { IdCampanhaSchema } from '../../../domain/arrecadacao/value-objects/ids.js';
 import {
   calcularSaldoRecebedor,
   type SaldoRecebedor,
-} from '../../domain/financeiro/value-objects/saldo-recebedor.js';
-import { FinanceiroInputInvalidoError } from '../../errors/financeiro/input-invalido.error.js';
-import type { Observability } from '../../observability/observability.js';
+} from '../../../domain/pagamentos/financeiro/value-objects/saldo-recebedor.js';
+import { FinanceiroInputInvalidoError } from '../../../errors/pagamentos/financeiro/input-invalido.error.js';
+import type { Observability } from '../../../observability/observability.js';
 
 export const ObterSaldoRecebedorInputSchema = z.object({
   idCampanha: IdCampanhaSchema,

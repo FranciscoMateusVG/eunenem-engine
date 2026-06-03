@@ -1,6 +1,6 @@
 import { SpanStatusCode } from '@opentelemetry/api';
 import { z } from 'zod/v4';
-import type { LivroFinanceiroRepository } from '../../adapters/financeiro/livro-repository.js';
+import type { LivroFinanceiroRepository } from '../../adapters/pagamentos/financeiro/livro-repository.js';
 import type { PagamentoEventPublisher } from '../../adapters/pagamentos/event-publisher.js';
 import type { PagamentoProvider } from '../../adapters/pagamentos/provider.js';
 import type { PagamentoRepository } from '../../adapters/pagamentos/repository.js';

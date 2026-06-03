@@ -6,10 +6,10 @@ export { ArrecadacaoInputInvalidoError } from './arrecadacao/input-invalido.erro
 export { ArrecadacaoOpcaoContribuicaoNaoEncontradaError } from './arrecadacao/opcao-contribuicao-nao-encontrada.error.js';
 export { ArrecadacaoOpcaoIdDuplicadoError } from './arrecadacao/opcao-id-duplicado.error.js';
 export { CatAlreadyExistsError } from './cat-already-exists.error.js';
-export { FinanceiroInputInvalidoError } from './financeiro/input-invalido.error.js';
-export { FinanceiroPagamentoJaRegistradoError } from './financeiro/pagamento-ja-registrado.error.js';
-export { FinanceiroPagamentoNaoAprovadoError } from './financeiro/pagamento-nao-aprovado.error.js';
-export { FinanceiroSaldoDisponivelInsuficienteError } from './financeiro/saldo-disponivel-insuficiente.error.js';
+export { FinanceiroInputInvalidoError } from './pagamentos/financeiro/input-invalido.error.js';
+export { FinanceiroPagamentoJaRegistradoError } from './pagamentos/financeiro/pagamento-ja-registrado.error.js';
+export { FinanceiroPagamentoNaoAprovadoError } from './pagamentos/financeiro/pagamento-nao-aprovado.error.js';
+export { FinanceiroSaldoDisponivelInsuficienteError } from './pagamentos/financeiro/saldo-disponivel-insuficiente.error.js';
 export { InvalidCatNameError } from './invalid-cat-name.error.js';
 export { PagamentosInputInvalidoError } from './pagamentos/input-invalido.error.js';
 export { PagamentoJaExisteError } from './pagamentos/ja-existe.error.js';

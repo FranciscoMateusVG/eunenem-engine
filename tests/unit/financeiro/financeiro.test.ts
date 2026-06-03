@@ -3,10 +3,10 @@ import {
   criarLancamentosParaPagamentoAprovado,
   type EfeitosFinanceirosPagamentoAprovado,
   type LancamentoFinanceiro,
-} from '../../../src/domain/financeiro/entities/lancamento-financeiro.js';
-import { criarRepasseRecebedorSolicitado } from '../../../src/domain/financeiro/entities/repasse-recebedor.js';
-import { calcularReceitaPlataforma } from '../../../src/domain/financeiro/value-objects/receita-plataforma.js';
-import { calcularSaldoRecebedor } from '../../../src/domain/financeiro/value-objects/saldo-recebedor.js';
+} from '../../../src/domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
+import { criarRepasseRecebedorSolicitado } from '../../../src/domain/pagamentos/financeiro/entities/repasse-recebedor.js';
+import { calcularReceitaPlataforma } from '../../../src/domain/pagamentos/financeiro/value-objects/receita-plataforma.js';
+import { calcularSaldoRecebedor } from '../../../src/domain/pagamentos/financeiro/value-objects/saldo-recebedor.js';
 
 /**
  * Plan 0015 (aperture-ucgok). Rewritten for the collapsed model:

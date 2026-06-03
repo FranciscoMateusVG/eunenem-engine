@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { LivroFinanceiroRepositoryMemory } from '../../../src/adapters/financeiro/livro-repository.memory.js';
-import type { LancamentoFinanceiro } from '../../../src/domain/financeiro/entities/lancamento-financeiro.js';
+import { LivroFinanceiroRepositoryMemory } from '../../../src/adapters/pagamentos/financeiro/livro-repository.memory.js';
+import type { LancamentoFinanceiro } from '../../../src/domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
 import { NoopLogger } from '../../../src/observability/noop-logger.js';
 import { noopTracer } from '../../../src/observability/tracer.js';
-import { marcarLancamentoTransferido } from '../../../src/use-cases/financeiro/marcar-lancamento-transferido.js';
-import { FinanceiroInputInvalidoError } from '../../../src/errors/financeiro/input-invalido.error.js';
+import { marcarLancamentoTransferido } from '../../../src/use-cases/pagamentos/financeiro/marcar-lancamento-transferido.js';
+import { FinanceiroInputInvalidoError } from '../../../src/errors/pagamentos/financeiro/input-invalido.error.js';
 
 const observability = { logger: new NoopLogger(), tracer: noopTracer() };
 

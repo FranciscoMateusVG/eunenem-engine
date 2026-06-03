@@ -23,17 +23,17 @@
 
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { LivroFinanceiroRepositoryPostgres } from '../../src/adapters/financeiro/livro-repository.postgres.js';
+import { LivroFinanceiroRepositoryPostgres } from '../../src/adapters/pagamentos/financeiro/livro-repository.postgres.js';
 import type { IdCampanha } from '../../src/domain/arrecadacao/value-objects/ids.js';
-import type { LancamentoFinanceiro } from '../../src/domain/financeiro/entities/lancamento-financeiro.js';
-import type { RepasseRecebedor } from '../../src/domain/financeiro/entities/repasse-recebedor.js';
+import type { LancamentoFinanceiro } from '../../src/domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
+import type { RepasseRecebedor } from '../../src/domain/pagamentos/financeiro/entities/repasse-recebedor.js';
 import type {
   IdContribuicaoReferencia,
   IdLancamentoFinanceiro,
   IdPagamentoReferencia,
   IdRepasse,
-} from '../../src/domain/financeiro/value-objects/ids.js';
-import { FinanceiroPagamentoJaRegistradoError } from '../../src/errors/financeiro/pagamento-ja-registrado.error.js';
+} from '../../src/domain/pagamentos/financeiro/value-objects/ids.js';
+import { FinanceiroPagamentoJaRegistradoError } from '../../src/errors/pagamentos/financeiro/pagamento-ja-registrado.error.js';
 import { createTestDatabase, type TestDatabase } from '../helpers/test-db.js';
 
 let testDb: TestDatabase;
