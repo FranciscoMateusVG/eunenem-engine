@@ -15,9 +15,26 @@ services:
     depends_on:
       eunenem-db:
         condition: service_healthy
+    # Env wire-through: Dokploy writes its env block to `.env` at the build
+    # context root, which the server reads via `tsx --env-file-if-exists=.env`
+    # at PWD /app/apps/eunenem-server. BUT PID 1's environment stays bare,
+    # so `docker exec ... pnpm db:migrate` (which inherits PID 1 env) falls
+    # back to dev defaults → ECONNREFUSED. Wiring through here makes
+    # docker-compose interpolate from Dokploy's .env at deploy-time AND
+    # inject into the container env → docker exec inherits them.
+    # See dokploy-api skill §12 "compose env layer-skip".
     environment:
       - NODE_ENV=production
       - PORT=3001
+      - DATABASE_URL=${DATABASE_URL:-}
+      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:-}
+      - BETTER_AUTH_URL=${BETTER_AUTH_URL:-}
+      - TRUSTED_ORIGINS=${TRUSTED_ORIGINS:-}
+      - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY:-}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
+      - LOG_PII_HASH_SALT=${LOG_PII_HASH_SALT:-}
+      - TRUSTED_HOP_COUNT=${TRUSTED_HOP_COUNT:-1}
 
   # Postgres sidecar — holds the engine domain schema (Arrecadação,
   # Pagamentos, Financeiro, Usuário) + BetterAuth's tables (users,
