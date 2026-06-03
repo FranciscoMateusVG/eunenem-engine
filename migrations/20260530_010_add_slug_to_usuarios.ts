@@ -27,9 +27,7 @@ import type { Kysely } from 'kysely';
  */
 export async function up(db: Kysely<unknown>): Promise<void> {
   // 1. Add NULL-allowing column so the ALTER succeeds on existing data.
-  // biome-ignore lint/suspicious/noExplicitAny: Kysely<unknown> doesn't know the
-  // post-migration schema — `slug` is added by this migration. We cast for the
-  // backfill UPDATE only; the `addColumn` call above is the source of truth.
+  // biome-ignore lint/suspicious/noExplicitAny: Kysely<unknown> lacks post-migration schema; cast for backfill only.
   const typed = db as Kysely<any>;
 
   await typed.schema
