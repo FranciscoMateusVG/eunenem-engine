@@ -1,6 +1,5 @@
 export { ArrecadacaoCampanhaNaoEncontradaError } from './arrecadacao/campanha-nao-encontrada.error.js';
 export { ArrecadacaoContribuicaoJaExisteError } from './arrecadacao/contribuicao-ja-existe.error.js';
-export { ArrecadacaoContribuicaoNaoDisponivelError } from './arrecadacao/contribuicao-nao-disponivel.error.js';
 export { ArrecadacaoContribuicaoNaoEncontradaError } from './arrecadacao/contribuicao-nao-encontrada.error.js';
 export { ArrecadacaoInputInvalidoError } from './arrecadacao/input-invalido.error.js';
 export { ArrecadacaoOpcaoContribuicaoNaoEncontradaError } from './arrecadacao/opcao-contribuicao-nao-encontrada.error.js';

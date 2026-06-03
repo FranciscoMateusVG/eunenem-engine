@@ -90,19 +90,16 @@ export {
   criarCampanhaSemRecebedor,
   encontrarOpcaoContribuicao,
 } from './domain/arrecadacao/entities/campanha.js';
-export type {
-  Contribuicao,
-  StatusContribuicao,
-} from './domain/arrecadacao/entities/contribuicao.js';
+export type { Contribuicao } from './domain/arrecadacao/entities/contribuicao.js';
+// Plan 0015 (aperture-7pqee): `criarContribuicaoDisponivel` was renamed to
+// `criarContribuicao` (no status field to qualify). The entity factory is
+// NOT re-exported from the barrel to avoid collision with the use-case
+// `criarContribuicao`. Adapters/tests that need the factory import it
+// directly from the entity module.
 export {
   contribuicaoAtualizada,
-  contribuicaoComContribuinte,
-  contribuicaoComValor,
-  contribuicaoDisponivel,
-  contribuicaoSemContribuinte,
-  criarContribuicaoDisponivel,
+  LIMITE_CONTRIBUICOES_POR_OPCAO,
   NomeContribuicaoSchema,
-  StatusContribuicaoSchema,
 } from './domain/arrecadacao/entities/contribuicao.js';
 export type { Recebedor } from './domain/arrecadacao/entities/recebedor.js';
 export {
@@ -110,11 +107,15 @@ export {
   criarRecebedorInicial,
   desativarRecebedor,
 } from './domain/arrecadacao/entities/recebedor.js';
-export type { DadosContribuinte } from './domain/arrecadacao/value-objects/dados-contribuinte.js';
+// Plan 0015 (aperture-7pqee): DadosContribuinte moved to the Pagamentos BC
+// since it now lives on IntencaoPagamento, not on the Contribuição
+// aggregate. The arrecadacao path keeps a deprecated re-export for one
+// release cycle; consumers should import from the pagamentos path.
+export type { DadosContribuinte } from './domain/pagamentos/value-objects/dados-contribuinte.js';
 export {
   DadosContribuinteSchema,
   NomeContribuinteSchema,
-} from './domain/arrecadacao/value-objects/dados-contribuinte.js';
+} from './domain/pagamentos/value-objects/dados-contribuinte.js';
 export type {
   DadosRecebedor,
   TipoChavePix,
@@ -160,7 +161,6 @@ export type {
   EfeitosFinanceirosPagamentoAprovado,
   IdsLancamentosFinanceiros,
   LancamentoFinanceiro,
-  StatusLancamento,
   StatusPagamentoFinanceiro,
   TipoLancamentoFinanceiro,
 } from './domain/financeiro/entities/lancamento-financeiro.js';
@@ -168,7 +168,6 @@ export {
   criarLancamentosParaPagamentoAprovado,
   IdsLancamentosFinanceirosSchema,
   LancamentoFinanceiroSchema,
-  StatusLancamentoSchema,
   StatusPagamentoFinanceiroSchema,
   TipoLancamentoFinanceiroSchema,
   validarComposicaoFinanceiraPagamentoAprovado,
@@ -185,12 +184,9 @@ export {
 } from './domain/financeiro/entities/repasse-recebedor.js';
 export type { DadosRecebedorAtivo } from './domain/financeiro/value-objects/dados-recebedor-ativo.js';
 export { DadosRecebedorAtivoSchema } from './domain/financeiro/value-objects/dados-recebedor-ativo.js';
-// aperture-led0r: maturation rule.
-export type { RegraMaturacao } from './domain/financeiro/value-objects/regra-maturacao.js';
-export {
-  calcularMaturaEm,
-  REGRAS_MATURACAO_PADRAO,
-} from './domain/financeiro/value-objects/regra-maturacao.js';
+// Plan 0015 (aperture-7pqee): maturation rule removed. Lançamento has no
+// FSM; predicted maturation dates replaced by observed transferidoEm /
+// canceladoEm columns. See plans/0015-contribuicao-pagamento-financeiro-collapse.md.
 export type {
   IdContribuicaoReferencia as IdContribuicaoReferenciaFinanceiro,
   IdLancamentoFinanceiro,
@@ -238,6 +234,8 @@ export {
   aprovarPagamentoPendente,
   criarEventoPagamento,
   criarPagamentoPendente,
+  estornarPagamentoAprovado,
+  iniciarProcessamentoPagamento,
   IntencaoPagamentoSchema,
   PagamentoSchema,
   podeAprovarPagamento,
@@ -370,9 +368,11 @@ export { TokenSessaoSchema } from './domain/usuario/value-objects/token-sessao.j
 export { ArrecadacaoAdministradorDuplicadoError } from './errors/arrecadacao/administrador-duplicado.error.js';
 export { ArrecadacaoAdministradorNaoEncontradoError } from './errors/arrecadacao/administrador-nao-encontrado.error.js';
 export { ArrecadacaoCampanhaNaoEncontradaError } from './errors/arrecadacao/campanha-nao-encontrada.error.js';
-export { ArrecadacaoContribuicaoJaDisponivelError } from './errors/arrecadacao/contribuicao-ja-disponivel.error.js';
+// Plan 0015 (aperture-7pqee): contribuicao-ja-disponivel.error and
+// contribuicao-nao-disponivel.error removed. Contribuição no longer has a
+// status field; the "indisponivel" check becomes a query-time predicate
+// in Phase 2 (contribuicao-esta-indisponivel use-case) with its own error.
 export { ArrecadacaoContribuicaoJaExisteError } from './errors/arrecadacao/contribuicao-ja-existe.error.js';
-export { ArrecadacaoContribuicaoNaoDisponivelError } from './errors/arrecadacao/contribuicao-nao-disponivel.error.js';
 export { ArrecadacaoContribuicaoNaoEncontradaError } from './errors/arrecadacao/contribuicao-nao-encontrada.error.js';
 export { ArrecadacaoInputInvalidoError } from './errors/arrecadacao/input-invalido.error.js';
 export { ArrecadacaoLimiteOpcaoExcedidoError } from './errors/arrecadacao/limite-opcao-excedido.error.js';
@@ -449,14 +449,9 @@ export {
   AlterarValorContribuicaoInputSchema,
   alterarValorContribuicao,
 } from './use-cases/arrecadacao/alterar-valor-contribuicao.js';
-export type {
-  AssociarContribuinteContribuicaoDeps,
-  AssociarContribuinteContribuicaoInput,
-} from './use-cases/arrecadacao/associar-contribuinte-contribuicao.js';
-export {
-  AssociarContribuinteContribuicaoInputSchema,
-  associarContribuinteContribuicao,
-} from './use-cases/arrecadacao/associar-contribuinte-contribuicao.js';
+// Plan 0015 (aperture-7pqee): associarContribuinteContribuicao removed.
+// Contribuinte now lives on IntencaoPagamento; finalizarPagamentoAprovado
+// writes it atomically with the status transition in Phase 2.
 export type {
   AtualizarContribuicaoDeps,
   AtualizarContribuicaoInput,
@@ -492,14 +487,9 @@ export {
   criarContribuicoesEmLote,
   ItemLoteSchema,
 } from './use-cases/arrecadacao/criar-contribuicoes-em-lote.js';
-export type {
-  DesassociarContribuinteContribuicaoDeps,
-  DesassociarContribuinteContribuicaoInput,
-} from './use-cases/arrecadacao/desassociar-contribuinte-contribuicao.js';
-export {
-  DesassociarContribuinteContribuicaoInputSchema,
-  desassociarContribuinteContribuicao,
-} from './use-cases/arrecadacao/desassociar-contribuinte-contribuicao.js';
+// Plan 0015 (aperture-7pqee): desassociarContribuinteContribuicao removed.
+// No saga compensation needed — there's no claim step to undo. Estorno
+// path uses estornar-pagamento (Phase 2).
 export type {
   ListarContribuicoesDeOpcaoDeps,
   ListarContribuicoesDeOpcaoInput,
@@ -582,13 +572,9 @@ export {
   ObterSaldoRecebedorInputSchema,
   obterSaldoRecebedor,
 } from './use-cases/financeiro/obter-saldo-recebedor.js';
-// aperture-led0r: maturation use-case.
-export type {
-  MaturarLancamentosPendentesDeps,
-  MaturarLancamentosPendentesInput,
-  MaturarLancamentosPendentesOutput,
-} from './use-cases/financeiro/maturar-lancamentos-pendentes.js';
-export { maturarLancamentosPendentes } from './use-cases/financeiro/maturar-lancamentos-pendentes.js';
+// Plan 0015 (aperture-7pqee): maturarLancamentosPendentes removed.
+// Lançamento has no FSM; admin manually marks transferidoEm via the new
+// marcar-lancamento-transferido use-case (Phase 2).
 export type {
   RegistrarEfeitosFinanceirosPagamentoAprovadoDeps,
   RegistrarEfeitosFinanceirosPagamentoAprovadoInput,

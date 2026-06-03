@@ -9,6 +9,24 @@ import type { LancamentoFinanceiro } from '../entities/lancamento-financeiro.js'
  *
  * `SaldoCentavos` (a non-negative integer) is inlined here as a small bounded
  * primitive used only by this projection.
+ *
+ * **Plan 0015 (aperture-7pqee).** Lançamento has no more FSM. The two
+ * implicit states this VO surfaces are now predicates over date columns:
+ *
+ *   - `valorPendenteCents` ("a receber") — money the recebedor has earned
+ *     but the admin hasn't marked as transferred yet:
+ *     `transferidoEm IS NULL AND canceladoEm IS NULL`.
+ *   - `valorDisponivelCents` ("já transferido") — money the admin has
+ *     marked as actually transferred to the recebedor:
+ *     `transferidoEm IS NOT NULL AND canceladoEm IS NULL`.
+ *
+ * Cancelled rows (`canceladoEm IS NOT NULL`) are excluded from both
+ * sums — they represent estornado pagamentos and the money never reached
+ * the recebedor.
+ *
+ * The Phase 2 use-case (`obter-saldo-recebedor`) will switch to a SQL
+ * SUM aggregation; this in-memory projection stays as a fallback for
+ * the memory adapter and unit tests.
  */
 
 export const SaldoCentavosSchema = z.number().int().min(0);
@@ -31,11 +49,11 @@ export function calcularSaldoRecebedor(
   );
 
   const valorPendenteCents = lancamentosRecebedor
-    .filter((l) => l.status === 'pendente')
+    .filter((l) => l.transferidoEm === null && l.canceladoEm === null)
     .reduce<SaldoCentavos>((total, l) => total + l.amountCents, 0);
 
   const valorDisponivelCents = lancamentosRecebedor
-    .filter((l) => l.status === 'disponivel')
+    .filter((l) => l.transferidoEm !== null && l.canceladoEm === null)
     .reduce<SaldoCentavos>((total, l) => total + l.amountCents, 0);
 
   return {

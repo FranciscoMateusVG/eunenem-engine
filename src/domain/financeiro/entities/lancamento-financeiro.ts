@@ -1,7 +1,6 @@
 import { z } from 'zod/v4';
 import { type IdCampanha, IdCampanhaSchema } from '../../arrecadacao/value-objects/ids.js';
 import { MoneyCentsSchema } from '../../money.js';
-import type { MetodoPagamento } from '../../pagamentos/value-objects/metodo-pagamento.js';
 import {
   type IdContribuicaoReferencia,
   IdContribuicaoReferenciaSchema,
@@ -9,24 +8,44 @@ import {
   type IdPagamentoReferencia,
   IdPagamentoReferenciaSchema,
 } from '../value-objects/ids.js';
-import { calcularMaturaEm } from '../value-objects/regra-maturacao.js';
 import type { SnapshotComposicaoValoresFinanceiro } from '../value-objects/snapshot-composicao-valores-financeiro.js';
 
 /**
  * @entity LancamentoFinanceiro (within the implicit Livro Financeiro aggregate)
  *
  * A single ledger entry — either a credit to a receiver's balance or to the
- * platform's revenue. Has its own id and lifecycle (`pendente` → `disponivel`).
- * Persisted via `LivroFinanceiroRepository` (the ledger is the implicit
- * aggregate boundary; there is no separate `Livro` entity today).
+ * platform's revenue. Persisted via `LivroFinanceiroRepository` (the ledger
+ * is the implicit aggregate boundary; there is no separate `Livro` entity
+ * today).
  *
- * `StatusLancamento`, `TipoLancamentoFinanceiro`, and `StatusPagamentoFinanceiro`
- * are intrinsic enum VOs kept inline. `EfeitosFinanceirosPagamentoAprovado` is
- * the domain-shaped input type for the factory below.
+ * **Plan 0015 collapse (aperture-7pqee).** Before 0015 this entity had a
+ * 2-state FSM (`pendente | disponivel`) plus a predicted-maturation date
+ * (`maturaEm`) computed from the metodo's maturation rule. Plan 0015
+ * removes both — the lançamento has no FSM anymore. Instead, two
+ * observed-event date columns capture money flow:
+ *
+ *   - `transferidoEm: Date | null` — set when the admin marks that the
+ *     money actually reached the recebedor (manual action; automated
+ *     banking integration is out of scope for this plan).
+ *   - `canceladoEm: Date | null` — set when the parent pagamento
+ *     transitions to `estornado` AND this lançamento was still
+ *     untransferred at that moment.
+ *
+ * Implicit "states" are now query-time predicates:
+ *
+ *   pending      transferidoEm IS NULL AND canceladoEm IS NULL
+ *   transferred  transferidoEm IS NOT NULL AND canceladoEm IS NULL
+ *   cancelado    canceladoEm IS NOT NULL
+ *
+ * The rationale (plan 0015 DDD concept #6): predicted dates desync from
+ * reality; observed dates don't. The pre-0015 maturation model stored a
+ * guess about when Stripe would release funds; the new model stores what
+ * actually happened, when it happened.
+ *
+ * `TipoLancamentoFinanceiro` and `StatusPagamentoFinanceiro` are intrinsic
+ * enum VOs kept inline. `EfeitosFinanceirosPagamentoAprovado` is the
+ * domain-shaped input type for the factory below.
  */
-
-export const StatusLancamentoSchema = z.enum(['pendente', 'disponivel']);
-export type StatusLancamento = z.infer<typeof StatusLancamentoSchema>;
 
 export const TipoLancamentoFinanceiroSchema = z.enum([
   'credito_saldo_recebedor',
@@ -52,17 +71,25 @@ export const LancamentoFinanceiroSchema = z.object({
   idCampanha: IdCampanhaSchema.optional(),
   tipo: TipoLancamentoFinanceiroSchema,
   amountCents: MoneyCentsSchema,
-  status: StatusLancamentoSchema,
   criadoEm: z.date(),
   /**
-   * The moment at which this lancamento may flip from `pendente` to
-   * `disponivel` (aperture-led0r, plano 0006). Computed at factory time
-   * via `calcularMaturaEm(metodo, criadoEm)`; the maturation use-case
-   * queries `WHERE status='pendente' AND matura_em <= now()`. Persisted
-   * (not derived) so historical lancamentos retain their original
-   * maturation date even if the rule changes later.
+   * Set when the admin marks this lançamento as actually transferred to
+   * the recebedor. Manual action — no cron, no Stripe Connect, no
+   * automated banking in v1. Idempotent at the use-case layer:
+   * re-marking an already-transferred row is a no-op.
+   *
+   * Plan 0015 replaces the old `status='disponivel'` flip with this
+   * observed-event timestamp.
    */
-  maturaEm: z.date(),
+  transferidoEm: z.date().nullable(),
+  /**
+   * Set when the parent pagamento transitions to `estornado` AND this
+   * lançamento was still `transferidoEm IS NULL` at that moment. The
+   * cascade-scope rule (plan 0015 DDD concept #5): only untransferred
+   * rows are cancelled. The 409-on-estorno-after-transfer rule (locked
+   * decision #10) is the upstream gate that keeps this cascade safe.
+   */
+  canceladoEm: z.date().nullable(),
 });
 
 export type LancamentoFinanceiro = Readonly<z.infer<typeof LancamentoFinanceiroSchema>>;
@@ -81,20 +108,21 @@ export const IdsLancamentosFinanceirosSchema = z.object({
 
 export type IdsLancamentosFinanceiros = Readonly<z.infer<typeof IdsLancamentosFinanceirosSchema>>;
 
-/** Domain-shaped input para registrar efeitos financeiros de um pagamento aprovado. */
+/**
+ * Domain-shaped input para registrar efeitos financeiros de um pagamento
+ * aprovado.
+ *
+ * **Plan 0015:** `metodo` field removed. Pre-0015 the factory needed it
+ * to compute `maturaEm` via `REGRAS_MATURACAO_PADRAO`. With maturation
+ * gone, `metodo` is no longer required at the lançamento factory
+ * boundary (the pagamento still carries it for routing webhook events).
+ */
 export interface EfeitosFinanceirosPagamentoAprovado {
   readonly idPagamento: IdPagamentoReferencia;
   readonly idContribuicao: IdContribuicaoReferencia;
   readonly idCampanha: IdCampanha;
   readonly statusPagamento: StatusPagamentoFinanceiro;
   readonly composicaoValores: SnapshotComposicaoValoresFinanceiro;
-  /**
-   * The pagamento `metodo` (aperture-led0r). Required to compute
-   * `maturaEm` per `REGRAS_MATURACAO_PADRAO`. The use-case caller
-   * (Stripe webhook handler / finalizarPagamentoAprovado) already has
-   * this on the Pagamento aggregate and passes it through.
-   */
-  readonly metodo: MetodoPagamento;
 }
 
 export function validarComposicaoFinanceiraPagamentoAprovado(
@@ -116,9 +144,6 @@ export function validarComposicaoFinanceiraPagamentoAprovado(
   // total paid by the contribuinte but NOT counted toward platform fee
   // or receiver amount. Invariant per SnapshotComposicaoValoresFinanceiro:
   //   receiverAmountCents + feeAmountCents + surchargeCents === totalPaidCents
-  // The original equality check missed surchargeCents → every card
-  // payment threw here despite the saga steps 1+2 succeeding upstream
-  // (operator-caught aperture-6g58e verify session 2026-05-31).
   if (receiverAmountCents + feeAmountCents + surchargeCents !== totalPaidCents) {
     throw new Error('Composicao de valores financeira nao confere com o total pago.');
   }
@@ -140,20 +165,16 @@ export function validarComposicaoFinanceiraPagamentoAprovado(
  *
  * Book-balance invariant: once this returns,
  * `SUM(amountCents over all returned lancamentos) === totalPaidCents`
- * for BOTH paths. The composicao-input invariant
- * (`receiverAmountCents + feeAmountCents + surchargeCents === totalPaidCents`)
- * is enforced upstream by `validarComposicaoFinanceiraPagamentoAprovado`;
- * the third lancamento makes it true on the OUTPUT side too.
+ * for BOTH paths.
  *
- * Maturation (aperture-led0r, plano 0006): every emitted lancamento
- * starts `status: 'pendente'` — including `credito_receita_plataforma`,
- * which prior to led0r hardcoded `disponivel` (the Finding #2 bug). The
- * `maturaEm` field is computed ONCE per pagamento via
- * `calcularMaturaEm(input.metodo, criadoEm)` and stamped on every
- * emitted row (same Stripe payout governs all of them). The
- * `maturarLancamentosPendentes` use-case flips matured rows to
- * `disponivel`. Until the cron lands per plano 0005, the flip is
- * manual; the admin UI surfaces the gap.
+ * **Plan 0015 (aperture-7pqee).** Every emitted lançamento starts with
+ * both date columns null (`transferidoEm: null, canceladoEm: null`) — the
+ * implicit "pending" state. Pre-0015 the factory computed a `maturaEm`
+ * per pagamento and stamped it on every row; the maturation rule is gone
+ * and the factory no longer touches the metodo. The admin marks
+ * `transferidoEm` when the money actually reaches the recebedor; the
+ * estorno cascade sets `canceladoEm` when the pagamento goes
+ * `estornado` and the row was still untransferred.
  *
  * idCampanha is populated on `recebedor` (today's behavior) AND on
  * `passthrough` (per bjshv spec — "inherit from input"), but NOT on
@@ -170,12 +191,6 @@ export function criarLancamentosParaPagamentoAprovado(
 ): readonly LancamentoFinanceiro[] {
   validarComposicaoFinanceiraPagamentoAprovado(input);
 
-  // aperture-led0r: compute maturaEm ONCE per pagamento. All emitted
-  // lancamentos share the same maturation date because they're
-  // governed by the same Stripe payout schedule. Throws on unknown
-  // metodo (e.g. boleto added without an entry in REGRAS_MATURACAO_PADRAO).
-  const maturaEm = calcularMaturaEm(input.metodo, criadoEm);
-
   const lancamentoRecebedor: LancamentoFinanceiro = {
     id: idsLancamentos.idLancamentoRecebedor,
     idPagamento: input.idPagamento,
@@ -183,23 +198,20 @@ export function criarLancamentosParaPagamentoAprovado(
     idCampanha: input.idCampanha,
     tipo: 'credito_saldo_recebedor',
     amountCents: input.composicaoValores.receiverAmountCents,
-    status: 'pendente',
     criadoEm,
-    maturaEm,
+    transferidoEm: null,
+    canceladoEm: null,
   };
 
-  // aperture-led0r Finding #2 fix: receita_plataforma now starts
-  // 'pendente'. Prior to led0r this hardcoded 'disponivel' — the bug.
-  // All tipos governed by the same Stripe payout schedule per the epic.
   const lancamentoReceita: LancamentoFinanceiro = {
     id: idsLancamentos.idLancamentoReceitaPlataforma,
     idPagamento: input.idPagamento,
     idContribuicao: input.idContribuicao,
     tipo: 'credito_receita_plataforma',
     amountCents: input.composicaoValores.feeAmountCents,
-    status: 'pendente',
     criadoEm,
-    maturaEm,
+    transferidoEm: null,
+    canceladoEm: null,
   };
 
   // PIX path — no surcharge, no third lancamento. Book balance:
@@ -221,9 +233,9 @@ export function criarLancamentosParaPagamentoAprovado(
     idCampanha: input.idCampanha,
     tipo: 'credito_passthrough_surcharge',
     amountCents: input.composicaoValores.surchargeCents,
-    status: 'pendente',
     criadoEm,
-    maturaEm,
+    transferidoEm: null,
+    canceladoEm: null,
   };
 
   // Book balance (cartao): recebedor (= contribution) + receita (= fee) +
