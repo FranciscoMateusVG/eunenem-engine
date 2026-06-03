@@ -17,7 +17,12 @@ import type {
   CriarSessaoCheckoutResult,
   ObterSessaoCheckoutResult,
 } from './checkout-session-provider.js';
-import type { PagamentoProvider, SolicitarPagamentoInput } from './provider.js';
+import type {
+  PagamentoProvider,
+  RefundarPagamentoInput,
+  RefundarPagamentoResult,
+  SolicitarPagamentoInput,
+} from './provider.js';
 
 const tracer = trace.getTracer('frame');
 
@@ -33,6 +38,14 @@ export interface PagamentoProviderFakeOptions {
    * assertions can pattern-match. Override in deterministic tests.
    */
   readonly idSessaoFactory?: () => string;
+  /**
+   * Plan 0015 / aperture-ucgok. Controls what `refundarPagamento` returns.
+   * Defaults to 'aceito' (happy-path estorno tests). Set 'recusado' for
+   * the rollback-path test (provider refuses; the use-case must not
+   * transition pagamento → estornado).
+   */
+  readonly statusRefund?: 'aceito' | 'recusado';
+  readonly idRefundFactory?: () => string;
 }
 
 /**
@@ -57,6 +70,8 @@ export class PagamentoProviderFake implements PagamentoProvider, CheckoutSession
   private readonly clock: () => Date;
   private readonly amountCentsTransacao: MoneyCents | undefined;
   private readonly idSessaoFactory: () => string;
+  private readonly statusRefund: 'aceito' | 'recusado';
+  private readonly idRefundFactory: () => string;
 
   /**
    * In-memory ledger of sessions created via criarSessaoCheckout. Keyed
@@ -78,6 +93,32 @@ export class PagamentoProviderFake implements PagamentoProvider, CheckoutSession
     this.clock = options.clock ?? (() => new Date());
     this.amountCentsTransacao = options.amountCentsTransacao;
     this.idSessaoFactory = options.idSessaoFactory ?? (() => `cs_fake_${randomUUID()}`);
+    this.statusRefund = options.statusRefund ?? 'aceito';
+    this.idRefundFactory = options.idRefundFactory ?? (() => `re_fake_${randomUUID()}`);
+  }
+
+  async refundarPagamento(input: RefundarPagamentoInput): Promise<RefundarPagamentoResult> {
+    return tracer.startActiveSpan('payment_provider.fake.refundarPagamento', async (span) => {
+      span.setAttribute('payment.id', input.idPagamento);
+      span.setAttribute('payment.amount_cents', input.amountCents);
+      span.setAttribute('refund.reason', input.reason ?? 'requested_by_customer');
+      try {
+        const result: RefundarPagamentoResult = {
+          id: this.idRefundFactory(),
+          status: this.statusRefund,
+          amountCents: input.amountCents,
+          statusBruto: this.statusRefund === 'aceito' ? 'succeeded' : 'failed',
+        };
+        span.setStatus({ code: SpanStatusCode.OK });
+        return result;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
   }
 
   async solicitarPagamento(input: SolicitarPagamentoInput): Promise<TransacaoExterna> {

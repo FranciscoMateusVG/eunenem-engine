@@ -180,4 +180,44 @@ export class PagamentoRepositoryMemory implements PagamentoRepository {
       },
     );
   }
+
+  /**
+   * Plan 0015 (aperture-ucgok). Linear scan: returns the subset of the
+   * input IDs that have at least one aprovado pagamento. Order not
+   * guaranteed; caller should treat as a Set.
+   */
+  async findIdsContribuicoesComPagamentoAprovado(
+    idsContribuicao: readonly IdContribuicaoPagamento[],
+  ): Promise<readonly IdContribuicaoPagamento[]> {
+    return tracer.startActiveSpan(
+      'db.pagamentos.findIdsContribuicoesComPagamentoAprovado',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+        try {
+          if (idsContribuicao.length === 0) {
+            span.setStatus({ code: SpanStatusCode.OK });
+            return [];
+          }
+          const candidates = new Set(idsContribuicao);
+          const matched = new Set<IdContribuicaoPagamento>();
+          for (const pagamento of this.pagamentos.values()) {
+            if (
+              pagamento.status === 'aprovado' &&
+              candidates.has(pagamento.intencao.idContribuicao)
+            ) {
+              matched.add(pagamento.intencao.idContribuicao);
+            }
+          }
+          span.setStatus({ code: SpanStatusCode.OK });
+          return [...matched];
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
 }

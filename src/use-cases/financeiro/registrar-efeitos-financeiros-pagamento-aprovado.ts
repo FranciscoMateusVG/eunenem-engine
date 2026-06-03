@@ -13,25 +13,24 @@ import {
   IdPagamentoReferenciaSchema,
 } from '../../domain/financeiro/value-objects/ids.js';
 import { SnapshotComposicaoValoresFinanceiroSchema } from '../../domain/financeiro/value-objects/snapshot-composicao-valores-financeiro.js';
-import { MetodoPagamentoSchema } from '../../domain/pagamentos/value-objects/metodo-pagamento.js';
 import { FinanceiroInputInvalidoError } from '../../errors/financeiro/input-invalido.error.js';
 import { FinanceiroPagamentoJaRegistradoError } from '../../errors/financeiro/pagamento-ja-registrado.error.js';
 import { FinanceiroPagamentoNaoAprovadoError } from '../../errors/financeiro/pagamento-nao-aprovado.error.js';
 import type { Observability } from '../../observability/observability.js';
 
+/**
+ * Plan 0015 (aperture-ucgok). Schema dropped `metodo` — the factory no
+ * longer needs it (predicted maturation gone; lançamentos start with both
+ * date columns null). The caller (Stripe webhook handler) still carries
+ * `metodo` on the Pagamento aggregate; it just doesn't flow through here
+ * anymore.
+ */
 export const RegistrarEfeitosFinanceirosPagamentoAprovadoInputSchema = z.object({
   idPagamento: IdPagamentoReferenciaSchema,
   idContribuicao: IdContribuicaoReferenciaSchema,
   idCampanha: IdCampanhaSchema,
   statusPagamento: StatusPagamentoFinanceiroSchema,
   composicaoValores: SnapshotComposicaoValoresFinanceiroSchema,
-  /**
-   * Pagamento `metodo` (aperture-led0r). Forwarded to the factory so
-   * it can compute `maturaEm` per `REGRAS_MATURACAO_PADRAO`. The
-   * Stripe-webhook caller already has metodo on the Pagamento
-   * aggregate and passes it through.
-   */
-  metodo: MetodoPagamentoSchema,
 });
 
 export type RegistrarEfeitosFinanceirosPagamentoAprovadoInput = Readonly<

@@ -19,6 +19,14 @@ const DB_ATTRS = {
   'db.collection.name': 'financeiro_livro',
 } as const;
 
+/**
+ * In-memory adapter. Plan 0015 reshape: status + maturaEm are gone; the
+ * "state" is computed from `transferidoEm` + `canceladoEm`. Two new
+ * mutations (`marcarLancamentosComoTransferidos` +
+ * `marcarLancamentosComoCanceladosPorPagamento`) replace the old
+ * `marcarComoDisponivel` flip; `hasLancamentosTransferidos` exposes the
+ * 409-gate predicate.
+ */
 export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepository {
   private readonly lancamentos = new Map<IdLancamentoFinanceiro, LancamentoFinanceiro>();
   private readonly repasses = new Map<IdRepasse, RepasseRecebedor>();
@@ -119,21 +127,28 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
     );
   }
 
-  async findPendentesMaturos(now: Date): Promise<readonly LancamentoFinanceiro[]> {
+  async marcarLancamentosComoTransferidos(
+    idsLancamentos: readonly IdLancamentoFinanceiro[],
+    transferidoEm: Date,
+  ): Promise<void> {
     return tracer.startActiveSpan(
-      'db.financeiro_livro.lancamentos.findPendentesMaturos',
+      'db.financeiro_livro.lancamentos.marcarComoTransferidos',
       async (span) => {
-        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+        span.setAttributes({
+          ...DB_ATTRS,
+          'db.operation.name': 'UPDATE',
+          'batch.size': idsLancamentos.length,
+        });
         try {
-          // aperture-led0r: status='pendente' AND maturaEm ≤ now.
-          // Less-than-or-equal-to semantics — a row whose maturaEm
-          // equals exactly `now` is considered matured (the bead's
-          // boundary test pins this).
-          const result = [...this.lancamentos.values()].filter(
-            (l) => l.status === 'pendente' && l.maturaEm.getTime() <= now.getTime(),
-          );
+          for (const id of idsLancamentos) {
+            const existing = this.lancamentos.get(id);
+            if (!existing) continue;
+            // Idempotent: skip rows already transferred OR cancelled —
+            // matches the postgres WHERE clause exactly.
+            if (existing.transferidoEm !== null || existing.canceladoEm !== null) continue;
+            this.lancamentos.set(id, { ...existing, transferidoEm });
+          }
           span.setStatus({ code: SpanStatusCode.OK });
-          return result;
         } catch (error: unknown) {
           span.recordException(error as Error);
           span.setStatus({ code: SpanStatusCode.ERROR });
@@ -145,21 +160,49 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
     );
   }
 
-  async marcarComoDisponivel(idLancamento: IdLancamentoFinanceiro): Promise<void> {
+  async marcarLancamentosComoCanceladosPorPagamento(
+    idPagamento: IdPagamentoReferencia,
+    canceladoEm: Date,
+  ): Promise<void> {
     return tracer.startActiveSpan(
-      'db.financeiro_livro.lancamentos.marcarComoDisponivel',
+      'db.financeiro_livro.lancamentos.marcarComoCanceladosPorPagamento',
       async (span) => {
         span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
         try {
-          const existing = this.lancamentos.get(idLancamento);
-          if (!existing || existing.status === 'disponivel') {
-            // Idempotent — no-op on unknown id OR already-disponivel
-            // (matches the postgres UPDATE-matches-zero-rows semantics).
-            span.setStatus({ code: SpanStatusCode.OK });
-            return;
+          for (const [id, existing] of this.lancamentos.entries()) {
+            if (existing.idPagamento !== idPagamento) continue;
+            // Mirror postgres WHERE: skip already-cancelled, skip already-
+            // transferred. Idempotent + defensive (the use-case enforces
+            // the 409 gate upstream).
+            if (existing.canceladoEm !== null || existing.transferidoEm !== null) continue;
+            this.lancamentos.set(id, { ...existing, canceladoEm });
           }
-          this.lancamentos.set(idLancamento, { ...existing, status: 'disponivel' });
           span.setStatus({ code: SpanStatusCode.OK });
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  async hasLancamentosTransferidos(idPagamento: IdPagamentoReferencia): Promise<boolean> {
+    return tracer.startActiveSpan(
+      'db.financeiro_livro.lancamentos.hasTransferidos',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+        try {
+          for (const lancamento of this.lancamentos.values()) {
+            if (lancamento.idPagamento === idPagamento && lancamento.transferidoEm !== null) {
+              span.setStatus({ code: SpanStatusCode.OK });
+              return true;
+            }
+          }
+          span.setStatus({ code: SpanStatusCode.OK });
+          return false;
         } catch (error: unknown) {
           span.recordException(error as Error);
           span.setStatus({ code: SpanStatusCode.ERROR });

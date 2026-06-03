@@ -368,10 +368,10 @@ export { TokenSessaoSchema } from './domain/usuario/value-objects/token-sessao.j
 export { ArrecadacaoAdministradorDuplicadoError } from './errors/arrecadacao/administrador-duplicado.error.js';
 export { ArrecadacaoAdministradorNaoEncontradoError } from './errors/arrecadacao/administrador-nao-encontrado.error.js';
 export { ArrecadacaoCampanhaNaoEncontradaError } from './errors/arrecadacao/campanha-nao-encontrada.error.js';
-// Plan 0015 (aperture-7pqee): contribuicao-ja-disponivel.error and
-// contribuicao-nao-disponivel.error removed. Contribuição no longer has a
-// status field; the "indisponivel" check becomes a query-time predicate
-// in Phase 2 (contribuicao-esta-indisponivel use-case) with its own error.
+// Plan 0015 (aperture-ucgok): the ja-disponivel / nao-disponivel errors
+// were replaced by a single ContribuicaoIndisponivelError with the
+// EXISTS-aprovado-pagamento semantic.
+export { ArrecadacaoContribuicaoIndisponivelError } from './errors/arrecadacao/contribuicao-indisponivel.error.js';
 export { ArrecadacaoContribuicaoJaExisteError } from './errors/arrecadacao/contribuicao-ja-existe.error.js';
 export { ArrecadacaoContribuicaoNaoEncontradaError } from './errors/arrecadacao/contribuicao-nao-encontrada.error.js';
 export { ArrecadacaoInputInvalidoError } from './errors/arrecadacao/input-invalido.error.js';
@@ -449,9 +449,18 @@ export {
   AlterarValorContribuicaoInputSchema,
   alterarValorContribuicao,
 } from './use-cases/arrecadacao/alterar-valor-contribuicao.js';
-// Plan 0015 (aperture-7pqee): associarContribuinteContribuicao removed.
-// Contribuinte now lives on IntencaoPagamento; finalizarPagamentoAprovado
-// writes it atomically with the status transition in Phase 2.
+// Plan 0015 (aperture-ucgok). associarContribuinteContribuicao removed;
+// contribuinte writes happen on IntencaoPagamento inside
+// finalizarPagamentoAprovado. The EXISTS-aprovado-pagamento predicate
+// replaces the old status helper:
+export type {
+  ContribuicaoEstaIndisponivelDeps,
+  ContribuicaoEstaIndisponivelInput,
+} from './use-cases/arrecadacao/contribuicao-esta-indisponivel.js';
+export {
+  ContribuicaoEstaIndisponivelInputSchema,
+  contribuicaoEstaIndisponivel,
+} from './use-cases/arrecadacao/contribuicao-esta-indisponivel.js';
 export type {
   AtualizarContribuicaoDeps,
   AtualizarContribuicaoInput,
@@ -541,6 +550,27 @@ export {
   IniciarPagamentoContribuicaoInputSchema,
   iniciarPagamentoContribuicao,
 } from './use-cases/checkout/iniciar-pagamento-contribuicao.js';
+// Plan 0015 (aperture-ucgok): admin estorno + admin batch transfer.
+export type {
+  EstornarPagamentoDeps,
+  EstornarPagamentoInput,
+  EstornarPagamentoResult,
+} from './use-cases/checkout/estornar-pagamento.js';
+export {
+  EstornarPagamentoInputSchema,
+  estornarPagamento,
+  PagamentoEstornoLancamentoJaTransferidoError,
+  PagamentoEstornoRecusadoPeloProvedorError,
+} from './use-cases/checkout/estornar-pagamento.js';
+export type {
+  MarcarLancamentoTransferidoDeps,
+  MarcarLancamentoTransferidoInput,
+  MarcarLancamentoTransferidoResult,
+} from './use-cases/financeiro/marcar-lancamento-transferido.js';
+export {
+  MarcarLancamentoTransferidoInputSchema,
+  marcarLancamentoTransferido,
+} from './use-cases/financeiro/marcar-lancamento-transferido.js';
 export type {
   IniciarRepasseRecebedorDeps,
   IniciarRepasseRecebedorInput,

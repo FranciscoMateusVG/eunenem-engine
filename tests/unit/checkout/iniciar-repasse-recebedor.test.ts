@@ -67,6 +67,11 @@ async function setupCampanhaComSaldoDisponivel(
   );
 
   if (disponivelAmountCents > 0) {
+    // Plan 0015 (aperture-ucgok): lancamento has no FSM anymore. The
+    // "disponivel" (transferred) state is `transferidoEm !== null AND
+    // canceladoEm === null` — see `calcularSaldoRecebedor`. Stamp
+    // transferidoEm here so the seeded row counts toward
+    // `valorDisponivelCents`.
     const lancamento: LancamentoFinanceiro = {
       id: randomUUID(),
       idPagamento: randomUUID(),
@@ -74,12 +79,9 @@ async function setupCampanhaComSaldoDisponivel(
       idCampanha,
       tipo: 'credito_saldo_recebedor',
       amountCents: disponivelAmountCents,
-      status: 'disponivel',
       criadoEm: fixedDate,
-      // aperture-led0r: maturaEm required on all lancamentos. Already
-      // matured here (= criadoEm) so the test continues to exercise the
-      // disponivel path.
-      maturaEm: fixedDate,
+      transferidoEm: fixedDate,
+      canceladoEm: null,
     };
     await livroFinanceiroRepository.saveLancamentos([lancamento]);
   }

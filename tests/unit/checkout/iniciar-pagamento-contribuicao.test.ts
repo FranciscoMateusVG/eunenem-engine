@@ -9,14 +9,16 @@ import {
   ID_PLATAFORMA_EUNENEM,
 } from '../../../src/adapters/plataforma/repository.memory.js';
 import { ProvedorRegraTaxaMemory } from '../../../src/adapters/taxas/regra-provider.memory.js';
-import { criarPagamentoPendente } from '../../../src/domain/pagamentos/entities/pagamento.js';
-import { ArrecadacaoContribuicaoNaoDisponivelError } from '../../../src/errors/arrecadacao/contribuicao-nao-disponivel.error.js';
+import {
+  aprovarPagamentoPendente,
+  criarPagamentoPendente,
+} from '../../../src/domain/pagamentos/entities/pagamento.js';
+import { ArrecadacaoContribuicaoIndisponivelError } from '../../../src/errors/arrecadacao/contribuicao-indisponivel.error.js';
 import { CheckoutPlataformaMismatchError } from '../../../src/errors/checkout/plataforma-mismatch.error.js';
 import { PagamentoJaExisteError } from '../../../src/errors/pagamentos/ja-existe.error.js';
 import { NoopLogger } from '../../../src/observability/noop-logger.js';
 import { noopTracer } from '../../../src/observability/tracer.js';
 import { adicionarOpcaoContribuicao } from '../../../src/use-cases/arrecadacao/adicionar-opcao-contribuicao.js';
-import { associarContribuinteContribuicao } from '../../../src/use-cases/arrecadacao/associar-contribuinte-contribuicao.js';
 import { criarCampanha } from '../../../src/use-cases/arrecadacao/criar-campanha.js';
 import { criarContribuicao } from '../../../src/use-cases/arrecadacao/criar-contribuicao.js';
 import { iniciarPagamentoContribuicao } from '../../../src/use-cases/checkout/iniciar-pagamento-contribuicao.js';
@@ -34,11 +36,6 @@ const dadosRecebedorPadrao = () => ({
   nomeTitular: 'Maria Silva',
   tipoChavePix: 'email' as const,
   chavePix: 'maria@exemplo.com',
-});
-
-const contribuinteValido = () => ({
-  nome: 'Joao Visitante',
-  email: 'joao@exemplo.com',
 });
 
 const TEST_RETURN_URL = 'https://test.example/sucesso?session_id={CHECKOUT_SESSION_ID}';
@@ -105,7 +102,7 @@ async function seedCheckoutCenario(idPlataforma: string, tipoOpcao: 'presente' |
 }
 
 describe('iniciarPagamentoContribuicao — happy path', () => {
-  it('leaves contribuição disponivel, computes plataforma-scoped composição, creates pagamento pendente (eunenem presente, 5%)', async () => {
+  it('does not touch contribuição, computes plataforma-scoped composição, creates pagamento pendente (eunenem presente, 5%)', async () => {
     // aperture-m95f3: the saga no longer claims the contribuição — claim
     // happens later in finalizarPagamentoAprovado via the webhook. Visitor
     // identity is collected by Stripe inside the iframe, so no contribuinte
@@ -129,8 +126,6 @@ describe('iniciarPagamentoContribuicao — happy path', () => {
     });
 
     expect(contribuicao.id).toBe(idContribuicao);
-    expect(contribuicao.status).toBe('disponivel');
-    expect(contribuicao.contribuinte).toBeNull();
 
     expect(pagamento.id).toBe(idPagamento);
     expect(pagamento.status).toBe('pendente');
@@ -185,15 +180,17 @@ describe('iniciarPagamentoContribuicao — cross-tenant guard', () => {
       }),
     ).rejects.toThrow(CheckoutPlataformaMismatchError);
 
-    // contribuição untouched — no side effect from a cross-tenant attempt
+    // contribuição untouched — no side effect from a cross-tenant attempt.
+    // Plan 0015 (aperture-ucgok): the entity has no status/contribuinte
+    // fields anymore. We assert the row is still findable; "untouched" at
+    // this layer means "no admin patch + no deletion."
     const contribuicao = await deps.contribuicaoRepository.findById(idContribuicao);
-    expect(contribuicao?.status).toBe('disponivel');
-    expect(contribuicao?.contribuinte).toBeNull();
+    expect(contribuicao).toBeDefined();
   });
 });
 
 describe('iniciarPagamentoContribuicao — failure paths leave contribuição untouched', () => {
-  it('contribuição stays disponivel when criarIntencaoPagamento fails (idPagamento collision)', async () => {
+  it('contribuição is untouched when criarIntencaoPagamento fails (idPagamento collision)', async () => {
     // aperture-m95f3: saga never claims the contribuição (claim moves to
     // finalize via webhook). Failures in later saga steps therefore have
     // nothing to compensate — verify the contribuição is untouched.
@@ -235,27 +232,55 @@ describe('iniciarPagamentoContribuicao — failure paths leave contribuição un
       }),
     ).rejects.toThrow(PagamentoJaExisteError);
 
-    // nothing to revert — saga never wrote to the contribuição
+    // nothing to revert — saga never wrote to the contribuição.
+    // Plan 0015 (aperture-ucgok): no status/contribuinte fields to assert
+    // on; "untouched" just means the row is still findable.
     const contribuicao = await deps.contribuicaoRepository.findById(idContribuicao);
-    expect(contribuicao?.status).toBe('disponivel');
-    expect(contribuicao?.contribuinte).toBeNull();
+    expect(contribuicao).toBeDefined();
   });
 
-  it('early-fails with ArrecadacaoContribuicaoNaoDisponivelError when contribuição is already claimed (step 2 read-only check)', async () => {
-    // aperture-m95f3 rephrase: the saga's new step 2 reads the contribuição
-    // and refuses to mount a Stripe iframe for a gift already claimed by
-    // someone else's webhook. UX win — visitor doesn't pay for something
-    // they can't keep. Webhook finalize still owns the correctness race.
+  it('early-fails with ArrecadacaoContribuicaoIndisponivelError when contribuição already has an aprovado pagamento (step 2 EXISTS-predicate check)', async () => {
+    // Plan 0015 (aperture-ucgok): the saga's step 2 now refuses to mount
+    // a Stripe iframe for a slot that already has at least one aprovado
+    // pagamento — surfaced via `pagamentoRepository.findIdsContribuicoesComPagamentoAprovado`.
+    // UX win — visitor doesn't pay for a gift someone else already paid
+    // for. Webhook finalize still owns the correctness race (decision #6).
     const { deps, idCampanha, idContribuicao } = await seedCheckoutCenario(
       ID_PLATAFORMA_EUNENEM,
       'presente',
     );
 
-    // simulate an earlier visitor's webhook having claimed the contribuição
-    await associarContribuinteContribuicao(
-      { contribuicaoRepository: deps.contribuicaoRepository, observability: silentObservability },
-      { idContribuicao, contribuinte: contribuinteValido() },
+    // Seed an aprovado pagamento for this contribuição so the EXISTS
+    // predicate returns true on the second visitor's attempt.
+    const idIntencaoSeed = randomUUID();
+    const pendente = criarPagamentoPendente({
+      idPagamento: randomUUID() as never,
+      idIntencaoPagamento: idIntencaoSeed as never,
+      composicaoValores: {
+        idContribuicao: idContribuicao as never,
+        contributionAmountCents: 8000 as never,
+        feeAmountCents: 400 as never,
+        surchargeCents: 0 as never,
+        totalPaidCents: 8400 as never,
+        receiverAmountCents: 8000 as never,
+        responsavelTaxa: 'contribuinte',
+      } as never,
+      valorACobrarCents: 8400 as never,
+      metodo: 'pix',
+      criadoEm: fixedDate,
+    });
+    const aprovado = aprovarPagamentoPendente(
+      pendente,
+      {
+        id: randomUUID() as never,
+        provedor: 'stripe',
+        status: 'aprovado',
+        amountCents: 8400 as never,
+        criadaEm: fixedDate,
+      },
+      fixedDate,
     );
+    await deps.pagamentoRepository.save(aprovado);
 
     // a new visitor attempting to mount checkout is refused at session-create
     await expect(
@@ -268,11 +293,10 @@ describe('iniciarPagamentoContribuicao — failure paths leave contribuição un
         idIntencaoPagamento: randomUUID(),
         returnUrl: TEST_RETURN_URL,
       }),
-    ).rejects.toThrow(ArrecadacaoContribuicaoNaoDisponivelError);
+    ).rejects.toThrow(ArrecadacaoContribuicaoIndisponivelError);
 
-    // contribuição still belongs to the original claimant — untouched
+    // contribuição still findable — no admin patch, no deletion
     const contribuicao = await deps.contribuicaoRepository.findById(idContribuicao);
-    expect(contribuicao?.status).toBe('indisponivel');
-    expect(contribuicao?.contribuinte).toEqual(contribuinteValido());
+    expect(contribuicao).toBeDefined();
   });
 });

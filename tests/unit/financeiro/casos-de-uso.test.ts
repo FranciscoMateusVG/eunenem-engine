@@ -29,13 +29,15 @@ const idRepasse = '550e8400-e29b-41d4-a716-446655443004';
 function makeApprovedPaymentInput(
   overrides: Partial<RegistrarEfeitosFinanceirosPagamentoAprovadoInput> = {},
 ): RegistrarEfeitosFinanceirosPagamentoAprovadoInput {
+  // Plan 0015 (aperture-ucgok): input schema dropped `metodo` along with
+  // the maturação calculation — `EfeitosFinanceirosPagamentoAprovado` no
+  // longer needs it. Lancamentos are born with
+  // `transferidoEm: null, canceladoEm: null`.
   return {
     idPagamento,
     idContribuicao,
     idCampanha,
     statusPagamento: 'aprovado',
-    // aperture-led0r: metodo required to compute maturaEm.
-    metodo: 'pix',
     composicaoValores: {
       contributionAmountCents: 8000,
       feeAmountCents: 400,
@@ -121,6 +123,9 @@ describe('financial use cases', () => {
 
   it('creates an initial payout request when the receiver has available balance', async () => {
     const livroFinanceiroRepository = new LivroFinanceiroRepositoryMemory();
+    // Plan 0015 (aperture-ucgok): the "disponivel" (transferred) state on
+    // a lancamento is now `transferidoEm !== null AND canceladoEm === null`.
+    // Stamp transferidoEm so this row counts toward `valorDisponivelCents`.
     const availableEntry: LancamentoFinanceiro = {
       id: '550e8400-e29b-41d4-a716-446655443005',
       idPagamento: '550e8400-e29b-41d4-a716-446655443006',
@@ -128,11 +133,9 @@ describe('financial use cases', () => {
       idCampanha,
       tipo: 'credito_saldo_recebedor',
       amountCents: 5000,
-      status: 'disponivel',
       criadoEm: fixedDate,
-      // aperture-led0r: maturaEm required on all lancamentos post-led0r.
-      // Already matured (= criadoEm) since this entry is meant to be `disponivel`.
-      maturaEm: fixedDate,
+      transferidoEm: fixedDate,
+      canceladoEm: null,
     };
     await livroFinanceiroRepository.saveLancamentos([availableEntry]);
 

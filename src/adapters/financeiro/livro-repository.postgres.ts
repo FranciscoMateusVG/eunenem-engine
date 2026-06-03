@@ -50,6 +50,10 @@ function isUniqueViolation(error: unknown, constraint: string): boolean {
   return false;
 }
 
+/**
+ * Plan 0015 / migration 019: status + matura_em dropped; transferido_em +
+ * cancelado_em added (both nullable timestamps).
+ */
 type LancamentoRow = {
   id: string;
   id_pagamento: string;
@@ -57,9 +61,9 @@ type LancamentoRow = {
   id_campanha: string | null;
   tipo: string;
   amount_cents: number;
-  status: string;
   criado_em: Date;
-  matura_em: Date;
+  transferido_em: Date | null;
+  cancelado_em: Date | null;
 };
 
 type RepasseRow = {
@@ -71,23 +75,14 @@ type RepasseRow = {
 };
 
 /**
- * PostgreSQL adapter for `LivroFinanceiroRepository` (aperture-id3ay).
- * First production wiring of the Financeiro BC — until this lands, every
- * successful checkout's lancamentos went into a Map and disappeared on
- * server restart.
+ * PostgreSQL adapter for `LivroFinanceiroRepository`.
  *
- * Shape decisions:
- *   - `lancamentos_financeiros` and `repasses_recebedor` are two distinct
- *     tables under one adapter (the port's surface is the implicit "livro
- *     financeiro" aggregate).
- *   - `findRecebedorAtivoPorIdCampanha` delegates to the injected
- *     `RecebedorRepository` — recebedor data isn't owned by Financeiro,
- *     it's a cross-BC read from Arrecadação (same as memory adapter).
- *   - Idempotency on (id_pagamento, tipo) is enforced at the DB via the
- *     unique constraint; the adapter catches 23505 and maps it to the
- *     typed `FinanceiroPagamentoJaRegistradoError` (port-conformance).
- *   - The whole-batch INSERT is atomic in Postgres — if either of the
- *     two rows (recebedor + plataforma) collides, neither row lands.
+ * Plan 0015 (aperture-ucgok) reshape:
+ *   - row mapper drops status/matura_em, picks up transferido_em + cancelado_em
+ *   - new mutation: `marcarLancamentosComoTransferidos` (admin batch action)
+ *   - new mutation: `marcarLancamentosComoCanceladosPorPagamento` (estorno cascade)
+ *   - new query: `hasLancamentosTransferidos` (estorno 409 gate)
+ *   - removed: `findPendentesMaturos`, `marcarComoDisponivel` (FSM-based methods gone)
  */
 export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroRepository {
   constructor(
@@ -106,18 +101,16 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
 
         const rows = lancamentos.map(rowFromLancamento);
 
-        // biome-ignore lint/suspicious/noExplicitAny: Kysely<DB> doesn't know
-        // about lancamentos_financeiros until codegen regenerates types.
+        // biome-ignore lint/suspicious/noExplicitAny: row shape uses
+        // Record<string, unknown> for the heterogeneous date+null inserts;
+        // the Kysely DB type doesn't narrow that cleanly.
         await (this.db as any).insertInto('lancamentos_financeiros').values(rows).execute();
 
         span.setStatus({ code: SpanStatusCode.OK });
       } catch (error: unknown) {
         if (isUniqueViolation(error, UNIQUE_PAGAMENTO_TIPO)) {
-          // Surface the typed error for ALL conflicting idPagamento values
-          // in the batch — picking the first matches the memory adapter
-          // (it throws on the first collision in its preflight loop).
-          // Length-checked above (we returned on empty array), so the
-          // non-null assertion is safe.
+          // Surface the typed error for the first conflicting idPagamento
+          // in the batch — matches memory adapter's preflight loop order.
           const first = lancamentos[0];
           if (first) {
             const typed = new FinanceiroPagamentoJaRegistradoError(first.idPagamento);
@@ -220,27 +213,34 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
     );
   }
 
-  async findPendentesMaturos(now: Date): Promise<readonly LancamentoFinanceiro[]> {
+  async marcarLancamentosComoTransferidos(
+    idsLancamentos: readonly IdLancamentoFinanceiro[],
+    transferidoEm: Date,
+  ): Promise<void> {
     return tracer.startActiveSpan(
-      'db.financeiro_livro.lancamentos.findPendentesMaturos',
+      'db.financeiro_livro.lancamentos.marcarComoTransferidos',
       async (span) => {
-        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+        span.setAttributes({
+          ...DB_ATTRS,
+          'db.operation.name': 'UPDATE',
+          'batch.size': idsLancamentos.length,
+        });
         try {
-          // aperture-led0r: status='pendente' AND matura_em ≤ now.
-          // Postgres uses the partial index
-          // `lancamentos_pendentes_maturos_idx ON (matura_em) WHERE
-          // status='pendente'` (migration 017) for selective scan.
-          // biome-ignore lint/suspicious/noExplicitAny: lancamentos_financeiros not yet in DB types
-          const rows = (await (this.db as any)
-            .selectFrom('lancamentos_financeiros')
-            .selectAll()
-            .where('status', '=', 'pendente')
-            .where('matura_em', '<=', now)
-            .execute()) as LancamentoRow[];
-
-          const result = rows.map(lancamentoFromRow);
+          if (idsLancamentos.length === 0) {
+            span.setStatus({ code: SpanStatusCode.OK });
+            return;
+          }
+          // Idempotent at the WHERE: rows already transferred OR cancelled
+          // are silently skipped. The UPDATE matches only the
+          // pre-transfer subset of the input ids.
+          await sql`
+            UPDATE lancamentos_financeiros
+              SET transferido_em = ${transferidoEm}
+              WHERE id = ANY(${[...idsLancamentos]}::uuid[])
+                AND transferido_em IS NULL
+                AND cancelado_em IS NULL
+          `.execute(this.db);
           span.setStatus({ code: SpanStatusCode.OK });
-          return result;
         } catch (error: unknown) {
           span.recordException(error as Error);
           span.setStatus({ code: SpanStatusCode.ERROR });
@@ -252,22 +252,61 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
     );
   }
 
-  async marcarComoDisponivel(idLancamento: IdLancamentoFinanceiro): Promise<void> {
+  async marcarLancamentosComoCanceladosPorPagamento(
+    idPagamento: IdPagamentoReferencia,
+    canceladoEm: Date,
+  ): Promise<void> {
     return tracer.startActiveSpan(
-      'db.financeiro_livro.lancamentos.marcarComoDisponivel',
+      'db.financeiro_livro.lancamentos.marcarComoCanceladosPorPagamento',
       async (span) => {
         span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
         try {
-          // aperture-led0r: idempotent flip — UPDATE matches zero rows
-          // when the row is already disponivel (the WHERE clause filters
-          // by current status). No exception, no audit-trail noise.
+          // Estorno cascade: only the not-yet-transferred subset gets
+          // canceladoEm stamped. Already-cancelled rows are silently
+          // skipped (idempotent). Already-transferred rows are NEVER
+          // touched here — the upstream estornar-pagamento use-case
+          // enforces the 409 pre-transfer gate, so reaching this method
+          // with any transferred row would be a bug; the WHERE clause
+          // is defense-in-depth.
           await sql`
             UPDATE lancamentos_financeiros
-              SET status = 'disponivel'
-              WHERE id = ${idLancamento}
-                AND status = 'pendente'
+              SET cancelado_em = ${canceladoEm}
+              WHERE id_pagamento = ${idPagamento}
+                AND cancelado_em IS NULL
+                AND transferido_em IS NULL
           `.execute(this.db);
           span.setStatus({ code: SpanStatusCode.OK });
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  async hasLancamentosTransferidos(idPagamento: IdPagamentoReferencia): Promise<boolean> {
+    return tracer.startActiveSpan(
+      'db.financeiro_livro.lancamentos.hasTransferidos',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+        try {
+          // Hits the partial index
+          // `lancamentos_transferidos_por_pagamento_idx ON (id_pagamento)
+          // WHERE transferido_em IS NOT NULL` (migration 019) — a
+          // microsecond probe.
+          // biome-ignore lint/suspicious/noExplicitAny: see saveLancamentos
+          const row = await (this.db as any)
+            .selectFrom('lancamentos_financeiros')
+            .select((eb: any) => eb.fn.countAll().as('cnt'))
+            .where('id_pagamento', '=', idPagamento)
+            .where('transferido_em', 'is not', null)
+            .executeTakeFirstOrThrow();
+          const cnt = Number(row.cnt);
+          span.setStatus({ code: SpanStatusCode.OK });
+          return cnt > 0;
         } catch (error: unknown) {
           span.recordException(error as Error);
           span.setStatus({ code: SpanStatusCode.ERROR });
@@ -355,8 +394,6 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
       async (span) => {
         span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
         try {
-          // Cross-BC delegation — Financeiro doesn't own recebedor data.
-          // Memory adapter does the same.
           if (!this.recebedorRepository) {
             span.setStatus({ code: SpanStatusCode.OK });
             return undefined;
@@ -385,9 +422,9 @@ function rowFromLancamento(l: LancamentoFinanceiro): Record<string, unknown> {
     id_campanha: l.idCampanha ?? null,
     tipo: l.tipo,
     amount_cents: l.amountCents,
-    status: l.status,
     criado_em: l.criadoEm,
-    matura_em: l.maturaEm,
+    transferido_em: l.transferidoEm,
+    cancelado_em: l.canceladoEm,
   };
 }
 
@@ -400,9 +437,9 @@ function lancamentoFromRow(row: LancamentoRow): LancamentoFinanceiro {
     idCampanha: row.id_campanha ?? undefined,
     tipo: row.tipo,
     amountCents: row.amount_cents,
-    status: row.status,
     criadoEm: row.criado_em,
-    maturaEm: row.matura_em,
+    transferidoEm: row.transferido_em,
+    canceladoEm: row.cancelado_em,
   });
 }
 

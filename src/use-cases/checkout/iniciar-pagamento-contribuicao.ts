@@ -7,10 +7,7 @@ import type { PagamentoEventPublisher } from '../../adapters/pagamentos/event-pu
 import type { PagamentoRepository } from '../../adapters/pagamentos/repository.js';
 import type { ProvedorRegraTaxa } from '../../adapters/taxas/regra-provider.js';
 import { encontrarOpcaoContribuicao } from '../../domain/arrecadacao/entities/campanha.js';
-import {
-  type Contribuicao,
-  contribuicaoDisponivel,
-} from '../../domain/arrecadacao/entities/contribuicao.js';
+import type { Contribuicao } from '../../domain/arrecadacao/entities/contribuicao.js';
 import {
   IdCampanhaSchema,
   IdContribuicaoSchema,
@@ -23,8 +20,9 @@ import {
 } from '../../domain/pagamentos/value-objects/ids.js';
 import { MetodoPagamentoSchema } from '../../domain/pagamentos/value-objects/metodo-pagamento.js';
 import { ArrecadacaoCampanhaNaoEncontradaError } from '../../errors/arrecadacao/campanha-nao-encontrada.error.js';
-import { ArrecadacaoContribuicaoNaoDisponivelError } from '../../errors/arrecadacao/contribuicao-nao-disponivel.error.js';
+import { ArrecadacaoContribuicaoIndisponivelError } from '../../errors/arrecadacao/contribuicao-indisponivel.error.js';
 import { ArrecadacaoContribuicaoNaoEncontradaError } from '../../errors/arrecadacao/contribuicao-nao-encontrada.error.js';
+import { contribuicaoEstaIndisponivel } from '../arrecadacao/contribuicao-esta-indisponivel.js';
 import { ArrecadacaoOpcaoContribuicaoNaoEncontradaError } from '../../errors/arrecadacao/opcao-contribuicao-nao-encontrada.error.js';
 import { CheckoutPlataformaMismatchError } from '../../errors/checkout/plataforma-mismatch.error.js';
 import type { Observability } from '../../observability/observability.js';
@@ -87,49 +85,37 @@ export interface IniciarPagamentoContribuicaoDeps {
 
 /**
  * Saga de checkout (write-side) — async session topology, Stripe-as-source-
- * of-truth shape (aperture-m95f3 rework of aperture-xaha2's original flow).
+ * of-truth shape.
  *
  * Step order:
  *   1. Plataforma membership check (campanha.idPlataforma === input.idPlataforma)
- *   2. Resolve contribuicao + opção (READ-ONLY, no claim yet)
- *      - Verify contribuicao exists, belongs to campanha, AND is currently
- *        disponivel (early-fail UX — refuses to mount Stripe iframe for an
- *        already-claimed gift; saves the visitor a payment they can't keep)
+ *   2. Resolve contribuicao + opção (READ-ONLY, no claim, ever)
+ *      - Verify contribuicao exists, belongs to campanha, AND no aprovado
+ *        pagamento exists for it yet (early-fail UX — refuses to mount
+ *        Stripe iframe for an already-purchased gift; saves the visitor
+ *        a payment they can't keep)
  *   3. encontrarOpcaoContribuicao + calcularComposicaoValores (no DB writes)
  *   4. **checkoutSessionProvider.criarSessaoCheckout** → provider session
  *   5. criarIntencaoPagamento (Pagamentos) → pagamento pendente with
- *      externalRef populated
+ *      externalRef populated AND contribuinte: null (the visitor's
+ *      nome/email/recadinho are collected by Stripe inside the iframe
+ *      via custom_fields + customer_creation; the webhook populates
+ *      IntencaoPagamento.contribuinte at finalize time)
  *
- * **Why no claim here (aperture-m95f3 architecture change):**
+ * **Plan 0015 collapse (aperture-ucgok).** The old saga had a
+ * `contribuicaoComContribuinte` step that flipped the contribuição's
+ * status field as part of finalize. With the status field gone, that
+ * step is gone — `contribuição` is a pure slot definition. The
+ * "indisponivel" badge is derived from the EXISTS predicate over
+ * pagamentos (the `contribuicaoEstaIndisponivel` use-case, step 2's
+ * gate). The locked decision #6 of plan 0015 explicitly accepts
+ * concurrent double-pay (visitor's +money outcome), so this gate is
+ * a UX courtesy, not a correctness check.
  *
- * The original (xaha2) saga claimed the contribuicao at step 2 — flipping
- * status to indisponivel as part of session-create. That coupled "visitor
- * initiated checkout" with "visitor owns the gift," which was wrong:
- * a visitor could abandon the iframe (close tab, Stripe-side timeout) and
- * the contribuicao would stay locked until manual intervention. Operator
- * caught this during live-walk testing (2026-05-30) — moving the claim
- * to the WEBHOOK (the moment the payment actually settles) means:
- *   - Abandoned sessions don't lock contribuicoes
- *   - Race condition between two concurrent visitors becomes "first
- *     successful payment wins" — clean, observable, handled by finalize
- *   - The visitor's nome/email/recadinho are collected inside Stripe's
- *     iframe (custom_fields + customer_creation), so we don't even know
- *     them at session-create time — there's no input to associate at
- *     this layer.
- *
- * **Compensation:** unchanged in spirit, but simpler in practice — there's
- * no claim to revert. If criarSessaoCheckout (step 4) or criarIntencaoPagamento
- * (step 5) fails, we just throw. The contribuicao was never touched.
- * Orphaned Stripe sessions self-expire via provider TTL.
- *
- * **Early-fail on indisponivel:** step 2 reads the contribuicao + bails
- * with ArrecadacaoContribuicaoNaoDisponivelError if it's already claimed.
- * This is a UX win, NOT a correctness gate — the webhook's finalize path
- * remains the source of truth (it must handle the race where two visitors
- * both pass this check, both mount Stripe, both pay; finalize tolerates
- * the second one's contribuicao-already-claimed branch). Without the
- * early check, visitors would routinely pay for already-claimed gifts in
- * any reasonable concurrency.
+ * **Compensation:** trivial — there's no claim to revert. If
+ * criarSessaoCheckout (step 4) or criarIntencaoPagamento (step 5)
+ * fails, we throw. Contribuição was never touched. Orphaned Stripe
+ * sessions self-expire via the provider's TTL.
  */
 export async function iniciarPagamentoContribuicao(
   deps: IniciarPagamentoContribuicaoDeps,
@@ -175,12 +161,17 @@ export async function iniciarPagamentoContribuicao(
         // Cross-tenant access attempt — surface as not-found (don't leak existence).
         throw new ArrecadacaoContribuicaoNaoEncontradaError(parsed.idContribuicao);
       }
-      if (!contribuicaoDisponivel(contribuicao)) {
-        // UX-friendly early fail — don't make the visitor pay for a gift
-        // someone else just bought. The webhook's finalize path is still
-        // the correctness source-of-truth (handles the race when two
-        // visitors both pass this check concurrently).
-        throw new ArrecadacaoContribuicaoNaoDisponivelError(parsed.idContribuicao);
+      // Plan 0015 (aperture-ucgok): UX-friendly early fail derived
+      // from the EXISTS-aprovado-pagamento query. Don't make the
+      // visitor pay for a gift someone else just bought. NOT a
+      // correctness gate — locked decision #6 accepts double-pay
+      // as +money for the recebedor when two visitors race through.
+      const indisponivel = await contribuicaoEstaIndisponivel(
+        { pagamentoRepository, observability },
+        { idContribuicao: parsed.idContribuicao },
+      );
+      if (indisponivel) {
+        throw new ArrecadacaoContribuicaoIndisponivelError(parsed.idContribuicao);
       }
 
       // step 3a: resolve tipo via the campanha's opção

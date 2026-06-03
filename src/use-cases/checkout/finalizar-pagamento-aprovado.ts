@@ -6,34 +6,33 @@ import type { LivroFinanceiroRepository } from '../../adapters/financeiro/livro-
 import type { PagamentoEventPublisher } from '../../adapters/pagamentos/event-publisher.js';
 import type { PagamentoProvider } from '../../adapters/pagamentos/provider.js';
 import type { PagamentoRepository } from '../../adapters/pagamentos/repository.js';
-import { contribuicaoDisponivel } from '../../domain/arrecadacao/entities/contribuicao.js';
-import { DadosContribuinteSchema } from '../../domain/arrecadacao/value-objects/dados-contribuinte.js';
 import type { LancamentoFinanceiro } from '../../domain/financeiro/entities/lancamento-financeiro.js';
 import type { Pagamento } from '../../domain/pagamentos/entities/pagamento.js';
 import { IdPagamentoSchema } from '../../domain/pagamentos/value-objects/ids.js';
+import { DadosContribuinteSchema } from '../../domain/pagamentos/value-objects/dados-contribuinte.js';
 import { ArrecadacaoCampanhaNaoEncontradaError } from '../../errors/arrecadacao/campanha-nao-encontrada.error.js';
 import { ArrecadacaoContribuicaoNaoEncontradaError } from '../../errors/arrecadacao/contribuicao-nao-encontrada.error.js';
 import { PagamentoTransicaoStatusInvalidaError } from '../../errors/pagamentos/transicao-status-invalida.error.js';
 import type { Observability } from '../../observability/observability.js';
-import { associarContribuinteContribuicao } from '../arrecadacao/associar-contribuinte-contribuicao.js';
-import { registrarEfeitosFinanceirosPagamentoAprovado } from '../financeiro/registrar-efeitos-financeiros-pagamento-aprovado.js';
 import { aprovarPagamento } from '../pagamentos/aprovar-pagamento.js';
+import { registrarEfeitosFinanceirosPagamentoAprovado } from '../financeiro/registrar-efeitos-financeiros-pagamento-aprovado.js';
 
 export const FinalizarPagamentoAprovadoInputSchema = z.object({
   idPagamento: IdPagamentoSchema,
   /**
-   * Contribuinte data collected by the payment provider in the checkout
-   * flow (Stripe iframe via custom_fields + customer_creation). Passed
-   * in by the webhook handler at finalize time — this is the moment the
-   * contribuicao gets claimed (status: disponivel → indisponivel)
-   * (aperture-m95f3 rework — the claim used to happen in the saga at
-   * session-create time; that left abandoned-checkout state locking
-   * contribuicoes; operator moved it here).
+   * Plan 0015 (aperture-ucgok). Contribuinte snapshot delivered by the
+   * payment provider in the webhook event. For Stripe this comes from
+   * `checkout.session.completed`'s `custom_fields` (nome + mensagem)
+   * + `customer_details` (email). The use-case writes it to
+   * `IntencaoPagamento.contribuinte` atomically with the status flip
+   * — the per-pagamento snapshot model under plan 0015 (each gift
+   * attempt carries its own contribuinte; the contribuição aggregate
+   * holds none).
    *
-   * Optional for backward-compat with non-Stripe call sites + retry
-   * paths where the contribuicao is already claimed. When absent the
-   * finalize still runs (Pagamento aprovado + Financeiro effects) but
-   * doesn't touch the contribuicao state.
+   * Optional: retry paths can fire this use-case without the
+   * contribuinte (e.g. replay after the contribuinte was already
+   * written on a prior attempt); the existing
+   * `IntencaoPagamento.contribuinte` is preserved in that case.
    */
   contribuinte: DadosContribuinteSchema.optional(),
 });
@@ -58,26 +57,30 @@ export interface FinalizarPagamentoAprovadoDeps {
 
 /**
  * Process Manager: depois que o provedor responde, este orquestrador *avança*
- * o workflow — aprova o Pagamento e dispara os efeitos financeiros (saldo
- * + receita) em Financeiro. Distinct from a Saga: não está desfazendo nada;
- * está propagando uma transição.
+ * o workflow — aprova o Pagamento, persiste o contribuinte na intencao,
+ * e dispara os efeitos financeiros (saldo + receita + passthrough).
  *
- * Cross-BC context: Pagamentos não conhece `idCampanha` nem `idPlataforma`
- * (isolamento de BC). O process manager carrega Contribuicao → Campanha
- * para juntar os identificadores, e estampa `idPlataforma` no span/log
- * para rastreabilidade.
+ * **Plan 0015 (aperture-ucgok).** Two structural changes from pre-collapse:
  *
- * Carries no compensation: por design, este é o "ponto sem retorno" do
- * fluxo de checkout. Refunds são uma operação separada (fora de escopo).
+ * 1. **Contribuinte writes happen here, on the pagamento.** The old
+ *    saga had a separate `associarContribuinteContribuicao` step that
+ *    flipped the contribuição's status field. With status gone,
+ *    contribuinte lives on `IntencaoPagamento` and gets stamped at
+ *    finalize time alongside the status transition.
  *
- * **Idempotency contract:** calling this twice with the same `idPagamento`
- * produces the SAME `{pagamento, lancamentos}` result — exactly one set of
- * Financeiro effects exists per pagamento, no matter how many times the
- * caller retries. Two replay paths are handled:
- *   1. Pagamento already `aprovado` → skip provider call, reuse existing state.
- *   2. Financeiro lancamentos already exist → skip register, return existing.
- * Concurrency safety (two parallel callers) is deferred — needs Postgres
- * row locks or `INSERT ... ON CONFLICT`.
+ * 2. **5-state FSM (`pendente | processing | aprovado | rejeitado |
+ *    estornado`).** Both `pendente` and `processing` are valid source
+ *    states for the aprovado transition — card flows skip processing
+ *    (charge.succeeded fires from pendente directly); pix flows transit
+ *    through processing (payment_intent.processing → charge.succeeded).
+ *    Idempotent on aprovado (replay path).
+ *
+ * **Idempotency contract:**
+ *   1. Pagamento already `aprovado` → skip provider call, reuse state.
+ *      The contribuinte is preserved (no overwrite on retry; the
+ *      Stripe-provided value won the first time it ran).
+ *   2. Lancamentos already exist → skip register, return existing.
+ *   3. Pagamento in `rejeitado` or `estornado` → throw transition error.
  */
 export async function finalizarPagamentoAprovado(
   deps: FinalizarPagamentoAprovadoDeps,
@@ -100,22 +103,46 @@ export async function finalizarPagamentoAprovado(
       const parsed = FinalizarPagamentoAprovadoInputSchema.parse(input);
       span.setAttribute('checkout.pagamento.id', parsed.idPagamento);
 
+      // step 0 (plan 0015): contribuinte write — must happen BEFORE the
+      // aprovar step so the persisted Pagamento snapshot reflects both
+      // the new status AND the new contribuinte in a single update().
+      const existingPagamento = await pagamentoRepository.findById(parsed.idPagamento);
+      if (existingPagamento && parsed.contribuinte && existingPagamento.intencao.contribuinte === null) {
+        // Only write when (a) we have a contribuinte AND (b) the
+        // pagamento doesn't already have one (preserves first-writer
+        // wins on retry; matches the existing pi/ch external-ref shape).
+        const withContribuinte: Pagamento = {
+          ...existingPagamento,
+          intencao: {
+            ...existingPagamento.intencao,
+            contribuinte: parsed.contribuinte,
+          },
+          atualizadoEm: clock(),
+        };
+        await pagamentoRepository.update(withContribuinte);
+        logger.info('checkout.pagamento.contribuinte_stamped', {
+          idPagamento: parsed.idPagamento,
+        });
+      }
+
       // step 1: approve via Pagamentos — with idempotent replay
       // ----------------------------------------------------------
-      // If the Pagamento is already `aprovado` (this is a retry), skip the
-      // provider call entirely and reuse the existing state. Anything other
-      // than `pendente` or `aprovado` (e.g. `rejeitado`, or missing) goes
-      // through the normal aprovarPagamento path so the right typed error
-      // is thrown.
-      const existingPagamento = await pagamentoRepository.findById(parsed.idPagamento);
+      // If already aprovado, skip the provider call. Both `pendente`
+      // AND `processing` are valid source states for the aprovado
+      // transition (plan 0015 5-state FSM); anything else throws.
+      const refreshed = await pagamentoRepository.findById(parsed.idPagamento);
       let aprovado: Pagamento;
-      if (existingPagamento?.status === 'aprovado') {
-        aprovado = existingPagamento;
+      if (refreshed?.status === 'aprovado') {
+        aprovado = refreshed;
         logger.info('checkout.pagamento.replay_aprovacao', { idPagamento: parsed.idPagamento });
-      } else if (existingPagamento && existingPagamento.status !== 'pendente') {
+      } else if (
+        refreshed &&
+        refreshed.status !== 'pendente' &&
+        refreshed.status !== 'processing'
+      ) {
         throw new PagamentoTransicaoStatusInvalidaError(
-          existingPagamento.id,
-          existingPagamento.status,
+          refreshed.id,
+          refreshed.status,
           'aprovado',
         );
       } else {
@@ -147,48 +174,15 @@ export async function finalizarPagamentoAprovado(
       span.setAttribute('checkout.campanha.id', campanha.id);
       span.setAttribute('checkout.plataforma.id', campanha.idPlataforma);
 
-      // step 2b (aperture-m95f3): associate contribuinte to contribuicao
-      // — the claim moves from the saga (session-create) to here (post-
-      // payment). Three branches:
-      //   a) contribuicao still disponivel + we have contribuinte data
-      //      → associate (flips status to indisponivel)
-      //   b) contribuicao already indisponivel
-      //      → "double-claim race" — first visitor's webhook fired first.
-      //         Log it, but CONTINUE the finalize (the payment IS valid;
-      //         we still want to record it as aprovado + run Financeiro
-      //         effects). UX-wise the second visitor paid for an
-      //         already-claimed gift — operator-acknowledged v1 trade-off;
-      //         refund flow is out of scope here.
-      //   c) contribuinte absent (retry path; webhook replay)
-      //      → skip association; the existing state stands.
-      if (parsed.contribuinte) {
-        if (contribuicaoDisponivel(contribuicao)) {
-          await associarContribuinteContribuicao(
-            { contribuicaoRepository, observability },
-            {
-              idContribuicao,
-              contribuinte: parsed.contribuinte,
-            },
-          );
-        } else {
-          logger.info('checkout.pagamento.double_claim_race', {
-            idPlataforma: campanha.idPlataforma,
-            idCampanha: campanha.id,
-            idContribuicao,
-            idPagamento: aprovado.id,
-            // Don't log raw nome/email — drift hash via the observability
-            // emission path on the eunenem-server side if forensics need
-            // it. Here we only emit the structural fact.
-          });
-        }
-      }
-
       // step 3: register Financeiro effects — with idempotent replay
       // ------------------------------------------------------------
       // If lancamentos for this Pagamento already exist, the Financeiro
-      // step has already run on a previous invocation. Return the existing
-      // rows instead of attempting a second insert (which would throw
-      // FinanceiroPagamentoJaRegistradoError).
+      // step has already run on a previous invocation. Return the
+      // existing rows instead of attempting a second insert.
+      //
+      // Plan 0015: drop `metodo` from the input — Financeiro no longer
+      // needs it (no more `calcularMaturaEm`); lancamentos start with
+      // both date columns null.
       const existingLancamentos = await livroFinanceiroRepository.findLancamentosByIdPagamento(
         aprovado.id,
       );
@@ -208,10 +202,6 @@ export async function finalizarPagamentoAprovado(
             idCampanha: campanha.id,
             statusPagamento: 'aprovado',
             composicaoValores: aprovado.intencao.composicaoValores,
-            // aperture-led0r: pass metodo through so Financeiro can
-            // compute maturaEm per REGRAS_MATURACAO_PADRAO. Already on
-            // the Pagamento aggregate's intencao.
-            metodo: aprovado.intencao.metodo,
           },
         );
       }

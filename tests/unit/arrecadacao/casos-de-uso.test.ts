@@ -7,7 +7,6 @@ import { ArrecadacaoAdministradorDuplicadoError } from '../../../src/errors/arre
 import { ArrecadacaoAdministradorNaoEncontradoError } from '../../../src/errors/arrecadacao/administrador-nao-encontrado.error.js';
 import { ArrecadacaoCampanhaNaoEncontradaError } from '../../../src/errors/arrecadacao/campanha-nao-encontrada.error.js';
 import { ArrecadacaoContribuicaoJaExisteError } from '../../../src/errors/arrecadacao/contribuicao-ja-existe.error.js';
-import { ArrecadacaoContribuicaoNaoDisponivelError } from '../../../src/errors/arrecadacao/contribuicao-nao-disponivel.error.js';
 import { ArrecadacaoContribuicaoNaoEncontradaError } from '../../../src/errors/arrecadacao/contribuicao-nao-encontrada.error.js';
 import { ArrecadacaoInputInvalidoError } from '../../../src/errors/arrecadacao/input-invalido.error.js';
 import { ArrecadacaoOpcaoContribuicaoNaoEncontradaError } from '../../../src/errors/arrecadacao/opcao-contribuicao-nao-encontrada.error.js';
@@ -20,7 +19,6 @@ import { adicionarAdministradorCampanha } from '../../../src/use-cases/arrecadac
 import { adicionarOpcaoContribuicao } from '../../../src/use-cases/arrecadacao/adicionar-opcao-contribuicao.js';
 import { alterarDadosRecebedorCampanha } from '../../../src/use-cases/arrecadacao/alterar-dados-recebedor-campanha.js';
 import { alterarValorContribuicao } from '../../../src/use-cases/arrecadacao/alterar-valor-contribuicao.js';
-import { associarContribuinteContribuicao } from '../../../src/use-cases/arrecadacao/associar-contribuinte-contribuicao.js';
 import { criarCampanha } from '../../../src/use-cases/arrecadacao/criar-campanha.js';
 import { criarContribuicao } from '../../../src/use-cases/arrecadacao/criar-contribuicao.js';
 import { removerAdministradorCampanha } from '../../../src/use-cases/arrecadacao/remover-administrador-campanha.js';
@@ -448,7 +446,7 @@ describe('alterarDadosRecebedorCampanha', () => {
 });
 
 describe('alterarValorContribuicao', () => {
-  it('updates valor on disponivel contribution', async () => {
+  it('updates valor on a contribution (status guard removed in plan 0015)', async () => {
     const { campanhaRepository, recebedorRepository, plataformaRepository } =
       createArrecadacaoMemoryRepos();
     const contribuicaoRepository = new ContribuicaoRepositoryMemory();
@@ -498,7 +496,6 @@ describe('alterarValorContribuicao', () => {
     );
 
     expect(updated.valor).toBe(7500);
-    expect(updated.status).toBe('disponivel');
   });
 
   it('throws when contribution is missing', async () => {
@@ -509,65 +506,6 @@ describe('alterarValorContribuicao', () => {
         { idContribuicao: randomUUID(), valor: 100 },
       ),
     ).rejects.toThrow(ArrecadacaoContribuicaoNaoEncontradaError);
-  });
-
-  it('throws when contribution is indisponivel', async () => {
-    const { campanhaRepository, recebedorRepository, plataformaRepository } =
-      createArrecadacaoMemoryRepos();
-    const contribuicaoRepository = new ContribuicaoRepositoryMemory();
-    const idCampanha = randomUUID();
-    const idOpcao = randomUUID();
-    const idContribuicao = randomUUID();
-
-    await criarCampanha(
-      {
-        campanhaRepository,
-        recebedorRepository,
-        plataformaRepository,
-        clock,
-        observability: silentObservability,
-      },
-      {
-        id: idCampanha,
-        idPlataforma: ID_PLATAFORMA_EUNENEM,
-        idsAdministradores: [randomUUID()],
-        dadosRecebedor: dadosRecebedorPadrao(),
-        titulo: 'Campanha',
-      },
-    );
-    await adicionarOpcaoContribuicao(
-      { campanhaRepository, observability: silentObservability },
-      { idCampanha, idOpcao, tipo: 'presente' },
-    );
-    await criarContribuicao(
-      {
-        campanhaRepository,
-        contribuicaoRepository,
-        clock,
-        observability: silentObservability,
-      },
-      {
-        id: idContribuicao,
-        idCampanha,
-        idOpcaoContribuicao: idOpcao,
-        nome: 'Fralda',
-        valor: 100,
-      },
-    );
-    await associarContribuinteContribuicao(
-      { contribuicaoRepository, observability: silentObservability },
-      {
-        idContribuicao,
-        contribuinte: { nome: 'V', email: 'v@exemplo.com' },
-      },
-    );
-
-    await expect(
-      alterarValorContribuicao(
-        { contribuicaoRepository, observability: silentObservability },
-        { idContribuicao, valor: 200 },
-      ),
-    ).rejects.toThrow(ArrecadacaoContribuicaoNaoDisponivelError);
   });
 
   it('throws ArrecadacaoInputInvalidoError on zero valor', async () => {
@@ -682,7 +620,7 @@ describe('adicionarOpcaoContribuicao', () => {
 });
 
 describe('criarContribuicao', () => {
-  it('creates disponivel contribution with admin input', async () => {
+  it('creates a contribution with admin input', async () => {
     const { campanhaRepository, recebedorRepository, plataformaRepository } =
       createArrecadacaoMemoryRepos();
     const contribuicaoRepository = new ContribuicaoRepositoryMemory();
@@ -729,8 +667,6 @@ describe('criarContribuicao', () => {
 
     expect(contribuicao.valor).toBe(8000);
     expect(contribuicao.nome).toBe('Fralda');
-    expect(contribuicao.status).toBe('disponivel');
-    expect(contribuicao.contribuinte).toBeNull();
     expect(contribuicao.idOpcaoContribuicao).toBe(idOpcao);
   });
 
@@ -873,135 +809,13 @@ describe('criarContribuicao', () => {
   });
 });
 
-describe('associarContribuinteContribuicao', () => {
-  it('associates contributor and marks indisponivel', async () => {
-    const { campanhaRepository, recebedorRepository, plataformaRepository } =
-      createArrecadacaoMemoryRepos();
-    const contribuicaoRepository = new ContribuicaoRepositoryMemory();
-    const idCampanha = randomUUID();
-    const idOpcao = randomUUID();
-    const idContribuicao = randomUUID();
-
-    await criarCampanha(
-      {
-        campanhaRepository,
-        recebedorRepository,
-        plataformaRepository,
-        clock,
-        observability: silentObservability,
-      },
-      {
-        id: idCampanha,
-        idPlataforma: ID_PLATAFORMA_EUNENEM,
-        idsAdministradores: [randomUUID()],
-        dadosRecebedor: dadosRecebedorPadrao(),
-        titulo: 'Campanha',
-      },
-    );
-    await adicionarOpcaoContribuicao(
-      { campanhaRepository, observability: silentObservability },
-      { idCampanha, idOpcao, tipo: 'presente' },
-    );
-    await criarContribuicao(
-      {
-        campanhaRepository,
-        contribuicaoRepository,
-        clock,
-        observability: silentObservability,
-      },
-      {
-        id: idContribuicao,
-        idCampanha,
-        idOpcaoContribuicao: idOpcao,
-        nome: 'Fralda',
-        valor: 8000,
-      },
-    );
-
-    const updated = await associarContribuinteContribuicao(
-      { contribuicaoRepository, observability: silentObservability },
-      {
-        idContribuicao,
-        contribuinte: { nome: 'Visitante', email: 'visitante@exemplo.com' },
-      },
-    );
-
-    expect(updated.status).toBe('indisponivel');
-    expect(updated.contribuinte?.email).toBe('visitante@exemplo.com');
-  });
-
-  it('throws when contribution is missing', async () => {
-    const contribuicaoRepository = new ContribuicaoRepositoryMemory();
-    await expect(
-      associarContribuinteContribuicao(
-        { contribuicaoRepository, observability: silentObservability },
-        {
-          idContribuicao: randomUUID(),
-          contribuinte: { nome: 'V', email: 'v@exemplo.com' },
-        },
-      ),
-    ).rejects.toThrow(ArrecadacaoContribuicaoNaoEncontradaError);
-  });
-
-  it('throws when contribution is already indisponivel', async () => {
-    const { campanhaRepository, recebedorRepository, plataformaRepository } =
-      createArrecadacaoMemoryRepos();
-    const contribuicaoRepository = new ContribuicaoRepositoryMemory();
-    const idCampanha = randomUUID();
-    const idOpcao = randomUUID();
-    const idContribuicao = randomUUID();
-
-    await criarCampanha(
-      {
-        campanhaRepository,
-        recebedorRepository,
-        plataformaRepository,
-        clock,
-        observability: silentObservability,
-      },
-      {
-        id: idCampanha,
-        idPlataforma: ID_PLATAFORMA_EUNENEM,
-        idsAdministradores: [randomUUID()],
-        dadosRecebedor: dadosRecebedorPadrao(),
-        titulo: 'Campanha',
-      },
-    );
-    await adicionarOpcaoContribuicao(
-      { campanhaRepository, observability: silentObservability },
-      { idCampanha, idOpcao, tipo: 'presente' },
-    );
-    await criarContribuicao(
-      {
-        campanhaRepository,
-        contribuicaoRepository,
-        clock,
-        observability: silentObservability,
-      },
-      {
-        id: idContribuicao,
-        idCampanha,
-        idOpcaoContribuicao: idOpcao,
-        nome: 'Fralda',
-        valor: 100,
-      },
-    );
-    await associarContribuinteContribuicao(
-      { contribuicaoRepository, observability: silentObservability },
-      {
-        idContribuicao,
-        contribuinte: { nome: 'A', email: 'a@exemplo.com' },
-      },
-    );
-
-    await expect(
-      associarContribuinteContribuicao(
-        { contribuicaoRepository, observability: silentObservability },
-        {
-          idContribuicao,
-          contribuinte: { nome: 'B', email: 'b@exemplo.com' },
-        },
-      ),
-    ).rejects.toThrow(ArrecadacaoContribuicaoNaoDisponivelError);
-  });
-});
+// Plan 0015 (aperture-ucgok): `associarContribuinteContribuicao` and
+// `desassociarContribuinteContribuicao` were deleted along with the
+// Contribuicao status field. Contribuinte data now lives on
+// IntencaoPagamento.contribuinte (per-pagamento snapshot) and the
+// "indisponivel" badge is the EXISTS-aprovado-pagamento predicate covered
+// by `contribuicaoEstaIndisponivel` + repository tests, not here.
+//
+// The aprovado-pagamento guard that previously belonged to
+// `alterar-valor` was moved to `removerContribuicao` — its own
+// describe block lives in `remover-contribuicao.test.ts`.
