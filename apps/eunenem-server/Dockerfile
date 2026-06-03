@@ -41,9 +41,14 @@ RUN pnpm install --frozen-lockfile
 
 # Layer 3: source. node_modules + generated public/ excluded via
 # .dockerignore so the COPY doesn't blow away the installed deps.
+# scripts/ + migrations/ are included so `pnpm db:migrate` can be
+# executed inside the container post-deploy (kysely runner reads
+# migrations/ at runtime — see scripts/migrate.ts).
 WORKDIR /app
 COPY apps/eunenem-server ./apps/eunenem-server/
 COPY src ./src/
+COPY scripts ./scripts/
+COPY migrations ./migrations/
 
 # STRIPE_PUBLISHABLE_KEY is consumed by esbuild's `define` at BUILD time
 # and inlined into the client bundle (see build.mjs / setup.ts:167-169).
@@ -59,6 +64,12 @@ RUN pnpm build
 
 ENV NODE_ENV=production
 ENV PORT=3001
+# Expose apps/eunenem-server/node_modules/.bin on PATH so root-level
+# scripts that shell out to tsx (e.g. `pnpm db:migrate` → `tsx
+# scripts/migrate.ts` per root package.json) can find it. tsx is a root
+# devDep and was excluded by --prod, but the eunenem-server's full
+# install includes it.
+ENV PATH=/app/apps/eunenem-server/node_modules/.bin:$PATH
 EXPOSE 3001
 
 # Hono server: serves SSR + static assets, /healthz health check.
