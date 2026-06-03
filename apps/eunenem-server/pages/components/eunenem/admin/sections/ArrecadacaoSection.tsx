@@ -3,19 +3,36 @@ import { DddBadge } from "@/components/eunenem/admin/DddBadge";
 import { trpc } from "@/lib/trpc.js";
 
 /**
- * ArrecadacaoSection — FILLED ship (aperture-rsidz.4, W3).
+ * ArrecadacaoSection — plan 0015 Phase 6 reshape (aperture-i45g5).
  *
  * Top section of /admin/contribuicao/:idContribuicao. Renders the
- * Arrecadação-side facts of a single contribuicao: id, valor, status,
- * opcao + grupo, contribuinte (anonymous-safe), criadaEm, mensagem,
- * campanha link, recebedor (gift-not-claimed-safe).
+ * Arrecadação-side facts of a single contribuicao: id, valor,
+ * disponibilidade, opção + grupo, criadaEm, campanha link, recebedor
+ * (gift-not-claimed-safe).
+ *
+ * Phase 6 simplification — three blocks dropped from this card vs the
+ * original rsidz.4 ship:
+ *   1. CONTRIBUINTE block (name + email) — moved to per-pagamento
+ *      contribuinte affordance in PagamentosSection.
+ *   2. MENSAGEM (recadinho) block — same, moves to per-pagamento.
+ *   3. Stored `status` badge — replaced with the `indisponivel` predicate
+ *      computed from `EXISTS pagamento WHERE id_contribuicao=X AND
+ *      status='aprovado'`. Visual style stays the same; the data source
+ *      changes. Parallel-prep stub today: derived from the legacy
+ *      `status` field. Rex's Phase 1 PR swaps to the real predicate
+ *      with no UI change.
+ *
+ * Why: per plan 0015 Locked Decision #2, the Contribuicao aggregate is
+ * "admin-owned, no visitor writes, slot definition only" — contribuinte
+ * data is per-pagamento (intencao.contribuinte), and the
+ * indisponivel/disponivel state is derived, not stored.
  *
  * Calls `trpc.admin.contribuicoes.findById` which returns the
  * multi-aggregate payload (contribuicao + campanha summary + recebedor
- * snapshot + resolved contribuinte usuario summary). Server-side tenant
- * guard ensures cross-plataforma lookups return null.
+ * snapshot). The legacy `contribuinte` usuario summary slot still
+ * arrives on the wire but is unused by this card now.
  *
- * Seam contract (W4/W5 do not modify this file — only Pagamentos/Financeiro):
+ * Seam contract (preserved verbatim from rsidz.4):
  *   - Default export `({ idContribuicao }) => JSX.Element`
  *   - Root element carries `data-bc="arrecadacao"`
  *   - Renders the DddBadge header (emerald) so BC wayfinding stays consistent
@@ -43,7 +60,6 @@ export default function ArrecadacaoSection({
           contribuicao={data.contribuicao}
           campanha={data.campanha}
           recebedor={data.recebedor}
-          contribuinte={data.contribuinte}
         />
       )}
     </section>
@@ -106,47 +122,37 @@ type ContribuicaoDTO = {
   id: string;
   nome: string;
   valorCentavos: number;
-  status: "disponivel" | "indisponivel";
   grupo: string | null;
   idOpcaoContribuicao: string;
   criadaEm: string;
-  contribuinte: {
-    nome: string;
-    email: string;
-    mensagem: string | null;
-  } | null;
+  // Plan 0015 Phase 6 — computed predicate (EXISTS pagamento WHERE
+  // id_contribuicao=X AND status='aprovado'). The Arrecadação card reads
+  // this; the legacy `status` field on the wire is ignored here.
+  indisponivel: boolean;
 };
 
 type CampanhaSummary = { id: string; titulo: string };
 type RecebedorSummary = { nome: string };
-type UsuarioSummary = { idConta: string; nomeExibicao: string; email: string };
 
 function Body({
   idContribuicao,
   contribuicao,
   campanha,
   recebedor,
-  contribuinte,
 }: {
   idContribuicao: string;
   contribuicao: ContribuicaoDTO;
   campanha: CampanhaSummary;
   recebedor: RecebedorSummary | null;
-  contribuinte: UsuarioSummary | null;
 }) {
   return (
     <div className="space-y-6 rounded-md border border-line bg-paper p-5">
       <Headline contribuicao={contribuicao} idContribuicao={idContribuicao} />
       <FactsGrid contribuicao={contribuicao} idContribuicao={idContribuicao} />
       <SubGrid>
-        <ContribuinteBlock
-          contribuinte={contribuinte}
-          rawContribuinte={contribuicao.contribuinte}
-        />
         <CampanhaBlock campanha={campanha} />
         <RecebedorBlock recebedor={recebedor} />
       </SubGrid>
-      <MensagemBlock mensagem={contribuicao.contribuinte?.mensagem ?? null} />
     </div>
   );
 }
@@ -163,7 +169,7 @@ function Headline({
       <h3 className="text-xl font-semibold tracking-tight text-ink">
         {contribuicao.nome}
       </h3>
-      <StatusPill status={contribuicao.status} />
+      <StatusPill indisponivel={contribuicao.indisponivel} />
       <IdCopyChip idContribuicao={idContribuicao} />
     </div>
   );
@@ -227,52 +233,11 @@ function FactsGrid({
 }
 
 function SubGrid({ children }: { children: React.ReactNode }) {
+  // Phase 6: ContribuinteBlock removed → grid drops from 3 to 2 cols.
+  // Campanha + Recebedor now share the row at sm: breakpoint and above.
   return (
-    <div className="grid gap-4 border-t border-line pt-4 sm:grid-cols-3">
+    <div className="grid gap-4 border-t border-line pt-4 sm:grid-cols-2">
       {children}
-    </div>
-  );
-}
-
-function ContribuinteBlock({
-  contribuinte,
-  rawContribuinte,
-}: {
-  contribuinte: UsuarioSummary | null;
-  rawContribuinte: ContribuicaoDTO["contribuinte"];
-}) {
-  // Three states:
-  //  1. anonymous (rawContribuinte === null) → "(sem contribuinte identificado)"
-  //  2. identified visitor, no usuario on this plataforma → show nome + email mono, no link
-  //  3. identified visitor + registered usuario → nome + linked email → /admin/usuario/:idConta
-  return (
-    <div>
-      <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-mute">
-        contribuinte
-      </p>
-      {rawContribuinte === null ? (
-        <p className="mt-1 text-[13px] italic text-ink-mute">
-          (sem contribuinte identificado)
-        </p>
-      ) : (
-        <div className="mt-1 space-y-0.5">
-          <p className="text-[13px] text-ink">
-            {contribuinte?.nomeExibicao ?? rawContribuinte.nome}
-          </p>
-          {contribuinte ? (
-            <a
-              href={`/admin/usuario/${contribuinte.idConta}`}
-              className="font-mono text-[12px] text-plum underline-offset-2 hover:underline"
-            >
-              {contribuinte.email}
-            </a>
-          ) : (
-            <p className="font-mono text-[12px] text-ink-soft">
-              {rawContribuinte.email}
-            </p>
-          )}
-        </div>
-      )}
     </div>
   );
 }
@@ -311,25 +276,20 @@ function RecebedorBlock({ recebedor }: { recebedor: RecebedorSummary | null }) {
   );
 }
 
-function MensagemBlock({ mensagem }: { mensagem: string | null }) {
-  return (
-    <div className="border-t border-line pt-4">
-      <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-mute">
-        mensagem
-      </p>
-      {mensagem === null || mensagem === "" ? (
-        <p className="mt-1 text-[13px] italic text-ink-mute">(sem mensagem)</p>
-      ) : (
-        <p className="mt-1 text-[14px] italic leading-relaxed text-ink-soft">
-          “{mensagem}”
-        </p>
-      )}
-    </div>
-  );
-}
-
-function StatusPill({ status }: { status: "disponivel" | "indisponivel" }) {
-  const isAvailable = status === "disponivel";
+/**
+ * Disponibilidade pill — visual style unchanged from rsidz.4. The data
+ * source moved from a stored `status` field to the `indisponivel` predicate
+ * (EXISTS pagamento WHERE id_contribuicao=X AND status='aprovado').
+ *
+ * Why we read `indisponivel: boolean` instead of a 2-state string:
+ *   - The predicate is structurally a boolean (does some aprovado pagamento
+ *     exist?). Round-tripping it through a string just to keep the old API
+ *     shape was ceremony without value.
+ *   - The pill's only two visible states are "disponível" / "indisponível";
+ *     a boolean maps to them 1:1.
+ */
+function StatusPill({ indisponivel }: { indisponivel: boolean }) {
+  const isAvailable = !indisponivel;
   return (
     <span
       className={[

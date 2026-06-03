@@ -4,25 +4,40 @@ import { PagamentoWebhookList } from "@/components/eunenem/admin/PagamentoWebhoo
 import { trpc } from "@/lib/trpc.js";
 
 /**
- * PagamentosList — W4 fill for the PagamentosSection (aperture-rsidz.5).
+ * PagamentosList — plan 0015 Phase 6 reshape (aperture-i45g5).
  *
  * Renders every pagamento attempt against a contribuicao, sorted criadoEm
  * DESC so the latest attempt sits first. Visitor-retry flows
- * (pendente → rejeitado → new pendente → aprovado) get every step in the
- * card stack — the operator can see the full lifecycle without leaving the
- * page.
+ * (pendente → processing → aprovado, or pendente → rejeitado → new pendente
+ * → aprovado, or aprovado → estornado) get every step in the card stack.
  *
- * Visual language matches W0/W1/W2/W3:
- *   - `font-mono` labels at `text-[11px] uppercase tracking-[0.14em] text-ink-soft`
- *   - `text-[13px] text-ink` body
- *   - hairline `border-line`, `bg-paper` cards
- *   - the same status-pill shape as ArrecadacaoSection's `StatusPill`
+ * Phase 6 reshape — two visible changes vs the rsidz.5 ship:
  *
- * The composição breakdown is a structured 6-row table — it's the high-
- * signal payload of the screen, so it gets a dedicated grid. The
- * JsonViewer below it is for operator inspection of the raw VO snapshots
- * (composicaoValores, transacaoExterna, intencao) — collapsed by default
- * because the screen would otherwise drown in JSON.
+ *   1. Inline ContribuinteBlock per pagamento. Contribuinte data moved off
+ *      Contribuicao onto IntencaoPagamento (Locked Decision #3). Each card
+ *      now surfaces { nome, email, mensagem } in a dedicated block, since
+ *      different pagamento attempts on the same contribuicao can have
+ *      different contribuintes (or null for in-flight pendente rows whose
+ *      visitor hasn't completed the Stripe iframe yet).
+ *
+ *   2. 5-state StatusPill. The Pagamento FSM gained `processing`
+ *      (pix QR scanned, ACH float — distinct from `pendente` which is
+ *      "intent created, no Stripe activity") and `estornado` (full refund
+ *      after aprovado — pre-transfer guard enforced upstream). Visual
+ *      palette: processing=amber, estornado=stone (muted past-tense).
+ *
+ * Visual language matches W0..W4 admin sections — `font-mono` small-caps
+ * labels, `text-[13px] text-ink` body, hairline `border-line` cards.
+ *
+ * The composição breakdown is a structured 6-row table — high-signal
+ * payload of the screen, dedicated grid. JsonViewer below it surfaces the
+ * raw VO snapshots (composicaoValores, transacaoExterna, intencao) —
+ * collapsed by default.
+ *
+ * Parallel-prep stub: `intencao.contribuinte` arrives as null on every
+ * row until Rex's Phase 1 + Phase 3 (entity surgery + webhook handler)
+ * ship. The ContribuinteBlock renders the "(sem contribuinte ainda)"
+ * affordance for null — same shape as the anonymous-checkout path.
  */
 export default function PagamentosList({
   idContribuicao,
@@ -118,9 +133,23 @@ function EmptyState() {
   );
 }
 
+// Phase 6 — 5-state Pagamento FSM per plan 0015 Locked Decision #7.
+type PagamentoStatus =
+  | "pendente"
+  | "processing"
+  | "aprovado"
+  | "rejeitado"
+  | "estornado";
+
+type ContribuinteBlockData = {
+  nome: string;
+  email: string;
+  mensagem: string | null;
+} | null;
+
 type PagamentoDTO = {
   id: string;
-  status: "pendente" | "aprovado" | "rejeitado";
+  status: PagamentoStatus;
   criadoEm: string;
   atualizadoEm: string;
   intencao: {
@@ -139,6 +168,10 @@ type PagamentoDTO = {
       receiverAmountCents: number;
       responsavelTaxa: "contribuinte";
     };
+    // Plan 0015 Phase 1+3 — DadosContribuinte attached to IntencaoPagamento.
+    // Null until the webhook handler populates it at
+    // `checkout.session.completed` (Stripe custom_fields delivery).
+    contribuinte: ContribuinteBlockData;
   };
   transacaoExterna?: {
     id: string;
@@ -163,6 +196,7 @@ function PagamentoCard({
     <article className="space-y-4 rounded-md border border-line bg-paper p-5">
       <CardHeader pagamento={pagamento} />
       <CompactRow pagamento={pagamento} />
+      <ContribuinteBlock contribuinte={pagamento.intencao.contribuinte} />
       <ComposicaoTable composicao={pagamento.intencao.composicaoValores} />
       <ExpandToggle expanded={expanded} onToggle={() => setExpanded((v) => !v)} />
       {expanded && (
@@ -203,6 +237,63 @@ function CardHeader({ pagamento }: { pagamento: PagamentoDTO }) {
       <span className="font-mono text-[12px] tabular-nums text-ink-soft">
         {formatCriadoEmShort(pagamento.criadoEm)}
       </span>
+    </div>
+  );
+}
+
+/**
+ * Per-pagamento contribuinte block. Plan 0015 Phase 6 — DadosContribuinte
+ * moved off Contribuicao onto IntencaoPagamento, so each pagamento card
+ * shows its own contribuinte inline. Three states:
+ *
+ *   1. NULL (parallel-prep stub OR anonymous checkout OR pre-webhook
+ *      pendente) → "(sem contribuinte ainda)" italic affordance. The same
+ *      shape as the legacy Arrecadação ContribuinteBlock's anonymous-state
+ *      so the visual identity carries over.
+ *
+ *   2. Identified, no mensagem → nome + email only, no quote block.
+ *
+ *   3. Identified + mensagem → nome + email + italicized quote block
+ *      underneath, matching the rsidz.4 MensagemBlock typography
+ *      (`text-[14px] italic leading-relaxed text-ink-soft`).
+ *
+ * Visual identity matches W3's old SubGrid ContribuinteBlock — same
+ * small-caps label, same nome+email stack — but here it lives inside a
+ * pagamento card instead of the parent contribuicao. Operators see "this
+ * specific attempt was from <X>" instead of "this contribuicao slot was
+ * bound to <X>".
+ */
+function ContribuinteBlock({
+  contribuinte,
+}: {
+  contribuinte: ContribuinteBlockData;
+}) {
+  return (
+    <div className="border-t border-line pt-4">
+      <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-mute">
+        contribuinte
+      </p>
+      {contribuinte === null ? (
+        <p className="mt-1 text-[13px] italic text-ink-mute">
+          (sem contribuinte ainda)
+        </p>
+      ) : (
+        <div className="mt-1 space-y-2">
+          <div className="space-y-0.5">
+            <p className="text-[13px] text-ink">{contribuinte.nome}</p>
+            <p className="font-mono text-[12px] text-ink-soft">
+              {contribuinte.email}
+            </p>
+          </div>
+          {contribuinte.mensagem !== null && contribuinte.mensagem !== "" && (
+            <blockquote className="border-l-2 border-line pl-3">
+              <p className="text-[13.5px] italic leading-relaxed text-ink-soft">
+                “{contribuinte.mensagem}”
+              </p>
+            </blockquote>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -332,10 +423,30 @@ function FactRow({
   );
 }
 
+/**
+ * 5-state StatusPill per plan 0015 Phase 6.
+ *
+ * Visual palette — chosen to make the FSM legible at a glance:
+ *
+ *   pendente    → zinc     (created, no Stripe motion — same neutral as before)
+ *   processing  → amber    (in-flight; pix QR scanned / ACH float)
+ *                          NEW — distinct yellow band reads as "money is
+ *                          moving but not settled". Treats the pix mid-state
+ *                          as a first-class status, not a synonym for pendente.
+ *   aprovado    → emerald  (success, money settled)
+ *   rejeitado   → red      (failed before/during processing)
+ *   estornado   → stone    NEW — muted grey-tan band reads as "past tense"
+ *                          (the pagamento was successful AND THEN refunded;
+ *                          visually distinct from rejeitado which never
+ *                          succeeded in the first place).
+ *
+ * Both new bands use the same chip shape, padding, and `size-[6px]` dot as
+ * the existing three — only the color band differs. No layout change.
+ */
 function StatusPill({
   status,
 }: {
-  status: "pendente" | "aprovado" | "rejeitado";
+  status: PagamentoStatus;
 }) {
   const palette = {
     pendente: {
@@ -344,6 +455,13 @@ function StatusPill({
       text: "text-ink-soft",
       dot: "bg-ink-mute",
       label: "pendente",
+    },
+    processing: {
+      border: "border-amber-200",
+      bg: "bg-amber-50",
+      text: "text-amber-800",
+      dot: "bg-amber-500",
+      label: "processing",
     },
     aprovado: {
       border: "border-emerald-200",
@@ -358,6 +476,13 @@ function StatusPill({
       text: "text-red-800",
       dot: "bg-red-500",
       label: "rejeitado",
+    },
+    estornado: {
+      border: "border-stone-300",
+      bg: "bg-stone-100",
+      text: "text-stone-700",
+      dot: "bg-stone-500",
+      label: "estornado",
     },
   }[status];
   return (
