@@ -4,6 +4,13 @@ Captures the design decisions and open questions around retry safety, idempotenc
 
 This is a **discussion doc**, not a settled spec — several deferred items below are real concerns that need their own plan eventually.
 
+> 📌 **2026-06-03 — most cross-BC races eliminated by plan [0015](../plans/0015-contribuicao-pagamento-financeiro-collapse.md).** The simplification pass collapses three FSMs into one (only Pagamento has a state machine; Contribuição has none; LançamentoFinanceiro has none) and removes the contribuição-claim step entirely. The two races that motivated the deferred questions in the original draft of this doc — the **contribuição-claim race** (two visitors hitting "Comprar" milliseconds apart) and the **maturation race** (a scheduled job racing the webhook on flipping lançamento `status`) — are both gone:
+>
+> - **Claim race:** Contribuição has no `status` and no claim step. The "indisponivel" predicate is a query (`EXISTS pagamento WHERE idContribuicao = X AND status='aprovado'`). With no shared status to race on, there's nothing to optimistic-CC. Two visitors completing payment for the same slot inside the same Stripe-session window is an **accepted edge case** — both pagamentos go `aprovado`, recebedor receives 2x the value, no remediation, per 0015 §Locked-decision 6 (eunenem is a money-transfer product with no stock; double-pay is +money, not -inventory).
+> - **Maturation race:** `LançamentoFinanceiro` has no FSM and no `maturaEm` field. The "states" are query-time predicates over `transferidoEm` + `canceladoEm`. There is no scheduled job flipping status; the admin sets `transferidoEm` manually when the money actually reaches the recebedor. Nothing races against the webhook because nothing is asynchronously mutating the row in the background.
+>
+> What *still* matters: the Pagamento FSM is event-driven (Stripe webhooks fire actual transitions) and earns its own consistency boundary inside the Pagamentos aggregate. The replay-discipline below still applies to `finalizarPagamentoAprovado`. The lançamento batch-transfer ordering is admin-discipline rather than a race (only one operator marks a batch as transferred at a time, with a UI confirmation step).
+
 ---
 
 ## Principle: idempotency is a domain invariant
@@ -134,6 +141,8 @@ In **Postgres + multiple workers**, it absolutely can. The fix is one of:
 
 **Why this is deferred:** there are no Postgres adapters for Pagamentos or Financeiro yet. Adding row locks against a non-existent table is yak-shaving. When those adapters are introduced (a future plan), this is the moment to harden.
 
+**Post-0015 note:** the race illustrated above is the *Pagamento aprovação* race — webhook fires, scheduled reconciliação fires simultaneously, both read `pendente`, both try to flip to `aprovado`. This race still exists and the optimistic-CC pattern still applies (a `versao` column on Pagamento would close it). What 0015 retired was the *cross-BC* races — claim-race on Contribuição and maturation-race on LançamentoFinanceiro — because the columns they raced against no longer exist. The remaining races live cleanly inside the Pagamento aggregate's own consistency boundary, which is where they belonged all along.
+
 ---
 
 ## Compensation vs idempotency — different problems, different patterns
@@ -191,17 +200,24 @@ Today's "called twice" tests are sequential. Real concurrency tests need:
 
 **Open question:** do we adopt a batch-level idempotency log table once batch jobs exist?
 
-### 4. Compensation's race window
+### 4. Lançamento batch-transfer ordering ~~(was: Compensation's race window)~~
 
-The saga in Phase 2 calls `desassociarContribuinteContribuicao` on failure. What if a concurrent caller already grabbed the contribuição by the time compensation runs? Today the compensation throws `ArrecadacaoContribuicaoNaoDisponivelError` (because the contribuição is `indisponivel` from someone *else's* claim), the log records it as a compensation failure, and the original error bubbles up.
+The original deferred question here was about the claim-saga's compensation racing against a concurrent claim. **Retired by [0015](../plans/0015-contribuicao-pagamento-financeiro-collapse.md):** no claim step, no compensation, no race. Marked answered.
 
-**Open question:** is "best-effort compensation with structured log" the right answer, or do we want stronger guarantees (compensation queue, scheduled retry)?
+The replacement concern at this layer is the **lançamento batch-transfer ordering** problem. When an admin runs `marcar-lancamento-transferido` over a batch of IDs, two questions matter:
 
-### 5. The `version` column convention
+- What if a pagamento estorna *while* the admin is mid-batch (one row already stamped `transferidoEm`, another still in flight)? The estorno's `canceladoEm` cascade should skip the stamped row (per 0015 §Locked-decision 10's 409 gate). The cascade uses `UPDATE ... WHERE transferidoEm IS NULL` so the ordering resolves naturally — but it's worth a test.
+- What if two admins click "marcar como transferido" on overlapping batches in the same minute? The use case is idempotent (re-marking an already-transferred lançamento is a no-op per 0015 §Phase 2), so double-stamping is safe. But two operators racing on a recebedor's payouts is more of an **admin-discipline / UI-coordination** problem than a domain race — the UI should either lock the recebedor's "ready to transfer" list while a batch is in flight, or surface the contention as a confirmation prompt.
 
-If we go optimistic (Design B above), every Pagamento, Contribuicao, etc. needs a `version: integer` column that the orchestrator reads and the UPDATE checks. Adopting this is **uniform across all aggregates** or none — partial adoption is worse than neither (because half your code does it and the other half pretends concurrency doesn't exist).
+**Open question:** is admin-discipline (UI flow, confirmation prompts) sufficient, or does `marcar-lancamento-transferido` itself need a batch-level lock? Today: admin-discipline is enough because the operator population is small (one or two people) and the operation runs out-of-band. Revisit if the engine grows a self-service "transfer" surface that recebedores hit directly.
 
-**Open question:** when we add the first Postgres-backed write that needs concurrency safety, do we retrofit `version` across all aggregates as a single migration? Or grow it incrementally?
+### 5. ~~The `version` column convention~~ — retired
+
+The original deferred question was about retrofitting a `version: integer` column across all aggregates (Contribuicao, Pagamento, Lancamento, etc.) for optimistic CC. **Retired by [0015](../plans/0015-contribuicao-pagamento-financeiro-collapse.md):** Contribuicao no longer has writeable status, Lancamento no longer has a status field at all, and the question collapses to "do we add `versao` to **Pagamento** alone?"
+
+That's a much smaller decision and it's the Pagamento aggregate's own concern, not a cross-aggregate convention. The webhook-aprovação race (illustrated in the race-window section above) is still the motivating case. The replacement open question:
+
+**Open question:** when we add the first Postgres-backed Pagamento write, do we add a `versao` column on Pagamento up front, or wait for an observed conflict in production to motivate it? Today the webhook handler resolves the target pagamento via `findByExternalRef`/`findByPaymentIntentExternalRef`/`findByChargeExternalRef` (see aperture-wif8s) which is a single lookup point — adding `versao` is a one-row migration when we hit it. Recommend deferring until first Postgres adapter for Pagamento ships, then adding it in the same migration.
 
 ---
 

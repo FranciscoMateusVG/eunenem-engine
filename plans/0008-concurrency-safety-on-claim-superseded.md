@@ -1,8 +1,18 @@
 # Plan 0008 — Concurrency safety on Contribuição claim
 
-> **Status**: drafted 2026-05-24, awaiting confirmation.
-> **Depends on**: plan `0002-checkout-orchestration-layer-done.md` (defines `iniciarPagamentoContribuicao` and the claim step). Optionally synergizes with `0005-durable-event-log-and-worker-queue.md` (DB transactions matter more once there's a worker).
-> **Companion doc**: `docs/idempotency-and-concurrency.md` — question 1 (concurrency safety on claim, deferred from 0004).
+> ⚠️ **SUPERSEDED-BY** plan 0015 — 2026-06-03. Canonical phase: [0015 §Phase 2 (Use-case rewrites — saga loses the claim step)](./0015-contribuicao-pagamento-financeiro-collapse.md#phase-2--use-case-rewrites). Rationale: [0015 §Locked decisions #2 + #5 + #6 (Contribuição shape, indisponivel predicate, accept-double-pay)](./0015-contribuicao-pagamento-financeiro-collapse.md#locked-decisions) + [0015 §DDD concept #3 (Optimistic vs pessimistic reservation)](./0015-contribuicao-pagamento-financeiro-collapse.md#ddd-concepts-this-plan-teaches).
+>
+> There is no contribuição-claim step anymore. The `iniciarPagamentoContribuicao` saga from 0002 used to set the slot's status to `indisponivel` at session-create (pessimistic claim). 0015 removes `status` from Contribuição entirely — it becomes a pure slot definition with no transitions and no visitor-side writes. The "indisponivel" predicate is now a query: `EXISTS pagamento WHERE idContribuicao = X AND status='aprovado'`. With no shared status to race on, the optimistic-CC-via-`versao` pattern this plan proposed has nothing to protect.
+>
+> Concurrency on multi-write paths still matters — but it moves under the Pagamentos aggregate's own consistency boundary (the Pagamento FSM is event-driven and earns its lock semantics) rather than living as a cross-BC contribuição invariant. The double-pay scenario this plan was partly motivated by is now an **accepted edge case** (recebedor gets +money, no inventory to oversell).
+>
+> This file is preserved as historical context: the optimistic-vs-pessimistic-CC discussion and the "check-then-act is a smell" lesson remain useful general background, even though the specific Contribuição.versao implementation is no longer needed.
+>
+> ---
+>
+> **Status (historical)**: drafted 2026-05-24, never implemented.
+> **Depended on**: plan `0002-checkout-orchestration-layer-done.md` (which defined `iniciarPagamentoContribuicao` and the claim step that 0015 removed). Would have synergized with `0005-durable-event-log-and-worker-queue.md` (DB transactions matter more once there's a worker).
+> **Companion doc (historical)**: `docs/idempotency-and-concurrency.md` — question 1 (concurrency safety on claim, originally deferred from 0004; now retired by 0015).
 
 ## Goal
 

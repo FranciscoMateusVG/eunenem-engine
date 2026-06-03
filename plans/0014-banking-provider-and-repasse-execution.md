@@ -1,5 +1,15 @@
 # Plan 0014 — Banking provider integration & repasse execution
 
+> 📌 **Addendum 2026-06-03 — deferred by [0015](./0015-contribuicao-pagamento-financeiro-collapse.md).**
+>
+> 0015's v1 transfer model is **manual**: an admin (or operator) marks a lançamento's `transferidoEm` timestamp when the money actually reaches the recebedor (out-of-band, via the bank's web UI or an existing operations workflow). There is no automated Stripe Connect, no Inter PIX-out API call, no banking-provider port wired into the lançamento lifecycle. The implicit state of a lançamento ("pending / transferred / cancelado") becomes a query-time predicate over `transferidoEm` + `canceladoEm` — see 0015 §Locked-decisions 9.
+>
+> This plan's full scope — `BankingProvider` port, `executarRepasseRecebedor` use case, real Inter adapter, dual-approval workflow, reconciliação of bank webhooks — becomes a **separate future plan** that ships *after* 0015 has been running in production with the manual model long enough for the operator to confirm the automation is worth the irrevocable-money risk. The HIGH-RISK guardrails below remain non-negotiable for that follow-up plan.
+>
+> What stays useful from this plan today: the **DDD framing** (ingress vs egress money, asymmetric risk, per-plataforma egress configuration, idempotency at the bank boundary), the **operational guardrails section** (dry-run mode, idempotency-key audit log, per-day cap, production toggle), and **the open-questions list** (Q1–Q10) which still need answers before any automated transfer ships. Treat the rest of this document as the design draft for the follow-up plan, not as an in-flight implementation guide.
+>
+> ---
+>
 > **Status**: drafted 2026-05-24, awaiting confirmation. **Many decisions deliberately left open** — see "Open questions to answer before phases start" below. Don't begin implementation until those are resolved.
 >
 > ⚠️ **HIGH-RISK PLAN**: PIX-out transfers are **irrevocable real money** the moment the bank accepts them. A bug here pays the wrong recebedor and there is no chargeback. The Phase-1-decisions-before-code discipline matters double here. Required: written ops runbook before Phase 5 lands.

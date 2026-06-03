@@ -1,7 +1,15 @@
 # Plan 0006 — Lancamento maturation rule
 
-> **Status**: drafted 2026-05-24, awaiting confirmation.
-> **Depends on**: plan `0005-durable-event-log-and-worker-queue.md` (the scheduler runs the maturation job). Without 0005 this still works as a manual use case; the cron piece needs 0005.
+> ⚠️ **SUPERSEDED-BY** plan 0015 — 2026-06-03. Canonical phase: [0015 §Phase 1 (Entity surgery — Lançamento schema swap)](./0015-contribuicao-pagamento-financeiro-collapse.md#phase-1--entity-surgery). Rationale: [0015 §Locked decisions #9 (LançamentoFinanceiro has no FSM)](./0015-contribuicao-pagamento-financeiro-collapse.md#locked-decisions) + [0015 §DDD concept #6 (Predicted dates vs observed dates)](./0015-contribuicao-pagamento-financeiro-collapse.md#ddd-concepts-this-plan-teaches).
+>
+> The predicted-maturation model (`maturaEm` computed from método + `aprovadoEm`, flipped by a scheduled job) is replaced by an **observed-transfer** model: `LancamentoFinanceiro` carries a `transferidoEm: Date | null` column set manually by the admin when the money actually reaches the recebedor. There is no `status` field on lançamento anymore (and no FSM); the implicit states are query-time predicates over `transferidoEm` + `canceladoEm`. The "maturation rule" — `calcularMaturaEm`, `MaturacaoRegra`, the `maturarLancamentos` use case, the scheduler job — is removed entirely. We store what *happened*, not what we *guessed would happen*.
+>
+> This file is preserved as historical context: the original predicted-maturation design and the DDD lessons it taught (time-based rules as persisted state, eager vs lazy projection) remain useful background reading even though the chosen path is different.
+>
+> ---
+>
+> **Status (historical)**: drafted 2026-05-24, never implemented.
+> **Depended on**: plan `0005-durable-event-log-and-worker-queue.md` (the scheduler would have run the maturation job). Without 0005 it still worked as a manual use case; the cron piece needed 0005.
 
 ## Goal
 

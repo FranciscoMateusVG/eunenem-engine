@@ -1,5 +1,7 @@
 # Plan 0002 — Checkout / Orchestration Layer (6 phases)
 
+> 📌 **Addendum 2026-06-03 — saga simplified by [0015](./0015-contribuicao-pagamento-financeiro-collapse.md).** The `contribuicaoComContribuinte` claim step described in Phase 2 below has been removed; Contribuição loses its `status` and `contribuinte` fields. `iniciarPagamentoContribuicao` now validates an EXISTS-style "indisponivel" predicate instead of claiming the slot, and `DadosContribuinte` moves into `IntencaoPagamento` (set by the webhook at `checkout.session.completed`). The compensation-on-failure path collapses with the claim. See 0015 §Phase 2 for the new use-case shape. This file stays marked `-done` because the original orchestration scaffolding shipped; the addendum points to the next iteration.
+
 **Status:** awaiting confirmation (revised 2026-05-24 after plan 0003 landed)
 **Decided:** 2026-05-24 (revised after multi-tenant introduced)
 **Depends on:**
