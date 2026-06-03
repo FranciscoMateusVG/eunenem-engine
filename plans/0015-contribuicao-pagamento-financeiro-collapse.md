@@ -256,7 +256,7 @@ Each phase ends with **STOP for confirmation**. Don't roll forward without expli
 **Verification:**
 
 - Updated unit tests for the webhook pipeline using `PagamentoProviderFake` (already supports both pix + credit_card flows)
-- Live walks against staging (Phase 6 covers end-to-end; this phase verifies the handler unit-level)
+- Live walks against staging (Phase 7 covers end-to-end; this phase verifies the handler unit-level)
 
 **STOP for confirmation.**
 
@@ -343,7 +343,73 @@ Recommendation: **(a) keep as aggregate** — gives the admin UI a real "batch" 
 
 **STOP for confirmation.**
 
-### Phase 6 — End-to-end live walks
+### Phase 6 — Admin UI reshape (`/admin/contribuicao/:id`)
+
+**Objective.** The admin contribuição detail screen (the DDD-trace view rendered by the eunenem-server admin module — likely `apps/eunenem-server/src/admin/contribuicao/[id]/...`) embeds three assumptions invalidated by Phases 1–4. Reshape it so the surface matches the new model.
+
+**Today's screen (per the screenshot operator surfaced 2026-06-03):**
+
+```
+ARRECADAÇÃO card
+├── nome, valor, opção (id), grupo, criada em
+├── INDISPONIVEL badge          ← assumes stored status on contribuição
+├── CONTRIBUINTE: name + email  ← assumes contribuinte on contribuição
+├── CAMPANHA, RECEBEDOR
+└── MENSAGEM (recadinho)        ← assumes recadinho on contribuição
+
+PAGAMENTOS card
+└── (today: only intencão refs + composição; no contribuinte shown)
+
+EVENTOS WEBHOOK card
+└── (raw webhook list — already correct)
+
+FINANCEIRO card
+└── (lançamentos with status PENDENTE/DISPONIVEL — needs the new shape)
+```
+
+**New screen — required changes:**
+
+1. **ARRECADAÇÃO card simplification.**
+   - Remove the CONTRIBUINTE block (name + email) from this card
+   - Remove the MENSAGEM (recadinho) block from this card
+   - Replace the stored INDISPONIVEL badge with one computed from the new predicate: query `EXISTS pagamento WHERE idContribuicao = X AND status='aprovado'`; show INDISPONIVEL if true, DISPONIVEL otherwise. Visual style stays the same.
+
+2. **PAGAMENTOS card expansion.** Each pagamento entry in the list now exposes its own contribuinte data inline (since DadosContribuinte moved to IntencaoPagamento). Per-pagamento block becomes:
+   ```
+   [status badge] [valor] [criado em]
+   MÉTODO: cartão / pix
+   EXTERNAL REFS: cs_xxx... | pi_xxx... | ch_xxx...
+   CONTRIBUINTE: name + email + recadinho   ← NEW (from intencao.contribuinte)
+   COMPOSIÇÃO DE VALORES: (existing — gift price + taxa plataforma + acréscimo cartão + total + líquido)
+   ```
+   Also surface the new states: the `processing` state needs visual treatment (yellow/in-flight) distinct from `pendente`; `estornado` needs a treatment distinct from `rejeitado`.
+
+3. **FINANCEIRO card update.** Each lançamento row stops showing `status: PENDENTE/DISPONIVEL` (status no longer exists) and instead shows two timestamps:
+   ```
+   [tipo label] [amount]
+   TRANSFERIDO EM: 02/07/2026, 10:15  (or "—" if null)
+   CANCELADO EM:   —                   (or timestamp if estornado)
+   ```
+   Same row visual; the data binding changes.
+
+4. **Indisponivel→Disponivel transition is now ad-hoc.** A pagamento that goes to `estornado` makes its associated contribuição disponivel again (no other aprovado pagamentos exist on the same slot). The UI should reflect this on next page-load — no separate "reverted" badge needed; the predicate just flips.
+
+**Files MODIFIED (under apps/eunenem-server):**
+
+- Admin contribuição detail page server-side renderer + read-DTO query (locate via `grep -r 'admin/contribuicao' apps/eunenem-server/src`)
+- Read-side query helper that today reads `contribuicao.contribuinte` — split into a contribuição-only query + a per-pagamento contribuinte query
+- Status-badge component(s) used in the Arrecadação card — re-wire to the EXISTS predicate
+- Lançamento row component — swap the status pill for the timestamp pair
+
+**Verification:**
+
+- Visual walk of `/admin/contribuicao/<seeded-id>` with each of the 5 pagamento states surfaces correctly (Phase 7 live-walk scenarios will hit these)
+- Inspect the rendered page DOM to confirm no orphan "INDISPONIVEL"/"PENDENTE" labels survive
+- Type-check passes (TS sees no `contribuicao.status` or `contribuicao.contribuinte` reads)
+
+**STOP for confirmation.** Operator visual walk required.
+
+### Phase 7 — End-to-end live walks
 
 **Objective.** Validate the redesign on staging (`eunenem.xeroxtoxerox.com`) with both shipped payment metodos. Apply the `verify-user-path` skill discipline: Layer A (URL opens), Layer B (action performed), Layer C (network response correct), Layer D (DB row + audit event match).
 
