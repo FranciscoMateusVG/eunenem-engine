@@ -34,7 +34,7 @@ import type { LancamentoFinanceiro } from "../../../../src/domain/pagamentos/fin
 import type { IdPagamentoReferencia } from "../../../../src/domain/pagamentos/financeiro/value-objects/ids.js";
 import type { Pagamento } from "../../../../src/domain/pagamentos/entities/pagamento.js";
 import type { IdContribuicaoPagamento } from "../../../../src/domain/pagamentos/value-objects/ids.js";
-import { ID_PLATAFORMA_EUNENEM } from "../../../../src/index.js";
+import { contribuicaoEstaIndisponivel, ID_PLATAFORMA_EUNENEM } from "../../../../src/index.js";
 import type { TrpcContext } from "./context.js";
 
 const t = initTRPC.context<TrpcContext>().create();
@@ -278,27 +278,14 @@ const ContribuicaoAdminDTOSchema = z.object({
   id: z.string(),
   nome: z.string(),
   valorCentavos: z.number().int().nonnegative(),
-  // Stored status (`disponivel | indisponivel`) — DEPRECATED per plan 0015 Phase 1
-  // (Rex's entity surgery drops this field; the campanha-level ContribuicoesList
-  // still reads it until a follow-up bead migrates that surface). New consumers
-  // should read `indisponivel` instead.
-  status: z.enum(["disponivel", "indisponivel"]),
   grupo: z.string().nullable(),
   idOpcaoContribuicao: z.string(),
   criadaEm: z.string(),
-  // Stored contribuinte — DEPRECATED per plan 0015 Phase 1. Contribuinte data
-  // moves to IntencaoPagamento on each Pagamento. Kept on the wire until the
-  // campanha listing migrates off it.
-  contribuinte: ContribuinteDTOSchema,
   // Plan 0015 Phase 6 — computed predicate (`EXISTS pagamento WHERE
   // id_contribuicao=X AND status='aprovado'`). The contribuicao detail
-  // screen's Arrecadação status pill reads this; the OLD `status` field is
-  // wire-only legacy until Phase 1 drops it.
-  //
-  // Parallel-prep stub: until Rex's Phase 1 lands, this is derived from
-  // `status === "indisponivel"`. Same observable value, different source.
-  // When Rex's PR opens, `toContribuicaoAdminDTO` swaps to a real EXISTS
-  // pagamento query via `pagamentoRepository`. No schema or UI change needed.
+  // screen's Arrecadação status pill reads this. Phase 1 dropped the
+  // stored `status` field; this is now the only source of truth.
+  // Computed in `toContribuicaoAdminDTO` via `pagamentoRepository`.
   indisponivel: z.boolean(),
 });
 export type ContribuicaoAdminDTO = z.infer<typeof ContribuicaoAdminDTOSchema>;
@@ -321,29 +308,30 @@ const UsuarioSummaryDTOSchema = z.object({
 });
 export type UsuarioSummaryDTO = z.infer<typeof UsuarioSummaryDTOSchema>;
 
-function toContribuicaoAdminDTO(c: Contribuicao): ContribuicaoAdminDTO {
+async function toContribuicaoAdminDTO(
+  c: Contribuicao,
+  ctx: TrpcContext,
+): Promise<ContribuicaoAdminDTO> {
+  // Post-Phase-1 swap: contribuição has NO status, NO contribuinte (those
+  // moved to IntencaoPagamento per-pagamento). The "indisponivel" badge is
+  // a computed predicate: at least one approved pagamento exists for this
+  // slot. Per-pagamento contribuinte data lives on the contribuição detail
+  // screen's Pagamentos card.
+  const indisponivel = await contribuicaoEstaIndisponivel(
+    {
+      pagamentoRepository: ctx.deps.pagamentoRepository,
+      observability: ctx.deps.observability,
+    },
+    { idContribuicao: c.id },
+  );
   return {
     id: c.id,
     nome: c.nome,
     valorCentavos: c.valor as unknown as number,
-    status: c.status,
     grupo: c.grupo,
     idOpcaoContribuicao: c.idOpcaoContribuicao,
     criadaEm: c.criadaEm.toISOString(),
-    contribuinte:
-      c.contribuinte === null
-        ? null
-        : {
-            nome: c.contribuinte.nome,
-            email: c.contribuinte.email,
-            mensagem: c.contribuinte.mensagem ?? null,
-          },
-    // Parallel-prep stub (plan 0015 Phase 6 — aperture-i45g5). Derived from the
-    // stored status field until Rex's Phase 1 lands. When the EXISTS predicate
-    // shipps via `pagamentoRepository`, swap to:
-    //   indisponivel: await pagamentoRepository.existsAprovadoForContribuicao(c.id),
-    // No schema or UI change needed — same observable value, different source.
-    indisponivel: c.status === "indisponivel",
+    indisponivel,
   };
 }
 
@@ -373,7 +361,11 @@ const contribuicoesRouter = t.router({
           input.idCampanha as IdCampanha,
         );
       return {
-        contribuicoes: contribuicoes.map(toContribuicaoAdminDTO),
+        contribuicoes: await Promise.all(
+        contribuicoes.map((c) =>
+          toContribuicaoAdminDTO(c, ctx),
+        ),
+      ),
       };
     }),
 
@@ -427,23 +419,17 @@ const contribuicoesRouter = t.router({
           ? null
           : { nome: campanha.dadosRecebedor.nomeTitular };
 
-      let contribuinteSummary: UsuarioSummaryDTO | null = null;
-      if (contribuicao.contribuinte !== null) {
-        const usuario = await ctx.deps.usuarioRepository.findUsuarioByEmail(
-          ID_PLATAFORMA_EUNENEM,
-          contribuicao.contribuinte.email as never,
-        );
-        if (usuario) {
-          contribuinteSummary = {
-            idConta: usuario.idConta,
-            nomeExibicao: usuario.nomeExibicao,
-            email: usuario.email,
-          };
-        }
-      }
+      // Post-Phase-1: contribuição no longer carries a single contribuinte
+      // (data moved to IntencaoPagamento per-pagamento). The
+      // contribuinte-summary lookup-by-email path is retired here — the
+      // detail screen surfaces per-pagamento contribuintes via the
+      // Pagamentos card directly. Always null at the campanha-level summary
+      // surface. Follow-up bead can reintroduce a "first/most-recent aprovado
+      // pagamento's contribuinte" lookup if the campanha view needs it.
+      const contribuinteSummary: UsuarioSummaryDTO | null = null;
 
       return {
-        contribuicao: toContribuicaoAdminDTO(contribuicao),
+        contribuicao: await toContribuicaoAdminDTO(contribuicao, ctx),
         campanha: { id: campanha.id, titulo: campanha.titulo },
         recebedor,
         contribuinte: contribuinteSummary,
@@ -516,8 +502,6 @@ const LancamentoTipoSchema = z.enum([
   "credito_passthrough_surcharge",
 ]);
 
-const LancamentoStatusSchema = z.enum(["pendente", "disponivel"]);
-
 const LancamentoFinanceiroAdminDTOSchema = z.object({
   id: z.string(),
   idPagamento: z.string(),
@@ -525,19 +509,9 @@ const LancamentoFinanceiroAdminDTOSchema = z.object({
   idCampanha: z.string().nullable(),
   tipo: LancamentoTipoSchema,
   amountCents: z.number().int().nonnegative(),
-  // Stored status (`pendente | disponivel`) — DEPRECATED per plan 0015
-  // Locked Decision #9 (Lançamento has NO FSM). FinanceiroSection swaps
-  // the status pill for the `transferidoEm` / `canceladoEm` timestamp
-  // pair. Kept on the wire until Rex's Phase 1 entity surgery drops the
-  // column; FinanceiroSection ignores it.
-  status: LancamentoStatusSchema,
   criadoEm: z.string(),
-  // DEPRECATED per plan 0015 Locked Decision #9. Predicted dates desync
-  // from reality; we store what *happened*, not what we *guessed would
-  // happen*. The UI no longer surfaces this — replaced by `transferidoEm`
-  // (observation). Kept on the wire until Rex's Phase 1 entity surgery.
-  maturaEm: z.string(),
   // Plan 0015 Locked Decision #9 — observed timestamps replace the FSM.
+  // Lançamento has NO status enum; "state" is derived from the two dates:
   //
   //   transferidoEm: when admin marked the row as transferred to the
   //     recebedor (manual action; no cron yet — operator clicks a button).
@@ -551,10 +525,11 @@ const LancamentoFinanceiroAdminDTOSchema = z.object({
   //   transferred = transferidoEm IS NOT NULL AND canceladoEm IS NULL
   //   cancelado   = canceladoEm IS NOT NULL
   //
-  // Parallel-prep stub (aperture-i45g5): until Rex's Phase 1 entity
-  // surgery adds the columns to the LancamentoFinanceiro domain entity,
-  // both fields return null on every row. UI handles null with the "—"
-  // placeholder per spec.
+  // Phase 1 entity surgery dropped the status + maturaEm fields from the
+  // domain entity; Phase 6's parallel-prep additive stubs (status,
+  // maturaEm, null transferidoEm/canceladoEm) are now retired and the DTO
+  // wires through the real LancamentoFinanceiro fields. (Cross-app drift
+  // fix surfaced by Peppy's Phase-7 deploy verify.)
   transferidoEm: z.string().nullable(),
   canceladoEm: z.string().nullable(),
 });
@@ -580,16 +555,11 @@ function toLancamentoAdminDTO(l: LancamentoFinanceiro): LancamentoFinanceiroAdmi
     idCampanha: l.idCampanha ?? null,
     tipo: l.tipo,
     amountCents: l.amountCents as unknown as number,
-    status: l.status,
     criadoEm: l.criadoEm.toISOString(),
-    maturaEm: l.maturaEm.toISOString(),
-    // Parallel-prep stub (plan 0015 Phase 1 — aperture-i45g5). Until Rex's
-    // entity surgery adds the columns to the LancamentoFinanceiro domain
-    // entity, both fields are null on every row. When Rex's PR lands:
-    //   transferidoEm: l.transferidoEm?.toISOString() ?? null,
-    //   canceladoEm:   l.canceladoEm?.toISOString() ?? null,
-    transferidoEm: null,
-    canceladoEm: null,
+    // Post-Phase-1 / Phase-6 parallel-prep swap (cross-app drift fix). The
+    // entity now carries the two nullable dates directly.
+    transferidoEm: l.transferidoEm?.toISOString() ?? null,
+    canceladoEm: l.canceladoEm?.toISOString() ?? null,
   };
 }
 
