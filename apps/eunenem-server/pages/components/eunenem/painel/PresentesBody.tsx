@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { PainelSectionBodyProps } from "@/PainelSectionPage";
 import {
@@ -6,12 +6,20 @@ import {
   fmtMoney,
   dateLong,
   dateShort,
-  PRESENTES_TX,
   STATUS_TINT,
-  summarize,
   type PresentesStatus,
   type PresentesTx,
 } from "@/lib/mocks/presentes";
+import {
+  type ExtratoLiberacao,
+  type ExtratoRowDTO,
+  type ExtratoSummaryDTO,
+  type SolicitarTransferenciaState,
+  useStubCampanhaIdForSlug,
+  useStubExtratoList,
+  useStubExtratoSummary,
+  useStubSolicitarTransferencia,
+} from "./ExtratoStubData";
 
 // aperture-xjwc — "Presentes recebidos" (extrato + resgatar).
 //
@@ -33,9 +41,277 @@ import {
 // app shell, and the green CTA uses --green-deep per the Sistema de Design
 // reservation (green = "resgatar / receber valores").
 
-const EVENT_PERIOD = "28/abr — 22/mai · 2026";
-const EVENT_TITLE = "extrato · chá da Mari";
-const NEXT_TRANSFER_LABEL = "qui · 26/mai";
+/**
+ * Plan q2d4b Track 4 — recebedor extrato wiring (aperture-ekn90).
+ *
+ * Pre-wire: this surface consumed `PRESENTES_TX` + `summarize()` from the
+ * painelDemo mock. Post-wire: drives off Rex's locked
+ * `recebedor.extrato.{summary,list}` + `recebedor.transferencia.solicitar`
+ * procs (aperture-7g5sx Track 2 backend).
+ *
+ * §9 parallel-prep stubs ship in ./ExtratoStubData.ts — hook bodies swap to
+ * trpc.useQuery / useMutation when Rex's PR lands; consumers unchanged.
+ *
+ * Wire-shape mapping (extrato wire → existing visual layer):
+ *
+ *   ExtratoSummaryDTO        →  PresentesSummary subset
+ *   ├ totalRecebidoCents     →  summary.recebido
+ *   ├ totalPresentes         →  summary.presentes
+ *   ├ resgatadoCents         →  summary.resgatado
+ *   ├ saldoDisponivelCents   →  summary.disponivel
+ *   ├ aguardandoLiberacaoCents → summary.aguardando
+ *   ├ proximaTransfDate      →  NEXT_TRANSFER_LABEL (computed pt-BR)
+ *   └ dateRangeStart/End     →  EVENT_PERIOD (computed pt-BR)
+ *
+ *   ExtratoRowDTO            →  PresentesTx (in-row only — wire ships
+ *                               lancamento grain; "out" events from the
+ *                               mock are gone, surfaced via summary totals)
+ *   ├ idLancamento           →  tx.id
+ *   ├ timestamp (ISO)        →  tx.d + tx.t
+ *   ├ contribuinteNome | null →  tx.guest  (default: "(anônimo)")
+ *   ├ amountCents            →  tx.amount
+ *   ├ liberacao 4-state      →  tx.status  (mapped via LIBERACAO_TO_STATUS)
+ *   └ liberadoEm             →  surfaced via DetailDrawer when applicable
+ *
+ *   (Gift name + per-row metodo NOT on wire — Rex's projection is
+ *   deliberately lean. Mirrored from RepasseLancamentoDetail discipline.)
+ *
+ * Errors on solicitar (per Rex's confirmation):
+ *   TRPCError code='CONFLICT'                + message='repasse_ja_pendente'
+ *     → button disabled, label "transferência já solicitada"
+ *   TRPCError code='UNPROCESSABLE_CONTENT'   + message='saldo_disponivel_insuficiente'
+ *     → button disabled, label "sem saldo disponível"
+ *   Other code='BAD_REQUEST'                  → generic error toast
+ */
+
+/** Pre-wire label fallbacks — used while data is loading. */
+const EVENT_TITLE_FALLBACK = "extrato";
+const EVENT_PERIOD_FALLBACK = "carregando…";
+const NEXT_TRANSFER_FALLBACK = "—";
+
+/** Wire-to-PresentesStatus mapping. The wire ships 4 lancamento-grain
+ *  liberacao states; the mock-shaped UI was designed for 6 (4 in-row +
+ *  2 out-row). Since the wire only ships in-rows, the 4-state set maps
+ *  to the 4 in-row mock statuses. The out-row statuses (resgatado,
+ *  tSolicitada) never appear in row data anymore — surfaced via
+ *  summary.resgatado totals instead. */
+const LIBERACAO_TO_STATUS: Record<ExtratoLiberacao, PresentesStatus> = {
+  aguardando_liberacao: "aguardando",
+  disponivel: "disponivel",
+  transferido: "tEnviada",
+  cancelado: "estornado",
+};
+
+/**
+ * Reverse of LIBERACAO_TO_STATUS — used when reverse-mapping a mock-status
+ * chip filter to a wire-status filter. Returns null for mock statuses that
+ * have no wire equivalent (resgatado / tSolicitada — those are out-row
+ * concepts the wire doesn't model at the lancamento grain).
+ *
+ * Currently UNUSED (the page filters client-side instead of pushing
+ * statusFilters to the wire) but kept for the eventual swap-time pivot to
+ * server-side filtering.
+ */
+// @ts-expect-error — reserved for the future swap to server-side filter.
+function _mockToLiberacao(s: PresentesStatus): ExtratoLiberacao | null {
+  switch (s) {
+    case "aguardando":
+      return "aguardando_liberacao";
+    case "disponivel":
+      return "disponivel";
+    case "tEnviada":
+      return "transferido";
+    case "estornado":
+      return "cancelado";
+    case "resgatado":
+    case "tSolicitada":
+      return null;
+  }
+}
+
+// ── Wire → mock adapters ────────────────────────────────────────────────────
+
+interface PresentesSummaryUI {
+  recebido: number;
+  presentes: number;
+  resgatado: number;
+  disponivel: number;
+  aguardando: number;
+  opening: number;
+}
+
+function adaptSummary(s: ExtratoSummaryDTO): PresentesSummaryUI {
+  return {
+    recebido: s.totalRecebidoCents,
+    presentes: s.totalPresentes,
+    resgatado: s.resgatadoCents,
+    disponivel: s.saldoDisponivelCents,
+    aguardando: s.aguardandoLiberacaoCents,
+    // `opening` is a mock concept (account-level prior balance carried
+    // forward) that doesn't exist on Rex's wire. The wire saldoDisponivel
+    // already accounts for all activity — no rolling prior balance needed.
+    // Zeroed here for shape compat.
+    opening: 0,
+  };
+}
+
+function adaptRow(row: ExtratoRowDTO): PresentesTx {
+  // Split ISO timestamp into date + time of day for the mock-shaped row.
+  // YYYY-MM-DDTHH:MM:SSZ → ('YYYY-MM-DD', 'HH:MM')
+  const isoSafe = row.timestamp.length >= 16 ? row.timestamp : row.timestamp + "T00:00:00";
+  const d = isoSafe.slice(0, 10);
+  const t = isoSafe.slice(11, 16);
+  return {
+    id: row.idLancamento,
+    d,
+    t,
+    type: "in",
+    guest: row.contribuinteNome ?? "(anônimo)",
+    // Gift name not on wire (Rex's projection deliberately lean — avoids
+    // composing across 3 BCs at list time). Generic "lançamento" label;
+    // operator drills to the contribuição via idContribuicao if needed.
+    item: "lançamento",
+    note: "",
+    amount: row.amountCents,
+    status: LIBERACAO_TO_STATUS[row.liberacao],
+  };
+}
+
+// ── Header label formatters ─────────────────────────────────────────────────
+
+const MES_ABREV = [
+  "jan",
+  "fev",
+  "mar",
+  "abr",
+  "mai",
+  "jun",
+  "jul",
+  "ago",
+  "set",
+  "out",
+  "nov",
+  "dez",
+];
+
+const WEEKDAY_PT = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
+
+function formatEventPeriod(
+  startIso: string | null,
+  endIso: string | null,
+): string {
+  if (startIso === null || endIso === null) return EVENT_PERIOD_FALLBACK;
+  const start = new Date(startIso);
+  const end = new Date(endIso);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return EVENT_PERIOD_FALLBACK;
+  }
+  const sd = String(start.getDate()).padStart(2, "0");
+  const sm = MES_ABREV[start.getMonth()];
+  const ed = String(end.getDate()).padStart(2, "0");
+  const em = MES_ABREV[end.getMonth()];
+  const yr = end.getFullYear();
+  return `${sd}/${sm} — ${ed}/${em} · ${yr}`;
+}
+
+function formatNextTransferLabel(iso: string | null): string {
+  if (iso === null) return NEXT_TRANSFER_FALLBACK;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return NEXT_TRANSFER_FALLBACK;
+  const wd = WEEKDAY_PT[d.getDay()];
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = MES_ABREV[d.getMonth()];
+  return `${wd} · ${dd}/${mm}`;
+}
+
+// ── Loading / error / empty surfaces ────────────────────────────────────────
+
+function ExtratoLoadingState() {
+  return (
+    <section
+      className="presentes-extrato"
+      style={{ padding: "32px 16px", textAlign: "center" }}
+    >
+      <p
+        className="ex-mono"
+        style={{
+          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+          fontSize: "11px",
+          textTransform: "uppercase",
+          letterSpacing: "0.18em",
+          color: "var(--ink-mute, #999)",
+        }}
+      >
+        carregando extrato…
+      </p>
+    </section>
+  );
+}
+
+function ExtratoErrorState({ message }: { message: string }) {
+  return (
+    <section
+      className="presentes-extrato"
+      style={{ padding: "32px 16px", maxWidth: 640, margin: "0 auto" }}
+    >
+      <div
+        role="alert"
+        style={{
+          padding: "14px 18px",
+          borderRadius: 10,
+          background: "#F4D6CE",
+          color: "#7B2A1A",
+          textAlign: "center",
+        }}
+      >
+        <p
+          style={{
+            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+            fontSize: "11px",
+            textTransform: "uppercase",
+            letterSpacing: "0.18em",
+            margin: 0,
+          }}
+        >
+          erro ao carregar extrato
+        </p>
+        <p style={{ marginTop: 6, fontSize: "13px" }}>{message}</p>
+      </div>
+    </section>
+  );
+}
+
+function ExtratoEmptyState() {
+  return (
+    <section
+      className="presentes-extrato"
+      style={{ padding: "48px 16px", textAlign: "center" }}
+    >
+      <p
+        style={{
+          fontFamily: "var(--font-hand, 'Caveat', cursive)",
+          fontSize: "22px",
+          color: "var(--ink, #1a1a1a)",
+        }}
+      >
+        ainda não recebeu presentes ♡
+      </p>
+      <p
+        className="ex-mono"
+        style={{
+          marginTop: 8,
+          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+          fontSize: "11px",
+          textTransform: "uppercase",
+          letterSpacing: "0.14em",
+          color: "var(--ink-mute, #999)",
+        }}
+      >
+        quando alguém presentear, vai aparecer aqui
+      </p>
+    </section>
+  );
+}
 
 function IconArrowUpRight() {
   return (
@@ -294,10 +570,12 @@ function TransferModal({
   open,
   saldo,
   onClose,
+  solicitarState,
 }: {
   open: boolean;
   saldo: number;
   onClose: () => void;
+  solicitarState: SolicitarTransferenciaState;
 }) {
   const [amount, setAmount] = useState("");
   useEffect(() => {
@@ -305,6 +583,27 @@ function TransferModal({
   }, [open, saldo]);
 
   if (!open) return null;
+
+  // Rex's solicitar API takes ONLY idCampanha — the amount is always the
+  // full saldoDisponivelCents (v1 spec: no partial withdrawals). The
+  // amount input is kept as an informational display + "usar tudo" affordance
+  // for the eventual partial-withdrawal feature, but today the actual mutate
+  // call ignores the input value and always solicits the full saldo.
+  const submit = () => {
+    if (solicitarState.isPending) return;
+    solicitarState.mutate();
+  };
+
+  // Discriminate domain errors per Rex's locked contract.
+  // - CONFLICT + 'repasse_ja_pendente'         → "transferência já solicitada"
+  // - UNPROCESSABLE_CONTENT + 'saldo_…insuficiente' → "sem saldo disponível"
+  // - else                                    → generic message
+  const errorLabel = solicitarState.error
+    ? formatSolicitarError(solicitarState.error)
+    : null;
+  const isBlocking =
+    errorLabel === "transferência já solicitada" ||
+    errorLabel === "sem saldo disponível";
 
   return (
     <>
@@ -348,17 +647,70 @@ function TransferModal({
             trocar
           </button>
         </div>
+        {errorLabel && (
+          <div
+            role="alert"
+            className="ex-modal-error"
+            style={{
+              padding: "10px 14px",
+              borderRadius: 8,
+              background: "#F4D6CE",
+              color: "#7B2A1A",
+              fontFamily:
+                "ui-monospace, SFMono-Regular, Menlo, monospace",
+              fontSize: "11px",
+              textTransform: "uppercase",
+              letterSpacing: "0.14em",
+            }}
+          >
+            {errorLabel}
+          </div>
+        )}
         <div className="ex-modal-actions">
-          <button type="button" className="ex-btn-ghost" onClick={onClose}>
+          <button
+            type="button"
+            className="ex-btn-ghost"
+            onClick={onClose}
+            disabled={solicitarState.isPending}
+          >
             cancelar
           </button>
-          <button type="button" className="ex-btn-green" onClick={onClose}>
-            solicitar transferência
+          <button
+            type="button"
+            className="ex-btn-green"
+            onClick={submit}
+            disabled={solicitarState.isPending || isBlocking}
+            aria-busy={solicitarState.isPending}
+          >
+            {solicitarState.isPending
+              ? "solicitando…"
+              : isBlocking
+                ? errorLabel
+                : "solicitar transferência"}
           </button>
         </div>
       </div>
     </>
   );
+}
+
+/**
+ * Map TRPCClientError-shape to operator-facing label. Per Rex's contract:
+ *   - CONFLICT + message='repasse_ja_pendente'         → "transferência já solicitada"
+ *   - UNPROCESSABLE_CONTENT + 'saldo_…insuficiente'    → "sem saldo disponível"
+ *   - else                                              → "não foi possível solicitar"
+ */
+function formatSolicitarError(err: { code: string; message: string }): string {
+  if (err.code === "CONFLICT" && err.message === "repasse_ja_pendente") {
+    return "transferência já solicitada";
+  }
+  if (
+    err.code === "UNPROCESSABLE_CONTENT" &&
+    err.message === "saldo_disponivel_insuficiente"
+  ) {
+    return "sem saldo disponível";
+  }
+  return "não foi possível solicitar";
 }
 
 // ── Resgatado modal (all outgoing movements) ─────────────────────────────────
@@ -432,25 +784,87 @@ function ResgatadoModal({
 }
 
 // ── Body ─────────────────────────────────────────────────────────────────────
-export function PresentesBody(_props: PainelSectionBodyProps) {
+export function PresentesBody(props: PainelSectionBodyProps) {
   const [openTx, setOpenTx] = useState<PresentesTx | null>(null);
   const [transferOpen, setTransferOpen] = useState(false);
   const [resgatadoOpen, setResgatadoOpen] = useState(false);
   const [activeStatuses, setActiveStatuses] = useState<PresentesStatus[]>([]);
 
-  const summary = useMemo(() => summarize(PRESENTES_TX), []);
-  const transactions = PRESENTES_TX;
+  // slug → idCampanha resolution. Stub today (djb2-derived); swap target is
+  // the real campanha-by-slug lookup when Rex's contract exposes one.
+  const { idCampanha, isLoading: campanhaLoading, error: campanhaError } =
+    useStubCampanhaIdForSlug(props.slug);
 
-  const statusCounts = useMemo(() => {
+  // Fetch the FULL extrato (no wire-level statusFilters) and apply the chip
+  // filter client-side. Keeps the existing "X de N" counter shape intact —
+  // visibleTransactions is the filtered subset, transactions is the total.
+  // For prod-scale lists this would need to flip to server-side filter +
+  // a separate count query; today's scale (<20 rows in test, <100 in
+  // realistic campanha) fits comfortably in the default cursor page.
+  const summaryQuery = useStubExtratoSummary(idCampanha ?? "");
+  const listQuery = useStubExtratoList({
+    idCampanha: idCampanha ?? "",
+  });
+
+  // ── Loading / error / empty gates ──────────────────────────────────────
+  if (campanhaLoading || summaryQuery.isLoading || listQuery.isLoading) {
+    return <ExtratoLoadingState />;
+  }
+  if (campanhaError) {
+    return <ExtratoErrorState message={campanhaError.message} />;
+  }
+  if (summaryQuery.error) {
+    return <ExtratoErrorState message={summaryQuery.error.message} />;
+  }
+  if (listQuery.error) {
+    return <ExtratoErrorState message={listQuery.error.message} />;
+  }
+  if (!summaryQuery.data || !listQuery.data) {
+    return <ExtratoErrorState message="dados indisponíveis no momento" />;
+  }
+
+  const wireSummary = summaryQuery.data;
+  const wireRows = listQuery.data.rows;
+
+  // Empty state — no presentes received yet on this campanha.
+  if (wireSummary.totalPresentes === 0 && wireRows.length === 0) {
+    return <ExtratoEmptyState />;
+  }
+
+  // Adapt the wire shapes to what the existing visual layer consumes.
+  const summary = adaptSummary(wireSummary);
+  const transactions: PresentesTx[] = wireRows.map(adaptRow);
+
+  // Computed header labels (replacing the pre-wire constants).
+  const eventTitle = EVENT_TITLE_FALLBACK;
+  const eventPeriod = formatEventPeriod(
+    wireSummary.dateRangeStart,
+    wireSummary.dateRangeEnd,
+  );
+  const nextTransferLabel = formatNextTransferLabel(wireSummary.proximaTransfDate);
+
+  const statusCounts = (() => {
     const counts: Partial<Record<PresentesStatus, number>> = {};
     for (const x of transactions) counts[x.status] = (counts[x.status] || 0) + 1;
     return counts;
-  }, [transactions]);
+  })();
 
-  const visibleTransactions = useMemo(() => {
-    if (!activeStatuses.length) return transactions;
-    return transactions.filter((x) => activeStatuses.includes(x.status));
-  }, [transactions, activeStatuses]);
+  const visibleTransactions =
+    activeStatuses.length === 0
+      ? transactions
+      : transactions.filter((x) => activeStatuses.includes(x.status));
+
+  // Solicitar transferência mutation. Lives at the body level so both the
+  // TransferModal AND the post-success acknowledgement flow share state.
+  // On success we close the modal; in the real swap, also invalidate the
+  // summary + list queries.
+  const solicitarState = useStubSolicitarTransferencia({
+    onSuccess: () => {
+      setTransferOpen(false);
+      // Real swap: utils.recebedor.extrato.summary.invalidate({ idCampanha });
+      //            utils.recebedor.extrato.list.invalidate({ idCampanha });
+    },
+  });
 
   return (
     <section className="presentes-extrato">
@@ -463,8 +877,8 @@ export function PresentesBody(_props: PainelSectionBodyProps) {
 
           <header className="ex-sheet-hd">
             <div className="ex-sheet-eyebrow">
-              <span className="ex-caps">{EVENT_TITLE}</span>
-              <span className="ex-sheet-period ex-mono">{EVENT_PERIOD}</span>
+              <span className="ex-caps">{eventTitle}</span>
+              <span className="ex-sheet-period ex-mono">{eventPeriod}</span>
             </div>
 
             <div className="ex-sheet-summary">
@@ -514,7 +928,7 @@ export function PresentesBody(_props: PainelSectionBodyProps) {
               </span>
               <span className="ex-aux-pill lilac">
                 <span>próxima transf.</span>
-                <span className="ex-aux-num">{NEXT_TRANSFER_LABEL}</span>
+                <span className="ex-aux-num">{nextTransferLabel}</span>
               </span>
             </div>
           </header>
@@ -553,7 +967,15 @@ export function PresentesBody(_props: PainelSectionBodyProps) {
       </div>
 
       <DetailDrawer tx={openTx} onClose={() => setOpenTx(null)} />
-      <TransferModal open={transferOpen} saldo={summary.disponivel} onClose={() => setTransferOpen(false)} />
+      <TransferModal
+        open={transferOpen}
+        saldo={summary.disponivel}
+        onClose={() => {
+          setTransferOpen(false);
+          solicitarState.reset();
+        }}
+        solicitarState={solicitarState}
+      />
       <ResgatadoModal
         open={resgatadoOpen}
         transactions={transactions}
