@@ -306,7 +306,7 @@ function StatusPill({ indisponivel }: { indisponivel: boolean }) {
           isAvailable ? "bg-emerald-500" : "bg-ink-mute",
         ].join(" ")}
       />
-      {isAvailable ? "disponível" : "indisponível"}
+      {isAvailable ? "disponível" : "presenteada"}
     </span>
   );
 }

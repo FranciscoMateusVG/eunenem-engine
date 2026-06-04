@@ -163,7 +163,7 @@ function FilterStrip({
         chips={[
           { value: "todas", label: "Todas" },
           { value: "disponivel", label: "Disponíveis" },
-          { value: "indisponivel", label: "Indisponíveis" },
+          { value: "indisponivel", label: "Presenteadas" },
         ]}
         active={status}
         onChange={(v) => onStatus(v as Status)}
@@ -328,7 +328,7 @@ function StatusPill({ status }: { status: "disponivel" | "indisponivel" }) {
           isAvailable ? "bg-emerald-500" : "bg-ink-mute",
         ].join(" ")}
       />
-      {isAvailable ? "disponível" : "indisponível"}
+      {isAvailable ? "disponível" : "presenteada"}
     </span>
   );
 }
