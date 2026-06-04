@@ -151,6 +151,40 @@ export interface WebhookEventArchive {
     idPagamento: string,
     options?: FindByPagamentoIdOptions,
   ): Promise<readonly WebhookEventRecord[]>;
+
+  /**
+   * Plan 0015 / aperture-v4ax3. Retroactive sweep — relink orphan
+   * webhook events (rows with `pagamento_id IS NULL`) to a pagamento
+   * when we later learn that they belong to it.
+   *
+   * The scenario: payment_intent.* and charge.* events can arrive
+   * BEFORE checkout.session.completed has populated the pagamento's
+   * payment_intent_external_ref column. At arrival time the lookup
+   * misses and the events archive as orphans. When cs.completed
+   * later fires and persists the pi, we know retroactively which
+   * pagamento those earlier events belonged to — this method
+   * sweeps the archive for orphans referencing the same pi and
+   * stamps `pagamento_id` on them.
+   *
+   * Match predicate (logical OR):
+   *   - `raw_payload.data.object.id === $pi` — pi.* events whose
+   *     primary id is the payment_intent (pi.requires_action,
+   *     pi.created, pi.processing, pi.succeeded, pi.payment_failed).
+   *   - `raw_payload.data.object.payment_intent === $pi` — charge.*
+   *     events whose `payment_intent` field is the pi
+   *     (charge.succeeded, charge.failed, charge.updated, charge.refunded).
+   *
+   * Idempotent: re-running with the same arguments is a no-op
+   * because the WHERE clause filters on `pagamento_id IS NULL`.
+   *
+   * Returns the count of rows updated — caller logs this so
+   * operators can see "linked N previously-orphan events" in
+   * the forensic trail.
+   */
+  relinkOrphansByPaymentIntent(
+    paymentIntentId: string,
+    pagamentoId: string,
+  ): Promise<number>;
 }
 
 export interface FindByPagamentoIdOptions {

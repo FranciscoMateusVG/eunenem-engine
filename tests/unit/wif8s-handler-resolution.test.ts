@@ -36,6 +36,7 @@ import { LivroFinanceiroRepositoryMemory } from '../../src/adapters/pagamentos/f
 import { PagamentoEventPublisherMemory } from '../../src/adapters/pagamentos/event-publisher.memory.js';
 import { PagamentoProviderFake } from '../../src/adapters/pagamentos/provider.fake.js';
 import { PagamentoRepositoryMemory } from '../../src/adapters/pagamentos/repository.memory.js';
+import { WebhookEventArchiveMemory } from '../../src/adapters/webhook-archive/webhook-event-archive.memory.js';
 import { criarPagamentoPendente } from '../../src/domain/pagamentos/entities/pagamento.js';
 import { NoopLogger } from '../../src/observability/noop-logger.js';
 import type { Observability } from '../../src/observability/observability.js';
@@ -80,7 +81,10 @@ function buildRig(): TestRig {
     publicOrigin: 'http://localhost:3001',
     trustedHopCount: 0,
     logPiiHashSalt: 'test-salt-thirty-two-chars-aaaaaaaaa',
-    webhookEventArchive: {} as never,
+    // aperture-v4ax3: cs.completed handler now calls
+    // relinkOrphansByPaymentIntent on the archive after persisting pi.
+    // Wire a real memory archive so the call doesn't crash on `{} as never`.
+    webhookEventArchive: new WebhookEventArchiveMemory(),
   } as unknown as ServerDeps;
 
   return { deps, pagamentoRepository };

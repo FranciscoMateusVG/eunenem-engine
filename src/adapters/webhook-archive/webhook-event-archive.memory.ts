@@ -183,6 +183,48 @@ export class WebhookEventArchiveMemory implements WebhookEventArchive {
     );
   }
 
+  async relinkOrphansByPaymentIntent(
+    paymentIntentId: string,
+    pagamentoId: string,
+  ): Promise<number> {
+    return tracer.startActiveSpan(
+      'db.payment_webhook_events.relinkOrphansByPaymentIntent',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+        try {
+          // aperture-v4ax3: mirror the postgres adapter's predicate.
+          // Walk every row; skip non-orphans; for orphans, peek into
+          // raw_payload.data.object for either `.id === pi` (pi.* events)
+          // or `.payment_intent === pi` (charge.* events). Update the
+          // pagamentoId in place on matches.
+          let updated = 0;
+          for (const [id, row] of this.rows.entries()) {
+            if (row.pagamentoId !== null) continue;
+            const obj = readObjectFromPayload(row.rawPayload);
+            const matchesPi =
+              typeof obj?.id === 'string' && obj.id === paymentIntentId;
+            const matchesPiRef =
+              typeof obj?.payment_intent === 'string' &&
+              obj.payment_intent === paymentIntentId;
+            if (matchesPi || matchesPiRef) {
+              this.rows.set(id, { ...row, pagamentoId });
+              updated += 1;
+            }
+          }
+          span.setAttribute('rows.updated', updated);
+          span.setStatus({ code: SpanStatusCode.OK });
+          return updated;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
   async findByPagamentoId(
     idPagamento: string,
     options?: FindByPagamentoIdOptions,
@@ -219,4 +261,21 @@ export class WebhookEventArchiveMemory implements WebhookEventArchive {
       },
     );
   }
+}
+
+/**
+ * Defensively extract `data.object` from a raw webhook payload. The
+ * payload is `unknown` at the port — the memory adapter parses it
+ * shallowly here to mirror the postgres adapter's JSONB path
+ * `raw_payload->'data'->'object'`.
+ */
+function readObjectFromPayload(
+  payload: unknown,
+): { id?: unknown; payment_intent?: unknown } | undefined {
+  if (typeof payload !== 'object' || payload === null) return undefined;
+  const data = (payload as { data?: unknown }).data;
+  if (typeof data !== 'object' || data === null) return undefined;
+  const obj = (data as { object?: unknown }).object;
+  if (typeof obj !== 'object' || obj === null) return undefined;
+  return obj as { id?: unknown; payment_intent?: unknown };
 }

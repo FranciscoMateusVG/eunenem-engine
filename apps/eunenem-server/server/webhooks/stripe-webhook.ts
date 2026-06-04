@@ -319,6 +319,30 @@ export async function dispatchVerifiedStripeEvent(
           idPagamento: pagamento.id,
           paymentIntentId: piId,
         });
+
+        // aperture-v4ax3 retroactive sweep — Stripe frequently delivers
+        // payment_intent.* and charge.* events BEFORE the
+        // checkout.session.completed event that carries the
+        // session→pagamento linkage. Those earlier events archive as
+        // orphans (pagamento_id NULL) because the pi-keyed lookup
+        // misses (the column was still null at the time). Now that
+        // we've populated the pi ref, sweep the archive and stamp
+        // pagamento_id onto any orphan rows referencing this pi.
+        // Idempotent: the sweep filters on pagamento_id IS NULL, so
+        // re-firing is harmless.
+        const relinked = await deps.webhookEventArchive.relinkOrphansByPaymentIntent(
+          piId,
+          pagamento.id,
+        );
+        if (relinked > 0) {
+          logger.info('webhook.stripe.relinked_orphans', {
+            eventId: event.id,
+            idPagamento: pagamento.id,
+            paymentIntentId: piId,
+            relinkedCount: relinked,
+          });
+          span.setAttribute('webhook.relinked.count', relinked);
+        }
       }
 
       // aperture-m95f3 + plan 0015: extract contribuinte data from

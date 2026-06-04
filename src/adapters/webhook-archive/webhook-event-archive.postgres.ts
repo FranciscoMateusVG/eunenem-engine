@@ -182,6 +182,47 @@ export class WebhookEventArchivePostgres implements WebhookEventArchive {
     );
   }
 
+  async relinkOrphansByPaymentIntent(
+    paymentIntentId: string,
+    pagamentoId: string,
+  ): Promise<number> {
+    return tracer.startActiveSpan(
+      'db.payment_webhook_events.relinkOrphansByPaymentIntent',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+        try {
+          // aperture-v4ax3: sweep orphan rows whose payload references the
+          // pi (either as the primary `id` for pi.* events, or as the
+          // `payment_intent` field for charge.* events). Uses the JSONB
+          // ->> text extraction so the comparison is index-eligible
+          // even without a generated column (we don't have one yet —
+          // P3 follow-up if event volume grows).
+          //
+          // Match predicate documented in webhook-event-archive.ts port.
+          const result = await sql`
+            UPDATE payment_webhook_events
+              SET pagamento_id = ${pagamentoId}
+              WHERE pagamento_id IS NULL
+                AND (
+                  raw_payload->'data'->'object'->>'id' = ${paymentIntentId}
+                  OR raw_payload->'data'->'object'->>'payment_intent' = ${paymentIntentId}
+                )
+          `.execute(this.db);
+          const updated = Number(result.numAffectedRows ?? 0n);
+          span.setAttribute('rows.updated', updated);
+          span.setStatus({ code: SpanStatusCode.OK });
+          return updated;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
   async findByPagamentoId(
     idPagamento: string,
     options?: FindByPagamentoIdOptions,
