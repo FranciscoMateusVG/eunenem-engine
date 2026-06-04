@@ -4,7 +4,6 @@ import type { ContribuicaoRepository } from '../../adapters/arrecadacao/contribu
 import type { Contribuicao } from '../../domain/arrecadacao/entities/contribuicao.js';
 import {
   contribuicaoAtualizada,
-  contribuicaoDisponivel,
   NomeContribuicaoSchema,
 } from '../../domain/arrecadacao/entities/contribuicao.js';
 import {
@@ -12,7 +11,6 @@ import {
   IdContribuicaoSchema,
 } from '../../domain/arrecadacao/value-objects/ids.js';
 import { MoneyCentsSchema } from '../../domain/money.js';
-import { ArrecadacaoContribuicaoNaoDisponivelError } from '../../errors/arrecadacao/contribuicao-nao-disponivel.error.js';
 import { ArrecadacaoContribuicaoNaoEncontradaError } from '../../errors/arrecadacao/contribuicao-nao-encontrada.error.js';
 import { ArrecadacaoInputInvalidoError } from '../../errors/arrecadacao/input-invalido.error.js';
 import { ArrecadacaoNaoAutorizadoError } from '../../errors/arrecadacao/nao-autorizado.error.js';
@@ -30,9 +28,14 @@ import type { Observability } from '../../observability/observability.js';
  * campanha — fecha o cross-tenant write surface explicitamente, na camada
  * de domínio (procedure fica thin).
  *
- * Status guard: a contribuição precisa estar `disponivel`. Itens já reservados
- * por um contribuinte não podem ter nome/valor/imagem editados — a regra
- * vem do agregado (`contribuicaoAtualizada` faz o check).
+**Plan 0015 (aperture-ucgok):** o guard `contribuicaoDisponivel` foi
+ * removido. Sem status na contribuição, o admin pode editar a qualquer
+ * momento. Uma slot com pagamento aprovado pode ter nome/valor editados;
+ * o snapshot do pagamento existente preserva o valor que o contribuinte
+ * pagou (composicaoValores é imutável). Trade-off com a operadora:
+ * editar pode confundir admins que esperavam o guard antigo, mas o
+ * modelo collapsed reflete que contribuição é uma slot — não o ato de
+ * pagamento.
  */
 export const AtualizarContribuicaoInputSchema = z.object({
   idContribuicao: IdContribuicaoSchema,
@@ -94,9 +97,7 @@ export async function atualizarContribuicao(
         );
       }
 
-      if (!contribuicaoDisponivel(existing)) {
-        throw new ArrecadacaoContribuicaoNaoDisponivelError(idContribuicao);
-      }
+      // Plan 0015: no more status guard. Slot edits allowed at any time.
 
       const updated = contribuicaoAtualizada(existing, {
         nome,

@@ -16,6 +16,12 @@ const DB_ATTRS = {
   'db.collection.name': 'arrecadacao_contribuicoes',
 } as const;
 
+/**
+ * Plan 0015 / migration 019: status + contribuinte_{nome,email} dropped.
+ * Row shape is now the slot definition only — admin-owned, no visitor
+ * data, no FSM. The "indisponivel" badge is derived at query time by
+ * checking pagamentos.
+ */
 type ContribuicaoRow = {
   id: string;
   campanha_id: string;
@@ -24,10 +30,7 @@ type ContribuicaoRow = {
   valor: number;
   imagem_url: string | null;
   grupo: string | null;
-  status: string;
   criada_em: Date;
-  contribuinte_nome: string | null;
-  contribuinte_email: string | null;
 };
 
 export class ContribuicaoRepositoryPostgres implements ContribuicaoRepository {
@@ -47,10 +50,7 @@ export class ContribuicaoRepositoryPostgres implements ContribuicaoRepository {
             valor: contribuicao.valor,
             imagem_url: contribuicao.imagemUrl,
             grupo: contribuicao.grupo,
-            status: contribuicao.status,
             criada_em: contribuicao.criadaEm,
-            contribuinte_nome: contribuicao.contribuinte?.nome ?? null,
-            contribuinte_email: contribuicao.contribuinte?.email ?? null,
           })
           .onConflict((oc) =>
             oc.column('id').doUpdateSet({
@@ -58,9 +58,6 @@ export class ContribuicaoRepositoryPostgres implements ContribuicaoRepository {
               valor: contribuicao.valor,
               imagem_url: contribuicao.imagemUrl,
               grupo: contribuicao.grupo,
-              status: contribuicao.status,
-              contribuinte_nome: contribuicao.contribuinte?.nome ?? null,
-              contribuinte_email: contribuicao.contribuinte?.email ?? null,
             }),
           )
           .execute();
@@ -113,10 +110,7 @@ export class ContribuicaoRepositoryPostgres implements ContribuicaoRepository {
               valor: c.valor,
               imagem_url: c.imagemUrl,
               grupo: c.grupo,
-              status: c.status,
               criada_em: c.criadaEm,
-              contribuinte_nome: c.contribuinte?.nome ?? null,
-              contribuinte_email: c.contribuinte?.email ?? null,
             })),
           )
           .execute();
@@ -238,14 +232,6 @@ export class ContribuicaoRepositoryPostgres implements ContribuicaoRepository {
 }
 
 function toContribuicao(row: ContribuicaoRow): Contribuicao {
-  const contribuinte =
-    row.contribuinte_nome !== null && row.contribuinte_email !== null
-      ? {
-          nome: row.contribuinte_nome,
-          email: row.contribuinte_email,
-        }
-      : null;
-
   return {
     id: row.id,
     idCampanha: row.campanha_id,
@@ -254,8 +240,6 @@ function toContribuicao(row: ContribuicaoRow): Contribuicao {
     valor: row.valor,
     imagemUrl: row.imagem_url,
     grupo: row.grupo,
-    contribuinte,
-    status: row.status as Contribuicao['status'],
     criadaEm: row.criada_em,
   };
 }

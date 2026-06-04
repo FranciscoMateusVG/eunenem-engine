@@ -1,6 +1,6 @@
-import type { LivroFinanceiroRepositoryMemory } from '../../src/adapters/financeiro/livro-repository.memory.js';
+import type { LivroFinanceiroRepositoryMemory } from '../../src/adapters/pagamentos/financeiro/livro-repository.memory.js';
 import type { IdCampanha } from '../../src/domain/arrecadacao/value-objects/ids.js';
-import type { LancamentoFinanceiro } from '../../src/domain/financeiro/entities/lancamento-financeiro.js';
+import type { LancamentoFinanceiro } from '../../src/domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
 
 /**
  * Test-only helper: flips receiver-balance ledger entries from `pendente` to

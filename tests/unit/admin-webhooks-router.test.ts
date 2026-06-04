@@ -53,6 +53,12 @@ function makePagamento(args: {
   idContribuicao: string;
 }): Parameters<PagamentoRepositoryMemory['save']>[0] {
   const now = new Date('2026-06-02T10:00:00.000Z');
+  // Plan 0015 (aperture-ucgok): IntencaoPagamento now carries
+  // `paymentIntentExternalRef`, `chargeExternalRef`, and a `contribuinte`
+  // snapshot. Pagamento dropped `transacaoExterna: null` in favor of
+  // omitting the optional field. Webhook router only reads `id` +
+  // `intencao.idContribuicao` so the snapshot mostly exists to satisfy
+  // any future schema check at the boundary.
   return {
     id: args.id as never,
     status: 'aprovado',
@@ -65,6 +71,9 @@ function makePagamento(args: {
       metodo: 'pix',
       amountCents: 4500 as never,
       externalRef: null,
+      paymentIntentExternalRef: null,
+      chargeExternalRef: null,
+      contribuinte: null,
       composicaoValores: {
         contributionAmountCents: 4500 as never,
         feeAmountCents: 0 as never,
@@ -74,7 +83,6 @@ function makePagamento(args: {
         responsavelTaxa: 'plataforma',
       } as never,
     } as never,
-    transacaoExterna: null,
   } as never;
 }
 
@@ -118,18 +126,17 @@ async function buildRig(): Promise<TestRig> {
 
   const idContribEunenem = randomUUID();
   const idContribEucasei = randomUUID();
+  // Plan 0015 (aperture-ucgok): Contribuicao dropped `status` +
+  // contribuinte fields. Slot is now a pure definition with no FSM.
   await contribuicaoRepository.save({
     id: idContribEunenem as never,
     idCampanha: idCampanhaEunenem as never,
     idOpcaoContribuicao: randomUUID() as never,
     nome: 'Test',
     valor: 4500 as never,
-    status: 'disponivel',
     imagemUrl: null,
     grupo: null,
     criadaEm: new Date(),
-    contribuinteNome: null,
-    contribuinteEmail: null,
   } as never);
   await contribuicaoRepository.save({
     id: idContribEucasei as never,
@@ -137,12 +144,9 @@ async function buildRig(): Promise<TestRig> {
     idOpcaoContribuicao: randomUUID() as never,
     nome: 'Test Eucasei',
     valor: 4500 as never,
-    status: 'disponivel',
     imagemUrl: null,
     grupo: null,
     criadaEm: new Date(),
-    contribuinteNome: null,
-    contribuinteEmail: null,
   } as never);
 
   const pagamentoIdEunenem = randomUUID();

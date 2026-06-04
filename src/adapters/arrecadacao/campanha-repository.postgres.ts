@@ -421,19 +421,32 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
             return [];
           }
 
-          // DISTINCT campanha ids reached through contribuicoes by the
-          // given contribuinte_email, scoped to the tenant. Case-
-          // insensitive on email — the contribuicoes table stores raw
-          // user input and a future signup/visitor mismatch on casing
-          // shouldn't fragment the lookup.
-          const idRows = await executor
+          // Plan 0015 (aperture-ucgok): contribuinte data moved off
+          // contribuicoes onto pagamentos.intencao_contribuinte_*. The
+          // join now bridges campanhas → contribuicoes → pagamentos,
+          // filtering by the visitor's email on the pagamento side AND
+          // requiring status='aprovado' (a pending/rejeitado pagamento
+          // never "completed" — surfacing it would be misleading for
+          // the admin's "campaigns this contribuinte gifted to" view).
+          // Case-insensitive ilike preserved.
+          // biome-ignore lint/suspicious/noExplicitAny: pagamentos join
+          // requires Kysely<DB> typing which the codegen-generated DB
+          // type covers; the explicit cast unblocks the heterogeneous
+          // join shape across two BCs.
+          const idRows = (await (executor as any)
             .selectFrom('campanhas')
             .innerJoin('contribuicoes', 'contribuicoes.campanha_id', 'campanhas.id')
+            .innerJoin(
+              'pagamentos',
+              'pagamentos.intencao_id_contribuicao',
+              'contribuicoes.id',
+            )
             .select('campanhas.id')
             .distinct()
             .where('campanhas.id_plataforma', '=', idPlataforma)
-            .where('contribuicoes.contribuinte_email', 'ilike', emailContribuinte)
-            .execute();
+            .where('pagamentos.intencao_contribuinte_email', 'ilike', emailContribuinte)
+            .where('pagamentos.status', '=', 'aprovado')
+            .execute()) as Array<{ id: string }>;
 
           if (idRows.length === 0) {
             span.setStatus({ code: SpanStatusCode.OK });

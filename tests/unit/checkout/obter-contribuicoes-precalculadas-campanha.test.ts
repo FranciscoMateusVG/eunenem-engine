@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
+import { PagamentoRepositoryMemory } from '../../../src/adapters/pagamentos/repository.memory.js';
 import {
   ID_PLATAFORMA_EUCASEI,
   ID_PLATAFORMA_EUNENEM,
@@ -36,6 +37,10 @@ async function seedCampanha(idPlataforma: string) {
     await import('../../../src/adapters/arrecadacao/contribuicao-repository.memory.js')
   ).ContribuicaoRepositoryMemory();
   const provedorRegraTaxa = new ProvedorRegraTaxaMemory();
+  // Plan 0015 (aperture-ucgok): the use-case now derives `disponivel` from
+  // a batch EXISTS query against pagamentos. With no aprovado pagamentos
+  // seeded, every contribuição reports `disponivel: true`.
+  const pagamentoRepository = new PagamentoRepositoryMemory();
 
   const idCampanha = randomUUID();
   const idOpcaoPresente = randomUUID();
@@ -97,6 +102,7 @@ async function seedCampanha(idPlataforma: string) {
       campanhaRepository,
       contribuicaoRepository,
       provedorRegraTaxa,
+      pagamentoRepository,
       observability: silentObservability,
     },
     plataformaRepository,
@@ -200,6 +206,7 @@ describe('obterContribuicoesPrecalculadasCampanha', () => {
       await import('../../../src/adapters/arrecadacao/contribuicao-repository.memory.js')
     ).ContribuicaoRepositoryMemory();
     const provedorRegraTaxa = new ProvedorRegraTaxaMemory();
+    const pagamentoRepository = new PagamentoRepositoryMemory();
 
     const idCampanha = randomUUID();
     const idOpcao = randomUUID();
@@ -229,6 +236,7 @@ describe('obterContribuicoesPrecalculadasCampanha', () => {
         campanhaRepository,
         contribuicaoRepository,
         provedorRegraTaxa,
+        pagamentoRepository,
         observability: silentObservability,
       },
       { idPlataforma: ID_PLATAFORMA_EUNENEM, idCampanha },

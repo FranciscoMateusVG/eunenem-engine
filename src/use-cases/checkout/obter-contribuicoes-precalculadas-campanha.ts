@@ -2,10 +2,10 @@ import { SpanStatusCode } from '@opentelemetry/api';
 import { z } from 'zod/v4';
 import type { CampanhaRepository } from '../../adapters/arrecadacao/campanha-repository.js';
 import type { ContribuicaoRepository } from '../../adapters/arrecadacao/contribuicao-repository.js';
+import type { PagamentoRepository } from '../../adapters/pagamentos/repository.js';
 import type { ProvedorRegraTaxa } from '../../adapters/taxas/regra-provider.js';
 import type { Campanha } from '../../domain/arrecadacao/entities/campanha.js';
 import type { Contribuicao } from '../../domain/arrecadacao/entities/contribuicao.js';
-import { contribuicaoDisponivel } from '../../domain/arrecadacao/entities/contribuicao.js';
 import {
   IdCampanhaSchema,
   type IdContribuicao,
@@ -13,6 +13,7 @@ import {
   type IdPlataformaReferencia,
   IdPlataformaReferenciaSchema,
 } from '../../domain/arrecadacao/value-objects/ids.js';
+import type { IdContribuicaoPagamento } from '../../domain/pagamentos/value-objects/ids.js';
 import type {
   OpcaoContribuicao,
   TipoOpcaoContribuicao,
@@ -63,6 +64,10 @@ export interface ContribuicoesPrecalculadasCampanha {
 export interface ObterContribuicoesPrecalculadasCampanhaDeps {
   readonly campanhaRepository: CampanhaRepository;
   readonly contribuicaoRepository: ContribuicaoRepository;
+  // Plan 0015 (aperture-ucgok): the `disponivel` flag is now a derived
+  // predicate from the EXISTS-aprovado-pagamento query, batched over
+  // the campanha's contribuicoes in a single round-trip.
+  readonly pagamentoRepository: PagamentoRepository;
   readonly provedorRegraTaxa: ProvedorRegraTaxa;
   readonly observability: Observability;
 }
@@ -81,7 +86,13 @@ export async function obterContribuicoesPrecalculadasCampanha(
   deps: ObterContribuicoesPrecalculadasCampanhaDeps,
   input: ObterContribuicoesPrecalculadasCampanhaInput,
 ): Promise<ContribuicoesPrecalculadasCampanha> {
-  const { campanhaRepository, contribuicaoRepository, provedorRegraTaxa, observability } = deps;
+  const {
+    campanhaRepository,
+    contribuicaoRepository,
+    pagamentoRepository,
+    provedorRegraTaxa,
+    observability,
+  } = deps;
   const { logger, tracer } = observability;
 
   return tracer.startActiveSpan('obterContribuicoesPrecalculadasCampanha', async (span) => {
@@ -108,10 +119,23 @@ export async function obterContribuicoesPrecalculadasCampanha(
       span.setAttribute('checkout.contribuicoes.count', contribuicoes.length);
       span.setAttribute('checkout.opcoes.count', campanha.opcoes.length);
 
+      // Plan 0015 (aperture-ucgok): batch-resolve the disponivel
+      // predicate. One indexed Pagamento query for the whole campanha
+      // instead of N EXISTS calls.
+      const idsIndisponiveis = await pagamentoRepository.findIdsContribuicoesComPagamentoAprovado(
+        contribuicoes.map((c) => c.id as unknown as IdContribuicaoPagamento),
+      );
+      const indisponiveisSet = new Set<string>(idsIndisponiveis);
+
       const contribuicoesPorOpcao = groupContribuicoesPorOpcao(contribuicoes);
 
       const opcoes: OpcaoComContribuicoes[] = campanha.opcoes.map((opcao) =>
-        buildOpcaoComContribuicoes(opcao, contribuicoesPorOpcao.get(opcao.id) ?? [], regraTaxa),
+        buildOpcaoComContribuicoes(
+          opcao,
+          contribuicoesPorOpcao.get(opcao.id) ?? [],
+          regraTaxa,
+          indisponiveisSet,
+        ),
       );
 
       const primeiraOrfa = findPrimeiraContribuicaoOrfa(contribuicoes, campanha.opcoes);
@@ -149,6 +173,7 @@ export async function obterContribuicoesPrecalculadasCampanha(
     opcao: OpcaoContribuicao,
     contribuicoesDaOpcao: readonly Contribuicao[],
     regraTaxa: Parameters<typeof obterTarifaPorTipo>[0],
+    indisponiveisSet: ReadonlySet<string>,
   ): OpcaoComContribuicoes {
     const tarifa = obterTarifaPorTipo(regraTaxa, opcao.tipo as TipoOpcaoContribuicaoReferencia);
     return {
@@ -160,7 +185,9 @@ export async function obterContribuicoesPrecalculadasCampanha(
         imagemUrl: c.imagemUrl,
         grupo: c.grupo,
         valorContribuicaoCents: c.valor,
-        disponivel: contribuicaoDisponivel(c),
+        // Plan 0015 (aperture-ucgok): disponivel is the negation of
+        // "EXISTS aprovado pagamento for this slot."
+        disponivel: !indisponiveisSet.has(c.id),
         composicao: calcularComposicaoValores(tarifa, {
           idContribuicao: c.id,
           contributionAmountCents: c.valor,

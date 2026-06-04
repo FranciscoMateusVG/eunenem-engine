@@ -1,8 +1,19 @@
 # Plan 0013 — Provider fee passthrough
 
+> 📌 **Addendum 2026-06-03 — light revision pending after [0015](./0015-contribuicao-pagamento-financeiro-collapse.md).**
+>
+> Two references in this plan reflect the pre-0015 lançamento model and will be reconciled in 0013's implementation cycle (not in 0015 Phase 5's scope):
+>
+> 1. The interaction with 0006 (`maturacao-regra.ts`, `maturaEm`) is **moot** — 0006 is superseded. Lançamentos no longer carry `maturaEm`; the implicit "disponivel" state is now the predicate `transferidoEm IS NULL AND canceladoEm IS NULL` per 0015 §Locked-decision 9. The Phase reference below that says "passthrough lancamento born already disponivel (or with `maturaEm = criadoEm`)" should read "passthrough lancamento born with `transferidoEm: null, canceladoEm: null` — same as every other lançamento, no per-tipo maturation rule."
+> 2. The interaction with 0012 (chargeback fee passthrough loss) is now part of 0012's narrower chargeback-only scope — see 0012 §Locked-decision 6 (new) and §Q7. Plan 0013 introduces the `credito_reembolso_taxa_provedor` lançamento tipo; plan 0012 introduces the loss row when the chargeback unrecovers it.
+>
+> The rest of this plan (the 3-part composition, the per-plataforma policy framing, the receita-vs-passthrough double-entry discipline) is unaffected by 0015. Treat the Phase-by-Phase implementation steps as currently-drafted but verify against the post-0015 lançamento shape before coding.
+>
+> ---
+>
 > **Status**: drafted 2026-05-24, awaiting confirmation. **Many decisions deliberately left open** — see "Open questions to answer before phases start" below. Don't begin implementation until those are resolved.
 > **Depends on**: plan `0002-checkout-orchestration-layer-done.md` (existing `ComposicaoValores` is the extension point), plan `0009-plataforma-management-and-admin-ux.md` (versioned RegraTaxa pattern — `RegraTaxaProvedor` mirrors it; if 0009 hasn't shipped yet, this plan introduces versioning standalone).
-> **Interacts with**: plan `0006-lancamento-maturation-rule.md` (passthrough lancamentos may need their own maturation rule), plan `0012-estorno-and-chargeback-cascade.md` (chargebacks usually don't refund the provider's fee — plataforma eats the passthrough on estorno).
+> **Interacts with**: ~~plan `0006-lancamento-maturation-rule.md`~~ (superseded — see addendum), plan `0012-estorno-and-chargeback-cascade.md` (chargebacks usually don't refund the provider's fee — plataforma eats the passthrough on estorno; rescoped by 0015 — see addendum).
 
 ## Goal
 
@@ -252,11 +263,11 @@ conciliarLiquidacaoProvedor(deps, { idPagamento, feeRealizadoCents, liquidadoEm 
 
 **Objective**: Passthrough + variance lancamentos get their own maturation rule (probably "always disponivel" since the plataforma absorbs/keeps them immediately).
 
-**Files MODIFIED**:
-- `src/domain/financeiro/value-objects/maturacao-regra.ts` (from plan 0006) — add rules for the new tipos.
-- Tests for maturation across the new types.
+**Files MODIFIED** (post-0015 — see addendum at top):
+- ~~`src/domain/financeiro/value-objects/maturacao-regra.ts`~~ — moot (0006 superseded; no maturation rule exists). Passthrough lançamento is born with the standard `transferidoEm: null, canceladoEm: null` pair, same as every other lançamento.
+- Tests for the new tipos (no maturation behaviour to test).
 
-**Verification**: passthrough lancamento born already disponivel (or with maturaEm = criadoEm); variance same.
+**Verification (post-0015)**: passthrough lançamento born with `transferidoEm: null, canceladoEm: null`; variance row created identically. The pre-0015 verification line that said "born already disponivel (or with `matura` baked in)" is retired — there is no disponivel-vs-pendente distinction on lançamentos anymore.
 
 **STOP for confirmation.**
 

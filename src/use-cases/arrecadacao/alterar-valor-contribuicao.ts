@@ -1,14 +1,12 @@
 import { SpanStatusCode } from '@opentelemetry/api';
 import { z } from 'zod/v4';
 import type { ContribuicaoRepository } from '../../adapters/arrecadacao/contribuicao-repository.js';
-import type { Contribuicao } from '../../domain/arrecadacao/entities/contribuicao.js';
 import {
-  contribuicaoComValor,
-  contribuicaoDisponivel,
+  type Contribuicao,
+  contribuicaoAtualizada,
 } from '../../domain/arrecadacao/entities/contribuicao.js';
 import { IdContribuicaoSchema } from '../../domain/arrecadacao/value-objects/ids.js';
 import { MoneyCentsSchema } from '../../domain/money.js';
-import { ArrecadacaoContribuicaoNaoDisponivelError } from '../../errors/arrecadacao/contribuicao-nao-disponivel.error.js';
 import { ArrecadacaoContribuicaoNaoEncontradaError } from '../../errors/arrecadacao/contribuicao-nao-encontrada.error.js';
 import { ArrecadacaoInputInvalidoError } from '../../errors/arrecadacao/input-invalido.error.js';
 import type { Observability } from '../../observability/observability.js';
@@ -26,7 +24,14 @@ export interface AlterarValorContribuicaoDeps {
 }
 
 /**
- * Altera o valor de uma contribuição enquanto ela está `disponivel`.
+ * Altera o valor de uma contribuição.
+ *
+ * Plan 0015 (aperture-ucgok): o status guard foi removido. Slots não
+ * têm mais FSM; o valor pode ser editado a qualquer momento. Pagamentos
+ * já aprovados preservam o valor original no snapshot composicaoValores —
+ * a edição não afeta retroativamente o que o contribuinte pagou.
+ * Implementado em termos de `contribuicaoAtualizada` (o helper único)
+ * desde que `contribuicaoComValor` foi removido com a redução do agregado.
  */
 export async function alterarValorContribuicao(
   deps: AlterarValorContribuicaoDeps,
@@ -51,11 +56,7 @@ export async function alterarValorContribuicao(
         throw new ArrecadacaoContribuicaoNaoEncontradaError(idContribuicao);
       }
 
-      if (!contribuicaoDisponivel(existing)) {
-        throw new ArrecadacaoContribuicaoNaoDisponivelError(idContribuicao);
-      }
-
-      const updated = contribuicaoComValor(existing, valor);
+      const updated = contribuicaoAtualizada(existing, { valor });
       await contribuicaoRepository.save(updated);
 
       logger.info('arrecadacao.contribuicao.valor_alterado', {

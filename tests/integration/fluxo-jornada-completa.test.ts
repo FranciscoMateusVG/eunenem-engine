@@ -13,7 +13,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { CampanhaRepositoryPostgres } from '../../src/adapters/arrecadacao/campanha-repository.postgres.js';
 import { ContribuicaoRepositoryPostgres } from '../../src/adapters/arrecadacao/contribuicao-repository.postgres.js';
 import { RecebedorRepositoryPostgres } from '../../src/adapters/arrecadacao/recebedor-repository.postgres.js';
-import { LivroFinanceiroRepositoryMemory } from '../../src/adapters/financeiro/livro-repository.memory.js';
+import { LivroFinanceiroRepositoryMemory } from '../../src/adapters/pagamentos/financeiro/livro-repository.memory.js';
 import { PagamentoEventPublisherMemory } from '../../src/adapters/pagamentos/event-publisher.memory.js';
 import { PagamentoProviderFake } from '../../src/adapters/pagamentos/provider.fake.js';
 import { PagamentoRepositoryMemory } from '../../src/adapters/pagamentos/repository.memory.js';
@@ -31,7 +31,7 @@ import { finalizarPagamentoAprovado } from '../../src/use-cases/checkout/finaliz
 import { iniciarPagamentoContribuicao } from '../../src/use-cases/checkout/iniciar-pagamento-contribuicao.js';
 import { iniciarRepasseRecebedor } from '../../src/use-cases/checkout/iniciar-repasse-recebedor.js';
 import { obterContribuicoesPrecalculadasCampanha } from '../../src/use-cases/checkout/obter-contribuicoes-precalculadas-campanha.js';
-import { obterSaldoRecebedor } from '../../src/use-cases/financeiro/obter-saldo-recebedor.js';
+import { obterSaldoRecebedor } from '../../src/use-cases/pagamentos/financeiro/obter-saldo-recebedor.js';
 import { registrarContaUsuario } from '../../src/use-cases/usuario/registrar-conta-usuario.js';
 import { matureLancamentosRecebedorForCampanha } from '../helpers/mature-lancamentos-financeiros.js';
 import { createTestObservability } from '../helpers/observability.js';

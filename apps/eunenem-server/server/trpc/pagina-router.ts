@@ -5,6 +5,7 @@ import {
   calcularValorTaxaPercentual,
   type Campanha,
   computeCardSurchargeCents,
+  contribuicaoEstaIndisponivel,
   type IdContribuicao,
   type IdIntencaoPagamento,
   type IdOpcaoContribuicao,
@@ -221,26 +222,32 @@ export const paginaRouter = t.router({
       // Single source of truth — same calcularValorTaxaPercentual +
       // computeCardSurchargeCents helpers feed Stripe AND this
       // projection; no frontend/backend drift surface.
-      return items.map((c) => {
-        const feeAmountCents = calcularValorTaxaPercentual(c.valor, tarifaPresente.percentageBps);
-        const valorComTaxa = c.valor + feeAmountCents;
-        return {
-          id: c.id as string,
-          nome: c.nome,
-          valor: valorComTaxa,
-          // Surcharge is computed off the bare contribution amount —
-          // matches what the Stripe adapter sends as the surcharge line
-          // item via composicao.surchargeCents (which is also computed
-          // off contributionAmountCents in calcularComposicaoValores).
-          // Keeping the surcharge base aligned across backend + projection
-          // preserves the "what we display equals what Stripe charges"
-          // invariant the operator caught the original bug under.
-          valorComTaxaCartao: valorComTaxa + computeCardSurchargeCents(c.valor),
-          imagemUrl: c.imagemUrl,
-          grupo: c.grupo,
-          status: c.status,
-        };
-      });
+      return Promise.all(
+        items.map(async (c) => {
+          const feeAmountCents = calcularValorTaxaPercentual(c.valor, tarifaPresente.percentageBps);
+          const valorComTaxa = c.valor + feeAmountCents;
+          // Post-Phase-1 (plan 0015): contribuição has no stored status.
+          // Compute the "indisponivel" predicate per-slot via the EXISTS
+          // query against approved pagamentos (uses the partial index
+          // pagamentos_aprovado_por_contribuicao_idx — sub-ms per slot).
+          const indisponivel = await contribuicaoEstaIndisponivel(
+            {
+              pagamentoRepository: ctx.deps.pagamentoRepository,
+              observability: ctx.deps.observability,
+            },
+            { idContribuicao: c.id },
+          );
+          return {
+            id: c.id as string,
+            nome: c.nome,
+            valor: valorComTaxa,
+            valorComTaxaCartao: valorComTaxa + computeCardSurchargeCents(c.valor),
+            imagemUrl: c.imagemUrl,
+            grupo: c.grupo,
+            status: indisponivel ? ('indisponivel' as const) : ('disponivel' as const),
+          };
+        }),
+      );
     }),
 
   /**
@@ -355,12 +362,12 @@ export const paginaRouter = t.router({
         status = 'unknown';
       }
 
-      // aperture-m95f3: post-webhook the Contribuicao.contribuinte (set
-      // by finalize → associarContribuinteContribuicao) is canonical for
-      // nome / email / mensagem. Fall back to the provider session for the
-      // pre-webhook window (visitor hit success before webhook fired) so
-      // the page still shows something during the pending state.
-      const persistedContribuinte = contribuicao?.contribuinte ?? null;
+      // Post-Phase-1 (plan 0015): contribuinte data moved from Contribuicao
+      // to IntencaoPagamento per-pagamento. The success page now reads it
+      // from this specific pagamento's intencao (where the webhook stamped
+      // it on finalize). Fall back to the Stripe session for the
+      // pre-webhook window (visitor hit success before webhook fired).
+      const persistedContribuinte = pagamento.intencao.contribuinte ?? null;
 
       return {
         giftName: contribuicao?.nome ?? '',

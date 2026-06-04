@@ -50,13 +50,14 @@ The folder is a roll-call of *aggregate roots*, not of *entities*.
 | BC | Aggregate roots | Repositories | Files in `entities/` |
 |---|---|---|---|
 | Arrecadação | Campanha, Contribuicao, Recebedor | 3 (`CampanhaRepository`, `ContribuicaoRepository`, `RecebedorRepository`) | **3** |
-| Pagamentos | Pagamento | 1 (`PagamentoRepository`) | **1** (file contains `Pagamento` + nested `IntencaoPagamento` + nested `TransacaoExterna`) |
+| Pagamentos | Pagamento | 1 (`PagamentoRepository`) | **1** (file contains `Pagamento` + nested `IntencaoPagamento` + nested `TransacaoExterna` + the **Financeiro module** — see note below) |
 | Usuário | Usuario, Sessao | 2 (`UsuarioRepository`, `SessaoUsuarioRepository`) | **2** (`usuario.ts` also contains nested `Conta` + nested `CredencialSimulada`) |
 | Taxas | RegraTaxa | 1 (`ProvedorRegraTaxa`) | **1** |
 | Plataforma | Plataforma | 1 (`PlataformaRepository`) | **1** |
-| Financeiro | LancamentoFinanceiro, RepasseRecebedor | 1 (`LivroFinanceiroRepository` — handles both) | **2** *(open design point)* |
 
 **One file ⇔ one aggregate root ⇔ one persistence boundary.**
+
+> 📌 **2026-06-03 — Financeiro is a module inside Pagamentos, not a standalone BC.** Per plan [0015 §Locked-decisions 1](../plans/0015-contribuicao-pagamento-financeiro-collapse.md), what was once a separate Financeiro BC (with its own `src/domain/financeiro/`, its own `LivroFinanceiroRepository`, its own ubiquitous language) collapses into the Pagamentos BC as the **Financeiro module**. Concretely: `LancamentoFinanceiro` and `RepasseRecebedor` live under `src/domain/pagamentos/financeiro/`, use-cases under `src/use-cases/pagamentos/financeiro/`, adapters under `src/adapters/pagamentos/financeiro/`. The persistence boundary stays one repository surface; the namespace folds. See the lifecycle-independence test below for why.
 
 ### Why the folder splits this way
 
@@ -71,6 +72,29 @@ Compare to Arrecadação: a `Contribuicao` exists standalone (an item on the cam
 > If the only way to act on it is by loading something bigger first, it's a nested entity (lives inside the root's file).
 >
 > If you can load and act on it directly via its own repository, it's an aggregate root (gets its own file in `entities/`).
+
+---
+
+## Module vs Bounded Context — the lifecycle-independence test
+
+Once a BC has more than one aggregate root, the temptation to grow it into "a BC for each cluster" is real. Resist by default. **A new BC is justified only when the cluster has independent lifecycle.** Concretely, a separate BC needs all three of:
+
+1. **Its own ubiquitous language.** Domain experts say the same word for the same thing across the cluster, and a *different* word for the things outside it. If translating to/from the parent BC is one-to-one and trivial, the language hasn't actually forked.
+2. **Its own consistency boundary.** The cluster has invariants that hold *within itself* but not against the parent. Writes inside the cluster should not require coordinating with the parent's aggregates in the same transaction. If they do, the cluster is downstream of the parent's consistency boundary, not parallel to it.
+3. **Lifecycle independence from the parent.** Aggregates in the cluster can be born, change, and die *without* a corresponding event on a parent aggregate. If every write in the cluster is *caused by* a parent aggregate's transition, the cluster is the parent's downstream projection — that's a module, not a BC.
+
+If any of the three fails, what you have is a **module inside the parent BC** — a folder grouping, not a sovereign domain.
+
+**Worked example: Financeiro.** Originally drafted as a BC alongside Pagamentos. After plan 0015 the test fails on points 2 and 3:
+
+- **Consistency:** `LancamentoFinanceiro` rows are born transactionally with the Pagamento that triggered them; their `canceladoEm` is set transactionally when the same Pagamento estorna. The financeiro write IS the pagamento write — same DB transaction, same aggregate boundary.
+- **Lifecycle:** there is no Lancamento without a Pagamento causing it. Every state change on a Lancamento has a Pagamento (or admin action against a Lancamento, with no peer aggregate involved) as its proximate cause. There is no "Lancamento lifecycle" parallel to Pagamento's.
+
+Conclusion: Financeiro is a **module of Pagamentos**, expressed at the folder level (`src/domain/pagamentos/financeiro/`) rather than at the BC level. The repository surface stays one (`PagamentoRepository`); the aggregate root stays Pagamento; the financeiro entities are reachable through it.
+
+**Worked counter-example: Plataforma.** Plataforma passes all three: its own ubiquitous language (tenancy, ownership, RegraTaxa lifecycle), its own consistency boundary (per-tenant invariants that don't touch Pagamento writes), and lifecycle independence (a Plataforma is born + dies on its own admin clock, unrelated to any single pagamento). It earns its BC status.
+
+The lesson: BCs are expensive. Modules are cheap. Use the test before splitting; collapse when the test stops passing.
 
 ---
 

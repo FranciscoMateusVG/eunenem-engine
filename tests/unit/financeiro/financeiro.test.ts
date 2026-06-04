@@ -3,10 +3,23 @@ import {
   criarLancamentosParaPagamentoAprovado,
   type EfeitosFinanceirosPagamentoAprovado,
   type LancamentoFinanceiro,
-} from '../../../src/domain/financeiro/entities/lancamento-financeiro.js';
-import { criarRepasseRecebedorSolicitado } from '../../../src/domain/financeiro/entities/repasse-recebedor.js';
-import { calcularReceitaPlataforma } from '../../../src/domain/financeiro/value-objects/receita-plataforma.js';
-import { calcularSaldoRecebedor } from '../../../src/domain/financeiro/value-objects/saldo-recebedor.js';
+} from '../../../src/domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
+import { criarRepasseRecebedorSolicitado } from '../../../src/domain/pagamentos/financeiro/entities/repasse-recebedor.js';
+import { calcularReceitaPlataforma } from '../../../src/domain/pagamentos/financeiro/value-objects/receita-plataforma.js';
+import { calcularSaldoRecebedor } from '../../../src/domain/pagamentos/financeiro/value-objects/saldo-recebedor.js';
+
+/**
+ * Plan 0015 (aperture-ucgok). Rewritten for the collapsed model:
+ *   - EfeitosFinanceirosPagamentoAprovado.metodo removed (maturation gone)
+ *   - Lançamento has no FSM; rows carry transferidoEm + canceladoEm (both
+ *     start null at creation time; admin marks transferidoEm to record
+ *     money actually reached the recebedor; estorno cascade sets
+ *     canceladoEm on the untransferred subset)
+ *   - calcularSaldoRecebedor predicates rewired:
+ *       pending  = transferidoEm IS NULL AND canceladoEm IS NULL
+ *       disponivel = transferidoEm IS NOT NULL AND canceladoEm IS NULL
+ *       cancelled = canceladoEm IS NOT NULL (excluded from both sums)
+ */
 
 const idPagamento = '550e8400-e29b-41d4-a716-446655441001';
 const idContribuicao = '550e8400-e29b-41d4-a716-446655441002';
@@ -21,8 +34,6 @@ const inputPagamentoAprovado: EfeitosFinanceirosPagamentoAprovado = {
   idContribuicao,
   idCampanha,
   statusPagamento: 'aprovado',
-  // aperture-led0r: metodo required to compute maturaEm via REGRAS_MATURACAO_PADRAO.
-  metodo: 'pix',
   composicaoValores: {
     contributionAmountCents: 8000,
     feeAmountCents: 400,
@@ -33,9 +44,6 @@ const inputPagamentoAprovado: EfeitosFinanceirosPagamentoAprovado = {
   },
 };
 
-// aperture-led0r: PIX maturaEm = criadoEm + 1h per REGRAS_MATURACAO_PADRAO.
-const maturaEmPix = new Date('2026-05-01T13:00:00.000Z');
-
 describe('criarLancamentosParaPagamentoAprovado', () => {
   it('creates receiver balance and platform revenue entries for the canonical flow', () => {
     const lancamentos = criarLancamentosParaPagamentoAprovado(
@@ -44,8 +52,7 @@ describe('criarLancamentosParaPagamentoAprovado', () => {
       criadoEm,
     );
 
-    // aperture-led0r: receita_plataforma now starts 'pendente' (Finding #2 fix);
-    // both lancamentos carry maturaEm = criadoEm + 1h (PIX rule).
+    // Plan 0015: both lancamentos born with transferidoEm + canceladoEm null.
     expect(lancamentos).toEqual([
       {
         id: idLancamentoRecebedor,
@@ -54,9 +61,9 @@ describe('criarLancamentosParaPagamentoAprovado', () => {
         idCampanha,
         tipo: 'credito_saldo_recebedor',
         amountCents: 8000,
-        status: 'pendente',
         criadoEm,
-        maturaEm: maturaEmPix,
+        transferidoEm: null,
+        canceladoEm: null,
       },
       {
         id: idLancamentoReceitaPlataforma,
@@ -64,9 +71,9 @@ describe('criarLancamentosParaPagamentoAprovado', () => {
         idContribuicao,
         tipo: 'credito_receita_plataforma',
         amountCents: 400,
-        status: 'pendente',
         criadoEm,
-        maturaEm: maturaEmPix,
+        transferidoEm: null,
+        canceladoEm: null,
       },
     ]);
   });
@@ -132,7 +139,6 @@ describe('criarLancamentosParaPagamentoAprovado', () => {
       'credito_saldo_recebedor',
       'credito_receita_plataforma',
     ]);
-    // Book-balance invariant on the PIX path.
     const sum = lancamentos.reduce((acc, l) => acc + l.amountCents, 0);
     expect(sum).toBe(inputPagamentoAprovado.composicaoValores.totalPaidCents);
   });
@@ -140,8 +146,6 @@ describe('criarLancamentosParaPagamentoAprovado', () => {
   it('cartao (surchargeCents>0) emits 3 lancamentos and book balances (aperture-bjshv)', () => {
     const inputCartao = {
       ...inputPagamentoAprovado,
-      // aperture-led0r: cartao path → credit_card metodo → maturaEm = +30 days.
-      metodo: 'credit_card' as const,
       composicaoValores: {
         contributionAmountCents: 4500,
         feeAmountCents: 225,
@@ -166,16 +170,16 @@ describe('criarLancamentosParaPagamentoAprovado', () => {
       'credito_receita_plataforma',
       'credito_passthrough_surcharge',
     ]);
-    // Per-row shape checks for the new passthrough lancamento.
     const passthrough = lancamentos[2];
     expect(passthrough.id).toBe(idLancamentoPassthroughSurcharge);
     expect(passthrough.amountCents).toBe(224);
-    expect(passthrough.status).toBe('pendente');
-    expect(passthrough.idCampanha).toBe(idCampanha); // inherit from input per bead
+    // Plan 0015: all rows born with date columns null (not 'pendente' status).
+    expect(passthrough.transferidoEm).toBeNull();
+    expect(passthrough.canceladoEm).toBeNull();
+    expect(passthrough.idCampanha).toBe(idCampanha);
     expect(passthrough.idPagamento).toBe(idPagamento);
     expect(passthrough.idContribuicao).toBe(idContribuicao);
     expect(passthrough.criadoEm).toBe(criadoEm);
-    // Book-balance invariant on the cartao path — the whole reason this exists.
     const sum = lancamentos.reduce((acc, l) => acc + l.amountCents, 0);
     expect(sum).toBe(inputCartao.composicaoValores.totalPaidCents);
     expect(sum).toBe(4949);
@@ -186,8 +190,6 @@ describe('criarLancamentosParaPagamentoAprovado', () => {
       criarLancamentosParaPagamentoAprovado(
         {
           ...inputPagamentoAprovado,
-          // aperture-led0r: cartao → credit_card.
-          metodo: 'credit_card',
           composicaoValores: {
             contributionAmountCents: 4500,
             feeAmountCents: 225,
@@ -204,9 +206,6 @@ describe('criarLancamentosParaPagamentoAprovado', () => {
   });
 
   it('PIX accepts a present idLancamentoPassthroughSurcharge but ignores it (no-op when surchargeCents=0)', () => {
-    // Defensive: caller minted an extra UUID for a PIX payment. Factory
-    // should NOT emit a 3rd lancamento — the surchargeCents===0 check
-    // wins before the optional id is consumed.
     const lancamentos = criarLancamentosParaPagamentoAprovado(
       inputPagamentoAprovado,
       {
@@ -221,25 +220,52 @@ describe('criarLancamentosParaPagamentoAprovado', () => {
   });
 });
 
-describe('financial summaries', () => {
-  it('separates pending and available receiver balance', () => {
-    const lancamentoPendente = criarLancamentosParaPagamentoAprovado(
+describe('financial summaries (plan 0015 date-column predicates)', () => {
+  it('separates pending and transferred receiver balance via date columns', () => {
+    const lancamentoPending = criarLancamentosParaPagamentoAprovado(
       inputPagamentoAprovado,
       { idLancamentoRecebedor, idLancamentoReceitaPlataforma },
       criadoEm,
     )[0];
-    const lancamentoDisponivel: LancamentoFinanceiro = {
-      ...lancamentoPendente,
+    // Mock a different lancamento that's been transferred to the recebedor:
+    // transferidoEm set, canceladoEm null → counts as "disponivel" (já recebido).
+    const lancamentoTransferido: LancamentoFinanceiro = {
+      ...lancamentoPending,
       id: '550e8400-e29b-41d4-a716-446655441007',
       idPagamento: '550e8400-e29b-41d4-a716-446655441008',
-      status: 'disponivel',
+      transferidoEm: new Date('2026-05-02T10:00:00.000Z'),
+      canceladoEm: null,
       amountCents: 2000,
     };
 
-    expect(calcularSaldoRecebedor(idCampanha, [lancamentoPendente, lancamentoDisponivel])).toEqual({
+    expect(calcularSaldoRecebedor(idCampanha, [lancamentoPending, lancamentoTransferido])).toEqual({
       idCampanha,
       valorPendenteCents: 8000,
       valorDisponivelCents: 2000,
+    });
+  });
+
+  it('excludes cancelled lançamentos from both sums', () => {
+    const lancamentoPending = criarLancamentosParaPagamentoAprovado(
+      inputPagamentoAprovado,
+      { idLancamentoRecebedor, idLancamentoReceitaPlataforma },
+      criadoEm,
+    )[0];
+    // canceladoEm set → estornado cascade fired before transfer. Excluded
+    // from both pending AND disponivel.
+    const lancamentoCancelado: LancamentoFinanceiro = {
+      ...lancamentoPending,
+      id: '550e8400-e29b-41d4-a716-446655441009',
+      idPagamento: '550e8400-e29b-41d4-a716-446655441010',
+      transferidoEm: null,
+      canceladoEm: new Date('2026-05-02T10:00:00.000Z'),
+      amountCents: 5000,
+    };
+
+    expect(calcularSaldoRecebedor(idCampanha, [lancamentoPending, lancamentoCancelado])).toEqual({
+      idCampanha,
+      valorPendenteCents: 8000,
+      valorDisponivelCents: 0,
     });
   });
 

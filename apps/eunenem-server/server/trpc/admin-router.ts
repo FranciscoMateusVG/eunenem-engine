@@ -30,11 +30,11 @@ import type {
   IdConta,
   IdContribuicao,
 } from "../../../../src/domain/arrecadacao/value-objects/ids.js";
-import type { LancamentoFinanceiro } from "../../../../src/domain/financeiro/entities/lancamento-financeiro.js";
-import type { IdPagamentoReferencia } from "../../../../src/domain/financeiro/value-objects/ids.js";
+import type { LancamentoFinanceiro } from "../../../../src/domain/pagamentos/financeiro/entities/lancamento-financeiro.js";
+import type { IdPagamentoReferencia } from "../../../../src/domain/pagamentos/financeiro/value-objects/ids.js";
 import type { Pagamento } from "../../../../src/domain/pagamentos/entities/pagamento.js";
 import type { IdContribuicaoPagamento } from "../../../../src/domain/pagamentos/value-objects/ids.js";
-import { ID_PLATAFORMA_EUNENEM } from "../../../../src/index.js";
+import { contribuicaoEstaIndisponivel, ID_PLATAFORMA_EUNENEM } from "../../../../src/index.js";
 import type { TrpcContext } from "./context.js";
 
 const t = initTRPC.context<TrpcContext>().create();
@@ -278,11 +278,15 @@ const ContribuicaoAdminDTOSchema = z.object({
   id: z.string(),
   nome: z.string(),
   valorCentavos: z.number().int().nonnegative(),
-  status: z.enum(["disponivel", "indisponivel"]),
   grupo: z.string().nullable(),
   idOpcaoContribuicao: z.string(),
   criadaEm: z.string(),
-  contribuinte: ContribuinteDTOSchema,
+  // Plan 0015 Phase 6 — computed predicate (`EXISTS pagamento WHERE
+  // id_contribuicao=X AND status='aprovado'`). The contribuicao detail
+  // screen's Arrecadação status pill reads this. Phase 1 dropped the
+  // stored `status` field; this is now the only source of truth.
+  // Computed in `toContribuicaoAdminDTO` via `pagamentoRepository`.
+  indisponivel: z.boolean(),
 });
 export type ContribuicaoAdminDTO = z.infer<typeof ContribuicaoAdminDTOSchema>;
 
@@ -304,23 +308,30 @@ const UsuarioSummaryDTOSchema = z.object({
 });
 export type UsuarioSummaryDTO = z.infer<typeof UsuarioSummaryDTOSchema>;
 
-function toContribuicaoAdminDTO(c: Contribuicao): ContribuicaoAdminDTO {
+async function toContribuicaoAdminDTO(
+  c: Contribuicao,
+  ctx: TrpcContext,
+): Promise<ContribuicaoAdminDTO> {
+  // Post-Phase-1 swap: contribuição has NO status, NO contribuinte (those
+  // moved to IntencaoPagamento per-pagamento). The "indisponivel" badge is
+  // a computed predicate: at least one approved pagamento exists for this
+  // slot. Per-pagamento contribuinte data lives on the contribuição detail
+  // screen's Pagamentos card.
+  const indisponivel = await contribuicaoEstaIndisponivel(
+    {
+      pagamentoRepository: ctx.deps.pagamentoRepository,
+      observability: ctx.deps.observability,
+    },
+    { idContribuicao: c.id },
+  );
   return {
     id: c.id,
     nome: c.nome,
     valorCentavos: c.valor as unknown as number,
-    status: c.status,
     grupo: c.grupo,
     idOpcaoContribuicao: c.idOpcaoContribuicao,
     criadaEm: c.criadaEm.toISOString(),
-    contribuinte:
-      c.contribuinte === null
-        ? null
-        : {
-            nome: c.contribuinte.nome,
-            email: c.contribuinte.email,
-            mensagem: c.contribuinte.mensagem ?? null,
-          },
+    indisponivel,
   };
 }
 
@@ -350,7 +361,11 @@ const contribuicoesRouter = t.router({
           input.idCampanha as IdCampanha,
         );
       return {
-        contribuicoes: contribuicoes.map(toContribuicaoAdminDTO),
+        contribuicoes: await Promise.all(
+        contribuicoes.map((c) =>
+          toContribuicaoAdminDTO(c, ctx),
+        ),
+      ),
       };
     }),
 
@@ -404,23 +419,17 @@ const contribuicoesRouter = t.router({
           ? null
           : { nome: campanha.dadosRecebedor.nomeTitular };
 
-      let contribuinteSummary: UsuarioSummaryDTO | null = null;
-      if (contribuicao.contribuinte !== null) {
-        const usuario = await ctx.deps.usuarioRepository.findUsuarioByEmail(
-          ID_PLATAFORMA_EUNENEM,
-          contribuicao.contribuinte.email as never,
-        );
-        if (usuario) {
-          contribuinteSummary = {
-            idConta: usuario.idConta,
-            nomeExibicao: usuario.nomeExibicao,
-            email: usuario.email,
-          };
-        }
-      }
+      // Post-Phase-1: contribuição no longer carries a single contribuinte
+      // (data moved to IntencaoPagamento per-pagamento). The
+      // contribuinte-summary lookup-by-email path is retired here — the
+      // detail screen surfaces per-pagamento contribuintes via the
+      // Pagamentos card directly. Always null at the campanha-level summary
+      // surface. Follow-up bead can reintroduce a "first/most-recent aprovado
+      // pagamento's contribuinte" lookup if the campanha view needs it.
+      const contribuinteSummary: UsuarioSummaryDTO | null = null;
 
       return {
-        contribuicao: toContribuicaoAdminDTO(contribuicao),
+        contribuicao: await toContribuicaoAdminDTO(contribuicao, ctx),
         campanha: { id: campanha.id, titulo: campanha.titulo },
         recebedor,
         contribuinte: contribuinteSummary,
@@ -433,7 +442,29 @@ const contribuicoesRouter = t.router({
  * `financeiro` (W5) sub-routers.
  * ────────────────────────────────────────────────────────────────────── */
 
-const PagamentoStatusSchema = z.enum(["pendente", "aprovado", "rejeitado"]);
+/**
+ * Pagamento FSM — 5 states per plan 0015 Locked Decision #7.
+ *
+ *   pendente   → processing   (payment_intent.processing — pix QR scanned)
+ *   pendente   → aprovado     (charge.succeeded, card happy path)
+ *   processing → aprovado     (charge.succeeded after pix/ACH confirmation)
+ *   pendente   → rejeitado    (failure before processing)
+ *   processing → rejeitado    (failure during processing)
+ *   aprovado   → estornado    (charge.refunded — pre-transfer guard enforced)
+ *
+ * Parallel-prep note (aperture-i45g5): until Rex's Phase 3 webhook handler
+ * ships, the engine only emits {pendente, aprovado, rejeitado}. The schema
+ * is widened in advance so the UI can render all 5 states without coupling
+ * to the rollout order. Current data flows through the same 3-state subset
+ * it always did.
+ */
+const PagamentoStatusSchema = z.enum([
+  "pendente",
+  "processing",
+  "aprovado",
+  "rejeitado",
+  "estornado",
+]);
 
 /* ─────────────────────────────────────────────────────────────────────────
  * financeiro — W5 (aperture-rsidz.6).
@@ -471,8 +502,6 @@ const LancamentoTipoSchema = z.enum([
   "credito_passthrough_surcharge",
 ]);
 
-const LancamentoStatusSchema = z.enum(["pendente", "disponivel"]);
-
 const LancamentoFinanceiroAdminDTOSchema = z.object({
   id: z.string(),
   idPagamento: z.string(),
@@ -480,15 +509,29 @@ const LancamentoFinanceiroAdminDTOSchema = z.object({
   idCampanha: z.string().nullable(),
   tipo: LancamentoTipoSchema,
   amountCents: z.number().int().nonnegative(),
-  status: LancamentoStatusSchema,
   criadoEm: z.string(),
-  // Maturation timestamp (aperture-led0r / PR #112). The point in time when
-  // a pendente lancamento is expected to flip to disponivel under plano
-  // 0006's rule (PIX = criadoEm + 1h, cartao_credito = criadoEm + 30 days).
-  // Same value across every lancamento generated by the same pagamento —
-  // one Stripe payout governs all of them. UI surfaces it as
-  // "Matura em [DD/MM/YYYY HH:MM]" per row.
-  maturaEm: z.string(),
+  // Plan 0015 Locked Decision #9 — observed timestamps replace the FSM.
+  // Lançamento has NO status enum; "state" is derived from the two dates:
+  //
+  //   transferidoEm: when admin marked the row as transferred to the
+  //     recebedor (manual action; no cron yet — operator clicks a button).
+  //   canceladoEm: when the parent pagamento went `estornado` AND this
+  //     lancamento was still untransferred (cascade-scope-discipline:
+  //     transferred rows are NOT cancelled — the estorno gate returns
+  //     409 if any lancamento has transferidoEm set).
+  //
+  // Implicit "states" via query-time predicates:
+  //   pending     = transferidoEm IS NULL AND canceladoEm IS NULL
+  //   transferred = transferidoEm IS NOT NULL AND canceladoEm IS NULL
+  //   cancelado   = canceladoEm IS NOT NULL
+  //
+  // Phase 1 entity surgery dropped the status + maturaEm fields from the
+  // domain entity; Phase 6's parallel-prep additive stubs (status,
+  // maturaEm, null transferidoEm/canceladoEm) are now retired and the DTO
+  // wires through the real LancamentoFinanceiro fields. (Cross-app drift
+  // fix surfaced by Peppy's Phase-7 deploy verify.)
+  transferidoEm: z.string().nullable(),
+  canceladoEm: z.string().nullable(),
 });
 export type LancamentoFinanceiroAdminDTO = z.infer<
   typeof LancamentoFinanceiroAdminDTOSchema
@@ -512,9 +555,11 @@ function toLancamentoAdminDTO(l: LancamentoFinanceiro): LancamentoFinanceiroAdmi
     idCampanha: l.idCampanha ?? null,
     tipo: l.tipo,
     amountCents: l.amountCents as unknown as number,
-    status: l.status,
     criadoEm: l.criadoEm.toISOString(),
-    maturaEm: l.maturaEm.toISOString(),
+    // Post-Phase-1 / Phase-6 parallel-prep swap (cross-app drift fix). The
+    // entity now carries the two nullable dates directly.
+    transferidoEm: l.transferidoEm?.toISOString() ?? null,
+    canceladoEm: l.canceladoEm?.toISOString() ?? null,
   };
 }
 
@@ -627,6 +672,20 @@ const SnapshotComposicaoValoresDTOSchema = z.object({
   responsavelTaxa: z.literal("contribuinte"),
 });
 
+/**
+ * IntencaoPagamento wire shape.
+ *
+ * Plan 0015 Phase 1 (Rex) moves DadosContribuinte off Contribuicao onto
+ * IntencaoPagamento. Set by the webhook handler at `checkout.session.completed`
+ * (Stripe `custom_fields` payload). Nullable at intent-creation time because
+ * the visitor hasn't completed the iframe yet.
+ *
+ * Parallel-prep note (aperture-i45g5): until Rex's Phase 1 + Phase 3 ship,
+ * `intencao.contribuinte` is null in every row. UI handles the null state
+ * with a "(sem contribuinte ainda)" affordance — same as the anonymous
+ * checkout path. When Rex's PRs land, `toPagamentoAdminDTO` reads
+ * `p.intencao.contribuinte`.
+ */
 const IntencaoPagamentoDTOSchema = z.object({
   id: z.string(),
   idContribuicao: z.string(),
@@ -635,6 +694,7 @@ const IntencaoPagamentoDTOSchema = z.object({
   externalRef: z.string().nullable(),
   criadaEm: z.string(),
   composicaoValores: SnapshotComposicaoValoresDTOSchema,
+  contribuinte: ContribuinteDTOSchema,
 });
 
 const TransacaoExternaDTOSchema = z.object({
@@ -669,6 +729,12 @@ function toPagamentoAdminDTO(p: Pagamento): PagamentoAdminDTO {
       metodo: p.intencao.metodo,
       externalRef: p.intencao.externalRef,
       criadaEm: p.intencao.criadaEm.toISOString(),
+      // Parallel-prep stub (plan 0015 Phase 1+3 — aperture-i45g5). The
+      // contribuinte field lives on IntencaoPagamento post-Phase-1. Until
+      // Rex's PRs land, no row has a contribuinte attached — populated by
+      // the webhook handler at `checkout.session.completed`. UI handles
+      // null gracefully.
+      contribuinte: null,
       composicaoValores: {
         idContribuicao: p.intencao.composicaoValores.idContribuicao,
         contributionAmountCents: p.intencao.composicaoValores

@@ -16,7 +16,12 @@ import type {
   CriarSessaoCheckoutResult,
   ObterSessaoCheckoutResult,
 } from './checkout-session-provider.js';
-import type { PagamentoProvider, SolicitarPagamentoInput } from './provider.js';
+import type {
+  PagamentoProvider,
+  RefundarPagamentoInput,
+  RefundarPagamentoResult,
+  SolicitarPagamentoInput,
+} from './provider.js';
 
 const tracer = trace.getTracer('frame');
 
@@ -413,6 +418,70 @@ export class PagamentoProviderStripe implements PagamentoProvider, CheckoutSessi
         span.setAttribute('checkout.payment_status', session.payment_status ?? 'unknown');
         span.setStatus({ code: SpanStatusCode.OK });
         return transacao;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  /**
+   * Plan 0015 (aperture-ucgok). Fire a full refund through Stripe Refunds
+   * API. The use-case (`estornar-pagamento`) only calls this AFTER the
+   * pre-transfer 409 gate has passed; once we get here, the upstream
+   * decision to refund is committed.
+   *
+   * Stripe Refunds API keys off the charge id (`ch_xxx`). The webhook
+   * handler populates `chargeExternalRef` on `payment_intent.succeeded`
+   * (aperture-wif8s), so it's available by the time an aprovado
+   * pagamento becomes refundable. As a fallback, we honor
+   * `paymentIntentExternalRef` (`pi_xxx`) — Stripe also accepts the PI
+   * as a refund key and will fan it out to the latest charge.
+   *
+   * Status normalization: Stripe's refund.status is
+   * `succeeded | pending | failed | canceled | requires_action`. We
+   * collapse `succeeded` AND `pending` to `aceito` (the money path is
+   * committed; settlement timing is out-of-band on the provider side)
+   * and everything else to `recusado`.
+   */
+  async refundarPagamento(input: RefundarPagamentoInput): Promise<RefundarPagamentoResult> {
+    return tracer.startActiveSpan('payment_provider.stripe.refundarPagamento', async (span) => {
+      span.setAttribute('payment.id', input.idPagamento);
+      span.setAttribute('payment.amount_cents', input.amountCents);
+      span.setAttribute('refund.reason', input.reason ?? 'requested_by_customer');
+      try {
+        if (!input.chargeExternalRef && !input.paymentIntentExternalRef) {
+          throw new Error(
+            `PagamentoProviderStripe.refundarPagamento called for pagamento ${input.idPagamento} without chargeExternalRef nor paymentIntentExternalRef. Webhook should have populated at least one by aprovado.`,
+          );
+        }
+
+        const refundParams: Stripe.RefundCreateParams = input.chargeExternalRef
+          ? { charge: input.chargeExternalRef, reason: input.reason ?? 'requested_by_customer' }
+          : {
+              payment_intent: input.paymentIntentExternalRef as string,
+              reason: input.reason ?? 'requested_by_customer',
+            };
+
+        const refund = await this.stripe.refunds.create(refundParams, {
+          idempotencyKey: `pagamento:${input.idPagamento}:refund`,
+        });
+
+        const status: RefundarPagamentoResult['status'] =
+          refund.status === 'succeeded' || refund.status === 'pending' ? 'aceito' : 'recusado';
+
+        span.setAttribute('refund.id', refund.id);
+        span.setAttribute('refund.status', refund.status ?? 'unknown');
+        span.setStatus({ code: SpanStatusCode.OK });
+        return {
+          id: refund.id,
+          status,
+          amountCents: input.amountCents,
+          statusBruto: refund.status?.slice(0, 120) ?? 'unknown',
+        };
       } catch (error: unknown) {
         span.recordException(error as Error);
         span.setStatus({ code: SpanStatusCode.ERROR });

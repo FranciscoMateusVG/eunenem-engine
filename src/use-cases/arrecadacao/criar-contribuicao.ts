@@ -5,7 +5,7 @@ import type { ContribuicaoRepository } from '../../adapters/arrecadacao/contribu
 import { encontrarOpcaoContribuicao } from '../../domain/arrecadacao/entities/campanha.js';
 import type { Contribuicao } from '../../domain/arrecadacao/entities/contribuicao.js';
 import {
-  criarContribuicaoDisponivel,
+  criarContribuicao as criarContribuicaoEntity,
   LIMITE_CONTRIBUICOES_POR_OPCAO,
   NomeContribuicaoSchema,
 } from '../../domain/arrecadacao/entities/contribuicao.js';
@@ -48,7 +48,13 @@ export interface CriarContribuicaoDeps {
 }
 
 /**
- * Administrador cria um item de contribuição disponível dentro de uma opção (sacola).
+ * Administrador cria um slot de contribuição dentro de uma opção (sacola).
+ *
+ * Plan 0015 (aperture-ucgok): the entity factory was renamed from
+ * `criarContribuicaoDisponivel` to `criarContribuicao` (the slot has no
+ * status — there's nothing to qualify). Imported under the alias
+ * `criarContribuicaoEntity` here so it doesn't collide with this
+ * use-case's own export name.
  */
 export async function criarContribuicao(
   deps: CriarContribuicaoDeps,
@@ -95,7 +101,7 @@ export async function criarContribuicao(
         );
       }
 
-      const contribuicao = criarContribuicaoDisponivel({
+      const contribuicao = criarContribuicaoEntity({
         id,
         idCampanha,
         idOpcaoContribuicao,
@@ -113,7 +119,6 @@ export async function criarContribuicao(
         idCampanha,
         idOpcaoContribuicao,
         valor: contribuicao.valor,
-        status: contribuicao.status,
       });
 
       span.setStatus({ code: SpanStatusCode.OK });

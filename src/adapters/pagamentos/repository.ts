@@ -67,4 +67,23 @@ export interface PagamentoRepository {
    * missing). Returns `undefined` for unknown ch_xxx.
    */
   findByChargeExternalRef(ch: string): Promise<Pagamento | undefined>;
+  /**
+   * Plan 0015 / aperture-ucgok. Bulk EXISTS predicate: returns the
+   * subset of the input IDs that have AT LEAST ONE aprovado pagamento.
+   * One indexed query for the whole set (the Postgres adapter uses
+   * `pagamentos_aprovado_por_contribuicao_idx` — the partial index
+   * created by migration 019). Used by:
+   *   - `contribuicaoEstaIndisponivel` (single-id wrapper, the saga's
+   *     early-fail gate);
+   *   - `obterContribuicoesPrecalculadasCampanha` (visitor-facing
+   *     read; computes the "indisponivel" badge for every gift slot
+   *     in one query instead of N).
+   *
+   * Returns an empty array when none of the input IDs have aprovado
+   * pagamentos. Order of returned IDs is not guaranteed; callers
+   * should treat the result as a Set.
+   */
+  findIdsContribuicoesComPagamentoAprovado(
+    idsContribuicao: readonly IdContribuicaoPagamento[],
+  ): Promise<readonly IdContribuicaoPagamento[]>;
 }

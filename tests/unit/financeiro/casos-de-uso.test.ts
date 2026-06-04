@@ -1,17 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { LivroFinanceiroRepositoryMemory } from '../../../src/adapters/financeiro/livro-repository.memory.js';
-import type { LancamentoFinanceiro } from '../../../src/domain/financeiro/entities/lancamento-financeiro.js';
-import { FinanceiroInputInvalidoError } from '../../../src/errors/financeiro/input-invalido.error.js';
-import { FinanceiroPagamentoJaRegistradoError } from '../../../src/errors/financeiro/pagamento-ja-registrado.error.js';
-import { FinanceiroPagamentoNaoAprovadoError } from '../../../src/errors/financeiro/pagamento-nao-aprovado.error.js';
-import { FinanceiroSaldoDisponivelInsuficienteError } from '../../../src/errors/financeiro/saldo-disponivel-insuficiente.error.js';
+import { LivroFinanceiroRepositoryMemory } from '../../../src/adapters/pagamentos/financeiro/livro-repository.memory.js';
+import type { LancamentoFinanceiro } from '../../../src/domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
+import { FinanceiroInputInvalidoError } from '../../../src/errors/pagamentos/financeiro/input-invalido.error.js';
+import { FinanceiroPagamentoJaRegistradoError } from '../../../src/errors/pagamentos/financeiro/pagamento-ja-registrado.error.js';
+import { FinanceiroPagamentoNaoAprovadoError } from '../../../src/errors/pagamentos/financeiro/pagamento-nao-aprovado.error.js';
+import { FinanceiroSaldoDisponivelInsuficienteError } from '../../../src/errors/pagamentos/financeiro/saldo-disponivel-insuficiente.error.js';
 import { NoopLogger } from '../../../src/observability/noop-logger.js';
 import { noopTracer } from '../../../src/observability/tracer.js';
-import { obterReceitaPlataforma } from '../../../src/use-cases/financeiro/obter-receita-plataforma.js';
-import { obterSaldoRecebedor } from '../../../src/use-cases/financeiro/obter-saldo-recebedor.js';
-import type { RegistrarEfeitosFinanceirosPagamentoAprovadoInput } from '../../../src/use-cases/financeiro/registrar-efeitos-financeiros-pagamento-aprovado.js';
-import { registrarEfeitosFinanceirosPagamentoAprovado } from '../../../src/use-cases/financeiro/registrar-efeitos-financeiros-pagamento-aprovado.js';
-import { solicitarRepasseRecebedor } from '../../../src/use-cases/financeiro/solicitar-repasse-recebedor.js';
+import { obterReceitaPlataforma } from '../../../src/use-cases/pagamentos/financeiro/obter-receita-plataforma.js';
+import { obterSaldoRecebedor } from '../../../src/use-cases/pagamentos/financeiro/obter-saldo-recebedor.js';
+import type { RegistrarEfeitosFinanceirosPagamentoAprovadoInput } from '../../../src/use-cases/pagamentos/financeiro/registrar-efeitos-financeiros-pagamento-aprovado.js';
+import { registrarEfeitosFinanceirosPagamentoAprovado } from '../../../src/use-cases/pagamentos/financeiro/registrar-efeitos-financeiros-pagamento-aprovado.js';
+import { solicitarRepasseRecebedor } from '../../../src/use-cases/pagamentos/financeiro/solicitar-repasse-recebedor.js';
 
 const silentObservability = {
   logger: new NoopLogger(),
@@ -29,13 +29,15 @@ const idRepasse = '550e8400-e29b-41d4-a716-446655443004';
 function makeApprovedPaymentInput(
   overrides: Partial<RegistrarEfeitosFinanceirosPagamentoAprovadoInput> = {},
 ): RegistrarEfeitosFinanceirosPagamentoAprovadoInput {
+  // Plan 0015 (aperture-ucgok): input schema dropped `metodo` along with
+  // the maturação calculation — `EfeitosFinanceirosPagamentoAprovado` no
+  // longer needs it. Lancamentos are born with
+  // `transferidoEm: null, canceladoEm: null`.
   return {
     idPagamento,
     idContribuicao,
     idCampanha,
     statusPagamento: 'aprovado',
-    // aperture-led0r: metodo required to compute maturaEm.
-    metodo: 'pix',
     composicaoValores: {
       contributionAmountCents: 8000,
       feeAmountCents: 400,
@@ -121,6 +123,9 @@ describe('financial use cases', () => {
 
   it('creates an initial payout request when the receiver has available balance', async () => {
     const livroFinanceiroRepository = new LivroFinanceiroRepositoryMemory();
+    // Plan 0015 (aperture-ucgok): the "disponivel" (transferred) state on
+    // a lancamento is now `transferidoEm !== null AND canceladoEm === null`.
+    // Stamp transferidoEm so this row counts toward `valorDisponivelCents`.
     const availableEntry: LancamentoFinanceiro = {
       id: '550e8400-e29b-41d4-a716-446655443005',
       idPagamento: '550e8400-e29b-41d4-a716-446655443006',
@@ -128,11 +133,9 @@ describe('financial use cases', () => {
       idCampanha,
       tipo: 'credito_saldo_recebedor',
       amountCents: 5000,
-      status: 'disponivel',
       criadoEm: fixedDate,
-      // aperture-led0r: maturaEm required on all lancamentos post-led0r.
-      // Already matured (= criadoEm) since this entry is meant to be `disponivel`.
-      maturaEm: fixedDate,
+      transferidoEm: fixedDate,
+      canceladoEm: null,
     };
     await livroFinanceiroRepository.saveLancamentos([availableEntry]);
 

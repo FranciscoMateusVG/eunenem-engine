@@ -1,12 +1,12 @@
 import { SpanStatusCode } from '@opentelemetry/api';
 import { z } from 'zod/v4';
 import type { ContribuicaoRepository } from '../../adapters/arrecadacao/contribuicao-repository.js';
-import { contribuicaoDisponivel } from '../../domain/arrecadacao/entities/contribuicao.js';
+import type { PagamentoRepository } from '../../adapters/pagamentos/repository.js';
 import {
   IdCampanhaSchema,
   IdContribuicaoSchema,
 } from '../../domain/arrecadacao/value-objects/ids.js';
-import { ArrecadacaoContribuicaoNaoDisponivelError } from '../../errors/arrecadacao/contribuicao-nao-disponivel.error.js';
+import { ArrecadacaoContribuicaoIndisponivelError } from '../../errors/arrecadacao/contribuicao-indisponivel.error.js';
 import { ArrecadacaoContribuicaoNaoEncontradaError } from '../../errors/arrecadacao/contribuicao-nao-encontrada.error.js';
 import { ArrecadacaoInputInvalidoError } from '../../errors/arrecadacao/input-invalido.error.js';
 import { ArrecadacaoNaoAutorizadoError } from '../../errors/arrecadacao/nao-autorizado.error.js';
@@ -20,9 +20,11 @@ import type { Observability } from '../../observability/observability.js';
  *
  * Guards:
  *   - Cross-tenant: `target.idCampanha !== idCampanhaEsperada` → não-autorizado.
- *   - Status: apenas `disponivel` pode ser removida. Itens já reservados por
- *     um contribuinte NÃO podem ser deletados — preservar a evidência da
- *     reserva é parte da consistência da saga de checkout.
+ *   - Pagamento-aprovado: a slot com pelo menos um pagamento aprovado NÃO
+ *     pode ser deletada — preservar a integridade referencial dos
+ *     lançamentos financeiros + a auditoria do contribuinte que pagou.
+ *     Plan 0015 (aperture-ucgok): substitui o velho status-guard (gone)
+ *     pelo EXISTS-predicate sobre pagamentos.
  */
 export const RemoverContribuicaoInputSchema = z.object({
   idContribuicao: IdContribuicaoSchema,
@@ -33,6 +35,8 @@ export type RemoverContribuicaoInput = z.infer<typeof RemoverContribuicaoInputSc
 
 export interface RemoverContribuicaoDeps {
   readonly contribuicaoRepository: ContribuicaoRepository;
+  // Plan 0015: needed for the indisponivel EXISTS check.
+  readonly pagamentoRepository: PagamentoRepository;
   readonly observability: Observability;
 }
 
@@ -40,7 +44,7 @@ export async function removerContribuicao(
   deps: RemoverContribuicaoDeps,
   input: RemoverContribuicaoInput,
 ): Promise<void> {
-  const { contribuicaoRepository, observability } = deps;
+  const { contribuicaoRepository, pagamentoRepository, observability } = deps;
   const { logger, tracer } = observability;
 
   return tracer.startActiveSpan('removerContribuicao', async (span) => {
@@ -66,8 +70,12 @@ export async function removerContribuicao(
         );
       }
 
-      if (!contribuicaoDisponivel(existing)) {
-        throw new ArrecadacaoContribuicaoNaoDisponivelError(idContribuicao);
+      // Plan 0015: EXISTS aprovado pagamento for this contribuicao? then refuse.
+      const indisponivel = await pagamentoRepository.findIdsContribuicoesComPagamentoAprovado([
+        idContribuicao,
+      ]);
+      if (indisponivel.length > 0) {
+        throw new ArrecadacaoContribuicaoIndisponivelError(idContribuicao);
       }
 
       await contribuicaoRepository.deleteById(idContribuicao);

@@ -1,26 +1,36 @@
 import { z } from 'zod/v4';
 import type { MoneyCents } from '../../money.js';
-import type { DadosContribuinte } from '../value-objects/dados-contribuinte.js';
 import type { IdCampanha, IdContribuicao, IdOpcaoContribuicao } from '../value-objects/ids.js';
 
 /**
  * @aggregateRoot Contribuição (BC Arrecadação)
  *
- * Item inside an opção (sacola). Created by the admin as `disponivel`; the
- * visitor associates `DadosContribuinte` and the item flips to `indisponivel`.
+ * Slot definition inside an opção (sacola). Admin-owned, visitor-read-only.
+ * No state machine, no contribuinte, no transitions.
  *
  * Persisted via: `ContribuicaoRepository`.
  *
- * Aggregate boundary: status transitions and contribuinte association happen
- * atomically through this root. References Campanha + OpcaoContribuicao by ID
- * only — never imports those aggregates.
+ * **Plan 0015 collapse (aperture-7pqee).** Before 0015, Contribuição had:
+ *   - a `status` enum (`disponivel | indisponivel`) mirroring whether a
+ *     pagamento had claimed the slot;
+ *   - a `contribuinte: DadosContribuinte | null` field set by the
+ *     visitor at checkout-finalize time;
+ *   - a saga that flipped the status atomically with contribuinte
+ *     association.
  *
- * `StatusContribuicao` and `NomeContribuicao` are inlined here as intrinsic
- * field schemas (tightly bound to this entity's invariants).
+ * The mirror status was the source of race-condition concerns (backwards
+ * transitions on estorno cascade, claim-vs-iframe-abandonment locking).
+ * Plan 0015 collapses the model: contribuição becomes a pure slot
+ * definition, contribuinte moves to IntencaoPagamento (per-pagamento
+ * snapshot, since 1:N contribuição→pagamentos is now allowed), and the
+ * "indisponivel" badge becomes a query-time predicate
+ * (`EXISTS pagamento WHERE idContribuicao = X AND status='aprovado'`).
+ *
+ * Aggregate boundary: only admin patches go through this root. References
+ * Campanha + OpcaoContribuicao by ID only — never imports those aggregates.
+ *
+ * `NomeContribuicao` is inlined here as an intrinsic field schema.
  */
-
-export const StatusContribuicaoSchema = z.enum(['disponivel', 'indisponivel']);
-export type StatusContribuicao = z.infer<typeof StatusContribuicaoSchema>;
 
 /**
  * Limite por opção de contribuição — guardrail de escala. Cap deliberadamente
@@ -48,21 +58,15 @@ export interface Contribuicao {
   /**
    * Agrupamento opcional para a UI da loja (ex: "vestuário", "alimentação"
    * dentro de uma opção `presente`). Sem semântica de domínio — não afeta
-   * preço, status ou financeiro; só organiza a exibição. `null` quando o
-   * tipo da opção não se beneficia de grupos (ex: rifa).
+   * preço nem financeiro; só organiza a exibição. `null` quando o tipo da
+   * opção não se beneficia de grupos (ex: rifa).
    */
   readonly grupo: string | null;
-  readonly contribuinte: DadosContribuinte | null;
-  readonly status: StatusContribuicao;
   readonly criadaEm: Date;
 }
 
-export function contribuicaoDisponivel(contribuicao: Contribuicao): boolean {
-  return contribuicao.status === 'disponivel';
-}
-
-/** Monta item disponível criado pelo administrador (sem contribuinte). */
-export function criarContribuicaoDisponivel(params: {
+/** Monta um slot de contribuição criado pelo administrador. */
+export function criarContribuicao(params: {
   id: IdContribuicao;
   idCampanha: IdCampanha;
   idOpcaoContribuicao: IdOpcaoContribuicao;
@@ -80,43 +84,21 @@ export function criarContribuicaoDisponivel(params: {
     valor: params.valor,
     imagemUrl: params.imagemUrl ?? null,
     grupo: params.grupo ?? null,
-    contribuinte: null,
-    status: 'disponivel',
     criadaEm: params.criadaEm,
   };
 }
 
-/** Associa contribuinte e marca como indisponível. Exige status `disponivel`. */
-export function contribuicaoComContribuinte(
-  contribuicao: Contribuicao,
-  contribuinte: DadosContribuinte,
-): Contribuicao {
-  if (!contribuicaoDisponivel(contribuicao)) {
-    throw new Error('Contribuicao nao esta disponivel');
-  }
-  return {
-    ...contribuicao,
-    contribuinte,
-    status: 'indisponivel',
-  };
-}
-
-/** Altera valor apenas enquanto disponível. */
-export function contribuicaoComValor(contribuicao: Contribuicao, valor: MoneyCents): Contribuicao {
-  if (!contribuicaoDisponivel(contribuicao)) {
-    throw new Error('Contribuicao nao esta disponivel');
-  }
-  return { ...contribuicao, valor };
-}
-
 /**
- * Patch de campos administrativos editáveis enquanto `disponivel`. Aplica
- * apenas as chaves presentes em `patch` — campos omitidos preservam o valor
- * atual. `null` em `imagemUrl`/`grupo` é tratado como "limpar"; `undefined`
- * é "não alterar". Exige `status === 'disponivel'`.
+ * Patch de campos administrativos editáveis. Aplica apenas as chaves
+ * presentes em `patch` — campos omitidos preservam o valor atual. `null`
+ * em `imagemUrl`/`grupo` é tratado como "limpar"; `undefined` é "não
+ * alterar".
  *
- * O caso de uso `atualizarContribuicao` (aperture-d6atj) consome este helper
- * para concentrar a regra de invariante (status) no agregado.
+ * **Plan 0015:** o guard de `status === 'disponivel'` foi removido. Sem
+ * status na contribuição, o admin pode atualizar a qualquer momento. Se
+ * houver pagamentos aprovados sobre a slot, a edição passa pelo
+ * `contribuicaoEstaIndisponivel` query no use-case (Phase 2) — não é
+ * uma invariante do agregado.
  */
 export function contribuicaoAtualizada(
   contribuicao: Contribuicao,
@@ -127,31 +109,14 @@ export function contribuicaoAtualizada(
     readonly grupo?: string | null | undefined;
   },
 ): Contribuicao {
-  if (!contribuicaoDisponivel(contribuicao)) {
-    throw new Error('Contribuicao nao esta disponivel');
-  }
   return {
-    ...contribuicao,
+    id: contribuicao.id,
+    idCampanha: contribuicao.idCampanha,
+    idOpcaoContribuicao: contribuicao.idOpcaoContribuicao,
     nome: patch.nome ?? contribuicao.nome,
     valor: patch.valor ?? contribuicao.valor,
     imagemUrl: patch.imagemUrl === undefined ? contribuicao.imagemUrl : patch.imagemUrl,
     grupo: patch.grupo === undefined ? contribuicao.grupo : patch.grupo,
-  };
-}
-
-/**
- * Remove o contribuinte e devolve a contribuição ao estado `disponivel`.
- * Usado como **compensação** na saga de checkout: se um passo posterior
- * falhar (cálculo de composição, criação do pagamento), o orquestrador
- * desfaz a associação. Exige `status === 'indisponivel'`.
- */
-export function contribuicaoSemContribuinte(contribuicao: Contribuicao): Contribuicao {
-  if (contribuicaoDisponivel(contribuicao)) {
-    throw new Error('Contribuicao ja esta disponivel');
-  }
-  return {
-    ...contribuicao,
-    contribuinte: null,
-    status: 'disponivel',
+    criadaEm: contribuicao.criadaEm,
   };
 }

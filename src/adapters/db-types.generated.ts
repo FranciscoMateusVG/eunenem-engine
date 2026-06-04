@@ -67,29 +67,29 @@ export interface Contas {
 }
 
 export interface Contribuicoes {
+  // Plan 0015 / migration 019: status + contribuinte_* dropped.
   campanha_id: string;
-  contribuinte_email: string | null;
-  contribuinte_nome: string | null;
   criada_em: Generated<Timestamp>;
   grupo: string | null;
   id: string;
   id_opcao_contribuicao: string;
   imagem_url: string | null;
   nome: string;
-  status: string;
   valor: number;
 }
 
 export interface LancamentosFinanceiros {
+  // Plan 0015 / migration 019: status + matura_em dropped;
+  // transferido_em + cancelado_em added (both nullable).
   amount_cents: number;
+  cancelado_em: Timestamp | null;
   criado_em: Timestamp;
   id: string;
   id_campanha: string | null;
   id_contribuicao: string;
   id_pagamento: string;
-  matura_em: Timestamp;
-  status: string;
   tipo: string;
+  transferido_em: Timestamp | null;
 }
 
 export interface OpcoesContribuicao {
@@ -99,12 +99,17 @@ export interface OpcoesContribuicao {
 }
 
 export interface Pagamentos {
+  // Plan 0015 / migration 019: intencao_contribuinte_{nome,email,mensagem}
+  // added (all nullable; populated by webhook at checkout.session.completed).
   atualizado_em: Timestamp;
   criado_em: Timestamp;
   id: string;
   intencao_amount_cents: number;
   intencao_charge_external_ref: string | null;
   intencao_composicao_valores: Json;
+  intencao_contribuinte_email: string | null;
+  intencao_contribuinte_mensagem: string | null;
+  intencao_contribuinte_nome: string | null;
   intencao_criada_em: Timestamp;
   intencao_external_ref: string | null;
   intencao_id: string;

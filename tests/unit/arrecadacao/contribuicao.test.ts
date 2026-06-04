@@ -1,12 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import {
-  contribuicaoComContribuinte,
-  contribuicaoComValor,
-  contribuicaoDisponivel,
-  criarContribuicaoDisponivel,
+  contribuicaoAtualizada,
+  criarContribuicao,
 } from '../../../src/domain/arrecadacao/entities/contribuicao.js';
-import { AssociarContribuinteContribuicaoInputSchema } from '../../../src/use-cases/arrecadacao/associar-contribuinte-contribuicao.js';
 import { CriarContribuicaoInputSchema } from '../../../src/use-cases/arrecadacao/criar-contribuicao.js';
+
+/**
+ * Plan 0015 (aperture-ucgok). Rewritten for the slimmed Contribuição:
+ *   - No status, no contribuinte, no transitions
+ *   - `criarContribuicaoDisponivel` renamed to `criarContribuicao`
+ *   - `contribuicaoComContribuinte` / `contribuicaoComValor` / etc gone
+ *   - The AssociarContribuinteContribuicao use-case was deleted (Phase 1)
+ *
+ * The contribuinte-related tests moved to:
+ *   - Pagamentos repository tests (contribuinte snapshot on IntencaoPagamento)
+ *   - finalizar-pagamento-aprovado tests (webhook stamps it at finalize)
+ */
 
 const idContribuicao = '550e8400-e29b-41d4-a716-446655440010';
 const idCampanha = '550e8400-e29b-41d4-a716-446655440011';
@@ -47,27 +56,9 @@ describe('CriarContribuicaoInputSchema', () => {
   });
 });
 
-describe('AssociarContribuinteContribuicaoInputSchema', () => {
-  it('accepts valid contributor with email', () => {
-    const r = AssociarContribuinteContribuicaoInputSchema.safeParse({
-      idContribuicao,
-      contribuinte: { nome: 'Ana', email: 'ana@example.com' },
-    });
-    expect(r.success).toBe(true);
-  });
-
-  it('rejects invalid email', () => {
-    const r = AssociarContribuinteContribuicaoInputSchema.safeParse({
-      idContribuicao,
-      contribuinte: { nome: 'Ana', email: 'not-an-email' },
-    });
-    expect(r.success).toBe(false);
-  });
-});
-
-describe('criarContribuicaoDisponivel', () => {
-  it('creates disponivel contribution without contributor', () => {
-    const c = criarContribuicaoDisponivel({
+describe('criarContribuicao (entity factory)', () => {
+  it('creates a slot definition (no status, no contribuinte)', () => {
+    const c = criarContribuicao({
       id: idContribuicao,
       idCampanha,
       idOpcaoContribuicao,
@@ -75,16 +66,36 @@ describe('criarContribuicaoDisponivel', () => {
       valor: 5000,
       criadaEm,
     });
-    expect(c.status).toBe('disponivel');
-    expect(c.contribuinte).toBeNull();
     expect(c.nome).toBe('Fralda');
     expect(c.valor).toBe(5000);
+    expect(c.id).toBe(idContribuicao);
+    expect(c.criadaEm).toBe(criadaEm);
+    expect(c.imagemUrl).toBeNull();
+    expect(c.grupo).toBeNull();
+    // No status field anymore — predicate check.
+    expect(c).not.toHaveProperty('status');
+    expect(c).not.toHaveProperty('contribuinte');
+  });
+
+  it('honors optional imagemUrl and grupo', () => {
+    const c = criarContribuicao({
+      id: idContribuicao,
+      idCampanha,
+      idOpcaoContribuicao,
+      nome: 'Fralda',
+      valor: 5000,
+      imagemUrl: 'https://cdn.example.com/fralda.png',
+      grupo: 'vestuario',
+      criadaEm,
+    });
+    expect(c.imagemUrl).toBe('https://cdn.example.com/fralda.png');
+    expect(c.grupo).toBe('vestuario');
   });
 });
 
-describe('contribuicaoComContribuinte', () => {
-  it('associates contributor and marks indisponivel', () => {
-    const disponivel = criarContribuicaoDisponivel({
+describe('contribuicaoAtualizada', () => {
+  it('patches multiple fields without status guard (plan 0015)', () => {
+    const original = criarContribuicao({
       id: idContribuicao,
       idCampanha,
       idOpcaoContribuicao,
@@ -92,40 +103,37 @@ describe('contribuicaoComContribuinte', () => {
       valor: 5000,
       criadaEm,
     });
-    const updated = contribuicaoComContribuinte(disponivel, {
-      nome: 'Visitante',
-      email: 'v@exemplo.com',
+    const patched = contribuicaoAtualizada(original, {
+      nome: 'Fralda Premium',
+      valor: 9000,
     });
-    expect(updated.status).toBe('indisponivel');
-    expect(updated.contribuinte?.email).toBe('v@exemplo.com');
-    expect(contribuicaoDisponivel(disponivel)).toBe(true);
-    expect(contribuicaoDisponivel(updated)).toBe(false);
+    expect(patched.nome).toBe('Fralda Premium');
+    expect(patched.valor).toBe(9000);
+    // unchanged fields preserved
+    expect(patched.id).toBe(idContribuicao);
+    expect(patched.criadaEm).toBe(criadaEm);
   });
 
-  it('throws when contribution is not disponivel', () => {
-    const indisponivel = contribuicaoComContribuinte(
-      criarContribuicaoDisponivel({
-        id: idContribuicao,
-        idCampanha,
-        idOpcaoContribuicao,
-        nome: 'Fralda',
-        valor: 5000,
-        criadaEm,
-      }),
-      { nome: 'A', email: 'a@exemplo.com' },
-    );
-    expect(() =>
-      contribuicaoComContribuinte(indisponivel, {
-        nome: 'B',
-        email: 'b@exemplo.com',
-      }),
-    ).toThrow();
+  it('treats null in imagemUrl/grupo as "clear", undefined as "no change"', () => {
+    const original = criarContribuicao({
+      id: idContribuicao,
+      idCampanha,
+      idOpcaoContribuicao,
+      nome: 'Fralda',
+      valor: 5000,
+      imagemUrl: 'https://cdn.example.com/old.png',
+      grupo: 'vestuario',
+      criadaEm,
+    });
+    const patched = contribuicaoAtualizada(original, {
+      imagemUrl: null,
+    });
+    expect(patched.imagemUrl).toBeNull();
+    expect(patched.grupo).toBe('vestuario'); // undefined → no change
   });
-});
 
-describe('contribuicaoComValor', () => {
-  it('updates valor when disponivel', () => {
-    const disponivel = criarContribuicaoDisponivel({
+  it('preserves the slot when patch is empty', () => {
+    const original = criarContribuicao({
       id: idContribuicao,
       idCampanha,
       idOpcaoContribuicao,
@@ -133,7 +141,7 @@ describe('contribuicaoComValor', () => {
       valor: 5000,
       criadaEm,
     });
-    const updated = contribuicaoComValor(disponivel, 9000);
-    expect(updated.valor).toBe(9000);
+    const patched = contribuicaoAtualizada(original, {});
+    expect(patched).toEqual(original);
   });
 });

@@ -32,7 +32,7 @@ import { dispatchVerifiedStripeEvent } from '../../apps/eunenem-server/server/we
 import { CampanhaRepositoryMemory } from '../../src/adapters/arrecadacao/campanha-repository.memory.js';
 import { ContribuicaoRepositoryMemory } from '../../src/adapters/arrecadacao/contribuicao-repository.memory.js';
 import { RecebedorRepositoryMemory } from '../../src/adapters/arrecadacao/recebedor-repository.memory.js';
-import { LivroFinanceiroRepositoryMemory } from '../../src/adapters/financeiro/livro-repository.memory.js';
+import { LivroFinanceiroRepositoryMemory } from '../../src/adapters/pagamentos/financeiro/livro-repository.memory.js';
 import { PagamentoEventPublisherMemory } from '../../src/adapters/pagamentos/event-publisher.memory.js';
 import { PagamentoProviderFake } from '../../src/adapters/pagamentos/provider.fake.js';
 import { PagamentoRepositoryMemory } from '../../src/adapters/pagamentos/repository.memory.js';
@@ -140,6 +140,19 @@ async function bindPagamentoToCh(
     ...pag,
     intencao: { ...pag.intencao, chargeExternalRef: ch },
   });
+}
+
+/**
+ * Plan 0015 Phase 3 (aperture-ndxuf): the charge.succeeded dispatcher
+ * now fires finalize-aprovado for non-terminal source states. For
+ * link-only tests (wif8s g/h) that want to assert pagamento_id
+ * resolution WITHOUT going through finalize, seed the pagamento as
+ * already aprovado so the dispatcher's terminal-skip path runs.
+ */
+async function markPagamentoAprovado(rig: TestRig, idPagamento: string): Promise<void> {
+  const pag = await rig.pagamentoRepository.findById(idPagamento as never);
+  if (!pag) throw new Error('pagamento not seeded');
+  await rig.pagamentoRepository.update({ ...pag, status: 'aprovado' as never });
 }
 
 /** Build a fake Stripe.Event payload — only the fields the handler reads. */
@@ -260,6 +273,9 @@ describe('dispatchVerifiedStripeEvent (aperture-wif8s)', () => {
     const { idPagamento } = await seedPagamentoWithSession(rig, `cs_test_${randomUUID()}`);
     await bindPagamentoToPi(rig, idPagamento, piId);
     // Note: ch NOT bound — primary path should still resolve via pi.
+    // Plan 0015 Phase 3: mark aprovado so the dispatcher's terminal-skip
+    // path runs (this test asserts link-only resolution, not transition).
+    await markPagamentoAprovado(rig, idPagamento);
 
     const event = makeStripeEvent('charge.succeeded', {
       id: chId,
@@ -278,6 +294,9 @@ describe('dispatchVerifiedStripeEvent (aperture-wif8s)', () => {
     const { idPagamento } = await seedPagamentoWithSession(rig, `cs_test_${randomUUID()}`);
     // Bind ch but NOT pi — simulates the backfilled post-event-reprocess case.
     await bindPagamentoToCh(rig, idPagamento, chId);
+    // Plan 0015 Phase 3: see (g) above — mark aprovado for the link-only
+    // assertion path.
+    await markPagamentoAprovado(rig, idPagamento);
 
     const event = makeStripeEvent('charge.succeeded', {
       id: chId,

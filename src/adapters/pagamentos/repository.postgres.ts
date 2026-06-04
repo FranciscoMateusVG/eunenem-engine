@@ -42,6 +42,13 @@ type PagamentoRow = {
   // each WHERE NOT NULL via migration 018.
   intencao_payment_intent_external_ref: string | null;
   intencao_charge_external_ref: string | null;
+  // Plan 0015 / aperture-ucgok / migration 019: contribuinte columns
+  // populated by the webhook at checkout.session.completed (Stripe
+  // custom_fields). All nullable at intent-creation; flipped to the
+  // visitor's data when the webhook fires.
+  intencao_contribuinte_nome: string | null;
+  intencao_contribuinte_email: string | null;
+  intencao_contribuinte_mensagem: string | null;
   intencao_criada_em: Date;
   transacao_externa: unknown;
 };
@@ -278,6 +285,53 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
       },
     );
   }
+
+  async findIdsContribuicoesComPagamentoAprovado(
+    idsContribuicao: readonly IdContribuicaoPagamento[],
+  ): Promise<readonly IdContribuicaoPagamento[]> {
+    return tracer.startActiveSpan(
+      'db.pagamentos.findIdsContribuicoesComPagamentoAprovado',
+      async (span) => {
+        span.setAttributes({
+          ...DB_ATTRS,
+          'db.operation.name': 'SELECT',
+          'batch.size': idsContribuicao.length,
+        });
+        try {
+          if (idsContribuicao.length === 0) {
+            span.setStatus({ code: SpanStatusCode.OK });
+            return [];
+          }
+          // Uses partial index
+          // `pagamentos_aprovado_por_contribuicao_idx ON
+          // (intencao_id_contribuicao) WHERE status='aprovado'`
+          // (migration 019). One indexed scan over the candidate set.
+          // DISTINCT collapses the (multiple aprovado pagamentos per
+          // contribuição) row-multiplication that the locked decision
+          // #6 of plan 0015 (accept double-pay) makes possible.
+          // biome-ignore lint/suspicious/noExplicitAny: see save()
+          const rows = (await (this.db as any)
+            .selectFrom('pagamentos')
+            .select('intencao_id_contribuicao')
+            .distinct()
+            .where('status', '=', 'aprovado')
+            .where('intencao_id_contribuicao', 'in', [...idsContribuicao])
+            .execute()) as Array<{ intencao_id_contribuicao: string }>;
+          const result = rows.map(
+            (r) => r.intencao_id_contribuicao as IdContribuicaoPagamento,
+          );
+          span.setStatus({ code: SpanStatusCode.OK });
+          return result;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
 }
 
 /** Aggregate → row mapper. Used by save + update. */
@@ -297,6 +351,12 @@ function rowFromPagamento(p: Pagamento): Record<string, unknown> {
     // start null; update() rewrites them when the handler sets them.
     intencao_payment_intent_external_ref: p.intencao.paymentIntentExternalRef,
     intencao_charge_external_ref: p.intencao.chargeExternalRef,
+    // Plan 0015 (aperture-ucgok): contribuinte snapshot persisted on
+    // IntencaoPagamento. Null at intent-creation; set by webhook on
+    // checkout.session.completed with custom_fields + customer_details.
+    intencao_contribuinte_nome: p.intencao.contribuinte?.nome ?? null,
+    intencao_contribuinte_email: p.intencao.contribuinte?.email ?? null,
+    intencao_contribuinte_mensagem: p.intencao.contribuinte?.mensagem ?? null,
     intencao_criada_em: p.intencao.criadaEm,
     transacao_externa: p.transacaoExterna ? JSON.stringify(p.transacaoExterna) : null,
   };
@@ -323,6 +383,22 @@ function pagamentoFromRow(row: PagamentoRow): Pagamento {
         ? hydrateTransacaoExterna(JSON.parse(row.transacao_externa))
         : hydrateTransacaoExterna(row.transacao_externa);
 
+  // Plan 0015: rebuild the contribuinte VO from the three columns. All
+  // three are nullable at intent-creation; we treat (nome=null, email=null)
+  // as "no contribuinte yet" and pass null through. (nome=set, email=set,
+  // mensagem=null) is a perfectly valid post-webhook state — Stripe's
+  // mensagem custom_field is optional.
+  const contribuinte =
+    row.intencao_contribuinte_nome !== null && row.intencao_contribuinte_email !== null
+      ? {
+          nome: row.intencao_contribuinte_nome,
+          email: row.intencao_contribuinte_email,
+          ...(row.intencao_contribuinte_mensagem !== null
+            ? { mensagem: row.intencao_contribuinte_mensagem }
+            : {}),
+        }
+      : null;
+
   return PagamentoSchema.parse({
     id: row.id,
     status: row.status,
@@ -337,6 +413,7 @@ function pagamentoFromRow(row: PagamentoRow): Pagamento {
       externalRef: row.intencao_external_ref,
       paymentIntentExternalRef: row.intencao_payment_intent_external_ref,
       chargeExternalRef: row.intencao_charge_external_ref,
+      contribuinte,
       criadaEm: row.intencao_criada_em,
     },
     transacaoExterna,

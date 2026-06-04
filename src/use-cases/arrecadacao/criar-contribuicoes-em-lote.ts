@@ -6,7 +6,7 @@ import type { ContribuicaoRepository } from '../../adapters/arrecadacao/contribu
 import { encontrarOpcaoContribuicao } from '../../domain/arrecadacao/entities/campanha.js';
 import type { Contribuicao } from '../../domain/arrecadacao/entities/contribuicao.js';
 import {
-  criarContribuicaoDisponivel,
+  criarContribuicao as criarContribuicaoEntity,
   LIMITE_CONTRIBUICOES_POR_OPCAO,
   NomeContribuicaoSchema,
 } from '../../domain/arrecadacao/entities/contribuicao.js';
@@ -141,7 +141,7 @@ export async function criarContribuicoesEmLote(
           const id = randomUUID() as IdContribuicao;
           ids.push(id);
           contribuicoes.push(
-            criarContribuicaoDisponivel({
+            criarContribuicaoEntity({
               id,
               idCampanha: idCampanha as IdCampanha,
               idOpcaoContribuicao: idOpcaoContribuicao as IdOpcaoContribuicao,

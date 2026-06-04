@@ -1,6 +1,7 @@
 import { z } from 'zod/v4';
 import type { MoneyCents } from '../../money.js';
 import { MoneyCentsSchema } from '../../money.js';
+import { DadosContribuinteSchema } from '../value-objects/dados-contribuinte.js';
 import {
   EventoPagamentoSchema,
   NomeProvedorPagamentoSchema,
@@ -23,10 +24,10 @@ import {
 /**
  * @aggregateRoot Pagamento (BC Pagamentos)
  *
- * Lifecycle root: a pagamento is born `pendente`, transitions to `aprovado` or
- * `rejeitado` once exactly. Carries an embedded `IntencaoPagamento` (the charge
- * intent) and, after settlement, an embedded `TransacaoExterna` (the provider's
- * response).
+ * Lifecycle root: a pagamento is born `pendente` and walks the 5-state FSM
+ * driven by Stripe webhooks. Carries an embedded `IntencaoPagamento` (the
+ * charge intent) and, after settlement, an embedded `TransacaoExterna` (the
+ * provider's response).
  *
  * Persisted via: `PagamentoRepository`.
  *
@@ -34,9 +35,29 @@ import {
  * aggregate** — they have their own identity (id) but are loaded and saved
  * with the Pagamento root, never independently. `StatusPagamento` and
  * `StatusTransacaoExterna` are intrinsic enum VOs kept inline.
+ *
+ * **Plan 0015 FSM (aperture-7pqee).** Before 0015 the FSM was 3-state
+ * (`pendente | aprovado | rejeitado`). The collapse plan locks 5 states
+ * that match Stripe's event lifecycle 1:1 — pix flows transit through
+ * `processing` (QR scanned, awaiting bank confirmation); card flows skip
+ * it. `aprovado → estornado` is the new full-refund terminal transition
+ * gated by the pre-transfer check in `estornar-pagamento` (Phase 2).
+ *
+ *   pendente   → processing   (payment_intent.processing — pix QR scanned)
+ *   pendente   → aprovado     (charge.succeeded — card happy path)
+ *   processing → aprovado     (charge.succeeded — pix after bank confirm)
+ *   pendente   → rejeitado    (failure before processing)
+ *   processing → rejeitado    (failure during processing)
+ *   aprovado   → estornado    (charge.refunded — pre-transfer guard)
  */
 
-export const StatusPagamentoSchema = z.enum(['pendente', 'aprovado', 'rejeitado']);
+export const StatusPagamentoSchema = z.enum([
+  'pendente',
+  'processing',
+  'aprovado',
+  'rejeitado',
+  'estornado',
+]);
 export type StatusPagamento = z.infer<typeof StatusPagamentoSchema>;
 
 export const StatusTransacaoExternaSchema = z.enum(['aprovado', 'rejeitado']);
@@ -67,13 +88,16 @@ export type StatusTransacaoExterna = z.infer<typeof StatusTransacaoExternaSchema
  *
  * The handler then uses these as additional lookup keys so future
  * `payment_intent.*` and `charge.*` events can resolve back to the
- * Pagamento that owns them — closes the orphan-event gap operator
- * surfaced via 3zxkn. PagamentoRepository exposes
- * `findByPaymentIntentExternalRef` + `findByChargeExternalRef` for the
- * resolver. Both fields stay on IntencaoPagamento (NOT Pagamento root)
- * because they belong to the provider-transport boundary — the
- * post-settlement TransacaoExterna ID is a separate concept owned by
- * the provider's terminal flow.
+ * Pagamento that owns them. PagamentoRepository exposes
+ * `findByPaymentIntentExternalRef` + `findByChargeExternalRef`.
+ *
+ * `contribuinte` (plan 0015 / aperture-7pqee): the visitor's
+ * DadosContribuinte snapshot. Nullable at IntencaoPagamento creation —
+ * the Stripe iframe hasn't rendered yet, so no contribuinte data exists.
+ * Populated by the webhook handler at `checkout.session.completed` when
+ * Stripe delivers `custom_fields` + `customer_details`. Matches the
+ * lifecycle pattern of the two external-ref fields above (nullable at
+ * intent-creation, set by the webhook).
  */
 export const IntencaoPagamentoSchema = z.object({
   id: IdIntencaoPagamentoSchema,
@@ -84,6 +108,7 @@ export const IntencaoPagamentoSchema = z.object({
   externalRef: z.string().trim().min(1).max(255).nullable(),
   paymentIntentExternalRef: z.string().trim().min(1).max(255).nullable(),
   chargeExternalRef: z.string().trim().min(1).max(255).nullable(),
+  contribuinte: DadosContribuinteSchema.nullable(),
   criadaEm: z.date(),
 });
 export type IntencaoPagamento = Readonly<z.infer<typeof IntencaoPagamentoSchema>>;
@@ -147,6 +172,11 @@ export function criarPagamentoPendente(input: CriarPagamentoPendenteInput): Paga
       // confirms in the Stripe-hosted UI).
       paymentIntentExternalRef: null,
       chargeExternalRef: null,
+      // plan 0015 / aperture-7pqee: contribuinte starts null. The
+      // visitor data is collected by Stripe's iframe (custom_fields)
+      // and delivered on `checkout.session.completed`; the handler
+      // writes it atomically with the status transition.
+      contribuinte: null,
       criadaEm: input.criadoEm,
     },
     status: 'pendente',
@@ -155,12 +185,51 @@ export function criarPagamentoPendente(input: CriarPagamentoPendenteInput): Paga
   };
 }
 
+/**
+ * Both `pendente` and `processing` are valid source states for the aprovado
+ * transition — card payments skip `processing`, pix transits through it
+ * (payment_intent.processing → QR scanned), and either path can fire
+ * charge.succeeded.
+ */
 export function podeAprovarPagamento(pagamento: Pagamento): boolean {
-  return pagamento.status === 'pendente';
+  return pagamento.status === 'pendente' || pagamento.status === 'processing';
 }
 
+/**
+ * `pendente` (declined-before-processing) and `processing`
+ * (declined-during-processing) are both valid source states for
+ * rejection. Mirrors `podeAprovarPagamento`.
+ */
 export function podeRejeitarPagamento(pagamento: Pagamento): boolean {
-  return pagamento.status === 'pendente';
+  return pagamento.status === 'pendente' || pagamento.status === 'processing';
+}
+
+/**
+ * Pix-specific transition: `pendente → processing`. Fires when Stripe
+ * reports `payment_intent.processing` (QR scanned / ACH float / bank-side
+ * confirmation pending). Card flows do not transit through this state.
+ * Idempotent: re-invoking on an already-processing pagamento is a no-op
+ * (returns the same object); but transitioning from any other state
+ * throws — webhooks fire out of order and we want loud failures, not
+ * silent corruption.
+ */
+export function iniciarProcessamentoPagamento(
+  pagamento: Pagamento,
+  atualizadoEm: Date,
+): Pagamento {
+  if (pagamento.status === 'processing') {
+    return pagamento;
+  }
+  if (pagamento.status !== 'pendente') {
+    throw new Error(
+      `Pagamento "${pagamento.id}" nao pode transitar para processing a partir do status "${pagamento.status}".`,
+    );
+  }
+  return {
+    ...pagamento,
+    status: 'processing',
+    atualizadoEm,
+  };
 }
 
 export function aprovarPagamentoPendente(
@@ -213,6 +282,34 @@ export function rejeitarPagamentoPendente(
     ...pagamento,
     status: 'rejeitado',
     transacaoExterna: transacao,
+    atualizadoEm,
+  };
+}
+
+/**
+ * Terminal estorno transition: `aprovado → estornado`. Fires on Stripe
+ * `charge.refunded` when `amount_refunded === amount_total` (full refund).
+ * Partial refunds keep the pagamento `aprovado` per locked decision #7 of
+ * plan 0015.
+ *
+ * The pre-transfer guard (rejecting estorno when any lançamento on this
+ * pagamento has `transferidoEm IS NOT NULL`) lives in the use-case layer
+ * (`estornar-pagamento`, Phase 2) — it requires a repository read across
+ * the financeiro module that the entity doesn't have access to. The
+ * entity only validates the state transition itself.
+ */
+export function estornarPagamentoAprovado(
+  pagamento: Pagamento,
+  atualizadoEm: Date,
+): Pagamento {
+  if (pagamento.status !== 'aprovado') {
+    throw new Error(
+      `Pagamento "${pagamento.id}" nao pode ser estornado a partir do status "${pagamento.status}". Apenas pagamentos aprovados podem ser estornados.`,
+    );
+  }
+  return {
+    ...pagamento,
+    status: 'estornado',
     atualizadoEm,
   };
 }

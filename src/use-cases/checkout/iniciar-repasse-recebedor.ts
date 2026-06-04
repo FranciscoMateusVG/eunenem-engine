@@ -2,21 +2,21 @@ import { SpanStatusCode } from '@opentelemetry/api';
 import { z } from 'zod/v4';
 import type { CampanhaRepository } from '../../adapters/arrecadacao/campanha-repository.js';
 import type { RecebedorRepository } from '../../adapters/arrecadacao/recebedor-repository.js';
-import type { LivroFinanceiroRepository } from '../../adapters/financeiro/livro-repository.js';
+import type { LivroFinanceiroRepository } from '../../adapters/pagamentos/financeiro/livro-repository.js';
 import { campanhaTemRecebedor } from '../../domain/arrecadacao/entities/campanha.js';
 import {
   IdCampanhaSchema,
   IdPlataformaReferenciaSchema,
 } from '../../domain/arrecadacao/value-objects/ids.js';
-import type { RepasseRecebedor } from '../../domain/financeiro/entities/repasse-recebedor.js';
-import { IdRepasseSchema } from '../../domain/financeiro/value-objects/ids.js';
+import type { RepasseRecebedor } from '../../domain/pagamentos/financeiro/entities/repasse-recebedor.js';
+import { IdRepasseSchema } from '../../domain/pagamentos/financeiro/value-objects/ids.js';
 import { MoneyCentsSchema } from '../../domain/money.js';
 import { ArrecadacaoCampanhaNaoEncontradaError } from '../../errors/arrecadacao/campanha-nao-encontrada.error.js';
 import { ArrecadacaoRecebedorNaoEncontradoError } from '../../errors/arrecadacao/recebedor-nao-encontrado.error.js';
 import { CheckoutCampanhaSemRecebedorError } from '../../errors/checkout/campanha-sem-recebedor.error.js';
 import { CheckoutPlataformaMismatchError } from '../../errors/checkout/plataforma-mismatch.error.js';
 import type { Observability } from '../../observability/observability.js';
-import { solicitarRepasseRecebedor } from '../financeiro/solicitar-repasse-recebedor.js';
+import { solicitarRepasseRecebedor } from '../pagamentos/financeiro/solicitar-repasse-recebedor.js';
 
 export const IniciarRepasseRecebedorInputSchema = z.object({
   idPlataforma: IdPlataformaReferenciaSchema,

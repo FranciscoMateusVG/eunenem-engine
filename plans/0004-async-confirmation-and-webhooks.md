@@ -1,5 +1,24 @@
 # Plan 0004 — Async confirmation, webhooks, and rejection compensation
 
+> 📌 **Addendum 2026-06-03 — FSM expanded by [0015](./0015-contribuicao-pagamento-financeiro-collapse.md).**
+>
+> The two-state aprovado/rejeitado model below was correct for 0004's scope but does not survive the post-0015 reality. After 0015 lands, the **canonical FSM has 5 states**:
+>
+> ```
+> pendente   → processing   (payment_intent.processing — pix QR scanned / ACH float)
+> pendente   → aprovado     (charge.succeeded, card happy path)
+> processing → aprovado     (charge.succeeded after pix/ACH confirmation)
+> pendente   → rejeitado    (failure before processing — declined, expired, fraud)
+> processing → rejeitado    (failure during processing)
+> aprovado   → estornado    (charge.refunded — pre-transfer guard enforced)
+> ```
+>
+> The webhook event → transition table moves to 0015 §Phase 3 (canonical mapping). The `processing` state is new (pix sits there between QR-scan and bank confirmation); the `estornado` state subsumes what plan 0012 originally treated as a separate concern. **Contribuição-claim no longer fires in the webhook**: 0015 removes `status` from Contribuição entirely, so `finalizarPagamentoRejeitado` from Phase 1 below loses its `liberarContribuicao` step. The compensation collapses to "mark Pagamento rejeitado" — Contribuição needs no cross-BC follow-up because it never claimed the slot in the first place.
+>
+> Where this plan is still useful: the **idempotency machinery** (`eventos_provedor_processados`, the `EventoProvedorNormalizado` VO, the `processarEventoProvedor` dispatch shape, the reconciliação use case) all survive intact — only the dispatch table grows from 2 tipo branches to 5. Read this plan for the eventing infrastructure; read 0015 §Phase 3 for the canonical transition table.
+>
+> ---
+>
 > **Status**: drafted 2026-05-24, awaiting confirmation.
 > **Depends on**: plans `0002-checkout-orchestration-layer-done.md` (saga + process manager + Phase 4 idempotency hardening) and `0003-plataforma-multi-tenant-done.md` (cross-tenant guards).
 > **Companion docs**: `docs/idempotency-and-concurrency.md` (the 5 open questions). This plan answers questions 1–3; question 4 (queue/worker model) and question 5 (durable event store) are explicitly deferred.
@@ -97,23 +116,21 @@ tests/unit/arrecadacao/
 
 **Files MODIFIED**: none in src/domain — `liberarContribuicao` already works with existing `Contribuicao` shape (just sets `status = 'disponivel'`, clears `contribuinte`).
 
-**Behavior**:
-```ts
-// arrecadacao/liberar-contribuicao.ts
-liberarContribuicao(deps, { idContribuicao })
-  → fetch contribuicao
-  → if status !== 'indisponivel' → ArrecadacaoContribuicaoNaoClaimableError
-  → set status = 'disponivel', contribuinte = null
-  → save
-  → log 'arrecadacao.contribuicao.liberada'
+**Behavior** (pre-0015 — see addendum at top of this file):
 
-// checkout/finalizar-pagamento-rejeitado.ts
+```ts
+// arrecadacao/liberar-contribuicao.ts  — REMOVED by 0015 (no claim → nothing to release)
+// historical shape: would have flipped contribuição back to 'disponivel'
+
+// checkout/finalizar-pagamento-rejeitado.ts  — SIMPLIFIED by 0015
 finalizarPagamentoRejeitado(deps, { idPagamento })
-  → idempotent: if pagamento.status === 'rejeitado' AND contribuicao.status === 'disponivel' → no-op replay
+  → idempotent: if pagamento.status === 'rejeitado' → no-op replay   // pre-0015 also AND-checked the now-gone contribuição predicate
   → call rejeitarPagamento (pagamentos BC) — emits payment.rejected
-  → call liberarContribuicao (arrecadacao BC)
+  → // pre-0015: ALSO called liberarContribuicao (arrecadacao BC)   ← gone post-0015 (Contribuição has no status)
   → log 'checkout.pagamento.rejeitado.finalizado'
 ```
+
+Post-0015 the rejected-pagamento path collapses to a single-BC write: mark Pagamento `rejeitado` and emit. The cross-BC compensation that Phase 1 was originally written to teach (process manager spanning Pagamentos + Arrecadação) is gone because there is no Arrecadação-side write to compensate. See 0015 §Phase 2 for the new `finalizar-pagamento-rejeitado` shape.
 
 **Out of scope**: webhook trigger (Phase 2 calls this), updating the demo (Phase 3 wires it visibly).
 

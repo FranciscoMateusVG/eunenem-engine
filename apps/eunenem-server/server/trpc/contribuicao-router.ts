@@ -3,7 +3,7 @@ import { z } from 'zod';
 import {
   ArrecadacaoCampanhaNaoEncontradaError,
   ArrecadacaoContribuicaoJaExisteError,
-  ArrecadacaoContribuicaoNaoDisponivelError,
+  ArrecadacaoContribuicaoIndisponivelError,
   ArrecadacaoContribuicaoNaoEncontradaError,
   ArrecadacaoInputInvalidoError,
   ArrecadacaoLimiteOpcaoExcedidoError,
@@ -150,7 +150,7 @@ function toTRPCError(err: unknown): TRPCError {
   if (err instanceof ArrecadacaoNaoAutorizadoError) {
     return new TRPCError({ code: 'UNAUTHORIZED', message: err.message, cause: err });
   }
-  if (err instanceof ArrecadacaoContribuicaoNaoDisponivelError) {
+  if (err instanceof ArrecadacaoContribuicaoIndisponivelError) {
     return new TRPCError({
       code: 'BAD_REQUEST',
       // Stable client-routable code; the frontend's per-field error
@@ -255,19 +255,16 @@ function toListItem(c: Contribuicao): {
   valor: number;
   imagemUrl: string | null;
   grupo: string | null;
-  contribuinte: { nome: string; email: string } | null;
-  status: 'disponivel' | 'indisponivel';
 } {
+  // Post-Phase-1 (plan 0015): contribuição has no status + no contribuinte.
+  // The "presentes" panel now shows slot definition only; per-pagamento
+  // contribuinte data lives on the contribuição detail screen.
   return {
     id: c.id,
     nome: c.nome,
     valor: c.valor,
     imagemUrl: c.imagemUrl,
     grupo: c.grupo,
-    contribuinte: c.contribuinte
-      ? { nome: c.contribuinte.nome, email: c.contribuinte.email }
-      : null,
-    status: c.status,
   };
 }
 
@@ -444,6 +441,7 @@ export const contribuicaoRouter = t.router({
           await removerContribuicao(
             {
               contribuicaoRepository: ctx.deps.contribuicaoRepository,
+              pagamentoRepository: ctx.deps.pagamentoRepository,
               observability: ctx.deps.observability,
             },
             {

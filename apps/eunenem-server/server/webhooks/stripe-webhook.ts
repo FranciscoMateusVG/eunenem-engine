@@ -66,12 +66,29 @@
  *     $ stripe trigger checkout.session.expired
  *     $ stripe trigger payment_intent.payment_failed
  *
- * EVENT DISPATCH TABLE:
+ * EVENT DISPATCH TABLE (plan 0015 Phase 3 / aperture-ndxuf — 5-state FSM):
  *
- *   checkout.session.completed       → finalizarPagamentoAprovado
- *   checkout.session.expired         → finalizarPagamentoRejeitado
- *   payment_intent.payment_failed    → finalizarPagamentoRejeitado
- *   (anything else)                  → log info + 200 no-op
+ *   checkout.session.completed
+ *     payment_status='paid'         → finalizarPagamentoAprovado + contribuinte
+ *     payment_status='processing'   → iniciarProcessamentoPagamento + contribuinte
+ *                                     write (pix QR scanned; settlement pending)
+ *   checkout.session.expired        → finalizarPagamentoRejeitado
+ *   payment_intent.created          → no transition (audit only; pagamento linked)
+ *   payment_intent.processing       → iniciarProcessamentoPagamento
+ *   payment_intent.succeeded        → no transition (link-only; persist ch ref)
+ *   payment_intent.payment_failed   → finalizarPagamentoRejeitado
+ *                                     (pendente|processing → rejeitado)
+ *   charge.succeeded                → finalizarPagamentoAprovado
+ *                                     (pendente|processing → aprovado;
+ *                                     idempotent if already aprovado from cs)
+ *   charge.failed                   → finalizarPagamentoRejeitado
+ *   charge.updated                  → no transition (audit only)
+ *   charge.refunded (FULL)          → estornarPagamento (aprovado → estornado)
+ *   charge.refunded (partial)       → no transition (stays aprovado per
+ *                                     plan 0015 locked decision #7)
+ *   charge.dispute.created          → no transition (out-of-scope; audit only;
+ *                                     pagamento linked for forensic trail)
+ *   (anything else)                 → log info + 200 no-op
  *
  *   `checkout.session.*` events carry the session id in
  *   `event.data.object.id` — we resolve via
@@ -91,9 +108,12 @@ import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import {
   archiveAndDispatchStripeEvent,
+  estornarPagamento,
   finalizarPagamentoAprovado,
   finalizarPagamentoRejeitado,
   IdPagamentoSchema,
+  iniciarProcessamentoPagamento,
+  PagamentoEstornoLancamentoJaTransferidoError,
 } from '../../../../src/index.js';
 import type { ServerDeps } from '../auth/setup.js';
 import { getStripe } from '../../src/lib/stripe/stripe.js';
@@ -271,7 +291,7 @@ export async function dispatchVerifiedStripeEvent(
   switch (event.type) {
     case 'checkout.session.completed': {
       const session = event.data.object as Stripe.Checkout.Session;
-      const pagamento = await deps.pagamentoRepository.findByExternalRef(session.id);
+      let pagamento = await deps.pagamentoRepository.findByExternalRef(session.id);
       if (!pagamento) {
         // Could be a legitimate Stripe replay for a session we
         // never created (e.g. another integration sharing the
@@ -292,9 +312,8 @@ export async function dispatchVerifiedStripeEvent(
       // we only need the id.
       const piId = extractStripeId(session.payment_intent);
       if (piId !== null && pagamento.intencao.paymentIntentExternalRef !== piId) {
-        await deps.pagamentoRepository.update(
-          withPaymentIntentRef(pagamento, piId),
-        );
+        pagamento = withPaymentIntentRef(pagamento, piId);
+        await deps.pagamentoRepository.update(pagamento);
         logger.info('webhook.stripe.pi_ref_persisted', {
           eventId: event.id,
           idPagamento: pagamento.id,
@@ -302,47 +321,91 @@ export async function dispatchVerifiedStripeEvent(
         });
       }
 
-      // aperture-m95f3: extract contribuinte data from the Stripe
-      // session itself — Stripe collects nome + mensagem via
-      // custom_fields and email via customer_creation. Pass to
-      // finalize so the contribuicao gets claimed at the
-      // payment-settled moment (NOT at session-create — see
-      // iniciar-pagamento-contribuicao.ts header for rationale).
+      // aperture-m95f3 + plan 0015: extract contribuinte data from
+      // the Stripe session — Stripe collects nome + mensagem via
+      // custom_fields and email via customer_creation.
       const contribuinte = extractContribuinteFromSession(session);
-      await finalizarPagamentoAprovado(
-        {
-          pagamentoRepository: deps.pagamentoRepository,
-          pagamentoProvider: deps.pagamentoProvider,
-          pagamentoEventPublisher: deps.pagamentoEventPublisher,
-          contribuicaoRepository: deps.contribuicaoRepository,
-          campanhaRepository: deps.campanhaRepository,
-          livroFinanceiroRepository: deps.livroFinanceiroRepository,
-          clock: deps.clock,
-          observability: deps.observability,
-        },
-        {
+
+      // Plan 0015 Phase 3 — branch on session.payment_status:
+      //   'paid'       → card flow, charge already settled.
+      //                  finalizarPagamentoAprovado handles the
+      //                  pendente|processing → aprovado transition
+      //                  AND writes contribuinte atomically.
+      //   'processing' → pix flow, QR scanned, awaiting bank confirmation.
+      //                  Write contribuinte directly; transition to
+      //                  processing via iniciarProcessamentoPagamento.
+      //                  finalize-aprovado fires later from charge.succeeded.
+      span.setAttribute('checkout.payment_status', session.payment_status ?? 'unknown');
+      if (session.payment_status === 'paid') {
+        await finalizarPagamentoAprovado(
+          {
+            pagamentoRepository: deps.pagamentoRepository,
+            pagamentoProvider: deps.pagamentoProvider,
+            pagamentoEventPublisher: deps.pagamentoEventPublisher,
+            contribuicaoRepository: deps.contribuicaoRepository,
+            campanhaRepository: deps.campanhaRepository,
+            livroFinanceiroRepository: deps.livroFinanceiroRepository,
+            clock: deps.clock,
+            observability: deps.observability,
+          },
+          {
+            idPagamento: pagamento.id,
+            ...(contribuinte ? { contribuinte } : {}),
+          },
+        );
+        logger.info('webhook.stripe.dispatched', {
+          eventId: event.id,
+          eventType: event.type,
           idPagamento: pagamento.id,
-          ...(contribuinte ? { contribuinte } : {}),
-        },
-      );
-      logger.info('webhook.stripe.dispatched', {
-        eventId: event.id,
-        eventType: event.type,
-        idPagamento: pagamento.id,
-      });
+          transition: 'aprovado',
+          paymentStatus: 'paid',
+        });
+      } else if (session.payment_status === 'processing') {
+        // Write contribuinte first (first-writer-wins) — finalize-aprovado
+        // isn't being called yet, so its own contribuinte-write logic
+        // doesn't fire. When charge.succeeded later triggers finalize-aprovado,
+        // it sees contribuinte already set and skips its write.
+        if (contribuinte && pagamento.intencao.contribuinte === null) {
+          pagamento = {
+            ...pagamento,
+            intencao: { ...pagamento.intencao, contribuinte },
+            atualizadoEm: deps.clock(),
+          };
+          await deps.pagamentoRepository.update(pagamento);
+          logger.info('webhook.stripe.contribuinte_stamped', {
+            eventId: event.id,
+            idPagamento: pagamento.id,
+          });
+        }
+        // pendente → processing. Idempotent on processing → processing.
+        if (pagamento.status === 'pendente') {
+          pagamento = iniciarProcessamentoPagamento(pagamento, deps.clock());
+          await deps.pagamentoRepository.update(pagamento);
+        }
+        logger.info('webhook.stripe.dispatched', {
+          eventId: event.id,
+          eventType: event.type,
+          idPagamento: pagamento.id,
+          transition: 'processing',
+          paymentStatus: 'processing',
+        });
+      } else {
+        // payment_status === 'unpaid' on a completed session is rare
+        // (Stripe usually fires session.expired for unpaid abandonment).
+        // Log + no-op so the operator can investigate without us
+        // forcing a transition.
+        logger.info('webhook.stripe.unhandled_payment_status', {
+          eventId: event.id,
+          eventType: event.type,
+          idPagamento: pagamento.id,
+          paymentStatus: session.payment_status ?? 'unknown',
+        });
+      }
       return { pagamentoId: pagamento.id };
     }
 
-    // aperture-wif8s: link-only handlers for payment_intent.* events
-    // that don't trigger finalize. Resolves via findByPaymentIntentExternalRef
-    // so the archive row gets pagamento_id populated. On succeeded
-    // events we also persist the charge ref for downstream charge.*
-    // resolution. No domain dispatch — domain state was already settled
-    // by checkout.session.completed; these events exist only to populate
-    // the archive trail for the admin UI.
-    case 'payment_intent.created':
-    case 'payment_intent.succeeded':
-    case 'payment_intent.processing': {
+    // payment_intent.created — no transition (audit only).
+    case 'payment_intent.created': {
       const pi = event.data.object as Stripe.PaymentIntent;
       const pagamento = await resolvePagamentoFromPaymentIntent(deps, pi);
       if (!pagamento) {
@@ -354,22 +417,6 @@ export async function dispatchVerifiedStripeEvent(
         return { pagamentoId: null };
       }
       span.setAttribute('pagamento.id', pagamento.id);
-
-      // On succeeded: persist the latest_charge ref so charge.* events
-      // can resolve via the ch_xxx path. latest_charge can be a string
-      // OR an expanded object.
-      if (event.type === 'payment_intent.succeeded') {
-        const chId = extractStripeId(pi.latest_charge);
-        if (chId !== null && pagamento.intencao.chargeExternalRef !== chId) {
-          await deps.pagamentoRepository.update(withChargeRef(pagamento, chId));
-          logger.info('webhook.stripe.ch_ref_persisted', {
-            eventId: event.id,
-            idPagamento: pagamento.id,
-            chargeId: chId,
-          });
-        }
-      }
-
       logger.info('webhook.stripe.dispatched', {
         eventId: event.id,
         eventType: event.type,
@@ -378,17 +425,267 @@ export async function dispatchVerifiedStripeEvent(
       return { pagamentoId: pagamento.id };
     }
 
-    // aperture-wif8s: charge events resolve primarily via pi (most
-    // reliable — charge.* always carries payment_intent in the
-    // payload), with a fallback to ch lookup when the pi link is
-    // missing (rare — only happens if charge.* arrives BEFORE
-    // payment_intent.succeeded backfilled the ch ref via a separate
-    // re-link sweep). Domain state isn't mutated; the archive trail
-    // is the value.
-    case 'charge.succeeded':
-    case 'charge.updated':
-    case 'charge.failed':
+    // payment_intent.succeeded — no transition (charge.succeeded is
+    // canonical); link-only + persist ch_xxx ref so charge.* events
+    // can resolve via the ch path.
+    case 'payment_intent.succeeded': {
+      const pi = event.data.object as Stripe.PaymentIntent;
+      let pagamento = await resolvePagamentoFromPaymentIntent(deps, pi);
+      if (!pagamento) {
+        logger.info('webhook.stripe.unknown_payment_intent', {
+          eventId: event.id,
+          eventType: event.type,
+          paymentIntentId: pi.id,
+        });
+        return { pagamentoId: null };
+      }
+      span.setAttribute('pagamento.id', pagamento.id);
+      const chId = extractStripeId(pi.latest_charge);
+      if (chId !== null && pagamento.intencao.chargeExternalRef !== chId) {
+        pagamento = withChargeRef(pagamento, chId);
+        await deps.pagamentoRepository.update(pagamento);
+        logger.info('webhook.stripe.ch_ref_persisted', {
+          eventId: event.id,
+          idPagamento: pagamento.id,
+          chargeId: chId,
+        });
+      }
+      logger.info('webhook.stripe.dispatched', {
+        eventId: event.id,
+        eventType: event.type,
+        idPagamento: pagamento.id,
+      });
+      return { pagamentoId: pagamento.id };
+    }
+
+    // payment_intent.processing — Plan 0015 Phase 3: pendente → processing.
+    // Pix flow signal that the QR was scanned / ACH float started.
+    // Idempotent on processing → processing. Other source states are
+    // no-ops (already-aprovado / already-rejeitado / already-estornado).
+    case 'payment_intent.processing': {
+      const pi = event.data.object as Stripe.PaymentIntent;
+      let pagamento = await resolvePagamentoFromPaymentIntent(deps, pi);
+      if (!pagamento) {
+        logger.info('webhook.stripe.unknown_payment_intent', {
+          eventId: event.id,
+          eventType: event.type,
+          paymentIntentId: pi.id,
+        });
+        return { pagamentoId: null };
+      }
+      span.setAttribute('pagamento.id', pagamento.id);
+      if (pagamento.status === 'pendente') {
+        pagamento = iniciarProcessamentoPagamento(pagamento, deps.clock());
+        await deps.pagamentoRepository.update(pagamento);
+        logger.info('webhook.stripe.dispatched', {
+          eventId: event.id,
+          eventType: event.type,
+          idPagamento: pagamento.id,
+          transition: 'processing',
+        });
+      } else {
+        logger.info('webhook.stripe.processing_skipped', {
+          eventId: event.id,
+          eventType: event.type,
+          idPagamento: pagamento.id,
+          currentStatus: pagamento.status,
+        });
+      }
+      return { pagamentoId: pagamento.id };
+    }
+
+    // charge.succeeded — Plan 0015 Phase 3: pendente|processing → aprovado.
+    // Canonical transition for the aprovado path. For card flows it's
+    // idempotent (already aprovado via cs.completed); for pix flows
+    // it's the first-time transition (cs.completed only got us to
+    // processing). Contribuinte was already written during cs.completed
+    // (for both flows); finalize-aprovado's first-writer-wins skip
+    // protects against overwrites.
+    case 'charge.succeeded': {
+      const charge = event.data.object as Stripe.Charge;
+      const pagamento = await resolvePagamentoFromCharge(deps, charge);
+      if (!pagamento) {
+        logger.info('webhook.stripe.unknown_charge', {
+          eventId: event.id,
+          eventType: event.type,
+          chargeId: charge.id,
+          paymentIntentId: extractStripeId(charge.payment_intent),
+        });
+        return { pagamentoId: null };
+      }
+      span.setAttribute('pagamento.id', pagamento.id);
+      // Skip if already terminal (aprovado/estornado/rejeitado) — only
+      // re-fire the finalize path for source states that can still
+      // legally transition. finalize-aprovado has its own replay
+      // idempotency on aprovado, but skipping at the dispatcher saves
+      // the round-trip + makes the log signal clearer.
+      if (
+        pagamento.status === 'aprovado' ||
+        pagamento.status === 'estornado' ||
+        pagamento.status === 'rejeitado'
+      ) {
+        logger.info('webhook.stripe.charge_succeeded_terminal', {
+          eventId: event.id,
+          idPagamento: pagamento.id,
+          currentStatus: pagamento.status,
+        });
+        return { pagamentoId: pagamento.id };
+      }
+      await finalizarPagamentoAprovado(
+        {
+          pagamentoRepository: deps.pagamentoRepository,
+          pagamentoProvider: deps.pagamentoProvider,
+          pagamentoEventPublisher: deps.pagamentoEventPublisher,
+          contribuicaoRepository: deps.contribuicaoRepository,
+          campanhaRepository: deps.campanhaRepository,
+          livroFinanceiroRepository: deps.livroFinanceiroRepository,
+          clock: deps.clock,
+          observability: deps.observability,
+        },
+        { idPagamento: pagamento.id },
+      );
+      logger.info('webhook.stripe.dispatched', {
+        eventId: event.id,
+        eventType: event.type,
+        idPagamento: pagamento.id,
+        transition: 'aprovado',
+      });
+      return { pagamentoId: pagamento.id };
+    }
+
+    // charge.failed — Plan 0015 Phase 3: pendente|processing → rejeitado.
+    case 'charge.failed': {
+      const charge = event.data.object as Stripe.Charge;
+      const pagamento = await resolvePagamentoFromCharge(deps, charge);
+      if (!pagamento) {
+        logger.info('webhook.stripe.unknown_charge', {
+          eventId: event.id,
+          eventType: event.type,
+          chargeId: charge.id,
+          paymentIntentId: extractStripeId(charge.payment_intent),
+        });
+        return { pagamentoId: null };
+      }
+      span.setAttribute('pagamento.id', pagamento.id);
+      if (
+        pagamento.status === 'aprovado' ||
+        pagamento.status === 'estornado' ||
+        pagamento.status === 'rejeitado'
+      ) {
+        logger.info('webhook.stripe.charge_failed_terminal', {
+          eventId: event.id,
+          idPagamento: pagamento.id,
+          currentStatus: pagamento.status,
+        });
+        return { pagamentoId: pagamento.id };
+      }
+      await finalizarPagamentoRejeitado(
+        {
+          pagamentoRepository: deps.pagamentoRepository,
+          pagamentoProvider: deps.pagamentoProvider,
+          pagamentoEventPublisher: deps.pagamentoEventPublisher,
+          contribuicaoRepository: deps.contribuicaoRepository,
+          campanhaRepository: deps.campanhaRepository,
+          clock: deps.clock,
+          observability: deps.observability,
+        },
+        { idPagamento: pagamento.id },
+      );
+      logger.info('webhook.stripe.dispatched', {
+        eventId: event.id,
+        eventType: event.type,
+        idPagamento: pagamento.id,
+        transition: 'rejeitado',
+      });
+      return { pagamentoId: pagamento.id };
+    }
+
+    // charge.refunded — Plan 0015 Phase 3: aprovado → estornado on FULL
+    // refunds only (amount_refunded === amount). Partial refunds keep
+    // the pagamento aprovado per locked decision #7. The estorno gate
+    // (no transferred lançamentos) lives in the use-case; if Stripe
+    // refunded but our admin already marked transferred, the use-case
+    // throws and we 500 → Stripe retries (which won't help — operator
+    // must investigate). That's an acceptable signal of state drift.
     case 'charge.refunded': {
+      const charge = event.data.object as Stripe.Charge;
+      const pagamento = await resolvePagamentoFromCharge(deps, charge);
+      if (!pagamento) {
+        logger.info('webhook.stripe.unknown_charge', {
+          eventId: event.id,
+          eventType: event.type,
+          chargeId: charge.id,
+          paymentIntentId: extractStripeId(charge.payment_intent),
+        });
+        return { pagamentoId: null };
+      }
+      span.setAttribute('pagamento.id', pagamento.id);
+      const amountRefunded = charge.amount_refunded ?? 0;
+      const amountTotal = charge.amount ?? 0;
+      const isFullRefund = amountTotal > 0 && amountRefunded === amountTotal;
+      span.setAttribute('refund.amount_refunded', amountRefunded);
+      span.setAttribute('refund.amount_total', amountTotal);
+      span.setAttribute('refund.full', isFullRefund);
+      if (!isFullRefund) {
+        logger.info('webhook.stripe.charge_partial_refund', {
+          eventId: event.id,
+          idPagamento: pagamento.id,
+          amountRefunded,
+          amountTotal,
+        });
+        return { pagamentoId: pagamento.id };
+      }
+      // Idempotent on already-estornado (estornarPagamento handles it).
+      if (pagamento.status === 'estornado') {
+        logger.info('webhook.stripe.charge_refund_already_estornado', {
+          eventId: event.id,
+          idPagamento: pagamento.id,
+        });
+        return { pagamentoId: pagamento.id };
+      }
+      // Webhook-driven full refund — call the estornar use-case. The
+      // use-case still runs the 409 gate; if any lançamento has been
+      // transferred, the gate throws PagamentoEstornoLancamentoJaTransferidoError
+      // and the webhook surfaces 500 (Stripe retries). This is the
+      // right signal for the operator that state has drifted —
+      // Stripe says refunded, our admin says transferred — and
+      // resolution requires manual investigation.
+      try {
+        await estornarPagamento(
+          {
+            pagamentoRepository: deps.pagamentoRepository,
+            pagamentoProvider: deps.pagamentoProvider,
+            pagamentoEventPublisher: deps.pagamentoEventPublisher,
+            livroFinanceiroRepository: deps.livroFinanceiroRepository,
+            clock: deps.clock,
+            observability: deps.observability,
+          },
+          { idPagamento: pagamento.id },
+        );
+      } catch (estornoError) {
+        if (estornoError instanceof PagamentoEstornoLancamentoJaTransferidoError) {
+          logger.error('webhook.stripe.charge_refund_409_state_drift', {
+            eventId: event.id,
+            idPagamento: pagamento.id,
+            note: 'Stripe says refunded; engine says at least one lançamento was already transferred to recebedor. Manual investigation required.',
+          });
+        }
+        throw estornoError;
+      }
+      logger.info('webhook.stripe.dispatched', {
+        eventId: event.id,
+        eventType: event.type,
+        idPagamento: pagamento.id,
+        transition: 'estornado',
+      });
+      return { pagamentoId: pagamento.id };
+    }
+
+    // charge.updated — no transition (audit only). Stripe fires this
+    // for partial refund signaling, dispute updates, metadata changes,
+    // etc. We resolve the pagamento for the audit-trail link but don't
+    // touch domain state.
+    case 'charge.updated': {
       const charge = event.data.object as Stripe.Charge;
       const pagamento = await resolvePagamentoFromCharge(deps, charge);
       if (!pagamento) {
@@ -405,6 +702,42 @@ export async function dispatchVerifiedStripeEvent(
         eventId: event.id,
         eventType: event.type,
         idPagamento: pagamento.id,
+      });
+      return { pagamentoId: pagamento.id };
+    }
+
+    // charge.dispute.created — Plan 0015 Phase 3: out-of-scope (locked
+    // decision #12). No transition; pagamento stays aprovado. We
+    // resolve via charge id for the audit-trail link and log at warn
+    // level so operators see the dispute in their dashboards. Full
+    // dispute handling (notify recebedor, reverse already-transferred
+    // lançamentos, mark `disputed` state) is a follow-up bead.
+    case 'charge.dispute.created': {
+      const dispute = event.data.object as Stripe.Dispute;
+      const chargeId = extractStripeId(dispute.charge);
+      if (!chargeId) {
+        logger.warn('webhook.stripe.dispute_missing_charge', {
+          eventId: event.id,
+          eventType: event.type,
+        });
+        return { pagamentoId: null };
+      }
+      const pagamento = await deps.pagamentoRepository.findByChargeExternalRef(chargeId);
+      if (!pagamento) {
+        logger.info('webhook.stripe.unknown_charge', {
+          eventId: event.id,
+          eventType: event.type,
+          chargeId,
+        });
+        return { pagamentoId: null };
+      }
+      span.setAttribute('pagamento.id', pagamento.id);
+      logger.warn('webhook.stripe.dispute_created', {
+        eventId: event.id,
+        idPagamento: pagamento.id,
+        chargeId,
+        amount: dispute.amount,
+        reason: dispute.reason,
       });
       return { pagamentoId: pagamento.id };
     }
