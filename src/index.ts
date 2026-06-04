@@ -269,6 +269,7 @@ export type {
   StatusRepasse,
 } from './domain/pagamentos/financeiro/entities/repasse-recebedor.js';
 export {
+  aprovarRepasse,
   criarRepasseRecebedorSolicitado,
   RepasseRecebedorSchema,
   StatusRepasseSchema,
@@ -817,6 +818,18 @@ export {
   SolicitarRepasseRecebedorInputSchema,
   solicitarRepasseRecebedor,
 } from './use-cases/pagamentos/financeiro/solicitar-repasse-recebedor.js';
+export type {
+  AprovarRepasseRecebedorDeps,
+  AprovarRepasseRecebedorInput,
+  AprovarRepasseRecebedorOutput,
+} from './use-cases/pagamentos/financeiro/aprovar-repasse-recebedor.js';
+export {
+  AprovarRepasseRecebedorInputSchema,
+  aprovarRepasseRecebedor,
+} from './use-cases/pagamentos/financeiro/aprovar-repasse-recebedor.js';
+export { FinanceiroRepasseJaPendenteError } from './errors/pagamentos/financeiro/repasse-ja-pendente.error.js';
+export { FinanceiroRepasseNaoEncontradoError } from './errors/pagamentos/financeiro/repasse-nao-encontrado.error.js';
+export { FinanceiroRepasseStatusInvalidoError } from './errors/pagamentos/financeiro/repasse-status-invalido.error.js';
 export type { AprovarPagamentoDeps } from './use-cases/pagamentos/aprovar-pagamento.js';
 export { aprovarPagamento } from './use-cases/pagamentos/aprovar-pagamento.js';
 export type {

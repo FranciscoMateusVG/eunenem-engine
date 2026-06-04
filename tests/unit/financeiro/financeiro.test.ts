@@ -53,6 +53,7 @@ describe('criarLancamentosParaPagamentoAprovado', () => {
     );
 
     // Plan 0015: both lancamentos born with transferidoEm + canceladoEm null.
+    // aperture-s03dr: idRepasse also born null.
     expect(lancamentos).toEqual([
       {
         id: idLancamentoRecebedor,
@@ -64,6 +65,7 @@ describe('criarLancamentosParaPagamentoAprovado', () => {
         criadoEm,
         transferidoEm: null,
         canceladoEm: null,
+        idRepasse: null,
       },
       {
         id: idLancamentoReceitaPlataforma,
@@ -74,6 +76,7 @@ describe('criarLancamentosParaPagamentoAprovado', () => {
         criadoEm,
         transferidoEm: null,
         canceladoEm: null,
+        idRepasse: null,
       },
     ]);
   });
@@ -297,6 +300,8 @@ describe('criarRepasseRecebedorSolicitado', () => {
       amountCents: 2000,
       status: 'solicitado',
       solicitadoEm: criadoEm,
+      aprovadoEm: null,
+      bankTransferRef: null,
     });
   });
 });

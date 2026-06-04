@@ -84,5 +84,100 @@ export interface LivroFinanceiroRepository {
   saveRepasse(repasse: RepasseRecebedor): Promise<void>;
   findRepasseById(idRepasse: IdRepasse): Promise<RepasseRecebedor | undefined>;
   findRepassesByIdCampanha(idCampanha: IdCampanha): Promise<readonly RepasseRecebedor[]>;
+  /**
+   * aperture-s03dr. Returns the set of lançamentos currently eligible
+   * for inclusion in a new repasse for `idCampanha`. Eligibility is the
+   * full derived-liberação predicate:
+   *
+   *   tipo = 'credito_saldo_recebedor'
+   *   id_campanha = X
+   *   transferido_em IS NULL
+   *   cancelado_em IS NULL
+   *   id_repasse IS NULL                            (not yet swept)
+   *   parent pagamento.status = 'aprovado'          (mjgxe derived predicate)
+   *   parent pagamento.intencao_balance_transaction_available_on <= now
+   *
+   * Read-only — does NOT lock rows. The solicitação use-case calls this
+   * for the preflight saldo check; the actual atomic sweep happens
+   * inside `solicitarRepasseTransaction` (which re-runs the same
+   * predicate under SELECT FOR UPDATE).
+   *
+   * Returns an empty array when no lançamentos are eligible.
+   */
+  findLancamentosDisponiveisByIdCampanha(
+    idCampanha: IdCampanha,
+    now: Date,
+  ): Promise<readonly LancamentoFinanceiro[]>;
+  /**
+   * aperture-s03dr. Atomic solicitação of a repasse:
+   *
+   *   1. SELECT FOR UPDATE on the eligible lançamento set (same
+   *      predicate as `findLancamentosDisponiveisByIdCampanha`).
+   *   2. Compute amountCents = SUM(amount_cents) over the locked set.
+   *   3. Build the `RepasseRecebedor` (factory in the use-case layer).
+   *   4. INSERT the repasse + UPDATE lançamentos SET id_repasse = repasse.id
+   *      WHERE id IN (locked set).
+   *
+   * Concurrency invariant: at most ONE pending repasse per campanha.
+   * Enforced at two layers:
+   *   - postgres: unique partial index
+   *     `repasses_um_solicitado_por_campanha ON (id_campanha) WHERE status='solicitado'`.
+   *     A concurrent INSERT racing past the row lock surfaces 23505;
+   *     the adapter translates to `FinanceiroRepasseJaPendenteError`.
+   *   - memory: preflight scan over the in-memory map.
+   *
+   * Throws:
+   *   - `FinanceiroSaldoDisponivelInsuficienteError` when the locked set
+   *     is empty (caller decides; use-case currently throws on empty).
+   *   - `FinanceiroRepasseJaPendenteError` on the unique-index violation.
+   *
+   * Returns the persisted `RepasseRecebedor` (with the snapshotted
+   * `amountCents` and `solicitadoEm`).
+   */
+  solicitarRepasseTransaction(input: {
+    readonly idCampanha: IdCampanha;
+    readonly idRepasse: IdRepasse;
+    readonly solicitadoEm: Date;
+    readonly now: Date;
+  }): Promise<{
+    readonly repasse: RepasseRecebedor;
+    readonly idsLancamentosClaimados: readonly IdLancamentoFinanceiro[];
+  }>;
+  /**
+   * aperture-s03dr. Atomic admin approval of a pending repasse:
+   *
+   *   1. SELECT FOR UPDATE on the target repasse.
+   *   2. Verify status = 'solicitado' (throw FinanceiroRepasseStatusInvalidoError
+   *      if not).
+   *   3. UPDATE repasse SET status='aprovado', aprovado_em, bank_transfer_ref.
+   *   4. UPDATE lançamentos SET transferido_em = aprovado_em
+   *      WHERE id_repasse = repasse.id AND transferido_em IS NULL.
+   *      (Cancelled lançamentos under the repasse are skipped — should
+   *      never happen given the cascade-scope rule, but defensive.)
+   *
+   * Returns the updated repasse + count of lançamentos affected.
+   *
+   * Idempotency: if the repasse is ALREADY 'aprovado' with the same
+   * bankTransferRef, the adapter no-ops and returns
+   * `{ repasse: existing, lancamentosAfetados: 0 }`. The use-case layer
+   * surfaces this as a 200 (caller treats as success). Mismatched
+   * bankTransferRef on an already-aprovado repasse surfaces
+   * `FinanceiroRepasseStatusInvalidoError` (don't silently overwrite
+   * an audit value).
+   *
+   * Throws:
+   *   - `FinanceiroRepasseNaoEncontradoError` when the repasse doesn't
+   *     exist.
+   *   - `FinanceiroRepasseStatusInvalidoError` when the repasse is in
+   *     a non-solicitado state and the input would mutate the snapshot.
+   */
+  aprovarRepasseTransaction(input: {
+    readonly idRepasse: IdRepasse;
+    readonly aprovadoEm: Date;
+    readonly bankTransferRef: string | null;
+  }): Promise<{
+    readonly repasse: RepasseRecebedor;
+    readonly lancamentosAfetados: number;
+  }>;
   findRecebedorAtivoPorIdCampanha(idCampanha: IdCampanha): Promise<DadosRecebedorAtivo | undefined>;
 }

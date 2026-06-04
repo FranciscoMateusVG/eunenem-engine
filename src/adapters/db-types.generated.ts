@@ -81,6 +81,9 @@ export interface Contribuicoes {
 export interface LancamentosFinanceiros {
   // Plan 0015 / migration 019: status + matura_em dropped;
   // transferido_em + cancelado_em added (both nullable).
+  // aperture-s03dr / migration 021: id_repasse added (nullable —
+  // points at the pending/aprovado repasse_recebedor that claimed
+  // this lancamento, if any).
   amount_cents: number;
   cancelado_em: Timestamp | null;
   criado_em: Timestamp;
@@ -88,6 +91,7 @@ export interface LancamentosFinanceiros {
   id_campanha: string | null;
   id_contribuicao: string;
   id_pagamento: string;
+  id_repasse: string | null;
   tipo: string;
   transferido_em: Timestamp | null;
 }
@@ -155,7 +159,11 @@ export interface Recebedores {
 }
 
 export interface RepassesRecebedor {
+  // aperture-s03dr / migration 021: aprovado_em + bank_transfer_ref added
+  // (both nullable); status CHECK extended to include 'aprovado'.
   amount_cents: number;
+  aprovado_em: Timestamp | null;
+  bank_transfer_ref: string | null;
   id: string;
   id_campanha: string;
   solicitado_em: Timestamp;

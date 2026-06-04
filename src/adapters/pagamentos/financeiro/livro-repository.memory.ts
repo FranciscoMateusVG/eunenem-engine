@@ -1,7 +1,11 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 import type { IdCampanha } from '../../../domain/arrecadacao/value-objects/ids.js';
 import type { LancamentoFinanceiro } from '../../../domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
-import type { RepasseRecebedor } from '../../../domain/pagamentos/financeiro/entities/repasse-recebedor.js';
+import {
+  aprovarRepasse,
+  criarRepasseRecebedorSolicitado,
+  type RepasseRecebedor,
+} from '../../../domain/pagamentos/financeiro/entities/repasse-recebedor.js';
 import type { DadosRecebedorAtivo } from '../../../domain/pagamentos/financeiro/value-objects/dados-recebedor-ativo.js';
 import type {
   IdLancamentoFinanceiro,
@@ -9,7 +13,11 @@ import type {
   IdRepasse,
 } from '../../../domain/pagamentos/financeiro/value-objects/ids.js';
 import { FinanceiroPagamentoJaRegistradoError } from '../../../errors/pagamentos/financeiro/pagamento-ja-registrado.error.js';
+import { FinanceiroRepasseJaPendenteError } from '../../../errors/pagamentos/financeiro/repasse-ja-pendente.error.js';
+import { FinanceiroRepasseNaoEncontradoError } from '../../../errors/pagamentos/financeiro/repasse-nao-encontrado.error.js';
+import { FinanceiroRepasseStatusInvalidoError } from '../../../errors/pagamentos/financeiro/repasse-status-invalido.error.js';
 import type { RecebedorRepository } from '../../arrecadacao/recebedor-repository.js';
+import type { PagamentoRepository } from '../repository.js';
 import type { LivroFinanceiroRepository } from './livro-repository.js';
 
 const tracer = trace.getTracer('frame');
@@ -26,12 +34,29 @@ const DB_ATTRS = {
  * `marcarLancamentosComoCanceladosPorPagamento`) replace the old
  * `marcarComoDisponivel` flip; `hasLancamentosTransferidos` exposes the
  * 409-gate predicate.
+ *
+ * **aperture-s03dr.** Adds the repasse-FSM extension:
+ *
+ *   - `findLancamentosDisponiveisByIdCampanha` walks lançamentos +
+ *     consults the (optionally-injected) `PagamentoRepository` for the
+ *     parent pagamento status + balance_transaction available_on.
+ *   - `solicitarRepasseTransaction` does the preflight scan, computes
+ *     the amountCents SUM, INSERTs the repasse, and stamps id_repasse
+ *     on the claimed lançamento set — all as one logical batch. The
+ *     unique-pending-per-campanha guard is enforced by a preflight
+ *     scan over existing repasses.
+ *   - `aprovarRepasseTransaction` transitions the repasse + bulk-stamps
+ *     `transferidoEm` on the linked lançamento set with the same
+ *     timestamp.
  */
 export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepository {
   private readonly lancamentos = new Map<IdLancamentoFinanceiro, LancamentoFinanceiro>();
   private readonly repasses = new Map<IdRepasse, RepasseRecebedor>();
 
-  constructor(private readonly recebedorRepository?: RecebedorRepository) {}
+  constructor(
+    private readonly recebedorRepository?: RecebedorRepository,
+    private readonly pagamentoRepository?: PagamentoRepository,
+  ) {}
 
   async saveLancamentos(lancamentos: readonly LancamentoFinanceiro[]): Promise<void> {
     return tracer.startActiveSpan('db.financeiro_livro.lancamentos.save', async (span) => {
@@ -293,6 +318,178 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
         span.end();
       }
     });
+  }
+
+  /**
+   * aperture-s03dr. Eligible-lançamentos preflight scan.
+   *
+   * Mirrors the postgres query: recebedor tipo + campanha match,
+   * un-transferred, un-cancelled, not-yet-swept-into-repasse, parent
+   * pagamento aprovado AND available_on <= now. Without a
+   * pagamentoRepository injected, the cross-port filter degrades to
+   * "trust everything" — useful only for tests that pre-seed the
+   * memory adapter directly without pagamentos.
+   */
+  async findLancamentosDisponiveisByIdCampanha(
+    idCampanha: IdCampanha,
+    now: Date,
+  ): Promise<readonly LancamentoFinanceiro[]> {
+    return tracer.startActiveSpan(
+      'db.financeiro_livro.lancamentos.findDisponiveisByIdCampanha',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+        try {
+          const candidates = [...this.lancamentos.values()].filter(
+            (l) =>
+              l.tipo === 'credito_saldo_recebedor' &&
+              l.idCampanha === idCampanha &&
+              l.transferidoEm === null &&
+              l.canceladoEm === null &&
+              l.idRepasse === null,
+          );
+
+          if (!this.pagamentoRepository) {
+            // Memory adapter without cross-port wiring — caller is
+            // responsible for state coherence.
+            span.setStatus({ code: SpanStatusCode.OK });
+            return candidates;
+          }
+
+          const eligible: LancamentoFinanceiro[] = [];
+          for (const l of candidates) {
+            const pagamento = await this.pagamentoRepository.findById(l.idPagamento as never);
+            if (!pagamento) continue;
+            if (pagamento.status !== 'aprovado') continue;
+            const availableOn = pagamento.intencao.balanceTransactionAvailableOn;
+            if (availableOn === null || availableOn === undefined) continue;
+            if (availableOn.getTime() > now.getTime()) continue;
+            eligible.push(l);
+          }
+
+          span.setStatus({ code: SpanStatusCode.OK });
+          return eligible;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  async solicitarRepasseTransaction(input: {
+    readonly idCampanha: IdCampanha;
+    readonly idRepasse: IdRepasse;
+    readonly solicitadoEm: Date;
+    readonly now: Date;
+  }): Promise<{
+    readonly repasse: RepasseRecebedor;
+    readonly idsLancamentosClaimados: readonly IdLancamentoFinanceiro[];
+  }> {
+    return tracer.startActiveSpan(
+      'db.financeiro_livro.repasses.solicitarTransaction',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'INSERT' });
+        try {
+          // Unique-pending-per-campanha guard.
+          for (const r of this.repasses.values()) {
+            if (r.idCampanha === input.idCampanha && r.status === 'solicitado') {
+              throw new FinanceiroRepasseJaPendenteError(input.idCampanha);
+            }
+          }
+
+          // Re-scan eligibility under the (logical) lock — same predicate
+          // as findLancamentosDisponiveisByIdCampanha.
+          const eligible = await this.findLancamentosDisponiveisByIdCampanha(
+            input.idCampanha,
+            input.now,
+          );
+
+          const amountCents = eligible.reduce((sum, l) => sum + l.amountCents, 0);
+
+          const repasse = criarRepasseRecebedorSolicitado(
+            {
+              idRepasse: input.idRepasse,
+              idCampanha: input.idCampanha,
+              amountCents,
+            },
+            input.solicitadoEm,
+          );
+
+          this.repasses.set(repasse.id, repasse);
+          const idsLancamentosClaimados: IdLancamentoFinanceiro[] = [];
+          for (const l of eligible) {
+            this.lancamentos.set(l.id, { ...l, idRepasse: repasse.id });
+            idsLancamentosClaimados.push(l.id);
+          }
+
+          span.setStatus({ code: SpanStatusCode.OK });
+          return { repasse, idsLancamentosClaimados };
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  async aprovarRepasseTransaction(input: {
+    readonly idRepasse: IdRepasse;
+    readonly aprovadoEm: Date;
+    readonly bankTransferRef: string | null;
+  }): Promise<{
+    readonly repasse: RepasseRecebedor;
+    readonly lancamentosAfetados: number;
+  }> {
+    return tracer.startActiveSpan(
+      'db.financeiro_livro.repasses.aprovarTransaction',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+        try {
+          const existing = this.repasses.get(input.idRepasse);
+          if (!existing) {
+            throw new FinanceiroRepasseNaoEncontradoError(input.idRepasse);
+          }
+
+          // Idempotent at the SAME terminal state.
+          if (existing.status === 'aprovado') {
+            if (existing.bankTransferRef === input.bankTransferRef) {
+              span.setStatus({ code: SpanStatusCode.OK });
+              return { repasse: existing, lancamentosAfetados: 0 };
+            }
+            throw new FinanceiroRepasseStatusInvalidoError(input.idRepasse, existing.status);
+          }
+
+          // Domain-layer transition (forward-only enforced inside).
+          const updated = aprovarRepasse(existing, input.bankTransferRef, input.aprovadoEm);
+          this.repasses.set(updated.id, updated);
+
+          // Bulk-stamp transferidoEm on linked + un-transferred + un-
+          // cancelled lançamentos.
+          let lancamentosAfetados = 0;
+          for (const [id, l] of this.lancamentos.entries()) {
+            if (l.idRepasse !== updated.id) continue;
+            if (l.transferidoEm !== null || l.canceladoEm !== null) continue;
+            this.lancamentos.set(id, { ...l, transferidoEm: input.aprovadoEm });
+            lancamentosAfetados += 1;
+          }
+
+          span.setStatus({ code: SpanStatusCode.OK });
+          return { repasse: updated, lancamentosAfetados };
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
   }
 
   async findRecebedorAtivoPorIdCampanha(

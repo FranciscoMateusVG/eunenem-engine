@@ -121,12 +121,15 @@ describe('financial use cases', () => {
     ).rejects.toThrow(FinanceiroInputInvalidoError);
   });
 
-  it('creates an initial payout request when the receiver has available balance', async () => {
+  it('creates an initial payout request sweeping every disponivel lancamento (aperture-s03dr)', async () => {
     const livroFinanceiroRepository = new LivroFinanceiroRepositoryMemory();
-    // Plan 0015 (aperture-ucgok): the "disponivel" (transferred) state on
-    // a lancamento is now `transferidoEm !== null AND canceladoEm === null`.
-    // Stamp transferidoEm so this row counts toward `valorDisponivelCents`.
-    const availableEntry: LancamentoFinanceiro = {
+    // aperture-s03dr: "disponivel for solicitação" is now the predicate
+    // `transferidoEm IS NULL && canceladoEm IS NULL && idRepasse IS NULL`
+    // PLUS (parent pagamento.status='aprovado' && availableOn <= now).
+    // Without an injected PagamentoRepository the memory adapter
+    // degrades to "trust everything that passes the lancamento-side
+    // predicate" — good for this unit test.
+    const eligibleEntry: LancamentoFinanceiro = {
       id: '550e8400-e29b-41d4-a716-446655443005',
       idPagamento: '550e8400-e29b-41d4-a716-446655443006',
       idContribuicao: '550e8400-e29b-41d4-a716-446655443007',
@@ -134,41 +137,42 @@ describe('financial use cases', () => {
       tipo: 'credito_saldo_recebedor',
       amountCents: 5000,
       criadoEm: fixedDate,
-      transferidoEm: fixedDate,
+      transferidoEm: null,
       canceladoEm: null,
+      idRepasse: null,
     };
-    await livroFinanceiroRepository.saveLancamentos([availableEntry]);
+    await livroFinanceiroRepository.saveLancamentos([eligibleEntry]);
 
     const repasse = await solicitarRepasseRecebedor(
       { livroFinanceiroRepository, clock, observability: silentObservability },
-      {
-        idRepasse,
-        idCampanha,
-        amountCents: 3000,
-      },
+      { idRepasse, idCampanha },
     );
 
+    // The sweep claims the full eligible set; amountCents = SUM.
     expect(repasse).toEqual({
       id: idRepasse,
       idCampanha,
-      amountCents: 3000,
+      amountCents: 5000,
       status: 'solicitado',
       solicitadoEm: fixedDate,
+      aprovadoEm: null,
+      bankTransferRef: null,
     });
     expect(await livroFinanceiroRepository.findRepasseById(idRepasse)).toEqual(repasse);
+    // The eligible lancamento now carries idRepasse linkage.
+    const lancamentoAposClaim = (
+      await livroFinanceiroRepository.findLancamentosByIdPagamento(eligibleEntry.idPagamento)
+    )[0];
+    expect(lancamentoAposClaim?.idRepasse).toBe(idRepasse);
   });
 
-  it('does not create a payout request above the available balance', async () => {
+  it('does not create a payout request when the eligible set is empty (aperture-s03dr)', async () => {
     const livroFinanceiroRepository = new LivroFinanceiroRepositoryMemory();
 
     await expect(
       solicitarRepasseRecebedor(
         { livroFinanceiroRepository, clock, observability: silentObservability },
-        {
-          idRepasse,
-          idCampanha,
-          amountCents: 3000,
-        },
+        { idRepasse, idCampanha },
       ),
     ).rejects.toThrow(FinanceiroSaldoDisponivelInsuficienteError);
   });

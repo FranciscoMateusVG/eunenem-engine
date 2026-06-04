@@ -67,11 +67,11 @@ async function setupCampanhaComSaldoDisponivel(
   );
 
   if (disponivelAmountCents > 0) {
-    // Plan 0015 (aperture-ucgok): lancamento has no FSM anymore. The
-    // "disponivel" (transferred) state is `transferidoEm !== null AND
-    // canceladoEm === null` — see `calcularSaldoRecebedor`. Stamp
-    // transferidoEm here so the seeded row counts toward
-    // `valorDisponivelCents`.
+    // aperture-s03dr: "disponivel for solicitação" is now the predicate
+    // `transferidoEm IS NULL && canceladoEm IS NULL && idRepasse IS NULL`
+    // (plus the parent-pagamento JOIN which the memory adapter skips
+    // when no PagamentoRepository is injected — that's fine for this
+    // cross-BC orchestrator unit test).
     const lancamento: LancamentoFinanceiro = {
       id: randomUUID(),
       idPagamento: randomUUID(),
@@ -80,8 +80,9 @@ async function setupCampanhaComSaldoDisponivel(
       tipo: 'credito_saldo_recebedor',
       amountCents: disponivelAmountCents,
       criadoEm: fixedDate,
-      transferidoEm: fixedDate,
+      transferidoEm: null,
       canceladoEm: null,
+      idRepasse: null,
     };
     await livroFinanceiroRepository.saveLancamentos([lancamento]);
   }
@@ -107,7 +108,6 @@ describe('iniciarRepasseRecebedor — happy path', () => {
       idPlataforma: ID_PLATAFORMA_EUNENEM,
       idCampanha,
       idRepasse,
-      amountCents: 8000,
     });
 
     expect(repasse.id).toBe(idRepasse);
@@ -124,7 +124,6 @@ describe('iniciarRepasseRecebedor — happy path', () => {
       idPlataforma: ID_PLATAFORMA_EUNENEM,
       idCampanha,
       idRepasse,
-      amountCents: 5000,
     });
 
     const persisted = await deps.livroFinanceiroRepository.findRepasseById(idRepasse);
@@ -142,7 +141,6 @@ describe('iniciarRepasseRecebedor — pre-validation failures', () => {
         idPlataforma: ID_PLATAFORMA_EUCASEI,
         idCampanha,
         idRepasse: randomUUID(),
-        amountCents: 1000,
       }),
     ).rejects.toThrow(CheckoutPlataformaMismatchError);
   });
@@ -155,7 +153,6 @@ describe('iniciarRepasseRecebedor — pre-validation failures', () => {
         idPlataforma: ID_PLATAFORMA_EUNENEM,
         idCampanha: randomUUID(),
         idRepasse: randomUUID(),
-        amountCents: 1000,
       }),
     ).rejects.toThrow(ArrecadacaoCampanhaNaoEncontradaError);
   });
@@ -179,22 +176,24 @@ describe('iniciarRepasseRecebedor — pre-validation failures', () => {
         idPlataforma: ID_PLATAFORMA_EUNENEM,
         idCampanha,
         idRepasse: randomUUID(),
-        amountCents: 1000,
       }),
     ).rejects.toThrow(CheckoutCampanhaSemRecebedorError);
   });
 });
 
 describe('iniciarRepasseRecebedor — delegated failures bubble up', () => {
-  it('throws FinanceiroSaldoDisponivelInsuficienteError when amountCents exceeds available saldo', async () => {
-    const { deps, idCampanha } = await setupCampanhaComSaldoDisponivel(ID_PLATAFORMA_EUNENEM, 5000);
+  it('throws FinanceiroSaldoDisponivelInsuficienteError when the eligible set is empty', async () => {
+    // aperture-s03dr: with the sweep semantics, "insuficiente" means
+    // "no eligible lançamento for this campanha at this clock", not
+    // "amountCents > sum". Seed zero balance and verify the
+    // delegated error bubbles up through the orchestrator.
+    const { deps, idCampanha } = await setupCampanhaComSaldoDisponivel(ID_PLATAFORMA_EUNENEM, 0);
 
     await expect(
       iniciarRepasseRecebedor(deps, {
         idPlataforma: ID_PLATAFORMA_EUNENEM,
         idCampanha,
         idRepasse: randomUUID(),
-        amountCents: 999_999, // more than the seeded R$50
       }),
     ).rejects.toThrow(FinanceiroSaldoDisponivelInsuficienteError);
   });

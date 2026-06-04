@@ -7,6 +7,7 @@ import {
   IdLancamentoFinanceiroSchema,
   type IdPagamentoReferencia,
   IdPagamentoReferenciaSchema,
+  IdRepasseSchema,
 } from '../value-objects/ids.js';
 import type { SnapshotComposicaoValoresFinanceiro } from '../value-objects/snapshot-composicao-valores-financeiro.js';
 
@@ -90,6 +91,16 @@ export const LancamentoFinanceiroSchema = z.object({
    * decision #10) is the upstream gate that keeps this cascade safe.
    */
   canceladoEm: z.date().nullable(),
+  /**
+   * aperture-s03dr. Set when this lançamento has been swept into a
+   * pending or aprovado `RepasseRecebedor` via the
+   * `solicitarRepasseRecebedor` use-case. Null at creation time and
+   * until a repasse claims this row. When the parent repasse
+   * transitions `solicitado → aprovado`, the `aprovarRepasseTransaction`
+   * stamps `transferidoEm = repasse.aprovadoEm` on this row but leaves
+   * `idRepasse` populated for audit (the linkage is permanent).
+   */
+  idRepasse: IdRepasseSchema.nullable(),
 });
 
 export type LancamentoFinanceiro = Readonly<z.infer<typeof LancamentoFinanceiroSchema>>;
@@ -201,6 +212,7 @@ export function criarLancamentosParaPagamentoAprovado(
     criadoEm,
     transferidoEm: null,
     canceladoEm: null,
+    idRepasse: null,
   };
 
   const lancamentoReceita: LancamentoFinanceiro = {
@@ -212,6 +224,7 @@ export function criarLancamentosParaPagamentoAprovado(
     criadoEm,
     transferidoEm: null,
     canceladoEm: null,
+    idRepasse: null,
   };
 
   // PIX path — no surcharge, no third lancamento. Book balance:
@@ -236,6 +249,7 @@ export function criarLancamentosParaPagamentoAprovado(
     criadoEm,
     transferidoEm: null,
     canceladoEm: null,
+    idRepasse: null,
   };
 
   // Book balance (cartao): recebedor (= contribution) + receita (= fee) +

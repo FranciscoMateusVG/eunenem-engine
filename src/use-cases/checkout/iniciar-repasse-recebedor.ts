@@ -10,7 +10,6 @@ import {
 } from '../../domain/arrecadacao/value-objects/ids.js';
 import type { RepasseRecebedor } from '../../domain/pagamentos/financeiro/entities/repasse-recebedor.js';
 import { IdRepasseSchema } from '../../domain/pagamentos/financeiro/value-objects/ids.js';
-import { MoneyCentsSchema } from '../../domain/money.js';
 import { ArrecadacaoCampanhaNaoEncontradaError } from '../../errors/arrecadacao/campanha-nao-encontrada.error.js';
 import { ArrecadacaoRecebedorNaoEncontradoError } from '../../errors/arrecadacao/recebedor-nao-encontrado.error.js';
 import { CheckoutCampanhaSemRecebedorError } from '../../errors/checkout/campanha-sem-recebedor.error.js';
@@ -18,11 +17,15 @@ import { CheckoutPlataformaMismatchError } from '../../errors/checkout/plataform
 import type { Observability } from '../../observability/observability.js';
 import { solicitarRepasseRecebedor } from '../pagamentos/financeiro/solicitar-repasse-recebedor.js';
 
+/**
+ * aperture-s03dr: `amountCents` removed. The repasse now sweeps every
+ * currently-disponível lançamento atomically; the snapshot IS the
+ * amount. Callers that previously passed `amountCents` should drop it.
+ */
 export const IniciarRepasseRecebedorInputSchema = z.object({
   idPlataforma: IdPlataformaReferenciaSchema,
   idCampanha: IdCampanhaSchema,
   idRepasse: IdRepasseSchema,
-  amountCents: MoneyCentsSchema,
 });
 
 export type IniciarRepasseRecebedorInput = z.infer<typeof IniciarRepasseRecebedorInputSchema>;
@@ -81,7 +84,6 @@ export async function iniciarRepasseRecebedor(
       span.setAttribute('checkout.plataforma.id', parsed.idPlataforma);
       span.setAttribute('checkout.campanha.id', parsed.idCampanha);
       span.setAttribute('checkout.repasse.id', parsed.idRepasse);
-      span.setAttribute('checkout.repasse.amount_cents', parsed.amountCents);
 
       // pre-validation 1: plataforma membership
       const campanha = await campanhaRepository.findById(parsed.idCampanha);
@@ -103,13 +105,12 @@ export async function iniciarRepasseRecebedor(
         throw new ArrecadacaoRecebedorNaoEncontradoError(parsed.idCampanha);
       }
 
-      // delegate to Financeiro (saldo check + repasse creation)
+      // delegate to Financeiro (sweep + atomic claim)
       const repasse = await solicitarRepasseRecebedor(
         { livroFinanceiroRepository, clock, observability },
         {
           idRepasse: parsed.idRepasse,
           idCampanha: parsed.idCampanha,
-          amountCents: parsed.amountCents,
         },
       );
 
