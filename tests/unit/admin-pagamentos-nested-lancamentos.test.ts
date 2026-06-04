@@ -45,6 +45,7 @@ function makePagamento(args: {
   idContribuicao: string;
   status?: 'pendente' | 'processing' | 'aprovado' | 'rejeitado' | 'estornado';
   criadoEm?: Date;
+  contribuinte?: { nome: string; email: string; mensagem?: string } | null;
 }) {
   const now = args.criadoEm ?? new Date('2026-06-04T10:00:00.000Z');
   return {
@@ -61,7 +62,7 @@ function makePagamento(args: {
       externalRef: null,
       paymentIntentExternalRef: null,
       chargeExternalRef: null,
-      contribuinte: null,
+      contribuinte: args.contribuinte === undefined ? null : args.contribuinte,
       composicaoValores: {
         idContribuicao: args.idContribuicao,
         contributionAmountCents: 4500 as never,
@@ -360,5 +361,88 @@ describe('admin.pagamentos.listByContribuicao — nested lancamentos (aperture-a
     expect(result.pagamentos).toEqual([]);
     void ID_PLATAFORMA_EUCASEI;
     void idCampanhaEucasei;
+  });
+});
+
+describe('admin.pagamentos.listByContribuicao — contribuinte projection (aperture-xfw5c)', () => {
+  let rig: TestRig;
+  beforeEach(async () => {
+    rig = await buildRig();
+  });
+
+  it('surfaces { nome, email, mensagem } when webhook stamped all three fields', async () => {
+    const idPagamento = randomUUID();
+    await rig.pagamentoRepository.save(
+      makePagamento({
+        id: idPagamento,
+        idContribuicao: rig.idContribuicao,
+        contribuinte: {
+          nome: 'Teste Teste',
+          email: 'franciscomateusvg@gmail.com',
+          mensagem: 'parabéns!',
+        },
+      }),
+    );
+
+    const result = await rig.caller.admin.pagamentos.listByContribuicao({
+      idContribuicao: rig.idContribuicao,
+    });
+
+    expect(result.pagamentos).toHaveLength(1);
+    expect(result.pagamentos[0].intencao.contribuinte).toEqual({
+      nome: 'Teste Teste',
+      email: 'franciscomateusvg@gmail.com',
+      mensagem: 'parabéns!',
+    });
+  });
+
+  it('normalises missing mensagem (undefined on engine entity) → null on the wire', async () => {
+    // The engine's DadosContribuinte carries mensagem as OPTIONAL
+    // (`mensagem?: string`). The wire DTO uses `string | null`. The
+    // projection MUST coerce undefined → null so the wire shape stays
+    // uniform across rows that did vs didn't capture the optional
+    // recadinho.
+    const idPagamento = randomUUID();
+    await rig.pagamentoRepository.save(
+      makePagamento({
+        id: idPagamento,
+        idContribuicao: rig.idContribuicao,
+        contribuinte: {
+          nome: 'Sem Mensagem',
+          email: 'sem@example.com',
+          // mensagem omitted (undefined)
+        },
+      }),
+    );
+
+    const result = await rig.caller.admin.pagamentos.listByContribuicao({
+      idContribuicao: rig.idContribuicao,
+    });
+
+    expect(result.pagamentos[0].intencao.contribuinte).toEqual({
+      nome: 'Sem Mensagem',
+      email: 'sem@example.com',
+      mensagem: null,
+    });
+  });
+
+  it('returns null contribuinte for anonymous checkouts (pre-webhook or unstamped)', async () => {
+    // Either the webhook hasn't fired yet OR the visitor's checkout
+    // session didn't carry the required nome+email. The UI shows the
+    // "(sem contribuinte ainda)" affordance.
+    const idPagamento = randomUUID();
+    await rig.pagamentoRepository.save(
+      makePagamento({
+        id: idPagamento,
+        idContribuicao: rig.idContribuicao,
+        contribuinte: null,
+      }),
+    );
+
+    const result = await rig.caller.admin.pagamentos.listByContribuicao({
+      idContribuicao: rig.idContribuicao,
+    });
+
+    expect(result.pagamentos[0].intencao.contribuinte).toBeNull();
   });
 });

@@ -826,12 +826,20 @@ function toPagamentoAdminDTO(p: Pagamento, now: Date): PagamentoAdminDTO {
       metodo: p.intencao.metodo,
       externalRef: p.intencao.externalRef,
       criadaEm: p.intencao.criadaEm.toISOString(),
-      // Parallel-prep stub (plan 0015 Phase 1+3 — aperture-i45g5). The
-      // contribuinte field lives on IntencaoPagamento post-Phase-1. Until
-      // Rex's PRs land, no row has a contribuinte attached — populated by
-      // the webhook handler at `checkout.session.completed`. UI handles
-      // null gracefully.
-      contribuinte: null,
+      // aperture-xfw5c: surface the contribuinte the webhook stamped at
+      // `checkout.session.completed`. Engine's DadosContribuinte carries
+      // `mensagem?: string` (optional); the DTO schema is `string | null`
+      // (nullable + required) — normalise undefined → null at the
+      // boundary so the wire shape stays uniform across rows that did vs
+      // didn't capture the optional recadinho.
+      contribuinte:
+        p.intencao.contribuinte === null
+          ? null
+          : {
+              nome: p.intencao.contribuinte.nome,
+              email: p.intencao.contribuinte.email,
+              mensagem: p.intencao.contribuinte.mensagem ?? null,
+            },
       composicaoValores: {
         idContribuicao: p.intencao.composicaoValores.idContribuicao,
         contributionAmountCents: p.intencao.composicaoValores
