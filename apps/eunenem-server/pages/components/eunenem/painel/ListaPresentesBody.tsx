@@ -270,10 +270,17 @@ function groupContribuicoes(items: ContribuicaoDTO[]): GroupedGift[] {
     const imageUrl = isImagePath(c.imagemUrl) ? c.imagemUrl : null;
     const emoji = imageUrl ? "🎁" : c.imagemUrl ?? "🎁";
     const existing = map.get(c.nome);
+    // Plan 0015 derived-availability (aperture-ocw8r). The legacy
+    // `c.status === "indisponivel"` comparison breaks once Rex's Phase 1
+    // entity surgery drops the column — we read the derived `indisponivel`
+    // boolean instead. Parallel-prep stub: optional on the wire today, so
+    // `undefined` is treated as not-received (same shape as today's bug;
+    // resolves the moment Rex's @repo/domains schema commit ships).
+    const isReserved = c.indisponivel === true;
     if (existing) {
       existing.ids.push(c.id);
       existing.qty += 1;
-      if (c.status === "indisponivel") existing.received += 1;
+      if (isReserved) existing.received += 1;
     } else {
       map.set(c.nome, {
         ids: [c.id],
@@ -285,8 +292,8 @@ function groupContribuicoes(items: ContribuicaoDTO[]): GroupedGift[] {
         bgColor: deriveBgColor(c.grupo),
         chipLabel,
         qty: 1,
-        received: c.status === "indisponivel" ? 1 : 0,
-        hasClaimed: c.status === "indisponivel",
+        received: isReserved ? 1 : 0,
+        hasClaimed: isReserved,
         // `custom` styling (pink chip + locked semantics) is reserved for true
         // user-created items, i.e. grupo === "personalizado". Don't flag rows
         // we merely couldn't categorize.

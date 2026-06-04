@@ -33,13 +33,36 @@ export interface ContribuicaoDTO {
   imagemUrl: string | null;
   /** Category-ish grouping tag. Nullable for ad-hoc custom items. */
   grupo: string | null;
-  /** Filled once a guest reserves the item. null = still available. */
+  /** Filled once a guest reserves the item. null = still available.
+   *  DEPRECATED per plan 0015 Phase 1 — contribuinte data moves to
+   *  IntencaoPagamento. Kept on the interface during the transition because
+   *  visitorGift.ts + ContribuicoesList.tsx still read it; follow-up bead
+   *  will retire it once those consumers have been migrated. */
   contribuinte: { nome: string; email: string } | null;
   /**
    * `indisponivel` once a contribuinte has reserved — server-side
    * mutations refuse to update locked rows (see `update` below).
+   *
+   * DEPRECATED per plan 0015 Phase 1 — replaced by the derived
+   * `indisponivel: boolean` predicate below. Kept on the interface during
+   * the transition because visitorGift.ts + ContribuicoesList.tsx still
+   * read it; follow-up bead migrates those consumers.
    */
   status: "disponivel" | "indisponivel";
+  /**
+   * Plan 0015 derived-availability predicate (aperture-ocw8r). Server-side
+   * derived from `EXISTS pagamento WHERE id_contribuicao = X AND status =
+   * 'aprovado'`. The lista-de-presentes (recebedor) + visitor marketplace
+   * pages read this instead of comparing the legacy `status` string.
+   *
+   * PARALLEL-PREP STUB: OPTIONAL today because Rex's @repo/domains schema
+   * commit for ContribuicaoListItem hasn't landed yet. When his PR opens,
+   * drop the `?` modifier — single-line swap, no UI change. ListaPresentes
+   * Body's group-by-nome accumulation reads `c.indisponivel === true` so
+   * `undefined` is treated as not-yet-received (same as today's bug; bug
+   * resolves the moment the wire starts populating the field).
+   */
+  indisponivel?: boolean;
 }
 
 /** Single-item create. `qty` rows get inserted, each with its own id. */
