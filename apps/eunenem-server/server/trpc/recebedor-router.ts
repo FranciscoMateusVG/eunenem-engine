@@ -90,6 +90,21 @@ const ExtratoRowDTOSchema = z.object({
    * Null on anonymous OR pre-Phase-3 rows.
    */
   contribuinteNome: z.string().nullable(),
+  /**
+   * aperture-k6fbz — the gift (contribuição) name. Resolved via
+   * lancamento → pagamento → contribuição lookup. Surfaces as the
+   * primary row label ("Berço Montessoriano" instead of generic
+   * "lançamento"). Falls back to the empty string when the
+   * contribuição has been deleted between the pagamento and the
+   * read — frontend defaults to a neutral "lançamento" affordance.
+   */
+  contribuicaoNome: z.string(),
+  /**
+   * aperture-k6fbz — the gift's image URL. Emoji glyph or hosted URL
+   * per the existing contribuicao.imagemUrl shape. Null when the
+   * gift was ad-hoc (no image) or the contribuição was deleted.
+   */
+  contribuicaoImagemUrl: z.string().nullable(),
   amountCents: z.number().int().nonnegative(),
   /** Derived sub-state — drives the chip + sort affordance on the UI. */
   liberacao: ExtratoLiberacaoSchema,
@@ -236,13 +251,22 @@ function toTRPCError(err: unknown): TRPCError {
 interface ExtratoLancamentoState {
   lancamento: LancamentoFinanceiro;
   pagamento: Pagamento | undefined;
+  /**
+   * aperture-k6fbz — gift name + image resolved via
+   * lancamento → pagamento.intencao.idContribuicao → contribuição.
+   * Undefined when either the pagamento is missing OR the contribuição
+   * has been deleted between the pagamento + the read. Row projection
+   * falls back to a neutral shape in that case.
+   */
+  contribuicao: { nome: string; imagemUrl: string | null } | undefined;
   liberacao: ExtratoLiberacao;
 }
 
 /**
  * Walk every recebedor-tipo lançamento for the campanha and resolve
- * each one's parent pagamento + derived liberação state. N+1 across
- * pagamentos by design (see file header note).
+ * each one's parent pagamento + contribuição + derived liberação state.
+ * N+1 across pagamentos + contribuições by design (see file header
+ * note — v1 is bounded small; SQL aggregation is a follow-up).
  *
  * Excludes platform-revenue + passthrough-surcharge tipos (those don't
  * appear on the recebedor's extrato — only their own saldo).
@@ -265,9 +289,27 @@ async function buildExtratoStates(
       const pagamento = await ctx.deps.pagamentoRepository.findById(
         lancamento.idPagamento as never,
       );
+      // aperture-k6fbz: resolve the gift via the pagamento's intent.
+      // When pagamento is missing OR the contribuição was deleted in
+      // the meantime, contribuicao stays undefined and the projection
+      // falls back to empty-string/null at the wire boundary.
+      let contribuicao: { nome: string; imagemUrl: string | null } | undefined;
+      if (pagamento !== undefined) {
+        const idC = pagamento.intencao.idContribuicao;
+        const fetched = await ctx.deps.contribuicaoRepository.findById(
+          idC as never,
+        );
+        if (fetched !== undefined && fetched !== null) {
+          contribuicao = {
+            nome: fetched.nome,
+            imagemUrl: fetched.imagemUrl ?? null,
+          };
+        }
+      }
       return {
         lancamento,
         pagamento,
+        contribuicao,
         liberacao: deriveLiberacao(lancamento, pagamento, now),
       };
     }),
@@ -440,6 +482,11 @@ const extratoRouter = t.router({
           idLancamento: s.lancamento.id,
           idPagamento: s.lancamento.idPagamento,
           contribuinteNome: s.pagamento?.intencao.contribuinte?.nome ?? null,
+          // aperture-k6fbz: empty string + null fallback when the
+          // contribuição is gone or unresolvable. UI handles either
+          // with a neutral "lançamento" affordance.
+          contribuicaoNome: s.contribuicao?.nome ?? "",
+          contribuicaoImagemUrl: s.contribuicao?.imagemUrl ?? null,
           amountCents: s.lancamento.amountCents as unknown as number,
           liberacao: s.liberacao,
           timestamp: (

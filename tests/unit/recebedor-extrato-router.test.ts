@@ -109,6 +109,7 @@ interface TestRig {
   caller: ReturnType<typeof appRouter.createCaller>;
   callerAnon: ReturnType<typeof appRouter.createCaller>;
   campanhaRepository: CampanhaRepositoryMemory;
+  contribuicaoRepository: ContribuicaoRepositoryMemory;
   pagamentoRepository: PagamentoRepositoryMemory;
   livroFinanceiroRepository: LivroFinanceiroRepositoryMemory;
   idCampanha: string;
@@ -219,6 +220,7 @@ async function buildRig(): Promise<TestRig> {
     caller: appRouter.createCaller(ctxAuthed),
     callerAnon: appRouter.createCaller(ctxAnon),
     campanhaRepository,
+    contribuicaoRepository,
     pagamentoRepository,
     livroFinanceiroRepository,
     idCampanha,
@@ -766,5 +768,145 @@ describe('recebedor.transferencia.solicitar (aperture-7g5sx)', () => {
     await expect(
       rig.callerAnon.recebedor.transferencia.solicitar({ idCampanha: rig.idCampanha }),
     ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────
+//  (E) Gift name + imagemUrl projection (aperture-k6fbz)
+// ────────────────────────────────────────────────────────────────────
+
+describe('recebedor.extrato.list — contribuicaoNome + contribuicaoImagemUrl (aperture-k6fbz)', () => {
+  let rig: TestRig;
+  beforeEach(async () => {
+    rig = await buildRig();
+  });
+
+  it('row.contribuicaoNome projects from the contribuição linked via pagamento.intencao', async () => {
+    // Override the default seeded contribuição with a recognisable name + image.
+    const idC = randomUUID();
+    await rig.contribuicaoRepository.save({
+      id: idC as never,
+      idCampanha: rig.idCampanha as never,
+      idOpcaoContribuicao: randomUUID() as never,
+      nome: 'Berço Montessoriano',
+      valor: 4500 as never,
+      imagemUrl: '🍼',
+      grupo: null,
+      criadaEm: new Date(),
+    } as never);
+
+    const idPag = randomUUID();
+    await rig.pagamentoRepository.save(
+      makePagamento({ id: idPag, idContribuicao: idC }),
+    );
+    await rig.livroFinanceiroRepository.saveLancamentos([
+      makeLancamento({
+        idPagamento: idPag,
+        idContribuicao: idC,
+        idCampanha: rig.idCampanha,
+      }),
+    ]);
+
+    const result = await rig.caller.recebedor.extrato.list({
+      idCampanha: rig.idCampanha,
+      statusFilters: [],
+      cursor: null,
+      limit: 20,
+    });
+
+    expect(result.rows[0].contribuicaoNome).toBe('Berço Montessoriano');
+    expect(result.rows[0].contribuicaoImagemUrl).toBe('🍼');
+  });
+
+  it('row.contribuicaoImagemUrl is null when the contribuição has no image attached', async () => {
+    // Default seeded contribuição (rig.idContribuicao) has nome='T' + imagemUrl=null.
+    const idPag = randomUUID();
+    await rig.pagamentoRepository.save(
+      makePagamento({ id: idPag, idContribuicao: rig.idContribuicao }),
+    );
+    await rig.livroFinanceiroRepository.saveLancamentos([
+      makeLancamento({
+        idPagamento: idPag,
+        idContribuicao: rig.idContribuicao,
+        idCampanha: rig.idCampanha,
+      }),
+    ]);
+
+    const result = await rig.caller.recebedor.extrato.list({
+      idCampanha: rig.idCampanha,
+      statusFilters: [],
+      cursor: null,
+      limit: 20,
+    });
+
+    expect(result.rows[0].contribuicaoNome).toBe('T');
+    expect(result.rows[0].contribuicaoImagemUrl).toBeNull();
+  });
+
+  it('multiple rows: each row carries its own gift name/image', async () => {
+    const idC1 = randomUUID();
+    const idC2 = randomUUID();
+    await rig.contribuicaoRepository.save({
+      id: idC1 as never,
+      idCampanha: rig.idCampanha as never,
+      idOpcaoContribuicao: randomUUID() as never,
+      nome: 'Berço Montessoriano',
+      valor: 4500 as never,
+      imagemUrl: '🍼',
+      grupo: null,
+      criadaEm: new Date(),
+    } as never);
+    await rig.contribuicaoRepository.save({
+      id: idC2 as never,
+      idCampanha: rig.idCampanha as never,
+      idOpcaoContribuicao: randomUUID() as never,
+      nome: 'Carrinho 3 em 1',
+      valor: 6000 as never,
+      imagemUrl: '🛒',
+      grupo: null,
+      criadaEm: new Date(),
+    } as never);
+
+    const idPag1 = randomUUID();
+    const idPag2 = randomUUID();
+    await rig.pagamentoRepository.save(
+      makePagamento({
+        id: idPag1,
+        idContribuicao: idC1,
+        criadoEm: new Date('2026-06-01T08:00:00Z'),
+      }),
+    );
+    await rig.pagamentoRepository.save(
+      makePagamento({
+        id: idPag2,
+        idContribuicao: idC2,
+        criadoEm: new Date('2026-06-02T08:00:00Z'),
+      }),
+    );
+    await rig.livroFinanceiroRepository.saveLancamentos([
+      makeLancamento({
+        idPagamento: idPag1,
+        idContribuicao: idC1,
+        idCampanha: rig.idCampanha,
+      }),
+      makeLancamento({
+        idPagamento: idPag2,
+        idContribuicao: idC2,
+        idCampanha: rig.idCampanha,
+      }),
+    ]);
+
+    const result = await rig.caller.recebedor.extrato.list({
+      idCampanha: rig.idCampanha,
+      statusFilters: [],
+      cursor: null,
+      limit: 20,
+    });
+
+    const byPag = new Map(result.rows.map((r) => [r.idPagamento, r]));
+    expect(byPag.get(idPag1)?.contribuicaoNome).toBe('Berço Montessoriano');
+    expect(byPag.get(idPag1)?.contribuicaoImagemUrl).toBe('🍼');
+    expect(byPag.get(idPag2)?.contribuicaoNome).toBe('Carrinho 3 em 1');
+    expect(byPag.get(idPag2)?.contribuicaoImagemUrl).toBe('🛒');
   });
 });
