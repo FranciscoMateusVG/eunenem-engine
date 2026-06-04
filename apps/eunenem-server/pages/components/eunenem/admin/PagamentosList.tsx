@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import JsonViewer from "@/components/eunenem/admin/JsonViewer";
+import LancamentosBlock, {
+  type LancamentoRow,
+} from "@/components/eunenem/admin/LancamentosBlock";
 import { PagamentoWebhookList } from "@/components/eunenem/admin/PagamentoWebhookList";
 import { trpc } from "@/lib/trpc.js";
 
 /**
- * PagamentosList — plan 0015 Phase 6 reshape (aperture-i45g5).
+ * PagamentosList — plan 0015 BC reshape, Financeiro folded in (aperture-c5vq2).
  *
  * Renders every pagamento attempt against a contribuicao, sorted criadoEm
  * DESC so the latest attempt sits first. Visitor-retry flows
@@ -38,6 +41,28 @@ import { trpc } from "@/lib/trpc.js";
  * row until Rex's Phase 1 + Phase 3 (entity surgery + webhook handler)
  * ship. The ContribuinteBlock renders the "(sem contribuinte ainda)"
  * affordance for null — same shape as the anonymous-checkout path.
+ *
+ * Plan 0015 BC reshape (aperture-c5vq2 layered on top of Phase 6):
+ *   Financeiro is no longer a sibling section — it's a MODULE inside
+ *   Pagamentos. Each PagamentoCard now nests a <LancamentosBlock /> that
+ *   renders the triple-entry ledger booked by THIS pagamento. The wire
+ *   shape carries the lancamentos slice on each PagamentoAdminDTO; the
+ *   standalone `trpc.admin.financeiro.listByContribuicao` is deprecated
+ *   on the server (additive — kept on the wire, no UI consumer).
+ *
+ *   Visual hierarchy inside each card:
+ *     CardHeader (status + amount + criadoEm)
+ *     CompactRow (método + external ref)
+ *     ContribuinteBlock (who paid)
+ *     ComposicaoTable (what was paid — the price breakdown)
+ *     LancamentosBlock (what was booked — the financeiro ledger)  ← NEW
+ *     ExpandToggle / JsonViewer drawer (debug shelf, collapsed)
+ *     PagamentoWebhookList (diagnostic webhook trail)
+ *
+ *   Rationale: composição shows WHAT the contribuinte paid; the ledger
+ *   shows WHAT the platform booked. They're conceptual partners — reading
+ *   them adjacent makes the double-entry discipline legible at a glance.
+ *   The debug drawer + webhook trail follow as lower-signal diagnostics.
  */
 export default function PagamentosList({
   idContribuicao,
@@ -181,6 +206,13 @@ type PagamentoDTO = {
     criadaEm: string;
     statusBruto?: string;
   };
+  /**
+   * Plan 0015 BC reshape (aperture-c5vq2) — Financeiro folded into
+   * Pagamentos. The triple-entry ledger booked by THIS pagamento ships
+   * inline on the DTO. Empty array for non-aprovado pagamentos. See the
+   * `LancamentosBlock` component for the rendering contract.
+   */
+  lancamentos: readonly LancamentoRow[];
 };
 
 function PagamentoCard({
@@ -198,6 +230,14 @@ function PagamentoCard({
       <CompactRow pagamento={pagamento} />
       <ContribuinteBlock contribuinte={pagamento.intencao.contribuinte} />
       <ComposicaoTable composicao={pagamento.intencao.composicaoValores} />
+      {/* Plan 0015 BC reshape — Financeiro module inline. Sits adjacent to
+          ComposicaoTable because they're conceptual partners: composição
+          shows what the contribuinte PAID, lancamentos show what the
+          platform BOOKED. The double-entry discipline reads at a glance. */}
+      <LancamentosBlock
+        pagamentoStatus={pagamento.status}
+        lancamentos={pagamento.lancamentos}
+      />
       <ExpandToggle expanded={expanded} onToggle={() => setExpanded((v) => !v)} />
       {expanded && (
         <div className="space-y-3 border-t border-line pt-4">

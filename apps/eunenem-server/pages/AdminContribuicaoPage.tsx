@@ -1,22 +1,24 @@
 import { AdminShell } from "@/components/eunenem/admin/AdminShell";
 import ArrecadacaoSection from "@/components/eunenem/admin/sections/ArrecadacaoSection";
-import FinanceiroSection from "@/components/eunenem/admin/sections/FinanceiroSection";
 import PagamentosSection from "@/components/eunenem/admin/sections/PagamentosSection";
 
 /**
  * /admin/contribuicao/:idContribuicao — contribuição detail page
- * (aperture-rsidz.4, W3).
+ * (plan 0015 BC reshape, aperture-c5vq2).
  *
  * The aggregate/multi-BC view. AdminShell receives `activeBc={null}` so the
  * BcStrap renders the legend (the page touches THREE bounded contexts —
  * Arrecadação, Pagamentos, Financeiro — and no single one is "active"). Per-
  * section DddBadge headers carry the individual BC color identity instead.
+ * Financeiro's purple identity now appears as the sub-header strip inside
+ * each PagamentoCard's <LancamentosBlock />, NOT as a sibling section,
+ * because per plan 0015 Locked Decision #1 Financeiro is a MODULE inside
+ * Pagamentos rather than its own BC.
  *
- * SEAM CONTRACT (rsidz.4 §1, non-negotiable for W4/W5):
- *   - The three section components below are file-swap surfaces. W4
- *     overwrites PagamentosSection.tsx; W5 overwrites FinanceiroSection.tsx.
- *     This page imports them by name and never touches the seam shape.
- *   - All three sections share `({ idContribuicao }: { idContribuicao: string }) => JSX.Element`.
+ * SECTION COMPOSITION:
+ *   - ArrecadacaoSection  — emerald BC header, the contribuição slot itself
+ *   - PagamentosSection   — amber BC header, every pagamento attempt PLUS
+ *                           its nested financeiro ledger + webhook trail
  *
  * Breadcrumb chooses "admin / contribuição / <short id>" — we don't have
  * the campanha id at routing time (only the contribuicao id is in the
@@ -46,7 +48,6 @@ export function AdminContribuicaoPage({
       <section className="space-y-10">
         <ArrecadacaoSection idContribuicao={idContribuicao} />
         <PagamentosSection idContribuicao={idContribuicao} />
-        <FinanceiroSection idContribuicao={idContribuicao} />
       </section>
     </AdminShell>
   );
