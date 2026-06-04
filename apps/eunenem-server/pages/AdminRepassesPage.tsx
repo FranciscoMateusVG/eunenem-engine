@@ -267,7 +267,11 @@ function RepasseRow({ row }: { row: RepasseListRow }) {
         </a>
       </td>
       <td className="px-4 py-3 text-[13px] text-ink-soft">
-        {row.recebedorNome}
+        {row.recebedorNome === null ? (
+          <span className="italic text-ink-mute">(sem recebedor)</span>
+        ) : (
+          row.recebedorNome
+        )}
       </td>
       <td className="px-4 py-3 text-right font-mono text-[13px] tabular-nums text-ink">
         {formatBRL(row.amountCents)}

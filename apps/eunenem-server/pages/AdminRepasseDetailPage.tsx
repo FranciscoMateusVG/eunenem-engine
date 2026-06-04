@@ -229,7 +229,14 @@ function FactsGrid({ repasse }: { repasse: RepasseDetail }) {
   const facts: Array<{ label: string; value: React.ReactNode }> = [
     {
       label: "recebedor",
-      value: <span className="text-[13px] text-ink">{repasse.recebedorNome}</span>,
+      value:
+        repasse.recebedorNome === null ? (
+          <span className="text-[13px] italic text-ink-mute">
+            (sem recebedor)
+          </span>
+        ) : (
+          <span className="text-[13px] text-ink">{repasse.recebedorNome}</span>
+        ),
     },
     {
       label: "valor",
@@ -496,7 +503,16 @@ function SummaryFacts({ repasse }: { repasse: RepasseDetail }) {
   return (
     <dl className="grid gap-x-4 gap-y-1.5 sm:grid-cols-[max-content_1fr]">
       <SummaryRow label="campanha" value={repasse.campanhaTitulo} />
-      <SummaryRow label="recebedor" value={repasse.recebedorNome} />
+      <SummaryRow
+        label="recebedor"
+        value={
+          repasse.recebedorNome === null ? (
+            <span className="italic text-ink-mute">(sem recebedor)</span>
+          ) : (
+            repasse.recebedorNome
+          )
+        }
+      />
       <SummaryRow
         label="valor"
         value={
