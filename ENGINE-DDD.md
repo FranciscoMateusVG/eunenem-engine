@@ -162,6 +162,36 @@ Isso mantém o núcleo de cobrança **estável** enquanto a UX de arrecadação 
 
 ---
 
+### 2.7 Evento (supporting)
+
+**Responsabilidade:** dados do **evento** ligado a uma campanha (tipo, data/hora, modalidade presencial/online, endereço opcional). Fora do core financeiro; não participa de Taxas, Pagamentos ou Financeiro.
+
+**Conceitos principais (fase 1 — subdomínio Evento)**
+
+| Conceito | Papel no domínio |
+|----------|------------------|
+| Evento | Agregado raiz; no máximo um por campanha (1:1 via `idCampanha`) |
+| Tipo de Evento | `cha-bebe`, `cha-fraldas`, `cha-surpresa`, `cha-revelacao`, `batizado`, `aniversario` |
+| Modalidade | `presencial` ou `online` |
+| Data e Hora | Instante do evento (`Date`) |
+| Endereço | Texto opcional |
+| IdCampanha | Mirror VO local — não importa `Campanha` de Arrecadação |
+
+**Planejado no mesmo BC (não implementado na fase 1)**
+
+| Subdomínio | Relação |
+|------------|---------|
+| Convite | 1:1 com `IdEvento` — nome exibido, mensagem, personalização |
+| Lista de Convidados | Por `IdEvento` — convidados, RSVP, link de confirmação |
+
+**Integração:** `criarEvento` valida que a campanha existe via `CampanhaRepository`.
+
+**Persistência (fase 1):** apenas `EventoRepositoryMemory`.
+
+> Não confundir com `OpcaoContribuicao.tipo === 'convite'` em Arrecadação (sacola de contribuição) nem com `EventoPagamento` em Pagamentos.
+
+---
+
 ## 3. Fluxo principal (ponta a ponta)
 
 Ordem lógica dos passos, do ponto de vista do domínio:

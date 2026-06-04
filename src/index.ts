@@ -12,27 +12,11 @@ export { RecebedorRepositoryPostgres } from './adapters/arrecadacao/recebedor-re
 export type { CatRepository } from './adapters/cat-repository.js';
 export type { Database } from './adapters/database.js';
 export { createDatabase } from './adapters/database.js';
+export type { EventoRepository } from './adapters/evento/evento-repository.js';
+export { EventoRepositoryMemory } from './adapters/evento/evento-repository.memory.js';
 export type { LivroFinanceiroRepository } from './adapters/financeiro/livro-repository.js';
 export { LivroFinanceiroRepositoryMemory } from './adapters/financeiro/livro-repository.memory.js';
 export { LivroFinanceiroRepositoryPostgres } from './adapters/financeiro/livro-repository.postgres.js';
-// aperture-1n6u8: payment webhook event archive (infrastructure boundary).
-// aperture-2sp6m: findByPagamentoId + FindByPagamentoIdOptions for admin trail.
-export type {
-  FindByPagamentoIdOptions,
-  SaveReceivedInput,
-  SaveReceivedResult,
-  WebhookEventArchive,
-  WebhookEventRecord,
-} from './adapters/webhook-archive/webhook-event-archive.js';
-export { PROCESSING_ERROR_MAX_LENGTH } from './adapters/webhook-archive/webhook-event-archive.js';
-export { WebhookEventArchiveMemory } from './adapters/webhook-archive/webhook-event-archive.memory.js';
-export { WebhookEventArchivePostgres } from './adapters/webhook-archive/webhook-event-archive.postgres.js';
-export type {
-  StripeDispatchResult,
-  StripePipelineArgs,
-  StripePipelineResult,
-} from './adapters/webhook-archive/stripe-webhook-pipeline.js';
-export { archiveAndDispatchStripeEvent } from './adapters/webhook-archive/stripe-webhook-pipeline.js';
 export {
   computeCardSurchargeCents,
   STRIPE_CARD_FIXED_CENTS,
@@ -73,6 +57,24 @@ export { criarAuth } from './adapters/usuario/criar-auth.js';
 export type { UsuarioRepository } from './adapters/usuario/repository.js';
 export { UsuarioRepositoryMemory } from './adapters/usuario/repository.memory.js';
 export { UsuarioRepositoryPostgres } from './adapters/usuario/repository.postgres.js';
+export type {
+  StripeDispatchResult,
+  StripePipelineArgs,
+  StripePipelineResult,
+} from './adapters/webhook-archive/stripe-webhook-pipeline.js';
+export { archiveAndDispatchStripeEvent } from './adapters/webhook-archive/stripe-webhook-pipeline.js';
+// aperture-1n6u8: payment webhook event archive (infrastructure boundary).
+// aperture-2sp6m: findByPagamentoId + FindByPagamentoIdOptions for admin trail.
+export type {
+  FindByPagamentoIdOptions,
+  SaveReceivedInput,
+  SaveReceivedResult,
+  WebhookEventArchive,
+  WebhookEventRecord,
+} from './adapters/webhook-archive/webhook-event-archive.js';
+export { PROCESSING_ERROR_MAX_LENGTH } from './adapters/webhook-archive/webhook-event-archive.js';
+export { WebhookEventArchiveMemory } from './adapters/webhook-archive/webhook-event-archive.memory.js';
+export { WebhookEventArchivePostgres } from './adapters/webhook-archive/webhook-event-archive.postgres.js';
 export { hashClientPII } from './observability/hash-client-pii.js';
 
 // --- Domain: Arrecadação ---
@@ -154,6 +156,41 @@ export {
 export type { Cat, CatId, CatName, CreateCatInput } from './domain/cat.js';
 export { CatIdSchema, CatNameSchema, CreateCatInputSchema } from './domain/cat.js';
 
+// --- Domain: Evento (supporting) ---
+
+export type {
+  AtualizarEventoCampos,
+  CriarEventoInput as CriarEventoDominioInput,
+  Evento,
+} from './domain/evento/entities/evento.js';
+export {
+  criarEvento as criarEventoDominio,
+  eventoComCamposAtualizados,
+  eventoComDataHora,
+  eventoComEndereco,
+  eventoComModalidade,
+  eventoComTipo,
+} from './domain/evento/entities/evento.js';
+export type { DataHoraEvento } from './domain/evento/value-objects/data-hora-evento.js';
+export { DataHoraEventoSchema } from './domain/evento/value-objects/data-hora-evento.js';
+export type { EnderecoEvento } from './domain/evento/value-objects/endereco-evento.js';
+export {
+  EnderecoEventoNullableSchema,
+  EnderecoEventoSchema,
+} from './domain/evento/value-objects/endereco-evento.js';
+export type {
+  IdCampanha as IdCampanhaEvento,
+  IdEvento,
+} from './domain/evento/value-objects/ids.js';
+export {
+  IdCampanhaSchema as IdCampanhaEventoSchema,
+  IdEventoSchema,
+} from './domain/evento/value-objects/ids.js';
+export type { ModalidadeEvento } from './domain/evento/value-objects/modalidade-evento.js';
+export { ModalidadeEventoSchema } from './domain/evento/value-objects/modalidade-evento.js';
+export type { TipoEvento } from './domain/evento/value-objects/tipo-evento.js';
+export { TipoEventoSchema } from './domain/evento/value-objects/tipo-evento.js';
+
 // --- Domain: Financeiro ---
 
 export type {
@@ -185,12 +222,6 @@ export {
 } from './domain/financeiro/entities/repasse-recebedor.js';
 export type { DadosRecebedorAtivo } from './domain/financeiro/value-objects/dados-recebedor-ativo.js';
 export { DadosRecebedorAtivoSchema } from './domain/financeiro/value-objects/dados-recebedor-ativo.js';
-// aperture-led0r: maturation rule.
-export type { RegraMaturacao } from './domain/financeiro/value-objects/regra-maturacao.js';
-export {
-  calcularMaturaEm,
-  REGRAS_MATURACAO_PADRAO,
-} from './domain/financeiro/value-objects/regra-maturacao.js';
 export type {
   IdContribuicaoReferencia as IdContribuicaoReferenciaFinanceiro,
   IdLancamentoFinanceiro,
@@ -207,6 +238,12 @@ export {
   calcularReceitaPlataforma,
   ReceitaPlataformaSchema,
 } from './domain/financeiro/value-objects/receita-plataforma.js';
+// aperture-led0r: maturation rule.
+export type { RegraMaturacao } from './domain/financeiro/value-objects/regra-maturacao.js';
+export {
+  calcularMaturaEm,
+  REGRAS_MATURACAO_PADRAO,
+} from './domain/financeiro/value-objects/regra-maturacao.js';
 export type {
   SaldoCentavos,
   SaldoRecebedor,
@@ -385,6 +422,10 @@ export { ArrecadacaoUltimoAdministradorError } from './errors/arrecadacao/ultimo
 export { CatAlreadyExistsError } from './errors/cat-already-exists.error.js';
 export { CheckoutCampanhaSemRecebedorError } from './errors/checkout/campanha-sem-recebedor.error.js';
 export { CheckoutPlataformaMismatchError } from './errors/checkout/plataforma-mismatch.error.js';
+export { EventoCampanhaJaTemEventoError } from './errors/evento/campanha-ja-tem-evento.error.js';
+export { EventoCampanhaNaoEncontradaError } from './errors/evento/campanha-nao-encontrada.error.js';
+export { EventoInputInvalidoError } from './errors/evento/input-invalido.error.js';
+export { EventoNaoEncontradoError } from './errors/evento/nao-encontrado.error.js';
 export { FinanceiroInputInvalidoError } from './errors/financeiro/input-invalido.error.js';
 export { FinanceiroPagamentoJaRegistradoError } from './errors/financeiro/pagamento-ja-registrado.error.js';
 export { FinanceiroPagamentoNaoAprovadoError } from './errors/financeiro/pagamento-nao-aprovado.error.js';
@@ -572,6 +613,39 @@ export {
 } from './use-cases/checkout/obter-contribuicoes-precalculadas-campanha.js';
 export type { CreateCatDeps } from './use-cases/create-cat.js';
 export { createCat } from './use-cases/create-cat.js';
+export type {
+  AtualizarEventoDeps,
+  AtualizarEventoInput,
+} from './use-cases/evento/atualizar-evento.js';
+export {
+  AtualizarEventoInputSchema,
+  atualizarEvento,
+} from './use-cases/evento/atualizar-evento.js';
+export type { CriarEventoDeps, CriarEventoInput } from './use-cases/evento/criar-evento.js';
+export { CriarEventoInputSchema, criarEvento } from './use-cases/evento/criar-evento.js';
+export type {
+  ObterEventoPorIdDeps,
+  ObterEventoPorIdInput,
+} from './use-cases/evento/obter-evento-por-id.js';
+export {
+  ObterEventoPorIdInputSchema,
+  obterEventoPorId,
+} from './use-cases/evento/obter-evento-por-id.js';
+export type {
+  ObterEventoPorIdCampanhaDeps,
+  ObterEventoPorIdCampanhaInput,
+} from './use-cases/evento/obter-evento-por-id-campanha.js';
+export {
+  ObterEventoPorIdCampanhaInputSchema,
+  obterEventoPorIdCampanha,
+} from './use-cases/evento/obter-evento-por-id-campanha.js';
+// aperture-led0r: maturation use-case.
+export type {
+  MaturarLancamentosPendentesDeps,
+  MaturarLancamentosPendentesInput,
+  MaturarLancamentosPendentesOutput,
+} from './use-cases/financeiro/maturar-lancamentos-pendentes.js';
+export { maturarLancamentosPendentes } from './use-cases/financeiro/maturar-lancamentos-pendentes.js';
 export type { ObterReceitaPlataformaDeps } from './use-cases/financeiro/obter-receita-plataforma.js';
 export { obterReceitaPlataforma } from './use-cases/financeiro/obter-receita-plataforma.js';
 export type {
@@ -582,13 +656,6 @@ export {
   ObterSaldoRecebedorInputSchema,
   obterSaldoRecebedor,
 } from './use-cases/financeiro/obter-saldo-recebedor.js';
-// aperture-led0r: maturation use-case.
-export type {
-  MaturarLancamentosPendentesDeps,
-  MaturarLancamentosPendentesInput,
-  MaturarLancamentosPendentesOutput,
-} from './use-cases/financeiro/maturar-lancamentos-pendentes.js';
-export { maturarLancamentosPendentes } from './use-cases/financeiro/maturar-lancamentos-pendentes.js';
 export type {
   RegistrarEfeitosFinanceirosPagamentoAprovadoDeps,
   RegistrarEfeitosFinanceirosPagamentoAprovadoInput,
