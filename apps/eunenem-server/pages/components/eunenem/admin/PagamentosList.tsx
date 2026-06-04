@@ -240,26 +240,26 @@ type PagamentoDTO = {
    * pagamento is aprovado, the Stripe balance-transaction maturation
    * timestamp tells the UI when the funds become available for transfer
    * to the recebedor. Null for non-aprovado pagamentos (and during the
-   * brief window between charge.succeeded and the dispatcher persisting
-   * available_on).
+   * brief window between `charge.succeeded` and the dispatcher persisting
+   * `intencao.balanceTransactionAvailableOn` to the DB).
    *
-   * PARALLEL-PREP STUB: OPTIONAL today because Rex's mjgxe backend hasn't
-   * shipped yet. When his PR opens the wire will carry the field for
-   * every pagamento and the type can drop the `?` — single-line swap,
-   * no UI change. UI renders the existing aprovado chip until the field
-   * starts flowing.
+   * Source of truth: `pagamentos.listByContribuicao` projects this from
+   * the column populated by the webhook dispatcher (PIX = NOW() inline
+   * at `payment_intent.succeeded`; cartão = Stripe API
+   * `obterAvailableOnDoCharge` on `charge.balance_transaction`).
    */
-  availableOn?: string | null;
+  availableOn: string | null;
   /**
    * Plan 0015 derived-liberacao extension (aperture-mjgxe). Server-side
    * derived from (status, availableOn) per the contract in
    * `LiberacaoState`'s doc-block above. Null for non-aprovado pagamentos.
    *
-   * PARALLEL-PREP STUB: OPTIONAL today (Rex's backend not shipped yet).
-   * Existing aprovado chip stays in place until field starts flowing —
-   * no compile-time break, no visual regression.
+   * Source of truth: server-side at DTO projection time —
+   * `pagamentos.listByContribuicao` evaluates the predicate with `now()`
+   * against `availableOn` and labels the chip accordingly. UI does no
+   * temporal math.
    */
-  liberacao?: LiberacaoState;
+  liberacao: LiberacaoState;
 };
 
 function PagamentoCard({
@@ -313,23 +313,22 @@ function PagamentoCard({
 }
 
 function CardHeader({ pagamento }: { pagamento: PagamentoDTO }) {
-  const liberacao = pagamento.liberacao ?? null;
-  const availableOn = pagamento.availableOn ?? null;
-  const showLiberacaoSubLabel =
-    liberacao === "aguardando_liberacao" && availableOn !== null;
-
   return (
     <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
       <div className="flex flex-col gap-1">
         <div className="flex items-center gap-3">
-          <StatusPill status={pagamento.status} liberacao={liberacao} />
+          <StatusPill
+            status={pagamento.status}
+            liberacao={pagamento.liberacao}
+          />
           <span className="font-mono text-[15px] tabular-nums text-ink">
             {formatBRL(pagamento.intencao.amountCents)}
           </span>
         </div>
-        {showLiberacaoSubLabel && (
-          <LiberacaoSubLabel availableOn={availableOn} />
-        )}
+        {pagamento.liberacao === "aguardando_liberacao" &&
+          pagamento.availableOn !== null && (
+            <LiberacaoSubLabel availableOn={pagamento.availableOn} />
+          )}
       </div>
       <span className="font-mono text-[12px] tabular-nums text-ink-soft">
         {formatCriadoEmShort(pagamento.criadoEm)}
