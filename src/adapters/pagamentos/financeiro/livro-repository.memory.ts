@@ -321,6 +321,82 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
   }
 
   /**
+   * aperture-riywh. Cursor-paginated admin browse. Cursor encodes the
+   * (solicitadoEm-iso, id) of the last row of the previous page; we
+   * include rows STRICTLY EARLIER (DESC sort) than the cursor row.
+   * Plain string encoding `${ms}:${id}` — opaque to callers.
+   */
+  async findRepassesPaginated(input: {
+    readonly statusFilter: 'solicitado' | 'aprovado' | 'all';
+    readonly cursor: string | null;
+    readonly limit: number;
+  }): Promise<{
+    readonly repasses: readonly RepasseRecebedor[];
+    readonly nextCursor: string | null;
+    readonly totalCount: number;
+  }> {
+    return tracer.startActiveSpan('db.financeiro_livro.repasses.findPaginated', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        const filtered = [...this.repasses.values()].filter((r) =>
+          input.statusFilter === 'all' ? true : r.status === input.statusFilter,
+        );
+        // Sort DESC by solicitadoEm, then by id ASC as tiebreaker.
+        const sorted = filtered.slice().sort((a: RepasseRecebedor, b: RepasseRecebedor) => {
+          const t = b.solicitadoEm.getTime() - a.solicitadoEm.getTime();
+          return t !== 0 ? t : a.id.localeCompare(b.id);
+        });
+
+        const startIdx = input.cursor === null ? 0 : decodeCursorIndex(sorted, input.cursor);
+        const page = sorted.slice(startIdx, startIdx + input.limit);
+        const nextCursor =
+          startIdx + input.limit < sorted.length && page.length > 0
+            ? encodeCursor(page[page.length - 1] as RepasseRecebedor)
+            : null;
+
+        span.setStatus({ code: SpanStatusCode.OK });
+        return { repasses: page, nextCursor, totalCount: sorted.length };
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  /**
+   * aperture-riywh. Lançamentos linked to a single repasse (drill-down).
+   */
+  async findLancamentosByIdRepasse(
+    idRepasse: IdRepasse,
+  ): Promise<readonly LancamentoFinanceiro[]> {
+    return tracer.startActiveSpan(
+      'db.financeiro_livro.lancamentos.findByIdRepasse',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+        try {
+          const result = [...this.lancamentos.values()]
+            .filter((l) => l.idRepasse === idRepasse)
+            .sort(
+              (a: LancamentoFinanceiro, b: LancamentoFinanceiro) =>
+                a.criadoEm.getTime() - b.criadoEm.getTime(),
+            );
+          span.setStatus({ code: SpanStatusCode.OK });
+          return result;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  /**
    * aperture-s03dr. Eligible-lançamentos preflight scan.
    *
    * Mirrors the postgres query: recebedor tipo + campanha match,
@@ -522,4 +598,33 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
     const lancamentos = await this.findLancamentosByIdPagamento(idPagamento);
     return lancamentos.length > 0;
   }
+}
+
+/**
+ * Encode a repasse cursor: `${solicitadoEm-ms}:${id}`.
+ * Opaque to callers — adapter-internal format.
+ */
+function encodeCursor(r: RepasseRecebedor): string {
+  return `${r.solicitadoEm.getTime()}:${r.id}`;
+}
+
+/**
+ * Decode the cursor: return the index of the FIRST row whose
+ * (solicitadoEm, id) is STRICTLY LESS THAN the cursor's tuple under the
+ * DESC sort. If the cursor references a row no longer in the page (e.g.
+ * because filter changed between pages), returns sorted.length (empty
+ * page).
+ */
+function decodeCursorIndex(sorted: readonly RepasseRecebedor[], cursor: string): number {
+  const colonIdx = cursor.indexOf(':');
+  if (colonIdx === -1) return sorted.length;
+  const cursorMs = Number(cursor.slice(0, colonIdx));
+  const cursorId = cursor.slice(colonIdx + 1);
+  for (let i = 0; i < sorted.length; i += 1) {
+    const r = sorted[i] as RepasseRecebedor;
+    const rMs = r.solicitadoEm.getTime();
+    if (rMs < cursorMs) return i;
+    if (rMs === cursorMs && r.id > cursorId) return i;
+  }
+  return sorted.length;
 }

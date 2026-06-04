@@ -441,6 +441,122 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
   }
 
   /**
+   * aperture-riywh. Admin-facing cursor-paginated browse. Cursor
+   * encodes `(solicitadoEm-ms):(id)` for stable DESC sort.
+   *
+   * Sort order: (solicitadoEm DESC, id ASC) — DESC on the timestamp
+   * shows the freshest requests first; the id ASC tiebreaker is for
+   * deterministic ordering across equal timestamps. The cursor reads:
+   * "give me rows STRICTLY EARLIER than (cursorMs, cursorId) in the
+   * DESC sense."
+   */
+  async findRepassesPaginated(input: {
+    readonly statusFilter: 'solicitado' | 'aprovado' | 'all';
+    readonly cursor: string | null;
+    readonly limit: number;
+  }): Promise<{
+    readonly repasses: readonly RepasseRecebedor[];
+    readonly nextCursor: string | null;
+    readonly totalCount: number;
+  }> {
+    return tracer.startActiveSpan('db.financeiro_livro.repasses.findPaginated', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        // biome-ignore lint/suspicious/noExplicitAny: see saveLancamentos
+        let countQuery = (this.db as any).selectFrom('repasses_recebedor');
+        if (input.statusFilter !== 'all') {
+          countQuery = countQuery.where('status', '=', input.statusFilter);
+        }
+        const totalRow = await countQuery
+          // biome-ignore lint/suspicious/noExplicitAny: see saveLancamentos
+          .select((eb: any) => eb.fn.countAll().as('cnt'))
+          .executeTakeFirstOrThrow();
+        const totalCount = Number(totalRow.cnt);
+
+        // biome-ignore lint/suspicious/noExplicitAny: see saveLancamentos
+        let pageQuery = (this.db as any)
+          .selectFrom('repasses_recebedor')
+          .selectAll();
+        if (input.statusFilter !== 'all') {
+          pageQuery = pageQuery.where('status', '=', input.statusFilter);
+        }
+        if (input.cursor !== null) {
+          const colonIdx = input.cursor.indexOf(':');
+          if (colonIdx !== -1) {
+            const cursorMs = Number(input.cursor.slice(0, colonIdx));
+            const cursorId = input.cursor.slice(colonIdx + 1);
+            const cursorDate = new Date(cursorMs);
+            pageQuery = pageQuery.where(({ eb, or, and }: any) =>
+              or([
+                eb('solicitado_em', '<', cursorDate),
+                and([eb('solicitado_em', '=', cursorDate), eb('id', '>', cursorId)]),
+              ]),
+            );
+          }
+        }
+        const rows = (await pageQuery
+          .orderBy('solicitado_em', 'desc')
+          .orderBy('id', 'asc')
+          .limit(input.limit + 1)
+          .execute()) as RepasseRow[];
+
+        const hasMore = rows.length > input.limit;
+        const pageRows = hasMore ? rows.slice(0, input.limit) : rows;
+        const repasses = pageRows.map(repasseFromRow);
+        const last = pageRows[pageRows.length - 1];
+        const nextCursor =
+          hasMore && last !== undefined
+            ? `${last.solicitado_em.getTime()}:${last.id}`
+            : null;
+
+        span.setStatus({ code: SpanStatusCode.OK });
+        return { repasses, nextCursor, totalCount };
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  /**
+   * aperture-riywh. Lançamentos linked to a single repasse (drill-down).
+   * Uses the partial index `lancamentos_financeiros_id_repasse_idx`
+   * (migration 021).
+   */
+  async findLancamentosByIdRepasse(
+    idRepasse: IdRepasse,
+  ): Promise<readonly LancamentoFinanceiro[]> {
+    return tracer.startActiveSpan(
+      'db.financeiro_livro.lancamentos.findByIdRepasse',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+        try {
+          // biome-ignore lint/suspicious/noExplicitAny: see saveLancamentos
+          const rows = (await (this.db as any)
+            .selectFrom('lancamentos_financeiros')
+            .selectAll()
+            .where('id_repasse', '=', idRepasse)
+            .orderBy('criado_em', 'asc')
+            .execute()) as LancamentoRow[];
+
+          const result = rows.map(lancamentoFromRow);
+          span.setStatus({ code: SpanStatusCode.OK });
+          return result;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  /**
    * aperture-s03dr. Eligible-lançamentos JOIN — single query, single
    * indexed scan on (id_campanha, transferido_em IS NULL ...). Read-only;
    * does NOT lock rows. The atomic sweep happens inside

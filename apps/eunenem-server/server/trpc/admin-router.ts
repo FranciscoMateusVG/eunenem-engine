@@ -34,7 +34,14 @@ import type { LancamentoFinanceiro } from "../../../../src/domain/pagamentos/fin
 import type { IdPagamentoReferencia } from "../../../../src/domain/pagamentos/financeiro/value-objects/ids.js";
 import type { Pagamento } from "../../../../src/domain/pagamentos/entities/pagamento.js";
 import type { IdContribuicaoPagamento } from "../../../../src/domain/pagamentos/value-objects/ids.js";
-import { contribuicaoEstaIndisponivel, ID_PLATAFORMA_EUNENEM } from "../../../../src/index.js";
+import {
+  aprovarRepasseRecebedor,
+  contribuicaoEstaIndisponivel,
+  FinanceiroInputInvalidoError,
+  FinanceiroRepasseNaoEncontradoError,
+  FinanceiroRepasseStatusInvalidoError,
+  ID_PLATAFORMA_EUNENEM,
+} from "../../../../src/index.js";
 import type { TrpcContext } from "./context.js";
 
 const t = initTRPC.context<TrpcContext>().create();
@@ -1124,6 +1131,280 @@ const webhooksRouter = t.router({
     }),
 });
 
+/* ─────────────────────────────────────────────────────────────────────────
+ * repasses — aperture-riywh (Track 3 backend).
+ *
+ * Admin queue + drill-down + approval for RepasseRecebedor (the 2-state
+ * FSM landed in Track 1 / aperture-s03dr). Three procedures:
+ *
+ *   1. list({ statusFilter, cursor, limit })
+ *      Cursor-paginated browse across ALL campanhas (defaults to
+ *      statusFilter='solicitado' — the action queue). Each row carries
+ *      campanha title + recebedor name lookups (N+1 by design — admin
+ *      queue is bounded small). Returns totalCount so the UI can render
+ *      "N pendentes" without exhausting pagination.
+ *
+ *   2. aprovar({ idRepasse, bankTransferRef })
+ *      Wraps `aprovarRepasseRecebedor` use-case from Track 1.
+ *      Idempotent at same terminal state. Typed errors map to TRPCError:
+ *        - FinanceiroRepasseNaoEncontradoError → NOT_FOUND
+ *        - FinanceiroRepasseStatusInvalidoError → CONFLICT
+ *        - FinanceiroInputInvalidoError → BAD_REQUEST
+ *
+ *   3. show({ idRepasse })
+ *      Drill-down detail: repasse summary + linked lançamentos. Each
+ *      lançamento gets contribuição-aware enrichment (contribuinte
+ *      name from the parent pagamento's intencao).
+ *
+ * Vance scaffolds the /admin/repasses UI (bead aperture-vi0hy) against
+ * the schemas EXPORTED from this block. Parallel-prep per
+ * specialist-delegation §9 + contract-pinning 4-layer defense.
+ *
+ * Supersedes aperture-09hap (admin marcarLancamentoTransferido tRPC) —
+ * the approval path is now the bulk transition under aprovar, not a
+ * per-lançamento flip.
+ * ────────────────────────────────────────────────────────────────────── */
+
+const RepasseStatusSchema = z.enum(["solicitado", "aprovado"]);
+export type RepasseStatus = z.infer<typeof RepasseStatusSchema>;
+
+const RepasseAdminDTOSchema = z.object({
+  idRepasse: z.string(),
+  idCampanha: z.string(),
+  campanhaTitulo: z.string(),
+  recebedorNome: z.string().nullable(),
+  amountCents: z.number().int().nonnegative(),
+  numLancamentos: z.number().int().nonnegative(),
+  status: RepasseStatusSchema,
+  solicitadoEm: z.string(),
+  aprovadoEm: z.string().nullable(),
+  bankTransferRef: z.string().nullable(),
+});
+export type RepasseAdminDTO = z.infer<typeof RepasseAdminDTOSchema>;
+
+const RepasseLancamentoDetailSchema = z.object({
+  idLancamento: z.string(),
+  idPagamento: z.string(),
+  idContribuicao: z.string(),
+  amountCents: z.number().int().nonnegative(),
+  contribuinteNome: z.string().nullable(),
+  pagamentoCriadoEm: z.string(),
+});
+export type RepasseLancamentoDetail = z.infer<typeof RepasseLancamentoDetailSchema>;
+
+const RepasseDetailDTOSchema = RepasseAdminDTOSchema.extend({
+  lancamentos: z.array(RepasseLancamentoDetailSchema),
+});
+export type RepasseDetailDTO = z.infer<typeof RepasseDetailDTOSchema>;
+
+const RepassesListInputSchema = z.object({
+  statusFilter: RepasseStatusSchema.or(z.literal("all")).default("solicitado"),
+  cursor: z.string().nullable(),
+  limit: z.number().int().min(1).max(100).default(20),
+});
+
+const RepassesListOutputSchema = z.object({
+  rows: z.array(RepasseAdminDTOSchema),
+  nextCursor: z.string().nullable(),
+  totalCount: z.number().int().min(0),
+});
+
+const RepassesAprovarInputSchema = z.object({
+  idRepasse: z.string().uuid(),
+  bankTransferRef: z.string().min(1).max(255).nullable().default(null),
+});
+
+const RepassesAprovarOutputSchema = z.object({
+  idRepasse: z.string(),
+  aprovadoEm: z.string(),
+  numLancamentosTransferidos: z.number().int().nonnegative(),
+  totalCents: z.number().int().nonnegative(),
+});
+
+const RepassesShowInputSchema = z.object({
+  idRepasse: z.string().uuid(),
+});
+
+const RepassesShowOutputSchema = z.object({
+  repasse: RepasseDetailDTOSchema.nullable(),
+});
+
+function toRepasseAdminDTO(
+  repasse: {
+    id: string;
+    idCampanha: string;
+    amountCents: number;
+    status: RepasseStatus;
+    solicitadoEm: Date;
+    aprovadoEm: Date | null;
+    bankTransferRef: string | null;
+  },
+  campanhaTitulo: string,
+  recebedorNome: string | null,
+  numLancamentos: number,
+): RepasseAdminDTO {
+  return {
+    idRepasse: repasse.id,
+    idCampanha: repasse.idCampanha,
+    campanhaTitulo,
+    recebedorNome,
+    amountCents: repasse.amountCents as unknown as number,
+    numLancamentos,
+    status: repasse.status,
+    solicitadoEm: repasse.solicitadoEm.toISOString(),
+    aprovadoEm: repasse.aprovadoEm?.toISOString() ?? null,
+    bankTransferRef: repasse.bankTransferRef,
+  };
+}
+
+const repassesRouter = t.router({
+  list: t.procedure
+    .input(RepassesListInputSchema)
+    .output(RepassesListOutputSchema)
+    .query(async ({ ctx, input }) => {
+      const { repasses, nextCursor, totalCount } =
+        await ctx.deps.livroFinanceiroRepository.findRepassesPaginated({
+          statusFilter: input.statusFilter,
+          cursor: input.cursor,
+          limit: input.limit,
+        });
+
+      const rows: RepasseAdminDTO[] = (
+        await Promise.all(
+          repasses.map(async (r) => {
+            const campanha = await ctx.deps.campanhaRepository.findById(
+              r.idCampanha as IdCampanha,
+            );
+            // Tenant filter — defensive across plataformas.
+            if (campanha && campanha.idPlataforma !== ID_PLATAFORMA_EUNENEM) {
+              return null;
+            }
+            const titulo = campanha?.titulo ?? "(campanha removida)";
+            const recebedorAtivo =
+              await ctx.deps.recebedorRepository.findAtivoByCampanhaId(
+                r.idCampanha as IdCampanha,
+              );
+            const recebedorNome =
+              recebedorAtivo?.dadosRecebedor.nomeTitular ?? null;
+            const linked =
+              await ctx.deps.livroFinanceiroRepository.findLancamentosByIdRepasse(
+                r.id,
+              );
+            return toRepasseAdminDTO(r, titulo, recebedorNome, linked.length);
+          }),
+        )
+      ).filter((row): row is RepasseAdminDTO => row !== null);
+
+      return { rows, nextCursor, totalCount };
+    }),
+
+  aprovar: t.procedure
+    .input(RepassesAprovarInputSchema)
+    .output(RepassesAprovarOutputSchema)
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const result = await aprovarRepasseRecebedor(
+          {
+            livroFinanceiroRepository: ctx.deps.livroFinanceiroRepository,
+            clock: ctx.deps.clock,
+            observability: ctx.deps.observability,
+          },
+          {
+            idRepasse: input.idRepasse as never,
+            bankTransferRef: input.bankTransferRef,
+          },
+        );
+
+        return {
+          idRepasse: result.repasse.id,
+          aprovadoEm: (
+            result.repasse.aprovadoEm ?? ctx.deps.clock()
+          ).toISOString(),
+          numLancamentosTransferidos: result.lancamentosAfetados,
+          totalCents: result.repasse.amountCents as unknown as number,
+        };
+      } catch (error: unknown) {
+        if (error instanceof FinanceiroRepasseNaoEncontradoError) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "repasse_nao_encontrado",
+          });
+        }
+        if (error instanceof FinanceiroRepasseStatusInvalidoError) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "repasse_status_invalido",
+          });
+        }
+        if (error instanceof FinanceiroInputInvalidoError) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: error.message,
+          });
+        }
+        throw error;
+      }
+    }),
+
+  show: t.procedure
+    .input(RepassesShowInputSchema)
+    .output(RepassesShowOutputSchema)
+    .query(async ({ ctx, input }) => {
+      const repasse = await ctx.deps.livroFinanceiroRepository.findRepasseById(
+        input.idRepasse as never,
+      );
+      if (!repasse) return { repasse: null };
+
+      const campanha = await ctx.deps.campanhaRepository.findById(
+        repasse.idCampanha as IdCampanha,
+      );
+      if (!campanha || campanha.idPlataforma !== ID_PLATAFORMA_EUNENEM) {
+        return { repasse: null };
+      }
+      const recebedorAtivo =
+        await ctx.deps.recebedorRepository.findAtivoByCampanhaId(
+          repasse.idCampanha as IdCampanha,
+        );
+      const linked =
+        await ctx.deps.livroFinanceiroRepository.findLancamentosByIdRepasse(
+          repasse.id,
+        );
+
+      const lancamentos: RepasseLancamentoDetail[] = await Promise.all(
+        linked.map(async (l) => {
+          const pagamento = await ctx.deps.pagamentoRepository.findById(
+            l.idPagamento as never,
+          );
+          const contribuinteNome =
+            pagamento?.intencao.contribuinte?.nome ?? null;
+          const pagamentoCriadoEm = (
+            pagamento?.criadoEm ?? l.criadoEm
+          ).toISOString();
+          return {
+            idLancamento: l.id,
+            idPagamento: l.idPagamento,
+            idContribuicao: l.idContribuicao,
+            amountCents: l.amountCents as unknown as number,
+            contribuinteNome,
+            pagamentoCriadoEm,
+          };
+        }),
+      );
+
+      const detailDTO: RepasseDetailDTO = {
+        ...toRepasseAdminDTO(
+          repasse,
+          campanha.titulo,
+          recebedorAtivo?.dadosRecebedor.nomeTitular ?? null,
+          linked.length,
+        ),
+        lancamentos,
+      };
+
+      return { repasse: detailDTO };
+    }),
+});
+
 export const adminRouter = t.router({
   /** Nested sub-router for usuarios browse + paginated list. */
   usuarios: usuariosRouter,
@@ -1213,4 +1494,11 @@ export const adminRouter = t.router({
    * (Vance bead aperture-pf348).
    */
   webhooks: webhooksRouter,
+
+  /**
+   * Admin queue + drill-down + approval for RepasseRecebedor
+   * (aperture-riywh). Powers the new top-level /admin/repasses tab
+   * (Vance bead aperture-vi0hy).
+   */
+  repasses: repassesRouter,
 });

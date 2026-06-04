@@ -85,6 +85,38 @@ export interface LivroFinanceiroRepository {
   findRepasseById(idRepasse: IdRepasse): Promise<RepasseRecebedor | undefined>;
   findRepassesByIdCampanha(idCampanha: IdCampanha): Promise<readonly RepasseRecebedor[]>;
   /**
+   * aperture-riywh. Admin-facing paginated browse across ALL campanhas.
+   * Filters by `statusFilter` (solicitado | aprovado | all); the default
+   * filter used by the admin UI is 'solicitado' (the action queue).
+   * Cursor is opaque (the postgres adapter encodes (solicitadoEm, id)
+   * for stable desc sort; memory adapter encodes the same shape).
+   *
+   * Returns:
+   *   - repasses: page of RepasseRecebedor (sorted by solicitadoEm DESC).
+   *   - nextCursor: opaque pagination cursor; null when no more pages.
+   *   - totalCount: total matching rows (NOT page size). Lets the UI
+   *     render "N solicitações pendentes" even before pagination ends.
+   */
+  findRepassesPaginated(input: {
+    readonly statusFilter: 'solicitado' | 'aprovado' | 'all';
+    readonly cursor: string | null;
+    readonly limit: number;
+  }): Promise<{
+    readonly repasses: readonly RepasseRecebedor[];
+    readonly nextCursor: string | null;
+    readonly totalCount: number;
+  }>;
+  /**
+   * aperture-riywh. Returns lançamentos linked to a single repasse
+   * (`id_repasse = X`), in `criadoEm ASC` order. Used by the admin
+   * drill-down to render the breakdown of which contributions a repasse
+   * will pay out. Empty array if the repasse has no linked lançamentos
+   * (shouldn't happen post-solicitação, but defensive).
+   */
+  findLancamentosByIdRepasse(
+    idRepasse: IdRepasse,
+  ): Promise<readonly LancamentoFinanceiro[]>;
+  /**
    * aperture-s03dr. Returns the set of lançamentos currently eligible
    * for inclusion in a new repasse for `idCampanha`. Eligibility is the
    * full derived-liberação predicate:
