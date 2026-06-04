@@ -276,6 +276,7 @@ describe('recebedor.extrato.summary — KPI aggregation (aperture-7g5sx)', () =>
       totalRecebidoCents: 0,
       resgatadoCents: 0,
       saldoDisponivelCents: 0,
+      aguardandoAprovacaoCents: 0,
       aguardandoLiberacaoCents: 0,
       proximaTransfDate: null,
       totalPresentes: 0,
@@ -908,5 +909,195 @@ describe('recebedor.extrato.list — contribuicaoNome + contribuicaoImagemUrl (a
     expect(byPag.get(idPag1)?.contribuicaoImagemUrl).toBe('🍼');
     expect(byPag.get(idPag2)?.contribuicaoNome).toBe('Carrinho 3 em 1');
     expect(byPag.get(idPag2)?.contribuicaoImagemUrl).toBe('🛒');
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────
+//  (F) Solicitado state — derived predicate (aperture-1ut92)
+// ────────────────────────────────────────────────────────────────────
+
+describe('recebedor.extrato — solicitado state (aperture-1ut92)', () => {
+  let rig: TestRig;
+  beforeEach(async () => {
+    rig = await buildRig();
+  });
+
+  it('row.liberacao = "solicitado" when idRepasse set + transferidoEm null + canceladoEm null', async () => {
+    const past = new Date('2026-06-01T10:00:00.000Z');
+    const idPag = randomUUID();
+    await rig.pagamentoRepository.save(
+      makePagamento({
+        id: idPag,
+        idContribuicao: rig.idContribuicao,
+        availableOn: past,
+      }),
+    );
+    await rig.livroFinanceiroRepository.saveLancamentos([
+      makeLancamento({
+        idPagamento: idPag,
+        idContribuicao: rig.idContribuicao,
+        idCampanha: rig.idCampanha,
+        idRepasse: randomUUID(), // claimed by a solicitado repasse
+      }),
+    ]);
+
+    const result = await rig.caller.recebedor.extrato.list({
+      idCampanha: rig.idCampanha,
+      statusFilters: [],
+      cursor: null,
+      limit: 20,
+    });
+    expect(result.rows[0].liberacao).toBe('solicitado');
+  });
+
+  it('precedence: transferidoEm set DOMINATES idRepasse → liberacao=transferido', async () => {
+    const past = new Date('2026-06-01T10:00:00.000Z');
+    const idPag = randomUUID();
+    await rig.pagamentoRepository.save(
+      makePagamento({
+        id: idPag,
+        idContribuicao: rig.idContribuicao,
+        availableOn: past,
+      }),
+    );
+    await rig.livroFinanceiroRepository.saveLancamentos([
+      makeLancamento({
+        idPagamento: idPag,
+        idContribuicao: rig.idContribuicao,
+        idCampanha: rig.idCampanha,
+        idRepasse: randomUUID(),
+        transferidoEm: new Date('2026-06-02T08:00:00.000Z'),
+      }),
+    ]);
+
+    const result = await rig.caller.recebedor.extrato.list({
+      idCampanha: rig.idCampanha,
+      statusFilters: [],
+      cursor: null,
+      limit: 20,
+    });
+    expect(result.rows[0].liberacao).toBe('transferido');
+  });
+
+  it('precedence: canceladoEm set DOMINATES even idRepasse + transferidoEm → row hidden (cancelado)', async () => {
+    const past = new Date('2026-06-01T10:00:00.000Z');
+    const idPag = randomUUID();
+    await rig.pagamentoRepository.save(
+      makePagamento({
+        id: idPag,
+        idContribuicao: rig.idContribuicao,
+        availableOn: past,
+      }),
+    );
+    await rig.livroFinanceiroRepository.saveLancamentos([
+      makeLancamento({
+        idPagamento: idPag,
+        idContribuicao: rig.idContribuicao,
+        idCampanha: rig.idCampanha,
+        idRepasse: randomUUID(),
+        canceladoEm: new Date('2026-06-02T08:00:00.000Z'),
+      }),
+    ]);
+
+    const result = await rig.caller.recebedor.extrato.list({
+      idCampanha: rig.idCampanha,
+      statusFilters: [],
+      cursor: null,
+      limit: 20,
+    });
+    // Cancelado rows are filtered out of the extrato view entirely.
+    expect(result.rows).toHaveLength(0);
+  });
+
+  it('summary: solicitado cents flow into aguardandoAprovacaoCents, NOT saldoDisponivelCents', async () => {
+    const past = new Date('2026-06-01T10:00:00.000Z');
+    const idPagDisp = randomUUID();
+    const idPagSol = randomUUID();
+
+    await rig.pagamentoRepository.save(
+      makePagamento({
+        id: idPagDisp,
+        idContribuicao: rig.idContribuicao,
+        availableOn: past,
+      }),
+    );
+    await rig.pagamentoRepository.save(
+      makePagamento({
+        id: idPagSol,
+        idContribuicao: rig.idContribuicao,
+        availableOn: past,
+        criadoEm: new Date('2026-06-02T08:00:00.000Z'),
+      }),
+    );
+    await rig.livroFinanceiroRepository.saveLancamentos([
+      makeLancamento({
+        idPagamento: idPagDisp,
+        idContribuicao: rig.idContribuicao,
+        idCampanha: rig.idCampanha,
+        amountCents: 4500,
+      }),
+      makeLancamento({
+        idPagamento: idPagSol,
+        idContribuicao: rig.idContribuicao,
+        idCampanha: rig.idCampanha,
+        amountCents: 3000,
+        idRepasse: randomUUID(),
+      }),
+    ]);
+
+    const result = await rig.caller.recebedor.extrato.summary({
+      idCampanha: rig.idCampanha,
+    });
+    expect(result.saldoDisponivelCents).toBe(4500);
+    expect(result.aguardandoAprovacaoCents).toBe(3000);
+    expect(result.resgatadoCents).toBe(0);
+    // totalRecebido includes both — money is in the system either way.
+    expect(result.totalRecebidoCents).toBe(7500);
+  });
+
+  it('statusFilters supports "solicitado" filter — narrows to admin-pipeline rows only', async () => {
+    const past = new Date('2026-06-01T10:00:00.000Z');
+    const idPagDisp = randomUUID();
+    const idPagSol = randomUUID();
+
+    await rig.pagamentoRepository.save(
+      makePagamento({
+        id: idPagDisp,
+        idContribuicao: rig.idContribuicao,
+        availableOn: past,
+        criadoEm: new Date('2026-06-01T08:00:00.000Z'),
+      }),
+    );
+    await rig.pagamentoRepository.save(
+      makePagamento({
+        id: idPagSol,
+        idContribuicao: rig.idContribuicao,
+        availableOn: past,
+        criadoEm: new Date('2026-06-02T08:00:00.000Z'),
+      }),
+    );
+    await rig.livroFinanceiroRepository.saveLancamentos([
+      makeLancamento({
+        idPagamento: idPagDisp,
+        idContribuicao: rig.idContribuicao,
+        idCampanha: rig.idCampanha,
+      }),
+      makeLancamento({
+        idPagamento: idPagSol,
+        idContribuicao: rig.idContribuicao,
+        idCampanha: rig.idCampanha,
+        idRepasse: randomUUID(),
+      }),
+    ]);
+
+    const result = await rig.caller.recebedor.extrato.list({
+      idCampanha: rig.idCampanha,
+      statusFilters: ['solicitado'],
+      cursor: null,
+      limit: 20,
+    });
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].liberacao).toBe('solicitado');
+    expect(result.rows[0].idPagamento).toBe(idPagSol);
   });
 });

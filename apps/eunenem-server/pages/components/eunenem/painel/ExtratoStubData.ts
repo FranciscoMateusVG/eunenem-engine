@@ -38,6 +38,10 @@ import { trpc } from "@/lib/trpc.js";
 export type ExtratoLiberacao =
   | "aguardando_liberacao"
   | "disponivel"
+  // aperture-1ut92 — admin-pipeline state: lancamento claimed by a
+  // solicitado repasse, awaiting admin approval. Wire ships this now;
+  // visual treatment (color/label) is Vance's parallel-prep PR.
+  | "solicitado"
   | "transferido"
   | "cancelado";
 

@@ -89,15 +89,16 @@ const EVENT_TITLE_FALLBACK = "extrato";
 const EVENT_PERIOD_FALLBACK = "carregando…";
 const NEXT_TRANSFER_FALLBACK = "—";
 
-/** Wire-to-PresentesStatus mapping. The wire ships 4 lancamento-grain
- *  liberacao states; the mock-shaped UI was designed for 6 (4 in-row +
- *  2 out-row). Since the wire only ships in-rows, the 4-state set maps
- *  to the 4 in-row mock statuses. The out-row statuses (resgatado,
- *  tSolicitada) never appear in row data anymore — surfaced via
- *  summary.resgatado totals instead. */
+/** Wire-to-PresentesStatus mapping. aperture-1ut92 extends the wire
+ *  to 5 lancamento-grain liberacao states (added 'solicitado' — the
+ *  admin-pipeline state). The mock vocabulary already had a
+ *  'tSolicitada' status for the same shape, so the new mapping is
+ *  natural. Visual refinement (color/label distinct from disponivel
+ *  and transferido) is Vance's parallel-prep PR. */
 const LIBERACAO_TO_STATUS: Record<ExtratoLiberacao, PresentesStatus> = {
   aguardando_liberacao: "aguardando",
   disponivel: "disponivel",
+  solicitado: "tSolicitada",
   transferido: "tEnviada",
   cancelado: "estornado",
 };

@@ -57,8 +57,27 @@ const ExtratoSummaryDTOSchema = z.object({
   totalRecebidoCents: z.number().int().nonnegative(),
   /** Already-withdrawn: transferidoEm IS NOT NULL. */
   resgatadoCents: z.number().int().nonnegative(),
-  /** Currently withdrawable: aprovado + availableOn <= now + not-claimed + not-transferred + not-cancelled. */
+  /**
+   * Currently withdrawable: aprovado + availableOn <= now + not-yet
+   * claimed by any repasse + not-transferred + not-cancelled.
+   *
+   * aperture-1ut92 — solicitado lançamentos (idRepasse !== null but
+   * transferidoEm still null) are NOW EXCLUDED from this bucket. They
+   * still count toward totalRecebido but live under the new
+   * aguardandoAprovacaoCents sibling field. Operator's mental model:
+   * "this is the saldo I can SOLICITAR on right now" — solicitado
+   * cents are in the admin pipeline, not actionable.
+   */
   saldoDisponivelCents: z.number().int().nonnegative(),
+  /**
+   * aperture-1ut92 — sum of lançamentos already claimed by a
+   * solicitado repasse but not yet approved by admin. These cents are
+   * in flight; once admin approves, they roll into resgatadoCents.
+   * Surfaces a 3rd bucket on the header so the operator sees the
+   * full lifecycle: aguardando_liberacao → disponivel → solicitado
+   * (this) → resgatado.
+   */
+  aguardandoAprovacaoCents: z.number().int().nonnegative(),
   /** Aprovado but not-yet-liberado: status='aprovado' AND availableOn > now. */
   aguardandoLiberacaoCents: z.number().int().nonnegative(),
   /** Earliest upcoming availableOn (ISO). Null when nothing aguardando. */
@@ -72,10 +91,31 @@ const ExtratoSummaryDTOSchema = z.object({
 });
 export type ExtratoSummaryDTO = z.infer<typeof ExtratoSummaryDTOSchema>;
 
-/** Derived liberação predicate per row (mirrors admin DTO LiberacaoSchema). */
+/**
+ * aperture-1ut92 — 5-state derived liberação predicate per row.
+ *
+ *   - `aguardando_liberacao` — aprovado pagamento, availableOn in the
+ *     future (or null while webhook hasn't populated it yet).
+ *   - `disponivel` — aprovado + availableOn <= now AND not yet claimed
+ *     by a repasse. The ONLY actionable state for SOLICITAR.
+ *   - `solicitado` — claimed by a solicitado repasse
+ *     (lancamento.idRepasse !== null) but admin hasn't approved yet
+ *     (transferidoEm still null). Money is in the admin pipeline.
+ *   - `transferido` — admin approved the repasse (transferidoEm set).
+ *     The terminal happy-path state.
+ *   - `cancelado` — pagamento estornado; lancamento.canceladoEm set.
+ *     Excluded from extrato totals (refund posture).
+ *
+ * Precedence when multiple predicates could fire (defensive ordering):
+ *   cancelado > transferido > solicitado > disponivel > aguardando_liberacao
+ * The terminal states (cancelado/transferido) dominate; solicitado
+ * dominates disponivel because once idRepasse is set the row is no
+ * longer actionable for a fresh SOLICITAR.
+ */
 const ExtratoLiberacaoSchema = z.enum([
   "aguardando_liberacao",
   "disponivel",
+  "solicitado",
   "transferido",
   "cancelado",
 ]);
@@ -129,6 +169,7 @@ export type ExtratoRowDTO = z.infer<typeof ExtratoRowDTOSchema>;
 const ExtratoStatusFilterSchema = z.enum([
   "aguardando_liberacao",
   "disponivel",
+  "solicitado",
   "transferido",
 ]);
 
@@ -322,8 +363,16 @@ function deriveLiberacao(
   p: Pagamento | undefined,
   now: Date,
 ): ExtratoLiberacao {
+  // Precedence: terminal states first, then admin-pipeline, then liquid,
+  // then locked. See ExtratoLiberacaoSchema docblock.
   if (l.canceladoEm !== null) return "cancelado";
   if (l.transferidoEm !== null) return "transferido";
+  // aperture-1ut92 — idRepasse set but transferidoEm still null →
+  // claimed by a solicitado repasse, awaiting admin approval. Same
+  // pagamento.status invariant as disponivel (lancamento can only be
+  // claimed if its parent pagamento is aprovado), so we skip the
+  // status guard here.
+  if (l.idRepasse !== null) return "solicitado";
   if (!p) return "aguardando_liberacao";
   if (p.status !== "aprovado") return "aguardando_liberacao";
   const availableOn = p.intencao.balanceTransactionAvailableOn;
@@ -371,6 +420,7 @@ const extratoRouter = t.router({
         let totalRecebidoCents = 0;
         let resgatadoCents = 0;
         let saldoDisponivelCents = 0;
+        let aguardandoAprovacaoCents = 0;
         let aguardandoLiberacaoCents = 0;
         let proximaTransfMs: number | null = null;
         let dateRangeStartMs: number | null = null;
@@ -393,6 +443,14 @@ const extratoRouter = t.router({
             resgatadoCents += lancamento.amountCents;
             continue;
           }
+          // aperture-1ut92 — solicitado lançamentos sit in the
+          // admin-pipeline bucket; they no longer count as actionable
+          // saldo. saldoDisponivel only includes rows the recebedor
+          // can still SOLICITAR on.
+          if (liberacao === "solicitado") {
+            aguardandoAprovacaoCents += lancamento.amountCents;
+            continue;
+          }
           if (liberacao === "disponivel") {
             saldoDisponivelCents += lancamento.amountCents;
             continue;
@@ -412,6 +470,7 @@ const extratoRouter = t.router({
           totalRecebidoCents,
           resgatadoCents,
           saldoDisponivelCents,
+          aguardandoAprovacaoCents,
           aguardandoLiberacaoCents,
           proximaTransfDate:
             proximaTransfMs === null ? null : new Date(proximaTransfMs).toISOString(),
