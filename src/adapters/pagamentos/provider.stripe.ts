@@ -560,4 +560,75 @@ export class PagamentoProviderStripe implements PagamentoProvider, CheckoutSessi
       },
     );
   }
+
+  /**
+   * Plan 0015 / aperture-1ewwh. Resolve `chargeRef` + `available_on`
+   * starting from a `payment_intent` reference. Single Stripe API call
+   * with the latest_charge.balance_transaction expanded.
+   *
+   * Same fallback semantics as obterAvailableOnDoCharge: any missing
+   * level of the expansion chain (no latest_charge, no balance_transaction,
+   * no available_on, API failure) collapses to `{ chargeRef: null,
+   * availableOn: null }`. The dispatcher persists what we resolved
+   * (potentially nothing) and logs the gap.
+   */
+  async obterAvailableOnDoPaymentIntent(
+    paymentIntentRef: string,
+  ): Promise<{ chargeRef: string | null; availableOn: Date | null }> {
+    return tracer.startActiveSpan(
+      'payment_provider.stripe.obterAvailableOnDoPaymentIntent',
+      async (span) => {
+        span.setAttribute('payment_intent.ref', paymentIntentRef);
+        try {
+          const pi = await this.stripe.paymentIntents.retrieve(paymentIntentRef, {
+            expand: ['latest_charge.balance_transaction'],
+          });
+          const latestCharge = pi.latest_charge;
+          if (
+            latestCharge === null ||
+            latestCharge === undefined ||
+            typeof latestCharge === 'string'
+          ) {
+            // Either no latest_charge yet, or Stripe ignored the expand
+            // (returned the id as a string). Treat both as no-resolution.
+            span.setAttribute('latest_charge.missing', true);
+            span.setStatus({ code: SpanStatusCode.OK });
+            return { chargeRef: null, availableOn: null };
+          }
+          const chargeRef = latestCharge.id;
+          span.setAttribute('charge.ref', chargeRef);
+
+          const balanceTransaction = latestCharge.balance_transaction;
+          if (
+            balanceTransaction === null ||
+            balanceTransaction === undefined ||
+            typeof balanceTransaction === 'string'
+          ) {
+            span.setAttribute('balance_transaction.missing', true);
+            span.setStatus({ code: SpanStatusCode.OK });
+            return { chargeRef, availableOn: null };
+          }
+          const availableOnUnix = balanceTransaction.available_on;
+          if (typeof availableOnUnix !== 'number') {
+            span.setAttribute('balance_transaction.available_on.missing', true);
+            span.setStatus({ code: SpanStatusCode.OK });
+            return { chargeRef, availableOn: null };
+          }
+          const date = new Date(availableOnUnix * 1000);
+          span.setAttribute('available_on.iso', date.toISOString());
+          span.setStatus({ code: SpanStatusCode.OK });
+          return { chargeRef, availableOn: date };
+        } catch (error: unknown) {
+          // Same fallback as obterAvailableOnDoCharge — never re-throw;
+          // dispatcher persists what we have and logs.
+          span.recordException(error as Error);
+          span.setAttribute('payment_intent.fetch_failed', true);
+          span.setStatus({ code: SpanStatusCode.OK });
+          return { chargeRef: null, availableOn: null };
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
 }

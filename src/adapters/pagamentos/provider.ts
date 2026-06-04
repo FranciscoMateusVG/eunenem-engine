@@ -103,4 +103,35 @@ export interface PagamentoProvider {
    * (`statusBalanceTransaction: 'unknown'` returns null).
    */
   obterAvailableOnDoCharge(chargeRef: string): Promise<Date | null>;
+  /**
+   * Plan 0015 / aperture-1ewwh. Resolve `available_on` + `latest_charge.id`
+   * starting from a PaymentIntent reference. Single round-trip to Stripe
+   * via `stripe.paymentIntents.retrieve(piId, { expand:
+   * ['latest_charge.balance_transaction'] })`.
+   *
+   * **Why this exists alongside `obterAvailableOnDoCharge`:** the
+   * webhook's cs.completed handler knows the piId (from
+   * `session.payment_intent`) but not necessarily the chargeRef — when
+   * `payment_intent.succeeded` arrives BEFORE `cs.completed` (the
+   * orphan-archive path), the dispatcher bails on `unknown_payment_intent`
+   * before chargeRef is persisted. By the time cs.completed runs the
+   * relink sweep, we have piId in hand but no chargeRef on the
+   * pagamento. This port resolves both in one call so the dispatcher
+   * can atomically populate chargeExternalRef + balanceTransactionAvailableOn.
+   *
+   * Returns `{ chargeRef: null, availableOn: null }` when:
+   *   - the PI has no `latest_charge` yet (very-fresh PI, edge case)
+   *   - the `balance_transaction` is missing on the charge
+   *   - the Stripe API call fails (same fallback semantics as
+   *     obterAvailableOnDoCharge — never re-throw; dispatcher persists
+   *     NULL and logs).
+   *
+   * Fake adapter: returns the same deterministic offset shape as
+   * obterAvailableOnDoCharge for the `availableOn`; the `chargeRef` is
+   * a synthetic `ch_fake_<uuid>` when `statusBalanceTransaction='known'`
+   * and `null` when `'unknown'`.
+   */
+  obterAvailableOnDoPaymentIntent(
+    paymentIntentRef: string,
+  ): Promise<{ chargeRef: string | null; availableOn: Date | null }>;
 }

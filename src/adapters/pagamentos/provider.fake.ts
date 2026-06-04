@@ -137,6 +137,43 @@ export class PagamentoProviderFake implements PagamentoProvider, CheckoutSession
     );
   }
 
+  /**
+   * Plan 0015 / aperture-1ewwh. Mirrors obterAvailableOnDoCharge but
+   * starts from a piId. Synthesises a deterministic ch_fake_<uuid>
+   * chargeRef when statusBalanceTransaction='known'; returns
+   * `{ chargeRef: null, availableOn: null }` when 'unknown' (mirrors
+   * the Stripe "no latest_charge / no balance_transaction" failure
+   * path).
+   */
+  async obterAvailableOnDoPaymentIntent(
+    paymentIntentRef: string,
+  ): Promise<{ chargeRef: string | null; availableOn: Date | null }> {
+    return tracer.startActiveSpan(
+      'payment_provider.fake.obterAvailableOnDoPaymentIntent',
+      async (span) => {
+        span.setAttribute('payment_intent.ref', paymentIntentRef);
+        try {
+          if (this.statusBalanceTransaction === 'unknown') {
+            span.setStatus({ code: SpanStatusCode.OK });
+            return { chargeRef: null, availableOn: null };
+          }
+          const chargeRef = `ch_fake_${randomUUID()}`;
+          const availableOn = new Date(
+            this.clock().getTime() + this.availableOnOffsetSeconds * 1000,
+          );
+          span.setStatus({ code: SpanStatusCode.OK });
+          return { chargeRef, availableOn };
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
   async refundarPagamento(input: RefundarPagamentoInput): Promise<RefundarPagamentoResult> {
     return tracer.startActiveSpan('payment_provider.fake.refundarPagamento', async (span) => {
       span.setAttribute('payment.id', input.idPagamento);
