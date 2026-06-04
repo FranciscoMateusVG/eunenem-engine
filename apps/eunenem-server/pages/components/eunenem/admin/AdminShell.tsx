@@ -46,10 +46,16 @@ type AdminShellProps = {
   activeNav?: NavKey;
 };
 
-type NavKey = "landing";
+type NavKey = "landing" | "repasses";
 
-const NAV_ITEMS: ReadonlyArray<{ key: NavKey; label: string; href: string }> =
-  [{ key: "landing", label: "Visão geral", href: "/admin" }];
+const NAV_ITEMS: ReadonlyArray<{ key: NavKey; label: string; href: string }> = [
+  { key: "landing", label: "Visão geral", href: "/admin" },
+  // plan q2d4b Track 3 — operator-facing recebedor repasses approval queue.
+  // Lives as a sidebar sibling to Visão geral because it's a dedicated
+  // operator workflow surface (action queue + historical record), not a
+  // drill-down off the landing table.
+  { key: "repasses", label: "Repasses", href: "/admin/repasses" },
+];
 
 export function AdminShell({
   children,

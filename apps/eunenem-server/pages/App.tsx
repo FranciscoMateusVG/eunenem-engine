@@ -2,6 +2,8 @@ import { Toaster } from 'sonner';
 import { AdminCampanhaPage } from './AdminCampanhaPage.js';
 import { AdminContribuicaoPage } from './AdminContribuicaoPage.js';
 import { AdminPage } from './AdminPage.js';
+import { AdminRepasseDetailPage } from './AdminRepasseDetailPage.js';
+import { AdminRepassesPage } from './AdminRepassesPage.js';
 import { AdminUsuarioPage } from './AdminUsuarioPage.js';
 import { AuthDemoPage } from './AuthDemoPage.js';
 import { AuthModalProvider } from './components/eunenem/auth/AuthModalProvider.js';
@@ -47,6 +49,8 @@ export function resolveRoute(pathname: string):
   | { kind: 'admin-usuario'; idConta: string }
   | { kind: 'admin-campanha'; idCampanha: string }
   | { kind: 'admin-contribuicao'; idContribuicao: string }
+  | { kind: 'admin-repasses' }
+  | { kind: 'admin-repasse-detail'; idRepasse: string }
   | { kind: 'not-found' } {
   // Marketing landing page (aperture-q1j2) — exact "/" only.
   if (pathname === '/') {
@@ -97,6 +101,23 @@ export function resolveRoute(pathname: string):
       kind: 'admin-contribuicao',
       idContribuicao: adminContribuicaoMatch[1],
     };
+  }
+  // /admin/repasses/<idRepasse> (plan q2d4b Track 3, aperture-vi0hy) —
+  // single-repasse approval flow. Matched BEFORE the bare /admin/repasses
+  // rule so the more specific match wins. idRepasse is a free-shape string
+  // here; the tRPC fetch (stub today) returns null for unknown ids and
+  // AdminRepasseDetailPage renders a not-found body.
+  const adminRepasseDetailMatch = pathname.match(
+    /^\/admin\/repasses\/([^/]+)\/?$/,
+  );
+  if (adminRepasseDetailMatch && adminRepasseDetailMatch[1]) {
+    return {
+      kind: 'admin-repasse-detail',
+      idRepasse: adminRepasseDetailMatch[1],
+    };
+  }
+  if (pathname === '/admin/repasses' || pathname === '/admin/repasses/') {
+    return { kind: 'admin-repasses' };
   }
   if (pathname === '/admin' || pathname === '/admin/') {
     return { kind: 'admin' };
@@ -171,5 +192,8 @@ function pickPage(route: ReturnType<typeof resolveRoute>, pathname: string) {
     return <AdminCampanhaPage idCampanha={route.idCampanha} />;
   if (route.kind === 'admin-contribuicao')
     return <AdminContribuicaoPage idContribuicao={route.idContribuicao} />;
+  if (route.kind === 'admin-repasses') return <AdminRepassesPage />;
+  if (route.kind === 'admin-repasse-detail')
+    return <AdminRepasseDetailPage idRepasse={route.idRepasse} />;
   return <NotFoundPage pathname={pathname} />;
 }
