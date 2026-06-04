@@ -716,6 +716,33 @@ const PagamentoAdminDTOSchema = z.object({
 });
 export type PagamentoAdminDTO = z.infer<typeof PagamentoAdminDTOSchema>;
 
+/**
+ * `PagamentoAdminDTO` extended with the financial ledger entries it
+ * produced. The `lancamentos` array is empty for every non-aprovado
+ * pagamento (no rows exist in the ledger until aprovação) — the UI
+ * uses that empty-array signal to skip the financeiro block on
+ * pendente/processing/rejeitado payments and show "Sem lançamentos"
+ * affordance.
+ *
+ * Plan 0015 / aperture-aqlv2 contract pin: the Financeiro section
+ * on /admin/contribuicao/:id collapses into the Pagamentos section
+ * because Financeiro is now a MODULE UNDER Pagamentos (Locked
+ * Decision #1). Vance's `aperture-c5vq2` parallel-prep scaffold
+ * binds against this shape; the contribuição.detail page renders
+ * each pagamento with its lançamentos nested inline.
+ *
+ * `LancamentoFinanceiroAdminDTOSchema` already encodes the
+ * plan-0015 timestamp pair (`transferidoEm`, `canceladoEm`) — no
+ * status field. See its docblock above for the implicit-state
+ * predicates.
+ */
+const PagamentoWithLancamentosAdminDTOSchema = PagamentoAdminDTOSchema.extend({
+  lancamentos: z.array(LancamentoFinanceiroAdminDTOSchema),
+});
+export type PagamentoWithLancamentosAdminDTO = z.infer<
+  typeof PagamentoWithLancamentosAdminDTOSchema
+>;
+
 function toPagamentoAdminDTO(p: Pagamento): PagamentoAdminDTO {
   return {
     id: p.id,
@@ -766,13 +793,35 @@ function toPagamentoAdminDTO(p: Pagamento): PagamentoAdminDTO {
 const pagamentosRouter = t.router({
   /**
    * All pagamentos for a contribuicao, sorted criadoEm DESC (latest first).
+   * Each pagamento now carries its lançamentos inline (plan 0015 /
+   * aperture-aqlv2 — Financeiro is a MODULE UNDER Pagamentos, so the
+   * BC-collapsed UI nests lançamentos under each pagamento block).
    *
    * Tenant guard: resolves the contribuicao → campanha → idPlataforma chain.
    * Unknown contribuicao or cross-tenant campanha → empty list (no leak).
+   *
+   * Composition: for each pagamento p, calls
+   * `livroFinanceiroRepository.findLancamentosByIdPagamento(p.id)`. N+1
+   * by design — same shape as `financeiro.listByContribuicao` and N is
+   * bounded small (≤3 pagamentos/contribuicao in practice). Pendente,
+   * processing, rejeitado, and estornado pagamentos yield empty arrays
+   * (lançamentos only exist for aprovado; estornado rows have
+   * canceladoEm set but the rows themselves persist for the audit
+   * trail).
+   *
+   * The pre-existing `financeiro.listByContribuicao` endpoint stays in
+   * place — it has its own LancamentosByPagamento shape that other
+   * callers may depend on. Future cleanup: deprecate that endpoint
+   * after grep confirms it's only Vance's frontend that consumed it
+   * and the frontend has fully migrated to the nested shape here.
    */
   listByContribuicao: t.procedure
     .input(z.object({ idContribuicao: z.string() }))
-    .output(z.object({ pagamentos: z.array(PagamentoAdminDTOSchema) }))
+    .output(
+      z.object({
+        pagamentos: z.array(PagamentoWithLancamentosAdminDTOSchema),
+      }),
+    )
     .query(async ({ ctx, input }) => {
       const contribuicao = await ctx.deps.contribuicaoRepository.findById(
         input.idContribuicao as IdContribuicao,
@@ -791,11 +840,33 @@ const pagamentosRouter = t.router({
         await ctx.deps.pagamentoRepository.findByContribuicao(
           input.idContribuicao as IdContribuicaoPagamento,
         );
-      // Engine port returns criadoEm ASC; admin UI wants DESC (latest first).
-      const sorted = [...pagamentos].sort(
-        (a, b) => b.criadoEm.getTime() - a.criadoEm.getTime(),
+
+      // Compose lançamentos per pagamento (plan 0015 BC reshape — see
+      // header). N+1 by design: N ≤ ~3 in practice; bulk port lookup
+      // is a +1 engine bead we don't need yet.
+      const enriched = await Promise.all(
+        pagamentos.map(async (p) => {
+          const lancamentos =
+            await ctx.deps.livroFinanceiroRepository.findLancamentosByIdPagamento(
+              p.id as unknown as IdPagamentoReferencia,
+            );
+          return {
+            pagamentoDTO: toPagamentoAdminDTO(p),
+            criadoEm: p.criadoEm,
+            lancamentosDTO: lancamentos.map(toLancamentoAdminDTO),
+          };
+        }),
       );
-      return { pagamentos: sorted.map(toPagamentoAdminDTO) };
+
+      // Engine port returns criadoEm ASC; admin UI wants DESC.
+      enriched.sort((a, b) => b.criadoEm.getTime() - a.criadoEm.getTime());
+
+      return {
+        pagamentos: enriched.map((e) => ({
+          ...e.pagamentoDTO,
+          lancamentos: e.lancamentosDTO,
+        })),
+      };
     }),
 });
 

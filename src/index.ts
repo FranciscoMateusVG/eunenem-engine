@@ -79,24 +79,11 @@ export { criarAuth } from './adapters/usuario/criar-auth.js';
 export type { UsuarioRepository } from './adapters/usuario/repository.js';
 export { UsuarioRepositoryMemory } from './adapters/usuario/repository.memory.js';
 export { UsuarioRepositoryPostgres } from './adapters/usuario/repository.postgres.js';
-export type {
-  StripeDispatchResult,
-  StripePipelineArgs,
-  StripePipelineResult,
-} from './adapters/webhook-archive/stripe-webhook-pipeline.js';
-export { archiveAndDispatchStripeEvent } from './adapters/webhook-archive/stripe-webhook-pipeline.js';
-// aperture-1n6u8: payment webhook event archive (infrastructure boundary).
-// aperture-2sp6m: findByPagamentoId + FindByPagamentoIdOptions for admin trail.
-export type {
-  FindByPagamentoIdOptions,
-  SaveReceivedInput,
-  SaveReceivedResult,
-  WebhookEventArchive,
-  WebhookEventRecord,
-} from './adapters/webhook-archive/webhook-event-archive.js';
-export { PROCESSING_ERROR_MAX_LENGTH } from './adapters/webhook-archive/webhook-event-archive.js';
-export { WebhookEventArchiveMemory } from './adapters/webhook-archive/webhook-event-archive.memory.js';
-export { WebhookEventArchivePostgres } from './adapters/webhook-archive/webhook-event-archive.postgres.js';
+// Pre-existing duplicate block of webhook-archive + stripe-webhook-pipeline
+// exports removed here (aperture-aqlv2 cleanup). They live at lines ~26-41
+// of this file; a recent merge of the convite/evento/lista-convidados PRs
+// double-added them. See PR description for context. Don't re-add without
+// removing the canonical copy above first.
 export { hashClientPII } from './observability/hash-client-pii.js';
 
 // --- Domain: Arrecadação ---
