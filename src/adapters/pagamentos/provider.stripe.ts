@@ -491,4 +491,73 @@ export class PagamentoProviderStripe implements PagamentoProvider, CheckoutSessi
       }
     });
   }
+
+  /**
+   * Plan 0015 / aperture-mjgxe. Look up `charge.balance_transaction.available_on`
+   * via Stripe API.
+   *
+   * Fetches the charge with the balance_transaction expanded. The
+   * `available_on` field is a unix seconds timestamp — Stripe's "when
+   * funds settle to the platform account." Test mode shows ~6 days
+   * out; prod is the configured payout schedule (Stripe Brazil default
+   * is ~30 days for unanticipated card payments, instant for pix).
+   *
+   * Returns `null` when:
+   *   - `balance_transaction` is missing on the charge (very-fresh
+   *     charges occasionally arrive without it — Stripe's own ordering
+   *     edge case)
+   *   - the API call fails (network / 5xx / auth)
+   *
+   * The dispatcher logs a discriminating message on null so operators
+   * see WHY available_on stayed unpopulated; admin can manually
+   * inspect the charge in Stripe Dashboard if needed.
+   */
+  async obterAvailableOnDoCharge(chargeRef: string): Promise<Date | null> {
+    return tracer.startActiveSpan(
+      'payment_provider.stripe.obterAvailableOnDoCharge',
+      async (span) => {
+        span.setAttribute('charge.ref', chargeRef);
+        try {
+          const charge = await this.stripe.charges.retrieve(chargeRef, {
+            expand: ['balance_transaction'],
+          });
+          const balanceTransaction = charge.balance_transaction;
+          // balance_transaction can be: string (unexpanded id), expanded
+          // object, or null/undefined. We requested expand so an object
+          // is the happy path; anything else returns null.
+          if (
+            balanceTransaction === null ||
+            balanceTransaction === undefined ||
+            typeof balanceTransaction === 'string'
+          ) {
+            span.setAttribute('balance_transaction.missing', true);
+            span.setStatus({ code: SpanStatusCode.OK });
+            return null;
+          }
+          const availableOnUnix = balanceTransaction.available_on;
+          if (typeof availableOnUnix !== 'number') {
+            span.setAttribute('balance_transaction.available_on.missing', true);
+            span.setStatus({ code: SpanStatusCode.OK });
+            return null;
+          }
+          const date = new Date(availableOnUnix * 1000);
+          span.setAttribute('available_on.iso', date.toISOString());
+          span.setStatus({ code: SpanStatusCode.OK });
+          return date;
+        } catch (error: unknown) {
+          // Same fallback shape as the bead's spec: log + return null
+          // so the dispatcher persists NULL on the pagamento; admin can
+          // inspect Stripe directly. Don't re-throw — a Stripe outage
+          // shouldn't fail the webhook processing of an otherwise-valid
+          // payment_intent.succeeded.
+          span.recordException(error as Error);
+          span.setAttribute('balance_transaction.fetch_failed', true);
+          span.setStatus({ code: SpanStatusCode.OK });
+          return null;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
 }

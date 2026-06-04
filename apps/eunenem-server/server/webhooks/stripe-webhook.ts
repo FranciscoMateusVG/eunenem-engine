@@ -449,9 +449,21 @@ export async function dispatchVerifiedStripeEvent(
       return { pagamentoId: pagamento.id };
     }
 
-    // payment_intent.succeeded — no transition (charge.succeeded is
-    // canonical); link-only + persist ch_xxx ref so charge.* events
-    // can resolve via the ch path.
+    // payment_intent.succeeded — no FSM transition (charge.succeeded is
+    // canonical for the aprovado transition); link-only + persist
+    // ch_xxx ref so charge.* events can resolve via the ch path.
+    //
+    // Plan 0015 / aperture-mjgxe — ALSO populate
+    // intencao.balanceTransactionAvailableOn here so the admin DTO can
+    // derive the liberação sub-state:
+    //   - PIX: set to NOW() inline (operator's no-cancel domain shortcut)
+    //   - CARTÃO: fetch via PagamentoProvider.obterAvailableOnDoCharge
+    //     (Stripe API charge.balance_transaction.available_on). If the
+    //     API call returns null (transient failure, no balance_transaction
+    //     yet), persist NULL and log; admin can inspect Stripe directly.
+    //
+    // The new column is updated atomically with the ch ref so a single
+    // pagamentoRepository.update() carries both writes.
     case 'payment_intent.succeeded': {
       const pi = event.data.object as Stripe.PaymentIntent;
       let pagamento = await resolvePagamentoFromPaymentIntent(deps, pi);
@@ -464,16 +476,79 @@ export async function dispatchVerifiedStripeEvent(
         return { pagamentoId: null };
       }
       span.setAttribute('pagamento.id', pagamento.id);
+
+      // ch_xxx persistence (existing wif8s logic) + plan-0015 availableOn
+      // resolution. We collapse both writes into one update() call so the
+      // pagamento snapshot stays atomic.
       const chId = extractStripeId(pi.latest_charge);
-      if (chId !== null && pagamento.intencao.chargeExternalRef !== chId) {
-        pagamento = withChargeRef(pagamento, chId);
-        await deps.pagamentoRepository.update(pagamento);
-        logger.info('webhook.stripe.ch_ref_persisted', {
-          eventId: event.id,
-          idPagamento: pagamento.id,
-          chargeId: chId,
-        });
+      const newChRef =
+        chId !== null && pagamento.intencao.chargeExternalRef !== chId ? chId : null;
+
+      let newAvailableOn: Date | null = null;
+      let availableOnNeedsUpdate = false;
+      if (pagamento.intencao.balanceTransactionAvailableOn === null) {
+        if (pagamento.intencao.metodo === 'pix') {
+          newAvailableOn = deps.clock();
+          availableOnNeedsUpdate = true;
+          span.setAttribute('available_on.source', 'pix_now');
+        } else if (pagamento.intencao.metodo === 'credit_card') {
+          // Need a charge id to look up balance_transaction. Prefer the
+          // freshly-extracted chId (current event); fall back to the
+          // existing chargeExternalRef on the pagamento (defensive — pi
+          // can re-fire without latest_charge in rare paths).
+          const lookupChRef = chId ?? pagamento.intencao.chargeExternalRef;
+          if (lookupChRef !== null) {
+            const fetched = await deps.pagamentoProvider.obterAvailableOnDoCharge(lookupChRef);
+            newAvailableOn = fetched;
+            availableOnNeedsUpdate = true;
+            if (fetched === null) {
+              logger.warn('webhook.stripe.available_on_unknown', {
+                eventId: event.id,
+                idPagamento: pagamento.id,
+                chargeId: lookupChRef,
+              });
+              span.setAttribute('available_on.source', 'stripe_api_null');
+            } else {
+              span.setAttribute('available_on.source', 'stripe_api');
+              span.setAttribute('available_on.iso', fetched.toISOString());
+            }
+          } else {
+            logger.warn('webhook.stripe.available_on_no_charge_ref', {
+              eventId: event.id,
+              idPagamento: pagamento.id,
+            });
+          }
+        }
       }
+
+      if (newChRef !== null || availableOnNeedsUpdate) {
+        pagamento = {
+          ...pagamento,
+          intencao: {
+            ...pagamento.intencao,
+            ...(newChRef !== null ? { chargeExternalRef: newChRef } : {}),
+            ...(availableOnNeedsUpdate ? { balanceTransactionAvailableOn: newAvailableOn } : {}),
+          },
+          atualizadoEm: deps.clock(),
+        };
+        await deps.pagamentoRepository.update(pagamento);
+        if (newChRef !== null) {
+          logger.info('webhook.stripe.ch_ref_persisted', {
+            eventId: event.id,
+            idPagamento: pagamento.id,
+            chargeId: newChRef,
+          });
+        }
+        if (availableOnNeedsUpdate) {
+          logger.info('webhook.stripe.available_on_persisted', {
+            eventId: event.id,
+            idPagamento: pagamento.id,
+            metodo: pagamento.intencao.metodo,
+            availableOn: newAvailableOn?.toISOString() ?? null,
+          });
+        }
+      }
+
       logger.info('webhook.stripe.dispatched', {
         eventId: event.id,
         eventType: event.type,

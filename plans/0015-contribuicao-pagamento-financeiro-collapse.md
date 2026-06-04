@@ -438,6 +438,36 @@ FINANCEIRO card
 - `docs/idempotency-and-concurrency.md` reflects the simplified race model
 - Follow-up beads filed for: (1) disputes / chargeback flow, (2) admin UI for `marcar-lancamento-transferido`, (3) automated transfer execution (Stripe Connect / banking provider), (4) RepasseRecebedor aggregate refinement after Phase 4 disposition.
 
+## Extension — derived liberação predicate (aperture-1htgm, 2026-06-04)
+
+Operator design conversation 2026-06-04 surfaced a gap in the 5-state FSM around the "is this pagamento actually transferable" question: after `aprovado`, Stripe still holds the money for the configured payout window (Stripe Brazil default ~30 days for cartão, immediate for pix). Marking lançamentos as `transferidoEm` before Stripe settles to the platform account would be a lie.
+
+**Locked decisions (extends §Locked decisions above without overriding):**
+
+1. **No FSM enum change.** `status` stays at 5 values. "aguardando liberação" + "disponível" are DERIVED sub-states, surfaced only at the DTO layer — same discipline as `indisponivel` on contribuição.
+
+2. **New persistent column:** `pagamentos.intencao_balance_transaction_available_on TIMESTAMPTZ NULL` (migration 020 / aperture-mjgxe). The dispatcher populates this at `payment_intent.succeeded`:
+   - **PIX:** dispatcher sets `NOW()` inline (operator's no-cancel domain shortcut — pix funds settle effectively immediately).
+   - **CARTÃO:** dispatcher fetches `charge.balance_transaction.available_on` from the Stripe API via the new `PagamentoProvider.obterAvailableOnDoCharge(ch_xxx)` port method. Stripe test mode shows ~6 days from charge; prod is the payout schedule. If the API call returns null (transient failure or balance_transaction not yet minted), persist NULL + log; admin can manually inspect Stripe Dashboard.
+
+3. **DTO derive at the admin-router boundary:**
+   - `status='aprovado' AND availableOn IS NULL OR availableOn > now()` → `'aguardando_liberacao'`
+   - `status='aprovado' AND availableOn <= now()` → `'disponivel'`
+   - else → `null` (chip shows status-level state)
+
+   The admin DTO exposes both `liberacao` (derived enum) AND `availableOn` (ISO string) at the top level — UI renders the chip + a "liberação prevista DD/MM" sub-label.
+
+4. **Transfer-to-recebedor gate.** The `marcarLancamentoTransferido` use-case refuses with `MarcarLancamentoTransferidoBloqueadoError` if ANY pagamento in the batch fails the gate. Reasons enum-typed for HTTP-layer messaging:
+   - `pagamento_nao_aprovado` — status isn't aprovado yet (also covers estornado/rejeitado)
+   - `aguardando_liberacao_sem_data` — aprovado but availableOn is NULL (defensive — brief window before webhook lands)
+   - `aguardando_liberacao_ate` — aprovado but availableOn is in the future
+   
+   HTTP maps to 422 with operator-readable message "Pagamento ainda em liberação até DD/MM".
+
+5. **Out of scope (deferred follow-ups):**
+   - `payout.paid` subscription / a `pagos_em` column tracking when funds actually left Stripe to the bank
+   - Backfill availableOn on already-aprovado pagamentos from before migration 020 (run the dispatcher's pi.succeeded path manually or write a one-shot script)
+
 ## Open questions
 
 1. **IntencaoPagamento.contribuinte at the persistence layer.** Locked on storing contribuinte on IntencaoPagamento, but the Postgres adapter (`pagamento-repository.postgres.ts`) needs to be checked — does it project IntencaoPagamento as nested rows or flatten everything onto a single `pagamentos` row? If flat, the contribuinte columns live on `pagamentos`; if nested, on `intencoes_pagamento`. Confirm during Phase 1 before writing the migration.

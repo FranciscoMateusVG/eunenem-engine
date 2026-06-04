@@ -46,6 +46,18 @@ export interface PagamentoProviderFakeOptions {
    */
   readonly statusRefund?: 'aceito' | 'recusado';
   readonly idRefundFactory?: () => string;
+  /**
+   * Plan 0015 / aperture-mjgxe. Controls what
+   * `obterAvailableOnDoCharge` returns.
+   *   - 'known' (default): returns a deterministic Date offset from the
+   *     fake clock by `availableOnOffsetSeconds` (defaults to 6 days,
+   *     matching Stripe test-mode).
+   *   - 'unknown': returns `null` (the Stripe API "no balance_transaction
+   *     yet" or transient-failure path; the dispatcher logs + falls
+   *     back to NULL on the pagamento).
+   */
+  readonly statusBalanceTransaction?: 'known' | 'unknown';
+  readonly availableOnOffsetSeconds?: number;
 }
 
 /**
@@ -72,6 +84,8 @@ export class PagamentoProviderFake implements PagamentoProvider, CheckoutSession
   private readonly idSessaoFactory: () => string;
   private readonly statusRefund: 'aceito' | 'recusado';
   private readonly idRefundFactory: () => string;
+  private readonly statusBalanceTransaction: 'known' | 'unknown';
+  private readonly availableOnOffsetSeconds: number;
 
   /**
    * In-memory ledger of sessions created via criarSessaoCheckout. Keyed
@@ -95,6 +109,32 @@ export class PagamentoProviderFake implements PagamentoProvider, CheckoutSession
     this.idSessaoFactory = options.idSessaoFactory ?? (() => `cs_fake_${randomUUID()}`);
     this.statusRefund = options.statusRefund ?? 'aceito';
     this.idRefundFactory = options.idRefundFactory ?? (() => `re_fake_${randomUUID()}`);
+    this.statusBalanceTransaction = options.statusBalanceTransaction ?? 'known';
+    this.availableOnOffsetSeconds = options.availableOnOffsetSeconds ?? 6 * 24 * 60 * 60;
+  }
+
+  async obterAvailableOnDoCharge(chargeRef: string): Promise<Date | null> {
+    return tracer.startActiveSpan(
+      'payment_provider.fake.obterAvailableOnDoCharge',
+      async (span) => {
+        span.setAttribute('charge.ref', chargeRef);
+        try {
+          if (this.statusBalanceTransaction === 'unknown') {
+            span.setStatus({ code: SpanStatusCode.OK });
+            return null;
+          }
+          const date = new Date(this.clock().getTime() + this.availableOnOffsetSeconds * 1000);
+          span.setStatus({ code: SpanStatusCode.OK });
+          return date;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
   }
 
   async refundarPagamento(input: RefundarPagamentoInput): Promise<RefundarPagamentoResult> {

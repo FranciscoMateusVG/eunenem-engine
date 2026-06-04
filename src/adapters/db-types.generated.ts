@@ -101,10 +101,13 @@ export interface OpcoesContribuicao {
 export interface Pagamentos {
   // Plan 0015 / migration 019: intencao_contribuinte_{nome,email,mensagem}
   // added (all nullable; populated by webhook at checkout.session.completed).
+  // Plan 0015 / migration 020 (aperture-mjgxe):
+  // intencao_balance_transaction_available_on added (nullable).
   atualizado_em: Timestamp;
   criado_em: Timestamp;
   id: string;
   intencao_amount_cents: number;
+  intencao_balance_transaction_available_on: Timestamp | null;
   intencao_charge_external_ref: string | null;
   intencao_composicao_valores: Json;
   intencao_contribuinte_email: string | null;

@@ -49,6 +49,11 @@ type PagamentoRow = {
   intencao_contribuinte_nome: string | null;
   intencao_contribuinte_email: string | null;
   intencao_contribuinte_mensagem: string | null;
+  // Plan 0015 / aperture-mjgxe / migration 020: when the visitor's money
+  // becomes available to the recebedor. PIX = NOW() set inline by
+  // dispatcher at pi.succeeded; cartão = Stripe API
+  // charge.balance_transaction.available_on. Nullable.
+  intencao_balance_transaction_available_on: Date | null;
   intencao_criada_em: Date;
   transacao_externa: unknown;
 };
@@ -357,6 +362,8 @@ function rowFromPagamento(p: Pagamento): Record<string, unknown> {
     intencao_contribuinte_nome: p.intencao.contribuinte?.nome ?? null,
     intencao_contribuinte_email: p.intencao.contribuinte?.email ?? null,
     intencao_contribuinte_mensagem: p.intencao.contribuinte?.mensagem ?? null,
+    // Plan 0015 / aperture-mjgxe: when the money becomes available.
+    intencao_balance_transaction_available_on: p.intencao.balanceTransactionAvailableOn,
     intencao_criada_em: p.intencao.criadaEm,
     transacao_externa: p.transacaoExterna ? JSON.stringify(p.transacaoExterna) : null,
   };
@@ -414,6 +421,7 @@ function pagamentoFromRow(row: PagamentoRow): Pagamento {
       paymentIntentExternalRef: row.intencao_payment_intent_external_ref,
       chargeExternalRef: row.intencao_charge_external_ref,
       contribuinte,
+      balanceTransactionAvailableOn: row.intencao_balance_transaction_available_on,
       criadaEm: row.intencao_criada_em,
     },
     transacaoExterna,

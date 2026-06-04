@@ -77,4 +77,30 @@ export interface RefundarPagamentoResult {
 export interface PagamentoProvider {
   solicitarPagamento(input: SolicitarPagamentoInput): Promise<TransacaoExterna>;
   refundarPagamento(input: RefundarPagamentoInput): Promise<RefundarPagamentoResult>;
+  /**
+   * Plan 0015 / aperture-mjgxe. Resolve `charge.balance_transaction.available_on`
+   * — the Stripe-side timestamp at which a settled charge's funds
+   * become available to the recebedor.
+   *
+   * Stripe adapter: `stripe.charges.retrieve(chargeRef, { expand:
+   * ['balance_transaction'] })` then read `.balance_transaction.available_on`
+   * (unix seconds → Date). Test mode shows ~6 days from charge.succeeded;
+   * prod is the configured payout schedule.
+   *
+   * Returns `null` when:
+   *   - the charge doesn't have a balance_transaction yet (Stripe edge
+   *     case for very-fresh charges; the dispatcher logs + falls back
+   *     to NULL on the pagamento; admin can inspect Stripe directly)
+   *   - the Stripe API call fails (network, auth, transient 5xx — same
+   *     fallback behavior)
+   *
+   * The dispatcher logs a discriminating message on null so operators
+   * see WHY available_on stayed unpopulated for a given pagamento.
+   *
+   * Fake adapter: returns a deterministic Date based on a configurable
+   * fixed offset from "now" (default +6 days, matching Stripe test
+   * mode). Override via constructor options for failure-path tests
+   * (`statusBalanceTransaction: 'unknown'` returns null).
+   */
+  obterAvailableOnDoCharge(chargeRef: string): Promise<Date | null>;
 }

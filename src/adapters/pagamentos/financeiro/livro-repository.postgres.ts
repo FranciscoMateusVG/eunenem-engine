@@ -157,6 +157,42 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
     );
   }
 
+  async findLancamentosByIds(
+    ids: readonly IdLancamentoFinanceiro[],
+  ): Promise<readonly LancamentoFinanceiro[]> {
+    return tracer.startActiveSpan(
+      'db.financeiro_livro.lancamentos.findByIds',
+      async (span) => {
+        span.setAttributes({
+          ...DB_ATTRS,
+          'db.operation.name': 'SELECT',
+          'batch.size': ids.length,
+        });
+        try {
+          if (ids.length === 0) {
+            span.setStatus({ code: SpanStatusCode.OK });
+            return [];
+          }
+          // biome-ignore lint/suspicious/noExplicitAny: see saveLancamentos
+          const rows = (await (this.db as any)
+            .selectFrom('lancamentos_financeiros')
+            .selectAll()
+            .where('id', 'in', [...ids])
+            .execute()) as LancamentoRow[];
+          const result = rows.map(lancamentoFromRow);
+          span.setStatus({ code: SpanStatusCode.OK });
+          return result;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
   async findLancamentosByIdCampanha(
     idCampanha: IdCampanha,
   ): Promise<readonly LancamentoFinanceiro[]> {

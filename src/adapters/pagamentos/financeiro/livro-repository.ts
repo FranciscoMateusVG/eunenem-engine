@@ -33,6 +33,16 @@ export interface LivroFinanceiroRepository {
   findLancamentosByIdPagamento(
     idPagamento: IdPagamentoReferencia,
   ): Promise<readonly LancamentoFinanceiro[]>;
+  /**
+   * Plan 0015 / aperture-mjgxe. Bulk-lookup by id — used by the
+   * `marcarLancamentoTransferido` use-case's gate to resolve which
+   * pagamento each input lançamento belongs to before checking the
+   * derived liberação predicate. Returns only matched rows;
+   * caller-side responsibility to detect missing ids.
+   */
+  findLancamentosByIds(
+    ids: readonly IdLancamentoFinanceiro[],
+  ): Promise<readonly LancamentoFinanceiro[]>;
   findLancamentosByIdCampanha(idCampanha: IdCampanha): Promise<readonly LancamentoFinanceiro[]>;
   findLancamentosReceitaPlataforma(): Promise<readonly LancamentoFinanceiro[]>;
   /**

@@ -706,6 +706,28 @@ const TransacaoExternaDTOSchema = z.object({
   statusBruto: z.string().optional(),
 });
 
+/**
+ * Plan 0015 derived-liberação extension (aperture-mjgxe). Two sub-states
+ * of `aprovado` exposed at the DTO layer as a derived predicate over
+ * the new `intencao.balanceTransactionAvailableOn` column:
+ *
+ *   - `aguardando_liberacao` — status='aprovado' AND
+ *     (availableOn IS NULL OR availableOn > now()).
+ *     Money received from Stripe but not yet available to the recebedor.
+ *     Admin transfer-to-recebedor is BLOCKED in this state.
+ *   - `disponivel` — status='aprovado' AND availableOn <= now().
+ *     Money is settled; admin transfer is unblocked.
+ *   - `null` — any non-aprovado status. The UI shows the status-level
+ *     chip (pendente, processing, rejeitado, estornado) without the
+ *     liberação overlay.
+ *
+ * Vance's parallel-prep scaffold (#135, aperture-ft5t1) already reads
+ * `pagamento.liberacao` + `pagamento.availableOn` at the top level —
+ * the chip + sub-label light up automatically on the wire-shape swap.
+ */
+const LiberacaoSchema = z.enum(['aguardando_liberacao', 'disponivel']).nullable();
+export type Liberacao = z.infer<typeof LiberacaoSchema>;
+
 const PagamentoAdminDTOSchema = z.object({
   id: z.string(),
   status: PagamentoStatusSchema,
@@ -713,6 +735,21 @@ const PagamentoAdminDTOSchema = z.object({
   atualizadoEm: z.string(),
   intencao: IntencaoPagamentoDTOSchema,
   transacaoExterna: TransacaoExternaDTOSchema.optional(),
+  /**
+   * Plan 0015 / aperture-mjgxe. Server-side derived liberação sub-state
+   * (see LiberacaoSchema docblock). Top-level field — NOT nested under
+   * intencao — matches Vance's scaffold contract.
+   */
+  liberacao: LiberacaoSchema,
+  /**
+   * Plan 0015 / aperture-mjgxe. ISO string of when the money becomes
+   * (or became) available to the recebedor. `null` when the webhook
+   * hasn't populated it yet (typically a brief window after pi.succeeded
+   * for cartão while Stripe's Balance Transaction hasn't been minted).
+   * UI sub-label "liberação prevista DD/MM" formats this; only renders
+   * when liberacao === 'aguardando_liberacao' AND availableOn !== null.
+   */
+  availableOn: z.string().nullable(),
 });
 export type PagamentoAdminDTO = z.infer<typeof PagamentoAdminDTOSchema>;
 
@@ -743,12 +780,38 @@ export type PagamentoWithLancamentosAdminDTO = z.infer<
   typeof PagamentoWithLancamentosAdminDTOSchema
 >;
 
-function toPagamentoAdminDTO(p: Pagamento): PagamentoAdminDTO {
+/**
+ * Plan 0015 / aperture-mjgxe. Compute the derived liberação sub-state
+ * from (status, availableOn, now).
+ *
+ * Rules (locked at the bead spec):
+ *   - status !== 'aprovado'               → null (no overlay)
+ *   - aprovado AND availableOn === null   → 'aguardando_liberacao'
+ *     (defensive — brief window before webhook persists availableOn)
+ *   - aprovado AND availableOn > now      → 'aguardando_liberacao'
+ *   - aprovado AND availableOn <= now     → 'disponivel'
+ */
+function deriveLiberacao(
+  status: Pagamento['status'],
+  availableOn: Date | null | undefined,
+  now: Date,
+): Liberacao {
+  if (status !== 'aprovado') return null;
+  // Loose-equality catches both null AND undefined — old test fixtures
+  // built pre-mjgxe (with `as never` casts) lack the field; production
+  // entities always carry null at minimum (set in criarPagamentoPendente).
+  if (availableOn == null) return 'aguardando_liberacao';
+  return availableOn.getTime() <= now.getTime() ? 'disponivel' : 'aguardando_liberacao';
+}
+
+function toPagamentoAdminDTO(p: Pagamento, now: Date): PagamentoAdminDTO {
   return {
     id: p.id,
     status: p.status,
     criadoEm: p.criadoEm.toISOString(),
     atualizadoEm: p.atualizadoEm.toISOString(),
+    liberacao: deriveLiberacao(p.status, p.intencao.balanceTransactionAvailableOn ?? null, now),
+    availableOn: p.intencao.balanceTransactionAvailableOn?.toISOString() ?? null,
     intencao: {
       id: p.intencao.id,
       idContribuicao: p.intencao.idContribuicao,
@@ -841,6 +904,12 @@ const pagamentosRouter = t.router({
           input.idContribuicao as IdContribuicaoPagamento,
         );
 
+      // Plan 0015 / aperture-mjgxe: snapshot "now" once for the whole
+      // query so every pagamento in the list derives liberação against
+      // the same reference timestamp (no cross-row jitter on rapid
+      // re-renders).
+      const now = ctx.deps.clock();
+
       // Compose lançamentos per pagamento (plan 0015 BC reshape — see
       // header). N+1 by design: N ≤ ~3 in practice; bulk port lookup
       // is a +1 engine bead we don't need yet.
@@ -851,7 +920,7 @@ const pagamentosRouter = t.router({
               p.id as unknown as IdPagamentoReferencia,
             );
           return {
-            pagamentoDTO: toPagamentoAdminDTO(p),
+            pagamentoDTO: toPagamentoAdminDTO(p, now),
             criadoEm: p.criadoEm,
             lancamentosDTO: lancamentos.map(toLancamentoAdminDTO),
           };

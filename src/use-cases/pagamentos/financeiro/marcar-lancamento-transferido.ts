@@ -1,7 +1,9 @@
 import { SpanStatusCode } from '@opentelemetry/api';
 import { z } from 'zod/v4';
 import type { LivroFinanceiroRepository } from '../../../adapters/pagamentos/financeiro/livro-repository.js';
+import type { PagamentoRepository } from '../../../adapters/pagamentos/repository.js';
 import { IdLancamentoFinanceiroSchema } from '../../../domain/pagamentos/financeiro/value-objects/ids.js';
+import type { IdPagamento } from '../../../domain/pagamentos/value-objects/ids.js';
 import { FinanceiroInputInvalidoError } from '../../../errors/pagamentos/financeiro/input-invalido.error.js';
 import type { Observability } from '../../../observability/observability.js';
 
@@ -33,34 +35,78 @@ export interface MarcarLancamentoTransferidoResult {
 
 export interface MarcarLancamentoTransferidoDeps {
   readonly livroFinanceiroRepository: LivroFinanceiroRepository;
+  /**
+   * Plan 0015 / aperture-mjgxe. Needed for the derived-liberação gate:
+   * each input lançamento resolves to a pagamento; the gate refuses
+   * the batch if ANY pagamento is not yet `aprovado AND available_on
+   * <= now`.
+   */
+  readonly pagamentoRepository: PagamentoRepository;
   readonly clock: () => Date;
   readonly observability: Observability;
 }
 
 /**
- * Plan 0015 (aperture-ucgok). Admin-action use-case: stamp
- * `transferidoEm` on a batch of lançamentos to record that the money
- * actually reached the recebedor. Idempotent at the adapter level:
- * re-marking an already-transferred row is a silent no-op (the
- * WHERE clause skips it). Mix of fresh + already-transferred IDs is
- * acceptable — admin can re-fire the operation without error if a
- * partial batch needs to be retried.
+ * Plan 0015 / aperture-mjgxe. Thrown when the admin tries to transfer
+ * lançamentos for a pagamento that is not yet "disponível" (status
+ * aprovado AND availableOn <= now). The pagamento is still in the
+ * aguardando-liberação sub-state.
  *
- * Already-cancelled rows (cancelled by an estorno cascade) are also
- * skipped — once a row is `canceladoEm`, the money never left to the
- * recebedor; marking it transferred would be a lie.
+ * The HTTP layer maps this to 422 with a operator-readable message
+ * "Pagamento ainda em liberação até DD/MM" (per the bead spec).
+ * Carries enough context for the message: the offending pagamento id,
+ * its current status, its availableOn date (may be null), and a
+ * categorical `reason` so the HTTP layer can branch the message
+ * without parsing prose.
+ */
+export class MarcarLancamentoTransferidoBloqueadoError extends Error {
+  constructor(
+    public readonly idPagamento: string,
+    public readonly pagamentoStatus: string,
+    public readonly availableOn: Date | null,
+    public readonly reason:
+      | 'pagamento_nao_aprovado'
+      | 'aguardando_liberacao_sem_data'
+      | 'aguardando_liberacao_ate',
+  ) {
+    super(
+      `Transfer bloqueado para pagamento ${idPagamento}: ${reason} (status=${pagamentoStatus}, availableOn=${availableOn?.toISOString() ?? 'null'})`,
+    );
+    this.name = 'MarcarLancamentoTransferidoBloqueadoError';
+  }
+}
+
+/**
+ * Plan 0015 (aperture-ucgok + aperture-mjgxe). Admin-action use-case:
+ * stamp `transferidoEm` on a batch of lançamentos to record that the
+ * money actually reached the recebedor.
+ *
+ * **GATE (aperture-mjgxe).** Before stamping, the use-case resolves
+ * each input lançamento to its pagamento and verifies the derived
+ * liberação predicate is `disponivel`. If ANY pagamento is in
+ * aguardando-liberação or non-aprovado, the WHOLE batch is refused
+ * with `MarcarLancamentoTransferidoBloqueadoError`. The gate
+ * deliberately covers all unique pagamentos in the batch — partial
+ * application would leave the admin with a confusing half-state.
+ *
+ * Idempotency at the row level (preserved from the original
+ * ucgok implementation): re-marking an already-transferred row is a
+ * silent no-op (adapter WHERE clause skips it). Mix of fresh +
+ * already-transferred IDs is acceptable — admin can re-fire the
+ * operation without error if a partial batch needs to be retried.
+ * Already-cancelled rows (estorno cascade) are also skipped — once
+ * a row is `canceladoEm`, the money never left to the recebedor.
  *
  * **v1 ships without an automated banking integration.** This
  * use-case is the admin's manual journal entry that the money path
  * completed. Stripe Connect / open-banking integration is a separate
- * future plan (0014 partially covers — but needs revision per
- * plan 0015's renames).
+ * future plan.
  */
 export async function marcarLancamentoTransferido(
   deps: MarcarLancamentoTransferidoDeps,
   input: MarcarLancamentoTransferidoInput,
 ): Promise<MarcarLancamentoTransferidoResult> {
-  const { livroFinanceiroRepository, clock, observability } = deps;
+  const { livroFinanceiroRepository, pagamentoRepository, clock, observability } = deps;
   const { logger, tracer } = observability;
 
   return tracer.startActiveSpan('marcarLancamentoTransferido', async (span) => {
@@ -79,6 +125,51 @@ export async function marcarLancamentoTransferido(
         span.setAttribute('financeiro.bank_transfer.ref', bankTransferRef);
       }
 
+      // ─── Plan 0015 gate (aperture-mjgxe) ───────────────────────────
+      // Resolve unique pagamento ids from the batch + gate-check each.
+      const lancamentos = await livroFinanceiroRepository.findLancamentosByIds(idsLancamentos);
+      const idsPagamento = new Set<string>(lancamentos.map((l) => l.idPagamento));
+      for (const idPagamento of idsPagamento) {
+        const pagamento = await pagamentoRepository.findById(idPagamento as IdPagamento);
+        if (!pagamento) {
+          // Defensive: the lançamento exists but its pagamento doesn't.
+          // Treat as gate failure with a clear signal (shouldn't happen
+          // outside corrupt-state scenarios; FK enforces this at the DB).
+          throw new MarcarLancamentoTransferidoBloqueadoError(
+            idPagamento,
+            'nao_encontrado',
+            null,
+            'pagamento_nao_aprovado',
+          );
+        }
+        if (pagamento.status !== 'aprovado') {
+          throw new MarcarLancamentoTransferidoBloqueadoError(
+            pagamento.id,
+            pagamento.status,
+            pagamento.intencao.balanceTransactionAvailableOn,
+            'pagamento_nao_aprovado',
+          );
+        }
+        const availableOn = pagamento.intencao.balanceTransactionAvailableOn;
+        if (availableOn === null) {
+          throw new MarcarLancamentoTransferidoBloqueadoError(
+            pagamento.id,
+            pagamento.status,
+            null,
+            'aguardando_liberacao_sem_data',
+          );
+        }
+        if (availableOn.getTime() > transferidoEm.getTime()) {
+          throw new MarcarLancamentoTransferidoBloqueadoError(
+            pagamento.id,
+            pagamento.status,
+            availableOn,
+            'aguardando_liberacao_ate',
+          );
+        }
+      }
+      span.setAttribute('financeiro.gate.pagamentos_checked', idsPagamento.size);
+
       await livroFinanceiroRepository.marcarLancamentosComoTransferidos(
         idsLancamentos,
         transferidoEm,
@@ -86,6 +177,7 @@ export async function marcarLancamentoTransferido(
 
       logger.info('financeiro.lancamentos.transferidos', {
         batchSize: idsLancamentos.length,
+        pagamentosCount: idsPagamento.size,
         bankTransferRef: bankTransferRef ?? null,
         transferidoEm: transferidoEm.toISOString(),
       });

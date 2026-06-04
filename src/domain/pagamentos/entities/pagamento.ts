@@ -109,6 +109,21 @@ export const IntencaoPagamentoSchema = z.object({
   paymentIntentExternalRef: z.string().trim().min(1).max(255).nullable(),
   chargeExternalRef: z.string().trim().min(1).max(255).nullable(),
   contribuinte: DadosContribuinteSchema.nullable(),
+  /**
+   * Plan 0015 derived-liberação extension (aperture-mjgxe). When the
+   * money the visitor paid becomes available to the recebedor:
+   *   - PIX: dispatcher sets to NOW() at payment_intent.succeeded
+   *     (operator's no-cancel domain shortcut — pix funds settle
+   *     effectively immediately).
+   *   - CARTÃO: dispatcher fetches `charge.balance_transaction.available_on`
+   *     from the Stripe API at payment_intent.succeeded.
+   * Stays null between intent-creation and aprovado (the brief
+   * pre-webhook window) AND for any synchronous PIX-direct topology
+   * that doesn't go through a Stripe payment_intent path. The
+   * "liberação" sub-state surfaces only at the DTO layer — not a
+   * domain transition.
+   */
+  balanceTransactionAvailableOn: z.date().nullable(),
   criadaEm: z.date(),
 });
 export type IntencaoPagamento = Readonly<z.infer<typeof IntencaoPagamentoSchema>>;
@@ -177,6 +192,10 @@ export function criarPagamentoPendente(input: CriarPagamentoPendenteInput): Paga
       // and delivered on `checkout.session.completed`; the handler
       // writes it atomically with the status transition.
       contribuinte: null,
+      // plan 0015 / aperture-mjgxe: balanceTransactionAvailableOn starts
+      // null; dispatcher populates at payment_intent.succeeded based
+      // on metodo (NOW for pix, Stripe API for cartão).
+      balanceTransactionAvailableOn: null,
       criadaEm: input.criadoEm,
     },
     status: 'pendente',

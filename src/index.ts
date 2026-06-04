@@ -670,6 +670,7 @@ export type {
   MarcarLancamentoTransferidoResult,
 } from './use-cases/pagamentos/financeiro/marcar-lancamento-transferido.js';
 export {
+  MarcarLancamentoTransferidoBloqueadoError,
   MarcarLancamentoTransferidoInputSchema,
   marcarLancamentoTransferido,
 } from './use-cases/pagamentos/financeiro/marcar-lancamento-transferido.js';
