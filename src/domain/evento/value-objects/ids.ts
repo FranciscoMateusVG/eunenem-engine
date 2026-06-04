@@ -8,6 +8,9 @@ import { z } from 'zod/v4';
 export const IdEventoSchema = z.uuid();
 export type IdEvento = z.infer<typeof IdEventoSchema>;
 
+export const IdConviteSchema = z.uuid();
+export type IdConvite = z.infer<typeof IdConviteSchema>;
+
 /**
  * Mirror VO: public reference to a Campanha (Arrecadação). Same shape as
  * `IdCampanha` in Arrecadação, defined locally so Evento does NOT import from

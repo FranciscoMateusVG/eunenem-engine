@@ -12,6 +12,8 @@ export { RecebedorRepositoryPostgres } from './adapters/arrecadacao/recebedor-re
 export type { CatRepository } from './adapters/cat-repository.js';
 export type { Database } from './adapters/database.js';
 export { createDatabase } from './adapters/database.js';
+export type { ConviteRepository } from './adapters/evento/convite-repository.js';
+export { ConviteRepositoryMemory } from './adapters/evento/convite-repository.memory.js';
 export type { EventoRepository } from './adapters/evento/evento-repository.js';
 export { EventoRepositoryMemory } from './adapters/evento/evento-repository.memory.js';
 export type { LivroFinanceiroRepository } from './adapters/financeiro/livro-repository.js';
@@ -159,6 +161,15 @@ export { CatIdSchema, CatNameSchema, CreateCatInputSchema } from './domain/cat.j
 // --- Domain: Evento (supporting) ---
 
 export type {
+  AtualizarConviteCampos,
+  Convite,
+  CriarConviteInput as CriarConviteDominioInput,
+} from './domain/evento/entities/convite.js';
+export {
+  conviteComCamposAtualizados,
+  criarConvite as criarConviteDominio,
+} from './domain/evento/entities/convite.js';
+export type {
   AtualizarEventoCampos,
   CriarEventoInput as CriarEventoDominioInput,
   Evento,
@@ -178,16 +189,28 @@ export {
   EnderecoEventoNullableSchema,
   EnderecoEventoSchema,
 } from './domain/evento/value-objects/endereco-evento.js';
+export type { FonteConvite } from './domain/evento/value-objects/fonte-convite.js';
+export { FonteConviteSchema } from './domain/evento/value-objects/fonte-convite.js';
 export type {
   IdCampanha as IdCampanhaEvento,
+  IdConvite,
   IdEvento,
 } from './domain/evento/value-objects/ids.js';
 export {
   IdCampanhaSchema as IdCampanhaEventoSchema,
+  IdConviteSchema,
   IdEventoSchema,
 } from './domain/evento/value-objects/ids.js';
+export type { MensagemConvite } from './domain/evento/value-objects/mensagem-convite.js';
+export { MensagemConviteSchema } from './domain/evento/value-objects/mensagem-convite.js';
 export type { ModalidadeEvento } from './domain/evento/value-objects/modalidade-evento.js';
 export { ModalidadeEventoSchema } from './domain/evento/value-objects/modalidade-evento.js';
+export type { ModeloConvite } from './domain/evento/value-objects/modelo-convite.js';
+export { ModeloConviteSchema } from './domain/evento/value-objects/modelo-convite.js';
+export type { NomeExibidoConvite } from './domain/evento/value-objects/nome-exibido-convite.js';
+export { NomeExibidoConviteSchema } from './domain/evento/value-objects/nome-exibido-convite.js';
+export type { PaletaConvite } from './domain/evento/value-objects/paleta-convite.js';
+export { PaletaConviteSchema } from './domain/evento/value-objects/paleta-convite.js';
 export type { TipoEvento } from './domain/evento/value-objects/tipo-evento.js';
 export { TipoEventoSchema } from './domain/evento/value-objects/tipo-evento.js';
 
@@ -424,6 +447,9 @@ export { CheckoutCampanhaSemRecebedorError } from './errors/checkout/campanha-se
 export { CheckoutPlataformaMismatchError } from './errors/checkout/plataforma-mismatch.error.js';
 export { EventoCampanhaJaTemEventoError } from './errors/evento/campanha-ja-tem-evento.error.js';
 export { EventoCampanhaNaoEncontradaError } from './errors/evento/campanha-nao-encontrada.error.js';
+export { ConviteInputInvalidoError } from './errors/evento/convite-input-invalido.error.js';
+export { ConviteJaExisteError } from './errors/evento/convite-ja-existe.error.js';
+export { ConviteNaoEncontradoError } from './errors/evento/convite-nao-encontrado.error.js';
 export { EventoInputInvalidoError } from './errors/evento/input-invalido.error.js';
 export { EventoNaoEncontradoError } from './errors/evento/nao-encontrado.error.js';
 export { FinanceiroInputInvalidoError } from './errors/financeiro/input-invalido.error.js';
@@ -614,6 +640,14 @@ export {
 export type { CreateCatDeps } from './use-cases/create-cat.js';
 export { createCat } from './use-cases/create-cat.js';
 export type {
+  AtualizarConviteDeps,
+  AtualizarConviteInput,
+} from './use-cases/evento/atualizar-convite.js';
+export {
+  AtualizarConviteInputSchema,
+  atualizarConvite,
+} from './use-cases/evento/atualizar-convite.js';
+export type {
   AtualizarEventoDeps,
   AtualizarEventoInput,
 } from './use-cases/evento/atualizar-evento.js';
@@ -621,8 +655,26 @@ export {
   AtualizarEventoInputSchema,
   atualizarEvento,
 } from './use-cases/evento/atualizar-evento.js';
+export type { CriarConviteDeps, CriarConviteInput } from './use-cases/evento/criar-convite.js';
+export { CriarConviteInputSchema, criarConvite } from './use-cases/evento/criar-convite.js';
 export type { CriarEventoDeps, CriarEventoInput } from './use-cases/evento/criar-evento.js';
 export { CriarEventoInputSchema, criarEvento } from './use-cases/evento/criar-evento.js';
+export type {
+  ObterConvitePorIdDeps,
+  ObterConvitePorIdInput,
+} from './use-cases/evento/obter-convite-por-id.js';
+export {
+  ObterConvitePorIdInputSchema,
+  obterConvitePorId,
+} from './use-cases/evento/obter-convite-por-id.js';
+export type {
+  ObterConvitePorIdEventoDeps,
+  ObterConvitePorIdEventoInput,
+} from './use-cases/evento/obter-convite-por-id-evento.js';
+export {
+  ObterConvitePorIdEventoInputSchema,
+  obterConvitePorIdEvento,
+} from './use-cases/evento/obter-convite-por-id-evento.js';
 export type {
   ObterEventoPorIdDeps,
   ObterEventoPorIdInput,
