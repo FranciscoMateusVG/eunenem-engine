@@ -48,8 +48,19 @@ export type ExtratoLiberacao =
 export type ExtratoSummaryDTO = {
   totalRecebidoCents: number;
   resgatadoCents: number;
+  /** Money the recebedor can still SOLICITAR right now. Shrinks at solicit-
+   *  time — solicitado lançamentos move out of this bucket into
+   *  aguardandoAprovacaoCents (aperture-1ut92). Operator's mental model:
+   *  "saldo I can act on right now." */
   saldoDisponivelCents: number;
   aguardandoLiberacaoCents: number;
+  /** Sum of lançamentos with idRepasse set + still untransferred
+   *  (aperture-1ut92, Rex backend PR #158). Money is requested for transfer
+   *  and sitting in the admin-approval queue. Distinct visual bucket from
+   *  saldoDisponivel (actionable) and aguardandoLiberacao (waiting Stripe
+   *  maturação). Optional on the mirror for the trpc-cache-rotation window
+   *  — older cached responses lack this field; renderer falls back to 0. */
+  aguardandoAprovacaoCents?: number;
   proximaTransfDate: string | null;
   totalPresentes: number;
   dateRangeStart: string | null;
@@ -142,13 +153,19 @@ export function useStubExtratoList(input: {
   // Rex's input schema:
   //   statusFilters → enum subset (no 'cancelado' — operator never filters
   //                                for cancelled; we strip it client-side
-  //                                if any leak through).
+  //                                if any leak through). aperture-1ut92
+  //                                added 'solicitado' to the accepted set.
   //   cursor       → string | null (required slot, even when null)
   //   limit        → 1..100 (default 20). Use 100 so the current "filter
   //                  client-side" approach has enough data without paging.
   const wireFilters = (input.statusFilters ?? []).filter(
-    (s): s is "aguardando_liberacao" | "disponivel" | "transferido" =>
-      s !== "cancelado",
+    (
+      s,
+    ): s is
+      | "aguardando_liberacao"
+      | "disponivel"
+      | "solicitado"
+      | "transferido" => s !== "cancelado",
   );
   const query = trpc.recebedor.extrato.list.useQuery(
     {

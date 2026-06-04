@@ -60,12 +60,14 @@ import {
  *   ├ resgatadoCents         →  summary.resgatado
  *   ├ saldoDisponivelCents   →  summary.disponivel
  *   ├ aguardandoLiberacaoCents → summary.aguardando
+ *   ├ aguardandoAprovacaoCents → summary.aguardandoAprovacao (aperture-1ut92)
  *   ├ proximaTransfDate      →  NEXT_TRANSFER_LABEL (computed pt-BR)
  *   └ dateRangeStart/End     →  EVENT_PERIOD (computed pt-BR)
  *
- *   ExtratoRowDTO            →  PresentesTx (in-row only — wire ships
- *                               lancamento grain; "out" events from the
- *                               mock are gone, surfaced via summary totals)
+ *   ExtratoRowDTO            →  PresentesTx (in-row, 5-state liberacao —
+ *                               wire ships lancamento grain; "out" events
+ *                               from the mock are gone, surfaced via
+ *                               summary totals + the solicitar mutation)
  *   ├ idLancamento           →  tx.id
  *   ├ timestamp (ISO)        →  tx.d + tx.t
  *   ├ contribuinteNome | null →  tx.guest  (default: "(anônimo)")
@@ -89,12 +91,12 @@ const EVENT_TITLE_FALLBACK = "extrato";
 const EVENT_PERIOD_FALLBACK = "carregando…";
 const NEXT_TRANSFER_FALLBACK = "—";
 
-/** Wire-to-PresentesStatus mapping. aperture-1ut92 extends the wire
- *  to 5 lancamento-grain liberacao states (added 'solicitado' — the
- *  admin-pipeline state). The mock vocabulary already had a
- *  'tSolicitada' status for the same shape, so the new mapping is
- *  natural. Visual refinement (color/label distinct from disponivel
- *  and transferido) is Vance's parallel-prep PR. */
+/** Wire-to-PresentesStatus mapping. aperture-1ut92 extended the wire to
+ *  5 lancamento-grain liberacao states by adding 'solicitado' — the
+ *  admin-pipeline state. The mock vocabulary already had a 'tSolicitada'
+ *  status with a lilac/purple palette designed for exactly this shape,
+ *  so the new mapping reuses it (aperture-yspfw confirms — no new
+ *  visual treatment needed; the palette was waiting). */
 const LIBERACAO_TO_STATUS: Record<ExtratoLiberacao, PresentesStatus> = {
   aguardando_liberacao: "aguardando",
   disponivel: "disponivel",
@@ -105,9 +107,11 @@ const LIBERACAO_TO_STATUS: Record<ExtratoLiberacao, PresentesStatus> = {
 
 /**
  * Reverse of LIBERACAO_TO_STATUS — used when reverse-mapping a mock-status
- * chip filter to a wire-status filter. Returns null for mock statuses that
- * have no wire equivalent (resgatado / tSolicitada — those are out-row
- * concepts the wire doesn't model at the lancamento grain).
+ * chip filter to a wire-status filter. Returns null for `resgatado` — the
+ * only remaining mock status without a wire equivalent (account-level
+ * out-row concept that the wire's lancamento-grain projection doesn't
+ * model). aperture-1ut92 added 'solicitado' to the wire, so tSolicitada
+ * now has a clean reverse mapping (it surfaces as an in-row state again).
  *
  * Currently UNUSED (the page filters client-side instead of pushing
  * statusFilters to the wire) but kept for the eventual swap-time pivot to
@@ -120,12 +124,13 @@ function _mockToLiberacao(s: PresentesStatus): ExtratoLiberacao | null {
       return "aguardando_liberacao";
     case "disponivel":
       return "disponivel";
+    case "tSolicitada":
+      return "solicitado";
     case "tEnviada":
       return "transferido";
     case "estornado":
       return "cancelado";
     case "resgatado":
-    case "tSolicitada":
       return null;
   }
 }
@@ -138,6 +143,12 @@ interface PresentesSummaryUI {
   resgatado: number;
   disponivel: number;
   aguardando: number;
+  /** Sum of solicitado lançamentos — money in the admin-approval queue
+   *  (aperture-1ut92). Surfaced as a dedicated aux pill in the summary
+   *  block so the operator sees all three liquidity buckets honestly:
+   *  saldoDisponivel (actionable) · aguardandoAprovacao (admin queue) ·
+   *  aguardandoLiberacao (Stripe maturação). */
+  aguardandoAprovacao: number;
   opening: number;
 }
 
@@ -148,6 +159,10 @@ function adaptSummary(s: ExtratoSummaryDTO): PresentesSummaryUI {
     resgatado: s.resgatadoCents,
     disponivel: s.saldoDisponivelCents,
     aguardando: s.aguardandoLiberacaoCents,
+    // aperture-1ut92 — fall back to 0 for the trpc-cache-rotation window
+    // (older cached summaries lack this bucket); once the cache rotates
+    // the field is always populated by Rex's server-side aggregation.
+    aguardandoAprovacao: s.aguardandoAprovacaoCents ?? 0,
     // `opening` is a mock concept (account-level prior balance carried
     // forward) that doesn't exist on Rex's wire. The wire saldoDisponivel
     // already accounts for all activity — no rolling prior balance needed.
@@ -1023,6 +1038,18 @@ export function PresentesBody(props: PainelSectionBodyProps) {
                 <span className="ex-aux-num">{fmtMoney(summary.aguardando)}</span>
                 <span>aguardando liberação</span>
               </span>
+              {/* aperture-1ut92 — admin-pipeline bucket. Renders only when
+                  there's actually money in it; an empty pill reads as
+                  visual noise. Lilac/purple matches the row badge for
+                  in-flight solicitado lançamentos. */}
+              {summary.aguardandoAprovacao > 0 && (
+                <span className="ex-aux-pill lilac">
+                  <span className="ex-aux-num">
+                    {fmtMoney(summary.aguardandoAprovacao)}
+                  </span>
+                  <span>aguardando aprovação</span>
+                </span>
+              )}
               <span className="ex-aux-pill lilac">
                 <span>próxima transf.</span>
                 <span className="ex-aux-num">{nextTransferLabel}</span>

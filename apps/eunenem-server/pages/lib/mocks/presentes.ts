@@ -58,7 +58,20 @@ export interface PresentesTx {
 // through the history even though older outgoing > older incoming.
 export const OPENING_BALANCE_CENTS = 320000; // R$ 3.200,00
 
-/** Status palette — bg tint, accent stripe, ink, pt-BR label. */
+/** Status palette — bg tint, accent stripe, ink, pt-BR label.
+ *
+ * Labels match operator vocabulary as of aperture-yspfw (folded with the
+ * filter-dropdown scope-repair, 2026-06-04). The row badge label, the
+ * filter chip label, and the drawer status label all read the SAME
+ * vocabulary across the surface — single-vocabulary mental model. Old
+ * "transf. enviada" / "transf. solicitada" / "estornado" labels read as
+ * mock-era abbreviations; the wire's plain "transferido" / "solicitado" /
+ * "cancelado" are what the operator says out loud.
+ *
+ * Color call: solicitado uses the existing lilac/purple palette — the
+ * mock UI shipped this color for "admin pipeline pending" from day one,
+ * which matches the wire's `solicitado` semantic exactly (aperture-1ut92).
+ */
 export const STATUS_TINT: Record<
   PresentesStatus,
   { bg: string; stripe: string; ink: string; label: string }
@@ -66,19 +79,26 @@ export const STATUS_TINT: Record<
   disponivel: { bg: "#E5EFCF", stripe: "#7FA32E", ink: "#42620C", label: "disponível" },
   aguardando: { bg: "#F7E8A5", stripe: "#D2A82A", ink: "#7A5B0D", label: "aguardando liberação" },
   resgatado: { bg: "#F4D6CE", stripe: "#B7503C", ink: "#7B2A1A", label: "resgatado" },
-  estornado: { bg: "#E6E1DA", stripe: "#9C928A", ink: "#5B544D", label: "estornado" },
-  tSolicitada: { bg: "#E2D7EE", stripe: "#7E5BA8", ink: "#492F70", label: "transf. solicitada" },
-  tEnviada: { bg: "#D2E4DD", stripe: "#4F7B69", ink: "#244C3D", label: "transf. enviada" },
+  estornado: { bg: "#E6E1DA", stripe: "#9C928A", ink: "#5B544D", label: "cancelado" },
+  tSolicitada: { bg: "#E2D7EE", stripe: "#7E5BA8", ink: "#492F70", label: "solicitado" },
+  tEnviada: { bg: "#D2E4DD", stripe: "#4F7B69", ink: "#244C3D", label: "transferido" },
 };
 
-/** Filter-pill options, in display order (decorations.jsx FILTER_OPTIONS). */
+/** Filter-pill options, in display order — matches the 5 wire liberacao
+ *  states (aperture-1ut92): aguardando_liberacao / disponivel / solicitado /
+ *  transferido / cancelado. The mock's `resgatado` state never surfaces
+ *  in wire row data (the wire ships lancamento-grain only; account-level
+ *  resgate is summary-only), so it's dropped from the filter set —
+ *  zero-count clutter on a filter chip is operator confusion.
+ *
+ *  Labels match the STATUS_TINT row-badge labels above so the chip
+ *  vocabulary and the row vocabulary read the same. */
 export const FILTER_OPTIONS: { key: PresentesStatus; label: string; color: string }[] = [
+  { key: "aguardando", label: "aguardando liberação", color: "#D2A82A" },
   { key: "disponivel", label: "disponível", color: "#7FA32E" },
-  { key: "aguardando", label: "aguardando", color: "#D2A82A" },
-  { key: "resgatado", label: "resgatado", color: "#B7503C" },
-  { key: "estornado", label: "estornado", color: "#9C928A" },
-  { key: "tSolicitada", label: "transf. solicitada", color: "#7E5BA8" },
-  { key: "tEnviada", label: "transf. enviada", color: "#4F7B69" },
+  { key: "tSolicitada", label: "solicitado", color: "#7E5BA8" },
+  { key: "tEnviada", label: "transferido", color: "#4F7B69" },
+  { key: "estornado", label: "cancelado", color: "#9C928A" },
 ];
 
 export const PRESENTES_TX: PresentesTx[] = [
