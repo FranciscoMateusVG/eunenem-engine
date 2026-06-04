@@ -12,6 +12,12 @@ export { RecebedorRepositoryPostgres } from './adapters/arrecadacao/recebedor-re
 export type { CatRepository } from './adapters/cat-repository.js';
 export type { Database } from './adapters/database.js';
 export { createDatabase } from './adapters/database.js';
+export type { ConviteRepository } from './adapters/evento/convite-repository.js';
+export { ConviteRepositoryMemory } from './adapters/evento/convite-repository.memory.js';
+export type { EventoRepository } from './adapters/evento/evento-repository.js';
+export { EventoRepositoryMemory } from './adapters/evento/evento-repository.memory.js';
+export type { ListaDeConvidadosRepository } from './adapters/evento/lista-de-convidados-repository.js';
+export { ListaDeConvidadosRepositoryMemory } from './adapters/evento/lista-de-convidados-repository.memory.js';
 export type { LivroFinanceiroRepository } from './adapters/pagamentos/financeiro/livro-repository.js';
 export { LivroFinanceiroRepositoryMemory } from './adapters/pagamentos/financeiro/livro-repository.memory.js';
 export { LivroFinanceiroRepositoryPostgres } from './adapters/pagamentos/financeiro/livro-repository.postgres.js';
@@ -73,6 +79,24 @@ export { criarAuth } from './adapters/usuario/criar-auth.js';
 export type { UsuarioRepository } from './adapters/usuario/repository.js';
 export { UsuarioRepositoryMemory } from './adapters/usuario/repository.memory.js';
 export { UsuarioRepositoryPostgres } from './adapters/usuario/repository.postgres.js';
+export type {
+  StripeDispatchResult,
+  StripePipelineArgs,
+  StripePipelineResult,
+} from './adapters/webhook-archive/stripe-webhook-pipeline.js';
+export { archiveAndDispatchStripeEvent } from './adapters/webhook-archive/stripe-webhook-pipeline.js';
+// aperture-1n6u8: payment webhook event archive (infrastructure boundary).
+// aperture-2sp6m: findByPagamentoId + FindByPagamentoIdOptions for admin trail.
+export type {
+  FindByPagamentoIdOptions,
+  SaveReceivedInput,
+  SaveReceivedResult,
+  WebhookEventArchive,
+  WebhookEventRecord,
+} from './adapters/webhook-archive/webhook-event-archive.js';
+export { PROCESSING_ERROR_MAX_LENGTH } from './adapters/webhook-archive/webhook-event-archive.js';
+export { WebhookEventArchiveMemory } from './adapters/webhook-archive/webhook-event-archive.memory.js';
+export { WebhookEventArchivePostgres } from './adapters/webhook-archive/webhook-event-archive.postgres.js';
 export { hashClientPII } from './observability/hash-client-pii.js';
 
 // --- Domain: Arrecadação ---
@@ -154,6 +178,86 @@ export {
 
 export type { Cat, CatId, CatName, CreateCatInput } from './domain/cat.js';
 export { CatIdSchema, CatNameSchema, CreateCatInputSchema } from './domain/cat.js';
+
+// --- Domain: Evento (supporting) ---
+
+export type {
+  AtualizarConviteCampos,
+  Convite,
+  CriarConviteInput as CriarConviteDominioInput,
+} from './domain/evento/entities/convite.js';
+export {
+  conviteComCamposAtualizados,
+  criarConvite as criarConviteDominio,
+} from './domain/evento/entities/convite.js';
+export type {
+  AtualizarEventoCampos,
+  CriarEventoInput as CriarEventoDominioInput,
+  Evento,
+} from './domain/evento/entities/evento.js';
+export {
+  criarEvento as criarEventoDominio,
+  eventoComCamposAtualizados,
+  eventoComDataHora,
+  eventoComEndereco,
+  eventoComModalidade,
+  eventoComTipo,
+} from './domain/evento/entities/evento.js';
+export type {
+  AtualizarListaDeConvidadosCampos,
+  Convidado,
+  CriarListaDeConvidadosInput as CriarListaDeConvidadosDominioInput,
+  ListaDeConvidados,
+} from './domain/evento/entities/lista-de-convidados.js';
+export {
+  convidadoComPresencaAtualizada,
+  criarListaDeConvidados as criarListaDeConvidadosDominio,
+  listaDeConvidadosComCamposAtualizados,
+  listaDeConvidadosComPresencaAlterada,
+} from './domain/evento/entities/lista-de-convidados.js';
+export type { DataHoraEvento } from './domain/evento/value-objects/data-hora-evento.js';
+export { DataHoraEventoSchema } from './domain/evento/value-objects/data-hora-evento.js';
+export type { EnderecoEvento } from './domain/evento/value-objects/endereco-evento.js';
+export {
+  EnderecoEventoNullableSchema,
+  EnderecoEventoSchema,
+} from './domain/evento/value-objects/endereco-evento.js';
+export type { FonteConvite } from './domain/evento/value-objects/fonte-convite.js';
+export { FonteConviteSchema } from './domain/evento/value-objects/fonte-convite.js';
+export type {
+  IdCampanha as IdCampanhaEvento,
+  IdConvidado,
+  IdConvite,
+  IdEvento,
+  IdListaDeConvidados,
+} from './domain/evento/value-objects/ids.js';
+export {
+  IdCampanhaSchema as IdCampanhaEventoSchema,
+  IdConvidadoSchema,
+  IdConviteSchema,
+  IdEventoSchema,
+  IdListaDeConvidadosSchema,
+} from './domain/evento/value-objects/ids.js';
+export type { LinkConfirmacao } from './domain/evento/value-objects/link-confirmacao-lista.js';
+export { LinkConfirmacaoSchema } from './domain/evento/value-objects/link-confirmacao-lista.js';
+export type { MensagemConvite } from './domain/evento/value-objects/mensagem-convite.js';
+export { MensagemConviteSchema } from './domain/evento/value-objects/mensagem-convite.js';
+export type { ModalidadeEvento } from './domain/evento/value-objects/modalidade-evento.js';
+export { ModalidadeEventoSchema } from './domain/evento/value-objects/modalidade-evento.js';
+export type { ModeloConvite } from './domain/evento/value-objects/modelo-convite.js';
+export { ModeloConviteSchema } from './domain/evento/value-objects/modelo-convite.js';
+export type { NomeConvidado } from './domain/evento/value-objects/nome-convidado.js';
+export { NomeConvidadoSchema } from './domain/evento/value-objects/nome-convidado.js';
+export type { NomeExibidoConvite } from './domain/evento/value-objects/nome-exibido-convite.js';
+export { NomeExibidoConviteSchema } from './domain/evento/value-objects/nome-exibido-convite.js';
+export type { NumeroCelularConvidado } from './domain/evento/value-objects/numero-celular-convidado.js';
+export { NumeroCelularConvidadoSchema } from './domain/evento/value-objects/numero-celular-convidado.js';
+export type { PaletaConvite } from './domain/evento/value-objects/paleta-convite.js';
+export { PaletaConviteSchema } from './domain/evento/value-objects/paleta-convite.js';
+export type { StatusPresencaConvidado } from './domain/evento/value-objects/status-presenca-convidado.js';
+export { StatusPresencaConvidadoSchema } from './domain/evento/value-objects/status-presenca-convidado.js';
+export type { TipoEvento } from './domain/evento/value-objects/tipo-evento.js';
+export { TipoEventoSchema } from './domain/evento/value-objects/tipo-evento.js';
 
 // --- Domain: Financeiro ---
 
@@ -385,6 +489,17 @@ export { ArrecadacaoUltimoAdministradorError } from './errors/arrecadacao/ultimo
 export { CatAlreadyExistsError } from './errors/cat-already-exists.error.js';
 export { CheckoutCampanhaSemRecebedorError } from './errors/checkout/campanha-sem-recebedor.error.js';
 export { CheckoutPlataformaMismatchError } from './errors/checkout/plataforma-mismatch.error.js';
+export { EventoCampanhaJaTemEventoError } from './errors/evento/campanha-ja-tem-evento.error.js';
+export { EventoCampanhaNaoEncontradaError } from './errors/evento/campanha-nao-encontrada.error.js';
+export { ConvidadoNaoEncontradoError } from './errors/evento/convidado-nao-encontrado.error.js';
+export { ConviteInputInvalidoError } from './errors/evento/convite-input-invalido.error.js';
+export { ConviteJaExisteError } from './errors/evento/convite-ja-existe.error.js';
+export { ConviteNaoEncontradoError } from './errors/evento/convite-nao-encontrado.error.js';
+export { EventoInputInvalidoError } from './errors/evento/input-invalido.error.js';
+export { ListaDeConvidadosInputInvalidoError } from './errors/evento/lista-de-convidados-input-invalido.error.js';
+export { ListaDeConvidadosJaExisteError } from './errors/evento/lista-de-convidados-ja-existe.error.js';
+export { ListaDeConvidadosNaoEncontradaError } from './errors/evento/lista-de-convidados-nao-encontrada.error.js';
+export { EventoNaoEncontradoError } from './errors/evento/nao-encontrado.error.js';
 export { FinanceiroInputInvalidoError } from './errors/pagamentos/financeiro/input-invalido.error.js';
 export { FinanceiroPagamentoJaRegistradoError } from './errors/pagamentos/financeiro/pagamento-ja-registrado.error.js';
 export { FinanceiroPagamentoNaoAprovadoError } from './errors/pagamentos/financeiro/pagamento-nao-aprovado.error.js';
@@ -592,6 +707,99 @@ export {
 } from './use-cases/checkout/obter-contribuicoes-precalculadas-campanha.js';
 export type { CreateCatDeps } from './use-cases/create-cat.js';
 export { createCat } from './use-cases/create-cat.js';
+export type {
+  AlterarPresencaConvidadoDeps,
+  AlterarPresencaConvidadoInput,
+} from './use-cases/evento/alterar-presenca-convidado.js';
+export {
+  AlterarPresencaConvidadoInputSchema,
+  alterarPresencaConvidado,
+} from './use-cases/evento/alterar-presenca-convidado.js';
+export type {
+  AtualizarConviteDeps,
+  AtualizarConviteInput,
+} from './use-cases/evento/atualizar-convite.js';
+export {
+  AtualizarConviteInputSchema,
+  atualizarConvite,
+} from './use-cases/evento/atualizar-convite.js';
+export type {
+  AtualizarEventoDeps,
+  AtualizarEventoInput,
+} from './use-cases/evento/atualizar-evento.js';
+export {
+  AtualizarEventoInputSchema,
+  atualizarEvento,
+} from './use-cases/evento/atualizar-evento.js';
+export type {
+  AtualizarListaDeConvidadosDeps,
+  AtualizarListaDeConvidadosInput,
+} from './use-cases/evento/atualizar-lista-de-convidados.js';
+export {
+  AtualizarListaDeConvidadosInputSchema,
+  atualizarListaDeConvidados,
+} from './use-cases/evento/atualizar-lista-de-convidados.js';
+export type { CriarConviteDeps, CriarConviteInput } from './use-cases/evento/criar-convite.js';
+export { CriarConviteInputSchema, criarConvite } from './use-cases/evento/criar-convite.js';
+export type { CriarEventoDeps, CriarEventoInput } from './use-cases/evento/criar-evento.js';
+export { CriarEventoInputSchema, criarEvento } from './use-cases/evento/criar-evento.js';
+export type {
+  CriarListaDeConvidadosDeps,
+  CriarListaDeConvidadosInput,
+} from './use-cases/evento/criar-lista-de-convidados.js';
+export {
+  CriarListaDeConvidadosInputSchema,
+  criarListaDeConvidados,
+} from './use-cases/evento/criar-lista-de-convidados.js';
+export type {
+  ObterConvitePorIdDeps,
+  ObterConvitePorIdInput,
+} from './use-cases/evento/obter-convite-por-id.js';
+export {
+  ObterConvitePorIdInputSchema,
+  obterConvitePorId,
+} from './use-cases/evento/obter-convite-por-id.js';
+export type {
+  ObterConvitePorIdEventoDeps,
+  ObterConvitePorIdEventoInput,
+} from './use-cases/evento/obter-convite-por-id-evento.js';
+export {
+  ObterConvitePorIdEventoInputSchema,
+  obterConvitePorIdEvento,
+} from './use-cases/evento/obter-convite-por-id-evento.js';
+export type {
+  ObterEventoPorIdDeps,
+  ObterEventoPorIdInput,
+} from './use-cases/evento/obter-evento-por-id.js';
+export {
+  ObterEventoPorIdInputSchema,
+  obterEventoPorId,
+} from './use-cases/evento/obter-evento-por-id.js';
+export type {
+  ObterEventoPorIdCampanhaDeps,
+  ObterEventoPorIdCampanhaInput,
+} from './use-cases/evento/obter-evento-por-id-campanha.js';
+export {
+  ObterEventoPorIdCampanhaInputSchema,
+  obterEventoPorIdCampanha,
+} from './use-cases/evento/obter-evento-por-id-campanha.js';
+export type {
+  ObterListaDeConvidadosPorIdDeps,
+  ObterListaDeConvidadosPorIdInput,
+} from './use-cases/evento/obter-lista-de-convidados-por-id.js';
+export {
+  ObterListaDeConvidadosPorIdInputSchema,
+  obterListaDeConvidadosPorId,
+} from './use-cases/evento/obter-lista-de-convidados-por-id.js';
+export type {
+  ObterListaDeConvidadosPorIdEventoDeps,
+  ObterListaDeConvidadosPorIdEventoInput,
+} from './use-cases/evento/obter-lista-de-convidados-por-id-evento.js';
+export {
+  ObterListaDeConvidadosPorIdEventoInputSchema,
+  obterListaDeConvidadosPorIdEvento,
+} from './use-cases/evento/obter-lista-de-convidados-por-id-evento.js';
+// aperture-led0r: maturation use-case.
 export type { ObterReceitaPlataformaDeps } from './use-cases/pagamentos/financeiro/obter-receita-plataforma.js';
 export { obterReceitaPlataforma } from './use-cases/pagamentos/financeiro/obter-receita-plataforma.js';
 export type {

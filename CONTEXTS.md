@@ -2,7 +2,7 @@
 
 Este arquivo reúne a documentação dos **bounded contexts** já implementados na engine de intermediação financeira (skeleton Frame). A **Plataforma** é o BC fundacional **multi-tenant**: todo Usuário, Campanha, Sessão e regra de Taxa pertence a exatamente uma plataforma (eunenem, eucasei, ...). A seguir vem o fluxo natural do negócio: arrecadação → taxas → pagamentos → financeiro, com **usuário** como contexto transversal de administração. Por fim, **Checkout** é um pseudo-BC de orquestração (apenas casos de uso + erros, sem domínio nem adaptadores próprios) que costura os BCs em sagas com compensação.
 
-**Persistência hoje:** **Arrecadação** tem adaptadores em memória e **Postgres** (Kysely); **Plataforma**, **Taxas**, **Pagamentos**, **Financeiro** e **Usuário** usam apenas adaptadores em memória nesta fase.
+**Persistência hoje:** **Arrecadação** tem adaptadores em memória e **Postgres** (Kysely); **Plataforma**, **Taxas**, **Pagamentos**, **Financeiro** e **Usuário** usam adaptadores em memória e/ou Postgres conforme o BC; **Evento** (fase 1) usa **somente memória**.
 
 ---
 
@@ -14,7 +14,8 @@ Este arquivo reúne a documentação dos **bounded contexts** já implementados 
 4. [BC Pagamentos](#bc-pagamentos--o-que-foi-implementado)
 5. [BC Financeiro](#bc-financeiro--o-que-foi-implementado)
 6. [BC Usuário](#bc-usuário--o-que-foi-implementado)
-7. [Orquestração — Checkout (pseudo-BC)](#orquestração--checkout-pseudo-bc)
+7. [BC Evento (supporting)](#bc-evento-supporting--fase-1)
+8. [Orquestração — Checkout (pseudo-BC)](#orquestração--checkout-pseudo-bc)
 
 ---
 
@@ -464,6 +465,41 @@ Este documento descreve a primeira fatia do **bounded context Usuário** na engi
 - **Serviço de aplicação:** cada arquivo em `use-cases/` orquestra validação, leituras e persistência; a “autenticação” é **consciente de ser fake** (senha simulada, token opaco). `registrarContaUsuario` consulta `plataformaRepository.findById` antes de qualquer escrita — gate cross-BC explícito.
 - **Integração com Plataforma:** dependência soft via `IdPlataformaReferencia` no domínio + gate explícito (`plataformaRepository.findById`) na aplicação. Cadastros com plataforma inexistente falham com `UsuarioPlataformaNaoEncontradaError`.
 - **Integração com Arrecadação:** o BC Arrecadação guarda uma lista de UUIDs (`idsAdministradores`). O significado “conta registrada no Usuário” é responsabilidade da **aplicação** (orquestração) ou de testes que chamam primeiro `registrarContaUsuario` e depois `criarCampanha` com o mesmo `idConta` na lista — **sem** acoplar o domínio de campanhas ao de usuários.
+
+---
+
+# BC Evento (supporting) — fase 1
+
+Bounded context de **suporte** ao produto (convites digitais, RSVP): fora do core Arrecadação → Taxas → Pagamentos → Financeiro. Nesta fase só o subdomínio **Evento** (agregado raiz) está implementado.
+
+## Resumo em linguagem simples
+
+1. Uma **campanha** pode ter **no máximo um evento** (relação 1:1 por `idCampanha`).
+2. O evento guarda **tipo** (chá de bebê, chá de fraldas, …), **modalidade** (presencial ou online), **data/hora** e **endereço** opcional.
+3. O agregado **não** guarda `idPlataforma` — o escopo de tenant vem da campanha; a app valida que o admin só opera na própria campanha.
+4. **Convite** (texto, personalização) e **lista de convidados** (RSVP) estão **planejados** no mesmo BC, fase 2+.
+
+## Mapa conceito → código
+
+| Conceito | Onde está |
+|----------|-----------|
+| Evento (agregado raiz) | [`src/domain/evento/entities/evento.ts`](src/domain/evento/entities/evento.ts) |
+| Identificadores | [`src/domain/evento/value-objects/ids.ts`](src/domain/evento/value-objects/ids.ts) |
+| Tipo / modalidade / data-hora / endereço | [`src/domain/evento/value-objects/`](src/domain/evento/value-objects/) |
+| Porta de persistência | [`src/adapters/evento/evento-repository.ts`](src/adapters/evento/evento-repository.ts) |
+| Memória + índice 1:1 campanha | [`src/adapters/evento/evento-repository.memory.ts`](src/adapters/evento/evento-repository.memory.ts) |
+| `criarEvento` | [`src/use-cases/evento/criar-evento.ts`](src/use-cases/evento/criar-evento.ts) |
+| `atualizarEvento` | [`src/use-cases/evento/atualizar-evento.ts`](src/use-cases/evento/atualizar-evento.ts) |
+| `obterEventoPorId` / `obterEventoPorIdCampanha` | [`src/use-cases/evento/obter-evento-por-id.ts`](src/use-cases/evento/obter-evento-por-id.ts), [`obter-evento-por-id-campanha.ts`](src/use-cases/evento/obter-evento-por-id-campanha.ts) |
+| Erros | [`src/errors/evento/`](src/errors/evento/) |
+| API pública | [`src/index.ts`](src/index.ts) — seção `Domain: Evento` |
+| Testes | [`tests/unit/evento/`](tests/unit/evento/) |
+
+## Planejado (mesmo BC)
+
+- **Convite** — 1:1 com `IdEvento`; nome exibido, mensagem, paleta/fonte/modelo.
+- **Lista de convidados** — convidados por evento; presença `sim` / `nao` / `talvez`; link de confirmação.
+- **Postgres** — migration `eventos`, adapter, testes de integração.
 
 ---
 
