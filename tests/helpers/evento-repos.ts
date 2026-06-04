@@ -2,11 +2,14 @@ import type { ConviteRepository } from '../../src/adapters/evento/convite-reposi
 import { ConviteRepositoryMemory } from '../../src/adapters/evento/convite-repository.memory.js';
 import type { EventoRepository } from '../../src/adapters/evento/evento-repository.js';
 import { EventoRepositoryMemory } from '../../src/adapters/evento/evento-repository.memory.js';
+import type { ListaDeConvidadosRepository } from '../../src/adapters/evento/lista-de-convidados-repository.js';
+import { ListaDeConvidadosRepositoryMemory } from '../../src/adapters/evento/lista-de-convidados-repository.memory.js';
 import { createArrecadacaoMemoryRepos } from './arrecadacao-repos.js';
 
 export function createEventoMemoryRepos(): {
   conviteRepository: ConviteRepository;
   eventoRepository: EventoRepository;
+  listaDeConvidadosRepository: ListaDeConvidadosRepository;
   campanhaRepository: ReturnType<typeof createArrecadacaoMemoryRepos>['campanhaRepository'];
   recebedorRepository: ReturnType<typeof createArrecadacaoMemoryRepos>['recebedorRepository'];
   plataformaRepository: ReturnType<typeof createArrecadacaoMemoryRepos>['plataformaRepository'];
@@ -14,5 +17,6 @@ export function createEventoMemoryRepos(): {
   const arrecadacao = createArrecadacaoMemoryRepos();
   const conviteRepository = new ConviteRepositoryMemory();
   const eventoRepository = new EventoRepositoryMemory();
-  return { conviteRepository, eventoRepository, ...arrecadacao };
+  const listaDeConvidadosRepository = new ListaDeConvidadosRepositoryMemory();
+  return { conviteRepository, eventoRepository, listaDeConvidadosRepository, ...arrecadacao };
 }
