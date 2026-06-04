@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import JsonViewer from "@/components/eunenem/admin/JsonViewer";
 import LancamentosBlock, {
   type LancamentoRow,
@@ -55,7 +55,7 @@ import { trpc } from "@/lib/trpc.js";
  *     CompactRow (método + external ref)
  *     ContribuinteBlock (who paid)
  *     ComposicaoTable (what was paid — the price breakdown)
- *     LancamentosBlock (what was booked — the financeiro ledger)  ← NEW
+ *     LancamentosBlock (what was booked — the financeiro ledger)
  *     ExpandToggle / JsonViewer drawer (debug shelf, collapsed)
  *     PagamentoWebhookList (diagnostic webhook trail)
  *
@@ -63,6 +63,30 @@ import { trpc } from "@/lib/trpc.js";
  *   shows WHAT the platform booked. They're conceptual partners — reading
  *   them adjacent makes the double-entry discipline legible at a glance.
  *   The debug drawer + webhook trail follow as lower-signal diagnostics.
+ *
+ * Single-pagamento-view pagination (aperture-d7sxd):
+ *   Multi-pagamento contribuicoes (visitor retried; cartão failed then PIX
+ *   succeeded; orphan pendentes from abandoned iframes) stack vertically by
+ *   default. With 5+ attempts the page reads as visual mess. Solution: render
+ *   ONE PagamentoCard at a time with a navigator strip above. The strip
+ *   shows every attempt as a status-chip pill — operator sees the full
+ *   landscape AND clicks to swap the visible card.
+ *
+ *   Default selection: most-recent aprovado (the "winning" pagamento), else
+ *   most-recent overall (single pendente/processing/rejeitado/estornado).
+ *   Implementation keys selection by pagamento.id (not index) so a wire
+ *   refetch that reorders the list keeps the operator's selection stable.
+ *
+ *   ALL cards stay mounted (hidden via `hidden` Tailwind utility on the
+ *   non-selected ones). Two reasons:
+ *     1. PagamentoWebhookList queries fire for every card → aggregate
+ *        "⚠ N webhooks com erro" header chip count stays accurate.
+ *     2. Internal card state (expanded JsonViewer drawer) persists across
+ *        navigation — operator doesn't lose their place when toggling.
+ *   DOM cost is bounded: N ≤ ~10 in realistic admin cases.
+ *
+ *   Single-pagamento contribuicoes (N=1) hide the navigator entirely — no
+ *   UX noise, the card renders as it did pre-d7sxd.
  */
 export default function PagamentosList({
   idContribuicao,
@@ -111,21 +135,178 @@ export default function PagamentosList({
     onWebhookIssueCountChange?.(total);
   }, [total, onWebhookIssueCountChange]);
 
+  // d7sxd — single-pagamento-view pagination. Selection key is the pagamento
+  // id (not index) so a wire refetch that reorders the list keeps operator's
+  // selection stable. Default selection: most-recent aprovado, else first.
+  const defaultSelectedId = useMemo<string | null>(() => {
+    if (!data?.pagamentos.length) return null;
+    const firstAprovado = data.pagamentos.find((p) => p.status === "aprovado");
+    return firstAprovado?.id ?? data.pagamentos[0]?.id ?? null;
+  }, [data]);
+  const [explicitSelection, setExplicitSelection] = useState<string | null>(
+    null,
+  );
+  // If the operator picked something explicit, honor that. Otherwise track
+  // the data-derived default — which can shift as new pagamentos arrive
+  // (e.g. visitor completes a successful retry after we already loaded the
+  // page; live query refetch promotes the new aprovado as default).
+  const selectedId = explicitSelection ?? defaultSelectedId;
+
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
   if (!data || data.pagamentos.length === 0) return <EmptyState />;
 
+  const pagamentos = data.pagamentos;
+
   return (
     <div className="space-y-4">
-      {data.pagamentos.map((p) => (
-        <PagamentoCard
-          key={p.id}
-          pagamento={p}
-          onWebhookIssueCountChange={(count) => reportIssueCount(p.id, count)}
+      {pagamentos.length > 1 && (
+        <PagamentoNavigator
+          pagamentos={pagamentos}
+          selectedId={selectedId}
+          onSelect={setExplicitSelection}
         />
+      )}
+      {pagamentos.map((p) => (
+        <div
+          key={p.id}
+          className={selectedId === p.id ? undefined : "hidden"}
+          aria-hidden={selectedId === p.id ? undefined : true}
+        >
+          <PagamentoCard
+            pagamento={p}
+            onWebhookIssueCountChange={(count) => reportIssueCount(p.id, count)}
+          />
+        </div>
       ))}
     </div>
   );
+}
+
+/**
+ * Horizontal status-chip strip — one pill per pagamento, click to swap the
+ * visible card. Plan 0015 admin pagination (aperture-d7sxd).
+ *
+ * Each pill shows the StatusPill palette (5-state FSM + liberacao overlay if
+ * applicable) + the short-id (8 chars, mono) + criadoEm short date. The
+ * active pill gets a filled bg-ink/5 + ring-1 ring-ink/20 to read as
+ * "currently selected" without competing with the status color.
+ *
+ * Why a chip strip vs prev/next chips vs dropdown:
+ *   - Prev/next chips lose context ("which of N am I viewing?")
+ *   - Dropdown hides the choices behind a click — operator can't scan
+ *     statuses without interacting
+ *   - Chip strip wins on signal density: status palette IS the navigator
+ *     label, dates + short-ids are inline, full landscape visible at a
+ *     glance. For N≤~10 (realistic admin case) this scans cleanly; for
+ *     pathological N=50 the strip horizontal-scrolls (overflow-x-auto).
+ *
+ * Single-pagamento contribuicoes never render this — the parent guards on
+ * `pagamentos.length > 1`.
+ */
+function PagamentoNavigator({
+  pagamentos,
+  selectedId,
+  onSelect,
+}: {
+  pagamentos: readonly PagamentoDTO[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <nav
+      aria-label="Selecionar pagamento"
+      className="-mx-1 flex items-center gap-2 overflow-x-auto px-1 pb-1"
+    >
+      <span className="shrink-0 font-mono text-[10px] uppercase tracking-[0.18em] text-ink-mute">
+        {pagamentos.length} tentativas
+      </span>
+      <span aria-hidden className="shrink-0 text-ink-mute">
+        ·
+      </span>
+      <ul className="flex shrink-0 items-center gap-1.5">
+        {pagamentos.map((p, idx) => (
+          <li key={p.id}>
+            <NavigatorPill
+              pagamento={p}
+              ordinal={idx + 1}
+              selected={selectedId === p.id}
+              onSelect={() => onSelect(p.id)}
+            />
+          </li>
+        ))}
+      </ul>
+    </nav>
+  );
+}
+
+function NavigatorPill({
+  pagamento,
+  ordinal,
+  selected,
+  onSelect,
+}: {
+  pagamento: PagamentoDTO;
+  ordinal: number;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const palette =
+    pagamento.liberacao !== null
+      ? LIBERACAO_PALETTE[pagamento.liberacao]
+      : STATUS_PALETTE[pagamento.status];
+  const shortId = `${pagamento.id.slice(0, 8)}…`;
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={selected}
+      aria-label={`Tentativa ${ordinal} — ${palette.label} — ${shortId}`}
+      title={`Tentativa ${ordinal} · ${pagamento.id}`}
+      className={[
+        "group inline-flex items-center gap-2 rounded-full border px-2.5 py-[3px] font-mono text-[10px] uppercase tracking-[0.12em] transition-colors",
+        // Status palette controls the BAND color (border + bg + text).
+        palette.border,
+        palette.bg,
+        palette.text,
+        // Active state: subtle ring + opacity bump so the chip "lifts" off
+        // the strip without changing the underlying status hue.
+        selected
+          ? "ring-1 ring-ink/30 ring-offset-1 ring-offset-paper"
+          : "opacity-60 hover:opacity-100 focus:opacity-100",
+      ].join(" ")}
+    >
+      <span
+        aria-hidden
+        className={`inline-block size-[6px] rounded-full ${palette.dot}`}
+      />
+      <span className="tabular-nums">{ordinal}.</span>
+      <span>{palette.label}</span>
+      <span aria-hidden className="text-ink-mute opacity-70">
+        ·
+      </span>
+      <span className="text-ink-soft normal-case opacity-90">
+        {formatNavigatorDate(pagamento.criadoEm)}
+      </span>
+    </button>
+  );
+}
+
+/**
+ * Navigator-pill date format — `DD/MM` (short). Operator only needs the
+ * day/month to disambiguate the attempts. Full ISO is one click away
+ * inside each card's CardHeader formatCriadoEmShort.
+ */
+function formatNavigatorDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  try {
+    return d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit" });
+  } catch {
+    const dd = String(d.getUTCDate()).padStart(2, "0");
+    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+    return `${dd}/${mm}`;
+  }
 }
 
 
