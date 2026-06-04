@@ -29,6 +29,18 @@ export interface PresentesTx {
   /** Amount in centavos — positive; the sign comes from `type`. */
   amount: number;
   status: PresentesStatus;
+  /**
+   * ISO timestamp — when the row's funds become available for transfer.
+   * Populated from the wire's ExtratoRowDTO.liberacaoPrevistaEm only when
+   * liberacao === 'aguardando_liberacao' AND parent pagamento has a
+   * known balanceTransactionAvailableOn. Null otherwise (already
+   * disponivel / transferido / cancelado / orphan-window).
+   *
+   * Optional in this shape because the mock data shipped pre-wire
+   * doesn't have it; live wire data always provides string | null per
+   * Rex's locked ExtratoRowDTOSchema.
+   */
+  liberacaoPrevistaEm?: string | null;
 }
 
 // Account opens with a prior balance so the running saldo stays positive

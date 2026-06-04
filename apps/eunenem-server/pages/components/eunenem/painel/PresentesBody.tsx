@@ -71,7 +71,7 @@ import {
  *   ├ contribuinteNome | null →  tx.guest  (default: "(anônimo)")
  *   ├ amountCents            →  tx.amount
  *   ├ liberacao 4-state      →  tx.status  (mapped via LIBERACAO_TO_STATUS)
- *   └ liberadoEm             →  surfaced via DetailDrawer when applicable
+ *   └ liberacaoPrevistaEm             →  surfaced via DetailDrawer when applicable
  *
  *   (Gift name + per-row metodo NOT on wire — Rex's projection is
  *   deliberately lean. Mirrored from RepasseLancamentoDetail discipline.)
@@ -174,6 +174,11 @@ function adaptRow(row: ExtratoRowDTO): PresentesTx {
     note: "",
     amount: row.amountCents,
     status: LIBERACAO_TO_STATUS[row.liberacao],
+    // aperture-m58zm — populated only when liberacao='aguardando_liberacao'
+    // AND parent pagamento has balanceTransactionAvailableOn. Drives the
+    // drawer's "libera em DD/MM/YYYY" sub-label; null state renders an
+    // "aguardando confirmação do pagamento" fallback.
+    liberacaoPrevistaEm: row.liberacaoPrevistaEm,
   };
 }
 
@@ -222,6 +227,43 @@ function formatNextTransferLabel(iso: string | null): string {
   const dd = String(d.getDate()).padStart(2, "0");
   const mm = MES_ABREV[d.getMonth()];
   return `${wd} · ${dd}/${mm}`;
+}
+
+/**
+ * Aguardando-state drawer "previsão" copy. Replaces the pre-wire hardcoded
+ * "libera em até 72h" (aperture-m58zm).
+ *
+ * Wire shape: `t.liberacaoPrevistaEm` is ISO when liberacao=aguardando_liberacao
+ * AND parent pagamento has balanceTransactionAvailableOn. Null when the
+ * webhook dispatcher hasn't yet persisted available_on (orphan window)
+ * OR for any state other than aguardando — but the drawer guard
+ * (`t.status === "aguardando"`) already gates non-aguardando out.
+ *
+ * Output:
+ *   - liberacaoPrevistaEm known → "libera em DD/MM/YYYY"
+ *   - liberacaoPrevistaEm null  → "aguardando confirmação do pagamento"
+ *
+ * The concrete-date format beats relative ("em X dias") because operators
+ * are planning around a real settlement date — they want a date they can
+ * write down, not a moving rolling label.
+ */
+function formatAguardandoPrevisao(liberacaoPrevistaEm: string | null): string {
+  if (liberacaoPrevistaEm === null) return "aguardando confirmação do pagamento";
+  const d = new Date(liberacaoPrevistaEm);
+  if (Number.isNaN(d.getTime())) return "aguardando confirmação do pagamento";
+  try {
+    const formatted = d.toLocaleString("pt-BR", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    });
+    return `libera em ${formatted}`;
+  } catch {
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const yyyy = d.getFullYear();
+    return `libera em ${dd}/${mm}/${yyyy}`;
+  }
 }
 
 // ── Loading / error / empty surfaces ────────────────────────────────────────
@@ -538,13 +580,13 @@ function DetailDrawer({ tx, onClose }: { tx: PresentesTx | null; onClose: () => 
           {t.status === "aguardando" && (
             <div>
               <dt>previsão</dt>
-              <dd>libera em até 72h</dd>
+              <dd>{formatAguardandoPrevisao(t.liberacaoPrevistaEm ?? null)}</dd>
             </div>
           )}
           {t.status === "estornado" && (
             <div>
               <dt>motivo</dt>
-              <dd>pagamento não confirmado pelo banco em 72h.</dd>
+              <dd>pagamento estornado pelo provedor</dd>
             </div>
           )}
         </dl>

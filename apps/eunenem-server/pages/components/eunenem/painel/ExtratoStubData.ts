@@ -59,7 +59,12 @@ export type ExtratoRowDTO = {
   amountCents: number;
   liberacao: ExtratoLiberacao;
   timestamp: string;
-  liberadoEm: string | null;
+  /** ISO of the FUTURE date when the row's funds become available. Renamed
+   *  from `liberadoEm` post-aperture-75mw3 — the field is a predicted
+   *  release date, not a past-tense observation. Wire ships string when
+   *  liberacao=aguardando_liberacao + parent pagamento has
+   *  balanceTransactionAvailableOn; null otherwise. */
+  liberacaoPrevistaEm: string | null;
 };
 
 export type SolicitarTransferenciaResult = {
@@ -140,7 +145,30 @@ export function useStubExtratoList(input: {
   return {
     data: query.data
       ? {
-          rows: query.data.rows,
+          // Per-row remap. The wire (Rex's recebedor-router) is in the
+          // middle of renaming `liberadoEm` → `liberacaoPrevistaEm` per
+          // aperture-75mw3. Until his rename PR merges, the inferred trpc
+          // type still has `liberadoEm`. Read EITHER field via the
+          // bridge below; expose the new name on our DTO. When his PR
+          // lands, the `?? r.liberadoEm` fallback becomes a one-line
+          // cleanup target.
+          rows: query.data.rows.map((r): ExtratoRowDTO => {
+            const renamed = r as { liberacaoPrevistaEm?: string | null };
+            const legacy = r as { liberadoEm?: string | null };
+            const liberacaoPrevistaEm =
+              renamed.liberacaoPrevistaEm !== undefined
+                ? renamed.liberacaoPrevistaEm
+                : (legacy.liberadoEm ?? null);
+            return {
+              idLancamento: r.idLancamento,
+              idPagamento: r.idPagamento,
+              contribuinteNome: r.contribuinteNome,
+              amountCents: r.amountCents,
+              liberacao: r.liberacao,
+              timestamp: r.timestamp,
+              liberacaoPrevistaEm,
+            };
+          }),
           nextCursor: query.data.nextCursor,
           hasMore: query.data.hasMore,
         }
