@@ -1,41 +1,39 @@
-import { useState as useReactState } from "react";
+import { TRPCClientError } from "@trpc/client";
+import { trpc } from "@/lib/trpc.js";
 
 /**
- * Extrato stub data layer — plan q2d4b Track 4 (aperture-ekn90).
+ * Extrato data layer — plan q2d4b Track 4 (post-swap).
  *
- * Rex's Track 2 backend (aperture-7g5sx) ships shortly with these procs:
- *   - trpc.recebedor.extrato.summary({ idCampanha })       → ExtratoSummaryDTO
- *   - trpc.recebedor.extrato.list({ idCampanha, ... })     → { rows, nextCursor, hasMore }
- *   - trpc.recebedor.transferencia.solicitar({ idCampanha }) → { idRepasse, ... }
+ * Rex's Track 2 backend (aperture-7g5sx, PR #147) is LIVE. This module
+ * previously shipped djb2-seeded stubs against the locked contract; now
+ * the hook bodies call real trpc procs and the fixtures are gone.
  *
- * This module ships:
- *   - Manual typedefs mirroring Rex's locked contract verbatim
- *   - djb2-seeded deterministic stub data so the visual review is convincing
- *   - Hook-shaped surface (useStubExtratoSummary / .List / .SolicitarTransferencia)
- *     that mirrors trpc.useQuery / useMutation field names exactly so the swap
- *     is a hook-body replacement, no consumer change.
+ * Procs in play (all under `trpc.recebedor.*`):
+ *   - extrato.summary({ idCampanha })            → query
+ *   - extrato.list({ idCampanha, statusFilters, cursor, limit }) → query
+ *   - transferencia.solicitar({ idCampanha })    → mutation
  *
- * SWAP PLAYBOOK (when Rex's PR lands):
- *   1. Drop the local type aliases; import from his schema source.
- *   2. Replace `useStubExtratoSummary` body with
- *      `trpc.recebedor.extrato.summary.useQuery({ idCampanha })`.
- *   3. Replace `useStubExtratoList` body with
- *      `trpc.recebedor.extrato.list.useQuery({ idCampanha, statusFilters, cursor, limit })`.
- *   4. Replace `useStubSolicitarTransferencia` body with
- *      `trpc.recebedor.transferencia.solicitar.useMutation({ onSuccess, onError })`.
- *   5. Replace the slug→idCampanha resolution stub (currently djb2-derived)
- *      with a real campanha lookup — probably an existing trpc.painel.findCampanhaBySlug
- *      or equivalent.
- *   6. Delete the djb2 + SAMPLE blocks.
+ * Auth: session-cookie based, recebedor-router's `resolveAdminOfCampanha`
+ * enforces that the caller's session.idConta is in
+ * campanha.idsAdministradores. Wrong-tenant / missing-session surfaces
+ * UNAUTHORIZED (not NOT_FOUND — no existence leak).
  *
- * Error mapping (per Rex's confirmation on the wire format):
- *   TRPCClientError carries { code, message } where:
- *     - code='CONFLICT', message='repasse_ja_pendente'                → button disabled
- *     - code='UNPROCESSABLE_CONTENT', message='saldo_disponivel_insuficiente' → button disabled
- *     - code='BAD_REQUEST', message=<validation string>               → generic error toast
+ * slug → idCampanha resolution: piggybacks on `trpc.auth.me()`, which
+ * already returns `{ idCampanha, idOpcaoPresentes }` for the authenticated
+ * user (aperture-p8i01). The slug parameter is currently informational
+ * (the painel routes use slug for the URL; the actual data binds to the
+ * authenticated user's default campanha). For multi-campanha futures the
+ * slug → idCampanha mapping needs a real proc that resolves slug to a
+ * specific campanha; v1 assumes one-campanha-per-user.
  */
 
 // ── Locked contract types (mirror Rex's exports) ────────────────────────────
+//
+// Kept LOCAL to this module rather than imported from the server router so
+// the frontend bundle doesn't pull in server-only deps via the router file
+// path. Shapes match `recebedor-router.ts` verbatim; if drift surfaces here
+// at typecheck time, fix the local types — they're the canonical projection
+// of what the wire actually ships.
 
 export type ExtratoLiberacao =
   | "aguardando_liberacao"
@@ -48,10 +46,10 @@ export type ExtratoSummaryDTO = {
   resgatadoCents: number;
   saldoDisponivelCents: number;
   aguardandoLiberacaoCents: number;
-  proximaTransfDate: string | null; // ISO
+  proximaTransfDate: string | null;
   totalPresentes: number;
-  dateRangeStart: string | null; // ISO
-  dateRangeEnd: string | null; // ISO
+  dateRangeStart: string | null;
+  dateRangeEnd: string | null;
 };
 
 export type ExtratoRowDTO = {
@@ -60,25 +58,8 @@ export type ExtratoRowDTO = {
   contribuinteNome: string | null;
   amountCents: number;
   liberacao: ExtratoLiberacao;
-  /** ISO — parent pagamento.criadoEm. */
   timestamp: string;
-  /** ISO — populated ONLY when liberacao === 'aguardando_liberacao' AND
-   *  parent pagamento has balanceTransactionAvailableOn. Null in the orphan
-   *  window between charge.succeeded and the dispatcher persist. */
   liberadoEm: string | null;
-};
-
-export type ExtratoListInput = {
-  idCampanha: string;
-  statusFilters?: ExtratoLiberacao[];
-  cursor?: string | null;
-  limit?: number;
-};
-
-export type ExtratoListResult = {
-  rows: readonly ExtratoRowDTO[];
-  nextCursor: string | null;
-  hasMore: boolean;
 };
 
 export type SolicitarTransferenciaResult = {
@@ -88,16 +69,18 @@ export type SolicitarTransferenciaResult = {
   numLancamentos: number;
 };
 
-/** Domain-error discriminator carried on TRPCClientError.message. */
-export type SolicitarTransferenciaErrorMessage =
-  | "repasse_ja_pendente"
-  | "saldo_disponivel_insuficiente"
-  | string;
+// ── Hook-shaped surface (real trpc calls) ───────────────────────────────────
 
 export type ExtratoSummaryResult = {
   data: ExtratoSummaryDTO | null;
   isLoading: boolean;
   error: { message: string } | null;
+};
+
+export type ExtratoListResult = {
+  rows: readonly ExtratoRowDTO[];
+  nextCursor: string | null;
+  hasMore: boolean;
 };
 
 export type ExtratoListResultHook = {
@@ -114,195 +97,159 @@ export type SolicitarTransferenciaState = {
   reset: () => void;
 };
 
-// ── djb2 + sample helpers ───────────────────────────────────────────────────
-
-function djb2(s: string): number {
-  let hash = 5381;
-  for (let i = 0; i < s.length; i++) {
-    hash = ((hash << 5) + hash + s.charCodeAt(i)) >>> 0;
-  }
-  return hash;
-}
-
-const CONTRIBUINTE_NOMES: ReadonlyArray<string | null> = [
-  "Mariana Souza",
-  "Camila Ribeiro",
-  "Vovó Lurdes",
-  "Patrícia Andrade",
-  "Fernanda Lima",
-  "Beatriz Oliveira",
-  "Juliana Castro",
-  "Renata Almeida",
-  "Carolina Mendes",
-  "Aline Pereira",
-  null, // anonymous-checkout
-  "Larissa Cardoso",
-];
-
-const LIBERACOES: ReadonlyArray<ExtratoLiberacao> = [
-  "aguardando_liberacao",
-  "disponivel",
-  "transferido",
-  "cancelado",
-];
-
-/**
- * Build a deterministic ExtratoRowDTO at index `i` for slug `seed`. Same
- * seed + index pair always produces the same row — useful for QA + scaffold
- * review (operator sees identical fixtures across page-loads).
- */
-function buildStubRow(seed: number, i: number): ExtratoRowDTO {
-  const liberacao = LIBERACOES[(seed + i) % LIBERACOES.length] as ExtratoLiberacao;
-  const tsOffsetMs = ((seed >> (i % 8)) % 30) * 86400000 + i * 3600000;
-  const tsMs = Date.now() - tsOffsetMs;
-  const amount = 5000 + ((seed >> (i * 2)) % 50000);
-  const contribuinte = CONTRIBUINTE_NOMES[(seed + i * 5) % CONTRIBUINTE_NOMES.length] as
-    | string
-    | null;
-  const liberadoEm =
-    liberacao === "aguardando_liberacao"
-      ? new Date(tsMs + 7 * 86400000).toISOString()
-      : null;
+export function useStubExtratoSummary(
+  idCampanha: string,
+): ExtratoSummaryResult {
+  const query = trpc.recebedor.extrato.summary.useQuery(
+    { idCampanha },
+    { enabled: idCampanha !== "" && isUuid(idCampanha) },
+  );
   return {
-    idLancamento: `lanc-${seed.toString(36).slice(0, 6)}-${i.toString().padStart(2, "0")}`,
-    idPagamento: `pag-${(seed + i * 17).toString(36).slice(0, 6)}`,
-    contribuinteNome: contribuinte,
-    amountCents: amount,
-    liberacao,
-    timestamp: new Date(tsMs).toISOString(),
-    liberadoEm,
+    data: query.data ?? null,
+    isLoading: query.isLoading,
+    error: query.error ? { message: query.error.message } : null,
   };
 }
 
-function buildStubSummary(seed: number, rows: readonly ExtratoRowDTO[]): ExtratoSummaryDTO {
-  const totalRecebido = rows.reduce(
-    (acc, r) => (r.liberacao !== "cancelado" ? acc + r.amountCents : acc),
-    0,
+export function useStubExtratoList(input: {
+  idCampanha: string;
+  statusFilters?: ExtratoLiberacao[];
+  cursor?: string | null;
+  limit?: number;
+}): ExtratoListResultHook {
+  // Rex's input schema:
+  //   statusFilters → enum subset (no 'cancelado' — operator never filters
+  //                                for cancelled; we strip it client-side
+  //                                if any leak through).
+  //   cursor       → string | null (required slot, even when null)
+  //   limit        → 1..100 (default 20). Use 100 so the current "filter
+  //                  client-side" approach has enough data without paging.
+  const wireFilters = (input.statusFilters ?? []).filter(
+    (s): s is "aguardando_liberacao" | "disponivel" | "transferido" =>
+      s !== "cancelado",
   );
-  const resgatado = rows.reduce(
-    (acc, r) => (r.liberacao === "transferido" ? acc + r.amountCents : acc),
-    0,
-  );
-  const saldoDisp = rows.reduce(
-    (acc, r) => (r.liberacao === "disponivel" ? acc + r.amountCents : acc),
-    0,
-  );
-  const aguardando = rows.reduce(
-    (acc, r) => (r.liberacao === "aguardando_liberacao" ? acc + r.amountCents : acc),
-    0,
-  );
-  const aguardandoRows = rows.filter((r) => r.liberacao === "aguardando_liberacao");
-  const proximaTransfDate =
-    aguardandoRows.length === 0
-      ? null
-      : aguardandoRows
-          .map((r) => r.liberadoEm)
-          .filter((v): v is string => v !== null)
-          .sort()[0] ?? null;
-  const timestamps = rows.map((r) => r.timestamp).sort();
-  return {
-    totalRecebidoCents: totalRecebido,
-    resgatadoCents: resgatado,
-    saldoDisponivelCents: saldoDisp,
-    aguardandoLiberacaoCents: aguardando,
-    proximaTransfDate,
-    totalPresentes: rows.filter((r) => r.liberacao !== "cancelado").length,
-    dateRangeStart: timestamps[0] ?? null,
-    dateRangeEnd: timestamps[timestamps.length - 1] ?? null,
-    // seed is unused here; consumer-cache hint
-    ...{ _seed: seed },
-  } as ExtratoSummaryDTO;
-}
-
-// ── Hook-shaped surface ─────────────────────────────────────────────────────
-
-export function useStubExtratoSummary(idCampanha: string): ExtratoSummaryResult {
-  const seed = djb2(idCampanha);
-  const rows: ExtratoRowDTO[] = [];
-  for (let i = 0; i < 18; i++) rows.push(buildStubRow(seed, i));
-  return {
-    data: buildStubSummary(seed, rows),
-    isLoading: false,
-    error: null,
-  };
-}
-
-export function useStubExtratoList(input: ExtratoListInput): ExtratoListResultHook {
-  const seed = djb2(input.idCampanha);
-  const all: ExtratoRowDTO[] = [];
-  for (let i = 0; i < 18; i++) all.push(buildStubRow(seed, i));
-  const filtered =
-    input.statusFilters && input.statusFilters.length > 0
-      ? all.filter((r) => input.statusFilters!.includes(r.liberacao))
-      : all;
-  // Sort DESC by timestamp + id ASC tiebreaker (matches Rex's cursor sort).
-  filtered.sort((a, b) => {
-    if (a.timestamp !== b.timestamp) return a.timestamp < b.timestamp ? 1 : -1;
-    return a.idLancamento < b.idLancamento ? -1 : 1;
-  });
-  return {
-    data: {
-      rows: filtered,
-      nextCursor: null,
-      hasMore: false,
+  const query = trpc.recebedor.extrato.list.useQuery(
+    {
+      idCampanha: input.idCampanha,
+      statusFilters: wireFilters,
+      cursor: input.cursor ?? null,
+      limit: input.limit ?? 100,
     },
-    isLoading: false,
-    error: null,
+    { enabled: input.idCampanha !== "" && isUuid(input.idCampanha) },
+  );
+  return {
+    data: query.data
+      ? {
+          rows: query.data.rows,
+          nextCursor: query.data.nextCursor,
+          hasMore: query.data.hasMore,
+        }
+      : null,
+    isLoading: query.isLoading,
+    error: query.error ? { message: query.error.message } : null,
   };
 }
 
 export function useStubSolicitarTransferencia(opts: {
+  /** Resolved idCampanha for the authenticated user. Captured in closure
+   *  for the mutate() call so consumers can call mutate() with no args
+   *  (matches the stub API shape). */
+  idCampanha: string | null;
   onSuccess: (result: SolicitarTransferenciaResult) => void;
 }): SolicitarTransferenciaState {
-  const [isPending, setIsPending] = useReactState(false);
-  const [data, setData] = useReactState<SolicitarTransferenciaResult | null>(null);
-  const [error, setError] = useReactState<{ code: string; message: string } | null>(
-    null,
-  );
+  const utils = trpc.useUtils();
+  const mutation = trpc.recebedor.transferencia.solicitar.useMutation({
+    onSuccess: async (result) => {
+      // Refresh the data the operator just changed. Invalidate before the
+      // consumer-onSuccess so re-renders pick up fresh queries.
+      await Promise.all([
+        utils.recebedor.extrato.summary.invalidate(),
+        utils.recebedor.extrato.list.invalidate(),
+      ]);
+      opts.onSuccess(result);
+    },
+  });
+  // Discriminate domain errors per the locked contract:
+  //   CONFLICT + 'repasse_ja_pendente'        → button disabled + label
+  //   UNPROCESSABLE_CONTENT + 'saldo_insuf…'  → button disabled + label
+  //   else (BAD_REQUEST / UNAUTHORIZED / etc.) → generic operator label
+  const error: { code: string; message: string } | null =
+    mutation.error && mutation.error instanceof TRPCClientError
+      ? { code: extractCode(mutation.error), message: mutation.error.message }
+      : mutation.error
+        ? { code: "INTERNAL_SERVER_ERROR", message: mutation.error.message }
+        : null;
   return {
     mutate: () => {
-      setIsPending(true);
-      setError(null);
-      window.setTimeout(() => {
-        setIsPending(false);
-        const result: SolicitarTransferenciaResult = {
-          idRepasse: `repasse-${Date.now().toString(36).slice(-8)}`,
-          amountCents: 50000,
-          solicitadoEm: new Date().toISOString(),
-          numLancamentos: 6,
-        };
-        setData(result);
-        opts.onSuccess(result);
-      }, 600);
+      // No-op if idCampanha hasn't resolved yet. The consumer gates the
+      // modal-open state on the loading check upstream, but the defensive
+      // null-check here keeps a stray race from firing a malformed call.
+      if (opts.idCampanha !== null) {
+        mutation.mutate({ idCampanha: opts.idCampanha });
+      }
     },
-    isPending,
-    data,
+    isPending: mutation.isPending,
+    data: mutation.data ?? null,
     error,
-    reset: () => {
-      setIsPending(false);
-      setData(null);
-      setError(null);
-    },
+    reset: () => mutation.reset(),
   };
 }
 
 /**
- * Stub resolver — slug → idCampanha. djb2-derived placeholder so the parallel-
- * prep stub has a deterministic id without touching a real campanha lookup.
+ * slug → idCampanha resolution via the authenticated user's session.
+ * `trpc.auth.me()` already returns `idCampanha` for the current user's
+ * default campanha (aperture-p8i01). v1 assumes one-campanha-per-user;
+ * a future multi-campanha world will need a real slug-keyed lookup.
  *
- * SWAP TARGET: replace with the real campanha-by-slug lookup. Likely
- * something like `trpc.painel.findCampanhaBySlug.useQuery({ slug })` — or
- * whatever Rex's contract exposes for that resolution. Until then, the stub
- * lets the rest of the wire-up compile + render against a stable seed.
+ * The `slug` param is informational v1 — we don't currently use it to
+ * disambiguate. If the authenticated session's slug doesn't match the
+ * URL slug, the wire still resolves to the session-user's campanha
+ * (defensive). Operator visiting their own painel URL while logged in
+ * sees their own data.
  */
-export function useStubCampanhaIdForSlug(slug: string): {
+export function useStubCampanhaIdForSlug(_slug: string): {
   idCampanha: string | null;
   isLoading: boolean;
   error: { message: string } | null;
 } {
+  const me = trpc.auth.me.useQuery();
   return {
-    idCampanha: `stub-campanha-${djb2(slug).toString(36).slice(0, 8)}`,
-    isLoading: false,
-    error: null,
+    idCampanha: me.data?.idCampanha ?? null,
+    isLoading: me.isLoading,
+    error: me.error ? { message: me.error.message } : null,
   };
+}
+
+// ── Internal helpers ────────────────────────────────────────────────────────
+
+/**
+ * Lazy UUID check — Rex's input schema validates `idCampanha` as
+ * `z.string().uuid()`. We block the query early when the resolved
+ * idCampanha is empty or non-UUID shape (the `auth.me()` user may have
+ * idCampanha === null during backfill).
+ */
+function isUuid(s: string): boolean {
+  return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(
+    s,
+  );
+}
+
+/**
+ * Best-effort TRPCError code extraction. The shape carried on
+ * `TRPCClientError.data.code` is the string code (CONFLICT,
+ * UNPROCESSABLE_CONTENT, etc.). When the transformer chain
+ * sanitizes the error, the code may be on `.shape.data.code` instead
+ * — we check both.
+ */
+function extractCode(err: TRPCClientError<never>): string {
+  const dataCode = (err.data as { code?: unknown } | null | undefined)?.code;
+  if (typeof dataCode === "string") return dataCode;
+  const shapeCode = (
+    err.shape as
+      | { data?: { code?: unknown } }
+      | null
+      | undefined
+  )?.data?.code;
+  if (typeof shapeCode === "string") return shapeCode;
+  return "INTERNAL_SERVER_ERROR";
 }

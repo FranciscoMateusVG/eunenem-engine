@@ -806,6 +806,22 @@ export function PresentesBody(props: PainelSectionBodyProps) {
     idCampanha: idCampanha ?? "",
   });
 
+  // Solicitar transferência mutation. Lives at the body level so both the
+  // TransferModal AND the post-success acknowledgement flow share state.
+  // The mutation hook invalidates summary + list queries on success
+  // (trpc.useUtils()-based; operator sees the new state without a manual
+  // refresh).
+  //
+  // MUST run BEFORE the loading-gate early returns — React hooks rules
+  // forbid conditional hook calls. The hook itself defends against
+  // null idCampanha at mutate-time.
+  const solicitarState = useStubSolicitarTransferencia({
+    idCampanha,
+    onSuccess: () => {
+      setTransferOpen(false);
+    },
+  });
+
   // ── Loading / error / empty gates ──────────────────────────────────────
   if (campanhaLoading || summaryQuery.isLoading || listQuery.isLoading) {
     return <ExtratoLoadingState />;
@@ -853,18 +869,6 @@ export function PresentesBody(props: PainelSectionBodyProps) {
     activeStatuses.length === 0
       ? transactions
       : transactions.filter((x) => activeStatuses.includes(x.status));
-
-  // Solicitar transferência mutation. Lives at the body level so both the
-  // TransferModal AND the post-success acknowledgement flow share state.
-  // On success we close the modal; in the real swap, also invalidate the
-  // summary + list queries.
-  const solicitarState = useStubSolicitarTransferencia({
-    onSuccess: () => {
-      setTransferOpen(false);
-      // Real swap: utils.recebedor.extrato.summary.invalidate({ idCampanha });
-      //            utils.recebedor.extrato.list.invalidate({ idCampanha });
-    },
-  });
 
   return (
     <section className="presentes-extrato">
