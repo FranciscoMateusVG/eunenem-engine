@@ -12,9 +12,11 @@ import {
   atualizarContribuicao,
   type Campanha,
   type Contribuicao,
+  contribuicaoEstaIndisponivel,
   criarContribuicoesEmLote,
   type IdCampanha,
   type IdContribuicao,
+  type IdContribuicaoPagamento,
   type IdOpcaoContribuicao,
   listarContribuicoesDeOpcao,
   removerContribuicao,
@@ -249,22 +251,34 @@ const DeleteInputSchema = z.object({
 
 // ── Projection ─────────────────────────────────────────────────────────────
 
-function toListItem(c: Contribuicao): {
+function toListItem(
+  c: Contribuicao,
+  indisponivel: boolean,
+): {
   id: IdContribuicao;
   nome: string;
   valor: number;
   imagemUrl: string | null;
   grupo: string | null;
+  indisponivel: boolean;
 } {
   // Post-Phase-1 (plan 0015): contribuição has no status + no contribuinte.
   // The "presentes" panel now shows slot definition only; per-pagamento
   // contribuinte data lives on the contribuição detail screen.
+  //
+  // aperture-ocw8r: `indisponivel` is a DERIVED predicate — EXISTS at
+  // least one aprovado pagamento against this contribuição (Phase 1
+  // dropped the contribuição.status field; the recebedor's "X de N
+  // recebidos" UI reads this boolean to compute totals). Computed via
+  // pagamentoRepository EXISTS query at the caller, then passed in
+  // here so the projection function stays sync + injection-free.
   return {
     id: c.id,
     nome: c.nome,
     valor: c.valor,
     imagemUrl: c.imagemUrl,
     grupo: c.grupo,
+    indisponivel,
   };
 }
 
@@ -299,7 +313,19 @@ export const contribuicaoRouter = t.router({
         },
         { idCampanha: campanha.id, idOpcaoContribuicao: idOpcaoPresentes },
       );
-      return items.map(toListItem);
+      // aperture-ocw8r: bulk EXISTS lookup once for all rows (one indexed
+      // pagamentos query — partial index `pagamentos_aprovado_por_contribuicao_idx`).
+      // Matches the pattern admin-router uses single-row + the pattern
+      // obterContribuicoesPrecalculadasCampanha uses for visitor reads.
+      // Falls back to empty set if no slots exist.
+      const idsIndisponiveis =
+        items.length === 0
+          ? []
+          : await ctx.deps.pagamentoRepository.findIdsContribuicoesComPagamentoAprovado(
+              items.map((c) => c.id as unknown as IdContribuicaoPagamento),
+            );
+      const indisponiveisSet = new Set<string>(idsIndisponiveis);
+      return items.map((c) => toListItem(c, indisponiveisSet.has(c.id)));
     } catch (err) {
       throw toTRPCError(err);
     }
@@ -419,7 +445,19 @@ export const contribuicaoRouter = t.router({
             grupo: input.grupo,
           },
         );
-        return toListItem(updated);
+        // aperture-ocw8r: single-row EXISTS via the wrapper that fan-outs
+        // to the same bulk port method. atualizarContribuicao already
+        // rejects updates against `indisponivel` slots upstream, so in
+        // practice this returns `false` — but we compute it explicitly
+        // to keep the projection contract consistent with `list`.
+        const indisponivel = await contribuicaoEstaIndisponivel(
+          {
+            pagamentoRepository: ctx.deps.pagamentoRepository,
+            observability: ctx.deps.observability,
+          },
+          { idContribuicao: updated.id },
+        );
+        return toListItem(updated, indisponivel);
       } catch (err) {
         throw toTRPCError(err);
       }
