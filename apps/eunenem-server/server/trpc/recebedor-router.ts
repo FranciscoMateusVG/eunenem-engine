@@ -96,10 +96,18 @@ const ExtratoRowDTOSchema = z.object({
   /** Parent pagamento criadoEm (ISO). The "contribution moment". */
   timestamp: z.string(),
   /**
-   * `null` when liberacao !== 'aguardando_liberacao'. ISO of when the
-   * row becomes disponivel (parent pagamento availableOn).
+   * aperture-75mw3 — predicted liberation date for aguardando rows.
+   * ISO timestamp of when the parent pagamento's funds become available
+   * to the recebedor (Stripe `charge.balance_transaction.available_on`).
+   * `null` when liberacao !== 'aguardando_liberacao' OR when the
+   * webhook hasn't populated availableOn yet (orphan window —
+   * 1ewwh handles the retroactive sweep).
+   *
+   * Field is named for the FUTURE date semantics ("libera em DD/MM" —
+   * the operator's UI label). Earlier shipped as `liberadoEm` which
+   * was misnamed (past tense for a future value).
    */
-  liberadoEm: z.string().nullable(),
+  liberacaoPrevistaEm: z.string().nullable(),
 });
 export type ExtratoRowDTO = z.infer<typeof ExtratoRowDTOSchema>;
 
@@ -437,7 +445,7 @@ const extratoRouter = t.router({
           timestamp: (
             s.pagamento?.criadoEm ?? s.lancamento.criadoEm
           ).toISOString(),
-          liberadoEm:
+          liberacaoPrevistaEm:
             s.liberacao === "aguardando_liberacao"
               ? (s.pagamento?.intencao.balanceTransactionAvailableOn?.toISOString() ??
                 null)

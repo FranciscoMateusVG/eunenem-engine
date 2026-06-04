@@ -451,6 +451,93 @@ describe('recebedor.extrato.list — rows + sort + filter + contribuinte (apertu
     expect(result.nextCursor).toBeNull();
   });
 
+  it('liberacaoPrevistaEm populated for aguardando_liberacao rows (aperture-75mw3)', async () => {
+    const future = new Date('2026-06-10T10:00:00.000Z');
+    const idPag = randomUUID();
+    await rig.pagamentoRepository.save(
+      makePagamento({
+        id: idPag,
+        idContribuicao: rig.idContribuicao,
+        availableOn: future, // future → aguardando_liberacao
+      }),
+    );
+    await rig.livroFinanceiroRepository.saveLancamentos([
+      makeLancamento({
+        idPagamento: idPag,
+        idContribuicao: rig.idContribuicao,
+        idCampanha: rig.idCampanha,
+      }),
+    ]);
+
+    const result = await rig.caller.recebedor.extrato.list({
+      idCampanha: rig.idCampanha,
+      statusFilters: [],
+      cursor: null,
+      limit: 20,
+    });
+    expect(result.rows[0].liberacao).toBe('aguardando_liberacao');
+    expect(result.rows[0].liberacaoPrevistaEm).toBe(future.toISOString());
+  });
+
+  it('liberacaoPrevistaEm null for non-aguardando rows (disponivel/transferido) (aperture-75mw3)', async () => {
+    const past = new Date('2026-06-01T10:00:00.000Z');
+    const idPag = randomUUID();
+    await rig.pagamentoRepository.save(
+      makePagamento({
+        id: idPag,
+        idContribuicao: rig.idContribuicao,
+        availableOn: past, // past → disponivel
+      }),
+    );
+    await rig.livroFinanceiroRepository.saveLancamentos([
+      makeLancamento({
+        idPagamento: idPag,
+        idContribuicao: rig.idContribuicao,
+        idCampanha: rig.idCampanha,
+      }),
+    ]);
+
+    const result = await rig.caller.recebedor.extrato.list({
+      idCampanha: rig.idCampanha,
+      statusFilters: [],
+      cursor: null,
+      limit: 20,
+    });
+    expect(result.rows[0].liberacao).toBe('disponivel');
+    expect(result.rows[0].liberacaoPrevistaEm).toBeNull();
+  });
+
+  it('liberacaoPrevistaEm null when webhook hasnt populated availableOn yet (aperture-75mw3 + 1ewwh edge)', async () => {
+    // Aguardando but availableOn=null (orphan window — pi.succeeded
+    // bailed, cs.completed hasn't run yet, OR Stripe API returned null).
+    // The row still shows aguardando_liberacao but the predicted date is
+    // unknown; UI falls back to neutral copy.
+    const idPag = randomUUID();
+    await rig.pagamentoRepository.save(
+      makePagamento({
+        id: idPag,
+        idContribuicao: rig.idContribuicao,
+        availableOn: null, // orphan / unknown
+      }),
+    );
+    await rig.livroFinanceiroRepository.saveLancamentos([
+      makeLancamento({
+        idPagamento: idPag,
+        idContribuicao: rig.idContribuicao,
+        idCampanha: rig.idCampanha,
+      }),
+    ]);
+
+    const result = await rig.caller.recebedor.extrato.list({
+      idCampanha: rig.idCampanha,
+      statusFilters: [],
+      cursor: null,
+      limit: 20,
+    });
+    expect(result.rows[0].liberacao).toBe('aguardando_liberacao');
+    expect(result.rows[0].liberacaoPrevistaEm).toBeNull();
+  });
+
   it('null contribuinte on pagamento → null contribuinteNome on row', async () => {
     const idPag = randomUUID();
     await rig.pagamentoRepository.save(
