@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { DddBadge } from "@/components/eunenem/admin/DddBadge";
 
 /**
@@ -94,6 +95,22 @@ export type LancamentoRow = {
   canceladoEm: string | null;
 };
 
+/**
+ * Collapsable per-card (aperture-joeh9). Default expanded — operator wants
+ * the ledger visible on landing; the triple-entry rows are the high-signal
+ * payload of the Financeiro module. The chevron-toggle in the header strip
+ * folds the rows to a rollup summary (`· 3 lançamentos · R$ 50,00`) so the
+ * collapsed state still carries useful information at a glance.
+ *
+ * Session-only state — not persisted across reloads (deliberate; the
+ * default-expanded posture is the right re-entry state on refresh).
+ * Per-card by virtue of instance: each PagamentoCard mounts its own
+ * LancamentosBlock, so each card carries its own expanded/collapsed bit.
+ *
+ * Non-aprovado pagamentos book zero lançamentos and render a single
+ * "Sem lançamentos" line — collapsing it is pointless, so the toggle hides
+ * entirely in that branch.
+ */
 export default function LancamentosBlock({
   pagamentoStatus,
   lancamentos,
@@ -101,16 +118,124 @@ export default function LancamentosBlock({
   pagamentoStatus: PagamentoStatus;
   lancamentos: readonly LancamentoRow[];
 }) {
+  const [expanded, setExpanded] = useState(true);
+  const isAprovado = pagamentoStatus === "aprovado";
+  const showToggle = isAprovado;
+
   return (
     <div className="rounded-md border border-line bg-paper">
-      <div className="flex items-center gap-2 border-b border-line px-5 py-2">
-        <DddBadge bc="financeiro" size="sm" />
-        <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-ink-soft">
-          financeiro · livro do pagamento
-        </p>
+      <div className="flex items-center justify-between gap-2 border-b border-line px-5 py-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <DddBadge bc="financeiro" size="sm" />
+          <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-ink-soft">
+            financeiro · livro do pagamento
+          </p>
+          {showToggle && !expanded && (
+            <RollupSummary lancamentos={lancamentos} />
+          )}
+        </div>
+        {showToggle && (
+          <CollapseToggle
+            expanded={expanded}
+            onToggle={() => setExpanded((v) => !v)}
+          />
+        )}
       </div>
-      <Body pagamentoStatus={pagamentoStatus} lancamentos={lancamentos} />
+      {/* CSS-only grid-template-rows collapse — no JS measurement, smooth
+          200ms height + opacity transition, gracefully degrades to instant
+          under prefers-reduced-motion. The inner div's overflow-hidden is
+          what makes the grid-rows-[0fr] clip the content cleanly. */}
+      <div
+        className={[
+          "grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none",
+          expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
+        ].join(" ")}
+      >
+        <div
+          className={[
+            "overflow-hidden transition-opacity duration-200 ease-out motion-reduce:transition-none",
+            expanded ? "opacity-100" : "opacity-0",
+          ].join(" ")}
+        >
+          <Body pagamentoStatus={pagamentoStatus} lancamentos={lancamentos} />
+        </div>
+      </div>
     </div>
+  );
+}
+
+/**
+ * Inline rollup shown next to the FINANCEIRO header when the block is
+ * collapsed. Sum of all booked lançamentos equals the gross pagamento amount
+ * (cartão = saldo + plataforma + passthrough; PIX = saldo + plataforma, no
+ * surcharge). Operator can eyeball-verify the rollup against the
+ * PagamentoCard's header amount as a quick double-entry sanity check —
+ * disagreement is a corruption signal worth investigating.
+ */
+function RollupSummary({
+  lancamentos,
+}: {
+  lancamentos: readonly LancamentoRow[];
+}) {
+  const count = lancamentos.length;
+  const total = lancamentos.reduce((acc, l) => acc + l.amountCents, 0);
+  return (
+    <span className="truncate font-mono text-[10px] tabular-nums text-ink-mute">
+      · {count} {count === 1 ? "lançamento" : "lançamentos"} ·{" "}
+      {formatBRL(total)}
+    </span>
+  );
+}
+
+function CollapseToggle({
+  expanded,
+  onToggle,
+}: {
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={expanded}
+      aria-label={
+        expanded ? "Recolher lançamentos" : "Expandir lançamentos"
+      }
+      className="group inline-flex shrink-0 items-center gap-1.5 rounded p-1 text-ink-mute transition-colors hover:text-plum focus:outline-none focus:ring-2 focus:ring-lilac-soft"
+    >
+      <Chevron expanded={expanded} />
+    </button>
+  );
+}
+
+/**
+ * Disclosure chevron. down=expanded (default), right=collapsed — the
+ * industry-standard mapping operators reach for without thinking. SVG with
+ * stroke-width 1.5 to match the rest of the admin surface's icon weight
+ * (matches the chevrons in JsonViewer / PagamentoWebhookList).
+ */
+function Chevron({ expanded }: { expanded: boolean }) {
+  return (
+    <svg
+      aria-hidden
+      width="11"
+      height="11"
+      viewBox="0 0 12 12"
+      className={[
+        "transition-transform duration-200 ease-out motion-reduce:transition-none",
+        expanded ? "rotate-0" : "-rotate-90",
+      ].join(" ")}
+    >
+      <path
+        d="M2.5 4.5L6 8L9.5 4.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 
