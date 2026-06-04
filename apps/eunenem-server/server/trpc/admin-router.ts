@@ -36,7 +36,6 @@ import type { Pagamento } from "../../../../src/domain/pagamentos/entities/pagam
 import type { IdContribuicaoPagamento } from "../../../../src/domain/pagamentos/value-objects/ids.js";
 import {
   aprovarRepasseRecebedor,
-  contribuicaoEstaIndisponivel,
   FinanceiroInputInvalidoError,
   FinanceiroRepasseNaoEncontradoError,
   FinanceiroRepasseStatusInvalidoError,
@@ -294,6 +293,15 @@ const ContribuicaoAdminDTOSchema = z.object({
   // stored `status` field; this is now the only source of truth.
   // Computed in `toContribuicaoAdminDTO` via `pagamentoRepository`.
   indisponivel: z.boolean(),
+  // aperture-6iqum — contribuinte attribution from the most-recent
+  // aprovado pagamento's intencao.contribuinte. Mirrors the per-
+  // pagamento projection xfw5c added on PagamentoAdminDTO. Null when:
+  //   - no aprovado pagamento exists yet (gift not received)
+  //   - aprovado pagamento has anonymous checkout (contribuinte=null)
+  //   - pre-webhook race window before contribuinte_stamped fires
+  // Frontend list row shows "presented by X" when non-null,
+  // "(sem contribuinte)" affordance otherwise.
+  contribuinte: ContribuinteDTOSchema,
 });
 export type ContribuicaoAdminDTO = z.infer<typeof ContribuicaoAdminDTOSchema>;
 
@@ -315,22 +323,29 @@ const UsuarioSummaryDTOSchema = z.object({
 });
 export type UsuarioSummaryDTO = z.infer<typeof UsuarioSummaryDTOSchema>;
 
-async function toContribuicaoAdminDTO(
+/**
+ * Sync projection — caller hands in the pre-fetched bulk results
+ * (indisponivelSet + contribuintesByIdContribuicao) so the function
+ * itself doesn't fan out N+1 lookups. Used by listByCampanha (bulk)
+ * and by detail-resolution paths (singletons wrapping the bulk port).
+ */
+function toContribuicaoAdminDTO(
   c: Contribuicao,
-  ctx: TrpcContext,
-): Promise<ContribuicaoAdminDTO> {
+  indisponivelSet: Set<string>,
+  contribuintesByIdContribuicao: Map<
+    string,
+    { nome: string; email: string; mensagem?: string } | null
+  >,
+): ContribuicaoAdminDTO {
   // Post-Phase-1 swap: contribuição has NO status, NO contribuinte (those
   // moved to IntencaoPagamento per-pagamento). The "indisponivel" badge is
   // a computed predicate: at least one approved pagamento exists for this
-  // slot. Per-pagamento contribuinte data lives on the contribuição detail
-  // screen's Pagamentos card.
-  const indisponivel = await contribuicaoEstaIndisponivel(
-    {
-      pagamentoRepository: ctx.deps.pagamentoRepository,
-      observability: ctx.deps.observability,
-    },
-    { idContribuicao: c.id },
-  );
+  // slot.
+  //
+  // aperture-6iqum: `contribuinte` is the most-recent aprovado
+  // pagamento's intencao.contribuinte (anonymous + pre-webhook race
+  // surface as null; UI affordance handles either).
+  const contribuinte = contribuintesByIdContribuicao.get(c.id) ?? null;
   return {
     id: c.id,
     nome: c.nome,
@@ -338,7 +353,15 @@ async function toContribuicaoAdminDTO(
     grupo: c.grupo,
     idOpcaoContribuicao: c.idOpcaoContribuicao,
     criadaEm: c.criadaEm.toISOString(),
-    indisponivel,
+    indisponivel: indisponivelSet.has(c.id),
+    contribuinte:
+      contribuinte === null
+        ? null
+        : {
+            nome: contribuinte.nome,
+            email: contribuinte.email,
+            mensagem: contribuinte.mensagem ?? null,
+          },
   };
 }
 
@@ -367,12 +390,32 @@ const contribuicoesRouter = t.router({
         await ctx.deps.contribuicaoRepository.findByCampanhaId(
           input.idCampanha as IdCampanha,
         );
+      // aperture-6iqum: bulk-fetch indisponivel set + contribuinte
+      // attribution in TWO indexed queries (was N+1 via the per-row
+      // contribuicaoEstaIndisponivel call). Empty-input fast-path
+      // short-circuits both.
+      const ids = contribuicoes.map(
+        (c) => c.id as unknown as IdContribuicaoPagamento,
+      );
+      const [indisponiveisArr, contribuintesMap] =
+        ids.length === 0
+          ? [[] as readonly IdContribuicaoPagamento[], new Map() as Map<
+              string,
+              { nome: string; email: string; mensagem?: string } | null
+            >]
+          : await Promise.all([
+              ctx.deps.pagamentoRepository.findIdsContribuicoesComPagamentoAprovado(
+                ids,
+              ),
+              ctx.deps.pagamentoRepository.findContribuintesFromLatestAprovadoPagamento(
+                ids,
+              ),
+            ]);
+      const indisponivelSet = new Set<string>(indisponiveisArr);
       return {
-        contribuicoes: await Promise.all(
-        contribuicoes.map((c) =>
-          toContribuicaoAdminDTO(c, ctx),
+        contribuicoes: contribuicoes.map((c) =>
+          toContribuicaoAdminDTO(c, indisponivelSet, contribuintesMap),
         ),
-      ),
       };
     }),
 
@@ -435,8 +478,26 @@ const contribuicoesRouter = t.router({
       // pagamento's contribuinte" lookup if the campanha view needs it.
       const contribuinteSummary: UsuarioSummaryDTO | null = null;
 
+      // aperture-6iqum: single-row resolution via the same bulk port
+      // (Map with one entry). Mirrors the listByCampanha shape so the
+      // projection function stays uniform.
+      const idCp = contribuicao.id as unknown as IdContribuicaoPagamento;
+      const [indisponiveisArr, contribuintesMap] = await Promise.all([
+        ctx.deps.pagamentoRepository.findIdsContribuicoesComPagamentoAprovado([
+          idCp,
+        ]),
+        ctx.deps.pagamentoRepository.findContribuintesFromLatestAprovadoPagamento([
+          idCp,
+        ]),
+      ]);
+      const indisponivelSet = new Set<string>(indisponiveisArr);
+
       return {
-        contribuicao: await toContribuicaoAdminDTO(contribuicao, ctx),
+        contribuicao: toContribuicaoAdminDTO(
+          contribuicao,
+          indisponivelSet,
+          contribuintesMap,
+        ),
         campanha: { id: campanha.id, titulo: campanha.titulo },
         recebedor,
         contribuinte: contribuinteSummary,

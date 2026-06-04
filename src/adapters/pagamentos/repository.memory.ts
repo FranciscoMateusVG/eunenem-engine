@@ -220,4 +220,71 @@ export class PagamentoRepositoryMemory implements PagamentoRepository {
       },
     );
   }
+
+  /**
+   * Plan 0015 (aperture-6iqum). Linear scan: for each idContribuicao,
+   * find the most-recent aprovado pagamento (by criadoEm DESC) and
+   * return its intencao.contribuinte. Keys absent from the Map mean
+   * NO aprovado pagamento exists for that idContribuicao; null entry
+   * means an aprovado pagamento exists but contribuinte was never
+   * populated (anonymous checkout).
+   */
+  async findContribuintesFromLatestAprovadoPagamento(
+    idsContribuicao: readonly IdContribuicaoPagamento[],
+  ): Promise<Map<string, { nome: string; email: string; mensagem?: string } | null>> {
+    return tracer.startActiveSpan(
+      'db.pagamentos.findContribuintesFromLatestAprovadoPagamento',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+        try {
+          const result = new Map<
+            string,
+            { nome: string; email: string; mensagem?: string } | null
+          >();
+          if (idsContribuicao.length === 0) {
+            span.setStatus({ code: SpanStatusCode.OK });
+            return result;
+          }
+          const candidates = new Set<string>(idsContribuicao);
+          // Group aprovado pagamentos by idContribuicao, keeping the
+          // most-recent one (by criadoEm).
+          const winners = new Map<string, Pagamento>();
+          for (const pagamento of this.pagamentos.values()) {
+            if (pagamento.status !== 'aprovado') continue;
+            const idC = pagamento.intencao.idContribuicao as unknown as string;
+            if (!candidates.has(idC)) continue;
+            const current = winners.get(idC);
+            if (
+              current === undefined ||
+              pagamento.criadoEm.getTime() > current.criadoEm.getTime()
+            ) {
+              winners.set(idC, pagamento);
+            }
+          }
+          for (const [idC, pagamento] of winners.entries()) {
+            const contribuinte = pagamento.intencao.contribuinte;
+            if (contribuinte === null) {
+              result.set(idC, null);
+            } else {
+              result.set(idC, {
+                nome: contribuinte.nome,
+                email: contribuinte.email,
+                ...(contribuinte.mensagem !== undefined
+                  ? { mensagem: contribuinte.mensagem }
+                  : {}),
+              });
+            }
+          }
+          span.setStatus({ code: SpanStatusCode.OK });
+          return result;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
 }

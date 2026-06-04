@@ -86,4 +86,29 @@ export interface PagamentoRepository {
   findIdsContribuicoesComPagamentoAprovado(
     idsContribuicao: readonly IdContribuicaoPagamento[],
   ): Promise<readonly IdContribuicaoPagamento[]>;
+  /**
+   * Plan 0015 / aperture-6iqum. Bulk lookup of the most-recent
+   * aprovado pagamento's `intencao.contribuinte` for each requested
+   * idContribuicao. Used by the admin contribuições list to surface
+   * "presented by X" inline on the row.
+   *
+   * Returns a Map keyed by idContribuicao. Entries:
+   *   - When at least one aprovado pagamento exists with a non-null
+   *     contribuinte → returns the contribuinte of the MOST RECENT
+   *     aprovado pagamento (by criadoEm DESC). Mensagem may be
+   *     undefined on the engine side (DadosContribuinte optional
+   *     field); callers normalize at the wire boundary.
+   *   - When all aprovado pagamentos have null contribuinte
+   *     (anonymous checkout) → null entry.
+   *   - When no aprovado pagamento exists → key absent from Map.
+   *
+   * Empty input returns an empty Map without touching the DB.
+   *
+   * Postgres adapter uses `DISTINCT ON (id_contribuicao)` ordered by
+   * `id_contribuicao, criado_em DESC` — a single indexed query for
+   * the whole set. Memory adapter filters + groups in-process.
+   */
+  findContribuintesFromLatestAprovadoPagamento(
+    idsContribuicao: readonly IdContribuicaoPagamento[],
+  ): Promise<Map<string, { nome: string; email: string; mensagem?: string } | null>>;
 }

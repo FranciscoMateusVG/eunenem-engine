@@ -337,6 +337,80 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
       },
     );
   }
+
+  async findContribuintesFromLatestAprovadoPagamento(
+    idsContribuicao: readonly IdContribuicaoPagamento[],
+  ): Promise<Map<string, { nome: string; email: string; mensagem?: string } | null>> {
+    return tracer.startActiveSpan(
+      'db.pagamentos.findContribuintesFromLatestAprovadoPagamento',
+      async (span) => {
+        span.setAttributes({
+          ...DB_ATTRS,
+          'db.operation.name': 'SELECT',
+          'batch.size': idsContribuicao.length,
+        });
+        try {
+          const result = new Map<
+            string,
+            { nome: string; email: string; mensagem?: string } | null
+          >();
+          if (idsContribuicao.length === 0) {
+            span.setStatus({ code: SpanStatusCode.OK });
+            return result;
+          }
+          // DISTINCT ON (intencao_id_contribuicao) ORDER BY ... criado_em
+          // DESC picks the most-recent aprovado row per contribuição.
+          // One query for the whole input set. The partial index
+          // pagamentos_aprovado_por_contribuicao_idx serves the WHERE
+          // status='aprovado' predicate.
+          // biome-ignore lint/suspicious/noExplicitAny: see save()
+          const rows = (await (this.db as any)
+            .selectFrom('pagamentos')
+            .select([
+              'intencao_id_contribuicao',
+              'intencao_contribuinte_nome',
+              'intencao_contribuinte_email',
+              'intencao_contribuinte_mensagem',
+            ])
+            .distinctOn('intencao_id_contribuicao')
+            .where('status', '=', 'aprovado')
+            .where('intencao_id_contribuicao', 'in', [...idsContribuicao])
+            .orderBy('intencao_id_contribuicao')
+            .orderBy('criado_em', 'desc')
+            .execute()) as Array<{
+            intencao_id_contribuicao: string;
+            intencao_contribuinte_nome: string | null;
+            intencao_contribuinte_email: string | null;
+            intencao_contribuinte_mensagem: string | null;
+          }>;
+          for (const row of rows) {
+            const hasContribuinte =
+              row.intencao_contribuinte_nome !== null &&
+              row.intencao_contribuinte_email !== null;
+            if (!hasContribuinte) {
+              result.set(row.intencao_id_contribuicao, null);
+              continue;
+            }
+            result.set(row.intencao_id_contribuicao, {
+              nome: row.intencao_contribuinte_nome as string,
+              email: row.intencao_contribuinte_email as string,
+              ...(row.intencao_contribuinte_mensagem !== null
+                ? { mensagem: row.intencao_contribuinte_mensagem }
+                : {}),
+            });
+          }
+          span.setStatus({ code: SpanStatusCode.OK });
+          return result;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
 }
 
 /** Aggregate → row mapper. Used by save + update. */
