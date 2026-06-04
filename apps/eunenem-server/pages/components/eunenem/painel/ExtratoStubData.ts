@@ -65,6 +65,19 @@ export type ExtratoRowDTO = {
    *  liberacao=aguardando_liberacao + parent pagamento has
    *  balanceTransactionAvailableOn; null otherwise. */
   liberacaoPrevistaEm: string | null;
+  /** Gift name resolved via lancamento → pagamento.intencao.idContribuicao
+   *  → contribuição.nome (aperture-k6fbz, Rex backend merged at ed459fd).
+   *  Empty string when the contribuição was deleted between pagamento +
+   *  read. Optional in the mirror so the swap survives the merge window
+   *  (the field arrived on the wire 2026-06-04; older cached responses
+   *  may briefly lack it until the trpc cache rotates). Consumer defends
+   *  with `|| "lançamento"` for both the empty-string + absence cases. */
+  contribuicaoNome?: string;
+  /** Gift image — emoji glyph OR hosted URL (aperture-k6fbz). Null when
+   *  the contribuição has no image OR was deleted post-pagamento.
+   *  Optional in the mirror for the same merge-window reason as
+   *  contribuicaoNome above. */
+  contribuicaoImagemUrl?: string | null;
 };
 
 export type SolicitarTransferenciaResult = {
@@ -159,6 +172,25 @@ export function useStubExtratoList(input: {
               renamed.liberacaoPrevistaEm !== undefined
                 ? renamed.liberacaoPrevistaEm
                 : (legacy.liberadoEm ?? null);
+            // aperture-k6fbz — gift name + image arrived on the wire
+            // 2026-06-04 (Rex's PR merged at ed459fd). Optional-read so
+            // any cached response from before the merge still parses;
+            // consumer defends against empty-string contribuicaoNome
+            // (deleted-contribuição edge case) with `|| "lançamento"`.
+            const giftCarrier = r as {
+              contribuicaoNome?: unknown;
+              contribuicaoImagemUrl?: unknown;
+            };
+            const contribuicaoNome =
+              typeof giftCarrier.contribuicaoNome === "string"
+                ? giftCarrier.contribuicaoNome
+                : undefined;
+            const contribuicaoImagemUrl =
+              typeof giftCarrier.contribuicaoImagemUrl === "string"
+                ? giftCarrier.contribuicaoImagemUrl
+                : giftCarrier.contribuicaoImagemUrl === null
+                  ? null
+                  : undefined;
             return {
               idLancamento: r.idLancamento,
               idPagamento: r.idPagamento,
@@ -167,6 +199,8 @@ export function useStubExtratoList(input: {
               liberacao: r.liberacao,
               timestamp: r.timestamp,
               liberacaoPrevistaEm,
+              contribuicaoNome,
+              contribuicaoImagemUrl,
             };
           }),
           nextCursor: query.data.nextCursor,

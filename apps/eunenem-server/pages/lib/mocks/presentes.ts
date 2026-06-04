@@ -41,6 +41,17 @@ export interface PresentesTx {
    * Rex's locked ExtratoRowDTOSchema.
    */
   liberacaoPrevistaEm?: string | null;
+  /**
+   * Optional image for the gift — emoji glyph (e.g. "🍼") OR a hosted URL.
+   * Populated from the wire's ExtratoRowDTO.contribuicaoImagemUrl when the
+   * contribuição has an image. Null/absent when the contribuição has no
+   * image OR was deleted between pagamento and read.
+   *
+   * Wire shape (aperture-k6fbz, locked with Rex 2026-06-04): `string | null`.
+   * Mock data doesn't carry images — optional in the type so the adapter
+   * can populate from the wire without breaking pre-wire mock seeds.
+   */
+  itemImagemUrl?: string | null;
 }
 
 // Account opens with a prior balance so the running saldo stays positive

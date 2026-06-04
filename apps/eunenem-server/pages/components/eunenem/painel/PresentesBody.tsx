@@ -167,10 +167,12 @@ function adaptRow(row: ExtratoRowDTO): PresentesTx {
     t,
     type: "in",
     guest: row.contribuinteNome ?? "(anônimo)",
-    // Gift name not on wire (Rex's projection deliberately lean — avoids
-    // composing across 3 BCs at list time). Generic "lançamento" label;
-    // operator drills to the contribuição via idContribuicao if needed.
-    item: "lançamento",
+    // aperture-k6fbz — gift name now projected on the wire (Rex backend
+    // merged at ed459fd). Defensive `||` covers BOTH the optional-absence
+    // case (cached response from before the merge) AND the empty-string
+    // case (contribuição deleted between pagamento + read). Falls back to
+    // the pre-k6fbz "lançamento" generic label so the row stays readable.
+    item: row.contribuicaoNome || "lançamento",
     note: "",
     amount: row.amountCents,
     status: LIBERACAO_TO_STATUS[row.liberacao],
@@ -179,6 +181,11 @@ function adaptRow(row: ExtratoRowDTO): PresentesTx {
     // drawer's "libera em DD/MM/YYYY" sub-label; null state renders an
     // "aguardando confirmação do pagamento" fallback.
     liberacaoPrevistaEm: row.liberacaoPrevistaEm,
+    // aperture-k6fbz — gift image projection. Wire may carry an emoji
+    // glyph ("🍼") OR a hosted URL ("https://…"). The renderer
+    // discriminates by URL shape: starts-with-`http` or `/` → <img>,
+    // else → text glyph. Null/absent → no thumbnail.
+    itemImagemUrl: row.contribuicaoImagemUrl ?? null,
   };
 }
 
@@ -464,6 +471,43 @@ function FilterButton({
   );
 }
 
+// ── Gift thumbnail ─────────────────────────────────────────────────────────
+/**
+ * Renders the contribuição's image next to the row item label
+ * (aperture-k6fbz). The wire field carries EITHER:
+ *   - a short emoji glyph (e.g. "🍼", "🧸") → rendered as text
+ *   - a hosted URL ("https://…" or "/path") → rendered as <img>
+ *
+ * URL detection: starts-with `http` or `/`. Anything else is treated
+ * as a text glyph (covers raw emoji + any short-string fallback the
+ * backend may surface). Null/empty → renders nothing so the row falls
+ * back to the label-only layout.
+ *
+ * Width is fixed at 28px so rows with + without an image stay aligned;
+ * the wrap container's `gap` handles spacing without needing per-row
+ * conditionals. Image is loaded `lazy` (offscreen rows don't fetch).
+ */
+function GiftThumb({ url }: { url: string | null }) {
+  if (!url) return null;
+  const isHostedUrl = url.startsWith("http") || url.startsWith("/");
+  return (
+    <span className="ex-t-thumb" aria-hidden>
+      {isHostedUrl ? (
+        <img
+          src={url}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          width={28}
+          height={28}
+        />
+      ) : (
+        <span className="ex-t-thumb-glyph">{url}</span>
+      )}
+    </span>
+  );
+}
+
 // ── Ticket row ─────────────────────────────────────────────────────────────
 function TicketRow({ tx, onPick }: { tx: PresentesTx; onPick: (tx: PresentesTx) => void }) {
   const tint = STATUS_TINT[tx.status];
@@ -487,7 +531,10 @@ function TicketRow({ tx, onPick }: { tx: PresentesTx; onPick: (tx: PresentesTx) 
       <span className="ex-t-stripe" />
       <div className="ex-t-body">
         <div className="ex-t-l1">
-          <span className="ex-t-item">{tx.item}</span>
+          <span className="ex-t-item-wrap">
+            <GiftThumb url={tx.itemImagemUrl ?? null} />
+            <span className="ex-t-item">{tx.item}</span>
+          </span>
           <span className={`ex-t-val ${isIn ? "pos" : "neg"}${isReversed ? " reversed" : ""}`}>
             {isIn ? "+" : "−"} {fmtMoney(tx.amount)}
           </span>
@@ -547,7 +594,10 @@ function DetailDrawer({ tx, onClose }: { tx: PresentesTx | null; onClose: () => 
         <dl className="ex-drawer-meta">
           <div>
             <dt>item</dt>
-            <dd>{t.item}</dd>
+            <dd className="ex-drawer-item-dd">
+              <GiftThumb url={t.itemImagemUrl ?? null} />
+              <span>{t.item}</span>
+            </dd>
           </div>
           {t.note && (
             <div>
@@ -1218,7 +1268,22 @@ const EXTRATO_CSS = `
 .presentes-extrato .ex-t-stripe { flex: 0 0 6px; background: var(--tint-stripe); position: relative; }
 .presentes-extrato .ex-t-stripe::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(0, 0, 0, 0.08)); }
 .presentes-extrato .ex-t-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; padding: var(--t-row-pad) 14px; }
-.presentes-extrato .ex-t-l1 { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.presentes-extrato .ex-t-l1 { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.presentes-extrato .ex-t-item-wrap {
+  flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px;
+}
+.presentes-extrato .ex-t-thumb {
+  flex: 0 0 28px; width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 5px; overflow: hidden; background: rgba(255, 255, 255, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06);
+}
+.presentes-extrato .ex-t-thumb img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+}
+.presentes-extrato .ex-t-thumb-glyph {
+  font-size: 20px; line-height: 1; font-family: var(--font-emoji, "Apple Color Emoji", "Segoe UI Emoji", sans-serif);
+}
 .presentes-extrato .ex-t-item {
   font-family: var(--hand); font-size: 19px; line-height: 1.1; color: var(--tint-ink, var(--sheet-ink));
   flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -1335,6 +1400,9 @@ const EXTRATO_CSS = `
 .presentes-extrato .ex-drawer-meta dt { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-mute); margin-top: 2px; }
 .presentes-extrato .ex-drawer-meta dd { margin: 0; font-family: var(--font-dm-sans), sans-serif; font-size: 14px; font-weight: 500; color: var(--plum); line-height: 1.3; }
 .presentes-extrato .ex-drawer-meta dd.ex-mono { font-family: var(--mono); font-size: 12px; font-weight: 400; color: var(--ink-soft); letter-spacing: 0.02em; }
+.presentes-extrato .ex-drawer-item-dd { display: flex; align-items: center; gap: 8px; }
+.presentes-extrato .ex-drawer-item-dd .ex-t-thumb { flex: 0 0 32px; width: 32px; height: 32px; }
+.presentes-extrato .ex-drawer-item-dd .ex-t-thumb-glyph { font-size: 22px; }
 .presentes-extrato .ex-drawer-actions { display: flex; flex-direction: column; gap: 10px; margin-top: auto; padding-top: 18px; }
 
 /* ── modal ── */
