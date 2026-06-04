@@ -166,6 +166,28 @@ type PagamentoStatus =
   | "rejeitado"
   | "estornado";
 
+/**
+ * Plan 0015 derived-liberacao extension (aperture-mjgxe / aperture-ft5t1).
+ *
+ * Splits the `aprovado` chip into two sub-states without changing the FSM:
+ *
+ *   'aguardando_liberacao'  Money received from Stripe but not yet settled
+ *                           into the platform's balance (Stripe's T+1 for pix,
+ *                           D+30 default for cartão). Server-derived from
+ *                           `status='aprovado' AND (availableOn IS NULL OR
+ *                           availableOn > now())`.
+ *   'disponivel'            Money has settled and can be transferred to the
+ *                           recebedor. Derived from `status='aprovado' AND
+ *                           availableOn <= now()`.
+ *   null                    Pagamento is not aprovado — the chip falls back to
+ *                           the status-level palette (pendente / processing /
+ *                           rejeitado / estornado).
+ *
+ * UI never computes the predicate — Rex's backend derives it server-side and
+ * ships the resolved value on the wire. The UI just renders.
+ */
+type LiberacaoState = "aguardando_liberacao" | "disponivel" | null;
+
 type ContribuinteBlockData = {
   nome: string;
   email: string;
@@ -213,6 +235,31 @@ type PagamentoDTO = {
    * `LancamentosBlock` component for the rendering contract.
    */
   lancamentos: readonly LancamentoRow[];
+  /**
+   * Plan 0015 derived-liberacao extension (aperture-mjgxe). When the
+   * pagamento is aprovado, the Stripe balance-transaction maturation
+   * timestamp tells the UI when the funds become available for transfer
+   * to the recebedor. Null for non-aprovado pagamentos (and during the
+   * brief window between charge.succeeded and the dispatcher persisting
+   * available_on).
+   *
+   * PARALLEL-PREP STUB: OPTIONAL today because Rex's mjgxe backend hasn't
+   * shipped yet. When his PR opens the wire will carry the field for
+   * every pagamento and the type can drop the `?` — single-line swap,
+   * no UI change. UI renders the existing aprovado chip until the field
+   * starts flowing.
+   */
+  availableOn?: string | null;
+  /**
+   * Plan 0015 derived-liberacao extension (aperture-mjgxe). Server-side
+   * derived from (status, availableOn) per the contract in
+   * `LiberacaoState`'s doc-block above. Null for non-aprovado pagamentos.
+   *
+   * PARALLEL-PREP STUB: OPTIONAL today (Rex's backend not shipped yet).
+   * Existing aprovado chip stays in place until field starts flowing —
+   * no compile-time break, no visual regression.
+   */
+  liberacao?: LiberacaoState;
 };
 
 function PagamentoCard({
@@ -266,19 +313,63 @@ function PagamentoCard({
 }
 
 function CardHeader({ pagamento }: { pagamento: PagamentoDTO }) {
+  const liberacao = pagamento.liberacao ?? null;
+  const availableOn = pagamento.availableOn ?? null;
+  const showLiberacaoSubLabel =
+    liberacao === "aguardando_liberacao" && availableOn !== null;
+
   return (
     <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-      <div className="flex items-center gap-3">
-        <StatusPill status={pagamento.status} />
-        <span className="font-mono text-[15px] tabular-nums text-ink">
-          {formatBRL(pagamento.intencao.amountCents)}
-        </span>
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center gap-3">
+          <StatusPill status={pagamento.status} liberacao={liberacao} />
+          <span className="font-mono text-[15px] tabular-nums text-ink">
+            {formatBRL(pagamento.intencao.amountCents)}
+          </span>
+        </div>
+        {showLiberacaoSubLabel && (
+          <LiberacaoSubLabel availableOn={availableOn} />
+        )}
       </div>
       <span className="font-mono text-[12px] tabular-nums text-ink-soft">
         {formatCriadoEmShort(pagamento.criadoEm)}
       </span>
     </div>
   );
+}
+
+/**
+ * Sub-label rendered under the StatusPill when the pagamento is aprovado +
+ * aguardando_liberacao + has a known availableOn date. Plan 0015 derived-
+ * liberacao extension (aperture-mjgxe / aperture-ft5t1).
+ *
+ * Visual treatment matches the existing PagamentosSection header sublabels
+ * (`font-mono text-[10px] uppercase tracking-[0.14em] text-ink-mute`) so the
+ * card chrome reads cohesively. Date format is DD/MM (short — the operator
+ * only needs the day/month at a glance; the full ISO is one click away in
+ * the JsonViewer drawer if they need year + time).
+ */
+function LiberacaoSubLabel({ availableOn }: { availableOn: string }) {
+  return (
+    <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-ink-mute">
+      liberação prevista {formatLiberacaoDate(availableOn)}
+    </span>
+  );
+}
+
+function formatLiberacaoDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  try {
+    return d.toLocaleString("pt-BR", {
+      day: "2-digit",
+      month: "2-digit",
+    });
+  } catch {
+    const dd = String(d.getUTCDate()).padStart(2, "0");
+    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+    return `${dd}/${mm}`;
+  }
 }
 
 /**
@@ -463,68 +554,126 @@ function FactRow({
   );
 }
 
+type ChipPalette = {
+  border: string;
+  bg: string;
+  text: string;
+  dot: string;
+  label: string;
+};
+
+const STATUS_PALETTE: Record<PagamentoStatus, ChipPalette> = {
+  pendente: {
+    border: "border-line",
+    bg: "bg-cream-2",
+    text: "text-ink-soft",
+    dot: "bg-ink-mute",
+    label: "pendente",
+  },
+  processing: {
+    border: "border-amber-200",
+    bg: "bg-amber-50",
+    text: "text-amber-800",
+    dot: "bg-amber-500",
+    label: "processing",
+  },
+  aprovado: {
+    border: "border-emerald-200",
+    bg: "bg-emerald-50",
+    text: "text-emerald-800",
+    dot: "bg-emerald-500",
+    label: "aprovado",
+  },
+  rejeitado: {
+    border: "border-red-200",
+    bg: "bg-red-50",
+    text: "text-red-800",
+    dot: "bg-red-500",
+    label: "rejeitado",
+  },
+  estornado: {
+    border: "border-stone-300",
+    bg: "bg-stone-100",
+    text: "text-stone-700",
+    dot: "bg-stone-500",
+    label: "estornado",
+  },
+};
+
+// Liberacao overlay (aperture-mjgxe). Applies only when status='aprovado'.
+// 'disponivel' inherits the aprovado emerald (same hue family — settled
+// success state). 'aguardando_liberacao' uses a DEEPER amber than
+// processing's so both "waiting" chips read as the same family without
+// visually colliding.
+const LIBERACAO_PALETTE: Record<"aguardando_liberacao" | "disponivel", ChipPalette> = {
+  aguardando_liberacao: {
+    border: "border-amber-300",
+    bg: "bg-amber-100",
+    text: "text-amber-700",
+    dot: "bg-amber-600",
+    label: "aguardando liberação",
+  },
+  disponivel: {
+    border: "border-emerald-200",
+    bg: "bg-emerald-50",
+    text: "text-emerald-800",
+    dot: "bg-emerald-500",
+    label: "disponível",
+  },
+};
+
 /**
- * 5-state StatusPill per plan 0015 Phase 6.
+ * 5-state StatusPill + 2-substate liberacao overlay per plan 0015.
  *
- * Visual palette — chosen to make the FSM legible at a glance:
+ * Status-level palette (Phase 6 / Locked Decision #7):
  *
- *   pendente    → zinc     (created, no Stripe motion — same neutral as before)
- *   processing  → amber    (in-flight; pix QR scanned / ACH float)
- *                          NEW — distinct yellow band reads as "money is
- *                          moving but not settled". Treats the pix mid-state
- *                          as a first-class status, not a synonym for pendente.
- *   aprovado    → emerald  (success, money settled)
+ *   pendente    → zinc     (created, no Stripe motion)
+ *   processing  → amber    (in-flight; pix QR scanned / ACH float — light amber)
+ *   aprovado    → emerald  (success — money received from Stripe)
  *   rejeitado   → red      (failed before/during processing)
- *   estornado   → stone    NEW — muted grey-tan band reads as "past tense"
- *                          (the pagamento was successful AND THEN refunded;
- *                          visually distinct from rejeitado which never
- *                          succeeded in the first place).
+ *   estornado   → stone    (refunded after aprovado — muted past-tense)
  *
- * Both new bands use the same chip shape, padding, and `size-[6px]` dot as
- * the existing three — only the color band differs. No layout change.
+ * Liberacao overlay (aperture-mjgxe — applies ONLY when status='aprovado'):
+ *
+ *   liberacao=null              → falls back to status-level palette
+ *                                 (i.e. for non-aprovado pagamentos)
+ *   liberacao='disponivel'      → emerald (same hue as aprovado), label
+ *                                 changes to "disponível". The pagamento has
+ *                                 settled and is ready for transfer.
+ *   liberacao='aguardando_lib…' → amber-100 / amber-700 — a DARKER amber than
+ *                                 processing's amber-50 / amber-500. Both
+ *                                 sub-states sit in the "waiting" family but
+ *                                 visually distinct: processing reads as
+ *                                 ACTIVE in-flight motion, aguardando_libera-
+ *                                 cao reads as PASSIVE waiting on an external
+ *                                 maturation timer (Stripe T+1 / D+30).
+ *
+ * Why deeper amber for aguardando_liberacao rather than emerald-outline:
+ *   - The operator's mental model is "this isn't fully settled yet" — the
+ *     chip should NOT read as "ready" (which emerald does, even outlined).
+ *   - Two waiting states in the same hue family creates a learnable visual
+ *     vocabulary: "amber = waiting; processing amber = active wait; aguar-
+ *     dando amber = passive wait". The bg-weight delta (50 → 100) + text-
+ *     weight delta (800 → 700) keeps them distinct at a glance.
+ *
+ * All chips share the same shape, padding, and `size-[6px]` dot — only the
+ * color band and label differ. No layout change.
  */
 function StatusPill({
   status,
+  liberacao,
 }: {
   status: PagamentoStatus;
+  liberacao: LiberacaoState;
 }) {
-  const palette = {
-    pendente: {
-      border: "border-line",
-      bg: "bg-cream-2",
-      text: "text-ink-soft",
-      dot: "bg-ink-mute",
-      label: "pendente",
-    },
-    processing: {
-      border: "border-amber-200",
-      bg: "bg-amber-50",
-      text: "text-amber-800",
-      dot: "bg-amber-500",
-      label: "processing",
-    },
-    aprovado: {
-      border: "border-emerald-200",
-      bg: "bg-emerald-50",
-      text: "text-emerald-800",
-      dot: "bg-emerald-500",
-      label: "aprovado",
-    },
-    rejeitado: {
-      border: "border-red-200",
-      bg: "bg-red-50",
-      text: "text-red-800",
-      dot: "bg-red-500",
-      label: "rejeitado",
-    },
-    estornado: {
-      border: "border-stone-300",
-      bg: "bg-stone-100",
-      text: "text-stone-700",
-      dot: "bg-stone-500",
-      label: "estornado",
-    },
-  }[status];
+  // When liberacao is set, it overrides the status-level palette + label.
+  // Only happens when status='aprovado' (Rex's backend derives null for
+  // every other status), so the override always sits on top of the
+  // emerald base — we just substitute palette + label.
+  const palette =
+    liberacao !== null
+      ? LIBERACAO_PALETTE[liberacao]
+      : STATUS_PALETTE[status];
   return (
     <span
       className={[
