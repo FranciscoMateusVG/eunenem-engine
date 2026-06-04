@@ -82,7 +82,11 @@
  *                                     (pendente|processing → aprovado;
  *                                     idempotent if already aprovado from cs)
  *   charge.failed                   → finalizarPagamentoRejeitado
- *   charge.updated                  → no transition (audit only)
+ *   charge.updated                  → no transition (audit only) +
+ *                                     aperture-8qknw retry of
+ *                                     available_on resolution when
+ *                                     cs.completed got null from Stripe
+ *                                     (balance_transaction race)
  *   charge.refunded (FULL)          → estornarPagamento (aprovado → estornado)
  *   charge.refunded (partial)       → no transition (stays aprovado per
  *                                     plan 0015 locked decision #7)
@@ -864,13 +868,22 @@ export async function dispatchVerifiedStripeEvent(
       return { pagamentoId: pagamento.id };
     }
 
-    // charge.updated — no transition (audit only). Stripe fires this
+    // charge.updated — no FSM transition (audit only). Stripe fires this
     // for partial refund signaling, dispute updates, metadata changes,
-    // etc. We resolve the pagamento for the audit-trail link but don't
-    // touch domain state.
+    // AND — critically for aperture-8qknw — to backfill
+    // `balance_transaction.available_on` once Stripe's internal accounting
+    // settles. At cs.completed time the balance_transaction may exist but
+    // available_on is often still null (race with Stripe internals);
+    // charge.updated fires 1-2s later with the field fully populated.
+    //
+    // aperture-8qknw retry: when metodo='credit_card' AND the pagamento
+    // still has `balanceTransactionAvailableOn=null`, re-call the
+    // Stripe API and persist whatever we get. Idempotent on null →
+    // re-firing is harmless. Once populated, the predicate short-
+    // circuits and the row never gets a second fetch.
     case 'charge.updated': {
-      const charge = event.data.object as Stripe.Charge;
-      const pagamento = await resolvePagamentoFromCharge(deps, charge);
+      let charge = event.data.object as Stripe.Charge;
+      let pagamento = await resolvePagamentoFromCharge(deps, charge);
       if (!pagamento) {
         logger.info('webhook.stripe.unknown_charge', {
           eventId: event.id,
@@ -881,6 +894,63 @@ export async function dispatchVerifiedStripeEvent(
         return { pagamentoId: null };
       }
       span.setAttribute('pagamento.id', pagamento.id);
+
+      // aperture-8qknw — retroactive available_on resolution.
+      if (
+        pagamento.intencao.metodo === 'credit_card' &&
+        pagamento.intencao.balanceTransactionAvailableOn === null
+      ) {
+        // Prefer the charge.id from the event (always present on
+        // charge.updated); fall back to the persisted chargeExternalRef.
+        const chargeRef =
+          typeof charge.id === 'string' && charge.id.length > 0
+            ? charge.id
+            : pagamento.intencao.chargeExternalRef;
+        if (chargeRef !== null) {
+          const fetched = await deps.pagamentoProvider.obterAvailableOnDoCharge(chargeRef);
+          // Persist whatever we got (including null, since the schema
+          // allows it). The idempotency check above means we won't
+          // re-fetch on subsequent charge.updated events once non-null.
+          pagamento = {
+            ...pagamento,
+            intencao: {
+              ...pagamento.intencao,
+              balanceTransactionAvailableOn: fetched,
+              // chargeExternalRef may still be null if cs.completed
+              // didn't carry it (rare edge); persist now for parity
+              // with cs.completed's atomic 3-write.
+              ...(pagamento.intencao.chargeExternalRef === null && chargeRef !== null
+                ? { chargeExternalRef: chargeRef }
+                : {}),
+            },
+            atualizadoEm: deps.clock(),
+          };
+          await deps.pagamentoRepository.update(pagamento);
+          if (fetched === null) {
+            logger.warn('webhook.stripe.cu_available_on_unknown', {
+              eventId: event.id,
+              idPagamento: pagamento.id,
+              chargeId: chargeRef,
+            });
+            span.setAttribute('available_on.source', 'cu_stripe_api_null');
+          } else {
+            logger.info('webhook.stripe.cu_available_on_persisted', {
+              eventId: event.id,
+              idPagamento: pagamento.id,
+              metodo: 'credit_card',
+              availableOn: fetched.toISOString(),
+            });
+            span.setAttribute('available_on.source', 'cu_stripe_api');
+            span.setAttribute('available_on.iso', fetched.toISOString());
+          }
+        } else {
+          logger.warn('webhook.stripe.cu_available_on_no_charge_ref', {
+            eventId: event.id,
+            idPagamento: pagamento.id,
+          });
+        }
+      }
+
       logger.info('webhook.stripe.dispatched', {
         eventId: event.id,
         eventType: event.type,
