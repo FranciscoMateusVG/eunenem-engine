@@ -1,5 +1,6 @@
 import type { FonteConvite } from '../value-objects/fonte-convite.js';
 import type { IdConvite, IdEvento } from '../value-objects/ids.js';
+import type { ImagemConvite } from '../value-objects/imagem-convite.js';
 import type { MensagemConvite } from '../value-objects/mensagem-convite.js';
 import type { ModeloConvite } from '../value-objects/modelo-convite.js';
 import type { NomeExibidoConvite } from '../value-objects/nome-exibido-convite.js';
@@ -21,6 +22,7 @@ export interface Convite {
   readonly paleta: PaletaConvite;
   readonly fonte: FonteConvite;
   readonly modelo: ModeloConvite;
+  readonly imagem?: ImagemConvite;
   readonly criadoEm: Date;
   readonly atualizadoEm: Date;
 }
@@ -33,6 +35,7 @@ export interface CriarConviteInput {
   readonly paleta: PaletaConvite;
   readonly fonte: FonteConvite;
   readonly modelo: ModeloConvite;
+  readonly imagem?: ImagemConvite;
   readonly criadoEm: Date;
   readonly atualizadoEm: Date;
 }
@@ -46,6 +49,7 @@ export function criarConvite(input: CriarConviteInput): Convite {
     paleta: input.paleta,
     fonte: input.fonte,
     modelo: input.modelo,
+    ...(input.imagem === undefined ? {} : { imagem: input.imagem }),
     criadoEm: input.criadoEm,
     atualizadoEm: input.atualizadoEm,
   };
@@ -57,6 +61,7 @@ export interface AtualizarConviteCampos {
   readonly paleta: PaletaConvite;
   readonly fonte: FonteConvite;
   readonly modelo: ModeloConvite;
+  readonly imagem?: ImagemConvite;
 }
 
 export function conviteComCamposAtualizados(
@@ -64,6 +69,11 @@ export function conviteComCamposAtualizados(
   campos: AtualizarConviteCampos,
   atualizadoEm: Date,
 ): Convite {
+  const imagemAtualizada =
+    campos.imagem === undefined
+      ? { ...(convite.imagem === undefined ? {} : { imagem: convite.imagem }) }
+      : { imagem: campos.imagem };
+
   return {
     ...convite,
     nomeExibido: campos.nomeExibido,
@@ -71,6 +81,7 @@ export function conviteComCamposAtualizados(
     paleta: campos.paleta,
     fonte: campos.fonte,
     modelo: campos.modelo,
+    ...imagemAtualizada,
     atualizadoEm,
   };
 }
