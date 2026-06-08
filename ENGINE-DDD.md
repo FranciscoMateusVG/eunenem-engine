@@ -37,37 +37,40 @@ A **Plataforma** (§2.6) é o BC fundacional **multi-tenant**: cada Usuário, Ca
 
 **Responsabilidade:** usuários autenticados que **administram campanhas**.
 
-**Decisão de produto:** o **contribuinte não cria conta**, para reduzir fricção no fluxo de pagamento.
+**Decisão de produto:** o **contribuinte não cria conta**, para reduzir fricção no fluxo de pagamento. O snapshot do contribuinte vive em `IntencaoPagamento.contribuinte` (BC Pagamentos), populado pelo webhook do provedor.
+
+**Decisão arquitetural (Pattern A — Infrastructure Adapter, epic aperture-pgqih):** o domínio Usuário é **auth-implementation-agnostic**. Credencial, sessão, rate-limit e password-hashing **vivem fora do agregado**, atrás da porta `AuthService` (`src/adapters/usuario/auth-service.ts`). Dois adaptadores: `AuthServiceMemoria` (testes/dev, in-process) e `AuthServiceBetterAuth` (produção, BetterAuth + Postgres). A uniqueness composta `(idPlataforma, email)` é preservada em **duas camadas independentes** (schema do domínio + schema BetterAuth).
 
 **Conceitos principais**
 
 | Conceito | Papel no domínio |
 |----------|------------------|
-| Usuário | Identidade humana ou lógica no sistema |
-| Conta | Agrupamento de permissões e recursos administrativos |
-| Credenciais | Prova de identidade (login, tokens, etc.) |
-| Perfil | Dados exibíveis ou configuráveis do usuário |
-| Sessão | Estado autenticado em um período |
-| Permissões | O que o usuário pode fazer (ex.: criar campanha) |
+| Usuário | Identidade do administrador no sistema; carrega `idPlataforma` (multi-tenant) |
+| Conta | Entidade aninhada 1:1 com Usuário; agrupa permissões e recursos administrativos |
+| Perfil | Dados exibíveis (`nomeExibicao`, `slug` derivado para URLs públicas) |
+| Permissões | O que a Conta pode fazer (ex.: criar campanha) |
+| **AuthService (porta)** | Contrato para credencial + sessão; vive **fora** do agregado. Métodos: `criarConta`, `iniciarSessao`, `validarSessao`, `revogarSessao`, `alterarSenha`, `removerConta`. Cada um recebe `idPlataforma` para a composta. |
+| **Sessão** | Owned pelo AuthService adapter (BetterAuth gerencia cookies + expiry em produção); o domínio só vê o resultado de `validarSessao` (`{idUsuario, idPlataforma, idConta} \| null`). |
 
 ---
 
 ### 2.2 Arrecadação
 
-**Responsabilidade:** **campanhas**, **opções de contribuição** e **contribuições** (o “o quê” e “quanto” se deseja contribuir antes do pagamento).
+**Responsabilidade:** **campanhas**, **opções de contribuição** e **contribuições** (o "o quê" e "quanto" se deseja contribuir antes do pagamento).
+
+**Mudança estrutural (Plan 0015):** `Contribuicao` virou *slot puro* — perdeu `status` enum e o snapshot do contribuinte. "Indisponibilidade" virou **predicado de consulta** sobre o BC Pagamentos (`EXISTS pagamento WHERE idContribuicao = X AND status = 'aprovado'`). O snapshot do contribuinte migrou para `IntencaoPagamento.contribuinte` no BC Pagamentos.
 
 **Conceitos principais**
 
 | Conceito | Papel no domínio |
 |----------|------------------|
 | Administrador(es) da Campanha | Quem configura a campanha (tipicamente ligado a Identidade e Conta; pode haver mais de um) |
-| Recebedor | Quem deve receber o valor líquido (pessoa externa; histórico de recebedores com dados PIX em `recebedores`; saldo no Financeiro por `idCampanha` = `Campanha.id`) |
+| Recebedor | Quem deve receber o valor líquido (pessoa externa; histórico de recebedores com dados PIX em `recebedores`; saldo no módulo Financeiro por `idCampanha` = `Campanha.id`). Entidade versionada com `is_active`. |
 | Campanha | Container de arrecadação com regras e opções |
 | Opção de Contribuição | Sacola por `tipo` (`presente`, `rifa`, `convite`) que agrupa itens |
-| Contribuição | Item de arrecadação (`nome`, `valor`) criado pelo admin dentro de uma opção |
-| Contribuinte Visitante | Quem paga, sem obrigatoriamente ter conta |
-| Dados do Contribuinte | Informações associadas ao escolher um item (ex.: nome de exibição, email) |
-| Status da Contribuição | `disponivel` (sem visitante) ou `indisponivel` (após associação) |
+| Contribuição | **Slot puro** (pós-0015) — item de arrecadação (`nome`, `valor`, `imagemUrl`, `grupo`) criado pelo admin. **Sem estado armazenado**, sem snapshot de contribuinte. |
+| Predicado "Indisponível" | Não é estado — é consulta. `EXISTS pagamento WHERE idContribuicao = X AND status = 'aprovado'`. Implementado em [`contribuicaoEstaIndisponivel`](src/use-cases/arrecadacao/contribuicao-esta-indisponivel.ts). |
+| Contribuinte Visitante | Quem paga, sem conta. Os dados do visitante (nome, email, mensagem) **vivem em Pagamentos** desde o Plan 0015 — no `IntencaoPagamento.contribuinte`. |
 
 ---
 
@@ -99,44 +102,74 @@ A **Plataforma** (§2.6) é o BC fundacional **multi-tenant**: cada Usuário, Ca
 
 ### 2.4 Pagamentos
 
-**Responsabilidade:** **cobrar o valor total** acordado na composição (integração com meios e provedores externos, em nível de domínio como “intenção” e “pagamento”).
+**Responsabilidade:** **cobrar o valor total** acordado na composição (integração com provedores externos — Stripe, Pagarme, Fake), **arquivar a settlement do provedor**, e **carregar o snapshot do contribuinte** (introduzido pelo Plan 0015). Inclui o **módulo Financeiro** aninhado (§2.5) que registra os efeitos contábeis pós-aprovação.
+
+**FSM de Pagamento (Plan 0015) — 5 estados:**
+
+```
+                 pendente
+                    │
+        ┌───────────┼───────────┐
+        ▼           ▼           ▼
+   processing   aprovado    rejeitado   (terminal)
+        │           │
+        │           ▼
+        │       estornado    (terminal)
+        ▼
+  aprovado / rejeitado
+```
+
+- `pendente` — criação da intenção; sessão de checkout aberta no provedor.
+- `processing` — PIX-only intermediate (`payment_intent.processing` — QR escaneado, banco ainda não confirmou).
+- `aprovado` — settlement bem-sucedido. Dispara `registrarEfeitosFinanceirosPagamentoAprovado` no módulo Financeiro **na mesma transação DB**.
+- `rejeitado` — falha pré-aprovação. Terminal.
+- `estornado` — refund total via `charge.refunded`. Terminal. Cascateia `canceladoEm` nos lançamentos pendentes.
 
 **Conceitos principais**
 
 | Conceito | Papel no domínio |
 |----------|------------------|
-| Intenção de Pagamento | Registro do valor e contexto mínimo para iniciar cobrança |
-| Pagamento | Tentativa ou confirmação junto ao provedor |
-| Método de Pagamento | Cartão, PIX, boleto, etc. |
-| Provedor de Pagamento | Gateway ou adquirente |
-| Transação Externa | ID e metadados no mundo externo |
-| Status do Pagamento | Autorizado, capturado, falhou, estornado… |
-| Evento de Pagamento | Notificação de mudança de estado (útil entre contextos) |
+| Pagamento | Agregado raiz; carrega `IntencaoPagamento` + `TransacaoExterna` como entidades aninhadas; transita pelo FSM via webhooks. |
+| IntencaoPagamento | Entidade aninhada: pré-auth + metadata do provedor (`externalRef` da sessão Stripe, `paymentIntentExternalRef` `pi_xxx`, `chargeExternalRef` `ch_xxx`) + **`contribuinte` (snapshot DadosContribuinte, nullable, populado via webhook `checkout.session.completed`)** + `balanceTransactionAvailableOn` (data de liberação Stripe, usada pelo Financeiro como gate de "marcar transferido"). |
+| Método de Pagamento | `pix \| credit_card` |
+| Provedor de Pagamento | Gateway atrás de porta `PagamentoProvider` (Stripe, Pagarme, Fake) |
+| TransacaoExterna | Settlement do provedor: `aprovado \| rejeitado` (2-state), `statusBruto` do provedor para auditoria |
+| Status do Pagamento | FSM 5-estados acima |
+| DadosContribuinte | VO que **vive em Pagamentos** desde o Plan 0015 (anteriormente em Arrecadação). Re-export deprecado em arrecadação para soft migration. |
 
 **Regra de modelagem importante**
 
-- O contexto de **Pagamentos não conhece** “presente”, “rifa” ou “convite”.
-- Pagamentos conhece apenas: uma **Contribuição** (referência), uma **Composição de Valores** e o **valor total a cobrar**.
+- O contexto de **Pagamentos não conhece** "presente", "rifa" ou "convite".
+- Pagamentos conhece: uma **Contribuição** (referência), uma **Composição de Valores**, **valor total a cobrar** e (pós-0015) o **snapshot do contribuinte** + **metadata do provedor**.
 
 Isso mantém o núcleo de cobrança **estável** enquanto a UX de arrecadação evolui.
 
 ---
 
-### 2.5 Financeiro
+### 2.5 Módulo Financeiro (dentro de Pagamentos)
 
-**Responsabilidade:** registrar os **efeitos contábeis/financeiros** após pagamento aprovado: saldos, receita da plataforma, pendências e repasses.
+**Responsabilidade:** registrar os **efeitos contábeis/financeiros** após `Pagamento → aprovado`: saldos, receita da plataforma, lançamentos pendentes/transferidos/cancelados, e repasses ao recebedor.
+
+**Por que módulo e não BC top-level (pós-Plan 0015):** falha o teste de independência de ciclo de vida — nenhum `LancamentoFinanceiro` existe sem um `Pagamento` que o causa, e a escrita é na **mesma transação DB** que aprova o pagamento. Não há "lifecycle financeiro" paralelo. Vive em `src/domain/pagamentos/financeiro/`.
+
+**Mudança estrutural-chave (Plan 0015):** o FSM de `LancamentoFinanceiro` (`pendente | disponivel`) foi **eliminado**. As "fases" viraram predicados de consulta sobre **colunas de data observada**:
+
+- `pending` → `transferidoEm IS NULL AND canceladoEm IS NULL`
+- `transferred` → `transferidoEm IS NOT NULL AND canceladoEm IS NULL`
+- `cancelado` → `canceladoEm IS NOT NULL`
+
+**Datas observadas (o que de fato aconteceu)** substituem **enums preditivos (o que achávamos que ia acontecer)** — eliminou uma classe de race conditions cross-aggregate e simplificou idempotência.
 
 **Conceitos principais**
 
 | Conceito | Papel no domínio |
 |----------|------------------|
-| Lançamento Financeiro | Registro atômico de movimentação de valor |
-| Saldo do Recebedor | Quanto o recebedor acumulou e pode resgatar |
-| Receita da Plataforma | Taxas reconhecidas como receita |
-| Valor Disponível | Liberado para resgate ou já alocado |
-| Valor Pendente | Ainda não liquidado ou retido por regra |
-| Resgate / Repasse | Saída de valor do sistema para o recebedor |
-| Status do Repasse | Ciclo de vida do repasse |
+| Lançamento Financeiro | Entidade sem FSM. Tipos: `credito_saldo_recebedor`, `credito_receita_plataforma`, `credito_passthrough_surcharge` (aperture-bjshv, sobretaxa de cartão repassada ao recebedor). Estado = predicado sobre `transferidoEm` / `canceladoEm`. |
+| Saldo do Recebedor | View calculada via predicate sobre lançamentos de tipo `credito_saldo_recebedor` |
+| Receita da Plataforma | View calculada sobre `credito_receita_plataforma` |
+| RepasseRecebedor (raiz própria) | Agregado com FSM **2-state forward-only** (`solicitado → aprovado`, aperture-s03dr). `solicitadoEm` setado na criação; `aprovadoEm` setado na aprovação (carimba `transferidoEm = aprovadoEm` em todos os lançamentos linkados na mesma transação). `bankTransferRef` opcional para audit. |
+| Status do Repasse | 2-state (`solicitado`, `aprovado`). Sem rejeição em v1. |
+| Gate `balanceTransactionAvailableOn` | Lançamento só pode ser marcado `transferido` se `IntencaoPagamento.balanceTransactionAvailableOn ≤ now()`. Erro categórico distingue 3 razões: `pagamento_nao_aprovado`, `aguardando_liberacao_sem_data`, `aguardando_liberacao_ate`. |
 
 ---
 
@@ -194,47 +227,54 @@ Isso mantém o núcleo de cobrança **estável** enquanto a UX de arrecadação 
 
 ## 3. Fluxo principal (ponta a ponta)
 
-Ordem lógica dos passos, do ponto de vista do domínio:
+Ordem lógica dos passos pós-Plan 0015, do ponto de vista do domínio:
 
-1. **Administrador(es) da Campanha** criam uma **Campanha**.
-2. A **Campanha** define um **Recebedor**.
-3. A **Campanha** possui **Opções de Contribuição** (sacolas por tipo).
-4. O **Administrador** cria **Contribuições** (itens, ex.: “fralda” R$ 80) dentro de uma opção.
-5. **Contribuinte Visitante** escolhe um item e associa seus dados; a contribuição fica **indisponível** para outros.
-6. **Taxas** calcula a taxa (ex.: R$ 4) e gera a **Composição de Valores**:
-   - valor da contribuição: R$ 80  
-   - taxa: R$ 4  
-   - total pago: R$ 84  
-   - valor destinado ao recebedor: R$ 80  
-7. **Pagamentos** cria uma **Intenção de Pagamento** de R$ 84.
-8. O **Pagamento** é aprovado.
-9. **Financeiro** cria lançamentos, por exemplo:
-   - R$ 80 → **Saldo do Recebedor**  
-   - R$ 4 → **Receita da Plataforma**  
-10. O **Recebedor** solicita **Resgate** ou **Repasse** (conforme regras do produto).
+1. **Administrador(es) da Campanha** criam uma **Campanha** e registram um **Recebedor** (versionado em `recebedores`, com `is_active`).
+2. A **Campanha** possui **Opções de Contribuição** (sacolas por `tipo`: `presente | rifa | convite`).
+3. O **Administrador** cria **Contribuições** (slots: ex. "fralda" R$ 80) dentro de uma opção. Pós-0015: slots **não têm estado** — são definição pura.
+4. **Contribuinte Visitante** escolhe um item e segue para checkout. Checkout valida (predicate `contribuicaoEstaIndisponivel`) que o slot não foi pago ainda — **sem reservar nada** (concorrência otimista).
+5. **Taxas** calcula a taxa (ex.: R$ 4) e gera a **Composição de Valores**:
+   - valor da contribuição: R$ 80
+   - taxa: R$ 4
+   - total pago: R$ 84
+   - valor destinado ao recebedor: R$ 80
+6. **Pagamentos** cria uma **`IntencaoPagamento`** + abre sessão de checkout no provedor (Stripe/Pagarme). Pagamento nasce `pendente`.
+7. Provedor processa. Webhooks do provedor avançam o FSM:
+   - PIX: `payment_intent.processing` → `processing` → `payment_intent.succeeded` → `aprovado`.
+   - Cartão: `payment_intent.succeeded` → `aprovado`.
+   - Falha em qualquer ponto: `pendente|processing → rejeitado`.
+   - `checkout.session.completed` grava o **snapshot do contribuinte** (`nome`, `email`, mensagem) em `IntencaoPagamento.contribuinte`.
+8. Quando o Pagamento vai a `aprovado`, o **módulo Financeiro** cria lançamentos **na mesma transação**:
+   - R$ 80 → `credito_saldo_recebedor`
+   - R$ 4 → `credito_receita_plataforma`
+   - (opcional) sobretaxa → `credito_passthrough_surcharge`
+9. Os lançamentos começam como **pending** (`transferidoEm IS NULL`); o admin marca `transferidoEm` quando o dinheiro é liberado pelo Stripe (gateado por `balanceTransactionAvailableOn`).
+10. **Recebedor** solicita repasse → `RepasseRecebedor` em `solicitado`. **Admin** aprova → `aprovado` + carimbo de `transferidoEm` em todos os lançamentos linkados, atomicamente.
 
-Diagrama simplificado (responsabilidades, não deployment):
+**Fluxo de exceção — estorno:** admin chama `estornarPagamento` em pagamento `aprovado` → dispara refund Stripe → `aprovado → estornado` → cascateia `canceladoEm = now()` em lançamentos linkados que ainda não foram transferidos. Lançamentos já transferidos **bloqueiam** o estorno.
+
+Diagrama simplificado (responsabilidades, não deployment) — note Financeiro nested em Pagamentos:
 
 ```mermaid
 flowchart LR
-  subgraph identidade["Identidade e Conta"]
+  subgraph identidade["Usuário (AuthService port)"]
     U[Usuário / Conta]
   end
   subgraph arrecadacao["Arrecadação"]
     C[Campanha]
     O[Opção de Contribuição]
-    Co[Contribuição]
+    Co[Contribuição<br/>slot puro]
   end
   subgraph taxas["Taxas"]
     Cmp[Composição de Valores]
   end
   subgraph pagamentos["Pagamentos"]
-    I[Intenção de Pagamento]
-    P[Pagamento]
-  end
-  subgraph financeiro["Financeiro"]
-    L[Lançamentos]
-    S[Saldo / Repasse]
+    I[IntencaoPagamento<br/>+ contribuinte snapshot]
+    P[Pagamento<br/>FSM 5-estados]
+    subgraph financeiro["Módulo Financeiro"]
+      L[Lançamentos<br/>transferidoEm / canceladoEm]
+      R[RepasseRecebedor<br/>FSM solicitado→aprovado]
+    end
   end
   U --> C
   C --> O
@@ -243,7 +283,7 @@ flowchart LR
   Cmp --> I
   I --> P
   P --> L
-  L --> S
+  L --> R
 ```
 
 ---
@@ -251,10 +291,12 @@ flowchart LR
 ## 4. Integração entre contextos (regras DDD)
 
 - **Domínio:** cada contexto mantém seu modelo; **não** importar entidades de outro contexto dentro do núcleo de domínio. A regra é enforçada pelo `dependency-cruiser` (`.dependency-cruiser.cjs`), inclusive para o **mirror VO** `IdPlataformaReferencia` que cada BC consumidor define localmente.
+- **Exceção arquitetural — módulo Financeiro:** vive em `src/domain/pagamentos/financeiro/` e importa livremente do agregado Pagamento. Não é fronteira de contexto; é organização de pastas dentro do mesmo BC. Vide §2.5 para a justificativa.
 - **Fronteiras:** troca de informação via **IDs**, **contratos públicos (DTOs)** e **eventos de domínio/aplicação** quando fizer sentido.
-- **Orquestração:** **casos de uso** podem coordenar vários contextos (ex.: após reservar contribuição, pedir composição de valores e criar intenção de pagamento). Quando a coordenação envolve **múltiplos passos com efeitos colaterais e precisa desfazer parcialmente em caso de falha**, ela vive no pseudo-BC **Checkout** (`src/use-cases/checkout/`) — orquestração com **padrão saga + compensação explícita**, sem domínio próprio. Ver `CONTEXTS.md` § _Orquestração — Checkout_.
+- **Orquestração:** **casos de uso** podem coordenar vários contextos (ex.: validar campanha + checar predicado de indisponibilidade + calcular composição + criar intenção). Quando a coordenação envolve **múltiplos passos com efeitos colaterais cross-BC**, ela vive no pseudo-BC **Checkout** (`src/use-cases/checkout/`) — orquestração sem domínio próprio. Ver `CONTEXTS.md` § _Orquestração — Checkout_. **Pós-Plan 0015**, o padrão de "saga + compensação" simplificou-se: como Contribuição perdeu estado armazenado, o passo de criar a intenção é o último que importa — não há reserva de slot para desfazer. A única compensação real hoje é a **cascata de `canceladoEm`** dentro de `estornarPagamento` (atomicidade DB em vez de saga).
+- **Padrão port-adapter para integração externa:** integrações com sistemas externos (provedor de pagamento, BetterAuth, e futuras integrações bancárias) seguem **Pattern A — Infrastructure Adapter**. O domínio define uma porta (interface) com vocabulário do domínio; um adapter em `src/adapters/<bc>/` implementa a porta contra o sistema externo. Exemplos canônicos: `PagamentoProvider` + `CheckoutSessionProvider` (Stripe/Pagarme/Fake) e `AuthService` (Memoria/BetterAuth). O agregado fica auth-implementation-agnostic / provider-agnostic; cada adapter pode trazer seu próprio schema/migration sem invadir o domínio.
 - **Guard multi-tenant:** sagas e use-cases que recebem `idPlataforma` no input comparam-no com o `idPlataforma` carregado dos agregados referenciados (campanha, contribuição) e falham com erro tipado se houver mismatch (`CheckoutPlataformaMismatchError`). Esse é o gate cross-tenant explícito em código.
-- **Evolução:** começar com **implementações em memória** e adapters simples; integrações reais (banco dedicado, auth, gateway) entram de forma incremental, sem obliterar o modelo acima.
+- **Evolução:** começar com **implementações em memória** e adapters simples; integrações reais (Postgres, BetterAuth, Stripe) entram de forma incremental atrás de portas, sem obliterar o modelo acima.
 
 ---
 
@@ -274,11 +316,18 @@ Estes itens vêm do contrato de trabalho do projeto e reforçam como o código d
 
 | Termo | Significado nesta engine |
 |--------|---------------------------|
-| Contribuição | Item de arrecadação com valor; visitante associa dados ao reservar para pagamento |
-| Opção de contribuição | Sacola por tipo de experiência; agrupa itens de contribuição |
+| Contribuição | Slot de arrecadação com valor; pós-Plan 0015 é **definição pura** — sem estado armazenado, sem snapshot do contribuinte |
+| Opção de contribuição | Sacola por tipo de experiência; agrupa contribuições |
 | Composição de valores | Decomposição oficial: contribuição, taxa, total, destino ao recebedor |
-| Intenção de pagamento | Passo explícito de cobrança com valor total (ex.: R$ 84) |
-| Recebedor | Destinatário do valor líquido da contribuição |
+| Intenção de pagamento | Pré-auth no provedor; carrega `externalRef` da sessão Stripe, metadata do FSM, **e o snapshot do contribuinte** (populado por webhook) |
+| Snapshot do contribuinte | `DadosContribuinte` (nome, email, mensagem) gravado em `IntencaoPagamento.contribuinte` quando o `checkout.session.completed` chega. Pós-0015 vive em Pagamentos, não em Arrecadação |
+| Recebedor | Destinatário do valor líquido da contribuição; entidade versionada com `is_active` |
 | Taxa (paga pelo contribuinte) | Adicionada ao valor da contribuição no total a pagar |
+| FSM de Pagamento | 5 estados: `pendente → processing → aprovado → estornado` (e `→ rejeitado` como terminal alternativo) |
+| Predicado "indisponível" | Consulta `EXISTS pagamento WHERE idContribuicao = X AND status = 'aprovado'`; **não** é estado armazenado pós-0015 |
+| Data observada (Plan 0015) | `transferidoEm` / `canceladoEm` em `LancamentoFinanceiro`. **Datas que de fato aconteceram** substituem **enums preditivos** — pendente/transferido/cancelado viraram predicados sobre essas colunas |
+| Módulo Financeiro | Pasta `src/domain/pagamentos/financeiro/` aninhada no BC Pagamentos. Não é BC top-level — não passa no teste de independência de ciclo de vida |
+| Repasse (FSM 2-state) | `RepasseRecebedor`: `solicitado → aprovado`, forward-only. Aprovação carimba `transferidoEm` em lançamentos linkados atomicamente |
+| AuthService (porta) | Contrato de credencial + sessão **fora** do agregado Usuário. Adapters: `Memoria` (testes/dev), `BetterAuth` (produção, Postgres-backed) |
 
 ---

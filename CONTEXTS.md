@@ -1,8 +1,14 @@
 # Contextos da engine — documentação consolidada
 
-Este arquivo reúne a documentação dos **bounded contexts** já implementados na engine de intermediação financeira (skeleton Frame). A **Plataforma** é o BC fundacional **multi-tenant**: todo Usuário, Campanha, Sessão e regra de Taxa pertence a exatamente uma plataforma (eunenem, eucasei, ...). A seguir vem o fluxo natural do negócio: arrecadação → taxas → pagamentos → financeiro, com **usuário** como contexto transversal de administração. Por fim, **Checkout** é um pseudo-BC de orquestração (apenas casos de uso + erros, sem domínio nem adaptadores próprios) que costura os BCs em sagas com compensação.
+Este arquivo reúne a documentação dos **bounded contexts** já implementados na engine de intermediação financeira (skeleton Frame). A **Plataforma** é o BC fundacional **multi-tenant**: todo Usuário, Campanha, Sessão e regra de Taxa pertence a exatamente uma plataforma (eunenem, eucasei, ...). A seguir vem o fluxo natural do negócio: arrecadação → taxas → pagamentos (com o **módulo Financeiro** aninhado dentro), com **usuário** como contexto transversal de administração. Por fim, **Checkout** é um pseudo-BC de orquestração (apenas casos de uso + erros, sem domínio nem adaptadores próprios) que costura os BCs em sagas com compensação.
 
-**Persistência hoje:** **Arrecadação** tem adaptadores em memória e **Postgres** (Kysely); **Plataforma**, **Taxas**, **Pagamentos**, **Financeiro** e **Usuário** usam adaptadores em memória e/ou Postgres conforme o BC; **Evento** (fase 1) usa **somente memória**.
+**Mudanças estruturais recentes (junho/2026):**
+
+- **Plan 0015 — colapso Contribuição/Pagamento/Financeiro:** Contribuição virou *slot puro* (sem `status` enum, sem snapshot do contribuinte); Pagamento ganhou FSM de 5 estados (`pendente | processing | aprovado | rejeitado | estornado`); LancamentoFinanceiro perdeu o FSM e passou a usar **colunas de data observada** (`transferidoEm`, `canceladoEm`) — os "estados" pendente/transferido/cancelado viraram predicados de consulta. **Financeiro** deixou de ser BC top-level e virou **módulo aninhado dentro de Pagamentos** (`src/domain/pagamentos/financeiro/`). Plano-fonte: [`plans/0015-contribuicao-pagamento-financeiro-collapse.md`](plans/0015-contribuicao-pagamento-financeiro-collapse.md).
+- **BetterAuth (Pattern A — Infrastructure Adapter):** o domínio Usuário recebeu uma porta `AuthService` (`src/adapters/usuario/auth-service.ts`) com dois adaptadores — `AuthServiceMemoria` (testes/dev) e `AuthServiceBetterAuth` (produção). A uniqueness composta `(idPlataforma, email)` foi preservada tanto no domínio quanto no schema BetterAuth. `eunenem-server` monta `auth.handler` (Hono) + procedures tRPC (`signUp / signIn / signOut / me`).
+- **RepasseRecebedor (aperture-s03dr):** FSM de 2 estados (`solicitado → aprovado`, forward-only), com índice único parcial garantindo no máximo 1 repasse `solicitado` por campanha.
+
+**Persistência hoje:** **Arrecadação**, **Pagamentos** (incluindo o módulo **Financeiro**), **Plataforma**, **Taxas**, **Usuário** e **Evento** têm adaptadores em memória; **Arrecadação**, **Pagamentos / Financeiro**, **Usuário** (incluindo as 5 tabelas BetterAuth) têm também adaptadores **Postgres** (Kysely). **Evento** segue só em memória na fase 1.
 
 ---
 
@@ -12,7 +18,7 @@ Este arquivo reúne a documentação dos **bounded contexts** já implementados 
 2. [BC Arrecadação](#bc-arrecadação--o-que-foi-implementado)
 3. [BC Taxas](#bc-taxas--o-que-foi-implementado)
 4. [BC Pagamentos](#bc-pagamentos--o-que-foi-implementado)
-5. [BC Financeiro](#bc-financeiro--o-que-foi-implementado)
+5. [Módulo Financeiro (dentro de Pagamentos)](#módulo-financeiro-dentro-de-pagamentos--o-que-foi-implementado)
 6. [BC Usuário](#bc-usuário--o-que-foi-implementado)
 7. [BC Evento (supporting)](#bc-evento-supporting--fase-1)
 8. [Orquestração — Checkout (pseudo-BC)](#orquestração--checkout-pseudo-bc)
@@ -91,8 +97,9 @@ Este documento descreve a primeira fatia da **engine de intermediação financei
 
 1. Um ou mais **administradores** (UUIDs de conta) abrem uma **campanha** com título e registram o **recebedor** externo (nome + chave PIX em `dadosRecebedor`); o saldo no Financeiro agrega por `id` da campanha (`idCampanha`). Alterações de PIX desativam o recebedor ativo e criam nova linha em `recebedores` (`is_active`).
 2. A campanha começa sem **opções de contribuição** (sacolas); o administrador adiciona opções só com `tipo`: `presente`, `rifa` ou `convite`.
-3. O administrador cria **itens de contribuição** dentro de uma opção (`nome`, `valor` em centavos), com status `disponivel` e sem contribuinte.
-4. Um **contribuinte visitante** (sem conta) escolhe um item e associa seus dados (`nome`, **email obrigatório**); a contribuição passa a `indisponivel`. Taxas e pagamentos usam o `idContribuicao` e o valor do item.
+3. O administrador cria **itens de contribuição** dentro de uma opção (`nome`, `valor` em centavos). Pós-Plan 0015, **Contribuição é um slot puro**: campos `id, idCampanha, idOpcaoContribuicao, nome, valor, imagemUrl, grupo, criadaEm` — **sem `status` enum e sem snapshot do contribuinte**.
+4. Um **contribuinte visitante** (sem conta) escolhe um item e segue para o checkout. Os dados do contribuinte (`nome`, **email obrigatório**, mensagem opcional) vivem agora no **snapshot `contribuinte` da `IntencaoPagamento`** (BC Pagamentos), não mais na Contribuição. Taxas e pagamentos usam o `idContribuicao` + valor do item.
+5. **"Indisponível" virou predicado de consulta**, não estado armazenado: uma contribuição é considerada indisponível quando `EXISTS pagamento WHERE idContribuicao = X AND status = 'aprovado'`. O caso de uso [`contribuicaoEstaIndisponivel`](src/use-cases/arrecadacao/contribuicao-esta-indisponivel.ts) implementa exatamente isso. Relação **1:N** contribuição→pagamentos é permitida com concorrência otimista (dois pagamentos aprovados para o mesmo slot são aceitos como duplo-pagamento — virgem +dinheiro para o recebedor, sem rollback).
 
 Nada disso cobra pagamento nem calcula taxa — isso fica em outros bounded contexts.
 
@@ -106,7 +113,7 @@ Nada disso cobra pagamento nem calcula taxa — isso fica em outros bounded cont
 | `recebedores` | `id`, `campanha_id`, dados PIX, `is_active`, `criada_em` | Histórico de recebedores; 1 ativo por campanha |
 | `campanha_administradores` | `campanha_id`, `id_usuario` | PK composta; `id_usuario` ↔ `IdConta` no domínio |
 | `opcoes_contribuicao` | `id`, `campanha_id`, `tipo` | Sacola por `tipo`: `presente` \| `rifa` \| `convite` |
-| `contribuicoes` | `id`, `campanha_id`, `id_opcao_contribuicao`, `nome`, `valor`, `status`, `criada_em`, `contribuinte_*` | `status`: `disponivel` \| `indisponivel`; contribuinte NULL até associação; FKs `ON DELETE RESTRICT` |
+| `contribuicoes` | `id`, `campanha_id`, `id_opcao_contribuicao`, `nome`, `valor`, `imagem_url`, `grupo`, `criada_em` | **Pós-Plan 0015**: sem `status`, sem colunas `contribuinte_*`. Slot puro; "indisponibilidade" é predicado de consulta sobre `pagamentos`. FKs `ON DELETE RESTRICT`. |
 
 Migrations: [`migrations/20260519_001_create_arrecadacao.ts`](migrations/20260519_001_create_arrecadacao.ts), [`migrations/20260520_002_alter_arrecadacao_sacola_itens.ts`](migrations/20260520_002_alter_arrecadacao_sacola_itens.ts), [`migrations/20260521_003_recebedores_versionados.ts`](migrations/20260521_003_recebedores_versionados.ts), [`migrations/20260522_004_drop_recebedores_id_carteira.ts`](migrations/20260522_004_drop_recebedores_id_carteira.ts).
 
@@ -119,12 +126,12 @@ Adaptadores Postgres exportados também pelo subpath `frame/adapters/postgres` (
 | Conceito | Onde está |
 |----------|-----------|
 | Montante em centavos (evitar `number` em reais) | [`src/domain/money.ts`](src/domain/money.ts) — `MoneyCentsSchema` |
-| Campanha, administradores, projeção do recebedor ativo (`dadosRecebedor`), opção de contribuição | [`src/domain/arrecadacao/campanha.ts`](src/domain/arrecadacao/campanha.ts) — `Campanha`, `DadosRecebedor`, `OpcaoContribuicao` |
-| Recebedor (PIX auditável) | [`src/domain/arrecadacao/recebedor.ts`](src/domain/arrecadacao/recebedor.ts) — `Recebedor`, `criarNovoRecebedor` |
+| Campanha, administradores, projeção do recebedor ativo (`dadosRecebedor`), opção de contribuição | [`src/domain/arrecadacao/entities/campanha.ts`](src/domain/arrecadacao/entities/campanha.ts) — `Campanha`, `DadosRecebedor`, `OpcaoContribuicao` |
+| Recebedor (PIX auditável, versionado) | [`src/domain/arrecadacao/entities/recebedor.ts`](src/domain/arrecadacao/entities/recebedor.ts) — `Recebedor`, `criarRecebedorInicial`, `criarNovoRecebedor`, `desativarRecebedor` |
 | Persistência Postgres do recebedor | [`src/adapters/arrecadacao/recebedor-repository.postgres.ts`](src/adapters/arrecadacao/recebedor-repository.postgres.ts) — `RecebedorRepositoryPostgres` |
-| Procurar opção na campanha (função pura) | [`src/domain/arrecadacao/campanha.ts`](src/domain/arrecadacao/campanha.ts) — `encontrarOpcaoContribuicao` |
-| Anexar opção de forma imutável | [`src/domain/arrecadacao/campanha.ts`](src/domain/arrecadacao/campanha.ts) — `campanhaComOpcao` |
-| Contribuição, dados do visitante, input de criação | [`src/domain/arrecadacao/contribuicao.ts`](src/domain/arrecadacao/contribuicao.ts) |
+| Procurar opção na campanha (função pura) | [`src/domain/arrecadacao/entities/campanha.ts`](src/domain/arrecadacao/entities/campanha.ts) — `campanhaComOpcao` |
+| Contribuição (slot puro pós-0015) | [`src/domain/arrecadacao/entities/contribuicao.ts`](src/domain/arrecadacao/entities/contribuicao.ts) — `Contribuicao`, `criarContribuicao`, `contribuicaoAtualizada` |
+| Dados do contribuinte (compartilhado com Pagamentos) | [`src/domain/pagamentos/value-objects/dados-contribuinte.ts`](src/domain/pagamentos/value-objects/dados-contribuinte.ts) — `DadosContribuinte`. **Mudou de BC** no Plan 0015; re-export deprecado em `src/domain/arrecadacao/value-objects/dados-contribuinte.ts`. |
 | Persistência em memória da campanha | [`src/adapters/arrecadacao/campanha-repository.memory.ts`](src/adapters/arrecadacao/campanha-repository.memory.ts) |
 | Persistência Postgres da campanha | [`src/adapters/arrecadacao/campanha-repository.postgres.ts`](src/adapters/arrecadacao/campanha-repository.postgres.ts) — `CampanhaRepositoryPostgres` |
 | Persistência em memória das contribuições | [`src/adapters/arrecadacao/contribuicao-repository.memory.ts`](src/adapters/arrecadacao/contribuicao-repository.memory.ts) |
@@ -133,14 +140,19 @@ Adaptadores Postgres exportados também pelo subpath `frame/adapters/postgres` (
 | Testes de integração Postgres | [`tests/integration/campanha-repository.postgres.test.ts`](tests/integration/campanha-repository.postgres.test.ts), [`tests/integration/contribuicao-repository.postgres.test.ts`](tests/integration/contribuicao-repository.postgres.test.ts) |
 | Portas (interfaces) | [`src/adapters/arrecadacao/campanha-repository.ts`](src/adapters/arrecadacao/campanha-repository.ts) — `CampanhaRepository`; [`src/adapters/arrecadacao/contribuicao-repository.ts`](src/adapters/arrecadacao/contribuicao-repository.ts) — `ContribuicaoRepository` |
 | Caso de uso: criar campanha | [`src/use-cases/arrecadacao/criar-campanha.ts`](src/use-cases/arrecadacao/criar-campanha.ts) — `criarCampanha` |
-| Caso de uso: adicionar administrador | [`src/use-cases/arrecadacao/adicionar-administrador-campanha.ts`](src/use-cases/arrecadacao/adicionar-administrador-campanha.ts) — `adicionarAdministradorCampanha` |
-| Caso de uso: remover administrador | [`src/use-cases/arrecadacao/remover-administrador-campanha.ts`](src/use-cases/arrecadacao/remover-administrador-campanha.ts) — `removerAdministradorCampanha` |
-| Caso de uso: alterar dados do recebedor (desativa + novo recebedor) | [`src/use-cases/arrecadacao/alterar-dados-recebedor-campanha.ts`](src/use-cases/arrecadacao/alterar-dados-recebedor-campanha.ts) — `alterarDadosRecebedorCampanha` |
+| Caso de uso: adicionar/remover administrador | [`adicionar-administrador-campanha.ts`](src/use-cases/arrecadacao/adicionar-administrador-campanha.ts), [`remover-administrador-campanha.ts`](src/use-cases/arrecadacao/remover-administrador-campanha.ts) |
+| Caso de uso: alterar dados do recebedor (desativa + cria nova linha versionada) | [`src/use-cases/arrecadacao/alterar-dados-recebedor-campanha.ts`](src/use-cases/arrecadacao/alterar-dados-recebedor-campanha.ts) — `alterarDadosRecebedorCampanha` |
 | Caso de uso: adicionar opção (sacola) | [`src/use-cases/arrecadacao/adicionar-opcao-contribuicao.ts`](src/use-cases/arrecadacao/adicionar-opcao-contribuicao.ts) — `adicionarOpcaoContribuicao` |
 | Caso de uso: criar item de contribuição (admin) | [`src/use-cases/arrecadacao/criar-contribuicao.ts`](src/use-cases/arrecadacao/criar-contribuicao.ts) — `criarContribuicao` |
-| Caso de uso: associar contribuinte (visitante) | [`src/use-cases/arrecadacao/associar-contribuinte-contribuicao.ts`](src/use-cases/arrecadacao/associar-contribuinte-contribuicao.ts) — `associarContribuinteContribuicao` |
-| Caso de uso: alterar valor do item | [`src/use-cases/arrecadacao/alterar-valor-contribuicao.ts`](src/use-cases/arrecadacao/alterar-valor-contribuicao.ts) — `alterarValorContribuicao` |
+| Caso de uso: criar contribuições em lote (admin) | [`src/use-cases/arrecadacao/criar-contribuicoes-em-lote.ts`](src/use-cases/arrecadacao/criar-contribuicoes-em-lote.ts) — `criarContribuicoesEmLote` |
+| Caso de uso: atualizar contribuição (admin) | [`src/use-cases/arrecadacao/atualizar-contribuicao.ts`](src/use-cases/arrecadacao/atualizar-contribuicao.ts) — `atualizarContribuicao` (substitui `alterar-valor-contribuicao` parcialmente) |
+| Caso de uso: remover contribuição (admin) | [`src/use-cases/arrecadacao/remover-contribuicao.ts`](src/use-cases/arrecadacao/remover-contribuicao.ts) — `removerContribuicao` |
+| Caso de uso: predicado "contribuição indisponível?" (substitui o status enum) | [`src/use-cases/arrecadacao/contribuicao-esta-indisponivel.ts`](src/use-cases/arrecadacao/contribuicao-esta-indisponivel.ts) — `contribuicaoEstaIndisponivel`. Consulta `pagamentoRepository.findIdsContribuicoesComPagamentoAprovado([id])` e devolve `matches.length > 0`. |
+| Caso de uso: listar contribuições da opção (admin) | [`src/use-cases/arrecadacao/listar-contribuicoes-de-opcao.ts`](src/use-cases/arrecadacao/listar-contribuicoes-de-opcao.ts) |
+| Caso de uso: transação atômica multi-aggregate | [`src/use-cases/arrecadacao/executar-transacao-arrecadacao.ts`](src/use-cases/arrecadacao/executar-transacao-arrecadacao.ts) |
 | Erros de domínio / aplicação | [`src/errors/arrecadacao/`](src/errors/arrecadacao) |
+
+**Casos de uso deletados pelo Plan 0015** (não pesquise por eles; foram removidos): `associar-contribuinte-contribuicao.ts`, `desassociar-contribuinte-contribuicao.ts`. A associação contribuinte→contribuição deixou de existir como estado armazenado; o snapshot do contribuinte agora vive na `IntencaoPagamento` (BC Pagamentos), populado pelo webhook `checkout.session.completed`.
 | API pública do pacote (re-exports) | [`src/index.ts`](src/index.ts) |
 | Testes unitários | [`tests/unit/money.test.ts`](tests/unit/money.test.ts), [`tests/unit/arrecadacao/campanha.test.ts`](tests/unit/arrecadacao/campanha.test.ts), [`tests/unit/arrecadacao/contribuicao.test.ts`](tests/unit/arrecadacao/contribuicao.test.ts), [`tests/unit/arrecadacao/casos-de-uso.test.ts`](tests/unit/arrecadacao/casos-de-uso.test.ts) |
 
@@ -148,21 +160,21 @@ Adaptadores Postgres exportados também pelo subpath `frame/adapters/postgres` (
 
 ## DDD
 
-- **Bounded context (contexto delimitado):** arquivos na subpasta `arrecadacao/` em domínio, adaptadores, erros e casos de uso. Toda a linguagem (campanha, opção, contribuição, visitante) vive aqui; não aparecem “pagamentos” ou “taxas” neste BC.
+- **Bounded context (contexto delimitado):** arquivos na subpasta `arrecadacao/` em domínio, adaptadores, erros e casos de uso. Toda a linguagem (campanha, opção, contribuição) vive aqui; não aparecem “pagamentos” ou “taxas” neste BC. **O snapshot do contribuinte** deixou de ser cidadão deste BC no Plan 0015 — vive agora em Pagamentos (`IntencaoPagamento.contribuinte`).
 
 - **Ubiquitous language (linguagem ubíqua):** os nomes em TypeScript (`Campanha`, `OpcaoContribuicao`, `criarContribuicao`) alinham com a conversa de produto em [`ENGINE-DDD.md`](ENGINE-DDD.md).
 
-- **Value object:** `MoneyCents` (via schema) e o perfil do contribuinte são valores validados nas fronteiras, sem identidade própria.
+- **Value object:** `MoneyCents` (via schema). Os value objects da pasta `value-objects/` cobrem `DadosRecebedor`, `OpcaoContribuicao` e os identificadores. `DadosContribuinte` sobrevive aqui como re-export deprecado apontando para `src/domain/pagamentos/value-objects/dados-contribuinte.ts`.
 
-- **Entidade:** `Campanha` e `Contribuicao` têm **id** estável e ciclo de vida; a campanha **muda** quando se adicionam opções (nova versão imutável do agregado).
+- **Entidade:** `Campanha`, `Recebedor` e `Contribuicao` têm **id** estável. Pós-0015, **`Contribuicao` é stateless**: não tem ciclo de vida (sem `status` enum, sem transições), só patches de admin (nome, valor, imagemUrl, grupo). A campanha continua tendo ciclo de vida (adicionar opções, alterar recebedor ativo).
 
-- **Agregado:** a **Campanha** é a raiz com **opções** (sacolas por `tipo`). Cada **Contribuição** é um item persistido à parte, referenciando `idCampanha` e `idOpcaoContribuicao` (herda o `tipo` da sacola sem duplicar no domínio).
+- **Agregado:** a **Campanha** é a raiz com **opções** (sacolas por `tipo`). Cada **Contribuição** é um slot persistido à parte, referenciando `idCampanha` e `idOpcaoContribuicao` (herda o `tipo` da sacola sem duplicar no domínio). **`Recebedor`** é uma raiz versionada própria (uma linha por versão, `is_active` marcando o atual).
 
-- **Repositório (padrão):** `CampanhaRepository` e `ContribuicaoRepository` são portas; Postgres faz upsert de campanha/opções e upsert de contribuições. Administradores usam coluna `id_usuario` ↔ `IdConta`.
+- **Repositório (padrão):** `CampanhaRepository`, `ContribuicaoRepository` e `RecebedorRepository` são portas; Postgres faz upsert de campanha/opções e upsert de contribuições. Administradores usam coluna `id_usuario` ↔ `IdConta`.
 
-- **Caso de uso / serviço de aplicação:** validação Zod, invariantes (opção duplicada, item só `disponivel` para associação/alteração de valor) e persistência.
+- **Caso de uso / serviço de aplicação:** validação Zod, invariantes (opção duplicada, exatamente um recebedor ativo por campanha) e persistência.
 
-- **Invariantes:** opção com `id` único na campanha; item nasce `disponivel` sem contribuinte; associação de visitante exige `disponivel` e resulta em `indisponivel`; valor do item definido pelo admin e alterável só enquanto `disponivel`.
+- **Invariantes (pós-Plan 0015):** opção com `id` único na campanha; contribuição nasce e permanece como slot (sem estado próprio); "disponibilidade" é predicado de consulta (`EXISTS pagamento WHERE idContribuicao = X AND status = 'aprovado'`); 1:N contribuição→pagamentos é permitido (concorrência otimista, sem reserva de slot).
 
 ---
 
@@ -190,16 +202,17 @@ Como a taxa é paga pelo contribuinte, ela é somada ao total cobrado e não é 
 ## Mapa conceito de negócio → código
 
 - **Montante em centavos:** `src/domain/money.ts` — `MoneyCentsSchema`
-- **Regra de Taxa:** `src/domain/taxas/taxas.ts` — `RegraTaxa`, `REGRA_TAXA_PADRAO`
-- **Responsável pela Taxa:** `src/domain/taxas/taxas.ts` — `ResponsavelTaxa`, por enquanto apenas `contribuinte`
-- **Cálculo de Taxa:** `src/domain/taxas/taxas.ts` — `calcularValorTaxaPercentual` e `calcularTaxa`
-- **Composição de Valores:** `src/domain/taxas/taxas.ts` — `ComposicaoValores`, `comporComposicaoValores` e `calcularComposicaoValores` (domínio; exportado como `calcularComposicaoValoresDominio` no pacote)
-- **Porta para regra ativa:** `src/adapters/taxas/regra-provider.ts` — `ProvedorRegraTaxa`
-- **Regra em memória:** `src/adapters/taxas/regra-provider.memory.ts` — `ProvedorRegraTaxaMemory`
-- **Caso de uso:** `src/use-cases/taxas/calcular-composicao-valores.ts` — `calcularComposicaoValores`
+- **Regra de Taxa (raiz do agregado):** [`src/domain/taxas/entities/regra-taxa.ts`](src/domain/taxas/entities/regra-taxa.ts) — `RegraTaxa`, `criarRegraTaxa`, `obterTarifaPorTipo`. Cada plataforma tem exatamente uma RegraTaxa ativa; estrutura é um record `tarifasPorTipo` keyed por `presente | rifa | convite`.
+- **Tarifa por tipo (VO):** [`src/domain/taxas/value-objects/tarifa-tipo.ts`](src/domain/taxas/value-objects/tarifa-tipo.ts) — `TarifaTipo` (percentage em basis points + fixed amount; `responsavelTaxa: contribuinte`)
+- **Cálculo de Taxa (função pura):** [`src/domain/taxas/value-objects/calculo-taxa.ts`](src/domain/taxas/value-objects/calculo-taxa.ts) — `calcularValorTaxaPercentual`, `calcularTaxa`
+- **Composição de Valores:** [`src/domain/taxas/value-objects/composicao-valores.ts`](src/domain/taxas/value-objects/composicao-valores.ts) — `ComposicaoValores`, `comporComposicaoValores` (domínio); o use-case exportado como `calcularComposicaoValores` compõe contribuição + tarifa.
+- **Identificadores:** [`src/domain/taxas/value-objects/ids.ts`](src/domain/taxas/value-objects/ids.ts) — `IdRegraTaxa`, mirror `IdPlataformaReferencia`
+- **Porta para regra ativa:** [`src/adapters/taxas/regra-provider.ts`](src/adapters/taxas/regra-provider.ts) — `ProvedorRegraTaxa` (resolve por plataforma)
+- **Regra em memória:** [`src/adapters/taxas/regra-provider.memory.ts`](src/adapters/taxas/regra-provider.memory.ts) — `ProvedorRegraTaxaMemory`
+- **Caso de uso:** [`src/use-cases/taxas/calcular-composicao-valores.ts`](src/use-cases/taxas/calcular-composicao-valores.ts) — `calcularComposicaoValores`
 - **Erro tipado:** `src/errors/taxas/input-invalido.error.ts` — `TaxasInputInvalidoError`
 - **API pública:** `src/index.ts`
-- **Testes unitários:** `tests/unit/taxas/taxas.test.ts`, `tests/unit/taxas/regra-provider.memory.test.ts`, `tests/unit/taxas/calcular-composicao-valores.test.ts`
+- **Testes unitários:** `tests/unit/taxas/`
 
 ---
 
@@ -231,69 +244,95 @@ Quando o cálculo gera fração de centavo, a implementação arredonda para cim
 
 # BC Pagamentos — o que foi implementado
 
-Este documento descreve a primeira fatia do **bounded context Pagamentos** na engine de intermediação financeira: pagamento em memória, com provedor fake, sem Postgres e sem integração real com Stripe, Mercado Pago, PagSeguro ou similares.
+Este documento descreve o **bounded context Pagamentos** pós-Plan 0015: FSM de 5 estados, intenção de pagamento como **portador do snapshot do contribuinte**, provedores reais (Stripe, Pagarme, Fake) atrás de uma porta, persistência **em memória + Postgres**, e o **módulo Financeiro aninhado** (`src/domain/pagamentos/financeiro/`) que reage à aprovação. Inclui o **módulo Financeiro** em capítulo separado abaixo.
 
 ## Resumo em linguagem simples
 
-1. O contexto **Pagamentos** recebe uma composição de valores já calculada por **Taxas**.
-2. Ele cria uma **intenção de pagamento** cobrando exatamente o `totalPaidCents`.
+1. O contexto **Pagamentos** recebe uma composição de valores já calculada por **Taxas** e um `idContribuicao` (BC Arrecadação).
+2. Ele cria uma **`IntencaoPagamento`** + abre uma **sessão de checkout** no provedor (Stripe/Pagarme/Fake), cobrando exatamente o `totalPaidCents`.
 3. O pagamento nasce com status `pendente`.
-4. Um **provedor fake** simula a resposta externa e pode aprovar ou rejeitar.
-5. O pagamento muda para `aprovado` ou `rejeitado` e um evento é publicado em memória.
-
-Exemplo canônico:
-
-- Valor da contribuição: R$ 80,00 (`8000` centavos)
-- Taxa: R$ 4,00 (`400` centavos)
-- Total pago pelo contribuinte: R$ 84,00 (`8400` centavos)
-- Valor destinado ao recebedor: R$ 80,00 (`8000` centavos)
-- Valor cobrado por Pagamentos: R$ 84,00 (`8400` centavos)
+4. Webhooks do provedor avançam o FSM em 5 estados:
+   - **`pendente → processing`** (PIX): `payment_intent.processing` (QR escaneado, aguardando confirmação bancária)
+   - **`pendente → aprovado`** (cartão happy path) ou **`processing → aprovado`** (PIX confirmado pelo banco)
+   - **`pendente|processing → rejeitado`** (falha cedo ou no meio do fluxo)
+   - **`aprovado → estornado`** (refund total via `charge.refunded`)
+5. No webhook `checkout.session.completed`, o **snapshot do contribuinte** (nome, email, mensagem) é gravado em `IntencaoPagamento.contribuinte` — esse é o ponto onde os dados do visitante entram no sistema.
+6. Quando o pagamento vai a `aprovado`, o **módulo Financeiro** (próxima seção) cria os lançamentos contábeis na mesma transação.
 
 Pagamentos não calcula taxa. Ele só confere se o valor a cobrar é igual ao total calculado por Taxas.
 
 ---
 
+## FSM de Pagamento (Plan 0015)
+
+```
+                       pendente
+                          │
+              ┌───────────┼───────────┐
+              │           │           │
+              ▼           ▼           ▼
+         processing   aprovado    rejeitado    (terminal)
+              │           │
+              │           ▼
+              │       estornado    (terminal)
+              ▼
+        aprovado / rejeitado
+```
+
+Definido em [`src/domain/pagamentos/entities/pagamento.ts`](src/domain/pagamentos/entities/pagamento.ts) (`StatusPagamentoSchema`). Funções puras de transição:
+
+- `iniciarProcessamentoPagamento` (`pendente → processing`, PIX-only, idempotente)
+- `aprovarPagamentoPendente` (`pendente|processing → aprovado`)
+- `rejeitarPagamentoPendente` (`pendente|processing → rejeitado`)
+- `estornarPagamentoAprovado` (`aprovado → estornado`; gateada por pré-check "nenhum lançamento já transferido")
+
+`charge.refunded` parcial **não** muda o estado (decisão travada pela operação); `charge.dispute.created` é auditado mas não transiciona.
+
+---
+
 ## Mapa conceito de negócio → código
 
-- **Montante em centavos:** `src/domain/money.ts` — `MoneyCentsSchema`
-- **Intenção de Pagamento:** `src/domain/pagamentos/pagamentos.ts` — `IntencaoPagamento`
-- **Pagamento:** `src/domain/pagamentos/pagamentos.ts` — `Pagamento`
-- **Método de Pagamento:** `src/domain/pagamentos/pagamentos.ts` — `MetodoPagamento`, por enquanto `pix` e `credit_card`
-- **Status do Pagamento:** `src/domain/pagamentos/pagamentos.ts` — `StatusPagamento`, com `pendente`, `aprovado` e `rejeitado`
-- **Composição de Valores recebida de Taxas:** `src/domain/pagamentos/pagamentos.ts` — `SnapshotComposicaoValores`
-- **Transação Externa simulada:** `src/domain/pagamentos/pagamentos.ts` — `TransacaoExterna`
-- **Evento de Pagamento:** `src/domain/pagamentos/pagamentos.ts` — `EventoPagamento`
-- **Porta de persistência:** `src/adapters/pagamentos/repository.ts` — `PagamentoRepository`
-- **Persistência em memória:** `src/adapters/pagamentos/repository.memory.ts` — `PagamentoRepositoryMemory`
-- **Porta do provedor:** `src/adapters/pagamentos/provider.ts` — `PagamentoProvider`
-- **Provedor fake:** `src/adapters/pagamentos/provider.fake.ts` — `PagamentoProviderFake`
-- **Porta de eventos:** `src/adapters/pagamentos/event-publisher.ts` — `PagamentoEventPublisher`
-- **Eventos em memória:** `src/adapters/pagamentos/event-publisher.memory.ts` — `PagamentoEventPublisherMemory`
-- **Caso de uso: criar intenção:** `src/use-cases/pagamentos/criar-intencao-pagamento.ts` — `criarIntencaoPagamento`
-- **Caso de uso: aprovar pagamento:** `src/use-cases/pagamentos/aprovar-pagamento.ts` — `aprovarPagamento`
-- **Caso de uso: rejeitar pagamento:** `src/use-cases/pagamentos/rejeitar-pagamento.ts` — `rejeitarPagamento`
-- **Caso de uso: consultar pagamento:** `src/use-cases/pagamentos/obter-pagamento-por-id.ts` — `obterPagamentoPorId`
-- **Erros tipados:** `src/errors/pagamentos/`
-- **API pública:** `src/index.ts`
-- **Testes unitários:** `tests/unit/pagamentos/pagamentos.test.ts`, `tests/unit/pagamentos/repository.memory.test.ts`, `tests/unit/pagamentos/provider.fake.test.ts`, `tests/unit/pagamentos/event-publisher.memory.test.ts`, `tests/unit/pagamentos/casos-de-uso.test.ts`
+| Conceito | Onde está |
+|----------|-----------|
+| Montante em centavos | [`src/domain/money.ts`](src/domain/money.ts) — `MoneyCentsSchema` |
+| **Pagamento (agregado raiz)** | [`src/domain/pagamentos/entities/pagamento.ts`](src/domain/pagamentos/entities/pagamento.ts) — `Pagamento`, `criarPagamentoPendente`, transições FSM, predicados (`podeAprovarPagamento`, `podeRejeitarPagamento`) |
+| **IntencaoPagamento** (entidade aninhada — carrega snapshot do contribuinte) | [`src/domain/pagamentos/entities/pagamento.ts`](src/domain/pagamentos/entities/pagamento.ts) — `IntencaoPagamento`. Campos: `id, idContribuicao, amountCents, metodo, composicaoValores, externalRef` (Stripe checkout session), `paymentIntentExternalRef` (`pi_xxx`), `chargeExternalRef` (`ch_xxx`), **`contribuinte: DadosContribuinte \| null`** (nullable na criação, populado pelo webhook `checkout.session.completed`), `balanceTransactionAvailableOn: Date \| null` (data de liberação do Stripe — usada pelo módulo Financeiro como gate de "marcar transferido") |
+| TransacaoExterna (entidade aninhada — settlement do provedor) | [`src/domain/pagamentos/entities/pagamento.ts`](src/domain/pagamentos/entities/pagamento.ts) — `TransacaoExterna` (`status`: `aprovado` \| `rejeitado`, com `statusBruto` do provedor) |
+| Status FSM | [`src/domain/pagamentos/entities/pagamento.ts`](src/domain/pagamentos/entities/pagamento.ts) — `StatusPagamentoSchema` (`pendente \| processing \| aprovado \| rejeitado \| estornado`) |
+| Método de Pagamento | [`src/domain/pagamentos/value-objects/`](src/domain/pagamentos/value-objects/) — `MetodoPagamento` (`pix \| credit_card`) |
+| Snapshot composição de valores | [`src/domain/pagamentos/value-objects/`](src/domain/pagamentos/value-objects/) — `SnapshotComposicaoValores` (totalPaidCents, receiverAmountCents, feeAmountCents, surchargeCents) |
+| **DadosContribuinte** (movido de Arrecadação pelo Plan 0015) | [`src/domain/pagamentos/value-objects/dados-contribuinte.ts`](src/domain/pagamentos/value-objects/dados-contribuinte.ts) — nome, email, mensagem (recadinho), … |
+| Porta de persistência | [`src/adapters/pagamentos/repository.ts`](src/adapters/pagamentos/repository.ts) — `PagamentoRepository` (inclui `findIdsContribuicoesComPagamentoAprovado` usado pelo predicado de "indisponibilidade") |
+| Adaptador em memória | [`src/adapters/pagamentos/repository.memory.ts`](src/adapters/pagamentos/repository.memory.ts) |
+| Adaptador Postgres | [`src/adapters/pagamentos/repository.postgres.ts`](src/adapters/pagamentos/repository.postgres.ts) |
+| Porta do provedor de pagamento | [`src/adapters/pagamentos/provider.ts`](src/adapters/pagamentos/provider.ts) — `PagamentoProvider`, `CheckoutSessionProvider` |
+| Adaptadores de provedor | `provider.fake.ts`, `provider.stripe.ts`, `provider.pagarme.ts` em `src/adapters/pagamentos/` |
+| Webhook handler Stripe (consumer) | [`apps/eunenem-server/server/webhooks/stripe-webhook.ts`](apps/eunenem-server/server/webhooks/stripe-webhook.ts) — mapa de evento Stripe → transição FSM |
+| Caso de uso: criar intenção | [`src/use-cases/pagamentos/criar-intencao-pagamento.ts`](src/use-cases/pagamentos/criar-intencao-pagamento.ts) — `criarIntencaoPagamento` |
+| Caso de uso: aprovar pagamento | [`src/use-cases/pagamentos/aprovar-pagamento.ts`](src/use-cases/pagamentos/aprovar-pagamento.ts) — `aprovarPagamento` |
+| Caso de uso: rejeitar pagamento | [`src/use-cases/pagamentos/rejeitar-pagamento.ts`](src/use-cases/pagamentos/rejeitar-pagamento.ts) — `rejeitarPagamento` |
+| Caso de uso: consultar pagamento | [`src/use-cases/pagamentos/obter-pagamento-por-id.ts`](src/use-cases/pagamentos/obter-pagamento-por-id.ts) |
+| Caso de uso: estornar pagamento (orquestrador) | [`src/use-cases/checkout/estornar-pagamento.ts`](src/use-cases/checkout/estornar-pagamento.ts) — vive em Checkout pois cruza Pagamentos + Financeiro (cascata em `canceladoEm`) |
+| Erros tipados | [`src/errors/pagamentos/`](src/errors/pagamentos) |
+| API pública | [`src/index.ts`](src/index.ts) — seção `Domain: Pagamentos` |
 
 ---
 
 ## DDD
 
-- **Bounded Context:** Pagamentos tem linguagem própria: intenção, pagamento, método, provedor, transação externa, status e evento. Ele não importa campanha, opção de contribuição, presente, rifa ou convite.
+- **Bounded Context:** Pagamentos tem linguagem própria: pagamento, intenção, transação externa, status FSM, provedor, evento. Ele não importa campanha, opção de contribuição, presente, rifa ou convite. A partir do Plan 0015, **também é o lar do `DadosContribuinte`** — o snapshot do contribuinte vive dentro da `IntencaoPagamento`, populado pelo webhook do provedor.
 
-- **Contrato entre contextos:** Pagamentos recebe `idContribuicao` e um snapshot da composição de valores. Isso permite conversar com Arrecadação e Taxas por IDs e dados públicos, sem misturar modelos internos.
+- **Contrato entre contextos:** Pagamentos recebe `idContribuicao` (Arrecadação) e um snapshot de composição (Taxas). Devolve um `Pagamento` com FSM próprio. O módulo Financeiro nested (próxima seção) reage à transição `→ aprovado` na **mesma transação DB** que aprova o pagamento.
 
-- **Agregado:** `Pagamento` concentra o ciclo de vida do pagamento. Nesta fase, ele só pode sair de `pendente` para `aprovado` ou `rejeitado`.
+- **Agregado:** `Pagamento` é a raiz que carrega `IntencaoPagamento` e `TransacaoExterna` como **entidades aninhadas** (carregadas e persistidas como unidade). 
 
-- **Value Object / Snapshot:** `SnapshotComposicaoValores` guarda os valores que vieram de Taxas no momento de criar a intenção. O pagamento não recalcula a taxa; ele preserva o que recebeu.
+- **Value Object / Snapshot:** `SnapshotComposicaoValores` preserva o que veio de Taxas; `DadosContribuinte` é VO que entra via webhook (não revalida nada da Arrecadação).
 
-- **Portas e adapters:** `PagamentoRepository`, `PagamentoProvider` e `PagamentoEventPublisher` são portas. As versões `memory` e `fake` são adapters simples, trocáveis no futuro.
+- **Portas e adapters:** `PagamentoRepository` (memória + Postgres), `PagamentoProvider` + `CheckoutSessionProvider` (Stripe, Pagarme, Fake) atrás de portas separadas.
 
-- **Eventos:** `EventoPagamento` registra fatos importantes, como `payment.intent_created`, `payment.approved` e `payment.rejected` (literais técnicos de integração). O BC Financeiro reage via caso de uso com DTO, sem acoplamento direto.
+- **Webhooks como driver do FSM:** os adaptadores HTTP do webhook lidam com idempotência (Stripe envia o mesmo evento N vezes em retries) — as transições FSM são guardadas por predicados (`podeAprovarPagamento` aceita `pendente|processing` mas é no-op se já está aprovado).
 
-- **Invariantes:** o valor cobrado deve ser exatamente `totalPaidCents`; um pagamento aprovado não volta para pendente; um pagamento rejeitado não vira aprovado sem uma regra explícita futura.
+- **Invariantes:** o valor cobrado deve ser exatamente `totalPaidCents`; um pagamento `estornado` é terminal; `rejeitado` é terminal; `processing` só existe para PIX; `IntencaoPagamento.contribuinte` é nullable até `checkout.session.completed` chegar.
 
 ---
 
@@ -302,216 +341,225 @@ Pagamentos não calcula taxa. Ele só confere se o valor a cobrar é igual ao to
 Pagamentos não conhece:
 
 - Campanha
-- Opção de contribuição
-- Presente simbólico
-- Rifa
-- Convite
-- Detalhes da experiência de arrecadação
+- Opção de contribuição (presente / rifa / convite)
 - Regras de taxa
-- Lançamentos financeiros
-- Saldo do recebedor
-- Receita da plataforma
+- Detalhes da experiência de arrecadação
 
-Ele conhece apenas o necessário para cobrar:
+Ele conhece apenas o necessário para cobrar + arquivar settlement:
 
-- ID da contribuição
+- `idContribuicao`
 - Composição de valores
-- Valor total a cobrar
 - Método de pagamento
-- Status do pagamento
-- Dados mínimos da transação externa simulada
+- Status FSM
+- Metadados do provedor (`externalRef`, `paymentIntentExternalRef`, `chargeExternalRef`, `balanceTransactionAvailableOn`)
+- Snapshot do contribuinte (após webhook)
 
 ---
 
-# BC Financeiro — o que foi implementado
+# Módulo Financeiro (dentro de Pagamentos) — o que foi implementado
 
-Este documento descreve a primeira fatia do **bounded context Financeiro** na engine de intermediação financeira: lançamentos em memória, sem Postgres, sem integração bancária real e sem substituir o domínio placeholder `Cat`.
+Este documento descreve o **módulo Financeiro**, **aninhado dentro do BC Pagamentos** desde o Plan 0015 (antes era BC top-level). O módulo registra os efeitos contábeis após `Pagamento → aprovado`, gerencia o saldo do recebedor, expõe a receita da plataforma e modela `RepasseRecebedor` como agregado próprio (FSM `solicitado → aprovado` introduzido em **aperture-s03dr**).
+
+**Por que módulo e não BC?** A regra de teste de independência de ciclo de vida (vide [`docs/ddd-conventions.md`](docs/ddd-conventions.md)): nenhum `LancamentoFinanceiro` existe sem um `Pagamento` que o causa; a escrita do lançamento acontece na **mesma transação DB** que aprova o pagamento. Não há "ciclo de vida financeiro" paralelo ao do pagamento. O módulo nasce dentro de Pagamentos para refletir isso. `RepasseRecebedor`, ao contrário, tem ciclo de vida próprio (solicitação do recebedor, aprovação do admin) — é o único agregado-membro com lifecycle real do módulo.
 
 ## Resumo em linguagem simples
 
-1. O contexto **Financeiro** recebe dados de um pagamento já aprovado.
-2. Ele não cobra pagamento e não calcula taxa.
-3. Ele registra dois efeitos financeiros: valor do recebedor no saldo do recebedor e taxa como receita da plataforma.
-4. Ele permite consultar saldo pendente/disponível do recebedor e receita acumulada da plataforma.
-5. Ele também permite iniciar um pedido de resgate/repasse em estado `solicitado`, sem executar Pix, banco ou gateway real.
+1. Quando um `Pagamento` vai a `aprovado`, o módulo Financeiro cria **lançamentos** na mesma transação:
+   - `credito_saldo_recebedor` — `receiverAmountCents` para o **Saldo do Recebedor**
+   - `credito_receita_plataforma` — `feeAmountCents` como **Receita da Plataforma**
+   - `credito_passthrough_surcharge` (opcional, aperture-bjshv) — quando o contribuinte paga sobretaxa de cartão repassada ao recebedor
+2. **`LancamentoFinanceiro` não tem FSM** (Plan 0015). Os "estados" são predicados de consulta sobre colunas de **data observada**:
+   - `pending` → `transferidoEm IS NULL AND canceladoEm IS NULL`
+   - `transferred` → `transferidoEm IS NOT NULL AND canceladoEm IS NULL`
+   - `cancelado` → `canceladoEm IS NOT NULL`
+3. `transferidoEm` é setado em lote pelo caso de uso `marcarLancamentoTransferido`, gateado por `balanceTransactionAvailableOn` (a data que o Stripe libera o dinheiro). `canceladoEm` é cascateado pelo `estornarPagamento` quando o lançamento ainda estava pendente.
+4. **`RepasseRecebedor`** é um agregado dentro do módulo com **FSM de 2 estados forward-only**: `solicitado → aprovado`. Um repasse `aprovado` carimba `transferidoEm = aprovadoEm` em todos os lançamentos linkados na mesma transação atômica. Índice único parcial garante no máximo 1 repasse `solicitado` por campanha.
+5. O módulo expõe consultas: `obterSaldoRecebedor`, `obterReceitaPlataforma`.
 
-Exemplo canônico:
-
-- Valor da contribuição: R$ 80,00 (`8000` centavos)
-- Taxa: R$ 4,00 (`400` centavos)
-- Total pago pelo contribuinte: R$ 84,00 (`8400` centavos)
-- Valor destinado ao recebedor: R$ 80,00 (`8000` centavos)
-
-O Financeiro cria:
-
-- Um lançamento de `8000` centavos para o **Saldo do Recebedor**
-- Um lançamento de `400` centavos como **Receita da Plataforma**
-
-O campo `idContribuicao` usado pelo Financeiro é o ID da **contribuição**, não o ID de quem contribuiu. O Financeiro não recebe nem armazena nome, email ou qualquer dado do contribuinte.
+O módulo não recebe nem armazena nome/email do contribuinte — essa info vive em `IntencaoPagamento.contribuinte` no agregado Pagamento.
 
 ---
 
-## Mapa conceito de negócio → código
+## FSM de RepasseRecebedor (aperture-s03dr)
 
-- **Montante em centavos:** `src/domain/money.ts` — `MoneyCentsSchema`
-- **Lançamento Financeiro:** `src/domain/financeiro/financeiro.ts` — `LancamentoFinanceiro`
-- **Saldo do Recebedor:** `src/domain/financeiro/financeiro.ts` — `SaldoRecebedor`
-- **Receita da Plataforma:** `src/domain/financeiro/financeiro.ts` — `ReceitaPlataforma`
-- **Valor Pendente / Disponível:** `src/domain/financeiro/financeiro.ts` — `StatusLancamento` (`pendente`, `disponivel`)
-- **Resgate / Repasse:** `src/domain/financeiro/financeiro.ts` — `RepasseRecebedor`
-- **Status do Repasse:** `src/domain/financeiro/financeiro.ts` — `StatusRepasse`, por enquanto apenas `solicitado`
-- **Snapshot de valores recebido:** `src/domain/financeiro/financeiro.ts` — `SnapshotComposicaoValoresFinanceiro`
-- **Porta de persistência:** `src/adapters/financeiro/livro-repository.ts` — `LivroFinanceiroRepository`
-- **Persistência em memória:** `src/adapters/financeiro/livro-repository.memory.ts` — `LivroFinanceiroRepositoryMemory`
-- **Caso de uso: registrar efeitos:** `src/use-cases/financeiro/registrar-efeitos-financeiros-pagamento-aprovado.ts` — `registrarEfeitosFinanceirosPagamentoAprovado`
-- **Caso de uso: consultar saldo:** `src/use-cases/financeiro/obter-saldo-recebedor.ts` — `obterSaldoRecebedor`
-- **Caso de uso: consultar receita:** `src/use-cases/financeiro/obter-receita-plataforma.ts` — `obterReceitaPlataforma`
-- **Caso de uso: pedir repasse:** `src/use-cases/financeiro/solicitar-repasse-recebedor.ts` — `solicitarRepasseRecebedor`
-- **Erros tipados:** `src/errors/financeiro/`
-- **API pública:** `src/index.ts`
-- **Testes unitários:** `tests/unit/financeiro/financeiro.test.ts`, `tests/unit/financeiro/livro-repository.memory.test.ts`, `tests/unit/financeiro/casos-de-uso.test.ts`
+```
+solicitado ──────────► aprovado    (terminal, forward-only)
+```
+
+Definido em [`src/domain/pagamentos/financeiro/entities/repasse-recebedor.ts`](src/domain/pagamentos/financeiro/entities/repasse-recebedor.ts) (`StatusRepasseSchema`).
+
+- `solicitado` — o recebedor pediu o repasse via Checkout (`iniciarRepasseRecebedor`); lançamentos linkados carregam `id_repasse` mas continuam com `transferidoEm IS NULL`.
+- `aprovado` — admin confirmou a transferência (PIX/TED externo); `aprovadoEm` é setado; todos os lançamentos linkados ficam `transferidoEm = aprovadoEm`. Opcionalmente carrega `bankTransferRef` (E2E PIX id, número TED).
+- **Sem rejeição:** v1 não modela `rejeitado` — se o admin precisa recusar, é conversa fora de banda.
+- **Concorrência:** migration `20260604_021` adiciona índice único parcial `repasses_um_solicitado_por_campanha` em `(id_campanha) WHERE status = 'solicitado'` — dois pedidos simultâneos para a mesma campanha geram `FinanceiroRepasseJaPendenteError`.
 
 ---
-
-## DDD
-
-- **Bounded Context:** Financeiro tem linguagem própria: lançamento, saldo, receita, valor pendente, valor disponível e repasse. Ele não conhece campanha, presente, rifa, convite, provedor de pagamento nem dados do contribuinte.
-
-- **Contrato entre contextos:** Financeiro recebe IDs e um snapshot de valores já decidido por outros contextos. Ele usa `idPagamento`, `idContribuicao`, `idCampanha` (mesmo UUID que `Campanha.id` na orquestração) e composição de valores, sem importar entidades ricas de Arrecadação, Taxas ou Pagamentos. O livro financeiro pode resolver PIX vigente via `findRecebedorAtivoPorIdCampanha`.
-
-- **Evento/fato de domínio:** a regra central é “pagamento aprovado gera efeitos financeiros”. Nesta fase, o caso de uso recebe um DTO enriquecido de pagamento aprovado; uma integração automática por eventos pode ser adicionada depois.
-
-- **Entidade:** `LancamentoFinanceiro` tem identidade própria e representa um fato financeiro registrado. `RepasseRecebedor` também tem identidade e marca o início de um pedido de repasse.
-
-- **Value Object / Snapshot:** `SnapshotComposicaoValoresFinanceiro` representa os valores recebidos. O Financeiro não recalcula taxa; ele usa exatamente `feeAmountCents` e `receiverAmountCents` que recebeu.
-
-- **Porta e adapter:** `LivroFinanceiroRepository` é a porta; `LivroFinanceiroRepositoryMemory` é o adapter em memória para testes e aprendizado.
-
-- **Idempotência:** o mesmo `idPagamento` não pode gerar lançamentos duplicados.
-
-- **Invariantes:** só pagamento aprovado gera lançamentos; `receiverAmountCents + feeAmountCents` precisa bater com `totalPaidCents`; o valor do recebedor vira saldo do recebedor; a taxa vira receita da plataforma.
-
----
-
-## O que Financeiro não conhece
-
-Financeiro não conhece:
-
-- Nome, email ou identidade do contribuinte
-- Campanha
-- Opção de contribuição
-- Presente simbólico
-- Rifa
-- Convite
-- Regra de taxa
-- Provedor de pagamento
-- Transação bancária real
-
-Ele conhece apenas o necessário para registrar efeitos financeiros:
-
-- ID do pagamento aprovado
-- ID da contribuição que originou o pagamento
-- ID do recebedor
-- Composição de valores já calculada
-- Status aprovado
-
----
-
-# BC Usuário — o que foi implementado
-
-Este documento descreve a primeira fatia do **bounded context Usuário** na engine didática: usuários que **administram campanhas**, com persistência **em memória**, **sem autenticação real** e **sem base de dados nova**. O **contribuinte** continua sem conta (isso pertence ao produto, não a este BC). O BC é **multi-tenant**: toda conta de administrador pertence a exatamente **uma Plataforma**, e o mesmo email pode coexistir em plataformas diferentes como contas distintas.
-
-## Resumo em linguagem simples
-
-1. Um **administrador** se cadastra **dentro de uma plataforma** (ex.: eunenem) com email, nome de exibição e uma **senha simulada** (não é segurança real). O sistema cria um **usuário** (com `idPlataforma`), uma **conta** (1:1), uma **credencial** em texto para demo e atribui a permissão padrão.
-2. O cadastro **valida que a plataforma existe** consultando o `plataformaRepository.findById`. Se a plataforma não existir, o caso de uso falha com `UsuarioPlataformaNaoEncontradaError` antes de qualquer escrita.
-3. O **email é único por plataforma**, não globalmente — a uniqueness é composta `(idPlataforma, email)`. A mesma pessoa pode registrar-se em `eunenem` e `eucasei` como duas contas separadas; cada `Usuario` é um registro distinto.
-4. O **`idConta`** (UUID) da conta é o mesmo tipo de identificador que o BC **Arrecadação** usa em `idsAdministradores` — a ligação é por **ID**, sem importar modelos entre contextos.
-5. É possível **atualizar o perfil** (nome de exibição).
-6. É possível abrir uma **sessão fake**: email + senha simulada devolvem um **token opaco** em memória com expiração. A `Sessao` carrega `idPlataforma` diretamente (não derivado via Conta → Usuario) para que verificações de autorização downstream não precisem de múltiplos hops.
-7. É possível **verificar uma permissão** com esse token; sessão inválida ou expirada não autoriza; falta de permissão devolve erro explícito.
-
----
-
-## Mapa conceito de negócio → código
-
-| Conceito | Onde está |
-|----------|-----------|
-| Usuário (raiz do agregado, com `idPlataforma`) | [`src/domain/usuario/entities/usuario.ts`](src/domain/usuario/entities/usuario.ts) — `Usuario`, `Conta`, `CredencialSimulada`, `contaTemPermissao` |
-| Sessão (agregado separado, escopado por plataforma) | [`src/domain/usuario/entities/sessao.ts`](src/domain/usuario/entities/sessao.ts) — `Sessao`, `sessaoExpirada` |
-| Identificadores (`IdUsuario`, `IdContaUsuario`, mirror VO `IdPlataformaReferencia`) | [`src/domain/usuario/value-objects/ids.ts`](src/domain/usuario/value-objects/ids.ts) |
-| Demais value objects (email, nome de exibição, permissão, senha simulada, token de sessão) | [`src/domain/usuario/value-objects/`](src/domain/usuario/value-objects) |
-| Porta de persistência de usuário/conta/credencial (uniqueness composta) | [`src/adapters/usuario/repository.ts`](src/adapters/usuario/repository.ts) — `UsuarioRepository` (`findUsuarioByEmail(idPlataforma, email)`) |
-| Porta de sessões | [`src/adapters/usuario/sessao-repository.ts`](src/adapters/usuario/sessao-repository.ts) — `SessaoUsuarioRepository` |
-| Implementações em memória | [`src/adapters/usuario/repository.memory.ts`](src/adapters/usuario/repository.memory.ts), [`src/adapters/usuario/sessao-repository.memory.ts`](src/adapters/usuario/sessao-repository.memory.ts) |
-| Caso de uso: cadastro (gate de plataforma) | [`src/use-cases/usuario/registrar-conta-usuario.ts`](src/use-cases/usuario/registrar-conta-usuario.ts) — `registrarContaUsuario` (deps incluem `plataformaRepository`) |
-| Caso de uso: atualizar perfil | [`src/use-cases/usuario/atualizar-perfil-usuario.ts`](src/use-cases/usuario/atualizar-perfil-usuario.ts) — `atualizarPerfilUsuario` |
-| Caso de uso: sessão fake | [`src/use-cases/usuario/criar-sessao-usuario.ts`](src/use-cases/usuario/criar-sessao-usuario.ts) — `criarSessaoUsuario` |
-| Caso de uso: autorizar permissão | [`src/use-cases/usuario/autorizar-permissao-usuario.ts`](src/use-cases/usuario/autorizar-permissao-usuario.ts) — `autorizarPermissaoUsuario` |
-| Erros (inclui `UsuarioPlataformaNaoEncontradaError`) | [`src/errors/usuario/`](src/errors/usuario) |
-| API pública do pacote | [`src/index.ts`](src/index.ts) |
-| Testes unitários | [`tests/unit/usuario/`](tests/unit/usuario) — predicados de domínio, contrato do repositório em memória, 4 casos de uso (incluindo modos de falha) |
-
----
-
-## DDD
-
-- **Bounded context:** o vocabulário de usuário, conta, sessão e permissão vive aqui; **não** aparecem campanhas, contribuições, taxas ou pagamentos no domínio do Usuário.
-- **Linguagem ubíqua:** nomes em código (`Usuario`, `Conta`, `registrarContaUsuario`) alinham com o produto descrito em [`ENGINE-DDD.md`](ENGINE-DDD.md).
-- **Multi-tenant por design:** todo `Usuario` carrega `idPlataforma`; toda `Sessao` carrega `idPlataforma`; a uniqueness de email é **composta** `(idPlataforma, email)`, não global. O `IdPlataformaReferencia` é um **mirror VO** local (mesmo shape UUID que `IdPlataforma`) — o domínio do Usuário **não importa** de `src/domain/plataforma/`. A regra é enforçada pelo `dependency-cruiser`.
-- **Agregados / invariantes (didático):** **uma conta pertence a um usuário** (1:1) e é persistida **atomicamente** com a credencial via `saveRegistro({usuario, conta, credencial})`; sessão inválida ou expirada **não autoriza**; sessão tem o **`idConta` como principal de autenticação** (não o `idUsuario`).
-- **Value objects / validação na fronteira:** email normalizado, token de sessão opaco (`base64url(32)`), permissões enumeradas — validados com Zod nos inputs dos casos de uso.
-- **Repositório (porta + adaptador):** interfaces em `adapters/` e `*.memory.ts` para testes e demos sem Postgres. `findUsuarioByEmail` recebe `(idPlataforma, email)` para refletir a uniqueness composta na assinatura.
-- **Serviço de aplicação:** cada arquivo em `use-cases/` orquestra validação, leituras e persistência; a “autenticação” é **consciente de ser fake** (senha simulada, token opaco). `registrarContaUsuario` consulta `plataformaRepository.findById` antes de qualquer escrita — gate cross-BC explícito.
-- **Integração com Plataforma:** dependência soft via `IdPlataformaReferencia` no domínio + gate explícito (`plataformaRepository.findById`) na aplicação. Cadastros com plataforma inexistente falham com `UsuarioPlataformaNaoEncontradaError`.
-- **Integração com Arrecadação:** o BC Arrecadação guarda uma lista de UUIDs (`idsAdministradores`). O significado “conta registrada no Usuário” é responsabilidade da **aplicação** (orquestração) ou de testes que chamam primeiro `registrarContaUsuario` e depois `criarCampanha` com o mesmo `idConta` na lista — **sem** acoplar o domínio de campanhas ao de usuários.
-
----
-
-# BC Evento (supporting) — fase 1
-
-Bounded context de **suporte** ao produto (convites digitais, RSVP): fora do core Arrecadação → Taxas → Pagamentos → Financeiro. Nesta fase só o subdomínio **Evento** (agregado raiz) está implementado.
-
-## Resumo em linguagem simples
-
-1. Uma **campanha** pode ter **no máximo um evento** (relação 1:1 por `idCampanha`).
-2. O evento guarda **tipo** (chá de bebê, chá de fraldas, …), **modalidade** (presencial ou online), **data/hora** e **endereço** opcional.
-3. O agregado **não** guarda `idPlataforma` — o escopo de tenant vem da campanha; a app valida que o admin só opera na própria campanha.
-4. **Convite** (texto, personalização) e **lista de convidados** (RSVP) estão **planejados** no mesmo BC, fase 2+.
 
 ## Mapa conceito → código
 
 | Conceito | Onde está |
 |----------|-----------|
-| Evento (agregado raiz) | [`src/domain/evento/entities/evento.ts`](src/domain/evento/entities/evento.ts) |
-| Identificadores | [`src/domain/evento/value-objects/ids.ts`](src/domain/evento/value-objects/ids.ts) |
-| Tipo / modalidade / data-hora / endereço | [`src/domain/evento/value-objects/`](src/domain/evento/value-objects/) |
-| Porta de persistência | [`src/adapters/evento/evento-repository.ts`](src/adapters/evento/evento-repository.ts) |
-| Memória + índice 1:1 campanha | [`src/adapters/evento/evento-repository.memory.ts`](src/adapters/evento/evento-repository.memory.ts) |
-| `criarEvento` | [`src/use-cases/evento/criar-evento.ts`](src/use-cases/evento/criar-evento.ts) |
-| `atualizarEvento` | [`src/use-cases/evento/atualizar-evento.ts`](src/use-cases/evento/atualizar-evento.ts) |
-| `obterEventoPorId` / `obterEventoPorIdCampanha` | [`src/use-cases/evento/obter-evento-por-id.ts`](src/use-cases/evento/obter-evento-por-id.ts), [`obter-evento-por-id-campanha.ts`](src/use-cases/evento/obter-evento-por-id-campanha.ts) |
+| Montante em centavos | [`src/domain/money.ts`](src/domain/money.ts) — `MoneyCentsSchema` |
+| **LancamentoFinanceiro** (entidade, sem FSM) | [`src/domain/pagamentos/financeiro/entities/lancamento-financeiro.ts`](src/domain/pagamentos/financeiro/entities/lancamento-financeiro.ts). Campos: `id, idPagamento, idContribuicao, idCampanha, tipo, amountCents, criadoEm, transferidoEm, canceladoEm, idRepasse` (nullable) |
+| **RepasseRecebedor** (entidade, FSM 2-estados) | [`src/domain/pagamentos/financeiro/entities/repasse-recebedor.ts`](src/domain/pagamentos/financeiro/entities/repasse-recebedor.ts) — `StatusRepasse`, `criarRepasseRecebedorSolicitado`, `aprovarRepasse` |
+| Tipos de lançamento | [`src/domain/pagamentos/financeiro/value-objects/`](src/domain/pagamentos/financeiro/value-objects/) — `TipoLancamentoFinanceiro` (`credito_saldo_recebedor`, `credito_receita_plataforma`, `credito_passthrough_surcharge`) |
+| Saldo do Recebedor / Receita da Plataforma (VOs derivados) | mesmo diretório — `SaldoRecebedor`, `ReceitaPlataforma`, `SnapshotComposicaoValoresFinanceiro` |
+| Porta de persistência | [`src/adapters/pagamentos/financeiro/livro-repository.ts`](src/adapters/pagamentos/financeiro/livro-repository.ts) — `LivroFinanceiroRepository` (inclui `saveRepasse`, `aprovarRepasseTransaction` atômico) |
+| Adaptador em memória | [`src/adapters/pagamentos/financeiro/livro-repository.memory.ts`](src/adapters/pagamentos/financeiro/livro-repository.memory.ts) |
+| Adaptador Postgres | [`src/adapters/pagamentos/financeiro/livro-repository.postgres.ts`](src/adapters/pagamentos/financeiro/livro-repository.postgres.ts) |
+| Migrations chave | `migrations/019_*` (índices parciais para predicados de estado), `migrations/020_*` (`balanceTransactionAvailableOn`), `migrations/20260604_021_extend_repasse_recebedor_fsm.ts` (índice único parcial + coluna `aprovado_em`) |
+| Caso de uso: registrar efeitos do pagamento aprovado | [`src/use-cases/pagamentos/financeiro/registrar-efeitos-financeiros-pagamento-aprovado.ts`](src/use-cases/pagamentos/financeiro/registrar-efeitos-financeiros-pagamento-aprovado.ts) |
+| Caso de uso: consultar saldo | [`src/use-cases/pagamentos/financeiro/obter-saldo-recebedor.ts`](src/use-cases/pagamentos/financeiro/obter-saldo-recebedor.ts) |
+| Caso de uso: consultar receita | [`src/use-cases/pagamentos/financeiro/obter-receita-plataforma.ts`](src/use-cases/pagamentos/financeiro/obter-receita-plataforma.ts) |
+| Caso de uso: solicitar repasse (recebedor) | [`src/use-cases/pagamentos/financeiro/solicitar-repasse-recebedor.ts`](src/use-cases/pagamentos/financeiro/solicitar-repasse-recebedor.ts) |
+| Caso de uso: aprovar repasse (admin) | [`src/use-cases/pagamentos/financeiro/aprovar-repasse-recebedor.ts`](src/use-cases/pagamentos/financeiro/aprovar-repasse-recebedor.ts) — transição FSM atômica com carimbo de `transferidoEm` |
+| Caso de uso: marcar lançamento transferido (admin) | [`src/use-cases/pagamentos/financeiro/marcar-lancamento-transferido.ts`](src/use-cases/pagamentos/financeiro/marcar-lancamento-transferido.ts) — gate por `balanceTransactionAvailableOn` (3 razões categóricas: `pagamento_nao_aprovado`, `aguardando_liberacao_sem_data`, `aguardando_liberacao_ate`) |
+| Erros tipados | [`src/errors/pagamentos/financeiro/`](src/errors/pagamentos/financeiro/) — inclui `FinanceiroRepasseJaPendenteError`, `MarcarLancamentoTransferidoBloqueadoError` |
+| API pública | [`src/index.ts`](src/index.ts) — re-export sob seções `Domain: Pagamentos / Financeiro` |
+
+---
+
+## DDD
+
+- **Módulo, não BC:** o módulo Financeiro **vive dentro** do BC Pagamentos. Importa livremente do agregado Pagamento (e do contrário: o registro de efeitos é parte da mesma transação de aprovação). A separação de pasta `pagamentos/financeiro/` é organizacional — facilita encontrar tudo que é ledger — não uma fronteira de contexto.
+
+- **Substituição do FSM por colunas de data observada:** insight central do Plan 0015. **Datas observadas (o que aconteceu) substituem enums preditivos (o que achávamos que ia acontecer).** Eliminou um set de race conditions cross-aggregate; abriu espaço para idempotência simples no carimbo de data.
+
+- **Agregado implícito "Livro Financeiro":** lançamentos não têm raiz dedicada — são persistidos via `LivroFinanceiroRepository` que carrega o agregado pelo escopo da campanha quando necessário. `RepasseRecebedor` é raiz própria (tem id, tem ciclo de vida).
+
+- **Idempotência:** o caso de uso `registrarEfeitosFinanceirosPagamentoAprovado` é idempotente por `idPagamento` — um webhook reentrante não duplica lançamentos.
+
+- **Atomicidade FSM + ledger:** `aprovarRepasseTransaction` faz, na mesma `BEGIN/COMMIT`: (a) UPDATE em `repasses_recebedor` para `aprovado`, (b) UPDATE em todos os `lancamentos_financeiros` linkados para carimbar `transferidoEm = aprovadoEm`. Se um falha, ambos rolam.
+
+- **Invariantes:** `receiverAmountCents + feeAmountCents (+ surchargeCents)` precisa bater com `totalPaidCents`; `transferidoEm` só é setado em lançamento de pagamento `aprovado`; `canceladoEm` só é setado se `transferidoEm IS NULL` (não se cancela algo já transferido); RepasseRecebedor só sai de `solicitado` para `aprovado` (e somente uma vez).
+
+---
+
+## O que o módulo Financeiro não conhece
+
+Nome, email ou identidade do contribuinte; provedor de pagamento; transação bancária real (não automatiza PIX/TED — o admin carimba manualmente).
+
+---
+
+# BC Usuário — o que foi implementado
+
+Este documento descreve o **bounded context Usuário** pós-integração BetterAuth (Pattern A — Infrastructure Adapter, epic aperture-pgqih, shipado em 2026-05-30). Usuários são administradores de campanhas; **autenticação real** vive atrás da porta `AuthService` com dois adaptadores (memória para testes/dev, BetterAuth+Postgres para produção). O contribuinte continua **sem conta** (isso pertence ao produto, não a este BC). O BC é **multi-tenant**: toda conta de administrador pertence a exatamente **uma Plataforma**, e o mesmo email pode coexistir em plataformas diferentes como contas distintas (uniqueness composta `(idPlataforma, email)`).
+
+## Decisão arquitetural: Pattern A — Infrastructure Adapter
+
+A integração BetterAuth seguiu o Pattern A: o **domínio Usuário fica intacto**; BetterAuth vive **fora do agregado**, atrás de uma porta `AuthService`. O agregado Usuario continua sendo apenas a identidade do administrador (id, idPlataforma, email, nomeExibicao, slug, idConta); a **credencial** (hash de senha, sessão, rate-limit) é responsabilidade do `AuthService` adapter, não do domínio.
+
+Trade-off: o domínio fica **auth-implementation-agnostic** (testes usam `AuthServiceMemoria` sem qualquer dependência de BetterAuth, Postgres ou crypto). A composta `(idPlataforma, email)` é preservada em **duas camadas independentes**: no schema do domínio (`usuarios_plataforma_email_uniq` em `usuarios`) e no schema BetterAuth (`users_plataforma_email_uniq` em `users` da BetterAuth) — a invariante é replicada porque cada camada tem um dado próprio (registro de domínio vs. credencial), e nenhuma pode confiar na outra.
+
+## Resumo em linguagem simples
+
+1. Um **administrador** se cadastra **dentro de uma plataforma** (ex.: eunenem) com email, nome de exibição e senha. O caso de uso `registrarContaUsuario`:
+   - Valida que a plataforma existe (`plataformaRepository.findById` → `UsuarioPlataformaNaoEncontradaError` se não).
+   - Cria o registro de domínio: `Usuario` + `Conta` 1:1 + slug derivado do nome de exibição, persistido via `saveRegistroDomain({usuario, conta})`.
+   - Chama `authService.criarConta({idPlataforma, idUsuario, email, senha})` para criar o principal BetterAuth com `idUsuario` controlado pelo chamador (não-padrão para BetterAuth — vide `AuthServiceBetterAuth` para o workaround via Kysely direto).
+   - **Compensação T3:** se a escrita BetterAuth falha após o registro de domínio ter sido persistido, o caso de uso rola o domínio para trás (best-effort) e levanta erro tipado. Cipher revisou isso na assinatura de segurança da epic.
+2. **Login (`signIn`)** vai pela porta `authService.iniciarSessao({idPlataforma, email, senha})` que devolve um token de sessão BetterAuth (cookie em produção, opaco em memória nos testes).
+3. **Sessão (`me`)** valida o token via `authService.validarSessao(token)` e devolve `{idUsuario, idPlataforma, idConta}`; sessão inválida ou expirada retorna `null`.
+4. **Logout (`signOut`)** chama `authService.revogarSessao(token)` (idempotente).
+5. **Alterar senha / remover conta** existem como métodos do port (`alterarSenha`, `removerConta`) e são exercidos por testes; rotas de admin não foram expostas em v1.
+6. O **`idConta`** (UUID) da conta é o mesmo tipo de identificador que o BC **Arrecadação** usa em `idsAdministradores` — a ligação é por **ID**, sem importar modelos entre contextos.
+
+A **uniqueness composta** `(idPlataforma, email)` é provada por teste de integração testcontainers (registrar mesmo email em duas plataformas distintas → ambos sucessos; mesmo email duas vezes na mesma plataforma → erro tipado).
+
+---
+
+## Mapa conceito de negócio → código
+
+| Conceito | Onde está |
+|----------|-----------|
+| Usuário (raiz do agregado, com `idPlataforma`) | [`src/domain/usuario/entities/usuario.ts`](src/domain/usuario/entities/usuario.ts) — `Usuario`, `Conta`, `contaTemPermissao`. **Sem `CredencialSimulada`** — credencial saiu do agregado pelo Pattern A. |
+| Identificadores (`IdUsuario`, `IdContaUsuario`, mirror VO `IdPlataformaReferencia`) | [`src/domain/usuario/value-objects/ids.ts`](src/domain/usuario/value-objects/ids.ts) |
+| Demais value objects (email, nome de exibição, slug, permissão, token de sessão) | [`src/domain/usuario/value-objects/`](src/domain/usuario/value-objects) |
+| **Porta `AuthService`** (credencial + sessão fora do agregado) | [`src/adapters/usuario/auth-service.ts`](src/adapters/usuario/auth-service.ts) — métodos: `criarConta`, `iniciarSessao`, `validarSessao`, `revogarSessao`, `alterarSenha`, `removerConta`. Cada método recebe `idPlataforma` como parâmetro para a uniqueness composta. |
+| Adaptador `AuthServiceMemoria` (testes + dev) | [`src/adapters/usuario/auth-service.memory.ts`](src/adapters/usuario/auth-service.memory.ts) — maps in-process, chave `{idPlataforma}::{email}` |
+| Adaptador `AuthServiceBetterAuth` (produção) | [`src/adapters/usuario/auth-service.better-auth.ts`](src/adapters/usuario/auth-service.better-auth.ts) — escreve direto em Kysely (bypass do pipeline HTTP da BetterAuth para preservar `idUsuario` controlado pelo chamador e pular rate-limit interno). Usa `hashPassword` / `verifyPassword` de `better-auth/crypto`. |
+| Helper `criarAuth` (config BetterAuth) | [`src/adapters/usuario/criar-auth.ts`](src/adapters/usuario/criar-auth.ts) — pool Kysely compartilhado, casing snake, sessão 7 dias / refresh 1 dia / fresh 1 dia, rate-limit DB-backed (multi-instance safe), `additionalFields.idPlataforma` requerido, **email + senha only** (sem OAuth, sem magic link, sem admin plugin) |
+| Migration BetterAuth (5 tabelas) | [`migrations/20260530_009_create_better_auth.ts`](migrations/20260530_009_create_better_auth.ts) — `users` (com `id_plataforma` + composta `(id_plataforma, email)`), `sessions`, `accounts` (com `account_id = {idPlataforma}::{email}` para evitar colisão cross-tenant), `verifications`, `rate_limit` |
+| Porta de persistência do domínio | [`src/adapters/usuario/repository.ts`](src/adapters/usuario/repository.ts) — `UsuarioRepository.saveRegistroDomain({usuario, conta})`, `findUsuarioByEmail(idPlataforma, email)`, `findUsuarioById`, … |
+| Adaptador em memória | [`src/adapters/usuario/repository.memory.ts`](src/adapters/usuario/repository.memory.ts) |
+| Adaptador Postgres | [`src/adapters/usuario/repository.postgres.ts`](src/adapters/usuario/repository.postgres.ts) |
+| Caso de uso: cadastro (gate de plataforma + Pattern A) | [`src/use-cases/usuario/registrar-conta-usuario.ts`](src/use-cases/usuario/registrar-conta-usuario.ts) — deps incluem `plataformaRepository` + `authService` |
+| Caso de uso: atualizar perfil | [`src/use-cases/usuario/atualizar-perfil-usuario.ts`](src/use-cases/usuario/atualizar-perfil-usuario.ts) |
+| Caso de uso: criar sessão (delega à porta) | [`src/use-cases/usuario/criar-sessao-usuario.ts`](src/use-cases/usuario/criar-sessao-usuario.ts) — chama `authService.iniciarSessao` |
+| Caso de uso: autorizar permissão | [`src/use-cases/usuario/autorizar-permissao-usuario.ts`](src/use-cases/usuario/autorizar-permissao-usuario.ts) — chama `authService.validarSessao` |
+| Consumer eunenem-server: mount handler | [`apps/eunenem-server/server/`](apps/eunenem-server/server/) — `auth.handler` montado no Hono entry (rota `/api/auth/**`) |
+| Consumer eunenem-server: procedures tRPC | mesmo diretório — `auth.signUp`, `auth.signIn`, `auth.signOut`, `auth.me` |
+| Erros tipados | [`src/errors/usuario/`](src/errors/usuario) — `UsuarioPlataformaNaoEncontradaError`, `UsuarioEmailJaCadastradoError`, … |
+| API pública | [`src/index.ts`](src/index.ts) — seção `Domain: Usuario` + re-exports dos adapters BetterAuth |
+| Testes unitários + integração | [`tests/unit/usuario/`](tests/unit/usuario), [`tests/integration/`](tests/integration) — incluindo conformance compartilhada Memória vs Postgres+BetterAuth via testcontainers (composta + saga T3) |
+
+---
+
+## DDD
+
+- **Bounded context:** o vocabulário de usuário, conta, sessão e permissão vive aqui. Pós-Pattern A, **credencial** deixou de ser vocabulário do domínio (ficou na infraestrutura).
+- **Linguagem ubíqua:** nomes em código (`Usuario`, `Conta`, `registrarContaUsuario`, `AuthService`) alinham com o produto e com a discussão de DDD em [`ENGINE-DDD.md`](ENGINE-DDD.md).
+- **Multi-tenant por design:** todo `Usuario` carrega `idPlataforma`; uniqueness de email é **composta** `(idPlataforma, email)` tanto no domínio quanto no schema BetterAuth. O `IdPlataformaReferencia` é um **mirror VO** local — o domínio do Usuário **não importa** de `src/domain/plataforma/` (regra do `dependency-cruiser`).
+- **Agregado:** Usuario carrega a Conta como entidade aninhada (1:1, mesma transação). **Credencial fica fora do agregado** atrás do `AuthService` port; o agregado em si é auth-implementation-agnostic.
+- **Value objects / validação na fronteira:** email normalizado, slug derivado de nomeExibicao, permissões enumeradas — validados com Zod nos inputs dos casos de uso.
+- **Saga T3 (compensação cross-port):** `registrarContaUsuario` escreve em duas portas (`usuarioRepository` + `authService`). Se a segunda falha, a primeira é compensada best-effort com log estruturado. Esse padrão veio do checklist de banked lessons T1-T12 (vide notes do epic aperture-pgqih).
+- **Integração com Plataforma:** dependência soft via `IdPlataformaReferencia` no domínio + gate explícito (`plataformaRepository.findById`) na aplicação. Cadastros com plataforma inexistente falham com `UsuarioPlataformaNaoEncontradaError`.
+- **Integração com Arrecadação:** o BC Arrecadação guarda uma lista de UUIDs (`idsAdministradores`). O significado "conta registrada no Usuário" é responsabilidade da **aplicação** (orquestração) — sem acoplar o domínio de campanhas ao de usuários.
+- **Pontos de produção pendentes (status atual):** Cipher's review (aperture-ebspa) sinalizou 3 P2 prod-gates ainda em aberto que NÃO bloqueiam staging mas precisam fechar antes de prod: auth-router hardening (M1+M2+M4, aperture-haakf), freshAge gate (M3, aperture-wshvw), reverse-proxy security headers (L1, aperture-85n6u).
+
+---
+
+# BC Evento (supporting) — fase 1
+
+Bounded context de **suporte** ao produto (convites digitais, RSVP): fora do core Arrecadação → Taxas → Pagamentos. Estado atual: três agregados shipados — **Evento** (raiz por campanha), **Convite** (1:1 com evento), **ListaDeConvidados** (RSVP por evento, com `Convidado` entity aninhada).
+
+## Resumo em linguagem simples
+
+1. Uma **campanha** pode ter **no máximo um evento** (relação 1:1 por `idCampanha`).
+2. O evento guarda **tipo** (chá de bebê, chá de fraldas, chá-surpresa, chá-revelação, batizado, aniversário), **modalidade** (presencial ou online), **data/hora** e **endereço** opcional.
+3. O **Convite** (1:1 com evento) guarda nome exibido, mensagem, e a personalização visual: `paleta`, `fonte`, `modelo` (ex.: `scrapbook`, `varal-de-mimos`, `balao-de-ar`, `jardim-romantico`, `lavanda`, `floresta-magica`, `roupinhas-e-coracoes`, `berco-floral`, `arco-iris-boho`, `margaridas`, `girafinha-bailarina`, `safari`, `elefantinho`).
+4. A **ListaDeConvidados** (1:1 com evento) é um roster com `linkConfirmacao` e uma coleção de `Convidado` (entidade aninhada com nome, número de celular, `presenca: sim | nao | talvez`).
+5. Os agregados **não** carregam `idPlataforma` — o escopo de tenant vem da campanha; a app valida que o admin só opera na própria campanha.
+6. **Persistência:** todos os três agregados rodam só em memória na fase 1 (sem Postgres ainda; migration planejada).
+
+## Mapa conceito → código
+
+| Conceito | Onde está |
+|----------|-----------|
+| Evento (agregado raiz) | [`src/domain/evento/entities/evento.ts`](src/domain/evento/entities/evento.ts) — `Evento`, `criarEvento`, `eventoComCamposAtualizados` |
+| Convite (agregado raiz, 1:1 com evento) | [`src/domain/evento/entities/convite.ts`](src/domain/evento/entities/convite.ts) — `Convite`, `criarConvite`, `conviteComCamposAtualizados` |
+| ListaDeConvidados (agregado raiz, 1:1 com evento) | [`src/domain/evento/entities/lista-de-convidados.ts`](src/domain/evento/entities/lista-de-convidados.ts) — `ListaDeConvidados`, `Convidado` (entidade aninhada), `convidadoComPresencaAtualizada` |
+| Identificadores | [`src/domain/evento/value-objects/ids.ts`](src/domain/evento/value-objects/ids.ts) — `IdEvento`, `IdConvite`, `IdListaDeConvidados`, `IdConvidado` + mirror VOs `IdCampanha` |
+| Value objects do Evento (tipo, modalidade, data-hora, endereço) | [`src/domain/evento/value-objects/`](src/domain/evento/value-objects/) — `TipoEvento`, `ModalidadeEvento`, `DataHoraEvento`, `EnderecoEvento` |
+| Value objects do Convite (paleta, fonte, modelo, mensagem) | mesmo diretório — `PaletaConvite`, `FonteConvite`, `ModeloConvite`, `MensagemConvite`, `NomeExibidoConvite` |
+| Value objects da ListaDeConvidados | mesmo diretório — `LinkConfirmacaoLista`, `StatusPresencaConvidado`, `NumeroCelularConvidado` |
+| Portas de persistência | [`src/adapters/evento/`](src/adapters/evento/) — `EventoRepository`, `ConviteRepository`, `ListaDeConvidadosRepository` |
+| Adaptadores em memória + índices 1:1 | mesmo diretório — `.memory.ts` para os três |
+| Casos de uso Evento | [`src/use-cases/evento/criar-evento.ts`](src/use-cases/evento/criar-evento.ts), [`atualizar-evento.ts`](src/use-cases/evento/atualizar-evento.ts), [`obter-evento-por-id.ts`](src/use-cases/evento/obter-evento-por-id.ts), [`obter-evento-por-id-campanha.ts`](src/use-cases/evento/obter-evento-por-id-campanha.ts) |
+| Casos de uso Convite | [`criar-convite.ts`](src/use-cases/evento/criar-convite.ts), [`atualizar-convite.ts`](src/use-cases/evento/atualizar-convite.ts), [`obter-convite-por-id.ts`](src/use-cases/evento/obter-convite-por-id.ts), [`obter-convite-por-id-evento.ts`](src/use-cases/evento/obter-convite-por-id-evento.ts) |
+| Casos de uso ListaDeConvidados | [`criar-lista-de-convidados.ts`](src/use-cases/evento/criar-lista-de-convidados.ts), [`atualizar-lista-de-convidados.ts`](src/use-cases/evento/atualizar-lista-de-convidados.ts), [`alterar-presenca-convidado.ts`](src/use-cases/evento/alterar-presenca-convidado.ts), [`obter-lista-de-convidados-por-id.ts`](src/use-cases/evento/obter-lista-de-convidados-por-id.ts), [`obter-lista-de-convidados-por-id-evento.ts`](src/use-cases/evento/obter-lista-de-convidados-por-id-evento.ts) |
 | Erros | [`src/errors/evento/`](src/errors/evento/) |
 | API pública | [`src/index.ts`](src/index.ts) — seção `Domain: Evento` |
 | Testes | [`tests/unit/evento/`](tests/unit/evento/) |
 
-## Planejado (mesmo BC)
+## Pendente
 
-- **Convite** — 1:1 com `IdEvento`; nome exibido, mensagem, paleta/fonte/modelo.
-- **Lista de convidados** — convidados por evento; presença `sim` / `nao` / `talvez`; link de confirmação.
-- **Postgres** — migration `eventos`, adapter, testes de integração.
+- **Postgres** — migrations + adapters + testes de integração para os três agregados.
 
 ---
 
 # Orquestração — Checkout (pseudo-BC)
 
-O **Checkout** é um **pseudo-bounded-context**: existe apenas como casos de uso em [`src/use-cases/checkout/`](src/use-cases/checkout) e erros tipados em [`src/errors/checkout/`](src/errors/checkout). **Não há `src/domain/checkout/` nem `src/adapters/checkout/`** — Checkout não tem entidades, value objects, agregados nem repositórios próprios. Sua única responsabilidade é **orquestrar BCs reais (Arrecadação, Taxas, Pagamentos, Financeiro)** em sagas multi-passo com **compensação explícita** quando algum passo falha.
+O **Checkout** é um **pseudo-bounded-context**: existe apenas como casos de uso em [`src/use-cases/checkout/`](src/use-cases/checkout) e erros tipados em [`src/errors/checkout/`](src/errors/checkout). **Não há `src/domain/checkout/` nem `src/adapters/checkout/`** — Checkout não tem entidades, value objects, agregados nem repositórios próprios. Sua única responsabilidade é **orquestrar BCs reais (Arrecadação, Taxas, Pagamentos, módulo Financeiro)** em sagas multi-passo, com **guard multi-tenant** e (onde ainda faz sentido) compensação.
+
+**Mudança no padrão de compensação (pós-Plan 0015):** como `Contribuicao` virou *slot puro* (sem estado armazenado), **não há mais o que rolar atrás** quando uma intenção de pagamento falha — a contribuição nunca foi "reservada", o predicado de indisponibilidade é só uma checagem de leitura. As sagas pós-0015 são mais simples: validam, criam intenção, deixam o webhook avançar o FSM. A única compensação real hoje é o **`estornarPagamento`** (refund pós-aprovação) que cascateia em `canceladoEm` nos lançamentos linkados que ainda não foram transferidos.
 
 ## Resumo em linguagem simples
 
-1. Quando o contribuinte clica “quero este item”, o sistema precisa: validar a plataforma da campanha, **reservar** a contribuição (Arrecadação), **calcular** a composição de valores (Taxas) e **criar** a intenção de pagamento (Pagamentos). Se qualquer passo a partir da reserva falhar, a contribuição precisa **voltar a `disponivel`**. Esse é o trabalho do Checkout.
-2. Os passos vivem em BCs separados. O Checkout **não** estende o domínio de nenhum deles — apenas chama os casos de uso já existentes na ordem certa e desfaz o que precisar via casos de uso de **compensação** (`desassociarContribuinteContribuicao`, etc.).
-3. Todas as sagas que cruzam plataformas (write-side e leituras pré-calculadas) **verificam coerência multi-tenant** comparando `input.idPlataforma` com `campanha.idPlataforma` e lançando `CheckoutPlataformaMismatchError` se houver mismatch. É o **guard cross-tenant** explícito no orquestrador.
+1. Quando o contribuinte clica "quero este item", o Checkout: valida a plataforma da campanha, checa que a contribuição existe + **não está indisponível** (predicado), calcula a composição de valores (Taxas), e cria a `IntencaoPagamento` + sessão de checkout no provedor (Pagamentos). O provedor avança o FSM por webhooks; o snapshot do contribuinte chega via `checkout.session.completed`.
+2. Quando o webhook `payment_intent.succeeded` (ou `charge.succeeded`) chega, o Checkout finaliza: `aprovarPagamento` + `registrarEfeitosFinanceirosPagamentoAprovado` na mesma transação.
+3. Quando o admin precisa estornar, `estornarPagamento` aciona o refund no provedor, transiciona o FSM para `estornado`, e cascateia `canceladoEm` em lançamentos que ainda não foram transferidos. Lançamentos já transferidos bloqueiam o estorno (`PagamentoEstornoLancamentoJaTransferidoError`).
+4. Todas as sagas cross-tenant comparam `input.idPlataforma` com `campanha.idPlataforma` e levantam `CheckoutPlataformaMismatchError` em mismatch — guard cross-tenant explícito.
 
 ---
 
@@ -519,25 +567,35 @@ O **Checkout** é um **pseudo-bounded-context**: existe apenas como casos de uso
 
 | Caso de uso | Responsabilidade |
 |-------------|------------------|
-| [`iniciarPagamentoContribuicao`](src/use-cases/checkout/iniciar-pagamento-contribuicao.ts) | Saga write-side principal: gate de plataforma → `associarContribuinteContribuicao` (Arrecadação) → `calcularComposicaoValores` (Taxas, plataforma + tipo escopados) → `criarIntencaoPagamento` (Pagamentos). **Compensa** com `desassociarContribuinteContribuicao` se passo 3 ou 4 falhar. Compensação falhar é logado mas não substitui o erro original. |
-| [`finalizarPagamentoAprovado`](src/use-cases/checkout/finalizar-pagamento-aprovado.ts) | Saga de confirmação: `aprovarPagamento` (Pagamentos) → `registrarEfeitosFinanceirosPagamentoAprovado` (Financeiro). Devolve o pagamento atualizado + lançamentos criados. |
-| [`finalizarPagamentoRejeitado`](src/use-cases/checkout/finalizar-pagamento-rejeitado.ts) | Saga de rejeição: `rejeitarPagamento` (Pagamentos) → `desassociarContribuinteContribuicao` (Arrecadação). Libera a contribuição para reuso. |
-| [`iniciarRepasseRecebedor`](src/use-cases/checkout/iniciar-repasse-recebedor.ts) | Saga de repasse: gate de plataforma → resolve o recebedor ativo (Arrecadação) → `solicitarRepasseRecebedor` (Financeiro). |
-| [`obterContribuicoesPrecalculadasCampanha`](src/use-cases/checkout/obter-contribuicoes-precalculadas-campanha.ts) | Read-side: gate de plataforma → lista contribuições disponíveis + aplica `calcularComposicaoValores` em cada uma. Pré-monta o snapshot para a UI sem efeitos colaterais. |
+| [`iniciarPagamentoContribuicao`](src/use-cases/checkout/iniciar-pagamento-contribuicao.ts) | Saga write-side: gate de plataforma → carrega campanha + contribuição (Arrecadação) → checa `contribuicaoEstaIndisponivel` (predicate, não estado) → `calcularComposicaoValores` (Taxas, plataforma + tipo escopados) → `criarIntencaoPagamento` (Pagamentos) → abre sessão de checkout no provedor. **Sem reserva de slot** — concorrência otimista; se duas pessoas pagarem o mesmo item, ambos pagamentos vão a `aprovado`. |
+| [`finalizarPagamentoAprovado`](src/use-cases/checkout/finalizar-pagamento-aprovado.ts) | Saga de confirmação (driver: webhook do provedor): `aprovarPagamento` (Pagamentos) → `registrarEfeitosFinanceirosPagamentoAprovado` (módulo Financeiro). Mesma transação DB; idempotente por `idPagamento`. |
+| [`finalizarPagamentoRejeitado`](src/use-cases/checkout/finalizar-pagamento-rejeitado.ts) | Saga de rejeição (driver: webhook): `rejeitarPagamento` (Pagamentos). **Não há mais compensação em Arrecadação** (pré-0015 fazia desassociar contribuinte — agora não há nada para rolar atrás). |
+| [`estornarPagamento`](src/use-cases/checkout/estornar-pagamento.ts) | Saga de refund (admin-driven): valida que pagamento está `aprovado` → checa que nenhum lançamento linkado tem `transferidoEm` setado (senão `PagamentoEstornoLancamentoJaTransferidoError`) → dispara refund no provedor → `estornarPagamentoAprovado` (Pagamentos) → cascateia `canceladoEm = now()` em todos os lançamentos pendentes do pagamento. Tudo na mesma transação. |
+| [`iniciarRepasseRecebedor`](src/use-cases/checkout/iniciar-repasse-recebedor.ts) | Saga de repasse (recebedor-driven): gate de plataforma → resolve o recebedor ativo (Arrecadação) → guard que campanha tem recebedor (`CheckoutCampanhaSemRecebedorError` se não) → `solicitarRepasseRecebedor` (módulo Financeiro). Gera bead `RepasseRecebedor` em `solicitado`. |
+| [`obterContribuicoesPrecalculadasCampanha`](src/use-cases/checkout/obter-contribuicoes-precalculadas-campanha.ts) | Read-side: gate de plataforma → lista contribuições disponíveis (predicate) + aplica `calcularComposicaoValores` em cada uma. Pré-monta o snapshot para a UI sem efeitos colaterais. |
+
+---
+
+## Erros tipados
+
+Apenas dois — todos os outros vêm dos BCs orquestrados:
+
+- [`CheckoutPlataformaMismatchError`](src/errors/checkout/plataforma-mismatch.error.ts) — guard cross-tenant.
+- [`CheckoutCampanhaSemRecebedorError`](src/errors/checkout/campanha-sem-recebedor.error.ts) — `iniciarRepasseRecebedor` chamado em campanha sem recebedor ativo. Criação de campanha + recebimento de contribuições funcionam sem recebedor; só o saque é gateado.
 
 ---
 
 ## DDD
 
-- **Pseudo-BC, não BC real:** sem domínio próprio. Toda regra de negócio vive nos BCs orquestrados (Arrecadação, Taxas, Pagamentos, Financeiro). O Checkout adiciona **apenas** orquestração + um erro cross-tenant (`CheckoutPlataformaMismatchError`).
+- **Pseudo-BC, não BC real:** sem domínio próprio. Toda regra de negócio vive nos BCs orquestrados (Arrecadação, Taxas, Pagamentos + módulo Financeiro). O Checkout adiciona **apenas** orquestração + dois erros cross-BC.
 
-- **Padrão saga com compensação:** o write-side principal (`iniciarPagamentoContribuicao`) ilustra a disciplina: o **primeiro passo com efeito colateral** (associar contribuição) tem uma **compensação registrada explicitamente** num `try/catch` que envolve os passos subsequentes. Se qualquer passo posterior falha, a compensação é chamada antes de o erro original ser re-lançado.
+- **Padrão saga simplificado pós-Plan 0015:** o write-side principal (`iniciarPagamentoContribuicao`) deixou de ter `try/catch` de compensação porque o primeiro passo de efeito colateral (`criarIntencaoPagamento`) é o último que importa — não há reserva de slot para desfazer. A única compensação que sobreviveu é a cascata de `canceladoEm` dentro de `estornarPagamento`, que mora na mesma transação DB do `estornarPagamentoAprovado` — atomicidade em vez de saga.
 
-- **Guard cross-tenant:** toda saga que recebe `idPlataforma` no input compara com o `campanha.idPlataforma` carregado do repositório e lança `CheckoutPlataformaMismatchError` se forem diferentes. Isso fecha a superfície de ataque “consigo um id de campanha de outra plataforma e tento pagá-la pela minha”. O erro tipado torna a intenção visível no call-site (vs. um 404 genérico) e o span registra o mismatch com atributos estruturados para auditoria.
+- **Guard cross-tenant:** toda saga que recebe `idPlataforma` no input compara com o `campanha.idPlataforma` carregado do repositório e lança `CheckoutPlataformaMismatchError` se forem diferentes. Fecha a superfície "consigo um id de campanha de outra plataforma e tento pagá-la pela minha". O span registra o mismatch com atributos estruturados para auditoria.
 
-- **Sem novos modelos:** Checkout não cria entidades, agregados, value objects nem ports. Ele consome os modelos públicos dos BCs (`Campanha`, `Contribuicao`, `Pagamento`, `LancamentoFinanceiro`, etc.) e devolve composições deles ao chamador.
+- **Sem novos modelos:** Checkout não cria entidades, agregados, value objects nem ports. Ele consome os modelos públicos dos BCs (`Campanha`, `Contribuicao`, `Pagamento`, `LancamentoFinanceiro`, `RepasseRecebedor`) e devolve composições deles ao chamador.
 
-- **Observabilidade:** cada saga abre um span próprio (`iniciarPagamentoContribuicao`, `finalizarPagamentoAprovado`, ...) com atributos `checkout.*` para correlacionar os passos. Eventos de compensação são logados em chave própria (`checkout.pagamento.compensado`, `checkout.pagamento.compensacao_falhou`).
+- **Observabilidade:** cada saga abre um span próprio (`iniciarPagamentoContribuicao`, `finalizarPagamentoAprovado`, `estornarPagamento`, …) com atributos `checkout.*` para correlacionar os passos.
 
 ---
 
@@ -548,9 +606,9 @@ Checkout não conhece detalhes internos de nenhum BC. Em particular, ele não co
 - A estrutura das opções de contribuição além de saber que existe um `tipo` que Taxas precisa para resolver a tarifa
 - A política de cálculo de taxa (delega 100% a Taxas)
 - O provedor de pagamento ou como aprovação acontece (chama os casos de uso de Pagamentos)
-- A representação interna de lançamentos financeiros (recebe o array que Financeiro devolve e repassa)
+- A representação interna de lançamentos financeiros (recebe o array que o módulo Financeiro devolve e repassa)
 
-Ele conhece apenas a **ordem dos passos**, as **deps necessárias para chamá-los**, e a **regra de compensação** quando um passo intermediário falha.
+Ele conhece apenas a **ordem dos passos**, as **deps necessárias para chamá-los**, e (no caso do estorno) a **regra de cascata** quando um pagamento aprovado precisa ser desfeito.
 
 ---
 
