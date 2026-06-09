@@ -45,20 +45,26 @@ interface TestRig {
 }
 
 // Minimal Pagamento aggregate matching the engine's shape. The webhook
-// procedures only read `id` + `intencao.idContribuicao`, but the
-// repository's Zod schema validates the whole thing — so we build a
-// realistic snapshot.
+// procedures resolve tenant via `pagamento.intencao.idCampanha` (Plan 0016
+// Phase 4 / aperture-3htxg: cart-scope idCampanha hoisted to IntencaoPagamento
+// root), so the fixture MUST thread idCampanha through to align the
+// pagamento with the seeded campanha — otherwise `resolveAdminPagamentoContext`
+// throws `dados_corrompidos: campanha_nao_encontrada` before the test gets
+// to exercise the actual procedure surface.
 function makePagamento(args: {
   id: string;
   idContribuicao: string;
+  idCampanha: string;
 }): Parameters<PagamentoRepositoryMemory['save']>[0] {
   // Plan 0016 Phase 2 (aperture-ktw11): delegate to the shared canonical
   // factory so the aggregate carries the new `items` + `composicaoValoresAggregate`
-  // shape. Webhook router only reads `id` + `intencao.idContribuicao` so
-  // defaults are fine here.
+  // shape. Phase 4 admin tenant-guard reads idCampanha at the IntencaoPagamento
+  // root — wire it through here so cross-tenant tests can assert FORBIDDEN
+  // instead of falling through to campanha_nao_encontrada.
   return makePagamentoBase({
     id: args.id,
     idContribuicao: args.idContribuicao,
+    idCampanha: args.idCampanha,
     status: 'aprovado',
     criadoEm: new Date('2026-06-02T10:00:00.000Z'),
   });
@@ -130,10 +136,18 @@ async function buildRig(): Promise<TestRig> {
   const pagamentoIdEunenem = randomUUID();
   const pagamentoIdEucasei = randomUUID();
   await pagamentoRepository.save(
-    makePagamento({ id: pagamentoIdEunenem, idContribuicao: idContribEunenem }),
+    makePagamento({
+      id: pagamentoIdEunenem,
+      idContribuicao: idContribEunenem,
+      idCampanha: idCampanhaEunenem,
+    }),
   );
   await pagamentoRepository.save(
-    makePagamento({ id: pagamentoIdEucasei, idContribuicao: idContribEucasei }),
+    makePagamento({
+      id: pagamentoIdEucasei,
+      idContribuicao: idContribEucasei,
+      idCampanha: idCampanhaEucasei,
+    }),
   );
 
   const deps = {

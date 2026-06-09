@@ -294,7 +294,12 @@ interface ExtratoLancamentoState {
   pagamento: Pagamento | undefined;
   /**
    * aperture-k6fbz — gift name + image resolved via
-   * lancamento → pagamento.intencao.idContribuicao → contribuição.
+   * lancamento → pagamento.intencao.items[first contribuicao] →
+   * contribuição. Plan 0016 (aperture-3htxg): the pre-multi-item path
+   * walked `pagamento.intencao.idContribuicao` directly; the new shape
+   * stores per-item contribuição refs on the items[] array, so the
+   * extrato projection picks the FIRST contribuicao-tipo item (visitor
+   * carts are single-item today; multi-item visitor cart is plan 0017).
    * Undefined when either the pagamento is missing OR the contribuição
    * has been deleted between the pagamento + the read. Row projection
    * falls back to a neutral shape in that case.
