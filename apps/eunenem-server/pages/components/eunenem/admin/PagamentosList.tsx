@@ -412,7 +412,9 @@ type ComposicaoAggregateDTO = {
   responsavelTaxa: "contribuinte";
 };
 
-type PagamentoDTO = {
+// Exported (aperture-gf2t5) so /admin/pagamento/:id can type its findById
+// payload against the same shape the list-context PagamentoCard consumes.
+export type PagamentoDTO = {
   id: string;
   status: PagamentoStatus;
   criadoEm: string;
@@ -484,7 +486,14 @@ type PagamentoDTO = {
   liberacao: LiberacaoState;
 };
 
-function PagamentoCard({
+/**
+ * PagamentoCard — exported (aperture-gf2t5 admin reshape) so the new
+ * /admin/pagamento/:id detail page can render the same card outside the
+ * list context. Both call sites read the same wire shape from the admin
+ * router (PagamentoWithLancamentosAdminDTO) — the standalone page just
+ * fetches it via `pagamentos.findById` instead of `listByContribuicao`.
+ */
+export function PagamentoCard({
   pagamento,
   onWebhookIssueCountChange,
 }: {

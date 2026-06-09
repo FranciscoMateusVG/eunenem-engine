@@ -1,29 +1,32 @@
 import { AdminShell } from "@/components/eunenem/admin/AdminShell";
+import { ItensDoSlotList } from "@/components/eunenem/admin/ItensDoSlotList";
 import ArrecadacaoSection from "@/components/eunenem/admin/sections/ArrecadacaoSection";
-import PagamentosSection from "@/components/eunenem/admin/sections/PagamentosSection";
 
 /**
- * /admin/contribuicao/:idContribuicao — contribuição detail page
- * (plan 0015 BC reshape, aperture-c5vq2).
+ * /admin/contribuicao/:idContribuicao — contribuição detail page.
  *
- * The aggregate/multi-BC view. AdminShell receives `activeBc={null}` so the
- * BcStrap renders the legend (the page touches THREE bounded contexts —
- * Arrecadação, Pagamentos, Financeiro — and no single one is "active"). Per-
- * section DddBadge headers carry the individual BC color identity instead.
- * Financeiro's purple identity now appears as the sub-header strip inside
- * each PagamentoCard's <LancamentosBlock />, NOT as a sibling section,
- * because per plan 0015 Locked Decision #1 Financeiro is a MODULE inside
- * Pagamentos rather than its own BC.
+ * Reframed under Plan 0017 / aperture-gf2t5 as a SLOT-DEFINITION view.
+ * The old shape (slot facts + every pagamento attempt rendered as a full
+ * PagamentoCard) inverted the new domain ontology: under Plan 0016,
+ * Contribuição is a slot DEFINITION and Pagamento is the transaction
+ * aggregate root. A contribuição page that surfaces N inline PagamentoCards
+ * obscures the aggregate "5 of 6 sold to different people" story.
  *
- * SECTION COMPOSITION:
- *   - ArrecadacaoSection  — emerald BC header, the contribuição slot itself
- *   - PagamentosSection   — amber BC header, every pagamento attempt PLUS
- *                           its nested financeiro ledger + webhook trail
+ * NEW SHAPE:
+ *   - ArrecadacaoSection (unchanged) — emerald BC header, slot facts +
+ *     N/M-or-ESGOTADA badge + campanha/recebedor block.
+ *   - ItensDoSlotList — NEW. Every ItemDoPagamento across every pagamento
+ *     that bought into this slot. Compact rows (status + contribuinte +
+ *     quantidade + line total + criadoEm); clicks navigate to
+ *     /admin/pagamento/:id rather than nesting the full card here.
  *
- * Breadcrumb chooses "admin / contribuição / <short id>" — we don't have
- * the campanha id at routing time (only the contribuicao id is in the
- * URL), so the campanha link lives inside ArrecadacaoSection's
- * CampanhaBlock once the multi-aggregate payload resolves.
+ * The "every pagamento as a full card" view moves to /admin/pagamento/:id
+ * — operators reach a specific pagamento via the campanha-level Pagamentos
+ * list (the primary view under the reshape).
+ *
+ * BC handling unchanged: `activeBc={null}` because the page bridges two
+ * BCs (Arrecadação for the slot facts, Pagamentos for the item rows); the
+ * per-section DddBadges carry identity.
  */
 export function AdminContribuicaoPage({
   idContribuicao,
@@ -47,7 +50,7 @@ export function AdminContribuicaoPage({
     >
       <section className="space-y-10">
         <ArrecadacaoSection idContribuicao={idContribuicao} />
-        <PagamentosSection idContribuicao={idContribuicao} />
+        <ItensDoSlotList idContribuicao={idContribuicao} />
       </section>
     </AdminShell>
   );

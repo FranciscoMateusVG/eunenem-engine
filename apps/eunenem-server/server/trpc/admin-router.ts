@@ -390,6 +390,28 @@ function toContribuicaoAdminDTO(
   };
 }
 
+/**
+ * Pagamento FSM — 5 states per plan 0015 Locked Decision #7. Hoisted above
+ * contribuicoesRouter for aperture-gf2t5 (the new
+ * `contribuicoes.listItemsByContribuicao` proc references it). Originally
+ * declared just above `financeiroRouter` — call site comments kept inline
+ * there for context.
+ *
+ *   pendente   → processing   (payment_intent.processing — pix QR scanned)
+ *   pendente   → aprovado     (charge.succeeded, card happy path)
+ *   processing → aprovado     (charge.succeeded after pix/ACH confirmation)
+ *   pendente   → rejeitado    (failure before processing)
+ *   processing → rejeitado    (failure during processing)
+ *   aprovado   → estornado    (charge.refunded — pre-transfer guard enforced)
+ */
+const PagamentoStatusSchema = z.enum([
+  "pendente",
+  "processing",
+  "aprovado",
+  "rejeitado",
+  "estornado",
+]);
+
 const contribuicoesRouter = t.router({
   /**
    * All contribuicoes for a campanha. Tenant-guarded: resolves the campanha
@@ -444,6 +466,117 @@ const contribuicoesRouter = t.router({
           toContribuicaoAdminDTO(c, sumsMap, contribuintesMap),
         ),
       };
+    }),
+
+  /**
+   * Plan 0017 / aperture-gf2t5 — pagamento-first reshape.
+   *
+   * All ItemDoPagamento rows across every pagamento that references this
+   * contribuição slot. Flat projection: one row per item, denormalised
+   * with the parent pagamento's status + criadoEm + contribuinte so the
+   * UI can render an aggregate-context list without nesting.
+   *
+   * Operator's pain that drove this: clicking "Fralda Ecológica × 6 slots,
+   * 5/6" on the campanha drill led to ONE contribuição-slot row, which
+   * then surfaced only THAT row's pagamento (since legacy data had qty=1
+   * per row). The aggregate "5 of 6 sold to different people" was lost.
+   * This proc surfaces ALL items across ALL pagamentos that bought into
+   * the slot — restoring the missing aggregate context.
+   *
+   * Tenant guard: same chain as listByCampanha — contribuicao → campanha
+   * → idPlataforma. Cross-tenant returns empty.
+   *
+   * Sort: pagamento criadoEm DESC (most recent purchase first).
+   * Surcharge items are filtered out — they're cart-scope, not slot-scope.
+   */
+  listItemsByContribuicao: t.procedure
+    .input(z.object({ idContribuicao: z.string() }))
+    .output(
+      z.object({
+        items: z.array(
+          z.object({
+            id: z.string(),
+            idPagamento: z.string(),
+            pagamentoStatus: PagamentoStatusSchema,
+            pagamentoCriadoEm: z.string(),
+            quantidade: z.number().int().positive(),
+            lineContributionAmountCents: z.number().int().nonnegative(),
+            lineFeeAmountCents: z.number().int().nonnegative(),
+            lineReceiverAmountCents: z.number().int().nonnegative(),
+            contribuinte: ContribuinteDTOSchema,
+          }),
+        ),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const contribuicao = await ctx.deps.contribuicaoRepository.findById(
+        input.idContribuicao as IdContribuicao,
+      );
+      if (!contribuicao) return { items: [] };
+      const campanha = await ctx.deps.campanhaRepository.findById(
+        contribuicao.idCampanha,
+      );
+      if (!campanha) return { items: [] };
+      if (campanha.idPlataforma !== ID_PLATAFORMA_EUNENEM) {
+        return { items: [] };
+      }
+
+      const pagamentos = await ctx.deps.pagamentoRepository.findByContribuicao(
+        input.idContribuicao as IdContribuicaoPagamento,
+      );
+
+      // Flatten + filter: only contribuicao-tipo items pointing at THIS slot.
+      // Multi-item carts may include items for OTHER slots; we keep only the
+      // ones that name input.idContribuicao.
+      type ItemRow = {
+        id: string;
+        idPagamento: string;
+        pagamentoStatus: Pagamento["status"];
+        pagamentoCriadoEm: string;
+        quantidade: number;
+        lineContributionAmountCents: number;
+        lineFeeAmountCents: number;
+        lineReceiverAmountCents: number;
+        contribuinte: { nome: string; email: string; mensagem: string | null } | null;
+      };
+      const rows: ItemRow[] = [];
+      for (const p of pagamentos) {
+        for (const item of p.intencao.items) {
+          if (item.tipo !== "contribuicao") continue;
+          if (
+            (item.idContribuicao as unknown as string) !==
+            input.idContribuicao
+          ) {
+            continue;
+          }
+          rows.push({
+            id: item.id,
+            idPagamento: p.id,
+            pagamentoStatus: p.status,
+            pagamentoCriadoEm: p.criadoEm.toISOString(),
+            quantidade: item.quantidade,
+            lineContributionAmountCents: item.composicaoValoresItem
+              .lineContributionAmountCents as unknown as number,
+            lineFeeAmountCents: item.composicaoValoresItem
+              .lineFeeAmountCents as unknown as number,
+            lineReceiverAmountCents: item.composicaoValoresItem
+              .lineReceiverAmountCents as unknown as number,
+            contribuinte:
+              p.intencao.contribuinte === null
+                ? null
+                : {
+                    nome: p.intencao.contribuinte.nome,
+                    email: p.intencao.contribuinte.email,
+                    mensagem: p.intencao.contribuinte.mensagem ?? null,
+                  },
+          });
+        }
+      }
+
+      // Sort DESC by pagamentoCriadoEm — most recent purchase first.
+      rows.sort((a, b) => (a.pagamentoCriadoEm < b.pagamentoCriadoEm ? 1 : -1));
+
+      return { items: rows };
     }),
 
   /**
@@ -525,35 +658,6 @@ const contribuicoesRouter = t.router({
       };
     }),
 });
-
-/* ─────────────────────────────────────────────────────────────────────────
- * Shared cross-BC schema — used by both `pagamentos` (W4) and
- * `financeiro` (W5) sub-routers.
- * ────────────────────────────────────────────────────────────────────── */
-
-/**
- * Pagamento FSM — 5 states per plan 0015 Locked Decision #7.
- *
- *   pendente   → processing   (payment_intent.processing — pix QR scanned)
- *   pendente   → aprovado     (charge.succeeded, card happy path)
- *   processing → aprovado     (charge.succeeded after pix/ACH confirmation)
- *   pendente   → rejeitado    (failure before processing)
- *   processing → rejeitado    (failure during processing)
- *   aprovado   → estornado    (charge.refunded — pre-transfer guard enforced)
- *
- * Parallel-prep note (aperture-i45g5): until Rex's Phase 3 webhook handler
- * ships, the engine only emits {pendente, aprovado, rejeitado}. The schema
- * is widened in advance so the UI can render all 5 states without coupling
- * to the rollout order. Current data flows through the same 3-state subset
- * it always did.
- */
-const PagamentoStatusSchema = z.enum([
-  "pendente",
-  "processing",
-  "aprovado",
-  "rejeitado",
-  "estornado",
-]);
 
 /* ─────────────────────────────────────────────────────────────────────────
  * financeiro — W5 (aperture-rsidz.6).
@@ -1059,6 +1163,30 @@ function toPagamentoAdminDTO(
   };
 }
 
+/**
+ * Webhook event DTO schemas. Hoisted above `pagamentosRouter` (aperture-gf2t5)
+ * so the new `pagamentos.findById` proc can ride webhook events along on its
+ * detail payload. Used by both routers; the webhook section below references
+ * these declarations.
+ */
+const WebhookEventAdminDTOSchema = z.object({
+  id: z.string(),
+  provider: z.string(),
+  eventType: z.string(),
+  receivedAt: z.string(), // ISO
+  signatureValid: z.boolean(),
+  processedAt: z.string().nullable(), // ISO | null
+  processingError: z.string().nullable(),
+  pagamentoId: z.string().nullable(),
+});
+export type WebhookEventAdminDTO = z.infer<typeof WebhookEventAdminDTOSchema>;
+
+const WebhookEventDetailDTOSchema = WebhookEventAdminDTOSchema.extend({
+  rawPayload: z.unknown(),
+  signatureHeader: z.string(),
+});
+export type WebhookEventDetailDTO = z.infer<typeof WebhookEventDetailDTOSchema>;
+
 const pagamentosRouter = t.router({
   /**
    * All pagamentos for a contribuicao, sorted criadoEm DESC (latest first).
@@ -1170,6 +1298,171 @@ const pagamentosRouter = t.router({
         })),
       };
     }),
+
+  /**
+   * Plan 0017 / aperture-gf2t5 — pagamento-first reshape.
+   *
+   * All pagamentos for a single CAMPANHA (not contribuição), sorted DESC by
+   * criadoEm. The drill-entry point for the new /admin/campanha/:id primary
+   * "Pagamentos" section.
+   *
+   * Approach: fan-out across the campanha's contribuições, dedupe by
+   * pagamento.id, project. We don't have a direct `findByCampanha` on the
+   * pagamento port — adding one would be a +1 engine bead. The fan-out
+   * is bounded (N ≤ ~50 contribuições, ≤ ~3 pagamentos each in practice)
+   * and reuses the contract-stable `findByContribuicao` path the rest
+   * of the admin layer depends on.
+   *
+   * Tenant guard: campanha → idPlataforma. Unknown / cross-tenant → empty.
+   *
+   * DTO: PagamentoWithLancamentosAdminDTO (same shape as listByContribuicao),
+   * so the frontend can render the same PagamentoCard component without
+   * a separate projection.
+   */
+  listByCampanha: t.procedure
+    .input(z.object({ idCampanha: z.string() }))
+    .output(
+      z.object({
+        pagamentos: z.array(PagamentoWithLancamentosAdminDTOSchema),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const campanha = await ctx.deps.campanhaRepository.findById(
+        input.idCampanha as IdCampanha,
+      );
+      if (!campanha) return { pagamentos: [] };
+      if (campanha.idPlataforma !== ID_PLATAFORMA_EUNENEM) {
+        return { pagamentos: [] };
+      }
+
+      const contribuicoes =
+        await ctx.deps.contribuicaoRepository.findByCampanhaId(
+          input.idCampanha as IdCampanha,
+        );
+
+      // Fan-out + dedupe by pagamento.id. A single pagamento can reference
+      // multiple contribuições in the same campanha (multi-item cart per
+      // locked decision #8), so the same Pagamento aggregate surfaces N
+      // times — once per contribuição item. Dedupe on the first appearance.
+      const pagamentosById = new Map<string, Pagamento>();
+      for (const c of contribuicoes) {
+        const list = await ctx.deps.pagamentoRepository.findByContribuicao(
+          c.id as unknown as IdContribuicaoPagamento,
+        );
+        for (const p of list) {
+          if (!pagamentosById.has(p.id)) pagamentosById.set(p.id, p);
+        }
+      }
+      const pagamentos = Array.from(pagamentosById.values());
+
+      // Snapshot clock once for liberação derivation (no cross-row jitter).
+      const now = ctx.deps.clock();
+
+      // Pre-resolve contribuição names referenced by any item across the
+      // list — same N×M optimisation pattern as listByContribuicao. The
+      // contribuições we just loaded above ARE the same campanha's
+      // contribuições, so seed the map from those.
+      const contribuicaoNomesById = new Map<string, string>();
+      for (const c of contribuicoes) {
+        contribuicaoNomesById.set(c.id, c.nome);
+      }
+
+      const enriched = await Promise.all(
+        pagamentos.map(async (p) => {
+          const lancamentos =
+            await ctx.deps.livroFinanceiroRepository.findLancamentosByIdPagamento(
+              p.id as unknown as IdPagamentoReferencia,
+            );
+          return {
+            pagamentoDTO: toPagamentoAdminDTO(p, now, contribuicaoNomesById),
+            criadoEm: p.criadoEm,
+            lancamentosDTO: lancamentos.map(toLancamentoAdminDTO),
+          };
+        }),
+      );
+
+      enriched.sort((a, b) => b.criadoEm.getTime() - a.criadoEm.getTime());
+
+      return {
+        pagamentos: enriched.map((e) => ({
+          ...e.pagamentoDTO,
+          lancamentos: e.lancamentosDTO,
+        })),
+      };
+    }),
+
+  /**
+   * Plan 0017 / aperture-gf2t5 — pagamento-first reshape.
+   *
+   * Single pagamento by id, with lançamentos + webhook events inline. Powers
+   * the new /admin/pagamento/:id detail page (lifted out of the contribuição
+   * detail's PagamentoCard).
+   *
+   * Tenant guard via resolveAdminPagamentoContext (throws 404/403). Pagamento
+   * not found → NOT_FOUND. Cross-tenant → FORBIDDEN.
+   *
+   * Returns the SAME shape as a single row from listByContribuicao /
+   * listByCampanha (PagamentoWithLancamentosAdminDTO), so PagamentoCard
+   * renders identically. Webhook events ride along for the new page's
+   * embedded webhook trail.
+   */
+  findById: t.procedure
+    .input(z.object({ idPagamento: z.string() }))
+    .output(
+      z.object({
+        pagamento: PagamentoWithLancamentosAdminDTOSchema,
+        webhookEvents: z.array(WebhookEventAdminDTOSchema),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const { pagamento, campanha } = await resolveAdminPagamentoContext(
+        ctx,
+        input.idPagamento,
+      );
+
+      // Snapshot clock for liberação derivation.
+      const now = ctx.deps.clock();
+
+      // Pre-resolve contribuição names across this pagamento's items.
+      const referencedIds = new Set<string>();
+      for (const item of pagamento.intencao.items) {
+        if (item.tipo === "contribuicao") {
+          referencedIds.add(item.idContribuicao as unknown as string);
+        }
+      }
+      const contribuicaoNomesById = new Map<string, string>();
+      await Promise.all(
+        Array.from(referencedIds).map(async (id) => {
+          const found = await ctx.deps.contribuicaoRepository.findById(
+            id as IdContribuicao,
+          );
+          if (found) contribuicaoNomesById.set(id, found.nome);
+        }),
+      );
+      // campanha is unused below but the resolveAdminPagamentoContext call
+      // above is what enforces the tenant guard — keep it destructured to
+      // silence the lint and document intent.
+      void campanha;
+
+      const lancamentos =
+        await ctx.deps.livroFinanceiroRepository.findLancamentosByIdPagamento(
+          pagamento.id as unknown as IdPagamentoReferencia,
+        );
+
+      const webhookRecords =
+        await ctx.deps.webhookEventArchive.findByPagamentoId(pagamento.id, {
+          orderBy: "received_at_asc",
+        });
+
+      const dto = toPagamentoAdminDTO(pagamento, now, contribuicaoNomesById);
+      return {
+        pagamento: {
+          ...dto,
+          lancamentos: lancamentos.map(toLancamentoAdminDTO),
+        },
+        webhookEvents: webhookRecords.map(toWebhookEventAdminDTO),
+      };
+    }),
 });
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -1196,23 +1489,10 @@ const pagamentosRouter = t.router({
  * array, success) from "you don't have access" (403).
  * ────────────────────────────────────────────────────────────────────── */
 
-const WebhookEventAdminDTOSchema = z.object({
-  id: z.string(),
-  provider: z.string(),
-  eventType: z.string(),
-  receivedAt: z.string(), // ISO
-  signatureValid: z.boolean(),
-  processedAt: z.string().nullable(), // ISO | null
-  processingError: z.string().nullable(),
-  pagamentoId: z.string().nullable(),
-});
-export type WebhookEventAdminDTO = z.infer<typeof WebhookEventAdminDTOSchema>;
-
-const WebhookEventDetailDTOSchema = WebhookEventAdminDTOSchema.extend({
-  rawPayload: z.unknown(),
-  signatureHeader: z.string(),
-});
-export type WebhookEventDetailDTO = z.infer<typeof WebhookEventDetailDTOSchema>;
+// WebhookEventAdminDTOSchema + WebhookEventDetailDTOSchema have been hoisted
+// above `pagamentosRouter` (aperture-gf2t5) — `pagamentos.findById` rides
+// webhook events along on its detail payload. Declared here as comment-only
+// breadcrumb so the webhook section still reads coherently.
 
 /**
  * Resolve the admin tenant-guard chain from a `pagamentoId`. Throws:
