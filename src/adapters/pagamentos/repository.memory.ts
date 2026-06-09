@@ -76,10 +76,10 @@ export class PagamentoRepositoryMemory implements PagamentoRepository {
   }
 
   /**
-   * Linear scan over the in-memory map (aperture-i0pz8). Filters by
-   * `intencao.idContribuicao` and returns ALL matches in `criadoEm ASC`
-   * order — a single contribuicao may have multiple pagamentos over
-   * time (retries after rejection, saga reprocessing).
+   * Linear scan (aperture-i0pz8 + plan 0016 / aperture-eg1s2 reshape).
+   * Post-0016 a pagamento carries a multi-item cart; a "match" means
+   * ANY contribuicao-tipo item references the given idContribuicao.
+   * Returns ALL matching pagamentos in `criadoEm ASC` order.
    */
   async findByContribuicao(idContribuicao: IdContribuicaoPagamento): Promise<readonly Pagamento[]> {
     return tracer.startActiveSpan('db.pagamentos.findByContribuicao', async (span) => {
@@ -87,7 +87,10 @@ export class PagamentoRepositoryMemory implements PagamentoRepository {
       try {
         const matches: Pagamento[] = [];
         for (const pagamento of this.pagamentos.values()) {
-          if (pagamento.intencao.idContribuicao === idContribuicao) {
+          const hit = pagamento.intencao.items.some(
+            (item) => item.tipo === 'contribuicao' && item.idContribuicao === idContribuicao,
+          );
+          if (hit) {
             matches.push(pagamento);
           }
         }
@@ -176,34 +179,40 @@ export class PagamentoRepositoryMemory implements PagamentoRepository {
   }
 
   /**
-   * Plan 0015 (aperture-ucgok). Linear scan: returns the subset of the
-   * input IDs that have at least one aprovado pagamento. Order not
-   * guaranteed; caller should treat as a Set.
+   * Plan 0016 Phase 2 (aperture-eg1s2). Linear scan over the in-memory
+   * map: for each input id, sums `quantidade` across all
+   * contribuição-tipo items of aprovado pagamentos. Returns a Map with
+   * every input key (zeros for misses) — same contract as the postgres
+   * adapter.
    */
-  async findIdsContribuicoesComPagamentoAprovado(
+  async somarQuantidadesContribuicoesEmPagamentosAprovados(
     idsContribuicao: readonly IdContribuicaoPagamento[],
-  ): Promise<readonly IdContribuicaoPagamento[]> {
+  ): Promise<Map<IdContribuicaoPagamento, number>> {
     return tracer.startActiveSpan(
-      'db.pagamentos.findIdsContribuicoesComPagamentoAprovado',
+      'db.pagamentos.somarQuantidadesContribuicoesEmPagamentosAprovados',
       async (span) => {
         span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
         try {
+          const result = new Map<IdContribuicaoPagamento, number>();
+          for (const id of idsContribuicao) {
+            result.set(id, 0);
+          }
           if (idsContribuicao.length === 0) {
             span.setStatus({ code: SpanStatusCode.OK });
-            return [];
+            return result;
           }
-          const candidates = new Set(idsContribuicao);
-          const matched = new Set<IdContribuicaoPagamento>();
+          const candidates = new Set<IdContribuicaoPagamento>(idsContribuicao);
           for (const pagamento of this.pagamentos.values()) {
-            if (
-              pagamento.status === 'aprovado' &&
-              candidates.has(pagamento.intencao.idContribuicao)
-            ) {
-              matched.add(pagamento.intencao.idContribuicao);
+            if (pagamento.status !== 'aprovado') continue;
+            for (const item of pagamento.intencao.items) {
+              if (item.tipo !== 'contribuicao') continue;
+              const idC = item.idContribuicao;
+              if (!candidates.has(idC)) continue;
+              result.set(idC, (result.get(idC) ?? 0) + item.quantidade);
             }
           }
           span.setStatus({ code: SpanStatusCode.OK });
-          return [...matched];
+          return result;
         } catch (error: unknown) {
           span.recordException(error as Error);
           span.setStatus({ code: SpanStatusCode.ERROR });
@@ -241,18 +250,25 @@ export class PagamentoRepositoryMemory implements PagamentoRepository {
           }
           const candidates = new Set<string>(idsContribuicao);
           // Group aprovado pagamentos by idContribuicao, keeping the
-          // most-recent one (by criadoEm).
+          // most-recent one (by criadoEm). Post-0016 a pagamento can
+          // hold multiple contribuição-tipo items; we visit each item
+          // and consider the pagamento a "winner" for each
+          // contribuição id it carries (the same pagamento can be the
+          // winner for several ids in a multi-item cart).
           const winners = new Map<string, Pagamento>();
           for (const pagamento of this.pagamentos.values()) {
             if (pagamento.status !== 'aprovado') continue;
-            const idC = pagamento.intencao.idContribuicao as unknown as string;
-            if (!candidates.has(idC)) continue;
-            const current = winners.get(idC);
-            if (
-              current === undefined ||
-              pagamento.criadoEm.getTime() > current.criadoEm.getTime()
-            ) {
-              winners.set(idC, pagamento);
+            for (const item of pagamento.intencao.items) {
+              if (item.tipo !== 'contribuicao') continue;
+              const idC = item.idContribuicao as unknown as string;
+              if (!candidates.has(idC)) continue;
+              const current = winners.get(idC);
+              if (
+                current === undefined ||
+                pagamento.criadoEm.getTime() > current.criadoEm.getTime()
+              ) {
+                winners.set(idC, pagamento);
+              }
             }
           }
           for (const [idC, pagamento] of winners.entries()) {

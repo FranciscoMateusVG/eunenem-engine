@@ -165,7 +165,7 @@ export async function estornarPagamento(
         idPagamento: pagamento.id,
         chargeExternalRef: pagamento.intencao.chargeExternalRef,
         paymentIntentExternalRef: pagamento.intencao.paymentIntentExternalRef,
-        amountCents: pagamento.intencao.amountCents,
+        amountCents: pagamento.intencao.composicaoValoresAggregate.totalPaidCents,
         ...(parsed.reason ? { reason: parsed.reason } : {}),
       });
       if (refundResult.status === 'recusado') {
@@ -188,8 +188,9 @@ export async function estornarPagamento(
 
       logger.info('checkout.pagamento.estornado', {
         idPagamento: pagamento.id,
-        idContribuicao: pagamento.intencao.idContribuicao,
-        amountCents: pagamento.intencao.amountCents,
+        idCampanha: pagamento.intencao.idCampanha,
+        numeroDeItens: pagamento.intencao.items.length,
+        amountCents: pagamento.intencao.composicaoValoresAggregate.totalPaidCents,
         refundId: refundResult.id,
         refundReason: parsed.reason ?? 'requested_by_customer',
       });

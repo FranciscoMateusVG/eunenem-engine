@@ -5,7 +5,7 @@ import {
   calcularValorTaxaPercentual,
   type Campanha,
   computeCardSurchargeCents,
-  contribuicaoEstaIndisponivel,
+  esgotada,
   type IdContribuicao,
   type IdIntencaoPagamento,
   type IdOpcaoContribuicao,
@@ -226,13 +226,13 @@ export const paginaRouter = t.router({
         items.map(async (c) => {
           const feeAmountCents = calcularValorTaxaPercentual(c.valor, tarifaPresente.percentageBps);
           const valorComTaxa = c.valor + feeAmountCents;
-          // Post-Phase-1 (plan 0015): contribuição has no stored status.
-          // Compute the "indisponivel" predicate per-slot via the EXISTS
-          // query against approved pagamentos (uses the partial index
-          // pagamentos_aprovado_por_contribuicao_idx — sub-ms per slot).
-          const indisponivel = await contribuicaoEstaIndisponivel(
+          // Plan 0016 Phase 2 (aperture-eg1s2): esgotada predicate
+          // derived from sum-of-quantidades vs slot cap (uses partial
+          // index idx_intencao_items_contribuicao_aprovado).
+          const indisponivel = await esgotada(
             {
               pagamentoRepository: ctx.deps.pagamentoRepository,
+              contribuicaoRepository: ctx.deps.contribuicaoRepository,
               observability: ctx.deps.observability,
             },
             { idContribuicao: c.id },

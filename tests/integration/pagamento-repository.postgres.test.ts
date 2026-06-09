@@ -73,7 +73,7 @@ afterAll(async () => {
 // SKIPPED — unblock when Phase 2 (aperture-eg1s2) rewrites the postgres
 // adapter to match the post-Phase-0 schema. See the file-header note for
 // the full gate.
-describe.skip('PagamentoRepository conformance — Postgres (gated on Plan 0016 Phase 2)', () => {
+describe('PagamentoRepository conformance — Postgres', () => {
   describePagamentoRepositoryConformance('Postgres', {
     factory: () => new PagamentoRepositoryPostgres(testDb.db),
     resetState: () => truncatePagamentosTables(testDb.db),
@@ -86,7 +86,7 @@ describe.skip('PagamentoRepository conformance — Postgres (gated on Plan 0016 
 // ═══════════════ Postgres-specific tests ═══════════════
 
 // SKIPPED — same Phase 0 schema-drift gate as the conformance suite above.
-describe.skip('PagamentoRepositoryPostgres — Postgres-specific (gated on Plan 0016 Phase 2)', () => {
+describe('PagamentoRepositoryPostgres — Postgres-specific', () => {
   let repo: PagamentoRepositoryPostgres;
 
   beforeEach(async () => {
@@ -135,16 +135,16 @@ describe.skip('PagamentoRepositoryPostgres — Postgres-specific (gated on Plan 
     expect(failure.reason).toBeInstanceOf(PagamentoJaExisteError);
   });
 
-  it('findIdsContribuicoesComPagamentoAprovado annotates the span with batch.size', async () => {
+  it('somarQuantidadesContribuicoesEmPagamentosAprovados annotates the span with batch.size', async () => {
     // Postgres-only span annotation (the memory adapter does not record
     // batch.size). Documenting the divergence with a postgres-specific
     // assertion keeps the shared conformance suite system-agnostic.
     const ids = [randomUUID(), randomUUID(), randomUUID()];
-    await repo.findIdsContribuicoesComPagamentoAprovado(ids);
+    await repo.somarQuantidadesContribuicoesEmPagamentosAprovados(ids);
 
     const spans = testObs.getSpans();
     const span = spans.find(
-      (s) => s.name === 'db.pagamentos.findIdsContribuicoesComPagamentoAprovado',
+      (s) => s.name === 'db.pagamentos.somarQuantidadesContribuicoesEmPagamentosAprovados',
     );
     expect(span).toBeDefined();
     expect(span?.attributes['batch.size']).toBe(3);

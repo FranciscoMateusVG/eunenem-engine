@@ -70,11 +70,17 @@ export async function removerContribuicao(
         );
       }
 
-      // Plan 0015: EXISTS aprovado pagamento for this contribuicao? then refuse.
-      const indisponivel = await pagamentoRepository.findIdsContribuicoesComPagamentoAprovado([
+      // Plan 0016 (aperture-eg1s2): refuse delete if ANY contribuição-tipo
+      // item across aprovado pagamentos references this slot. Same
+      // protective intent as the pre-0016 binary check; the new shape
+      // sums quantidade per slot — any positive sum means the slot was
+      // sold and must not be removed (the lançamento ledger still
+      // references it).
+      const sold = await pagamentoRepository.somarQuantidadesContribuicoesEmPagamentosAprovados([
         idContribuicao,
       ]);
-      if (indisponivel.length > 0) {
+      const quantidadeVendida = sold.get(idContribuicao) ?? 0;
+      if (quantidadeVendida > 0) {
         throw new ArrecadacaoContribuicaoIndisponivelError(idContribuicao);
       }
 

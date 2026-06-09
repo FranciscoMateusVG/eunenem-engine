@@ -103,6 +103,7 @@ export interface LancamentosFinanceiros {
   id: string;
   id_campanha: string | null;
   id_contribuicao: string;
+  id_item_pagamento: string;
   id_pagamento: string;
   id_repasse: string | null;
   tipo: string;

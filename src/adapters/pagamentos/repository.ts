@@ -68,24 +68,37 @@ export interface PagamentoRepository {
    */
   findByChargeExternalRef(ch: string): Promise<Pagamento | undefined>;
   /**
-   * Plan 0015 / aperture-ucgok. Bulk EXISTS predicate: returns the
-   * subset of the input IDs that have AT LEAST ONE aprovado pagamento.
-   * One indexed query for the whole set (the Postgres adapter uses
-   * `pagamentos_aprovado_por_contribuicao_idx` — the partial index
-   * created by migration 019). Used by:
-   *   - `contribuicaoEstaIndisponivel` (single-id wrapper, the saga's
-   *     early-fail gate);
-   *   - `obterContribuicoesPrecalculadasCampanha` (visitor-facing
-   *     read; computes the "indisponivel" badge for every gift slot
-   *     in one query instead of N).
+   * Plan 0016 / aperture-eg1s2. Bulk SUM aggregator: returns the total
+   * quantidade consumed per contribuição across all aprovado
+   * pagamentos' contribuicao-tipo items. One indexed query for the
+   * whole set (Postgres adapter uses
+   * `idx_intencao_items_contribuicao_aprovado` — the partial index
+   * INCLUDE (quantidade) created by migration 022). Replaces the
+   * pre-0016 `findIdsContribuicoesComPagamentoAprovado` binary
+   * predicate.
    *
-   * Returns an empty array when none of the input IDs have aprovado
-   * pagamentos. Order of returned IDs is not guaranteed; callers
-   * should treat the result as a Set.
+   * Returns a Map keyed by idContribuicao. Entries:
+   *   - When at least one aprovado item exists for the contribuição
+   *     → returns the SUM of `quantidade` across all of them.
+   *   - When no aprovado item exists → returns 0.
+   *
+   * Empty input returns an empty Map without touching the DB.
+   *
+   * Used by:
+   *   - `quantidadeRestante(contribuicao)` use-case (the slot's
+   *     remaining cap; subtracts this sum from contribuicao.quantidade).
+   *   - `esgotada(contribuicao)` use-case (derived: quantidadeRestante <= 0).
+   *   - `obterContribuicoesPrecalculadasCampanha` (visitor-facing
+   *     read; computes the N/M badge for every gift slot in one query
+   *     instead of N).
+   *
+   * Note on overshoot: the sum can exceed contribuicao.quantidade
+   * (locked decision #10 of plan 0016 — admin pockets the extra money,
+   * the predicate just surfaces esgotada=true).
    */
-  findIdsContribuicoesComPagamentoAprovado(
+  somarQuantidadesContribuicoesEmPagamentosAprovados(
     idsContribuicao: readonly IdContribuicaoPagamento[],
-  ): Promise<readonly IdContribuicaoPagamento[]>;
+  ): Promise<Map<IdContribuicaoPagamento, number>>;
   /**
    * Plan 0015 / aperture-6iqum. Bulk lookup of the most-recent
    * aprovado pagamento's `intencao.contribuinte` for each requested

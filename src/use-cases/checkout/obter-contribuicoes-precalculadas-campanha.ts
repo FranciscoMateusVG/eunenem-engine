@@ -119,13 +119,20 @@ export async function obterContribuicoesPrecalculadasCampanha(
       span.setAttribute('checkout.contribuicoes.count', contribuicoes.length);
       span.setAttribute('checkout.opcoes.count', campanha.opcoes.length);
 
-      // Plan 0015 (aperture-ucgok): batch-resolve the disponivel
-      // predicate. One indexed Pagamento query for the whole campanha
-      // instead of N EXISTS calls.
-      const idsIndisponiveis = await pagamentoRepository.findIdsContribuicoesComPagamentoAprovado(
+      // Plan 0016 (aperture-eg1s2): batch-resolve the esgotada predicate
+      // across the campanha's contribuições. One indexed Pagamento query
+      // sums `quantidade` per slot; we derive esgotada (quantidade_restante <= 0)
+      // per slot. Replaces the pre-0016 binary indisponivel set.
+      const sums = await pagamentoRepository.somarQuantidadesContribuicoesEmPagamentosAprovados(
         contribuicoes.map((c) => c.id as unknown as IdContribuicaoPagamento),
       );
-      const indisponiveisSet = new Set<string>(idsIndisponiveis);
+      const indisponiveisSet = new Set<string>();
+      for (const c of contribuicoes) {
+        const sold = sums.get(c.id as unknown as IdContribuicaoPagamento) ?? 0;
+        if (c.quantidade - sold <= 0) {
+          indisponiveisSet.add(c.id);
+        }
+      }
 
       const contribuicoesPorOpcao = groupContribuicoesPorOpcao(contribuicoes);
 

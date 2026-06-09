@@ -36,6 +36,10 @@ import type { ReadableSpan } from '@opentelemetry/sdk-trace-base';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { PagamentoRepository } from '../../src/adapters/pagamentos/repository.js';
 import {
+  criarItemContribuicao,
+  type ItemDoPagamento,
+} from '../../src/domain/pagamentos/entities/item-do-pagamento.js';
+import {
   criarPagamentoPendente,
   type Pagamento,
   PagamentoSchema,
@@ -274,23 +278,25 @@ export function describePagamentoRepositoryConformance(name: string, options: Co
       expect((await repo.findByChargeExternalRef('ch_test_round_trip'))?.id).toBe(pagamento.id);
     });
 
-    // ───────── findIdsContribuicoesComPagamentoAprovado (Plan 0015, aperture-ucgok) ─────────
+    // ───── somarQuantidadesContribuicoesEmPagamentosAprovados (Plan 0016 Phase 2, aperture-eg1s2) ─────
 
-    it('findIdsContribuicoesComPagamentoAprovado returns empty array for empty input', async () => {
-      await expect(repo.findIdsContribuicoesComPagamentoAprovado([])).resolves.toEqual([]);
+    it('somarQuantidadesContribuicoesEmPagamentosAprovados returns empty Map for empty input', async () => {
+      const result = await repo.somarQuantidadesContribuicoesEmPagamentosAprovados([]);
+      expect(result.size).toBe(0);
     });
 
-    it('findIdsContribuicoesComPagamentoAprovado returns empty array when no aprovado pagamentos exist', async () => {
+    it('somarQuantidadesContribuicoesEmPagamentosAprovados returns 0 for every input id when no aprovado pagamentos exist', async () => {
       const idA = randomUUID();
       const idB = randomUUID();
-      // Both contribuicoes have pagamentos, but neither is aprovado.
       await repo.save(makePagamento({ idContribuicao: idA, status: 'pendente' }));
       await repo.save(makePagamento({ idContribuicao: idB, status: 'rejeitado' }));
 
-      await expect(repo.findIdsContribuicoesComPagamentoAprovado([idA, idB])).resolves.toEqual([]);
+      const result = await repo.somarQuantidadesContribuicoesEmPagamentosAprovados([idA, idB]);
+      expect(result.get(idA)).toBe(0);
+      expect(result.get(idB)).toBe(0);
     });
 
-    it('findIdsContribuicoesComPagamentoAprovado returns only ids that have at least one aprovado pagamento', async () => {
+    it('somarQuantidadesContribuicoesEmPagamentosAprovados sums only aprovado contribuição-tipo items', async () => {
       const idAprovada = randomUUID();
       const idPendente = randomUUID();
       const idRejeitada = randomUUID();
@@ -300,27 +306,30 @@ export function describePagamentoRepositoryConformance(name: string, options: Co
       await repo.save(makePagamento({ idContribuicao: idPendente, status: 'pendente' }));
       await repo.save(makePagamento({ idContribuicao: idRejeitada, status: 'rejeitado' }));
 
-      const found = await repo.findIdsContribuicoesComPagamentoAprovado([
+      const result = await repo.somarQuantidadesContribuicoesEmPagamentosAprovados([
         idAprovada,
         idPendente,
         idRejeitada,
         idSemPagamento,
       ]);
-      expect(found).toEqual([idAprovada]);
+      // makePagamento defaults to quantidade=1 per item.
+      expect(result.get(idAprovada)).toBe(1);
+      expect(result.get(idPendente)).toBe(0);
+      expect(result.get(idRejeitada)).toBe(0);
+      expect(result.get(idSemPagamento)).toBe(0);
     });
 
-    it('findIdsContribuicoesComPagamentoAprovado deduplicates ids when multiple aprovado pagamentos exist per contribuicao', async () => {
+    it('somarQuantidadesContribuicoesEmPagamentosAprovados accumulates across multiple aprovado pagamentos per contribuição', async () => {
       const idTarget = randomUUID();
-      // Plan 0015 locked decision #6 (accept double-pay) makes multiple
-      // aprovado pagamentos per contribuicao possible — the result must
-      // still contain idTarget exactly once.
+      // Locked decision #6 (accept double-pay) + Plan 0016 multi-cart shape:
+      // three separate pagamentos all aprovado, each carrying a single
+      // contribuicao item with quantidade=1 → sum = 3.
       await repo.save(makePagamento({ idContribuicao: idTarget, status: 'aprovado' }));
       await repo.save(makePagamento({ idContribuicao: idTarget, status: 'aprovado' }));
       await repo.save(makePagamento({ idContribuicao: idTarget, status: 'aprovado' }));
 
-      const found = await repo.findIdsContribuicoesComPagamentoAprovado([idTarget]);
-      expect(found).toHaveLength(1);
-      expect(found[0]).toBe(idTarget);
+      const result = await repo.somarQuantidadesContribuicoesEmPagamentosAprovados([idTarget]);
+      expect(result.get(idTarget)).toBe(3);
     });
 
     // ───────── findContribuintesFromLatestAprovadoPagamento (Plan 0015, aperture-6iqum) ─────────
@@ -569,12 +578,12 @@ export function describePagamentoRepositoryConformance(name: string, options: Co
       expect(span?.attributes['db.collection.name']).toBe('pagamentos');
     });
 
-    it('findIdsContribuicoesComPagamentoAprovado emits a db.pagamentos.findIdsContribuicoesComPagamentoAprovado span with correct attributes', async () => {
-      await repo.findIdsContribuicoesComPagamentoAprovado([randomUUID()]);
+    it('somarQuantidadesContribuicoesEmPagamentosAprovados emits a db.pagamentos.somarQuantidadesContribuicoesEmPagamentosAprovados span with correct attributes', async () => {
+      await repo.somarQuantidadesContribuicoesEmPagamentosAprovados([randomUUID()]);
 
       const span = findSpan(
         options.getSpans(),
-        'db.pagamentos.findIdsContribuicoesComPagamentoAprovado',
+        'db.pagamentos.somarQuantidadesContribuicoesEmPagamentosAprovados',
       );
       expect(span).toBeDefined();
       expect(span?.attributes['db.system']).toBe(options.expectedDbSystem);
@@ -636,20 +645,44 @@ interface MakePagamentoOverrides {
 export function makePagamento(overrides: MakePagamentoOverrides = {}): Pagamento {
   const id = (overrides.id ?? randomUUID()) as IdPagamento;
   const idContribuicao = (overrides.idContribuicao ?? randomUUID()) as IdContribuicaoPagamento;
+  const idCampanha = randomUUID();
   const criadoEm = overrides.criadoEm ?? new Date('2026-05-01T12:00:00.000Z');
+
+  // Plan 0016 Phase 2 (aperture-eg1s2): multi-item cart shape. Build a
+  // single-contribuição PIX cart (1 item, no surcharge) for conformance
+  // defaults — repository tests focus on persistence, not cart
+  // construction. Multi-item / cartão fixtures live in the per-cart
+  // tests at tests/unit/pagamentos/multi-item-cart.test.ts.
+  const item: ItemDoPagamento = criarItemContribuicao({
+    id: randomUUID() as never,
+    composicaoValoresItem: {
+      tipo: 'contribuicao',
+      idContribuicao,
+      quantidade: 1,
+      contributionUnitAmountCents: 8000 as never,
+      feeUnitAmountCents: 400 as never,
+      receiverUnitAmountCents: 8000 as never,
+      lineContributionAmountCents: 8000 as never,
+      lineFeeAmountCents: 400 as never,
+      lineReceiverAmountCents: 8000 as never,
+    },
+    criadoEm,
+  });
 
   const base = criarPagamentoPendente({
     idPagamento: id,
     idIntencaoPagamento: randomUUID() as never,
-    composicaoValores: {
-      idContribuicao,
-      contributionAmountCents: 8000,
-      feeAmountCents: 400,
-      totalPaidCents: 8400,
-      receiverAmountCents: 8000,
+    items: [item],
+    composicaoValoresAggregate: {
+      idCampanha: idCampanha as never,
+      totalContributionCents: 8000 as never,
+      totalFeeCents: 400 as never,
+      totalReceiverCents: 8000 as never,
+      totalSurchargeCents: 0,
+      totalPaidCents: 8400 as never,
       responsavelTaxa: 'contribuinte',
     },
-    valorACobrarCents: 8400,
+    valorACobrarCents: 8400 as never,
     metodo: 'pix',
     criadoEm,
   });

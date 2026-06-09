@@ -390,28 +390,37 @@ const contribuicoesRouter = t.router({
         await ctx.deps.contribuicaoRepository.findByCampanhaId(
           input.idCampanha as IdCampanha,
         );
-      // aperture-6iqum: bulk-fetch indisponivel set + contribuinte
-      // attribution in TWO indexed queries (was N+1 via the per-row
-      // contribuicaoEstaIndisponivel call). Empty-input fast-path
-      // short-circuits both.
+      // Plan 0016 Phase 2 (aperture-eg1s2): bulk-fetch esgotada set +
+      // contribuinte attribution in TWO indexed queries. The sums
+      // query gives `quantidade` sold per slot; esgotada derives from
+      // `quantidade - sold <= 0`.
       const ids = contribuicoes.map(
         (c) => c.id as unknown as IdContribuicaoPagamento,
       );
-      const [indisponiveisArr, contribuintesMap] =
+      const [sumsMap, contribuintesMap] =
         ids.length === 0
-          ? [[] as readonly IdContribuicaoPagamento[], new Map() as Map<
-              string,
-              { nome: string; email: string; mensagem?: string } | null
-            >]
+          ? [
+              new Map<IdContribuicaoPagamento, number>(),
+              new Map() as Map<
+                string,
+                { nome: string; email: string; mensagem?: string } | null
+              >,
+            ]
           : await Promise.all([
-              ctx.deps.pagamentoRepository.findIdsContribuicoesComPagamentoAprovado(
+              ctx.deps.pagamentoRepository.somarQuantidadesContribuicoesEmPagamentosAprovados(
                 ids,
               ),
               ctx.deps.pagamentoRepository.findContribuintesFromLatestAprovadoPagamento(
                 ids,
               ),
             ]);
-      const indisponivelSet = new Set<string>(indisponiveisArr);
+      const indisponivelSet = new Set<string>();
+      for (const c of contribuicoes) {
+        const sold = sumsMap.get(c.id as unknown as IdContribuicaoPagamento) ?? 0;
+        if (c.quantidade - sold <= 0) {
+          indisponivelSet.add(c.id);
+        }
+      }
       return {
         contribuicoes: contribuicoes.map((c) =>
           toContribuicaoAdminDTO(c, indisponivelSet, contribuintesMap),
@@ -478,19 +487,19 @@ const contribuicoesRouter = t.router({
       // pagamento's contribuinte" lookup if the campanha view needs it.
       const contribuinteSummary: UsuarioSummaryDTO | null = null;
 
-      // aperture-6iqum: single-row resolution via the same bulk port
-      // (Map with one entry). Mirrors the listByCampanha shape so the
-      // projection function stays uniform.
+      // Plan 0016 Phase 2 (aperture-eg1s2): single-row resolution via
+      // the same bulk somar port (Map with one entry). Mirrors the
+      // listByCampanha shape so the projection function stays uniform.
       const idCp = contribuicao.id as unknown as IdContribuicaoPagamento;
-      const [indisponiveisArr, contribuintesMap] = await Promise.all([
-        ctx.deps.pagamentoRepository.findIdsContribuicoesComPagamentoAprovado([
-          idCp,
-        ]),
-        ctx.deps.pagamentoRepository.findContribuintesFromLatestAprovadoPagamento([
-          idCp,
-        ]),
+      const [sumsMap, contribuintesMap] = await Promise.all([
+        ctx.deps.pagamentoRepository.somarQuantidadesContribuicoesEmPagamentosAprovados([idCp]),
+        ctx.deps.pagamentoRepository.findContribuintesFromLatestAprovadoPagamento([idCp]),
       ]);
-      const indisponivelSet = new Set<string>(indisponiveisArr);
+      const sold = sumsMap.get(idCp) ?? 0;
+      const indisponivelSet = new Set<string>();
+      if (contribuicao.quantidade - sold <= 0) {
+        indisponivelSet.add(contribuicao.id);
+      }
 
       return {
         contribuicao: toContribuicaoAdminDTO(

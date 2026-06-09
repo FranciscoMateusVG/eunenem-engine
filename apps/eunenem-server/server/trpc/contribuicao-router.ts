@@ -12,7 +12,7 @@ import {
   atualizarContribuicao,
   type Campanha,
   type Contribuicao,
-  contribuicaoEstaIndisponivel,
+  esgotada,
   criarContribuicoesEmLote,
   type IdCampanha,
   type IdContribuicao,
@@ -313,18 +313,24 @@ export const contribuicaoRouter = t.router({
         },
         { idCampanha: campanha.id, idOpcaoContribuicao: idOpcaoPresentes },
       );
-      // aperture-ocw8r: bulk EXISTS lookup once for all rows (one indexed
-      // pagamentos query — partial index `pagamentos_aprovado_por_contribuicao_idx`).
-      // Matches the pattern admin-router uses single-row + the pattern
-      // obterContribuicoesPrecalculadasCampanha uses for visitor reads.
-      // Falls back to empty set if no slots exist.
-      const idsIndisponiveis =
+      // Plan 0016 (aperture-eg1s2): bulk SUM lookup once for all rows
+      // (one indexed pagamentos query — partial index
+      // `idx_intencao_items_contribuicao_aprovado` INCLUDE quantidade).
+      // Each slot's esgotada state derives from quantidade_restante <= 0.
+      // Falls back to empty map if no slots exist.
+      const sums =
         items.length === 0
-          ? []
-          : await ctx.deps.pagamentoRepository.findIdsContribuicoesComPagamentoAprovado(
+          ? new Map<IdContribuicaoPagamento, number>()
+          : await ctx.deps.pagamentoRepository.somarQuantidadesContribuicoesEmPagamentosAprovados(
               items.map((c) => c.id as unknown as IdContribuicaoPagamento),
             );
-      const indisponiveisSet = new Set<string>(idsIndisponiveis);
+      const indisponiveisSet = new Set<string>();
+      for (const c of items) {
+        const sold = sums.get(c.id as unknown as IdContribuicaoPagamento) ?? 0;
+        if (c.quantidade - sold <= 0) {
+          indisponiveisSet.add(c.id);
+        }
+      }
       return items.map((c) => toListItem(c, indisponiveisSet.has(c.id)));
     } catch (err) {
       throw toTRPCError(err);
@@ -445,14 +451,15 @@ export const contribuicaoRouter = t.router({
             grupo: input.grupo,
           },
         );
-        // aperture-ocw8r: single-row EXISTS via the wrapper that fan-outs
-        // to the same bulk port method. atualizarContribuicao already
-        // rejects updates against `indisponivel` slots upstream, so in
-        // practice this returns `false` — but we compute it explicitly
-        // to keep the projection contract consistent with `list`.
-        const indisponivel = await contribuicaoEstaIndisponivel(
+        // Plan 0016 (aperture-eg1s2): single-row esgotada check.
+        // atualizarContribuicao already rejects updates against
+        // sold-out slots upstream, so in practice this returns
+        // `false` — but we compute it explicitly to keep the
+        // projection contract consistent with `list`.
+        const indisponivel = await esgotada(
           {
             pagamentoRepository: ctx.deps.pagamentoRepository,
+            contribuicaoRepository: ctx.deps.contribuicaoRepository,
             observability: ctx.deps.observability,
           },
           { idContribuicao: updated.id },

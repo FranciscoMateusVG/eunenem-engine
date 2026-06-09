@@ -64,7 +64,7 @@ export async function aprovarPagamento(
       const transacao = await pagamentoProvider.solicitarPagamento({
         idPagamento: pagamento.id,
         idIntencaoPagamento: pagamento.intencao.id,
-        amountCents: pagamento.intencao.amountCents,
+        amountCents: pagamento.intencao.composicaoValoresAggregate.totalPaidCents,
         metodo: pagamento.intencao.metodo,
         externalRef: pagamento.intencao.externalRef,
       });
@@ -73,9 +73,9 @@ export async function aprovarPagamento(
         throw new PagamentoTransicaoStatusInvalidaError(pagamento.id, pagamento.status, 'aprovado');
       }
 
-      if (transacao.amountCents !== pagamento.intencao.amountCents) {
+      if (transacao.amountCents !== pagamento.intencao.composicaoValoresAggregate.totalPaidCents) {
         throw new PagamentoValorDivergenteError(
-          pagamento.intencao.amountCents,
+          pagamento.intencao.composicaoValoresAggregate.totalPaidCents,
           transacao.amountCents,
         );
       }
@@ -95,8 +95,9 @@ export async function aprovarPagamento(
       logger.info('pagamento.aprovado', {
         idPagamento: aprovado.id,
         idIntencaoPagamento: aprovado.intencao.id,
-        idContribuicao: aprovado.intencao.idContribuicao,
-        amountCents: aprovado.intencao.amountCents,
+        idCampanha: aprovado.intencao.idCampanha,
+        numeroDeItens: aprovado.intencao.items.length,
+        amountCents: aprovado.intencao.composicaoValoresAggregate.totalPaidCents,
         idTransacaoExterna: transacao.id,
       });
 

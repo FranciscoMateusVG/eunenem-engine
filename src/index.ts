@@ -250,14 +250,15 @@ export { TipoEventoSchema } from './domain/evento/value-objects/tipo-evento.js';
 
 export type {
   EfeitosFinanceirosPagamentoAprovado,
-  IdsLancamentosFinanceiros,
+  IdsLancamentosFinanceirosPorPagamento,
+  IdsLancamentosPorItem,
+  ItemDoPagamentoFinanceiro,
   LancamentoFinanceiro,
   StatusPagamentoFinanceiro,
   TipoLancamentoFinanceiro,
 } from './domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
 export {
   criarLancamentosParaPagamentoAprovado,
-  IdsLancamentosFinanceirosSchema,
   LancamentoFinanceiroSchema,
   StatusPagamentoFinanceiroSchema,
   TipoLancamentoFinanceiroSchema,
@@ -613,18 +614,20 @@ export {
   AtualizarContribuicaoInputSchema,
   atualizarContribuicao,
 } from './use-cases/arrecadacao/atualizar-contribuicao.js';
-// Plan 0015 (aperture-ucgok). associarContribuinteContribuicao removed;
-// contribuinte writes happen on IntencaoPagamento inside
-// finalizarPagamentoAprovado. The EXISTS-aprovado-pagamento predicate
-// replaces the old status helper:
+// Plan 0016 Phase 2 (aperture-eg1s2). Replaces the pre-0016
+// contribuicaoEstaIndisponivel binary predicate with the
+// quantidadeRestante (count of remaining slots) + esgotada
+// (derived boolean) pair. Pure rename per operator review nit C —
+// no @deprecated alias for the old name.
 export type {
-  ContribuicaoEstaIndisponivelDeps,
-  ContribuicaoEstaIndisponivelInput,
-} from './use-cases/arrecadacao/contribuicao-esta-indisponivel.js';
+  QuantidadeRestanteDeps,
+  QuantidadeRestanteInput,
+} from './use-cases/arrecadacao/quantidade-restante.js';
 export {
-  ContribuicaoEstaIndisponivelInputSchema,
-  contribuicaoEstaIndisponivel,
-} from './use-cases/arrecadacao/contribuicao-esta-indisponivel.js';
+  esgotada,
+  QuantidadeRestanteInputSchema,
+  quantidadeRestante,
+} from './use-cases/arrecadacao/quantidade-restante.js';
 export type {
   CriarCampanhaDeps,
   CriarCampanhaInput,
@@ -709,15 +712,16 @@ export {
   FinalizarPagamentoRejeitadoInputSchema,
   finalizarPagamentoRejeitado,
 } from './use-cases/checkout/finalizar-pagamento-rejeitado.js';
+// Plan 0016 Phase 2 (aperture-eg1s2): saga renamed to multi-item carrinho.
 export type {
-  IniciarPagamentoContribuicaoDeps,
-  IniciarPagamentoContribuicaoInput,
-  IniciarPagamentoContribuicaoResult,
-} from './use-cases/checkout/iniciar-pagamento-contribuicao.js';
+  IniciarPagamentoCarrinhoDeps,
+  IniciarPagamentoCarrinhoInput,
+  IniciarPagamentoCarrinhoResult,
+} from './use-cases/checkout/iniciar-pagamento-carrinho.js';
 export {
-  IniciarPagamentoContribuicaoInputSchema,
-  iniciarPagamentoContribuicao,
-} from './use-cases/checkout/iniciar-pagamento-contribuicao.js';
+  IniciarPagamentoCarrinhoInputSchema,
+  iniciarPagamentoCarrinho,
+} from './use-cases/checkout/iniciar-pagamento-carrinho.js';
 export type {
   IniciarRepasseRecebedorDeps,
   IniciarRepasseRecebedorInput,
@@ -900,14 +904,25 @@ export {
 } from './use-cases/pagamentos/obter-pagamento-por-id.js';
 export type { RejeitarPagamentoDeps } from './use-cases/pagamentos/rejeitar-pagamento.js';
 export { rejeitarPagamento } from './use-cases/pagamentos/rejeitar-pagamento.js';
+// Plan 0016 Phase 2 (aperture-eg1s2): split per-item + cart-wide surcharge.
 export type {
-  CalcularComposicaoValoresDeps,
-  CalcularComposicaoValoresInput,
-} from './use-cases/taxas/calcular-composicao-valores.js';
+  CalcularComposicaoValoresParaItemDeps,
+  CalcularComposicaoValoresParaItemInput,
+} from './use-cases/taxas/calcular-composicao-valores-para-item.js';
 export {
-  CalcularComposicaoValoresInputSchema,
-  calcularComposicaoValores,
-} from './use-cases/taxas/calcular-composicao-valores.js';
+  CalcularComposicaoValoresParaItemInputSchema,
+  calcularComposicaoValoresParaItem,
+} from './use-cases/taxas/calcular-composicao-valores-para-item.js';
+export type {
+  CalcularSurchargeParaCarrinhoDeps,
+  CalcularSurchargeParaCarrinhoInput,
+} from './use-cases/taxas/calcular-surcharge-para-carrinho.js';
+export {
+  CalcularSurchargeParaCarrinhoInputSchema,
+  calcularSurchargeParaCarrinho,
+} from './use-cases/taxas/calcular-surcharge-para-carrinho.js';
+// Plan 0016 Phase 2 (aperture-eg1s2): cart-multi-campanha error.
+export { CarrinhoMultiplasCampanhasError } from './errors/checkout/carrinho-multiplas-campanhas.error.js';
 export type {
   AtualizarPerfilUsuarioDeps,
   AtualizarPerfilUsuarioInput,

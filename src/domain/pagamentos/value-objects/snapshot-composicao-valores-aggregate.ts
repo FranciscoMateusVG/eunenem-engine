@@ -1,6 +1,6 @@
 import { z } from 'zod/v4';
 import { IdCampanhaSchema } from '../../arrecadacao/value-objects/ids.js';
-import { MoneyCentsSchema } from '../../money.js';
+import { MoneyCentsNonNegativeSchema, MoneyCentsSchema } from '../../money.js';
 import type { SnapshotComposicaoValoresItem } from './snapshot-composicao-valores-item.js';
 
 /**
@@ -30,7 +30,12 @@ export const SnapshotComposicaoValoresAggregateSchema = z.object({
   totalContributionCents: MoneyCentsSchema,
   totalFeeCents: MoneyCentsSchema,
   totalReceiverCents: MoneyCentsSchema,
-  totalSurchargeCents: MoneyCentsSchema,
+  /**
+   * aperture-daxwm bugfix: zero is structurally valid. PIX flows have no
+   * passthrough_surcharge item, so the cart's surcharge sum is 0 — must
+   * not be rejected by `PagamentoSchema.parse` at hidration time.
+   */
+  totalSurchargeCents: MoneyCentsNonNegativeSchema,
   totalPaidCents: MoneyCentsSchema,
   responsavelTaxa: ResponsavelTaxaPagamentoSchema,
 });

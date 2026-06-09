@@ -329,28 +329,26 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
   }
 
   /**
-   * Plan 0016 (aperture-aj8qw): post-multi-item the lookup bridges
-   * through `intencao_items` — the per-pagamento id_contribuicao column
-   * retired in migration 022. Uses the partial index
-   * `idx_intencao_items_contribuicao_aprovado` (filter on
-   * `id_contribuicao IS NOT NULL`) joined against
-   * `pagamentos.status = 'aprovado'`. DISTINCT collapses the
-   * (multiple aprovado items pointing at the same contribuição)
-   * row-multiplication that the locked decision #6 of plan 0015
-   * (accept double-pay) + the multi-cart shape of plan 0016 both make
-   * possible.
+   * Plan 0016 Phase 2 (aperture-eg1s2): replaces the pre-0016 binary
+   * predicate `findIdsContribuicoesComPagamentoAprovado` with a SUM
+   * aggregator. Returns total `quantidade` consumed per contribuição
+   * across all aprovado items.
    *
-   * **Phase 2 plan**: this method retires entirely, replaced by
-   * `somarQuantidadesContribuicoesEmPagamentosAprovados(ids): Map<…, number>`
-   * which returns the sum of `quantidade` per contribuição instead of
-   * the binary "any aprovado pagamento?" answer. The new query feeds
-   * `quantidadeRestante` directly without a second round-trip.
+   * Uses the partial index `idx_intencao_items_contribuicao_aprovado`
+   * INCLUDE (quantidade) — covering for the aggregation — joined
+   * against `pagamentos.status='aprovado'`. One indexed query for
+   * the whole input set.
+   *
+   * Missing keys are returned as 0 — caller can iterate the input set
+   * confidently. Overshoot (sum > contribuicao.quantidade) is OK per
+   * locked decision #10; the use-case surfaces `esgotada=true` when
+   * `quantidadeRestante <= 0`.
    */
-  async findIdsContribuicoesComPagamentoAprovado(
+  async somarQuantidadesContribuicoesEmPagamentosAprovados(
     idsContribuicao: readonly IdContribuicaoPagamento[],
-  ): Promise<readonly IdContribuicaoPagamento[]> {
+  ): Promise<Map<IdContribuicaoPagamento, number>> {
     return tracer.startActiveSpan(
-      'db.pagamentos.findIdsContribuicoesComPagamentoAprovado',
+      'db.pagamentos.somarQuantidadesContribuicoesEmPagamentosAprovados',
       async (span) => {
         span.setAttributes({
           ...DB_ATTRS,
@@ -358,23 +356,29 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
           'batch.size': idsContribuicao.length,
         });
         try {
+          const result = new Map<IdContribuicaoPagamento, number>();
+          for (const id of idsContribuicao) {
+            result.set(id, 0);
+          }
           if (idsContribuicao.length === 0) {
             span.setStatus({ code: SpanStatusCode.OK });
-            return [];
+            return result;
           }
           const rows = await this.db
             .selectFrom('intencao_items')
             .innerJoin('pagamentos', 'pagamentos.id', 'intencao_items.id_pagamento')
-            .select('intencao_items.id_contribuicao')
-            .distinct()
+            .select([
+              'intencao_items.id_contribuicao as id_contribuicao',
+              (eb) => eb.fn.sum<string>('intencao_items.quantidade').as('total'),
+            ])
             .where('pagamentos.status', '=', 'aprovado')
+            .where('intencao_items.tipo', '=', 'contribuicao')
             .where('intencao_items.id_contribuicao', 'in', [...idsContribuicao])
+            .groupBy('intencao_items.id_contribuicao')
             .execute();
-          const result: IdContribuicaoPagamento[] = [];
           for (const r of rows) {
-            if (r.id_contribuicao !== null) {
-              result.push(r.id_contribuicao as IdContribuicaoPagamento);
-            }
+            if (r.id_contribuicao === null) continue;
+            result.set(r.id_contribuicao as IdContribuicaoPagamento, Number(r.total));
           }
           span.setStatus({ code: SpanStatusCode.OK });
           return result;

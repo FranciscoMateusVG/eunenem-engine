@@ -1,6 +1,6 @@
 import { z } from 'zod/v4';
 import { IdCampanhaSchema } from '../../../arrecadacao/value-objects/ids.js';
-import { MoneyCentsSchema } from '../../../money.js';
+import { MoneyCentsNonNegativeSchema, MoneyCentsSchema } from '../../../money.js';
 
 /**
  * Value object: financeiro-side mirror of `SnapshotComposicaoValores*`
@@ -105,7 +105,10 @@ export const SnapshotComposicaoValoresAggregateFinanceiroSchema = z.object({
   totalContributionCents: MoneyCentsSchema,
   totalFeeCents: MoneyCentsSchema,
   totalReceiverCents: MoneyCentsSchema,
-  totalSurchargeCents: MoneyCentsSchema,
+  /**
+   * aperture-daxwm bugfix mirror: zero is structurally valid for PIX flows.
+   */
+  totalSurchargeCents: MoneyCentsNonNegativeSchema,
   totalPaidCents: MoneyCentsSchema,
   responsavelTaxa: ResponsavelTaxaFinanceiroSchema,
 });

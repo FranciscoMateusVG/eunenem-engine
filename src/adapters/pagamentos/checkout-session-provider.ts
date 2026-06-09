@@ -1,4 +1,5 @@
 import type {
+  IdCampanha,
   IdContribuicao,
   IdOpcaoContribuicao,
 } from '../../domain/arrecadacao/value-objects/ids.js';
@@ -51,24 +52,40 @@ import type { MetodoPagamento } from '../../domain/pagamentos/value-objects/meto
 export interface CriarSessaoCheckoutInput {
   readonly idPagamento: IdPagamento;
   readonly idIntencaoPagamento: IdIntencaoPagamento;
+  /**
+   * Plan 0016 Phase 2 (aperture-eg1s2): cart-scope invariant carrier.
+   * All items in the cart share this campanha; the adapter stamps it
+   * into provider metadata as a top-level traceability key.
+   */
+  readonly idCampanha: IdCampanha;
+  /**
+   * Plan 0016 Phase 2: the cart's "anchor" contribuição — the FIRST
+   * contribuicao-tipo item of the cart's `items` array. Used for
+   * Stripe metadata (round-tripped to the webhook + admin UI).
+   * Multi-item carts pass the first item; line-item itemisation
+   * against Stripe is out-of-scope per plan locked decision #14.
+   */
   readonly idContribuicao: IdContribuicao;
   readonly idOpcaoContribuicao: IdOpcaoContribuicao;
   readonly tipoOpcao: TipoOpcaoContribuicao;
+  /**
+   * Display name for the Stripe line item. Single-item cart: the
+   * contribuição's nome. Multi-item: a cart-summary string like
+   * "Carrinho — N itens (presenteFromX)".
+   */
   readonly nomeItem: string;
   /**
-   * Total the buyer is charged (cents). Equals
-   * `contributionAmountCents + feeAmountCents + surchargeCents`
-   * per the composicao invariant.
+   * Total the buyer is charged (cents) — sum across all cart items
+   * (contribution + fee + surcharge). For the multi-item shape this
+   * equals `composicaoValoresAggregate.totalPaidCents`.
    */
   readonly amountCents: MoneyCents;
   readonly metodo: MetodoPagamento;
   /**
-   * Provider-side surcharge component of `amountCents` (aperture-uyw8i).
-   * When > 0, the adapter MUST surface it as a separate line item so
-   * the buyer's Stripe receipt itemises gift price vs surcharge. Zero
-   * for Pix flows + non-surcharge providers. Typed `number` (not
-   * MoneyCents) because surcharge can legitimately be 0 — MoneyCents
-   * is positive-only.
+   * Cart-level surcharge component of `amountCents` (aperture-uyw8i +
+   * plan 0016 Phase 2). When > 0, the adapter MUST surface it as a
+   * separate line item so the buyer's Stripe receipt itemises gift
+   * price vs surcharge. Zero for Pix flows + non-surcharge providers.
    */
   readonly surchargeCents: number;
   /**
