@@ -1,8 +1,9 @@
 # 0015 — Contribuição / Pagamento / Financeiro collapse
 
-**Status.** 📝 drafted 2026-06-03
+**Status.** 📝 drafted 2026-06-03 — **shipped to staging 2026-06-04**
 **Depends on.** 0002 (checkout orchestration — done), 0004 (async confirmation — drafted), 0013 (provider fee passthrough — drafted)
 **Supersedes parts of.** 0006 (maturation rule), 0008 (concurrency on claim), 0012 (estorno cascade)
+**Subsequent work.** [0016 — Multi-item Pagamento + quantidade na Contribuição](./0016-multi-item-pagamento-and-quantidade.md) generalizes this plan's "1:N contribuição→pagamento with derived predicate" pattern one level deeper: Contribuição gains a `quantidade: number` field, IntencaoPagamento becomes a multi-item cart (`items: ItemDoPagamento[]`), and the single boolean predicate from 0015 is replaced by the pair `quantidadeRestante(c): number` + `esgotada(c): boolean`. The lançamento factory shifts from per-pagamento branching to uniform per-item iteration (2N + S total per pagamento). The asymmetric surcharge field on the pagamento root that 0013 introduced retires; surcharge becomes a `tipo='passthrough_surcharge'` item.
 **Unblocks.** Simpler estorno path, simpler webhook handler, fewer race conditions across BCs, cleaner mental model for the recebedor's balance.
 
 ## Goal
@@ -182,7 +183,7 @@ Each phase ends with **STOP for confirmation**. Don't roll forward without expli
 
 - `src/use-cases/checkout/iniciar-pagamento-contribuicao.ts`:
   - Drop the `contribuicaoComContribuinte` saga step entirely (no claim, ever)
-  - Drop the `contribuicaoDisponivel` early-fail gate (replace with `contribuicaoEstaIndisponivel` EXISTS query — the new derived predicate; reject with `ContribuicaoIndisponivelError` if true)
+  - Drop the `contribuicaoDisponivel` early-fail gate (replace with the new derived predicate `esgotada(idContribuicao)` — see plan 0016 §Open-items §Naming for the original 0015 name and its subsequent rename; reject with `ContribuicaoIndisponivelError` if true)
   - Saga simplifies to: validate plataforma + load contribuição + compute composição + create Stripe session + create IntencaoPagamento with `contribuinte: null`
 - `src/use-cases/checkout/finalizar-pagamento-aprovado.ts`:
   - Update to handle 5-state transitions; accept both `pendente` and `processing` as valid source states for the aprovado transition

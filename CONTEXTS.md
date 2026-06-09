@@ -97,9 +97,13 @@ Este documento descreve a primeira fatia da **engine de intermediação financei
 
 1. Um ou mais **administradores** (UUIDs de conta) abrem uma **campanha** com título e registram o **recebedor** externo (nome + chave PIX em `dadosRecebedor`); o saldo no Financeiro agrega por `id` da campanha (`idCampanha`). Alterações de PIX desativam o recebedor ativo e criam nova linha em `recebedores` (`is_active`).
 2. A campanha começa sem **opções de contribuição** (sacolas); o administrador adiciona opções só com `tipo`: `presente`, `rifa` ou `convite`.
-3. O administrador cria **itens de contribuição** dentro de uma opção (`nome`, `valor` em centavos). Pós-Plan 0015, **Contribuição é um slot puro**: campos `id, idCampanha, idOpcaoContribuicao, nome, valor, imagemUrl, grupo, criadaEm` — **sem `status` enum e sem snapshot do contribuinte**.
-4. Um **contribuinte visitante** (sem conta) escolhe um item e segue para o checkout. Os dados do contribuinte (`nome`, **email obrigatório**, mensagem opcional) vivem agora no **snapshot `contribuinte` da `IntencaoPagamento`** (BC Pagamentos), não mais na Contribuição. Taxas e pagamentos usam o `idContribuicao` + valor do item.
-5. **"Indisponível" virou predicado de consulta**, não estado armazenado: uma contribuição é considerada indisponível quando `EXISTS pagamento WHERE idContribuicao = X AND status = 'aprovado'`. O caso de uso [`contribuicaoEstaIndisponivel`](src/use-cases/arrecadacao/contribuicao-esta-indisponivel.ts) implementa exatamente isso. Relação **1:N** contribuição→pagamentos é permitida com concorrência otimista (dois pagamentos aprovados para o mesmo slot são aceitos como duplo-pagamento — virgem +dinheiro para o recebedor, sem rollback).
+3. O administrador cria **itens de contribuição** dentro de uma opção (`nome`, `valor` em centavos, `quantidade` em unidades — inteiro positivo, default 1). Pós-Plan 0015 + Plan 0016, **Contribuição é um slot puro com cardinalidade**: campos `id, idCampanha, idOpcaoContribuicao, nome, valor, imagemUrl, grupo, quantidade, criadaEm` — **sem `status` enum e sem snapshot do contribuinte**.
+4. Uma slot com `quantidade > 1` representa **N exemplares fungíveis da mesma coisa** (5 taças de vinho, 12 convites VIP). Antes do Plan 0016 o workaround era criar 5 rows idênticas; agora a cardinalidade é um campo. O badge **`esgotada`** é derivado da soma de `quantidade` em items de pagamentos aprovados — não é estado armazenado.
+5. Um **contribuinte visitante** (sem conta) monta um **carrinho** com um ou mais itens e segue para o checkout. Os dados do contribuinte (`nome`, **email obrigatório**, mensagem opcional) vivem no **snapshot `contribuinte` da `IntencaoPagamento`** (BC Pagamentos), não na Contribuição. Cada linha do carrinho vira um `ItemDoPagamento` dentro da IntencaoPagamento, carregando `idContribuicao` + `quantidade` + composição por-linha.
+6. **"Indisponível" virou um par de predicados derivados** (Plan 0016 substituiu o predicado boolean único de 0015):
+   - [`quantidadeRestante(idContribuicao)`](src/use-cases/arrecadacao/quantidade-restante.ts) — `contribuicao.quantidade − SUM(item.quantidade)` sobre items em pagamentos `aprovado`. Pode retornar **≤ 0** (overshoot é aceito por design: se 5 taças listadas viraram 7 vendidas em corrida concorrente, `restante = -2`, ninguém é estornado, operador embolsa o +dinheiro).
+   - [`esgotada(idContribuicao)`](src/use-cases/arrecadacao/quantidade-restante.ts) — derivado: `quantidadeRestante(c) ≤ 0`. Usado pelo gate da saga `iniciarPagamentoCarrinho` (ver Checkout).
+   Relação **1:N** contribuição→pagamentos permitida com concorrência otimista (mesma postura do Plan 0015, agora aplicada por-item via `SUM(quantidade)`).
 
 Nada disso cobra pagamento nem calcula taxa — isso fica em outros bounded contexts.
 
@@ -113,7 +117,7 @@ Nada disso cobra pagamento nem calcula taxa — isso fica em outros bounded cont
 | `recebedores` | `id`, `campanha_id`, dados PIX, `is_active`, `criada_em` | Histórico de recebedores; 1 ativo por campanha |
 | `campanha_administradores` | `campanha_id`, `id_usuario` | PK composta; `id_usuario` ↔ `IdConta` no domínio |
 | `opcoes_contribuicao` | `id`, `campanha_id`, `tipo` | Sacola por `tipo`: `presente` \| `rifa` \| `convite` |
-| `contribuicoes` | `id`, `campanha_id`, `id_opcao_contribuicao`, `nome`, `valor`, `imagem_url`, `grupo`, `criada_em` | **Pós-Plan 0015**: sem `status`, sem colunas `contribuinte_*`. Slot puro; "indisponibilidade" é predicado de consulta sobre `pagamentos`. FKs `ON DELETE RESTRICT`. |
+| `contribuicoes` | `id`, `campanha_id`, `id_opcao_contribuicao`, `nome`, `valor`, `imagem_url`, `grupo`, `quantidade`, `criada_em` | **Pós-Plan 0015 + Plan 0016**: sem `status`, sem colunas `contribuinte_*`. Slot puro com cardinalidade — `quantidade INTEGER NOT NULL DEFAULT 1 CHECK (quantidade >= 1)`. Esgotada é predicado de consulta `SUM(intencao_items.quantidade) >= contribuicao.quantidade` sobre items de pagamentos aprovados. FKs `ON DELETE RESTRICT`. |
 
 Migrations: [`migrations/20260519_001_create_arrecadacao.ts`](migrations/20260519_001_create_arrecadacao.ts), [`migrations/20260520_002_alter_arrecadacao_sacola_itens.ts`](migrations/20260520_002_alter_arrecadacao_sacola_itens.ts), [`migrations/20260521_003_recebedores_versionados.ts`](migrations/20260521_003_recebedores_versionados.ts), [`migrations/20260522_004_drop_recebedores_id_carteira.ts`](migrations/20260522_004_drop_recebedores_id_carteira.ts).
 
@@ -130,7 +134,7 @@ Adaptadores Postgres exportados também pelo subpath `frame/adapters/postgres` (
 | Recebedor (PIX auditável, versionado) | [`src/domain/arrecadacao/entities/recebedor.ts`](src/domain/arrecadacao/entities/recebedor.ts) — `Recebedor`, `criarRecebedorInicial`, `criarNovoRecebedor`, `desativarRecebedor` |
 | Persistência Postgres do recebedor | [`src/adapters/arrecadacao/recebedor-repository.postgres.ts`](src/adapters/arrecadacao/recebedor-repository.postgres.ts) — `RecebedorRepositoryPostgres` |
 | Procurar opção na campanha (função pura) | [`src/domain/arrecadacao/entities/campanha.ts`](src/domain/arrecadacao/entities/campanha.ts) — `campanhaComOpcao` |
-| Contribuição (slot puro pós-0015) | [`src/domain/arrecadacao/entities/contribuicao.ts`](src/domain/arrecadacao/entities/contribuicao.ts) — `Contribuicao`, `criarContribuicao`, `contribuicaoAtualizada` |
+| Contribuição (slot puro com cardinalidade, pós-0015/0016) | [`src/domain/arrecadacao/entities/contribuicao.ts`](src/domain/arrecadacao/entities/contribuicao.ts) — `Contribuicao` (carrega `quantidade: number`), `criarContribuicao`, `contribuicaoAtualizada` |
 | Dados do contribuinte (compartilhado com Pagamentos) | [`src/domain/pagamentos/value-objects/dados-contribuinte.ts`](src/domain/pagamentos/value-objects/dados-contribuinte.ts) — `DadosContribuinte`. **Mudou de BC** no Plan 0015; re-export deprecado em `src/domain/arrecadacao/value-objects/dados-contribuinte.ts`. |
 | Persistência em memória da campanha | [`src/adapters/arrecadacao/campanha-repository.memory.ts`](src/adapters/arrecadacao/campanha-repository.memory.ts) |
 | Persistência Postgres da campanha | [`src/adapters/arrecadacao/campanha-repository.postgres.ts`](src/adapters/arrecadacao/campanha-repository.postgres.ts) — `CampanhaRepositoryPostgres` |
@@ -147,7 +151,7 @@ Adaptadores Postgres exportados também pelo subpath `frame/adapters/postgres` (
 | Caso de uso: criar contribuições em lote (admin) | [`src/use-cases/arrecadacao/criar-contribuicoes-em-lote.ts`](src/use-cases/arrecadacao/criar-contribuicoes-em-lote.ts) — `criarContribuicoesEmLote` |
 | Caso de uso: atualizar contribuição (admin) | [`src/use-cases/arrecadacao/atualizar-contribuicao.ts`](src/use-cases/arrecadacao/atualizar-contribuicao.ts) — `atualizarContribuicao` (substitui `alterar-valor-contribuicao` parcialmente) |
 | Caso de uso: remover contribuição (admin) | [`src/use-cases/arrecadacao/remover-contribuicao.ts`](src/use-cases/arrecadacao/remover-contribuicao.ts) — `removerContribuicao` |
-| Caso de uso: predicado "contribuição indisponível?" (substitui o status enum) | [`src/use-cases/arrecadacao/contribuicao-esta-indisponivel.ts`](src/use-cases/arrecadacao/contribuicao-esta-indisponivel.ts) — `contribuicaoEstaIndisponivel`. Consulta `pagamentoRepository.findIdsContribuicoesComPagamentoAprovado([id])` e devolve `matches.length > 0`. |
+| Caso de uso: predicados de cardinalidade (substitui o predicado boolean único de 0015) | [`src/use-cases/arrecadacao/quantidade-restante.ts`](src/use-cases/arrecadacao/quantidade-restante.ts) — `quantidadeRestante(idContribuicao)` retorna `contribuicao.quantidade − SUM(item.quantidade WHERE pagamento.status='aprovado')` (pode ser ≤ 0, overshoot aceito); `esgotada(idContribuicao)` retorna `quantidadeRestante ≤ 0`. Consulta `pagamentoRepository.somarQuantidadesContribuicoesEmPagamentosAprovados`. |
 | Caso de uso: listar contribuições da opção (admin) | [`src/use-cases/arrecadacao/listar-contribuicoes-de-opcao.ts`](src/use-cases/arrecadacao/listar-contribuicoes-de-opcao.ts) |
 | Caso de uso: transação atômica multi-aggregate | [`src/use-cases/arrecadacao/executar-transacao-arrecadacao.ts`](src/use-cases/arrecadacao/executar-transacao-arrecadacao.ts) |
 | Erros de domínio / aplicação | [`src/errors/arrecadacao/`](src/errors/arrecadacao) |
@@ -174,7 +178,7 @@ Adaptadores Postgres exportados também pelo subpath `frame/adapters/postgres` (
 
 - **Caso de uso / serviço de aplicação:** validação Zod, invariantes (opção duplicada, exatamente um recebedor ativo por campanha) e persistência.
 
-- **Invariantes (pós-Plan 0015):** opção com `id` único na campanha; contribuição nasce e permanece como slot (sem estado próprio); "disponibilidade" é predicado de consulta (`EXISTS pagamento WHERE idContribuicao = X AND status = 'aprovado'`); 1:N contribuição→pagamentos é permitido (concorrência otimista, sem reserva de slot).
+- **Invariantes (pós-Plan 0015 + Plan 0016):** opção com `id` único na campanha; contribuição nasce e permanece como slot (sem estado próprio); `quantidade ≥ 1` enforçada por schema + CHECK no DB; "esgotada" é predicado de consulta (`quantidadeRestante ≤ 0`, derivado de `SUM(item.quantidade)` em items aprovados); 1:N contribuição→pagamentos permitido (concorrência otimista por-item, sem reserva de slot, overshoot aceito).
 
 ---
 
@@ -244,22 +248,22 @@ Quando o cálculo gera fração de centavo, a implementação arredonda para cim
 
 # BC Pagamentos — o que foi implementado
 
-Este documento descreve o **bounded context Pagamentos** pós-Plan 0015: FSM de 5 estados, intenção de pagamento como **portador do snapshot do contribuinte**, provedores reais (Stripe, Pagarme, Fake) atrás de uma porta, persistência **em memória + Postgres**, e o **módulo Financeiro aninhado** (`src/domain/pagamentos/financeiro/`) que reage à aprovação. Inclui o **módulo Financeiro** em capítulo separado abaixo.
+Este documento descreve o **bounded context Pagamentos** pós-Plan 0015 + Plan 0016: FSM de 5 estados ao nível Pagamento, **intenção de pagamento como carrinho multi-item** (`items: ItemDoPagamento[]` com discriminated union `contribuicao | passthrough_surcharge`), snapshot do contribuinte populado por webhook, provedores reais (Stripe, Pagarme, Fake) atrás de uma porta, persistência **em memória + Postgres**, e o **módulo Financeiro aninhado** (`src/domain/pagamentos/financeiro/`) que itera per-item para emitir lançamentos. Inclui o **módulo Financeiro** em capítulo separado abaixo.
 
 ## Resumo em linguagem simples
 
-1. O contexto **Pagamentos** recebe uma composição de valores já calculada por **Taxas** e um `idContribuicao` (BC Arrecadação).
-2. Ele cria uma **`IntencaoPagamento`** + abre uma **sessão de checkout** no provedor (Stripe/Pagarme/Fake), cobrando exatamente o `totalPaidCents`.
+1. O contexto **Pagamentos** recebe um **carrinho** (lista de items + composição agregada já calculada por **Taxas**) e o `idCampanha` do carrinho (BC Arrecadação).
+2. Ele cria uma **`IntencaoPagamento`** carregando `items: ItemDoPagamento[]` (≥ 1 item, contribuição items primeiro + surcharge item por último em flows de cartão) + `composicaoValoresAggregate` (soma das linhas), e abre uma **sessão de checkout** no provedor (Stripe/Pagarme/Fake), cobrando exatamente o `totalPaidCents` agregado.
 3. O pagamento nasce com status `pendente`.
-4. Webhooks do provedor avançam o FSM em 5 estados:
+4. Webhooks do provedor avançam o FSM em 5 estados (o FSM opera sobre o Pagamento como um todo, **não por item**):
    - **`pendente → processing`** (PIX): `payment_intent.processing` (QR escaneado, aguardando confirmação bancária)
    - **`pendente → aprovado`** (cartão happy path) ou **`processing → aprovado`** (PIX confirmado pelo banco)
    - **`pendente|processing → rejeitado`** (falha cedo ou no meio do fluxo)
-   - **`aprovado → estornado`** (refund total via `charge.refunded`)
-5. No webhook `checkout.session.completed`, o **snapshot do contribuinte** (nome, email, mensagem) é gravado em `IntencaoPagamento.contribuinte` — esse é o ponto onde os dados do visitante entram no sistema.
-6. Quando o pagamento vai a `aprovado`, o **módulo Financeiro** (próxima seção) cria os lançamentos contábeis na mesma transação.
+   - **`aprovado → estornado`** (refund total via `charge.refunded`; whole-pagamento only, sem refund por-item)
+5. No webhook `checkout.session.completed`, o **snapshot do contribuinte** (nome, email, mensagem) é gravado em `IntencaoPagamento.contribuinte` (raiz da intencão, não por-item — uma checkout-session tem um contribuinte) — esse é o ponto onde os dados do visitante entram no sistema.
+6. Quando o pagamento vai a `aprovado`, o **módulo Financeiro** (próxima seção) **itera sobre os items** para emitir lançamentos contábeis na mesma transação.
 
-Pagamentos não calcula taxa. Ele só confere se o valor a cobrar é igual ao total calculado por Taxas.
+Pagamentos não calcula taxa. Ele só confere se o `totalPaidCents` agregado bate com a soma das linhas dos items.
 
 ---
 
@@ -296,13 +300,14 @@ Definido em [`src/domain/pagamentos/entities/pagamento.ts`](src/domain/pagamento
 |----------|-----------|
 | Montante em centavos | [`src/domain/money.ts`](src/domain/money.ts) — `MoneyCentsSchema` |
 | **Pagamento (agregado raiz)** | [`src/domain/pagamentos/entities/pagamento.ts`](src/domain/pagamentos/entities/pagamento.ts) — `Pagamento`, `criarPagamentoPendente`, transições FSM, predicados (`podeAprovarPagamento`, `podeRejeitarPagamento`) |
-| **IntencaoPagamento** (entidade aninhada — carrega snapshot do contribuinte) | [`src/domain/pagamentos/entities/pagamento.ts`](src/domain/pagamentos/entities/pagamento.ts) — `IntencaoPagamento`. Campos: `id, idContribuicao, amountCents, metodo, composicaoValores, externalRef` (Stripe checkout session), `paymentIntentExternalRef` (`pi_xxx`), `chargeExternalRef` (`ch_xxx`), **`contribuinte: DadosContribuinte \| null`** (nullable na criação, populado pelo webhook `checkout.session.completed`), `balanceTransactionAvailableOn: Date \| null` (data de liberação do Stripe — usada pelo módulo Financeiro como gate de "marcar transferido") |
+| **IntencaoPagamento** (entidade aninhada — raiz do carrinho) | [`src/domain/pagamentos/entities/pagamento.ts`](src/domain/pagamentos/entities/pagamento.ts) — `IntencaoPagamento`. Campos pós-0016: `id, idCampanha` (hoisted — invariante "todos os items do carrinho na mesma campanha"), `items: readonly ItemDoPagamento[]` (≥ 1, contribuição items primeiro + surcharge por último em cartão), `composicaoValoresAggregate` (soma das linhas + `idCampanha` + `responsavelTaxa`), `metodo, externalRef` (Stripe checkout session), `paymentIntentExternalRef` (`pi_xxx`), `chargeExternalRef` (`ch_xxx`), **`contribuinte: DadosContribuinte \| null`** (nullable na criação, populado pelo webhook `checkout.session.completed` — raiz, não por-item), `balanceTransactionAvailableOn: Date \| null` (data de liberação do Stripe — gate do módulo Financeiro para "marcar transferido") |
+| **ItemDoPagamento** (entidade aninhada dentro de IntencaoPagamento, novo no Plan 0016) | [`src/domain/pagamentos/entities/item-do-pagamento.ts`](src/domain/pagamentos/entities/item-do-pagamento.ts) — **discriminated union** por `tipo`:<br/>• `tipo='contribuicao'` → carrega `idContribuicao, quantidade: number, composicaoValoresItem` (com per-unit + per-line denormalizado: `contributionUnitAmountCents` + `lineContributionAmountCents`, etc.)<br/>• `tipo='passthrough_surcharge'` → carrega `idContribuicao: null, quantidade: 1, composicaoValoresItem` com `amountCents` único.<br/>Ordem posição-estável: contribuição items primeiro (na ordem do chamador), surcharge **sempre por último** quando presente. Naming "Do" (vs no-connector como `EventoPagamento`) sinaliza entity-com-identidade-dentro-do-agregado — vide [`docs/ddd-conventions.md`](docs/ddd-conventions.md). |
 | TransacaoExterna (entidade aninhada — settlement do provedor) | [`src/domain/pagamentos/entities/pagamento.ts`](src/domain/pagamentos/entities/pagamento.ts) — `TransacaoExterna` (`status`: `aprovado` \| `rejeitado`, com `statusBruto` do provedor) |
-| Status FSM | [`src/domain/pagamentos/entities/pagamento.ts`](src/domain/pagamentos/entities/pagamento.ts) — `StatusPagamentoSchema` (`pendente \| processing \| aprovado \| rejeitado \| estornado`) |
+| Status FSM | [`src/domain/pagamentos/entities/pagamento.ts`](src/domain/pagamentos/entities/pagamento.ts) — `StatusPagamentoSchema` (`pendente \| processing \| aprovado \| rejeitado \| estornado`). FSM atua sobre Pagamento como um todo; items não têm FSM próprio. |
 | Método de Pagamento | [`src/domain/pagamentos/value-objects/`](src/domain/pagamentos/value-objects/) — `MetodoPagamento` (`pix \| credit_card`) |
-| Snapshot composição de valores | [`src/domain/pagamentos/value-objects/`](src/domain/pagamentos/value-objects/) — `SnapshotComposicaoValores` (totalPaidCents, receiverAmountCents, feeAmountCents, surchargeCents) |
+| Snapshot composição (por-item + agregada) | [`src/domain/pagamentos/value-objects/`](src/domain/pagamentos/value-objects/) — `SnapshotComposicaoValoresItem` (discriminated union espelhando o item tipo) + `SnapshotComposicaoValoresAggregate` (sum across items: `totalContributionCents`, `totalFeeCents`, `totalReceiverCents`, `totalSurchargeCents`, `totalPaidCents`, `idCampanha`, `responsavelTaxa`). Invariante de livro: `totalReceiverCents + totalFeeCents + totalSurchargeCents === totalPaidCents`. **O campo asymmetric de surcharge na raiz da IntencaoPagamento foi aposentado pelo Plan 0016** — surcharge agora é item próprio (`tipo='passthrough_surcharge'`). |
 | **DadosContribuinte** (movido de Arrecadação pelo Plan 0015) | [`src/domain/pagamentos/value-objects/dados-contribuinte.ts`](src/domain/pagamentos/value-objects/dados-contribuinte.ts) — nome, email, mensagem (recadinho), … |
-| Porta de persistência | [`src/adapters/pagamentos/repository.ts`](src/adapters/pagamentos/repository.ts) — `PagamentoRepository` (inclui `findIdsContribuicoesComPagamentoAprovado` usado pelo predicado de "indisponibilidade") |
+| Porta de persistência | [`src/adapters/pagamentos/repository.ts`](src/adapters/pagamentos/repository.ts) — `PagamentoRepository` (inclui `somarQuantidadesContribuicoesEmPagamentosAprovados` usado pelos predicados `quantidadeRestante`/`esgotada`) |
 | Adaptador em memória | [`src/adapters/pagamentos/repository.memory.ts`](src/adapters/pagamentos/repository.memory.ts) |
 | Adaptador Postgres | [`src/adapters/pagamentos/repository.postgres.ts`](src/adapters/pagamentos/repository.postgres.ts) |
 | Porta do provedor de pagamento | [`src/adapters/pagamentos/provider.ts`](src/adapters/pagamentos/provider.ts) — `PagamentoProvider`, `CheckoutSessionProvider` |
@@ -322,17 +327,17 @@ Definido em [`src/domain/pagamentos/entities/pagamento.ts`](src/domain/pagamento
 
 - **Bounded Context:** Pagamentos tem linguagem própria: pagamento, intenção, transação externa, status FSM, provedor, evento. Ele não importa campanha, opção de contribuição, presente, rifa ou convite. A partir do Plan 0015, **também é o lar do `DadosContribuinte`** — o snapshot do contribuinte vive dentro da `IntencaoPagamento`, populado pelo webhook do provedor.
 
-- **Contrato entre contextos:** Pagamentos recebe `idContribuicao` (Arrecadação) e um snapshot de composição (Taxas). Devolve um `Pagamento` com FSM próprio. O módulo Financeiro nested (próxima seção) reage à transição `→ aprovado` na **mesma transação DB** que aprova o pagamento.
+- **Contrato entre contextos:** Pagamentos recebe um **carrinho** (`{idCampanha, items: [...]}` com `items` carregando per-line `idContribuicao + quantidade + composiçãoItem`) e a composição agregada de Taxas. Devolve um `Pagamento` com FSM próprio + items posição-estáveis. O módulo Financeiro nested (próxima seção) reage à transição `→ aprovado` na **mesma transação DB** iterando per-item.
 
-- **Agregado:** `Pagamento` é a raiz que carrega `IntencaoPagamento` e `TransacaoExterna` como **entidades aninhadas** (carregadas e persistidas como unidade). 
+- **Agregado (nesting 3-níveis):** `Pagamento` (raiz) → `IntencaoPagamento` (entidade aninhada — carrinho + metadata do provedor + snapshot contribuinte) → `ItemDoPagamento[]` (entidades aninhadas — as linhas do carrinho). Toda a árvore é carregada e persistida como unidade pelo `PagamentoRepository`. Vide [`docs/ddd-conventions.md`](docs/ddd-conventions.md) seção "Aggregate Root vs nested Entity" para a justificativa do nesting (items não têm lifecycle independente, born + dies com a intencão; vocabulário não forka).
 
-- **Value Object / Snapshot:** `SnapshotComposicaoValores` preserva o que veio de Taxas; `DadosContribuinte` é VO que entra via webhook (não revalida nada da Arrecadação).
+- **Value Object / Snapshot (per-item + agregado):** `SnapshotComposicaoValoresItem` é discriminated union espelhando `tipo`; `SnapshotComposicaoValoresAggregate` é a soma das linhas (denormalizada à criação para o ledger não recomputar). `DadosContribuinte` é VO que entra via webhook (não revalida nada da Arrecadação).
 
 - **Portas e adapters:** `PagamentoRepository` (memória + Postgres), `PagamentoProvider` + `CheckoutSessionProvider` (Stripe, Pagarme, Fake) atrás de portas separadas.
 
 - **Webhooks como driver do FSM:** os adaptadores HTTP do webhook lidam com idempotência (Stripe envia o mesmo evento N vezes em retries) — as transições FSM são guardadas por predicados (`podeAprovarPagamento` aceita `pendente|processing` mas é no-op se já está aprovado).
 
-- **Invariantes:** o valor cobrado deve ser exatamente `totalPaidCents`; um pagamento `estornado` é terminal; `rejeitado` é terminal; `processing` só existe para PIX; `IntencaoPagamento.contribuinte` é nullable até `checkout.session.completed` chegar.
+- **Invariantes:** carrinho deve ter ≥ 1 item; todos os items contribuição compartilham `idCampanha` (idêntico ao `IntencaoPagamento.idCampanha` raiz — backstop dual no factory + use-case); soma per-line bate com `totalPaidCents` agregado; um pagamento `estornado` é terminal (whole-pagamento only, sem refund per-item em v1); `rejeitado` é terminal; `processing` só existe para PIX; `IntencaoPagamento.contribuinte` é nullable até `checkout.session.completed` chegar; surcharge item, quando existe, é **sempre o último** da array de items.
 
 ---
 
@@ -347,8 +352,9 @@ Pagamentos não conhece:
 
 Ele conhece apenas o necessário para cobrar + arquivar settlement:
 
-- `idContribuicao`
-- Composição de valores
+- `idCampanha` (raiz do carrinho)
+- `items[]` (linhas com `idContribuicao` + `quantidade` por item contribuição; surcharge ítem standalone)
+- Composição agregada (sum-of-lines)
 - Método de pagamento
 - Status FSM
 - Metadados do provedor (`externalRef`, `paymentIntentExternalRef`, `chargeExternalRef`, `balanceTransactionAvailableOn`)
@@ -364,17 +370,26 @@ Este documento descreve o **módulo Financeiro**, **aninhado dentro do BC Pagame
 
 ## Resumo em linguagem simples
 
-1. Quando um `Pagamento` vai a `aprovado`, o módulo Financeiro cria **lançamentos** na mesma transação:
-   - `credito_saldo_recebedor` — `receiverAmountCents` para o **Saldo do Recebedor**
-   - `credito_receita_plataforma` — `feeAmountCents` como **Receita da Plataforma**
-   - `credito_passthrough_surcharge` (opcional, aperture-bjshv) — quando o contribuinte paga sobretaxa de cartão repassada ao recebedor
-2. **`LancamentoFinanceiro` não tem FSM** (Plan 0015). Os "estados" são predicados de consulta sobre colunas de **data observada**:
+1. Quando um `Pagamento` vai a `aprovado`, o módulo Financeiro **itera sobre `intencao.items`** e emite lançamentos na mesma transação — emissão uniforme per-item, sem branch "+1 se cartão":
+   | `item.tipo`             | Lançamentos emitidos                                                                  |
+   | ----------------------- | -------------------------------------------------------------------------------------- |
+   | `contribuicao`          | 2 — `credito_saldo_recebedor` (= `lineReceiverAmountCents`) + `credito_receita_plataforma` (= `lineFeeAmountCents`) |
+   | `passthrough_surcharge` | 1 — `credito_passthrough_surcharge` (= `amountCents`)                                 |
+
+   **Total por pagamento = 2N + S** (N items contribuição + S items surcharge). PIX flows: S = 0. Cartão flows: S = 1 (locked decision #11 do Plan 0016).
+
+2. **Contabilidade do saldo do banco:** `credito_saldo_recebedor` + `credito_receita_plataforma` contam para o saldo. **`credito_passthrough_surcharge` é audit-only** — representa dinheiro que passou pela plataforma para Stripe, nunca foi propriedade dela. Exemplo: contrib 100 + tarifa 10 + surcharge 5 → comprador paga 115 → Stripe deduz 5 → banco recebe 110 = `credito_saldo_recebedor` (100) + `credito_receita_plataforma` (10). O lançamento de surcharge existe para reconciliação contra payouts Stripe mas é silencioso em qualquer query de "quanto está no banco".
+
+3. **`LancamentoFinanceiro` não tem FSM** (Plan 0015). Os "estados" são predicados de consulta sobre colunas de **data observada**:
    - `pending` → `transferidoEm IS NULL AND canceladoEm IS NULL`
    - `transferred` → `transferidoEm IS NOT NULL AND canceladoEm IS NULL`
    - `cancelado` → `canceladoEm IS NOT NULL`
-3. `transferidoEm` é setado em lote pelo caso de uso `marcarLancamentoTransferido`, gateado por `balanceTransactionAvailableOn` (a data que o Stripe libera o dinheiro). `canceladoEm` é cascateado pelo `estornarPagamento` quando o lançamento ainda estava pendente.
-4. **`RepasseRecebedor`** é um agregado dentro do módulo com **FSM de 2 estados forward-only**: `solicitado → aprovado`. Um repasse `aprovado` carimba `transferidoEm = aprovadoEm` em todos os lançamentos linkados na mesma transação atômica. Índice único parcial garante no máximo 1 repasse `solicitado` por campanha.
-5. O módulo expõe consultas: `obterSaldoRecebedor`, `obterReceitaPlataforma`.
+
+4. `transferidoEm` é setado em lote pelo caso de uso `marcarLancamentoTransferido`, gateado por `balanceTransactionAvailableOn` (a data que o Stripe libera o dinheiro). `canceladoEm` é cascateado pelo `estornarPagamento` (whole-pagamento) quando o lançamento ainda estava pendente — atinge todos os 2N + S lançamentos do pagamento.
+
+5. **`RepasseRecebedor`** é um agregado dentro do módulo com **FSM de 2 estados forward-only**: `solicitado → aprovado`. Um repasse `aprovado` carimba `transferidoEm = aprovadoEm` em todos os lançamentos linkados na mesma transação atômica. Índice único parcial garante no máximo 1 repasse `solicitado` por campanha.
+
+6. O módulo expõe consultas: `obterSaldoRecebedor`, `obterReceitaPlataforma`.
 
 O módulo não recebe nem armazena nome/email do contribuinte — essa info vive em `IntencaoPagamento.contribuinte` no agregado Pagamento.
 
@@ -400,7 +415,7 @@ Definido em [`src/domain/pagamentos/financeiro/entities/repasse-recebedor.ts`](s
 | Conceito | Onde está |
 |----------|-----------|
 | Montante em centavos | [`src/domain/money.ts`](src/domain/money.ts) — `MoneyCentsSchema` |
-| **LancamentoFinanceiro** (entidade, sem FSM) | [`src/domain/pagamentos/financeiro/entities/lancamento-financeiro.ts`](src/domain/pagamentos/financeiro/entities/lancamento-financeiro.ts). Campos: `id, idPagamento, idContribuicao, idCampanha, tipo, amountCents, criadoEm, transferidoEm, canceladoEm, idRepasse` (nullable) |
+| **LancamentoFinanceiro** (entidade, sem FSM) | [`src/domain/pagamentos/financeiro/entities/lancamento-financeiro.ts`](src/domain/pagamentos/financeiro/entities/lancamento-financeiro.ts). Campos: `id, idPagamento, idItemPagamento` (Plan 0016 — link 1:N para o item que originou esta linha), `idContribuicao` (nullable; null em `credito_passthrough_surcharge`), `idCampanha, tipo, amountCents, criadoEm, transferidoEm, canceladoEm, idRepasse` (nullable) |
 | **RepasseRecebedor** (entidade, FSM 2-estados) | [`src/domain/pagamentos/financeiro/entities/repasse-recebedor.ts`](src/domain/pagamentos/financeiro/entities/repasse-recebedor.ts) — `StatusRepasse`, `criarRepasseRecebedorSolicitado`, `aprovarRepasse` |
 | Tipos de lançamento | [`src/domain/pagamentos/financeiro/value-objects/`](src/domain/pagamentos/financeiro/value-objects/) — `TipoLancamentoFinanceiro` (`credito_saldo_recebedor`, `credito_receita_plataforma`, `credito_passthrough_surcharge`) |
 | Saldo do Recebedor / Receita da Plataforma (VOs derivados) | mesmo diretório — `SaldoRecebedor`, `ReceitaPlataforma`, `SnapshotComposicaoValoresFinanceiro` |
@@ -431,7 +446,7 @@ Definido em [`src/domain/pagamentos/financeiro/entities/repasse-recebedor.ts`](s
 
 - **Atomicidade FSM + ledger:** `aprovarRepasseTransaction` faz, na mesma `BEGIN/COMMIT`: (a) UPDATE em `repasses_recebedor` para `aprovado`, (b) UPDATE em todos os `lancamentos_financeiros` linkados para carimbar `transferidoEm = aprovadoEm`. Se um falha, ambos rolam.
 
-- **Invariantes:** `receiverAmountCents + feeAmountCents (+ surchargeCents)` precisa bater com `totalPaidCents`; `transferidoEm` só é setado em lançamento de pagamento `aprovado`; `canceladoEm` só é setado se `transferidoEm IS NULL` (não se cancela algo já transferido); RepasseRecebedor só sai de `solicitado` para `aprovado` (e somente uma vez).
+- **Invariantes:** `totalReceiverCents + totalFeeCents + totalSurchargeCents === totalPaidCents` na composição agregada (soma per-line); cada `LancamentoFinanceiro` carrega `idItemPagamento` apontando para a linha que o originou; `transferidoEm` só é setado em lançamento de pagamento `aprovado`; `canceladoEm` só é setado se `transferidoEm IS NULL` (não se cancela algo já transferido); RepasseRecebedor só sai de `solicitado` para `aprovado` (e somente uma vez).
 
 ---
 
@@ -552,13 +567,15 @@ Bounded context de **suporte** ao produto (convites digitais, RSVP): fora do cor
 
 O **Checkout** é um **pseudo-bounded-context**: existe apenas como casos de uso em [`src/use-cases/checkout/`](src/use-cases/checkout) e erros tipados em [`src/errors/checkout/`](src/errors/checkout). **Não há `src/domain/checkout/` nem `src/adapters/checkout/`** — Checkout não tem entidades, value objects, agregados nem repositórios próprios. Sua única responsabilidade é **orquestrar BCs reais (Arrecadação, Taxas, Pagamentos, módulo Financeiro)** em sagas multi-passo, com **guard multi-tenant** e (onde ainda faz sentido) compensação.
 
-**Mudança no padrão de compensação (pós-Plan 0015):** como `Contribuicao` virou *slot puro* (sem estado armazenado), **não há mais o que rolar atrás** quando uma intenção de pagamento falha — a contribuição nunca foi "reservada", o predicado de indisponibilidade é só uma checagem de leitura. As sagas pós-0015 são mais simples: validam, criam intenção, deixam o webhook avançar o FSM. A única compensação real hoje é o **`estornarPagamento`** (refund pós-aprovação) que cascateia em `canceladoEm` nos lançamentos linkados que ainda não foram transferidos.
+**Mudança no padrão de compensação (pós-Plan 0015 + Plan 0016):** como `Contribuicao` virou *slot puro com cardinalidade* (sem estado armazenado), **não há mais o que rolar atrás** quando uma intenção de pagamento falha — a contribuição nunca foi "reservada", os predicados `quantidadeRestante` + `esgotada` são checagens de leitura. As sagas pós-0015 são mais simples: validam, criam intenção (agora como carrinho multi-item), deixam o webhook avançar o FSM. A única compensação real hoje é o **`estornarPagamento`** (refund pós-aprovação, whole-pagamento) que cascateia em `canceladoEm` em todos os lançamentos linkados ainda não transferidos.
+
+**Rename pós-Plan 0016:** o saga `iniciarPagamentoContribuicao` foi renomeada para **`iniciarPagamentoCarrinho`** — o novo nome reflete a forma multi-item (locked decision §Open items / Naming). Pure rename, sem re-export deprecado (greenfield staging).
 
 ## Resumo em linguagem simples
 
-1. Quando o contribuinte clica "quero este item", o Checkout: valida a plataforma da campanha, checa que a contribuição existe + **não está indisponível** (predicado), calcula a composição de valores (Taxas), e cria a `IntencaoPagamento` + sessão de checkout no provedor (Pagamentos). O provedor avança o FSM por webhooks; o snapshot do contribuinte chega via `checkout.session.completed`.
-2. Quando o webhook `payment_intent.succeeded` (ou `charge.succeeded`) chega, o Checkout finaliza: `aprovarPagamento` + `registrarEfeitosFinanceirosPagamentoAprovado` na mesma transação.
-3. Quando o admin precisa estornar, `estornarPagamento` aciona o refund no provedor, transiciona o FSM para `estornado`, e cascateia `canceladoEm` em lançamentos que ainda não foram transferidos. Lançamentos já transferidos bloqueiam o estorno (`PagamentoEstornoLancamentoJaTransferidoError`).
+1. Quando o contribuinte clica "comprar carrinho", o Checkout: valida a plataforma da campanha; carrega cada contribuição do carrinho e checa **`esgotada(idContribuicao)`** por-item (gate per-item — qualquer slot esgotado → `ArrecadacaoContribuicaoIndisponivelError`); valida que todos os items compartilham `idCampanha` (`CarrinhoMultiplasCampanhasError` se não); calcula composição agregada (Taxas, sum-of-lines); se o método é cartão, calcula `calcularSurchargeParaCarrinho` + appenda como último item; cria a `IntencaoPagamento` carrinho + sessão de checkout no provedor (Pagamentos). O provedor avança o FSM por webhooks; o snapshot do contribuinte chega via `checkout.session.completed`.
+2. Quando o webhook `payment_intent.succeeded` (ou `charge.succeeded`) chega, o Checkout finaliza: `aprovarPagamento` + `registrarEfeitosFinanceirosPagamentoAprovado` (que itera per-item) na mesma transação.
+3. Quando o admin precisa estornar, `estornarPagamento` aciona o refund Stripe pelo `totalPaidCents` agregado, transiciona o FSM para `estornado`, e cascateia `canceladoEm` em todos os lançamentos pendentes do pagamento. Lançamentos já transferidos bloqueiam o estorno (`PagamentoEstornoLancamentoJaTransferidoError`). Whole-pagamento only — não há refund por-item em v1.
 4. Todas as sagas cross-tenant comparam `input.idPlataforma` com `campanha.idPlataforma` e levantam `CheckoutPlataformaMismatchError` em mismatch — guard cross-tenant explícito.
 
 ---
@@ -567,12 +584,12 @@ O **Checkout** é um **pseudo-bounded-context**: existe apenas como casos de uso
 
 | Caso de uso | Responsabilidade |
 |-------------|------------------|
-| [`iniciarPagamentoContribuicao`](src/use-cases/checkout/iniciar-pagamento-contribuicao.ts) | Saga write-side: gate de plataforma → carrega campanha + contribuição (Arrecadação) → checa `contribuicaoEstaIndisponivel` (predicate, não estado) → `calcularComposicaoValores` (Taxas, plataforma + tipo escopados) → `criarIntencaoPagamento` (Pagamentos) → abre sessão de checkout no provedor. **Sem reserva de slot** — concorrência otimista; se duas pessoas pagarem o mesmo item, ambos pagamentos vão a `aprovado`. |
+| [`iniciarPagamentoCarrinho`](src/use-cases/checkout/iniciar-pagamento-carrinho.ts) | Saga write-side multi-item (renomeada de `iniciarPagamentoContribuicao` no Plan 0016): gate de plataforma → carrega campanha + cada contribuição (Arrecadação) → checa `esgotada(idContribuicao)` por-item → valida que todos os items compartilham `idCampanha` → `calcularComposicaoValores` agregada (Taxas) → opcionalmente `calcularSurchargeParaCarrinho` + appenda surcharge item como último → `criarPagamentoPendente` (Pagamentos, com `items[]`) → abre sessão de checkout no provedor. **Sem reserva de slot** — concorrência otimista; se duas pessoas pagarem o mesmo item, ambos pagamentos vão a `aprovado` (overshoot aceito). |
 | [`finalizarPagamentoAprovado`](src/use-cases/checkout/finalizar-pagamento-aprovado.ts) | Saga de confirmação (driver: webhook do provedor): `aprovarPagamento` (Pagamentos) → `registrarEfeitosFinanceirosPagamentoAprovado` (módulo Financeiro). Mesma transação DB; idempotente por `idPagamento`. |
 | [`finalizarPagamentoRejeitado`](src/use-cases/checkout/finalizar-pagamento-rejeitado.ts) | Saga de rejeição (driver: webhook): `rejeitarPagamento` (Pagamentos). **Não há mais compensação em Arrecadação** (pré-0015 fazia desassociar contribuinte — agora não há nada para rolar atrás). |
 | [`estornarPagamento`](src/use-cases/checkout/estornar-pagamento.ts) | Saga de refund (admin-driven): valida que pagamento está `aprovado` → checa que nenhum lançamento linkado tem `transferidoEm` setado (senão `PagamentoEstornoLancamentoJaTransferidoError`) → dispara refund no provedor → `estornarPagamentoAprovado` (Pagamentos) → cascateia `canceladoEm = now()` em todos os lançamentos pendentes do pagamento. Tudo na mesma transação. |
 | [`iniciarRepasseRecebedor`](src/use-cases/checkout/iniciar-repasse-recebedor.ts) | Saga de repasse (recebedor-driven): gate de plataforma → resolve o recebedor ativo (Arrecadação) → guard que campanha tem recebedor (`CheckoutCampanhaSemRecebedorError` se não) → `solicitarRepasseRecebedor` (módulo Financeiro). Gera bead `RepasseRecebedor` em `solicitado`. |
-| [`obterContribuicoesPrecalculadasCampanha`](src/use-cases/checkout/obter-contribuicoes-precalculadas-campanha.ts) | Read-side: gate de plataforma → lista contribuições disponíveis (predicate) + aplica `calcularComposicaoValores` em cada uma. Pré-monta o snapshot para a UI sem efeitos colaterais. |
+| [`obterContribuicoesPrecalculadasCampanha`](src/use-cases/checkout/obter-contribuicoes-precalculadas-campanha.ts) | Read-side: gate de plataforma → lista contribuições disponíveis (filtra por `esgotada` predicate) + aplica `calcularComposicaoValores` em cada uma. Pré-monta o snapshot para a UI sem efeitos colaterais. |
 
 ---
 
@@ -583,19 +600,21 @@ Apenas dois — todos os outros vêm dos BCs orquestrados:
 - [`CheckoutPlataformaMismatchError`](src/errors/checkout/plataforma-mismatch.error.ts) — guard cross-tenant.
 - [`CheckoutCampanhaSemRecebedorError`](src/errors/checkout/campanha-sem-recebedor.error.ts) — `iniciarRepasseRecebedor` chamado em campanha sem recebedor ativo. Criação de campanha + recebimento de contribuições funcionam sem recebedor; só o saque é gateado.
 
+Carrinhos com items de campanhas diferentes levantam `CarrinhoMultiplasCampanhasError` (no BC Pagamentos / saga `iniciarPagamentoCarrinho`).
+
 ---
 
 ## DDD
 
 - **Pseudo-BC, não BC real:** sem domínio próprio. Toda regra de negócio vive nos BCs orquestrados (Arrecadação, Taxas, Pagamentos + módulo Financeiro). O Checkout adiciona **apenas** orquestração + dois erros cross-BC.
 
-- **Padrão saga simplificado pós-Plan 0015:** o write-side principal (`iniciarPagamentoContribuicao`) deixou de ter `try/catch` de compensação porque o primeiro passo de efeito colateral (`criarIntencaoPagamento`) é o último que importa — não há reserva de slot para desfazer. A única compensação que sobreviveu é a cascata de `canceladoEm` dentro de `estornarPagamento`, que mora na mesma transação DB do `estornarPagamentoAprovado` — atomicidade em vez de saga.
+- **Padrão saga simplificado pós-Plan 0015 + Plan 0016:** o write-side principal (`iniciarPagamentoCarrinho`) deixou de ter `try/catch` de compensação porque o primeiro passo de efeito colateral (`criarPagamentoPendente`) é o último que importa — não há reserva de slot para desfazer. A única compensação que sobreviveu é a cascata de `canceladoEm` dentro de `estornarPagamento`, que mora na mesma transação DB do `estornarPagamentoAprovado` — atomicidade em vez de saga. O nome antigo `iniciarPagamentoContribuicao` foi removido (pure rename, sem re-export deprecado).
 
 - **Guard cross-tenant:** toda saga que recebe `idPlataforma` no input compara com o `campanha.idPlataforma` carregado do repositório e lança `CheckoutPlataformaMismatchError` se forem diferentes. Fecha a superfície "consigo um id de campanha de outra plataforma e tento pagá-la pela minha". O span registra o mismatch com atributos estruturados para auditoria.
 
-- **Sem novos modelos:** Checkout não cria entidades, agregados, value objects nem ports. Ele consome os modelos públicos dos BCs (`Campanha`, `Contribuicao`, `Pagamento`, `LancamentoFinanceiro`, `RepasseRecebedor`) e devolve composições deles ao chamador.
+- **Sem novos modelos:** Checkout não cria entidades, agregados, value objects nem ports. Ele consome os modelos públicos dos BCs (`Campanha`, `Contribuicao`, `Pagamento`, `ItemDoPagamento`, `LancamentoFinanceiro`, `RepasseRecebedor`) e devolve composições deles ao chamador.
 
-- **Observabilidade:** cada saga abre um span próprio (`iniciarPagamentoContribuicao`, `finalizarPagamentoAprovado`, `estornarPagamento`, …) com atributos `checkout.*` para correlacionar os passos.
+- **Observabilidade:** cada saga abre um span próprio (`iniciarPagamentoCarrinho`, `finalizarPagamentoAprovado`, `estornarPagamento`, …) com atributos `checkout.*` para correlacionar os passos. O evento de domínio emitido pela criação carrega `numeroDeItens` + `idsContribuicoes` (não `idContribuicao` único — locked decision §Operator review #19 do Plan 0016).
 
 ---
 

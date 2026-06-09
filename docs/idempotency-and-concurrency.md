@@ -6,10 +6,16 @@ This is a **discussion doc**, not a settled spec — several deferred items belo
 
 > 📌 **2026-06-03 — most cross-BC races eliminated by plan [0015](../plans/0015-contribuicao-pagamento-financeiro-collapse.md).** The simplification pass collapses three FSMs into one (only Pagamento has a state machine; Contribuição has none; LançamentoFinanceiro has none) and removes the contribuição-claim step entirely. The two races that motivated the deferred questions in the original draft of this doc — the **contribuição-claim race** (two visitors hitting "Comprar" milliseconds apart) and the **maturation race** (a scheduled job racing the webhook on flipping lançamento `status`) — are both gone:
 >
-> - **Claim race:** Contribuição has no `status` and no claim step. The "indisponivel" predicate is a query (`EXISTS pagamento WHERE idContribuicao = X AND status='aprovado'`). With no shared status to race on, there's nothing to optimistic-CC. Two visitors completing payment for the same slot inside the same Stripe-session window is an **accepted edge case** — both pagamentos go `aprovado`, recebedor receives 2x the value, no remediation, per 0015 §Locked-decision 6 (eunenem is a money-transfer product with no stock; double-pay is +money, not -inventory).
+> - **Claim race:** Contribuição has no `status` and no claim step. With no shared status to race on, there's nothing to optimistic-CC. Two visitors completing payment for the same slot inside the same Stripe-session window is an **accepted edge case** — both pagamentos go `aprovado`, recebedor receives 2x the value, no remediation, per 0015 §Locked-decision 6 (eunenem is a money-transfer product with no stock; double-pay is +money, not -inventory).
 > - **Maturation race:** `LançamentoFinanceiro` has no FSM and no `maturaEm` field. The "states" are query-time predicates over `transferidoEm` + `canceladoEm`. There is no scheduled job flipping status; the admin sets `transferidoEm` manually when the money actually reaches the recebedor. Nothing races against the webhook because nothing is asynchronously mutating the row in the background.
 >
 > What *still* matters: the Pagamento FSM is event-driven (Stripe webhooks fire actual transitions) and earns its own consistency boundary inside the Pagamentos aggregate. The replay-discipline below still applies to `finalizarPagamentoAprovado`. The lançamento batch-transfer ordering is admin-discipline rather than a race (only one operator marks a batch as transferred at a time, with a UI confirmation step).
+
+> 📌 **2026-06-08 — overshoot-accepted generalizes per-item under plan [0016](../plans/0016-multi-item-pagamento-and-quantidade.md).** The same "no claim step, no shared status to race on" posture extends one level deeper. Contribuição gains `quantidade: number` (the slot's cardinality), and the boolean "indisponivel" predicate becomes a pair: `quantidadeRestante(c): number` (read-derived as `contribuicao.quantidade − SUM(item.quantidade WHERE pagamento.status='aprovado')`) + `esgotada(c): boolean` (derived as `quantidadeRestante ≤ 0`).
+>
+> `quantidadeRestante` **is allowed to return negative**. Two carts that together overshoot the slot's `quantidade` both pass the `esgotada(c) === false` check at saga entry, both win their Stripe sessions, both webhook-approve, and the operator pockets the extra +money. No reservation table, no TTL cleanup cron, no remediation. The slot's quantidade is the operator's *intent*, not a hard cap enforced against the buyer.
+>
+> Same money-transfer-not-inventory posture as 0015, applied per-item: an extra paid contribuição is +R$ for the recebedor, not −1 slot of physical inventory that needs reconciliation. The saga `iniciarPagamentoCarrinho` (renamed from `iniciarPagamentoContribuicao` in 0016) gates against `esgotada` per item — and that gate is honest at query time but doesn't try to lock the slot between read and write. The optimistic-CC pattern that 0015 retired (the `versao`-column convention) stays retired: cardinality is read-derived, no shared row to race on.
 
 ---
 
@@ -154,7 +160,7 @@ Easy to confuse. Two concepts, two patterns, two parts of the codebase:
 | **When it applies** | Multi-step operation, one step fails mid-flow | Same operation called twice |
 | **Direction** | Undo (reverse the writes that already happened) | Skip (don't redo the writes) |
 | **Code pattern** | `try { stepB; stepC } catch { undo(stepA) }` | `if (alreadyDone) return existing; else doIt` |
-| **Concrete example** | Phase 2: `iniciarPagamentoContribuicao` reverts the claim via `desassociarContribuinte` | Phase 4: `finalizarPagamentoAprovado` skips already-done steps |
+| **Concrete example** | (Pre-0015 era) Phase 2: `iniciarPagamentoContribuicao` reverts the claim via `desassociarContribuinte`. **Post-0015/0016:** there's no claim to revert, so the only surviving compensation is the `canceladoEm` cascade inside `estornarPagamento` — same idea, atomicity-via-DB-transaction instead of saga | Phase 4: `finalizarPagamentoAprovado` skips already-done steps |
 | **Failure mode** | Partial state if compensation also fails (logged, ops investigates) | None — second call is structurally indistinguishable from first |
 
 **The boundary in this engine:** Phase 2 (saga) lives BEFORE money moves. Phase 3 (process manager) lives AFTER money moves. After the provider returns "charged", you can't "uncharge" by compensation — you'd need a refund flow, which is a separate domain operation. That's why Phase 3 has no try/catch wrapping the writes: there's no compensation available, only retry-safety.
@@ -181,7 +187,7 @@ The orchestrator's job: make all of these safe.
 
 `idPagamento` works as the dedup key for `finalizarPagamentoAprovado` because the operation is **about** that specific Pagamento. But what about operations whose "thing being done" isn't a single identifier?
 
-Example: `iniciarPagamentoContribuicao` creates BOTH a contribuição-claim AND a new Pagamento. The caller-supplied `idPagamento` works — but what if the caller doesn't supply one? Then we'd want a client-supplied idempotency key.
+Example: `iniciarPagamentoCarrinho` creates a multi-item Pagamento. The caller-supplied `idPagamento` works — but what if the caller doesn't supply one? Then we'd want a client-supplied idempotency key.
 
 **Open question:** do we adopt a `(idPlataforma, clientRequestId)` idempotency-key pattern for write orchestrators that mint server-side ids? Or keep "caller supplies all ids" as the convention?
 

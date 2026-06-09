@@ -22,7 +22,8 @@ Read plans in dependency order, not file order — see the graph below.
 | 0012 | [estorno-and-chargeback-cascade](./0012-estorno-and-chargeback-cascade.md)    | 📝 drafted (rewritten by 0015) | Now scoped to customer-initiated chargebacks (`charge.dispute.created`) — admin/lojista refund path implemented by 0015 |
 | 0013 | [provider-fee-passthrough](./0013-provider-fee-passthrough.md)                | 📝 drafted   | 3-part composition; surcharge for Stripe fees    |
 | 0014 | [banking-provider-and-repasse-execution](./0014-banking-provider-and-repasse-execution.md) | 📝 drafted (deferred by 0015) | ⚠️ Real bank transfers (Inter/Nubank); HIGH-RISK — v1 uses manual `transferidoEm`, automated banking is post-0015 |
-| 0015 | [contribuicao-pagamento-financeiro-collapse](./0015-contribuicao-pagamento-financeiro-collapse.md) | 📝 drafted | Single Pagamento FSM; Contribuição → slot; Financeiro → module of Pagamentos; supersedes parts of 0006/0008/0012 |
+| 0015 | [contribuicao-pagamento-financeiro-collapse](./0015-contribuicao-pagamento-financeiro-collapse.md) | ✅ shipped to staging 2026-06-04 | Single Pagamento FSM; Contribuição → slot; Financeiro → module of Pagamentos; supersedes parts of 0006/0008/0012 |
+| 0016 | [multi-item-pagamento-and-quantidade](./0016-multi-item-pagamento-and-quantidade.md) | 🚧 in flight (Phase 5 — docs) | Contribuição gains `quantidade: number`; IntencaoPagamento → multi-item cart (`ItemDoPagamento[]` discriminated by `tipo`); surcharge becomes an item; uniform per-item lançamento emission; depends on 0015 + 0013 |
 
 ## Dependency graph
 
@@ -55,16 +56,22 @@ Arrows mean "needs to be done (or partially done) before." Plans without arrows 
        │                       │     Financeiro folds into Pagamentos,
        │                       │     Contribuição → slot only)
        │                       │
-       │                       └──> 0012 ◄─── 0015
-       │                            (now scoped to customer-initiated
-       │                             chargebacks only — admin/lojista
-       │                             refund path implemented in 0015)
+       │                       ├──> 0012 ◄─── 0015
+       │                       │    (now scoped to customer-initiated
+       │                       │     chargebacks only — admin/lojista
+       │                       │     refund path implemented in 0015)
+       │                       │
+       │                       └──> 0016 ◄── 0015 + 0013
+       │                            (multi-item carrinho: ItemDoPagamento,
+       │                             Contribuição.quantidade, surcharge-as-item,
+       │                             uniform per-item lançamento emission)
        │
-       └──> 0011 (hygiene — best run after 0005/0007/0010/0013/0014/0015 add their adapters)
+       └──> 0011 (hygiene — best run after 0005/0007/0010/0013/0014/0015/0016 add their adapters)
 ```
 
 Notes:
 - **0015** is the **simplification pass** after the original event-driven design lessons were learned. It supersedes parts of 0006 (no maturation rule — `transferidoEm` is observed not predicted), 0008 (no claim step — no shared status to race on), and 0012 (admin/lojista refund collapses into a simple `canceladoEm` timestamp + 409 gate; only customer-initiated chargebacks remain in 0012's scope).
+- **0016** is the **generalization pass** that takes 0015's "derived-predicate over stored state" pattern one level deeper. Cardinality becomes a field on Contribuição (`quantidade`); the boolean predicate becomes a number (`quantidadeRestante`) + a derived boolean (`esgotada`); the IntencaoPagamento becomes a multi-item cart with discriminated-union items; the asymmetric surcharge field at the pagamento root retires in favor of `tipo='passthrough_surcharge'` items; the lançamento factory iterates uniformly per-item (2N + S total) instead of branching on metodo.
 - **0006, 0008** are retained on disk with `-superseded` suffix as historical context. Don't implement them.
 - **0009** (admin UX) and **0010** (auth) are deeply intertwined: 0010 unblocks "admin UX safe to expose." Run 0010 before 0009 Phase 4, or land 0009 Phases 1–3 (no UI) first and then do 0010 and finally 0009 Phase 4.
 - **0011** is hygiene. Run it after any plan that introduces adapters, or run a small slice at the end of each plan.
