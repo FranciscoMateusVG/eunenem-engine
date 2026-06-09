@@ -3,15 +3,22 @@ import {
   EmbeddedCheckoutProvider,
 } from "@stripe/react-stripe-js";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import {
   useIniciarPagamentoCarrinho,
   useInvalidarListaPresentes,
   useObterSucessoPagamento,
+  usePaginaListaPresentes,
   type MetodoPagamento,
 } from "@/lib/paginaApi";
-import { useCart, toSagaInput, type CartLine } from "@/lib/cart.js";
+import {
+  useCart,
+  revalidateAgainstFresh,
+  type CartLine,
+} from "@/lib/cart.js";
 import { formatBRL } from "@/lib/formatBRL";
 import { getStripePromise } from "@/lib/stripeClient";
+import { groupVisitorGifts } from "@/lib/visitorGift";
 
 // Plan 0017 / aperture-16flf — visitor cart drawer + checkout flow.
 //
@@ -123,10 +130,63 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
     };
   }, [open]);
 
+  // aperture-qxntg — refetch list at finalize so we re-validate against
+  // FRESH availableIds. The cart line captures availableIds at add-time
+  // (per the visitorGift projection); between add + finalize another
+  // visitor (or admin action) can flip a row to aprovado. Without this
+  // refetch, the cart would happily ship a now-sold row-id and the
+  // saga's per-item esgotada gate would 500.
+  const listQuery = usePaginaListaPresentes(slug);
+
   const onFinalizar = useCallback(async () => {
     if (cart.state.lines.length === 0 || iniciar.isPending) return;
-    const itens = toSagaInput(cart.state.lines);
+
+    // aperture-qxntg — force a fresh fetch before we ship. ensureData
+    // returns the latest snapshot (refetches if stale per the 30s
+    // staleTime); we then re-derive saga input from those fresh
+    // availableIds rather than the cart line's potentially-stale
+    // snapshot. Falls back to the cart's snapshot if the refetch
+    // throws (network blip) — better to attempt the saga than block
+    // the visitor on a transient list refetch failure; the saga's own
+    // esgotada gate is the safety net.
+    let freshList = listQuery.data;
+    try {
+      freshList = await listQuery.refetch().then((r) => r.data ?? freshList);
+    } catch {
+      // Leave freshList at its cached snapshot.
+    }
+    const freshGifts = freshList ? groupVisitorGifts(freshList) : [];
+
+    const { itens, raced } = revalidateAgainstFresh(
+      cart.state.lines,
+      freshGifts,
+    );
+
+    // Race-recovery: decrement any line whose available count dropped
+    // below the visitor's wanted quantidade between add + finalize.
+    // The visitor sees the updated count + a friendly toast; they
+    // re-click Finalizar to ship with the trimmed cart.
+    if (raced.length > 0) {
+      for (const r of raced) {
+        const dropBy = Math.max(0, cart.quantidadeFor(r.nome) - r.available);
+        for (let i = 0; i < dropBy; i++) {
+          cart.decrement(r.nome);
+        }
+      }
+      const firstNome = raced[0]?.nome ?? "esse mimo";
+      toast(
+        raced.length === 1
+          ? `${firstNome} acabou de ser presenteado por outra pessoa ♡ ajustamos seu carrinho`
+          : `alguns mimos acabaram de ser presenteados ♡ ajustamos seu carrinho`,
+      );
+      // Don't fire the mutation if anything raced — let the visitor
+      // confirm the new cart before paying. They can re-click
+      // Finalizar.
+      return;
+    }
+
     if (itens.length === 0) return;
+
     setCheckoutSnapshot({
       lines: cart.state.lines.slice(),
       totalUnits: cart.totalUnits,
@@ -148,11 +208,9 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
       setCheckoutSnapshot(null);
     }
   }, [
-    cart.state.lines,
-    cart.totalUnits,
-    cart.totalPixCents,
-    cart.totalCartaoCents,
+    cart,
     iniciar,
+    listQuery,
     metodo,
     slug,
   ]);

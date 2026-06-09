@@ -93,12 +93,15 @@ function reducer(state: CartState, action: Action): CartState {
           ),
         };
       }
-      // First add — capture all available ids + initial quantidade=1.
-      // Filter ids to the subset the wire flagged available (the group's
-      // `ids` includes presenteado ones; we only want the buyable ones).
-      const idsAvailable = action.gift.ids.filter(
-        (_, i) => i < action.gift.qtyAvailable,
-      );
+      // aperture-qxntg — capture `availableIds` (UNSOLD rows only) from
+      // the gift's projection. The pre-fix code index-sliced `gift.ids`
+      // (which contains every row sold + unsold in arbitrary order) and
+      // picked sold-out rows in operator's repro (Sapatinho × 1 + Fralda
+      // × 2 against 528bedbe campanha — 3 of 7 Fralda rows already
+      // aprovado, the slice grabbed one of them). The saga's per-item
+      // esgotada gate then fired a 500. visitorGift's `availableIds`
+      // shape is deterministic — only `status === "disponivel"` rows.
+      const idsAvailable = action.gift.availableIds.slice();
       if (idsAvailable.length === 0) return state;
       const line: CartLine = {
         nome: action.gift.nome,
@@ -282,4 +285,53 @@ export function toSagaInput(
     }
   }
   return itens;
+}
+
+/**
+ * aperture-qxntg — finalize-time re-validation against a freshly-fetched
+ * list. Walks each cart line; for each, looks up the matching gift in
+ * `freshGifts` by nome, and rebuilds the saga input from the fresh
+ * `availableIds` (which strips out any row another visitor finalized
+ * between this cart's last add + the visitor clicking Finalizar).
+ *
+ * Returns `{ itens, raced }`:
+ *   - `itens` — saga input ready to send. Only lines that still have
+ *     enough fresh availableIds to cover their quantidade contribute.
+ *   - `raced` — array of line nomes whose quantidade exceeded what's
+ *     fresh-available. Drawer surfaces a calm "esse mimo acabou de ser
+ *     presenteado ♡" toast + decrements those lines so the visitor can
+ *     retry against the new state.
+ *
+ * Gift-not-found in `freshGifts` (the whole group went esgotada / got
+ * deleted) is treated the same as "raced — fresh count is 0."
+ */
+export function revalidateAgainstFresh(
+  lines: readonly CartLine[],
+  freshGifts: ReadonlyArray<{ nome: string; availableIds: readonly string[] }>,
+): {
+  itens: ReadonlyArray<{ idContribuicao: string; quantidade: number }>;
+  raced: ReadonlyArray<{ nome: string; available: number; needed: number }>;
+} {
+  const freshByNome = new Map(
+    freshGifts.map((g) => [g.nome, g.availableIds] as const),
+  );
+  const itens: { idContribuicao: string; quantidade: number }[] = [];
+  const raced: { nome: string; available: number; needed: number }[] = [];
+  for (const line of lines) {
+    const freshIds = freshByNome.get(line.nome) ?? [];
+    if (freshIds.length < line.quantidade) {
+      raced.push({
+        nome: line.nome,
+        available: freshIds.length,
+        needed: line.quantidade,
+      });
+      continue;
+    }
+    for (let i = 0; i < line.quantidade; i++) {
+      const id = freshIds[i];
+      if (!id) continue;
+      itens.push({ idContribuicao: id, quantidade: 1 });
+    }
+  }
+  return { itens, raced };
 }

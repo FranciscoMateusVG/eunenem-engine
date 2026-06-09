@@ -1526,27 +1526,32 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
     }
   };
 
-  // Plan 0016 / aperture-1l37i — atomic edit path with legacy fallback.
+  // Plan 0016 / aperture-1l37i + aperture-1saoe — fully atomic edit.
   //
-  // The pre-1l37i flow always did delete-then-createBulk (one delete + one
-  // createBulk, but FIVE network round-trips counting React Query
-  // invalidations + refetches). That was brittle in three ways:
-  //   1. New id on every edit broke the FK from intencao_items →
-  //      contribuicao (Plan 0016 introduced the items table; the row's
-  //      stable id is now load-bearing).
-  //   2. If `delete` succeeded but `createBulk` failed, the slot was
-  //      gone with no recovery surface.
-  //   3. The 5-request cascade was visible in the operator's Network
-  //      panel + felt slow on the lista pronta scale.
+  // Rex's aperture-putz5 engine PR (#176) extended
+  // AtualizarContribuicaoInputSchema to accept quantidade end-to-end, so
+  // EVERY edit — including qty changes — now flows through a single
+  // `contribuicao.update` Network round-trip. Preserves the
+  // contribuicao.id across the edit (critical for the
+  // intencao_items.idContribuicao FK introduced by Plan 0016), emits
+  // ONE request instead of the pre-1l37i 5-request cascade, and avoids
+  // the broken legacy delete+createBulk path which was 400'ing under
+  // Rex's post-rename schema (aperture-1saoe P0 regression).
   //
-  // The fix: detect the common case (rename / re-price / re-group /
-  // image swap with qty unchanged) and route it through ONE
-  // `contribuicao.update` call. Quantidade changes still need the
-  // delete+createBulk path UNTIL Rex's engine PR (parallel work on the
-  // criar-contribuicoes-em-lote + atualizar-contribuicao engine pieces)
-  // lands. Once Rex's PR lands, the trpc layer already passes quantidade
-  // through to the use-case (zod silently drops it today; uses it after),
-  // and the painel can drop the qty-changed fallback entirely.
+  // The (now-retired) legacy path was: delete(ids) → createBulk(...).
+  // It survived briefly during the parallel-work window between
+  // aperture-1l37i and aperture-putz5 to cover qty changes. Once
+  // aperture-putz5 merged, the fallback became unnecessary; once the
+  // create-flow schema rename shipped, it became actively broken. This
+  // change retires it in saveEdit only — delete + createBulk hooks
+  // remain wired for confirmRemove + the addCatalogItems / addPresetItems
+  // create flows, which still need them.
+  //
+  // Multi-id legacy groups (operator's pre-0016 7-Fralda data) still
+  // patch through the first underlying id — the entity itself carries
+  // quantidade, so we update the representative row's fields and the
+  // group's other rows stay untouched. Operator's mental model is the
+  // group; the underlying data drift is invisible to them.
   //
   // Recovery on NOT_FOUND: when the stable id no longer exists server-
   // side (sibling tab deleted, DB reset, etc.) the toast surfaces a
@@ -1558,78 +1563,29 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
     if (!editItem) return;
     const price = parseFloat(draft.price.replace(",", ".")) || 0;
     const newQty = Number(draft.qty) || 1;
-    const qtyUnchanged = newQty === editItem.qty;
     const imagemUrl = editItem.imageUrl ?? editItem.emoji;
-
-    // Atomic-update path — qty stayed the same, so a single in-place
-    // patch covers the change. Preserves the contribuicao id (FK-safe),
-    // emits ONE Network request, and round-trips an updated row the
-    // list query naturally refetches via the mutation's onSuccess
-    // invalidation. The painel post-1l37i wire ships quantidade on the
-    // row so the operator can still see the slot's cardinality, but
-    // can't bump it via this path until Rex's engine PR lands.
-    if (qtyUnchanged && editItem.ids.length === 1) {
-      const idToUpdate = editItem.ids[0];
-      if (!idToUpdate) {
-        toast.error("Não consegui identificar esse mimo — recarrega a página ♡");
-        return;
-      }
-      try {
-        await updateMut.mutateAsync({
-          id: idToUpdate,
-          nome: draft.title,
-          valor: centsFromBRL(price),
-          imagemUrl,
-          grupo: draft.category,
-        });
-        setEditItem(null);
-        toast.success("Alterações salvas ♡");
-        return;
-      } catch (err) {
-        const error = toContribuicaoError(err);
-        // Stale-row recovery: the slot was deleted between the visitor's
-        // fetch + this edit. Invalidate so the next render reflects
-        // reality + nudge the visitor with a calmer message than the
-        // dead-end "esse mimo não existe mais" the legacy flow used.
-        if (error.kind === "not-found") {
-          void listQuery.refetch();
-          setEditItem(null);
-          toast("essa lista mudou — atualizamos para você ♡");
-          return;
-        }
-        toast.error(contribuicaoErrorMessage(error));
-        return;
-      }
+    const idToUpdate = editItem.ids[0];
+    if (!idToUpdate) {
+      toast.error("Não consegui identificar esse mimo — recarrega a página ♡");
+      return;
     }
-
-    // Legacy delete+createBulk path — needed today only when qty
-    // changed (or the rare multi-id legacy group). Retires after Rex's
-    // engine PR lands so `update` carries quantidade end-to-end.
     try {
-      await deleteMut.mutateAsync({ ids: editItem.ids });
-      await createBulkMut.mutateAsync({
-        // Plan 0016 (aperture-putz5): one ROW with `quantidade=newQty`.
-        // The pre-0016 delete+createBulk(newQty rows) shape is preserved
-        // here as a behavior-equivalent migration; aperture-1l37i covers
-        // the saveEdit rewrite to a single `update({quantidade})` call
-        // that doesn't churn the FK chain.
-        items: [
-          {
-            nome: draft.title,
-            valor: centsFromBRL(price),
-            // aperture-intake-grxsh-followup — preserve the real product
-            // image URL (if any) on edit; fall back to whatever was in
-            // `emoji` (legacy rows used this slot for a glyph or url).
-            imagemUrl,
-            grupo: draft.category,
-            quantidade: newQty,
-          },
-        ],
+      await updateMut.mutateAsync({
+        id: idToUpdate,
+        nome: draft.title,
+        valor: centsFromBRL(price),
+        imagemUrl,
+        grupo: draft.category,
+        quantidade: newQty,
       });
       setEditItem(null);
       toast.success("Alterações salvas ♡");
     } catch (err) {
       const error = toContribuicaoError(err);
+      // Stale-row recovery: the slot was deleted between the visitor's
+      // fetch + this edit. Invalidate so the next render reflects
+      // reality + nudge the visitor with a calmer message than the
+      // dead-end "esse mimo não existe mais" the legacy flow used.
       if (error.kind === "not-found") {
         void listQuery.refetch();
         setEditItem(null);
@@ -1661,11 +1617,13 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
   }
 
   const addSubmitting = createMut.isPending || createBulkMut.isPending;
-  // Plan 0016 / aperture-1l37i: edit submission spans either the atomic
-  // update path (updateMut) or the legacy delete+createBulk path. Track
-  // both so the modal's "Salvando..." state survives whichever path runs.
-  const editSubmitting =
-    updateMut.isPending || deleteMut.isPending || createBulkMut.isPending;
+  // Plan 0016 / aperture-1saoe: edit submission is now a single atomic
+  // contribuicao.update call. The legacy delete+createBulk path retired
+  // once Rex's engine accepted quantidade in update; tracking those
+  // mutations for editSubmitting would surface false-positive spinners
+  // when ConfirmRemove or the addCatalogItems / addPresetItems flows
+  // are in-flight.
+  const editSubmitting = updateMut.isPending;
   const removeSubmitting = deleteMut.isPending;
   const presetSubmitting = createBulkMut.isPending;
 

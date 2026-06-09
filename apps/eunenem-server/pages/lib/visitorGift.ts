@@ -23,6 +23,25 @@ export interface VisitorGift {
   ids: string[];
   /** The id of the first available unit; falsy if the whole group is taken. */
   availableId: string | null;
+  /**
+   * aperture-qxntg — UNSOLD subset of `ids` for the cart's saga input.
+   * Populated by `groupVisitorGifts` from rows with `status === "disponivel"`
+   * only. The cart (lib/cart.tsx) captures these at add-time so the
+   * `toSagaInput` expansion never sends a row-id that's already aprovado.
+   *
+   * Why a separate field instead of `ids.slice(0, qtyAvailable)`: row
+   * iteration order in the wire response is arbitrary — the first
+   * qtyAvailable ids in `ids[]` are NOT guaranteed to be the unsold
+   * subset. The legacy slice picked any subset, including sold-out
+   * rows, which triggered the saga's per-item esgotada early-fail at
+   * finalize-time (operator's Sapatinho × 1 + Fralda Ecológica × 2
+   * walk on the 528bedbe campanha). This field is the deterministic
+   * answer to "which ids can the cart actually buy."
+   *
+   * Length always equals `qtyAvailable`. Empty array when the whole
+   * group is taken (matches `availableId === null`).
+   */
+  availableIds: string[];
   nome: string;
   /** Humanised grupo or "Outros". Drives the chip + badge text. */
   displayCategory: string;
@@ -143,15 +162,18 @@ export function groupVisitorGifts(items: PaginaContribuicao[]): VisitorGift[] {
   const map = new Map<string, VisitorGift>();
   for (const c of items) {
     const existing = map.get(c.nome);
+    const isAvailable = c.status === "disponivel";
     if (existing) {
       existing.ids.push(c.id);
       existing.qtyTotal += 1;
-      if (c.status === "disponivel") {
+      if (isAvailable) {
         existing.qtyAvailable += 1;
+        // aperture-qxntg — push the row-id onto the unsold subset so
+        // the cart's saga input only ever picks buyable ids.
+        existing.availableIds.push(c.id);
         if (!existing.availableId) existing.availableId = c.id;
       }
     } else {
-      const isAvailable = c.status === "disponivel";
       // aperture-kx9bl: `valorComTaxaCartao` is on Rex's m95f3-extended
       // PaginaContribuicao output. Until that branch is in flight against
       // staging, the inferred type doesn't carry the field. The cast
@@ -161,6 +183,11 @@ export function groupVisitorGifts(items: PaginaContribuicao[]): VisitorGift[] {
       map.set(c.nome, {
         ids: [c.id],
         availableId: isAvailable ? c.id : null,
+        // aperture-qxntg — seed `availableIds` with the first row only
+        // when it's actually unsold. The accumulation branch above
+        // pushes subsequent unsold rows. An all-sold-out group ends up
+        // with an empty list.
+        availableIds: isAvailable ? [c.id] : [],
         nome: c.nome,
         displayCategory: humaniseGrupo(c.grupo),
         grupoKey: c.grupo ?? "Outros",
