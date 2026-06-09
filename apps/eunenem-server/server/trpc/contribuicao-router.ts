@@ -211,16 +211,24 @@ const CreateInputSchema = z.object({
   valor: z.number().int().nonnegative(),
   imagemUrl: ImagemUrlSchema.optional(),
   grupo: z.string().trim().min(1).max(60).optional(),
-  qty: z.number().int().min(1).max(100),
+  /**
+   * Plan 0016 (aperture-putz5): slot capacity. `quantidade=N` produces
+   * ONE row with quantidade=N, not N rows with quantidade=1 (pre-0016
+   * `qty` shape — semantically renamed). Defaults to 1 in the engine
+   * use-case when omitted; required here so the painel commits to a
+   * value at the wire boundary.
+   */
+  quantidade: z.number().int().min(1).max(100),
 });
 
 /**
- * Bulk creation input (aperture-d6atj fix-up). One mutation creates N
- * contribuicoes across M catalog items in a single SQL INSERT.
+ * Bulk creation input (aperture-d6atj fix-up; Plan 0016 aperture-putz5
+ * single-row + quantidade migration).
  *
- * Use case: operator picks "Pacote de Fraldas RN qty=8" + "Mamadeira qty=4"
- * + "kit chá de bebê" (10 items × qty=3) → ONE INSERT of N rows, not N
- * round-trips.
+ * Use case: operator picks "Pacote de Fraldas RN quantidade=8" + "Mamadeira
+ * quantidade=4" + "kit chá de bebê" (10 items, each quantidade=1) → ONE
+ * INSERT of 12 rows (NOT 30 — each item is one slot regardless of
+ * quantidade).
  */
 const CreateBulkInputSchema = z.object({
   items: z
@@ -230,7 +238,7 @@ const CreateBulkInputSchema = z.object({
         valor: z.number().int().nonnegative(),
         imagemUrl: ImagemUrlSchema.optional(),
         grupo: z.string().trim().min(1).max(60).optional(),
-        qty: z.number().int().min(1).max(100),
+        quantidade: z.number().int().min(1).max(100),
       }),
     )
     .min(1)
@@ -243,6 +251,13 @@ const UpdateInputSchema = z.object({
   valor: z.number().int().nonnegative().optional(),
   imagemUrl: ImagemUrlSchema.nullable().optional(),
   grupo: z.string().trim().min(1).max(60).nullable().optional(),
+  /**
+   * Plan 0016 (aperture-putz5): change a slot's capacity. Per locked
+   * decision #10 the new value can be lower than already-sold count —
+   * `quantidadeRestante` goes negative, `esgotada` returns true. The
+   * use-case + entity validate `quantidade >= 1` only.
+   */
+  quantidade: z.number().int().min(1).max(100).optional(),
 });
 
 const DeleteInputSchema = z.object({
@@ -260,6 +275,7 @@ function toListItem(
   valor: number;
   imagemUrl: string | null;
   grupo: string | null;
+  quantidade: number;
   indisponivel: boolean;
 } {
   // Post-Phase-1 (plan 0015): contribuição has no status + no contribuinte.
@@ -272,12 +288,18 @@ function toListItem(
   // recebidos" UI reads this boolean to compute totals). Computed via
   // pagamentoRepository EXISTS query at the caller, then passed in
   // here so the projection function stays sync + injection-free.
+  //
+  // Plan 0016 (aperture-putz5): expose `quantidade` so the painel renders
+  // the slot's capacity directly (e.g. "Fralda Ecológica × 7"). The list
+  // procedure already loads it from the entity; threading it through here
+  // keeps the projection self-contained.
   return {
     id: c.id,
     nome: c.nome,
     valor: c.valor,
     imagemUrl: c.imagemUrl,
     grupo: c.grupo,
+    quantidade: c.quantidade,
     indisponivel,
   };
 }
@@ -338,18 +360,20 @@ export const contribuicaoRouter = t.router({
   }),
 
   /**
-   * Creates `qty` separate contribuicoes for a single catalog item shape.
+   * Creates ONE contribuição slot with `quantidade=N` (pre-0016 this used
+   * to expand into N rows × quantidade=1 — the `qty` row-multiplier
+   * pattern that Plan 0016 retires per locked decision #1).
+   *
    * Server derives `idCampanha` + `idOpcaoContribuicao` from the session —
-   * client only supplies the shape + qty.
+   * client only supplies the shape + quantidade.
    *
    * Backward-compat wrapper (aperture-d6atj fix-up): delegates to
-   * `createBulk` with a single-item array. There is now exactly ONE write
-   * path (the bulk path) so single-item creates also go through the
-   * single-INSERT use-case — the wrapper exists only to preserve the
-   * legacy procedure shape for callers that haven't migrated yet.
+   * `createBulk` with a single-item array. There is exactly ONE write
+   * path (the bulk path); single-item creates go through the same
+   * single-INSERT use-case.
    *
-   * All-or-nothing semantics via the bulk repo: if any row fails, none
-   * persist (no partial state).
+   * All-or-nothing semantics via the bulk repo: if the row fails (FK,
+   * unique), nothing persists.
    */
   create: t.procedure
     .input(CreateInputSchema)
@@ -372,7 +396,7 @@ export const contribuicaoRouter = t.router({
                 valor: input.valor,
                 imagemUrl: input.imagemUrl ?? null,
                 grupo: input.grupo ?? null,
-                qty: input.qty,
+                quantidade: input.quantidade,
               },
             ],
           },
@@ -384,23 +408,18 @@ export const contribuicaoRouter = t.router({
     }),
 
   /**
-   * Bulk creation across M catalog items (aperture-d6atj fix-up). Each
-   * item is expanded to `qty` contribuicoes; all expand into ONE SQL
-   * INSERT statement (single round-trip, atomic).
+   * Bulk creation across M catalog items (aperture-d6atj fix-up; Plan
+   * 0016 aperture-putz5 single-row + quantidade migration).
    *
-   * Concrete shape: operator picks a "kit chá de bebê" of 10 items × qty=3
-   * → 30 contribuicoes in ONE INSERT. Without this procedure the legacy
-   * single-create loop would emit 30 round-trips.
+   * Concrete shape: operator picks a "kit chá de bebê" of 10 items each
+   * with quantidade=1 → 10 contribuicoes in ONE INSERT. A
+   * Fralda-RN-quantidade=8 slot is ONE row, not 8 — locked decision #1.
+   * Without this procedure each single-create would round-trip; bulk lets
+   * the painel commit a whole catalog selection in a single mutation.
    *
    * Server derives `idCampanha` + `idOpcaoPresentes` from the session —
    * the client never specifies them, and every item in the batch is
    * scoped to the same tenant.
-   *
-   * Future follow-up: `createFromCatalog` / `createFromListaPronta`
-   * (convenience procedures that resolve a template id → items[]) are
-   * DEFERRED — the catalog→contribuicao mapping ambiguity from the
-   * original d6atj recon still needs operator alignment. Once resolved,
-   * those procedures will compose `criarContribuicoesEmLote` directly.
    */
   createBulk: t.procedure
     .input(CreateBulkInputSchema)
@@ -422,7 +441,7 @@ export const contribuicaoRouter = t.router({
               valor: item.valor,
               imagemUrl: item.imagemUrl ?? null,
               grupo: item.grupo ?? null,
-              qty: item.qty,
+              quantidade: item.quantidade,
             })),
           },
         );
@@ -449,6 +468,7 @@ export const contribuicaoRouter = t.router({
             valor: input.valor,
             imagemUrl: input.imagemUrl,
             grupo: input.grupo,
+            quantidade: input.quantidade,
           },
         );
         // Plan 0016 (aperture-eg1s2): single-row esgotada check.

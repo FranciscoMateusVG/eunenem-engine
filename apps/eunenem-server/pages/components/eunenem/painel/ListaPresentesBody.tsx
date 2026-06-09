@@ -1453,6 +1453,9 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
   const addCatalogItems = async (picked: ListaCatalogItem[]) => {
     try {
       await createBulkMut.mutateAsync({
+        // Plan 0016 (aperture-putz5): one ROW per catalog item with
+        // `quantidade=suggestedQty`. Pre-0016 this fanned out into
+        // suggestedQty rows per item — locked decision #1 retires that.
         items: picked.map((it) => ({
           nome: it.name,
           valor: centsFromBRL(it.price),
@@ -1464,7 +1467,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
           // to keep the field unset for image-less items.
           imagemUrl: it.imageUrl ?? undefined,
           grupo: it.category,
-          qty: it.suggestedQty,
+          quantidade: it.suggestedQty,
         })),
       });
       setAddModalTab(null);
@@ -1482,6 +1485,9 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
   const addPresetItems = async (picked: PresetItem[], presetId: ListaProntaId) => {
     try {
       await createBulkMut.mutateAsync({
+        // Plan 0016 (aperture-putz5): one ROW per preset item with
+        // `quantidade=suggestedQty`. Aperture-1l37i frontend follow-up
+        // covers the grouping/saveEdit UX rewrite around this shape.
         items: picked.map((it) => ({
           nome: it.name,
           valor: centsFromBRL(it.price),
@@ -1490,7 +1496,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
           // addCatalogItems for the undefined-vs-null reasoning.
           imagemUrl: it.imageUrl ?? undefined,
           grupo: presetId,
-          qty: it.suggestedQty,
+          quantidade: it.suggestedQty,
         })),
       });
       setPresetDetail(null);
@@ -1515,6 +1521,11 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
     try {
       await deleteMut.mutateAsync({ ids: editItem.ids });
       await createBulkMut.mutateAsync({
+        // Plan 0016 (aperture-putz5): one ROW with `quantidade=newQty`.
+        // The pre-0016 delete+createBulk(newQty rows) shape is preserved
+        // here as a behavior-equivalent migration; aperture-1l37i covers
+        // the saveEdit rewrite to a single `update({quantidade})` call
+        // that doesn't churn the FK chain.
         items: [
           {
             nome: draft.title,
@@ -1524,7 +1535,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
             // (legacy rows used this slot for a glyph or url).
             imagemUrl: editItem.imageUrl ?? editItem.emoji,
             grupo: draft.category,
-            qty: newQty,
+            quantidade: newQty,
           },
         ],
       });

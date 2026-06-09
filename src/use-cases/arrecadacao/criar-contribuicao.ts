@@ -36,6 +36,13 @@ export const CriarContribuicaoInputSchema = z.object({
   // tRPC router schema).
   imagemUrl: z.string().trim().min(1).max(500).nullable().optional(),
   grupo: z.string().trim().min(1).max(60).nullable().optional(),
+  /**
+   * Plan 0016 (aperture-putz5): slot capacity. Defaults to 1 (single-unit
+   * slot, mirroring the pre-0016 default). The entity factory validates
+   * `quantidade >= 1` at construction; a 5-of-Fralda-RN slot is one row
+   * with quantidade=5, NOT five rows.
+   */
+  quantidade: z.number().int().min(1).max(100).optional(),
 });
 
 export type CriarContribuicaoInput = z.infer<typeof CriarContribuicaoInputSchema>;
@@ -71,7 +78,8 @@ export async function criarContribuicao(
         throw new ArrecadacaoInputInvalidoError(message);
       }
 
-      const { id, idCampanha, idOpcaoContribuicao, nome, valor, imagemUrl, grupo } = parsed.data;
+      const { id, idCampanha, idOpcaoContribuicao, nome, valor, imagemUrl, grupo, quantidade } =
+        parsed.data;
 
       span.setAttribute('arrecadacao.contribuicao.id', id);
       span.setAttribute('arrecadacao.campanha.id', idCampanha);
@@ -109,6 +117,9 @@ export async function criarContribuicao(
         valor,
         imagemUrl: imagemUrl ?? null,
         grupo: grupo ?? null,
+        // exactOptionalPropertyTypes: only include quantidade when the
+        // caller provided it; the entity factory defaults to 1.
+        ...(quantidade !== undefined ? { quantidade } : {}),
         criadaEm: clock(),
       });
 

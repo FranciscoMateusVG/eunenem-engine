@@ -3,14 +3,20 @@
 // Single seam between the lista UI and the contribuicao data layer.
 // SWAPPED from mock → real tRPC by GLaDOS post-PR #68 merge.
 //
-// Contract Rex's d6atj shipped (LOCKED — matches mock perfectly):
+// Contract (Plan 0016 aperture-putz5 reshape — `qty` row-multiplier
+// retired in favor of `quantidade` slot capacity per locked decision #1):
 //   contribuicao.list -> ContribuicaoDTO[]
-//   contribuicao.create({ nome, valor, imagemUrl, grupo, qty }) -> { ids }
+//   contribuicao.create({ nome, valor, imagemUrl, grupo, quantidade }) -> { ids }
 //   contribuicao.createBulk({ items: [...] }) -> { ids }
-//   contribuicao.createFromCatalog({ catalogItemId, qty, overrides? }) -> { ids }
-//   contribuicao.createFromListaPronta({ listaProntaId }) -> { ids }
-//   contribuicao.update({ id, ...fields }) -> { id }
+//   contribuicao.update({ id, ...fields, quantidade? }) -> ContribuicaoDTO
 //   contribuicao.delete({ ids }) -> { count }
+//
+// `createFromCatalog` + `createFromListaPronta` were declared in the
+// pre-0016 contract but never wired server-side. The corresponding hooks
+// (`useContribuicaoCreateFromCatalog`, `useContribuicaoCreateFromListaPronta`)
+// were dead client code referencing routes that don't exist; removed in
+// this PR. If catalog/lista-pronta convenience procedures land later they
+// re-enter through the bulk path.
 //
 // Errors: BAD_REQUEST 'contribuicao_locked' | NOT_FOUND | UNAUTHORIZED
 //         mapped to ContribuicaoError discriminated union.
@@ -151,7 +157,7 @@ export function useContribuicaoList() {
   return trpc.contribuicao.list.useQuery();
 }
 
-/** Single-item create. Multiplied by `input.qty` server-side. */
+/** Single-item create. One row with `quantidade=N` per Plan 0016. */
 export function useContribuicaoCreate() {
   const utils = trpc.useUtils();
   return trpc.contribuicao.create.useMutation({
@@ -161,30 +167,15 @@ export function useContribuicaoCreate() {
   });
 }
 
-/** Bulk create — each input.items[i] gets `items[i].qty` rows. */
+/**
+ * Bulk create — one row per `input.items[i]`, each carrying its own
+ * `quantidade` (Plan 0016 single-row + quantidade migration). Pre-0016
+ * this fanned out into `items[i].qty` rows per item; that pattern is
+ * gone.
+ */
 export function useContribuicaoCreateBulk() {
   const utils = trpc.useUtils();
   return trpc.contribuicao.createBulk.useMutation({
-    onSuccess: () => {
-      void utils.contribuicao.list.invalidate();
-    },
-  });
-}
-
-/** Add `qty` units of one catalog item, with optional overrides. */
-export function useContribuicaoCreateFromCatalog() {
-  const utils = trpc.useUtils();
-  return trpc.contribuicao.createFromCatalog.useMutation({
-    onSuccess: () => {
-      void utils.contribuicao.list.invalidate();
-    },
-  });
-}
-
-/** Expand a "lista pronta" bundle into individual contribuicoes. */
-export function useContribuicaoCreateFromListaPronta() {
-  const utils = trpc.useUtils();
-  return trpc.contribuicao.createFromListaPronta.useMutation({
     onSuccess: () => {
       void utils.contribuicao.list.invalidate();
     },

@@ -33,6 +33,15 @@ export interface ContribuicaoDTO {
   imagemUrl: string | null;
   /** Category-ish grouping tag. Nullable for ad-hoc custom items. */
   grupo: string | null;
+  /**
+   * Plan 0016 (aperture-putz5): slot capacity. Pre-0016 every slot was
+   * implicitly quantidade=1 and "5 wine glasses" meant 5 rows; post-0016
+   * it's ONE row with quantidade=5 (locked decision #1). Optional during
+   * the migration to keep the visitor wire (which doesn't yet project
+   * quantidade) typecheck-clean; will tighten to required once the
+   * visitor cart MVP (aperture-16flf) lands.
+   */
+  quantidade?: number;
   /** Filled once a guest reserves the item. null = still available.
    *  DEPRECATED per plan 0015 Phase 1 — contribuinte data moves to
    *  IntencaoPagamento. The wire stopped projecting this field for
@@ -68,17 +77,21 @@ export interface ContribuicaoDTO {
   indisponivel?: boolean;
 }
 
-/** Single-item create. `qty` rows get inserted, each with its own id. */
+/** Single-item create — ONE row with `quantidade=N` per Plan 0016. */
 export interface CreateInput {
   nome: string;
   /** Cents. */
   valor: number;
   imagemUrl?: string | null;
   grupo?: string | null;
-  qty: number;
+  /**
+   * Plan 0016 (aperture-putz5): slot capacity. Replaces the pre-0016
+   * `qty` row-multiplier shape — see `ContribuicaoDTO.quantidade`.
+   */
+  quantidade: number;
 }
 
-/** Bulk create — N items, each carrying its own qty multiplier. */
+/** Bulk create — N items, each a single slot with its own `quantidade`. */
 export interface BulkCreateInput {
   items: CreateInput[];
 }
@@ -90,6 +103,11 @@ export interface UpdateInput {
   valor?: number;
   imagemUrl?: string | null;
   grupo?: string | null;
+  /**
+   * Plan 0016 (aperture-putz5): change a slot's capacity. Per locked
+   * decision #10 lowering below sold count is accepted (overshoot).
+   */
+  quantidade?: number;
 }
 
 /** Bulk delete by id list. Missing ids are silently ignored. */
@@ -123,25 +141,23 @@ const CATALOG_INDEX: Map<string, ListaCatalogItem> = (() => {
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 /**
- * Materialize one CreateInput into `qty` separate ContribuicaoDTO rows.
- * Each row gets its own UUID — the qty multiplier lives at the store
- * boundary, never as a column on the row itself (a "qty: 8 of fraldas"
- * decomposes to 8 individual rows so per-unit reservation works).
+ * Materialize one CreateInput into ONE ContribuicaoDTO row carrying
+ * `quantidade=N` (Plan 0016 aperture-putz5). Pre-0016 this loop emitted
+ * N copies of the row; locked decision #1 retires that shape.
  */
 function expandCreateInput(input: CreateInput): ContribuicaoDTO[] {
-  const rows: ContribuicaoDTO[] = [];
-  for (let i = 0; i < input.qty; i++) {
-    rows.push({
+  return [
+    {
       id: crypto.randomUUID(),
       nome: input.nome,
       valor: input.valor,
       imagemUrl: input.imagemUrl ?? null,
       grupo: input.grupo ?? null,
+      quantidade: input.quantidade,
       contribuinte: null,
       status: "disponivel",
-    });
-  }
-  return rows;
+    },
+  ];
 }
 
 // ── Procedures ─────────────────────────────────────────────────────────────
@@ -154,16 +170,17 @@ export const mockContribuicao = {
   },
 
   /**
-   * Single-item create — routes through `createBulk` so the qty
-   * multiplier path stays single-source.
+   * Single-item create — routes through `createBulk` so the single-row
+   * path stays single-source.
    */
   async create(input: CreateInput): Promise<{ ids: string[] }> {
     return mockContribuicao.createBulk({ items: [input] });
   },
 
   /**
-   * Bulk create — each input item produces `input.qty` rows.
-   * 3 items each qty=2 → 6 rows; 1 item qty=8 → 8 rows.
+   * Bulk create — each input item produces ONE row with `quantidade=N`
+   * (Plan 0016 single-row + quantidade). 3 items each quantidade=2 →
+   * 3 rows; 1 item quantidade=8 → 1 row.
    */
   async createBulk(input: BulkCreateInput): Promise<{ ids: string[] }> {
     await delay(200);
@@ -178,13 +195,14 @@ export const mockContribuicao = {
   },
 
   /**
-   * Add `qty` units of a single catalog item. Optional `overrides`
-   * patch the derived CreateInput before it's expanded — supports the
-   * "I want this catalog item but rename it / bump the price" flow.
+   * Add ONE slot of a single catalog item with `quantidade=N` (Plan
+   * 0016). Optional `overrides` patch the derived CreateInput before
+   * persistence — supports the "I want this catalog item but rename it /
+   * bump the price" flow.
    */
   async createFromCatalog(input: {
     catalogItemId: string;
-    qty: number;
+    quantidade: number;
     overrides?: Partial<CreateInput>;
   }): Promise<{ ids: string[] }> {
     const item = CATALOG_INDEX.get(input.catalogItemId);
@@ -202,17 +220,16 @@ export const mockContribuicao = {
       valor: Math.round(item.price * 100),
       imagemUrl: item.emoji,
       grupo: item.category,
-      qty: input.qty,
+      quantidade: input.quantidade,
     };
     const merged: CreateInput = { ...base, ...(input.overrides ?? {}) };
     return mockContribuicao.createBulk({ items: [merged] });
   },
 
   /**
-   * Expand a "lista pronta" bundle into individual contribuicoes.
-   * Every item in the bundle becomes its own CreateInput (qty per
-   * item from `suggestedQty`), then a single createBulk call flushes
-   * the lot.
+   * Expand a "lista pronta" bundle into ONE row per bundle item, each
+   * carrying its `suggestedQty` as `quantidade`. Pre-0016 a "suggestedQty:
+   * 3" item produced 3 rows; post-0016 it's 1 row with quantidade=3.
    */
   async createFromListaPronta(input: {
     listaProntaId: string;
@@ -233,7 +250,7 @@ export const mockContribuicao = {
       // Bundle id IS the grupo — keeps the UI's category badge wired
       // even when the bundle isn't a strict ListaCategory value.
       grupo: bundle.id,
-      qty: it.suggestedQty,
+      quantidade: it.suggestedQty,
     }));
     return mockContribuicao.createBulk({ items });
   },
