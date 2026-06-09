@@ -5,7 +5,7 @@ import {
   calcularValorTaxaPercentual,
   type Campanha,
   computeCardSurchargeCents,
-  esgotada,
+  quantidadeRestante,
   type IdContribuicao,
   type IdIntencaoPagamento,
   type IdItemDoPagamento,
@@ -66,6 +66,35 @@ export const ObterListaPresentesOutputItemSchema = z.object({
    * Visitor-facing item name. Visitor-safe (no PII / no idCampanha).
    */
   nome: z.string(),
+  /**
+   * Plan 0016 slot capacity. The contribuição's intrinsic quantidade
+   * column — how many units of this gift the recebedor opened. New-shape
+   * contribuições carry quantidade > 1 (single row × N slots); legacy
+   * multi-row data carries quantidade=1 (each row IS a single slot, the
+   * grouper on the visitor side counts rows).
+   *
+   * Added under aperture-nz12u so the visitor's `groupVisitorGifts` can
+   * read it and distinguish new-shape from legacy data (dual-mode). Pre-
+   * nz12u the visitor was blind to the field, capping the cart at 1 for
+   * every new-shape gift (Conjunto / Vale Banhos / Beleza / Kit de Sonos /
+   * Pacote de Paciência all returned qtyTotal=1 from the legacy row-count
+   * grouper, even though the recebedor opened 7/5/5/5/10 slots respectively).
+   */
+  quantidade: z.number().int().positive(),
+  /**
+   * Plan 0016 derived availability. `quantidade - SUM(ItemDoPagamento.
+   * quantidade across aprovado pagamentos pointing at this slot)`.
+   *
+   * Can be 0 or negative (overshoot per locked decision #10 — operator
+   * accepts the +money outcome; the badge just reads ESGOTADA without
+   * surfacing the overshoot magnitude).
+   *
+   * The cart's UI cap reads this directly. For legacy multi-row data
+   * (quantidade=1) it's either 1 (disponivel) or 0 (aprovado) — same
+   * legacy semantics as before. For new-shape data it's the source of
+   * truth for "how many can the visitor still add".
+   */
+  quantidadeRestante: z.number().int(),
   /**
    * Visitor-paid total in cents for the **Pix** path (aperture-ines9 —
    * semantic shift). Equals `contributionAmountCents + feeAmountCents`
@@ -259,10 +288,18 @@ export const paginaRouter = t.router({
         items.map(async (c) => {
           const feeAmountCents = calcularValorTaxaPercentual(c.valor, tarifaPresente.percentageBps);
           const valorComTaxa = c.valor + feeAmountCents;
-          // Plan 0016 Phase 2 (aperture-eg1s2): esgotada predicate
-          // derived from sum-of-quantidades vs slot cap (uses partial
-          // index idx_intencao_items_contribuicao_aprovado).
-          const indisponivel = await esgotada(
+          // aperture-nz12u: surface BOTH the slot cap (quantidade) AND the
+          // derived availability (quantidadeRestante) so the visitor side
+          // can dual-mode the grouper + cap the cart honestly. Pre-nz12u
+          // we only surfaced a boolean via esgotada(), which lost the
+          // multiplicity signal on new-shape data.
+          //
+          // quantidadeRestante can be negative (overshoot per locked
+          // decision #10). The status field stays "indisponivel" when
+          // restante <= 0 — matches the pre-nz12u esgotada() predicate
+          // shape so the visitor card's existing indisponivel branch
+          // keeps working unchanged.
+          const restante = await quantidadeRestante(
             {
               pagamentoRepository: ctx.deps.pagamentoRepository,
               contribuicaoRepository: ctx.deps.contribuicaoRepository,
@@ -270,6 +307,11 @@ export const paginaRouter = t.router({
             },
             { idContribuicao: c.id },
           );
+          // restante === null only when the contribuição doesn't exist —
+          // which can't happen here since we just loaded c from the
+          // contribuicao repo. Treat as 0 (disponivel=false) defensively.
+          const restanteSafe = restante ?? 0;
+          const indisponivel = restanteSafe <= 0;
           return {
             id: c.id as string,
             nome: c.nome,
@@ -277,6 +319,8 @@ export const paginaRouter = t.router({
             valorComTaxaCartao: valorComTaxa + computeCardSurchargeCents(c.valor),
             imagemUrl: c.imagemUrl,
             grupo: c.grupo,
+            quantidade: c.quantidade,
+            quantidadeRestante: restanteSafe,
             status: indisponivel ? ('indisponivel' as const) : ('disponivel' as const),
           };
         }),

@@ -674,7 +674,11 @@ function CartLineRow({ line }: { line: CartLine }) {
 
 function QtyStepper({ line }: { line: CartLine }) {
   const cart = useCart();
-  const canIncrement = line.quantidade < line.idsAvailable.length;
+  // aperture-nz12u — qtyAvailable cap (dual-mode safe). Pre-nz12u this
+  // capped at idsAvailable.length which was correct for legacy data but
+  // wrong for new-shape single-row gifts (Conjunto with quantidade=7
+  // capped the drawer at +1).
+  const canIncrement = line.quantidade < line.qtyAvailable;
 
   return (
     <div

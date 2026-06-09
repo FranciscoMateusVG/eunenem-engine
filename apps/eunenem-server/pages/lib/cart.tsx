@@ -10,21 +10,26 @@
 // loads the cart-for-X (empty if none) and Y's cart sits untouched.
 //
 // Cart line shape: each line corresponds to one VisitorGift group (rows
-// sharing a `nome`). The line captures every available `idContribuicao`
-// the group offered at add-time + the visitor's chosen `quantidade`.
+// sharing a `nome`). The line captures the visitor's chosen `quantidade`
+// + the slot's `qtyAvailable` ceiling (cart cap, source of truth) +
+// the snapshot of `idsAvailable` row-ids (saga-input source).
 //
-// Why capture all available ids: today's wire returns N flat rows per
-// "gift" (legacy pre-0016 shape — see aperture-1l37i for the planned
-// create-flow rewrite). To express "Fralda × 3", we need to send THREE
-// items at saga time, each with quantidade=1, each pointing at a distinct
-// row-id. Capturing the available-id list at add-time lets the cart
-// faithfully build the saga input without re-querying.
+// DUAL-MODE (aperture-nz12u): two data shapes flow through the same
+// CartLine.
+//   - LEGACY (multi-row, each row × quantidade=1): idsAvailable carries
+//     N entries (one per unsold row-id); qtyAvailable === idsAvailable
+//     .length. toSagaInput fans out into N items × quantidade=1, one
+//     per row-id.
+//   - NEW-SHAPE (single row × quantidade=N — Plan 0016 post-create-flow):
+//     idsAvailable is single-entry [c.id]; qtyAvailable can be N. The
+//     cart cap reads qtyAvailable. toSagaInput emits ONE item ×
+//     quantidade=N, letting the saga pack the multiplicity onto a
+//     single ItemDoPagamento.
 //
-// When Rex's create-flow rewrite lands (aperture-1l37i) the visitor wire
-// will return 1 row per gift with quantidade=N. At that point a cart line
-// collapses to a single saga item `{idContribuicao, quantidade: N}` — but
-// the line shape AND the public API of this module don't need to change,
-// only the `toSagaInput` mapping below.
+// Pre-nz12u the cap was `idsAvailable.length` which was correct for
+// legacy (where length === qtyAvailable) but wrong for new-shape (length
+// always 1). Operator caught it on staging walk: Conjunto R$49,35 with
+// quantidade=7 capped at +1. Fixed under dual-mode.
 
 import {
   createContext,
@@ -47,9 +52,21 @@ import type { VisitorGift } from './visitorGift.js';
 export interface CartLine {
   /** Stable key — the gift's display nome. Lines are 1:1 with VisitorGift groups. */
   nome: string;
-  /** Snapshot of contribuição row-ids available when the line was first added. */
+  /**
+   * Snapshot of contribuição row-ids the slot exposed at add-time.
+   *
+   * LEGACY: N entries (one per unsold row-id). toSagaInput fans out 1:1.
+   * NEW-SHAPE: single-entry [c.id]. toSagaInput emits ONE item × quantidade.
+   */
   idsAvailable: readonly string[];
-  /** Visitor's chosen quantity. Always 1 ≤ quantidade ≤ idsAvailable.length. */
+  /**
+   * Ceiling on the visitor's chosen quantidade — the slot's qtyAvailable
+   * at add-time. Source of truth for the cart cap (aperture-nz12u dual-mode
+   * fix). For legacy this happens to equal idsAvailable.length; for new-
+   * shape it can exceed it (single id, N slots).
+   */
+  qtyAvailable: number;
+  /** Visitor's chosen quantity. Always 1 ≤ quantidade ≤ qtyAvailable. */
   quantidade: number;
   valorCents: number;
   valorComTaxaCartaoCents: number | null;
@@ -81,11 +98,11 @@ function reducer(state: CartState, action: Action): CartState {
     case 'add': {
       const existing = state.lines.find((l) => l.nome === action.gift.nome);
       if (existing) {
-        // Adding when already in cart bumps quantidade by 1, capped at
-        // idsAvailable.length (visitor can't add more than the marketplace
-        // surfaces). Esgotada races still possible at saga time; the cap
-        // here is just the UI's honest read.
-        if (existing.quantidade >= existing.idsAvailable.length) return state;
+        // aperture-nz12u — cap by qtyAvailable (works for both legacy
+        // multi-row and new-shape single-row data). Pre-nz12u this
+        // capped at idsAvailable.length which was correct for legacy
+        // but wrong for new-shape (single id, N slots).
+        if (existing.quantidade >= existing.qtyAvailable) return state;
         return {
           ...state,
           lines: state.lines.map((l) =>
@@ -93,19 +110,24 @@ function reducer(state: CartState, action: Action): CartState {
           ),
         };
       }
-      // aperture-qxntg — capture `availableIds` (UNSOLD rows only) from
-      // the gift's projection. The pre-fix code index-sliced `gift.ids`
-      // (which contains every row sold + unsold in arbitrary order) and
-      // picked sold-out rows in operator's repro (Sapatinho × 1 + Fralda
-      // × 2 against 528bedbe campanha — 3 of 7 Fralda rows already
-      // aprovado, the slice grabbed one of them). The saga's per-item
-      // esgotada gate then fired a 500. visitorGift's `availableIds`
-      // shape is deterministic — only `status === "disponivel"` rows.
+      // aperture-qxntg — capture availableIds (UNSOLD rows only) from
+      // the gift's projection. Pre-qxntg the slice picked from `gift.ids`
+      // (every row sold + unsold) and could grab sold rows on legacy
+      // data → saga's per-item esgotada gate fired 500.
+      //
+      // aperture-nz12u — the snapshot is the same single-id list for
+      // new-shape data (one row × quantidade=N); the qtyAvailable
+      // ceiling carries the multiplicity.
       const idsAvailable = action.gift.availableIds.slice();
-      if (idsAvailable.length === 0) return state;
+      const qtyAvailable = action.gift.qtyAvailable;
+      // Empty when the whole slot is taken. For new-shape this is also
+      // when qtyAvailable === 0 (single id but zero remaining); guard on
+      // qtyAvailable so the cart doesn't add a line that can't grow.
+      if (idsAvailable.length === 0 || qtyAvailable === 0) return state;
       const line: CartLine = {
         nome: action.gift.nome,
         idsAvailable,
+        qtyAvailable,
         quantidade: 1,
         valorCents: action.gift.valorCents,
         valorComTaxaCartaoCents: action.gift.valorComTaxaCartaoCents,
@@ -121,7 +143,8 @@ function reducer(state: CartState, action: Action): CartState {
       return {
         ...state,
         lines: state.lines.map((l) =>
-          l.nome === action.nome && l.quantidade < l.idsAvailable.length
+          // aperture-nz12u — qtyAvailable cap (dual-mode safe).
+          l.nome === action.nome && l.quantidade < l.qtyAvailable
             ? { ...l, quantidade: l.quantidade + 1 }
             : l,
         ),
@@ -205,7 +228,23 @@ export function CartProvider({ slug, children }: CartProviderProps) {
         parsed.slug === slug &&
         Array.isArray(parsed.lines)
       ) {
-        dispatch({ type: 'hydrate', state: parsed });
+        // aperture-nz12u — defend against pre-nz12u localStorage payloads
+        // that lack the qtyAvailable field. For legacy cart lines
+        // qtyAvailable always equalled idsAvailable.length, so fall back
+        // to that for any line missing the field. New writes carry the
+        // field directly.
+        const migrated: CartState = {
+          slug: parsed.slug,
+          lines: parsed.lines.map((l) => {
+            const line = l as Partial<CartLine>;
+            if (typeof line.qtyAvailable === 'number') return line as CartLine;
+            const idsAvailable = Array.isArray(line.idsAvailable)
+              ? line.idsAvailable
+              : [];
+            return { ...(line as CartLine), qtyAvailable: idsAvailable.length };
+          }),
+        };
+        dispatch({ type: 'hydrate', state: migrated });
       }
     } catch {
       // Malformed payload — ignore + start fresh. The cart is recoverable
@@ -246,7 +285,10 @@ export function CartProvider({ slug, children }: CartProviderProps) {
       remainingFor: (nome) => {
         const line = state.lines.find((l) => l.nome === nome);
         if (!line) return Infinity; // First add: cap comes from gift.qtyAvailable, not the cart.
-        return line.idsAvailable.length - line.quantidade;
+        // aperture-nz12u — qtyAvailable, NOT idsAvailable.length. For
+        // new-shape data the length is always 1 but the slot can have N
+        // units remaining.
+        return line.qtyAvailable - line.quantidade;
       },
       quantidadeFor: (nome) =>
         state.lines.find((l) => l.nome === nome)?.quantidade ?? 0,
@@ -268,20 +310,42 @@ export function useCart(): CartContextValue {
 
 /**
  * Map the cart state to the `iniciarPagamentoCarrinho` saga input shape.
- * Today (legacy pre-0016 wire) we expand each multi-quantidade line into
- * N separate items with quantidade=1 each — one per available row-id the
- * group exposed. After aperture-1l37i lands and the visitor wire returns
- * 1 row + quantidade=N, this mapping collapses to one saga item per line.
+ *
+ * DUAL-MODE (aperture-nz12u):
+ *   - LEGACY line (idsAvailable.length >= quantidade): fan out into N
+ *     items × quantidade=1, one per row-id. Legacy data is N rows of
+ *     quantidade=1; the saga lands N separate ItemDoPagamento records.
+ *   - NEW-SHAPE line (idsAvailable.length === 1 AND quantidade > 1):
+ *     emit ONE item × quantidade=N against the single row-id. The
+ *     saga packs the multiplicity onto a single ItemDoPagamento and
+ *     the quantidadeRestante predicate consumes it as one slot-N count.
+ *
+ * The shape-discrimination is structural: if the cart's chosen quantidade
+ * exceeds the snapshot's available-id count, we MUST be on new-shape data
+ * (legacy would have one id per unit). Otherwise we walk the legacy path.
+ * No mode flag needed on the line — the lengths tell us.
  */
 export function toSagaInput(
   lines: readonly CartLine[],
 ): ReadonlyArray<{ idContribuicao: string; quantidade: number }> {
   const itens: { idContribuicao: string; quantidade: number }[] = [];
   for (const line of lines) {
-    for (let i = 0; i < line.quantidade; i++) {
-      const id = line.idsAvailable[i];
+    if (line.idsAvailable.length === 0) continue;
+    if (line.quantidade <= line.idsAvailable.length) {
+      // LEGACY (or new-shape with quantidade=1 — degenerate same shape):
+      // fan out 1:1, one item per row-id.
+      for (let i = 0; i < line.quantidade; i++) {
+        const id = line.idsAvailable[i];
+        if (!id) continue;
+        itens.push({ idContribuicao: id, quantidade: 1 });
+      }
+    } else {
+      // NEW-SHAPE — quantidade exceeds the snapshot's id count. The
+      // contract from groupVisitorGifts is that new-shape lines have
+      // exactly one id; assert defensively + emit a single item × N.
+      const id = line.idsAvailable[0];
       if (!id) continue;
-      itens.push({ idContribuicao: id, quantidade: 1 });
+      itens.push({ idContribuicao: id, quantidade: line.quantidade });
     }
   }
   return itens;
