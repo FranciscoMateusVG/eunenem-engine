@@ -304,8 +304,22 @@ export {
   SaldoCentavosSchema,
   SaldoRecebedorSchema,
 } from './domain/pagamentos/financeiro/value-objects/saldo-recebedor.js';
-export type { SnapshotComposicaoValoresFinanceiro } from './domain/pagamentos/financeiro/value-objects/snapshot-composicao-valores-financeiro.js';
-export { SnapshotComposicaoValoresFinanceiroSchema } from './domain/pagamentos/financeiro/value-objects/snapshot-composicao-valores-financeiro.js';
+// Plan 0016 (aperture-aj8qw): the single SnapshotComposicaoValoresFinanceiro
+// retires; replaced by per-item + aggregate financeiro mirrors below.
+export type {
+  ResponsavelTaxaFinanceiro,
+  SnapshotComposicaoValoresAggregateFinanceiro,
+  SnapshotComposicaoValoresItemFinanceiro,
+  SnapshotComposicaoValoresItemFinanceiroContribuicao,
+  SnapshotComposicaoValoresItemFinanceiroSurcharge,
+} from './domain/pagamentos/financeiro/value-objects/snapshot-composicao-valores-financeiro.js';
+export {
+  ResponsavelTaxaFinanceiroSchema,
+  SnapshotComposicaoValoresAggregateFinanceiroSchema,
+  SnapshotComposicaoValoresItemFinanceiroContribuicaoSchema,
+  SnapshotComposicaoValoresItemFinanceiroSchema,
+  SnapshotComposicaoValoresItemFinanceiroSurchargeSchema,
+} from './domain/pagamentos/financeiro/value-objects/snapshot-composicao-valores-financeiro.js';
 
 // --- Domain: Money ---
 
@@ -353,16 +367,52 @@ export type {
   IdPagamento,
   IdTransacaoExterna,
 } from './domain/pagamentos/value-objects/ids.js';
+export type { IdItemDoPagamento } from './domain/pagamentos/value-objects/ids.js';
 export {
   IdContribuicaoPagamentoSchema,
   IdIntencaoPagamentoSchema,
+  IdItemDoPagamentoSchema,
   IdPagamentoSchema,
   IdTransacaoExternaSchema,
 } from './domain/pagamentos/value-objects/ids.js';
 export type { MetodoPagamento } from './domain/pagamentos/value-objects/metodo-pagamento.js';
 export { MetodoPagamentoSchema } from './domain/pagamentos/value-objects/metodo-pagamento.js';
-export type { SnapshotComposicaoValores } from './domain/pagamentos/value-objects/snapshot-composicao-valores.js';
-export { SnapshotComposicaoValoresSchema } from './domain/pagamentos/value-objects/snapshot-composicao-valores.js';
+// Plan 0016 (aperture-aj8qw): the single SnapshotComposicaoValores VO
+// retires; replaced by the per-item + aggregate split below.
+export type {
+  ResponsavelTaxaPagamento,
+  SnapshotComposicaoValoresAggregate,
+} from './domain/pagamentos/value-objects/snapshot-composicao-valores-aggregate.js';
+export {
+  ResponsavelTaxaPagamentoSchema,
+  SnapshotComposicaoValoresAggregateSchema,
+  validarComposicaoAggregate,
+} from './domain/pagamentos/value-objects/snapshot-composicao-valores-aggregate.js';
+export type {
+  SnapshotComposicaoValoresItem,
+  SnapshotComposicaoValoresItemContribuicao,
+  SnapshotComposicaoValoresItemSurcharge,
+} from './domain/pagamentos/value-objects/snapshot-composicao-valores-item.js';
+export {
+  SnapshotComposicaoValoresItemContribuicaoSchema,
+  SnapshotComposicaoValoresItemSchema,
+  SnapshotComposicaoValoresItemSurchargeSchema,
+  validarComposicaoItem,
+} from './domain/pagamentos/value-objects/snapshot-composicao-valores-item.js';
+// Plan 0016 (aperture-aj8qw): ItemDoPagamento entity inside the
+// IntencaoPagamento child of the Pagamento aggregate.
+export type {
+  ItemDoPagamento,
+  ItemDoPagamentoContribuicao,
+  ItemDoPagamentoPassthroughSurcharge,
+} from './domain/pagamentos/entities/item-do-pagamento.js';
+export {
+  criarItemContribuicao,
+  criarItemPassthroughSurcharge,
+  ItemDoPagamentoContribuicaoSchema,
+  ItemDoPagamentoPassthroughSurchargeSchema,
+  ItemDoPagamentoSchema,
+} from './domain/pagamentos/entities/item-do-pagamento.js';
 
 // --- Domain: Plataforma ---
 

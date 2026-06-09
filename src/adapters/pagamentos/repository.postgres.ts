@@ -1,4 +1,9 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
+import type { Transaction } from 'kysely';
+import {
+  type ItemDoPagamento,
+  ItemDoPagamentoSchema,
+} from '../../domain/pagamentos/entities/item-do-pagamento.js';
 import { type Pagamento, PagamentoSchema } from '../../domain/pagamentos/entities/pagamento.js';
 import type {
   IdContribuicaoPagamento,
@@ -7,6 +12,7 @@ import type {
 import { PagamentoJaExisteError } from '../../errors/pagamentos/ja-existe.error.js';
 import { PagamentoNaoEncontradoError } from '../../errors/pagamentos/nao-encontrado.error.js';
 import type { Database } from '../database.js';
+import type { DB } from '../db-types.generated.js';
 import type { PagamentoRepository } from './repository.js';
 
 const tracer = trace.getTracer('frame');
@@ -23,40 +29,30 @@ const DB_ATTRS = {
  */
 const UNIQUE_INTENCAO_ID = 'pagamentos_intencao_id_uniq';
 
-type PagamentoRow = {
-  id: string;
-  status: string;
-  criado_em: Date;
-  atualizado_em: Date;
-  intencao_id: string;
-  intencao_id_contribuicao: string;
-  intencao_amount_cents: number;
-  intencao_metodo: string;
-  // JSONB columns surface as `unknown` from kysely-codegen until we ship
-  // typed schemas. The hydration step parses them through PagamentoSchema
-  // which enforces the shape end-to-end.
-  intencao_composicao_valores: unknown;
-  intencao_external_ref: string | null;
-  // aperture-wif8s: pi_xxx + ch_xxx provider refs populated by the
-  // webhook handler post-aprovado. Both nullable; partial indexes on
-  // each WHERE NOT NULL via migration 018.
-  intencao_payment_intent_external_ref: string | null;
-  intencao_charge_external_ref: string | null;
-  // Plan 0015 / aperture-ucgok / migration 019: contribuinte columns
-  // populated by the webhook at checkout.session.completed (Stripe
-  // custom_fields). All nullable at intent-creation; flipped to the
-  // visitor's data when the webhook fires.
-  intencao_contribuinte_nome: string | null;
-  intencao_contribuinte_email: string | null;
-  intencao_contribuinte_mensagem: string | null;
-  // Plan 0015 / aperture-mjgxe / migration 020: when the visitor's money
-  // becomes available to the recebedor. PIX = NOW() set inline by
-  // dispatcher at pi.succeeded; cartão = Stripe API
-  // charge.balance_transaction.available_on. Nullable.
-  intencao_balance_transaction_available_on: Date | null;
-  intencao_criada_em: Date;
-  transacao_externa: unknown;
-};
+/**
+ * Plan 0016 (aperture-aj8qw) typecheck-trap fix + multi-item cart rewrite.
+ *
+ * Pre-0016 this file declared its own hand-written `PagamentoRow` type
+ * that mirrored the pagamentos schema by convention. That mirror
+ * silently went stale when Phase 0 dropped the per-pagamento
+ * id_contribuicao + composição-JSONB columns and renamed amount_cents
+ * to total_paid_cents, since the hand-written type still matched what
+ * the queries SELECTed regardless of whether those columns existed at
+ * runtime.
+ *
+ * Phase 1 of plan 0016 lifts the row shape to kysely-codegen's
+ * `Pagamentos` interface directly + adds the new `intencao_items` row
+ * shape from the same generated file. Hydration is split into two
+ * helpers: one for the pagamento row, one for the per-item rows; the
+ * Pagamento aggregate is reconstructed from both.
+ *
+ * Same JSONB `unknown` → parsed `Pagamento` flow at the schema-parse
+ * boundary; same span-instrumentation conventions; same constraint-name
+ * mapping for unique-violation → `PagamentoJaExisteError`. The wire
+ * shape just expanded by one table.
+ */
+type PagamentoRow = import('../db-types.generated.js').Pagamentos;
+type ItemRow = import('../db-types.generated.js').IntencaoItems;
 
 interface PostgresError {
   readonly code?: string;
@@ -75,19 +71,22 @@ function isUniqueViolation(error: unknown, constraint: string): boolean {
 
 /**
  * PostgreSQL adapter for `PagamentoRepository` (aperture-xaha2). First
- * production wiring of the Pagamento BC — until this lands, only the
- * in-memory adapter exists.
+ * production wiring of the Pagamento BC — until aperture-xaha2 landed,
+ * only the in-memory adapter existed.
  *
  * Shape decisions:
  *   - The IntencaoPagamento embedded entity is FLATTENED into top-level
- *     columns (intencao_*) for lookup-by-field convenience (e.g. the
- *     external_ref + id_contribuicao indexes). The TransacaoExterna
- *     embedded entity stays as a single JSONB column — it's never queried
- *     by inner field and only loaded with the aggregate root.
- *   - composicao_valores stays JSONB (deep, snapshot-style — never queried
- *     by inner field).
- *   - Save/update insert/replace the full aggregate atomically — no field-
- *     level patch surface.
+ *     `intencao_*` columns on `pagamentos` for lookup-by-field convenience
+ *     (e.g. the external_ref partial indexes). The TransacaoExterna
+ *     embedded entity stays as a single JSONB column — never queried by
+ *     inner field; only loaded with the aggregate root.
+ *   - Per plan 0016 (aperture-aj8qw): item-level decomposition lives in
+ *     the separate `intencao_items` table (1:N from pagamentos). Cart
+ *     reads do an explicit second SELECT per pagamento; this keeps the
+ *     hydration straightforward and lets the discriminator CHECK + the
+ *     position-ordering UNIQUE constraint enforce shape DB-side.
+ *   - Save/update insert/replace the full aggregate atomically inside a
+ *     transaction — pagamento row + items together, no partial state.
  */
 export class PagamentoRepositoryPostgres implements PagamentoRepository {
   constructor(private readonly db: Database) {}
@@ -96,11 +95,13 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
     return tracer.startActiveSpan('db.pagamentos.save', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'INSERT' });
       try {
-        // biome-ignore lint/suspicious/noExplicitAny: Kysely<unknown> + JSONB columns
-        await (this.db as any)
-          .insertInto('pagamentos')
-          .values(rowFromPagamento(pagamento))
-          .execute();
+        await this.db.transaction().execute(async (trx) => {
+          // Cast through any to satisfy kysely's `Insertable<pagamentos>`
+          // ColumnType-branded shape vs the plain row object.
+          // biome-ignore lint/suspicious/noExplicitAny: kysely Insertable brand vs plain row object
+          await trx.insertInto('pagamentos').values(rowFromPagamento(pagamento) as any).execute();
+          await insertItemsForPagamento(trx, pagamento);
+        });
         span.setStatus({ code: SpanStatusCode.OK });
       } catch (error: unknown) {
         if (isUniqueViolation(error, UNIQUE_INTENCAO_ID)) {
@@ -135,23 +136,30 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
     return tracer.startActiveSpan('db.pagamentos.update', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
       try {
-        // biome-ignore lint/suspicious/noExplicitAny: Kysely<unknown> + JSONB columns
-        const result = await (this.db as any)
-          .updateTable('pagamentos')
-          .set(rowFromPagamento(pagamento))
-          .where('id', '=', pagamento.id)
-          .executeTakeFirst();
+        await this.db.transaction().execute(async (trx) => {
+          const result = await trx
+            .updateTable('pagamentos')
+            // biome-ignore lint/suspicious/noExplicitAny: kysely Updateable brand vs plain row object
+            .set(rowFromPagamento(pagamento) as any)
+            .where('id', '=', pagamento.id)
+            .executeTakeFirst();
 
-        // Match memory-adapter semantics: throw when no row was matched
-        // (caller treated this as "must exist"). Kysely returns a result
-        // object with numUpdatedRows; cast to bigint-aware number compare.
-        const matched =
-          typeof result?.numUpdatedRows === 'bigint'
-            ? Number(result.numUpdatedRows)
-            : (result?.numUpdatedRows ?? 0);
-        if (matched === 0) {
-          throw new PagamentoNaoEncontradoError(pagamento.id);
-        }
+          // Match memory-adapter semantics: throw when no row was matched
+          // (caller treated this as "must exist").
+          const matched =
+            typeof result?.numUpdatedRows === 'bigint'
+              ? Number(result.numUpdatedRows)
+              : (result?.numUpdatedRows ?? 0);
+          if (matched === 0) {
+            throw new PagamentoNaoEncontradoError(pagamento.id);
+          }
+
+          // Replace items wholesale — items have no independent lifecycle
+          // so DELETE-and-INSERT is correct semantics + cheap given the
+          // small cardinality (a cart has ≤ a handful of items).
+          await trx.deleteFrom('intencao_items').where('id_pagamento', '=', pagamento.id).execute();
+          await insertItemsForPagamento(trx, pagamento);
+        });
         span.setStatus({ code: SpanStatusCode.OK });
       } catch (error: unknown) {
         span.recordException(error as Error);
@@ -167,14 +175,18 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
     return tracer.startActiveSpan('db.pagamentos.findById', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
       try {
-        // biome-ignore lint/suspicious/noExplicitAny: see save()
-        const row = (await (this.db as any)
+        const row = await this.db
           .selectFrom('pagamentos')
           .selectAll()
           .where('id', '=', id)
-          .executeTakeFirst()) as PagamentoRow | undefined;
+          .executeTakeFirst();
+        if (!row) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return undefined;
+        }
+        const items = await loadItemsForPagamento(this.db, id);
         span.setStatus({ code: SpanStatusCode.OK });
-        return row ? pagamentoFromRow(row) : undefined;
+        return pagamentoFromRow(row as unknown as PagamentoRow, items);
       } catch (error: unknown) {
         span.recordException(error as Error);
         span.setStatus({ code: SpanStatusCode.ERROR });
@@ -185,22 +197,35 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
     });
   }
 
+  /**
+   * Find all pagamentos referencing the given contribuição. Post-plan-0016
+   * the reference moved to per-item — bridges through the
+   * `intencao_items` table via `idx_intencao_items_contribuicao_aprovado`
+   * (partial index on `id_contribuicao IS NOT NULL`).
+   *
+   * Returns ALL matches in `criado_em ASC` order — a single contribuição
+   * may participate in multiple carts over time (locked decision #6 of
+   * plan 0015 + the multi-item carts of plan 0016 both allow this).
+   */
   async findByContribuicao(idContribuicao: IdContribuicaoPagamento): Promise<readonly Pagamento[]> {
     return tracer.startActiveSpan('db.pagamentos.findByContribuicao', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
       try {
-        // The pagamentos_intencao_id_contribuicao_idx (migration 011)
-        // makes this an indexed scan even on a large table.
-        // biome-ignore lint/suspicious/noExplicitAny: see save()
-        const rows = (await (this.db as any)
+        const rows = await this.db
           .selectFrom('pagamentos')
-          .selectAll()
-          .where('intencao_id_contribuicao', '=', idContribuicao)
-          .orderBy('criado_em', 'asc')
-          .execute()) as PagamentoRow[];
-        const result = rows.map(pagamentoFromRow);
+          .innerJoin('intencao_items', 'intencao_items.id_pagamento', 'pagamentos.id')
+          .selectAll('pagamentos')
+          .distinct()
+          .where('intencao_items.id_contribuicao', '=', idContribuicao)
+          .orderBy('pagamentos.criado_em', 'asc')
+          .execute();
+        const pagamentos: Pagamento[] = [];
+        for (const row of rows) {
+          const items = await loadItemsForPagamento(this.db, row.id as IdPagamento);
+          pagamentos.push(pagamentoFromRow(row as unknown as PagamentoRow, items));
+        }
         span.setStatus({ code: SpanStatusCode.OK });
-        return result;
+        return pagamentos;
       } catch (error: unknown) {
         span.recordException(error as Error);
         span.setStatus({ code: SpanStatusCode.ERROR });
@@ -215,14 +240,18 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
     return tracer.startActiveSpan('db.pagamentos.findByExternalRef', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
       try {
-        // biome-ignore lint/suspicious/noExplicitAny: see save()
-        const row = (await (this.db as any)
+        const row = await this.db
           .selectFrom('pagamentos')
           .selectAll()
           .where('intencao_external_ref', '=', externalRef)
-          .executeTakeFirst()) as PagamentoRow | undefined;
+          .executeTakeFirst();
+        if (!row) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return undefined;
+        }
+        const items = await loadItemsForPagamento(this.db, row.id as IdPagamento);
         span.setStatus({ code: SpanStatusCode.OK });
-        return row ? pagamentoFromRow(row) : undefined;
+        return pagamentoFromRow(row as unknown as PagamentoRow, items);
       } catch (error: unknown) {
         span.recordException(error as Error);
         span.setStatus({ code: SpanStatusCode.ERROR });
@@ -234,57 +263,89 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
   }
 
   async findByPaymentIntentExternalRef(pi: string): Promise<Pagamento | undefined> {
-    return tracer.startActiveSpan('db.pagamentos.findByPaymentIntentExternalRef', async (span) => {
-      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
-      try {
-        // aperture-wif8s: uses partial index
-        // `pagamentos_intencao_pi_ref_idx ON
-        // (intencao_payment_intent_external_ref) WHERE … IS NOT NULL`
-        // (migration 018) for selective scan.
-        // biome-ignore lint/suspicious/noExplicitAny: see save()
-        const row = (await (this.db as any)
-          .selectFrom('pagamentos')
-          .selectAll()
-          .where('intencao_payment_intent_external_ref', '=', pi)
-          .executeTakeFirst()) as PagamentoRow | undefined;
-        span.setStatus({ code: SpanStatusCode.OK });
-        return row ? pagamentoFromRow(row) : undefined;
-      } catch (error: unknown) {
-        span.recordException(error as Error);
-        span.setStatus({ code: SpanStatusCode.ERROR });
-        throw error;
-      } finally {
-        span.end();
-      }
-    });
+    return tracer.startActiveSpan(
+      'db.pagamentos.findByPaymentIntentExternalRef',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+        try {
+          // aperture-wif8s: uses partial index
+          // `pagamentos_intencao_pi_ref_idx ON
+          // (intencao_payment_intent_external_ref) WHERE … IS NOT NULL`
+          // (migration 018) for selective scan.
+          const row = await this.db
+            .selectFrom('pagamentos')
+            .selectAll()
+            .where('intencao_payment_intent_external_ref', '=', pi)
+            .executeTakeFirst();
+          if (!row) {
+            span.setStatus({ code: SpanStatusCode.OK });
+            return undefined;
+          }
+          const items = await loadItemsForPagamento(this.db, row.id as IdPagamento);
+          span.setStatus({ code: SpanStatusCode.OK });
+          return pagamentoFromRow(row as unknown as PagamentoRow, items);
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
   }
 
   async findByChargeExternalRef(ch: string): Promise<Pagamento | undefined> {
-    return tracer.startActiveSpan('db.pagamentos.findByChargeExternalRef', async (span) => {
-      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
-      try {
-        // aperture-wif8s: uses partial index
-        // `pagamentos_intencao_ch_ref_idx ON
-        // (intencao_charge_external_ref) WHERE … IS NOT NULL`
-        // (migration 018).
-        // biome-ignore lint/suspicious/noExplicitAny: see save()
-        const row = (await (this.db as any)
-          .selectFrom('pagamentos')
-          .selectAll()
-          .where('intencao_charge_external_ref', '=', ch)
-          .executeTakeFirst()) as PagamentoRow | undefined;
-        span.setStatus({ code: SpanStatusCode.OK });
-        return row ? pagamentoFromRow(row) : undefined;
-      } catch (error: unknown) {
-        span.recordException(error as Error);
-        span.setStatus({ code: SpanStatusCode.ERROR });
-        throw error;
-      } finally {
-        span.end();
-      }
-    });
+    return tracer.startActiveSpan(
+      'db.pagamentos.findByChargeExternalRef',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+        try {
+          // aperture-wif8s: uses partial index
+          // `pagamentos_intencao_ch_ref_idx ON
+          // (intencao_charge_external_ref) WHERE … IS NOT NULL`
+          // (migration 018).
+          const row = await this.db
+            .selectFrom('pagamentos')
+            .selectAll()
+            .where('intencao_charge_external_ref', '=', ch)
+            .executeTakeFirst();
+          if (!row) {
+            span.setStatus({ code: SpanStatusCode.OK });
+            return undefined;
+          }
+          const items = await loadItemsForPagamento(this.db, row.id as IdPagamento);
+          span.setStatus({ code: SpanStatusCode.OK });
+          return pagamentoFromRow(row as unknown as PagamentoRow, items);
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
   }
 
+  /**
+   * Plan 0016 (aperture-aj8qw): post-multi-item the lookup bridges
+   * through `intencao_items` — the per-pagamento id_contribuicao column
+   * retired in migration 022. Uses the partial index
+   * `idx_intencao_items_contribuicao_aprovado` (filter on
+   * `id_contribuicao IS NOT NULL`) joined against
+   * `pagamentos.status = 'aprovado'`. DISTINCT collapses the
+   * (multiple aprovado items pointing at the same contribuição)
+   * row-multiplication that the locked decision #6 of plan 0015
+   * (accept double-pay) + the multi-cart shape of plan 0016 both make
+   * possible.
+   *
+   * **Phase 2 plan**: this method retires entirely, replaced by
+   * `somarQuantidadesContribuicoesEmPagamentosAprovados(ids): Map<…, number>`
+   * which returns the sum of `quantidade` per contribuição instead of
+   * the binary "any aprovado pagamento?" answer. The new query feeds
+   * `quantidadeRestante` directly without a second round-trip.
+   */
   async findIdsContribuicoesComPagamentoAprovado(
     idsContribuicao: readonly IdContribuicaoPagamento[],
   ): Promise<readonly IdContribuicaoPagamento[]> {
@@ -301,22 +362,20 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
             span.setStatus({ code: SpanStatusCode.OK });
             return [];
           }
-          // Uses partial index
-          // `pagamentos_aprovado_por_contribuicao_idx ON
-          // (intencao_id_contribuicao) WHERE status='aprovado'`
-          // (migration 019). One indexed scan over the candidate set.
-          // DISTINCT collapses the (multiple aprovado pagamentos per
-          // contribuição) row-multiplication that the locked decision
-          // #6 of plan 0015 (accept double-pay) makes possible.
-          // biome-ignore lint/suspicious/noExplicitAny: see save()
-          const rows = (await (this.db as any)
-            .selectFrom('pagamentos')
-            .select('intencao_id_contribuicao')
+          const rows = await this.db
+            .selectFrom('intencao_items')
+            .innerJoin('pagamentos', 'pagamentos.id', 'intencao_items.id_pagamento')
+            .select('intencao_items.id_contribuicao')
             .distinct()
-            .where('status', '=', 'aprovado')
-            .where('intencao_id_contribuicao', 'in', [...idsContribuicao])
-            .execute()) as Array<{ intencao_id_contribuicao: string }>;
-          const result = rows.map((r) => r.intencao_id_contribuicao as IdContribuicaoPagamento);
+            .where('pagamentos.status', '=', 'aprovado')
+            .where('intencao_items.id_contribuicao', 'in', [...idsContribuicao])
+            .execute();
+          const result: IdContribuicaoPagamento[] = [];
+          for (const r of rows) {
+            if (r.id_contribuicao !== null) {
+              result.push(r.id_contribuicao as IdContribuicaoPagamento);
+            }
+          }
           span.setStatus({ code: SpanStatusCode.OK });
           return result;
         } catch (error: unknown) {
@@ -330,6 +389,21 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
     );
   }
 
+  /**
+   * Plan 0016 (aperture-aj8qw): the most-recent aprovado pagamento per
+   * contribuição is now resolved via `intencao_items`. The contribuinte
+   * lives at `pagamentos.intencao_contribuinte_*` (root of IntencaoPagamento
+   * per plan 0015 / aperture-7pqee — NOT per-item). The query:
+   *
+   *   - JOIN `intencao_items` ON `pagamentos.id`
+   *   - WHERE `id_contribuicao IN (…)` AND `status='aprovado'`
+   *   - DISTINCT ON `(id_contribuicao)` ORDER BY `criado_em DESC`
+   *
+   * picks the most-recent aprovado pagamento per contribuição. The
+   * partial index `idx_intencao_items_contribuicao_aprovado` serves the
+   * id_contribuicao filter; the (id_contribuicao, criado_em) sort uses
+   * an in-memory sort on the small post-WHERE set.
+   */
   async findContribuintesFromLatestAprovadoPagamento(
     idsContribuicao: readonly IdContribuicaoPagamento[],
   ): Promise<Map<string, { nome: string; email: string; mensagem?: string } | null>> {
@@ -350,39 +424,38 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
             span.setStatus({ code: SpanStatusCode.OK });
             return result;
           }
-          // DISTINCT ON (intencao_id_contribuicao) ORDER BY ... criado_em
-          // DESC picks the most-recent aprovado row per contribuição.
-          // One query for the whole input set. The partial index
-          // pagamentos_aprovado_por_contribuicao_idx serves the WHERE
-          // status='aprovado' predicate.
-          // biome-ignore lint/suspicious/noExplicitAny: see save()
-          const rows = (await (this.db as any)
-            .selectFrom('pagamentos')
+          const rows = await this.db
+            .selectFrom('intencao_items')
+            .innerJoin('pagamentos', 'pagamentos.id', 'intencao_items.id_pagamento')
             .select([
-              'intencao_id_contribuicao',
-              'intencao_contribuinte_nome',
-              'intencao_contribuinte_email',
-              'intencao_contribuinte_mensagem',
+              'intencao_items.id_contribuicao as id_contribuicao',
+              'pagamentos.intencao_contribuinte_nome as intencao_contribuinte_nome',
+              'pagamentos.intencao_contribuinte_email as intencao_contribuinte_email',
+              'pagamentos.intencao_contribuinte_mensagem as intencao_contribuinte_mensagem',
+              'pagamentos.criado_em as criado_em',
             ])
-            .distinctOn('intencao_id_contribuicao')
-            .where('status', '=', 'aprovado')
-            .where('intencao_id_contribuicao', 'in', [...idsContribuicao])
-            .orderBy('intencao_id_contribuicao')
-            .orderBy('criado_em', 'desc')
-            .execute()) as Array<{
-            intencao_id_contribuicao: string;
-            intencao_contribuinte_nome: string | null;
-            intencao_contribuinte_email: string | null;
-            intencao_contribuinte_mensagem: string | null;
-          }>;
+            .where('pagamentos.status', '=', 'aprovado')
+            .where('intencao_items.id_contribuicao', 'in', [...idsContribuicao])
+            .orderBy('intencao_items.id_contribuicao')
+            .orderBy('pagamentos.criado_em', 'desc')
+            .execute();
+
+          // Sorted by id_contribuicao ASC, criado_em DESC. The first row
+          // per id_contribuicao is the most-recent aprovado pagamento.
+          const seen = new Set<string>();
           for (const row of rows) {
+            const idC = row.id_contribuicao;
+            if (idC === null) continue;
+            if (seen.has(idC)) continue;
+            seen.add(idC);
             const hasContribuinte =
-              row.intencao_contribuinte_nome !== null && row.intencao_contribuinte_email !== null;
+              row.intencao_contribuinte_nome !== null &&
+              row.intencao_contribuinte_email !== null;
             if (!hasContribuinte) {
-              result.set(row.intencao_id_contribuicao, null);
+              result.set(idC, null);
               continue;
             }
-            result.set(row.intencao_id_contribuicao, {
+            result.set(idC, {
               nome: row.intencao_contribuinte_nome as string,
               email: row.intencao_contribuinte_email as string,
               ...(row.intencao_contribuinte_mensagem !== null
@@ -404,18 +477,30 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
   }
 }
 
-/** Aggregate → row mapper. Used by save + update. */
+// ─── Row <-> aggregate mappers ─────────────────────────────────────
+
+/**
+ * Aggregate → row mapper for the `pagamentos` table. Used by save +
+ * update. Plan 0016: the aggregate composição columns + the cart-scope
+ * id_campanha are sourced from `intencao.composicaoValoresAggregate`;
+ * the per-item rows are inserted separately by
+ * `insertItemsForPagamento`.
+ */
 function rowFromPagamento(p: Pagamento): Record<string, unknown> {
+  const aggregate = p.intencao.composicaoValoresAggregate;
   return {
     id: p.id,
     status: p.status,
     criado_em: p.criadoEm,
     atualizado_em: p.atualizadoEm,
     intencao_id: p.intencao.id,
-    intencao_id_contribuicao: p.intencao.idContribuicao,
-    intencao_amount_cents: p.intencao.amountCents,
+    intencao_id_campanha: p.intencao.idCampanha,
+    intencao_total_paid_cents: aggregate.totalPaidCents,
+    intencao_total_contribution_cents: aggregate.totalContributionCents,
+    intencao_total_fee_cents: aggregate.totalFeeCents,
+    intencao_total_receiver_cents: aggregate.totalReceiverCents,
+    intencao_total_surcharge_cents: aggregate.totalSurchargeCents,
     intencao_metodo: p.intencao.metodo,
-    intencao_composicao_valores: JSON.stringify(p.intencao.composicaoValores),
     intencao_external_ref: p.intencao.externalRef,
     // aperture-wif8s: webhook-populated provider refs. New rows always
     // start null; update() rewrites them when the handler sets them.
@@ -435,19 +520,123 @@ function rowFromPagamento(p: Pagamento): Record<string, unknown> {
 }
 
 /**
- * Row → aggregate mapper. Hydrates JSONB columns + revives Date columns.
- * Parses through PagamentoSchema so any schema drift surfaces as a Zod
- * error at the boundary (vs. silently returning a malformed aggregate).
+ * Map each ItemDoPagamento to its DB row shape. Insertion order
+ * follows the cart's `items` array (caller controls position via the
+ * surcharge-LAST convention; the UNIQUE constraint on
+ * `(id_pagamento, position)` is the structural enforcement).
  */
-function pagamentoFromRow(row: PagamentoRow): Pagamento {
-  // Postgres returns JSONB as parsed JS objects through the node-postgres
-  // driver, but defensively handle the case where it arrives as a string
-  // (older driver versions / type coercion).
-  const composicaoValores =
-    typeof row.intencao_composicao_valores === 'string'
-      ? JSON.parse(row.intencao_composicao_valores)
-      : row.intencao_composicao_valores;
+function itemRowsFromPagamento(p: Pagamento): Record<string, unknown>[] {
+  return p.intencao.items.map((item, position) => {
+    if (item.tipo === 'contribuicao') {
+      const c = item.composicaoValoresItem;
+      return {
+        id: item.id,
+        id_pagamento: p.id,
+        id_intencao_pagamento: p.intencao.id,
+        position,
+        tipo: 'contribuicao',
+        id_contribuicao: item.idContribuicao,
+        quantidade: item.quantidade,
+        contribution_unit_amount_cents: c.contributionUnitAmountCents,
+        fee_unit_amount_cents: c.feeUnitAmountCents,
+        receiver_unit_amount_cents: c.receiverUnitAmountCents,
+        line_contribution_amount_cents: c.lineContributionAmountCents,
+        line_fee_amount_cents: c.lineFeeAmountCents,
+        line_receiver_amount_cents: c.lineReceiverAmountCents,
+        surcharge_amount_cents: null,
+        criado_em: item.criadoEm,
+      };
+    }
+    return {
+      id: item.id,
+      id_pagamento: p.id,
+      id_intencao_pagamento: p.intencao.id,
+      position,
+      tipo: 'passthrough_surcharge',
+      id_contribuicao: null,
+      quantidade: 1,
+      contribution_unit_amount_cents: null,
+      fee_unit_amount_cents: null,
+      receiver_unit_amount_cents: null,
+      line_contribution_amount_cents: null,
+      line_fee_amount_cents: null,
+      line_receiver_amount_cents: null,
+      surcharge_amount_cents: item.composicaoValoresItem.amountCents,
+      criado_em: item.criadoEm,
+    };
+  });
+}
 
+/**
+ * Insert all of a pagamento's items inside an open transaction. Caller
+ * is responsible for the txn wrapping (so the pagamentos row + items
+ * commit/rollback atomically).
+ */
+async function insertItemsForPagamento(trx: Transaction<DB>, p: Pagamento): Promise<void> {
+  const rows = itemRowsFromPagamento(p);
+  if (rows.length === 0) return;
+  // Cast through unknown to satisfy kysely's `Insertable<intencao_items>`
+  // ColumnType-branded shape. The runtime values are correct; the brand
+  // is a compile-time guard only.
+  // biome-ignore lint/suspicious/noExplicitAny: kysely Insertable brand vs plain row object
+  await trx.insertInto('intencao_items').values(rows as any).execute();
+}
+
+async function loadItemsForPagamento(
+  db: Database,
+  idPagamento: IdPagamento,
+): Promise<ItemRow[]> {
+  const rows = await db
+    .selectFrom('intencao_items')
+    .selectAll()
+    .where('id_pagamento', '=', idPagamento)
+    .orderBy('position', 'asc')
+    .execute();
+  return rows as unknown as ItemRow[];
+}
+
+/** Map a single item row back to its domain entity. */
+function itemFromRow(row: ItemRow): ItemDoPagamento {
+  if (row.tipo === 'contribuicao') {
+    return ItemDoPagamentoSchema.parse({
+      id: row.id,
+      tipo: 'contribuicao',
+      idContribuicao: row.id_contribuicao,
+      quantidade: row.quantidade,
+      composicaoValoresItem: {
+        tipo: 'contribuicao',
+        idContribuicao: row.id_contribuicao,
+        quantidade: row.quantidade,
+        contributionUnitAmountCents: Number(row.contribution_unit_amount_cents),
+        feeUnitAmountCents: Number(row.fee_unit_amount_cents),
+        receiverUnitAmountCents: Number(row.receiver_unit_amount_cents),
+        lineContributionAmountCents: Number(row.line_contribution_amount_cents),
+        lineFeeAmountCents: Number(row.line_fee_amount_cents),
+        lineReceiverAmountCents: Number(row.line_receiver_amount_cents),
+      },
+      criadoEm: row.criado_em,
+    });
+  }
+  return ItemDoPagamentoSchema.parse({
+    id: row.id,
+    tipo: 'passthrough_surcharge',
+    idContribuicao: null,
+    quantidade: 1,
+    composicaoValoresItem: {
+      tipo: 'passthrough_surcharge',
+      amountCents: Number(row.surcharge_amount_cents),
+    },
+    criadoEm: row.criado_em,
+  });
+}
+
+/**
+ * Row → aggregate mapper. Hydrates JSONB columns + revives Date columns
+ * + reconstructs the items array from the per-item rows. Parses through
+ * PagamentoSchema so any schema drift surfaces as a Zod error at the
+ * boundary (vs. silently returning a malformed aggregate).
+ */
+function pagamentoFromRow(row: PagamentoRow, itemRows: ItemRow[]): Pagamento {
   const transacaoExterna =
     row.transacao_externa == null
       ? undefined
@@ -471,6 +660,21 @@ function pagamentoFromRow(row: PagamentoRow): Pagamento {
         }
       : null;
 
+  const items = itemRows.map(itemFromRow);
+
+  // Per plan 0016: aggregate composição is reconstructed from the
+  // dedicated columns. responsavelTaxa is always 'contribuinte' today;
+  // matches the value-object literal.
+  const composicaoValoresAggregate = {
+    idCampanha: row.intencao_id_campanha,
+    totalContributionCents: Number(row.intencao_total_contribution_cents),
+    totalFeeCents: Number(row.intencao_total_fee_cents),
+    totalReceiverCents: Number(row.intencao_total_receiver_cents),
+    totalSurchargeCents: Number(row.intencao_total_surcharge_cents),
+    totalPaidCents: Number(row.intencao_total_paid_cents),
+    responsavelTaxa: 'contribuinte' as const,
+  };
+
   return PagamentoSchema.parse({
     id: row.id,
     status: row.status,
@@ -478,10 +682,10 @@ function pagamentoFromRow(row: PagamentoRow): Pagamento {
     atualizadoEm: row.atualizado_em,
     intencao: {
       id: row.intencao_id,
-      idContribuicao: row.intencao_id_contribuicao,
-      amountCents: row.intencao_amount_cents,
+      idCampanha: row.intencao_id_campanha,
+      items,
+      composicaoValoresAggregate,
       metodo: row.intencao_metodo,
-      composicaoValores,
       externalRef: row.intencao_external_ref,
       paymentIntentExternalRef: row.intencao_payment_intent_external_ref,
       chargeExternalRef: row.intencao_charge_external_ref,

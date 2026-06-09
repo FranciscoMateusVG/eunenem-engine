@@ -24,10 +24,16 @@ export interface ContribuicaoEstaIndisponivelDeps {
  * old `contribuicaoDisponivel(contribuicao)` entity-helper that was
  * gone with the status field.
  *
- * Uses the partial index
- * `pagamentos_aprovado_por_contribuicao_idx ON (intencao_id_contribuicao)
- * WHERE status='aprovado'` (migration 019) — sub-millisecond on any
+ * Uses the partial index from migration 019 — sub-millisecond on any
  * realistic data shape.
+ *
+ * **Plan 0016 (aperture-aj8qw)**: this use-case retires in Phase 2.
+ * The migration 019 index gets replaced by
+ * `idx_intencao_items_contribuicao_aprovado` (migration 022, joined
+ * against `pagamentos.status='aprovado'`), and the predicate moves
+ * from "any aprovado pagamento?" to `quantidadeRestante(c)` /
+ * `esgotada(c)` (sum-of-quantidades-vs-slot-cap). Phase 2 reshape
+ * is the canonical fix; this file is left in place for Phase 1.
  *
  * Called by:
  *   - `iniciarPagamentoContribuicao` saga step 2 (UX early-fail gate)
