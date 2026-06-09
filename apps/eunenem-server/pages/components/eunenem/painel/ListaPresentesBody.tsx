@@ -380,7 +380,7 @@ function GiftCard({
     ? "não dá pra mexer — algum mimo desse grupo já foi reservado ♡"
     : undefined;
   return (
-    <div className={"lista-card" + (isComplete ? " is-complete" : "")}>
+    <div className={"lista-card" + (isComplete ? " is-complete" : "")} data-testid="lista-card">
       <div className="lista-card-thumb" style={{ background: item.bgColor }}>
         {/* aperture-intake-grxsh-followup — real product image when imagemUrl
             is a same-origin path or absolute URL; emoji fallback otherwise.
@@ -414,6 +414,7 @@ function GiftCard({
             aria-label={`Editar ${item.nome}`}
             disabled={item.hasClaimed}
             title={lockedTip}
+            data-testid="gift-edit-btn"
           >
             {icon.edit}
           </button>
@@ -550,6 +551,7 @@ function PersonalizadoForm({
                 setF({ ...f, qty: Number(e.target.value.replace(/\D/g, "")) || 1 })
               }
               aria-label="Quantidade"
+              data-testid="qty-input"
             />
             <button
               type="button"
@@ -1120,6 +1122,7 @@ function EditItemModal({
             className="btn btn-primary"
             disabled={!valid || submitting}
             onClick={submit}
+            data-testid="edit-save-btn"
           >
             {submitting ? "Salvando..." : "Salvar alterações"}
           </button>

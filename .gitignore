@@ -8,3 +8,8 @@ coverage/
 .DS_Store
 tmp/
 projectStructure.cache.json
+
+# Playwright (aperture-ilji3)
+test-results/
+playwright-report/
+playwright/.cache/
