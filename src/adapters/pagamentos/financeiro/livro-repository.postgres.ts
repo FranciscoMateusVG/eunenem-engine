@@ -33,12 +33,18 @@ const DB_ATTRS = {
 } as const;
 
 /**
- * Constraint name from migration 20260531_012_create_financeiro — matched
- * verbatim to surface `FinanceiroPagamentoJaRegistradoError` on duplicate
- * (id_pagamento, tipo) insert (port-conformance with the memory adapter,
- * which preflight-checks and throws the same typed error).
+ * Constraint name from migration 20260609_023_lancamentos_financeiros_per_item
+ * (Plan 0016 Phase 2 — UNIQUE was dropped from `(id_pagamento, tipo)` and
+ * re-added on `(id_item_pagamento, tipo)`). Surfaces
+ * `FinanceiroPagamentoJaRegistradoError` on retry (Stripe webhook
+ * idempotency relies on the typed error to short-circuit).
+ *
+ * The new constraint fires per-item-per-tipo. Any retry of the same
+ * pagamento re-emits lançamentos for the same items, so the 23505 path is
+ * functionally equivalent — translating it to the same typed error
+ * preserves the pre-0016 retry-shape semantics.
  */
-const UNIQUE_PAGAMENTO_TIPO = 'lancamentos_financeiros_id_pagamento_tipo_uniq';
+const UNIQUE_ITEM_TIPO = 'lancamentos_financeiros_id_item_pagamento_tipo_uniq';
 /**
  * aperture-s03dr / migration 021. Unique partial index name used to
  * surface FinanceiroRepasseJaPendenteError on the concurrent-solicitação
@@ -65,10 +71,13 @@ function isUniqueViolation(error: unknown, constraint: string): boolean {
  * Plan 0015 / migration 019: status + matura_em dropped; transferido_em +
  * cancelado_em added (both nullable timestamps).
  * aperture-s03dr / migration 021: id_repasse added (nullable).
+ * Plan 0016 Phase 2 / migration 023: id_item_pagamento added (NOT NULL
+ * FK to intencao_items.id; one lançamento per (item, tipo) pair).
  */
 type LancamentoRow = {
   id: string;
   id_pagamento: string;
+  id_item_pagamento: string;
   id_contribuicao: string;
   id_campanha: string | null;
   tipo: string;
@@ -127,7 +136,7 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
 
         span.setStatus({ code: SpanStatusCode.OK });
       } catch (error: unknown) {
-        if (isUniqueViolation(error, UNIQUE_PAGAMENTO_TIPO)) {
+        if (isUniqueViolation(error, UNIQUE_ITEM_TIPO)) {
           // Surface the typed error for the first conflicting idPagamento
           // in the batch — matches memory adapter's preflight loop order.
           const first = lancamentos[0];
@@ -806,6 +815,10 @@ function rowFromLancamento(l: LancamentoFinanceiro): Record<string, unknown> {
   return {
     id: l.id,
     id_pagamento: l.idPagamento,
+    // Plan 0016 Phase 2 / migration 023: NOT NULL FK to intencao_items.id.
+    // The entity always carries it (factory throws if any item lacks ids),
+    // so this is never null at this point.
+    id_item_pagamento: l.idItemPagamento,
     id_contribuicao: l.idContribuicao,
     id_campanha: l.idCampanha ?? null,
     tipo: l.tipo,
@@ -822,6 +835,8 @@ function lancamentoFromRow(row: LancamentoRow): LancamentoFinanceiro {
   return LancamentoFinanceiroSchema.parse({
     id: row.id,
     idPagamento: row.id_pagamento,
+    // Plan 0016 Phase 2 / migration 023.
+    idItemPagamento: row.id_item_pagamento,
     idContribuicao: row.id_contribuicao,
     idCampanha: row.id_campanha ?? undefined,
     tipo: row.tipo,
