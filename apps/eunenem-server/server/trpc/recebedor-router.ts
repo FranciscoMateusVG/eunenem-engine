@@ -334,17 +334,30 @@ async function buildExtratoStates(
       // When pagamento is missing OR the contribuição was deleted in
       // the meantime, contribuicao stays undefined and the projection
       // falls back to empty-string/null at the wire boundary.
+      //
+      // Plan 0016 (aperture-3htxg): the saga-emitted recebedor lançamento
+      // points at one specific contribuicao item. The extrato row's
+      // "gift name" projection is best-effort — for a multi-item cart we
+      // surface the FIRST contribuição item's name (visitor flow is
+      // single-item today; multi-item visitor cart is plan 0017). A
+      // follow-up bead can drill the lançamento → item link if the
+      // multi-item extrato needs per-item gift-name precision.
       let contribuicao: { nome: string; imagemUrl: string | null } | undefined;
       if (pagamento !== undefined) {
-        const idC = pagamento.intencao.idContribuicao;
-        const fetched = await ctx.deps.contribuicaoRepository.findById(
-          idC as never,
+        const primeiroItemContribuicao = pagamento.intencao.items.find(
+          (item): item is Extract<typeof item, { tipo: "contribuicao" }> =>
+            item.tipo === "contribuicao",
         );
-        if (fetched !== undefined && fetched !== null) {
-          contribuicao = {
-            nome: fetched.nome,
-            imagemUrl: fetched.imagemUrl ?? null,
-          };
+        if (primeiroItemContribuicao !== undefined) {
+          const fetched = await ctx.deps.contribuicaoRepository.findById(
+            primeiroItemContribuicao.idContribuicao as never,
+          );
+          if (fetched !== undefined && fetched !== null) {
+            contribuicao = {
+              nome: fetched.nome,
+              imagemUrl: fetched.imagemUrl ?? null,
+            };
+          }
         }
       }
       return {

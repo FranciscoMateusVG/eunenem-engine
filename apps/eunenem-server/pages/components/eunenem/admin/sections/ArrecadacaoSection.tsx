@@ -3,29 +3,34 @@ import { DddBadge } from "@/components/eunenem/admin/DddBadge";
 import { trpc } from "@/lib/trpc.js";
 
 /**
- * ArrecadacaoSection — plan 0015 Phase 6 reshape (aperture-i45g5).
+ * ArrecadacaoSection — plan 0016 Phase 4 reshape (aperture-3htxg) on
+ * top of plan 0015 Phase 6 (aperture-i45g5).
  *
  * Top section of /admin/contribuicao/:idContribuicao. Renders the
  * Arrecadação-side facts of a single contribuicao: id, valor,
  * disponibilidade, opção + grupo, criadaEm, campanha link, recebedor
  * (gift-not-claimed-safe).
  *
- * Phase 6 simplification — three blocks dropped from this card vs the
- * original rsidz.4 ship:
- *   1. CONTRIBUINTE block (name + email) — moved to per-pagamento
- *      contribuinte affordance in PagamentosSection.
- *   2. MENSAGEM (recadinho) block — same, moves to per-pagamento.
- *   3. Stored `status` badge — replaced with the `indisponivel` predicate
- *      computed from `EXISTS pagamento WHERE id_contribuicao=X AND
- *      status='aprovado'`. Visual style stays the same; the data source
- *      changes. Parallel-prep stub today: derived from the legacy
- *      `status` field. Rex's Phase 1 PR swaps to the real predicate
- *      with no UI change.
+ * **Phase 4 badge change (operator review nit B — two states only):**
  *
- * Why: per plan 0015 Locked Decision #2, the Contribuicao aggregate is
+ *   - When `quantidadeRestante > 0`: render an `N/M` count chip
+ *     (e.g. `2/5` for "2 sold of 5"). No `DISPONÍVEL` / `PARCIAL` /
+ *     `ESGOTADA` semantic — the count carries the information; the
+ *     state is implicit ("some still available" = N/M).
+ *   - When `quantidadeRestante <= 0`: render the literal word
+ *     `ESGOTADA`. Overshoot cases (e.g. 6 sold against quantidade=5)
+ *     still just say `ESGOTADA` per the operator's call — the
+ *     overcount is honest but not foregrounded.
+ *
+ * The wire ships (`quantidade`, `quantidadeRestante`) and the UI does
+ * the (subtract → count, compare → ESGOTADA) derivation locally. No
+ * `indisponivel: boolean` anywhere.
+ *
+ * Per plan 0015 Locked Decision #2, the Contribuicao aggregate is
  * "admin-owned, no visitor writes, slot definition only" — contribuinte
- * data is per-pagamento (intencao.contribuinte), and the
- * indisponivel/disponivel state is derived, not stored.
+ * data is per-pagamento (intencao.contribuinte), and the disponibilidade
+ * state is derived, not stored. The count is the natural surface that
+ * preserves both meanings (capacity + sold) in one chip.
  *
  * Calls `trpc.admin.contribuicoes.findById` which returns the
  * multi-aggregate payload (contribuicao + campanha summary + recebedor
@@ -125,10 +130,13 @@ type ContribuicaoDTO = {
   grupo: string | null;
   idOpcaoContribuicao: string;
   criadaEm: string;
-  // Plan 0015 Phase 6 — computed predicate (EXISTS pagamento WHERE
-  // id_contribuicao=X AND status='aprovado'). The Arrecadação card reads
-  // this; the legacy `status` field on the wire is ignored here.
-  indisponivel: boolean;
+  // Plan 0016 Phase 4 (aperture-3htxg) — two-input badge contract:
+  // intrinsic slot cap + sum-of-aprovado-items-quantidade derived
+  // remainder. `quantidadeRestante` CAN BE NEGATIVE (locked decision
+  // #10 overshoot — operator-accepted +money outcome). The UI badge
+  // shows the literal `ESGOTADA` for any `restante <= 0`.
+  quantidade: number;
+  quantidadeRestante: number;
 };
 
 type CampanhaSummary = { id: string; titulo: string };
@@ -169,7 +177,10 @@ function Headline({
       <h3 className="text-xl font-semibold tracking-tight text-ink">
         {contribuicao.nome}
       </h3>
-      <StatusPill indisponivel={contribuicao.indisponivel} />
+      <QuantidadeBadge
+        quantidade={contribuicao.quantidade}
+        quantidadeRestante={contribuicao.quantidadeRestante}
+      />
       <IdCopyChip idContribuicao={idContribuicao} />
     </div>
   );
@@ -277,36 +288,68 @@ function RecebedorBlock({ recebedor }: { recebedor: RecebedorSummary | null }) {
 }
 
 /**
- * Disponibilidade pill — visual style unchanged from rsidz.4. The data
- * source moved from a stored `status` field to the `indisponivel` predicate
- * (EXISTS pagamento WHERE id_contribuicao=X AND status='aprovado').
+ * QuantidadeBadge — Plan 0016 Phase 4 (aperture-3htxg) two-state badge.
  *
- * Why we read `indisponivel: boolean` instead of a 2-state string:
- *   - The predicate is structurally a boolean (does some aprovado pagamento
- *     exist?). Round-tripping it through a string just to keep the old API
- *     shape was ceremony without value.
- *   - The pill's only two visible states are "disponível" / "indisponível";
- *     a boolean maps to them 1:1.
+ * Reads `(quantidade, quantidadeRestante)` and renders ONE of:
+ *
+ *   - **`N/M` count chip** when `quantidadeRestante > 0`. Computes
+ *     `vendidas = quantidade - quantidadeRestante` and renders it as
+ *     `<vendidas>/<quantidade>` in tabular-nums mono — the operator
+ *     scans "how full" the slot is at a glance. Emerald accent dot
+ *     mirrors the pagamento aprovado chip palette (same hue family =
+ *     "still selling"). For a single-exemplar gift (quantidade=1) that
+ *     hasn't sold, this renders as `0/1`.
+ *
+ *   - **literal `ESGOTADA` chip** when `quantidadeRestante <= 0`,
+ *     including overshoot (e.g. 6 sold against quantidade=5 still says
+ *     ESGOTADA, not 6/5). Stone palette echoes the `estornado` pagamento
+ *     chip — the "settled past state" family. Operator review nit B:
+ *     the overcount is honest in the data but not foregrounded.
+ *
+ * Visual chassis (border/padding/dot/font-mono uppercase tracking)
+ * mirrors the pagamento `StatusPill` so all admin chips read as one
+ * vocabulary at a glance. Tooltips surface the precise restante on
+ * hover — useful when the operator wants the actual number after
+ * scanning the chip.
  */
-function StatusPill({ indisponivel }: { indisponivel: boolean }) {
-  const isAvailable = !indisponivel;
+function QuantidadeBadge({
+  quantidade,
+  quantidadeRestante,
+}: {
+  quantidade: number;
+  quantidadeRestante: number;
+}) {
+  const esgotada = quantidadeRestante <= 0;
+  const vendidas = quantidade - quantidadeRestante;
+
+  if (esgotada) {
+    // Overshoot tooltip: when more items shipped than the slot's cap,
+    // surface the overcount on hover. Otherwise the chip stands alone.
+    const overshoot = quantidadeRestante < 0 ? Math.abs(quantidadeRestante) : 0;
+    const title =
+      overshoot > 0
+        ? `${vendidas} vendida(s) de ${quantidade} — excedeu em ${overshoot}`
+        : `${vendidas} vendida(s) de ${quantidade} — esgotada`;
+    return (
+      <span
+        title={title}
+        className="inline-flex items-center gap-1.5 rounded-full border border-stone-300 bg-stone-100 px-2 py-[3px] font-mono text-[10px] uppercase tracking-[0.12em] text-stone-700"
+      >
+        <span aria-hidden className="inline-block size-[6px] rounded-full bg-stone-500" />
+        esgotada
+      </span>
+    );
+  }
+
   return (
     <span
-      className={[
-        "inline-flex items-center gap-1.5 rounded-full border px-2 py-[3px] font-mono text-[10px] uppercase tracking-[0.12em]",
-        isAvailable
-          ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-          : "border-line bg-cream-2 text-ink-soft",
-      ].join(" ")}
+      title={`${vendidas} vendida(s) de ${quantidade} — ${quantidadeRestante} restante(s)`}
+      className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-[3px] font-mono text-[10px] uppercase tracking-[0.12em] text-emerald-800"
     >
-      <span
-        aria-hidden
-        className={[
-          "inline-block size-[6px] rounded-full",
-          isAvailable ? "bg-emerald-500" : "bg-ink-mute",
-        ].join(" ")}
-      />
-      {isAvailable ? "disponível" : "presenteada"}
+      <span aria-hidden className="inline-block size-[6px] rounded-full bg-emerald-500" />
+      <span className="tabular-nums">{vendidas}</span>
+      <span aria-hidden className="text-emerald-700/60">/</span>
+      <span className="tabular-nums">{quantidade}</span>
     </span>
   );
 }

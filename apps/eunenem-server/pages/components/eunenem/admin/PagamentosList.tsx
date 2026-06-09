@@ -375,6 +375,43 @@ type ContribuinteBlockData = {
   mensagem: string | null;
 } | null;
 
+/**
+ * Plan 0016 Phase 4 (aperture-3htxg) — per-item discriminated wire shape.
+ *
+ * Contribuição items carry the joined `contribuicaoNome` (null when the
+ * slot has been deleted between the pagamento + this read — orphan items
+ * still bill + book) plus per-line denormalised totals. Surcharge items
+ * carry only the cart-wide processing fee. Position is preserved verbatim
+ * from the domain — contribuição items first, surcharge ALWAYS LAST when
+ * present (locked decision #18).
+ */
+type ItemContribuicaoDTO = {
+  id: string;
+  tipo: "contribuicao";
+  idContribuicao: string;
+  contribuicaoNome: string | null;
+  quantidade: number;
+  lineContributionAmountCents: number;
+  lineFeeAmountCents: number;
+  lineReceiverAmountCents: number;
+};
+type ItemSurchargeDTO = {
+  id: string;
+  tipo: "passthrough_surcharge";
+  amountCents: number;
+};
+type ItemDTO = ItemContribuicaoDTO | ItemSurchargeDTO;
+
+type ComposicaoAggregateDTO = {
+  idCampanha: string;
+  totalContributionCents: number;
+  totalFeeCents: number;
+  totalSurchargeCents: number;
+  totalReceiverCents: number;
+  totalPaidCents: number;
+  responsavelTaxa: "contribuinte";
+};
+
 type PagamentoDTO = {
   id: string;
   status: PagamentoStatus;
@@ -382,20 +419,24 @@ type PagamentoDTO = {
   atualizadoEm: string;
   intencao: {
     id: string;
-    idContribuicao: string;
+    idCampanha: string;
     amountCents: number;
     metodo: "pix" | "credit_card";
     externalRef: string | null;
     criadaEm: string;
-    composicaoValores: {
-      idContribuicao: string;
-      contributionAmountCents: number;
-      feeAmountCents: number;
-      surchargeCents: number;
-      totalPaidCents: number;
-      receiverAmountCents: number;
-      responsavelTaxa: "contribuinte";
-    };
+    /**
+     * Plan 0016 Phase 4: the cart's per-line decomposition. ≥ 1 item.
+     * Contribuição items first (in caller-provided order), surcharge
+     * item LAST when the pagamento is on the cartão path (PIX flows
+     * carry zero surcharge items).
+     */
+    items: ReadonlyArray<ItemDTO>;
+    /**
+     * Plan 0016 Phase 4: aggregate composição — sum across items of
+     * each per-line component. `totalPaidCents` mirrors the legacy
+     * pagamento-level `amountCents`.
+     */
+    composicaoValoresAggregate: ComposicaoAggregateDTO;
     // Plan 0015 Phase 1+3 — DadosContribuinte attached to IntencaoPagamento.
     // Null until the webhook handler populates it at
     // `checkout.session.completed` (Stripe custom_fields delivery).
@@ -457,11 +498,26 @@ function PagamentoCard({
       <CardHeader pagamento={pagamento} />
       <CompactRow pagamento={pagamento} />
       <ContribuinteBlock contribuinte={pagamento.intencao.contribuinte} />
-      <ComposicaoTable composicao={pagamento.intencao.composicaoValores} />
+      {/* Plan 0016 Phase 4 (aperture-3htxg) — per-item breakdown of the
+          cart. Replaces the pre-0016 single-row ComposicaoTable. Reads
+          top-to-bottom in the same order the lançamentos rendered below
+          it: each contribuição line books 2 lançamentos (recebedor +
+          plataforma), the surcharge item (when present, cartão path
+          only) books 1 — so a 2-contribuição cartão cart produces
+          5 lançamentos total, all under the same pagamento header. */}
+      <ItensList items={pagamento.intencao.items} />
+      {/* Plan 0016 Phase 4 — aggregate composição, replaces the pre-0016
+          single-row composição. Sits between the per-item breakdown and
+          the Financeiro module: "what each line cost" → "what the cart
+          summed to" → "what the platform booked." */}
+      <ComposicaoAgregadaTable
+        agregada={pagamento.intencao.composicaoValoresAggregate}
+      />
       {/* Plan 0015 BC reshape — Financeiro module inline. Sits adjacent to
-          ComposicaoTable because they're conceptual partners: composição
-          shows what the contribuinte PAID, lancamentos show what the
-          platform BOOKED. The double-entry discipline reads at a glance. */}
+          ComposicaoAgregadaTable because they're conceptual partners:
+          composição shows what the contribuinte PAID, lancamentos show
+          what the platform BOOKED. The double-entry discipline reads at
+          a glance even with the multi-item row counts. */}
       <LancamentosBlock
         pagamentoStatus={pagamento.status}
         lancamentos={pagamento.lancamentos}
@@ -470,9 +526,10 @@ function PagamentoCard({
       {expanded && (
         <div className="space-y-3 border-t border-line pt-4">
           <JsonViewer
-            label="composicaoValores"
-            data={pagamento.intencao.composicaoValores}
+            label="composicaoValoresAggregate"
+            data={pagamento.intencao.composicaoValoresAggregate}
           />
+          <JsonViewer label="items" data={pagamento.intencao.items} />
           {pagamento.transacaoExterna && (
             <JsonViewer
               label="transacaoExterna"
@@ -627,43 +684,198 @@ function CompactRow({ pagamento }: { pagamento: PagamentoDTO }) {
   );
 }
 
-function ComposicaoTable({
-  composicao,
+/**
+ * ItensList — Plan 0016 Phase 4 (aperture-3htxg).
+ *
+ * Per-line decomposition of the cart. Each contribuição item gets a row
+ * with: name + `× N` quantidade chip on the left, contribution / fee /
+ * receiver as compact value columns on the right. The surcharge item
+ * (cartão path only — ALWAYS LAST per locked decision #18) gets its own
+ * italic-muted row with just the surcharge amount surfacing, since it's
+ * a cart-wide passthrough rather than a per-slot line.
+ *
+ * Visual rhythm: hairline separators between items, contribuição rows
+ * carry the same font weight as the composição totals so the eye reads
+ * `items` and `aggregate` as one ledger. The orphan-slot affordance
+ * `(contribuição removida)` italic appears when the join misses — same
+ * shape as the `(sem contribuinte ainda)` affordance elsewhere.
+ *
+ * Quantidade chip:
+ *   - Hidden for `× 1` (no signal value; would just add noise to the
+ *     common single-quantidade gift case).
+ *   - Shown for `× 2` and above as a small mono chip — operator scans
+ *     "this slot has 5 exemplars sold in one cart" at a glance.
+ *
+ * Layout: a single grid with three trailing tabular-nums columns so the
+ * values right-align cleanly across rows even when the contribuição
+ * names have wildly different lengths.
+ */
+function ItensList({ items }: { items: ReadonlyArray<ItemDTO> }) {
+  return (
+    <div className="border-t border-line pt-4">
+      <p className="mb-3 font-mono text-[11px] uppercase tracking-[0.14em] text-ink-soft">
+        itens do carrinho
+      </p>
+      <ul className="divide-y divide-line/70 overflow-hidden rounded border border-line bg-cream-2/30">
+        {items.map((item) => (
+          <li key={item.id}>
+            {item.tipo === "contribuicao" ? (
+              <ItemContribuicaoRow item={item} />
+            ) : (
+              <ItemSurchargeRow item={item} />
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function ItemContribuicaoRow({ item }: { item: ItemContribuicaoDTO }) {
+  const shortId = `${item.idContribuicao.slice(0, 8)}…`;
+  // Pre-0016 had no quantidade concept (every item was implicitly × 1);
+  // suppress the chip for that common case to keep the row visually
+  // calm. Multi-quantidade items get an explicit chip — that IS the
+  // multi-item story Phase 4 is surfacing.
+  const showQuantidadeChip = item.quantidade > 1;
+  return (
+    <div className="grid grid-cols-[1fr_max-content_max-content_max-content] items-baseline gap-x-4 gap-y-1 px-3 py-2 sm:gap-x-6">
+      <div className="min-w-0 flex-col">
+        <div className="flex flex-wrap items-baseline gap-2">
+          {item.contribuicaoNome === null ? (
+            <span
+              className="truncate text-[13px] italic text-ink-mute"
+              title={item.idContribuicao}
+            >
+              (contribuição removida — {shortId})
+            </span>
+          ) : (
+            <span
+              className="truncate text-[13px] text-ink"
+              title={item.contribuicaoNome}
+            >
+              {item.contribuicaoNome}
+            </span>
+          )}
+          {showQuantidadeChip && (
+            <span className="inline-flex shrink-0 items-center rounded border border-line bg-paper px-1.5 py-[1px] font-mono text-[10px] uppercase tracking-[0.12em] text-ink-soft">
+              × <span className="tabular-nums">{item.quantidade}</span>
+            </span>
+          )}
+        </div>
+        <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-mute">
+          contribuição
+        </span>
+      </div>
+      <ItemValueColumn
+        label="contribuição"
+        cents={item.lineContributionAmountCents}
+        emphasis
+      />
+      <ItemValueColumn label="taxa" cents={item.lineFeeAmountCents} />
+      <ItemValueColumn
+        label="recebedor"
+        cents={item.lineReceiverAmountCents}
+      />
+    </div>
+  );
+}
+
+function ItemSurchargeRow({ item }: { item: ItemSurchargeDTO }) {
+  // Surcharge sits visually distinct — italic + softer label — because
+  // it's a cart-wide passthrough rather than a per-slot line. The
+  // operator scans the contribuição rows first; the surcharge tail-row
+  // reads as "and then there's the cart fee." No per-line composição
+  // columns: surcharge has no contribution/receiver split — the whole
+  // amount goes to Stripe.
+  return (
+    <div className="grid grid-cols-[1fr_max-content] items-baseline gap-x-4 gap-y-1 bg-cream-2/40 px-3 py-2 sm:gap-x-6">
+      <div className="flex flex-col">
+        <span className="text-[13px] italic text-ink-soft">
+          taxa de processamento — cartão
+        </span>
+        <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-mute">
+          passthrough · cart-wide
+        </span>
+      </div>
+      <ItemValueColumn label="acréscimo" cents={item.amountCents} emphasis />
+    </div>
+  );
+}
+
+function ItemValueColumn({
+  label,
+  cents,
+  emphasis = false,
 }: {
-  composicao: PagamentoDTO["intencao"]["composicaoValores"];
+  label: string;
+  cents: number;
+  emphasis?: boolean;
+}) {
+  return (
+    <div className="flex flex-col items-end">
+      <span
+        className={[
+          "font-mono tabular-nums",
+          emphasis ? "text-[13px] text-ink" : "text-[12px] text-ink-soft",
+        ].join(" ")}
+      >
+        {formatBRL(cents)}
+      </span>
+      <span className="font-mono text-[9px] uppercase tracking-[0.12em] text-ink-mute">
+        {label}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * ComposicaoAgregadaTable — Plan 0016 Phase 4 (aperture-3htxg).
+ *
+ * The cart totals — sum across items of each per-line component. Same
+ * structured grid as the pre-0016 composição table, swapped to the
+ * aggregate field names. The book-balance triple
+ * (`contribuição + taxa + surcharge = total`) reads at a glance from
+ * the row order; the recebedor net follows below as the "what the
+ * gift recipient actually gets" payoff line.
+ */
+function ComposicaoAgregadaTable({
+  agregada,
+}: {
+  agregada: ComposicaoAggregateDTO;
 }) {
   const rows: Array<{ label: string; value: React.ReactNode }> = [
     {
-      label: "Contribuição",
-      value: <BrlValue cents={composicao.contributionAmountCents} />,
+      label: "Total contribuição",
+      value: <BrlValue cents={agregada.totalContributionCents} />,
     },
     {
-      label: "Taxa plataforma",
-      value: <BrlValue cents={composicao.feeAmountCents} />,
+      label: "Total taxa plataforma",
+      value: <BrlValue cents={agregada.totalFeeCents} />,
     },
     {
-      label: "Acréscimo cartão (visitante)",
-      value: <BrlValue cents={composicao.surchargeCents} />,
+      label: "Total acréscimo cartão",
+      value: <BrlValue cents={agregada.totalSurchargeCents} />,
     },
     {
       label: "Total pago",
-      value: <BrlValue cents={composicao.totalPaidCents} emphasis />,
+      value: <BrlValue cents={agregada.totalPaidCents} emphasis />,
     },
     {
       label: "Líquido ao recebedor",
-      value: <BrlValue cents={composicao.receiverAmountCents} />,
+      value: <BrlValue cents={agregada.totalReceiverCents} />,
     },
     {
       label: "Responsável pela taxa",
       value: (
-        <span className="text-[13px] text-ink">{composicao.responsavelTaxa}</span>
+        <span className="text-[13px] text-ink">{agregada.responsavelTaxa}</span>
       ),
     },
   ];
   return (
     <div className="border-t border-line pt-4">
       <p className="mb-2 font-mono text-[11px] uppercase tracking-[0.14em] text-ink-soft">
-        composição de valores
+        composição agregada
       </p>
       <dl className="grid gap-x-6 gap-y-1.5 sm:grid-cols-[max-content_1fr]">
         {rows.map(({ label, value }) => (

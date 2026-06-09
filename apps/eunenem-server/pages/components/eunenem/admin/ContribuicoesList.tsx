@@ -52,14 +52,24 @@ export function ContribuicoesList({ idCampanha }: { idCampanha: string }) {
   return <Loaded contribuicoes={contribuicoes} />;
 }
 
-type Status = "todas" | "disponivel" | "indisponivel";
+// Plan 0016 Phase 4 (aperture-3htxg) — the list filter dropped the
+// three-state vocabulary in favour of two: "todas" + "esgotadas". A
+// future bead can introduce a "parcialmente vendida" filter if
+// operators ask for it; today the count chip in each row already
+// surfaces partial-sale state at a glance.
+type Status = "todas" | "esgotada";
 type DateRange = "todo" | "ultimos-7d" | "ultimos-30d" | "ultimos-90d";
 
 type ContribuicaoRow = {
   id: string;
   nome: string;
   valorCentavos: number;
-  status: "disponivel" | "indisponivel";
+  // Plan 0016 Phase 4 — same (quantidade, quantidadeRestante) contract
+  // the Arrecadação section reads. The list row renders the same
+  // N/M-or-ESGOTADA badge so the visual identity is unified across the
+  // campanha overview AND the single-contribuição drill-down.
+  quantidade: number;
+  quantidadeRestante: number;
   grupo: string | null;
   idOpcaoContribuicao: string;
   criadaEm: string;
@@ -85,7 +95,10 @@ function Loaded({ contribuicoes }: { contribuicoes: ReadonlyArray<ContribuicaoRo
     const now = Date.now();
     const rangeMs = dateRangeWindowMs(dateRange);
     return contribuicoes.filter((c) => {
-      if (status !== "todas" && c.status !== status) return false;
+      // Plan 0016 Phase 4: filter derives from the same predicate the
+      // badge uses — quantidadeRestante <= 0 means "esgotada"
+      // (including overshoot).
+      if (status === "esgotada" && c.quantidadeRestante > 0) return false;
       if (opcao !== "todas" && c.idOpcaoContribuicao !== opcao) return false;
       if (rangeMs !== null) {
         const t = Date.parse(c.criadaEm);
@@ -162,8 +175,7 @@ function FilterStrip({
         label="status"
         chips={[
           { value: "todas", label: "Todas" },
-          { value: "disponivel", label: "Disponíveis" },
-          { value: "indisponivel", label: "Presenteadas" },
+          { value: "esgotada", label: "Esgotadas" },
         ]}
         active={status}
         onChange={(v) => onStatus(v as Status)}
@@ -302,7 +314,10 @@ function Row({ contribuicao }: { contribuicao: ContribuicaoRow }) {
       <span className="font-mono text-[12px] tabular-nums text-ink">
         {formatBRL(contribuicao.valorCentavos)}
       </span>
-      <StatusPill status={contribuicao.status} />
+      <QuantidadeBadge
+        quantidade={contribuicao.quantidade}
+        quantidadeRestante={contribuicao.quantidadeRestante}
+      />
       <span className="font-mono text-[11px] tabular-nums text-ink-mute">
         {formatCriadaEm(contribuicao.criadaEm)}
       </span>
@@ -310,25 +325,55 @@ function Row({ contribuicao }: { contribuicao: ContribuicaoRow }) {
   );
 }
 
-function StatusPill({ status }: { status: "disponivel" | "indisponivel" }) {
-  const isAvailable = status === "disponivel";
+/**
+ * QuantidadeBadge — Plan 0016 Phase 4 (aperture-3htxg). Same two-state
+ * badge the Arrecadação section renders; duplicated here (rather than
+ * imported) because the list + detail surfaces have intentionally
+ * separate ownership of their visual vocabulary (the admin list is
+ * its own component tree). When operators surface a third state in the
+ * future (e.g. "low stock under N"), both sites swap independently.
+ *
+ *   - `quantidadeRestante > 0` → `N/M` count chip (emerald accent).
+ *   - `quantidadeRestante <= 0` → literal `ESGOTADA` chip (stone palette,
+ *     same family as the `estornado` pagamento chip — "settled past
+ *     state"). Overshoot tooltip surfaces the overcount on hover.
+ */
+function QuantidadeBadge({
+  quantidade,
+  quantidadeRestante,
+}: {
+  quantidade: number;
+  quantidadeRestante: number;
+}) {
+  const esgotada = quantidadeRestante <= 0;
+  const vendidas = quantidade - quantidadeRestante;
+
+  if (esgotada) {
+    const overshoot = quantidadeRestante < 0 ? Math.abs(quantidadeRestante) : 0;
+    const title =
+      overshoot > 0
+        ? `${vendidas} vendida(s) de ${quantidade} — excedeu em ${overshoot}`
+        : `${vendidas} vendida(s) de ${quantidade} — esgotada`;
+    return (
+      <span
+        title={title}
+        className="inline-flex items-center gap-1.5 rounded-full border border-stone-300 bg-stone-100 px-2 py-[3px] font-mono text-[10px] uppercase tracking-[0.12em] text-stone-700"
+      >
+        <span aria-hidden className="inline-block size-[6px] rounded-full bg-stone-500" />
+        esgotada
+      </span>
+    );
+  }
+
   return (
     <span
-      className={[
-        "inline-flex items-center gap-1.5 rounded-full border px-2 py-[3px] font-mono text-[10px] uppercase tracking-[0.12em]",
-        isAvailable
-          ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-          : "border-line bg-cream-2 text-ink-soft",
-      ].join(" ")}
+      title={`${vendidas} vendida(s) de ${quantidade} — ${quantidadeRestante} restante(s)`}
+      className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-[3px] font-mono text-[10px] uppercase tracking-[0.12em] text-emerald-800"
     >
-      <span
-        aria-hidden
-        className={[
-          "inline-block size-[6px] rounded-full",
-          isAvailable ? "bg-emerald-500" : "bg-ink-mute",
-        ].join(" ")}
-      />
-      {isAvailable ? "disponível" : "presenteada"}
+      <span aria-hidden className="inline-block size-[6px] rounded-full bg-emerald-500" />
+      <span className="tabular-nums">{vendidas}</span>
+      <span aria-hidden className="text-emerald-700/60">/</span>
+      <span className="tabular-nums">{quantidade}</span>
     </span>
   );
 }

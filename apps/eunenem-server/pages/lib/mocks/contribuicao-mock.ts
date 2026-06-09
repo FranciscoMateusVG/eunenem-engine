@@ -35,20 +35,23 @@ export interface ContribuicaoDTO {
   grupo: string | null;
   /** Filled once a guest reserves the item. null = still available.
    *  DEPRECATED per plan 0015 Phase 1 — contribuinte data moves to
-   *  IntencaoPagamento. Kept on the interface during the transition because
-   *  visitorGift.ts + ContribuicoesList.tsx still read it; follow-up bead
-   *  will retire it once those consumers have been migrated. */
-  contribuinte: { nome: string; email: string } | null;
+   *  IntencaoPagamento. The wire stopped projecting this field for
+   *  pagina.obterListaPresentes after Phase 1; consumers must treat the
+   *  absence as "no contribuinte yet" (the visitor view never needed
+   *  this projection — it would be a PII leak across an unauthed
+   *  surface). Optional here so other consumers (admin internal mocks)
+   *  can still set it. */
+  contribuinte?: { nome: string; email: string } | null;
   /**
    * `indisponivel` once a contribuinte has reserved — server-side
    * mutations refuse to update locked rows (see `update` below).
    *
    * DEPRECATED per plan 0015 Phase 1 — replaced by the derived
-   * `indisponivel: boolean` predicate below. Kept on the interface during
-   * the transition because visitorGift.ts + ContribuicoesList.tsx still
-   * read it; follow-up bead migrates those consumers.
+   * `indisponivel: boolean` predicate below. Optional here so the
+   * visitor wire (which only returns `indisponivel`) typechecks; mocks
+   * + admin consumers still set the legacy string when present.
    */
-  status: "disponivel" | "indisponivel";
+  status?: "disponivel" | "indisponivel";
   /**
    * Plan 0015 derived-availability predicate (aperture-ocw8r). Server-side
    * derived from `EXISTS pagamento WHERE id_contribuicao = X AND status =

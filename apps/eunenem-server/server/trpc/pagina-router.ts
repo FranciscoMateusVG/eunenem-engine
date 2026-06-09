@@ -8,9 +8,10 @@ import {
   esgotada,
   type IdContribuicao,
   type IdIntencaoPagamento,
+  type IdItemDoPagamento,
   type IdOpcaoContribuicao,
   type IdPagamento,
-  iniciarPagamentoContribuicao,
+  iniciarPagamentoCarrinho,
   listarContribuicoesDeOpcao,
   obterTarifaPorTipo,
   type SlugUsuario,
@@ -278,8 +279,20 @@ export const paginaRouter = t.router({
       const idIntencaoPagamento = randomUUID() as IdIntencaoPagamento;
       const returnUrl = `${ctx.deps.publicOrigin}/pagina/${encodeURIComponent(input.slug)}/sucesso?sessionId={CHECKOUT_SESSION_ID}`;
 
+      // Plan 0016 (aperture-3htxg): visitor flow stays single-contribuição
+      // for now (multi-item visitor cart is the separate 0017 follow-on).
+      // Adapt the single-gift input to the multi-item saga shape: a
+      // 1-element cart with quantidade=1. The saga itself injects the
+      // surcharge item for the cartão path, so we mint exactly one
+      // contribuição item id here.
+      const idItemContribuicao = randomUUID() as IdItemDoPagamento;
+      const idsItens: IdItemDoPagamento[] =
+        input.metodo === 'credit_card'
+          ? [idItemContribuicao, randomUUID() as IdItemDoPagamento]
+          : [idItemContribuicao];
+
       try {
-        const result = await iniciarPagamentoContribuicao(
+        const result = await iniciarPagamentoCarrinho(
           {
             campanhaRepository: ctx.deps.campanhaRepository,
             contribuicaoRepository: ctx.deps.contribuicaoRepository,
@@ -293,10 +306,16 @@ export const paginaRouter = t.router({
           {
             idPlataforma: ID_PLATAFORMA_EUNENEM,
             idCampanha: campanha.id,
-            idContribuicao: input.idContribuicao as IdContribuicao,
+            itens: [
+              {
+                idContribuicao: input.idContribuicao as IdContribuicao,
+                quantidade: 1,
+              },
+            ],
             metodo: input.metodo,
             idPagamento,
             idIntencaoPagamento,
+            idsItens,
             returnUrl,
             // aperture-6g58e: browser-originated checkout uses inline
             // success — Stripe fires onComplete in the iframe instead of
@@ -347,9 +366,18 @@ export const paginaRouter = t.router({
 
       const sessao = await ctx.deps.checkoutSessionProvider.obterSessaoCheckout(input.sessionId);
 
-      const contribuicao = await ctx.deps.contribuicaoRepository.findById(
-        pagamento.intencao.idContribuicao as unknown as IdContribuicao,
+      // Plan 0016: visitor flow is single-item today (multi-item visitor
+      // cart is the separate 0017 follow-on). The cart has exactly one
+      // contribuição item; resolve its slot for gift-name display.
+      const primeiroItemContribuicao = pagamento.intencao.items.find(
+        (item): item is Extract<typeof item, { tipo: 'contribuicao' }> =>
+          item.tipo === 'contribuicao',
       );
+      const contribuicao = primeiroItemContribuicao
+        ? await ctx.deps.contribuicaoRepository.findById(
+            primeiroItemContribuicao.idContribuicao as unknown as IdContribuicao,
+          )
+        : undefined;
 
       let status: 'pending' | 'approved' | 'rejected' | 'unknown';
       if (pagamento.status === 'aprovado') {
@@ -371,7 +399,11 @@ export const paginaRouter = t.router({
 
       return {
         giftName: contribuicao?.nome ?? '',
-        valor: pagamento.intencao.amountCents,
+        // Plan 0016: total paid lives on the aggregate composição now.
+        // For a single-item visitor cart this equals the legacy
+        // intencao.amountCents (saga seeds it from the aggregate sum).
+        valor: pagamento.intencao.composicaoValoresAggregate
+          .totalPaidCents as unknown as number,
         recadinho:
           persistedContribuinte?.mensagem ?? sessao?.customFields.mensagem ?? null,
         babyName: usuario.nomeExibicao,
