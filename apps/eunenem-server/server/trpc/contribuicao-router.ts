@@ -252,10 +252,10 @@ const UpdateInputSchema = z.object({
   imagemUrl: ImagemUrlSchema.nullable().optional(),
   grupo: z.string().trim().min(1).max(60).nullable().optional(),
   /**
-   * Plan 0016 (aperture-putz5): change a slot's capacity. Per locked
-   * decision #10 the new value can be lower than already-sold count —
-   * `quantidadeRestante` goes negative, `esgotada` returns true. The
-   * use-case + entity validate `quantidade >= 1` only.
+   * Plan 0016 (aperture-putz5 + aperture-1l37i): change a slot's capacity.
+   * Per locked decision #10 the new value can be lower than already-sold
+   * count — `quantidadeRestante` goes negative, `esgotada` returns true.
+   * The use-case + entity validate `quantidade >= 1` only.
    */
   quantidade: z.number().int().min(1).max(100).optional(),
 });
@@ -289,10 +289,12 @@ function toListItem(
   // pagamentoRepository EXISTS query at the caller, then passed in
   // here so the projection function stays sync + injection-free.
   //
-  // Plan 0016 (aperture-putz5): expose `quantidade` so the painel renders
-  // the slot's capacity directly (e.g. "Fralda Ecológica × 7"). The list
-  // procedure already loads it from the entity; threading it through here
-  // keeps the projection self-contained.
+  // Plan 0016 (aperture-putz5 engine + aperture-1l37i frontend): expose
+  // `quantidade` so the painel renders the slot's capacity directly
+  // (e.g. "Fralda Ecológica × 7") and the admin ContribuicoesList can
+  // group + aggregate across legacy multi-row data uniformly. The list
+  // procedure already loads it from the entity; threading it through
+  // here keeps the projection self-contained.
   return {
     id: c.id,
     nome: c.nome,
@@ -468,6 +470,12 @@ export const contribuicaoRouter = t.router({
             valor: input.valor,
             imagemUrl: input.imagemUrl,
             grupo: input.grupo,
+            // Plan 0016 (aperture-putz5 engine + aperture-1l37i frontend):
+            // quantidade flows through to the engine use-case. Rex's
+            // engine PR extended AtualizarContribuicaoInputSchema to
+            // accept this field; the painel can now run atomic single-
+            // request updates for qty changes too (the qty-changed
+            // fallback in saveEdit retires in a follow-up cleanup).
             quantidade: input.quantidade,
           },
         );

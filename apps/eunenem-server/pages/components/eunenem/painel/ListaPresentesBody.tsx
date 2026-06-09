@@ -20,6 +20,7 @@ import {
   useContribuicaoCreate,
   useContribuicaoCreateBulk,
   useContribuicaoDelete,
+  useContribuicaoUpdate,
   useContribuicaoList,
   type ContribuicaoDTO,
 } from "@/lib/contribuicao.js";
@@ -277,10 +278,24 @@ function groupContribuicoes(items: ContribuicaoDTO[]): GroupedGift[] {
     // `undefined` is treated as not-received (same shape as today's bug;
     // resolves the moment Rex's @repo/domains schema commit ships).
     const isReserved = c.indisponivel === true;
+    // Plan 0016 / aperture-1l37i: read entity.quantidade directly with a
+    // 1-default for legacy rows that pre-date the wire bump. The
+    // accumulation logic below handles BOTH shapes uniformly:
+    //   - Legacy (pre-create-flow-rewrite): N rows of "Fralda" each
+    //     quantidade=1 → group qty sums to N (matches today's behavior).
+    //   - Post-rewrite: 1 row of "Fralda" with quantidade=N → group qty
+    //     equals N directly. No double-counting; the loop only sees one
+    //     row per gift.
+    // `received` mirrors the same shape: an indisponivel row contributes
+    // its quantidade to the "already presented" tally (legacy: 1 per
+    // row; post-rewrite: N when the whole slot is sold out, but with
+    // overshoot allowed per locked decision #10 the value can exceed
+    // qty — the painel surface clamps to qty for display purposes).
+    const rowQuantidade = c.quantidade ?? 1;
     if (existing) {
       existing.ids.push(c.id);
-      existing.qty += 1;
-      if (isReserved) existing.received += 1;
+      existing.qty += rowQuantidade;
+      if (isReserved) existing.received += rowQuantidade;
     } else {
       map.set(c.nome, {
         ids: [c.id],
@@ -291,8 +306,8 @@ function groupContribuicoes(items: ContribuicaoDTO[]): GroupedGift[] {
         imageUrl,
         bgColor: deriveBgColor(c.grupo),
         chipLabel,
-        qty: 1,
-        received: isReserved ? 1 : 0,
+        qty: rowQuantidade,
+        received: isReserved ? rowQuantidade : 0,
         hasClaimed: isReserved,
         // `custom` styling (pink chip + locked semantics) is reserved for true
         // user-created items, i.e. grupo === "personalizado". Don't flag rows
@@ -1384,6 +1399,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
   const createMut = useContribuicaoCreate();
   const createBulkMut = useContribuicaoCreateBulk();
   const deleteMut = useContribuicaoDelete();
+  const updateMut = useContribuicaoUpdate();
 
   const [search, setSearch] = useState("");
   const [cat, setCat] = useState<CatFilter>("all");
@@ -1510,14 +1526,85 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
     }
   };
 
-  // Edit strategy: delete the group, then createBulk with the new shape.
-  // Safe because edits are disabled when received > 0 (no contribuinte data
-  // to preserve). One delete + one createBulk = two round-trips total, much
-  // simpler than per-id update + qty delta math.
+  // Plan 0016 / aperture-1l37i — atomic edit path with legacy fallback.
+  //
+  // The pre-1l37i flow always did delete-then-createBulk (one delete + one
+  // createBulk, but FIVE network round-trips counting React Query
+  // invalidations + refetches). That was brittle in three ways:
+  //   1. New id on every edit broke the FK from intencao_items →
+  //      contribuicao (Plan 0016 introduced the items table; the row's
+  //      stable id is now load-bearing).
+  //   2. If `delete` succeeded but `createBulk` failed, the slot was
+  //      gone with no recovery surface.
+  //   3. The 5-request cascade was visible in the operator's Network
+  //      panel + felt slow on the lista pronta scale.
+  //
+  // The fix: detect the common case (rename / re-price / re-group /
+  // image swap with qty unchanged) and route it through ONE
+  // `contribuicao.update` call. Quantidade changes still need the
+  // delete+createBulk path UNTIL Rex's engine PR (parallel work on the
+  // criar-contribuicoes-em-lote + atualizar-contribuicao engine pieces)
+  // lands. Once Rex's PR lands, the trpc layer already passes quantidade
+  // through to the use-case (zod silently drops it today; uses it after),
+  // and the painel can drop the qty-changed fallback entirely.
+  //
+  // Recovery on NOT_FOUND: when the stable id no longer exists server-
+  // side (sibling tab deleted, DB reset, etc.) the toast surfaces a
+  // calmer "essa lista mudou — atualizamos para você" message + the list
+  // refetches so the user can retry against fresh data. The pre-1l37i
+  // flow landed on a dead-end "esse mimo não existe mais" toast with no
+  // refetch.
   const saveEdit = async (draft: DraftFields) => {
     if (!editItem) return;
     const price = parseFloat(draft.price.replace(",", ".")) || 0;
     const newQty = Number(draft.qty) || 1;
+    const qtyUnchanged = newQty === editItem.qty;
+    const imagemUrl = editItem.imageUrl ?? editItem.emoji;
+
+    // Atomic-update path — qty stayed the same, so a single in-place
+    // patch covers the change. Preserves the contribuicao id (FK-safe),
+    // emits ONE Network request, and round-trips an updated row the
+    // list query naturally refetches via the mutation's onSuccess
+    // invalidation. The painel post-1l37i wire ships quantidade on the
+    // row so the operator can still see the slot's cardinality, but
+    // can't bump it via this path until Rex's engine PR lands.
+    if (qtyUnchanged && editItem.ids.length === 1) {
+      const idToUpdate = editItem.ids[0];
+      if (!idToUpdate) {
+        toast.error("Não consegui identificar esse mimo — recarrega a página ♡");
+        return;
+      }
+      try {
+        await updateMut.mutateAsync({
+          id: idToUpdate,
+          nome: draft.title,
+          valor: centsFromBRL(price),
+          imagemUrl,
+          grupo: draft.category,
+        });
+        setEditItem(null);
+        toast.success("Alterações salvas ♡");
+        return;
+      } catch (err) {
+        const error = toContribuicaoError(err);
+        // Stale-row recovery: the slot was deleted between the visitor's
+        // fetch + this edit. Invalidate so the next render reflects
+        // reality + nudge the visitor with a calmer message than the
+        // dead-end "esse mimo não existe mais" the legacy flow used.
+        if (error.kind === "not-found") {
+          void listQuery.refetch();
+          setEditItem(null);
+          toast("essa lista mudou — atualizamos para você ♡");
+          return;
+        }
+        toast.error(contribuicaoErrorMessage(error));
+        return;
+      }
+    }
+
+    // Legacy delete+createBulk path — needed today only when qty
+    // changed (or the rare multi-id legacy group). Retires after Rex's
+    // engine PR lands so `update` carries quantidade end-to-end.
     try {
       await deleteMut.mutateAsync({ ids: editItem.ids });
       await createBulkMut.mutateAsync({
@@ -1531,9 +1618,9 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
             nome: draft.title,
             valor: centsFromBRL(price),
             // aperture-intake-grxsh-followup — preserve the real product
-            // image URL (if any) on edit; fall back to whatever was in `emoji`
-            // (legacy rows used this slot for a glyph or url).
-            imagemUrl: editItem.imageUrl ?? editItem.emoji,
+            // image URL (if any) on edit; fall back to whatever was in
+            // `emoji` (legacy rows used this slot for a glyph or url).
+            imagemUrl,
             grupo: draft.category,
             quantidade: newQty,
           },
@@ -1542,7 +1629,14 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
       setEditItem(null);
       toast.success("Alterações salvas ♡");
     } catch (err) {
-      toast.error(contribuicaoErrorMessage(toContribuicaoError(err)));
+      const error = toContribuicaoError(err);
+      if (error.kind === "not-found") {
+        void listQuery.refetch();
+        setEditItem(null);
+        toast("essa lista mudou — atualizamos para você ♡");
+        return;
+      }
+      toast.error(contribuicaoErrorMessage(error));
     }
   };
 
@@ -1567,7 +1661,11 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
   }
 
   const addSubmitting = createMut.isPending || createBulkMut.isPending;
-  const editSubmitting = deleteMut.isPending || createBulkMut.isPending;
+  // Plan 0016 / aperture-1l37i: edit submission spans either the atomic
+  // update path (updateMut) or the legacy delete+createBulk path. Track
+  // both so the modal's "Salvando..." state survives whichever path runs.
+  const editSubmitting =
+    updateMut.isPending || deleteMut.isPending || createBulkMut.isPending;
   const removeSubmitting = deleteMut.isPending;
   const presetSubmitting = createBulkMut.isPending;
 
