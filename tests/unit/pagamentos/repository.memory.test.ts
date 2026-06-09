@@ -6,7 +6,7 @@ import { PagamentoJaExisteError } from '../../../src/errors/pagamentos/ja-existe
 import { PagamentoNaoEncontradoError } from '../../../src/errors/pagamentos/nao-encontrado.error.js';
 
 const idPagamento = '550e8400-e29b-41d4-a716-446655440201';
-const idIntencaoPagamento = '550e8400-e29b-41d4-a716-446655440202';
+const _idIntencaoPagamento = '550e8400-e29b-41d4-a716-446655440202';
 const idContribuicao = '550e8400-e29b-41d4-a716-446655440203';
 const criadoEm = new Date('2026-05-01T12:00:00.000Z');
 
@@ -196,9 +196,7 @@ describe('PagamentoRepositoryMemory', () => {
   it('findByChargeExternalRef — returns undefined for unknown ch_xxx (aperture-wif8s)', async () => {
     const repository = new PagamentoRepositoryMemory();
     await repository.save(makePagamento());
-    await expect(
-      repository.findByChargeExternalRef('ch_does_not_exist'),
-    ).resolves.toBeUndefined();
+    await expect(repository.findByChargeExternalRef('ch_does_not_exist')).resolves.toBeUndefined();
   });
 
   it('pi + ch refs round-trip through save/update (aperture-wif8s)', async () => {
@@ -221,11 +219,9 @@ describe('PagamentoRepositoryMemory', () => {
     expect(reloaded?.intencao.chargeExternalRef).toBe('ch_test_round_trip');
 
     // And the new lookups resolve.
-    expect(
-      (await repository.findByPaymentIntentExternalRef('pi_test_round_trip'))?.id,
-    ).toBe(pagamento.id);
-    expect((await repository.findByChargeExternalRef('ch_test_round_trip'))?.id).toBe(
+    expect((await repository.findByPaymentIntentExternalRef('pi_test_round_trip'))?.id).toBe(
       pagamento.id,
     );
+    expect((await repository.findByChargeExternalRef('ch_test_round_trip'))?.id).toBe(pagamento.id);
   });
 });

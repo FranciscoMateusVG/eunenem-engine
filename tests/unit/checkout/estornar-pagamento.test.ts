@@ -1,14 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { LivroFinanceiroRepositoryMemory } from '../../../src/adapters/pagamentos/financeiro/livro-repository.memory.js';
 import { PagamentoEventPublisherMemory } from '../../../src/adapters/pagamentos/event-publisher.memory.js';
+import { LivroFinanceiroRepositoryMemory } from '../../../src/adapters/pagamentos/financeiro/livro-repository.memory.js';
 import { PagamentoProviderFake } from '../../../src/adapters/pagamentos/provider.fake.js';
 import { PagamentoRepositoryMemory } from '../../../src/adapters/pagamentos/repository.memory.js';
-import type { LancamentoFinanceiro } from '../../../src/domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
 import {
   aprovarPagamentoPendente,
   criarPagamentoPendente,
   type Pagamento,
 } from '../../../src/domain/pagamentos/entities/pagamento.js';
+import type { LancamentoFinanceiro } from '../../../src/domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
+import { PagamentoNaoEncontradoError } from '../../../src/errors/pagamentos/nao-encontrado.error.js';
+import { PagamentoTransicaoStatusInvalidaError } from '../../../src/errors/pagamentos/transicao-status-invalida.error.js';
 import { NoopLogger } from '../../../src/observability/noop-logger.js';
 import { noopTracer } from '../../../src/observability/tracer.js';
 import {
@@ -16,8 +18,6 @@ import {
   PagamentoEstornoLancamentoJaTransferidoError,
   PagamentoEstornoRecusadoPeloProvedorError,
 } from '../../../src/use-cases/checkout/estornar-pagamento.js';
-import { PagamentoTransicaoStatusInvalidaError } from '../../../src/errors/pagamentos/transicao-status-invalida.error.js';
-import { PagamentoNaoEncontradoError } from '../../../src/errors/pagamentos/nao-encontrado.error.js';
 
 /**
  * Plan 0015 (aperture-ucgok). Tests the new estornar-pagamento use-case:

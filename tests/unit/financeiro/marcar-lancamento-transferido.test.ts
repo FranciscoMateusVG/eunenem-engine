@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { LivroFinanceiroRepositoryMemory } from '../../../src/adapters/pagamentos/financeiro/livro-repository.memory.js';
 import { PagamentoRepositoryMemory } from '../../../src/adapters/pagamentos/repository.memory.js';
-import type { LancamentoFinanceiro } from '../../../src/domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
 import type { Pagamento } from '../../../src/domain/pagamentos/entities/pagamento.js';
+import type { LancamentoFinanceiro } from '../../../src/domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
+import { FinanceiroInputInvalidoError } from '../../../src/errors/pagamentos/financeiro/input-invalido.error.js';
 import { NoopLogger } from '../../../src/observability/noop-logger.js';
 import { noopTracer } from '../../../src/observability/tracer.js';
-import { marcarLancamentoTransferido, MarcarLancamentoTransferidoBloqueadoError } from '../../../src/use-cases/pagamentos/financeiro/marcar-lancamento-transferido.js';
-import { FinanceiroInputInvalidoError } from '../../../src/errors/pagamentos/financeiro/input-invalido.error.js';
+import {
+  MarcarLancamentoTransferidoBloqueadoError,
+  marcarLancamentoTransferido,
+} from '../../../src/use-cases/pagamentos/financeiro/marcar-lancamento-transferido.js';
 
 const observability = { logger: new NoopLogger(), tracer: noopTracer() };
 
@@ -290,10 +293,7 @@ describe('marcarLancamentoTransferido — derived-liberação gate (aperture-mjg
       availableOn: new Date('2026-06-15T10:00:00Z'),
     });
     // lançamento A under pagamento A; lançamento B under pagamento B
-    await livro.saveLancamentos([
-      row(idLancA),
-      row(idLancB, { idPagamento: idOtherPagamento }),
-    ]);
+    await livro.saveLancamentos([row(idLancA), row(idLancB, { idPagamento: idOtherPagamento })]);
 
     await expect(
       marcarLancamentoTransferido(

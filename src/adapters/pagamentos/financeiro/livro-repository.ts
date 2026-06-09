@@ -113,9 +113,7 @@ export interface LivroFinanceiroRepository {
    * will pay out. Empty array if the repasse has no linked lançamentos
    * (shouldn't happen post-solicitação, but defensive).
    */
-  findLancamentosByIdRepasse(
-    idRepasse: IdRepasse,
-  ): Promise<readonly LancamentoFinanceiro[]>;
+  findLancamentosByIdRepasse(idRepasse: IdRepasse): Promise<readonly LancamentoFinanceiro[]>;
   /**
    * aperture-s03dr. Returns the set of lançamentos currently eligible
    * for inclusion in a new repasse for `idCampanha`. Eligibility is the

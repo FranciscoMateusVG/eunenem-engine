@@ -261,11 +261,8 @@ export class UsuarioRepositoryPostgres implements UsuarioRepository {
         const { sortBy, sortDir } = input;
         const dbCol = sortColumnFor(sortBy);
 
-        const hasFilter =
-          typeof input.emailPrefix === 'string' && input.emailPrefix.length > 0;
-        const pattern = hasFilter
-          ? `${escapeLikePattern(input.emailPrefix as string)}%`
-          : null;
+        const hasFilter = typeof input.emailPrefix === 'string' && input.emailPrefix.length > 0;
+        const pattern = hasFilter ? `${escapeLikePattern(input.emailPrefix as string)}%` : null;
 
         // ─── 1. Page query (limit+1 to detect "has more"). ────────────────
         let pageQb = this.db

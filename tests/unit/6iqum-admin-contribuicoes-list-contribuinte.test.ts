@@ -102,9 +102,7 @@ describe('PagamentoRepositoryMemory.findContribuintesFromLatestAprovadoPagamento
 
   it('returns null entry for aprovado pagamento with null contribuinte (anonymous)', async () => {
     const idC = randomUUID();
-    await repo.save(
-      makePagamento({ idContribuicao: idC, contribuinte: null }),
-    );
+    await repo.save(makePagamento({ idContribuicao: idC, contribuinte: null }));
 
     const map = await repo.findContribuintesFromLatestAprovadoPagamento([
       idC as unknown as IdContribuicaoPagamento,
@@ -258,10 +256,7 @@ async function buildRig(): Promise<TestRig> {
   };
 }
 
-async function seedContribuicao(
-  rig: TestRig,
-  args?: { nome?: string },
-): Promise<string> {
+async function seedContribuicao(rig: TestRig, args?: { nome?: string }): Promise<string> {
   const id = randomUUID();
   await rig.contribuicaoRepository.save({
     id: id as never,
@@ -315,9 +310,7 @@ describe('admin.contribuicoes.listByCampanha — contribuinte projection (apertu
 
   it('row.contribuinte is null for anonymous aprovado (contribuinte was null on pagamento)', async () => {
     const idC = await seedContribuicao(rig);
-    await rig.pagamentoRepository.save(
-      makePagamento({ idContribuicao: idC, contribuinte: null }),
-    );
+    await rig.pagamentoRepository.save(makePagamento({ idContribuicao: idC, contribuinte: null }));
 
     const result = await rig.caller.admin.contribuicoes.listByCampanha({
       idCampanha: rig.idCampanha,

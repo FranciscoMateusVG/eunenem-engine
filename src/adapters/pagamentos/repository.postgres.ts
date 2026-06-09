@@ -234,61 +234,55 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
   }
 
   async findByPaymentIntentExternalRef(pi: string): Promise<Pagamento | undefined> {
-    return tracer.startActiveSpan(
-      'db.pagamentos.findByPaymentIntentExternalRef',
-      async (span) => {
-        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
-        try {
-          // aperture-wif8s: uses partial index
-          // `pagamentos_intencao_pi_ref_idx ON
-          // (intencao_payment_intent_external_ref) WHERE … IS NOT NULL`
-          // (migration 018) for selective scan.
-          // biome-ignore lint/suspicious/noExplicitAny: see save()
-          const row = (await (this.db as any)
-            .selectFrom('pagamentos')
-            .selectAll()
-            .where('intencao_payment_intent_external_ref', '=', pi)
-            .executeTakeFirst()) as PagamentoRow | undefined;
-          span.setStatus({ code: SpanStatusCode.OK });
-          return row ? pagamentoFromRow(row) : undefined;
-        } catch (error: unknown) {
-          span.recordException(error as Error);
-          span.setStatus({ code: SpanStatusCode.ERROR });
-          throw error;
-        } finally {
-          span.end();
-        }
-      },
-    );
+    return tracer.startActiveSpan('db.pagamentos.findByPaymentIntentExternalRef', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        // aperture-wif8s: uses partial index
+        // `pagamentos_intencao_pi_ref_idx ON
+        // (intencao_payment_intent_external_ref) WHERE … IS NOT NULL`
+        // (migration 018) for selective scan.
+        // biome-ignore lint/suspicious/noExplicitAny: see save()
+        const row = (await (this.db as any)
+          .selectFrom('pagamentos')
+          .selectAll()
+          .where('intencao_payment_intent_external_ref', '=', pi)
+          .executeTakeFirst()) as PagamentoRow | undefined;
+        span.setStatus({ code: SpanStatusCode.OK });
+        return row ? pagamentoFromRow(row) : undefined;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
   }
 
   async findByChargeExternalRef(ch: string): Promise<Pagamento | undefined> {
-    return tracer.startActiveSpan(
-      'db.pagamentos.findByChargeExternalRef',
-      async (span) => {
-        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
-        try {
-          // aperture-wif8s: uses partial index
-          // `pagamentos_intencao_ch_ref_idx ON
-          // (intencao_charge_external_ref) WHERE … IS NOT NULL`
-          // (migration 018).
-          // biome-ignore lint/suspicious/noExplicitAny: see save()
-          const row = (await (this.db as any)
-            .selectFrom('pagamentos')
-            .selectAll()
-            .where('intencao_charge_external_ref', '=', ch)
-            .executeTakeFirst()) as PagamentoRow | undefined;
-          span.setStatus({ code: SpanStatusCode.OK });
-          return row ? pagamentoFromRow(row) : undefined;
-        } catch (error: unknown) {
-          span.recordException(error as Error);
-          span.setStatus({ code: SpanStatusCode.ERROR });
-          throw error;
-        } finally {
-          span.end();
-        }
-      },
-    );
+    return tracer.startActiveSpan('db.pagamentos.findByChargeExternalRef', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        // aperture-wif8s: uses partial index
+        // `pagamentos_intencao_ch_ref_idx ON
+        // (intencao_charge_external_ref) WHERE … IS NOT NULL`
+        // (migration 018).
+        // biome-ignore lint/suspicious/noExplicitAny: see save()
+        const row = (await (this.db as any)
+          .selectFrom('pagamentos')
+          .selectAll()
+          .where('intencao_charge_external_ref', '=', ch)
+          .executeTakeFirst()) as PagamentoRow | undefined;
+        span.setStatus({ code: SpanStatusCode.OK });
+        return row ? pagamentoFromRow(row) : undefined;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
   }
 
   async findIdsContribuicoesComPagamentoAprovado(
@@ -322,9 +316,7 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
             .where('status', '=', 'aprovado')
             .where('intencao_id_contribuicao', 'in', [...idsContribuicao])
             .execute()) as Array<{ intencao_id_contribuicao: string }>;
-          const result = rows.map(
-            (r) => r.intencao_id_contribuicao as IdContribuicaoPagamento,
-          );
+          const result = rows.map((r) => r.intencao_id_contribuicao as IdContribuicaoPagamento);
           span.setStatus({ code: SpanStatusCode.OK });
           return result;
         } catch (error: unknown) {
@@ -385,8 +377,7 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
           }>;
           for (const row of rows) {
             const hasContribuinte =
-              row.intencao_contribuinte_nome !== null &&
-              row.intencao_contribuinte_email !== null;
+              row.intencao_contribuinte_nome !== null && row.intencao_contribuinte_email !== null;
             if (!hasContribuinte) {
               result.set(row.intencao_id_contribuicao, null);
               continue;

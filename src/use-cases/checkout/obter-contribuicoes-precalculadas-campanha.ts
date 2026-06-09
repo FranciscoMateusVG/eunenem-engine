@@ -13,11 +13,11 @@ import {
   type IdPlataformaReferencia,
   IdPlataformaReferenciaSchema,
 } from '../../domain/arrecadacao/value-objects/ids.js';
-import type { IdContribuicaoPagamento } from '../../domain/pagamentos/value-objects/ids.js';
 import type {
   OpcaoContribuicao,
   TipoOpcaoContribuicao,
 } from '../../domain/arrecadacao/value-objects/opcao-contribuicao.js';
+import type { IdContribuicaoPagamento } from '../../domain/pagamentos/value-objects/ids.js';
 import { obterTarifaPorTipo } from '../../domain/taxas/entities/regra-taxa.js';
 import {
   type ComposicaoValores,

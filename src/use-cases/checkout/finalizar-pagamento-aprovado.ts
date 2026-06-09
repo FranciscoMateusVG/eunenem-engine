@@ -2,14 +2,14 @@ import { SpanStatusCode } from '@opentelemetry/api';
 import { z } from 'zod/v4';
 import type { CampanhaRepository } from '../../adapters/arrecadacao/campanha-repository.js';
 import type { ContribuicaoRepository } from '../../adapters/arrecadacao/contribuicao-repository.js';
-import type { LivroFinanceiroRepository } from '../../adapters/pagamentos/financeiro/livro-repository.js';
 import type { PagamentoEventPublisher } from '../../adapters/pagamentos/event-publisher.js';
+import type { LivroFinanceiroRepository } from '../../adapters/pagamentos/financeiro/livro-repository.js';
 import type { PagamentoProvider } from '../../adapters/pagamentos/provider.js';
 import type { PagamentoRepository } from '../../adapters/pagamentos/repository.js';
-import type { LancamentoFinanceiro } from '../../domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
 import type { Pagamento } from '../../domain/pagamentos/entities/pagamento.js';
-import { IdPagamentoSchema } from '../../domain/pagamentos/value-objects/ids.js';
+import type { LancamentoFinanceiro } from '../../domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
 import { DadosContribuinteSchema } from '../../domain/pagamentos/value-objects/dados-contribuinte.js';
+import { IdPagamentoSchema } from '../../domain/pagamentos/value-objects/ids.js';
 import { ArrecadacaoCampanhaNaoEncontradaError } from '../../errors/arrecadacao/campanha-nao-encontrada.error.js';
 import { ArrecadacaoContribuicaoNaoEncontradaError } from '../../errors/arrecadacao/contribuicao-nao-encontrada.error.js';
 import { PagamentoTransicaoStatusInvalidaError } from '../../errors/pagamentos/transicao-status-invalida.error.js';
@@ -107,7 +107,11 @@ export async function finalizarPagamentoAprovado(
       // aprovar step so the persisted Pagamento snapshot reflects both
       // the new status AND the new contribuinte in a single update().
       const existingPagamento = await pagamentoRepository.findById(parsed.idPagamento);
-      if (existingPagamento && parsed.contribuinte && existingPagamento.intencao.contribuinte === null) {
+      if (
+        existingPagamento &&
+        parsed.contribuinte &&
+        existingPagamento.intencao.contribuinte === null
+      ) {
         // Only write when (a) we have a contribuinte AND (b) the
         // pagamento doesn't already have one (preserves first-writer
         // wins on retry; matches the existing pi/ch external-ref shape).
@@ -140,11 +144,7 @@ export async function finalizarPagamentoAprovado(
         refreshed.status !== 'pendente' &&
         refreshed.status !== 'processing'
       ) {
-        throw new PagamentoTransicaoStatusInvalidaError(
-          refreshed.id,
-          refreshed.status,
-          'aprovado',
-        );
+        throw new PagamentoTransicaoStatusInvalidaError(refreshed.id, refreshed.status, 'aprovado');
       } else {
         aprovado = await aprovarPagamento(
           {

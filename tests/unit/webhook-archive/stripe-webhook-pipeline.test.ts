@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type Stripe from 'stripe';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { archiveAndDispatchStripeEvent } from '../../../src/adapters/webhook-archive/stripe-webhook-pipeline.js';
 import { WebhookEventArchiveMemory } from '../../../src/adapters/webhook-archive/webhook-event-archive.memory.js';
 

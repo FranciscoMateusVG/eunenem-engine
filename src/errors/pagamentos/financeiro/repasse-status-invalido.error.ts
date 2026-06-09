@@ -1,7 +1,5 @@
-import type {
-  IdRepasse,
-} from '../../../domain/pagamentos/financeiro/value-objects/ids.js';
 import type { StatusRepasse } from '../../../domain/pagamentos/financeiro/entities/repasse-recebedor.js';
+import type { IdRepasse } from '../../../domain/pagamentos/financeiro/value-objects/ids.js';
 
 /**
  * Raised by `aprovarRepasseRecebedor` when the target repasse is not in

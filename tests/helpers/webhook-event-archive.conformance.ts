@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { PROCESSING_ERROR_MAX_LENGTH } from '../../src/adapters/webhook-archive/webhook-event-archive.js';
 import type {
   SaveReceivedInput,
   WebhookEventArchive,
 } from '../../src/adapters/webhook-archive/webhook-event-archive.js';
+import { PROCESSING_ERROR_MAX_LENGTH } from '../../src/adapters/webhook-archive/webhook-event-archive.js';
 
 interface ConformanceOptions {
   readonly factory: () => WebhookEventArchive | Promise<WebhookEventArchive>;
@@ -281,7 +281,7 @@ export function describeWebhookEventArchiveConformance(name: string, options: Co
       expect(found).toHaveLength(2);
     });
 
-    it('findByPagamentoId scopes to the requested pagamento — other pagamentos\' events do not leak (aperture-2sp6m)', async () => {
+    it("findByPagamentoId scopes to the requested pagamento — other pagamentos' events do not leak (aperture-2sp6m)", async () => {
       const pagA = randomUUID();
       const pagB = randomUUID();
       const idA1 = await seedEventLinkedToPagamento(pagA);

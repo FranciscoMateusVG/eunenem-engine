@@ -201,11 +201,9 @@ export class WebhookEventArchiveMemory implements WebhookEventArchive {
           for (const [id, row] of this.rows.entries()) {
             if (row.pagamentoId !== null) continue;
             const obj = readObjectFromPayload(row.rawPayload);
-            const matchesPi =
-              typeof obj?.id === 'string' && obj.id === paymentIntentId;
+            const matchesPi = typeof obj?.id === 'string' && obj.id === paymentIntentId;
             const matchesPiRef =
-              typeof obj?.payment_intent === 'string' &&
-              obj.payment_intent === paymentIntentId;
+              typeof obj?.payment_intent === 'string' && obj.payment_intent === paymentIntentId;
             if (matchesPi || matchesPiRef) {
               this.rows.set(id, { ...row, pagamentoId });
               updated += 1;
@@ -229,37 +227,32 @@ export class WebhookEventArchiveMemory implements WebhookEventArchive {
     idPagamento: string,
     options?: FindByPagamentoIdOptions,
   ): Promise<readonly WebhookEventRecord[]> {
-    return tracer.startActiveSpan(
-      'db.payment_webhook_events.findByPagamentoId',
-      async (span) => {
-        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
-        try {
-          // aperture-2sp6m: filter by pagamento_id. Orphan rows
-          // (pagamento_id === null) excluded by the strict-equality
-          // match; matches the postgres adapter's WHERE pagamento_id = $1
-          // semantics (NULL never satisfies the equality).
-          const orderBy = options?.orderBy ?? 'received_at_asc';
-          const limit = options?.limit;
-          const filtered = [...this.rows.values()].filter(
-            (r) => r.pagamentoId === idPagamento,
-          );
-          filtered.sort((a, b) => {
-            const dt = a.receivedAt.getTime() - b.receivedAt.getTime();
-            return orderBy === 'received_at_desc' ? -dt : dt;
-          });
-          const result =
-            typeof limit === 'number' && limit >= 0 ? filtered.slice(0, limit) : filtered;
-          span.setStatus({ code: SpanStatusCode.OK });
-          return result;
-        } catch (error: unknown) {
-          span.recordException(error as Error);
-          span.setStatus({ code: SpanStatusCode.ERROR });
-          throw error;
-        } finally {
-          span.end();
-        }
-      },
-    );
+    return tracer.startActiveSpan('db.payment_webhook_events.findByPagamentoId', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        // aperture-2sp6m: filter by pagamento_id. Orphan rows
+        // (pagamento_id === null) excluded by the strict-equality
+        // match; matches the postgres adapter's WHERE pagamento_id = $1
+        // semantics (NULL never satisfies the equality).
+        const orderBy = options?.orderBy ?? 'received_at_asc';
+        const limit = options?.limit;
+        const filtered = [...this.rows.values()].filter((r) => r.pagamentoId === idPagamento);
+        filtered.sort((a, b) => {
+          const dt = a.receivedAt.getTime() - b.receivedAt.getTime();
+          return orderBy === 'received_at_desc' ? -dt : dt;
+        });
+        const result =
+          typeof limit === 'number' && limit >= 0 ? filtered.slice(0, limit) : filtered;
+        span.setStatus({ code: SpanStatusCode.OK });
+        return result;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
   }
 }
 

@@ -22,10 +22,10 @@ import { MetodoPagamentoSchema } from '../../domain/pagamentos/value-objects/met
 import { ArrecadacaoCampanhaNaoEncontradaError } from '../../errors/arrecadacao/campanha-nao-encontrada.error.js';
 import { ArrecadacaoContribuicaoIndisponivelError } from '../../errors/arrecadacao/contribuicao-indisponivel.error.js';
 import { ArrecadacaoContribuicaoNaoEncontradaError } from '../../errors/arrecadacao/contribuicao-nao-encontrada.error.js';
-import { contribuicaoEstaIndisponivel } from '../arrecadacao/contribuicao-esta-indisponivel.js';
 import { ArrecadacaoOpcaoContribuicaoNaoEncontradaError } from '../../errors/arrecadacao/opcao-contribuicao-nao-encontrada.error.js';
 import { CheckoutPlataformaMismatchError } from '../../errors/checkout/plataforma-mismatch.error.js';
 import type { Observability } from '../../observability/observability.js';
+import { contribuicaoEstaIndisponivel } from '../arrecadacao/contribuicao-esta-indisponivel.js';
 import { criarIntencaoPagamento } from '../pagamentos/criar-intencao-pagamento.js';
 import { calcularComposicaoValores } from '../taxas/calcular-composicao-valores.js';
 

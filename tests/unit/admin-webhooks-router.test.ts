@@ -31,7 +31,6 @@ import {
   ID_PLATAFORMA_EUNENEM,
 } from '../../src/adapters/plataforma/repository.memory.js';
 import { WebhookEventArchiveMemory } from '../../src/adapters/webhook-archive/webhook-event-archive.memory.js';
-import { criarCampanha } from '../../src/use-cases/arrecadacao/criar-campanha.js';
 import { NoopLogger } from '../../src/observability/noop-logger.js';
 import type { Observability } from '../../src/observability/observability.js';
 import { noopTracer } from '../../src/observability/tracer.js';

@@ -6,6 +6,8 @@ import {
   LancamentoFinanceiroSchema,
 } from '../../../domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
 import {
+  aprovarRepasse,
+  criarRepasseRecebedorSolicitado,
   type RepasseRecebedor,
   RepasseRecebedorSchema,
 } from '../../../domain/pagamentos/financeiro/entities/repasse-recebedor.js';
@@ -19,7 +21,6 @@ import { FinanceiroPagamentoJaRegistradoError } from '../../../errors/pagamentos
 import { FinanceiroRepasseJaPendenteError } from '../../../errors/pagamentos/financeiro/repasse-ja-pendente.error.js';
 import { FinanceiroRepasseNaoEncontradoError } from '../../../errors/pagamentos/financeiro/repasse-nao-encontrado.error.js';
 import { FinanceiroRepasseStatusInvalidoError } from '../../../errors/pagamentos/financeiro/repasse-status-invalido.error.js';
-import { aprovarRepasse, criarRepasseRecebedorSolicitado } from '../../../domain/pagamentos/financeiro/entities/repasse-recebedor.js';
 import type { RecebedorRepository } from '../../arrecadacao/recebedor-repository.js';
 import type { Database } from '../../database.js';
 import type { LivroFinanceiroRepository } from './livro-repository.js';
@@ -178,37 +179,34 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
   async findLancamentosByIds(
     ids: readonly IdLancamentoFinanceiro[],
   ): Promise<readonly LancamentoFinanceiro[]> {
-    return tracer.startActiveSpan(
-      'db.financeiro_livro.lancamentos.findByIds',
-      async (span) => {
-        span.setAttributes({
-          ...DB_ATTRS,
-          'db.operation.name': 'SELECT',
-          'batch.size': ids.length,
-        });
-        try {
-          if (ids.length === 0) {
-            span.setStatus({ code: SpanStatusCode.OK });
-            return [];
-          }
-          // biome-ignore lint/suspicious/noExplicitAny: see saveLancamentos
-          const rows = (await (this.db as any)
-            .selectFrom('lancamentos_financeiros')
-            .selectAll()
-            .where('id', 'in', [...ids])
-            .execute()) as LancamentoRow[];
-          const result = rows.map(lancamentoFromRow);
+    return tracer.startActiveSpan('db.financeiro_livro.lancamentos.findByIds', async (span) => {
+      span.setAttributes({
+        ...DB_ATTRS,
+        'db.operation.name': 'SELECT',
+        'batch.size': ids.length,
+      });
+      try {
+        if (ids.length === 0) {
           span.setStatus({ code: SpanStatusCode.OK });
-          return result;
-        } catch (error: unknown) {
-          span.recordException(error as Error);
-          span.setStatus({ code: SpanStatusCode.ERROR });
-          throw error;
-        } finally {
-          span.end();
+          return [];
         }
-      },
-    );
+        // biome-ignore lint/suspicious/noExplicitAny: see saveLancamentos
+        const rows = (await (this.db as any)
+          .selectFrom('lancamentos_financeiros')
+          .selectAll()
+          .where('id', 'in', [...ids])
+          .execute()) as LancamentoRow[];
+        const result = rows.map(lancamentoFromRow);
+        span.setStatus({ code: SpanStatusCode.OK });
+        return result;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
   }
 
   async findLancamentosByIdCampanha(
@@ -474,9 +472,7 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
         const totalCount = Number(totalRow.cnt);
 
         // biome-ignore lint/suspicious/noExplicitAny: see saveLancamentos
-        let pageQuery = (this.db as any)
-          .selectFrom('repasses_recebedor')
-          .selectAll();
+        let pageQuery = (this.db as any).selectFrom('repasses_recebedor').selectAll();
         if (input.statusFilter !== 'all') {
           pageQuery = pageQuery.where('status', '=', input.statusFilter);
         }
@@ -505,9 +501,7 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
         const repasses = pageRows.map(repasseFromRow);
         const last = pageRows[pageRows.length - 1];
         const nextCursor =
-          hasMore && last !== undefined
-            ? `${last.solicitado_em.getTime()}:${last.id}`
-            : null;
+          hasMore && last !== undefined ? `${last.solicitado_em.getTime()}:${last.id}` : null;
 
         span.setStatus({ code: SpanStatusCode.OK });
         return { repasses, nextCursor, totalCount };
@@ -526,9 +520,7 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
    * Uses the partial index `lancamentos_financeiros_id_repasse_idx`
    * (migration 021).
    */
-  async findLancamentosByIdRepasse(
-    idRepasse: IdRepasse,
-  ): Promise<readonly LancamentoFinanceiro[]> {
+  async findLancamentosByIdRepasse(idRepasse: IdRepasse): Promise<readonly LancamentoFinanceiro[]> {
     return tracer.startActiveSpan(
       'db.financeiro_livro.lancamentos.findByIdRepasse',
       async (span) => {
@@ -658,10 +650,7 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
               input.solicitadoEm,
             );
 
-            await tx
-              .insertInto('repasses_recebedor')
-              .values(rowFromRepasse(repasse))
-              .execute();
+            await tx.insertInto('repasses_recebedor').values(rowFromRepasse(repasse)).execute();
 
             // 3. Stamp id_repasse on the claimed rows.
             const idsLancamentosClaimados = claimed.map((l) => l.id);

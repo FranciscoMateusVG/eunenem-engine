@@ -111,32 +111,29 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
   async findLancamentosByIds(
     ids: readonly IdLancamentoFinanceiro[],
   ): Promise<readonly LancamentoFinanceiro[]> {
-    return tracer.startActiveSpan(
-      'db.financeiro_livro.lancamentos.findByIds',
-      async (span) => {
-        span.setAttributes({
-          ...DB_ATTRS,
-          'db.operation.name': 'SELECT',
-          'batch.size': ids.length,
-        });
-        try {
-          if (ids.length === 0) {
-            span.setStatus({ code: SpanStatusCode.OK });
-            return [];
-          }
-          const set = new Set(ids);
-          const result = [...this.lancamentos.values()].filter((l) => set.has(l.id));
+    return tracer.startActiveSpan('db.financeiro_livro.lancamentos.findByIds', async (span) => {
+      span.setAttributes({
+        ...DB_ATTRS,
+        'db.operation.name': 'SELECT',
+        'batch.size': ids.length,
+      });
+      try {
+        if (ids.length === 0) {
           span.setStatus({ code: SpanStatusCode.OK });
-          return result;
-        } catch (error: unknown) {
-          span.recordException(error as Error);
-          span.setStatus({ code: SpanStatusCode.ERROR });
-          throw error;
-        } finally {
-          span.end();
+          return [];
         }
-      },
-    );
+        const set = new Set(ids);
+        const result = [...this.lancamentos.values()].filter((l) => set.has(l.id));
+        span.setStatus({ code: SpanStatusCode.OK });
+        return result;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
   }
 
   async findLancamentosByIdCampanha(
@@ -369,9 +366,7 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
   /**
    * aperture-riywh. Lançamentos linked to a single repasse (drill-down).
    */
-  async findLancamentosByIdRepasse(
-    idRepasse: IdRepasse,
-  ): Promise<readonly LancamentoFinanceiro[]> {
+  async findLancamentosByIdRepasse(idRepasse: IdRepasse): Promise<readonly LancamentoFinanceiro[]> {
     return tracer.startActiveSpan(
       'db.financeiro_livro.lancamentos.findByIdRepasse',
       async (span) => {

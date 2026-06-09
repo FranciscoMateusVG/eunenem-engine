@@ -58,8 +58,7 @@ function makePagamento(args: {
       externalRef: null,
       paymentIntentExternalRef: null,
       chargeExternalRef: null,
-      balanceTransactionAvailableOn:
-        args.availableOn === undefined ? FAKE_NOW : args.availableOn,
+      balanceTransactionAvailableOn: args.availableOn === undefined ? FAKE_NOW : args.availableOn,
       contribuinte:
         args.contribuinteNome === null || args.contribuinteNome === undefined
           ? null
@@ -83,10 +82,7 @@ function makeLancamento(args: {
   idContribuicao: string;
   idCampanha: string;
   amountCents?: number;
-  tipo?:
-    | 'credito_saldo_recebedor'
-    | 'credito_receita_plataforma'
-    | 'credito_passthrough_surcharge';
+  tipo?: 'credito_saldo_recebedor' | 'credito_receita_plataforma' | 'credito_passthrough_surcharge';
   transferidoEm?: Date | null;
   canceladoEm?: Date | null;
   idRepasse?: string | null;
@@ -797,9 +793,7 @@ describe('recebedor.extrato.list — contribuicaoNome + contribuicaoImagemUrl (a
     } as never);
 
     const idPag = randomUUID();
-    await rig.pagamentoRepository.save(
-      makePagamento({ id: idPag, idContribuicao: idC }),
-    );
+    await rig.pagamentoRepository.save(makePagamento({ id: idPag, idContribuicao: idC }));
     await rig.livroFinanceiroRepository.saveLancamentos([
       makeLancamento({
         idPagamento: idPag,

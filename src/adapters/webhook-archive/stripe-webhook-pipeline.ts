@@ -98,7 +98,6 @@ export async function archiveAndDispatchStripeEvent(
   args: StripePipelineArgs,
 ): Promise<StripePipelineResult> {
   // ─── 1. Parse JSON to extract event.id + event.type ─────────────────
-  let preview: { id: string; type: string };
   let parsedPayload: unknown;
   try {
     parsedPayload = JSON.parse(args.rawBody);
@@ -114,7 +113,7 @@ export async function archiveAndDispatchStripeEvent(
     return { status: 400, body: 'invalid event shape', outcome: 'malformed_body' };
   }
   const obj = parsedPayload as { id: string; type: string };
-  preview = { id: obj.id, type: obj.type };
+  const preview = { id: obj.id, type: obj.type };
 
   // ─── 2. Verify signature (result determines signatureValid) ─────────
   let verifiedEvent: Stripe.Event | null = null;

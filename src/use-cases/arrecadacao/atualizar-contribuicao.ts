@@ -28,7 +28,7 @@ import type { Observability } from '../../observability/observability.js';
  * campanha — fecha o cross-tenant write surface explicitamente, na camada
  * de domínio (procedure fica thin).
  *
-**Plan 0015 (aperture-ucgok):** o guard `contribuicaoDisponivel` foi
+ **Plan 0015 (aperture-ucgok):** o guard `contribuicaoDisponivel` foi
  * removido. Sem status na contribuição, o admin pode editar a qualquer
  * momento. Uma slot com pagamento aprovado pode ter nome/valor editados;
  * o snapshot do pagamento existente preserva o valor que o contribuinte

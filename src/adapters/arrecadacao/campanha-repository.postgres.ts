@@ -436,11 +436,7 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
           const idRows = (await (executor as any)
             .selectFrom('campanhas')
             .innerJoin('contribuicoes', 'contribuicoes.campanha_id', 'campanhas.id')
-            .innerJoin(
-              'pagamentos',
-              'pagamentos.intencao_id_contribuicao',
-              'contribuicoes.id',
-            )
+            .innerJoin('pagamentos', 'pagamentos.intencao_id_contribuicao', 'contribuicoes.id')
             .select('campanhas.id')
             .distinct()
             .where('campanhas.id_plataforma', '=', idPlataforma)

@@ -91,7 +91,7 @@ describe('Migration round-trip', () => {
     // definition via pg_get_constraintdef.
     const tipoConstraint = (await db
       .selectFrom('pg_constraint' as never)
-      .select((eb) => [
+      .select((_eb) => [
         // biome-ignore lint/suspicious/noExplicitAny: pg_constraint not in DB types
         sql<string>`pg_get_constraintdef(oid)`.as('def') as any,
       ])
@@ -126,9 +126,7 @@ describe('Migration round-trip', () => {
       .where('schemaname' as never, '=', 'public' as never)
       .where('tablename' as never, '=', 'lancamentos_financeiros' as never)
       .execute();
-    const lancamentoIdxNames = lancamentoIndexes.map(
-      (i: Record<string, unknown>) => i.indexname,
-    );
+    const lancamentoIdxNames = lancamentoIndexes.map((i: Record<string, unknown>) => i.indexname);
     expect(lancamentoIdxNames).toContain('lancamentos_pendentes_maturos_idx');
 
     // aperture-wif8s added intencao_payment_intent_external_ref +
@@ -157,9 +155,7 @@ describe('Migration round-trip', () => {
       .where('schemaname' as never, '=', 'public' as never)
       .where('tablename' as never, '=', 'pagamentos' as never)
       .execute();
-    const pagamentoIdxNames = pagamentoIndexes.map(
-      (i: Record<string, unknown>) => i.indexname,
-    );
+    const pagamentoIdxNames = pagamentoIndexes.map((i: Record<string, unknown>) => i.indexname);
     expect(pagamentoIdxNames).toContain('pagamentos_intencao_pi_ref_idx');
     expect(pagamentoIdxNames).toContain('pagamentos_intencao_ch_ref_idx');
 
@@ -214,7 +210,7 @@ describe('Migration round-trip', () => {
     // After down on 015, the constraint is back to the 2-literal enum.
     const tipoConstraintAfterDown = (await db
       .selectFrom('pg_constraint' as never)
-      .select((eb) => [
+      .select((_eb) => [
         // biome-ignore lint/suspicious/noExplicitAny: same
         sql<string>`pg_get_constraintdef(oid)`.as('def') as any,
       ])

@@ -21,15 +21,15 @@
  */
 import { randomUUID } from 'node:crypto';
 import { trace } from '@opentelemetry/api';
-import { beforeEach, describe, expect, it } from 'vitest';
 import type Stripe from 'stripe';
+import { beforeEach, describe, expect, it } from 'vitest';
 import type { ServerDeps } from '../../apps/eunenem-server/server/auth/setup.js';
 import { dispatchVerifiedStripeEvent } from '../../apps/eunenem-server/server/webhooks/stripe-webhook.ts';
 import { CampanhaRepositoryMemory } from '../../src/adapters/arrecadacao/campanha-repository.memory.js';
 import { ContribuicaoRepositoryMemory } from '../../src/adapters/arrecadacao/contribuicao-repository.memory.js';
 import { RecebedorRepositoryMemory } from '../../src/adapters/arrecadacao/recebedor-repository.memory.js';
-import { LivroFinanceiroRepositoryMemory } from '../../src/adapters/pagamentos/financeiro/livro-repository.memory.js';
 import { PagamentoEventPublisherMemory } from '../../src/adapters/pagamentos/event-publisher.memory.js';
+import { LivroFinanceiroRepositoryMemory } from '../../src/adapters/pagamentos/financeiro/livro-repository.memory.js';
 import { PagamentoProviderFake } from '../../src/adapters/pagamentos/provider.fake.js';
 import { PagamentoRepositoryMemory } from '../../src/adapters/pagamentos/repository.memory.js';
 import { WebhookEventArchiveMemory } from '../../src/adapters/webhook-archive/webhook-event-archive.memory.js';
@@ -213,9 +213,7 @@ async function seedLancamentos(
       tipo: 'credito_saldo_recebedor',
       amountCents: 4500,
       criadoEm: new Date('2026-06-03T12:00:00.000Z'),
-      transferidoEm: options?.recebedorTransferido
-        ? new Date('2026-06-03T13:00:00.000Z')
-        : null,
+      transferidoEm: options?.recebedorTransferido ? new Date('2026-06-03T13:00:00.000Z') : null,
       canceladoEm: null,
     } as never,
     {
@@ -695,9 +693,9 @@ describe('Phase 3 dispatcher: charge.refunded — FULL', () => {
       amount: 4949,
       amount_refunded: 4949,
     });
-    await expect(
-      dispatchVerifiedStripeEvent(rig.deps, noopSpan, event),
-    ).rejects.toThrow(/Estorno bloqueado/);
+    await expect(dispatchVerifiedStripeEvent(rig.deps, noopSpan, event)).rejects.toThrow(
+      /Estorno bloqueado/,
+    );
 
     // Pagamento stays aprovado (no partial transition).
     const updated = await rig.pagamentoRepository.findById(ids.idPagamento as never);

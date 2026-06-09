@@ -81,10 +81,7 @@ function makeLancamento(args: {
   idPagamento: string;
   idContribuicao: string;
   idCampanha?: string;
-  tipo?:
-    | 'credito_saldo_recebedor'
-    | 'credito_receita_plataforma'
-    | 'credito_passthrough_surcharge';
+  tipo?: 'credito_saldo_recebedor' | 'credito_receita_plataforma' | 'credito_passthrough_surcharge';
   amountCents?: number;
   transferidoEm?: Date | null;
   canceladoEm?: Date | null;
@@ -336,9 +333,11 @@ describe('admin.pagamentos.listByContribuicao — nested lancamentos (aperture-a
     const idCampanhaEucasei = randomUUID();
     const idContribEucasei = randomUUID();
     const idPagamentoEucasei = randomUUID();
-    await (rig as TestRig & {
-      deps?: { campanhaRepository: CampanhaRepositoryMemory };
-    }).pagamentoRepository.save(
+    await (
+      rig as TestRig & {
+        deps?: { campanhaRepository: CampanhaRepositoryMemory };
+      }
+    ).pagamentoRepository.save(
       makePagamento({ id: idPagamentoEucasei, idContribuicao: idContribEucasei }),
     );
 

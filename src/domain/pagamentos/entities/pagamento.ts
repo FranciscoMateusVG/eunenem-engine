@@ -232,10 +232,7 @@ export function podeRejeitarPagamento(pagamento: Pagamento): boolean {
  * throws — webhooks fire out of order and we want loud failures, not
  * silent corruption.
  */
-export function iniciarProcessamentoPagamento(
-  pagamento: Pagamento,
-  atualizadoEm: Date,
-): Pagamento {
+export function iniciarProcessamentoPagamento(pagamento: Pagamento, atualizadoEm: Date): Pagamento {
   if (pagamento.status === 'processing') {
     return pagamento;
   }
@@ -317,10 +314,7 @@ export function rejeitarPagamentoPendente(
  * the financeiro module that the entity doesn't have access to. The
  * entity only validates the state transition itself.
  */
-export function estornarPagamentoAprovado(
-  pagamento: Pagamento,
-  atualizadoEm: Date,
-): Pagamento {
+export function estornarPagamentoAprovado(pagamento: Pagamento, atualizadoEm: Date): Pagamento {
   if (pagamento.status !== 'aprovado') {
     throw new Error(
       `Pagamento "${pagamento.id}" nao pode ser estornado a partir do status "${pagamento.status}". Apenas pagamentos aprovados podem ser estornados.`,

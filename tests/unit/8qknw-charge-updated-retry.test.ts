@@ -25,15 +25,15 @@
 
 import { randomUUID } from 'node:crypto';
 import { trace } from '@opentelemetry/api';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type Stripe from 'stripe';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ServerDeps } from '../../apps/eunenem-server/server/auth/setup.js';
 import { dispatchVerifiedStripeEvent } from '../../apps/eunenem-server/server/webhooks/stripe-webhook.ts';
 import { CampanhaRepositoryMemory } from '../../src/adapters/arrecadacao/campanha-repository.memory.js';
 import { ContribuicaoRepositoryMemory } from '../../src/adapters/arrecadacao/contribuicao-repository.memory.js';
 import { RecebedorRepositoryMemory } from '../../src/adapters/arrecadacao/recebedor-repository.memory.js';
-import { LivroFinanceiroRepositoryMemory } from '../../src/adapters/pagamentos/financeiro/livro-repository.memory.js';
 import { PagamentoEventPublisherMemory } from '../../src/adapters/pagamentos/event-publisher.memory.js';
+import { LivroFinanceiroRepositoryMemory } from '../../src/adapters/pagamentos/financeiro/livro-repository.memory.js';
 import { PagamentoProviderFake } from '../../src/adapters/pagamentos/provider.fake.js';
 import { PagamentoRepositoryMemory } from '../../src/adapters/pagamentos/repository.memory.js';
 import { WebhookEventArchiveMemory } from '../../src/adapters/webhook-archive/webhook-event-archive.memory.js';
@@ -49,9 +49,7 @@ interface TestRig {
   provider: PagamentoProviderFake;
 }
 
-function buildRig(overrides?: {
-  statusBalanceTransaction?: 'known' | 'unknown';
-}): TestRig {
+function buildRig(overrides?: { statusBalanceTransaction?: 'known' | 'unknown' }): TestRig {
   const observability = { logger: new NoopLogger(), tracer: noopTracer() };
   const pagamentoRepository = new PagamentoRepositoryMemory();
   const recebedorRepository = new RecebedorRepositoryMemory();
@@ -253,11 +251,7 @@ describe('charge.updated retry — available_on resolution (aperture-8qknw)', ()
       availableOn: null,
     });
 
-    await dispatchVerifiedStripeEvent(
-      rig.deps,
-      noopSpan,
-      makeChargeUpdatedEvent(chFromEvent, pi),
-    );
+    await dispatchVerifiedStripeEvent(rig.deps, noopSpan, makeChargeUpdatedEvent(chFromEvent, pi));
 
     const updated = await rig.pagamentoRepository.findById(idPagamento as never);
     expect(updated?.intencao.chargeExternalRef).toBe(chFromEvent);

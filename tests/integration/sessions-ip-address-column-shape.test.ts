@@ -171,10 +171,7 @@ describe('sessions.ip_address column shape (aperture-vcen4 regression pin)', () 
 
   it('round-trip: persisted hash reads back byte-identical (no truncation/encoding loss)', async () => {
     const userId = await seedUser();
-    const hashed = hashClientPII(
-      '203.0.113.45',
-      'prod-grade-salt-thirty-two-chars-aaaaaaaaaaaaaa',
-    );
+    const hashed = hashClientPII('203.0.113.45', 'prod-grade-salt-thirty-two-chars-aaaaaaaaaaaaaa');
     await insertSessionWithIp(userId, hashed);
     const row = await testDb.db
       .selectFrom('sessions')

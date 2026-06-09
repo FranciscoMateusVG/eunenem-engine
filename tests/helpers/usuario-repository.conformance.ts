@@ -226,9 +226,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
     });
 
     it('findUsuarioByConta returns undefined when idConta does not exist (aperture-lp9cw)', async () => {
-      expect(
-        await repo.findUsuarioByConta(randomUUID(), ID_PLATAFORMA_EUNENEM),
-      ).toBeUndefined();
+      expect(await repo.findUsuarioByConta(randomUUID(), ID_PLATAFORMA_EUNENEM)).toBeUndefined();
     });
 
     it('findUsuarioByConta returns undefined when the resolved Usuario is on a different plataforma (aperture-lp9cw)', async () => {
@@ -637,9 +635,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
         sortBy: 'email',
         sortDir: 'asc',
       });
-      expect(page1.usuarios.map((u) => u.email)).toEqual(
-        rows.slice(0, 3).map((r) => r.email),
-      );
+      expect(page1.usuarios.map((u) => u.email)).toEqual(rows.slice(0, 3).map((r) => r.email));
       expect(page1.nextCursor).not.toBeNull();
       expect(page1.totalCount).toBe(7);
 
@@ -649,9 +645,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
         sortBy: 'email',
         sortDir: 'asc',
       });
-      expect(page2.usuarios.map((u) => u.email)).toEqual(
-        rows.slice(3, 6).map((r) => r.email),
-      );
+      expect(page2.usuarios.map((u) => u.email)).toEqual(rows.slice(3, 6).map((r) => r.email));
       expect(page2.nextCursor).not.toBeNull();
 
       const page3 = await repo.findUsuariosPaginated(ID_PLATAFORMA_EUNENEM, {
@@ -726,10 +720,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
         emailPrefix: 'mari',
       });
       expect(page1.totalCount).toBe(4);
-      expect(page1.usuarios.map((u) => u.email)).toEqual([
-        mariRows[0]?.email,
-        mariRows[1]?.email,
-      ]);
+      expect(page1.usuarios.map((u) => u.email)).toEqual([mariRows[0]?.email, mariRows[1]?.email]);
 
       const page2 = await repo.findUsuariosPaginated(ID_PLATAFORMA_EUNENEM, {
         cursor: page1.nextCursor,
@@ -738,10 +729,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
         sortDir: 'asc',
         emailPrefix: 'mari',
       });
-      expect(page2.usuarios.map((u) => u.email)).toEqual([
-        mariRows[2]?.email,
-        mariRows[3]?.email,
-      ]);
+      expect(page2.usuarios.map((u) => u.email)).toEqual([mariRows[2]?.email, mariRows[3]?.email]);
       expect(page2.nextCursor).toBeNull();
     });
 

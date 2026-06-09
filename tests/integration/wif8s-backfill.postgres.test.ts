@@ -168,26 +168,30 @@ describe('migration 018 backfill (aperture-wif8s)', () => {
 
     // First pass populates both columns.
     await runBackfillPasses();
-    const first = (await sql<{
-      intencao_payment_intent_external_ref: string | null;
-      intencao_charge_external_ref: string | null;
-    }>`
+    const first = (
+      await sql<{
+        intencao_payment_intent_external_ref: string | null;
+        intencao_charge_external_ref: string | null;
+      }>`
       SELECT intencao_payment_intent_external_ref, intencao_charge_external_ref
         FROM pagamentos WHERE id = ${pagId}
-    `.execute(testDb.db)).rows[0];
+    `.execute(testDb.db)
+    ).rows[0];
     expect(first?.intencao_payment_intent_external_ref).toBe(pi);
     expect(first?.intencao_charge_external_ref).toBe(ch);
 
     // Re-run: idempotent — WHERE clauses gate on IS NULL so the rows
     // stay byte-identical.
     await runBackfillPasses();
-    const second = (await sql<{
-      intencao_payment_intent_external_ref: string | null;
-      intencao_charge_external_ref: string | null;
-    }>`
+    const second = (
+      await sql<{
+        intencao_payment_intent_external_ref: string | null;
+        intencao_charge_external_ref: string | null;
+      }>`
       SELECT intencao_payment_intent_external_ref, intencao_charge_external_ref
         FROM pagamentos WHERE id = ${pagId}
-    `.execute(testDb.db)).rows[0];
+    `.execute(testDb.db)
+    ).rows[0];
     expect(second?.intencao_payment_intent_external_ref).toBe(pi);
     expect(second?.intencao_charge_external_ref).toBe(ch);
   });
@@ -230,19 +234,25 @@ describe('migration 018 backfill (aperture-wif8s)', () => {
 
     await runBackfillPasses();
 
-    const linkedPi = (await sql<{ pagamento_id: string | null }>`
+    const linkedPi = (
+      await sql<{ pagamento_id: string | null }>`
       SELECT pagamento_id FROM payment_webhook_events WHERE id = ${resolvablePiEvent}
-    `.execute(testDb.db)).rows[0];
+    `.execute(testDb.db)
+    ).rows[0];
     expect(linkedPi?.pagamento_id).toBe(pagId);
 
-    const linkedCh = (await sql<{ pagamento_id: string | null }>`
+    const linkedCh = (
+      await sql<{ pagamento_id: string | null }>`
       SELECT pagamento_id FROM payment_webhook_events WHERE id = ${resolvableChEvent}
-    `.execute(testDb.db)).rows[0];
+    `.execute(testDb.db)
+    ).rows[0];
     expect(linkedCh?.pagamento_id).toBe(pagId);
 
-    const stillOrphan = (await sql<{ pagamento_id: string | null }>`
+    const stillOrphan = (
+      await sql<{ pagamento_id: string | null }>`
       SELECT pagamento_id FROM payment_webhook_events WHERE id = ${trulyOrphan}
-    `.execute(testDb.db)).rows[0];
+    `.execute(testDb.db)
+    ).rows[0];
     expect(stillOrphan?.pagamento_id).toBeNull();
   });
 
@@ -294,13 +304,15 @@ describe('migration 018 backfill (aperture-wif8s)', () => {
     await runBackfillPasses();
 
     // Pagamento now carries pi + ch refs.
-    const pag = (await sql<{
-      intencao_payment_intent_external_ref: string | null;
-      intencao_charge_external_ref: string | null;
-    }>`
+    const pag = (
+      await sql<{
+        intencao_payment_intent_external_ref: string | null;
+        intencao_charge_external_ref: string | null;
+      }>`
       SELECT intencao_payment_intent_external_ref, intencao_charge_external_ref
         FROM pagamentos WHERE id = ${pagId}
-    `.execute(testDb.db)).rows[0];
+    `.execute(testDb.db)
+    ).rows[0];
     expect(pag?.intencao_payment_intent_external_ref).toBe(pi);
     expect(pag?.intencao_charge_external_ref).toBe(ch);
 
@@ -328,18 +340,22 @@ describe('migration 018 backfill (aperture-wif8s)', () => {
       });
     }
 
-    const piExplain = (await sql<{ 'QUERY PLAN': string }>`
+    const piExplain = (
+      await sql<{ 'QUERY PLAN': string }>`
       EXPLAIN SELECT id FROM pagamentos
         WHERE intencao_payment_intent_external_ref = ${pi}
-    `.execute(testDb.db)).rows
+    `.execute(testDb.db)
+    ).rows
       .map((r) => r['QUERY PLAN'])
       .join('\n');
     expect(piExplain).toMatch(/pagamentos_intencao_pi_ref_idx/);
 
-    const chExplain = (await sql<{ 'QUERY PLAN': string }>`
+    const chExplain = (
+      await sql<{ 'QUERY PLAN': string }>`
       EXPLAIN SELECT id FROM pagamentos
         WHERE intencao_charge_external_ref = ${ch}
-    `.execute(testDb.db)).rows
+    `.execute(testDb.db)
+    ).rows
       .map((r) => r['QUERY PLAN'])
       .join('\n');
     expect(chExplain).toMatch(/pagamentos_intencao_ch_ref_idx/);

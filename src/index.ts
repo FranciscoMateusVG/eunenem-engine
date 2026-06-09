@@ -18,27 +18,6 @@ export type { EventoRepository } from './adapters/evento/evento-repository.js';
 export { EventoRepositoryMemory } from './adapters/evento/evento-repository.memory.js';
 export type { ListaDeConvidadosRepository } from './adapters/evento/lista-de-convidados-repository.js';
 export { ListaDeConvidadosRepositoryMemory } from './adapters/evento/lista-de-convidados-repository.memory.js';
-export type { LivroFinanceiroRepository } from './adapters/pagamentos/financeiro/livro-repository.js';
-export { LivroFinanceiroRepositoryMemory } from './adapters/pagamentos/financeiro/livro-repository.memory.js';
-export { LivroFinanceiroRepositoryPostgres } from './adapters/pagamentos/financeiro/livro-repository.postgres.js';
-// aperture-1n6u8: payment webhook event archive (infrastructure boundary).
-// aperture-2sp6m: findByPagamentoId + FindByPagamentoIdOptions for admin trail.
-export type {
-  FindByPagamentoIdOptions,
-  SaveReceivedInput,
-  SaveReceivedResult,
-  WebhookEventArchive,
-  WebhookEventRecord,
-} from './adapters/webhook-archive/webhook-event-archive.js';
-export { PROCESSING_ERROR_MAX_LENGTH } from './adapters/webhook-archive/webhook-event-archive.js';
-export { WebhookEventArchiveMemory } from './adapters/webhook-archive/webhook-event-archive.memory.js';
-export { WebhookEventArchivePostgres } from './adapters/webhook-archive/webhook-event-archive.postgres.js';
-export type {
-  StripeDispatchResult,
-  StripePipelineArgs,
-  StripePipelineResult,
-} from './adapters/webhook-archive/stripe-webhook-pipeline.js';
-export { archiveAndDispatchStripeEvent } from './adapters/webhook-archive/stripe-webhook-pipeline.js';
 export {
   computeCardSurchargeCents,
   STRIPE_CARD_FIXED_CENTS,
@@ -53,6 +32,9 @@ export type {
 } from './adapters/pagamentos/checkout-session-provider.js';
 export type { PagamentoEventPublisher } from './adapters/pagamentos/event-publisher.js';
 export { PagamentoEventPublisherMemory } from './adapters/pagamentos/event-publisher.memory.js';
+export type { LivroFinanceiroRepository } from './adapters/pagamentos/financeiro/livro-repository.js';
+export { LivroFinanceiroRepositoryMemory } from './adapters/pagamentos/financeiro/livro-repository.memory.js';
+export { LivroFinanceiroRepositoryPostgres } from './adapters/pagamentos/financeiro/livro-repository.postgres.js';
 export { PagamentoProviderFake } from './adapters/pagamentos/provider.fake.js';
 export type { PagamentoProvider, SolicitarPagamentoInput } from './adapters/pagamentos/provider.js';
 export { PagamentoProviderStripe } from './adapters/pagamentos/provider.stripe.js';
@@ -79,6 +61,24 @@ export { criarAuth } from './adapters/usuario/criar-auth.js';
 export type { UsuarioRepository } from './adapters/usuario/repository.js';
 export { UsuarioRepositoryMemory } from './adapters/usuario/repository.memory.js';
 export { UsuarioRepositoryPostgres } from './adapters/usuario/repository.postgres.js';
+export type {
+  StripeDispatchResult,
+  StripePipelineArgs,
+  StripePipelineResult,
+} from './adapters/webhook-archive/stripe-webhook-pipeline.js';
+export { archiveAndDispatchStripeEvent } from './adapters/webhook-archive/stripe-webhook-pipeline.js';
+// aperture-1n6u8: payment webhook event archive (infrastructure boundary).
+// aperture-2sp6m: findByPagamentoId + FindByPagamentoIdOptions for admin trail.
+export type {
+  FindByPagamentoIdOptions,
+  SaveReceivedInput,
+  SaveReceivedResult,
+  WebhookEventArchive,
+  WebhookEventRecord,
+} from './adapters/webhook-archive/webhook-event-archive.js';
+export { PROCESSING_ERROR_MAX_LENGTH } from './adapters/webhook-archive/webhook-event-archive.js';
+export { WebhookEventArchiveMemory } from './adapters/webhook-archive/webhook-event-archive.memory.js';
+export { WebhookEventArchivePostgres } from './adapters/webhook-archive/webhook-event-archive.postgres.js';
 // Pre-existing duplicate block of webhook-archive + stripe-webhook-pipeline
 // exports removed here (aperture-aqlv2 cleanup). They live at lines ~26-41
 // of this file; a recent merge of the convite/evento/lista-convidados PRs
@@ -118,15 +118,6 @@ export {
   criarRecebedorInicial,
   desativarRecebedor,
 } from './domain/arrecadacao/entities/recebedor.js';
-// Plan 0015 (aperture-7pqee): DadosContribuinte moved to the Pagamentos BC
-// since it now lives on IntencaoPagamento, not on the Contribuição
-// aggregate. The arrecadacao path keeps a deprecated re-export for one
-// release cycle; consumers should import from the pagamentos path.
-export type { DadosContribuinte } from './domain/pagamentos/value-objects/dados-contribuinte.js';
-export {
-  DadosContribuinteSchema,
-  NomeContribuinteSchema,
-} from './domain/pagamentos/value-objects/dados-contribuinte.js';
 export type {
   DadosRecebedor,
   TipoChavePix,
@@ -160,6 +151,15 @@ export {
   OpcaoContribuicaoSchema,
   TipoOpcaoContribuicaoSchema,
 } from './domain/arrecadacao/value-objects/opcao-contribuicao.js';
+// Plan 0015 (aperture-7pqee): DadosContribuinte moved to the Pagamentos BC
+// since it now lives on IntencaoPagamento, not on the Contribuição
+// aggregate. The arrecadacao path keeps a deprecated re-export for one
+// release cycle; consumers should import from the pagamentos path.
+export type { DadosContribuinte } from './domain/pagamentos/value-objects/dados-contribuinte.js';
+export {
+  DadosContribuinteSchema,
+  NomeContribuinteSchema,
+} from './domain/pagamentos/value-objects/dados-contribuinte.js';
 
 // --- Domain: Cat (placeholder) ---
 
@@ -327,8 +327,8 @@ export {
   criarEventoPagamento,
   criarPagamentoPendente,
   estornarPagamentoAprovado,
-  iniciarProcessamentoPagamento,
   IntencaoPagamentoSchema,
+  iniciarProcessamentoPagamento,
   PagamentoSchema,
   podeAprovarPagamento,
   podeRejeitarPagamento,
@@ -488,11 +488,11 @@ export { ListaDeConvidadosInputInvalidoError } from './errors/evento/lista-de-co
 export { ListaDeConvidadosJaExisteError } from './errors/evento/lista-de-convidados-ja-existe.error.js';
 export { ListaDeConvidadosNaoEncontradaError } from './errors/evento/lista-de-convidados-nao-encontrada.error.js';
 export { EventoNaoEncontradoError } from './errors/evento/nao-encontrado.error.js';
+export { InvalidCatNameError } from './errors/invalid-cat-name.error.js';
 export { FinanceiroInputInvalidoError } from './errors/pagamentos/financeiro/input-invalido.error.js';
 export { FinanceiroPagamentoJaRegistradoError } from './errors/pagamentos/financeiro/pagamento-ja-registrado.error.js';
 export { FinanceiroPagamentoNaoAprovadoError } from './errors/pagamentos/financeiro/pagamento-nao-aprovado.error.js';
 export { FinanceiroSaldoDisponivelInsuficienteError } from './errors/pagamentos/financeiro/saldo-disponivel-insuficiente.error.js';
-export { InvalidCatNameError } from './errors/invalid-cat-name.error.js';
 export { PagamentosInputInvalidoError } from './errors/pagamentos/input-invalido.error.js';
 export { PagamentoJaExisteError } from './errors/pagamentos/ja-existe.error.js';
 export { PagamentoNaoEncontradoError } from './errors/pagamentos/nao-encontrado.error.js';
@@ -520,6 +520,9 @@ export { noopTracer, SpanKind, SpanStatusCode, trace } from './observability/tra
 
 // --- Use Cases ---
 
+export { FinanceiroRepasseJaPendenteError } from './errors/pagamentos/financeiro/repasse-ja-pendente.error.js';
+export { FinanceiroRepasseNaoEncontradoError } from './errors/pagamentos/financeiro/repasse-nao-encontrado.error.js';
+export { FinanceiroRepasseStatusInvalidoError } from './errors/pagamentos/financeiro/repasse-status-invalido.error.js';
 export type {
   AdicionarAdministradorCampanhaDeps,
   AdicionarAdministradorCampanhaInput,
@@ -552,6 +555,14 @@ export {
   AlterarValorContribuicaoInputSchema,
   alterarValorContribuicao,
 } from './use-cases/arrecadacao/alterar-valor-contribuicao.js';
+export type {
+  AtualizarContribuicaoDeps,
+  AtualizarContribuicaoInput,
+} from './use-cases/arrecadacao/atualizar-contribuicao.js';
+export {
+  AtualizarContribuicaoInputSchema,
+  atualizarContribuicao,
+} from './use-cases/arrecadacao/atualizar-contribuicao.js';
 // Plan 0015 (aperture-ucgok). associarContribuinteContribuicao removed;
 // contribuinte writes happen on IntencaoPagamento inside
 // finalizarPagamentoAprovado. The EXISTS-aprovado-pagamento predicate
@@ -564,14 +575,6 @@ export {
   ContribuicaoEstaIndisponivelInputSchema,
   contribuicaoEstaIndisponivel,
 } from './use-cases/arrecadacao/contribuicao-esta-indisponivel.js';
-export type {
-  AtualizarContribuicaoDeps,
-  AtualizarContribuicaoInput,
-} from './use-cases/arrecadacao/atualizar-contribuicao.js';
-export {
-  AtualizarContribuicaoInputSchema,
-  atualizarContribuicao,
-} from './use-cases/arrecadacao/atualizar-contribuicao.js';
 export type {
   CriarCampanhaDeps,
   CriarCampanhaInput,
@@ -626,6 +629,18 @@ export {
   RemoverContribuicaoInputSchema,
   removerContribuicao,
 } from './use-cases/arrecadacao/remover-contribuicao.js';
+// Plan 0015 (aperture-ucgok): admin estorno + admin batch transfer.
+export type {
+  EstornarPagamentoDeps,
+  EstornarPagamentoInput,
+  EstornarPagamentoResult,
+} from './use-cases/checkout/estornar-pagamento.js';
+export {
+  EstornarPagamentoInputSchema,
+  estornarPagamento,
+  PagamentoEstornoLancamentoJaTransferidoError,
+  PagamentoEstornoRecusadoPeloProvedorError,
+} from './use-cases/checkout/estornar-pagamento.js';
 export type {
   FinalizarPagamentoAprovadoDeps,
   FinalizarPagamentoAprovadoInput,
@@ -653,28 +668,6 @@ export {
   IniciarPagamentoContribuicaoInputSchema,
   iniciarPagamentoContribuicao,
 } from './use-cases/checkout/iniciar-pagamento-contribuicao.js';
-// Plan 0015 (aperture-ucgok): admin estorno + admin batch transfer.
-export type {
-  EstornarPagamentoDeps,
-  EstornarPagamentoInput,
-  EstornarPagamentoResult,
-} from './use-cases/checkout/estornar-pagamento.js';
-export {
-  EstornarPagamentoInputSchema,
-  estornarPagamento,
-  PagamentoEstornoLancamentoJaTransferidoError,
-  PagamentoEstornoRecusadoPeloProvedorError,
-} from './use-cases/checkout/estornar-pagamento.js';
-export type {
-  MarcarLancamentoTransferidoDeps,
-  MarcarLancamentoTransferidoInput,
-  MarcarLancamentoTransferidoResult,
-} from './use-cases/pagamentos/financeiro/marcar-lancamento-transferido.js';
-export {
-  MarcarLancamentoTransferidoBloqueadoError,
-  MarcarLancamentoTransferidoInputSchema,
-  marcarLancamentoTransferido,
-} from './use-cases/pagamentos/financeiro/marcar-lancamento-transferido.js';
 export type {
   IniciarRepasseRecebedorDeps,
   IniciarRepasseRecebedorInput,
@@ -788,6 +781,35 @@ export {
   ObterListaDeConvidadosPorIdEventoInputSchema,
   obterListaDeConvidadosPorIdEvento,
 } from './use-cases/evento/obter-lista-de-convidados-por-id-evento.js';
+export type { AprovarPagamentoDeps } from './use-cases/pagamentos/aprovar-pagamento.js';
+export { aprovarPagamento } from './use-cases/pagamentos/aprovar-pagamento.js';
+export type {
+  CriarIntencaoPagamentoDeps,
+  CriarIntencaoPagamentoInput,
+} from './use-cases/pagamentos/criar-intencao-pagamento.js';
+export {
+  CriarIntencaoPagamentoInputSchema,
+  criarIntencaoPagamento,
+} from './use-cases/pagamentos/criar-intencao-pagamento.js';
+export type {
+  AprovarRepasseRecebedorDeps,
+  AprovarRepasseRecebedorInput,
+  AprovarRepasseRecebedorOutput,
+} from './use-cases/pagamentos/financeiro/aprovar-repasse-recebedor.js';
+export {
+  AprovarRepasseRecebedorInputSchema,
+  aprovarRepasseRecebedor,
+} from './use-cases/pagamentos/financeiro/aprovar-repasse-recebedor.js';
+export type {
+  MarcarLancamentoTransferidoDeps,
+  MarcarLancamentoTransferidoInput,
+  MarcarLancamentoTransferidoResult,
+} from './use-cases/pagamentos/financeiro/marcar-lancamento-transferido.js';
+export {
+  MarcarLancamentoTransferidoBloqueadoError,
+  MarcarLancamentoTransferidoInputSchema,
+  marcarLancamentoTransferido,
+} from './use-cases/pagamentos/financeiro/marcar-lancamento-transferido.js';
 // aperture-led0r: maturation use-case.
 export type { ObterReceitaPlataformaDeps } from './use-cases/pagamentos/financeiro/obter-receita-plataforma.js';
 export { obterReceitaPlataforma } from './use-cases/pagamentos/financeiro/obter-receita-plataforma.js';
@@ -818,28 +840,6 @@ export {
   SolicitarRepasseRecebedorInputSchema,
   solicitarRepasseRecebedor,
 } from './use-cases/pagamentos/financeiro/solicitar-repasse-recebedor.js';
-export type {
-  AprovarRepasseRecebedorDeps,
-  AprovarRepasseRecebedorInput,
-  AprovarRepasseRecebedorOutput,
-} from './use-cases/pagamentos/financeiro/aprovar-repasse-recebedor.js';
-export {
-  AprovarRepasseRecebedorInputSchema,
-  aprovarRepasseRecebedor,
-} from './use-cases/pagamentos/financeiro/aprovar-repasse-recebedor.js';
-export { FinanceiroRepasseJaPendenteError } from './errors/pagamentos/financeiro/repasse-ja-pendente.error.js';
-export { FinanceiroRepasseNaoEncontradoError } from './errors/pagamentos/financeiro/repasse-nao-encontrado.error.js';
-export { FinanceiroRepasseStatusInvalidoError } from './errors/pagamentos/financeiro/repasse-status-invalido.error.js';
-export type { AprovarPagamentoDeps } from './use-cases/pagamentos/aprovar-pagamento.js';
-export { aprovarPagamento } from './use-cases/pagamentos/aprovar-pagamento.js';
-export type {
-  CriarIntencaoPagamentoDeps,
-  CriarIntencaoPagamentoInput,
-} from './use-cases/pagamentos/criar-intencao-pagamento.js';
-export {
-  CriarIntencaoPagamentoInputSchema,
-  criarIntencaoPagamento,
-} from './use-cases/pagamentos/criar-intencao-pagamento.js';
 export type {
   ComandoPagamentoInput,
   ObterPagamentoPorIdDeps,
