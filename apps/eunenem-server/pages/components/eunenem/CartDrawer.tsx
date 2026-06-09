@@ -3,22 +3,15 @@ import {
   EmbeddedCheckoutProvider,
 } from "@stripe/react-stripe-js";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { toast } from "sonner";
 import {
   useIniciarPagamentoCarrinho,
   useInvalidarListaPresentes,
   useObterSucessoPagamento,
-  usePaginaListaPresentes,
   type MetodoPagamento,
 } from "@/lib/paginaApi";
-import {
-  useCart,
-  revalidateAgainstFresh,
-  type CartLine,
-} from "@/lib/cart.js";
+import { useCart, toSagaInput, type CartLine } from "@/lib/cart.js";
 import { formatBRL } from "@/lib/formatBRL";
 import { getStripePromise } from "@/lib/stripeClient";
-import { groupVisitorGifts } from "@/lib/visitorGift";
 
 // Plan 0017 / aperture-16flf — visitor cart drawer + checkout flow.
 //
@@ -130,63 +123,25 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
     };
   }, [open]);
 
-  // aperture-qxntg — refetch list at finalize so we re-validate against
-  // FRESH availableIds. The cart line captures availableIds at add-time
-  // (per the visitorGift projection); between add + finalize another
-  // visitor (or admin action) can flip a row to aprovado. Without this
-  // refetch, the cart would happily ship a now-sold row-id and the
-  // saga's per-item esgotada gate would 500.
-  const listQuery = usePaginaListaPresentes(slug);
-
+  // Plan 0016 locked decision #10 — "Race conditions: accept overshoot.
+  // Honest predicate at query time. No pre-reservation table, no TTL
+  // cleanup cron, no claim semantics." The cart deliberately does NOT
+  // re-validate at finalize-time. If a row went esgotada between
+  // add-and-finalize, the saga's per-item esgotada gate rejects with
+  // a 500 — that's surfaced as the default iniciar.isError state on
+  // the summary panel. Visitor edits + retries; no remediation, no
+  // race-recovery toast, no auto-decrement. Operator-accepted overshoot
+  // semantics flow through cleanly.
+  //
+  // After Rex's create-flow migration is fully the canonical pattern
+  // (new campanhas → 1 row + quantidade=N), the legacy multi-row data
+  // is gone, the availableIds layer becomes redundant, and the cart
+  // simplifies to "one saga item per line." Race is then a pure saga-
+  // level concern.
   const onFinalizar = useCallback(async () => {
     if (cart.state.lines.length === 0 || iniciar.isPending) return;
-
-    // aperture-qxntg — force a fresh fetch before we ship. ensureData
-    // returns the latest snapshot (refetches if stale per the 30s
-    // staleTime); we then re-derive saga input from those fresh
-    // availableIds rather than the cart line's potentially-stale
-    // snapshot. Falls back to the cart's snapshot if the refetch
-    // throws (network blip) — better to attempt the saga than block
-    // the visitor on a transient list refetch failure; the saga's own
-    // esgotada gate is the safety net.
-    let freshList = listQuery.data;
-    try {
-      freshList = await listQuery.refetch().then((r) => r.data ?? freshList);
-    } catch {
-      // Leave freshList at its cached snapshot.
-    }
-    const freshGifts = freshList ? groupVisitorGifts(freshList) : [];
-
-    const { itens, raced } = revalidateAgainstFresh(
-      cart.state.lines,
-      freshGifts,
-    );
-
-    // Race-recovery: decrement any line whose available count dropped
-    // below the visitor's wanted quantidade between add + finalize.
-    // The visitor sees the updated count + a friendly toast; they
-    // re-click Finalizar to ship with the trimmed cart.
-    if (raced.length > 0) {
-      for (const r of raced) {
-        const dropBy = Math.max(0, cart.quantidadeFor(r.nome) - r.available);
-        for (let i = 0; i < dropBy; i++) {
-          cart.decrement(r.nome);
-        }
-      }
-      const firstNome = raced[0]?.nome ?? "esse mimo";
-      toast(
-        raced.length === 1
-          ? `${firstNome} acabou de ser presenteado por outra pessoa ♡ ajustamos seu carrinho`
-          : `alguns mimos acabaram de ser presenteados ♡ ajustamos seu carrinho`,
-      );
-      // Don't fire the mutation if anything raced — let the visitor
-      // confirm the new cart before paying. They can re-click
-      // Finalizar.
-      return;
-    }
-
+    const itens = toSagaInput(cart.state.lines);
     if (itens.length === 0) return;
-
     setCheckoutSnapshot({
       lines: cart.state.lines.slice(),
       totalUnits: cart.totalUnits,
@@ -208,9 +163,11 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
       setCheckoutSnapshot(null);
     }
   }, [
-    cart,
+    cart.state.lines,
+    cart.totalUnits,
+    cart.totalPixCents,
+    cart.totalCartaoCents,
     iniciar,
-    listQuery,
     metodo,
     slug,
   ]);

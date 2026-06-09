@@ -1563,7 +1563,15 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
     if (!editItem) return;
     const price = parseFloat(draft.price.replace(",", ".")) || 0;
     const newQty = Number(draft.qty) || 1;
-    const imagemUrl = editItem.imageUrl ?? editItem.emoji;
+    // aperture-qxntg follow-up — `editItem.emoji` is a UI-only display
+    // fallback derived from the grupo when the row has no real image
+    // URL. It MUST NOT be sent as the wire value: ImagemUrlSchema
+    // requires `/^(\/|https?:\/\/)/` and a glyph like "🪒" fails zod,
+    // returning a 400 on update. Operator's "Kit Tesoura e Cortador de
+    // Unha" repro (no imageUrl, emoji fallback) hit exactly this. The
+    // update mutation accepts `imagemUrl: ImagemUrlSchema.nullable()`
+    // — `null` is the right "no image" wire value.
+    const imagemUrl = editItem.imageUrl ?? null;
     const idToUpdate = editItem.ids[0];
     if (!idToUpdate) {
       toast.error("Não consegui identificar esse mimo — recarrega a página ♡");
