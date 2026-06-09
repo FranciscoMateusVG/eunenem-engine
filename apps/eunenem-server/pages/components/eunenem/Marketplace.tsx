@@ -3,6 +3,8 @@ import { useCallback, useMemo, useState } from "react";
 import { BottleDoodle, FlowerDoodle } from "./Doodles";
 import { GiftCard } from "./GiftCard";
 import { GiftCheckoutModal } from "./GiftCheckoutModal";
+import { useCart } from "@/lib/cart.js";
+import { useCartDrawer } from "./CartDrawerContext.js";
 import { useTweaks } from "./TweaksContext";
 import { usePaginaListaPresentes } from "@/lib/paginaApi";
 import {
@@ -43,9 +45,20 @@ export function Marketplace({ slug }: MarketplaceProps) {
       ? gifts
       : gifts.filter((g) => g.grupoKey === activeCat);
 
+  const cart = useCart();
+  const drawer = useCartDrawer();
+
   const onPick = useCallback((gift: VisitorGift) => {
     setSelectedGift(gift);
   }, []);
+
+  const onAdd = useCallback(
+    (gift: VisitorGift) => {
+      cart.add(gift);
+      drawer.open();
+    },
+    [cart, drawer],
+  );
 
   return (
     <section
@@ -177,7 +190,7 @@ export function Marketplace({ slug }: MarketplaceProps) {
         ) : (
           <div className="grid gap-4 sm:gap-6 mt-12 grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(260px,1fr))]">
             {filtered.map((g) => (
-              <GiftCard key={g.nome} gift={g} onPick={onPick} />
+              <GiftCard key={g.nome} gift={g} onPick={onPick} onAdd={onAdd} />
             ))}
           </div>
         )}

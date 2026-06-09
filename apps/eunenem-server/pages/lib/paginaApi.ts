@@ -33,6 +33,13 @@ export type IniciarPagamentoInput = PaginaInputs["iniciarPagamentoContribuicao"]
 export type IniciarPagamentoResult =
   PaginaOutputs["iniciarPagamentoContribuicao"];
 
+/** Plan 0017 — multi-item cart checkout input/output (aperture-16flf). */
+export type IniciarPagamentoCarrinhoInput =
+  PaginaInputs["iniciarPagamentoCarrinho"];
+
+export type IniciarPagamentoCarrinhoResult =
+  PaginaOutputs["iniciarPagamentoCarrinho"];
+
 export type ObterSucessoResult = PaginaOutputs["obterSucessoPagamento"];
 
 /** Payment method picker — exactly the enum Rex's router accepts. */
@@ -59,6 +66,15 @@ export function usePaginaListaPresentes(slug: string) {
  */
 export function useIniciarPagamentoContribuicao() {
   return trpc.pagina.iniciarPagamentoContribuicao.useMutation();
+}
+
+/**
+ * Plan 0017 / aperture-16flf — multi-item cart checkout. Same
+ * `{sessionId, clientSecret}` response shape as the single-shot mutation
+ * so the embedded Stripe checkout mounts identically downstream.
+ */
+export function useIniciarPagamentoCarrinho() {
+  return trpc.pagina.iniciarPagamentoCarrinho.useMutation();
 }
 
 /**

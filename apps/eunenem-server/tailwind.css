@@ -5565,3 +5565,25 @@ html {
     max-width: 320px;
   }
 }
+
+/* Plan 0017 / aperture-16flf — cart-button entry pop. Triggered when the
+   button mounts (first item added to the cart) for a soft welcoming
+   gesture. Forwards-fill so the button stays at its rest scale + opacity
+   once the animation completes. */
+@keyframes cartPop {
+  0% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.anim-cart-pop {
+  animation: cartPop 0.28s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
