@@ -82,18 +82,18 @@ describe('criarConvite', () => {
         paleta: 'lilas',
         fonte: 'patrick',
         modelo: 'scrapbook',
-        imagem: 'https://cdn.example.com/convites/maria-helena.png',
+        imagemUrl: 'https://cdn.example.com/convites/maria-helena.png',
       },
     );
 
     expect(convite.id).toBe(idConvite);
     expect(convite.idEvento).toBe(idEvento);
     expect(convite.nomeExibido).toBe('Maria Helena');
-    expect(convite.imagem).toBe('https://cdn.example.com/convites/maria-helena.png');
+    expect(convite.imagemUrl).toBe('https://cdn.example.com/convites/maria-helena.png');
 
     const loaded = await repos.conviteRepository.findByIdEvento(idEvento);
     expect(loaded?.id).toBe(idConvite);
-    expect(loaded?.imagem).toBe('https://cdn.example.com/convites/maria-helena.png');
+    expect(loaded?.imagemUrl).toBe('https://cdn.example.com/convites/maria-helena.png');
   });
 
   it('throws EventoNaoEncontradoError when evento is missing', async () => {
@@ -165,7 +165,7 @@ describe('criarConvite', () => {
           paleta: 'lilas',
           fonte: 'patrick',
           modelo: 'scrapbook',
-          imagem: '/convites/maria-helena.png',
+          imagemUrl: '/convites/maria-helena.png',
         },
       ),
     ).rejects.toBeInstanceOf(ConviteInputInvalidoError);
@@ -193,7 +193,7 @@ describe('obterConvite', () => {
         paleta: 'lilas',
         fonte: 'patrick',
         modelo: 'scrapbook',
-        imagem: 'https://cdn.example.com/convites/maria.png',
+        imagemUrl: 'https://cdn.example.com/convites/maria.png',
       },
     );
 
@@ -224,7 +224,7 @@ describe('obterConvite', () => {
         paleta: 'surpresa',
         fonte: 'caveat',
         modelo: 'safari',
-        imagem: 'https://cdn.example.com/convites/theo.jpg',
+        imagemUrl: 'https://cdn.example.com/convites/theo.jpg',
       },
     );
 
@@ -269,7 +269,7 @@ describe('atualizarConvite', () => {
         paleta: 'lilas',
         fonte: 'patrick',
         modelo: 'scrapbook',
-        imagem: 'https://cdn.example.com/convites/inicial.png',
+        imagemUrl: 'https://cdn.example.com/convites/inicial.png',
       },
     );
 
@@ -286,7 +286,7 @@ describe('atualizarConvite', () => {
         paleta: 'amarelo',
         fonte: 'caveat',
         modelo: 'elefantinho',
-        imagem: 'https://cdn.example.com/convites/theo.jpg',
+        imagemUrl: 'https://cdn.example.com/convites/theo.jpg',
       },
     );
 
@@ -294,7 +294,7 @@ describe('atualizarConvite', () => {
     expect(updated.paleta).toBe('amarelo');
     expect(updated.fonte).toBe('caveat');
     expect(updated.modelo).toBe('elefantinho');
-    expect(updated.imagem).toBe('https://cdn.example.com/convites/theo.jpg');
+    expect(updated.imagemUrl).toBe('https://cdn.example.com/convites/theo.jpg');
     expect(updated.atualizadoEm).toEqual(updateClock());
   });
 
@@ -318,7 +318,7 @@ describe('atualizarConvite', () => {
         paleta: 'lilas',
         fonte: 'patrick',
         modelo: 'scrapbook',
-        imagem: 'https://cdn.example.com/convites/maria.png',
+        imagemUrl: 'https://cdn.example.com/convites/maria.png',
       },
     );
 

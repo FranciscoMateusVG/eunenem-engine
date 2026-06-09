@@ -14,10 +14,13 @@ export type { Database } from './adapters/database.js';
 export { createDatabase } from './adapters/database.js';
 export type { ConviteRepository } from './adapters/evento/convite-repository.js';
 export { ConviteRepositoryMemory } from './adapters/evento/convite-repository.memory.js';
+export { ConviteRepositoryPostgres } from './adapters/evento/convite-repository.postgres.js';
 export type { EventoRepository } from './adapters/evento/evento-repository.js';
 export { EventoRepositoryMemory } from './adapters/evento/evento-repository.memory.js';
+export { EventoRepositoryPostgres } from './adapters/evento/evento-repository.postgres.js';
 export type { ListaDeConvidadosRepository } from './adapters/evento/lista-de-convidados-repository.js';
 export { ListaDeConvidadosRepositoryMemory } from './adapters/evento/lista-de-convidados-repository.memory.js';
+export { ListaDeConvidadosRepositoryPostgres } from './adapters/evento/lista-de-convidados-repository.postgres.js';
 export {
   computeCardSurchargeCents,
   STRIPE_CARD_FIXED_CENTS,
@@ -225,8 +228,8 @@ export {
   IdEventoSchema,
   IdListaDeConvidadosSchema,
 } from './domain/evento/value-objects/ids.js';
-export type { ImagemConvite } from './domain/evento/value-objects/imagem-convite.js';
-export { ImagemConviteSchema } from './domain/evento/value-objects/imagem-convite.js';
+export type { ImagemUrlConvite } from './domain/evento/value-objects/imagem-url-convite.js';
+export { ImagemUrlConviteSchema } from './domain/evento/value-objects/imagem-url-convite.js';
 export type { LinkConfirmacao } from './domain/evento/value-objects/link-confirmacao-lista.js';
 export { LinkConfirmacaoSchema } from './domain/evento/value-objects/link-confirmacao-lista.js';
 export type { MensagemConvite } from './domain/evento/value-objects/mensagem-convite.js';

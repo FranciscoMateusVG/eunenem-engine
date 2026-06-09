@@ -4,7 +4,7 @@ import {
   criarConvite,
 } from '../../../src/domain/evento/entities/convite.js';
 import { FonteConviteSchema } from '../../../src/domain/evento/value-objects/fonte-convite.js';
-import { ImagemConviteSchema } from '../../../src/domain/evento/value-objects/imagem-convite.js';
+import { ImagemUrlConviteSchema } from '../../../src/domain/evento/value-objects/imagem-url-convite.js';
 import { MensagemConviteSchema } from '../../../src/domain/evento/value-objects/mensagem-convite.js';
 import { ModeloConviteSchema } from '../../../src/domain/evento/value-objects/modelo-convite.js';
 import { NomeExibidoConviteSchema } from '../../../src/domain/evento/value-objects/nome-exibido-convite.js';
@@ -24,7 +24,7 @@ describe('criarConvite (dominio)', () => {
       paleta: 'lilas',
       fonte: 'patrick',
       modelo: 'scrapbook',
-      imagem: 'https://cdn.example.com/convites/maria-helena.png',
+      imagemUrl: 'https://cdn.example.com/convites/maria-helena.png',
       criadoEm: fixedDate,
       atualizadoEm: fixedDate,
     });
@@ -34,7 +34,7 @@ describe('criarConvite (dominio)', () => {
     expect(convite.nomeExibido).toBe('Maria Helena');
     expect(convite.paleta).toBe('lilas');
     expect(convite.modelo).toBe('scrapbook');
-    expect(convite.imagem).toBe('https://cdn.example.com/convites/maria-helena.png');
+    expect(convite.imagemUrl).toBe('https://cdn.example.com/convites/maria-helena.png');
   });
 });
 
@@ -48,7 +48,7 @@ describe('convite factories', () => {
       paleta: 'lilas',
       fonte: 'patrick',
       modelo: 'scrapbook',
-      imagem: 'https://cdn.example.com/convites/original.jpg',
+      imagemUrl: 'https://cdn.example.com/convites/original.jpg',
       criadoEm: fixedDate,
       atualizadoEm: fixedDate,
     });
@@ -62,7 +62,7 @@ describe('convite factories', () => {
         paleta: 'surpresa',
         fonte: 'caveat',
         modelo: 'safari',
-        imagem: 'https://cdn.example.com/convites/theo.png',
+        imagemUrl: 'https://cdn.example.com/convites/theo.png',
       },
       later,
     );
@@ -72,7 +72,7 @@ describe('convite factories', () => {
     expect(updated.paleta).toBe('surpresa');
     expect(updated.fonte).toBe('caveat');
     expect(updated.modelo).toBe('safari');
-    expect(updated.imagem).toBe('https://cdn.example.com/convites/theo.png');
+    expect(updated.imagemUrl).toBe('https://cdn.example.com/convites/theo.png');
     expect(updated.atualizadoEm).toEqual(later);
     expect(updated.criadoEm).toEqual(fixedDate);
   });
@@ -101,20 +101,20 @@ describe('schemas', () => {
 
   it('accepts png/jpg image references', () => {
     expect(
-      ImagemConviteSchema.safeParse('https://cdn.example.com/convites/maria.png').success,
+      ImagemUrlConviteSchema.safeParse('https://cdn.example.com/convites/maria.png').success,
     ).toBe(true);
-    expect(ImagemConviteSchema.safeParse('https://cdn.example.com/maria.jpg?size=lg').success).toBe(
-      true,
-    );
+    expect(
+      ImagemUrlConviteSchema.safeParse('https://cdn.example.com/maria.jpg?size=lg').success,
+    ).toBe(true);
   });
 
   it('rejects non-url image references', () => {
-    expect(ImagemConviteSchema.safeParse('/convites/maria.png').success).toBe(false);
+    expect(ImagemUrlConviteSchema.safeParse('/convites/maria.png').success).toBe(false);
   });
 
   it('rejects invalid image format', () => {
     expect(
-      ImagemConviteSchema.safeParse('https://cdn.example.com/convites/maria.pdf').success,
+      ImagemUrlConviteSchema.safeParse('https://cdn.example.com/convites/maria.pdf').success,
     ).toBe(false);
   });
 });

@@ -2,11 +2,11 @@ import { z } from 'zod/v4';
 
 const IMAGE_FILE_EXTENSION_REGEX = /\.(png|jpe?g)(?:[?#].*)?$/i;
 
-export const ImagemConviteSchema = z
+export const ImagemUrlConviteSchema = z
   .string()
   .trim()
-  .min(1, 'Imagem do convite nao pode ser vazia')
-  .max(500, 'Imagem do convite e longa demais')
+  .min(1, 'Imagem URL do convite nao pode ser vazia')
+  .max(500, 'Imagem URL do convite e longa demais')
   .refine((value) => {
     try {
       const url = new URL(value);
@@ -14,10 +14,10 @@ export const ImagemConviteSchema = z
     } catch {
       return false;
     }
-  }, 'Imagem do convite deve ser uma URL valida')
+  }, 'Imagem URL do convite deve ser uma URL valida')
   .refine(
     (value) => IMAGE_FILE_EXTENSION_REGEX.test(value),
-    'Imagem do convite deve apontar para um arquivo PNG, JPG ou JPEG',
+    'Imagem URL do convite deve apontar para um arquivo PNG, JPG ou JPEG',
   );
 
-export type ImagemConvite = z.infer<typeof ImagemConviteSchema>;
+export type ImagemUrlConvite = z.infer<typeof ImagemUrlConviteSchema>;
