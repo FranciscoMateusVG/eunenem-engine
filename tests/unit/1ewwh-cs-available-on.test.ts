@@ -51,9 +51,9 @@ import { LivroFinanceiroRepositoryMemory } from '../../src/adapters/pagamentos/f
 import { PagamentoProviderFake } from '../../src/adapters/pagamentos/provider.fake.js';
 import { PagamentoRepositoryMemory } from '../../src/adapters/pagamentos/repository.memory.js';
 import { WebhookEventArchiveMemory } from '../../src/adapters/webhook-archive/webhook-event-archive.memory.js';
-import { criarPagamentoPendente } from '../../src/domain/pagamentos/entities/pagamento.js';
 import { NoopLogger } from '../../src/observability/noop-logger.js';
 import { noopTracer } from '../../src/observability/tracer.js';
+import { makePagamento } from '../helpers/pagamento-repository.conformance.js';
 
 // ────────────────────────────────────────────────────────────────────
 //  (A) Fake adapter — new obterAvailableOnDoPaymentIntent port method
@@ -172,35 +172,21 @@ async function seedPagamento(
     criadaEm: new Date(),
   } as never);
 
-  const pagamento = criarPagamentoPendente({
-    idPagamento: idPagamento as never,
-    idIntencaoPagamento: randomUUID() as never,
-    composicaoValores: {
-      idContribuicao,
-      contributionAmountCents: 4500,
-      feeAmountCents: 0,
-      surchargeCents: 0,
-      totalPaidCents: 4500,
-      receiverAmountCents: 4500,
-      responsavelTaxa: 'contribuinte',
-    } as never,
-    valorACobrarCents: 4500 as never,
+  const pagamento = makePagamento({
+    id: idPagamento,
+    idContribuicao,
+    idCampanha,
     metodo: options.metodo,
     externalRef: options.sessionId,
     criadoEm: new Date('2026-06-04T09:00:00Z'),
+    // Pre-populate fields per test scenario. By default both stay null —
+    // that's the "orphan path" shape we're fixing.
+    balanceTransactionAvailableOn:
+      options.prePopulatedAvailableOn !== undefined ? options.prePopulatedAvailableOn : null,
+    chargeExternalRef:
+      options.prePopulatedChargeRef !== undefined ? options.prePopulatedChargeRef : null,
   });
-  // Pre-populate fields per test scenario. By default both stay null —
-  // that's the "orphan path" shape we're fixing.
-  await rig.pagamentoRepository.save({
-    ...pagamento,
-    intencao: {
-      ...pagamento.intencao,
-      balanceTransactionAvailableOn:
-        options.prePopulatedAvailableOn !== undefined ? options.prePopulatedAvailableOn : null,
-      chargeExternalRef:
-        options.prePopulatedChargeRef !== undefined ? options.prePopulatedChargeRef : null,
-    },
-  });
+  await rig.pagamentoRepository.save(pagamento);
   return idPagamento;
 }
 

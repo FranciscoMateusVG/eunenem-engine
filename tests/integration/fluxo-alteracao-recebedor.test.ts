@@ -32,7 +32,7 @@ import { alterarDadosRecebedorCampanha } from '../../src/use-cases/arrecadacao/a
 import { criarCampanha } from '../../src/use-cases/arrecadacao/criar-campanha.js';
 import { criarContribuicao } from '../../src/use-cases/arrecadacao/criar-contribuicao.js';
 import { finalizarPagamentoAprovado } from '../../src/use-cases/checkout/finalizar-pagamento-aprovado.js';
-import { iniciarPagamentoContribuicao } from '../../src/use-cases/checkout/iniciar-pagamento-contribuicao.js';
+import { iniciarPagamentoCarrinho } from '../../src/use-cases/checkout/iniciar-pagamento-carrinho.js';
 import { iniciarRepasseRecebedor } from '../../src/use-cases/checkout/iniciar-repasse-recebedor.js';
 import { obterSaldoRecebedor } from '../../src/use-cases/pagamentos/financeiro/obter-saldo-recebedor.js';
 import { registrarContaUsuario } from '../../src/use-cases/usuario/registrar-conta-usuario.js';
@@ -191,7 +191,7 @@ describe('Fluxo — alteração de recebedor', () => {
     const { deps, idCampanha, idContribuicao, idPagamento, idRepasse, idRecebedorInicial } =
       await seedFluxoBase();
 
-    await iniciarPagamentoContribuicao(
+    await iniciarPagamentoCarrinho(
       {
         campanhaRepository: deps.campanhaRepository,
         contribuicaoRepository: deps.contribuicaoRepository,
@@ -205,8 +205,8 @@ describe('Fluxo — alteração de recebedor', () => {
       {
         idPlataforma: ID_PLATAFORMA_EUNENEM,
         idCampanha,
-        idContribuicao,
-        contribuinte: contribuinteValido(),
+        itens: [{ idContribuicao, quantidade: 1 }],
+        idsItens: [randomUUID()],
         metodo: 'pix',
         idPagamento,
         idIntencaoPagamento: randomUUID(),
@@ -214,6 +214,8 @@ describe('Fluxo — alteração de recebedor', () => {
       },
     );
 
+    // Plan 0015 (aperture-ucgok): contribuinte moved from Contribuição to
+    // IntencaoPagamento; stamped at finalize-time off the webhook payload.
     await finalizarPagamentoAprovado(
       {
         pagamentoRepository: deps.pagamentoRepository,
@@ -225,7 +227,7 @@ describe('Fluxo — alteração de recebedor', () => {
         clock,
         observability: deps.observability,
       },
-      { idPagamento },
+      { idPagamento, contribuinte: contribuinteValido() },
     );
 
     matureLancamentosRecebedorForCampanha(deps.livroFinanceiroRepository, idCampanha);

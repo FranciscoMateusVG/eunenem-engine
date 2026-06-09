@@ -37,6 +37,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { PagamentoRepository } from '../../src/adapters/pagamentos/repository.js';
 import {
   criarItemContribuicao,
+  criarItemPassthroughSurcharge,
   type ItemDoPagamento,
 } from '../../src/domain/pagamentos/entities/item-do-pagamento.js';
 import {
@@ -613,6 +614,8 @@ interface MakePagamentoOverrides {
   id?: IdPagamento | string;
   /** IntencaoPagamento.idContribuicao. Defaults to a fresh UUID per call. */
   idContribuicao?: IdContribuicaoPagamento | string;
+  /** IntencaoPagamento.idCampanha. Defaults to a fresh UUID per call. */
+  idCampanha?: string;
   /** Pagamento.criadoEm. Defaults to 2026-05-01T12:00:00.000Z. */
   criadoEm?: Date;
   /** Override Pagamento.status. Defaults to 'pendente'. */
@@ -625,6 +628,37 @@ interface MakePagamentoOverrides {
   chargeExternalRef?: string | null;
   /** IntencaoPagamento.contribuinte. Defaults to null (anonymous). */
   contribuinte?: Pagamento['intencao']['contribuinte'];
+  /**
+   * IntencaoPagamento.metodo. Defaults to 'pix' (zero surcharge). Pass
+   * 'credit_card' to get a cartão cart with a 50-cent passthrough
+   * surcharge item appended; override `surchargeCents` to vary the
+   * amount.
+   */
+  metodo?: 'pix' | 'credit_card';
+  /**
+   * For cartão carts: per-cart passthrough surcharge amount. Defaults to
+   * 50. Ignored for PIX (PIX carts always have surchargeCents=0).
+   */
+  surchargeCents?: number;
+  /**
+   * Per-unit contribution cents (single item). Defaults to 8000. The
+   * per-line denormalised totals derive from this × `quantidade`.
+   */
+  contributionUnitAmountCents?: number;
+  /** Per-unit fee cents. Defaults to 400. */
+  feeUnitAmountCents?: number;
+  /** Item quantidade. Defaults to 1. */
+  quantidade?: number;
+  /**
+   * IntencaoPagamento.valorACobrarCents. Defaults to the computed
+   * totalPaidCents (sum of contribution + surcharge per quantidade).
+   */
+  valorACobrarCents?: number;
+  /**
+   * IntencaoPagamento.balanceTransactionAvailableOn. Webhook-populated
+   * post-aprovado for cartão. Defaults to null (unpopulated).
+   */
+  balanceTransactionAvailableOn?: Date | null;
 }
 
 /**
@@ -645,45 +679,66 @@ interface MakePagamentoOverrides {
 export function makePagamento(overrides: MakePagamentoOverrides = {}): Pagamento {
   const id = (overrides.id ?? randomUUID()) as IdPagamento;
   const idContribuicao = (overrides.idContribuicao ?? randomUUID()) as IdContribuicaoPagamento;
-  const idCampanha = randomUUID();
+  const idCampanha = overrides.idCampanha ?? randomUUID();
   const criadoEm = overrides.criadoEm ?? new Date('2026-05-01T12:00:00.000Z');
+  const metodo = overrides.metodo ?? 'pix';
+  const quantidade = overrides.quantidade ?? 1;
+  const contributionUnitAmountCents = overrides.contributionUnitAmountCents ?? 8000;
+  const feeUnitAmountCents = overrides.feeUnitAmountCents ?? 400;
+  const surchargeCents = metodo === 'credit_card' ? (overrides.surchargeCents ?? 50) : 0;
 
   // Plan 0016 Phase 2 (aperture-eg1s2): multi-item cart shape. Build a
-  // single-contribuição PIX cart (1 item, no surcharge) for conformance
-  // defaults — repository tests focus on persistence, not cart
-  // construction. Multi-item / cartão fixtures live in the per-cart
-  // tests at tests/unit/pagamentos/multi-item-cart.test.ts.
-  const item: ItemDoPagamento = criarItemContribuicao({
+  // single-contribuição cart (1 item) with an optional passthrough
+  // surcharge item appended when metodo='credit_card' (cartão flows
+  // always carry the per-cart surcharge as the LAST item per locked
+  // decision #18). PIX flows have zero surcharge by construction.
+  const contributionItem: ItemDoPagamento = criarItemContribuicao({
     id: randomUUID() as never,
     composicaoValoresItem: {
       tipo: 'contribuicao',
       idContribuicao,
-      quantidade: 1,
-      contributionUnitAmountCents: 8000 as never,
-      feeUnitAmountCents: 400 as never,
-      receiverUnitAmountCents: 8000 as never,
-      lineContributionAmountCents: 8000 as never,
-      lineFeeAmountCents: 400 as never,
-      lineReceiverAmountCents: 8000 as never,
+      quantidade,
+      contributionUnitAmountCents: contributionUnitAmountCents as never,
+      feeUnitAmountCents: feeUnitAmountCents as never,
+      receiverUnitAmountCents: contributionUnitAmountCents as never,
+      lineContributionAmountCents: (contributionUnitAmountCents * quantidade) as never,
+      lineFeeAmountCents: (feeUnitAmountCents * quantidade) as never,
+      lineReceiverAmountCents: (contributionUnitAmountCents * quantidade) as never,
     },
     criadoEm,
   });
 
+  const items: ItemDoPagamento[] = [contributionItem];
+  if (metodo === 'credit_card') {
+    items.push(
+      criarItemPassthroughSurcharge({
+        id: randomUUID() as never,
+        composicaoValoresItem: { tipo: 'passthrough_surcharge', amountCents: surchargeCents as never },
+        criadoEm,
+      }),
+    );
+  }
+
+  const totalContributionCents = contributionUnitAmountCents * quantidade;
+  const totalFeeCents = feeUnitAmountCents * quantidade;
+  const totalReceiverCents = contributionUnitAmountCents * quantidade;
+  const totalPaidCents = totalContributionCents + totalFeeCents + surchargeCents;
+
   const base = criarPagamentoPendente({
     idPagamento: id,
     idIntencaoPagamento: randomUUID() as never,
-    items: [item],
+    items,
     composicaoValoresAggregate: {
       idCampanha: idCampanha as never,
-      totalContributionCents: 8000 as never,
-      totalFeeCents: 400 as never,
-      totalReceiverCents: 8000 as never,
-      totalSurchargeCents: 0,
-      totalPaidCents: 8400 as never,
+      totalContributionCents: totalContributionCents as never,
+      totalFeeCents: totalFeeCents as never,
+      totalReceiverCents: totalReceiverCents as never,
+      totalSurchargeCents: surchargeCents,
+      totalPaidCents: totalPaidCents as never,
       responsavelTaxa: 'contribuinte',
     },
-    valorACobrarCents: 8400 as never,
-    metodo: 'pix',
+    valorACobrarCents: (overrides.valorACobrarCents ?? totalPaidCents) as never,
+    metodo,
     criadoEm,
   });
 
@@ -698,6 +753,8 @@ export function makePagamento(overrides: MakePagamentoOverrides = {}): Pagamento
   if (overrides.chargeExternalRef !== undefined)
     intencaoOverrides.chargeExternalRef = overrides.chargeExternalRef;
   if (overrides.contribuinte !== undefined) intencaoOverrides.contribuinte = overrides.contribuinte;
+  if (overrides.balanceTransactionAvailableOn !== undefined)
+    intencaoOverrides.balanceTransactionAvailableOn = overrides.balanceTransactionAvailableOn;
 
   const result: Pagamento = {
     ...base,

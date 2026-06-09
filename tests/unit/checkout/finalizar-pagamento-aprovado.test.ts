@@ -9,7 +9,6 @@ import {
   ID_PLATAFORMA_EUCASEI,
   ID_PLATAFORMA_EUNENEM,
 } from '../../../src/adapters/plataforma/repository.memory.js';
-import { ProvedorRegraTaxaMemory } from '../../../src/adapters/taxas/regra-provider.memory.js';
 import { ArrecadacaoCampanhaNaoEncontradaError } from '../../../src/errors/arrecadacao/campanha-nao-encontrada.error.js';
 import { ArrecadacaoContribuicaoNaoEncontradaError } from '../../../src/errors/arrecadacao/contribuicao-nao-encontrada.error.js';
 import { PagamentoNaoEncontradoError } from '../../../src/errors/pagamentos/nao-encontrado.error.js';
@@ -19,9 +18,9 @@ import { adicionarOpcaoContribuicao } from '../../../src/use-cases/arrecadacao/a
 import { criarCampanha } from '../../../src/use-cases/arrecadacao/criar-campanha.js';
 import { criarContribuicao } from '../../../src/use-cases/arrecadacao/criar-contribuicao.js';
 import { finalizarPagamentoAprovado } from '../../../src/use-cases/checkout/finalizar-pagamento-aprovado.js';
-import { iniciarPagamentoContribuicao } from '../../../src/use-cases/checkout/iniciar-pagamento-contribuicao.js';
 import { aprovarPagamento } from '../../../src/use-cases/pagamentos/aprovar-pagamento.js';
 import { createArrecadacaoMemoryRepos } from '../../helpers/arrecadacao-repos.js';
+import { makePagamento } from '../../helpers/pagamento-repository.conformance.js';
 
 const silentObservability = {
   logger: new NoopLogger(),
@@ -42,12 +41,19 @@ const contribuinteValido = () => ({
   email: 'joao@exemplo.com',
 });
 
-/** Builds a pendente pagamento via Phase 2 saga and returns deps + ids. */
+/**
+ * Plan 0016 Phase 2 (aperture-eg1s2): builds a pendente pagamento by
+ * seeding the campanha + contribuição via real use-cases (so the
+ * finalize use-case finds them) and the pagamento via the shared
+ * `makePagamento` factory (cart shape). The pagamento's
+ * `composicaoValoresAggregate` reflects the FROZEN per-platform fee —
+ * eunenem 5% (fee 400) vs eucasei 8% (fee 640) — so the orchestrator's
+ * "no re-query RegraTaxa" contract is honored.
+ */
 async function setupPagamentoPendente(idPlataforma: string, tipoOpcao: 'presente' | 'rifa') {
   const repos = createArrecadacaoMemoryRepos();
   const { campanhaRepository, recebedorRepository, plataformaRepository } = repos;
   const contribuicaoRepository = new ContribuicaoRepositoryMemory();
-  const provedorRegraTaxa = new ProvedorRegraTaxaMemory();
   const pagamentoRepository = new PagamentoRepositoryMemory();
   const pagamentoEventPublisher = new PagamentoEventPublisherMemory();
   const pagamentoProvider = new PagamentoProviderFake({ statusResultado: 'aprovado' });
@@ -89,28 +95,20 @@ async function setupPagamentoPendente(idPlataforma: string, tipoOpcao: 'presente
     },
   );
 
-  await iniciarPagamentoContribuicao(
-    {
-      campanhaRepository,
-      contribuicaoRepository,
-      provedorRegraTaxa,
-      pagamentoRepository,
-      pagamentoEventPublisher,
-      checkoutSessionProvider: pagamentoProvider,
-      clock,
-      observability: silentObservability,
-    },
-    {
-      idPlataforma,
-      idCampanha,
-      idContribuicao,
-      contribuinte: contribuinteValido(),
-      metodo: 'pix',
-      idPagamento,
-      idIntencaoPagamento: randomUUID(),
-      returnUrl: 'https://test.example/sucesso?session_id={CHECKOUT_SESSION_ID}',
-    },
-  );
+  // Frozen per-platform fee: eunenem 5% of R$80 = R$4; eucasei 8% = R$6,40.
+  const feeUnitAmountCents = idPlataforma === ID_PLATAFORMA_EUCASEI ? 640 : 400;
+
+  const pendente = makePagamento({
+    id: idPagamento as never,
+    idContribuicao: idContribuicao as never,
+    idCampanha,
+    criadoEm: fixedDate,
+    metodo: 'pix',
+    contributionUnitAmountCents: 8000,
+    feeUnitAmountCents,
+    contribuinte: contribuinteValido(),
+  });
+  await pagamentoRepository.save(pendente);
 
   return {
     deps: {
@@ -140,7 +138,7 @@ describe('finalizarPagamentoAprovado — happy path', () => {
 
     expect(pagamento.status).toBe('aprovado');
     expect(pagamento.transacaoExterna?.status).toBe('aprovado');
-    expect(pagamento.intencao.amountCents).toBe(8400);
+    expect(pagamento.intencao.composicaoValoresAggregate.totalPaidCents).toBe(8400);
 
     expect(lancamentos).toHaveLength(2);
     const recebedorLancamento = lancamentos.find((l) => l.tipo === 'credito_saldo_recebedor');
@@ -156,7 +154,7 @@ describe('finalizarPagamentoAprovado — happy path', () => {
 
     const { pagamento, lancamentos } = await finalizarPagamentoAprovado(deps, { idPagamento });
 
-    expect(pagamento.intencao.amountCents).toBe(8640);
+    expect(pagamento.intencao.composicaoValoresAggregate.totalPaidCents).toBe(8640);
     const receitaLancamento = lancamentos.find((l) => l.tipo === 'credito_receita_plataforma');
     const recebedorLancamento = lancamentos.find((l) => l.tipo === 'credito_saldo_recebedor');
     expect(receitaLancamento?.amountCents).toBe(640);

@@ -30,6 +30,7 @@ import { PagamentoRepositoryMemory } from '../../src/adapters/pagamentos/reposit
 import { ID_PLATAFORMA_EUNENEM } from '../../src/adapters/plataforma/repository.memory.js';
 import { NoopLogger } from '../../src/observability/noop-logger.js';
 import { noopTracer } from '../../src/observability/tracer.js';
+import { makePagamento as makePagamentoBase } from '../helpers/pagamento-repository.conformance.js';
 
 const SESSION_COOKIE = 'better-auth.session_token';
 const SESSION_TOKEN = 'tok_test_session';
@@ -43,37 +44,18 @@ function makePagamento(args: {
   criadoEm?: Date;
   contribuinteNome?: string | null;
 }) {
-  const criadoEm = args.criadoEm ?? FAKE_NOW;
-  return {
-    id: args.id as never,
+  return makePagamentoBase({
+    id: args.id,
+    idContribuicao: args.idContribuicao,
     status: (args.status ?? 'aprovado') as never,
-    criadoEm,
-    atualizadoEm: criadoEm,
-    intencao: {
-      id: randomUUID() as never,
-      idContribuicao: args.idContribuicao as never,
-      criadaEm: criadoEm,
-      metodo: 'pix',
-      amountCents: 4500 as never,
-      externalRef: null,
-      paymentIntentExternalRef: null,
-      chargeExternalRef: null,
-      balanceTransactionAvailableOn: args.availableOn === undefined ? FAKE_NOW : args.availableOn,
-      contribuinte:
-        args.contribuinteNome === null || args.contribuinteNome === undefined
-          ? null
-          : { nome: args.contribuinteNome, email: 'x@y.com' },
-      composicaoValores: {
-        idContribuicao: args.idContribuicao,
-        contributionAmountCents: 4500 as never,
-        feeAmountCents: 0 as never,
-        surchargeCents: 0 as never,
-        receiverAmountCents: 4500 as never,
-        totalPaidCents: 4500 as never,
-        responsavelTaxa: 'contribuinte',
-      } as never,
-    } as never,
-  } as never;
+    criadoEm: args.criadoEm ?? FAKE_NOW,
+    balanceTransactionAvailableOn:
+      args.availableOn === undefined ? FAKE_NOW : args.availableOn,
+    contribuinte:
+      args.contribuinteNome === null || args.contribuinteNome === undefined
+        ? null
+        : ({ nome: args.contribuinteNome, email: 'x@y.com' } as never),
+  });
 }
 
 function makeLancamento(args: {

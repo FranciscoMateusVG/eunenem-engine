@@ -25,27 +25,38 @@ const idPagamento = '550e8400-e29b-41d4-a716-446655443001';
 const idContribuicao = '550e8400-e29b-41d4-a716-446655443002';
 const idCampanha = '550e8400-e29b-41d4-a716-446655443003';
 const idRepasse = '550e8400-e29b-41d4-a716-446655443004';
+const idItemContribuicao = '550e8400-e29b-41d4-a716-446655443020';
 
 function makeApprovedPaymentInput(
   overrides: Partial<RegistrarEfeitosFinanceirosPagamentoAprovadoInput> = {},
 ): RegistrarEfeitosFinanceirosPagamentoAprovadoInput {
   // Plan 0015 (aperture-ucgok): input schema dropped `metodo` along with
-  // the maturação calculation — `EfeitosFinanceirosPagamentoAprovado` no
-  // longer needs it. Lancamentos are born with
+  // the maturação calculation — Lançamentos born with
   // `transferidoEm: null, canceladoEm: null`.
+  // Plan 0016 Phase 2 (aperture-eg1s2): multi-item cart shape — root
+  // `idContribuicao` + `composicaoValores` replaced by `items[]` +
+  // `idContribuicaoAnchor`.
   return {
     idPagamento,
-    idContribuicao,
+    idContribuicaoAnchor: idContribuicao,
     idCampanha,
     statusPagamento: 'aprovado',
-    composicaoValores: {
-      contributionAmountCents: 8000,
-      feeAmountCents: 400,
-      surchargeCents: 0,
-      totalPaidCents: 8400,
-      receiverAmountCents: 8000,
-      responsavelTaxa: 'contribuinte',
-    },
+    items: [
+      {
+        idItemPagamento: idItemContribuicao,
+        composicaoValoresItem: {
+          tipo: 'contribuicao',
+          idContribuicao,
+          quantidade: 1,
+          contributionUnitAmountCents: 8000,
+          feeUnitAmountCents: 400,
+          receiverUnitAmountCents: 8000,
+          lineContributionAmountCents: 8000,
+          lineFeeAmountCents: 400,
+          lineReceiverAmountCents: 8000,
+        },
+      },
+    ],
     ...overrides,
   };
 }
@@ -102,20 +113,32 @@ describe('financial use cases', () => {
     ).rejects.toThrow(FinanceiroPagamentoNaoAprovadoError);
   });
 
-  it('rejects inconsistent value composition as invalid financial input', async () => {
+  it('rejects inconsistent per-item value composition as invalid financial input', async () => {
     const livroFinanceiroRepository = new LivroFinanceiroRepositoryMemory();
 
+    // Plan 0016 Phase 2: validation moved to per-item — `line` must equal
+    // `unit × quantidade`. Build an item whose lineContribution is wrong.
     await expect(
       registrarEfeitosFinanceirosPagamentoAprovado(
         { livroFinanceiroRepository, clock, observability: silentObservability },
         makeApprovedPaymentInput({
-          composicaoValores: {
-            contributionAmountCents: 8000,
-            feeAmountCents: 400,
-            totalPaidCents: 8300,
-            receiverAmountCents: 8000,
-            responsavelTaxa: 'contribuinte',
-          },
+          items: [
+            {
+              idItemPagamento: idItemContribuicao,
+              composicaoValoresItem: {
+                tipo: 'contribuicao',
+                idContribuicao,
+                quantidade: 1,
+                contributionUnitAmountCents: 8000,
+                feeUnitAmountCents: 400,
+                receiverUnitAmountCents: 8000,
+                // Intentionally wrong: should be 8000.
+                lineContributionAmountCents: 7900,
+                lineFeeAmountCents: 400,
+                lineReceiverAmountCents: 8000,
+              },
+            },
+          ],
         }),
       ),
     ).rejects.toThrow(FinanceiroInputInvalidoError);

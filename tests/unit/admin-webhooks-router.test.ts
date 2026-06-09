@@ -34,6 +34,7 @@ import { WebhookEventArchiveMemory } from '../../src/adapters/webhook-archive/we
 import { NoopLogger } from '../../src/observability/noop-logger.js';
 import type { Observability } from '../../src/observability/observability.js';
 import { noopTracer } from '../../src/observability/tracer.js';
+import { makePagamento as makePagamentoBase } from '../helpers/pagamento-repository.conformance.js';
 
 interface TestRig {
   caller: ReturnType<typeof appRouter.createCaller>;
@@ -51,38 +52,16 @@ function makePagamento(args: {
   id: string;
   idContribuicao: string;
 }): Parameters<PagamentoRepositoryMemory['save']>[0] {
-  const now = new Date('2026-06-02T10:00:00.000Z');
-  // Plan 0015 (aperture-ucgok): IntencaoPagamento now carries
-  // `paymentIntentExternalRef`, `chargeExternalRef`, and a `contribuinte`
-  // snapshot. Pagamento dropped `transacaoExterna: null` in favor of
-  // omitting the optional field. Webhook router only reads `id` +
-  // `intencao.idContribuicao` so the snapshot mostly exists to satisfy
-  // any future schema check at the boundary.
-  return {
-    id: args.id as never,
+  // Plan 0016 Phase 2 (aperture-ktw11): delegate to the shared canonical
+  // factory so the aggregate carries the new `items` + `composicaoValoresAggregate`
+  // shape. Webhook router only reads `id` + `intencao.idContribuicao` so
+  // defaults are fine here.
+  return makePagamentoBase({
+    id: args.id,
+    idContribuicao: args.idContribuicao,
     status: 'aprovado',
-    criadoEm: now,
-    atualizadoEm: now,
-    intencao: {
-      id: randomUUID() as never,
-      idContribuicao: args.idContribuicao as never,
-      criadaEm: now,
-      metodo: 'pix',
-      amountCents: 4500 as never,
-      externalRef: null,
-      paymentIntentExternalRef: null,
-      chargeExternalRef: null,
-      contribuinte: null,
-      composicaoValores: {
-        contributionAmountCents: 4500 as never,
-        feeAmountCents: 0 as never,
-        surchargeCents: 0 as never,
-        receiverAmountCents: 4500 as never,
-        totalPaidCents: 4500 as never,
-        responsavelTaxa: 'plataforma',
-      } as never,
-    } as never,
-  } as never;
+    criadoEm: new Date('2026-06-02T10:00:00.000Z'),
+  });
 }
 
 async function buildRig(): Promise<TestRig> {

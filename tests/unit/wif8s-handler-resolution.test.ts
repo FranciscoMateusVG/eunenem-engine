@@ -37,10 +37,10 @@ import { LivroFinanceiroRepositoryMemory } from '../../src/adapters/pagamentos/f
 import { PagamentoProviderFake } from '../../src/adapters/pagamentos/provider.fake.js';
 import { PagamentoRepositoryMemory } from '../../src/adapters/pagamentos/repository.memory.js';
 import { WebhookEventArchiveMemory } from '../../src/adapters/webhook-archive/webhook-event-archive.memory.js';
-import { criarPagamentoPendente } from '../../src/domain/pagamentos/entities/pagamento.js';
 import { NoopLogger } from '../../src/observability/noop-logger.js';
 import type { Observability } from '../../src/observability/observability.js';
 import { noopTracer } from '../../src/observability/tracer.js';
+import { makePagamento } from '../helpers/pagamento-repository.conformance.js';
 
 interface TestRig {
   deps: ServerDeps;
@@ -96,22 +96,15 @@ async function seedPagamentoWithSession(
   sessionId: string,
 ): Promise<{ idPagamento: string; idContribuicao: string }> {
   const idPagamento = randomUUID();
-  const idIntencaoPagamento = randomUUID();
   const idContribuicao = randomUUID();
-  const pagamento = criarPagamentoPendente({
-    idPagamento,
-    idIntencaoPagamento,
-    composicaoValores: {
-      idContribuicao,
-      contributionAmountCents: 4500,
-      feeAmountCents: 225,
-      surchargeCents: 0 as never,
-      totalPaidCents: 4725,
-      receiverAmountCents: 4500,
-      responsavelTaxa: 'contribuinte',
-    } as never,
-    valorACobrarCents: 4725 as never,
+  const pagamento = makePagamento({
+    id: idPagamento,
+    idContribuicao,
     metodo: 'pix',
+    contributionUnitAmountCents: 4500,
+    feeUnitAmountCents: 225,
+    surchargeCents: 0,
+    valorACobrarCents: 4725,
     externalRef: sessionId,
     criadoEm: new Date('2026-06-02T12:00:00.000Z'),
   });

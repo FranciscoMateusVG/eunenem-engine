@@ -37,9 +37,9 @@ import { LivroFinanceiroRepositoryMemory } from '../../src/adapters/pagamentos/f
 import { PagamentoProviderFake } from '../../src/adapters/pagamentos/provider.fake.js';
 import { PagamentoRepositoryMemory } from '../../src/adapters/pagamentos/repository.memory.js';
 import { WebhookEventArchiveMemory } from '../../src/adapters/webhook-archive/webhook-event-archive.memory.js';
-import { criarPagamentoPendente } from '../../src/domain/pagamentos/entities/pagamento.js';
 import { NoopLogger } from '../../src/observability/noop-logger.js';
 import { noopTracer } from '../../src/observability/tracer.js';
+import { makePagamento } from '../helpers/pagamento-repository.conformance.js';
 
 const FAKE_NOW = new Date('2026-06-04T10:00:00Z');
 
@@ -100,32 +100,16 @@ async function seedPagamento(
   },
 ): Promise<string> {
   const idPagamento = randomUUID();
-  const pagamento = criarPagamentoPendente({
-    idPagamento: idPagamento as never,
-    idIntencaoPagamento: randomUUID() as never,
-    composicaoValores: {
-      idContribuicao: randomUUID(),
-      contributionAmountCents: 4500,
-      feeAmountCents: 0,
-      surchargeCents: 0,
-      totalPaidCents: 4500,
-      receiverAmountCents: 4500,
-      responsavelTaxa: 'contribuinte',
-    } as never,
-    valorACobrarCents: 4500 as never,
+  const pagamento = makePagamento({
+    id: idPagamento,
     metodo: options.metodo,
     externalRef: 'cs_test_xxx',
     criadoEm: new Date('2026-06-04T09:00:00Z'),
+    paymentIntentExternalRef: options.piId,
+    chargeExternalRef: options.chId,
+    balanceTransactionAvailableOn: options.availableOn,
   });
-  await rig.pagamentoRepository.save({
-    ...pagamento,
-    intencao: {
-      ...pagamento.intencao,
-      paymentIntentExternalRef: options.piId,
-      chargeExternalRef: options.chId,
-      balanceTransactionAvailableOn: options.availableOn,
-    },
-  });
+  await rig.pagamentoRepository.save(pagamento);
   return idPagamento;
 }
 

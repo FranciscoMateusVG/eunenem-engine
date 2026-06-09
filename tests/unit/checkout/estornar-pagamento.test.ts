@@ -5,7 +5,6 @@ import { PagamentoProviderFake } from '../../../src/adapters/pagamentos/provider
 import { PagamentoRepositoryMemory } from '../../../src/adapters/pagamentos/repository.memory.js';
 import {
   aprovarPagamentoPendente,
-  criarPagamentoPendente,
   type Pagamento,
 } from '../../../src/domain/pagamentos/entities/pagamento.js';
 import type { LancamentoFinanceiro } from '../../../src/domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
@@ -18,6 +17,7 @@ import {
   PagamentoEstornoLancamentoJaTransferidoError,
   PagamentoEstornoRecusadoPeloProvedorError,
 } from '../../../src/use-cases/checkout/estornar-pagamento.js';
+import { makePagamento } from '../../helpers/pagamento-repository.conformance.js';
 
 /**
  * Plan 0015 (aperture-ucgok). Tests the new estornar-pagamento use-case:
@@ -41,31 +41,29 @@ const idTransacaoExterna = '550e8400-e29b-41d4-a716-446655440306';
 
 const observability = { logger: new NoopLogger(), tracer: noopTracer() };
 
-const composicaoValores = {
-  idContribuicao,
-  contributionAmountCents: 8000,
-  feeAmountCents: 400,
-  totalPaidCents: 8400,
-  receiverAmountCents: 8000,
-  responsavelTaxa: 'contribuinte' as const,
-};
-
 async function seedAprovado(deps: {
   pagamentoRepository: PagamentoRepositoryMemory;
   livroFinanceiroRepository: LivroFinanceiroRepositoryMemory;
 }): Promise<{ pagamento: Pagamento; lancamentos: LancamentoFinanceiro[] }> {
-  const pendente = criarPagamentoPendente({
-    idPagamento,
-    idIntencaoPagamento,
-    composicaoValores,
-    valorACobrarCents: 8400,
-    metodo: 'pix',
+  // Plan 0016 Phase 2 (aperture-eg1s2): build the pendente pagamento via
+  // the shared `makePagamento` factory so the cart-shape invariants are
+  // satisfied. Pin id / idIntencaoPagamento / idContribuicao so the
+  // seeded lançamentos below reference the same aggregate.
+  const pendente = makePagamento({
+    id: idPagamento as never,
+    idContribuicao: idContribuicao as never,
     criadoEm: new Date('2026-05-01T12:00:00Z'),
+    metodo: 'pix',
   });
-  await deps.pagamentoRepository.save(pendente);
+  // Pin idIntencaoPagamento so external observers can correlate.
+  const pendenteComIntencao: Pagamento = {
+    ...pendente,
+    intencao: { ...pendente.intencao, id: idIntencaoPagamento as never },
+  };
+  await deps.pagamentoRepository.save(pendenteComIntencao);
   // Approve via the entity transition.
   const aprovado = aprovarPagamentoPendente(
-    pendente,
+    pendenteComIntencao,
     {
       id: idTransacaoExterna,
       provedor: 'fake-provider',
@@ -305,13 +303,11 @@ describe('estornarPagamento — invalid source states', () => {
     const pagamentoProvider = new PagamentoProviderFake();
     const pagamentoEventPublisher = new PagamentoEventPublisherMemory();
 
-    const pendente = criarPagamentoPendente({
-      idPagamento,
-      idIntencaoPagamento,
-      composicaoValores,
-      valorACobrarCents: 8400,
-      metodo: 'pix',
+    const pendente = makePagamento({
+      id: idPagamento as never,
+      idContribuicao: idContribuicao as never,
       criadoEm: new Date('2026-05-01T12:00:00Z'),
+      metodo: 'pix',
     });
     await pagamentoRepository.save(pendente);
 
