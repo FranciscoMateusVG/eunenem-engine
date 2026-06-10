@@ -4546,5 +4546,755 @@
     "bgColor": "var(--blue-soft)",
     "category": "passeio",
     "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_763641-MLB112943740949_062026-F.jpg"
+  },
+  {
+    "id": "rh_1",
+    "name": "Figura de Ação - Dino Papa Tudo - Elka",
+    "price": 100.99,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/9360465/Figura-de-Acao---Dino-Papa-Tudo---Elka-0.jpg?v=638984825599700000"
+  },
+  {
+    "id": "rh_2",
+    "name": "Pelúcia - Aprender e Brincar - Irmã do Cachorrinho - Aprende Comigo - Fisher-Price",
+    "price": 276.99,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/9178359/Pelucia---Aprender-e-Brincar---Irma-do-Cachorrinho---Aprende-Comigo---Fisher-Price-0.jpg?v=638951203006800000"
+  },
+  {
+    "id": "rh_3",
+    "name": "Volante - Fom-Fom - Elka",
+    "price": 93.99,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/6413002/Volante---Fom-Fom---Elka-0.jpg?v=638610017749830000"
+  },
+  {
+    "id": "rh_4",
+    "name": "Girafa com Blocos Fisher-Price",
+    "price": 159.99,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/4124363/100002050_1.jpg?v=637919391828170000"
+  },
+  {
+    "id": "rh_5",
+    "name": "Telefone Sonoro - Disney - Minnie - Elka",
+    "price": 118.99,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/350272/telefone-sonoro-disney-minnie-elka-1061_Frente.jpg?v=636594792503830000"
+  },
+  {
+    "id": "rh_6",
+    "name": "Meu Primeiro Cachorrinho - Fisher-Price",
+    "price": 108.99,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/240755/Cachorrinho-com-coleira-Fisher-Price---Meu-Primeiro-Cachorrinho.jpg?v=635004116788830000"
+  },
+  {
+    "id": "rh_7",
+    "name": "Potinhos Empilhar & Rolar - Brilliant Basics - Fisher-Price",
+    "price": 81.9,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/212578/762008.jpg?v=634804688947370000"
+  },
+  {
+    "id": "rh_8",
+    "name": "Pelúcia - Aprender e Brincar - Cachorrinho - Aprende Comigo - Fisher-Price",
+    "price": 276.99,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/9178367/Pelucia---Aprender-e-Brincar---Cachorrinho---Aprende-Comigo---Fisher-Price-0.jpg?v=638951209642430000"
+  },
+  {
+    "id": "rh_9",
+    "name": "Brinquedo Educativo - Pirâmide De Argolas - Fisher-Price",
+    "price": 56.99,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/6433568/Brinquedo-Educativo---Piramide-De-Argolas---Fisher-Price-0.jpg?v=638610808434900000"
+  },
+  {
+    "id": "rh_10",
+    "name": "Brinquedo Didático - Baby Land - Mipuxa - Cardoso",
+    "price": 63.99,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/5822792/Brinquedo-Didatico---Baby-Land---Mipuxa---Cardoso-0.jpg?v=638258194312200000"
+  },
+  {
+    "id": "rh_11",
+    "name": "Brinquedo Educativo - Laptop - Fisher-Price - 33Cm - Azul",
+    "price": 187.99,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/6413039/Brinquedo-Educativo---Laptop---Fisher-Price---33Cm---Azul-0.jpg?v=638610020197630000"
+  },
+  {
+    "id": "rh_12",
+    "name": "Bate Rebate - Minhoquinhas - Martelinho - Elka",
+    "price": 63.99,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/6002104/Bate-Rebate---Minhoquinhas---Martelinho---Elka-frente.jpg?v=638357579243400000"
+  },
+  {
+    "id": "rh_13",
+    "name": "Playset Com Mini Veículos - Super Parking - Minimi",
+    "price": 117.99,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/6285850/Playset-Com-Mini-Veiculos---Super-Parking---Minimi-0.jpg?v=638526086079770000"
+  },
+  {
+    "id": "rh_14",
+    "name": "Xilofone para Bebês - Fisher-Price - Colorido",
+    "price": 127.99,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/6847104/Xilofone-para-Bebes---Fisher-Price---Colorido-0.jpg?v=639001504316170000"
+  },
+  {
+    "id": "rh_15",
+    "name": "Brinquedo de Encaixe - Encaixa Borboleta - Colorido - Fisher-Price",
+    "price": 56.99,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/6765795/Brinquedo-de-Encaixe---Encaixa-Borboleta---Colorido---Fisher-Price--0.jpg?v=638639537633370000"
+  },
+  {
+    "id": "rh_16",
+    "name": "Caixa Encaixa - Estrela Baby",
+    "price": 167.48,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/317872/Caixa-Encaixa-Estrela-Baby-1001104000005-Frente.jpg?v=636093841476430000"
+  },
+  {
+    "id": "rh_17",
+    "name": "Brinquedo Interativo - Minimi - Casinha Pets - Modelos Sortidos - Jxp Brink",
+    "price": 43.99,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/8499652/Brinquedo-Interativo---Minimi---Casinha-Pets---Modelos-Sortidos---Jxp-Brink-0.jpg?v=638881157566900000"
+  },
+  {
+    "id": "rh_18",
+    "name": "Lousa Mágica Magnética - Desenha Comigo - Sortida - Fisher Price",
+    "price": 59.95,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/8342464/Lousa-Magica-Magnetica---Desenha-Comigo---Sortida---Fisher-Price-0.jpg?v=638845885307630000"
+  },
+  {
+    "id": "rh_19",
+    "name": "Conjunto de Mordedores - Disney Baby - Meu Primeiro Kit - Bda - Toyster",
+    "price": 63.99,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/7112740/Conjunto-de-Mordedores---Disney-Baby---Meu-Primeiro-Kit---Bda---Toyster-0.jpg?v=638696329877770000"
+  },
+  {
+    "id": "rh_20",
+    "name": "Mordedor - Sensimals - Modelos Sortidos - Fisher-Price",
+    "price": 19.91,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/7502404/Mordedor---Sensimals---Modelos-Sortidos---Fisher-Price-0.jpg?v=638756852404000000"
+  },
+  {
+    "id": "rh_21",
+    "name": "Chocalho - Maracas - Fisher-Price - Colorido",
+    "price": 66.99,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/6787385/Chocalho---Maracas---Fisher-Price---Colorido-0.jpg?v=638641876664970000"
+  },
+  {
+    "id": "rh_22",
+    "name": "Mordedor - Disney Baby - Chaveiro Fusca Musical - Yes Toys",
+    "price": 46.99,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/8445703/Mordedor---Disney-Baby---Chaveiro-Fusca-Musical---Yes-Toys-0.jpg?v=638870673693100000"
+  },
+  {
+    "id": "rh_23",
+    "name": "Chupeta - Nuk - Star Newborn - Silicone",
+    "price": 29.99,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/6421946/Chupeta---Nuk---Star-Newborn---Silicone-0.jpg?v=638610719696570000"
+  },
+  {
+    "id": "rh_24",
+    "name": "Chupeta - Philips Avent - Soothie - Silicone - De 0 a 3 Meses",
+    "price": 39.97,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/6416657/Chupeta---Philips-Avent---Soothie---Silicone---De-0-a-3-Meses-0.jpg?v=638610516437200000"
+  },
+  {
+    "id": "rh_25",
+    "name": "Chupeta - Silicone - Space - Rosa - Meninas - Tam 2 - NUK",
+    "price": 39.99,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/408973/chupeta-silicone-space-rosa-meninas-tam-2-nuk-PA7333-2G_frente.jpg?v=637151324881730000"
+  },
+  {
+    "id": "rh_26",
+    "name": "Carregador De Bebê Ergonômico - Nuk - Canguru 3 Em 1",
+    "price": 339.99,
+    "suggestedQty": 1,
+    "emoji": "🚼",
+    "bgColor": "var(--blue-soft)",
+    "category": "passeio",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/9721200/Carregador-De-Bebe-Ergonomico---Nuk---Canguru-3-Em-1-0.jpg?v=639064335482600000"
+  },
+  {
+    "id": "rh_27",
+    "name": "Protetor Solar - Com Ventosas - 2 Unidades - Buba",
+    "price": 40.31,
+    "suggestedQty": 1,
+    "emoji": "🚼",
+    "bgColor": "var(--blue-soft)",
+    "category": "passeio",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/393782/prot-solar-car-vent-2un-buba-10503_Frente.jpg?v=637018390313100000"
+  },
+  {
+    "id": "rh_28",
+    "name": "Apoio De Cabeça Para Assento Para Bebês Buba Cinza - 11619",
+    "price": 106.97,
+    "suggestedQty": 1,
+    "emoji": "🚼",
+    "bgColor": "var(--blue-soft)",
+    "category": "passeio",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/9983432/17789402257892.jpg?v=639147124151830000"
+  },
+  {
+    "id": "rh_29",
+    "name": "Fisher-Price Lagarta de Encaixe Mattel Amigável Colorido",
+    "price": 119.9,
+    "suggestedQty": 1,
+    "emoji": "🚼",
+    "bgColor": "var(--blue-soft)",
+    "category": "passeio",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/9978545/17787650412910.jpg?v=639144291991930000"
+  },
+  {
+    "id": "rh_30",
+    "name": "Cordão De Segurança Para Pulso Rosa Buba - 15360",
+    "price": 73.45,
+    "suggestedQty": 1,
+    "emoji": "🚼",
+    "bgColor": "var(--blue-soft)",
+    "category": "passeio",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/9930845/17779233516561.jpg?v=639136721247130000"
+  },
+  {
+    "id": "rh_31",
+    "name": "Trava Para Cinto de Segurança Buba - 13205",
+    "price": 27.84,
+    "suggestedQty": 1,
+    "emoji": "🚼",
+    "bgColor": "var(--blue-soft)",
+    "category": "passeio",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/9930324/17763679084514.jpg?v=639136719940430000"
+  },
+  {
+    "id": "rh_32",
+    "name": "SuperJipe Reclinável Com Capota Passeio e Pedal - Preto - Bandeirante",
+    "price": 868.99,
+    "suggestedQty": 1,
+    "emoji": "🚼",
+    "bgColor": "var(--blue-soft)",
+    "category": "passeio",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/6410284/SuperJipe-Reclinavel-Com-Capota-Passeio-e-Pedal---Preto---Bandeirante-0.jpg?v=638609899148030000"
+  },
+  {
+    "id": "rh_33",
+    "name": "Carrinho 2 em 1 - Moises Jazz Litet - Preto - Multikids",
+    "price": 999.91,
+    "suggestedQty": 1,
+    "emoji": "🚼",
+    "bgColor": "var(--blue-soft)",
+    "category": "passeio",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/6422034/Carrinho-2-em-1---Moises-Jazz-Litet---Preto---Multikids-0.jpg?v=638610722703400000"
+  },
+  {
+    "id": "rh_34",
+    "name": "Totokinha - Galinha Pintadinha Mini - Cardoso",
+    "price": 169.99,
+    "suggestedQty": 1,
+    "emoji": "🚼",
+    "bgColor": "var(--blue-soft)",
+    "category": "passeio",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/6434972/Totokinha---Galinha-Pintadinha-Mini---Cardoso-0.jpg?v=638610881670130000"
+  },
+  {
+    "id": "rh_35",
+    "name": "Carrinho de Bebê 2 Em 1 - Jazz Litet - Preto E Cinza - Multikids",
+    "price": 999.91,
+    "suggestedQty": 1,
+    "emoji": "🚼",
+    "bgColor": "var(--blue-soft)",
+    "category": "passeio",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/6422096/Carrinho-de-Bebe-2-Em-1---Jazz-Litet---Preto-E-Cinza---Multikids-0.jpg?v=638610724505030000"
+  },
+  {
+    "id": "rh_36",
+    "name": "Mamadeira - Fisher-Price - Clássica Neutra - 330ml",
+    "price": 29.91,
+    "suggestedQty": 1,
+    "emoji": "🍼",
+    "bgColor": "var(--yellow-soft)",
+    "category": "alimentacao",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/1072148/Mamadeira---330ml-Classica-Neutra---Fisher-Price---Multikids-4.jpg?v=637492566430230000"
+  },
+  {
+    "id": "rh_37",
+    "name": "Bico De Mamadeira - 6 Meses+ - Fluxo Para Líquido Espesso - Philips Avent - Pétala 3.0",
+    "price": 62.99,
+    "suggestedQty": 1,
+    "emoji": "🍼",
+    "bgColor": "var(--yellow-soft)",
+    "category": "alimentacao",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/6422710/Bico-De-Mamadeira---6-Meses----Fluxo-Para-Liquido-Espesso---Philips-Avent---Petala-30-0.jpg?v=638610756335400000"
+  },
+  {
+    "id": "rh_38",
+    "name": "Mamadeira - Chicco - Perfect 5 - Azul - 300ML",
+    "price": 79.91,
+    "suggestedQty": 1,
+    "emoji": "🍼",
+    "bgColor": "var(--yellow-soft)",
+    "category": "alimentacao",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/6413504/Mamadeira---Chicco---Perfect-5---Azul---300ML-0.jpg?v=638610083570070000"
+  },
+  {
+    "id": "rh_39",
+    "name": "Mamadeira - Chicco - Perfect 5 - Rosa - 300ML",
+    "price": 79.91,
+    "suggestedQty": 1,
+    "emoji": "🍼",
+    "bgColor": "var(--yellow-soft)",
+    "category": "alimentacao",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/6413660/Mamadeira---Chicco---Perfect-5---Rosa---300ML-0.jpg?v=638610102556000000"
+  },
+  {
+    "id": "rh_40",
+    "name": "Mamadeiras My First - 150 ml e 300 ml - Rosa - Nuk",
+    "price": 93.99,
+    "suggestedQty": 1,
+    "emoji": "🍼",
+    "bgColor": "var(--yellow-soft)",
+    "category": "alimentacao",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/2097171/mamadeiras-my-first-150-ml-e-300-ml-rosa-nuk-PA7063-MG_Frente.jpg?v=637720063061670000"
+  },
+  {
+    "id": "rh_41",
+    "name": "Colher Dosadora - Azul - Buba",
+    "price": 50.99,
+    "suggestedQty": 1,
+    "emoji": "🍼",
+    "bgColor": "var(--yellow-soft)",
+    "category": "alimentacao",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/7158413/Colher-Dosadora---Azul---Buba-0.jpg?v=638717857705330000"
+  },
+  {
+    "id": "rh_42",
+    "name": "Babador Com Bolso - Bubazoo - Leão - Buba",
+    "price": 24.99,
+    "suggestedQty": 1,
+    "emoji": "🍼",
+    "bgColor": "var(--yellow-soft)",
+    "category": "alimentacao",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/6423727/Babador-Com-Bolso---Bubazoo---Leao---Buba-0.jpg?v=638610782455900000"
+  },
+  {
+    "id": "rh_43",
+    "name": "Babador Com Bolso - Bubazoo - Dino - Buba",
+    "price": 17.99,
+    "suggestedQty": 1,
+    "emoji": "🍼",
+    "bgColor": "var(--yellow-soft)",
+    "category": "alimentacao",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/6423749/Babador-Com-Bolso---Bubazoo---Dino---Buba-0.jpg?v=638610784251230000"
+  },
+  {
+    "id": "rh_44",
+    "name": "Pote Térmico Com Colher - Buba - Azul",
+    "price": 158.99,
+    "suggestedQty": 1,
+    "emoji": "🍼",
+    "bgColor": "var(--yellow-soft)",
+    "category": "alimentacao",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/6419415/Pote-Termico-Com-Colher---Buba---Azul--0.jpg?v=638610621199370000"
+  },
+  {
+    "id": "rh_45",
+    "name": "Conjunto de Talheres Infantil - Buba - Unicórnio Star - Aço Inoxidável - Rosa",
+    "price": 39.99,
+    "suggestedQty": 1,
+    "emoji": "🍼",
+    "bgColor": "var(--yellow-soft)",
+    "category": "alimentacao",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/6417335/Conjunto-de-Talheres-Infantil---Buba---Unicornio-Star---Aco-Inoxidavel---Rosa-0.jpg?v=638610544336730000"
+  },
+  {
+    "id": "rh_46",
+    "name": "Naninha - Aconchego - Coelho - Minimi",
+    "price": 63.99,
+    "suggestedQty": 1,
+    "emoji": "🛏️",
+    "bgColor": "var(--lilac-soft)",
+    "category": "soninho",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/7220304/Naninha---Aconchego---Coelho---Minimi-0.jpg?v=638726753224930000"
+  },
+  {
+    "id": "rh_47",
+    "name": "Naninha Mordedor - Disney - Sortido - New Toys",
+    "price": 59.99,
+    "suggestedQty": 1,
+    "emoji": "🛏️",
+    "bgColor": "var(--lilac-soft)",
+    "category": "soninho",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/8327834/Naninha-Mordedor---Disney---Sortido---New-Toys-0.jpg?v=638842295908670000"
+  },
+  {
+    "id": "rh_48",
+    "name": "Mobile Arco - Mobile Abelhinha - Mobile Jardim da Abelhinha - Minimi",
+    "price": 160.99,
+    "suggestedQty": 1,
+    "emoji": "🛏️",
+    "bgColor": "var(--lilac-soft)",
+    "category": "soninho",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/9722598/Mobile-Arco---Mobile-Abelhinha---Mobile-Jardim-da-Abelhinha---Minimi-0.jpg?v=639065188047000000"
+  },
+  {
+    "id": "rh_49",
+    "name": "Pelúcia Naninha Para Bebe Magic Dino Buba - 21067",
+    "price": 65.08,
+    "suggestedQty": 1,
+    "emoji": "🛏️",
+    "bgColor": "var(--lilac-soft)",
+    "category": "soninho",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/9969713/17783761844195.jpg?v=639141033413670000"
+  },
+  {
+    "id": "rh_50",
+    "name": "MOBILE ANIMAL MUSICAL - ZOOP TOYS",
+    "price": 131.9,
+    "suggestedQty": 1,
+    "emoji": "🛏️",
+    "bgColor": "var(--lilac-soft)",
+    "category": "soninho",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/9901038/17768857240598.jpg?v=639126443122300000"
+  },
+  {
+    "id": "rh_51",
+    "name": "Babá Eletrônica Kidsneed Branco Tela 5\" 720P Sem WiFi Bateria 48h Pan Tilt Zoom Visão Noturna Térmica",
+    "price": 986.36,
+    "suggestedQty": 1,
+    "emoji": "🛏️",
+    "bgColor": "var(--lilac-soft)",
+    "category": "soninho",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/9880055/17752531070658.jpg?v=639117735658400000"
+  },
+  {
+    "id": "rh_52",
+    "name": "Babá Eletrônica AnKeKe Branco Sem Fio Tela 5\" Pan Tilt Zoom Detecção Movimento Naninhas Temperatura",
+    "price": 832.39,
+    "suggestedQty": 1,
+    "emoji": "🛏️",
+    "bgColor": "var(--lilac-soft)",
+    "category": "soninho",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/9880035/17752529880129.jpg?v=639117735079870000"
+  },
+  {
+    "id": "rh_53",
+    "name": "Monitor Sono Owlet Dream Sensor Dedo Pé Oxigênio Pulso Temperatura Personalizável Cama Bebê WiFi",
+    "price": 1989.21,
+    "suggestedQty": 1,
+    "emoji": "🛏️",
+    "bgColor": "var(--lilac-soft)",
+    "category": "soninho",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/9880027/17752530145941.jpg?v=639117735076400000"
+  },
+  {
+    "id": "rh_54",
+    "name": "Babá Eletrônica Hubble 2 Câmeras 2K UHD WiFi Detecção IA Rosto Virada Choro Suporte Flexível",
+    "price": 3279.85,
+    "suggestedQty": 1,
+    "emoji": "🛏️",
+    "bgColor": "var(--lilac-soft)",
+    "category": "soninho",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/9880017/17752529613019.jpg?v=639117735051570000"
+  },
+  {
+    "id": "rh_55",
+    "name": "Babá Eletrônica Arenti 4MP Tela 5\" WiFi 2.4G/5G Upgraded Smartphone Criptografia Conexão Segura A4",
+    "price": 1603.91,
+    "suggestedQty": 1,
+    "emoji": "🛏️",
+    "bgColor": "var(--lilac-soft)",
+    "category": "soninho",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/9880008/17752529146401.jpg?v=639117735009300000"
+  },
+  {
+    "id": "rh_56",
+    "name": "Kit Banho - Burigotto - Banheira, Suporte e Assento Redutor - Branco",
+    "price": 229.91,
+    "suggestedQty": 1,
+    "emoji": "🛁",
+    "bgColor": "var(--cream-2)",
+    "category": "higiene",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/6414264/Kit-Banho---Burigotto---Banheira-Suporte-e-Assento-Redutor---Branco-0.jpg?v=638610152409100000"
+  },
+  {
+    "id": "rh_57",
+    "name": "Saboneteira para Banheira - Burigotto",
+    "price": 19.97,
+    "suggestedQty": 1,
+    "emoji": "🛁",
+    "bgColor": "var(--cream-2)",
+    "category": "higiene",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/295270/100110038-IXAP0344BR-saboneteira-p-banheira-burigotto-5039848_1.jpg?v=635787829985400000"
+  },
+  {
+    "id": "rh_58",
+    "name": "Banheira Babytub Ofurô - De 1 a 6 Anos - Rosa - Baby Tub",
+    "price": 319.99,
+    "suggestedQty": 1,
+    "emoji": "🛁",
+    "bgColor": "var(--cream-2)",
+    "category": "higiene",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/373157/Rosa.jpg?v=636858224331130000"
+  },
+  {
+    "id": "rh_59",
+    "name": "Tapete Animais Selva Colorido Buba",
+    "price": 79.99,
+    "suggestedQty": 1,
+    "emoji": "🛁",
+    "bgColor": "var(--cream-2)",
+    "category": "higiene",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/4359721/100154491_1.jpg?v=637934425221930000"
+  },
+  {
+    "id": "rh_60",
+    "name": "Banheira Rígida e Avulsa - Burigotto",
+    "price": 99.99,
+    "suggestedQty": 1,
+    "emoji": "🛁",
+    "bgColor": "var(--cream-2)",
+    "category": "higiene",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/3140915/100110201_1.jpg?v=637873086867070000"
+  },
+  {
+    "id": "rh_61",
+    "name": "Vestido Festa Junina Infantil pra Menina Xadrez Preto e Rosa de Luxo",
+    "price": 209.9,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--pink-soft)",
+    "category": "roupa",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/10009919/17800567542940.jpg?v=639159405227970000"
+  },
+  {
+    "id": "rh_62",
+    "name": "Conjunto Curto Lilica Ripilica Blusa e Short Fun Kids Coral",
+    "price": 199.9,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--pink-soft)",
+    "category": "roupa",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/9980386/17788791889974.jpg?v=639145159437600000"
+  },
+  {
+    "id": "rh_63",
+    "name": "Camiseta Gola Polo Tigor T Tigre Grid Laranja",
+    "price": 99.9,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--pink-soft)",
+    "category": "roupa",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/9980388/17788792593052.jpg?v=639145159439800000"
+  },
+  {
+    "id": "rh_64",
+    "name": "Camiseta Gola Polo Tigor T Tigre Botão Etiqueta Vermelho",
+    "price": 109.9,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--pink-soft)",
+    "category": "roupa",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/9980383/17788792503331.jpg?v=639145159434930000"
+  },
+  {
+    "id": "rh_65",
+    "name": "Camiseta Gola Polo Tigor T Tigre Grid Preto",
+    "price": 99.9,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--pink-soft)",
+    "category": "roupa",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/9980373/17788792684372.jpg?v=639145159415530000"
+  },
+  {
+    "id": "rh_66",
+    "name": "Mictório Infantil com Ventosas - Sapinho - Buba",
+    "price": 49.99,
+    "suggestedQty": 1,
+    "emoji": "📦",
+    "bgColor": "var(--cream-2)",
+    "category": "outros",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/350718/mictorio-infantil-com-ventosas-sapinho-buba-7274_Frente.jpg?v=636598367256170000"
+  },
+  {
+    "id": "rh_67",
+    "name": "Brinquedo de Atividades Buba Chaveiro Com Mordedor Colorido",
+    "price": 55.9,
+    "suggestedQty": 1,
+    "emoji": "📦",
+    "bgColor": "var(--cream-2)",
+    "category": "outros",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/10011371/17803351089829.jpg?v=639159844447030000"
+  },
+  {
+    "id": "rh_68",
+    "name": "Brinquedo de Atividades Buba Carrinho Com Chaveiro Colorido",
+    "price": 89.9,
+    "suggestedQty": 1,
+    "emoji": "📦",
+    "bgColor": "var(--cream-2)",
+    "category": "outros",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/10011332/17803350868713.jpg?v=639159844422630000"
+  },
+  {
+    "id": "rh_69",
+    "name": "Brinquedo Educativo Buba Phone Bilingue Zoo Leão Amarelo",
+    "price": 49.9,
+    "suggestedQty": 1,
+    "emoji": "📦",
+    "bgColor": "var(--cream-2)",
+    "category": "outros",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/10011338/17803350979329.jpg?v=639159844422970000"
+  },
+  {
+    "id": "rh_70",
+    "name": "Brinquedo Educativo Fisher-Price Boppin Insetos Pop Up Verde",
+    "price": 269.9,
+    "suggestedQty": 1,
+    "emoji": "📦",
+    "bgColor": "var(--cream-2)",
+    "category": "outros",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/10008389/17800814987632.jpg?v=639157255117330000"
+  },
+  {
+    "id": "rh_71",
+    "name": "Repelente Eletrônico - Difusor Ultrassons - Portátil - Chicco",
+    "price": 69.91,
+    "suggestedQty": 1,
+    "emoji": "📦",
+    "bgColor": "var(--cream-2)",
+    "category": "outros",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/328860/repelente-eletronico-difusor-ultrassons-portatil-chicco-00007222100000_Frente.jpg?v=636281124339500000"
+  },
+  {
+    "id": "rh_72",
+    "name": "Repelente Eletrônico Bivolt Controle De Pragas",
+    "price": 36.99,
+    "suggestedQty": 1,
+    "emoji": "📦",
+    "bgColor": "var(--cream-2)",
+    "category": "outros",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/9970001/17782597180531.jpg?v=639141033851000000"
+  },
+  {
+    "id": "rh_73",
+    "name": "Kit 4 Lixas De Unha Para Bebe Fazendinha Buba - 13775",
+    "price": 18.52,
+    "suggestedQty": 1,
+    "emoji": "📦",
+    "bgColor": "var(--cream-2)",
+    "category": "outros",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/9930757/17779233883590.jpg?v=639136721229130000"
+  },
+  {
+    "id": "rh_74",
+    "name": "Creme Para Prevenção de Assaduras 50g Buba Care 16561",
+    "price": 29.99,
+    "suggestedQty": 1,
+    "emoji": "📦",
+    "bgColor": "var(--cream-2)",
+    "category": "outros",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/9784356/17727998422414.jpg?v=639086914026370000"
+  },
+  {
+    "id": "rh_75",
+    "name": "Kit Lixas de Unha Eletrico Azul Buba 18688",
+    "price": 49.99,
+    "suggestedQty": 1,
+    "emoji": "📦",
+    "bgColor": "var(--cream-2)",
+    "category": "outros",
+    "imageUrl": "https://rihappy.vteximg.com.br/arquivos/ids/9766598/17722164955216.jpg?v=639081629992700000"
   }
 ]
