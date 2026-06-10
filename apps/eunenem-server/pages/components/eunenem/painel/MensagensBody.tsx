@@ -2,29 +2,43 @@ import { useMemo, useState, type CSSProperties } from "react";
 import { toast } from "sonner";
 
 import type { PainelSectionBodyProps } from "@/PainelSectionPage";
-import {
-  useMockMarcarLida,
-  useMockMarcarTodasLidas,
-  useMockMensagensList,
-} from "@/lib/hooks/useMensagensAdmin";
-import type { AdminRecadoProjection } from "@/lib/schemas/admin-recado";
+import { trpc } from "@/lib/trpc";
 
-// aperture-5v766 Phase B — admin mensagens page (scaffolded against mock).
+// aperture-5v766 Phase B + aperture-kih74 swap-over — admin mensagens page
+// against Rex's Phase A backend (PR #199).
 //
 // Content-only body for /painel/:slug/mensagens. The topbar / shell / Tweaks
 // come from PainelLayout — this renders ONLY the page content, matching the
 // painel-body conventions established by ConvidadosBody / PresentesBody.
 //
-// Hook surface mirrors Rex's upcoming `admin.mensagens.*` procs verbatim
-// (see `@/lib/hooks/useMensagensAdmin` + `@/lib/schemas/admin-recado`).
-// When Rex's Phase A backend (aperture-16wrk) lands, the swap is a one-line
-// import change per hook — consumer code in this file should not change.
+// Wire shape from `trpc.painelMensagens.list({ slug })`:
+//   - idPagamento: uuid string
+//   - contribuinteNome: string
+//   - mensagem: string
+//   - criadoEm: ISO-8601 string (parsed at render via new Date)
+//   - lidaEm: ISO-8601 string | null
+//   - valorContribuicaoCents: integer (BRL cents)
+//   - contribuicaoNome: string | null (null when the contribuição row was
+//     deleted between pagamento and read — render "(presente removido)")
 //
-// TODO(aperture-5v766-rex-swap): the slug→idCampanha resolution currently
-// passes slug straight through to the mock store (mocks are keyed by an
-// opaque string). Post-swap Rex's contract takes `{ idCampanha }`, so this
-// component will wrap in `trpc.painel.resolveCampanhaBySlug.useQuery({slug})`
-// (or whatever the resolver lands as) and pass the resolved id downstream.
+// Slug-keyed (no idCampanha resolver needed — tenant chain runs server-side
+// from session-derived idUsuario + slug verification).
+//
+// Type declared inline rather than derived from AppRouter via
+// `inferRouterOutputs` because the engine's painel-mensagens-router has
+// some relative-path noise in its src/domain imports that breaks the
+// inferred-router chain in this worktree's strict tsc. The runtime call
+// + wire validation are unaffected; the inline shape stays a verbatim
+// mirror of `AdminRecadoProjectionSchema` exported from `src/index.ts`.
+interface AdminRecadoProjection {
+  idPagamento: string;
+  contribuinteNome: string;
+  mensagem: string;
+  criadoEm: string;
+  lidaEm: string | null;
+  valorContribuicaoCents: number;
+  contribuicaoNome: string | null;
+}
 
 // AGRADECER scope decision (aperture-5v766 spec §6):
 // The button stays visible as an affordance — hiding it would erase a
@@ -86,8 +100,14 @@ const REL_DIVS: readonly [Intl.RelativeTimeFormatUnit, number][] = [
   ["minute", 60],
 ];
 
-/** Relative time in pt-BR ("há 4 horas"). Falls back to "agora" under 1m. */
-function relativeTime(d: Date): string {
+/**
+ * Relative time in pt-BR ("há 4 horas"). Falls back to "agora" under 1m.
+ *
+ * aperture-kih74 — accepts ISO-8601 strings (Rex's wire shape) instead of
+ * Date objects. Internal Date parse stays the same.
+ */
+function relativeTime(iso: string): string {
+  const d = new Date(iso);
   const rtf = new Intl.RelativeTimeFormat("pt-BR", { numeric: "auto" });
   const seconds = Math.round((d.getTime() - Date.now()) / 1000);
   const abs = Math.abs(seconds);
@@ -342,7 +362,9 @@ function RecadoCard({
             marginTop: 2,
           }}
         >
-          {/* gift chip */}
+          {/* gift chip — aperture-kih74: valorContribuicaoCents rename +
+              null fallback for contribuicaoNome when the contribuição
+              row was deleted between pagamento and read. */}
           <span
             style={{
               display: "inline-flex",
@@ -360,10 +382,12 @@ function RecadoCard({
             <IconGift size={15} style={{ color: "var(--coral-pink)" }} />
             presenteou com{" "}
             <strong style={{ color: "var(--plum)", fontWeight: 600 }}>
-              {fmtCents(r.valorContribuicao)}
+              {fmtCents(r.valorContribuicaoCents)}
             </strong>
             <span style={{ color: "var(--ink-mute)" }}>·</span>
-            {r.contribuicaoNome}
+            {r.contribuicaoNome ?? (
+              <em style={{ color: "var(--ink-mute)" }}>(presente removido)</em>
+            )}
           </span>
 
           {/* actions */}
@@ -431,18 +455,38 @@ function RecadoCard({
 
 // ---------- page body ----------
 export function MensagensBody({ slug }: PainelSectionBodyProps) {
-  // TODO(aperture-5v766-rex-swap): wrap in a slug→idCampanha resolver query.
-  // Today the mock store is keyed by an opaque string and `slug` is fine.
-  const idCampanha = slug;
-
-  const list = useMockMensagensList(idCampanha);
-  const marcarLida = useMockMarcarLida(idCampanha);
-  const marcarTodasLidas = useMockMarcarTodasLidas();
+  // aperture-kih74 — real wire. Slug-keyed; tenant chain runs server-side
+  // (session-derived idUsuario → slug-owner-admin guard → idCampanha lookup).
+  // No client-side slug→idCampanha resolver needed.
+  const utils = trpc.useUtils();
+  const list = trpc.painelMensagens.list.useQuery({ slug });
+  // Both mutations invalidate the list on success so the NOVA badge +
+  // filter counts repaint in one round-trip without optimistic updates.
+  const marcarLida = trpc.painelMensagens.marcarLida.useMutation({
+    onSuccess: () => {
+      void utils.painelMensagens.list.invalidate({ slug });
+    },
+  });
+  const marcarTodasLidas = trpc.painelMensagens.marcarTodasLidas.useMutation({
+    onSuccess: () => {
+      void utils.painelMensagens.list.invalidate({ slug });
+    },
+  });
 
   const [filter, setFilter] = useState<"all" | "unread">("all");
 
-  const recados = list.data?.recados ?? [];
-  const counts = list.data?.counts ?? { todas: 0, naoLidas: 0 };
+  // Explicit type aliasing for `recados` — see file-header comment
+  // explaining the AppRouter inference gap from Rex's painel-mensagens-
+  // router import-path quirks. Wire shape is authoritative; the cast
+  // is a contract assertion (validated at wire-input time by the same
+  // AdminRecadoProjectionSchema Rex's procedure outputs).
+  const recados: readonly AdminRecadoProjection[] =
+    (list.data?.recados ?? []) as readonly AdminRecadoProjection[];
+  const counts: { todas: number; naoLidas: number } =
+    (list.data?.counts ?? { todas: 0, naoLidas: 0 }) as {
+      todas: number;
+      naoLidas: number;
+    };
 
   const visible = useMemo(
     () =>
@@ -453,7 +497,7 @@ export function MensagensBody({ slug }: PainelSectionBodyProps) {
   );
 
   const handleMarcarLida = (idPagamento: string) => {
-    marcarLida.mutate({ idPagamento });
+    marcarLida.mutate({ slug, idPagamento });
   };
 
   const handleMarcarTodas = () => {
@@ -461,7 +505,7 @@ export function MensagensBody({ slug }: PainelSectionBodyProps) {
       toast("nenhum recado novo por aqui ♡");
       return;
     }
-    marcarTodasLidas.mutate({ idCampanha });
+    marcarTodasLidas.mutate({ slug });
     toast.success("tudo lido ♡");
   };
 
