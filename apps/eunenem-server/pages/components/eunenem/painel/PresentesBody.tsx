@@ -12,6 +12,22 @@ import {
   type PresentesTx,
 } from "@/lib/mocks/presentes";
 import {
+  ACCOUNT_TYPES,
+  BANKS,
+  BANCARIOS_DEMO,
+  CPF_FIXO,
+  PIX_TYPES,
+  bankByCode,
+  type BancariosForm as BancariosFormState,
+  type BancariosMode,
+  type PixType,
+} from "@/lib/mocks/bancarios";
+import { useCriarRecebedor } from "@/lib/hooks/useCriarRecebedor";
+import type {
+  CriarRecebedorInput,
+  PixKeyTipo,
+} from "@/lib/schemas/criar-recebedor";
+import {
   type ExtratoLiberacao,
   type ExtratoRowDTO,
   type ExtratoSummaryDTO,
@@ -726,18 +742,45 @@ function DetailDrawer({ tx, onClose }: { tx: PresentesTx | null; onClose: () => 
 // shape is a plain confirm: "Transferir R$ X (tudo) — confirmar?"
 // followed by a single solicit button. No amount input ever, no
 // destination override.
+//
+// aperture-kbmel (#9 deferred path) — when hasRecebedor === false, the
+// modal body becomes a slim BancariosBody form (Conta Completa / Chave Pix
+// tabs, titular guard, locked CPF from session). On submit the modal
+// chains: useCriarRecebedor.mutate() → on success →
+// solicitarState.mutate() → close. Both branches share the same modal
+// chrome (header / scrim / close button); only the body swaps.
 function TransferModal({
   open,
   saldo,
+  hasRecebedor,
+  idCampanha,
   onClose,
   solicitarState,
 }: {
   open: boolean;
   saldo: number;
+  /** Drives the onboarding branch. Sourced from useStubCampanhaIdForSlug. */
+  hasRecebedor: boolean;
+  /** Required to submit recebedor.criar (the input schema demands it). */
+  idCampanha: string | null;
   onClose: () => void;
   solicitarState: SolicitarTransferenciaState;
 }) {
   if (!open) return null;
+
+  // Branch on hasRecebedor. Existing-recebedor flow keeps the current
+  // all-or-nothing confirm body verbatim; no-recebedor flow embeds the
+  // onboarding form.
+  if (!hasRecebedor) {
+    return (
+      <TransferOnboardingModal
+        saldo={saldo}
+        idCampanha={idCampanha}
+        onClose={onClose}
+        solicitarState={solicitarState}
+      />
+    );
+  }
 
   const submit = () => {
     if (solicitarState.isPending) return;
@@ -858,6 +901,454 @@ function TransferModal({
   );
 }
 
+// ── Transfer onboarding modal (no-recebedor path) ────────────────────────────
+//
+// aperture-kbmel — modal body when the user hits SOLICITAR TRANSFERÊNCIA
+// without a recebedor configured. Slim port of BancariosBody form shape:
+// Conta Completa / Chave Pix tabs, titular guard, CPF locked from session.
+//
+// On submit:
+//   1. useCriarRecebedor.mutateAsync({ idCampanha, dadosBancarios, titular })
+//   2. on success → solicitarState.mutate() (sweeps the saldo)
+//   3. solicitarState.onSuccess in the parent closes the modal + toasts
+//
+// Embedded copy (not extracted) per the kbmel spec's "Simpler" option —
+// the full BancariosBody is 35KB with its own CSS recipe, and embedding it
+// 1:1 into a modal frame would require a significant CSS reshape. The
+// slim port below mirrors the same form FIELDS + the same validation
+// contract but uses inline modal-scoped styles. When/if a real form-
+// extraction PR ships (kbmel spec's "Better" option), this whole
+// component swaps to `<BancariosForm onSubmit={...} />`.
+//
+// TODO(aperture-kbmel-rex-swap): nothing in this component needs to change
+// when Rex's backend lands — the swap point is `useCriarRecebedor` itself
+// (see pages/lib/hooks/useCriarRecebedor.ts).
+function TransferOnboardingModal({
+  saldo,
+  idCampanha,
+  onClose,
+  solicitarState,
+}: {
+  saldo: number;
+  idCampanha: string | null;
+  onClose: () => void;
+  solicitarState: SolicitarTransferenciaState;
+}) {
+  const [s, setS] = useState<BancariosFormState>({ ...BANCARIOS_DEMO });
+  const [modo, setModo] = useState<BancariosMode>("conta");
+  const [tipoPix, setTipoPix] = useState<PixType["v"]>("cpf");
+  const [validationError, setValidationError] = useState<string | null>(null);
+
+  const criarRecebedor = useCriarRecebedor({
+    onSuccess: () => {
+      // Chain into solicitar AFTER recebedor.criar succeeds. The parent
+      // wires solicitarState.onSuccess to close the modal + show the
+      // toast, so a single side-effect terminates the whole flow.
+      solicitarState.mutate();
+    },
+  });
+
+  const set = (patch: Partial<BancariosFormState>) =>
+    setS((prev) => ({ ...prev, ...patch }));
+
+  // Slim client-side validation: just enough to block obvious garbage
+  // before hitting the wire. The shared `CriarRecebedorInputSchema`
+  // re-validates inside the mock hook (and will inside Rex's procedure
+  // post-swap), so this is belt-and-suspenders rather than the source
+  // of truth.
+  const validate = (): string | null => {
+    if (!s.nome || s.nome.trim().split(/\s+/).length < 2) {
+      return "informe o nome completo do titular";
+    }
+    if (!/^\(\d{2}\) \d{4,5}-\d{4}$/.test(s.telefone)) {
+      return "celular inválido — use o formato (DD) 9XXXX-XXXX";
+    }
+    if (modo === "conta") {
+      if (!s.bankCode) return "escolha o banco";
+      if (!s.agencia) return "informe a agência";
+      if (!s.conta) return "informe a conta";
+      if (!s.contaDV) return "informe o dígito da conta";
+      return null;
+    }
+    if (!s.pixKey) return "informe a chave pix";
+    return null;
+  };
+
+  const submit = () => {
+    if (criarRecebedor.isPending || solicitarState.isPending) return;
+    const err = validate();
+    if (err) {
+      setValidationError(err);
+      return;
+    }
+    setValidationError(null);
+    if (idCampanha === null) {
+      setValidationError("aguardando dados da campanha — tente novamente em um instante");
+      return;
+    }
+    // Build the discriminated-union payload per CriarRecebedorInputSchema.
+    const input: CriarRecebedorInput =
+      modo === "conta"
+        ? {
+            idCampanha,
+            titular: { nome: s.nome, telefone: s.telefone },
+            dadosBancarios: {
+              tipo: "conta_completa",
+              dados: {
+                bankCode: s.bankCode,
+                agencia: s.agencia,
+                agenciaDV: s.agenciaDV,
+                conta: s.conta,
+                contaDV: s.contaDV,
+                tipoConta: s.tipoConta as "cc" | "cp" | "pg" | "csl",
+              },
+            },
+          }
+        : {
+            idCampanha,
+            titular: { nome: s.nome, telefone: s.telefone },
+            dadosBancarios: {
+              tipo: "chave_pix",
+              dados: {
+                tipoChave: tipoPix as PixKeyTipo,
+                chave: s.pixKey,
+              },
+            },
+          };
+    criarRecebedor.mutate(input);
+  };
+
+  const bank = bankByCode(s.bankCode);
+  const tipo = PIX_TYPES.find((p) => p.v === tipoPix) ?? PIX_TYPES[0]!;
+  const isBusy = criarRecebedor.isPending || solicitarState.isPending;
+
+  const solicitarError = solicitarState.error
+    ? formatSolicitarError(solicitarState.error)
+    : null;
+  const criarError = criarRecebedor.error
+    ? "não foi possível cadastrar — confira os dados e tente de novo"
+    : null;
+  const inlineError = validationError ?? criarError ?? solicitarError;
+
+  return (
+    <>
+      <div className="ex-scrim is-open" onClick={onClose} />
+      <div
+        className="ex-modal ex-modal-wide"
+        role="dialog"
+        aria-label="Cadastrar dados bancários para transferência"
+      >
+        <header className="ex-modal-hd">
+          <div>
+            <span className="ex-caps">solicitar transferência</span>
+            <h3 className="ex-modal-title">cadastre sua conta</h3>
+          </div>
+          <button type="button" className="ex-icon-btn" onClick={onClose} aria-label="Fechar">
+            <IconClose />
+          </button>
+        </header>
+        <p className="ex-modal-text">
+          pra transferir <strong>{fmtMoney(saldo)} (tudo)</strong> a gente
+          precisa dos dados da sua conta — só dessa vez. depois é só clicar
+          em "solicitar" e a transferência vai automática.
+        </p>
+
+        {/* Mode toggle: conta completa ↔ chave pix */}
+        <div
+          role="tablist"
+          aria-label="forma de recebimento"
+          style={{
+            display: "flex",
+            gap: 8,
+            padding: 4,
+            background: "var(--cream)",
+            border: "1px solid var(--line)",
+            borderRadius: 10,
+            margin: "0 0 14px",
+          }}
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={modo === "conta"}
+            onClick={() => setModo("conta")}
+            style={tabStyle(modo === "conta")}
+          >
+            conta completa
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={modo === "pix"}
+            onClick={() => setModo("pix")}
+            style={tabStyle(modo === "pix")}
+          >
+            chave pix
+          </button>
+        </div>
+
+        {/* Form body */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 14 }}>
+          {modo === "conta" ? (
+            <>
+              <FieldRow label="banco" required>
+                <select
+                  className="ex-modal-input"
+                  value={s.bankCode}
+                  onChange={(e) => set({ bankCode: e.target.value })}
+                  aria-label="banco"
+                  style={inputStyle}
+                >
+                  {BANKS.map((b) => (
+                    <option key={b.code} value={b.code}>
+                      {b.name} ({b.code})
+                    </option>
+                  ))}
+                </select>
+                <span style={helperStyle}>{bank.name}</span>
+              </FieldRow>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 80px", gap: 10 }}>
+                <FieldRow label="agência" required>
+                  <input
+                    style={inputStyle}
+                    inputMode="numeric"
+                    maxLength={6}
+                    value={s.agencia}
+                    onChange={(e) => set({ agencia: e.target.value.replace(/\D/g, "").slice(0, 6) })}
+                    aria-label="agência"
+                  />
+                </FieldRow>
+                <FieldRow label="dígito">
+                  <input
+                    style={inputStyle}
+                    inputMode="numeric"
+                    maxLength={2}
+                    value={s.agenciaDV}
+                    onChange={(e) => set({ agenciaDV: e.target.value.replace(/[^\dxX]/g, "").slice(0, 2) })}
+                    aria-label="dígito da agência"
+                  />
+                </FieldRow>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 80px 1fr", gap: 10 }}>
+                <FieldRow label="conta" required>
+                  <input
+                    style={inputStyle}
+                    inputMode="numeric"
+                    maxLength={14}
+                    value={s.conta}
+                    onChange={(e) => set({ conta: e.target.value.replace(/\D/g, "").slice(0, 14) })}
+                    aria-label="conta"
+                  />
+                </FieldRow>
+                <FieldRow label="dígito" required>
+                  <input
+                    style={inputStyle}
+                    inputMode="numeric"
+                    maxLength={2}
+                    value={s.contaDV}
+                    onChange={(e) => set({ contaDV: e.target.value.replace(/[^\dxX]/g, "").slice(0, 2) })}
+                    aria-label="dígito da conta"
+                  />
+                </FieldRow>
+                <FieldRow label="tipo" required>
+                  <select
+                    style={inputStyle}
+                    value={s.tipoConta}
+                    onChange={(e) => set({ tipoConta: e.target.value })}
+                    aria-label="tipo de conta"
+                  >
+                    {ACCOUNT_TYPES.map((a) => (
+                      <option key={a.v} value={a.v}>
+                        {a.label}
+                      </option>
+                    ))}
+                  </select>
+                </FieldRow>
+              </div>
+            </>
+          ) : (
+            <>
+              <FieldRow label="tipo de chave">
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {PIX_TYPES.map((p) => (
+                    <button
+                      key={p.v}
+                      type="button"
+                      onClick={() => setTipoPix(p.v)}
+                      style={chipStyle(tipoPix === p.v)}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </FieldRow>
+              <FieldRow label="chave pix" required>
+                <input
+                  style={inputStyle}
+                  placeholder={tipo.placeholder}
+                  value={s.pixKey}
+                  onChange={(e) => set({ pixKey: e.target.value })}
+                  aria-label="chave pix"
+                />
+              </FieldRow>
+            </>
+          )}
+
+          {/* Titular block */}
+          <FieldRow label="nome do titular" required>
+            <input
+              style={inputStyle}
+              placeholder="igual ao documento"
+              value={s.nome}
+              onChange={(e) => set({ nome: e.target.value })}
+              aria-label="nome do titular"
+            />
+          </FieldRow>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <FieldRow label="cpf (travado)">
+              <input style={{ ...inputStyle, opacity: 0.6 }} value={CPF_FIXO} disabled aria-label="cpf" />
+              <span style={helperStyle}>locked na sessão</span>
+            </FieldRow>
+            <FieldRow label="celular" required>
+              <input
+                style={inputStyle}
+                placeholder="(00) 00000-0000"
+                inputMode="numeric"
+                value={s.telefone}
+                onChange={(e) => set({ telefone: maskPhoneInline(e.target.value) })}
+                aria-label="celular"
+              />
+            </FieldRow>
+          </div>
+        </div>
+
+        {inlineError && (
+          <div
+            role="alert"
+            className="ex-modal-error"
+            style={{
+              padding: "10px 14px",
+              borderRadius: 8,
+              background: "#F4D6CE",
+              color: "#7B2A1A",
+              fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+              fontSize: "11px",
+              textTransform: "uppercase",
+              letterSpacing: "0.14em",
+              marginBottom: 14,
+            }}
+          >
+            {inlineError}
+          </div>
+        )}
+
+        <div className="ex-modal-actions">
+          <button
+            type="button"
+            className="ex-btn-ghost"
+            onClick={onClose}
+            disabled={isBusy}
+          >
+            cancelar
+          </button>
+          <button
+            type="button"
+            className="ex-btn-green"
+            onClick={submit}
+            disabled={isBusy || saldo === 0}
+            aria-busy={isBusy}
+          >
+            {criarRecebedor.isPending
+              ? "cadastrando…"
+              : solicitarState.isPending
+                ? "solicitando…"
+                : "cadastrar e transferir"}
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function FieldRow({
+  label,
+  required,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <span
+        style={{
+          fontSize: 11,
+          fontWeight: 600,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          color: "var(--ink-mute)",
+        }}
+      >
+        {label}
+        {required && <span style={{ color: "var(--coral-pink, #c8567a)", marginLeft: 4 }}>*</span>}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  padding: "10px 12px",
+  borderRadius: 10,
+  border: "1px solid var(--line)",
+  background: "var(--paper, #fff)",
+  fontSize: 14,
+  fontFamily: "inherit",
+  color: "var(--ink, #5c3a4f)",
+};
+
+const helperStyle: React.CSSProperties = {
+  fontSize: 11,
+  color: "var(--ink-mute)",
+  marginTop: 2,
+};
+
+function tabStyle(active: boolean): React.CSSProperties {
+  return {
+    flex: 1,
+    padding: "8px 12px",
+    border: "none",
+    borderRadius: 6,
+    background: active ? "var(--paper, #fff)" : "transparent",
+    color: active ? "var(--plum)" : "var(--ink-soft)",
+    fontWeight: 600,
+    fontSize: 13,
+    cursor: "pointer",
+    boxShadow: active ? "0 1px 3px rgba(90,69,32,0.12)" : "none",
+  };
+}
+
+function chipStyle(active: boolean): React.CSSProperties {
+  return {
+    padding: "6px 12px",
+    borderRadius: 999,
+    border: active ? "1px solid var(--plum)" : "1px solid var(--line)",
+    background: active ? "var(--plum)" : "var(--paper, #fff)",
+    color: active ? "#fff" : "var(--ink-soft)",
+    fontSize: 12,
+    cursor: "pointer",
+  };
+}
+
+function maskPhoneInline(s: string): string {
+  const d = (s || "").replace(/\D/g, "").slice(0, 11);
+  if (d.length <= 2) return d;
+  if (d.length <= 7) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
+  return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+}
+
 /**
  * Map TRPCClientError-shape to operator-facing label. Per Rex's contract:
  *   - CONFLICT + message='repasse_ja_pendente'         → "transferência já solicitada"
@@ -956,8 +1447,16 @@ export function PresentesBody(props: PainelSectionBodyProps) {
 
   // slug → idCampanha resolution. Stub today (djb2-derived); swap target is
   // the real campanha-by-slug lookup when Rex's contract exposes one.
-  const { idCampanha, isLoading: campanhaLoading, error: campanhaError } =
-    useStubCampanhaIdForSlug(props.slug);
+  //
+  // aperture-kbmel — `hasRecebedor` drives the TransferModal's onboarding
+  // branch. Currently MOCKED to `false` inside useStubCampanhaIdForSlug;
+  // swap to `me.data?.hasRecebedor ?? false` when Rex extends `auth.me`.
+  const {
+    idCampanha,
+    hasRecebedor,
+    isLoading: campanhaLoading,
+    error: campanhaError,
+  } = useStubCampanhaIdForSlug(props.slug);
 
   // Fetch the FULL extrato (no wire-level statusFilters) and apply the chip
   // filter client-side. Keeps the existing "X de N" counter shape intact —
@@ -1184,6 +1683,8 @@ export function PresentesBody(props: PainelSectionBodyProps) {
       <TransferModal
         open={transferOpen}
         saldo={summary.disponivel}
+        hasRecebedor={hasRecebedor}
+        idCampanha={idCampanha}
         onClose={() => {
           setTransferOpen(false);
           solicitarState.reset();
