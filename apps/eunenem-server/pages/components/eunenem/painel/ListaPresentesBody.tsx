@@ -1,6 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
+// aperture-p73kv — deterministic random "sugerido N un" in [5, 10] keyed
+// by item id (djb2 hash). The hardcoded `1` operators saw was unrealistic
+// for baby-shower lists ("sugerido is still only 1 unidade and i cant add
+// or remove more"). djb2 is fast + deterministic per session so the same
+// card always shows the same number across re-renders. The inline stepper
+// (PartB) lets the user adjust before adding the item to their list.
+function djb2(s: string): number {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  }
+  return h >>> 0;
+}
+function defaultSuggestedQty(itemId: string): number {
+  // [5, 10] inclusive — 6 buckets.
+  return 5 + (djb2(itemId) % 6);
+}
+
 import type { PainelSectionBodyProps } from "@/PainelSectionPage";
 import {
   loadCatalog,
@@ -866,7 +884,7 @@ function CatalogoView({
                     <span className="lista-cat-meta">
                       <span className="lista-cat-name">{it.name}</span>
                       <span className="lista-cat-sub">
-                        {brl(it.price)} · sugerido {it.suggestedQty} un
+                        {brl(it.price)} · sugerido {defaultSuggestedQty(it.id)} un
                       </span>
                     </span>
                     <span
@@ -944,7 +962,13 @@ function AddGiftModal({
     );
     return out;
   }, [catalog, selected]);
-  const catTotal = selectedItems.reduce((s, i) => s + i.price * i.suggestedQty, 0);
+  // aperture-p73kv — mirror the picker's djb2-derived "sugerido N un"
+  // (display + submit) on the running total so the footer R$ amount
+  // doesn't drift from what the user sees per card.
+  const catTotal = selectedItems.reduce(
+    (s, i) => s + i.price * defaultSuggestedQty(i.id),
+    0,
+  );
 
   const toggleCatItem = (it: ListaCatalogItem) => {
     setSelected((cur) => {
@@ -1202,7 +1226,11 @@ function PresetDetailModal({
   };
 
   const selectedItems = preset.items.filter((it) => selected.has(it.id));
-  const total = selectedItems.reduce((s, it) => s + it.price * it.suggestedQty, 0);
+  // aperture-p73kv — same djb2-derived mirror as the catalogo path.
+  const total = selectedItems.reduce(
+    (s, it) => s + it.price * defaultSuggestedQty(it.id),
+    0,
+  );
   const count = selectedItems.length;
 
   const submit = () => {
@@ -1269,7 +1297,7 @@ function PresetDetailModal({
                 <div className="lista-preset-meta">
                   <span className="lista-preset-name">{it.name}</span>
                   <span className="lista-preset-sub">
-                    {brl(it.price)} · sugerido {it.suggestedQty} un
+                    {brl(it.price)} · sugerido {defaultSuggestedQty(it.id)} un
                   </span>
                 </div>
                 <span
@@ -1475,6 +1503,14 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
         // Plan 0016 (aperture-putz5): one ROW per catalog item with
         // `quantidade=suggestedQty`. Pre-0016 this fanned out into
         // suggestedQty rows per item — locked decision #1 retires that.
+        //
+        // aperture-p73kv: `it.suggestedQty` from the catalog data is
+        // a static `1`, which surfaces as "sugerido 1 un" on the picker
+        // — unrealistic for typical baby-shower lists. The display uses
+        // `defaultSuggestedQty(it.id)` (djb2-derived 5–10) and the
+        // submit MUST mirror that same value or the actual list
+        // count diverges from what the user saw. Inline stepper +
+        // per-card override is the next layer (filed as follow-up).
         items: picked.map((it) => ({
           nome: it.name,
           valor: centsFromBRL(it.price),
@@ -1486,11 +1522,14 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
           // to keep the field unset for image-less items.
           imagemUrl: it.imageUrl ?? undefined,
           grupo: it.category,
-          quantidade: it.suggestedQty,
+          quantidade: defaultSuggestedQty(it.id),
         })),
       });
       setAddModalTab(null);
-      const totalUnits = picked.reduce((s, it) => s + it.suggestedQty, 0);
+      const totalUnits = picked.reduce(
+        (s, it) => s + defaultSuggestedQty(it.id),
+        0,
+      );
       toast.success(
         totalUnits === 1
           ? "1 mimo adicionado à sua lista ♡"
@@ -1507,6 +1546,9 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
         // Plan 0016 (aperture-putz5): one ROW per preset item with
         // `quantidade=suggestedQty`. Aperture-1l37i frontend follow-up
         // covers the grouping/saveEdit UX rewrite around this shape.
+        //
+        // aperture-p73kv: mirror the picker's djb2-derived display
+        // value (same helper, same itemId → same N ∈ [5,10]).
         items: picked.map((it) => ({
           nome: it.name,
           valor: centsFromBRL(it.price),
@@ -1515,12 +1557,13 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
           // addCatalogItems for the undefined-vs-null reasoning.
           imagemUrl: it.imageUrl ?? undefined,
           grupo: presetId,
-          quantidade: it.suggestedQty,
+          quantidade: defaultSuggestedQty(it.id),
         })),
       });
       setPresetDetail(null);
       setPresetsOpen(false);
-      const n = picked.reduce((s, it) => s + it.suggestedQty, 0);
+      // aperture-p73kv — toast count mirrors the per-item djb2 helper.
+      const n = picked.reduce((s, it) => s + defaultSuggestedQty(it.id), 0);
       toast.success(
         `${n} ${n === 1 ? "mimo adicionado" : "mimos adicionados"} à sua lista ♡`,
       );

@@ -1624,25 +1624,14 @@ export function PresentesBody(props: PainelSectionBodyProps) {
                   <span>aguardando aprovação</span>
                 </span>
               )}
-              {/* aperture-sm7uc (#7) — próxima-transf chip is conditional
-                  on a pending solicitado repasse. The signal is
-                  `aguardandoAprovacaoCents > 0` (a non-zero admin-queue
-                  bucket means at least one solicitado RepasseRecebedor
-                  is sitting in the admin queue). When nothing is
-                  pending, hide the chip entirely instead of showing a
-                  stale next-stripe-release date the user can't act on.
-                  Pre-fix the chip always rendered + showed the stripe
-                  available_on date, which read as "we will move your
-                  money on this day automatically" — operators thought
-                  the platform was doing the transfer for them. */}
-              {summary.aguardandoAprovacao > 0 && (
-                <span className="ex-aux-pill lilac">
-                  <span>próxima transf.</span>
-                  <span className="ex-aux-num">
-                    {fmtMoney(summary.aguardandoAprovacao)}
-                  </span>
-                </span>
-              )}
+              {/* aperture-lwkwx — `próxima transf.` chip removed.
+                  It rendered the SAME value as `aguardando aprovação`
+                  above (both keyed on `aguardandoAprovacao > 0`), which
+                  duplicated information for no UX benefit. `aguardando
+                  aprovação` is clearer about WHY the money isn't moving
+                  yet (admin approval pending) so it's the chip we
+                  keep. Operator's call: "why 2 tags that are the same
+                  thing choos one or another please". */}
             </div>
           </header>
 

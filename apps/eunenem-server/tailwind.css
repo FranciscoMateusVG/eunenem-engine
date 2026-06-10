@@ -1533,49 +1533,35 @@ h4 {
     margin-top: 28px;
   }
   .painel-menu-grid {
-    /* Same `minmax(0, 1fr)` reasoning as the mobile single-col grid —
-     * prevents the widest row label from forcing a column past its
-     * fair share of the parent. */
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    /* aperture-lwkwx — per-column flex (replaces aperture-cihww's grid-
+     * row placement). The grid approach couldn't avoid sizing row 1 by
+     * the tallest left-col group (SEU EVENTO @ 4 rows), which left
+     * CONVIDADOS short and stranded CONTA in row 2 with a dead-space
+     * gap. Two flex-column children, each stacks its groups flush.
+     *
+     * `align-items: flex-start` so the right column doesn't try to
+     * match the left column's height — each lane is its own world. */
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
     gap: 28px;
-    align-items: start;
+    grid-template-columns: unset;
+  }
+  .painel-menu-col {
+    /* Each column owns its own stacking. `minmax(0, 1fr)` semantics
+     * preserved via `min-width: 0` + `flex: 1` — prevents row labels
+     * from forcing the column past its fair share. */
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
   }
   .painel-group:first-child .painel-group-title {
     margin-top: 0;
   }
   .painel-group .painel-group-title {
     margin-top: 0;
-  }
-  /* aperture-cihww — explicit grid placement so CONTA & AJUDA lives
-   * directly under CONVIDADOS on the right column instead of stranding
-   * itself under the tall EVENTO column (the auto-flow placement put
-   * conta in row 2/col 2 — visually far below convidados because row 1
-   * was sized by EVENTO's 4 items, leaving a dead-space gap under
-   * convidados). NOVO/rifa drops to row 2/col 1.
-   *   - EVENTO       (4 items) → col 1, row 1
-   *   - CONVIDADOS   (2 items) → col 2, row 1
-   *   - NOVO/rifa    (1 item)  → col 1, row 2
-   *   - CONTA & AJUDA(3 items) → col 2, row 2 (was row 2 already, but
-   *                              now anchored directly under convidados
-   *                              because each column tracks its own
-   *                              intrinsic content height).
-   * On mobile (<900px) the single-col grid stacks groups in source
-   * order [evento, convidados, novo, conta] — unchanged. */
-  .painel-group-evento {
-    grid-column: 1;
-    grid-row: 1;
-  }
-  .painel-group-convidados {
-    grid-column: 2;
-    grid-row: 1;
-  }
-  .painel-group-novo {
-    grid-column: 1;
-    grid-row: 2;
-  }
-  .painel-group-conta {
-    grid-column: 2;
-    grid-row: 2;
   }
 }
 
