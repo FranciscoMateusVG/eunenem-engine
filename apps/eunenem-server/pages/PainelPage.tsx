@@ -74,6 +74,11 @@ export function PainelPage({ slug }: { slug: string }) {
 
   const liveReceivedCents = summary.data?.totalRecebidoCents;
   const livePresentes = summary.data?.totalPresentes;
+  // aperture-kvpvf — finishes the B1 audit. Wire the strip-only
+  // PRESENTES + RECADOS counters from the same summary proc. Optional
+  // reads keep the swap safe across the trpc cache-rotation window.
+  const livePresentesStrip = summary.data?.totalPresentesItensCount;
+  const liveRecadosStrip = summary.data?.totalRecadosCount;
 
   const liveItems = listaQuery.data ?? null;
   const liveListaTotal = liveItems?.length;
@@ -92,6 +97,11 @@ export function PainelPage({ slug }: { slug: string }) {
     // extrato.summary.totalPresentes (distinct pagamentos contributing
     // to the recebido total).
     giftsClaimed: livePresentes ?? PAINEL_DEMO.giftsClaimed,
+    // aperture-kvpvf — strip overrides (distinct from giftsClaimed +
+    // messagesTotal which still drive the menu rows; see PainelHeaderCard
+    // for the rationale).
+    presentesStripCount: livePresentesStrip ?? PAINEL_DEMO.presentesStripCount,
+    recadosStripCount: liveRecadosStrip ?? PAINEL_DEMO.recadosStripCount,
   };
 
   const groups = buildPainelMenu(snapshot, {

@@ -90,6 +90,33 @@ const ExtratoSummaryDTOSchema = z.object({
   proximaTransfDate: z.string().nullable(),
   /** Distinct pagamentos contributing to totalRecebido. */
   totalPresentes: z.number().int().nonnegative(),
+  /**
+   * aperture-kvpvf — finishes the B1 audit. Distinct aprovado
+   * pagamentos in this campanha whose `intencao.contribuinte` has BOTH
+   * a non-null nome AND a non-empty (trimmed) mensagem. Mirrors B3's
+   * `MuralRecadoProjection` predicate exactly — same eligibility, just
+   * COUNT instead of project. Powers the painel home 3-col strip's
+   * "RECADOS" cell (was mocked at 12).
+   *
+   * Counted from `liveStates` here so the same lançamento walk that
+   * already drives every other summary metric stays the single source
+   * of truth (no extra DB roundtrip).
+   */
+  totalRecadosCount: z.number().int().nonnegative(),
+  /**
+   * aperture-kvpvf — finishes the B1 audit. Count of
+   * `ItemDoPagamento` rows of `tipo='contribuicao'` whose parent
+   * pagamento is aprovado on the current campanha. ONE PER CART ITEM
+   * (a 5-item cart contributes 5), NOT one per pagamento — distinct
+   * from `totalPresentes` above which is the distinct-pagamento count
+   * used by the featured "presentes recebidos" card. This field powers
+   * the painel home 3-col strip's "PRESENTES" cell (was mocked at 2).
+   *
+   * Cancelado lançamentos already filtered out via `liveStates`.
+   * passthrough_surcharge items are skipped — those are platform
+   * surcharges, not gifts.
+   */
+  totalPresentesItensCount: z.number().int().nonnegative(),
   /** Earliest contribution date (ISO). Null when no contributions. */
   dateRangeStart: z.string().nullable(),
   /** Latest contribution date (ISO). Null when no contributions. */
@@ -470,11 +497,56 @@ const extratoRouter = t.router({
         let dateRangeStartMs: number | null = null;
         let dateRangeEndMs: number | null = null;
         const distinctPagamentos = new Set<string>();
+        // aperture-kvpvf — strip-counter accumulators.
+        //   recadosPagamentoIds — distinct aprovado pagamentos with a
+        //     non-null contribuinte.nome AND a non-empty trimmed
+        //     mensagem. Same eligibility as B3's
+        //     MuralRecadoProjection, just counted instead of projected.
+        //   presentesItensCountedFor — pagamentos whose items we've
+        //     already tallied (each pagamento appears once per
+        //     lançamento in liveStates; we tally each one's items
+        //     exactly once).
+        //   totalPresentesItensCount — sum of `tipo='contribuicao'`
+        //     items across all aprovado pagamentos. Surcharges
+        //     skipped — they aren't gifts.
+        const recadosPagamentoIds = new Set<string>();
+        const presentesItensCountedFor = new Set<string>();
+        let totalPresentesItensCount = 0;
 
         for (const state of liveStates) {
           const { lancamento, pagamento, liberacao } = state;
           totalRecebidoCents += lancamento.amountCents;
           distinctPagamentos.add(lancamento.idPagamento);
+
+          // aperture-kvpvf — strip counters. We only want APROVADO
+          // pagamentos (deriveLiberacao guarantees non-cancelado already,
+          // but a parent pagamento can still be in pendente/rejeitado
+          // when the lançamento hasn't materialised — defensive guard).
+          if (pagamento && pagamento.status === "aprovado") {
+            // Items count: tally once per pagamento, sum contribuicao-tipo items.
+            if (!presentesItensCountedFor.has(pagamento.id)) {
+              presentesItensCountedFor.add(pagamento.id);
+              for (const item of pagamento.intencao.items) {
+                if (item.tipo === "contribuicao") {
+                  totalPresentesItensCount += 1;
+                }
+              }
+            }
+            // Recados count: same predicate as B3's
+            // MuralRecadoProjection (findMensagensMuralByCampanha):
+            // contribuinte non-null (carries nome by schema) AND
+            // mensagem is a non-empty trimmed string.
+            const contribuinte = pagamento.intencao.contribuinte;
+            if (contribuinte !== null) {
+              const mensagem = contribuinte.mensagem;
+              if (
+                typeof mensagem === "string" &&
+                mensagem.trim().length > 0
+              ) {
+                recadosPagamentoIds.add(pagamento.id);
+              }
+            }
+          }
 
           const tsMs =
             pagamento?.criadoEm.getTime() ?? lancamento.criadoEm.getTime();
@@ -519,6 +591,8 @@ const extratoRouter = t.router({
           proximaTransfDate:
             proximaTransfMs === null ? null : new Date(proximaTransfMs).toISOString(),
           totalPresentes: distinctPagamentos.size,
+          totalRecadosCount: recadosPagamentoIds.size,
+          totalPresentesItensCount,
           dateRangeStart:
             dateRangeStartMs === null ? null : new Date(dateRangeStartMs).toISOString(),
           dateRangeEnd:

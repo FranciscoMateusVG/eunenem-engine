@@ -214,16 +214,27 @@ export function PainelHeaderCard({ snapshot, slug }: Props) {
           </svg>
         </a>
         <div className="painel-stats" role="group" aria-label="resumo do evento">
+          {/* aperture-kvpvf — strip swap from snapshot.giftsClaimed
+              (distinct-pagamento count) to snapshot.presentesStripCount
+              (item-row count). Operator expectation: 5-item cart counts
+              as 5 PRESENTES here. The featured "presentes recebidos"
+              card on the menu still reads giftsClaimed (distinct
+              pagamentos) — those are two intentionally different
+              numbers on the same page. */}
           <div className="painel-stat">
-            <div className="painel-stat-num">{snapshot.giftsClaimed}</div>
+            <div className="painel-stat-num">{snapshot.presentesStripCount}</div>
             <div className="painel-stat-lbl">presentes</div>
           </div>
           <div className="painel-stat">
             <div className="painel-stat-num">{snapshot.guestsConfirmed}</div>
             <div className="painel-stat-lbl">confirmados</div>
           </div>
+          {/* aperture-kvpvf — strip swap from snapshot.messagesTotal
+              (mock 12) to snapshot.recadosStripCount (real count). The
+              "mensagens recebidas" menu row still reads messagesTotal
+              (separate follow-up bead aperture-mztrb covers that). */}
           <div className="painel-stat">
-            <div className="painel-stat-num">{snapshot.messagesTotal}</div>
+            <div className="painel-stat-num">{snapshot.recadosStripCount}</div>
             <div className="painel-stat-lbl">recados</div>
           </div>
         </div>

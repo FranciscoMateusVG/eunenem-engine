@@ -27,6 +27,24 @@ export interface PainelEventSnapshot {
   messagesTotal: number;
   /** "X novas" badge count on mensagens row. 0 hides the badge. */
   messagesNew: number;
+  /**
+   * aperture-kvpvf — strip-only PRESENTES count (one per
+   * ItemDoPagamento on aprovado pagamentos, NOT one per pagamento).
+   * Distinct from `giftsClaimed`, which counts distinct pagamentos
+   * and drives the featured "presentes recebidos" card. Wired from
+   * `recebedor.extrato.summary.totalPresentesItensCount`; falls back
+   * to `giftsClaimed` for the loading/unauth path so the strip still
+   * renders something sensible.
+   */
+  presentesStripCount: number;
+  /**
+   * aperture-kvpvf — strip-only RECADOS count. Distinct aprovado
+   * pagamentos whose contribuinte carries a non-empty mensagem (same
+   * predicate as B3's mural projection). Wired from
+   * `recebedor.extrato.summary.totalRecadosCount`. Distinct from the
+   * `messagesTotal` field used by the "mensagens recebidas" menu row.
+   */
+  recadosStripCount: number;
 }
 
 export const PAINEL_DEMO: PainelEventSnapshot = {
@@ -54,6 +72,12 @@ export const PAINEL_DEMO: PainelEventSnapshot = {
   // unread badge when the mensagens backend ships.
   messagesTotal: 12,
   messagesNew: 3,
+  // aperture-kvpvf — fallback values for the home stats strip while
+  // the recebedor.extrato.summary query is loading / on the public
+  // unauth path. Live values flow through PainelPage from
+  // totalPresentesItensCount + totalRecadosCount.
+  presentesStripCount: 2,
+  recadosStripCount: 12,
 };
 
 export interface PainelMenuItem {

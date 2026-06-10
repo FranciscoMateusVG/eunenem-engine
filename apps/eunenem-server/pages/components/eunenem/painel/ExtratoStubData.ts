@@ -63,6 +63,22 @@ export type ExtratoSummaryDTO = {
   aguardandoAprovacaoCents?: number;
   proximaTransfDate: string | null;
   totalPresentes: number;
+  /**
+   * aperture-kvpvf — distinct aprovado pagamentos with a non-empty
+   * mensagem on the current campanha. Drives the painel home strip's
+   * "RECADOS" cell. Optional on the mirror for the trpc-cache-rotation
+   * window — older cached responses lack the field; renderer falls
+   * back to the demo snapshot's `recadosStripCount` (12).
+   */
+  totalRecadosCount?: number;
+  /**
+   * aperture-kvpvf — count of `ItemDoPagamento` rows (tipo=contribuicao)
+   * across all aprovado pagamentos on the current campanha. One per
+   * cart item, distinct from `totalPresentes` (distinct pagamentos).
+   * Powers the painel home strip's "PRESENTES" cell. Optional on the
+   * mirror for the same merge-window reason as totalRecadosCount.
+   */
+  totalPresentesItensCount?: number;
   dateRangeStart: string | null;
   dateRangeEnd: string | null;
 };
