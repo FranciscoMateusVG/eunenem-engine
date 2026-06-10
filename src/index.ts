@@ -957,3 +957,12 @@ export {
   RegistrarContaUsuarioInputSchema,
   registrarContaUsuario,
 } from './use-cases/usuario/registrar-conta-usuario.js';
+
+// Plan 0018 Phase A (aperture-omswg) — first-time tutorial.
+export type { TutorialStatusResponse } from './use-cases/usuario/tutorial-status-response.js';
+export { TutorialStatusResponseSchema } from './use-cases/usuario/tutorial-status-response.js';
+export type { ObterStatusTutorialUsuarioDeps } from './use-cases/usuario/obter-status-tutorial-usuario.js';
+export { obterStatusTutorialUsuario } from './use-cases/usuario/obter-status-tutorial-usuario.js';
+export type { MarcarTutorialUsuarioComoCompletadoDeps } from './use-cases/usuario/marcar-tutorial-usuario-como-completado.js';
+export { marcarTutorialUsuarioComoCompletado } from './use-cases/usuario/marcar-tutorial-usuario-como-completado.js';
+export { UsuarioNaoEncontradoError } from './errors/usuario/nao-encontrado.error.js';

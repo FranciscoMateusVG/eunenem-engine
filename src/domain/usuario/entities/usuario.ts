@@ -41,6 +41,15 @@ export interface Usuario {
    */
   readonly slug: SlugUsuario;
   readonly criadoEm: Date;
+  /**
+   * Plan 0018 Phase A (aperture-omswg). First-time tutorial overlay
+   * gate. `null` = first-time user, overlay fires on next visit.
+   * Non-null = tutorial completed (either via skip, last-step finish,
+   * or admin/backfill action) — the timestamp is the moment of
+   * completion (first-write-wins; `marcarTutorialUsuarioComoCompletado`
+   * is a no-op if already non-null).
+   */
+  readonly tutorialCompletadoEm: Date | null;
 }
 
 /** @entity Conta (within Usuario aggregate) — permissions and admin grouping. */

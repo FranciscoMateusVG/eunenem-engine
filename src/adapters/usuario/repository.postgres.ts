@@ -61,6 +61,8 @@ type UsuarioRow = {
   nome_exibicao: string;
   slug: string;
   criado_em: Date;
+  /** Plan 0018 Phase A (aperture-omswg / migration 024). */
+  tutorial_completado_em: Date | null;
 };
 
 type ContaRow = {
@@ -130,6 +132,10 @@ export class UsuarioRepositoryPostgres implements UsuarioRepository {
               nome_exibicao: usuario.nomeExibicao,
               slug: usuario.slug,
               criado_em: usuario.criadoEm,
+              // Plan 0018 Phase A (aperture-omswg / migration 024). Fresh
+              // registrations start with tutorial_completado_em NULL so
+              // the overlay fires on first visit.
+              tutorial_completado_em: usuario.tutorialCompletadoEm,
             })
             .execute();
 
@@ -410,6 +416,8 @@ export class UsuarioRepositoryPostgres implements UsuarioRepository {
             'usuarios.nome_exibicao as nome_exibicao',
             'usuarios.slug as slug',
             'usuarios.criado_em as criado_em',
+            // Plan 0018 Phase A (aperture-omswg / migration 024).
+            'usuarios.tutorial_completado_em as tutorial_completado_em',
           ])
           .where('contas.id', '=', idConta)
           .where('usuarios.id_plataforma', '=', idPlataforma)
@@ -440,6 +448,33 @@ export class UsuarioRepositoryPostgres implements UsuarioRepository {
           .updateTable('usuarios')
           .set({ nome_exibicao: nomeExibicao })
           .where('id', '=', idUsuario)
+          .execute();
+        span.setStatus({ code: SpanStatusCode.OK });
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  /**
+   * Plan 0018 Phase A (aperture-omswg / migration 024). First-write-wins
+   * via the `WHERE tutorial_completado_em IS NULL` guard — already-completed
+   * usuarios are skipped (UPDATE affects 0 rows, no error). Mirrors
+   * `atualizarNomeExibicaoUsuario` shape: silent no-op for unknown id.
+   */
+  async marcarTutorialCompletado(idUsuario: IdUsuario, completadoEm: Date): Promise<void> {
+    return tracer.startActiveSpan('db.usuarios.marcarTutorialCompletado', async (span) => {
+      span.setAttributes({ ...DB_USUARIOS_ATTRS, 'db.operation.name': 'UPDATE' });
+      try {
+        await this.db
+          .updateTable('usuarios')
+          .set({ tutorial_completado_em: completadoEm })
+          .where('id', '=', idUsuario)
+          .where('tutorial_completado_em', 'is', null)
           .execute();
         span.setStatus({ code: SpanStatusCode.OK });
       } catch (error: unknown) {
@@ -508,6 +543,9 @@ function toUsuario(row: UsuarioRow): Usuario {
     nomeExibicao: row.nome_exibicao,
     slug: row.slug,
     criadoEm: row.criado_em,
+    // Plan 0018 Phase A (aperture-omswg / migration 024). null until
+    // the user completes (or skips) the tutorial overlay.
+    tutorialCompletadoEm: row.tutorial_completado_em,
   };
 }
 

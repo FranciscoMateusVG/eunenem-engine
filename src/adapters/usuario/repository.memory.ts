@@ -329,6 +329,42 @@ export class UsuarioRepositoryMemory implements UsuarioRepository {
     });
   }
 
+  /**
+   * Plan 0018 Phase A (aperture-omswg). First-write-wins; mirror of
+   * the postgres adapter's `WHERE tutorial_completado_em IS NULL`
+   * guard. Already-completed → no-op (the original timestamp is
+   * preserved). Unknown id → no-op.
+   */
+  async marcarTutorialCompletado(idUsuario: IdUsuario, completadoEm: Date): Promise<void> {
+    return tracer.startActiveSpan('db.usuarios.marcarTutorialCompletado', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+      try {
+        const existing = this.usuarios.get(idUsuario);
+        if (!existing) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return;
+        }
+        if (existing.tutorialCompletadoEm !== null) {
+          // First-write-wins: do not overwrite a previously persisted
+          // timestamp.
+          span.setStatus({ code: SpanStatusCode.OK });
+          return;
+        }
+        this.usuarios.set(idUsuario, {
+          ...existing,
+          tutorialCompletadoEm: completadoEm,
+        });
+        span.setStatus({ code: SpanStatusCode.OK });
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
   async removeRegistroDomain(idUsuario: IdUsuario): Promise<void> {
     return tracer.startActiveSpan('db.usuarios.removeRegistroDomain', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'DELETE' });

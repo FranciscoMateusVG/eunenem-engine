@@ -21,6 +21,7 @@ import { contribuicaoRouter } from './contribuicao-router.js';
 import type { TrpcContext } from './context.js';
 import { paginaRouter } from './pagina-router.js';
 import { recebedorRouter } from './recebedor-router.js';
+import { usuarioRouter } from './usuario-router.js';
 
 const t = initTRPC.context<TrpcContext>().create();
 
@@ -37,6 +38,7 @@ export const appRouter = t.router({
   contribuicao: contribuicaoRouter,
   pagina: paginaRouter,
   recebedor: recebedorRouter,
+  usuario: usuarioRouter,
 });
 
 export type AppRouter = typeof appRouter;

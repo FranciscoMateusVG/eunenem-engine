@@ -211,6 +211,7 @@ export interface Usuarios {
   id_plataforma: string;
   nome_exibicao: string;
   slug: string;
+  tutorial_completado_em: Timestamp | null;
 }
 
 export interface Verifications {
