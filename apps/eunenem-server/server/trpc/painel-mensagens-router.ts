@@ -26,15 +26,15 @@
 
 import { TRPCError, initTRPC } from '@trpc/server';
 import { z } from 'zod/v4';
-import type { Campanha } from '../../../src/domain/arrecadacao/entities/campanha.js';
-import type { IdCampanha } from '../../../src/domain/arrecadacao/value-objects/ids.js';
-import type { IdPagamento } from '../../../src/domain/pagamentos/value-objects/ids.js';
-import type { Usuario } from '../../../src/domain/usuario/entities/usuario.js';
-import type { SlugUsuario } from '../../../src/domain/usuario/value-objects/slug.js';
-import { PagamentoNaoEncontradoError } from '../../../src/errors/pagamentos/nao-encontrado.error.js';
-import { marcarRecadoComoLido } from '../../../src/use-cases/pagamentos/marcar-recado-como-lido.js';
-import { marcarTodosRecadosComoLidos } from '../../../src/use-cases/pagamentos/marcar-todos-recados-como-lidos.js';
-import { obterRecadosAdminDeCampanha } from '../../../src/use-cases/pagamentos/obter-recados-admin-de-campanha.js';
+import type { Campanha } from '../../../../src/domain/arrecadacao/entities/campanha.js';
+import type { IdCampanha } from '../../../../src/domain/arrecadacao/value-objects/ids.js';
+import type { IdPagamento } from '../../../../src/domain/pagamentos/value-objects/ids.js';
+import type { Usuario } from '../../../../src/domain/usuario/entities/usuario.js';
+import type { SlugUsuario } from '../../../../src/domain/usuario/value-objects/slug.js';
+import { PagamentoNaoEncontradoError } from '../../../../src/errors/pagamentos/nao-encontrado.error.js';
+import { marcarRecadoComoLido } from '../../../../src/use-cases/pagamentos/marcar-recado-como-lido.js';
+import { marcarTodosRecadosComoLidos } from '../../../../src/use-cases/pagamentos/marcar-todos-recados-como-lidos.js';
+import { obterRecadosAdminDeCampanha } from '../../../../src/use-cases/pagamentos/obter-recados-admin-de-campanha.js';
 import { ID_PLATAFORMA_EUNENEM } from '../auth/setup.js';
 import type { TrpcContext } from './context.js';
 
