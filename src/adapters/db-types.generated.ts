@@ -97,6 +97,7 @@ export interface Convites {
   modelo: string;
   nome_exibido: string;
   paleta: string;
+  remetente: string;
 }
 
 export interface Eventos {

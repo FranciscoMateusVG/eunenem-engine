@@ -124,6 +124,7 @@ export function makeConvite(overrides: Partial<Convite> = {}): Convite {
   return {
     id: randomUUID(),
     idEvento: randomUUID(),
+    remetente: 'Os pais',
     nomeExibido: 'Cha da Maria',
     mensagem: 'Esperamos voce para celebrar esse momento especial.',
     paleta: 'lilas',

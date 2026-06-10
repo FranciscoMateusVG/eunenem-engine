@@ -26,6 +26,7 @@ export class ConviteRepositoryPostgres implements ConviteRepository {
           .values({
             id: convite.id,
             id_evento: convite.idEvento,
+            remetente: convite.remetente,
             nome_exibido: convite.nomeExibido,
             mensagem: convite.mensagem,
             paleta: convite.paleta,
@@ -38,6 +39,7 @@ export class ConviteRepositoryPostgres implements ConviteRepository {
           .onConflict((oc) =>
             oc.column('id').doUpdateSet({
               id_evento: convite.idEvento,
+              remetente: convite.remetente,
               nome_exibido: convite.nomeExibido,
               mensagem: convite.mensagem,
               paleta: convite.paleta,
@@ -121,6 +123,7 @@ export class ConviteRepositoryPostgres implements ConviteRepository {
 function toConvite(row: {
   id: string;
   id_evento: string;
+  remetente: string;
   nome_exibido: string;
   mensagem: string;
   paleta: string;
@@ -133,6 +136,7 @@ function toConvite(row: {
   const base = {
     id: row.id as IdConvite,
     idEvento: row.id_evento as IdEvento,
+    remetente: row.remetente as Convite['remetente'],
     nomeExibido: row.nome_exibido as Convite['nomeExibido'],
     mensagem: row.mensagem as Convite['mensagem'],
     paleta: row.paleta as Convite['paleta'],

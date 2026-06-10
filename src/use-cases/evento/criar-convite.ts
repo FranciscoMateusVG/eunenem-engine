@@ -13,6 +13,7 @@ import { MensagemConviteSchema } from '../../domain/evento/value-objects/mensage
 import { ModeloConviteSchema } from '../../domain/evento/value-objects/modelo-convite.js';
 import { NomeExibidoConviteSchema } from '../../domain/evento/value-objects/nome-exibido-convite.js';
 import { PaletaConviteSchema } from '../../domain/evento/value-objects/paleta-convite.js';
+import { RemetenteConviteSchema } from '../../domain/evento/value-objects/remetente-convite.js';
 import { ConviteInputInvalidoError } from '../../errors/evento/convite-input-invalido.error.js';
 import { ConviteJaExisteError } from '../../errors/evento/convite-ja-existe.error.js';
 import { EventoNaoEncontradoError } from '../../errors/evento/nao-encontrado.error.js';
@@ -21,6 +22,7 @@ import type { Observability } from '../../observability/observability.js';
 export const CriarConviteInputSchema = z.object({
   id: IdConviteSchema,
   idEvento: IdEventoSchema,
+  remetente: RemetenteConviteSchema,
   nomeExibido: NomeExibidoConviteSchema,
   mensagem: MensagemConviteSchema,
   paleta: PaletaConviteSchema,
@@ -59,6 +61,7 @@ export async function criarConvite(
       const now = clock();
       span.setAttribute('convite.id', parsed.data.id);
       span.setAttribute('evento.id', parsed.data.idEvento);
+      span.setAttribute('convite.remetente.length', parsed.data.remetente.length);
       span.setAttribute('convite.paleta', parsed.data.paleta);
       span.setAttribute('convite.fonte', parsed.data.fonte);
       span.setAttribute('convite.modelo', parsed.data.modelo);
@@ -79,6 +82,7 @@ export async function criarConvite(
       const convite = criarConviteDominio({
         id: parsed.data.id,
         idEvento: parsed.data.idEvento,
+        remetente: parsed.data.remetente,
         nomeExibido: parsed.data.nomeExibido,
         mensagem: parsed.data.mensagem,
         paleta: parsed.data.paleta,
@@ -94,6 +98,7 @@ export async function criarConvite(
       logger.info('convite.criado', {
         idConvite: convite.id,
         idEvento: convite.idEvento,
+        remetente: convite.remetente,
         paleta: convite.paleta,
         fonte: convite.fonte,
         modelo: convite.modelo,

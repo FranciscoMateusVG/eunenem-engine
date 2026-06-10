@@ -27,6 +27,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .createTable('convites')
     .addColumn('id', 'uuid', (col) => col.primaryKey())
     .addColumn('id_evento', 'uuid', (col) => col.notNull())
+    .addColumn('remetente', 'varchar(120)', (col) => col.notNull())
     .addColumn('nome_exibido', 'varchar(120)', (col) => col.notNull())
     .addColumn('mensagem', 'varchar(2000)', (col) => col.notNull())
     .addColumn('paleta', 'varchar(40)', (col) => col.notNull())

@@ -77,6 +77,7 @@ describe('criarConvite', () => {
       {
         id: idConvite,
         idEvento,
+        remetente: 'Os pais',
         nomeExibido: 'Maria Helena',
         mensagem: 'Esperamos voce para esse dia especial.',
         paleta: 'lilas',
@@ -88,6 +89,7 @@ describe('criarConvite', () => {
 
     expect(convite.id).toBe(idConvite);
     expect(convite.idEvento).toBe(idEvento);
+    expect(convite.remetente).toBe('Os pais');
     expect(convite.nomeExibido).toBe('Maria Helena');
     expect(convite.imagemUrl).toBe('https://cdn.example.com/convites/maria-helena.png');
 
@@ -110,6 +112,7 @@ describe('criarConvite', () => {
         {
           id: randomUUID(),
           idEvento: randomUUID(),
+          remetente: 'Os pais',
           nomeExibido: 'Maria Helena',
           mensagem: 'Mensagem valida',
           paleta: 'lilas',
@@ -131,6 +134,7 @@ describe('criarConvite', () => {
     };
     const base = {
       idEvento,
+      remetente: 'Os pais',
       nomeExibido: 'Maria Helena',
       mensagem: 'Mensagem valida',
       paleta: 'lilas' as const,
@@ -160,6 +164,7 @@ describe('criarConvite', () => {
         {
           id: randomUUID(),
           idEvento,
+          remetente: 'Os pais',
           nomeExibido: 'Maria Helena',
           mensagem: 'Mensagem valida',
           paleta: 'lilas',
@@ -188,6 +193,7 @@ describe('obterConvite', () => {
       {
         id: idConvite,
         idEvento,
+        remetente: 'Os pais',
         nomeExibido: 'Maria Helena',
         mensagem: 'Mensagem valida',
         paleta: 'lilas',
@@ -219,6 +225,7 @@ describe('obterConvite', () => {
       {
         id: idConvite,
         idEvento,
+        remetente: 'A madrinha',
         nomeExibido: 'Theo',
         mensagem: 'Mensagem valida',
         paleta: 'surpresa',
@@ -264,6 +271,7 @@ describe('atualizarConvite', () => {
       {
         id: idConvite,
         idEvento,
+        remetente: 'Os pais',
         nomeExibido: 'Maria Helena',
         mensagem: 'Mensagem inicial',
         paleta: 'lilas',
@@ -281,6 +289,7 @@ describe('atualizarConvite', () => {
       },
       {
         id: idConvite,
+        remetente: 'A madrinha',
         nomeExibido: 'Theo',
         mensagem: 'Mensagem atualizada',
         paleta: 'amarelo',
@@ -290,6 +299,7 @@ describe('atualizarConvite', () => {
       },
     );
 
+    expect(updated.remetente).toBe('A madrinha');
     expect(updated.nomeExibido).toBe('Theo');
     expect(updated.paleta).toBe('amarelo');
     expect(updated.fonte).toBe('caveat');
@@ -313,6 +323,7 @@ describe('atualizarConvite', () => {
       {
         id: idConvite,
         idEvento,
+        remetente: 'Os pais',
         nomeExibido: 'Maria Helena',
         mensagem: 'Mensagem inicial',
         paleta: 'lilas',
@@ -331,6 +342,7 @@ describe('atualizarConvite', () => {
         },
         {
           id: idConvite,
+          remetente: 'Os pais',
           nomeExibido: 'Maria Helena',
           mensagem: 'Mensagem atualizada',
           paleta: 'coral' as 'lilas',

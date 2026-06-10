@@ -246,6 +246,8 @@ export type { NumeroCelularConvidado } from './domain/evento/value-objects/numer
 export { NumeroCelularConvidadoSchema } from './domain/evento/value-objects/numero-celular-convidado.js';
 export type { PaletaConvite } from './domain/evento/value-objects/paleta-convite.js';
 export { PaletaConviteSchema } from './domain/evento/value-objects/paleta-convite.js';
+export type { RemetenteConvite } from './domain/evento/value-objects/remetente-convite.js';
+export { RemetenteConviteSchema } from './domain/evento/value-objects/remetente-convite.js';
 export type { StatusPresencaConvidado } from './domain/evento/value-objects/status-presenca-convidado.js';
 export { StatusPresencaConvidadoSchema } from './domain/evento/value-objects/status-presenca-convidado.js';
 export type { TipoEvento } from './domain/evento/value-objects/tipo-evento.js';

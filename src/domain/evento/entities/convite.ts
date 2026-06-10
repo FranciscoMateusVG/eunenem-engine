@@ -5,6 +5,7 @@ import type { MensagemConvite } from '../value-objects/mensagem-convite.js';
 import type { ModeloConvite } from '../value-objects/modelo-convite.js';
 import type { NomeExibidoConvite } from '../value-objects/nome-exibido-convite.js';
 import type { PaletaConvite } from '../value-objects/paleta-convite.js';
+import type { RemetenteConvite } from '../value-objects/remetente-convite.js';
 
 /**
  * @aggregateRoot Convite (BC Evento)
@@ -17,6 +18,7 @@ import type { PaletaConvite } from '../value-objects/paleta-convite.js';
 export interface Convite {
   readonly id: IdConvite;
   readonly idEvento: IdEvento;
+  readonly remetente: RemetenteConvite;
   readonly nomeExibido: NomeExibidoConvite;
   readonly mensagem: MensagemConvite;
   readonly paleta: PaletaConvite;
@@ -30,6 +32,7 @@ export interface Convite {
 export interface CriarConviteInput {
   readonly id: IdConvite;
   readonly idEvento: IdEvento;
+  readonly remetente: RemetenteConvite;
   readonly nomeExibido: NomeExibidoConvite;
   readonly mensagem: MensagemConvite;
   readonly paleta: PaletaConvite;
@@ -44,6 +47,7 @@ export function criarConvite(input: CriarConviteInput): Convite {
   return {
     id: input.id,
     idEvento: input.idEvento,
+    remetente: input.remetente,
     nomeExibido: input.nomeExibido,
     mensagem: input.mensagem,
     paleta: input.paleta,
@@ -56,6 +60,7 @@ export function criarConvite(input: CriarConviteInput): Convite {
 }
 
 export interface AtualizarConviteCampos {
+  readonly remetente: RemetenteConvite;
   readonly nomeExibido: NomeExibidoConvite;
   readonly mensagem: MensagemConvite;
   readonly paleta: PaletaConvite;
@@ -76,6 +81,7 @@ export function conviteComCamposAtualizados(
 
   return {
     ...convite,
+    remetente: campos.remetente,
     nomeExibido: campos.nomeExibido,
     mensagem: campos.mensagem,
     paleta: campos.paleta,

@@ -135,6 +135,11 @@ describe('Migration round-trip', () => {
     const repasseIndexes = await listIndexNames(db, 'repasses_recebedor');
     expect(repasseIndexes).toContain('repasses_um_solicitado_por_campanha');
 
+    const conviteRemetenteCol = await getColumn(db, 'convites', 'remetente');
+    expect(conviteRemetenteCol?.data_type).toBe('character varying');
+    expect(conviteRemetenteCol?.character_maximum_length).toBe(120);
+    expect(conviteRemetenteCol?.is_nullable).toBe('NO');
+
     const downEvento = await migrator.migrateDown();
     expect(downEvento.error).toBeUndefined();
 

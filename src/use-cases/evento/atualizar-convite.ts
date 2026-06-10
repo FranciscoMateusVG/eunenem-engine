@@ -10,12 +10,14 @@ import { MensagemConviteSchema } from '../../domain/evento/value-objects/mensage
 import { ModeloConviteSchema } from '../../domain/evento/value-objects/modelo-convite.js';
 import { NomeExibidoConviteSchema } from '../../domain/evento/value-objects/nome-exibido-convite.js';
 import { PaletaConviteSchema } from '../../domain/evento/value-objects/paleta-convite.js';
+import { RemetenteConviteSchema } from '../../domain/evento/value-objects/remetente-convite.js';
 import { ConviteInputInvalidoError } from '../../errors/evento/convite-input-invalido.error.js';
 import { ConviteNaoEncontradoError } from '../../errors/evento/convite-nao-encontrado.error.js';
 import type { Observability } from '../../observability/observability.js';
 
 export const AtualizarConviteInputSchema = z.object({
   id: IdConviteSchema,
+  remetente: RemetenteConviteSchema,
   nomeExibido: NomeExibidoConviteSchema,
   mensagem: MensagemConviteSchema,
   paleta: PaletaConviteSchema,
@@ -48,6 +50,7 @@ export async function atualizarConvite(
       }
 
       span.setAttribute('convite.id', parsed.data.id);
+      span.setAttribute('convite.remetente.length', parsed.data.remetente.length);
       span.setAttribute('convite.paleta', parsed.data.paleta);
       span.setAttribute('convite.fonte', parsed.data.fonte);
       span.setAttribute('convite.modelo', parsed.data.modelo);
@@ -63,6 +66,7 @@ export async function atualizarConvite(
       const updated = conviteComCamposAtualizados(
         existing,
         {
+          remetente: parsed.data.remetente,
           nomeExibido: parsed.data.nomeExibido,
           mensagem: parsed.data.mensagem,
           paleta: parsed.data.paleta,
@@ -78,6 +82,7 @@ export async function atualizarConvite(
       logger.info('convite.atualizado', {
         idConvite: updated.id,
         idEvento: updated.idEvento,
+        remetente: updated.remetente,
         paleta: updated.paleta,
         fonte: updated.fonte,
         modelo: updated.modelo,
