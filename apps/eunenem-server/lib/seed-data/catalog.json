@@ -3166,5 +3166,1385 @@
     "category": "alimentacao",
     "imageUrl": "/products/603011.jpg",
     "popularity": 0
+  },
+  {
+    "id": "mlb_5537222254",
+    "name": "Cadeira De Alimentação Infantil 3 Em 1 Harmony Maxi Baby - Cinza",
+    "price": 447.34,
+    "suggestedQty": 1,
+    "emoji": "🍼",
+    "bgColor": "var(--blue)",
+    "category": "alimentacao",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_612441-MLA99520261016_112025-F.jpg"
+  },
+  {
+    "id": "mlb_3891301981",
+    "name": "Kit Com 2 Bebê Babador De Silicone Gumy Com Pega Migalhas",
+    "price": 38.89,
+    "suggestedQty": 1,
+    "emoji": "🥣",
+    "bgColor": "var(--cream-2)",
+    "category": "alimentacao",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_907563-MLB90667461123_082025-F.jpg"
+  },
+  {
+    "id": "mlb_6185598496",
+    "name": "Kit Talheres Infantil Silicone Aço Introdução Alimentar Buba",
+    "price": 49.9,
+    "suggestedQty": 1,
+    "emoji": "🍼",
+    "bgColor": "var(--blue)",
+    "category": "alimentacao",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_817285-MLB110011350793_042026-F.jpg"
+  },
+  {
+    "id": "mlb_4692144787",
+    "name": "Paninho De Boca Fralda Bebe Infantil Bordada Enxoval Kit 6pç Menina",
+    "price": 45.0,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--lilac-soft)",
+    "category": "roupa",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_898778-MLB111894926915_052026-F.jpg"
+  },
+  {
+    "id": "mlb_4700715521",
+    "name": "Bebê Babador De Silicone Gumy Com Pega Migalhas Cor Bege Urso Tamanho Cm",
+    "price": 19.98,
+    "suggestedQty": 1,
+    "emoji": "🥣",
+    "bgColor": "var(--cream-2)",
+    "category": "alimentacao",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_779389-MLA111026368430_052026-F.jpg"
+  },
+  {
+    "id": "mlb_5898835868",
+    "name": "Prato Infantil Bebê 3 Divisórias E Talheres Fibra De Bambu Verde Kit Alimentação Prato Urso Garfo E Colher",
+    "price": 17.9,
+    "suggestedQty": 1,
+    "emoji": "🥣",
+    "bgColor": "var(--cream-2)",
+    "category": "alimentacao",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_734414-MLB107122507090_022026-F.jpg"
+  },
+  {
+    "id": "mlb_4437864771",
+    "name": "Cadeira De Alimentação Assento De Chão Sauro Com Cinto Cor Laranja Tutti Baby",
+    "price": 279.9,
+    "suggestedQty": 1,
+    "emoji": "🍼",
+    "bgColor": "var(--cream-2)",
+    "category": "alimentacao",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_700737-MLA95696718254_102025-F.jpg"
+  },
+  {
+    "id": "mlb_6187930082",
+    "name": "Kit Talheres Infantil Buba Zoo Garfo E Colher Bebê 6m+",
+    "price": 32.79,
+    "suggestedQty": 1,
+    "emoji": "🥣",
+    "bgColor": "var(--cream-2)",
+    "category": "alimentacao",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_804040-MLB111881145302_062026-F.jpg"
+  },
+  {
+    "id": "mlb_4480840549",
+    "name": "Kit Infantil Marmita Hermética Trava Garrafa Lanche Stitch Stitch",
+    "price": 68.9,
+    "suggestedQty": 1,
+    "emoji": "🍼",
+    "bgColor": "var(--cream-2)",
+    "category": "alimentacao",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_856045-MLB106783974962_022026-F.jpg"
+  },
+  {
+    "id": "mlb_3919366193",
+    "name": "Babador De Silicone Gumy Com Pega Migalhas Cor Rosa-pálido Morango Tamanho Cm",
+    "price": 19.98,
+    "suggestedQty": 1,
+    "emoji": "🍼",
+    "bgColor": "var(--blue)",
+    "category": "alimentacao",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_754478-MLA80821616009_112024-F.jpg"
+  },
+  {
+    "id": "mlb_6183643118",
+    "name": "Babador Silicone Infantil Bandana Impermeável Bebê Coelho Rosa",
+    "price": 18.41,
+    "suggestedQty": 1,
+    "emoji": "🍼",
+    "bgColor": "var(--blue)",
+    "category": "alimentacao",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_669386-MLB112767355089_062026-F.jpg"
+  },
+  {
+    "id": "mlb_5858196982",
+    "name": "Copo Com Canudo Infantil Transição 330ml +18m Mundo Bita Cor Rosa Passarinho",
+    "price": 55.9,
+    "suggestedQty": 1,
+    "emoji": "🍼",
+    "bgColor": "var(--cream-2)",
+    "category": "alimentacao",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_998753-MLA99992567633_112025-F.jpg"
+  },
+  {
+    "id": "mlb_5410959626",
+    "name": "Capa De Proteção Para Cadeira Alta De Bebê, Fácil De",
+    "price": 141.08,
+    "suggestedQty": 1,
+    "emoji": "🍼",
+    "bgColor": "var(--cream-2)",
+    "category": "alimentacao",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_892470-CBT85131241550_052025-F.jpg"
+  },
+  {
+    "id": "mlb_5904534438",
+    "name": "Kit 2 Escovas Lavar Garrafa Mamadeira Copo Multicolorido",
+    "price": 24.89,
+    "suggestedQty": 1,
+    "emoji": "🥣",
+    "bgColor": "var(--cream-2)",
+    "category": "alimentacao",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_933584-MLB97351480859_112025-F.jpg"
+  },
+  {
+    "id": "mlb_5973473744",
+    "name": "Kit 2 Escovas De Mamadeira Copo Jarra Garrafas Cinza",
+    "price": 21.89,
+    "suggestedQty": 1,
+    "emoji": "🥣",
+    "bgColor": "var(--cream-2)",
+    "category": "alimentacao",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_627233-MLB99123621360_112025-F.jpg"
+  },
+  {
+    "id": "mlb_6877835956",
+    "name": "Bebê Babador De Silicone Gumy Com Pega Migalhas Cor Azul-celeste Leão Tamanho Cm",
+    "price": 19.98,
+    "suggestedQty": 1,
+    "emoji": "🥣",
+    "bgColor": "var(--cream-2)",
+    "category": "alimentacao",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_798694-MLA111478143178_052026-F.jpg"
+  },
+  {
+    "id": "mlb_6884296590",
+    "name": "Bebê Babador De Silicone Gumy Com Pega Migalhas Cor Amarelo Hipopótamo Tamanho Cm",
+    "price": 19.98,
+    "suggestedQty": 1,
+    "emoji": "🍼",
+    "bgColor": "var(--blue)",
+    "category": "alimentacao",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_784737-MLA112539586259_052026-F.jpg"
+  },
+  {
+    "id": "mlb_4288064929",
+    "name": "Tapete Amarelinha Infantil Movimento Material Pedagógico Jogo Impermeável - Estimular Aprendizado, Coordenação,... Colo…",
+    "price": 102.9,
+    "suggestedQty": 1,
+    "emoji": "🍼",
+    "bgColor": "var(--blue-soft)",
+    "category": "passeio",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_641104-MLA99983689313_112025-F.jpg"
+  },
+  {
+    "id": "mlb_4598384593",
+    "name": "Pelúcia Premium Pinguim Miniso Macia E Fofa 23cm Infantil Cinza",
+    "price": 65.99,
+    "suggestedQty": 1,
+    "emoji": "🎈",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_746035-MLB110281668723_042026-F.jpg"
+  },
+  {
+    "id": "mlb_3989144699",
+    "name": "Tapete De Atividades Para Bebê Dobrável Dupla Face Buba +2m",
+    "price": 208.03,
+    "suggestedQty": 1,
+    "emoji": "🎈",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_812459-MLB82481314618_022025-F.jpg"
+  },
+  {
+    "id": "mlb_4565089147",
+    "name": "Chocalho Mordedor Bebê Leãozinho Bpa Free Sensorial Vila Toy Azul Leão",
+    "price": 39.9,
+    "suggestedQty": 1,
+    "emoji": "🥣",
+    "bgColor": "var(--cream-2)",
+    "category": "alimentacao",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_885394-MLB108818604202_032026-F.jpg"
+  },
+  {
+    "id": "mlb_4555982239",
+    "name": "Tapete Amarelinha Infantil Em Lona Grande Lavável",
+    "price": 69.9,
+    "suggestedQty": 1,
+    "emoji": "🚼",
+    "bgColor": "var(--blue-soft)",
+    "category": "passeio",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_648824-MLB109378642527_032026-F.jpg"
+  },
+  {
+    "id": "mlb_4556015947",
+    "name": "Tapete Amarelinha Infantil Psicomotor 77x200 Cm Em Lona",
+    "price": 89.9,
+    "suggestedQty": 1,
+    "emoji": "🚼",
+    "bgColor": "var(--blue-soft)",
+    "category": "passeio",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_857264-MLB108573480966_032026-F.jpg"
+  },
+  {
+    "id": "mlb_3774872286",
+    "name": "Bicicleta Urbana Infantil Good Mood Tiffany R16 Rosa Aço Carbono Único",
+    "price": 899.0,
+    "suggestedQty": 1,
+    "emoji": "🎈",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_873441-MLA99871145261_112025-F.jpg"
+  },
+  {
+    "id": "mlb_6191303864",
+    "name": "Bicicleta Balance Infantil Nathor Rosa Aro 12 Freio Traseiro",
+    "price": 297.3,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_654565-MLA80787912325_112024-F.jpg"
+  },
+  {
+    "id": "mlb_4560040447",
+    "name": "Cachorro Robô Inteligente Infantil Controle Sensor Movimento",
+    "price": 295.08,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_644804-MLB111836165359_052026-F.jpg"
+  },
+  {
+    "id": "mlb_6198357520",
+    "name": "Bicicleta Equilíbrio Sem Pedal Andador Infantil Rosa",
+    "price": 299.9,
+    "suggestedQty": 1,
+    "emoji": "🚼",
+    "bgColor": "var(--blue-soft)",
+    "category": "passeio",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_897582-MLA105822390253_012026-F.jpg"
+  },
+  {
+    "id": "mlb_4538967269",
+    "name": "Kit 24 Bolhas De Sabão Brinquedo Lança Bolinha Refil Lembrancinha Aniversario Atacado Sortido Infantil Criança Colorido",
+    "price": 78.9,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_716370-MLA108186577156_032026-F.jpg"
+  },
+  {
+    "id": "mlb_6719999404",
+    "name": "Conjunto De Maquiagem Infantil Com 48 Peças, Lavável",
+    "price": 318.0,
+    "suggestedQty": 1,
+    "emoji": "🎈",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_851940-MLB111264152089_052026-F.jpg"
+  },
+  {
+    "id": "mlb_5341718264",
+    "name": "Boneca Bebê Coleção Frutinhas Cotiplás Cheirinho Frutas Fofa",
+    "price": 32.99,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_938246-MLB97917875664_112025-F.jpg"
+  },
+  {
+    "id": "mlb_6525955466",
+    "name": "Kit 899 Blocos Magnéticos De Montar Construção Brinquedo | Blocos Magnéticos De Construção Brinquedo Infantil Educativo",
+    "price": 160.0,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_747505-MLA111735713011_052026-F.jpg"
+  },
+  {
+    "id": "mlb_5356151938",
+    "name": "Motoquinha Infantil De Menino Carro De Passeio Infantil Bebê Vermelho",
+    "price": 399.9,
+    "suggestedQty": 1,
+    "emoji": "🎈",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_738505-MLB92707136142_092025-F.jpg"
+  },
+  {
+    "id": "mlb_4510616289",
+    "name": "Bicicleta De Equilíbrio Infantil Aro 12 Balance Colli Pitukinha - Amarelo Neon",
+    "price": 599.9,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_812708-MLB109734754603_032026-F.jpg"
+  },
+  {
+    "id": "mlb_5374875450",
+    "name": "Triciclo Infantil Motoca Honey Bee Nathor 18+ Com Cestinha Honey Bee",
+    "price": 299.98,
+    "suggestedQty": 1,
+    "emoji": "🚼",
+    "bgColor": "var(--blue-soft)",
+    "category": "passeio",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_644566-MLB109136407076_042026-F.jpg"
+  },
+  {
+    "id": "mlb_4675476589",
+    "name": "Espada Katana Ninja Sabre De Luz Led Rgb 80cm Com Efeitos De Faísca E Névoa Presente Infantil Covei Toys Preto",
+    "price": 159.89,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_617487-MLA106755780059_022026-F.jpg"
+  },
+  {
+    "id": "mlb_3988914401",
+    "name": "Raquetes Frescobol Tênis Kit Brinquedo Infantil Bola Peteca Preto",
+    "price": 78.99,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_959036-MLB81599521236_012025-F.jpg"
+  },
+  {
+    "id": "mlb_6674362546",
+    "name": "Kit Maquiagem Infantil Espelho Gato Seguro Lavável",
+    "price": 155.0,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_784760-MLB111847801497_052026-F.jpg"
+  },
+  {
+    "id": "mlb_3983873321",
+    "name": "Ukulele Brinquedo Musical Infantil Mini Violão Cavaquinho Cor Laranja",
+    "price": 129.99,
+    "suggestedQty": 1,
+    "emoji": "🎈",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_770611-MLA96176360309_102025-F.jpg"
+  },
+  {
+    "id": "mlb_5836649518",
+    "name": "Mini Bateria Brinquedo Instrumento Infantil 5 Tambores",
+    "price": 74.9,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_920762-MLB108184707263_032026-F.jpg"
+  },
+  {
+    "id": "mlb_6505677454",
+    "name": "Walkie Talkie Infantil Recarregável 3km Rádio Comunicador Azul E Rosa",
+    "price": 196.5,
+    "suggestedQty": 1,
+    "emoji": "🎈",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_639359-MLA109352156395_032026-F.jpg"
+  },
+  {
+    "id": "mlb_2601941005",
+    "name": "Geladeira De Brinquedo Infantil Grande E Acessórios Internos Rosa",
+    "price": 119.97,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_981215-MLB110375662187_042026-F.jpg"
+  },
+  {
+    "id": "mlb_6643688602",
+    "name": "Kit Maquiagem Infantil Completo Para Meninas Laváve",
+    "price": 155.0,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--yellow-soft)",
+    "category": "brinquedo",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_609802-MLB110879722284_052026-F.jpg"
+  },
+  {
+    "id": "mlb_5259525116",
+    "name": "Bicicleta De Equilíbrio Infantil Sem Pedal Andador Criança",
+    "price": 498.9,
+    "suggestedQty": 1,
+    "emoji": "🚼",
+    "bgColor": "var(--blue-soft)",
+    "category": "passeio",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_913721-MLB101310639290_122025-F.jpg"
+  },
+  {
+    "id": "mlb_4645102377",
+    "name": "Kit Body Splash Masculino Barbarius + Enigma + Midtown 200ml",
+    "price": 140.0,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--pink-soft)",
+    "category": "roupa",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_997574-MLA109633443994_042026-F.jpg"
+  },
+  {
+    "id": "mlb_5414376970",
+    "name": "Vestido Bebe Menina Festa Junina Saia Rodada Luxo Até 1 Ano",
+    "price": 139.88,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--pink-soft)",
+    "category": "roupa",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_783599-MLB108646904163_032026-F.jpg"
+  },
+  {
+    "id": "mlb_6232100574",
+    "name": "Conjunto Body Bebê Pagão Luxo Rn Menino(a) Bordado 3 Peças Cinza Mescla 0-2 Meses",
+    "price": 63.8,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--lilac-soft)",
+    "category": "roupa",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_849609-MLB94345568015_102025-F.jpg"
+  },
+  {
+    "id": "mlb_4201880847",
+    "name": "Saída De Maternidade Rn Algodão 4 Peças Menino Menina Manta",
+    "price": 78.9,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--pink-soft)",
+    "category": "roupa",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_711983-MLB109774567588_042026-F.jpg"
+  },
+  {
+    "id": "mlb_1946657251",
+    "name": "Kit 3 Conjunto Body Bebê C/ Calça Mijão Sortidos - 6 Peças",
+    "price": 78.7,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--lilac-soft)",
+    "category": "roupa",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_969981-MLB112793149431_062026-F.jpg"
+  },
+  {
+    "id": "mlb_1838324443",
+    "name": "Sapatinho Pantufa Lacinho Charme",
+    "price": 25.7,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--pink-soft)",
+    "category": "roupa",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_930508-MLB96641411775_102025-F.jpg"
+  },
+  {
+    "id": "mlb_6815221178",
+    "name": "Kit Body E Mijão + Kit Touca 100% Algodão Kit 6peças Menino Azul-royal P Sortido",
+    "price": 49.0,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--pink-soft)",
+    "category": "roupa",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_906770-MLA111015502830_052026-F.jpg"
+  },
+  {
+    "id": "mlb_4038390936",
+    "name": "Body Roupa Para Bebê Sou A Princesa Da Dinda Rosa Menina",
+    "price": 25.0,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--lilac-soft)",
+    "category": "roupa",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_703137-MLB71630808110_092023-F.jpg"
+  },
+  {
+    "id": "mlb_4701378741",
+    "name": "Kit Body E Mijão + Kit Touca 100% Algodão Kit 6peças Menina Rosa Rn Sortido",
+    "price": 49.0,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--lilac-soft)",
+    "category": "roupa",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_708773-MLA111066988794_052026-F.jpg"
+  },
+  {
+    "id": "mlb_5423989400",
+    "name": "Kit 6 Meias Bebê Menina 0 A 24 Meses Antiderrapante Estampas",
+    "price": 69.9,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--lilac-soft)",
+    "category": "roupa",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_966842-MLB85935036733_062025-F.jpg"
+  },
+  {
+    "id": "mlb_1327291815",
+    "name": "Babuche Infantil Baby Bebê Chinelo Muito Leve E Macio As164",
+    "price": 59.9,
+    "suggestedQty": 1,
+    "emoji": "✨",
+    "bgColor": "var(--cream-2)",
+    "category": "outros",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_744075-MLB112584064575_062026-F.jpg"
+  },
+  {
+    "id": "mlb_5697095968",
+    "name": "Kit Pagão Bebê 3 Pcs Conjunto Rn Manga Longa Bordado Unissex",
+    "price": 34.0,
+    "suggestedQty": 1,
+    "emoji": "🌟",
+    "bgColor": "var(--lilac-soft)",
+    "category": "outros",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_840943-MLB91994084456_092025-F.jpg"
+  },
+  {
+    "id": "mlb_1831963894",
+    "name": "Conjunto Body Bebê Bordado Sortido 2 Peças",
+    "price": 47.8,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--lilac-soft)",
+    "category": "roupa",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_927959-MLB96193571144_102025-F.jpg"
+  },
+  {
+    "id": "mlb_4298408355",
+    "name": "Tenis Infantil Cano Alto Look Primeiros Passos Personalizar",
+    "price": 69.9,
+    "suggestedQty": 1,
+    "emoji": "🌟",
+    "bgColor": "var(--lilac-soft)",
+    "category": "outros",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_736937-MLB106643239280_022026-F.jpg"
+  },
+  {
+    "id": "mlb_5572936562",
+    "name": "Sapatinho Tricô Bebe Estilo Pantufa Lux E Faixinha De Cabelo",
+    "price": 78.9,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--pink-soft)",
+    "category": "roupa",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_804015-MLB93817172113_092025-F.jpg"
+  },
+  {
+    "id": "mlb_4561102897",
+    "name": "Kit 3 Pares Meias Soquete Escolar Infantil Feminina Babado Branco Sem Estampas 6 A 8 Anos",
+    "price": 55.9,
+    "suggestedQty": 1,
+    "emoji": "✨",
+    "bgColor": "var(--cream-2)",
+    "category": "outros",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_684667-MLB111030732086_052026-F.jpg"
+  },
+  {
+    "id": "mlb_6590495602",
+    "name": "Faixa Bebê De Cabelo Na Meia De Seda Laço Mini Rn Kit 10 Kit 10 Colorido",
+    "price": 54.9,
+    "suggestedQty": 1,
+    "emoji": "🌟",
+    "bgColor": "var(--lilac-soft)",
+    "category": "outros",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_899535-MLB95639544342_102025-F.jpg"
+  },
+  {
+    "id": "mlb_6333710592",
+    "name": "Kit 12 Pares Meia Infantil Escolar Menina Menino Lisa Branca Liso M 30/33 7-9 Anos",
+    "price": 59.9,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--pink-soft)",
+    "category": "roupa",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_770854-MLB107178357494_022026-F.jpg"
+  },
+  {
+    "id": "mlb_5024508206",
+    "name": "Camisa Infantil Lisa Menino Algodão Confortável",
+    "price": 34.99,
+    "suggestedQty": 1,
+    "emoji": "🌟",
+    "bgColor": "var(--lilac-soft)",
+    "category": "outros",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_948254-MLB78476749502_082024-F.jpg"
+  },
+  {
+    "id": "mlb_4038412116",
+    "name": "Body Roupa Para Bebê Kimono Jiujtsu Menino Menina",
+    "price": 25.0,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--lilac-soft)",
+    "category": "roupa",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_736558-MLB71631365166_092023-F.jpg"
+  },
+  {
+    "id": "mlb_4502597679",
+    "name": "Kit 5 Pares Meia Soquete Infantil Escolar Semaninha Algodão Masculino Colorido G 34-37",
+    "price": 39.9,
+    "suggestedQty": 1,
+    "emoji": "✨",
+    "bgColor": "var(--cream-2)",
+    "category": "outros",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_990951-MLB107966008421_032026-F.jpg"
+  },
+  {
+    "id": "mlb_6017824080",
+    "name": "Tenis Sapatinho Bebe Recem Nascido Unissex Macio Batizado",
+    "price": 39.9,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--lilac-soft)",
+    "category": "roupa",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_707253-MLB109157262079_032026-F.jpg"
+  },
+  {
+    "id": "mlb_6655754026",
+    "name": "Body Bebê Seleção Brasil Copa Do Mundo Times Futebol Flamengo G",
+    "price": 35.9,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--lilac-soft)",
+    "category": "roupa",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_948799-MLB110758241909_042026-F.jpg"
+  },
+  {
+    "id": "mlb_4616226456",
+    "name": "Roupas De Bebe Menino/menina Conjunto Body Calça Saruel",
+    "price": 50.0,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--lilac-soft)",
+    "category": "roupa",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_828732-MLB112848357039_062026-F.jpg"
+  },
+  {
+    "id": "mlb_4614789037",
+    "name": "Kit Body Bebê Menina Laços Cotton Calça Faixa Cabelo 3 Peças Off/bege G",
+    "price": 117.0,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--pink-soft)",
+    "category": "roupa",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_825790-MLB110242724356_052026-F.jpg"
+  },
+  {
+    "id": "mlb_4626319579",
+    "name": "Macacão De Frio Inverno Bebê Recen Nascido Luxo Multicolorido Animais 1-3 Meses",
+    "price": 92.5,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--pink-soft)",
+    "category": "roupa",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_987329-MLB111604172418_062026-F.jpg"
+  },
+  {
+    "id": "mlb_2733783726",
+    "name": "Macacão Bebê Menino Suedine Estampado Vira Pé C/zíper 2 Pçs",
+    "price": 82.06,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--lilac-soft)",
+    "category": "roupa",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_980052-MLB111611045576_062026-F.jpg"
+  },
+  {
+    "id": "mlb_4580534243",
+    "name": "Macacão Bebe Menina Luxo Bordado Isis Confort Nude 2-3 M",
+    "price": 68.0,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--pink-soft)",
+    "category": "roupa",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_914650-MLB111078872797_042026-F.jpg"
+  },
+  {
+    "id": "mlb_5431780116",
+    "name": "Sapatinhos Recém Nascido Tricô Menino Bebê Urso",
+    "price": 67.85,
+    "suggestedQty": 1,
+    "emoji": "✨",
+    "bgColor": "var(--cream-2)",
+    "category": "outros",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_690154-MLB111229086432_052026-F.jpg"
+  },
+  {
+    "id": "mlb_4614934315",
+    "name": "Conjunto Bebê Menino Em Malha Cotelê Blusa + Calça Inverno Azul-marinho Gg",
+    "price": 139.0,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--pink-soft)",
+    "category": "roupa",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_696065-MLB111168187237_052026-F.jpg"
+  },
+  {
+    "id": "mlb_6620763366",
+    "name": "Conjunto Bebê Menino Malha Texturizada 100% Algodão + Calça Off/verde Gg",
+    "price": 135.0,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--lilac-soft)",
+    "category": "roupa",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_724189-MLB110441134411_042026-F.jpg"
+  },
+  {
+    "id": "mlb_6625326340",
+    "name": "Kit 2 Pares Tênis Bebê Masculino Sapatinho Calce Fácil Leve Azul 16 Br Kit 2 Pares De Tênis Batizado Bebê",
+    "price": 99.9,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--lilac-soft)",
+    "category": "roupa",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_961772-MLB110475722563_042026-F.jpg"
+  },
+  {
+    "id": "mlb_5849873934",
+    "name": "Conjunto Bebê Menino Canelado Urso Silkado Body E Mijão",
+    "price": 46.16,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--lilac-soft)",
+    "category": "roupa",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_748726-MLB103839182155_012026-F.jpg"
+  },
+  {
+    "id": "mlb_6148339808",
+    "name": "Body Revelação Gravidez Frase Irmã Sou Resposta Da Oração",
+    "price": 39.99,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--lilac-soft)",
+    "category": "roupa",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_716116-MLB103598962552_012026-F.jpg"
+  },
+  {
+    "id": "mlb_1822188319",
+    "name": "Kit Sapatinho Touca Luva Prendedor Chupeta Tema Laço 4 Pçs",
+    "price": 43.18,
+    "suggestedQty": 1,
+    "emoji": "🍼",
+    "bgColor": "var(--cream-2)",
+    "category": "alimentacao",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_744780-MLB87709870078_072025-F.jpg"
+  },
+  {
+    "id": "mlb_1925409428",
+    "name": "Kit 3 Conjunto Body E Mijão Masculino 6 Peças",
+    "price": 78.13,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--lilac-soft)",
+    "category": "roupa",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_927284-MLB97348675775_112025-F.jpg"
+  },
+  {
+    "id": "mlb_6631256972",
+    "name": "Kit 3 Macacão Bebê Estampado Algodão Zíper Tamanho Único Menino Estampados Único",
+    "price": 78.9,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--lilac-soft)",
+    "category": "roupa",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_824033-MLB109635023690_042026-F.jpg"
+  },
+  {
+    "id": "mlb_6631518584",
+    "name": "Kit 3 Macacões Bebê Liso Algodão Zíper Macacão Pé Reversível Unissex Liso Único",
+    "price": 78.9,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--pink-soft)",
+    "category": "roupa",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_868805-MLB110517712751_042026-F.jpg"
+  },
+  {
+    "id": "mlb_2625138383",
+    "name": "Body Bebê Melhor Mãe Do Mundo Menino Azul Gestante Presente",
+    "price": 25.0,
+    "suggestedQty": 1,
+    "emoji": "👕",
+    "bgColor": "var(--lilac-soft)",
+    "category": "roupa",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_788181-MLB49785353471_042022-F.jpg"
+  },
+  {
+    "id": "mlb_3970784805",
+    "name": "Touca Gorro De Lã Infantil Bebê Lã Macia Canelada",
+    "price": 23.68,
+    "suggestedQty": 1,
+    "emoji": "✨",
+    "bgColor": "var(--cream-2)",
+    "category": "outros",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_642914-MLB96793602242_112025-F.jpg"
+  },
+  {
+    "id": "mlb_4709194283",
+    "name": "Conjunto Moletom Infantil Básico Escola Creche Inverno 3 Lilás Hello Kitty",
+    "price": 69.0,
+    "suggestedQty": 1,
+    "emoji": "🌟",
+    "bgColor": "var(--lilac-soft)",
+    "category": "outros",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_896702-MLB111188911328_052026-F.jpg"
+  },
+  {
+    "id": "mlb_5561442848",
+    "name": "Meia 3/4 Babadinho Cano Alto Branca Infantil Unnissex",
+    "price": 34.89,
+    "suggestedQty": 1,
+    "emoji": "✨",
+    "bgColor": "var(--cream-2)",
+    "category": "outros",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_993544-MLB99016130593_112025-F.jpg"
+  },
+  {
+    "id": "mlb_3289699621",
+    "name": "Pijama Macacão Longo Bebê Soft Menino E Menina Tip Top",
+    "price": 78.9,
+    "suggestedQty": 1,
+    "emoji": "🛏️",
+    "bgColor": "var(--lilac-soft)",
+    "category": "soninho",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_999808-MLB86192669634_062025-F.jpg"
+  },
+  {
+    "id": "mlb_1235237289",
+    "name": "Bolero Casaquinho Infantil Festa Menina Super Chique Luxo",
+    "price": 69.9,
+    "suggestedQty": 1,
+    "emoji": "✨",
+    "bgColor": "var(--cream-2)",
+    "category": "outros",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_613089-MLB89198265514_082025-F.jpg"
+  },
+  {
+    "id": "mlb_6512660456",
+    "name": "Cadeira De Carro Infantil All Stages 2.0 Isofix Preto Litet",
+    "price": 1199.0,
+    "suggestedQty": 1,
+    "emoji": "🚼",
+    "bgColor": "var(--blue-soft)",
+    "category": "passeio",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_836450-MLA100062682691_122025-F.jpg"
+  },
+  {
+    "id": "mlb_3379223661",
+    "name": "Cadeirinha Infantil Para Carro Litet Mass 0-36kg Preta E Cinza - Bb458 Liso Preto E Cinza",
+    "price": 899.9,
+    "suggestedQty": 1,
+    "emoji": "🚼",
+    "bgColor": "var(--blue-soft)",
+    "category": "passeio",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_737130-MLA99503062202_112025-F.jpg"
+  },
+  {
+    "id": "mlb_4519191754",
+    "name": "Berço Cômoda Guarda Roupa Ditália Bbi-51 Bb-120 Bb-322 Cozy",
+    "price": 1549.0,
+    "suggestedQty": 1,
+    "emoji": "🛏️",
+    "bgColor": "var(--lilac-soft)",
+    "category": "soninho",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_845148-MLB74992437584_032024-F.jpg"
+  },
+  {
+    "id": "mlb_4459059243",
+    "name": "Carrinho Passeio Bebê Reversível Berço Moisés Conforto Rosa",
+    "price": 999.0,
+    "suggestedQty": 1,
+    "emoji": "🍼",
+    "bgColor": "var(--blue-soft)",
+    "category": "passeio",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_681214-MLB106454937853_022026-F.jpg"
+  },
+  {
+    "id": "mlb_2626088118",
+    "name": "Fralda Babysec Ultrasec Galinha Pintadinha Tamanho M 68 Unid",
+    "price": 95.9,
+    "suggestedQty": 2,
+    "emoji": "👶",
+    "bgColor": "var(--lilac-soft)",
+    "category": "fraldas",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_655224-MLA99419862660_112025-F.jpg"
+  },
+  {
+    "id": "mlb_6201938390",
+    "name": "Carrinho Bebê Conforto Reversível Passeio Modo Berço Travel Preto",
+    "price": 999.0,
+    "suggestedQty": 1,
+    "emoji": "🚼",
+    "bgColor": "var(--blue-soft)",
+    "category": "passeio",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_774637-MLB105347538540_012026-F.jpg"
+  },
+  {
+    "id": "mlb_4228168907",
+    "name": "Berço 3 Em 1 Com Colchão Incluso Multimóveis Mp4394 Rosa/branco",
+    "price": 549.99,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--lilac-soft)",
+    "category": "soninho",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_814739-MLA95373285860_102025-F.jpg"
+  },
+  {
+    "id": "mlb_4145840751",
+    "name": "Berço 3 Em 1 Com Colchão Incluso Doce De Leite Multimóveis Mp4244 Rosa",
+    "price": 549.99,
+    "suggestedQty": 1,
+    "emoji": "🛏️",
+    "bgColor": "var(--lilac-soft)",
+    "category": "soninho",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_789138-MLA90809454794_082025-F.jpg"
+  },
+  {
+    "id": "mlb_5944559128",
+    "name": "Fralda Babysec Galinha Pintadinha Shortinho M 60 Unidades Médio (m) Sem Gênero",
+    "price": 83.2,
+    "suggestedQty": 2,
+    "emoji": "👶",
+    "bgColor": "var(--lilac-soft)",
+    "category": "fraldas",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_817317-MLA99823422703_112025-F.jpg"
+  },
+  {
+    "id": "mlb_5376269868",
+    "name": "Mini Berço Chiqueirinho Ísis E Acompanha Colchão Prático",
+    "price": 511.99,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--lilac-soft)",
+    "category": "soninho",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_806609-MLB111909184629_052026-F.jpg"
+  },
+  {
+    "id": "mlb_6513672062",
+    "name": "Mordedor Bebê Kit 3 Silicone Frutas Macio Chocalho Cores Frutas 1",
+    "price": 69.9,
+    "suggestedQty": 1,
+    "emoji": "🍼",
+    "bgColor": "var(--blue)",
+    "category": "alimentacao",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_959548-MLB110751615180_052026-F.jpg"
+  },
+  {
+    "id": "mlb_4540247765",
+    "name": "Mordedor Para Lápis De Silicone Menino",
+    "price": 59.9,
+    "suggestedQty": 1,
+    "emoji": "🍼",
+    "bgColor": "var(--blue)",
+    "category": "alimentacao",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_652055-MLB110342960966_052026-F.jpg"
+  },
+  {
+    "id": "mlb_4061945709",
+    "name": "Fralda Babysec Galinha Pintadinha Shortinho Mega Tam M C/ 30 Médio (m) Sem Gênero",
+    "price": 55.2,
+    "suggestedQty": 2,
+    "emoji": "👶",
+    "bgColor": "var(--lilac-soft)",
+    "category": "fraldas",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_934175-MLB93794483803_092025-F.jpg"
+  },
+  {
+    "id": "mlb_4714505165",
+    "name": "Fralda De Pano Reutilizável Impermeável Bebês De 3 A 15 Kg",
+    "price": 109.99,
+    "suggestedQty": 2,
+    "emoji": "👶",
+    "bgColor": "var(--lilac-soft)",
+    "category": "fraldas",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_649803-MLB111273378272_052026-F.jpg"
+  },
+  {
+    "id": "mlb_4136259931",
+    "name": "Quadriciclo Carrinho De Passeio Infantil Haste Pedal Rosa Vermelho",
+    "price": 599.9,
+    "suggestedQty": 1,
+    "emoji": "🍼",
+    "bgColor": "var(--blue-soft)",
+    "category": "passeio",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_978664-MLA99376148732_112025-F.jpg"
+  },
+  {
+    "id": "mlb_5291887478",
+    "name": "Joelheira Para Bebê Engatinhar Antiderrapante Infantil +6m",
+    "price": 31.9,
+    "suggestedQty": 1,
+    "emoji": "✨",
+    "bgColor": "var(--cream-2)",
+    "category": "outros",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_690688-MLB89683360644_082025-F.jpg"
+  },
+  {
+    "id": "mlb_1847427761",
+    "name": "Kit C/ 8 Travas Magnéticas Proteção Criança Portas Gavetas Branco",
+    "price": 145.91,
+    "suggestedQty": 1,
+    "emoji": "✨",
+    "bgColor": "var(--cream-2)",
+    "category": "outros",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_803911-MLB45634089575_042021-F.jpg"
+  },
+  {
+    "id": "mlb_4615899564",
+    "name": "Fraldas Pom Pom Protek M X 48 Unidades Sem Gênero",
+    "price": 59.9,
+    "suggestedQty": 2,
+    "emoji": "🍼",
+    "bgColor": "var(--lilac-soft)",
+    "category": "fraldas",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_906144-MLA99932428557_112025-F.jpg"
+  },
+  {
+    "id": "mlb_4480404935",
+    "name": "Carrinho De Bebê Sprint Ii Com Bebê Conforto E Base - Kiddo Grafite Preto",
+    "price": 2499.0,
+    "suggestedQty": 1,
+    "emoji": "🍼",
+    "bgColor": "var(--blue-soft)",
+    "category": "passeio",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_700606-MLA99508027474_112025-F.jpg"
+  },
+  {
+    "id": "mlb_6593815008",
+    "name": "Carrinho De Bebê Para Gêmeos Kiddo Pair Melange Cinza Com 1 Bebe Conforto Casulo Preto",
+    "price": 5299.0,
+    "suggestedQty": 1,
+    "emoji": "🍼",
+    "bgColor": "var(--blue-soft)",
+    "category": "passeio",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_842975-MLA110175277607_042026-F.jpg"
+  },
+  {
+    "id": "mlb_5303077140",
+    "name": "Fralda Babysec Galinha Pintadinha Shortinho Mega Xg - 22 Un Gênero Sem Gênero Tamanho Extra Grande (xg)",
+    "price": 52.9,
+    "suggestedQty": 2,
+    "emoji": "👶",
+    "bgColor": "var(--lilac-soft)",
+    "category": "fraldas",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_973032-MLA110553135558_052026-F.jpg"
+  },
+  {
+    "id": "mlb_4616247078",
+    "name": "Burigotto, Berço Portátil Serenata Pink Burigotto, Rosa",
+    "price": 729.0,
+    "suggestedQty": 1,
+    "emoji": "🛏️",
+    "bgColor": "var(--lilac-soft)",
+    "category": "soninho",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_900502-MLA99513800174_112025-F.jpg"
+  },
+  {
+    "id": "mlb_4486698509",
+    "name": "Carrinho De Bebê Cosmos Melange Grafite - Kiddo Preto",
+    "price": 2229.0,
+    "suggestedQty": 1,
+    "emoji": "🚼",
+    "bgColor": "var(--blue-soft)",
+    "category": "passeio",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_874152-MLA100037308465_122025-F.jpg"
+  },
+  {
+    "id": "mlb_6588835848",
+    "name": "Mordedor Bebê Brinquedo Dino Sensorial Vinil Macio Alívio Verde Dino Rex",
+    "price": 32.1,
+    "suggestedQty": 1,
+    "emoji": "🍼",
+    "bgColor": "var(--blue)",
+    "category": "alimentacao",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_957927-MLA109933912691_042026-F.jpg"
+  },
+  {
+    "id": "mlb_4561853983",
+    "name": "2 Unidade Mordedor De Silicone Para Lápis Rosa E Vermelho Sensorial",
+    "price": 49.9,
+    "suggestedQty": 1,
+    "emoji": "🍼",
+    "bgColor": "var(--cream-2)",
+    "category": "alimentacao",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_603435-MLB110913327269_042026-F.jpg"
+  },
+  {
+    "id": "mlb_6774055546",
+    "name": "Kit 04 Toalha Umedecida Baby Club Care 70 Unidades 20cmx13cm",
+    "price": 29.9,
+    "suggestedQty": 2,
+    "emoji": "🍼",
+    "bgColor": "var(--lilac-soft)",
+    "category": "fraldas",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_962067-MLA111689409275_052026-F.jpg"
+  },
+  {
+    "id": "mlb_4709721261",
+    "name": "Organizador Infantil Guarda Brinquedos 8 Caixas Com Rodas Branco",
+    "price": 169.0,
+    "suggestedQty": 1,
+    "emoji": "🌟",
+    "bgColor": "var(--lilac-soft)",
+    "category": "outros",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_707234-MLB112209250383_052026-F.jpg"
+  },
+  {
+    "id": "mlb_5118217918",
+    "name": "Capa Bebê Conforto Capota Apoio Redutor Menina Menino 3 Peça",
+    "price": 65.8,
+    "suggestedQty": 1,
+    "emoji": "🚼",
+    "bgColor": "var(--blue-soft)",
+    "category": "passeio",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_799639-MLB91905428064_092025-F.jpg"
+  },
+  {
+    "id": "mlb_5719341856",
+    "name": "Colchão Ortobom Infantil D18 Baby Light Saúde Infantil 60x130 Ciano",
+    "price": 197.94,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--lilac-soft)",
+    "category": "soninho",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_812312-MLA96426645990_102025-F.jpg"
+  },
+  {
+    "id": "mlb_4598225721",
+    "name": "Mordedor Sensorial Para Lápis Silicone Anti-stress Autismo Lara-azul-verde-rosa",
+    "price": 59.9,
+    "suggestedQty": 1,
+    "emoji": "🥣",
+    "bgColor": "var(--cream-2)",
+    "category": "alimentacao",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_667789-MLB111086373615_042026-F.jpg"
+  },
+  {
+    "id": "mlb_4510847101",
+    "name": "Triciclo Infantil Menina Com Cestinho Duplo Colli Kika Rosa - A Partir De 2 Anos Até 20kg",
+    "price": 599.9,
+    "suggestedQty": 1,
+    "emoji": "🚼",
+    "bgColor": "var(--blue-soft)",
+    "category": "passeio",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_936671-MLB108958598666_032026-F.jpg"
+  },
+  {
+    "id": "mlb_4528135503",
+    "name": "Kit 3 Mordedor Bebê Borracha Natural Frutas Macio Livre Bpa Cores Diversas Frutinhas",
+    "price": 59.9,
+    "suggestedQty": 1,
+    "emoji": "🍼",
+    "bgColor": "var(--blue)",
+    "category": "alimentacao",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_996513-MLB107903746406_032026-F.jpg"
+  },
+  {
+    "id": "mlb_3509247723",
+    "name": "Kit Higiene Cuidados Para O Bebê Com 5 Peças + Nécessaire Cor Cinza",
+    "price": 59.9,
+    "suggestedQty": 1,
+    "emoji": "🌟",
+    "bgColor": "var(--lilac-soft)",
+    "category": "outros",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_907813-MLU78419850481_082024-F.jpg"
+  },
+  {
+    "id": "mlb_6572756320",
+    "name": "Pulseira Mordedor Sensorial Silicone Autismo Brasil Cores Brasil Liso",
+    "price": 99.9,
+    "suggestedQty": 1,
+    "emoji": "🍼",
+    "bgColor": "var(--cream-2)",
+    "category": "alimentacao",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_705592-MLB111343161249_052026-F.jpg"
+  },
+  {
+    "id": "mlb_4469056511",
+    "name": "Capa Anti-insetos Tela Para Carrinho Bebe Capa Mosquiteiro Branco",
+    "price": 21.98,
+    "suggestedQty": 1,
+    "emoji": "🍼",
+    "bgColor": "var(--blue-soft)",
+    "category": "passeio",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_671227-MLB106302818572_022026-F.jpg"
+  },
+  {
+    "id": "mlb_6233711542",
+    "name": "Cobertor Dyuri Baby Jacquard Cosmo Dino 0,90mx1,10m Azul Cosmo Dino Azul",
+    "price": 71.41,
+    "suggestedQty": 1,
+    "emoji": "🛏️",
+    "bgColor": "var(--lilac-soft)",
+    "category": "soninho",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_615651-MLB106130477940_022026-F.jpg"
+  },
+  {
+    "id": "mlb_4534168922",
+    "name": "Trocador De Fraldas Anatômico Impermeável Menina Menino",
+    "price": 64.1,
+    "suggestedQty": 2,
+    "emoji": "🍼",
+    "bgColor": "var(--lilac-soft)",
+    "category": "fraldas",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_736165-MLB112328429821_052026-F.jpg"
+  },
+  {
+    "id": "mlb_4746259353",
+    "name": "Travesseiro Almofada Calmante Bebê Colchão Ninho Suporte Mãe Rosa",
+    "price": 397.89,
+    "suggestedQty": 1,
+    "emoji": "🛏️",
+    "bgColor": "var(--lilac-soft)",
+    "category": "soninho",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_884288-MLB111788967690_062026-F.jpg"
+  },
+  {
+    "id": "mlb_4331973885",
+    "name": "Quarto De Bebê Completo Com Berço Americano 3 Em 1 Encanto Multimóveis Mp4585 Madeirado/branco",
+    "price": 1889.0,
+    "suggestedQty": 1,
+    "emoji": "🛏️",
+    "bgColor": "var(--lilac-soft)",
+    "category": "soninho",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_831328-MLA99735072669_112025-F.jpg"
+  },
+  {
+    "id": "mlb_4615734651",
+    "name": "Colchão Ortobom Infantil Physical Resistente 70x150 Ciano",
+    "price": 248.94,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--lilac-soft)",
+    "category": "soninho",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_686269-MLA110567056073_042026-F.jpg"
+  },
+  {
+    "id": "mlb_5831988632",
+    "name": "Berço Para Colchão 60 X 130 Cm Ana Lívia Multimóveis Branco",
+    "price": 629.99,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--lilac-soft)",
+    "category": "soninho",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_970678-MLA100037384145_122025-F.jpg"
+  },
+  {
+    "id": "mlb_6184964312",
+    "name": "Mini Berço De Bebê Rubi Quarto Infantil 5 Em 1 Chiqueirinho",
+    "price": 511.99,
+    "suggestedQty": 1,
+    "emoji": "🧸",
+    "bgColor": "var(--lilac-soft)",
+    "category": "soninho",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_824419-MLB110752071357_042026-F.jpg"
+  },
+  {
+    "id": "mlb_4564647413",
+    "name": "Porta Foto Ultrassom Lembrança Especial De Gravidez",
+    "price": 38.0,
+    "suggestedQty": 1,
+    "emoji": "🛏️",
+    "bgColor": "var(--lilac-soft)",
+    "category": "soninho",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_981279-MLB108811946550_032026-F.jpg"
+  },
+  {
+    "id": "mlb_4751419283",
+    "name": "Kit De 5 Bolsa Maternidade Grande Menina Menino Com Trocador",
+    "price": 133.0,
+    "suggestedQty": 1,
+    "emoji": "🚼",
+    "bgColor": "var(--blue-soft)",
+    "category": "passeio",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_803293-MLB112974493741_062026-F.jpg"
+  },
+  {
+    "id": "mlb_6222559818",
+    "name": "Calça Legging Maternidade Trifil Alta Longa 0008 Gra",
+    "price": 122.9,
+    "suggestedQty": 2,
+    "emoji": "👶",
+    "bgColor": "var(--lilac-soft)",
+    "category": "fraldas",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_797072-MLB85761319551_062025-F.jpg"
+  },
+  {
+    "id": "mlb_3606660329",
+    "name": "144 Adesivos Repelente Infantil Bebê Sai Dai Mosquito Dengue Multicolor Diverso",
+    "price": 74.99,
+    "suggestedQty": 1,
+    "emoji": "✨",
+    "bgColor": "var(--cream-2)",
+    "category": "outros",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_648686-MLB92653221271_092025-F.jpg"
+  },
+  {
+    "id": "mlb_4426990143",
+    "name": "Mordedor Bebê Unicórnio Látex Natural Chocalho 14cm",
+    "price": 49.9,
+    "suggestedQty": 1,
+    "emoji": "🍼",
+    "bgColor": "var(--blue)",
+    "category": "alimentacao",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_731405-MLB110088863930_042026-F.jpg"
+  },
+  {
+    "id": "mlb_4740391949",
+    "name": "Mordedor Elefante Em Silicone Azul Livre Bpa Buba - 15651 Liso",
+    "price": 49.9,
+    "suggestedQty": 1,
+    "emoji": "🥣",
+    "bgColor": "var(--cream-2)",
+    "category": "alimentacao",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_983808-MLA100081040795_122025-F.jpg"
+  },
+  {
+    "id": "mlb_6022212814",
+    "name": "Triciclo Infantil Com Empurrador Avespa Passeio Maral",
+    "price": 484.52,
+    "suggestedQty": 1,
+    "emoji": "🚼",
+    "bgColor": "var(--blue-soft)",
+    "category": "passeio",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_729542-MLB100705366284_122025-F.jpg"
+  },
+  {
+    "id": "mlb_6719996532",
+    "name": "Bicicleta De Equilíbrio Infantil 3 Cores, Segura E Leve",
+    "price": 157.0,
+    "suggestedQty": 1,
+    "emoji": "🍼",
+    "bgColor": "var(--blue-soft)",
+    "category": "passeio",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_934516-MLB111662356957_052026-F.jpg"
+  },
+  {
+    "id": "mlb_6922777492",
+    "name": "Andador Infantil Musical Disquinho - Rosa Rosa",
+    "price": 523.28,
+    "suggestedQty": 1,
+    "emoji": "🚼",
+    "bgColor": "var(--blue-soft)",
+    "category": "passeio",
+    "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_2X_763641-MLB112943740949_062026-F.jpg"
   }
 ]
