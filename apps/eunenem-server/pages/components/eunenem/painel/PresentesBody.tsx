@@ -22,11 +22,11 @@ import {
   type BancariosMode,
   type PixType,
 } from "@/lib/mocks/bancarios";
-import { useCriarRecebedor } from "@/lib/hooks/useCriarRecebedor";
-import type {
-  CriarRecebedorInput,
-  PixKeyTipo,
-} from "@/lib/schemas/criar-recebedor";
+import { trpc } from "@/lib/trpc";
+// aperture-jtamj — local PIX-key-type tuple (used to be inferred from the
+// pre-swap CriarRecebedorInputSchema discriminated union; Rex's flat wire
+// landed with the same string set so we keep the same vocabulary).
+type PixKeyTipo = "cpf" | "cnpj" | "email" | "telefone" | "aleatoria";
 import {
   type ExtratoLiberacao,
   type ExtratoRowDTO,
@@ -939,11 +939,17 @@ function TransferOnboardingModal({
   const [tipoPix, setTipoPix] = useState<PixType["v"]>("cpf");
   const [validationError, setValidationError] = useState<string | null>(null);
 
-  const criarRecebedor = useCriarRecebedor({
+  // aperture-jtamj — real trpc.recebedor.criar mutation (Rex's #193 Phase A).
+  // onSuccess invalidates auth.me so hasRecebedor flips true → next click
+  // on SOLICITAR routes to the confirm-amount modal (existing B2 #188 path).
+  const utils = trpc.useUtils();
+  const criarRecebedor = trpc.recebedor.criar.useMutation({
     onSuccess: () => {
-      // Chain into solicitar AFTER recebedor.criar succeeds. The parent
-      // wires solicitarState.onSuccess to close the modal + show the
-      // toast, so a single side-effect terminates the whole flow.
+      // Invalidate auth.me so the hasRecebedor signal refetches.
+      void utils.auth.me.invalidate();
+      // Chain into solicitar. The parent wires solicitarState.onSuccess
+      // to close the modal + show the toast, so a single side-effect
+      // terminates the whole flow.
       solicitarState.mutate();
     },
   });
@@ -986,36 +992,32 @@ function TransferOnboardingModal({
       setValidationError("aguardando dados da campanha — tente novamente em um instante");
       return;
     }
-    // Build the discriminated-union payload per CriarRecebedorInputSchema.
-    const input: CriarRecebedorInput =
-      modo === "conta"
-        ? {
-            idCampanha,
-            titular: { nome: s.nome, telefone: s.telefone },
-            dadosBancarios: {
-              tipo: "conta_completa",
-              dados: {
-                bankCode: s.bankCode,
-                agencia: s.agencia,
-                agenciaDV: s.agenciaDV,
-                conta: s.conta,
-                contaDV: s.contaDV,
-                tipoConta: s.tipoConta as "cc" | "cp" | "pg" | "csl",
-              },
-            },
-          }
-        : {
-            idCampanha,
-            titular: { nome: s.nome, telefone: s.telefone },
-            dadosBancarios: {
-              tipo: "chave_pix",
-              dados: {
-                tipoChave: tipoPix as PixKeyTipo,
-                chave: s.pixKey,
-              },
-            },
-          };
-    criarRecebedor.mutate(input);
+    // aperture-jtamj — Rex's wire is flat + PIX-only.
+    // {idCampanha, dadosRecebedor: {nomeTitular, tipoChavePix, chavePix}}.
+    // Conta Completa tab still renders for visual continuity (BancariosBody
+    // pattern parity) but its submit is gated behind a modo === "conta"
+    // early-return — operator hits a toast pointing them at the Chave Pix
+    // tab. Backend will accept conta_completa in a future iteration; until
+    // then the user-visible affordance is the PIX path.
+    if (modo === "conta") {
+      setValidationError(
+        "no momento só aceitamos chave Pix — use a aba 'Chave Pix' acima",
+      );
+      return;
+    }
+    // Pix mapping: PIX_TYPES.v has `celular`; Rex's wire wants `telefone`.
+    // Aliases otherwise (cpf / email / aleatoria) are identical.
+    const tipoChavePix: "cpf" | "cnpj" | "email" | "telefone" | "aleatoria" =
+      tipoPix === "celular" ? "telefone" : (tipoPix as PixKeyTipo);
+
+    criarRecebedor.mutate({
+      idCampanha,
+      dadosRecebedor: {
+        nomeTitular: s.nome.trim(),
+        tipoChavePix,
+        chavePix: s.pixKey,
+      },
+    });
   };
 
   const bank = bankByCode(s.bankCode);

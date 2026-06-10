@@ -295,27 +295,22 @@ export function useStubCampanhaIdForSlug(_slug: string): {
   /**
    * Whether the authenticated user has a recebedor configured on the
    * default campanha. Drives the TransferModal's onboarding-vs-confirm
-   * branch (aperture-kbmel).
+   * branch (aperture-kbmel + aperture-jtamj swap-over).
    *
-   * TODO(aperture-kbmel-rex-swap): when Rex's auth.me extension lands,
-   * replace the literal `false` below with `me.data?.hasRecebedor ?? false`.
-   * The field must be added to the `auth.me` procedure's return type in
-   * `apps/eunenem-server/server/trpc/auth-router.ts:447-492` (per
-   * kbmel's ACCEPTANCE spec). Backend resolution: query the recebedor
-   * repository for `findByCampanha(idCampanha)` — null → false, hit → true.
+   * Real source: trpc.auth.me carries `hasRecebedor: boolean` (Rex's
+   * Phase A #193 — derived from campanha?.idRecebedor != null with no
+   * extra DB call). Null campanha (pre-p8i01 backfill caveat) AND
+   * null recebedor both surface as false, both routing to the onboarding
+   * embed.
    */
   hasRecebedor: boolean;
   isLoading: boolean;
   error: { message: string } | null;
 } {
   const me = trpc.auth.me.useQuery();
-  // aperture-kbmel — MOCK: force false so the onboarding branch is
-  // exercised. Swap to `me.data?.hasRecebedor ?? false` when Rex's
-  // backend ships the field on `auth.me`.
-  const hasRecebedor = false;
   return {
     idCampanha: me.data?.idCampanha ?? null,
-    hasRecebedor,
+    hasRecebedor: me.data?.hasRecebedor ?? false,
     isLoading: me.isLoading,
     error: me.error ? { message: me.error.message } : null,
   };
