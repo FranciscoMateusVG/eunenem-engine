@@ -65,7 +65,16 @@ function PainelGroupCard({
   slug: string;
 }) {
   return (
-    <section className={`painel-group painel-group-${group.id}`}>
+    // aperture-7nius — `id` enables the AJUDA top-nav chip's anchor-jump
+    // target (`#painel-group-conta`). Combined with aperture-lwkwx's
+    // per-column flex restructure: section is rendered inside its
+    // column wrapper above, so the id still resolves at document scope
+    // (ids are tree-global) and `scroll-margin-top` in tailwind.css
+    // accounts for the sticky topbar offset.
+    <section
+      id={`painel-group-${group.id}`}
+      className={`painel-group painel-group-${group.id}`}
+    >
       <div className="painel-group-title">{group.title}</div>
       <div className="painel-list">
         {group.items.map((item) => (

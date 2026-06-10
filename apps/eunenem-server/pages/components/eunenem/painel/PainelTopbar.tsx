@@ -1,26 +1,33 @@
 import { painelHref, type PainelSection } from "@/lib/painelRoutes";
 
-// aperture-fx2iz — Common full-width painel topbar.
+// aperture-7nius — Painel topbar redesign (3 chips).
 //
-// Single header used by every /painel/:slug(/:section) route. Three zones,
-// rendered in a centered max-width row that sits inside a full-viewport-width
-// background band:
-//   • Brand block on the left — Thacy's logo.png wordmark, linking back to the
-//     painel root.
-//   • 4 centered nav links — MINHA ÁREA / EXTRATO / CONVIDADOS / CONVITE.
-//     Operator-confirmed exactly 4 buttons (no LISTA, no PERFIL); see the bead
-//     brief — earlier sketches mentioned a 5th-button placeholder, dropped.
-//   • Circular icon-buttons on the right — notifications bell (carries a coral
-//     dot when `unread` is true; wired static for now) + logout (arrow-out-of-
-//     box). Same visual treatment as the existing painel header (see 26.png).
+// Phase B of plan 0018 — the operator's reference screenshots show a
+// reduced top nav `MINHA PÁGINA / TUTORIAL / AJUDA`, replacing the
+// previous 4-chip nav (`MINHA ÁREA / EXTRATO / CONVIDADOS / CONVITE`)
+// from aperture-fx2iz. Decisions encoded here:
 //
-// Active state: the link matching `activeSection` (or the MINHA ÁREA link when
-// `activeSection` is undefined, i.e. the painel root) renders as a soft-purple
-// pill — `var(--lilac-soft)` background, `var(--plum)` text. Inactive links
-// stay plain text in `var(--ink)`.
+//   • MINHA PÁGINA  — renamed from MINHA ÁREA; same destination (painel
+//                     root). The label is closer to the user's mental
+//                     model of "my public page" vs "my admin area".
+//   • TUTORIAL      — re-triggers the spotlight overlay (plan 0018 §"Re-
+//                     trigger via floating CTA"). On the painel root this
+//                     calls `onOpenTutorial`; on sub-pages it navigates
+//                     to the painel root carrying `?tutorial=open` so
+//                     the painel root auto-opens the overlay on land.
+//   • AJUDA         — scrolls to the CONTA & AJUDA section of the painel
+//                     grid (id `painel-group-conta` from PainelMenu).
+//                     On sub-pages it navigates to the painel root with
+//                     `#painel-group-conta` so the browser anchor-jumps.
+//                     Lowest-friction: the section already contains the
+//                     SUPORTE row pointing at WhatsApp, plus PERFIL and
+//                     BANCÁRIOS — exactly the "help" surface area.
 //
-// Hrefs come from painelHref() so paths never drift from the routing source of
-// truth in lib/painelRoutes.ts.
+// Why this trio replaces the previous 4-chip nav: EXTRATO + CONVIDADOS +
+// CONVITE already exist as rows in the painel grid (under SEU EVENTO and
+// CONVIDADOS groups), so a top-nav duplicate was redundant. The new trio
+// reflects the operator's reference screenshots and the painel's actual
+// information architecture.
 
 interface PainelTopbarProps {
   /** Creator slug — drives every nav href. */
@@ -29,27 +36,36 @@ interface PainelTopbarProps {
   activeSection?: PainelSection;
   /** Whether the bell shows the unread dot. Static-wired for now. */
   unread?: boolean;
+  /** Painel-root-only: fires when the user clicks the TUTORIAL chip and
+   *  we can open the overlay locally. When undefined (sub-pages), the
+   *  chip falls back to `?tutorial=open` navigation. */
+  onOpenTutorial?: () => void;
 }
 
 interface NavItem {
   label: string;
-  /** undefined → MINHA ÁREA (the painel root). */
+  /** undefined → painel root. */
   section?: PainelSection;
+  /** Optional behavior key — when set, the chip is wired to the matching
+   *  handler instead of being a plain anchor. */
+  kind?: "page" | "tutorial" | "ajuda";
 }
 
-// Order matters — left-to-right per the brief.
+// Order matters — left-to-right per the reference screenshots.
 const NAV_ITEMS: NavItem[] = [
-  { label: "MINHA ÁREA" },
-  { label: "EXTRATO", section: "presentes" },
-  { label: "CONVIDADOS", section: "convidados" },
-  { label: "CONVITE", section: "convite" },
+  { label: "MINHA PÁGINA", kind: "page" },
+  { label: "TUTORIAL", kind: "tutorial" },
+  { label: "AJUDA", kind: "ajuda" },
 ];
 
 export function PainelTopbar({
   slug,
   activeSection,
   unread = true,
+  onOpenTutorial,
 }: PainelTopbarProps) {
+  const onPainelRoot = activeSection === undefined;
+
   return (
     <header className="painel-topbar" aria-label="Painel — navegação">
       <div className="painel-topbar-inner">
@@ -58,9 +74,6 @@ export function PainelTopbar({
           className="painel-topbar-brand"
           aria-label="EuNeném — painel"
         >
-          {/* Thacy's logo asset — the "ee NENEM" colorful wordmark. The
-              .painel-logo-img rule already height-controls it (34px mobile /
-              40px desktop) so we keep the same visual rhythm. */}
           <img
             src="/public/logo.png"
             alt="EuNeném"
@@ -73,20 +86,72 @@ export function PainelTopbar({
         <nav className="painel-topbar-nav" aria-label="Seções do painel">
           <ul>
             {NAV_ITEMS.map((item) => {
-              const active = item.section === activeSection;
-              return (
-                <li key={item.label}>
-                  <a
-                    href={painelHref(slug, item.section)}
-                    aria-current={active ? "page" : undefined}
-                    className={`painel-topbar-link${
-                      active ? " is-active" : ""
-                    }`}
-                  >
-                    {item.label}
-                  </a>
-                </li>
-              );
+              // MINHA PÁGINA — anchor to painel root, active when there's
+              // no sub-section.
+              if (item.kind === "page") {
+                const active = onPainelRoot;
+                return (
+                  <li key={item.label}>
+                    <a
+                      href={painelHref(slug, item.section)}
+                      aria-current={active ? "page" : undefined}
+                      className={`painel-topbar-link${
+                        active ? " is-active" : ""
+                      }`}
+                    >
+                      {item.label}
+                    </a>
+                  </li>
+                );
+              }
+
+              // TUTORIAL — fires onOpenTutorial when we have it (painel
+              // root); otherwise navigates with a flag so the root can
+              // auto-open on land.
+              if (item.kind === "tutorial") {
+                if (onPainelRoot && onOpenTutorial) {
+                  return (
+                    <li key={item.label}>
+                      <button
+                        type="button"
+                        onClick={onOpenTutorial}
+                        className="painel-topbar-link painel-topbar-link-btn"
+                      >
+                        {item.label}
+                      </button>
+                    </li>
+                  );
+                }
+                return (
+                  <li key={item.label}>
+                    <a
+                      href={`${painelHref(slug)}?tutorial=open`}
+                      className="painel-topbar-link"
+                    >
+                      {item.label}
+                    </a>
+                  </li>
+                );
+              }
+
+              // AJUDA — anchor-jumps to the CONTA & AJUDA group on the
+              // painel root. On sub-pages we navigate to the root with
+              // the hash; on the root we just scroll via the # anchor
+              // (the browser handles it).
+              if (item.kind === "ajuda") {
+                const href = onPainelRoot
+                  ? "#painel-group-conta"
+                  : `${painelHref(slug)}#painel-group-conta`;
+                return (
+                  <li key={item.label}>
+                    <a href={href} className="painel-topbar-link">
+                      {item.label}
+                    </a>
+                  </li>
+                );
+              }
+
+              return null;
             })}
           </ul>
         </nav>
@@ -118,7 +183,6 @@ export function PainelTopbar({
             aria-label="sair"
             className="painel-topbar-icon-btn"
           >
-            {/* Logout — arrow-out-of-box (door + arrow pointing right). */}
             <svg
               viewBox="0 0 24 24"
               fill="none"
