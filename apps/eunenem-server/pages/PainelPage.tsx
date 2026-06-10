@@ -8,10 +8,7 @@ import { PainelTutorialTrigger } from '@/components/eunenem/painel/PainelTutoria
 import { useStubCampanhaIdForSlug, useStubExtratoSummary } from '@/components/eunenem/painel/ExtratoStubData';
 import { useContribuicaoList } from '@/lib/contribuicao';
 import { buildPainelMenu, PAINEL_DEMO, type PainelEventSnapshot } from '@/lib/mocks/painelDemo';
-import {
-  useCompletarTutorialMock,
-  useTutorialStatusMock,
-} from '@/lib/painelTutorialMock';
+import { trpc } from '@/lib/trpc';
 
 // /painel/:slug — creator dashboard (was /painel/[slug]/page.tsx in
 // eunenem-v2). v1 only recognises the "helena" slug; the App.tsx router
@@ -47,10 +44,26 @@ import {
 //     after completion (locked decision #5).
 //   • Top-nav `TUTORIAL` chip wired via `onOpenTutorial` (PainelLayout
 //     threads it through to PainelTopbar).
-//   • Backend integration uses MOCK hooks today
-//     (`useTutorialStatusMock` / `useCompletarTutorialMock`) — swap to
-//     `trpc.usuario.tutorialStatus.useQuery()` + `.completarTutorial.
-//     useMutation()` when Rex's PR lands. Same call shape, one-line swap.
+//   • Backend integration via `trpc.usuario.tutorialStatus.useQuery()`
+//     + `.completarTutorial.useMutation()` (Rex's Phase A landed in #192).
+//     Pre-swap mock scaffolding deleted in aperture-4my2a.
+//
+// aperture-4my2a — P0 dismiss-loop fix. Operator: "im stuck on encerrar
+// tutorial no matter how many times i click i cant get away of it". Root
+// cause: the auto-open useEffect depends on `tutorialStatus.data`. Even
+// after dismiss (which sets `overlayOpen=false`), the next React Query
+// settle/refetch would surface the SAME data reference (or, with the
+// pre-persistence mock, the same `{completado: false}` payload), so the
+// useEffect would re-fire and slam the overlay back open. Operator
+// trapped.
+//
+// Fix: introduce a session-scoped `dismissedThisSession` boolean. Once
+// the user dismisses (ENCERRAR / CONCLUIR / Esc), we set this to true
+// and the auto-open effect honours it — even if the wire later says
+// `completado: false` (rare; mutation just round-tripped) the overlay
+// stays closed for the rest of this session. The floating TUTORIAL CTA
+// (and the topbar chip) explicitly reset `dismissedThisSession=false`
+// before opening, so re-triggering still works.
 export function PainelPage({ slug }: { slug: string }) {
   // Real data sources. Each falls back to the PAINEL_DEMO snapshot when
   // the user isn't logged in, has no campanha yet, or the query is
@@ -86,18 +99,36 @@ export function PainelPage({ slug }: { slug: string }) {
     listaClaimed: liveListaClaimed,
   });
 
-  // aperture-7nius — tutorial state (plan 0018 Phase B).
-  // Mock hooks today; swap to trpc.usuario.* once Rex lands Phase A.
-  const tutorialStatus = useTutorialStatusMock();
-  const completarTutorial = useCompletarTutorialMock();
-  const [overlayOpen, setOverlayOpen] = useState(false);
+  // aperture-7nius / aperture-4my2a — tutorial state (Plan 0018 Phase B,
+  // real-tRPC swap).
+  const tutorialStatus = trpc.usuario.tutorialStatus.useQuery();
+  const completarTutorial = trpc.usuario.completarTutorial.useMutation({
+    onSuccess: () => {
+      // Invalidate the status query so `completado: true` reaches the
+      // PainelPage on the next mount (refresh, navigation back, etc).
+      // This isn't what gates the current-session loop — `dismissedThisSession`
+      // does — but it keeps the cached state honest for the re-trigger path.
+      tutorialStatus.refetch();
+    },
+  });
 
-  // Auto-open on first paint for users who haven't completed the
-  // tutorial. Also handles the `?tutorial=open` deep-link from sub-pages
-  // (TUTORIAL chip clicks on a sub-page navigate to the root with this
-  // query so the root can pop the overlay on land).
+  const [overlayOpen, setOverlayOpen] = useState(false);
+  // aperture-4my2a — session-scoped dismissal latch. Auto-open useEffect
+  // honours this regardless of what the wire says. Re-trigger via the
+  // floating CTA / topbar chip resets it.
+  const [dismissedThisSession, setDismissedThisSession] = useState(false);
+
+  // Auto-open on first paint for users who haven't completed the tutorial.
+  // Also handles the `?tutorial=open` deep-link from sub-pages (TUTORIAL chip
+  // clicks on a sub-page navigate to the root with this query so the root can
+  // pop the overlay on land).
+  //
+  // Dismissal latch: once the user has dismissed in this session, the effect
+  // refuses to re-open even if the query re-settles. Without this, every
+  // refetch / cache mutation would slam the overlay back over the user.
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    if (dismissedThisSession) return;
     const params = new URLSearchParams(window.location.search);
     if (params.get('tutorial') === 'open') {
       setOverlayOpen(true);
@@ -106,28 +137,40 @@ export function PainelPage({ slug }: { slug: string }) {
     if (tutorialStatus.data && !tutorialStatus.data.completado) {
       setOverlayOpen(true);
     }
-  }, [tutorialStatus.data]);
+  }, [tutorialStatus.data, dismissedThisSession]);
 
+  // CONCLUIR (step 9 PRÓXIMO → CONCLUIR variant) — auto-fires the mutation
+  // AND latches the dismissal so the user lands on the painel clean.
   const handleComplete = () => {
     completarTutorial.mutate();
+    setDismissedThisSession(true);
     setOverlayOpen(false);
   };
 
+  // ENCERRAR (or Esc) — same persistence + latch. Plan 0018 §"Dismissal
+  // path": ENCERRAR ≡ CONCLUIR for state. Both fire the mutation; the
+  // user has been shown the entry-point and that's what the flag tracks.
   const handleDismiss = () => {
-    // Plan 0018 §"Dismissal path": ENCERRAR == CONCLUIR for state. Both
-    // fire the mutation; the user has been shown the entry-point and
-    // that's what the flag tracks.
     completarTutorial.mutate();
+    setDismissedThisSession(true);
     setOverlayOpen(false);
+  };
+
+  // Re-trigger paths (floating CTA + topbar TUTORIAL chip). Resets the
+  // session latch so the auto-open useEffect can fire again on next visit
+  // if the user dismisses without completing the tour.
+  const openOverlay = () => {
+    setDismissedThisSession(false);
+    setOverlayOpen(true);
   };
 
   return (
-    <PainelLayout slug={slug} onOpenTutorial={() => setOverlayOpen(true)}>
+    <PainelLayout slug={slug} onOpenTutorial={openOverlay}>
       <PainelHeaderCard snapshot={snapshot} slug={slug} />
       <PainelMenu groups={groups} slug={slug} />
       <PainelTutorialTrigger
         visible={!overlayOpen}
-        onOpen={() => setOverlayOpen(true)}
+        onOpen={openOverlay}
       />
       <PainelTutorialOverlay
         open={overlayOpen}
