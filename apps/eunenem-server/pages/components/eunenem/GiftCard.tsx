@@ -130,64 +130,71 @@ export function GiftCard({ gift, onPick, onAdd }: GiftCardProps) {
         )}
       </div>
 
-      <h3
-        style={{
-          fontSize: 24,
-          color: "var(--plum)",
-          marginTop: 16,
-          marginBottom: 10,
-          lineHeight: 1.1,
-        }}
-      >
-        {gift.nome}
-      </h3>
-
-      <div
-        style={{
-          display: "flex",
-          alignItems: "baseline",
-          justifyContent: "space-between",
-          marginBottom: showQtyTag ? 8 : 16,
-        }}
-      >
-        <span
+      {/* aperture-nwxkq: wrap the middle content (name + price + qty tag) in a
+          flex-grow container so the bottom CTA pins to the card bottom
+          regardless of name-wrap or whether the "X de Y disponíveis" badge
+          shows. Without this, cards in the same grid row have CTAs at
+          inconsistent vertical positions. */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+        <h3
           style={{
-            fontFamily: "var(--font-patrick-hand), cursive",
-            fontSize: 30,
+            fontSize: 24,
             color: "var(--plum)",
-            lineHeight: 1,
-            whiteSpace: "nowrap",
+            marginTop: 16,
+            marginBottom: 10,
+            lineHeight: 1.1,
           }}
         >
-          {formatBRL(gift.valorCents)}
-        </span>
-        <span
-          style={{
-            fontFamily: "var(--font-caveat), cursive",
-            fontSize: 18,
-            color: "var(--coral-pink)",
-          }}
-        >
-          presente
-        </span>
-      </div>
+          {gift.nome}
+        </h3>
 
-      {showQtyTag && (
-        <p
+        <div
           style={{
-            fontFamily: "var(--font-caveat), cursive",
-            fontSize: 17,
-            color: "var(--ink-soft)",
-            marginBottom: 14,
-            marginTop: 0,
-            lineHeight: 1.2,
+            display: "flex",
+            alignItems: "baseline",
+            justifyContent: "space-between",
+            marginBottom: showQtyTag ? 8 : 16,
           }}
         >
-          {gift.qtyAvailable > 0
-            ? `${gift.qtyAvailable} de ${gift.qtyTotal} disponíveis ♡`
-            : `todos os ${gift.qtyTotal} já foram ♡`}
-        </p>
-      )}
+          <span
+            style={{
+              fontFamily: "var(--font-patrick-hand), cursive",
+              fontSize: 30,
+              color: "var(--plum)",
+              lineHeight: 1,
+              whiteSpace: "nowrap",
+            }}
+          >
+            {formatBRL(gift.valorCents)}
+          </span>
+          <span
+            style={{
+              fontFamily: "var(--font-caveat), cursive",
+              fontSize: 18,
+              color: "var(--coral-pink)",
+            }}
+          >
+            presente
+          </span>
+        </div>
+
+        {showQtyTag && (
+          <p
+            style={{
+              fontFamily: "var(--font-caveat), cursive",
+              fontSize: 17,
+              color: "var(--ink-soft)",
+              marginBottom: 14,
+              marginTop: 0,
+              lineHeight: 1.2,
+            }}
+          >
+            {gift.qtyAvailable > 0
+              ? `${gift.qtyAvailable} de ${gift.qtyTotal} disponíveis ♡`
+              : `todos os ${gift.qtyTotal} já foram ♡`}
+          </p>
+        )}
+      </div>
 
       {isTaken ? (
         <button
