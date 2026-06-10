@@ -1546,6 +1546,37 @@ h4 {
   .painel-group .painel-group-title {
     margin-top: 0;
   }
+  /* aperture-cihww — explicit grid placement so CONTA & AJUDA lives
+   * directly under CONVIDADOS on the right column instead of stranding
+   * itself under the tall EVENTO column (the auto-flow placement put
+   * conta in row 2/col 2 — visually far below convidados because row 1
+   * was sized by EVENTO's 4 items, leaving a dead-space gap under
+   * convidados). NOVO/rifa drops to row 2/col 1.
+   *   - EVENTO       (4 items) → col 1, row 1
+   *   - CONVIDADOS   (2 items) → col 2, row 1
+   *   - NOVO/rifa    (1 item)  → col 1, row 2
+   *   - CONTA & AJUDA(3 items) → col 2, row 2 (was row 2 already, but
+   *                              now anchored directly under convidados
+   *                              because each column tracks its own
+   *                              intrinsic content height).
+   * On mobile (<900px) the single-col grid stacks groups in source
+   * order [evento, convidados, novo, conta] — unchanged. */
+  .painel-group-evento {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .painel-group-convidados {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .painel-group-novo {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .painel-group-conta {
+    grid-column: 2;
+    grid-row: 2;
+  }
 }
 
 /* =================================================================

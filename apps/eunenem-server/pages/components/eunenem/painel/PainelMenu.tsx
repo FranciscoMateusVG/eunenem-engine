@@ -26,7 +26,15 @@ export function PainelMenu({ groups, slug }: Props) {
     <div className="painel-menu-wrap">
       <div className="painel-menu-grid">
         {groups.map((group) => (
-          <section key={group.id} className="painel-group">
+          // aperture-cihww — `painel-group-<id>` lets the desktop
+          // breakpoint reshuffle CONTA & AJUDA up to the right column
+          // (directly below CONVIDADOS) without touching JSX order. On
+          // mobile the grid is single-col and the natural source order
+          // [evento, convidados, novo, conta] stands.
+          <section
+            key={group.id}
+            className={`painel-group painel-group-${group.id}`}
+          >
             <div className="painel-group-title">{group.title}</div>
             <div className="painel-list">
               {group.items.map((item) => (
