@@ -38,7 +38,7 @@ export { LivroFinanceiroRepositoryPostgres } from './adapters/pagamentos/finance
 export { PagamentoProviderFake } from './adapters/pagamentos/provider.fake.js';
 export type { PagamentoProvider, SolicitarPagamentoInput } from './adapters/pagamentos/provider.js';
 export { PagamentoProviderStripe } from './adapters/pagamentos/provider.stripe.js';
-export type { PagamentoRepository } from './adapters/pagamentos/repository.js';
+export type { MuralRecadoProjection, PagamentoRepository } from './adapters/pagamentos/repository.js';
 export { PagamentoRepositoryMemory } from './adapters/pagamentos/repository.memory.js';
 export { PagamentoRepositoryPostgres } from './adapters/pagamentos/repository.postgres.js';
 export type { PlataformaRepository } from './adapters/plataforma/repository.js';

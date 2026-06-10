@@ -28,6 +28,15 @@ type PaginaOutputs = inferRouterOutputs<PaginaRouter>;
 export type PaginaContribuicao =
   PaginaOutputs["obterListaPresentes"][number];
 
+/**
+ * Visitor-safe mural recado (aperture-7eci9). One row per aprovado
+ * pagamento whose contribuinte left a mensagem at Stripe checkout.
+ * Projection: opaque pagamento id, the nome typed at checkout, the
+ * mensagem body, and the criadoEm timestamp. No PII beyond the nome
+ * the contribuinte themselves chose to display.
+ */
+export type PaginaMuralRecado = PaginaOutputs["obterMural"][number];
+
 export type IniciarPagamentoInput = PaginaInputs["iniciarPagamentoContribuicao"];
 
 export type IniciarPagamentoResult =
@@ -55,6 +64,23 @@ export type PagamentoStatus = ObterSucessoResult["status"];
  */
 export function usePaginaListaPresentes(slug: string) {
   return trpc.pagina.obterListaPresentes.useQuery(
+    { slug },
+    { staleTime: 30_000 },
+  );
+}
+
+/**
+ * Visitor read of the public mural — aprovado pagamentos with a
+ * non-empty mensagem, ordered newest-first. aperture-7eci9.
+ *
+ * Same 30s staleTime as the gift list so the mural stays roughly
+ * fresh without thrashing on every render. Webhook-driven new recados
+ * arrive within one staleness window without manual invalidation; a
+ * future tick can wire an invalidation hook if real-time freshness
+ * becomes necessary.
+ */
+export function usePaginaMural(slug: string) {
+  return trpc.pagina.obterMural.useQuery(
     { slug },
     { staleTime: 30_000 },
   );

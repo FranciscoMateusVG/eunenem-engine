@@ -1,8 +1,26 @@
+import type { IdCampanha } from '../../domain/arrecadacao/value-objects/ids.js';
 import type { Pagamento } from '../../domain/pagamentos/entities/pagamento.js';
 import type {
   IdContribuicaoPagamento,
   IdPagamento,
 } from '../../domain/pagamentos/value-objects/ids.js';
+
+/**
+ * Visitor-safe mural projection (aperture-7eci9). Surfaces ONLY the fields
+ * the public `/pagina/<slug>` mural needs to render a recado card: opaque
+ * pagamento id, contribuinte's display name, message body, and timestamp.
+ *
+ * Deliberately omits everything else from the Pagamento aggregate
+ * (`email`, `idCampanha`, internal status, composição values, intencao id,
+ * any item-level data). This is what the `pagina.obterMural` procedure
+ * returns straight to a public visitor — no further projection needed.
+ */
+export interface MuralRecadoProjection {
+  readonly idPagamento: IdPagamento;
+  readonly contribuinteNome: string;
+  readonly mensagem: string;
+  readonly criadoEm: Date;
+}
 
 /**
  * Persistência de Pagamentos (porta).
@@ -124,4 +142,29 @@ export interface PagamentoRepository {
   findContribuintesFromLatestAprovadoPagamento(
     idsContribuicao: readonly IdContribuicaoPagamento[],
   ): Promise<Map<string, { nome: string; email: string; mensagem?: string } | null>>;
+  /**
+   * Visitor mural read (aperture-7eci9). Returns aprovado pagamentos for
+   * `idCampanha` whose `intencao.contribuinte.mensagem` is a non-empty
+   * string, projected to the visitor-safe `MuralRecadoProjection` shape.
+   *
+   * Ordering: `criadoEm DESC` (newest recados first).
+   *
+   * Filter rules:
+   *   - status === 'aprovado' (Stripe-settled only — pendings are noise)
+   *   - intencao.contribuinte is non-null AND mensagem is a non-empty
+   *     string after trim. Anonymous-checkout pagamentos (contribuinte
+   *     null) and "no message" pagamentos (contribuinte set, mensagem
+   *     missing/empty) are excluded.
+   *
+   * Projection omits everything the visitor doesn't need / shouldn't see:
+   * email, internal ids beyond opaque `idPagamento`, item-level data.
+   *
+   * `limit` caps how many recados the visitor mural pulls in one page —
+   * defaults are policy at the caller (the procedure today asks for 50).
+   * Empty array when no matches.
+   */
+  findMensagensMuralByCampanha(
+    idCampanha: IdCampanha,
+    limit: number,
+  ): Promise<readonly MuralRecadoProjection[]>;
 }

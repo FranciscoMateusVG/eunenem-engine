@@ -1,27 +1,38 @@
 
 import { useState } from "react";
+import { type PaginaMuralRecado, usePaginaMural } from "@/lib/paginaApi";
 import { FlowerDoodle, HeartDoodle, Tape } from "./Doodles";
 import { useTweaks } from "./TweaksContext";
-import { useMural } from "./MuralContext";
-import { type MuralMessage } from "@/lib/mocks/messages";
 
 // aperture-3d9t — Mural section ("o mural do <baby>").
+// aperture-7eci9 — mocks → real recados from aprovado pagamentos with
+// a non-empty mensagem. Also drops the free-form "Só deixar recado"
+// composer + the misleading "seu recadinho aqui" CTA — recados are
+// bound to pagamentos (custom_fields on Stripe checkout) and there is
+// no free-form recado path. The remaining "Escolher presente" CTA
+// lives inside MarketplaceCTA elsewhere; this section is now
+// read-only.
 //
-// Grid of message cards. Each card:
-// - rotated -3 to 3 degrees
+// Each card preserves the existing scrapbook styling:
+// - rotated -3 to 3 degrees (deterministic per pagamento id)
 // - scrapbook tape on top edge
 // - avatar circle with initials + colored bg
-// - name + timeAgo metadata
-// - body in Caveat (italic + quotes) OR DM Sans (plain) per style
+// - name + relative-time metadata
+// - message body in Caveat (italic + quotes)
 // - hover lifts the card and straightens its rotation
 //
-// Composer card at the end: dashed lilac border, "Escolher presente"
-// CTA that anchor-jumps to the marketplace.
+// Empty state: when no aprovados-with-mensagem exist, show a single
+// invitation card prompting visitors to pick a presente (no free-form
+// recado path).
 
-export function Messages() {
+interface MessagesProps {
+  slug: string;
+}
+
+export function Messages({ slug }: MessagesProps) {
   const { tweaks } = useTweaks();
-  const { messages, addMessage } = useMural();
-  const [showComposer, setShowComposer] = useState(false);
+  const { data, isLoading } = usePaginaMural(slug);
+  const recados = data ?? [];
 
   return (
     <section
@@ -81,43 +92,38 @@ export function Messages() {
           </p>
         </header>
 
-        <div
-          className="grid gap-7"
-          style={{
-            gridTemplateColumns:
-              "repeat(auto-fill, minmax(280px, 1fr))",
-          }}
-        >
-          {messages.map((m) => (
-            <MessageCard key={m.id} m={m} />
-          ))}
-
-          <ComposerCard
-            babyName={tweaks.babyName}
-            open={showComposer}
-            onOpenChange={setShowComposer}
-            onSubmit={(message) => {
-              addMessage({
-                authorName: "Você",
-                avatarBg: "var(--lilac-deep)",
-                avatarInitials: "VC",
-                timeAgo: "agora há pouco",
-                message,
-                style: "caveat",
-                rotation: -1,
-              });
-              setShowComposer(false);
+        {isLoading ? (
+          <MuralSkeleton />
+        ) : recados.length === 0 ? (
+          <EmptyMural babyName={tweaks.babyName} />
+        ) : (
+          <div
+            className="grid gap-7"
+            style={{
+              gridTemplateColumns:
+                "repeat(auto-fill, minmax(280px, 1fr))",
             }}
-          />
-        </div>
+          >
+            {recados.map((r) => (
+              <MessageCard key={r.id} recado={r} />
+            ))}
+          </div>
+        )}
       </div>
     </section>
   );
 }
 
-function MessageCard({ m }: { m: MuralMessage }) {
+function MessageCard({ recado }: { recado: PaginaMuralRecado }) {
   const [hover, setHover] = useState(false);
-  const isCaveat = m.style === "caveat";
+  // Deterministic rotation + avatar color per pagamento id so the same
+  // recado renders identically on every reload (the data has no rotation
+  // / avatarBg column — we derive both from the opaque id).
+  const seed = hashSeed(recado.id);
+  const rotation = ((seed % 60) - 30) / 10; // -3.0 .. 3.0 degrees
+  const avatarBg = AVATAR_PALETTE[seed % AVATAR_PALETTE.length] ?? "var(--lilac-deep)";
+  const initials = computeInitials(recado.contribuinteNome);
+  const timeAgo = formatRelativeTime(new Date(recado.criadoEm), new Date());
 
   return (
     <article
@@ -133,7 +139,7 @@ function MessageCard({ m }: { m: MuralMessage }) {
         transition: "transform 0.25s ease",
         transform: hover
           ? "rotate(0deg) translateY(-4px)"
-          : `rotate(${m.rotation}deg)`,
+          : `rotate(${rotation}deg)`,
       }}
     >
       <Tape
@@ -162,11 +168,11 @@ function MessageCard({ m }: { m: MuralMessage }) {
             fontFamily: "var(--font-patrick-hand), cursive",
             fontSize: 22,
             boxShadow: "var(--shadow-sm)",
-            background: m.avatarBg,
+            background: avatarBg,
             flexShrink: 0,
           }}
         >
-          {m.avatarInitials}
+          {initials}
         </span>
         <div>
           <div
@@ -177,185 +183,166 @@ function MessageCard({ m }: { m: MuralMessage }) {
               lineHeight: 1.1,
             }}
           >
-            {m.authorName}
+            {recado.contribuinteNome}
           </div>
           <div style={{ fontSize: 12.5, color: "var(--ink-mute)" }}>
-            {m.timeAgo}
+            {timeAgo}
           </div>
         </div>
       </div>
 
       <div
-        style={
-          isCaveat
-            ? {
-                fontFamily: "var(--font-caveat), cursive",
-                fontSize: 24,
-                color: "var(--ink)",
-                lineHeight: 1.25,
-              }
-            : {
-                fontFamily: "var(--font-dm-sans), system-ui, sans-serif",
-                fontSize: 15,
-                color: "var(--ink-soft)",
-                lineHeight: 1.5,
-              }
-        }
+        style={{
+          fontFamily: "var(--font-caveat), cursive",
+          fontSize: 24,
+          color: "var(--ink)",
+          lineHeight: 1.25,
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-word",
+        }}
       >
-        {isCaveat ? `"${m.message}"` : m.message}
+        “{recado.mensagem}”
       </div>
     </article>
   );
 }
 
-interface ComposerCardProps {
-  babyName: string;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onSubmit: (message: string) => void;
-}
-
-function ComposerCard({
-  babyName,
-  open,
-  onOpenChange,
-  onSubmit,
-}: ComposerCardProps) {
-  const [text, setText] = useState("");
-
-  if (!open) {
-    return (
-      <div
-        style={{
-          background: "var(--paper)",
-          border: "1.5px dashed var(--lilac)",
-          borderRadius: 18,
-          padding: 24,
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "center",
-          alignItems: "center",
-          textAlign: "center",
-          minHeight: 220,
-        }}
-      >
-        <div
-          style={{
-            fontFamily: "var(--font-patrick-hand), cursive",
-            fontSize: 24,
-            color: "var(--plum)",
-            marginBottom: 8,
-          }}
-        >
-          seu recadinho aqui
-        </div>
-        <p
-          style={{
-            fontSize: 14,
-            color: "var(--ink-soft)",
-            marginBottom: 18,
-          }}
-        >
-          Escolha um presente e deixe uma mensagem
-          <br />
-          pro {babyName} no checkout.
-        </p>
-        <div className="flex gap-2 flex-wrap justify-center">
-          <a href="#presentes" className="btn-lilac no-underline">
-            Escolher presente
-          </a>
-          <button
-            type="button"
-            onClick={() => onOpenChange(true)}
-            className="btn-outline"
-          >
-            Só deixar recado
-          </button>
-        </div>
-      </div>
-    );
-  }
-
+function EmptyMural({ babyName }: { babyName: string }) {
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (text.trim().length === 0) return;
-        onSubmit(text.trim());
-        setText("");
-      }}
+    <div
       style={{
         background: "var(--paper)",
-        border: "1.5px solid var(--lilac)",
+        border: "1.5px dashed var(--lilac)",
         borderRadius: 18,
-        padding: 22,
+        padding: 32,
         display: "flex",
         flexDirection: "column",
-        gap: 10,
-        minHeight: 220,
+        justifyContent: "center",
+        alignItems: "center",
+        textAlign: "center",
+        maxWidth: 420,
+        marginLeft: "auto",
+        marginRight: "auto",
       }}
     >
-      <label
-        htmlFor="composer-message"
+      <div
         style={{
-          fontFamily: "var(--font-caveat), cursive",
-          fontSize: 22,
+          fontFamily: "var(--font-patrick-hand), cursive",
+          fontSize: 24,
           color: "var(--plum)",
-          transform: "rotate(-1deg)",
-          display: "inline-block",
+          marginBottom: 8,
         }}
       >
-        recadinho pro {babyName} ♡
-      </label>
-      <textarea
-        id="composer-message"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        rows={4}
-        maxLength={280}
-        autoFocus
-        placeholder="Conta uma história, manda um abraço, deixa um conselho..."
-        style={{
-          width: "100%",
-          padding: 12,
-          borderRadius: 14,
-          border: "1.5px solid var(--line)",
-          fontSize: 15,
-          fontFamily: "var(--font-dm-sans), system-ui, sans-serif",
-          color: "var(--ink)",
-          lineHeight: 1.5,
-          background: "var(--cream)",
-          resize: "vertical",
-          minHeight: 80,
-          outline: "none",
-        }}
-      />
-      <div className="flex items-center justify-between gap-2 flex-wrap">
-        <span style={{ fontSize: 12, color: "var(--ink-mute)" }}>
-          {text.length}/280
-        </span>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              setText("");
-              onOpenChange(false);
-            }}
-            className="btn-outline"
-            style={{ padding: "8px 16px", fontSize: 12 }}
-          >
-            Cancelar
-          </button>
-          <button
-            type="submit"
-            disabled={text.trim().length === 0}
-            className="btn-lilac"
-            style={{ padding: "10px 18px", fontSize: 12 }}
-          >
-            Postar no mural
-          </button>
-        </div>
+        ainda sem recadinhos
       </div>
-    </form>
+      <p
+        style={{
+          fontSize: 14,
+          color: "var(--ink-soft)",
+          marginBottom: 18,
+        }}
+      >
+        Os recadinhos aparecem aqui quando alguém escolhe um presente
+        e deixa uma mensagem pro {babyName} no checkout.
+      </p>
+      <a href="#presentes" className="btn-lilac no-underline">
+        Escolher presente
+      </a>
+    </div>
   );
+}
+
+function MuralSkeleton() {
+  return (
+    <div
+      className="grid gap-7"
+      style={{
+        gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+      }}
+    >
+      {Array.from({ length: 4 }, (_, i) => (
+        <div
+          // biome-ignore lint/suspicious/noArrayIndexKey: skeleton placeholders, stable order
+          key={`mural-skel-${i}`}
+          style={{
+            background: "var(--paper)",
+            border: "1px solid var(--line)",
+            borderRadius: 18,
+            padding: "22px 22px 18px",
+            minHeight: 180,
+            opacity: 0.5,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ── helpers ────────────────────────────────────────────────────────────
+
+/**
+ * Deterministic hash from an opaque pagamento UUID string. Used to pick
+ * a stable rotation + avatar color per recado without persisting either
+ * on the visitor projection. djb2-style mix; the modulus is taken at
+ * the call site so the seed can feed multiple decisions independently.
+ */
+function hashSeed(id: string): number {
+  let h = 5381;
+  for (let i = 0; i < id.length; i += 1) {
+    h = ((h << 5) + h + id.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h);
+}
+
+const AVATAR_PALETTE: readonly string[] = [
+  "var(--coral-pink)",
+  "var(--lilac-deep)",
+  "var(--green)",
+  "var(--blue)",
+  "var(--lilac)",
+];
+
+/**
+ * Pull at most two display-initials from a free-form nome. Handles
+ * empty / single-word / multi-word inputs; falls back to "?" when the
+ * input is unusable (defensive — the procedure already filters out
+ * null contribuintes but the field is still a free-text Stripe input).
+ */
+function computeInitials(nome: string): string {
+  const parts = nome
+    .trim()
+    .split(/\s+/u)
+    .filter((p) => p.length > 0);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) {
+    const first = parts[0] ?? "";
+    return first.slice(0, 2).toUpperCase();
+  }
+  const first = parts[0] ?? "";
+  const last = parts[parts.length - 1] ?? "";
+  return `${first.charAt(0)}${last.charAt(0)}`.toUpperCase();
+}
+
+/**
+ * pt-BR relative-time formatter. Inline (no new lib dependency) — the
+ * mural only needs a handful of buckets and these are the buckets the
+ * mocked copy used. `now` is injected for testability; default is
+ * `new Date()` at the call site.
+ */
+export function formatRelativeTime(when: Date, now: Date): string {
+  const ms = Math.max(0, now.getTime() - when.getTime());
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 1) return "agora há pouco";
+  if (minutes < 60) return minutes === 1 ? "há 1 minuto" : `há ${minutes} minutos`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return hours === 1 ? "há 1 hora" : `há ${hours} horas`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return "ontem";
+  if (days < 7) return `há ${days} dias`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return weeks === 1 ? "há 1 semana" : `há ${weeks} semanas`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return months === 1 ? "há 1 mês" : `há ${months} meses`;
+  const years = Math.floor(days / 365);
+  return years === 1 ? "há 1 ano" : `há ${years} anos`;
 }

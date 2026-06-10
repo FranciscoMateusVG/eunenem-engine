@@ -24,7 +24,6 @@ import { useEffect, useMemo, useState } from "react";
 import { Navbar } from "./components/eunenem/Navbar";
 import { Footer } from "./components/eunenem/Footer";
 import { BottleDoodle, FlowerDoodle, HeartDoodle } from "./components/eunenem/Doodles";
-import { MuralProvider } from "./components/eunenem/MuralContext";
 import { TweaksProvider } from "./components/eunenem/TweaksContext";
 import {
   useObterSucessoPagamento,
@@ -65,7 +64,7 @@ export function PaginaSucessoPage({ slug }: { slug: string }) {
 
   return (
     <TweaksProvider>
-      <MuralProvider>
+      <>
         <Navbar />
         <main
           className="flex-1 pt-16 sucesso-bg"
@@ -95,7 +94,7 @@ export function PaginaSucessoPage({ slug }: { slug: string }) {
           </div>
         </main>
         <Footer />
-      </MuralProvider>
+      </>
     </TweaksProvider>
   );
 }

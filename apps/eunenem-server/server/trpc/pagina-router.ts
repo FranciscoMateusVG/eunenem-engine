@@ -175,6 +175,25 @@ export const ObterSucessoPagamentoInputSchema = z.object({
   sessionId: z.string().trim().min(1).max(255),
 });
 
+// aperture-7eci9 — visitor mural read input + projection.
+//
+// Slug-keyed (visitor has no session); mirrors the obterListaPresentes
+// tenant-resolution chain so a mural can only be read for the slug's own
+// campanha. Visitor-safe DTO: NO email, NO idContribuicao, NO idCampanha,
+// NO payment status / amounts. Just an opaque pagamento id, the nome the
+// contribuinte typed at checkout, the mensagem they wrote, and the
+// criadoEm so the UI can render relative time.
+export const ObterMuralInputSchema = z.object({
+  slug: z.string().trim().min(1).max(60),
+});
+
+export const ObterMuralOutputItemSchema = z.object({
+  id: z.string().uuid(),
+  contribuinteNome: z.string(),
+  mensagem: z.string(),
+  criadoEm: z.date(),
+});
+
 export const ObterSucessoPagamentoOutputSchema = z.object({
   giftName: z.string(),
   valor: z.number().int().nonnegative(),
@@ -325,6 +344,38 @@ export const paginaRouter = t.router({
           };
         }),
       );
+    }),
+
+  /**
+   * Visitor mural read (aperture-7eci9). Returns the public list of
+   * recados — every aprovado pagamento against this slug's campanha
+   * whose contribuinte left a non-empty mensagem at checkout.
+   *
+   * Tenant safety: slug → usuario → campanha → mural rows. The repo
+   * filter is scoped by `idCampanha`, so a slug can only ever read its
+   * own mural.
+   *
+   * Visitor-safe projection: `{ id, contribuinteNome, mensagem,
+   * criadoEm }` — the four fields a recado card needs. NO email, NO
+   * internal ids, NO payment composição. Limit hard-capped at 50;
+   * future-pagination is a separate task.
+   */
+  obterMural: t.procedure
+    .input(ObterMuralInputSchema)
+    .query(async ({ ctx, input }) => {
+      const { campanha } = await resolvePaginaBySlug(ctx, input.slug);
+
+      const recados = await ctx.deps.pagamentoRepository.findMensagensMuralByCampanha(
+        campanha.id,
+        50,
+      );
+
+      return recados.map((r) => ({
+        id: r.idPagamento as unknown as string,
+        contribuinteNome: r.contribuinteNome,
+        mensagem: r.mensagem,
+        criadoEm: r.criadoEm,
+      }));
     }),
 
   /**

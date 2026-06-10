@@ -1,4 +1,5 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
+import type { IdCampanha } from '../../domain/arrecadacao/value-objects/ids.js';
 import type { Pagamento } from '../../domain/pagamentos/entities/pagamento.js';
 import type {
   IdContribuicaoPagamento,
@@ -6,7 +7,7 @@ import type {
 } from '../../domain/pagamentos/value-objects/ids.js';
 import { PagamentoJaExisteError } from '../../errors/pagamentos/ja-existe.error.js';
 import { PagamentoNaoEncontradoError } from '../../errors/pagamentos/nao-encontrado.error.js';
-import type { PagamentoRepository } from './repository.js';
+import type { MuralRecadoProjection, PagamentoRepository } from './repository.js';
 
 const tracer = trace.getTracer('frame');
 
@@ -285,6 +286,53 @@ export class PagamentoRepositoryMemory implements PagamentoRepository {
           }
           span.setStatus({ code: SpanStatusCode.OK });
           return result;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  /**
+   * aperture-7eci9 — visitor mural read. Linear scan over the in-memory
+   * map; matches the postgres adapter contract: status='aprovado' AND
+   * intencao.contribuinte non-null AND a non-empty mensagem string,
+   * scoped to the given campanha, ordered newest-first, capped at limit.
+   */
+  async findMensagensMuralByCampanha(
+    idCampanha: IdCampanha,
+    limit: number,
+  ): Promise<readonly MuralRecadoProjection[]> {
+    return tracer.startActiveSpan(
+      'db.pagamentos.findMensagensMuralByCampanha',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+        try {
+          const matches: MuralRecadoProjection[] = [];
+          for (const pagamento of this.pagamentos.values()) {
+            if (pagamento.status !== 'aprovado') continue;
+            if (pagamento.intencao.idCampanha !== idCampanha) continue;
+            const contribuinte = pagamento.intencao.contribuinte;
+            if (contribuinte === null) continue;
+            const mensagem = contribuinte.mensagem;
+            if (typeof mensagem !== 'string' || mensagem.trim().length === 0) {
+              continue;
+            }
+            matches.push({
+              idPagamento: pagamento.id,
+              contribuinteNome: contribuinte.nome,
+              mensagem,
+              criadoEm: pagamento.criadoEm,
+            });
+          }
+          matches.sort((a, b) => b.criadoEm.getTime() - a.criadoEm.getTime());
+          const capped = matches.slice(0, Math.max(0, limit));
+          span.setStatus({ code: SpanStatusCode.OK });
+          return capped;
         } catch (error: unknown) {
           span.recordException(error as Error);
           span.setStatus({ code: SpanStatusCode.ERROR });

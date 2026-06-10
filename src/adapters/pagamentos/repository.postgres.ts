@@ -1,5 +1,6 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 import type { Transaction } from 'kysely';
+import type { IdCampanha } from '../../domain/arrecadacao/value-objects/ids.js';
 import {
   type ItemDoPagamento,
   ItemDoPagamentoSchema,
@@ -13,7 +14,7 @@ import { PagamentoJaExisteError } from '../../errors/pagamentos/ja-existe.error.
 import { PagamentoNaoEncontradoError } from '../../errors/pagamentos/nao-encontrado.error.js';
 import type { Database } from '../database.js';
 import type { DB } from '../db-types.generated.js';
-import type { PagamentoRepository } from './repository.js';
+import type { MuralRecadoProjection, PagamentoRepository } from './repository.js';
 
 const tracer = trace.getTracer('frame');
 
@@ -469,6 +470,79 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
           }
           span.setStatus({ code: SpanStatusCode.OK });
           return result;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  /**
+   * aperture-7eci9 — visitor mural read. Single indexed query over
+   * `pagamentos` filtered by `status='aprovado' AND intencao_id_campanha=$1
+   * AND intencao_contribuinte_mensagem IS NOT NULL`, ordered by
+   * `criado_em DESC` and capped at `limit`.
+   *
+   * The mensagem column is flattened on the pagamentos row (per the same
+   * shape decision documented at the top of this file — IntencaoPagamento
+   * fields hoisted for lookup-by-field), so this scans the row table
+   * directly with no joins. Empty-string mensagens are dropped in the
+   * adapter post-filter for parity with the memory adapter; the trimmed
+   * non-empty rule keeps "whitespace-only" rows out of the mural without
+   * forcing a CHECK constraint on the column.
+   */
+  async findMensagensMuralByCampanha(
+    idCampanha: IdCampanha,
+    limit: number,
+  ): Promise<readonly MuralRecadoProjection[]> {
+    return tracer.startActiveSpan(
+      'db.pagamentos.findMensagensMuralByCampanha',
+      async (span) => {
+        span.setAttributes({
+          ...DB_ATTRS,
+          'db.operation.name': 'SELECT',
+          'mural.limit': limit,
+        });
+        try {
+          if (limit <= 0) {
+            span.setStatus({ code: SpanStatusCode.OK });
+            return [];
+          }
+          const rows = await this.db
+            .selectFrom('pagamentos')
+            .select([
+              'pagamentos.id as id',
+              'pagamentos.intencao_contribuinte_nome as intencao_contribuinte_nome',
+              'pagamentos.intencao_contribuinte_mensagem as intencao_contribuinte_mensagem',
+              'pagamentos.criado_em as criado_em',
+            ])
+            .where('pagamentos.status', '=', 'aprovado')
+            .where('pagamentos.intencao_id_campanha', '=', idCampanha)
+            .where('pagamentos.intencao_contribuinte_mensagem', 'is not', null)
+            .where('pagamentos.intencao_contribuinte_nome', 'is not', null)
+            .orderBy('pagamentos.criado_em', 'desc')
+            .limit(limit)
+            .execute();
+
+          const projection: MuralRecadoProjection[] = [];
+          for (const row of rows) {
+            const nome = row.intencao_contribuinte_nome;
+            const mensagem = row.intencao_contribuinte_mensagem;
+            if (nome === null || mensagem === null) continue;
+            if (mensagem.trim().length === 0) continue;
+            projection.push({
+              idPagamento: row.id as IdPagamento,
+              contribuinteNome: nome,
+              mensagem,
+              criadoEm: row.criado_em as Date,
+            });
+          }
+          span.setStatus({ code: SpanStatusCode.OK });
+          return projection;
         } catch (error: unknown) {
           span.recordException(error as Error);
           span.setStatus({ code: SpanStatusCode.ERROR });
