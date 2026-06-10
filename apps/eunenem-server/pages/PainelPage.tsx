@@ -68,7 +68,7 @@ export function PainelPage({ slug }: { slug: string }) {
 
   return (
     <PainelLayout slug={slug}>
-      <PainelHeaderCard snapshot={snapshot} />
+      <PainelHeaderCard snapshot={snapshot} slug={slug} />
       <PainelMenu groups={groups} slug={slug} />
     </PainelLayout>
   );

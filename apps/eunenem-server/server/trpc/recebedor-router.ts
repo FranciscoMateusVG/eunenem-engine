@@ -293,16 +293,19 @@ interface ExtratoLancamentoState {
   lancamento: LancamentoFinanceiro;
   pagamento: Pagamento | undefined;
   /**
-   * aperture-k6fbz — gift name + image resolved via
-   * lancamento → pagamento.intencao.items[first contribuicao] →
-   * contribuição. Plan 0016 (aperture-3htxg): the pre-multi-item path
-   * walked `pagamento.intencao.idContribuicao` directly; the new shape
-   * stores per-item contribuição refs on the items[] array, so the
-   * extrato projection picks the FIRST contribuicao-tipo item (visitor
-   * carts are single-item today; multi-item visitor cart is plan 0017).
-   * Undefined when either the pagamento is missing OR the contribuição
-   * has been deleted between the pagamento + the read. Row projection
-   * falls back to a neutral shape in that case.
+   * aperture-k6fbz — gift name + image for THIS lançamento.
+   *
+   * aperture-sm7uc (#6 fix): resolved via `lancamento.idContribuicao`
+   * (Plan 0016 Phase 2 / migration 023 — each lançamento carries the
+   * NOT-NULL FK to its own contribuição), NOT via the first cart item.
+   * The previous "first contribuição-tipo item" projection collapsed
+   * every row in a multi-item cart to the same name and image, which
+   * surfaced in prod as the painel extrato showing "Fralda Ecológica"
+   * three times when the cart actually held three different items.
+   *
+   * Undefined when the contribuição has been deleted between the
+   * pagamento + the read. Row projection falls back to a neutral
+   * empty-string/null shape in that case.
    */
   contribuicao: { nome: string; imagemUrl: string | null } | undefined;
   liberacao: ExtratoLiberacao;
@@ -335,35 +338,29 @@ async function buildExtratoStates(
       const pagamento = await ctx.deps.pagamentoRepository.findById(
         lancamento.idPagamento as never,
       );
-      // aperture-k6fbz: resolve the gift via the pagamento's intent.
-      // When pagamento is missing OR the contribuição was deleted in
-      // the meantime, contribuicao stays undefined and the projection
-      // falls back to empty-string/null at the wire boundary.
+      // aperture-sm7uc (#6 fix) — per-lançamento gift resolution.
+      // Each LancamentoFinanceiro carries `idContribuicao` directly
+      // (Plan 0016 Phase 2 / migration 023), so we resolve THIS row's
+      // contribuição instead of collapsing the whole pagamento to the
+      // first cart item — which was the regression that made every
+      // ticket in a multi-item cart show the same name in the painel
+      // extrato.
       //
-      // Plan 0016 (aperture-3htxg): the saga-emitted recebedor lançamento
-      // points at one specific contribuicao item. The extrato row's
-      // "gift name" projection is best-effort — for a multi-item cart we
-      // surface the FIRST contribuição item's name (visitor flow is
-      // single-item today; multi-item visitor cart is plan 0017). A
-      // follow-up bead can drill the lançamento → item link if the
-      // multi-item extrato needs per-item gift-name precision.
+      // When the contribuição has been deleted between pagamento and
+      // read, contribuicao stays undefined and the projection falls
+      // back to empty-string/null at the wire boundary. pagamento
+      // presence isn't required for the name lookup, but we still
+      // surface it via the parent state for timestamp + balance
+      // metadata.
       let contribuicao: { nome: string; imagemUrl: string | null } | undefined;
-      if (pagamento !== undefined) {
-        const primeiroItemContribuicao = pagamento.intencao.items.find(
-          (item): item is Extract<typeof item, { tipo: "contribuicao" }> =>
-            item.tipo === "contribuicao",
-        );
-        if (primeiroItemContribuicao !== undefined) {
-          const fetched = await ctx.deps.contribuicaoRepository.findById(
-            primeiroItemContribuicao.idContribuicao as never,
-          );
-          if (fetched !== undefined && fetched !== null) {
-            contribuicao = {
-              nome: fetched.nome,
-              imagemUrl: fetched.imagemUrl ?? null,
-            };
-          }
-        }
+      const fetched = await ctx.deps.contribuicaoRepository.findById(
+        lancamento.idContribuicao as never,
+      );
+      if (fetched !== undefined && fetched !== null) {
+        contribuicao = {
+          nome: fetched.nome,
+          imagemUrl: fetched.imagemUrl ?? null,
+        };
       }
       return {
         lancamento,

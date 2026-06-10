@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import type { PainelSectionBodyProps } from "@/PainelSectionPage";
 import {
@@ -425,15 +426,44 @@ function FilterButton({
   onChange: (next: PresentesStatus[]) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  // aperture-sm7uc (#8) — pop-coords for the portalled panel.
+  // The parent `.ex-sheet` uses CSS `mask` which creates a clipping
+  // stacking context: any in-tree absolute child that crosses the
+  // mask boundary gets painted into nothing, which made the panel
+  // disappear behind the ticket rows below. Portalling to <body>
+  // with position: fixed sidesteps the mask entirely.
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [coords, setCoords] = useState<{ top: number; right: number } | null>(null);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setCoords(null);
+      return;
+    }
+    const place = () => {
+      const r = btnRef.current?.getBoundingClientRect();
+      if (!r) return;
+      setCoords({
+        top: r.bottom + 6,
+        right: Math.max(8, window.innerWidth - r.right),
+      });
+    };
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
     const onDoc = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (btnRef.current?.contains(target)) return;
+      if (panelRef.current?.contains(target)) return;
+      setOpen(false);
     };
     document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+      document.removeEventListener("mousedown", onDoc);
+    };
   }, [open]);
 
   const toggle = (k: PresentesStatus) => {
@@ -441,8 +471,9 @@ function FilterButton({
   };
 
   return (
-    <div className="ex-filter" ref={ref}>
+    <div className="ex-filter">
       <button
+        ref={btnRef}
         type="button"
         className={`ex-filter-btn ${open ? "is-open " : ""}${active.length ? "is-active" : ""}`}
         onClick={() => setOpen((v) => !v)}
@@ -453,36 +484,48 @@ function FilterButton({
         {active.length > 0 && <span className="ex-filter-badge">{active.length}</span>}
       </button>
 
-      {open && (
-        <div className="ex-filter-panel" role="menu">
-          <div className="ex-filter-panel-hd">
-            <span className="ex-caps">por status</span>
-            {active.length > 0 && (
-              <button type="button" className="ex-link" onClick={() => onChange([])}>
-                limpar
-              </button>
-            )}
-          </div>
-          <div className="ex-filter-pills">
-            {FILTER_OPTIONS.map((o) => {
-              const on = active.includes(o.key);
-              return (
-                <button
-                  key={o.key}
-                  type="button"
-                  className={`ex-filter-pill ${on ? "is-on" : ""}`}
-                  style={on ? { background: `${o.color}22`, borderColor: o.color, color: o.color } : undefined}
-                  onClick={() => toggle(o.key)}
-                >
-                  <i className="ex-filter-dot" style={{ background: o.color }} />
-                  {o.label}
-                  <span className="ex-filter-count">{counts[o.key] || 0}</span>
+      {open && coords !== null && typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={panelRef}
+            className="ex-filter-panel presentes-extrato-portal"
+            role="menu"
+            style={{
+              position: "fixed",
+              top: coords.top,
+              right: coords.right,
+              zIndex: 120,
+            }}
+          >
+            <div className="ex-filter-panel-hd">
+              <span className="ex-caps">por status</span>
+              {active.length > 0 && (
+                <button type="button" className="ex-link" onClick={() => onChange([])}>
+                  limpar
                 </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
+              )}
+            </div>
+            <div className="ex-filter-pills">
+              {FILTER_OPTIONS.map((o) => {
+                const on = active.includes(o.key);
+                return (
+                  <button
+                    key={o.key}
+                    type="button"
+                    className={`ex-filter-pill ${on ? "is-on" : ""}`}
+                    style={on ? { background: `${o.color}22`, borderColor: o.color, color: o.color } : undefined}
+                    onClick={() => toggle(o.key)}
+                  >
+                    <i className="ex-filter-dot" style={{ background: o.color }} />
+                    {o.label}
+                    <span className="ex-filter-count">{counts[o.key] || 0}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
@@ -674,6 +717,15 @@ function DetailDrawer({ tx, onClose }: { tx: PresentesTx | null; onClose: () => 
 }
 
 // ── Transfer modal ───────────────────────────────────────────────────────────
+//
+// aperture-sm7uc (#9) — all-or-nothing confirm modal. The previous
+// version embedded an amount <input> + "usar tudo" + a mocked destination
+// summary, both of which encouraged a partial-withdrawal mental model
+// that the backend never supported (Rex's solicitarRepasseRecebedor
+// sweeps the WHOLE saldo per locked decision aperture-s03dr). The new
+// shape is a plain confirm: "Transferir R$ X (tudo) — confirmar?"
+// followed by a single solicit button. No amount input ever, no
+// destination override.
 function TransferModal({
   open,
   saldo,
@@ -685,18 +737,8 @@ function TransferModal({
   onClose: () => void;
   solicitarState: SolicitarTransferenciaState;
 }) {
-  const [amount, setAmount] = useState("");
-  useEffect(() => {
-    if (open) setAmount((saldo / 100).toFixed(2).replace(".", ","));
-  }, [open, saldo]);
-
   if (!open) return null;
 
-  // Rex's solicitar API takes ONLY idCampanha — the amount is always the
-  // full saldoDisponivelCents (v1 spec: no partial withdrawals). The
-  // amount input is kept as an informational display + "usar tudo" affordance
-  // for the eventual partial-withdrawal feature, but today the actual mutate
-  // call ignores the input value and always solicits the full saldo.
   const submit = () => {
     if (solicitarState.isPending) return;
     solicitarState.mutate();
@@ -720,40 +762,53 @@ function TransferModal({
         <header className="ex-modal-hd">
           <div>
             <span className="ex-caps">solicitar transferência</span>
-            <h3 className="ex-modal-title">retirar do saldo</h3>
+            <h3 className="ex-modal-title">transferir tudo?</h3>
           </div>
           <button type="button" className="ex-icon-btn" onClick={onClose} aria-label="Fechar">
             <IconClose />
           </button>
         </header>
         <p className="ex-modal-text">
-          o valor é enviado para a conta de destino em <strong>até 1 dia útil</strong>. você recebe
-          um aviso por e-mail quando o pagamento for confirmado.
+          vamos transferir <strong>{fmtMoney(saldo)} (tudo)</strong> para sua conta
+          cadastrada. o valor cai em <strong>até 1 dia útil</strong> depois
+          que aprovamos a solicitação por aqui.
         </p>
-        <label className="ex-modal-field">
-          <span>valor</span>
-          <div className="ex-modal-input">
-            <span className="prefix">R$</span>
-            <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" />
-            <button
-              type="button"
-              className="ex-link"
-              onClick={() => setAmount((saldo / 100).toFixed(2).replace(".", ","))}
-            >
-              usar tudo
-            </button>
-          </div>
-          <span className="ex-hint">disponível: {fmtMoney(saldo)}</span>
-        </label>
-        <div className="ex-modal-dest">
-          <div>
-            <div className="ex-modal-dest-label">destino</div>
-            <div className="ex-modal-dest-bank">Banco Inter · ag. 0001 · c/c 12345-6</div>
-            <div className="ex-modal-dest-name">Mariana Vasconcelos · CPF ***.***.***-12</div>
-          </div>
-          <button type="button" className="ex-link">
-            trocar
-          </button>
+        <div
+          className="ex-confirm-amount"
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 4,
+            padding: "18px 16px",
+            margin: "0 0 22px",
+            background: "var(--cream)",
+            border: "1px dashed var(--line)",
+            borderRadius: 12,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              color: "var(--ink-mute)",
+            }}
+          >
+            total a transferir
+          </span>
+          <span
+            style={{
+              fontFamily: "var(--hand)",
+              fontSize: 36,
+              lineHeight: 1,
+              color: "var(--plum)",
+              fontFeatureSettings: '"tnum"',
+            }}
+          >
+            {fmtMoney(saldo)}
+          </span>
         </div>
         {errorLabel && (
           <div
@@ -769,6 +824,7 @@ function TransferModal({
               fontSize: "11px",
               textTransform: "uppercase",
               letterSpacing: "0.14em",
+              marginBottom: 14,
             }}
           >
             {errorLabel}
@@ -787,14 +843,14 @@ function TransferModal({
             type="button"
             className="ex-btn-green"
             onClick={submit}
-            disabled={solicitarState.isPending || isBlocking}
+            disabled={solicitarState.isPending || isBlocking || saldo === 0}
             aria-busy={solicitarState.isPending}
           >
             {solicitarState.isPending
               ? "solicitando…"
               : isBlocking
                 ? errorLabel
-                : "solicitar transferência"}
+                : "confirmar transferência"}
           </button>
         </div>
       </div>
@@ -965,7 +1021,12 @@ export function PresentesBody(props: PainelSectionBodyProps) {
     wireSummary.dateRangeStart,
     wireSummary.dateRangeEnd,
   );
-  const nextTransferLabel = formatNextTransferLabel(wireSummary.proximaTransfDate);
+  // aperture-sm7uc (#7): formatNextTransferLabel intentionally unused —
+  // the próxima-transf chip is now driven off `aguardandoAprovacaoCents`
+  // (presence of a solicitado RepasseRecebedor), not the next stripe
+  // available_on date. Leaving the formatter in place for potential
+  // reuse in the drawer's "previsão" copy block.
+  void formatNextTransferLabel;
 
   const statusCounts = (() => {
     const counts: Partial<Record<PresentesStatus, number>> = {};
@@ -1025,9 +1086,23 @@ export function PresentesBody(props: PainelSectionBodyProps) {
                 pure noise. Single CTA reads cleaner and matches what
                 payout actually does (one path: request a transfer).
                 The existing `.ex-sheet-cta` rule has `flex: 1 1 200px`,
-                so one child = full-width row by default. */}
+                so one child = full-width row by default.
+
+                aperture-sm7uc (#9) — disabled when saldo disponivel is
+                zero. Backend would surface 'saldo_disponivel_insuficiente'
+                anyway, but disabling the CTA up-front saves the user a
+                roundtrip and matches operator expectation ("greyed out =
+                nothing to transfer"). The all-or-nothing confirm modal
+                inside doesn't expose an amount input — there's no
+                partial-withdrawal UI ever (locked decision s03dr). */}
             <div className="ex-sheet-cta-row">
-              <button type="button" className="ex-sheet-cta green" onClick={() => setTransferOpen(true)}>
+              <button
+                type="button"
+                className="ex-sheet-cta green"
+                onClick={() => setTransferOpen(true)}
+                disabled={summary.disponivel === 0}
+                aria-disabled={summary.disponivel === 0 || undefined}
+              >
                 <IconArrowUpRight />
                 solicitar transferência
               </button>
@@ -1050,10 +1125,25 @@ export function PresentesBody(props: PainelSectionBodyProps) {
                   <span>aguardando aprovação</span>
                 </span>
               )}
-              <span className="ex-aux-pill lilac">
-                <span>próxima transf.</span>
-                <span className="ex-aux-num">{nextTransferLabel}</span>
-              </span>
+              {/* aperture-sm7uc (#7) — próxima-transf chip is conditional
+                  on a pending solicitado repasse. The signal is
+                  `aguardandoAprovacaoCents > 0` (a non-zero admin-queue
+                  bucket means at least one solicitado RepasseRecebedor
+                  is sitting in the admin queue). When nothing is
+                  pending, hide the chip entirely instead of showing a
+                  stale next-stripe-release date the user can't act on.
+                  Pre-fix the chip always rendered + showed the stripe
+                  available_on date, which read as "we will move your
+                  money on this day automatically" — operators thought
+                  the platform was doing the transfer for them. */}
+              {summary.aguardandoAprovacao > 0 && (
+                <span className="ex-aux-pill lilac">
+                  <span>próxima transf.</span>
+                  <span className="ex-aux-num">
+                    {fmtMoney(summary.aguardandoAprovacao)}
+                  </span>
+                </span>
+              )}
             </div>
           </header>
 
@@ -1259,6 +1349,15 @@ const EXTRATO_CSS = `
 }
 .presentes-extrato .ex-sheet-cta.green { background: var(--green-deep); box-shadow: var(--shadow-green); }
 .presentes-extrato .ex-sheet-cta.green:hover { background: #7c9532; transform: translateY(-1px); }
+/* aperture-sm7uc (#9): disabled state — visual "no saldo, nothing to do" */
+.presentes-extrato .ex-sheet-cta:disabled,
+.presentes-extrato .ex-sheet-cta[aria-disabled="true"] {
+  background: #c8c2bf; box-shadow: none; cursor: not-allowed; opacity: 0.7;
+}
+.presentes-extrato .ex-sheet-cta:disabled:hover,
+.presentes-extrato .ex-sheet-cta[aria-disabled="true"]:hover {
+  background: #c8c2bf; transform: none;
+}
 .presentes-extrato .ex-sheet-cta.lilac { background: var(--lilac-deep); box-shadow: var(--shadow-lilac); }
 .presentes-extrato .ex-sheet-cta.lilac:hover { background: #9d6cb6; transform: translateY(-1px); }
 .presentes-extrato .ex-sheet-cta:active { transform: translateY(0); }
@@ -1496,11 +1595,55 @@ const EXTRATO_CSS = `
   display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px;
   padding: 0 4px; border-radius: 999px; background: var(--lilac-deep); color: #fff; font-size: 9.5px; font-weight: 700;
 }
-.presentes-extrato .ex-filter-panel {
-  position: absolute; top: calc(100% + 6px); right: 0; width: 260px; background: var(--paper);
-  border: 1px solid var(--line); border-radius: 14px;
+/* aperture-sm7uc (#8) — panel selector duplicated for both the in-tree
+   fallback case (.presentes-extrato .ex-filter-panel) and the portalled
+   variant (.presentes-extrato-portal at <body> level). Color tokens
+   resolved against :root because the portalled panel lives outside
+   the .presentes-extrato scope where the local --paper / --line vars
+   are declared. */
+.presentes-extrato .ex-filter-panel,
+.ex-filter-panel.presentes-extrato-portal {
+  width: 260px; background: #ffffff;
+  border: 1px solid #efe2e9; border-radius: 14px;
   box-shadow: 0 16px 40px -8px rgba(107, 60, 94, 0.28), 0 2px 8px rgba(107, 60, 94, 0.08), 0 1px 0 rgba(255, 255, 255, 0.5) inset;
-  padding: 12px 14px; z-index: 20;
+  padding: 12px 14px;
+  color: #5c3a4f;
+  font-family: var(--font-dm-sans), sans-serif;
+}
+.ex-filter-panel.presentes-extrato-portal .ex-caps {
+  font-family: var(--font-dm-sans), sans-serif;
+  font-weight: 600; font-size: 10px; letter-spacing: 0.14em;
+  text-transform: uppercase; color: #7a5a6c;
+}
+.ex-filter-panel.presentes-extrato-portal .ex-link {
+  font-family: var(--font-dm-sans), sans-serif; font-size: 12px; font-weight: 500;
+  color: var(--lilac-deep, #8a5da6); cursor: pointer; background: transparent; padding: 0; border: 0;
+}
+.ex-filter-panel.presentes-extrato-portal .ex-filter-panel-hd {
+  display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;
+}
+.ex-filter-panel.presentes-extrato-portal .ex-filter-pills {
+  display: flex; flex-direction: column; gap: 6px;
+}
+.ex-filter-panel.presentes-extrato-portal .ex-filter-pill {
+  display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 10px;
+  border: 1px solid #efe2e9; background: #f8f7f6; color: #7a5a6c; cursor: pointer;
+  font-size: 12px; font-weight: 500; text-align: left; transition: background 0.12s, border-color 0.12s, color 0.12s;
+  font-family: var(--font-dm-sans), sans-serif;
+}
+.ex-filter-panel.presentes-extrato-portal .ex-filter-pill:hover {
+  background: #efece9; color: #5c3a4f;
+}
+.ex-filter-panel.presentes-extrato-portal .ex-filter-pill.is-on { font-weight: 600; }
+.ex-filter-panel.presentes-extrato-portal .ex-filter-dot {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+}
+.ex-filter-panel.presentes-extrato-portal .ex-filter-count {
+  margin-left: auto; font-family: "DM Mono", ui-monospace, "SFMono-Regular", monospace;
+  font-size: 11px; color: #a18a99; font-feature-settings: "tnum";
+}
+.ex-filter-panel.presentes-extrato-portal .ex-filter-pill.is-on .ex-filter-count {
+  color: inherit; opacity: 0.7;
 }
 .presentes-extrato .ex-filter-panel-hd { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .presentes-extrato .ex-filter-pills { display: flex; flex-direction: column; gap: 6px; }

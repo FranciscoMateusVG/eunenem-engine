@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useTweaks } from "../TweaksContext";
 import type { PainelEventSnapshot } from "@/lib/mocks/painelDemo";
+import { painelHref } from "@/lib/painelRoutes";
 
 // aperture-9qu7k — Painel root hero composition (target screenshot 32).
 //
@@ -40,6 +41,9 @@ import type { PainelEventSnapshot } from "@/lib/mocks/painelDemo";
 
 interface Props {
   snapshot: PainelEventSnapshot;
+  /** Painel slug — needed to build the RESGATAR pill href to the
+   *  extrato page (`/painel/<slug>/presentes`). */
+  slug: string;
 }
 
 const MONTHS_PT = [
@@ -47,7 +51,7 @@ const MONTHS_PT = [
   "jul", "ago", "set", "out", "nov", "dez",
 ];
 
-export function PainelHeaderCard({ snapshot }: Props) {
+export function PainelHeaderCard({ snapshot, slug }: Props) {
   const { tweaks } = useTweaks();
   const [copied, setCopied] = useState(false);
   const [now, setNow] = useState<number>(() => Date.now());
@@ -186,7 +190,15 @@ export function PainelHeaderCard({ snapshot }: Props) {
           {reaisInt}
           <span className="painel-recebido-cents">,{reaisCents}</span>
         </div>
-        <button type="button" className="painel-recebido-cta">
+        {/* aperture-sm7uc (#2 fix) — pill was a dead <button>. Navigates
+            to the extrato (presentes) sub-page so the operator lands on
+            the place that actually lets them resgatar. Render an <a>
+            (not a button) so the painel router picks it up via the same
+            full-page nav path every other menu row uses. */}
+        <a
+          href={painelHref(slug, "presentes")}
+          className="painel-recebido-cta"
+        >
           <span>resgatar valores</span>
           <svg
             viewBox="0 0 24 24"
@@ -200,7 +212,7 @@ export function PainelHeaderCard({ snapshot }: Props) {
             <path d="M5 12h14" />
             <path d="M13 5l7 7-7 7" />
           </svg>
-        </button>
+        </a>
         <div className="painel-stats" role="group" aria-label="resumo do evento">
           <div className="painel-stat">
             <div className="painel-stat-num">{snapshot.giftsClaimed}</div>
