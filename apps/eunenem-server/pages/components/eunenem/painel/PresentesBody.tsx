@@ -219,6 +219,10 @@ function adaptRow(row: ExtratoRowDTO): PresentesTx {
     // discriminates by URL shape: starts-with-`http` or `/` → <img>,
     // else → text glyph. Null/absent → no thumbnail.
     itemImagemUrl: row.contribuicaoImagemUrl ?? null,
+    // aperture-qp4mq — per-item quantidade. Drives the "× N" suffix
+    // on the drawer's item row when > 1; the row itself shows only
+    // the item name (the badge would crowd the inline two-line ticket).
+    quantidade: row.quantidade,
   };
 }
 
@@ -417,16 +421,6 @@ function IconFilter() {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M22 3H2l8 9.5V20l4 2v-9.5z" />
-    </svg>
-  );
-}
-
-function IconDownload() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-      <path d="m7 10 5 5 5-5" />
-      <path d="M12 15V3" />
     </svg>
   );
 }
@@ -671,7 +665,22 @@ function DetailDrawer({ tx, onClose }: { tx: PresentesTx | null; onClose: () => 
             <dt>item</dt>
             <dd className="ex-drawer-item-dd">
               <GiftThumb url={t.itemImagemUrl ?? null} />
-              <span>{t.item}</span>
+              <span>
+                {t.item}
+                {typeof t.quantidade === "number" && t.quantidade > 1 && (
+                  <span
+                    aria-label={`quantidade ${t.quantidade}`}
+                    style={{
+                      marginLeft: 8,
+                      fontVariantNumeric: "tabular-nums",
+                      color: "var(--ink-soft)",
+                      fontWeight: 600,
+                    }}
+                  >
+                    × {t.quantidade}
+                  </span>
+                )}
+              </span>
             </dd>
           </div>
           {t.note && (
@@ -692,10 +701,10 @@ function DetailDrawer({ tx, onClose }: { tx: PresentesTx | null; onClose: () => 
             <dt>horário</dt>
             <dd>{t.t}</dd>
           </div>
-          <div>
-            <dt>identificador</dt>
-            <dd className="ex-mono">PRT-{t.id.toUpperCase()}-2026</dd>
-          </div>
+          {/* aperture-qp4mq — IDENTIFICADOR row removed (internal UUID,
+              not user-actionable). The id stays available on the underlying
+              tx for support / debugging purposes but no longer renders in
+              the drawer surface. */}
           {t.status === "tSolicitada" && (
             <div>
               <dt>previsão</dt>
@@ -722,10 +731,11 @@ function DetailDrawer({ tx, onClose }: { tx: PresentesTx | null; onClose: () => 
               enviar agradecimento à {firstName}
             </button>
           )}
-          <button type="button" className="ex-btn-ghost block" onClick={onClose}>
-            <IconDownload />
-            baixar comprovante
-          </button>
+          {/* aperture-qp4mq — BAIXAR COMPROVANTE button removed. No PDF
+              download in scope; the IconDownload import was kept dead-code
+              free by removing both the button + its handler. If a receipt
+              feature returns, file a fresh bead with the storage shape +
+              user trigger. */}
         </div>
       </aside>
     </>

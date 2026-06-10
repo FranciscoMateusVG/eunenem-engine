@@ -109,6 +109,10 @@ export type ExtratoRowDTO = {
    *  Optional in the mirror for the same merge-window reason as
    *  contribuicaoNome above. */
   contribuicaoImagemUrl?: string | null;
+  /** aperture-qp4mq — per-item quantidade (Plan 0016 / migration 023).
+   *  Optional in the mirror so pre-bump cached responses still parse;
+   *  the drawer falls back to "no × N" when undefined or 1. */
+  quantidade?: number;
 };
 
 export type SolicitarTransferenciaResult = {
@@ -228,6 +232,17 @@ export function useStubExtratoList(input: {
                 : giftCarrier.contribuicaoImagemUrl === null
                   ? null
                   : undefined;
+            // aperture-qp4mq — per-item quantidade. Same merge-window
+            // optional-read shape as contribuicaoNome above; consumer
+            // (PresentesBody adaptRow) defaults to "no badge" when
+            // undefined or 1.
+            const quantidadeCarrier = r as { quantidade?: unknown };
+            const quantidade =
+              typeof quantidadeCarrier.quantidade === "number" &&
+              Number.isFinite(quantidadeCarrier.quantidade) &&
+              quantidadeCarrier.quantidade > 0
+                ? Math.floor(quantidadeCarrier.quantidade)
+                : undefined;
             return {
               idLancamento: r.idLancamento,
               idPagamento: r.idPagamento,
@@ -238,6 +253,7 @@ export function useStubExtratoList(input: {
               liberacaoPrevistaEm,
               contribuicaoNome,
               contribuicaoImagemUrl,
+              quantidade,
             };
           }),
           nextCursor: query.data.nextCursor,

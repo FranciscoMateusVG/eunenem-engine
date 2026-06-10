@@ -178,6 +178,18 @@ const ExtratoRowDTOSchema = z.object({
    * gift was ad-hoc (no image) or the contribuição was deleted.
    */
   contribuicaoImagemUrl: z.string().nullable(),
+  /**
+   * aperture-qp4mq — per-item quantidade as encoded on the parent
+   * intencao_items row this lançamento was spawned from (1:1 via
+   * lancamento.idItemPagamento per Plan 0016 Phase 2 migration 023).
+   * Multi-quantity purchases (operator buys 5 of a "fralda" slot
+   * with quantidade=10 capacity) surface as 5 here, so the painel
+   * extrato drawer can render "× 5" alongside the item name.
+   * Defaults to 1 when the parent pagamento can't be resolved (deleted
+   * between read + projection) — same defensive shape as
+   * contribuicaoNome's empty-string fallback.
+   */
+  quantidade: z.number().int().positive(),
   amountCents: z.number().int().nonnegative(),
   /** Derived sub-state — drives the chip + sort affordance on the UI. */
   liberacao: ExtratoLiberacaoSchema,
@@ -655,7 +667,25 @@ const extratoRouter = t.router({
             ? encodeRowCursor(page[page.length - 1] as ExtratoLancamentoState)
             : null;
 
-        const rows: ExtratoRowDTO[] = page.map((s) => ({
+        const rows: ExtratoRowDTO[] = page.map((s) => {
+          // aperture-qp4mq — resolve THIS lançamento's parent
+          // intencao_items row to read its per-item quantidade. The
+          // FK lives at s.lancamento.idItemPagamento (Plan 0016 Phase
+          // 2 — every lançamento carries the NOT-NULL item id), so the
+          // lookup is unambiguous even in carts with two items pointing
+          // at the same contribuição. Recebedor lançamentos are
+          // pre-filtered to credito_saldo_recebedor (line 388) so the
+          // matched item is always a contribuicao-tipo; the runtime
+          // type guard keeps TS narrow + falls back to 1 if the parent
+          // pagamento can't be resolved (deleted between read + projection).
+          const items = s.pagamento?.intencao.items ?? [];
+          const matchedItem = items.find(
+            (i: (typeof items)[number]) =>
+              i.id === s.lancamento.idItemPagamento,
+          );
+          const quantidade =
+            matchedItem?.tipo === "contribuicao" ? matchedItem.quantidade : 1;
+          return {
           idLancamento: s.lancamento.id,
           idPagamento: s.lancamento.idPagamento,
           contribuinteNome: s.pagamento?.intencao.contribuinte?.nome ?? null,
@@ -664,6 +694,7 @@ const extratoRouter = t.router({
           // with a neutral "lançamento" affordance.
           contribuicaoNome: s.contribuicao?.nome ?? "",
           contribuicaoImagemUrl: s.contribuicao?.imagemUrl ?? null,
+          quantidade,
           amountCents: s.lancamento.amountCents as unknown as number,
           liberacao: s.liberacao,
           timestamp: (
@@ -674,7 +705,8 @@ const extratoRouter = t.router({
               ? (s.pagamento?.intencao.balanceTransactionAvailableOn?.toISOString() ??
                 null)
               : null,
-        }));
+          };
+        });
 
         return { rows, nextCursor, hasMore };
       } catch (err) {
