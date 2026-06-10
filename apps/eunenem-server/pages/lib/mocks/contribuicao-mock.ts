@@ -42,6 +42,15 @@ export interface ContribuicaoDTO {
    * visitor cart MVP (aperture-16flf) lands.
    */
   quantidade?: number;
+  /**
+   * Plan 0016 (aperture-ypk01): remaining unsold slots = `quantidade - sold`.
+   * Optional during migration to keep mocks and any pre-bump consumers
+   * typecheck-clean; required for the painel lista's "X de N recebidos"
+   * tally to render correctly on partially-sold new-shape rows. Overshoot
+   * is accepted per locked decision #10 — value can go negative; consumers
+   * clamp at 0 for display. Mirrors visitor-side wire shape from PR #182.
+   */
+  quantidadeRestante?: number;
   /** Filled once a guest reserves the item. null = still available.
    *  DEPRECATED per plan 0015 Phase 1 — contribuinte data moves to
    *  IntencaoPagamento. The wire stopped projecting this field for

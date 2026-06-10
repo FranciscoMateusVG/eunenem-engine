@@ -269,6 +269,7 @@ const DeleteInputSchema = z.object({
 function toListItem(
   c: Contribuicao,
   indisponivel: boolean,
+  quantidadeRestante: number,
 ): {
   id: IdContribuicao;
   nome: string;
@@ -276,6 +277,7 @@ function toListItem(
   imagemUrl: string | null;
   grupo: string | null;
   quantidade: number;
+  quantidadeRestante: number;
   indisponivel: boolean;
 } {
   // Post-Phase-1 (plan 0015): contribuição has no status + no contribuinte.
@@ -295,6 +297,15 @@ function toListItem(
   // group + aggregate across legacy multi-row data uniformly. The list
   // procedure already loads it from the entity; threading it through
   // here keeps the projection self-contained.
+  //
+  // aperture-ypk01: also surface `quantidadeRestante` so the painel's
+  // lista-de-presentes "X de N recebidos" tally renders the real
+  // partial-sale count for new-shape rows. The binary `indisponivel`
+  // is only true when ALL slots are sold; partial purchases (5 of 10)
+  // need the explicit remaining count to compute received. Mirrors the
+  // visitor-side projection landed in PR #182. Overshoot accepted per
+  // locked decision #10 — quantidadeRestante can go negative; consumers
+  // clamp at 0 for display.
   return {
     id: c.id,
     nome: c.nome,
@@ -302,6 +313,7 @@ function toListItem(
     imagemUrl: c.imagemUrl,
     grupo: c.grupo,
     quantidade: c.quantidade,
+    quantidadeRestante,
     indisponivel,
   };
 }
@@ -349,13 +361,18 @@ export const contribuicaoRouter = t.router({
               items.map((c) => c.id as unknown as IdContribuicaoPagamento),
             );
       const indisponiveisSet = new Set<string>();
+      const restantePorId = new Map<string, number>();
       for (const c of items) {
         const sold = sums.get(c.id as unknown as IdContribuicaoPagamento) ?? 0;
-        if (c.quantidade - sold <= 0) {
+        const restante = c.quantidade - sold;
+        restantePorId.set(c.id, restante);
+        if (restante <= 0) {
           indisponiveisSet.add(c.id);
         }
       }
-      return items.map((c) => toListItem(c, indisponiveisSet.has(c.id)));
+      return items.map((c) =>
+        toListItem(c, indisponiveisSet.has(c.id), restantePorId.get(c.id) ?? c.quantidade),
+      );
     } catch (err) {
       throw toTRPCError(err);
     }
@@ -492,7 +509,16 @@ export const contribuicaoRouter = t.router({
           },
           { idContribuicao: updated.id },
         );
-        return toListItem(updated, indisponivel);
+        // aperture-ypk01: also compute quantidadeRestante for this
+        // single row so the update projection matches the list shape.
+        // SUM the aprovado items for this id; restante = quantidade -
+        // sold. Same indexed query the list uses, scoped to one id.
+        const sums = await ctx.deps.pagamentoRepository.somarQuantidadesContribuicoesEmPagamentosAprovados(
+          [updated.id as unknown as IdContribuicaoPagamento],
+        );
+        const sold = sums.get(updated.id as unknown as IdContribuicaoPagamento) ?? 0;
+        const quantidadeRestante = updated.quantidade - sold;
+        return toListItem(updated, indisponivel, quantidadeRestante);
       } catch (err) {
         throw toTRPCError(err);
       }

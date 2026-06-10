@@ -304,16 +304,39 @@ function groupContribuicoes(items: ContribuicaoDTO[]): GroupedGift[] {
     //   - Post-rewrite: 1 row of "Fralda" with quantidade=N → group qty
     //     equals N directly. No double-counting; the loop only sees one
     //     row per gift.
-    // `received` mirrors the same shape: an indisponivel row contributes
-    // its quantidade to the "already presented" tally (legacy: 1 per
-    // row; post-rewrite: N when the whole slot is sold out, but with
-    // overshoot allowed per locked decision #10 the value can exceed
-    // qty — the painel surface clamps to qty for display purposes).
+    //
+    // aperture-ypk01 (Plan 0016 leak — partial-sale leak fix): the
+    // `received` axis is DUAL-MODE based on the row's quantidade:
+    //
+    //   - new-shape row (quantidade > 1): receive count =
+    //     quantidade - max(0, quantidadeRestante). Reads the explicit
+    //     remaining-slots projection landed by the router companion,
+    //     clamps negative overshoots to 0 (locked decision #10 allows
+    //     quantidadeRestante to go negative on concurrent oversell;
+    //     painel display caps at quantidade). This is what makes the
+    //     "5 de 10 recebidos" tally render when a partial purchase
+    //     has happened — the binary indisponivel only flips when ALL
+    //     N slots are sold, so legacy-mode below would have surfaced
+    //     0 here.
+    //
+    //   - legacy multi-row (quantidade <= 1): preserve the original
+    //     row-by-row count where each indisponivel row contributes
+    //     its own quantidade to the received tally. This keeps the
+    //     pre-Plan-0016 N-rows-of-quantidade-1 fixtures correct.
+    //
+    // The visitor-side equivalent of this dual-mode shipped in PR #182;
+    // this is the painel-side analog the night batch missed.
     const rowQuantidade = c.quantidade ?? 1;
+    const isNewShape = rowQuantidade > 1;
+    const rowReceived = isNewShape
+      ? rowQuantidade - Math.max(0, c.quantidadeRestante ?? rowQuantidade)
+      : isReserved
+        ? rowQuantidade
+        : 0;
     if (existing) {
       existing.ids.push(c.id);
       existing.qty += rowQuantidade;
-      if (isReserved) existing.received += rowQuantidade;
+      existing.received += rowReceived;
     } else {
       map.set(c.nome, {
         ids: [c.id],
@@ -325,8 +348,8 @@ function groupContribuicoes(items: ContribuicaoDTO[]): GroupedGift[] {
         bgColor: deriveBgColor(c.grupo),
         chipLabel,
         qty: rowQuantidade,
-        received: isReserved ? rowQuantidade : 0,
-        hasClaimed: isReserved,
+        received: rowReceived,
+        hasClaimed: rowReceived > 0,
         // `custom` styling (pink chip + locked semantics) is reserved for true
         // user-created items, i.e. grupo === "personalizado". Don't flag rows
         // we merely couldn't categorize.
