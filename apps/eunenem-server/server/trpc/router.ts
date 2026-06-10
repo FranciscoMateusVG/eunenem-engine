@@ -20,6 +20,7 @@ import { authRouter } from './auth-router.js';
 import { contribuicaoRouter } from './contribuicao-router.js';
 import type { TrpcContext } from './context.js';
 import { paginaRouter } from './pagina-router.js';
+import { painelMensagensRouter } from './painel-mensagens-router.js';
 import { recebedorRouter } from './recebedor-router.js';
 import { usuarioRouter } from './usuario-router.js';
 
@@ -37,6 +38,7 @@ export const appRouter = t.router({
   auth: authRouter,
   contribuicao: contribuicaoRouter,
   pagina: paginaRouter,
+  painelMensagens: painelMensagensRouter,
   recebedor: recebedorRouter,
   usuario: usuarioRouter,
 });

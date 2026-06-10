@@ -38,7 +38,7 @@ export { LivroFinanceiroRepositoryPostgres } from './adapters/pagamentos/finance
 export { PagamentoProviderFake } from './adapters/pagamentos/provider.fake.js';
 export type { PagamentoProvider, SolicitarPagamentoInput } from './adapters/pagamentos/provider.js';
 export { PagamentoProviderStripe } from './adapters/pagamentos/provider.stripe.js';
-export type { MuralRecadoProjection, PagamentoRepository } from './adapters/pagamentos/repository.js';
+export type { AdminRecadoRow, MuralRecadoProjection, PagamentoRepository } from './adapters/pagamentos/repository.js';
 export { PagamentoRepositoryMemory } from './adapters/pagamentos/repository.memory.js';
 export { PagamentoRepositoryPostgres } from './adapters/pagamentos/repository.postgres.js';
 export type { PlataformaRepository } from './adapters/plataforma/repository.js';
@@ -978,3 +978,27 @@ export {
   criarRecebedorParaCampanha,
 } from './use-cases/arrecadacao/criar-recebedor-para-campanha.js';
 export { ArrecadacaoRecebedorJaExisteError } from './errors/arrecadacao/recebedor-ja-existe.error.js';
+
+// aperture-16wrk — admin mensagens backend (5v766 Phase A). SHARED with
+// the frontend (Vance / Phase B) — the schemas + use-case Result types
+// are the contract.
+export type {
+  AdminMensagensResponse,
+  AdminRecadoProjection,
+} from './use-cases/pagamentos/admin-recado-projection.js';
+export {
+  AdminMensagensResponseSchema,
+  AdminRecadoProjectionSchema,
+} from './use-cases/pagamentos/admin-recado-projection.js';
+export type { ObterRecadosAdminDeCampanhaDeps } from './use-cases/pagamentos/obter-recados-admin-de-campanha.js';
+export { obterRecadosAdminDeCampanha } from './use-cases/pagamentos/obter-recados-admin-de-campanha.js';
+export type {
+  MarcarRecadoComoLidoDeps,
+  MarcarRecadoComoLidoResult,
+} from './use-cases/pagamentos/marcar-recado-como-lido.js';
+export { marcarRecadoComoLido } from './use-cases/pagamentos/marcar-recado-como-lido.js';
+export type {
+  MarcarTodosRecadosComoLidosDeps,
+  MarcarTodosRecadosComoLidosResult,
+} from './use-cases/pagamentos/marcar-todos-recados-como-lidos.js';
+export { marcarTodosRecadosComoLidos } from './use-cases/pagamentos/marcar-todos-recados-como-lidos.js';

@@ -1,6 +1,7 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 import type { Transaction } from 'kysely';
-import type { IdCampanha } from '../../domain/arrecadacao/value-objects/ids.js';
+import type { IdCampanha, IdContribuicao } from '../../domain/arrecadacao/value-objects/ids.js';
+import { sql } from 'kysely';
 import {
   type ItemDoPagamento,
   ItemDoPagamentoSchema,
@@ -14,7 +15,11 @@ import { PagamentoJaExisteError } from '../../errors/pagamentos/ja-existe.error.
 import { PagamentoNaoEncontradoError } from '../../errors/pagamentos/nao-encontrado.error.js';
 import type { Database } from '../database.js';
 import type { DB } from '../db-types.generated.js';
-import type { MuralRecadoProjection, PagamentoRepository } from './repository.js';
+import type {
+  AdminRecadoRow,
+  MuralRecadoProjection,
+  PagamentoRepository,
+} from './repository.js';
 
 const tracer = trace.getTracer('frame');
 
@@ -543,6 +548,179 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
           }
           span.setStatus({ code: SpanStatusCode.OK });
           return projection;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  /**
+   * aperture-16wrk / 5v766 Phase A — admin mensagens raw row read.
+   * Same `intencao_id_campanha` + `status = 'aprovado'` +
+   * `intencao_contribuinte_mensagem IS NOT NULL` filter as the
+   * visitor mural. Adds `mensagem_lida_em` + aggregate's
+   * `intencao_total_contribution_cents` + the first contribuição
+   * item's `id_contribuicao` (looked up via LEFT JOIN LATERAL on
+   * `intencao_items` filtered to `tipo = 'contribuicao'` ordered by
+   * `position` ASC). No JOIN to contribuicoes — name resolution
+   * happens in the use-case via the contribuição repository.
+   */
+  async findRecadosAdminByCampanha(
+    idCampanha: IdCampanha,
+  ): Promise<readonly AdminRecadoRow[]> {
+    return tracer.startActiveSpan(
+      'db.pagamentos.findRecadosAdminByCampanha',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+        try {
+          const rows = await this.db
+            .selectFrom('pagamentos')
+            .leftJoinLateral(
+              (eb) =>
+                eb
+                  .selectFrom('intencao_items')
+                  .select('id_contribuicao')
+                  .whereRef('intencao_items.id_pagamento', '=', 'pagamentos.id')
+                  .where('intencao_items.tipo', '=', 'contribuicao')
+                  .orderBy('intencao_items.position', 'asc')
+                  .limit(1)
+                  .as('first_item'),
+              (join) => join.onTrue(),
+            )
+            .select([
+              'pagamentos.id as id',
+              'pagamentos.intencao_contribuinte_nome as intencao_contribuinte_nome',
+              'pagamentos.intencao_contribuinte_mensagem as intencao_contribuinte_mensagem',
+              'pagamentos.criado_em as criado_em',
+              'pagamentos.mensagem_lida_em as mensagem_lida_em',
+              'pagamentos.intencao_total_contribution_cents as intencao_total_contribution_cents',
+              'first_item.id_contribuicao as id_primeira_contribuicao',
+            ])
+            .where('pagamentos.status', '=', 'aprovado')
+            .where('pagamentos.intencao_id_campanha', '=', idCampanha)
+            .where('pagamentos.intencao_contribuinte_mensagem', 'is not', null)
+            .where('pagamentos.intencao_contribuinte_nome', 'is not', null)
+            .orderBy('pagamentos.criado_em', 'desc')
+            .execute();
+
+          const projection: AdminRecadoRow[] = [];
+          for (const row of rows) {
+            const nome = row.intencao_contribuinte_nome;
+            const mensagem = row.intencao_contribuinte_mensagem;
+            if (nome === null || mensagem === null) continue;
+            if (mensagem.trim().length === 0) continue;
+            projection.push({
+              idPagamento: row.id as IdPagamento,
+              contribuinteNome: nome,
+              mensagem,
+              criadoEm: row.criado_em as Date,
+              lidaEm: (row.mensagem_lida_em as Date | null) ?? null,
+              valorContribuicaoCents: Number(row.intencao_total_contribution_cents),
+              idPrimeiraContribuicao:
+                (row.id_primeira_contribuicao as IdContribuicao | null) ?? null,
+            });
+          }
+          span.setStatus({ code: SpanStatusCode.OK });
+          return projection;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  /**
+   * aperture-16wrk / 5v766 Phase A — idempotent first-write-wins.
+   * Strategy: try UPDATE-WHERE-IS-NULL; if matched, return the new
+   * value; otherwise SELECT the existing value. Throws
+   * `PagamentoNaoEncontradoError` when the row doesn't exist at all
+   * (the use-case treats this as a programming error, same posture
+   * as `findById` / `update`).
+   */
+  async marcarRecadoLido(idPagamento: IdPagamento, lidaEm: Date): Promise<Date> {
+    return tracer.startActiveSpan('db.pagamentos.marcarRecadoLido', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+      try {
+        const updated = await this.db
+          .updateTable('pagamentos')
+          .set({ mensagem_lida_em: lidaEm })
+          .where('id', '=', idPagamento)
+          .where('mensagem_lida_em', 'is', null)
+          .returning('mensagem_lida_em')
+          .executeTakeFirst();
+        if (updated !== undefined && updated.mensagem_lida_em !== null) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return updated.mensagem_lida_em as Date;
+        }
+        // No row flipped — either already-read (preserve original) or
+        // pagamento missing (throw).
+        const existing = await this.db
+          .selectFrom('pagamentos')
+          .select(['id', 'mensagem_lida_em'])
+          .where('id', '=', idPagamento)
+          .executeTakeFirst();
+        if (existing === undefined) {
+          throw new PagamentoNaoEncontradoError(idPagamento);
+        }
+        if (existing.mensagem_lida_em === null) {
+          // Should not happen — guard above missed but the row exists
+          // and column is still null. Defensive: persist now.
+          await this.db
+            .updateTable('pagamentos')
+            .set({ mensagem_lida_em: lidaEm })
+            .where('id', '=', idPagamento)
+            .execute();
+          span.setStatus({ code: SpanStatusCode.OK });
+          return lidaEm;
+        }
+        span.setStatus({ code: SpanStatusCode.OK });
+        return existing.mensagem_lida_em as Date;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  /**
+   * aperture-16wrk / 5v766 Phase A — batch first-write-wins. Single
+   * UPDATE with the full filter set; returns the row-count flipped.
+   * Already-read rows skip via `mensagem_lida_em IS NULL`.
+   */
+  async marcarTodosRecadosLidos(idCampanha: IdCampanha, lidaEm: Date): Promise<number> {
+    return tracer.startActiveSpan(
+      'db.pagamentos.marcarTodosRecadosLidos',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+        try {
+          const result = await this.db
+            .updateTable('pagamentos')
+            .set({ mensagem_lida_em: lidaEm })
+            .where('status', '=', 'aprovado')
+            .where('intencao_id_campanha', '=', idCampanha)
+            .where('intencao_contribuinte_mensagem', 'is not', null)
+            .where(sql`TRIM(intencao_contribuinte_mensagem)`, '<>', '')
+            .where('intencao_contribuinte_nome', 'is not', null)
+            .where('mensagem_lida_em', 'is', null)
+            .executeTakeFirst();
+          const flipped =
+            typeof result?.numUpdatedRows === 'bigint'
+              ? Number(result.numUpdatedRows)
+              : (result?.numUpdatedRows ?? 0);
+          span.setStatus({ code: SpanStatusCode.OK });
+          return flipped;
         } catch (error: unknown) {
           span.recordException(error as Error);
           span.setStatus({ code: SpanStatusCode.ERROR });

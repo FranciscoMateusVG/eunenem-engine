@@ -136,6 +136,7 @@ export interface Pagamentos {
   intencao_total_paid_cents: Int8;
   intencao_total_receiver_cents: Int8;
   intencao_total_surcharge_cents: Int8;
+  mensagem_lida_em: Timestamp | null;
   status: string;
   transacao_externa: Json | null;
 }

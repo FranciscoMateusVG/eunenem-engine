@@ -1,9 +1,10 @@
-import type { IdCampanha } from '../../domain/arrecadacao/value-objects/ids.js';
+import type { IdCampanha, IdContribuicao } from '../../domain/arrecadacao/value-objects/ids.js';
 import type { Pagamento } from '../../domain/pagamentos/entities/pagamento.js';
 import type {
   IdContribuicaoPagamento,
   IdPagamento,
 } from '../../domain/pagamentos/value-objects/ids.js';
+import type { MoneyCents } from '../../domain/money.js';
 
 /**
  * Visitor-safe mural projection (aperture-7eci9). Surfaces ONLY the fields
@@ -20,6 +21,49 @@ export interface MuralRecadoProjection {
   readonly contribuinteNome: string;
   readonly mensagem: string;
   readonly criadoEm: Date;
+}
+
+/**
+ * Admin mensagens RAW row (aperture-16wrk / 5v766 Phase A). What the
+ * pagamento repository returns; the use-case decorates with the
+ * contribuição NAME (resolved from `idPrimeiraContribuicao` via the
+ * contribuição repository) before shipping to the wire as
+ * `AdminRecadoProjection`.
+ *
+ * Why split row vs projection: the memory adapter has no handle on
+ * the contribuicao repository (it's used in many test fixtures with
+ * `new PagamentoRepositoryMemory()` — adding a required constructor
+ * arg would break ~25 sites). Postgres adapter could do the JOIN
+ * in-SQL but the asymmetry isn't worth it — use-case decoration
+ * lands on the same wire shape with one extra in-process Map lookup.
+ *
+ * Mirrors MuralRecadoProjection's filter rule (status='aprovado' AND
+ * contribuinte non-null AND mensagem non-empty) and adds:
+ *
+ *   - `lidaEm` (Date|null) — `mensagem_lida_em` column. NULL = unread,
+ *     non-NULL = the moment the admin marked it. First-write-wins
+ *     via `marcarRecadoLido`.
+ *   - `valorContribuicaoCents` — aggregate's totalContributionCents
+ *     (sum of all contribuição-tipo items; excludes the cartão
+ *     surcharge bucket).
+ *   - `idPrimeiraContribuicao` — the FIRST contribuição-tipo item's
+ *     `idContribuicao` (by `intencao_items.position` ASC). NULL when
+ *     the pagamento has only a surcharge item (shouldn't happen with
+ *     factory invariants — defensive null).
+ *
+ * Same visitor-safe-field discipline as MuralRecadoProjection: NO
+ * email, NO internal ids beyond opaque `idPagamento` +
+ * `idPrimeiraContribuicao` (which only flows through to the use-case
+ * for name resolution, never to the wire).
+ */
+export interface AdminRecadoRow {
+  readonly idPagamento: IdPagamento;
+  readonly contribuinteNome: string;
+  readonly mensagem: string;
+  readonly criadoEm: Date;
+  readonly lidaEm: Date | null;
+  readonly valorContribuicaoCents: MoneyCents;
+  readonly idPrimeiraContribuicao: IdContribuicao | null;
 }
 
 /**
@@ -167,4 +211,63 @@ export interface PagamentoRepository {
     idCampanha: IdCampanha,
     limit: number,
   ): Promise<readonly MuralRecadoProjection[]>;
+  /**
+   * Admin mensagens read (aperture-16wrk / 5v766 Phase A). Returns
+   * the admin-facing view of every aprovado pagamento with a
+   * non-empty contribuinte mensagem on the given campanha. Ordering
+   * matches the visitor mural: `criadoEm DESC` (newest first).
+   *
+   * Same filter rules as `findMensagensMuralByCampanha`:
+   *   - status === 'aprovado'
+   *   - intencao.contribuinte non-null AND mensagem non-empty after trim
+   *
+   * Projection ADDS:
+   *   - `lidaEm` (Date|null) — read-state column persisted on
+   *     pagamentos.mensagem_lida_em
+   *   - `valorContribuicaoCents` — aggregate's totalContributionCents
+   *   - `contribuicaoNome` — name of the first contribuição item; null
+   *     when the referenced contribuição row is gone or missing.
+   *
+   * No `limit` parameter — the admin page is one campanha's recados;
+   * pagination is a future concern. Empty array when no matches.
+   */
+  findRecadosAdminByCampanha(
+    idCampanha: IdCampanha,
+  ): Promise<readonly AdminRecadoRow[]>;
+  /**
+   * aperture-16wrk / 5v766 Phase A — idempotent first-write-wins
+   * mark-as-read.
+   *
+   * Sets `mensagem_lida_em = lidaEm` on the row only when the column
+   * is currently NULL. Returns the persisted timestamp:
+   *   - the NEW `lidaEm` if the guard accepted the write
+   *   - the ORIGINAL persisted value if the row was already read
+   *     (fire-and-forget callers get the first-write timestamp back,
+   *     not the timestamp they passed)
+   *
+   * Throws `PagamentoNaoEncontradoError` when no row matches
+   * `idPagamento`. Does NOT validate that the pagamento has a
+   * mensagem or is `aprovado` — the use-case is responsible for the
+   * upstream gate. Marking a recado-less pagamento as read is a
+   * harmless no-op at the data layer; the column just carries the
+   * timestamp without affecting any downstream read (the admin
+   * dashboard filter excludes those rows anyway).
+   */
+  marcarRecadoLido(idPagamento: IdPagamento, lidaEm: Date): Promise<Date>;
+  /**
+   * aperture-16wrk / 5v766 Phase A — batch first-write-wins
+   * mark-as-read for every unread aprovado-with-mensagem pagamento on
+   * the campanha.
+   *
+   * SQL contract: `UPDATE pagamentos SET mensagem_lida_em = $1 WHERE
+   * intencao_id_campanha = $2 AND status = 'aprovado' AND
+   * intencao_contribuinte_mensagem IS NOT NULL AND mensagem_lida_em
+   * IS NULL`. Already-read rows are untouched (the guard's
+   * first-write-wins is preserved at row granularity).
+   *
+   * Returns the count of rows flipped — frontend uses it for the
+   * post-batch toast ("N recados marcadas"). Zero is a normal
+   * outcome when the admin already cleared the queue.
+   */
+  marcarTodosRecadosLidos(idCampanha: IdCampanha, lidaEm: Date): Promise<number>;
 }
