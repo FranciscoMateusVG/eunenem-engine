@@ -42,6 +42,12 @@ import type { LancamentoFinanceiro } from "../../../../src/domain/pagamentos/fin
 import type { Pagamento } from "../../../../src/domain/pagamentos/entities/pagamento.js";
 import { randomUUID } from "node:crypto";
 import {
+  ArrecadacaoCampanhaNaoEncontradaError,
+  ArrecadacaoInputInvalidoError,
+  ArrecadacaoNaoAutorizadoError,
+  ArrecadacaoRecebedorJaExisteError,
+  criarRecebedorParaCampanha,
+  CriarRecebedorParaCampanhaInputSchema,
   FinanceiroRepasseJaPendenteError,
   FinanceiroSaldoDisponivelInsuficienteError,
   FinanceiroInputInvalidoError,
@@ -278,6 +284,29 @@ function toTRPCError(err: unknown): TRPCError {
     });
   }
   if (err instanceof FinanceiroInputInvalidoError) {
+    return new TRPCError({ code: "BAD_REQUEST", message: err.message, cause: err });
+  }
+  // aperture-0bynm — recebedor.criar mapping.
+  if (err instanceof ArrecadacaoRecebedorJaExisteError) {
+    return new TRPCError({
+      code: "CONFLICT",
+      message: "recebedor_ja_existe",
+      cause: err,
+    });
+  }
+  if (err instanceof ArrecadacaoNaoAutorizadoError) {
+    return new TRPCError({ code: "UNAUTHORIZED", message: err.message, cause: err });
+  }
+  if (err instanceof ArrecadacaoCampanhaNaoEncontradaError) {
+    // Don't leak existence — surface as UNAUTHORIZED, same posture as
+    // resolveAdminOfCampanha.
+    return new TRPCError({
+      code: "UNAUTHORIZED",
+      message: "campanha_nao_encontrada_ou_nao_autorizada",
+      cause: err,
+    });
+  }
+  if (err instanceof ArrecadacaoInputInvalidoError) {
     return new TRPCError({ code: "BAD_REQUEST", message: err.message, cause: err });
   }
   return err instanceof Error
@@ -619,7 +648,52 @@ const transferenciaRouter = t.router({
     }),
 });
 
+// ────────────────────────────────────────────────────────────────────
+//  recebedor.criar — first-time onboarding (aperture-0bynm, kbmel)
+// ────────────────────────────────────────────────────────────────────
+
+const RecebedorCriarInputSchema = CriarRecebedorParaCampanhaInputSchema.pick({
+  idCampanha: true,
+  dadosRecebedor: true,
+});
+
+const RecebedorCriarOutputSchema = z.object({
+  idRecebedor: z.string().uuid(),
+});
+
+const criarProcedure = t.procedure
+  .input(RecebedorCriarInputSchema)
+  .output(RecebedorCriarOutputSchema)
+  .mutation(async ({ ctx, input }) => {
+    try {
+      // Admin guard + tenant resolution. resolveAdminOfCampanha throws
+      // UNAUTHORIZED on missing session / non-admin caller / unknown
+      // campanha (no existence leak). idConta is the caller's session-
+      // derived identity that the use-case re-validates via its admin
+      // guard (defense in depth).
+      const { idConta } = await resolveAdminOfCampanha(ctx, input.idCampanha);
+
+      const result = await criarRecebedorParaCampanha(
+        {
+          campanhaRepository: ctx.deps.campanhaRepository,
+          recebedorRepository: ctx.deps.recebedorRepository,
+          clock: ctx.deps.clock,
+          observability: ctx.deps.observability,
+        },
+        {
+          idCampanha: input.idCampanha,
+          idContaCaller: idConta,
+          dadosRecebedor: input.dadosRecebedor,
+        },
+      );
+      return { idRecebedor: result.idRecebedor };
+    } catch (err) {
+      throw toTRPCError(err);
+    }
+  });
+
 export const recebedorRouter = t.router({
+  criar: criarProcedure,
   extrato: extratoRouter,
   transferencia: transferenciaRouter,
 });

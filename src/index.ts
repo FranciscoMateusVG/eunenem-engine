@@ -966,3 +966,15 @@ export { obterStatusTutorialUsuario } from './use-cases/usuario/obter-status-tut
 export type { MarcarTutorialUsuarioComoCompletadoDeps } from './use-cases/usuario/marcar-tutorial-usuario-como-completado.js';
 export { marcarTutorialUsuarioComoCompletado } from './use-cases/usuario/marcar-tutorial-usuario-como-completado.js';
 export { UsuarioNaoEncontradoError } from './errors/usuario/nao-encontrado.error.js';
+
+// aperture-0bynm — recebedor first-time create (backend half of aperture-kbmel).
+export type {
+  CriarRecebedorParaCampanhaDeps,
+  CriarRecebedorParaCampanhaInput,
+  CriarRecebedorParaCampanhaResult,
+} from './use-cases/arrecadacao/criar-recebedor-para-campanha.js';
+export {
+  CriarRecebedorParaCampanhaInputSchema,
+  criarRecebedorParaCampanha,
+} from './use-cases/arrecadacao/criar-recebedor-para-campanha.js';
+export { ArrecadacaoRecebedorJaExisteError } from './errors/arrecadacao/recebedor-ja-existe.error.js';
