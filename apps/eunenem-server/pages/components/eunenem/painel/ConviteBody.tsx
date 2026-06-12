@@ -2,6 +2,16 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import type { PainelSectionBodyProps } from "@/PainelSectionPage";
+import { downloadConvitePng } from "@/lib/convite-download";
+import { shareConvitePreview } from "@/lib/convite-share";
+import {
+  conviteErrorMessage,
+  conviteStateFromData,
+  savePayloadFromConviteState,
+  useConviteData,
+  useSalvarConvite,
+} from "@/lib/convite";
+import { painelConvitePreviewHref } from "@/lib/painelRoutes";
 import {
   countdownTo,
   DEFAULT_STATE,
@@ -1285,8 +1295,6 @@ const STEPS: readonly WizardStep[] = [
 export interface StepViewProps {
   state: ConviteState;
   update: <K extends keyof ConviteState>(k: K, v: ConviteState[K]) => void;
-  fidelity: Fidelity;
-  setFidelity: (f: Fidelity) => void;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1319,11 +1327,20 @@ export function ConviteBody(props: PainelSectionBodyProps) {
   return <DesktopConviteBody {...props} />;
 }
 
-function DesktopConviteBody(_props: PainelSectionBodyProps) {
+function DesktopConviteBody({ slug }: PainelSectionBodyProps) {
   const [state, setState] = useState<ConviteState>({ ...DEFAULT_STATE });
   const [step, setStep] = useState<number>(0);
-  const [fidelity, setFidelity] = useState<Fidelity>("scrapbook");
   const [previewScale, setPreviewScale] = useState<number>(0.7);
+  const [isSharing, setIsSharing] = useState(false);
+  const conviteQuery = useConviteData();
+  const salvarConvite = useSalvarConvite();
+  const hydratedRef = useRef(false);
+
+  useEffect(() => {
+    if (!conviteQuery.data || hydratedRef.current) return;
+    setState(conviteStateFromData(conviteQuery.data));
+    hydratedRef.current = true;
+  }, [conviteQuery.data]);
 
   // Resize-aware preview scale — mirrors direction-b.jsx L11-23 with painel
   // chrome subtracted (topbar + side padding). Bounded so the preview never
@@ -1346,13 +1363,47 @@ function DesktopConviteBody(_props: PainelSectionBodyProps) {
   const cur = STEPS[step]!;
   const isLast = step === STEPS.length - 1;
   const pct = ((step + 1) / STEPS.length) * 100;
+  const isSaving = salvarConvite.isPending;
+  const isSending = isSaving || isSharing;
 
   const goPrev = () => setStep((s) => Math.max(0, s - 1));
   const goNext = () => setStep((s) => Math.min(STEPS.length - 1, s + 1));
-  const onSave = () => toast.success("rascunho salvo com carinho ♡");
-  const onSend = () => toast.success("convite pronto! agora é só compartilhar ♡");
+  const onSave = async () => {
+    try {
+      await salvarConvite.mutateAsync(savePayloadFromConviteState(state));
+      toast.success("convite salvo com carinho ♡");
+    } catch (error) {
+      toast.error("não foi possível salvar agora", {
+        description: conviteErrorMessage(error),
+      });
+    }
+  };
+  const onSend = async () => {
+    setIsSharing(true);
+    try {
+      await salvarConvite.mutateAsync(savePayloadFromConviteState(state));
+      try {
+        await shareConvitePreview({
+          slug,
+          title: `Convite de ${state.babyName || 'nosso evento'}`,
+          text: "Quero te mostrar este convite.",
+        });
 
-  const stepProps: StepViewProps = { state, update, fidelity, setFidelity };
+      } catch {
+        toast.error("não deu pra compartilhar agora", {
+          description: "Tente novamente em um navegador com suporte ou copie o link depois.",
+        });
+      }
+    } catch (error) {
+      toast.error("não foi possível salvar agora", {
+        description: conviteErrorMessage(error),
+      });
+    } finally {
+      setIsSharing(false);
+    }
+  };
+
+  const stepProps: StepViewProps = { state, update };
 
   return (
     <div className="cv-wiz">
@@ -1404,10 +1455,14 @@ function DesktopConviteBody(_props: PainelSectionBodyProps) {
           type="button"
           className="cv-btn ghost sm cv-wiz-save"
           onClick={onSave}
+          disabled={isSaving}
           aria-label="salvar rascunho"
         >
-          salvar
+          {isSaving ? "salvando..." : "salvar"}
         </button>
+        <a href={painelConvitePreviewHref(slug)} className="cv-btn ghost sm" aria-label="ver convite salvo">
+          ver convite salvo
+        </a>
       </header>
 
       {/* body — open book: form left, preview right */}
@@ -1425,7 +1480,7 @@ function DesktopConviteBody(_props: PainelSectionBodyProps) {
             <InvitePreview
               state={state}
               format="story"
-              fidelity={fidelity}
+              fidelity="scrapbook"
               scale={previewScale}
             />
             <span className="cv-wiz-preview-tag">preview ♡</span>
@@ -1456,9 +1511,10 @@ function DesktopConviteBody(_props: PainelSectionBodyProps) {
             type="button"
             className="cv-btn coral"
             onClick={onSend}
+            disabled={isSending}
             aria-label="enviar convite"
           >
-            enviar convite ♡
+            {isSaving ? "salvando..." : isSharing ? "compartilhando..." : "enviar convite ♡"}
           </button>
         ) : (
           <button
@@ -1723,7 +1779,7 @@ function StepQuando({ state, update }: StepViewProps) {
   );
 }
 
-function StepVisual({ state, update, fidelity, setFidelity }: StepViewProps) {
+function StepVisual({ state, update }: StepViewProps) {
   const firstName = state.babyName.split(" ")[0] ?? "";
   const surprisePalette = () => {
     const pool = PALETTES.filter((p) => p.id !== state.palette);
@@ -1766,28 +1822,6 @@ function StepVisual({ state, update, fidelity, setFidelity }: StepViewProps) {
         </button>
       </div>
 
-      <label className="cv-label">estilo do convite</label>
-      <div className="cv-grid-2" style={{ marginBottom: 22 }}>
-        <button
-          type="button"
-          className={`cv-fidelity ${fidelity === "scrapbook" ? "on" : ""}`}
-          aria-pressed={fidelity === "scrapbook"}
-          onClick={() => setFidelity("scrapbook")}
-        >
-          <div className="cv-fidelity-title">scrapbook</div>
-          <div className="cv-fidelity-hint">manuscrito, com washi tape, polaroid e carimbos</div>
-        </button>
-        <button
-          type="button"
-          className={`cv-fidelity ${fidelity === "clean" ? "on" : ""}`}
-          aria-pressed={fidelity === "clean"}
-          onClick={() => setFidelity("clean")}
-        >
-          <div className="cv-fidelity-title">limpo</div>
-          <div className="cv-fidelity-hint">tipográfico, elegante, com pouca decoração</div>
-        </button>
-      </div>
-
       <label className="cv-label">fonte do nome</label>
       <div className="cv-fonts" style={{ marginBottom: 22 }}>
         {NAME_FONTS.map((f) => (
@@ -1804,21 +1838,6 @@ function StepVisual({ state, update, fidelity, setFidelity }: StepViewProps) {
           </button>
         ))}
       </div>
-
-      <label className="cv-label">densidade de decoração</label>
-      <div className="cv-seg" role="group" aria-label="densidade de decoração">
-        {(["pouca", "media", "muita"] as const).map((d) => (
-          <button
-            key={d}
-            type="button"
-            className={state.density === d ? "on" : ""}
-            aria-pressed={state.density === d}
-            onClick={() => update("density", d)}
-          >
-            {d === "media" ? "média" : d}
-          </button>
-        ))}
-      </div>
     </>
   );
 }
@@ -1826,23 +1845,39 @@ function StepVisual({ state, update, fidelity, setFidelity }: StepViewProps) {
 
 // ════════════════════════════════════════════════════════════════════════════
 // StepPronto — aperture-iopmm — review & export (step 6/6).
-// Ports direction-b.jsx L643-677: a blurb + 3 vertical export-format cards
-// (story / square / link). Each card embeds a mini InvitePreview thumbnail
-// at scale 0.22, labels the format, and offers a stub "baixar" button that
-// toasts. Real PNG export / share-link generation is out of scope for this
-// bead — the buttons are mock; the footer's "enviar convite ♡" stays wired
-// by the shell.
+// Ports direction-b.jsx L643-677: a blurb + the export-format card. The card
+// embeds a mini InvitePreview thumbnail at scale 0.22, labels the format, and
+// offers a stub "baixar" button that toasts. Real PNG export / share-link
+// generation is out of scope for this bead — the button is mock; the footer's
+// "enviar convite ♡" stays wired by the shell.
 // ════════════════════════════════════════════════════════════════════════════
 
 const PRONTO_FORMATS: ReadonlyArray<{ f: PreviewFormat; label: string; sub: string }> = [
   { f: "story", label: "story · 9:16", sub: "pro whatsapp e instagram stories" },
-  { f: "square", label: "quadrado · 1:1", sub: "pro feed e grupos" },
-  { f: "link", label: "link único", sub: "compartilhe um endereço bonitinho" },
 ];
 
-function StepPronto({ state, fidelity }: StepViewProps) {
-  const onDownload = (label: string) => {
-    toast.success("seu convite foi gerado ♡", { description: label });
+function StepPronto({ state }: StepViewProps) {
+  const previewRef = useRef<HTMLDivElement | null>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  const onDownload = async () => {
+    setIsDownloading(true);
+    try {
+      await downloadConvitePng({
+        node: previewRef.current,
+        format: "story",
+        displayName: state.babyName,
+      });
+      toast.success("convite baixado ♡", {
+        description: "o arquivo foi salvo em story",
+      });
+    } catch (error) {
+      toast.error("nao deu pra baixar agora", {
+        description: error instanceof Error ? error.message : "Tente de novo em instantes.",
+      });
+    } finally {
+      setIsDownloading(false);
+    }
   };
 
   return (
@@ -1857,7 +1892,7 @@ function StepPronto({ state, fidelity }: StepViewProps) {
           marginBottom: 22,
         }}
       >
-        seu convite vai chegar nos 3 formatos pra mandar onde quiser ♡
+        seu convite vai ficar prontinho em story pra mandar onde quiser ♡
       </p>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -1875,7 +1910,7 @@ function StepPronto({ state, fidelity }: StepViewProps) {
               position: "relative",
             }}
           >
-            <InvitePreview state={state} format={f} fidelity={fidelity} scale={0.22} />
+            <InvitePreview state={state} format={f} fidelity="scrapbook" scale={0.22} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div
                 style={{
@@ -1920,13 +1955,31 @@ function StepPronto({ state, fidelity }: StepViewProps) {
             <button
               type="button"
               className="cv-btn ghost sm"
-              onClick={() => onDownload(label)}
+              onClick={() => void onDownload()}
               aria-label={`baixar formato ${label}`}
+              disabled={isDownloading}
             >
-              baixar
+              {isDownloading ? "baixando..." : "baixar"}
             </button>
           </div>
         ))}
+      </div>
+
+      <div
+        aria-hidden="true"
+        style={{
+          position: "fixed",
+          left: -10000,
+          top: 0,
+          width: 400,
+          height: 600,
+          opacity: 0,
+          pointerEvents: "none",
+        }}
+      >
+        <div ref={previewRef}>
+          <InvitePreview state={state} format="story" fidelity="scrapbook" scale={1} />
+        </div>
       </div>
     </>
   );
@@ -2102,7 +2155,7 @@ function StepPlaceholder({
     fundo:
       "ilustrações watercolor, ou uma foto sua de fundo. cada template já vem com paleta e fonte sugeridas.",
     visual: "paleta, estilo (scrapbook ou limpo), fonte do nome e densidade da decoração.",
-    pronto: "revisão final em story, quadrado e link — pronto pra mandar onde quiser ♡",
+    pronto: "revisão final em story — pronto pra mandar onde quiser ♡",
   };
 
   return (

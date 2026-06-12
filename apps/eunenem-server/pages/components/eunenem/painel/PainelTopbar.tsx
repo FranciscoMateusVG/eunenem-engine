@@ -1,3 +1,7 @@
+import {
+  conviteDestinationHref,
+  useConvitePreviewData,
+} from "@/lib/convite";
 import { painelHref, type PainelSection } from "@/lib/painelRoutes";
 
 // aperture-fx2iz — Common full-width painel topbar.
@@ -50,6 +54,8 @@ export function PainelTopbar({
   activeSection,
   unread = true,
 }: PainelTopbarProps) {
+  const conviteQuery = useConvitePreviewData(slug);
+
   return (
     <header className="painel-topbar" aria-label="Painel — navegação">
       <div className="painel-topbar-inner">
@@ -74,10 +80,13 @@ export function PainelTopbar({
           <ul>
             {NAV_ITEMS.map((item) => {
               const active = item.section === activeSection;
+              const href = item.section === "convite"
+                ? conviteDestinationHref(slug, conviteQuery.data)
+                : painelHref(slug, item.section);
               return (
                 <li key={item.label}>
                   <a
-                    href={painelHref(slug, item.section)}
+                    href={href}
                     aria-current={active ? "page" : undefined}
                     className={`painel-topbar-link${
                       active ? " is-active" : ""

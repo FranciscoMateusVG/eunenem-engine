@@ -124,7 +124,7 @@ export const DEFAULT_STATE: ConviteState = {
   time: "15:00",
   address: "Rua das Acácias, 142\nVila Mariana — São Paulo",
   onlineLink: "meet.google.com/cha-mari",
-  hashtag: "#chegadaDaMari",
+  hashtag: "",
   message: "a gente já te ama tanto. vem celebrar com a gente essa nova fase ♡",
   gifts: true,
   rsvp: true,

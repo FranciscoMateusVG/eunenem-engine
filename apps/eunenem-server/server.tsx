@@ -133,7 +133,11 @@ app.get('*', async (c) => {
   // If not, the URL is structurally valid but unowned → 404. The React tree
   // still renders the painel chrome (helps debugging in dev — see the slug
   // we tried), but the HTTP status is honest.
-  if (route.kind === 'painel' || route.kind === 'painel-section') {
+  if (
+    route.kind === 'painel' ||
+    route.kind === 'painel-section' ||
+    route.kind === 'painel-convite-preview'
+  ) {
     const owner = await deps.usuarioRepository.findUsuarioBySlug(
       ID_PLATAFORMA_EUNENEM,
       route.slug,

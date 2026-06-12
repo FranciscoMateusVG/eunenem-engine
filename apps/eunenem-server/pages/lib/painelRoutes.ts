@@ -35,6 +35,11 @@ export function painelHref(slug: string, section?: PainelSection): string {
   return section ? `/painel/${slug}/${section}` : `/painel/${slug}`;
 }
 
+/** Dedicated read-only preview route for the saved convite. */
+export function painelConvitePreviewHref(slug: string): string {
+  return `/painel/${slug}/convite/preview`;
+}
+
 /**
  * Map a dashboard menu-row `id` (from painelDemo.buildPainelMenu) to its
  * destination href. Most ids map to a painel section; a couple are special:
