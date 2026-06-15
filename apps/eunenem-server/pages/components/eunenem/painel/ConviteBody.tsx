@@ -2618,6 +2618,12 @@ const CV_WIZ_CSS = `
   grid-template-columns:repeat(3,1fr);
   gap:10px;
   margin-bottom:14px;
+  max-height:min(44vh, 430px);
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  align-content:start;
+  padding-right:6px;
+  scrollbar-gutter:stable;
 }
 
 .cv-tpl{
