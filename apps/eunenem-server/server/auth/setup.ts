@@ -5,6 +5,8 @@ import {
   type Auth,
   type CampanhaRepository,
   CampanhaRepositoryPostgres,
+  type ConviteRepository,
+  ConviteRepositoryPostgres,
   type CheckoutSessionProvider,
   ConsoleLogger,
   type ContribuicaoRepository,
@@ -14,6 +16,8 @@ import {
   criarAuth,
   type Database,
   ID_PLATAFORMA_EUNENEM,
+  type EventoRepository,
+  EventoRepositoryPostgres,
   type LivroFinanceiroRepository,
   LivroFinanceiroRepositoryPostgres,
   type WebhookEventArchive,
@@ -62,6 +66,9 @@ export interface ServerDeps {
   readonly campanhaRepository: CampanhaRepository;
   readonly contribuicaoRepository: ContribuicaoRepository;
   readonly recebedorRepository: RecebedorRepository;
+  /** Evento BC — event metadata + invite content for the painel convite flow. */
+  readonly eventoRepository: EventoRepository;
+  readonly conviteRepository: ConviteRepository;
   /**
    * Pagamentos / Checkout adapters (aperture-xaha2). Wired for the FIRST
    * time here — the engine's pagamentos BC has been in-memory-test-only
@@ -316,6 +323,8 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
   const recebedorRepository = new RecebedorRepositoryPostgres(db);
   const campanhaRepository = new CampanhaRepositoryPostgres(db, recebedorRepository);
   const contribuicaoRepository = new ContribuicaoRepositoryPostgres(db);
+  const eventoRepository = new EventoRepositoryPostgres(db);
+  const conviteRepository = new ConviteRepositoryPostgres(db);
 
   // Pagamentos BC — first wiring (aperture-xaha2). Repository persisted
   // to Postgres (migration 011). Event publisher in-memory; no consumers
@@ -393,6 +402,8 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     campanhaRepository,
     contribuicaoRepository,
     recebedorRepository,
+    eventoRepository,
+    conviteRepository,
     pagamentoRepository,
     pagamentoProvider,
     checkoutSessionProvider,

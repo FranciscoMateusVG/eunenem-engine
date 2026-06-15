@@ -1,9 +1,11 @@
 import type { FonteConvite } from '../value-objects/fonte-convite.js';
 import type { IdConvite, IdEvento } from '../value-objects/ids.js';
+import type { ImagemUrlConvite } from '../value-objects/imagem-url-convite.js';
 import type { MensagemConvite } from '../value-objects/mensagem-convite.js';
 import type { ModeloConvite } from '../value-objects/modelo-convite.js';
 import type { NomeExibidoConvite } from '../value-objects/nome-exibido-convite.js';
 import type { PaletaConvite } from '../value-objects/paleta-convite.js';
+import type { RemetenteConvite } from '../value-objects/remetente-convite.js';
 
 /**
  * @aggregateRoot Convite (BC Evento)
@@ -16,11 +18,13 @@ import type { PaletaConvite } from '../value-objects/paleta-convite.js';
 export interface Convite {
   readonly id: IdConvite;
   readonly idEvento: IdEvento;
+  readonly remetente: RemetenteConvite;
   readonly nomeExibido: NomeExibidoConvite;
   readonly mensagem: MensagemConvite;
   readonly paleta: PaletaConvite;
   readonly fonte: FonteConvite;
   readonly modelo: ModeloConvite;
+  readonly imagemUrl?: ImagemUrlConvite;
   readonly criadoEm: Date;
   readonly atualizadoEm: Date;
 }
@@ -28,11 +32,13 @@ export interface Convite {
 export interface CriarConviteInput {
   readonly id: IdConvite;
   readonly idEvento: IdEvento;
+  readonly remetente: RemetenteConvite;
   readonly nomeExibido: NomeExibidoConvite;
   readonly mensagem: MensagemConvite;
   readonly paleta: PaletaConvite;
   readonly fonte: FonteConvite;
   readonly modelo: ModeloConvite;
+  readonly imagemUrl?: ImagemUrlConvite;
   readonly criadoEm: Date;
   readonly atualizadoEm: Date;
 }
@@ -41,22 +47,26 @@ export function criarConvite(input: CriarConviteInput): Convite {
   return {
     id: input.id,
     idEvento: input.idEvento,
+    remetente: input.remetente,
     nomeExibido: input.nomeExibido,
     mensagem: input.mensagem,
     paleta: input.paleta,
     fonte: input.fonte,
     modelo: input.modelo,
+    ...(input.imagemUrl === undefined ? {} : { imagemUrl: input.imagemUrl }),
     criadoEm: input.criadoEm,
     atualizadoEm: input.atualizadoEm,
   };
 }
 
 export interface AtualizarConviteCampos {
+  readonly remetente: RemetenteConvite;
   readonly nomeExibido: NomeExibidoConvite;
   readonly mensagem: MensagemConvite;
   readonly paleta: PaletaConvite;
   readonly fonte: FonteConvite;
   readonly modelo: ModeloConvite;
+  readonly imagemUrl?: ImagemUrlConvite;
 }
 
 export function conviteComCamposAtualizados(
@@ -64,13 +74,20 @@ export function conviteComCamposAtualizados(
   campos: AtualizarConviteCampos,
   atualizadoEm: Date,
 ): Convite {
+  const imagemUrlAtualizada =
+    campos.imagemUrl === undefined
+      ? { ...(convite.imagemUrl === undefined ? {} : { imagemUrl: convite.imagemUrl }) }
+      : { imagemUrl: campos.imagemUrl };
+
   return {
     ...convite,
+    remetente: campos.remetente,
     nomeExibido: campos.nomeExibido,
     mensagem: campos.mensagem,
     paleta: campos.paleta,
     fonte: campos.fonte,
     modelo: campos.modelo,
+    ...imagemUrlAtualizada,
     atualizadoEm,
   };
 }

@@ -10,6 +10,7 @@ import { AuthDemoPage } from './AuthDemoPage.js';
 import { AuthModalProvider } from './components/eunenem/auth/AuthModalProvider.js';
 import { LandingPage } from './LandingPage.js';
 import { NotFoundPage } from './NotFoundPage.js';
+import { PainelConvitePreviewPage } from './PainelConvitePreviewPage.js';
 import { PaginaPage } from './PaginaPage.js';
 import { PaginaSucessoPage } from './PaginaSucessoPage.js';
 import { PainelPage } from './PainelPage.js';
@@ -43,6 +44,7 @@ export function resolveRoute(pathname: string):
   | { kind: 'pagina'; slug: string }
   | { kind: 'pagina-sucesso'; slug: string }
   | { kind: 'painel'; slug: string }
+  | { kind: 'painel-convite-preview'; slug: string }
   | { kind: 'painel-section'; slug: string; section: PainelSection }
   | { kind: 'trpc-smoke' }
   | { kind: 'auth-demo' }
@@ -154,6 +156,15 @@ export function resolveRoute(pathname: string):
   if (paginaMatch && paginaMatch[1] === 'francisco') {
     return { kind: 'pagina', slug: paginaMatch[1] };
   }
+  const painelConvitePreviewMatch = pathname.match(/^\/painel\/([^/]+)\/convite\/preview\/?$/);
+  if (
+    painelConvitePreviewMatch &&
+    painelConvitePreviewMatch[1] &&
+    SLUG_REGEX.test(painelConvitePreviewMatch[1])
+  ) {
+    return { kind: 'painel-convite-preview', slug: painelConvitePreviewMatch[1] };
+  }
+
   const painelMatch = pathname.match(/^\/painel\/([^/]+)(?:\/([^/]+))?\/?$/);
   if (painelMatch && painelMatch[1] && SLUG_REGEX.test(painelMatch[1])) {
     const slug = painelMatch[1];
@@ -200,6 +211,8 @@ function pickPage(route: ReturnType<typeof resolveRoute>, pathname: string) {
   if (route.kind === 'pagina') return <PaginaPage slug={route.slug} />;
   if (route.kind === 'pagina-sucesso') return <PaginaSucessoPage slug={route.slug} />;
   if (route.kind === 'painel') return <PainelPage slug={route.slug} />;
+  if (route.kind === 'painel-convite-preview')
+    return <PainelConvitePreviewPage slug={route.slug} />;
   if (route.kind === 'painel-section')
     return <PainelSectionPage slug={route.slug} section={route.section} />;
   if (route.kind === 'trpc-smoke') return <TrpcSmokePage />;

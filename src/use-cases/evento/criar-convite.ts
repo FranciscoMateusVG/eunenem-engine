@@ -8,10 +8,12 @@ import {
 } from '../../domain/evento/entities/convite.js';
 import { FonteConviteSchema } from '../../domain/evento/value-objects/fonte-convite.js';
 import { IdConviteSchema, IdEventoSchema } from '../../domain/evento/value-objects/ids.js';
+import { ImagemUrlConviteSchema } from '../../domain/evento/value-objects/imagem-url-convite.js';
 import { MensagemConviteSchema } from '../../domain/evento/value-objects/mensagem-convite.js';
 import { ModeloConviteSchema } from '../../domain/evento/value-objects/modelo-convite.js';
 import { NomeExibidoConviteSchema } from '../../domain/evento/value-objects/nome-exibido-convite.js';
 import { PaletaConviteSchema } from '../../domain/evento/value-objects/paleta-convite.js';
+import { RemetenteConviteSchema } from '../../domain/evento/value-objects/remetente-convite.js';
 import { ConviteInputInvalidoError } from '../../errors/evento/convite-input-invalido.error.js';
 import { ConviteJaExisteError } from '../../errors/evento/convite-ja-existe.error.js';
 import { EventoNaoEncontradoError } from '../../errors/evento/nao-encontrado.error.js';
@@ -20,11 +22,13 @@ import type { Observability } from '../../observability/observability.js';
 export const CriarConviteInputSchema = z.object({
   id: IdConviteSchema,
   idEvento: IdEventoSchema,
+  remetente: RemetenteConviteSchema,
   nomeExibido: NomeExibidoConviteSchema,
   mensagem: MensagemConviteSchema,
   paleta: PaletaConviteSchema,
   fonte: FonteConviteSchema,
   modelo: ModeloConviteSchema,
+  imagemUrl: ImagemUrlConviteSchema.optional(),
 });
 
 export type CriarConviteInput = z.infer<typeof CriarConviteInputSchema>;
@@ -57,9 +61,13 @@ export async function criarConvite(
       const now = clock();
       span.setAttribute('convite.id', parsed.data.id);
       span.setAttribute('evento.id', parsed.data.idEvento);
+      span.setAttribute('convite.remetente.length', parsed.data.remetente.length);
       span.setAttribute('convite.paleta', parsed.data.paleta);
       span.setAttribute('convite.fonte', parsed.data.fonte);
       span.setAttribute('convite.modelo', parsed.data.modelo);
+      if (parsed.data.imagemUrl !== undefined) {
+        span.setAttribute('convite.imagem_url', parsed.data.imagemUrl);
+      }
 
       const evento = await eventoRepository.findById(parsed.data.idEvento);
       if (!evento) {
@@ -74,11 +82,13 @@ export async function criarConvite(
       const convite = criarConviteDominio({
         id: parsed.data.id,
         idEvento: parsed.data.idEvento,
+        remetente: parsed.data.remetente,
         nomeExibido: parsed.data.nomeExibido,
         mensagem: parsed.data.mensagem,
         paleta: parsed.data.paleta,
         fonte: parsed.data.fonte,
         modelo: parsed.data.modelo,
+        ...(parsed.data.imagemUrl === undefined ? {} : { imagemUrl: parsed.data.imagemUrl }),
         criadoEm: now,
         atualizadoEm: now,
       });
@@ -88,9 +98,11 @@ export async function criarConvite(
       logger.info('convite.criado', {
         idConvite: convite.id,
         idEvento: convite.idEvento,
+        remetente: convite.remetente,
         paleta: convite.paleta,
         fonte: convite.fonte,
         modelo: convite.modelo,
+        imagemUrl: convite.imagemUrl,
       });
 
       span.setStatus({ code: SpanStatusCode.OK });

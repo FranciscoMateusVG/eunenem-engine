@@ -78,6 +78,37 @@ export interface Contribuicoes {
   valor: number;
 }
 
+export interface Convidados {
+  id: string;
+  lista_id: string;
+  nome: string;
+  numero_celular: string;
+  presenca: string;
+}
+
+export interface Convites {
+  atualizado_em: Generated<Timestamp>;
+  criado_em: Generated<Timestamp>;
+  fonte: string;
+  id: string;
+  id_evento: string;
+  imagem_url: string | null;
+  mensagem: string;
+  modelo: string;
+  nome_exibido: string;
+  paleta: string;
+  remetente: string;
+}
+
+export interface Eventos {
+  atualizado_em: Generated<Timestamp>;
+  criado_em: Generated<Timestamp>;
+  data_hora: Timestamp;
+  endereco: string | null;
+  id: string;
+  id_campanha: string;
+  modalidade: string;
+  tipo_evento: string;
 export interface IntencaoItems {
   contribution_unit_amount_cents: Int8 | null;
   criado_em: Timestamp;
@@ -108,6 +139,14 @@ export interface LancamentosFinanceiros {
   id_repasse: string | null;
   tipo: string;
   transferido_em: Timestamp | null;
+}
+
+export interface ListasDeConvidados {
+  atualizado_em: Generated<Timestamp>;
+  criado_em: Generated<Timestamp>;
+  id: string;
+  id_evento: string;
+  link_confirmacao: string;
 }
 
 export interface OpcoesContribuicao {
@@ -231,8 +270,12 @@ export interface DB {
   cats: Cats;
   contas: Contas;
   contribuicoes: Contribuicoes;
+  convidados: Convidados;
+  convites: Convites;
+  eventos: Eventos;
   intencao_items: IntencaoItems;
   lancamentos_financeiros: LancamentosFinanceiros;
+  listas_de_convidados: ListasDeConvidados;
   opcoes_contribuicao: OpcoesContribuicao;
   pagamentos: Pagamentos;
   payment_webhook_events: PaymentWebhookEvents;

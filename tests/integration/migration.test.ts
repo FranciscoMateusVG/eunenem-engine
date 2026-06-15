@@ -33,19 +33,11 @@ describe('Migration round-trip', () => {
       provider: createMigrationProvider(),
     });
 
-    // Migrate up
     const upResult = await migrator.migrateToLatest();
     expect(upResult.error).toBeUndefined();
-    expect(upResult.results).toBeDefined();
-    expect(upResult.results?.every((r) => r.status === 'Success')).toBe(true);
+    expect(upResult.results?.every((result) => result.status === 'Success')).toBe(true);
 
-    // Verify cats table exists
-    const tables = await db
-      .selectFrom('information_schema.tables' as never)
-      .select('table_name' as never)
-      .where('table_schema' as never, '=', 'public' as never)
-      .execute();
-    const tableNames = tables.map((t: Record<string, unknown>) => t.table_name);
+    const tableNames = await listTableNames(db);
     expect(tableNames).toContain('cats');
     expect(tableNames).toContain('campanhas');
     expect(tableNames).toContain('recebedores');
@@ -57,9 +49,13 @@ describe('Migration round-trip', () => {
     expect(tableNames).toContain('verifications');
     expect(tableNames).toContain('rate_limit');
     expect(tableNames).toContain('pagamentos');
-    // aperture-id3ay added the financeiro migration (012).
+    expect(tableNames).toContain('payment_webhook_events');
     expect(tableNames).toContain('lancamentos_financeiros');
     expect(tableNames).toContain('repasses_recebedor');
+    expect(tableNames).toContain('eventos');
+    expect(tableNames).toContain('convites');
+    expect(tableNames).toContain('listas_de_convidados');
+    expect(tableNames).toContain('convidados');
 
     // aperture-qatwz added two paginated-browse indexes on usuarios (013).
     // Verify the indexes exist (no new tables here — pure index migration).
@@ -167,42 +163,19 @@ describe('Migration round-trip', () => {
     const downPiCh = await migrator.migrateDown();
     expect(downPiCh.error).toBeUndefined();
 
-    // After down on 018, both columns + partial indexes are gone.
-    const piColAfterDown = await db
-      .selectFrom('information_schema.columns' as never)
-      .select(['column_name' as never])
-      .where('table_schema' as never, '=', 'public' as never)
-      .where('table_name' as never, '=', 'pagamentos' as never)
-      .where('column_name' as never, '=', 'intencao_payment_intent_external_ref' as never)
-      .execute();
-    expect(piColAfterDown).toHaveLength(0);
+    expect(
+      await getColumn(db, 'pagamentos', 'intencao_payment_intent_external_ref'),
+    ).toBeUndefined();
+    expect(await getColumn(db, 'pagamentos', 'intencao_charge_external_ref')).toBeUndefined();
 
     const downMaturaEm = await migrator.migrateDown();
     expect(downMaturaEm.error).toBeUndefined();
 
-    // After down on 017, matura_em column + partial index are gone.
-    const maturaEmAfterDown = await db
-      .selectFrom('information_schema.columns' as never)
-      .select(['column_name' as never])
-      .where('table_schema' as never, '=', 'public' as never)
-      .where('table_name' as never, '=', 'lancamentos_financeiros' as never)
-      .where('column_name' as never, '=', 'matura_em' as never)
-      .execute();
-    expect(maturaEmAfterDown).toHaveLength(0);
+    expect(await getColumn(db, 'lancamentos_financeiros', 'matura_em')).toBeUndefined();
 
     const downWebhookEvents = await migrator.migrateDown();
     expect(downWebhookEvents.error).toBeUndefined();
-
-    // After down on 016, the table should be gone.
-    const tablesAfterWebhookDown = await db
-      .selectFrom('information_schema.tables' as never)
-      .select('table_name' as never)
-      .where('table_schema' as never, '=', 'public' as never)
-      .execute();
-    const namesAfterWebhookDown = tablesAfterWebhookDown.map(
-      (t: Record<string, unknown>) => t.table_name,
-    );
-    expect(namesAfterWebhookDown).not.toContain('payment_webhook_events');
+    expect(await listTableNames(db)).not.toContain('payment_webhook_events');
 
     const downPassthroughTipo = await migrator.migrateDown();
     expect(downPassthroughTipo.error).toBeUndefined();
@@ -221,33 +194,14 @@ describe('Migration round-trip', () => {
 
     const downIpAddressWiden = await migrator.migrateDown();
     expect(downIpAddressWiden.error).toBeUndefined();
-
-    // After down on 014, the column is back to varchar(45). The down()
-    // carries a pre-flight guard (aperture-vcen4 follow-up) that throws
-    // when any row exceeds 45 chars — vacuously safe here because the
-    // sessions table is empty in this round-trip.
-    const ipColAfterDown = (await db
-      .selectFrom('information_schema.columns' as never)
-      .select(['character_maximum_length' as never])
-      .where('table_schema' as never, '=', 'public' as never)
-      .where('table_name' as never, '=', 'sessions' as never)
-      .where('column_name' as never, '=', 'ip_address' as never)
-      .executeTakeFirst()) as { character_maximum_length: number } | undefined;
+    const ipColAfterDown = await getColumn(db, 'sessions', 'ip_address');
     expect(ipColAfterDown?.character_maximum_length).toBe(45);
 
     const downPaginatedIndexes = await migrator.migrateDown();
     expect(downPaginatedIndexes.error).toBeUndefined();
-
-    // After down on 013, both indexes should be gone.
-    const indexesAfterDown = await db
-      .selectFrom('pg_indexes' as never)
-      .select('indexname' as never)
-      .where('schemaname' as never, '=', 'public' as never)
-      .where('tablename' as never, '=', 'usuarios' as never)
-      .execute();
-    const namesAfterDown = indexesAfterDown.map((i: Record<string, unknown>) => i.indexname);
-    expect(namesAfterDown).not.toContain('usuarios_plataforma_criado_em_id_idx');
-    expect(namesAfterDown).not.toContain('usuarios_plataforma_nome_id_idx');
+    const indexesAfterDown = await listIndexNames(db, 'usuarios');
+    expect(indexesAfterDown).not.toContain('usuarios_plataforma_criado_em_id_idx');
+    expect(indexesAfterDown).not.toContain('usuarios_plataforma_nome_id_idx');
 
     const downFinanceiro = await migrator.migrateDown();
     expect(downFinanceiro.error).toBeUndefined();
@@ -285,26 +239,78 @@ describe('Migration round-trip', () => {
     const downArrecadacaoCreate = await migrator.migrateDown();
     expect(downArrecadacaoCreate.error).toBeUndefined();
 
-    const tablesAfterArrecadacao = await db
-      .selectFrom('information_schema.tables' as never)
-      .select('table_name' as never)
-      .where('table_schema' as never, '=', 'public' as never)
-      .execute();
-    const namesAfterArrecadacao = tablesAfterArrecadacao.map(
-      (t: Record<string, unknown>) => t.table_name,
-    );
-    expect(namesAfterArrecadacao).not.toContain('campanhas');
-    expect(namesAfterArrecadacao).toContain('cats');
+    const tablesAfterArrecadacao = await listTableNames(db);
+    expect(tablesAfterArrecadacao).not.toContain('campanhas');
+    expect(tablesAfterArrecadacao).toContain('cats');
 
     const downCats = await migrator.migrateDown();
     expect(downCats.error).toBeUndefined();
 
-    const tablesAfterCats = await db
-      .selectFrom('information_schema.tables' as never)
-      .select('table_name' as never)
-      .where('table_schema' as never, '=', 'public' as never)
-      .execute();
-    const namesAfterCats = tablesAfterCats.map((t: Record<string, unknown>) => t.table_name);
-    expect(namesAfterCats).not.toContain('cats');
+    const tablesAfterCats = await listTableNames(db);
+    expect(tablesAfterCats).not.toContain('cats');
   });
 });
+
+async function listTableNames(db: Kysely<unknown>): Promise<string[]> {
+  const tables = await db
+    .selectFrom('information_schema.tables' as never)
+    .select('table_name' as never)
+    .where('table_schema' as never, '=', 'public' as never)
+    .execute();
+
+  return tables.map((table: Record<string, unknown>) => String(table.table_name));
+}
+
+async function listIndexNames(db: Kysely<unknown>, tableName: string): Promise<string[]> {
+  const indexes = await db
+    .selectFrom('pg_indexes' as never)
+    .select('indexname' as never)
+    .where('schemaname' as never, '=', 'public' as never)
+    .where('tablename' as never, '=', tableName as never)
+    .execute();
+
+  return indexes.map((index: Record<string, unknown>) => String(index.indexname));
+}
+
+async function getColumn(
+  db: Kysely<unknown>,
+  tableName: string,
+  columnName: string,
+): Promise<
+  | {
+      data_type: string | null;
+      is_nullable: string | null;
+      character_maximum_length: number | null;
+    }
+  | undefined
+> {
+  return (await db
+    .selectFrom('information_schema.columns' as never)
+    .select(['data_type' as never, 'is_nullable' as never, 'character_maximum_length' as never])
+    .where('table_schema' as never, '=', 'public' as never)
+    .where('table_name' as never, '=', tableName as never)
+    .where('column_name' as never, '=', columnName as never)
+    .executeTakeFirst()) as
+    | {
+        data_type: string | null;
+        is_nullable: string | null;
+        character_maximum_length: number | null;
+      }
+    | undefined;
+}
+
+async function getConstraintDef(
+  db: Kysely<unknown>,
+  constraintName: string,
+): Promise<string | undefined> {
+  const row = (await db
+    .selectFrom('pg_constraint' as never)
+    .select(() => [
+      // biome-ignore lint/suspicious/noExplicitAny: pg_catalog tables are outside DB types
+      sql<string>`pg_get_constraintdef(oid)`.as('def') as any,
+    ])
+    .where('conname' as never, '=', constraintName as never)
+    .executeTakeFirst()) as { def: string } | undefined;
+
+  return row?.def;
+}
