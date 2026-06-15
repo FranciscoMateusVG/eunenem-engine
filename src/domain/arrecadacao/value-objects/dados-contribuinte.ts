@@ -7,7 +7,7 @@
  * after Phase 4.
  */
 export {
+  type DadosContribuinte,
   DadosContribuinteSchema,
   NomeContribuinteSchema,
-  type DadosContribuinte,
 } from '../../pagamentos/value-objects/dados-contribuinte.js';

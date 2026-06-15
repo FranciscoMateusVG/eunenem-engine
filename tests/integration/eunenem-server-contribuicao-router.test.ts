@@ -271,7 +271,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       const created = (await caller.contribuicao.create({
         nome: 'Fralda P',
         valor: 5000,
-        qty: 8,
+        quantidade: 8,
       })) as { ids: string[] };
       expect(created.ids).toHaveLength(8);
 
@@ -321,7 +321,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       const aliceCaller = rig.callerFor(alice.cookieHeader);
       const bobCaller = rig.callerFor(bob.cookieHeader);
 
-      await aliceCaller.contribuicao.create({ nome: 'Fralda', valor: 3000, qty: 3 });
+      await aliceCaller.contribuicao.create({ nome: 'Fralda', valor: 3000, quantidade: 3 });
 
       const bobList = (await bobCaller.contribuicao.list()) as Array<unknown>;
       expect(bobList).toEqual([]);
@@ -343,7 +343,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       const create = (await aliceCaller.contribuicao.create({
         nome: 'Fralda',
         valor: 3000,
-        qty: 1,
+        quantidade: 1,
       })) as { ids: string[] };
       const aliceItemId = requireFirst(create.ids);
 
@@ -369,7 +369,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       const create = (await aliceCaller.contribuicao.create({
         nome: 'Fralda',
         valor: 3000,
-        qty: 1,
+        quantidade: 1,
       })) as { ids: string[] };
       const aliceItemId = requireFirst(create.ids);
 
@@ -392,7 +392,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       const create = (await caller.contribuicao.create({
         nome: 'Fralda',
         valor: 3000,
-        qty: 1,
+        quantidade: 1,
       })) as { ids: string[] };
       const itemId = requireFirst(create.ids);
 
@@ -424,7 +424,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       const create = (await caller.contribuicao.create({
         nome: 'Fralda',
         valor: 3000,
-        qty: 1,
+        quantidade: 1,
       })) as { ids: string[] };
       const itemId = requireFirst(create.ids);
 
@@ -452,7 +452,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
     it('create without session → UNAUTHORIZED', async () => {
       const caller = rig.callerFor();
       const err = await expectTrpcError(() =>
-        caller.contribuicao.create({ nome: 'X', valor: 100, qty: 1 }),
+        caller.contribuicao.create({ nome: 'X', valor: 100, quantidade: 1 }),
       );
       expect(err.code).toBe('UNAUTHORIZED');
     });
@@ -481,7 +481,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       const caller = rig.callerFor(alice.cookieHeader);
 
       const result = (await caller.contribuicao.createBulk({
-        items: [{ nome: 'Fralda P', valor: 5000, qty: 1 }],
+        items: [{ nome: 'Fralda P', valor: 5000, quantidade: 1 }],
       })) as { ids: string[] };
       expect(result.ids).toHaveLength(1);
 
@@ -498,7 +498,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       const caller = rig.callerFor(alice.cookieHeader);
 
       const result = (await caller.contribuicao.createBulk({
-        items: [{ nome: 'Pacote Fraldas RN', valor: 8000, qty: 10 }],
+        items: [{ nome: 'Pacote Fraldas RN', valor: 8000, quantidade: 10 }],
       })) as { ids: string[] };
       expect(result.ids).toHaveLength(10);
       // Unique ids (no accidental dedup or repetition).
@@ -519,7 +519,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       const items = Array.from({ length: 10 }, (_, i) => ({
         nome: `Item kit ${i}`,
         valor: 1000 + i * 100,
-        qty: 3,
+        quantidade: 3,
       }));
 
       const result = (await caller.contribuicao.createBulk({ items })) as { ids: string[] };
@@ -545,7 +545,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       const items = Array.from({ length: 50 }, (_, i) => ({
         nome: `Single ${i}`,
         valor: 100,
-        qty: 1,
+        quantidade: 1,
       }));
 
       const result = (await caller.contribuicao.createBulk({ items })) as { ids: string[] };
@@ -565,8 +565,8 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
 
       const result = (await caller.contribuicao.createBulk({
         items: [
-          { nome: 'A', valor: 100, qty: 2 },
-          { nome: 'B', valor: 200, qty: 3 },
+          { nome: 'A', valor: 100, quantidade: 2 },
+          { nome: 'B', valor: 200, quantidade: 3 },
         ],
       })) as { ids: string[] };
 
@@ -589,8 +589,8 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       const err = await expectTrpcError(() =>
         caller.contribuicao.createBulk({
           items: [
-            { nome: 'Valid', valor: 100, qty: 5 },
-            { nome: 'Invalid', valor: -1, qty: 1 },
+            { nome: 'Valid', valor: 100, quantidade: 5 },
+            { nome: 'Invalid', valor: -1, quantidade: 1 },
           ],
         }),
       );
@@ -605,7 +605,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       const caller = rig.callerFor();
       const err = await expectTrpcError(() =>
         caller.contribuicao.createBulk({
-          items: [{ nome: 'X', valor: 100, qty: 1 }],
+          items: [{ nome: 'X', valor: 100, quantidade: 1 }],
         }),
       );
       expect(err.code).toBe('UNAUTHORIZED');
@@ -621,7 +621,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       const created = (await caller.contribuicao.create({
         nome: 'Fralda P',
         valor: 5000,
-        qty: 4,
+        quantidade: 4,
       })) as { ids: string[] };
       expect(created.ids).toHaveLength(4);
 
@@ -647,7 +647,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       const create = (await aliceCaller.contribuicao.create({
         nome: 'Fralda',
         valor: 3000,
-        qty: 1,
+        quantidade: 1,
       })) as { ids: string[] };
       const aliceItemId = requireFirst(create.ids);
 

@@ -63,6 +63,22 @@ export type ExtratoSummaryDTO = {
   aguardandoAprovacaoCents?: number;
   proximaTransfDate: string | null;
   totalPresentes: number;
+  /**
+   * aperture-kvpvf — distinct aprovado pagamentos with a non-empty
+   * mensagem on the current campanha. Drives the painel home strip's
+   * "RECADOS" cell. Optional on the mirror for the trpc-cache-rotation
+   * window — older cached responses lack the field; renderer falls
+   * back to the demo snapshot's `recadosStripCount` (12).
+   */
+  totalRecadosCount?: number;
+  /**
+   * aperture-kvpvf — count of `ItemDoPagamento` rows (tipo=contribuicao)
+   * across all aprovado pagamentos on the current campanha. One per
+   * cart item, distinct from `totalPresentes` (distinct pagamentos).
+   * Powers the painel home strip's "PRESENTES" cell. Optional on the
+   * mirror for the same merge-window reason as totalRecadosCount.
+   */
+  totalPresentesItensCount?: number;
   dateRangeStart: string | null;
   dateRangeEnd: string | null;
 };
@@ -93,6 +109,10 @@ export type ExtratoRowDTO = {
    *  Optional in the mirror for the same merge-window reason as
    *  contribuicaoNome above. */
   contribuicaoImagemUrl?: string | null;
+  /** aperture-qp4mq — per-item quantidade (Plan 0016 / migration 023).
+   *  Optional in the mirror so pre-bump cached responses still parse;
+   *  the drawer falls back to "no × N" when undefined or 1. */
+  quantidade?: number;
 };
 
 export type SolicitarTransferenciaResult = {
@@ -212,6 +232,17 @@ export function useStubExtratoList(input: {
                 : giftCarrier.contribuicaoImagemUrl === null
                   ? null
                   : undefined;
+            // aperture-qp4mq — per-item quantidade. Same merge-window
+            // optional-read shape as contribuicaoNome above; consumer
+            // (PresentesBody adaptRow) defaults to "no badge" when
+            // undefined or 1.
+            const quantidadeCarrier = r as { quantidade?: unknown };
+            const quantidade =
+              typeof quantidadeCarrier.quantidade === "number" &&
+              Number.isFinite(quantidadeCarrier.quantidade) &&
+              quantidadeCarrier.quantidade > 0
+                ? Math.floor(quantidadeCarrier.quantidade)
+                : undefined;
             return {
               idLancamento: r.idLancamento,
               idPagamento: r.idPagamento,
@@ -222,6 +253,7 @@ export function useStubExtratoList(input: {
               liberacaoPrevistaEm,
               contribuicaoNome,
               contribuicaoImagemUrl,
+              quantidade,
             };
           }),
           nextCursor: query.data.nextCursor,
@@ -292,12 +324,25 @@ export function useStubSolicitarTransferencia(opts: {
  */
 export function useStubCampanhaIdForSlug(_slug: string): {
   idCampanha: string | null;
+  /**
+   * Whether the authenticated user has a recebedor configured on the
+   * default campanha. Drives the TransferModal's onboarding-vs-confirm
+   * branch (aperture-kbmel + aperture-jtamj swap-over).
+   *
+   * Real source: trpc.auth.me carries `hasRecebedor: boolean` (Rex's
+   * Phase A #193 — derived from campanha?.idRecebedor != null with no
+   * extra DB call). Null campanha (pre-p8i01 backfill caveat) AND
+   * null recebedor both surface as false, both routing to the onboarding
+   * embed.
+   */
+  hasRecebedor: boolean;
   isLoading: boolean;
   error: { message: string } | null;
 } {
   const me = trpc.auth.me.useQuery();
   return {
     idCampanha: me.data?.idCampanha ?? null,
+    hasRecebedor: me.data?.hasRecebedor ?? false,
     isLoading: me.isLoading,
     error: me.error ? { message: me.error.message } : null,
   };

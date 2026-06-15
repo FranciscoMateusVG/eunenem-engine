@@ -2,14 +2,14 @@ import { SpanStatusCode } from '@opentelemetry/api';
 import { z } from 'zod/v4';
 import type { CampanhaRepository } from '../../adapters/arrecadacao/campanha-repository.js';
 import type { ContribuicaoRepository } from '../../adapters/arrecadacao/contribuicao-repository.js';
-import type { LivroFinanceiroRepository } from '../../adapters/pagamentos/financeiro/livro-repository.js';
 import type { PagamentoEventPublisher } from '../../adapters/pagamentos/event-publisher.js';
+import type { LivroFinanceiroRepository } from '../../adapters/pagamentos/financeiro/livro-repository.js';
 import type { PagamentoProvider } from '../../adapters/pagamentos/provider.js';
 import type { PagamentoRepository } from '../../adapters/pagamentos/repository.js';
-import type { LancamentoFinanceiro } from '../../domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
 import type { Pagamento } from '../../domain/pagamentos/entities/pagamento.js';
-import { IdPagamentoSchema } from '../../domain/pagamentos/value-objects/ids.js';
+import type { LancamentoFinanceiro } from '../../domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
 import { DadosContribuinteSchema } from '../../domain/pagamentos/value-objects/dados-contribuinte.js';
+import { IdPagamentoSchema } from '../../domain/pagamentos/value-objects/ids.js';
 import { ArrecadacaoCampanhaNaoEncontradaError } from '../../errors/arrecadacao/campanha-nao-encontrada.error.js';
 import { ArrecadacaoContribuicaoNaoEncontradaError } from '../../errors/arrecadacao/contribuicao-nao-encontrada.error.js';
 import { PagamentoTransicaoStatusInvalidaError } from '../../errors/pagamentos/transicao-status-invalida.error.js';
@@ -107,7 +107,11 @@ export async function finalizarPagamentoAprovado(
       // aprovar step so the persisted Pagamento snapshot reflects both
       // the new status AND the new contribuinte in a single update().
       const existingPagamento = await pagamentoRepository.findById(parsed.idPagamento);
-      if (existingPagamento && parsed.contribuinte && existingPagamento.intencao.contribuinte === null) {
+      if (
+        existingPagamento &&
+        parsed.contribuinte &&
+        existingPagamento.intencao.contribuinte === null
+      ) {
         // Only write when (a) we have a contribuinte AND (b) the
         // pagamento doesn't already have one (preserves first-writer
         // wins on retry; matches the existing pi/ch external-ref shape).
@@ -140,11 +144,7 @@ export async function finalizarPagamentoAprovado(
         refreshed.status !== 'pendente' &&
         refreshed.status !== 'processing'
       ) {
-        throw new PagamentoTransicaoStatusInvalidaError(
-          refreshed.id,
-          refreshed.status,
-          'aprovado',
-        );
+        throw new PagamentoTransicaoStatusInvalidaError(refreshed.id, refreshed.status, 'aprovado');
       } else {
         aprovado = await aprovarPagamento(
           {
@@ -158,31 +158,35 @@ export async function finalizarPagamentoAprovado(
         );
       }
 
-      // step 2: cross-BC context — Contribuicao → Campanha → idPlataforma
-      const idContribuicao = aprovado.intencao.idContribuicao;
-      const contribuicao = await contribuicaoRepository.findById(idContribuicao);
+      // step 2: cross-BC context — Plan 0016 Phase 2 (aperture-eg1s2):
+      // anchor contribuição is the FIRST contribuicao-tipo item; campanha
+      // is hoisted onto `intencao.idCampanha` (cart-scope invariant).
+      const anchorItem = aprovado.intencao.items.find((it) => it.tipo === 'contribuicao');
+      if (!anchorItem || anchorItem.tipo !== 'contribuicao') {
+        // Per locked decision #7, every cart has at least one contribuição
+        // item — this branch is a defensive throw, not a normal path.
+        throw new Error(
+          `Pagamento ${aprovado.id} has no contribuicao item — invalid cart shape.`,
+        );
+      }
+      const idContribuicaoAnchor = anchorItem.idContribuicao;
+
+      const contribuicao = await contribuicaoRepository.findById(idContribuicaoAnchor);
       if (!contribuicao) {
-        throw new ArrecadacaoContribuicaoNaoEncontradaError(idContribuicao);
+        throw new ArrecadacaoContribuicaoNaoEncontradaError(idContribuicaoAnchor);
       }
-
-      const campanha = await campanhaRepository.findById(contribuicao.idCampanha);
+      const campanha = await campanhaRepository.findById(aprovado.intencao.idCampanha);
       if (!campanha) {
-        throw new ArrecadacaoCampanhaNaoEncontradaError(contribuicao.idCampanha);
+        throw new ArrecadacaoCampanhaNaoEncontradaError(aprovado.intencao.idCampanha);
       }
 
-      span.setAttribute('checkout.contribuicao.id', idContribuicao);
+      span.setAttribute('checkout.contribuicao.anchor.id', idContribuicaoAnchor);
       span.setAttribute('checkout.campanha.id', campanha.id);
       span.setAttribute('checkout.plataforma.id', campanha.idPlataforma);
+      span.setAttribute('checkout.cart.itens_count', aprovado.intencao.items.length);
 
-      // step 3: register Financeiro effects — with idempotent replay
-      // ------------------------------------------------------------
-      // If lancamentos for this Pagamento already exist, the Financeiro
-      // step has already run on a previous invocation. Return the
-      // existing rows instead of attempting a second insert.
-      //
-      // Plan 0015: drop `metodo` from the input — Financeiro no longer
-      // needs it (no more `calcularMaturaEm`); lancamentos start with
-      // both date columns null.
+      // step 3: register Financeiro effects — with idempotent replay.
+      // Build the per-item financeiro input from the cart.
       const existingLancamentos = await livroFinanceiroRepository.findLancamentosByIdPagamento(
         aprovado.id,
       );
@@ -198,10 +202,13 @@ export async function finalizarPagamentoAprovado(
           { livroFinanceiroRepository, clock, observability },
           {
             idPagamento: aprovado.id,
-            idContribuicao,
+            idContribuicaoAnchor,
             idCampanha: campanha.id,
             statusPagamento: 'aprovado',
-            composicaoValores: aprovado.intencao.composicaoValores,
+            items: aprovado.intencao.items.map((it) => ({
+              idItemPagamento: it.id,
+              composicaoValoresItem: it.composicaoValoresItem as never,
+            })),
           },
         );
       }
@@ -209,11 +216,13 @@ export async function finalizarPagamentoAprovado(
       logger.info('checkout.pagamento.finalizado', {
         idPlataforma: campanha.idPlataforma,
         idCampanha: campanha.id,
-        idContribuicao,
+        idContribuicaoAnchor,
         idPagamento: aprovado.id,
-        totalPaidCents: aprovado.intencao.composicaoValores.totalPaidCents,
-        receiverAmountCents: aprovado.intencao.composicaoValores.receiverAmountCents,
-        platformRevenueAmountCents: aprovado.intencao.composicaoValores.feeAmountCents,
+        numeroDeItens: aprovado.intencao.items.length,
+        totalPaidCents: aprovado.intencao.composicaoValoresAggregate.totalPaidCents,
+        totalReceiverAmountCents: aprovado.intencao.composicaoValoresAggregate.totalReceiverCents,
+        totalPlatformRevenueAmountCents: aprovado.intencao.composicaoValoresAggregate.totalFeeCents,
+        totalSurchargeAmountCents: aprovado.intencao.composicaoValoresAggregate.totalSurchargeCents,
         lancamentosCount: lancamentos.length,
       });
 

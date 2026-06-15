@@ -27,23 +27,57 @@ export interface PainelEventSnapshot {
   messagesTotal: number;
   /** "X novas" badge count on mensagens row. 0 hides the badge. */
   messagesNew: number;
+  /**
+   * aperture-kvpvf — strip-only PRESENTES count (one per
+   * ItemDoPagamento on aprovado pagamentos, NOT one per pagamento).
+   * Distinct from `giftsClaimed`, which counts distinct pagamentos
+   * and drives the featured "presentes recebidos" card. Wired from
+   * `recebedor.extrato.summary.totalPresentesItensCount`; falls back
+   * to `giftsClaimed` for the loading/unauth path so the strip still
+   * renders something sensible.
+   */
+  presentesStripCount: number;
+  /**
+   * aperture-kvpvf — strip-only RECADOS count. Distinct aprovado
+   * pagamentos whose contribuinte carries a non-empty mensagem (same
+   * predicate as B3's mural projection). Wired from
+   * `recebedor.extrato.summary.totalRecadosCount`. Distinct from the
+   * `messagesTotal` field used by the "mensagens recebidas" menu row.
+   */
+  recadosStripCount: number;
 }
 
 export const PAINEL_DEMO: PainelEventSnapshot = {
   greetingTo: "Mari",
   // Pretty-format is intentionally hard-coded here; the live countdown
   // numbers come from tweaks.targetDate via CountdownTimer.
+  // TODO(aperture-uxv83): swap to campanha.dataEvento when the backend
+  // exposes it on auth.me / a campanha-by-id query (currently no wire
+  // surface for the event date).
   eventDateLabel: "12 jun, sex · 16h",
   shareUrl: "eunenem.com/",
   shareSlug: "helena",
   // R$ 2.840,00 — matches the v3 mockup's "recebido até agora" figure.
+  // aperture-cihww: live values now flow through PainelPage from
+  // `trpc.recebedor.extrato.summary` (totalRecebidoCents + totalPresentes).
+  // Keep these as fallback for the loading/unauthenticated paths.
   receivedCents: 284000,
   giftsClaimed: 9,
   giftsTotal: 130,
+  // TODO(aperture-7eamc): swap to real RSVP counts when the convidado
+  // backend ships (no trpc.convidado.* procedure today).
   guestsConfirmed: 28,
   guestsTotal: 42,
+  // TODO(aperture-mztrb): swap to real recados counters + "X novas"
+  // unread badge when the mensagens backend ships.
   messagesTotal: 12,
   messagesNew: 3,
+  // aperture-kvpvf — fallback values for the home stats strip while
+  // the recebedor.extrato.summary query is loading / on the public
+  // unauth path. Live values flow through PainelPage from
+  // totalPresentesItensCount + totalRecadosCount.
+  presentesStripCount: 2,
+  recadosStripCount: 12,
 };
 
 export interface PainelMenuItem {
@@ -92,6 +126,17 @@ export interface PainelMenuGroup {
 }
 
 /**
+ * Optional live overrides for the "minha lista de presentes" counts.
+ * When supplied (aperture-cihww — sourced from `trpc.contribuicao.list`),
+ * they replace the demo "9/24" pair. When omitted (loading / no
+ * campanha), the snapshot fields are used.
+ */
+export interface PainelMenuOverrides {
+  listaTotal?: number;
+  listaClaimed?: number;
+}
+
+/**
  * Pure data — wired against PAINEL_DEMO at render time so the badge
  * counts ("9/24", "28/42", "3 novas") and the featured-row subtitle
  * ("9 mimos · R$ 2.840,00 · ver extrato") track the snapshot. Keeping
@@ -99,11 +144,16 @@ export interface PainelMenuGroup {
  */
 export function buildPainelMenu(
   snapshot: PainelEventSnapshot,
+  overrides: PainelMenuOverrides = {},
 ): PainelMenuGroup[] {
   const reais = (snapshot.receivedCents / 100).toLocaleString("pt-BR", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
+  // aperture-cihww — real lista counts when available; fall back to the
+  // historical "9/24" demo pair otherwise.
+  const listaTotal = overrides.listaTotal ?? 24;
+  const listaClaimed = overrides.listaClaimed ?? snapshot.giftsClaimed;
 
   return [
     {
@@ -123,10 +173,10 @@ export function buildPainelMenu(
         {
           id: "lista",
           label: "minha lista de presentes",
-          sub: `24 itens · ${snapshot.giftsClaimed} já escolhidos`,
+          sub: `${listaTotal} itens · ${listaClaimed} já escolhidos`,
           variant: "lilac",
           icon: "list",
-          badge: { kind: "soft", text: `${snapshot.giftsClaimed}/24` },
+          badge: { kind: "soft", text: `${listaClaimed}/${listaTotal}` },
         },
         {
           id: "convite",
@@ -148,6 +198,8 @@ export function buildPainelMenu(
       id: "convidados",
       title: "convidados",
       items: [
+        // TODO(aperture-7eamc): swap guestsTotal/guestsConfirmed to real
+        // RSVP data once the convidado backend ships.
         {
           id: "lista-convidados",
           label: "lista de convidados",
@@ -159,6 +211,8 @@ export function buildPainelMenu(
             text: `${snapshot.guestsConfirmed}/${snapshot.guestsTotal}`,
           },
         },
+        // TODO(aperture-mztrb): swap messagesTotal + messagesNew to real
+        // recados counters when the mensagens backend ships.
         {
           id: "mensagens",
           label: "mensagens recebidas",
@@ -191,6 +245,8 @@ export function buildPainelMenu(
       id: "conta",
       title: "conta & ajuda",
       items: [
+        // TODO(aperture-5q39i): wire to the real perfil edit backend
+        // (nome/foto/história) when trpc.usuario.updateProfile ships.
         {
           id: "perfil",
           label: "editar meu perfil",
@@ -198,6 +254,9 @@ export function buildPainelMenu(
           variant: null,
           icon: "edit-profile",
         },
+        // TODO(aperture-aqiu7): only render the "verificado" chip when
+        // the Stripe Connect account is truly verified (charges_enabled
+        // + payouts_enabled). Today it's hard-coded.
         {
           id: "bancarios",
           label: "dados bancários",

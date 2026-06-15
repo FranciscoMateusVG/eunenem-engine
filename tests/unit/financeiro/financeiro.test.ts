@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   criarLancamentosParaPagamentoAprovado,
   type EfeitosFinanceirosPagamentoAprovado,
+  type IdsLancamentosFinanceirosPorPagamento,
+  type ItemDoPagamentoFinanceiro,
   type LancamentoFinanceiro,
 } from '../../../src/domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
 import { criarRepasseRecebedorSolicitado } from '../../../src/domain/pagamentos/financeiro/entities/repasse-recebedor.js';
@@ -9,12 +11,19 @@ import { calcularReceitaPlataforma } from '../../../src/domain/pagamentos/financ
 import { calcularSaldoRecebedor } from '../../../src/domain/pagamentos/financeiro/value-objects/saldo-recebedor.js';
 
 /**
- * Plan 0015 (aperture-ucgok). Rewritten for the collapsed model:
- *   - EfeitosFinanceirosPagamentoAprovado.metodo removed (maturation gone)
- *   - Lançamento has no FSM; rows carry transferidoEm + canceladoEm (both
- *     start null at creation time; admin marks transferidoEm to record
- *     money actually reached the recebedor; estorno cascade sets
- *     canceladoEm on the untransferred subset)
+ * Plan 0016 Phase 2 (aperture-eg1s2). Rewritten for the multi-item cart
+ * shape:
+ *   - EfeitosFinanceirosPagamentoAprovado drops root `idContribuicao` +
+ *     `composicaoValores`; gains `items[]` + `idContribuicaoAnchor`.
+ *   - The factory's second arg is `IdsLancamentosFinanceirosPorPagamento`
+ *     (array of per-item id triples), NOT a single object.
+ *   - contribuicao item → 2 lançamentos (recebedor + receita_plataforma)
+ *   - passthrough_surcharge item → 1 lançamento (passthrough)
+ *   - Every lançamento carries `idItemPagamento` (FK to intencao_items).
+ *
+ * Plan 0015 invariants preserved:
+ *   - Lançamentos born with `transferidoEm: null, canceladoEm: null,
+ *     idRepasse: null`.
  *   - calcularSaldoRecebedor predicates rewired:
  *       pending  = transferidoEm IS NULL AND canceladoEm IS NULL
  *       disponivel = transferidoEm IS NOT NULL AND canceladoEm IS NULL
@@ -24,40 +33,80 @@ import { calcularSaldoRecebedor } from '../../../src/domain/pagamentos/financeir
 const idPagamento = '550e8400-e29b-41d4-a716-446655441001';
 const idContribuicao = '550e8400-e29b-41d4-a716-446655441002';
 const idCampanha = '550e8400-e29b-41d4-a716-446655441003';
+const idItemContribuicao = '550e8400-e29b-41d4-a716-446655441020';
+const idItemSurcharge = '550e8400-e29b-41d4-a716-446655441021';
 const idLancamentoRecebedor = '550e8400-e29b-41d4-a716-446655441004';
 const idLancamentoReceitaPlataforma = '550e8400-e29b-41d4-a716-446655441005';
+const idLancamentoPassthroughSurcharge = '550e8400-e29b-41d4-a716-446655441099';
 const idRepasse = '550e8400-e29b-41d4-a716-446655441006';
 const criadoEm = new Date('2026-05-01T12:00:00.000Z');
 
-const inputPagamentoAprovado: EfeitosFinanceirosPagamentoAprovado = {
+// Per-item helpers — local fixtures for the multi-item cart shape. Mirror
+// the helper pattern in `tests/unit/pagamentos/multi-item-cart.test.ts`.
+function contribuicaoItem(opts: {
+  idItemPagamento?: string;
+  idContribuicao?: string;
+  quantidade?: number;
+  unitContribution?: number;
+  unitFee?: number;
+} = {}): ItemDoPagamentoFinanceiro {
+  const quantidade = opts.quantidade ?? 1;
+  const unitContribution = opts.unitContribution ?? 8000;
+  const unitFee = opts.unitFee ?? 400;
+  return {
+    idItemPagamento: opts.idItemPagamento ?? idItemContribuicao,
+    composicaoValoresItem: {
+      tipo: 'contribuicao',
+      idContribuicao: opts.idContribuicao ?? idContribuicao,
+      quantidade,
+      contributionUnitAmountCents: unitContribution,
+      feeUnitAmountCents: unitFee,
+      receiverUnitAmountCents: unitContribution,
+      lineContributionAmountCents: unitContribution * quantidade,
+      lineFeeAmountCents: unitFee * quantidade,
+      lineReceiverAmountCents: unitContribution * quantidade,
+    },
+  };
+}
+
+function surchargeItem(amountCents: number, idItemPagamento = idItemSurcharge): ItemDoPagamentoFinanceiro {
+  return {
+    idItemPagamento,
+    composicaoValoresItem: {
+      tipo: 'passthrough_surcharge',
+      amountCents,
+    },
+  };
+}
+
+const pixInput: EfeitosFinanceirosPagamentoAprovado = {
   idPagamento,
-  idContribuicao,
   idCampanha,
   statusPagamento: 'aprovado',
-  composicaoValores: {
-    contributionAmountCents: 8000,
-    feeAmountCents: 400,
-    surchargeCents: 0,
-    totalPaidCents: 8400,
-    receiverAmountCents: 8000,
-    responsavelTaxa: 'contribuinte',
-  },
+  idContribuicaoAnchor: idContribuicao,
+  items: [contribuicaoItem()],
 };
 
+const pixIds: IdsLancamentosFinanceirosPorPagamento = [
+  {
+    idItemPagamento: idItemContribuicao,
+    idLancamentoRecebedor,
+    idLancamentoReceitaPlataforma,
+  },
+];
+
 describe('criarLancamentosParaPagamentoAprovado', () => {
-  it('creates receiver balance and platform revenue entries for the canonical flow', () => {
-    const lancamentos = criarLancamentosParaPagamentoAprovado(
-      inputPagamentoAprovado,
-      { idLancamentoRecebedor, idLancamentoReceitaPlataforma },
-      criadoEm,
-    );
+  it('creates receiver balance and platform revenue entries for the canonical PIX flow', () => {
+    const lancamentos = criarLancamentosParaPagamentoAprovado(pixInput, pixIds, criadoEm);
 
     // Plan 0015: both lancamentos born with transferidoEm + canceladoEm null.
     // aperture-s03dr: idRepasse also born null.
+    // Plan 0016 Phase 2: every lancamento carries idItemPagamento.
     expect(lancamentos).toEqual([
       {
         id: idLancamentoRecebedor,
         idPagamento,
+        idItemPagamento: idItemContribuicao,
         idContribuicao,
         idCampanha,
         tipo: 'credito_saldo_recebedor',
@@ -70,7 +119,9 @@ describe('criarLancamentosParaPagamentoAprovado', () => {
       {
         id: idLancamentoReceitaPlataforma,
         idPagamento,
+        idItemPagamento: idItemContribuicao,
         idContribuicao,
+        // Platform revenue isn't pinned to a campanha (pre-0016 convention).
         tipo: 'credito_receita_plataforma',
         amountCents: 400,
         criadoEm,
@@ -84,43 +135,45 @@ describe('criarLancamentosParaPagamentoAprovado', () => {
   it('rejects payments that are not approved', () => {
     expect(() =>
       criarLancamentosParaPagamentoAprovado(
-        { ...inputPagamentoAprovado, statusPagamento: 'pendente' },
-        { idLancamentoRecebedor, idLancamentoReceitaPlataforma },
+        { ...pixInput, statusPagamento: 'pendente' },
+        pixIds,
         criadoEm,
       ),
     ).toThrow('Apenas pagamentos aprovados podem gerar lancamentos financeiros.');
   });
 
-  it('rejects an inconsistent value composition', () => {
+  it('rejects an inconsistent per-item value composition (line != unit × quantidade)', () => {
+    const badItem: ItemDoPagamentoFinanceiro = {
+      idItemPagamento: idItemContribuicao,
+      composicaoValoresItem: {
+        tipo: 'contribuicao',
+        idContribuicao,
+        quantidade: 1,
+        contributionUnitAmountCents: 8000,
+        feeUnitAmountCents: 400,
+        receiverUnitAmountCents: 8000,
+        // Wrong: should be 8000.
+        lineContributionAmountCents: 7900,
+        lineFeeAmountCents: 400,
+        lineReceiverAmountCents: 8000,
+      },
+    };
     expect(() =>
       criarLancamentosParaPagamentoAprovado(
-        {
-          ...inputPagamentoAprovado,
-          composicaoValores: {
-            ...inputPagamentoAprovado.composicaoValores,
-            totalPaidCents: 8300,
-          },
-        },
-        { idLancamentoRecebedor, idLancamentoReceitaPlataforma },
+        { ...pixInput, items: [badItem] },
+        pixIds,
         criadoEm,
       ),
-    ).toThrow('Composicao de valores financeira nao confere com o total pago.');
+    ).toThrow(/lineContributionAmountCents/);
   });
 
   it('uses the received fee amount without recalculating it', () => {
     const lancamentos = criarLancamentosParaPagamentoAprovado(
       {
-        ...inputPagamentoAprovado,
-        composicaoValores: {
-          contributionAmountCents: 8000,
-          feeAmountCents: 500,
-          surchargeCents: 0,
-          totalPaidCents: 8500,
-          receiverAmountCents: 8000,
-          responsavelTaxa: 'contribuinte',
-        },
+        ...pixInput,
+        items: [contribuicaoItem({ unitContribution: 8000, unitFee: 500 })],
       },
-      { idLancamentoRecebedor, idLancamentoReceitaPlataforma },
+      pixIds,
       criadoEm,
     );
 
@@ -129,44 +182,44 @@ describe('criarLancamentosParaPagamentoAprovado', () => {
 
   // ───── aperture-bjshv: credito_passthrough_surcharge ─────────────
 
-  const idLancamentoPassthroughSurcharge = '550e8400-e29b-41d4-a716-446655441099';
-
-  it('PIX (surchargeCents=0) emits exactly 2 lancamentos and book balances (aperture-bjshv)', () => {
-    const lancamentos = criarLancamentosParaPagamentoAprovado(
-      inputPagamentoAprovado,
-      { idLancamentoRecebedor, idLancamentoReceitaPlataforma },
-      criadoEm,
-    );
+  it('PIX emits exactly 2 lancamentos and book balances (aperture-bjshv)', () => {
+    const lancamentos = criarLancamentosParaPagamentoAprovado(pixInput, pixIds, criadoEm);
     expect(lancamentos).toHaveLength(2);
     expect(lancamentos.map((l) => l.tipo)).toEqual([
       'credito_saldo_recebedor',
       'credito_receita_plataforma',
     ]);
     const sum = lancamentos.reduce((acc, l) => acc + l.amountCents, 0);
-    expect(sum).toBe(inputPagamentoAprovado.composicaoValores.totalPaidCents);
+    // contributionUnit (8000) + feeUnit (400) = 8400 total paid for the
+    // single contribuicao item.
+    expect(sum).toBe(8400);
   });
 
-  it('cartao (surchargeCents>0) emits 3 lancamentos and book balances (aperture-bjshv)', () => {
-    const inputCartao = {
-      ...inputPagamentoAprovado,
-      composicaoValores: {
-        contributionAmountCents: 4500,
-        feeAmountCents: 225,
-        surchargeCents: 224,
-        totalPaidCents: 4949,
-        receiverAmountCents: 4500,
-        responsavelTaxa: 'contribuinte' as const,
-      },
+  it('cartao (surcharge item present) emits 3 lancamentos and book balances (aperture-bjshv)', () => {
+    const inputCartao: EfeitosFinanceirosPagamentoAprovado = {
+      idPagamento,
+      idCampanha,
+      statusPagamento: 'aprovado',
+      idContribuicaoAnchor: idContribuicao,
+      items: [
+        contribuicaoItem({ unitContribution: 4500, unitFee: 225 }),
+        surchargeItem(224),
+      ],
     };
-    const lancamentos = criarLancamentosParaPagamentoAprovado(
-      inputCartao,
+    const idsCartao: IdsLancamentosFinanceirosPorPagamento = [
       {
+        idItemPagamento: idItemContribuicao,
         idLancamentoRecebedor,
         idLancamentoReceitaPlataforma,
+      },
+      {
+        idItemPagamento: idItemSurcharge,
         idLancamentoPassthroughSurcharge,
       },
-      criadoEm,
-    );
+    ];
+
+    const lancamentos = criarLancamentosParaPagamentoAprovado(inputCartao, idsCartao, criadoEm);
+
     expect(lancamentos).toHaveLength(3);
     expect(lancamentos.map((l) => l.tipo)).toEqual([
       'credito_saldo_recebedor',
@@ -176,48 +229,51 @@ describe('criarLancamentosParaPagamentoAprovado', () => {
     const passthrough = lancamentos[2];
     expect(passthrough.id).toBe(idLancamentoPassthroughSurcharge);
     expect(passthrough.amountCents).toBe(224);
-    // Plan 0015: all rows born with date columns null (not 'pendente' status).
+    // Plan 0015: all rows born with date columns null.
     expect(passthrough.transferidoEm).toBeNull();
     expect(passthrough.canceladoEm).toBeNull();
     expect(passthrough.idCampanha).toBe(idCampanha);
     expect(passthrough.idPagamento).toBe(idPagamento);
+    // Surcharge has no real contribuição linkage; the anchor is stamped.
     expect(passthrough.idContribuicao).toBe(idContribuicao);
+    expect(passthrough.idItemPagamento).toBe(idItemSurcharge);
     expect(passthrough.criadoEm).toBe(criadoEm);
     const sum = lancamentos.reduce((acc, l) => acc + l.amountCents, 0);
-    expect(sum).toBe(inputCartao.composicaoValores.totalPaidCents);
+    // contribution (4500) + fee (225) + surcharge (224) = 4949.
     expect(sum).toBe(4949);
   });
 
   it('cartao without idLancamentoPassthroughSurcharge throws a clear error (aperture-bjshv)', () => {
+    const inputCartao: EfeitosFinanceirosPagamentoAprovado = {
+      idPagamento,
+      idCampanha,
+      statusPagamento: 'aprovado',
+      idContribuicaoAnchor: idContribuicao,
+      items: [
+        contribuicaoItem({ unitContribution: 4500, unitFee: 225 }),
+        surchargeItem(224),
+      ],
+    };
+    const incompleteIds: IdsLancamentosFinanceirosPorPagamento = [
+      {
+        idItemPagamento: idItemContribuicao,
+        idLancamentoRecebedor,
+        idLancamentoReceitaPlataforma,
+      },
+      {
+        idItemPagamento: idItemSurcharge,
+        // Missing idLancamentoPassthroughSurcharge.
+      },
+    ];
     expect(() =>
-      criarLancamentosParaPagamentoAprovado(
-        {
-          ...inputPagamentoAprovado,
-          composicaoValores: {
-            contributionAmountCents: 4500,
-            feeAmountCents: 225,
-            surchargeCents: 224,
-            totalPaidCents: 4949,
-            receiverAmountCents: 4500,
-            responsavelTaxa: 'contribuinte',
-          },
-        },
-        { idLancamentoRecebedor, idLancamentoReceitaPlataforma },
-        criadoEm,
-      ),
+      criarLancamentosParaPagamentoAprovado(inputCartao, incompleteIds, criadoEm),
     ).toThrow(/idLancamentoPassthroughSurcharge/);
   });
 
-  it('PIX accepts a present idLancamentoPassthroughSurcharge but ignores it (no-op when surchargeCents=0)', () => {
-    const lancamentos = criarLancamentosParaPagamentoAprovado(
-      inputPagamentoAprovado,
-      {
-        idLancamentoRecebedor,
-        idLancamentoReceitaPlataforma,
-        idLancamentoPassthroughSurcharge,
-      },
-      criadoEm,
-    );
+  it('PIX with no surcharge item ignores any unused passthrough id (no-op when items has no surcharge)', () => {
+    // PIX shape has no surcharge item by construction, so the factory
+    // simply never visits passthrough-id entries.
+    const lancamentos = criarLancamentosParaPagamentoAprovado(pixInput, pixIds, criadoEm);
     expect(lancamentos).toHaveLength(2);
     expect(lancamentos.find((l) => l.tipo === 'credito_passthrough_surcharge')).toBeUndefined();
   });
@@ -225,11 +281,7 @@ describe('criarLancamentosParaPagamentoAprovado', () => {
 
 describe('financial summaries (plan 0015 date-column predicates)', () => {
   it('separates pending and transferred receiver balance via date columns', () => {
-    const lancamentoPending = criarLancamentosParaPagamentoAprovado(
-      inputPagamentoAprovado,
-      { idLancamentoRecebedor, idLancamentoReceitaPlataforma },
-      criadoEm,
-    )[0];
+    const lancamentoPending = criarLancamentosParaPagamentoAprovado(pixInput, pixIds, criadoEm)[0];
     // Mock a different lancamento that's been transferred to the recebedor:
     // transferidoEm set, canceladoEm null → counts as "disponivel" (já recebido).
     const lancamentoTransferido: LancamentoFinanceiro = {
@@ -249,11 +301,7 @@ describe('financial summaries (plan 0015 date-column predicates)', () => {
   });
 
   it('excludes cancelled lançamentos from both sums', () => {
-    const lancamentoPending = criarLancamentosParaPagamentoAprovado(
-      inputPagamentoAprovado,
-      { idLancamentoRecebedor, idLancamentoReceitaPlataforma },
-      criadoEm,
-    )[0];
+    const lancamentoPending = criarLancamentosParaPagamentoAprovado(pixInput, pixIds, criadoEm)[0];
     // canceladoEm set → estornado cascade fired before transfer. Excluded
     // from both pending AND disponivel.
     const lancamentoCancelado: LancamentoFinanceiro = {
@@ -273,11 +321,7 @@ describe('financial summaries (plan 0015 date-column predicates)', () => {
   });
 
   it('accumulates only platform revenue entries', () => {
-    const lancamentos = criarLancamentosParaPagamentoAprovado(
-      inputPagamentoAprovado,
-      { idLancamentoRecebedor, idLancamentoReceitaPlataforma },
-      criadoEm,
-    );
+    const lancamentos = criarLancamentosParaPagamentoAprovado(pixInput, pixIds, criadoEm);
 
     expect(calcularReceitaPlataforma(lancamentos)).toEqual({ totalAmountCents: 400 });
   });

@@ -22,9 +22,9 @@ describe('shouldSpinPostgresContainer (aperture-epmps)', () => {
     });
 
     it('SKIP_DB_GLOBAL_SETUP=1 → false on full run too', () => {
-      expect(shouldSpinPostgresContainer(['node', 'vitest', 'run'], { SKIP_DB_GLOBAL_SETUP: '1' })).toBe(
-        false,
-      );
+      expect(
+        shouldSpinPostgresContainer(['node', 'vitest', 'run'], { SKIP_DB_GLOBAL_SETUP: '1' }),
+      ).toBe(false);
     });
 
     it('FORCE_DB_GLOBAL_SETUP=1 → true even when path is unit-only', () => {
@@ -73,13 +73,7 @@ describe('shouldSpinPostgresContainer (aperture-epmps)', () => {
     it('mixed paths (unit + integration) → true', () => {
       expect(
         shouldSpinPostgresContainer(
-          [
-            'node',
-            'vitest',
-            'run',
-            'tests/unit/foo.test.ts',
-            'tests/integration/bar.test.ts',
-          ],
+          ['node', 'vitest', 'run', 'tests/unit/foo.test.ts', 'tests/integration/bar.test.ts'],
           {},
         ),
       ).toBe(true);
@@ -130,9 +124,9 @@ describe('shouldSpinPostgresContainer (aperture-epmps)', () => {
     });
 
     it('only flags, no path → true (full run with flags only)', () => {
-      expect(
-        shouldSpinPostgresContainer(['node', 'vitest', 'run', '--reporter=verbose'], {}),
-      ).toBe(true);
+      expect(shouldSpinPostgresContainer(['node', 'vitest', 'run', '--reporter=verbose'], {})).toBe(
+        true,
+      );
     });
 
     it('empty argv → true (defensive default)', () => {

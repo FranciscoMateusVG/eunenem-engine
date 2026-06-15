@@ -44,7 +44,7 @@ import {
 import { ProvedorRegraTaxaMemory } from '../../src/adapters/taxas/regra-provider.memory.js';
 import { AuthServiceMemoria } from '../../src/adapters/usuario/auth-service.memory.js';
 import { UsuarioRepositoryMemory } from '../../src/adapters/usuario/repository.memory.js';
-import { criarContribuicaoDisponivel } from '../../src/domain/arrecadacao/entities/contribuicao.js';
+import { criarContribuicao } from '../../src/domain/arrecadacao/entities/contribuicao.js';
 import { criarRecebedorInicial } from '../../src/domain/arrecadacao/entities/recebedor.js';
 import type { IdContribuicao } from '../../src/domain/arrecadacao/value-objects/ids.js';
 import { NoopLogger } from '../../src/observability/noop-logger.js';
@@ -141,7 +141,7 @@ describe('pagina.obterListaPresentes projection (aperture-ines9)', () => {
 
     // Seed a contribuicao with bare valor = 100 cents (R$ 1.00) — matches
     // the BABADOR B amount from operator's live-walk screenshot.
-    const contribuicao = criarContribuicaoDisponivel({
+    const contribuicao = criarContribuicao({
       id: randomUUID() as IdContribuicao,
       idCampanha: campanha.id,
       idOpcaoContribuicao: opcaoPresentes.id,

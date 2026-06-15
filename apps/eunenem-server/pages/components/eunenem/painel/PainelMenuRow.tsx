@@ -48,6 +48,11 @@ export function PainelMenuRow({ item, slug, href }: Props) {
     <a
       href={resolvedHref}
       className={rowClass}
+      // aperture-7nius — stable selector for the painel tutorial overlay
+      // (plan 0018). The overlay reads positions via
+      // document.querySelector(`[data-tutorial-target="<id>"]`), so every
+      // row exposes its painelDemo id here. No-op for non-tutorial paths.
+      data-tutorial-target={item.id}
       aria-disabled={item.soon || undefined}
       onClick={item.soon ? (e) => e.preventDefault() : undefined}
       {...(isExternal ? { target: "_blank", rel: "noopener noreferrer" } : {})}

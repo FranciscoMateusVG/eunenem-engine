@@ -227,27 +227,25 @@ export class WebhookEventArchivePostgres implements WebhookEventArchive {
     idPagamento: string,
     options?: FindByPagamentoIdOptions,
   ): Promise<readonly WebhookEventRecord[]> {
-    return tracer.startActiveSpan(
-      'db.payment_webhook_events.findByPagamentoId',
-      async (span) => {
-        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
-        try {
-          // aperture-2sp6m: uses the partial index
-          // `payment_webhook_events_pagamento_id_idx ON (pagamento_id)
-          // WHERE pagamento_id IS NOT NULL` shipped by 1n6u8's migration
-          // 016. The equality predicate is satisfied only by non-NULL
-          // values, so orphan rows are naturally excluded — no extra
-          // IS NOT NULL needed in the WHERE.
-          const orderClause =
-            (options?.orderBy ?? 'received_at_asc') === 'received_at_desc'
-              ? sql`ORDER BY received_at DESC`
-              : sql`ORDER BY received_at ASC`;
-          const limitClause =
-            typeof options?.limit === 'number' && options.limit >= 0
-              ? sql`LIMIT ${options.limit}`
-              : sql``;
+    return tracer.startActiveSpan('db.payment_webhook_events.findByPagamentoId', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        // aperture-2sp6m: uses the partial index
+        // `payment_webhook_events_pagamento_id_idx ON (pagamento_id)
+        // WHERE pagamento_id IS NOT NULL` shipped by 1n6u8's migration
+        // 016. The equality predicate is satisfied only by non-NULL
+        // values, so orphan rows are naturally excluded — no extra
+        // IS NOT NULL needed in the WHERE.
+        const orderClause =
+          (options?.orderBy ?? 'received_at_asc') === 'received_at_desc'
+            ? sql`ORDER BY received_at DESC`
+            : sql`ORDER BY received_at ASC`;
+        const limitClause =
+          typeof options?.limit === 'number' && options.limit >= 0
+            ? sql`LIMIT ${options.limit}`
+            : sql``;
 
-          const rows = await sql<PaymentWebhookEventRow>`
+        const rows = await sql<PaymentWebhookEventRow>`
             SELECT id, provider, provider_event_id, event_type, raw_payload,
                    signature_header, signature_valid, received_at, processed_at,
                    processing_error, pagamento_id
@@ -257,18 +255,17 @@ export class WebhookEventArchivePostgres implements WebhookEventArchive {
               ${limitClause}
           `.execute(this.db);
 
-          const result = rows.rows.map(toRecord);
-          span.setStatus({ code: SpanStatusCode.OK });
-          return result;
-        } catch (error: unknown) {
-          span.recordException(error as Error);
-          span.setStatus({ code: SpanStatusCode.ERROR });
-          throw error;
-        } finally {
-          span.end();
-        }
-      },
-    );
+        const result = rows.rows.map(toRecord);
+        span.setStatus({ code: SpanStatusCode.OK });
+        return result;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
   }
 }
 

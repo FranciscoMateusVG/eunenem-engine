@@ -5,12 +5,13 @@ import {
   calcularValorTaxaPercentual,
   type Campanha,
   computeCardSurchargeCents,
-  contribuicaoEstaIndisponivel,
+  quantidadeRestante,
   type IdContribuicao,
   type IdIntencaoPagamento,
+  type IdItemDoPagamento,
   type IdOpcaoContribuicao,
   type IdPagamento,
-  iniciarPagamentoContribuicao,
+  iniciarPagamentoCarrinho,
   listarContribuicoesDeOpcao,
   obterTarifaPorTipo,
   type SlugUsuario,
@@ -66,6 +67,35 @@ export const ObterListaPresentesOutputItemSchema = z.object({
    */
   nome: z.string(),
   /**
+   * Plan 0016 slot capacity. The contribuição's intrinsic quantidade
+   * column — how many units of this gift the recebedor opened. New-shape
+   * contribuições carry quantidade > 1 (single row × N slots); legacy
+   * multi-row data carries quantidade=1 (each row IS a single slot, the
+   * grouper on the visitor side counts rows).
+   *
+   * Added under aperture-nz12u so the visitor's `groupVisitorGifts` can
+   * read it and distinguish new-shape from legacy data (dual-mode). Pre-
+   * nz12u the visitor was blind to the field, capping the cart at 1 for
+   * every new-shape gift (Conjunto / Vale Banhos / Beleza / Kit de Sonos /
+   * Pacote de Paciência all returned qtyTotal=1 from the legacy row-count
+   * grouper, even though the recebedor opened 7/5/5/5/10 slots respectively).
+   */
+  quantidade: z.number().int().positive(),
+  /**
+   * Plan 0016 derived availability. `quantidade - SUM(ItemDoPagamento.
+   * quantidade across aprovado pagamentos pointing at this slot)`.
+   *
+   * Can be 0 or negative (overshoot per locked decision #10 — operator
+   * accepts the +money outcome; the badge just reads ESGOTADA without
+   * surfacing the overshoot magnitude).
+   *
+   * The cart's UI cap reads this directly. For legacy multi-row data
+   * (quantidade=1) it's either 1 (disponivel) or 0 (aprovado) — same
+   * legacy semantics as before. For new-shape data it's the source of
+   * truth for "how many can the visitor still add".
+   */
+  quantidadeRestante: z.number().int(),
+  /**
    * Visitor-paid total in cents for the **Pix** path (aperture-ines9 —
    * semantic shift). Equals `contributionAmountCents + feeAmountCents`
    * where `feeAmountCents` is the platform fee from the active RegraTaxa
@@ -103,6 +133,38 @@ export const IniciarPagamentoContribuicaoInputSchema = z.object({
   metodo: z.enum(['pix', 'credit_card']),
 });
 
+/**
+ * Plan 0017 / aperture-16flf — visitor cart multi-item checkout input.
+ *
+ * Each cart item carries an `idContribuicao` and a `quantidade ≥ 1`. Today
+ * (pre-create-flow-rewrite — aperture-1l37i lands separately) every
+ * contribuição row in the DB has quantidade=1, so the cart drawer maps a
+ * line of "Fralda × 3" to THREE items with quantidade=1 each, one per
+ * available unit-row in the group. After Rex's create-flow rewrite ships,
+ * the drawer can collapse a multi-unit line into a single `{idContribuicao,
+ * quantidade: 3}` item against a single row with quantidade=3 — same
+ * saga, simpler shape.
+ *
+ * idsItens is OMITTED from the visitor-facing input. The procedure mints
+ * UUIDs server-side per-item (contribuição items + the surcharge item
+ * when metodo='credit_card'). Keeping client uninvolved here matches the
+ * existing single-shot procedure's pattern and avoids leaking saga-shape
+ * details across the public API.
+ */
+export const IniciarPagamentoCarrinhoInputSchema = z.object({
+  slug: z.string().trim().min(1).max(60),
+  itens: z
+    .array(
+      z.object({
+        idContribuicao: z.string().uuid(),
+        quantidade: z.number().int().positive(),
+      }),
+    )
+    .min(1)
+    .max(50),
+  metodo: z.enum(['pix', 'credit_card']),
+});
+
 export const IniciarPagamentoContribuicaoOutputSchema = z.object({
   sessionId: z.string(),
   clientSecret: z.string(),
@@ -111,6 +173,25 @@ export const IniciarPagamentoContribuicaoOutputSchema = z.object({
 export const ObterSucessoPagamentoInputSchema = z.object({
   slug: z.string().trim().min(1).max(60),
   sessionId: z.string().trim().min(1).max(255),
+});
+
+// aperture-7eci9 — visitor mural read input + projection.
+//
+// Slug-keyed (visitor has no session); mirrors the obterListaPresentes
+// tenant-resolution chain so a mural can only be read for the slug's own
+// campanha. Visitor-safe DTO: NO email, NO idContribuicao, NO idCampanha,
+// NO payment status / amounts. Just an opaque pagamento id, the nome the
+// contribuinte typed at checkout, the mensagem they wrote, and the
+// criadoEm so the UI can render relative time.
+export const ObterMuralInputSchema = z.object({
+  slug: z.string().trim().min(1).max(60),
+});
+
+export const ObterMuralOutputItemSchema = z.object({
+  id: z.string().uuid(),
+  contribuinteNome: z.string(),
+  mensagem: z.string(),
+  criadoEm: z.date(),
 });
 
 export const ObterSucessoPagamentoOutputSchema = z.object({
@@ -226,17 +307,30 @@ export const paginaRouter = t.router({
         items.map(async (c) => {
           const feeAmountCents = calcularValorTaxaPercentual(c.valor, tarifaPresente.percentageBps);
           const valorComTaxa = c.valor + feeAmountCents;
-          // Post-Phase-1 (plan 0015): contribuição has no stored status.
-          // Compute the "indisponivel" predicate per-slot via the EXISTS
-          // query against approved pagamentos (uses the partial index
-          // pagamentos_aprovado_por_contribuicao_idx — sub-ms per slot).
-          const indisponivel = await contribuicaoEstaIndisponivel(
+          // aperture-nz12u: surface BOTH the slot cap (quantidade) AND the
+          // derived availability (quantidadeRestante) so the visitor side
+          // can dual-mode the grouper + cap the cart honestly. Pre-nz12u
+          // we only surfaced a boolean via esgotada(), which lost the
+          // multiplicity signal on new-shape data.
+          //
+          // quantidadeRestante can be negative (overshoot per locked
+          // decision #10). The status field stays "indisponivel" when
+          // restante <= 0 — matches the pre-nz12u esgotada() predicate
+          // shape so the visitor card's existing indisponivel branch
+          // keeps working unchanged.
+          const restante = await quantidadeRestante(
             {
               pagamentoRepository: ctx.deps.pagamentoRepository,
+              contribuicaoRepository: ctx.deps.contribuicaoRepository,
               observability: ctx.deps.observability,
             },
             { idContribuicao: c.id },
           );
+          // restante === null only when the contribuição doesn't exist —
+          // which can't happen here since we just loaded c from the
+          // contribuicao repo. Treat as 0 (disponivel=false) defensively.
+          const restanteSafe = restante ?? 0;
+          const indisponivel = restanteSafe <= 0;
           return {
             id: c.id as string,
             nome: c.nome,
@@ -244,10 +338,44 @@ export const paginaRouter = t.router({
             valorComTaxaCartao: valorComTaxa + computeCardSurchargeCents(c.valor),
             imagemUrl: c.imagemUrl,
             grupo: c.grupo,
+            quantidade: c.quantidade,
+            quantidadeRestante: restanteSafe,
             status: indisponivel ? ('indisponivel' as const) : ('disponivel' as const),
           };
         }),
       );
+    }),
+
+  /**
+   * Visitor mural read (aperture-7eci9). Returns the public list of
+   * recados — every aprovado pagamento against this slug's campanha
+   * whose contribuinte left a non-empty mensagem at checkout.
+   *
+   * Tenant safety: slug → usuario → campanha → mural rows. The repo
+   * filter is scoped by `idCampanha`, so a slug can only ever read its
+   * own mural.
+   *
+   * Visitor-safe projection: `{ id, contribuinteNome, mensagem,
+   * criadoEm }` — the four fields a recado card needs. NO email, NO
+   * internal ids, NO payment composição. Limit hard-capped at 50;
+   * future-pagination is a separate task.
+   */
+  obterMural: t.procedure
+    .input(ObterMuralInputSchema)
+    .query(async ({ ctx, input }) => {
+      const { campanha } = await resolvePaginaBySlug(ctx, input.slug);
+
+      const recados = await ctx.deps.pagamentoRepository.findMensagensMuralByCampanha(
+        campanha.id,
+        50,
+      );
+
+      return recados.map((r) => ({
+        id: r.idPagamento as unknown as string,
+        contribuinteNome: r.contribuinteNome,
+        mensagem: r.mensagem,
+        criadoEm: r.criadoEm,
+      }));
     }),
 
   /**
@@ -278,8 +406,20 @@ export const paginaRouter = t.router({
       const idIntencaoPagamento = randomUUID() as IdIntencaoPagamento;
       const returnUrl = `${ctx.deps.publicOrigin}/pagina/${encodeURIComponent(input.slug)}/sucesso?sessionId={CHECKOUT_SESSION_ID}`;
 
+      // Plan 0016 (aperture-3htxg): visitor flow stays single-contribuição
+      // for now (multi-item visitor cart is the separate 0017 follow-on).
+      // Adapt the single-gift input to the multi-item saga shape: a
+      // 1-element cart with quantidade=1. The saga itself injects the
+      // surcharge item for the cartão path, so we mint exactly one
+      // contribuição item id here.
+      const idItemContribuicao = randomUUID() as IdItemDoPagamento;
+      const idsItens: IdItemDoPagamento[] =
+        input.metodo === 'credit_card'
+          ? [idItemContribuicao, randomUUID() as IdItemDoPagamento]
+          : [idItemContribuicao];
+
       try {
-        const result = await iniciarPagamentoContribuicao(
+        const result = await iniciarPagamentoCarrinho(
           {
             campanhaRepository: ctx.deps.campanhaRepository,
             contribuicaoRepository: ctx.deps.contribuicaoRepository,
@@ -293,16 +433,109 @@ export const paginaRouter = t.router({
           {
             idPlataforma: ID_PLATAFORMA_EUNENEM,
             idCampanha: campanha.id,
-            idContribuicao: input.idContribuicao as IdContribuicao,
+            itens: [
+              {
+                idContribuicao: input.idContribuicao as IdContribuicao,
+                quantidade: 1,
+              },
+            ],
             metodo: input.metodo,
             idPagamento,
             idIntencaoPagamento,
+            idsItens,
             returnUrl,
             // aperture-6g58e: browser-originated checkout uses inline
             // success — Stripe fires onComplete in the iframe instead of
             // redirecting. The /sucesso page remains the fallback for
             // payment methods that DO need a redirect (some bank-redirect
             // flows) and for direct-URL visits.
+            redirectOnCompletion: 'if_required' as const,
+          },
+        );
+        return { sessionId: result.sessionId, clientSecret: result.clientSecret };
+      } catch (err) {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: err instanceof Error ? err.message : String(err),
+          cause: err,
+        });
+      }
+    }),
+
+  /**
+   * Plan 0017 / aperture-16flf — visitor cart multi-item checkout
+   * mutation. Wraps `iniciarPagamentoCarrinho` with the visitor-facing
+   * shape: takes a slug + array of cart items (each `{idContribuicao,
+   * quantidade}`) + metodo, returns the same `{sessionId, clientSecret}`
+   * the single-shot procedure returns so the embedded Stripe checkout
+   * mounts identically.
+   *
+   * Server mints UUIDs per-item:
+   *   - One IdItemDoPagamento per cart item (contribuição-tipo).
+   *   - Plus one more for the surcharge item when metodo === credit_card
+   *     (the saga inserts the surcharge automatically; the id must be
+   *     provided up-front per the saga's contract).
+   *
+   * Tenant + invariants enforced by the saga itself:
+   *   - All cart items must resolve to the same campanha (cart-construction
+   *     invariant per locked decision #8 of Plan 0016) — the saga throws
+   *     CarrinhoMultiplasCampanhasError if violated; the procedure
+   *     surfaces this as INTERNAL_SERVER_ERROR with the message preserved.
+   *   - Per-item esgotada early-fail (locked decision #6) — if any
+   *     contribuição in the cart is sold out, the entire mutation rejects.
+   */
+  iniciarPagamentoCarrinho: t.procedure
+    .input(IniciarPagamentoCarrinhoInputSchema)
+    .mutation(async ({ ctx, input }) => {
+      const { campanha } = await resolvePaginaBySlug(ctx, input.slug);
+
+      const idPagamento = randomUUID() as IdPagamento;
+      const idIntencaoPagamento = randomUUID() as IdIntencaoPagamento;
+      const returnUrl = `${ctx.deps.publicOrigin}/pagina/${encodeURIComponent(input.slug)}/sucesso?sessionId={CHECKOUT_SESSION_ID}`;
+
+      // Mint one item-id per cart line, plus one more for the surcharge
+      // item when the visitor picked cartão. The saga enforces the
+      // "surcharge always last" invariant (Plan 0016 locked decision #18)
+      // — we just provide the ids in the same order: contribuição items
+      // first, surcharge id last when present.
+      const idsItensContribuicao: IdItemDoPagamento[] = input.itens.map(
+        () => randomUUID() as IdItemDoPagamento,
+      );
+      const idsItens: IdItemDoPagamento[] =
+        input.metodo === 'credit_card'
+          ? [...idsItensContribuicao, randomUUID() as IdItemDoPagamento]
+          : idsItensContribuicao;
+
+      try {
+        const result = await iniciarPagamentoCarrinho(
+          {
+            campanhaRepository: ctx.deps.campanhaRepository,
+            contribuicaoRepository: ctx.deps.contribuicaoRepository,
+            provedorRegraTaxa: ctx.deps.provedorRegraTaxa,
+            pagamentoRepository: ctx.deps.pagamentoRepository,
+            pagamentoEventPublisher: ctx.deps.pagamentoEventPublisher,
+            checkoutSessionProvider: ctx.deps.checkoutSessionProvider,
+            clock: ctx.deps.clock,
+            observability: ctx.deps.observability,
+          },
+          {
+            idPlataforma: ID_PLATAFORMA_EUNENEM,
+            idCampanha: campanha.id,
+            itens: input.itens.map((item) => ({
+              idContribuicao: item.idContribuicao as IdContribuicao,
+              quantidade: item.quantidade,
+            })),
+            metodo: input.metodo,
+            idPagamento,
+            idIntencaoPagamento,
+            idsItens,
+            returnUrl,
+            // Same inline-success policy as the single-shot procedure:
+            // browser-originated checkout uses redirect_on_completion =
+            // 'if_required' so Stripe fires onComplete inside the iframe
+            // for happy-path metodos (cartão + most PIX flows). The
+            // /sucesso page remains the fallback for bank-redirect flows
+            // + direct-URL visits + the legacy redirect path.
             redirectOnCompletion: 'if_required' as const,
           },
         );
@@ -347,9 +580,18 @@ export const paginaRouter = t.router({
 
       const sessao = await ctx.deps.checkoutSessionProvider.obterSessaoCheckout(input.sessionId);
 
-      const contribuicao = await ctx.deps.contribuicaoRepository.findById(
-        pagamento.intencao.idContribuicao as unknown as IdContribuicao,
+      // Plan 0016: visitor flow is single-item today (multi-item visitor
+      // cart is the separate 0017 follow-on). The cart has exactly one
+      // contribuição item; resolve its slot for gift-name display.
+      const primeiroItemContribuicao = pagamento.intencao.items.find(
+        (item): item is Extract<typeof item, { tipo: 'contribuicao' }> =>
+          item.tipo === 'contribuicao',
       );
+      const contribuicao = primeiroItemContribuicao
+        ? await ctx.deps.contribuicaoRepository.findById(
+            primeiroItemContribuicao.idContribuicao as unknown as IdContribuicao,
+          )
+        : undefined;
 
       let status: 'pending' | 'approved' | 'rejected' | 'unknown';
       if (pagamento.status === 'aprovado') {
@@ -371,7 +613,11 @@ export const paginaRouter = t.router({
 
       return {
         giftName: contribuicao?.nome ?? '',
-        valor: pagamento.intencao.amountCents,
+        // Plan 0016: total paid lives on the aggregate composição now.
+        // For a single-item visitor cart this equals the legacy
+        // intencao.amountCents (saga seeds it from the aggregate sum).
+        valor: pagamento.intencao.composicaoValoresAggregate
+          .totalPaidCents as unknown as number,
         recadinho:
           persistedContribuinte?.mensagem ?? sessao?.customFields.mensagem ?? null,
         babyName: usuario.nomeExibicao,

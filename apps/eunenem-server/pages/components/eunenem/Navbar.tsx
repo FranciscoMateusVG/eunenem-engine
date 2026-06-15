@@ -1,5 +1,7 @@
 
 import { useEffect, useRef, useState } from "react";
+import { CartButton } from "./CartButton";
+import { useCartDrawer } from "./CartDrawerContext.js";
 
 // aperture-3d9t — Navbar with scroll-aware blur backdrop.
 //
@@ -24,6 +26,7 @@ export function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const drawer = useCartDrawer();
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 16);
@@ -108,29 +111,35 @@ export function Navbar() {
           </span>
         </a>
 
-        {/* Desktop nav (sm+ only). Inline ul. */}
-        <nav aria-label="Seções da página" className="hidden sm:block">
-          <ul className="flex items-center gap-1 sm:gap-3 m-0 p-0 list-none">
-            {NAV_LINKS.map((link) => (
-              <li key={link.href}>
-                <a
-                  href={link.href}
-                  className="inline-flex px-3 py-2 rounded-full text-sm font-semibold text-ink-soft hover:text-lilac-deep hover:bg-lilac-soft/60 transition-colors"
-                >
-                  {link.label}
-                </a>
-              </li>
-            ))}
-          </ul>
-        </nav>
+        {/* Desktop nav (sm+ only). Inline ul + cart button. */}
+        <div className="hidden sm:flex items-center gap-3">
+          <nav aria-label="Seções da página">
+            <ul className="flex items-center gap-1 sm:gap-3 m-0 p-0 list-none">
+              {NAV_LINKS.map((link) => (
+                <li key={link.href}>
+                  <a
+                    href={link.href}
+                    className="inline-flex px-3 py-2 rounded-full text-sm font-semibold text-ink-soft hover:text-lilac-deep hover:bg-lilac-soft/60 transition-colors"
+                  >
+                    {link.label}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </nav>
+          <CartButton onOpen={drawer.open} />
+        </div>
 
-        {/* Mobile nav (below sm). Hamburger button toggles a dropdown
-            anchored below the header. Keeps the page within viewport
-            width at 375/390/430. */}
-        <div ref={dropdownRef} className="relative sm:hidden">
-          <button
-            type="button"
-            aria-label={mobileOpen ? "Fechar menu" : "Abrir menu"}
+        {/* Mobile nav (below sm). Hamburger toggles a dropdown, with the
+            cart button sitting beside it so the visitor can reach the
+            drawer without first opening the menu. Keeps the page within
+            viewport width at 375/390/430. */}
+        <div className="flex items-center gap-2 sm:hidden">
+          <CartButton onOpen={drawer.open} />
+          <div ref={dropdownRef} className="relative">
+            <button
+              type="button"
+              aria-label={mobileOpen ? "Fechar menu" : "Abrir menu"}
             aria-expanded={mobileOpen}
             aria-controls="mobile-nav"
             onClick={(e) => {
@@ -228,6 +237,7 @@ export function Navbar() {
               </ul>
             </nav>
           )}
+          </div>
         </div>
       </div>
     </header>

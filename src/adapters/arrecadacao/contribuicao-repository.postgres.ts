@@ -30,6 +30,11 @@ type ContribuicaoRow = {
   valor: number;
   imagem_url: string | null;
   grupo: string | null;
+  /**
+   * Plan 0016 (aperture-aj8qw / migration 022): cardinality of the slot,
+   * positive integer, DB-side CHECK constraint enforces `>= 1`. DEFAULT 1.
+   */
+  quantidade: number;
   criada_em: Date;
 };
 
@@ -50,6 +55,7 @@ export class ContribuicaoRepositoryPostgres implements ContribuicaoRepository {
             valor: contribuicao.valor,
             imagem_url: contribuicao.imagemUrl,
             grupo: contribuicao.grupo,
+            quantidade: contribuicao.quantidade,
             criada_em: contribuicao.criadaEm,
           })
           .onConflict((oc) =>
@@ -58,6 +64,7 @@ export class ContribuicaoRepositoryPostgres implements ContribuicaoRepository {
               valor: contribuicao.valor,
               imagem_url: contribuicao.imagemUrl,
               grupo: contribuicao.grupo,
+              quantidade: contribuicao.quantidade,
             }),
           )
           .execute();
@@ -110,6 +117,7 @@ export class ContribuicaoRepositoryPostgres implements ContribuicaoRepository {
               valor: c.valor,
               imagem_url: c.imagemUrl,
               grupo: c.grupo,
+              quantidade: c.quantidade,
               criada_em: c.criadaEm,
             })),
           )
@@ -240,6 +248,10 @@ function toContribuicao(row: ContribuicaoRow): Contribuicao {
     valor: row.valor,
     imagemUrl: row.imagem_url,
     grupo: row.grupo,
+    // Plan 0016 (aperture-aj8qw): quantidade lifts cardinality onto
+    // the slot. DEFAULT 1 in migration 022 means pre-0016 rows surface
+    // as quantidade=1 (the workaround the field eliminates).
+    quantidade: row.quantidade,
     criadaEm: row.criada_em,
   };
 }

@@ -112,29 +112,38 @@ export async function finalizarPagamentoRejeitado(
         );
       }
 
-      // step 2: cross-BC context — Contribuicao → Campanha → idPlataforma
-      // (logging-only — no state changes anywhere downstream)
-      const idContribuicao = rejeitado.intencao.idContribuicao;
-      const contribuicao = await contribuicaoRepository.findById(idContribuicao);
+      // step 2: cross-BC context — Plan 0016 Phase 2 (aperture-eg1s2):
+      // logging-only — no state changes anywhere downstream. Anchor
+      // contribuição from the first contribuicao item; campanha from
+      // the cart-scope idCampanha.
+      const anchorItem = rejeitado.intencao.items.find((it) => it.tipo === 'contribuicao');
+      if (!anchorItem || anchorItem.tipo !== 'contribuicao') {
+        throw new Error(
+          `Pagamento ${rejeitado.id} has no contribuicao item — invalid cart shape.`,
+        );
+      }
+      const idContribuicaoAnchor = anchorItem.idContribuicao;
+      const contribuicao = await contribuicaoRepository.findById(idContribuicaoAnchor);
       if (!contribuicao) {
-        throw new ArrecadacaoContribuicaoNaoEncontradaError(idContribuicao);
+        throw new ArrecadacaoContribuicaoNaoEncontradaError(idContribuicaoAnchor);
       }
-
-      const campanha = await campanhaRepository.findById(contribuicao.idCampanha);
+      const campanha = await campanhaRepository.findById(rejeitado.intencao.idCampanha);
       if (!campanha) {
-        throw new ArrecadacaoCampanhaNaoEncontradaError(contribuicao.idCampanha);
+        throw new ArrecadacaoCampanhaNaoEncontradaError(rejeitado.intencao.idCampanha);
       }
 
-      span.setAttribute('checkout.contribuicao.id', idContribuicao);
+      span.setAttribute('checkout.contribuicao.anchor.id', idContribuicaoAnchor);
       span.setAttribute('checkout.campanha.id', campanha.id);
       span.setAttribute('checkout.plataforma.id', campanha.idPlataforma);
+      span.setAttribute('checkout.cart.itens_count', rejeitado.intencao.items.length);
 
       logger.info('checkout.pagamento.rejeitado_finalizado', {
         idPlataforma: campanha.idPlataforma,
         idCampanha: campanha.id,
-        idContribuicao,
+        idContribuicaoAnchor,
         idPagamento: rejeitado.id,
-        amountCents: rejeitado.intencao.amountCents,
+        numeroDeItens: rejeitado.intencao.items.length,
+        amountCents: rejeitado.intencao.composicaoValoresAggregate.totalPaidCents,
       });
 
       span.setStatus({ code: SpanStatusCode.OK });

@@ -171,6 +171,21 @@ export interface UsuarioRepository {
   ): Promise<void>;
 
   /**
+   * Plan 0018 Phase A (aperture-omswg). Sets `tutorial_completado_em`
+   * if and only if it is currently NULL — first-write-wins, idempotent
+   * at the SQL layer (`UPDATE ... WHERE tutorial_completado_em IS NULL`).
+   * Returns no value; callers re-read via `findUsuarioById` when they
+   * need the persisted timestamp.
+   *
+   * Unknown `idUsuario` is a silent no-op (mirrors
+   * `atualizarNomeExibicaoUsuario`). Already-completed usuarios are
+   * also a no-op (the predicate filter matches zero rows). The
+   * use-case wrapper `marcarTutorialUsuarioComoCompletado` reads
+   * before-and-after to surface a meaningful response shape.
+   */
+  marcarTutorialCompletado(idUsuario: IdUsuario, completadoEm: Date): Promise<void>;
+
+  /**
    * Removes the domain Usuario aggregate (Usuario root + Conta inner entity).
    * Used by the `registrarContaUsuario` saga as a T3 compensation when a
    * downstream step (e.g. campanha creation) fails after `saveRegistroDomain`

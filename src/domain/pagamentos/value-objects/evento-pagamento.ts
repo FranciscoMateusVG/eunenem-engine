@@ -1,4 +1,5 @@
 import { z } from 'zod/v4';
+import { IdCampanhaSchema } from '../../arrecadacao/value-objects/ids.js';
 import { MoneyCentsSchema } from '../../money.js';
 import {
   IdContribuicaoPagamentoSchema,
@@ -17,6 +18,21 @@ import {
  *
  * `StatusPagamentoSchema` is referenced here but defined on the entity file
  * (status is intrinsic to the Pagamento aggregate's state machine).
+ *
+ * **Plan 0016 multi-item (aperture-aj8qw).** Per operator review lock #19,
+ * the event shape changes:
+ *   - DROP `idContribuicao` (the IntencaoPagamento no longer carries one
+ *     at root — items do).
+ *   - ADD `idCampanha` (single, hoisted from items — cart-scope
+ *     invariant).
+ *   - ADD `numeroDeItens` (count of items in the cart, top-level integer
+ *     for cheap log-grep summaries).
+ *   - ADD `idsContribuicoes` (array of contribuição ids the cart touched
+ *     — surcharge items contribute nothing here; an empty surcharge-only
+ *     cart cannot exist per locked decision #7, so the array is always
+ *     non-empty).
+ *   - `amountCents` stays — semantically still "what the buyer paid"
+ *     (now sourced from `composicaoValoresAggregate.totalPaidCents`).
  */
 
 export const NomeProvedorPagamentoSchema = z.string().trim().min(1).max(120);
@@ -38,7 +54,12 @@ export const EventoPagamentoSchema = z.object({
   tipo: TipoEventoPagamentoSchema,
   idPagamento: IdPagamentoSchema,
   idIntencaoPagamento: IdIntencaoPagamentoSchema,
-  idContribuicao: IdContribuicaoPagamentoSchema,
+  // Plan 0016 (aperture-aj8qw) per operator review lock #19:
+  // idContribuicao removed; idCampanha + numeroDeItens + idsContribuicoes
+  // replace it. amountCents kept as the cart's totalPaidCents.
+  idCampanha: IdCampanhaSchema,
+  numeroDeItens: z.number().int().positive(),
+  idsContribuicoes: z.array(IdContribuicaoPagamentoSchema).min(1),
   amountCents: MoneyCentsSchema,
   status: StatusPagamentoSchemaLocal,
   idTransacaoExterna: IdTransacaoExternaSchema.optional(),

@@ -25,9 +25,15 @@ import { ArrecadacaoOpcaoContribuicaoNaoEncontradaError } from '../../errors/arr
 import type { Observability } from '../../observability/observability.js';
 
 /**
- * Item de catálogo expandido em N contribuições (qty cópias do mesmo shape).
+ * Item de catálogo persisted como UMA contribuição com `quantidade=N`.
  * O caller (tRPC `contribuicao.createBulk`) já resolveu `idCampanha` +
- * `idOpcaoContribuicao` da sessão — itens só carregam o shape + qty.
+ * `idOpcaoContribuicao` da sessão — itens só carregam o shape + quantidade.
+ *
+ * Plan 0016 (aperture-putz5 / aperture-1l37i): pre-0016, "qty: 8 fraldas"
+ * expandia em 8 linhas de quantidade=1 (o workaround do modelo single-unit).
+ * Pós-0016, "quantidade: 8 fraldas" é UMA linha — locked decision #1.
+ * O cap `LIMITE_CONTRIBUICOES_POR_OPCAO` agora é sobre número de slots
+ * distintos por opção, não sobre soma de unidades.
  */
 export const ItemLoteSchema = z.object({
   nome: NomeContribuicaoSchema,
@@ -36,7 +42,11 @@ export const ItemLoteSchema = z.object({
   // on imagemUrl shape; consumers enforce format at their API edge.
   imagemUrl: z.string().trim().min(1).max(500).nullable().optional(),
   grupo: z.string().trim().min(1).max(60).nullable().optional(),
-  qty: z.number().int().min(1).max(100),
+  /**
+   * Slot capacity for this contribuição. Defaults to 1 if omitted (single
+   * unit, e.g. "kit chá de bebê" presets where each item is qty=1).
+   */
+  quantidade: z.number().int().min(1).max(100).optional(),
 });
 
 export type ItemLote = z.infer<typeof ItemLoteSchema>;
@@ -61,16 +71,20 @@ export interface CriarContribuicoesEmLoteResult {
 }
 
 /**
- * Cria N contribuições em UM único INSERT (aperture-d6atj fix-up).
+ * Cria N slots de contribuição em UM único INSERT (aperture-d6atj fix-up;
+ * Plan 0016 aperture-putz5 single-row + quantidade migration).
  *
- * Operator clarification post-shape-review: "Pacote de Fraldas RN qty=8" ou
- * "kit chá de bebê" (10 items × qty) precisam virar UMA query SQL, não 8 ou
- * 30 round-trips. Este use-case expande `items × qty` → N contribuições com
- * UUIDs frescos e chama `saveBulk` uma única vez.
+ * Operator clarification post-shape-review: "Pacote de Fraldas RN
+ * quantidade=8" ou "kit chá de bebê" (10 items, each quantidade=1) precisam
+ * virar UMA query SQL, não 8 ou 10 round-trips. Pós-0016 cada item produz
+ * UMA linha com `quantidade=N` (não N linhas com `quantidade=1`); o use-case
+ * faz `items.length` linhas e chama `saveBulk` uma única vez.
  *
  * Invariantes preservadas:
- *   - Cap `LIMITE_CONTRIBUICOES_POR_OPCAO` é verificado contra o total
- *     PÓS-inserção (count atual + N). Se estourar, nenhuma linha persiste.
+ *   - Cap `LIMITE_CONTRIBUICOES_POR_OPCAO` é sobre número de slots
+ *     distintos por opção (rows), não soma de unidades. Verificado contra
+ *     o total PÓS-inserção (count atual + items.length). Se estourar,
+ *     nenhuma linha persiste.
  *   - Mesma validação de campanha + opção que `criarContribuicao` (single).
  *   - `saveBulk` é atomic — se uma linha falha (FK, unique), nenhuma
  *     persiste.
@@ -97,11 +111,14 @@ export async function criarContribuicoesEmLote(
 
       const { idCampanha, idOpcaoContribuicao, items } = parsed.data;
 
-      const totalContribuicoes = items.reduce((sum, item) => sum + item.qty, 0);
+      // Plan 0016 (aperture-putz5): one row per item with `quantidade=N`.
+      // The cap below counts rows in the opção, not units across rows.
+      const totalSlots = items.length;
+      const totalUnidades = items.reduce((sum, item) => sum + (item.quantidade ?? 1), 0);
 
       span.setAttribute('arrecadacao.campanha.id', idCampanha);
-      span.setAttribute('arrecadacao.contribuicoes.items_count', items.length);
-      span.setAttribute('arrecadacao.contribuicoes.bulk_size', totalContribuicoes);
+      span.setAttribute('arrecadacao.contribuicoes.items_count', totalSlots);
+      span.setAttribute('arrecadacao.contribuicoes.total_unidades', totalUnidades);
 
       const campanha = await campanhaRepository.findById(idCampanha as IdCampanha);
       if (!campanha) {
@@ -123,12 +140,12 @@ export async function criarContribuicoesEmLote(
         idCampanha as IdCampanha,
         idOpcaoContribuicao as IdOpcaoContribuicao,
       );
-      if (totalAtual + totalContribuicoes > LIMITE_CONTRIBUICOES_POR_OPCAO) {
+      if (totalAtual + totalSlots > LIMITE_CONTRIBUICOES_POR_OPCAO) {
         throw new ArrecadacaoLimiteOpcaoExcedidoError(
           idCampanha as IdCampanha,
           idOpcaoContribuicao as IdOpcaoContribuicao,
           LIMITE_CONTRIBUICOES_POR_OPCAO,
-          totalAtual + totalContribuicoes,
+          totalAtual + totalSlots,
         );
       }
 
@@ -136,23 +153,25 @@ export async function criarContribuicoesEmLote(
       const contribuicoes: Contribuicao[] = [];
       const ids: IdContribuicao[] = [];
 
+      // Plan 0016 (aperture-putz5): one row per item, quantidade=N.
+      // Pre-0016 looped `for (let i=0; i<item.qty; i++)` emitting N
+      // identical rows; locked decision #1 retires that pattern.
       for (const item of items) {
-        for (let i = 0; i < item.qty; i++) {
-          const id = randomUUID() as IdContribuicao;
-          ids.push(id);
-          contribuicoes.push(
-            criarContribuicaoEntity({
-              id,
-              idCampanha: idCampanha as IdCampanha,
-              idOpcaoContribuicao: idOpcaoContribuicao as IdOpcaoContribuicao,
-              nome: item.nome,
-              valor: item.valor,
-              imagemUrl: item.imagemUrl ?? null,
-              grupo: item.grupo ?? null,
-              criadaEm,
-            }),
-          );
-        }
+        const id = randomUUID() as IdContribuicao;
+        ids.push(id);
+        contribuicoes.push(
+          criarContribuicaoEntity({
+            id,
+            idCampanha: idCampanha as IdCampanha,
+            idOpcaoContribuicao: idOpcaoContribuicao as IdOpcaoContribuicao,
+            nome: item.nome,
+            valor: item.valor,
+            imagemUrl: item.imagemUrl ?? null,
+            grupo: item.grupo ?? null,
+            quantidade: item.quantidade ?? 1,
+            criadaEm,
+          }),
+        );
       }
 
       await contribuicaoRepository.saveBulk(contribuicoes);
@@ -160,8 +179,8 @@ export async function criarContribuicoesEmLote(
       logger.info('arrecadacao.contribuicoes.lote_criado', {
         idCampanha,
         idOpcaoContribuicao,
-        itemsCount: items.length,
-        bulkSize: totalContribuicoes,
+        itemsCount: totalSlots,
+        totalUnidades,
       });
 
       span.setStatus({ code: SpanStatusCode.OK });

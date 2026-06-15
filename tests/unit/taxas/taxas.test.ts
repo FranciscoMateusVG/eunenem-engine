@@ -10,7 +10,7 @@ import {
   type TarifaTipo,
   TarifaTipoSchema,
 } from '../../../src/domain/taxas/value-objects/tarifa-tipo.js';
-import { CalcularComposicaoValoresInputSchema } from '../../../src/use-cases/taxas/calcular-composicao-valores.js';
+import { CalcularComposicaoValoresParaItemInputSchema } from '../../../src/use-cases/taxas/calcular-composicao-valores-para-item.js';
 
 const idContribuicao = '550e8400-e29b-41d4-a716-446655440020';
 
@@ -68,38 +68,63 @@ describe('criarRegraTaxa + obterTarifaPorTipo', () => {
   });
 });
 
-describe('CalcularComposicaoValoresInputSchema', () => {
+describe('CalcularComposicaoValoresParaItemInputSchema', () => {
+  // Plan 0016 Phase 2 (aperture-eg1s2): per-item input schema. The
+  // pre-0016 root-level `contributionAmountCents` is now per-unit
+  // (`contributionUnitAmountCents`) and the input requires `quantidade`
+  // (positive integer).
   const validInput = {
     idPlataforma: ID_PLATAFORMA_EUNENEM,
     idContribuicao,
     tipo: 'presente' as const,
-    contributionAmountCents: 8000,
+    contributionUnitAmountCents: 8000,
+    quantidade: 1,
   };
 
   it('accepts a complete input', () => {
-    expect(CalcularComposicaoValoresInputSchema.safeParse(validInput).success).toBe(true);
+    expect(CalcularComposicaoValoresParaItemInputSchema.safeParse(validInput).success).toBe(true);
   });
 
-  it('rejects zero, negative and non-integer contribution amounts', () => {
+  it('rejects zero, negative and non-integer unit contribution amounts', () => {
     expect(
-      CalcularComposicaoValoresInputSchema.safeParse({ ...validInput, contributionAmountCents: 0 })
-        .success,
-    ).toBe(false);
-    expect(
-      CalcularComposicaoValoresInputSchema.safeParse({ ...validInput, contributionAmountCents: -1 })
-        .success,
-    ).toBe(false);
-    expect(
-      CalcularComposicaoValoresInputSchema.safeParse({
+      CalcularComposicaoValoresParaItemInputSchema.safeParse({
         ...validInput,
-        contributionAmountCents: 10.5,
+        contributionUnitAmountCents: 0,
       }).success,
+    ).toBe(false);
+    expect(
+      CalcularComposicaoValoresParaItemInputSchema.safeParse({
+        ...validInput,
+        contributionUnitAmountCents: -1,
+      }).success,
+    ).toBe(false);
+    expect(
+      CalcularComposicaoValoresParaItemInputSchema.safeParse({
+        ...validInput,
+        contributionUnitAmountCents: 10.5,
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects zero, negative and non-integer quantidade', () => {
+    expect(
+      CalcularComposicaoValoresParaItemInputSchema.safeParse({ ...validInput, quantidade: 0 })
+        .success,
+    ).toBe(false);
+    expect(
+      CalcularComposicaoValoresParaItemInputSchema.safeParse({ ...validInput, quantidade: -1 })
+        .success,
+    ).toBe(false);
+    expect(
+      CalcularComposicaoValoresParaItemInputSchema.safeParse({ ...validInput, quantidade: 1.5 })
+        .success,
     ).toBe(false);
   });
 
   it('rejects an unknown tipo', () => {
     expect(
-      CalcularComposicaoValoresInputSchema.safeParse({ ...validInput, tipo: 'mystery' }).success,
+      CalcularComposicaoValoresParaItemInputSchema.safeParse({ ...validInput, tipo: 'mystery' })
+        .success,
     ).toBe(false);
   });
 });

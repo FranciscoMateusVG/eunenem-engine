@@ -65,7 +65,7 @@ export async function rejeitarPagamento(
       const transacao = await pagamentoProvider.solicitarPagamento({
         idPagamento: pagamento.id,
         idIntencaoPagamento: pagamento.intencao.id,
-        amountCents: pagamento.intencao.amountCents,
+        amountCents: pagamento.intencao.composicaoValoresAggregate.totalPaidCents,
         metodo: pagamento.intencao.metodo,
         externalRef: pagamento.intencao.externalRef,
       });
@@ -78,9 +78,9 @@ export async function rejeitarPagamento(
         );
       }
 
-      if (transacao.amountCents !== pagamento.intencao.amountCents) {
+      if (transacao.amountCents !== pagamento.intencao.composicaoValoresAggregate.totalPaidCents) {
         throw new PagamentoValorDivergenteError(
-          pagamento.intencao.amountCents,
+          pagamento.intencao.composicaoValoresAggregate.totalPaidCents,
           transacao.amountCents,
         );
       }
@@ -100,8 +100,9 @@ export async function rejeitarPagamento(
       logger.info('pagamento.rejeitado', {
         idPagamento: rejeitado.id,
         idIntencaoPagamento: rejeitado.intencao.id,
-        idContribuicao: rejeitado.intencao.idContribuicao,
-        amountCents: rejeitado.intencao.amountCents,
+        idCampanha: rejeitado.intencao.idCampanha,
+        numeroDeItens: rejeitado.intencao.items.length,
+        amountCents: rejeitado.intencao.composicaoValoresAggregate.totalPaidCents,
         idTransacaoExterna: transacao.id,
       });
 

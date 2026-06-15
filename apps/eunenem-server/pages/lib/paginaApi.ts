@@ -28,10 +28,26 @@ type PaginaOutputs = inferRouterOutputs<PaginaRouter>;
 export type PaginaContribuicao =
   PaginaOutputs["obterListaPresentes"][number];
 
+/**
+ * Visitor-safe mural recado (aperture-7eci9). One row per aprovado
+ * pagamento whose contribuinte left a mensagem at Stripe checkout.
+ * Projection: opaque pagamento id, the nome typed at checkout, the
+ * mensagem body, and the criadoEm timestamp. No PII beyond the nome
+ * the contribuinte themselves chose to display.
+ */
+export type PaginaMuralRecado = PaginaOutputs["obterMural"][number];
+
 export type IniciarPagamentoInput = PaginaInputs["iniciarPagamentoContribuicao"];
 
 export type IniciarPagamentoResult =
   PaginaOutputs["iniciarPagamentoContribuicao"];
+
+/** Plan 0017 — multi-item cart checkout input/output (aperture-16flf). */
+export type IniciarPagamentoCarrinhoInput =
+  PaginaInputs["iniciarPagamentoCarrinho"];
+
+export type IniciarPagamentoCarrinhoResult =
+  PaginaOutputs["iniciarPagamentoCarrinho"];
 
 export type ObterSucessoResult = PaginaOutputs["obterSucessoPagamento"];
 
@@ -54,11 +70,37 @@ export function usePaginaListaPresentes(slug: string) {
 }
 
 /**
+ * Visitor read of the public mural — aprovado pagamentos with a
+ * non-empty mensagem, ordered newest-first. aperture-7eci9.
+ *
+ * Same 30s staleTime as the gift list so the mural stays roughly
+ * fresh without thrashing on every render. Webhook-driven new recados
+ * arrive within one staleness window without manual invalidation; a
+ * future tick can wire an invalidation hook if real-time freshness
+ * becomes necessary.
+ */
+export function usePaginaMural(slug: string) {
+  return trpc.pagina.obterMural.useQuery(
+    { slug },
+    { staleTime: 30_000 },
+  );
+}
+
+/**
  * Visitor initiates payment — server creates a Stripe embedded checkout
  * session, returns { sessionId, clientSecret }.
  */
 export function useIniciarPagamentoContribuicao() {
   return trpc.pagina.iniciarPagamentoContribuicao.useMutation();
+}
+
+/**
+ * Plan 0017 / aperture-16flf — multi-item cart checkout. Same
+ * `{sessionId, clientSecret}` response shape as the single-shot mutation
+ * so the embedded Stripe checkout mounts identically downstream.
+ */
+export function useIniciarPagamentoCarrinho() {
+  return trpc.pagina.iniciarPagamentoCarrinho.useMutation();
 }
 
 /**

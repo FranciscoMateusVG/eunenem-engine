@@ -1533,12 +1533,29 @@ h4 {
     margin-top: 28px;
   }
   .painel-menu-grid {
-    /* Same `minmax(0, 1fr)` reasoning as the mobile single-col grid —
-     * prevents the widest row label from forcing a column past its
-     * fair share of the parent. */
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    /* aperture-lwkwx — per-column flex (replaces aperture-cihww's grid-
+     * row placement). The grid approach couldn't avoid sizing row 1 by
+     * the tallest left-col group (SEU EVENTO @ 4 rows), which left
+     * CONVIDADOS short and stranded CONTA in row 2 with a dead-space
+     * gap. Two flex-column children, each stacks its groups flush.
+     *
+     * `align-items: flex-start` so the right column doesn't try to
+     * match the left column's height — each lane is its own world. */
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
     gap: 28px;
-    align-items: start;
+    grid-template-columns: unset;
+  }
+  .painel-menu-col {
+    /* Each column owns its own stacking. `minmax(0, 1fr)` semantics
+     * preserved via `min-width: 0` + `flex: 1` — prevents row labels
+     * from forcing the column past its fair share. */
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
   }
   .painel-group:first-child .painel-group-title {
     margin-top: 0;
@@ -5563,5 +5580,348 @@ html {
   }
   .hero-polaroid {
     max-width: 320px;
+  }
+}
+
+/* Plan 0017 / aperture-16flf — cart-button entry pop. Triggered when the
+   button mounts (first item added to the cart) for a soft welcoming
+   gesture. Forwards-fill so the button stays at its rest scale + opacity
+   once the animation completes. */
+@keyframes cartPop {
+  0% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.anim-cart-pop {
+  animation: cartPop 0.28s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+/* =================================================================
+ * aperture-7nius — Painel tutorial overlay (plan 0018 Phase B).
+ *
+ * Layered model (z-axis):
+ *   1. .painel-tutorial-backdrop   — full-screen dim
+ *   2. .painel-tutorial-spotlight  — ring around the target (the dim is
+ *                                    actually painted as a huge outward
+ *                                    box-shadow on this element, which
+ *                                    cuts a "window" into the dim by
+ *                                    sitting precisely over the target)
+ *   3. .painel-tutorial-popover    — popover card
+ *   4. .painel-tutorial-encerrar   — top-right ENCERRAR TUTORIAL chip
+ *
+ * The spotlight cutout trick: instead of an SVG mask, we render a
+ * transparent div over the target rect with `box-shadow: 0 0 0 9999px`
+ * in the dim colour. That single shadow paints the entire dim layer
+ * AROUND the rect — the rect itself stays a clean window. The
+ * .painel-tutorial-backdrop layer below ensures the dim is uniform even
+ * when there's no ring (target missing fallback).
+ *
+ * z-index lives at 100 (above the topbar's 30, above the .painel-app
+ * shell).
+ * ================================================================= */
+
+.painel-tutorial-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  pointer-events: none; /* children opt back in */
+}
+
+.painel-tutorial-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(28, 24, 32, 0.56);
+  pointer-events: auto;
+  animation: tutorialFadeIn 0.18s ease-out both;
+}
+
+.painel-tutorial-spotlight {
+  position: absolute;
+  border-radius: 18px;
+  /* The ring outline + outward shadow form the "cutout" effect. The
+   * 9999px shadow paints dim around the rect; the ring itself is
+   * transparent so the underlying target stays clickable visually
+   * (clicks still swallowed by the backdrop). The inset shadow gives
+   * the highlight ring. */
+  box-shadow:
+    0 0 0 9999px rgba(28, 24, 32, 0.56),
+    0 0 0 2px var(--plum),
+    0 0 0 6px color-mix(in srgb, var(--plum) 30%, transparent);
+  pointer-events: none;
+  animation: tutorialSpotlightIn 0.22s ease-out both;
+  transition:
+    top 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+    left 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+    width 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+    height 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* When the spotlight is present it owns the dim (via the 9999px shadow),
+ * so we hide the redundant backdrop layer. The selector targets
+ * "overlay HAS a spotlight" via :has() — falls back to two dim layers
+ * stacked (visually identical) where :has() isn't supported. */
+.painel-tutorial-overlay:has(.painel-tutorial-spotlight) .painel-tutorial-backdrop {
+  background: transparent;
+}
+
+.painel-tutorial-encerrar {
+  position: absolute;
+  top: calc(env(safe-area-inset-top) + 16px);
+  right: 18px;
+  background: var(--paper);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  pointer-events: auto;
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.2s ease, background 0.2s ease;
+}
+.painel-tutorial-encerrar:hover {
+  background: color-mix(in srgb, var(--lilac-soft) 40%, var(--paper));
+  transform: translateY(-1px);
+}
+
+.painel-tutorial-popover {
+  position: absolute;
+  background: var(--paper);
+  border-radius: 22px;
+  padding: 22px 22px 18px;
+  box-shadow:
+    0 24px 48px -16px rgba(28, 24, 32, 0.4),
+    0 6px 14px -6px rgba(28, 24, 32, 0.18);
+  pointer-events: auto;
+  animation: tutorialPopoverIn 0.22s cubic-bezier(0.4, 0, 0.2, 1) both;
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  color: var(--ink);
+}
+
+.painel-tutorial-popover-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.painel-tutorial-passo {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--plum);
+  background: var(--lilac-soft);
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+
+.painel-tutorial-titulo {
+  margin: 0 0 8px;
+  font-family: var(--font-fraunces, var(--font-dm-sans)), serif;
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--ink);
+  text-transform: lowercase;
+}
+
+.painel-tutorial-descricao {
+  margin: 0 0 18px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+
+.painel-tutorial-dots {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+.painel-tutorial-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--ink-soft) 30%, transparent);
+  transition: background 0.2s ease, width 0.2s ease;
+}
+.painel-tutorial-dot.is-active {
+  background: var(--plum);
+  width: 18px;
+  border-radius: 999px;
+}
+
+.painel-tutorial-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.painel-tutorial-back {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: background 0.2s ease, opacity 0.2s ease, transform 0.2s ease;
+  padding: 0;
+}
+.painel-tutorial-back:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--lilac-soft) 50%, var(--paper));
+  transform: translateX(-1px);
+}
+.painel-tutorial-back:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.painel-tutorial-next {
+  flex: 1;
+  height: 44px;
+  border-radius: 999px;
+  background: var(--plum);
+  color: var(--paper);
+  border: none;
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: var(--shadow-sm);
+}
+.painel-tutorial-next:hover {
+  background: color-mix(in srgb, var(--plum) 88%, black);
+  transform: translateY(-1px);
+}
+
+/* Floating bottom-right TUTORIAL re-trigger CTA. Visible whenever the
+ * overlay itself isn't open. */
+.painel-tutorial-trigger {
+  position: fixed;
+  bottom: calc(env(safe-area-inset-bottom) + 18px);
+  right: 18px;
+  z-index: 25; /* below the overlay, above page content */
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 18px;
+  background: var(--plum);
+  color: var(--paper);
+  border: none;
+  border-radius: 999px;
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  box-shadow:
+    0 12px 28px -8px rgba(99, 56, 121, 0.5),
+    0 4px 10px -4px rgba(28, 24, 32, 0.15);
+  transition: transform 0.2s ease, background 0.2s ease;
+}
+.painel-tutorial-trigger:hover {
+  background: color-mix(in srgb, var(--plum) 88%, black);
+  transform: translateY(-2px);
+}
+
+/* Mobile: smaller chip, hugs the safe area. */
+@media (max-width: 640px) {
+  .painel-tutorial-trigger {
+    padding: 10px 14px;
+    font-size: 11px;
+    right: 14px;
+    bottom: calc(env(safe-area-inset-bottom) + 14px);
+  }
+  .painel-tutorial-encerrar {
+    font-size: 11px;
+    padding: 6px 12px;
+    right: 12px;
+    top: calc(env(safe-area-inset-top) + 12px);
+  }
+  .painel-tutorial-popover {
+    padding: 18px 18px 14px;
+    border-radius: 18px;
+  }
+  .painel-tutorial-titulo {
+    font-size: 19px;
+  }
+}
+
+/* Button rendered as a topbar nav link (TUTORIAL chip). Resets default
+ * <button> chrome so it matches the <a> siblings. */
+.painel-topbar a.painel-topbar-link.painel-topbar-link-btn,
+button.painel-topbar-link {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  display: inline-block;
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 8px 14px;
+  border-radius: 999px;
+  white-space: nowrap;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+button.painel-topbar-link:hover {
+  background: color-mix(in srgb, var(--lilac-soft) 55%, transparent);
+  color: var(--plum);
+}
+
+/* Anchor-jump scroll-margin so the AJUDA chip's `#painel-group-conta`
+ * jump lands BELOW the sticky topbar (which is ~64px). */
+.painel-group[id] {
+  scroll-margin-top: 88px;
+}
+
+@keyframes tutorialFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes tutorialSpotlightIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes tutorialPopoverIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }

@@ -1,24 +1,39 @@
 import { AdminShell } from "@/components/eunenem/admin/AdminShell";
+import { CampanhaPagamentosList } from "@/components/eunenem/admin/CampanhaPagamentosList";
 import { ContribuicoesList } from "@/components/eunenem/admin/ContribuicoesList";
 import { DddBadge } from "@/components/eunenem/admin/DddBadge";
 import { trpc } from "@/lib/trpc.js";
+import { useState } from "react";
 
 /**
- * /admin/campanha/:idCampanha — campanha detail page (aperture-rsidz.3, W2).
+ * /admin/campanha/:idCampanha — campanha detail page (aperture-rsidz.3, W2,
+ * reshaped Plan 0017 / aperture-gf2t5).
  *
- * Reached from the CampanhasTabs rows on /admin/usuario/:idConta. Layout
- * follows the W1 pattern: AdminShell with `activeBc="arrecadacao"`,
- * breadcrumb back to /admin, BC strap context shows the campanha id.
- * Body is the campanha header (badge + titulo H1 + meta row) + a facts
- * grid + a placeholder contribuicoes drill section. W2 owns the seam +
- * embed point; W3 (aperture-rsidz.4) file-swaps the placeholder body
- * with the real ContribuicoesList without touching this page.
+ * PAGAMENTO-FIRST RESHAPE (gf2t5):
+ *   The page used to lead with the Contribuições list (slot catalog), which
+ *   inverted the new domain ontology: post-Plan-0016 a Contribuição is a
+ *   slot DEFINITION (admin-owned catalog), and a Pagamento is the
+ *   transaction aggregate root. Operator's pain: clicking a contribuição
+ *   row drilled into ONE slot's pagamentos (typically one), losing the
+ *   aggregate "5 of 6 sold to different people" context. Reshape:
  *
- * SSR-time status: the server.tsx catch-all leaves status=200 because
- * the URL is structurally valid; React renders loading → not-found /
- * loaded states off the tRPC hook. Unknown idCampanha → tenant-guarded
- * null → 404-styled body, HTTP stays 200 (matches the /admin/usuario
- * pattern).
+ *     1. PAGAMENTOS — primary section. Lists every pagamento against this
+ *        campanha (across all contribuições), with status + total +
+ *        contribuinte + criado em + item count. Click → /admin/pagamento/:id.
+ *
+ *     2. CATÁLOGO (Contribuições) — secondary section, framed as the slot
+ *        catalog. Still reachable via the same grouped-card affordance —
+ *        clicking a row drills into /admin/contribuicao/:id (which itself
+ *        is reframed to surface aggregate item-rows across pagamentos, see
+ *        AdminContribuicaoPage).
+ *
+ *   The BC shifts: previously `activeBc="arrecadacao"` (emerald — Catálogo's
+ *   identity), now `activeBc={null}` because the page touches BOTH
+ *   Pagamentos (amber) AND Arrecadação (emerald) — let the per-section
+ *   DddBadges carry the BC identity instead.
+ *
+ * SSR-time status unchanged: 200 for structurally-valid URLs; the page
+ * body renders loading → not-found / loaded off the tRPC hook.
  */
 export function AdminCampanhaPage({ idCampanha }: { idCampanha: string }) {
   const { data, isLoading, error } = trpc.admin.campanhas.findById.useQuery({
@@ -29,7 +44,7 @@ export function AdminCampanhaPage({ idCampanha }: { idCampanha: string }) {
 
   return (
     <AdminShell
-      activeBc="arrecadacao"
+      activeBc={null}
       breadcrumb={[
         { label: "admin", href: "/admin" },
         { label: "campanha" },
@@ -50,7 +65,12 @@ export function AdminCampanhaPage({ idCampanha }: { idCampanha: string }) {
         <section className="space-y-10">
           <CampanhaHeader campanha={data} />
           <FactsGrid campanha={data} idCampanha={idCampanha} />
-          <ContribuicoesSection idCampanha={idCampanha} />
+          {/* PRIMARY — Pagamentos. The transaction aggregate root, where the
+              "who paid me what?" question lives. New under Plan 0017. */}
+          <PagamentosSection idCampanha={idCampanha} />
+          {/* SECONDARY — Catálogo (contribuições as slot definitions).
+              Collapsed by default; still expandable for slot management. */}
+          <CatalogoSection idCampanha={idCampanha} />
           <RawRecord campanha={data} idCampanha={idCampanha} />
         </section>
       )}
@@ -205,29 +225,72 @@ function FactsGrid({
 }
 
 /**
- * Contribuições drill embedded in the campanha detail page (aperture-rsidz.4,
- * W3). W2 shipped the seam (the section shell + data-bc wrapper + heading);
- * W3 fills the body with the real ContribuicoesList — a filterable list of
- * every contribuicao for this campanha, with status/opção/período chips,
- * a counter, and a clear-link. Rows navigate to
- * /admin/contribuicao/:idContribuicao (the W3 detail route).
+ * PRIMARY section under the Plan 0017 reshape (aperture-gf2t5). Lists every
+ * pagamento against this campanha — the "who paid me what" view that
+ * answers the operator's day-to-day question without having to drill into
+ * individual contribuição slots. Click a row → /admin/pagamento/:id.
  *
- * The data-bc="arrecadacao" wrapper + the heading are preserved verbatim
- * from W2 — the embed contract held across the W2 → W3 boundary exactly as
- * designed.
+ * Delegates rendering + filtering + sort to <CampanhaPagamentosList />.
  */
-function ContribuicoesSection({ idCampanha }: { idCampanha: string }) {
+function PagamentosSection({ idCampanha }: { idCampanha: string }) {
   return (
-    <section data-bc="arrecadacao" className="space-y-3">
+    <section data-bc="pagamentos" className="space-y-3">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <h2 className="font-mono text-[11px] uppercase tracking-[0.14em] text-ink-soft">
-          contribuições
-        </h2>
+        <div className="flex items-center gap-3">
+          <DddBadge bc="pagamentos" size="sm" />
+          <h2 className="font-mono text-[11px] uppercase tracking-[0.14em] text-ink-soft">
+            pagamentos
+          </h2>
+        </div>
         <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-mute">
-          arrecadação · drill
+          transações · ordem cronológica
         </span>
       </div>
-      <ContribuicoesList idCampanha={idCampanha} />
+      <CampanhaPagamentosList idCampanha={idCampanha} />
+    </section>
+  );
+}
+
+/**
+ * SECONDARY section under the Plan 0017 reshape (aperture-gf2t5). Surfaces
+ * the catálogo (contribuições as slot definitions) — what's on the menu,
+ * not what sold. Collapsed by default; operator can open to manage the
+ * slot list. Rows still drill to /admin/contribuicao/:id (which under the
+ * reshape becomes the slot-definition view with aggregate item stats).
+ */
+function CatalogoSection({ idCampanha }: { idCampanha: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <section data-bc="arrecadacao" className="space-y-3">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-3 rounded-md border border-line bg-paper px-4 py-3 text-left hover:bg-cream-2/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-plum"
+        aria-expanded={open}
+        aria-controls="catalogo-content"
+      >
+        <div className="flex items-center gap-3">
+          <DddBadge bc="arrecadacao" size="sm" />
+          <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-ink-soft">
+            catálogo
+          </span>
+          <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-mute">
+            slots da campanha
+          </span>
+        </div>
+        <span
+          aria-hidden
+          className="font-mono text-[11px] text-ink-mute transition-transform"
+          style={{ transform: open ? "rotate(90deg)" : "rotate(0deg)" }}
+        >
+          ▸
+        </span>
+      </button>
+      {open && (
+        <div id="catalogo-content" className="pt-2">
+          <ContribuicoesList idCampanha={idCampanha} />
+        </div>
+      )}
     </section>
   );
 }

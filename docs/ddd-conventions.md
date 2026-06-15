@@ -67,6 +67,28 @@ If `IntencaoPagamento` were its own aggregate root, you could create a "payment 
 
 Compare to Arrecadação: a `Contribuicao` exists standalone (an item on the campaign page before any checkout). You create it, update it, delete it — all without touching its `Campanha` row. That independence is what earns it its own aggregate-root status, its own repository, and its own file.
 
+### Three-level nesting — the cart pattern
+
+Plan 0016 (multi-item pagamento) deepened the Pagamento aggregate to three levels:
+
+```
+Pagamento (aggregate root)
+ ├── IntencaoPagamento (nested entity — the cart)
+ │    ├── items: ItemDoPagamento[] (nested entities — the cart's lines)
+ │    └── composicaoValoresAggregate (VO — sum of lines)
+ └── TransacaoExterna (nested entity — provider settlement)
+```
+
+Three levels passes the same diagnostic that justified two levels:
+
+- **Lifecycle independence?** No — an `ItemDoPagamento` is born when its `IntencaoPagamento` is born (`criarPagamentoPendente`) and dies when the pagamento dies (`ON DELETE CASCADE` at the persistence layer). There's no use case that creates, updates, or deletes an item in isolation.
+- **Own ubiquitous language?** No — items use the cart's language (`tipo`, `quantidade`, `composicaoValoresItem`). Operators say "the cart has three items"; they don't say "the items belong to a payment" (that's an implementation detail of *how* the cart is persisted).
+- **Standalone repository?** No — there is no `ItemDoPagamentoRepository`. Items are loaded as part of `PagamentoRepository.findById`; they're written as part of `save(pagamento)`. The repository surface stays one.
+
+**Rationale for the depth.** The cart is itself a nested entity (Plan 0015's `IntencaoPagamento` decision), not an aggregate root. The cart's *lines* are the natural unit of iteration for the lançamento factory and for the Stripe `line_items` mapping. Hoisting them to be siblings of `IntencaoPagamento` (directly under `Pagamento`) would force a two-level traversal at the factory call site (`pagamento.items` AND `pagamento.intencao`); keeping them under `IntencaoPagamento` keeps the traversal one level (`pagamento.intencao.items`). The depth is a function of the data's natural shape, not of complexity for its own sake.
+
+**Naming.** Items use the **"Do" connector** in the entity name (`ItemDoPagamento`, not `ItemPagamento`). See *Naming conventions* below for the rationale — TL;DR: the connector signals "real entity inside an aggregate," distinguishing this kind of thing from the no-connector VOs (`MetodoPagamento`, `EventoPagamento`, `IntencaoPagamento` itself).
+
 ### Mental shortcut
 
 > If the only way to act on it is by loading something bigger first, it's a nested entity (lives inside the root's file).
@@ -146,6 +168,25 @@ Reading the JSDoc tells you the entity's role without having to inspect imports 
 - Identifier VOs share a single `ids.ts` per BC (e.g., `IdCampanha`, `IdConta`, `IdRecebedor` all in one file).
 - Each conceptual VO gets its own file (`dados-recebedor.ts`, `email-usuario.ts`, `metodo-pagamento.ts`).
 - Tiny enums that are intrinsic to a single entity (e.g., `StatusContribuicao` for `Contribuicao`) stay **inlined** in the entity's file — they don't earn a separate VO file unless they'd ever be reused across aggregates.
+
+---
+
+## Naming conventions — the "Do" connector
+
+Inside the Pagamentos BC two names share a noun root but mean different things:
+
+- `MetodoPagamento` — a Value Object (pix / credit_card). No identity, no lifecycle.
+- `EventoPagamento` — a Value Object (the published event after a status flip). No identity, no lifecycle.
+- `IntencaoPagamento` — a **nested Entity** with identity, born + dies with its `Pagamento`.
+- `ItemDoPagamento` — a **nested Entity** with identity, born + dies with its `IntencaoPagamento`.
+
+Notice the pattern: the **"Do" connector** is used when the noun is a real entity nested inside the aggregate (`ItemDoPagamento` = "Item of the Payment"). The **no-connector form** is reserved for VOs that describe attributes of the payment without owning their own row (`MetodoPagamento`, `EventoPagamento`).
+
+`IntencaoPagamento` looks like the exception (entity without the "Do"), but it was named before the convention crystallized; renaming would carry a wide refactor cost for a marginal clarity gain. New entities in the Pagamentos BC use the "Do" form going forward.
+
+**Rationale.** The connector is a lightweight cue at read-time: when you see `ItemDoPagamento` you know there's an `id` somewhere and a row in the database; when you see `MetodoPagamento` you know it's a `'pix' | 'credit_card'` literal that gets compared structurally. The convention costs four characters and saves a JSDoc-lookup at every reference site.
+
+**Not a hard rule for other BCs.** Arrecadação uses no connectors at all (`Campanha`, `Recebedor`, `Contribuicao`) — its entities are either aggregate roots (their own file makes their status obvious) or absent (no nested entities). The "Do" cue is most useful in BCs where nested entities and same-noun VOs coexist, which is currently only Pagamentos.
 
 ---
 

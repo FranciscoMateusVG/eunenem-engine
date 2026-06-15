@@ -13,21 +13,21 @@
 
 import { randomUUID } from 'node:crypto';
 import { trace } from '@opentelemetry/api';
-import { beforeEach, describe, expect, it } from 'vitest';
 import type Stripe from 'stripe';
+import { beforeEach, describe, expect, it } from 'vitest';
 import type { ServerDeps } from '../../apps/eunenem-server/server/auth/setup.js';
 import { dispatchVerifiedStripeEvent } from '../../apps/eunenem-server/server/webhooks/stripe-webhook.ts';
 import { CampanhaRepositoryMemory } from '../../src/adapters/arrecadacao/campanha-repository.memory.js';
 import { ContribuicaoRepositoryMemory } from '../../src/adapters/arrecadacao/contribuicao-repository.memory.js';
 import { RecebedorRepositoryMemory } from '../../src/adapters/arrecadacao/recebedor-repository.memory.js';
-import { LivroFinanceiroRepositoryMemory } from '../../src/adapters/pagamentos/financeiro/livro-repository.memory.js';
 import { PagamentoEventPublisherMemory } from '../../src/adapters/pagamentos/event-publisher.memory.js';
+import { LivroFinanceiroRepositoryMemory } from '../../src/adapters/pagamentos/financeiro/livro-repository.memory.js';
 import { PagamentoProviderFake } from '../../src/adapters/pagamentos/provider.fake.js';
 import { PagamentoRepositoryMemory } from '../../src/adapters/pagamentos/repository.memory.js';
 import { WebhookEventArchiveMemory } from '../../src/adapters/webhook-archive/webhook-event-archive.memory.js';
-import { criarPagamentoPendente } from '../../src/domain/pagamentos/entities/pagamento.js';
 import { NoopLogger } from '../../src/observability/noop-logger.js';
 import { noopTracer } from '../../src/observability/tracer.js';
+import { makePagamento } from '../helpers/pagamento-repository.conformance.js';
 
 // ────────────────────────────────────────────────────────────────────
 //  (C) Fake adapter port-level behavior
@@ -116,32 +116,16 @@ async function seedPagamento(
   options: { metodo: 'pix' | 'credit_card'; pi: string; ch: string },
 ): Promise<string> {
   const idPagamento = randomUUID();
-  const pagamento = criarPagamentoPendente({
-    idPagamento: idPagamento as never,
-    idIntencaoPagamento: randomUUID() as never,
-    composicaoValores: {
-      idContribuicao: randomUUID(),
-      contributionAmountCents: 4500,
-      feeAmountCents: 0,
-      surchargeCents: 0,
-      totalPaidCents: 4500,
-      receiverAmountCents: 4500,
-      responsavelTaxa: 'contribuinte',
-    } as never,
-    valorACobrarCents: 4500 as never,
+  // Pre-populate pi + ch refs so resolvePagamentoFromPaymentIntent finds it.
+  const pagamento = makePagamento({
+    id: idPagamento,
     metodo: options.metodo,
     externalRef: 'cs_test_xxx',
     criadoEm: new Date('2026-06-04T09:00:00Z'),
+    paymentIntentExternalRef: options.pi,
+    chargeExternalRef: options.ch,
   });
-  // Pre-populate pi + ch refs so resolvePagamentoFromPaymentIntent finds it.
-  await rig.pagamentoRepository.save({
-    ...pagamento,
-    intencao: {
-      ...pagamento.intencao,
-      paymentIntentExternalRef: options.pi,
-      chargeExternalRef: options.ch,
-    },
-  });
+  await rig.pagamentoRepository.save(pagamento);
   return idPagamento;
 }
 
@@ -205,11 +189,7 @@ describe('Webhook dispatcher pi.succeeded — populates availableOn (aperture-mj
       ch,
     });
 
-    await dispatchVerifiedStripeEvent(
-      rigUnknown.deps,
-      noopSpan,
-      makePiSucceededEvent(pi, ch),
-    );
+    await dispatchVerifiedStripeEvent(rigUnknown.deps, noopSpan, makePiSucceededEvent(pi, ch));
 
     const updated = await rigUnknown.pagamentoRepository.findById(idPagamento as never);
     // ch ref still persisted; available_on stays null.

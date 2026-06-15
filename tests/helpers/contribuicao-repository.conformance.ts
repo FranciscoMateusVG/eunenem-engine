@@ -48,10 +48,16 @@ export function describeContribuicaoRepositoryConformance(
       await options.seedForContribuicao?.(contribuicao);
       await repo.save(contribuicao);
 
+      // Plan 0016 Phase 1 (aperture-aj8qw) dropped `status` and
+      // `contribuinte` from Contribuicao — the mirror state moved to
+      // Pagamento (status derives from EXISTS aprovado pagamento;
+      // contribuinte lives at IntencaoPagamento root). The upsert
+      // contract is now exercised via a mutable admin-editable field
+      // (nome) plus the new `quantidade` lift — both round-trip on save.
       const updated: Contribuicao = {
         ...contribuicao,
-        status: 'indisponivel',
-        contribuinte: { nome: 'Visitante', email: 'v@exemplo.com' },
+        nome: 'Fralda — atualizada',
+        quantidade: 5,
       };
       await repo.save(updated);
 
@@ -212,8 +218,14 @@ function makeContribuicao(overrides: Partial<Contribuicao> = {}): Contribuicao {
     valor: 8000,
     imagemUrl: null,
     grupo: null,
-    contribuinte: null,
-    status: 'disponivel',
+    /**
+     * Plan 0016 Phase 1 (aperture-aj8qw) added `quantidade: number` as a
+     * required field on Contribuicao. Default to 1 here to keep the
+     * pre-0016 "1 row per countable thing" semantics across all existing
+     * conformance cases. Tests exercising the lift (quantidade > 1)
+     * pass an explicit override.
+     */
+    quantidade: 1,
     criadaEm: new Date('2026-05-01T12:00:00.000Z'),
     ...overrides,
   };

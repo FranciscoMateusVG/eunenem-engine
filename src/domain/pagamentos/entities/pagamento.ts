@@ -1,4 +1,5 @@
 import { z } from 'zod/v4';
+import { IdCampanhaSchema } from '../../arrecadacao/value-objects/ids.js';
 import type { MoneyCents } from '../../money.js';
 import { MoneyCentsSchema } from '../../money.js';
 import { DadosContribuinteSchema } from '../value-objects/dados-contribuinte.js';
@@ -8,7 +9,6 @@ import {
   type TipoEventoPagamento,
 } from '../value-objects/evento-pagamento.js';
 import {
-  IdContribuicaoPagamentoSchema,
   type IdIntencaoPagamento,
   IdIntencaoPagamentoSchema,
   type IdPagamento,
@@ -17,9 +17,11 @@ import {
 } from '../value-objects/ids.js';
 import { type MetodoPagamento, MetodoPagamentoSchema } from '../value-objects/metodo-pagamento.js';
 import {
-  type SnapshotComposicaoValores,
-  SnapshotComposicaoValoresSchema,
-} from '../value-objects/snapshot-composicao-valores.js';
+  type SnapshotComposicaoValoresAggregate,
+  SnapshotComposicaoValoresAggregateSchema,
+  validarComposicaoAggregate,
+} from '../value-objects/snapshot-composicao-valores-aggregate.js';
+import { type ItemDoPagamento, ItemDoPagamentoSchema } from './item-do-pagamento.js';
 
 /**
  * @aggregateRoot Pagamento (BC Pagamentos)
@@ -49,6 +51,16 @@ import {
  *   pendente   → rejeitado    (failure before processing)
  *   processing → rejeitado    (failure during processing)
  *   aprovado   → estornado    (charge.refunded — pre-transfer guard)
+ *
+ * **Plan 0016 multi-item cart (aperture-aj8qw).** IntencaoPagamento becomes
+ * a multi-item cart: the single `idContribuicao` retires, replaced by
+ * `items: readonly ItemDoPagamento[]`. The single `composicaoValores`
+ * retires, replaced by `composicaoValoresAggregate` (root-level sum) +
+ * per-item composição inside each `ItemDoPagamento`. The cart-scope
+ * invariant carrier `idCampanha` is hoisted onto the root (all items
+ * share one campanha per locked decision #8). The asymmetric
+ * `surchargeCents` field at SnapshotComposicaoValores retires —
+ * surcharge becomes its own item with `tipo='passthrough_surcharge'`.
  */
 
 export const StatusPagamentoSchema = z.enum([
@@ -101,10 +113,30 @@ export type StatusTransacaoExterna = z.infer<typeof StatusTransacaoExternaSchema
  */
 export const IntencaoPagamentoSchema = z.object({
   id: IdIntencaoPagamentoSchema,
-  idContribuicao: IdContribuicaoPagamentoSchema,
-  amountCents: MoneyCentsSchema,
+  /**
+   * Plan 0016 (aperture-aj8qw): cart-scope invariant carrier. All items
+   * in the cart belong to the same campanha; hoisted onto the root so
+   * the read path doesn't have to traverse items to find the campanha.
+   * Enforced at construction in `criarPagamentoPendente` against
+   * `composicaoValoresAggregate.idCampanha`.
+   */
+  idCampanha: IdCampanhaSchema,
+  /**
+   * Plan 0016 (aperture-aj8qw): the cart's per-line decomposition.
+   * Must have ≥ 1 item (an empty cart is invalid). Position-stability:
+   * contribuição items first (caller-provided order); surcharge item
+   * (if present) ALWAYS LAST per operator review lock #18. Validated
+   * in `criarPagamentoPendente`.
+   */
+  items: z.array(ItemDoPagamentoSchema).min(1),
+  /**
+   * Plan 0016 (aperture-aj8qw): aggregate composição (sum across items).
+   * Carries totalPaidCents, the totals of each line-component, plus
+   * `idCampanha` (mirror of the root) and `responsavelTaxa`. Replaces
+   * the pre-0016 single-item `composicaoValores` at root.
+   */
+  composicaoValoresAggregate: SnapshotComposicaoValoresAggregateSchema,
   metodo: MetodoPagamentoSchema,
-  composicaoValores: SnapshotComposicaoValoresSchema,
   externalRef: z.string().trim().min(1).max(255).nullable(),
   paymentIntentExternalRef: z.string().trim().min(1).max(255).nullable(),
   chargeExternalRef: z.string().trim().min(1).max(255).nullable(),
@@ -152,7 +184,20 @@ export type Pagamento = Readonly<z.infer<typeof PagamentoSchema>>;
 export interface CriarPagamentoPendenteInput {
   readonly idPagamento: IdPagamento;
   readonly idIntencaoPagamento: IdIntencaoPagamento;
-  readonly composicaoValores: SnapshotComposicaoValores;
+  /**
+   * Plan 0016 (aperture-aj8qw): the cart's per-line decomposition.
+   * Caller-controlled UUIDs are minted by the use-case (`iniciarPagamentoCarrinho`)
+   * and threaded into each item's `id`. Contribuição items first in
+   * caller-provided order; surcharge item (if present) LAST.
+   */
+  readonly items: readonly ItemDoPagamento[];
+  /**
+   * Plan 0016 (aperture-aj8qw): aggregate composição — sum across
+   * `items` of the per-line values, plus the cart-scope `idCampanha`
+   * and `responsavelTaxa`. Validated against `items` at construction
+   * via `validarComposicaoAggregate`.
+   */
+  readonly composicaoValoresAggregate: SnapshotComposicaoValoresAggregate;
   readonly valorACobrarCents: MoneyCents;
   readonly metodo: MetodoPagamento;
   readonly criadoEm: Date;
@@ -166,19 +211,77 @@ export interface CriarPagamentoPendenteInput {
   readonly externalRef?: string | null;
 }
 
+/**
+ * Plan 0016 (aperture-aj8qw) cart-construction invariants enforced here:
+ *
+ *   1. `items.length >= 1` — an empty cart is invalid (schema-enforced
+ *      via `.min(1)`; this comment documents the why).
+ *   2. Every contribuição-tipo item's `composicaoValoresItem.idContribuicao`
+ *      points at a contribuição on the cart's campanha. The factory can't
+ *      check the FK across BCs (no contribuição repository handle here);
+ *      the saga's `iniciarPagamentoCarrinho` is the user-facing surface
+ *      that throws `CarrinhoMultiplasCampanhasError` (Phase 2 work). The
+ *      factory's honest backstop is the IDcampanha equality check between
+ *      input and aggregate.idCampanha.
+ *   3. At most one `tipo='passthrough_surcharge'` item. PIX flows have
+ *      zero; cartão flows have exactly one.
+ *   4. If a surcharge item is present, it MUST be the last element of
+ *      `items` (operator review lock #18).
+ *   5. Aggregate composição balances against the per-line items
+ *      (`validarComposicaoAggregate`).
+ *   6. `valorACobrarCents === aggregate.totalPaidCents` — same shape as
+ *      pre-0016, just routed through aggregate.
+ */
 export function criarPagamentoPendente(input: CriarPagamentoPendenteInput): Pagamento {
-  if (input.valorACobrarCents !== input.composicaoValores.totalPaidCents) {
-    throw new Error('Valor do pagamento deve ser igual ao total pago na composicao de valores.');
+  const { items, composicaoValoresAggregate, valorACobrarCents } = input;
+
+  if (items.length < 1) {
+    throw new Error('IntencaoPagamento deve conter ao menos um item.');
+  }
+
+  // Per-item composição validation (per-unit × quantidade = per-line).
+  // The item factories `criarItemContribuicao` / `criarItemPassthroughSurcharge`
+  // also call `validarComposicaoItem`; we re-run here as honest
+  // backstop in case callers bypass the factories.
+  const surchargeIndices: number[] = [];
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (item === undefined) continue;
+    if (item.tipo === 'passthrough_surcharge') {
+      surchargeIndices.push(i);
+    }
+  }
+
+  if (surchargeIndices.length > 1) {
+    throw new Error(
+      `IntencaoPagamento aceita no máximo um item de surcharge (recebido ${surchargeIndices.length}).`,
+    );
+  }
+  if (surchargeIndices.length === 1) {
+    const surchargeIndex = surchargeIndices[0];
+    if (surchargeIndex !== items.length - 1) {
+      throw new Error(
+        `Item de surcharge deve ser o último do cart (posição ${surchargeIndex} de ${items.length - 1}).`,
+      );
+    }
+  }
+
+  // Composição aggregate <-> items consistency + book balance + responsavelTaxa.
+  const itemComposicoes = items.map((it) => it.composicaoValoresItem);
+  validarComposicaoAggregate(composicaoValoresAggregate, itemComposicoes);
+
+  if (valorACobrarCents !== composicaoValoresAggregate.totalPaidCents) {
+    throw new Error('Valor do pagamento deve ser igual ao totalPaidCents da composição agregada.');
   }
 
   return {
     id: input.idPagamento,
     intencao: {
       id: input.idIntencaoPagamento,
-      idContribuicao: input.composicaoValores.idContribuicao,
-      amountCents: input.valorACobrarCents,
+      idCampanha: composicaoValoresAggregate.idCampanha,
+      items: [...items],
+      composicaoValoresAggregate,
       metodo: input.metodo,
-      composicaoValores: input.composicaoValores,
       externalRef: input.externalRef ?? null,
       // aperture-wif8s: pi_xxx + ch_xxx populated post-creation by the
       // webhook handler as Stripe events arrive. Always start null at
@@ -232,10 +335,7 @@ export function podeRejeitarPagamento(pagamento: Pagamento): boolean {
  * throws — webhooks fire out of order and we want loud failures, not
  * silent corruption.
  */
-export function iniciarProcessamentoPagamento(
-  pagamento: Pagamento,
-  atualizadoEm: Date,
-): Pagamento {
+export function iniciarProcessamentoPagamento(pagamento: Pagamento, atualizadoEm: Date): Pagamento {
   if (pagamento.status === 'processing') {
     return pagamento;
   }
@@ -266,7 +366,7 @@ export function aprovarPagamentoPendente(
     throw new Error('Transacao externa deve estar aprovada para aprovar o pagamento.');
   }
 
-  if (transacao.amountCents !== pagamento.intencao.amountCents) {
+  if (transacao.amountCents !== pagamento.intencao.composicaoValoresAggregate.totalPaidCents) {
     throw new Error('Valor da transacao externa deve ser igual ao valor do pagamento.');
   }
 
@@ -293,7 +393,7 @@ export function rejeitarPagamentoPendente(
     throw new Error('Transacao externa deve estar rejeitada para rejeitar o pagamento.');
   }
 
-  if (transacao.amountCents !== pagamento.intencao.amountCents) {
+  if (transacao.amountCents !== pagamento.intencao.composicaoValoresAggregate.totalPaidCents) {
     throw new Error('Valor da transacao externa deve ser igual ao valor do pagamento.');
   }
 
@@ -317,10 +417,7 @@ export function rejeitarPagamentoPendente(
  * the financeiro module that the entity doesn't have access to. The
  * entity only validates the state transition itself.
  */
-export function estornarPagamentoAprovado(
-  pagamento: Pagamento,
-  atualizadoEm: Date,
-): Pagamento {
+export function estornarPagamentoAprovado(pagamento: Pagamento, atualizadoEm: Date): Pagamento {
   if (pagamento.status !== 'aprovado') {
     throw new Error(
       `Pagamento "${pagamento.id}" nao pode ser estornado a partir do status "${pagamento.status}". Apenas pagamentos aprovados podem ser estornados.`,
@@ -333,19 +430,39 @@ export function estornarPagamentoAprovado(
   };
 }
 
+/**
+ * Plan 0016 (aperture-aj8qw) per operator review lock #19: event shape
+ * changes from single-contribuição emission to cart emission.
+ *
+ * Sourced fields:
+ *   - `idCampanha` — hoisted from `pagamento.intencao.idCampanha`
+ *   - `numeroDeItens` — `pagamento.intencao.items.length`
+ *   - `idsContribuicoes` — every contribuição-tipo item's
+ *     `idContribuicao` (surcharge items contribute nothing here).
+ *     Always non-empty: locked decision #7 forbids surcharge-only
+ *     carts, so at least one contribuição item is guaranteed.
+ *   - `amountCents` — `composicaoValoresAggregate.totalPaidCents`
+ *     (semantically still "what the buyer paid").
+ */
 export function criarEventoPagamento(input: {
   readonly id: string;
   readonly tipo: TipoEventoPagamento;
   readonly pagamento: Pagamento;
   readonly ocorridoEm: Date;
 }) {
+  const idsContribuicoes = input.pagamento.intencao.items
+    .filter((item) => item.tipo === 'contribuicao')
+    .map((item) => item.idContribuicao);
+
   return EventoPagamentoSchema.parse({
     id: input.id,
     tipo: input.tipo,
     idPagamento: input.pagamento.id,
     idIntencaoPagamento: input.pagamento.intencao.id,
-    idContribuicao: input.pagamento.intencao.idContribuicao,
-    amountCents: input.pagamento.intencao.amountCents,
+    idCampanha: input.pagamento.intencao.idCampanha,
+    numeroDeItens: input.pagamento.intencao.items.length,
+    idsContribuicoes,
+    amountCents: input.pagamento.intencao.composicaoValoresAggregate.totalPaidCents,
     status: input.pagamento.status,
     idTransacaoExterna: input.pagamento.transacaoExterna?.id,
     ocorridoEm: input.ocorridoEm,

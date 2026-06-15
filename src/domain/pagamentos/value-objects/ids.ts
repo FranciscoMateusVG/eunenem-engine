@@ -31,3 +31,12 @@ export type IdTransacaoExterna = z.infer<typeof IdTransacaoExternaSchema>;
 
 export const IdContribuicaoPagamentoSchema = z.uuid();
 export type IdContribuicaoPagamento = z.infer<typeof IdContribuicaoPagamentoSchema>;
+
+/**
+ * Plan 0016 (aperture-aj8qw): identifier for `ItemDoPagamento`, the
+ * per-line decomposition of an IntencaoPagamento. UUID, caller-controlled
+ * at construction time — matches the existing engine convention where
+ * the use-case threads UUIDs through to entity factories.
+ */
+export const IdItemDoPagamentoSchema = z.uuid();
+export type IdItemDoPagamento = z.infer<typeof IdItemDoPagamentoSchema>;

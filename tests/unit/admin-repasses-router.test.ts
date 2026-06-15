@@ -26,6 +26,7 @@ import {
 import { criarRecebedorInicial } from '../../src/domain/arrecadacao/entities/recebedor.js';
 import { NoopLogger } from '../../src/observability/noop-logger.js';
 import { noopTracer } from '../../src/observability/tracer.js';
+import { makePagamento as makePagamentoBase } from '../helpers/pagamento-repository.conformance.js';
 
 interface TestRig {
   caller: ReturnType<typeof appRouter.createCaller>;
@@ -48,36 +49,16 @@ function makePagamento(args: {
   criadoEm?: Date;
   contribuinteNome?: string | null;
 }) {
-  const now = args.criadoEm ?? T0;
   const contribuinte = args.contribuinteNome
-    ? { nome: args.contribuinteNome, email: null, mensagem: null }
+    ? { nome: args.contribuinteNome, email: 'x@y.com' }
     : null;
-  return {
-    id: args.id as never,
+  return makePagamentoBase({
+    id: args.id,
+    idContribuicao: args.idContribuicao,
     status: (args.status ?? 'aprovado') as never,
-    criadoEm: now,
-    atualizadoEm: now,
-    intencao: {
-      id: randomUUID() as never,
-      idContribuicao: args.idContribuicao as never,
-      criadaEm: now,
-      metodo: 'pix',
-      amountCents: 4500 as never,
-      externalRef: null,
-      paymentIntentExternalRef: null,
-      chargeExternalRef: null,
-      contribuinte,
-      composicaoValores: {
-        idContribuicao: args.idContribuicao,
-        contributionAmountCents: 4500 as never,
-        feeAmountCents: 0 as never,
-        surchargeCents: 0 as never,
-        receiverAmountCents: 4500 as never,
-        totalPaidCents: 4500 as never,
-        responsavelTaxa: 'contribuinte',
-      } as never,
-    } as never,
-  } as never;
+    criadoEm: args.criadoEm ?? T0,
+    contribuinte: contribuinte as never,
+  });
 }
 
 function makeLancamento(args: {

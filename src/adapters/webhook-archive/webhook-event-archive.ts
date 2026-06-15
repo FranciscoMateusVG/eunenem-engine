@@ -181,10 +181,7 @@ export interface WebhookEventArchive {
    * operators can see "linked N previously-orphan events" in
    * the forensic trail.
    */
-  relinkOrphansByPaymentIntent(
-    paymentIntentId: string,
-    pagamentoId: string,
-  ): Promise<number>;
+  relinkOrphansByPaymentIntent(paymentIntentId: string, pagamentoId: string): Promise<number>;
 }
 
 export interface FindByPagamentoIdOptions {

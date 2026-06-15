@@ -1,7 +1,12 @@
+import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { PagamentoEventPublisherMemory } from '../../../src/adapters/pagamentos/event-publisher.memory.js';
 import { PagamentoProviderFake } from '../../../src/adapters/pagamentos/provider.fake.js';
 import { PagamentoRepositoryMemory } from '../../../src/adapters/pagamentos/repository.memory.js';
+import {
+  criarItemContribuicao,
+  type ItemDoPagamento,
+} from '../../../src/domain/pagamentos/entities/item-do-pagamento.js';
 import { PagamentosInputInvalidoError } from '../../../src/errors/pagamentos/input-invalido.error.js';
 import { PagamentoNaoEncontradoError } from '../../../src/errors/pagamentos/nao-encontrado.error.js';
 import { PagamentoTransicaoStatusInvalidaError } from '../../../src/errors/pagamentos/transicao-status-invalida.error.js';
@@ -25,20 +30,45 @@ const clock = () => fixedDate;
 const idPagamento = '550e8400-e29b-41d4-a716-446655440501';
 const idIntencaoPagamento = '550e8400-e29b-41d4-a716-446655440502';
 const idContribuicao = '550e8400-e29b-41d4-a716-446655440503';
+const idCampanha = '550e8400-e29b-41d4-a716-446655440505';
 const idTransacaoExterna = '550e8400-e29b-41d4-a716-446655440504';
 
+/**
+ * Plan 0016 Phase 2 (aperture-eg1s2): the use-case now takes a multi-item
+ * cart input — `items` + `composicaoValoresAggregate` — instead of the
+ * pre-0016 flat `composicaoValores` snapshot. Default fixture is a single
+ * contribuição line at R$80 + R$4 fee = R$84, matching the original test
+ * shape exactly so the assertions still hold.
+ */
 function makeCriarIntencaoPagamentoInput(
   overrides: Partial<CriarIntencaoPagamentoInput> = {},
 ): CriarIntencaoPagamentoInput {
+  const contributionItem: ItemDoPagamento = criarItemContribuicao({
+    id: randomUUID() as never,
+    composicaoValoresItem: {
+      tipo: 'contribuicao',
+      idContribuicao: idContribuicao as never,
+      quantidade: 1,
+      contributionUnitAmountCents: 8000 as never,
+      feeUnitAmountCents: 400 as never,
+      receiverUnitAmountCents: 8000 as never,
+      lineContributionAmountCents: 8000 as never,
+      lineFeeAmountCents: 400 as never,
+      lineReceiverAmountCents: 8000 as never,
+    },
+    criadoEm: fixedDate,
+  });
   return {
     idPagamento,
     idIntencaoPagamento,
-    composicaoValores: {
-      idContribuicao,
-      contributionAmountCents: 8000,
-      feeAmountCents: 400,
-      totalPaidCents: 8400,
-      receiverAmountCents: 8000,
+    items: [contributionItem],
+    composicaoValoresAggregate: {
+      idCampanha: idCampanha as never,
+      totalContributionCents: 8000 as never,
+      totalFeeCents: 400 as never,
+      totalReceiverCents: 8000 as never,
+      totalSurchargeCents: 0,
+      totalPaidCents: 8400 as never,
       responsavelTaxa: 'contribuinte',
     },
     valorACobrarCents: 8400,
@@ -62,7 +92,7 @@ describe('payment use cases', () => {
     );
 
     expect(created.status).toBe('pendente');
-    expect(created.intencao.amountCents).toBe(8400);
+    expect(created.intencao.composicaoValoresAggregate.totalPaidCents).toBe(8400);
 
     const approved = await aprovarPagamento(
       {

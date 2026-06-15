@@ -31,6 +31,7 @@ import {
 } from '../../src/adapters/plataforma/repository.memory.js';
 import { NoopLogger } from '../../src/observability/noop-logger.js';
 import { noopTracer } from '../../src/observability/tracer.js';
+import { makePagamento as makePagamentoBase } from '../helpers/pagamento-repository.conformance.js';
 
 interface TestRig {
   caller: ReturnType<typeof appRouter.createCaller>;
@@ -47,33 +48,13 @@ function makePagamento(args: {
   criadoEm?: Date;
   contribuinte?: { nome: string; email: string; mensagem?: string } | null;
 }) {
-  const now = args.criadoEm ?? new Date('2026-06-04T10:00:00.000Z');
-  return {
-    id: args.id as never,
+  return makePagamentoBase({
+    id: args.id,
+    idContribuicao: args.idContribuicao,
     status: (args.status ?? 'aprovado') as never,
-    criadoEm: now,
-    atualizadoEm: now,
-    intencao: {
-      id: randomUUID() as never,
-      idContribuicao: args.idContribuicao as never,
-      criadaEm: now,
-      metodo: 'pix',
-      amountCents: 4500 as never,
-      externalRef: null,
-      paymentIntentExternalRef: null,
-      chargeExternalRef: null,
-      contribuinte: args.contribuinte === undefined ? null : args.contribuinte,
-      composicaoValores: {
-        idContribuicao: args.idContribuicao,
-        contributionAmountCents: 4500 as never,
-        feeAmountCents: 0 as never,
-        surchargeCents: 0 as never,
-        receiverAmountCents: 4500 as never,
-        totalPaidCents: 4500 as never,
-        responsavelTaxa: 'contribuinte',
-      } as never,
-    } as never,
-  } as never;
+    criadoEm: args.criadoEm ?? new Date('2026-06-04T10:00:00.000Z'),
+    contribuinte: (args.contribuinte === undefined ? null : args.contribuinte) as never,
+  });
 }
 
 function makeLancamento(args: {
@@ -81,10 +62,7 @@ function makeLancamento(args: {
   idPagamento: string;
   idContribuicao: string;
   idCampanha?: string;
-  tipo?:
-    | 'credito_saldo_recebedor'
-    | 'credito_receita_plataforma'
-    | 'credito_passthrough_surcharge';
+  tipo?: 'credito_saldo_recebedor' | 'credito_receita_plataforma' | 'credito_passthrough_surcharge';
   amountCents?: number;
   transferidoEm?: Date | null;
   canceladoEm?: Date | null;
@@ -336,9 +314,11 @@ describe('admin.pagamentos.listByContribuicao — nested lancamentos (aperture-a
     const idCampanhaEucasei = randomUUID();
     const idContribEucasei = randomUUID();
     const idPagamentoEucasei = randomUUID();
-    await (rig as TestRig & {
-      deps?: { campanhaRepository: CampanhaRepositoryMemory };
-    }).pagamentoRepository.save(
+    await (
+      rig as TestRig & {
+        deps?: { campanhaRepository: CampanhaRepositoryMemory };
+      }
+    ).pagamentoRepository.save(
       makePagamento({ id: idPagamentoEucasei, idContribuicao: idContribEucasei }),
     );
 

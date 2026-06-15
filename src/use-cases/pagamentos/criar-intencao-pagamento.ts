@@ -9,21 +9,36 @@ import {
   criarPagamentoPendente,
   type Pagamento,
 } from '../../domain/pagamentos/entities/pagamento.js';
+import { ItemDoPagamentoSchema } from '../../domain/pagamentos/entities/item-do-pagamento.js';
 import {
   IdIntencaoPagamentoSchema,
   IdPagamentoSchema,
 } from '../../domain/pagamentos/value-objects/ids.js';
 import { MetodoPagamentoSchema } from '../../domain/pagamentos/value-objects/metodo-pagamento.js';
-import { SnapshotComposicaoValoresSchema } from '../../domain/pagamentos/value-objects/snapshot-composicao-valores.js';
+import { SnapshotComposicaoValoresAggregateSchema } from '../../domain/pagamentos/value-objects/snapshot-composicao-valores-aggregate.js';
 import { PagamentosInputInvalidoError } from '../../errors/pagamentos/input-invalido.error.js';
 import { PagamentoJaExisteError } from '../../errors/pagamentos/ja-existe.error.js';
 import { PagamentoValorDivergenteError } from '../../errors/pagamentos/valor-divergente.error.js';
 import type { Observability } from '../../observability/observability.js';
 
+/**
+ * Plan 0016 Phase 2 (aperture-eg1s2): reshape to multi-item cart input.
+ * Pre-0016 the use-case accepted `composicaoValores` (single-item
+ * snapshot) and the IntencaoPagamento factory laid it out at root.
+ * Post-0016 the input carries the cart (items + aggregate snapshot +
+ * idCampanha) and `criarPagamentoPendente` validates the
+ * cart-construction invariants.
+ *
+ * The event published carries the new shape per operator review lock
+ * #19 — drop idContribuicao, add idCampanha + numeroDeItens +
+ * idsContribuicoes — sourced inside `criarEventoPagamento` from the
+ * pagamento entity (Phase 1 work).
+ */
 export const CriarIntencaoPagamentoInputSchema = z.object({
   idPagamento: IdPagamentoSchema,
   idIntencaoPagamento: IdIntencaoPagamentoSchema,
-  composicaoValores: SnapshotComposicaoValoresSchema,
+  items: z.array(ItemDoPagamentoSchema).min(1),
+  composicaoValoresAggregate: SnapshotComposicaoValoresAggregateSchema,
   valorACobrarCents: MoneyCentsSchema,
   metodo: MetodoPagamentoSchema,
   /**
@@ -44,7 +59,9 @@ export interface CriarIntencaoPagamentoDeps {
 }
 
 /**
- * Cria uma intenção de pagamento sem conhecer campanha, presente, rifa ou convite.
+ * Cria uma intenção de pagamento (cart shape). Não conhece campanha,
+ * presente, rifa ou convite — somente recebe os items já calculados +
+ * o aggregate snapshot vindos da saga.
  */
 export async function criarIntencaoPagamento(
   deps: CriarIntencaoPagamentoDeps,
@@ -64,24 +81,28 @@ export async function criarIntencaoPagamento(
       const {
         idPagamento,
         idIntencaoPagamento,
-        composicaoValores,
+        items,
+        composicaoValoresAggregate,
         valorACobrarCents,
         metodo,
         externalRef,
       } = parsed.data;
 
-      span.setAttribute('pagamento.id', idPagamento);
-      span.setAttribute('pagamento.intencao.id', idIntencaoPagamento);
-      span.setAttribute('pagamento.contribuicao.id', composicaoValores.idContribuicao);
-      span.setAttribute('pagamento.amount_cents', valorACobrarCents);
-      span.setAttribute('pagamento.method', metodo);
+      span.setAttributes({
+        'pagamento.id': idPagamento,
+        'pagamento.intencao.id': idIntencaoPagamento,
+        'pagamento.intencao.id_campanha': composicaoValoresAggregate.idCampanha,
+        'pagamento.intencao.numero_de_itens': items.length,
+        'pagamento.amount_cents': valorACobrarCents,
+        'pagamento.method': metodo,
+      });
       if (externalRef) {
         span.setAttribute('pagamento.external_ref.present', true);
       }
 
-      if (valorACobrarCents !== composicaoValores.totalPaidCents) {
+      if (valorACobrarCents !== composicaoValoresAggregate.totalPaidCents) {
         throw new PagamentoValorDivergenteError(
-          composicaoValores.totalPaidCents,
+          composicaoValoresAggregate.totalPaidCents,
           valorACobrarCents,
         );
       }
@@ -95,7 +116,8 @@ export async function criarIntencaoPagamento(
       const pagamento = criarPagamentoPendente({
         idPagamento,
         idIntencaoPagamento,
-        composicaoValores,
+        items,
+        composicaoValoresAggregate,
         valorACobrarCents,
         metodo,
         externalRef: externalRef ?? null,
@@ -115,8 +137,9 @@ export async function criarIntencaoPagamento(
       logger.info('pagamento.intencao_criada', {
         idPagamento,
         idIntencaoPagamento,
-        idContribuicao: pagamento.intencao.idContribuicao,
-        amountCents: pagamento.intencao.amountCents,
+        idCampanha: pagamento.intencao.idCampanha,
+        numeroDeItens: pagamento.intencao.items.length,
+        totalPaidCents: pagamento.intencao.composicaoValoresAggregate.totalPaidCents,
         metodo,
       });
 

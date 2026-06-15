@@ -21,7 +21,9 @@ import { contribuicaoRouter } from './contribuicao-router.js';
 import type { TrpcContext } from './context.js';
 import { eventoConviteRouter } from './evento-convite-router.js';
 import { paginaRouter } from './pagina-router.js';
+import { painelMensagensRouter } from './painel-mensagens-router.js';
 import { recebedorRouter } from './recebedor-router.js';
+import { usuarioRouter } from './usuario-router.js';
 
 const t = initTRPC.context<TrpcContext>().create();
 
@@ -38,7 +40,9 @@ export const appRouter = t.router({
   contribuicao: contribuicaoRouter,
   eventoConvite: eventoConviteRouter,
   pagina: paginaRouter,
+  painelMensagens: painelMensagensRouter,
   recebedor: recebedorRouter,
+  usuario: usuarioRouter,
 });
 
 export type AppRouter = typeof appRouter;

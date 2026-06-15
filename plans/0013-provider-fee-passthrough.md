@@ -11,6 +11,14 @@
 >
 > ---
 >
+> 📌 **Addendum 2026-06-08 — surcharge field retires in [0016](./0016-multi-item-pagamento-and-quantidade.md).**
+>
+> The asymmetric surcharge field at `SnapshotComposicaoValores` (introduced by aperture-uyw8i as part of 0013's implementation) **retires** in plan 0016. Per 0016 §Locked-decision 11 ("Surcharge as item (Option C)"), the card-passthrough surcharge is now its own `ItemDoPagamento` with `tipo='passthrough_surcharge'`, modeled symmetrically with contribuição items inside the cart. The 3-part composition discipline this plan teaches survives — it's just expressed per-line + aggregated, instead of stamped on a single pagamento-level snapshot.
+>
+> Concretely after 0016: the line-item discipline (contribution / fee / surcharge as distinct money buckets) and the `credito_passthrough_surcharge` lançamento tipo (the double-entry side) both stand. What changes is *where the surcharge value lives* — it's a `tipo='passthrough_surcharge'` `ItemDoPagamento.composicaoValoresItem.amountCents` rather than `SnapshotComposicaoValores.surcharge*` at the intent root. The book-balance invariant updates from per-pagamento totals to sum-of-items totals (`totalReceiverCents + totalFeeCents + totalSurchargeCents === totalPaidCents` in the aggregate snapshot).
+>
+> ---
+>
 > **Status**: drafted 2026-05-24, awaiting confirmation. **Many decisions deliberately left open** — see "Open questions to answer before phases start" below. Don't begin implementation until those are resolved.
 > **Depends on**: plan `0002-checkout-orchestration-layer-done.md` (existing `ComposicaoValores` is the extension point), plan `0009-plataforma-management-and-admin-ux.md` (versioned RegraTaxa pattern — `RegraTaxaProvedor` mirrors it; if 0009 hasn't shipped yet, this plan introduces versioning standalone).
 > **Interacts with**: ~~plan `0006-lancamento-maturation-rule.md`~~ (superseded — see addendum), plan `0012-estorno-and-chargeback-cascade.md` (chargebacks usually don't refund the provider's fee — plataforma eats the passthrough on estorno; rescoped by 0015 — see addendum).

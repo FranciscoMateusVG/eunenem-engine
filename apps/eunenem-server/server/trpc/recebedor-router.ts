@@ -42,6 +42,12 @@ import type { LancamentoFinanceiro } from "../../../../src/domain/pagamentos/fin
 import type { Pagamento } from "../../../../src/domain/pagamentos/entities/pagamento.js";
 import { randomUUID } from "node:crypto";
 import {
+  ArrecadacaoCampanhaNaoEncontradaError,
+  ArrecadacaoInputInvalidoError,
+  ArrecadacaoNaoAutorizadoError,
+  ArrecadacaoRecebedorJaExisteError,
+  criarRecebedorParaCampanha,
+  CriarRecebedorParaCampanhaInputSchema,
   FinanceiroRepasseJaPendenteError,
   FinanceiroSaldoDisponivelInsuficienteError,
   FinanceiroInputInvalidoError,
@@ -84,6 +90,33 @@ const ExtratoSummaryDTOSchema = z.object({
   proximaTransfDate: z.string().nullable(),
   /** Distinct pagamentos contributing to totalRecebido. */
   totalPresentes: z.number().int().nonnegative(),
+  /**
+   * aperture-kvpvf — finishes the B1 audit. Distinct aprovado
+   * pagamentos in this campanha whose `intencao.contribuinte` has BOTH
+   * a non-null nome AND a non-empty (trimmed) mensagem. Mirrors B3's
+   * `MuralRecadoProjection` predicate exactly — same eligibility, just
+   * COUNT instead of project. Powers the painel home 3-col strip's
+   * "RECADOS" cell (was mocked at 12).
+   *
+   * Counted from `liveStates` here so the same lançamento walk that
+   * already drives every other summary metric stays the single source
+   * of truth (no extra DB roundtrip).
+   */
+  totalRecadosCount: z.number().int().nonnegative(),
+  /**
+   * aperture-kvpvf — finishes the B1 audit. Count of
+   * `ItemDoPagamento` rows of `tipo='contribuicao'` whose parent
+   * pagamento is aprovado on the current campanha. ONE PER CART ITEM
+   * (a 5-item cart contributes 5), NOT one per pagamento — distinct
+   * from `totalPresentes` above which is the distinct-pagamento count
+   * used by the featured "presentes recebidos" card. This field powers
+   * the painel home 3-col strip's "PRESENTES" cell (was mocked at 2).
+   *
+   * Cancelado lançamentos already filtered out via `liveStates`.
+   * passthrough_surcharge items are skipped — those are platform
+   * surcharges, not gifts.
+   */
+  totalPresentesItensCount: z.number().int().nonnegative(),
   /** Earliest contribution date (ISO). Null when no contributions. */
   dateRangeStart: z.string().nullable(),
   /** Latest contribution date (ISO). Null when no contributions. */
@@ -145,6 +178,18 @@ const ExtratoRowDTOSchema = z.object({
    * gift was ad-hoc (no image) or the contribuição was deleted.
    */
   contribuicaoImagemUrl: z.string().nullable(),
+  /**
+   * aperture-qp4mq — per-item quantidade as encoded on the parent
+   * intencao_items row this lançamento was spawned from (1:1 via
+   * lancamento.idItemPagamento per Plan 0016 Phase 2 migration 023).
+   * Multi-quantity purchases (operator buys 5 of a "fralda" slot
+   * with quantidade=10 capacity) surface as 5 here, so the painel
+   * extrato drawer can render "× 5" alongside the item name.
+   * Defaults to 1 when the parent pagamento can't be resolved (deleted
+   * between read + projection) — same defensive shape as
+   * contribuicaoNome's empty-string fallback.
+   */
+  quantidade: z.number().int().positive(),
   amountCents: z.number().int().nonnegative(),
   /** Derived sub-state — drives the chip + sort affordance on the UI. */
   liberacao: ExtratoLiberacaoSchema,
@@ -280,6 +325,29 @@ function toTRPCError(err: unknown): TRPCError {
   if (err instanceof FinanceiroInputInvalidoError) {
     return new TRPCError({ code: "BAD_REQUEST", message: err.message, cause: err });
   }
+  // aperture-0bynm — recebedor.criar mapping.
+  if (err instanceof ArrecadacaoRecebedorJaExisteError) {
+    return new TRPCError({
+      code: "CONFLICT",
+      message: "recebedor_ja_existe",
+      cause: err,
+    });
+  }
+  if (err instanceof ArrecadacaoNaoAutorizadoError) {
+    return new TRPCError({ code: "UNAUTHORIZED", message: err.message, cause: err });
+  }
+  if (err instanceof ArrecadacaoCampanhaNaoEncontradaError) {
+    // Don't leak existence — surface as UNAUTHORIZED, same posture as
+    // resolveAdminOfCampanha.
+    return new TRPCError({
+      code: "UNAUTHORIZED",
+      message: "campanha_nao_encontrada_ou_nao_autorizada",
+      cause: err,
+    });
+  }
+  if (err instanceof ArrecadacaoInputInvalidoError) {
+    return new TRPCError({ code: "BAD_REQUEST", message: err.message, cause: err });
+  }
   return err instanceof Error
     ? new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: err.message, cause: err })
     : new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Unknown error" });
@@ -293,11 +361,19 @@ interface ExtratoLancamentoState {
   lancamento: LancamentoFinanceiro;
   pagamento: Pagamento | undefined;
   /**
-   * aperture-k6fbz — gift name + image resolved via
-   * lancamento → pagamento.intencao.idContribuicao → contribuição.
-   * Undefined when either the pagamento is missing OR the contribuição
-   * has been deleted between the pagamento + the read. Row projection
-   * falls back to a neutral shape in that case.
+   * aperture-k6fbz — gift name + image for THIS lançamento.
+   *
+   * aperture-sm7uc (#6 fix): resolved via `lancamento.idContribuicao`
+   * (Plan 0016 Phase 2 / migration 023 — each lançamento carries the
+   * NOT-NULL FK to its own contribuição), NOT via the first cart item.
+   * The previous "first contribuição-tipo item" projection collapsed
+   * every row in a multi-item cart to the same name and image, which
+   * surfaced in prod as the painel extrato showing "Fralda Ecológica"
+   * three times when the cart actually held three different items.
+   *
+   * Undefined when the contribuição has been deleted between the
+   * pagamento + the read. Row projection falls back to a neutral
+   * empty-string/null shape in that case.
    */
   contribuicao: { nome: string; imagemUrl: string | null } | undefined;
   liberacao: ExtratoLiberacao;
@@ -330,22 +406,29 @@ async function buildExtratoStates(
       const pagamento = await ctx.deps.pagamentoRepository.findById(
         lancamento.idPagamento as never,
       );
-      // aperture-k6fbz: resolve the gift via the pagamento's intent.
-      // When pagamento is missing OR the contribuição was deleted in
-      // the meantime, contribuicao stays undefined and the projection
-      // falls back to empty-string/null at the wire boundary.
+      // aperture-sm7uc (#6 fix) — per-lançamento gift resolution.
+      // Each LancamentoFinanceiro carries `idContribuicao` directly
+      // (Plan 0016 Phase 2 / migration 023), so we resolve THIS row's
+      // contribuição instead of collapsing the whole pagamento to the
+      // first cart item — which was the regression that made every
+      // ticket in a multi-item cart show the same name in the painel
+      // extrato.
+      //
+      // When the contribuição has been deleted between pagamento and
+      // read, contribuicao stays undefined and the projection falls
+      // back to empty-string/null at the wire boundary. pagamento
+      // presence isn't required for the name lookup, but we still
+      // surface it via the parent state for timestamp + balance
+      // metadata.
       let contribuicao: { nome: string; imagemUrl: string | null } | undefined;
-      if (pagamento !== undefined) {
-        const idC = pagamento.intencao.idContribuicao;
-        const fetched = await ctx.deps.contribuicaoRepository.findById(
-          idC as never,
-        );
-        if (fetched !== undefined && fetched !== null) {
-          contribuicao = {
-            nome: fetched.nome,
-            imagemUrl: fetched.imagemUrl ?? null,
-          };
-        }
+      const fetched = await ctx.deps.contribuicaoRepository.findById(
+        lancamento.idContribuicao as never,
+      );
+      if (fetched !== undefined && fetched !== null) {
+        contribuicao = {
+          nome: fetched.nome,
+          imagemUrl: fetched.imagemUrl ?? null,
+        };
       }
       return {
         lancamento,
@@ -426,11 +509,56 @@ const extratoRouter = t.router({
         let dateRangeStartMs: number | null = null;
         let dateRangeEndMs: number | null = null;
         const distinctPagamentos = new Set<string>();
+        // aperture-kvpvf — strip-counter accumulators.
+        //   recadosPagamentoIds — distinct aprovado pagamentos with a
+        //     non-null contribuinte.nome AND a non-empty trimmed
+        //     mensagem. Same eligibility as B3's
+        //     MuralRecadoProjection, just counted instead of projected.
+        //   presentesItensCountedFor — pagamentos whose items we've
+        //     already tallied (each pagamento appears once per
+        //     lançamento in liveStates; we tally each one's items
+        //     exactly once).
+        //   totalPresentesItensCount — sum of `tipo='contribuicao'`
+        //     items across all aprovado pagamentos. Surcharges
+        //     skipped — they aren't gifts.
+        const recadosPagamentoIds = new Set<string>();
+        const presentesItensCountedFor = new Set<string>();
+        let totalPresentesItensCount = 0;
 
         for (const state of liveStates) {
           const { lancamento, pagamento, liberacao } = state;
           totalRecebidoCents += lancamento.amountCents;
           distinctPagamentos.add(lancamento.idPagamento);
+
+          // aperture-kvpvf — strip counters. We only want APROVADO
+          // pagamentos (deriveLiberacao guarantees non-cancelado already,
+          // but a parent pagamento can still be in pendente/rejeitado
+          // when the lançamento hasn't materialised — defensive guard).
+          if (pagamento && pagamento.status === "aprovado") {
+            // Items count: tally once per pagamento, sum contribuicao-tipo items.
+            if (!presentesItensCountedFor.has(pagamento.id)) {
+              presentesItensCountedFor.add(pagamento.id);
+              for (const item of pagamento.intencao.items) {
+                if (item.tipo === "contribuicao") {
+                  totalPresentesItensCount += 1;
+                }
+              }
+            }
+            // Recados count: same predicate as B3's
+            // MuralRecadoProjection (findMensagensMuralByCampanha):
+            // contribuinte non-null (carries nome by schema) AND
+            // mensagem is a non-empty trimmed string.
+            const contribuinte = pagamento.intencao.contribuinte;
+            if (contribuinte !== null) {
+              const mensagem = contribuinte.mensagem;
+              if (
+                typeof mensagem === "string" &&
+                mensagem.trim().length > 0
+              ) {
+                recadosPagamentoIds.add(pagamento.id);
+              }
+            }
+          }
 
           const tsMs =
             pagamento?.criadoEm.getTime() ?? lancamento.criadoEm.getTime();
@@ -475,6 +603,8 @@ const extratoRouter = t.router({
           proximaTransfDate:
             proximaTransfMs === null ? null : new Date(proximaTransfMs).toISOString(),
           totalPresentes: distinctPagamentos.size,
+          totalRecadosCount: recadosPagamentoIds.size,
+          totalPresentesItensCount,
           dateRangeStart:
             dateRangeStartMs === null ? null : new Date(dateRangeStartMs).toISOString(),
           dateRangeEnd:
@@ -537,7 +667,25 @@ const extratoRouter = t.router({
             ? encodeRowCursor(page[page.length - 1] as ExtratoLancamentoState)
             : null;
 
-        const rows: ExtratoRowDTO[] = page.map((s) => ({
+        const rows: ExtratoRowDTO[] = page.map((s) => {
+          // aperture-qp4mq — resolve THIS lançamento's parent
+          // intencao_items row to read its per-item quantidade. The
+          // FK lives at s.lancamento.idItemPagamento (Plan 0016 Phase
+          // 2 — every lançamento carries the NOT-NULL item id), so the
+          // lookup is unambiguous even in carts with two items pointing
+          // at the same contribuição. Recebedor lançamentos are
+          // pre-filtered to credito_saldo_recebedor (line 388) so the
+          // matched item is always a contribuicao-tipo; the runtime
+          // type guard keeps TS narrow + falls back to 1 if the parent
+          // pagamento can't be resolved (deleted between read + projection).
+          const items = s.pagamento?.intencao.items ?? [];
+          const matchedItem = items.find(
+            (i: (typeof items)[number]) =>
+              i.id === s.lancamento.idItemPagamento,
+          );
+          const quantidade =
+            matchedItem?.tipo === "contribuicao" ? matchedItem.quantidade : 1;
+          return {
           idLancamento: s.lancamento.id,
           idPagamento: s.lancamento.idPagamento,
           contribuinteNome: s.pagamento?.intencao.contribuinte?.nome ?? null,
@@ -546,6 +694,7 @@ const extratoRouter = t.router({
           // with a neutral "lançamento" affordance.
           contribuicaoNome: s.contribuicao?.nome ?? "",
           contribuicaoImagemUrl: s.contribuicao?.imagemUrl ?? null,
+          quantidade,
           amountCents: s.lancamento.amountCents as unknown as number,
           liberacao: s.liberacao,
           timestamp: (
@@ -556,7 +705,8 @@ const extratoRouter = t.router({
               ? (s.pagamento?.intencao.balanceTransactionAvailableOn?.toISOString() ??
                 null)
               : null,
-        }));
+          };
+        });
 
         return { rows, nextCursor, hasMore };
       } catch (err) {
@@ -604,7 +754,52 @@ const transferenciaRouter = t.router({
     }),
 });
 
+// ────────────────────────────────────────────────────────────────────
+//  recebedor.criar — first-time onboarding (aperture-0bynm, kbmel)
+// ────────────────────────────────────────────────────────────────────
+
+const RecebedorCriarInputSchema = CriarRecebedorParaCampanhaInputSchema.pick({
+  idCampanha: true,
+  dadosRecebedor: true,
+});
+
+const RecebedorCriarOutputSchema = z.object({
+  idRecebedor: z.string().uuid(),
+});
+
+const criarProcedure = t.procedure
+  .input(RecebedorCriarInputSchema)
+  .output(RecebedorCriarOutputSchema)
+  .mutation(async ({ ctx, input }) => {
+    try {
+      // Admin guard + tenant resolution. resolveAdminOfCampanha throws
+      // UNAUTHORIZED on missing session / non-admin caller / unknown
+      // campanha (no existence leak). idConta is the caller's session-
+      // derived identity that the use-case re-validates via its admin
+      // guard (defense in depth).
+      const { idConta } = await resolveAdminOfCampanha(ctx, input.idCampanha);
+
+      const result = await criarRecebedorParaCampanha(
+        {
+          campanhaRepository: ctx.deps.campanhaRepository,
+          recebedorRepository: ctx.deps.recebedorRepository,
+          clock: ctx.deps.clock,
+          observability: ctx.deps.observability,
+        },
+        {
+          idCampanha: input.idCampanha,
+          idContaCaller: idConta,
+          dadosRecebedor: input.dadosRecebedor,
+        },
+      );
+      return { idRecebedor: result.idRecebedor };
+    } catch (err) {
+      throw toTRPCError(err);
+    }
+  });
+
 export const recebedorRouter = t.router({
+  criar: criarProcedure,
   extrato: extratoRouter,
   transferencia: transferenciaRouter,
 });

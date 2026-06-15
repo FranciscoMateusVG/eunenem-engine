@@ -34,20 +34,14 @@ const processingEm = new Date('2026-05-01T12:01:00.000Z');
 const atualizadoEm = new Date('2026-05-01T12:05:00.000Z');
 const estornadoEm = new Date('2026-05-02T15:00:00.000Z');
 
-const composicaoValores = {
-  idContribuicao,
-  contributionAmountCents: 8000,
-  feeAmountCents: 400,
-  totalPaidCents: 8400,
-  receiverAmountCents: 8000,
-  responsavelTaxa: 'contribuinte' as const,
-};
+const idCampanha = '550e8400-e29b-41d4-a716-446655440205';
+const idItem = '550e8400-e29b-41d4-a716-446655440206';
 
 const transacaoAprovada: TransacaoExterna = {
   id: idTransacaoExterna,
   provedor: 'fake-provider',
   status: 'aprovado',
-  amountCents: 8400,
+  amountCents: 8400 as never,
   criadaEm: atualizadoEm,
   statusBruto: 'aprovado',
 };
@@ -59,11 +53,39 @@ const transacaoRejeitada: TransacaoExterna = {
 };
 
 function novoPendente(metodo: 'pix' | 'credit_card' = 'pix'): Pagamento {
+  // Plan 0016 Phase 2: build a single-item PIX cart fixture.
+  const item = {
+    id: idItem,
+    tipo: 'contribuicao' as const,
+    idContribuicao,
+    quantidade: 1,
+    composicaoValoresItem: {
+      tipo: 'contribuicao' as const,
+      idContribuicao,
+      quantidade: 1,
+      contributionUnitAmountCents: 8000,
+      feeUnitAmountCents: 400,
+      receiverUnitAmountCents: 8000,
+      lineContributionAmountCents: 8000,
+      lineFeeAmountCents: 400,
+      lineReceiverAmountCents: 8000,
+    },
+    criadoEm,
+  };
   return criarPagamentoPendente({
     idPagamento,
     idIntencaoPagamento,
-    composicaoValores,
-    valorACobrarCents: 8400,
+    items: [item as never],
+    composicaoValoresAggregate: {
+      idCampanha: idCampanha as never,
+      totalContributionCents: 8000 as never,
+      totalFeeCents: 400 as never,
+      totalReceiverCents: 8000 as never,
+      totalSurchargeCents: 0,
+      totalPaidCents: 8400 as never,
+      responsavelTaxa: 'contribuinte',
+    },
+    valorACobrarCents: 8400 as never,
     metodo,
     criadoEm,
   });

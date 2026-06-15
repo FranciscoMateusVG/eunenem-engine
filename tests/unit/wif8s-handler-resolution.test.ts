@@ -25,22 +25,22 @@
 
 import { randomUUID } from 'node:crypto';
 import { trace } from '@opentelemetry/api';
-import { beforeEach, describe, expect, it } from 'vitest';
 import type Stripe from 'stripe';
+import { beforeEach, describe, expect, it } from 'vitest';
 import type { ServerDeps } from '../../apps/eunenem-server/server/auth/setup.js';
 import { dispatchVerifiedStripeEvent } from '../../apps/eunenem-server/server/webhooks/stripe-webhook.ts';
 import { CampanhaRepositoryMemory } from '../../src/adapters/arrecadacao/campanha-repository.memory.js';
 import { ContribuicaoRepositoryMemory } from '../../src/adapters/arrecadacao/contribuicao-repository.memory.js';
 import { RecebedorRepositoryMemory } from '../../src/adapters/arrecadacao/recebedor-repository.memory.js';
-import { LivroFinanceiroRepositoryMemory } from '../../src/adapters/pagamentos/financeiro/livro-repository.memory.js';
 import { PagamentoEventPublisherMemory } from '../../src/adapters/pagamentos/event-publisher.memory.js';
+import { LivroFinanceiroRepositoryMemory } from '../../src/adapters/pagamentos/financeiro/livro-repository.memory.js';
 import { PagamentoProviderFake } from '../../src/adapters/pagamentos/provider.fake.js';
 import { PagamentoRepositoryMemory } from '../../src/adapters/pagamentos/repository.memory.js';
 import { WebhookEventArchiveMemory } from '../../src/adapters/webhook-archive/webhook-event-archive.memory.js';
-import { criarPagamentoPendente } from '../../src/domain/pagamentos/entities/pagamento.js';
 import { NoopLogger } from '../../src/observability/noop-logger.js';
 import type { Observability } from '../../src/observability/observability.js';
 import { noopTracer } from '../../src/observability/tracer.js';
+import { makePagamento } from '../helpers/pagamento-repository.conformance.js';
 
 interface TestRig {
   deps: ServerDeps;
@@ -96,22 +96,15 @@ async function seedPagamentoWithSession(
   sessionId: string,
 ): Promise<{ idPagamento: string; idContribuicao: string }> {
   const idPagamento = randomUUID();
-  const idIntencaoPagamento = randomUUID();
   const idContribuicao = randomUUID();
-  const pagamento = criarPagamentoPendente({
-    idPagamento,
-    idIntencaoPagamento,
-    composicaoValores: {
-      idContribuicao,
-      contributionAmountCents: 4500,
-      feeAmountCents: 225,
-      surchargeCents: 0 as never,
-      totalPaidCents: 4725,
-      receiverAmountCents: 4500,
-      responsavelTaxa: 'contribuinte',
-    } as never,
-    valorACobrarCents: 4725 as never,
+  const pagamento = makePagamento({
+    id: idPagamento,
+    idContribuicao,
     metodo: 'pix',
+    contributionUnitAmountCents: 4500,
+    feeUnitAmountCents: 225,
+    surchargeCents: 0,
+    valorACobrarCents: 4725,
     externalRef: sessionId,
     criadoEm: new Date('2026-06-02T12:00:00.000Z'),
   });
@@ -120,11 +113,7 @@ async function seedPagamentoWithSession(
 }
 
 /** Set the pi ref on an existing pagamento (simulates cs.completed having run). */
-async function bindPagamentoToPi(
-  rig: TestRig,
-  idPagamento: string,
-  pi: string,
-): Promise<void> {
+async function bindPagamentoToPi(rig: TestRig, idPagamento: string, pi: string): Promise<void> {
   const pag = await rig.pagamentoRepository.findById(idPagamento as never);
   if (!pag) throw new Error('pagamento not seeded');
   await rig.pagamentoRepository.update({
@@ -133,11 +122,7 @@ async function bindPagamentoToPi(
   });
 }
 
-async function bindPagamentoToCh(
-  rig: TestRig,
-  idPagamento: string,
-  ch: string,
-): Promise<void> {
+async function bindPagamentoToCh(rig: TestRig, idPagamento: string, ch: string): Promise<void> {
   const pag = await rig.pagamentoRepository.findById(idPagamento as never);
   if (!pag) throw new Error('pagamento not seeded');
   await rig.pagamentoRepository.update({
@@ -160,10 +145,7 @@ async function markPagamentoAprovado(rig: TestRig, idPagamento: string): Promise
 }
 
 /** Build a fake Stripe.Event payload — only the fields the handler reads. */
-function makeStripeEvent(
-  type: string,
-  data: Record<string, unknown>,
-): Stripe.Event {
+function makeStripeEvent(type: string, data: Record<string, unknown>): Stripe.Event {
   return {
     id: `evt_${randomUUID()}`,
     object: 'event',

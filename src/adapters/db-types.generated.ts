@@ -67,7 +67,6 @@ export interface Contas {
 }
 
 export interface Contribuicoes {
-  // Plan 0015 / migration 019: status + contribuinte_* dropped.
   campanha_id: string;
   criada_em: Generated<Timestamp>;
   grupo: string | null;
@@ -75,6 +74,7 @@ export interface Contribuicoes {
   id_opcao_contribuicao: string;
   imagem_url: string | null;
   nome: string;
+  quantidade: Generated<number>;
   valor: number;
 }
 
@@ -109,20 +109,32 @@ export interface Eventos {
   id_campanha: string;
   modalidade: string;
   tipo_evento: string;
+export interface IntencaoItems {
+  contribution_unit_amount_cents: Int8 | null;
+  criado_em: Timestamp;
+  fee_unit_amount_cents: Int8 | null;
+  id: string;
+  id_contribuicao: string | null;
+  id_intencao_pagamento: string;
+  id_pagamento: string;
+  line_contribution_amount_cents: Int8 | null;
+  line_fee_amount_cents: Int8 | null;
+  line_receiver_amount_cents: Int8 | null;
+  position: number;
+  quantidade: number;
+  receiver_unit_amount_cents: Int8 | null;
+  surcharge_amount_cents: Int8 | null;
+  tipo: string;
 }
 
 export interface LancamentosFinanceiros {
-  // Plan 0015 / migration 019: status + matura_em dropped;
-  // transferido_em + cancelado_em added (both nullable).
-  // aperture-s03dr / migration 021: id_repasse added (nullable —
-  // points at the pending/aprovado repasse_recebedor that claimed
-  // this lancamento, if any).
   amount_cents: number;
   cancelado_em: Timestamp | null;
   criado_em: Timestamp;
   id: string;
   id_campanha: string | null;
   id_contribuicao: string;
+  id_item_pagamento: string;
   id_pagamento: string;
   id_repasse: string | null;
   tipo: string;
@@ -144,26 +156,26 @@ export interface OpcoesContribuicao {
 }
 
 export interface Pagamentos {
-  // Plan 0015 / migration 019: intencao_contribuinte_{nome,email,mensagem}
-  // added (all nullable; populated by webhook at checkout.session.completed).
-  // Plan 0015 / migration 020 (aperture-mjgxe):
-  // intencao_balance_transaction_available_on added (nullable).
   atualizado_em: Timestamp;
   criado_em: Timestamp;
   id: string;
-  intencao_amount_cents: number;
   intencao_balance_transaction_available_on: Timestamp | null;
   intencao_charge_external_ref: string | null;
-  intencao_composicao_valores: Json;
   intencao_contribuinte_email: string | null;
   intencao_contribuinte_mensagem: string | null;
   intencao_contribuinte_nome: string | null;
   intencao_criada_em: Timestamp;
   intencao_external_ref: string | null;
   intencao_id: string;
-  intencao_id_contribuicao: string;
+  intencao_id_campanha: string;
   intencao_metodo: string;
   intencao_payment_intent_external_ref: string | null;
+  intencao_total_contribution_cents: Int8;
+  intencao_total_fee_cents: Int8;
+  intencao_total_paid_cents: Int8;
+  intencao_total_receiver_cents: Int8;
+  intencao_total_surcharge_cents: Int8;
+  mensagem_lida_em: Timestamp | null;
   status: string;
   transacao_externa: Json | null;
 }
@@ -200,8 +212,6 @@ export interface Recebedores {
 }
 
 export interface RepassesRecebedor {
-  // aperture-s03dr / migration 021: aprovado_em + bank_transfer_ref added
-  // (both nullable); status CHECK extended to include 'aprovado'.
   amount_cents: number;
   aprovado_em: Timestamp | null;
   bank_transfer_ref: string | null;
@@ -241,6 +251,7 @@ export interface Usuarios {
   id_plataforma: string;
   nome_exibicao: string;
   slug: string;
+  tutorial_completado_em: Timestamp | null;
 }
 
 export interface Verifications {
@@ -262,6 +273,7 @@ export interface DB {
   convidados: Convidados;
   convites: Convites;
   eventos: Eventos;
+  intencao_items: IntencaoItems;
   lancamentos_financeiros: LancamentosFinanceiros;
   listas_de_convidados: ListasDeConvidados;
   opcoes_contribuicao: OpcoesContribuicao;

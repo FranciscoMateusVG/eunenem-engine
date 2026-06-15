@@ -12,7 +12,7 @@ import {
   atualizarContribuicao,
   type Campanha,
   type Contribuicao,
-  contribuicaoEstaIndisponivel,
+  esgotada,
   criarContribuicoesEmLote,
   type IdCampanha,
   type IdContribuicao,
@@ -211,16 +211,24 @@ const CreateInputSchema = z.object({
   valor: z.number().int().nonnegative(),
   imagemUrl: ImagemUrlSchema.optional(),
   grupo: z.string().trim().min(1).max(60).optional(),
-  qty: z.number().int().min(1).max(100),
+  /**
+   * Plan 0016 (aperture-putz5): slot capacity. `quantidade=N` produces
+   * ONE row with quantidade=N, not N rows with quantidade=1 (pre-0016
+   * `qty` shape — semantically renamed). Defaults to 1 in the engine
+   * use-case when omitted; required here so the painel commits to a
+   * value at the wire boundary.
+   */
+  quantidade: z.number().int().min(1).max(100),
 });
 
 /**
- * Bulk creation input (aperture-d6atj fix-up). One mutation creates N
- * contribuicoes across M catalog items in a single SQL INSERT.
+ * Bulk creation input (aperture-d6atj fix-up; Plan 0016 aperture-putz5
+ * single-row + quantidade migration).
  *
- * Use case: operator picks "Pacote de Fraldas RN qty=8" + "Mamadeira qty=4"
- * + "kit chá de bebê" (10 items × qty=3) → ONE INSERT of N rows, not N
- * round-trips.
+ * Use case: operator picks "Pacote de Fraldas RN quantidade=8" + "Mamadeira
+ * quantidade=4" + "kit chá de bebê" (10 items, each quantidade=1) → ONE
+ * INSERT of 12 rows (NOT 30 — each item is one slot regardless of
+ * quantidade).
  */
 const CreateBulkInputSchema = z.object({
   items: z
@@ -230,7 +238,7 @@ const CreateBulkInputSchema = z.object({
         valor: z.number().int().nonnegative(),
         imagemUrl: ImagemUrlSchema.optional(),
         grupo: z.string().trim().min(1).max(60).optional(),
-        qty: z.number().int().min(1).max(100),
+        quantidade: z.number().int().min(1).max(100),
       }),
     )
     .min(1)
@@ -243,6 +251,13 @@ const UpdateInputSchema = z.object({
   valor: z.number().int().nonnegative().optional(),
   imagemUrl: ImagemUrlSchema.nullable().optional(),
   grupo: z.string().trim().min(1).max(60).nullable().optional(),
+  /**
+   * Plan 0016 (aperture-putz5 + aperture-1l37i): change a slot's capacity.
+   * Per locked decision #10 the new value can be lower than already-sold
+   * count — `quantidadeRestante` goes negative, `esgotada` returns true.
+   * The use-case + entity validate `quantidade >= 1` only.
+   */
+  quantidade: z.number().int().min(1).max(100).optional(),
 });
 
 const DeleteInputSchema = z.object({
@@ -254,12 +269,15 @@ const DeleteInputSchema = z.object({
 function toListItem(
   c: Contribuicao,
   indisponivel: boolean,
+  quantidadeRestante: number,
 ): {
   id: IdContribuicao;
   nome: string;
   valor: number;
   imagemUrl: string | null;
   grupo: string | null;
+  quantidade: number;
+  quantidadeRestante: number;
   indisponivel: boolean;
 } {
   // Post-Phase-1 (plan 0015): contribuição has no status + no contribuinte.
@@ -272,12 +290,30 @@ function toListItem(
   // recebidos" UI reads this boolean to compute totals). Computed via
   // pagamentoRepository EXISTS query at the caller, then passed in
   // here so the projection function stays sync + injection-free.
+  //
+  // Plan 0016 (aperture-putz5 engine + aperture-1l37i frontend): expose
+  // `quantidade` so the painel renders the slot's capacity directly
+  // (e.g. "Fralda Ecológica × 7") and the admin ContribuicoesList can
+  // group + aggregate across legacy multi-row data uniformly. The list
+  // procedure already loads it from the entity; threading it through
+  // here keeps the projection self-contained.
+  //
+  // aperture-ypk01: also surface `quantidadeRestante` so the painel's
+  // lista-de-presentes "X de N recebidos" tally renders the real
+  // partial-sale count for new-shape rows. The binary `indisponivel`
+  // is only true when ALL slots are sold; partial purchases (5 of 10)
+  // need the explicit remaining count to compute received. Mirrors the
+  // visitor-side projection landed in PR #182. Overshoot accepted per
+  // locked decision #10 — quantidadeRestante can go negative; consumers
+  // clamp at 0 for display.
   return {
     id: c.id,
     nome: c.nome,
     valor: c.valor,
     imagemUrl: c.imagemUrl,
     grupo: c.grupo,
+    quantidade: c.quantidade,
+    quantidadeRestante,
     indisponivel,
   };
 }
@@ -313,37 +349,50 @@ export const contribuicaoRouter = t.router({
         },
         { idCampanha: campanha.id, idOpcaoContribuicao: idOpcaoPresentes },
       );
-      // aperture-ocw8r: bulk EXISTS lookup once for all rows (one indexed
-      // pagamentos query — partial index `pagamentos_aprovado_por_contribuicao_idx`).
-      // Matches the pattern admin-router uses single-row + the pattern
-      // obterContribuicoesPrecalculadasCampanha uses for visitor reads.
-      // Falls back to empty set if no slots exist.
-      const idsIndisponiveis =
+      // Plan 0016 (aperture-eg1s2): bulk SUM lookup once for all rows
+      // (one indexed pagamentos query — partial index
+      // `idx_intencao_items_contribuicao_aprovado` INCLUDE quantidade).
+      // Each slot's esgotada state derives from quantidade_restante <= 0.
+      // Falls back to empty map if no slots exist.
+      const sums =
         items.length === 0
-          ? []
-          : await ctx.deps.pagamentoRepository.findIdsContribuicoesComPagamentoAprovado(
+          ? new Map<IdContribuicaoPagamento, number>()
+          : await ctx.deps.pagamentoRepository.somarQuantidadesContribuicoesEmPagamentosAprovados(
               items.map((c) => c.id as unknown as IdContribuicaoPagamento),
             );
-      const indisponiveisSet = new Set<string>(idsIndisponiveis);
-      return items.map((c) => toListItem(c, indisponiveisSet.has(c.id)));
+      const indisponiveisSet = new Set<string>();
+      const restantePorId = new Map<string, number>();
+      for (const c of items) {
+        const sold = sums.get(c.id as unknown as IdContribuicaoPagamento) ?? 0;
+        const restante = c.quantidade - sold;
+        restantePorId.set(c.id, restante);
+        if (restante <= 0) {
+          indisponiveisSet.add(c.id);
+        }
+      }
+      return items.map((c) =>
+        toListItem(c, indisponiveisSet.has(c.id), restantePorId.get(c.id) ?? c.quantidade),
+      );
     } catch (err) {
       throw toTRPCError(err);
     }
   }),
 
   /**
-   * Creates `qty` separate contribuicoes for a single catalog item shape.
+   * Creates ONE contribuição slot with `quantidade=N` (pre-0016 this used
+   * to expand into N rows × quantidade=1 — the `qty` row-multiplier
+   * pattern that Plan 0016 retires per locked decision #1).
+   *
    * Server derives `idCampanha` + `idOpcaoContribuicao` from the session —
-   * client only supplies the shape + qty.
+   * client only supplies the shape + quantidade.
    *
    * Backward-compat wrapper (aperture-d6atj fix-up): delegates to
-   * `createBulk` with a single-item array. There is now exactly ONE write
-   * path (the bulk path) so single-item creates also go through the
-   * single-INSERT use-case — the wrapper exists only to preserve the
-   * legacy procedure shape for callers that haven't migrated yet.
+   * `createBulk` with a single-item array. There is exactly ONE write
+   * path (the bulk path); single-item creates go through the same
+   * single-INSERT use-case.
    *
-   * All-or-nothing semantics via the bulk repo: if any row fails, none
-   * persist (no partial state).
+   * All-or-nothing semantics via the bulk repo: if the row fails (FK,
+   * unique), nothing persists.
    */
   create: t.procedure
     .input(CreateInputSchema)
@@ -366,7 +415,7 @@ export const contribuicaoRouter = t.router({
                 valor: input.valor,
                 imagemUrl: input.imagemUrl ?? null,
                 grupo: input.grupo ?? null,
-                qty: input.qty,
+                quantidade: input.quantidade,
               },
             ],
           },
@@ -378,23 +427,18 @@ export const contribuicaoRouter = t.router({
     }),
 
   /**
-   * Bulk creation across M catalog items (aperture-d6atj fix-up). Each
-   * item is expanded to `qty` contribuicoes; all expand into ONE SQL
-   * INSERT statement (single round-trip, atomic).
+   * Bulk creation across M catalog items (aperture-d6atj fix-up; Plan
+   * 0016 aperture-putz5 single-row + quantidade migration).
    *
-   * Concrete shape: operator picks a "kit chá de bebê" of 10 items × qty=3
-   * → 30 contribuicoes in ONE INSERT. Without this procedure the legacy
-   * single-create loop would emit 30 round-trips.
+   * Concrete shape: operator picks a "kit chá de bebê" of 10 items each
+   * with quantidade=1 → 10 contribuicoes in ONE INSERT. A
+   * Fralda-RN-quantidade=8 slot is ONE row, not 8 — locked decision #1.
+   * Without this procedure each single-create would round-trip; bulk lets
+   * the painel commit a whole catalog selection in a single mutation.
    *
    * Server derives `idCampanha` + `idOpcaoPresentes` from the session —
    * the client never specifies them, and every item in the batch is
    * scoped to the same tenant.
-   *
-   * Future follow-up: `createFromCatalog` / `createFromListaPronta`
-   * (convenience procedures that resolve a template id → items[]) are
-   * DEFERRED — the catalog→contribuicao mapping ambiguity from the
-   * original d6atj recon still needs operator alignment. Once resolved,
-   * those procedures will compose `criarContribuicoesEmLote` directly.
    */
   createBulk: t.procedure
     .input(CreateBulkInputSchema)
@@ -416,7 +460,7 @@ export const contribuicaoRouter = t.router({
               valor: item.valor,
               imagemUrl: item.imagemUrl ?? null,
               grupo: item.grupo ?? null,
-              qty: item.qty,
+              quantidade: item.quantidade,
             })),
           },
         );
@@ -443,21 +487,38 @@ export const contribuicaoRouter = t.router({
             valor: input.valor,
             imagemUrl: input.imagemUrl,
             grupo: input.grupo,
+            // Plan 0016 (aperture-putz5 engine + aperture-1l37i frontend):
+            // quantidade flows through to the engine use-case. Rex's
+            // engine PR extended AtualizarContribuicaoInputSchema to
+            // accept this field; the painel can now run atomic single-
+            // request updates for qty changes too (the qty-changed
+            // fallback in saveEdit retires in a follow-up cleanup).
+            quantidade: input.quantidade,
           },
         );
-        // aperture-ocw8r: single-row EXISTS via the wrapper that fan-outs
-        // to the same bulk port method. atualizarContribuicao already
-        // rejects updates against `indisponivel` slots upstream, so in
-        // practice this returns `false` — but we compute it explicitly
-        // to keep the projection contract consistent with `list`.
-        const indisponivel = await contribuicaoEstaIndisponivel(
+        // Plan 0016 (aperture-eg1s2): single-row esgotada check.
+        // atualizarContribuicao already rejects updates against
+        // sold-out slots upstream, so in practice this returns
+        // `false` — but we compute it explicitly to keep the
+        // projection contract consistent with `list`.
+        const indisponivel = await esgotada(
           {
             pagamentoRepository: ctx.deps.pagamentoRepository,
+            contribuicaoRepository: ctx.deps.contribuicaoRepository,
             observability: ctx.deps.observability,
           },
           { idContribuicao: updated.id },
         );
-        return toListItem(updated, indisponivel);
+        // aperture-ypk01: also compute quantidadeRestante for this
+        // single row so the update projection matches the list shape.
+        // SUM the aprovado items for this id; restante = quantidade -
+        // sold. Same indexed query the list uses, scoped to one id.
+        const sums = await ctx.deps.pagamentoRepository.somarQuantidadesContribuicoesEmPagamentosAprovados(
+          [updated.id as unknown as IdContribuicaoPagamento],
+        );
+        const sold = sums.get(updated.id as unknown as IdContribuicaoPagamento) ?? 0;
+        const quantidadeRestante = updated.quantidade - sold;
+        return toListItem(updated, indisponivel, quantidadeRestante);
       } catch (err) {
         throw toTRPCError(err);
       }

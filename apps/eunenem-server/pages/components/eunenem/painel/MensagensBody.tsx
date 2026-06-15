@@ -2,36 +2,50 @@ import { useMemo, useState, type CSSProperties } from "react";
 import { toast } from "sonner";
 
 import type { PainelSectionBodyProps } from "@/PainelSectionPage";
-import {
-  RECADOS_SEED,
-  avatarFor,
-  fmtValue,
-  initialsOf,
-  type Recado,
-} from "@/lib/mocks/mensagens";
+import { trpc } from "@/lib/trpc";
 
-// aperture-1oafq — "Mensagens recebidas" (recados de quem presenteou).
+// aperture-5v766 Phase B + aperture-kih74 swap-over — admin mensagens page
+// against Rex's Phase A backend (PR #199).
 //
 // Content-only body for /painel/:slug/mensagens. The topbar / shell / Tweaks
 // come from PainelLayout — this renders ONLY the page content, matching the
 // painel-body conventions established by ConvidadosBody / PresentesBody.
 //
-// There is NO dedicated design export for this page, so it is built
-// DESIGN-CONSISTENT with the EuNeném Sistema de Design:
-//   - header card (radial lilás "stained paper" pseudo-glow) with the count of
-//     recados, a "X novas" pink badge, a Caveat eyebrow ("recadinhos ♡") and a
-//     Patrick Hand title ("mensagens recebidas") with yellow marca-texto.
-//   - filter chips (todas / não lidas).
-//   - a list of recado cards: gradient-placeholder avatar + initials, name, the
-//     affectionate message (Caveat, quoted), a gift/value chip
-//     ("presenteou com R$ 120,00 · Kit body"), a date, and an
-//     "agradecer ♡" affordance. Unread recados carry a soft lilás "stamp" tint
-//     + a "nova ♡" handwritten mark.
+// Wire shape from `trpc.painelMensagens.list({ slug })`:
+//   - idPagamento: uuid string
+//   - contribuinteNome: string
+//   - mensagem: string
+//   - criadoEm: ISO-8601 string (parsed at render via new Date)
+//   - lidaEm: ISO-8601 string | null
+//   - valorContribuicaoCents: integer (BRL cents)
+//   - contribuicaoNome: string | null (null when the contribuição row was
+//     deleted between pagamento and read — render "(presente removido)")
 //
-// Mock-first: no fetch / auth / backend. Marking-as-read and "agradecer" all
-// mutate local state and surface a sonner toast. Styling uses the global
-// design tokens (--plum / --lilac / --coral-pink / --yellow, plum-tinted
-// shadows) so it inherits the scrapbook aesthetic.
+// Slug-keyed (no idCampanha resolver needed — tenant chain runs server-side
+// from session-derived idUsuario + slug verification).
+//
+// Type declared inline rather than derived from AppRouter via
+// `inferRouterOutputs` because the engine's painel-mensagens-router has
+// some relative-path noise in its src/domain imports that breaks the
+// inferred-router chain in this worktree's strict tsc. The runtime call
+// + wire validation are unaffected; the inline shape stays a verbatim
+// mirror of `AdminRecadoProjectionSchema` exported from `src/index.ts`.
+interface AdminRecadoProjection {
+  idPagamento: string;
+  contribuinteNome: string;
+  mensagem: string;
+  criadoEm: string;
+  lidaEm: string | null;
+  valorContribuicaoCents: number;
+  contribuicaoNome: string | null;
+}
+
+// AGRADECER scope decision (aperture-5v766 spec §6):
+// The button stays visible as an affordance — hiding it would erase a
+// signal the operator and contribuintes both expect. On click we surface a
+// sonner toast "em breve" so the affordance is honest about its stub state.
+// The eventual AGRADECER path needs operator spec (P3 follow-up); when
+// that ships, the toast swap becomes a real mutation.
 
 const SHADOW_SM = "0 2px 10px rgba(107, 60, 94, 0.06)";
 const SHADOW_MD = "0 14px 36px rgba(107, 60, 94, 0.1)";
@@ -39,6 +53,72 @@ const SHADOW_MD = "0 14px 36px rgba(107, 60, 94, 0.1)";
 const FONT_HAND = "var(--font-patrick-hand), cursive";
 const FONT_CAVEAT = "var(--font-caveat), cursive";
 const FONT_SANS = "var(--font-dm-sans), system-ui, sans-serif";
+
+// ---------- avatar palette (djb2 → palette index) ----------
+const AVATAR_PALETTES: readonly { bg: string; fg: string }[] = [
+  { bg: "var(--lilac-soft)", fg: "var(--lilac-deep)" },
+  { bg: "var(--pink-soft)", fg: "var(--coral-pink)" },
+  { bg: "color-mix(in srgb, var(--green) 32%, white)", fg: "var(--green-deep)" },
+  { bg: "color-mix(in srgb, var(--yellow) 35%, white)", fg: "#8a6a14" },
+  { bg: "color-mix(in srgb, var(--lilac) 28%, white)", fg: "var(--plum)" },
+];
+
+/** djb2 hash → deterministic palette pick by contribuinte name. */
+function avatarFor(name: string): { bg: string; fg: string } {
+  let h = 5381;
+  for (let i = 0; i < name.length; i++) {
+    h = ((h << 5) + h + name.charCodeAt(i)) >>> 0;
+  }
+  return AVATAR_PALETTES[h % AVATAR_PALETTES.length] ?? AVATAR_PALETTES[0]!;
+}
+
+function initialsOf(name: string): string {
+  const parts = name
+    .replace(/\(.*?\)/g, "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (parts.length === 0) return "?";
+  const first = parts[0]?.[0] ?? "";
+  const last = parts.length > 1 ? parts[parts.length - 1]?.[0] ?? "" : "";
+  return (first + last).toUpperCase();
+}
+
+function fmtCents(cents: number): string {
+  return (cents / 100).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  });
+}
+
+const REL_DIVS: readonly [Intl.RelativeTimeFormatUnit, number][] = [
+  ["year", 60 * 60 * 24 * 365],
+  ["month", 60 * 60 * 24 * 30],
+  ["week", 60 * 60 * 24 * 7],
+  ["day", 60 * 60 * 24],
+  ["hour", 60 * 60],
+  ["minute", 60],
+];
+
+/**
+ * Relative time in pt-BR ("há 4 horas"). Falls back to "agora" under 1m.
+ *
+ * aperture-kih74 — accepts ISO-8601 strings (Rex's wire shape) instead of
+ * Date objects. Internal Date parse stays the same.
+ */
+function relativeTime(iso: string): string {
+  const d = new Date(iso);
+  const rtf = new Intl.RelativeTimeFormat("pt-BR", { numeric: "auto" });
+  const seconds = Math.round((d.getTime() - Date.now()) / 1000);
+  const abs = Math.abs(seconds);
+  if (abs < 60) return "agora";
+  for (const [unit, secs] of REL_DIVS) {
+    if (abs >= secs) {
+      return rtf.format(Math.round(seconds / secs), unit);
+    }
+  }
+  return "agora";
+}
 
 // ---------- icons (stroke style, mirrors sibling bodies) ----------
 function Icon({
@@ -89,52 +169,110 @@ const IconCheck = (p: { size?: number; style?: CSSProperties }) => (
     <polyline points="20 6 9 17 4 12" />
   </Icon>
 );
-const IconMail = (p: { size?: number; style?: CSSProperties }) => (
-  <Icon size={p.size} sw={1.7} style={p.style}>
-    <rect x="2" y="4" width="20" height="16" rx="2" />
-    <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
-  </Icon>
-);
+
+// ---------- skeleton card (loading state) ----------
+function SkeletonCard() {
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        background: "var(--paper)",
+        border: "1px solid var(--line)",
+        borderRadius: 22,
+        padding: "18px 20px",
+        display: "flex",
+        gap: 14,
+        boxShadow: SHADOW_SM,
+        opacity: 0.7,
+      }}
+    >
+      <div
+        style={{
+          width: 46,
+          height: 46,
+          flexShrink: 0,
+          borderRadius: "50%",
+          background: "var(--cream-2)",
+        }}
+      />
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 10 }}>
+        <div
+          style={{
+            width: "40%",
+            height: 16,
+            borderRadius: 6,
+            background: "var(--cream-2)",
+          }}
+        />
+        <div
+          style={{
+            width: "92%",
+            height: 14,
+            borderRadius: 6,
+            background: "var(--cream-2)",
+          }}
+        />
+        <div
+          style={{
+            width: "70%",
+            height: 14,
+            borderRadius: 6,
+            background: "var(--cream-2)",
+          }}
+        />
+      </div>
+    </div>
+  );
+}
 
 // ---------- recado card ----------
 function RecadoCard({
   r,
-  onThank,
-  onToggleRead,
+  onMarcarLida,
+  onAgradecer,
+  isMarkingLida,
 }: {
-  r: Recado;
-  onThank: (r: Recado) => void;
-  onToggleRead: (id: number) => void;
+  r: AdminRecadoProjection;
+  onMarcarLida: (idPagamento: string) => void;
+  onAgradecer: (r: AdminRecadoProjection) => void;
+  isMarkingLida: boolean;
 }) {
-  const pal = avatarFor(r.name);
-  const firstName = r.name.replace(/\(.*?\)/g, "").trim().split(/\s+/)[0];
+  const pal = avatarFor(r.contribuinteNome);
+  const isUnread = r.lidaEm === null;
+  const firstName = r.contribuinteNome
+    .replace(/\(.*?\)/g, "")
+    .trim()
+    .split(/\s+/)[0];
 
   return (
     <article
       style={{
-        background: r.read
-          ? "var(--paper)"
-          : "linear-gradient(135deg, var(--paper), rgba(232, 213, 240, 0.35))",
-        border: `1px solid ${r.read ? "var(--line)" : "rgba(167, 123, 190, 0.4)"}`,
+        background: isUnread
+          ? "linear-gradient(135deg, var(--paper), rgba(232, 213, 240, 0.35))"
+          : "var(--paper)",
+        border: `1px solid ${isUnread ? "rgba(167, 123, 190, 0.4)" : "var(--line)"}`,
         borderRadius: 22,
         padding: "18px 20px",
         display: "flex",
         gap: 14,
         position: "relative",
-        boxShadow: r.read ? SHADOW_SM : SHADOW_MD,
+        boxShadow: isUnread ? SHADOW_MD : SHADOW_SM,
       }}
     >
-      {!r.read && (
+      {isUnread && (
         <span
           style={{
             position: "absolute",
             top: 12,
             right: 16,
             fontFamily: FONT_CAVEAT,
-            fontSize: 18,
+            fontSize: 16,
+            fontWeight: 700,
+            letterSpacing: "0.08em",
             color: "var(--coral-pink)",
             transform: "rotate(-6deg)",
             pointerEvents: "none",
+            textTransform: "uppercase",
           }}
         >
           nova ♡
@@ -159,7 +297,7 @@ function RecadoCard({
         }}
         aria-hidden="true"
       >
-        {initialsOf(r.name)}
+        {initialsOf(r.contribuinteNome)}
       </div>
 
       {/* body */}
@@ -188,7 +326,7 @@ function RecadoCard({
               lineHeight: 1.1,
             }}
           >
-            {r.name}
+            {r.contribuinteNome}
           </span>
           <span
             style={{
@@ -198,7 +336,7 @@ function RecadoCard({
               whiteSpace: "nowrap",
             }}
           >
-            {r.date}
+            {relativeTime(r.criadoEm)}
           </span>
         </div>
 
@@ -211,7 +349,7 @@ function RecadoCard({
             margin: 0,
           }}
         >
-          &ldquo;{r.message}&rdquo;
+          &ldquo;{r.mensagem}&rdquo;
         </p>
 
         <div
@@ -224,7 +362,9 @@ function RecadoCard({
             marginTop: 2,
           }}
         >
-          {/* gift chip */}
+          {/* gift chip — aperture-kih74: valorContribuicaoCents rename +
+              null fallback for contribuicaoNome when the contribuição
+              row was deleted between pagamento and read. */}
           <span
             style={{
               display: "inline-flex",
@@ -242,43 +382,48 @@ function RecadoCard({
             <IconGift size={15} style={{ color: "var(--coral-pink)" }} />
             presenteou com{" "}
             <strong style={{ color: "var(--plum)", fontWeight: 600 }}>
-              {fmtValue(r.valueCents)}
+              {fmtCents(r.valorContribuicaoCents)}
             </strong>
             <span style={{ color: "var(--ink-mute)" }}>·</span>
-            {r.giftLabel}
+            {r.contribuicaoNome ?? (
+              <em style={{ color: "var(--ink-mute)" }}>(presente removido)</em>
+            )}
           </span>
 
           {/* actions */}
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {isUnread && (
+              <button
+                type="button"
+                onClick={() => onMarcarLida(r.idPagamento)}
+                disabled={isMarkingLida}
+                title="marcar como lida"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "8px 14px",
+                  borderRadius: 999,
+                  border: "1px solid var(--line)",
+                  background: "transparent",
+                  color: "var(--ink-soft)",
+                  cursor: isMarkingLida ? "default" : "pointer",
+                  opacity: isMarkingLida ? 0.6 : 1,
+                  fontFamily: FONT_SANS,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                <IconCheck size={13} /> marcar lida
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => onToggleRead(r.id)}
-              title={r.read ? "marcar como não lida" : "marcar como lida"}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                padding: "8px 14px",
-                borderRadius: 999,
-                border: "1px solid var(--line)",
-                background: "transparent",
-                color: "var(--ink-soft)",
-                cursor: "pointer",
-                fontFamily: FONT_SANS,
-                fontSize: 11,
-                fontWeight: 600,
-                letterSpacing: "0.06em",
-                textTransform: "uppercase",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {r.read ? <IconMail size={13} /> : <IconCheck size={13} />}
-              {r.read ? "marcar não lida" : "marcar lida"}
-            </button>
-            <button
-              type="button"
-              onClick={() => onThank(r)}
-              title={`agradecer ${firstName}`}
+              onClick={() => onAgradecer(r)}
+              title={`agradecer ${firstName ?? ""}`}
               style={{
                 display: "inline-flex",
                 alignItems: "center",
@@ -309,47 +454,73 @@ function RecadoCard({
 }
 
 // ---------- page body ----------
-export function MensagensBody({ slug: _slug }: PainelSectionBodyProps) {
-  const [recados, setRecados] = useState<Recado[]>(RECADOS_SEED);
+export function MensagensBody({ slug }: PainelSectionBodyProps) {
+  // aperture-kih74 — real wire. Slug-keyed; tenant chain runs server-side
+  // (session-derived idUsuario → slug-owner-admin guard → idCampanha lookup).
+  // No client-side slug→idCampanha resolver needed.
+  const utils = trpc.useUtils();
+  const list = trpc.painelMensagens.list.useQuery({ slug });
+  // Both mutations invalidate the list on success so the NOVA badge +
+  // filter counts repaint in one round-trip without optimistic updates.
+  const marcarLida = trpc.painelMensagens.marcarLida.useMutation({
+    onSuccess: () => {
+      void utils.painelMensagens.list.invalidate({ slug });
+    },
+  });
+  const marcarTodasLidas = trpc.painelMensagens.marcarTodasLidas.useMutation({
+    onSuccess: () => {
+      void utils.painelMensagens.list.invalidate({ slug });
+    },
+  });
+
   const [filter, setFilter] = useState<"all" | "unread">("all");
 
-  const unreadCount = useMemo(
-    () => recados.filter((r) => !r.read).length,
-    [recados],
-  );
+  // Explicit type aliasing for `recados` — see file-header comment
+  // explaining the AppRouter inference gap from Rex's painel-mensagens-
+  // router import-path quirks. Wire shape is authoritative; the cast
+  // is a contract assertion (validated at wire-input time by the same
+  // AdminRecadoProjectionSchema Rex's procedure outputs).
+  const recados: readonly AdminRecadoProjection[] =
+    (list.data?.recados ?? []) as readonly AdminRecadoProjection[];
+  const counts: { todas: number; naoLidas: number } =
+    (list.data?.counts ?? { todas: 0, naoLidas: 0 }) as {
+      todas: number;
+      naoLidas: number;
+    };
 
   const visible = useMemo(
-    () => (filter === "unread" ? recados.filter((r) => !r.read) : recados),
+    () =>
+      filter === "unread"
+        ? recados.filter((r) => r.lidaEm === null)
+        : recados,
     [recados, filter],
   );
 
-  const thank = (r: Recado) => {
-    const firstName = r.name.replace(/\(.*?\)/g, "").trim().split(/\s+/)[0];
-    setRecados((rs) =>
-      rs.map((x) => (x.id === r.id ? { ...x, read: true } : x)),
-    );
-    toast.success(`agradecimento enviado pra ${firstName} ♡`);
+  const handleMarcarLida = (idPagamento: string) => {
+    marcarLida.mutate({ slug, idPagamento });
   };
 
-  const toggleRead = (id: number) => {
-    setRecados((rs) =>
-      rs.map((x) => (x.id === id ? { ...x, read: !x.read } : x)),
-    );
-  };
-
-  const markAllRead = () => {
-    if (!unreadCount) {
+  const handleMarcarTodas = () => {
+    if (!counts.naoLidas) {
       toast("nenhum recado novo por aqui ♡");
       return;
     }
-    setRecados((rs) => rs.map((x) => ({ ...x, read: true })));
+    marcarTodasLidas.mutate({ slug });
     toast.success("tudo lido ♡");
   };
 
-  const filterChips: [typeof filter, string, number][] = [
-    ["all", "todas", recados.length],
-    ["unread", "não lidas", unreadCount],
+  const handleAgradecer = (_r: AdminRecadoProjection) => {
+    // AGRADECER stub — see file-header decision. Surface affordance, no action.
+    toast("agradecer — em breve ♡");
+  };
+
+  const filterChips: readonly [typeof filter, string, number][] = [
+    ["all", "todas", counts.todas],
+    ["unread", "não lidas", counts.naoLidas],
   ];
+
+  const showSkeleton = list.isLoading;
+  const showEmpty = !showSkeleton && visible.length === 0;
 
   return (
     <section
@@ -374,7 +545,6 @@ export function MensagensBody({ slug: _slug }: PainelSectionBodyProps) {
           padding: 26,
         }}
       >
-        {/* radial lilás "stained paper" glow */}
         <span
           aria-hidden="true"
           style={{
@@ -430,9 +600,9 @@ export function MensagensBody({ slug: _slug }: PainelSectionBodyProps) {
                 margin: 0,
               }}
             >
-              {recados.length} recados de quem presenteou o seu bebê.
+              {counts.todas} recados de quem presenteou o seu bebê.
             </p>
-            {unreadCount > 0 && (
+            {counts.naoLidas > 0 && (
               <span
                 style={{
                   display: "inline-flex",
@@ -450,7 +620,7 @@ export function MensagensBody({ slug: _slug }: PainelSectionBodyProps) {
                   textTransform: "lowercase",
                 }}
               >
-                {unreadCount} {unreadCount === 1 ? "nova" : "novas"}
+                {counts.naoLidas} {counts.naoLidas === 1 ? "nova" : "novas"}
               </span>
             )}
           </div>
@@ -510,8 +680,8 @@ export function MensagensBody({ slug: _slug }: PainelSectionBodyProps) {
         </div>
         <button
           type="button"
-          onClick={markAllRead}
-          disabled={!unreadCount}
+          onClick={handleMarcarTodas}
+          disabled={!counts.naoLidas || marcarTodasLidas.isPending}
           style={{
             display: "inline-flex",
             alignItems: "center",
@@ -521,8 +691,11 @@ export function MensagensBody({ slug: _slug }: PainelSectionBodyProps) {
             border: "1px solid var(--line)",
             background: "transparent",
             color: "var(--ink-soft)",
-            cursor: unreadCount ? "pointer" : "default",
-            opacity: unreadCount ? 1 : 0.5,
+            cursor:
+              counts.naoLidas && !marcarTodasLidas.isPending
+                ? "pointer"
+                : "default",
+            opacity: counts.naoLidas ? 1 : 0.5,
             fontFamily: FONT_SANS,
             fontSize: 11,
             fontWeight: 600,
@@ -536,7 +709,13 @@ export function MensagensBody({ slug: _slug }: PainelSectionBodyProps) {
 
       {/* recado list */}
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-        {visible.length === 0 ? (
+        {showSkeleton ? (
+          <>
+            <SkeletonCard />
+            <SkeletonCard />
+            <SkeletonCard />
+          </>
+        ) : showEmpty ? (
           <div
             style={{
               padding: "48px 16px",
@@ -550,7 +729,9 @@ export function MensagensBody({ slug: _slug }: PainelSectionBodyProps) {
                 color: "var(--plum)",
               }}
             >
-              nenhum recado novo ♡
+              {filter === "unread"
+                ? "nenhum recado novo ♡"
+                : "ainda sem recados ♡"}
             </div>
             <div
               style={{
@@ -560,16 +741,19 @@ export function MensagensBody({ slug: _slug }: PainelSectionBodyProps) {
                 marginTop: 8,
               }}
             >
-              você já leu todos os carinhos. veja todas em "todas".
+              {filter === "unread"
+                ? 'você já leu todos os carinhos. veja todas em "todas".'
+                : "assim que alguém presentear com uma mensagem, ela aparece aqui."}
             </div>
           </div>
         ) : (
           visible.map((r) => (
             <RecadoCard
-              key={r.id}
+              key={r.idPagamento}
               r={r}
-              onThank={thank}
-              onToggleRead={toggleRead}
+              onMarcarLida={handleMarcarLida}
+              onAgradecer={handleAgradecer}
+              isMarkingLida={marcarLida.isPending}
             />
           ))
         )}

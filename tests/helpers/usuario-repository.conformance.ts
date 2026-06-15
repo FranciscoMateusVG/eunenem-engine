@@ -54,6 +54,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
         nomeExibicao: 'Owner',
         slug: 'owner',
         criadoEm: fixedDate,
+          tutorialCompletadoEm: null,
       };
       const conta = {
         id: idConta,
@@ -92,6 +93,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
           nomeExibicao: 'A',
           slug,
           criadoEm: fixedDate,
+          tutorialCompletadoEm: null,
         },
         conta: {
           id: aid,
@@ -126,6 +128,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
           nomeExibicao: 'First',
           slug: 'shared-slug',
           criadoEm: fixedDate,
+          tutorialCompletadoEm: null,
         },
         conta: {
           id: a1,
@@ -147,6 +150,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
             nomeExibicao: 'Second',
             slug: 'shared-slug',
             criadoEm: fixedDate,
+          tutorialCompletadoEm: null,
           },
           conta: {
             id: a2,
@@ -169,6 +173,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
           nomeExibicao: 'H',
           slug,
           criadoEm: fixedDate,
+          tutorialCompletadoEm: null,
         },
         conta: {
           id: aid,
@@ -210,6 +215,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
           nomeExibicao: 'Lookup',
           slug: 'lookup',
           criadoEm: fixedDate,
+          tutorialCompletadoEm: null,
         },
         conta: {
           id: idConta,
@@ -226,9 +232,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
     });
 
     it('findUsuarioByConta returns undefined when idConta does not exist (aperture-lp9cw)', async () => {
-      expect(
-        await repo.findUsuarioByConta(randomUUID(), ID_PLATAFORMA_EUNENEM),
-      ).toBeUndefined();
+      expect(await repo.findUsuarioByConta(randomUUID(), ID_PLATAFORMA_EUNENEM)).toBeUndefined();
     });
 
     it('findUsuarioByConta returns undefined when the resolved Usuario is on a different plataforma (aperture-lp9cw)', async () => {
@@ -245,6 +249,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
           nomeExibicao: 'Target',
           slug: 'cross-tenant-target',
           criadoEm: fixedDate,
+          tutorialCompletadoEm: null,
         },
         conta: {
           id: idConta,
@@ -280,6 +285,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
           nomeExibicao: 'A',
           slug: 'twin-slug',
           criadoEm: fixedDate,
+          tutorialCompletadoEm: null,
         },
         conta: {
           id: a1,
@@ -297,6 +303,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
           nomeExibicao: 'B',
           slug: 'twin-slug',
           criadoEm: fixedDate,
+          tutorialCompletadoEm: null,
         },
         conta: {
           id: a2,
@@ -324,6 +331,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
           nomeExibicao: 'Shared',
           slug,
           criadoEm: fixedDate,
+          tutorialCompletadoEm: null,
         },
         conta: {
           id: aid,
@@ -361,6 +369,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
           nomeExibicao: 'I',
           slug: 'isolated',
           criadoEm: fixedDate,
+          tutorialCompletadoEm: null,
         },
         conta: {
           id: idConta,
@@ -387,6 +396,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
           nomeExibicao: 'Old',
           slug: 'old-name',
           criadoEm: fixedDate,
+          tutorialCompletadoEm: null,
         },
         conta: {
           id: idConta,
@@ -416,6 +426,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
           nomeExibicao: 'Clean',
           slug,
           criadoEm: fixedDate,
+          tutorialCompletadoEm: null,
         },
         conta: {
           id: idConta,
@@ -445,6 +456,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
             nomeExibicao: 'Clean Again',
             slug,
             criadoEm: fixedDate,
+          tutorialCompletadoEm: null,
           },
           conta: {
             id: idConta2,
@@ -478,6 +490,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
             nomeExibicao: email.split('@')[0] ?? email,
             slug,
             criadoEm: fixedDate,
+          tutorialCompletadoEm: null,
           },
           conta: {
             id: idConta,
@@ -637,9 +650,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
         sortBy: 'email',
         sortDir: 'asc',
       });
-      expect(page1.usuarios.map((u) => u.email)).toEqual(
-        rows.slice(0, 3).map((r) => r.email),
-      );
+      expect(page1.usuarios.map((u) => u.email)).toEqual(rows.slice(0, 3).map((r) => r.email));
       expect(page1.nextCursor).not.toBeNull();
       expect(page1.totalCount).toBe(7);
 
@@ -649,9 +660,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
         sortBy: 'email',
         sortDir: 'asc',
       });
-      expect(page2.usuarios.map((u) => u.email)).toEqual(
-        rows.slice(3, 6).map((r) => r.email),
-      );
+      expect(page2.usuarios.map((u) => u.email)).toEqual(rows.slice(3, 6).map((r) => r.email));
       expect(page2.nextCursor).not.toBeNull();
 
       const page3 = await repo.findUsuariosPaginated(ID_PLATAFORMA_EUNENEM, {
@@ -726,10 +735,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
         emailPrefix: 'mari',
       });
       expect(page1.totalCount).toBe(4);
-      expect(page1.usuarios.map((u) => u.email)).toEqual([
-        mariRows[0]?.email,
-        mariRows[1]?.email,
-      ]);
+      expect(page1.usuarios.map((u) => u.email)).toEqual([mariRows[0]?.email, mariRows[1]?.email]);
 
       const page2 = await repo.findUsuariosPaginated(ID_PLATAFORMA_EUNENEM, {
         cursor: page1.nextCursor,
@@ -738,10 +744,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
         sortDir: 'asc',
         emailPrefix: 'mari',
       });
-      expect(page2.usuarios.map((u) => u.email)).toEqual([
-        mariRows[2]?.email,
-        mariRows[3]?.email,
-      ]);
+      expect(page2.usuarios.map((u) => u.email)).toEqual([mariRows[2]?.email, mariRows[3]?.email]);
       expect(page2.nextCursor).toBeNull();
     });
 
@@ -868,6 +871,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
             nomeExibicao: email,
             slug,
             criadoEm: fixedDate,
+          tutorialCompletadoEm: null,
           },
           conta: {
             id: idConta,
@@ -943,6 +947,69 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
       expect(eucaseiPage.usuarios.every((u) => u.idPlataforma === ID_PLATAFORMA_EUCASEI)).toBe(
         true,
       );
+    });
+
+    // ───── marcarTutorialCompletado (Plan 0018 Phase A, aperture-omswg) ─────
+
+    const seedFreshUsuario = async (
+      idUsuario: string,
+      idConta: string,
+      slug: string,
+    ): Promise<void> => {
+      await repo.saveRegistroDomain({
+        usuario: {
+          id: idUsuario,
+          idPlataforma: ID_PLATAFORMA_EUNENEM,
+          idConta,
+          email: `${slug}@example.com`,
+          nomeExibicao: slug,
+          slug,
+          criadoEm: fixedDate,
+          tutorialCompletadoEm: null,
+        },
+        conta: {
+          id: idConta,
+          idUsuario,
+          permissoes: ['campaign:admin'] as const,
+          criadaEm: fixedDate,
+        },
+      });
+    };
+
+    it('marcarTutorialCompletado: fresh usuario flips null → timestamp', async () => {
+      const idUsuario = randomUUID();
+      const idConta = randomUUID();
+      await seedFreshUsuario(idUsuario, idConta, 'tut-fresh');
+
+      const before = await repo.findUsuarioById(idUsuario);
+      expect(before?.tutorialCompletadoEm).toBeNull();
+
+      const ts = new Date('2026-06-10T12:00:00Z');
+      await repo.marcarTutorialCompletado(idUsuario, ts);
+
+      const after = await repo.findUsuarioById(idUsuario);
+      expect(after?.tutorialCompletadoEm).toBeInstanceOf(Date);
+      expect(after?.tutorialCompletadoEm?.getTime()).toBe(ts.getTime());
+    });
+
+    it('marcarTutorialCompletado: first-write-wins (second call preserves original timestamp)', async () => {
+      const idUsuario = randomUUID();
+      const idConta = randomUUID();
+      await seedFreshUsuario(idUsuario, idConta, 'tut-idempotent');
+
+      const t1 = new Date('2026-06-10T08:00:00Z');
+      const t2 = new Date('2026-06-10T20:00:00Z');
+      await repo.marcarTutorialCompletado(idUsuario, t1);
+      await repo.marcarTutorialCompletado(idUsuario, t2);
+
+      const loaded = await repo.findUsuarioById(idUsuario);
+      expect(loaded?.tutorialCompletadoEm?.getTime()).toBe(t1.getTime());
+    });
+
+    it('marcarTutorialCompletado: silent no-op on unknown idUsuario', async () => {
+      await expect(
+        repo.marcarTutorialCompletado(randomUUID(), new Date('2026-06-10T00:00:00Z')),
+      ).resolves.toBeUndefined();
     });
 
     it('findUsuariosPaginated — cursor encode round-trip is canonical across adapters (aperture-qatwz)', async () => {

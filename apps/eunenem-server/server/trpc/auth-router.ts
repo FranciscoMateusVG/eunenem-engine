@@ -487,6 +487,21 @@ export const authRouter = t.router({
        * Campanha (aperture-p8i01). Same caveat as idCampanha.
        */
       idOpcaoPresentes: opcaoPresentes?.id ?? null,
+      /**
+       * aperture-0bynm — Solicitar Transferência onboarding embed.
+       * `true` when the user's default campanha has an active recebedor
+       * linked; `false` otherwise (first-time onboarding required).
+       * Derived from the campanha aggregate's `idRecebedor` field
+       * (Plan 0015 invariant — `idRecebedor` and `dadosRecebedor` are
+       * either BOTH null or BOTH set). NO extra DB call.
+       *
+       * Frontend's TransferModal reads this to decide whether to embed
+       * the BancariosBody onboarding form or proceed straight to
+       * solicitarRepasse. `false` when `idCampanha` is null (the
+       * pre-p8i01 backfill caveat) — frontend treats both the
+       * no-campanha and no-recebedor cases as "render the form".
+       */
+      hasRecebedor: campanha?.idRecebedor != null,
       expiraEm: sessao.expiraEm,
     };
   }),

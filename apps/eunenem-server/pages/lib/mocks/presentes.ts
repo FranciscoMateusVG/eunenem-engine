@@ -42,6 +42,16 @@ export interface PresentesTx {
    */
   liberacaoPrevistaEm?: string | null;
   /**
+   * aperture-qp4mq — per-item quantidade as encoded on the parent
+   * intencao_items row this lançamento was spawned from. Operator
+   * surface: the detail drawer renders "× N" alongside the item name
+   * when this is > 1 so multi-quantity purchases are legible at a
+   * glance. Optional in this shape so mock seeds (single-row,
+   * implicit quantity=1) typecheck without a backfill pass; live wire
+   * data always provides a positive int per Rex's ExtratoRowDTOSchema.
+   */
+  quantidade?: number;
+  /**
    * Optional image for the gift — emoji glyph (e.g. "🍼") OR a hosted URL.
    * Populated from the wire's ExtratoRowDTO.contribuicaoImagemUrl when the
    * contribuição has an image. Null/absent when the contribuição has no

@@ -2,6 +2,7 @@ import { Toaster } from 'sonner';
 import { AdminCampanhaPage } from './AdminCampanhaPage.js';
 import { AdminContribuicaoPage } from './AdminContribuicaoPage.js';
 import { AdminPage } from './AdminPage.js';
+import { AdminPagamentoPage } from './AdminPagamentoPage.js';
 import { AdminRepasseDetailPage } from './AdminRepasseDetailPage.js';
 import { AdminRepassesPage } from './AdminRepassesPage.js';
 import { AdminUsuarioPage } from './AdminUsuarioPage.js';
@@ -51,6 +52,7 @@ export function resolveRoute(pathname: string):
   | { kind: 'admin-usuario'; idConta: string }
   | { kind: 'admin-campanha'; idCampanha: string }
   | { kind: 'admin-contribuicao'; idContribuicao: string }
+  | { kind: 'admin-pagamento'; idPagamento: string }
   | { kind: 'admin-repasses' }
   | { kind: 'admin-repasse-detail'; idRepasse: string }
   | { kind: 'not-found' } {
@@ -102,6 +104,23 @@ export function resolveRoute(pathname: string):
     return {
       kind: 'admin-contribuicao',
       idContribuicao: adminContribuicaoMatch[1],
+    };
+  }
+  // /admin/pagamento/<idPagamento> (Plan 0017 / aperture-gf2t5) — pagamento
+  // detail page. The pagamento-first reshape promotes Pagamento to a
+  // first-class admin drill target (previously you could only reach a
+  // pagamento by drilling INTO a contribuição first; under the new ontology
+  // Pagamento IS the transaction aggregate root). Matched before the bare
+  // /admin rule. idPagamento is a free-shape string here; the tRPC
+  // findById throws NOT_FOUND for unknown ids and the page renders a
+  // not-found body (HTTP stays 200, same pattern as the other drill pages).
+  const adminPagamentoMatch = pathname.match(
+    /^\/admin\/pagamento\/([^/]+)\/?$/,
+  );
+  if (adminPagamentoMatch && adminPagamentoMatch[1]) {
+    return {
+      kind: 'admin-pagamento',
+      idPagamento: adminPagamentoMatch[1],
     };
   }
   // /admin/repasses/<idRepasse> (plan q2d4b Track 3, aperture-vi0hy) —
@@ -205,6 +224,8 @@ function pickPage(route: ReturnType<typeof resolveRoute>, pathname: string) {
     return <AdminCampanhaPage idCampanha={route.idCampanha} />;
   if (route.kind === 'admin-contribuicao')
     return <AdminContribuicaoPage idContribuicao={route.idContribuicao} />;
+  if (route.kind === 'admin-pagamento')
+    return <AdminPagamentoPage idPagamento={route.idPagamento} />;
   if (route.kind === 'admin-repasses') return <AdminRepassesPage />;
   if (route.kind === 'admin-repasse-detail')
     return <AdminRepasseDetailPage idRepasse={route.idRepasse} />;

@@ -1,6 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
+// aperture-p73kv — deterministic random "sugerido N un" in [5, 10] keyed
+// by item id (djb2 hash). The hardcoded `1` operators saw was unrealistic
+// for baby-shower lists ("sugerido is still only 1 unidade and i cant add
+// or remove more"). djb2 is fast + deterministic per session so the same
+// card always shows the same number across re-renders. The inline stepper
+// (PartB) lets the user adjust before adding the item to their list.
+function djb2(s: string): number {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  }
+  return h >>> 0;
+}
+function defaultSuggestedQty(itemId: string): number {
+  // [5, 10] inclusive — 6 buckets.
+  return 5 + (djb2(itemId) % 6);
+}
+
 import type { PainelSectionBodyProps } from "@/PainelSectionPage";
 import {
   loadCatalog,
@@ -20,6 +38,7 @@ import {
   useContribuicaoCreate,
   useContribuicaoCreateBulk,
   useContribuicaoDelete,
+  useContribuicaoUpdate,
   useContribuicaoList,
   type ContribuicaoDTO,
 } from "@/lib/contribuicao.js";
@@ -277,10 +296,47 @@ function groupContribuicoes(items: ContribuicaoDTO[]): GroupedGift[] {
     // `undefined` is treated as not-received (same shape as today's bug;
     // resolves the moment Rex's @repo/domains schema commit ships).
     const isReserved = c.indisponivel === true;
+    // Plan 0016 / aperture-1l37i: read entity.quantidade directly with a
+    // 1-default for legacy rows that pre-date the wire bump. The
+    // accumulation logic below handles BOTH shapes uniformly:
+    //   - Legacy (pre-create-flow-rewrite): N rows of "Fralda" each
+    //     quantidade=1 → group qty sums to N (matches today's behavior).
+    //   - Post-rewrite: 1 row of "Fralda" with quantidade=N → group qty
+    //     equals N directly. No double-counting; the loop only sees one
+    //     row per gift.
+    //
+    // aperture-ypk01 (Plan 0016 leak — partial-sale leak fix): the
+    // `received` axis is DUAL-MODE based on the row's quantidade:
+    //
+    //   - new-shape row (quantidade > 1): receive count =
+    //     quantidade - max(0, quantidadeRestante). Reads the explicit
+    //     remaining-slots projection landed by the router companion,
+    //     clamps negative overshoots to 0 (locked decision #10 allows
+    //     quantidadeRestante to go negative on concurrent oversell;
+    //     painel display caps at quantidade). This is what makes the
+    //     "5 de 10 recebidos" tally render when a partial purchase
+    //     has happened — the binary indisponivel only flips when ALL
+    //     N slots are sold, so legacy-mode below would have surfaced
+    //     0 here.
+    //
+    //   - legacy multi-row (quantidade <= 1): preserve the original
+    //     row-by-row count where each indisponivel row contributes
+    //     its own quantidade to the received tally. This keeps the
+    //     pre-Plan-0016 N-rows-of-quantidade-1 fixtures correct.
+    //
+    // The visitor-side equivalent of this dual-mode shipped in PR #182;
+    // this is the painel-side analog the night batch missed.
+    const rowQuantidade = c.quantidade ?? 1;
+    const isNewShape = rowQuantidade > 1;
+    const rowReceived = isNewShape
+      ? rowQuantidade - Math.max(0, c.quantidadeRestante ?? rowQuantidade)
+      : isReserved
+        ? rowQuantidade
+        : 0;
     if (existing) {
       existing.ids.push(c.id);
-      existing.qty += 1;
-      if (isReserved) existing.received += 1;
+      existing.qty += rowQuantidade;
+      existing.received += rowReceived;
     } else {
       map.set(c.nome, {
         ids: [c.id],
@@ -291,9 +347,9 @@ function groupContribuicoes(items: ContribuicaoDTO[]): GroupedGift[] {
         imageUrl,
         bgColor: deriveBgColor(c.grupo),
         chipLabel,
-        qty: 1,
-        received: isReserved ? 1 : 0,
-        hasClaimed: isReserved,
+        qty: rowQuantidade,
+        received: rowReceived,
+        hasClaimed: rowReceived > 0,
         // `custom` styling (pink chip + locked semantics) is reserved for true
         // user-created items, i.e. grupo === "personalizado". Don't flag rows
         // we merely couldn't categorize.
@@ -365,7 +421,7 @@ function GiftCard({
     ? "não dá pra mexer — algum mimo desse grupo já foi reservado ♡"
     : undefined;
   return (
-    <div className={"lista-card" + (isComplete ? " is-complete" : "")}>
+    <div className={"lista-card" + (isComplete ? " is-complete" : "")} data-testid="lista-card">
       <div className="lista-card-thumb" style={{ background: item.bgColor }}>
         {/* aperture-intake-grxsh-followup — real product image when imagemUrl
             is a same-origin path or absolute URL; emoji fallback otherwise.
@@ -399,6 +455,7 @@ function GiftCard({
             aria-label={`Editar ${item.nome}`}
             disabled={item.hasClaimed}
             title={lockedTip}
+            data-testid="gift-edit-btn"
           >
             {icon.edit}
           </button>
@@ -535,6 +592,7 @@ function PersonalizadoForm({
                 setF({ ...f, qty: Number(e.target.value.replace(/\D/g, "")) || 1 })
               }
               aria-label="Quantidade"
+              data-testid="qty-input"
             />
             <button
               type="button"
@@ -849,7 +907,7 @@ function CatalogoView({
                     <span className="lista-cat-meta">
                       <span className="lista-cat-name">{it.name}</span>
                       <span className="lista-cat-sub">
-                        {brl(it.price)} · sugerido {it.suggestedQty} un
+                        {brl(it.price)} · sugerido {defaultSuggestedQty(it.id)} un
                       </span>
                     </span>
                     <span
@@ -927,7 +985,13 @@ function AddGiftModal({
     );
     return out;
   }, [catalog, selected]);
-  const catTotal = selectedItems.reduce((s, i) => s + i.price * i.suggestedQty, 0);
+  // aperture-p73kv — mirror the picker's djb2-derived "sugerido N un"
+  // (display + submit) on the running total so the footer R$ amount
+  // doesn't drift from what the user sees per card.
+  const catTotal = selectedItems.reduce(
+    (s, i) => s + i.price * defaultSuggestedQty(i.id),
+    0,
+  );
 
   const toggleCatItem = (it: ListaCatalogItem) => {
     setSelected((cur) => {
@@ -1105,6 +1169,7 @@ function EditItemModal({
             className="btn btn-primary"
             disabled={!valid || submitting}
             onClick={submit}
+            data-testid="edit-save-btn"
           >
             {submitting ? "Salvando..." : "Salvar alterações"}
           </button>
@@ -1184,7 +1249,11 @@ function PresetDetailModal({
   };
 
   const selectedItems = preset.items.filter((it) => selected.has(it.id));
-  const total = selectedItems.reduce((s, it) => s + it.price * it.suggestedQty, 0);
+  // aperture-p73kv — same djb2-derived mirror as the catalogo path.
+  const total = selectedItems.reduce(
+    (s, it) => s + it.price * defaultSuggestedQty(it.id),
+    0,
+  );
   const count = selectedItems.length;
 
   const submit = () => {
@@ -1251,7 +1320,7 @@ function PresetDetailModal({
                 <div className="lista-preset-meta">
                   <span className="lista-preset-name">{it.name}</span>
                   <span className="lista-preset-sub">
-                    {brl(it.price)} · sugerido {it.suggestedQty} un
+                    {brl(it.price)} · sugerido {defaultSuggestedQty(it.id)} un
                   </span>
                 </div>
                 <span
@@ -1384,6 +1453,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
   const createMut = useContribuicaoCreate();
   const createBulkMut = useContribuicaoCreateBulk();
   const deleteMut = useContribuicaoDelete();
+  const updateMut = useContribuicaoUpdate();
 
   const [search, setSearch] = useState("");
   const [cat, setCat] = useState<CatFilter>("all");
@@ -1453,6 +1523,17 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
   const addCatalogItems = async (picked: ListaCatalogItem[]) => {
     try {
       await createBulkMut.mutateAsync({
+        // Plan 0016 (aperture-putz5): one ROW per catalog item with
+        // `quantidade=suggestedQty`. Pre-0016 this fanned out into
+        // suggestedQty rows per item — locked decision #1 retires that.
+        //
+        // aperture-p73kv: `it.suggestedQty` from the catalog data is
+        // a static `1`, which surfaces as "sugerido 1 un" on the picker
+        // — unrealistic for typical baby-shower lists. The display uses
+        // `defaultSuggestedQty(it.id)` (djb2-derived 5–10) and the
+        // submit MUST mirror that same value or the actual list
+        // count diverges from what the user saw. Inline stepper +
+        // per-card override is the next layer (filed as follow-up).
         items: picked.map((it) => ({
           nome: it.name,
           valor: centsFromBRL(it.price),
@@ -1464,11 +1545,14 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
           // to keep the field unset for image-less items.
           imagemUrl: it.imageUrl ?? undefined,
           grupo: it.category,
-          qty: it.suggestedQty,
+          quantidade: defaultSuggestedQty(it.id),
         })),
       });
       setAddModalTab(null);
-      const totalUnits = picked.reduce((s, it) => s + it.suggestedQty, 0);
+      const totalUnits = picked.reduce(
+        (s, it) => s + defaultSuggestedQty(it.id),
+        0,
+      );
       toast.success(
         totalUnits === 1
           ? "1 mimo adicionado à sua lista ♡"
@@ -1482,6 +1566,12 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
   const addPresetItems = async (picked: PresetItem[], presetId: ListaProntaId) => {
     try {
       await createBulkMut.mutateAsync({
+        // Plan 0016 (aperture-putz5): one ROW per preset item with
+        // `quantidade=suggestedQty`. Aperture-1l37i frontend follow-up
+        // covers the grouping/saveEdit UX rewrite around this shape.
+        //
+        // aperture-p73kv: mirror the picker's djb2-derived display
+        // value (same helper, same itemId → same N ∈ [5,10]).
         items: picked.map((it) => ({
           nome: it.name,
           valor: centsFromBRL(it.price),
@@ -1490,12 +1580,13 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
           // addCatalogItems for the undefined-vs-null reasoning.
           imagemUrl: it.imageUrl ?? undefined,
           grupo: presetId,
-          qty: it.suggestedQty,
+          quantidade: defaultSuggestedQty(it.id),
         })),
       });
       setPresetDetail(null);
       setPresetsOpen(false);
-      const n = picked.reduce((s, it) => s + it.suggestedQty, 0);
+      // aperture-p73kv — toast count mirrors the per-item djb2 helper.
+      const n = picked.reduce((s, it) => s + defaultSuggestedQty(it.id), 0);
       toast.success(
         `${n} ${n === 1 ? "mimo adicionado" : "mimos adicionados"} à sua lista ♡`,
       );
@@ -1504,34 +1595,81 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
     }
   };
 
-  // Edit strategy: delete the group, then createBulk with the new shape.
-  // Safe because edits are disabled when received > 0 (no contribuinte data
-  // to preserve). One delete + one createBulk = two round-trips total, much
-  // simpler than per-id update + qty delta math.
+  // Plan 0016 / aperture-1l37i + aperture-1saoe — fully atomic edit.
+  //
+  // Rex's aperture-putz5 engine PR (#176) extended
+  // AtualizarContribuicaoInputSchema to accept quantidade end-to-end, so
+  // EVERY edit — including qty changes — now flows through a single
+  // `contribuicao.update` Network round-trip. Preserves the
+  // contribuicao.id across the edit (critical for the
+  // intencao_items.idContribuicao FK introduced by Plan 0016), emits
+  // ONE request instead of the pre-1l37i 5-request cascade, and avoids
+  // the broken legacy delete+createBulk path which was 400'ing under
+  // Rex's post-rename schema (aperture-1saoe P0 regression).
+  //
+  // The (now-retired) legacy path was: delete(ids) → createBulk(...).
+  // It survived briefly during the parallel-work window between
+  // aperture-1l37i and aperture-putz5 to cover qty changes. Once
+  // aperture-putz5 merged, the fallback became unnecessary; once the
+  // create-flow schema rename shipped, it became actively broken. This
+  // change retires it in saveEdit only — delete + createBulk hooks
+  // remain wired for confirmRemove + the addCatalogItems / addPresetItems
+  // create flows, which still need them.
+  //
+  // Multi-id legacy groups (operator's pre-0016 7-Fralda data) still
+  // patch through the first underlying id — the entity itself carries
+  // quantidade, so we update the representative row's fields and the
+  // group's other rows stay untouched. Operator's mental model is the
+  // group; the underlying data drift is invisible to them.
+  //
+  // Recovery on NOT_FOUND: when the stable id no longer exists server-
+  // side (sibling tab deleted, DB reset, etc.) the toast surfaces a
+  // calmer "essa lista mudou — atualizamos para você" message + the list
+  // refetches so the user can retry against fresh data. The pre-1l37i
+  // flow landed on a dead-end "esse mimo não existe mais" toast with no
+  // refetch.
   const saveEdit = async (draft: DraftFields) => {
     if (!editItem) return;
     const price = parseFloat(draft.price.replace(",", ".")) || 0;
     const newQty = Number(draft.qty) || 1;
+    // aperture-qxntg follow-up — `editItem.emoji` is a UI-only display
+    // fallback derived from the grupo when the row has no real image
+    // URL. It MUST NOT be sent as the wire value: ImagemUrlSchema
+    // requires `/^(\/|https?:\/\/)/` and a glyph like "🪒" fails zod,
+    // returning a 400 on update. Operator's "Kit Tesoura e Cortador de
+    // Unha" repro (no imageUrl, emoji fallback) hit exactly this. The
+    // update mutation accepts `imagemUrl: ImagemUrlSchema.nullable()`
+    // — `null` is the right "no image" wire value.
+    const imagemUrl = editItem.imageUrl ?? null;
+    const idToUpdate = editItem.ids[0];
+    if (!idToUpdate) {
+      toast.error("Não consegui identificar esse mimo — recarrega a página ♡");
+      return;
+    }
     try {
-      await deleteMut.mutateAsync({ ids: editItem.ids });
-      await createBulkMut.mutateAsync({
-        items: [
-          {
-            nome: draft.title,
-            valor: centsFromBRL(price),
-            // aperture-intake-grxsh-followup — preserve the real product
-            // image URL (if any) on edit; fall back to whatever was in `emoji`
-            // (legacy rows used this slot for a glyph or url).
-            imagemUrl: editItem.imageUrl ?? editItem.emoji,
-            grupo: draft.category,
-            qty: newQty,
-          },
-        ],
+      await updateMut.mutateAsync({
+        id: idToUpdate,
+        nome: draft.title,
+        valor: centsFromBRL(price),
+        imagemUrl,
+        grupo: draft.category,
+        quantidade: newQty,
       });
       setEditItem(null);
       toast.success("Alterações salvas ♡");
     } catch (err) {
-      toast.error(contribuicaoErrorMessage(toContribuicaoError(err)));
+      const error = toContribuicaoError(err);
+      // Stale-row recovery: the slot was deleted between the visitor's
+      // fetch + this edit. Invalidate so the next render reflects
+      // reality + nudge the visitor with a calmer message than the
+      // dead-end "esse mimo não existe mais" the legacy flow used.
+      if (error.kind === "not-found") {
+        void listQuery.refetch();
+        setEditItem(null);
+        toast("essa lista mudou — atualizamos para você ♡");
+        return;
+      }
+      toast.error(contribuicaoErrorMessage(error));
     }
   };
 
@@ -1556,7 +1694,13 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
   }
 
   const addSubmitting = createMut.isPending || createBulkMut.isPending;
-  const editSubmitting = deleteMut.isPending || createBulkMut.isPending;
+  // Plan 0016 / aperture-1saoe: edit submission is now a single atomic
+  // contribuicao.update call. The legacy delete+createBulk path retired
+  // once Rex's engine accepted quantidade in update; tracking those
+  // mutations for editSubmitting would surface false-positive spinners
+  // when ConfirmRemove or the addCatalogItems / addPresetItems flows
+  // are in-flight.
+  const editSubmitting = updateMut.isPending;
   const removeSubmitting = deleteMut.isPending;
   const presetSubmitting = createBulkMut.isPending;
 

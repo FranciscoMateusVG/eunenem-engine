@@ -422,31 +422,43 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
           }
 
           // Plan 0015 (aperture-ucgok): contribuinte data moved off
-          // contribuicoes onto pagamentos.intencao_contribuinte_*. The
-          // join now bridges campanhas → contribuicoes → pagamentos,
-          // filtering by the visitor's email on the pagamento side AND
+          // contribuicoes onto pagamentos.intencao_contribuinte_*.
+          //
+          // Plan 0016 (aperture-aj8qw): the per-pagamento id-contribuicao
+          // column on `pagamentos` retired in migration 022 (a pagamento
+          // now carries N contribuição-tipo items in a separate
+          // `intencao_items` table). The join bridges via
+          // intencao_items.id_contribuicao instead.
+          //
+          // The join now traverses:
+          //   campanhas
+          //     → contribuicoes (campanha_id)
+          //     → intencao_items (id_contribuicao — partial index from
+          //       migration 022 covers contribuicao-tipo items)
+          //     → pagamentos (id ← intencao_items.id_pagamento)
+          //
+          // Filtering by the visitor's email on the pagamento side AND
           // requiring status='aprovado' (a pending/rejeitado pagamento
           // never "completed" — surfacing it would be misleading for
           // the admin's "campaigns this contribuinte gifted to" view).
-          // Case-insensitive ilike preserved.
-          // biome-ignore lint/suspicious/noExplicitAny: pagamentos join
-          // requires Kysely<DB> typing which the codegen-generated DB
-          // type covers; the explicit cast unblocks the heterogeneous
-          // join shape across two BCs.
-          const idRows = (await (executor as any)
+          // Case-insensitive ilike preserved. The `executor as any` cast
+          // from the pre-0016 shape is gone — Kysely<DB> typing now
+          // covers the heterogeneous join cleanly.
+          const idRows = await executor
             .selectFrom('campanhas')
             .innerJoin('contribuicoes', 'contribuicoes.campanha_id', 'campanhas.id')
             .innerJoin(
-              'pagamentos',
-              'pagamentos.intencao_id_contribuicao',
+              'intencao_items',
+              'intencao_items.id_contribuicao',
               'contribuicoes.id',
             )
+            .innerJoin('pagamentos', 'pagamentos.id', 'intencao_items.id_pagamento')
             .select('campanhas.id')
             .distinct()
             .where('campanhas.id_plataforma', '=', idPlataforma)
             .where('pagamentos.intencao_contribuinte_email', 'ilike', emailContribuinte)
             .where('pagamentos.status', '=', 'aprovado')
-            .execute()) as Array<{ id: string }>;
+            .execute();
 
           if (idRows.length === 0) {
             span.setStatus({ code: SpanStatusCode.OK });

@@ -424,12 +424,14 @@ describe('LivroFinanceiroRepositoryPostgres — maturation (aperture-led0r)', ()
     const matureInPast = makeMaturedRow(new Date('2026-05-15T00:00:00Z'));
     const matureExactlyNow = makeMaturedRow(new Date('2026-06-01T00:00:00Z'));
     const futureMature = makeMaturedRow(new Date('2026-12-31T00:00:00Z'));
-    const alreadyDisponivelStale = makeMaturedRow(
-      new Date('2026-01-01T00:00:00Z'),
-      'disponivel',
-    );
+    const alreadyDisponivelStale = makeMaturedRow(new Date('2026-01-01T00:00:00Z'), 'disponivel');
 
-    await repo.saveLancamentos([matureInPast, matureExactlyNow, futureMature, alreadyDisponivelStale]);
+    await repo.saveLancamentos([
+      matureInPast,
+      matureExactlyNow,
+      futureMature,
+      alreadyDisponivelStale,
+    ]);
 
     const found = await repo.findPendentesMaturos(new Date('2026-06-01T00:00:00Z'));
     const ids = found.map((l) => l.id).sort();

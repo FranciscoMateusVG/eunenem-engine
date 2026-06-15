@@ -28,7 +28,7 @@ import type { Observability } from '../../observability/observability.js';
  * campanha — fecha o cross-tenant write surface explicitamente, na camada
  * de domínio (procedure fica thin).
  *
-**Plan 0015 (aperture-ucgok):** o guard `contribuicaoDisponivel` foi
+ **Plan 0015 (aperture-ucgok):** o guard `contribuicaoDisponivel` foi
  * removido. Sem status na contribuição, o admin pode editar a qualquer
  * momento. Uma slot com pagamento aprovado pode ter nome/valor editados;
  * o snapshot do pagamento existente preserva o valor que o contribuinte
@@ -52,6 +52,14 @@ export const AtualizarContribuicaoInputSchema = z.object({
   // on imagemUrl shape; consumers enforce format at their API edge.
   imagemUrl: z.string().trim().min(1).max(500).nullable().optional(),
   grupo: z.string().trim().min(1).max(60).nullable().optional(),
+  /**
+   * Plan 0016 (aperture-putz5): change a slot's capacity. Per locked
+   * decision #10 the new value can be lower than the already-sold count —
+   * `quantidadeRestante` simply goes negative and `esgotada` returns true.
+   * The patch helper at `contribuicaoAtualizada` validates `quantidade >= 1`
+   * (the floor) but does NOT cap against sold count.
+   */
+  quantidade: z.number().int().min(1).max(100).optional(),
 });
 
 export type AtualizarContribuicaoInput = z.infer<typeof AtualizarContribuicaoInputSchema>;
@@ -76,7 +84,8 @@ export async function atualizarContribuicao(
         throw new ArrecadacaoInputInvalidoError(message);
       }
 
-      const { idContribuicao, idCampanhaEsperada, nome, valor, imagemUrl, grupo } = parsed.data;
+      const { idContribuicao, idCampanhaEsperada, nome, valor, imagemUrl, grupo, quantidade } =
+        parsed.data;
       span.setAttribute('arrecadacao.contribuicao.id', idContribuicao);
       span.setAttribute('arrecadacao.campanha.id', idCampanhaEsperada);
 
@@ -104,6 +113,7 @@ export async function atualizarContribuicao(
         valor,
         imagemUrl,
         grupo,
+        quantidade,
       });
 
       await contribuicaoRepository.save(updated);
@@ -116,6 +126,7 @@ export async function atualizarContribuicao(
           valor: valor !== undefined,
           imagemUrl: imagemUrl !== undefined,
           grupo: grupo !== undefined,
+          quantidade: quantidade !== undefined,
         },
       });
 

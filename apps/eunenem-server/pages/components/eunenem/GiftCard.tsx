@@ -1,34 +1,37 @@
 
 import { useState } from "react";
+import { useCart } from "@/lib/cart.js";
 import { formatBRL } from "@/lib/formatBRL";
 import type { VisitorGift } from "@/lib/visitorGift";
 
-// aperture-3d9t (visual) + aperture-3xgch (data shape swap — VisitorGift).
+// aperture-3d9t (visual) + aperture-3xgch (data shape swap — VisitorGift)
+// + aperture-16flf (visitor-cart MVP — replace direct PRESENTEAR CTA with
+//   "+ Adicionar" → in-cart QtyStepper).
 //
-// Renders one gift card on the public /pagina/<slug>. Now consumes the
-// grouped-by-nome VisitorGift shape (see lib/visitorGift.ts). Real product
-// image takes over the thumb when imagemUrl is set; otherwise we render the
-// grupo-derived emoji on the colored square. CTA disabled when all units
-// in the group are presenteado.
+// Renders one gift card on the public /pagina/<slug>. Reads the cart for
+// the per-gift qty + remaining-available count, so once an item is in the
+// cart the CTA flips to a +/- stepper inline on the card.
 //
-// Visual contract (unchanged from aperture-3d9t):
-//   - Paper card, 24px radius, hover lifts 4px + bumps shadow
-//   - Square thumb with emoji or image, category chip top-left
-//   - "✓ Presenteado" badge top-right when status = presenteado
-//   - Patrick Hand for the price, Caveat for the "presente" flourish
-//   - btn-lilac CTA → "Presentear →", muted disabled CTA → "Já presenteado ♡"
+// Plan 0017 CTA states (operator's verbal spec: cart is primary, single-
+// shot is the fallback):
+//   - In stock + NOT in cart → "+ Adicionar" lilac CTA (adds 1, opens drawer)
+//   - In stock + already in cart → inline QtyStepper "- / N / +"
+//     accompanied by a small "comprar agora →" link below for single-shot
+//   - All units presenteado → muted disabled chip "Já presenteado ♡"
 //
-// New affordance: when qtyTotal > 1, render a "X de Y disponíveis" tag
-// below the price so the visitor knows there's more than one unit of this
-// gift on the list.
+// onPick is preserved as the single-shot fallback path (GiftCheckoutModal).
+// Plus a new onAdd callback that the Marketplace wires up to open the drawer.
 
 interface GiftCardProps {
   gift: VisitorGift;
   onPick: (gift: VisitorGift) => void;
+  onAdd: (gift: VisitorGift) => void;
 }
 
-export function GiftCard({ gift, onPick }: GiftCardProps) {
+export function GiftCard({ gift, onPick, onAdd }: GiftCardProps) {
   const [hover, setHover] = useState(false);
+  const cart = useCart();
+  const inCartQty = cart.quantidadeFor(gift.nome);
   const isTaken = gift.status === "presenteado";
   const showQtyTag = gift.qtyTotal > 1;
 
@@ -127,90 +130,202 @@ export function GiftCard({ gift, onPick }: GiftCardProps) {
         )}
       </div>
 
-      <h3
-        style={{
-          fontSize: 24,
-          color: "var(--plum)",
-          marginTop: 16,
-          marginBottom: 10,
-          lineHeight: 1.1,
-        }}
-      >
-        {gift.nome}
-      </h3>
+      {/* aperture-nwxkq: wrap the middle content (name + price + qty tag) in a
+          flex-grow container so the bottom CTA pins to the card bottom
+          regardless of name-wrap or whether the "X de Y disponíveis" badge
+          shows. Without this, cards in the same grid row have CTAs at
+          inconsistent vertical positions. */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+        <h3
+          style={{
+            fontSize: 24,
+            color: "var(--plum)",
+            marginTop: 16,
+            marginBottom: 10,
+            lineHeight: 1.1,
+          }}
+        >
+          {gift.nome}
+        </h3>
 
+        <div
+          style={{
+            display: "flex",
+            alignItems: "baseline",
+            justifyContent: "space-between",
+            marginBottom: showQtyTag ? 8 : 16,
+          }}
+        >
+          <span
+            style={{
+              fontFamily: "var(--font-patrick-hand), cursive",
+              fontSize: 30,
+              color: "var(--plum)",
+              lineHeight: 1,
+              whiteSpace: "nowrap",
+            }}
+          >
+            {formatBRL(gift.valorCents)}
+          </span>
+          <span
+            style={{
+              fontFamily: "var(--font-caveat), cursive",
+              fontSize: 18,
+              color: "var(--coral-pink)",
+            }}
+          >
+            presente
+          </span>
+        </div>
+
+        {showQtyTag && (
+          <p
+            style={{
+              fontFamily: "var(--font-caveat), cursive",
+              fontSize: 17,
+              color: "var(--ink-soft)",
+              marginBottom: 14,
+              marginTop: 0,
+              lineHeight: 1.2,
+            }}
+          >
+            {gift.qtyAvailable > 0
+              ? `${gift.qtyAvailable} de ${gift.qtyTotal} disponíveis ♡`
+              : `todos os ${gift.qtyTotal} já foram ♡`}
+          </p>
+        )}
+      </div>
+
+      {isTaken ? (
+        <button
+          type="button"
+          disabled
+          style={{
+            width: "100%",
+            padding: "12px 18px",
+            borderRadius: 999,
+            background: "var(--cream-2)",
+            color: "var(--ink-mute)",
+            fontWeight: 700,
+            fontSize: 13,
+            letterSpacing: "0.06em",
+            textTransform: "uppercase",
+            cursor: "not-allowed",
+            border: "none",
+          }}
+        >
+          Já presenteado ♡
+        </button>
+      ) : inCartQty > 0 ? (
+        <InCartStepper gift={gift} inCartQty={inCartQty} onPick={onPick} />
+      ) : (
+        <button
+          type="button"
+          onClick={() => onAdd(gift)}
+          className="btn-lilac"
+          style={{ width: "100%", justifyContent: "center" }}
+        >
+          + Adicionar
+        </button>
+      )}
+    </article>
+  );
+}
+
+// Inline stepper that replaces the CTA once the gift is in the cart. Mirrors
+// the drawer's stepper vocabulary so the visitor's mental model carries
+// across both surfaces. Decrement at quantidade=1 removes the line entirely
+// (the natural UX read: dragging the count below 1 means "I don't want
+// this anymore"). Increment caps at the group's available unit count.
+function InCartStepper({
+  gift,
+  inCartQty,
+  onPick,
+}: {
+  gift: VisitorGift;
+  inCartQty: number;
+  onPick: (gift: VisitorGift) => void;
+}) {
+  const cart = useCart();
+  const canIncrement = inCartQty < gift.qtyAvailable;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       <div
         style={{
           display: "flex",
-          alignItems: "baseline",
+          alignItems: "center",
           justifyContent: "space-between",
-          marginBottom: showQtyTag ? 8 : 16,
+          padding: "8px 12px",
+          borderRadius: 999,
+          background: "var(--lilac-soft)",
+          border: "1px solid var(--lilac-deep)",
         }}
       >
+        <button
+          type="button"
+          onClick={() => cart.decrement(gift.nome)}
+          aria-label={`Diminuir ${gift.nome}`}
+          style={stepperBtnStyle(false)}
+        >
+          −
+        </button>
         <span
+          aria-live="polite"
           style={{
             fontFamily: "var(--font-patrick-hand), cursive",
-            fontSize: 30,
+            fontSize: 22,
             color: "var(--plum)",
+            fontVariantNumeric: "tabular-nums",
             lineHeight: 1,
-            whiteSpace: "nowrap",
           }}
         >
-          {formatBRL(gift.valorCents)}
+          {inCartQty} no carrinho
         </span>
-        <span
-          style={{
-            fontFamily: "var(--font-caveat), cursive",
-            fontSize: 18,
-            color: "var(--coral-pink)",
-          }}
+        <button
+          type="button"
+          onClick={() => cart.increment(gift.nome)}
+          disabled={!canIncrement}
+          aria-label={`Aumentar ${gift.nome}`}
+          style={stepperBtnStyle(!canIncrement)}
         >
-          presente
-        </span>
+          +
+        </button>
       </div>
-
-      {showQtyTag && (
-        <p
-          style={{
-            fontFamily: "var(--font-caveat), cursive",
-            fontSize: 17,
-            color: "var(--ink-soft)",
-            marginBottom: 14,
-            marginTop: 0,
-            lineHeight: 1.2,
-          }}
-        >
-          {gift.qtyAvailable > 0
-            ? `${gift.qtyAvailable} de ${gift.qtyTotal} disponíveis ♡`
-            : `todos os ${gift.qtyTotal} já foram ♡`}
-        </p>
-      )}
-
       <button
         type="button"
-        onClick={() => !isTaken && onPick(gift)}
-        disabled={isTaken}
-        className={isTaken ? "" : "btn-lilac"}
-        style={
-          isTaken
-            ? {
-                width: "100%",
-                padding: "12px 18px",
-                borderRadius: 999,
-                background: "var(--cream-2)",
-                color: "var(--ink-mute)",
-                fontWeight: 700,
-                fontSize: 13,
-                letterSpacing: "0.06em",
-                textTransform: "uppercase",
-                cursor: "not-allowed",
-                border: "none",
-              }
-            : { width: "100%", justifyContent: "center" }
-        }
+        onClick={() => onPick(gift)}
+        style={{
+          background: "transparent",
+          border: "none",
+          color: "var(--ink-mute)",
+          fontSize: 12,
+          cursor: "pointer",
+          padding: "4px 6px",
+          alignSelf: "center",
+        }}
       >
-        {isTaken ? "Já presenteado ♡" : "Presentear →"}
+        ou comprar agora →
       </button>
-    </article>
+    </div>
   );
+}
+
+function stepperBtnStyle(disabled: boolean): React.CSSProperties {
+  return {
+    width: 30,
+    height: 30,
+    background: "var(--paper)",
+    border: "1px solid var(--lilac-deep)",
+    borderRadius: 999,
+    color: disabled ? "var(--ink-mute)" : "var(--plum)",
+    fontSize: 18,
+    lineHeight: 1,
+    cursor: disabled ? "not-allowed" : "pointer",
+    opacity: disabled ? 0.4 : 1,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  };
 }

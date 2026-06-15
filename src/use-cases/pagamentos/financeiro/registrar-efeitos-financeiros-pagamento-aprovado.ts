@@ -5,6 +5,9 @@ import type { LivroFinanceiroRepository } from '../../../adapters/pagamentos/fin
 import { IdCampanhaSchema } from '../../../domain/arrecadacao/value-objects/ids.js';
 import {
   criarLancamentosParaPagamentoAprovado,
+  type IdsLancamentosFinanceirosPorPagamento,
+  type IdsLancamentosPorItem,
+  type ItemDoPagamentoFinanceiro,
   type LancamentoFinanceiro,
   StatusPagamentoFinanceiroSchema,
 } from '../../../domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
@@ -12,25 +15,35 @@ import {
   IdContribuicaoReferenciaSchema,
   IdPagamentoReferenciaSchema,
 } from '../../../domain/pagamentos/financeiro/value-objects/ids.js';
-import { SnapshotComposicaoValoresFinanceiroSchema } from '../../../domain/pagamentos/financeiro/value-objects/snapshot-composicao-valores-financeiro.js';
+import { SnapshotComposicaoValoresItemFinanceiroSchema } from '../../../domain/pagamentos/financeiro/value-objects/snapshot-composicao-valores-financeiro.js';
+import { IdItemDoPagamentoSchema } from '../../../domain/pagamentos/value-objects/ids.js';
 import { FinanceiroInputInvalidoError } from '../../../errors/pagamentos/financeiro/input-invalido.error.js';
 import { FinanceiroPagamentoJaRegistradoError } from '../../../errors/pagamentos/financeiro/pagamento-ja-registrado.error.js';
 import { FinanceiroPagamentoNaoAprovadoError } from '../../../errors/pagamentos/financeiro/pagamento-nao-aprovado.error.js';
 import type { Observability } from '../../../observability/observability.js';
 
 /**
- * Plan 0015 (aperture-ucgok). Schema dropped `metodo` — the factory no
- * longer needs it (predicted maturation gone; lançamentos start with both
- * date columns null). The caller (Stripe webhook handler) still carries
- * `metodo` on the Pagamento aggregate; it just doesn't flow through here
- * anymore.
+ * Plan 0016 Phase 2 (aperture-eg1s2). Multi-item input shape: caller
+ * provides the cart's per-item financeiro snapshots + the cart-scope
+ * idCampanha + idContribuicaoAnchor. Per-item ids are minted here for
+ * the lançamentos.
  */
+const ItemFinanceiroInputSchema = z.object({
+  idItemPagamento: IdItemDoPagamentoSchema,
+  composicaoValoresItem: SnapshotComposicaoValoresItemFinanceiroSchema,
+});
+
 export const RegistrarEfeitosFinanceirosPagamentoAprovadoInputSchema = z.object({
   idPagamento: IdPagamentoReferenciaSchema,
-  idContribuicao: IdContribuicaoReferenciaSchema,
+  /**
+   * Anchor contribuição id — stamped on every lançamento (including
+   * surcharge rows) for traceability. Sourced from the cart's first
+   * contribuicao-tipo item.
+   */
+  idContribuicaoAnchor: IdContribuicaoReferenciaSchema,
   idCampanha: IdCampanhaSchema,
   statusPagamento: StatusPagamentoFinanceiroSchema,
-  composicaoValores: SnapshotComposicaoValoresFinanceiroSchema,
+  items: z.array(ItemFinanceiroInputSchema).min(1),
 });
 
 export type RegistrarEfeitosFinanceirosPagamentoAprovadoInput = Readonly<
@@ -44,7 +57,10 @@ export interface RegistrarEfeitosFinanceirosPagamentoAprovadoDeps {
 }
 
 /**
- * Registra os efeitos financeiros de um pagamento aprovado sem conhecer o contribuinte.
+ * Registra os efeitos financeiros de um pagamento aprovado em shape
+ * multi-item. Per-item lançamentos per locked decision #12:
+ *   - contribuicao item → recebedor + receita_plataforma (2 rows)
+ *   - passthrough_surcharge item → passthrough (1 row)
  */
 export async function registrarEfeitosFinanceirosPagamentoAprovado(
   deps: RegistrarEfeitosFinanceirosPagamentoAprovadoDeps,
@@ -61,12 +77,15 @@ export async function registrarEfeitosFinanceirosPagamentoAprovado(
         throw new FinanceiroInputInvalidoError(message);
       }
 
-      const { idPagamento, idContribuicao, idCampanha, statusPagamento, composicaoValores } =
+      const { idPagamento, idContribuicaoAnchor, idCampanha, statusPagamento, items } =
         parsed.data;
 
-      span.setAttribute('financeiro.pagamento.id', idPagamento);
-      span.setAttribute('financeiro.contribuicao.id', idContribuicao);
-      span.setAttribute('financeiro.campanha.id', idCampanha);
+      span.setAttributes({
+        'financeiro.pagamento.id': idPagamento,
+        'financeiro.contribuicao.anchor.id': idContribuicaoAnchor,
+        'financeiro.campanha.id': idCampanha,
+        'financeiro.items.count': items.length,
+      });
 
       if (statusPagamento !== 'aprovado') {
         throw new FinanceiroPagamentoNaoAprovadoError(idPagamento, statusPagamento);
@@ -78,20 +97,33 @@ export async function registrarEfeitosFinanceirosPagamentoAprovado(
         throw new FinanceiroPagamentoJaRegistradoError(idPagamento);
       }
 
+      // Mint per-item lancamento ids: 2 per contribuicao item, 1 per surcharge.
+      const idsPorItem: IdsLancamentosPorItem[] = items.map((it) => {
+        if (it.composicaoValoresItem.tipo === 'contribuicao') {
+          return {
+            idItemPagamento: it.idItemPagamento,
+            idLancamentoRecebedor: randomUUID(),
+            idLancamentoReceitaPlataforma: randomUUID(),
+          };
+        }
+        return {
+          idItemPagamento: it.idItemPagamento,
+          idLancamentoPassthroughSurcharge: randomUUID(),
+        };
+      });
+
       const now = clock();
       let lancamentos: readonly LancamentoFinanceiro[];
       try {
-        // aperture-bjshv: mint the third UUID only when the composicao
-        // carries a non-zero surcharge (cartao). PIX (surchargeCents===0)
-        // keeps the 2-UUID shape and the factory returns 2 lancamentos.
         lancamentos = criarLancamentosParaPagamentoAprovado(
-          parsed.data,
           {
-            idLancamentoRecebedor: randomUUID(),
-            idLancamentoReceitaPlataforma: randomUUID(),
-            idLancamentoPassthroughSurcharge:
-              composicaoValores.surchargeCents > 0 ? randomUUID() : undefined,
+            idPagamento,
+            idCampanha,
+            statusPagamento,
+            idContribuicaoAnchor,
+            items: items as readonly ItemDoPagamentoFinanceiro[],
           },
+          idsPorItem as IdsLancamentosFinanceirosPorPagamento,
           now,
         );
       } catch (error) {
@@ -100,16 +132,25 @@ export async function registrarEfeitosFinanceirosPagamentoAprovado(
 
       await livroFinanceiroRepository.saveLancamentos(lancamentos);
 
+      // Aggregate totals for the audit log.
+      let totalReceiver = 0;
+      let totalReceita = 0;
+      let totalPassthrough = 0;
+      for (const l of lancamentos) {
+        if (l.tipo === 'credito_saldo_recebedor') totalReceiver += l.amountCents;
+        else if (l.tipo === 'credito_receita_plataforma') totalReceita += l.amountCents;
+        else if (l.tipo === 'credito_passthrough_surcharge') totalPassthrough += l.amountCents;
+      }
+
       logger.info('financeiro.efeitos.registrados', {
         idPagamento,
-        idContribuicao,
         idCampanha,
-        receiverAmountCents: composicaoValores.receiverAmountCents,
-        platformRevenueAmountCents: composicaoValores.feeAmountCents,
-        // aperture-bjshv: surface the third lancamento amount in audit logs
-        // so operators can correlate the new book entry against the
-        // composicao snapshot without joining tables. 0 for PIX.
-        passthroughSurchargeAmountCents: composicaoValores.surchargeCents,
+        idContribuicaoAnchor,
+        numeroDeItens: items.length,
+        numeroDeLancamentos: lancamentos.length,
+        totalReceiverAmountCents: totalReceiver,
+        totalPlatformRevenueAmountCents: totalReceita,
+        totalPassthroughSurchargeAmountCents: totalPassthrough,
       });
 
       span.setStatus({ code: SpanStatusCode.OK });

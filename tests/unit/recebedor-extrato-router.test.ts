@@ -30,6 +30,7 @@ import { PagamentoRepositoryMemory } from '../../src/adapters/pagamentos/reposit
 import { ID_PLATAFORMA_EUNENEM } from '../../src/adapters/plataforma/repository.memory.js';
 import { NoopLogger } from '../../src/observability/noop-logger.js';
 import { noopTracer } from '../../src/observability/tracer.js';
+import { makePagamento as makePagamentoBase } from '../helpers/pagamento-repository.conformance.js';
 
 const SESSION_COOKIE = 'better-auth.session_token';
 const SESSION_TOKEN = 'tok_test_session';
@@ -43,38 +44,18 @@ function makePagamento(args: {
   criadoEm?: Date;
   contribuinteNome?: string | null;
 }) {
-  const criadoEm = args.criadoEm ?? FAKE_NOW;
-  return {
-    id: args.id as never,
+  return makePagamentoBase({
+    id: args.id,
+    idContribuicao: args.idContribuicao,
     status: (args.status ?? 'aprovado') as never,
-    criadoEm,
-    atualizadoEm: criadoEm,
-    intencao: {
-      id: randomUUID() as never,
-      idContribuicao: args.idContribuicao as never,
-      criadaEm: criadoEm,
-      metodo: 'pix',
-      amountCents: 4500 as never,
-      externalRef: null,
-      paymentIntentExternalRef: null,
-      chargeExternalRef: null,
-      balanceTransactionAvailableOn:
-        args.availableOn === undefined ? FAKE_NOW : args.availableOn,
-      contribuinte:
-        args.contribuinteNome === null || args.contribuinteNome === undefined
-          ? null
-          : { nome: args.contribuinteNome, email: 'x@y.com' },
-      composicaoValores: {
-        idContribuicao: args.idContribuicao,
-        contributionAmountCents: 4500 as never,
-        feeAmountCents: 0 as never,
-        surchargeCents: 0 as never,
-        receiverAmountCents: 4500 as never,
-        totalPaidCents: 4500 as never,
-        responsavelTaxa: 'contribuinte',
-      } as never,
-    } as never,
-  } as never;
+    criadoEm: args.criadoEm ?? FAKE_NOW,
+    balanceTransactionAvailableOn:
+      args.availableOn === undefined ? FAKE_NOW : args.availableOn,
+    contribuinte:
+      args.contribuinteNome === null || args.contribuinteNome === undefined
+        ? null
+        : ({ nome: args.contribuinteNome, email: 'x@y.com' } as never),
+  });
 }
 
 function makeLancamento(args: {
@@ -83,10 +64,7 @@ function makeLancamento(args: {
   idContribuicao: string;
   idCampanha: string;
   amountCents?: number;
-  tipo?:
-    | 'credito_saldo_recebedor'
-    | 'credito_receita_plataforma'
-    | 'credito_passthrough_surcharge';
+  tipo?: 'credito_saldo_recebedor' | 'credito_receita_plataforma' | 'credito_passthrough_surcharge';
   transferidoEm?: Date | null;
   canceladoEm?: Date | null;
   idRepasse?: string | null;
@@ -280,6 +258,9 @@ describe('recebedor.extrato.summary — KPI aggregation (aperture-7g5sx)', () =>
       aguardandoLiberacaoCents: 0,
       proximaTransfDate: null,
       totalPresentes: 0,
+      // aperture-kvpvf — strip counters: both zero on empty campanha.
+      totalRecadosCount: 0,
+      totalPresentesItensCount: 0,
       dateRangeStart: null,
       dateRangeEnd: null,
     });
@@ -411,6 +392,113 @@ describe('recebedor.extrato.summary — KPI aggregation (aperture-7g5sx)', () =>
       idCampanha: rig.idCampanha,
     });
     expect(result.totalRecebidoCents).toBe(4500); // ONLY saldo_recebedor counted
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  //  aperture-kvpvf — strip counters (RECADOS + PRESENTES item count)
+  // ─────────────────────────────────────────────────────────────────
+
+  it('totalRecadosCount — counts distinct aprovado pagamentos with a non-empty mensagem', async () => {
+    // pag1: contribuinte + mensagem  → INCLUDED
+    const idPag1 = randomUUID();
+    await rig.pagamentoRepository.save(
+      makePagamentoBase({
+        id: idPag1 as never,
+        idContribuicao: rig.idContribuicao as never,
+        status: 'aprovado' as never,
+        criadoEm: new Date('2026-06-01T08:00:00.000Z'),
+        balanceTransactionAvailableOn: FAKE_NOW,
+        contribuinte: { nome: 'Ana', email: 'a@x.com', mensagem: 'Parabéns!' } as never,
+      }),
+    );
+    // pag2: contribuinte but no mensagem → EXCLUDED
+    const idPag2 = randomUUID();
+    await rig.pagamentoRepository.save(
+      makePagamentoBase({
+        id: idPag2 as never,
+        idContribuicao: rig.idContribuicao as never,
+        status: 'aprovado' as never,
+        criadoEm: new Date('2026-06-02T08:00:00.000Z'),
+        balanceTransactionAvailableOn: FAKE_NOW,
+        contribuinte: { nome: 'Bruno', email: 'b@x.com' } as never,
+      }),
+    );
+    // pag3: anonymous (contribuinte null) → EXCLUDED
+    const idPag3 = randomUUID();
+    await rig.pagamentoRepository.save(
+      makePagamento({ id: idPag3, idContribuicao: rig.idContribuicao }),
+    );
+    // pag4: contribuinte + whitespace-only mensagem → EXCLUDED
+    const idPag4 = randomUUID();
+    await rig.pagamentoRepository.save(
+      makePagamentoBase({
+        id: idPag4 as never,
+        idContribuicao: rig.idContribuicao as never,
+        status: 'aprovado' as never,
+        criadoEm: new Date('2026-06-04T08:00:00.000Z'),
+        balanceTransactionAvailableOn: FAKE_NOW,
+        contribuinte: { nome: 'Carla', email: 'c@x.com', mensagem: '   ' } as never,
+      }),
+    );
+    await rig.livroFinanceiroRepository.saveLancamentos([
+      makeLancamento({ idPagamento: idPag1, idContribuicao: rig.idContribuicao, idCampanha: rig.idCampanha }),
+      makeLancamento({ idPagamento: idPag2, idContribuicao: rig.idContribuicao, idCampanha: rig.idCampanha }),
+      makeLancamento({ idPagamento: idPag3, idContribuicao: rig.idContribuicao, idCampanha: rig.idCampanha }),
+      makeLancamento({ idPagamento: idPag4, idContribuicao: rig.idContribuicao, idCampanha: rig.idCampanha }),
+    ]);
+
+    const result = await rig.caller.recebedor.extrato.summary({
+      idCampanha: rig.idCampanha,
+    });
+    expect(result.totalRecadosCount).toBe(1);
+  });
+
+  it('totalPresentesItensCount — counts one per contribuicao-tipo ItemDoPagamento (not per pagamento)', async () => {
+    // pag1: PIX, 1 contribuicao item × quantidade 3 → 1 contribuicao item row
+    // pag2: cartão, 1 contribuicao item + 1 passthrough_surcharge → counts ONE (surcharge excluded)
+    // pag3: distinct pagamento with one item → adds 1
+    const idPag1 = randomUUID();
+    await rig.pagamentoRepository.save(
+      makePagamentoBase({
+        id: idPag1 as never,
+        idContribuicao: rig.idContribuicao as never,
+        status: 'aprovado' as never,
+        criadoEm: new Date('2026-06-01T08:00:00.000Z'),
+        balanceTransactionAvailableOn: FAKE_NOW,
+        metodo: 'pix' as never,
+        quantidade: 3 as never,
+      }),
+    );
+    const idPag2 = randomUUID();
+    await rig.pagamentoRepository.save(
+      makePagamentoBase({
+        id: idPag2 as never,
+        idContribuicao: rig.idContribuicao as never,
+        status: 'aprovado' as never,
+        criadoEm: new Date('2026-06-02T08:00:00.000Z'),
+        balanceTransactionAvailableOn: FAKE_NOW,
+        metodo: 'credit_card' as never,
+      }),
+    );
+    const idPag3 = randomUUID();
+    await rig.pagamentoRepository.save(
+      makePagamento({ id: idPag3, idContribuicao: rig.idContribuicao }),
+    );
+    // Multiple lançamentos against the same pagamento should NOT
+    // double-count items (each pagamento's items tallied once).
+    await rig.livroFinanceiroRepository.saveLancamentos([
+      makeLancamento({ idPagamento: idPag1, idContribuicao: rig.idContribuicao, idCampanha: rig.idCampanha }),
+      makeLancamento({ idPagamento: idPag1, idContribuicao: rig.idContribuicao, idCampanha: rig.idCampanha }),
+      makeLancamento({ idPagamento: idPag2, idContribuicao: rig.idContribuicao, idCampanha: rig.idCampanha }),
+      makeLancamento({ idPagamento: idPag3, idContribuicao: rig.idContribuicao, idCampanha: rig.idCampanha }),
+    ]);
+
+    const result = await rig.caller.recebedor.extrato.summary({
+      idCampanha: rig.idCampanha,
+    });
+    // pag1 has 1 contribuicao item, pag2 has 1 contribuicao item (surcharge
+    // skipped), pag3 has 1 contribuicao item → 3.
+    expect(result.totalPresentesItensCount).toBe(3);
   });
 });
 
@@ -797,9 +885,7 @@ describe('recebedor.extrato.list — contribuicaoNome + contribuicaoImagemUrl (a
     } as never);
 
     const idPag = randomUUID();
-    await rig.pagamentoRepository.save(
-      makePagamento({ id: idPag, idContribuicao: idC }),
-    );
+    await rig.pagamentoRepository.save(makePagamento({ id: idPag, idContribuicao: idC }));
     await rig.livroFinanceiroRepository.saveLancamentos([
       makeLancamento({
         idPagamento: idPag,

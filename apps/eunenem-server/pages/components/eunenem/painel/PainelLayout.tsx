@@ -24,19 +24,28 @@ interface PainelLayoutProps {
   slug: string;
   /** Current section, or undefined for the painel root (PainelPage). */
   activeSection?: PainelSection;
+  /** aperture-7nius — when on the painel root the parent can wire a
+   *  TUTORIAL chip handler. Sub-pages leave this undefined and the chip
+   *  falls back to `?tutorial=open` navigation. */
+  onOpenTutorial?: () => void;
   children: ReactNode;
 }
 
 export function PainelLayout({
   slug,
   activeSection,
+  onOpenTutorial,
   children,
 }: PainelLayoutProps) {
   const initialBabyName = slug.charAt(0).toUpperCase() + slug.slice(1);
 
   return (
     <TweaksProvider initialState={{ babyName: initialBabyName }}>
-      <PainelTopbar slug={slug} activeSection={activeSection} />
+      <PainelTopbar
+        slug={slug}
+        activeSection={activeSection}
+        onOpenTutorial={onOpenTutorial}
+      />
       <div className="painel-app">{children}</div>
       <TweaksPanel />
     </TweaksProvider>

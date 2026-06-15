@@ -49,10 +49,7 @@ import { sql } from 'kysely';
  */
 export async function up(db: Kysely<unknown>): Promise<void> {
   // ───── lancamentos_financeiros.id_repasse ─────
-  await db.schema
-    .alterTable('lancamentos_financeiros')
-    .addColumn('id_repasse', 'uuid')
-    .execute();
+  await db.schema.alterTable('lancamentos_financeiros').addColumn('id_repasse', 'uuid').execute();
 
   await sql`
     CREATE INDEX lancamentos_financeiros_id_repasse_idx
@@ -66,10 +63,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn('aprovado_em', 'timestamptz')
     .execute();
 
-  await db.schema
-    .alterTable('repasses_recebedor')
-    .addColumn('bank_transfer_ref', 'text')
-    .execute();
+  await db.schema.alterTable('repasses_recebedor').addColumn('bank_transfer_ref', 'text').execute();
 
   // ───── status CHECK extension ─────
   await sql`
@@ -107,22 +101,13 @@ export async function down(db: Kysely<unknown>): Promise<void> {
       CHECK (status IN ('solicitado'))
   `.execute(db);
 
-  await db.schema
-    .alterTable('repasses_recebedor')
-    .dropColumn('bank_transfer_ref')
-    .execute();
+  await db.schema.alterTable('repasses_recebedor').dropColumn('bank_transfer_ref').execute();
 
-  await db.schema
-    .alterTable('repasses_recebedor')
-    .dropColumn('aprovado_em')
-    .execute();
+  await db.schema.alterTable('repasses_recebedor').dropColumn('aprovado_em').execute();
 
   await sql`
     DROP INDEX IF EXISTS lancamentos_financeiros_id_repasse_idx
   `.execute(db);
 
-  await db.schema
-    .alterTable('lancamentos_financeiros')
-    .dropColumn('id_repasse')
-    .execute();
+  await db.schema.alterTable('lancamentos_financeiros').dropColumn('id_repasse').execute();
 }

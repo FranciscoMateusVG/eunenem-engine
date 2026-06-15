@@ -18,11 +18,11 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { LivroFinanceiroRepositoryMemory } from '../../../src/adapters/pagamentos/financeiro/livro-repository.memory.js';
+import type { LancamentoFinanceiro } from '../../../src/domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
 import {
   aprovarRepasse,
   criarRepasseRecebedorSolicitado,
 } from '../../../src/domain/pagamentos/financeiro/entities/repasse-recebedor.js';
-import type { LancamentoFinanceiro } from '../../../src/domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
 import { FinanceiroRepasseJaPendenteError } from '../../../src/errors/pagamentos/financeiro/repasse-ja-pendente.error.js';
 import { FinanceiroRepasseNaoEncontradoError } from '../../../src/errors/pagamentos/financeiro/repasse-nao-encontrado.error.js';
 import { FinanceiroRepasseStatusInvalidoError } from '../../../src/errors/pagamentos/financeiro/repasse-status-invalido.error.js';

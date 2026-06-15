@@ -222,6 +222,10 @@ export async function registrarContaUsuario(
         nomeExibicao: data.nomeExibicao,
         slug,
         criadoEm,
+        // Plan 0018 Phase A (aperture-omswg). Fresh registrations start
+        // with `null` so the first-time tutorial overlay fires on first
+        // visit.
+        tutorialCompletadoEm: null,
       };
 
       const conta: Conta = {

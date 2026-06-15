@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import type { PainelSectionBodyProps } from "@/PainelSectionPage";
 import {
@@ -10,6 +11,22 @@ import {
   type PresentesStatus,
   type PresentesTx,
 } from "@/lib/mocks/presentes";
+import {
+  ACCOUNT_TYPES,
+  BANKS,
+  BANCARIOS_DEMO,
+  CPF_FIXO,
+  PIX_TYPES,
+  bankByCode,
+  type BancariosForm as BancariosFormState,
+  type BancariosMode,
+  type PixType,
+} from "@/lib/mocks/bancarios";
+import { trpc } from "@/lib/trpc";
+// aperture-jtamj — local PIX-key-type tuple (used to be inferred from the
+// pre-swap CriarRecebedorInputSchema discriminated union; Rex's flat wire
+// landed with the same string set so we keep the same vocabulary).
+type PixKeyTipo = "cpf" | "cnpj" | "email" | "telefone" | "aleatoria";
 import {
   type ExtratoLiberacao,
   type ExtratoRowDTO,
@@ -202,6 +219,10 @@ function adaptRow(row: ExtratoRowDTO): PresentesTx {
     // discriminates by URL shape: starts-with-`http` or `/` → <img>,
     // else → text glyph. Null/absent → no thumbnail.
     itemImagemUrl: row.contribuicaoImagemUrl ?? null,
+    // aperture-qp4mq — per-item quantidade. Drives the "× N" suffix
+    // on the drawer's item row when > 1; the row itself shows only
+    // the item name (the badge would crowd the inline two-line ticket).
+    quantidade: row.quantidade,
   };
 }
 
@@ -404,16 +425,6 @@ function IconFilter() {
   );
 }
 
-function IconDownload() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-      <path d="m7 10 5 5 5-5" />
-      <path d="M12 15V3" />
-    </svg>
-  );
-}
-
 // ── Filter popover ───────────────────────────────────────────────────────────
 function FilterButton({
   active,
@@ -425,15 +436,44 @@ function FilterButton({
   onChange: (next: PresentesStatus[]) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  // aperture-sm7uc (#8) — pop-coords for the portalled panel.
+  // The parent `.ex-sheet` uses CSS `mask` which creates a clipping
+  // stacking context: any in-tree absolute child that crosses the
+  // mask boundary gets painted into nothing, which made the panel
+  // disappear behind the ticket rows below. Portalling to <body>
+  // with position: fixed sidesteps the mask entirely.
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [coords, setCoords] = useState<{ top: number; right: number } | null>(null);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setCoords(null);
+      return;
+    }
+    const place = () => {
+      const r = btnRef.current?.getBoundingClientRect();
+      if (!r) return;
+      setCoords({
+        top: r.bottom + 6,
+        right: Math.max(8, window.innerWidth - r.right),
+      });
+    };
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
     const onDoc = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (btnRef.current?.contains(target)) return;
+      if (panelRef.current?.contains(target)) return;
+      setOpen(false);
     };
     document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+      document.removeEventListener("mousedown", onDoc);
+    };
   }, [open]);
 
   const toggle = (k: PresentesStatus) => {
@@ -441,8 +481,9 @@ function FilterButton({
   };
 
   return (
-    <div className="ex-filter" ref={ref}>
+    <div className="ex-filter">
       <button
+        ref={btnRef}
         type="button"
         className={`ex-filter-btn ${open ? "is-open " : ""}${active.length ? "is-active" : ""}`}
         onClick={() => setOpen((v) => !v)}
@@ -453,36 +494,48 @@ function FilterButton({
         {active.length > 0 && <span className="ex-filter-badge">{active.length}</span>}
       </button>
 
-      {open && (
-        <div className="ex-filter-panel" role="menu">
-          <div className="ex-filter-panel-hd">
-            <span className="ex-caps">por status</span>
-            {active.length > 0 && (
-              <button type="button" className="ex-link" onClick={() => onChange([])}>
-                limpar
-              </button>
-            )}
-          </div>
-          <div className="ex-filter-pills">
-            {FILTER_OPTIONS.map((o) => {
-              const on = active.includes(o.key);
-              return (
-                <button
-                  key={o.key}
-                  type="button"
-                  className={`ex-filter-pill ${on ? "is-on" : ""}`}
-                  style={on ? { background: `${o.color}22`, borderColor: o.color, color: o.color } : undefined}
-                  onClick={() => toggle(o.key)}
-                >
-                  <i className="ex-filter-dot" style={{ background: o.color }} />
-                  {o.label}
-                  <span className="ex-filter-count">{counts[o.key] || 0}</span>
+      {open && coords !== null && typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={panelRef}
+            className="ex-filter-panel presentes-extrato-portal"
+            role="menu"
+            style={{
+              position: "fixed",
+              top: coords.top,
+              right: coords.right,
+              zIndex: 120,
+            }}
+          >
+            <div className="ex-filter-panel-hd">
+              <span className="ex-caps">por status</span>
+              {active.length > 0 && (
+                <button type="button" className="ex-link" onClick={() => onChange([])}>
+                  limpar
                 </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
+              )}
+            </div>
+            <div className="ex-filter-pills">
+              {FILTER_OPTIONS.map((o) => {
+                const on = active.includes(o.key);
+                return (
+                  <button
+                    key={o.key}
+                    type="button"
+                    className={`ex-filter-pill ${on ? "is-on" : ""}`}
+                    style={on ? { background: `${o.color}22`, borderColor: o.color, color: o.color } : undefined}
+                    onClick={() => toggle(o.key)}
+                  >
+                    <i className="ex-filter-dot" style={{ background: o.color }} />
+                    {o.label}
+                    <span className="ex-filter-count">{counts[o.key] || 0}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
@@ -612,7 +665,22 @@ function DetailDrawer({ tx, onClose }: { tx: PresentesTx | null; onClose: () => 
             <dt>item</dt>
             <dd className="ex-drawer-item-dd">
               <GiftThumb url={t.itemImagemUrl ?? null} />
-              <span>{t.item}</span>
+              <span>
+                {t.item}
+                {typeof t.quantidade === "number" && t.quantidade > 1 && (
+                  <span
+                    aria-label={`quantidade ${t.quantidade}`}
+                    style={{
+                      marginLeft: 8,
+                      fontVariantNumeric: "tabular-nums",
+                      color: "var(--ink-soft)",
+                      fontWeight: 600,
+                    }}
+                  >
+                    × {t.quantidade}
+                  </span>
+                )}
+              </span>
             </dd>
           </div>
           {t.note && (
@@ -633,10 +701,10 @@ function DetailDrawer({ tx, onClose }: { tx: PresentesTx | null; onClose: () => 
             <dt>horário</dt>
             <dd>{t.t}</dd>
           </div>
-          <div>
-            <dt>identificador</dt>
-            <dd className="ex-mono">PRT-{t.id.toUpperCase()}-2026</dd>
-          </div>
+          {/* aperture-qp4mq — IDENTIFICADOR row removed (internal UUID,
+              not user-actionable). The id stays available on the underlying
+              tx for support / debugging purposes but no longer renders in
+              the drawer surface. */}
           {t.status === "tSolicitada" && (
             <div>
               <dt>previsão</dt>
@@ -663,10 +731,11 @@ function DetailDrawer({ tx, onClose }: { tx: PresentesTx | null; onClose: () => 
               enviar agradecimento à {firstName}
             </button>
           )}
-          <button type="button" className="ex-btn-ghost block" onClick={onClose}>
-            <IconDownload />
-            baixar comprovante
-          </button>
+          {/* aperture-qp4mq — BAIXAR COMPROVANTE button removed. No PDF
+              download in scope; the IconDownload import was kept dead-code
+              free by removing both the button + its handler. If a receipt
+              feature returns, file a fresh bead with the storage shape +
+              user trigger. */}
         </div>
       </aside>
     </>
@@ -674,29 +743,55 @@ function DetailDrawer({ tx, onClose }: { tx: PresentesTx | null; onClose: () => 
 }
 
 // ── Transfer modal ───────────────────────────────────────────────────────────
+//
+// aperture-sm7uc (#9) — all-or-nothing confirm modal. The previous
+// version embedded an amount <input> + "usar tudo" + a mocked destination
+// summary, both of which encouraged a partial-withdrawal mental model
+// that the backend never supported (Rex's solicitarRepasseRecebedor
+// sweeps the WHOLE saldo per locked decision aperture-s03dr). The new
+// shape is a plain confirm: "Transferir R$ X (tudo) — confirmar?"
+// followed by a single solicit button. No amount input ever, no
+// destination override.
+//
+// aperture-kbmel (#9 deferred path) — when hasRecebedor === false, the
+// modal body becomes a slim BancariosBody form (Conta Completa / Chave Pix
+// tabs, titular guard, locked CPF from session). On submit the modal
+// chains: useCriarRecebedor.mutate() → on success →
+// solicitarState.mutate() → close. Both branches share the same modal
+// chrome (header / scrim / close button); only the body swaps.
 function TransferModal({
   open,
   saldo,
+  hasRecebedor,
+  idCampanha,
   onClose,
   solicitarState,
 }: {
   open: boolean;
   saldo: number;
+  /** Drives the onboarding branch. Sourced from useStubCampanhaIdForSlug. */
+  hasRecebedor: boolean;
+  /** Required to submit recebedor.criar (the input schema demands it). */
+  idCampanha: string | null;
   onClose: () => void;
   solicitarState: SolicitarTransferenciaState;
 }) {
-  const [amount, setAmount] = useState("");
-  useEffect(() => {
-    if (open) setAmount((saldo / 100).toFixed(2).replace(".", ","));
-  }, [open, saldo]);
-
   if (!open) return null;
 
-  // Rex's solicitar API takes ONLY idCampanha — the amount is always the
-  // full saldoDisponivelCents (v1 spec: no partial withdrawals). The
-  // amount input is kept as an informational display + "usar tudo" affordance
-  // for the eventual partial-withdrawal feature, but today the actual mutate
-  // call ignores the input value and always solicits the full saldo.
+  // Branch on hasRecebedor. Existing-recebedor flow keeps the current
+  // all-or-nothing confirm body verbatim; no-recebedor flow embeds the
+  // onboarding form.
+  if (!hasRecebedor) {
+    return (
+      <TransferOnboardingModal
+        saldo={saldo}
+        idCampanha={idCampanha}
+        onClose={onClose}
+        solicitarState={solicitarState}
+      />
+    );
+  }
+
   const submit = () => {
     if (solicitarState.isPending) return;
     solicitarState.mutate();
@@ -720,40 +815,53 @@ function TransferModal({
         <header className="ex-modal-hd">
           <div>
             <span className="ex-caps">solicitar transferência</span>
-            <h3 className="ex-modal-title">retirar do saldo</h3>
+            <h3 className="ex-modal-title">transferir tudo?</h3>
           </div>
           <button type="button" className="ex-icon-btn" onClick={onClose} aria-label="Fechar">
             <IconClose />
           </button>
         </header>
         <p className="ex-modal-text">
-          o valor é enviado para a conta de destino em <strong>até 1 dia útil</strong>. você recebe
-          um aviso por e-mail quando o pagamento for confirmado.
+          vamos transferir <strong>{fmtMoney(saldo)} (tudo)</strong> para sua conta
+          cadastrada. o valor cai em <strong>até 1 dia útil</strong> depois
+          que aprovamos a solicitação por aqui.
         </p>
-        <label className="ex-modal-field">
-          <span>valor</span>
-          <div className="ex-modal-input">
-            <span className="prefix">R$</span>
-            <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" />
-            <button
-              type="button"
-              className="ex-link"
-              onClick={() => setAmount((saldo / 100).toFixed(2).replace(".", ","))}
-            >
-              usar tudo
-            </button>
-          </div>
-          <span className="ex-hint">disponível: {fmtMoney(saldo)}</span>
-        </label>
-        <div className="ex-modal-dest">
-          <div>
-            <div className="ex-modal-dest-label">destino</div>
-            <div className="ex-modal-dest-bank">Banco Inter · ag. 0001 · c/c 12345-6</div>
-            <div className="ex-modal-dest-name">Mariana Vasconcelos · CPF ***.***.***-12</div>
-          </div>
-          <button type="button" className="ex-link">
-            trocar
-          </button>
+        <div
+          className="ex-confirm-amount"
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 4,
+            padding: "18px 16px",
+            margin: "0 0 22px",
+            background: "var(--cream)",
+            border: "1px dashed var(--line)",
+            borderRadius: 12,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              color: "var(--ink-mute)",
+            }}
+          >
+            total a transferir
+          </span>
+          <span
+            style={{
+              fontFamily: "var(--hand)",
+              fontSize: 36,
+              lineHeight: 1,
+              color: "var(--plum)",
+              fontFeatureSettings: '"tnum"',
+            }}
+          >
+            {fmtMoney(saldo)}
+          </span>
         </div>
         {errorLabel && (
           <div
@@ -769,6 +877,7 @@ function TransferModal({
               fontSize: "11px",
               textTransform: "uppercase",
               letterSpacing: "0.14em",
+              marginBottom: 14,
             }}
           >
             {errorLabel}
@@ -787,19 +896,469 @@ function TransferModal({
             type="button"
             className="ex-btn-green"
             onClick={submit}
-            disabled={solicitarState.isPending || isBlocking}
+            disabled={solicitarState.isPending || isBlocking || saldo === 0}
             aria-busy={solicitarState.isPending}
           >
             {solicitarState.isPending
               ? "solicitando…"
               : isBlocking
                 ? errorLabel
-                : "solicitar transferência"}
+                : "confirmar transferência"}
           </button>
         </div>
       </div>
     </>
   );
+}
+
+// ── Transfer onboarding modal (no-recebedor path) ────────────────────────────
+//
+// aperture-kbmel — modal body when the user hits SOLICITAR TRANSFERÊNCIA
+// without a recebedor configured. Slim port of BancariosBody form shape:
+// Conta Completa / Chave Pix tabs, titular guard, CPF locked from session.
+//
+// On submit:
+//   1. useCriarRecebedor.mutateAsync({ idCampanha, dadosBancarios, titular })
+//   2. on success → solicitarState.mutate() (sweeps the saldo)
+//   3. solicitarState.onSuccess in the parent closes the modal + toasts
+//
+// Embedded copy (not extracted) per the kbmel spec's "Simpler" option —
+// the full BancariosBody is 35KB with its own CSS recipe, and embedding it
+// 1:1 into a modal frame would require a significant CSS reshape. The
+// slim port below mirrors the same form FIELDS + the same validation
+// contract but uses inline modal-scoped styles. When/if a real form-
+// extraction PR ships (kbmel spec's "Better" option), this whole
+// component swaps to `<BancariosForm onSubmit={...} />`.
+//
+// TODO(aperture-kbmel-rex-swap): nothing in this component needs to change
+// when Rex's backend lands — the swap point is `useCriarRecebedor` itself
+// (see pages/lib/hooks/useCriarRecebedor.ts).
+function TransferOnboardingModal({
+  saldo,
+  idCampanha,
+  onClose,
+  solicitarState,
+}: {
+  saldo: number;
+  idCampanha: string | null;
+  onClose: () => void;
+  solicitarState: SolicitarTransferenciaState;
+}) {
+  const [s, setS] = useState<BancariosFormState>({ ...BANCARIOS_DEMO });
+  const [modo, setModo] = useState<BancariosMode>("conta");
+  const [tipoPix, setTipoPix] = useState<PixType["v"]>("cpf");
+  const [validationError, setValidationError] = useState<string | null>(null);
+
+  // aperture-jtamj — real trpc.recebedor.criar mutation (Rex's #193 Phase A).
+  // onSuccess invalidates auth.me so hasRecebedor flips true → next click
+  // on SOLICITAR routes to the confirm-amount modal (existing B2 #188 path).
+  const utils = trpc.useUtils();
+  const criarRecebedor = trpc.recebedor.criar.useMutation({
+    onSuccess: () => {
+      // Invalidate auth.me so the hasRecebedor signal refetches.
+      void utils.auth.me.invalidate();
+      // Chain into solicitar. The parent wires solicitarState.onSuccess
+      // to close the modal + show the toast, so a single side-effect
+      // terminates the whole flow.
+      solicitarState.mutate();
+    },
+  });
+
+  const set = (patch: Partial<BancariosFormState>) =>
+    setS((prev) => ({ ...prev, ...patch }));
+
+  // Slim client-side validation: just enough to block obvious garbage
+  // before hitting the wire. The shared `CriarRecebedorInputSchema`
+  // re-validates inside the mock hook (and will inside Rex's procedure
+  // post-swap), so this is belt-and-suspenders rather than the source
+  // of truth.
+  const validate = (): string | null => {
+    if (!s.nome || s.nome.trim().split(/\s+/).length < 2) {
+      return "informe o nome completo do titular";
+    }
+    if (!/^\(\d{2}\) \d{4,5}-\d{4}$/.test(s.telefone)) {
+      return "celular inválido — use o formato (DD) 9XXXX-XXXX";
+    }
+    if (modo === "conta") {
+      if (!s.bankCode) return "escolha o banco";
+      if (!s.agencia) return "informe a agência";
+      if (!s.conta) return "informe a conta";
+      if (!s.contaDV) return "informe o dígito da conta";
+      return null;
+    }
+    if (!s.pixKey) return "informe a chave pix";
+    return null;
+  };
+
+  const submit = () => {
+    if (criarRecebedor.isPending || solicitarState.isPending) return;
+    const err = validate();
+    if (err) {
+      setValidationError(err);
+      return;
+    }
+    setValidationError(null);
+    if (idCampanha === null) {
+      setValidationError("aguardando dados da campanha — tente novamente em um instante");
+      return;
+    }
+    // aperture-jtamj — Rex's wire is flat + PIX-only.
+    // {idCampanha, dadosRecebedor: {nomeTitular, tipoChavePix, chavePix}}.
+    // Conta Completa tab still renders for visual continuity (BancariosBody
+    // pattern parity) but its submit is gated behind a modo === "conta"
+    // early-return — operator hits a toast pointing them at the Chave Pix
+    // tab. Backend will accept conta_completa in a future iteration; until
+    // then the user-visible affordance is the PIX path.
+    if (modo === "conta") {
+      setValidationError(
+        "no momento só aceitamos chave Pix — use a aba 'Chave Pix' acima",
+      );
+      return;
+    }
+    // Pix mapping: PIX_TYPES.v has `celular`; Rex's wire wants `telefone`.
+    // Aliases otherwise (cpf / email / aleatoria) are identical.
+    const tipoChavePix: "cpf" | "cnpj" | "email" | "telefone" | "aleatoria" =
+      tipoPix === "celular" ? "telefone" : (tipoPix as PixKeyTipo);
+
+    criarRecebedor.mutate({
+      idCampanha,
+      dadosRecebedor: {
+        nomeTitular: s.nome.trim(),
+        tipoChavePix,
+        chavePix: s.pixKey,
+      },
+    });
+  };
+
+  const bank = bankByCode(s.bankCode);
+  const tipo = PIX_TYPES.find((p) => p.v === tipoPix) ?? PIX_TYPES[0]!;
+  const isBusy = criarRecebedor.isPending || solicitarState.isPending;
+
+  const solicitarError = solicitarState.error
+    ? formatSolicitarError(solicitarState.error)
+    : null;
+  const criarError = criarRecebedor.error
+    ? "não foi possível cadastrar — confira os dados e tente de novo"
+    : null;
+  const inlineError = validationError ?? criarError ?? solicitarError;
+
+  return (
+    <>
+      <div className="ex-scrim is-open" onClick={onClose} />
+      <div
+        className="ex-modal ex-modal-wide"
+        role="dialog"
+        aria-label="Cadastrar dados bancários para transferência"
+      >
+        <header className="ex-modal-hd">
+          <div>
+            <span className="ex-caps">solicitar transferência</span>
+            <h3 className="ex-modal-title">cadastre sua conta</h3>
+          </div>
+          <button type="button" className="ex-icon-btn" onClick={onClose} aria-label="Fechar">
+            <IconClose />
+          </button>
+        </header>
+        <p className="ex-modal-text">
+          pra transferir <strong>{fmtMoney(saldo)} (tudo)</strong> a gente
+          precisa dos dados da sua conta — só dessa vez. depois é só clicar
+          em "solicitar" e a transferência vai automática.
+        </p>
+
+        {/* Mode toggle: conta completa ↔ chave pix */}
+        <div
+          role="tablist"
+          aria-label="forma de recebimento"
+          style={{
+            display: "flex",
+            gap: 8,
+            padding: 4,
+            background: "var(--cream)",
+            border: "1px solid var(--line)",
+            borderRadius: 10,
+            margin: "0 0 14px",
+          }}
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={modo === "conta"}
+            onClick={() => setModo("conta")}
+            style={tabStyle(modo === "conta")}
+          >
+            conta completa
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={modo === "pix"}
+            onClick={() => setModo("pix")}
+            style={tabStyle(modo === "pix")}
+          >
+            chave pix
+          </button>
+        </div>
+
+        {/* Form body */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 14 }}>
+          {modo === "conta" ? (
+            <>
+              <FieldRow label="banco" required>
+                <select
+                  className="ex-modal-input"
+                  value={s.bankCode}
+                  onChange={(e) => set({ bankCode: e.target.value })}
+                  aria-label="banco"
+                  style={inputStyle}
+                >
+                  {BANKS.map((b) => (
+                    <option key={b.code} value={b.code}>
+                      {b.name} ({b.code})
+                    </option>
+                  ))}
+                </select>
+                <span style={helperStyle}>{bank.name}</span>
+              </FieldRow>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 80px", gap: 10 }}>
+                <FieldRow label="agência" required>
+                  <input
+                    style={inputStyle}
+                    inputMode="numeric"
+                    maxLength={6}
+                    value={s.agencia}
+                    onChange={(e) => set({ agencia: e.target.value.replace(/\D/g, "").slice(0, 6) })}
+                    aria-label="agência"
+                  />
+                </FieldRow>
+                <FieldRow label="dígito">
+                  <input
+                    style={inputStyle}
+                    inputMode="numeric"
+                    maxLength={2}
+                    value={s.agenciaDV}
+                    onChange={(e) => set({ agenciaDV: e.target.value.replace(/[^\dxX]/g, "").slice(0, 2) })}
+                    aria-label="dígito da agência"
+                  />
+                </FieldRow>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 80px 1fr", gap: 10 }}>
+                <FieldRow label="conta" required>
+                  <input
+                    style={inputStyle}
+                    inputMode="numeric"
+                    maxLength={14}
+                    value={s.conta}
+                    onChange={(e) => set({ conta: e.target.value.replace(/\D/g, "").slice(0, 14) })}
+                    aria-label="conta"
+                  />
+                </FieldRow>
+                <FieldRow label="dígito" required>
+                  <input
+                    style={inputStyle}
+                    inputMode="numeric"
+                    maxLength={2}
+                    value={s.contaDV}
+                    onChange={(e) => set({ contaDV: e.target.value.replace(/[^\dxX]/g, "").slice(0, 2) })}
+                    aria-label="dígito da conta"
+                  />
+                </FieldRow>
+                <FieldRow label="tipo" required>
+                  <select
+                    style={inputStyle}
+                    value={s.tipoConta}
+                    onChange={(e) => set({ tipoConta: e.target.value })}
+                    aria-label="tipo de conta"
+                  >
+                    {ACCOUNT_TYPES.map((a) => (
+                      <option key={a.v} value={a.v}>
+                        {a.label}
+                      </option>
+                    ))}
+                  </select>
+                </FieldRow>
+              </div>
+            </>
+          ) : (
+            <>
+              <FieldRow label="tipo de chave">
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {PIX_TYPES.map((p) => (
+                    <button
+                      key={p.v}
+                      type="button"
+                      onClick={() => setTipoPix(p.v)}
+                      style={chipStyle(tipoPix === p.v)}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </FieldRow>
+              <FieldRow label="chave pix" required>
+                <input
+                  style={inputStyle}
+                  placeholder={tipo.placeholder}
+                  value={s.pixKey}
+                  onChange={(e) => set({ pixKey: e.target.value })}
+                  aria-label="chave pix"
+                />
+              </FieldRow>
+            </>
+          )}
+
+          {/* Titular block */}
+          <FieldRow label="nome do titular" required>
+            <input
+              style={inputStyle}
+              placeholder="igual ao documento"
+              value={s.nome}
+              onChange={(e) => set({ nome: e.target.value })}
+              aria-label="nome do titular"
+            />
+          </FieldRow>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <FieldRow label="cpf (travado)">
+              <input style={{ ...inputStyle, opacity: 0.6 }} value={CPF_FIXO} disabled aria-label="cpf" />
+              <span style={helperStyle}>locked na sessão</span>
+            </FieldRow>
+            <FieldRow label="celular" required>
+              <input
+                style={inputStyle}
+                placeholder="(00) 00000-0000"
+                inputMode="numeric"
+                value={s.telefone}
+                onChange={(e) => set({ telefone: maskPhoneInline(e.target.value) })}
+                aria-label="celular"
+              />
+            </FieldRow>
+          </div>
+        </div>
+
+        {inlineError && (
+          <div
+            role="alert"
+            className="ex-modal-error"
+            style={{
+              padding: "10px 14px",
+              borderRadius: 8,
+              background: "#F4D6CE",
+              color: "#7B2A1A",
+              fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+              fontSize: "11px",
+              textTransform: "uppercase",
+              letterSpacing: "0.14em",
+              marginBottom: 14,
+            }}
+          >
+            {inlineError}
+          </div>
+        )}
+
+        <div className="ex-modal-actions">
+          <button
+            type="button"
+            className="ex-btn-ghost"
+            onClick={onClose}
+            disabled={isBusy}
+          >
+            cancelar
+          </button>
+          <button
+            type="button"
+            className="ex-btn-green"
+            onClick={submit}
+            disabled={isBusy || saldo === 0}
+            aria-busy={isBusy}
+          >
+            {criarRecebedor.isPending
+              ? "cadastrando…"
+              : solicitarState.isPending
+                ? "solicitando…"
+                : "cadastrar e transferir"}
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function FieldRow({
+  label,
+  required,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <span
+        style={{
+          fontSize: 11,
+          fontWeight: 600,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          color: "var(--ink-mute)",
+        }}
+      >
+        {label}
+        {required && <span style={{ color: "var(--coral-pink, #c8567a)", marginLeft: 4 }}>*</span>}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  padding: "10px 12px",
+  borderRadius: 10,
+  border: "1px solid var(--line)",
+  background: "var(--paper, #fff)",
+  fontSize: 14,
+  fontFamily: "inherit",
+  color: "var(--ink, #5c3a4f)",
+};
+
+const helperStyle: React.CSSProperties = {
+  fontSize: 11,
+  color: "var(--ink-mute)",
+  marginTop: 2,
+};
+
+function tabStyle(active: boolean): React.CSSProperties {
+  return {
+    flex: 1,
+    padding: "8px 12px",
+    border: "none",
+    borderRadius: 6,
+    background: active ? "var(--paper, #fff)" : "transparent",
+    color: active ? "var(--plum)" : "var(--ink-soft)",
+    fontWeight: 600,
+    fontSize: 13,
+    cursor: "pointer",
+    boxShadow: active ? "0 1px 3px rgba(90,69,32,0.12)" : "none",
+  };
+}
+
+function chipStyle(active: boolean): React.CSSProperties {
+  return {
+    padding: "6px 12px",
+    borderRadius: 999,
+    border: active ? "1px solid var(--plum)" : "1px solid var(--line)",
+    background: active ? "var(--plum)" : "var(--paper, #fff)",
+    color: active ? "#fff" : "var(--ink-soft)",
+    fontSize: 12,
+    cursor: "pointer",
+  };
+}
+
+function maskPhoneInline(s: string): string {
+  const d = (s || "").replace(/\D/g, "").slice(0, 11);
+  if (d.length <= 2) return d;
+  if (d.length <= 7) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
+  return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
 }
 
 /**
@@ -900,8 +1459,16 @@ export function PresentesBody(props: PainelSectionBodyProps) {
 
   // slug → idCampanha resolution. Stub today (djb2-derived); swap target is
   // the real campanha-by-slug lookup when Rex's contract exposes one.
-  const { idCampanha, isLoading: campanhaLoading, error: campanhaError } =
-    useStubCampanhaIdForSlug(props.slug);
+  //
+  // aperture-kbmel — `hasRecebedor` drives the TransferModal's onboarding
+  // branch. Currently MOCKED to `false` inside useStubCampanhaIdForSlug;
+  // swap to `me.data?.hasRecebedor ?? false` when Rex extends `auth.me`.
+  const {
+    idCampanha,
+    hasRecebedor,
+    isLoading: campanhaLoading,
+    error: campanhaError,
+  } = useStubCampanhaIdForSlug(props.slug);
 
   // Fetch the FULL extrato (no wire-level statusFilters) and apply the chip
   // filter client-side. Keeps the existing "X de N" counter shape intact —
@@ -965,7 +1532,12 @@ export function PresentesBody(props: PainelSectionBodyProps) {
     wireSummary.dateRangeStart,
     wireSummary.dateRangeEnd,
   );
-  const nextTransferLabel = formatNextTransferLabel(wireSummary.proximaTransfDate);
+  // aperture-sm7uc (#7): formatNextTransferLabel intentionally unused —
+  // the próxima-transf chip is now driven off `aguardandoAprovacaoCents`
+  // (presence of a solicitado RepasseRecebedor), not the next stripe
+  // available_on date. Leaving the formatter in place for potential
+  // reuse in the drawer's "previsão" copy block.
+  void formatNextTransferLabel;
 
   const statusCounts = (() => {
     const counts: Partial<Record<PresentesStatus, number>> = {};
@@ -1025,9 +1597,23 @@ export function PresentesBody(props: PainelSectionBodyProps) {
                 pure noise. Single CTA reads cleaner and matches what
                 payout actually does (one path: request a transfer).
                 The existing `.ex-sheet-cta` rule has `flex: 1 1 200px`,
-                so one child = full-width row by default. */}
+                so one child = full-width row by default.
+
+                aperture-sm7uc (#9) — disabled when saldo disponivel is
+                zero. Backend would surface 'saldo_disponivel_insuficiente'
+                anyway, but disabling the CTA up-front saves the user a
+                roundtrip and matches operator expectation ("greyed out =
+                nothing to transfer"). The all-or-nothing confirm modal
+                inside doesn't expose an amount input — there's no
+                partial-withdrawal UI ever (locked decision s03dr). */}
             <div className="ex-sheet-cta-row">
-              <button type="button" className="ex-sheet-cta green" onClick={() => setTransferOpen(true)}>
+              <button
+                type="button"
+                className="ex-sheet-cta green"
+                onClick={() => setTransferOpen(true)}
+                disabled={summary.disponivel === 0}
+                aria-disabled={summary.disponivel === 0 || undefined}
+              >
                 <IconArrowUpRight />
                 solicitar transferência
               </button>
@@ -1050,10 +1636,14 @@ export function PresentesBody(props: PainelSectionBodyProps) {
                   <span>aguardando aprovação</span>
                 </span>
               )}
-              <span className="ex-aux-pill lilac">
-                <span>próxima transf.</span>
-                <span className="ex-aux-num">{nextTransferLabel}</span>
-              </span>
+              {/* aperture-lwkwx — `próxima transf.` chip removed.
+                  It rendered the SAME value as `aguardando aprovação`
+                  above (both keyed on `aguardandoAprovacao > 0`), which
+                  duplicated information for no UX benefit. `aguardando
+                  aprovação` is clearer about WHY the money isn't moving
+                  yet (admin approval pending) so it's the chip we
+                  keep. Operator's call: "why 2 tags that are the same
+                  thing choos one or another please". */}
             </div>
           </header>
 
@@ -1094,6 +1684,8 @@ export function PresentesBody(props: PainelSectionBodyProps) {
       <TransferModal
         open={transferOpen}
         saldo={summary.disponivel}
+        hasRecebedor={hasRecebedor}
+        idCampanha={idCampanha}
         onClose={() => {
           setTransferOpen(false);
           solicitarState.reset();
@@ -1259,6 +1851,15 @@ const EXTRATO_CSS = `
 }
 .presentes-extrato .ex-sheet-cta.green { background: var(--green-deep); box-shadow: var(--shadow-green); }
 .presentes-extrato .ex-sheet-cta.green:hover { background: #7c9532; transform: translateY(-1px); }
+/* aperture-sm7uc (#9): disabled state — visual "no saldo, nothing to do" */
+.presentes-extrato .ex-sheet-cta:disabled,
+.presentes-extrato .ex-sheet-cta[aria-disabled="true"] {
+  background: #c8c2bf; box-shadow: none; cursor: not-allowed; opacity: 0.7;
+}
+.presentes-extrato .ex-sheet-cta:disabled:hover,
+.presentes-extrato .ex-sheet-cta[aria-disabled="true"]:hover {
+  background: #c8c2bf; transform: none;
+}
 .presentes-extrato .ex-sheet-cta.lilac { background: var(--lilac-deep); box-shadow: var(--shadow-lilac); }
 .presentes-extrato .ex-sheet-cta.lilac:hover { background: #9d6cb6; transform: translateY(-1px); }
 .presentes-extrato .ex-sheet-cta:active { transform: translateY(0); }
@@ -1496,11 +2097,55 @@ const EXTRATO_CSS = `
   display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px;
   padding: 0 4px; border-radius: 999px; background: var(--lilac-deep); color: #fff; font-size: 9.5px; font-weight: 700;
 }
-.presentes-extrato .ex-filter-panel {
-  position: absolute; top: calc(100% + 6px); right: 0; width: 260px; background: var(--paper);
-  border: 1px solid var(--line); border-radius: 14px;
+/* aperture-sm7uc (#8) — panel selector duplicated for both the in-tree
+   fallback case (.presentes-extrato .ex-filter-panel) and the portalled
+   variant (.presentes-extrato-portal at <body> level). Color tokens
+   resolved against :root because the portalled panel lives outside
+   the .presentes-extrato scope where the local --paper / --line vars
+   are declared. */
+.presentes-extrato .ex-filter-panel,
+.ex-filter-panel.presentes-extrato-portal {
+  width: 260px; background: #ffffff;
+  border: 1px solid #efe2e9; border-radius: 14px;
   box-shadow: 0 16px 40px -8px rgba(107, 60, 94, 0.28), 0 2px 8px rgba(107, 60, 94, 0.08), 0 1px 0 rgba(255, 255, 255, 0.5) inset;
-  padding: 12px 14px; z-index: 20;
+  padding: 12px 14px;
+  color: #5c3a4f;
+  font-family: var(--font-dm-sans), sans-serif;
+}
+.ex-filter-panel.presentes-extrato-portal .ex-caps {
+  font-family: var(--font-dm-sans), sans-serif;
+  font-weight: 600; font-size: 10px; letter-spacing: 0.14em;
+  text-transform: uppercase; color: #7a5a6c;
+}
+.ex-filter-panel.presentes-extrato-portal .ex-link {
+  font-family: var(--font-dm-sans), sans-serif; font-size: 12px; font-weight: 500;
+  color: var(--lilac-deep, #8a5da6); cursor: pointer; background: transparent; padding: 0; border: 0;
+}
+.ex-filter-panel.presentes-extrato-portal .ex-filter-panel-hd {
+  display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;
+}
+.ex-filter-panel.presentes-extrato-portal .ex-filter-pills {
+  display: flex; flex-direction: column; gap: 6px;
+}
+.ex-filter-panel.presentes-extrato-portal .ex-filter-pill {
+  display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 10px;
+  border: 1px solid #efe2e9; background: #f8f7f6; color: #7a5a6c; cursor: pointer;
+  font-size: 12px; font-weight: 500; text-align: left; transition: background 0.12s, border-color 0.12s, color 0.12s;
+  font-family: var(--font-dm-sans), sans-serif;
+}
+.ex-filter-panel.presentes-extrato-portal .ex-filter-pill:hover {
+  background: #efece9; color: #5c3a4f;
+}
+.ex-filter-panel.presentes-extrato-portal .ex-filter-pill.is-on { font-weight: 600; }
+.ex-filter-panel.presentes-extrato-portal .ex-filter-dot {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+}
+.ex-filter-panel.presentes-extrato-portal .ex-filter-count {
+  margin-left: auto; font-family: "DM Mono", ui-monospace, "SFMono-Regular", monospace;
+  font-size: 11px; color: #a18a99; font-feature-settings: "tnum";
+}
+.ex-filter-panel.presentes-extrato-portal .ex-filter-pill.is-on .ex-filter-count {
+  color: inherit; opacity: 0.7;
 }
 .presentes-extrato .ex-filter-panel-hd { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .presentes-extrato .ex-filter-pills { display: flex; flex-direction: column; gap: 6px; }

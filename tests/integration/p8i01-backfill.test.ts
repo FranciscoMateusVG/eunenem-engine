@@ -68,6 +68,7 @@ async function seedUsuario(
     nomeExibicao,
     slug,
     criadoEm: fixedDate,
+    tutorialCompletadoEm: null,
   };
   const conta: Conta = {
     id: idConta,
