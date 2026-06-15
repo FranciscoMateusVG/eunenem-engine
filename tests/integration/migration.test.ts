@@ -57,6 +57,20 @@ describe('Migration round-trip', () => {
     expect(tableNames).toContain('listas_de_convidados');
     expect(tableNames).toContain('convidados');
 
+    const conviteRemetenteCol = await getColumn(db, 'convites', 'remetente');
+    expect(conviteRemetenteCol?.data_type).toBe('character varying');
+    expect(conviteRemetenteCol?.character_maximum_length).toBe(120);
+    expect(conviteRemetenteCol?.is_nullable).toBe('NO');
+
+    const downEvento = await migrator.migrateDown();
+    expect(downEvento.error).toBeUndefined();
+
+    const tablesAfterEventoDown = await listTableNames(db);
+    expect(tablesAfterEventoDown).not.toContain('eventos');
+    expect(tablesAfterEventoDown).not.toContain('convites');
+    expect(tablesAfterEventoDown).not.toContain('listas_de_convidados');
+    expect(tablesAfterEventoDown).not.toContain('convidados');
+
     // aperture-qatwz added two paginated-browse indexes on usuarios (013).
     // Verify the indexes exist (no new tables here — pure index migration).
     const indexes = await db
@@ -101,7 +115,12 @@ describe('Migration round-trip', () => {
     const webhookConstraints = await db
       .selectFrom('pg_constraint' as never)
       .select('conname' as never)
-      .where('conrelid' as never, '=', sql`'payment_webhook_events'::regclass`)
+      .where(
+        'conrelid' as never,
+        '=',
+        // biome-ignore lint/suspicious/noExplicitAny: pg_catalog oid regclass not in DB types
+        sql`'payment_webhook_events'::regclass` as any,
+      )
       .execute();
     const conNames = webhookConstraints.map((c: Record<string, unknown>) => c.conname);
     expect(conNames).toContain('payment_webhook_events_provider_event_id_uniq');
@@ -297,20 +316,4 @@ async function getColumn(
         character_maximum_length: number | null;
       }
     | undefined;
-}
-
-async function getConstraintDef(
-  db: Kysely<unknown>,
-  constraintName: string,
-): Promise<string | undefined> {
-  const row = (await db
-    .selectFrom('pg_constraint' as never)
-    .select(() => [
-      // biome-ignore lint/suspicious/noExplicitAny: pg_catalog tables are outside DB types
-      sql<string>`pg_get_constraintdef(oid)`.as('def') as any,
-    ])
-    .where('conname' as never, '=', constraintName as never)
-    .executeTakeFirst()) as { def: string } | undefined;
-
-  return row?.def;
 }
