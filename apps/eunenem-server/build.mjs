@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { join } from 'node:path';
 import * as esbuild from 'esbuild';
 
 const watch = process.argv.includes('--watch');
@@ -46,14 +47,26 @@ function buildTailwind() {
     if (watch) args.push('--watch');
     if (!watch) args.push('--minify');
 
-    const child = spawn('./node_modules/.bin/tailwindcss', args, {
+    // Use the platform-specific wrapper from node_modules/.bin so local
+    // dev works on Windows (.cmd) and Unix-like shells alike.
+    const tailwindBin = join(
+      'node_modules',
+      '.bin',
+      process.platform === 'win32' ? 'tailwindcss.cmd' : 'tailwindcss',
+    );
+
+    const child = spawn(tailwindBin, args, {
+      shell: process.platform === 'win32',
       stdio: 'inherit',
     });
 
     if (watch) {
-      // In watch mode, leave it running; resolve immediately so concurrently sees us as live.
-      resolve();
+      // In watch mode, leave it running; resolve only after the process
+      // successfully spawns so startup errors still fail the build.
+      child.once('spawn', resolve);
+      child.once('error', reject);
     } else {
+      child.once('error', reject);
       child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`tailwind exit ${code}`))));
     }
   });
