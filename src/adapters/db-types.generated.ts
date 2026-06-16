@@ -109,6 +109,8 @@ export interface Eventos {
   id_campanha: string;
   modalidade: string;
   tipo_evento: string;
+}
+
 export interface IntencaoItems {
   contribution_unit_amount_cents: Int8 | null;
   criado_em: Timestamp;

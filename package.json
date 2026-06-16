@@ -61,7 +61,7 @@
     "check": "pnpm lint && pnpm lint:structure && pnpm depcruise && pnpm typecheck && pnpm check:codegen-drift && pnpm check:barrel-exports && pnpm check:server-router-resolution && pnpm test:coverage && tsx examples/create-cat.ts && tsx examples/create-cat.with-otel.ts && tsx examples/create-cat.hono.ts && pnpm verify-hooks",
     "db:up": "docker compose -f docker/docker-compose.yml up -d",
     "db:down": "docker compose -f docker/docker-compose.yml down",
-    "db:reset": "docker compose -f docker/docker-compose.yml down -v && docker compose -f docker/docker-compose.yml up -d && sleep 2 && pnpm db:migrate",
+    "db:reset": "docker compose -f docker/docker-compose.yml down -v && docker compose -f docker/docker-compose.yml up -d --wait && pnpm db:migrate",
     "db:migrate": "tsx scripts/migrate.ts",
     "db:codegen": "kysely-codegen --url postgresql://frame:frame@localhost:54320/frame --out-file src/adapters/db-types.generated.ts",
     "example:web": "tsx examples/fluxo-completo.web.ts",

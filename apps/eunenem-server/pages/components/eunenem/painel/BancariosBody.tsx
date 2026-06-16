@@ -219,11 +219,6 @@ const ILock = (p: IconProps) => (
     <path d="M8 11V8a4 4 0 0 1 8 0v3" />
   </Svg>
 );
-const IArrowRight = (p: IconProps) => (
-  <Svg {...p} strokeWidth={2}>
-    <path d="M5 12h14M13 6l6 6-6 6" />
-  </Svg>
-);
 
 const PIX_ICON: Record<PixType["v"], (p: IconProps) => React.ReactNode> = {
   cpf: IID,
@@ -282,12 +277,6 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
     const errs = validate(modo, s, tipoPix);
     setErrors(errs);
     if (errs.length === 0) toast.success("dados salvos com carinho ♡");
-  };
-  const onSaveAndConfig = () => {
-    const errs = validate(modo, s, tipoPix);
-    setErrors(errs);
-    if (errs.length === 0)
-      toast.success("dados salvos. vamos configurar o resgate ♡");
   };
 
   const bank = useMemo(() => bankByCode(s.bankCode), [s.bankCode]);
@@ -709,9 +698,9 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
 
         {/* Actions */}
         <div className="bnc-actions">
-          <button type="button" className="bnc-btn ghost" onClick={onSaveAndConfig}>
+          {/* <button type="button" className="bnc-btn ghost" onClick={onSaveAndConfig}>
             salvar e configurar resgate <IArrowRight size={16} />
-          </button>
+          </button> */}
           <button type="button" className="bnc-btn primary" onClick={onSave}>
             <ICheck size={16} />
             salvar dados bancários
@@ -817,8 +806,8 @@ const BNC_CSS = `
 .bnc-bank-flag{position:absolute;left:10px;top:50%;transform:translateY(-50%);width:30px;height:30px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:700;letter-spacing:.02em;box-shadow:var(--shadow-sm)}
 .bnc-bank-pick .bnc-input{padding-left:52px}
 
-.bnc-chip-row{display:flex;flex-wrap:wrap;gap:8px}
-.bnc-chip{display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border-radius:999px;background:#fff;border:1.5px solid var(--line);font-size:13px;font-weight:600;color:var(--ink-soft);transition:all .2s;cursor:pointer}
+.bnc-chip-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.bnc-chip{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:0;padding:9px 10px;border-radius:999px;background:#fff;border:1.5px solid var(--line);font-size:12px;font-weight:600;color:var(--ink-soft);white-space:nowrap;transition:all .2s;cursor:pointer}
 .bnc-chip svg{width:16px;height:16px}
 .bnc-chip:hover{border-color:var(--lilac-soft);color:var(--lilac-deep)}
 .bnc-chip.active{background:var(--lilac-soft);border-color:var(--lilac);color:var(--lilac-deep);box-shadow:0 4px 14px rgba(167,123,190,.18)}
