@@ -5,6 +5,9 @@ import type { PainelSectionBodyProps } from "@/PainelSectionPage";
 import {
   CONVIDADOS_SEED,
   CONVIDADOS_DEFAULT_MESSAGE,
+  CONVIDADOS_DEFAULT_DATE,
+  CONVIDADOS_DEFAULT_TIME,
+  CONVIDADOS_DEFAULT_ADDRESS,
   CONVIDADOS_EVENT,
   RSVP_META,
   avatarFor,
@@ -21,10 +24,10 @@ import { PREVIEW_EVENT } from "@/lib/mocks/eventPreview";
 // matching the "Lista de convidados" design export (app.jsx + styles.css).
 //
 // Ported faithfully from the export:
-//   - stats strip (confirmados · talvez · aguardando · não vão + envio %)
+//   - filter badges (confirmados · talvez · aguardando · não vão · todos · não enviadas)
 //   - título + "adicionar convidado" affordance (inline form, local state)
 //   - mensagem padrão card with [nome]/[link] variable chips + invite-type toggle
-//   - guest list: search, filter chips, per-guest card with WhatsApp send /
+//   - guest list: per-guest card with WhatsApp send /
 //     reenviar / lembrar + an RSVP override dropdown, and the "recebido ♡"
 //     handwritten stamp on confirmed guests.
 //
@@ -100,6 +103,13 @@ const IconSearch = (p: { size?: number; style?: CSSProperties }) => (
 const IconChevron = (p: { size?: number; style?: CSSProperties }) => (
   <Icon size={p.size} style={p.style}>
     <polyline points="9 18 15 12 9 6" />
+  </Icon>
+);
+const IconMoreVertical = (p: { size?: number }) => (
+  <Icon size={p.size} sw={2.2}>
+    <circle cx="12" cy="5" r="1.1" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="12" r="1.1" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="19" r="1.1" fill="currentColor" stroke="none" />
   </Icon>
 );
 const IconSparkle = (p: { size?: number }) => (
@@ -364,18 +374,40 @@ const RSVP_OPTIONS: [ConvidadoRsvp, string, string][] = [
   ["pending", "voltar para aguardando", "var(--ink-mute)"],
 ];
 
-function GuestCard({
-  g,
-  onSend,
-  onRemind,
+function GuestAvatar({ name }: { name: string }) {
+  const pal = avatarFor(name);
+  return (
+    <div
+      className="cv-guest-avatar"
+      style={{
+        width: 44,
+        height: 44,
+        flexShrink: 0,
+        borderRadius: "50%",
+        display: "grid",
+        placeItems: "center",
+        fontFamily: FONT_HAND,
+        fontSize: 18,
+        border: "2px solid var(--paper)",
+        boxShadow: SHADOW_SM,
+        background: pal.bg,
+        color: pal.fg,
+      }}
+    >
+      {initialsOf(name)}
+    </div>
+  );
+}
+
+function RsvpMenu({
+  guestId,
   onSetRsvp,
+  variant,
 }: {
-  g: Convidado;
-  onSend: (id: number, isResend?: boolean) => void;
-  onRemind: (id: number) => void;
+  guestId: number;
   onSetRsvp: (id: number, rsvp: ConvidadoRsvp) => void;
+  variant: "desktop" | "mobile";
 }) {
-  const pal = avatarFor(g.name);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -391,323 +423,354 @@ function GuestCard({
 
   return (
     <div
-      style={{
-        background: "var(--paper)",
-        border: "1px solid var(--line)",
-        borderRadius: 22,
-        padding: "16px 18px",
-        display: "flex",
-        gap: 14,
-        alignItems: "center",
-        flexWrap: "wrap",
-        position: "relative",
-        boxShadow: SHADOW_SM,
-      }}
+      ref={menuRef}
+      className={
+        variant === "mobile" ? "cv-guest-rsvp-mobile" : "cv-guest-rsvp-desktop"
+      }
     >
-      {g.rsvp === "confirmed" && (
-        <span
+      {variant === "mobile" ? (
+        <button
+          type="button"
+          className="cv-guest-more-btn"
+          aria-label="Opções de RSVP"
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen((v) => !v)}
+        >
+          <IconMoreVertical size={18} />
+        </button>
+      ) : (
+        <Button variant="ghost" size="sm" onClick={() => setMenuOpen((v) => !v)}>
+          rsvp{" "}
+          <IconChevron
+            size={12}
+            style={{
+              transform: menuOpen ? "rotate(90deg)" : "none",
+              transition: "transform 140ms",
+            }}
+          />
+        </Button>
+      )}
+      {menuOpen && (
+        <div
+          role="menu"
+          className="cv-guest-rsvp-dropdown"
           style={{
             position: "absolute",
-            top: 10,
-            right: 14,
-            fontFamily: FONT_CAVEAT,
-            fontSize: 18,
-            color: "var(--green-deep)",
-            transform: "rotate(-6deg)",
-            opacity: 0.55,
-            pointerEvents: "none",
+            top: "calc(100% + 6px)",
+            right: 0,
+            background: "var(--paper)",
+            border: "1px solid var(--line)",
+            borderRadius: 14,
+            boxShadow: SHADOW_MD,
+            padding: 6,
+            minWidth: 200,
+            zIndex: 20,
           }}
         >
-          recebido ♡
-        </span>
-      )}
-
-      <div
-        style={{
-          width: 44,
-          height: 44,
-          flexShrink: 0,
-          borderRadius: "50%",
-          display: "grid",
-          placeItems: "center",
-          fontFamily: FONT_HAND,
-          fontSize: 18,
-          border: "2px solid var(--paper)",
-          boxShadow: SHADOW_SM,
-          background: pal.bg,
-          color: pal.fg,
-        }}
-      >
-        {initialsOf(g.name)}
-      </div>
-
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: 6,
-          minWidth: 0,
-          flex: "1 1 200px",
-        }}
-      >
-        <div
-          style={{
-            fontFamily: FONT_HAND,
-            fontSize: 22,
-            color: "var(--plum)",
-            lineHeight: 1.1,
-          }}
-        >
-          {g.name}
+          {RSVP_OPTIONS.map(([k, label, color]) => (
+            <button
+              type="button"
+              key={k}
+              onClick={() => {
+                onSetRsvp(guestId, k);
+                setMenuOpen(false);
+              }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                width: "100%",
+                textAlign: "left",
+                padding: "9px 12px",
+                background: "transparent",
+                border: 0,
+                borderRadius: 10,
+                cursor: "pointer",
+                fontFamily: FONT_SANS,
+                fontSize: 13,
+                color: "var(--ink)",
+              }}
+            >
+              <StatusDot color={color} />
+              {label}
+            </button>
+          ))}
         </div>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            flexWrap: "wrap",
-          }}
+      )}
+    </div>
+  );
+}
+
+function GuestSendActions({
+  g,
+  onSend,
+  onRemind,
+}: {
+  g: Convidado;
+  onSend: (id: number, isResend?: boolean) => void;
+  onRemind: (id: number) => void;
+}) {
+  return (
+    <>
+      {!g.sent && (
+        <Button variant="whatsapp" size="sm" onClick={() => onSend(g.id)}>
+          <IconWhatsapp /> enviar
+        </Button>
+      )}
+      {g.sent && g.rsvp === "maybe" && (
+        <Button
+          variant="coral"
+          size="sm"
+          disabled={g.reminded}
+          onClick={() => onRemind(g.id)}
         >
-          <span
+          <IconBell /> {g.reminded ? "lembrado" : "lembrar"}
+        </Button>
+      )}
+      {g.sent && g.rsvp !== "maybe" && (
+        <Button
+          variant="ghost"
+          size="sm"
+          title="reenviar mensagem"
+          onClick={() => onSend(g.id, true)}
+        >
+          <IconWhatsapp /> reenviar
+        </Button>
+      )}
+    </>
+  );
+}
+
+function GuestMobilePrimaryAction({
+  g,
+  onSend,
+  onRemind,
+}: {
+  g: Convidado;
+  onSend: (id: number, isResend?: boolean) => void;
+  onRemind: (id: number) => void;
+}) {
+  if (!g.sent) {
+    return (
+      <Button variant="whatsapp" size="sm" onClick={() => onSend(g.id)}>
+        <IconWhatsapp /> enviar
+      </Button>
+    );
+  }
+
+  if (g.rsvp === "maybe") {
+    return (
+      <Button
+        variant="coral"
+        size="sm"
+        disabled={g.reminded}
+        onClick={() => onRemind(g.id)}
+      >
+        <IconBell /> {g.reminded ? "lembrado" : "lembrar"}
+      </Button>
+    );
+  }
+
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      title="reenviar mensagem"
+      onClick={() => onSend(g.id, true)}
+    >
+      <IconWhatsapp /> reenviar
+    </Button>
+  );
+}
+
+function GuestCard({
+  g,
+  onSend,
+  onRemind,
+  onSetRsvp,
+}: {
+  g: Convidado;
+  onSend: (id: number, isResend?: boolean) => void;
+  onRemind: (id: number) => void;
+  onSetRsvp: (id: number, rsvp: ConvidadoRsvp) => void;
+}) {
+  return (
+    <div className="cv-guest-card">
+
+      {/* desktop */}
+      <div className="cv-guest-layout-desktop">
+        <GuestAvatar name={g.name} />
+
+        <div className="cv-guest-desktop-info">
+          <div
             style={{
-              fontFamily: FONT_SANS,
-              fontSize: 13,
-              color: "var(--ink-soft)",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 4,
+              fontFamily: FONT_HAND,
+              fontSize: 22,
+              color: "var(--plum)",
+              lineHeight: 1.1,
             }}
           >
-            <IconPhone size={12} /> {g.phone}
-          </span>
+            {g.name}
+          </div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              flexWrap: "wrap",
+            }}
+          >
+            <span
+              style={{
+                fontFamily: FONT_SANS,
+                fontSize: 13,
+                color: "var(--ink-soft)",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+              }}
+            >
+              <IconPhone size={12} /> {g.phone}
+            </span>
+            <SendBadge sent={g.sent} />
+            <RsvpBadge rsvp={g.rsvp} />
+            {g.reminded && (
+              <span
+                style={{
+                  fontFamily: FONT_CAVEAT,
+                  fontSize: 16,
+                  color: "var(--coral-pink)",
+                  transform: "rotate(-3deg)",
+                }}
+              >
+                lembrete enviado ♡
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="cv-guest-desktop-actions">
+          <GuestSendActions g={g} onSend={onSend} onRemind={onRemind} />
+          <RsvpMenu guestId={g.id} onSetRsvp={onSetRsvp} variant="desktop" />
+        </div>
+      </div>
+
+      {/* mobile */}
+      <div className="cv-guest-layout-mobile">
+        <div className="cv-guest-mobile-row1">
+          <div className="cv-guest-mobile-identity">
+            <GuestAvatar name={g.name} />
+            <div className="cv-guest-mobile-info">
+              <div className="cv-guest-mobile-name">{g.name}</div>
+              <span className="cv-guest-mobile-phone">
+                <IconPhone size={12} /> {g.phone}
+              </span>
+            </div>
+          </div>
+          <RsvpMenu guestId={g.id} onSetRsvp={onSetRsvp} variant="mobile" />
+        </div>
+
+        <div className="cv-guest-mobile-row2">
           <SendBadge sent={g.sent} />
           <RsvpBadge rsvp={g.rsvp} />
           {g.reminded && (
-            <span
-              style={{
-                fontFamily: FONT_CAVEAT,
-                fontSize: 16,
-                color: "var(--coral-pink)",
-                transform: "rotate(-3deg)",
-              }}
-            >
-              lembrete enviado ♡
-            </span>
+            <span className="cv-guest-mobile-reminded">lembrete enviado ♡</span>
           )}
         </div>
-      </div>
 
-      <div
-        style={{
-          display: "flex",
-          gap: 8,
-          alignItems: "center",
-          flexWrap: "wrap",
-          marginLeft: "auto",
-        }}
-      >
-        {!g.sent && (
-          <Button variant="whatsapp" size="sm" onClick={() => onSend(g.id)}>
-            <IconWhatsapp /> enviar
-          </Button>
-        )}
-        {g.sent && g.rsvp === "maybe" && (
-          <Button
-            variant="coral"
-            size="sm"
-            disabled={g.reminded}
-            onClick={() => onRemind(g.id)}
-          >
-            <IconBell /> {g.reminded ? "lembrado" : "lembrar"}
-          </Button>
-        )}
-        {g.sent && g.rsvp !== "maybe" && (
-          <Button
-            variant="ghost"
-            size="sm"
-            title="reenviar mensagem"
-            onClick={() => onSend(g.id, true)}
-          >
-            <IconWhatsapp /> reenviar
-          </Button>
-        )}
-
-        <div ref={menuRef} style={{ position: "relative" }}>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setMenuOpen((v) => !v)}
-          >
-            rsvp{" "}
-            <IconChevron
-              size={12}
-              style={{
-                transform: menuOpen ? "rotate(90deg)" : "none",
-                transition: "transform 140ms",
-              }}
-            />
-          </Button>
-          {menuOpen && (
-            <div
-              role="menu"
-              style={{
-                position: "absolute",
-                top: "calc(100% + 6px)",
-                right: 0,
-                background: "var(--paper)",
-                border: "1px solid var(--line)",
-                borderRadius: 14,
-                boxShadow: SHADOW_MD,
-                padding: 6,
-                minWidth: 200,
-                zIndex: 20,
-              }}
-            >
-              {RSVP_OPTIONS.map(([k, label, color]) => (
-                <button
-                  type="button"
-                  key={k}
-                  onClick={() => {
-                    onSetRsvp(g.id, k);
-                    setMenuOpen(false);
-                  }}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    width: "100%",
-                    textAlign: "left",
-                    padding: "9px 12px",
-                    background: "transparent",
-                    border: 0,
-                    borderRadius: 10,
-                    cursor: "pointer",
-                    fontFamily: FONT_SANS,
-                    fontSize: 13,
-                    color: "var(--ink)",
-                  }}
-                >
-                  <StatusDot color={color} />
-                  {label}
-                </button>
-              ))}
-            </div>
-          )}
+        <div className="cv-guest-mobile-row3">
+          <GuestMobilePrimaryAction
+            g={g}
+            onSend={onSend}
+            onRemind={onRemind}
+          />
         </div>
       </div>
     </div>
   );
 }
 
-// ---------- stats strip ----------
-function StatsStrip({ guests }: { guests: Convidado[] }) {
+// ---------- filter badges  ----------
+const STAT_BADGE_NEUTRAL = badgeStyle("var(--paper)", "var(--ink-soft)", "var(--line)");
+
+type GuestListFilter = "all" | ConvidadoRsvp | "unsent";
+
+function GuestFilterBadges({
+  guests,
+  filter,
+  onFilterChange,
+}: {
+  guests: Convidado[];
+  filter: GuestListFilter;
+  onFilterChange: (filter: GuestListFilter) => void;
+}) {
   const total = guests.length;
-  const sent = guests.filter((g) => g.sent).length;
   const confirmed = guests.filter((g) => g.rsvp === "confirmed").length;
   const maybe = guests.filter((g) => g.rsvp === "maybe").length;
   const declined = guests.filter((g) => g.rsvp === "declined").length;
-  const pending = total - confirmed - maybe - declined;
-  const pct = total ? Math.round((sent / total) * 100) : 0;
+  const pending = guests.filter((g) => g.rsvp === "pending").length;
+  const unsent = guests.filter((g) => !g.sent).length;
 
-  const stats: [number, string, string][] = [
-    [confirmed, "confirmados", "var(--green-deep)"],
-    [maybe, "talvez", "#c79b1d"],
-    [pending, "aguardando", "var(--ink-mute)"],
-    [declined, "não vão", "var(--coral-pink)"],
+  const stats: {
+    key: GuestListFilter;
+    count: number;
+    label: string;
+    color: string;
+  }[] = [
+    { key: "all", count: total, label: "todos", color: "var(--plum)" },
+    {
+      key: "confirmed",
+      count: confirmed,
+      label: "confirmados",
+      color: RSVP_META.confirmed.color,
+    },
+    { key: "maybe", count: maybe, label: "talvez", color: RSVP_META.maybe.color },
+    {
+      key: "pending",
+      count: pending,
+      label: "aguardando",
+      color: RSVP_META.pending.color,
+    },
+    {
+      key: "declined",
+      count: declined,
+      label: "não vão",
+      color: RSVP_META.declined.color,
+    },
+    {
+      key: "unsent",
+      count: unsent,
+      label: "não enviadas",
+      color: "var(--coral-pink)",
+    },
   ];
 
-  const numStyle: CSSProperties = {
-    fontFamily: FONT_HAND,
-    fontSize: 22,
-    lineHeight: 1,
-    color: "var(--plum)",
-  };
-  const lblStyle: CSSProperties = {
-    fontFamily: FONT_SANS,
-    textTransform: "uppercase",
-    letterSpacing: "0.08em",
-    fontWeight: 600,
-    fontSize: 11,
-    color: "var(--ink-soft)",
-  };
-
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 18,
-        padding: "12px 20px",
-        background: "var(--paper)",
-        border: "1px solid var(--line)",
-        borderRadius: 999,
-        boxShadow: SHADOW_SM,
-        flexWrap: "wrap",
-      }}
-    >
-      {stats.map(([num, label, color], i) => (
-        <div
-          key={label}
-          style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
-        >
-          {i > 0 && (
-            <span
+    <div className="cv-stats-strip">
+      <div className="cv-stats-strip-row">
+        {stats.map(({ key, count, label, color }) => {
+          const active = filter === key;
+          return (
+            <button
+              type="button"
+              key={key}
+              className="cv-stat-badge"
+              aria-pressed={active}
+              onClick={() => onFilterChange(key)}
               style={{
-                width: 1,
-                height: 18,
-                background: "var(--line)",
-                marginRight: 18,
+                ...STAT_BADGE_NEUTRAL,
+                boxShadow: SHADOW_SM,
+                ...(active
+                  ? { outline: "2px solid var(--lilac)", outlineOffset: 2 }
+                  : {}),
               }}
-            />
-          )}
-          <span
-            style={{
-              width: 8,
-              height: 8,
-              borderRadius: "50%",
-              background: color,
-            }}
-          />
-          <span style={numStyle}>{num}</span>
-          <span style={lblStyle}>{label}</span>
-        </div>
-      ))}
-
-      <span style={{ flex: 1, minWidth: 16 }} />
-
-      <div
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 10,
-          minWidth: 220,
-        }}
-      >
-        <span style={lblStyle}>mensagens</span>
-        <div
-          style={{
-            position: "relative",
-            flex: 1,
-            minWidth: 100,
-            height: 6,
-            background: "var(--cream-2)",
-            borderRadius: 999,
-            overflow: "hidden",
-          }}
-        >
-          <div
-            style={{
-              height: "100%",
-              width: `${pct}%`,
-              background: "linear-gradient(90deg, var(--green), var(--lilac))",
-              borderRadius: 999,
-              transition: "width 320ms ease",
-            }}
-          />
-        </div>
-        <span style={{ ...numStyle, color: "var(--plum)" }}>
-          {sent}/{total}
-        </span>
+            >
+              <StatusDot color={color} />
+              <span className="cv-stat-num">{count}</span>
+              <span className="cv-stat-lbl">{label}</span>
+            </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -1248,31 +1311,15 @@ function VerLinkModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-// ---------- aperture-ch1kr — VER CONVITE preview modal ----------
+// ---------- shared virtual invite preview card ----------
 //
-// Replaces the placeholder toast shipped by aperture-gnxal with the
-// real "prévia do convite" modal: a single rounded purple-gradient
-// card showing the invite hero (greeting, event title with marca-texto,
-// host attribution, date/time/location pill chips, decorative CONFIRMAR
-// PRESENÇA button, handwritten footer).
-//
-// Mirrors VerLinkModal's chrome + inline-style approach for visual
-// cohesion. The CONFIRMAR PRESENÇA CTA inside the preview is purely
-// DECORATIVE — triple-guarded (aria-hidden + tabIndex=-1 + preventDefault)
-// so screen readers + keyboard nav aren't fooled into thinking it's a
-// real RSVP action. The modal's own "USAR ESTE CONVITE" foot button is
-// the real action.
-//
-// Event data sourced from the shared PREVIEW_EVENT mock (added in
-// aperture-8qg1s, extended here with timeLabel). NO redefining the data.
+// Extracted from VerConviteModal so the collapse body can show the same
+// card inline when "convite virtual" is selected.
 
-function VerConviteModal({ onClose }: { onClose: () => void }) {
+function VirtualInvitePreviewCard() {
   const { eventName, eventNameHighlight, hostName, dateLabel, timeLabel, locationLabel } =
     PREVIEW_EVENT;
 
-  // Duplicated from VerLinkModal — keeps each modal self-contained while
-  // both consume the same shared PREVIEW_EVENT mock. If a third modal
-  // ever needs this it's worth lifting to a module-level helper.
   const renderHighlighted = () => {
     const idx = eventName.indexOf(eventNameHighlight);
     if (idx < 0) return eventName;
@@ -1291,12 +1338,12 @@ function VerConviteModal({ onClose }: { onClose: () => void }) {
     display: "inline-flex",
     alignItems: "center",
     gap: 6,
-    padding: "6px 12px",
+    padding: "5px 10px",
     borderRadius: 999,
     background: "var(--cream)",
     color: "var(--ink-soft)",
     fontFamily: FONT_SANS,
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: 500,
     border: "1px solid var(--line)",
   };
@@ -1304,174 +1351,53 @@ function VerConviteModal({ onClose }: { onClose: () => void }) {
   const noop = (e: React.MouseEvent) => e.preventDefault();
 
   return (
-    <Modal onClose={onClose}>
-      <div className="lista-modal-head">
-        <div>
-          <span
-            style={{
-              fontFamily: FONT_CAVEAT,
-              color: "var(--plum)",
-              fontSize: 22,
-              display: "inline-block",
-              transform: "rotate(-2deg)",
-              lineHeight: 1,
-              fontWeight: 600,
-            }}
-          >
-            convite virtual ♡
+    <div className="cv-virtual-invite-frame">
+      <div className="cv-virtual-invite-preview">
+        <div className="cv-virtual-invite-greeting">olá ♡ você foi convidada</div>
+
+        <h4 className="cv-virtual-invite-title">{renderHighlighted()}</h4>
+
+        <div className="cv-virtual-invite-host">por {hostName}</div>
+
+        <div className="cv-virtual-invite-chips">
+          <span style={chipStyle}>
+            <IconCalendar size={13} /> {dateLabel}
           </span>
-          <h3>
-            prévia do <span className="hl">convite</span>
-          </h3>
+          <span style={chipStyle}>
+            <IconClock size={13} /> {timeLabel}
+          </span>
+          <span style={chipStyle}>
+            <IconPin size={13} /> {locationLabel}
+          </span>
         </div>
+
         <button
           type="button"
-          className="lista-modal-x"
-          onClick={onClose}
-          aria-label="Fechar"
+          className="cv-virtual-invite-cta"
+          onClick={noop}
+          aria-hidden="true"
+          tabIndex={-1}
         >
-          <IconX size={16} />
+          <IconHeart size={13} fill="currentColor" /> confirmar presença
         </button>
+
+        <div className="cv-virtual-invite-footer">mal posso esperar pra te ver ♡</div>
       </div>
-
-      <div className="lista-modal-body">
-        {/* Preview card — what the convite itself looks like */}
-        <div
-          style={{
-            marginTop: 4,
-            padding: "26px 22px",
-            borderRadius: 22,
-            background:
-              "linear-gradient(135deg, var(--lilac-soft) 0%, var(--pink-soft) 100%)",
-            border: "1px solid var(--line)",
-            textAlign: "center",
-          }}
-        >
-          <div
-            style={{
-              fontFamily: FONT_CAVEAT,
-              color: "var(--plum)",
-              fontSize: 26,
-              lineHeight: 1.1,
-              fontWeight: 600,
-            }}
-          >
-            olá ♡ você foi convidada
-          </div>
-
-          <h4
-            style={{
-              fontFamily: FONT_HAND,
-              fontSize: 34,
-              color: "var(--plum)",
-              margin: "10px 0 6px",
-              fontWeight: 400,
-            }}
-          >
-            {renderHighlighted()}
-          </h4>
-
-          <div
-            style={{
-              fontFamily: FONT_CAVEAT,
-              color: "var(--plum)",
-              fontSize: 20,
-              marginBottom: 16,
-              fontStyle: "italic",
-            }}
-          >
-            por {hostName}
-          </div>
-
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: 8,
-              marginBottom: 18,
-            }}
-          >
-            <span style={chipStyle}>
-              <IconCalendar size={13} /> {dateLabel}
-            </span>
-            <span style={chipStyle}>
-              <IconClock size={13} /> {timeLabel}
-            </span>
-            <span style={chipStyle}>
-              <IconPin size={13} /> {locationLabel}
-            </span>
-          </div>
-
-          <button
-            type="button"
-            onClick={noop}
-            aria-hidden="true"
-            tabIndex={-1}
-            style={{
-              fontFamily: FONT_SANS,
-              textTransform: "uppercase",
-              letterSpacing: "0.08em",
-              fontWeight: 600,
-              fontSize: 12,
-              padding: "12px 22px",
-              borderRadius: 999,
-              cursor: "default",
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 8,
-              border: "1px solid transparent",
-              background:
-                "linear-gradient(135deg, var(--lilac), var(--lilac-deep))",
-              color: "#fff",
-              boxShadow: "var(--shadow-cta)",
-              marginBottom: 14,
-            }}
-          >
-            <IconHeart size={13} fill="currentColor" /> confirmar presença
-          </button>
-
-          <div
-            style={{
-              fontFamily: FONT_CAVEAT,
-              color: "var(--plum)",
-              fontSize: 18,
-              lineHeight: 1.1,
-            }}
-          >
-            mal posso esperar pra te ver ♡
-          </div>
-        </div>
-      </div>
-
-      <div className="lista-modal-foot">
-        <div className="lista-foot-actions">
-          <button type="button" className="btn btn-ghost" onClick={onClose}>
-            fechar
-          </button>
-        </div>
-        <div className="lista-foot-actions lista-foot-actions-end">
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={() => {
-              toast.success("convite escolhido ♡");
-              onClose();
-            }}
-          >
-            <IconSparkle size={14} /> usar este convite
-          </button>
-        </div>
-      </div>
-    </Modal>
+    </div>
   );
 }
+
+// ---------- aperture-ch1kr — VER CONVITE preview modal (retired) ----------
+// Inline 9:16 preview in the collapse replaced the modal entry point.
 
 // ---------- page body ----------
 export function ConvidadosBody({ slug: _slug }: PainelSectionBodyProps) {
   const [guests, setGuests] = useState<Convidado[]>(CONVIDADOS_SEED);
   const [message, setMessage] = useState(CONVIDADOS_DEFAULT_MESSAGE);
+  const [inviteDate, setInviteDate] = useState(CONVIDADOS_DEFAULT_DATE);
+  const [inviteTime, setInviteTime] = useState(CONVIDADOS_DEFAULT_TIME);
+  const [inviteAddress, setInviteAddress] = useState(CONVIDADOS_DEFAULT_ADDRESS);
+  const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteType, setInviteType] = useState<"virtual" | "text">("virtual");
   const [filter, setFilter] = useState<
     "all" | ConvidadoRsvp | "unsent"
@@ -1480,20 +1406,6 @@ export function ConvidadosBody({ slug: _slug }: PainelSectionBodyProps) {
   const [showAdd, setShowAdd] = useState(false);
   // aperture-8qg1s — controls the VER LINK preview modal
   const [verLinkOpen, setVerLinkOpen] = useState(false);
-  // aperture-ch1kr — controls the VER CONVITE preview modal
-  const [verConviteOpen, setVerConviteOpen] = useState(false);
-
-  const counts = useMemo(
-    () => ({
-      all: guests.length,
-      confirmed: guests.filter((g) => g.rsvp === "confirmed").length,
-      maybe: guests.filter((g) => g.rsvp === "maybe").length,
-      declined: guests.filter((g) => g.rsvp === "declined").length,
-      pending: guests.filter((g) => g.rsvp === "pending").length,
-      unsent: guests.filter((g) => !g.sent).length,
-    }),
-    [guests],
-  );
 
   const filteredGuests = useMemo(() => {
     let list = guests;
@@ -1518,15 +1430,6 @@ export function ConvidadosBody({ slug: _slug }: PainelSectionBodyProps) {
     setGuests((gs) => gs.map((g) => (g.id === id ? { ...g, sent: true } : g)));
     toast.success(isResend ? "mensagem reenviada ♡" : "mensagem enviada ♡");
   };
-  const sendAllUnsent = () => {
-    const n = counts.unsent;
-    if (!n) {
-      toast("todo mundo já recebeu ♡");
-      return;
-    }
-    setGuests((gs) => gs.map((g) => (g.sent ? g : { ...g, sent: true })));
-    toast.success(`${n} mensagens enviadas ♡`);
-  };
   const remindOne = (id: number) => {
     setGuests((gs) =>
       gs.map((g) => (g.id === id ? { ...g, reminded: true } : g)),
@@ -1536,15 +1439,6 @@ export function ConvidadosBody({ slug: _slug }: PainelSectionBodyProps) {
   const setRsvp = (id: number, rsvp: ConvidadoRsvp) => {
     setGuests((gs) => gs.map((g) => (g.id === id ? { ...g, rsvp } : g)));
   };
-
-  const filterChips: [typeof filter, string, number][] = [
-    ["all", "todos", counts.all],
-    ["confirmed", "confirmados", counts.confirmed],
-    ["maybe", "talvez", counts.maybe],
-    ["pending", "aguardando", counts.pending],
-    ["declined", "não vão", counts.declined],
-    ["unsent", "não enviadas", counts.unsent],
-  ];
 
   const cardStyle: CSSProperties = {
     background: "var(--paper)",
@@ -1556,387 +1450,229 @@ export function ConvidadosBody({ slug: _slug }: PainelSectionBodyProps) {
   };
 
   return (
-    <section style={{ margin: "18px 16px 0", display: "flex", flexDirection: "column", gap: 22 }}>
-      {/* 1. stats strip */}
-      <StatsStrip guests={guests} />
-
-      {/* 2. título + ações */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "flex-end",
-          justifyContent: "space-between",
-          gap: 20,
-          flexWrap: "wrap",
-        }}
-      >
-        <div>
-          <span
-            style={{
-              fontFamily: FONT_CAVEAT,
-              fontSize: 22,
-              color: "var(--coral-pink)",
-              display: "inline-block",
-              transform: "rotate(-3deg)",
-              transformOrigin: "left",
-            }}
-          >
-            quem vem ♡
+    <section className="cv-convidados-page" style={{ margin: "18px 16px 0", display: "flex", flexDirection: "column", gap: 22 }}>
+      {/* 1. título */}
+      <div>
+        <h1
+          style={{
+            fontFamily: FONT_HAND,
+            fontSize: 40,
+            lineHeight: 1.05,
+            color: "var(--plum)",
+            margin: "4px 0",
+            fontWeight: 400,
+          }}
+        >
+          lista de <span className="hl">convidados</span>
+        </h1>
+        <p
+          className="cv-event-meta"
+          style={{
+            fontFamily: FONT_SANS,
+            fontSize: 15,
+            color: "var(--ink-soft)",
+            margin: 0,
+            maxWidth: 540,
+          }}
+        >
+          <span className="cv-event-meta-item">
+            <IconCalendar size={13} /> {CONVIDADOS_EVENT.date}
           </span>
-          <h1
-            style={{
-              fontFamily: FONT_HAND,
-              fontSize: 40,
-              lineHeight: 1.05,
-              color: "var(--plum)",
-              margin: "4px 0",
-              fontWeight: 400,
-            }}
-          >
-            lista de <span className="hl">convidados</span>
-          </h1>
-          <p
-            style={{
-              fontFamily: FONT_SANS,
-              fontSize: 15,
-              color: "var(--ink-soft)",
-              margin: 0,
-              maxWidth: 540,
-            }}
-          >
-            {CONVIDADOS_EVENT.title} · {CONVIDADOS_EVENT.date} ·{" "}
-            {CONVIDADOS_EVENT.location}
-          </p>
-        </div>
-        <Button variant="primary" onClick={() => setShowAdd(true)}>
-          <IconPlus size={16} /> adicionar convidado
-        </Button>
+          <span className="cv-event-meta-sep" aria-hidden="true">
+            ·
+          </span>
+          <span className="cv-event-meta-item">
+            <IconClock size={13} /> {CONVIDADOS_EVENT.time}
+          </span>
+        </p>
       </div>
 
       {showAdd && (
         <AddGuestModal onAdd={addGuest} onClose={() => setShowAdd(false)} />
       )}
 
-      {/* 3. mensagem padrão */}
-      <div style={cardStyle}>
-        <span
-          style={{
-            position: "absolute",
-            top: -12,
-            left: 24,
-            background: "var(--yellow)",
-            padding: "2px 12px",
-            borderRadius: 8,
-            fontFamily: FONT_CAVEAT,
-            fontSize: 18,
-            color: "var(--plum)",
-            transform: "rotate(-3deg)",
-            boxShadow: SHADOW_SM,
-          }}
+      {/* 3. mensagem padrão (colapsável) */}
+      <div
+        style={{
+          ...cardStyle,
+          padding: inviteOpen ? 24 : "16px 20px",
+        }}
+      >
+        <button
+          type="button"
+          className="cv-invite-collapse-trigger"
+          aria-expanded={inviteOpen}
+          onClick={() => setInviteOpen((open) => !open)}
         >
-          mensagem padrão ♡
-        </span>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 12,
-            flexWrap: "wrap",
-            marginBottom: 14,
-          }}
-        >
-          <h3 style={{ fontFamily: FONT_HAND, fontSize: 22, color: "var(--plum)", margin: 0, fontWeight: 400 }}>
-            o que vão receber
-          </h3>
-          <div
-            role="tablist"
-            aria-label="tipo de convite"
-            style={{
-              display: "inline-flex",
-              background: "var(--cream-2)",
-              borderRadius: 999,
-              padding: 4,
-              border: "1px solid var(--line)",
-              gap: 2,
-            }}
-          >
-            {(["virtual", "text"] as const).map((t) => {
-              const active = inviteType === t;
-              return (
-                <button
-                  type="button"
-                  key={t}
-                  aria-pressed={active}
-                  onClick={() => setInviteType(t)}
-                  style={{
-                    fontFamily: FONT_SANS,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.06em",
-                    fontWeight: 600,
-                    fontSize: 11,
-                    padding: "9px 16px",
-                    borderRadius: 999,
-                    border: 0,
-                    cursor: "pointer",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                    background: active ? "var(--paper)" : "transparent",
-                    color: active ? "var(--plum)" : "var(--ink-soft)",
-                    boxShadow: active ? SHADOW_SM : "none",
-                  }}
-                >
-                  {t === "virtual" ? (
-                    <>
-                      <IconSparkle size={12} /> convite virtual
-                    </>
-                  ) : (
-                    "apenas texto"
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="convidados-msg-grid">
-          <textarea
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
+          <h3
             style={{
               fontFamily: FONT_HAND,
-              fontSize: 18,
-              lineHeight: 1.55,
-              color: "var(--ink)",
-              background: "var(--cream)",
-              border: "1px solid var(--line)",
-              borderRadius: 14,
-              padding: "12px 14px",
-              width: "100%",
-              minHeight: 180,
-              resize: "vertical",
-              outline: "none",
+              fontSize: 22,
+              color: "var(--plum)",
+              margin: 0,
+              fontWeight: 400,
+            }}
+          >
+            Mensagem do convite
+          </h3>
+          <IconChevron
+            size={20}
+            style={{
+              color: "var(--ink-soft)",
+              flexShrink: 0,
+              transition: "transform 0.25s ease",
+              transform: inviteOpen ? "rotate(-90deg)" : "rotate(90deg)",
             }}
           />
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 8,
-              minWidth: 180,
-            }}
-          >
-            <span
-              style={{
-                fontFamily: FONT_SANS,
-                textTransform: "uppercase",
-                letterSpacing: "0.04em",
-                fontWeight: 600,
-                fontSize: 11,
-                color: "var(--ink-soft)",
-              }}
-            >
-              variáveis
-            </span>
-            {([
-              ["[nome]", "var(--lilac-deep)"],
-              ["[link]", "var(--coral-pink)"],
-            ] as const).map(([label, color]) => (
-              <span
-                key={label}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 6,
-                  fontFamily: FONT_SANS,
-                  fontSize: 12,
-                  fontWeight: 500,
-                  padding: "7px 13px",
-                  borderRadius: 999,
-                  border: "1px solid var(--line)",
-                  background: "var(--paper)",
-                  color: "var(--ink-soft)",
-                }}
-              >
-                <StatusDot color={color} />
-                {label}
-              </span>
-            ))}
-          </div>
-        </div>
-        <p
-          style={{
-            fontFamily: FONT_CAVEAT,
-            fontSize: 15,
-            color: "var(--ink-mute)",
-            marginTop: 12,
-            marginBottom: 0,
-          }}
-        >
-          use <b style={{ color: "var(--lilac-deep)" }}>[nome]</b> e{" "}
-          <b style={{ color: "var(--coral-pink)" }}>[link]</b> — vamos preencher
-          pra cada um.
-        </p>
+        </button>
 
-        {/* aperture-gnxal — preview-action strip. Two outlined CTAs
-            below the textarea hint so the section communicates
-            "you can see what this looks like" without competing with
-            the inline VARIÁVEIS panel. Follow-up beads land the
-            actual previews:
-              - aperture-8qg1s replaces VER LINK's toast with the
-                confirmation-link preview modal
-              - aperture-ch1kr replaces VER CONVITE's toast with the
-                convite preview modal
-            Until those land, both fire a placeholder toast so the
-            surface communicates intent without dead UI. Reuses the
-            section's own Button variant="ghost" (NOT the global
-            .btn-ghost — this file is fully inline-styled) so the
-            chrome stays harmonious with adjacente buttons. */}
-        <div
+        {inviteOpen && (
+          <div className="cv-invite-collapse-body">
+            <div className="convidados-preview-actions">
+              <div
+                role="tablist"
+                aria-label="tipo de convite"
+                className="cv-invite-type-toggle"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {(["virtual", "text"] as const).map((t) => {
+                  const active = inviteType === t;
+                  return (
+                    <button
+                      type="button"
+                      key={t}
+                      className="cv-invite-type-btn"
+                      aria-pressed={active}
+                      onClick={() => setInviteType(t)}
+                    >
+                      {t === "virtual" ? (
+                        <>
+                          <IconSparkle size={12} /> convite virtual
+                        </>
+                      ) : (
+                        "apenas texto"
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {inviteType === "virtual" ? (
+              <VirtualInvitePreviewCard />
+            ) : (
+              <div className="convidados-msg-grid">
+                <div className="convidados-msg-fields">
+                  <label className="cv-invite-field">
+                    <span className="cv-invite-label">mensagem</span>
+                    <textarea
+                      className="cv-invite-textarea"
+                      value={message}
+                      onChange={(e) => setMessage(e.target.value)}
+                    />
+                  </label>
+
+                  <label className="cv-invite-field">
+                    <span className="cv-invite-label">
+                      <IconPin size={13} /> endereço
+                    </span>
+                    <input
+                      className="cv-invite-input"
+                      type="text"
+                      value={inviteAddress}
+                      onChange={(e) => setInviteAddress(e.target.value)}
+                    />
+                  </label>
+
+                  <div className="convidados-msg-datetime">
+                    <label className="cv-invite-field">
+                      <span className="cv-invite-label">
+                        <IconCalendar size={13} /> data
+                      </span>
+                      <input
+                        className="cv-invite-input"
+                        type="text"
+                        value={inviteDate}
+                        onChange={(e) => setInviteDate(e.target.value)}
+                      />
+                    </label>
+                    <label className="cv-invite-field">
+                      <span className="cv-invite-label">
+                        <IconClock size={13} /> horário
+                      </span>
+                      <input
+                        className="cv-invite-input"
+                        type="text"
+                        value={inviteTime}
+                        onChange={(e) => setInviteTime(e.target.value)}
+                      />
+                    </label>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="convidados-preview-btns">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setVerLinkOpen(true)}
+                title="Ver link de confirmação"
+                ariaLabel="Ver link de confirmação"
+              >
+                <IconLink size={14} /> Pré-visualizar link
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* busca + filtros */}
+      <div style={{ position: "relative" }}>
+        <IconSearch
+          size={14}
           style={{
-            display: "flex",
-            gap: 8,
-            marginTop: 14,
-            flexWrap: "wrap",
+            position: "absolute",
+            left: 12,
+            top: "50%",
+            transform: "translateY(-50%)",
+            color: "var(--ink-mute)",
           }}
-        >
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setVerLinkOpen(true)}
-            title="Ver link de confirmação"
-            ariaLabel="Ver link de confirmação"
-          >
-            <IconLink size={14} /> ver link
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setVerConviteOpen(true)}
-            title="Ver convite"
-            ariaLabel="Ver convite"
-          >
-            <IconEye size={14} /> ver convite
-          </Button>
-        </div>
+        />
+        <input
+          placeholder="buscar por nome ou telefone"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          style={{
+            fontFamily: FONT_SANS,
+            fontSize: 15,
+            color: "var(--ink)",
+            background: "var(--cream)",
+            border: "1px solid var(--line)",
+            borderRadius: 14,
+            padding: "12px 14px 12px 34px",
+            width: "100%",
+            maxWidth: 400,
+            outline: "none",
+          }}
+        />
+      </div>
+
+      <GuestFilterBadges
+        guests={guests}
+        filter={filter}
+        onFilterChange={setFilter}
+      />
+
+      <div className="cv-add-guest-desktop">
+        <Button variant="primary" onClick={() => setShowAdd(true)}>
+          <IconPlus size={16} /> adicionar convidado
+        </Button>
       </div>
 
       {/* 4. guest list */}
-      <div style={cardStyle}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            flexWrap: "wrap",
-            gap: 14,
-            marginBottom: 16,
-          }}
-        >
-          <div>
-            <span
-              style={{
-                fontFamily: FONT_CAVEAT,
-                fontSize: 22,
-                color: "var(--coral-pink)",
-                display: "inline-block",
-                transform: "rotate(-3deg)",
-                transformOrigin: "left",
-              }}
-            >
-              a turma toda ♡
-            </span>
-            <h2 style={{ fontFamily: FONT_HAND, fontSize: 28, color: "var(--plum)", margin: 0, fontWeight: 400 }}>
-              convidados
-            </h2>
-          </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <div style={{ position: "relative" }}>
-              <IconSearch
-                size={14}
-                style={{
-                  position: "absolute",
-                  left: 12,
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  color: "var(--ink-mute)",
-                }}
-              />
-              <input
-                placeholder="buscar por nome ou telefone"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                style={{
-                  fontFamily: FONT_SANS,
-                  fontSize: 15,
-                  color: "var(--ink)",
-                  background: "var(--cream)",
-                  border: "1px solid var(--line)",
-                  borderRadius: 14,
-                  padding: "12px 14px 12px 34px",
-                  width: 280,
-                  maxWidth: "100%",
-                  outline: "none",
-                }}
-              />
-            </div>
-            <Button
-              variant="whatsapp"
-              size="sm"
-              disabled={!counts.unsent}
-              onClick={sendAllUnsent}
-            >
-              <IconWhatsapp /> enviar para {counts.unsent || "todos"}
-            </Button>
-          </div>
-        </div>
-
-        {/* filter chips */}
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "16px 0" }}>
-          {filterChips.map(([k, label, c]) => {
-            const active = filter === k;
-            return (
-              <button
-                type="button"
-                key={k}
-                aria-pressed={active}
-                onClick={() => setFilter(k)}
-                style={{
-                  fontFamily: FONT_SANS,
-                  fontSize: 12,
-                  fontWeight: 500,
-                  padding: "7px 13px",
-                  borderRadius: 999,
-                  border: `1px solid ${active ? "var(--lilac)" : "var(--line)"}`,
-                  background: active ? "var(--lilac-soft)" : "var(--paper)",
-                  color: active ? "var(--plum)" : "var(--ink-soft)",
-                  cursor: "pointer",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                }}
-              >
-                {label}{" "}
-                <span
-                  style={{
-                    background: "rgba(255,255,255,0.6)",
-                    color: "var(--plum)",
-                    padding: "1px 7px",
-                    borderRadius: 999,
-                    fontSize: 11,
-                    fontWeight: 600,
-                  }}
-                >
-                  {c}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div className="cv-guest-list-wrap">
+        <div className="cv-guest-list">
           {filteredGuests.length === 0 ? (
             <div style={{ padding: "48px 16px", textAlign: "center", color: "var(--ink-mute)" }}>
               <div style={{ fontFamily: FONT_HAND, fontSize: 28, color: "var(--plum)" }}>
@@ -1960,24 +1696,468 @@ export function ConvidadosBody({ slug: _slug }: PainelSectionBodyProps) {
         </div>
       </div>
 
+      <div className="cv-add-guest-fab">
+        <Button variant="primary" onClick={() => setShowAdd(true)}>
+          <IconPlus size={16} /> adicionar convidado
+        </Button>
+      </div>
+
       {/* desktop: message textarea + variables side-by-side */}
       <style>{`
+        .cv-event-meta {
+          display: flex;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+        .cv-event-meta-item {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+        }
+        .cv-event-meta-sep {
+          opacity: 0.55;
+        }
+        .cv-convidados-page {
+          padding-bottom: 88px;
+        }
+        .cv-add-guest-desktop {
+          display: none;
+        }
+        .cv-add-guest-fab {
+          position: fixed;
+          left: 16px;
+          right: 16px;
+          bottom: max(16px, env(safe-area-inset-bottom));
+          z-index: 50;
+        }
+        .cv-add-guest-fab > button {
+          width: 100%;
+          justify-content: center;
+          box-shadow: var(--shadow-cta);
+        }
+        .cv-stats-strip {
+          overflow-x: auto;
+          -webkit-overflow-scrolling: touch;
+          scrollbar-width: none;
+          -ms-overflow-style: none;
+          margin: 0 -4px;
+          padding: 4px 2px;
+        }
+        .cv-stats-strip::-webkit-scrollbar { display: none; }
+        .cv-stats-strip-row {
+          display: flex;
+          flex-wrap: nowrap;
+          gap: 10px;
+          min-width: min-content;
+        }
+        .cv-stat-badge {
+          cursor: pointer;
+          user-select: none;
+          padding: 10px 16px;
+          gap: 8px;
+          font-size: 12px;
+          border: 0;
+          font: inherit;
+        }
+        .cv-stat-num {
+          font-family: var(--font-patrick-hand), cursive;
+          font-size: 22px;
+          line-height: 1;
+          color: var(--plum);
+          font-weight: 400;
+          text-transform: none;
+          letter-spacing: normal;
+        }
+        .cv-stat-lbl {
+          font-family: var(--font-dm-sans), sans-serif;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          font-weight: 600;
+          font-size: 11px;
+          color: var(--ink-soft);
+        }
         .convidados-msg-grid {
           display: grid;
           grid-template-columns: 1fr;
           gap: 20px;
           align-items: stretch;
         }
+        .convidados-msg-fields {
+          display: flex;
+          flex-direction: column;
+          gap: 14px;
+          min-width: 0;
+        }
+        .convidados-msg-datetime {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 14px;
+        }
+        .convidados-msg-vars {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          min-width: 180px;
+        }
+        .cv-invite-collapse-trigger {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          width: 100%;
+          border: 0;
+          background: transparent;
+          padding: 0;
+          margin: 0;
+          cursor: pointer;
+          text-align: left;
+        }
+        .cv-invite-collapse-body {
+          margin-top: 16px;
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
+        }
+        .cv-invite-field {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          min-width: 0;
+        }
+        .cv-invite-label {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          font-family: var(--font-dm-sans), sans-serif;
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+          font-weight: 600;
+          font-size: 11px;
+          color: var(--ink-soft);
+        }
+        .cv-invite-input,
+        .cv-invite-textarea {
+          width: 100%;
+          font-family: var(--font-patrick-hand), cursive;
+          font-size: 18px;
+          line-height: 1.55;
+          color: var(--ink);
+          background: var(--cream);
+          border: 1px solid var(--line);
+          border-radius: 14px;
+          padding: 12px 14px;
+          outline: none;
+          box-sizing: border-box;
+        }
+        .cv-invite-input {
+          height: 48px;
+          line-height: 1.2;
+        }
+        .cv-invite-textarea {
+          min-height: 180px;
+          resize: vertical;
+        }
+        .convidados-preview-actions {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          margin-top: 0;
+          width: 100%;
+        }
+        .cv-invite-type-toggle {
+          display: flex;
+          width: 100%;
+          background: var(--cream-2);
+          border-radius: 999px;
+          padding: 4px;
+          border: 1px solid var(--line);
+          gap: 2px;
+          box-sizing: border-box;
+          overflow: hidden;
+        }
+        .cv-invite-type-btn {
+          flex: 1;
+          font-family: var(--font-dm-sans), sans-serif;
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
+          font-weight: 600;
+          font-size: 11px;
+          padding: 9px 16px;
+          border-radius: 999px;
+          border: 0;
+          cursor: pointer;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          background: transparent;
+          color: var(--ink-soft);
+        }
+        .cv-invite-type-btn[aria-pressed="true"] {
+          background: var(--paper);
+          color: var(--plum);
+          box-shadow: 0 2px 10px rgba(107, 60, 94, 0.06);
+        }
+        .convidados-preview-btns {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          width: 100%;
+        }
+        .convidados-preview-btns > button {
+          width: 100%;
+          justify-content: center;
+        }
+        .cv-virtual-invite-frame {
+          width: min(72vw, 220px);
+          margin-inline: auto;
+          aspect-ratio: 9 / 16;
+        }
+        .cv-virtual-invite-preview {
+          width: 100%;
+          height: 100%;
+          box-sizing: border-box;
+          padding: clamp(14px, 3.5vw, 20px) clamp(12px, 3vw, 18px);
+          border-radius: 18px;
+          background:
+            linear-gradient(135deg, var(--lilac-soft) 0%, var(--pink-soft) 100%);
+          border: 1px solid var(--line);
+          box-shadow: 0 10px 28px rgba(107, 60, 94, 0.1);
+          text-align: center;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: clamp(6px, 1.8vw, 10px);
+        }
+        .cv-virtual-invite-greeting {
+          font-family: var(--font-caveat), cursive;
+          color: var(--plum);
+          font-size: clamp(18px, 4.5vw, 22px);
+          line-height: 1.1;
+          font-weight: 600;
+        }
+        .cv-virtual-invite-title {
+          font-family: var(--font-patrick-hand), cursive;
+          font-size: clamp(22px, 5.5vw, 28px);
+          color: var(--plum);
+          margin: 0;
+          line-height: 1.05;
+          font-weight: 400;
+        }
+        .cv-virtual-invite-host {
+          font-family: var(--font-caveat), cursive;
+          color: var(--plum);
+          font-size: clamp(14px, 3.5vw, 17px);
+          font-style: italic;
+        }
+        .cv-virtual-invite-chips {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 5px;
+          width: 100%;
+        }
+        .cv-virtual-invite-cta {
+          font-family: var(--font-dm-sans), sans-serif;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          font-weight: 600;
+          font-size: 10px;
+          padding: 9px 16px;
+          border-radius: 999;
+          cursor: default;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          border: 1px solid transparent;
+          background: linear-gradient(135deg, var(--lilac), var(--lilac-deep));
+          color: #fff;
+          box-shadow: var(--shadow-cta);
+        }
+        .cv-virtual-invite-footer {
+          font-family: var(--font-caveat), cursive;
+          color: var(--plum);
+          font-size: clamp(13px, 3.2vw, 16px);
+          line-height: 1.1;
+        }
+        .cv-guest-list-wrap {
+          background: transparent;
+          border: 0;
+          border-radius: 0;
+          box-shadow: none;
+          padding: 0;
+        }
+        .cv-guest-list {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+        .cv-guest-card {
+          background: var(--paper);
+          border: 1px solid var(--line);
+          border-radius: 22px;
+          padding: 16px 18px;
+          position: relative;
+          box-shadow: 0 2px 10px rgba(107, 60, 94, 0.06);
+        }
+        .cv-guest-stamp {
+          position: absolute;
+          top: 10px;
+          right: 14px;
+          font-family: var(--font-caveat), cursive;
+          font-size: 18px;
+          color: var(--green-deep);
+          transform: rotate(-6deg);
+          opacity: 0.55;
+          pointer-events: none;
+        }
+        .cv-guest-layout-desktop {
+          display: none;
+        }
+        .cv-guest-layout-mobile {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+        .cv-guest-mobile-row1 {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+        .cv-guest-mobile-identity {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          min-width: 0;
+          flex: 1;
+        }
+        .cv-guest-mobile-info {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          min-width: 0;
+        }
+        .cv-guest-mobile-name {
+          font-family: var(--font-patrick-hand), cursive;
+          font-size: 22px;
+          color: var(--plum);
+          line-height: 1.1;
+        }
+        .cv-guest-mobile-phone {
+          font-family: var(--font-dm-sans), sans-serif;
+          font-size: 13px;
+          color: var(--ink-soft);
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+        }
+        .cv-guest-rsvp-mobile,
+        .cv-guest-rsvp-desktop {
+          position: relative;
+          flex-shrink: 0;
+        }
+        .cv-guest-more-btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 36px;
+          height: 36px;
+          border: 1px solid var(--line);
+          border-radius: 12px;
+          background: var(--paper);
+          color: var(--ink-soft);
+          cursor: pointer;
+          padding: 0;
+        }
+        .cv-guest-mobile-row2 {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex-wrap: wrap;
+        }
+        .cv-guest-mobile-reminded {
+          font-family: var(--font-caveat), cursive;
+          font-size: 16px;
+          color: var(--coral-pink);
+          transform: rotate(-3deg);
+        }
+        .cv-guest-mobile-row3 {
+          width: 100%;
+        }
+        .cv-guest-mobile-row3 > button {
+          width: 100%;
+          justify-content: center;
+        }
         @media (min-width: 760px) {
           .convidados-msg-grid { grid-template-columns: 1fr auto; }
+          .convidados-preview-actions {
+            align-items: center;
+          }
+          .cv-invite-type-toggle {
+            width: 50%;
+            margin-inline: auto;
+          }
+          .convidados-preview-btns {
+            flex-direction: row;
+            flex-wrap: wrap;
+            justify-content: center;
+            width: auto;
+          }
+          .convidados-preview-btns > button {
+            width: auto;
+          }
+          .cv-virtual-invite-frame {
+            width: min(100%, 260px);
+          }
+          .cv-convidados-page {
+            padding-bottom: 0;
+          }
+          .cv-add-guest-desktop {
+            display: flex;
+            justify-content: flex-end;
+          }
+          .cv-add-guest-fab {
+            display: none;
+          }
+          .cv-guest-list-wrap {
+            background: var(--paper);
+            border: 1px solid var(--line);
+            border-radius: 24px;
+            box-shadow: 0 14px 36px rgba(107, 60, 94, 0.1);
+            padding: 24px;
+            position: relative;
+          }
+          .cv-guest-layout-desktop {
+            display: flex;
+            gap: 14px;
+            align-items: center;
+            flex-wrap: wrap;
+          }
+          .cv-guest-layout-mobile {
+            display: none;
+          }
+          .cv-guest-desktop-info {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            min-width: 0;
+            flex: 1 1 200px;
+          }
+          .cv-guest-desktop-actions {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-left: auto;
+          }
         }
       `}</style>
 
       {/* aperture-8qg1s — VER LINK preview modal */}
       {verLinkOpen && <VerLinkModal onClose={() => setVerLinkOpen(false)} />}
-
-      {/* aperture-ch1kr — VER CONVITE preview modal */}
-      {verConviteOpen && <VerConviteModal onClose={() => setVerConviteOpen(false)} />}
     </section>
   );
 }

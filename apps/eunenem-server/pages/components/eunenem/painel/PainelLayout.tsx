@@ -47,7 +47,7 @@ export function PainelLayout({
         onOpenTutorial={onOpenTutorial}
       />
       <div className="painel-app">{children}</div>
-      <TweaksPanel />
+      {activeSection !== "convidados" && <TweaksPanel />}
     </TweaksProvider>
   );
 }

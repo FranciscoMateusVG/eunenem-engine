@@ -41,17 +41,19 @@ export const CONVIDADOS_DEFAULT_MESSAGE = `oi, [nome]! ♡
 
 estou te convidando pro chá da maria — um momento bem afetivo pra celebrar a chegada dela em casa.
 
-será no dia 14 de junho, às 16h, lá em casa (rua das laranjeiras, 482 — laranjeiras / rj).
-
 confirma pra mim? ♡ é só clicar aqui: [link]
 
 vai ser tão lindo te ter por perto.`;
 
+export const CONVIDADOS_DEFAULT_DATE = "sábado, 14 de junho";
+export const CONVIDADOS_DEFAULT_TIME = "16h";
+export const CONVIDADOS_DEFAULT_ADDRESS =
+  "rua das laranjeiras, 482 — laranjeiras / rj";
+
 /** Scrapbook-feeling event meta shown under the title. */
 export const CONVIDADOS_EVENT = {
-  title: "chá da maria",
   date: "sábado, 14 de junho",
-  location: "laranjeiras / rj",
+  time: "16h",
 };
 
 /** RSVP label + token color per state — single source for badges. */
