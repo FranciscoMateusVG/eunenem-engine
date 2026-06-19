@@ -386,8 +386,11 @@ function GuestAvatar({ name }: { name: string }) {
         borderRadius: "50%",
         display: "grid",
         placeItems: "center",
-        fontFamily: FONT_HAND,
-        fontSize: 18,
+        fontFamily: FONT_SANS,
+        fontSize: 14,
+        fontWeight: 700,
+        letterSpacing: "0.04em",
+        textTransform: "uppercase",
         border: "2px solid var(--paper)",
         boxShadow: SHADOW_SM,
         background: pal.bg,
@@ -796,6 +799,19 @@ function formatBrPhone(raw: string): string {
   return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
 }
 
+const BR_MOBILE_PHONE_RE = /^\(\d{2}\) 9\d{4}-\d{4}$/;
+
+function isValidBrMobilePhone(phone: string): boolean {
+  return BR_MOBILE_PHONE_RE.test(phone);
+}
+
+function capitalizeGuestName(raw: string): string {
+  return raw.replace(/\S+/g, (word) => {
+    const [first = "", ...rest] = word;
+    return first.toUpperCase() + rest.join("").toLowerCase();
+  });
+}
+
 function AddGuestModal({
   onAdd,
   onClose,
@@ -821,12 +837,18 @@ function AddGuestModal({
 
   const submit = () => {
     const n = name.trim();
-    if (!n) return;
-    onAdd({ name: n.toLowerCase(), phone: phone.trim() || "—" });
+    if (!n || !isValidBrMobilePhone(phone)) return;
+    onAdd({ name: n, phone });
     setName("");
     setPhone("");
     onClose();
   };
+
+  const canSubmit = name.trim().length > 0 && isValidBrMobilePhone(phone);
+  const phoneError =
+    phone.length > 0 && !isValidBrMobilePhone(phone)
+      ? "formato inválido — use (DD) 9XXXX-XXXX"
+      : null;
 
   return (
     <div className="lista-scrim" onClick={onClose}>
@@ -839,7 +861,6 @@ function AddGuestModal({
       >
         <div className="lista-modal-head">
           <div>
-            <span className="eyebrow coral">um novo mimo ♡</span>
             <h3 id="convidado-modal-title">
               adicionar <span className="hl">convidado</span>
             </h3>
@@ -881,11 +902,11 @@ function AddGuestModal({
               <div style={{ position: "relative" }}>
                 <input
                   id="convidado-name"
-                  placeholder="ex: ana clara"
+                  placeholder="ex: Ana Clara"
                   value={name}
                   autoFocus
-                  onChange={(e) => setName(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && submit()}
+                  onChange={(e) => setName(capitalizeGuestName(e.target.value))}
+                  onKeyDown={(e) => e.key === "Enter" && canSubmit && submit()}
                   style={{ paddingRight: 40 }}
                 />
                 <span
@@ -924,8 +945,25 @@ function AddGuestModal({
                 placeholder="(11) 99999-9999"
                 value={phone}
                 onChange={(e) => setPhone(formatBrPhone(e.target.value))}
-                onKeyDown={(e) => e.key === "Enter" && submit()}
+                onKeyDown={(e) => e.key === "Enter" && canSubmit && submit()}
+                aria-invalid={phoneError ? true : undefined}
+                aria-describedby={phoneError ? "convidado-phone-error" : undefined}
               />
+              {phoneError && (
+                <p
+                  id="convidado-phone-error"
+                  role="alert"
+                  style={{
+                    fontFamily: FONT_SANS,
+                    fontSize: 12,
+                    color: "var(--coral-pink)",
+                    margin: "6px 0 0",
+                    lineHeight: 1.4,
+                  }}
+                >
+                  {phoneError}
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -938,7 +976,7 @@ function AddGuestModal({
             <button
               type="button"
               className="btn btn-primary"
-              disabled={!name.trim()}
+              disabled={!canSubmit}
               onClick={submit}
             >
               <svg

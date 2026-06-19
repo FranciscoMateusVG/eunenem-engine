@@ -22,18 +22,18 @@ export interface Convidado {
 
 /** Seed list — matches the export's SEED_GUESTS (12 convidadas). */
 export const CONVIDADOS_SEED: Convidado[] = [
-  { id: 1, name: "ana clara mendes", phone: "(11) 99432-1187", sent: true, rsvp: "confirmed", reminded: false },
-  { id: 2, name: "beatriz oliveira", phone: "(21) 98777-2231", sent: true, rsvp: "maybe", reminded: false },
-  { id: 3, name: "camila ribeiro", phone: "(11) 97123-9988", sent: true, rsvp: "confirmed", reminded: false },
-  { id: 4, name: "daniela monteiro", phone: "(31) 99876-4523", sent: true, rsvp: "declined", reminded: false },
-  { id: 5, name: "eduarda farias", phone: "(11) 98765-1100", sent: false, rsvp: "pending", reminded: false },
-  { id: 6, name: "fernanda azevedo", phone: "(11) 99000-2244", sent: true, rsvp: "confirmed", reminded: false },
-  { id: 7, name: "gabriela siqueira", phone: "(11) 98432-7766", sent: true, rsvp: "maybe", reminded: true },
-  { id: 8, name: "helena vasconcelos", phone: "(11) 99887-1234", sent: true, rsvp: "confirmed", reminded: false },
-  { id: 9, name: "isadora pinheiro", phone: "(11) 99123-4567", sent: false, rsvp: "pending", reminded: false },
-  { id: 10, name: "júlia bernardo", phone: "(11) 98321-6655", sent: true, rsvp: "confirmed", reminded: false },
-  { id: 11, name: "letícia carvalho", phone: "(21) 97432-8899", sent: true, rsvp: "maybe", reminded: false },
-  { id: 12, name: "mariana torres", phone: "(11) 98123-3344", sent: true, rsvp: "confirmed", reminded: false },
+  { id: 1, name: "Ana Clara Mendes", phone: "(11) 99432-1187", sent: true, rsvp: "confirmed", reminded: false },
+  { id: 2, name: "Beatriz Oliveira", phone: "(21) 98777-2231", sent: true, rsvp: "maybe", reminded: false },
+  { id: 3, name: "Camila Ribeiro", phone: "(11) 97123-9988", sent: true, rsvp: "confirmed", reminded: false },
+  { id: 4, name: "Daniela Monteiro", phone: "(31) 99876-4523", sent: true, rsvp: "declined", reminded: false },
+  { id: 5, name: "Eduarda Farias", phone: "(11) 98765-1100", sent: false, rsvp: "pending", reminded: false },
+  { id: 6, name: "Fernanda Azevedo", phone: "(11) 99000-2244", sent: true, rsvp: "confirmed", reminded: false },
+  { id: 7, name: "Gabriela Siqueira", phone: "(11) 98432-7766", sent: true, rsvp: "maybe", reminded: true },
+  { id: 8, name: "Helena Vasconcelos", phone: "(11) 99887-1234", sent: true, rsvp: "confirmed", reminded: false },
+  { id: 9, name: "Isadora Pinheiro", phone: "(11) 99123-4567", sent: false, rsvp: "pending", reminded: false },
+  { id: 10, name: "Júlia Bernardo", phone: "(11) 98321-6655", sent: true, rsvp: "confirmed", reminded: false },
+  { id: 11, name: "Letícia Carvalho", phone: "(21) 97432-8899", sent: true, rsvp: "maybe", reminded: false },
+  { id: 12, name: "Mariana Torres", phone: "(11) 98123-3344", sent: true, rsvp: "confirmed", reminded: false },
 ];
 
 /** Default WhatsApp invite copy, with [nome] / [link] variables. */
