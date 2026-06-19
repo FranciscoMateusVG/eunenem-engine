@@ -697,10 +697,6 @@ function DetailDrawer({ tx, onClose }: { tx: PresentesTx | null; onClose: () => 
             <dt>data</dt>
             <dd>{dateLong(t.d)}</dd>
           </div>
-          <div>
-            <dt>horário</dt>
-            <dd>{t.t}</dd>
-          </div>
           {/* aperture-qp4mq — IDENTIFICADOR row removed (internal UUID,
               not user-actionable). The id stays available on the underlying
               tx for support / debugging purposes but no longer renders in
