@@ -28,6 +28,11 @@ import type { PainelSectionBodyProps } from "@/PainelSectionPage";
 const SHARE_BASE = "eunenem.com/";
 const STORY_MAX = 600;
 
+// Slug format mirror of the domain VO (SlugUsuario): starts with a letter,
+// 3–30 chars, lowercase letters / digits / hyphen. Client-side gate before
+// we even ask the server for availability (aperture-e21v2 / V2).
+const SLUG_RE = /^[a-z][a-z0-9-]{2,29}$/;
+
 // Canonical celebration slugs — kept in sync with the contract enum
 // (TipoEventoPerfilSchema, mirror of the Evento BC's TipoEvento). The form
 // stores the SLUG; the label is display-only. Selectable set matches the
@@ -305,6 +310,193 @@ function PhotoSlot({
   );
 }
 
+// aperture-e21v2 (V2) — slug edit UX. Inline availability (debounced) via
+// verificarDisponibilidadeSlug (R2), save via atualizarSlug with graceful
+// inline errors (CONFLICT / BAD_REQUEST never surface as a 500), and a
+// confirm step warning that changing the slug breaks already-shared links
+// (operator decision #5 = warn only; no redirect table in v1).
+function SlugEditor({
+  currentSlug,
+  onChanged,
+}: {
+  currentSlug: string;
+  onChanged: (slug: string) => void;
+}) {
+  const utils = trpc.useUtils();
+  const [draft, setDraft] = useState(currentSlug);
+  const [confirming, setConfirming] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
+
+  // Re-sync when the saved slug changes underneath (parent hydration).
+  useEffect(() => {
+    setDraft(currentSlug);
+    setConfirming(false);
+    setServerError(null);
+  }, [currentSlug]);
+
+  const dirty = draft !== currentSlug;
+  const formatOk = SLUG_RE.test(draft);
+
+  // Debounce the availability check so it doesn't fire on every keystroke.
+  const [debounced, setDebounced] = useState(draft);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(draft), 400);
+    return () => clearTimeout(t);
+  }, [draft]);
+
+  const disponibilidade = trpc.usuario.verificarDisponibilidadeSlug.useQuery(
+    { slug: debounced },
+    { enabled: dirty && formatOk && debounced === draft, staleTime: 0, retry: false },
+  );
+
+  const atualizarSlug = trpc.usuario.atualizarSlug.useMutation({
+    onSuccess: () => {
+      setConfirming(false);
+      setServerError(null);
+      onChanged(draft);
+      void utils.perfil.getPerfil.invalidate();
+      toast.success("link da página atualizado ♡");
+    },
+    onError: (err) => {
+      setConfirming(false);
+      const code = err.data?.code;
+      if (code === "CONFLICT") {
+        setServerError("esse endereço já está em uso — escolha outro ♡");
+      } else if (code === "BAD_REQUEST") {
+        setServerError(
+          "formato inválido: 3–30 caracteres, começa com letra, só a–z, números e hífen",
+        );
+      } else {
+        setServerError(err.message || "não consegui salvar o link — tenta de novo?");
+      }
+    },
+  });
+
+  let status: { text: string; tone: "ok" | "bad" | "muted" };
+  if (serverError) {
+    status = { text: serverError, tone: "bad" };
+  } else if (!dirty) {
+    status = {
+      text: "esse é o endereço público da sua página — dá pra trocar quando quiser",
+      tone: "muted",
+    };
+  } else if (!formatOk) {
+    status = {
+      text: "3–30 caracteres, começa com letra, só a–z, números e hífen",
+      tone: "bad",
+    };
+  } else if (disponibilidade.isFetching || debounced !== draft) {
+    status = { text: "verificando disponibilidade…", tone: "muted" };
+  } else if (disponibilidade.data?.disponivel) {
+    status = { text: "disponível ♡", tone: "ok" };
+  } else if (disponibilidade.data?.motivo === "em_uso") {
+    status = { text: "esse endereço já está em uso", tone: "bad" };
+  } else {
+    status = { text: "formato inválido", tone: "bad" };
+  }
+
+  const canSave =
+    dirty &&
+    formatOk &&
+    disponibilidade.data?.disponivel === true &&
+    !atualizarSlug.isPending;
+  const toneColor =
+    status.tone === "ok"
+      ? "var(--lilac-deep)"
+      : status.tone === "bad"
+        ? "var(--coral-pink)"
+        : "var(--ink-soft)";
+
+  return (
+    <Field label="nome do perfil (link da página)" htmlFor="perfil-slug">
+      <div className="perfil-input-prefix">
+        <span className="perfil-prefix">{SHARE_BASE}</span>
+        <input
+          id="perfil-slug"
+          className="perfil-input perfil-input-slug"
+          type="text"
+          value={draft}
+          placeholder="seu-link"
+          onChange={(e) => {
+            setServerError(null);
+            setConfirming(false);
+            setDraft(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""));
+          }}
+        />
+      </div>
+
+      <span
+        className="perfil-field-hint"
+        role={status.tone === "bad" ? "alert" : undefined}
+        style={{ color: toneColor, fontWeight: status.tone === "muted" ? 400 : 600 }}
+      >
+        {status.text}
+      </span>
+
+      {dirty && (
+        <div style={{ marginTop: 8 }}>
+          {confirming ? (
+            <div
+              role="alert"
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 10,
+                padding: "12px 14px",
+                borderRadius: 12,
+                background: "var(--cream)",
+                border: "1px dashed var(--line)",
+              }}
+            >
+              <span style={{ fontSize: 13, color: "var(--ink)" }}>
+                trocar o link vai <strong>quebrar os links antigos</strong> que
+                você já compartilhou (<code>{SHARE_BASE}{currentSlug}</code>). tem certeza?
+              </span>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className="perfil-btn perfil-btn-primary"
+                  disabled={atualizarSlug.isPending}
+                  onClick={() => atualizarSlug.mutate({ novoSlug: draft })}
+                >
+                  {atualizarSlug.isPending ? (
+                    <>
+                      <span className="perfil-spinner" aria-hidden="true" /> salvando…
+                    </>
+                  ) : (
+                    <span>sim, trocar o link</span>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  className="perfil-btn perfil-btn-ghost"
+                  disabled={atualizarSlug.isPending}
+                  onClick={() => {
+                    setConfirming(false);
+                    setDraft(currentSlug);
+                  }}
+                >
+                  <span>cancelar</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="perfil-btn perfil-btn-primary"
+              disabled={!canSave}
+              onClick={() => setConfirming(true)}
+            >
+              {ico.check}
+              <span>salvar novo link</span>
+            </button>
+          )}
+        </div>
+      )}
+    </Field>
+  );
+}
+
 export function PerfilBody({ slug }: PainelSectionBodyProps) {
   const { tweaks, setTweaks } = useTweaks();
   const utils = trpc.useUtils();
@@ -465,24 +657,7 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
 
       {/* 1 — Informações da página */}
       <PerfilSection icon={ico.user} title="informações da página" variant="lilac">
-        <Field
-          label="nome do perfil (link da página)"
-          htmlFor="perfil-slug"
-          hint="a edição do link chega em breve ♡"
-        >
-          <div className="perfil-input-prefix">
-            <span className="perfil-prefix">{SHARE_BASE}</span>
-            <input
-              id="perfil-slug"
-              className="perfil-input perfil-input-slug"
-              type="text"
-              value={profileSlug}
-              placeholder="seu-link"
-              readOnly
-              aria-readonly="true"
-            />
-          </div>
-        </Field>
+        <SlugEditor currentSlug={profileSlug} onChanged={setProfileSlug} />
 
         <div className="perfil-share">
           <span className="perfil-share-eyebrow">link da página</span>

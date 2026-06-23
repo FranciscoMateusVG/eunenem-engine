@@ -148,12 +148,16 @@ export function resolveRoute(pathname: string):
   // sub-path takes precedence. sessionId travels as a query param and is
   // read client-side from window.location (server can't see it through
   // pathname alone).
+  // aperture-e21v2 — de-hardcoded. Any syntactically valid slug routes to the
+  // public page; existence is resolved at render time via
+  // trpc.perfil.getPerfilPublicoBySlug (unknown slug → not-found UI). Mirrors
+  // the painel rule below (regex-match; the pure router doesn't know owners).
   const sucessoMatch = pathname.match(/^\/pagina\/([^/]+)\/sucesso\/?$/);
-  if (sucessoMatch && sucessoMatch[1] === 'francisco') {
+  if (sucessoMatch && sucessoMatch[1] && SLUG_REGEX.test(sucessoMatch[1])) {
     return { kind: 'pagina-sucesso', slug: sucessoMatch[1] };
   }
   const paginaMatch = pathname.match(/^\/pagina\/([^/]+)\/?$/);
-  if (paginaMatch && paginaMatch[1] === 'francisco') {
+  if (paginaMatch && paginaMatch[1] && SLUG_REGEX.test(paginaMatch[1])) {
     return { kind: 'pagina', slug: paginaMatch[1] };
   }
   const painelConvitePreviewMatch = pathname.match(/^\/painel\/([^/]+)\/convite\/preview\/?$/);

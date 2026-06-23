@@ -31,7 +31,10 @@ const NAV_LINKS = [
   { href: "#mural", label: "Mural" },
 ];
 
-export function Navbar() {
+// aperture-t0ggy — the logo links back to the CURRENT page's slug (passed by
+// PaginaPage / PaginaSucessoPage), not a hardcoded "/pagina/francisco". Falls
+// back to the site root when no slug is supplied.
+export function Navbar({ slug }: { slug?: string } = {}) {
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<string | null>(null);
@@ -115,7 +118,7 @@ export function Navbar() {
     >
       <div className="eu-container flex items-center justify-between py-4">
         <a
-          href="/pagina/francisco"
+          href={slug ? `/pagina/${slug}` : "/"}
           className="inline-flex items-center no-underline"
           aria-label="EuNeném — início"
         >
