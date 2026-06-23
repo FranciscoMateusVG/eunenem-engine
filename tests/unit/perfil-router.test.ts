@@ -127,8 +127,22 @@ describe('perfil router', () => {
     expect(got.tipoEvento).toBe('cha-bebe');
     expect(got.dataEvento).toBe('2026-08-01T00:00:00.000Z');
     expect(got.dataNascimento).toBe('2026-09-15T00:00:00.000Z');
-    // Resolved key → public URL (aperture-lq8vw); fake adapter mints memory:// URLs.
-    expect(got.fotoPerfil).toBe('memory://eunenem-perfil-fotos/perfis/helena/perfil.jpg');
+    // Split Url (display) / Key (round-trip) — aperture-qjgfr.
+    expect(got.fotoPerfilUrl).toBe('memory://eunenem-perfil-fotos/perfis/helena/perfil.jpg');
+    expect(got.fotoPerfilKey).toBe('perfis/helena/perfil.jpg'); // bare key for round-trip
+  });
+
+  it('🔁 idempotent persist: a resolved URL fed back as fotoXKey self-heals to a bare key', async () => {
+    // First save with the bare key.
+    await rig.caller.perfil.atualizar(FULL_INPUT);
+    // Simulate the bug: the client round-trips the RESOLVED url back as the key
+    // (and even a doubly-mangled value). extrairKey must strip ALL base prefixes.
+    const mangled = `memory://eunenem-perfil-fotos/memory://eunenem-perfil-fotos/perfis/helena/perfil.jpg`;
+    await rig.caller.perfil.atualizar({ ...FULL_INPUT, fotoPerfilKey: mangled });
+    const got = await rig.caller.perfil.getPerfil();
+    // Stored as a single bare key → resolves to a SINGLE-prefixed url (no ×N).
+    expect(got.fotoPerfilKey).toBe('perfis/helena/perfil.jpg');
+    expect(got.fotoPerfilUrl).toBe('memory://eunenem-perfil-fotos/perfis/helena/perfil.jpg');
   });
 
   it('getPerfilPublicoBySlug returns the projection', async () => {
@@ -151,9 +165,9 @@ describe('perfil router', () => {
         'creatorName',
         'dataEvento',
         'dataNascimento',
-        'fotoCapa',
-        'fotoHistoria',
-        'fotoPerfil',
+        'fotoCapaUrl',
+        'fotoHistoriaUrl',
+        'fotoPerfilUrl',
         'historia',
         'nomeBebe',
         'relacao',
@@ -196,6 +210,7 @@ describe('perfil router', () => {
     expect(got.slug).toBe(SLUG);
     expect(got.nomeBebe).toBeNull();
     expect(got.historia).toBeNull();
-    expect(got.fotoPerfil).toBeNull();
+    expect(got.fotoPerfilUrl).toBeNull();
+    expect(got.fotoPerfilKey).toBeNull();
   });
 });

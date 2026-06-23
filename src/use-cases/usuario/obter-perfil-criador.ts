@@ -24,9 +24,18 @@ export const PerfilProprioDTOSchema = z.object({
   tipoEvento: TipoEventoPerfilSchema.nullable(),
   dataEvento: z.string().nullable(),
   dataNascimento: z.string().nullable(),
-  fotoPerfil: z.string().nullable(),
-  fotoCapa: z.string().nullable(),
-  fotoHistoria: z.string().nullable(),
+  // Resolved public URLs — DISPLAY ONLY (aperture-qjgfr). img src binds here.
+  fotoPerfilUrl: z.string().nullable(),
+  fotoCapaUrl: z.string().nullable(),
+  fotoHistoriaUrl: z.string().nullable(),
+  // Bare object keys — ROUND-TRIP (aperture-qjgfr). The client stores THESE
+  // and re-sends them as fotoXKey on save, NEVER the resolved URLs above.
+  // Splitting Url (display) from Key (round-trip) is what stops the
+  // resolved-URL-fed-back-as-key re-prefix bug; the idempotent strip on the
+  // persist side is the belt-and-suspenders.
+  fotoPerfilKey: z.string().nullable(),
+  fotoCapaKey: z.string().nullable(),
+  fotoHistoriaKey: z.string().nullable(),
 });
 
 export type PerfilProprioDTO = z.infer<typeof PerfilProprioDTOSchema>;
@@ -72,9 +81,12 @@ export async function obterPerfilCriador(
         tipoEvento: c?.tipoEvento ?? null,
         dataEvento: c?.dataEvento ? c.dataEvento.toISOString() : null,
         dataNascimento: c?.dataNascimento ? c.dataNascimento.toISOString() : null,
-        fotoPerfil: fotoUrl(c?.fotoPerfilKey ?? null),
-        fotoCapa: fotoUrl(c?.fotoCapaKey ?? null),
-        fotoHistoria: fotoUrl(c?.fotoHistoriaKey ?? null),
+        fotoPerfilUrl: fotoUrl(c?.fotoPerfilKey ?? null),
+        fotoCapaUrl: fotoUrl(c?.fotoCapaKey ?? null),
+        fotoHistoriaUrl: fotoUrl(c?.fotoHistoriaKey ?? null),
+        fotoPerfilKey: c?.fotoPerfilKey ?? null,
+        fotoCapaKey: c?.fotoCapaKey ?? null,
+        fotoHistoriaKey: c?.fotoHistoriaKey ?? null,
       };
 
       span.setStatus({ code: SpanStatusCode.OK });

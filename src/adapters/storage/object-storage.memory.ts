@@ -75,4 +75,14 @@ export class ObjectStorageMemory implements ObjectStorage {
   urlPublica(objectKey: string): string {
     return `memory://${this.bucket}/${objectKey}`;
   }
+
+  /** Strips the `memory://${bucket}/` base REPEATEDLY → bare key (aperture-qjgfr). */
+  extrairKey(urlOuKey: string): string {
+    const base = `memory://${this.bucket}/`;
+    let key = urlOuKey;
+    while (key.startsWith(base)) {
+      key = key.slice(base.length);
+    }
+    return key;
+  }
 }

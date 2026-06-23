@@ -1,5 +1,6 @@
 import { SpanStatusCode } from '@opentelemetry/api';
 import { z } from 'zod/v4';
+import type { ObjectStorage } from '../../adapters/storage/object-storage.js';
 import type { PerfilCriadorRepository } from '../../adapters/usuario/perfil-criador-repository.js';
 import {
   atualizarConteudoPerfilCriador,
@@ -38,6 +39,13 @@ export type AtualizarPerfilCriadorInput = z.input<typeof AtualizarPerfilCriadorI
 
 export interface AtualizarPerfilCriadorDeps {
   readonly perfilCriadorRepository: PerfilCriadorRepository;
+  /**
+   * Used to normalize incoming photo "keys" back to bare keys (aperture-qjgfr).
+   * The client may round-trip a RESOLVED public URL into a fotoXKey field; we
+   * strip the public base before persisting so the store stays idempotent and
+   * self-heals any previously double-prefixed value.
+   */
+  readonly objectStorage: ObjectStorage;
   readonly observability: Observability;
   readonly clock: () => Date;
   readonly gerarId: () => IdPerfilCriador;
@@ -56,8 +64,10 @@ export async function atualizarPerfilCriador(
   deps: AtualizarPerfilCriadorDeps,
   input: AtualizarPerfilCriadorInput,
 ): Promise<PerfilCriador> {
-  const { perfilCriadorRepository, observability, clock, gerarId } = deps;
+  const { perfilCriadorRepository, objectStorage, observability, clock, gerarId } = deps;
   const { logger, tracer } = observability;
+  const normalizarKey = (key: string | null): string | null =>
+    key === null ? null : objectStorage.extrairKey(key);
 
   return tracer.startActiveSpan('atualizarPerfilCriador', async (span) => {
     try {
@@ -67,8 +77,18 @@ export async function atualizarPerfilCriador(
         throw new UsuarioInputInvalidoError(message);
       }
 
-      const { idUsuario, ...rest } = parsed.data;
+      const { idUsuario, ...rawRest } = parsed.data;
       span.setAttribute('usuario.id', idUsuario);
+
+      // Idempotent persist (aperture-qjgfr): a fotoXKey arriving as a resolved
+      // (or accidentally multi-prefixed) public URL is stripped back to a bare
+      // key before storage, so the round-trip never re-prefixes the base.
+      const rest = {
+        ...rawRest,
+        fotoPerfilKey: normalizarKey(rawRest.fotoPerfilKey),
+        fotoCapaKey: normalizarKey(rawRest.fotoCapaKey),
+        fotoHistoriaKey: normalizarKey(rawRest.fotoHistoriaKey),
+      };
 
       // Re-validate the content as a domain VO (single source of truth for
       // the field invariants — historia cap, photo-key bounds, etc).

@@ -64,6 +64,21 @@ export interface ObjectStorage {
    * pg-leak in aperture-9abwt taught us).
    */
   urlPublica(objectKey: string): string;
+
+  /**
+   * Inverse of `urlPublica` — normalize a value that may be a bare object key
+   * OR a resolved public URL (or an accidentally MULTI-prefixed URL) back to
+   * the bare key (aperture-qjgfr). Strips the public base
+   * (`${endpoint}/${bucket}/` or `memory://${bucket}/`) REPEATEDLY so
+   * `base×N/key → key`. A bare key never starts with the base, so stripping
+   * is safe + idempotent.
+   *
+   * The persist path runs every incoming photo "key" through this, making the
+   * store self-healing: no matter what the client round-trips (key, URL, or a
+   * previously-mangled multi-prefixed URL), exactly one bare key is stored and
+   * the DTO resolves it to a single-prefixed URL.
+   */
+  extrairKey(urlOuKey: string): string;
 }
 
 /**
