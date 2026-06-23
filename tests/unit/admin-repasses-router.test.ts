@@ -102,6 +102,7 @@ async function buildRig(): Promise<TestRig> {
     opcoes: [],
     idRecebedor: null,
     dadosRecebedor: {
+      metodo: 'pix',
       nomeTitular: 'Bia Silva',
       tipoChavePix: 'email',
       chavePix: 'bia@example.com',
@@ -114,6 +115,7 @@ async function buildRig(): Promise<TestRig> {
     id: randomUUID() as never,
     idCampanha: idCampanha as never,
     dadosRecebedor: {
+      metodo: 'pix',
       nomeTitular: 'Bia Silva',
       tipoChavePix: 'email',
       chavePix: 'bia@example.com',

@@ -2,14 +2,15 @@
 //
 // Ported from the "Convites Desktop" export (shared.jsx + themes.jsx) into the
 // painel foundation, mock-first. Two deliberate fidelity calls vs the export:
-//   1. NAME_FONTS is restricted to the canonical pair (Patrick Hand + Caveat).
-//      The export also offered Dancing Script + Shadows Into Light, which are
-//      NOT in the EuNeném canonical font set — so they're dropped to keep the
-//      page on-brand and asset-free (operator-confirmed canonical-fonts rule).
+//   1. The font catalog now includes the prototype's extra handwritten faces
+//      plus one additional on-brand option, while keeping ids aligned with the
+//      `FonteConvite` contract from the Evento BC.
 //   2. The template-watercolor + photo-upload preview modes need 12 PNG assets
 //      we don't ship in this repo, so DEFAULT_STATE starts with no background
 //      template — the pure-CSS "scrapbook" mode renders by default and nothing
 //      can break on a missing asset. The wizard ships scrapbook + clean modes.
+
+import type { FonteConvite } from "../../../../../src/index.js";
 
 export type EventTypeId =
   | "cha-bebe"
@@ -20,7 +21,7 @@ export type EventTypeId =
   | "aniversario";
 
 export interface EventType {
-  id: EventTypeId;
+  id: string;
   label: string;
   icon: string;
   emojiHint: string;
@@ -30,9 +31,15 @@ export const EVENT_TYPES: EventType[] = [
   { id: "cha-bebe", label: "chá de bebê", icon: "🍼", emojiHint: "✿ ☁ ♡" },
   { id: "cha-fraldas", label: "chá de fraldas", icon: "🧷", emojiHint: "☁ ♡" },
   { id: "cha-surpresa", label: "chá surpresa", icon: "🎀", emojiHint: "✨ ♡" },
-  { id: "batizado", label: "batizado", icon: "🕊", emojiHint: "✦ ♡" },
-  { id: "cha-revelacao", label: "chá revelação", icon: "🎈", emojiHint: "♡ ♂♀" },
   { id: "aniversario", label: "aniversário", icon: "🎂", emojiHint: "✦ ♡" },
+  { id: "batizado", label: "batizado", icon: "🕊", emojiHint: "✦ ♡" },
+];
+
+// "Em breve" event types — rendered as dimmed, un-clickable chips in the
+// selector. Deliberately kept OUT of EVENT_TYPES so they can never be
+// selected, become the active eventType, or be persisted.
+export const DISABLED_EVENT_TYPES: EventType[] = [
+  { id: "cha-rifa", label: "chá rifa", icon: "🎟", emojiHint: "♡ ✦" },
 ];
 
 export const EVENT_BY_ID: Record<string, EventType> = Object.fromEntries(
@@ -65,7 +72,7 @@ export const PALETTE_BY_ID: Record<string, Palette> = Object.fromEntries(
   PALETTES.map((p) => [p.id, p]),
 );
 
-export type NameFontId = "patrick" | "caveat";
+export type NameFontId = FonteConvite;
 
 export interface NameFont {
   id: NameFontId;
@@ -73,10 +80,12 @@ export interface NameFont {
   css: string;
 }
 
-// Canonical pair only (see file header note 1).
 export const NAME_FONTS: NameFont[] = [
   { id: "patrick", label: "patrick hand", css: "var(--font-patrick-hand), cursive" },
   { id: "caveat", label: "caveat", css: "var(--font-caveat), cursive" },
+  { id: "dancing-script", label: "dancing script", css: "var(--font-dancing-script), cursive" },
+  { id: "shadows-into-light", label: "shadows into light", css: "var(--font-shadows-into-light), cursive" },
+  { id: "handlee", label: "handlee", css: "var(--font-handlee), cursive" },
 ];
 
 export const NAME_FONT_BY_ID: Record<string, NameFont> = Object.fromEntries(
@@ -124,7 +133,7 @@ export const DEFAULT_STATE: ConviteState = {
   time: "15:00",
   address: "Rua das Acácias, 142\nVila Mariana — São Paulo",
   onlineLink: "meet.google.com/cha-mari",
-  hashtag: "#chegadaDaMari",
+  hashtag: "",
   message: "a gente já te ama tanto. vem celebrar com a gente essa nova fase ♡",
   gifts: true,
   rsvp: true,

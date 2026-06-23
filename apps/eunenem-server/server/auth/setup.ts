@@ -5,6 +5,8 @@ import {
   type Auth,
   type CampanhaRepository,
   CampanhaRepositoryPostgres,
+  type ConviteRepository,
+  ConviteRepositoryPostgres,
   type CheckoutSessionProvider,
   ConsoleLogger,
   type ContribuicaoRepository,
@@ -14,6 +16,8 @@ import {
   criarAuth,
   type Database,
   ID_PLATAFORMA_EUNENEM,
+  type EventoRepository,
+  EventoRepositoryPostgres,
   type LivroFinanceiroRepository,
   LivroFinanceiroRepositoryPostgres,
   type WebhookEventArchive,
@@ -26,6 +30,10 @@ import {
   PagamentoProviderStripe,
   type PagamentoRepository,
   PagamentoRepositoryPostgres,
+  type DadosRecebimentoRepository,
+  DadosRecebimentoRepositoryPostgres,
+  type PerfilCriadorRepository,
+  PerfilCriadorRepositoryPostgres,
   PlataformaRepositoryMemory,
   type PlataformaRepository,
   type ProvedorRegraTaxa,
@@ -53,6 +61,20 @@ export interface ServerDeps {
   readonly auth: Auth;
   readonly authService: AuthService;
   readonly usuarioRepository: UsuarioRepository;
+  /**
+   * PerfilCriador BC adapter (aperture-cdo69). Backs the `perfil.*` tRPC
+   * procedures — authed read/write of the creator profile + the public
+   * `getPerfilPublicoBySlug` projection. Postgres-backed (migration 026),
+   * sharing the same Kysely instance as the other domain repos.
+   */
+  readonly perfilCriadorRepository: PerfilCriadorRepository;
+  /**
+   * DadosRecebimentoUsuario BC adapter (aperture-mcvyw). Backs the
+   * `dadosRecebimento.*` tRPC procedures — authed read/write of the user-level
+   * receiving data (pix | conta). Postgres-backed (migration 028), sharing
+   * the same Kysely instance as the other domain repos.
+   */
+  readonly dadosRecebimentoRepository: DadosRecebimentoRepository;
   readonly plataformaRepository: PlataformaRepository;
   /**
    * Arrecadação adapters (aperture-d6atj). Needed by `contribuicao.*` tRPC
@@ -62,6 +84,9 @@ export interface ServerDeps {
   readonly campanhaRepository: CampanhaRepository;
   readonly contribuicaoRepository: ContribuicaoRepository;
   readonly recebedorRepository: RecebedorRepository;
+  /** Evento BC — event metadata + invite content for the painel convite flow. */
+  readonly eventoRepository: EventoRepository;
+  readonly conviteRepository: ConviteRepository;
   /**
    * Pagamentos / Checkout adapters (aperture-xaha2). Wired for the FIRST
    * time here — the engine's pagamentos BC has been in-memory-test-only
@@ -302,6 +327,8 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
   });
 
   const usuarioRepository = new UsuarioRepositoryPostgres(db);
+  const perfilCriadorRepository = new PerfilCriadorRepositoryPostgres(db);
+  const dadosRecebimentoRepository = new DadosRecebimentoRepositoryPostgres(db);
 
   // Plataforma BC is still in-memory; the engine ships seeded values for
   // ID_PLATAFORMA_EUNENEM + ID_PLATAFORMA_EUCASEI via the seed array.
@@ -316,6 +343,8 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
   const recebedorRepository = new RecebedorRepositoryPostgres(db);
   const campanhaRepository = new CampanhaRepositoryPostgres(db, recebedorRepository);
   const contribuicaoRepository = new ContribuicaoRepositoryPostgres(db);
+  const eventoRepository = new EventoRepositoryPostgres(db);
+  const conviteRepository = new ConviteRepositoryPostgres(db);
 
   // Pagamentos BC — first wiring (aperture-xaha2). Repository persisted
   // to Postgres (migration 011). Event publisher in-memory; no consumers
@@ -389,10 +418,14 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     auth,
     authService,
     usuarioRepository,
+    perfilCriadorRepository,
+    dadosRecebimentoRepository,
     plataformaRepository,
     campanhaRepository,
     contribuicaoRepository,
     recebedorRepository,
+    eventoRepository,
+    conviteRepository,
     pagamentoRepository,
     pagamentoProvider,
     checkoutSessionProvider,

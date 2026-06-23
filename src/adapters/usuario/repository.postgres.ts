@@ -461,6 +461,47 @@ export class UsuarioRepositoryPostgres implements UsuarioRepository {
   }
 
   /**
+   * Edita o slug (aperture-2ztes). Mesma forma estrutural de
+   * `atualizarNomeExibicaoUsuario` (UPDATE keyed em `id`, no-op silencioso
+   * para id desconhecido), mas adiciona o mapeamento 23505 →
+   * `UsuarioSlugJaExisteError` que hoje só existe no INSERT de
+   * `saveRegistroDomain`. A constraint composta `usuarios_plataforma_slug_uniq`
+   * levanta o 23505 quando o `novoSlug` já existe na mesma plataforma; sem
+   * auto-sufixo — o use-case propaga o erro tipado para o utilizador
+   * escolher outro slug.
+   */
+  async atualizarSlugUsuario(idUsuario: IdUsuario, novoSlug: SlugUsuario): Promise<void> {
+    return tracer.startActiveSpan('db.usuarios.atualizarSlugUsuario', async (span) => {
+      span.setAttributes({ ...DB_USUARIOS_ATTRS, 'db.operation.name': 'UPDATE' });
+      try {
+        // Silent no-op if the user does not exist (mirrors
+        // atualizarNomeExibicaoUsuario). The use-case guards existence.
+        await this.db
+          .updateTable('usuarios')
+          .set({ slug: novoSlug })
+          .where('id', '=', idUsuario)
+          .execute();
+        span.setStatus({ code: SpanStatusCode.OK });
+      } catch (error: unknown) {
+        // Composite (id_plataforma, slug) collision — surface the same
+        // typed error the INSERT path and the memory adapter throw so
+        // callers see one consistent error regardless of adapter.
+        if (isUniqueViolation(error, UNIQUE_PLATAFORMA_SLUG)) {
+          const typed = new UsuarioSlugJaExisteError(novoSlug);
+          span.recordException(typed);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw typed;
+        }
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  /**
    * Plan 0018 Phase A (aperture-omswg / migration 024). First-write-wins
    * via the `WHERE tutorial_completado_em IS NULL` guard — already-completed
    * usuarios are skipped (UPDATE affects 0 rows, no error). Mirrors

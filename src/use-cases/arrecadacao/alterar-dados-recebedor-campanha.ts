@@ -68,7 +68,10 @@ export async function alterarDadosRecebedorCampanha(
       const { idCampanha, dadosRecebedor } = parsed.data;
 
       span.setAttribute('arrecadacao.campanha.id', idCampanha);
-      span.setAttribute('arrecadacao.recebedor.tipoChavePix', dadosRecebedor.tipoChavePix);
+      span.setAttribute('arrecadacao.recebedor.metodo', dadosRecebedor.metodo);
+      if (dadosRecebedor.metodo === 'pix') {
+        span.setAttribute('arrecadacao.recebedor.tipoChavePix', dadosRecebedor.tipoChavePix);
+      }
 
       const existing = await campanhaRepository.findById(idCampanha);
       if (!existing) {
@@ -100,7 +103,8 @@ export async function alterarDadosRecebedorCampanha(
       logger.info('arrecadacao.campanha.recebedor_alterado', {
         idCampanha,
         idRecebedor: updated.idRecebedor,
-        tipoChavePix: dadosRecebedor.tipoChavePix,
+        metodo: dadosRecebedor.metodo,
+        tipoChavePix: dadosRecebedor.metodo === 'pix' ? dadosRecebedor.tipoChavePix : null,
       });
 
       span.setStatus({ code: SpanStatusCode.OK });

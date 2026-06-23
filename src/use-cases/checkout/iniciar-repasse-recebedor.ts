@@ -14,6 +14,7 @@ import { ArrecadacaoCampanhaNaoEncontradaError } from '../../errors/arrecadacao/
 import { ArrecadacaoRecebedorNaoEncontradoError } from '../../errors/arrecadacao/recebedor-nao-encontrado.error.js';
 import { CheckoutCampanhaSemRecebedorError } from '../../errors/checkout/campanha-sem-recebedor.error.js';
 import { CheckoutPlataformaMismatchError } from '../../errors/checkout/plataforma-mismatch.error.js';
+import { CheckoutRecebedorNaoPagavelViaPixError } from '../../errors/checkout/recebedor-nao-pagavel-via-pix.error.js';
 import type { Observability } from '../../observability/observability.js';
 import { solicitarRepasseRecebedor } from '../pagamentos/financeiro/solicitar-repasse-recebedor.js';
 
@@ -103,6 +104,14 @@ export async function iniciarRepasseRecebedor(
       const recebedorAtivo = await recebedorRepository.findAtivoByCampanhaId(parsed.idCampanha);
       if (!recebedorAtivo) {
         throw new ArrecadacaoRecebedorNaoEncontradoError(parsed.idCampanha);
+      }
+
+      // pre-validation 4: the active recebedor must be PIX-payable. A 'conta'
+      // (bank-account) receiver has no PIX key and there is no bank-transfer
+      // rail — short-circuit BEFORE any Financeiro delegation so the
+      // cents-sweep never runs. Manual payout is the operator's job.
+      if (recebedorAtivo.dadosRecebedor.metodo === 'conta') {
+        throw new CheckoutRecebedorNaoPagavelViaPixError(parsed.idCampanha);
       }
 
       // delegate to Financeiro (sweep + atomic claim)

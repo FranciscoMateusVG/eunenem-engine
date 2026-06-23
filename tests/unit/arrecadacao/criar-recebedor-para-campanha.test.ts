@@ -57,6 +57,7 @@ async function seedCampanha(
 }
 
 const DADOS_RECEBEDOR = {
+  metodo: 'pix' as const,
   nomeTitular: 'Test Owner',
   tipoChavePix: 'email' as const,
   chavePix: 'owner@example.com',
@@ -164,6 +165,7 @@ describe('criarRecebedorParaCampanha (aperture-0bynm)', () => {
           idCampanha,
           idContaCaller: idAdmin,
           dadosRecebedor: {
+            metodo: 'pix',
             nomeTitular: 'X',
             tipoChavePix: 'cpf',
             chavePix: 'not-a-cpf',

@@ -5,21 +5,25 @@ import type { Convite } from '../../domain/evento/entities/convite.js';
 import { conviteComCamposAtualizados } from '../../domain/evento/entities/convite.js';
 import { FonteConviteSchema } from '../../domain/evento/value-objects/fonte-convite.js';
 import { IdConviteSchema } from '../../domain/evento/value-objects/ids.js';
+import { ImagemUrlConviteSchema } from '../../domain/evento/value-objects/imagem-url-convite.js';
 import { MensagemConviteSchema } from '../../domain/evento/value-objects/mensagem-convite.js';
 import { ModeloConviteSchema } from '../../domain/evento/value-objects/modelo-convite.js';
 import { NomeExibidoConviteSchema } from '../../domain/evento/value-objects/nome-exibido-convite.js';
 import { PaletaConviteSchema } from '../../domain/evento/value-objects/paleta-convite.js';
+import { RemetenteConviteSchema } from '../../domain/evento/value-objects/remetente-convite.js';
 import { ConviteInputInvalidoError } from '../../errors/evento/convite-input-invalido.error.js';
 import { ConviteNaoEncontradoError } from '../../errors/evento/convite-nao-encontrado.error.js';
 import type { Observability } from '../../observability/observability.js';
 
 export const AtualizarConviteInputSchema = z.object({
   id: IdConviteSchema,
+  remetente: RemetenteConviteSchema,
   nomeExibido: NomeExibidoConviteSchema,
   mensagem: MensagemConviteSchema,
   paleta: PaletaConviteSchema,
   fonte: FonteConviteSchema,
   modelo: ModeloConviteSchema,
+  imagemUrl: ImagemUrlConviteSchema.optional(),
 });
 
 export type AtualizarConviteInput = z.infer<typeof AtualizarConviteInputSchema>;
@@ -46,9 +50,13 @@ export async function atualizarConvite(
       }
 
       span.setAttribute('convite.id', parsed.data.id);
+      span.setAttribute('convite.remetente.length', parsed.data.remetente.length);
       span.setAttribute('convite.paleta', parsed.data.paleta);
       span.setAttribute('convite.fonte', parsed.data.fonte);
       span.setAttribute('convite.modelo', parsed.data.modelo);
+      if (parsed.data.imagemUrl !== undefined) {
+        span.setAttribute('convite.imagem_url', parsed.data.imagemUrl);
+      }
 
       const existing = await conviteRepository.findById(parsed.data.id);
       if (!existing) {
@@ -58,11 +66,13 @@ export async function atualizarConvite(
       const updated = conviteComCamposAtualizados(
         existing,
         {
+          remetente: parsed.data.remetente,
           nomeExibido: parsed.data.nomeExibido,
           mensagem: parsed.data.mensagem,
           paleta: parsed.data.paleta,
           fonte: parsed.data.fonte,
           modelo: parsed.data.modelo,
+          ...(parsed.data.imagemUrl === undefined ? {} : { imagemUrl: parsed.data.imagemUrl }),
         },
         clock(),
       );
@@ -72,9 +82,11 @@ export async function atualizarConvite(
       logger.info('convite.atualizado', {
         idConvite: updated.id,
         idEvento: updated.idEvento,
+        remetente: updated.remetente,
         paleta: updated.paleta,
         fonte: updated.fonte,
         modelo: updated.modelo,
+        imagemUrl: updated.imagemUrl,
       });
 
       span.setStatus({ code: SpanStatusCode.OK });

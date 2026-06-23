@@ -322,6 +322,7 @@ export function makeCampanha(overrides: Partial<Campanha> = {}): Campanha {
     idsAdministradores: [randomUUID()],
     idRecebedor,
     dadosRecebedor: {
+      metodo: 'pix',
       nomeTitular: 'Maria Silva',
       tipoChavePix: 'email',
       chavePix: 'maria@exemplo.com',

@@ -1,3 +1,7 @@
+import {
+  conviteDestinationHref,
+  useConvitePreviewData,
+} from "@/lib/convite";
 import { painelHref, type PainelSection } from "@/lib/painelRoutes";
 
 // aperture-7nius — Painel topbar redesign (3 chips).
@@ -64,6 +68,7 @@ export function PainelTopbar({
   unread = true,
   onOpenTutorial,
 }: PainelTopbarProps) {
+  const conviteQuery = useConvitePreviewData(slug);
   const onPainelRoot = activeSection === undefined;
 
   return (
@@ -86,6 +91,23 @@ export function PainelTopbar({
         <nav className="painel-topbar-nav" aria-label="Seções do painel">
           <ul>
             {NAV_ITEMS.map((item) => {
+              const active = item.section === activeSection;
+              const href = item.section === "convite"
+                ? conviteDestinationHref(slug, conviteQuery.data)
+                : painelHref(slug, item.section);
+              return (
+                <li key={item.label}>
+                  <a
+                    href={href}
+                    aria-current={active ? "page" : undefined}
+                    className={`painel-topbar-link${
+                      active ? " is-active" : ""
+                    }`}
+                  >
+                    {item.label}
+                  </a>
+                </li>
+              );
               // MINHA PÁGINA — anchor to painel root, active when there's
               // no sub-section.
               if (item.kind === "page") {

@@ -65,7 +65,7 @@ export function PaginaSucessoPage({ slug }: { slug: string }) {
   return (
     <TweaksProvider>
       <>
-        <Navbar />
+        <Navbar slug={slug} />
         <main
           className="flex-1 pt-16 sucesso-bg"
           aria-live={data?.status === "pending" ? "polite" : "off"}

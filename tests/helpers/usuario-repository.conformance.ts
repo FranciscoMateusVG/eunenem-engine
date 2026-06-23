@@ -54,7 +54,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
         nomeExibicao: 'Owner',
         slug: 'owner',
         criadoEm: fixedDate,
-          tutorialCompletadoEm: null,
+        tutorialCompletadoEm: null,
       };
       const conta = {
         id: idConta,
@@ -150,7 +150,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
             nomeExibicao: 'Second',
             slug: 'shared-slug',
             criadoEm: fixedDate,
-          tutorialCompletadoEm: null,
+            tutorialCompletadoEm: null,
           },
           conta: {
             id: a2,
@@ -411,6 +411,182 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
       expect(loaded?.nomeExibicao).toBe('New Name');
     });
 
+    // ───── atualizarSlugUsuario (aperture-2ztes) ─────
+
+    it('atualizarSlugUsuario updates the slug; round-trip findUsuarioBySlug finds the NEW slug (aperture-2ztes)', async () => {
+      const idUsuario = randomUUID();
+      const idConta = randomUUID();
+      await repo.saveRegistroDomain({
+        usuario: {
+          id: idUsuario,
+          idPlataforma: ID_PLATAFORMA_EUNENEM,
+          idConta,
+          email: 'slug-edit@example.com',
+          nomeExibicao: 'Slug Edit',
+          slug: 'old-slug',
+          criadoEm: fixedDate,
+          tutorialCompletadoEm: null,
+        },
+        conta: {
+          id: idConta,
+          idUsuario,
+          permissoes: ['campaign:admin'] as const,
+          criadaEm: fixedDate,
+        },
+      });
+
+      await repo.atualizarSlugUsuario(idUsuario, 'new-slug');
+
+      // The Usuario carries the new slug.
+      expect((await repo.findUsuarioById(idUsuario))?.slug).toBe('new-slug');
+      // findUsuarioBySlug resolves the NEW slug to this Usuario.
+      expect((await repo.findUsuarioBySlug(ID_PLATAFORMA_EUNENEM, 'new-slug'))?.id).toBe(idUsuario);
+      // The OLD slug no longer resolves.
+      expect(await repo.findUsuarioBySlug(ID_PLATAFORMA_EUNENEM, 'old-slug')).toBeUndefined();
+    });
+
+    it('atualizarSlugUsuario throws UsuarioSlugJaExisteError on (idPlataforma, slug) collision — no auto-suffix (aperture-2ztes)', async () => {
+      // Two usuarios on the same plataforma. The second tries to take the
+      // first's slug → typed error in BOTH adapters (postgres maps 23505;
+      // memory checks the composite index).
+      const u1 = randomUUID();
+      const a1 = randomUUID();
+      await repo.saveRegistroDomain({
+        usuario: {
+          id: u1,
+          idPlataforma: ID_PLATAFORMA_EUNENEM,
+          idConta: a1,
+          email: 'taken-owner@example.com',
+          nomeExibicao: 'Owner',
+          slug: 'taken-slug',
+          criadoEm: fixedDate,
+          tutorialCompletadoEm: null,
+        },
+        conta: {
+          id: a1,
+          idUsuario: u1,
+          permissoes: ['campaign:admin'] as const,
+          criadaEm: fixedDate,
+        },
+      });
+
+      const u2 = randomUUID();
+      const a2 = randomUUID();
+      await repo.saveRegistroDomain({
+        usuario: {
+          id: u2,
+          idPlataforma: ID_PLATAFORMA_EUNENEM,
+          idConta: a2,
+          email: 'edit-collider@example.com',
+          nomeExibicao: 'Collider',
+          slug: 'collider-slug',
+          criadoEm: fixedDate,
+          tutorialCompletadoEm: null,
+        },
+        conta: {
+          id: a2,
+          idUsuario: u2,
+          permissoes: ['campaign:admin'] as const,
+          criadaEm: fixedDate,
+        },
+      });
+
+      await expect(repo.atualizarSlugUsuario(u2, 'taken-slug')).rejects.toThrow(
+        UsuarioSlugJaExisteError,
+      );
+      // The collider's slug is unchanged after the rejection.
+      expect((await repo.findUsuarioById(u2))?.slug).toBe('collider-slug');
+    });
+
+    it('atualizarSlugUsuario allows re-claiming the SAME slug (idempotent self-update) (aperture-2ztes)', async () => {
+      const idUsuario = randomUUID();
+      const idConta = randomUUID();
+      await repo.saveRegistroDomain({
+        usuario: {
+          id: idUsuario,
+          idPlataforma: ID_PLATAFORMA_EUNENEM,
+          idConta,
+          email: 'self-slug@example.com',
+          nomeExibicao: 'Self',
+          slug: 'self-slug',
+          criadoEm: fixedDate,
+          tutorialCompletadoEm: null,
+        },
+        conta: {
+          id: idConta,
+          idUsuario,
+          permissoes: ['campaign:admin'] as const,
+          criadaEm: fixedDate,
+        },
+      });
+
+      // Re-setting a usuario's own slug must NOT collide with itself.
+      await expect(repo.atualizarSlugUsuario(idUsuario, 'self-slug')).resolves.toBeUndefined();
+      expect((await repo.findUsuarioBySlug(ID_PLATAFORMA_EUNENEM, 'self-slug'))?.id).toBe(
+        idUsuario,
+      );
+    });
+
+    it('atualizarSlugUsuario allows the same slug across different plataformas (aperture-2ztes)', async () => {
+      // A usuario on EUCASEI already owns "shared-edit". A usuario on
+      // EUNENEM editing to "shared-edit" must succeed — uniqueness is
+      // composite (idPlataforma, slug).
+      const uOther = randomUUID();
+      const aOther = randomUUID();
+      await repo.saveRegistroDomain({
+        usuario: {
+          id: uOther,
+          idPlataforma: ID_PLATAFORMA_EUCASEI,
+          idConta: aOther,
+          email: 'other-plat@example.com',
+          nomeExibicao: 'Other',
+          slug: 'shared-edit',
+          criadoEm: fixedDate,
+          tutorialCompletadoEm: null,
+        },
+        conta: {
+          id: aOther,
+          idUsuario: uOther,
+          permissoes: ['campaign:admin'] as const,
+          criadaEm: fixedDate,
+        },
+      });
+
+      const idUsuario = randomUUID();
+      const idConta = randomUUID();
+      await repo.saveRegistroDomain({
+        usuario: {
+          id: idUsuario,
+          idPlataforma: ID_PLATAFORMA_EUNENEM,
+          idConta,
+          email: 'editor@example.com',
+          nomeExibicao: 'Editor',
+          slug: 'editor-original',
+          criadoEm: fixedDate,
+          tutorialCompletadoEm: null,
+        },
+        conta: {
+          id: idConta,
+          idUsuario,
+          permissoes: ['campaign:admin'] as const,
+          criadaEm: fixedDate,
+        },
+      });
+
+      await expect(repo.atualizarSlugUsuario(idUsuario, 'shared-edit')).resolves.toBeUndefined();
+      expect((await repo.findUsuarioBySlug(ID_PLATAFORMA_EUNENEM, 'shared-edit'))?.id).toBe(
+        idUsuario,
+      );
+      // The EUCASEI owner is untouched.
+      expect((await repo.findUsuarioBySlug(ID_PLATAFORMA_EUCASEI, 'shared-edit'))?.id).toBe(uOther);
+    });
+
+    it('atualizarSlugUsuario is a silent no-op for unknown idUsuario (aperture-2ztes)', async () => {
+      await expect(
+        repo.atualizarSlugUsuario(randomUUID(), 'whatever-slug'),
+      ).resolves.toBeUndefined();
+    });
+
     it('removeRegistroDomain deletes Usuario + Conta + frees composite-uniqueness slots (aperture-p8i01)', async () => {
       const idUsuario = randomUUID();
       const idConta = randomUUID();
@@ -456,7 +632,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
             nomeExibicao: 'Clean Again',
             slug,
             criadoEm: fixedDate,
-          tutorialCompletadoEm: null,
+            tutorialCompletadoEm: null,
           },
           conta: {
             id: idConta2,
@@ -490,7 +666,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
             nomeExibicao: email.split('@')[0] ?? email,
             slug,
             criadoEm: fixedDate,
-          tutorialCompletadoEm: null,
+            tutorialCompletadoEm: null,
           },
           conta: {
             id: idConta,
@@ -871,7 +1047,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
             nomeExibicao: email,
             slug,
             criadoEm: fixedDate,
-          tutorialCompletadoEm: null,
+            tutorialCompletadoEm: null,
           },
           conta: {
             id: idConta,

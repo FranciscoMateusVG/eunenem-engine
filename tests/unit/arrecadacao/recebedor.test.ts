@@ -11,6 +11,7 @@ const idRecebedor2 = '550e8400-e29b-41d4-a716-446655440004';
 const criadaEm = new Date('2026-05-01T12:00:00.000Z');
 
 const dadosPix = {
+  metodo: 'pix' as const,
   nomeTitular: 'Maria Silva',
   tipoChavePix: 'email' as const,
   chavePix: 'maria@exemplo.com',
@@ -52,6 +53,7 @@ describe('desativarRecebedor', () => {
 describe('criarNovoRecebedor', () => {
   it('creates new active receiver for same idCampanha', () => {
     const novosDados = {
+      metodo: 'pix' as const,
       nomeTitular: 'Joao',
       tipoChavePix: 'cpf' as const,
       chavePix: '12345678901',

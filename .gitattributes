@@ -1,2 +1,5 @@
 # Generated sources: always LF so check:codegen-drift matches on all platforms.
 *.generated.ts text eol=lf
+
+# Migrations: keep LF so biome/format checks stay stable across OSes.
+migrations/*.ts text eol=lf

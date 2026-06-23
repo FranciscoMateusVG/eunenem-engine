@@ -131,6 +131,7 @@ describe('pagina.obterListaPresentes projection (aperture-ines9)', () => {
         id: randomUUID(),
         idCampanha: campanha.id,
         dadosRecebedor: {
+          metodo: 'pix',
           nomeTitular: 'Lista Projection Owner',
           tipoChavePix: 'email',
           chavePix: 'lista-projection@test.local',

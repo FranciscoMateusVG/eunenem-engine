@@ -3,7 +3,7 @@ import { Calculadora } from '@/components/eunenem/landing/Calculadora';
 import { ChaRifa } from '@/components/eunenem/landing/ChaRifa';
 import { CTAFinal } from '@/components/eunenem/landing/CTAFinal';
 import { Differential } from '@/components/eunenem/landing/Differential';
-import { Footer } from '@/components/eunenem/landing/Footer';
+import { Footer } from '@/components/eunenem/Footer';
 import { Hero } from '@/components/eunenem/landing/Hero';
 import { HowItWorks } from '@/components/eunenem/landing/HowItWorks';
 import { Invites } from '@/components/eunenem/landing/Invites';

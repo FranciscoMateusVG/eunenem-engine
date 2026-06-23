@@ -78,6 +78,57 @@ export interface Contribuicoes {
   valor: number;
 }
 
+export interface Convidados {
+  id: string;
+  lista_id: string;
+  nome: string;
+  numero_celular: string;
+  presenca: string;
+}
+
+export interface Convites {
+  atualizado_em: Generated<Timestamp>;
+  criado_em: Generated<Timestamp>;
+  fonte: string;
+  id: string;
+  id_evento: string;
+  imagem_url: string | null;
+  mensagem: string;
+  modelo: string;
+  nome_exibido: string;
+  paleta: string;
+  remetente: string;
+}
+
+export interface DadosRecebimentoUsuario {
+  agencia: string | null;
+  agencia_digito: string | null;
+  atualizado_em: Generated<Timestamp>;
+  celular_titular: string | null;
+  chave_pix: string | null;
+  codigo_banco: string | null;
+  conta: string | null;
+  conta_digito: string | null;
+  cpf_titular: string | null;
+  id: string;
+  id_usuario: string;
+  metodo: string;
+  nome_titular: string;
+  tipo_chave_pix: string | null;
+  tipo_conta: string | null;
+}
+
+export interface Eventos {
+  atualizado_em: Generated<Timestamp>;
+  criado_em: Generated<Timestamp>;
+  data_hora: Timestamp;
+  endereco: string | null;
+  id: string;
+  id_campanha: string;
+  modalidade: string;
+  tipo_evento: string;
+}
+
 export interface IntencaoItems {
   contribution_unit_amount_cents: Int8 | null;
   criado_em: Timestamp;
@@ -108,6 +159,14 @@ export interface LancamentosFinanceiros {
   id_repasse: string | null;
   tipo: string;
   transferido_em: Timestamp | null;
+}
+
+export interface ListasDeConvidados {
+  atualizado_em: Generated<Timestamp>;
+  criado_em: Generated<Timestamp>;
+  id: string;
+  id_evento: string;
+  link_confirmacao: string;
 }
 
 export interface OpcoesContribuicao {
@@ -155,6 +214,22 @@ export interface PaymentWebhookEvents {
   signature_valid: boolean;
 }
 
+export interface PerfilCriadores {
+  atualizado_em: Generated<Timestamp>;
+  criado_em: Generated<Timestamp>;
+  data_evento: Timestamp | null;
+  data_nascimento: Timestamp | null;
+  foto_capa_key: string | null;
+  foto_historia_key: string | null;
+  foto_perfil_key: string | null;
+  historia: string | null;
+  id: string;
+  id_usuario: string;
+  nome_bebe: string | null;
+  relacao: string | null;
+  tipo_evento: string | null;
+}
+
 export interface RateLimit {
   count: Generated<number>;
   id: string;
@@ -163,13 +238,22 @@ export interface RateLimit {
 }
 
 export interface Recebedores {
+  agencia: string | null;
+  agencia_digito: string | null;
   campanha_id: string;
-  chave_pix: string;
+  celular_titular: string | null;
+  chave_pix: string | null;
+  codigo_banco: string | null;
+  conta: string | null;
+  conta_digito: string | null;
+  cpf_titular: string | null;
   criada_em: Generated<Timestamp>;
   id: string;
   is_active: Generated<boolean>;
+  metodo: string;
   nome_titular: string;
-  tipo_chave_pix: string;
+  tipo_chave_pix: string | null;
+  tipo_conta: string | null;
 }
 
 export interface RepassesRecebedor {
@@ -231,11 +315,17 @@ export interface DB {
   cats: Cats;
   contas: Contas;
   contribuicoes: Contribuicoes;
+  convidados: Convidados;
+  convites: Convites;
+  dados_recebimento_usuario: DadosRecebimentoUsuario;
+  eventos: Eventos;
   intencao_items: IntencaoItems;
   lancamentos_financeiros: LancamentosFinanceiros;
+  listas_de_convidados: ListasDeConvidados;
   opcoes_contribuicao: OpcoesContribuicao;
   pagamentos: Pagamentos;
   payment_webhook_events: PaymentWebhookEvents;
+  perfil_criadores: PerfilCriadores;
   rate_limit: RateLimit;
   recebedores: Recebedores;
   repasses_recebedor: RepassesRecebedor;

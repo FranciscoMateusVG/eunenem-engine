@@ -367,38 +367,6 @@ function ExtratoErrorState({ message }: { message: string }) {
   );
 }
 
-function ExtratoEmptyState() {
-  return (
-    <section
-      className="presentes-extrato"
-      style={{ padding: "48px 16px", textAlign: "center" }}
-    >
-      <p
-        style={{
-          fontFamily: "var(--font-hand, 'Caveat', cursive)",
-          fontSize: "22px",
-          color: "var(--ink, #1a1a1a)",
-        }}
-      >
-        ainda não recebeu presentes ♡
-      </p>
-      <p
-        className="ex-mono"
-        style={{
-          marginTop: 8,
-          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-          fontSize: "11px",
-          textTransform: "uppercase",
-          letterSpacing: "0.14em",
-          color: "var(--ink-mute, #999)",
-        }}
-      >
-        quando alguém presentear, vai aparecer aqui
-      </p>
-    </section>
-  );
-}
-
 function IconArrowUpRight() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -696,10 +664,6 @@ function DetailDrawer({ tx, onClose }: { tx: PresentesTx | null; onClose: () => 
           <div>
             <dt>data</dt>
             <dd>{dateLong(t.d)}</dd>
-          </div>
-          <div>
-            <dt>horário</dt>
-            <dd>{t.t}</dd>
           </div>
           {/* aperture-qp4mq — IDENTIFICADOR row removed (internal UUID,
               not user-actionable). The id stays available on the underlying
@@ -1023,6 +987,7 @@ function TransferOnboardingModal({
     criarRecebedor.mutate({
       idCampanha,
       dadosRecebedor: {
+        metodo: "pix",
         nomeTitular: s.nome.trim(),
         tipoChavePix,
         chavePix: s.pixKey,
@@ -1517,10 +1482,12 @@ export function PresentesBody(props: PainelSectionBodyProps) {
   const wireSummary = summaryQuery.data;
   const wireRows = listQuery.data.rows;
 
-  // Empty state — no presentes received yet on this campanha.
-  if (wireSummary.totalPresentes === 0 && wireRows.length === 0) {
-    return <ExtratoEmptyState />;
-  }
+  // aperture-jszqp — no early short-circuit for the empty case. The extrato
+  // layout itself renders gracefully with zero presentes: totals show
+  // R$ 0,00 / 0 presentes (adaptSummary maps cents straight through),
+  // the rows table renders its header + divider + an inline empty <li>
+  // within the ticket sheet (NOT the full-screen generic empty screen).
+  // Operator wants the recebedor's own extrato, just zeroed.
 
   // Adapt the wire shapes to what the existing visual layer consumes.
   const summary = adaptSummary(wireSummary);
@@ -1660,14 +1627,21 @@ export function PresentesBody(props: PainelSectionBodyProps) {
           </div>
 
           <ul className="ex-ticket-rows">
-            {visibleTransactions.length === 0 && (
-              <li className="ex-ticket-empty">
-                <span className="ex-hand">nenhum mimo com esse filtro</span>
-                <button type="button" className="ex-link" onClick={() => setActiveStatuses([])}>
-                  limpar filtros
-                </button>
-              </li>
-            )}
+            {visibleTransactions.length === 0 &&
+              (activeStatuses.length > 0 ? (
+                <li className="ex-ticket-empty">
+                  <span className="ex-hand">nenhum mimo com esse filtro</span>
+                  <button type="button" className="ex-link" onClick={() => setActiveStatuses([])}>
+                    limpar filtros
+                  </button>
+                </li>
+              ) : (
+                // aperture-jszqp — genuinely empty extrato (no presentes yet).
+                // Inline empty row WITHIN the ticket sheet, not a filter prompt.
+                <li className="ex-ticket-empty">
+                  <span className="ex-hand">nenhum presente ainda ♡</span>
+                </li>
+              ))}
             {visibleTransactions.map((tx) => (
               <TicketRow key={tx.id} tx={tx} onPick={setOpenTx} />
             ))}

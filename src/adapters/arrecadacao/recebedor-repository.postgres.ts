@@ -3,6 +3,7 @@ import type { Recebedor } from '../../domain/arrecadacao/entities/recebedor.js';
 import type {
   DadosRecebedor,
   TipoChavePix,
+  TipoConta,
 } from '../../domain/arrecadacao/value-objects/dados-recebedor.js';
 import type { IdCampanha, IdRecebedor } from '../../domain/arrecadacao/value-objects/ids.js';
 import type { Database } from '../database.js';
@@ -20,11 +21,60 @@ type RecebedorRow = {
   id: string;
   campanha_id: string;
   nome_titular: string;
-  tipo_chave_pix: string;
-  chave_pix: string;
+  metodo: string;
+  // pix variant (NULL on conta rows)
+  tipo_chave_pix: string | null;
+  chave_pix: string | null;
+  // conta variant (NULL on pix rows)
+  cpf_titular: string | null;
+  celular_titular: string | null;
+  codigo_banco: string | null;
+  agencia: string | null;
+  agencia_digito: string | null;
+  conta: string | null;
+  conta_digito: string | null;
+  tipo_conta: string | null;
   is_active: boolean;
   criada_em: Date;
 };
+
+/**
+ * Flattens a `DadosRecebedor` union member into the recebedores column set.
+ * Exactly one variant's columns are populated; the other variant's columns
+ * are NULL — enforced by the row-level CHECK (migration 027).
+ */
+function dadosRecebedorToColumns(dados: DadosRecebedor) {
+  if (dados.metodo === 'pix') {
+    return {
+      metodo: 'pix' as const,
+      nome_titular: dados.nomeTitular,
+      tipo_chave_pix: dados.tipoChavePix,
+      chave_pix: dados.chavePix,
+      cpf_titular: null,
+      celular_titular: null,
+      codigo_banco: null,
+      agencia: null,
+      agencia_digito: null,
+      conta: null,
+      conta_digito: null,
+      tipo_conta: null,
+    };
+  }
+  return {
+    metodo: 'conta' as const,
+    nome_titular: dados.nomeTitular,
+    tipo_chave_pix: null,
+    chave_pix: null,
+    cpf_titular: dados.cpfTitular,
+    celular_titular: dados.celularTitular,
+    codigo_banco: dados.codigoBanco,
+    agencia: dados.agencia,
+    agencia_digito: dados.agenciaDigito,
+    conta: dados.conta,
+    conta_digito: dados.contaDigito,
+    tipo_conta: dados.tipoConta,
+  };
+}
 
 export class RecebedorRepositoryPostgres implements RecebedorRepository {
   constructor(private readonly db: Database) {}
@@ -34,23 +84,20 @@ export class RecebedorRepositoryPostgres implements RecebedorRepository {
     return tracer.startActiveSpan('db.arrecadacao_recebedores.save', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPSERT' });
       try {
+        const cols = dadosRecebedorToColumns(recebedor.dadosRecebedor);
         await executor
           .insertInto('recebedores')
           .values({
             id: recebedor.id,
             campanha_id: recebedor.idCampanha,
-            nome_titular: recebedor.dadosRecebedor.nomeTitular,
-            tipo_chave_pix: recebedor.dadosRecebedor.tipoChavePix,
-            chave_pix: recebedor.dadosRecebedor.chavePix,
+            ...cols,
             is_active: recebedor.isActive,
             criada_em: recebedor.criadaEm,
           })
           .onConflict((oc) =>
             oc.column('id').doUpdateSet({
               is_active: recebedor.isActive,
-              nome_titular: recebedor.dadosRecebedor.nomeTitular,
-              tipo_chave_pix: recebedor.dadosRecebedor.tipoChavePix,
-              chave_pix: recebedor.dadosRecebedor.chavePix,
+              ...cols,
             }),
           )
           .execute();
@@ -122,11 +169,26 @@ export class RecebedorRepositoryPostgres implements RecebedorRepository {
 }
 
 function toRecebedor(row: RecebedorRow): Recebedor {
-  const dadosRecebedor: DadosRecebedor = {
-    nomeTitular: row.nome_titular,
-    tipoChavePix: row.tipo_chave_pix as TipoChavePix,
-    chavePix: row.chave_pix,
-  };
+  const dadosRecebedor: DadosRecebedor =
+    row.metodo === 'conta'
+      ? {
+          metodo: 'conta',
+          nomeTitular: row.nome_titular,
+          cpfTitular: row.cpf_titular as string,
+          celularTitular: row.celular_titular as string,
+          codigoBanco: row.codigo_banco as string,
+          agencia: row.agencia as string,
+          agenciaDigito: row.agencia_digito,
+          conta: row.conta as string,
+          contaDigito: row.conta_digito as string,
+          tipoConta: row.tipo_conta as TipoConta,
+        }
+      : {
+          metodo: 'pix',
+          nomeTitular: row.nome_titular,
+          tipoChavePix: row.tipo_chave_pix as TipoChavePix,
+          chavePix: row.chave_pix as string,
+        };
 
   return {
     id: row.id as IdRecebedor,

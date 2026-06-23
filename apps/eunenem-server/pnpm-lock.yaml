@@ -38,6 +38,9 @@ importers:
       hono:
         specifier: ^4.6.14
         version: 4.12.22
+      html-to-image:
+        specifier: ^1.11.13
+        version: 1.11.13
       kysely:
         specifier: ^0.28.7
         version: 0.28.17
@@ -950,6 +953,9 @@ packages:
   hono@4.12.22:
     resolution: {integrity: sha512-7fvVPbB92zNRsQke+uiRGwtTuef0tB2Dg4hWxYfFNvkQhIltWoyi0ONReM5LWA+jJWS3nfT5lTq+qbsIpX0IQw==}
     engines: {node: '>=16.9.0'}
+
+  html-to-image@1.11.13:
+    resolution: {integrity: sha512-cuOPoI7WApyhBElTTb9oqsawRvZ0rHhaHwghRLlTuffoD1B2aDemlCruLeZrUIIdvG7gs9xeELEPm6PhuASqrg==}
 
   is-extglob@2.1.1:
     resolution: {integrity: sha512-SbKbANkN603Vi4jEZv49LeVJMn4yGwsbzZworEoyEiutsN3nJYdbO36zfhGJ6QEDpOZIFkDtnq5JRxmvl3jsoQ==}
@@ -1907,6 +1913,8 @@ snapshots:
       function-bind: 1.1.2
 
   hono@4.12.22: {}
+
+  html-to-image@1.11.13: {}
 
   is-extglob@2.1.1: {}
 

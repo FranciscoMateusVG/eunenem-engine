@@ -133,7 +133,11 @@ app.get('*', async (c) => {
   // If not, the URL is structurally valid but unowned → 404. The React tree
   // still renders the painel chrome (helps debugging in dev — see the slug
   // we tried), but the HTTP status is honest.
-  if (route.kind === 'painel' || route.kind === 'painel-section') {
+  if (
+    route.kind === 'painel' ||
+    route.kind === 'painel-section' ||
+    route.kind === 'painel-convite-preview'
+  ) {
     const owner = await deps.usuarioRepository.findUsuarioBySlug(
       ID_PLATAFORMA_EUNENEM,
       route.slug,
@@ -165,11 +169,14 @@ function envelope(ssrHtml: string, pathname: string): string {
     <title>eunenem · ${escapeHtml(pathname)}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600;700&family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Patrick+Hand&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600;700&family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Dancing+Script:wght@400;500;600;700&family=Handlee&family=Patrick+Hand&family=Shadows+Into+Light&display=swap" rel="stylesheet" />
     <style>
       :root {
         --font-patrick-hand: 'Patrick Hand', cursive;
         --font-caveat: 'Caveat', cursive;
+        --font-dancing-script: 'Dancing Script', cursive;
+        --font-shadows-into-light: 'Shadows Into Light', cursive;
+        --font-handlee: 'Handlee', cursive;
         --font-dm-sans: 'DM Sans', system-ui, sans-serif;
       }
     </style>

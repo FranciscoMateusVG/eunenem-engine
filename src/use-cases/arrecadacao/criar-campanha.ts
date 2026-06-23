@@ -89,11 +89,12 @@ export async function criarCampanha(
         'arrecadacao.campanha.com_recebedor',
         parsed.data.dadosRecebedor !== undefined,
       );
-      if (parsed.data.dadosRecebedor) {
-        span.setAttribute(
-          'arrecadacao.recebedor.tipoChavePix',
-          parsed.data.dadosRecebedor.tipoChavePix,
-        );
+      const dadosRecebedorAttr = parsed.data.dadosRecebedor;
+      if (dadosRecebedorAttr) {
+        span.setAttribute('arrecadacao.recebedor.metodo', dadosRecebedorAttr.metodo);
+      }
+      if (dadosRecebedorAttr?.metodo === 'pix') {
+        span.setAttribute('arrecadacao.recebedor.tipoChavePix', dadosRecebedorAttr.tipoChavePix);
       }
 
       const plataforma = await plataformaRepository.findById(parsed.data.idPlataforma);
@@ -138,7 +139,9 @@ export async function criarCampanha(
         idCampanha: campanha.id,
         idPlataforma: campanha.idPlataforma,
         idRecebedor: campanha.idRecebedor,
-        tipoChavePix: campanha.dadosRecebedor?.tipoChavePix ?? null,
+        metodo: campanha.dadosRecebedor?.metodo ?? null,
+        tipoChavePix:
+          campanha.dadosRecebedor?.metodo === 'pix' ? campanha.dadosRecebedor.tipoChavePix : null,
         tituloLength: campanha.titulo.length,
         comRecebedor: campanha.idRecebedor !== null,
       });

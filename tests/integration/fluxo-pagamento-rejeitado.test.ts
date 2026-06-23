@@ -53,6 +53,7 @@ const clock = () => fixedDate;
 const VALOR_CONTRIBUICAO_CENTS = 8000;
 
 const dadosRecebedorPadrao = () => ({
+  metodo: 'pix' as const,
   nomeTitular: 'Maria Silva',
   tipoChavePix: 'email' as const,
   chavePix: 'maria@exemplo.com',

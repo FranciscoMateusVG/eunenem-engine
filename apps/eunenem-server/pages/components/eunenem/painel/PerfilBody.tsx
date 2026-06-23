@@ -3,30 +3,98 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { useTweaks } from "@/components/eunenem/TweaksContext";
+import { trpc } from "@/lib/trpc";
 import { painelHref } from "@/lib/painelRoutes";
-import {
-  PERFIL_DEMO,
-  PERFIL_EVENT_TYPES,
-  PERFIL_RELATIONS,
-} from "@/lib/mocks/perfil";
+import { PERFIL_RELATIONS } from "@/lib/mocks/perfil";
 import type { PainelSectionBodyProps } from "@/PainelSectionPage";
 
-// aperture-1z6xa — Editar Perfil body (content only).
+// aperture-1z6xa / aperture-bnj0z — Editar Perfil body (content only).
 //
-// Renders inside PainelLayout (topbar + 520px shell + Tweaks come free), so
-// this file is just the hero + the profile-edit form cards. Faithful to the
-// "Editar Perfil" export: lilás "informações da página" (slug link + share
-// row), pink "datas importantes" (chá + nascimento + tipo de evento), yellow
-// "informações do neném" (nome obrigatório + seu nome + parentesco), blue
-// "minha história" textarea (600-char cap), green "fotos da página" (3 upload
-// slots reusing ImageSlot).
+// V1 (bnj0z): wired to the real tRPC perfil-router (R3 aperture-cdo69).
+//   • load  → trpc.perfil.getPerfil populates the form on mount (real
+//     loading/error states; no more PERFIL_DEMO snapshot).
+//   • save  → trpc.perfil.atualizar persists; toast fires only after the
+//     mutation resolves. RELOADING THE PAGE PERSISTS (data comes from the DB).
+//   • eventType uses the canonical TipoEvento slugs from the contract as the
+//     source of truth (NOT the old mock labels) — the <select> stores slugs.
+//   • babyName/creatorName still mirror into TweaksContext (header greeting).
 //
-// Mock-first: every input is local React state seeded from PERFIL_DEMO. babyName
-// + creatorName mirror into TweaksContext on save so the rest of the panel
-// (header card greeting + "página da <nome>") tracks the edit live — but only
-// on an explicit save, never per-keystroke, so the form feels like a draft.
-// "salvar" is a mock with a 600ms fake latency then a sonner toast. There is no
-// backend, no persistence: reload resets to PERFIL_DEMO.
+// BOUNDARIES (kept out of V1 on purpose):
+//   • slug is READ-ONLY here — inline availability + editing is V2 (e21v2).
+//   • photo slots stay local-preview stubs — presigned upload is V4 (w4afb).
+//     Existing photo keys from getPerfil are preserved on save (passed back to
+//     atualizar) so V1 never wipes them.
+
+const SHARE_BASE = "eunenem.com/";
+const STORY_MAX = 600;
+
+// Slug format mirror of the domain VO (SlugUsuario): starts with a letter,
+// 3–30 chars, lowercase letters / digits / hyphen. Client-side gate before
+// we even ask the server for availability (aperture-e21v2 / V2).
+const SLUG_RE = /^[a-z][a-z0-9-]{2,29}$/;
+
+// Canonical celebration slugs — kept in sync with the contract enum
+// (TipoEventoPerfilSchema, mirror of the Evento BC's TipoEvento). The form
+// stores the SLUG; the label is display-only. Selectable set matches the
+// convite selector (aperture-irowp): chá revelação is not offered as a new
+// choice, but is labelled if an existing profile already carries it.
+type PerfilEventTypeSlug =
+  | "cha-bebe"
+  | "cha-fraldas"
+  | "cha-surpresa"
+  | "cha-revelacao"
+  | "batizado"
+  | "aniversario";
+
+const EVENT_TYPE_LABELS: Record<PerfilEventTypeSlug, string> = {
+  "cha-bebe": "Chá de bebê",
+  "cha-fraldas": "Chá de fraldas",
+  "cha-surpresa": "Chá surpresa",
+  "cha-revelacao": "Chá revelação",
+  batizado: "Batizado",
+  aniversario: "Aniversário",
+};
+
+const SELECTABLE_EVENT_TYPES: PerfilEventTypeSlug[] = [
+  "cha-bebe",
+  "cha-fraldas",
+  "cha-surpresa",
+  "aniversario",
+  "batizado",
+];
+
+// dd/mm/aaaa ⇄ ISO. The backend stores dates and `getPerfil` returns ISO
+// strings; `atualizar` accepts an ISO string (z.coerce.date coerces it).
+// We read/write UTC components so the displayed day never shifts by timezone.
+const BR_DATE_RE = /^(\d{2})\/(\d{2})\/(\d{4})$/;
+
+function brToISO(br: string): string | null {
+  const m = br.trim().match(BR_DATE_RE);
+  if (!m) return null;
+  const d = Number(m[1]);
+  const mo = Number(m[2]);
+  const y = Number(m[3]);
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  // Reject overflow dates like 31/02/2026 (JS would roll them forward).
+  if (
+    dt.getUTCFullYear() !== y ||
+    dt.getUTCMonth() !== mo - 1 ||
+    dt.getUTCDate() !== d
+  ) {
+    return null;
+  }
+  return dt.toISOString();
+}
+
+function isoToBR(iso: string | null): string {
+  if (!iso) return "";
+  const dt = new Date(iso);
+  if (Number.isNaN(dt.getTime())) return "";
+  const dd = String(dt.getUTCDate()).padStart(2, "0");
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
+  return `${dd}/${mm}/${dt.getUTCFullYear()}`;
+}
 
 const ico = {
   user: (
@@ -148,7 +216,7 @@ function Field({
 // aperture-ou9bp — single upload slot for the "fotos da página" 3-grid.
 // Header row (pink mini-tile + plum label) over a dashed-border dropzone
 // with a + circle + CTA. Stub upload only: file becomes a local
-// URL.createObjectURL preview, no fetch.
+// URL.createObjectURL preview, no fetch. (Real presigned upload is V4.)
 function PhotoSlot({
   id,
   label,
@@ -242,45 +310,342 @@ function PhotoSlot({
   );
 }
 
+// aperture-e21v2 (V2) — slug edit UX. Inline availability (debounced) via
+// verificarDisponibilidadeSlug (R2), save via atualizarSlug with graceful
+// inline errors (CONFLICT / BAD_REQUEST never surface as a 500), and a
+// confirm step warning that changing the slug breaks already-shared links
+// (operator decision #5 = warn only; no redirect table in v1).
+function SlugEditor({
+  currentSlug,
+  onChanged,
+}: {
+  currentSlug: string;
+  onChanged: (slug: string) => void;
+}) {
+  const utils = trpc.useUtils();
+  const [draft, setDraft] = useState(currentSlug);
+  const [confirming, setConfirming] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
+
+  // Re-sync when the saved slug changes underneath (parent hydration).
+  useEffect(() => {
+    setDraft(currentSlug);
+    setConfirming(false);
+    setServerError(null);
+  }, [currentSlug]);
+
+  const dirty = draft !== currentSlug;
+  const formatOk = SLUG_RE.test(draft);
+
+  // Debounce the availability check so it doesn't fire on every keystroke.
+  const [debounced, setDebounced] = useState(draft);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(draft), 400);
+    return () => clearTimeout(t);
+  }, [draft]);
+
+  const disponibilidade = trpc.usuario.verificarDisponibilidadeSlug.useQuery(
+    { slug: debounced },
+    { enabled: dirty && formatOk && debounced === draft, staleTime: 0, retry: false },
+  );
+
+  const atualizarSlug = trpc.usuario.atualizarSlug.useMutation({
+    onSuccess: () => {
+      setConfirming(false);
+      setServerError(null);
+      onChanged(draft);
+      void utils.perfil.getPerfil.invalidate();
+      toast.success("link da página atualizado ♡");
+    },
+    onError: (err) => {
+      setConfirming(false);
+      const code = err.data?.code;
+      if (code === "CONFLICT") {
+        setServerError("esse endereço já está em uso — escolha outro ♡");
+      } else if (code === "BAD_REQUEST") {
+        setServerError(
+          "formato inválido: 3–30 caracteres, começa com letra, só a–z, números e hífen",
+        );
+      } else {
+        setServerError(err.message || "não consegui salvar o link — tenta de novo?");
+      }
+    },
+  });
+
+  let status: { text: string; tone: "ok" | "bad" | "muted" };
+  if (serverError) {
+    status = { text: serverError, tone: "bad" };
+  } else if (!dirty) {
+    status = {
+      text: "esse é o endereço público da sua página — dá pra trocar quando quiser",
+      tone: "muted",
+    };
+  } else if (!formatOk) {
+    status = {
+      text: "3–30 caracteres, começa com letra, só a–z, números e hífen",
+      tone: "bad",
+    };
+  } else if (disponibilidade.isFetching || debounced !== draft) {
+    status = { text: "verificando disponibilidade…", tone: "muted" };
+  } else if (disponibilidade.data?.disponivel) {
+    status = { text: "disponível ♡", tone: "ok" };
+  } else if (disponibilidade.data?.motivo === "em_uso") {
+    status = { text: "esse endereço já está em uso", tone: "bad" };
+  } else {
+    status = { text: "formato inválido", tone: "bad" };
+  }
+
+  const canSave =
+    dirty &&
+    formatOk &&
+    disponibilidade.data?.disponivel === true &&
+    !atualizarSlug.isPending;
+  const toneColor =
+    status.tone === "ok"
+      ? "var(--lilac-deep)"
+      : status.tone === "bad"
+        ? "var(--coral-pink)"
+        : "var(--ink-soft)";
+
+  return (
+    <Field label="nome do perfil (link da página)" htmlFor="perfil-slug">
+      <div className="perfil-input-prefix">
+        <span className="perfil-prefix">{SHARE_BASE}</span>
+        <input
+          id="perfil-slug"
+          className="perfil-input perfil-input-slug"
+          type="text"
+          value={draft}
+          placeholder="seu-link"
+          onChange={(e) => {
+            setServerError(null);
+            setConfirming(false);
+            setDraft(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""));
+          }}
+        />
+      </div>
+
+      <span
+        className="perfil-field-hint"
+        role={status.tone === "bad" ? "alert" : undefined}
+        style={{ color: toneColor, fontWeight: status.tone === "muted" ? 400 : 600 }}
+      >
+        {status.text}
+      </span>
+
+      {dirty && (
+        <div style={{ marginTop: 8 }}>
+          {confirming ? (
+            <div
+              role="alert"
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 10,
+                padding: "12px 14px",
+                borderRadius: 12,
+                background: "var(--cream)",
+                border: "1px dashed var(--line)",
+              }}
+            >
+              <span style={{ fontSize: 13, color: "var(--ink)" }}>
+                trocar o link vai <strong>quebrar os links antigos</strong> que
+                você já compartilhou (<code>{SHARE_BASE}{currentSlug}</code>). tem certeza?
+              </span>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className="perfil-btn perfil-btn-primary"
+                  disabled={atualizarSlug.isPending}
+                  onClick={() => atualizarSlug.mutate({ novoSlug: draft })}
+                >
+                  {atualizarSlug.isPending ? (
+                    <>
+                      <span className="perfil-spinner" aria-hidden="true" /> salvando…
+                    </>
+                  ) : (
+                    <span>sim, trocar o link</span>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  className="perfil-btn perfil-btn-ghost"
+                  disabled={atualizarSlug.isPending}
+                  onClick={() => {
+                    setConfirming(false);
+                    setDraft(currentSlug);
+                  }}
+                >
+                  <span>cancelar</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="perfil-btn perfil-btn-primary"
+              disabled={!canSave}
+              onClick={() => setConfirming(true)}
+            >
+              {ico.check}
+              <span>salvar novo link</span>
+            </button>
+          )}
+        </div>
+      )}
+    </Field>
+  );
+}
+
 export function PerfilBody({ slug }: PainelSectionBodyProps) {
   const { tweaks, setTweaks } = useTweaks();
+  const utils = trpc.useUtils();
 
-  const [profileSlug, setProfileSlug] = useState(
-    slug || PERFIL_DEMO.profileSlug,
-  );
-  const [babyName, setBabyName] = useState(
-    tweaks.babyName || PERFIL_DEMO.babyName,
-  );
-  const [creatorName, setCreatorName] = useState(PERFIL_DEMO.creatorName);
-  const [relation, setRelation] = useState(PERFIL_DEMO.relation);
-  const [eventType, setEventType] = useState(PERFIL_DEMO.eventType);
-  const [teaDate, setTeaDate] = useState(PERFIL_DEMO.teaDate);
-  const [birthDate, setBirthDate] = useState(PERFIL_DEMO.birthDate);
-  const [story, setStory] = useState(PERFIL_DEMO.story);
-  const [saving, setSaving] = useState(false);
+  const [profileSlug, setProfileSlug] = useState(slug || "");
+  const [babyName, setBabyName] = useState(tweaks.babyName || "");
+  const [creatorName, setCreatorName] = useState("");
+  const [relation, setRelation] = useState("");
+  const [eventType, setEventType] = useState<PerfilEventTypeSlug | "">("");
+  const [teaDate, setTeaDate] = useState("");
+  const [birthDate, setBirthDate] = useState("");
+  const [story, setStory] = useState("");
 
-  // aperture-ou9bp — stub photo uploads. Each slot is independent state;
-  // no fetch, no persistence, swap-on-pick + sonner toast only.
+  // aperture-ou9bp — local-only photo previews (real upload is V4). Existing
+  // keys from getPerfil are held so save round-trips them unchanged.
   const [fotoPerfil, setFotoPerfil] = useState<File | null>(null);
   const [fotoCapa, setFotoCapa] = useState<File | null>(null);
   const [fotoHistoria, setFotoHistoria] = useState<File | null>(null);
+  const fotoKeys = useRef<{
+    perfil: string | null;
+    capa: string | null;
+    historia: string | null;
+  }>({ perfil: null, capa: null, historia: null });
 
+  const perfilQuery = trpc.perfil.getPerfil.useQuery(undefined, {
+    staleTime: 30_000,
+  });
+  const hydrated = useRef(false);
+
+  // Hydrate the form once from the real profile. Subsequent saves keep local
+  // state authoritative (it already reflects the edit), so we don't re-seed.
+  useEffect(() => {
+    const d = perfilQuery.data;
+    if (!d || hydrated.current) return;
+    setProfileSlug(d.slug || slug || "");
+    setBabyName(d.nomeBebe ?? "");
+    setCreatorName(d.creatorName ?? "");
+    setRelation(d.relacao ?? "");
+    setEventType((d.tipoEvento as PerfilEventTypeSlug | null) ?? "");
+    setTeaDate(isoToBR(d.dataEvento));
+    setBirthDate(isoToBR(d.dataNascimento));
+    setStory(d.historia ?? "");
+    fotoKeys.current = {
+      perfil: d.fotoPerfil,
+      capa: d.fotoCapa,
+      historia: d.fotoHistoria,
+    };
+    setTweaks({ babyName: d.nomeBebe ?? "" });
+    hydrated.current = true;
+  }, [perfilQuery.data, slug, setTweaks]);
+
+  const atualizar = trpc.perfil.atualizar.useMutation({
+    onSuccess: (updated) => {
+      fotoKeys.current = {
+        perfil: updated.fotoPerfil,
+        capa: updated.fotoCapa,
+        historia: updated.fotoHistoria,
+      };
+      setTweaks({ babyName: updated.nomeBebe ?? babyName.trim() });
+      utils.perfil.getPerfil.setData(undefined, updated);
+      toast.success("Tudo salvo! Feito com carinho ♡");
+    },
+    onError: (err) => {
+      toast.error(err.message || "não consegui salvar — tenta de novo?");
+    },
+  });
 
   const handleSave = () => {
     if (!babyName.trim()) {
       toast.error("Conta pra gente o nome do neném ♡");
       return;
     }
-    setSaving(true);
-    // Mock latency — no backend. On "save" we mirror the names into the
-    // shared Tweaks state so the panel header (greeting + "página da <nome>")
-    // tracks the edit, then confirm with a toast.
-    setTimeout(() => {
-      setTweaks({ babyName: babyName.trim() });
-      setSaving(false);
-      toast.success("Tudo salvo! Feito com carinho ♡");
-    }, 600);
+    if (!creatorName.trim()) {
+      toast.error("Conta pra gente o seu nome ♡");
+      return;
+    }
+    const dataEvento = teaDate.trim() ? brToISO(teaDate) : null;
+    if (teaDate.trim() && !dataEvento) {
+      toast.error("Data do chá inválida — use dd/mm/aaaa");
+      return;
+    }
+    const dataNascimento = birthDate.trim() ? brToISO(birthDate) : null;
+    if (birthDate.trim() && !dataNascimento) {
+      toast.error("Data de nascimento inválida — use dd/mm/aaaa");
+      return;
+    }
+    atualizar.mutate({
+      nomeExibicao: creatorName.trim(),
+      nomeBebe: babyName.trim(),
+      relacao: relation.trim() || null,
+      historia: story.trim() || null,
+      dataNascimento,
+      tipoEvento: eventType || null,
+      dataEvento,
+      fotoPerfilKey: fotoKeys.current.perfil,
+      fotoCapaKey: fotoKeys.current.capa,
+      fotoHistoriaKey: fotoKeys.current.historia,
+    });
   };
+
+  const saving = atualizar.isPending;
+
+  // Event-type options: the 5 selectable slugs, plus the currently-loaded
+  // value if it isn't one of them (so an existing chá-revelação still shows
+  // and isn't silently dropped on the next save).
+  const eventOptions: PerfilEventTypeSlug[] =
+    eventType && !SELECTABLE_EVENT_TYPES.includes(eventType)
+      ? [eventType, ...SELECTABLE_EVENT_TYPES]
+      : SELECTABLE_EVENT_TYPES;
+
+  // ── Loading / error states (real, replacing the demo snapshot) ──
+  if (perfilQuery.isLoading) {
+    return (
+      <div className="perfil-body">
+        <div className="perfil-hero">
+          <h1 className="perfil-hero-title">
+            carregando o seu <span className="hl">perfil</span>…
+          </h1>
+        </div>
+        <div style={{ display: "flex", justifyContent: "center", padding: "48px 0" }}>
+          <span className="perfil-spinner" aria-hidden="true" />
+        </div>
+      </div>
+    );
+  }
+
+  if (perfilQuery.error) {
+    return (
+      <div className="perfil-body">
+        <div className="perfil-hero">
+          <h1 className="perfil-hero-title">
+            ops, algo <span className="hl">não carregou</span>
+          </h1>
+        </div>
+        <div style={{ textAlign: "center", padding: "16px 0 32px" }}>
+          <p style={{ color: "var(--ink-soft)", marginBottom: 16 }}>
+            não consegui carregar o seu perfil agora.
+          </p>
+          <button
+            type="button"
+            className="perfil-btn perfil-btn-primary"
+            onClick={() => void perfilQuery.refetch()}
+          >
+            <span>tentar de novo</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="perfil-body">
@@ -292,36 +657,20 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
 
       {/* 1 — Informações da página */}
       <PerfilSection icon={ico.user} title="informações da página" variant="lilac">
-        <Field label="nome do perfil (link da página)" htmlFor="perfil-slug">
-          <div className="perfil-input-prefix">
-            <span className="perfil-prefix">{PERFIL_DEMO.shareBase}</span>
-            <input
-              id="perfil-slug"
-              className="perfil-input perfil-input-slug"
-              type="text"
-              value={profileSlug}
-              placeholder="seu-link"
-              onChange={(e) =>
-                setProfileSlug(
-                  e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""),
-                )
-              }
-            />
-          </div>
-        </Field>
+        <SlugEditor currentSlug={profileSlug} onChanged={setProfileSlug} />
 
         <div className="perfil-share">
           <span className="perfil-share-eyebrow">link da página</span>
           <div className="perfil-share-row">
-            <span className="perfil-share-url" title={`${PERFIL_DEMO.shareBase}${profileSlug}`}>
-              {PERFIL_DEMO.shareBase}
+            <span className="perfil-share-url" title={`${SHARE_BASE}${profileSlug}`}>
+              {SHARE_BASE}
               {profileSlug}
             </span>
             <button
               type="button"
               className="perfil-share-copy"
               onClick={() => {
-                const link = `${PERFIL_DEMO.shareBase}${profileSlug}`;
+                const link = `${SHARE_BASE}${profileSlug}`;
                 void navigator.clipboard
                   .writeText(link)
                   .then(() => toast.success("link copiado ♡"))
@@ -403,11 +752,14 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
               id="perfil-event"
               className="perfil-input perfil-select"
               value={eventType}
-              onChange={(e) => setEventType(e.target.value)}
+              onChange={(e) =>
+                setEventType(e.target.value as PerfilEventTypeSlug | "")
+              }
             >
-              {PERFIL_EVENT_TYPES.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
+              <option value="">selecione o tipo</option>
+              {eventOptions.map((slug) => (
+                <option key={slug} value={slug}>
+                  {EVENT_TYPE_LABELS[slug]}
                 </option>
               ))}
             </select>
@@ -429,7 +781,7 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
           />
         </Field>
 
-        <Field label="seu nome" htmlFor="perfil-creator">
+        <Field label="seu nome" htmlFor="perfil-creator" required>
           <input
             id="perfil-creator"
             className="perfil-input"
@@ -448,6 +800,7 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
               value={relation}
               onChange={(e) => setRelation(e.target.value)}
             >
+              <option value="">selecione</option>
               {PERFIL_RELATIONS.map((o) => (
                 <option key={o.value} value={o.value}>
                   {o.label}
@@ -465,7 +818,7 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
         <Field
           label="conte um pouquinho"
           htmlFor="perfil-story"
-          hint={`${story.length}/${PERFIL_DEMO.storyMax} caracteres`}
+          hint={`${story.length}/${STORY_MAX} caracteres`}
         >
           <textarea
             id="perfil-story"
@@ -473,14 +826,12 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
             value={story}
             placeholder="conte sua história… como foi a notícia, planos, sonhos, recados pra quem visita a página ♡"
             rows={6}
-            onChange={(e) =>
-              setStory(e.target.value.slice(0, PERFIL_DEMO.storyMax))
-            }
+            onChange={(e) => setStory(e.target.value.slice(0, STORY_MAX))}
           />
         </Field>
       </PerfilSection>
 
-      {/* 5 — Fotos da página (aperture-ou9bp) */}
+      {/* 5 — Fotos da página (aperture-ou9bp; upload real = V4) */}
       <PerfilSection icon={ico.camera} title="fotos da página" variant="pink">
         <div className="perfil-fotos-grid">
           <PhotoSlot

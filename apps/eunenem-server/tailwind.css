@@ -3627,6 +3627,71 @@ html {
 }
 
 /* =================================================================
+ * aperture-uk8q1 — visitor page header brand alignment
+ * Brings the public /pagina/<slug> header (Navbar) in line with the
+ * painel topbar branding: the shared EuNeném logo image + chip-shaped
+ * nav links mirroring .painel-topbar-link (DM Sans, uppercase, lilac-
+ * soft active pill). Active state is driven by a scroll-spy in Navbar.
+ * Distinct from painel: the visitor nav items are scroll anchors and
+ * the right-side affordance is the cart (no bell/logout).
+ * ================================================================= */
+.eu-nav-logo {
+  height: 36px;
+  width: auto;
+  display: block;
+}
+@media (min-width: 640px) {
+  .eu-nav-logo {
+    height: 40px;
+  }
+}
+
+.eu-nav-chip {
+  display: inline-block;
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: transparent;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+.eu-nav-chip:hover {
+  background: color-mix(in srgb, var(--lilac-soft) 55%, transparent);
+  color: var(--plum);
+}
+.eu-nav-chip.is-active {
+  background: var(--lilac-soft);
+  color: var(--plum);
+}
+
+/* Mobile dropdown variant — same vocabulary, left-aligned block rows. */
+.eu-nav-chip-block {
+  display: block;
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: transparent;
+  text-decoration: none;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+.eu-nav-chip-block:hover,
+.eu-nav-chip-block.is-active {
+  background: color-mix(in srgb, var(--lilac-soft) 55%, transparent);
+  color: var(--plum);
+}
+
+/* =================================================================
  * aperture-g70uv — lista pronta curation panel
  * Expand/collapse panel that lives inside .lista-header-card and
  * surfaces 4 curated preset cards under the action strip. Selectors

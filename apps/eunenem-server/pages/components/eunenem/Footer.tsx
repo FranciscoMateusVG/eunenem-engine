@@ -1,83 +1,82 @@
-// aperture-3d9t — Footer.
+// aperture-19ebe — shared rich footer.
 //
-// Logo + tagline + contact email. Plum background tone so it
-// terminates the page with weight after the cream-2 mural.
+// Single canonical footer used by LandingPage, PaginaPage (guest) and
+// PaginaSucessoPage. Plum-background marketing footer: brand logo + blurb,
+// security seals, link columns, copyright row + social chips. Replaces the
+// old minimal guest-page footer (and its "preview/mockados" notice, which
+// must never appear in production).
+import {
+  LANDING_FOOTER_COLS,
+  LANDING_FOOTER_SOCIALS,
+} from '@/lib/mocks/landing';
 
 export function Footer() {
   return (
-    <footer
-      style={{
-        background: "var(--plum)",
-        color: "#fff",
-        padding: "48px 0 32px",
-      }}
-    >
-      <div className="eu-container flex flex-col md:flex-row md:items-center md:justify-between gap-6">
-        <div className="flex items-center gap-3">
-          <span
-            aria-hidden="true"
-            style={{
-              width: 36,
-              height: 36,
-              borderRadius: "50%",
-              background: "rgba(255, 255, 255, 0.18)",
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontFamily: "var(--font-patrick-hand), cursive",
-              fontSize: 22,
-              paddingBottom: 2,
-            }}
-          >
-            ♡
-          </span>
+    <footer className="bg-plum text-[#F4DCEA] pt-16 pb-7">
+      <div className="mx-auto max-w-[1200px] px-6">
+        <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_2fr] gap-14 mb-12">
           <div>
-            <div
-              style={{
-                fontFamily: "var(--font-patrick-hand), cursive",
-                fontSize: 24,
-                lineHeight: 1,
-              }}
-            >
-              EuNeném
-            </div>
-            <div
-              style={{
-                fontFamily: "var(--font-caveat), cursive",
-                fontSize: 18,
-                color: "rgba(255, 255, 255, 0.7)",
-                transform: "rotate(-1deg)",
-                display: "inline-block",
-                marginTop: 4,
-              }}
-            >
-              chá de bebê online — feito com carinho ♡
+            <img
+              src="/public/logo-landing.png"
+              alt="EuNeném"
+              width={220}
+              height={70}
+              className="h-[70px] w-auto bg-white/95 px-4 py-2.5 rounded-2xl"
+            />
+            <p className="mt-4.5 text-sm text-[#F4DCEA]/75 max-w-[320px] leading-relaxed">
+              A plataforma líder e mais confiável de chá de bebê online no Brasil
+              — desde 2014, ajudando famílias a celebrarem com liberdade.
+            </p>
+            <div className="flex gap-2.5 mt-5 flex-wrap">
+              <span className="px-3 py-1.5 border border-[#F4DCEA]/20 rounded-full text-xs text-[#F4DCEA]/85 font-semibold">
+                🔒 Stripe
+              </span>
+              <span className="px-3 py-1.5 border border-[#F4DCEA]/20 rounded-full text-xs text-[#F4DCEA]/85 font-semibold">
+                SSL · dados protegidos
+              </span>
             </div>
           </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-7">
+            {LANDING_FOOTER_COLS.map((col) => (
+              <div key={col.title}>
+                <h4 className="font-display text-sm font-semibold text-cream mb-4 lowercase tracking-wide">
+                  {col.title}
+                </h4>
+                <ul className="list-none space-y-2.5">
+                  {col.links.map(([label, href]) => (
+                    <li key={label}>
+                      <a
+                        href={href}
+                        className="text-sm text-[#F4DCEA]/80 hover:text-yellow transition-colors"
+                      >
+                        {label}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
         </div>
-
-        <div style={{ fontSize: 13, color: "rgba(255, 255, 255, 0.7)" }}>
-          <a
-            href="mailto:oi@eunenem.com.br"
-            style={{ color: "rgba(255,255,255,0.85)", textDecoration: "none" }}
-          >
-            oi@eunenem.com.br
-          </a>
+        <div className="border-t border-[#F4DCEA]/10 pt-6 flex flex-wrap justify-between items-center gap-4">
+          <div className="text-[12.5px] text-[#F4DCEA]/60">
+            © 2026 EuNeném® · feito com ❤️ no Brasil
+          </div>
+          <div className="flex gap-2.5">
+            {LANDING_FOOTER_SOCIALS.map(([href, label]) => (
+              <a
+                key={label}
+                href={href}
+                aria-label={label}
+                className="w-9 h-9 rounded-full bg-[#F4DCEA]/10 inline-flex items-center justify-center hover:bg-lilac hover:-translate-y-0.5 transition-all"
+              >
+                <span className="text-cream text-[11px] font-bold">
+                  {label[0]}
+                </span>
+              </a>
+            ))}
+          </div>
         </div>
-      </div>
-
-      <div
-        className="eu-container"
-        style={{
-          marginTop: 28,
-          paddingTop: 18,
-          borderTop: "1px solid rgba(255, 255, 255, 0.12)",
-          fontSize: 11,
-          color: "rgba(255, 255, 255, 0.55)",
-          letterSpacing: "0.04em",
-        }}
-      >
-        Pré-visualização — todos os pagamentos e listas são mockados.
       </div>
     </footer>
   );

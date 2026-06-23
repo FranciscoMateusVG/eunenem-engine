@@ -10,6 +10,7 @@ import { AuthDemoPage } from './AuthDemoPage.js';
 import { AuthModalProvider } from './components/eunenem/auth/AuthModalProvider.js';
 import { LandingPage } from './LandingPage.js';
 import { NotFoundPage } from './NotFoundPage.js';
+import { PainelConvitePreviewPage } from './PainelConvitePreviewPage.js';
 import { PaginaPage } from './PaginaPage.js';
 import { PaginaSucessoPage } from './PaginaSucessoPage.js';
 import { PainelPage } from './PainelPage.js';
@@ -43,6 +44,7 @@ export function resolveRoute(pathname: string):
   | { kind: 'pagina'; slug: string }
   | { kind: 'pagina-sucesso'; slug: string }
   | { kind: 'painel'; slug: string }
+  | { kind: 'painel-convite-preview'; slug: string }
   | { kind: 'painel-section'; slug: string; section: PainelSection }
   | { kind: 'trpc-smoke' }
   | { kind: 'auth-demo' }
@@ -146,14 +148,27 @@ export function resolveRoute(pathname: string):
   // sub-path takes precedence. sessionId travels as a query param and is
   // read client-side from window.location (server can't see it through
   // pathname alone).
+  // aperture-e21v2 — de-hardcoded. Any syntactically valid slug routes to the
+  // public page; existence is resolved at render time via
+  // trpc.perfil.getPerfilPublicoBySlug (unknown slug → not-found UI). Mirrors
+  // the painel rule below (regex-match; the pure router doesn't know owners).
   const sucessoMatch = pathname.match(/^\/pagina\/([^/]+)\/sucesso\/?$/);
-  if (sucessoMatch && sucessoMatch[1] === 'francisco') {
+  if (sucessoMatch && sucessoMatch[1] && SLUG_REGEX.test(sucessoMatch[1])) {
     return { kind: 'pagina-sucesso', slug: sucessoMatch[1] };
   }
   const paginaMatch = pathname.match(/^\/pagina\/([^/]+)\/?$/);
-  if (paginaMatch && paginaMatch[1] === 'francisco') {
+  if (paginaMatch && paginaMatch[1] && SLUG_REGEX.test(paginaMatch[1])) {
     return { kind: 'pagina', slug: paginaMatch[1] };
   }
+  const painelConvitePreviewMatch = pathname.match(/^\/painel\/([^/]+)\/convite\/preview\/?$/);
+  if (
+    painelConvitePreviewMatch &&
+    painelConvitePreviewMatch[1] &&
+    SLUG_REGEX.test(painelConvitePreviewMatch[1])
+  ) {
+    return { kind: 'painel-convite-preview', slug: painelConvitePreviewMatch[1] };
+  }
+
   const painelMatch = pathname.match(/^\/painel\/([^/]+)(?:\/([^/]+))?\/?$/);
   if (painelMatch && painelMatch[1] && SLUG_REGEX.test(painelMatch[1])) {
     const slug = painelMatch[1];
@@ -200,6 +215,8 @@ function pickPage(route: ReturnType<typeof resolveRoute>, pathname: string) {
   if (route.kind === 'pagina') return <PaginaPage slug={route.slug} />;
   if (route.kind === 'pagina-sucesso') return <PaginaSucessoPage slug={route.slug} />;
   if (route.kind === 'painel') return <PainelPage slug={route.slug} />;
+  if (route.kind === 'painel-convite-preview')
+    return <PainelConvitePreviewPage slug={route.slug} />;
   if (route.kind === 'painel-section')
     return <PainelSectionPage slug={route.slug} section={route.section} />;
   if (route.kind === 'trpc-smoke') return <TrpcSmokePage />;

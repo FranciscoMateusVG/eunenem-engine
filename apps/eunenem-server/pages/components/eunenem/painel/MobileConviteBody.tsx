@@ -3,13 +3,22 @@ import { toast } from "sonner";
 
 import type { PainelSectionBodyProps } from "@/PainelSectionPage";
 import {
+  conviteErrorMessage,
+  conviteStateFromData,
+  savePayloadFromConviteState,
+  useConviteData,
+  useSalvarConvite,
+} from "@/lib/convite";
+import { shareConvitePreview } from "@/lib/convite-share";
+import { painelConvitePreviewHref } from "@/lib/painelRoutes";
+import {
   DEFAULT_STATE,
+  DISABLED_EVENT_TYPES,
   EVENT_BY_ID,
   EVENT_TYPES,
   NAME_FONTS,
   PALETTES,
   type ConviteState,
-  type Density,
   type PreviewFormat,
 } from "@/lib/mocks/convite";
 
@@ -89,11 +98,21 @@ interface StepProps {
 
 // ─── shell ──────────────────────────────────────────────────────────
 
-export function MobileConviteBody(_props: PainelSectionBodyProps) {
+export function MobileConviteBody({ slug }: PainelSectionBodyProps) {
   const [state, setState] = useState<ConviteState>({ ...DEFAULT_STATE });
   const [step, setStep] = useState(0);
   const [previewFmt, setPreviewFmt] = useState<PreviewFormat>("story");
   const [previewExpanded, setPreviewExpanded] = useState(false);
+  const [isSharing, setIsSharing] = useState(false);
+  const conviteQuery = useConviteData();
+  const salvarConvite = useSalvarConvite();
+  const hydratedRef = useRef(false);
+
+  useEffect(() => {
+    if (!conviteQuery.data || hydratedRef.current) return;
+    setState(conviteStateFromData(conviteQuery.data));
+    hydratedRef.current = true;
+  }, [conviteQuery.data]);
 
   const update = <K extends keyof ConviteState>(
     k: K,
@@ -103,11 +122,52 @@ export function MobileConviteBody(_props: PainelSectionBodyProps) {
   const cur = STEPS[step]!;
   const pct = ((step + 1) / STEPS.length) * 100;
   const isLast = step === STEPS.length - 1;
+  const isSaving = salvarConvite.isPending;
+  const isSending = isSaving || isSharing;
 
   const goPrev = () => setStep((s) => Math.max(0, s - 1));
   const goNext = () => setStep((s) => Math.min(STEPS.length - 1, s + 1));
-  const onSave = () => toast.success("rascunho salvo com carinho ♡");
-  const onSend = () => toast.success("convite pronto! agora é só compartilhar ♡");
+  const onSave = async () => {
+    try {
+      await salvarConvite.mutateAsync(savePayloadFromConviteState(state));
+      toast.success("rascunho salvo com carinho ♡");
+    } catch (error) {
+      toast.error("não deu pra salvar agora", {
+        description: conviteErrorMessage(error),
+      });
+    }
+  };
+  const onSend = async () => {
+    setIsSharing(true);
+    try {
+      await salvarConvite.mutateAsync(savePayloadFromConviteState(state));
+      try {
+        const result = await shareConvitePreview({
+          slug,
+          title: `Convite de ${state.babyName || 'nosso evento'}`,
+          text: "Quero te mostrar este convite.",
+        });
+
+        if (result === 'shared') {
+          toast.success("interface de compartilhamento aberta ♡");
+        } else if (result === 'copied') {
+          toast.success("link do convite copiado ♡");
+        } else {
+          toast.success("convite salvo com carinho ♡");
+        }
+      } catch {
+        toast.error("não deu pra compartilhar agora", {
+          description: "Tente novamente em um navegador com suporte ou copie o link depois.",
+        });
+      }
+    } catch (error) {
+      toast.error("não deu pra salvar agora", {
+        description: conviteErrorMessage(error),
+      });
+    } finally {
+      setIsSharing(false);
+    }
+  };
 
   const stepProps: StepProps = { state, update };
 
@@ -124,9 +184,12 @@ export function MobileConviteBody(_props: PainelSectionBodyProps) {
             passo {step + 1} de {STEPS.length} · {cur.title}
           </div>
         </div>
-        <button type="button" className="mcv-save" onClick={onSave}>
-          salvar
+        <button type="button" className="mcv-save" onClick={onSave} disabled={isSaving}>
+          {isSaving ? "salvando..." : "salvar"}
         </button>
+        <a href={painelConvitePreviewHref(slug)} className="mcv-save">
+          ver salvo
+        </a>
       </header>
 
       {/* PROGRESS BAR — non-interactive */}
@@ -210,8 +273,15 @@ export function MobileConviteBody(_props: PainelSectionBodyProps) {
           type="button"
           className={`mcv-footer-cta ${isLast ? "is-last" : ""}`}
           onClick={isLast ? onSend : goNext}
+          disabled={isLast ? isSending : isSaving}
         >
-          {isLast ? "enviar convite ♡" : "próximo passo →"}
+          {isSaving
+            ? "salvando..."
+            : isLast
+              ? isSharing
+                ? "compartilhando..."
+                : "enviar convite ♡"
+              : "próximo passo →"}
         </button>
       </footer>
 
@@ -496,6 +566,30 @@ function MStepTipo({ state, update }: StepProps) {
           </button>
         );
       })}
+      {DISABLED_EVENT_TYPES.map((e, i) => (
+        <button
+          key={e.id}
+          type="button"
+          className="mcv-tipo"
+          disabled
+          aria-disabled="true"
+          aria-label={`tipo de evento: ${e.label} (em breve)`}
+          style={{
+            transform: `rotate(${rotations[(EVENT_TYPES.length + i) % rotations.length]}deg)`,
+            opacity: 0.5,
+            cursor: "not-allowed",
+            pointerEvents: "none",
+          }}
+        >
+          <div className="mcv-tipo-ico" aria-hidden="true">{e.icon}</div>
+          <div className="mcv-tipo-body">
+            <div className="mcv-tipo-label">
+              {e.label} <span className="mcv-tipo-soon">em breve</span>
+            </div>
+            <div className="mcv-tipo-hint">{e.emojiHint}</div>
+          </div>
+        </button>
+      ))}
     </div>
   );
 }
@@ -647,7 +741,7 @@ function MStepQuando({ state, update }: StepProps) {
 }
 
 // ─── step: visual ────────────────────────────────────────────────────
-// NO fidelity toggle on mobile per operator. Just palette + nameFont + density.
+// NO fidelity toggle on mobile per operator. Just palette + nameFont.
 
 function MStepVisual({ state, update }: StepProps) {
   const pickRandomPalette = () => {
@@ -711,25 +805,6 @@ function MStepVisual({ state, update }: StepProps) {
         </div>
       </div>
 
-      <div>
-        <label className="mcv-label">decoração</label>
-        <div className="mcv-seg">
-          {(["pouca", "media", "muita"] as Density[]).map((d) => {
-            const on = state.density === d;
-            return (
-              <button
-                key={d}
-                type="button"
-                className={`mcv-seg-btn ${on ? "on" : ""}`}
-                onClick={() => update("density", d)}
-                aria-pressed={on}
-              >
-                {d === "media" ? "média" : d}
-              </button>
-            );
-          })}
-        </div>
-      </div>
     </div>
   );
 }
@@ -1008,6 +1083,12 @@ const MCV_CSS = `
   font-family:var(--font-caveat),cursive;
   font-size:11px;color:var(--ink-soft);
   margin-top:2px;line-height:1;
+}
+.mcv-tipo-soon{
+  font-family:var(--font-caveat),cursive;
+  font-size:10px;color:var(--ink-soft);
+  border:1px solid var(--line);border-radius:7px;
+  padding:0 4px;margin-left:3px;vertical-align:middle;white-space:nowrap;
 }
 
 /* STEP: quando — mode picker + date row ─ */

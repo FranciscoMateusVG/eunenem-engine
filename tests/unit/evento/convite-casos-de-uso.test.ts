@@ -77,20 +77,25 @@ describe('criarConvite', () => {
       {
         id: idConvite,
         idEvento,
+        remetente: 'Os pais',
         nomeExibido: 'Maria Helena',
         mensagem: 'Esperamos voce para esse dia especial.',
         paleta: 'lilas',
         fonte: 'patrick',
         modelo: 'scrapbook',
+        imagemUrl: 'https://cdn.example.com/convites/maria-helena.png',
       },
     );
 
     expect(convite.id).toBe(idConvite);
     expect(convite.idEvento).toBe(idEvento);
+    expect(convite.remetente).toBe('Os pais');
     expect(convite.nomeExibido).toBe('Maria Helena');
+    expect(convite.imagemUrl).toBe('https://cdn.example.com/convites/maria-helena.png');
 
     const loaded = await repos.conviteRepository.findByIdEvento(idEvento);
     expect(loaded?.id).toBe(idConvite);
+    expect(loaded?.imagemUrl).toBe('https://cdn.example.com/convites/maria-helena.png');
   });
 
   it('throws EventoNaoEncontradoError when evento is missing', async () => {
@@ -107,6 +112,7 @@ describe('criarConvite', () => {
         {
           id: randomUUID(),
           idEvento: randomUUID(),
+          remetente: 'Os pais',
           nomeExibido: 'Maria Helena',
           mensagem: 'Mensagem valida',
           paleta: 'lilas',
@@ -128,6 +134,7 @@ describe('criarConvite', () => {
     };
     const base = {
       idEvento,
+      remetente: 'Os pais',
       nomeExibido: 'Maria Helena',
       mensagem: 'Mensagem valida',
       paleta: 'lilas' as const,
@@ -140,6 +147,33 @@ describe('criarConvite', () => {
     await expect(criarConvite(deps, { ...base, id: randomUUID() })).rejects.toBeInstanceOf(
       ConviteJaExisteError,
     );
+  });
+
+  it('rejects non-url image reference', async () => {
+    const repos = createEventoMemoryRepos();
+    const { idEvento } = await seedEvento(repos);
+
+    await expect(
+      criarConvite(
+        {
+          conviteRepository: repos.conviteRepository,
+          eventoRepository: repos.eventoRepository,
+          clock,
+          observability: silentObservability,
+        },
+        {
+          id: randomUUID(),
+          idEvento,
+          remetente: 'Os pais',
+          nomeExibido: 'Maria Helena',
+          mensagem: 'Mensagem valida',
+          paleta: 'lilas',
+          fonte: 'patrick',
+          modelo: 'scrapbook',
+          imagemUrl: '/convites/maria-helena.png',
+        },
+      ),
+    ).rejects.toBeInstanceOf(ConviteInputInvalidoError);
   });
 });
 
@@ -159,11 +193,13 @@ describe('obterConvite', () => {
       {
         id: idConvite,
         idEvento,
+        remetente: 'Os pais',
         nomeExibido: 'Maria Helena',
         mensagem: 'Mensagem valida',
         paleta: 'lilas',
         fonte: 'patrick',
         modelo: 'scrapbook',
+        imagemUrl: 'https://cdn.example.com/convites/maria.png',
       },
     );
 
@@ -189,11 +225,13 @@ describe('obterConvite', () => {
       {
         id: idConvite,
         idEvento,
+        remetente: 'A madrinha',
         nomeExibido: 'Theo',
         mensagem: 'Mensagem valida',
         paleta: 'surpresa',
         fonte: 'caveat',
         modelo: 'safari',
+        imagemUrl: 'https://cdn.example.com/convites/theo.jpg',
       },
     );
 
@@ -233,11 +271,13 @@ describe('atualizarConvite', () => {
       {
         id: idConvite,
         idEvento,
+        remetente: 'Os pais',
         nomeExibido: 'Maria Helena',
         mensagem: 'Mensagem inicial',
         paleta: 'lilas',
         fonte: 'patrick',
         modelo: 'scrapbook',
+        imagemUrl: 'https://cdn.example.com/convites/inicial.png',
       },
     );
 
@@ -249,18 +289,22 @@ describe('atualizarConvite', () => {
       },
       {
         id: idConvite,
+        remetente: 'A madrinha',
         nomeExibido: 'Theo',
         mensagem: 'Mensagem atualizada',
         paleta: 'amarelo',
         fonte: 'caveat',
         modelo: 'elefantinho',
+        imagemUrl: 'https://cdn.example.com/convites/theo.jpg',
       },
     );
 
+    expect(updated.remetente).toBe('A madrinha');
     expect(updated.nomeExibido).toBe('Theo');
     expect(updated.paleta).toBe('amarelo');
     expect(updated.fonte).toBe('caveat');
     expect(updated.modelo).toBe('elefantinho');
+    expect(updated.imagemUrl).toBe('https://cdn.example.com/convites/theo.jpg');
     expect(updated.atualizadoEm).toEqual(updateClock());
   });
 
@@ -279,11 +323,13 @@ describe('atualizarConvite', () => {
       {
         id: idConvite,
         idEvento,
+        remetente: 'Os pais',
         nomeExibido: 'Maria Helena',
         mensagem: 'Mensagem inicial',
         paleta: 'lilas',
         fonte: 'patrick',
         modelo: 'scrapbook',
+        imagemUrl: 'https://cdn.example.com/convites/maria.png',
       },
     );
 
@@ -296,6 +342,7 @@ describe('atualizarConvite', () => {
         },
         {
           id: idConvite,
+          remetente: 'Os pais',
           nomeExibido: 'Maria Helena',
           mensagem: 'Mensagem atualizada',
           paleta: 'coral' as 'lilas',
