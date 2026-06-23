@@ -20,6 +20,10 @@ import {
   EventoRepositoryPostgres,
   type LivroFinanceiroRepository,
   LivroFinanceiroRepositoryPostgres,
+  type EmitirUrlUploadInput,
+  type ObjectStorage,
+  ObjectStorageMinio,
+  type UrlUploadPresignada,
   type WebhookEventArchive,
   WebhookEventArchivePostgres,
   type Observability,
@@ -150,6 +154,25 @@ export interface ServerDeps {
    * domain concept — lives at the infrastructure boundary.
    */
   readonly webhookEventArchive: WebhookEventArchive;
+  /**
+   * Object storage (aperture-kcasm). Emits presigned PUT URLs so the client
+   * uploads profile photos directly to the MinIO bucket. Gated on
+   * MINIO_ENDPOINT: configured → ObjectStorageMinio; otherwise a fallback
+   * that throws on use (so a fresh-clone dev boot doesn't crash but photo
+   * upload fails loudly). NOT a domain concept — infrastructure boundary.
+   */
+  readonly objectStorage: ObjectStorage;
+}
+
+/**
+ * Fallback ObjectStorage for unconfigured (MINIO_* absent) boots. Lets a
+ * fresh-clone `pnpm dev` start; any photo-upload attempt fails loudly
+ * instead of silently 500ing on a half-wired adapter.
+ */
+class ObjectStorageNaoConfigurado implements ObjectStorage {
+  async emitirUrlUploadPresignada(_input: EmitirUrlUploadInput): Promise<UrlUploadPresignada> {
+    throw new Error('storage não configurado (MINIO_* ausente)');
+  }
 }
 
 /**
@@ -213,6 +236,20 @@ const ServerEnvSchema = z
      * `openssl rand -hex 32`.
      */
     LOG_PII_HASH_SALT: z.string().default(''),
+    /**
+     * MinIO / S3-compatible object storage (aperture-kcasm). Powers
+     * presigned-PUT profile-photo uploads. All optional with '' defaults so
+     * a fresh-clone dev boot doesn't crash; when MINIO_ENDPOINT is present
+     * the real adapter is wired, otherwise photo upload fails loudly at use.
+     *
+     * MINIO_REGION is a placeholder (MinIO ignores it but aws-sdk requires a
+     * value) — defaults to us-east-1.
+     */
+    MINIO_ENDPOINT: z.string().default(''),
+    MINIO_REGION: z.string().default('us-east-1'),
+    MINIO_ACCESS_KEY: z.string().default(''),
+    MINIO_SECRET_KEY: z.string().default(''),
+    MINIO_BUCKET: z.string().default('eunenem-perfil-fotos'),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === 'production') {
@@ -371,6 +408,24 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
   // src/adapters/webhook-archive/stripe-webhook-pipeline.ts).
   const webhookEventArchive = new WebhookEventArchivePostgres(db);
 
+  // Object storage (aperture-kcasm) — gate on MINIO_ENDPOINT presence,
+  // mirroring the Stripe-key gate above. Configured → real MinIO adapter
+  // (presigned PUT). Otherwise a fallback that throws on use, so a
+  // fresh-clone `pnpm dev` boots but photo upload fails loudly instead of
+  // half-wiring a broken adapter.
+  let objectStorage: ObjectStorage;
+  if (env.MINIO_ENDPOINT.length > 0) {
+    objectStorage = new ObjectStorageMinio({
+      endpoint: env.MINIO_ENDPOINT,
+      region: env.MINIO_REGION,
+      accessKeyId: env.MINIO_ACCESS_KEY,
+      secretAccessKey: env.MINIO_SECRET_KEY,
+      bucket: env.MINIO_BUCKET,
+    });
+  } else {
+    objectStorage = new ObjectStorageNaoConfigurado();
+  }
+
   let pagamentoProvider: PagamentoProvider;
   let checkoutSessionProvider: CheckoutSessionProvider;
   // aperture-ozlcr: gate on STRIPE_SECRET_KEY presence, NOT NODE_ENV.
@@ -443,6 +498,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     trustedHopCount: env.TRUSTED_HOP_COUNT,
     logPiiHashSalt: env.LOG_PII_HASH_SALT,
     webhookEventArchive,
+    objectStorage,
   };
 }
 
