@@ -269,9 +269,9 @@ function AccountChip({ nomeExibicao, slug, isSigningOut, onSignOut }: AccountChi
 /**
  * First word of the display name, trimmed. Mirrors the slug-derivation
  * "first word" rule from the engine domain (see src/domain/usuario/
- * slug-derivation.ts) — so when we render "Francisco" here it lines up
- * with "/painel/francisco" in the dropdown link without needing a
- * separate firstName field on auth.me.
+ * slug-derivation.ts) — the rendered first name lines up with the real
+ * `/painel/${slug}` dropdown link (slug comes from auth.me, Rex's #63),
+ * without needing a separate firstName field on auth.me.
  *
  * Falls back to the raw display name (or empty string) if splitting
  * produces nothing useful — defensive against degenerate names like

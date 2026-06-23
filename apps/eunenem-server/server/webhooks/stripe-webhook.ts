@@ -69,9 +69,16 @@
  * EVENT DISPATCH TABLE (plan 0015 Phase 3 / aperture-ndxuf — 5-state FSM):
  *
  *   checkout.session.completed
+ *     (Stripe Checkout.Session.PaymentStatus enum = 'no_payment_required'
+ *      | 'paid' | 'unpaid' — there is NO 'processing' member.)
  *     payment_status='paid'         → finalizarPagamentoAprovado + contribuinte
- *     payment_status='processing'   → iniciarProcessamentoPagamento + contribuinte
- *                                     write (pix QR scanned; settlement pending)
+ *                                     write (card flow; charge already settled)
+ *     payment_status='unpaid'       → iniciarProcessamentoPagamento + contribuinte
+ *                                     write (pix delayed-notification; Stripe
+ *                                     reports 'unpaid' while bank settlement is
+ *                                     pending — charge.succeeded finalizes later)
+ *     payment_status='no_payment_required' (or any unmodeled future member)
+ *                                   → log unhandled_payment_status + no-op
  *   checkout.session.expired        → finalizarPagamentoRejeitado
  *   payment_intent.created          → no transition (audit only; pagamento linked)
  *   payment_intent.processing       → iniciarProcessamentoPagamento
