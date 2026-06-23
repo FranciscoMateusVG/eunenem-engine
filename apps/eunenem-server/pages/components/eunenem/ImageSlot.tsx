@@ -29,6 +29,20 @@ interface ImageSlotProps {
   className?: string;
   /** Visual fit when an image is selected. */
   fit?: "cover" | "contain";
+  /**
+   * Real image URL to display (aperture-qjgfr gap-B). On the public
+   * contributor page the creator's uploaded photos are read-only display
+   * — pass the resolved URL here. When set together with `readOnly` the
+   * drag/click upload affordance is suppressed entirely.
+   */
+  src?: string | null;
+  /**
+   * Read-only display mode — no drag-and-drop, no file picker, no CTA.
+   * Renders `src` if present, otherwise a neutral branded empty frame.
+   * Used by the guest-facing /pagina/:slug Hero + Story; the editable
+   * demo affordance stays the default for any other caller.
+   */
+  readOnly?: boolean;
 }
 
 export function ImageSlot({
@@ -37,10 +51,63 @@ export function ImageSlot({
   id,
   className,
   fit = "cover",
+  src = null,
+  readOnly = false,
 }: ImageSlotProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
+
+  // In editable mode a freshly-dragged preview wins; otherwise fall back to
+  // the real `src`. In read-only mode only `src` is ever shown.
+  const shown = readOnly ? src : (preview ?? src);
+
+  if (readOnly) {
+    return (
+      <div
+        id={id}
+        className={className}
+        style={{
+          position: "relative",
+          width: "100%",
+          height: "100%",
+          aspectRatio,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "var(--cream-2)",
+          borderRadius: "inherit",
+          overflow: "hidden",
+        }}
+      >
+        {shown ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={shown}
+            alt=""
+            style={{
+              position: "absolute",
+              inset: 0,
+              width: "100%",
+              height: "100%",
+              objectFit: fit,
+            }}
+          />
+        ) : (
+          <span
+            aria-hidden="true"
+            style={{
+              fontFamily: "var(--font-patrick-hand), cursive",
+              fontSize: 26,
+              color: "var(--lilac-soft)",
+            }}
+          >
+            ♡
+          </span>
+        )}
+      </div>
+    );
+  }
 
   const handleFile = useCallback((file: File | null | undefined) => {
     if (!file) return;
@@ -77,7 +144,7 @@ export function ImageSlot({
         onDragLeave={onDragLeave}
         onDrop={onDrop}
         className={className}
-        aria-label={preview ? "Trocar foto" : `Selecionar foto: ${placeholder}`}
+        aria-label={shown ? "Trocar foto" : `Selecionar foto: ${placeholder}`}
         style={{
           position: "relative",
           width: "100%",
@@ -86,12 +153,12 @@ export function ImageSlot({
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          background: preview
+          background: shown
             ? "var(--cream-2)"
             : isDragOver
               ? "var(--lilac-soft)"
               : "var(--cream-2)",
-          border: preview
+          border: shown
             ? "none"
             : `1.5px dashed ${isDragOver ? "var(--lilac-deep)" : "var(--lilac)"}`,
           borderRadius: "inherit",
@@ -102,10 +169,10 @@ export function ImageSlot({
           transition: "background 0.2s ease, border-color 0.2s ease",
         }}
       >
-        {preview ? (
+        {shown ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={preview}
+            src={shown}
             alt="Pré-visualização do upload"
             style={{
               position: "absolute",

@@ -79,8 +79,14 @@ export function PaginaPage({ slug }: { slug: string }) {
         <CartDrawerProvider>
           <Navbar slug={slug} />
           <main className="flex-1 pt-16">
-            <Hero />
-            <Story historia={data?.historia ?? null} />
+            <Hero
+              coverUrl={data?.fotoCapaUrl ?? null}
+              profileUrl={data?.fotoPerfilUrl ?? null}
+            />
+            <Story
+              historia={data?.historia ?? null}
+              fotoHistoria={data?.fotoHistoriaUrl ?? null}
+            />
             <Marketplace slug={slug} />
             <HowTo />
             <Messages slug={slug} />

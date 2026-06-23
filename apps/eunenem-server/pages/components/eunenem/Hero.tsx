@@ -18,7 +18,17 @@ import { useTweaks } from "./TweaksContext";
 // photo (rotated 1.5deg + scrapbook tape) with a floating profile
 // polaroid bottom-left.
 
-export function Hero() {
+// aperture-qjgfr gap-B — the creator's real cover (5:4) + profile (1:1)
+// photos from getPerfilPublicoBySlug. Read-only on the guest page; null
+// when the creator hasn't uploaded that slot (ImageSlot shows a neutral
+// branded frame).
+export function Hero({
+  coverUrl = null,
+  profileUrl = null,
+}: {
+  coverUrl?: string | null;
+  profileUrl?: string | null;
+} = {}) {
   const { tweaks } = useTweaks();
   const { babyName, targetDate } = tweaks;
 
@@ -132,6 +142,8 @@ export function Hero() {
               id="hero-cover"
               placeholder="Arraste a foto de capa aqui"
               fit="cover"
+              src={coverUrl}
+              readOnly
             />
             <Tape
               width={110}
@@ -166,6 +178,8 @@ export function Hero() {
                   id="hero-profile"
                   placeholder="Foto do bebê"
                   fit="cover"
+                  src={profileUrl}
+                  readOnly
                 />
               </div>
             </Polaroid>
