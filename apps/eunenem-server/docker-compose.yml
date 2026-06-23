@@ -35,6 +35,20 @@ services:
       - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
       - LOG_PII_HASH_SALT=${LOG_PII_HASH_SALT:-}
       - TRUSTED_HOP_COUNT=${TRUSTED_HOP_COUNT:-1}
+      # Object storage for profile photos (aperture-0bgo3 / R5 aperture-kcasm).
+      # Wired through here so the values reach the container's process.env
+      # (Dokploy stores them in the compose-project .env; without this
+      # interpolation they never cross into the running service — see the
+      # dokploy-api skill "compose env layer-skip"). The S3 endpoint is the
+      # PUBLIC per-stack MinIO domain (storage-eunenem.<host>) so browser
+      # presigned PUTs reach it; MINIO_REGION is a placeholder MinIO ignores;
+      # access/secret are a bucket-scoped key (PutObject+GetObject on
+      # eunenem-perfil-fotos only). Bucket is public-read, presigned-write.
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT:-}
+      - MINIO_REGION=${MINIO_REGION:-us-east-1}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-}
+      - MINIO_BUCKET=${MINIO_BUCKET:-eunenem-perfil-fotos}
 
   # Postgres sidecar — holds the engine domain schema (Arrecadação,
   # Pagamentos, Financeiro, Usuário) + BetterAuth's tables (users,
@@ -56,11 +70,12 @@ services:
       timeout: 5s
       retries: 5
 
-  # Minio sidecar — pre-provisioned object storage for future use
-  # (engine does not yet read MINIO_* env vars, but operator wants the
-  # infra in place so the first feature that needs blob storage doesn't
-  # block on Peppy re-shaping the compose). Console exposed at :9001
-  # for admin; data persists across deploys via the named volume.
+  # Minio sidecar — object storage for profile photos (R5 aperture-kcasm).
+  # Bucket eunenem-perfil-fotos is provisioned (public-read, presigned-write);
+  # eunenem-server now reads the MINIO_* vars above. Exposed publicly per
+  # stack via the Dokploy domain storage-eunenem.<host> → :9000 so browser
+  # presigned PUTs reach it. Console at :9001 for admin; data persists across
+  # deploys via the named volume.
   eunenem-minio:
     image: minio/minio:latest
     restart: unless-stopped
