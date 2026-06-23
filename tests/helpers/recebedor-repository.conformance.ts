@@ -48,9 +48,34 @@ export function describeRecebedorRepositoryConformance(name: string, options: Co
         id: randomUUID(),
         idCampanha,
         dadosRecebedor: {
+          metodo: 'pix',
           nomeTitular: 'Maria',
           tipoChavePix: 'email',
           chavePix: 'maria@exemplo.com',
+        },
+        criadaEm: new Date('2026-05-01T12:00:00.000Z'),
+      });
+      await repo.save(recebedor);
+      expect(await repo.findAtivoByCampanhaId(idCampanha)).toEqual(recebedor);
+    });
+
+    it('round-trips a conta (bank-account) receiver', async () => {
+      const idCampanha = randomUUID();
+      await seedCampanha(idCampanha);
+      const recebedor = criarRecebedorInicial({
+        id: randomUUID(),
+        idCampanha,
+        dadosRecebedor: {
+          metodo: 'conta',
+          nomeTitular: 'Joao Santos',
+          cpfTitular: '52998224725',
+          celularTitular: '11987654321',
+          codigoBanco: '237',
+          agencia: '1234',
+          agenciaDigito: null,
+          conta: '56789',
+          contaDigito: '0',
+          tipoConta: 'cc',
         },
         criadaEm: new Date('2026-05-01T12:00:00.000Z'),
       });
@@ -70,6 +95,7 @@ export function describeRecebedorRepositoryConformance(name: string, options: Co
         id: randomUUID(),
         idCampanha,
         dadosRecebedor: {
+          metodo: 'pix',
           nomeTitular: 'A',
           tipoChavePix: 'email',
           chavePix: 'a@exemplo.com',
@@ -80,6 +106,7 @@ export function describeRecebedorRepositoryConformance(name: string, options: Co
         id: randomUUID(),
         idCampanha,
         dadosRecebedor: {
+          metodo: 'pix',
           nomeTitular: 'B',
           tipoChavePix: 'email',
           chavePix: 'b@exemplo.com',
@@ -101,6 +128,7 @@ export function describeRecebedorRepositoryConformance(name: string, options: Co
           id: randomUUID(),
           idCampanha,
           dadosRecebedor: {
+            metodo: 'pix',
             nomeTitular: 'Maria',
             tipoChavePix: 'email',
             chavePix: 'maria@exemplo.com',

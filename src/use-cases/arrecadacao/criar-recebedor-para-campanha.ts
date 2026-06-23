@@ -10,9 +10,9 @@ import {
 import { criarRecebedorInicial } from '../../domain/arrecadacao/entities/recebedor.js';
 import { DadosRecebedorSchema } from '../../domain/arrecadacao/value-objects/dados-recebedor.js';
 import {
+  IdCampanhaSchema,
   type IdConta,
   IdContaSchema,
-  IdCampanhaSchema,
   type IdRecebedor,
 } from '../../domain/arrecadacao/value-objects/ids.js';
 import { ArrecadacaoCampanhaNaoEncontradaError } from '../../errors/arrecadacao/campanha-nao-encontrada.error.js';
@@ -59,9 +59,7 @@ export const CriarRecebedorParaCampanhaInputSchema = z.object({
   dadosRecebedor: DadosRecebedorSchema,
 });
 
-export type CriarRecebedorParaCampanhaInput = z.infer<
-  typeof CriarRecebedorParaCampanhaInputSchema
->;
+export type CriarRecebedorParaCampanhaInput = z.infer<typeof CriarRecebedorParaCampanhaInputSchema>;
 
 export interface CriarRecebedorParaCampanhaDeps {
   readonly campanhaRepository: CampanhaRepository;
@@ -100,7 +98,10 @@ export async function criarRecebedorParaCampanha(
 
       const { idCampanha, idContaCaller, dadosRecebedor } = parsed.data;
       span.setAttribute('arrecadacao.campanha.id', idCampanha);
-      span.setAttribute('arrecadacao.recebedor.tipoChavePix', dadosRecebedor.tipoChavePix);
+      span.setAttribute('arrecadacao.recebedor.metodo', dadosRecebedor.metodo);
+      if (dadosRecebedor.metodo === 'pix') {
+        span.setAttribute('arrecadacao.recebedor.tipoChavePix', dadosRecebedor.tipoChavePix);
+      }
 
       const campanha = await campanhaRepository.findById(idCampanha);
       if (!campanha) {
@@ -140,7 +141,8 @@ export async function criarRecebedorParaCampanha(
       logger.info('arrecadacao.recebedor.criado', {
         idCampanha,
         idRecebedor: recebedor.id,
-        tipoChavePix: dadosRecebedor.tipoChavePix,
+        metodo: dadosRecebedor.metodo,
+        tipoChavePix: dadosRecebedor.metodo === 'pix' ? dadosRecebedor.tipoChavePix : null,
       });
 
       span.setStatus({ code: SpanStatusCode.OK });

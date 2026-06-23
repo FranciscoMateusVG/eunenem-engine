@@ -65,6 +65,9 @@ export type { AuthService } from './adapters/usuario/auth-service.js';
 export { AuthServiceMemoria } from './adapters/usuario/auth-service.memory.js';
 export type { Auth, CriarAuthConfig } from './adapters/usuario/criar-auth.js';
 export { criarAuth } from './adapters/usuario/criar-auth.js';
+export type { DadosRecebimentoRepository } from './adapters/usuario/dados-recebimento-repository.js';
+export { DadosRecebimentoRepositoryMemory } from './adapters/usuario/dados-recebimento-repository.memory.js';
+export { DadosRecebimentoRepositoryPostgres } from './adapters/usuario/dados-recebimento-repository.postgres.js';
 export type { PerfilCriadorRepository } from './adapters/usuario/perfil-criador-repository.js';
 export { PerfilCriadorRepositoryMemory } from './adapters/usuario/perfil-criador-repository.memory.js';
 export { PerfilCriadorRepositoryPostgres } from './adapters/usuario/perfil-criador-repository.postgres.js';
@@ -130,11 +133,21 @@ export {
 } from './domain/arrecadacao/entities/recebedor.js';
 export type {
   DadosRecebedor,
+  DadosRecebedorConta,
+  DadosRecebedorPix,
   TipoChavePix,
+  TipoConta,
 } from './domain/arrecadacao/value-objects/dados-recebedor.js';
 export {
+  cnpjValido,
+  cpfValido,
+  DadosRecebedorContaSchema,
+  DadosRecebedorPixSchema,
   DadosRecebedorSchema,
+  mensagemChavePixInvalida,
   TipoChavePixSchema,
+  TipoContaSchema,
+  telefoneBrValido,
 } from './domain/arrecadacao/value-objects/dados-recebedor.js';
 export type {
   IdCampanha,
@@ -491,6 +504,15 @@ export {
 // --- Domain: Usuário ---
 
 export type {
+  AtualizarDadosRecebimentoUsuarioInput,
+  CriarDadosRecebimentoUsuarioInput,
+  DadosRecebimentoUsuario,
+} from './domain/usuario/entities/dados-recebimento-usuario.js';
+export {
+  atualizarDadosRecebimentoUsuario,
+  criarDadosRecebimentoUsuario,
+} from './domain/usuario/entities/dados-recebimento-usuario.js';
+export type {
   AtualizarConteudoPerfilCriadorInput,
   CriarPerfilCriadorInput,
   PerfilCriador,
@@ -560,6 +582,7 @@ export { ArrecadacaoUltimoAdministradorError } from './errors/arrecadacao/ultimo
 export { CatAlreadyExistsError } from './errors/cat-already-exists.error.js';
 export { CheckoutCampanhaSemRecebedorError } from './errors/checkout/campanha-sem-recebedor.error.js';
 export { CheckoutPlataformaMismatchError } from './errors/checkout/plataforma-mismatch.error.js';
+export { CheckoutRecebedorNaoPagavelViaPixError } from './errors/checkout/recebedor-nao-pagavel-via-pix.error.js';
 export { EventoCampanhaJaTemEventoError } from './errors/evento/campanha-ja-tem-evento.error.js';
 export { EventoCampanhaNaoEncontradaError } from './errors/evento/campanha-nao-encontrada.error.js';
 export { ConvidadoNaoEncontradoError } from './errors/evento/convidado-nao-encontrado.error.js';
@@ -1033,6 +1056,8 @@ export {
 } from './use-cases/usuario/criar-sessao-usuario.js';
 export type { MarcarTutorialUsuarioComoCompletadoDeps } from './use-cases/usuario/marcar-tutorial-usuario-como-completado.js';
 export { marcarTutorialUsuarioComoCompletado } from './use-cases/usuario/marcar-tutorial-usuario-como-completado.js';
+export type { ObterDadosRecebimentoUsuarioDeps } from './use-cases/usuario/obter-dados-recebimento-usuario.js';
+export { obterDadosRecebimentoUsuario } from './use-cases/usuario/obter-dados-recebimento-usuario.js';
 export type {
   ObterPerfilCriadorDeps,
   PerfilProprioDTO,
@@ -1060,6 +1085,14 @@ export {
   RegistrarContaUsuarioInputSchema,
   registrarContaUsuario,
 } from './use-cases/usuario/registrar-conta-usuario.js';
+export type {
+  SalvarDadosRecebimentoUsuarioDeps,
+  SalvarDadosRecebimentoUsuarioInput,
+} from './use-cases/usuario/salvar-dados-recebimento-usuario.js';
+export {
+  SalvarDadosRecebimentoUsuarioInputSchema,
+  salvarDadosRecebimentoUsuario,
+} from './use-cases/usuario/salvar-dados-recebimento-usuario.js';
 // Plan 0018 Phase A (aperture-omswg) — first-time tutorial.
 export type { TutorialStatusResponse } from './use-cases/usuario/tutorial-status-response.js';
 export { TutorialStatusResponseSchema } from './use-cases/usuario/tutorial-status-response.js';

@@ -33,6 +33,7 @@ const fixedDate = new Date('2026-05-01T12:00:00.000Z');
 const clock = () => fixedDate;
 
 const dadosRecebedorPadrao = (): DadosRecebedor => ({
+  metodo: 'pix',
   nomeTitular: 'Maria Silva',
   tipoChavePix: 'email',
   chavePix: 'maria@exemplo.com',
@@ -341,9 +342,10 @@ describe('alterarDadosRecebedorCampanha', () => {
       createArrecadacaoMemoryRepos();
     const idCampanha = randomUUID();
     const novosDados: DadosRecebedor = {
+      metodo: 'pix',
       nomeTitular: 'Joao Santos',
       tipoChavePix: 'cpf',
-      chavePix: '12345678901',
+      chavePix: '52998224725',
     };
 
     const criada = await criarCampanha(
@@ -435,6 +437,7 @@ describe('alterarDadosRecebedorCampanha', () => {
         {
           idCampanha,
           dadosRecebedor: {
+            metodo: 'pix',
             nomeTitular: 'X',
             tipoChavePix: 'email',
             chavePix: 'nao-e-email',

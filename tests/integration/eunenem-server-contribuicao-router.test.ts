@@ -169,6 +169,7 @@ async function seedUserWithCampanha(
     id: randomUUID(),
     idCampanha,
     dadosRecebedor: {
+      metodo: 'pix',
       nomeTitular: params.handle,
       tipoChavePix: 'email',
       chavePix: params.email,

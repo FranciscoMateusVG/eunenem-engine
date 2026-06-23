@@ -46,6 +46,7 @@ import {
   ArrecadacaoInputInvalidoError,
   ArrecadacaoNaoAutorizadoError,
   ArrecadacaoRecebedorJaExisteError,
+  CheckoutRecebedorNaoPagavelViaPixError,
   criarRecebedorParaCampanha,
   CriarRecebedorParaCampanhaInputSchema,
   FinanceiroRepasseJaPendenteError,
@@ -324,6 +325,16 @@ function toTRPCError(err: unknown): TRPCError {
   }
   if (err instanceof FinanceiroInputInvalidoError) {
     return new TRPCError({ code: "BAD_REQUEST", message: err.message, cause: err });
+  }
+  // aperture-mcvyw — a 'conta' (bank-account) recebedor cannot be paid via
+  // the PIX repasse rail. Surface as a 422 so the painel can route the
+  // operator to manual payout instead of a generic 500.
+  if (err instanceof CheckoutRecebedorNaoPagavelViaPixError) {
+    return new TRPCError({
+      code: "UNPROCESSABLE_CONTENT",
+      message: "recebedor_nao_pagavel_via_pix",
+      cause: err,
+    });
   }
   // aperture-0bynm — recebedor.criar mapping.
   if (err instanceof ArrecadacaoRecebedorJaExisteError) {

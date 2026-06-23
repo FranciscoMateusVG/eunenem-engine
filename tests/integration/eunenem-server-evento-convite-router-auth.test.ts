@@ -115,6 +115,7 @@ async function buildRig(): Promise<TestRig> {
       id: randomUUID(),
       idCampanha: campanha.id,
       dadosRecebedor: {
+        metodo: 'pix',
         nomeTitular: 'Francisco',
         tipoChavePix: 'email',
         chavePix: TEST_EMAIL,

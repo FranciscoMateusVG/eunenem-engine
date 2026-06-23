@@ -50,15 +50,17 @@ const clock = () => fixedDate;
 const VALOR_CONTRIBUICAO_CENTS = 8000;
 
 const dadosRecebedorPadrao = () => ({
+  metodo: 'pix' as const,
   nomeTitular: 'Maria Silva',
   tipoChavePix: 'email' as const,
   chavePix: 'maria@exemplo.com',
 });
 
 const dadosRecebedorNovo = () => ({
+  metodo: 'pix' as const,
   nomeTitular: 'Joao Santos',
   tipoChavePix: 'cpf' as const,
-  chavePix: '12345678901',
+  chavePix: '52998224725',
 });
 
 const contribuinteValido = () => ({

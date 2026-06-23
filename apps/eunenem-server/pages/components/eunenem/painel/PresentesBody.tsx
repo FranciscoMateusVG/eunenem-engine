@@ -987,6 +987,7 @@ function TransferOnboardingModal({
     criarRecebedor.mutate({
       idCampanha,
       dadosRecebedor: {
+        metodo: "pix",
         nomeTitular: s.nome.trim(),
         tipoChavePix,
         chavePix: s.pixKey,

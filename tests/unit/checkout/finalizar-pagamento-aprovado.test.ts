@@ -31,6 +31,7 @@ const fixedDate = new Date('2026-05-01T12:00:00.000Z');
 const clock = () => fixedDate;
 
 const dadosRecebedorPadrao = () => ({
+  metodo: 'pix' as const,
   nomeTitular: 'Maria Silva',
   tipoChavePix: 'email' as const,
   chavePix: 'maria@exemplo.com',
