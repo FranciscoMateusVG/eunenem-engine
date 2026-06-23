@@ -144,5 +144,5 @@ export const BANCARIOS_DEMO: BancariosForm = {
 };
 
 /** Default recebimento mode shown on load. */
-export const BANCARIOS_DEFAULT_MODE: BancariosMode = "conta";
+export const BANCARIOS_DEFAULT_MODE: BancariosMode = "pix";
 export const BANCARIOS_DEFAULT_PIX_TYPE: PixType["v"] = "cpf";
