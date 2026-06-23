@@ -136,7 +136,7 @@ export function PainelHeaderCard({ snapshot, slug }: Props) {
       {/* 2. Title row — greeting + h1 + url chip line */}
       <header className="painel-title-row">
         <span className="painel-hc-greeting">
-          olá, {snapshot.greetingTo} ♡
+          olá{snapshot.greetingTo ? `, ${snapshot.greetingTo}` : ""} ♡
         </span>
         <h1 className="painel-hc-title">
           página da <span className="hl">{babyNameDisplay}</span>
