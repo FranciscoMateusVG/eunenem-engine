@@ -522,23 +522,28 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
                   <ILock size={12} />o cpf não pode ser alterado após o cadastro inicial
                 </span>
               </div>
-              <div className="bnc-field">
-                <label>
-                  celular <span className="req">*</span>
-                </label>
-                <input
-                  className="bnc-input"
-                  value={s.telefone}
-                  style={errStyle("telefone")}
-                  onChange={(e) => set({ telefone: maskPhone(e.target.value) })}
-                  placeholder="(00) 00000-0000"
-                  inputMode="numeric"
-                  aria-label="celular"
-                />
-                <span className="bnc-helper">
-                  usamos só pra avisar quando cair um mimo ♡
-                </span>
-              </div>
+              {/* aperture-4biak — celular só existe no payload do modo CONTA
+                  (celularTitular). No modo PIX ele não é coletado nem persistido,
+                  então mostrá-lo como obrigatório era enganoso (sumia no reload). */}
+              {modo === "conta" && (
+                <div className="bnc-field">
+                  <label>
+                    celular <span className="req">*</span>
+                  </label>
+                  <input
+                    className="bnc-input"
+                    value={s.telefone}
+                    style={errStyle("telefone")}
+                    onChange={(e) => set({ telefone: maskPhone(e.target.value) })}
+                    placeholder="(00) 00000-0000"
+                    inputMode="numeric"
+                    aria-label="celular"
+                  />
+                  <span className="bnc-helper">
+                    usamos só pra avisar quando cair um mimo ♡
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         </section>

@@ -86,22 +86,30 @@ export function PainelPage({ slug }: { slug: string }) {
     ? liveItems.filter((c) => c.indisponivel).length
     : undefined;
 
-  // Merge real values over the demo snapshot. Header card reads
-  // receivedCents + giftsClaimed; the menu builder reads receivedCents
-  // for the featured row.
+  // aperture-77512 — the creator's REAL first name for the "olá, {name}"
+  // greeting (was the demo "Mari"). First word of nomeExibicao.
+  const perfilQ = trpc.perfil.getPerfil.useQuery(undefined, { staleTime: 30_000 });
+  const greetingFirstName =
+    (perfilQ.data?.creatorName ?? "").trim().split(/\s+/)[0] ?? "";
+
+  // aperture-77512 — Merge REAL values over the demo snapshot, falling back to
+  // ZERO (never the PAINEL_DEMO numbers) so a brand-new creator never sees a
+  // stranger's fabricated stats (Mari / helena / 28 confirmados / 12 recados).
+  // greetingTo + shareSlug come from the real account; counters use live data
+  // when present else 0; unwired metrics (guest RSVP) are honestly 0 until
+  // those features ship.
   const snapshot: PainelEventSnapshot = {
     ...PAINEL_DEMO,
-    receivedCents: liveReceivedCents ?? PAINEL_DEMO.receivedCents,
-    // `giftsClaimed` is the "presentes" stat in the header AND the
-    // featured-row's "N presentes · R$ X" subtitle. Real source:
-    // extrato.summary.totalPresentes (distinct pagamentos contributing
-    // to the recebido total).
-    giftsClaimed: livePresentes ?? PAINEL_DEMO.giftsClaimed,
-    // aperture-kvpvf — strip overrides (distinct from giftsClaimed +
-    // messagesTotal which still drive the menu rows; see PainelHeaderCard
-    // for the rationale).
-    presentesStripCount: livePresentesStrip ?? PAINEL_DEMO.presentesStripCount,
-    recadosStripCount: liveRecadosStrip ?? PAINEL_DEMO.recadosStripCount,
+    greetingTo: greetingFirstName,
+    shareSlug: slug,
+    receivedCents: liveReceivedCents ?? 0,
+    giftsClaimed: livePresentes ?? 0,
+    guestsConfirmed: 0,
+    guestsTotal: 0,
+    messagesTotal: liveRecadosStrip ?? 0,
+    messagesNew: 0,
+    presentesStripCount: livePresentesStrip ?? 0,
+    recadosStripCount: liveRecadosStrip ?? 0,
   };
 
   const groups = buildPainelMenu(snapshot, {
