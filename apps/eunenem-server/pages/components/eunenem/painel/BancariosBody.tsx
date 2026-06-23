@@ -17,8 +17,13 @@ import {
   type PixType,
 } from "@/lib/mocks/bancarios";
 // aperture-4bf4j (V3) — client validation imports the SAME pure validators the
-// domain VO uses (DadosRecebedorSchema), so the inline checks never drift from
-// the server. Precedent for pages→src runtime import: pages/lib/convite-mapper.
+// domain VO uses, so the inline checks never drift from the server.
+// aperture-9abwt: import from the DEEP leaf module (zod-only, pg-free), NOT the
+// barrel src/index.js. The barrel statically re-exports the Postgres adapters
+// (src/adapters/database.ts → `import pg from 'pg'`), so a runtime value-import
+// of it drags `pg` + node built-ins into the browser bundle → esbuild fails to
+// resolve fs/events/util/dns. Type-only barrel imports are fine (stripped at
+// build); runtime values MUST come from the leaf.
 import {
   cpfValido,
   type DadosRecebedor,
@@ -26,7 +31,7 @@ import {
   type TipoChavePix,
   type TipoConta,
   telefoneBrValido,
-} from "../../../../../../src/index.js";
+} from "../../../../../../src/domain/arrecadacao/value-objects/dados-recebedor.js";
 
 // aperture-6xjcw — Dados Bancários body for /painel/:slug/bancarios.
 //
