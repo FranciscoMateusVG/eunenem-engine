@@ -53,6 +53,17 @@ export interface ObjectStorage {
    * the constructed public URL.
    */
   emitirUrlUploadPresignada(input: EmitirUrlUploadInput): Promise<UrlUploadPresignada>;
+
+  /**
+   * Construct the stable public read URL for a stored object key
+   * (`${endpoint}/${bucket}/${objectKey}`). Pure string construction — no
+   * network, no signature — valid because the bucket is public-read
+   * (operator decision). Used to resolve a profile's stored photo KEYS into
+   * displayable URLs in the read DTOs (aperture-lq8vw), so the client never
+   * needs the bucket/endpoint config (the same client/infra decoupling the
+   * pg-leak in aperture-9abwt taught us).
+   */
+  urlPublica(objectKey: string): string;
 }
 
 /**

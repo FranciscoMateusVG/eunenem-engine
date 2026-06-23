@@ -87,7 +87,7 @@ export class ObjectStorageMinio implements ObjectStorage {
           { expiresIn: PRESIGN_EXPIRES_IN_SECONDS },
         );
 
-        const publicUrl = `${this.endpoint}/${this.bucket}/${objectKey}`;
+        const publicUrl = this.urlPublica(objectKey);
 
         span.setStatus({ code: SpanStatusCode.OK });
         return { uploadUrl, objectKey, publicUrl };
@@ -99,5 +99,14 @@ export class ObjectStorageMinio implements ObjectStorage {
         span.end();
       }
     });
+  }
+
+  /**
+   * Stable public read URL for a key. Pure string construction (bucket is
+   * public-read) — no signature, no network. Single source of truth shared
+   * with `emitirUrlUploadPresignada`'s `publicUrl`.
+   */
+  urlPublica(objectKey: string): string {
+    return `${this.endpoint}/${this.bucket}/${objectKey}`;
   }
 }

@@ -1,5 +1,6 @@
 import { SpanStatusCode } from '@opentelemetry/api';
 import { z } from 'zod/v4';
+import type { ObjectStorage } from '../../adapters/storage/object-storage.js';
 import type { PerfilCriadorRepository } from '../../adapters/usuario/perfil-criador-repository.js';
 import type { UsuarioRepository } from '../../adapters/usuario/repository.js';
 import type { IdPlataformaReferencia } from '../../domain/usuario/value-objects/ids.js';
@@ -40,6 +41,8 @@ export type PerfilPublicoDTO = z.infer<typeof PerfilPublicoDTOSchema>;
 export interface ObterPerfilPublicoBySlugDeps {
   readonly usuarioRepository: UsuarioRepository;
   readonly perfilCriadorRepository: PerfilCriadorRepository;
+  /** Resolves stored photo keys → displayable public URLs (aperture-lq8vw). */
+  readonly objectStorage: ObjectStorage;
   readonly observability: Observability;
 }
 
@@ -56,8 +59,10 @@ export async function obterPerfilPublicoBySlug(
   idPlataforma: IdPlataformaReferencia,
   slug: SlugUsuario,
 ): Promise<PerfilPublicoDTO> {
-  const { usuarioRepository, perfilCriadorRepository, observability } = deps;
+  const { usuarioRepository, perfilCriadorRepository, objectStorage, observability } = deps;
   const { tracer } = observability;
+  const fotoUrl = (key: string | null): string | null =>
+    key === null ? null : objectStorage.urlPublica(key);
 
   return tracer.startActiveSpan('obterPerfilPublicoBySlug', async (span) => {
     try {
@@ -79,9 +84,9 @@ export async function obterPerfilPublicoBySlug(
         tipoEvento: c?.tipoEvento ?? null,
         dataEvento: c?.dataEvento ? c.dataEvento.toISOString() : null,
         dataNascimento: c?.dataNascimento ? c.dataNascimento.toISOString() : null,
-        fotoPerfil: c?.fotoPerfilKey ?? null,
-        fotoCapa: c?.fotoCapaKey ?? null,
-        fotoHistoria: c?.fotoHistoriaKey ?? null,
+        fotoPerfil: fotoUrl(c?.fotoPerfilKey ?? null),
+        fotoCapa: fotoUrl(c?.fotoCapaKey ?? null),
+        fotoHistoria: fotoUrl(c?.fotoHistoriaKey ?? null),
       };
 
       span.setStatus({ code: SpanStatusCode.OK });
