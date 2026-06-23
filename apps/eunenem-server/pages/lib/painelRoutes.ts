@@ -65,8 +65,13 @@ export function menuItemHref(slug: string, id: string): string | undefined {
     case "bancarios":
       return painelHref(slug, "bancarios");
     case "preview":
-      // "ver como convidado" → the public contributor experience.
-      return "/pagina/francisco";
+      // aperture-slqtk — "ver como convidado" → the logged-in creator's OWN
+      // public page. Was hardcoded "/pagina/francisco" (the 3rd francisco
+      // residue the V2 de-hardcode missed): it sent every non-francisco creator
+      // to Francisco's page — which ALSO read as "my edits didn't save" because
+      // they were viewing someone else's page. `slug` here is the real creator
+      // slug (the same one every other row above already threads correctly).
+      return `/pagina/${slug}`;
     case "suporte":
       // External support channel — no in-app page in scope.
       return "https://wa.me/5531999999999";

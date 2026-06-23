@@ -20,7 +20,11 @@ export interface TweaksState {
 }
 
 export const TWEAKS_DEFAULTS: TweaksState = {
-  babyName: "Francisco",
+  // aperture-slqtk — neutral fallback, NOT a real person's name. This default
+  // surfaces on a creator's PUBLIC page when nomeBebe is null (more reachable
+  // since aperture-0xoy0 lets photos persist before babyName is set). The old
+  // "Francisco" demo value leaked a stranger's name onto real creators' pages.
+  babyName: "bebê",
   parents: "Mariana & Rodrigo",
   targetDate: "2026-06-15",
   primary: "#C9A5D8",
