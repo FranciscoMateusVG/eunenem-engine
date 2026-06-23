@@ -817,7 +817,9 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
   // null) so a half-typed date never blocks persisting a photo.
   const currentPayload = () => ({
     nomeExibicao: creatorName.trim(),
-    nomeBebe: babyName.trim(),
+    // aperture-0xoy0 — nomeBebe is nullable; send null (not "") when empty so a
+    // photo upload can persist before the baby name is filled (no min(1) reject).
+    nomeBebe: babyName.trim() || null,
     relacao: relation.trim() || null,
     historia: story.trim() || null,
     dataNascimento: birthDate.trim() ? brToISO(birthDate) : null,
@@ -844,10 +846,14 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
     if (!res.ok) throw new Error(`upload falhou (${res.status})`);
     fotoKeys.current = { ...fotoKeys.current, [slot]: objectKey };
     setFotoUrls((prev) => ({ ...prev, [slot]: publicUrl }));
-    if (babyName.trim() && creatorName.trim()) {
+    // aperture-0xoy0 — persist the photo key the moment the bytes land, so they
+    // never orphan in the bucket. babyName no longer gates this (nomeBebe is
+    // nullable → currentPayload sends null when empty). Only the always-present
+    // creatorName (nomeExibicao is required) needs to be set to save.
+    if (creatorName.trim()) {
       atualizar.mutate(currentPayload());
     } else {
-      toast("foto enviada ♡ — preencha o nome do neném e o seu, depois salve pra guardar");
+      toast("foto enviada ♡ — preencha o seu nome e salve pra guardar");
     }
   };
 
