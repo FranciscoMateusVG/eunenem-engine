@@ -53,16 +53,46 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Typecheck (root SDK)
         run: pnpm typecheck
-      # NOTE: apps/eunenem-server typecheck is intentionally NOT gated in
-      # V1 — it currently has pre-existing type errors on staging
-      # (aperture-14mtr CI surfaced them). Add this job in a follow-up
-      # once those are fixed.
+      # esbuild strips types without checking, so the app needs its own
+      # tsc. Added in aperture-0oa8z after the pre-existing type debt
+      # (tfe9g + 33ien) was cleared.
+      - name: Install (eunenem-server)
+        working-directory: apps/eunenem-server
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck (eunenem-server)
+        working-directory: apps/eunenem-server
+        run: pnpm typecheck
 
-  # NOTE: a `test` job (pnpm vitest unit + integration) is intentionally
-  # NOT in V1. It currently fails on pre-existing staging breakage
-  # (renamed/removed modules — aperture-tfe9g), which the first CI run
-  # surfaced. The test gate + eunenem-server typecheck land in a
-  # follow-up (blocked-by tfe9g) once that debt is cleared.
+  test:
+    name: test (vitest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      # pnpm version comes from package.json `packageManager` (pnpm@10.33.0).
+      # Do NOT also pass `version:` here — action-setup errors on the conflict.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            apps/eunenem-server/pnpm-lock.yaml
+      - name: Install (root)
+        run: pnpm install --frozen-lockfile
+      # Several integration tests import from apps/eunenem-server
+      # (e.g. server/trpc/router.ts → @trpc/server), which is a separate
+      # pnpm package — its deps must be installed for those imports to
+      # resolve.
+      - name: Install (eunenem-server)
+        working-directory: apps/eunenem-server
+        run: pnpm install --frozen-lockfile
+      # vitest globalSetup spins ONE Testcontainers Postgres for the
+      # integration tests. ubuntu-latest ships a working Docker daemon,
+      # so no `services:` block is needed here.
+      - name: Run unit + integration tests
+        run: pnpm test
 
   build:
     name: build (client bundle — #223 gate)
