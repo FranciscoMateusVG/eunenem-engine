@@ -196,6 +196,22 @@ export interface PaymentWebhookEvents {
   signature_valid: boolean;
 }
 
+export interface PerfilCriadores {
+  atualizado_em: Generated<Timestamp>;
+  criado_em: Generated<Timestamp>;
+  data_evento: Timestamp | null;
+  data_nascimento: Timestamp | null;
+  foto_capa_key: string | null;
+  foto_historia_key: string | null;
+  foto_perfil_key: string | null;
+  historia: string | null;
+  id: string;
+  id_usuario: string;
+  nome_bebe: string | null;
+  relacao: string | null;
+  tipo_evento: string | null;
+}
+
 export interface RateLimit {
   count: Generated<number>;
   id: string;
@@ -281,6 +297,7 @@ export interface DB {
   opcoes_contribuicao: OpcoesContribuicao;
   pagamentos: Pagamentos;
   payment_webhook_events: PaymentWebhookEvents;
+  perfil_criadores: PerfilCriadores;
   rate_limit: RateLimit;
   recebedores: Recebedores;
   repasses_recebedor: RepassesRecebedor;

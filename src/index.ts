@@ -41,7 +41,11 @@ export { LivroFinanceiroRepositoryPostgres } from './adapters/pagamentos/finance
 export { PagamentoProviderFake } from './adapters/pagamentos/provider.fake.js';
 export type { PagamentoProvider, SolicitarPagamentoInput } from './adapters/pagamentos/provider.js';
 export { PagamentoProviderStripe } from './adapters/pagamentos/provider.stripe.js';
-export type { AdminRecadoRow, MuralRecadoProjection, PagamentoRepository } from './adapters/pagamentos/repository.js';
+export type {
+  AdminRecadoRow,
+  MuralRecadoProjection,
+  PagamentoRepository,
+} from './adapters/pagamentos/repository.js';
 export { PagamentoRepositoryMemory } from './adapters/pagamentos/repository.memory.js';
 export { PagamentoRepositoryPostgres } from './adapters/pagamentos/repository.postgres.js';
 export type { PlataformaRepository } from './adapters/plataforma/repository.js';
@@ -61,6 +65,9 @@ export type { AuthService } from './adapters/usuario/auth-service.js';
 export { AuthServiceMemoria } from './adapters/usuario/auth-service.memory.js';
 export type { Auth, CriarAuthConfig } from './adapters/usuario/criar-auth.js';
 export { criarAuth } from './adapters/usuario/criar-auth.js';
+export type { PerfilCriadorRepository } from './adapters/usuario/perfil-criador-repository.js';
+export { PerfilCriadorRepositoryMemory } from './adapters/usuario/perfil-criador-repository.memory.js';
+export { PerfilCriadorRepositoryPostgres } from './adapters/usuario/perfil-criador-repository.postgres.js';
 export type { UsuarioRepository } from './adapters/usuario/repository.js';
 export { UsuarioRepositoryMemory } from './adapters/usuario/repository.memory.js';
 export { UsuarioRepositoryPostgres } from './adapters/usuario/repository.postgres.js';
@@ -336,6 +343,20 @@ export { MoneyCentsSchema } from './domain/money.js';
 
 // --- Domain: Pagamentos ---
 
+// Plan 0016 (aperture-aj8qw): ItemDoPagamento entity inside the
+// IntencaoPagamento child of the Pagamento aggregate.
+export type {
+  ItemDoPagamento,
+  ItemDoPagamentoContribuicao,
+  ItemDoPagamentoPassthroughSurcharge,
+} from './domain/pagamentos/entities/item-do-pagamento.js';
+export {
+  criarItemContribuicao,
+  criarItemPassthroughSurcharge,
+  ItemDoPagamentoContribuicaoSchema,
+  ItemDoPagamentoPassthroughSurchargeSchema,
+  ItemDoPagamentoSchema,
+} from './domain/pagamentos/entities/item-do-pagamento.js';
 export type {
   CriarPagamentoPendenteInput,
   IntencaoPagamento,
@@ -372,10 +393,10 @@ export {
 export type {
   IdContribuicaoPagamento,
   IdIntencaoPagamento,
+  IdItemDoPagamento,
   IdPagamento,
   IdTransacaoExterna,
 } from './domain/pagamentos/value-objects/ids.js';
-export type { IdItemDoPagamento } from './domain/pagamentos/value-objects/ids.js';
 export {
   IdContribuicaoPagamentoSchema,
   IdIntencaoPagamentoSchema,
@@ -407,20 +428,6 @@ export {
   SnapshotComposicaoValoresItemSurchargeSchema,
   validarComposicaoItem,
 } from './domain/pagamentos/value-objects/snapshot-composicao-valores-item.js';
-// Plan 0016 (aperture-aj8qw): ItemDoPagamento entity inside the
-// IntencaoPagamento child of the Pagamento aggregate.
-export type {
-  ItemDoPagamento,
-  ItemDoPagamentoContribuicao,
-  ItemDoPagamentoPassthroughSurcharge,
-} from './domain/pagamentos/entities/item-do-pagamento.js';
-export {
-  criarItemContribuicao,
-  criarItemPassthroughSurcharge,
-  ItemDoPagamentoContribuicaoSchema,
-  ItemDoPagamentoPassthroughSurchargeSchema,
-  ItemDoPagamentoSchema,
-} from './domain/pagamentos/entities/item-do-pagamento.js';
 
 // --- Domain: Plataforma ---
 
@@ -484,20 +491,36 @@ export {
 // --- Domain: Usuário ---
 
 export type {
+  AtualizarConteudoPerfilCriadorInput,
+  CriarPerfilCriadorInput,
+  PerfilCriador,
+} from './domain/usuario/entities/perfil-criador.js';
+export {
+  atualizarConteudoPerfilCriador,
+  criarPerfilCriador,
+} from './domain/usuario/entities/perfil-criador.js';
+export type {
   Conta,
   Usuario,
 } from './domain/usuario/entities/usuario.js';
 export { contaTemPermissao } from './domain/usuario/entities/usuario.js';
 export { deriveSlugBase, slugWithSuffix } from './domain/usuario/slug-derivation.js';
+export type { ConteudoPerfilCriador } from './domain/usuario/value-objects/conteudo-perfil-criador.js';
+export {
+  ConteudoPerfilCriadorSchema,
+  conteudoPerfilCriadorVazio,
+} from './domain/usuario/value-objects/conteudo-perfil-criador.js';
 export type { EmailUsuario } from './domain/usuario/value-objects/email-usuario.js';
 export { EmailUsuarioSchema } from './domain/usuario/value-objects/email-usuario.js';
 export type {
   IdContaUsuario,
+  IdPerfilCriador,
   IdPlataformaReferencia as IdPlataformaReferenciaUsuario,
   IdUsuario,
 } from './domain/usuario/value-objects/ids.js';
 export {
   IdContaUsuarioSchema,
+  IdPerfilCriadorSchema,
   IdPlataformaReferenciaSchema as IdPlataformaReferenciaUsuarioSchema,
   IdUsuarioSchema,
 } from './domain/usuario/value-objects/ids.js';
@@ -510,6 +533,8 @@ export {
   SLUG_USUARIO_REGEX,
   SlugUsuarioSchema,
 } from './domain/usuario/value-objects/slug-usuario.js';
+export type { TipoEventoPerfil } from './domain/usuario/value-objects/tipo-evento-perfil.js';
+export { TipoEventoPerfilSchema } from './domain/usuario/value-objects/tipo-evento-perfil.js';
 export type { TokenSessao } from './domain/usuario/value-objects/token-sessao.js';
 export { TokenSessaoSchema } from './domain/usuario/value-objects/token-sessao.js';
 
@@ -578,9 +603,13 @@ export { noopTracer, SpanKind, SpanStatusCode, trace } from './observability/tra
 
 // --- Use Cases ---
 
+export { ArrecadacaoRecebedorJaExisteError } from './errors/arrecadacao/recebedor-ja-existe.error.js';
+// Plan 0016 Phase 2 (aperture-eg1s2): cart-multi-campanha error.
+export { CarrinhoMultiplasCampanhasError } from './errors/checkout/carrinho-multiplas-campanhas.error.js';
 export { FinanceiroRepasseJaPendenteError } from './errors/pagamentos/financeiro/repasse-ja-pendente.error.js';
 export { FinanceiroRepasseNaoEncontradoError } from './errors/pagamentos/financeiro/repasse-nao-encontrado.error.js';
 export { FinanceiroRepasseStatusInvalidoError } from './errors/pagamentos/financeiro/repasse-status-invalido.error.js';
+export { UsuarioNaoEncontradoError } from './errors/usuario/nao-encontrado.error.js';
 export type {
   AdicionarAdministradorCampanhaDeps,
   AdicionarAdministradorCampanhaInput,
@@ -621,20 +650,6 @@ export {
   AtualizarContribuicaoInputSchema,
   atualizarContribuicao,
 } from './use-cases/arrecadacao/atualizar-contribuicao.js';
-// Plan 0016 Phase 2 (aperture-eg1s2). Replaces the pre-0016
-// contribuicaoEstaIndisponivel binary predicate with the
-// quantidadeRestante (count of remaining slots) + esgotada
-// (derived boolean) pair. Pure rename per operator review nit C —
-// no @deprecated alias for the old name.
-export type {
-  QuantidadeRestanteDeps,
-  QuantidadeRestanteInput,
-} from './use-cases/arrecadacao/quantidade-restante.js';
-export {
-  esgotada,
-  QuantidadeRestanteInputSchema,
-  quantidadeRestante,
-} from './use-cases/arrecadacao/quantidade-restante.js';
 export type {
   CriarCampanhaDeps,
   CriarCampanhaInput,
@@ -662,6 +677,16 @@ export {
   criarContribuicoesEmLote,
   ItemLoteSchema,
 } from './use-cases/arrecadacao/criar-contribuicoes-em-lote.js';
+// aperture-0bynm — recebedor first-time create (backend half of aperture-kbmel).
+export type {
+  CriarRecebedorParaCampanhaDeps,
+  CriarRecebedorParaCampanhaInput,
+  CriarRecebedorParaCampanhaResult,
+} from './use-cases/arrecadacao/criar-recebedor-para-campanha.js';
+export {
+  CriarRecebedorParaCampanhaInputSchema,
+  criarRecebedorParaCampanha,
+} from './use-cases/arrecadacao/criar-recebedor-para-campanha.js';
 // Plan 0015 (aperture-7pqee): desassociarContribuinteContribuicao removed.
 // No saga compensation needed — there's no claim step to undo. Estorno
 // path uses estornar-pagamento (Phase 2).
@@ -673,6 +698,20 @@ export {
   ListarContribuicoesDeOpcaoInputSchema,
   listarContribuicoesDeOpcao,
 } from './use-cases/arrecadacao/listar-contribuicoes-de-opcao.js';
+// Plan 0016 Phase 2 (aperture-eg1s2). Replaces the pre-0016
+// contribuicaoEstaIndisponivel binary predicate with the
+// quantidadeRestante (count of remaining slots) + esgotada
+// (derived boolean) pair. Pure rename per operator review nit C —
+// no @deprecated alias for the old name.
+export type {
+  QuantidadeRestanteDeps,
+  QuantidadeRestanteInput,
+} from './use-cases/arrecadacao/quantidade-restante.js';
+export {
+  esgotada,
+  QuantidadeRestanteInputSchema,
+  quantidadeRestante,
+} from './use-cases/arrecadacao/quantidade-restante.js';
 export type {
   RemoverAdministradorCampanhaDeps,
   RemoverAdministradorCampanhaInput,
@@ -842,6 +881,17 @@ export {
   ObterListaDeConvidadosPorIdEventoInputSchema,
   obterListaDeConvidadosPorIdEvento,
 } from './use-cases/evento/obter-lista-de-convidados-por-id-evento.js';
+// aperture-16wrk — admin mensagens backend (5v766 Phase A). SHARED with
+// the frontend (Vance / Phase B) — the schemas + use-case Result types
+// are the contract.
+export type {
+  AdminMensagensResponse,
+  AdminRecadoProjection,
+} from './use-cases/pagamentos/admin-recado-projection.js';
+export {
+  AdminMensagensResponseSchema,
+  AdminRecadoProjectionSchema,
+} from './use-cases/pagamentos/admin-recado-projection.js';
 export type { AprovarPagamentoDeps } from './use-cases/pagamentos/aprovar-pagamento.js';
 export { aprovarPagamento } from './use-cases/pagamentos/aprovar-pagamento.js';
 export type {
@@ -902,6 +952,16 @@ export {
   solicitarRepasseRecebedor,
 } from './use-cases/pagamentos/financeiro/solicitar-repasse-recebedor.js';
 export type {
+  MarcarRecadoComoLidoDeps,
+  MarcarRecadoComoLidoResult,
+} from './use-cases/pagamentos/marcar-recado-como-lido.js';
+export { marcarRecadoComoLido } from './use-cases/pagamentos/marcar-recado-como-lido.js';
+export type {
+  MarcarTodosRecadosComoLidosDeps,
+  MarcarTodosRecadosComoLidosResult,
+} from './use-cases/pagamentos/marcar-todos-recados-como-lidos.js';
+export { marcarTodosRecadosComoLidos } from './use-cases/pagamentos/marcar-todos-recados-como-lidos.js';
+export type {
   ComandoPagamentoInput,
   ObterPagamentoPorIdDeps,
 } from './use-cases/pagamentos/obter-pagamento-por-id.js';
@@ -909,6 +969,8 @@ export {
   ComandoPagamentoInputSchema,
   obterPagamentoPorId,
 } from './use-cases/pagamentos/obter-pagamento-por-id.js';
+export type { ObterRecadosAdminDeCampanhaDeps } from './use-cases/pagamentos/obter-recados-admin-de-campanha.js';
+export { obterRecadosAdminDeCampanha } from './use-cases/pagamentos/obter-recados-admin-de-campanha.js';
 export type { RejeitarPagamentoDeps } from './use-cases/pagamentos/rejeitar-pagamento.js';
 export { rejeitarPagamento } from './use-cases/pagamentos/rejeitar-pagamento.js';
 // Plan 0016 Phase 2 (aperture-eg1s2): split per-item + cart-wide surcharge.
@@ -928,8 +990,6 @@ export {
   CalcularSurchargeParaCarrinhoInputSchema,
   calcularSurchargeParaCarrinho,
 } from './use-cases/taxas/calcular-surcharge-para-carrinho.js';
-// Plan 0016 Phase 2 (aperture-eg1s2): cart-multi-campanha error.
-export { CarrinhoMultiplasCampanhasError } from './errors/checkout/carrinho-multiplas-campanhas.error.js';
 export type {
   AtualizarPerfilUsuarioDeps,
   AtualizarPerfilUsuarioInput,
@@ -955,6 +1015,10 @@ export {
   CriarSessaoUsuarioInputSchema,
   criarSessaoUsuario,
 } from './use-cases/usuario/criar-sessao-usuario.js';
+export type { MarcarTutorialUsuarioComoCompletadoDeps } from './use-cases/usuario/marcar-tutorial-usuario-como-completado.js';
+export { marcarTutorialUsuarioComoCompletado } from './use-cases/usuario/marcar-tutorial-usuario-como-completado.js';
+export type { ObterStatusTutorialUsuarioDeps } from './use-cases/usuario/obter-status-tutorial-usuario.js';
+export { obterStatusTutorialUsuario } from './use-cases/usuario/obter-status-tutorial-usuario.js';
 export type {
   RegistrarContaUsuarioDeps,
   RegistrarContaUsuarioInput,
@@ -964,48 +1028,6 @@ export {
   RegistrarContaUsuarioInputSchema,
   registrarContaUsuario,
 } from './use-cases/usuario/registrar-conta-usuario.js';
-
 // Plan 0018 Phase A (aperture-omswg) — first-time tutorial.
 export type { TutorialStatusResponse } from './use-cases/usuario/tutorial-status-response.js';
 export { TutorialStatusResponseSchema } from './use-cases/usuario/tutorial-status-response.js';
-export type { ObterStatusTutorialUsuarioDeps } from './use-cases/usuario/obter-status-tutorial-usuario.js';
-export { obterStatusTutorialUsuario } from './use-cases/usuario/obter-status-tutorial-usuario.js';
-export type { MarcarTutorialUsuarioComoCompletadoDeps } from './use-cases/usuario/marcar-tutorial-usuario-como-completado.js';
-export { marcarTutorialUsuarioComoCompletado } from './use-cases/usuario/marcar-tutorial-usuario-como-completado.js';
-export { UsuarioNaoEncontradoError } from './errors/usuario/nao-encontrado.error.js';
-
-// aperture-0bynm — recebedor first-time create (backend half of aperture-kbmel).
-export type {
-  CriarRecebedorParaCampanhaDeps,
-  CriarRecebedorParaCampanhaInput,
-  CriarRecebedorParaCampanhaResult,
-} from './use-cases/arrecadacao/criar-recebedor-para-campanha.js';
-export {
-  CriarRecebedorParaCampanhaInputSchema,
-  criarRecebedorParaCampanha,
-} from './use-cases/arrecadacao/criar-recebedor-para-campanha.js';
-export { ArrecadacaoRecebedorJaExisteError } from './errors/arrecadacao/recebedor-ja-existe.error.js';
-
-// aperture-16wrk — admin mensagens backend (5v766 Phase A). SHARED with
-// the frontend (Vance / Phase B) — the schemas + use-case Result types
-// are the contract.
-export type {
-  AdminMensagensResponse,
-  AdminRecadoProjection,
-} from './use-cases/pagamentos/admin-recado-projection.js';
-export {
-  AdminMensagensResponseSchema,
-  AdminRecadoProjectionSchema,
-} from './use-cases/pagamentos/admin-recado-projection.js';
-export type { ObterRecadosAdminDeCampanhaDeps } from './use-cases/pagamentos/obter-recados-admin-de-campanha.js';
-export { obterRecadosAdminDeCampanha } from './use-cases/pagamentos/obter-recados-admin-de-campanha.js';
-export type {
-  MarcarRecadoComoLidoDeps,
-  MarcarRecadoComoLidoResult,
-} from './use-cases/pagamentos/marcar-recado-como-lido.js';
-export { marcarRecadoComoLido } from './use-cases/pagamentos/marcar-recado-como-lido.js';
-export type {
-  MarcarTodosRecadosComoLidosDeps,
-  MarcarTodosRecadosComoLidosResult,
-} from './use-cases/pagamentos/marcar-todos-recados-como-lidos.js';
-export { marcarTodosRecadosComoLidos } from './use-cases/pagamentos/marcar-todos-recados-como-lidos.js';
