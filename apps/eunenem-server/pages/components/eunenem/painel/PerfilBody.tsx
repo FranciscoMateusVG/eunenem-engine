@@ -768,26 +768,39 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
     setTeaDate(isoToBR(d.dataEvento));
     setBirthDate(isoToBR(d.dataNascimento));
     setStory(d.historia ?? "");
+    // aperture-qjgfr — the DTO carries TWO photo field sets (R5/#236):
+    //   fotoXKey = BARE object key   → round-tripped to atualizar as fotoXKey
+    //   fotoXUrl = RESOLVED publicUrl → display only (<img src>)
+    // fotoKeys.current MUST hold bare keys; storing the resolved URL here is
+    // what caused the re-prefix mangling this fix closes.
     fotoKeys.current = {
-      perfil: d.fotoPerfil,
-      capa: d.fotoCapa,
-      historia: d.fotoHistoria,
+      perfil: d.fotoPerfilKey,
+      capa: d.fotoCapaKey,
+      historia: d.fotoHistoriaKey,
     };
-    // Forward-compatible: render whatever getPerfil gives for the photo fields
-    // as <img src>. Today these are keys (broken img until aperture-lq8vw
-    // resolves keys→publicUrls server-side); then reload-display "just works".
-    setFotoUrls({ perfil: d.fotoPerfil, capa: d.fotoCapa, historia: d.fotoHistoria });
+    setFotoUrls({
+      perfil: d.fotoPerfilUrl,
+      capa: d.fotoCapaUrl,
+      historia: d.fotoHistoriaUrl,
+    });
     setTweaks({ babyName: d.nomeBebe ?? "" });
     hydrated.current = true;
   }, [perfilQuery.data, slug, setTweaks]);
 
   const atualizar = trpc.perfil.atualizar.useMutation({
     onSuccess: (updated) => {
+      // Re-seed from the fresh DTO: bare keys → round-trip ref, resolved urls
+      // → display. After the extrairKey strip these are always single-prefixed.
       fotoKeys.current = {
-        perfil: updated.fotoPerfil,
-        capa: updated.fotoCapa,
-        historia: updated.fotoHistoria,
+        perfil: updated.fotoPerfilKey,
+        capa: updated.fotoCapaKey,
+        historia: updated.fotoHistoriaKey,
       };
+      setFotoUrls({
+        perfil: updated.fotoPerfilUrl,
+        capa: updated.fotoCapaUrl,
+        historia: updated.fotoHistoriaUrl,
+      });
       setTweaks({ babyName: updated.nomeBebe ?? babyName.trim() });
       utils.perfil.getPerfil.setData(undefined, updated);
       toast.success("Tudo salvo! Feito com carinho ♡");
