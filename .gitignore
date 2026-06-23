@@ -13,3 +13,6 @@ projectStructure.cache.json
 test-results/
 playwright-report/
 playwright/.cache/
+
+# also ignore a stray node_modules symlink/file (the dir pattern above only matches dirs)
+node_modules
