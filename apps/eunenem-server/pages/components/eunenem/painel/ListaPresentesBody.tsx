@@ -219,11 +219,10 @@ interface DraftFields {
   price: string;
   qty: number;
   category: ListaCategory;
-  note: string;
 }
 
 function emptyDraft(): DraftFields {
-  return { title: "", price: "", qty: 1, category: "personalizado", note: "" };
+  return { title: "", price: "", qty: 1, category: "personalizado" };
 }
 
 /* ─── Grouping ─── */
@@ -618,15 +617,6 @@ function PersonalizadoForm({
             ))}
           </select>
         </div>
-        <div className="lista-field lista-field-full">
-          <label htmlFor="lista-note">recadinho opcional</label>
-          <input
-            id="lista-note"
-            placeholder="um detalhe pra contar pros convidados..."
-            value={f.note}
-            onChange={(e) => setF({ ...f, note: e.target.value })}
-          />
-        </div>
       </div>
     </>
   );
@@ -1004,7 +994,7 @@ function AddGiftModal({
 
   const submitPersonalizado = () => {
     if (!personValid || submitting) return;
-    onSubmitPersonalizado({ ...f, title: f.title.trim(), note: f.note.trim() });
+    onSubmitPersonalizado({ ...f, title: f.title.trim() });
   };
 
   const submitCatalogo = () => {
@@ -1139,7 +1129,7 @@ function EditItemModal({
 
   const submit = () => {
     if (!valid || submitting) return;
-    onSubmit({ ...f, title: f.title.trim(), note: f.note.trim() });
+    onSubmit({ ...f, title: f.title.trim() });
   };
 
   return (
@@ -1511,10 +1501,6 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
           ? "1 mimo adicionado à sua lista ♡"
           : `${n} mimos adicionados à sua lista ♡`,
       );
-      // aperture-0ph83: the optional `note` (recadinho) is collected but not
-      // yet persisted server-side — the contribuicao contract doesn't carry
-      // a note field. Follow-up bead can wire it once the schema accepts it.
-      void draft.note;
     } catch (err) {
       toast.error(contribuicaoErrorMessage(toContribuicaoError(err)));
     }
@@ -1925,7 +1911,6 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
             price: editItem.price.toFixed(2).replace(".", ","),
             qty: editItem.qty,
             category: editItem.category,
-            note: "",
           }}
           onClose={() => setEditItem(null)}
           onSubmit={saveEdit}
