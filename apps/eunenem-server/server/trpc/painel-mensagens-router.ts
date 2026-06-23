@@ -30,7 +30,7 @@ import type { Campanha } from '../../../../src/domain/arrecadacao/entities/campa
 import type { IdCampanha } from '../../../../src/domain/arrecadacao/value-objects/ids.js';
 import type { IdPagamento } from '../../../../src/domain/pagamentos/value-objects/ids.js';
 import type { Usuario } from '../../../../src/domain/usuario/entities/usuario.js';
-import type { SlugUsuario } from '../../../../src/domain/usuario/value-objects/slug.js';
+import type { SlugUsuario } from '../../../../src/domain/usuario/value-objects/slug-usuario.js';
 import { PagamentoNaoEncontradoError } from '../../../../src/errors/pagamentos/nao-encontrado.error.js';
 import { marcarRecadoComoLido } from '../../../../src/use-cases/pagamentos/marcar-recado-como-lido.js';
 import { marcarTodosRecadosComoLidos } from '../../../../src/use-cases/pagamentos/marcar-todos-recados-como-lidos.js';

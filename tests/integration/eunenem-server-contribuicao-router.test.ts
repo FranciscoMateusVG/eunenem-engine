@@ -4,7 +4,8 @@
  * Validates the full HTTP-tRPC pipeline end-to-end:
  *   - Session resolution (cookie → idUsuario → idConta → campanha → opção presente)
  *   - Multi-tenant boundary (user B cannot mutate user A's contribuicoes)
- *   - Status guards (indisponivel contribuicoes are immutable)
+ *   - Sold-slot guards (Plan 0015/0016: update is unguarded; delete refuses
+ *     slots with an aprovado pagamento referencing them)
  *   - Error mapping (domain errors → tRPCError codes)
  *
  * Uses in-memory adapters (no Postgres dependency — fast, hermetic). The
@@ -22,6 +23,7 @@ import { appRouter } from '../../apps/eunenem-server/server/trpc/router.js';
 import { CampanhaRepositoryMemory } from '../../src/adapters/arrecadacao/campanha-repository.memory.js';
 import { ContribuicaoRepositoryMemory } from '../../src/adapters/arrecadacao/contribuicao-repository.memory.js';
 import { RecebedorRepositoryMemory } from '../../src/adapters/arrecadacao/recebedor-repository.memory.js';
+import { PagamentoRepositoryMemory } from '../../src/adapters/pagamentos/repository.memory.js';
 import {
   ID_PLATAFORMA_EUNENEM,
   PlataformaRepositoryMemory,
@@ -29,6 +31,11 @@ import {
 import { AuthServiceMemoria } from '../../src/adapters/usuario/auth-service.memory.js';
 import { UsuarioRepositoryMemory } from '../../src/adapters/usuario/repository.memory.js';
 import { criarRecebedorInicial } from '../../src/domain/arrecadacao/entities/recebedor.js';
+import { criarItemContribuicao } from '../../src/domain/pagamentos/entities/item-do-pagamento.js';
+import {
+  criarPagamentoPendente,
+  type Pagamento,
+} from '../../src/domain/pagamentos/entities/pagamento.js';
 import { NoopLogger } from '../../src/observability/noop-logger.js';
 import type { Observability } from '../../src/observability/observability.js';
 import { noopTracer } from '../../src/observability/tracer.js';
@@ -81,6 +88,12 @@ function buildTestRig(): TestRig {
   const recebedorRepository = new RecebedorRepositoryMemory();
   const campanhaRepository = new CampanhaRepositoryMemory(recebedorRepository);
   const contribuicaoRepository = new ContribuicaoRepositoryMemory();
+  // Plan 0016 (aperture-eg1s2): contribuicao.list / create / update / delete
+  // all reach pagamentoRepository.somarQuantidadesContribuicoesEm-
+  // PagamentosAprovados to derive the esgotada/quantidadeRestante predicate.
+  // Real in-memory repo (empty = nothing sold) — the previous omission left
+  // it undefined and every projection path threw.
+  const pagamentoRepository = new PagamentoRepositoryMemory();
 
   // Minimal ServerDeps shape — only the fields actually read by the
   // contribuicao/auth routers. `auth` is unused by contribuicao-router so
@@ -94,6 +107,7 @@ function buildTestRig(): TestRig {
     campanhaRepository,
     contribuicaoRepository,
     recebedorRepository,
+    pagamentoRepository,
     observability,
     clock: () => new Date(),
     sessionCookieName: SESSION_COOKIE,
@@ -220,6 +234,52 @@ function requireAt<T>(arr: readonly T[], index: number): T {
   return v;
 }
 
+/**
+ * Build an `aprovado` Pagamento whose cart references `idContribuicao` with
+ * the given `quantidade`. Plan 0015/0016: a slot is "locked" against delete
+ * iff `somarQuantidadesContribuicoesEmPagamentosAprovados` returns a
+ * positive sum for it — i.e. there's at least one aprovado pagamento item
+ * pointing at the slot. This is the new way to represent the pre-0015
+ * `status: 'indisponivel'` + contribuinte association the status guard
+ * used to read (those fields were dropped from the Contribuicao entity).
+ * Mirrors the fixture in tests/unit/arrecadacao/quantidade-restante.test.ts.
+ */
+function makeAprovadoPagamento(idContribuicao: string, quantidade: number): Pagamento {
+  const item = criarItemContribuicao({
+    id: randomUUID() as never,
+    composicaoValoresItem: {
+      tipo: 'contribuicao',
+      idContribuicao: idContribuicao as never,
+      quantidade,
+      contributionUnitAmountCents: 100 as never,
+      feeUnitAmountCents: 10 as never,
+      receiverUnitAmountCents: 100 as never,
+      lineContributionAmountCents: (100 * quantidade) as never,
+      lineFeeAmountCents: (10 * quantidade) as never,
+      lineReceiverAmountCents: (100 * quantidade) as never,
+    },
+    criadoEm: new Date(),
+  });
+  const base = criarPagamentoPendente({
+    idPagamento: randomUUID() as never,
+    idIntencaoPagamento: randomUUID() as never,
+    items: [item],
+    composicaoValoresAggregate: {
+      idCampanha: randomUUID() as never,
+      totalContributionCents: (100 * quantidade) as never,
+      totalFeeCents: (10 * quantidade) as never,
+      totalReceiverCents: (100 * quantidade) as never,
+      totalSurchargeCents: 0,
+      totalPaidCents: (110 * quantidade) as never,
+      responsavelTaxa: 'contribuinte',
+    },
+    valorACobrarCents: (110 * quantidade) as never,
+    metodo: 'pix',
+    criadoEm: new Date(),
+  });
+  return { ...base, status: 'aprovado' as const };
+}
+
 // ── tRPC caller helpers ────────────────────────────────────────────────────
 
 /**
@@ -262,17 +322,25 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
   });
 
   describe('happy path — create / list / update / delete', () => {
-    it('signed-in user can create 8 contribuicoes, list 8, update one, delete 2, list 6', async () => {
+    it('signed-in user can create 8 slots, list 8, update one, delete 2, list 6', async () => {
       const alice = await seedUserWithCampanha(rig, {
         handle: 'alice',
         email: 'alice@test.local',
       });
       const caller = rig.callerFor(alice.cookieHeader);
 
-      const created = (await caller.contribuicao.create({
-        nome: 'Fralda P',
-        valor: 5000,
-        quantidade: 8,
+      // Plan 0016 (aperture-putz5, locked decision #1): `create` produces
+      // ONE row per call with `quantidade=N`, NOT N rows. To exercise the
+      // multi-slot list/update/delete flow we createBulk 8 DISTINCT slots
+      // (each quantidade=1) → 8 rows. (Pre-0016 this test used
+      // `create({ quantidade: 8 })` to fan out into 8 identical rows — the
+      // row-multiplier pattern that 0016 retired.)
+      const created = (await caller.contribuicao.createBulk({
+        items: Array.from({ length: 8 }, (_, i) => ({
+          nome: `Fralda P ${i}`,
+          valor: 5000,
+          quantidade: 1,
+        })),
       })) as { ids: string[] };
       expect(created.ids).toHaveLength(8);
 
@@ -280,11 +348,16 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
         id: string;
         nome: string;
         valor: number;
-        status: string;
+        quantidade: number;
+        quantidadeRestante: number;
+        indisponivel: boolean;
       }>;
       expect(list1).toHaveLength(8);
-      expect(list1.every((i) => i.nome === 'Fralda P' && i.valor === 5000)).toBe(true);
-      expect(list1.every((i) => i.status === 'disponivel')).toBe(true);
+      expect(list1.every((i) => i.valor === 5000)).toBe(true);
+      // Plan 0015 dropped contribuição.status; the projection now exposes a
+      // derived `indisponivel` predicate (false when nothing is sold).
+      expect(list1.every((i) => i.indisponivel === false)).toBe(true);
+      expect(list1.every((i) => i.quantidade === 1 && i.quantidadeRestante === 1)).toBe(true);
 
       const targetId = requireFirst(created.ids);
       const updated = (await caller.contribuicao.update({
@@ -381,8 +454,16 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
     });
   });
 
-  describe('status guard — claimed contribuicoes are locked', () => {
-    it('update on a claimed contribuicao → BAD_REQUEST contribuicao_locked', async () => {
+  describe('sold-slot guards (Plan 0015/0016)', () => {
+    // Plan 0015 (aperture-ucgok) DROPPED the contribuição.status +
+    // contribuinte fields and the update-time "locked" guard entirely. A
+    // slot is now a pure admin-owned definition: editing it is allowed at
+    // ANY time, even after sales (the existing pagamento snapshot preserves
+    // the price the contribuinte actually paid). The old seed trick — flip
+    // `status: 'indisponivel'` + attach `contribuinte` on the entity — no
+    // longer represents anything (those fields don't exist), so "sold" is
+    // now modeled by an `aprovado` Pagamento whose cart references the slot.
+    it('update on a SOLD contribuicao still SUCCEEDS (Plan 0015 removed the update guard)', async () => {
       const alice = await seedUserWithCampanha(rig, {
         handle: 'alice',
         email: 'alice@test.local',
@@ -397,24 +478,20 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       })) as { ids: string[] };
       const itemId = requireFirst(create.ids);
 
-      // Lock it via direct repo manipulation (simulates a checkout
-      // associating a contribuinte and flipping status to indisponivel).
-      const existing = await deps.contribuicaoRepository.findById(itemId);
-      if (!existing) throw new Error('seed failed: contribuicao not found');
-      await deps.contribuicaoRepository.save({
-        ...existing,
-        status: 'indisponivel',
-        contribuinte: { nome: 'Visitante', email: 'v@test.local' },
-      });
+      // Mark the slot as sold: an aprovado pagamento referencing it.
+      await deps.pagamentoRepository.save(makeAprovadoPagamento(itemId, 1));
 
-      const err = await expectTrpcError(() =>
-        caller.contribuicao.update({ id: itemId, nome: 'New name' }),
-      );
-      expect(err.code).toBe('BAD_REQUEST');
-      expect(err.message).toBe('contribuicao_locked');
+      const updated = (await caller.contribuicao.update({
+        id: itemId,
+        nome: 'New name',
+      })) as { id: string; nome: string; indisponivel: boolean; quantidadeRestante: number };
+      expect(updated.nome).toBe('New name');
+      // quantidade=1 with 1 sold → esgotada → indisponivel true, restante 0.
+      expect(updated.indisponivel).toBe(true);
+      expect(updated.quantidadeRestante).toBe(0);
     });
 
-    it('delete on a claimed contribuicao → BAD_REQUEST contribuicao_locked', async () => {
+    it('delete on a SOLD contribuicao → BAD_REQUEST contribuicao_locked', async () => {
       const alice = await seedUserWithCampanha(rig, {
         handle: 'alice',
         email: 'alice@test.local',
@@ -429,13 +506,10 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       })) as { ids: string[] };
       const itemId = requireFirst(create.ids);
 
-      const existing = await deps.contribuicaoRepository.findById(itemId);
-      if (!existing) throw new Error('seed failed: contribuicao not found');
-      await deps.contribuicaoRepository.save({
-        ...existing,
-        status: 'indisponivel',
-        contribuinte: { nome: 'Visitante', email: 'v@test.local' },
-      });
+      // Plan 0016 (aperture-eg1s2): removerContribuicao refuses delete when
+      // any aprovado pagamento sums >0 against the slot (referential
+      // integrity for the lançamento ledger). Seed that sold state.
+      await deps.pagamentoRepository.save(makeAprovadoPagamento(itemId, 1));
 
       const err = await expectTrpcError(() => caller.contribuicao.delete({ ids: [itemId] }));
       expect(err.code).toBe('BAD_REQUEST');
@@ -491,26 +565,37 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       expect(list[0]?.nome).toBe('Fralda P');
     });
 
-    it('N=1 item, qty=10 → produces 10 contribuicoes from ONE bulk call', async () => {
+    it('N=1 item, quantidade=10 → produces ONE slot-row with quantidade=10', async () => {
       const alice = await seedUserWithCampanha(rig, {
         handle: 'alice',
         email: 'alice@test.local',
       });
       const caller = rig.callerFor(alice.cookieHeader);
 
+      // Plan 0016 (aperture-putz5, locked decision #1): `quantidade=10` is
+      // ONE row with `quantidade=10`, NOT 10 rows. Pre-0016 this fanned out
+      // into 10 identical quantidade=1 rows (the retired row-multiplier).
       const result = (await caller.contribuicao.createBulk({
         items: [{ nome: 'Pacote Fraldas RN', valor: 8000, quantidade: 10 }],
       })) as { ids: string[] };
-      expect(result.ids).toHaveLength(10);
-      // Unique ids (no accidental dedup or repetition).
-      expect(new Set(result.ids).size).toBe(10);
+      expect(result.ids).toHaveLength(1);
 
-      const list = (await caller.contribuicao.list()) as Array<{ nome: string; valor: number }>;
-      expect(list).toHaveLength(10);
-      expect(list.every((i) => i.nome === 'Pacote Fraldas RN' && i.valor === 8000)).toBe(true);
+      const list = (await caller.contribuicao.list()) as Array<{
+        nome: string;
+        valor: number;
+        quantidade: number;
+        quantidadeRestante: number;
+      }>;
+      expect(list).toHaveLength(1);
+      const [row] = list;
+      expect(row?.nome).toBe('Pacote Fraldas RN');
+      expect(row?.valor).toBe(8000);
+      expect(row?.quantidade).toBe(10);
+      // Nothing sold yet → full capacity remaining.
+      expect(row?.quantidadeRestante).toBe(10);
     });
 
-    it('N=10 items × qty=3 → produces 30 contribuicoes from one bulk call (kit chá de bebê)', async () => {
+    it('N=10 items × quantidade=3 → produces 10 slot-rows, each quantidade=3 (kit chá de bebê)', async () => {
       const alice = await seedUserWithCampanha(rig, {
         handle: 'alice',
         email: 'alice@test.local',
@@ -523,16 +608,22 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
         quantidade: 3,
       }));
 
+      // Plan 0016 (locked decision #1): each catalog item is ONE slot-row
+      // carrying its own `quantidade`. 10 items → 10 rows (not 30).
       const result = (await caller.contribuicao.createBulk({ items })) as { ids: string[] };
-      expect(result.ids).toHaveLength(30);
-      expect(new Set(result.ids).size).toBe(30);
+      expect(result.ids).toHaveLength(10);
+      expect(new Set(result.ids).size).toBe(10);
 
-      const list = (await caller.contribuicao.list()) as Array<{ nome: string }>;
-      expect(list).toHaveLength(30);
-      // Every catalog name appears exactly qty=3 times.
+      const list = (await caller.contribuicao.list()) as Array<{
+        nome: string;
+        quantidade: number;
+      }>;
+      expect(list).toHaveLength(10);
+      // Every catalog name appears exactly once, each carrying quantidade=3.
       for (let i = 0; i < 10; i++) {
         const matches = list.filter((c) => c.nome === `Item kit ${i}`);
-        expect(matches).toHaveLength(3);
+        expect(matches).toHaveLength(1);
+        expect(matches[0]?.quantidade).toBe(3);
       }
     });
 
@@ -619,16 +710,23 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       });
       const caller = rig.callerFor(alice.cookieHeader);
 
+      // Plan 0016 (locked decision #1): `create` produces ONE row with
+      // `quantidade=N` (it delegates to createBulk with a single item),
+      // NOT N rows. Pre-0016 this asserted 4 rows from the row-multiplier.
       const created = (await caller.contribuicao.create({
         nome: 'Fralda P',
         valor: 5000,
         quantidade: 4,
       })) as { ids: string[] };
-      expect(created.ids).toHaveLength(4);
+      expect(created.ids).toHaveLength(1);
 
-      const list = (await caller.contribuicao.list()) as Array<{ nome: string }>;
-      expect(list).toHaveLength(4);
-      expect(list.every((i) => i.nome === 'Fralda P')).toBe(true);
+      const list = (await caller.contribuicao.list()) as Array<{
+        nome: string;
+        quantidade: number;
+      }>;
+      expect(list).toHaveLength(1);
+      expect(list[0]?.nome).toBe('Fralda P');
+      expect(list[0]?.quantidade).toBe(4);
     });
   });
 

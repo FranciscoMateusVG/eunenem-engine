@@ -1,9 +1,15 @@
 /**
  * Integration test for fluxo-exclusividade-contribuicao (fluxo 4).
  *
- * Validates contribution exclusivity in Arrecadação when two visitors attempt
- * checkout on the same item: visitor A reserves the contribution in Postgres,
- * visitor B's checkout fails, and no second pending payment is created.
+ * Validates the "sold out" gate in the checkout saga when two visitors attempt
+ * checkout on the same quantidade=1 item. Plan 0015/0016 (aperture-ucgok /
+ * aperture-eg1s2) replaced the old claim-based exclusivity FSM with a derived
+ * `esgotada` gate: a slot is unavailable once an APROVADO pagamento has sold its
+ * full quantidade. Visitor A starts checkout and A's pagamento settles to
+ * aprovado → the slot is now esgotada → visitor B's checkout is refused with
+ * ArrecadacaoContribuicaoIndisponivelError, and no second pending payment is
+ * created. (Locked decision #6: this is a UX gate, not a concurrency lock — two
+ * visitors who BOTH pass the gate before either settles can both complete.)
  *
  * Arrecadação persists in Postgres via Testcontainers; Taxas/Pagamentos/Usuário
  * use in-memory adapters.
@@ -17,6 +23,7 @@ import { CampanhaRepositoryPostgres } from '../../src/adapters/arrecadacao/campa
 import { ContribuicaoRepositoryPostgres } from '../../src/adapters/arrecadacao/contribuicao-repository.postgres.js';
 import { RecebedorRepositoryPostgres } from '../../src/adapters/arrecadacao/recebedor-repository.postgres.js';
 import { PagamentoEventPublisherMemory } from '../../src/adapters/pagamentos/event-publisher.memory.js';
+import { LivroFinanceiroRepositoryMemory } from '../../src/adapters/pagamentos/financeiro/livro-repository.memory.js';
 import { PagamentoProviderFake } from '../../src/adapters/pagamentos/provider.fake.js';
 import { PagamentoRepositoryMemory } from '../../src/adapters/pagamentos/repository.memory.js';
 import {
@@ -26,12 +33,13 @@ import {
 import { ProvedorRegraTaxaMemory } from '../../src/adapters/taxas/regra-provider.memory.js';
 import { AuthServiceMemoria } from '../../src/adapters/usuario/auth-service.memory.js';
 import { UsuarioRepositoryMemory } from '../../src/adapters/usuario/repository.memory.js';
-import { ArrecadacaoContribuicaoNaoDisponivelError } from '../../src/errors/arrecadacao/contribuicao-nao-disponivel.error.js';
+import { ArrecadacaoContribuicaoIndisponivelError } from '../../src/errors/arrecadacao/contribuicao-indisponivel.error.js';
 import { adicionarOpcaoContribuicao } from '../../src/use-cases/arrecadacao/adicionar-opcao-contribuicao.js';
-import { associarContribuinteContribuicao } from '../../src/use-cases/arrecadacao/associar-contribuinte-contribuicao.js';
 import { criarCampanha } from '../../src/use-cases/arrecadacao/criar-campanha.js';
 import { criarContribuicao } from '../../src/use-cases/arrecadacao/criar-contribuicao.js';
-import { iniciarPagamentoContribuicao } from '../../src/use-cases/checkout/iniciar-pagamento-contribuicao.js';
+import { esgotada } from '../../src/use-cases/arrecadacao/quantidade-restante.js';
+import { finalizarPagamentoAprovado } from '../../src/use-cases/checkout/finalizar-pagamento-aprovado.js';
+import { iniciarPagamentoCarrinho } from '../../src/use-cases/checkout/iniciar-pagamento-carrinho.js';
 import { registrarContaUsuario } from '../../src/use-cases/usuario/registrar-conta-usuario.js';
 import { createTestObservability } from '../helpers/observability.js';
 import { createTestDatabase, type TestDatabase } from '../helpers/test-db.js';
@@ -66,7 +74,8 @@ function makeDeps() {
   const provedorRegraTaxa = new ProvedorRegraTaxaMemory();
   const pagamentoRepository = new PagamentoRepositoryMemory();
   const pagamentoEventPublisher = new PagamentoEventPublisherMemory();
-  const pagamentoProvider = new PagamentoProviderFake();
+  const pagamentoProvider = new PagamentoProviderFake({ statusResultado: 'aprovado', clock });
+  const livroFinanceiroRepository = new LivroFinanceiroRepositoryMemory(recebedorRepository);
   const observability = testObs.observability;
 
   return {
@@ -79,6 +88,7 @@ function makeDeps() {
     pagamentoRepository,
     pagamentoEventPublisher,
     pagamentoProvider,
+    livroFinanceiroRepository,
     observability,
   };
 }
@@ -177,7 +187,7 @@ beforeEach(async () => {
 });
 
 describe('Fluxo — exclusividade de contribuição entre visitantes', () => {
-  it('reserva a contribuição para visitante A e rejeita checkout do visitante B', async () => {
+  it('vende o slot (quantidade=1) para o visitante A e rejeita o checkout do visitante B como esgotado', async () => {
     const {
       deps,
       idCampanha,
@@ -188,9 +198,17 @@ describe('Fluxo — exclusividade de contribuição entre visitantes', () => {
       idIntencaoB,
     } = await seedFluxoBase();
 
+    // Plan 0015/0016: Contribuição has no `status` / `contribuinte` fields.
+    // Availability is derived via esgotada(); contribuinte lives on the aprovado
+    // pagamento's intenção. The freshly-seeded slot is available.
+    const esgotadaArgs = {
+      pagamentoRepository: deps.pagamentoRepository,
+      contribuicaoRepository: deps.contribuicaoRepository,
+      observability: deps.observability,
+    };
     const contribuicaoInicial = await deps.contribuicaoRepository.findById(idContribuicao);
-    expect(contribuicaoInicial?.status).toBe('disponivel');
-    expect(contribuicaoInicial?.contribuinte).toBeNull();
+    expect(contribuicaoInicial?.id).toBe(idContribuicao);
+    expect(await esgotada(esgotadaArgs, { idContribuicao })).toBe(false);
 
     const checkoutDeps = {
       campanhaRepository: deps.campanhaRepository,
@@ -203,61 +221,84 @@ describe('Fluxo — exclusividade de contribuição entre visitantes', () => {
       observability: deps.observability,
     };
 
-    // aperture-m95f3: saga no longer claims the contribuição — claim moves
-    // to finalize via webhook. Two visitors can BOTH start a session; the
-    // first whose webhook fires wins. The saga's new step-2 read-only check
-    // refuses to mount a checkout for a contribuição already claimed.
-    const { contribuicao: contribuicaoAposCheckoutASaga, pagamento: pagamentoA } =
-      await iniciarPagamentoContribuicao(checkoutDeps, {
+    // Plan 0016 (aperture-eg1s2): the saga no longer claims the contribuição at
+    // checkout-start. Both visitors could mount a session; the esgotada gate
+    // only fires once an APROVADO pagamento has sold the slot's full quantidade.
+    const { contribuicoes: contribuicoesAposCheckoutASaga, pagamento: pagamentoA } =
+      await iniciarPagamentoCarrinho(checkoutDeps, {
         idPlataforma: ID_PLATAFORMA_EUNENEM,
         idCampanha,
-        idContribuicao,
+        itens: [{ idContribuicao, quantidade: 1 }],
+        idsItens: [randomUUID()],
         metodo: 'pix',
         idPagamento: idPagamentoA,
         idIntencaoPagamento: idIntencaoA,
         returnUrl: 'https://test.example/sucesso?session_id={CHECKOUT_SESSION_ID}',
       });
 
-    expect(contribuicaoAposCheckoutASaga.status).toBe('disponivel');
-    expect(contribuicaoAposCheckoutASaga.contribuinte).toBeNull();
+    expect(contribuicoesAposCheckoutASaga[0]?.id).toBe(idContribuicao);
+    expect(pagamentoA.intencao.contribuinte).toBeNull();
     expect(pagamentoA.status).toBe('pendente');
+    // Still available — the pendente pagamento doesn't count as sold.
+    expect(await esgotada(esgotadaArgs, { idContribuicao })).toBe(false);
 
-    // Simulate visitor A's webhook firing first — claim the contribuição.
-    await associarContribuinteContribuicao(
-      { contribuicaoRepository: deps.contribuicaoRepository, observability: deps.observability },
-      { idContribuicao, contribuinte: contribuinteVisitanteA() },
+    // Visitor A's webhook fires → pagamento settles to aprovado → the slot is
+    // now sold out (quantidade=1, sold=1 → esgotada). Claim is stamped from the
+    // webhook contribuinte inside finalize.
+    const { pagamento: pagamentoAprovadoA } = await finalizarPagamentoAprovado(
+      {
+        pagamentoRepository: deps.pagamentoRepository,
+        pagamentoProvider: deps.pagamentoProvider,
+        pagamentoEventPublisher: deps.pagamentoEventPublisher,
+        contribuicaoRepository: deps.contribuicaoRepository,
+        campanhaRepository: deps.campanhaRepository,
+        livroFinanceiroRepository: deps.livroFinanceiroRepository,
+        clock,
+        observability: deps.observability,
+      },
+      { idPagamento: idPagamentoA, contribuinte: contribuinteVisitanteA() },
     );
+    expect(pagamentoAprovadoA.status).toBe('aprovado');
 
-    const contribuicaoAposClaimA = await deps.contribuicaoRepository.findById(idContribuicao);
-    expect(contribuicaoAposClaimA?.status).toBe('indisponivel');
-    expect(contribuicaoAposClaimA?.contribuinte).toEqual(contribuinteVisitanteA());
+    // The aprovado pagamento carries the contribuinte and sells out the slot.
+    expect(pagamentoAprovadoA.intencao.contribuinte).toEqual(contribuinteVisitanteA());
+    expect(await esgotada(esgotadaArgs, { idContribuicao })).toBe(true);
 
-    // Visitor B now attempts to start checkout — refused by step-2 early-fail.
+    // Visitor B now attempts to start checkout — refused by the per-item
+    // esgotada gate (step 3) because the slot is sold out.
     await expect(
-      iniciarPagamentoContribuicao(checkoutDeps, {
+      iniciarPagamentoCarrinho(checkoutDeps, {
         idPlataforma: ID_PLATAFORMA_EUNENEM,
         idCampanha,
-        idContribuicao,
+        itens: [{ idContribuicao, quantidade: 1 }],
+        idsItens: [randomUUID()],
         metodo: 'pix',
         idPagamento: idPagamentoB,
         idIntencaoPagamento: idIntencaoB,
         returnUrl: 'https://test.example/sucesso?session_id={CHECKOUT_SESSION_ID}',
       }),
-    ).rejects.toThrow(ArrecadacaoContribuicaoNaoDisponivelError);
+    ).rejects.toThrow(ArrecadacaoContribuicaoIndisponivelError);
 
-    const contribuicaoFinal = await deps.contribuicaoRepository.findById(idContribuicao);
-    expect(contribuicaoFinal?.status).toBe('indisponivel');
-    expect(contribuicaoFinal?.contribuinte).toEqual(contribuinteVisitanteA());
+    // Slot remains sold out and bound to visitor A's contribuinte.
+    expect(await esgotada(esgotadaArgs, { idContribuicao })).toBe(true);
+    const pagamentoAprovadoReload = await deps.pagamentoRepository.findById(idPagamentoA);
+    expect(pagamentoAprovadoReload?.intencao.contribuinte).toEqual(contribuinteVisitanteA());
 
     const pagamentoPersistidoA = await deps.pagamentoRepository.findById(idPagamentoA);
-    expect(pagamentoPersistidoA?.status).toBe('pendente');
+    expect(pagamentoPersistidoA?.status).toBe('aprovado');
 
+    // Visitor B's pagamento was never created — the saga early-failed before
+    // persisting an intenção.
     const pagamentoPersistidoB = await deps.pagamentoRepository.findById(idPagamentoB);
     expect(pagamentoPersistidoB).toBeUndefined();
 
+    // Only visitor A's payment produced events; no intent_created for B.
     const eventos = deps.pagamentoEventPublisher.getEventosPublicados();
-    expect(eventos).toHaveLength(1);
-    expect(eventos[0]?.tipo).toBe('payment.intent_created');
-    expect(eventos[0]?.idPagamento).toBe(idPagamentoA);
+    const eventosB = eventos.filter((e) => e.idPagamento === idPagamentoB);
+    expect(eventosB).toHaveLength(0);
+    const intentCreatedA = eventos.filter(
+      (e) => e.idPagamento === idPagamentoA && e.tipo === 'payment.intent_created',
+    );
+    expect(intentCreatedA).toHaveLength(1);
   });
 });

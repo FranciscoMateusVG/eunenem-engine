@@ -53,6 +53,7 @@ import {
   describePagamentoRepositoryConformance,
   makePagamento,
 } from '../helpers/pagamento-repository.conformance.js';
+import { seedPagamentoParents, withParentSeeding } from '../helpers/seed-pagamento-parents.js';
 import { createTestDatabase, type TestDatabase } from '../helpers/test-db.js';
 import { truncatePagamentosTables } from '../helpers/truncate-pagamentos.js';
 
@@ -75,7 +76,11 @@ afterAll(async () => {
 // the full gate.
 describe('PagamentoRepository conformance — Postgres', () => {
   describePagamentoRepositoryConformance('Postgres', {
-    factory: () => new PagamentoRepositoryPostgres(testDb.db),
+    // Plan 0016 (migrations 022 + 023) added FKs from pagamentos +
+    // intencao_items to campanhas + contribuicoes. The shared rig mints
+    // random ids for those; wrap save/update to seed the FK parents
+    // on-demand so the conformance contract runs against the real schema.
+    factory: () => withParentSeeding(new PagamentoRepositoryPostgres(testDb.db), testDb.db),
     resetState: () => truncatePagamentosTables(testDb.db),
     getSpans: () => testObs.getSpans(),
     resetSpans: () => testObs.reset(),
@@ -100,6 +105,11 @@ describe('PagamentoRepositoryPostgres — Postgres-specific', () => {
     const a = makePagamento({ id });
     const b = makePagamento({ id });
 
+    // Seed FK parents (campanha + contribuição) before racing the saves;
+    // the race itself is on the pagamentos PK / intencao_id uniqueness.
+    await seedPagamentoParents(testDb.db, a);
+    await seedPagamentoParents(testDb.db, b);
+
     const results = await Promise.allSettled([repo.save(a), repo.save(b)]);
 
     const successes = results.filter((r) => r.status === 'fulfilled');
@@ -122,6 +132,11 @@ describe('PagamentoRepositoryPostgres — Postgres-specific', () => {
       ...makePagamento(),
       intencao: { ...a.intencao }, // copy the intencao (same intencao.id)
     };
+
+    // Both share a.intencao (same idCampanha + items); seeding either is
+    // sufficient, but seed both for symmetry / idempotency.
+    await seedPagamentoParents(testDb.db, a);
+    await seedPagamentoParents(testDb.db, b);
 
     const results = await Promise.allSettled([repo.save(a), repo.save(b)]);
 

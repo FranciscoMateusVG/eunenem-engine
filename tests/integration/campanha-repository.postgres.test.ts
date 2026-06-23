@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { sql } from 'kysely';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { CampanhaRepositoryPostgres } from '../../src/adapters/arrecadacao/campanha-repository.postgres.js';
 import { ContribuicaoRepositoryPostgres } from '../../src/adapters/arrecadacao/contribuicao-repository.postgres.js';
@@ -92,12 +93,20 @@ describe('CampanhaRepositoryPostgres — findCampanhasByContribuinte (aperture-2
 
     const email = 'maria@example.com';
 
-    await contribuicaoRepo.save(
-      makeContribuicaoComContribuinte(campanhaA.id, campanhaA.opcoes[0]?.id, 'Maria', email),
-    );
-    await contribuicaoRepo.save(
-      makeContribuicaoComContribuinte(campanhaB.id, campanhaB.opcoes[0]?.id, 'Maria', email),
-    );
+    await seedContribuinteAprovado({
+      contribuicaoRepo,
+      idCampanha: campanhaA.id,
+      idOpcao: campanhaA.opcoes[0]?.id,
+      contribuinteNome: 'Maria',
+      contribuinteEmail: email,
+    });
+    await seedContribuinteAprovado({
+      contribuicaoRepo,
+      idCampanha: campanhaB.id,
+      idOpcao: campanhaB.opcoes[0]?.id,
+      contribuinteNome: 'Maria',
+      contribuinteEmail: email,
+    });
 
     const results = await campanhaRepo.findCampanhasByContribuinte(idPlataforma, email);
     const ids = results.map((c) => c.id).sort();
@@ -110,12 +119,22 @@ describe('CampanhaRepositoryPostgres — findCampanhasByContribuinte (aperture-2
     const campanha = await seedCampanhaWithOpcao({ idPlataforma });
     const email = 'gives-twice@example.com';
 
-    await contribuicaoRepo.save(
-      makeContribuicaoComContribuinte(campanha.id, campanha.opcoes[0]?.id, 'GT', email),
-    );
-    await contribuicaoRepo.save(
-      makeContribuicaoComContribuinte(campanha.id, campanha.opcoes[0]?.id, 'GT', email),
-    );
+    // Two separate aprovado pagamentos (two distinct contribuições) on the
+    // SAME campanha — the DISTINCT in the repo query must collapse them.
+    await seedContribuinteAprovado({
+      contribuicaoRepo,
+      idCampanha: campanha.id,
+      idOpcao: campanha.opcoes[0]?.id,
+      contribuinteNome: 'GT',
+      contribuinteEmail: email,
+    });
+    await seedContribuinteAprovado({
+      contribuicaoRepo,
+      idCampanha: campanha.id,
+      idOpcao: campanha.opcoes[0]?.id,
+      contribuinteNome: 'GT',
+      contribuinteEmail: email,
+    });
 
     const results = await campanhaRepo.findCampanhasByContribuinte(idPlataforma, email);
     expect(results).toHaveLength(1);
@@ -126,14 +145,13 @@ describe('CampanhaRepositoryPostgres — findCampanhasByContribuinte (aperture-2
     const idPlataforma = randomUUID();
     const campanha = await seedCampanhaWithOpcao({ idPlataforma });
 
-    await contribuicaoRepo.save(
-      makeContribuicaoComContribuinte(
-        campanha.id,
-        campanha.opcoes[0]?.id,
-        'CaseTest',
-        'Maria.Silva@Example.COM',
-      ),
-    );
+    await seedContribuinteAprovado({
+      contribuicaoRepo,
+      idCampanha: campanha.id,
+      idOpcao: campanha.opcoes[0]?.id,
+      contribuinteNome: 'CaseTest',
+      contribuinteEmail: 'Maria.Silva@Example.COM',
+    });
 
     const results = await campanhaRepo.findCampanhasByContribuinte(
       idPlataforma,
@@ -149,12 +167,20 @@ describe('CampanhaRepositoryPostgres — findCampanhasByContribuinte (aperture-2
     const campanhaB = await seedCampanhaWithOpcao({ idPlataforma: idPlataformaB });
     const email = 'multi-tenant@example.com';
 
-    await contribuicaoRepo.save(
-      makeContribuicaoComContribuinte(campanhaA.id, campanhaA.opcoes[0]?.id, 'MT', email),
-    );
-    await contribuicaoRepo.save(
-      makeContribuicaoComContribuinte(campanhaB.id, campanhaB.opcoes[0]?.id, 'MT', email),
-    );
+    await seedContribuinteAprovado({
+      contribuicaoRepo,
+      idCampanha: campanhaA.id,
+      idOpcao: campanhaA.opcoes[0]?.id,
+      contribuinteNome: 'MT',
+      contribuinteEmail: email,
+    });
+    await seedContribuinteAprovado({
+      contribuicaoRepo,
+      idCampanha: campanhaB.id,
+      idOpcao: campanhaB.opcoes[0]?.id,
+      contribuinteNome: 'MT',
+      contribuinteEmail: email,
+    });
 
     const fromA = await campanhaRepo.findCampanhasByContribuinte(idPlataformaA, email);
     expect(fromA.map((c) => c.id)).toEqual([campanhaA.id]);
@@ -180,37 +206,98 @@ describe('CampanhaRepositoryPostgres — findCampanhasByContribuinte (aperture-2
   });
 });
 
-// ───── helper for building an "indisponivel" contribuicao with a known
-//       contribuinte. Uses the entity factories so we always produce a
-//       valid aggregate.
+// ───── helper for seeding the NEW (Plan 0015 + 0016) shape that
+//       `findCampanhasByContribuinte` actually queries.
+//
+//   Plan 0015 (aperture-ucgok): contribuinte data moved OFF contribuicoes
+//   ONTO pagamentos.intencao_contribuinte_* (email/nome/mensagem). The
+//   Contribuição entity is now a pure admin-owned slot definition — no
+//   status, no contribuinte. The factory `criarContribuicaoDisponivel`
+//   was renamed `criarContribuicao` and `contribuicaoComContribuinte`
+//   was removed.
+//
+//   Plan 0016 (aperture-aj8qw, migrations 022+023): a pagamento carries
+//   N contribuição-tipo items in the separate `intencao_items` table
+//   (id_contribuicao, id_pagamento, quantidade). The old per-pagamento
+//   `intencao_id_contribuicao` column on `pagamentos` was retired.
+//
+//   So to make `findCampanhasByContribuinte(idPlataforma, email)` return
+//   a campanha we must seed, per contribuição:
+//     1. a contribuição slot (via `criarContribuicao` + repo) on the
+//        campanha,
+//     2. an APROVADO pagamento carrying `intencao_contribuinte_email = email`,
+//     3. an `intencao_items` row of tipo 'contribuicao' pointing the
+//        pagamento at that contribuição.
+//   The repo joins campanhas → contribuicoes → intencao_items →
+//   pagamentos and filters on the pagamento's contribuinte email +
+//   status='aprovado'.
 
-import {
-  contribuicaoComContribuinte,
-  criarContribuicaoDisponivel,
-} from '../../src/domain/arrecadacao/entities/contribuicao.js';
+import { criarContribuicao } from '../../src/domain/arrecadacao/entities/contribuicao.js';
 import type {
   IdCampanha,
   IdOpcaoContribuicao,
 } from '../../src/domain/arrecadacao/value-objects/ids.js';
 
-function makeContribuicaoComContribuinte(
-  idCampanha: string,
-  idOpcao: string | undefined,
-  contribuinteNome: string,
-  contribuinteEmail: string,
-) {
-  const base = criarContribuicaoDisponivel({
+/**
+ * Seed a contribuição slot + an aprovado pagamento (carrying the
+ * contribuinte email) + the intencao_items row binding them. Mirrors the
+ * post-0016 multi-item shape the repo query traverses.
+ */
+async function seedContribuinteAprovado(args: {
+  contribuicaoRepo: ContribuicaoRepositoryPostgres;
+  idCampanha: string;
+  idOpcao: string | undefined;
+  contribuinteNome: string;
+  contribuinteEmail: string;
+}): Promise<void> {
+  const contribuicao = criarContribuicao({
     id: randomUUID() as never,
-    idCampanha: idCampanha as IdCampanha,
-    idOpcaoContribuicao: (idOpcao ?? randomUUID()) as IdOpcaoContribuicao,
+    idCampanha: args.idCampanha as IdCampanha,
+    idOpcaoContribuicao: (args.idOpcao ?? randomUUID()) as IdOpcaoContribuicao,
     nome: 'Test Item',
     valor: 5000 as never,
     imagemUrl: null,
     grupo: null,
+    quantidade: 1,
     criadaEm: new Date(),
   });
-  return contribuicaoComContribuinte(base, {
-    nome: contribuinteNome,
-    email: contribuinteEmail,
-  });
+  await args.contribuicaoRepo.save(contribuicao);
+
+  const pagamentoId = randomUUID();
+  const intencaoId = randomUUID();
+  // Aprovado pagamento carrying the contribuinte snapshot. The cart-scope
+  // invariant FK `intencao_id_campanha` points at the same campanha the
+  // contribuição belongs to.
+  await sql`
+    INSERT INTO pagamentos (
+      id, status, criado_em, atualizado_em,
+      intencao_id, intencao_id_campanha, intencao_metodo, intencao_criada_em,
+      intencao_total_paid_cents, intencao_total_contribution_cents,
+      intencao_total_fee_cents, intencao_total_receiver_cents,
+      intencao_total_surcharge_cents,
+      intencao_contribuinte_nome, intencao_contribuinte_email
+    ) VALUES (
+      ${pagamentoId}, 'aprovado', now(), now(),
+      ${intencaoId}, ${args.idCampanha}, 'credit_card', now(),
+      5000, 5000, 0, 5000, 0,
+      ${args.contribuinteNome}, ${args.contribuinteEmail}
+    )
+  `.execute(testDb.db);
+
+  // The contribuicao-tipo item linking the pagamento to the contribuição.
+  await sql`
+    INSERT INTO intencao_items (
+      id, id_pagamento, id_intencao_pagamento, position, tipo,
+      id_contribuicao, quantidade,
+      contribution_unit_amount_cents, fee_unit_amount_cents,
+      receiver_unit_amount_cents, line_contribution_amount_cents,
+      line_fee_amount_cents, line_receiver_amount_cents,
+      criado_em
+    ) VALUES (
+      ${randomUUID()}, ${pagamentoId}, ${intencaoId}, 0, 'contribuicao',
+      ${contribuicao.id}, 1,
+      5000, 0, 5000, 5000, 0, 5000,
+      now()
+    )
+  `.execute(testDb.db);
 }

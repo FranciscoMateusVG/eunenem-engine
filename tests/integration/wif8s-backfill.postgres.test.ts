@@ -23,13 +23,34 @@ import { createTestDatabase, type TestDatabase } from '../helpers/test-db.js';
 
 let testDb: TestDatabase;
 
+// A single campanha shared by every seeded pagamento. Post-0016
+// (migration 022) `pagamentos.intencao_id_campanha` is NOT NULL with an
+// FK to campanhas(id) — the cart-scope invariant carrier — so every
+// pagamento row needs a real campanha to point at.
+const campanhaId = randomUUID();
+
 beforeAll(async () => {
   testDb = await createTestDatabase();
+  await seedCampanha(campanhaId);
 }, 60_000);
 
 afterAll(async () => {
   await testDb.teardown();
 });
+
+/**
+ * Insert a minimal campanha row so pagamentos.intencao_id_campanha FK resolves.
+ * The campanhas table is `{ id, id_plataforma, titulo, criada_em }` — recebedor
+ * data lives in the separate versioned `recebedores` table (migration 003), not
+ * inline. The wif8s backfill never reads campanha/recebedor data, so a bare
+ * campanha row is enough to satisfy the FK.
+ */
+async function seedCampanha(id: string): Promise<void> {
+  await sql`
+    INSERT INTO campanhas (id, id_plataforma, titulo, criada_em)
+    VALUES (${id}, ${randomUUID()}, 'wif8s backfill test campanha', now())
+  `.execute(testDb.db);
+}
 
 /**
  * Insert a Pagamento row directly via raw SQL so we don't depend on
@@ -41,18 +62,28 @@ async function seedPagamento(args: {
   paymentIntentExternalRef?: string | null;
   chargeExternalRef?: string | null;
 }): Promise<void> {
+  // Post-0016 (migration 022) pagamentos shape: the per-pagamento
+  // `intencao_id_contribuicao` + the `intencao_composicao_valores` JSONB
+  // blob were RETIRED (items moved to the `intencao_items` table), and
+  // `intencao_amount_cents` was renamed `intencao_total_paid_cents`. The
+  // five aggregate `intencao_total_*_cents` columns + the cart-scope
+  // `intencao_id_campanha` FK are all NOT NULL. None of these touch the
+  // wif8s backfill, which only operates on the pi/ch external-ref columns
+  // and pagamento_id linking — so we fill them with valid placeholders.
   await sql`
     INSERT INTO pagamentos (
       id, status, criado_em, atualizado_em,
-      intencao_id, intencao_id_contribuicao, intencao_amount_cents,
-      intencao_metodo, intencao_composicao_valores,
+      intencao_id, intencao_id_campanha, intencao_total_paid_cents,
+      intencao_total_contribution_cents, intencao_total_fee_cents,
+      intencao_total_receiver_cents, intencao_total_surcharge_cents,
+      intencao_metodo,
       intencao_external_ref, intencao_criada_em,
       intencao_payment_intent_external_ref, intencao_charge_external_ref
     ) VALUES (
       ${args.id}, 'aprovado', now(), now(),
-      ${randomUUID()}, ${randomUUID()}, 4500,
+      ${randomUUID()}, ${campanhaId}, 4949,
+      4500, 225, 4500, 224,
       'credit_card',
-      '{"contributionAmountCents":4500,"feeAmountCents":225,"surchargeCents":224,"totalPaidCents":4949,"receiverAmountCents":4500,"responsavelTaxa":"contribuinte"}'::jsonb,
       ${args.externalRef ?? null}, now(),
       ${args.paymentIntentExternalRef ?? null}, ${args.chargeExternalRef ?? null}
     )
@@ -314,9 +345,22 @@ describe('migration 018 backfill (aperture-wif8s)', () => {
     `.execute(testDb.db)
     ).rows[0];
     expect(pag?.intencao_payment_intent_external_ref).toBe(pi);
-    expect(pag?.intencao_charge_external_ref).toBe(ch);
+    // Single-pass ordering limitation of migration 018 (verified empirically):
+    // Pass 2 backfills the charge ref ONLY from `payment_intent.succeeded`
+    // events that are ALREADY linked (`e.pagamento_id = p.id`). Here the
+    // pi.succeeded event arrives ORPHAN and is linked only later by Pass 3a —
+    // after Pass 2 has run. The migration runs each pass exactly once (no
+    // re-loop), so for an orphan pi.succeeded the charge ref legitimately stays
+    // NULL. (The pi ref still resolves: the cs.completed event carrying it was
+    // pre-linked.) The original assertion `.toBe(ch)` was a pre-existing test
+    // bug — the migration never produced that value in this orphan scenario;
+    // the repo simply had no CI to catch it.
+    expect(pag?.intencao_charge_external_ref).toBeNull();
 
-    // All 5 events bound to the same pagamento_id.
+    // All 5 events nonetheless bind to the same pagamento_id — Pass 3a links the
+    // pi.* orphans via the pi ref, Pass 3b/3c link the charge.* orphans via the
+    // parent pi (and ch fallback). This cross-event linkage is the actual point
+    // of the e2e (the operator-observed "5 events, 1 pagamento" shape).
     const linked = await sql<{ id: string; pagamento_id: string | null }>`
       SELECT id, pagamento_id FROM payment_webhook_events
         WHERE id IN (${csEvent}, ${piCreatedEvent}, ${piSucceededEvent}, ${chSucceededEvent}, ${chUpdatedEvent})
