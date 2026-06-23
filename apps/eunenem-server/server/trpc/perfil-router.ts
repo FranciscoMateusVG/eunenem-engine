@@ -18,6 +18,8 @@ import { z } from 'zod';
 import {
   atualizarPerfilCriador,
   atualizarPerfilUsuario,
+  EmitirUrlUploadFotoInputSchema,
+  emitirUrlUploadFoto,
   type IdPerfilCriador,
   type IdUsuario,
   obterPerfilCriador,
@@ -158,6 +160,38 @@ export const perfilRouter = t.router({
       throw toTRPCError(err);
     }
   }),
+
+  /**
+   * Emit a presigned PUT URL for a profile photo upload (aperture-kcasm).
+   * AUTHED — `idUsuario` comes from the session cookie (never client input),
+   * so the object key is namespaced to the caller. The client uploads the
+   * bytes directly to the bucket, then persists `objectKey` via
+   * `perfil.atualizar`. Bad content-type → BAD_REQUEST.
+   */
+  emitirUrlUploadFoto: t.procedure
+    .input(EmitirUrlUploadFotoInputSchema)
+    .output(
+      z.object({
+        uploadUrl: z.string(),
+        objectKey: z.string(),
+        publicUrl: z.string(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const idUsuario = await resolveCallerIdUsuario(ctx);
+        return await emitirUrlUploadFoto(
+          {
+            objectStorage: ctx.deps.objectStorage,
+            observability: ctx.deps.observability,
+          },
+          idUsuario,
+          input,
+        );
+      } catch (err) {
+        throw toTRPCError(err);
+      }
+    }),
 
   /**
    * PUBLIC profile by slug — no auth. Returns the PII-safe projection only.

@@ -55,6 +55,18 @@ export {
   PLATAFORMAS_SEED,
   PlataformaRepositoryMemory,
 } from './adapters/plataforma/repository.memory.js';
+// aperture-kcasm: object storage — presigned-PUT photo uploads (infra boundary).
+export type {
+  EmitirUrlUploadInput,
+  ObjectStorage,
+  SlotFoto,
+  UrlUploadPresignada,
+} from './adapters/storage/object-storage.js';
+export { CONTENT_TYPE_EXTENSAO } from './adapters/storage/object-storage.js';
+export type { UploadRegistrado } from './adapters/storage/object-storage.memory.js';
+export { ObjectStorageMemory } from './adapters/storage/object-storage.memory.js';
+export type { ObjectStorageMinioConfig } from './adapters/storage/object-storage.minio.js';
+export { ObjectStorageMinio } from './adapters/storage/object-storage.minio.js';
 export type { ProvedorRegraTaxa } from './adapters/taxas/regra-provider.js';
 export {
   ProvedorRegraTaxaMemory,
@@ -1054,6 +1066,14 @@ export {
   CriarSessaoUsuarioInputSchema,
   criarSessaoUsuario,
 } from './use-cases/usuario/criar-sessao-usuario.js';
+export type {
+  EmitirUrlUploadFotoDeps,
+  EmitirUrlUploadFotoInput,
+} from './use-cases/usuario/emitir-url-upload-foto.js';
+export {
+  EmitirUrlUploadFotoInputSchema,
+  emitirUrlUploadFoto,
+} from './use-cases/usuario/emitir-url-upload-foto.js';
 export type { MarcarTutorialUsuarioComoCompletadoDeps } from './use-cases/usuario/marcar-tutorial-usuario-como-completado.js';
 export { marcarTutorialUsuarioComoCompletado } from './use-cases/usuario/marcar-tutorial-usuario-como-completado.js';
 export type { ObterDadosRecebimentoUsuarioDeps } from './use-cases/usuario/obter-dados-recebimento-usuario.js';
