@@ -16,6 +16,7 @@ import type { ServerDeps } from '../../apps/eunenem-server/server/auth/setup.js'
 import type { TrpcContext } from '../../apps/eunenem-server/server/trpc/context.js';
 import { appRouter } from '../../apps/eunenem-server/server/trpc/router.js';
 import { ID_PLATAFORMA_EUNENEM } from '../../src/adapters/plataforma/repository.memory.js';
+import { ObjectStorageMemory } from '../../src/adapters/storage/object-storage.memory.js';
 import { PerfilCriadorRepositoryMemory } from '../../src/adapters/usuario/perfil-criador-repository.memory.js';
 import { UsuarioRepositoryMemory } from '../../src/adapters/usuario/repository.memory.js';
 import { NoopLogger } from '../../src/observability/noop-logger.js';
@@ -73,6 +74,7 @@ async function buildRig(): Promise<Rig> {
     authService: authService as never,
     usuarioRepository,
     perfilCriadorRepository,
+    objectStorage: new ObjectStorageMemory(),
     plataformaRepository: {} as never,
     observability,
     clock: () => FAKE_NOW,
@@ -125,7 +127,8 @@ describe('perfil router', () => {
     expect(got.tipoEvento).toBe('cha-bebe');
     expect(got.dataEvento).toBe('2026-08-01T00:00:00.000Z');
     expect(got.dataNascimento).toBe('2026-09-15T00:00:00.000Z');
-    expect(got.fotoPerfil).toBe('perfis/helena/perfil.jpg');
+    // Resolved key → public URL (aperture-lq8vw); fake adapter mints memory:// URLs.
+    expect(got.fotoPerfil).toBe('memory://eunenem-perfil-fotos/perfis/helena/perfil.jpg');
   });
 
   it('getPerfilPublicoBySlug returns the projection', async () => {

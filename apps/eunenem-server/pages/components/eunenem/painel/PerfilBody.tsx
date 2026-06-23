@@ -1,5 +1,6 @@
 
 import { useEffect, useRef, useState } from "react";
+import Cropper from "react-easy-crop";
 import { toast } from "sonner";
 
 import { useTweaks } from "@/components/eunenem/TweaksContext";
@@ -213,39 +214,215 @@ function Field({
   );
 }
 
-// aperture-ou9bp — single upload slot for the "fotos da página" 3-grid.
-// Header row (pink mini-tile + plum label) over a dashed-border dropzone
-// with a + circle + CTA. Stub upload only: file becomes a local
-// URL.createObjectURL preview, no fetch. (Real presigned upload is V4.)
-function PhotoSlot({
-  id,
-  label,
-  cta,
-  toastLabel,
-  file,
-  onFile,
-}: {
-  id: string;
-  label: string;
-  cta: string;
-  toastLabel: string;
-  file: File | null;
-  onFile: (file: File | null) => void;
-}) {
-  const inputRef = useRef<HTMLInputElement | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+// aperture-w4afb (V4) — per-slot photo config. Aspect is LOCKED in the cropper
+// so the creator sees exactly the crop that will show. Slot keys match the
+// contract's emitirUrlUploadFoto slot enum ('perfil'|'capa'|'historia').
+const SLOT_CONFIG = {
+  perfil: { label: "Foto de Perfil", cta: "escolher foto para Perfil", aspect: 1 },
+  capa: { label: "Foto de Capa", cta: "escolher foto para Capa", aspect: 5 / 4 },
+  historia: { label: "Foto de História", cta: "escolher foto para História", aspect: 7 / 8 },
+} as const;
+type FotoSlot = keyof typeof SLOT_CONFIG;
+// Matches the contract's CONTENT_TYPES_PERMITIDOS. We always export JPEG from
+// the cropper, but the type stays a union to match emitirUrlUploadFoto's input.
+type FotoContentType = "image/jpeg" | "image/png" | "image/webp";
 
-  // Mint/revoke object URLs in sync with the chosen file. Revoking on
-  // unmount + on swap keeps blob: URLs from leaking.
+type CropArea = { x: number; y: number; width: number; height: number };
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.addEventListener("load", () => resolve(img));
+    img.addEventListener("error", () => reject(new Error("falha ao carregar imagem")));
+    img.src = src;
+  });
+}
+
+// Draw the cropped region to a canvas → JPEG (always an allowed content-type;
+// transparency isn't needed for these photos).
+async function cropToBlob(imageSrc: string, area: CropArea): Promise<Blob> {
+  const image = await loadImage(imageSrc);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(area.width));
+  canvas.height = Math.max(1, Math.round(area.height));
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("canvas indisponível");
+  ctx.drawImage(image, area.x, area.y, area.width, area.height, 0, 0, area.width, area.height);
+  return await new Promise<Blob>((resolve, reject) =>
+    canvas.toBlob(
+      (b) => (b ? resolve(b) : reject(new Error("falha ao recortar"))),
+      "image/jpeg",
+      0.9,
+    ),
+  );
+}
+
+// Locked-aspect cropper modal (react-easy-crop) → returns the cropped JPEG blob.
+function CropperModal({
+  file,
+  aspect,
+  label,
+  onCancel,
+  onConfirm,
+}: {
+  file: File;
+  aspect: number;
+  label: string;
+  onCancel: () => void;
+  onConfirm: (blob: Blob) => void;
+}) {
+  const [imageSrc, setImageSrc] = useState<string | null>(null);
+  const [crop, setCrop] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [area, setArea] = useState<CropArea | null>(null);
+  const [working, setWorking] = useState(false);
+
   useEffect(() => {
-    if (!file) {
-      setPreviewUrl(null);
-      return;
-    }
     const url = URL.createObjectURL(file);
-    setPreviewUrl(url);
+    setImageSrc(url);
     return () => URL.revokeObjectURL(url);
   }, [file]);
+
+  const confirm = async () => {
+    if (!imageSrc || !area) return;
+    setWorking(true);
+    try {
+      onConfirm(await cropToBlob(imageSrc, area));
+    } catch {
+      toast.error("não consegui recortar a imagem — tenta outra?");
+      setWorking(false);
+    }
+  };
+
+  return (
+    <div
+      className="perfil-cropper-scrim"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Recortar ${label}`}
+      onClick={onCancel}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(26,26,26,0.55)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 80,
+        padding: 16,
+      }}
+    >
+      <div
+        className="perfil-cropper-modal"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "var(--paper)",
+          borderRadius: 18,
+          padding: 16,
+          width: "min(440px, 100%)",
+          boxShadow: "var(--shadow-md)",
+        }}
+      >
+        <div
+          style={{
+            fontFamily: "var(--font-patrick-hand), cursive",
+            fontSize: 20,
+            color: "var(--plum)",
+            marginBottom: 10,
+          }}
+        >
+          recortar {label.toLowerCase()}
+        </div>
+        <div
+          style={{
+            position: "relative",
+            width: "100%",
+            height: 300,
+            background: "#1a1a1a",
+            borderRadius: 12,
+            overflow: "hidden",
+          }}
+        >
+          {imageSrc && (
+            <Cropper
+              image={imageSrc}
+              crop={crop}
+              zoom={zoom}
+              aspect={aspect}
+              onCropChange={setCrop}
+              onZoomChange={setZoom}
+              onCropComplete={(_, areaPixels) => setArea(areaPixels)}
+            />
+          )}
+        </div>
+        <label
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            margin: "14px 0",
+            fontSize: 12,
+            color: "var(--ink-soft)",
+          }}
+        >
+          zoom
+          <input
+            type="range"
+            min={1}
+            max={3}
+            step={0.02}
+            value={zoom}
+            onChange={(e) => setZoom(Number(e.target.value))}
+            aria-label="zoom"
+            style={{ flex: 1 }}
+          />
+        </label>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button
+            type="button"
+            className="perfil-btn perfil-btn-ghost"
+            onClick={onCancel}
+            disabled={working}
+          >
+            <span>cancelar</span>
+          </button>
+          <button
+            type="button"
+            className="perfil-btn perfil-btn-primary"
+            onClick={confirm}
+            disabled={working || !area}
+          >
+            {working ? (
+              <>
+                <span className="perfil-spinner" aria-hidden="true" /> recortando…
+              </>
+            ) : (
+              <span>usar foto</span>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// aperture-w4afb — single photo slot: shows the current photo (or an empty
+// CTA), opens the cropper on pick, then hands the cropped blob to onUpload
+// (presigned PUT + persist). Per-slot locked aspect from SLOT_CONFIG.
+function PhotoSlot({
+  slot,
+  displayUrl,
+  onUpload,
+}: {
+  slot: FotoSlot;
+  displayUrl: string | null;
+  onUpload: (slot: FotoSlot, blob: Blob, contentType: FotoContentType) => Promise<void>;
+}) {
+  const cfg = SLOT_CONFIG[slot];
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const openPicker = () => inputRef.current?.click();
   const handleKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -255,7 +432,20 @@ function PhotoSlot({
     }
   };
 
-  const filled = !!file && !!previewUrl;
+  const onCropped = async (blob: Blob) => {
+    setPendingFile(null);
+    setUploading(true);
+    setError(null);
+    try {
+      await onUpload(slot, blob, "image/jpeg");
+    } catch {
+      setError("não consegui enviar a foto — tenta de novo?");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const filled = !!displayUrl;
 
   return (
     <div className="perfil-foto-slot">
@@ -263,49 +453,85 @@ function PhotoSlot({
         <span className="perfil-foto-icon" aria-hidden="true">
           {ico.photo}
         </span>
-        <span className="perfil-foto-label">{label}</span>
+        <span className="perfil-foto-label">{cfg.label}</span>
       </div>
 
       <div
         className={`perfil-foto-dropzone${filled ? " perfil-foto-dropzone--filled" : ""}`}
         role="button"
         tabIndex={0}
-        aria-label={cta}
+        aria-label={cfg.cta}
         onClick={openPicker}
         onKeyDown={handleKey}
+        style={{ aspectRatio: String(cfg.aspect), position: "relative" }}
       >
-        {filled ? (
+        {uploading ? (
+          <span className="perfil-spinner" aria-hidden="true" />
+        ) : filled ? (
           <img
             className="perfil-foto-preview"
-            src={previewUrl ?? undefined}
-            alt={`${toastLabel} — pré-visualização`}
+            src={displayUrl ?? undefined}
+            alt={`${cfg.label} — atual`}
           />
         ) : (
           <>
             <span className="perfil-foto-plus-circle" aria-hidden="true">
               {ico.plus}
             </span>
-            <span className="perfil-foto-cta">{cta}</span>
+            <span className="perfil-foto-cta">{cfg.cta}</span>
           </>
         )}
       </div>
 
+      {error && (
+        <span
+          className="perfil-field-hint"
+          role="alert"
+          style={{ color: "var(--coral-pink)", fontWeight: 600 }}
+        >
+          {error}
+        </span>
+      )}
+      {filled && !uploading && (
+        <button
+          type="button"
+          className="perfil-foto-replace"
+          onClick={openPicker}
+          style={{
+            marginTop: 8,
+            background: "none",
+            border: "none",
+            color: "var(--lilac-deep)",
+            fontWeight: 600,
+            fontSize: 12,
+            cursor: "pointer",
+          }}
+        >
+          trocar foto
+        </button>
+      )}
+
       <input
         ref={inputRef}
-        id={id}
         className="perfil-foto-input"
         type="file"
-        accept="image/*"
+        accept="image/jpeg,image/png,image/webp"
         onChange={(e) => {
-          const next = e.target.files?.[0] ?? null;
-          if (next) {
-            onFile(next);
-            toast.success(`foto carregada — ${toastLabel}`);
-          }
-          // reset so picking the same file again still fires
+          const f = e.target.files?.[0] ?? null;
+          if (f) setPendingFile(f);
           e.target.value = "";
         }}
       />
+
+      {pendingFile && (
+        <CropperModal
+          file={pendingFile}
+          aspect={cfg.aspect}
+          label={cfg.label}
+          onCancel={() => setPendingFile(null)}
+          onConfirm={onCropped}
+        />
+      )}
     </div>
   );
 }
@@ -510,11 +736,14 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
   const [birthDate, setBirthDate] = useState("");
   const [story, setStory] = useState("");
 
-  // aperture-ou9bp — local-only photo previews (real upload is V4). Existing
-  // keys from getPerfil are held so save round-trips them unchanged.
-  const [fotoPerfil, setFotoPerfil] = useState<File | null>(null);
-  const [fotoCapa, setFotoCapa] = useState<File | null>(null);
-  const [fotoHistoria, setFotoHistoria] = useState<File | null>(null);
+  // aperture-w4afb (V4) — photo display URLs (seeded from getPerfil on hydrate;
+  // set to the presigned publicUrl right after an upload). fotoKeys holds the
+  // objectKeys persisted via atualizar.
+  const [fotoUrls, setFotoUrls] = useState<{
+    perfil: string | null;
+    capa: string | null;
+    historia: string | null;
+  }>({ perfil: null, capa: null, historia: null });
   const fotoKeys = useRef<{
     perfil: string | null;
     capa: string | null;
@@ -544,6 +773,10 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
       capa: d.fotoCapa,
       historia: d.fotoHistoria,
     };
+    // Forward-compatible: render whatever getPerfil gives for the photo fields
+    // as <img src>. Today these are keys (broken img until aperture-lq8vw
+    // resolves keys→publicUrls server-side); then reload-display "just works".
+    setFotoUrls({ perfil: d.fotoPerfil, capa: d.fotoCapa, historia: d.fotoHistoria });
     setTweaks({ babyName: d.nomeBebe ?? "" });
     hydrated.current = true;
   }, [perfilQuery.data, slug, setTweaks]);
@@ -564,6 +797,47 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
     },
   });
 
+  const emitirUpload = trpc.perfil.emitirUrlUploadFoto.useMutation();
+
+  // Single source of truth for the atualizar payload — shared by the manual
+  // save and the photo-upload persist. Dates are parsed defensively (invalid →
+  // null) so a half-typed date never blocks persisting a photo.
+  const currentPayload = () => ({
+    nomeExibicao: creatorName.trim(),
+    nomeBebe: babyName.trim(),
+    relacao: relation.trim() || null,
+    historia: story.trim() || null,
+    dataNascimento: birthDate.trim() ? brToISO(birthDate) : null,
+    tipoEvento: eventType || null,
+    dataEvento: teaDate.trim() ? brToISO(teaDate) : null,
+    fotoPerfilKey: fotoKeys.current.perfil,
+    fotoCapaKey: fotoKeys.current.capa,
+    fotoHistoriaKey: fotoKeys.current.historia,
+  });
+
+  // V4 flow: presign (emitirUrlUploadFoto) → PUT the cropped blob DIRECT to
+  // MinIO → persist the returned objectKey via atualizar → preview shows the
+  // publicUrl immediately. Throws on failure so PhotoSlot surfaces the error.
+  const uploadFoto = async (slot: FotoSlot, blob: Blob, contentType: FotoContentType) => {
+    const { uploadUrl, objectKey, publicUrl } = await emitirUpload.mutateAsync({
+      slot,
+      contentType,
+    });
+    const res = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: { "Content-Type": contentType },
+      body: blob,
+    });
+    if (!res.ok) throw new Error(`upload falhou (${res.status})`);
+    fotoKeys.current = { ...fotoKeys.current, [slot]: objectKey };
+    setFotoUrls((prev) => ({ ...prev, [slot]: publicUrl }));
+    if (babyName.trim() && creatorName.trim()) {
+      atualizar.mutate(currentPayload());
+    } else {
+      toast("foto enviada ♡ — preencha o nome do neném e o seu, depois salve pra guardar");
+    }
+  };
+
   const handleSave = () => {
     if (!babyName.trim()) {
       toast.error("Conta pra gente o nome do neném ♡");
@@ -583,18 +857,9 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
       toast.error("Data de nascimento inválida — use dd/mm/aaaa");
       return;
     }
-    atualizar.mutate({
-      nomeExibicao: creatorName.trim(),
-      nomeBebe: babyName.trim(),
-      relacao: relation.trim() || null,
-      historia: story.trim() || null,
-      dataNascimento,
-      tipoEvento: eventType || null,
-      dataEvento,
-      fotoPerfilKey: fotoKeys.current.perfil,
-      fotoCapaKey: fotoKeys.current.capa,
-      fotoHistoriaKey: fotoKeys.current.historia,
-    });
+    // The dataEvento / dataNascimento locals above gate on validity; currentPayload
+    // re-parses them (same result) and assembles the full payload incl. photo keys.
+    atualizar.mutate(currentPayload());
   };
 
   const saving = atualizar.isPending;
@@ -834,29 +1099,12 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
       {/* 5 — Fotos da página (aperture-ou9bp; upload real = V4) */}
       <PerfilSection icon={ico.camera} title="fotos da página" variant="pink">
         <div className="perfil-fotos-grid">
+          <PhotoSlot slot="perfil" displayUrl={fotoUrls.perfil} onUpload={uploadFoto} />
+          <PhotoSlot slot="capa" displayUrl={fotoUrls.capa} onUpload={uploadFoto} />
           <PhotoSlot
-            id="perfil-foto-avatar"
-            label="Foto de Perfil"
-            cta="escolher foto para Perfil"
-            toastLabel="Perfil"
-            file={fotoPerfil}
-            onFile={setFotoPerfil}
-          />
-          <PhotoSlot
-            id="perfil-foto-capa"
-            label="Foto de Capa"
-            cta="escolher foto para Capa"
-            toastLabel="Capa"
-            file={fotoCapa}
-            onFile={setFotoCapa}
-          />
-          <PhotoSlot
-            id="perfil-foto-historia"
-            label="Foto de História"
-            cta="escolher foto para História"
-            toastLabel="História"
-            file={fotoHistoria}
-            onFile={setFotoHistoria}
+            slot="historia"
+            displayUrl={fotoUrls.historia}
+            onUpload={uploadFoto}
           />
         </div>
       </PerfilSection>

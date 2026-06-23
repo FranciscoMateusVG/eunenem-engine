@@ -173,6 +173,12 @@ class ObjectStorageNaoConfigurado implements ObjectStorage {
   async emitirUrlUploadPresignada(_input: EmitirUrlUploadInput): Promise<UrlUploadPresignada> {
     throw new Error('storage não configurado (MINIO_* ausente)');
   }
+
+  urlPublica(_objectKey: string): string {
+    // Only reached if a profile already has a stored photo key, which can't
+    // happen without MINIO configured (upload requires it). Fail loudly.
+    throw new Error('storage não configurado (MINIO_* ausente)');
+  }
 }
 
 /**

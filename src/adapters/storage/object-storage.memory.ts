@@ -70,4 +70,9 @@ export class ObjectStorageMemory implements ObjectStorage {
       }
     });
   }
+
+  /** Deterministic public URL — same shape as `publicUrl` from a presign. */
+  urlPublica(objectKey: string): string {
+    return `memory://${this.bucket}/${objectKey}`;
+  }
 }

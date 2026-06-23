@@ -135,6 +135,7 @@ export const perfilRouter = t.router({
           {
             usuarioRepository: ctx.deps.usuarioRepository,
             perfilCriadorRepository: ctx.deps.perfilCriadorRepository,
+            objectStorage: ctx.deps.objectStorage,
             observability: ctx.deps.observability,
           },
           idUsuario,
@@ -152,6 +153,7 @@ export const perfilRouter = t.router({
         {
           usuarioRepository: ctx.deps.usuarioRepository,
           perfilCriadorRepository: ctx.deps.perfilCriadorRepository,
+          objectStorage: ctx.deps.objectStorage,
           observability: ctx.deps.observability,
         },
         idUsuario,
@@ -206,6 +208,7 @@ export const perfilRouter = t.router({
           {
             usuarioRepository: ctx.deps.usuarioRepository,
             perfilCriadorRepository: ctx.deps.perfilCriadorRepository,
+            objectStorage: ctx.deps.objectStorage,
             observability: ctx.deps.observability,
           },
           ID_PLATAFORMA_EUNENEM,
