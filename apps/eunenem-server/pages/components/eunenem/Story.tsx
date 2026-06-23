@@ -16,9 +16,17 @@ import { useTweaks } from "./TweaksContext";
 // drifting (any operator override of targetDate left it stale) and
 // the layout reads cleaner without it.
 
-export function Story() {
+// aperture-wocl8 — `historia` is the creator's REAL story text from
+// getPerfilPublicoBySlug (threaded by PaginaPage). When absent we render a
+// neutral placeholder — NEVER the old hardcoded demo prose, which used to bleed
+// a stranger's ("Francisco") life story onto every creator's public page.
+export function Story({ historia }: { historia?: string | null }) {
   const { tweaks } = useTweaks();
   const { babyName, parents } = tweaks;
+  const paragraphs = (historia ?? "")
+    .split(/\n+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
 
   return (
     <section className="eu-section" style={{ background: "var(--cream)" }}>
@@ -66,65 +74,35 @@ export function Story() {
         <div className="grid grid-cols-1 md:grid-cols-[1.1fr_1fr] gap-12 items-center">
           {/* Text */}
           <div>
-            <div
-              style={{
-                fontFamily: "var(--font-caveat), cursive",
-                fontSize: 32,
-                color: "var(--plum)",
-                marginBottom: 16,
-                transform: "rotate(-1.5deg)",
-                display: "inline-block",
-              }}
-            >
-              da primeira listrinha azul até hoje...
-            </div>
-
-            <p
-              style={{
-                color: "var(--ink-soft)",
-                fontSize: 17,
-                lineHeight: 1.7,
-                maxWidth: 520,
-              }}
-            >
-              A gente se conheceu numa tarde de quinta, em uma cafeteria
-              minúscula no Pinheiros, sem fazer ideia de que sete anos
-              depois estaríamos escolhendo o papel de parede do quartinho
-              juntos. ♡
-            </p>
-            <p
-              style={{
-                color: "var(--ink-soft)",
-                fontSize: 17,
-                lineHeight: 1.7,
-                maxWidth: 520,
-                marginTop: 14,
-              }}
-            >
-              O <strong style={{ color: "var(--ink)" }}>{babyName}</strong>{" "}
-              começou a se anunciar em outubro, com um teste feito às
-              pressas no banheiro de casa e um abraço daqueles que apertam
-              até doer. Desde então é ele puxando a gente — escolhendo
-              nomes, mandando soluço às 3 da manhã, virando o nosso
-              planejamento de cabeça pra baixo (do melhor jeito possível).
-            </p>
-            <p
-              style={{
-                color: "var(--ink-soft)",
-                fontSize: 17,
-                lineHeight: 1.7,
-                maxWidth: 520,
-                marginTop: 14,
-              }}
-            >
-              Esse chá é a nossa forma de te abraçar de volta.{" "}
-              <strong style={{ color: "var(--ink)" }}>
-                Cada presente vai direto pro cantinho dele
-              </strong>{" "}
-              — fralda, banho, berço, primeiras roupinhas — e o que sobrar
-              vira poupança pro primeiro ano. Obrigada por estar aqui com a
-              gente. ♡
-            </p>
+            {paragraphs.length > 0 ? (
+              paragraphs.map((para, i) => (
+                <p
+                  key={i}
+                  style={{
+                    color: "var(--ink-soft)",
+                    fontSize: 17,
+                    lineHeight: 1.7,
+                    maxWidth: 520,
+                    marginTop: i === 0 ? 0 : 14,
+                    whiteSpace: "pre-line",
+                  }}
+                >
+                  {para}
+                </p>
+              ))
+            ) : (
+              <p
+                style={{
+                  color: "var(--ink-soft)",
+                  fontSize: 17,
+                  lineHeight: 1.7,
+                  maxWidth: 520,
+                  fontStyle: "italic",
+                }}
+              >
+                a família ainda está escrevendo essa história ♡
+              </p>
+            )}
 
             <div
               style={{
