@@ -76,13 +76,23 @@ services:
   # stack via the Dokploy domain storage-eunenem.<host> → :9000 so browser
   # presigned PUTs reach it. Console at :9001 for admin; data persists across
   # deploys via the named volume.
+  #
+  # SECURITY (aperture-5667u): the `:?` interpolation is mandatory, not
+  # cosmetic. Bare `${MINIO_ROOT_USER}` interpolates to an EMPTY string when
+  # Dokploy's env doesn't set it, and MinIO treats empty root creds as
+  # "fall back to minioadmin:minioadmin" → wide-open admin on boot (and the
+  # admin API shares the public :9000 ingress). `:?` makes `docker compose up`
+  # FAIL FAST if the var is unset/empty, so the container can never silently
+  # boot on default credentials. Both vars MUST be set in the Dokploy env
+  # store (strong non-default username + `openssl rand -hex 32` password) on
+  # every stack. Mirrors the guard merged to main in #229.
   eunenem-minio:
     image: minio/minio:latest
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required — set a strong non-default value in the Dokploy env store (see aperture-5667u)}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required — set a strong random value (openssl rand -hex 32) in the Dokploy env store (see aperture-5667u)}
     volumes:
       - eunenem-minio-data:/data
 
