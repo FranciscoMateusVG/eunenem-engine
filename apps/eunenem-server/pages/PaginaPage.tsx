@@ -10,7 +10,6 @@ import { Marketplace } from '@/components/eunenem/Marketplace';
 import { Messages } from '@/components/eunenem/Messages';
 import { Navbar } from '@/components/eunenem/Navbar';
 import { Story } from '@/components/eunenem/Story';
-import { TweaksPanel } from '@/components/eunenem/TweaksPanel';
 import { TweaksProvider } from '@/components/eunenem/TweaksContext';
 import { CartProvider } from '@/lib/cart.js';
 
@@ -42,7 +41,6 @@ export function PaginaPage({ slug }: { slug: string }) {
             <Messages slug={slug} />
           </main>
           <Footer />
-          <TweaksPanel />
           <CartDrawerMount slug={slug} />
         </CartDrawerProvider>
       </CartProvider>

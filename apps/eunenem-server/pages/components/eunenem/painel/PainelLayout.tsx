@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 
-import { TweaksPanel } from "@/components/eunenem/TweaksPanel";
 import { TweaksProvider } from "@/components/eunenem/TweaksContext";
 import type { PainelSection } from "@/lib/painelRoutes";
 import { PainelTopbar } from "./PainelTopbar";
@@ -47,7 +46,6 @@ export function PainelLayout({
         onOpenTutorial={onOpenTutorial}
       />
       <div className="painel-app">{children}</div>
-      {activeSection !== "convidados" && <TweaksPanel />}
     </TweaksProvider>
   );
 }
