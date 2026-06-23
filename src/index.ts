@@ -999,6 +999,14 @@ export {
   atualizarPerfilUsuario,
 } from './use-cases/usuario/atualizar-perfil-usuario.js';
 export type {
+  AtualizarSlugUsuarioDeps,
+  AtualizarSlugUsuarioInput,
+} from './use-cases/usuario/atualizar-slug-usuario.js';
+export {
+  AtualizarSlugUsuarioInputSchema,
+  atualizarSlugUsuario,
+} from './use-cases/usuario/atualizar-slug-usuario.js';
+export type {
   AutorizarPermissaoUsuarioDeps,
   AutorizarPermissaoUsuarioInput,
 } from './use-cases/usuario/autorizar-permissao-usuario.js';
@@ -1031,3 +1039,12 @@ export {
 // Plan 0018 Phase A (aperture-omswg) — first-time tutorial.
 export type { TutorialStatusResponse } from './use-cases/usuario/tutorial-status-response.js';
 export { TutorialStatusResponseSchema } from './use-cases/usuario/tutorial-status-response.js';
+export type {
+  VerificarDisponibilidadeSlugDeps,
+  VerificarDisponibilidadeSlugInput,
+  VerificarDisponibilidadeSlugResult,
+} from './use-cases/usuario/verificar-disponibilidade-slug.js';
+export {
+  VerificarDisponibilidadeSlugInputSchema,
+  verificarDisponibilidadeSlug,
+} from './use-cases/usuario/verificar-disponibilidade-slug.js';

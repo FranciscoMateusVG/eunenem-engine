@@ -171,6 +171,26 @@ export interface UsuarioRepository {
   ): Promise<void>;
 
   /**
+   * Edita o slug público do utilizador (aperture-2ztes). A unicidade é
+   * composta `(idPlataforma, slug)` — a mesma garantia que a registo. Ao
+   * contrário do caminho de registo (`registrarContaUsuario`, que caminha
+   * sufixos `base, base-2…` para resolver colisões), o caminho de edição
+   * NÃO auto-sufixa: o utilizador escolheu o slug, e se já estiver em uso
+   * o adapter levanta `UsuarioSlugJaExisteError` para que o use-case
+   * devolva um erro tipado pedindo outro slug.
+   *
+   * `idUsuario` desconhecido é um no-op silencioso ao nível do adapter
+   * (espelha `atualizarNomeExibicaoUsuario`); o use-case
+   * `atualizarSlugUsuario` garante a existência antes de chamar.
+   *
+   * Ambos os adapters DEVEM levantar o MESMO `UsuarioSlugJaExisteError`
+   * em colisão (port conformance): postgres mapeia o 23505 da constraint
+   * `usuarios_plataforma_slug_uniq`; memory verifica a colisão dentro da
+   * mesma `idPlataforma` antes de gravar.
+   */
+  atualizarSlugUsuario(idUsuario: IdUsuario, novoSlug: SlugUsuario): Promise<void>;
+
+  /**
    * Plan 0018 Phase A (aperture-omswg). Sets `tutorial_completado_em`
    * if and only if it is currently NULL — first-write-wins, idempotent
    * at the SQL layer (`UPDATE ... WHERE tutorial_completado_em IS NULL`).

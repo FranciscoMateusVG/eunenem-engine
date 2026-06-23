@@ -330,6 +330,53 @@ export class UsuarioRepositoryMemory implements UsuarioRepository {
   }
 
   /**
+   * Edita o slug (aperture-2ztes). Espelha o adapter postgres: id
+   * desconhecido é no-op silencioso; colisão de `(idPlataforma, slug)`
+   * com OUTRO usuario levanta `UsuarioSlugJaExisteError` (o mesmo erro
+   * tipado que o postgres mapeia do 23505 — port conformance). Sem
+   * auto-sufixo. Reescrever o usuario com o SEU PRÓPRIO slug é um no-op
+   * (não colide consigo mesmo).
+   */
+  async atualizarSlugUsuario(idUsuario: IdUsuario, novoSlug: SlugUsuario): Promise<void> {
+    return tracer.startActiveSpan('db.usuarios.atualizarSlugUsuario', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+      try {
+        const existing = this.usuarios.get(idUsuario);
+        if (!existing) {
+          // Silent no-op on unknown id (mirrors postgres / the use-case
+          // guards existence before calling).
+          span.setStatus({ code: SpanStatusCode.OK });
+          return;
+        }
+
+        const newIdx = slugKey(existing.idPlataforma, novoSlug);
+        const owner = this.idUsuarioBySlug.get(newIdx);
+        if (owner !== undefined && owner !== idUsuario) {
+          // Composite (idPlataforma, slug) already taken by another
+          // usuario — same typed error the postgres 23505 mapping throws.
+          throw new UsuarioSlugJaExisteError(novoSlug);
+        }
+
+        // Free the old slot, claim the new one, rewrite the usuario.
+        this.idUsuarioBySlug.delete(slugKey(existing.idPlataforma, existing.slug));
+        this.idUsuarioBySlug.set(newIdx, idUsuario);
+        this.usuarios.set(idUsuario, {
+          ...existing,
+          slug: novoSlug,
+        });
+
+        span.setStatus({ code: SpanStatusCode.OK });
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  /**
    * Plan 0018 Phase A (aperture-omswg). First-write-wins; mirror of
    * the postgres adapter's `WHERE tutorial_completado_em IS NULL`
    * guard. Already-completed → no-op (the original timestamp is
