@@ -15,6 +15,7 @@ import { painelConvitePreviewHref } from "@/lib/painelRoutes";
 import {
   countdownTo,
   DEFAULT_STATE,
+  DISABLED_EVENT_TYPES,
   EVENT_BY_ID,
   EVENT_TYPES,
   formatDateScrap,
@@ -1618,6 +1619,34 @@ function StepTipo({ state, update }: StepViewProps) {
             </button>
           );
         })}
+        {DISABLED_EVENT_TYPES.map((e, i) => {
+          const rot = ROT[(EVENT_TYPES.length + i) % ROT.length];
+          return (
+            <button
+              key={e.id}
+              type="button"
+              className="cv-event"
+              disabled
+              aria-disabled="true"
+              aria-label={`tipo de evento: ${e.label} (em breve)`}
+              style={{
+                transform: `rotate(${rot}deg)`,
+                opacity: 0.5,
+                cursor: "not-allowed",
+                pointerEvents: "none",
+              }}
+            >
+              <div className="cv-event-ico" aria-hidden="true">{e.icon}</div>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div className="cv-event-label">
+                  {e.label}{" "}
+                  <span className="cv-event-soon">em breve</span>
+                </div>
+                <div className="cv-event-hint">{e.emojiHint}</div>
+              </div>
+            </button>
+          );
+        })}
       </div>
     </>
   );
@@ -2272,6 +2301,12 @@ const CV_CSS = `
   font-family:var(--font-caveat),cursive;
   font-size:13px;color:var(--ink-soft);
   line-height:1;margin-top:4px;
+}
+.cv-event-soon{
+  font-family:var(--font-caveat),cursive;
+  font-size:11px;color:var(--ink-soft);
+  border:1px solid var(--cv-line-strong);border-radius:8px;
+  padding:0 5px;margin-left:4px;vertical-align:middle;white-space:nowrap;
 }
 .cv-input-lg{font-size:28px}
 .cv-input-md{font-size:23px}

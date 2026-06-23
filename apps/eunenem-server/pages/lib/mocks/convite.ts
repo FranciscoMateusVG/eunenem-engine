@@ -21,7 +21,7 @@ export type EventTypeId =
   | "aniversario";
 
 export interface EventType {
-  id: EventTypeId;
+  id: string;
   label: string;
   icon: string;
   emojiHint: string;
@@ -31,9 +31,15 @@ export const EVENT_TYPES: EventType[] = [
   { id: "cha-bebe", label: "chá de bebê", icon: "🍼", emojiHint: "✿ ☁ ♡" },
   { id: "cha-fraldas", label: "chá de fraldas", icon: "🧷", emojiHint: "☁ ♡" },
   { id: "cha-surpresa", label: "chá surpresa", icon: "🎀", emojiHint: "✨ ♡" },
-  { id: "batizado", label: "batizado", icon: "🕊", emojiHint: "✦ ♡" },
-  { id: "cha-revelacao", label: "chá revelação", icon: "🎈", emojiHint: "♡ ♂♀" },
   { id: "aniversario", label: "aniversário", icon: "🎂", emojiHint: "✦ ♡" },
+  { id: "batizado", label: "batizado", icon: "🕊", emojiHint: "✦ ♡" },
+];
+
+// "Em breve" event types — rendered as dimmed, un-clickable chips in the
+// selector. Deliberately kept OUT of EVENT_TYPES so they can never be
+// selected, become the active eventType, or be persisted.
+export const DISABLED_EVENT_TYPES: EventType[] = [
+  { id: "cha-rifa", label: "chá rifa", icon: "🎟", emojiHint: "♡ ✦" },
 ];
 
 export const EVENT_BY_ID: Record<string, EventType> = Object.fromEntries(

@@ -13,6 +13,7 @@ import { shareConvitePreview } from "@/lib/convite-share";
 import { painelConvitePreviewHref } from "@/lib/painelRoutes";
 import {
   DEFAULT_STATE,
+  DISABLED_EVENT_TYPES,
   EVENT_BY_ID,
   EVENT_TYPES,
   NAME_FONTS,
@@ -565,6 +566,30 @@ function MStepTipo({ state, update }: StepProps) {
           </button>
         );
       })}
+      {DISABLED_EVENT_TYPES.map((e, i) => (
+        <button
+          key={e.id}
+          type="button"
+          className="mcv-tipo"
+          disabled
+          aria-disabled="true"
+          aria-label={`tipo de evento: ${e.label} (em breve)`}
+          style={{
+            transform: `rotate(${rotations[(EVENT_TYPES.length + i) % rotations.length]}deg)`,
+            opacity: 0.5,
+            cursor: "not-allowed",
+            pointerEvents: "none",
+          }}
+        >
+          <div className="mcv-tipo-ico" aria-hidden="true">{e.icon}</div>
+          <div className="mcv-tipo-body">
+            <div className="mcv-tipo-label">
+              {e.label} <span className="mcv-tipo-soon">em breve</span>
+            </div>
+            <div className="mcv-tipo-hint">{e.emojiHint}</div>
+          </div>
+        </button>
+      ))}
     </div>
   );
 }
@@ -1058,6 +1083,12 @@ const MCV_CSS = `
   font-family:var(--font-caveat),cursive;
   font-size:11px;color:var(--ink-soft);
   margin-top:2px;line-height:1;
+}
+.mcv-tipo-soon{
+  font-family:var(--font-caveat),cursive;
+  font-size:10px;color:var(--ink-soft);
+  border:1px solid var(--line);border-radius:7px;
+  padding:0 4px;margin-left:3px;vertical-align:middle;white-space:nowrap;
 }
 
 /* STEP: quando — mode picker + date row ─ */
