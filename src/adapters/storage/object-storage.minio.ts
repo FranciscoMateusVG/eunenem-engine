@@ -109,4 +109,19 @@ export class ObjectStorageMinio implements ObjectStorage {
   urlPublica(objectKey: string): string {
     return `${this.endpoint}/${this.bucket}/${objectKey}`;
   }
+
+  /**
+   * Normalize a value to a bare key — strips the public base
+   * (`${endpoint}/${bucket}/`) REPEATEDLY so an accidentally re-prefixed value
+   * (`base×N/key`) collapses to `key` (aperture-qjgfr). A bare key never starts
+   * with the endpoint, so this is a no-op on already-bare keys.
+   */
+  extrairKey(urlOuKey: string): string {
+    const base = `${this.endpoint}/${this.bucket}/`;
+    let key = urlOuKey;
+    while (key.startsWith(base)) {
+      key = key.slice(base.length);
+    }
+    return key;
+  }
 }

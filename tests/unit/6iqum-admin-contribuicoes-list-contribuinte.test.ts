@@ -277,7 +277,10 @@ describe('admin.contribuicoes.listByCampanha — contribuinte projection (apertu
       email: 't@x.com',
       mensagem: null,
     });
-    expect(result.contribuicoes[0].indisponivel).toBe(true);
+    // Plan 0016 Phase 4 (aperture-3htxg): the admin DTO replaced the binary
+    // `indisponivel` field with `quantidadeRestante`. Sold out (quantidade=1,
+    // sold=1) → quantidadeRestante <= 0.
+    expect(result.contribuicoes[0].quantidadeRestante).toBeLessThanOrEqual(0);
   });
 
   it('row.contribuinte is null when no aprovado pagamento exists (gift unclaimed)', async () => {
@@ -287,7 +290,8 @@ describe('admin.contribuicoes.listByCampanha — contribuinte projection (apertu
       idCampanha: rig.idCampanha,
     });
     expect(result.contribuicoes[0].contribuinte).toBeNull();
-    expect(result.contribuicoes[0].indisponivel).toBe(false);
+    // No aprovado pagamento → nothing sold → slot still available.
+    expect(result.contribuicoes[0].quantidadeRestante).toBeGreaterThan(0);
   });
 
   it('row.contribuinte is null for anonymous aprovado (contribuinte was null on pagamento)', async () => {
@@ -298,7 +302,8 @@ describe('admin.contribuicoes.listByCampanha — contribuinte projection (apertu
       idCampanha: rig.idCampanha,
     });
     expect(result.contribuicoes[0].contribuinte).toBeNull();
-    expect(result.contribuicoes[0].indisponivel).toBe(true);
+    // Anonymous but aprovado → still sold → quantidadeRestante <= 0.
+    expect(result.contribuicoes[0].quantidadeRestante).toBeLessThanOrEqual(0);
   });
 
   it('mensagem undefined on engine entity → null on wire (boundary normalization)', async () => {

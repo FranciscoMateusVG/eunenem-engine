@@ -57,11 +57,54 @@ describe('Migration round-trip', () => {
     expect(tableNames).toContain('listas_de_convidados');
     expect(tableNames).toContain('convidados');
 
+    // Migrations layered ON TOP of the evento migration (026 create_evento):
+    //   - 20260615_023_expand_convites_fonte_check (CHECK only, no table)
+    //   - 20260623_026_create_perfil_criador → perfil_criadores
+    //   - 20260623_027_recebedores_dados_conta (recebedores ALTER, no table)
+    //   - 20260623_028_create_dados_recebimento_usuario → dados_recebimento_usuario
+    //
+    // NOTE (duplicate migration-number smell): the migration set contains
+    // TWO files numbered "026" (20260611_026_create_evento and
+    // 20260623_026_create_perfil_criador) and TWO numbered "023"
+    // (20260608_023_lancamentos_financeiros_per_item and
+    // 20260615_023_expand_convites_fonte_check). The kysely migration
+    // provider keys on the FULL filename (basename without extension) and
+    // sorts lexically, so the dates disambiguate them and ordering is
+    // well-defined — but the colliding numeric prefixes are a real naming
+    // smell. Renaming production migration files is out of scope/risky;
+    // this test is made correct against the current files instead.
+    expect(tableNames).toContain('perfil_criadores');
+    expect(tableNames).toContain('dados_recebimento_usuario');
+
     const conviteRemetenteCol = await getColumn(db, 'convites', 'remetente');
     expect(conviteRemetenteCol?.data_type).toBe('character varying');
     expect(conviteRemetenteCol?.character_maximum_length).toBe(120);
     expect(conviteRemetenteCol?.is_nullable).toBe('NO');
 
+    // ── Roll back the post-evento migrations first (latest → earliest),
+    //    so the subsequent evento down-step actually targets the evento
+    //    migration. A single migrateDown() here would only unwind 028.
+
+    // 028 create_dados_recebimento_usuario → drops dados_recebimento_usuario
+    const downDadosRecebimento = await migrator.migrateDown();
+    expect(downDadosRecebimento.error).toBeUndefined();
+    expect(await listTableNames(db)).not.toContain('dados_recebimento_usuario');
+
+    // 027 recebedores_dados_conta → recebedores ALTER (no table delta)
+    const downRecebedoresDadosConta = await migrator.migrateDown();
+    expect(downRecebedoresDadosConta.error).toBeUndefined();
+
+    // 20260623_026 create_perfil_criador → drops perfil_criadores
+    const downPerfilCriador = await migrator.migrateDown();
+    expect(downPerfilCriador.error).toBeUndefined();
+    expect(await listTableNames(db)).not.toContain('perfil_criadores');
+
+    // 20260615_023 expand_convites_fonte_check → CHECK swap (no table delta);
+    // convites still exists here (dropped only by the evento down below).
+    const downExpandConvitesFonte = await migrator.migrateDown();
+    expect(downExpandConvitesFonte.error).toBeUndefined();
+
+    // 20260611_026 create_evento → drops the four evento-domain tables.
     const downEvento = await migrator.migrateDown();
     expect(downEvento.error).toBeUndefined();
 
@@ -70,6 +113,55 @@ describe('Migration round-trip', () => {
     expect(tablesAfterEventoDown).not.toContain('convites');
     expect(tablesAfterEventoDown).not.toContain('listas_de_convidados');
     expect(tablesAfterEventoDown).not.toContain('convidados');
+
+    // ── Roll back migrations 025 → 019, which sit BETWEEN the evento
+    //    migration (026) and the pi/ch migration (018). These are all
+    //    column add/alter migrations (no table create/drop), so we assert
+    //    on the column delta. Without unwinding these first, the
+    //    subsequent `downPiCh` step would actually be rolling back 025,
+    //    not 018, and every assertion below would be off-by-seven.
+
+    // 025 add_mensagem_lida_em_to_pagamentos → drops pagamentos.mensagem_lida_em
+    const downMensagemLida = await migrator.migrateDown();
+    expect(downMensagemLida.error).toBeUndefined();
+    expect(await getColumn(db, 'pagamentos', 'mensagem_lida_em')).toBeUndefined();
+
+    // 024 add_tutorial_completado_em_to_usuarios → drops usuarios.tutorial_completado_em
+    const downTutorialCompletado = await migrator.migrateDown();
+    expect(downTutorialCompletado.error).toBeUndefined();
+    expect(await getColumn(db, 'usuarios', 'tutorial_completado_em')).toBeUndefined();
+
+    // 20260609_023 lancamentos_financeiros_per_item → drops
+    // lancamentos_financeiros.id_item_pagamento
+    const downLancamentosPerItem = await migrator.migrateDown();
+    expect(downLancamentosPerItem.error).toBeUndefined();
+    expect(await getColumn(db, 'lancamentos_financeiros', 'id_item_pagamento')).toBeUndefined();
+
+    // 022 multi_item_pagamento_and_quantidade → drops intencao_items table,
+    // restores the single-item pagamentos shape, drops contribuicoes.quantidade
+    const downMultiItem = await migrator.migrateDown();
+    expect(downMultiItem.error).toBeUndefined();
+    expect(await listTableNames(db)).not.toContain('intencao_items');
+    expect(await getColumn(db, 'contribuicoes', 'quantidade')).toBeUndefined();
+    // down() of 022 restores the retired per-pagamento contribuição column.
+    expect(await getColumn(db, 'pagamentos', 'intencao_id_contribuicao')).toBeDefined();
+
+    // 021 extend_repasse_recebedor_fsm → drops repasses_recebedor.bank_transfer_ref
+    const downRepasseFsm = await migrator.migrateDown();
+    expect(downRepasseFsm.error).toBeUndefined();
+    expect(await getColumn(db, 'repasses_recebedor', 'bank_transfer_ref')).toBeUndefined();
+
+    // 020 add_balance_transaction_available_on_to_pagamentos → drops that column
+    const downBalanceTxn = await migrator.migrateDown();
+    expect(downBalanceTxn.error).toBeUndefined();
+    expect(
+      await getColumn(db, 'pagamentos', 'intencao_balance_transaction_available_on'),
+    ).toBeUndefined();
+
+    // 019 collapse_state_machines → drops intencao_contribuinte_* columns
+    const downCollapseStateMachines = await migrator.migrateDown();
+    expect(downCollapseStateMachines.error).toBeUndefined();
+    expect(await getColumn(db, 'pagamentos', 'intencao_contribuinte_email')).toBeUndefined();
 
     // aperture-qatwz added two paginated-browse indexes on usuarios (013).
     // Verify the indexes exist (no new tables here — pure index migration).

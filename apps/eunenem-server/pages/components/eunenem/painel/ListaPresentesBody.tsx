@@ -1490,9 +1490,12 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
       await createMut.mutateAsync({
         nome: draft.title,
         valor: centsFromBRL(price),
-        imagemUrl: null,
+        // aperture-33ien — input is string | undefined (optional), not nullable.
+        imagemUrl: undefined,
         grupo: draft.category,
-        qty: Number(draft.qty) || 1,
+        // aperture-33ien — mutation field is `quantidade`, not `qty` (the wrong
+        // key was masked behind the imagemUrl error in the same object literal).
+        quantidade: Number(draft.qty) || 1,
       });
       setAddModalTab(null);
       const n = Number(draft.qty) || 1;

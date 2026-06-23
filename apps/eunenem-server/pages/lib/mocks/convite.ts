@@ -21,6 +21,17 @@ export type EventTypeId =
   | "aniversario";
 
 export interface EventType {
+  // aperture-33ien — id is a real, selectable EventTypeId (not a loose string),
+  // so update("eventType", e.id) typechecks against ConviteState["eventType"].
+  id: EventTypeId;
+  label: string;
+  icon: string;
+  emojiHint: string;
+}
+
+// "Em breve" chips carry ids that are deliberately NOT EventTypeIds (so they
+// can never be selected/persisted) — looser type, separate from EventType.
+export interface DisabledEventType {
   id: string;
   label: string;
   icon: string;
@@ -38,7 +49,7 @@ export const EVENT_TYPES: EventType[] = [
 // "Em breve" event types — rendered as dimmed, un-clickable chips in the
 // selector. Deliberately kept OUT of EVENT_TYPES so they can never be
 // selected, become the active eventType, or be persisted.
-export const DISABLED_EVENT_TYPES: EventType[] = [
+export const DISABLED_EVENT_TYPES: DisabledEventType[] = [
   { id: "cha-rifa", label: "chá rifa", icon: "🎟", emojiHint: "♡ ✦" },
 ];
 

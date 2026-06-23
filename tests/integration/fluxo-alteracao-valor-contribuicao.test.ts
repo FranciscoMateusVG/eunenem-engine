@@ -2,8 +2,10 @@
  * Integration test for fluxo-alteracao-valor-contribuicao (fluxo 7).
  *
  * Validates that an administrator can change a contribution's value while it is
- * `disponivel`, and that the change is blocked after checkout reserves the item
- * in Postgres (`indisponivel`), leaving the last valid value unchanged.
+ * `disponivel`. Plan 0015 (aperture-ucgok) removed the status FSM guard, so the
+ * change is ALSO permitted after the slot becomes `indisponivel` — already-approved
+ * pagamentos preserve the original value in their composicaoValores snapshot, so a
+ * later edit does not retroactively change what the contribuinte paid.
  *
  * Arrecadação persists in Postgres via Testcontainers; Taxas/Pagamentos/Usuário
  * use in-memory adapters.
@@ -17,6 +19,7 @@ import { CampanhaRepositoryPostgres } from '../../src/adapters/arrecadacao/campa
 import { ContribuicaoRepositoryPostgres } from '../../src/adapters/arrecadacao/contribuicao-repository.postgres.js';
 import { RecebedorRepositoryPostgres } from '../../src/adapters/arrecadacao/recebedor-repository.postgres.js';
 import { PagamentoEventPublisherMemory } from '../../src/adapters/pagamentos/event-publisher.memory.js';
+import { LivroFinanceiroRepositoryMemory } from '../../src/adapters/pagamentos/financeiro/livro-repository.memory.js';
 import { PagamentoProviderFake } from '../../src/adapters/pagamentos/provider.fake.js';
 import { PagamentoRepositoryMemory } from '../../src/adapters/pagamentos/repository.memory.js';
 import {
@@ -26,13 +29,13 @@ import {
 import { ProvedorRegraTaxaMemory } from '../../src/adapters/taxas/regra-provider.memory.js';
 import { AuthServiceMemoria } from '../../src/adapters/usuario/auth-service.memory.js';
 import { UsuarioRepositoryMemory } from '../../src/adapters/usuario/repository.memory.js';
-import { ArrecadacaoContribuicaoNaoDisponivelError } from '../../src/errors/arrecadacao/contribuicao-nao-disponivel.error.js';
 import { adicionarOpcaoContribuicao } from '../../src/use-cases/arrecadacao/adicionar-opcao-contribuicao.js';
 import { alterarValorContribuicao } from '../../src/use-cases/arrecadacao/alterar-valor-contribuicao.js';
-import { associarContribuinteContribuicao } from '../../src/use-cases/arrecadacao/associar-contribuinte-contribuicao.js';
 import { criarCampanha } from '../../src/use-cases/arrecadacao/criar-campanha.js';
 import { criarContribuicao } from '../../src/use-cases/arrecadacao/criar-contribuicao.js';
-import { iniciarPagamentoContribuicao } from '../../src/use-cases/checkout/iniciar-pagamento-contribuicao.js';
+import { esgotada } from '../../src/use-cases/arrecadacao/quantidade-restante.js';
+import { finalizarPagamentoAprovado } from '../../src/use-cases/checkout/finalizar-pagamento-aprovado.js';
+import { iniciarPagamentoCarrinho } from '../../src/use-cases/checkout/iniciar-pagamento-carrinho.js';
 import { registrarContaUsuario } from '../../src/use-cases/usuario/registrar-conta-usuario.js';
 import { createTestObservability } from '../helpers/observability.js';
 import { createTestDatabase, type TestDatabase } from '../helpers/test-db.js';
@@ -69,7 +72,8 @@ function makeDeps() {
   const provedorRegraTaxa = new ProvedorRegraTaxaMemory();
   const pagamentoRepository = new PagamentoRepositoryMemory();
   const pagamentoEventPublisher = new PagamentoEventPublisherMemory();
-  const pagamentoProvider = new PagamentoProviderFake();
+  const pagamentoProvider = new PagamentoProviderFake({ statusResultado: 'aprovado', clock });
+  const livroFinanceiroRepository = new LivroFinanceiroRepositoryMemory(recebedorRepository);
   const observability = testObs.observability;
 
   return {
@@ -82,6 +86,7 @@ function makeDeps() {
     pagamentoRepository,
     pagamentoEventPublisher,
     pagamentoProvider,
+    livroFinanceiroRepository,
     observability,
   };
 }
@@ -176,13 +181,20 @@ beforeEach(async () => {
 });
 
 describe('Fluxo — alteração de valor antes e depois do checkout', () => {
-  it('Deve permitir alterar valor da contribuição enquanto disponível e bloquear após checkout iniciado', async () => {
+  it('Deve permitir alterar valor da contribuição enquanto disponível e também após checkout iniciado (FSM guard removido no Plan 0015)', async () => {
     const { deps, idCampanha, idContribuicao, idPagamento, idIntencaoPagamento } =
       await seedFluxoBase();
 
+    // Plan 0015/0016: Contribuição has no `status` field; availability is
+    // derived via esgotada(). The freshly-seeded slot is available.
+    const esgotadaArgs = {
+      pagamentoRepository: deps.pagamentoRepository,
+      contribuicaoRepository: deps.contribuicaoRepository,
+      observability: deps.observability,
+    };
     const contribuicaoInicial = await deps.contribuicaoRepository.findById(idContribuicao);
-    expect(contribuicaoInicial?.status).toBe('disponivel');
     expect(contribuicaoInicial?.valor).toBe(VALOR_INICIAL_CENTS);
+    expect(await esgotada(esgotadaArgs, { idContribuicao })).toBe(false);
 
     const contribuicaoAlterada = await alterarValorContribuicao(
       { contribuicaoRepository: deps.contribuicaoRepository, observability: deps.observability },
@@ -190,11 +202,10 @@ describe('Fluxo — alteração de valor antes e depois do checkout', () => {
     );
 
     expect(contribuicaoAlterada.valor).toBe(VALOR_APOS_ALTERACAO_CENTS);
-    expect(contribuicaoAlterada.status).toBe('disponivel');
 
     const contribuicaoPersistida = await deps.contribuicaoRepository.findById(idContribuicao);
     expect(contribuicaoPersistida?.valor).toBe(VALOR_APOS_ALTERACAO_CENTS);
-    expect(contribuicaoPersistida?.status).toBe('disponivel');
+    expect(await esgotada(esgotadaArgs, { idContribuicao })).toBe(false);
 
     const checkoutDeps = {
       campanhaRepository: deps.campanhaRepository,
@@ -209,14 +220,14 @@ describe('Fluxo — alteração de valor antes e depois do checkout', () => {
 
     const contribuinte = contribuinteVisitante();
 
-    // aperture-m95f3: saga no longer claims the contribuição (claim moved to
-    // finalize via webhook). The saga leaves the contribuição disponivel.
-    const { contribuicao: contribuicaoAposSaga, pagamento } = await iniciarPagamentoContribuicao(
+    // Saga no longer claims the contribuição at checkout-start (Plan 0016).
+    const { contribuicoes: contribuicoesAposSaga, pagamento } = await iniciarPagamentoCarrinho(
       checkoutDeps,
       {
         idPlataforma: ID_PLATAFORMA_EUNENEM,
         idCampanha,
-        idContribuicao,
+        itens: [{ idContribuicao, quantidade: 1 }],
+        idsItens: [randomUUID()],
         metodo: 'pix',
         idPagamento,
         idIntencaoPagamento,
@@ -224,28 +235,49 @@ describe('Fluxo — alteração de valor antes e depois do checkout', () => {
       },
     );
 
-    expect(contribuicaoAposSaga.status).toBe('disponivel');
-    expect(contribuicaoAposSaga.valor).toBe(VALOR_APOS_ALTERACAO_CENTS);
+    expect(contribuicoesAposSaga[0]?.id).toBe(idContribuicao);
+    expect(contribuicoesAposSaga[0]?.valor).toBe(VALOR_APOS_ALTERACAO_CENTS);
     expect(pagamento.status).toBe('pendente');
+    // A pendente pagamento doesn't sell the slot.
+    expect(await esgotada(esgotadaArgs, { idContribuicao })).toBe(false);
 
-    // Simulate the webhook firing: payment settled → contribuição claimed
-    // (this is what finalizarPagamentoAprovado does in prod with `contribuinte`).
-    const contribuicaoReservada = await associarContribuinteContribuicao(
-      { contribuicaoRepository: deps.contribuicaoRepository, observability: deps.observability },
-      { idContribuicao, contribuinte },
+    // The webhook fires → pagamento settles to aprovado → slot is now sold out
+    // (the contribuinte is stamped onto the aprovado pagamento's intenção; the
+    // contribuição itself no longer carries status/contribuinte).
+    const { pagamento: pagamentoAprovado } = await finalizarPagamentoAprovado(
+      {
+        pagamentoRepository: deps.pagamentoRepository,
+        pagamentoProvider: deps.pagamentoProvider,
+        pagamentoEventPublisher: deps.pagamentoEventPublisher,
+        contribuicaoRepository: deps.contribuicaoRepository,
+        campanhaRepository: deps.campanhaRepository,
+        livroFinanceiroRepository: deps.livroFinanceiroRepository,
+        clock,
+        observability: deps.observability,
+      },
+      { idPagamento, contribuinte },
     );
-    expect(contribuicaoReservada.status).toBe('indisponivel');
-    expect(contribuicaoReservada.valor).toBe(VALOR_APOS_ALTERACAO_CENTS);
+    expect(pagamentoAprovado.intencao.contribuinte).toEqual(contribuinte);
+    expect(await esgotada(esgotadaArgs, { idContribuicao })).toBe(true);
 
-    await expect(
-      alterarValorContribuicao(
-        { contribuicaoRepository: deps.contribuicaoRepository, observability: deps.observability },
-        { idContribuicao, valor: VALOR_ALTERACAO_CENTS },
-      ),
-    ).rejects.toThrow(ArrecadacaoContribuicaoNaoDisponivelError);
+    // Plan 0015 (aperture-ucgok): the status FSM guard was removed. Editing the
+    // value AFTER the slot is sold (esgotada) now SUCCEEDS (it used to throw
+    // ArrecadacaoContribuicaoNaoDisponivelError, which no longer exists). The
+    // already-settled pagamento keeps the original value in its
+    // composicaoValoresAggregate snapshot, so this edit is non-retroactive.
+    const contribuicaoAposEsgotada = await alterarValorContribuicao(
+      { contribuicaoRepository: deps.contribuicaoRepository, observability: deps.observability },
+      { idContribuicao, valor: VALOR_ALTERACAO_CENTS },
+    );
+    expect(contribuicaoAposEsgotada.valor).toBe(VALOR_ALTERACAO_CENTS);
 
     const contribuicaoFinal = await deps.contribuicaoRepository.findById(idContribuicao);
-    expect(contribuicaoFinal?.status).toBe('indisponivel');
-    expect(contribuicaoFinal?.valor).toBe(VALOR_APOS_ALTERACAO_CENTS);
+    expect(contribuicaoFinal?.valor).toBe(VALOR_ALTERACAO_CENTS);
+    // Still sold out (the value edit doesn't change the aprovado pagamento).
+    expect(await esgotada(esgotadaArgs, { idContribuicao })).toBe(true);
+    // The aprovado pagamento preserved the value paid at checkout time.
+    expect(pagamentoAprovado.intencao.composicaoValoresAggregate.totalReceiverCents).toBe(
+      VALOR_APOS_ALTERACAO_CENTS,
+    );
   });
 });

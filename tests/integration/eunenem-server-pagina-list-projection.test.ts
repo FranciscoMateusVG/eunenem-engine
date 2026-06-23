@@ -37,6 +37,7 @@ import { appRouter } from '../../apps/eunenem-server/server/trpc/router.js';
 import { CampanhaRepositoryMemory } from '../../src/adapters/arrecadacao/campanha-repository.memory.js';
 import { ContribuicaoRepositoryMemory } from '../../src/adapters/arrecadacao/contribuicao-repository.memory.js';
 import { RecebedorRepositoryMemory } from '../../src/adapters/arrecadacao/recebedor-repository.memory.js';
+import { PagamentoRepositoryMemory } from '../../src/adapters/pagamentos/repository.memory.js';
 import {
   ID_PLATAFORMA_EUNENEM,
   PlataformaRepositoryMemory,
@@ -64,6 +65,12 @@ function buildPaginaTestDeps(): ServerDeps {
   const campanhaRepository = new CampanhaRepositoryMemory(recebedorRepository);
   const contribuicaoRepository = new ContribuicaoRepositoryMemory();
   const provedorRegraTaxa = new ProvedorRegraTaxaMemory();
+  // Plan 0016 (aperture-eg1s2): obterListaPresentes →
+  // obterContribuicoesPrecalculadasCampanha now batch-resolves the esgotada
+  // predicate via pagamentoRepository.somarQuantidadesContribuicoesEm-
+  // PagamentosAprovados. A real in-memory repo (empty = nothing sold) is
+  // required on the read path; the previous `{} as never` stub throws.
+  const pagamentoRepository = new PagamentoRepositoryMemory();
 
   // Only the fields actually touched by pagina-router.obterListaPresentes
   // (+ resolvePaginaBySlug). Other ports stubbed to satisfy the type;
@@ -77,7 +84,7 @@ function buildPaginaTestDeps(): ServerDeps {
     campanhaRepository,
     contribuicaoRepository,
     recebedorRepository,
-    pagamentoRepository: {} as never,
+    pagamentoRepository,
     pagamentoProvider: {} as never,
     pagamentoEventPublisher: {} as never,
     checkoutSessionProvider: {} as never,

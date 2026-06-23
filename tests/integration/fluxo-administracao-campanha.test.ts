@@ -173,10 +173,12 @@ describe('Fluxo — administração de campanha', () => {
       },
     );
 
-    expect(contribuicaoCriada.status).toBe('disponivel');
+    // Plan 0015/0016: Contribuição no longer carries a `status` field
+    // (availability is now derived via esgotada()). Assert the slot was created
+    // and persisted.
+    expect(contribuicaoCriada.id).toBe(idContribuicao);
     const contribuicaoReload = await deps.contribuicaoRepository.findById(idContribuicao);
     expect(contribuicaoReload?.id).toBe(idContribuicao);
-    expect(contribuicaoReload?.status).toBe('disponivel');
 
     const campanhaSemB = await removerAdministradorCampanha(
       { campanhaRepository: deps.campanhaRepository, observability: deps.observability },

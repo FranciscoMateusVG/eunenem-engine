@@ -20,7 +20,15 @@ import { useTweaks } from "./TweaksContext";
 // getPerfilPublicoBySlug (threaded by PaginaPage). When absent we render a
 // neutral placeholder — NEVER the old hardcoded demo prose, which used to bleed
 // a stranger's ("Francisco") life story onto every creator's public page.
-export function Story({ historia }: { historia?: string | null }) {
+export function Story({
+  historia,
+  fotoHistoria = null,
+}: {
+  historia?: string | null;
+  // aperture-qjgfr gap-B — the creator's real história photo (7:8) from
+  // getPerfilPublicoBySlug. Read-only; null → neutral branded frame.
+  fotoHistoria?: string | null;
+}) {
   const { tweaks } = useTweaks();
   const { babyName, parents } = tweaks;
   const paragraphs = (historia ?? "")
@@ -135,6 +143,8 @@ export function Story({ historia }: { historia?: string | null }) {
                     id="story-photo"
                     placeholder="Foto da família / ultrassom"
                     fit="cover"
+                    src={fotoHistoria}
+                    readOnly
                   />
                 </div>
               </Polaroid>

@@ -179,6 +179,12 @@ class ObjectStorageNaoConfigurado implements ObjectStorage {
     // happen without MINIO configured (upload requires it). Fail loudly.
     throw new Error('storage não configurado (MINIO_* ausente)');
   }
+
+  extrairKey(urlOuKey: string): string {
+    // Pure normalization — no base to strip without an endpoint. A bare key
+    // passes through unchanged; safe to call even unconfigured.
+    return urlOuKey;
+  }
 }
 
 /**

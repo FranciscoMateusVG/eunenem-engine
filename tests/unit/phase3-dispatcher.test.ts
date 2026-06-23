@@ -278,7 +278,12 @@ describe('Phase 3 dispatcher: checkout.session.completed', () => {
     expect(updated?.intencao.contribuinte?.mensagem).toBe('Parabens!');
   });
 
-  it('pix pending (payment_status=processing): pendente → processing + contribuinte stamped (no finalize yet)', async () => {
+  it('pix pending (payment_status=unpaid): pendente → processing + contribuinte stamped (no finalize yet)', async () => {
+    // Stripe's Checkout.Session.PaymentStatus union is
+    // 'no_payment_required' | 'paid' | 'unpaid' — there is NO 'processing'
+    // member (that's a PaymentIntent status). For pix (a delayed-notification
+    // method), checkout.session.completed reports the session as 'unpaid'
+    // while the bank confirmation settles: that's the pix-QR-scanned signal.
     const sessionId = `cs_test_${randomUUID()}`;
     const piId = `pi_test_${randomUUID()}`;
     const ids = await seedFullChain(rig, sessionId, 'pix');
@@ -286,7 +291,7 @@ describe('Phase 3 dispatcher: checkout.session.completed', () => {
     const event = makeEvent('checkout.session.completed', {
       id: sessionId,
       payment_intent: piId,
-      payment_status: 'processing',
+      payment_status: 'unpaid',
       customer_details: { email: 'pix-visitor@example.com' },
       custom_fields: [{ key: 'nome', text: { value: 'Visitante Pix' } }],
     });
@@ -316,14 +321,17 @@ describe('Phase 3 dispatcher: checkout.session.completed', () => {
     expect(result.pagamentoId).toBeNull();
   });
 
-  it('payment_status=unpaid (rare on completed): no-op transition, audit only', async () => {
+  it('payment_status=no_payment_required (zero-amount session): no-op transition, audit only', async () => {
+    // 'unpaid' is now the pix-completion branch (transitions to processing).
+    // The remaining no-op case is 'no_payment_required' (zero-amount sessions)
+    // — neither 'paid' nor 'unpaid', so there's no FSM transition to make.
     const sessionId = `cs_test_${randomUUID()}`;
     const ids = await seedFullChain(rig, sessionId);
 
     const event = makeEvent('checkout.session.completed', {
       id: sessionId,
       payment_intent: 'pi_test_x',
-      payment_status: 'unpaid',
+      payment_status: 'no_payment_required',
     });
     const result = await dispatchVerifiedStripeEvent(rig.deps, noopSpan, event);
     expect(result.pagamentoId).toBe(ids.idPagamento);

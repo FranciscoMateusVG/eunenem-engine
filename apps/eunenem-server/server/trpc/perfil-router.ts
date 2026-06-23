@@ -124,6 +124,7 @@ export const perfilRouter = t.router({
         await atualizarPerfilCriador(
           {
             perfilCriadorRepository: ctx.deps.perfilCriadorRepository,
+            objectStorage: ctx.deps.objectStorage,
             observability: ctx.deps.observability,
             clock: ctx.deps.clock,
             gerarId: () => randomUUID() as IdPerfilCriador,

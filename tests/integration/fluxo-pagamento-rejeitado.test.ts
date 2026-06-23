@@ -4,7 +4,7 @@
  * Desired behavior (fluxos.txt item 5): checkout started → provider rejects →
  * pagamento `rejeitado`, no Financeiro effects, contribuição `disponivel` again.
  *
- * Uses the checkout orchestrators `iniciarPagamentoContribuicao` +
+ * Uses the checkout orchestrators `iniciarPagamentoCarrinho` +
  * `finalizarPagamentoRejeitado`. The orchestrator is the symmetric
  * counterpart of `finalizarPagamentoAprovado` from plan 0002 — it sequences
  * the Pagamentos rejection AND releases the Arrecadação claim (cross-BC
@@ -36,8 +36,9 @@ import { UsuarioRepositoryMemory } from '../../src/adapters/usuario/repository.m
 import { adicionarOpcaoContribuicao } from '../../src/use-cases/arrecadacao/adicionar-opcao-contribuicao.js';
 import { criarCampanha } from '../../src/use-cases/arrecadacao/criar-campanha.js';
 import { criarContribuicao } from '../../src/use-cases/arrecadacao/criar-contribuicao.js';
+import { esgotada } from '../../src/use-cases/arrecadacao/quantidade-restante.js';
 import { finalizarPagamentoRejeitado } from '../../src/use-cases/checkout/finalizar-pagamento-rejeitado.js';
-import { iniciarPagamentoContribuicao } from '../../src/use-cases/checkout/iniciar-pagamento-contribuicao.js';
+import { iniciarPagamentoCarrinho } from '../../src/use-cases/checkout/iniciar-pagamento-carrinho.js';
 import { obterSaldoRecebedor } from '../../src/use-cases/pagamentos/financeiro/obter-saldo-recebedor.js';
 import { registrarContaUsuario } from '../../src/use-cases/usuario/registrar-conta-usuario.js';
 import { createTestObservability } from '../helpers/observability.js';
@@ -182,9 +183,11 @@ describe('Fluxo — pagamento rejeitado pelo provedor', () => {
     const { deps, idCampanha, idContribuicao, idPagamento, idIntencaoPagamento } =
       await seedFluxoBase();
 
+    // Plan 0015/0016: Contribuição no longer has `status` / `contribuinte`
+    // fields. Availability is derived (esgotada); contribuinte lives on the
+    // pagamento's intenção. We just assert the slot was seeded.
     const contribuicaoInicial = await deps.contribuicaoRepository.findById(idContribuicao);
-    expect(contribuicaoInicial?.status).toBe('disponivel');
-    expect(contribuicaoInicial?.contribuinte).toBeNull();
+    expect(contribuicaoInicial?.id).toBe(idContribuicao);
 
     const checkoutDeps = {
       campanhaRepository: deps.campanhaRepository,
@@ -200,18 +203,19 @@ describe('Fluxo — pagamento rejeitado pelo provedor', () => {
     // aperture-m95f3: saga no longer claims the contribuição — claim moves to
     // finalize via webhook. A rejected payment therefore never had a claim to
     // release; the contribuição simply stays disponivel end-to-end.
-    const { contribuicao: contribuicaoAposSaga, pagamento: pagamentoPendente } =
-      await iniciarPagamentoContribuicao(checkoutDeps, {
+    const { contribuicoes: contribuicoesAposSaga, pagamento: pagamentoPendente } =
+      await iniciarPagamentoCarrinho(checkoutDeps, {
         idPlataforma: ID_PLATAFORMA_EUNENEM,
         idCampanha,
-        idContribuicao,
+        itens: [{ idContribuicao, quantidade: 1 }],
+        idsItens: [randomUUID()],
         metodo: 'pix',
         idPagamento,
         idIntencaoPagamento,
         returnUrl: 'https://test.example/sucesso?session_id={CHECKOUT_SESSION_ID}',
       });
 
-    expect(contribuicaoAposSaga.status).toBe('disponivel');
+    expect(contribuicoesAposSaga[0]?.id).toBe(idContribuicao);
     expect(pagamentoPendente.status).toBe('pendente');
 
     expect(deps.pagamentoEventPublisher.getEventosPublicados()).toHaveLength(1);
@@ -263,8 +267,20 @@ describe('Fluxo — pagamento rejeitado pelo provedor', () => {
       await deps.livroFinanceiroRepository.findLancamentosReceitaPlataforma();
     expect(receitaPlataforma).toHaveLength(0);
 
+    // Plan 0015/0016: a rejected payment never produced an aprovado pagamento,
+    // so the slot stays available — esgotada() is false end-to-end. (There is no
+    // longer a contribuição status/contribuinte to "release".)
     const contribuicaoFinal = await deps.contribuicaoRepository.findById(idContribuicao);
-    expect(contribuicaoFinal?.status).toBe('disponivel');
-    expect(contribuicaoFinal?.contribuinte).toBeNull();
+    expect(contribuicaoFinal?.id).toBe(idContribuicao);
+    expect(
+      await esgotada(
+        {
+          pagamentoRepository: deps.pagamentoRepository,
+          contribuicaoRepository: deps.contribuicaoRepository,
+          observability: deps.observability,
+        },
+        { idContribuicao },
+      ),
+    ).toBe(false);
   });
 });

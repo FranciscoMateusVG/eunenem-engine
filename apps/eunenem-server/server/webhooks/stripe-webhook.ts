@@ -438,15 +438,21 @@ export async function dispatchVerifiedStripeEvent(
       // custom_fields and email via customer_creation.
       const contribuinte = extractContribuinteFromSession(session);
 
-      // Plan 0015 Phase 3 — branch on session.payment_status:
-      //   'paid'       → card flow, charge already settled.
-      //                  finalizarPagamentoAprovado handles the
-      //                  pendente|processing → aprovado transition
-      //                  AND writes contribuinte atomically.
-      //   'processing' → pix flow, QR scanned, awaiting bank confirmation.
-      //                  Write contribuinte directly; transition to
-      //                  processing via iniciarProcessamentoPagamento.
-      //                  finalize-aprovado fires later from charge.succeeded.
+      // Plan 0015 Phase 3 — branch on session.payment_status. Stripe's
+      // Checkout.Session.PaymentStatus union is
+      // 'no_payment_required' | 'paid' | 'unpaid' (there is no 'processing'
+      // member — that's a PaymentIntent status, not a Checkout status):
+      //   'paid'   → card flow, charge already settled.
+      //              finalizarPagamentoAprovado handles the
+      //              pendente|processing → aprovado transition
+      //              AND writes contribuinte atomically.
+      //   'unpaid' → pix flow (delayed-notification PM). On
+      //              checkout.session.completed Stripe reports the session
+      //              as 'unpaid' while the bank confirmation is pending:
+      //              QR scanned, awaiting settlement. Write contribuinte
+      //              directly; transition to processing via
+      //              iniciarProcessamentoPagamento. finalize-aprovado fires
+      //              later from charge.succeeded / async_payment_succeeded.
       span.setAttribute('checkout.payment_status', session.payment_status ?? 'unknown');
       if (session.payment_status === 'paid') {
         await finalizarPagamentoAprovado(
@@ -472,7 +478,7 @@ export async function dispatchVerifiedStripeEvent(
           transition: 'aprovado',
           paymentStatus: 'paid',
         });
-      } else if (session.payment_status === 'processing') {
+      } else if (session.payment_status === 'unpaid') {
         // Write contribuinte first (first-writer-wins) — finalize-aprovado
         // isn't being called yet, so its own contribuinte-write logic
         // doesn't fire. When charge.succeeded later triggers finalize-aprovado,
@@ -502,10 +508,10 @@ export async function dispatchVerifiedStripeEvent(
           paymentStatus: 'processing',
         });
       } else {
-        // payment_status === 'unpaid' on a completed session is rare
-        // (Stripe usually fires session.expired for unpaid abandonment).
-        // Log + no-op so the operator can investigate without us
-        // forcing a transition.
+        // payment_status === 'no_payment_required' (zero-amount session) or
+        // any future member we don't model. Neither 'paid' nor 'unpaid', so
+        // there's no FSM transition to make — log + no-op so the operator can
+        // investigate without us forcing a transition.
         logger.info('webhook.stripe.unhandled_payment_status', {
           eventId: event.id,
           eventType: event.type,

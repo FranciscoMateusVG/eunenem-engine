@@ -27,8 +27,9 @@ import { UsuarioRepositoryMemory } from '../../src/adapters/usuario/repository.m
 import { adicionarOpcaoContribuicao } from '../../src/use-cases/arrecadacao/adicionar-opcao-contribuicao.js';
 import { criarCampanha } from '../../src/use-cases/arrecadacao/criar-campanha.js';
 import { criarContribuicao } from '../../src/use-cases/arrecadacao/criar-contribuicao.js';
+import { esgotada } from '../../src/use-cases/arrecadacao/quantidade-restante.js';
 import { finalizarPagamentoAprovado } from '../../src/use-cases/checkout/finalizar-pagamento-aprovado.js';
-import { iniciarPagamentoContribuicao } from '../../src/use-cases/checkout/iniciar-pagamento-contribuicao.js';
+import { iniciarPagamentoCarrinho } from '../../src/use-cases/checkout/iniciar-pagamento-carrinho.js';
 import { iniciarRepasseRecebedor } from '../../src/use-cases/checkout/iniciar-repasse-recebedor.js';
 import { obterContribuicoesPrecalculadasCampanha } from '../../src/use-cases/checkout/obter-contribuicoes-precalculadas-campanha.js';
 import { obterSaldoRecebedor } from '../../src/use-cases/pagamentos/financeiro/obter-saldo-recebedor.js';
@@ -189,6 +190,9 @@ describe('Fluxo — jornada completa de criação de campanha até repasse de sa
         campanhaRepository: deps.campanhaRepository,
         contribuicaoRepository: deps.contribuicaoRepository,
         provedorRegraTaxa: deps.provedorRegraTaxa,
+        // Plan 0016 (aperture-eg1s2): the use-case now batch-resolves the
+        // esgotada predicate via the Pagamento repo. Fixture was missing this dep.
+        pagamentoRepository: deps.pagamentoRepository,
         observability: deps.observability,
       },
       { idPlataforma: ID_PLATAFORMA_EUNENEM, idCampanha },
@@ -208,7 +212,7 @@ describe('Fluxo — jornada completa de criação de campanha até repasse de sa
       },
     });
 
-    const { contribuicao, pagamento } = await iniciarPagamentoContribuicao(
+    const { contribuicoes, pagamento } = await iniciarPagamentoCarrinho(
       {
         campanhaRepository: deps.campanhaRepository,
         contribuicaoRepository: deps.contribuicaoRepository,
@@ -222,7 +226,8 @@ describe('Fluxo — jornada completa de criação de campanha até repasse de sa
       {
         idPlataforma: ID_PLATAFORMA_EUNENEM,
         idCampanha,
-        idContribuicao,
+        itens: [{ idContribuicao, quantidade: 1 }],
+        idsItens: [randomUUID()],
         metodo: 'pix',
         idPagamento,
         idIntencaoPagamento: randomUUID(),
@@ -230,16 +235,23 @@ describe('Fluxo — jornada completa de criação de campanha até repasse de sa
       },
     );
 
-    // aperture-m95f3: saga no longer claims the contribuição — that happens
-    // during finalizarPagamentoAprovado when the webhook delivers the
-    // contribuinte data Stripe collected inside the iframe.
-    expect(contribuicao.status).toBe('disponivel');
-    expect(contribuicao.contribuinte).toBeNull();
+    // Plan 0015/0016: Contribuição no longer carries a `status` enum or a
+    // `contribuinte` field. "Disponível" is now derived via esgotada() (no
+    // aprovado pagamento has sold the slot yet); contribuinte lives on the
+    // pagamento's intenção and is stamped at finalize-time from the webhook.
+    const contribuicao = contribuicoes[0];
+    expect(contribuicao?.id).toBe(idContribuicao);
+    expect(pagamento.intencao.contribuinte).toBeNull();
     expect(pagamento.status).toBe('pendente');
-    expect(pagamento.intencao.composicaoValores.totalPaidCents).toBe(VALOR_TOTAL_CENTS);
+    expect(pagamento.intencao.composicaoValoresAggregate.totalPaidCents).toBe(VALOR_TOTAL_CENTS);
 
-    const persistedContribuicao = await deps.contribuicaoRepository.findById(idContribuicao);
-    expect(persistedContribuicao?.status).toBe('disponivel');
+    const esgotadaArgs = {
+      pagamentoRepository: deps.pagamentoRepository,
+      contribuicaoRepository: deps.contribuicaoRepository,
+      observability: deps.observability,
+    };
+    // Still available: the pendente pagamento does not count toward sold.
+    expect(await esgotada(esgotadaArgs, { idContribuicao })).toBe(false);
 
     const { pagamento: pagamentoAprovado, lancamentos } = await finalizarPagamentoAprovado(
       {
@@ -255,10 +267,11 @@ describe('Fluxo — jornada completa de criação de campanha até repasse de sa
       { idPagamento, contribuinte: contribuinteValido() },
     );
 
-    // Webhook-driven claim happens inside finalize when contribuinte is present.
-    const contribuicaoAposFinalize = await deps.contribuicaoRepository.findById(idContribuicao);
-    expect(contribuicaoAposFinalize?.status).toBe('indisponivel');
-    expect(contribuicaoAposFinalize?.contribuinte).toEqual(contribuinteValido());
+    // Webhook-driven claim happens inside finalize when contribuinte is present:
+    // the contribuinte is stamped onto the aprovado pagamento's intenção, and
+    // the slot (quantidade=1) is now sold out → esgotada returns true.
+    expect(pagamentoAprovado.intencao.contribuinte).toEqual(contribuinteValido());
+    expect(await esgotada(esgotadaArgs, { idContribuicao })).toBe(true);
 
     expect(pagamentoAprovado.status).toBe('aprovado');
     expect(lancamentos).toHaveLength(2);
@@ -266,13 +279,16 @@ describe('Fluxo — jornada completa de criação de campanha até repasse de sa
       'credito_saldo_recebedor',
       'credito_receita_plataforma',
     ]);
-    expect(lancamentos.find((l) => l.tipo === 'credito_saldo_recebedor')).toMatchObject({
-      amountCents: VALOR_CONTRIBUICAO_CENTS,
-      status: 'pendente',
-    });
+    // Plan 0015/0016: LancamentoFinanceiro no longer carries a `status` enum.
+    // Pendente/disponível are now derived from transferidoEm/canceladoEm. A
+    // fresh recebedor lançamento is pending (transferidoEm === null); the
+    // platform-revenue row is realised immediately (no maturation gate).
+    const lancamentoRecebedor = lancamentos.find((l) => l.tipo === 'credito_saldo_recebedor');
+    expect(lancamentoRecebedor).toMatchObject({ amountCents: VALOR_CONTRIBUICAO_CENTS });
+    expect(lancamentoRecebedor?.transferidoEm).toBeNull();
+    expect(lancamentoRecebedor?.canceladoEm).toBeNull();
     expect(lancamentos.find((l) => l.tipo === 'credito_receita_plataforma')).toMatchObject({
       amountCents: VALOR_TAXA_CENTS,
-      status: 'disponivel',
     });
 
     const saldoPendente = await obterSaldoRecebedor(
@@ -282,30 +298,23 @@ describe('Fluxo — jornada completa de criação de campanha até repasse de sa
       },
       { idCampanha },
     );
+    // Plan 0015/0016: the financeiro FSM collapsed. The recebedor lançamento is
+    // repasse-eligible (transferidoEm === null) the moment it's created — there
+    // is NO maturation gate flipping it to "disponivel" first. So before the
+    // repasse the whole balance is PENDENTE ("a receber").
     expect(saldoPendente).toEqual({
       idCampanha,
       valorPendenteCents: VALOR_CONTRIBUICAO_CENTS,
       valorDisponivelCents: 0,
     });
 
-    const maturados = matureLancamentosRecebedorForCampanha(
+    // The (now collapsed) maturation helper is a no-op that just reports the
+    // count of repasse-eligible recebedor lançamentos.
+    const eligiveis = matureLancamentosRecebedorForCampanha(
       deps.livroFinanceiroRepository,
       idCampanha,
     );
-    expect(maturados).toBe(1);
-
-    const saldoDisponivel = await obterSaldoRecebedor(
-      {
-        livroFinanceiroRepository: deps.livroFinanceiroRepository,
-        observability: deps.observability,
-      },
-      { idCampanha },
-    );
-    expect(saldoDisponivel).toEqual({
-      idCampanha,
-      valorPendenteCents: 0,
-      valorDisponivelCents: VALOR_CONTRIBUICAO_CENTS,
-    });
+    expect(eligiveis).toBe(1);
 
     const repasse = await iniciarRepasseRecebedor(
       {
@@ -328,6 +337,24 @@ describe('Fluxo — jornada completa de criação de campanha até repasse de sa
       idCampanha,
       amountCents: VALOR_CONTRIBUICAO_CENTS,
       status: 'solicitado',
+    });
+
+    // A merely SOLICITADO repasse only claims the lançamento (stamps idRepasse);
+    // it does NOT stamp transferidoEm — that happens on repasse APPROVAL. So the
+    // saldo VO still reports the money as pendente ("a receber") here. The
+    // lançamento is no longer re-claimable, but the funds aren't "já transferido"
+    // until the repasse is approved.
+    const saldoAposSolicitacao = await obterSaldoRecebedor(
+      {
+        livroFinanceiroRepository: deps.livroFinanceiroRepository,
+        observability: deps.observability,
+      },
+      { idCampanha },
+    );
+    expect(saldoAposSolicitacao).toEqual({
+      idCampanha,
+      valorPendenteCents: VALOR_CONTRIBUICAO_CENTS,
+      valorDisponivelCents: 0,
     });
 
     const repassePersistido = await deps.livroFinanceiroRepository.findRepasseById(idRepasse);

@@ -232,7 +232,16 @@ describe('Fluxo — alteração de recebedor', () => {
       { idPagamento, contribuinte: contribuinteValido() },
     );
 
-    matureLancamentosRecebedorForCampanha(deps.livroFinanceiroRepository, idCampanha);
+    // Plan 0015/0016: the financeiro state machine was collapsed — there is no
+    // maturation gate anymore. The recebedor lançamento is repasse-eligible the
+    // moment it's created (transferidoEm === null → "a receber"). It only moves
+    // to valorDisponivelCents ("já transferido") after a repasse stamps
+    // transferidoEm. So before any repasse the balance is fully PENDENTE.
+    const eligiveis = matureLancamentosRecebedorForCampanha(
+      deps.livroFinanceiroRepository,
+      idCampanha,
+    );
+    expect(eligiveis).toBe(1);
 
     const saldoAntesAlteracao = await obterSaldoRecebedor(
       {
@@ -243,8 +252,8 @@ describe('Fluxo — alteração de recebedor', () => {
     );
     expect(saldoAntesAlteracao).toEqual({
       idCampanha,
-      valorPendenteCents: 0,
-      valorDisponivelCents: VALOR_CONTRIBUICAO_CENTS,
+      valorPendenteCents: VALOR_CONTRIBUICAO_CENTS,
+      valorDisponivelCents: 0,
     });
 
     const novosDados = dadosRecebedorNovo();

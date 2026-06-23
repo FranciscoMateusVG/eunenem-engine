@@ -30,10 +30,14 @@ export const PerfilPublicoDTOSchema = z.object({
   tipoEvento: TipoEventoPerfilSchema.nullable(),
   dataEvento: z.string().nullable(),
   dataNascimento: z.string().nullable(),
-  /** Photo refs (storage keys today; R5 resolves to public/presigned URLs). */
-  fotoPerfil: z.string().nullable(),
-  fotoCapa: z.string().nullable(),
-  fotoHistoria: z.string().nullable(),
+  /**
+   * Resolved public photo URLs — DISPLAY ONLY (aperture-qjgfr). No bare-key
+   * field on the public surface: the public page never round-trips, and the
+   * key embeds idUsuario (kept off the public projection).
+   */
+  fotoPerfilUrl: z.string().nullable(),
+  fotoCapaUrl: z.string().nullable(),
+  fotoHistoriaUrl: z.string().nullable(),
 });
 
 export type PerfilPublicoDTO = z.infer<typeof PerfilPublicoDTOSchema>;
@@ -84,9 +88,9 @@ export async function obterPerfilPublicoBySlug(
         tipoEvento: c?.tipoEvento ?? null,
         dataEvento: c?.dataEvento ? c.dataEvento.toISOString() : null,
         dataNascimento: c?.dataNascimento ? c.dataNascimento.toISOString() : null,
-        fotoPerfil: fotoUrl(c?.fotoPerfilKey ?? null),
-        fotoCapa: fotoUrl(c?.fotoCapaKey ?? null),
-        fotoHistoria: fotoUrl(c?.fotoHistoriaKey ?? null),
+        fotoPerfilUrl: fotoUrl(c?.fotoPerfilKey ?? null),
+        fotoCapaUrl: fotoUrl(c?.fotoCapaKey ?? null),
+        fotoHistoriaUrl: fotoUrl(c?.fotoHistoriaKey ?? null),
       };
 
       span.setStatus({ code: SpanStatusCode.OK });
