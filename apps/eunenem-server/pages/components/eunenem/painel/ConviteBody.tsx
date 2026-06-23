@@ -8,6 +8,9 @@ import {
   conviteErrorMessage,
   conviteStateFromData,
   savePayloadFromConviteState,
+  scrapbookSelectionPatch,
+  templateSelectionPatch,
+  uploadSelectionPatch,
   useConviteData,
   useSalvarConvite,
 } from "@/lib/convite";
@@ -1296,6 +1299,9 @@ const STEPS: readonly WizardStep[] = [
 export interface StepViewProps {
   state: ConviteState;
   update: <K extends keyof ConviteState>(k: K, v: ConviteState[K]) => void;
+  /** aperture-qa2m3 — apply a multi-field patch atomically (one re-render).
+   *  Used for the shared template-selection cascade. */
+  updateMany: (patch: Partial<ConviteState>) => void;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1360,6 +1366,8 @@ function DesktopConviteBody({ slug }: PainelSectionBodyProps) {
 
   const update = <K extends keyof ConviteState>(k: K, v: ConviteState[K]) =>
     setState((s) => ({ ...s, [k]: v }));
+  const updateMany = (patch: Partial<ConviteState>) =>
+    setState((s) => ({ ...s, ...patch }));
 
   const cur = STEPS[step]!;
   const isLast = step === STEPS.length - 1;
@@ -1404,7 +1412,7 @@ function DesktopConviteBody({ slug }: PainelSectionBodyProps) {
     }
   };
 
-  const stepProps: StepViewProps = { state, update };
+  const stepProps: StepViewProps = { state, update, updateMany };
 
   return (
     <div className="cv-wiz">
@@ -2027,17 +2035,19 @@ function StepPronto({ state }: StepViewProps) {
 // templates.ts for future consumers.
 // ────────────────────────────────────────────────────────────────────────────
 
-function StepFundo({ state, update }: StepViewProps) {
+function StepFundo({ state, update, updateMany }: StepViewProps) {
   const fileRef = useRef<HTMLInputElement | null>(null);
 
+  // aperture-qa2m3 — all three background choices go through the SHARED patch
+  // helpers in lib/convite (the canonical cascade), so mobile applies the exact
+  // same rules. The silent palette+font cascade lives in templateSelectionPatch.
   const onUpload = (file: File | undefined | null) => {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (e) => {
       const result = e.target?.result;
       if (typeof result === "string") {
-        update("bgUpload", result);
-        update("bgTemplate", "none");
+        updateMany(uploadSelectionPatch(result));
       }
     };
     reader.readAsDataURL(file);
@@ -2045,18 +2055,10 @@ function StepFundo({ state, update }: StepViewProps) {
 
   const removeUpload = () => update("bgUpload", null);
 
-  const selectTemplate = (tpl: Template) => {
-    update("bgTemplate", tpl.id);
-    update("bgUpload", null);
-    // Silent palette + font cascade (preserve default per direction-b).
-    update("palette", tpl.suggestedPalette);
-    update("nameFont", tpl.suggestedNameFont);
-  };
+  const selectTemplate = (tpl: Template) =>
+    updateMany(templateSelectionPatch(tpl));
 
-  const selectNone = () => {
-    update("bgTemplate", "none");
-    update("bgUpload", null);
-  };
+  const selectNone = () => updateMany(scrapbookSelectionPatch());
 
   const isNoneActive = state.bgTemplate === "none" && !state.bgUpload;
 

@@ -6,6 +6,9 @@ import {
   conviteErrorMessage,
   conviteStateFromData,
   savePayloadFromConviteState,
+  scrapbookSelectionPatch,
+  templateSelectionPatch,
+  uploadSelectionPatch,
   useConviteData,
   useSalvarConvite,
 } from "@/lib/convite";
@@ -19,8 +22,8 @@ import {
   NAME_FONTS,
   PALETTES,
   type ConviteState,
-  type PreviewFormat,
 } from "@/lib/mocks/convite";
+import { TEMPLATES, type Template } from "@/lib/mocks/templates";
 
 import { InvitePreview, SUGGEST } from "./ConviteBody";
 
@@ -70,17 +73,10 @@ const STEPS: readonly WizStep[] = [
   { id: "visual", title: "a cara do convite" },
 ] as const;
 
-const PREVIEW_SCALE_HERO: Record<PreviewFormat, number> = {
-  story: 0.5,
-  square: 0.46,
-  link: 0.5,
-};
-
-const PREVIEW_SCALE_MODAL: Record<PreviewFormat, number> = {
-  story: 0.75,
-  square: 0.66,
-  link: 0.58,
-};
+// aperture-qa2m3 — desktop is canonical and story-only (direction-b); mobile
+// no longer exposes square/link, so the preview renders at a single story scale.
+const PREVIEW_SCALE_HERO_STORY = 0.5;
+const PREVIEW_SCALE_MODAL_STORY = 0.75;
 
 /** NFD + diacritic strip + lowercase. Used by fundo step search to match
  *  "balao" against "balão" etc. */
@@ -94,6 +90,8 @@ function normalize(s: string): string {
 interface StepProps {
   state: ConviteState;
   update: <K extends keyof ConviteState>(k: K, v: ConviteState[K]) => void;
+  /** aperture-qa2m3 — atomic multi-field patch for the shared template cascade. */
+  updateMany: (patch: Partial<ConviteState>) => void;
 }
 
 // ─── shell ──────────────────────────────────────────────────────────
@@ -101,7 +99,6 @@ interface StepProps {
 export function MobileConviteBody({ slug }: PainelSectionBodyProps) {
   const [state, setState] = useState<ConviteState>({ ...DEFAULT_STATE });
   const [step, setStep] = useState(0);
-  const [previewFmt, setPreviewFmt] = useState<PreviewFormat>("story");
   const [previewExpanded, setPreviewExpanded] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
   const conviteQuery = useConviteData();
@@ -118,6 +115,8 @@ export function MobileConviteBody({ slug }: PainelSectionBodyProps) {
     k: K,
     v: ConviteState[K],
   ) => setState((s) => ({ ...s, [k]: v }));
+  const updateMany = (patch: Partial<ConviteState>) =>
+    setState((s) => ({ ...s, ...patch }));
 
   const cur = STEPS[step]!;
   const pct = ((step + 1) / STEPS.length) * 100;
@@ -169,7 +168,7 @@ export function MobileConviteBody({ slug }: PainelSectionBodyProps) {
     }
   };
 
-  const stepProps: StepProps = { state, update };
+  const stepProps: StepProps = { state, update, updateMany };
 
   return (
     <div className="mcv-wiz">
@@ -210,38 +209,17 @@ export function MobileConviteBody({ slug }: PainelSectionBodyProps) {
           <span className="mcv-hero-tape" aria-hidden="true" />
           <InvitePreview
             state={state}
-            format={previewFmt}
+            format="story"
             fidelity="scrapbook"
-            scale={PREVIEW_SCALE_HERO[previewFmt]}
+            scale={PREVIEW_SCALE_HERO_STORY}
           />
           <span className="mcv-hero-expand" aria-hidden="true">⤢</span>
         </button>
 
+        {/* aperture-qa2m3 — square/link format tabs removed: desktop is canonical
+            and story-only (direction-b), so mobile no longer offers them. */}
         <div className="mcv-fmt-row">
           <span className="mcv-fmt-eyebrow">seu convite ♡</span>
-          <div className="mcv-fmt-tabs" role="tablist" aria-label="formato">
-            {(
-              [
-                ["story", "story"],
-                ["square", "quadrado"],
-                ["link", "link"],
-              ] as const
-            ).map(([k, l]) => {
-              const on = previewFmt === k;
-              return (
-                <button
-                  key={k}
-                  type="button"
-                  role="tab"
-                  aria-selected={on}
-                  className={`mcv-fmt-tab ${on ? "on" : ""}`}
-                  onClick={() => setPreviewFmt(k)}
-                >
-                  {l}
-                </button>
-              );
-            })}
-          </div>
         </div>
       </div>
 
@@ -304,8 +282,6 @@ function PreviewModal({
   state: ConviteState;
   onClose: () => void;
 }) {
-  const [fmt, setFmt] = useState<PreviewFormat>("story");
-
   // Close on ESC for the rare keyboard-mobile case (Bluetooth keyboards
   // exist; doesn't hurt).
   useEffect(() => {
@@ -316,8 +292,10 @@ function PreviewModal({
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  // aperture-qa2m3 follow-up: real copy/download (desktop uses downloadConvitePng
+  // + shareConvitePreview) is out of scope here — still mock toasts.
   const onCopy = () => toast.success("link copiado ♡ (mock)");
-  const onDownload = () => toast.success(`baixando ${fmt} ♡ (mock)`);
+  const onDownload = () => toast.success("baixando convite ♡ (mock)");
 
   return (
     <div
@@ -340,40 +318,15 @@ function PreviewModal({
         </button>
       </div>
 
-      <div className="mcv-modal-tabs-row" onClick={(e) => e.stopPropagation()}>
-        <div className="mcv-modal-tabs" role="tablist" aria-label="formato">
-          {(
-            [
-              ["story", "story"],
-              ["square", "quadrado"],
-              ["link", "link"],
-            ] as const
-          ).map(([k, l]) => {
-            const on = fmt === k;
-            return (
-              <button
-                key={k}
-                type="button"
-                role="tab"
-                aria-selected={on}
-                className={`mcv-modal-tab ${on ? "on" : ""}`}
-                onClick={() => setFmt(k)}
-              >
-                {l}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
+      {/* aperture-qa2m3 — story-only (desktop canonical); format tabs removed. */}
       <div className="mcv-modal-stage" onClick={(e) => e.stopPropagation()}>
         <div className="mcv-modal-preview">
           <span className="mcv-modal-tape" aria-hidden="true" />
           <InvitePreview
             state={state}
-            format={fmt}
+            format="story"
             fidelity="scrapbook"
-            scale={PREVIEW_SCALE_MODAL[fmt]}
+            scale={PREVIEW_SCALE_MODAL_STORY}
           />
         </div>
       </div>
@@ -392,7 +345,7 @@ function PreviewModal({
 
 // ─── step: fundo ─────────────────────────────────────────────────────
 
-function MStepFundo({ state, update }: StepProps) {
+function MStepFundo({ state, update, updateMany }: StepProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
 
@@ -402,19 +355,16 @@ function MStepFundo({ state, update }: StepProps) {
     reader.onload = (e) => {
       const data = e.target?.result;
       if (typeof data === "string") {
-        update("bgUpload", data);
-        update("bgTemplate", "none");
+        updateMany(uploadSelectionPatch(data));
       }
     };
     reader.readAsDataURL(file);
   };
 
+  // aperture-qa2m3 — the real 12 watercolor templates (same TEMPLATES the desktop
+  // uses), no longer a stub. Accent-normalized search by label / id / event type.
   const q = normalize(query.trim());
-  // Templates land via sibling aperture-hzcy5 (Vance). Until then, the
-  // search runs against an empty list so the result-count copy still
-  // works ("0 resultados pra ...").
-  const TEMPLATES: ReadonlyArray<{ id: string; label: string; forEvents: string[] }> = [];
-  const filtered = q
+  const filtered: Template[] = q
     ? TEMPLATES.filter(
         (t) =>
           normalize(t.label).includes(q) ||
@@ -464,25 +414,37 @@ function MStepFundo({ state, update }: StepProps) {
             <button
               type="button"
               className={`mcv-tpl ${paperActive ? "on" : ""}`}
-              onClick={() => {
-                update("bgTemplate", "none");
-                update("bgUpload", null);
-              }}
+              onClick={() => updateMany(scrapbookSelectionPatch())}
             >
               <div className="mcv-tpl-thumb mcv-tpl-thumb-paper">papel</div>
               <div className="mcv-tpl-label">scrapbook</div>
             </button>
           )}
 
-          {filtered.length === 0 && !q && (
-            <div className="mcv-fundo-soon">
-              <div className="mcv-fundo-soon-glyph">✨</div>
-              <div className="mcv-fundo-soon-title">templates a caminho ♡</div>
-              <div className="mcv-fundo-soon-sub">
-                ilustrações watercolor chegam logo (aperture-hzcy5)
-              </div>
-            </div>
-          )}
+          {/* aperture-qa2m3 — the 12 watercolor templates, same as desktop.
+              Picking one cascades palette + font via the shared patch. */}
+          {filtered.map((tpl) => {
+            const active = state.bgTemplate === tpl.id && !state.bgUpload;
+            return (
+              <button
+                type="button"
+                key={tpl.id}
+                className={`mcv-tpl ${active ? "on" : ""}`}
+                aria-pressed={active}
+                aria-label={`template ${tpl.label}`}
+                onClick={() => updateMany(templateSelectionPatch(tpl))}
+              >
+                <div
+                  className="mcv-tpl-thumb"
+                  style={{ background: `url("${tpl.img}") center/cover, white` }}
+                  aria-hidden="true"
+                />
+                <div className="mcv-tpl-label">
+                  {tpl.emoji} {tpl.label}
+                </div>
+              </button>
+            );
+          })}
 
           {q && filtered.length === 0 && (
             <div className="mcv-fundo-empty">
