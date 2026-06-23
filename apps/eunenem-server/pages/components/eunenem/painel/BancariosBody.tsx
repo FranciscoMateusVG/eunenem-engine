@@ -1,15 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import type { PainelSectionBodyProps } from "@/PainelSectionPage";
+import { trpc } from "@/lib/trpc";
 import {
   ACCOUNT_TYPES,
   BANKS,
   BANCARIOS_DEFAULT_MODE,
   BANCARIOS_DEFAULT_PIX_TYPE,
-  BANCARIOS_DEMO,
   CPF_FIXO,
-  PIX_RESOLVED,
   PIX_TYPES,
   accountTypeLabel,
   bankByCode,
@@ -17,6 +16,17 @@ import {
   type BancariosMode,
   type PixType,
 } from "@/lib/mocks/bancarios";
+// aperture-4bf4j (V3) — client validation imports the SAME pure validators the
+// domain VO uses (DadosRecebedorSchema), so the inline checks never drift from
+// the server. Precedent for pages→src runtime import: pages/lib/convite-mapper.
+import {
+  cpfValido,
+  type DadosRecebedor,
+  mensagemChavePixInvalida,
+  type TipoChavePix,
+  type TipoConta,
+  telefoneBrValido,
+} from "../../../../../../src/index.js";
 
 // aperture-6xjcw — Dados Bancários body for /painel/:slug/bancarios.
 //
@@ -53,20 +63,42 @@ const maskPhone = (s: string): string => {
   return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
 };
 
-const isFilledPixKey = (type: PixType["v"], v: string): boolean => {
-  if (!v) return false;
-  switch (type) {
-    case "cpf":
-      return onlyDigits(v).length === 11;
-    case "email":
-      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
-    case "celular":
-      return onlyDigits(v).length >= 10;
-    case "aleatoria":
-      return v.length >= 18;
-    default:
-      return false;
+// Frontend pix-type label ⇄ domain TipoChavePix. The domain key is 'telefone';
+// the UI calls it 'celular'. Bridge both directions so we never send 'celular'
+// raw to the wire (the enum-alignment landmine flagged in design).
+const PIX_TYPE_TO_DOMAIN: Record<PixType["v"], TipoChavePix> = {
+  cpf: "cpf",
+  email: "email",
+  celular: "telefone",
+  aleatoria: "aleatoria",
+};
+const DOMAIN_TO_PIX_TYPE: Record<TipoChavePix, PixType["v"]> = {
+  cpf: "cpf",
+  cnpj: "cpf", // frontend has no CNPJ pix chip; our UI never writes it
+  email: "email",
+  telefone: "celular",
+  aleatoria: "aleatoria",
+};
+
+// Store the key the way the domain does: digits-only for cpf/cnpj/phone,
+// trimmed text for email/random.
+function normalizePixKey(domainType: TipoChavePix, raw: string): string {
+  if (domainType === "cpf" || domainType === "cnpj" || domainType === "telefone") {
+    return onlyDigits(raw);
   }
+  return raw.trim();
+}
+
+const EMPTY_FORM: BancariosForm = {
+  bankCode: BANKS[0]!.code,
+  agencia: "",
+  agenciaDV: "",
+  conta: "",
+  contaDV: "",
+  tipoConta: "cc",
+  pixKey: "",
+  nome: "",
+  telefone: "",
 };
 
 interface ValidationError {
@@ -74,50 +106,106 @@ interface ValidationError {
   msg: string;
 }
 
+// Mirrors DadosRecebedorSchema (same pure validators the server uses):
+// pix → mensagemChavePixInvalida (per-type checksum/format); conta → COMPE
+// 3 digits, numeric agência/conta, holder CPF checksum + E.164-ish celular.
+// nomeTitular required in both modes.
 function validate(
   modo: BancariosMode,
   s: BancariosForm,
   tipoPix: PixType["v"],
 ): ValidationError[] {
   const errs: ValidationError[] = [];
-  if (modo === "conta") {
-    if (!s.bankCode)
-      errs.push({ k: "bankCode", msg: "escolha o banco onde a sua conta foi aberta." });
-    if (!s.agencia) errs.push({ k: "agencia", msg: "faltou a agência ✿" });
-    if (!s.conta) errs.push({ k: "conta", msg: "faltou o número da conta." });
-    if (!s.contaDV)
-      errs.push({
-        k: "contaDV",
-        msg: "o dígito da conta é obrigatório — é o número depois do tracinho.",
-      });
-  } else {
-    if (!isFilledPixKey(tipoPix, s.pixKey)) {
-      const tipoLbl = PIX_TYPES.find((p) => p.v === tipoPix)?.label ?? "chave";
-      errs.push({
-        k: "pixKey",
-        msg: `a chave Pix do tipo ${tipoLbl} parece incompleta — confira com calma.`,
-      });
-    }
-    if (tipoPix === "cpf" && onlyDigits(s.pixKey) !== "12155720696") {
-      errs.push({
-        k: "pixKey",
-        msg: "esse cpf não é o mesmo da sua conta EuNeném. troque a chave ou escolha outro tipo.",
-      });
-    }
-  }
+
   if (!s.nome || s.nome.trim().split(/\s+/).length < 2) {
     errs.push({
       k: "nome",
       msg: "o nome do titular precisa ser igual ao do documento (nome e sobrenome).",
     });
   }
-  if (onlyDigits(s.telefone).length < 10) {
-    errs.push({
-      k: "telefone",
-      msg: "o celular é obrigatório pra avisar você quando cair um mimo.",
-    });
+
+  if (modo === "conta") {
+    if (!/^\d{3}$/.test(s.bankCode))
+      errs.push({ k: "bankCode", msg: "escolha o banco onde a sua conta foi aberta." });
+    if (!/^\d{1,10}$/.test(s.agencia))
+      errs.push({ k: "agencia", msg: "a agência deve ser numérica ✿" });
+    if (!/^\d{1,20}$/.test(s.conta))
+      errs.push({ k: "conta", msg: "o número da conta deve ser numérico." });
+    if (!s.contaDV)
+      errs.push({
+        k: "contaDV",
+        msg: "o dígito da conta é obrigatório — é o número depois do tracinho.",
+      });
+    if (!telefoneBrValido(s.telefone))
+      errs.push({
+        k: "telefone",
+        msg: "o celular (com DDD) é obrigatório pra avisar você quando cair um mimo.",
+      });
+    if (!cpfValido(CPF_FIXO))
+      errs.push({ k: "cpf", msg: "o cpf da sua conta parece inválido — fale com o suporte." });
+  } else {
+    const domainType = PIX_TYPE_TO_DOMAIN[tipoPix];
+    const msg = mensagemChavePixInvalida(domainType, normalizePixKey(domainType, s.pixKey));
+    if (msg) {
+      const tipoLbl = PIX_TYPES.find((p) => p.v === tipoPix)?.label ?? "chave";
+      errs.push({ k: "pixKey", msg: `${msg} (chave ${tipoLbl}).` });
+    }
   }
   return errs;
+}
+
+// ── form ⇄ DadosRecebedor (the wire union) ──
+function toDadosRecebedor(
+  modo: BancariosMode,
+  s: BancariosForm,
+  tipoPix: PixType["v"],
+): DadosRecebedor {
+  const nomeTitular = s.nome.trim();
+  if (modo === "pix") {
+    const tipoChavePix = PIX_TYPE_TO_DOMAIN[tipoPix];
+    return {
+      metodo: "pix",
+      nomeTitular,
+      tipoChavePix,
+      chavePix: normalizePixKey(tipoChavePix, s.pixKey),
+    };
+  }
+  return {
+    metodo: "conta",
+    nomeTitular,
+    cpfTitular: onlyDigits(CPF_FIXO),
+    celularTitular: onlyDigits(s.telefone),
+    codigoBanco: s.bankCode,
+    agencia: s.agencia,
+    agenciaDigito: s.agenciaDV ? s.agenciaDV : null,
+    conta: s.conta,
+    contaDigito: s.contaDV,
+    tipoConta: s.tipoConta as TipoConta,
+  };
+}
+
+function fromDadosRecebedor(d: DadosRecebedor): BancariosForm {
+  if (d.metodo === "pix") {
+    const uiType = DOMAIN_TO_PIX_TYPE[d.tipoChavePix];
+    const pixKey =
+      uiType === "cpf"
+        ? maskCPF(d.chavePix)
+        : uiType === "celular"
+          ? maskPhone(d.chavePix)
+          : d.chavePix;
+    return { ...EMPTY_FORM, nome: d.nomeTitular, pixKey };
+  }
+  return {
+    ...EMPTY_FORM,
+    nome: d.nomeTitular,
+    telefone: maskPhone(d.celularTitular),
+    bankCode: d.codigoBanco,
+    agencia: d.agencia,
+    agenciaDV: d.agenciaDigito ?? "",
+    conta: d.conta,
+    contaDV: d.contaDigito,
+    tipoConta: d.tipoConta,
+  };
 }
 
 // ── tiny stroke icons (ported from the export's icons.jsx) ──────────────────
@@ -230,7 +318,8 @@ const PIX_ICON: Record<PixType["v"], (p: IconProps) => React.ReactNode> = {
 // ── component ───────────────────────────────────────────────────────────────
 
 export function BancariosBody(_props: PainelSectionBodyProps) {
-  const [s, setS] = useState<BancariosForm>({ ...BANCARIOS_DEMO });
+  const utils = trpc.useUtils();
+  const [s, setS] = useState<BancariosForm>({ ...EMPTY_FORM });
   const [modo, setModo] = useState<BancariosMode>(BANCARIOS_DEFAULT_MODE);
   const [tipoPix, setTipoPix] = useState<PixType["v"]>(BANCARIOS_DEFAULT_PIX_TYPE);
   const [errors, setErrors] = useState<ValidationError[]>([]);
@@ -239,6 +328,39 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
     setS((prev) => ({ ...prev, ...patch }));
   const errorKeys = errors.map((e) => e.k);
   const hasErr = (k: string) => errorKeys.includes(k);
+
+  // ── Load the saved receiving data (R4 dadosRecebimento.get). Hydrate once;
+  // null = never saved → empty form. ──
+  const dadosQuery = trpc.dadosRecebimento.get.useQuery(undefined, {
+    staleTime: 30_000,
+  });
+  const hydrated = useRef(false);
+  useEffect(() => {
+    if (hydrated.current || dadosQuery.isLoading) return;
+    const d = dadosQuery.data;
+    if (d) {
+      setS(fromDadosRecebedor(d));
+      if (d.metodo === "pix") {
+        setModo("pix");
+        setTipoPix(DOMAIN_TO_PIX_TYPE[d.tipoChavePix]);
+      } else {
+        setModo("conta");
+      }
+    }
+    hydrated.current = true;
+  }, [dadosQuery.data, dadosQuery.isLoading]);
+
+  const salvar = trpc.dadosRecebimento.salvar.useMutation({
+    onSuccess: () => {
+      void utils.dadosRecebimento.get.invalidate();
+      toast.success("dados salvos com carinho ♡");
+    },
+    onError: (err) => {
+      toast.error(
+        err.message || "não consegui salvar — confira os campos e tente de novo",
+      );
+    },
+  });
 
   // Toggling to Pix + CPF type with an empty key prefills the CPF.
   useEffect(() => {
@@ -259,30 +381,15 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
 
   const isComplete = validate(modo, s, tipoPix).length === 0;
 
-  const onAutofillConta = () => {
-    setS((prev) => ({
-      ...prev,
-      bankCode: PIX_RESOLVED.bankCode,
-      agencia: PIX_RESOLVED.agencia,
-      agenciaDV: PIX_RESOLVED.agenciaDV,
-      conta: PIX_RESOLVED.conta,
-      contaDV: PIX_RESOLVED.contaDV,
-      tipoConta: PIX_RESOLVED.tipoConta,
-    }));
-    setModo("conta");
-    toast.success("preenchemos sua conta pra você ♡");
-  };
-
   const onSave = () => {
     const errs = validate(modo, s, tipoPix);
     setErrors(errs);
-    if (errs.length === 0) toast.success("dados salvos com carinho ♡");
+    if (errs.length > 0) return;
+    salvar.mutate(toDadosRecebedor(modo, s, tipoPix));
   };
 
   const bank = useMemo(() => bankByCode(s.bankCode), [s.bankCode]);
   const tipo = PIX_TYPES.find((p) => p.v === tipoPix) ?? PIX_TYPES[0]!;
-  const pixOk = isFilledPixKey(tipoPix, s.pixKey);
-  const resolvedBank = bankByCode(PIX_RESOLVED.bankCode);
 
   const onPixKeyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     let v = e.target.value;
@@ -295,6 +402,24 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
     hasErr(k)
       ? { borderColor: "var(--coral-pink)", boxShadow: "0 0 0 4px rgba(231,143,167,.18)" }
       : undefined;
+
+  // Real loading state while the saved data loads (R4) — no demo flash.
+  if (dadosQuery.isLoading) {
+    return (
+      <div className="bnc">
+        <style>{BNC_CSS}</style>
+        <header className="bnc-title">
+          <span className="bnc-crumb">conta · pagamentos</span>
+          <h1>
+            <span className="hl">Dados Bancários</span>
+          </h1>
+        </header>
+        <div style={{ display: "flex", justifyContent: "center", padding: "48px 0" }}>
+          <span className="perfil-spinner" aria-hidden="true" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="bnc">
@@ -456,12 +581,6 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
               <div className="bnc-field">
                 <label>
                   chave pix <span className="req">*</span>
-                  {pixOk && (
-                    <span className="bnc-verified-pill" style={{ marginLeft: 8 }}>
-                      <ICheckCircle size={12} />
-                      verificada
-                    </span>
-                  )}
                 </label>
                 <input
                   className="bnc-input"
@@ -477,41 +596,10 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
                 <span className="bnc-helper">
                   {tipo.help}
                   {tipo.v === "cpf" && (
-                    <b style={{ color: "var(--plum)" }}>121.557.206-96</b>
+                    <b style={{ color: "var(--plum)" }}>{CPF_FIXO}</b>
                   )}
                 </span>
               </div>
-
-              {pixOk && (
-                <div className="bnc-saved-stamp">
-                  <BankFlag bank={resolvedBank} size={34} />
-                  <div style={{ flex: 1 }}>
-                    <div className="who">chave conferida ♡</div>
-                    <div>
-                      vinculada a {resolvedBank.name} ·{" "}
-                      {accountTypeLabel(PIX_RESOLVED.tipoConta)} · final{" "}
-                      {PIX_RESOLVED.finalDigits}
-                    </div>
-                  </div>
-                  <span className="bnc-verified-pill">
-                    <ICheckCircle size={12} />
-                    titular bate
-                  </span>
-                </div>
-              )}
-
-              {pixOk && (
-                <div className="bnc-autofill-strip">
-                  <IBank size={16} />
-                  <span className="lbl">
-                    descobrimos a conta vinculada a essa chave.
-                  </span>
-                  <span>posso preencher agência e conta automaticamente?</span>
-                  <button type="button" onClick={onAutofillConta}>
-                    preencher pra mim
-                  </button>
-                </div>
-              )}
             </div>
           ) : (
             <div className="bnc-grid" style={{ gap: 14 }}>
@@ -701,9 +789,14 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
           {/* <button type="button" className="bnc-btn ghost" onClick={onSaveAndConfig}>
             salvar e configurar resgate <IArrowRight size={16} />
           </button> */}
-          <button type="button" className="bnc-btn primary" onClick={onSave}>
+          <button
+            type="button"
+            className="bnc-btn primary"
+            onClick={onSave}
+            disabled={salvar.isPending}
+          >
             <ICheck size={16} />
-            salvar dados bancários
+            {salvar.isPending ? "salvando…" : "salvar dados bancários"}
           </button>
         </div>
 
