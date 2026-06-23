@@ -1,0 +1,173 @@
+name: CI
+
+# V1 CI for EuNenem/engine (aperture-14mtr). Runs on every PR targeting
+# `staging`. Four jobs, modelled on monorepo-incluir's ci.yml but on
+# GitHub-hosted runners (the V1 jobs are lightweight; no Mac Mini
+# self-hosted runner needed — that's a phase-2 optimisation if Actions
+# minutes ever bite).
+#
+# Each job closes a gap that let a prod bug ship on 2026-06-23:
+#   - typecheck : baseline type safety (root SDK + eunenem-server app)
+#   - test      : vitest unit + integration (Testcontainers Postgres)
+#   - build     : esbuild client bundle — catches #223 (aperture-9abwt),
+#                 a server-only `pg` import leaking into the browser bundle.
+#                 Unit/integration ran in Node and never saw it; only the
+#                 real browser build fails ("Could not resolve fs/net/tls").
+#   - migrate   : two-phase apply (base-branch migrations FIRST, then the
+#                 PR's) — catches 1bo61, a migration that sorts BEFORE
+#                 already-applied ones. A fresh-DB migrate (what
+#                 migration.test.ts does) can't catch this: Kysely only
+#                 raises corruptedMigrations when applied migrations are no
+#                 longer a prefix of the sorted set, which needs a
+#                 pre-applied (prod-like) state.
+#
+# E2E (Playwright) + branch protection / auto-merge gating = phase 2.
+
+on:
+  pull_request:
+    branches: [staging]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    name: typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      # pnpm version comes from package.json `packageManager` (pnpm@10.33.0).
+      # Do NOT also pass `version:` here — action-setup errors on the conflict.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            apps/eunenem-server/pnpm-lock.yaml
+      - name: Install (root)
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck (root SDK)
+        run: pnpm typecheck
+      # NOTE: apps/eunenem-server typecheck is intentionally NOT gated in
+      # V1 — it currently has pre-existing type errors on staging
+      # (aperture-14mtr CI surfaced them). Add this job in a follow-up
+      # once those are fixed.
+
+  # NOTE: a `test` job (pnpm vitest unit + integration) is intentionally
+  # NOT in V1. It currently fails on pre-existing staging breakage
+  # (renamed/removed modules — aperture-tfe9g), which the first CI run
+  # surfaced. The test gate + eunenem-server typecheck land in a
+  # follow-up (blocked-by tfe9g) once that debt is cleared.
+
+  build:
+    name: build (client bundle — #223 gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      # pnpm version comes from package.json `packageManager` (pnpm@10.33.0).
+      # Do NOT also pass `version:` here — action-setup errors on the conflict.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            apps/eunenem-server/pnpm-lock.yaml
+      # Root install first: the eunenem-server client bundle imports leaf
+      # modules from the root `src/` tree, whose transitive deps (zod)
+      # resolve from the root node_modules. (The root `tsup` SDK build is
+      # intentionally NOT run here — the bead's build gate is the
+      # eunenem-server client bundle, and root tsup dts currently trips a
+      # TS5101 baseUrl-deprecation on staging — out of V1 scope.)
+      - name: Install (root)
+        run: pnpm install --frozen-lockfile
+      - name: Install (eunenem-server)
+        working-directory: apps/eunenem-server
+        run: pnpm install --frozen-lockfile
+      # THE #223 gate. esbuild bundles client.tsx for the browser; any
+      # server-only module (pg + node built-ins) in the client import
+      # graph makes this fail with "Could not resolve fs/net/tls/...".
+      # STRIPE_PUBLISHABLE_KEY is intentionally unset — build.mjs inlines
+      # '' when absent and the build still succeeds (it's a build gate,
+      # not a runtime check).
+      - name: Build (eunenem-server client bundle)
+        working-directory: apps/eunenem-server
+        run: pnpm build
+      # Belt-and-suspenders (Rex, aperture-1bo61/9abwt). esbuild already
+      # HARD-fails when a server lib drags unresolved node built-ins into
+      # the client (the #223 mechanism). This grep additionally catches a
+      # server lib that bundles *browser-clean* and slips past esbuild —
+      # e.g. an aws-sdk/@smithy storage client. High-signal markers only,
+      # to avoid false positives on minified output.
+      - name: Assert no server-only library leaked into client bundle
+        working-directory: apps/eunenem-server
+        run: |
+          set -euo pipefail
+          if grep -nE 'S3Client|getSignedUrl|@aws-sdk|@smithy|pg-connection-string|pg-protocol' public/client.js; then
+            echo "::error::server-only library leaked into the browser client bundle (see matches above)"
+            exit 1
+          fi
+          echo "client bundle clean — no server-only library markers found"
+
+  migrate:
+    name: migrate (ordering — 1bo61 gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: frame
+          POSTGRES_PASSWORD: frame
+          POSTGRES_DB: frame
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U frame -d frame"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://frame:frame@localhost:5432/frame
+    steps:
+      - uses: actions/checkout@v4
+      # pnpm version comes from package.json `packageManager` (pnpm@10.33.0).
+      # Do NOT also pass `version:` here — action-setup errors on the conflict.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install (root)
+        run: pnpm install --frozen-lockfile
+      # Snapshot the PR's migration set before we swap in the base set.
+      - name: Snapshot PR migrations
+        run: cp -r migrations /tmp/pr-migrations
+      # Phase 1 — reproduce prod's "already-migrated" state by applying
+      # ONLY the base branch's (staging) migrations to the fresh Postgres.
+      - name: Apply base-branch migrations (prod-like applied state)
+        run: |
+          set -euo pipefail
+          rm -rf migrations
+          git fetch origin "${{ github.base_ref }}" --depth=1
+          git checkout FETCH_HEAD -- migrations
+          pnpm db:migrate
+      # Phase 2 — restore the PR's migrations and apply on top. If the PR
+      # introduced a migration that sorts BEFORE one already applied in
+      # phase 1, Kysely raises corruptedMigrations, migrate.ts exits 1,
+      # and this job fails — exactly the 1bo61 class. An in-order add (or
+      # no migration change) applies cleanly / no-ops.
+      - name: Apply PR migrations on top (catches out-of-order — 1bo61)
+        run: |
+          set -euo pipefail
+          rm -rf migrations
+          cp -r /tmp/pr-migrations migrations
+          pnpm db:migrate
