@@ -4,6 +4,8 @@ import { trpc } from './trpc.js';
 import { painelConvitePreviewHref, painelHref } from './painelRoutes.js';
 
 import type { AppRouter } from '../../server/trpc/router.js';
+import type { ConviteState } from './mocks/convite.js';
+import type { Template } from './mocks/templates.js';
 
 export {
   conviteStateFromData,
@@ -92,4 +94,40 @@ export function conviteErrorMessage(err: unknown): string {
     case 'network':
       return 'deu ruim ao falar com o servidor, tenta de novo daqui a pouco';
   }
+}
+
+// ── Template selection cascade (aperture-qa2m3 — shared desktop↔mobile) ──────
+//
+// DESKTOP is the canonical reference. Picking a template sets `bgTemplate`,
+// clears any uploaded background (mutually exclusive), and CASCADES the
+// template's suggested palette + name font. This logic used to live only in
+// the desktop `selectTemplate`; it now lives here so desktop AND mobile apply
+// the exact same rules and can never re-diverge. Callers spread the returned
+// patch into their `setState`.
+
+/** Field patch for selecting a watercolor template. */
+export function templateSelectionPatch(
+  tpl: Template,
+): Pick<ConviteState, 'bgTemplate' | 'bgUpload' | 'palette' | 'nameFont'> {
+  return {
+    bgTemplate: tpl.id,
+    bgUpload: null,
+    palette: tpl.suggestedPalette,
+    nameFont: tpl.suggestedNameFont,
+  };
+}
+
+/** Field patch for the "papel"/scrapbook choice — no template, no upload. */
+export function scrapbookSelectionPatch(): Pick<
+  ConviteState,
+  'bgTemplate' | 'bgUpload'
+> {
+  return { bgTemplate: 'none', bgUpload: null };
+}
+
+/** Field patch for a user-uploaded background image (clears any template). */
+export function uploadSelectionPatch(
+  dataUrl: string,
+): Pick<ConviteState, 'bgTemplate' | 'bgUpload'> {
+  return { bgTemplate: 'none', bgUpload: dataUrl };
 }
