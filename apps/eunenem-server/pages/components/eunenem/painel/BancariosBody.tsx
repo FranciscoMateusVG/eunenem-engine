@@ -351,6 +351,68 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
       </div>
 
       <div className="bnc-form-stack">
+        {/* SECTION 2: holder */}
+        <section className="bnc-card">
+          <header className="bnc-card-head">
+            <span className="bnc-card-chip blue">
+              <IUser />
+            </span>
+            <div>
+              <div className="bnc-card-title">dados do titular</div>
+              <div className="bnc-card-title-sub">
+                precisam bater com o cpf da sua conta EuNeném
+              </div>
+            </div>
+          </header>
+
+          <div className="bnc-grid" style={{ gap: 14 }}>
+            <div className="bnc-field">
+              <label>
+                nome do titular <span className="req">*</span>
+              </label>
+              <input
+                className="bnc-input"
+                value={s.nome}
+                style={errStyle("nome")}
+                onChange={(e) => set({ nome: e.target.value })}
+                placeholder="como está no documento"
+                aria-label="nome do titular"
+              />
+            </div>
+            <div className="bnc-grid c2">
+              <div className="bnc-field locked">
+                <label>
+                  cpf <span className="req">*</span>
+                </label>
+                <input className="bnc-input" value={CPF_FIXO} disabled aria-label="cpf" />
+                <span
+                  className="bnc-helper"
+                  style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                >
+                  <ILock size={12} />o cpf não pode ser alterado após o cadastro inicial
+                </span>
+              </div>
+              <div className="bnc-field">
+                <label>
+                  celular <span className="req">*</span>
+                </label>
+                <input
+                  className="bnc-input"
+                  value={s.telefone}
+                  style={errStyle("telefone")}
+                  onChange={(e) => set({ telefone: maskPhone(e.target.value) })}
+                  placeholder="(00) 00000-0000"
+                  inputMode="numeric"
+                  aria-label="celular"
+                />
+                <span className="bnc-helper">
+                  usamos só pra avisar quando cair um mimo ♡
+                </span>
+              </div>
+            </div>
+          </div>
+        </section>
+
         {/* SECTION 1: account / pix */}
         <section className="bnc-card">
           <header className="bnc-card-head">
@@ -567,68 +629,6 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
               </div>
             </div>
           )}
-        </section>
-
-        {/* SECTION 2: holder */}
-        <section className="bnc-card">
-          <header className="bnc-card-head">
-            <span className="bnc-card-chip blue">
-              <IUser />
-            </span>
-            <div>
-              <div className="bnc-card-title">dados do titular</div>
-              <div className="bnc-card-title-sub">
-                precisam bater com o cpf da sua conta EuNeném
-              </div>
-            </div>
-          </header>
-
-          <div className="bnc-grid" style={{ gap: 14 }}>
-            <div className="bnc-field">
-              <label>
-                nome do titular <span className="req">*</span>
-              </label>
-              <input
-                className="bnc-input"
-                value={s.nome}
-                style={errStyle("nome")}
-                onChange={(e) => set({ nome: e.target.value })}
-                placeholder="como está no documento"
-                aria-label="nome do titular"
-              />
-            </div>
-            <div className="bnc-grid c2">
-              <div className="bnc-field locked">
-                <label>
-                  cpf <span className="req">*</span>
-                </label>
-                <input className="bnc-input" value={CPF_FIXO} disabled aria-label="cpf" />
-                <span
-                  className="bnc-helper"
-                  style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-                >
-                  <ILock size={12} />o cpf não pode ser alterado após o cadastro inicial
-                </span>
-              </div>
-              <div className="bnc-field">
-                <label>
-                  celular <span className="req">*</span>
-                </label>
-                <input
-                  className="bnc-input"
-                  value={s.telefone}
-                  style={errStyle("telefone")}
-                  onChange={(e) => set({ telefone: maskPhone(e.target.value) })}
-                  placeholder="(00) 00000-0000"
-                  inputMode="numeric"
-                  aria-label="celular"
-                />
-                <span className="bnc-helper">
-                  usamos só pra avisar quando cair um mimo ♡
-                </span>
-              </div>
-            </div>
-          </div>
         </section>
 
         {/* Inline validation banner */}
