@@ -30,6 +30,8 @@ import {
   PagamentoProviderStripe,
   type PagamentoRepository,
   PagamentoRepositoryPostgres,
+  type PerfilCriadorRepository,
+  PerfilCriadorRepositoryPostgres,
   PlataformaRepositoryMemory,
   type PlataformaRepository,
   type ProvedorRegraTaxa,
@@ -57,6 +59,13 @@ export interface ServerDeps {
   readonly auth: Auth;
   readonly authService: AuthService;
   readonly usuarioRepository: UsuarioRepository;
+  /**
+   * PerfilCriador BC adapter (aperture-cdo69). Backs the `perfil.*` tRPC
+   * procedures — authed read/write of the creator profile + the public
+   * `getPerfilPublicoBySlug` projection. Postgres-backed (migration 026),
+   * sharing the same Kysely instance as the other domain repos.
+   */
+  readonly perfilCriadorRepository: PerfilCriadorRepository;
   readonly plataformaRepository: PlataformaRepository;
   /**
    * Arrecadação adapters (aperture-d6atj). Needed by `contribuicao.*` tRPC
@@ -309,6 +318,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
   });
 
   const usuarioRepository = new UsuarioRepositoryPostgres(db);
+  const perfilCriadorRepository = new PerfilCriadorRepositoryPostgres(db);
 
   // Plataforma BC is still in-memory; the engine ships seeded values for
   // ID_PLATAFORMA_EUNENEM + ID_PLATAFORMA_EUCASEI via the seed array.
@@ -398,6 +408,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     auth,
     authService,
     usuarioRepository,
+    perfilCriadorRepository,
     plataformaRepository,
     campanhaRepository,
     contribuicaoRepository,

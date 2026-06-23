@@ -991,6 +991,14 @@ export {
   calcularSurchargeParaCarrinho,
 } from './use-cases/taxas/calcular-surcharge-para-carrinho.js';
 export type {
+  AtualizarPerfilCriadorDeps,
+  AtualizarPerfilCriadorInput,
+} from './use-cases/usuario/atualizar-perfil-criador.js';
+export {
+  AtualizarPerfilCriadorInputSchema,
+  atualizarPerfilCriador,
+} from './use-cases/usuario/atualizar-perfil-criador.js';
+export type {
   AtualizarPerfilUsuarioDeps,
   AtualizarPerfilUsuarioInput,
 } from './use-cases/usuario/atualizar-perfil-usuario.js';
@@ -1025,6 +1033,22 @@ export {
 } from './use-cases/usuario/criar-sessao-usuario.js';
 export type { MarcarTutorialUsuarioComoCompletadoDeps } from './use-cases/usuario/marcar-tutorial-usuario-como-completado.js';
 export { marcarTutorialUsuarioComoCompletado } from './use-cases/usuario/marcar-tutorial-usuario-como-completado.js';
+export type {
+  ObterPerfilCriadorDeps,
+  PerfilProprioDTO,
+} from './use-cases/usuario/obter-perfil-criador.js';
+export {
+  obterPerfilCriador,
+  PerfilProprioDTOSchema,
+} from './use-cases/usuario/obter-perfil-criador.js';
+export type {
+  ObterPerfilPublicoBySlugDeps,
+  PerfilPublicoDTO,
+} from './use-cases/usuario/obter-perfil-publico-by-slug.js';
+export {
+  obterPerfilPublicoBySlug,
+  PerfilPublicoDTOSchema,
+} from './use-cases/usuario/obter-perfil-publico-by-slug.js';
 export type { ObterStatusTutorialUsuarioDeps } from './use-cases/usuario/obter-status-tutorial-usuario.js';
 export { obterStatusTutorialUsuario } from './use-cases/usuario/obter-status-tutorial-usuario.js';
 export type {
