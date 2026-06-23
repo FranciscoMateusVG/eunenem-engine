@@ -3,12 +3,21 @@ import { useEffect, useRef, useState } from "react";
 import { CartButton } from "./CartButton";
 import { useCartDrawer } from "./CartDrawerContext.js";
 
-// aperture-3d9t — Navbar with scroll-aware blur backdrop.
+// aperture-3d9t / aperture-uk8q1 — visitor page header.
 //
-// Logo + 3 anchor links (Presentes / Como funciona / Mural). Fixed
-// position so it stays during scroll. Background goes from
-// transparent → translucent-with-backdrop-blur once the page scrolls
-// (Visual Identity Prompt §8 — navbar blur-on-scroll).
+// Brand-aligned with the painel topbar (PainelTopbar): the shared
+// EuNeném logo image (/public/logo.png) + chip-shaped nav links that
+// mirror .painel-topbar-link (DM Sans, uppercase, lilac-soft active
+// pill — see .eu-nav-chip in tailwind.css). Scroll-aware blur backdrop
+// is kept (this is the public marketing-style page): background goes
+// transparent → translucent-with-backdrop-blur once the page scrolls.
+//
+// What stays distinct from the painel (semantic, not cosmetic):
+//   • nav items are SCROLL ANCHORS (Presentes / Como funciona / Mural),
+//     not functional admin chips — the active chip is driven by a
+//     scroll-spy (IntersectionObserver), highlighting the section in view.
+//   • the right-side affordance is the CART (with count badge), not the
+//     painel's bell + logout — the visitor is unauthenticated.
 //
 // Mobile (<sm: 640px) — aperture-hz7p caught a layout bug where the
 // 3 inline links + logo overflowed viewport at 375px. Fix: collapse
@@ -25,6 +34,7 @@ const NAV_LINKS = [
 export function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [activeSection, setActiveSection] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const drawer = useCartDrawer();
 
@@ -33,6 +43,30 @@ export function Navbar() {
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  // Scroll-spy — highlight the chip whose section is currently in view.
+  // The rootMargin carves a thin band in the upper-middle of the viewport;
+  // whichever section crosses it becomes active. Degrades gracefully: if
+  // the anchor sections aren't present on the page, nothing is highlighted.
+  useEffect(() => {
+    const ids = NAV_LINKS.map((l) => l.href.slice(1));
+    const els = ids
+      .map((id) => document.getElementById(id))
+      .filter((el): el is HTMLElement => el !== null);
+    if (els.length === 0) return;
+
+    const io = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((e) => e.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio);
+        if (visible[0]) setActiveSection(visible[0].target.id);
+      },
+      { rootMargin: "-40% 0px -55% 0px", threshold: [0, 0.25, 0.5, 1] },
+    );
+    els.forEach((el) => io.observe(el));
+    return () => io.disconnect();
   }, []);
 
   // Close the mobile dropdown when clicking outside, hitting Escape,
@@ -61,6 +95,8 @@ export function Navbar() {
     };
   }, [mobileOpen]);
 
+  const isActive = (href: string) => activeSection === href.slice(1);
+
   return (
     <header
       className="fixed top-0 inset-x-0 z-40 transition-all duration-300"
@@ -80,46 +116,22 @@ export function Navbar() {
       <div className="eu-container flex items-center justify-between py-4">
         <a
           href="/pagina/francisco"
-          className="flex items-center gap-2 no-underline"
+          className="inline-flex items-center no-underline"
           aria-label="EuNeném — início"
         >
-          <span
-            className="inline-flex items-center justify-center text-white font-bold"
-            style={{
-              width: 32,
-              height: 32,
-              borderRadius: 999,
-              background: "var(--lilac-deep)",
-              fontFamily: "var(--font-patrick-hand), cursive",
-              fontSize: 22,
-              lineHeight: 1,
-              paddingBottom: 2,
-            }}
-            aria-hidden="true"
-          >
-            ♡
-          </span>
-          <span
-            style={{
-              fontFamily: "var(--font-patrick-hand), cursive",
-              fontSize: 22,
-              color: "var(--plum)",
-              lineHeight: 1,
-            }}
-          >
-            EuNeném
-          </span>
+          <img src="/public/logo.png" alt="EuNeném" className="eu-nav-logo" />
         </a>
 
-        {/* Desktop nav (sm+ only). Inline ul + cart button. */}
+        {/* Desktop nav (sm+ only). Chip-shaped anchor links + cart button. */}
         <div className="hidden sm:flex items-center gap-3">
           <nav aria-label="Seções da página">
-            <ul className="flex items-center gap-1 sm:gap-3 m-0 p-0 list-none">
+            <ul className="flex items-center gap-1 sm:gap-2 m-0 p-0 list-none">
               {NAV_LINKS.map((link) => (
                 <li key={link.href}>
                   <a
                     href={link.href}
-                    className="inline-flex px-3 py-2 rounded-full text-sm font-semibold text-ink-soft hover:text-lilac-deep hover:bg-lilac-soft/60 transition-colors"
+                    aria-current={isActive(link.href) ? "true" : undefined}
+                    className={`eu-nav-chip${isActive(link.href) ? " is-active" : ""}`}
                   >
                     {link.label}
                   </a>
@@ -222,13 +234,14 @@ export function Navbar() {
                 zIndex: 50,
               }}
             >
-              <ul className="flex flex-col m-0 p-0 list-none">
+              <ul className="flex flex-col gap-1 m-0 p-0 list-none">
                 {NAV_LINKS.map((link) => (
                   <li key={link.href}>
                     <a
                       href={link.href}
                       onClick={() => setMobileOpen(false)}
-                      className="block px-3 py-2.5 rounded-lg text-sm font-semibold text-ink hover:text-lilac-deep hover:bg-lilac-soft/60 transition-colors no-underline"
+                      aria-current={isActive(link.href) ? "true" : undefined}
+                      className={`eu-nav-chip-block${isActive(link.href) ? " is-active" : ""}`}
                     >
                       {link.label}
                     </a>
