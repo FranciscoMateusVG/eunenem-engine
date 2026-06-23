@@ -5490,7 +5490,7 @@ html {
   left: 16px;
   right: 16px;
   bottom: 60px;
-  background-image: url('/hero-bg.jpg');
+  background-image: url('/public/hero-bg.jpg');
   background-size: cover;
   background-position: center 18%;
   background-color: var(--cream-2);

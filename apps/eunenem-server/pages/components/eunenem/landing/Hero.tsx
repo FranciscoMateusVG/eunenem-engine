@@ -102,22 +102,22 @@ export function Hero() {
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3.5 lg:justify-start">
             <div className="hero-stack flex">
               <img
-                src="/dep-luciana.jpg"
+                src="/public/dep-luciana.jpg"
                 alt=""
                 className="hero-stack-av"
               />
               <img
-                src="/dep-janaina.jpg"
+                src="/public/dep-janaina.jpg"
                 alt=""
                 className="hero-stack-av"
               />
               <img
-                src="/dep-maite.jpg"
+                src="/public/dep-maite.jpg"
                 alt=""
                 className="hero-stack-av"
               />
               <img
-                src="/dep-ana-paula.jpg"
+                src="/public/dep-ana-paula.jpg"
                 alt=""
                 className="hero-stack-av"
               />
