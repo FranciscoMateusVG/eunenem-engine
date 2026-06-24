@@ -1018,17 +1018,30 @@ function TemplateInvite({
             </div>
           )}
 
-          {state.message && !isCompact && (
+          {/* aperture-gabyl — the mensagem afetiva must render on EVERY template.
+              It was previously dropped on "compact" templates (tight-center
+              illustrations like floresta-magica / cogumelos, safeArea < 40% h).
+              Instead of hiding it, render it scaled-down + clamped to 2 lines on
+              compact templates so it fits the tight safe area without crowding
+              the art; full-size + pretty-wrapped on roomy templates. */}
+          {state.message && (
             <div
               style={{
                 fontFamily: "var(--font-dm-sans), sans-serif",
                 fontStyle: "italic",
-                fontSize: 11,
+                fontSize: isCompact ? 9 : 11,
                 color: pal.ink,
-                lineHeight: 1.55,
-                marginBottom: 10,
-                maxWidth: 320,
-                textWrap: "pretty",
+                lineHeight: 1.45,
+                marginBottom: isCompact ? 6 : 10,
+                maxWidth: isCompact ? 240 : 320,
+                ...(isCompact
+                  ? {
+                      display: "-webkit-box",
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: "vertical" as const,
+                      overflow: "hidden",
+                    }
+                  : { textWrap: "pretty" as const }),
               }}
             >
               {state.message}
@@ -1286,14 +1299,43 @@ interface WizardStep {
   ownerBead: string;
 }
 
+// aperture-7u2dk — "fundo do convite" (template/background) moved to STEP 1:
+// the chosen template defines the visual identity, so the creator picks it
+// first (matches the mobile wizard, which is already fundo-first). Step views
+// switch on step ID (not index) and StepFundo reads no earlier-step data, so
+// the reorder is safe; the stepper numbering derives from this array.
 const STEPS: readonly WizardStep[] = [
+  { id: "fundo", title: "fundo do convite", icon: "✨", ownerBead: "aperture-hzcy5" },
   { id: "tipo", title: "que mimo é esse?", icon: "🍼", ownerBead: "aperture-sonyh" },
   { id: "quem", title: "pra quem?", icon: "♡", ownerBead: "aperture-sonyh" },
   { id: "quando", title: "quando e onde?", icon: "☁", ownerBead: "aperture-sonyh" },
-  { id: "fundo", title: "fundo do convite", icon: "✨", ownerBead: "aperture-hzcy5" },
   { id: "visual", title: "a cara do convite", icon: "✿", ownerBead: "aperture-sonyh" },
   { id: "pronto", title: "pronto pra enviar", icon: "✨", ownerBead: "aperture-iopmm" },
 ] as const;
+
+// aperture-rw880 — client-side required-field validation, mirroring the backend
+// eventoConvite.save schema (remetente=host + nomeExibido=babyName are min(1);
+// dataHoraIso needs a real date). Blocks advancing / saving / sending with a
+// friendly inline message instead of leaking the raw backend 400.
+export type ConviteFieldKey = "babyName" | "host" | "date";
+export type ConviteFieldErrors = Partial<Record<ConviteFieldKey, string>>;
+
+export function conviteFieldErrors(state: ConviteState): ConviteFieldErrors {
+  const e: ConviteFieldErrors = {};
+  if (!state.babyName.trim()) e.babyName = "preencha o nome do bebê ♡";
+  if (!state.host.trim()) e.host = "diga de quem vem o convite ♡";
+  if (!state.date) e.date = "escolha a data do evento ♡";
+  return e;
+}
+
+export const STEP_REQUIRED_FIELDS: Record<WizardStepId, ConviteFieldKey[]> = {
+  fundo: [],
+  tipo: [],
+  quem: ["babyName", "host"],
+  quando: ["date"],
+  visual: [],
+  pronto: [],
+};
 
 /** Props shared by every step-view component (sibling beads consume these). */
 export interface StepViewProps {
@@ -1302,6 +1344,9 @@ export interface StepViewProps {
   /** aperture-qa2m3 — apply a multi-field patch atomically (one re-render).
    *  Used for the shared template-selection cascade. */
   updateMany: (patch: Partial<ConviteState>) => void;
+  /** aperture-rw880 — per-field validation errors to surface inline (only
+   *  populated once the user tries to advance/save with empties). */
+  errors?: ConviteFieldErrors;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1337,6 +1382,10 @@ export function ConviteBody(props: PainelSectionBodyProps) {
 function DesktopConviteBody({ slug }: PainelSectionBodyProps) {
   const [state, setState] = useState<ConviteState>({ ...DEFAULT_STATE });
   const [step, setStep] = useState<number>(0);
+  // aperture-rw880 — flips true once the user tries to advance/save with empty
+  // required fields, so inline errors only appear after an attempt (not on a
+  // pristine form).
+  const [showErrors, setShowErrors] = useState(false);
   const [previewScale, setPreviewScale] = useState<number>(0.7);
   const [isSharing, setIsSharing] = useState(false);
   const conviteQuery = useConviteData();
@@ -1375,9 +1424,43 @@ function DesktopConviteBody({ slug }: PainelSectionBodyProps) {
   const isSaving = salvarConvite.isPending;
   const isSending = isSaving || isSharing;
 
+  // aperture-rw880 — validation gates. curErrors = the current step's missing
+  // required fields (for inline display + blocking "próximo passo");
+  // guardComplete = every required field across the whole form (for save/send),
+  // jumping to the first offending step so the user sees what's missing.
+  const allErrors = conviteFieldErrors(state);
+  const curErrors: ConviteFieldErrors = Object.fromEntries(
+    STEP_REQUIRED_FIELDS[cur.id]
+      .filter((f) => allErrors[f])
+      .map((f) => [f, allErrors[f]!]),
+  );
+  const guardComplete = (): boolean => {
+    const idx = STEPS.findIndex((s) =>
+      STEP_REQUIRED_FIELDS[s.id].some((f) => allErrors[f]),
+    );
+    if (idx >= 0) {
+      setStep(idx);
+      setShowErrors(true);
+      toast.error("faltou preencher alguns campos ♡", {
+        description: Object.values(allErrors).join(" · "),
+      });
+      return false;
+    }
+    return true;
+  };
+
   const goPrev = () => setStep((s) => Math.max(0, s - 1));
-  const goNext = () => setStep((s) => Math.min(STEPS.length - 1, s + 1));
+  const goNext = () => {
+    if (Object.keys(curErrors).length > 0) {
+      setShowErrors(true);
+      toast.error("preencha os campos obrigatórios deste passo ♡");
+      return;
+    }
+    setShowErrors(false);
+    setStep((s) => Math.min(STEPS.length - 1, s + 1));
+  };
   const onSave = async () => {
+    if (!guardComplete()) return;
     try {
       await salvarConvite.mutateAsync(savePayloadFromConviteState(state));
       toast.success("convite salvo com carinho ♡");
@@ -1388,21 +1471,26 @@ function DesktopConviteBody({ slug }: PainelSectionBodyProps) {
     }
   };
   const onSend = async () => {
+    if (!guardComplete()) return;
     setIsSharing(true);
     try {
-      await salvarConvite.mutateAsync(savePayloadFromConviteState(state));
+      // aperture-b4z9k — fire the share FIRST so navigator.share() runs
+      // synchronously inside the user gesture. Safari drops transient
+      // activation if an await (the tRPC save) runs before share() →
+      // NotAllowedError. The share URL is slug-derived and valid before the
+      // save, so sharing doesn't depend on the mutation; we persist after.
       try {
         await shareConvitePreview({
           slug,
           title: `Convite de ${state.babyName || 'nosso evento'}`,
           text: "Quero te mostrar este convite.",
         });
-
       } catch {
         toast.error("não deu pra compartilhar agora", {
           description: "Tente novamente em um navegador com suporte ou copie o link depois.",
         });
       }
+      await salvarConvite.mutateAsync(savePayloadFromConviteState(state));
     } catch (error) {
       toast.error("não foi possível salvar agora", {
         description: conviteErrorMessage(error),
@@ -1412,7 +1500,12 @@ function DesktopConviteBody({ slug }: PainelSectionBodyProps) {
     }
   };
 
-  const stepProps: StepViewProps = { state, update, updateMany };
+  const stepProps: StepViewProps = {
+    state,
+    update,
+    updateMany,
+    errors: showErrors ? curErrors : undefined,
+  };
 
   return (
     <div className="cv-wiz">
@@ -1660,15 +1753,28 @@ function StepTipo({ state, update }: StepViewProps) {
   );
 }
 
-function StepQuem({ state, update }: StepViewProps) {
+// aperture-rw880 — inline validation error text shown under a required field.
+function FieldError({ msg }: { msg?: string }) {
+  if (!msg) return null;
+  return (
+    <span
+      role="alert"
+      style={{
+        display: "block",
+        marginTop: 4,
+        fontSize: 12,
+        color: "#c2566f",
+        fontFamily: "var(--font-dm-sans), sans-serif",
+      }}
+    >
+      {msg}
+    </span>
+  );
+}
+
+function StepQuem({ state, update, errors }: StepViewProps) {
   const ev = EVENT_BY_ID[state.eventType] ?? EVENT_TYPES[0]!;
   const isAniversario = ev.id === "aniversario";
-
-  const suggestCopy = () => {
-    const pick = SUGGEST[ev.id] ?? SUGGEST["cha-bebe"]!;
-    update("message", pick.message);
-    toast.success("sugestão aplicada com carinho ♡");
-  };
 
   return (
     <>
@@ -1681,7 +1787,10 @@ function StepQuem({ state, update }: StepViewProps) {
         value={state.babyName}
         onChange={(e) => update("babyName", e.target.value)}
         placeholder="Maria Helena"
+        aria-invalid={errors?.babyName ? true : undefined}
+        style={errors?.babyName ? { borderColor: "#c2566f" } : undefined}
       />
+      <FieldError msg={errors?.babyName} />
 
       <hr className="cv-dotline" />
 
@@ -1694,24 +1803,19 @@ function StepQuem({ state, update }: StepViewProps) {
         value={state.host}
         onChange={(e) => update("host", e.target.value)}
         placeholder="Mariana & Tiago"
+        aria-invalid={errors?.host ? true : undefined}
+        style={errors?.host ? { borderColor: "#c2566f" } : undefined}
       />
+      <FieldError msg={errors?.host} />
 
       <hr className="cv-dotline" />
 
-      <div className="cv-label-row">
-        <label className="cv-label" htmlFor="cv-message">
-          mensagem afetiva
-        </label>
-        <button
-          type="button"
-          className="cv-pill"
-          onClick={suggestCopy}
-          aria-label="pedir sugestão de mensagem"
-          style={{ transform: "rotate(2deg)" }}
-        >
-          <Sparkle /> pedir ajuda à ia
-        </button>
-      </div>
+      {/* aperture-39blz — removed the "pedir ajuda à ia" suggestion pill
+          (operator: the affectionate message should be the creator's own
+          words). Label kept; the row wrapper is no longer needed. */}
+      <label className="cv-label" htmlFor="cv-message">
+        mensagem afetiva
+      </label>
       <textarea
         id="cv-message"
         className="cv-textarea"
@@ -1724,7 +1828,7 @@ function StepQuem({ state, update }: StepViewProps) {
   );
 }
 
-function StepQuando({ state, update }: StepViewProps) {
+function StepQuando({ state, update, errors }: StepViewProps) {
   const isOnline = state.mode === "online";
   return (
     <>
@@ -1768,7 +1872,10 @@ function StepQuando({ state, update }: StepViewProps) {
             className="cv-input"
             value={state.date}
             onChange={(e) => update("date", e.target.value)}
+            aria-invalid={errors?.date ? true : undefined}
+            style={errors?.date ? { borderColor: "#c2566f" } : undefined}
           />
+          <FieldError msg={errors?.date} />
         </div>
         <div>
           <label className="cv-label" htmlFor="cv-time" style={{ transform: "rotate(1deg)" }}>
