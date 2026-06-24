@@ -50,17 +50,30 @@ export function PaginaSucessoPage({ slug }: { slug: string }) {
     pollWhilePending: true,
   });
 
-  // Track elapsed time on pending so we can soften the messaging if it
-  // hangs. After ~30s we add a reassurance line.
+  // aperture-d52he — the /sucesso direct-URL race: the page can render ~50ms
+  // after Pay while the webhook lands ~800ms later, so obterSucessoPagamento
+  // legitimately returns 'pending' OR 'unknown' for a few seconds before it
+  // resolves. Both are NON-terminal "still confirming" states (per the backend
+  // contract); only 'approved'/'rejected' are terminal. We keep polling and
+  // show the "confirmando seu pagamento" state through pending+unknown, and
+  // only fall back to "sessão expirada" after a give-up deadline — never on the
+  // first 'unknown'. (The hook caps the network poll at ~the same window.)
+  const RESOLVE_TIMEOUT_SEC = 30;
+  const isResolving = data?.status === "pending" || data?.status === "unknown";
+
+  // Tick elapsed while we're still confirming (pending OR unknown). Drives the
+  // give-up deadline + the reassurance copy.
   const [elapsedSec, setElapsedSec] = useState(0);
   useEffect(() => {
-    if (data?.status !== "pending") {
+    if (!isResolving) {
       setElapsedSec(0);
       return;
     }
     const t = setInterval(() => setElapsedSec((s) => s + 1), 1000);
     return () => clearInterval(t);
-  }, [data?.status]);
+  }, [isResolving]);
+
+  const withinDeadline = elapsedSec < RESOLVE_TIMEOUT_SEC;
 
   return (
     <TweaksProvider>
@@ -68,7 +81,7 @@ export function PaginaSucessoPage({ slug }: { slug: string }) {
         <Navbar slug={slug} />
         <main
           className="flex-1 pt-16 sucesso-bg"
-          aria-live={data?.status === "pending" ? "polite" : "off"}
+          aria-live={isResolving && withinDeadline ? "polite" : "off"}
         >
           <div className="eu-container sucesso-stage">
             {!hydrated || (isLoading && !data) ? (
@@ -81,14 +94,20 @@ export function PaginaSucessoPage({ slug }: { slug: string }) {
               <SkeletonState />
             ) : data.status === "approved" ? (
               <ApprovedState data={data} slug={slug} />
-            ) : data.status === "pending" ? (
-              <PendingState data={data} elapsedSec={elapsedSec} />
             ) : data.status === "rejected" ? (
               <FailedState slug={slug} />
+            ) : withinDeadline ? (
+              // aperture-d52he — pending OR unknown, still within the give-up
+              // window: keep showing the warm "estamos confirmando seu
+              // pagamento" state while the webhook lands (poll every ~2s). This
+              // is the race fix — 'unknown' no longer flashes "sessão expirada"
+              // the instant a freshly-paid user lands here.
+              <PendingState data={data} elapsedSec={elapsedSec} />
             ) : (
-              // status === 'unknown' — sessionId resolved but nothing has
-              // settled yet (webhook hasn't fired AND provider sessao is
-              // missing). Render as the friendly "sessão expirada" state.
+              // Only AFTER the give-up deadline (~30s) with no terminal status:
+              // the friendly "essa sessão já passou" fallback. The user can
+              // revisit the link later (a fresh poll resolves once the webhook
+              // has landed).
               <ExpiredState slug={slug} />
             )}
           </div>
