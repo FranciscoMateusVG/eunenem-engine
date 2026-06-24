@@ -14,8 +14,6 @@ import {
 import {
   ACCOUNT_TYPES,
   BANKS,
-  BANCARIOS_DEMO,
-  CPF_FIXO,
   PIX_TYPES,
   bankByCode,
   type BancariosForm as BancariosFormState,
@@ -918,6 +916,20 @@ function TransferModal({
 // TODO(aperture-kbmel-rex-swap): nothing in this component needs to change
 // when Rex's backend lands — the swap point is `useCriarRecebedor` itself
 // (see pages/lib/hooks/useCriarRecebedor.ts).
+// aperture-chamy — empty seed for the onboarding transfer form (replaces the
+// Thacyane BANCARIOS_DEMO mock prefill). tipoConta defaults to "cc".
+const EMPTY_BANCARIOS_FORM: BancariosFormState = {
+  bankCode: "",
+  agencia: "",
+  agenciaDV: "",
+  conta: "",
+  contaDV: "",
+  tipoConta: "cc",
+  pixKey: "",
+  nome: "",
+  telefone: "",
+};
+
 function TransferOnboardingModal({
   saldo,
   idCampanha,
@@ -929,8 +941,10 @@ function TransferOnboardingModal({
   onClose: () => void;
   solicitarState: SolicitarTransferenciaState;
 }) {
-  const [s, setS] = useState<BancariosFormState>({ ...BANCARIOS_DEMO });
-  const [modo, setModo] = useState<BancariosMode>("conta");
+  // aperture-chamy — start empty (no Thacyane mock prefill). aperture-llnqc
+  // parity: default to the PIX tab.
+  const [s, setS] = useState<BancariosFormState>({ ...EMPTY_BANCARIOS_FORM });
+  const [modo, setModo] = useState<BancariosMode>("pix");
   const [tipoPix, setTipoPix] = useState<PixType["v"]>("cpf");
   const [validationError, setValidationError] = useState<string | null>(null);
 
@@ -1202,22 +1216,20 @@ function TransferOnboardingModal({
               aria-label="nome do titular"
             />
           </FieldRow>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <FieldRow label="cpf (travado)">
-              <input style={{ ...inputStyle, opacity: 0.6 }} value={CPF_FIXO} disabled aria-label="cpf" />
-              <span style={helperStyle}>locked na sessão</span>
-            </FieldRow>
-            <FieldRow label="celular" required>
-              <input
-                style={inputStyle}
-                placeholder="(00) 00000-0000"
-                inputMode="numeric"
-                value={s.telefone}
-                onChange={(e) => set({ telefone: maskPhoneInline(e.target.value) })}
-                aria-label="celular"
-              />
-            </FieldRow>
-          </div>
+          {/* aperture-chamy — removed the "cpf (travado)" display field: it
+              only ever showed the mock CPF_FIXO (no real client-side session
+              CPF source exists; the backend locks the CPF from the session on
+              criarRecebedor). celular now spans the row. */}
+          <FieldRow label="celular" required>
+            <input
+              style={inputStyle}
+              placeholder="(00) 00000-0000"
+              inputMode="numeric"
+              value={s.telefone}
+              onChange={(e) => set({ telefone: maskPhoneInline(e.target.value) })}
+              aria-label="celular"
+            />
+          </FieldRow>
         </div>
 
         {inlineError && (
