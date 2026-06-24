@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
+// aperture-tua9o — image upload+crop for the custom ("personalizado") item form.
+import { ItemImageUpload } from "./ItemImageUpload";
+
 // aperture-p73kv — deterministic random "sugerido N un" in [5, 10] keyed
 // by item id (djb2 hash). The hardcoded `1` operators saw was unrealistic
 // for baby-shower lists ("sugerido is still only 1 unidade and i cant add
@@ -219,10 +222,12 @@ interface DraftFields {
   price: string;
   qty: number;
   category: ListaCategory;
+  // aperture-tua9o — optional uploaded image (publicUrl) for the custom item.
+  imageUrl: string | null;
 }
 
 function emptyDraft(): DraftFields {
-  return { title: "", price: "", qty: 1, category: "personalizado" };
+  return { title: "", price: "", qty: 1, category: "personalizado", imageUrl: null };
 }
 
 /* ─── Grouping ─── */
@@ -623,6 +628,11 @@ function PersonalizadoForm({
             ))}
           </select>
         </div>
+        {/* aperture-tua9o — optional image (upload + crop → MinIO). */}
+        <ItemImageUpload
+          value={f.imageUrl}
+          onChange={(url) => setF({ ...f, imageUrl: url })}
+        />
       </div>
     </>
   );
@@ -1497,8 +1507,9 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
       await createMut.mutateAsync({
         nome: draft.title,
         valor: centsFromBRL(price),
-        // aperture-33ien — input is string | undefined (optional), not nullable.
-        imagemUrl: undefined,
+        // aperture-tua9o — the uploaded item image (publicUrl) when present,
+        // else undefined (optional; item falls back to the emoji thumb).
+        imagemUrl: draft.imageUrl ?? undefined,
         grupo: draft.category,
         // aperture-33ien — mutation field is `quantidade`, not `qty` (the wrong
         // key was masked behind the imagemUrl error in the same object literal).
@@ -1636,7 +1647,11 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
     // Unha" repro (no imageUrl, emoji fallback) hit exactly this. The
     // update mutation accepts `imagemUrl: ImagemUrlSchema.nullable()`
     // — `null` is the right "no image" wire value.
-    const imagemUrl = editItem.imageUrl ?? null;
+    // aperture-tua9o — honor the edited image (draft.imageUrl): the edit form
+    // pre-fills it from the item, so unchanged = same value, and a new upload /
+    // removal flows through. Still NEVER the emoji glyph (draft.imageUrl is a
+    // real publicUrl or null, never an emoji).
+    const imagemUrl = draft.imageUrl ?? null;
     const idToUpdate = editItem.ids[0];
     if (!idToUpdate) {
       toast.error("Não consegui identificar esse mimo — recarrega a página ♡");
@@ -1921,6 +1936,9 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
             price: editItem.price.toFixed(2).replace(".", ","),
             qty: editItem.qty,
             category: editItem.category,
+            // aperture-tua9o — pre-fill the existing image so editing keeps it
+            // (and lets the user change/remove it via the same control).
+            imageUrl: editItem.imageUrl ?? null,
           }}
           onClose={() => setEditItem(null)}
           onSubmit={saveEdit}
