@@ -100,6 +100,14 @@ export function PainelPage({ slug }: { slug: string }) {
   // the slug.
   const babyName = perfilQ.data?.nomeBebe ?? null;
 
+  // aperture-84a21 — the REAL event date for the painel countdown + date chip.
+  // null (unset / fresh account / still loading) → PainelHeaderCard shows NO
+  // date (the old mock "15 jun 2026" / "0 dias" gap is closed). Mirrors the
+  // guest Hero (3ic62), which already gates its countdown on the real date.
+  const eventDate = perfilQ.data?.dataEvento
+    ? String(perfilQ.data.dataEvento).slice(0, 10)
+    : null;
+
   // aperture-77512 — Merge REAL values over the demo snapshot, falling back to
   // ZERO (never the PAINEL_DEMO numbers) so a brand-new creator never sees a
   // stranger's fabricated stats (Mari / helena / 28 confirmados / 12 recados).
@@ -191,7 +199,7 @@ export function PainelPage({ slug }: { slug: string }) {
   };
 
   return (
-    <PainelLayout slug={slug} babyName={babyName}>
+    <PainelLayout slug={slug} babyName={babyName} eventDate={eventDate}>
       <PainelHeaderCard snapshot={snapshot} slug={slug} />
       <PainelMenu groups={groups} slug={slug} />
       <PainelTutorialTrigger
