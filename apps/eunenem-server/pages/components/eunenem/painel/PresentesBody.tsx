@@ -1379,22 +1379,46 @@ function formatSolicitarError(err: { code: string; message: string }): string {
 }
 
 // ── Resgatado modal (all outgoing movements) ─────────────────────────────────
+const RESG_TINT = { "--tint-bg": "#F3E9F0", "--tint-stripe": "#6b3c5e" } as React.CSSProperties;
+
 function ResgatadoModal({
   open,
-  transactions,
+  idCampanha,
   total,
   onClose,
 }: {
   open: boolean;
-  transactions: PresentesTx[];
+  idCampanha: string | null;
   total: number;
   onClose: () => void;
 }) {
+  // aperture-sryf9 — real OUT-movement (transferências) list. The extrato is
+  // entrada-grain (it never emits saídas), so deriving outs from
+  // transactions.filter(type==='out') was ALWAYS empty → "0 movimentações"
+  // even after real transfers. Pull the grouped-by-repasse transfers from
+  // recebedor.listMovimentacoes (Rex #266), lazy on open. Hook runs BEFORE the
+  // early return (rules-of-hooks); the query is gated on a real uuid idCampanha.
+  const movQuery = trpc.recebedor.listMovimentacoes.useQuery(
+    { idCampanha: idCampanha ?? "" },
+    {
+      enabled:
+        open &&
+        !!idCampanha &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          idCampanha ?? "",
+        ),
+    },
+  );
+
   if (!open) return null;
 
-  const outs = transactions
-    .filter((x) => x.type === "out")
-    .sort((a, b) => (b.d + b.t).localeCompare(a.d + a.t));
+  const movs = movQuery.data?.movimentacoes ?? [];
+  const fmtDM = (iso: string) => {
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime())
+      ? ""
+      : d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+  };
 
   return (
     <>
@@ -1402,10 +1426,7 @@ function ResgatadoModal({
       <div className="ex-modal ex-modal-wide" role="dialog" aria-label="Detalhes do resgatado">
         <header className="ex-modal-hd">
           <div>
-            {/* aperture-2gceh — dropped the bogus hardcoded date range
-                ("· 28/abr — 22/mai") that bore no relation to the actual
-                transfer activity. No real range is on the wire for this
-                modal, so the header now shows just the label. */}
+            {/* aperture-2gceh — no bogus hardcoded date range. */}
             <span className="ex-caps">total resgatado</span>
             <h3 className="ex-modal-title neg">− {fmtMoney(total)}</h3>
           </div>
@@ -1414,35 +1435,51 @@ function ResgatadoModal({
           </button>
         </header>
         <p className="ex-modal-text">
-          todas as saídas do período: resgates em loja e transferências para conta corrente.
+          suas transferências para conta corrente.
         </p>
         <ul className="ex-resg-rows">
-          {outs.map((x) => {
-            const tint = STATUS_TINT[x.status];
-            return (
-              <li
-                key={x.id}
-                className="ex-resg-row"
-                style={{ "--tint-bg": tint.bg, "--tint-stripe": tint.stripe } as React.CSSProperties}
-              >
-                <span className="ex-resg-stripe" />
-                <div className="ex-resg-body">
-                  <div className="ex-resg-l1">
-                    <span className="ex-hand ex-resg-item">{x.item}</span>
-                    <span className="ex-hand ex-resg-val">− {fmtMoney(x.amount)}</span>
-                  </div>
-                  <div className="ex-resg-l2">
-                    <span className="ex-mono">{dateLong(x.d)} · {x.t}</span>
-                    <span className="ex-mono">{tint.label}</span>
-                  </div>
-                  <div className="ex-resg-l3">para {x.guest}</div>
+          {movQuery.isLoading && (
+            <li className="ex-resg-row" style={RESG_TINT}>
+              <span className="ex-resg-stripe" />
+              <div className="ex-resg-body">
+                <div className="ex-resg-l2">
+                  <span className="ex-mono">carregando…</span>
                 </div>
-              </li>
-            );
-          })}
+              </div>
+            </li>
+          )}
+          {!movQuery.isLoading && movs.length === 0 && (
+            <li className="ex-resg-row" style={RESG_TINT}>
+              <span className="ex-resg-stripe" />
+              <div className="ex-resg-body">
+                <div className="ex-resg-l2">
+                  <span className="ex-mono">nenhuma transferência ainda ♡</span>
+                </div>
+              </div>
+            </li>
+          )}
+          {movs.map((m) => (
+            <li key={m.idRepasse} className="ex-resg-row" style={RESG_TINT}>
+              <span className="ex-resg-stripe" />
+              <div className="ex-resg-body">
+                <div className="ex-resg-l1">
+                  <span className="ex-hand ex-resg-item">
+                    transferência para conta corrente
+                  </span>
+                  <span className="ex-hand ex-resg-val">− {fmtMoney(m.valorCents)}</span>
+                </div>
+                <div className="ex-resg-l2">
+                  <span className="ex-mono">{fmtDM(m.data)}</span>
+                  <span className="ex-mono">
+                    {m.quantidade} {m.quantidade === 1 ? "presente" : "presentes"}
+                  </span>
+                </div>
+              </div>
+            </li>
+          ))}
         </ul>
         <div className="ex-modal-actions ex-modal-actions-split">
-          <span className="ex-caps">{outs.length} movimentações</span>
+          <span className="ex-caps">{movs.length} movimentações</span>
           <button type="button" className="ex-btn-primary" onClick={onClose}>
             fechar
           </button>
@@ -1705,7 +1742,7 @@ export function PresentesBody(props: PainelSectionBodyProps) {
       />
       <ResgatadoModal
         open={resgatadoOpen}
-        transactions={transactions}
+        idCampanha={idCampanha}
         total={summary.resgatado}
         onClose={() => setResgatadoOpen(false)}
       />
