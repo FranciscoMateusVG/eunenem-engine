@@ -693,6 +693,48 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       expect(list).toEqual([]);
     });
 
+    it('aperture-phbwo: item with valor=0 → BAD_REQUEST at the boundary, none persist', async () => {
+      // Regression for the live curadoria bug: the tRPC boundary used to be
+      // .nonnegative(), so a zero-priced catalog item passed the wire layer
+      // and was rejected deeper by the domain use-case with a confusing
+      // "Too small: expected number to be >0" message. The boundary is now
+      // .positive() — a R$0 contribuição fails fast here, clearly. (The prior
+      // negative-valor test only covers -1, which .nonnegative() already
+      // rejected, so it never locked the valor=0 case.)
+      const alice = await seedUserWithCampanha(rig, {
+        handle: 'alice',
+        email: 'alice@test.local',
+      });
+      const caller = rig.callerFor(alice.cookieHeader);
+
+      const err = await expectTrpcError(() =>
+        caller.contribuicao.createBulk({
+          items: [
+            { nome: 'Valid', valor: 4990, quantidade: 1 },
+            { nome: 'Zero-priced item', valor: 0, quantidade: 1 },
+          ],
+        }),
+      );
+      expect(err.code).toBe('BAD_REQUEST');
+
+      // All-or-nothing: the valid item did NOT slip through.
+      const list = (await caller.contribuicao.list()) as Array<unknown>;
+      expect(list).toEqual([]);
+    });
+
+    it('aperture-phbwo: single create with valor=0 → BAD_REQUEST', async () => {
+      const alice = await seedUserWithCampanha(rig, {
+        handle: 'alice',
+        email: 'alice@test.local',
+      });
+      const caller = rig.callerFor(alice.cookieHeader);
+
+      const err = await expectTrpcError(() =>
+        caller.contribuicao.create({ nome: 'Zero', valor: 0, quantidade: 1 }),
+      );
+      expect(err.code).toBe('BAD_REQUEST');
+    });
+
     it('anonymous createBulk → UNAUTHORIZED', async () => {
       const caller = rig.callerFor();
       const err = await expectTrpcError(() =>
