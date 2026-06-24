@@ -246,14 +246,3 @@ export function groupVisitorGifts(items: PaginaContribuicao[]): VisitorGift[] {
   }
   return [...map.values()];
 }
-
-/**
- * Derive the chip set from the visible gifts. "Todos" goes first; only
- * grupos that actually appear in the result set are surfaced (so the chip
- * bar reflects the listmaker's reality, not a fixed taxonomy).
- */
-export function deriveCategoryChips(gifts: VisitorGift[]): string[] {
-  const seen = new Set<string>();
-  for (const g of gifts) seen.add(g.grupoKey);
-  return ["Todos", ...[...seen].sort((a, b) => a.localeCompare(b, "pt-BR"))];
-}
