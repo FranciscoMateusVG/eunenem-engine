@@ -17,6 +17,7 @@ import {
   type IdCampanhaEvento,
   type IdConvite,
   type IdEvento,
+  ImagemUrlConviteSchema,
   MensagemConviteSchema,
   ModeloConviteSchema,
   ModalidadeEventoSchema,
@@ -129,6 +130,12 @@ const SaveEventoConviteInputSchema = z.object({
   paleta: PaletaConviteSchema,
   fonte: FonteConviteSchema,
   modelo: ModeloConviteSchema,
+  // aperture-j4zjw — custom-photo background. A real (uploaded) http(s) image
+  // URL when the creator picks "usar uma foto sua"; null/absent for a watercolor
+  // template or the plain scrapbook paper. Optional (nullish) so existing
+  // callers that never set a photo stay valid. The domain use-cases already
+  // accept imagemUrl; this wires it through the BFF save procedure.
+  imagemUrl: ImagemUrlConviteSchema.nullish(),
 });
 
 const EventoSnapshotSchema = z.object({
@@ -335,6 +342,10 @@ export const eventoConviteRouter = t.router({
                 paleta: input.paleta,
                 fonte: input.fonte,
                 modelo: input.modelo,
+                // aperture-j4zjw — a real URL sets/updates the photo; null/absent
+                // leaves the existing value (the entity has no cleared state —
+                // clearing a stale photo is a follow-up, see PR notes).
+                imagemUrl: input.imagemUrl ?? undefined,
               },
             )
           : await criarConvite(
@@ -353,6 +364,8 @@ export const eventoConviteRouter = t.router({
                 paleta: input.paleta,
                 fonte: input.fonte,
                 modelo: input.modelo,
+                // aperture-j4zjw — persist the custom-photo URL on first save.
+                imagemUrl: input.imagemUrl ?? undefined,
               },
             );
 

@@ -13,6 +13,7 @@ import {
   useSalvarConvite,
 } from "@/lib/convite";
 import { shareConvitePreview } from "@/lib/convite-share";
+import { useConviteBackgroundUpload } from "@/lib/conviteUpload";
 import { painelConvitePreviewHref } from "@/lib/painelRoutes";
 import {
   DEFAULT_STATE,
@@ -367,17 +368,18 @@ function PreviewModal({
 function MStepFundo({ state, update, updateMany }: StepProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
+  // aperture-j4zjw — upload the photo to storage so it persists (was a base64
+  // dataUrl held only in client state and dropped on save).
+  const { upload, uploading } = useConviteBackgroundUpload();
 
-  const onUpload = (file: File | undefined) => {
+  const onUpload = async (file: File | undefined) => {
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const data = e.target?.result;
-      if (typeof data === "string") {
-        updateMany(uploadSelectionPatch(data));
-      }
-    };
-    reader.readAsDataURL(file);
+    try {
+      const url = await upload(file);
+      updateMany(uploadSelectionPatch(url));
+    } catch {
+      toast.error("não consegui enviar a imagem — tenta de novo?");
+    }
   };
 
   // aperture-qa2m3 — the real 12 watercolor templates (same TEMPLATES the desktop
@@ -499,6 +501,7 @@ function MStepFundo({ state, update, updateMany }: StepProps) {
               type="button"
               className="mcv-upload-clear"
               onClick={() => update("bgUpload", null)}
+              disabled={uploading}
             >
               tirar
             </button>
@@ -508,10 +511,13 @@ function MStepFundo({ state, update, updateMany }: StepProps) {
             type="button"
             className="mcv-upload-empty"
             onClick={() => fileRef.current?.click()}
+            disabled={uploading}
           >
             <span className="mcv-upload-plus" aria-hidden="true">＋</span>
             <span className="mcv-upload-empty-body">
-              <span className="mcv-upload-title">enviar foto</span>
+              <span className="mcv-upload-title">
+                {uploading ? "enviando…" : "enviar foto"}
+              </span>
               <span className="mcv-upload-sub">jpg, png — fica de fundo</span>
             </span>
           </button>

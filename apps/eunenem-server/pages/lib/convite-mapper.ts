@@ -42,6 +42,8 @@ export interface SaveConvitePayload {
   paleta: PaletaConvite;
   fonte: FonteConvite;
   modelo: ModeloConvite;
+  /** aperture-j4zjw — custom-photo background URL (null for template/paper). */
+  imagemUrl: string | null;
 }
 
 const UI_TO_DOMAIN_PALETTE = {
@@ -103,6 +105,15 @@ export function conviteStateFromData(data: EventoConviteQueryData | undefined): 
   const { date, time } = splitIsoToLocalFields(data.evento.dataHoraIso);
   const convite = data.convite;
 
+  const bgTemplate = convite ? templateFromDomain(convite.modelo) : DEFAULT_STATE.bgTemplate;
+  // aperture-j4zjw — rehydrate the custom photo ONLY when the modelo maps to the
+  // "none" (scrapbook) slot, since bgTemplate and bgUpload are mutually
+  // exclusive in state and a watercolor template must win over any stale
+  // imagemUrl. A saved photo lives as modelo=scrapbook + imagemUrl set; the
+  // plain paper choice is modelo=scrapbook + imagemUrl null.
+  const bgUpload =
+    bgTemplate === 'none' && convite?.imagemUrl ? convite.imagemUrl : null;
+
   return {
     ...DEFAULT_STATE,
     eventType: data.evento.tipoEvento,
@@ -115,8 +126,8 @@ export function conviteStateFromData(data: EventoConviteQueryData | undefined): 
     message: convite?.mensagem ?? DEFAULT_STATE.message,
     palette: convite ? paletteFromDomain(convite.paleta) : DEFAULT_STATE.palette,
     nameFont: convite?.fonte ?? DEFAULT_STATE.nameFont,
-    bgTemplate: convite ? templateFromDomain(convite.modelo) : DEFAULT_STATE.bgTemplate,
-    bgUpload: null,
+    bgTemplate,
+    bgUpload,
     onlineLink: '',
   };
 }
@@ -133,6 +144,11 @@ export function savePayloadFromConviteState(state: ConviteState): SaveConvitePay
     paleta: paletteToDomain(state.palette),
     fonte: state.nameFont,
     modelo: templateToDomain(state.bgTemplate),
+    // aperture-j4zjw — bgUpload now holds an uploaded http(s) URL (the upload
+    // flow PUTs the photo to storage and stores the public URL, not a base64
+    // dataUrl). Send it as imagemUrl so the custom photo persists; null when a
+    // template/paper is chosen (bgUpload is cleared on template/paper select).
+    imagemUrl: state.bgUpload && state.bgUpload.length > 0 ? state.bgUpload : null,
   };
 }
 

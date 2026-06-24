@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import type { PainelSectionBodyProps } from "@/PainelSectionPage";
 import { downloadConvitePng } from "@/lib/convite-download";
 import { shareConvitePreview } from "@/lib/convite-share";
+import { useConviteBackgroundUpload } from "@/lib/conviteUpload";
 import {
   conviteErrorMessage,
   conviteStateFromData,
@@ -2171,20 +2172,21 @@ function StepPronto({ state }: StepViewProps) {
 
 function StepFundo({ state, update, updateMany }: StepViewProps) {
   const fileRef = useRef<HTMLInputElement | null>(null);
+  // aperture-j4zjw — the photo background now uploads to storage (presigned PUT)
+  // and we keep the returned public URL in bgUpload, so it persists on save.
+  const { upload, uploading } = useConviteBackgroundUpload();
 
   // aperture-qa2m3 — all three background choices go through the SHARED patch
   // helpers in lib/convite (the canonical cascade), so mobile applies the exact
   // same rules. The silent palette+font cascade lives in templateSelectionPatch.
-  const onUpload = (file: File | undefined | null) => {
+  const onUpload = async (file: File | undefined | null) => {
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const result = e.target?.result;
-      if (typeof result === "string") {
-        updateMany(uploadSelectionPatch(result));
-      }
-    };
-    reader.readAsDataURL(file);
+    try {
+      const url = await upload(file);
+      updateMany(uploadSelectionPatch(url));
+    } catch {
+      toast.error("não consegui enviar a imagem — tenta de novo?");
+    }
   };
 
   const removeUpload = () => update("bgUpload", null);
@@ -2272,14 +2274,16 @@ function StepFundo({ state, update, updateMany }: StepViewProps) {
             type="button"
             onClick={() => fileRef.current?.click()}
             className="cv-btn ghost sm"
+            disabled={uploading}
           >
-            trocar
+            {uploading ? "enviando…" : "trocar"}
           </button>
           <button
             type="button"
             onClick={removeUpload}
             className="cv-upload-chip-remove"
             aria-label="remover imagem"
+            disabled={uploading}
           >
             remover
           </button>
@@ -2290,12 +2294,15 @@ function StepFundo({ state, update, updateMany }: StepViewProps) {
           onClick={() => fileRef.current?.click()}
           className="cv-upload-empty"
           aria-label="enviar uma imagem"
+          disabled={uploading}
         >
           <div className="cv-upload-empty-ico" aria-hidden="true">
             ＋
           </div>
           <div>
-            <div className="cv-upload-empty-title">enviar uma imagem</div>
+            <div className="cv-upload-empty-title">
+              {uploading ? "enviando…" : "enviar uma imagem"}
+            </div>
             <div className="cv-upload-empty-sub">
               jpg ou png — fica de fundo, o texto aparece embaixo com scrim
             </div>
