@@ -85,9 +85,14 @@ export const TEMPLATES: Template[] = [
     img: "/public/templates/jardim-romantico.png",
     suggestedPalette: "coral",
     suggestedNameFont: "caveat",
-    safeArea: { top: 0.24, bottom: 0.24, left: 0.1, right: 0.1 },
+    // aperture-i851t — faint florals are scattered across the whole canvas with
+    // no true clear band; the dark copy threads through the blooms (legible but
+    // cluttered, signature lands in the denser bottom florals). Soft scrim gives
+    // a frosted card so every line reads cleanly over the busy floral field
+    // (berco-floral pattern), keeping the delicate look.
+    safeArea: { top: 0.2, bottom: 0.2, left: 0.08, right: 0.08 },
     align: "center",
-    scrim: "none",
+    scrim: "soft",
     forEvents: ["cha-bebe", "batizado", "aniversario"],
   },
   {
@@ -109,7 +114,11 @@ export const TEMPLATES: Template[] = [
     img: "/public/templates/floresta-magica.png",
     suggestedPalette: "cream",
     suggestedNameFont: "caveat",
-    safeArea: { top: 0.3, bottom: 0.42, left: 0.1, right: 0.1 },
+    // aperture-i851t — the mushroom/foliage cluster fills the bottom ~40% and
+    // balloons sit top-left; the old band (center ~0.44) let the mensagem +
+    // signature land on the mushrooms. Raise the band into the clean
+    // upper-middle clear zone (still compact: tight art, secondary copy clamps).
+    safeArea: { top: 0.24, bottom: 0.46, left: 0.1, right: 0.1 },
     align: "center",
     scrim: "none",
     forEvents: ["cha-bebe", "aniversario", "batizado"],
@@ -169,9 +178,14 @@ export const TEMPLATES: Template[] = [
     img: "/public/templates/girafa-bailarina.png",
     suggestedPalette: "coral",
     suggestedNameFont: "caveat",
-    safeArea: { top: 0.1, bottom: 0.12, left: 0.06, right: 0.5 },
+    // aperture-i851t — the ballerina giraffe fills the whole canvas (head top,
+    // body+tutu center) with no clear zone; the old left column let the name
+    // run into the neck and the mensagem/host over the tutu. Keep the text in a
+    // left column but add a soft frosted scrim so every line stays legible over
+    // the art, while the giraffe's face stays visible on the right.
+    safeArea: { top: 0.08, bottom: 0.08, left: 0.05, right: 0.46 },
     align: "left",
-    scrim: "none",
+    scrim: "soft",
     forEvents: ["cha-bebe", "aniversario", "cha-revelacao"],
   },
   {
@@ -193,7 +207,12 @@ export const TEMPLATES: Template[] = [
     img: "/public/templates/elefante-balao.png",
     suggestedPalette: "cream",
     suggestedNameFont: "caveat",
-    safeArea: { top: 0.42, bottom: 0.06, left: 0.1, right: 0.1 },
+    // aperture-i851t — animals (giraffe/elephant) + foliage sit across the
+    // bottom ~30% and there's an empty decorative pink banner up top with a
+    // clean cream upper-middle. The old band (center ~0.68) dumped the text
+    // right onto the bottom animals. Flip the band up into the clear
+    // upper-middle so the copy clears the animals.
+    safeArea: { top: 0.1, bottom: 0.42, left: 0.1, right: 0.1 },
     align: "center",
     scrim: "none",
     forEvents: ["cha-bebe", "aniversario", "cha-revelacao"],
