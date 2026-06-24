@@ -71,7 +71,15 @@ export function PaginaPage({ slug }: { slug: string }) {
   const initialTweaks: Partial<TweaksState> = {};
   if (data?.nomeBebe) initialTweaks.babyName = data.nomeBebe;
   if (data?.creatorName) initialTweaks.parents = data.creatorName;
-  if (data?.dataEvento) initialTweaks.targetDate = data.dataEvento.slice(0, 10);
+  // aperture-3ic62 — the REAL event date (ISO YYYY-MM-DD) or null when the
+  // creator never set one. We thread it explicitly to the Hero instead of
+  // relying on tweaks.targetDate: when dataEvento is null, targetDate would
+  // silently fall back to the shared TWEAKS_DEFAULTS demo date
+  // ("2026-06-15") and render a fake "chegada em 0 dias" countdown. The Hero
+  // hides the countdown entirely when this is null. We still seed
+  // tweaks.targetDate when a real date exists (other consumers may read it).
+  const eventDate = data?.dataEvento ? data.dataEvento.slice(0, 10) : null;
+  if (eventDate) initialTweaks.targetDate = eventDate;
 
   return (
     <TweaksProvider initialState={initialTweaks}>
@@ -82,6 +90,7 @@ export function PaginaPage({ slug }: { slug: string }) {
             <Hero
               coverUrl={data?.fotoCapaUrl ?? null}
               profileUrl={data?.fotoPerfilUrl ?? null}
+              eventDate={eventDate}
             />
             <Story
               historia={data?.historia ?? null}

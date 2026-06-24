@@ -92,6 +92,14 @@ export function PainelPage({ slug }: { slug: string }) {
   const greetingFirstName =
     (perfilQ.data?.creatorName ?? "").trim().split(/\s+/)[0] ?? "";
 
+  // aperture-3ic62 — the REAL baby name for the "página da <X>" header.
+  // Was seeded from the slug inside PainelLayout, which is the creator's
+  // OWN name → the header repeated the greeting ("olá, Teste" / "página da
+  // Teste"). Thread nomeBebe from the same getPerfil query; null (unset or
+  // still loading) → PainelLayout falls back to the neutral "bebê", never
+  // the slug.
+  const babyName = perfilQ.data?.nomeBebe ?? null;
+
   // aperture-77512 — Merge REAL values over the demo snapshot, falling back to
   // ZERO (never the PAINEL_DEMO numbers) so a brand-new creator never sees a
   // stranger's fabricated stats (Mari / helena / 28 confirmados / 12 recados).
@@ -183,7 +191,7 @@ export function PainelPage({ slug }: { slug: string }) {
   };
 
   return (
-    <PainelLayout slug={slug} onOpenTutorial={openOverlay}>
+    <PainelLayout slug={slug} babyName={babyName} onOpenTutorial={openOverlay}>
       <PainelHeaderCard snapshot={snapshot} slug={slug} />
       <PainelMenu groups={groups} slug={slug} />
       <PainelTutorialTrigger
