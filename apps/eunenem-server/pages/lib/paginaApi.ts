@@ -127,14 +127,21 @@ export function useObterSucessoPagamento(
       refetchInterval: opts.pollWhilePending
         ? (query) => {
             const status = query.state.data?.status;
-            if (
-              status === "approved" ||
-              status === "rejected" ||
-              status === "unknown"
-            ) {
+            // aperture-d52he — only 'approved'/'rejected' are terminal. 'pending'
+            // AND 'unknown' are BOTH pre-webhook race states (the page can render
+            // ~50ms after Pay, the webhook lands ~800ms later), so keep polling
+            // through both. Previously 'unknown' stopped the poll, which made a
+            // freshly-paid visitor land on "essa sessão já passou".
+            if (status === "approved" || status === "rejected") {
               return false;
             }
-            return 3000;
+            // Give-up cap (~30s = 15 × 2s) so a truly-dead sessionId doesn't
+            // poll forever; the component shows "sessão expirada" past its own
+            // matching deadline.
+            if (query.state.dataUpdateCount >= 15) {
+              return false;
+            }
+            return 2000;
           }
         : false,
       staleTime: 5_000,
