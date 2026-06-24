@@ -1,4 +1,4 @@
-// aperture-84a21 — post-signup onboarding capture.
+// aperture-84a21 / aperture-4y1y4 — post-signup onboarding capture.
 //
 // Fires right AFTER a successful signUp (session present), opened by
 // AuthModalProvider in place of the immediate redirect-to-painel. Captures the
@@ -7,21 +7,28 @@
 //
 //   step 1 — nome do bebê (nomeBebe)
 //   step 2 — data do evento (dataEvento) + tipo de evento (tipoEvento)
+//   step 3 — link da página (vanity slug)               ← aperture-4y1y4
 //
-// Wiring is ZERO-new-backend: perfil.atualizar (the same use-case the painel
-// editor uses). On finish → /painel/<slug> (the auto-derived slug, unchanged).
+// aperture-4y1y4 — the vanity SLUG picker (operator-approved 2026-06-24). Today
+// the page slug is auto-derived from the display name's first word, and a 2nd
+// "Francisco" gets an ugly auto-suffix ("francisco-2"). Step 3 lets the creator
+// CLAIM their page URL (Instagram @-handle style) at signup. Decisions (locked):
+//   • OPTIONAL + pre-filled with the auto-derived slug (lowest friction — the
+//     user can just hit "criar minha página" with the default).
+//   • real-time availability via usuario.verificarDisponibilidadeSlug (debounced).
+//   • reserved-words denylist enforced BACKEND-side (Rex #269); the picker
+//     surfaces a "reservado" motivo gracefully + relies on atualizarSlug's
+//     CONFLICT/BAD_REQUEST codes as the authoritative gate on save.
 //
-// NOTE (aperture-84a21 decision, option B): the vanity SLUG picker is held
-// under aperture-4y1y4 (operator A/B onboarding approval pending), so it is
-// intentionally NOT part of this wizard — the account keeps its auto-derived
-// slug. dataEvento is optional here (no trap if the user doesn't know the date
-// yet); a null date is handled gracefully on the painel (no fake date), per the
-// companion PainelHeaderCard fix in this same bead.
+// Wiring: perfil.atualizar (existing use-case) for the profile fields +
+// usuario.atualizarSlug (existing use-case, same guarded UNIQUE(plataforma,slug)
+// constraint the PerfilBody editor uses) for the chosen slug. On finish →
+// /painel/<finalSlug> (the chosen slug if changed, else the auto-derived one).
 //
 // A new account has every profile field null except nomeExibicao (set at
 // signup), so perfil.atualizar is sent with the other fields as null — correct
 // for the onboarding context (the wizard only ever runs post-signup).
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { trpc } from "@/lib/trpc";
@@ -47,23 +54,132 @@ const EVENT_TYPES: ReadonlyArray<{ value: EventTypeSlug; label: string }> = [
   { value: "batizado", label: "Batizado" },
 ];
 
+// aperture-4y1y4 — slug VO regex (mirror App.tsx SLUG_REGEX + PerfilBody
+// SLUG_RE): starts with a letter, a–z/0–9/hyphen, 3–30 chars total.
+const SLUG_RE = /^[a-z][a-z0-9-]{2,29}$/;
+const SHARE_BASE = "eunenem.com/";
+
 export function OnboardingWizard({ onDone }: { onDone: (slug: string) => void }) {
   const me = trpc.auth.me.useQuery(undefined, { staleTime: 0 });
   const utils = trpc.useUtils();
   const atualizarPerfil = trpc.perfil.atualizar.useMutation();
+  const atualizarSlug = trpc.usuario.atualizarSlug.useMutation();
 
-  const [step, setStep] = useState<1 | 2>(1);
+  const [step, setStep] = useState<1 | 2 | 3>(1);
   const [babyName, setBabyName] = useState("");
   const [eventDate, setEventDate] = useState("");
   const [eventType, setEventType] = useState<EventTypeSlug>("cha-bebe");
   const [submitting, setSubmitting] = useState(false);
 
+  // aperture-4y1y4 — slug picker state. `slug` is the editable draft; it's
+  // seeded ONCE from the auto-derived me.slug when that lands (the seed effect
+  // honours `slugTouched` so it never clobbers a user edit). `slugError` carries
+  // a graceful inline message from atualizarSlug's CONFLICT/BAD_REQUEST codes.
+  const defaultSlug = me.data?.slug ?? "";
+  const [slug, setSlug] = useState("");
+  const [slugTouched, setSlugTouched] = useState(false);
+  const [slugError, setSlugError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!slugTouched && defaultSlug) setSlug(defaultSlug);
+  }, [defaultSlug, slugTouched]);
+
+  // Debounce the availability check so it doesn't fire on every keystroke.
+  const [debouncedSlug, setDebouncedSlug] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSlug(slug), 350);
+    return () => clearTimeout(t);
+  }, [slug]);
+
+  const slugChanged = slug !== defaultSlug;
+  const slugFormatOk = SLUG_RE.test(slug);
+
+  // Only hit the network when the slug is a VALID, CHANGED value and the
+  // debounce has settled — mirrors the PerfilBody SlugEditor gate.
+  const disponibilidade = trpc.usuario.verificarDisponibilidadeSlug.useQuery(
+    { slug: debouncedSlug },
+    {
+      enabled: slugChanged && slugFormatOk && debouncedSlug === slug,
+      staleTime: 0,
+      retry: false,
+    },
+  );
+
+  // motivo is read loosely so a backend addition like "reservado" (Rex #269)
+  // is handled at runtime without a strict-union TS mismatch.
+  const motivo = disponibilidade.data?.motivo as string | undefined;
+  const checking = disponibilidade.isFetching || debouncedSlug !== slug;
+  const slugAvailable = disponibilidade.data?.disponivel === true;
+
+  let slugStatus: { text: string; tone: "ok" | "bad" | "muted" };
+  if (slugError) {
+    slugStatus = { text: slugError, tone: "bad" };
+  } else if (!slugChanged) {
+    slugStatus = {
+      text: "esse vai ser o link público da sua página — dá pra trocar quando quiser ♡",
+      tone: "muted",
+    };
+  } else if (!slugFormatOk) {
+    slugStatus = {
+      text: "3–30 caracteres, começa com letra, só a–z, números e hífen",
+      tone: "bad",
+    };
+  } else if (checking) {
+    slugStatus = { text: "verificando disponibilidade…", tone: "muted" };
+  } else if (slugAvailable) {
+    slugStatus = { text: "disponível ♡", tone: "ok" };
+  } else if (motivo === "reservado") {
+    slugStatus = { text: "esse endereço é reservado — escolha outro ♡", tone: "bad" };
+  } else if (motivo === "em_uso") {
+    slugStatus = { text: "esse endereço já está em uso — escolha outro ♡", tone: "bad" };
+  } else {
+    slugStatus = { text: "esse endereço não tá disponível ♡", tone: "bad" };
+  }
+
+  const slugToneColor =
+    slugStatus.tone === "ok"
+      ? "var(--lilac-deep)"
+      : slugStatus.tone === "bad"
+        ? "var(--coral-pink)"
+        : "var(--ink-soft)";
+
+  // Finishing is allowed when the slug is either the untouched default (use it
+  // as-is, no atualizarSlug call) OR a valid+available custom value.
+  const slugOkToFinish = !slugChanged || (slugFormatOk && slugAvailable);
+
   const finish = async () => {
     if (submitting) return;
     setSubmitting(true);
+    setSlugError(null);
+
+    // 1. Claim the chosen slug FIRST (riskiest — UNIQUE conflict). On failure we
+    //    abort BEFORE touching the profile, so there's no half-committed state
+    //    and the user just picks another slug. Untouched default → skip (it's
+    //    already theirs from the auto-derive at signup).
+    let finalSlug = defaultSlug;
+    if (slugChanged) {
+      try {
+        await atualizarSlug.mutateAsync({ novoSlug: slug });
+        finalSlug = slug;
+      } catch (err) {
+        const code = (err as { data?: { code?: string } })?.data?.code;
+        if (code === "CONFLICT") {
+          setSlugError("esse endereço já está em uso — escolha outro ♡");
+        } else if (code === "BAD_REQUEST") {
+          setSlugError(
+            "formato inválido: 3–30 caracteres, começa com letra, só a–z, números e hífen",
+          );
+        } else {
+          setSlugError("não consegui reservar esse link — tenta de novo?");
+        }
+        setSubmitting(false);
+        return;
+      }
+    }
+
+    // 2. Save the profile fields. Fresh account → non-captured fields are null.
+    //    nomeExibicao is required by the schema; carry the one set at signup.
     try {
-      // Fresh account → the non-captured fields are null. nomeExibicao is
-      // required by the schema; carry the one set at signup.
       await atualizarPerfil.mutateAsync({
         nomeExibicao: me.data?.nomeExibicao || babyName.trim() || "Família",
         nomeBebe: babyName.trim() || null,
@@ -77,14 +193,25 @@ export function OnboardingWizard({ onDone }: { onDone: (slug: string) => void })
         fotoHistoriaKey: null,
       });
       await utils.auth.me.invalidate();
-      onDone(me.data?.slug ?? "");
+      onDone(finalSlug);
     } catch {
-      toast.error("não consegui salvar agora — tenta de novo ♡");
-      setSubmitting(false);
+      // The slug (if changed) is already committed at this point — redirect to
+      // the painel anyway so the user isn't trapped; the profile fields they can
+      // still set from the painel editor. Better than stranding them in the modal.
+      await utils.auth.me.invalidate();
+      toast.error("salvei seu link, mas não consegui salvar o resto agora — ajuste no seu perfil ♡");
+      onDone(finalSlug);
     }
   };
 
   const canNext1 = babyName.trim().length > 0;
+
+  const title =
+    step === 1
+      ? "como vamos chamar o bebê?"
+      : step === 2
+        ? "quando é o grande dia?"
+        : "qual vai ser o link da sua página?";
 
   return (
     <div className="auth-backdrop" role="dialog" aria-modal="true" aria-label="Vamos montar sua página">
@@ -92,10 +219,8 @@ export function OnboardingWizard({ onDone }: { onDone: (slug: string) => void })
       <div className="auth-card">
         <span aria-hidden="true" className="auth-tape" />
         <header className="auth-head">
-          <p className="auth-eyebrow">passo {step} de 2 ♡</p>
-          <h2 className="auth-title">
-            {step === 1 ? "como vamos chamar o bebê?" : "quando é o grande dia?"}
-          </h2>
+          <p className="auth-eyebrow">passo {step} de 3 ♡</p>
+          <h2 className="auth-title">{title}</h2>
         </header>
 
         {step === 1 && (
@@ -152,6 +277,47 @@ export function OnboardingWizard({ onDone }: { onDone: (slug: string) => void })
           </>
         )}
 
+        {step === 3 && (
+          <>
+            <label className="auth-label" htmlFor="ob-slug">
+              link da sua página
+            </label>
+            <div className="auth-input-wrap">
+              <input
+                id="ob-slug"
+                className="auth-input"
+                value={slug}
+                placeholder="seu-link"
+                inputMode="url"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                autoFocus
+                onChange={(e) => {
+                  setSlugTouched(true);
+                  setSlugError(null);
+                  // sanitize live: lowercase + drop anything outside a–z 0–9 -
+                  setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""));
+                }}
+              />
+            </div>
+            <p className="auth-fineprint" style={{ marginBottom: 4 }}>
+              sua página:{" "}
+              <strong style={{ color: "var(--ink)" }}>
+                {SHARE_BASE}
+                {slug || "seu-link"}
+              </strong>
+            </p>
+            <span
+              className="auth-fineprint"
+              role={slugStatus.tone === "bad" ? "alert" : undefined}
+              style={{ color: slugToneColor, fontWeight: slugStatus.tone === "muted" ? 400 : 600 }}
+            >
+              {slugStatus.text}
+            </span>
+          </>
+        )}
+
         <div
           style={{
             display: "flex",
@@ -161,10 +327,10 @@ export function OnboardingWizard({ onDone }: { onDone: (slug: string) => void })
             marginTop: 20,
           }}
         >
-          {step === 2 ? (
+          {step > 1 ? (
             <button
               type="button"
-              onClick={() => setStep(1)}
+              onClick={() => setStep((s) => (s === 3 ? 2 : 1))}
               disabled={submitting}
               style={{
                 background: "none",
@@ -180,7 +346,8 @@ export function OnboardingWizard({ onDone }: { onDone: (slug: string) => void })
           ) : (
             <span />
           )}
-          {step === 1 ? (
+
+          {step === 1 && (
             <button
               type="button"
               className="auth-cta"
@@ -190,13 +357,24 @@ export function OnboardingWizard({ onDone }: { onDone: (slug: string) => void })
             >
               próximo <span aria-hidden="true">→</span>
             </button>
-          ) : (
+          )}
+          {step === 2 && (
+            <button
+              type="button"
+              className="auth-cta"
+              style={{ width: "auto", flex: "0 0 auto" }}
+              onClick={() => setStep(3)}
+            >
+              próximo <span aria-hidden="true">→</span>
+            </button>
+          )}
+          {step === 3 && (
             <button
               type="button"
               className="auth-cta"
               style={{ width: "auto", flex: "0 0 auto" }}
               onClick={finish}
-              disabled={submitting}
+              disabled={submitting || !slugOkToFinish}
             >
               {submitting ? "salvando…" : "criar minha página ♡"}
             </button>
