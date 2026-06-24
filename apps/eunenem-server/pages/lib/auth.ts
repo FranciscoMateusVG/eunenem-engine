@@ -60,11 +60,19 @@ export interface AuthUser {
   slug: string;
 }
 
-/** Result of a successful signUp / signIn. */
+/** Result of a successful signUp / signIn / continuarComEmail. */
 export interface AuthSession {
   user: { email: string; nomeExibicao: string };
   /** ISO timestamp string for cross-tree serialisation. */
   expiraEm: string;
+  /**
+   * aperture-d7993 — true when the auth call CREATED a new account
+   * (→ caller shows the onboarding wizard), false when it logged into an
+   * existing one (→ caller redirects straight to the painel). `signUp`
+   * always reports true; `signIn` always false; `continuarComEmail` reports
+   * the server's branch decision.
+   */
+  criado: boolean;
 }
 
 /** Discriminated error type so the UI can render the right field message. */
@@ -73,6 +81,7 @@ export type AuthError =
   | { kind: "short-password"; minLength: number }
   | { kind: "credentials" }
   | { kind: "email-taken" }
+  | { kind: "rate-limited" }
   | { kind: "network" };
 
 /** Engine zod enforces ≥8 — keep in lock-step with `SignUpInputSchema`. */
@@ -88,6 +97,8 @@ export function authErrorMessage(err: AuthError): string {
       return "e-mail ou senha não bateram — tenta de novo?";
     case "email-taken":
       return "esse e-mail já tem conta — bora entrar?";
+    case "rate-limited":
+      return "muitas tentativas — espera um pouquinho e tenta de novo ♡";
     case "network":
       return "deu ruim na conexão — tenta de novo daqui a pouco ♡";
   }
@@ -101,7 +112,7 @@ export function isValidEmail(email: string): boolean {
 
 // ── Error mapping ───────────────────────────────────────────────────────────
 
-export type AuthOperation = "signUp" | "signIn";
+export type AuthOperation = "signUp" | "signIn" | "continuarComEmail";
 
 /**
  * Translate a thrown tRPC error into the modal's `AuthError` shape. The
@@ -125,11 +136,28 @@ export function toAuthError(err: unknown, op: AuthOperation): AuthError {
           return { kind: "network" };
       }
     }
+    if (op === "continuarComEmail") {
+      // aperture-d7993 — the unified login-or-create submit. The server keeps
+      // the wrong-password / no-account outcome AMBIGUOUS (UsuarioInputInvalido
+      // → credentials), so we never surface a distinct "no account" message.
+      // Rate-limit rejections surface their own friendly message.
+      switch (code) {
+        case "UNAUTHORIZED":
+        case "BAD_REQUEST":
+          return { kind: "credentials" };
+        case "TOO_MANY_REQUESTS":
+          return { kind: "rate-limited" };
+        default:
+          return { kind: "network" };
+      }
+    }
     // signIn
     switch (code) {
       case "UNAUTHORIZED":
       case "BAD_REQUEST":
         return { kind: "credentials" };
+      case "TOO_MANY_REQUESTS":
+        return { kind: "rate-limited" };
       default:
         return { kind: "network" };
     }
@@ -166,6 +194,7 @@ export function useSignUp() {
         return {
           user: { email: input.email.trim(), nomeExibicao: input.name.trim() },
           expiraEm: serializeDate(result.expiraEm),
+          criado: true,
         };
       } catch (err) {
         throw toAuthError(err, "signUp");
@@ -196,6 +225,7 @@ export function useSignIn() {
         return {
           user: { email: input.email.trim(), nomeExibicao: input.email.trim() },
           expiraEm: serializeDate(result.expiraEm),
+          criado: false,
         };
       } catch (err) {
         throw toAuthError(err, "signIn");
@@ -205,6 +235,54 @@ export function useSignIn() {
   );
 
   return { signIn, isPending: mutation.isPending };
+}
+
+/**
+ * aperture-d7993 — email-first unified entry (Option B). One submit decides
+ * login-vs-create SERVER-SIDE (Rex's `auth.continuarComEmail`, PR #271): the
+ * client never asks "does this email exist?" (zero existence endpoint — no
+ * enumeration oracle). The server branches on a tenant-scoped lookup, pays
+ * exactly one scrypt either way, and returns a session cookie. The result's
+ * `criado` flag (Rex #273) tells the caller whether a NEW account was created
+ * (→ show onboarding) or an existing one logged in (→ redirect to painel).
+ *
+ * `criado` is read via a cast so this typechecks against the current staging
+ * type whether or not #273 (the flag) is in the base yet — this PR must merge
+ * AFTER #273 so the flag is real at runtime. Wrong password surfaces the same
+ * ambiguous `credentials` error as signIn; rate-limit → `rate-limited`.
+ */
+export function useContinuarComEmail() {
+  const utils = trpc.useUtils();
+  const mutation = trpc.auth.continuarComEmail.useMutation({
+    onSuccess: () => {
+      void utils.auth.me.invalidate();
+    },
+  });
+
+  const continuarComEmail = useCallback(
+    async (input: { email: string; password: string }): Promise<AuthSession> => {
+      try {
+        const result = await mutation.mutateAsync({
+          email: input.email.trim(),
+          senha: input.password,
+          idPlataforma: ID_PLATAFORMA_EUNENEM,
+        });
+        return {
+          user: { email: input.email.trim(), nomeExibicao: input.email.trim() },
+          expiraEm: serializeDate(result.expiraEm),
+          // aperture-d7993 — `criado` is the server's authoritative login-vs-
+          // create branch (Rex #273, `as const` discriminated union → clean
+          // narrowing). true = new account (→ onboarding); false = login.
+          criado: result.criado,
+        };
+      } catch (err) {
+        throw toAuthError(err, "continuarComEmail");
+      }
+    },
+    [mutation],
+  );
+
+  return { continuarComEmail, isPending: mutation.isPending };
 }
 
 export function useSignOut() {

@@ -5,8 +5,7 @@ import {
   authErrorMessage,
   isValidEmail,
   MIN_PASSWORD_LENGTH,
-  useSignIn,
-  useSignUp,
+  useContinuarComEmail,
   type AuthError,
   type AuthSession,
 } from "@/lib/auth";
@@ -111,23 +110,24 @@ export function AuthModalShell({
   // unrelated rerenders).
   const [step, setStep] = useState<Step>(1);
 
-  // Form state. Email survives mode swap; password + name reset on swap.
+  // Form state. Email survives mode swap; password resets on swap.
+  // aperture-d7993 — the name field is gone: the unified email-first flow
+  // derives nomeExibicao from the email and the onboarding wizard collects the
+  // real display/baby name, so signup no longer asks for a name here.
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
 
   // Per-field errors + global submit state.
   const [emailError, setEmailError] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
-  const [nameError, setNameError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Real tRPC mutations (aperture-d0x1w). Hooks at top-level so React's
-  // rules-of-hooks holds across mode swaps + step changes.
-  const { signUp } = useSignUp();
-  const { signIn } = useSignIn();
+  // aperture-d7993 — one unified submit (Option B). The server decides
+  // login-vs-create; we never pre-check email existence (no enumeration
+  // oracle). Hook at top-level so rules-of-hooks holds across step changes.
+  const { continuarComEmail } = useContinuarComEmail();
 
   const copy = COPY[mode];
 
@@ -187,10 +187,8 @@ export function AuthModalShell({
   const swapMode = useCallback(() => {
     setStep(1);
     setPassword("");
-    setName("");
     setEmailError(null);
     setPasswordError(null);
-    setNameError(null);
     setSubmitError(null);
     setShowPassword(false);
     onModeChange(copy.footerCtaTarget);
@@ -221,41 +219,34 @@ export function AuthModalShell({
     if (isSubmitting) return;
     setStep(1);
     setPasswordError(null);
-    setNameError(null);
     setSubmitError(null);
   };
 
   const onStep2Submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setPasswordError(null);
-    setNameError(null);
     setSubmitError(null);
-    let bad = false;
-    if (mode === "signup" && !name.trim()) {
-      setNameError("como a gente pode te chamar?");
-      bad = true;
-    }
     if (!password) {
       setPasswordError("escolhe uma senha pra fechar a porta ♡");
-      bad = true;
-    } else if (password.length < MIN_PASSWORD_LENGTH) {
+      return;
+    }
+    if (password.length < MIN_PASSWORD_LENGTH) {
       setPasswordError(
         `a senha precisa ter pelo menos ${MIN_PASSWORD_LENGTH} caracteres ♡`,
       );
-      bad = true;
+      return;
     }
-    if (bad) return;
 
     setIsSubmitting(true);
     try {
-      const session =
-        mode === "signup"
-          ? await signUp({ email, password, name })
-          : await signIn({ email, password });
-      toast.success(
-        mode === "signup" ? "conta criada ♡" : "bem-vinda de volta ♡",
-        { description: session.user.email },
-      );
+      // aperture-d7993 — one unified call. The server decides login-vs-create
+      // and reports it via `session.criado`; the consumer (AuthModalProvider)
+      // routes a brand-new account to onboarding and an existing login to the
+      // painel. We surface an honest toast now that we know the outcome.
+      const session = await continuarComEmail({ email, password });
+      toast.success(session.criado ? "conta criada ♡" : "bem-vinda de volta ♡", {
+        description: session.user.email,
+      });
       onAuthenticated?.(session);
       onClose();
     } catch (err) {
@@ -327,11 +318,7 @@ export function AuthModalShell({
             {copy.title}
           </h2>
           <p id={subtitleId} className="auth-subtitle">
-            {step === 1
-              ? copy.subtitle
-              : mode === "signup"
-                ? "só mais um passinho — escolhe um nome bonito e uma senha ♡"
-                : `entrando como ${email}`}
+            {step === 1 ? copy.subtitle : `é só a senha pra ${email} ♡`}
           </p>
         </header>
 
@@ -346,10 +333,7 @@ export function AuthModalShell({
           />
         ) : (
           <StepTwo
-            mode={mode}
-            name={name}
-            setName={setName}
-            nameError={nameError}
+            email={email}
             password={password}
             setPassword={setPassword}
             passwordError={passwordError}
@@ -479,11 +463,12 @@ function StepOne({
 // visual identity: same card chrome, same label style, same lavender CTA.
 // Password has a show/hide toggle. Submit button shows spinner while pending.
 // ════════════════════════════════════════════════════════════════════════════
+// aperture-d7993 — unified password step (Option B). No name field (the email
+// derives nomeExibicao; the onboarding wizard collects the real name) and no
+// mode branching: the copy is deliberately AMBIGUOUS ("sua senha — ou crie
+// uma") because the server, not the client, decides login-vs-create at submit.
 function StepTwo({
-  mode,
-  name,
-  setName,
-  nameError,
+  email,
   password,
   setPassword,
   passwordError,
@@ -492,10 +477,7 @@ function StepTwo({
   isSubmitting,
   onSubmit,
 }: {
-  mode: AuthMode;
-  name: string;
-  setName: (v: string) => void;
-  nameError: string | null;
+  email: string;
   password: string;
   setPassword: (v: string) => void;
   passwordError: string | null;
@@ -504,56 +486,33 @@ function StepTwo({
   isSubmitting: boolean;
   onSubmit: (e: React.FormEvent) => void;
 }) {
-  const nameId = useId();
   const passwordId = useId();
   return (
     <form onSubmit={onSubmit} className="auth-form" noValidate>
-      {mode === "signup" && (
-        <>
-          <label htmlFor={nameId} className="auth-label">
-            Como a gente pode te chamar?
-          </label>
-          <div className={`auth-input-wrap ${nameError ? "has-error" : ""}`}>
-            <SmileIcon />
-            <input
-              id={nameId}
-              type="text"
-              autoComplete="given-name"
-              autoCapitalize="words"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Primeiro nome ou apelido"
-              aria-required="true"
-              aria-invalid={nameError ? true : false}
-              aria-describedby={nameError ? `${nameId}-err` : undefined}
-              disabled={isSubmitting}
-              className="auth-input"
-            />
-          </div>
-          {nameError && (
-            <p id={`${nameId}-err`} role="alert" className="auth-field-error">
-              {nameError}
-            </p>
-          )}
-        </>
-      )}
+      {/* Hidden username field so password managers associate the credential
+          with the email captured in step 1. */}
+      <input
+        type="email"
+        value={email}
+        autoComplete="username"
+        readOnly
+        aria-hidden="true"
+        tabIndex={-1}
+        style={{ display: "none" }}
+      />
 
       <label htmlFor={passwordId} className="auth-label">
-        {mode === "signup" ? "Crie uma senha" : "Sua senha"}
+        Sua senha — ou crie uma
       </label>
       <div className={`auth-input-wrap ${passwordError ? "has-error" : ""}`}>
         <LockIcon />
         <input
           id={passwordId}
           type={showPassword ? "text" : "password"}
-          autoComplete={mode === "signup" ? "new-password" : "current-password"}
+          autoComplete="current-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          placeholder={
-            mode === "signup"
-              ? `Mínimo ${MIN_PASSWORD_LENGTH} caracteres`
-              : "Digite sua senha"
-          }
+          placeholder={`Mínimo ${MIN_PASSWORD_LENGTH} caracteres`}
           aria-required="true"
           aria-invalid={passwordError ? true : false}
           aria-describedby={passwordError ? `${passwordId}-err` : undefined}
@@ -587,11 +546,11 @@ function StepTwo({
         {isSubmitting ? (
           <>
             <Spinner />
-            {mode === "signup" ? "CRIANDO…" : "ENTRANDO…"}
+            CONTINUANDO…
           </>
         ) : (
           <>
-            {mode === "signup" ? "CRIAR CONTA" : "ENTRAR"} <span aria-hidden="true">→</span>
+            CONTINUAR <span aria-hidden="true">→</span>
           </>
         )}
       </button>
@@ -666,17 +625,6 @@ function LockIcon() {
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
       <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-    </svg>
-  );
-}
-
-function SmileIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="12" cy="12" r="10"/>
-      <path d="M8 14s1.5 2 4 2 4-2 4-2"/>
-      <line x1="9" y1="9" x2="9.01" y2="9"/>
-      <line x1="15" y1="9" x2="15.01" y2="9"/>
     </svg>
   );
 }

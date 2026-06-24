@@ -9,6 +9,7 @@ import {
 } from "react";
 
 import { trpc } from "@/lib/trpc";
+import type { AuthSession } from "@/lib/auth";
 import { AuthModalShell, type AuthMode } from "./AuthModalShell.js";
 import { OnboardingWizard } from "./OnboardingWizard.js";
 
@@ -125,25 +126,32 @@ export function AuthModalProvider({
   // The user is already signed in at this point (cookie set), so leaving
   // them on the current page with an updated navbar is graceful
   // degradation.
-  const onAuthenticated = useCallback(async () => {
-    // aperture-84a21 — a NEW signup goes through the onboarding wizard first
-    // (it captures slug + babyName + dataEvento + tipoEvento, then redirects to
-    // the painel itself). Sign-IN keeps the straight redirect.
-    if (mode === "signup") {
-      setShowOnboarding(true);
-      return;
-    }
-    try {
-      const me = await utils.auth.me.fetch();
-      if (!me?.slug) return;
-      const target = `/painel/${me.slug}`;
-      if (typeof window === "undefined") return;
-      if (window.location.pathname === target) return;
-      window.location.assign(target);
-    } catch {
-      // Graceful degradation — see comment above.
-    }
-  }, [mode, utils]);
+  const onAuthenticated = useCallback(
+    async (session: AuthSession) => {
+      // aperture-d7993 — the unified email-first flow (continuarComEmail) hands
+      // us `session.criado`: the server's authoritative login-vs-create branch.
+      // A brand-NEW account goes through the onboarding wizard first (it captures
+      // slug + babyName + dataEvento + tipoEvento, then redirects to the painel);
+      // an existing LOGIN gets the straight redirect. This replaces the old
+      // `mode === "signup"` heuristic, which was wrong once a single entry could
+      // resolve to either outcome at submit time.
+      if (session.criado) {
+        setShowOnboarding(true);
+        return;
+      }
+      try {
+        const me = await utils.auth.me.fetch();
+        if (!me?.slug) return;
+        const target = `/painel/${me.slug}`;
+        if (typeof window === "undefined") return;
+        if (window.location.pathname === target) return;
+        window.location.assign(target);
+      } catch {
+        // Graceful degradation — see comment above.
+      }
+    },
+    [utils],
+  );
 
   // Focus restoration. Runs AFTER the modal has unmounted (next animation
   // frame) so the dialog's focus trap doesn't fight us for the focus target.
