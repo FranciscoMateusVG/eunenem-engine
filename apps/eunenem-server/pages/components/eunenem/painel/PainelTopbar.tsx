@@ -1,26 +1,18 @@
 import { useSignOut } from "@/lib/auth";
 import { painelHref, type PainelSection } from "@/lib/painelRoutes";
 
-// aperture-7nius / aperture-0mplv — Painel topbar nav.
+// aperture-7nius / aperture-0mplv / aperture-paf3m — Painel topbar nav.
 //
-// The logged-in painel topbar carries the EuNeném logo, a small set of
-// nav chips, and the bell + logout icon buttons.
+// The logged-in painel topbar carries the EuNeném logo, a single nav chip,
+// and the logout icon button.
 //
-// aperture-0mplv removed the TUTORIAL chip: the spotlight overlay is
-// still re-triggerable via the floating bottom-right CTA
-// (PainelTutorialTrigger on PainelPage), so a duplicate top-nav entry
-// was redundant. The topbar nav is now the two destinations that map to
-// real painel surfaces:
+// aperture-0mplv removed the TUTORIAL chip; aperture-paf3m removed the AJUDA
+// chip (operator request) — the CONTA & AJUDA surface (SUPORTE/WhatsApp +
+// PERFIL + BANCÁRIOS) is still reachable by scrolling the painel root menu,
+// so a dedicated top-nav anchor was redundant. The topbar nav is now just:
 //
 //   • MINHA PÁGINA  — anchors to the painel root; active when there's no
 //                     sub-section.
-//   • AJUDA         — anchor-jumps to the CONTA & AJUDA group on the
-//                     painel root (id `painel-group-conta` from
-//                     PainelMenu). On sub-pages it navigates to the root
-//                     carrying `#painel-group-conta` so the browser
-//                     anchor-jumps on land. The section already gathers
-//                     SUPORTE (WhatsApp) + PERFIL + BANCÁRIOS — exactly
-//                     the "help" surface area.
 
 interface PainelTopbarProps {
   /** Creator slug — drives every nav href. */
@@ -31,14 +23,11 @@ interface PainelTopbarProps {
 
 interface NavItem {
   label: string;
-  /** Behavior key — selects how the chip resolves its href + active state. */
-  kind: "page" | "ajuda";
 }
 
-// Order matters — left-to-right per the reference screenshots.
+// aperture-paf3m — AJUDA removed; MINHA PÁGINA is the sole topbar destination.
 const NAV_ITEMS: NavItem[] = [
-  { label: "MINHA PÁGINA", kind: "page" },
-  { label: "AJUDA", kind: "ajuda" },
+  { label: "MINHA PÁGINA" },
 ];
 
 export function PainelTopbar({
@@ -71,33 +60,15 @@ export function PainelTopbar({
           <ul>
             {NAV_ITEMS.map((item) => {
               // MINHA PÁGINA — anchor to painel root, active when there's
-              // no sub-section.
-              if (item.kind === "page") {
-                const active = onPainelRoot;
-                return (
-                  <li key={item.label}>
-                    <a
-                      href={painelHref(slug)}
-                      aria-current={active ? "page" : undefined}
-                      className={`painel-topbar-link${
-                        active ? " is-active" : ""
-                      }`}
-                    >
-                      {item.label}
-                    </a>
-                  </li>
-                );
-              }
-
-              // AJUDA — anchor-jumps to the CONTA & AJUDA group on the
-              // painel root. On sub-pages we navigate to the root with the
-              // hash; on the root we just scroll via the # anchor.
-              const href = onPainelRoot
-                ? "#painel-group-conta"
-                : `${painelHref(slug)}#painel-group-conta`;
+              // no sub-section. (aperture-paf3m: AJUDA branch removed.)
+              const active = onPainelRoot;
               return (
                 <li key={item.label}>
-                  <a href={href} className="painel-topbar-link">
+                  <a
+                    href={painelHref(slug)}
+                    aria-current={active ? "page" : undefined}
+                    className={`painel-topbar-link${active ? " is-active" : ""}`}
+                  >
                     {item.label}
                   </a>
                 </li>
