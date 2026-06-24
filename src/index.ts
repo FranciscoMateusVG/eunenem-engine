@@ -58,6 +58,7 @@ export {
 // aperture-kcasm: object storage — presigned-PUT photo uploads (infra boundary).
 export type {
   EmitirUrlUploadInput,
+  EmitirUrlUploadItemInput,
   ObjectStorage,
   SlotFoto,
   UrlUploadPresignada,
@@ -1074,6 +1075,14 @@ export {
   EmitirUrlUploadFotoInputSchema,
   emitirUrlUploadFoto,
 } from './use-cases/usuario/emitir-url-upload-foto.js';
+export type {
+  EmitirUrlUploadImagemItemDeps,
+  EmitirUrlUploadImagemItemInput,
+} from './use-cases/usuario/emitir-url-upload-imagem-item.js';
+export {
+  EmitirUrlUploadImagemItemInputSchema,
+  emitirUrlUploadImagemItem,
+} from './use-cases/usuario/emitir-url-upload-imagem-item.js';
 export type { MarcarTutorialUsuarioComoCompletadoDeps } from './use-cases/usuario/marcar-tutorial-usuario-como-completado.js';
 export { marcarTutorialUsuarioComoCompletado } from './use-cases/usuario/marcar-tutorial-usuario-como-completado.js';
 export type { ObterDadosRecebimentoUsuarioDeps } from './use-cases/usuario/obter-dados-recebimento-usuario.js';

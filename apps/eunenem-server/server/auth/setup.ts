@@ -21,6 +21,7 @@ import {
   type LivroFinanceiroRepository,
   LivroFinanceiroRepositoryPostgres,
   type EmitirUrlUploadInput,
+  type EmitirUrlUploadItemInput,
   type ObjectStorage,
   ObjectStorageMinio,
   type UrlUploadPresignada,
@@ -171,6 +172,12 @@ export interface ServerDeps {
  */
 class ObjectStorageNaoConfigurado implements ObjectStorage {
   async emitirUrlUploadPresignada(_input: EmitirUrlUploadInput): Promise<UrlUploadPresignada> {
+    throw new Error('storage não configurado (MINIO_* ausente)');
+  }
+
+  async emitirUrlUploadPresignadaItem(
+    _input: EmitirUrlUploadItemInput,
+  ): Promise<UrlUploadPresignada> {
     throw new Error('storage não configurado (MINIO_* ausente)');
   }
 

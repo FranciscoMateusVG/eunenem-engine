@@ -3,6 +3,7 @@ import { SpanStatusCode, trace } from '@opentelemetry/api';
 import {
   CONTENT_TYPE_EXTENSAO,
   type EmitirUrlUploadInput,
+  type EmitirUrlUploadItemInput,
   type ObjectStorage,
   type UrlUploadPresignada,
 } from './object-storage.js';
@@ -36,6 +37,16 @@ export class ObjectStorageMemory implements ObjectStorage {
   /** Every emitirUrlUploadPresignada call, in order. Public for test assertions. */
   public readonly uploads: UploadRegistrado[] = [];
 
+  /**
+   * Every emitirUrlUploadPresignadaItem call, in order (aperture-tua9o).
+   * Public for test assertions — same role as `uploads` for the profile
+   * emitter, kept separate so item-image tests assert in isolation.
+   */
+  public readonly itemUploads: {
+    input: EmitirUrlUploadItemInput;
+    resultado: UrlUploadPresignada;
+  }[] = [];
+
   constructor(private readonly bucket: string = BUCKET_PADRAO) {}
 
   async emitirUrlUploadPresignada(input: EmitirUrlUploadInput): Promise<UrlUploadPresignada> {
@@ -58,6 +69,40 @@ export class ObjectStorageMemory implements ObjectStorage {
         };
 
         this.uploads.push({ input, resultado });
+
+        span.setStatus({ code: SpanStatusCode.OK });
+        return resultado;
+      } catch (error) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR, message: (error as Error).message });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  async emitirUrlUploadPresignadaItem(
+    input: EmitirUrlUploadItemInput,
+  ): Promise<UrlUploadPresignada> {
+    return tracer.startActiveSpan('storage.emitirUrlUploadPresignadaItem', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'PRESIGN_PUT' });
+      try {
+        span.setAttribute('usuario.id', input.idUsuario);
+
+        const ext = CONTENT_TYPE_EXTENSAO[input.contentType];
+        if (ext === undefined) {
+          throw new Error(`contentType não suportado: ${input.contentType}`);
+        }
+
+        const objectKey = `itens/${input.idUsuario}/${randomUUID()}.${ext}`;
+        const resultado: UrlUploadPresignada = {
+          uploadUrl: `memory://upload/${this.bucket}/${objectKey}`,
+          objectKey,
+          publicUrl: `memory://${this.bucket}/${objectKey}`,
+        };
+
+        this.itemUploads.push({ input, resultado });
 
         span.setStatus({ code: SpanStatusCode.OK });
         return resultado;
