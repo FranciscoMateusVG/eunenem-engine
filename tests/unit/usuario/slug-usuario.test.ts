@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { SlugUsuarioSchema } from '../../../src/domain/usuario/value-objects/slug-usuario.js';
+import {
+  RESERVED_SLUGS,
+  SlugUsuarioSchema,
+} from '../../../src/domain/usuario/value-objects/slug-usuario.js';
 
 // aperture-khbow — SlugUsuario VO validation. The regex contract is the
 // public surface that /painel/[slug] depends on; lock the boundary cases.
@@ -8,6 +11,8 @@ describe('SlugUsuarioSchema', () => {
   describe('accepts valid slugs', () => {
     it.each([
       'helena',
+      'joao-2026',
+      'bebe-luiza',
       'francisco',
       'maria-silva-2',
       'a3c',
@@ -52,5 +57,46 @@ describe('SlugUsuarioSchema', () => {
 
   it('trims surrounding whitespace before validating', () => {
     expect(SlugUsuarioSchema.parse('  helena  ')).toBe('helena');
+  });
+
+  // aperture-vd1do — reserved-words denylist. A vanity slug must not claim a
+  // top-level app route segment (path-collision) or a standard reserved word.
+  describe('rejects reserved slugs (denylist)', () => {
+    it.each([
+      // real top-level routes
+      'admin',
+      'api',
+      'painel',
+      'pagina',
+      'healthz',
+      'public',
+      'products',
+      'listas-prontas',
+      // standard reserved words
+      'sucesso',
+      'login',
+      'me',
+      'conta',
+      'null',
+      'undefined',
+    ])('rejects reserved "%s"', (input) => {
+      expect(() => SlugUsuarioSchema.parse(input)).toThrow();
+      expect(SlugUsuarioSchema.safeParse(input).success).toBe(false);
+    });
+
+    it('rejects a reserved word even with surrounding whitespace (trim then deny)', () => {
+      expect(() => SlugUsuarioSchema.parse('  admin  ')).toThrow();
+    });
+
+    it('still accepts slugs that merely CONTAIN a reserved word (exact match only)', () => {
+      // `api` is reserved; `apize` / `api-helena` are not.
+      expect(SlugUsuarioSchema.parse('apize')).toBe('apize');
+      expect(SlugUsuarioSchema.parse('api-helena')).toBe('api-helena');
+    });
+
+    it('exposes the denylist as a ReadonlySet for callers/UI', () => {
+      expect(RESERVED_SLUGS.has('admin')).toBe(true);
+      expect(RESERVED_SLUGS.has('helena')).toBe(false);
+    });
   });
 });
