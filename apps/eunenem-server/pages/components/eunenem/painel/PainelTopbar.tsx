@@ -1,3 +1,4 @@
+import { useSignOut } from "@/lib/auth";
 import { painelHref, type PainelSection } from "@/lib/painelRoutes";
 
 // aperture-7nius / aperture-0mplv — Painel topbar nav.
@@ -26,8 +27,6 @@ interface PainelTopbarProps {
   slug: string;
   /** Current section, or undefined when on the painel root (PainelPage). */
   activeSection?: PainelSection;
-  /** Whether the bell shows the unread dot. Static-wired for now. */
-  unread?: boolean;
 }
 
 interface NavItem {
@@ -45,9 +44,11 @@ const NAV_ITEMS: NavItem[] = [
 export function PainelTopbar({
   slug,
   activeSection,
-  unread = true,
 }: PainelTopbarProps) {
   const onPainelRoot = activeSection === undefined;
+  // aperture-1wknu — wire the previously-dead logout button (it was a bare
+  // <button> with no onClick, so clicking did nothing).
+  const { signOut, isPending: isSigningOut } = useSignOut();
 
   return (
     <header className="painel-topbar" aria-label="Painel — navegação">
@@ -106,31 +107,19 @@ export function PainelTopbar({
         </nav>
 
         <div className="painel-topbar-actions">
-          <button
-            type="button"
-            aria-label={unread ? "notificações (novas)" : "notificações"}
-            className="painel-topbar-icon-btn"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={1.8}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-              width={18}
-              height={18}
-            >
-              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-              <path d="M13.7 21a2 2 0 0 1-3.4 0" />
-            </svg>
-            {unread && <span aria-hidden="true" className="badge-dot" />}
-          </button>
+          {/* aperture-1wknu — notification bell removed (operator request). */}
           <button
             type="button"
             aria-label="sair"
             className="painel-topbar-icon-btn"
+            disabled={isSigningOut}
+            onClick={async () => {
+              // aperture-1wknu — was a no-op bare button. Sign out, then
+              // hard-redirect to the public landing so the authed painel is
+              // fully left and the cleared session takes effect.
+              await signOut();
+              window.location.assign("/");
+            }}
           >
             <svg
               viewBox="0 0 24 24"
