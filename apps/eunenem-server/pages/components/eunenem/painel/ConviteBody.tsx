@@ -1261,6 +1261,33 @@ function UploadedInvite({
             </>
           )}
 
+          {/* aperture-j4zjw — the mensagem afetiva was added to the watercolor
+              TemplateInvite (gabyl) but this custom-photo render path is a
+              separate sibling that was left out, so the photo preview showed
+              evento/nome/data/endereço/assinatura but never the message. Render
+              it here too — white + text-shadow over the dark gradient scrim,
+              clamped to 3 lines so a long message never crowds the photo. */}
+          {state.message && (
+            <div
+              style={{
+                fontFamily: "var(--font-dm-sans), sans-serif",
+                fontStyle: "italic",
+                fontSize: 11,
+                opacity: 0.95,
+                lineHeight: 1.45,
+                marginBottom: 8,
+                maxWidth: 320,
+                textShadow: "0 1px 8px rgba(0,0,0,.45)",
+                display: "-webkit-box",
+                WebkitLineClamp: 3,
+                WebkitBoxOrient: "vertical" as const,
+                overflow: "hidden",
+              }}
+            >
+              {state.message}
+            </div>
+          )}
+
           {state.host && (
             <div
               style={{
