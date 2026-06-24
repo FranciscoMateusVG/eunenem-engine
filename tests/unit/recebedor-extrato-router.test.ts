@@ -1187,3 +1187,128 @@ describe('recebedor.extrato — solicitado state (aperture-1ut92)', () => {
     expect(result.rows[0].idPagamento).toBe(idPagSol);
   });
 });
+
+// ────────────────────────────────────────────────────────────────────
+//  (G) recebedor.listMovimentacoes — OUT-movement projection (aperture-2u5vw)
+// ────────────────────────────────────────────────────────────────────
+
+describe('recebedor.listMovimentacoes (aperture-2u5vw)', () => {
+  let rig: TestRig;
+  beforeEach(async () => {
+    rig = await buildRig();
+  });
+
+  it('anonymous caller → UNAUTHORIZED', async () => {
+    await expect(
+      rig.callerAnon.recebedor.listMovimentacoes({ idCampanha: rig.idCampanha }),
+    ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+  });
+
+  it('different-tenant campanha → UNAUTHORIZED (no leak)', async () => {
+    await expect(
+      rig.caller.recebedor.listMovimentacoes({ idCampanha: rig.idCampanhaOutsider }),
+    ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+  });
+
+  it('empty campanha → no movimentações', async () => {
+    const result = await rig.caller.recebedor.listMovimentacoes({
+      idCampanha: rig.idCampanha,
+    });
+    expect(result.movimentacoes).toEqual([]);
+  });
+
+  it('groups transferido lançamentos by idRepasse: summed valor, quantidade, data desc; excludes non-transferido', async () => {
+    const past = new Date('2026-06-01T10:00:00.000Z');
+    // Repasse A: transferred 2026-06-05, TWO lançamentos (4500 + 2500 = 7000).
+    const idRepasseA = randomUUID();
+    const transfA = new Date('2026-06-05T09:00:00.000Z');
+    // Repasse B: transferred 2026-06-08, ONE lançamento (3000).
+    const idRepasseB = randomUUID();
+    const transfB = new Date('2026-06-08T09:00:00.000Z');
+
+    const idPagA1 = randomUUID();
+    const idPagA2 = randomUUID();
+    const idPagB = randomUUID();
+    // Non-transferido pagamentos — must be EXCLUDED.
+    const idPagDisp = randomUUID(); // disponivel (availableOn past, no repasse)
+    const idPagAgu = randomUUID(); // aguardando (availableOn future)
+
+    for (const id of [idPagA1, idPagA2, idPagB, idPagDisp]) {
+      await rig.pagamentoRepository.save(
+        makePagamento({ id, idContribuicao: rig.idContribuicao, availableOn: past }),
+      );
+    }
+    await rig.pagamentoRepository.save(
+      makePagamento({
+        id: idPagAgu,
+        idContribuicao: rig.idContribuicao,
+        availableOn: new Date('2026-06-30T10:00:00.000Z'),
+      }),
+    );
+
+    await rig.livroFinanceiroRepository.saveLancamentos([
+      makeLancamento({
+        idPagamento: idPagA1,
+        idContribuicao: rig.idContribuicao,
+        idCampanha: rig.idCampanha,
+        amountCents: 4500,
+        idRepasse: idRepasseA,
+        transferidoEm: transfA,
+      }),
+      makeLancamento({
+        idPagamento: idPagA2,
+        idContribuicao: rig.idContribuicao,
+        idCampanha: rig.idCampanha,
+        amountCents: 2500,
+        idRepasse: idRepasseA,
+        transferidoEm: transfA,
+      }),
+      makeLancamento({
+        idPagamento: idPagB,
+        idContribuicao: rig.idContribuicao,
+        idCampanha: rig.idCampanha,
+        amountCents: 3000,
+        idRepasse: idRepasseB,
+        transferidoEm: transfB,
+      }),
+      // disponivel — no repasse, not transferido → EXCLUDED
+      makeLancamento({
+        idPagamento: idPagDisp,
+        idContribuicao: rig.idContribuicao,
+        idCampanha: rig.idCampanha,
+        amountCents: 9999,
+      }),
+      // aguardando_liberacao — future availableOn → EXCLUDED
+      makeLancamento({
+        idPagamento: idPagAgu,
+        idContribuicao: rig.idContribuicao,
+        idCampanha: rig.idCampanha,
+        amountCents: 8888,
+      }),
+    ]);
+
+    const result = await rig.caller.recebedor.listMovimentacoes({
+      idCampanha: rig.idCampanha,
+    });
+
+    expect(result.movimentacoes).toHaveLength(2);
+    // Sorted data DESC → repasse B (06-08) first, then repasse A (06-05).
+    expect(result.movimentacoes.map((m) => m.idRepasse)).toEqual([
+      idRepasseB,
+      idRepasseA,
+    ]);
+
+    const byRepasse = new Map(result.movimentacoes.map((m) => [m.idRepasse, m]));
+    const movA = byRepasse.get(idRepasseA)!;
+    expect(movA.valorCents).toBe(7000); // 4500 + 2500
+    expect(movA.quantidade).toBe(2);
+    expect(movA.data).toBe(transfA.toISOString());
+    expect(movA.tipo).toBe('transferencia_conta');
+
+    const movB = byRepasse.get(idRepasseB)!;
+    expect(movB.valorCents).toBe(3000);
+    expect(movB.quantidade).toBe(1);
+    expect(movB.data).toBe(transfB.toISOString());
+    expect(movB.tipo).toBe('transferencia_conta');
+  });
+});
