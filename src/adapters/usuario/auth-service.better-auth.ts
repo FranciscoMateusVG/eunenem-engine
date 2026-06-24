@@ -42,6 +42,39 @@ const UNIQUE_PLATAFORMA_EMAIL = 'users_plataforma_email_uniq';
 
 const PROVIDER_ID_CREDENTIAL = 'credential';
 
+/**
+ * Fixed bogus plaintext fed to `hashPassword` to produce the dummy hash
+ * used by `iniciarSessao`'s no-user branch (aperture-olgk2). The string
+ * itself is irrelevant — it is never compared against anything. What
+ * matters is that the resulting hash is a REAL BetterAuth scrypt hash, so
+ * a `verifyPassword` against it costs exactly one scrypt with the same
+ * N/r/p cost params as a verify against a genuine account hash.
+ */
+const DUMMY_PASSWORD_PLAINTEXT = 'aperture-olgk2-dummy-password-do-not-use';
+
+/**
+ * Lazily-computed, process-wide memoized dummy hash promise (aperture-olgk2).
+ *
+ * Computed once with BetterAuth's `hashPassword` — NOT hardcoded — so the
+ * scrypt cost params always track whatever BetterAuth uses (a future
+ * BetterAuth bump to N/r/p is picked up automatically, keeping the
+ * no-user branch's scrypt cost identical to the user-exists branch's).
+ *
+ * Module-level (not per-instance) because the value is independent of any
+ * `AuthServiceBetterAuth` instance state — every adapter shares the same
+ * cost params, so a single shared promise is the cleanest fit for this
+ * file's functional style. The first `iniciarSessao` that needs it awaits
+ * the computation; every subsequent call awaits the already-resolved
+ * promise (no recompute).
+ */
+let dummyPasswordHashPromise: Promise<string> | undefined;
+function getDummyPasswordHash(): Promise<string> {
+  if (dummyPasswordHashPromise === undefined) {
+    dummyPasswordHashPromise = hashPassword(DUMMY_PASSWORD_PLAINTEXT);
+  }
+  return dummyPasswordHashPromise;
+}
+
 interface PostgresError {
   readonly code?: string;
   readonly constraint?: string;
@@ -209,8 +242,17 @@ export class AuthServiceBetterAuth implements AuthService {
           .executeTakeFirst();
 
         if (!row?.password) {
-          // Same ambiguous error AuthServiceMemoria throws — no user
-          // enumeration via timing.
+          // aperture-olgk2 timing-oracle fix. No matching (plataforma,
+          // email, credential) row → no real hash to verify against. A
+          // naive `throw` here would SKIP scrypt entirely, while the
+          // user-exists branch below pays one `verifyPassword` (~50–200ms).
+          // That delta is a stopwatch oracle for email enumeration
+          // (Cipher H4). To close it, run ONE dummy scrypt against a real
+          // BetterAuth-cost hash and DISCARD the result, so this branch
+          // pays exactly the same single scrypt as the user-exists branch
+          // before throwing the identical ambiguous error.
+          const dummyHash = await getDummyPasswordHash();
+          await verifyPassword({ hash: dummyHash, password: input.senha });
           throw new UsuarioInputInvalidoError('Email ou senha invalidos');
         }
 
