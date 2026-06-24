@@ -4051,11 +4051,13 @@ html {
   border-style: solid;
   border-color: var(--lilac-soft);
   background: var(--paper);
-  min-height: 140px;
+  /* aperture-cuxt1 — no fixed-height floor: the dropzone's inline aspectRatio
+     (1:1 perfil / 5:4 capa / 7:8 historia) drives the height so the editor
+     mirrors the real public-page crop. */
 }
 .perfil-foto-preview {
   width: 100%;
-  height: 140px;
+  height: 100%;
   object-fit: cover;
   display: block;
 }
@@ -4090,9 +4092,8 @@ html {
   .perfil-fotos-grid > .perfil-foto-slot:nth-child(3) {
     grid-column: auto;
   }
-  .perfil-foto-dropzone {
-    min-height: 120px;
-  }
+  /* aperture-cuxt1 — no min-height floor; each slot's inline aspectRatio drives
+     its height so the editor shows the true per-slot crop shape. */
 }
 
 /* =================================================================
