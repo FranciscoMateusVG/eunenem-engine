@@ -97,6 +97,12 @@ type ContinueWithEmailEmissionStatus =
   | 'login_success'
   | 'login_failed'
   | 'signup_success'
+  // Internal-only (aperture-oss3g): a create-branch BetterAuth users-table
+  // UNIQUE collision (email has a BetterAuth row but no `usuarios` domain
+  // row). Surfaced to the caller as the SAME ambiguous bad-credentials error
+  // — this status exists purely so the data-integrity orphan is queryable in
+  // the logs; it never reaches the client.
+  | 'signup_collision'
   | 'rate_limited'
   | 'error';
 
@@ -641,25 +647,57 @@ export const authRouter = t.router({
         const idUsuario = randomUUID();
         const idConta = randomUUID();
 
-        await registrarContaUsuario(
-          {
-            usuarioRepository: deps.usuarioRepository,
-            plataformaRepository: deps.plataformaRepository,
-            campanhaRepository: deps.campanhaRepository,
-            recebedorRepository: deps.recebedorRepository,
-            authService: deps.authService,
-            clock: deps.clock,
-            observability: deps.observability,
-          },
-          {
-            idUsuario,
-            idConta,
-            idPlataforma: input.idPlataforma,
-            email: input.email,
-            nomeExibicao,
-            senhaSimulada: input.senha,
-          },
-        );
+        try {
+          await registrarContaUsuario(
+            {
+              usuarioRepository: deps.usuarioRepository,
+              plataformaRepository: deps.plataformaRepository,
+              campanhaRepository: deps.campanhaRepository,
+              recebedorRepository: deps.recebedorRepository,
+              authService: deps.authService,
+              clock: deps.clock,
+              observability: deps.observability,
+            },
+            {
+              idUsuario,
+              idConta,
+              idPlataforma: input.idPlataforma,
+              email: input.email,
+              nomeExibicao,
+              senhaSimulada: input.senha,
+            },
+          );
+        } catch (err) {
+          // aperture-oss3g — enumeration-oracle close. STEP 2's
+          // findUsuarioByEmail only checks the DOMAIN `usuarios` table; if no
+          // domain row exists we land here in the create branch. But the
+          // BetterAuth `users` table has its own UNIQUE(id_plataforma,email):
+          // an email that has a BetterAuth row WITHOUT a matching `usuarios`
+          // row (today only a saga-orphan; systematic the moment any
+          // social/OAuth provider is wired and OAuth users get a BetterAuth
+          // row without a domain row) makes criarConta's INSERT throw
+          // UsuarioEmailJaExisteError. The default toTRPCError maps that to
+          // CONFLICT — a status/body DISTINGUISHABLE from the ambiguous
+          // BAD_REQUEST wrong-password returns, i.e. an email-existence oracle
+          // that doesn't even create an account. Collapse the collision into
+          // the SAME ambiguous 'Email ou senha invalidos' so it is
+          // indistinguishable from a failed login. Emit a distinct INTERNAL
+          // status (never reaches the caller) so the data-integrity orphan
+          // stays queryable. Throwing a TRPCError here means the outer catch
+          // passes it through without re-emitting (mirrors the login branch).
+          if (err instanceof UsuarioEmailJaExisteError) {
+            emitContinueWithEmailAttempt(ctx, {
+              idPlataforma: input.idPlataforma,
+              emailHash,
+              ipHashed,
+              status: 'signup_collision',
+            });
+            throw toTRPCError(
+              new UsuarioInputInvalidoError('Email ou senha invalidos'),
+            );
+          }
+          throw err;
+        }
 
         // Immediately sign in (same as signUp) — one scrypt was already
         // paid by criarConta's hashPassword; this verify pays a second,

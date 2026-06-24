@@ -390,4 +390,63 @@ describe('auth.continuarComEmail — unified login-or-signup (aperture-d7993)', 
       .executeTakeFirst();
     expect(row).toBeUndefined();
   });
+
+  it('SECURITY (aperture-oss3g): create-branch BetterAuth-users collision (orphan with no usuarios row) → SAME ambiguous BAD_REQUEST, NOT a distinguishable CONFLICT', async () => {
+    // Seed the orphan: create a full account (BetterAuth `users` row + domain
+    // `usuarios`/`contas` rows), then delete ONLY the domain rows. The
+    // BetterAuth `users` row survives → an email that findUsuarioByEmail (which
+    // only checks the domain `usuarios` table) MISSES, but criarConta's INSERT
+    // into the BetterAuth `users` table COLLIDES on (UNIQUE id_plataforma,
+    // email). Today this is only reachable via a saga-orphan; it becomes
+    // systematic the moment any social/OAuth provider is wired (OAuth users get
+    // a BetterAuth row without a domain row). Pre-fix, the collision surfaced as
+    // a tRPC CONFLICT — a status DISTINGUISHABLE from the ambiguous BAD_REQUEST
+    // wrong-password returns = an email-enumeration oracle that doesn't even
+    // create an account.
+    {
+      const logger = makeCapturingLogger();
+      const deps = buildDeps(logger);
+      const { caller } = makeCaller(deps);
+      await caller.auth.continuarComEmail({
+        email: EMAIL,
+        senha: PASSWORD,
+        idPlataforma: ID_PLATAFORMA_EUNENEM,
+        nomeExibicao: 'Pessoa Teste',
+      });
+    }
+
+    // Drop the domain rows; the BetterAuth `users` row stays → orphan state.
+    await testDb.db.deleteFrom('contas').execute();
+    await testDb.db.deleteFrom('usuarios').execute();
+    // Sanity: the BetterAuth users row genuinely survived the domain wipe.
+    const orphan = await testDb.db
+      .selectFrom('users')
+      .select(['id'])
+      .where('email', '=', EMAIL)
+      .where('id_plataforma', '=', ID_PLATAFORMA_EUNENEM)
+      .executeTakeFirst();
+    expect(orphan).toBeTruthy();
+
+    const logger = makeCapturingLogger();
+    const deps = buildDeps(logger);
+    const { caller } = makeCaller(deps);
+
+    // The collision MUST surface as the SAME ambiguous BAD_REQUEST as
+    // wrong-password — code BAD_REQUEST mutually excludes the pre-fix CONFLICT,
+    // so an attacker cannot distinguish this orphan email from a failed login.
+    await expect(
+      caller.auth.continuarComEmail({
+        email: EMAIL,
+        senha: PASSWORD,
+        idPlataforma: ID_PLATAFORMA_EUNENEM,
+        nomeExibicao: 'Pessoa Teste',
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+
+    // Internal observability: the collision is emitted (so the data-integrity
+    // orphan stays queryable) and NO account-creation success leaked.
+    const statuses = lastStatuses(logger, 'usuario.continue_with_email.tentativa');
+    expect(statuses).toContain('signup_collision');
+    expect(statuses).not.toContain('signup_success');
+  });
 });
