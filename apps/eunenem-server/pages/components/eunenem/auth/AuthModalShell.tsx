@@ -711,7 +711,8 @@ function Spinner() {
 // CSS — scoped to the .auth-* selector namespace. Uses the eunenem-server
 // design tokens already declared in tailwind.css.
 // ════════════════════════════════════════════════════════════════════════════
-const AUTH_CSS = `
+// aperture-84a21 — exported so the OnboardingWizard reuses the exact modal CSS.
+export const AUTH_CSS = `
 .auth-backdrop{
   position:fixed;inset:0;z-index:120;
   background:rgba(107,60,94,.45);

@@ -10,6 +10,7 @@ import {
 
 import { trpc } from "@/lib/trpc";
 import { AuthModalShell, type AuthMode } from "./AuthModalShell.js";
+import { OnboardingWizard } from "./OnboardingWizard.js";
 
 // aperture-nop8l — AuthModalProvider
 // aperture-tgkh3 — Post-auth navigation wired here (vs the shell) so every
@@ -67,6 +68,9 @@ export function AuthModalProvider({
   const [isOpen, setIsOpen] = useState(false);
   const [mode, setModeState] = useState<AuthMode>(initialMode);
   const triggerRef = useRef<HTMLElement | null>(null);
+  // aperture-84a21 — a fresh signup opens the onboarding wizard (slug + baby
+  // name + event date/type) instead of redirecting straight to the painel.
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   // tRPC utils for fetching the freshly-authenticated user's slug
   // (aperture-tgkh3). The signUp / signIn mutations already invalidate
@@ -122,6 +126,13 @@ export function AuthModalProvider({
   // them on the current page with an updated navbar is graceful
   // degradation.
   const onAuthenticated = useCallback(async () => {
+    // aperture-84a21 — a NEW signup goes through the onboarding wizard first
+    // (it captures slug + babyName + dataEvento + tipoEvento, then redirects to
+    // the painel itself). Sign-IN keeps the straight redirect.
+    if (mode === "signup") {
+      setShowOnboarding(true);
+      return;
+    }
     try {
       const me = await utils.auth.me.fetch();
       if (!me?.slug) return;
@@ -132,7 +143,7 @@ export function AuthModalProvider({
     } catch {
       // Graceful degradation — see comment above.
     }
-  }, [utils]);
+  }, [mode, utils]);
 
   // Focus restoration. Runs AFTER the modal has unmounted (next animation
   // frame) so the dialog's focus trap doesn't fight us for the focus target.
@@ -157,6 +168,16 @@ export function AuthModalProvider({
           onClose={close}
           onModeChange={setMode}
           onAuthenticated={onAuthenticated}
+        />
+      )}
+      {showOnboarding && (
+        <OnboardingWizard
+          onDone={(slug) => {
+            setShowOnboarding(false);
+            if (typeof window !== "undefined") {
+              window.location.assign(`/painel/${slug}`);
+            }
+          }}
         />
       )}
     </AuthModalContext.Provider>

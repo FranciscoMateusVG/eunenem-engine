@@ -35,6 +35,15 @@ interface PainelLayoutProps {
    *   legacy slug-derived fallback so those pages are unchanged.
    */
   babyName?: string | null;
+  /**
+   * aperture-84a21 — the REAL event date (YYYY-MM-DD) from getPerfil.dataEvento.
+   * - A non-empty string seeds the painel countdown + date chip.
+   * - null/empty (creator hasn't set a date) seeds "" → PainelHeaderCard shows
+   *   NO date (no mock "15 jun 2026").
+   * - `undefined` (prop omitted, legacy sub-page callers) preserves the prior
+   *   behaviour (the shared TWEAKS_DEFAULTS targetDate is left untouched).
+   */
+  eventDate?: string | null;
   /** Current section, or undefined for the painel root (PainelPage). */
   activeSection?: PainelSection;
   children: ReactNode;
@@ -44,6 +53,7 @@ export function PainelLayout({
   slug,
   activeSection,
   babyName,
+  eventDate,
   children,
 }: PainelLayoutProps) {
   // aperture-3ic62 — resolve the initial babyName seed:
@@ -59,8 +69,16 @@ export function PainelLayout({
       ? slug.charAt(0).toUpperCase() + slug.slice(1)
       : (babyName?.trim() || "bebê");
 
+  // aperture-84a21 — seed the real event date when the prop is provided
+  // (PainelPage). `undefined` (legacy callers) leaves TWEAKS_DEFAULTS as-is;
+  // a real date seeds it; null/empty seeds "" so the header shows no date.
+  const initialTweaks =
+    eventDate === undefined
+      ? { babyName: initialBabyName }
+      : { babyName: initialBabyName, targetDate: eventDate ?? "" };
+
   return (
-    <TweaksProvider initialState={{ babyName: initialBabyName }}>
+    <TweaksProvider initialState={initialTweaks}>
       <PainelTopbar slug={slug} activeSection={activeSection} />
       <div className="painel-app">{children}</div>
     </TweaksProvider>

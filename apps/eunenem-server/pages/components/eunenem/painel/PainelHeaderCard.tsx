@@ -62,20 +62,23 @@ export function PainelHeaderCard({ snapshot, slug }: Props) {
     return () => clearInterval(id);
   }, []);
 
-  const target = new Date(`${tweaks.targetDate}T16:00:00-03:00`).getTime();
-  const daysLeft = Math.max(0, Math.floor((target - now) / 86_400_000));
-
-  // Inline date label for the top strip ("12 jun, sex · 16h") and the
-  // chip in the title row ("12 jun 2026"). Built from tweaks.targetDate
-  // so the operator's tweaks panel keeps driving both.
-  const targetDate = new Date(`${tweaks.targetDate}T16:00:00-03:00`);
+  // aperture-84a21 — only render the countdown + date chip when there's a REAL
+  // event date. A fresh account (dataEvento null → tweaks.targetDate "") must
+  // NOT show the old mock "15 jun 2026" / "0 dias". The operator's tweaks panel
+  // still drives both when a date is set.
+  const rawTarget = (tweaks.targetDate ?? "").trim();
+  const targetDate = rawTarget ? new Date(`${rawTarget}T16:00:00-03:00`) : null;
+  const hasDate = targetDate !== null && !Number.isNaN(targetDate.getTime());
   const weekdayPt = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
-  const dayNum = targetDate.getDate();
-  const monthShort = MONTHS_PT[targetDate.getMonth()];
-  const yearNum = targetDate.getFullYear();
-  const weekday = weekdayPt[targetDate.getDay()];
-  const inlineDate = `${dayNum} ${monthShort}, ${weekday} · 16h`;
-  const chipDate = `${dayNum} ${monthShort} ${yearNum}`;
+  const daysLeft = hasDate
+    ? Math.max(0, Math.floor((targetDate.getTime() - now) / 86_400_000))
+    : 0;
+  const inlineDate = hasDate
+    ? `${targetDate.getDate()} ${MONTHS_PT[targetDate.getMonth()]}, ${weekdayPt[targetDate.getDay()]} · 16h`
+    : "";
+  const chipDate = hasDate
+    ? `${targetDate.getDate()} ${MONTHS_PT[targetDate.getMonth()]} ${targetDate.getFullYear()}`
+    : "";
 
   const reais = (snapshot.receivedCents / 100).toLocaleString("pt-BR", {
     minimumFractionDigits: 2,
@@ -104,10 +107,14 @@ export function PainelHeaderCard({ snapshot, slug }: Props) {
       {/* 1. Top strip — countdown eyebrow + share CTA */}
       <section className="painel-top-strip" aria-label="contagem regressiva e link do evento">
         <div className="painel-top-strip-left">
-          <span className="painel-top-strip-eyebrow">faltam pouquinho ♡</span>
-          <span className="painel-top-strip-line">
-            {daysLeft} dias · {inlineDate}
+          <span className="painel-top-strip-eyebrow">
+            {hasDate ? "faltam pouquinho ♡" : "sua página tá no ar ♡"}
           </span>
+          {hasDate && (
+            <span className="painel-top-strip-line">
+              {daysLeft} dias · {inlineDate}
+            </span>
+          )}
         </div>
         <button
           type="button"
@@ -142,23 +149,29 @@ export function PainelHeaderCard({ snapshot, slug }: Props) {
           página da <span className="hl">{babyNameDisplay}</span>
         </h1>
         <div className="painel-url-row">
-          <span className="painel-url-cal" aria-hidden="true">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              style={{ width: 14, height: 14, strokeWidth: 2 }}
-            >
-              <rect x="3" y="5" width="18" height="16" rx="2" />
-              <line x1="3" y1="10" x2="21" y2="10" />
-              <line x1="8" y1="3" x2="8" y2="7" />
-              <line x1="16" y1="3" x2="16" y2="7" />
-            </svg>
-          </span>
-          <span className="painel-url-date">{chipDate}</span>
-          <span className="painel-url-dot" aria-hidden="true">·</span>
+          {/* aperture-84a21 — calendar icon + date chip only when a real event
+              date is set (no mock "15 jun 2026" on a fresh account). */}
+          {hasDate && (
+            <>
+              <span className="painel-url-cal" aria-hidden="true">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{ width: 14, height: 14, strokeWidth: 2 }}
+                >
+                  <rect x="3" y="5" width="18" height="16" rx="2" />
+                  <line x1="3" y1="10" x2="21" y2="10" />
+                  <line x1="8" y1="3" x2="8" y2="7" />
+                  <line x1="16" y1="3" x2="16" y2="7" />
+                </svg>
+              </span>
+              <span className="painel-url-date">{chipDate}</span>
+              <span className="painel-url-dot" aria-hidden="true">·</span>
+            </>
+          )}
           <span className="painel-url-link">
             {snapshot.shareUrl}
             <a
