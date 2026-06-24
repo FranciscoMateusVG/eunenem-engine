@@ -41,9 +41,9 @@ import { trpc } from '@/lib/trpc';
 //   • Tutorial gating reads `tutorialStatus.completado === false` and
 //     auto-opens the spotlight overlay on first paint for new users.
 //   • Floating bottom-right `TUTORIAL` CTA re-triggers the overlay even
-//     after completion (locked decision #5).
-//   • Top-nav `TUTORIAL` chip wired via `onOpenTutorial` (PainelLayout
-//     threads it through to PainelTopbar).
+//     after completion (locked decision #5). NOTE: aperture-0mplv removed
+//     the top-nav TUTORIAL chip; the floating CTA is now the sole
+//     re-trigger surface (openOverlay still wires it below).
 //   • Backend integration via `trpc.usuario.tutorialStatus.useQuery()`
 //     + `.completarTutorial.useMutation()` (Rex's Phase A landed in #192).
 //     Pre-swap mock scaffolding deleted in aperture-4my2a.
@@ -182,16 +182,16 @@ export function PainelPage({ slug }: { slug: string }) {
     setOverlayOpen(false);
   };
 
-  // Re-trigger paths (floating CTA + topbar TUTORIAL chip). Resets the
-  // session latch so the auto-open useEffect can fire again on next visit
-  // if the user dismisses without completing the tour.
+  // Re-trigger path (floating CTA). Resets the session latch so the
+  // auto-open useEffect can fire again on next visit if the user dismisses
+  // without completing the tour.
   const openOverlay = () => {
     setDismissedThisSession(false);
     setOverlayOpen(true);
   };
 
   return (
-    <PainelLayout slug={slug} babyName={babyName} onOpenTutorial={openOverlay}>
+    <PainelLayout slug={slug} babyName={babyName}>
       <PainelHeaderCard snapshot={snapshot} slug={slug} />
       <PainelMenu groups={groups} slug={slug} />
       <PainelTutorialTrigger
