@@ -3484,14 +3484,14 @@ html {
  * specificity wins for the new component without modifying the legacy
  * declarations.
  *
- * Active state mirrors PR #25's lista-tab pattern (lilac-soft pill +
- * plum text). Bell + logout use the outlined .btn-ghost / stroke-SVG
- * convention from PR #22 — circular 40px paper buttons with a 1px
- * border, no fill on the icons.
+ * Nav chip styling lives in the aperture-0mplv block below (lighter
+ * Patrick Hand ghost chips). Bell + logout use the outlined .btn-ghost /
+ * stroke-SVG convention from PR #22 — circular 40px paper buttons with a
+ * 1px border, no fill on the icons.
  *
  * Mobile (<900px) collapses the nav to a horizontal scroll strip so
- * all 4 buttons remain reachable without adding a hamburger (the
- * brief allowed either, and overflow-x:auto is the simpler ship).
+ * the chips remain reachable without adding a hamburger (the brief
+ * allowed either, and overflow-x:auto is the simpler ship).
  * ================================================================= */
 
 .painel-topbar {
@@ -3529,8 +3529,8 @@ html {
   justify-content: center;
   min-width: 0;
   /* Below the 900px desktop breakpoint the nav becomes a horizontally
-   * scrollable strip so all 4 buttons remain reachable without forcing
-   * a hamburger. Scrollbar hidden because the visual cue is the pill
+   * scrollable strip so the chips remain reachable without forcing a
+   * hamburger. Scrollbar hidden because the visual cue is the chip
    * shapes themselves. */
   overflow-x: auto;
   scrollbar-width: none;
@@ -3547,30 +3547,56 @@ html {
   list-style: none;
 }
 
-/* New selector — intentionally appended after the legacy .painel-topbar-link
- * rule so source order resolves the cascade in favour of the spec colors
- * (--ink for inactive, --lilac-soft + --plum for the active pill). */
+/* aperture-0mplv — lighter, on-brand nav chips.
+ *
+ * Before: DM Sans, 13px / weight 600 / UPPERCASE / 0.08em tracking on a
+ * transparent base that flipped to a heavy solid --lilac-soft pill when
+ * active. The uppercase + bold + wide tracking read loud/admin-y and
+ * fought the soft EuNeném identity.
+ *
+ * After: Patrick Hand (the brand display face used for headings) in
+ * natural case at a comfortable size, normal weight, no shouty tracking.
+ * Inactive chips are quiet ghost text in --ink-soft. Hover is a feather-
+ * light lilac wash (lilac-soft @ 35%) with plum text — a gentle tint, not
+ * a slab. Active swaps the heavy solid pill for a soft lilac wash + a
+ * hairline lilac ring + plum text, so the current page reads clearly
+ * without weighing the bar down.
+ *
+ * Appended after the legacy .painel-topbar-link rule so source order wins.
+ * Selectors raised to the parent (.painel-topbar a…) for the same reason.
+ * Focus-visible: a plum ring for keyboard accessibility (the old rule had
+ * none). Contrast: --plum (#6b3c5e) / --ink-soft (#7a5a6c) on the cream
+ * topbar both clear AA for this text size. */
 .painel-topbar a.painel-topbar-link {
   display: inline-block;
-  font-family: var(--font-dm-sans), system-ui, sans-serif;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--ink);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  padding: 8px 14px;
-  border-radius: 999px;
+  font-family: var(--font-patrick-hand), var(--font-dm-sans), system-ui,
+    sans-serif;
+  font-size: 17px;
+  font-weight: 400;
+  line-height: 1;
+  color: var(--ink-soft);
+  text-transform: none;
+  letter-spacing: 0.01em;
+  padding: 7px 14px;
+  border: 1px solid transparent;
+  border-radius: 14px;
   background: transparent;
   text-decoration: none;
   white-space: nowrap;
-  transition: background 0.2s ease, color 0.2s ease;
+  transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease;
 }
 .painel-topbar a.painel-topbar-link:hover {
-  background: color-mix(in srgb, var(--lilac-soft) 55%, transparent);
+  background: color-mix(in srgb, var(--lilac-soft) 35%, transparent);
   color: var(--plum);
 }
+.painel-topbar a.painel-topbar-link:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--plum) 45%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--lilac) 35%, transparent);
+}
 .painel-topbar a.painel-topbar-link.is-active {
-  background: var(--lilac-soft);
+  background: color-mix(in srgb, var(--lilac-soft) 55%, transparent);
+  border-color: color-mix(in srgb, var(--lilac) 50%, transparent);
   color: var(--plum);
 }
 

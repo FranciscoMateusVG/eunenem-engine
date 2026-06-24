@@ -1,37 +1,25 @@
-import {
-  conviteDestinationHref,
-  useConvitePreviewData,
-} from "@/lib/convite";
 import { painelHref, type PainelSection } from "@/lib/painelRoutes";
 
-// aperture-7nius — Painel topbar redesign (3 chips).
+// aperture-7nius / aperture-0mplv — Painel topbar nav.
 //
-// Phase B of plan 0018 — the operator's reference screenshots show a
-// reduced top nav `MINHA PÁGINA / TUTORIAL / AJUDA`, replacing the
-// previous 4-chip nav (`MINHA ÁREA / EXTRATO / CONVIDADOS / CONVITE`)
-// from aperture-fx2iz. Decisions encoded here:
+// The logged-in painel topbar carries the EuNeném logo, a small set of
+// nav chips, and the bell + logout icon buttons.
 //
-//   • MINHA PÁGINA  — renamed from MINHA ÁREA; same destination (painel
-//                     root). The label is closer to the user's mental
-//                     model of "my public page" vs "my admin area".
-//   • TUTORIAL      — re-triggers the spotlight overlay (plan 0018 §"Re-
-//                     trigger via floating CTA"). On the painel root this
-//                     calls `onOpenTutorial`; on sub-pages it navigates
-//                     to the painel root carrying `?tutorial=open` so
-//                     the painel root auto-opens the overlay on land.
-//   • AJUDA         — scrolls to the CONTA & AJUDA section of the painel
-//                     grid (id `painel-group-conta` from PainelMenu).
-//                     On sub-pages it navigates to the painel root with
-//                     `#painel-group-conta` so the browser anchor-jumps.
-//                     Lowest-friction: the section already contains the
-//                     SUPORTE row pointing at WhatsApp, plus PERFIL and
-//                     BANCÁRIOS — exactly the "help" surface area.
+// aperture-0mplv removed the TUTORIAL chip: the spotlight overlay is
+// still re-triggerable via the floating bottom-right CTA
+// (PainelTutorialTrigger on PainelPage), so a duplicate top-nav entry
+// was redundant. The topbar nav is now the two destinations that map to
+// real painel surfaces:
 //
-// Why this trio replaces the previous 4-chip nav: EXTRATO + CONVIDADOS +
-// CONVITE already exist as rows in the painel grid (under SEU EVENTO and
-// CONVIDADOS groups), so a top-nav duplicate was redundant. The new trio
-// reflects the operator's reference screenshots and the painel's actual
-// information architecture.
+//   • MINHA PÁGINA  — anchors to the painel root; active when there's no
+//                     sub-section.
+//   • AJUDA         — anchor-jumps to the CONTA & AJUDA group on the
+//                     painel root (id `painel-group-conta` from
+//                     PainelMenu). On sub-pages it navigates to the root
+//                     carrying `#painel-group-conta` so the browser
+//                     anchor-jumps on land. The section already gathers
+//                     SUPORTE (WhatsApp) + PERFIL + BANCÁRIOS — exactly
+//                     the "help" surface area.
 
 interface PainelTopbarProps {
   /** Creator slug — drives every nav href. */
@@ -40,25 +28,17 @@ interface PainelTopbarProps {
   activeSection?: PainelSection;
   /** Whether the bell shows the unread dot. Static-wired for now. */
   unread?: boolean;
-  /** Painel-root-only: fires when the user clicks the TUTORIAL chip and
-   *  we can open the overlay locally. When undefined (sub-pages), the
-   *  chip falls back to `?tutorial=open` navigation. */
-  onOpenTutorial?: () => void;
 }
 
 interface NavItem {
   label: string;
-  /** undefined → painel root. */
-  section?: PainelSection;
-  /** Optional behavior key — when set, the chip is wired to the matching
-   *  handler instead of being a plain anchor. */
-  kind?: "page" | "tutorial" | "ajuda";
+  /** Behavior key — selects how the chip resolves its href + active state. */
+  kind: "page" | "ajuda";
 }
 
 // Order matters — left-to-right per the reference screenshots.
 const NAV_ITEMS: NavItem[] = [
   { label: "MINHA PÁGINA", kind: "page" },
-  { label: "TUTORIAL", kind: "tutorial" },
   { label: "AJUDA", kind: "ajuda" },
 ];
 
@@ -66,9 +46,7 @@ export function PainelTopbar({
   slug,
   activeSection,
   unread = true,
-  onOpenTutorial,
 }: PainelTopbarProps) {
-  const conviteQuery = useConvitePreviewData(slug);
   const onPainelRoot = activeSection === undefined;
 
   return (
@@ -91,23 +69,6 @@ export function PainelTopbar({
         <nav className="painel-topbar-nav" aria-label="Seções do painel">
           <ul>
             {NAV_ITEMS.map((item) => {
-              const active = item.section === activeSection;
-              const href = item.section === "convite"
-                ? conviteDestinationHref(slug, conviteQuery.data)
-                : painelHref(slug, item.section);
-              return (
-                <li key={item.label}>
-                  <a
-                    href={href}
-                    aria-current={active ? "page" : undefined}
-                    className={`painel-topbar-link${
-                      active ? " is-active" : ""
-                    }`}
-                  >
-                    {item.label}
-                  </a>
-                </li>
-              );
               // MINHA PÁGINA — anchor to painel root, active when there's
               // no sub-section.
               if (item.kind === "page") {
@@ -115,7 +76,7 @@ export function PainelTopbar({
                 return (
                   <li key={item.label}>
                     <a
-                      href={painelHref(slug, item.section)}
+                      href={painelHref(slug)}
                       aria-current={active ? "page" : undefined}
                       className={`painel-topbar-link${
                         active ? " is-active" : ""
@@ -127,53 +88,19 @@ export function PainelTopbar({
                 );
               }
 
-              // TUTORIAL — fires onOpenTutorial when we have it (painel
-              // root); otherwise navigates with a flag so the root can
-              // auto-open on land.
-              if (item.kind === "tutorial") {
-                if (onPainelRoot && onOpenTutorial) {
-                  return (
-                    <li key={item.label}>
-                      <button
-                        type="button"
-                        onClick={onOpenTutorial}
-                        className="painel-topbar-link painel-topbar-link-btn"
-                      >
-                        {item.label}
-                      </button>
-                    </li>
-                  );
-                }
-                return (
-                  <li key={item.label}>
-                    <a
-                      href={`${painelHref(slug)}?tutorial=open`}
-                      className="painel-topbar-link"
-                    >
-                      {item.label}
-                    </a>
-                  </li>
-                );
-              }
-
               // AJUDA — anchor-jumps to the CONTA & AJUDA group on the
-              // painel root. On sub-pages we navigate to the root with
-              // the hash; on the root we just scroll via the # anchor
-              // (the browser handles it).
-              if (item.kind === "ajuda") {
-                const href = onPainelRoot
-                  ? "#painel-group-conta"
-                  : `${painelHref(slug)}#painel-group-conta`;
-                return (
-                  <li key={item.label}>
-                    <a href={href} className="painel-topbar-link">
-                      {item.label}
-                    </a>
-                  </li>
-                );
-              }
-
-              return null;
+              // painel root. On sub-pages we navigate to the root with the
+              // hash; on the root we just scroll via the # anchor.
+              const href = onPainelRoot
+                ? "#painel-group-conta"
+                : `${painelHref(slug)}#painel-group-conta`;
+              return (
+                <li key={item.label}>
+                  <a href={href} className="painel-topbar-link">
+                    {item.label}
+                  </a>
+                </li>
+              );
             })}
           </ul>
         </nav>
