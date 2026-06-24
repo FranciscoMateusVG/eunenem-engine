@@ -198,6 +198,41 @@ export function PainelPage({ slug }: { slug: string }) {
     setOverlayOpen(true);
   };
 
+  // aperture-q4r0f — gate the painel render on getPerfil so the TweaksProvider
+  // (seeded ONCE at mount inside PainelLayout via its useState initializer)
+  // receives the REAL nomeBebe + dataEvento as initial state. getPerfil is NOT
+  // SSR-hydrated for the painel → at first mount perfilQ.data is undefined;
+  // mounting PainelLayout then would seed the neutral "bebê"/"" tweaks that
+  // never re-sync when getPerfil later resolves (the seed-once initializer is
+  // the root cause). Holding a brief spinner until getPerfil settles makes the
+  // seed correct on the FIRST PainelLayout mount → header reads the real
+  // "página da <nomeBebe>" + real dataEvento countdown, neutral only when unset.
+  //
+  // CRITICAL: this branch must NOT render <PainelLayout> — it returns a DISTINCT
+  // element so that when isLoading flips false React mounts a FRESH PainelLayout
+  // (new TweaksProvider) seeded with the real values, instead of reconciling an
+  // already-mounted-with-neutral-seed provider in place (which would re-trigger
+  // the very bug). isLoading flips false on success OR error, so this never
+  // hangs (a logged-out / errored getPerfil falls through to the loaded branch
+  // with the honest neutral seed — still no mock date).
+  if (perfilQ.isLoading) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          minHeight: '60vh',
+        }}
+        role="status"
+        aria-live="polite"
+        aria-label="carregando sua página"
+      >
+        <span className="perfil-spinner" aria-hidden="true" />
+      </div>
+    );
+  }
+
   return (
     <PainelLayout slug={slug} babyName={babyName} eventDate={eventDate}>
       <PainelHeaderCard snapshot={snapshot} slug={slug} />
