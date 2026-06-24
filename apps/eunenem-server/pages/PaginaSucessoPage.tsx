@@ -25,6 +25,17 @@ import { Navbar } from "./components/eunenem/Navbar";
 import { Footer } from "./components/eunenem/Footer";
 import { BottleDoodle, FlowerDoodle, HeartDoodle } from "./components/eunenem/Doodles";
 import { TweaksProvider } from "./components/eunenem/TweaksContext";
+// aperture-d52he — the success page renders <Navbar>, which calls useCartDrawer
+// and therefore REQUIRES the cart providers (Plan 0017 / aperture-16flf). The
+// page never wrapped them, so SSR threw "useCartDrawer must be used inside
+// <CartDrawerProvider>" and /sucesso 500'd for EVERY request (pre-existing, not
+// the race change). Wrapping the tree like PaginaPage does fixes the SSR crash.
+import { CartDrawer } from "./components/eunenem/CartDrawer";
+import {
+  CartDrawerProvider,
+  useCartDrawer,
+} from "./components/eunenem/CartDrawerContext";
+import { CartProvider } from "@/lib/cart.js";
 import {
   useObterSucessoPagamento,
   type ObterSucessoResult,
@@ -77,7 +88,8 @@ export function PaginaSucessoPage({ slug }: { slug: string }) {
 
   return (
     <TweaksProvider>
-      <>
+      <CartProvider slug={slug}>
+        <CartDrawerProvider>
         <Navbar slug={slug} />
         <main
           className="flex-1 pt-16 sucesso-bg"
@@ -113,9 +125,19 @@ export function PaginaSucessoPage({ slug }: { slug: string }) {
           </div>
         </main>
         <Footer />
-      </>
+        <SucessoCartDrawerMount slug={slug} />
+        </CartDrawerProvider>
+      </CartProvider>
     </TweaksProvider>
   );
+}
+
+// aperture-d52he — mount the cart drawer so the Navbar's cart button has a
+// surface to open (the providers are required by Navbar's useCartDrawer; the
+// drawer itself is harmless/empty on the success page).
+function SucessoCartDrawerMount({ slug }: { slug: string }) {
+  const drawer = useCartDrawer();
+  return <CartDrawer open={drawer.isOpen} onClose={drawer.close} slug={slug} />;
 }
 
 // ── Approved (the warm moment) ────────────────────────────────────────────
