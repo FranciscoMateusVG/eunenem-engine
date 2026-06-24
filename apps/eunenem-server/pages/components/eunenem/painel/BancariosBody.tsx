@@ -6,9 +6,6 @@ import { trpc } from "@/lib/trpc";
 import {
   ACCOUNT_TYPES,
   BANKS,
-  BANCARIOS_DEFAULT_MODE,
-  BANCARIOS_DEFAULT_PIX_TYPE,
-  CPF_FIXO,
   PIX_TYPES,
   accountTypeLabel,
   bankByCode,
@@ -119,6 +116,7 @@ function validate(
   modo: BancariosMode,
   s: BancariosForm,
   tipoPix: PixType["v"],
+  cpfTitular: string,
 ): ValidationError[] {
   const errs: ValidationError[] = [];
 
@@ -146,7 +144,7 @@ function validate(
         k: "telefone",
         msg: "o celular (com DDD) é obrigatório pra avisar você quando cair um mimo.",
       });
-    if (!cpfValido(CPF_FIXO))
+    if (!cpfValido(cpfTitular))
       errs.push({ k: "cpf", msg: "o cpf da sua conta parece inválido — fale com o suporte." });
   } else {
     const domainType = PIX_TYPE_TO_DOMAIN[tipoPix];
@@ -164,6 +162,7 @@ function toDadosRecebedor(
   modo: BancariosMode,
   s: BancariosForm,
   tipoPix: PixType["v"],
+  cpfTitular: string,
 ): DadosRecebedor {
   const nomeTitular = s.nome.trim();
   if (modo === "pix") {
@@ -178,7 +177,7 @@ function toDadosRecebedor(
   return {
     metodo: "conta",
     nomeTitular,
-    cpfTitular: onlyDigits(CPF_FIXO),
+    cpfTitular: onlyDigits(cpfTitular),
     celularTitular: onlyDigits(s.telefone),
     codigoBanco: s.bankCode,
     agencia: s.agencia,
@@ -325,8 +324,10 @@ const PIX_ICON: Record<PixType["v"], (p: IconProps) => React.ReactNode> = {
 export function BancariosBody(_props: PainelSectionBodyProps) {
   const utils = trpc.useUtils();
   const [s, setS] = useState<BancariosForm>({ ...EMPTY_FORM });
-  const [modo, setModo] = useState<BancariosMode>(BANCARIOS_DEFAULT_MODE);
-  const [tipoPix, setTipoPix] = useState<PixType["v"]>(BANCARIOS_DEFAULT_PIX_TYPE);
+  // PIX is the default tab (initially-selected mode); fields start empty and
+  // only hydrate from real saved data below — no mock prefills.
+  const [modo, setModo] = useState<BancariosMode>("pix");
+  const [tipoPix, setTipoPix] = useState<PixType["v"]>("cpf");
   const [errors, setErrors] = useState<ValidationError[]>([]);
 
   const set = (patch: Partial<BancariosForm>) =>
@@ -339,6 +340,10 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
   const dadosQuery = trpc.dadosRecebimento.get.useQuery(undefined, {
     staleTime: 30_000,
   });
+  // Real saved CPF (locked) — only the "conta" payload carries it. Empty until
+  // the user has a saved account; never a mock literal.
+  const cpfTitular =
+    dadosQuery.data?.metodo === "conta" ? maskCPF(dadosQuery.data.cpfTitular) : "";
   const hydrated = useRef(false);
   useEffect(() => {
     if (hydrated.current || dadosQuery.isLoading) return;
@@ -367,30 +372,22 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
     },
   });
 
-  // Toggling to Pix + CPF type with an empty key prefills the CPF.
-  useEffect(() => {
-    if (modo === "pix" && tipoPix === "cpf" && !s.pixKey) {
-      setS((prev) => ({ ...prev, pixKey: CPF_FIXO }));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modo, tipoPix]);
-
   // Clear an error as soon as its field becomes valid.
   useEffect(() => {
     if (errors.length) {
-      const live = validate(modo, s, tipoPix);
+      const live = validate(modo, s, tipoPix, cpfTitular);
       setErrors((prev) => prev.filter((e) => live.some((x) => x.k === e.k)));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [s, modo, tipoPix]);
 
-  const isComplete = validate(modo, s, tipoPix).length === 0;
+  const isComplete = validate(modo, s, tipoPix, cpfTitular).length === 0;
 
   const onSave = () => {
-    const errs = validate(modo, s, tipoPix);
+    const errs = validate(modo, s, tipoPix, cpfTitular);
     setErrors(errs);
     if (errs.length > 0) return;
-    salvar.mutate(toDadosRecebedor(modo, s, tipoPix));
+    salvar.mutate(toDadosRecebedor(modo, s, tipoPix, cpfTitular));
   };
 
   const bank = useMemo(() => bankByCode(s.bankCode), [s.bankCode]);
@@ -471,11 +468,16 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
           <IShield size={18} />
         </span>
         <strong>importante:</strong> os dados bancários ou a chave Pix cadastrada
-        precisam estar vinculados ao mesmo CPF da sua conta —{" "}
-        <span className="bnc-pill">
-          <ILock size={12} />
-          {CPF_FIXO}
-        </span>
+        precisam estar vinculados ao mesmo CPF da sua conta
+        {cpfTitular ? (
+          <>
+            {" "}—{" "}
+            <span className="bnc-pill">
+              <ILock size={12} />
+              {cpfTitular}
+            </span>
+          </>
+        ) : null}
         . essa regra protege você de fraudes e garante que o valor só caia na
         conta da pessoa cadastrada ♡
       </div>
@@ -514,7 +516,13 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
                 <label>
                   cpf <span className="req">*</span>
                 </label>
-                <input className="bnc-input" value={CPF_FIXO} disabled aria-label="cpf" />
+                <input
+                  className="bnc-input"
+                  value={cpfTitular}
+                  placeholder="000.000.000-00"
+                  disabled
+                  aria-label="cpf"
+                />
                 <span
                   className="bnc-helper"
                   style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
@@ -605,8 +613,8 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
                 />
                 <span className="bnc-helper">
                   {tipo.help}
-                  {tipo.v === "cpf" && (
-                    <b style={{ color: "var(--plum)" }}>{CPF_FIXO}</b>
+                  {tipo.v === "cpf" && cpfTitular && (
+                    <b style={{ color: "var(--plum)" }}>{cpfTitular}</b>
                   )}
                 </span>
               </div>
@@ -786,10 +794,12 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
             <div className="bnc-summary-row">
               <span className="k">titular</span>
               <span className="v">{s.nome}</span>
-              <span className="bnc-verified-pill bf">
-                <ICheckCircle size={12} />
-                cpf {CPF_FIXO}
-              </span>
+              {cpfTitular && (
+                <span className="bnc-verified-pill bf">
+                  <ICheckCircle size={12} />
+                  cpf {cpfTitular}
+                </span>
+              )}
             </div>
           </section>
         )}

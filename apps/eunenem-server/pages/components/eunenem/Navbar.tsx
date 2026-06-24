@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { CartButton } from "./CartButton";
 import { useCartDrawer } from "./CartDrawerContext.js";
+import { useMe } from "@/lib/auth";
 
 // aperture-3d9t / aperture-uk8q1 — visitor page header.
 //
@@ -40,6 +41,19 @@ export function Navbar({ slug }: { slug?: string } = {}) {
   const [activeSection, setActiveSection] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const drawer = useCartDrawer();
+
+  // aperture-jdf1p — owner-only "voltar ao meu painel" affordance.
+  //
+  // Ownership signal: the SAME session probe the landing navbar uses to route
+  // its "Meu painel" chip (useMe() → me.data.slug, aperture-khbow / Rex #63).
+  // The signed-in user owns THIS guest page iff their session slug equals the
+  // slug this page is rendering. Regular visitors (me.data null, or a
+  // different slug) never satisfy this, so the button stays hidden for them.
+  // Route target is /painel/<slug> — the same slug, mirroring the landing
+  // dropdown's "Meu painel" → /painel/<slug> link.
+  const me = useMe();
+  const isOwner = Boolean(slug && me.data?.slug === slug);
+  const painelHref = slug ? `/painel/${slug}` : "/";
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 16);
@@ -142,6 +156,23 @@ export function Navbar({ slug }: { slug?: string } = {}) {
               ))}
             </ul>
           </nav>
+          {isOwner && (
+            <a
+              href={painelHref}
+              className="eu-nav-chip"
+              style={{
+                background: "var(--lilac-soft)",
+                color: "var(--plum)",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+              aria-label="Voltar ao meu painel"
+            >
+              <span aria-hidden="true">♡</span>
+              Meu painel
+            </a>
+          )}
           <CartButton onOpen={drawer.open} />
         </div>
 
@@ -238,6 +269,22 @@ export function Navbar({ slug }: { slug?: string } = {}) {
               }}
             >
               <ul className="flex flex-col gap-1 m-0 p-0 list-none">
+                {isOwner && (
+                  <li>
+                    <a
+                      href={painelHref}
+                      onClick={() => setMobileOpen(false)}
+                      className="eu-nav-chip-block"
+                      style={{
+                        background: "var(--lilac-soft)",
+                        color: "var(--plum)",
+                      }}
+                      aria-label="Voltar ao meu painel"
+                    >
+                      ♡ Meu painel
+                    </a>
+                  </li>
+                )}
                 {NAV_LINKS.map((link) => (
                   <li key={link.href}>
                     <a

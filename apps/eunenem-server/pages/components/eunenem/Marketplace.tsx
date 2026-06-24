@@ -7,11 +7,7 @@ import { useCart } from "@/lib/cart.js";
 import { useCartDrawer } from "./CartDrawerContext.js";
 import { useTweaks } from "./TweaksContext";
 import { usePaginaListaPresentes } from "@/lib/paginaApi";
-import {
-  deriveCategoryChips,
-  groupVisitorGifts,
-  type VisitorGift,
-} from "@/lib/visitorGift";
+import { groupVisitorGifts, type VisitorGift } from "@/lib/visitorGift";
 
 // aperture-3d9t (original visual scaffold) + aperture-3xgch (data swap).
 //
@@ -34,16 +30,9 @@ interface MarketplaceProps {
 export function Marketplace({ slug }: MarketplaceProps) {
   const { tweaks } = useTweaks();
   const { data, isLoading, isError } = usePaginaListaPresentes(slug);
-  const [activeCat, setActiveCat] = useState<string>("Todos");
   const [selectedGift, setSelectedGift] = useState<VisitorGift | null>(null);
 
   const gifts = useMemo(() => (data ? groupVisitorGifts(data) : []), [data]);
-  const chips = useMemo(() => deriveCategoryChips(gifts), [gifts]);
-
-  const filtered =
-    activeCat === "Todos"
-      ? gifts
-      : gifts.filter((g) => g.grupoKey === activeCat);
 
   const cart = useCart();
   const drawer = useCartDrawer();
@@ -116,43 +105,6 @@ export function Marketplace({ slug }: MarketplaceProps) {
             caixinha de loja, sem mensalidade. Você paga com Pix ou
             cartão, em checkout seguro.
           </p>
-
-          {chips.length > 1 && (
-            <div
-              role="tablist"
-              aria-label="Categorias de presentes"
-              className="flex justify-center gap-2 flex-wrap mt-7 mb-2"
-            >
-              {chips.map((c) => {
-                const active = activeCat === c;
-                return (
-                  <button
-                    key={c}
-                    type="button"
-                    role="tab"
-                    aria-selected={active}
-                    onClick={() => setActiveCat(c)}
-                    style={{
-                      padding: "9px 18px",
-                      borderRadius: 999,
-                      border: `1px solid ${active ? "var(--lilac-deep)" : "var(--line)"}`,
-                      background: active
-                        ? "var(--lilac-deep)"
-                        : "var(--paper)",
-                      color: active ? "#fff" : "var(--ink-soft)",
-                      fontWeight: 600,
-                      fontSize: 13,
-                      cursor: "pointer",
-                      transition: "all 0.2s ease",
-                      boxShadow: active ? "var(--shadow-cta)" : "none",
-                    }}
-                  >
-                    {c}
-                  </button>
-                );
-              })}
-            </div>
-          )}
         </header>
 
         {/* aperture-rdr8u — Mobile renders 2 columns (was 1) because the
@@ -174,7 +126,7 @@ export function Marketplace({ slug }: MarketplaceProps) {
           >
             ainda não consegui carregar a listinha — recarrega a página ♡
           </p>
-        ) : filtered.length === 0 ? (
+        ) : gifts.length === 0 ? (
           <p
             className="text-center mt-10"
             style={{
@@ -183,13 +135,11 @@ export function Marketplace({ slug }: MarketplaceProps) {
               fontSize: 22,
             }}
           >
-            {gifts.length === 0
-              ? `ainda não tem presentes aqui — volte daqui a pouco ♡`
-              : "ainda não tem nada nessa categoria — escolhe outra ♡"}
+            ainda não tem presentes aqui — volte daqui a pouco ♡
           </p>
         ) : (
           <div className="grid gap-4 sm:gap-6 mt-12 grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(260px,1fr))]">
-            {filtered.map((g) => (
+            {gifts.map((g) => (
               <GiftCard key={g.nome} gift={g} onPick={onPick} onAdd={onAdd} />
             ))}
           </div>

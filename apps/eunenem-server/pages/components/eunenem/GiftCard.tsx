@@ -67,25 +67,6 @@ export function GiftCard({ gift, onPick, onAdd }: GiftCardProps) {
           background: gift.bgColor,
         }}
       >
-        <span
-          style={{
-            position: "absolute",
-            top: 14,
-            left: 14,
-            background: "rgba(255, 255, 255, 0.85)",
-            backdropFilter: "blur(6px)",
-            padding: "4px 12px",
-            borderRadius: 999,
-            fontSize: 11,
-            fontWeight: 700,
-            letterSpacing: "0.08em",
-            textTransform: "uppercase",
-            color: "var(--ink-soft)",
-            zIndex: 2,
-          }}
-        >
-          {gift.displayCategory}
-        </span>
         {isTaken && (
           <span
             style={{
@@ -107,14 +88,24 @@ export function GiftCard({ gift, onPick, onAdd }: GiftCardProps) {
           </span>
         )}
         {gift.imagemUrl ? (
+          // aperture-actmy: pin the image to fill the thumb and carry the
+          // SAME border-radius as its container. Safari/Firefox anti-alias
+          // the rounded overflow:hidden clip and leave a sub-pixel sliver of
+          // the parent bgColor (often a pink token) peeking at the top edge —
+          // the intermittent pink/rose hairline. Letting the <img> own a
+          // matching radius means the clipped edge is the image's own pixels,
+          // so there's no parent fill behind the AA seam to bleed through.
           <img
             src={gift.imagemUrl}
             alt={gift.nome}
             loading="lazy"
             style={{
+              position: "absolute",
+              inset: 0,
               width: "100%",
               height: "100%",
               objectFit: "cover",
+              borderRadius: 18,
               filter: isTaken ? "grayscale(0.4) opacity(.55)" : "none",
             }}
           />
