@@ -24,6 +24,7 @@ import { CampanhaRepositoryMemory } from '../../src/adapters/arrecadacao/campanh
 import { ContribuicaoRepositoryMemory } from '../../src/adapters/arrecadacao/contribuicao-repository.memory.js';
 import { RecebedorRepositoryMemory } from '../../src/adapters/arrecadacao/recebedor-repository.memory.js';
 import { PagamentoRepositoryMemory } from '../../src/adapters/pagamentos/repository.memory.js';
+import { ObjectStorageMemory } from '../../src/adapters/storage/object-storage.memory.js';
 import {
   ID_PLATAFORMA_EUNENEM,
   PlataformaRepositoryMemory,
@@ -94,6 +95,10 @@ function buildTestRig(): TestRig {
   // Real in-memory repo (empty = nothing sold) — the previous omission left
   // it undefined and every projection path threw.
   const pagamentoRepository = new PagamentoRepositoryMemory();
+  // aperture-tua9o: contribuicao.emitirUrlUploadImagemItem reaches
+  // ctx.deps.objectStorage to mint the presigned PUT URL. In-memory fake
+  // mints deterministic memory:// URLs + records every call.
+  const objectStorage = new ObjectStorageMemory();
 
   // Minimal ServerDeps shape — only the fields actually read by the
   // contribuicao/auth routers. `auth` is unused by contribuicao-router so
@@ -108,6 +113,7 @@ function buildTestRig(): TestRig {
     contribuicaoRepository,
     recebedorRepository,
     pagamentoRepository,
+    objectStorage,
     observability,
     clock: () => new Date(),
     sessionCookieName: SESSION_COOKIE,
@@ -769,6 +775,35 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       expect(list).toHaveLength(1);
       expect(list[0]?.nome).toBe('Fralda P');
       expect(list[0]?.quantidade).toBe(4);
+    });
+  });
+
+  describe('emitirUrlUploadImagemItem (aperture-tua9o)', () => {
+    it('authed user gets a presigned result keyed under itens/', async () => {
+      const alice = await seedUserWithCampanha(rig, {
+        handle: 'alice',
+        email: 'alice@test.local',
+      });
+      const caller = rig.callerFor(alice.cookieHeader);
+
+      const result = (await caller.contribuicao.emitirUrlUploadImagemItem({
+        contentType: 'image/jpeg',
+      })) as { uploadUrl: string; objectKey: string; publicUrl: string };
+
+      expect(result.uploadUrl).toBeTruthy();
+      expect(result.objectKey).toBeTruthy();
+      expect(result.publicUrl).toBeTruthy();
+      // Item images have NO slot — namespaced under itens/.
+      expect(result.objectKey.startsWith('itens/')).toBe(true);
+      expect(result.publicUrl).toContain(result.objectKey);
+    });
+
+    it('anonymous emitirUrlUploadImagemItem → UNAUTHORIZED', async () => {
+      const caller = rig.callerFor();
+      const err = await expectTrpcError(() =>
+        caller.contribuicao.emitirUrlUploadImagemItem({ contentType: 'image/jpeg' }),
+      );
+      expect(err.code).toBe('UNAUTHORIZED');
     });
   });
 

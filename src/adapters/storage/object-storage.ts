@@ -34,6 +34,21 @@ export interface EmitirUrlUploadInput {
   readonly contentType: string;
 }
 
+/**
+ * Caller input for an ITEM (custom-gift) image upload (aperture-tua9o).
+ *
+ * SIBLING of `EmitirUrlUploadInput` but with NO `slot` — item images are
+ * not profile-scoped, so the key is `itens/<idUsuario>/<uuid>.<ext>` (no
+ * slot prefix). `idUsuario` is supplied by the tRPC procedure from the
+ * session, never client input — that's what namespaces the key per user.
+ */
+export interface EmitirUrlUploadItemInput {
+  /** Caller's user id — supplied by the tRPC procedure from the session, never client input. */
+  readonly idUsuario: string;
+  /** Validated upstream to one of the allowed image types; locked into the presign. */
+  readonly contentType: string;
+}
+
 export interface UrlUploadPresignada {
   /** Short-lived presigned PUT URL the client uploads the bytes to. */
   readonly uploadUrl: string;
@@ -53,6 +68,20 @@ export interface ObjectStorage {
    * the constructed public URL.
    */
   emitirUrlUploadPresignada(input: EmitirUrlUploadInput): Promise<UrlUploadPresignada>;
+
+  /**
+   * Mint a presigned PUT URL for a single custom-gift ITEM image upload
+   * (aperture-tua9o).
+   *
+   * SIBLING of `emitirUrlUploadPresignada` but item-scoped: there is NO
+   * `slot`, so the key is `itens/<idUsuario>/<uuid>.<ext>` (no slot prefix).
+   * Same security invariants as the profile emitter: derives the extension
+   * from `contentType`, builds a per-user namespaced key (user A can never
+   * overwrite user B's image), and presigns a PutObjectCommand with the
+   * Content-Type locked in and a 5-minute expiry. Returns the upload URL,
+   * the key, and the constructed public URL.
+   */
+  emitirUrlUploadPresignadaItem(input: EmitirUrlUploadItemInput): Promise<UrlUploadPresignada>;
 
   /**
    * Construct the stable public read URL for a stored object key

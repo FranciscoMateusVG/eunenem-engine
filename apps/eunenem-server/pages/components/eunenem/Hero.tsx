@@ -22,15 +22,27 @@ import { useTweaks } from "./TweaksContext";
 // photos from getPerfilPublicoBySlug. Read-only on the guest page; null
 // when the creator hasn't uploaded that slot (ImageSlot shows a neutral
 // branded frame).
+//
+// aperture-3ic62 — `eventDate` is the creator's REAL event date (ISO
+// YYYY-MM-DD) threaded explicitly from PaginaPage, or null when they
+// never set one. We render the countdown ONLY when a real date exists.
+// We deliberately do NOT read `tweaks.targetDate` for the gate: that
+// field carries the shared TWEAKS_DEFAULTS demo date ("2026-06-15") as a
+// fallback, which was leaking a fake "chegada em 0 dias" onto pages with
+// no event date. The shared default is left untouched (the painel + its
+// date math depend on it); the guest path just stops trusting it.
 export function Hero({
   coverUrl = null,
   profileUrl = null,
+  eventDate = null,
 }: {
   coverUrl?: string | null;
   profileUrl?: string | null;
+  eventDate?: string | null;
 } = {}) {
   const { tweaks } = useTweaks();
-  const { babyName, targetDate } = tweaks;
+  const { babyName } = tweaks;
+  const hasEventDate = typeof eventDate === "string" && eventDate.length > 0;
 
   return (
     <section className="relative overflow-hidden pt-4 pb-14 sm:pt-36 sm:pb-16">
@@ -108,9 +120,14 @@ export function Hero({
             </span>
           </h1>
 
-          <div className="flex gap-3 flex-wrap mb-5">
-            <CountdownTimer targetISO={targetDate} />
-          </div>
+          {/* aperture-3ic62 — only render the countdown when the creator
+              set a real event date. No date → no fake "chegada em 0 dias"
+              card. The CTAs below remain so the page still reads as live. */}
+          {hasEventDate && (
+            <div className="flex gap-3 flex-wrap mb-5">
+              <CountdownTimer targetISO={eventDate} />
+            </div>
+          )}
 
           <div className="flex gap-3 flex-wrap items-center">
             <a href="#presentes" className="btn-lilac no-underline">

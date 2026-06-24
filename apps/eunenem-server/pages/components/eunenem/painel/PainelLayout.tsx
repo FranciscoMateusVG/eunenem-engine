@@ -19,8 +19,22 @@ import { PainelTopbar } from "./PainelTopbar";
 // content row stays visually aligned with the body.
 
 interface PainelLayoutProps {
-  /** Creator slug (mock: "helena"). Seeds the Tweaks babyName default. */
+  /** Creator slug (mock: "helena"). Used for routing + as the topbar key. */
   slug: string;
+  /**
+   * aperture-3ic62 — the REAL baby name from the creator's own profile
+   * (`perfil.getPerfil` → nomeBebe). When provided, it seeds the Tweaks
+   * babyName so the painel header reads "página da <Helena>".
+   *
+   * - A non-empty string seeds that name.
+   * - An EXPLICIT empty string / null (creator hasn't set a baby name yet)
+   *   seeds the neutral "bebê" default — NEVER the slug, which is the
+   *   creator's OWN name and made the header read "página da Teste",
+   *   repeating the greeting name.
+   * - `undefined` (prop omitted, e.g. older sub-page callers) preserves the
+   *   legacy slug-derived fallback so those pages are unchanged.
+   */
+  babyName?: string | null;
   /** Current section, or undefined for the painel root (PainelPage). */
   activeSection?: PainelSection;
   /** aperture-7nius — when on the painel root the parent can wire a
@@ -34,9 +48,21 @@ export function PainelLayout({
   slug,
   activeSection,
   onOpenTutorial,
+  babyName,
   children,
 }: PainelLayoutProps) {
-  const initialBabyName = slug.charAt(0).toUpperCase() + slug.slice(1);
+  // aperture-3ic62 — resolve the initial babyName seed:
+  //   • prop provided + non-empty → the creator's real nomeBebe.
+  //   • prop provided but empty/null → neutral "bebê" default (creator
+  //     hasn't set a baby name). The slug is NEVER used as the baby name
+  //     here — it is the creator's own name and made "página da <slug>"
+  //     repeat the greeting name.
+  //   • prop omitted (undefined) → legacy slug-derived fallback, so older
+  //     sub-page callers that don't pass babyName keep their prior behaviour.
+  const initialBabyName =
+    babyName === undefined
+      ? slug.charAt(0).toUpperCase() + slug.slice(1)
+      : (babyName?.trim() || "bebê");
 
   return (
     <TweaksProvider initialState={{ babyName: initialBabyName }}>

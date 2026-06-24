@@ -12,6 +12,8 @@ import {
   atualizarContribuicao,
   type Campanha,
   type Contribuicao,
+  EmitirUrlUploadImagemItemInputSchema,
+  emitirUrlUploadImagemItem,
   esgotada,
   criarContribuicoesEmLote,
   type IdCampanha,
@@ -20,6 +22,7 @@ import {
   type IdOpcaoContribuicao,
   listarContribuicoesDeOpcao,
   removerContribuicao,
+  UsuarioInputInvalidoError,
 } from '../../../../src/index.js';
 import type { TrpcContext } from './context.js';
 
@@ -178,6 +181,13 @@ function toTRPCError(err: unknown): TRPCError {
     return new TRPCError({ code: 'BAD_REQUEST', message: err.message, cause: err });
   }
   if (err instanceof ArrecadacaoInputInvalidoError) {
+    return new TRPCError({ code: 'BAD_REQUEST', message: err.message, cause: err });
+  }
+  // aperture-tua9o: the item-image presign use-case validates idUsuario +
+  // contentType and throws this on a bad input (e.g. unsupported MIME type).
+  // Map to BAD_REQUEST, mirroring how perfil-router maps the same error for
+  // the sibling profile-photo presign procedure.
+  if (err instanceof UsuarioInputInvalidoError) {
     return new TRPCError({ code: 'BAD_REQUEST', message: err.message, cause: err });
   }
   return new TRPCError({
@@ -484,6 +494,41 @@ export const contribuicaoRouter = t.router({
           },
         );
         return { ids: result.ids };
+      } catch (err) {
+        throw toTRPCError(err);
+      }
+    }),
+
+  /**
+   * Emit a presigned PUT URL for a custom-gift ITEM image upload
+   * (aperture-tua9o). SIBLING of `perfil.emitirUrlUploadFoto` but
+   * item-scoped: NO slot, key namespaced `itens/<idUsuario>/<uuid>`.
+   * AUTHED — `idUsuario` comes from the session via `resolveCallerCampanha`
+   * (never client input), so the object key is namespaced to the caller.
+   * The client uploads the bytes directly to the bucket, then persists the
+   * resulting `objectKey`/`publicUrl` as the item's `imagemUrl`. Bad
+   * content-type → BAD_REQUEST.
+   */
+  emitirUrlUploadImagemItem: t.procedure
+    .input(EmitirUrlUploadImagemItemInputSchema)
+    .output(
+      z.object({
+        uploadUrl: z.string(),
+        objectKey: z.string(),
+        publicUrl: z.string(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { idUsuario } = await resolveCallerCampanha(ctx);
+        return await emitirUrlUploadImagemItem(
+          {
+            objectStorage: ctx.deps.objectStorage,
+            observability: ctx.deps.observability,
+          },
+          idUsuario,
+          input,
+        );
       } catch (err) {
         throw toTRPCError(err);
       }
