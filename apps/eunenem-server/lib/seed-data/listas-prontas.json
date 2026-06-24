@@ -250,7 +250,7 @@
       {
         "id": "334204",
         "name": "1 mamadeira fase 03 + 1 pct de lenço umidecido",
-        "price": 0,
+        "price": 49.9,
         "suggestedQty": 1,
         "emoji": "🧴",
         "bgColor": "var(--blue-soft)",
@@ -277,7 +277,7 @@
       {
         "id": "338948",
         "name": "3 calças simples tamanho P",
-        "price": 0,
+        "price": 39.9,
         "suggestedQty": 1,
         "emoji": "👕",
         "bgColor": "var(--lilac-soft)",
@@ -465,7 +465,7 @@
       {
         "id": "334204",
         "name": "1 mamadeira fase 03 + 1 pct de lenço umidecido",
-        "price": 0,
+        "price": 49.9,
         "suggestedQty": 1,
         "emoji": "🧴",
         "bgColor": "var(--blue-soft)",
@@ -546,7 +546,7 @@
       {
         "id": "338948",
         "name": "3 calças simples tamanho P",
-        "price": 0,
+        "price": 39.9,
         "suggestedQty": 1,
         "emoji": "👕",
         "bgColor": "var(--lilac-soft)",

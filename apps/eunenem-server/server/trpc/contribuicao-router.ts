@@ -206,9 +206,28 @@ const ImagemUrlSchema = z
   .max(500)
   .regex(/^(\/|https?:\/\/)/, 'imagemUrl must be an http(s) URL or a same-origin path starting with /');
 
+/**
+ * Per-item contribuição amount in cents (aperture-phbwo). A single-item
+ * price MUST be > 0 to match the domain `MoneyCentsSchema`
+ * (z.number().int().positive()). A R$0 contribuição is not a valid gift.
+ *
+ * Previously this boundary used `.nonnegative()`, which accepted 0 and let
+ * zero-priced items (e.g. catalog rows in listas-prontas.json with price:0)
+ * pass the wire layer only to be rejected deeper by the use-case with a
+ * confusing "Too small: expected number to be >0" domain message. Pinning
+ * it to `.positive()` here makes the boundary fail fast with a clear,
+ * field-scoped error. NOTE: this is NOT the daxwm case — that was an
+ * aggregate SUM (totalSurchargeCents) which CAN legitimately be 0; this is
+ * a single per-item price which cannot.
+ */
+const ValorContribuicaoCentavosSchema = z
+  .number()
+  .int()
+  .positive('valor deve ser maior que zero (em centavos)');
+
 const CreateInputSchema = z.object({
   nome: z.string().trim().min(1).max(120),
-  valor: z.number().int().nonnegative(),
+  valor: ValorContribuicaoCentavosSchema,
   imagemUrl: ImagemUrlSchema.optional(),
   grupo: z.string().trim().min(1).max(60).optional(),
   /**
@@ -235,7 +254,7 @@ const CreateBulkInputSchema = z.object({
     .array(
       z.object({
         nome: z.string().trim().min(1).max(120),
-        valor: z.number().int().nonnegative(),
+        valor: ValorContribuicaoCentavosSchema,
         imagemUrl: ImagemUrlSchema.optional(),
         grupo: z.string().trim().min(1).max(60).optional(),
         quantidade: z.number().int().min(1).max(100),
@@ -248,7 +267,7 @@ const CreateBulkInputSchema = z.object({
 const UpdateInputSchema = z.object({
   id: z.string().uuid(),
   nome: z.string().trim().min(1).max(120).optional(),
-  valor: z.number().int().nonnegative().optional(),
+  valor: ValorContribuicaoCentavosSchema.optional(),
   imagemUrl: ImagemUrlSchema.nullable().optional(),
   grupo: z.string().trim().min(1).max(60).nullable().optional(),
   /**
