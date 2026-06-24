@@ -496,8 +496,18 @@ export const authRouter = t.router({
    *       `criarConta` — forward-compat for future email verification) +
    *       sign in (one scrypt — the hashPassword inside criarConta).
    *
-   * The login-vs-signup distinction is recorded in the emission (internal,
-   * attacker-invisible) but never leaks to the caller.
+   * The login-vs-signup distinction is recorded in the emission (internal)
+   * AND surfaced to the caller via the `criado` flag (false = logged into an
+   * existing account, true = a new account was created). This is a deliberate
+   * reversal of the original "never leaks to the caller" posture, approved by
+   * Cipher (aperture-d7993): the outcome-residual is already attacker-derivable
+   * in a single real attempt (a create branch always creates an account + emits
+   * signup_success; a login requires the correct password) and is bounded by
+   * the shared login/signup rate-limit buckets, so a machine-readable flag on
+   * the SUCCESS path adds zero bits an attacker did not already hold. The flag
+   * is never returned on the failure path (wrong password / rate-limited throw
+   * the same ambiguous error before any return). The frontend uses it to branch
+   * post-success UX: login -> /painel, create -> onboarding wizard.
    */
   continuarComEmail: t.procedure
     .input(ContinuarComEmailInputSchema)
@@ -575,6 +585,7 @@ export const authRouter = t.router({
               idUsuario: sessao.idUsuario,
               idConta: sessao.idConta,
               expiraEm: sessao.expiraEm,
+              criado: false as const,
             };
           } catch (err) {
             // Wrong-password (the ambiguous bad-credentials error) is a
@@ -680,6 +691,7 @@ export const authRouter = t.router({
           idUsuario,
           idConta,
           expiraEm: sessao.expiraEm,
+          criado: true as const,
         };
       } catch (err) {
         // Any UNEXPECTED error that escaped the inner branch handlers
