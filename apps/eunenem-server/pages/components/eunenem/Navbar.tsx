@@ -181,6 +181,33 @@ export function Navbar({ slug }: { slug?: string } = {}) {
             drawer without first opening the menu. Keeps the page within
             viewport width at 375/390/430. */}
         <div className="flex items-center gap-2 sm:hidden">
+          {/* aperture-sc3js — the owner's "Meu painel" affordance must be
+              GLANCEABLE on mobile, not buried inside the hamburger dropdown.
+              The bug: the logged-in owner saw no return-to-painel button on a
+              narrow viewport because the only mobile copy lived inside the
+              collapsed menu. Surface a compact chip in the always-visible bar
+              so the owner always has a one-tap path back to their dashboard;
+              visitors + non-owners never satisfy isOwner so they never see it. */}
+          {isOwner && (
+            <a
+              href={painelHref}
+              className="eu-nav-chip"
+              style={{
+                background: "var(--lilac-soft)",
+                color: "var(--plum)",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                padding: "7px 12px",
+                fontSize: 12,
+                whiteSpace: "nowrap",
+              }}
+              aria-label="Voltar ao meu painel"
+            >
+              <span aria-hidden="true">♡</span>
+              Painel
+            </a>
+          )}
           <CartButton onOpen={drawer.open} />
           <div ref={dropdownRef} className="relative">
             <button
@@ -268,23 +295,11 @@ export function Navbar({ slug }: { slug?: string } = {}) {
                 zIndex: 50,
               }}
             >
+              {/* aperture-sc3js — the owner "Meu painel" entry moved OUT of this
+                  dropdown into the always-visible mobile bar (above), so the
+                  owner sees it without opening the menu. Only the scroll-anchor
+                  links remain inside the hamburger. */}
               <ul className="flex flex-col gap-1 m-0 p-0 list-none">
-                {isOwner && (
-                  <li>
-                    <a
-                      href={painelHref}
-                      onClick={() => setMobileOpen(false)}
-                      className="eu-nav-chip-block"
-                      style={{
-                        background: "var(--lilac-soft)",
-                        color: "var(--plum)",
-                      }}
-                      aria-label="Voltar ao meu painel"
-                    >
-                      ♡ Meu painel
-                    </a>
-                  </li>
-                )}
                 {NAV_LINKS.map((link) => (
                   <li key={link.href}>
                     <a
