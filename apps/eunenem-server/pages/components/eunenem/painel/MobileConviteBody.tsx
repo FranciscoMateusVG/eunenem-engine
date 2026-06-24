@@ -25,7 +25,7 @@ import {
 } from "@/lib/mocks/convite";
 import { TEMPLATES, type Template } from "@/lib/mocks/templates";
 
-import { InvitePreview, SUGGEST } from "./ConviteBody";
+import { InvitePreview, SUGGEST, conviteFieldErrors } from "./ConviteBody";
 
 // aperture-zlrd2 — Mobile-specific convites wizard.
 //
@@ -126,7 +126,21 @@ export function MobileConviteBody({ slug }: PainelSectionBodyProps) {
 
   const goPrev = () => setStep((s) => Math.max(0, s - 1));
   const goNext = () => setStep((s) => Math.min(STEPS.length - 1, s + 1));
+  // aperture-rw880 — block save/send when required fields (nomeExibido=babyName,
+  // remetente=host, dataHoraIso=date) are empty, with a friendly toast instead
+  // of the raw backend 400.
+  const guardComplete = (): boolean => {
+    const errs = conviteFieldErrors(state);
+    if (Object.keys(errs).length > 0) {
+      toast.error("faltou preencher alguns campos ♡", {
+        description: Object.values(errs).join(" · "),
+      });
+      return false;
+    }
+    return true;
+  };
   const onSave = async () => {
+    if (!guardComplete()) return;
     try {
       await salvarConvite.mutateAsync(savePayloadFromConviteState(state));
       toast.success("rascunho salvo com carinho ♡");
@@ -137,9 +151,13 @@ export function MobileConviteBody({ slug }: PainelSectionBodyProps) {
     }
   };
   const onSend = async () => {
+    if (!guardComplete()) return;
     setIsSharing(true);
     try {
-      await salvarConvite.mutateAsync(savePayloadFromConviteState(state));
+      // aperture-b4z9k — share FIRST so navigator.share() runs synchronously in
+      // the gesture (Safari drops transient activation if the tRPC save awaits
+      // before it → NotAllowedError). The slug URL is valid pre-save; persist
+      // after.
       try {
         const result = await shareConvitePreview({
           slug,
@@ -159,6 +177,7 @@ export function MobileConviteBody({ slug }: PainelSectionBodyProps) {
           description: "Tente novamente em um navegador com suporte ou copie o link depois.",
         });
       }
+      await salvarConvite.mutateAsync(savePayloadFromConviteState(state));
     } catch (error) {
       toast.error("não deu pra salvar agora", {
         description: conviteErrorMessage(error),
@@ -560,8 +579,9 @@ function MStepTipo({ state, update }: StepProps) {
 
 function MStepQuem({ state, update }: StepProps) {
   const ev = EVENT_BY_ID[state.eventType] ?? EVENT_TYPES[0]!;
+  // aperture-39blz — the "✦ sugestão" (pedir ajuda à IA) pill was removed; the
+  // SUGGEST copy is still used only as the textarea placeholder hint.
   const suggestion = SUGGEST[state.eventType] ?? SUGGEST["cha-bebe"]!;
-  const applySuggestion = () => update("message", suggestion.message);
 
   return (
     <div className="mcv-stack">
@@ -590,19 +610,11 @@ function MStepQuem({ state, update }: StepProps) {
         />
       </div>
       <div>
-        <div className="mcv-label-row">
-          <label className="mcv-label" htmlFor="mcv-message">
-            mensagem afetiva
-          </label>
-          <button
-            type="button"
-            className="mcv-pill"
-            onClick={applySuggestion}
-            aria-label="usar sugestão pro tipo de evento"
-          >
-            ✦ sugestão
-          </button>
-        </div>
+        {/* aperture-39blz — removed the "✦ sugestão" (pedir ajuda à IA) pill;
+            the affectionate message should be the creator's own words. */}
+        <label className="mcv-label" htmlFor="mcv-message">
+          mensagem afetiva
+        </label>
         <textarea
           id="mcv-message"
           className="mcv-textarea"
