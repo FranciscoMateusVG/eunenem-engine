@@ -155,6 +155,17 @@ describe('verificarDisponibilidadeSlug (aperture-2ztes)', () => {
     expect(result).toEqual({ disponivel: false, motivo: 'formato' });
   });
 
+  it('reserved slug → { disponivel: false, motivo: "formato" } (aperture-vd1do)', async () => {
+    // A reserved path-word is rejected by SlugUsuarioSchema (denylist), so the
+    // use-case reports it as a format failure — NO new motivo enum value.
+    const usuario = await seedUsuario(repo);
+    const result = await verificarDisponibilidadeSlug(
+      { usuarioRepository: repo, observability },
+      { idUsuario: usuario.id, slug: 'admin' },
+    );
+    expect(result).toEqual({ disponivel: false, motivo: 'formato' });
+  });
+
   it('slug taken by another usuario → { disponivel: false, motivo: "em_uso" }', async () => {
     await seedUsuario(repo, { slug: 'taken-here' });
     const caller = await seedUsuario(repo, { slug: 'caller-slug' });
