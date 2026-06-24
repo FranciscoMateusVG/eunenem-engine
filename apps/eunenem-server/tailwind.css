@@ -2307,6 +2307,13 @@ h4 {
 .lista-modal-sm {
   width: min(440px, 100%);
 }
+/* aperture-553no — wide variant for the curadoria modal: its 3-col preset grid
+   overflowed the default 560px modal and the right column got clipped by the
+   modal's overflow:hidden. 920px fits 3 comfortable columns on desktop; on
+   narrower viewports min() falls back to 100% and the grid reflows. */
+.lista-modal-lg {
+  width: min(920px, 100%);
+}
 .lista-modal-head {
   display: flex;
   align-items: flex-start;
@@ -3853,7 +3860,10 @@ html {
 }
 .lista-preset-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  /* aperture-553no — responsive: ~3 cols in the wide (920px) curadoria modal on
+     desktop, reflowing to fewer columns as the modal narrows on mobile, so no
+     card/price is ever clipped. (Was repeat(3, 1fr), which overflowed.) */
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: 12px;
 }
 .lista-preset-item {

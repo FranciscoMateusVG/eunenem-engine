@@ -499,10 +499,12 @@ function Modal({
   children,
   onClose,
   sm,
+  lg,
 }: {
   children: React.ReactNode;
   onClose: () => void;
   sm?: boolean;
+  lg?: boolean;
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -518,7 +520,11 @@ function Modal({
   return (
     <div className="lista-scrim" onClick={onClose}>
       <div
-        className={"lista-modal" + (sm ? " lista-modal-sm" : "")}
+        className={
+          "lista-modal" +
+          (sm ? " lista-modal-sm" : "") +
+          (lg ? " lista-modal-lg" : "")
+        }
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -1252,7 +1258,8 @@ function PresetDetailModal({
   };
 
   return (
-    <Modal onClose={onClose}>
+    // aperture-553no — wide modal so the 3-col curadoria grid isn't clipped.
+    <Modal onClose={onClose} lg>
       <div className="lista-modal-head">
         <div>
           <span className="eyebrow">curadoria EuNeném</span>
