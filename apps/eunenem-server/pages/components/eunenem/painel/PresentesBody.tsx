@@ -74,7 +74,7 @@ import {
  *   ExtratoSummaryDTO        →  PresentesSummary subset
  *   ├ totalRecebidoCents     →  summary.recebido
  *   ├ totalPresentes         →  summary.presentes
- *   ├ resgatadoCents         →  summary.resgatado
+ *   ├ resgatadoCents         →  summary.resgatado (+ aguardandoAprovacaoCents, aperture-eqdxl)
  *   ├ saldoDisponivelCents   →  summary.disponivel
  *   ├ aguardandoLiberacaoCents → summary.aguardando
  *   ├ aguardandoAprovacaoCents → summary.aguardandoAprovacao (aperture-1ut92)
@@ -173,7 +173,17 @@ function adaptSummary(s: ExtratoSummaryDTO): PresentesSummaryUI {
   return {
     recebido: s.totalRecebidoCents,
     presentes: s.totalPresentes,
-    resgatado: s.resgatadoCents,
+    // aperture-eqdxl — the RESGATADO figure sums TWO buckets: already
+    // transferred (resgatadoCents) PLUS in-flight admin-approval
+    // (aguardandoAprovacaoCents). Both are money the user has already
+    // SOLICITAR'd out of their disponível balance — from the operator's
+    // mental model it's "resgatado" the moment a transfer is requested,
+    // not only once admin approves. These are disjoint backend buckets
+    // (transferidoEm IS NOT NULL vs solicitado-but-not-transferred), so
+    // summing them does NOT double-count. The dedicated "aguardando
+    // aprovação" aux pill below still surfaces the in-flight slice
+    // separately as a breakdown.
+    resgatado: s.resgatadoCents + (s.aguardandoAprovacaoCents ?? 0),
     disponivel: s.saldoDisponivelCents,
     aguardando: s.aguardandoLiberacaoCents,
     // aperture-1ut92 — fall back to 0 for the trpc-cache-rotation window
@@ -583,7 +593,12 @@ function TicketRow({ tx, onPick }: { tx: PresentesTx; onPick: (tx: PresentesTx) 
           <span className="ex-t-meta">
             <span className="ex-t-status ex-mono">{tint.label}</span>
             <span className="ex-t-dot">·</span>
-            <span className="ex-t-date ex-mono">{dateShort(tx.d)} · {tx.t}</span>
+            {/* aperture-958vo — status line shows DATE ONLY. The `· <time>`
+                suffix was dropped per operator request (applies to every
+                state: transferido/disponível/etc). `tx.t` is still parsed
+                from the wire timestamp for other surfaces, just not shown
+                here. */}
+            <span className="ex-t-date ex-mono">{dateShort(tx.d)}</span>
           </span>
         </div>
       </div>
@@ -690,7 +705,13 @@ function DetailDrawer({ tx, onClose }: { tx: PresentesTx | null; onClose: () => 
         </dl>
 
         <div className="ex-drawer-actions">
-          {isIn && t.status !== "estornado" && (
+          {/* aperture-h8sd5 — hide "enviar agradecimento" ONLY when the gift
+              is already transferido (wire 'transferido' → UI status
+              "tEnviada"). It MUST still show on every other state, including
+              disponível ("disponivel") and aguardando liberação
+              ("aguardando"). The pre-existing estornado guard stays (no
+              thank-you on a reversed payment). */}
+          {isIn && t.status !== "estornado" && t.status !== "tEnviada" && (
             <button type="button" className="ex-btn-primary block" onClick={onClose}>
               enviar agradecimento à {firstName}
             </button>
@@ -1369,7 +1390,11 @@ function ResgatadoModal({
       <div className="ex-modal ex-modal-wide" role="dialog" aria-label="Detalhes do resgatado">
         <header className="ex-modal-hd">
           <div>
-            <span className="ex-caps">total resgatado · 28/abr — 22/mai</span>
+            {/* aperture-2gceh — dropped the bogus hardcoded date range
+                ("· 28/abr — 22/mai") that bore no relation to the actual
+                transfer activity. No real range is on the wire for this
+                modal, so the header now shows just the label. */}
+            <span className="ex-caps">total resgatado</span>
             <h3 className="ex-modal-title neg">− {fmtMoney(total)}</h3>
           </div>
           <button type="button" className="ex-icon-btn" onClick={onClose} aria-label="Fechar">
