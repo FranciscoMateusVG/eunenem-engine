@@ -244,6 +244,29 @@ const TransferenciaSolicitarOutputSchema = z.object({
 });
 
 // ────────────────────────────────────────────────────────────────────
+//  recebedor.listMovimentacoes — OUT-movement projection (aperture-2u5vw)
+//
+//  The resgatado-detail modal previously showed "0 movimentações"
+//  because nothing projected the account-transfer (repasse) side of the
+//  ledger. This query groups the TRANSFERIDO recebedor lançamentos by
+//  idRepasse — one movimentação per admin transfer (transfer date +
+//  summed amount + ticket count). Only an out-type exists today
+//  (transferencia_conta); there is no resgate-loja concept.
+// ────────────────────────────────────────────────────────────────────
+
+const MovimentacaoDTOSchema = z.object({
+  idRepasse: z.string(),
+  data: z.string(), // ISO transferidoEm (the transfer date)
+  valorCents: z.number().int().nonnegative(),
+  quantidade: z.number().int().positive(),
+  tipo: z.literal("transferencia_conta"), // only out-type today; no resgate-loja concept exists
+});
+
+const ListMovimentacoesOutputSchema = z.object({
+  movimentacoes: z.array(MovimentacaoDTOSchema),
+});
+
+// ────────────────────────────────────────────────────────────────────
 //  Auth helpers — same shape as contribuicao-router
 // ────────────────────────────────────────────────────────────────────
 
@@ -809,8 +832,67 @@ const criarProcedure = t.procedure
     }
   });
 
+// ────────────────────────────────────────────────────────────────────
+//  recebedor.listMovimentacoes (aperture-2u5vw)
+// ────────────────────────────────────────────────────────────────────
+
+const listMovimentacoesProcedure = t.procedure
+  .input(z.object({ idCampanha: z.string().uuid() }))
+  .output(ListMovimentacoesOutputSchema)
+  .query(async ({ ctx, input }) => {
+    try {
+      await resolveAdminOfCampanha(ctx, input.idCampanha); // same auth as extrato.summary / extrato.list
+      const now = ctx.deps.clock();
+      const states = await buildExtratoStates(ctx, input.idCampanha, now);
+
+      // Group the TRANSFERIDO recebedor lançamentos by idRepasse — one
+      // movimentação per admin transfer (date + summed amount). The grain
+      // here is credito_saldo_recebedor (buildExtratoStates already
+      // filters to it), matching resgatadoCents in extrato.summary.
+      const porRepasse = new Map<
+        string,
+        { data: Date; valorCents: number; quantidade: number }
+      >();
+      for (const s of states) {
+        if (s.liberacao !== "transferido") continue;
+        const idRepasse = s.lancamento.idRepasse;
+        const transferidoEm = s.lancamento.transferidoEm;
+        // Defensive — a transferido lançamento implies both are set.
+        if (idRepasse === null || transferidoEm === null) continue;
+        const key = idRepasse as unknown as string;
+        const existing = porRepasse.get(key);
+        if (existing) {
+          existing.valorCents += s.lancamento.amountCents as unknown as number;
+          existing.quantidade += 1;
+          // keep the first transferidoEm — they should match within a repasse
+        } else {
+          porRepasse.set(key, {
+            data: transferidoEm,
+            valorCents: s.lancamento.amountCents as unknown as number,
+            quantidade: 1,
+          });
+        }
+      }
+
+      const movimentacoes = [...porRepasse.entries()]
+        .map(([idRepasse, g]) => ({
+          idRepasse,
+          data: g.data.toISOString(),
+          valorCents: g.valorCents,
+          quantidade: g.quantidade,
+          tipo: "transferencia_conta" as const,
+        }))
+        .sort((a, b) => (a.data < b.data ? 1 : a.data > b.data ? -1 : 0)); // data desc
+
+      return { movimentacoes };
+    } catch (err) {
+      throw toTRPCError(err);
+    }
+  });
+
 export const recebedorRouter = t.router({
   criar: criarProcedure,
   extrato: extratoRouter,
   transferencia: transferenciaRouter,
+  listMovimentacoes: listMovimentacoesProcedure,
 });
