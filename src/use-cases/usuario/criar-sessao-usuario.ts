@@ -62,23 +62,39 @@ export interface CriarSessaoUsuarioResult {
  *   1. Validates input.
  *   2. Delegates credential check + session issuance to the AuthService.
  *      AuthService performs its own (idPlataforma, email) lookup +
- *      scrypt verifyPassword internally, so on bad credentials it
- *      throws an ambiguous error in CONSTANT time regardless of
- *      whether the email exists.
+ *      scrypt verifyPassword internally. On bad credentials it throws an
+ *      ambiguous error after running EXACTLY ONE scrypt regardless of
+ *      whether the email exists — the BetterAuth adapter pays a real
+ *      verify against the account hash when the user exists, and a verify
+ *      against a precomputed dummy hash when it does not (aperture-olgk2).
+ *      Both branches therefore pay the same single scrypt; this does NOT
+ *      claim bit-level constant time, only that no scrypt is skipped on
+ *      the unknown-email path (closing the H4 enumeration oracle).
  *   3. ON SUCCESS, fetches the domain Usuario via `findUsuarioById`
  *      (`sessao.idUsuario` is the auth principal; we resolve the
  *      matching domain Usuario to derive `idConta` for the result).
  *
- * **Timing-attack resistance (aperture-swmpm).** Previously this code
- * pre-checked `findUsuarioByEmail` and threw on null BEFORE calling
- * `iniciarSessao`. The error MESSAGE matched the AuthService bad-credential
- * throw, but the TIMING did not — an unknown-email attempt skipped the
- * ~50–200 ms scrypt verifyPassword inside iniciarSessao, producing a
- * measurable delta an attacker could use to enumerate registered emails
- * by stopwatch (Cipher's H4 finding from the aperture-ebspa security
- * review, 2026-05-30). The new shape routes BOTH paths (unknown-email
- * AND wrong-password-for-known-email) through the same scrypt code path
- * inside AuthService → timing is indistinguishable.
+ * **Timing-attack resistance (aperture-swmpm + aperture-olgk2).** Two
+ * stacked fixes close Cipher's H4 user-enumeration oracle (aperture-ebspa
+ * review, 2026-05-30):
+ *
+ *   1. (swmpm) This use-case previously pre-checked `findUsuarioByEmail`
+ *      and threw on null BEFORE calling `iniciarSessao`, so an
+ *      unknown-email attempt skipped scrypt entirely. That pre-check was
+ *      removed — BOTH unknown-email AND wrong-password paths now enter
+ *      `iniciarSessao`.
+ *   2. (olgk2) Entering `iniciarSessao` was not sufficient on its own:
+ *      the BetterAuth adapter's no-user branch ALSO skipped scrypt (there
+ *      was no real hash to verify against), re-opening the same delta one
+ *      layer down. The adapter now runs ONE `verifyPassword` against a
+ *      precomputed dummy hash on the no-user branch and discards the
+ *      result, so the unknown-email and wrong-password paths each pay
+ *      exactly one scrypt.
+ *
+ * Net effect: no scrypt is skipped on the unknown-email path, so the
+ * coarse ~50–200 ms scrypt delta an attacker would stopwatch is gone.
+ * This is a "both paths run one scrypt" guarantee, NOT a claim of
+ * bit-level constant-time execution.
  *
  * Returns an ambiguous `UsuarioInputInvalidoError` on either missing
  * user or wrong password — the `AuthService` itself enforces this.
@@ -115,9 +131,11 @@ export async function criarSessaoUsuario(
       // Delegate credential check + session issuance FIRST. AuthService
       // performs its own (idPlataforma, email) lookup + scrypt
       // verifyPassword internally — both unknown-email and wrong-password
-      // paths exit through the same constant-time error throw. NEVER add
-      // a pre-check here that lets one path skip the scrypt verify
-      // (regression would re-introduce the H4 user-enumeration oracle).
+      // paths run exactly one scrypt before throwing the same ambiguous
+      // error (the adapter's no-user branch verifies against a dummy hash;
+      // see aperture-olgk2). NEVER add a pre-check here that lets one path
+      // skip the scrypt verify (regression would re-introduce the H4
+      // user-enumeration oracle).
       // Spread the optional ipHashed conditionally — tsconfig has
       // `exactOptionalPropertyTypes: true` so passing `undefined`
       // explicitly is a type error. Omit the key when not present.
