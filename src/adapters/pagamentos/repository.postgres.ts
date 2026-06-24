@@ -160,11 +160,23 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
             throw new PagamentoNaoEncontradoError(pagamento.id);
           }
 
-          // Replace items wholesale — items have no independent lifecycle
-          // so DELETE-and-INSERT is correct semantics + cheap given the
-          // small cardinality (a cart has ≤ a handful of items).
-          await trx.deleteFrom('intencao_items').where('id_pagamento', '=', pagamento.id).execute();
-          await insertItemsForPagamento(trx, pagamento);
+          // intencao_items are WRITE-ONCE at save() (aperture-t0sxe). The
+          // cart is fixed at checkout-session creation and NO flow mutates
+          // `intencao.items` afterward — every update() is metadata-only
+          // (status / available_on / pi-ref / charge-ref / contribuinte).
+          //
+          // We deliberately do NOT delete+reinsert the items here. The old
+          // wholesale-replace was a latent data-integrity bug:
+          // `lancamentos_financeiros.id_item_pagamento` has an ON DELETE
+          // CASCADE FK to `intencao_items(id)` (migration 023), so deleting
+          // the items on a metadata-only update CASCADE-DELETES the booked
+          // financial ledger. That was the t0sxe card race: charge.succeeded
+          // booked the lancamentos, then a near-concurrent
+          // checkout.session.completed update() (persisting available_on)
+          // wiped them via this cascade — card payments silently lost their
+          // lancamentos and vanished from the extrato (PIX was unaffected
+          // because its events are spaced, so no metadata-update overlapped a
+          // fresh booking). update() now touches ONLY the pagamentos row.
         });
         span.setStatus({ code: SpanStatusCode.OK });
       } catch (error: unknown) {
