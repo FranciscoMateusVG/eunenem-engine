@@ -1,61 +1,58 @@
 import type { Hono } from 'hono';
 
 /**
- * BetterAuth HTTP auth-flow paths that the engine deliberately keeps
- * unreachable on the eunenem-server (aperture-ln3de).
+ * DENY-BY-DEFAULT guard on the BetterAuth HTTP surface (`/api/auth/*`).
  *
- * Cipher's pre-prod review (aperture-ebspa) identified two findings
- * that one fix collapses:
+ * aperture-9tca0 supersedes the original aperture-ln3de denylist. History:
+ * ln3de blocked 4 specific paths (sign-up/email, sign-in/email, sign-out,
+ * forget-password) — ALLOW-BY-DEFAULT. That posture was only safe because a
+ * latent better-auth adapter casing bug (aperture-bq2c9) 500'd EVERY adapter
+ * query, so the rest of the BetterAuth HTTP surface was accidentally inert.
+ * The bq2c9 fix activates the adapter, so every route under the catch-all
+ * mount (`app.on([POST,GET], '/api/auth/*', auth.handler)`) is now functional.
+ * "A bug is not a security control" — Cipher's adapter-activation sweep found:
  *
- *   C1 (CRITICAL, reproduced live): POST /api/auth/sign-in/email
- *      returns HTTP 500 for KNOWN emails and HTTP 401 for UNKNOWN —
- *      a deterministic user-enumeration oracle. Root cause:
- *      BetterAuth's HTTP signIn looks up accounts by
- *      `accounts.account_id == email`, but the engine saga writes
- *      `account_id == idPlataforma::email` (composite). The lookup
- *      hits an unhandled error path AFTER finding the user row,
- *      which 500s instead of returning the generic
- *      `INVALID_EMAIL_OR_PASSWORD` 401. An attacker can enumerate
- *      every registered customer in O(N) HTTP requests.
+ *   - CROSS-TENANT ESCALATION (HIGH): POST /api/auth/update-user accepts
+ *     arbitrary fields; idPlataforma was writable via HTTP input → any
+ *     authenticated user could move tenants, bypassing the engine saga.
+ *   - The ln3de denylist named `/api/auth/forget-password`, which does NOT
+ *     exist in better-auth@1.6.12 — the real `/api/auth/request-password-reset`
+ *     was left UNBLOCKED.
+ *   - /change-email, /delete-user, /change-password, /link-social,
+ *     /unlink-account, /list-accounts, /account-info — all saga-bypass /
+ *     unreviewed surfaces, newly functional.
  *
- *   H1 (HIGH): the full `auth.handler` mount at `/api/auth/*` is a
- *      latent saga-bypass surface. `/api/auth/sign-up/email`
- *      currently fails with `FAILED_TO_CREATE_USER` 422, but is one
- *      config tweak (BetterAuth version bump, an `additionalFields`
- *      relaxation) away from succeeding and creating users that
- *      bypass the engine saga entirely — no `plataforma`
- *      validation, no domain `Usuario` aggregate, no `slug`, no
- *      `PERMISSOES_PADRAO`, no `Conta`. Latent bypass = security
- *      problem today, not when it becomes active.
+ * The engine policy: every authn flow runs through tRPC at `/api/trpc/auth.*`
+ * so the saga executes end-to-end (plataforma validation, domain Usuario
+ * aggregate, slug, PERMISSOES_PADRAO, Conta, compensation on partial failure).
+ * The ONLY BetterAuth HTTP routes the engine deliberately exposes are the
+ * Google OAuth init + provider callback. EVERYTHING else under /api/auth/* is
+ * denied with a byte-identical 410 Gone (no status/body/latency signal that
+ * could distinguish a blocked route or enumerate registered emails).
  *
- * The engine's policy: every authn flow runs through tRPC at
- * `/api/trpc/auth.*` so the saga executes end-to-end (plataforma
- * validation, domain row, compensation on partial failure). The
- * BetterAuth HTTP endpoints below are blocked with byte-identical
- * 410 Gone responses so neither status code, body, nor latency
- * exposes any signal about whether an email is registered.
- *
- * `forget-password` is included until the SMTP transport bead lands —
- * today `sendResetPassword` (setup.ts) is a console.log stub, so a
- * user requesting reset would have the link only appear in the
- * server log. Confused-deputy UX bug if we leave it on.
- *
- * NOT blocked here (intentional): `/api/auth/verify-email` and
- * `/api/auth/callback/*`. These are BetterAuth-internal flows that
- * need to remain reachable so future bead can opt them in. If a
- * future bead adds a new HTTP-side flow we don't want exposed, it
- * MUST add the path here.
- *
- * Both GET and POST are blocked on each path (via `app.all`) so
- * method-based probing (`GET` vs `POST`) cannot distinguish a
- * blocked endpoint from one that simply rejects the method.
+ * Adding a new exposed flow REQUIRES adding it to the allowlist below AND a
+ * Cipher review — the deny-by-default posture means new better-auth routes are
+ * inert until explicitly allowed, which is the safe failure mode.
  */
-export const BLOCKED_AUTH_PATHS = [
-  '/api/auth/sign-up/email',
-  '/api/auth/sign-in/email',
-  '/api/auth/sign-out',
-  '/api/auth/forget-password',
-] as const;
+
+/**
+ * The allowlist: the exact (method, path) pairs permitted to reach
+ * `auth.handler`. METHOD-SPECIFIC on purpose — only the two requests the
+ * Google OAuth flow actually issues are allowed; every other method on these
+ * same paths (e.g. GET /sign-in/social, POST /callback/*) is denied with the
+ * uniform 410, so there is no method-probing signal.
+ *
+ *   - POST /api/auth/sign-in/social     — OAuth init (returns provider redirect)
+ *   - GET  /api/auth/callback/<provider> — OAuth provider callback (the FAMILY,
+ *     so a new provider needs no guard change). Google uses the GET (query)
+ *     callback; a provider that needs POST form_post would require adding it
+ *     here + a Cipher review (deny-by-default = safe failure mode).
+ */
+export function isAllowedAuthRequest(method: string, path: string): boolean {
+  if (method === 'POST' && path === '/api/auth/sign-in/social') return true;
+  if (method === 'GET' && path.startsWith('/api/auth/callback/')) return true;
+  return false;
+}
 
 /** Byte-identical response body returned for every blocked path. */
 export const BLOCKED_AUTH_BODY = 'Gone';
@@ -64,19 +61,18 @@ export const BLOCKED_AUTH_BODY = 'Gone';
 export const BLOCKED_AUTH_STATUS = 410 as const;
 
 /**
- * Install the block guard on a Hono app. MUST be called BEFORE the
- * `auth.handler` catch-all mount on `/api/auth/*` so the specific
- * paths win the route match regardless of router implementation.
- *
- * Idempotent in practice: registering the same path twice is a no-op
- * for the wire behavior, though it would leak into Hono's internal
- * route table.
+ * Install the deny-by-default guard on a Hono app. MUST be called BEFORE the
+ * `auth.handler` catch-all mount on `/api/auth/*` so the guard wins the route
+ * match and runs first. Allowed paths fall through via `next()` to the
+ * catch-all; everything else short-circuits with a byte-identical 410.
  */
 export function installBlockedAuthHandlerGuard(app: Hono): void {
-  for (const path of BLOCKED_AUTH_PATHS) {
-    app.all(path, (c) => {
-      c.status(BLOCKED_AUTH_STATUS);
-      return c.text(BLOCKED_AUTH_BODY);
-    });
-  }
+  app.all('/api/auth/*', async (c, next) => {
+    if (isAllowedAuthRequest(c.req.method, c.req.path)) {
+      await next();
+      return;
+    }
+    c.status(BLOCKED_AUTH_STATUS);
+    return c.text(BLOCKED_AUTH_BODY);
+  });
 }

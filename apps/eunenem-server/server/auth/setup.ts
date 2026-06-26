@@ -269,6 +269,17 @@ const ServerEnvSchema = z
     MINIO_ACCESS_KEY: z.string().default(''),
     MINIO_SECRET_KEY: z.string().default(''),
     MINIO_BUCKET: z.string().default('eunenem-perfil-fotos'),
+    /**
+     * Google OAuth credentials (aperture-8655f). Both OPTIONAL so the server
+     * still boots in environments without them — when EITHER is absent the
+     * google social provider is NOT registered (email+password still works).
+     * Set in the deploy env (Dokploy) by the infra owner; the SECRET is never
+     * committed. The OAuth callback lands at the BetterAuth-standard
+     * `<BETTER_AUTH_URL>/api/auth/callback/google` path (auth.handler is
+     * mounted at /api/auth/* in server.tsx).
+     */
+    GOOGLE_CLIENT_ID: z.string().optional(),
+    GOOGLE_CLIENT_SECRET: z.string().optional(),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === 'production') {
@@ -358,6 +369,15 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
 
   const db = createDatabase(env.DATABASE_URL);
 
+  // Google OAuth (aperture-8655f) — CONDITIONAL on BOTH env vars being
+  // present. When either is missing, `socialProviders` stays undefined and
+  // criarAuth omits the key entirely → email+password-only BetterAuth that
+  // boots cleanly in envs without Google credentials (the critical safety
+  // property). The real CLIENT_SECRET is set in the deploy env (Dokploy),
+  // never committed.
+  const googleConfigured =
+    !!env.GOOGLE_CLIENT_ID?.length && !!env.GOOGLE_CLIENT_SECRET?.length;
+
   const authConfig: CriarAuthConfig = {
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.BETTER_AUTH_URL,
@@ -374,6 +394,23 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
       });
     },
     useSecureCookies: env.NODE_ENV === 'production',
+    // aperture-dm7s3 — default platform id for adapter-created users (OAuth
+    // signup). The Google profile carries no idPlataforma + the column is
+    // notNull, so a new-user Google signup needs this injected. eunenem-server
+    // is single-tenant for OAuth signup → the seeded ID_PLATAFORMA_EUNENEM.
+    idPlataformaPadrao: ID_PLATAFORMA_EUNENEM,
+    // Spread the google provider in ONLY when both vars are present;
+    // otherwise the key is absent and no social provider is registered.
+    ...(googleConfigured
+      ? {
+          socialProviders: {
+            google: {
+              clientId: env.GOOGLE_CLIENT_ID as string,
+              clientSecret: env.GOOGLE_CLIENT_SECRET as string,
+            },
+          },
+        }
+      : {}),
   };
 
   const auth = criarAuth(db, authConfig);
