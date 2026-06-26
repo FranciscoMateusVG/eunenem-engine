@@ -77,6 +77,9 @@ describe('eunenem-server deny-by-default auth guard (aperture-9tca0)', () => {
           });
           expect(res.status).toBe(BLOCKED_AUTH_STATUS);
           expect(await res.text()).toBe(BLOCKED_AUTH_BODY);
+          // aperture-0jyzj: 410 is cacheable-by-default → must carry no-store so
+          // the browser/client never serves a stale deny after the allowlist changes.
+          expect(res.headers.get('cache-control')).toContain('no-store');
         });
       }
     }
@@ -104,6 +107,9 @@ describe('eunenem-server deny-by-default auth guard (aperture-9tca0)', () => {
         const res = await app.request(`${path}?code=abc&state=xyz`, { method });
         expect(res.status).toBe(200);
         expect(await res.text()).toBe('unblocked-sentinel');
+        // aperture-0jyzj: allowed auth responses (incl. get-session 200) must
+        // also be no-store — a cached get-session is a stale auth state.
+        expect(res.headers.get('cache-control')).toContain('no-store');
       });
     }
   });
