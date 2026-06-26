@@ -614,20 +614,27 @@ function PersonalizadoForm({
           </div>
           <span className="lista-hint">convidados podem dividir o valor</span>
         </div>
-        <div className="lista-field lista-field-full">
-          <label htmlFor="lista-cat">categoria</label>
-          <select
-            id="lista-cat"
-            value={f.category}
-            onChange={(e) => setF({ ...f, category: e.target.value as ListaCategory })}
-          >
-            {CATEGORY_OPTIONS.map((c) => (
-              <option key={c} value={c}>
-                {LISTA_CATEGORY_LABEL[c]}
-              </option>
-            ))}
-          </select>
-        </div>
+        {/* aperture-oa0th — CATEGORIA field hidden (visual-only). The category
+            data model is intact: `f.category` still defaults to "personalizado"
+            (see emptyDraft) and is sent as `grupo` on submit. We keep the JSX
+            behind `{false && …}` so the underlying state/options stay wired and
+            the control can be restored by flipping the flag. */}
+        {false && (
+          <div className="lista-field lista-field-full">
+            <label htmlFor="lista-cat">categoria</label>
+            <select
+              id="lista-cat"
+              value={f.category}
+              onChange={(e) => setF({ ...f, category: e.target.value as ListaCategory })}
+            >
+              {CATEGORY_OPTIONS.map((c) => (
+                <option key={c} value={c}>
+                  {LISTA_CATEGORY_LABEL[c]}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         {/* aperture-tua9o — optional image (upload + crop → MinIO). */}
         <ItemImageUpload
           value={f.imageUrl}
@@ -1861,19 +1868,27 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
                 aria-label="Buscar presente"
               />
             </div>
-            <div className="lista-chips">
-              {order.map((k) => (
-                <button
-                  type="button"
-                  key={k}
-                  className={"lista-chip" + (cat === k ? " active" : "")}
-                  onClick={() => setCat(k)}
-                >
-                  {k === "all" ? "todos" : LISTA_CATEGORY_LABEL[k]}
-                  <span className="lista-chip-count">{counts[k] || 0}</span>
-                </button>
-              ))}
-            </div>
+            {/* aperture-oa0th — category filter chips (todos / fraldas / outros …)
+                hidden (visual-only). The filter logic is intact: `cat` still
+                defaults to "all" so the list shows every gift, and `filtered`
+                continues to apply `cat`/`search`. Kept behind `{false && …}` so
+                `cat`/`setCat`/`order`/`counts` stay wired and the chips can be
+                restored by flipping the flag. */}
+            {false && (
+              <div className="lista-chips">
+                {order.map((k) => (
+                  <button
+                    type="button"
+                    key={k}
+                    className={"lista-chip" + (cat === k ? " active" : "")}
+                    onClick={() => setCat(k)}
+                  >
+                    {k === "all" ? "todos" : LISTA_CATEGORY_LABEL[k]}
+                    <span className="lista-chip-count">{counts[k] || 0}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
