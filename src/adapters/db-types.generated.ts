@@ -266,6 +266,12 @@ export interface RepassesRecebedor {
   status: string;
 }
 
+export interface ResgatesPendentes {
+  criado_em: Timestamp;
+  id_usuario: string;
+  pendente_desde: Timestamp;
+}
+
 export interface Sessions {
   created_at: Generated<Timestamp>;
   expires_at: Timestamp;
@@ -329,6 +335,7 @@ export interface DB {
   rate_limit: RateLimit;
   recebedores: Recebedores;
   repasses_recebedor: RepassesRecebedor;
+  resgates_pendentes: ResgatesPendentes;
   sessions: Sessions;
   users: Users;
   usuarios: Usuarios;

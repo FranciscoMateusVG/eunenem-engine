@@ -87,6 +87,9 @@ export { PerfilCriadorRepositoryPostgres } from './adapters/usuario/perfil-criad
 export type { UsuarioRepository } from './adapters/usuario/repository.js';
 export { UsuarioRepositoryMemory } from './adapters/usuario/repository.memory.js';
 export { UsuarioRepositoryPostgres } from './adapters/usuario/repository.postgres.js';
+export type { ResgatePendenteRepository } from './adapters/usuario/resgate-pendente-repository.js';
+export { ResgatePendenteRepositoryMemory } from './adapters/usuario/resgate-pendente-repository.memory.js';
+export { ResgatePendenteRepositoryPostgres } from './adapters/usuario/resgate-pendente-repository.postgres.js';
 export type {
   StripeDispatchResult,
   StripePipelineArgs,
@@ -1083,6 +1086,15 @@ export {
   EmitirUrlUploadImagemItemInputSchema,
   emitirUrlUploadImagemItem,
 } from './use-cases/usuario/emitir-url-upload-imagem-item.js';
+export type {
+  MarcarResgatePendenteDeps,
+  MarcarResgatePendenteInput,
+  MarcarResgatePendenteResult,
+} from './use-cases/usuario/marcar-resgate-pendente.js';
+export {
+  MarcarResgatePendenteInputSchema,
+  marcarResgatePendente,
+} from './use-cases/usuario/marcar-resgate-pendente.js';
 export type { MarcarTutorialUsuarioComoCompletadoDeps } from './use-cases/usuario/marcar-tutorial-usuario-como-completado.js';
 export { marcarTutorialUsuarioComoCompletado } from './use-cases/usuario/marcar-tutorial-usuario-como-completado.js';
 export type { ObterDadosRecebimentoUsuarioDeps } from './use-cases/usuario/obter-dados-recebimento-usuario.js';
@@ -1103,6 +1115,8 @@ export {
   obterPerfilPublicoBySlug,
   PerfilPublicoDTOSchema,
 } from './use-cases/usuario/obter-perfil-publico-by-slug.js';
+export type { ObterResgatePendenteDeps } from './use-cases/usuario/obter-resgate-pendente.js';
+export { obterResgatePendente } from './use-cases/usuario/obter-resgate-pendente.js';
 export type { ObterStatusTutorialUsuarioDeps } from './use-cases/usuario/obter-status-tutorial-usuario.js';
 export { obterStatusTutorialUsuario } from './use-cases/usuario/obter-status-tutorial-usuario.js';
 export type {

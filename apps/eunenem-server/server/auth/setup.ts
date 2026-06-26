@@ -39,6 +39,8 @@ import {
   DadosRecebimentoRepositoryPostgres,
   type PerfilCriadorRepository,
   PerfilCriadorRepositoryPostgres,
+  type ResgatePendenteRepository,
+  ResgatePendenteRepositoryPostgres,
   PlataformaRepositoryMemory,
   type PlataformaRepository,
   type ProvedorRegraTaxa,
@@ -80,6 +82,13 @@ export interface ServerDeps {
    * the same Kysely instance as the other domain repos.
    */
   readonly dadosRecebimentoRepository: DadosRecebimentoRepository;
+  /**
+   * Resgate-pendente marker store (aperture-kj9el #4b). Backs the
+   * `dadosRecebimento.marcarResgatePendente` mutation + the pending field on
+   * `dadosRecebimento.get`. Postgres-backed (migration 030), sharing the same
+   * Kysely instance as the other domain repos.
+   */
+  readonly resgatePendenteRepository: ResgatePendenteRepository;
   readonly plataformaRepository: PlataformaRepository;
   /**
    * Arrecadação adapters (aperture-d6atj). Needed by `contribuicao.*` tRPC
@@ -422,6 +431,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
   const usuarioRepository = new UsuarioRepositoryPostgres(db);
   const perfilCriadorRepository = new PerfilCriadorRepositoryPostgres(db);
   const dadosRecebimentoRepository = new DadosRecebimentoRepositoryPostgres(db);
+  const resgatePendenteRepository = new ResgatePendenteRepositoryPostgres(db);
 
   // Plataforma BC is still in-memory; the engine ships seeded values for
   // ID_PLATAFORMA_EUNENEM + ID_PLATAFORMA_EUCASEI via the seed array.
@@ -531,6 +541,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     usuarioRepository,
     perfilCriadorRepository,
     dadosRecebimentoRepository,
+    resgatePendenteRepository,
     plataformaRepository,
     campanhaRepository,
     contribuicaoRepository,

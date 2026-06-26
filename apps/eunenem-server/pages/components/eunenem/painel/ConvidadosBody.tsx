@@ -4,10 +4,6 @@ import { toast } from "sonner";
 import type { PainelSectionBodyProps } from "@/PainelSectionPage";
 import {
   CONVIDADOS_SEED,
-  CONVIDADOS_DEFAULT_MESSAGE,
-  CONVIDADOS_DEFAULT_DATE,
-  CONVIDADOS_DEFAULT_TIME,
-  CONVIDADOS_DEFAULT_ADDRESS,
   CONVIDADOS_EVENT,
   RSVP_META,
   avatarFor,
@@ -16,6 +12,16 @@ import {
   type ConvidadoRsvp,
 } from "@/lib/mocks/convidados";
 import { PREVIEW_EVENT } from "@/lib/mocks/eventPreview";
+// aperture-dkkau — wire the "Mensagem do convite" compositor to the REAL
+// convite save (eventoConvite.save → convites table), mirroring ConviteBody.
+import {
+  conviteErrorMessage,
+  conviteStateFromData,
+  savePayloadFromConviteState,
+  useConviteData,
+  useSalvarConvite,
+} from "@/lib/convite";
+import { DEFAULT_STATE, type ConviteState } from "@/lib/mocks/convite";
 
 // aperture-x1b3u — Lista de convidados (RSVP + convites por WhatsApp).
 //
@@ -1431,10 +1437,36 @@ function VirtualInvitePreviewCard() {
 // ---------- page body ----------
 export function ConvidadosBody({ slug: _slug }: PainelSectionBodyProps) {
   const [guests, setGuests] = useState<Convidado[]>(CONVIDADOS_SEED);
-  const [message, setMessage] = useState(CONVIDADOS_DEFAULT_MESSAGE);
-  const [inviteDate, setInviteDate] = useState(CONVIDADOS_DEFAULT_DATE);
-  const [inviteTime, setInviteTime] = useState(CONVIDADOS_DEFAULT_TIME);
-  const [inviteAddress, setInviteAddress] = useState(CONVIDADOS_DEFAULT_ADDRESS);
+  // aperture-dkkau — the compositor now holds the FULL ConviteState (mirroring
+  // ConviteBody) so saving re-serializes the whole convite intact. We only
+  // expose 4 fields here (message/date/time/address); palette, template,
+  // background image, host, babyName, mode etc. are hydrated from the saved
+  // convite and round-tripped untouched on save.
+  const [state, setState] = useState<ConviteState>({ ...DEFAULT_STATE });
+  const conviteQuery = useConviteData();
+  const salvarConvite = useSalvarConvite();
+  const hydratedRef = useRef(false);
+
+  useEffect(() => {
+    if (!conviteQuery.data || hydratedRef.current) return;
+    setState(conviteStateFromData(conviteQuery.data));
+    hydratedRef.current = true;
+  }, [conviteQuery.data]);
+
+  const onSaveConvite = async () => {
+    try {
+      // CONTRACT: start from the full hydrated state, never a hand-built
+      // partial — savePayloadFromConviteState re-serializes everything the
+      // user set in ConviteBody (palette/template/image/host/babyName/mode).
+      await salvarConvite.mutateAsync(savePayloadFromConviteState(state));
+      toast.success("convite salvo ♡");
+    } catch (error) {
+      toast.error("não foi possível salvar o convite agora", {
+        description: conviteErrorMessage(error),
+      });
+    }
+  };
+
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteType, setInviteType] = useState<"virtual" | "text">("virtual");
   const [filter, setFilter] = useState<
@@ -1605,8 +1637,10 @@ export function ConvidadosBody({ slug: _slug }: PainelSectionBodyProps) {
                     <span className="cv-invite-label">mensagem</span>
                     <textarea
                       className="cv-invite-textarea"
-                      value={message}
-                      onChange={(e) => setMessage(e.target.value)}
+                      value={state.message}
+                      onChange={(e) =>
+                        setState((s) => ({ ...s, message: e.target.value }))
+                      }
                     />
                   </label>
 
@@ -1617,8 +1651,10 @@ export function ConvidadosBody({ slug: _slug }: PainelSectionBodyProps) {
                     <input
                       className="cv-invite-input"
                       type="text"
-                      value={inviteAddress}
-                      onChange={(e) => setInviteAddress(e.target.value)}
+                      value={state.address}
+                      onChange={(e) =>
+                        setState((s) => ({ ...s, address: e.target.value }))
+                      }
                     />
                   </label>
 
@@ -1629,9 +1665,11 @@ export function ConvidadosBody({ slug: _slug }: PainelSectionBodyProps) {
                       </span>
                       <input
                         className="cv-invite-input"
-                        type="text"
-                        value={inviteDate}
-                        onChange={(e) => setInviteDate(e.target.value)}
+                        type="date"
+                        value={state.date}
+                        onChange={(e) =>
+                          setState((s) => ({ ...s, date: e.target.value }))
+                        }
                       />
                     </label>
                     <label className="cv-invite-field">
@@ -1640,9 +1678,11 @@ export function ConvidadosBody({ slug: _slug }: PainelSectionBodyProps) {
                       </span>
                       <input
                         className="cv-invite-input"
-                        type="text"
-                        value={inviteTime}
-                        onChange={(e) => setInviteTime(e.target.value)}
+                        type="time"
+                        value={state.time}
+                        onChange={(e) =>
+                          setState((s) => ({ ...s, time: e.target.value }))
+                        }
                       />
                     </label>
                   </div>
@@ -1659,6 +1699,18 @@ export function ConvidadosBody({ slug: _slug }: PainelSectionBodyProps) {
                 ariaLabel="Ver link de confirmação"
               >
                 <IconLink size={14} /> Pré-visualizar link
+              </Button>
+              {/* aperture-dkkau — persist the convite via eventoConvite.save */}
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={onSaveConvite}
+                disabled={salvarConvite.isPending}
+                title="Salvar convite"
+                ariaLabel="Salvar convite"
+              >
+                <IconHeart size={14} fill="currentColor" />{" "}
+                {salvarConvite.isPending ? "Salvando…" : "Salvar"}
               </Button>
             </div>
           </div>
