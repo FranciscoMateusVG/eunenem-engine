@@ -105,6 +105,32 @@ async function probe(
   return { status: res.status, body: await res.text() };
 }
 
+/**
+ * Same as probe() but ALSO surfaces the `cache-control` header. Used by the
+ * newly-allowed-route cases: the guard applies no-store on the allowed
+ * passthrough (setNoStore after next() in installBlockedAuthHandlerGuard), so
+ * no-store IS observable in THIS test app's scope — it is NOT a server-only
+ * middleware here. `redirect: 'manual'` so a 30x is observed as a 30x, not
+ * auto-followed.
+ */
+async function probeWithHeaders(
+  method: 'POST' | 'GET',
+  path: string,
+  body?: unknown,
+): Promise<{ status: number; body: string; cacheControl: string | null }> {
+  const res = await app.request(path, {
+    method,
+    headers: { 'content-type': 'application/json' },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+    redirect: 'manual',
+  });
+  return {
+    status: res.status,
+    body: await res.text(),
+    cacheControl: res.headers.get('cache-control'),
+  };
+}
+
 describe('DENY-BY-DEFAULT /api/auth/* on the REAL handler (aperture-sxj32 pins 9tca0)', () => {
   // --------------------------------------------------------------------------
   // 1. HIGHEST-VALUE PIN — the cross-tenant escalation route is dead.
@@ -168,6 +194,123 @@ describe('DENY-BY-DEFAULT /api/auth/* on the REAL handler (aperture-sxj32 pins 9
         'An arbitrary /api/auth/* non-route must return the uniform 410. A 404 (or any ' +
           'non-410) means the guard let it through to the real handler = allow-by-default ' +
           'regression + a route-recon oracle.',
+      ).toBe(BLOCKED_AUTH_STATUS);
+      expect(body).toBe(BLOCKED_AUTH_BODY);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // 2b. ALLOWLIST-WIDENING REGRESSION PINS (aperture-a7ttv pins aperture-x3g59).
+  //     Cipher widened the deny-by-default to ALSO pass GET /api/auth/error +
+  //     GET /api/auth/ok (previously both 410'd, so an OAuth failure showed users
+  //     a bare "Gone" instead of better-auth's readable error page). These cases
+  //     pin the EXACT new allowlist shape:
+  //       POSITIVE — error+ok are now reachable (NOT 410, hit the real handler).
+  //       NEGATIVE — the widening did NOT crack deny-by-default: the wrong method
+  //       on error, and mutative/enumeration routes, MUST still 410. The widening
+  //       opened EXACTLY {GET error, GET ok} and nothing else.
+  //
+  //     OBSERVED against the REAL guarded handler (test-db Postgres) at pin time:
+  //       GET error?error=… → 200 (HTML)   GET ok → 200 ({"ok":true})
+  //       POST error → 410   POST sign-up/email → 410   GET list-sessions → 410
+  //     no-store IS in scope here: the guard's setNoStore lands no-store on the
+  //     allowed passthrough (NOT a server-only middleware in this test app), so
+  //     the cache-control assertions below are meaningful and not faked.
+  // --------------------------------------------------------------------------
+  describe('allowlist widening (aperture-x3g59) — error+ok reachable, posture intact', () => {
+    // POSITIVE 1 — the OAuth error page is reachable again.
+    it('GET /api/auth/error?error=account_not_linked → NOT 410 (reaches better-auth error route)', async () => {
+      const { status, body, cacheControl } = await probeWithHeaders(
+        'GET',
+        '/api/auth/error?error=account_not_linked',
+      );
+      expect(
+        status,
+        'GET /api/auth/error must NOT 410 — the x3g59 widening makes it reach the real ' +
+          'better-auth error route. A 410 here = the allowlist fix is NOT effective ' +
+          '(OAuth failures show a bare "Gone" again). Do NOT massage this to expect 410.',
+      ).not.toBe(BLOCKED_AUTH_STATUS);
+      // Pin the OBSERVED shape: in this test scope better-auth RENDERS the error
+      // page (HTML 200) rather than 302-redirecting (prod, behind a baseURL, may
+      // 302 → /?error=…). Accept either a redirect OR a 200, which is the
+      // contract better-auth documents for this route.
+      expect([200, 302, 303, 307]).toContain(status);
+      if (status === 200) {
+        // The error route renders an HTML page that echoes the (sanitized) code.
+        expect(body).toContain('<!DOCTYPE html>');
+      }
+      // no-store is observable here (guard-applied on the allowed passthrough).
+      expect(cacheControl).toContain('no-store');
+    });
+
+    // POSITIVE 2 — the health/ok route is reachable again.
+    it('GET /api/auth/ok → 200 {"ok":true}, no-store (reaches better-auth ok route)', async () => {
+      const { status, body, cacheControl } = await probeWithHeaders('GET', '/api/auth/ok');
+      expect(
+        status,
+        'GET /api/auth/ok must NOT 410 — x3g59 widened the allowlist to pass it through ' +
+          'to the real better-auth ok route. A 410 here = the fix is broken.',
+      ).not.toBe(BLOCKED_AUTH_STATUS);
+      expect(status).toBe(200);
+      // better-auth's ok route returns the JSON health body {ok:true}.
+      expect(JSON.parse(body)).toEqual({ ok: true });
+      // no-store is observable here (guard-applied on the allowed passthrough).
+      expect(cacheControl).toContain('no-store');
+    });
+
+    // NEGATIVE 1 — method-specificity: only GET error is allowed.
+    it('POST /api/auth/error → 410 + no-store (allowlist is GET-only — no method-probing signal)', async () => {
+      const { status, body, cacheControl } = await probeWithHeaders('POST', '/api/auth/error', {
+        probe: true,
+      });
+      expect(
+        status,
+        'POST /api/auth/error must STILL 410 — x3g59 allowed GET only. A non-410 here = the ' +
+          'widening cracked method-specificity (a method-probing signal opened up).',
+      ).toBe(BLOCKED_AUTH_STATUS);
+      expect(body).toBe(BLOCKED_AUTH_BODY);
+      // The guard's setNoStore runs on the DENIED branch too (aperture-0jyzj/#289),
+      // so a 410 deny also carries no-store — pin it so a denied response can't be
+      // cached by an intermediary. Completes the no-store coverage across BOTH guard branches.
+      expect(cacheControl).toContain('no-store');
+    });
+
+    // NEGATIVE 2 — mutative write route stays dead.
+    it('POST /api/auth/sign-up/email → 410 (mutative write stays denied)', async () => {
+      const { status, body } = await probe('POST', '/api/auth/sign-up/email', {
+        email: 'probe@example.com',
+        password: 'probe-password',
+        name: 'probe',
+      });
+      expect(
+        status,
+        'POST /api/auth/sign-up/email must STILL 410 — the widening must not open any ' +
+          'mutative write route (sign-up runs through the tRPC saga, never HTTP).',
+      ).toBe(BLOCKED_AUTH_STATUS);
+      expect(body).toBe(BLOCKED_AUTH_BODY);
+    });
+
+    // NEGATIVE 3 — enumeration route stays dead.
+    it('GET /api/auth/list-sessions → 410 (enumeration stays denied)', async () => {
+      const { status, body } = await probe('GET', '/api/auth/list-sessions');
+      expect(
+        status,
+        'GET /api/auth/list-sessions must STILL 410 — the widening must not open any ' +
+          'session-enumeration route.',
+      ).toBe(BLOCKED_AUTH_STATUS);
+      expect(body).toBe(BLOCKED_AUTH_BODY);
+    });
+
+    // NEGATIVE 4 — catch-all tripwire still 410s (the allowlist did not open-by-default).
+    // (The dedicated tripwire above already asserts this; re-pinned HERE next to the
+    //  widening so a future change that over-widens to allow-by-default fails IN THIS
+    //  block too, right where the widening lives.)
+    it('GET /api/auth/__deny_by_default_probe__ → 410 (widening opened error+ok ONLY, not open-by-default)', async () => {
+      const { status, body } = await probe('GET', '/api/auth/__deny_by_default_probe__');
+      expect(
+        status,
+        'The catch-all tripwire must STILL 410 — the x3g59 widening must have opened ' +
+          'EXACTLY {GET error, GET ok}, not relaxed the posture to allow-by-default.',
       ).toBe(BLOCKED_AUTH_STATUS);
       expect(body).toBe(BLOCKED_AUTH_BODY);
     });
