@@ -56,6 +56,9 @@ const MUST_ALLOW = [
   { method: 'POST', path: '/api/auth/sign-in/social' },
   { method: 'GET', path: '/api/auth/callback/google' },
   { method: 'GET', path: '/api/auth/callback/oauth' },
+  // aperture-3c9na: the frontend BetterAuth client's own-session READ endpoint.
+  // Own-cookie-scoped (no IDOR / no enumeration / no cross-tenant); GET only.
+  { method: 'GET', path: '/api/auth/get-session' },
 ] as const;
 
 describe('eunenem-server deny-by-default auth guard (aperture-9tca0)', () => {
@@ -139,11 +142,19 @@ describe('eunenem-server deny-by-default auth guard (aperture-9tca0)', () => {
       expect(isAllowedAuthRequest('POST', '/api/auth/sign-in/social')).toBe(true);
       expect(isAllowedAuthRequest('GET', '/api/auth/callback/google')).toBe(true);
       expect(isAllowedAuthRequest('GET', '/api/auth/callback/apple')).toBe(true);
+      // aperture-3c9na: the frontend session-READ endpoint, GET only.
+      expect(isAllowedAuthRequest('GET', '/api/auth/get-session')).toBe(true);
       // wrong METHOD on an allowed path is denied (no method-probing signal)
       expect(isAllowedAuthRequest('GET', '/api/auth/sign-in/social')).toBe(false);
       expect(isAllowedAuthRequest('POST', '/api/auth/callback/google')).toBe(false);
-      // wrong PATH is denied
+      // get-session is a READ — POST (the mutating shape) stays denied
+      expect(isAllowedAuthRequest('POST', '/api/auth/get-session')).toBe(false);
+      // wrong PATH is denied — the mutation/oracle routes STAY denied (no
+      // blanket relaxation; get-session is the ONLY route 3c9na exempts)
       expect(isAllowedAuthRequest('POST', '/api/auth/update-user')).toBe(false);
+      expect(isAllowedAuthRequest('POST', '/api/auth/change-email')).toBe(false);
+      expect(isAllowedAuthRequest('POST', '/api/auth/request-password-reset')).toBe(false);
+      expect(isAllowedAuthRequest('GET', '/api/auth/list-sessions')).toBe(false);
       expect(isAllowedAuthRequest('POST', '/api/auth/sign-in/email')).toBe(false);
       expect(isAllowedAuthRequest('GET', '/api/auth/verify-email')).toBe(false);
       // not a prefix-confusion: 'callback' without trailing slash, social-evil

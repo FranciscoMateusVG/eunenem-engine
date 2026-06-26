@@ -47,10 +47,26 @@ import type { Hono } from 'hono';
  *     so a new provider needs no guard change). Google uses the GET (query)
  *     callback; a provider that needs POST form_post would require adding it
  *     here + a Cipher review (deny-by-default = safe failure mode).
+ *   - GET  /api/auth/get-session        — the frontend BetterAuth client's
+ *     session-READ endpoint (client.js calls it to learn whether the user is
+ *     logged in). aperture-3c9na: the original 9tca0 allowlist over-reached —
+ *     it omitted get-session because the BACKEND resolver uses the PROGRAMMATIC
+ *     `auth.api.getSession`, but the FRONTEND client uses this HTTP route, so
+ *     blocking it made the client conclude "logged-out" even with a valid
+ *     session (the visible 6wo1f symptom). SAFE to allow (Cipher-verified vs
+ *     better-auth@1.6.12 session.mjs): it resolves the session ONLY from the
+ *     requester's own SIGNED cookie (`getSignedCookie(...sessionToken, secret)`)
+ *     — no session-id/token query param (no IDOR), returns the requester's own
+ *     {session,user} or null (cookie-keyed, not email-keyed → no enumeration;
+ *     own-tenant only → no cross-tenant leak). It is a READ of one's OWN session.
+ *     Only GET is allowed (the method the client issues); the mutation/oracle
+ *     routes (update-user, change-email, request-password-reset, etc.) STAY
+ *     denied — this is a single-route exemption, NOT a blanket relaxation.
  */
 export function isAllowedAuthRequest(method: string, path: string): boolean {
   if (method === 'POST' && path === '/api/auth/sign-in/social') return true;
   if (method === 'GET' && path.startsWith('/api/auth/callback/')) return true;
+  if (method === 'GET' && path === '/api/auth/get-session') return true;
   return false;
 }
 
