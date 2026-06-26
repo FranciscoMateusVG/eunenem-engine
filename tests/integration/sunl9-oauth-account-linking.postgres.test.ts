@@ -7,73 +7,82 @@ import { createTestDatabase, type TestDatabase } from '../helpers/test-db.js';
 import { truncateBetterAuthTables } from '../helpers/truncate-better-auth.js';
 
 /**
- * SECURITY-PINNING TEST — Google-OAuth account-linking collision gate
- * (aperture-8655f / aperture-w2bty — Cipher's account-takeover gate).
+ * SECURITY-PINNING TEST — Google-OAuth account-linking + password-invalidation
+ * (aperture-8655f / aperture-w2bty / aperture-qcrv4 — Cipher's takeover gate,
+ * NEW MODEL).
  *
  * ============================================================================
- * READ THIS FIRST — HONEST COVERAGE NOTE (the test of the *real* reality)
+ * READ THIS FIRST — THE MODEL THIS FILE PINS (aperture-qcrv4, the CURRENT fix)
  * ============================================================================
- * The hardening we were asked to pin lives in
- * `src/adapters/usuario/criar-auth.ts`:
+ * The hardening this file pins lives in `src/adapters/usuario/criar-auth.ts`.
  *
+ * HISTORY — the OLD w2bty model (SUPERSEDED, do NOT re-pin it):
+ *     account: { accountLinking: { trustedProviders: [], disableImplicitLinking: true } }
+ * w2bty hard-REFUSED implicit linking: a returning email/password user who
+ * clicked "Sign in with Google" got `error=account_not_linked` and could not
+ * log in. That blocked legitimate login on a consumer product.
+ *
+ * THE NEW qcrv4 model (CURRENT — what this file pins):
  *     account: {
- *       accountLinking: { trustedProviders: [], disableImplicitLinking: true },
+ *       accountLinking: { trustedProviders: ['google'], requireLocalEmailVerified: false },
  *     }
+ *   + an `account.create.before` databaseHook that, when a `google` account is
+ *     created (links to a user), runs
+ *       UPDATE accounts SET password = NULL
+ *       WHERE user_id = <that user> AND provider_id = 'credential'
+ *     FAIL-CLOSED (returns false to ABORT the link on error).
  *
- * In better-auth@1.6.12 this config makes `handleOAuthUserInfo`
- * (dist/oauth2/link-account.mjs) SHORT-CIRCUIT to
- * `{ error: "account not linked", data: null }` BEFORE `createSession`
- * when a first Google sign-in collides with an existing local account —
- * which is the takeover refusal we want to lock in.
+ * The config RELAXES linking (an existing email+password user CAN now sign in
+ * with Google and it LINKS — the old hard-refuse is gone). The compensating
+ * control is the password-NULLing hook. Together they enforce the invariant:
+ *   THERE IS NEVER A "Google linked + old local password still works" STATE.
  *
- * HISTORY (the casing bug, now FIXED — aperture-bq2c9, tip e9a47f0):
- * While building this test the OAuth callback could NOT REACH the linking
- * decision at all. better-auth@1.6.12's data-layer does not honour
- * `database.casing: 'snake'` for queries through its OWN adapter, so every
- * adapter query emitted CAMEL-CASE column names (`accountId`, `expiresAt`, …)
- * absent from the snake_cased migration-009 schema (Postgres `42703 column
- * does not exist`). Init 500'd (`createVerificationValue` wrote `expiresAt`),
- * the callback 500'd at state-parse and again at `findOAuthUser`
- * (`accounts.accountId`). The gate was masked behind those 500s.
- *
- * THE FIX (Rex, e9a47f0): criar-auth.ts now declares explicit per-field
- * `fieldName` maps (`accountId → account_id`, `expiresAt → expires_at`, etc.)
- * so the better-auth adapter queries the snake_case columns directly. The
- * init step and the Google OAuth callback now run end-to-end against the real
- * schema — and the `disableImplicitLinking` gate is REACHABLE for the first
- * time.
- *
- * OBSERVED post-fix behaviour (this is now PINNED, verified end-to-end
- * against e9a47f0): a colliding existing-email Google sign-in is REFUSED at
- * the gate — `handleOAuthUserInfo` short-circuits to "account not linked"
- * BEFORE `createSession`, the callback redirects to
- *   /oauth-error?error=account_not_linked
- * NO session cookie is minted, NO `sessions` row is written, and NO implicit
- * `google` account is linked to the victim's row (the only `accounts` row
- * stays the original `credential` one). This is the genuine takeover refusal
- * we set out to lock in.
+ * Why that DEFEATS the w2bty pre-hijack takeover: the attacker pre-registers
+ * victim@email via email/password (eunenem has no email-verification flow, so
+ * the row is unverified), the victim later "Sign in with Google" → the link
+ * fires → the attacker's credential password is NULLed → the attacker's
+ * password no longer authenticates (`iniciarSessao` rejects on the NULL hash),
+ * while the legit Google user keeps access (they auth via Google, not a
+ * password). The password-invalidation is the LOAD-BEARING safety; without it
+ * this config reopens the takeover.
  *
  * WHAT THIS FILE PINS (all real, nothing faked):
  *   (A)  SOURCE CONFIG: `criarAuth` must emit
- *        `account.accountLinking.disableImplicitLinking === true` and empty
- *        `trustedProviders`. Removing it re-opens the takeover gate. Durable
- *        regression guard for the gate config itself.
- *   (B)  REAL CALLBACK: the colliding Google sign-in mints NO session / NO
- *        implicit link for the existing local user AND redirects to the
- *        genuine `error=account_not_linked` refusal (the gate, reachable
- *        post-fix). If this ever flips to success/session, that is an
- *        account-takeover regression — do NOT paper over it.
- *   (B2) INIT NO-500: `POST /api/auth/sign-in/social` no longer 500s — it
- *        returns a Google authorize redirect (proves the casing fix reached
- *        the init path too).
+ *        `account.accountLinking.trustedProviders` deep-equal `['google']` AND
+ *        `requireLocalEmailVerified === false`. Durable regression guard for
+ *        the relaxed-linking config itself.
+ *   (B)  REAL CALLBACK — COLLISION NOW LINKS: a colliding existing-email Google
+ *        sign-in LINKS — a session IS established (cookie + sessions row) and a
+ *        `google` accounts row now exists for the user. Redirect is the
+ *        success/dashboard URL, NOT `account_not_linked`.
+ *   (b)  ⭐ LOAD-BEARING + NON-VACUOUS PASSWORD-INVALIDATION PROOF. Three
+ *        distinct asserts: (1) BEFORE the Google link, the local password
+ *        AUTHENTICATES (`iniciarSessao` SUCCEEDS) — the control that proves the
+ *        password was valid pre-link; (2) AFTER the link, the credential
+ *        accounts.password IS NULL; (3) AFTER the link, the SAME local password
+ *        is REJECTED (`iniciarSessao` throws). The BEFORE-succeeds /
+ *        AFTER-rejects contrast is what makes this NON-VACUOUS: it proves the
+ *        LINK killed the password, not that the password never worked.
+ *   (B2) INIT NO-500: `POST /api/auth/sign-in/social` returns a Google
+ *        authorize redirect (proves the casing fix reached the init path too).
+ *   (D)  NO-REGRESSION HAPPY PATH: a brand-new Google email (no pre-existing
+ *        credential account) still creates a fresh user with
+ *        id_plataforma=EUNENEM + session.
  *   (C)  Composite UNIQUE `users(id_plataforma, email)` — defence-in-depth
  *        (raw Kysely).
  *
  * The ONLY thing mocked anywhere below is Google's OUTBOUND token endpoint
  * (`https://oauth2.googleapis.com/token`). The state cookie + verification
  * row are reconstructed exactly as better-auth's init step writes them, so
- * the callback runs its REAL state-parse + REAL (now-fixed) data-layer +
- * REAL linking gate — nothing about the security decision is faked.
+ * the callback runs its REAL state-parse + REAL data-layer + REAL linking +
+ * REAL password-invalidation hook — nothing about the security decision is
+ * faked.
+ *
+ * ⚠️ REGRESSION-GUARD (the whole point of (B)+(b)): if the credential password
+ * is NOT cleared after a Google link, OR the old password STILL authenticates
+ * post-link, the w2bty pre-hijack takeover is REOPENED. (b) pins loudly so a
+ * config/hook regression (removing trustedProviders, or the account.create.
+ * before hook, or a better-auth bump that re-blocks linking) breaks this test.
  */
 
 const SECRET = 'test-secret-at-least-32-chars-long-xxxxx';
@@ -269,7 +278,7 @@ function setsSessionCookie(res: Response): boolean {
   return (res.headers.getSetCookie?.() ?? []).some((c) => c.includes('session_token'));
 }
 
-describe('Google-OAuth account-linking collision gate (aperture-8655f / aperture-w2bty)', () => {
+describe('Google-OAuth account-linking + password-invalidation (aperture-8655f / aperture-w2bty / aperture-qcrv4)', () => {
   beforeEach(async () => {
     await truncateBetterAuthTables(testDb.db);
   });
@@ -279,9 +288,10 @@ describe('Google-OAuth account-linking collision gate (aperture-8655f / aperture
   });
 
   // --------------------------------------------------------------------------
-  // (A) SOURCE-CONFIG PIN — the durable regression guard for the gate.
+  // (A) SOURCE-CONFIG PIN — the durable regression guard for the NEW qcrv4
+  //     relaxed-linking config.
   // --------------------------------------------------------------------------
-  it('(A) PIN: criarAuth emits accountLinking.disableImplicitLinking=true', () => {
+  it('(A) PIN: criarAuth emits accountLinking.trustedProviders=["google"] + requireLocalEmailVerified=false', () => {
     const auth = buildAuth();
     // `auth.options` is the resolved BetterAuthOptions object criarAuth built.
     const accountLinking = (
@@ -294,23 +304,39 @@ describe('Google-OAuth account-linking collision gate (aperture-8655f / aperture
       accountLinking,
       'criar-auth.ts must declare an account.accountLinking block',
     ).toBeDefined();
-    expect(
-      accountLinking?.disableImplicitLinking,
-      'REMOVING disableImplicitLinking re-opens the OAuth→local account-takeover gate (aperture-w2bty). Do not.',
-    ).toBe(true);
+    // aperture-qcrv4: linking is now RELAXED — google is a trusted provider so
+    // a returning email/password user can sign in with Google and it LINKS.
+    // The takeover is closed by the password-invalidation hook (proven in (b)),
+    // NOT by refusing the link. Removing google from trustedProviders re-blocks
+    // legit login; the OLD disableImplicitLinking assertion is GONE.
     expect(
       accountLinking?.trustedProviders,
-      'trustedProviders must stay empty — a trusted provider bypasses the gate',
-    ).toEqual([]);
+      'trustedProviders must deep-equal ["google"] (the relaxed-linking policy, aperture-qcrv4)',
+    ).toEqual(['google']);
+    expect(
+      accountLinking?.requireLocalEmailVerified,
+      'requireLocalEmailVerified must be false — eunenem accounts are never ' +
+        'email_verified, so true would re-block the google link (account_not_linked).',
+    ).toBe(false);
   });
 
   // --------------------------------------------------------------------------
-  // (B) REAL CALLBACK — colliding Google sign-in mints NO session for the
-  //     existing local user and is REFUSED at the disableImplicitLinking gate
-  //     with error=account_not_linked (reachable post-casing-fix, e9a47f0).
+  // (B) REAL CALLBACK — COLLISION NOW LINKS (flipped from w2bty's refuse).
+  //     A colliding existing-email Google sign-in LINKS: a session IS
+  //     established (cookie + sessions row) and a `google` accounts row now
+  //     exists for the user. Redirect is the success/dashboard URL, NOT
+  //     account_not_linked.
+  //
+  //     This MUST use the production-fidelity auth (google provider +
+  //     idPlataformaPadrao) so BOTH databaseHooks are live — the dm7s3
+  //     user.create.before (irrelevant here, no user is created) AND the
+  //     qcrv4 account.create.before password-invalidation hook (load-bearing
+  //     for (b)). buildAuth() (no idPlataformaPadrao) would still register the
+  //     account hook, but we mirror prod exactly to keep (B) and (b) on the
+  //     same config the server runs.
   // --------------------------------------------------------------------------
-  it('(B) colliding Google sign-in mints NO session for the existing local user', async () => {
-    const auth = buildAuth();
+  it('(B) colliding Google sign-in LINKS — session established + google account linked', async () => {
+    const auth = buildAuthWithPlatformId();
     const authService = new AuthServiceBetterAuth(testDb.db);
 
     const existingUserId = randomUUID();
@@ -323,63 +349,184 @@ describe('Google-OAuth account-linking collision gate (aperture-8655f / aperture
       nome: 'Collision Victim',
     });
 
-    // Google reports the SAME email, VERIFIED — the takeover-attempt shape.
+    // Google reports the SAME email, VERIFIED — the collision shape.
     const res = await driveRealCallback(auth, {
       idTokenClaims: {
-        sub: 'google-attacker-subject-0001',
+        sub: 'google-collision-subject-0001',
         email,
         email_verified: true,
-        name: 'Not The Real Owner',
+        name: 'Google Identity',
       },
     });
 
-    // THE LOAD-BEARING SECURITY ASSERTION (holds regardless of WHY):
-    // the attacker is NOT logged in as the victim.
-    expect(setsSessionCookie(res), 'no session cookie may be minted').toBe(false);
+    // It LINKS — a session IS minted for the pre-existing user.
+    expect(
+      setsSessionCookie(res),
+      'aperture-qcrv4: the relaxed-linking policy LINKS the google sign-in to ' +
+        'the existing user, so a session cookie MUST be minted. Absent = the ' +
+        'link did NOT fire (config/better-auth regression) — a FINDING.',
+    ).toBe(true);
     expect(
       await sessionCountForUser(existingUserId),
-      'no session row may exist for the pre-existing local user',
-    ).toBe(0);
+      'a sessions row MUST exist for the pre-existing local user after the link',
+    ).toBeGreaterThanOrEqual(1);
 
-    // And no Google account was implicitly linked to the victim's row.
+    // A google account is now linked to the existing user's row.
+    const linkedGoogle = await testDb.db
+      .selectFrom('accounts')
+      .select(['id', 'account_id'])
+      .where('user_id', '=', existingUserId)
+      .where('provider_id', '=', 'google')
+      .execute();
+    expect(
+      linkedGoogle,
+      'a google accounts row MUST now be linked to the existing user (the link fired)',
+    ).toHaveLength(1);
+
+    // The callback redirects to SUCCESS/dashboard — NOT account_not_linked.
+    const location = res.headers.get('location') ?? '';
+    expect([302, 303, 307]).toContain(res.status);
+    expect(
+      location,
+      'aperture-qcrv4: a successful link must redirect to the success/dashboard URL',
+    ).toContain('dashboard');
+    expect(
+      location,
+      'must NOT redirect to account_not_linked (that was the OLD w2bty refuse model)',
+    ).not.toContain('account_not_linked');
+  });
+
+  // --------------------------------------------------------------------------
+  // (b) ⭐ LOAD-BEARING + NON-VACUOUS PASSWORD-INVALIDATION PROOF (aperture-qcrv4).
+  //
+  //     This is the assertion Cipher reviews hardest. It proves the qcrv4
+  //     account.create.before hook genuinely KILLS the pre-existing local
+  //     password the instant Google links — which is what defeats the w2bty
+  //     pre-hijack takeover (attacker pre-registers victim's email+password;
+  //     victim later signs in with Google → link fires → attacker's password
+  //     is NULLed → attacker's password no longer authenticates).
+  //
+  //     THREE DISTINCT, ORDERED ASSERTS make this NON-VACUOUS:
+  //       1. CONTROL (BEFORE the link): the local password AUTHENTICATES —
+  //          iniciarSessao SUCCEEDS (returns a session token). Proves the
+  //          password was valid pre-link.
+  //       2. (drive the Google callback to LINK — same as (B))
+  //       3a. AFTER: the credential accounts.password IS NULL (the hook ran).
+  //       3b. AFTER: the SAME local password is REJECTED — iniciarSessao
+  //           throws. (iniciarSessao's `if (!row?.password)` no-user branch
+  //           fires on the NULL hash → UsuarioInputInvalidoError.)
+  //
+  //     The BEFORE-succeeds / AFTER-rejects CONTRAST is the non-vacuity proof:
+  //     it shows the LINK killed the password, not that the password never
+  //     worked or rejects for an unrelated reason. If step 1 rejected too, the
+  //     after-reject would prove nothing — that vacuous shape is exactly what
+  //     this structure rules out.
+  //
+  //     ⚠️ REGRESSION-GUARD: if (3a) password is NOT null after the link, OR
+  //     (3b) the old password STILL authenticates post-link → the w2bty
+  //     pre-hijack takeover is REOPENED (attacker keeps a working password
+  //     alongside a freshly-linked Google identity). Do NOT massage these to
+  //     pass — that would hide a real account-takeover.
+  // --------------------------------------------------------------------------
+  it('(b) ⭐ Google link INVALIDATES the pre-existing local password (before-auth SUCCEEDS, after-auth REJECTS)', async () => {
+    const auth = buildAuthWithPlatformId();
+    const authService = new AuthServiceBetterAuth(testDb.db);
+
+    const existingUserId = randomUUID();
+    const email = 'prehijack-victim@example.com';
+    const oldPassword = 'old-password-123';
+    await authService.criarConta({
+      idUsuario: existingUserId,
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
+      email,
+      senha: oldPassword,
+      nome: 'Pre-Hijack Victim',
+    });
+
+    // ── STEP 1: CONTROL — BEFORE the link, the local password AUTHENTICATES.
+    // iniciarSessao SUCCEEDS, returning a session token. This is the control
+    // that makes the after-reject meaningful: it proves the password WORKED
+    // pre-link. (iniciarSessao returns {idUsuario, token, expiraEm} on success
+    // and THROWS UsuarioInputInvalidoError on bad creds — observed in
+    // auth-service.better-auth.ts.)
+    const sessionBefore = await authService.iniciarSessao({
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
+      email,
+      senha: oldPassword,
+    });
+    expect(
+      sessionBefore.idUsuario,
+      'CONTROL: before the link the old password MUST authenticate (proves it was valid pre-link)',
+    ).toBe(existingUserId);
+    expect(
+      sessionBefore.token,
+      'CONTROL: before the link iniciarSessao must mint a session token',
+    ).toBeTruthy();
+
+    // Sanity: the credential password is a real hash before the link.
+    const pwBefore = await testDb.db
+      .selectFrom('accounts')
+      .select('password')
+      .where('user_id', '=', existingUserId)
+      .where('provider_id', '=', 'credential')
+      .executeTakeFirstOrThrow();
+    expect(
+      pwBefore.password,
+      'precondition: the credential account has a non-null password before the link',
+    ).toBeTruthy();
+
+    // ── STEP 2: drive the REAL Google callback → the link fires → the
+    // account.create.before hook NULLs the credential password.
+    const res = await driveRealCallback(auth, {
+      idTokenClaims: {
+        sub: 'google-prehijack-subject-0001',
+        email,
+        email_verified: true,
+        name: 'Google Identity',
+      },
+    });
+    // Confirm the link actually happened (otherwise (b) would be vacuous from
+    // the other direction — a no-op callback that never touched the password).
+    expect([302, 303, 307]).toContain(res.status);
+    const location = res.headers.get('location') ?? '';
+    expect(
+      location,
+      'the link must SUCCEED (redirect to dashboard) so the password-NULL hook ran',
+    ).toContain('dashboard');
     const linkedGoogle = await testDb.db
       .selectFrom('accounts')
       .select('id')
       .where('user_id', '=', existingUserId)
       .where('provider_id', '=', 'google')
       .execute();
-    expect(linkedGoogle, 'no implicit google link may be created').toHaveLength(0);
+    expect(linkedGoogle, 'the google account must be linked (the link fired)').toHaveLength(1);
 
-    // The callback must NOT have succeeded into a session/dashboard.
-    const location = res.headers.get('location') ?? '';
-    expect([302, 303, 307]).toContain(res.status);
-    expect(location, 'must not redirect to the success/dashboard URL').not.toContain(
-      'dashboard',
-    );
-
-    // GENUINE GATE PIN — post-casing-fix (aperture-bq2c9, tip e9a47f0).
-    // The casing bug is FIXED: better-auth's own adapter now queries the
-    // snake_case columns via the per-field `fieldName` maps Rex added to
-    // criar-auth.ts, so the callback no longer 500s at the
-    // verifications/accounts column mismatch. The colliding Google sign-in
-    // now REACHES the `disableImplicitLinking` decision and is REFUSED:
-    // `handleOAuthUserInfo` short-circuits to "account not linked" BEFORE
-    // `createSession`, redirecting the callback to
-    //   /oauth-error?error=account_not_linked
-    // (OBSERVED end-to-end against e9a47f0, aperture-sunl9/izzy-sbje8). This
-    // is the FIRST time the takeover gate is exercised end-to-end — pre-fix
-    // it was masked behind the 500. The no-session / no-link / no-dashboard
-    // assertions above now hold for the GATE reason, not the casing bug.
-    //
-    //   ⚠️ If this assertion ever flips to a success/dashboard redirect OR a
-    //   session/google-link appears above, the gate has REGRESSED into a real
-    //   account-takeover (aperture-w2bty). Do NOT paper over it.
+    // ── STEP 3a: AFTER the link, the credential password IS NULL.
+    const pwAfter = await testDb.db
+      .selectFrom('accounts')
+      .select('password')
+      .where('user_id', '=', existingUserId)
+      .where('provider_id', '=', 'credential')
+      .executeTakeFirstOrThrow();
     expect(
-      location,
-      'POST-FIX reality: the disableImplicitLinking gate must REFUSE the ' +
-        'colliding sign-in with error=account_not_linked. A success/session ' +
-        'here is an account-takeover (aperture-w2bty).',
-    ).toContain('error=account_not_linked');
+      pwAfter.password,
+      'aperture-qcrv4: the account.create.before hook MUST NULL the credential ' +
+        'password when google links. Non-null here = the takeover is REOPENED ' +
+        '(attacker keeps a working password) — a FINDING.',
+    ).toBeNull();
+
+    // ── STEP 3b: AFTER the link, the SAME old password is REJECTED.
+    // iniciarSessao must throw (the NULL hash drives its no-user branch).
+    await expect(
+      authService.iniciarSessao({
+        idPlataforma: ID_PLATAFORMA_EUNENEM,
+        email,
+        senha: oldPassword,
+      }),
+      'aperture-qcrv4 / w2bty: AFTER the link the old password MUST NOT ' +
+        'authenticate. If it still mints a session, the pre-hijack takeover is ' +
+        'REOPENED — a FINDING. (BEFORE-succeeds + AFTER-rejects = non-vacuous proof.)',
+    ).rejects.toThrow();
   });
 
   // --------------------------------------------------------------------------
@@ -553,5 +700,103 @@ describe('Google-OAuth account-linking collision gate (aperture-8655f / aperture
       .where('id_plataforma', '=', ID_PLATAFORMA_EUNENEM)
       .execute();
     expect(rows, 'composite UNIQUE keeps exactly one row').toHaveLength(1);
+  });
+
+  // --------------------------------------------------------------------------
+  // (E) ALREADY-LINKED RE-LOGIN — the operator's PRIMARY-blocker regression
+  //     guard (aperture-jry44, folded in from the standalone diagnostic repro).
+  //
+  //     SHAPE: a RETURNING user whose ONLY account is an ALREADY-LINKED google
+  //     account (no local password / no credential row) signs in again with the
+  //     SAME google sub. This MUST be a CLEAN sign-in — better-auth finds the
+  //     existing account, updates its tokens and mints a session. It must NEVER
+  //     redirect to account_not_linked.
+  //
+  //     The operator's prod symptom (jry44) was exactly this user getting
+  //     account_not_linked on re-login. This guards that a returning
+  //     already-linked Google user always signs in — regressing it back to
+  //     account_not_linked (a config/better-auth/casing regression) breaks here.
+  //
+  //     State is seeded via raw Kysely (NOT criarConta — the operator has no
+  //     password), reproducing the exact operator row shape. The ONLY thing
+  //     mocked is Google's outbound token endpoint (via driveRealCallback), so
+  //     the REAL callback runs its REAL account lookup + linking gate.
+  // --------------------------------------------------------------------------
+  it('(E) already-linked Google account re-login signs in cleanly (NOT account_not_linked)', async () => {
+    const auth = buildAuthWithPlatformId();
+
+    // The operator's exact already-linked Google sub + a no-password user.
+    const googleSub = '109079365726236786089';
+    const email = 'already-linked@example.com';
+    const userId = randomUUID();
+
+    // Seed the operator-shape state: a user + an EXISTING google account row,
+    // NO credential row (operator has no local password).
+    await testDb.db
+      .insertInto('users')
+      .values({
+        id: userId,
+        name: 'Already Linked',
+        email,
+        email_verified: true,
+        id_plataforma: ID_PLATAFORMA_EUNENEM,
+        created_at: new Date(),
+        updated_at: new Date(),
+      })
+      .execute();
+    await testDb.db
+      .insertInto('accounts')
+      .values({
+        id: randomUUID(),
+        user_id: userId,
+        provider_id: 'google',
+        account_id: googleSub,
+        password: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+      })
+      .execute();
+
+    // Drive the REAL callback for the SAME sub — a returning sign-in.
+    const res = await driveRealCallback(auth, {
+      idTokenClaims: {
+        sub: googleSub,
+        email,
+        email_verified: true,
+        name: 'Already Linked',
+      },
+    });
+
+    // ── CLEAN SIGN-IN regression guard.
+    const location = res.headers.get('location') ?? '';
+    expect(
+      location,
+      'a returning user with an ALREADY-LINKED google account must NOT get ' +
+        'account_not_linked — they must just sign in (the jry44/operator symptom).',
+    ).not.toContain('account_not_linked');
+    expect(
+      setsSessionCookie(res),
+      'a session cookie MUST be minted on a clean already-linked re-sign-in',
+    ).toBe(true);
+    expect(
+      await sessionCountForUser(userId),
+      'a sessions row MUST exist for the returning already-linked user',
+    ).toBeGreaterThanOrEqual(1);
+    expect([302, 303, 307]).toContain(res.status);
+    expect(location, 'clean re-sign-in must land on the success/dashboard URL').toContain(
+      'dashboard',
+    );
+
+    // Exactly ONE google accounts row for the user — no duplicate created.
+    const googleAccounts = await testDb.db
+      .selectFrom('accounts')
+      .select('id')
+      .where('user_id', '=', userId)
+      .where('provider_id', '=', 'google')
+      .execute();
+    expect(
+      googleAccounts,
+      'the re-login must reuse the existing google account, never create a duplicate',
+    ).toHaveLength(1);
   });
 });

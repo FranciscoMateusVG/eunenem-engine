@@ -217,12 +217,32 @@ export function criarAuth(kysely: Database, config: CriarAuthConfig) {
         updatedAt: 'updated_at',
         // password, scope, id are single-word → column name already matches.
       },
-      // aperture-w2bty (Cipher security gate). OAuth sign-in must NEVER implicitly
-      // merge into an existing local account (account-takeover / pre-hijack class).
-      // disableImplicitLinking makes that explicit + independent of email_verified.
-      accountLinking: { trustedProviders: [], disableImplicitLinking: true },
-      // FORWARD-FRICTION: do NOT flip disableImplicitLinking off without (a) a real
-      // email-verification flow AND (b) Cipher re-review — the takeover gate lives here.
+      // aperture-qcrv4 (Cipher) — supersedes the w2bty disableImplicitLinking:true.
+      // POLICY: trust Google to link to a pre-existing same-email account, so a
+      // returning email/password user can sign in with Google (w2bty's hard refuse
+      // produced account_not_linked, blocking legit login on a consumer product).
+      //
+      // THREAT MODEL — why this is SAFE despite reopening implicit linking:
+      // The classic pre-hijack is: attacker pre-registers victim@email via
+      // email/password (unverified — eunenem has no verification flow), victim later
+      // "Sign in with Google", the Google login auto-links to the ATTACKER's
+      // pre-existing account, and the attacker's PASSWORD still opens it. w2bty
+      // closed this by refusing all implicit linking. We reopen linking but close
+      // the takeover a DIFFERENT way: the account.create.before hook below
+      // INVALIDATES the local credential password the instant Google links to a
+      // pre-existing account. So after a Google link, the pre-registered attacker's
+      // password no longer authenticates (login rejects on !password), while the
+      // legit Google user keeps access (they auth via Google, not the password).
+      // The password-invalidation hook is the LOAD-BEARING safety — without it,
+      // this config reopens the w2bty takeover. Do NOT remove one without the other.
+      //
+      // trustedProviders:['google'] kills better-auth's untrusted-provider refuse
+      // term; requireLocalEmailVerified:false kills the local-verified refuse term
+      // (required because eunenem accounts are never email_verified). ⚠️ FORWARD-
+      // FRICTION: requireLocalEmailVerified is @deprecated in better-auth@1.6.12 and
+      // becomes unconditional on the next minor — a better-auth upgrade would
+      // RE-BLOCK linking (account_not_linked returns). Re-review on any bump.
+      accountLinking: { trustedProviders: ['google'], requireLocalEmailVerified: false },
     },
     verification: {
       modelName: 'verifications',
@@ -254,28 +274,63 @@ export function criarAuth(kysely: Database, config: CriarAuthConfig) {
     // no idPlataforma + users.id_plataforma is notNull, so without this a
     // brand-new Google signup fails at user-create. Email+password (raw Kysely
     // criarConta) bypasses BetterAuth's create path, so it never hits this hook.
-    // Only registered when the consumer injects idPlataformaPadrao.
-    ...(idPlataformaPadrao
-      ? {
-          databaseHooks: {
+    databaseHooks: {
+      // aperture-dm7s3 — inject the default platform id on adapter-driven user
+      // creation (OAuth signup). Only registered when the consumer injects
+      // idPlataformaPadrao. SERVER-SOURCED ONLY: the platform id is ALWAYS the
+      // injected server constant, NEVER read from anything in the request (OAuth
+      // state/header/body / the incoming `user` object) — reading a user-
+      // influenceable source would re-open the cross-tenant vector that 9tca0's
+      // idPlataforma input:false closed, via the signup path. OVERRIDE
+      // unconditionally; the value can only ever be `idPlataformaPadrao`.
+      ...(idPlataformaPadrao
+        ? {
             user: {
               create: {
-                // SERVER-SOURCED ONLY (aperture-dm7s3 + Cipher tenancy gate):
-                // the platform id is ALWAYS the injected server constant and is
-                // NEVER read from anything in the request (OAuth state/header/
-                // body / the incoming `user` object). Reading a user-influenceable
-                // source would re-open the exact cross-tenant vector that 9tca0's
-                // idPlataforma input:false just closed — via the signup path
-                // instead of update-user. So we OVERRIDE unconditionally; the
-                // value can only ever be `idPlataformaPadrao` (a server constant).
                 before: async (user: Record<string, unknown>) => {
                   return { data: { ...user, idPlataforma: idPlataformaPadrao } };
                 },
               },
             },
+          }
+        : {}),
+      // aperture-qcrv4 (Cipher) — LOAD-BEARING SAFETY for the accountLinking
+      // relaxation above. When a Google account links to a user that also has a
+      // local credential (email/password) account, INVALIDATE the local password
+      // (set accounts.password = NULL where provider_id = 'credential'). This
+      // defeats the pre-hijack takeover: a pre-registered attacker's password no
+      // longer authenticates once the victim's Google links (login rejects on
+      // !password), while the legit Google user keeps access (they auth via
+      // Google). Runs in `before` (not `after`) so the clear happens — and can
+      // ABORT the link (return false) on failure — BEFORE the Google account
+      // exists: there is NEVER a "Google linked + old password still works" window.
+      // No-op for non-google account creates (credential signup, brand-new Google
+      // signup with no prior credential row → 0 rows updated).
+      account: {
+        create: {
+          before: async (account: { providerId?: unknown; userId?: unknown }) => {
+            if (account.providerId !== 'google' || typeof account.userId !== 'string') {
+              return;
+            }
+            try {
+              await kysely
+                .updateTable('accounts')
+                .set({ password: null })
+                .where('user_id', '=', account.userId)
+                .where('provider_id', '=', 'credential')
+                .execute();
+            } catch {
+              // Fail-closed: if the password could not be invalidated, ABORT the
+              // link rather than leave a usable pre-existing password alongside a
+              // freshly-linked Google identity (that would be the takeover state).
+              // The user can retry Google (this before-hook re-fires) to recover.
+              return false;
+            }
+            return;
           },
-        }
-      : {}),
+        },
+      },
+    },
   } satisfies BetterAuthOptions;
 
   return betterAuth(options);

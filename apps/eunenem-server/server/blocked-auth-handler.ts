@@ -67,6 +67,28 @@ export function isAllowedAuthRequest(method: string, path: string): boolean {
   if (method === 'POST' && path === '/api/auth/sign-in/social') return true;
   if (method === 'GET' && path.startsWith('/api/auth/callback/')) return true;
   if (method === 'GET' && path === '/api/auth/get-session') return true;
+  // aperture-x3g59: the deny-by-default over-reached on the OAuth ERROR page —
+  // it 410'd GET /api/auth/error, so every OAuth failure showed users a bare
+  // "Gone" instead of better-auth's readable error (in prod a 302 → /?error=...).
+  // Same over-reach class as the 3c9na get-session miss: a display-only route
+  // got swept up in the deny-by-default. Cipher-verified vs better-auth@1.6.12
+  // (api/routes/error.mjs + ok.mjs):
+  //   - GET /api/auth/error — reads ?error/?error_description, REGEX-whitelists
+  //     the code (/^['A-Za-z0-9_-]+$/) + HTML-escapes the description
+  //     (sanitize()), then renders HTML or 302-redirects. NO state mutation, no
+  //     DB write, no session/cookie, no secret — it only echoes back a sanitized
+  //     error code. XSS-safe.
+  //   - GET /api/auth/ok — returns {ok:true}; a stateless health check the
+  //     better-auth client pings. No state, no secret.
+  // Both are standard public better-auth display/health routes — allowlisting
+  // them is NOT a recon oracle (their existence is documented/open-source, and
+  // they leak nothing user-specific). The mutation/data/enumeration routes
+  // (update-user, change-email, request-password-reset, list-sessions, …) STAY
+  // denied. GET-only on purpose — no method-probing signal. no-store still
+  // applies (these are auth responses). Single-route exemptions, NOT a blanket
+  // relaxation; a new exposed route still requires a Cipher review.
+  if (method === 'GET' && path === '/api/auth/error') return true;
+  if (method === 'GET' && path === '/api/auth/ok') return true;
   return false;
 }
 
