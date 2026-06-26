@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { BetterAuthOptions, User } from 'better-auth';
 import { betterAuth } from 'better-auth';
 import type { Database } from '../database.js';
@@ -124,6 +125,23 @@ export function criarAuth(kysely: Database, config: CriarAuthConfig) {
     trustedOrigins: [...config.trustedOrigins],
     advanced: {
       useSecureCookies,
+      // aperture-6wo1f — adapter-created users (OAuth signup) MUST get a
+      // UUID id. The domain `usuarios.id` column is Postgres `uuid` (migration
+      // 008) and `IdUsuarioSchema` is `z.uuid()`, while the documented
+      // invariant (migration 009 header) is `users.id == usuarios.id`. The
+      // email+password path supplies its own UUID via raw Kysely in
+      // `criarConta` (bypassing this generator), but BetterAuth's NATIVE
+      // create path (OAuth) would otherwise mint its default non-UUID base62
+      // id — which can NEVER be inserted into the uuid-typed `usuarios.id`
+      // during the `me`-resolver self-heal. A custom `() => randomUUID()` is
+      // used rather than `generateId: 'uuid'` because the kysely-adapter's
+      // built-in 'uuid' mode relies on a DB-side `gen_random_uuid()` DEFAULT
+      // (our columns have none → it inserts NULL and the create fails). This
+      // generator runs ONLY on adapter-driven creates (OAuth) — email+password
+      // never reaches it.
+      database: {
+        generateId: () => randomUUID(),
+      },
     },
     emailAndPassword: {
       enabled: true,

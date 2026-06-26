@@ -33,38 +33,27 @@ import {
 } from '../../../../src/index.js';
 import { ID_PLATAFORMA_EUNENEM } from '../auth/setup.js';
 import type { TrpcContext } from './context.js';
+import {
+  resolverUsuarioAutenticado,
+  SessaoNaoAutenticadaError,
+} from './session-resolver.js';
 
 const t = initTRPC.context<TrpcContext>().create();
 
-function readSessionCookie(headers: Headers, name: string): string | null {
-  const cookieHeader = headers.get('cookie');
-  if (!cookieHeader) return null;
-  const cookies = cookieHeader.split(';').map((c) => c.trim());
-  const target = `${name}=`;
-  for (const cookie of cookies) {
-    if (cookie.startsWith(target)) {
-      return decodeURIComponent(cookie.slice(target.length));
-    }
-  }
-  return null;
-}
-
 async function resolveCallerIdUsuario(ctx: TrpcContext): Promise<IdUsuario> {
   const { deps, headers } = ctx;
-  const token = readSessionCookie(headers, deps.sessionCookieName);
-  if (!token) {
-    throw new TRPCError({ code: 'UNAUTHORIZED', message: 'sessao_ausente' });
-  }
-  let sessao;
+  // aperture-6wo1f: central A2 + OAuth-orphan self-heal. Returns the resolved
+  // (healed-if-orphan) usuario; only its id is exposed here. Map the shared
+  // sentinel to the existing UNAUTHORIZED shape.
   try {
-    sessao = await deps.authService.validarSessao(token);
-  } catch {
-    throw new TRPCError({ code: 'UNAUTHORIZED', message: 'sessao_invalida' });
+    const { usuario } = await resolverUsuarioAutenticado(deps, headers);
+    return usuario.id as IdUsuario;
+  } catch (err) {
+    if (err instanceof SessaoNaoAutenticadaError) {
+      throw new TRPCError({ code: 'UNAUTHORIZED', message: 'sessao_invalida' });
+    }
+    throw err;
   }
-  if (!sessao) {
-    throw new TRPCError({ code: 'UNAUTHORIZED', message: 'sessao_expirada' });
-  }
-  return sessao.idUsuario as IdUsuario;
 }
 
 function toTRPCError(err: unknown): TRPCError {

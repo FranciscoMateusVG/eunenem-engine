@@ -13,6 +13,10 @@ import {
 import { trustedClientIp } from '../lib/security/trusted-client-ip.js';
 import type { TrpcContext } from './context.js';
 import { enforceRateLimit } from './rate-limit.js';
+import {
+  readSessionCookie,
+  resolverUsuarioAutenticadoOuNull,
+} from './session-resolver.js';
 
 /**
  * Rate-limit posture (aperture-uc2ix) — matches Cipher's recommendation:
@@ -160,25 +164,6 @@ const ContinuarComEmailInputSchema = z.object({
   idPlataforma: z.uuid(),
   nomeExibicao: z.string().min(1).max(120).optional(),
 });
-
-/**
- * Read the session token from the Cookie header. Hono normalizes cookies
- * via getCookie() but the tRPC context only has the raw Headers object,
- * so we parse it ourselves — same logic as Hono's getCookie helper,
- * just inlined.
- */
-function readSessionCookie(headers: Headers, name: string): string | null {
-  const cookieHeader = headers.get('cookie');
-  if (!cookieHeader) return null;
-  const cookies = cookieHeader.split(';').map((c) => c.trim());
-  const target = `${name}=`;
-  for (const cookie of cookies) {
-    if (cookie.startsWith(target)) {
-      return decodeURIComponent(cookie.slice(target.length));
-    }
-  }
-  return null;
-}
 
 /**
  * Append a Set-Cookie header that pins the session token (aperture-ht7sq).
@@ -787,18 +772,16 @@ export const authRouter = t.router({
    */
   me: t.procedure.query(async ({ ctx }) => {
     const { deps, headers } = ctx;
-    const token = readSessionCookie(headers, deps.sessionCookieName);
-    if (!token) return null;
-    let sessao;
-    try {
-      sessao = await deps.authService.validarSessao(token);
-    } catch {
-      // Malformed token (fails TokenSessaoSchema.parse) — treat as no session.
-      return null;
-    }
-    if (!sessao) return null;
-    const usuario = await deps.usuarioRepository.findUsuarioById(sessao.idUsuario);
-    if (!usuario) return null;
+
+    // aperture-6wo1f: resolve the session through the shared central resolver —
+    // A2 (bare-cookie path with a BetterAuth `getSession` fallback for the prod
+    // OAuth __Secure-/signed cookie) fused with the OAuth-orphan self-heal. The
+    // `OuNull` variant returns null (rather than throwing) on no-session or a
+    // failed heal — the `me` probe's logged-out signal. All A2 + heal logic +
+    // Cipher's atomicity invariant live in session-resolver.ts.
+    const resolvido = await resolverUsuarioAutenticadoOuNull(deps, headers);
+    if (!resolvido) return null;
+    const { usuario, expiraEm } = resolvido;
 
     // p8i01: resolve the user's default Campanha + the 'presente' opcao
     // inside it. Single DB hit (findFirstByAdministrador joins
@@ -843,7 +826,7 @@ export const authRouter = t.router({
        * no-campanha and no-recebedor cases as "render the form".
        */
       hasRecebedor: campanha?.idRecebedor != null,
-      expiraEm: sessao.expiraEm,
+      expiraEm,
     };
   }),
 });
