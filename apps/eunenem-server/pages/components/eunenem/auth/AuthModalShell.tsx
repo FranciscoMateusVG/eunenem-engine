@@ -9,6 +9,7 @@ import {
   type AuthError,
   type AuthSession,
 } from "@/lib/auth";
+import { authClient } from "@/lib/authClient";
 
 // aperture-ubpnl + aperture-d0x1w — AuthModalShell.
 //
@@ -194,10 +195,32 @@ export function AuthModalShell({
     onModeChange(copy.footerCtaTarget);
   }, [copy.footerCtaTarget, onModeChange]);
 
-  const onOauth = (label: string) => {
-    toast("em breve ♡", {
-      description: `login com ${label} chega numa próxima entrega`,
-    });
+  // aperture-8655f — Google is wired to the real BetterAuth social flow;
+  // Apple/Microsoft stay stubs (sonner toast) until their providers land.
+  // `signIn.social` redirects to Google, then BetterAuth's callback at
+  // /api/auth/callback/google returns the browser to `callbackURL`. We send
+  // it to "/" — the same graceful landing AuthModalProvider falls back to
+  // when it can't resolve the user's /painel/<slug>: App + navbar pick up
+  // the freshly-set session cookie on the SSR render and the user lands
+  // signed-in on the home page.
+  const onOauth = async (id: string, label: string) => {
+    if (id !== "google") {
+      toast("em breve ♡", {
+        description: `login com ${label} chega numa próxima entrega`,
+      });
+      return;
+    }
+    try {
+      await authClient.signIn.social({
+        provider: "google",
+        callbackURL: "/",
+      });
+      // On success the browser is navigating away — nothing else to do.
+    } catch {
+      toast("não consegui abrir o Google agora ♡", {
+        description: "tenta de novo em instantes",
+      });
+    }
   };
 
   const onStep1Submit = (e: React.FormEvent) => {
@@ -397,7 +420,7 @@ function StepOne({
   setEmail: (v: string) => void;
   emailError: string | null;
   onSubmit: (e: React.FormEvent) => void;
-  onOauth: (label: string) => void;
+  onOauth: (id: string, label: string) => void;
 }) {
   const emailId = useId();
   return (
@@ -407,7 +430,7 @@ function StepOne({
           <button
             key={id}
             type="button"
-            onClick={() => onOauth(label)}
+            onClick={() => onOauth(id, label)}
             aria-label={`Continuar com ${label}`}
             className="auth-oauth"
           >
