@@ -9,6 +9,7 @@ import {
   PIX_TYPES,
   accountTypeLabel,
   bankByCode,
+  type BankOption,
   type BancariosForm,
   type BancariosMode,
   type PixType,
@@ -92,7 +93,7 @@ function normalizePixKey(domainType: TipoChavePix, raw: string): string {
 }
 
 const EMPTY_FORM: BancariosForm = {
-  bankCode: BANKS[0]!.code,
+  bankCode: "",
   agencia: "",
   agenciaDV: "",
   conta: "",
@@ -101,6 +102,17 @@ const EMPTY_FORM: BancariosForm = {
   pixKey: "",
   nome: "",
   telefone: "",
+};
+
+// aperture-4a — placeholder shown until a bank is chosen (bankCode === "").
+// bankByCode("") would fall back to Banco do Brasil; this keeps the flag neutral
+// so the field doesn't pre-fill a bank the user never selected.
+const NEUTRAL_BANK: BankOption = {
+  code: "",
+  name: "—",
+  color: "#EDE7DE",
+  text: "#A89E92",
+  short: "",
 };
 
 interface ValidationError {
@@ -145,7 +157,7 @@ function validate(
         msg: "o celular (com DDD) é obrigatório pra avisar você quando cair um mimo.",
       });
     if (!cpfValido(cpfTitular))
-      errs.push({ k: "cpf", msg: "o cpf da sua conta parece inválido — fale com o suporte." });
+      errs.push({ k: "cpf", msg: "o cpf da sua conta parece inválido — confira e tente de novo." });
   } else {
     const domainType = PIX_TYPE_TO_DOMAIN[tipoPix];
     const msg = mensagemChavePixInvalida(domainType, normalizePixKey(domainType, s.pixKey));
@@ -344,6 +356,13 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
   // the user has a saved account; never a mock literal.
   const cpfTitular =
     dadosQuery.data?.metodo === "conta" ? maskCPF(dadosQuery.data.cpfTitular) : "";
+  // aperture-3mlcw — the holder CPF is only immutable AFTER a real one is saved.
+  // Until cpfTitular (the saved value) is non-empty, the field must be editable
+  // so a new account can actually enter it. Previously the input was always
+  // `disabled` and bound to cpfTitular ("" when unsaved) → a brand-new user
+  // could never type a CPF and could never save conta data.
+  const [cpfInput, setCpfInput] = useState("");
+  const effectiveCpf = cpfTitular || cpfInput;
   const hydrated = useRef(false);
   useEffect(() => {
     if (hydrated.current || dadosQuery.isLoading) return;
@@ -375,22 +394,25 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
   // Clear an error as soon as its field becomes valid.
   useEffect(() => {
     if (errors.length) {
-      const live = validate(modo, s, tipoPix, cpfTitular);
+      const live = validate(modo, s, tipoPix, effectiveCpf);
       setErrors((prev) => prev.filter((e) => live.some((x) => x.k === e.k)));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [s, modo, tipoPix]);
 
-  const isComplete = validate(modo, s, tipoPix, cpfTitular).length === 0;
+  const isComplete = validate(modo, s, tipoPix, effectiveCpf).length === 0;
 
   const onSave = () => {
-    const errs = validate(modo, s, tipoPix, cpfTitular);
+    const errs = validate(modo, s, tipoPix, effectiveCpf);
     setErrors(errs);
     if (errs.length > 0) return;
-    salvar.mutate(toDadosRecebedor(modo, s, tipoPix, cpfTitular));
+    salvar.mutate(toDadosRecebedor(modo, s, tipoPix, effectiveCpf));
   };
 
-  const bank = useMemo(() => bankByCode(s.bankCode), [s.bankCode]);
+  const bank = useMemo(
+    () => (s.bankCode ? bankByCode(s.bankCode) : NEUTRAL_BANK),
+    [s.bankCode],
+  );
   const tipo = PIX_TYPES.find((p) => p.v === tipoPix) ?? PIX_TYPES[0]!;
 
   const onPixKeyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -512,23 +534,32 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
               />
             </div>
             <div className="bnc-grid c2">
-              <div className="bnc-field locked">
+              <div className={`bnc-field ${cpfTitular ? "locked" : ""}`}>
                 <label>
                   cpf <span className="req">*</span>
                 </label>
                 <input
                   className="bnc-input"
-                  value={cpfTitular}
+                  value={cpfTitular || cpfInput}
+                  style={cpfTitular ? undefined : errStyle("cpf")}
                   placeholder="000.000.000-00"
-                  disabled
+                  inputMode="numeric"
+                  disabled={cpfTitular !== ""}
+                  onChange={(e) => setCpfInput(maskCPF(e.target.value))}
                   aria-label="cpf"
                 />
-                <span
-                  className="bnc-helper"
-                  style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-                >
-                  <ILock size={12} />o cpf não pode ser alterado após o cadastro inicial
-                </span>
+                {cpfTitular ? (
+                  <span
+                    className="bnc-helper"
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                  >
+                    <ILock size={12} />o cpf não pode ser alterado após o cadastro inicial
+                  </span>
+                ) : (
+                  <span className="bnc-helper">
+                    use o mesmo cpf da sua conta bancária
+                  </span>
+                )}
               </div>
               {/* aperture-4biak — celular só existe no payload do modo CONTA
                   (celularTitular). No modo PIX ele não é coletado nem persistido,
@@ -640,6 +671,9 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
                       onChange={(e) => set({ bankCode: e.target.value })}
                       aria-label="banco"
                     >
+                      <option value="" disabled>
+                        Selecione o banco
+                      </option>
                       {BANKS.map((b) => (
                         <option key={b.code} value={b.code}>
                           {b.name} ({b.code})
