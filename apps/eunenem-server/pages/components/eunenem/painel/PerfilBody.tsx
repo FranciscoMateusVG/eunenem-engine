@@ -97,6 +97,29 @@ function isoToBR(iso: string | null): string {
   return `${dd}/${mm}/${dt.getUTCFullYear()}`;
 }
 
+// aperture-rbbpw — numeric dd/mm/aaaa mask: keep digits only, cap at 8, and
+// auto-insert the slashes. Free text like "bvjvhb" can never reach state.
+function maskBRDate(raw: string): string {
+  const digits = raw.replace(/\D/g, "").slice(0, 8);
+  let out = digits.slice(0, 2);
+  if (digits.length > 2) out += "/" + digits.slice(2, 4);
+  if (digits.length > 4) out += "/" + digits.slice(4, 8);
+  return out;
+}
+
+// BR (dd/mm/aaaa) <-> native <input type="date"> value (yyyy-mm-dd).
+function brToInputValue(br: string): string {
+  const m = br.trim().match(BR_DATE_RE);
+  if (!m) return "";
+  return `${m[3]}-${m[2]}-${m[1]}`;
+}
+
+function inputValueToBR(iso: string): string {
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return "";
+  return `${m[3]}/${m[2]}/${m[1]}`;
+}
+
 const ico = {
   user: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -723,6 +746,81 @@ function SlugEditor({
   );
 }
 
+// aperture-rbbpw — decent date input. The masked text field is the primary
+// path (numeric dd/mm/aaaa, no free text); the calendar icon is a real button
+// that opens the native date picker for zero-typing selection.
+function PerfilDateField({
+  id,
+  value,
+  onChange,
+  clearLabel,
+  calLabel,
+}: {
+  id: string;
+  value: string;
+  onChange: (next: string) => void;
+  clearLabel: string;
+  calLabel: string;
+}) {
+  const dateRef = useRef<HTMLInputElement>(null);
+  const openPicker = () => {
+    const el = dateRef.current as
+      | (HTMLInputElement & { showPicker?: () => void })
+      | null;
+    if (!el) return;
+    try {
+      el.showPicker?.();
+    } catch {
+      // Older browsers without showPicker(): the masked field still works.
+    }
+  };
+  return (
+    <div className={`perfil-input perfil-date ${value ? "" : "is-empty"}`}>
+      <input
+        id={id}
+        className="perfil-date-field"
+        type="text"
+        inputMode="numeric"
+        value={value}
+        placeholder="dd/mm/aaaa"
+        maxLength={10}
+        onChange={(e) => onChange(maskBRDate(e.target.value))}
+      />
+      <span className="perfil-date-actions">
+        {value && (
+          <button
+            type="button"
+            className="perfil-date-clear"
+            onClick={() => onChange("")}
+            aria-label={clearLabel}
+          >
+            {ico.x}
+          </button>
+        )}
+        <span className="perfil-date-cal-wrap">
+          <button
+            type="button"
+            className="perfil-date-cal"
+            onClick={openPicker}
+            aria-label={calLabel}
+          >
+            {ico.calendar}
+          </button>
+          <input
+            ref={dateRef}
+            type="date"
+            className="perfil-date-native"
+            tabIndex={-1}
+            aria-hidden="true"
+            value={brToInputValue(value)}
+            onChange={(e) => onChange(inputValueToBR(e.target.value))}
+          />
+        </span>
+      </span>
+    </div>
+  );
+}
+
 export function PerfilBody({ slug }: PainelSectionBodyProps) {
   const { tweaks, setTweaks } = useTweaks();
   const utils = trpc.useUtils();
@@ -977,57 +1075,23 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
       {/* 2 — Datas importantes */}
       <PerfilSection icon={ico.calendar} title="datas importantes" variant="pink">
         <Field label="data do chá" htmlFor="perfil-tea">
-          <div className={`perfil-input perfil-date ${teaDate ? "" : "is-empty"}`}>
-            <input
-              id="perfil-tea"
-              className="perfil-date-field"
-              type="text"
-              inputMode="numeric"
-              value={teaDate}
-              placeholder="dd/mm/aaaa"
-              onChange={(e) => setTeaDate(e.target.value)}
-            />
-            <span className="perfil-date-actions">
-              {teaDate && (
-                <button
-                  type="button"
-                  className="perfil-date-clear"
-                  onClick={() => setTeaDate("")}
-                  aria-label="Limpar data do chá"
-                >
-                  {ico.x}
-                </button>
-              )}
-              <span className="perfil-date-cal">{ico.calendar}</span>
-            </span>
-          </div>
+          <PerfilDateField
+            id="perfil-tea"
+            value={teaDate}
+            onChange={setTeaDate}
+            clearLabel="Limpar data do chá"
+            calLabel="Abrir calendário — data do chá"
+          />
         </Field>
 
         <Field label="data prevista de nascimento" htmlFor="perfil-birth">
-          <div className={`perfil-input perfil-date ${birthDate ? "" : "is-empty"}`}>
-            <input
-              id="perfil-birth"
-              className="perfil-date-field"
-              type="text"
-              inputMode="numeric"
-              value={birthDate}
-              placeholder="dd/mm/aaaa"
-              onChange={(e) => setBirthDate(e.target.value)}
-            />
-            <span className="perfil-date-actions">
-              {birthDate && (
-                <button
-                  type="button"
-                  className="perfil-date-clear"
-                  onClick={() => setBirthDate("")}
-                  aria-label="Limpar data de nascimento"
-                >
-                  {ico.x}
-                </button>
-              )}
-              <span className="perfil-date-cal">{ico.calendar}</span>
-            </span>
-          </div>
+          <PerfilDateField
+            id="perfil-birth"
+            value={birthDate}
+            onChange={setBirthDate}
+            clearLabel="Limpar data de nascimento"
+            calLabel="Abrir calendário — data de nascimento"
+          />
         </Field>
 
         <Field label="tipo de evento" htmlFor="perfil-event">
