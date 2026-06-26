@@ -382,6 +382,9 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
   const salvar = trpc.dadosRecebimento.salvar.useMutation({
     onSuccess: () => {
       void utils.dadosRecebimento.get.invalidate();
+      // aperture-kj9el #4b — a full save clears the pending marker server-side;
+      // refresh the banner query so the "resgate pendente" notice disappears.
+      void utils.dadosRecebimento.getResgatePendente.invalidate();
       toast.success("dados salvos com carinho ♡");
     },
     onError: (err) => {
@@ -390,6 +393,33 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
       );
     },
   });
+
+  // aperture-kj9el #4b — "resgate pendente" intent. getResgatePendente returns
+  // the timestamp the user clicked "preencher depois" (null when none / cleared
+  // by a later full save). marcarResgatePendente records the intent with NO bank
+  // data — for users setting up to receive on behalf of someone else.
+  const resgatePendenteQuery =
+    trpc.dadosRecebimento.getResgatePendente.useQuery(undefined, {
+      staleTime: 30_000,
+    });
+  const resgatePendenteDesde = resgatePendenteQuery.data
+    ? new Date(resgatePendenteQuery.data)
+    : null;
+  const marcarPendente =
+    trpc.dadosRecebimento.marcarResgatePendente.useMutation({
+      onSuccess: () => {
+        void utils.dadosRecebimento.getResgatePendente.invalidate();
+        toast.success(
+          "tudo bem — guardamos seu lugar ♡ complete os dados quando puder",
+        );
+      },
+      onError: (err) => {
+        toast.error(
+          err.message ||
+            "não consegui marcar agora — tente de novo em instantes",
+        );
+      },
+    });
 
   // Clear an error as soon as its field becomes valid.
   useEffect(() => {
@@ -455,6 +485,21 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
           <span className="hl">Dados Bancários</span>
         </h1>
       </header>
+
+      {/* aperture-kj9el #4b — persistent "resgate pendente" banner: shows when
+          the user deferred bank data via "preencher depois". Cleared by a save. */}
+      {resgatePendenteDesde && (
+        <div className="bnc-pending" role="note">
+          <span className="bnc-pending-ico">
+            <IInfo size={18} />
+          </span>
+          <div className="bnc-pending-txt">
+            <strong>resgate pendente</strong> desde{" "}
+            {resgatePendenteDesde.toLocaleDateString("pt-BR")}. complete seus
+            dados bancários abaixo para liberar o recebimento ♡
+          </div>
+        </div>
+      )}
 
       {/* Mode toggle */}
       <div className="bnc-mode-row">
@@ -839,10 +884,20 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
         )}
 
         {/* Actions */}
+        {/* aperture-kj9el #4b — CPF immutability is a one-way door; warn
+            prominently right before the commit action. */}
+        <div className="bnc-cpf-warn" role="note">
+          <span className="bnc-cpf-warn-ico">
+            <ILock size={18} />
+          </span>
+          <div>
+            <strong>atenção:</strong> depois de salvar, o{" "}
+            <strong>CPF do titular não poderá ser alterado</strong>. confira com
+            carinho antes de continuar ♡
+          </div>
+        </div>
+
         <div className="bnc-actions">
-          {/* <button type="button" className="bnc-btn ghost" onClick={onSaveAndConfig}>
-            salvar e configurar resgate <IArrowRight size={16} />
-          </button> */}
           <button
             type="button"
             className="bnc-btn primary"
@@ -852,6 +907,22 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
             <ICheck size={16} />
             {salvar.isPending ? "salvando…" : "salvar dados bancários"}
           </button>
+          {/* aperture-kj9el #4b — defer bank data: marks a pending resgate so a
+              user setting up for someone else can complete it later. Hidden once
+              already pending (the banner above covers that state). */}
+          {!resgatePendenteDesde && (
+            <button
+              type="button"
+              className="bnc-btn ghost"
+              onClick={() => marcarPendente.mutate()}
+              disabled={marcarPendente.isPending}
+            >
+              <IInfo size={16} />
+              {marcarPendente.isPending
+                ? "salvando…"
+                : "preencher depois · é para um amigo"}
+            </button>
+          )}
         </div>
 
         <div className="bnc-security-strip">
@@ -919,6 +990,13 @@ const BNC_CSS = `
 .bnc-callout strong{color:#5c3e08}
 .bnc-callout-ico{position:absolute;left:14px;top:50%;transform:translateY(-50%) rotate(-6deg);width:30px;height:30px;border-radius:9px;background:var(--yellow);display:inline-flex;align-items:center;justify-content:center;color:#5c3e08;box-shadow:0 3px 10px rgba(151,114,12,.18)}
 .bnc-pill{display:inline-flex;align-items:center;gap:6px;padding:1px 8px;margin:0 2px;border-radius:6px;background:#fff;border:1px solid #e8c95a;font-weight:700;font-variant-numeric:tabular-nums;color:#5c3e08}
+.bnc-pending{display:flex;align-items:center;gap:12px;margin-top:16px;padding:14px 16px;background:linear-gradient(135deg,var(--pink-soft) 0%,#fff7fb 70%);border:1px solid var(--coral-pink);border-radius:18px;color:var(--plum)}
+.bnc-pending-ico{flex-shrink:0;width:34px;height:34px;border-radius:10px;background:#fff;display:inline-flex;align-items:center;justify-content:center;color:var(--coral-pink);box-shadow:var(--shadow-sm)}
+.bnc-pending-txt{font-size:13.5px;line-height:1.4}
+.bnc-pending-txt strong{color:var(--coral-pink)}
+.bnc-cpf-warn{display:flex;align-items:center;gap:12px;margin-top:20px;padding:14px 16px;background:linear-gradient(135deg,#fdeef2 0%,#fff 70%);border:1.5px solid var(--coral-pink);border-radius:18px;color:var(--plum);font-size:13.5px;line-height:1.4}
+.bnc-cpf-warn-ico{flex-shrink:0;width:34px;height:34px;border-radius:10px;background:var(--pink-soft);display:inline-flex;align-items:center;justify-content:center;color:var(--coral-pink)}
+.bnc-cpf-warn strong{color:var(--coral-pink)}
 
 .bnc-form-stack{display:flex;flex-direction:column;gap:18px;margin-top:22px}
 .bnc-card{background:var(--paper);border:1px solid var(--line);border-radius:24px;box-shadow:var(--shadow-sm);padding:20px 18px}
