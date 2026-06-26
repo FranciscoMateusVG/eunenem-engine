@@ -1960,17 +1960,15 @@ h4 {
 .lista-card {
   position: relative;
   background: var(--paper);
-  border: 1px solid var(--line);
   border-radius: 20px;
   padding: 12px;
   display: flex;
   flex-direction: column;
-  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 .lista-card:hover {
   transform: translateY(-3px);
   box-shadow: var(--shadow-md);
-  border-color: var(--lilac-soft);
 }
 .lista-card-thumb {
   position: relative;
