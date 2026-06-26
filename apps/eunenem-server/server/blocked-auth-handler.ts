@@ -77,17 +77,35 @@ export const BLOCKED_AUTH_BODY = 'Gone';
 export const BLOCKED_AUTH_STATUS = 410 as const;
 
 /**
+ * No-cache headers applied to EVERY /api/auth/* response (aperture-0jyzj).
+ * Auth/session responses must NEVER be cached: a 410 is cacheable-by-default
+ * per RFC 7234, so the browser AND the BetterAuth client's fetch cached the
+ * pre-3c9na 410 from GET /api/auth/get-session and served it STALE — the client
+ * concluded "logged-out" from a cached deny even after the allowlist fix
+ * deployed. no-store on both the allowed passthrough (get-session 200, callback,
+ * sign-in/social) AND the 410 deny responses prevents any browser/intermediary
+ * cache from serving a stale auth/session state.
+ */
+function setNoStore(c: { header: (name: string, value: string) => void }): void {
+  c.header('Cache-Control', 'no-store, no-cache, must-revalidate');
+  c.header('Pragma', 'no-cache');
+}
+
+/**
  * Install the deny-by-default guard on a Hono app. MUST be called BEFORE the
  * `auth.handler` catch-all mount on `/api/auth/*` so the guard wins the route
  * match and runs first. Allowed paths fall through via `next()` to the
- * catch-all; everything else short-circuits with a byte-identical 410.
+ * catch-all; everything else short-circuits with a byte-identical 410. Every
+ * response (allowed or denied) carries no-store (aperture-0jyzj).
  */
 export function installBlockedAuthHandlerGuard(app: Hono): void {
   app.all('/api/auth/*', async (c, next) => {
     if (isAllowedAuthRequest(c.req.method, c.req.path)) {
       await next();
+      setNoStore(c);
       return;
     }
+    setNoStore(c);
     c.status(BLOCKED_AUTH_STATUS);
     return c.text(BLOCKED_AUTH_BODY);
   });
