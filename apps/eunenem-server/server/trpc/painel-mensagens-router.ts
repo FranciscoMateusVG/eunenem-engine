@@ -37,24 +37,15 @@ import { marcarTodosRecadosComoLidos } from '../../../../src/use-cases/pagamento
 import { obterRecadosAdminDeCampanha } from '../../../../src/use-cases/pagamentos/obter-recados-admin-de-campanha.js';
 import { ID_PLATAFORMA_EUNENEM } from '../auth/setup.js';
 import type { TrpcContext } from './context.js';
+import {
+  resolverUsuarioAutenticado,
+  SessaoNaoAutenticadaError,
+} from './session-resolver.js';
 
 const t = initTRPC.context<TrpcContext>().create();
 
 class PainelMensagensSessaoError extends Error {
   public readonly name = 'PainelMensagensSessaoError';
-}
-
-function readSessionCookie(headers: Headers, name: string): string | null {
-  const cookieHeader = headers.get('cookie');
-  if (!cookieHeader) return null;
-  const cookies = cookieHeader.split(';').map((c) => c.trim());
-  const target = `${name}=`;
-  for (const cookie of cookies) {
-    if (cookie.startsWith(target)) {
-      return decodeURIComponent(cookie.slice(target.length));
-    }
-  }
-  return null;
 }
 
 /**
@@ -68,16 +59,18 @@ async function resolvePainelAdminBySlug(
   slug: string,
 ): Promise<{ usuario: Usuario; campanha: Campanha }> {
   const { deps, headers } = ctx;
-  const token = readSessionCookie(headers, deps.sessionCookieName);
-  if (!token) throw new PainelMensagensSessaoError('Sessao ausente');
-
-  let sessao;
+  // aperture-6wo1f: resolve the SESSION usuario via the shared central resolver
+  // (A2 + OAuth-orphan self-heal). Map the shared sentinel to this router's
+  // UNAUTHORIZED-bearing sentinel (preserves the existence-leak posture).
+  let sessaoUsuario: Usuario;
   try {
-    sessao = await deps.authService.validarSessao(token);
-  } catch {
-    throw new PainelMensagensSessaoError('Sessao invalida');
+    sessaoUsuario = (await resolverUsuarioAutenticado(deps, headers)).usuario;
+  } catch (err) {
+    if (err instanceof SessaoNaoAutenticadaError) {
+      throw new PainelMensagensSessaoError('Sessao invalida');
+    }
+    throw err;
   }
-  if (!sessao) throw new PainelMensagensSessaoError('Sessao expirada');
 
   const usuario = await deps.usuarioRepository.findUsuarioBySlug(
     ID_PLATAFORMA_EUNENEM,
@@ -95,10 +88,6 @@ async function resolvePainelAdminBySlug(
   // For the eunenem solo-admin shape this is equivalent to `usuario`
   // === session usuario, but the broader check survives multi-admin
   // futures.
-  const sessaoUsuario = await deps.usuarioRepository.findUsuarioById(sessao.idUsuario);
-  if (!sessaoUsuario) {
-    throw new PainelMensagensSessaoError('Usuario da sessao nao encontrado');
-  }
   if (!campanha.idsAdministradores.includes(sessaoUsuario.idConta)) {
     throw new PainelMensagensSessaoError('Slug nao encontrado ou nao autorizado');
   }

@@ -1106,11 +1106,15 @@ export {
 export type { ObterStatusTutorialUsuarioDeps } from './use-cases/usuario/obter-status-tutorial-usuario.js';
 export { obterStatusTutorialUsuario } from './use-cases/usuario/obter-status-tutorial-usuario.js';
 export type {
+  ProvisionarContaUsuarioDominioDeps,
+  ProvisionarContaUsuarioDominioInput,
   RegistrarContaUsuarioDeps,
   RegistrarContaUsuarioInput,
   RegistrarContaUsuarioResult,
 } from './use-cases/usuario/registrar-conta-usuario.js';
 export {
+  ProvisionarContaUsuarioDominioInputSchema,
+  provisionarContaUsuarioDominio,
   RegistrarContaUsuarioInputSchema,
   registrarContaUsuario,
 } from './use-cases/usuario/registrar-conta-usuario.js';
