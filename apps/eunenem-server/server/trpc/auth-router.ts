@@ -830,6 +830,25 @@ export const authRouter = t.router({
     const campanha = await deps.campanhaRepository.findFirstByAdministrador(usuario.idConta);
     const opcaoPresentes = campanha?.opcoes.find((o) => o.tipo === 'presente');
 
+    // aperture-b6xr8 — server-side onboarding signal for the OAuth-signup
+    // wizard gate (Vance's aperture-8ysqu). DERIVED, not an explicit flag: a
+    // user "needs onboarding" until their creator profile has a baby name —
+    // the core field the OnboardingWizard captures (alongside event date/type
+    // + slug via perfil.atualizar). PROVIDER-AGNOSTIC by construction: it keys
+    // off profile STATE, not how the user authenticated, so it covers email,
+    // Google, Microsoft (y5ual) and any future provider — plus the lazily-
+    // provisioned OAuth orphans whose profile starts empty.
+    //
+    // Why derive over an onboardingConcluidoEm timestamp: the wizard already
+    // persists nomeBebe via perfil.atualizar, so finishing it flips this with
+    // NO new mutation/migration and no backfill/grandfathering of existing
+    // users. Trade-off: if the profile editor ever lets a user CLEAR nomeBebe
+    // the gate would re-fire — acceptable today (the painel editor keeps it
+    // required); upgrade to an explicit timestamp (mirror tutorialCompletadoEm)
+    // if that ever becomes a real path. One extra indexed PK-keyed read.
+    const perfil = await deps.perfilCriadorRepository.findByUsuarioId(usuario.id);
+    const needsOnboarding = (perfil?.conteudo.nomeBebe ?? '').trim().length === 0;
+
     return {
       idUsuario: usuario.id,
       idConta: usuario.idConta,
@@ -867,6 +886,16 @@ export const authRouter = t.router({
        * no-campanha and no-recebedor cases as "render the form".
        */
       hasRecebedor: campanha?.idRecebedor != null,
+      /**
+       * aperture-b6xr8 — true when this account still needs the onboarding
+       * wizard (creator profile has no baby name yet). The authoritative,
+       * provider-agnostic gate the frontend (aperture-8ysqu) mounts the
+       * OnboardingWizard on — replaces the brittle client-only `criado` flag
+       * so Google/Microsoft OAuth signups (which never re-enter the auth
+       * modal) also get onboarded. Flips to false once the wizard persists a
+       * baby name via perfil.atualizar.
+       */
+      needsOnboarding,
       expiraEm,
     };
   }),
