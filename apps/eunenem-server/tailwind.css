@@ -3729,6 +3729,35 @@ html {
   color: var(--plum);
 }
 
+/* aperture-cc1gb / aperture-prpkw — owner "voltar ao meu painel" action chip.
+ * Distinct from the lilac-soft .is-active scroll-spy pill on purpose: this is
+ * an ACTION (filled plum), not a scroll STATE (tinted lilac), so the two never
+ * read as the same thing when they sit side-by-side on desktop. Filled plum on
+ * --paper = 8.63:1 (WCAG AAA). The tap box is padded to a >=44px min-height so
+ * it clears the mobile touch-target floor without enlarging the visible pill. */
+.eu-nav-chip--owner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  background: var(--plum);
+  color: var(--paper);
+}
+.eu-nav-chip--owner:hover {
+  background: color-mix(in srgb, var(--plum) 88%, #000);
+  color: var(--paper);
+}
+/* Compact mobile sizing — keeps the always-visible bar within 375px width
+ * (logo + chip + cart + hamburger on one line) while the min-height above
+ * still guarantees the 44pt tap target. */
+.eu-nav-chip--owner-sm {
+  gap: 4px;
+  padding-left: 12px;
+  padding-right: 12px;
+  font-size: 12px;
+}
+
 /* Mobile dropdown variant — same vocabulary, left-aligned block rows. */
 .eu-nav-chip-block {
   display: block;
