@@ -6,8 +6,10 @@ import { PainelMenu } from '@/components/eunenem/painel/PainelMenu';
 import { PainelTutorialOverlay } from '@/components/eunenem/painel/PainelTutorialOverlay';
 import { PainelTutorialTrigger } from '@/components/eunenem/painel/PainelTutorialTrigger';
 import { useStubCampanhaIdForSlug, useStubExtratoSummary } from '@/components/eunenem/painel/ExtratoStubData';
+import { OnboardingWizard } from '@/components/eunenem/auth/OnboardingWizard';
 import { useContribuicaoList } from '@/lib/contribuicao';
 import { buildPainelMenu, PAINEL_DEMO, type PainelEventSnapshot } from '@/lib/mocks/painelDemo';
+import { needsOnboarding } from '@/lib/onboarding-gate';
 import { trpc } from '@/lib/trpc';
 
 // /painel/:slug — creator dashboard (was /painel/[slug]/page.tsx in
@@ -91,6 +93,17 @@ export function PainelPage({ slug }: { slug: string }) {
   const perfilQ = trpc.perfil.getPerfil.useQuery(undefined, { staleTime: 30_000 });
   const greetingFirstName =
     (perfilQ.data?.creatorName ?? "").trim().split(/\s+/)[0] ?? "";
+
+  // aperture-8ysqu — onboarding gate. A freshly-provisioned account that never
+  // ran the in-modal email wizard (every OAuth signup — Google now, Microsoft
+  // y5ual next — plus any direct navigation to the painel) reaches here with an
+  // empty profile. The backend flags it via auth.me.needsOnboarding; when set we
+  // mount the SAME OnboardingWizard the email flow uses, as a blocking gate,
+  // before the dashboard. This single painel-side gate is PROVIDER-AGNOSTIC —
+  // combined with the #304 OAuth-return redirect (which lands every OAuth user
+  // on /painel/<slug>), no per-callback patching is needed.
+  const meQ = trpc.auth.me.useQuery(undefined, { staleTime: 0 });
+  const mustOnboard = needsOnboarding(meQ.data);
 
   // aperture-3ic62 — the REAL baby name for the "página da <X>" header.
   // Was seeded from the slug inside PainelLayout, which is the creator's
@@ -215,7 +228,11 @@ export function PainelPage({ slug }: { slug: string }) {
   // the very bug). isLoading flips false on success OR error, so this never
   // hangs (a logged-out / errored getPerfil falls through to the loaded branch
   // with the honest neutral seed — still no mock date).
-  if (perfilQ.isLoading) {
+  // Hold the spinner until BOTH getPerfil and auth.me settle, so we never flash
+  // the dashboard before deciding the onboarding gate below (and the
+  // TweaksProvider seed-once invariant above is preserved — this branch still
+  // returns a DISTINCT element, so a FRESH PainelLayout mounts when loading ends).
+  if (perfilQ.isLoading || meQ.isLoading) {
     return (
       <div
         style={{
@@ -230,6 +247,24 @@ export function PainelPage({ slug }: { slug: string }) {
       >
         <span className="perfil-spinner" aria-hidden="true" />
       </div>
+    );
+  }
+
+  // aperture-8ysqu — block the dashboard behind the onboarding wizard for an
+  // account the server flags as needing onboarding. onDone reloads to
+  // /painel/<finalSlug> (mirrors the email flow's AuthModalProvider.onDone): the
+  // full reload re-reads auth.me with needsOnboarding now false and renders the
+  // real dashboard. The wizard persists the profile via its own
+  // perfil.atualizar + usuario.atualizarSlug mutations.
+  if (mustOnboard) {
+    return (
+      <OnboardingWizard
+        onDone={(finalSlug) => {
+          if (typeof window !== 'undefined') {
+            window.location.assign(`/painel/${finalSlug}`);
+          }
+        }}
+      />
     );
   }
 
