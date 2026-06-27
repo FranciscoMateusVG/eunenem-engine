@@ -198,11 +198,16 @@ export function AuthModalShell({
   // aperture-8655f — Google is wired to the real BetterAuth social flow;
   // Apple/Microsoft stay stubs (sonner toast) until their providers land.
   // `signIn.social` redirects to Google, then BetterAuth's callback at
-  // /api/auth/callback/google returns the browser to `callbackURL`. We send
-  // it to "/" — the same graceful landing AuthModalProvider falls back to
-  // when it can't resolve the user's /painel/<slug>: App + navbar pick up
-  // the freshly-set session cookie on the SSR render and the user lands
-  // signed-in on the home page.
+  // /api/auth/callback/google returns the browser to `callbackURL`.
+  //
+  // aperture-ydj4a — callbackURL is "/?oauth=1" (NOT bare "/"). The OAuth
+  // return is a full page load, so AuthModalProvider.onAuthenticated never
+  // runs to forward the user to their painel (the email flow's redirect). The
+  // ?oauth=1 marker lets useOauthReturnRedirect (mounted on the landing)
+  // reproduce that redirect: resolve auth.me, forward to /painel/<slug>. The
+  // marker is a fixed same-origin literal and the redirect slug comes from the
+  // server, so this is not an open-redirect surface. If auth.me can't resolve,
+  // the marker is cleared and the user stays signed-in on the landing.
   const onOauth = async (id: string, label: string) => {
     if (id !== "google") {
       toast("em breve ♡", {
@@ -213,7 +218,7 @@ export function AuthModalShell({
     try {
       await authClient.signIn.social({
         provider: "google",
-        callbackURL: "/",
+        callbackURL: "/?oauth=1",
       });
       // On success the browser is navigating away — nothing else to do.
     } catch {
