@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { useOauthReturnRedirect } from '@/lib/useOauthReturnRedirect';
 import { Calculadora } from '@/components/eunenem/landing/Calculadora';
 import { ChaRifa } from '@/components/eunenem/landing/ChaRifa';
 import { CTAFinal } from '@/components/eunenem/landing/CTAFinal';
@@ -31,6 +32,10 @@ import { Testimonials } from '@/components/eunenem/landing/Testimonials';
 // The scroll-reveal IntersectionObserver runs after hydration and adds
 // `.in` to every `.fade-up` section that enters view.
 export function LandingPage() {
+  // aperture-ydj4a — forward OAuth users back to their painel after the
+  // social-login callback returns here with the ?oauth=1 marker.
+  useOauthReturnRedirect();
+
   useEffect(() => {
     const io = new IntersectionObserver(
       (entries) => {
