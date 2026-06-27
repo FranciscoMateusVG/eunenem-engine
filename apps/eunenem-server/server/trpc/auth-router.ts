@@ -737,6 +737,11 @@ export const authRouter = t.router({
 
   signOut: t.procedure.mutation(async ({ ctx }) => {
     const { deps, headers, resHeaders } = ctx;
+
+    // ── PATH 1 — engine session (bare cookie, email+password) ──────────
+    // Source of truth for email+password is the engine session keyed by
+    // the BARE `better-auth.session_token` cookie. Revoke the engine-side
+    // session row, then clear the bare cookie. (Unchanged behaviour.)
     const token = readSessionCookie(headers, deps.sessionCookieName);
     if (token) {
       // Validate-then-strip on the way out — TokenSessaoSchema requires
@@ -754,6 +759,42 @@ export const authRouter = t.router({
       deps.sessionCookieName,
       deps.auth.options.advanced?.useSecureCookies ?? false,
     );
+
+    // ── PATH 2 — BetterAuth/OAuth session (aperture-qpvdh, folds p9td2) ─
+    // The MIRROR of the A2 read-fallback in session-resolver.ts. Under
+    // `useSecureCookies` (staging/prod) a Google OAuth session lives in the
+    // `__Secure-`-PREFIXED, HMAC-SIGNED cookie that the bare read+clear
+    // above can NOT see. Before this, an OAuth user's signOut was a no-op:
+    // `revogarSessao` was never called (bare token absent → session row
+    // survived) AND only the bare cookie was cleared (the `__Secure-` one
+    // stayed in the browser) → the next `auth.me` re-resolved them via
+    // getSession → still logged in. That was the p9td2 symptom.
+    //
+    // Delegate to BetterAuth's PROGRAMMATIC signOut (a direct function
+    // call, NOT the denied `/api/auth/sign-out` HTTP route): it natively
+    // reads the signed cookie, REVOKES the session server-side
+    // (internalAdapter.deleteSession), and emits the matching Set-Cookie
+    // clear. We forward those Set-Cookie header(s) onto resHeaders so the
+    // browser drops the `__Secure-` cookie too. `asResponse` is used so we
+    // get a real Headers object whose multiple Set-Cookie values survive
+    // (getSetCookie()) rather than being comma-collapsed.
+    //
+    // Fail-open on the LOGOUT direction is intended: a signOut that can't
+    // reach BetterAuth has already cleared the engine cookie and must never
+    // throw. For email+password users there is no signed cookie to find, so
+    // BetterAuth skips the revoke and emits an idempotent clear — harmless.
+    try {
+      const betterAuthResponse = await deps.auth.api.signOut({
+        headers,
+        asResponse: true,
+      });
+      for (const setCookie of betterAuthResponse.headers.getSetCookie()) {
+        resHeaders.append('set-cookie', setCookie);
+      }
+    } catch {
+      // Never let logout error — the engine session/cookie is already gone.
+    }
+
     return { ok: true as const };
   }),
 
