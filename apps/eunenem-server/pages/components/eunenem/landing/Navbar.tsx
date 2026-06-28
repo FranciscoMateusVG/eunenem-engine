@@ -27,7 +27,6 @@ export function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const auth = useAuthModal();
   const signinBtnRef = useRef<HTMLButtonElement | null>(null);
-  const signupBtnRef = useRef<HTMLButtonElement | null>(null);
 
   const me = useMe();
   const { signOut, isPending: isSigningOut } = useSignOut();
@@ -86,24 +85,18 @@ export function Navbar() {
               onSignOut={signOut}
             />
           ) : (
-            <>
-              <button
-                ref={signinBtnRef}
-                type="button"
-                onClick={() => auth.open('signin', signinBtnRef.current)}
-                className="text-[13px] font-semibold text-ink hover:text-lilac-deep transition-colors tracking-wide px-2 py-2 rounded-lg focus-visible:outline-2 focus-visible:outline-lilac-deep focus-visible:outline-offset-2"
-              >
-                Entrar
-              </button>
-              <button
-                ref={signupBtnRef}
-                type="button"
-                onClick={() => auth.open('signup', signupBtnRef.current)}
-                className="btn-lilac !py-3 !px-5 !text-[12px]"
-              >
-                criar minha lista
-              </button>
-            </>
+            // aperture-3mq5q — single smart entry: one "Entrar" button. The
+            // passwordless flow figures out existing-vs-new itself, so there's
+            // no separate "criar minha lista" CTA here anymore. (mode arg is now
+            // irrelevant to the modal, kept as a no-op for the API signature.)
+            <button
+              ref={signinBtnRef}
+              type="button"
+              onClick={() => auth.open('signin', signinBtnRef.current)}
+              className="btn-lilac !py-3 !px-5 !text-[12px]"
+            >
+              Entrar
+            </button>
           )}
         </div>
       </div>
