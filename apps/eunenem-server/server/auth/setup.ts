@@ -55,6 +55,7 @@ import {
   type UsuarioRepository,
 } from '../../../../src/index.js';
 import { renderMagicLinkEmail } from './magic-link-email.js';
+import { parseAdminAllowedEmails } from './admin-allowlist.js';
 import { noopTracer } from '../../../../src/observability/tracer.js';
 import { getStripe } from '../../src/lib/stripe/stripe.js';
 
@@ -133,6 +134,14 @@ export interface ServerDeps {
    */
   readonly provedorRegraTaxa: ProvedorRegraTaxa;
   readonly observability: Observability;
+  /**
+   * Normalized allowlist of operator emails permitted into the `/admin` surface
+   * (aperture-4n222). Parsed once at boot from `ADMIN_ALLOWED_EMAILS`. Read by
+   * the server-side `adminProcedure` gate (the security boundary) AND `auth.me`'s
+   * `isAdmin` flag — single source so enforcement + UI signal never drift.
+   * Empty = nobody is admin = fail-closed.
+   */
+  readonly adminAllowedEmails: ReadonlySet<string>;
   readonly clock: () => Date;
   /** Cookie name shared by the engine's BetterAuth sessions table + our tRPC procedures. */
   readonly sessionCookieName: string;
@@ -228,6 +237,16 @@ const ServerEnvSchema = z
      * local-dev front-end on a different port).
      */
     TRUSTED_ORIGINS: z.string().min(1, 'TRUSTED_ORIGINS required (comma-separated)'),
+    /**
+     * Comma-separated allowlist of operator emails permitted into the `/admin`
+     * surface (aperture-4n222). Parsed into a normalized Set on ServerDeps and
+     * read by BOTH the server-side `adminProcedure` gate and the `auth.me`
+     * `isAdmin` flag. OPTIONAL with a default of '' — unset/empty = nobody is
+     * admin = fail-closed (the admin area locks down rather than opening up).
+     * Seeded in prod (Dokploy env) with franciscomateusvg@gmail.com; extending
+     * the admin set is an env edit, no code migration/deploy.
+     */
+    ADMIN_ALLOWED_EMAILS: z.string().default(''),
     /**
      * Postgres connection string for the engine's domain + BetterAuth tables.
      * Both schemas live in the same DB. Migrations are owned by the engine
@@ -645,6 +664,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     livroFinanceiroRepository,
     provedorRegraTaxa,
     observability,
+    adminAllowedEmails: parseAdminAllowedEmails(env.ADMIN_ALLOWED_EMAILS),
     clock: () => new Date(),
     // BetterAuth's default cookie name — keep parity with `auth.handler`
     // mounted at /api/auth/* so the same session cookie is recognized

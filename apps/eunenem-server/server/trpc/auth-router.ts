@@ -11,6 +11,7 @@ import {
   UsuarioSessaoInvalidaError,
 } from '../../../../src/index.js';
 import { trustedClientIp } from '../lib/security/trusted-client-ip.js';
+import { isEmailAdmin } from '../auth/admin-allowlist.js';
 import type { TrpcContext } from './context.js';
 import { enforceRateLimit } from './rate-limit.js';
 import {
@@ -855,6 +856,14 @@ export const authRouter = t.router({
       idPlataforma: usuario.idPlataforma,
       email: usuario.email,
       nomeExibicao: usuario.nomeExibicao,
+      /**
+       * aperture-4n222 — admin flag for the frontend `/admin` UX gate. The
+       * email is in the `ADMIN_ALLOWED_EMAILS` allowlist (same normalized Set
+       * the server-side `adminProcedure` gate enforces — single source, no
+       * drift). This is a UX SIGNAL ONLY; the real boundary is the backend 403
+       * on every admin route. No extra DB call.
+       */
+      isAdmin: isEmailAdmin(deps.adminAllowedEmails ?? new Set<string>(), usuario.email),
       /**
        * Public URL slug (aperture-khbow). Lets the client redirect to
        * `/painel/<slug>` post-auth in one round-trip — no follow-up call

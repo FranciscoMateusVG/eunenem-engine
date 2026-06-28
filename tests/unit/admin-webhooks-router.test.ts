@@ -21,6 +21,7 @@ import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ServerDeps } from '../../apps/eunenem-server/server/auth/setup.js';
 import type { TrpcContext } from '../../apps/eunenem-server/server/trpc/context.js';
+import { adminAuthOverrides } from '../helpers/admin-auth.js';
 import { appRouter } from '../../apps/eunenem-server/server/trpc/router.js';
 import { CampanhaRepositoryMemory } from '../../src/adapters/arrecadacao/campanha-repository.memory.js';
 import { ContribuicaoRepositoryMemory } from '../../src/adapters/arrecadacao/contribuicao-repository.memory.js';
@@ -174,9 +175,10 @@ async function buildRig(): Promise<TestRig> {
     webhookEventArchive,
   } as unknown as ServerDeps;
 
+  const adminAuth = adminAuthOverrides();
   const ctx: TrpcContext = {
-    deps,
-    headers: new Headers(),
+    deps: { ...deps, ...adminAuth.depsOverrides },
+    headers: adminAuth.headers,
     resHeaders: new Headers(),
   };
   const caller = appRouter.createCaller(ctx);
