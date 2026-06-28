@@ -64,6 +64,11 @@ export type {
   UrlUploadPresignada,
 } from './adapters/storage/object-storage.js';
 export { CONTENT_TYPE_EXTENSAO } from './adapters/storage/object-storage.js';
+// aperture-lwx2k — shared email transport (magic-link + future transactional).
+export type { EmailMessage, EmailTransport } from './adapters/email/email-transport.js';
+export type { SmtpConfig } from './adapters/email/email-transport.nodemailer.js';
+export { EmailTransportNodemailer } from './adapters/email/email-transport.nodemailer.js';
+export { EmailTransportNoop } from './adapters/email/email-transport.noop.js';
 export type { UploadRegistrado } from './adapters/storage/object-storage.memory.js';
 export { ObjectStorageMemory } from './adapters/storage/object-storage.memory.js';
 export type { ObjectStorageMinioConfig } from './adapters/storage/object-storage.minio.js';
