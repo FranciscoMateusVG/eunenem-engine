@@ -12,5 +12,9 @@
 // the SSR pages and /api/auth/*), so relative `/api/auth/*` calls resolve to
 // the right host in dev (localhost:3001) and prod (eunenem.xeroxtoxerox.com).
 import { createAuthClient } from 'better-auth/react';
+import { magicLinkClient } from 'better-auth/client/plugins';
 
-export const authClient = createAuthClient();
+// aperture-3mq5q — register the magic-link CLIENT plugin so the single smart
+// entry flow can call `authClient.signIn.magicLink({ email, callbackURL })`.
+// Without this plugin that method does not exist on the client.
+export const authClient = createAuthClient({ plugins: [magicLinkClient()] });
