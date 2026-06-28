@@ -112,6 +112,9 @@ export function PainelPage({ slug }: { slug: string }) {
   // still loading) → PainelLayout falls back to the neutral "bebê", never
   // the slug.
   const babyName = perfilQ.data?.nomeBebe ?? null;
+  // aperture-neiwx — seed the owner header's gender article from the same
+  // getPerfil source, so owner + guest never disagree on do/da/de.
+  const genero = perfilQ.data?.genero ?? null;
 
   // aperture-84a21 — the REAL event date for the painel countdown + date chip.
   // null (unset / fresh account / still loading) → PainelHeaderCard shows NO
@@ -269,7 +272,7 @@ export function PainelPage({ slug }: { slug: string }) {
   }
 
   return (
-    <PainelLayout slug={slug} babyName={babyName} eventDate={eventDate}>
+    <PainelLayout slug={slug} babyName={babyName} eventDate={eventDate} genero={genero}>
       <PainelHeaderCard snapshot={snapshot} slug={slug} />
       <PainelMenu groups={groups} slug={slug} />
       <PainelTutorialTrigger

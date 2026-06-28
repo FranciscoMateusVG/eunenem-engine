@@ -1,4 +1,5 @@
 
+import { artigoDefinido } from "@/lib/concordancia";
 import { FlowerDoodle, Polaroid, StarDoodle, Tape } from "./Doodles";
 import { ImageSlot } from "./ImageSlot";
 import { useTweaks } from "./TweaksContext";
@@ -30,7 +31,8 @@ export function Story({
   fotoHistoria?: string | null;
 }) {
   const { tweaks } = useTweaks();
-  const { babyName, parents } = tweaks;
+  const { babyName, parents, genero } = tweaks;
+  const artDef = artigoDefinido(genero);
   const paragraphs = (historia ?? "")
     .split(/\n+/)
     .map((p) => p.trim())
@@ -73,7 +75,7 @@ export function Story({
               marginTop: 8,
             }}
           >
-            Como o{" "}
+            Como {artDef ? `${artDef} ` : ""}
             <span style={{ color: "var(--coral-pink)" }}>{babyName}</span>{" "}
             chegou na <span className="hl">nossa vida</span>
           </h2>

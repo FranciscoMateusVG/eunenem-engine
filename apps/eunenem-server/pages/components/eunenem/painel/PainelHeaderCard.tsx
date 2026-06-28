@@ -1,5 +1,6 @@
 
 import { useEffect, useState } from "react";
+import { artigoPosse } from "@/lib/concordancia";
 import { toast } from "sonner";
 import { useTweaks } from "../TweaksContext";
 import type { PainelEventSnapshot } from "@/lib/mocks/painelDemo";
@@ -146,7 +147,7 @@ export function PainelHeaderCard({ snapshot, slug }: Props) {
           olá{snapshot.greetingTo ? `, ${snapshot.greetingTo}` : ""} ♡
         </span>
         <h1 className="painel-hc-title">
-          página da <span className="hl">{babyNameDisplay}</span>
+          página {artigoPosse(tweaks.genero)} <span className="hl">{babyNameDisplay}</span>
         </h1>
         <div className="painel-url-row">
           {/* aperture-84a21 — calendar icon + date chip only when a real event

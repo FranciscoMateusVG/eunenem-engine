@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 
 import { TweaksProvider } from "@/components/eunenem/TweaksContext";
+import type { Genero } from "@/lib/concordancia";
+import type { TweaksState } from "@/lib/mocks/tweaksDefaults";
 import type { PainelSection } from "@/lib/painelRoutes";
 import { PainelTopbar } from "./PainelTopbar";
 
@@ -44,6 +46,9 @@ interface PainelLayoutProps {
    *   behaviour (the shared TWEAKS_DEFAULTS targetDate is left untouched).
    */
   eventDate?: string | null;
+  /** aperture-neiwx — the baby's gender from getPerfil, seeds tweaks.genero so
+   *  the owner header article ("página do/da/de") agrees with the guest page. */
+  genero?: Genero | null;
   /** Current section, or undefined for the painel root (PainelPage). */
   activeSection?: PainelSection;
   children: ReactNode;
@@ -54,6 +59,7 @@ export function PainelLayout({
   activeSection,
   babyName,
   eventDate,
+  genero,
   children,
 }: PainelLayoutProps) {
   // aperture-3ic62 — resolve the initial babyName seed:
@@ -72,10 +78,14 @@ export function PainelLayout({
   // aperture-84a21 — seed the real event date when the prop is provided
   // (PainelPage). `undefined` (legacy callers) leaves TWEAKS_DEFAULTS as-is;
   // a real date seeds it; null/empty seeds "" so the header shows no date.
-  const initialTweaks =
+  const initialTweaks: Partial<TweaksState> =
     eventDate === undefined
       ? { babyName: initialBabyName }
       : { babyName: initialBabyName, targetDate: eventDate ?? "" };
+  // aperture-neiwx — seed genero when the prop is provided (PainelPage), so the
+  // owner header reads the same article the guest page does. Omitted (legacy
+  // sub-page callers) → tweaks.genero stays null → neutral "de".
+  if (genero !== undefined) initialTweaks.genero = genero;
 
   return (
     <TweaksProvider initialState={initialTweaks}>
