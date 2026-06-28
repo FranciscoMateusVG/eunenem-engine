@@ -89,6 +89,30 @@ export function isAllowedAuthRequest(method: string, path: string): boolean {
   // relaxation; a new exposed route still requires a Cipher review.
   if (method === 'GET' && path === '/api/auth/error') return true;
   if (method === 'GET' && path === '/api/auth/ok') return true;
+  // aperture-lwx2k (Camada C) — the passwordless magic-link flow. Two routes,
+  // method-specific (every other method on them stays denied = no probing
+  // signal). Cipher-gated exposure (review against aperture-79b31):
+  //   - POST /api/auth/sign-in/magic-link — the SEND. Issues a single-use,
+  //     hashed-at-rest, 5-min token and emails the link. Response is uniform
+  //     ("if you have an account, we sent a link") with no account-existence
+  //     oracle. ⚠️ abuse surface (email-bombing / send-cost) → gate item 5
+  //     (DONE, aperture-lwx2k): DB-backed rate-limit on BOTH axes, wired in
+  //     criar-auth.ts — per-IP via better-auth's native rateLimit.customRules
+  //     ('/sign-in/magic-link', DB storage, keyed IP+path) and per-EMAIL via a
+  //     send-budget counter in the sendMagicLink chokepoint (better-auth can't
+  //     key on email). Both reuse the rate_limit table (migration 009) — no
+  //     Redis. Over-cap sends are skipped, preserving the uniform response.
+  //   - GET /api/auth/magic-link/verify — the CONSUME. Validates+consumes the
+  //     token atomically (single-use, GHSA-hc7v-rggr-4hvx), establishes the
+  //     session, and 302s to callbackURL. better-auth's originCheck middleware
+  //     validates callbackURL/newUserCallbackURL/errorCallbackURL against
+  //     trustedOrigins (open-redirect gate, item 4). The session.create.before
+  //     keystone NULLs any pre-existing credential password (takeover gate).
+  // The mutation/data/enumeration routes (update-user, change-email,
+  // request-password-reset, list-sessions, …) STAY denied. no-store still
+  // applies. A new exposed route still requires a Cipher review.
+  if (method === 'POST' && path === '/api/auth/sign-in/magic-link') return true;
+  if (method === 'GET' && path === '/api/auth/magic-link/verify') return true;
   return false;
 }
 

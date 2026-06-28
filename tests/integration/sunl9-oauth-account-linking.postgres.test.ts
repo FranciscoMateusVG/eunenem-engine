@@ -1047,4 +1047,198 @@ describe('Google-OAuth account-linking + password-invalidation (aperture-8655f /
       'the victim password must still authenticate after the blocked attack',
     ).toBe(victimUserId);
   });
+
+  // --------------------------------------------------------------------------
+  // (G) ⭐ lwx2k / 79b31 KEYSTONE: a magic-link sign-in to a pre-existing
+  //     credential account INVALIDATES the local password (attacker lockout).
+  //
+  //     THREAT (the keystone target): magic-link is an email-ownership-proving
+  //     sign-in that authenticates an EXISTING user without an account.create
+  //     event, so the OAuth password-NULL hook never fires. Attacker
+  //     pre-registers victim@email via email/password (attacker knows pw);
+  //     victim later signs in via magic-link → without the keystone the
+  //     attacker's password STILL authenticates = takeover. The
+  //     session.create.before hook NULLs the credential the instant a
+  //     verified-email session is created.
+  //
+  //     NON-VACUOUS, ORDERED: (1) CONTROL the password authenticates pre-link;
+  //     (2) run the REAL magic-link flow (signInMagicLink → consume the link);
+  //     (3a) the credential password is NULL; (3b) the old password no longer
+  //     authenticates. Mirror of the OAuth (b) proof for the magic-link path.
+  // --------------------------------------------------------------------------
+  it('(G) ⭐ magic-link sign-in NULLs a pre-existing credential password (keystone attacker lockout)', async () => {
+    let capturedUrl: string | null = null;
+    const auth = criarAuth(testDb.db, {
+      secret: SECRET,
+      baseURL: BASE_URL,
+      trustedOrigins: [BASE_URL],
+      sendResetPassword: async () => {
+        /* no-op */
+      },
+      useSecureCookies: false,
+      idPlataformaPadrao: ID_PLATAFORMA_EUNENEM,
+      sendMagicLink: async ({ url }) => {
+        capturedUrl = url;
+      },
+    });
+    const authService = new AuthServiceBetterAuth(testDb.db);
+
+    const victimUserId = randomUUID();
+    const email = 'magiclink-victim@example.com';
+    const oldPassword = 'attacker-set-password-123';
+    await authService.criarConta({
+      idUsuario: victimUserId,
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
+      email,
+      senha: oldPassword,
+      nome: 'Magic Victim',
+    });
+
+    // 1. CONTROL — the password authenticates before the magic-link.
+    const before = await authService.iniciarSessao({
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
+      email,
+      senha: oldPassword,
+    });
+    expect(
+      before.idUsuario,
+      'CONTROL: the password must authenticate before the magic-link',
+    ).toBe(victimUserId);
+
+    // 2. Request + consume the REAL magic link (signInMagicLink fires the
+    // sender → we capture the URL → drive the verify endpoint).
+    await auth.api.signInMagicLink({
+      body: { email, callbackURL: '/dashboard' },
+      headers: new Headers({ origin: BASE_URL }),
+    });
+    expect(capturedUrl, 'sendMagicLink must have been invoked with a url').toBeTruthy();
+    const verifyRes = await auth.handler(
+      new Request(capturedUrl as unknown as string, { method: 'GET', redirect: 'manual' }),
+    );
+    expect(
+      [200, 302, 303, 307],
+      'magic-link verify must succeed (session established)',
+    ).toContain(verifyRes.status);
+
+    // 3a. KEYSTONE — the credential password is now NULL.
+    const pwAfter = await testDb.db
+      .selectFrom('accounts')
+      .select('password')
+      .where('user_id', '=', victimUserId)
+      .where('provider_id', '=', 'credential')
+      .executeTakeFirstOrThrow();
+    expect(
+      pwAfter.password,
+      'magic-link to a credential account MUST NULL the pre-existing password (keystone)',
+    ).toBeNull();
+
+    // 3b. The old password no longer authenticates — attacker locked out.
+    await expect(
+      authService.iniciarSessao({ idPlataforma: ID_PLATAFORMA_EUNENEM, email, senha: oldPassword }),
+      'the old password MUST be rejected after the magic-link (takeover closed)',
+    ).rejects.toBeDefined();
+  });
+
+  // --------------------------------------------------------------------------
+  // (H) lwx2k — coexistence guard: a pure email+password user who NEVER
+  //     magic-links KEEPS their password (no false-positive null). Proves the
+  //     session.create.before STATE gate (email_verified=true) does not
+  //     over-fire: credential rows are created email_verified=false and
+  //     password login uses the engine-native session (not a better-auth
+  //     verified session), so the hook never touches them.
+  // --------------------------------------------------------------------------
+  it('(H) pure password user keeps their password after a normal login (coexistence intact)', async () => {
+    const authService = new AuthServiceBetterAuth(testDb.db);
+    const userId = randomUUID();
+    const email = 'pure-password@example.com';
+    const password = 'legit-password-123';
+    await authService.criarConta({
+      idUsuario: userId,
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
+      email,
+      senha: password,
+      nome: 'Pure Password',
+    });
+
+    const first = await authService.iniciarSessao({
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
+      email,
+      senha: password,
+    });
+    expect(first.idUsuario).toBe(userId);
+
+    const row = await testDb.db
+      .selectFrom('accounts')
+      .select('password')
+      .where('user_id', '=', userId)
+      .where('provider_id', '=', 'credential')
+      .executeTakeFirstOrThrow();
+    expect(
+      row.password,
+      'a pure-password user must KEEP their password — no false-positive null',
+    ).toBeTruthy();
+
+    // And it still authenticates on a subsequent login.
+    const again = await authService.iniciarSessao({
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
+      email,
+      senha: password,
+    });
+    expect(again.idUsuario).toBe(userId);
+  });
+
+  // --------------------------------------------------------------------------
+  // (I) lwx2k gate item 5 (per-EMAIL axis): the magic-link SEND is capped per
+  //     email. better-auth's native limiter keys on IP+path ONLY, so the
+  //     per-email cannon shield lives in the sendMagicLink chokepoint. Drive
+  //     MAX+1 sends to ONE email and assert the actual delivery
+  //     (config.sendMagicLink) fired exactly MAX times — the over-cap send is
+  //     skipped while better-auth still returns success (no oracle). The
+  //     per-IP axis is better-auth-native config (rateLimit.enabled defaults
+  //     to isProduction → inert in tests by design); it is reviewed by config,
+  //     not exercised here.
+  // --------------------------------------------------------------------------
+  it('(I) magic-link SEND is capped per email (item 5 per-email cannon shield)', async () => {
+    const MAX = 5; // value-pin: must mirror MAGIC_LINK_EMAIL_MAX_SENDS in criar-auth.ts
+    let sendCount = 0;
+    const auth = criarAuth(testDb.db, {
+      secret: SECRET,
+      baseURL: BASE_URL,
+      trustedOrigins: [BASE_URL],
+      sendResetPassword: async () => {
+        /* no-op */
+      },
+      useSecureCookies: false,
+      idPlataformaPadrao: ID_PLATAFORMA_EUNENEM,
+      sendMagicLink: async () => {
+        sendCount += 1;
+      },
+    });
+
+    // Deterministic target: create the user so the send path is unambiguous.
+    const authService = new AuthServiceBetterAuth(testDb.db);
+    const email = 'cannon-target@example.com';
+    await authService.criarConta({
+      idUsuario: randomUUID(),
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
+      email,
+      senha: 'irrelevant-never-verified-123',
+      nome: 'Cannon Target',
+    });
+
+    // Fire MAX+1 sends to the SAME email. better-auth returns success each time
+    // (uniform, no oracle); the per-email budget skips the actual send once the
+    // cap is reached within the window.
+    for (let i = 0; i < MAX + 1; i += 1) {
+      await auth.api.signInMagicLink({
+        body: { email, callbackURL: '/dashboard' },
+        headers: new Headers({ origin: BASE_URL }),
+      });
+    }
+
+    expect(
+      sendCount,
+      `exactly ${MAX} emails should be delivered for ${MAX + 1} requests — the over-cap send is skipped`,
+    ).toBe(MAX);
+  });
 });

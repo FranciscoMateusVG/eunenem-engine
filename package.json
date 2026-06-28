@@ -99,6 +99,7 @@
     "@opentelemetry/api-logs": "^0.215.0",
     "better-auth": "^1.6.12",
     "kysely": "^0.28.16",
+    "nodemailer": "^9.0.1",
     "pg": "^8.20.0",
     "stripe": "^18.5.0",
     "zod": "^4.3.6"
@@ -112,6 +113,7 @@
     "@playwright/test": "^1.60.0",
     "@testcontainers/postgresql": "^11.14.0",
     "@types/node": "^25.6.0",
+    "@types/nodemailer": "^8.0.1",
     "@types/pg": "^8.20.0",
     "@vitest/coverage-v8": "^4.1.5",
     "better-sqlite3": "^12.9.0",

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { BetterAuthOptions, User } from 'better-auth';
 import { betterAuth } from 'better-auth';
+import { magicLink } from 'better-auth/plugins';
 import type { Database } from '../database.js';
 
 /**
@@ -50,6 +51,27 @@ export interface CriarAuthConfig {
    * (already mounted via `auth.handler` at `/api/auth/*`).
    */
   readonly socialProviders?: BetterAuthOptions['socialProviders'];
+
+  /**
+   * OPTIONAL magic-link sender (aperture-lwx2k / Camada C). When provided, the
+   * BetterAuth `magicLink` plugin is enabled and this callback delivers the
+   * link (the consumer wires the SMTP transport; the engine never touches
+   * transports). When omitted/undefined the plugin is NOT registered and
+   * BetterAuth runs without passwordless — the server still boots cleanly in
+   * environments without SMTP creds (eunenem-server gates this on
+   * SMTP_HOST/USER/PASS all being present, mirroring the google spread).
+   *
+   * ⚠️ SECURITY (Cipher keystone, aperture-79b31): enabling magic-link is an
+   * email-ownership-proving sign-in. The `session.create.before` hook below
+   * NULLs any local credential password on a verified-email session so a
+   * pre-registered attacker's password cannot survive the victim's magic-link
+   * login. Enabling this WITHOUT that hook re-opens an account-takeover.
+   */
+  readonly sendMagicLink?: (input: {
+    email: string;
+    url: string;
+    token: string;
+  }) => Promise<void>;
 
   /**
    * Default platform id injected into adapter-created users (e.g. OAuth signup)
@@ -143,6 +165,95 @@ for (const trusted of TRUSTED_OAUTH_PROVIDERS) {
     throw new Error(
       `OAuth config invariant violated: trusted provider "${trusted}" is not in HOOK_COVERED_OAUTH_PROVIDERS (TRUSTED must be a subset of HOOK_COVERED)`,
     );
+  }
+}
+
+// ── aperture-lwx2k (Camada C) gate item 5: magic-link SEND rate-limit ─────────
+//
+// Cipher's item-5 requirement is a rate-limit on the magic-link SEND covering
+// BOTH axes (it is an email cannon without per-email):
+//
+//   - per-IP    → better-auth's NATIVE DB-backed limiter via `rateLimit`
+//                 (storage:'database' + customRules on '/sign-in/magic-link';
+//                 keyed on IP+path). Wired in the options block below. Active in
+//                 production (rateLimit.enabled defaults to `isProduction`,
+//                 verified in better-auth context/create-context.mjs).
+//
+//   - per-EMAIL → better-auth's limiter keys ONLY on IP+path
+//                 (createRateLimitKey(ip, path); verified in
+//                 api/rate-limiter/index.mjs) — it CANNOT key on the target
+//                 email, so a single victim can be email-bombed from rotating
+//                 IPs. We close that axis HERE, at the send chokepoint (the
+//                 actual email IS the abuse/cost), with a DB-backed counter that
+//                 REUSES the same `rate_limit` table (migration 009 — durable
+//                 across deploys + shared across replicas, no Redis needed).
+//
+// Over the cap we SKIP the send and return normally: better-auth still emits its
+// uniform success response, so there is NO account-existence / send-state oracle
+// (same no-oracle posture the route itself maintains).
+const MAGIC_LINK_EMAIL_WINDOW_MS = 60 * 60 * 1000; // 1h window per email
+const MAGIC_LINK_EMAIL_MAX_SENDS = 5; // sends per email per window
+const MAGIC_LINK_IP_WINDOW_SECONDS = 15 * 60; // 15-min window per IP
+const MAGIC_LINK_IP_MAX_SENDS = 5; // sends per IP per window
+
+/**
+ * Per-EMAIL send budget for the magic-link route (gate item 5, per-email axis).
+ *
+ * Returns true when a send to `email` is within budget (and records it); false
+ * when the per-email cap is hit (the caller MUST skip the actual send). The
+ * counter row is namespaced `magic-link-email:<normalized-email>` so it never
+ * collides with better-auth's own `<ip>:<path>` keys in the shared table.
+ *
+ * Read-then-write is non-atomic under a concurrent burst (this mirrors
+ * better-auth's own onResponseRateLimit shape) — acceptable for a send-cost
+ * shield: a small over-count on a simultaneous burst cannot defeat the cap's
+ * intent. On a storage error we FAIL-CLOSED (skip the send) rather than open an
+ * unbounded send path; in practice better-auth has already inserted the
+ * verification token (proving the DB is up) before sendMagicLink runs, so the
+ * catch is for truly exotic failures only.
+ */
+async function consumeMagicLinkEmailBudget(db: Database, email: string): Promise<boolean> {
+  const key = `magic-link-email:${email.trim().toLowerCase()}`;
+  const now = Date.now();
+  try {
+    const row = await db
+      .selectFrom('rate_limit')
+      .select(['count', 'last_request'])
+      .where('key', '=', key)
+      .executeTakeFirst();
+
+    if (!row) {
+      // First send for this email — create the row (onConflict guards the
+      // race where a concurrent first-send created it between SELECT/INSERT).
+      await db
+        .insertInto('rate_limit')
+        .values({ id: randomUUID(), key, count: 1, last_request: now })
+        .onConflict((oc) => oc.column('key').doUpdateSet({ count: 1, last_request: now }))
+        .execute();
+      return true;
+    }
+
+    const last = Number(row.last_request);
+    if (now - last > MAGIC_LINK_EMAIL_WINDOW_MS) {
+      // Window elapsed — reset the counter.
+      await db
+        .updateTable('rate_limit')
+        .set({ count: 1, last_request: now })
+        .where('key', '=', key)
+        .execute();
+      return true;
+    }
+    if (row.count >= MAGIC_LINK_EMAIL_MAX_SENDS) {
+      return false; // cap hit within the window — caller skips the send
+    }
+    await db
+      .updateTable('rate_limit')
+      .set({ count: row.count + 1, last_request: now })
+      .where('key', '=', key)
+      .execute();
+    return true;
+  } catch {
+    return false; // counter unavailable → fail-closed (no unbounded send path)
   }
 }
 
@@ -321,7 +432,50 @@ export function criarAuth(kysely: Database, config: CriarAuthConfig) {
       fields: {
         lastRequest: 'last_request',
       },
+      // aperture-lwx2k gate item 5 (per-IP axis): cap magic-link SENDs per IP.
+      // DB-backed (same rate_limit table), keyed on IP+path by better-auth.
+      // Overrides the default /sign-in special rule for this one route. The
+      // per-EMAIL axis is enforced in the magicLink sendMagicLink wrapper below
+      // (better-auth's limiter cannot key on email). Active in production
+      // (rateLimit.enabled defaults to isProduction).
+      customRules: {
+        '/sign-in/magic-link': {
+          window: MAGIC_LINK_IP_WINDOW_SECONDS,
+          max: MAGIC_LINK_IP_MAX_SENDS,
+        },
+      },
     },
+    // aperture-lwx2k (Camada C) — magic-link plugin, CONDITIONAL: only spread
+    // in when the consumer injected a sender (SMTP creds present). Absent → no
+    // plugin → passwordless off, boots clean (mirrors the google spread).
+    // TOKEN HARDENING (Cipher gate item 3, aperture-79b31):
+    //   - expiresIn: 300s (5 min) — magic links are used immediately; short
+    //     TTL minimises the intercept/replay window.
+    //   - storeToken: 'hashed' — set EXPLICITLY (not the default); a DB leak
+    //     must not expose live tokens.
+    //   - single-use: better-auth consumes the token atomically on the FIRST
+    //     /magic-link/verify (consumeVerificationValue; GHSA-hc7v-rggr-4hvx) —
+    //     no replay window. Verified in plugins/magic-link/index.mjs.
+    //   - token entropy: better-auth's default generateToken is CSPRNG
+    //     (generateRandomString, 32 chars) — we rely on it deliberately.
+    ...(config.sendMagicLink
+      ? {
+          plugins: [
+            magicLink({
+              expiresIn: 300,
+              storeToken: 'hashed',
+              sendMagicLink: async ({ email, url, token }) => {
+                // gate item 5 (per-EMAIL axis): skip the send when this email is
+                // over its send budget — preserves better-auth's uniform
+                // response (no account-existence / send-state oracle).
+                const within = await consumeMagicLinkEmailBudget(kysely, email);
+                if (!within) return;
+                await config.sendMagicLink!({ email, url, token });
+              },
+            }),
+          ],
+        }
+      : {}),
     // aperture-8655f — social providers are CONDITIONAL: only spread in when
     // the consumer injected them (both OAuth env vars present on its side).
     // Absent → key is omitted entirely → email+password-only, boots cleanly.
@@ -393,6 +547,77 @@ export function criarAuth(kysely: Database, config: CriarAuthConfig) {
               // link rather than leave a usable pre-existing password alongside a
               // freshly-linked Google identity (that would be the takeover state).
               // The user can retry Google (this before-hook re-fires) to recover.
+              return false;
+            }
+            return;
+          },
+        },
+      },
+      // aperture-lwx2k / 79b31 (Cipher KEYSTONE) — magic-link password
+      // invalidation. The OAuth account.create.before above covers the
+      // link-account path; this covers the OTHER email-ownership-proving path:
+      // magic-link sign-in authenticates an existing user WITHOUT an
+      // account.create event (it sets users.email_verified=true then creates a
+      // session), so the OAuth hook never fires. Without THIS hook a
+      // pre-registered attacker's password survives the victim's magic-link
+      // login = account takeover.
+      //
+      // MECHANISM (Cipher-approved over user.update.before, which is
+      // identity-blind + non-transactional): key on the SESSION being created.
+      // session.create.before receives the session data WITH userId, runs
+      // BEFORE the session row is inserted, and `return false` aborts the
+      // session (magic-link's `if (!session) redirectWithError` → NO cookie) —
+      // fail-closed BEFORE authentication completes.
+      //
+      // INVARIANT (provider-agnostic, NOT magic-link-specific): any session for
+      // a user whose email is verified must not coexist with a live local
+      // credential password. We key on STATE (users.email_verified===true), not
+      // a fragile "came-from-magic-link" guard:
+      //   - magic-link verify just set email_verified=true → NULL the password.
+      //   - OAuth: account.create.before already nulled it → 0 rows, no-op.
+      //   - pure password user (never verified): email_verified=FALSE → SKIP →
+      //     password preserved (coexistence login is NOT broken). New credential
+      //     rows are created email_verified=false, so normal password login is
+      //     never touched.
+      //   - email_verified=true + a live password only co-occurs in the takeover
+      //     state (or the very magic-link session establishing verification) →
+      //     nulling is exactly the fix. Idempotent + self-healing: every
+      //     session.create re-enforces it (0 rows once there's no live password).
+      //
+      // ⚠️ FORWARD-FRICTION (Cipher — re-review REQUIRED if any of these land):
+      // enabling the email-otp plugin, core emailVerification
+      // (sendVerificationEmail), the admin plugin, OR any direct
+      // updateUser({emailVerified:true}) that is NOT immediately followed by a
+      // session.create — each could flip email_verified=true WITHOUT a session
+      // to trip this hook, leaving a one-session-takeover window on the
+      // attacker's NEXT login. autoSignInAfterVerification:true creates a
+      // session (covered); false does not (window). Trip on this before adding.
+      session: {
+        create: {
+          before: async (session: { userId?: unknown }) => {
+            if (typeof session.userId !== 'string') return;
+            // STATE gate: only verified-email users. Pure password users are
+            // email_verified=false → skip → their password is preserved.
+            const usuario = await kysely
+              .selectFrom('users')
+              .select('email_verified')
+              .where('id', '=', session.userId)
+              .executeTakeFirst();
+            if (!usuario?.email_verified) return;
+            try {
+              // COND C: ALL credential rows for this user, never OAuth rows.
+              // Mirrors the account.create.before query exactly.
+              await kysely
+                .updateTable('accounts')
+                .set({ password: null })
+                .where('user_id', '=', session.userId)
+                .where('provider_id', '=', 'credential')
+                .execute();
+            } catch {
+              // COND B (fail-closed): if the NULL fails, ABORT this session
+              // rather than authenticate while a live credential survives. The
+              // user retries (the hook re-fires); the state-keyed gate
+              // self-heals on the next session.create.
               return false;
             }
             return;
