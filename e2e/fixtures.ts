@@ -23,16 +23,16 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { test as base, type BrowserContext, type Page } from '@playwright/test';
-import { createDatabase, type Database } from '../src/adapters/database.js';
-import { AuthServiceBetterAuth } from '../src/adapters/usuario/auth-service.better-auth.js';
+import { type BrowserContext, test as base, type Page } from '@playwright/test';
 import { CampanhaRepositoryPostgres } from '../src/adapters/arrecadacao/campanha-repository.postgres.js';
 import { ContribuicaoRepositoryPostgres } from '../src/adapters/arrecadacao/contribuicao-repository.postgres.js';
+import { RecebedorRepositoryPostgres } from '../src/adapters/arrecadacao/recebedor-repository.postgres.js';
+import { createDatabase, type Database } from '../src/adapters/database.js';
 import {
   ID_PLATAFORMA_EUNENEM,
   PlataformaRepositoryMemory,
 } from '../src/adapters/plataforma/repository.memory.js';
-import { RecebedorRepositoryPostgres } from '../src/adapters/arrecadacao/recebedor-repository.postgres.js';
+import { AuthServiceBetterAuth } from '../src/adapters/usuario/auth-service.better-auth.js';
 import { UsuarioRepositoryPostgres } from '../src/adapters/usuario/repository.postgres.js';
 import { criarContribuicao } from '../src/domain/arrecadacao/entities/contribuicao.js';
 import { criarRecebedorInicial } from '../src/domain/arrecadacao/entities/recebedor.js';
@@ -111,6 +111,7 @@ export const test = base.extend<SeedFixtures>({
    * inserts a single contribuição, returns identifiers + a fresh
    * BetterAuth session token. No cleanup yet (Phase 1).
    */
+  // biome-ignore lint/correctness/noEmptyPattern: Playwright fixture with no dependencies — the empty destructure is the documented idiom.
   seededData: async ({}, use) => {
     const db = createDatabase(DATABASE_URL);
     const deps = buildSeedDeps(db);
@@ -143,6 +144,12 @@ export const test = base.extend<SeedFixtures>({
       id: randomUUID() as never,
       idCampanha: campanha.id,
       dadosRecebedor: {
+        // aperture-8ro9v — DadosRecebedor is a discriminated union by
+        // `metodo` (aperture-mcvyw). Without `metodo: 'pix'` the column
+        // mapping (recebedor-repository.postgres.ts:47) falls to the
+        // 'conta' branch with null bank fields and violates the
+        // recebedores_variante_check constraint at save time.
+        metodo: 'pix',
         nomeTitular: nomeExibicao,
         tipoChavePix: 'email',
         chavePix: email,
