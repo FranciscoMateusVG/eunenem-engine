@@ -26,9 +26,9 @@ import { authClient } from "@/lib/authClient";
 //   step 1 = OAuth row + email + CONTINUAR (the reference PNGs)
 //   step 2 = (name for signup) + password + CONTINUAR — Vance designed
 //
-// OAuth providers (Google / Apple / Microsoft) are STUBS for v1 — clicking
-// fires a sonner toast "em breve ♡". The real provider integration lives
-// downstream of Rex's BetterAuth chain (currently aperture-ibbet/-ht7sq).
+// OAuth providers: Google + Microsoft are wired to the real BetterAuth social
+// flow (onOauth → authClient.signIn.social). Apple was removed (operator
+// dropped the dead "em breve" stub — not returning in this redesign).
 //
 // State machine:
 //   open + mode "signup" + step 1 → render signup email step
@@ -92,7 +92,6 @@ const COPY: Record<AuthMode, {
 
 const OAUTH_PROVIDERS = [
   { id: "google", label: "Google", icon: GoogleIcon },
-  { id: "apple", label: "Apple", icon: AppleIcon },
   { id: "microsoft", label: "Microsoft", icon: MicrosoftIcon },
 ] as const;
 
@@ -616,14 +615,6 @@ function GoogleIcon() {
       <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 16.2 19 13 24 13c3.1 0 5.8 1.2 8 3l5.7-5.7C33.8 6.2 29.1 4 24 4c-7.5 0-14 4.1-17.7 10.7z"/>
       <path fill="#4CAF50" d="M24 44c5 0 9.6-1.9 13-5.1l-6-5.1c-2 1.5-4.4 2.4-7 2.4-5.3 0-9.7-3.4-11.3-8l-6.6 5.1C9.9 39.8 16.4 44 24 44z"/>
       <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.2 4.2-4 5.6l6 5.1c-.4.4 6.7-4.9 6.7-14.7 0-1.3-.1-2.4-.4-3.5z"/>
-    </svg>
-  );
-}
-
-function AppleIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="#000" aria-hidden="true">
-      <path d="M16.4 12.7c0-2.5 2-3.7 2.1-3.8-1.2-1.7-3-1.9-3.6-2-1.5-.2-3 .9-3.8.9-.8 0-2-.9-3.3-.8-1.7 0-3.3 1-4.2 2.5C2 12.4 3.2 17 5 19.5c.9 1.2 1.9 2.6 3.3 2.6 1.3 0 1.8-.8 3.4-.8 1.6 0 2 .8 3.4.8 1.4 0 2.3-1.3 3.2-2.5 1-1.4 1.4-2.8 1.4-2.9-.1 0-2.7-1-2.7-4zM14 6.5c.7-.9 1.2-2.1 1-3.3-1 .1-2.2.7-3 1.6-.6.8-1.2 2-1 3.2 1.1.1 2.3-.6 3-1.5z"/>
     </svg>
   );
 }
