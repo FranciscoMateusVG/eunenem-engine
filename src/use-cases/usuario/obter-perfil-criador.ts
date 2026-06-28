@@ -3,6 +3,7 @@ import { z } from 'zod/v4';
 import type { ObjectStorage } from '../../adapters/storage/object-storage.js';
 import type { PerfilCriadorRepository } from '../../adapters/usuario/perfil-criador-repository.js';
 import type { UsuarioRepository } from '../../adapters/usuario/repository.js';
+import { GeneroBebeSchema } from '../../domain/usuario/value-objects/genero-bebe.js';
 import type { IdUsuario } from '../../domain/usuario/value-objects/ids.js';
 import { TipoEventoPerfilSchema } from '../../domain/usuario/value-objects/tipo-evento-perfil.js';
 import { UsuarioNaoEncontradoError } from '../../errors/usuario/nao-encontrado.error.js';
@@ -22,6 +23,7 @@ export const PerfilProprioDTOSchema = z.object({
   relacao: z.string().nullable(),
   historia: z.string().nullable(),
   tipoEvento: TipoEventoPerfilSchema.nullable(),
+  genero: GeneroBebeSchema.nullable(),
   dataEvento: z.string().nullable(),
   dataNascimento: z.string().nullable(),
   // Resolved public URLs — DISPLAY ONLY (aperture-qjgfr). img src binds here.
@@ -79,6 +81,7 @@ export async function obterPerfilCriador(
         relacao: c?.relacao ?? null,
         historia: c?.historia ?? null,
         tipoEvento: c?.tipoEvento ?? null,
+        genero: c?.genero ?? null,
         dataEvento: c?.dataEvento ? c.dataEvento.toISOString() : null,
         dataNascimento: c?.dataNascimento ? c.dataNascimento.toISOString() : null,
         fotoPerfilUrl: fotoUrl(c?.fotoPerfilKey ?? null),
