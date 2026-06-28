@@ -1,6 +1,7 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 import type { PerfilCriador } from '../../domain/usuario/entities/perfil-criador.js';
 import type { ConteudoPerfilCriador } from '../../domain/usuario/value-objects/conteudo-perfil-criador.js';
+import type { GeneroBebe } from '../../domain/usuario/value-objects/genero-bebe.js';
 import type { IdPerfilCriador, IdUsuario } from '../../domain/usuario/value-objects/ids.js';
 import type { TipoEventoPerfil } from '../../domain/usuario/value-objects/tipo-evento-perfil.js';
 import type { Database } from '../database.js';
@@ -21,6 +22,7 @@ type PerfilCriadorRow = {
   historia: string | null;
   data_nascimento: Date | null;
   tipo_evento: string | null;
+  genero: string | null;
   data_evento: Date | null;
   foto_perfil_key: string | null;
   foto_capa_key: string | null;
@@ -47,6 +49,7 @@ export class PerfilCriadorRepositoryPostgres implements PerfilCriadorRepository 
             historia: c.historia,
             data_nascimento: c.dataNascimento,
             tipo_evento: c.tipoEvento,
+            genero: c.genero,
             data_evento: c.dataEvento,
             foto_perfil_key: c.fotoPerfilKey,
             foto_capa_key: c.fotoCapaKey,
@@ -64,6 +67,7 @@ export class PerfilCriadorRepositoryPostgres implements PerfilCriadorRepository 
               historia: c.historia,
               data_nascimento: c.dataNascimento,
               tipo_evento: c.tipoEvento,
+              genero: c.genero,
               data_evento: c.dataEvento,
               foto_perfil_key: c.fotoPerfilKey,
               foto_capa_key: c.fotoCapaKey,
@@ -112,6 +116,7 @@ function toPerfilCriador(row: PerfilCriadorRow): PerfilCriador {
     historia: row.historia,
     dataNascimento: row.data_nascimento,
     tipoEvento: row.tipo_evento as TipoEventoPerfil | null,
+    genero: row.genero as GeneroBebe | null,
     dataEvento: row.data_evento,
     fotoPerfilKey: row.foto_perfil_key,
     fotoCapaKey: row.foto_capa_key,

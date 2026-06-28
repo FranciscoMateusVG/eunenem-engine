@@ -32,6 +32,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { trpc } from "@/lib/trpc";
+import type { Genero } from "@/lib/concordancia";
 import { AUTH_CSS } from "./AuthModalShell";
 
 // aperture-84a21 — tipoEvento canonical kebab slugs (mirror PerfilBody +
@@ -54,6 +55,16 @@ const EVENT_TYPES: ReadonlyArray<{ value: EventTypeSlug; label: string }> = [
   { value: "batizado", label: "Batizado" },
 ];
 
+// aperture-neiwx — baby gender, drives PT-BR article agreement (do/da/de)
+// across the owner painel + guest page. "neutro"/"surpresa" both render the
+// neutral "de" article; kept distinct so the copy can diverge later if needed.
+const GENEROS: ReadonlyArray<{ value: Genero; label: string }> = [
+  { value: "menina", label: "Menina" },
+  { value: "menino", label: "Menino" },
+  { value: "surpresa", label: "Ainda é surpresa ✨" },
+  { value: "neutro", label: "Prefiro não dizer" },
+];
+
 // aperture-4y1y4 — slug VO regex (mirror App.tsx SLUG_REGEX + PerfilBody
 // SLUG_RE): starts with a letter, a–z/0–9/hyphen, 3–30 chars total.
 const SLUG_RE = /^[a-z][a-z0-9-]{2,29}$/;
@@ -66,10 +77,23 @@ export function OnboardingWizard({ onDone }: { onDone: (slug: string) => void })
   const atualizarSlug = trpc.usuario.atualizarSlug.useMutation();
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
+  // aperture-b2gac — editable display name (= nomeExibicao = creatorName), seeded
+  // ONCE from the best server source (Google profile name → email local-part) so
+  // the painel greeting stops showing a raw email local-part. `displayNameTouched`
+  // keeps the seed from clobbering a user edit (mirrors the slug seed below).
+  const [displayName, setDisplayName] = useState("");
+  const [displayNameTouched, setDisplayNameTouched] = useState(false);
   const [babyName, setBabyName] = useState("");
   const [eventDate, setEventDate] = useState("");
   const [eventType, setEventType] = useState<EventTypeSlug>("cha-bebe");
+  // aperture-neiwx — baby gender, default neutro (→ neutral "de" article).
+  const [genero, setGenero] = useState<Genero>("neutro");
   const [submitting, setSubmitting] = useState(false);
+
+  const defaultDisplayName = me.data?.nomeExibicao ?? "";
+  useEffect(() => {
+    if (!displayNameTouched && defaultDisplayName) setDisplayName(defaultDisplayName);
+  }, [defaultDisplayName, displayNameTouched]);
 
   // aperture-4y1y4 — slug picker state. `slug` is the editable draft; it's
   // seeded ONCE from the auto-derived me.slug when that lands (the seed effect
@@ -181,8 +205,10 @@ export function OnboardingWizard({ onDone }: { onDone: (slug: string) => void })
     //    nomeExibicao is required by the schema; carry the one set at signup.
     try {
       await atualizarPerfil.mutateAsync({
-        nomeExibicao: me.data?.nomeExibicao || babyName.trim() || "Família",
+        nomeExibicao:
+          displayName.trim() || me.data?.nomeExibicao || babyName.trim() || "Família",
         nomeBebe: babyName.trim() || null,
+        genero,
         relacao: null,
         historia: null,
         dataNascimento: null,
@@ -204,7 +230,7 @@ export function OnboardingWizard({ onDone }: { onDone: (slug: string) => void })
     }
   };
 
-  const canNext1 = babyName.trim().length > 0;
+  const canNext1 = babyName.trim().length > 0 && displayName.trim().length > 0;
 
   const title =
     step === 1
@@ -225,7 +251,24 @@ export function OnboardingWizard({ onDone }: { onDone: (slug: string) => void })
 
         {step === 1 && (
           <>
-            <label className="auth-label" htmlFor="ob-baby">
+            <label className="auth-label" htmlFor="ob-name">
+              seu nome
+            </label>
+            <div className="auth-input-wrap">
+              <input
+                id="ob-name"
+                className="auth-input"
+                value={displayName}
+                onChange={(e) => {
+                  setDisplayNameTouched(true);
+                  setDisplayName(e.target.value);
+                }}
+                placeholder="Luciana Martins"
+                autoFocus
+              />
+            </div>
+            <p className="auth-fineprint">é assim que vamos te chamar no seu painel ♡</p>
+            <label className="auth-label" htmlFor="ob-baby" style={{ marginTop: 14 }}>
               nome do bebê
             </label>
             <div className="auth-input-wrap">
@@ -235,7 +278,6 @@ export function OnboardingWizard({ onDone }: { onDone: (slug: string) => void })
                 value={babyName}
                 onChange={(e) => setBabyName(e.target.value)}
                 placeholder="Maria Helena"
-                autoFocus
               />
             </div>
             <p className="auth-fineprint">é o nome que aparece na sua página ♡</p>
@@ -269,6 +311,23 @@ export function OnboardingWizard({ onDone }: { onDone: (slug: string) => void })
                 {EVENT_TYPES.map((t) => (
                   <option key={t.value} value={t.value}>
                     {t.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <label className="auth-label" htmlFor="ob-genero" style={{ marginTop: 14 }}>
+              é menino ou menina?
+            </label>
+            <div className="auth-input-wrap">
+              <select
+                id="ob-genero"
+                className="auth-input"
+                value={genero}
+                onChange={(e) => setGenero(e.target.value as Genero)}
+              >
+                {GENEROS.map((g) => (
+                  <option key={g.value} value={g.value}>
+                    {g.label}
                   </option>
                 ))}
               </select>

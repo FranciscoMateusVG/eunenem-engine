@@ -26,6 +26,7 @@ import {
   obterPerfilPublicoBySlug,
   PerfilProprioDTOSchema,
   PerfilPublicoDTOSchema,
+  GeneroBebeSchema,
   type SlugUsuario,
   TipoEventoPerfilSchema,
   UsuarioInputInvalidoError,
@@ -82,6 +83,10 @@ const AtualizarPerfilInputSchema = z.object({
   historia: z.string().trim().max(600).nullable(),
   dataNascimento: z.coerce.date().nullable(),
   tipoEvento: TipoEventoPerfilSchema.nullable(),
+  // Optional-with-default so existing callers (PerfilBody form, OnboardingWizard)
+  // compile before the frontend wires the gender selector; once they send it,
+  // it flows through. New field → no existing data to clobber in the interim.
+  genero: GeneroBebeSchema.nullable().default(null),
   dataEvento: z.coerce.date().nullable(),
   fotoPerfilKey: z.string().trim().min(1).max(512).nullable(),
   fotoCapaKey: z.string().trim().min(1).max(512).nullable(),

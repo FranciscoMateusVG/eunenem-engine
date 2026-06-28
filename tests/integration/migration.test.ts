@@ -88,11 +88,19 @@ describe('Migration round-trip', () => {
     //    this sequence must start at the LATEST migration and walk earlier.
     //    Adding a new migration on top REQUIRES prepending its down-step here.
 
-    // 030 create_resgates_pendentes (aperture-kj9el #4b) → the migration TIP
-    //   (landed after 029). migrateToLatest applied through it, so the FIRST
-    //   migrateDown unwinds 030, NOT 029. Its down() drops the
-    //   resgates_pendentes table. Without this step the next assertions target
-    //   029/028 while 030 is still applied → off-by-one false failures.
+    // 031 add_genero_to_perfil_criador (aperture-neiwx) → the migration TIP
+    //   (landed after 030). migrateToLatest applied through it, so the FIRST
+    //   migrateDown unwinds 031 — its down() drops the perfil_criadores.genero
+    //   column + its CHECK (the table itself survives until the 026 down below).
+    //   Without this step the whole sequence is off-by-one.
+    const downAddGenero = await migrator.migrateDown();
+    expect(downAddGenero.error).toBeUndefined();
+    expect(await listTableNames(db)).toContain('perfil_criadores'); // table still here
+
+    // 030 create_resgates_pendentes (aperture-kj9el #4b) → landed before 031.
+    //   Its down() drops the resgates_pendentes table. Without this step the
+    //   next assertions target 029/028 while 030 is still applied → off-by-one
+    //   false failures.
     const downResgatesPendentes = await migrator.migrateDown();
     expect(downResgatesPendentes.error).toBeUndefined();
     expect(await listTableNames(db)).not.toContain('resgates_pendentes');

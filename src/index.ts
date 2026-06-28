@@ -573,6 +573,8 @@ export {
 } from './domain/usuario/value-objects/slug-usuario.js';
 export type { TipoEventoPerfil } from './domain/usuario/value-objects/tipo-evento-perfil.js';
 export { TipoEventoPerfilSchema } from './domain/usuario/value-objects/tipo-evento-perfil.js';
+export type { GeneroBebe } from './domain/usuario/value-objects/genero-bebe.js';
+export { GeneroBebeSchema } from './domain/usuario/value-objects/genero-bebe.js';
 export type { TokenSessao } from './domain/usuario/value-objects/token-sessao.js';
 export { TokenSessaoSchema } from './domain/usuario/value-objects/token-sessao.js';
 

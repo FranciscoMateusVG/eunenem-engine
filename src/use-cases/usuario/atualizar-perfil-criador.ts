@@ -11,6 +11,7 @@ import {
   type ConteudoPerfilCriador,
   ConteudoPerfilCriadorSchema,
 } from '../../domain/usuario/value-objects/conteudo-perfil-criador.js';
+import { GeneroBebeSchema } from '../../domain/usuario/value-objects/genero-bebe.js';
 import { type IdPerfilCriador, IdUsuarioSchema } from '../../domain/usuario/value-objects/ids.js';
 import { TipoEventoPerfilSchema } from '../../domain/usuario/value-objects/tipo-evento-perfil.js';
 import { UsuarioInputInvalidoError } from '../../errors/usuario/input-invalido.error.js';
@@ -29,6 +30,10 @@ export const AtualizarPerfilCriadorInputSchema = z.object({
   historia: z.string().trim().max(600).nullable(),
   dataNascimento: z.coerce.date().nullable(),
   tipoEvento: TipoEventoPerfilSchema.nullable(),
+  // Optional-with-default (aperture-neiwx): a caller that omits genero gets
+  // null, so the field can land before the frontend sends it. The VO + read
+  // DTOs keep it as a required-nullable field.
+  genero: GeneroBebeSchema.nullable().default(null),
   dataEvento: z.coerce.date().nullable(),
   fotoPerfilKey: z.string().trim().min(1).max(512).nullable(),
   fotoCapaKey: z.string().trim().min(1).max(512).nullable(),

@@ -9,6 +9,7 @@ import {
 import { ImageSlot } from "./ImageSlot";
 import { CountdownTimer } from "./CountdownTimer";
 import { useTweaks } from "./TweaksContext";
+import { artigoPosse, saudacao } from "@/lib/concordancia";
 
 // aperture-3d9t — Hero section.
 //
@@ -41,7 +42,7 @@ export function Hero({
   eventDate?: string | null;
 } = {}) {
   const { tweaks } = useTweaks();
-  const { babyName } = tweaks;
+  const { babyName, genero } = tweaks;
   const hasEventDate = typeof eventDate === "string" && eventDate.length > 0;
 
   return (
@@ -105,9 +106,9 @@ export function Hero({
               marginBottom: 16,
             }}
           >
-            Bem-vindo ao <span className="hl">chá de bebê</span>
+            {saudacao(genero)} ao <span className="hl">chá de bebê</span>
             <br />
-            do <span style={{ color: "var(--coral-pink)" }}>{babyName}</span>
+            {artigoPosse(genero)} <span style={{ color: "var(--coral-pink)" }}>{babyName}</span>
             <span
               style={{
                 display: "inline-block",

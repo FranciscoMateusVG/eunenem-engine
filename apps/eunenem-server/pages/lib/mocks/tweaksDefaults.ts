@@ -4,8 +4,13 @@
 // The TweaksContext applies these to CSS vars on document root via
 // useEffect.
 
+import type { Genero } from "../concordancia";
+
 export interface TweaksState {
   babyName: string;
+  /** aperture-neiwx — baby's gender, drives PT-BR article/pronoun agreement
+   *  across owner + guest surfaces. null = neutral (treated like neutro). */
+  genero: Genero | null;
   parents: string;
   /** ISO date for the countdown target. */
   targetDate: string;
@@ -25,6 +30,7 @@ export const TWEAKS_DEFAULTS: TweaksState = {
   // since aperture-0xoy0 lets photos persist before babyName is set). The old
   // "Francisco" demo value leaked a stranger's name onto real creators' pages.
   babyName: "bebê",
+  genero: null,
   parents: "Mariana & Rodrigo",
   targetDate: "2026-06-15",
   primary: "#C9A5D8",
