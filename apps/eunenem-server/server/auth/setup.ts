@@ -289,6 +289,19 @@ const ServerEnvSchema = z
      */
     GOOGLE_CLIENT_ID: z.string().optional(),
     GOOGLE_CLIENT_SECRET: z.string().optional(),
+    /**
+     * aperture-y5ual — Microsoft (Entra) OAuth, mirrors GOOGLE_*. Same
+     * conditional-registration posture: when CLIENT_ID/SECRET are absent the
+     * microsoft provider is NOT registered (email+password still works). The
+     * SECRET is set in the deploy env (Dokploy), never committed. Callback
+     * lands at `<BETTER_AUTH_URL>/api/auth/callback/microsoft`.
+     * TENANT_ID defaults to 'common' (multi-tenant work/school + personal
+     * accounts); the operator can pin a single tenant later via env without a
+     * code change — the provider itself also falls back to 'common'.
+     */
+    MICROSOFT_CLIENT_ID: z.string().optional(),
+    MICROSOFT_CLIENT_SECRET: z.string().optional(),
+    MICROSOFT_TENANT_ID: z.string().optional().default('common'),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === 'production') {
@@ -386,6 +399,39 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
   // never committed.
   const googleConfigured =
     !!env.GOOGLE_CLIENT_ID?.length && !!env.GOOGLE_CLIENT_SECRET?.length;
+  // aperture-y5ual — Microsoft (Entra) mirrors Google: registered ONLY when
+  // BOTH env vars are present; otherwise omitted so BetterAuth boots without
+  // Microsoft creds.
+  const microsoftConfigured =
+    !!env.MICROSOFT_CLIENT_ID?.length && !!env.MICROSOFT_CLIENT_SECRET?.length;
+
+  // Build ONE socialProviders object so providers coexist. Two separate
+  // conditional `...(x ? { socialProviders: {...} } : {})` spreads would
+  // clobber each other (last-write-wins drops the first provider). We spread
+  // the whole key in only when at least one provider is configured, preserving
+  // the "undefined → email+password-only, boots cleanly" safety property.
+  const socialProviders = {
+    ...(googleConfigured
+      ? {
+          google: {
+            clientId: env.GOOGLE_CLIENT_ID as string,
+            clientSecret: env.GOOGLE_CLIENT_SECRET as string,
+          },
+        }
+      : {}),
+    ...(microsoftConfigured
+      ? {
+          microsoft: {
+            clientId: env.MICROSOFT_CLIENT_ID as string,
+            clientSecret: env.MICROSOFT_CLIENT_SECRET as string,
+            // 'common' = multi-tenant + personal MSAs. From env so the operator
+            // can pin a single tenant later without a code change; the provider
+            // also defaults to 'common' when this is omitted.
+            tenantId: env.MICROSOFT_TENANT_ID,
+          },
+        }
+      : {}),
+  };
 
   const authConfig: CriarAuthConfig = {
     secret: env.BETTER_AUTH_SECRET,
@@ -408,18 +454,9 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     // notNull, so a new-user Google signup needs this injected. eunenem-server
     // is single-tenant for OAuth signup → the seeded ID_PLATAFORMA_EUNENEM.
     idPlataformaPadrao: ID_PLATAFORMA_EUNENEM,
-    // Spread the google provider in ONLY when both vars are present;
+    // Spread the social providers in ONLY when at least one is configured;
     // otherwise the key is absent and no social provider is registered.
-    ...(googleConfigured
-      ? {
-          socialProviders: {
-            google: {
-              clientId: env.GOOGLE_CLIENT_ID as string,
-              clientSecret: env.GOOGLE_CLIENT_SECRET as string,
-            },
-          },
-        }
-      : {}),
+    ...(Object.keys(socialProviders).length > 0 ? { socialProviders } : {}),
   };
 
   const auth = criarAuth(db, authConfig);

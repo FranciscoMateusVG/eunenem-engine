@@ -101,6 +101,51 @@ export interface CriarAuthConfig {
  * layer too. The eunenem-server (child 4) must include `idPlataforma`
  * in the signUp payload — anti-trap §8 #8 multi-tenant auth.
  */
+/**
+ * Two DISTINCT OAuth provider sets, with a one-way safety invariant between
+ * them (aperture-qcrv4 + y5ual + etdx3 — Cipher security review).
+ *
+ * These are NOT the same list. Conflating them (y5ual's first cut) opened a
+ * HIGH account-takeover (etdx3): putting a provider that does NOT verify email
+ * ownership into the TRUSTED set lets an attacker spoof a victim's email and
+ * implicit-link their identity into the victim's existing local account.
+ *
+ *   HOOK_COVERED — providers whose `account.create.before` create/link
+ *     INVALIDATES the local credential password (the qcrv4 takeover defence).
+ *     Safe to be broad: NULLing a password on link can only ever LOCK OUT, it
+ *     never grants access.
+ *
+ *   TRUSTED — providers better-auth may IMPLICIT-LINK to an existing local
+ *     account by email alone (accountLinking.trustedProviders). DANGEROUS to be
+ *     broad: better-auth links trusted providers REGARDLESS of incoming
+ *     emailVerified (callback.mjs:94). Only providers that cryptographically
+ *     prove email ownership belong here. Google does (emailVerified=true,
+ *     validated issuer). Microsoft multi-tenant `common` does NOT — a free
+ *     Entra tenant can mint a token carrying any `email` with
+ *     emailVerified=false (issuer validation is skipped for `common`), so
+ *     trusting it = takeover. Microsoft is therefore HOOK_COVERED but NOT
+ *     TRUSTED: an incoming Microsoft login won't auto-link into an existing
+ *     account by email (better-auth returns account_not_linked); new Microsoft
+ *     users still get fresh accounts.
+ *
+ * INVARIANT: TRUSTED ⊆ HOOK_COVERED. A trusted-but-not-hooked provider would
+ * re-open the qcrv4 takeover; hooked-but-not-trusted is the safe asymmetry.
+ * Asserted at module load below so the two lists can never silently drift.
+ */
+const HOOK_COVERED_OAUTH_PROVIDERS = ['google', 'microsoft'] as const;
+const TRUSTED_OAUTH_PROVIDERS = ['google'] as const;
+type HookCoveredOAuthProvider = (typeof HOOK_COVERED_OAUTH_PROVIDERS)[number];
+
+// Enforce TRUSTED ⊆ HOOK_COVERED at module load — fail fast on a future edit
+// that trusts a provider without hook coverage (the takeover direction).
+for (const trusted of TRUSTED_OAUTH_PROVIDERS) {
+  if (!(HOOK_COVERED_OAUTH_PROVIDERS as readonly string[]).includes(trusted)) {
+    throw new Error(
+      `OAuth config invariant violated: trusted provider "${trusted}" is not in HOOK_COVERED_OAUTH_PROVIDERS (TRUSTED must be a subset of HOOK_COVERED)`,
+    );
+  }
+}
+
 export function criarAuth(kysely: Database, config: CriarAuthConfig) {
   const useSecureCookies = config.useSecureCookies ?? process.env.NODE_ENV === 'production';
   // Captured as a const so the narrowing (string when set) holds inside the
@@ -236,13 +281,25 @@ export function criarAuth(kysely: Database, config: CriarAuthConfig) {
       // The password-invalidation hook is the LOAD-BEARING safety — without it,
       // this config reopens the w2bty takeover. Do NOT remove one without the other.
       //
-      // trustedProviders:['google'] kills better-auth's untrusted-provider refuse
-      // term; requireLocalEmailVerified:false kills the local-verified refuse term
-      // (required because eunenem accounts are never email_verified). ⚠️ FORWARD-
-      // FRICTION: requireLocalEmailVerified is @deprecated in better-auth@1.6.12 and
-      // becomes unconditional on the next minor — a better-auth upgrade would
-      // RE-BLOCK linking (account_not_linked returns). Re-review on any bump.
-      accountLinking: { trustedProviders: ['google'], requireLocalEmailVerified: false },
+      // trustedProviders=['google'] (TRUSTED_OAUTH_PROVIDERS) kills better-auth's
+      // untrusted-provider refuse term; requireLocalEmailVerified:false kills the
+      // local-verified refuse term (required because eunenem accounts are never
+      // email_verified). ⚠️ FORWARD-FRICTION: requireLocalEmailVerified is
+      // @deprecated in better-auth@1.6.12 and becomes unconditional on the next
+      // minor — a better-auth upgrade would RE-BLOCK linking (account_not_linked
+      // returns). Re-review on any bump.
+      //
+      // ⚠️ etdx3: Microsoft is DELIBERATELY NOT here. With requireLocalEmailVerified
+      // false, trusting Microsoft multi-tenant `common` (whose tokens carry
+      // emailVerified=false and skip issuer validation) would let a free Entra
+      // tenant spoof a victim's email and implicit-link into their account =
+      // takeover. Only email-ownership-proving providers belong in TRUSTED. Do
+      // NOT add microsoft here without solving Microsoft email verification first
+      // (etdx3 option C) — and a Cipher re-review.
+      accountLinking: {
+        trustedProviders: [...TRUSTED_OAUTH_PROVIDERS],
+        requireLocalEmailVerified: false,
+      },
     },
     verification: {
       modelName: 'verifications',
@@ -309,7 +366,19 @@ export function criarAuth(kysely: Database, config: CriarAuthConfig) {
       account: {
         create: {
           before: async (account: { providerId?: unknown; userId?: unknown }) => {
-            if (account.providerId !== 'google' || typeof account.userId !== 'string') {
+            // Fire for every HOOK_COVERED provider (google, microsoft) — NOT
+            // just TRUSTED ones. The hook only ever NULLs a credential password,
+            // which can lock out but never grant access, so covering it broadly
+            // is pure defence-in-depth: if a HOOK_COVERED provider's account is
+            // ever created against a user with a local credential (by trusted
+            // implicit-link, or a future deliberate link), the old password is
+            // invalidated. TRUSTED ⊆ HOOK_COVERED (asserted at module load), so
+            // every implicit-linkable provider is necessarily covered here.
+            if (
+              typeof account.providerId !== 'string' ||
+              !HOOK_COVERED_OAUTH_PROVIDERS.includes(account.providerId as HookCoveredOAuthProvider) ||
+              typeof account.userId !== 'string'
+            ) {
               return;
             }
             try {

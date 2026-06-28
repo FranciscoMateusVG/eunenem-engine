@@ -195,21 +195,21 @@ export function AuthModalShell({
     onModeChange(copy.footerCtaTarget);
   }, [copy.footerCtaTarget, onModeChange]);
 
-  // aperture-8655f — Google is wired to the real BetterAuth social flow;
-  // Apple/Microsoft stay stubs (sonner toast) until their providers land.
-  // `signIn.social` redirects to Google, then BetterAuth's callback at
-  // /api/auth/callback/google returns the browser to `callbackURL`.
+  // aperture-8655f (Google) + aperture-y5ual (Microsoft/Entra) — both wired to
+  // the real BetterAuth social flow; Apple stays a stub (sonner toast) until its
+  // provider lands. `signIn.social` redirects to the provider, then BetterAuth's
+  // callback at /api/auth/callback/<provider> returns the browser to `callbackURL`.
   //
-  // aperture-ydj4a — callbackURL is "/?oauth=1" (NOT bare "/"). The OAuth
-  // return is a full page load, so AuthModalProvider.onAuthenticated never
-  // runs to forward the user to their painel (the email flow's redirect). The
-  // ?oauth=1 marker lets useOauthReturnRedirect (mounted on the landing)
-  // reproduce that redirect: resolve auth.me, forward to /painel/<slug>. The
-  // marker is a fixed same-origin literal and the redirect slug comes from the
-  // server, so this is not an open-redirect surface. If auth.me can't resolve,
-  // the marker is cleared and the user stays signed-in on the landing.
+  // aperture-ydj4a — callbackURL is "/?oauth=1" (NOT bare "/"). The OAuth return
+  // is a full page load, so AuthModalProvider.onAuthenticated never runs to
+  // forward the user to their painel (the email flow's redirect). The ?oauth=1
+  // marker lets useOauthReturnRedirect (mounted on the landing) reproduce that
+  // redirect: resolve auth.me, forward to /painel/<slug>. The marker is a fixed
+  // same-origin literal and the redirect slug comes from the server, so this is
+  // not an open-redirect surface. If auth.me can't resolve, the marker is
+  // cleared and the user stays signed-in on the landing.
   const onOauth = async (id: string, label: string) => {
-    if (id !== "google") {
+    if (id !== "google" && id !== "microsoft") {
       toast("em breve ♡", {
         description: `login com ${label} chega numa próxima entrega`,
       });
@@ -217,12 +217,12 @@ export function AuthModalShell({
     }
     try {
       await authClient.signIn.social({
-        provider: "google",
+        provider: id as "google" | "microsoft",
         callbackURL: "/?oauth=1",
       });
       // On success the browser is navigating away — nothing else to do.
     } catch {
-      toast("não consegui abrir o Google agora ♡", {
+      toast(`não consegui abrir o ${label} agora ♡`, {
         description: "tenta de novo em instantes",
       });
     }

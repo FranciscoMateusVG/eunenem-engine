@@ -265,6 +265,130 @@ async function driveRealCallback(
   }
 }
 
+// ── aperture-etdx3: Microsoft-OAuth harness (attacker-lockout proof) ─────────
+// Microsoft's callback code-flow resolves the profile via getUserInfo →
+// decodeJwt (NO signature/JWKS verification, same as Google here), so we can
+// drive the REAL callback with a mocked token endpoint + a decode-only id_token.
+const MICROSOFT_TOKEN_ENDPOINT =
+  'https://login.microsoftonline.com/common/oauth2/v2.0/token';
+const MICROSOFT_GRAPH = 'https://graph.microsoft.com/';
+
+/** Auth with the REAL config + the Microsoft provider registered. */
+function buildAuthWithMicrosoft() {
+  return criarAuth(testDb.db, {
+    secret: SECRET,
+    baseURL: BASE_URL,
+    trustedOrigins: [BASE_URL],
+    sendResetPassword: async () => {
+      /* no-op for this test */
+    },
+    useSecureCookies: false,
+    idPlataformaPadrao: ID_PLATAFORMA_EUNENEM,
+    socialProviders: {
+      microsoft: {
+        clientId: 'test-microsoft-client-id',
+        clientSecret: 'test-microsoft-client-secret',
+        tenantId: 'common',
+      },
+    },
+  });
+}
+
+/** A well-formed (unsigned) JWT carrying Microsoft profile claims. */
+function makeMicrosoftIdToken(claims: Record<string, unknown>): string {
+  const b64 = (obj: unknown) => Buffer.from(JSON.stringify(obj)).toString('base64url');
+  const header = b64({ alg: 'RS256', kid: 'test-kid', typ: 'JWT' });
+  const payload = b64({
+    iss: 'https://login.microsoftonline.com/common/v2.0',
+    aud: 'test-microsoft-client-id',
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + 3600,
+    tid: '9188040d-6c67-4c5b-b112-36a304b66dad',
+    ...claims,
+  });
+  return `${header}.${payload}.sig`;
+}
+
+/**
+ * Mock Microsoft's token endpoint (returns the attacker-controlled id_token)
+ * AND the Graph photo endpoint (getUserInfo betterFetches it — return non-ok so
+ * the photo block skips without a real outbound call). Returns a restore fn.
+ */
+function mockMicrosoftToken(idTokenClaims: Record<string, unknown>): () => void {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url =
+      typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : (input as Request).url;
+    if (url.startsWith(MICROSOFT_TOKEN_ENDPOINT)) {
+      return new Response(
+        JSON.stringify({
+          access_token: 'fake-ms-access-token',
+          token_type: 'Bearer',
+          expires_in: 3600,
+          scope: 'openid profile email User.Read',
+          id_token: makeMicrosoftIdToken(idTokenClaims),
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }
+    if (url.startsWith(MICROSOFT_GRAPH)) {
+      // No profile photo — skip cleanly (non-ok, no throw, no real network).
+      return new Response(null, { status: 404 });
+    }
+    // Anything else hits the real fetch so a stray dependency fails loudly.
+    return realFetch(input, init);
+  }) as typeof globalThis.fetch;
+  return () => {
+    globalThis.fetch = realFetch;
+  };
+}
+
+/** Drive the REAL Microsoft callback (mirrors driveRealCallback). */
+async function driveRealMicrosoftCallback(
+  auth: ReturnType<typeof buildAuthWithMicrosoft>,
+  opts: { idTokenClaims: Record<string, unknown> },
+): Promise<Response> {
+  const state = randomUUID().replace(/-/g, '');
+  const statePayload = {
+    callbackURL: SUCCESS_CALLBACK_URL,
+    codeVerifier: 'a'.repeat(43),
+    errorURL: ERROR_CALLBACK_URL,
+    expiresAt: Date.now() + 600_000,
+    oauthState: state,
+  };
+  await testDb.db
+    .insertInto('verifications')
+    .values({
+      id: randomUUID(),
+      identifier: state,
+      value: JSON.stringify(statePayload),
+      expires_at: new Date(Date.now() + 600_000),
+      created_at: new Date(),
+      updated_at: new Date(),
+    })
+    .execute();
+
+  const restore = mockMicrosoftToken(opts.idTokenClaims);
+  try {
+    const url = new URL(`${BASE_URL}/api/auth/callback/microsoft`);
+    url.searchParams.set('code', 'fake-authorization-code');
+    url.searchParams.set('state', state);
+    return await auth.handler(
+      new Request(url.toString(), {
+        method: 'GET',
+        headers: { cookie: `better-auth.state=${signStateCookie(state)}` },
+        redirect: 'manual',
+      }),
+    );
+  } finally {
+    restore();
+  }
+}
+
 async function sessionCountForUser(userId: string): Promise<number> {
   const rows = await testDb.db
     .selectFrom('sessions')
@@ -291,7 +415,7 @@ describe('Google-OAuth account-linking + password-invalidation (aperture-8655f /
   // (A) SOURCE-CONFIG PIN — the durable regression guard for the NEW qcrv4
   //     relaxed-linking config.
   // --------------------------------------------------------------------------
-  it('(A) PIN: criarAuth emits accountLinking.trustedProviders=["google"] + requireLocalEmailVerified=false', () => {
+  it('(A) PIN: criarAuth emits accountLinking.trustedProviders=["google"] (microsoft NOT trusted) + requireLocalEmailVerified=false', () => {
     const auth = buildAuth();
     // `auth.options` is the resolved BetterAuthOptions object criarAuth built.
     const accountLinking = (
@@ -304,14 +428,23 @@ describe('Google-OAuth account-linking + password-invalidation (aperture-8655f /
       accountLinking,
       'criar-auth.ts must declare an account.accountLinking block',
     ).toBeDefined();
-    // aperture-qcrv4: linking is now RELAXED — google is a trusted provider so
-    // a returning email/password user can sign in with Google and it LINKS.
-    // The takeover is closed by the password-invalidation hook (proven in (b)),
-    // NOT by refusing the link. Removing google from trustedProviders re-blocks
-    // legit login; the OLD disableImplicitLinking assertion is GONE.
+    // aperture-qcrv4: linking is RELAXED for GOOGLE only — Google can
+    // implicit-link to a same-email account, the takeover closed by the
+    // password-invalidation hook (proven in (b)).
+    //
+    // aperture-etdx3 (SECURITY): trustedProviders is GOOGLE-ONLY on purpose.
+    // Microsoft must NOT be here: a free multi-tenant `common` Entra app can
+    // mint a token carrying any email with emailVerified=false (issuer check
+    // skipped for `common`), and better-auth implicit-links trusted providers
+    // REGARDLESS of emailVerified (callback.mjs) → a Microsoft-in-trusted
+    // config = account takeover. Only email-ownership-proving providers belong
+    // in trustedProviders. Microsoft stays HOOK_COVERED (password-NULL) but
+    // un-trusted; proven behaviourally in (F). This deep-equal pins the EXACT
+    // trusted set — adding microsoft (or any unverified-email provider) here
+    // is the security regression this guard catches.
     expect(
       accountLinking?.trustedProviders,
-      'trustedProviders must deep-equal ["google"] (the relaxed-linking policy, aperture-qcrv4)',
+      'trustedProviders must deep-equal ["google"] — microsoft must NOT be trusted (etdx3 takeover fix)',
     ).toEqual(['google']);
     expect(
       accountLinking?.requireLocalEmailVerified,
@@ -798,5 +931,120 @@ describe('Google-OAuth account-linking + password-invalidation (aperture-8655f /
       googleAccounts,
       'the re-login must reuse the existing google account, never create a duplicate',
     ).toHaveLength(1);
+  });
+
+  // --------------------------------------------------------------------------
+  // (F) ⭐ etdx3 SECURITY: an unverified-email Microsoft sign-in must NOT
+  //     implicit-link into a pre-existing credential account (attacker lockout).
+  //
+  //     THREAT (nOAuth class): Microsoft multi-tenant `common` lets an attacker
+  //     spin up a free Entra tenant and mint a token carrying the VICTIM's email
+  //     with emailVerified=false. If `microsoft` were in trustedProviders,
+  //     better-auth would implicit-link that identity into the victim's existing
+  //     local account REGARDLESS of emailVerified (callback.mjs) = account
+  //     takeover. The etdx3 fix keeps microsoft OUT of trustedProviders (it stays
+  //     HOOK_COVERED but un-trusted), so better-auth REFUSES the link.
+  //
+  //     NON-VACUOUS, ORDERED ASSERTS:
+  //       1. CONTROL: the victim's local password authenticates pre-attack.
+  //       2. drive the REAL Microsoft callback (victim email, email_verified=false).
+  //       3a. the link is REFUSED — redirect does NOT reach the dashboard and no
+  //           session cookie is minted.
+  //       3b. NO microsoft account row is linked to the victim's user.
+  //       3c. the victim's credential password is UNCHANGED (no link → no
+  //           password-NULL → the victim keeps their account).
+  //       4. the victim's password STILL authenticates afterwards.
+  //
+  //     ⚠️ REGRESSION-GUARD: if the callback links (dashboard redirect / a
+  //     microsoft account appears on the victim / a session is minted / the
+  //     password is nulled) the takeover is REOPENED. Do NOT massage to pass —
+  //     that would hide a real account takeover. Adding microsoft to
+  //     trustedProviders is exactly what trips this.
+  // --------------------------------------------------------------------------
+  it('(F) ⭐ unverified-email Microsoft sign-in does NOT link to a pre-existing credential account (etdx3 takeover lockout)', async () => {
+    const auth = buildAuthWithMicrosoft();
+    const authService = new AuthServiceBetterAuth(testDb.db);
+
+    const victimUserId = randomUUID();
+    const email = 'etdx3-victim@example.com';
+    const password = 'victim-password-123';
+    await authService.criarConta({
+      idUsuario: victimUserId,
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
+      email,
+      senha: password,
+      nome: 'Etdx3 Victim',
+    });
+
+    // 1. CONTROL — the victim's password authenticates before the attack.
+    const before = await authService.iniciarSessao({
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
+      email,
+      senha: password,
+    });
+    expect(
+      before.idUsuario,
+      'CONTROL: the victim password must authenticate pre-attack',
+    ).toBe(victimUserId);
+
+    // 2. ATTACK — Microsoft callback spoofing the victim's email, UNVERIFIED.
+    const res = await driveRealMicrosoftCallback(auth, {
+      idTokenClaims: {
+        sub: 'ms-attacker-subject-0001',
+        email,
+        email_verified: false,
+        name: 'Attacker',
+      },
+    });
+
+    // 3a. The link is REFUSED — no dashboard, no session.
+    const location = res.headers.get('location') ?? '';
+    expect(
+      location,
+      'attacker Microsoft sign-in must NOT reach the dashboard (link must be refused)',
+    ).not.toContain('dashboard');
+    expect(
+      location,
+      'the refuse must surface account_not_linked (the attacker is locked out)',
+    ).toContain('account_not_linked');
+    expect(
+      setsSessionCookie(res),
+      'attacker Microsoft sign-in must NOT mint a session',
+    ).toBe(false);
+
+    // 3b. No microsoft account linked to the victim.
+    const linkedMs = await testDb.db
+      .selectFrom('accounts')
+      .select('id')
+      .where('user_id', '=', victimUserId)
+      .where('provider_id', '=', 'microsoft')
+      .execute();
+    expect(
+      linkedMs,
+      'no microsoft account may be linked to the victim (the link was refused)',
+    ).toHaveLength(0);
+
+    // 3c. The victim's credential password is UNCHANGED (link never happened).
+    const pwAfter = await testDb.db
+      .selectFrom('accounts')
+      .select('password')
+      .where('user_id', '=', victimUserId)
+      .where('provider_id', '=', 'credential')
+      .executeTakeFirstOrThrow();
+    expect(
+      pwAfter.password,
+      "the victim's password must stay intact (no link → no password-NULL → victim keeps the account)",
+    ).toBeTruthy();
+
+    // 4. The victim's password STILL authenticates after the blocked attack.
+    const after = await authService.iniciarSessao({
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
+      email,
+      senha: password,
+    });
+    expect(
+      after.idUsuario,
+      'the victim password must still authenticate after the blocked attack',
+    ).toBe(victimUserId);
   });
 });
