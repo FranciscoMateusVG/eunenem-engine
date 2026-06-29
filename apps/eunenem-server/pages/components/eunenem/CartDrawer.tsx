@@ -544,7 +544,7 @@ function EmptyCart() {
           maxWidth: 280,
         }}
       >
-        Escolhe um presentinho da listinha pra começar.
+        Escolha um presentinho da listinha pra começar.
       </p>
     </div>
   );
@@ -801,7 +801,7 @@ function MetodoPicker({
         onSelect={() => setMetodo("credit_card")}
         emoji="💳"
         label="Cartão"
-        hint="parcele em até 12x"
+        hint="taxa de 3,99%"
       />
     </fieldset>
   );

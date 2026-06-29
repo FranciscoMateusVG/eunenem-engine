@@ -180,8 +180,8 @@ export function buildPainelMenu(
         },
         {
           id: "convite",
-          label: "ver meu convite",
-          sub: "prévia do que os convidados veem",
+          label: "meu convite",
+          sub: "crie, edite e envie o seu convite",
           variant: "blue",
           icon: "envelope",
         },
@@ -260,7 +260,7 @@ export function buildPainelMenu(
         {
           id: "bancarios",
           label: "dados bancários",
-          sub: "para onde a gente envia",
+          sub: "para onde a gente envia o dinheiro",
           variant: null,
           icon: "bank",
           badge: { kind: "verified", text: "verificado" },
@@ -268,7 +268,7 @@ export function buildPainelMenu(
         {
           id: "suporte",
           label: "fale com a gente",
-          sub: "WhatsApp · seg a sex, 9h–18h",
+          sub: "WhatsApp · seg a sex, 9h–16h",
           variant: null,
           icon: "phone",
         },

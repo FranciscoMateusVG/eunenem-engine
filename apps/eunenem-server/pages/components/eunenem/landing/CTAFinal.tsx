@@ -88,7 +88,7 @@ export function CTAFinal() {
                 </span>
               </button>
               <div className="faq-a">
-                <div className="px-5 pb-5 text-ink-soft text-[14.5px] leading-relaxed">
+                <div className="px-5 pb-5 text-ink-soft text-[14.5px] leading-relaxed whitespace-pre-line">
                   {f.a}
                   {f.link ? (
                     <>

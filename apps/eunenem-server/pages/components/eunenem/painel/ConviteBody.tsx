@@ -1334,8 +1334,8 @@ interface WizardStep {
 // the reorder is safe; the stepper numbering derives from this array.
 const STEPS: readonly WizardStep[] = [
   { id: "fundo", title: "fundo do convite", icon: "✨", ownerBead: "aperture-hzcy5" },
-  { id: "tipo", title: "que mimo é esse?", icon: "🍼", ownerBead: "aperture-sonyh" },
-  { id: "quem", title: "pra quem?", icon: "♡", ownerBead: "aperture-sonyh" },
+  { id: "tipo", title: "qual tipo de evento?", icon: "🍼", ownerBead: "aperture-sonyh" },
+  { id: "quem", title: "", icon: "♡", ownerBead: "aperture-sonyh" },
   { id: "quando", title: "quando e onde?", icon: "☁", ownerBead: "aperture-sonyh" },
   { id: "visual", title: "a cara do convite", icon: "✿", ownerBead: "aperture-sonyh" },
   { id: "pronto", title: "pronto pra enviar", icon: "✨", ownerBead: "aperture-iopmm" },
@@ -1547,7 +1547,7 @@ function DesktopConviteBody({ slug }: PainelSectionBodyProps) {
       <header className="cv-wiz-topbar">
         <div className="cv-wiz-mark" aria-hidden="true">m</div>
         <div className="cv-wiz-brand">
-          <div className="cv-wiz-brand-name">convitinhos</div>
+          <div className="cv-wiz-brand-name">meu convite</div>
           <div className="cv-wiz-brand-step">
             passo {step + 1} de {STEPS.length}
           </div>
@@ -1723,9 +1723,6 @@ function StepTipo({ state, update }: StepViewProps) {
   const ROT = [-1.5, 1, -0.6, 1.2, -1, 0.8];
   return (
     <>
-      <p className="cv-step-blurb">
-        a gente adapta a copy, a paleta e os carimbos pra cada tipo de evento.
-      </p>
       <div className="cv-event-grid">
         {EVENT_TYPES.map((e, i) => {
           const on = state.eventType === e.id;
@@ -1922,7 +1919,7 @@ function StepQuando({ state, update, errors }: StepViewProps) {
       {isOnline ? (
         <>
           <label className="cv-label" htmlFor="cv-online-link">
-            link da sala
+            link da sala (opcional)
           </label>
           <input
             id="cv-online-link"
@@ -2201,8 +2198,7 @@ function StepFundo({ state, update, updateMany }: StepViewProps) {
   return (
     <div className="cv-fundo">
       <p className="cv-fundo-intro">
-        escolhe uma ilustração watercolor ou manda uma foto sua — cada template
-        já vem com paleta e fonte sugeridas ♡
+      escolhe um modelo de convite pronto ou envie sua própria imagem.
       </p>
 
       <label className="cv-label">templates de convite</label>
@@ -2304,7 +2300,7 @@ function StepFundo({ state, update, updateMany }: StepViewProps) {
               {uploading ? "enviando…" : "enviar uma imagem"}
             </div>
             <div className="cv-upload-empty-sub">
-              jpg ou png — fica de fundo, o texto aparece embaixo com scrim
+              jpg ou png — o texto aparece em cima
             </div>
           </div>
         </button>

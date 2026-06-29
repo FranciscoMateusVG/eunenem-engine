@@ -108,7 +108,7 @@ export function PainelHeaderCard({ snapshot, slug }: Props) {
       <section className="painel-top-strip" aria-label="contagem regressiva e link do evento">
         <div className="painel-top-strip-left">
           <span className="painel-top-strip-eyebrow">
-            {hasDate ? "faltam pouquinho ♡" : "sua página tá no ar ♡"}
+            {hasDate ? "falta pouco ♡" : "sua página tá no ar ♡"}
           </span>
           {hasDate && (
             <span className="painel-top-strip-line">

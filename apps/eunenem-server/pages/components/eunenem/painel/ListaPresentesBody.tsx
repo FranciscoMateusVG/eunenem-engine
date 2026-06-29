@@ -381,7 +381,7 @@ function Visor({ items }: { items: GroupedGift[] }) {
         <span className="lista-visor-eyebrow">já recebido ♡</span>
         <div className="lista-visor-amount">{brl(receivedValue)}</div>
         <div className="lista-visor-meta">
-          {receivedUnits} de {totalUnits} mimos
+          {receivedUnits} de {totalUnits} presentes
         </div>
       </div>
       <div className="lista-visor-progress">
@@ -422,7 +422,7 @@ function GiftCard({
   // aperture-0ph83 — Edit/Remove disabled when any unit is claimed
   // (status='indisponivel'). The tooltip explains why the buttons are inert.
   const lockedTip = item.hasClaimed
-    ? "não dá pra mexer — algum mimo desse grupo já foi reservado ♡"
+    ? "não dá pra mexer — algum presente desse grupo já foi reservado ♡"
     : undefined;
   return (
     <div className={"lista-card" + (isComplete ? " is-complete" : "")} data-testid="lista-card">
@@ -558,7 +558,7 @@ function PersonalizadoForm({
           <div className="lista-info-banner-text">
             <strong>Algo único da sua história?</strong>
             <p>
-              Adicione mimos que não estão no catálogo — uma cadeirinha específica,
+              Adicione presentes que não estão no catálogo — uma cadeirinha específica,
               decoração do quartinho ou aquele item dos sonhos.
             </p>
           </div>
@@ -566,7 +566,7 @@ function PersonalizadoForm({
       )}
       <div className="lista-form">
         <div className="lista-field lista-field-full">
-          <label htmlFor="lista-title">nome do mimo</label>
+          <label htmlFor="lista-title">nome do presente</label>
           <input
             id="lista-title"
             placeholder="ex.: Cadeirinha de carro Maxi-Cosi"
@@ -612,7 +612,6 @@ function PersonalizadoForm({
               +
             </button>
           </div>
-          <span className="lista-hint">convidados podem dividir o valor</span>
         </div>
         <div className="lista-field lista-field-full">
           <label htmlFor="lista-cat">categoria</label>
@@ -851,11 +850,11 @@ function CatalogoView({
           <span className="eyebrow coral">nada por aqui</span>
           {scope === "todos" ? (
             <p>
-              Tente outra palavra — ou monte o mimo pela aba <b>personalizado</b>.
+              Tente outra palavra — ou monte o presente pela aba <b>personalizado</b>.
             </p>
           ) : (
             <p>
-              Nenhum mimo em <b>{activeLabel}</b> pra essa busca.{" "}
+              Nenhum presente em <b>{activeLabel}</b> pra essa busca.{" "}
               <button
                 type="button"
                 onClick={() => setScope("todos")}
@@ -949,7 +948,7 @@ function CatalogoView({
               }}
             >
               fim do catálogo 💜 — {filtered.length}{" "}
-              {filtered.length === 1 ? "mimo" : "mimos"}
+              {filtered.length === 1 ? "presente" : "presentes"}
               {scope !== "todos" ? ` em ${activeLabel}` : ""}
             </div>
           )}
@@ -1022,7 +1021,7 @@ function AddGiftModal({
     <Modal onClose={onClose}>
       <div className="lista-modal-head">
         <div>
-          <span className="eyebrow coral">um novo mimo ♡</span>
+          <span className="eyebrow coral">um novo presente ♡</span>
           <h3>
             Adicionar à minha <span className="hl">lista</span>
           </h3>
@@ -1081,18 +1080,18 @@ function AddGiftModal({
         {tab === "catalogo" ? (
           <div className="lista-sel-count">
             {selectedItems.length === 0 ? (
-              <>0 mimos selecionados</>
+              <>0 presentes selecionados</>
             ) : (
               <>
                 {selectedItems.length}{" "}
-                {selectedItems.length === 1 ? "mimo selecionado" : "mimos selecionados"} ·{" "}
+                {selectedItems.length === 1 ? "presente selecionado" : "presentes selecionados"} ·{" "}
                 <b>{brl(catTotal)}</b>
               </>
             )}
           </div>
         ) : (
           <div className="lista-sel-count">
-            novo mimo: <b>{f.title.trim() || "—"}</b>
+            novo presente: <b>{f.title.trim() || "—"}</b>
           </div>
         )}
         <div className="lista-foot-actions">
@@ -1153,7 +1152,7 @@ function EditItemModal({
       <div className="lista-modal-head">
         <div>
           <span className="eyebrow coral">ajuste fininho ♡</span>
-          <h3>Editar mimo</h3>
+          <h3>Editar presente</h3>
         </div>
         <button type="button" className="lista-modal-x" onClick={onClose} aria-label="Fechar">
           {icon.x}
@@ -1202,7 +1201,7 @@ function ConfirmRemove({
       <div className="lista-modal-head">
         <div>
           <span className="eyebrow coral">tem certeza?</span>
-          <h3>Remover este mimo</h3>
+          <h3>Remover este presente</h3>
         </div>
         <button type="button" className="lista-modal-x" onClick={onClose} aria-label="Fechar">
           {icon.x}
@@ -1344,7 +1343,7 @@ function PresetDetailModal({
 
       <div className="lista-modal-foot">
         <div className="lista-sel-count">
-          {count} {count === 1 ? "mimo selecionado" : "mimos selecionados"} ·{" "}
+          {count} {count === 1 ? "presente selecionado" : "presentes selecionados"} ·{" "}
           <b>{brl(total)}</b>
         </div>
         <div className="lista-foot-actions">
@@ -1377,7 +1376,6 @@ function ListaSkeleton() {
     <div className="lista-body" aria-busy="true" aria-live="polite">
       <section className="lista-header-card">
         <div className="lista-header-top">
-          <span className="eyebrow">sua coleção de mimos ♡</span>
           <h1>
             Minha <span className="hl">lista de presentes</span>
           </h1>
@@ -1519,8 +1517,8 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
       const n = Number(draft.qty) || 1;
       toast.success(
         n === 1
-          ? "1 mimo adicionado à sua lista ♡"
-          : `${n} mimos adicionados à sua lista ♡`,
+          ? "1 presente adicionado à sua lista ♡"
+          : `${n} presentes adicionados à sua lista ♡`,
       );
     } catch (err) {
       toast.error(contribuicaoErrorMessage(toContribuicaoError(err)));
@@ -1562,8 +1560,8 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
       );
       toast.success(
         totalUnits === 1
-          ? "1 mimo adicionado à sua lista ♡"
-          : `${totalUnits} mimos adicionados à sua lista ♡`,
+          ? "1 presente adicionado à sua lista ♡"
+          : `${totalUnits} presentes adicionados à sua lista ♡`,
       );
     } catch (err) {
       toast.error(contribuicaoErrorMessage(toContribuicaoError(err)));
@@ -1595,7 +1593,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
       // aperture-p73kv — toast count mirrors the per-item djb2 helper.
       const n = picked.reduce((s, it) => s + defaultSuggestedQty(it.id), 0);
       toast.success(
-        `${n} ${n === 1 ? "mimo adicionado" : "mimos adicionados"} à sua lista ♡`,
+        `${n} ${n === 1 ? "presente adicionado" : "presentes adicionados"} à sua lista ♡`,
       );
     } catch (err) {
       toast.error(contribuicaoErrorMessage(toContribuicaoError(err)));
@@ -1633,7 +1631,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
   // side (sibling tab deleted, DB reset, etc.) the toast surfaces a
   // calmer "essa lista mudou — atualizamos para você" message + the list
   // refetches so the user can retry against fresh data. The pre-1l37i
-  // flow landed on a dead-end "esse mimo não existe mais" toast with no
+  // flow landed on a dead-end "esse presente não existe mais" toast with no
   // refetch.
   const saveEdit = async (draft: DraftFields) => {
     if (!editItem) return;
@@ -1654,7 +1652,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
     const imagemUrl = draft.imageUrl ?? null;
     const idToUpdate = editItem.ids[0];
     if (!idToUpdate) {
-      toast.error("Não consegui identificar esse mimo — recarrega a página ♡");
+      toast.error("Não consegui identificar esse presente — recarrega a página ♡");
       return;
     }
     try {
@@ -1673,7 +1671,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
       // Stale-row recovery: the slot was deleted between the visitor's
       // fetch + this edit. Invalidate so the next render reflects
       // reality + nudge the visitor with a calmer message than the
-      // dead-end "esse mimo não existe mais" the legacy flow used.
+      // dead-end "esse presente não existe mais" the legacy flow used.
       if (error.kind === "not-found") {
         void listQuery.refetch();
         setEditItem(null);
@@ -1688,7 +1686,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
     if (!removeItem) return;
     try {
       await deleteMut.mutateAsync({ ids: removeItem.ids });
-      toast("Mimo removido");
+      toast("Presente removido");
       setRemoveItem(null);
     } catch (err) {
       toast.error(contribuicaoErrorMessage(toContribuicaoError(err)));
@@ -1722,16 +1720,14 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
       {/* Header card */}
       <section className="lista-header-card">
         <div className="lista-header-top">
-          <span className="eyebrow">sua coleção de mimos ♡</span>
           <h1>
             Minha <span className="hl">lista de presentes</span>
           </h1>
           <p className="lista-header-sub">
-            {items.length} {items.length === 1 ? "presente" : "presentes"} ·{" "}
             <b>
               {claimedUnits} de {totalUnits}
             </b>{" "}
-            mimos já recebidos
+            presentes já recebidos
           </p>
           <div className="lista-header-actions">
             <button
@@ -1781,7 +1777,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
               <h2 className="lista-prontas-title">
                 Curadoria com o <span className="hl">essencial para cada fase</span>
               </h2>
-              <p className="lista-prontas-sub">Toque pra ver os mimos antes de adicionar.</p>
+              <p className="lista-prontas-sub">Toque pra ver os presentes antes de adicionar.</p>
               <div className="lista-prontas-grid">
                 {LISTA_PRONTAS.map((preset) => {
                   const detail = listasProntas[preset.id];
@@ -1844,7 +1840,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
 
       <div className="lista-group-title">
         <span>
-          os mimos da sua lista · {items.length} {items.length === 1 ? "presente" : "presentes"}
+          os presentes da sua lista
         </span>
       </div>
 
@@ -1882,7 +1878,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
             <div className="lista-empty-doodle">{icon.heart}</div>
             <span className="eyebrow coral">primeira página em branco ♡</span>
             <h3>Sua lista está pronta pra começar</h3>
-            <p>Adicione os mimos que vão contar a história do seu bebê.</p>
+            <p>Adicione os presentes que vão contar a história do seu bebê.</p>
             <button
               type="button"
               className="btn btn-primary"
@@ -1894,7 +1890,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
         ) : filtered.length === 0 ? (
           <div className="lista-empty lista-empty-sm">
             <span className="eyebrow coral">nada por aqui</span>
-            <h3>Nenhum mimo encontrado</h3>
+            <h3>Nenhum presente encontrado</h3>
             <p>Tente outra busca ou categoria.</p>
           </div>
         ) : (
@@ -1913,7 +1909,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
               onClick={() => setAddModalTab("catalogo")}
             >
               <span className="lista-card-add-plus">{icon.plus}</span>
-              <span className="lista-card-add-label">adicionar outro mimo</span>
+              <span className="lista-card-add-label">adicionar outro presente</span>
               <span className="lista-card-add-sub">um novo presente pra lista</span>
             </button>
           </div>
