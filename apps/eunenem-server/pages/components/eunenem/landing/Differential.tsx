@@ -1,52 +1,88 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+
 // aperture-hsm41 — v2 §04 Diferenciais
-// 5-card bento grid on a lilac-soft background. Card 1 is a plum hero with
-// the headline "7,5%" stat; cards 2-5 are white with category icons. Content
-// is inlined (not driven from LANDING_DIFFERENTIALS) because each card has a
-// bespoke shape — a uniform mock array can't carry the hero/timeline/world/
-// icon variants. Bespoke layout lives in tailwind.css under the
-// /* aperture-hsm41 */ block (diff-grid, diff-hero, diff-num, timeline-*,
-// world-vis, currency, globe, floaty).
+// 5-card bento on desktop (lg+); horizontal scroll-snap carousel on mobile.
+// Bespoke layout in tailwind.css under /* aperture-hsm41 */.
+
+const CARD_COUNT = 5;
+
 export function Differential() {
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const [activeIndex, setActiveIndex] = useState(0);
+
+  const syncActiveFromScroll = useCallback(() => {
+    const track = trackRef.current;
+    if (!track) return;
+    const cards = track.querySelectorAll<HTMLElement>('.diff-card');
+    if (cards.length === 0) return;
+
+    const center = track.scrollLeft + track.clientWidth / 2;
+    let closest = 0;
+    let minDist = Number.POSITIVE_INFINITY;
+
+    cards.forEach((card, i) => {
+      const cardCenter = card.offsetLeft + card.offsetWidth / 2;
+      const dist = Math.abs(center - cardCenter);
+      if (dist < minDist) {
+        minDist = dist;
+        closest = i;
+      }
+    });
+
+    setActiveIndex(closest);
+  }, []);
+
+  useEffect(() => {
+    const track = trackRef.current;
+    if (!track) return;
+
+    syncActiveFromScroll();
+    track.addEventListener('scroll', syncActiveFromScroll, { passive: true });
+    return () => track.removeEventListener('scroll', syncActiveFromScroll);
+  }, [syncActiveFromScroll]);
+
+  const scrollToCard = (index: number) => {
+    const track = trackRef.current;
+    if (!track) return;
+    const card = track.querySelectorAll<HTMLElement>('.diff-card')[index];
+    card?.scrollIntoView({
+      behavior: 'smooth',
+      inline: 'center',
+      block: 'nearest',
+    });
+    setActiveIndex(index);
+  };
+
   return (
     <section
       id="diferenciais"
       className="diff-section fade-up py-22 overflow-hidden bg-lilac-soft"
     >
-      <div className="mx-auto max-w-[1200px] px-6 relative z-10">
-        <div className="text-center max-w-[760px] mx-auto mb-14">
+      <div className="diff-inner relative z-10 mx-auto max-w-[1200px] px-6">
+        <div className="diff-header mb-10 max-w-[760px] text-left lg:mb-14">
           <span className="font-script text-[28px] text-lilac-deep font-semibold inline-block -rotate-2 mb-1">
-            por que escolher a EuNeném
+            por que escolher
           </span>
           <h2 className="font-display text-3xl sm:text-4xl lg:text-[44px] font-semibold text-plum leading-tight text-balance">
             o que <em className="not-italic text-lilac-deep">só a gente</em> faz
             por você
           </h2>
-          <p className="text-[17px] text-ink-soft mt-3.5 text-pretty">
-            Não é só uma lista de presentes. É uma plataforma sólida, feita há
-            mais de uma década ouvindo mães de verdade.
-          </p>
         </div>
 
-        <div className="diff-grid">
+        <div ref={trackRef} className="diff-grid diff-carousel-track">
           {/* 1. HERO — taxa */}
           <div className="diff-card diff-hero">
             <span className="diff-tag">menor taxa do mercado</span>
             <h3 className="font-display">7,5% — e você ainda recebe 100%</h3>
-            <p>
-              Concorrentes cobram entre 8% e 12% (ou nem dizem o preço). A
-              gente embute no convidado e não tira um centavo do seu bolso.
-            </p>
             <div className="diff-hero-row">
               <div className="diff-num font-display">
                 7,5<small>%</small>
               </div>
-              <div className="flex-1 min-w-[180px]">
-                <p className="text-[14px] m-0">
-                  taxa total · embutida no convidado · sem mensalidade · sem
-                  taxa de saque
-                </p>
-              </div>
             </div>
+            <p>
+              Concorrentes cobram 8% a 12% — a gente embute no convidado e você
+              recebe inteirinho.
+            </p>
           </div>
 
           {/* 2. Pioneira 2014 */}
@@ -62,43 +98,26 @@ export function Differential() {
                 <path d="M13 28a3 3 0 006 0" />
               </svg>
             </div>
-            <span className="diff-eyebrow">pioneira no Brasil</span>
-            <h3 className="font-display">
-              no ar desde{' '}
-              <em className="not-italic text-coral-pink">2014</em>
-            </h3>
+            <span className="diff-eyebrow">pioneira</span>
+            <h3 className="font-display">no ar desde 2014</h3>
             <p>
-              Mais de uma década cuidando do enxoval de mais de 300 mil bebês.
-              A gente sabe o que dá certo — e o que dá errado.
+              Mais de uma década cuidando do enxoval de +300mil bebês.
             </p>
-            <div className="flex flex-col gap-2 mt-3.5">
-              <div className="timeline-bar">
-                <div className="timeline-fill" />
-              </div>
-              <div className="timeline-ticks">
-                <span>2014</span>
-                <span>2018</span>
-                <span>2022</span>
-                <span>hoje</span>
-              </div>
-            </div>
           </div>
 
           {/* 3. Multimoedas */}
           <div className="diff-card diff-world">
-            <span className="diff-tag diff-tag-lilac">único no Brasil</span>
+            <div className="diff-icon c3">
+              <span className="text-[22px] leading-none" aria-hidden>
+                🌎
+              </span>
+            </div>
+            <span className="diff-eyebrow">único no Brasil</span>
             <h3 className="font-display">família no exterior? sem problema</h3>
             <p>
-              Aceita pagamento em USD, EUR, GBP, JPY e mais. Convidado paga na
-              moeda dele, você recebe em real via Pix.
+              USD, EUR, GBP, JPY. Convidado paga na moeda dele, você recebe em
+              real.
             </p>
-            <div className="world-vis" aria-hidden="true">
-              <span className="currency c1">USD $</span>
-              <span className="currency c2">EUR €</span>
-              <span className="currency c3">GBP £</span>
-              <span className="currency c4">JPY ¥</span>
-              <span className="globe">🌎</span>
-            </div>
           </div>
 
           {/* 4. Sem taxa de resgate */}
@@ -118,14 +137,13 @@ export function Differential() {
             <span className="diff-eyebrow">resgate</span>
             <h3 className="font-display">saque ilimitado, taxa zero</h3>
             <p>
-              Pix em até 10 minutos. Quantos saques você quiser, sem custo. Os
-              outros cobram R$ 7,90 por saque.
+              Receba via Pix. Quantos saques quiser, sem custo.
             </p>
           </div>
 
           {/* 5. Suporte humano */}
           <div className="diff-card diff-support">
-            <div className="diff-icon c3">
+            <div className="diff-icon c4">
               <svg
                 viewBox="0 0 32 32"
                 fill="none"
@@ -139,10 +157,28 @@ export function Differential() {
             <span className="diff-eyebrow">atendimento</span>
             <h3 className="font-display">gente de verdade no WhatsApp</h3>
             <p>
-              Convidado não conseguiu pagar? Esqueceu a senha? Manda mensagem —
-              quem responde é gente, não robô.
+              Convidado não conseguiu pagar? Manda mensagem — quem responde é
+              gente.
             </p>
           </div>
+        </div>
+
+        <div
+          className="diff-carousel-dots lg:hidden"
+          role="tablist"
+          aria-label="Diferenciais"
+        >
+          {Array.from({ length: CARD_COUNT }, (_, i) => (
+            <button
+              key={i}
+              type="button"
+              role="tab"
+              aria-selected={activeIndex === i}
+              aria-label={`Diferencial ${i + 1} de ${CARD_COUNT}`}
+              className={`diff-carousel-dot${activeIndex === i ? ' is-active' : ''}`}
+              onClick={() => scrollToCard(i)}
+            />
+          ))}
         </div>
       </div>
     </section>

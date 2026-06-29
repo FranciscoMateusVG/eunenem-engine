@@ -29,9 +29,7 @@ export function ChaRifa() {
             <em className="not-italic cha-rifa-em">nova</em>, chegando logo
           </h2>
           <p className="cha-rifa-lede">
-            Já dá pra fazer chá de bebê, chá de fraldas e chá revelação na
-            EuNeném. O <strong>chá rifa</strong> tá chegando — sorteio entre
-            os convidados, e o presentão vai pra um só. Quer ser uma das
+            Sorteio entre os convidados dentro da plataforma. Quer ser uma das
             primeiras a saber?
           </p>
           {submitted ? (
@@ -49,28 +47,6 @@ export function ChaRifa() {
               <button type="submit">me avisem!</button>
             </form>
           )}
-          <p className="cha-rifa-meta">Zero spam. Só um e-mail quando for hora.</p>
-        </div>
-        <div aria-hidden="true" className="cha-rifa-ticket-wrap">
-          <div className="cha-rifa-ticket">
-            <div className="cha-rifa-stamp">em breve!</div>
-            <div className="cha-rifa-ticket-top">
-              <span className="cha-rifa-ticket-label">chá rifa</span>
-              <span className="cha-rifa-ticket-num">№ 042</span>
-            </div>
-            <div className="cha-rifa-ticket-mid">
-              <h4>
-                1 sorteio,
-                <br />1 presente lindo
-              </h4>
-              <p>Cada presente vira um número. Um convidado leva tudo.</p>
-            </div>
-            <div className="cha-rifa-ticket-foot">
-              <span className="cha-rifa-tag">chá de bebê</span>
-              <span className="cha-rifa-tag">chá de fraldas</span>
-              <span className="cha-rifa-tag">chá revelação</span>
-            </div>
-          </div>
         </div>
       </div>
     </section>

@@ -175,6 +175,13 @@ export const LANDING_TESTIMONIALS_HIGHLIGHT: ReadonlyArray<LandingTestimonial> =
   },
 ];
 
+/** Aggregate rating shown above the testimonial grid. */
+export const LANDING_TESTIMONIALS_RATING = {
+  score: '4,9',
+  countLabel: '2.847 avaliações',
+  fiveStarLabel: '91% deram 5 estrelas',
+} as const;
+
 /** Three-up testimonial grid (Testimonials). */
 export const LANDING_TESTIMONIALS: ReadonlyArray<LandingTestimonial> = [
   {
@@ -242,6 +249,12 @@ export const LANDING_FOOTER_SOCIALS: ReadonlyArray<readonly [string, string]> = 
 ];
 
 /** FAQ — question + answer. Answers with inline links carry a `link` field. */
+export const LANDING_CTA_FINAL_PERKS = [
+  'Pronto em 5 min',
+  'Sem mensalidade',
+  'Suporte humano no WhatsApp',
+] as const;
+
 export interface LandingFaq {
   q: string;
   a: string;

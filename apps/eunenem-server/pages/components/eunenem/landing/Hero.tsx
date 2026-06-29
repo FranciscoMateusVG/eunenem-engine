@@ -9,7 +9,7 @@ import { useAuthModal } from '@/components/eunenem/auth/AuthModalProvider';
 //   - new headline "Seu chá de bebê do seu jeito" with .hl marca-texto on
 //     "chá de bebê" and plum emphasis on "seu jeito" (matches v2 markup)
 //   - 3 check-prefixed bullets (Pix in 10 min · 5 min setup · convite grátis)
-//   - polaroid + floating cards + counter card on the right
+//   - polaroid + Pix notification card on the right
 //   - avatar stack + 5-star rating strip below the CTAs
 //
 // The hero-bg.jpg asset is still used inside the polaroid photo mask (per v2
@@ -39,10 +39,10 @@ export function Hero() {
   const ctaRef = useRef<HTMLButtonElement | null>(null);
 
   return (
-    <header className="hero-section relative isolate overflow-hidden bg-cream pt-14 pb-20">
+    <header className="hero-section relative isolate overflow-hidden bg-cream pt-14 pb-0 lg:pb-20">
       <div className="relative z-10 mx-auto grid max-w-[1200px] grid-cols-1 items-center gap-12 px-6 lg:grid-cols-[1.05fr_1fr] lg:gap-14">
-        {/* ===================== LEFT: COPY ===================== */}
-        <div className="text-center lg:text-left">
+        {/* ===================== COPY (top) ===================== */}
+        <div className="text-left lg:col-start-1 lg:row-start-1">
           <span className="hero-live-badge">
             <span className="hero-live-dot" aria-hidden />
             <span>
@@ -52,12 +52,11 @@ export function Hero() {
 
           <h1 className="hero-headline mt-5 font-display text-[clamp(40px,5.6vw,64px)] font-semibold leading-[1.02] tracking-tight text-ink text-balance">
             Seu <span className="hl">chá de bebê</span> do{' '}
-            <span className="text-plum">seu jeito</span> — sem catálogo, sem
-            fila, sem repetir presente.
+            <span className="text-plum">seu jeito.</span>
           </h1>
 
-          <p className="mt-5 max-w-[540px] text-[18px] leading-[1.6] text-ink-soft text-pretty mx-auto lg:mx-0">
-            Crie a lista grátis em 5 minutos. Seus convidados presenteiam
+          <p className="mt-5 max-w-[540px] text-[18px] leading-[1.6] text-ink-soft text-pretty">
+            Crie a lista grátis em 5 minutos. Convidados presenteiam
             online,{' '}
             <strong className="text-plum font-bold">
               você recebe 100% em dinheiro via Pix
@@ -66,84 +65,11 @@ export function Hero() {
             <em className="not-italic text-plum font-semibold">realmente</em>{' '}
             precisa.
           </p>
-
-          <ul className="hero-bullets mt-6 flex flex-col gap-2.5 text-left">
-            <HeroBullet>
-              Lista pronta em{' '}
-              <strong className="text-plum">menos de 5 minutos</strong>
-            </HeroBullet>
-            <HeroBullet>
-              Pix na conta em <strong className="text-plum">10 minutos</strong>
-              , sem taxa de saque
-            </HeroBullet>
-            <HeroBullet>
-              Convite digital + confirmação de presença{' '}
-              <strong className="text-plum">grátis</strong>
-            </HeroBullet>
-          </ul>
-
-          <div className="mt-7 flex flex-wrap items-center justify-center gap-4 lg:justify-start">
-            <button
-              ref={ctaRef}
-              type="button"
-              onClick={() => auth.open('signup', ctaRef.current)}
-              className="btn-lilac btn-lilac-lg"
-            >
-              → criar minha lista grátis
-            </button>
-            <a
-              href="#calculadora"
-              className="text-[14px] font-semibold text-lilac-deep hover:text-plum transition-colors"
-            >
-              ou simular quanto vou receber →
-            </a>
-          </div>
-
-          <div className="mt-8 flex flex-wrap items-center justify-center gap-3.5 lg:justify-start">
-            <div className="hero-stack flex">
-              <img
-                src="/public/dep-luciana.jpg"
-                alt=""
-                className="hero-stack-av"
-              />
-              <img
-                src="/public/dep-janaina.jpg"
-                alt=""
-                className="hero-stack-av"
-              />
-              <img
-                src="/public/dep-maite.jpg"
-                alt=""
-                className="hero-stack-av"
-              />
-              <img
-                src="/public/dep-ana-paula.jpg"
-                alt=""
-                className="hero-stack-av"
-              />
-            </div>
-            <div className="text-[13.5px] text-ink-soft">
-              <div
-                className="text-yellow tracking-[1px] text-[13px]"
-                aria-label="Avaliação 4,9 de 5 estrelas"
-              >
-                ★★★★★{' '}
-                <strong className="text-plum font-bold">4,9</strong>
-                <span className="text-ink-soft"> de 5</span>
-              </div>
-              <div>
-                <strong className="text-plum font-bold">
-                  +300 mil famílias
-                </strong>{' '}
-                já celebraram com a EuNeném
-              </div>
-            </div>
-          </div>
         </div>
 
-        {/* ===================== RIGHT: VISUAL ===================== */}
+        {/* ===================== VISUAL (after intro on mobile) ===================== */}
         <div
-          className="hero-visual relative mx-auto w-full max-w-[460px]"
+          className="hero-visual relative mx-auto w-full max-w-[460px] lg:col-start-2 lg:row-start-1 lg:row-span-2 lg:mx-0"
           aria-hidden
         >
           <div className="hero-polaroid">
@@ -153,25 +79,8 @@ export function Hero() {
             <div className="hero-photo" />
           </div>
 
-          {/* Top-right floating card — "Ana presenteou" */}
-          <div className="hero-fcard hero-fcard--top">
-            <span
-              className="hero-av-mini"
-              style={{ background: 'var(--lilac-deep)' }}
-            >
-              A
-            </span>
-            <div>
-              <div className="hero-fcard-title">Ana presenteou ✿</div>
-              <div className="hero-fcard-meta">
-                há 2 min ·{' '}
-                <strong className="text-plum">R$ 150</strong>
-              </div>
-            </div>
-          </div>
-
-          {/* Mid-left floating card — Pix recebido */}
-          <div className="hero-fcard hero-fcard--mid">
+          {/* Bottom-right Pix notification — overlaps polaroid corner */}
+          <div className="hero-fcard hero-fcard--pix">
             <span
               className="hero-av-mini"
               style={{ background: 'var(--green)' }}
@@ -196,39 +105,103 @@ export function Hero() {
               </div>
             </div>
           </div>
+        </div>
 
-          {/* Bottom-right counter card */}
-          <div className="hero-counter hero-fcard--bot">
-            <div className="hero-counter-label">presentes hoje</div>
-            <div className="hero-counter-num">+1.847</div>
-            <div className="hero-counter-meta">
-              <span className="hero-counter-up">↑ 12%</span> vs ontem
+        {/* ===================== COPY (bottom) ===================== */}
+        <div className="text-left lg:col-start-1 lg:row-start-2">
+
+          <div className="mt-7 flex w-full flex-col items-center gap-4 lg:flex-row lg:flex-wrap lg:items-center lg:justify-start">
+            <button
+              ref={ctaRef}
+              type="button"
+              onClick={() => auth.open('signup', ctaRef.current)}
+              className="btn-lilac btn-lilac-lg w-full justify-center lg:w-auto"
+            >
+              → criar minha lista grátis
+            </button>
+            <a
+              href="#calculadora"
+              className="text-center text-[14px] font-semibold text-lilac-deep hover:text-plum transition-colors"
+            >
+              ou simular quanto vou receber →
+            </a>
+          </div>
+
+          <div className="hero-social mt-8">
+            <div className="hero-social-inner">
+              <div className="hero-stack flex shrink-0">
+                <img
+                  src="/public/dep-luciana.jpg"
+                  alt=""
+                  className="hero-stack-av"
+                />
+                <img
+                  src="/public/dep-janaina.jpg"
+                  alt=""
+                  className="hero-stack-av"
+                />
+                <img
+                  src="/public/dep-maite.jpg"
+                  alt=""
+                  className="hero-stack-av"
+                />
+                <img
+                  src="/public/dep-ana-paula.jpg"
+                  alt=""
+                  className="hero-stack-av"
+                />
+              </div>
+              <div className="hero-social-copy text-[13.5px] text-ink-soft">
+                <div
+                  className="text-yellow tracking-[1px] text-[13px]"
+                  aria-label="Avaliação 4,9 de 5 estrelas"
+                >
+                  ★★★★★{' '}
+                  <strong className="text-plum font-bold">4,9</strong>
+                </div>
+                <p className="hero-social-tagline">
+                  <strong className="text-plum font-bold">+300 mil mães</strong>{' '}
+                  com{'\u00a0'}a{'\u00a0'}EuNeném
+                </p>
+              </div>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Mobile-only stats band (v2 mock §01) */}
+      <div className="hero-mobile-stats lg:hidden" aria-label="Números da EuNeném">
+        <div className="hero-mobile-stats-grid">
+          <HeroMobileStat value="+300mil" label="famílias atendidas" />
+          <HeroMobileStat value="12 anos" label="no mercado desde 2014" />
+          <HeroMobileStat value="4,9" label="avaliação média" showStar />
+          <HeroMobileStat value="R$15M+" label="enviados às famílias" />
         </div>
       </div>
     </header>
   );
 }
 
-function HeroBullet({ children }: { children: React.ReactNode }) {
+function HeroMobileStat({
+  value,
+  label,
+  showStar = false,
+}: {
+  value: string;
+  label: string;
+  showStar?: boolean;
+}) {
   return (
-    <li className="flex items-center gap-2.5 text-[14.5px] text-ink-soft">
-      <span className="hero-check">
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="#fff"
-          strokeWidth="3.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          width={12}
-          height={12}
-        >
-          <path d="M5 12l5 5L20 7" />
-        </svg>
-      </span>
-      <span>{children}</span>
-    </li>
+    <div className="hero-mobile-stat">
+      <div className="hero-mobile-stat-value">
+        {value}
+        {showStar ? (
+          <span className="hero-mobile-stat-star" aria-hidden>
+            ★
+          </span>
+        ) : null}
+      </div>
+      <div className="hero-mobile-stat-label">{label}</div>
+    </div>
   );
 }

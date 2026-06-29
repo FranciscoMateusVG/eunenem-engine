@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { LANDING_FAQS } from '@/lib/mocks/landing';
+import { LANDING_CTA_FINAL_PERKS, LANDING_FAQS } from '@/lib/mocks/landing';
 import { useAuthModal } from '@/components/eunenem/auth/AuthModalProvider';
 
 // aperture-q1j2 — final CTA on a tri-stop gradient with an accordion FAQ.
@@ -40,11 +40,11 @@ export function CTAFinal() {
         </span>
         <h2 className="font-display text-3xl sm:text-4xl lg:text-[44px] font-semibold text-plum leading-tight text-balance">
           quanto antes{' '}
-          <em className="not-italic text-lilac-deep">criar a lista</em>, mais
-          tempo seus convidados têm para presentear.
+          <em className="not-italic text-lilac-deep">criar sua lista</em>, mais
+          tempo seus convidados têm.
         </h2>
         <p className="text-[17px] text-ink-soft my-6 max-w-[540px] mx-auto text-pretty">
-          Junte-se a mais de 300 mil famílias que celebraram com a EuNeném.
+          Junte-se a +300 mil famílias.
         </p>
         <button
           ref={ctaRef}
@@ -52,12 +52,21 @@ export function CTAFinal() {
           onClick={() => auth.open('signup', ctaRef.current)}
           className="btn-lilac btn-lilac-lg"
         >
-          → criar minha lista agora — é grátis
+          criar minha lista grátis{' '}
+          <span className="btn-cta-arrow" aria-hidden="true">
+            →
+          </span>
         </button>
-        <p className="text-[13px] text-ink-mute mt-4.5">
-          Menos de 2 minutos · transparência total em taxas · suporte via
-          WhatsApp
-        </p>
+        <ul className="cta-final-perks">
+          {LANDING_CTA_FINAL_PERKS.map((label) => (
+            <li key={label} className="cta-final-perk">
+              <span className="cta-final-perk-check" aria-hidden="true">
+                ✓
+              </span>
+              {label}
+            </li>
+          ))}
+        </ul>
 
         <div className="mt-14 max-w-[640px] mx-auto text-left">
           {LANDING_FAQS.map((f, i) => (

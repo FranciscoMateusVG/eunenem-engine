@@ -16,8 +16,8 @@ type FeeItem = {
 const FEE_ITEMS: FeeItem[] = [
   {
     label: 'Pix',
-    value: '10 minutos',
-    detail: 'após solicitar o saque',
+    value: '10 min',
+    detail: 'após o convidado pagar',
     iconBg: 'f1',
     icon: (
       <svg
@@ -85,24 +85,21 @@ export function Taxas() {
           </span>
           <h2 className="font-display text-3xl sm:text-4xl lg:text-[44px] font-semibold text-plum leading-tight text-balance">
             você recebe{' '}
-            <em className="not-italic text-lilac-deep">100%</em>. sem surpresa.
+            <em className="not-italic text-lilac-deep">100%</em>.
+            <br/>
+            sem surpresa.
           </h2>
-          <p className="text-[17px] text-ink-soft mt-3.5 text-pretty">
-            A taxa de 7,5% fica diluída no que cada convidado paga. Pra cada
-            um fica pequena. Pra você, soma tudo no fim.
-          </p>
         </div>
 
         <div className="taxas-band">
           <div>
             <div className="taxas-headline">
               <span className="taxas-pct">100%</span>
-              <br />
               pra você
             </div>
             <p>
-              Cada R$ 100 que entra na lista cai inteirinho na sua conta. Sem
-              desconto, sem letra miúda.
+              Cada R$ 100 adiciona na sua lista cai inteirinho na sua conta. Sem
+              letra miúda.
             </p>
           </div>
           <div className="taxas-grid">
@@ -111,9 +108,11 @@ export function Taxas() {
                 <div className={`taxas-icon-wrap taxas-icon-wrap--${it.iconBg}`}>
                   {it.icon}
                 </div>
-                <div className="taxas-label">{it.label}</div>
+                <div className="taxas-item-body">
+                  <div className="taxas-label">{it.label}</div>
+                  <div className="taxas-detail">{it.detail}</div>
+                </div>
                 <div className="taxas-value">{it.value}</div>
-                <div className="taxas-detail">{it.detail}</div>
               </div>
             ))}
           </div>
