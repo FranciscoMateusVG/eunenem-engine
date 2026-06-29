@@ -31,22 +31,16 @@ export function Differential() {
           {/* 1. HERO — taxa */}
           <div className="diff-card diff-hero">
             <span className="diff-tag">menor taxa do mercado</span>
-            <h3 className="font-display">7,5% — e você ainda recebe 100%</h3>
-            <p>
-              Concorrentes cobram entre 8% e 12% (ou nem dizem o preço). A
-              gente embute no convidado e não tira um centavo do seu bolso.
-            </p>
+            <h3 className="font-display">7,8% — e você ainda recebe 100%</h3>
             <div className="diff-hero-row">
               <div className="diff-num font-display">
-                7,5<small>%</small>
-              </div>
-              <div className="flex-1 min-w-[180px]">
-                <p className="text-[14px] m-0">
-                  taxa total · embutida no convidado · sem mensalidade · sem
-                  taxa de saque
-                </p>
+                7,8<small>%</small>
               </div>
             </div>
+            <p>
+              Concorrentes cobram 8% a 12% — convidado paga a taxa e você
+              recebe 100% do valor do presente.
+            </p>
           </div>
 
           {/* 2. Pioneira 2014 */}

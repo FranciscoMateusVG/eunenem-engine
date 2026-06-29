@@ -48,8 +48,8 @@ const STEPS: Step[] = [
     emoji: "✨",
     color: "var(--lilac)",
     rot: 3,
-    title: "Pronto — chegou no Pix",
-    desc: "O valor cai direto na conta dos papais. Eles compram o presente do jeito que fica melhor.",
+    title: "Pronto",
+    desc: "O valor chega na conta dos papais. Eles compram o presente do jeito que fica melhor.",
   },
 ];
 

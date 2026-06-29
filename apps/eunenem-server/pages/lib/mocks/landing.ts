@@ -228,7 +228,7 @@ export const LANDING_FOOTER_COLS: ReadonlyArray<LandingFooterCol> = [
     title: 'fale conosco',
     links: [
       ['whatsapp', 'https://eunenem.com/minha-area/fale-com-a-gente'],
-      ['contato@eunenem.com', 'mailto:contato@eunenem.com'],
+      ['oi@eunenem.com', 'mailto:oi@eunenem.com'],
     ],
   },
 ];
@@ -252,15 +252,39 @@ export interface LandingFaq {
 export const LANDING_FAQS: ReadonlyArray<LandingFaq> = [
   {
     q: 'a EuNeném cobra taxa?',
-    a: 'Sim, uma taxa pequena por presente recebido, sem mensalidade e sem cobranças escondidas. Você só paga quando recebe — e a transparência é total.',
+    a: `Sim. As taxas da EuNeném são cobradas do convidado no momento da compra do presente. Isso significa que o valor que você adiciona à sua lista é exatamente o valor que você receberá. Por exemplo, se você cadastrar um presente de R$ 100, receberá integralmente os R$ 100.
+
+Para viabilizar o funcionamento da plataforma, é cobrada uma taxa de serviço de 7,8% sobre cada presente, destinada a cobrir os custos de operação, manutenção da plataforma e processamento dos pagamentos.
+
+Além disso, para pagamentos realizados por cartão de crédito, há um acréscimo de 3,99%, referente às taxas da operadora de pagamento.
+
+Dessa forma, os futuros pais recebem o valor integral definido na lista, enquanto os custos da transação são pagos por quem realiza a compra do presente.`,
     link: { label: 'ver tabela completa →', href: 'https://eunenem.com/faq' },
   },
   {
     q: 'quando posso sacar o dinheiro?',
-    a: 'A qualquer momento. Os valores ficam disponíveis na sua área, e você transfere para sua conta bancária quando quiser, mesmo antes do chá acontecer.',
+    a: `O prazo começa a contar assim que o convidado realiza o pagamento do presente.
+
+Pagamentos via Pix: o valor fica disponível para solicitação de resgate em até 10 minutos.
+
+Pagamentos via cartão de crédito: o valor fica disponível para solicitação de resgate em 31 dias corridos.
+
+Depois que você solicitar o resgate, a transferência será realizada para a sua conta em até 3 dias úteis.
+
+Você pode acompanhar todos os presentes recebidos e os valores disponíveis diretamente em seu extrato na EuNeném.`,
   },
   {
-    q: 'meus convidados precisam se cadastrar?',
-    a: 'Não. Eles abrem o link, escolhem o item e presenteiam direto pelo cartão ou Pix. Leva menos de um minuto.',
+    q: 'Como os convidados compram os presentes?',
+    a: `Comprar um presente na EuNeném é simples, rápido e seguro:
+
+Seu convidado acessa o link do seu chá de bebê.
+
+Escolhe o presente virtual que deseja dar entre as opções da sua lista.
+
+É direcionado para um ambiente seguro de pagamento, com proteção dos dados da transação.
+
+Escolhe a forma de pagamento, podendo pagar por Pix ou cartão de crédito.
+
+Após a confirmação do pagamento, o valor do presente é creditado em sua conta EuNeném de acordo com os prazos da forma de pagamento escolhida.`,
   },
 ];
