@@ -4964,21 +4964,44 @@ html {
   }
 }
 
-/* aperture-q1j2 — invites mobile carousel (< lg keeps 3-column grid) */
+/* aperture-q1j2 — invites horizontal carousel (all breakpoints) */
 .invites-grid {
-  display: grid;
-  grid-template-columns: 1fr;
+  display: flex;
   gap: 24px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
 }
 
-@media (min-width: 1024px) {
-  .invites-grid {
-    grid-template-columns: repeat(3, 1fr);
-  }
+.invites-grid .invites-card {
+  flex: 0 0 calc((100% - 48px) / 3);
+  scroll-snap-align: start;
 }
 
 .invites-carousel-track {
   scrollbar-width: none;
+  touch-action: pan-x;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .invites-carousel-track {
+    cursor: grab;
+  }
+
+  .invites-carousel-track.is-dragging {
+    cursor: grabbing;
+  }
+}
+
+.invites-carousel-track.is-dragging {
+  scroll-snap-type: none;
+  scroll-behavior: auto;
+  user-select: none;
+}
+
+.invites-carousel-track.is-dragging .invites-card {
+  pointer-events: none;
 }
 
 .invites-carousel-track::-webkit-scrollbar {
@@ -5028,14 +5051,10 @@ html {
   }
 
   .invites-carousel-track {
-    display: flex;
     gap: 14px;
-    overflow-x: auto;
-    scroll-snap-type: x mandatory;
-    scroll-behavior: smooth;
-    -webkit-overflow-scrolling: touch;
     padding: 0 24px 4px;
     margin-bottom: 28px;
+    scroll-behavior: auto;
   }
 
   .invites-carousel-track .invites-card {
@@ -5048,17 +5067,40 @@ html {
   }
 }
 
-/* aperture-q1j2 — testimonials mobile carousel (< lg keeps 3-column grid) */
+/* aperture-q1j2 — testimonials horizontal carousel (all breakpoints) */
 .testi-grid {
-  display: grid;
-  grid-template-columns: 1fr;
+  display: flex;
   gap: 24px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
 }
 
-@media (min-width: 1024px) {
-  .testi-grid {
-    grid-template-columns: repeat(3, 1fr);
-  }
+.testi-grid .testi-card {
+  flex: 0 0 calc((100% - 48px) / 3);
+  scroll-snap-align: start;
+  display: flex;
+  flex-direction: column;
+}
+
+.testi-card-quote {
+  flex: 1 1 auto;
+  min-height: 6.5rem;
+  max-height: 6.5rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--lilac) transparent;
+}
+
+.testi-card-quote::-webkit-scrollbar {
+  width: 4px;
+}
+
+.testi-card-quote::-webkit-scrollbar-thumb {
+  background: var(--lilac);
+  border-radius: 999px;
 }
 
 .testi-rating-card {
@@ -5102,6 +5144,27 @@ html {
 
 .testi-carousel-track {
   scrollbar-width: none;
+  touch-action: pan-x;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .testi-carousel-track {
+    cursor: grab;
+  }
+
+  .testi-carousel-track.is-dragging {
+    cursor: grabbing;
+  }
+}
+
+.testi-carousel-track.is-dragging {
+  scroll-snap-type: none;
+  scroll-behavior: auto;
+  user-select: none;
+}
+
+.testi-carousel-track.is-dragging .testi-card {
+  pointer-events: none;
 }
 
 .testi-carousel-track::-webkit-scrollbar {
@@ -5154,13 +5217,9 @@ html {
   }
 
   .testi-carousel-track {
-    display: flex;
     gap: 14px;
-    overflow-x: auto;
-    scroll-snap-type: x mandatory;
-    scroll-behavior: smooth;
-    -webkit-overflow-scrolling: touch;
     padding: 0 24px 4px;
+    scroll-behavior: auto;
   }
 
   .testi-carousel-track .testi-card {

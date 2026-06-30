@@ -9,12 +9,17 @@ import {
 
 import { TestiCard } from './TestiCard';
 
-// aperture-q1j2 — testimonial grid with aggregate rating card.
-// 3-column grid on desktop (lg+); horizontal scroll-snap carousel on mobile.
+// aperture-q1j2 — testimonial carousel with aggregate rating card.
+// Horizontal scroll-snap carousel; mouse drag on desktop, native touch scroll on mobile.
 
 export function Testimonials() {
   const trackRef = useRef<HTMLDivElement | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
+  const activeIndexRef = useRef(0);
+  const isMouseDragging = useRef(false);
+  const dragStartX = useRef(0);
+  const dragStartScroll = useRef(0);
+  const scrollSyncRaf = useRef<number | null>(null);
 
   const syncActiveFromScroll = useCallback(() => {
     const track = trackRef.current;
@@ -35,17 +40,34 @@ export function Testimonials() {
       }
     });
 
+    if (closest === activeIndexRef.current) return;
+    activeIndexRef.current = closest;
     setActiveIndex(closest);
   }, []);
+
+  const scheduleActiveSync = useCallback(() => {
+    if (scrollSyncRaf.current !== null) return;
+    scrollSyncRaf.current = requestAnimationFrame(() => {
+      scrollSyncRaf.current = null;
+      syncActiveFromScroll();
+    });
+  }, [syncActiveFromScroll]);
 
   useEffect(() => {
     const track = trackRef.current;
     if (!track) return;
 
     syncActiveFromScroll();
-    track.addEventListener('scroll', syncActiveFromScroll, { passive: true });
-    return () => track.removeEventListener('scroll', syncActiveFromScroll);
-  }, [syncActiveFromScroll]);
+    track.addEventListener('scroll', scheduleActiveSync, { passive: true });
+    track.addEventListener('scrollend', syncActiveFromScroll, { passive: true });
+    return () => {
+      track.removeEventListener('scroll', scheduleActiveSync);
+      track.removeEventListener('scrollend', syncActiveFromScroll);
+      if (scrollSyncRaf.current !== null) {
+        cancelAnimationFrame(scrollSyncRaf.current);
+      }
+    };
+  }, [scheduleActiveSync, syncActiveFromScroll]);
 
   const scrollToCard = (index: number) => {
     const track = trackRef.current;
@@ -56,7 +78,40 @@ export function Testimonials() {
       inline: 'center',
       block: 'nearest',
     });
+    activeIndexRef.current = index;
     setActiveIndex(index);
+  };
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 || e.pointerType !== 'mouse') return;
+    const track = trackRef.current;
+    if (!track) return;
+
+    isMouseDragging.current = true;
+    dragStartX.current = e.clientX;
+    dragStartScroll.current = track.scrollLeft;
+    track.setPointerCapture(e.pointerId);
+    track.classList.add('is-dragging');
+  };
+
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isMouseDragging.current || e.pointerType !== 'mouse') return;
+    const track = trackRef.current;
+    if (!track) return;
+    track.scrollLeft = dragStartScroll.current - (e.clientX - dragStartX.current);
+  };
+
+  const endDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isMouseDragging.current || e.pointerType !== 'mouse') return;
+    const track = trackRef.current;
+    if (!track) return;
+
+    isMouseDragging.current = false;
+    track.classList.remove('is-dragging');
+    if (track.hasPointerCapture(e.pointerId)) {
+      track.releasePointerCapture(e.pointerId);
+    }
+    syncActiveFromScroll();
   };
 
   return (
@@ -92,6 +147,10 @@ export function Testimonials() {
         <div
           ref={trackRef}
           className="testi-grid testi-carousel-track"
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={endDrag}
+          onPointerCancel={endDrag}
         >
           {LANDING_TESTIMONIALS.map((t) => (
             <TestiCard key={t.name} {...t} />
@@ -99,7 +158,7 @@ export function Testimonials() {
         </div>
 
         <div
-          className="testi-carousel-dots lg:hidden"
+          className="testi-carousel-dots"
           aria-label="Navegação dos depoimentos"
         >
           {LANDING_TESTIMONIALS.map((t, i) => (
