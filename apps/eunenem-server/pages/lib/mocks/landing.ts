@@ -210,9 +210,9 @@ export const LANDING_FOOTER_COLS: ReadonlyArray<LandingFooterCol> = [
   {
     title: 'dúvidas',
     links: [
-      ['perguntas frequentes', 'https://eunenem.com/faq'],
-      ['status dos serviços', 'https://eunenem.com/faq'],
-      ['taxas', 'https://eunenem.com/faq'],
+      ['perguntas frequentes', '#faq'],
+      ['status dos serviços', '#faq'],
+      ['taxas', '#faq'],
       ['termos de uso', 'https://eunenem.com/termos-de-uso'],
     ],
   },
