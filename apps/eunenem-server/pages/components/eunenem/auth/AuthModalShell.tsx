@@ -368,7 +368,7 @@ export function AuthModalShell({
         {mode === "signup" && step === 1 && (
           <p className="auth-fineprint">
             Ao criar a conta você concorda com os{" "}
-            <a href="/termos" target="_blank" rel="noopener noreferrer">
+            <a href="/termos-de-uso" className="text-lilac-deep underline">
               Termos de uso
             </a>{" "}
             e a{" "}

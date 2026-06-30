@@ -15,7 +15,7 @@ import { PaginaPage } from './PaginaPage.js';
 import { PaginaSucessoPage } from './PaginaSucessoPage.js';
 import { PainelPage } from './PainelPage.js';
 import { PainelSectionPage } from './PainelSectionPage.js';
-import { TrpcSmokePage } from './TrpcSmokePage.js';
+import { TermosDeUsoPage } from './TermosDeUsoPage.js';
 import { TrpcProvider } from './lib/TrpcProvider.js';
 import { isPainelSection, type PainelSection } from './lib/painelRoutes.js';
 
@@ -46,6 +46,7 @@ export function resolveRoute(pathname: string):
   | { kind: 'painel'; slug: string }
   | { kind: 'painel-convite-preview'; slug: string }
   | { kind: 'painel-section'; slug: string; section: PainelSection }
+  | { kind: 'termos-de-uso' }
   | { kind: 'trpc-smoke' }
   | { kind: 'auth-demo' }
   | { kind: 'admin' }
@@ -59,6 +60,9 @@ export function resolveRoute(pathname: string):
   // Marketing landing page (aperture-q1j2) — exact "/" only.
   if (pathname === '/') {
     return { kind: 'landing' };
+  }
+  if (pathname === '/termos-de-uso' || pathname === '/termos-de-uso/') {
+    return { kind: 'termos-de-uso' };
   }
   // tRPC smoke test (aperture-kungg) — dev-only verification surface.
   if (pathname === '/trpc-smoke') {
@@ -212,6 +216,7 @@ export function App({ pathname }: { pathname: string }) {
 
 function pickPage(route: ReturnType<typeof resolveRoute>, pathname: string) {
   if (route.kind === 'landing') return <LandingPage />;
+  if (route.kind === 'termos-de-uso') return <TermosDeUsoPage />;
   if (route.kind === 'pagina') return <PaginaPage slug={route.slug} />;
   if (route.kind === 'pagina-sucesso') return <PaginaSucessoPage slug={route.slug} />;
   if (route.kind === 'painel') return <PainelPage slug={route.slug} />;

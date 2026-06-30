@@ -299,7 +299,7 @@ export const LANDING_FOOTER_COLS: ReadonlyArray<LandingFooterCol> = [
       ['perguntas frequentes', 'https://eunenem.com/faq'],
       ['status dos serviços', 'https://eunenem.com/faq'],
       ['taxas', 'https://eunenem.com/faq'],
-      ['termos de uso', 'https://eunenem.com/termos-de-uso'],
+      ['termos de uso', '/termos-de-uso'],
     ],
   },
   {
