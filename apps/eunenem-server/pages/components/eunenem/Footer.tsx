@@ -70,7 +70,7 @@ export function Footer() {
     <footer className="bg-plum text-[#F4DCEA] pt-16 pb-7">
       <div className="mx-auto max-w-[1200px] px-6">
         <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_2fr] gap-14 mb-12">
-          <div>
+          <div className="flex flex-col items-center text-center lg:items-start lg:text-left">
             <img
               src="/public/logo-landing.png"
               alt="EuNeném"
@@ -84,7 +84,7 @@ export function Footer() {
             </p>
             {/* aperture-zeueb — 4 real trust badges (white chips for legibility
                 on the dark footer) replacing the 2 text pills. */}
-            <div className="flex gap-2.5 mt-5 flex-wrap items-center">
+            <div className="flex gap-2.5 mt-5 flex-wrap items-center justify-center lg:justify-start">
               {BADGES.map(([src, alt]) => (
                 <span
                   key={src}
@@ -102,7 +102,7 @@ export function Footer() {
               ))}
             </div>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-7">
+          <div className="hidden lg:grid lg:grid-cols-3 gap-7">
             {LANDING_FOOTER_COLS.map((col) => (
               <div key={col.title}>
                 {/* aperture-zeueb — explicit light color via inline style: the
@@ -131,7 +131,7 @@ export function Footer() {
             ))}
           </div>
         </div>
-        <div className="border-t border-[#F4DCEA]/10 pt-6 flex flex-wrap justify-between items-center gap-4">
+        <div className="border-t border-[#F4DCEA]/10 pt-6 flex flex-col items-center gap-4 lg:flex-row lg:justify-between lg:items-center">
           <div className="text-[12.5px] text-[#F4DCEA]/60">
             © 2026 EuNeném® · feito com ❤️ no Brasil
           </div>

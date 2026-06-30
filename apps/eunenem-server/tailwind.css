@@ -5406,6 +5406,9 @@ html {
   .cha-rifa-inner {
     grid-template-columns: 1fr;
   }
+  .cha-rifa-ticket-wrap {
+    display: none;
+  }
 }
 
 

@@ -2,38 +2,45 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { LANDING_INVITES } from '@/lib/mocks/landing';
+import { InvitePreview } from '@/components/eunenem/painel/ConviteBody';
+import type { ConviteState } from '@/lib/mocks/convite';
+import { LANDING_INVITE_DEMOS } from '@/lib/mocks/landing';
 
 // aperture-q1j2 — digital-invite gallery.
 // 3-column grid on desktop (lg+); horizontal scroll-snap carousel on mobile.
+// Previews use real watercolor templates via InvitePreview (same renderer as painel).
 
-type InviteData = (typeof LANDING_INVITES)[number];
+const STORY_WIDTH = 400;
 
-function InviteCard({ it }: { it: InviteData }) {
+function InviteCard({ state }: { state: ConviteState }) {
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const [scale, setScale] = useState(0.85);
+
+  useEffect(() => {
+    const el = cardRef.current;
+    if (!el) return;
+
+    const updateScale = () => {
+      setScale(el.clientWidth / STORY_WIDTH);
+    };
+
+    updateScale();
+    const ro = new ResizeObserver(updateScale);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   return (
     <div
-      className="invites-card aspect-[3/4] rounded-3xl overflow-hidden relative shadow-soft-md hover:shadow-soft-lg hover:-translate-y-2 hover:-rotate-1 transition-all cursor-pointer"
-      style={{ background: it.bg }}
+      ref={cardRef}
+      className="invites-card aspect-[3/4] rounded-3xl overflow-hidden relative border border-black hover:-translate-y-2 hover:-rotate-1 transition-all cursor-pointer"
     >
-      <div className="absolute inset-5 border-[1.5px] border-white/70 rounded-2xl p-6 flex flex-col items-center justify-between text-center">
-        <span className="font-script text-[22px] text-ink/85 font-semibold">
-          {it.top}
-        </span>
-        <div>
-          <div className="font-display text-[32px] leading-tight text-ink font-semibold text-balance">
-            {it.titleLines[0]}
-            <br />
-            {it.titleLines[1]}
-          </div>
-          <div className="w-7 h-0.5 bg-ink/40 mx-auto my-3 rounded" />
-          <div className="text-xs text-ink/75 tracking-wider uppercase font-semibold">
-            {it.name}
-          </div>
-        </div>
-        <span className="font-script text-[22px] text-ink/85 font-semibold">
-          {it.bot}
-        </span>
-      </div>
+      <InvitePreview
+        state={state}
+        format="story"
+        fidelity="scrapbook"
+        scale={scale}
+      />
     </div>
   );
 }
@@ -102,8 +109,8 @@ export function Invites() {
           ref={trackRef}
           className="invites-grid invites-carousel-track mb-10 lg:mb-10"
         >
-          {LANDING_INVITES.map((it, i) => (
-            <InviteCard key={i} it={it} />
+          {LANDING_INVITE_DEMOS.map((state) => (
+            <InviteCard key={state.bgTemplate} state={state} />
           ))}
         </div>
 
@@ -111,7 +118,7 @@ export function Invites() {
           className="invites-carousel-dots lg:hidden"
           aria-label="Navegação dos convites"
         >
-          {LANDING_INVITES.map((_, i) => (
+          {LANDING_INVITE_DEMOS.map((_, i) => (
             <button
               key={i}
               type="button"

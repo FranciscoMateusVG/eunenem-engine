@@ -197,7 +197,7 @@ export function Calculadora() {
                   <div>
                     <div className="calculadora-buy-qty">{buys.diapers}</div>
                     <div className="calculadora-buy-item">
-                      de fralda descartável
+                      de fralda
                     </div>
                   </div>
                 </div>
@@ -206,7 +206,7 @@ export function Calculadora() {
                   <div>
                     <div className="calculadora-buy-qty">{buys.milk}</div>
                     <div className="calculadora-buy-item">
-                      de fórmula infantil
+                      de fórmula
                     </div>
                   </div>
                 </div>
@@ -215,7 +215,7 @@ export function Calculadora() {
                   <div>
                     <div className="calculadora-buy-qty">{buys.crib}</div>
                     <div className="calculadora-buy-item">
-                      completos com colchão
+                      com colchão
                     </div>
                   </div>
                 </div>
@@ -224,7 +224,7 @@ export function Calculadora() {
                   <div>
                     <div className="calculadora-buy-qty">{buys.stroller}</div>
                     <div className="calculadora-buy-item">
-                      de bebê top de linha
+                      top de linha
                     </div>
                   </div>
                 </div>

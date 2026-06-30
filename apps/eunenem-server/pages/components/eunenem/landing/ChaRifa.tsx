@@ -48,6 +48,26 @@ export function ChaRifa() {
             </form>
           )}
         </div>
+
+        <div className="cha-rifa-ticket-wrap" aria-hidden>
+          <div className="cha-rifa-ticket">
+            <span className="cha-rifa-stamp">em breve!</span>
+            <div className="cha-rifa-ticket-top">
+              <span className="cha-rifa-ticket-label">chá rifa</span>
+            </div>
+            <div className="cha-rifa-ticket-mid">
+              <h4>1 sorteio, 1 presente lindo</h4>
+              <p>
+                Cada presente vira um número. Um convidado leva tudo.
+              </p>
+            </div>
+            <div className="cha-rifa-ticket-foot">
+              <span className="cha-rifa-tag">chá de bebê</span>
+              <span className="cha-rifa-tag">chá de fraldas</span>
+              <span className="cha-rifa-tag">chá revelação</span>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
   );

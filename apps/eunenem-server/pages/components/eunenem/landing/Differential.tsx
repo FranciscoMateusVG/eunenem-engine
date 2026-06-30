@@ -108,9 +108,16 @@ export function Differential() {
           {/* 3. Multimoedas */}
           <div className="diff-card diff-world">
             <div className="diff-icon c3">
-              <span className="text-[22px] leading-none" aria-hidden>
-                🌎
-              </span>
+              <svg
+                viewBox="0 0 32 32"
+                fill="none"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="16" cy="16" r="11" />
+                <path d="M5 16h22" />
+                <path d="M16 5a11 11 0 0 1 3.67 11 11 11 0 0 1-3.67 11 11 11 0 0 1-3.67-11 11 11 0 0 1 3.67-11z" />
+              </svg>
             </div>
             <span className="diff-eyebrow">único no Brasil</span>
             <h3 className="font-display">família no exterior? sem problema</h3>

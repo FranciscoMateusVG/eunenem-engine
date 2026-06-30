@@ -5,6 +5,10 @@
 // SVGs / decorative JSX stay in the section components; only the textual
 // copy + structural data live here, mirroring painelDemo.ts conventions.
 
+import { templateSelectionPatch } from '../convite';
+import { DEFAULT_STATE, type ConviteState } from './convite';
+import { TEMPLATE_BY_ID } from './templates';
+
 /** External app URLs the marketing CTAs point at (real eunenem.com). */
 export const LANDING_LINKS = {
   criarLista: 'https://eunenem.com/minha-area',
@@ -104,38 +108,62 @@ export const LANDING_DIFFERENTIALS: ReadonlyArray<LandingDifferential> = [
   },
 ];
 
-/** Digital-invite preview cards. `title` carries a line break (split copy). */
-export interface LandingInvite {
-  /** CSS gradient for the card background. */
-  bg: string;
-  top: string;
-  /** Two-line title (rendered with a <br/> between). */
-  titleLines: readonly [string, string];
-  name: string;
-  bot: string;
-}
+/** Watercolor template ids showcased on the landing invites gallery. */
+export const LANDING_INVITE_TEMPLATE_IDS = [
+  'aviao-nas-nuvens',
+  'balao-rosa',
+  'baloes-no-ceu',
+] as const;
 
-export const LANDING_INVITES: ReadonlyArray<LandingInvite> = [
+const LANDING_INVITE_CLEAN: Pick<
+  ConviteState,
+  'address' | 'hashtag' | 'showHashtag' | 'rsvp' | 'gifts' | 'bgUpload'
+> = {
+  address: '',
+  hashtag: '',
+  showHashtag: false,
+  rsvp: false,
+  gifts: false,
+  bgUpload: null,
+};
+
+/** Real template previews — rendered via InvitePreview on the landing. */
+export const LANDING_INVITE_DEMOS: ReadonlyArray<ConviteState> = [
   {
-    bg: 'linear-gradient(155deg, #FBE0EA, #F4B6CD, #E78FA7)',
-    top: 'com muito amor',
-    titleLines: ['Helena', 'está chegando'],
-    name: '22 de junho · 15h',
-    bot: 'chá de bebê',
+    ...DEFAULT_STATE,
+    ...templateSelectionPatch(TEMPLATE_BY_ID['aviao-nas-nuvens']!),
+    ...LANDING_INVITE_CLEAN,
+    eventType: 'cha-bebe',
+    mode: 'presencial',
+    babyName: 'Júlia',
+    host: 'Camila & Tiago',
+    date: '2026-07-12',
+    time: '15:00',
+    message: 'Vem celebrar com a gente ♡',
   },
   {
-    bg: 'linear-gradient(165deg, #FFF9F1, #F7D560, #C7DC6E)',
-    top: 'save the date',
-    titleLines: ['pequeno', 'Bento'],
-    name: 'Camila & Tiago',
-    bot: 'convite digital',
+    ...DEFAULT_STATE,
+    ...templateSelectionPatch(TEMPLATE_BY_ID['balao-rosa']!),
+    ...LANDING_INVITE_CLEAN,
+    eventType: 'cha-bebe',
+    mode: 'presencial',
+    babyName: 'Helena',
+    host: 'Mariana & Pedro',
+    date: '2026-06-22',
+    time: '15:00',
+    message: 'Venha celebrar essa nova fase ♡',
   },
   {
-    bg: 'linear-gradient(150deg, #E8D5F0, #C9A5D8, #9CD7DD)',
-    top: 'está chegando',
-    titleLines: ['Alice,', 'nossa estrelinha'],
-    name: 'setembro · 2026',
-    bot: 'por favor, confirme',
+    ...DEFAULT_STATE,
+    ...templateSelectionPatch(TEMPLATE_BY_ID['baloes-no-ceu']!),
+    ...LANDING_INVITE_CLEAN,
+    eventType: 'cha-bebe',
+    mode: 'presencial',
+    babyName: 'Alice',
+    host: 'Julia & Rafael',
+    date: '2026-09-20',
+    time: '16:00',
+    message: 'Mal podemos esperar pra te ver lá! ♡',
   },
 ];
 
@@ -264,7 +292,7 @@ export interface LandingFaq {
 
 export const LANDING_FAQS: ReadonlyArray<LandingFaq> = [
   {
-    q: 'a EuNeném cobra taxa?',
+    q: 'A EuNeném cobra taxa?',
     a: `Sim. As taxas da EuNeném são cobradas do convidado no momento da compra do presente. Isso significa que o valor que você adiciona à sua lista é exatamente o valor que você receberá. Por exemplo, se você cadastrar um presente de R$ 100, receberá integralmente os R$ 100.
 
 Para viabilizar o funcionamento da plataforma, é cobrada uma taxa de serviço de 7,8% sobre cada presente, destinada a cobrir os custos de operação, manutenção da plataforma e processamento dos pagamentos.
@@ -275,7 +303,7 @@ Dessa forma, os futuros pais recebem o valor integral definido na lista, enquant
     link: { label: 'ver tabela completa →', href: 'https://eunenem.com/faq' },
   },
   {
-    q: 'quando posso sacar o dinheiro?',
+    q: 'Quando posso sacar o dinheiro?',
     a: `O prazo começa a contar assim que o convidado realiza o pagamento do presente.
 
 Pagamentos via Pix: o valor fica disponível para solicitação de resgate em até 10 minutos.
