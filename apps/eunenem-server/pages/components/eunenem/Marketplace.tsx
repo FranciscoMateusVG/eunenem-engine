@@ -1,5 +1,6 @@
 
 import { useCallback, useMemo, useState } from "react";
+import { artigoPosse } from "@/lib/concordancia";
 import { BottleDoodle, FlowerDoodle } from "./Doodles";
 import { GiftCard } from "./GiftCard";
 import { GiftCheckoutModal } from "./GiftCheckoutModal";
@@ -81,7 +82,7 @@ export function Marketplace({ slug }: MarketplaceProps) {
       <div className="eu-container">
         <header style={{ textAlign: "center", marginBottom: 32 }}>
           <span className="eyebrow eyebrow-coral">
-            a listinha do {tweaks.babyName}
+            a listinha {artigoPosse(tweaks.genero)} {tweaks.babyName}
           </span>
           <h2
             style={{

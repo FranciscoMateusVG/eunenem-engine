@@ -3,6 +3,8 @@ import { z } from 'zod/v4';
 import type { ObjectStorage } from '../../adapters/storage/object-storage.js';
 import type { PerfilCriadorRepository } from '../../adapters/usuario/perfil-criador-repository.js';
 import type { UsuarioRepository } from '../../adapters/usuario/repository.js';
+import type { ConteudoPerfilCriador } from '../../domain/usuario/value-objects/conteudo-perfil-criador.js';
+import { GeneroBebeSchema } from '../../domain/usuario/value-objects/genero-bebe.js';
 import type { IdPlataformaReferencia } from '../../domain/usuario/value-objects/ids.js';
 import type { SlugUsuario } from '../../domain/usuario/value-objects/slug-usuario.js';
 import { TipoEventoPerfilSchema } from '../../domain/usuario/value-objects/tipo-evento-perfil.js';
@@ -28,6 +30,7 @@ export const PerfilPublicoDTOSchema = z.object({
   relacao: z.string().nullable(),
   historia: z.string().nullable(),
   tipoEvento: TipoEventoPerfilSchema.nullable(),
+  genero: GeneroBebeSchema.nullable(),
   dataEvento: z.string().nullable(),
   dataNascimento: z.string().nullable(),
   /**
@@ -41,6 +44,32 @@ export const PerfilPublicoDTOSchema = z.object({
 });
 
 export type PerfilPublicoDTO = z.infer<typeof PerfilPublicoDTOSchema>;
+
+function dateToIso(value: Date | null | undefined): string | null {
+  return value ? value.toISOString() : null;
+}
+
+function mapPerfilPublicoDTO(
+  usuario: { slug: string; nomeExibicao: string },
+  conteudo: ConteudoPerfilCriador | undefined,
+  fotoUrl: (key: string | null) => string | null,
+): PerfilPublicoDTO {
+  const c = conteudo;
+  return {
+    slug: usuario.slug,
+    creatorName: usuario.nomeExibicao,
+    nomeBebe: c?.nomeBebe ?? null,
+    relacao: c?.relacao ?? null,
+    historia: c?.historia ?? null,
+    tipoEvento: c?.tipoEvento ?? null,
+    genero: c?.genero ?? null,
+    dataEvento: dateToIso(c?.dataEvento),
+    dataNascimento: dateToIso(c?.dataNascimento),
+    fotoPerfilUrl: fotoUrl(c?.fotoPerfilKey ?? null),
+    fotoCapaUrl: fotoUrl(c?.fotoCapaKey ?? null),
+    fotoHistoriaUrl: fotoUrl(c?.fotoHistoriaKey ?? null),
+  };
+}
 
 export interface ObterPerfilPublicoBySlugDeps {
   readonly usuarioRepository: UsuarioRepository;
@@ -77,21 +106,7 @@ export async function obterPerfilPublicoBySlug(
       }
 
       const perfil = await perfilCriadorRepository.findByUsuarioId(usuario.id);
-      const c = perfil?.conteudo;
-
-      const dto: PerfilPublicoDTO = {
-        slug: usuario.slug,
-        creatorName: usuario.nomeExibicao,
-        nomeBebe: c?.nomeBebe ?? null,
-        relacao: c?.relacao ?? null,
-        historia: c?.historia ?? null,
-        tipoEvento: c?.tipoEvento ?? null,
-        dataEvento: c?.dataEvento ? c.dataEvento.toISOString() : null,
-        dataNascimento: c?.dataNascimento ? c.dataNascimento.toISOString() : null,
-        fotoPerfilUrl: fotoUrl(c?.fotoPerfilKey ?? null),
-        fotoCapaUrl: fotoUrl(c?.fotoCapaKey ?? null),
-        fotoHistoriaUrl: fotoUrl(c?.fotoHistoriaKey ?? null),
-      };
+      const dto = mapPerfilPublicoDTO(usuario, perfil?.conteudo, fotoUrl);
 
       span.setStatus({ code: SpanStatusCode.OK });
       return dto;

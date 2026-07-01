@@ -11,8 +11,13 @@ import {
   UsuarioSessaoInvalidaError,
 } from '../../../../src/index.js';
 import { trustedClientIp } from '../lib/security/trusted-client-ip.js';
+import { isEmailAdmin } from '../auth/admin-allowlist.js';
 import type { TrpcContext } from './context.js';
 import { enforceRateLimit } from './rate-limit.js';
+import {
+  readSessionCookie,
+  resolverUsuarioAutenticadoOuNull,
+} from './session-resolver.js';
 
 /**
  * Rate-limit posture (aperture-uc2ix) — matches Cipher's recommendation:
@@ -160,25 +165,6 @@ const ContinuarComEmailInputSchema = z.object({
   idPlataforma: z.uuid(),
   nomeExibicao: z.string().min(1).max(120).optional(),
 });
-
-/**
- * Read the session token from the Cookie header. Hono normalizes cookies
- * via getCookie() but the tRPC context only has the raw Headers object,
- * so we parse it ourselves — same logic as Hono's getCookie helper,
- * just inlined.
- */
-function readSessionCookie(headers: Headers, name: string): string | null {
-  const cookieHeader = headers.get('cookie');
-  if (!cookieHeader) return null;
-  const cookies = cookieHeader.split(';').map((c) => c.trim());
-  const target = `${name}=`;
-  for (const cookie of cookies) {
-    if (cookie.startsWith(target)) {
-      return decodeURIComponent(cookie.slice(target.length));
-    }
-  }
-  return null;
-}
 
 /**
  * Append a Set-Cookie header that pins the session token (aperture-ht7sq).
@@ -752,6 +738,11 @@ export const authRouter = t.router({
 
   signOut: t.procedure.mutation(async ({ ctx }) => {
     const { deps, headers, resHeaders } = ctx;
+
+    // ── PATH 1 — engine session (bare cookie, email+password) ──────────
+    // Source of truth for email+password is the engine session keyed by
+    // the BARE `better-auth.session_token` cookie. Revoke the engine-side
+    // session row, then clear the bare cookie. (Unchanged behaviour.)
     const token = readSessionCookie(headers, deps.sessionCookieName);
     if (token) {
       // Validate-then-strip on the way out — TokenSessaoSchema requires
@@ -769,6 +760,42 @@ export const authRouter = t.router({
       deps.sessionCookieName,
       deps.auth.options.advanced?.useSecureCookies ?? false,
     );
+
+    // ── PATH 2 — BetterAuth/OAuth session (aperture-qpvdh, folds p9td2) ─
+    // The MIRROR of the A2 read-fallback in session-resolver.ts. Under
+    // `useSecureCookies` (staging/prod) a Google OAuth session lives in the
+    // `__Secure-`-PREFIXED, HMAC-SIGNED cookie that the bare read+clear
+    // above can NOT see. Before this, an OAuth user's signOut was a no-op:
+    // `revogarSessao` was never called (bare token absent → session row
+    // survived) AND only the bare cookie was cleared (the `__Secure-` one
+    // stayed in the browser) → the next `auth.me` re-resolved them via
+    // getSession → still logged in. That was the p9td2 symptom.
+    //
+    // Delegate to BetterAuth's PROGRAMMATIC signOut (a direct function
+    // call, NOT the denied `/api/auth/sign-out` HTTP route): it natively
+    // reads the signed cookie, REVOKES the session server-side
+    // (internalAdapter.deleteSession), and emits the matching Set-Cookie
+    // clear. We forward those Set-Cookie header(s) onto resHeaders so the
+    // browser drops the `__Secure-` cookie too. `asResponse` is used so we
+    // get a real Headers object whose multiple Set-Cookie values survive
+    // (getSetCookie()) rather than being comma-collapsed.
+    //
+    // Fail-open on the LOGOUT direction is intended: a signOut that can't
+    // reach BetterAuth has already cleared the engine cookie and must never
+    // throw. For email+password users there is no signed cookie to find, so
+    // BetterAuth skips the revoke and emits an idempotent clear — harmless.
+    try {
+      const betterAuthResponse = await deps.auth.api.signOut({
+        headers,
+        asResponse: true,
+      });
+      for (const setCookie of betterAuthResponse.headers.getSetCookie()) {
+        resHeaders.append('set-cookie', setCookie);
+      }
+    } catch {
+      // Never let logout error — the engine session/cookie is already gone.
+    }
+
     return { ok: true as const };
   }),
 
@@ -787,18 +814,16 @@ export const authRouter = t.router({
    */
   me: t.procedure.query(async ({ ctx }) => {
     const { deps, headers } = ctx;
-    const token = readSessionCookie(headers, deps.sessionCookieName);
-    if (!token) return null;
-    let sessao;
-    try {
-      sessao = await deps.authService.validarSessao(token);
-    } catch {
-      // Malformed token (fails TokenSessaoSchema.parse) — treat as no session.
-      return null;
-    }
-    if (!sessao) return null;
-    const usuario = await deps.usuarioRepository.findUsuarioById(sessao.idUsuario);
-    if (!usuario) return null;
+
+    // aperture-6wo1f: resolve the session through the shared central resolver —
+    // A2 (bare-cookie path with a BetterAuth `getSession` fallback for the prod
+    // OAuth __Secure-/signed cookie) fused with the OAuth-orphan self-heal. The
+    // `OuNull` variant returns null (rather than throwing) on no-session or a
+    // failed heal — the `me` probe's logged-out signal. All A2 + heal logic +
+    // Cipher's atomicity invariant live in session-resolver.ts.
+    const resolvido = await resolverUsuarioAutenticadoOuNull(deps, headers);
+    if (!resolvido) return null;
+    const { usuario, expiraEm } = resolvido;
 
     // p8i01: resolve the user's default Campanha + the 'presente' opcao
     // inside it. Single DB hit (findFirstByAdministrador joins
@@ -806,12 +831,39 @@ export const authRouter = t.router({
     const campanha = await deps.campanhaRepository.findFirstByAdministrador(usuario.idConta);
     const opcaoPresentes = campanha?.opcoes.find((o) => o.tipo === 'presente');
 
+    // aperture-b6xr8 — server-side onboarding signal for the OAuth-signup
+    // wizard gate (Vance's aperture-8ysqu). DERIVED, not an explicit flag: a
+    // user "needs onboarding" until their creator profile has a baby name —
+    // the core field the OnboardingWizard captures (alongside event date/type
+    // + slug via perfil.atualizar). PROVIDER-AGNOSTIC by construction: it keys
+    // off profile STATE, not how the user authenticated, so it covers email,
+    // Google, Microsoft (y5ual) and any future provider — plus the lazily-
+    // provisioned OAuth orphans whose profile starts empty.
+    //
+    // Why derive over an onboardingConcluidoEm timestamp: the wizard already
+    // persists nomeBebe via perfil.atualizar, so finishing it flips this with
+    // NO new mutation/migration and no backfill/grandfathering of existing
+    // users. Trade-off: if the profile editor ever lets a user CLEAR nomeBebe
+    // the gate would re-fire — acceptable today (the painel editor keeps it
+    // required); upgrade to an explicit timestamp (mirror tutorialCompletadoEm)
+    // if that ever becomes a real path. One extra indexed PK-keyed read.
+    const perfil = await deps.perfilCriadorRepository.findByUsuarioId(usuario.id);
+    const needsOnboarding = (perfil?.conteudo.nomeBebe ?? '').trim().length === 0;
+
     return {
       idUsuario: usuario.id,
       idConta: usuario.idConta,
       idPlataforma: usuario.idPlataforma,
       email: usuario.email,
       nomeExibicao: usuario.nomeExibicao,
+      /**
+       * aperture-4n222 — admin flag for the frontend `/admin` UX gate. The
+       * email is in the `ADMIN_ALLOWED_EMAILS` allowlist (same normalized Set
+       * the server-side `adminProcedure` gate enforces — single source, no
+       * drift). This is a UX SIGNAL ONLY; the real boundary is the backend 403
+       * on every admin route. No extra DB call.
+       */
+      isAdmin: isEmailAdmin(deps.adminAllowedEmails ?? new Set<string>(), usuario.email),
       /**
        * Public URL slug (aperture-khbow). Lets the client redirect to
        * `/painel/<slug>` post-auth in one round-trip — no follow-up call
@@ -843,7 +895,17 @@ export const authRouter = t.router({
        * no-campanha and no-recebedor cases as "render the form".
        */
       hasRecebedor: campanha?.idRecebedor != null,
-      expiraEm: sessao.expiraEm,
+      /**
+       * aperture-b6xr8 — true when this account still needs the onboarding
+       * wizard (creator profile has no baby name yet). The authoritative,
+       * provider-agnostic gate the frontend (aperture-8ysqu) mounts the
+       * OnboardingWizard on — replaces the brittle client-only `criado` flag
+       * so Google/Microsoft OAuth signups (which never re-enter the auth
+       * modal) also get onboarded. Flips to false once the wizard persists a
+       * baby name via perfil.atualizar.
+       */
+      needsOnboarding,
+      expiraEm,
     };
   }),
 });

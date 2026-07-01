@@ -38,6 +38,7 @@ import { ID_PLATAFORMA_EUNENEM } from '../../src/adapters/plataforma/repository.
 import type { IdContribuicaoPagamento } from '../../src/domain/pagamentos/value-objects/ids.js';
 import { NoopLogger } from '../../src/observability/noop-logger.js';
 import { noopTracer } from '../../src/observability/tracer.js';
+import { adminAuthOverrides } from '../helpers/admin-auth.js';
 import { makePagamento as makePagamentoBase } from '../helpers/pagamento-repository.conformance.js';
 
 function makePagamento(args: {
@@ -223,9 +224,10 @@ async function buildRig(): Promise<TestRig> {
     webhookEventArchive: {} as never,
   } as unknown as ServerDeps;
 
+  const adminAuth = adminAuthOverrides();
   const ctx: TrpcContext = {
-    deps,
-    headers: new Headers(),
+    deps: { ...deps, ...adminAuth.depsOverrides },
+    headers: adminAuth.headers,
     resHeaders: new Headers(),
   };
 

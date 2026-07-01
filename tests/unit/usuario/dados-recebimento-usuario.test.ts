@@ -107,6 +107,43 @@ describe('salvarDadosRecebimentoUsuario', () => {
     const found = await repo.findByUsuarioId(idUsuario);
     expect(found?.dados).toEqual(DADOS_CONTA);
   });
+
+  // aperture-3mlcw — CPF immutability (backend defense-in-depth)
+  it('rejects changing an already-saved cpfTitular to a different value', async () => {
+    const repo = new DadosRecebimentoRepositoryMemory();
+    const idUsuario = randomUUID();
+    await salvarDadosRecebimentoUsuario(
+      { dadosRecebimentoRepository: repo, observability: silentObs, clock },
+      { idUsuario, dados: DADOS_CONTA },
+    );
+    // '11144477735' is a DIFFERENT but checksum-valid CPF — it passes schema
+    // validation and reaches the immutability guard, which must reject it.
+    await expect(
+      salvarDadosRecebimentoUsuario(
+        { dadosRecebimentoRepository: repo, observability: silentObs, clock },
+        { idUsuario, dados: { ...DADOS_CONTA, cpfTitular: '11144477735' } },
+      ),
+    ).rejects.toThrow('CPF do titular nao pode ser alterado');
+    // unchanged on disk
+    const found = await repo.findByUsuarioId(idUsuario);
+    expect(found?.dados.metodo === 'conta' && found.dados.cpfTitular).toBe(
+      DADOS_CONTA.metodo === 'conta' ? DADOS_CONTA.cpfTitular : '',
+    );
+  });
+
+  it('allows re-saving the SAME cpfTitular while changing other fields', async () => {
+    const repo = new DadosRecebimentoRepositoryMemory();
+    const idUsuario = randomUUID();
+    await salvarDadosRecebimentoUsuario(
+      { dadosRecebimentoRepository: repo, observability: silentObs, clock },
+      { idUsuario, dados: DADOS_CONTA },
+    );
+    const updated = await salvarDadosRecebimentoUsuario(
+      { dadosRecebimentoRepository: repo, observability: silentObs, clock },
+      { idUsuario, dados: { ...DADOS_CONTA, agencia: '9999' } },
+    );
+    expect(updated.dados.metodo === 'conta' && updated.dados.agencia).toBe('9999');
+  });
 });
 
 describe('obterDadosRecebimentoUsuario', () => {

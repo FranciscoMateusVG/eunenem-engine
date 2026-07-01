@@ -230,6 +230,7 @@ export interface PerfilCriadores {
   foto_capa_key: string | null;
   foto_historia_key: string | null;
   foto_perfil_key: string | null;
+  genero: string | null;
   historia: string | null;
   id: string;
   id_usuario: string;
@@ -272,6 +273,12 @@ export interface RepassesRecebedor {
   id_campanha: string;
   solicitado_em: Timestamp;
   status: string;
+}
+
+export interface ResgatesPendentes {
+  criado_em: Timestamp;
+  id_usuario: string;
+  pendente_desde: Timestamp;
 }
 
 export interface Sessions {
@@ -338,6 +345,7 @@ export interface DB {
   rate_limit: RateLimit;
   recebedores: Recebedores;
   repasses_recebedor: RepassesRecebedor;
+  resgates_pendentes: ResgatesPendentes;
   sessions: Sessions;
   users: Users;
   usuarios: Usuarios;

@@ -59,12 +59,12 @@ app.use('/listas-prontas/*', serveStatic({ root: './public' }));
 // Health check.
 app.get('/healthz', (c) => c.text('ok'));
 
-// Block guard (aperture-ln3de) — install BEFORE the `auth.handler`
-// catch-all so specific blocked paths short-circuit with byte-identical
-// 410 Gone responses. Closes the C1 enumeration oracle on
-// /api/auth/sign-in/email and the H1 saga-bypass surface on
-// /api/auth/sign-up/email + sign-out + forget-password. See
-// server/blocked-auth-handler.ts for the full rationale + path list.
+// Deny-by-default auth guard (aperture-9tca0, supersedes ln3de denylist) —
+// install BEFORE the `auth.handler` catch-all so it wins the route match and
+// runs first. Blocks ALL /api/auth/* with byte-identical 410 Gone EXCEPT the
+// OAuth allowlist (sign-in/social + callback/*). Closes the cross-tenant
+// escalation via /api/auth/update-user + the saga-bypass surface that the
+// bq2c9 adapter-casing fix activated. See server/blocked-auth-handler.ts.
 installBlockedAuthHandlerGuard(app);
 
 // BetterAuth handler mount (aperture-ht7sq) — MUST come before any
@@ -77,10 +77,9 @@ installBlockedAuthHandlerGuard(app);
 // here is safe. The CORS middleware above only reads headers + sets
 // response headers — never reads the body.
 //
-// Endpoints actually intended to flow through here: verify-email +
-// callback/*. The four HTTP authn flows (sign-up/email, sign-in/email,
-// sign-out, forget-password) are intercepted above by the block guard
-// and never reach this catch-all (aperture-ln3de).
+// Only the OAuth allowlist (sign-in/social + callback/*) reaches this
+// catch-all; the deny-by-default guard above (aperture-9tca0) 410s every
+// other /api/auth/* route before it gets here.
 app.on(['POST', 'GET'], '/api/auth/*', (c) => deps.auth.handler(c.req.raw));
 
 // tRPC handler (aperture-kungg + aperture-ht7sq) — routes under

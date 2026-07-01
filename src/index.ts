@@ -12,6 +12,11 @@ export { RecebedorRepositoryPostgres } from './adapters/arrecadacao/recebedor-re
 export type { CatRepository } from './adapters/cat-repository.js';
 export type { Database } from './adapters/database.js';
 export { createDatabase } from './adapters/database.js';
+// aperture-lwx2k — shared email transport (magic-link + future transactional).
+export type { EmailMessage, EmailTransport } from './adapters/email/email-transport.js';
+export type { SmtpConfig } from './adapters/email/email-transport.nodemailer.js';
+export { EmailTransportNodemailer } from './adapters/email/email-transport.nodemailer.js';
+export { EmailTransportNoop } from './adapters/email/email-transport.noop.js';
 export type { ConviteRepository } from './adapters/evento/convite-repository.js';
 export { ConviteRepositoryMemory } from './adapters/evento/convite-repository.memory.js';
 export { ConviteRepositoryPostgres } from './adapters/evento/convite-repository.postgres.js';
@@ -87,6 +92,9 @@ export { PerfilCriadorRepositoryPostgres } from './adapters/usuario/perfil-criad
 export type { UsuarioRepository } from './adapters/usuario/repository.js';
 export { UsuarioRepositoryMemory } from './adapters/usuario/repository.memory.js';
 export { UsuarioRepositoryPostgres } from './adapters/usuario/repository.postgres.js';
+export type { ResgatePendenteRepository } from './adapters/usuario/resgate-pendente-repository.js';
+export { ResgatePendenteRepositoryMemory } from './adapters/usuario/resgate-pendente-repository.memory.js';
+export { ResgatePendenteRepositoryPostgres } from './adapters/usuario/resgate-pendente-repository.postgres.js';
 export type {
   StripeDispatchResult,
   StripePipelineArgs,
@@ -547,6 +555,8 @@ export {
 } from './domain/usuario/value-objects/conteudo-perfil-criador.js';
 export type { EmailUsuario } from './domain/usuario/value-objects/email-usuario.js';
 export { EmailUsuarioSchema } from './domain/usuario/value-objects/email-usuario.js';
+export type { GeneroBebe } from './domain/usuario/value-objects/genero-bebe.js';
+export { GeneroBebeSchema } from './domain/usuario/value-objects/genero-bebe.js';
 export type {
   IdContaUsuario,
   IdPerfilCriador,
@@ -1083,6 +1093,15 @@ export {
   EmitirUrlUploadImagemItemInputSchema,
   emitirUrlUploadImagemItem,
 } from './use-cases/usuario/emitir-url-upload-imagem-item.js';
+export type {
+  MarcarResgatePendenteDeps,
+  MarcarResgatePendenteInput,
+  MarcarResgatePendenteResult,
+} from './use-cases/usuario/marcar-resgate-pendente.js';
+export {
+  MarcarResgatePendenteInputSchema,
+  marcarResgatePendente,
+} from './use-cases/usuario/marcar-resgate-pendente.js';
 export type { MarcarTutorialUsuarioComoCompletadoDeps } from './use-cases/usuario/marcar-tutorial-usuario-como-completado.js';
 export { marcarTutorialUsuarioComoCompletado } from './use-cases/usuario/marcar-tutorial-usuario-como-completado.js';
 export type { ObterDadosRecebimentoUsuarioDeps } from './use-cases/usuario/obter-dados-recebimento-usuario.js';
@@ -1103,14 +1122,20 @@ export {
   obterPerfilPublicoBySlug,
   PerfilPublicoDTOSchema,
 } from './use-cases/usuario/obter-perfil-publico-by-slug.js';
+export type { ObterResgatePendenteDeps } from './use-cases/usuario/obter-resgate-pendente.js';
+export { obterResgatePendente } from './use-cases/usuario/obter-resgate-pendente.js';
 export type { ObterStatusTutorialUsuarioDeps } from './use-cases/usuario/obter-status-tutorial-usuario.js';
 export { obterStatusTutorialUsuario } from './use-cases/usuario/obter-status-tutorial-usuario.js';
 export type {
+  ProvisionarContaUsuarioDominioDeps,
+  ProvisionarContaUsuarioDominioInput,
   RegistrarContaUsuarioDeps,
   RegistrarContaUsuarioInput,
   RegistrarContaUsuarioResult,
 } from './use-cases/usuario/registrar-conta-usuario.js';
 export {
+  ProvisionarContaUsuarioDominioInputSchema,
+  provisionarContaUsuarioDominio,
   RegistrarContaUsuarioInputSchema,
   registrarContaUsuario,
 } from './use-cases/usuario/registrar-conta-usuario.js';

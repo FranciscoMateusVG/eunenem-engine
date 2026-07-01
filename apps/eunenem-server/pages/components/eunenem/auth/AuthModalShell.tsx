@@ -1,144 +1,89 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 
-import {
-  authErrorMessage,
-  isValidEmail,
-  MIN_PASSWORD_LENGTH,
-  useContinuarComEmail,
-  type AuthError,
-  type AuthSession,
-} from "@/lib/auth";
+import { isValidEmail, type AuthSession } from "@/lib/auth";
+import { authClient } from "@/lib/authClient";
 
-// aperture-ubpnl + aperture-d0x1w — AuthModalShell.
+// aperture-3mq5q — AuthModalShell (single smart entry).
 //
-// aperture-d0x1w: swapped the mock contract at `lib/mocks/auth.ts` for the
-// real tRPC procedures (Rex's PR #61). Same UX, same per-field error
-// routing — just real network calls + real Postgres now.
+// Camada E collapse: the old two-step (email → password) + two-mode
+// (signin/signup) modal is gone. There is now ONE smart passwordless flow —
+// the operator's "one smart Entrar". The server figures out existing-vs-new
+// when the magic link is clicked, so the client never branches on mode and
+// never asks for a password.
 //
-// One component, two modes: "signup" and "signin". The shell is ~90% shared
-// between the two reference PNGs (tape, close X, OAuth row, "ou" divider,
-// email input, lavender CONTINUAR, fineprint). Mode swaps just retitle the
-// header + footer cross-link.
+// Flow (status machine, NOT step/mode):
+//   "idle"    → OAuth row + "ou" divider + email input + "enviar link mágico"
+//   "sending" → CTA spinner while authClient.signIn.magicLink resolves
+//   "sent"    → uniform confirmation (enumeration-safe: NEVER reveals whether
+//               the account already existed) + optional "enviar de novo"
+//   "error"   → error banner, form still editable so the user can retry
 //
-// Email-first 2-step flow:
-//   step 1 = OAuth row + email + CONTINUAR (the reference PNGs)
-//   step 2 = (name for signup) + password + CONTINUAR — Vance designed
+// OAuth providers: Google + Microsoft, wired to the real BetterAuth social
+// flow (onOauth → authClient.signIn.social). ZERO Apple.
 //
-// OAuth providers (Google / Apple / Microsoft) are STUBS for v1 — clicking
-// fires a sonner toast "em breve ♡". The real provider integration lives
-// downstream of Rex's BetterAuth chain (currently aperture-ibbet/-ht7sq).
+// Mode/onModeChange props are retained ONLY so the existing AuthModalProvider
+// keeps compiling (it still passes them); they are deliberately ignored —
+// there are no modes anymore.
 //
-// State machine:
-//   open + mode "signup" + step 1 → render signup email step
-//   open + mode "signup" + step 2 → render signup password+name step
-//   open + mode "signin" + step 1 → render signin email step
-//   open + mode "signin" + step 2 → render signin password step
-//
-// Mode swap via footer cross-link is in-place — no remount. Internal step
-// resets to 1 + clears password/name (keeps email so the user doesn't
-// retype). Animations are short, opt-out via prefers-reduced-motion.
-//
-// Accessibility (acceptance criteria):
-//   - role="dialog" + aria-modal + aria-labelledby
-//   - ESC closes
-//   - Backdrop click closes
+// Accessibility:
+//   - role="dialog" + aria-modal + aria-labelledby/-describedby
+//   - ESC closes (unless mid-send), backdrop click closes (unless mid-send)
 //   - Focus trap: Tab cycles within modal; Shift+Tab wraps backward
-//   - First focusable element receives focus on open (email input on step 1,
-//     back-arrow on step 2 so screen readers announce the step change)
-//   - Focus returns to the trigger element on close (consumer's hook owns
-//     the trigger ref; AuthModalShell calls `onClose` and the hook restores)
+//   - First focusable element (email input) receives focus on open
+//   - Focus returns to the trigger element on close (provider owns the ref)
 //   - Body scroll locked while open
 
 export type AuthMode = "signup" | "signin";
-type Step = 1 | 2;
+type Status = "idle" | "sending" | "sent" | "error";
 
 export interface AuthModalShellProps {
-  mode: AuthMode;
+  /**
+   * Retained for API compatibility with AuthModalProvider — the single smart
+   * flow has no modes, so this is ignored.
+   */
+  mode?: AuthMode;
   /** Called when the user dismisses (X, ESC, or backdrop click). */
   onClose: () => void;
-  /** Called when the user toggles signin↔signup via the footer cross-link. */
-  onModeChange: (next: AuthMode) => void;
-  /** Called when the auth contract returns a successful session. */
+  /**
+   * Retained for API compatibility with AuthModalProvider — there is no
+   * mode swap anymore, so this is never called.
+   */
+  onModeChange?: (next: AuthMode) => void;
+  /**
+   * Retained for API compatibility. The magic-link flow authenticates via a
+   * full-page redirect after the user clicks the emailed link, so the modal
+   * never resolves a session inline and never calls this.
+   */
   onAuthenticated?: (session: AuthSession) => void;
 }
 
-const COPY: Record<AuthMode, {
-  eyebrow: string;
-  title: string;
-  subtitle: string;
-  footerPrompt: string;
-  footerCta: string;
-  footerCtaTarget: AuthMode;
-}> = {
-  signup: {
-    eyebrow: "vamos começar 🌸",
-    title: "Crie sua lista grátis",
-    subtitle: "Em menos de 5 minutos. Sem cartão, sem mensalidade.",
-    footerPrompt: "Já tem conta?",
-    footerCta: "Entrar",
-    footerCtaTarget: "signin",
-  },
-  signin: {
-    eyebrow: "bom te ver de novo ♡",
-    title: "Entrar na sua conta",
-    subtitle: "Acesse sua lista, mensagens e saldo.",
-    footerPrompt: "Ainda não tem conta?",
-    footerCta: "Criar grátis",
-    footerCtaTarget: "signup",
-  },
-};
-
 const OAUTH_PROVIDERS = [
   { id: "google", label: "Google", icon: GoogleIcon },
-  { id: "apple", label: "Apple", icon: AppleIcon },
   { id: "microsoft", label: "Microsoft", icon: MicrosoftIcon },
 ] as const;
 
-export function AuthModalShell({
-  mode,
-  onClose,
-  onModeChange,
-  onAuthenticated,
-}: AuthModalShellProps) {
+export function AuthModalShell({ onClose }: AuthModalShellProps) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const titleId = useId();
   const subtitleId = useId();
+  const emailId = useId();
 
-  // Step machine. Mode swap resets step to 1 (handled in the cross-link
-  // callback below — not in a useEffect, to avoid re-resetting on
-  // unrelated rerenders).
-  const [step, setStep] = useState<Step>(1);
-
-  // Form state. Email survives mode swap; password resets on swap.
-  // aperture-d7993 — the name field is gone: the unified email-first flow
-  // derives nomeExibicao from the email and the onboarding wizard collects the
-  // real display/baby name, so signup no longer asks for a name here.
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-
-  // Per-field errors + global submit state.
   const [emailError, setEmailError] = useState<string | null>(null);
-  const [passwordError, setPasswordError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [status, setStatus] = useState<Status>("idle");
 
-  // aperture-d7993 — one unified submit (Option B). The server decides
-  // login-vs-create; we never pre-check email existence (no enumeration
-  // oracle). Hook at top-level so rules-of-hooks holds across step changes.
-  const { continuarComEmail } = useContinuarComEmail();
-
-  const copy = COPY[mode];
+  const isSending = status === "sending";
 
   // ── Lifecycle: ESC, body scroll lock ──────────────────────────────────────
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !isSubmitting) onClose();
+      if (e.key === "Escape" && !isSending) onClose();
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [onClose, isSubmitting]);
+  }, [onClose, isSending]);
 
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -148,19 +93,16 @@ export function AuthModalShell({
     };
   }, []);
 
-  // ── Focus trap + initial focus on step change ────────────────────────────
+  // ── Initial / status-change focus ─────────────────────────────────────────
   useEffect(() => {
     const root = dialogRef.current;
     if (!root) return;
     const focusables = getFocusables(root);
-    // On step 1: focus the email input. On step 2: focus the back arrow so
-    // SRs announce the step change cleanly. Falls back to the close button.
-    const initial = root.querySelector<HTMLElement>(
-      step === 1 ? "[data-autofocus='email']" : "[data-autofocus='back']",
-    );
+    const initial = root.querySelector<HTMLElement>("[data-autofocus]");
     (initial ?? focusables[0])?.focus();
-  }, [step, mode]);
+  }, [status]);
 
+  // ── Focus trap ────────────────────────────────────────────────────────────
   useEffect(() => {
     const root = dialogRef.current;
     if (!root) return;
@@ -184,89 +126,67 @@ export function AuthModalShell({
   }, []);
 
   // ── Handlers ──────────────────────────────────────────────────────────────
-  const swapMode = useCallback(() => {
-    setStep(1);
-    setPassword("");
-    setEmailError(null);
-    setPasswordError(null);
-    setSubmitError(null);
-    setShowPassword(false);
-    onModeChange(copy.footerCtaTarget);
-  }, [copy.footerCtaTarget, onModeChange]);
-
-  const onOauth = (label: string) => {
-    toast("em breve ♡", {
-      description: `login com ${label} chega numa próxima entrega`,
-    });
+  // aperture-8655f (Google) + aperture-y5ual (Microsoft/Entra) — wired to the
+  // real BetterAuth social flow. `signIn.social` redirects to the provider,
+  // then BetterAuth's callback at /api/auth/callback/<provider> returns the
+  // browser to `callbackURL`.
+  //
+  // aperture-ydj4a — callbackURL is "/?oauth=1" (NOT bare "/"). The OAuth return
+  // is a full page load, so the ?oauth=1 marker lets useOauthReturnRedirect
+  // (mounted on the landing) resolve auth.me and forward to /painel/<slug>.
+  const onOauth = async (id: string, label: string) => {
+    if (id !== "google" && id !== "microsoft") {
+      toast("em breve ♡", {
+        description: `login com ${label} chega numa próxima entrega`,
+      });
+      return;
+    }
+    try {
+      await authClient.signIn.social({
+        provider: id as "google" | "microsoft",
+        callbackURL: "/?oauth=1",
+      });
+      // On success the browser is navigating away — nothing else to do.
+    } catch {
+      toast(`não consegui abrir o ${label} agora ♡`, {
+        description: "tenta de novo em instantes",
+      });
+    }
   };
 
-  const onStep1Submit = (e: React.FormEvent) => {
+  // aperture-3mq5q — single passwordless submit. We never pre-check whether the
+  // email exists (no enumeration oracle): BetterAuth sends a magic link either
+  // way and the "sent" confirmation is uniform. The server decides
+  // login-vs-create when the link is clicked.
+  const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setEmailError(null);
     setSubmitError(null);
     if (!email.trim()) {
-      setEmailError("preenche aqui pra eu te encontrar ♡");
+      setEmailError("preenche aqui pra eu te enviar o link ♡");
       return;
     }
     if (!isValidEmail(email)) {
       setEmailError("esse e-mail tá meio torto — confere pra mim?");
       return;
     }
-    setStep(2);
-  };
 
-  const onBack = () => {
-    if (isSubmitting) return;
-    setStep(1);
-    setPasswordError(null);
-    setSubmitError(null);
-  };
-
-  const onStep2Submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setPasswordError(null);
-    setSubmitError(null);
-    if (!password) {
-      setPasswordError("escolhe uma senha pra fechar a porta ♡");
-      return;
-    }
-    if (password.length < MIN_PASSWORD_LENGTH) {
-      setPasswordError(
-        `a senha precisa ter pelo menos ${MIN_PASSWORD_LENGTH} caracteres ♡`,
-      );
-      return;
-    }
-
-    setIsSubmitting(true);
+    setStatus("sending");
     try {
-      // aperture-d7993 — one unified call. The server decides login-vs-create
-      // and reports it via `session.criado`; the consumer (AuthModalProvider)
-      // routes a brand-new account to onboarding and an existing login to the
-      // painel. We surface an honest toast now that we know the outcome.
-      const session = await continuarComEmail({ email, password });
-      toast.success(session.criado ? "conta criada ♡" : "bem-vinda de volta ♡", {
-        description: session.user.email,
+      await authClient.signIn.magicLink({
+        email,
+        callbackURL: `${window.location.origin}/?oauth=1`,
       });
-      onAuthenticated?.(session);
-      onClose();
-    } catch (err) {
-      const e = err as AuthError;
-      // Per-field routing — credentials + email-taken should land on the
-      // password / email field respectively so the user knows where to fix.
-      if (e.kind === "credentials") {
-        setPasswordError(authErrorMessage(e));
-      } else if (e.kind === "email-taken") {
-        setSubmitError(authErrorMessage(e));
-      } else if (e.kind === "short-password") {
-        setPasswordError(authErrorMessage(e));
-      } else if (e.kind === "invalid-email") {
-        setSubmitError(authErrorMessage(e));
-      } else {
-        setSubmitError(authErrorMessage(e ?? { kind: "network" }));
-      }
-    } finally {
-      setIsSubmitting(false);
+      setStatus("sent");
+    } catch {
+      setStatus("error");
+      setSubmitError("não consegui enviar agora — tenta de novo em instantes ♡");
     }
+  };
+
+  const onResend = () => {
+    setStatus("idle");
+    setSubmitError(null);
   };
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -274,7 +194,7 @@ export function AuthModalShell({
     <div
       className="auth-backdrop"
       onClick={(e) => {
-        if (e.target === e.currentTarget && !isSubmitting) onClose();
+        if (e.target === e.currentTarget && !isSending) onClose();
       }}
     >
       <style>{AUTH_CSS}</style>
@@ -291,270 +211,143 @@ export function AuthModalShell({
 
         <button
           type="button"
-          onClick={() => !isSubmitting && onClose()}
-          disabled={isSubmitting}
+          onClick={() => !isSending && onClose()}
+          disabled={isSending}
           aria-label="Fechar"
           className="auth-close"
         >
           ×
         </button>
 
-        {/* header — shared between steps + modes */}
-        <header className="auth-head">
-          {step === 2 && (
+        {status === "sent" ? (
+          // ── Confirmation — uniform + enumeration-safe ──────────────────────
+          // CRITICAL: this copy must NOT reveal whether the account already
+          // existed. It covers both cases in one breath on purpose.
+          <>
+            <header className="auth-head">
+              <p className="auth-eyebrow">quase lá ♡</p>
+              <h2 id={titleId} className="auth-title">
+                confere seu email ♡
+              </h2>
+              <p id={subtitleId} className="auth-subtitle">
+                se você já tem conta, enviamos um link de acesso pra{" "}
+                <strong>{email}</strong>. se ainda não tem, o link cria sua
+                conta. é só clicar ♡
+              </p>
+            </header>
             <button
               type="button"
-              onClick={onBack}
-              disabled={isSubmitting}
-              aria-label="Voltar para o passo anterior"
-              data-autofocus="back"
-              className="auth-back"
+              onClick={onResend}
+              data-autofocus
+              className="auth-cta"
             >
-              ← voltar
+              não recebeu? enviar de novo
             </button>
-          )}
-          <p className="auth-eyebrow">{copy.eyebrow}</p>
-          <h2 id={titleId} className="auth-title">
-            {copy.title}
-          </h2>
-          <p id={subtitleId} className="auth-subtitle">
-            {step === 1 ? copy.subtitle : `é só a senha pra ${email} ♡`}
-          </p>
-        </header>
-
-        {/* body — branches on step */}
-        {step === 1 ? (
-          <StepOne
-            email={email}
-            setEmail={setEmail}
-            emailError={emailError}
-            onSubmit={onStep1Submit}
-            onOauth={onOauth}
-          />
+          </>
         ) : (
-          <StepTwo
-            email={email}
-            password={password}
-            setPassword={setPassword}
-            passwordError={passwordError}
-            showPassword={showPassword}
-            setShowPassword={setShowPassword}
-            isSubmitting={isSubmitting}
-            onSubmit={onStep2Submit}
-          />
-        )}
+          // ── Idle / error — the single smart entry form ─────────────────────
+          <>
+            <header className="auth-head">
+              <p className="auth-eyebrow">entra que é rapidinho ♡</p>
+              <h2 id={titleId} className="auth-title">
+                entrar ou criar sua lista
+              </h2>
+              <p id={subtitleId} className="auth-subtitle">
+                sem senha — a gente te manda um link mágico ♡
+              </p>
+            </header>
 
-        {/* submit-level error (network, email-taken etc.) */}
-        {submitError && (
-          <p role="alert" className="auth-error-banner">
-            {submitError}
-          </p>
-        )}
+            <form onSubmit={onSubmit} className="auth-form" noValidate>
+              <div className="auth-oauth-row">
+                {OAUTH_PROVIDERS.map(({ id, label, icon: Icon }) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => onOauth(id, label)}
+                    aria-label={`Continuar com ${label}`}
+                    className="auth-oauth"
+                  >
+                    <Icon />
+                    <span>Continuar com <strong>{label}</strong></span>
+                  </button>
+                ))}
+              </div>
 
-        {/* footer cross-link */}
-        <p className="auth-footer">
-          {copy.footerPrompt}{" "}
-          <button
-            type="button"
-            onClick={swapMode}
-            disabled={isSubmitting}
-            className="auth-swap"
-          >
-            {copy.footerCta}
-          </button>
-        </p>
+              <div className="auth-divider" aria-hidden="true">
+                <span className="auth-divider-line" />
+                <span className="auth-divider-label">ou</span>
+                <span className="auth-divider-line" />
+              </div>
 
-        {/* fineprint — signup-only, step-1-only (matches PNG) */}
-        {mode === "signup" && step === 1 && (
-          <p className="auth-fineprint">
-            Ao criar a conta você concorda com os{" "}
-            <a href="/termos-de-uso" className="text-lilac-deep underline">
-              Termos de uso
-            </a>{" "}
-            e a{" "}
-            <a href="/privacidade" target="_blank" rel="noopener noreferrer">
-              Política de privacidade
-            </a>
-            .
-          </p>
+              <label htmlFor={emailId} className="auth-label">
+                Seu e-mail
+              </label>
+              <div className={`auth-input-wrap ${emailError ? "has-error" : ""}`}>
+                <EnvelopeIcon />
+                <input
+                  id={emailId}
+                  type="email"
+                  inputMode="email"
+                  autoComplete="email"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="Digite o endereço de e-mail"
+                  aria-required="true"
+                  aria-invalid={emailError ? true : false}
+                  aria-describedby={emailError ? `${emailId}-err` : undefined}
+                  disabled={isSending}
+                  data-autofocus
+                  className="auth-input"
+                />
+              </div>
+              {emailError && (
+                <p id={`${emailId}-err`} role="alert" className="auth-field-error">
+                  {emailError}
+                </p>
+              )}
+
+              <button
+                type="submit"
+                className="auth-cta"
+                disabled={isSending}
+                aria-busy={isSending}
+              >
+                {isSending ? (
+                  <>
+                    <Spinner />
+                    ENVIANDO…
+                  </>
+                ) : (
+                  <>enviar link mágico ♡</>
+                )}
+              </button>
+            </form>
+
+            {/* submit-level error (network etc.) */}
+            {submitError && (
+              <p role="alert" className="auth-error-banner">
+                {submitError}
+              </p>
+            )}
+
+            {/* fineprint — always shown: a single entry can create accounts */}
+            <p className="auth-fineprint">
+              Ao continuar você concorda com os{" "}
+              <a href="/termos-de-uso" target="_blank" rel="noopener noreferrer">
+                Termos de uso
+              </a>{" "}
+              e a{" "}
+              <a href="/privacidade" target="_blank" rel="noopener noreferrer">
+                Política de privacidade
+              </a>
+              .
+            </p>
+          </>
         )}
       </div>
     </div>
-  );
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-// Step 1 — email + OAuth row (matches the reference PNGs verbatim)
-// ════════════════════════════════════════════════════════════════════════════
-function StepOne({
-  email,
-  setEmail,
-  emailError,
-  onSubmit,
-  onOauth,
-}: {
-  email: string;
-  setEmail: (v: string) => void;
-  emailError: string | null;
-  onSubmit: (e: React.FormEvent) => void;
-  onOauth: (label: string) => void;
-}) {
-  const emailId = useId();
-  return (
-    <form onSubmit={onSubmit} className="auth-form" noValidate>
-      <div className="auth-oauth-row">
-        {OAUTH_PROVIDERS.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => onOauth(label)}
-            aria-label={`Continuar com ${label}`}
-            className="auth-oauth"
-          >
-            <Icon />
-            <span>Continuar com <strong>{label}</strong></span>
-          </button>
-        ))}
-      </div>
-
-      <div className="auth-divider" aria-hidden="true">
-        <span className="auth-divider-line" />
-        <span className="auth-divider-label">ou</span>
-        <span className="auth-divider-line" />
-      </div>
-
-      <label htmlFor={emailId} className="auth-label">
-        Seu e-mail
-      </label>
-      <div className={`auth-input-wrap ${emailError ? "has-error" : ""}`}>
-        <EnvelopeIcon />
-        <input
-          id={emailId}
-          type="email"
-          inputMode="email"
-          autoComplete="email"
-          autoCapitalize="off"
-          spellCheck={false}
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="Digite o endereço de e-mail"
-          aria-required="true"
-          aria-invalid={emailError ? true : false}
-          aria-describedby={emailError ? `${emailId}-err` : undefined}
-          data-autofocus="email"
-          className="auth-input"
-        />
-      </div>
-      {emailError && (
-        <p id={`${emailId}-err`} role="alert" className="auth-field-error">
-          {emailError}
-        </p>
-      )}
-
-      <button type="submit" className="auth-cta">
-        CONTINUAR <span aria-hidden="true">→</span>
-      </button>
-    </form>
-  );
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-// Step 2 — name (signup only) + password — Vance-designed, mirrors step 1's
-// visual identity: same card chrome, same label style, same lavender CTA.
-// Password has a show/hide toggle. Submit button shows spinner while pending.
-// ════════════════════════════════════════════════════════════════════════════
-// aperture-d7993 — unified password step (Option B). No name field (the email
-// derives nomeExibicao; the onboarding wizard collects the real name) and no
-// mode branching: the copy is deliberately AMBIGUOUS ("sua senha — ou crie
-// uma") because the server, not the client, decides login-vs-create at submit.
-function StepTwo({
-  email,
-  password,
-  setPassword,
-  passwordError,
-  showPassword,
-  setShowPassword,
-  isSubmitting,
-  onSubmit,
-}: {
-  email: string;
-  password: string;
-  setPassword: (v: string) => void;
-  passwordError: string | null;
-  showPassword: boolean;
-  setShowPassword: (v: boolean) => void;
-  isSubmitting: boolean;
-  onSubmit: (e: React.FormEvent) => void;
-}) {
-  const passwordId = useId();
-  return (
-    <form onSubmit={onSubmit} className="auth-form" noValidate>
-      {/* Hidden username field so password managers associate the credential
-          with the email captured in step 1. */}
-      <input
-        type="email"
-        value={email}
-        autoComplete="username"
-        readOnly
-        aria-hidden="true"
-        tabIndex={-1}
-        style={{ display: "none" }}
-      />
-
-      <label htmlFor={passwordId} className="auth-label">
-        Sua senha — ou crie uma
-      </label>
-      <div className={`auth-input-wrap ${passwordError ? "has-error" : ""}`}>
-        <LockIcon />
-        <input
-          id={passwordId}
-          type={showPassword ? "text" : "password"}
-          autoComplete="current-password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder={`Mínimo ${MIN_PASSWORD_LENGTH} caracteres`}
-          aria-required="true"
-          aria-invalid={passwordError ? true : false}
-          aria-describedby={passwordError ? `${passwordId}-err` : undefined}
-          disabled={isSubmitting}
-          className="auth-input"
-        />
-        <button
-          type="button"
-          onClick={() => setShowPassword(!showPassword)}
-          aria-label={showPassword ? "Esconder senha" : "Mostrar senha"}
-          aria-pressed={showPassword}
-          className="auth-pw-toggle"
-          disabled={isSubmitting}
-          tabIndex={0}
-        >
-          {showPassword ? <EyeOffIcon /> : <EyeIcon />}
-        </button>
-      </div>
-      {passwordError && (
-        <p id={`${passwordId}-err`} role="alert" className="auth-field-error">
-          {passwordError}
-        </p>
-      )}
-
-      <button
-        type="submit"
-        className="auth-cta"
-        disabled={isSubmitting}
-        aria-busy={isSubmitting}
-      >
-        {isSubmitting ? (
-          <>
-            <Spinner />
-            CONTINUANDO…
-          </>
-        ) : (
-          <>
-            CONTINUAR <span aria-hidden="true">→</span>
-          </>
-        )}
-      </button>
-    </form>
   );
 }
 
@@ -578,7 +371,7 @@ function getFocusables(root: HTMLElement): HTMLElement[] {
 
 // ════════════════════════════════════════════════════════════════════════════
 // Inline SVG icons — vendored so the modal has zero asset dependencies.
-// Google/Apple/Microsoft logos match the reference PNGs.
+// Google + Microsoft logos match the reference PNGs. (Apple dropped — Camada E.)
 // ════════════════════════════════════════════════════════════════════════════
 
 function GoogleIcon() {
@@ -588,14 +381,6 @@ function GoogleIcon() {
       <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 16.2 19 13 24 13c3.1 0 5.8 1.2 8 3l5.7-5.7C33.8 6.2 29.1 4 24 4c-7.5 0-14 4.1-17.7 10.7z"/>
       <path fill="#4CAF50" d="M24 44c5 0 9.6-1.9 13-5.1l-6-5.1c-2 1.5-4.4 2.4-7 2.4-5.3 0-9.7-3.4-11.3-8l-6.6 5.1C9.9 39.8 16.4 44 24 44z"/>
       <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.2 4.2-4 5.6l6 5.1c-.4.4 6.7-4.9 6.7-14.7 0-1.3-.1-2.4-.4-3.5z"/>
-    </svg>
-  );
-}
-
-function AppleIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="#000" aria-hidden="true">
-      <path d="M16.4 12.7c0-2.5 2-3.7 2.1-3.8-1.2-1.7-3-1.9-3.6-2-1.5-.2-3 .9-3.8.9-.8 0-2-.9-3.3-.8-1.7 0-3.3 1-4.2 2.5C2 12.4 3.2 17 5 19.5c.9 1.2 1.9 2.6 3.3 2.6 1.3 0 1.8-.8 3.4-.8 1.6 0 2 .8 3.4.8 1.4 0 2.3-1.3 3.2-2.5 1-1.4 1.4-2.8 1.4-2.9-.1 0-2.7-1-2.7-4zM14 6.5c.7-.9 1.2-2.1 1-3.3-1 .1-2.2.7-3 1.6-.6.8-1.2 2-1 3.2 1.1.1 2.3-.6 3-1.5z"/>
     </svg>
   );
 }
@@ -616,33 +401,6 @@ function EnvelopeIcon() {
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
       <polyline points="22,6 12,13 2,6"/>
-    </svg>
-  );
-}
-
-function LockIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-      <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-    </svg>
-  );
-}
-
-function EyeIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-      <circle cx="12" cy="12" r="3"/>
-    </svg>
-  );
-}
-
-function EyeOffIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
-      <line x1="1" y1="1" x2="23" y2="23"/>
     </svg>
   );
 }

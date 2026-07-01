@@ -20,6 +20,9 @@ import {
   EventoRepositoryPostgres,
   type LivroFinanceiroRepository,
   LivroFinanceiroRepositoryPostgres,
+  type EmailTransport,
+  EmailTransportNodemailer,
+  EmailTransportNoop,
   type EmitirUrlUploadInput,
   type EmitirUrlUploadItemInput,
   type ObjectStorage,
@@ -39,6 +42,8 @@ import {
   DadosRecebimentoRepositoryPostgres,
   type PerfilCriadorRepository,
   PerfilCriadorRepositoryPostgres,
+  type ResgatePendenteRepository,
+  ResgatePendenteRepositoryPostgres,
   PlataformaRepositoryMemory,
   type PlataformaRepository,
   type ProvedorRegraTaxa,
@@ -49,6 +54,8 @@ import {
   UsuarioRepositoryPostgres,
   type UsuarioRepository,
 } from '../../../../src/index.js';
+import { renderMagicLinkEmail } from './magic-link-email.js';
+import { parseAdminAllowedEmails } from './admin-allowlist.js';
 import { noopTracer } from '../../../../src/observability/tracer.js';
 import { getStripe } from '../../src/lib/stripe/stripe.js';
 
@@ -80,6 +87,13 @@ export interface ServerDeps {
    * the same Kysely instance as the other domain repos.
    */
   readonly dadosRecebimentoRepository: DadosRecebimentoRepository;
+  /**
+   * Resgate-pendente marker store (aperture-kj9el #4b). Backs the
+   * `dadosRecebimento.marcarResgatePendente` mutation + the pending field on
+   * `dadosRecebimento.get`. Postgres-backed (migration 030), sharing the same
+   * Kysely instance as the other domain repos.
+   */
+  readonly resgatePendenteRepository: ResgatePendenteRepository;
   readonly plataformaRepository: PlataformaRepository;
   /**
    * Arrecadação adapters (aperture-d6atj). Needed by `contribuicao.*` tRPC
@@ -120,6 +134,14 @@ export interface ServerDeps {
    */
   readonly provedorRegraTaxa: ProvedorRegraTaxa;
   readonly observability: Observability;
+  /**
+   * Normalized allowlist of operator emails permitted into the `/admin` surface
+   * (aperture-4n222). Parsed once at boot from `ADMIN_ALLOWED_EMAILS`. Read by
+   * the server-side `adminProcedure` gate (the security boundary) AND `auth.me`'s
+   * `isAdmin` flag — single source so enforcement + UI signal never drift.
+   * Empty = nobody is admin = fail-closed.
+   */
+  readonly adminAllowedEmails: ReadonlySet<string>;
   readonly clock: () => Date;
   /** Cookie name shared by the engine's BetterAuth sessions table + our tRPC procedures. */
   readonly sessionCookieName: string;
@@ -216,6 +238,16 @@ const ServerEnvSchema = z
      */
     TRUSTED_ORIGINS: z.string().min(1, 'TRUSTED_ORIGINS required (comma-separated)'),
     /**
+     * Comma-separated allowlist of operator emails permitted into the `/admin`
+     * surface (aperture-4n222). Parsed into a normalized Set on ServerDeps and
+     * read by BOTH the server-side `adminProcedure` gate and the `auth.me`
+     * `isAdmin` flag. OPTIONAL with a default of '' — unset/empty = nobody is
+     * admin = fail-closed (the admin area locks down rather than opening up).
+     * Seeded in prod (Dokploy env) with franciscomateusvg@gmail.com; extending
+     * the admin set is an env edit, no code migration/deploy.
+     */
+    ADMIN_ALLOWED_EMAILS: z.string().default(''),
+    /**
      * Postgres connection string for the engine's domain + BetterAuth tables.
      * Both schemas live in the same DB. Migrations are owned by the engine
      * repo (`pnpm db:migrate` from the engine root) — eunenem-server is a
@@ -269,6 +301,48 @@ const ServerEnvSchema = z
     MINIO_ACCESS_KEY: z.string().default(''),
     MINIO_SECRET_KEY: z.string().default(''),
     MINIO_BUCKET: z.string().default('eunenem-perfil-fotos'),
+    /**
+     * Google OAuth credentials (aperture-8655f). Both OPTIONAL so the server
+     * still boots in environments without them — when EITHER is absent the
+     * google social provider is NOT registered (email+password still works).
+     * Set in the deploy env (Dokploy) by the infra owner; the SECRET is never
+     * committed. The OAuth callback lands at the BetterAuth-standard
+     * `<BETTER_AUTH_URL>/api/auth/callback/google` path (auth.handler is
+     * mounted at /api/auth/* in server.tsx).
+     */
+    GOOGLE_CLIENT_ID: z.string().optional(),
+    GOOGLE_CLIENT_SECRET: z.string().optional(),
+    /**
+     * aperture-y5ual — Microsoft (Entra) OAuth, mirrors GOOGLE_*. Same
+     * conditional-registration posture: when CLIENT_ID/SECRET are absent the
+     * microsoft provider is NOT registered (email+password still works). The
+     * SECRET is set in the deploy env (Dokploy), never committed. Callback
+     * lands at `<BETTER_AUTH_URL>/api/auth/callback/microsoft`.
+     * TENANT_ID defaults to 'common' (multi-tenant work/school + personal
+     * accounts); the operator can pin a single tenant later via env without a
+     * code change — the provider itself also falls back to 'common'.
+     */
+    MICROSOFT_CLIENT_ID: z.string().optional(),
+    MICROSOFT_CLIENT_SECRET: z.string().optional(),
+    MICROSOFT_TENANT_ID: z.string().optional().default('common'),
+    /**
+     * aperture-lwx2k (Camada C) — SMTP transport for magic-link + future
+     * transactional email. Same conditional-registration posture as the OAuth
+     * providers: when HOST/USER/PASS are absent the transport is a boot-safe
+     * no-op and the magicLink plugin is NOT registered (passwordless off). Set
+     * in the deploy env (Dokploy); the PASS is never committed. SECURE=false +
+     * PORT 587 → STARTTLS; SECURE=true + PORT 465 → implicit TLS.
+     */
+    SMTP_HOST: z.string().optional(),
+    SMTP_PORT: z.coerce.number().int().positive().optional().default(587),
+    SMTP_USER: z.string().optional(),
+    SMTP_PASS: z.string().optional(),
+    SMTP_FROM: z.string().optional().default('EuNenem <oi@eunenem.com>'),
+    SMTP_SECURE: z
+      .enum(['true', 'false'])
+      .optional()
+      .default('false')
+      .transform((v) => v === 'true'),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === 'production') {
@@ -358,6 +432,67 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
 
   const db = createDatabase(env.DATABASE_URL);
 
+  // Google OAuth (aperture-8655f) — CONDITIONAL on BOTH env vars being
+  // present. When either is missing, `socialProviders` stays undefined and
+  // criarAuth omits the key entirely → email+password-only BetterAuth that
+  // boots cleanly in envs without Google credentials (the critical safety
+  // property). The real CLIENT_SECRET is set in the deploy env (Dokploy),
+  // never committed.
+  const googleConfigured =
+    !!env.GOOGLE_CLIENT_ID?.length && !!env.GOOGLE_CLIENT_SECRET?.length;
+  // aperture-y5ual — Microsoft (Entra) mirrors Google: registered ONLY when
+  // BOTH env vars are present; otherwise omitted so BetterAuth boots without
+  // Microsoft creds.
+  const microsoftConfigured =
+    !!env.MICROSOFT_CLIENT_ID?.length && !!env.MICROSOFT_CLIENT_SECRET?.length;
+
+  // Build ONE socialProviders object so providers coexist. Two separate
+  // conditional `...(x ? { socialProviders: {...} } : {})` spreads would
+  // clobber each other (last-write-wins drops the first provider). We spread
+  // the whole key in only when at least one provider is configured, preserving
+  // the "undefined → email+password-only, boots cleanly" safety property.
+  const socialProviders = {
+    ...(googleConfigured
+      ? {
+          google: {
+            clientId: env.GOOGLE_CLIENT_ID as string,
+            clientSecret: env.GOOGLE_CLIENT_SECRET as string,
+          },
+        }
+      : {}),
+    ...(microsoftConfigured
+      ? {
+          microsoft: {
+            clientId: env.MICROSOFT_CLIENT_ID as string,
+            clientSecret: env.MICROSOFT_CLIENT_SECRET as string,
+            // 'common' = multi-tenant + personal MSAs. From env so the operator
+            // can pin a single tenant later without a code change; the provider
+            // also defaults to 'common' when this is omitted.
+            tenantId: env.MICROSOFT_TENANT_ID,
+          },
+        }
+      : {}),
+  };
+
+  // aperture-lwx2k (Camada C) — SMTP transport, CONDITIONAL like the OAuth
+  // providers: a real nodemailer transport only when HOST+USER+PASS are all
+  // present; otherwise a boot-safe no-op (and magic-link stays OFF — we only
+  // pass sendMagicLink to criarAuth when configured, so the plugin isn't
+  // registered without a real sender). The transport is SHARED — magic-link
+  // now; the c0a5s thank-you + future reset/verify reuse the same seam.
+  const smtpConfigured =
+    !!env.SMTP_HOST?.length && !!env.SMTP_USER?.length && !!env.SMTP_PASS?.length;
+  const emailTransport: EmailTransport = smtpConfigured
+    ? new EmailTransportNodemailer({
+        host: env.SMTP_HOST as string,
+        port: env.SMTP_PORT,
+        user: env.SMTP_USER as string,
+        pass: env.SMTP_PASS as string,
+        from: env.SMTP_FROM,
+        secure: env.SMTP_SECURE,
+      })
+    : new EmailTransportNoop(observability.logger);
+
   const authConfig: CriarAuthConfig = {
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.BETTER_AUTH_URL,
@@ -374,6 +509,26 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
       });
     },
     useSecureCookies: env.NODE_ENV === 'production',
+    // aperture-lwx2k (Camada C) — enable magic-link ONLY when SMTP is
+    // configured (passing sendMagicLink is what makes criarAuth spread the
+    // plugin). The keystone password-invalidation hook (session.create.before)
+    // ships in criar-auth.ts regardless; the plugin is what activates the
+    // verify path it protects.
+    ...(smtpConfigured
+      ? {
+          sendMagicLink: async ({ email, url }: { email: string; url: string }) => {
+            await emailTransport.enviar(renderMagicLinkEmail(email, url));
+          },
+        }
+      : {}),
+    // aperture-dm7s3 — default platform id for adapter-created users (OAuth
+    // signup). The Google profile carries no idPlataforma + the column is
+    // notNull, so a new-user Google signup needs this injected. eunenem-server
+    // is single-tenant for OAuth signup → the seeded ID_PLATAFORMA_EUNENEM.
+    idPlataformaPadrao: ID_PLATAFORMA_EUNENEM,
+    // Spread the social providers in ONLY when at least one is configured;
+    // otherwise the key is absent and no social provider is registered.
+    ...(Object.keys(socialProviders).length > 0 ? { socialProviders } : {}),
   };
 
   const auth = criarAuth(db, authConfig);
@@ -385,6 +540,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
   const usuarioRepository = new UsuarioRepositoryPostgres(db);
   const perfilCriadorRepository = new PerfilCriadorRepositoryPostgres(db);
   const dadosRecebimentoRepository = new DadosRecebimentoRepositoryPostgres(db);
+  const resgatePendenteRepository = new ResgatePendenteRepositoryPostgres(db);
 
   // Plataforma BC is still in-memory; the engine ships seeded values for
   // ID_PLATAFORMA_EUNENEM + ID_PLATAFORMA_EUCASEI via the seed array.
@@ -494,6 +650,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     usuarioRepository,
     perfilCriadorRepository,
     dadosRecebimentoRepository,
+    resgatePendenteRepository,
     plataformaRepository,
     campanhaRepository,
     contribuicaoRepository,
@@ -507,6 +664,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     livroFinanceiroRepository,
     provedorRegraTaxa,
     observability,
+    adminAllowedEmails: parseAdminAllowedEmails(env.ADMIN_ALLOWED_EMAILS),
     clock: () => new Date(),
     // BetterAuth's default cookie name — keep parity with `auth.handler`
     // mounted at /api/auth/* so the same session cookie is recognized

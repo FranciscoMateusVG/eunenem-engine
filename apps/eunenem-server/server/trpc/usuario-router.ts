@@ -36,47 +36,30 @@ import {
   verificarDisponibilidadeSlug,
 } from '../../../../src/index.js';
 import type { TrpcContext } from './context.js';
+import {
+  resolverUsuarioAutenticado,
+  SessaoNaoAutenticadaError,
+} from './session-resolver.js';
 
 const t = initTRPC.context<TrpcContext>().create();
 
 /**
- * Session-cookie reader. Same shape as the helper in auth-router /
- * contribuicao-router. Kept local — if a fourth router needs it, lift
- * to a shared helper.
- */
-function readSessionCookie(headers: Headers, name: string): string | null {
-  const cookieHeader = headers.get('cookie');
-  if (!cookieHeader) return null;
-  const cookies = cookieHeader.split(';').map((c) => c.trim());
-  const target = `${name}=`;
-  for (const cookie of cookies) {
-    if (cookie.startsWith(target)) {
-      return decodeURIComponent(cookie.slice(target.length));
-    }
-  }
-  return null;
-}
-
-/**
- * Resolve the caller's `idUsuario` from the session cookie. Throws
- * UNAUTHORIZED if no cookie / invalid token / no live session.
+ * Resolve the caller's `idUsuario` via the shared central resolver
+ * (aperture-6wo1f) — A2 (OAuth __Secure-/signed cookie fallback) fused with
+ * the OAuth-orphan self-heal. Returns the resolved (healed-if-orphan) usuario's
+ * id; the shared sentinel is mapped to the existing UNAUTHORIZED shape.
  */
 async function resolveCallerIdUsuario(ctx: TrpcContext): Promise<IdUsuario> {
   const { deps, headers } = ctx;
-  const token = readSessionCookie(headers, deps.sessionCookieName);
-  if (!token) {
-    throw new TRPCError({ code: 'UNAUTHORIZED', message: 'sessao_ausente' });
-  }
-  let sessao;
   try {
-    sessao = await deps.authService.validarSessao(token);
-  } catch {
-    throw new TRPCError({ code: 'UNAUTHORIZED', message: 'sessao_invalida' });
+    const { usuario } = await resolverUsuarioAutenticado(deps, headers);
+    return usuario.id as IdUsuario;
+  } catch (err) {
+    if (err instanceof SessaoNaoAutenticadaError) {
+      throw new TRPCError({ code: 'UNAUTHORIZED', message: 'sessao_invalida' });
+    }
+    throw err;
   }
-  if (!sessao) {
-    throw new TRPCError({ code: 'UNAUTHORIZED', message: 'sessao_expirada' });
-  }
-  return sessao.idUsuario as IdUsuario;
 }
 
 function toTRPCError(err: unknown): TRPCError {

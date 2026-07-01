@@ -70,6 +70,7 @@ export function PaginaPage({ slug }: { slug: string }) {
   const data = perfil.data;
   const initialTweaks: Partial<TweaksState> = {};
   if (data?.nomeBebe) initialTweaks.babyName = data.nomeBebe;
+  if (data?.genero) initialTweaks.genero = data.genero;
   if (data?.creatorName) initialTweaks.parents = data.creatorName;
   // aperture-3ic62 — the REAL event date (ISO YYYY-MM-DD) or null when the
   // creator never set one. We thread it explicitly to the Hero instead of

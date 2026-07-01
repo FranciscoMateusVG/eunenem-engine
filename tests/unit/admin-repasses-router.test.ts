@@ -26,6 +26,7 @@ import {
 import { criarRecebedorInicial } from '../../src/domain/arrecadacao/entities/recebedor.js';
 import { NoopLogger } from '../../src/observability/noop-logger.js';
 import { noopTracer } from '../../src/observability/tracer.js';
+import { adminAuthOverrides } from '../helpers/admin-auth.js';
 import { makePagamento as makePagamentoBase } from '../helpers/pagamento-repository.conformance.js';
 
 interface TestRig {
@@ -160,9 +161,10 @@ async function buildRig(): Promise<TestRig> {
     webhookEventArchive: {} as never,
   } as unknown as ServerDeps;
 
+  const adminAuth = adminAuthOverrides();
   const ctx: TrpcContext = {
-    deps,
-    headers: new Headers(),
+    deps: { ...deps, ...adminAuth.depsOverrides },
+    headers: adminAuth.headers,
     resHeaders: new Headers(),
   };
 

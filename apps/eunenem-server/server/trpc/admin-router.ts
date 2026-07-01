@@ -42,8 +42,59 @@ import {
   ID_PLATAFORMA_EUNENEM,
 } from "../../../../src/index.js";
 import type { TrpcContext } from "./context.js";
+import { isEmailAdmin } from "../auth/admin-allowlist.js";
+import {
+  resolverUsuarioAutenticado,
+  SessaoNaoAutenticadaError,
+} from "./session-resolver.js";
 
 const t = initTRPC.context<TrpcContext>().create();
+
+/**
+ * Admin authz gate (aperture-4n222) — THE server-side security boundary for the
+ * entire `admin.*` surface. Applied to EVERY procedure via `adminProcedure`
+ * below (incl. the bulk PII readers, the legacy `financeiro` duplicate, and the
+ * money-moving `repasses.aprovar` mutation) so there is no per-proc bypass.
+ *
+ * Two fail-closed checks, in order:
+ *   1. AUTHENTICATION — resolve the caller's session via the shared central
+ *      resolver (handles the prod `__Secure-` signed cookie + OAuth-orphan
+ *      self-heal). No valid session → 401 UNAUTHORIZED. Only
+ *      `SessaoNaoAutenticadaError` maps to 401; any other (unexpected) error
+ *      propagates as 500 rather than being masked as "not logged in".
+ *   2. AUTHORIZATION — the authenticated email must be in the
+ *      `ADMIN_ALLOWED_EMAILS` allowlist (normalized compare, same Set the
+ *      `auth.me` `isAdmin` flag reads). Not allowlisted → 403 FORBIDDEN.
+ *
+ * Client-side gating (Vance's frontend redirect) is UX only; this is the gate
+ * that actually protects the data.
+ */
+const adminMiddleware = t.middleware(async ({ ctx, next }) => {
+  const { deps, headers } = ctx;
+
+  let email: string;
+  try {
+    const { usuario } = await resolverUsuarioAutenticado(deps, headers);
+    email = usuario.email;
+  } catch (err) {
+    if (err instanceof SessaoNaoAutenticadaError) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: "Autenticação necessária.",
+      });
+    }
+    throw err;
+  }
+
+  if (!isEmailAdmin(deps.adminAllowedEmails, email)) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Acesso restrito." });
+  }
+
+  return next();
+});
+
+/** Base procedure for the admin router — gated by `adminMiddleware`. */
+const adminProcedure = t.procedure.use(adminMiddleware);
 
 /** Wire shape — kept narrow so we never leak the full Usuario aggregate. */
 const UsuarioMatchSchema = z.object({
@@ -101,7 +152,7 @@ const usuariosRouter = t.router({
    * Usuario aggregate down to the lean DTO the UI consumes; cursor +
    * sort + filter semantics live on the port.
    */
-  listPaginated: t.procedure
+  listPaginated: adminProcedure
     .input(ListPaginatedInputSchema)
     .output(ListPaginatedOutputSchema)
     .query(async ({ ctx, input }) => {
@@ -189,7 +240,7 @@ const campanhasRouter = t.router({
    * multi-tenancy boundary, in case a usuario has memberships across
    * plataformas in the future.
    */
-  listByUsuario: t.procedure
+  listByUsuario: adminProcedure
     .input(z.object({ idConta: z.string() }))
     .output(z.object({ campanhas: z.array(CampanhaAdminDTOSchema) }))
     .query(async ({ ctx, input }) => {
@@ -213,7 +264,7 @@ const campanhasRouter = t.router({
    * email only (no idConta on `contribuicoes`). The caller passes the
    * usuario's email (already resolved by the picker / detail page).
    */
-  listByContribuinte: t.procedure
+  listByContribuinte: adminProcedure
     .input(z.object({ email: z.string() }))
     .output(z.object({ campanhas: z.array(CampanhaAdminDTOSchema) }))
     .query(async ({ ctx, input }) => {
@@ -235,7 +286,7 @@ const campanhasRouter = t.router({
    * plataforma (defensive; the engine `findById` does NOT pre-filter
    * by tenant).
    */
-  findById: t.procedure
+  findById: adminProcedure
     .input(z.object({ idCampanha: z.string() }))
     .output(CampanhaDetailDTOSchema.nullable())
     .query(async ({ ctx, input }) => {
@@ -422,7 +473,7 @@ const contribuicoesRouter = t.router({
    * NOT paginated server-side (see file header §2). Filters live in the
    * client-side ContribuicoesList state machine.
    */
-  listByCampanha: t.procedure
+  listByCampanha: adminProcedure
     .input(z.object({ idCampanha: z.string() }))
     .output(z.object({ contribuicoes: z.array(ContribuicaoAdminDTOSchema) }))
     .query(async ({ ctx, input }) => {
@@ -489,7 +540,7 @@ const contribuicoesRouter = t.router({
    * Sort: pagamento criadoEm DESC (most recent purchase first).
    * Surcharge items are filtered out — they're cart-scope, not slot-scope.
    */
-  listItemsByContribuicao: t.procedure
+  listItemsByContribuicao: adminProcedure
     .input(z.object({ idContribuicao: z.string() }))
     .output(
       z.object({
@@ -599,7 +650,7 @@ const contribuicoesRouter = t.router({
    *     plataforma → also null (rendered as "(sem contribuinte identificado)"
    *     by the page).
    */
-  findById: t.procedure
+  findById: adminProcedure
     .input(z.object({ idContribuicao: z.string() }))
     .output(
       z
@@ -773,7 +824,7 @@ const financeiroRouter = t.router({
    *
    * Sort: pagamentos descending by criadoEm (most recent attempt first).
    */
-  listByContribuicao: t.procedure
+  listByContribuicao: adminProcedure
     .input(z.object({ idContribuicao: z.string() }))
     .output(
       z.object({
@@ -1212,7 +1263,7 @@ const pagamentosRouter = t.router({
    * after grep confirms it's only Vance's frontend that consumed it
    * and the frontend has fully migrated to the nested shape here.
    */
-  listByContribuicao: t.procedure
+  listByContribuicao: adminProcedure
     .input(z.object({ idContribuicao: z.string() }))
     .output(
       z.object({
@@ -1319,7 +1370,7 @@ const pagamentosRouter = t.router({
    * so the frontend can render the same PagamentoCard component without
    * a separate projection.
    */
-  listByCampanha: t.procedure
+  listByCampanha: adminProcedure
     .input(z.object({ idCampanha: z.string() }))
     .output(
       z.object({
@@ -1406,7 +1457,7 @@ const pagamentosRouter = t.router({
    * renders identically. Webhook events ride along for the new page's
    * embedded webhook trail.
    */
-  findById: t.procedure
+  findById: adminProcedure
     .input(z.object({ idPagamento: z.string() }))
     .output(
       z.object({
@@ -1595,7 +1646,7 @@ const webhooksRouter = t.router({
    * bottom). LEAN DTO: no rawPayload, no signatureHeader. The
    * "Ver payload" affordance fetches getEventDetail on demand.
    */
-  listByPagamento: t.procedure
+  listByPagamento: adminProcedure
     .input(z.object({ idPagamento: z.string() }))
     .output(z.object({ events: z.array(WebhookEventAdminDTOSchema) }))
     .query(async ({ ctx, input }) => {
@@ -1621,7 +1672,7 @@ const webhooksRouter = t.router({
    *   - 403 when the linked pagamento's campanha is on a different
    *     plataforma
    */
-  getEventDetail: t.procedure
+  getEventDetail: adminProcedure
     .input(z.object({ idEvent: z.string() }))
     .output(z.object({ event: WebhookEventDetailDTOSchema }))
     .query(async ({ ctx, input }) => {
@@ -1783,7 +1834,7 @@ function toRepasseAdminDTO(
 }
 
 const repassesRouter = t.router({
-  list: t.procedure
+  list: adminProcedure
     .input(RepassesListInputSchema)
     .output(RepassesListOutputSchema)
     .query(async ({ ctx, input }) => {
@@ -1823,7 +1874,7 @@ const repassesRouter = t.router({
       return { rows, nextCursor, totalCount };
     }),
 
-  aprovar: t.procedure
+  aprovar: adminProcedure
     .input(RepassesAprovarInputSchema)
     .output(RepassesAprovarOutputSchema)
     .mutation(async ({ ctx, input }) => {
@@ -1871,7 +1922,7 @@ const repassesRouter = t.router({
       }
     }),
 
-  show: t.procedure
+  show: adminProcedure
     .input(RepassesShowInputSchema)
     .output(RepassesShowOutputSchema)
     .query(async ({ ctx, input }) => {
@@ -1943,7 +1994,7 @@ export const adminRouter = t.router({
    * Backed by `UsuarioRepository.findUsuariosByEmailPrefix` (engine
    * aperture-5d3yz / PR #93).
    */
-  searchUsers: t.procedure
+  searchUsers: adminProcedure
     .input(
       z.object({
         prefix: z.string().max(120),
@@ -1982,7 +2033,7 @@ export const adminRouter = t.router({
    * idConta returns undefined rather than leaking a cross-plataforma
    * Usuario.
    */
-  findUsuarioByConta: t.procedure
+  findUsuarioByConta: adminProcedure
     .input(
       z.object({
         idConta: z.string(),

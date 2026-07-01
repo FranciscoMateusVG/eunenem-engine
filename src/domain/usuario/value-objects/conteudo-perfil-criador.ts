@@ -1,4 +1,5 @@
 import { z } from 'zod/v4';
+import { GeneroBebeSchema } from './genero-bebe.js';
 import { TipoEventoPerfilSchema } from './tipo-evento-perfil.js';
 
 /**
@@ -25,6 +26,8 @@ export const ConteudoPerfilCriadorSchema = z.object({
   dataNascimento: z.date().nullable(),
   /** Celebration kind — canonical slug aligned to the Evento BC. */
   tipoEvento: TipoEventoPerfilSchema.nullable(),
+  /** Baby's gender — drives PT-BR pronoun/article agreement on greetings. */
+  genero: GeneroBebeSchema.nullable(),
   /** Event date shown on the profile (display copy). */
   dataEvento: z.date().nullable(),
   /** Object-storage key for the profile photo (resolved/presigned in R5). */
@@ -45,6 +48,7 @@ export function conteudoPerfilCriadorVazio(): ConteudoPerfilCriador {
     historia: null,
     dataNascimento: null,
     tipoEvento: null,
+    genero: null,
     dataEvento: null,
     fotoPerfilKey: null,
     fotoCapaKey: null,

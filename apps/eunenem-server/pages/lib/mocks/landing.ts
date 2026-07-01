@@ -22,7 +22,7 @@ export const NAV_LINKS: ReadonlyArray<readonly [string, string]> = [
   ['por que dinheiro', '#diferencial'],
   ['convites', '#convites'],
   ['depoimentos', '#depoimentos'],
-  ['dúvidas', '#faq'],
+  ['dúvidas', '/faq'],
 ];
 
 /** Top stat band — number markup kept in component; here is the raw copy. */
@@ -296,9 +296,9 @@ export const LANDING_FOOTER_COLS: ReadonlyArray<LandingFooterCol> = [
   {
     title: 'dúvidas',
     links: [
-      ['perguntas frequentes', 'https://eunenem.com/faq'],
-      ['status dos serviços', 'https://eunenem.com/faq'],
-      ['taxas', 'https://eunenem.com/faq'],
+      ['perguntas frequentes', '/faq'],
+      ['status dos serviços', '/faq'],
+      ['taxas', '/faq'],
       ['termos de uso', '/termos-de-uso'],
     ],
   },
@@ -366,6 +366,18 @@ Depois que você solicitar o resgate, a transferência será realizada para a su
 Você pode acompanhar todos os presentes recebidos e os valores disponíveis diretamente em seu extrato na EuNeném.`,
   },
   {
+    q: 'Como os convidados compram os presentes?',
+    a: `Comprar um presente na EuNeném é simples, rápido e seguro:
+
+Seu convidado acessa o link do seu chá de bebê.
+
+Escolhe o presente virtual que deseja dar entre as opções da sua lista.
+
+É direcionado para um ambiente seguro de pagamento, com proteção dos dados da transação.
+
+Escolhe a forma de pagamento, podendo pagar por Pix ou cartão de crédito.
+
+Após a confirmação do pagamento, o valor do presente é creditado em sua conta EuNeném de acordo com os prazos da forma de pagamento escolhida.`,
     q: 'Como os convidados compram os presentes?',
     a: `Comprar um presente na EuNeném é simples, rápido e seguro:
 

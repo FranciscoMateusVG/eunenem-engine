@@ -72,6 +72,13 @@ ENV PORT=3001
 ENV PATH=/app/apps/eunenem-server/node_modules/.bin:$PATH
 EXPOSE 3001
 
+# Install the entrypoint script into a stable absolute path. It runs
+# Kysely migrations before handing off to CMD so the running DB schema
+# is always at-or-ahead of the code's expectations. See the script's
+# header comment for the full rationale.
+COPY --chmod=755 apps/eunenem-server/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+
 # Hono server: serves SSR + static assets, /healthz health check.
 # Runs from /app/apps/eunenem-server — server.tsx + relative imports
 # resolve correctly from this WORKDIR.

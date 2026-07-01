@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import { useEffect } from "react";
+import { trpc } from "@/lib/trpc";
 import { DddBadge, type Bc } from "./DddBadge";
 import { UserPicker } from "./UserPicker";
 
@@ -64,6 +66,39 @@ export function AdminShell({
   bcContext,
   activeNav = "landing",
 }: AdminShellProps) {
+  // aperture-r5fg0 — UX gate. The REAL security boundary is the backend: every
+  // admin.* tRPC proc 403s a non-allowlisted user server-side (aperture-4n222 /
+  // #313), so this is purely about not showing admin chrome to non-admins.
+  // auth.me.isAdmin is true iff the logged-in email is in the server allowlist;
+  // null (logged out) → not admin. Non-admins are redirected home, and we never
+  // render the shell/children (nor mount their admin.* queries) until confirmed.
+  const me = trpc.auth.me.useQuery(undefined, { staleTime: 0 });
+  // Defensive read — isAdmin lands with #313; treat absent/false/logged-out as
+  // NON-admin (fail-closed UX). This PR must merge after #313 so admins aren't
+  // locked out while isAdmin is still undefined on the wire.
+  const isAdmin =
+    (me.data as { isAdmin?: boolean } | null | undefined)?.isAdmin === true;
+  const decided = !me.isLoading;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (decided && !isAdmin) window.location.assign("/");
+  }, [decided, isAdmin]);
+
+  if (!decided || !isAdmin) {
+    return (
+      <div
+        data-admin
+        className="flex min-h-screen w-full items-center justify-center bg-paper text-ink-soft"
+        role="status"
+        aria-live="polite"
+        aria-label="verificando acesso"
+      >
+        <span className="perfil-spinner" aria-hidden="true" />
+      </div>
+    );
+  }
+
   return (
     <div
       data-admin
@@ -130,7 +165,6 @@ function Sidebar({ activeNav }: { activeNav: NavKey }) {
 
         <QuickJump />
 
-        <NoAuthChip />
         <ConsumerLink />
       </div>
     </aside>
@@ -150,23 +184,6 @@ function QuickJump() {
         Jump to user
       </p>
       <UserPicker />
-    </div>
-  );
-}
-
-function NoAuthChip() {
-  return (
-    <div className="mt-6 hidden lg:block">
-      <span
-        className="inline-flex items-center gap-1.5 rounded border border-amber-200 bg-amber-50 px-2 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-800"
-        title="v1: anyone with the URL can read. No login enforced."
-      >
-        <span
-          aria-hidden
-          className="inline-block size-[6px] rounded-full bg-amber-500"
-        />
-        no auth · v1
-      </span>
     </div>
   );
 }

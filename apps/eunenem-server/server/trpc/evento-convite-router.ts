@@ -29,6 +29,10 @@ import {
   TipoEventoSchema,
 } from '../../../../src/index.js';
 import type { TrpcContext } from './context.js';
+import {
+  resolverUsuarioAutenticado,
+  SessaoNaoAutenticadaError,
+} from './session-resolver.js';
 
 const t = initTRPC.context<TrpcContext>().create();
 
@@ -42,19 +46,6 @@ class CampanhaAusenteError extends Error {
 
 class CampanhaSlugNaoEncontradaError extends Error {
   public readonly name = 'CampanhaSlugNaoEncontradaError';
-}
-
-function readSessionCookie(headers: Headers, name: string): string | null {
-  const cookieHeader = headers.get('cookie');
-  if (!cookieHeader) return null;
-  const cookies = cookieHeader.split(';').map((c) => c.trim());
-  const target = `${name}=`;
-  for (const cookie of cookies) {
-    if (cookie.startsWith(target)) {
-      return decodeURIComponent(cookie.slice(target.length));
-    }
-  }
-  return null;
 }
 
 const ConviteSlugSchema = z
@@ -91,24 +82,17 @@ async function resolveCallerCampanha(
   campanha: Campanha;
 }> {
   const { deps, headers } = ctx;
-  const token = readSessionCookie(headers, deps.sessionCookieName);
-  if (!token) {
-    throw new SessaoAusenteError('Sessao ausente');
-  }
-
-  let sessao;
+  // aperture-6wo1f: resolve via the shared central resolver — A2 (OAuth
+  // __Secure-/signed cookie fallback) fused with the OAuth-orphan self-heal.
+  // Map the shared sentinel to this router's UNAUTHORIZED-bearing sentinel.
+  let usuario;
   try {
-    sessao = await deps.authService.validarSessao(token);
-  } catch {
-    throw new SessaoAusenteError('Sessao invalida');
-  }
-  if (!sessao) {
-    throw new SessaoAusenteError('Sessao expirada');
-  }
-
-  const usuario = await deps.usuarioRepository.findUsuarioById(sessao.idUsuario);
-  if (!usuario) {
-    throw new SessaoAusenteError('Usuario nao encontrado');
+    usuario = (await resolverUsuarioAutenticado(deps, headers)).usuario;
+  } catch (err) {
+    if (err instanceof SessaoNaoAutenticadaError) {
+      throw new SessaoAusenteError('Sessao invalida');
+    }
+    throw err;
   }
 
   const campanha = await deps.campanhaRepository.findByAdministrador(usuario.idConta);

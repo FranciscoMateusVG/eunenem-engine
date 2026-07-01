@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { CartButton } from "./CartButton";
 import { useCartDrawer } from "./CartDrawerContext.js";
 import { useMe } from "@/lib/auth";
+import { painelHref as buildPainelHref } from "@/lib/painelRoutes";
 
 // aperture-3d9t / aperture-uk8q1 — visitor page header.
 //
@@ -53,7 +54,9 @@ export function Navbar({ slug }: { slug?: string } = {}) {
   // dropdown's "Meu painel" → /painel/<slug> link.
   const me = useMe();
   const isOwner = Boolean(slug && me.data?.slug === slug);
-  const painelHref = slug ? `/painel/${slug}` : "/";
+  // Use the canonical painelHref helper (lib/painelRoutes) instead of
+  // hand-building the URL, matching PerfilBody / PainelTopbar / etc.
+  const painelHref = slug ? buildPainelHref(slug) : "/";
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 16);
@@ -159,14 +162,7 @@ export function Navbar({ slug }: { slug?: string } = {}) {
           {isOwner && (
             <a
               href={painelHref}
-              className="eu-nav-chip"
-              style={{
-                background: "var(--lilac-soft)",
-                color: "var(--plum)",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-              }}
+              className="eu-nav-chip eu-nav-chip--owner"
               aria-label="Voltar ao meu painel"
             >
               <span aria-hidden="true">♡</span>
@@ -191,17 +187,7 @@ export function Navbar({ slug }: { slug?: string } = {}) {
           {isOwner && (
             <a
               href={painelHref}
-              className="eu-nav-chip"
-              style={{
-                background: "var(--lilac-soft)",
-                color: "var(--plum)",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 4,
-                padding: "7px 12px",
-                fontSize: 12,
-                whiteSpace: "nowrap",
-              }}
+              className="eu-nav-chip eu-nav-chip--owner eu-nav-chip--owner-sm"
               aria-label="Voltar ao meu painel"
             >
               <span aria-hidden="true">♡</span>
@@ -223,8 +209,8 @@ export function Navbar({ slug }: { slug?: string } = {}) {
               display: "inline-flex",
               alignItems: "center",
               justifyContent: "center",
-              width: 38,
-              height: 38,
+              width: 44,
+              height: 44,
               borderRadius: 999,
               border: "1px solid var(--line)",
               background: "var(--paper)",

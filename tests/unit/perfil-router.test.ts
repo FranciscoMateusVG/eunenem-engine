@@ -104,6 +104,7 @@ const FULL_INPUT = {
   historia: 'Uma espera cheia de amor.',
   dataNascimento: new Date('2026-09-15T00:00:00.000Z'),
   tipoEvento: 'cha-bebe' as const,
+  genero: 'menina' as const,
   dataEvento: new Date('2026-08-01T00:00:00.000Z'),
   fotoPerfilKey: 'perfis/helena/perfil.jpg',
   fotoCapaKey: null,
@@ -125,6 +126,7 @@ describe('perfil router', () => {
     expect(got.relacao).toBe('Mãe');
     expect(got.historia).toBe('Uma espera cheia de amor.');
     expect(got.tipoEvento).toBe('cha-bebe');
+    expect(got.genero).toBe('menina');
     expect(got.dataEvento).toBe('2026-08-01T00:00:00.000Z');
     expect(got.dataNascimento).toBe('2026-09-15T00:00:00.000Z');
     // Split Url (display) / Key (round-trip) — aperture-qjgfr.
@@ -152,6 +154,7 @@ describe('perfil router', () => {
     expect(pub.nomeBebe).toBe('Helena');
     expect(pub.historia).toBe('Uma espera cheia de amor.');
     expect(pub.tipoEvento).toBe('cha-bebe');
+    expect(pub.genero).toBe('menina');
     expect(pub.slug).toBe(SLUG);
   });
 
@@ -168,6 +171,7 @@ describe('perfil router', () => {
         'fotoCapaUrl',
         'fotoHistoriaUrl',
         'fotoPerfilUrl',
+        'genero',
         'historia',
         'nomeBebe',
         'relacao',

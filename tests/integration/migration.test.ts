@@ -75,6 +75,7 @@ describe('Migration round-trip', () => {
     // this test is made correct against the current files instead.
     expect(tableNames).toContain('perfil_criadores');
     expect(tableNames).toContain('dados_recebimento_usuario');
+    expect(tableNames).toContain('resgates_pendentes');
 
     const conviteRemetenteCol = await getColumn(db, 'convites', 'remetente');
     expect(conviteRemetenteCol?.data_type).toBe('character varying');
@@ -83,7 +84,45 @@ describe('Migration round-trip', () => {
 
     // ── Roll back the post-evento migrations first (latest → earliest),
     //    so the subsequent evento down-step actually targets the evento
-    //    migration. A single migrateDown() here would only unwind 028.
+    //    migration. Each migrateDown() unwinds exactly the current tip, so
+    //    this sequence must start at the LATEST migration and walk earlier.
+    //    Adding a new migration on top REQUIRES prepending its down-step here.
+
+    // 031 add_genero_to_perfil_criador (aperture-neiwx) → the migration TIP
+    //   (landed after 030). migrateToLatest applied through it, so the FIRST
+    //   migrateDown unwinds 031 — its down() drops the perfil_criadores.genero
+    //   column + its CHECK (the table itself survives until the 026 down below).
+    //   Without this step the whole sequence is off-by-one.
+    const downAddGenero = await migrator.migrateDown();
+    expect(downAddGenero.error).toBeUndefined();
+    expect(await listTableNames(db)).toContain('perfil_criadores'); // table still here
+
+    // 030 create_resgates_pendentes (aperture-kj9el #4b) → landed before 031.
+    //   Its down() drops the resgates_pendentes table. Without this step the
+    //   next assertions target 029/028 while 030 is still applied → off-by-one
+    //   false failures.
+    const downResgatesPendentes = await migrator.migrateDown();
+    expect(downResgatesPendentes.error).toBeUndefined();
+    expect(await listTableNames(db)).not.toContain('resgates_pendentes');
+
+    // 029 expand_convites_modelo_check (aperture-ypmyb) → its down() reverts
+    //   the convites_modelo CHECK from the expanded 38-value list to the prior
+    //   13-value list (no table delta; convites still exists, dropped only by
+    //   the evento down below). Without this step the next assertion targets
+    //   028's table while 028 is still applied → false failure.
+    const downExpandConvitesModelo = await migrator.migrateDown();
+    expect(downExpandConvitesModelo.error).toBeUndefined();
+    const modeloConstraintAfterDown = (await db
+      .selectFrom('pg_constraint' as never)
+      .select((_eb) => [
+        // biome-ignore lint/suspicious/noExplicitAny: pg_constraint not in DB types
+        sql<string>`pg_get_constraintdef(oid)`.as('def') as any,
+      ])
+      .where('conname' as never, '=', 'convites_modelo_check' as never)
+      .executeTakeFirst()) as { def: string } | undefined;
+    // After down(): a 38-list-only literal is gone; a 13-list literal remains.
+    expect(modeloConstraintAfterDown?.def).not.toContain('xadrez-azul-suave');
+    expect(modeloConstraintAfterDown?.def).toContain('elefantinho');
 
     // 028 create_dados_recebimento_usuario → drops dados_recebimento_usuario
     const downDadosRecebimento = await migrator.migrateDown();

@@ -1,6 +1,7 @@
 import { SpanStatusCode } from '@opentelemetry/api';
 import { z } from 'zod/v4';
 import type { DadosRecebimentoRepository } from '../../adapters/usuario/dados-recebimento-repository.js';
+import type { ResgatePendenteRepository } from '../../adapters/usuario/resgate-pendente-repository.js';
 import { DadosRecebedorSchema } from '../../domain/arrecadacao/value-objects/dados-recebedor.js';
 import {
   atualizarDadosRecebimentoUsuario,
@@ -29,6 +30,13 @@ export type SalvarDadosRecebimentoUsuarioInput = z.infer<
 
 export interface SalvarDadosRecebimentoUsuarioDeps {
   readonly dadosRecebimentoRepository: DadosRecebimentoRepository;
+  /**
+   * "Resgate pendente" marker store (aperture-kj9el #4b). OPTIONAL: when
+   * provided, a successful full-data save CLEARS any pending-intent marker
+   * (the user has now actually filled their receiving data). Left optional so
+   * existing call sites/tests that don't care about the marker keep compiling.
+   */
+  readonly resgatePendenteRepository?: ResgatePendenteRepository;
   readonly observability: Observability;
   readonly clock: () => Date;
 }
@@ -48,7 +56,7 @@ export async function salvarDadosRecebimentoUsuario(
   deps: SalvarDadosRecebimentoUsuarioDeps,
   input: SalvarDadosRecebimentoUsuarioInput,
 ): Promise<DadosRecebimentoUsuario> {
-  const { dadosRecebimentoRepository, observability, clock } = deps;
+  const { dadosRecebimentoRepository, resgatePendenteRepository, observability, clock } = deps;
   const { logger, tracer } = observability;
 
   return tracer.startActiveSpan('salvarDadosRecebimentoUsuario', async (span) => {
@@ -65,11 +73,33 @@ export async function salvarDadosRecebimentoUsuario(
 
       const now = clock();
       const existing = await dadosRecebimentoRepository.findByUsuarioId(idUsuario);
+
+      // aperture-3mlcw (backend defense-in-depth): CPF is a fiscal-identity
+      // field — once a REAL cpfTitular has been saved it is IMMUTABLE. Reject a
+      // save that would change an already-set cpfTitular to a different value.
+      // The frontend also disables the field once saved (Vance), but an
+      // immutability invariant must not depend on the client honouring a
+      // `disabled` attribute. (Switching payment method away from 'conta' is a
+      // distinct operation and is allowed; this guards changing the CPF VALUE.)
+      if (
+        existing?.dados.metodo === 'conta' &&
+        existing.dados.cpfTitular &&
+        dados.metodo === 'conta' &&
+        dados.cpfTitular !== existing.dados.cpfTitular
+      ) {
+        throw new UsuarioInputInvalidoError('O CPF do titular nao pode ser alterado apos salvo.');
+      }
+
       const registro = existing
         ? atualizarDadosRecebimentoUsuario(existing, { dados, atualizadoEm: now })
         : criarDadosRecebimentoUsuario({ idUsuario, dados, atualizadoEm: now });
 
       await dadosRecebimentoRepository.save(registro);
+
+      // aperture-kj9el #4b: the user has now filled their receiving data, so
+      // any "preencher depois" pending-intent marker is no longer relevant —
+      // clear it (idempotent no-op when none exists).
+      await resgatePendenteRepository?.limparPendente(idUsuario);
 
       logger.info('usuario.dados_recebimento.salvo', {
         idUsuario,
