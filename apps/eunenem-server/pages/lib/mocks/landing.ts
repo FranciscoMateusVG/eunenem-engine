@@ -18,7 +18,7 @@ export const NAV_LINKS: ReadonlyArray<readonly [string, string]> = [
   ['por que dinheiro', '#diferencial'],
   ['convites', '#convites'],
   ['depoimentos', '#depoimentos'],
-  ['dúvidas', '#faq'],
+  ['dúvidas', '/faq'],
 ];
 
 /** Top stat band — number markup kept in component; here is the raw copy. */
@@ -210,9 +210,9 @@ export const LANDING_FOOTER_COLS: ReadonlyArray<LandingFooterCol> = [
   {
     title: 'dúvidas',
     links: [
-      ['perguntas frequentes', '#faq'],
-      ['status dos serviços', '#faq'],
-      ['taxas', '#faq'],
+      ['perguntas frequentes', '/faq'],
+      ['status dos serviços', '/faq'],
+      ['taxas', '/faq'],
       ['termos de uso', 'https://eunenem.com/termos-de-uso'],
     ],
   },

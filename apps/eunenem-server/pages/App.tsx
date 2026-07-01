@@ -7,6 +7,7 @@ import { AdminRepasseDetailPage } from './AdminRepasseDetailPage.js';
 import { AdminRepassesPage } from './AdminRepassesPage.js';
 import { AdminUsuarioPage } from './AdminUsuarioPage.js';
 import { AuthDemoPage } from './AuthDemoPage.js';
+import { FaqPage } from './FaqPage.js';
 import { AuthModalProvider } from './components/eunenem/auth/AuthModalProvider.js';
 import { LandingPage } from './LandingPage.js';
 import { NotFoundPage } from './NotFoundPage.js';
@@ -48,6 +49,7 @@ export function resolveRoute(pathname: string):
   | { kind: 'painel-section'; slug: string; section: PainelSection }
   | { kind: 'trpc-smoke' }
   | { kind: 'auth-demo' }
+  | { kind: 'faq' }
   | { kind: 'admin' }
   | { kind: 'admin-usuario'; idConta: string }
   | { kind: 'admin-campanha'; idCampanha: string }
@@ -68,6 +70,11 @@ export function resolveRoute(pathname: string):
   // AuthModalShell. Unlisted in nav; reachable only by typing the URL.
   if (pathname === '/auth-demo') {
     return { kind: 'auth-demo' };
+  }
+  // Perguntas Frequentes (aperture-sgjnn) — public FAQ page, linked from the
+  // footer. Exact "/faq" only.
+  if (pathname === '/faq') {
+    return { kind: 'faq' };
   }
   // Operator admin — DDD-trace drill-down (aperture-rsidz.1, W0). No auth
   // gate per operator directive. Sub-routes for the drills follow below
@@ -221,6 +228,7 @@ function pickPage(route: ReturnType<typeof resolveRoute>, pathname: string) {
     return <PainelSectionPage slug={route.slug} section={route.section} />;
   if (route.kind === 'trpc-smoke') return <TrpcSmokePage />;
   if (route.kind === 'auth-demo') return <AuthDemoPage />;
+  if (route.kind === 'faq') return <FaqPage />;
   if (route.kind === 'admin') return <AdminPage />;
   if (route.kind === 'admin-usuario')
     return <AdminUsuarioPage idConta={route.idConta} />;

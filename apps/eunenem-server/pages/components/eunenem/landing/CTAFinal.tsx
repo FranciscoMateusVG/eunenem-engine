@@ -1,18 +1,14 @@
-import { useRef, useState } from 'react';
-import { LANDING_FAQS } from '@/lib/mocks/landing';
+import { useRef } from 'react';
 import { useAuthModal } from '@/components/eunenem/auth/AuthModalProvider';
 
-// aperture-q1j2 — final CTA on a tri-stop gradient with an accordion FAQ.
-// Accordion is interactive (useState), so it hydrates on the client.
-// aperture-nop8l — CTA opens signup modal.
+// aperture-q1j2 — final CTA on a tri-stop gradient.
+// aperture-nop8l — CTA opens signup modal. FAQ moved to standalone /faq page.
 export function CTAFinal() {
-  const [open, setOpen] = useState<number | null>(null);
   const auth = useAuthModal();
   const ctaRef = useRef<HTMLButtonElement | null>(null);
 
   return (
     <section
-      id="faq"
       className="fade-up py-22 relative overflow-hidden"
       style={{
         background:
@@ -59,44 +55,6 @@ export function CTAFinal() {
           WhatsApp
         </p>
 
-        <div className="mt-14 max-w-[640px] mx-auto text-left">
-          {LANDING_FAQS.map((f, i) => (
-            <div
-              key={i}
-              className={`faq-item bg-white/85 backdrop-blur border border-white/90 rounded-2xl overflow-hidden shadow-soft-sm mb-3 ${
-                open === i ? 'open' : ''
-              }`}
-            >
-              <button
-                type="button"
-                onClick={() => setOpen(open === i ? null : i)}
-                aria-expanded={open === i}
-                className="w-full text-left px-5 py-5 flex items-center justify-between gap-4 text-[15px] font-bold text-plum hover:bg-white/60 transition-colors"
-              >
-                <span>{f.q}</span>
-                <span className="chev w-7 h-7 rounded-full bg-lilac text-white flex items-center justify-center flex-shrink-0 text-base font-bold">
-                  +
-                </span>
-              </button>
-              <div className="faq-a">
-                <div className="px-5 pb-5 text-ink-soft text-[14.5px] leading-relaxed whitespace-pre-line">
-                  {f.a}
-                  {f.link ? (
-                    <>
-                      {' '}
-                      <a
-                        href={f.link.href}
-                        className="text-lilac-deep font-bold"
-                      >
-                        {f.link.label}
-                      </a>
-                    </>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
       </div>
     </section>
   );
