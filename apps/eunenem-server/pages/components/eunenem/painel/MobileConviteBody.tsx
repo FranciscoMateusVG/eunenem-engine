@@ -68,7 +68,7 @@ interface WizStep {
 
 const STEPS: readonly WizStep[] = [
   { id: "fundo", title: "fundo do convite" },
-  { id: "tipo", title: "que mimo é esse?" },
+  { id: "tipo", title: "qual tipo de evento?" },
   { id: "quem", title: "pra quem?" },
   { id: "quando", title: "quando e onde?" },
   { id: "visual", title: "a cara do convite" },
@@ -198,7 +198,7 @@ export function MobileConviteBody({ slug }: PainelSectionBodyProps) {
       <header className="mcv-header">
         <div className="mcv-mark" aria-hidden="true">m</div>
         <div className="mcv-brand">
-          <div className="mcv-brand-name">convitinhos</div>
+          <div className="mcv-brand-name">meu convite</div>
           <div className="mcv-brand-step">
             passo {step + 1} de {STEPS.length} · {cur.title}
           </div>
@@ -518,7 +518,7 @@ function MStepFundo({ state, update, updateMany }: StepProps) {
               <span className="mcv-upload-title">
                 {uploading ? "enviando…" : "enviar foto"}
               </span>
-              <span className="mcv-upload-sub">jpg, png — fica de fundo</span>
+              <span className="mcv-upload-sub">jpg, png — o texto aparece em cima</span>
             </span>
           </button>
         )}
@@ -706,7 +706,7 @@ function MStepQuando({ state, update }: StepProps) {
         </div>
       ) : (
         <div>
-          <label className="mcv-label" htmlFor="mcv-link">link da sala</label>
+          <label className="mcv-label" htmlFor="mcv-link">link da sala (opcional)</label>
           <input
             id="mcv-link"
             className="mcv-field"

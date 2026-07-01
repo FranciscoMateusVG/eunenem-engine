@@ -90,7 +90,7 @@ export function Marketplace({ slug }: MarketplaceProps) {
               marginTop: 8,
             }}
           >
-            Escolhe um <span className="hl">presentinho</span> ♡
+            Escolha um <span className="hl">presentinho</span> ♡
           </h2>
           <p
             style={{

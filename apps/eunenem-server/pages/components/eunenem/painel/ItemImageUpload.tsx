@@ -86,7 +86,7 @@ function CropperModal({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Recortar imagem do mimo"
+      aria-label="Recortar imagem do presente"
       onClick={onCancel}
       style={{
         position: "fixed",
@@ -117,7 +117,7 @@ function CropperModal({
             marginBottom: 10,
           }}
         >
-          recortar imagem do mimo
+          recortar imagem do presente
         </div>
         <div
           style={{
@@ -228,7 +228,7 @@ export function ItemImageUpload({
 
   return (
     <div className="lista-field lista-field-full">
-      <label>imagem do mimo (opcional)</label>
+      <label>imagem do presente (opcional)</label>
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         {value ? (
           <span
@@ -243,7 +243,7 @@ export function ItemImageUpload({
           >
             <img
               src={value}
-              alt="prévia da imagem do mimo"
+              alt="prévia da imagem do presente"
               style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
             />
           </span>

@@ -46,7 +46,7 @@ export function ChaRifa() {
                 required
                 aria-label="E-mail para aviso de lançamento"
               />
-              <button type="submit">me avisem!</button>
+              <button type="submit">me avise!</button>
             </form>
           )}
           <p className="cha-rifa-meta">Zero spam. Só um e-mail quando for hora.</p>

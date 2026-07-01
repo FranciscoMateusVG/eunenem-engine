@@ -546,7 +546,7 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
           </>
         ) : null}
         . essa regra protege você de fraudes e garante que o valor só caia na
-        conta da pessoa cadastrada ♡
+        conta da pessoa cadastrada
       </div>
 
       <div className="bnc-form-stack">
@@ -624,7 +624,7 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
                     aria-label="celular"
                   />
                   <span className="bnc-helper">
-                    usamos só pra avisar quando cair um mimo ♡
+                    usamos pra avisar caso haja algum problema
                   </span>
                 </div>
               )}
@@ -645,7 +645,7 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
               <div className="bnc-card-title-sub">
                 {modo === "pix"
                   ? "uma chave só, vinculada ao seu cpf"
-                  : "banco, agência e conta pra receber os mimos"}
+                  : "banco, agência e conta pra receber o dinheiro"}
               </div>
             </div>
           </header>
@@ -822,7 +822,7 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
             <span className="bnc-form-errors-ico">
               <IInfo size={16} />
             </span>
-            <strong>pera, faltou conferir uma coisinha ♡</strong>
+            <strong>pera, faltou conferir uma coisinha</strong>
             <ul>
               {errors.map((e, i) => (
                 <li key={i}>{e.msg}</li>
