@@ -59,6 +59,14 @@ export interface Cats {
   name: string;
 }
 
+export interface ChaRifaWaitlist {
+  criado_em: Generated<Timestamp>;
+  email: string;
+  id: string;
+  id_plataforma: string;
+  notificado_em: Timestamp | null;
+}
+
 export interface Contas {
   criada_em: Generated<Timestamp>;
   id: string;
@@ -313,6 +321,7 @@ export interface DB {
   campanha_administradores: CampanhaAdministradores;
   campanhas: Campanhas;
   cats: Cats;
+  cha_rifa_waitlist: ChaRifaWaitlist;
   contas: Contas;
   contribuicoes: Contribuicoes;
   convidados: Convidados;

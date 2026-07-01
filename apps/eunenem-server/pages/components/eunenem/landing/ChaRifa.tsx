@@ -1,16 +1,35 @@
-// aperture-397x0 — "chá rifa" teaser section. Plum background, dotted
-// noise overlay, two-column grid: copy + email capture on the left, a
-// tilted paper raffle-ticket mock on the right with a coral "em breve"
-// stamp. Mirrors v2 HTML section 09 ("09 Chá rifa"). The submit handler
-// is a local optimistic stub — no backend wiring in this slice.
+'use client';
+
+// Persiste e-mail via tRPC na waitlist do chá rifa.
+// UX de "obrigado" após salvar; envio da notificação por e-mail será implementado em uma fase futura.
+import { TRPCClientError } from '@trpc/client';
 import { useState, type FormEvent } from 'react';
 
+import { trpc } from '@/lib/trpc.js';
+
 export function ChaRifa() {
+  const [email, setEmail] = useState('');
   const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const cadastrar = trpc.landing.cadastrarInteresseChaRifa.useMutation({
+    onSuccess: () => {
+      setSubmitted(true);
+      setError(null);
+    },
+    onError: (err) => {
+      if (err instanceof TRPCClientError && err.data?.code === 'TOO_MANY_REQUESTS') {
+        setError('Muitas tentativas. Aguarde alguns instantes e tente de novo.');
+        return;
+      }
+      setError('Não foi possível salvar agora. Tente novamente em instantes.');
+    },
+  });
 
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setSubmitted(true);
+    setError(null);
+    cadastrar.mutate({ email: email.trim().toLowerCase() });
   };
 
   return (
@@ -37,14 +56,31 @@ export function ChaRifa() {
               ✿ feito! a gente te avisa quando o chá rifa entrar no ar.
             </div>
           ) : (
-            <form className="cha-rifa-form" onSubmit={handleSubmit}>
-              <input
-                type="email"
-                placeholder="seu melhor e-mail"
-                required
-                aria-label="E-mail para aviso de lançamento"
-              />
-              <button type="submit">me avise!</button>
+            <form onSubmit={handleSubmit}>
+              <div className="cha-rifa-form">
+                <input
+                  type="email"
+                  name="email"
+                  placeholder="seu melhor e-mail"
+                  required
+                  aria-label="E-mail para aviso de lançamento"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  disabled={cadastrar.isPending}
+                />
+                <button type="submit" disabled={cadastrar.isPending}>
+                  {cadastrar.isPending ? 'enviando…' : 'me avise!'}
+                </button>
+              </div>
+              {error ? (
+                <p className="cha-rifa-error" role="alert">
+                  {error}
+                </p>
+              ) : null}
+              <p className="cha-rifa-meta">
+                Usaremos seu e-mail apenas para avisar sobre o lançamento do chá
+                rifa.
+              </p>
             </form>
           )}
         </div>
