@@ -335,7 +335,7 @@ export function AuthModalShell({ onClose }: AuthModalShellProps) {
             {/* fineprint — always shown: a single entry can create accounts */}
             <p className="auth-fineprint">
               Ao continuar você concorda com os{" "}
-              <a href="/termos" target="_blank" rel="noopener noreferrer">
+              <a href="/termos-de-uso" target="_blank" rel="noopener noreferrer">
                 Termos de uso
               </a>{" "}
               e a{" "}

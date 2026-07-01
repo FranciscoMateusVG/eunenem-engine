@@ -1,11 +1,11 @@
 import { Hono } from 'hono';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { criarAuth } from '../../src/adapters/usuario/criar-auth.js';
 import {
   BLOCKED_AUTH_BODY,
   BLOCKED_AUTH_STATUS,
   installBlockedAuthHandlerGuard,
 } from '../../apps/eunenem-server/server/blocked-auth-handler.js';
+import { criarAuth } from '../../src/adapters/usuario/criar-auth.js';
 import { createTestDatabase, type TestDatabase } from '../helpers/test-db.js';
 
 /**
@@ -365,7 +365,11 @@ describe('DENY-BY-DEFAULT /api/auth/* on the REAL handler (aperture-sxj32 pins 9
   describe('uniform 410 across the entire deny surface (no oracle)', () => {
     it('every denied route returns byte-identical {410, "Gone"}', async () => {
       const denied: Array<{ method: 'POST' | 'GET'; path: string; body?: unknown }> = [
-        { method: 'POST', path: '/api/auth/update-user', body: { idPlataforma: OTHER_PLATFORM_ID } },
+        {
+          method: 'POST',
+          path: '/api/auth/update-user',
+          body: { idPlataforma: OTHER_PLATFORM_ID },
+        },
         { method: 'POST', path: '/api/auth/change-email' },
         { method: 'POST', path: '/api/auth/delete-user' },
         { method: 'POST', path: '/api/auth/change-password' },

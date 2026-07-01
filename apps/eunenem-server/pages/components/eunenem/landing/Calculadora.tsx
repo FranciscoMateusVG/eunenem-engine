@@ -116,10 +116,6 @@ export function Calculadora() {
             quanto seu chá pode{' '}
             <em className="not-italic text-lilac-deep">render</em>?
           </h2>
-          <p className="text-[17px] text-ink-soft mt-3.5 text-pretty">
-            Arrasta os dois sliders. Mostro quanto você recebe líquido — e
-            o que dá pra comprar com isso.
-          </p>
         </div>
 
         <div className="calculadora-card">
@@ -128,7 +124,7 @@ export function Calculadora() {
             <div>
               <div className="calculadora-slider-row">
                 <span className="calculadora-slider-label">
-                  convidados que presenteiam
+                  convidados
                 </span>
                 <span className="calculadora-slider-value">{guests}</span>
               </div>
@@ -143,16 +139,12 @@ export function Calculadora() {
                 style={guestsStyle}
                 aria-label="Número de convidados que presenteiam"
               />
-              <div className="calculadora-block-sub">
-                ~70% dos convidados costumam presentear no chá de bebê
-                online
-              </div>
             </div>
 
             <div>
               <div className="calculadora-slider-row">
                 <span className="calculadora-slider-label">
-                  ticket médio do presente
+                  ticket médio
                 </span>
                 <span className="calculadora-slider-value">{ticketLabel}</span>
               </div>
@@ -183,28 +175,6 @@ export function Calculadora() {
                 ))}
               </div>
             </div>
-
-            <div className="calculadora-mini-fact">
-              <div className="calculadora-mini-fact-ico">
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="#fff"
-                  strokeWidth="3.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M5 12l5 5L20 7" />
-                </svg>
-              </div>
-              <div>
-                Sem mensalidade, sem taxa de cadastro, sem taxa de saque.{' '}
-                <strong>
-                  A taxa de 7,5% fica embutida no que o convidado paga
-                </strong>{' '}
-                — você recebe o valor cheio.
-              </div>
-            </div>
           </div>
 
           {/* ─── Result ───────────────────────────────────────── */}
@@ -217,18 +187,6 @@ export function Calculadora() {
               <small>líquido na sua conta · 0% de taxa pra você</small>
             </div>
 
-            <div className="calculadora-formula">
-              <span>
-                <b>{guests}</b> convidados
-              </span>
-              <span>×</span>
-              <span>
-                <b>{ticketLabel}</b> cada
-              </span>
-              <span>=</span>
-              <b>{totalLabel}</b>
-            </div>
-
             <div className="calculadora-buys">
               <span className="calculadora-buys-label">
                 com isso você compra ↓
@@ -239,7 +197,7 @@ export function Calculadora() {
                   <div>
                     <div className="calculadora-buy-qty">{buys.diapers}</div>
                     <div className="calculadora-buy-item">
-                      de fralda descartável
+                      de fralda
                     </div>
                   </div>
                 </div>
@@ -248,7 +206,7 @@ export function Calculadora() {
                   <div>
                     <div className="calculadora-buy-qty">{buys.milk}</div>
                     <div className="calculadora-buy-item">
-                      de fórmula infantil
+                      de fórmula
                     </div>
                   </div>
                 </div>
@@ -257,7 +215,7 @@ export function Calculadora() {
                   <div>
                     <div className="calculadora-buy-qty">{buys.crib}</div>
                     <div className="calculadora-buy-item">
-                      completos com colchão
+                      com colchão
                     </div>
                   </div>
                 </div>
@@ -266,7 +224,7 @@ export function Calculadora() {
                   <div>
                     <div className="calculadora-buy-qty">{buys.stroller}</div>
                     <div className="calculadora-buy-item">
-                      de bebê top de linha
+                      top de linha
                     </div>
                   </div>
                 </div>
@@ -280,7 +238,10 @@ export function Calculadora() {
                 onClick={() => auth.open('signup', ctaRef.current)}
                 className="btn-lilac"
               >
-                → criar minha lista grátis
+                criar minha lista grátis{' '}
+                <span className="btn-cta-arrow" aria-hidden="true">
+                  →
+                </span>
               </button>
             </div>
           </div>

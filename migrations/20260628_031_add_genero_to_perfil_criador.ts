@@ -14,10 +14,7 @@ import { sql } from 'kysely';
  * value the domain can't read.
  */
 export async function up(db: Kysely<unknown>): Promise<void> {
-  await db.schema
-    .alterTable('perfil_criadores')
-    .addColumn('genero', 'varchar(20)')
-    .execute();
+  await db.schema.alterTable('perfil_criadores').addColumn('genero', 'varchar(20)').execute();
 
   await db.schema
     .alterTable('perfil_criadores')

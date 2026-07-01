@@ -67,11 +67,7 @@ export interface CriarAuthConfig {
    * pre-registered attacker's password cannot survive the victim's magic-link
    * login. Enabling this WITHOUT that hook re-opens an account-takeover.
    */
-  readonly sendMagicLink?: (input: {
-    email: string;
-    url: string;
-    token: string;
-  }) => Promise<void>;
+  readonly sendMagicLink?: (input: { email: string; url: string; token: string }) => Promise<void>;
 
   /**
    * Default platform id injected into adapter-created users (e.g. OAuth signup)
@@ -459,22 +455,25 @@ export function criarAuth(kysely: Database, config: CriarAuthConfig) {
     //   - token entropy: better-auth's default generateToken is CSPRNG
     //     (generateRandomString, 32 chars) — we rely on it deliberately.
     ...(config.sendMagicLink
-      ? {
-          plugins: [
-            magicLink({
-              expiresIn: 300,
-              storeToken: 'hashed',
-              sendMagicLink: async ({ email, url, token }) => {
-                // gate item 5 (per-EMAIL axis): skip the send when this email is
-                // over its send budget — preserves better-auth's uniform
-                // response (no account-existence / send-state oracle).
-                const within = await consumeMagicLinkEmailBudget(kysely, email);
-                if (!within) return;
-                await config.sendMagicLink!({ email, url, token });
-              },
-            }),
-          ],
-        }
+      ? (() => {
+          const sendMagicLink = config.sendMagicLink;
+          return {
+            plugins: [
+              magicLink({
+                expiresIn: 300,
+                storeToken: 'hashed',
+                sendMagicLink: async ({ email, url, token }) => {
+                  // gate item 5 (per-EMAIL axis): skip the send when this email is
+                  // over its send budget — preserves better-auth's uniform
+                  // response (no account-existence / send-state oracle).
+                  const within = await consumeMagicLinkEmailBudget(kysely, email);
+                  if (!within) return;
+                  await sendMagicLink({ email, url, token });
+                },
+              }),
+            ],
+          };
+        })()
       : {}),
     // aperture-8655f — social providers are CONDITIONAL: only spread in when
     // the consumer injected them (both OAuth env vars present on its side).
@@ -530,7 +529,9 @@ export function criarAuth(kysely: Database, config: CriarAuthConfig) {
             // every implicit-linkable provider is necessarily covered here.
             if (
               typeof account.providerId !== 'string' ||
-              !HOOK_COVERED_OAUTH_PROVIDERS.includes(account.providerId as HookCoveredOAuthProvider) ||
+              !HOOK_COVERED_OAUTH_PROVIDERS.includes(
+                account.providerId as HookCoveredOAuthProvider,
+              ) ||
               typeof account.userId !== 'string'
             ) {
               return;

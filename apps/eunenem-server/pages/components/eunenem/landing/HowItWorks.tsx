@@ -24,7 +24,7 @@ const STEPS: ReadonlyArray<Step> = [
     color: 'bg-pink',
     rot: '-rotate-3',
     title: 'crie sua lista',
-    desc: 'Cadastre-se grátis. Use uma lista pronta ou monte do seu jeito.',
+    desc: 'Grátis. Use uma lista pronta ou monte do seu jeito.',
     icon: (
       <svg
         viewBox="0 0 56 56"
@@ -47,7 +47,7 @@ const STEPS: ReadonlyArray<Step> = [
     color: 'bg-green',
     rot: 'rotate-2',
     title: 'compartilhe',
-    desc: 'Envie pelo WhatsApp ou crie um convite digital lindo, com a sua cara.',
+    desc: 'Pelo WhatsApp ou com um convite digital com a sua cara.',
     icon: (
       <svg
         viewBox="0 0 56 56"
@@ -69,8 +69,8 @@ const STEPS: ReadonlyArray<Step> = [
     n: 3,
     color: 'bg-blue',
     rot: '-rotate-2',
-    title: 'receba em dinheiro',
-    desc: 'Você saca direto na sua conta via Pix, quando quiser.',
+    title: 'receba via Pix',
+    desc: 'Saque quando quiser, direto na sua conta.',
     icon: (
       <svg
         viewBox="0 0 56 56"
@@ -96,7 +96,7 @@ export function HowItWorks() {
   return (
     <section id="como-funciona" className="fade-up py-22 bg-cream">
       <div className="mx-auto max-w-[1200px] px-6">
-        <div className="text-center max-w-[760px] mx-auto mb-14">
+        <div className="mb-10 max-w-[760px] text-left lg:mx-auto lg:mb-14 lg:text-center">
           <span className="font-script text-[28px] text-lilac-deep font-semibold inline-block -rotate-2 mb-1">
             é simples assim
           </span>
@@ -104,39 +104,34 @@ export function HowItWorks() {
             em 3 passos,{' '}
             <em className="not-italic text-lilac-deep">seu chá está pronto</em>
           </h2>
-          <p className="text-[17px] text-ink-soft mt-3.5 text-pretty">
+          <p className="mt-3.5 hidden text-[17px] text-ink-soft text-pretty lg:block">
             Sem burocracia. Você cuida do bebê, a gente cuida do resto.
           </p>
         </div>
-        <div className="steps-line relative grid grid-cols-1 lg:grid-cols-3 gap-7">
+        <div className="steps-line relative flex flex-col gap-8 lg:grid lg:grid-cols-3 lg:gap-7">
           {STEPS.map((s) => (
-            <div key={s.n} className="relative z-10 text-center px-3 group">
+            <div
+              key={s.n}
+              className="relative z-10 flex items-start gap-4 text-left lg:block lg:px-3 lg:text-center group"
+            >
               <div
-                className={`relative w-[120px] h-[120px] mx-auto mb-5 rounded-3xl flex items-center justify-center shadow-soft-md transition-transform group-hover:-rotate-6 group-hover:-translate-y-1 ${s.color} ${s.rot}`}
+                className={`relative flex h-[88px] w-[88px] shrink-0 items-center justify-center rounded-3xl shadow-soft-md transition-transform group-hover:-rotate-6 group-hover:-translate-y-1 lg:mx-auto lg:mb-5 lg:h-[120px] lg:w-[120px] ${s.color} ${s.rot}`}
               >
-                <span className="absolute -top-3 -right-3 w-9 h-9 rounded-full bg-white text-plum font-display font-semibold text-lg flex items-center justify-center shadow-soft-sm border-2 border-lilac-soft">
+                <span className="absolute -top-3 -right-3 flex h-9 w-9 items-center justify-center rounded-full border-2 border-lilac-soft bg-white font-display text-lg font-semibold text-plum shadow-soft-sm">
                   {s.n}
                 </span>
-                {s.icon}
+                <span className="scale-[0.72] lg:scale-100">{s.icon}</span>
               </div>
-              <h3 className="font-display text-2xl font-semibold mb-2 text-plum">
-                {s.title}
-              </h3>
-              <p className="text-ink-soft text-[15px] max-w-[280px] mx-auto text-pretty">
-                {s.desc}
-              </p>
+              <div className="min-w-0 pt-1 lg:pt-0">
+                <h3 className="mb-1 font-display text-xl font-semibold text-plum lg:mb-2 lg:text-2xl">
+                  {s.title}
+                </h3>
+                <p className="text-[14px] text-ink-soft text-pretty lg:mx-auto lg:max-w-[280px] lg:text-[15px]">
+                  {s.desc}
+                </p>
+              </div>
             </div>
           ))}
-        </div>
-        <div className="text-center mt-14">
-          <button
-            ref={ctaRef}
-            type="button"
-            onClick={() => auth.open('signup', ctaRef.current)}
-            className="btn-outline"
-          >
-            começar agora →
-          </button>
         </div>
       </div>
     </section>

@@ -43,7 +43,7 @@ test.describe('Painel — Adicionar mimo (quantidade single-row)', () => {
     page.on('request', (req) => {
       const url = req.url();
       const m = url.match(/\/api\/trpc\/([^?]+)/);
-      if (m && m[1] && req.method() === 'POST') {
+      if (m?.[1] && req.method() === 'POST') {
         for (const procedure of m[1].split(',')) {
           trpcCalls.push(procedure);
         }

@@ -1,5 +1,5 @@
-import nodemailer, { type Transporter } from 'nodemailer';
 import { SpanStatusCode, trace } from '@opentelemetry/api';
+import nodemailer, { type Transporter } from 'nodemailer';
 import type { EmailMessage, EmailTransport } from './email-transport.js';
 
 const tracer = trace.getTracer('frame');

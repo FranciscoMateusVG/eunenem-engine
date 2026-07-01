@@ -1,8 +1,8 @@
 import { createHmac, randomUUID } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { criarAuth } from '../../src/adapters/usuario/criar-auth.js';
-import { AuthServiceBetterAuth } from '../../src/adapters/usuario/auth-service.better-auth.js';
 import { ID_PLATAFORMA_EUNENEM } from '../../src/adapters/plataforma/repository.memory.js';
+import { AuthServiceBetterAuth } from '../../src/adapters/usuario/auth-service.better-auth.js';
+import { criarAuth } from '../../src/adapters/usuario/criar-auth.js';
 import { createTestDatabase, type TestDatabase } from '../helpers/test-db.js';
 import { truncateBetterAuthTables } from '../helpers/truncate-better-auth.js';
 
@@ -269,8 +269,7 @@ async function driveRealCallback(
 // Microsoft's callback code-flow resolves the profile via getUserInfo →
 // decodeJwt (NO signature/JWKS verification, same as Google here), so we can
 // drive the REAL callback with a mocked token endpoint + a decode-only id_token.
-const MICROSOFT_TOKEN_ENDPOINT =
-  'https://login.microsoftonline.com/common/oauth2/v2.0/token';
+const MICROSOFT_TOKEN_ENDPOINT = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
 const MICROSOFT_GRAPH = 'https://graph.microsoft.com/';
 
 /** Auth with the REAL config + the Microsoft provider registered. */
@@ -753,7 +752,8 @@ describe('Google-OAuth account-linking + password-invalidation (aperture-8655f /
       'the OAuth callback must CREATE exactly one user for the brand-new Google identity. ' +
         'ZERO here means the happy path is broken (user-create failed) — a FINDING.',
     ).toHaveLength(1);
-    const createdUser = createdUsers[0]!;
+    const [createdUser] = createdUsers;
+    expect(createdUser, 'createdUsers[0] must exist after length assertion').toBeDefined();
     expect(
       createdUser.id_plataforma,
       'the dm7s3 user.create.before hook must inject id_plataforma = ID_PLATAFORMA_EUNENEM ' +
@@ -796,7 +796,8 @@ describe('Google-OAuth account-linking + password-invalidation (aperture-8655f /
       googleAccounts,
       'a google accounts row must be linked to the brand-new user (the OAuth account record).',
     ).toHaveLength(1);
-    expect(googleAccounts[0]!.account_id, 'the google account must carry the Google sub').toBe(
+    const [googleAccount] = googleAccounts;
+    expect(googleAccount?.account_id, 'the google account must carry the Google sub').toBe(
       freshSub,
     );
   });
@@ -982,10 +983,9 @@ describe('Google-OAuth account-linking + password-invalidation (aperture-8655f /
       email,
       senha: password,
     });
-    expect(
-      before.idUsuario,
-      'CONTROL: the victim password must authenticate pre-attack',
-    ).toBe(victimUserId);
+    expect(before.idUsuario, 'CONTROL: the victim password must authenticate pre-attack').toBe(
+      victimUserId,
+    );
 
     // 2. ATTACK — Microsoft callback spoofing the victim's email, UNVERIFIED.
     const res = await driveRealMicrosoftCallback(auth, {
@@ -1007,10 +1007,9 @@ describe('Google-OAuth account-linking + password-invalidation (aperture-8655f /
       location,
       'the refuse must surface account_not_linked (the attacker is locked out)',
     ).toContain('account_not_linked');
-    expect(
-      setsSessionCookie(res),
-      'attacker Microsoft sign-in must NOT mint a session',
-    ).toBe(false);
+    expect(setsSessionCookie(res), 'attacker Microsoft sign-in must NOT mint a session').toBe(
+      false,
+    );
 
     // 3b. No microsoft account linked to the victim.
     const linkedMs = await testDb.db
@@ -1100,10 +1099,9 @@ describe('Google-OAuth account-linking + password-invalidation (aperture-8655f /
       email,
       senha: oldPassword,
     });
-    expect(
-      before.idUsuario,
-      'CONTROL: the password must authenticate before the magic-link',
-    ).toBe(victimUserId);
+    expect(before.idUsuario, 'CONTROL: the password must authenticate before the magic-link').toBe(
+      victimUserId,
+    );
 
     // 2. Request + consume the REAL magic link (signInMagicLink fires the
     // sender → we capture the URL → drive the verify endpoint).
@@ -1115,10 +1113,9 @@ describe('Google-OAuth account-linking + password-invalidation (aperture-8655f /
     const verifyRes = await auth.handler(
       new Request(capturedUrl as unknown as string, { method: 'GET', redirect: 'manual' }),
     );
-    expect(
-      [200, 302, 303, 307],
-      'magic-link verify must succeed (session established)',
-    ).toContain(verifyRes.status);
+    expect([200, 302, 303, 307], 'magic-link verify must succeed (session established)').toContain(
+      verifyRes.status,
+    );
 
     // 3a. KEYSTONE — the credential password is now NULL.
     const pwAfter = await testDb.db

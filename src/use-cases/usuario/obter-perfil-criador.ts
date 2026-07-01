@@ -3,6 +3,7 @@ import { z } from 'zod/v4';
 import type { ObjectStorage } from '../../adapters/storage/object-storage.js';
 import type { PerfilCriadorRepository } from '../../adapters/usuario/perfil-criador-repository.js';
 import type { UsuarioRepository } from '../../adapters/usuario/repository.js';
+import type { ConteudoPerfilCriador } from '../../domain/usuario/value-objects/conteudo-perfil-criador.js';
 import { GeneroBebeSchema } from '../../domain/usuario/value-objects/genero-bebe.js';
 import type { IdUsuario } from '../../domain/usuario/value-objects/ids.js';
 import { TipoEventoPerfilSchema } from '../../domain/usuario/value-objects/tipo-evento-perfil.js';
@@ -42,6 +43,35 @@ export const PerfilProprioDTOSchema = z.object({
 
 export type PerfilProprioDTO = z.infer<typeof PerfilProprioDTOSchema>;
 
+function dateToIso(value: Date | null | undefined): string | null {
+  return value ? value.toISOString() : null;
+}
+
+function mapPerfilProprioDTO(
+  usuario: { slug: string; nomeExibicao: string },
+  conteudo: ConteudoPerfilCriador | undefined,
+  fotoUrl: (key: string | null) => string | null,
+): PerfilProprioDTO {
+  const c = conteudo;
+  return {
+    slug: usuario.slug,
+    creatorName: usuario.nomeExibicao,
+    nomeBebe: c?.nomeBebe ?? null,
+    relacao: c?.relacao ?? null,
+    historia: c?.historia ?? null,
+    tipoEvento: c?.tipoEvento ?? null,
+    genero: c?.genero ?? null,
+    dataEvento: dateToIso(c?.dataEvento),
+    dataNascimento: dateToIso(c?.dataNascimento),
+    fotoPerfilUrl: fotoUrl(c?.fotoPerfilKey ?? null),
+    fotoCapaUrl: fotoUrl(c?.fotoCapaKey ?? null),
+    fotoHistoriaUrl: fotoUrl(c?.fotoHistoriaKey ?? null),
+    fotoPerfilKey: c?.fotoPerfilKey ?? null,
+    fotoCapaKey: c?.fotoCapaKey ?? null,
+    fotoHistoriaKey: c?.fotoHistoriaKey ?? null,
+  };
+}
+
 export interface ObterPerfilCriadorDeps {
   readonly usuarioRepository: UsuarioRepository;
   readonly perfilCriadorRepository: PerfilCriadorRepository;
@@ -72,25 +102,7 @@ export async function obterPerfilCriador(
       }
 
       const perfil = await perfilCriadorRepository.findByUsuarioId(idUsuario);
-      const c = perfil?.conteudo;
-
-      const dto: PerfilProprioDTO = {
-        slug: usuario.slug,
-        creatorName: usuario.nomeExibicao,
-        nomeBebe: c?.nomeBebe ?? null,
-        relacao: c?.relacao ?? null,
-        historia: c?.historia ?? null,
-        tipoEvento: c?.tipoEvento ?? null,
-        genero: c?.genero ?? null,
-        dataEvento: c?.dataEvento ? c.dataEvento.toISOString() : null,
-        dataNascimento: c?.dataNascimento ? c.dataNascimento.toISOString() : null,
-        fotoPerfilUrl: fotoUrl(c?.fotoPerfilKey ?? null),
-        fotoCapaUrl: fotoUrl(c?.fotoCapaKey ?? null),
-        fotoHistoriaUrl: fotoUrl(c?.fotoHistoriaKey ?? null),
-        fotoPerfilKey: c?.fotoPerfilKey ?? null,
-        fotoCapaKey: c?.fotoCapaKey ?? null,
-        fotoHistoriaKey: c?.fotoHistoriaKey ?? null,
-      };
+      const dto = mapPerfilProprioDTO(usuario, perfil?.conteudo, fotoUrl);
 
       span.setStatus({ code: SpanStatusCode.OK });
       return dto;

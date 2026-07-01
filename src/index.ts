@@ -12,6 +12,11 @@ export { RecebedorRepositoryPostgres } from './adapters/arrecadacao/recebedor-re
 export type { CatRepository } from './adapters/cat-repository.js';
 export type { Database } from './adapters/database.js';
 export { createDatabase } from './adapters/database.js';
+// aperture-lwx2k — shared email transport (magic-link + future transactional).
+export type { EmailMessage, EmailTransport } from './adapters/email/email-transport.js';
+export type { SmtpConfig } from './adapters/email/email-transport.nodemailer.js';
+export { EmailTransportNodemailer } from './adapters/email/email-transport.nodemailer.js';
+export { EmailTransportNoop } from './adapters/email/email-transport.noop.js';
 export type { ConviteRepository } from './adapters/evento/convite-repository.js';
 export { ConviteRepositoryMemory } from './adapters/evento/convite-repository.memory.js';
 export { ConviteRepositoryPostgres } from './adapters/evento/convite-repository.postgres.js';
@@ -64,11 +69,6 @@ export type {
   UrlUploadPresignada,
 } from './adapters/storage/object-storage.js';
 export { CONTENT_TYPE_EXTENSAO } from './adapters/storage/object-storage.js';
-// aperture-lwx2k — shared email transport (magic-link + future transactional).
-export type { EmailMessage, EmailTransport } from './adapters/email/email-transport.js';
-export type { SmtpConfig } from './adapters/email/email-transport.nodemailer.js';
-export { EmailTransportNodemailer } from './adapters/email/email-transport.nodemailer.js';
-export { EmailTransportNoop } from './adapters/email/email-transport.noop.js';
 export type { UploadRegistrado } from './adapters/storage/object-storage.memory.js';
 export { ObjectStorageMemory } from './adapters/storage/object-storage.memory.js';
 export type { ObjectStorageMinioConfig } from './adapters/storage/object-storage.minio.js';
@@ -555,6 +555,8 @@ export {
 } from './domain/usuario/value-objects/conteudo-perfil-criador.js';
 export type { EmailUsuario } from './domain/usuario/value-objects/email-usuario.js';
 export { EmailUsuarioSchema } from './domain/usuario/value-objects/email-usuario.js';
+export type { GeneroBebe } from './domain/usuario/value-objects/genero-bebe.js';
+export { GeneroBebeSchema } from './domain/usuario/value-objects/genero-bebe.js';
 export type {
   IdContaUsuario,
   IdPerfilCriador,
@@ -578,8 +580,6 @@ export {
 } from './domain/usuario/value-objects/slug-usuario.js';
 export type { TipoEventoPerfil } from './domain/usuario/value-objects/tipo-evento-perfil.js';
 export { TipoEventoPerfilSchema } from './domain/usuario/value-objects/tipo-evento-perfil.js';
-export type { GeneroBebe } from './domain/usuario/value-objects/genero-bebe.js';
-export { GeneroBebeSchema } from './domain/usuario/value-objects/genero-bebe.js';
 export type { TokenSessao } from './domain/usuario/value-objects/token-sessao.js';
 export { TokenSessaoSchema } from './domain/usuario/value-objects/token-sessao.js';
 

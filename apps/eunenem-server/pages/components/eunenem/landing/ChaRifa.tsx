@@ -1,16 +1,35 @@
-// aperture-397x0 — "chá rifa" teaser section. Plum background, dotted
-// noise overlay, two-column grid: copy + email capture on the left, a
-// tilted paper raffle-ticket mock on the right with a coral "em breve"
-// stamp. Mirrors v2 HTML section 09 ("09 Chá rifa"). The submit handler
-// is a local optimistic stub — no backend wiring in this slice.
+'use client';
+
+// Persiste e-mail via tRPC na waitlist do chá rifa.
+// UX de "obrigado" após salvar; envio da notificação por e-mail será implementado em uma fase futura.
+import { TRPCClientError } from '@trpc/client';
 import { useState, type FormEvent } from 'react';
 
+import { trpc } from '@/lib/trpc.js';
+
 export function ChaRifa() {
+  const [email, setEmail] = useState('');
   const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const cadastrar = trpc.landing.cadastrarInteresseChaRifa.useMutation({
+    onSuccess: () => {
+      setSubmitted(true);
+      setError(null);
+    },
+    onError: (err) => {
+      if (err instanceof TRPCClientError && err.data?.code === 'TOO_MANY_REQUESTS') {
+        setError('Muitas tentativas. Aguarde alguns instantes e tente de novo.');
+        return;
+      }
+      setError('Não foi possível salvar agora. Tente novamente em instantes.');
+    },
+  });
 
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setSubmitted(true);
+    setError(null);
+    cadastrar.mutate({ email: email.trim().toLowerCase() });
   };
 
   return (
@@ -29,9 +48,7 @@ export function ChaRifa() {
             <em className="not-italic cha-rifa-em">nova</em>, chegando logo
           </h2>
           <p className="cha-rifa-lede">
-            Já dá pra fazer chá de bebê, chá de fraldas e chá revelação na
-            EuNeném. O <strong>chá rifa</strong> tá chegando — sorteio entre
-            os convidados, e o presentão vai pra um só. Quer ser uma das
+            Sorteio entre os convidados dentro da plataforma. Quer ser uma das
             primeiras a saber?
           </p>
           {submitted ? (
@@ -39,31 +56,46 @@ export function ChaRifa() {
               ✿ feito! a gente te avisa quando o chá rifa entrar no ar.
             </div>
           ) : (
-            <form className="cha-rifa-form" onSubmit={handleSubmit}>
-              <input
-                type="email"
-                placeholder="seu melhor e-mail"
-                required
-                aria-label="E-mail para aviso de lançamento"
-              />
-              <button type="submit">me avise!</button>
+            <form onSubmit={handleSubmit}>
+              <div className="cha-rifa-form">
+                <input
+                  type="email"
+                  name="email"
+                  placeholder="seu melhor e-mail"
+                  required
+                  aria-label="E-mail para aviso de lançamento"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  disabled={cadastrar.isPending}
+                />
+                <button type="submit" disabled={cadastrar.isPending}>
+                  {cadastrar.isPending ? 'enviando…' : 'me avise!'}
+                </button>
+              </div>
+              {error ? (
+                <p className="cha-rifa-error" role="alert">
+                  {error}
+                </p>
+              ) : null}
+              <p className="cha-rifa-meta">
+                Usaremos seu e-mail apenas para avisar sobre o lançamento do chá
+                rifa.
+              </p>
             </form>
           )}
-          <p className="cha-rifa-meta">Zero spam. Só um e-mail quando for hora.</p>
         </div>
-        <div aria-hidden="true" className="cha-rifa-ticket-wrap">
+
+        <div className="cha-rifa-ticket-wrap" aria-hidden>
           <div className="cha-rifa-ticket">
-            <div className="cha-rifa-stamp">em breve!</div>
+            <span className="cha-rifa-stamp">em breve!</span>
             <div className="cha-rifa-ticket-top">
               <span className="cha-rifa-ticket-label">chá rifa</span>
-              <span className="cha-rifa-ticket-num">№ 042</span>
             </div>
             <div className="cha-rifa-ticket-mid">
-              <h4>
-                1 sorteio,
-                <br />1 presente lindo
-              </h4>
-              <p>Cada presente vira um número. Um convidado leva tudo.</p>
+              <h4>1 sorteio, 1 presente lindo</h4>
+              <p>
+                Cada presente vira um número. Um convidado leva tudo.
+              </p>
             </div>
             <div className="cha-rifa-ticket-foot">
               <span className="cha-rifa-tag">chá de bebê</span>

@@ -19,7 +19,6 @@ import { randomUUID } from 'node:crypto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { ServerDeps } from '../../apps/eunenem-server/server/auth/setup.js';
 import type { TrpcContext } from '../../apps/eunenem-server/server/trpc/context.js';
-import { adminAuthOverrides } from '../helpers/admin-auth.js';
 import { appRouter } from '../../apps/eunenem-server/server/trpc/router.js';
 import { CampanhaRepositoryMemory } from '../../src/adapters/arrecadacao/campanha-repository.memory.js';
 import { ContribuicaoRepositoryMemory } from '../../src/adapters/arrecadacao/contribuicao-repository.memory.js';
@@ -32,6 +31,7 @@ import {
 } from '../../src/adapters/plataforma/repository.memory.js';
 import { NoopLogger } from '../../src/observability/noop-logger.js';
 import { noopTracer } from '../../src/observability/tracer.js';
+import { adminAuthOverrides } from '../helpers/admin-auth.js';
 import { makePagamento as makePagamentoBase } from '../helpers/pagamento-repository.conformance.js';
 
 interface TestRig {

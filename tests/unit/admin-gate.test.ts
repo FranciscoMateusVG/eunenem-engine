@@ -80,16 +80,16 @@ function caller(deps: ServerDeps, headers: Headers) {
 describe('admin authz gate (aperture-4n222)', () => {
   it('(1) anon (no session) → UNAUTHORIZED on an admin proc [CONTROL]', async () => {
     const { deps, headers } = makeDeps({ email: null, allowlist: ['admin@x.com'] });
-    await expect(
-      caller(deps, headers).admin.searchUsers({ prefix: 'a' }),
-    ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    await expect(caller(deps, headers).admin.searchUsers({ prefix: 'a' })).rejects.toMatchObject({
+      code: 'UNAUTHORIZED',
+    });
   });
 
   it('(2) authed but NOT allowlisted → FORBIDDEN', async () => {
     const { deps, headers } = makeDeps({ email: 'intruder@x.com', allowlist: ['admin@x.com'] });
-    await expect(
-      caller(deps, headers).admin.searchUsers({ prefix: 'a' }),
-    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(caller(deps, headers).admin.searchUsers({ prefix: 'a' })).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    });
   });
 
   it('(3) authed AND allowlisted → passes the gate', async () => {
@@ -100,9 +100,9 @@ describe('admin authz gate (aperture-4n222)', () => {
 
   it('(4) empty allowlist → FORBIDDEN even for an authed user (fail-closed)', async () => {
     const { deps, headers } = makeDeps({ email: 'admin@x.com', allowlist: [] });
-    await expect(
-      caller(deps, headers).admin.searchUsers({ prefix: 'a' }),
-    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(caller(deps, headers).admin.searchUsers({ prefix: 'a' })).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    });
   });
 
   it('(5) allowlist match is case/whitespace-insensitive', async () => {

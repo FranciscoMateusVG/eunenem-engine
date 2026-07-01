@@ -5,6 +5,10 @@
 // SVGs / decorative JSX stay in the section components; only the textual
 // copy + structural data live here, mirroring painelDemo.ts conventions.
 
+import { templateSelectionPatch } from '../convite';
+import { DEFAULT_STATE, type ConviteState } from './convite';
+import { TEMPLATE_BY_ID } from './templates';
+
 /** External app URLs the marketing CTAs point at (real eunenem.com). */
 export const LANDING_LINKS = {
   criarLista: 'https://eunenem.com/minha-area',
@@ -104,38 +108,99 @@ export const LANDING_DIFFERENTIALS: ReadonlyArray<LandingDifferential> = [
   },
 ];
 
-/** Digital-invite preview cards. `title` carries a line break (split copy). */
-export interface LandingInvite {
-  /** CSS gradient for the card background. */
-  bg: string;
-  top: string;
-  /** Two-line title (rendered with a <br/> between). */
-  titleLines: readonly [string, string];
-  name: string;
-  bot: string;
-}
+/** Watercolor template ids showcased on the landing invites gallery. */
+export const LANDING_INVITE_TEMPLATE_IDS = [
+  'aviao-nas-nuvens',
+  'balao-rosa',
+  'baloes-no-ceu',
+] as const;
 
-export const LANDING_INVITES: ReadonlyArray<LandingInvite> = [
+const LANDING_INVITE_CLEAN: Pick<
+  ConviteState,
+  'address' | 'hashtag' | 'showHashtag' | 'rsvp' | 'gifts' | 'bgUpload'
+> = {
+  address: '',
+  hashtag: '',
+  showHashtag: false,
+  rsvp: false,
+  gifts: false,
+  bgUpload: null,
+};
+
+/** Real template previews — rendered via InvitePreview on the landing. */
+export const LANDING_INVITE_DEMOS: ReadonlyArray<ConviteState> = [
   {
-    bg: 'linear-gradient(155deg, #FBE0EA, #F4B6CD, #E78FA7)',
-    top: 'com muito amor',
-    titleLines: ['Helena', 'está chegando'],
-    name: '22 de junho · 15h',
-    bot: 'chá de bebê',
+    ...DEFAULT_STATE,
+    ...templateSelectionPatch(TEMPLATE_BY_ID['urso-nas-nuvens']!),
+    ...LANDING_INVITE_CLEAN,
+    eventType: 'batizado',
+    mode: 'presencial',
+    babyName: 'Pedro',
+    host: 'Beatriz',
+    date: '2027-07-20',
+    time: '18:00',
+    message: 'Consagro minha vida ao Senhor',
   },
   {
-    bg: 'linear-gradient(165deg, #FFF9F1, #F7D560, #C7DC6E)',
-    top: 'save the date',
-    titleLines: ['pequeno', 'Bento'],
-    name: 'Camila & Tiago',
-    bot: 'convite digital',
+    ...DEFAULT_STATE,
+    ...templateSelectionPatch(TEMPLATE_BY_ID['balao-dourado']!),
+    ...LANDING_INVITE_CLEAN,
+    eventType: 'cha-bebe',
+    mode: 'presencial',
+    babyName: 'Miguel',
+    host: 'Luciana',
+    date: '2027-07-20',
+    time: '18:00',
+    message: 'Estou chegando para completar a família!',
   },
   {
-    bg: 'linear-gradient(150deg, #E8D5F0, #C9A5D8, #9CD7DD)',
-    top: 'está chegando',
-    titleLines: ['Alice,', 'nossa estrelinha'],
-    name: 'setembro · 2026',
-    bot: 'por favor, confirme',
+    ...DEFAULT_STATE,
+    ...templateSelectionPatch(TEMPLATE_BY_ID['balao-rosa']!),
+    ...LANDING_INVITE_CLEAN,
+    eventType: 'cha-bebe',
+    mode: 'presencial',
+    babyName: 'Maria Júlia',
+    host: 'César & Camila',
+    date: '2027-07-20',
+    time: '18:00',
+    address: 'Rua Curitiba, 123',
+  },
+  {
+    ...DEFAULT_STATE,
+    ...templateSelectionPatch(TEMPLATE_BY_ID['patinho-laco-azul']!),
+    ...LANDING_INVITE_CLEAN,
+    eventType: 'cha-fraldas',
+    mode: 'presencial',
+    babyName: 'Joaquim',
+    host: 'Mariana e Jorge',
+    date: '2026-08-15',
+    time: '15:00',
+  },
+  {
+    ...DEFAULT_STATE,
+    ...templateSelectionPatch(TEMPLATE_BY_ID['margaridas']!),
+    ...LANDING_INVITE_CLEAN,
+    eventType: 'aniversario',
+    mode: 'presencial',
+    babyName: 'Ana Laura',
+    host: 'Poliana',
+    date: '2026-08-15',
+    time: '15:00',
+    message: 'Venha comemorar o primeiro aninho',
+    address: 'Rua Curitiba, 123',
+  },
+  {
+    ...DEFAULT_STATE,
+    ...templateSelectionPatch(TEMPLATE_BY_ID['varal-classico']!),
+    ...LANDING_INVITE_CLEAN,
+    eventType: 'cha-bebe',
+    mode: 'presencial',
+    babyName: 'Ana Catarina',
+    host: 'Bruna',
+    date: '2026-08-15',
+    time: '15:00',
+    message: 'Venha celebrar com a gente a chegada da nossa princesa!',
+    address: 'Rua das Acácias, 142, Vila Mariana - São Paulo',
   },
 ];
 
@@ -175,6 +240,13 @@ export const LANDING_TESTIMONIALS_HIGHLIGHT: ReadonlyArray<LandingTestimonial> =
   },
 ];
 
+/** Aggregate rating shown above the testimonial grid. */
+export const LANDING_TESTIMONIALS_RATING = {
+  score: '4,9',
+  countLabel: '2.847 avaliações',
+  fiveStarLabel: '91% deram 5 estrelas',
+} as const;
+
 /** Three-up testimonial grid (Testimonials). */
 export const LANDING_TESTIMONIALS: ReadonlyArray<LandingTestimonial> = [
   {
@@ -198,6 +270,20 @@ export const LANDING_TESTIMONIALS: ReadonlyArray<LandingTestimonial> = [
     name: 'Maitê Martinelle',
     meta: 'mãe da Liz',
   },
+  {
+    quote:
+      '" Fazer o chá de bebê pela EuNenem contribuiu para que pudéssemos chamar um maior número de convidados e contribuir para que todos pudessem compartilhar dessa alegria. A plataforma é fácil de mexer. Meus convidados amaram!"',
+    img: '/public/dep-ana-flavia.jpg',
+    name: 'Flávia Albuquerque',
+    meta: 'Mãe da Ana Flávia',
+  },
+  {
+    quote:
+      '"Eu e meu marido moramos em SP e fizemos o nosso chá no RJ. Com receio de receber muitos presentes e com pouco espaço no carro, começamos a pesquisar uma solução. Foi aí que conhecemos a EuNeném. Um site super simples, que na hora supriu nossas necessidades e nos deu a tranquilidade de escolher os melhores presentinhos para o nosso filho. Como mãe de primeira viagem o site ajudou muito a indicar o que faria sentido incluir na lista. Amamos a experiência. Obrigada EuNeném."',
+    img: '/public/dep-baby-mattos.jpg',
+    name: 'Livia Felix de Mattos',
+    meta: 'Mãe da Baby Mattos',
+  }
 ];
 
 /** Footer link columns. */
@@ -213,7 +299,7 @@ export const LANDING_FOOTER_COLS: ReadonlyArray<LandingFooterCol> = [
       ['perguntas frequentes', '/faq'],
       ['status dos serviços', '/faq'],
       ['taxas', '/faq'],
-      ['termos de uso', 'https://eunenem.com/termos-de-uso'],
+      ['termos de uso', '/termos-de-uso'],
     ],
   },
   {
@@ -242,6 +328,12 @@ export const LANDING_FOOTER_SOCIALS: ReadonlyArray<readonly [string, string]> = 
 ];
 
 /** FAQ — question + answer. Answers with inline links carry a `link` field. */
+export const LANDING_CTA_FINAL_PERKS = [
+  'Pronto em 5 min',
+  'Sem mensalidade',
+  'Suporte humano no WhatsApp',
+] as const;
+
 export interface LandingFaq {
   q: string;
   a: string;
@@ -251,7 +343,7 @@ export interface LandingFaq {
 
 export const LANDING_FAQS: ReadonlyArray<LandingFaq> = [
   {
-    q: 'a EuNeném cobra taxa?',
+    q: 'A EuNeném cobra taxa?',
     a: `Sim. As taxas da EuNeném são cobradas do convidado no momento da compra do presente. Isso significa que o valor que você adiciona à sua lista é exatamente o valor que você receberá. Por exemplo, se você cadastrar um presente de R$ 100, receberá integralmente os R$ 100.
 
 Para viabilizar o funcionamento da plataforma, é cobrada uma taxa de serviço de 7,8% sobre cada presente, destinada a cobrir os custos de operação, manutenção da plataforma e processamento dos pagamentos.
@@ -262,7 +354,7 @@ Dessa forma, os futuros pais recebem o valor integral definido na lista, enquant
     link: { label: 'ver tabela completa →', href: 'https://eunenem.com/faq' },
   },
   {
-    q: 'quando posso sacar o dinheiro?',
+    q: 'Quando posso sacar o dinheiro?',
     a: `O prazo começa a contar assim que o convidado realiza o pagamento do presente.
 
 Pagamentos via Pix: o valor fica disponível para solicitação de resgate em até 10 minutos.
@@ -274,6 +366,18 @@ Depois que você solicitar o resgate, a transferência será realizada para a su
 Você pode acompanhar todos os presentes recebidos e os valores disponíveis diretamente em seu extrato na EuNeném.`,
   },
   {
+    q: 'Como os convidados compram os presentes?',
+    a: `Comprar um presente na EuNeném é simples, rápido e seguro:
+
+Seu convidado acessa o link do seu chá de bebê.
+
+Escolhe o presente virtual que deseja dar entre as opções da sua lista.
+
+É direcionado para um ambiente seguro de pagamento, com proteção dos dados da transação.
+
+Escolhe a forma de pagamento, podendo pagar por Pix ou cartão de crédito.
+
+Após a confirmação do pagamento, o valor do presente é creditado em sua conta EuNeném de acordo com os prazos da forma de pagamento escolhida.`,
     q: 'Como os convidados compram os presentes?',
     a: `Comprar um presente na EuNeném é simples, rápido e seguro:
 
