@@ -351,7 +351,6 @@ Para viabilizar o funcionamento da plataforma, é cobrada uma taxa de serviço d
 Além disso, para pagamentos realizados por cartão de crédito, há um acréscimo de 3,99%, referente às taxas da operadora de pagamento.
 
 Dessa forma, os futuros pais recebem o valor integral definido na lista, enquanto os custos da transação são pagos por quem realiza a compra do presente.`,
-    link: { label: 'ver tabela completa →', href: 'https://eunenem.com/faq' },
   },
   {
     q: 'Quando posso sacar o dinheiro?',
@@ -366,18 +365,6 @@ Depois que você solicitar o resgate, a transferência será realizada para a su
 Você pode acompanhar todos os presentes recebidos e os valores disponíveis diretamente em seu extrato na EuNeném.`,
   },
   {
-    q: 'Como os convidados compram os presentes?',
-    a: `Comprar um presente na EuNeném é simples, rápido e seguro:
-
-Seu convidado acessa o link do seu chá de bebê.
-
-Escolhe o presente virtual que deseja dar entre as opções da sua lista.
-
-É direcionado para um ambiente seguro de pagamento, com proteção dos dados da transação.
-
-Escolhe a forma de pagamento, podendo pagar por Pix ou cartão de crédito.
-
-Após a confirmação do pagamento, o valor do presente é creditado em sua conta EuNeném de acordo com os prazos da forma de pagamento escolhida.`,
     q: 'Como os convidados compram os presentes?',
     a: `Comprar um presente na EuNeném é simples, rápido e seguro:
 
