@@ -3,13 +3,9 @@ import { toast } from "sonner";
 
 import type { PainelSectionBodyProps } from "@/PainelSectionPage";
 import {
-  CONVIDADOS_SEED,
   CONVIDADOS_EVENT,
-  RSVP_META,
   avatarFor,
   initialsOf,
-  type Convidado,
-  type ConvidadoRsvp,
 } from "@/lib/mocks/convidados";
 import { PREVIEW_EVENT } from "@/lib/mocks/eventPreview";
 // aperture-dkkau — wire the "Mensagem do convite" compositor to the REAL
@@ -17,11 +13,27 @@ import { PREVIEW_EVENT } from "@/lib/mocks/eventPreview";
 import {
   conviteErrorMessage,
   conviteStateFromData,
+  hasSavedConvite,
   savePayloadFromConviteState,
   useConviteData,
   useSalvarConvite,
 } from "@/lib/convite";
+// aperture-lista-convidados — wire the guest list + RSVP to the REAL
+// backend (eventoListaDeConvidados.* → listas_de_convidados/convidados
+// tables), replacing the CONVIDADOS_SEED mock.
+import {
+  convidadoFromSnapshot,
+  convidadosErrorMessage,
+  PRESENCA_META,
+  useAdicionarConvidado,
+  useAlterarPresencaConvidado,
+  useListaDeConvidadosData,
+  type Convidado,
+  type StatusPresencaConvidado,
+} from "@/lib/convidados";
+import { painelHref } from "@/lib/painelRoutes";
 import { DEFAULT_STATE, type ConviteState } from "@/lib/mocks/convite";
+import { InvitePreview } from "./ConviteBody";
 
 // aperture-x1b3u — Lista de convidados (RSVP + convites por WhatsApp).
 //
@@ -327,57 +339,50 @@ function badgeStyle(bg: string, color: string, border: string): CSSProperties {
   };
 }
 
-function RsvpBadge({ rsvp }: { rsvp: ConvidadoRsvp }) {
-  const m = RSVP_META[rsvp];
-  const styles: Record<ConvidadoRsvp, CSSProperties> = {
-    confirmed: badgeStyle(
-      "rgba(199, 220, 110, 0.28)",
-      "var(--green-deep)",
-      "rgba(138, 165, 58, 0.3)",
-    ),
-    maybe: badgeStyle(
-      "rgba(247, 213, 96, 0.35)",
-      "#8a6a14",
-      "rgba(247, 213, 96, 0.7)",
-    ),
-    declined: badgeStyle(
-      "var(--pink-soft)",
-      "var(--coral-pink)",
-      "rgba(231, 143, 167, 0.4)",
-    ),
-    pending: badgeStyle("var(--cream-2)", "var(--ink-mute)", "var(--line)"),
-  };
+// aperture-lista-convidados — single badge for the 5 real `presenca`
+// states, replacing the old RsvpBadge/SendBadge pair (send status is now
+// part of the domain state, not a separate UI-only flag).
+const PRESENCA_BADGE_STYLES: Record<StatusPresencaConvidado, CSSProperties> = {
+  nao_enviado: badgeStyle("var(--cream-2)", "var(--ink-soft)", "var(--line)"),
+  enviado: badgeStyle(
+    "rgba(247, 213, 96, 0.35)",
+    "#8a6a14",
+    "rgba(247, 213, 96, 0.7)",
+  ),
+  sim: badgeStyle(
+    "rgba(199, 220, 110, 0.28)",
+    "var(--green-deep)",
+    "rgba(138, 165, 58, 0.3)",
+  ),
+  talvez: badgeStyle(
+    "rgba(247, 213, 96, 0.35)",
+    "#8a6a14",
+    "rgba(247, 213, 96, 0.7)",
+  ),
+  nao: badgeStyle(
+    "var(--pink-soft)",
+    "var(--coral-pink)",
+    "rgba(231, 143, 167, 0.4)",
+  ),
+};
+
+function PresencaBadge({ presenca }: { presenca: StatusPresencaConvidado }) {
+  const m = PRESENCA_META[presenca];
   return (
-    <span style={styles[rsvp]}>
+    <span style={PRESENCA_BADGE_STYLES[presenca]}>
       <StatusDot color={m.color} /> {m.label}
     </span>
   );
 }
 
-function SendBadge({ sent }: { sent: boolean }) {
-  return sent ? (
-    <span
-      style={badgeStyle(
-        "rgba(199, 220, 110, 0.25)",
-        "var(--green-deep)",
-        "rgba(138, 165, 58, 0.3)",
-      )}
-    >
-      <StatusDot color="var(--green-deep)" /> mensagem enviada
-    </span>
-  ) : (
-    <span style={badgeStyle("var(--cream-2)", "var(--ink-soft)", "var(--line)")}>
-      <StatusDot color="var(--ink-mute)" /> não enviada
-    </span>
-  );
-}
-
 // ---------- guest card ----------
-const RSVP_OPTIONS: [ConvidadoRsvp, string, string][] = [
-  ["confirmed", "marcar como confirmado", "var(--green-deep)"],
-  ["maybe", "marcar como talvez", "#c79b1d"],
-  ["declined", "marcar como não vai", "var(--coral-pink)"],
-  ["pending", "voltar para aguardando", "var(--ink-mute)"],
+// aperture-lista-convidados — manual override menu only exposes the 3
+// final responses. `nao_enviado`/`enviado` are governed by the send flow
+// (botão "enviar"), not a manual host override.
+const RSVP_OPTIONS: [StatusPresencaConvidado, string, string][] = [
+  ["sim", "marcar como confirmado", "var(--green-deep)"],
+  ["talvez", "marcar como talvez", "#c79b1d"],
+  ["nao", "marcar como não vai", "var(--coral-pink)"],
 ];
 
 function GuestAvatar({ name }: { name: string }) {
@@ -413,8 +418,8 @@ function RsvpMenu({
   onSetRsvp,
   variant,
 }: {
-  guestId: number;
-  onSetRsvp: (id: number, rsvp: ConvidadoRsvp) => void;
+  guestId: string;
+  onSetRsvp: (id: string, presenca: StatusPresencaConvidado) => void;
   variant: "desktop" | "mobile";
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -516,17 +521,17 @@ function GuestSendActions({
   onRemind,
 }: {
   g: Convidado;
-  onSend: (id: number, isResend?: boolean) => void;
-  onRemind: (id: number) => void;
+  onSend: (id: string, isResend?: boolean) => void;
+  onRemind: (id: string) => void;
 }) {
   return (
     <>
-      {!g.sent && (
+      {g.presenca === "nao_enviado" && (
         <Button variant="whatsapp" size="sm" onClick={() => onSend(g.id)}>
           <IconWhatsapp /> enviar
         </Button>
       )}
-      {g.sent && g.rsvp === "maybe" && (
+      {g.presenca === "talvez" && (
         <Button
           variant="coral"
           size="sm"
@@ -536,7 +541,7 @@ function GuestSendActions({
           <IconBell /> {g.reminded ? "lembrado" : "lembrar"}
         </Button>
       )}
-      {g.sent && g.rsvp !== "maybe" && (
+      {g.presenca !== "nao_enviado" && g.presenca !== "talvez" && (
         <Button
           variant="ghost"
           size="sm"
@@ -556,10 +561,10 @@ function GuestMobilePrimaryAction({
   onRemind,
 }: {
   g: Convidado;
-  onSend: (id: number, isResend?: boolean) => void;
-  onRemind: (id: number) => void;
+  onSend: (id: string, isResend?: boolean) => void;
+  onRemind: (id: string) => void;
 }) {
-  if (!g.sent) {
+  if (g.presenca === "nao_enviado") {
     return (
       <Button variant="whatsapp" size="sm" onClick={() => onSend(g.id)}>
         <IconWhatsapp /> enviar
@@ -567,7 +572,7 @@ function GuestMobilePrimaryAction({
     );
   }
 
-  if (g.rsvp === "maybe") {
+  if (g.presenca === "talvez") {
     return (
       <Button
         variant="coral"
@@ -599,9 +604,9 @@ function GuestCard({
   onSetRsvp,
 }: {
   g: Convidado;
-  onSend: (id: number, isResend?: boolean) => void;
-  onRemind: (id: number) => void;
-  onSetRsvp: (id: number, rsvp: ConvidadoRsvp) => void;
+  onSend: (id: string, isResend?: boolean) => void;
+  onRemind: (id: string) => void;
+  onSetRsvp: (id: string, presenca: StatusPresencaConvidado) => void;
 }) {
   return (
     <div className="cv-guest-card">
@@ -641,8 +646,7 @@ function GuestCard({
             >
               <IconPhone size={12} /> {g.phone}
             </span>
-            <SendBadge sent={g.sent} />
-            <RsvpBadge rsvp={g.rsvp} />
+            <PresencaBadge presenca={g.presenca} />
             {g.reminded && (
               <span
                 style={{
@@ -680,8 +684,7 @@ function GuestCard({
         </div>
 
         <div className="cv-guest-mobile-row2">
-          <SendBadge sent={g.sent} />
-          <RsvpBadge rsvp={g.rsvp} />
+          <PresencaBadge presenca={g.presenca} />
           {g.reminded && (
             <span className="cv-guest-mobile-reminded">lembrete enviado ♡</span>
           )}
@@ -702,7 +705,7 @@ function GuestCard({
 // ---------- filter badges  ----------
 const STAT_BADGE_NEUTRAL = badgeStyle("var(--paper)", "var(--ink-soft)", "var(--line)");
 
-type GuestListFilter = "all" | ConvidadoRsvp | "unsent";
+type GuestListFilter = "all" | StatusPresencaConvidado;
 
 function GuestFilterBadges({
   guests,
@@ -714,11 +717,11 @@ function GuestFilterBadges({
   onFilterChange: (filter: GuestListFilter) => void;
 }) {
   const total = guests.length;
-  const confirmed = guests.filter((g) => g.rsvp === "confirmed").length;
-  const maybe = guests.filter((g) => g.rsvp === "maybe").length;
-  const declined = guests.filter((g) => g.rsvp === "declined").length;
-  const pending = guests.filter((g) => g.rsvp === "pending").length;
-  const unsent = guests.filter((g) => !g.sent).length;
+  const naoEnviado = guests.filter((g) => g.presenca === "nao_enviado").length;
+  const enviado = guests.filter((g) => g.presenca === "enviado").length;
+  const sim = guests.filter((g) => g.presenca === "sim").length;
+  const talvez = guests.filter((g) => g.presenca === "talvez").length;
+  const nao = guests.filter((g) => g.presenca === "nao").length;
 
   const stats: {
     key: GuestListFilter;
@@ -728,30 +731,20 @@ function GuestFilterBadges({
   }[] = [
     { key: "all", count: total, label: "todos", color: "var(--plum)" },
     {
-      key: "confirmed",
-      count: confirmed,
-      label: "confirmados",
-      color: RSVP_META.confirmed.color,
-    },
-    { key: "maybe", count: maybe, label: "talvez", color: RSVP_META.maybe.color },
-    {
-      key: "pending",
-      count: pending,
-      label: "aguardando",
-      color: RSVP_META.pending.color,
-    },
-    {
-      key: "declined",
-      count: declined,
-      label: "não vão",
-      color: RSVP_META.declined.color,
-    },
-    {
-      key: "unsent",
-      count: unsent,
+      key: "nao_enviado",
+      count: naoEnviado,
       label: "não enviadas",
-      color: "var(--coral-pink)",
+      color: PRESENCA_META.nao_enviado.color,
     },
+    {
+      key: "enviado",
+      count: enviado,
+      label: "aguardando resposta",
+      color: PRESENCA_META.enviado.color,
+    },
+    { key: "sim", count: sim, label: "confirmados", color: PRESENCA_META.sim.color },
+    { key: "talvez", count: talvez, label: "talvez", color: PRESENCA_META.talvez.color },
+    { key: "nao", count: nao, label: "não vão", color: PRESENCA_META.nao.color },
   ];
 
   return (
@@ -822,11 +815,13 @@ function AddGuestModal({
   onAdd,
   onClose,
 }: {
-  onAdd: (g: { name: string; phone: string }) => void;
+  /** Resolves `true` on success (modal closes); `false` leaves it open so the user can retry. */
+  onAdd: (g: { name: string; phone: string }) => Promise<boolean>;
   onClose: () => void;
 }) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -841,16 +836,20 @@ function AddGuestModal({
     };
   }, [onClose]);
 
-  const submit = () => {
+  const submit = async () => {
     const n = name.trim();
-    if (!n || !isValidBrMobilePhone(phone)) return;
-    onAdd({ name: n, phone });
-    setName("");
-    setPhone("");
-    onClose();
+    if (!n || !isValidBrMobilePhone(phone) || isSubmitting) return;
+    setIsSubmitting(true);
+    const ok = await onAdd({ name: n, phone });
+    setIsSubmitting(false);
+    if (ok) {
+      setName("");
+      setPhone("");
+      onClose();
+    }
   };
 
-  const canSubmit = name.trim().length > 0 && isValidBrMobilePhone(phone);
+  const canSubmit = name.trim().length > 0 && isValidBrMobilePhone(phone) && !isSubmitting;
   const phoneError =
     phone.length > 0 && !isValidBrMobilePhone(phone)
       ? "formato inválido — use (DD) 9XXXX-XXXX"
@@ -998,7 +997,7 @@ function AddGuestModal({
               >
                 <path d="M12 5v14M5 12h14" />
               </svg>
-              Adicionar à lista
+              {isSubmitting ? "Adicionando…" : "Adicionar à lista"}
             </button>
           </div>
         </div>
@@ -1355,78 +1354,55 @@ function VerLinkModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-// ---------- shared virtual invite preview card ----------
+// ---------- real virtual invite preview ----------
 //
-// Extracted from VerConviteModal so the collapse body can show the same
-// card inline when "convite virtual" is selected.
+// Replaces the old PREVIEW_EVENT-backed mock card: shows the user's actual
+// saved convite (same InvitePreview renderer as ConvitePreviewBody) when one
+// exists, otherwise a "criar convite" prompt. Mirrors the loading/error/empty
+// branching of ConvitePreviewBody so the two surfaces stay consistent.
 
-function VirtualInvitePreviewCard() {
-  const { eventName, eventNameHighlight, hostName, dateLabel, timeLabel, locationLabel } =
-    PREVIEW_EVENT;
-
-  const renderHighlighted = () => {
-    const idx = eventName.indexOf(eventNameHighlight);
-    if (idx < 0) return eventName;
-    const before = eventName.slice(0, idx);
-    const after = eventName.slice(idx + eventNameHighlight.length);
+function VirtualInvitePreviewSection({
+  slug,
+  conviteQuery,
+  state,
+}: {
+  slug: string;
+  conviteQuery: ReturnType<typeof useConviteData>;
+  state: ConviteState;
+}) {
+  if (conviteQuery.isLoading) {
     return (
-      <>
-        {before}
-        <span className="hl">{eventNameHighlight}</span>
-        {after}
-      </>
+      <div className="cv-virtual-invite-status">
+        carregando seu convite...
+      </div>
     );
-  };
+  }
 
-  const chipStyle: CSSProperties = {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 6,
-    padding: "5px 10px",
-    borderRadius: 999,
-    background: "var(--cream)",
-    color: "var(--ink-soft)",
-    fontFamily: FONT_SANS,
-    fontSize: 11,
-    fontWeight: 500,
-    border: "1px solid var(--line)",
-  };
+  if (conviteQuery.error) {
+    return (
+      <div className="cv-virtual-invite-status">
+        <p>não consegui carregar o convite salvo agora.</p>
+        <Button variant="ghost" size="sm" onClick={() => void conviteQuery.refetch()}>
+          tentar de novo
+        </Button>
+      </div>
+    );
+  }
 
-  const noop = (e: React.MouseEvent) => e.preventDefault();
+  if (!hasSavedConvite(conviteQuery.data)) {
+    return (
+      <div className="cv-virtual-invite-status">
+        <p>Você ainda não criou seu convite.</p>
+        <a href={painelHref(slug, "convite")} style={btnStyle("primary", "sm")}>
+          Criar convite
+        </a>
+      </div>
+    );
+  }
 
   return (
     <div className="cv-virtual-invite-frame">
-      <div className="cv-virtual-invite-preview">
-        <div className="cv-virtual-invite-greeting">olá ♡ você foi convidada</div>
-
-        <h4 className="cv-virtual-invite-title">{renderHighlighted()}</h4>
-
-        <div className="cv-virtual-invite-host">por {hostName}</div>
-
-        <div className="cv-virtual-invite-chips">
-          <span style={chipStyle}>
-            <IconCalendar size={13} /> {dateLabel}
-          </span>
-          <span style={chipStyle}>
-            <IconClock size={13} /> {timeLabel}
-          </span>
-          <span style={chipStyle}>
-            <IconPin size={13} /> {locationLabel}
-          </span>
-        </div>
-
-        <button
-          type="button"
-          className="cv-virtual-invite-cta"
-          onClick={noop}
-          aria-hidden="true"
-          tabIndex={-1}
-        >
-          <IconHeart size={13} fill="currentColor" /> confirmar presença
-        </button>
-
-        <div className="cv-virtual-invite-footer">mal posso esperar pra te ver ♡</div>
-      </div>
+      <InvitePreview state={state} format="story" fidelity="scrapbook" scale={0.6} />
     </div>
   );
 }
@@ -1435,8 +1411,23 @@ function VirtualInvitePreviewCard() {
 // Inline 9:16 preview in the collapse replaced the modal entry point.
 
 // ---------- page body ----------
-export function ConvidadosBody({ slug: _slug }: PainelSectionBodyProps) {
-  const [guests, setGuests] = useState<Convidado[]>(CONVIDADOS_SEED);
+export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
+  // aperture-lista-convidados — the guest list is the real backend source
+  // of truth; `reminded` has no domain field, so it's tracked locally
+  // (keyed by convidado id) and merged in on render.
+  const listaQuery = useListaDeConvidadosData();
+  const alterarPresenca = useAlterarPresencaConvidado();
+  const adicionarConvidado = useAdicionarConvidado();
+  const [remindedIds, setRemindedIds] = useState<Set<string>>(new Set());
+
+  const guests = useMemo<Convidado[]>(() => {
+    const convidados = listaQuery.data?.lista?.convidados ?? [];
+    return convidados.map((c) => {
+      const g = convidadoFromSnapshot(c);
+      return remindedIds.has(g.id) ? { ...g, reminded: true } : g;
+    });
+  }, [listaQuery.data, remindedIds]);
+
   // aperture-dkkau — the compositor now holds the FULL ConviteState (mirroring
   // ConviteBody) so saving re-serializes the whole convite intact. We only
   // expose 4 fields here (message/date/time/address); palette, template,
@@ -1469,9 +1460,7 @@ export function ConvidadosBody({ slug: _slug }: PainelSectionBodyProps) {
 
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteType, setInviteType] = useState<"virtual" | "text">("virtual");
-  const [filter, setFilter] = useState<
-    "all" | ConvidadoRsvp | "unsent"
-  >("all");
+  const [filter, setFilter] = useState<GuestListFilter>("all");
   const [query, setQuery] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   // aperture-8qg1s — controls the VER LINK preview modal
@@ -1479,8 +1468,7 @@ export function ConvidadosBody({ slug: _slug }: PainelSectionBodyProps) {
 
   const filteredGuests = useMemo(() => {
     let list = guests;
-    if (filter === "unsent") list = list.filter((g) => !g.sent);
-    else if (filter !== "all") list = list.filter((g) => g.rsvp === filter);
+    if (filter !== "all") list = list.filter((g) => g.presenca === filter);
     const q = query.trim().toLowerCase();
     if (q)
       list = list.filter(
@@ -1489,25 +1477,44 @@ export function ConvidadosBody({ slug: _slug }: PainelSectionBodyProps) {
     return list;
   }, [guests, filter, query]);
 
-  const addGuest = ({ name, phone }: { name: string; phone: string }) => {
-    setGuests((gs) => [
-      { id: Date.now(), name, phone, sent: false, rsvp: "pending", reminded: false },
-      ...gs,
-    ]);
-    toast.success("convidado adicionado à lista ♡");
+  const addGuest = async ({ name, phone }: { name: string; phone: string }) => {
+    try {
+      await adicionarConvidado.mutateAsync({ nome: name, numeroCelular: phone });
+      toast.success("convidado adicionado à lista ♡");
+      return true;
+    } catch (error) {
+      toast.error("não foi possível adicionar o convidado agora", {
+        description: convidadosErrorMessage(error),
+      });
+      return false;
+    }
   };
-  const sendOne = (id: number, isResend?: boolean) => {
-    setGuests((gs) => gs.map((g) => (g.id === id ? { ...g, sent: true } : g)));
-    toast.success(isResend ? "mensagem reenviada ♡" : "mensagem enviada ♡");
+  const sendOne = async (id: string, isResend?: boolean) => {
+    if (isResend) {
+      toast.success("mensagem reenviada ♡");
+      return;
+    }
+    try {
+      await alterarPresenca.mutateAsync({ idConvidado: id, presenca: "enviado" });
+      toast.success("mensagem enviada ♡");
+    } catch (error) {
+      toast.error("não foi possível marcar como enviada agora", {
+        description: convidadosErrorMessage(error),
+      });
+    }
   };
-  const remindOne = (id: number) => {
-    setGuests((gs) =>
-      gs.map((g) => (g.id === id ? { ...g, reminded: true } : g)),
-    );
+  const remindOne = (id: string) => {
+    setRemindedIds((ids) => new Set(ids).add(id));
     toast.success("lembrete enviado ♡");
   };
-  const setRsvp = (id: number, rsvp: ConvidadoRsvp) => {
-    setGuests((gs) => gs.map((g) => (g.id === id ? { ...g, rsvp } : g)));
+  const setRsvp = async (id: string, presenca: StatusPresencaConvidado) => {
+    try {
+      await alterarPresenca.mutateAsync({ idConvidado: id, presenca });
+    } catch (error) {
+      toast.error("não foi possível atualizar o RSVP agora", {
+        description: convidadosErrorMessage(error),
+      });
+    }
   };
 
   const cardStyle: CSSProperties = {
@@ -1629,7 +1636,11 @@ export function ConvidadosBody({ slug: _slug }: PainelSectionBodyProps) {
             </div>
 
             {inviteType === "virtual" ? (
-              <VirtualInvitePreviewCard />
+              <VirtualInvitePreviewSection
+                slug={slug}
+                conviteQuery={conviteQuery}
+                state={state}
+              />
             ) : (
               <div className="convidados-msg-grid">
                 <div className="convidados-msg-fields">
@@ -1742,7 +1753,6 @@ export function ConvidadosBody({ slug: _slug }: PainelSectionBodyProps) {
             borderRadius: 14,
             padding: "12px 14px 12px 34px",
             width: "100%",
-            maxWidth: 400,
             outline: "none",
           }}
         />
@@ -1763,13 +1773,34 @@ export function ConvidadosBody({ slug: _slug }: PainelSectionBodyProps) {
       {/* 4. guest list */}
       <div className="cv-guest-list-wrap">
         <div className="cv-guest-list">
-          {filteredGuests.length === 0 ? (
+          {listaQuery.isLoading ? (
+            <div style={{ padding: "48px 16px", textAlign: "center", color: "var(--ink-soft)" }}>
+              carregando convidados...
+            </div>
+          ) : listaQuery.error ? (
+            <div style={{ padding: "48px 16px", textAlign: "center" }}>
+              <div style={{ fontFamily: FONT_SANS, fontSize: 15, color: "var(--ink-soft)" }}>
+                não consegui carregar sua lista de convidados agora.
+              </div>
+              <div style={{ marginTop: 12 }}>
+                <Button variant="ghost" size="sm" onClick={() => void listaQuery.refetch()}>
+                  tentar de novo
+                </Button>
+              </div>
+            </div>
+          ) : guests.length === 0 ? (
             <div style={{ padding: "48px 16px", textAlign: "center", color: "var(--ink-mute)" }}>
               <div style={{ fontFamily: FONT_HAND, fontSize: 28, color: "var(--plum)" }}>
-                nada por aqui ainda ♡
+                Sua lista ainda não possui convidados.
+              </div>
+            </div>
+          ) : filteredGuests.length === 0 ? (
+            <div style={{ padding: "48px 16px", textAlign: "center", color: "var(--ink-mute)" }}>
+              <div style={{ fontFamily: FONT_HAND, fontSize: 28, color: "var(--plum)" }}>
+                Nenhum resultado para o filtro selecionado.
               </div>
               <div style={{ fontFamily: FONT_SANS, fontSize: 15, color: "var(--ink-soft)", marginTop: 8 }}>
-                tente outro filtro ou adicione um convidado.
+                Tente outro filtro ou adicione convidados.
               </div>
             </div>
           ) : (
@@ -2000,78 +2031,23 @@ export function ConvidadosBody({ slug: _slug }: PainelSectionBodyProps) {
           justify-content: center;
         }
         .cv-virtual-invite-frame {
-          width: min(72vw, 220px);
-          margin-inline: auto;
-          aspect-ratio: 9 / 16;
-        }
-        .cv-virtual-invite-preview {
-          width: 100%;
-          height: 100%;
-          box-sizing: border-box;
-          padding: clamp(14px, 3.5vw, 20px) clamp(12px, 3vw, 18px);
-          border-radius: 18px;
-          background:
-            linear-gradient(135deg, var(--lilac-soft) 0%, var(--pink-soft) 100%);
+          display: flex;
+          justify-content: center;
+          padding: 16px;
+          background: rgba(255, 255, 255, 0.72);
           border: 1px solid var(--line);
-          box-shadow: 0 10px 28px rgba(107, 60, 94, 0.1);
+          border-radius: 24px;
+        }
+        .cv-virtual-invite-status {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 12px;
+          padding: 32px 16px;
           text-align: center;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          gap: clamp(6px, 1.8vw, 10px);
-        }
-        .cv-virtual-invite-greeting {
-          font-family: var(--font-caveat), cursive;
-          color: var(--plum);
-          font-size: clamp(18px, 4.5vw, 22px);
-          line-height: 1.1;
-          font-weight: 600;
-        }
-        .cv-virtual-invite-title {
-          font-family: var(--font-patrick-hand), cursive;
-          font-size: clamp(22px, 5.5vw, 28px);
-          color: var(--plum);
-          margin: 0;
-          line-height: 1.05;
-          font-weight: 400;
-        }
-        .cv-virtual-invite-host {
-          font-family: var(--font-caveat), cursive;
-          color: var(--plum);
-          font-size: clamp(14px, 3.5vw, 17px);
-          font-style: italic;
-        }
-        .cv-virtual-invite-chips {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 5px;
-          width: 100%;
-        }
-        .cv-virtual-invite-cta {
           font-family: var(--font-dm-sans), sans-serif;
-          text-transform: uppercase;
-          letter-spacing: 0.08em;
-          font-weight: 600;
-          font-size: 10px;
-          padding: 9px 16px;
-          border-radius: 999;
-          cursor: default;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          gap: 6px;
-          border: 1px solid transparent;
-          background: linear-gradient(135deg, var(--lilac), var(--lilac-deep));
-          color: #fff;
-          box-shadow: var(--shadow-cta);
-        }
-        .cv-virtual-invite-footer {
-          font-family: var(--font-caveat), cursive;
-          color: var(--plum);
-          font-size: clamp(13px, 3.2vw, 16px);
-          line-height: 1.1;
+          font-size: 14px;
+          color: var(--ink-soft);
         }
         .cv-guest-list-wrap {
           background: transparent;
@@ -2198,9 +2174,6 @@ export function ConvidadosBody({ slug: _slug }: PainelSectionBodyProps) {
           }
           .convidados-preview-btns > button {
             width: auto;
-          }
-          .cv-virtual-invite-frame {
-            width: min(100%, 260px);
           }
           .cv-convidados-page {
             padding-bottom: 0;

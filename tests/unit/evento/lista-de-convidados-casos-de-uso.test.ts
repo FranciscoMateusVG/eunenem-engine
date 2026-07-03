@@ -302,6 +302,44 @@ describe('alterarPresencaConvidado', () => {
     expect(updated.atualizadoEm).toEqual(updateClock());
   });
 
+  it('transitions a guest from nao_enviado to enviado', async () => {
+    const repos = createEventoMemoryRepos();
+    const { idEvento } = await seedEvento(repos);
+    const idLista = randomUUID();
+    const convidado = { ...convidadoBase(), presenca: 'nao_enviado' as const };
+    const updateClock = () => new Date('2026-06-22T12:00:00.000Z');
+
+    await criarListaDeConvidados(
+      {
+        listaDeConvidadosRepository: repos.listaDeConvidadosRepository,
+        eventoRepository: repos.eventoRepository,
+        clock,
+        observability: silentObservability,
+      },
+      {
+        id: idLista,
+        idEvento,
+        linkConfirmacao: 'https://eunenem.app/rsvp/lista-1',
+        convidados: [convidado],
+      },
+    );
+
+    const updated = await alterarPresencaConvidado(
+      {
+        listaDeConvidadosRepository: repos.listaDeConvidadosRepository,
+        clock: updateClock,
+        observability: silentObservability,
+      },
+      {
+        idListaDeConvidados: idLista,
+        idConvidado: convidado.id,
+        presenca: 'enviado',
+      },
+    );
+
+    expect(updated.convidados.find((item) => item.id === convidado.id)?.presenca).toBe('enviado');
+  });
+
   it('throws when guest is missing', async () => {
     const repos = createEventoMemoryRepos();
     const { idEvento } = await seedEvento(repos);

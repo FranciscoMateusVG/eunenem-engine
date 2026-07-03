@@ -18,6 +18,8 @@ import {
   ID_PLATAFORMA_EUNENEM,
   type EventoRepository,
   EventoRepositoryPostgres,
+  type ListaDeConvidadosRepository,
+  ListaDeConvidadosRepositoryPostgres,
   type LivroFinanceiroRepository,
   LivroFinanceiroRepositoryPostgres,
   type EmailTransport,
@@ -106,6 +108,7 @@ export interface ServerDeps {
   /** Evento BC — event metadata + invite content for the painel convite flow. */
   readonly eventoRepository: EventoRepository;
   readonly conviteRepository: ConviteRepository;
+  readonly listaDeConvidadosRepository: ListaDeConvidadosRepository;
   /**
    * Pagamentos / Checkout adapters (aperture-xaha2). Wired for the FIRST
    * time here — the engine's pagamentos BC has been in-memory-test-only
@@ -557,6 +560,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
   const contribuicaoRepository = new ContribuicaoRepositoryPostgres(db);
   const eventoRepository = new EventoRepositoryPostgres(db);
   const conviteRepository = new ConviteRepositoryPostgres(db);
+  const listaDeConvidadosRepository = new ListaDeConvidadosRepositoryPostgres(db);
 
   // Pagamentos BC — first wiring (aperture-xaha2). Repository persisted
   // to Postgres (migration 011). Event publisher in-memory; no consumers
@@ -657,6 +661,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     recebedorRepository,
     eventoRepository,
     conviteRepository,
+    listaDeConvidadosRepository,
     pagamentoRepository,
     pagamentoProvider,
     checkoutSessionProvider,
