@@ -24,11 +24,14 @@ import {
 import {
   convidadoFromSnapshot,
   convidadosErrorMessage,
+  FORMATO_MENSAGEM_CONVITE_DEFAULT,
   PRESENCA_META,
   useAdicionarConvidado,
   useAlterarPresencaConvidado,
   useListaDeConvidadosData,
+  useSalvarFormatoMensagem,
   type Convidado,
+  type FormatoMensagemConvite,
   type StatusPresencaConvidado,
 } from "@/lib/convidados";
 import { painelHref } from "@/lib/painelRoutes";
@@ -1418,6 +1421,7 @@ export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
   const listaQuery = useListaDeConvidadosData();
   const alterarPresenca = useAlterarPresencaConvidado();
   const adicionarConvidado = useAdicionarConvidado();
+  const salvarFormatoMensagem = useSalvarFormatoMensagem();
   const [remindedIds, setRemindedIds] = useState<Set<string>>(new Set());
 
   const guests = useMemo<Convidado[]>(() => {
@@ -1444,22 +1448,39 @@ export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
     hydratedRef.current = true;
   }, [conviteQuery.data]);
 
+  // aperture-formato-mensagem — inviteType is hydrated ONCE from the saved
+  // formatoMensagemConvite (mirrors the `hydratedRef` pattern for `state`
+  // above). Switching tabs only updates local state; it's not persisted
+  // until "Salvar" is clicked.
+  const [inviteType, setInviteType] = useState<FormatoMensagemConvite>(
+    FORMATO_MENSAGEM_CONVITE_DEFAULT,
+  );
+  const formatoHydratedRef = useRef(false);
+
+  useEffect(() => {
+    if (!listaQuery.data || formatoHydratedRef.current) return;
+    setInviteType(listaQuery.data.lista?.formatoMensagemConvite ?? FORMATO_MENSAGEM_CONVITE_DEFAULT);
+    formatoHydratedRef.current = true;
+  }, [listaQuery.data]);
+
   const onSaveConvite = async () => {
     try {
       // CONTRACT: start from the full hydrated state, never a hand-built
       // partial — savePayloadFromConviteState re-serializes everything the
       // user set in ConviteBody (palette/template/image/host/babyName/mode).
-      await salvarConvite.mutateAsync(savePayloadFromConviteState(state));
-      toast.success("convite salvo ♡");
+      await Promise.all([
+        salvarConvite.mutateAsync(savePayloadFromConviteState(state)),
+        salvarFormatoMensagem.mutateAsync({ formatoMensagemConvite: inviteType }),
+      ]);
+      toast.success("Salvo com sucesso");
     } catch (error) {
-      toast.error("não foi possível salvar o convite agora", {
+      toast.error("não foi possível salvar agora", {
         description: conviteErrorMessage(error),
       });
     }
   };
 
   const [inviteOpen, setInviteOpen] = useState(false);
-  const [inviteType, setInviteType] = useState<"virtual" | "text">("virtual");
   const [filter, setFilter] = useState<GuestListFilter>("all");
   const [query, setQuery] = useState("");
   const [showAdd, setShowAdd] = useState(false);
@@ -1612,7 +1633,7 @@ export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
                 className="cv-invite-type-toggle"
                 onClick={(e) => e.stopPropagation()}
               >
-                {(["virtual", "text"] as const).map((t) => {
+                {(["convite_virtual", "texto"] as const).map((t) => {
                   const active = inviteType === t;
                   return (
                     <button
@@ -1622,7 +1643,7 @@ export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
                       aria-pressed={active}
                       onClick={() => setInviteType(t)}
                     >
-                      {t === "virtual" ? (
+                      {t === "convite_virtual" ? (
                         <>
                           <IconSparkle size={12} /> convite virtual
                         </>
@@ -1635,7 +1656,7 @@ export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
               </div>
             </div>
 
-            {inviteType === "virtual" ? (
+            {inviteType === "convite_virtual" ? (
               <VirtualInvitePreviewSection
                 slug={slug}
                 conviteQuery={conviteQuery}
@@ -1711,17 +1732,19 @@ export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
               >
                 <IconLink size={14} /> Pré-visualizar link
               </Button>
-              {/* aperture-dkkau — persist the convite via eventoConvite.save */}
+              {/* aperture-dkkau — persist the convite via eventoConvite.save;
+                  aperture-formato-mensagem — same click also persists
+                  formatoMensagemConvite via eventoListaDeConvidados.salvarFormatoMensagem */}
               <Button
                 variant="primary"
                 size="sm"
                 onClick={onSaveConvite}
-                disabled={salvarConvite.isPending}
+                disabled={salvarConvite.isPending || salvarFormatoMensagem.isPending}
                 title="Salvar convite"
                 ariaLabel="Salvar convite"
               >
                 <IconHeart size={14} fill="currentColor" />{" "}
-                {salvarConvite.isPending ? "Salvando…" : "Salvar"}
+                {salvarConvite.isPending || salvarFormatoMensagem.isPending ? "Salvando…" : "Salvar"}
               </Button>
             </div>
           </div>

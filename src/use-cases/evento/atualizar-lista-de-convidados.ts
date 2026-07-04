@@ -5,6 +5,7 @@ import {
   type ListaDeConvidados,
   listaDeConvidadosComCamposAtualizados,
 } from '../../domain/evento/entities/lista-de-convidados.js';
+import { FormatoMensagemConviteSchema } from '../../domain/evento/value-objects/formato-mensagem-convite.js';
 import {
   IdConvidadoSchema,
   IdListaDeConvidadosSchema,
@@ -27,6 +28,7 @@ const ConvidadoInputSchema = z.object({
 export const AtualizarListaDeConvidadosInputSchema = z.object({
   id: IdListaDeConvidadosSchema,
   linkConfirmacao: LinkConfirmacaoSchema,
+  formatoMensagemConvite: FormatoMensagemConviteSchema,
   convidados: z.array(ConvidadoInputSchema),
 });
 
@@ -65,6 +67,7 @@ export async function atualizarListaDeConvidados(
         existing,
         {
           linkConfirmacao: parsed.data.linkConfirmacao,
+          formatoMensagemConvite: parsed.data.formatoMensagemConvite,
           convidados: parsed.data.convidados,
         },
         clock(),

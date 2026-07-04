@@ -20,6 +20,7 @@ describe('criarListaDeConvidados (dominio)', () => {
       id: idLista,
       idEvento,
       linkConfirmacao: 'https://eunenem.app/rsvp/abc123',
+      formatoMensagemConvite: 'texto',
       convidados: [
         {
           id: idConvidado,
@@ -46,6 +47,7 @@ describe('listaDeConvidados factories', () => {
       id: idLista,
       idEvento,
       linkConfirmacao: 'https://eunenem.app/rsvp/original',
+      formatoMensagemConvite: 'texto',
       convidados: [],
       criadoEm: fixedDate,
       atualizadoEm: fixedDate,
@@ -56,6 +58,7 @@ describe('listaDeConvidados factories', () => {
       base,
       {
         linkConfirmacao: 'https://eunenem.app/rsvp/novo',
+        formatoMensagemConvite: 'convite_virtual',
         convidados: [
           {
             id: idConvidado,
@@ -69,6 +72,7 @@ describe('listaDeConvidados factories', () => {
     );
 
     expect(updated.linkConfirmacao).toBe('https://eunenem.app/rsvp/novo');
+    expect(updated.formatoMensagemConvite).toBe('convite_virtual');
     expect(updated.convidados).toHaveLength(1);
     expect(updated.atualizadoEm).toEqual(later);
   });
@@ -78,6 +82,7 @@ describe('listaDeConvidados factories', () => {
       id: idLista,
       idEvento,
       linkConfirmacao: 'https://eunenem.app/rsvp/base',
+      formatoMensagemConvite: 'texto',
       convidados: [
         {
           id: idConvidado,

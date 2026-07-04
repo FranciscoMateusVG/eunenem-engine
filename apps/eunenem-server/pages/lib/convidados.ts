@@ -10,6 +10,10 @@ export type ListaDeConvidadosQueryData = RouterOutputs['eventoListaDeConvidados'
 export type ListaDeConvidadosSnapshot = NonNullable<ListaDeConvidadosQueryData['lista']>;
 export type ConvidadoSnapshot = ListaDeConvidadosSnapshot['convidados'][number];
 export type StatusPresencaConvidado = ConvidadoSnapshot['presenca'];
+export type FormatoMensagemConvite = ListaDeConvidadosSnapshot['formatoMensagemConvite'];
+
+/** Matches the backend default (a lista sem escolha ainda salva assume "texto"). */
+export const FORMATO_MENSAGEM_CONVITE_DEFAULT: FormatoMensagemConvite = 'texto';
 
 /** UI-facing guest shape used by ConvidadosBody — `presenca` is the domain
  * source of truth; `reminded` is UI-only local state, never persisted. */
@@ -60,6 +64,15 @@ export function useAlterarPresencaConvidado() {
 export function useAdicionarConvidado() {
   const utils = trpc.useUtils();
   return trpc.eventoListaDeConvidados.adicionarConvidado.useMutation({
+    onSuccess: () => {
+      void utils.eventoListaDeConvidados.get.invalidate();
+    },
+  });
+}
+
+export function useSalvarFormatoMensagem() {
+  const utils = trpc.useUtils();
+  return trpc.eventoListaDeConvidados.salvarFormatoMensagem.useMutation({
     onSuccess: () => {
       void utils.eventoListaDeConvidados.get.invalidate();
     },

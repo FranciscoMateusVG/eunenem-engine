@@ -255,6 +255,8 @@ export {
 } from './domain/evento/value-objects/endereco-evento.js';
 export type { FonteConvite } from './domain/evento/value-objects/fonte-convite.js';
 export { FonteConviteSchema } from './domain/evento/value-objects/fonte-convite.js';
+export type { FormatoMensagemConvite } from './domain/evento/value-objects/formato-mensagem-convite.js';
+export { FormatoMensagemConviteSchema } from './domain/evento/value-objects/formato-mensagem-convite.js';
 export type {
   IdCampanha as IdCampanhaEvento,
   IdConvidado,

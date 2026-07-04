@@ -172,6 +172,7 @@ export interface LancamentosFinanceiros {
 export interface ListasDeConvidados {
   atualizado_em: Generated<Timestamp>;
   criado_em: Generated<Timestamp>;
+  formato_mensagem_convite: string;
   id: string;
   id_evento: string;
   link_confirmacao: string;

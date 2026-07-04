@@ -9,6 +9,7 @@ import {
   ConvidadoNaoEncontradoError,
   criarListaDeConvidados,
   EventoNaoEncontradoError,
+  FormatoMensagemConviteSchema,
   type IdCampanhaEvento,
   type IdConvidado,
   type IdEvento,
@@ -105,6 +106,7 @@ const ConvidadoSnapshotSchema = z.object({
 const ListaDeConvidadosSnapshotSchema = z.object({
   id: z.string().uuid(),
   linkConfirmacao: z.string(),
+  formatoMensagemConvite: FormatoMensagemConviteSchema,
   convidados: z.array(ConvidadoSnapshotSchema),
 });
 
@@ -119,6 +121,7 @@ function toSnapshot(
     lista: {
       id: lista.id,
       linkConfirmacao: lista.linkConfirmacao,
+      formatoMensagemConvite: lista.formatoMensagemConvite,
       convidados: lista.convidados.map((convidado) => ({
         id: convidado.id,
         nome: convidado.nome,
@@ -264,6 +267,7 @@ export const eventoListaDeConvidadosRouter = t.router({
               {
                 id: existing.id,
                 linkConfirmacao: existing.linkConfirmacao,
+                formatoMensagemConvite: existing.formatoMensagemConvite,
                 convidados: [...existing.convidados, novoConvidado],
               },
             )
@@ -281,7 +285,62 @@ export const eventoListaDeConvidadosRouter = t.router({
                   `/confirmar/${usuario.slug}`,
                   ctx.deps.publicOrigin,
                 ).toString(),
+                formatoMensagemConvite: 'texto',
                 convidados: [novoConvidado],
+              },
+            );
+
+        return toSnapshot(updated);
+      } catch (err) {
+        throw toTRPCError(err);
+      }
+    }),
+
+  salvarFormatoMensagem: t.procedure
+    .input(z.object({ formatoMensagemConvite: FormatoMensagemConviteSchema }))
+    .output(GetListaDeConvidadosOutputSchema)
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { campanha, usuario } = await resolveCallerCampanha(ctx);
+        const evento = await resolveCallerEvento(ctx, campanha);
+        if (!evento) {
+          throw new EventoAusenteError('Crie seu convite antes de escolher o formato da mensagem');
+        }
+
+        const existing = await ctx.deps.listaDeConvidadosRepository.findByIdEvento(
+          evento.id as IdEvento,
+        );
+
+        const updated = existing
+          ? await atualizarListaDeConvidados(
+              {
+                listaDeConvidadosRepository: ctx.deps.listaDeConvidadosRepository,
+                clock: ctx.deps.clock,
+                observability: ctx.deps.observability,
+              },
+              {
+                id: existing.id,
+                linkConfirmacao: existing.linkConfirmacao,
+                formatoMensagemConvite: input.formatoMensagemConvite,
+                convidados: [...existing.convidados],
+              },
+            )
+          : await criarListaDeConvidados(
+              {
+                listaDeConvidadosRepository: ctx.deps.listaDeConvidadosRepository,
+                eventoRepository: ctx.deps.eventoRepository,
+                clock: ctx.deps.clock,
+                observability: ctx.deps.observability,
+              },
+              {
+                id: randomUUID() as IdListaDeConvidados,
+                idEvento: evento.id as IdEvento,
+                linkConfirmacao: new URL(
+                  `/confirmar/${usuario.slug}`,
+                  ctx.deps.publicOrigin,
+                ).toString(),
+                formatoMensagemConvite: input.formatoMensagemConvite,
+                convidados: [],
               },
             );
 
