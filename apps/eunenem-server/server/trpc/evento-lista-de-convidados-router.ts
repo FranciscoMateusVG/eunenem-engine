@@ -10,6 +10,7 @@ import {
   criarListaDeConvidados,
   EventoNaoEncontradoError,
   FormatoMensagemConviteSchema,
+  ID_PLATAFORMA_EUNENEM,
   type IdCampanhaEvento,
   type IdConvidado,
   type IdEvento,
@@ -45,6 +46,26 @@ class EventoAusenteError extends Error {
   public readonly name = 'EventoAusenteError';
 }
 
+class CampanhaSlugNaoEncontradaError extends Error {
+  public readonly name = 'CampanhaSlugNaoEncontradaError';
+}
+
+/** Public resolver — no session required. Mirrors evento-convite-router's
+ *  resolveCampanhaBySlug (used by the public confirmar-presenca page). */
+async function resolveCampanhaBySlug(ctx: TrpcContext, slug: string): Promise<{ campanha: Campanha }> {
+  const usuario = await ctx.deps.usuarioRepository.findUsuarioBySlug(ID_PLATAFORMA_EUNENEM, slug as never);
+  if (!usuario) {
+    throw new CampanhaSlugNaoEncontradaError('Usuario do slug nao encontrado');
+  }
+
+  const campanha = await ctx.deps.campanhaRepository.findByAdministrador(usuario.idConta);
+  if (!campanha) {
+    throw new CampanhaSlugNaoEncontradaError('Usuario do slug nao administra nenhuma campanha');
+  }
+
+  return { campanha };
+}
+
 async function resolveCallerCampanha(
   ctx: TrpcContext,
 ): Promise<{ campanha: Campanha; usuario: Usuario }> {
@@ -76,6 +97,9 @@ function toTRPCError(err: unknown): TRPCError {
   }
   if (err instanceof EventoAusenteError) {
     return new TRPCError({ code: 'PRECONDITION_FAILED', message: err.message, cause: err });
+  }
+  if (err instanceof CampanhaSlugNaoEncontradaError) {
+    return new TRPCError({ code: 'NOT_FOUND', message: err.message, cause: err });
   }
   if (err instanceof ListaDeConvidadosInputInvalidoError) {
     return new TRPCError({ code: 'BAD_REQUEST', message: err.message, cause: err });
@@ -179,6 +203,55 @@ const AlterarPresencaInputSchema = z.object({
 const AdicionarConvidadoInputSchema = z.object({
   nome: NomeConvidadoSchema,
   numeroCelular: NumeroCelularConvidadoSchema,
+});
+
+/** Resolves a convidado from public route params (slug + idConvidado), with
+ *  no session — used by the /confirmar-presenca page. Verifies the convidado
+ *  actually belongs to that slug's evento/lista before returning it. */
+async function resolveConvidadoPublico(
+  ctx: TrpcContext,
+  slug: string,
+  idConvidado: string,
+): Promise<{ lista: ListaDeConvidados; convidado: Convidado }> {
+  const { campanha } = await resolveCampanhaBySlug(ctx, slug);
+  const evento = await resolveCallerEvento(ctx, campanha);
+  if (!evento) {
+    throw new ListaDeConvidadosNaoEncontradaError();
+  }
+
+  const lista = await obterListaDeConvidadosPorIdEvento(
+    {
+      listaDeConvidadosRepository: ctx.deps.listaDeConvidadosRepository,
+      observability: ctx.deps.observability,
+    },
+    { idEvento: evento.id as IdEvento },
+  );
+
+  const convidado = lista.convidados.find((c) => c.id === idConvidado);
+  if (!convidado) {
+    throw new ConvidadoNaoEncontradoError(idConvidado as IdConvidado, lista.id);
+  }
+
+  return { lista, convidado };
+}
+
+const GetParaConfirmarInputSchema = z.object({
+  slug: z.string(),
+  idConvidado: z.string().uuid(),
+});
+
+const GetParaConfirmarOutputSchema = z.object({
+  nome: z.string(),
+  presenca: StatusPresencaConvidadoSchema,
+  formatoMensagemConvite: FormatoMensagemConviteSchema,
+});
+
+/** Public guests may only set one of the 3 final responses — nao_enviado/
+ *  enviado are governed by the authenticated send flow, never by the guest. */
+const ConfirmarPresencaInputSchema = z.object({
+  slug: z.string(),
+  idConvidado: z.string().uuid(),
+  presenca: z.enum(['sim', 'nao', 'talvez']),
 });
 
 export const eventoListaDeConvidadosRouter = t.router({
@@ -345,6 +418,63 @@ export const eventoListaDeConvidadosRouter = t.router({
             );
 
         return toSnapshot(updated);
+      } catch (err) {
+        throw toTRPCError(err);
+      }
+    }),
+
+  // ── Public procedures (no session) — /confirmar-presenca page ──────────
+
+  getParaConfirmar: t.procedure
+    .input(GetParaConfirmarInputSchema)
+    .output(GetParaConfirmarOutputSchema)
+    .query(async ({ ctx, input }) => {
+      try {
+        const { convidado, lista } = await resolveConvidadoPublico(
+          ctx,
+          input.slug,
+          input.idConvidado,
+        );
+        return {
+          nome: convidado.nome,
+          presenca: convidado.presenca,
+          formatoMensagemConvite: lista.formatoMensagemConvite,
+        };
+      } catch (err) {
+        throw toTRPCError(err);
+      }
+    }),
+
+  confirmarPresenca: t.procedure
+    .input(ConfirmarPresencaInputSchema)
+    .output(GetParaConfirmarOutputSchema)
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { lista } = await resolveConvidadoPublico(ctx, input.slug, input.idConvidado);
+
+        const updated = await alterarPresencaConvidado(
+          {
+            listaDeConvidadosRepository: ctx.deps.listaDeConvidadosRepository,
+            clock: ctx.deps.clock,
+            observability: ctx.deps.observability,
+          },
+          {
+            idListaDeConvidados: lista.id,
+            idConvidado: input.idConvidado as IdConvidado,
+            presenca: input.presenca,
+          },
+        );
+
+        const convidado = updated.convidados.find((c) => c.id === input.idConvidado);
+        if (!convidado) {
+          throw new ConvidadoNaoEncontradoError(input.idConvidado as IdConvidado, updated.id);
+        }
+
+        return {
+          nome: convidado.nome,
+          presenca: convidado.presenca,
+          formatoMensagemConvite: updated.formatoMensagemConvite,
+        };
       } catch (err) {
         throw toTRPCError(err);
       }

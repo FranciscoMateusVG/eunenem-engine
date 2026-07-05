@@ -7,6 +7,7 @@ import { AdminRepasseDetailPage } from './AdminRepasseDetailPage.js';
 import { AdminRepassesPage } from './AdminRepassesPage.js';
 import { AdminUsuarioPage } from './AdminUsuarioPage.js';
 import { AuthDemoPage } from './AuthDemoPage.js';
+import { ConfirmarPresencaPage } from './ConfirmarPresencaPage.js';
 import { FaqPage } from './FaqPage.js';
 import { AuthModalProvider } from './components/eunenem/auth/AuthModalProvider.js';
 import { LandingPage } from './LandingPage.js';
@@ -44,6 +45,7 @@ export function resolveRoute(pathname: string):
   | { kind: 'landing' }
   | { kind: 'pagina'; slug: string }
   | { kind: 'pagina-sucesso'; slug: string }
+  | { kind: 'confirmar-presenca'; slug: string; idConvidado: string }
   | { kind: 'painel'; slug: string }
   | { kind: 'painel-convite-preview'; slug: string }
   | { kind: 'painel-section'; slug: string; section: PainelSection }
@@ -171,6 +173,28 @@ export function resolveRoute(pathname: string):
   if (paginaMatch && paginaMatch[1] && SLUG_REGEX.test(paginaMatch[1])) {
     return { kind: 'pagina', slug: paginaMatch[1] };
   }
+  // /<slug>/confirmar-presenca/<idConvidado> — public RSVP page a guest opens
+  // from a WhatsApp link (aperture-confirmar-presenca). Root-level slug (not
+  // nested under /pagina/), matched here alongside the other slug-based
+  // routes before the /painel/* rules below. Existence of BOTH the slug and
+  // the convidadoId is resolved client-side via tRPC (unknown → not-found
+  // UI) — same "pure regex router doesn't know owners" convention as
+  // /pagina/:slug and /painel/:slug.
+  const confirmarPresencaMatch = pathname.match(
+    /^\/([^/]+)\/confirmar-presenca\/([^/]+)\/?$/,
+  );
+  if (
+    confirmarPresencaMatch &&
+    confirmarPresencaMatch[1] &&
+    confirmarPresencaMatch[2] &&
+    SLUG_REGEX.test(confirmarPresencaMatch[1])
+  ) {
+    return {
+      kind: 'confirmar-presenca',
+      slug: confirmarPresencaMatch[1],
+      idConvidado: confirmarPresencaMatch[2],
+    };
+  }
   const painelConvitePreviewMatch = pathname.match(/^\/painel\/([^/]+)\/convite\/preview\/?$/);
   if (
     painelConvitePreviewMatch &&
@@ -226,6 +250,8 @@ function pickPage(route: ReturnType<typeof resolveRoute>, pathname: string) {
   if (route.kind === 'termos-de-uso') return <TermosDeUsoPage />;
   if (route.kind === 'pagina') return <PaginaPage slug={route.slug} />;
   if (route.kind === 'pagina-sucesso') return <PaginaSucessoPage slug={route.slug} />;
+  if (route.kind === 'confirmar-presenca')
+    return <ConfirmarPresencaPage slug={route.slug} idConvidado={route.idConvidado} />;
   if (route.kind === 'painel') return <PainelPage slug={route.slug} />;
   if (route.kind === 'painel-convite-preview')
     return <PainelConvitePreviewPage slug={route.slug} />;

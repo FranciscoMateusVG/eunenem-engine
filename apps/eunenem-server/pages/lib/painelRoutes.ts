@@ -40,6 +40,11 @@ export function painelConvitePreviewHref(slug: string): string {
   return `/painel/${slug}/convite/preview`;
 }
 
+/** Public RSVP page a guest opens from a WhatsApp link — no auth required. */
+export function confirmarPresencaHref(slug: string, idConvidado: string): string {
+  return `/${slug}/confirmar-presenca/${idConvidado}`;
+}
+
 /**
  * Map a dashboard menu-row `id` (from painelDemo.buildPainelMenu) to its
  * destination href. Most ids map to a painel section; a couple are special:
