@@ -35,7 +35,17 @@ import {
   type StatusPresencaConvidado,
 } from "@/lib/convidados";
 import { painelHref } from "@/lib/painelRoutes";
-import { DEFAULT_STATE, type ConviteState } from "@/lib/mocks/convite";
+import { DEFAULT_STATE, EVENT_BY_ID, EVENT_TYPES, type ConviteState } from "@/lib/mocks/convite";
+import { getDefaultConviteShareOrigin } from "@/lib/convite-share";
+import {
+  buildConfirmarPresencaShareUrl,
+  buildFallbackWhatsappMessage,
+  buildWaUrl,
+  buildWhatsappSendPlan,
+  defaultConviteMessage,
+  formatPhoneForWhatsapp,
+  openWhatsappUrl,
+} from "@/lib/whatsapp-invite";
 import { InvitePreview } from "./ConviteBody";
 
 // aperture-x1b3u — Lista de convidados (RSVP + convites por WhatsApp).
@@ -1009,6 +1019,197 @@ function AddGuestModal({
   );
 }
 
+// ---------- ENVIAR CONVITE modal (WhatsApp click-to-chat) ----------
+//
+// Builds a wa.me link with the composed message + confirmation link and
+// opens it, then persists the guest as "enviado". No real WhatsApp API is
+// involved — the send itself is the user tapping "Enviar" inside WhatsApp.
+
+function EnviarConviteModal({
+  guest,
+  slug,
+  eventTypeLabel,
+  onClose,
+  onSent,
+}: {
+  guest: Convidado;
+  slug: string;
+  eventTypeLabel: string;
+  onClose: () => void;
+  onSent: () => Promise<unknown>;
+}) {
+  const [mensagem, setMensagem] = useState(() =>
+    defaultConviteMessage(guest.name, eventTypeLabel),
+  );
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [onClose]);
+
+  const canSubmit = mensagem.trim().length > 0 && !isSubmitting;
+
+  const submit = async () => {
+    if (!canSubmit) return;
+    setIsSubmitting(true);
+    const toastId = toast.loading("enviando convite ♡");
+    const phone = formatPhoneForWhatsapp(guest.phone);
+
+    try {
+      let confirmationUrl: string;
+      try {
+        confirmationUrl = buildConfirmarPresencaShareUrl(
+          getDefaultConviteShareOrigin(),
+          slug,
+          guest.id,
+        );
+      } catch {
+        openWhatsappUrl(buildWaUrl(phone, buildFallbackWhatsappMessage(mensagem)));
+        toast.error("não consegui gerar o link automático — avise o convidado por lá mesmo", {
+          id: toastId,
+        });
+        await onSent();
+        return;
+      }
+
+      const plan = buildWhatsappSendPlan(phone, mensagem, confirmationUrl);
+      if (plan.kind === "single") {
+        openWhatsappUrl(plan.url);
+      } else {
+        openWhatsappUrl(plan.firstUrl);
+        try {
+          await navigator.clipboard.writeText(plan.secondMessage);
+          toast("copiei o link de confirmação — cole numa segunda mensagem ♡");
+        } catch {
+          // Silent fallback — the invite itself still opened correctly.
+        }
+      }
+
+      await onSent();
+      toast.success("convite enviado ♡", { id: toastId });
+    } catch (error) {
+      toast.error("mensagem aberta no whatsapp, mas não consegui marcar como enviada", {
+        id: toastId,
+        description: convidadosErrorMessage(error),
+      });
+    } finally {
+      setIsSubmitting(false);
+      onClose();
+    }
+  };
+
+  return (
+    <div className="lista-scrim" onClick={onClose}>
+      <div
+        className="lista-modal lista-modal-sm"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="enviar-convite-modal-title"
+      >
+        <div className="lista-modal-head">
+          <div>
+            <h3 id="enviar-convite-modal-title">
+              enviar <span className="hl">convite</span>
+            </h3>
+            <p
+              style={{
+                fontFamily: FONT_SANS,
+                fontSize: 13.5,
+                color: "var(--ink-soft)",
+                margin: "6px 0 0",
+                lineHeight: 1.5,
+              }}
+            >
+              {guest.name} · {guest.phone}
+            </p>
+          </div>
+          <button
+            type="button"
+            className="lista-modal-x"
+            onClick={onClose}
+            aria-label="Fechar"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              aria-hidden="true"
+            >
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="lista-modal-body">
+          <div className="lista-form">
+            <div className="lista-field lista-field-full">
+              <label htmlFor="enviar-convite-mensagem">mensagem</label>
+              <textarea
+                id="enviar-convite-mensagem"
+                value={mensagem}
+                onChange={(e) => setMensagem(e.target.value)}
+                rows={6}
+                style={{
+                  width: "100%",
+                  resize: "vertical",
+                  fontFamily: FONT_SANS,
+                  fontSize: 14,
+                  padding: "10px 12px",
+                  borderRadius: 12,
+                  border: "1px solid var(--line)",
+                  color: "var(--ink)",
+                }}
+              />
+              {mensagem.trim().length === 0 && (
+                <p
+                  role="alert"
+                  style={{
+                    fontFamily: FONT_SANS,
+                    fontSize: 12,
+                    color: "var(--coral-pink)",
+                    margin: "6px 0 0",
+                    lineHeight: 1.4,
+                  }}
+                >
+                  a mensagem não pode ficar vazia
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="lista-modal-foot">
+          <div className="lista-foot-actions" style={{ marginLeft: "auto" }}>
+            <button type="button" className="btn btn-ghost" onClick={onClose}>
+              Cancelar
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={!canSubmit}
+              onClick={submit}
+            >
+              {isSubmitting ? "Enviando…" : "Enviar Convite"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ---------- aperture-8qg1s — VER LINK preview modal ----------
 //
 // Replaces the placeholder toast shipped by aperture-gnxal with the
@@ -1486,6 +1687,9 @@ export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
   const [showAdd, setShowAdd] = useState(false);
   // aperture-8qg1s — controls the VER LINK preview modal
   const [verLinkOpen, setVerLinkOpen] = useState(false);
+  // Guest currently targeted by the ENVIAR CONVITE modal (null = closed).
+  const [sendTarget, setSendTarget] = useState<Convidado | null>(null);
+  const eventTypeLabel = (EVENT_BY_ID[state.eventType] ?? EVENT_TYPES[0]!).label;
 
   const filteredGuests = useMemo(() => {
     let list = guests;
@@ -1510,19 +1714,9 @@ export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
       return false;
     }
   };
-  const sendOne = async (id: string, isResend?: boolean) => {
-    if (isResend) {
-      toast.success("mensagem reenviada ♡");
-      return;
-    }
-    try {
-      await alterarPresenca.mutateAsync({ idConvidado: id, presenca: "enviado" });
-      toast.success("mensagem enviada ♡");
-    } catch (error) {
-      toast.error("não foi possível marcar como enviada agora", {
-        description: convidadosErrorMessage(error),
-      });
-    }
+  const sendOne = (id: string) => {
+    const guest = guests.find((g) => g.id === id);
+    if (guest) setSendTarget(guest);
   };
   const remindOne = (id: string) => {
     setRemindedIds((ids) => new Set(ids).add(id));
@@ -2244,6 +2438,18 @@ export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
 
       {/* aperture-8qg1s — VER LINK preview modal */}
       {verLinkOpen && <VerLinkModal onClose={() => setVerLinkOpen(false)} />}
+
+      {sendTarget && (
+        <EnviarConviteModal
+          guest={sendTarget}
+          slug={slug}
+          eventTypeLabel={eventTypeLabel}
+          onClose={() => setSendTarget(null)}
+          onSent={() =>
+            alterarPresenca.mutateAsync({ idConvidado: sendTarget.id, presenca: "enviado" })
+          }
+        />
+      )}
     </section>
   );
 }
