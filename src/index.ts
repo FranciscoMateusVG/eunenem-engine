@@ -570,7 +570,10 @@ export {
   IdUsuarioSchema,
 } from './domain/usuario/value-objects/ids.js';
 export type { NomeExibicaoUsuario } from './domain/usuario/value-objects/nome-exibicao-usuario.js';
-export { NomeExibicaoUsuarioSchema } from './domain/usuario/value-objects/nome-exibicao-usuario.js';
+export {
+  derivarNomeExibicaoFallback,
+  NomeExibicaoUsuarioSchema,
+} from './domain/usuario/value-objects/nome-exibicao-usuario.js';
 export type { Permissao } from './domain/usuario/value-objects/permissao.js';
 export { PERMISSOES_PADRAO, PermissaoSchema } from './domain/usuario/value-objects/permissao.js';
 export type { SlugUsuario } from './domain/usuario/value-objects/slug-usuario.js';

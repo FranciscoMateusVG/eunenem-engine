@@ -17,6 +17,7 @@ import { PaginaSucessoPage } from './PaginaSucessoPage.js';
 import { PainelPage } from './PainelPage.js';
 import { PainelSectionPage } from './PainelSectionPage.js';
 import { TermosDeUsoPage } from './TermosDeUsoPage.js';
+import { TrpcSmokePage } from './TrpcSmokePage.js';
 import { TrpcProvider } from './lib/TrpcProvider.js';
 import { isPainelSection, type PainelSection } from './lib/painelRoutes.js';
 

@@ -88,11 +88,22 @@ describe('Migration round-trip', () => {
     //    this sequence must start at the LATEST migration and walk earlier.
     //    Adding a new migration on top REQUIRES prepending its down-step here.
 
-    // 031 add_genero_to_perfil_criador (aperture-neiwx) → the migration TIP
-    //   (landed after 030). migrateToLatest applied through it, so the FIRST
-    //   migrateDown unwinds 031 — its down() drops the perfil_criadores.genero
-    //   column + its CHECK (the table itself survives until the 026 down below).
-    //   Without this step the whole sequence is off-by-one.
+    // create_cha_rifa_waitlist (landed 2026-06-29) → the migration TIP. Its
+    //   filename (20260629_030_create_cha_rifa_waitlist) sorts AFTER
+    //   20260628_031_add_genero_to_perfil_criador, so kysely's file-ordered
+    //   runner applies it LAST — it is the real tip, and the FIRST migrateDown
+    //   unwinds it (drops the cha_rifa_waitlist table). It landed after this
+    //   sequence was written without prepending its down-step, which put the
+    //   whole roll-back off-by-one (the resgates_pendentes assertion below
+    //   failed on the residual table). Prepended here to restore alignment.
+    const downChaRifaWaitlist = await migrator.migrateDown();
+    expect(downChaRifaWaitlist.error).toBeUndefined();
+    expect(await listTableNames(db)).not.toContain('cha_rifa_waitlist');
+
+    // 031 add_genero_to_perfil_criador (aperture-neiwx) → now the SECOND
+    //   migrateDown (cha_rifa_waitlist above is the true tip). Its down() drops
+    //   the perfil_criadores.genero column + its CHECK (the table itself
+    //   survives until the 026 down below).
     const downAddGenero = await migrator.migrateDown();
     expect(downAddGenero.error).toBeUndefined();
     expect(await listTableNames(db)).toContain('perfil_criadores'); // table still here
