@@ -7,7 +7,6 @@ import {
   avatarFor,
   initialsOf,
 } from "@/lib/mocks/convidados";
-import { PREVIEW_EVENT } from "@/lib/mocks/eventPreview";
 // aperture-dkkau — wire the "Mensagem do convite" compositor to the REAL
 // convite save (eventoConvite.save → convites table), mirroring ConviteBody.
 import {
@@ -16,6 +15,7 @@ import {
   hasSavedConvite,
   savePayloadFromConviteState,
   useConviteData,
+  useConvitePreviewData,
   useSalvarConvite,
 } from "@/lib/convite";
 // aperture-lista-convidados — wire the guest list + RSVP to the REAL
@@ -35,7 +35,7 @@ import {
   type StatusPresencaConvidado,
 } from "@/lib/convidados";
 import { painelHref } from "@/lib/painelRoutes";
-import { DEFAULT_STATE, EVENT_BY_ID, EVENT_TYPES, type ConviteState } from "@/lib/mocks/convite";
+import { DEFAULT_STATE, EVENT_BY_ID, EVENT_TYPES, formatDateScrap, type ConviteState } from "@/lib/mocks/convite";
 import { getDefaultConviteShareOrigin } from "@/lib/convite-share";
 import {
   buildConfirmarPresencaShareUrl,
@@ -47,6 +47,7 @@ import {
   openWhatsappUrl,
 } from "@/lib/whatsapp-invite";
 import { InvitePreview } from "./ConviteBody";
+import { ConfirmarPresencaView } from "@/ConfirmarPresencaPage";
 
 // aperture-x1b3u — Lista de convidados (RSVP + convites por WhatsApp).
 //
@@ -164,26 +165,10 @@ const IconLink = (p: { size?: number }) => (
     <path d="M14 10a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5" />
   </Icon>
 );
-// aperture-gnxal — eye outline + center pupil for the "ver convite"
-// CTA. Same stroke style as the rest of the section's icons so the
-// two new buttons read as a paired affordance.
-const IconEye = (p: { size?: number }) => (
-  <Icon size={p.size} sw={1.9}>
-    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />
-    <circle cx="12" cy="12" r="3" />
-  </Icon>
-);
-// aperture-8qg1s — icons for the VER LINK preview modal: copy
-// (clipboard COPIAR action), calendar + map-pin (preview chips),
-// heart (primary RSVP), question (maybe RSVP), x (decline + close
-// button). All stroke-based, currentColor, viewBox 24, matching
+// aperture-8qg1s — icons for the guest-facing preview cards/sections:
+// calendar + map-pin (info rows), heart (primary RSVP), x (decline +
+// close button). All stroke-based, currentColor, viewBox 24, matching
 // the in-file Icon helper.
-const IconCopy = (p: { size?: number }) => (
-  <Icon size={p.size} sw={1.9}>
-    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-  </Icon>
-);
 const IconCalendar = (p: { size?: number }) => (
   <Icon size={p.size} sw={1.9}>
     <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
@@ -210,13 +195,6 @@ const IconClock = (p: { size?: number }) => (
 const IconHeart = (p: { size?: number; fill?: string }) => (
   <Icon size={p.size} sw={1.9} fill={p.fill ?? "none"}>
     <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-  </Icon>
-);
-const IconQuestion = (p: { size?: number }) => (
-  <Icon size={p.size} sw={1.9}>
-    <circle cx="12" cy="12" r="10" />
-    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-    <line x1="12" y1="17" x2="12.01" y2="17" />
   </Icon>
 );
 const IconX = (p: { size?: number }) => (
@@ -817,6 +795,12 @@ function isValidBrMobilePhone(phone: string): boolean {
   return BR_MOBILE_PHONE_RE.test(phone);
 }
 
+function formatHora(time: string): string {
+  const [h, m] = time.split(":");
+  if (!h) return time;
+  return m && m !== "00" ? `${Number(h)}h${m}` : `${Number(h)}h`;
+}
+
 function capitalizeGuestName(raw: string): string {
   return raw.replace(/\S+/g, (word) => {
     const [first = "", ...rest] = word;
@@ -1029,17 +1013,21 @@ function EnviarConviteModal({
   guest,
   slug,
   eventTypeLabel,
+  mensagemConvite,
   onClose,
   onSent,
 }: {
   guest: Convidado;
   slug: string;
   eventTypeLabel: string;
+  mensagemConvite: string;
   onClose: () => void;
   onSent: () => Promise<unknown>;
 }) {
   const [mensagem, setMensagem] = useState(() =>
-    defaultConviteMessage(guest.name, eventTypeLabel),
+    mensagemConvite.trim().length > 0
+      ? mensagemConvite
+      : defaultConviteMessage(guest.name, eventTypeLabel),
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -1230,10 +1218,12 @@ function Modal({
   children,
   onClose,
   sm,
+  xl,
 }: {
   children: React.ReactNode;
   onClose: () => void;
   sm?: boolean;
+  xl?: boolean;
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1249,7 +1239,7 @@ function Modal({
   return (
     <div className="lista-scrim" onClick={onClose}>
       <div
-        className={"lista-modal" + (sm ? " lista-modal-sm" : "")}
+        className={"lista-modal" + (sm ? " lista-modal-sm" : "") + (xl ? " lista-modal-xl" : "")}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -1260,73 +1250,27 @@ function Modal({
   );
 }
 
-function VerLinkModal({ onClose }: { onClose: () => void }) {
-  const fullUrl = `${PREVIEW_EVENT.shareDomain}${PREVIEW_EVENT.hostSlug}`;
-  const { eventName, eventNameHighlight, greeting, dateLabel, locationLabel } =
-    PREVIEW_EVENT;
+const PREVIEW_CONVIDADO_NOME = "Convidado Exemplo";
+const PREVIEW_CONVIDADO_PRESENCA: StatusPresencaConvidado = "nao_enviado";
 
-  // Render the event name with the highlight substring wrapped in <span.hl>.
-  // Splits on first occurrence so the marca-texto sits exactly on the keyword.
-  const renderHighlighted = () => {
-    const idx = eventName.indexOf(eventNameHighlight);
-    if (idx < 0) return eventName;
-    const before = eventName.slice(0, idx);
-    const after = eventName.slice(idx + eventNameHighlight.length);
-    return (
-      <>
-        {before}
-        <span className="hl">{eventNameHighlight}</span>
-        {after}
-      </>
-    );
-  };
-
-  const copyUrl = async () => {
-    try {
-      await navigator.clipboard.writeText(fullUrl);
-      toast.success("link copiado ♡");
-    } catch {
-      toast("não consegui copiar — copie manualmente ♡");
-    }
-  };
-
-  const chipStyle: CSSProperties = {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 6,
-    padding: "6px 12px",
-    borderRadius: 999,
-    background: "var(--cream)",
-    color: "var(--ink-soft)",
-    fontFamily: FONT_SANS,
-    fontSize: 13,
-    fontWeight: 500,
-    border: "1px solid var(--line)",
-  };
-
-  const previewBtnBase: CSSProperties = {
-    fontFamily: FONT_SANS,
-    textTransform: "uppercase",
-    letterSpacing: "0.08em",
-    fontWeight: 600,
-    fontSize: 12,
-    padding: "12px 18px",
-    borderRadius: 999,
-    width: "100%",
-    cursor: "default",
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    border: "1px solid var(--line)",
-    background: "var(--paper)",
-    color: "var(--ink)",
-  };
-
-  const noop = (e: React.MouseEvent) => e.preventDefault();
+/** Shows guests the REAL /confirmar-presenca page, non-interactively — same
+ * ConfirmarPresencaView the public page renders, so this can never drift out
+ * of sync with what a guest actually sees. No real idConvidado exists here
+ * (this is a preview, not a real guest), so nome/presenca are mocked; the
+ * convite content (message/date/address/template) is the real saved one. */
+function VerLinkModal({
+  slug,
+  formatoMensagemConvite,
+  onClose,
+}: {
+  slug: string;
+  formatoMensagemConvite: FormatoMensagemConvite;
+  onClose: () => void;
+}) {
+  const conviteQuery = useConvitePreviewData(slug);
 
   return (
-    <Modal onClose={onClose}>
+    <Modal onClose={onClose} xl>
       <div className="lista-modal-head">
         <div>
           <span
@@ -1353,7 +1297,7 @@ function VerLinkModal({ onClose }: { onClose: () => void }) {
               color: "var(--ink-soft)",
             }}
           >
-            é assim que seus convidados vão ver — limpinho e direto.
+            É assim que seus convidados vão ver — limpinho e direto.
           </p>
         </div>
         <button
@@ -1366,191 +1310,50 @@ function VerLinkModal({ onClose }: { onClose: () => void }) {
         </button>
       </div>
 
-      <div className="lista-modal-body">
-        {/* URL display row */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            padding: "12px 14px",
-            border: "1px solid var(--line)",
-            borderRadius: 14,
-            background: "var(--cream)",
-            marginTop: 4,
-          }}
-        >
-          <IconLink size={16} />
-          <span
-            style={{
-              flex: 1,
-              fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-              fontSize: 13.5,
-              color: "var(--plum)",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-            title={fullUrl}
-          >
-            {fullUrl}
-          </span>
-          <button
-            type="button"
-            onClick={copyUrl}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              padding: "8px 14px",
-              borderRadius: 999,
-              border: "1px solid var(--line)",
-              background: "var(--paper)",
-              color: "var(--ink)",
-              fontFamily: FONT_SANS,
-              fontSize: 11,
-              fontWeight: 600,
-              textTransform: "uppercase",
-              letterSpacing: "0.08em",
-              cursor: "pointer",
-              flexShrink: 0,
-            }}
-            aria-label="Copiar link"
-          >
-            <IconCopy size={13} /> copiar
-          </button>
-        </div>
+      <div className="lista-modal-body" style={{ padding: 0 }}>
+        {conviteQuery.isLoading && (
+          <p style={{ padding: 24, fontFamily: FONT_SANS, color: "var(--ink-soft)" }}>
+            carregando seu convite...
+          </p>
+        )}
 
-        {/* Preview card — what guests see on the public RSVP page */}
-        <div
-          style={{
-            marginTop: 18,
-            padding: "22px 20px",
-            borderRadius: 22,
-            background:
-              "linear-gradient(135deg, var(--lilac-soft) 0%, var(--pink-soft) 100%)",
-            border: "1px solid var(--line)",
-            textAlign: "center",
-          }}
-        >
-          <div
-            style={{
-              fontFamily: FONT_CAVEAT,
-              color: "var(--plum)",
-              fontSize: 22,
-              display: "inline-block",
-              transform: "rotate(-2deg)",
-              lineHeight: 1,
-              fontWeight: 600,
-            }}
-          >
-            {greeting}
-          </div>
-          <h4
-            style={{
-              fontFamily: FONT_HAND,
-              fontSize: 32,
-              color: "var(--plum)",
-              margin: "8px 0 14px",
-              fontWeight: 400,
-            }}
-          >
-            {renderHighlighted()}
-          </h4>
-
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: 8,
-              marginBottom: 18,
-            }}
-          >
-            <span style={chipStyle}>
-              <IconCalendar size={13} /> {dateLabel}
-            </span>
-            <span style={chipStyle}>
-              <IconPin size={13} /> {locationLabel}
-            </span>
-          </div>
-
-          <div
-            style={{
-              fontFamily: FONT_SANS,
-              fontSize: 11,
-              fontWeight: 700,
-              textTransform: "uppercase",
-              letterSpacing: "0.08em",
-              color: "var(--ink-mute)",
-              marginBottom: 10,
-            }}
-          >
-            você vem?
-          </div>
-
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 8,
-            }}
-          >
+        {!conviteQuery.isLoading && conviteQuery.error && (
+          <div style={{ padding: 24 }}>
+            <p style={{ fontFamily: FONT_SANS, color: "var(--ink-soft)", marginBottom: 12 }}>
+              não consegui carregar o convite salvo agora.
+            </p>
             <button
               type="button"
-              onClick={noop}
-              style={{
-                ...previewBtnBase,
-                background:
-                  "linear-gradient(135deg, var(--lilac), var(--lilac-deep))",
-                color: "#fff",
-                borderColor: "transparent",
-                boxShadow: "var(--shadow-cta)",
-              }}
-              aria-hidden="true"
-              tabIndex={-1}
+              className="btn btn-ghost"
+              onClick={() => void conviteQuery.refetch()}
             >
-              <IconHeart size={13} fill="currentColor" /> sim, eu vou
-              <IconHeart size={13} fill="currentColor" />
-            </button>
-            <button
-              type="button"
-              onClick={noop}
-              style={previewBtnBase}
-              aria-hidden="true"
-              tabIndex={-1}
-            >
-              <IconQuestion size={13} /> talvez
-            </button>
-            <button
-              type="button"
-              onClick={noop}
-              style={previewBtnBase}
-              aria-hidden="true"
-              tabIndex={-1}
-            >
-              <IconX size={13} /> não consigo dessa vez
+              tentar de novo
             </button>
           </div>
-        </div>
+        )}
+
+        {!conviteQuery.isLoading && !conviteQuery.error && !hasSavedConvite(conviteQuery.data) && (
+          <p style={{ padding: 24, fontFamily: FONT_SANS, color: "var(--ink-soft)" }}>
+            ainda não existe convite salvo para pré-visualizar.
+          </p>
+        )}
+
+        {!conviteQuery.isLoading && hasSavedConvite(conviteQuery.data) && (
+          <ConfirmarPresencaView
+            slug={slug}
+            nome={PREVIEW_CONVIDADO_NOME}
+            presenca={PREVIEW_CONVIDADO_PRESENCA}
+            formatoMensagemConvite={formatoMensagemConvite}
+            state={conviteStateFromData(conviteQuery.data)}
+            interactive={false}
+          />
+        )}
       </div>
 
       <div className="lista-modal-foot">
-        <div className="lista-foot-actions">
+        <div className="lista-foot-actions" style={{ marginLeft: "auto" }}>
           <button type="button" className="btn btn-ghost" onClick={onClose}>
             fechar
-          </button>
-        </div>
-        <div className="lista-foot-actions lista-foot-actions-end">
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={() => {
-              toast.success("ficou mesmo ♡");
-              onClose();
-            }}
-          >
-            <IconEye size={14} /> ficou lindo ♡
           </button>
         </div>
       </div>
@@ -1768,13 +1571,17 @@ export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
           }}
         >
           <span className="cv-event-meta-item">
-            <IconCalendar size={13} /> {CONVIDADOS_EVENT.date}
+            <IconCalendar size={13} />{" "}
+            {(() => {
+              const d = formatDateScrap(state.date);
+              return d ? `${d.day} de ${d.monthFull} de ${d.year}` : CONVIDADOS_EVENT.date;
+            })()}
           </span>
           <span className="cv-event-meta-sep" aria-hidden="true">
             ·
           </span>
           <span className="cv-event-meta-item">
-            <IconClock size={13} /> {CONVIDADOS_EVENT.time}
+            <IconClock size={13} /> {state.time ? formatHora(state.time) : CONVIDADOS_EVENT.time}
           </span>
         </p>
       </div>
@@ -2437,13 +2244,20 @@ export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
       `}</style>
 
       {/* aperture-8qg1s — VER LINK preview modal */}
-      {verLinkOpen && <VerLinkModal onClose={() => setVerLinkOpen(false)} />}
+      {verLinkOpen && (
+        <VerLinkModal
+          slug={slug}
+          formatoMensagemConvite={inviteType}
+          onClose={() => setVerLinkOpen(false)}
+        />
+      )}
 
       {sendTarget && (
         <EnviarConviteModal
           guest={sendTarget}
           slug={slug}
           eventTypeLabel={eventTypeLabel}
+          mensagemConvite={state.message}
           onClose={() => setSendTarget(null)}
           onSent={() =>
             alterarPresenca.mutateAsync({ idConvidado: sendTarget.id, presenca: "enviado" })

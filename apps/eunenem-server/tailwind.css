@@ -2312,6 +2312,13 @@ h4 {
 .lista-modal-lg {
   width: min(920px, 100%);
 }
+/* Full-bleed variant for embedding a full-page preview (ex: a tela de
+   confirmar presença) inside the modal shell — needs real viewport space
+   for its 2-column grid to not look cramped. */
+.lista-modal-xl {
+  width: min(1200px, 96vw);
+  max-height: 96dvh;
+}
 .lista-modal-head {
   display: flex;
   align-items: flex-start;

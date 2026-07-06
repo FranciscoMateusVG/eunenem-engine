@@ -2,8 +2,10 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { conviteStateFromData, useConvitePreviewData } from "@/lib/convite";
+import type { FormatoMensagemConvite, StatusPresencaConvidado } from "@/lib/convidados";
 import { convidadosErrorMessage } from "@/lib/convidados";
 import { formatDateScrap } from "@/lib/mocks/convite";
+import type { ConviteState } from "@/lib/mocks/convite";
 import { trpc } from "@/lib/trpc";
 import { NotFoundPage } from "./NotFoundPage";
 import { InvitePreview } from "./components/eunenem/painel/ConviteBody";
@@ -153,34 +155,69 @@ export function ConfirmarPresencaPage({
   }
 
   const state = conviteStateFromData(conviteQuery.data);
-  const date = formatDateScrap(state.date);
-  const isVirtual = convidadoQuery.data.formatoMensagemConvite === "convite_virtual";
-  const currentPresenca = convidadoQuery.data.presenca;
-  const activeChoice: RsvpChoice | null =
-    currentPresenca === "sim" || currentPresenca === "talvez" || currentPresenca === "nao"
-      ? currentPresenca
-      : null;
 
-  const onConfirmar = async (presenca: RsvpChoice) => {
-    setPending(presenca);
-    try {
-      await confirmarPresenca.mutateAsync({ slug, idConvidado, presenca });
-      toast.success("presença confirmada ♡");
-    } catch (error) {
-      toast.error("não foi possível confirmar agora", {
-        description: convidadosErrorMessage(error),
-      });
-    } finally {
-      setPending(null);
-    }
-  };
+  return (
+    <ConfirmarPresencaView
+      slug={slug}
+      nome={convidadoQuery.data.nome}
+      presenca={convidadoQuery.data.presenca}
+      formatoMensagemConvite={convidadoQuery.data.formatoMensagemConvite}
+      state={state}
+      interactive
+      pending={pending}
+      onConfirmar={async (presenca) => {
+        setPending(presenca);
+        try {
+          await confirmarPresenca.mutateAsync({ slug, idConvidado, presenca });
+          toast.success("presença confirmada ♡");
+        } catch (error) {
+          toast.error("não foi possível confirmar agora", {
+            description: convidadosErrorMessage(error),
+          });
+        } finally {
+          setPending(null);
+        }
+      }}
+    />
+  );
+}
+
+/**
+ * Pure presentational view for the RSVP page — reused both by the real public
+ * page above (`interactive`, backed by a real confirmarPresenca mutation) and
+ * by the "pré-visualizar link" preview inside the painel (non-interactive,
+ * mock convidado data), so the two never drift apart visually.
+ */
+export function ConfirmarPresencaView({
+  slug,
+  nome,
+  presenca,
+  formatoMensagemConvite,
+  state,
+  interactive,
+  onConfirmar,
+  pending = null,
+}: {
+  slug: string;
+  nome: string;
+  presenca: StatusPresencaConvidado;
+  formatoMensagemConvite: FormatoMensagemConvite;
+  state: ConviteState;
+  interactive: boolean;
+  onConfirmar?: (presenca: RsvpChoice) => void | Promise<void>;
+  pending?: RsvpChoice | null;
+}) {
+  const date = formatDateScrap(state.date);
+  const isVirtual = formatoMensagemConvite === "convite_virtual";
+  const activeChoice: RsvpChoice | null =
+    presenca === "sim" || presenca === "talvez" || presenca === "nao" ? presenca : null;
 
   return (
     <main className="cp-page">
       <style>{CP_CSS}</style>
 
       <div className="cp-wrap">
-        <p className="cp-greeting">Olá, {convidadoQuery.data.nome}!</p>
+        <p className="cp-greeting">Olá, {nome}!</p>
         <h1 className="cp-title">
           Você está <span className="hl">convidado</span> para celebrar com a gente
         </h1>
@@ -190,7 +227,7 @@ export function ConfirmarPresencaPage({
             <section className="cp-card">
               <span className="cp-card-eyebrow">um recadinho do anfitrião</span>
               {state.message && <p className="cp-message">{state.message}</p>}
-              {state.host && <p className="cp-signature">com carinho, {state.host} ♡</p>} 
+              {state.host && <p className="cp-signature">com carinho, {state.host} ♡</p>}
             </section>
 
             <section className="cp-card cp-info-card">
@@ -247,7 +284,7 @@ export function ConfirmarPresencaPage({
               <input
                 id="cp-nome"
                 className="cp-input"
-                value={convidadoQuery.data.nome}
+                value={nome}
                 disabled
                 readOnly
               />
@@ -257,12 +294,12 @@ export function ConfirmarPresencaPage({
                     key={choice}
                     type="button"
                     className={`cp-rsvp-tile cp-rsvp-${choice}${activeChoice === choice ? " active" : ""}`}
-                    disabled={pending !== null}
-                    onClick={() => void onConfirmar(choice)}
+                    disabled={interactive && pending !== null}
+                    onClick={interactive ? () => void onConfirmar?.(choice) : undefined}
                   >
                     <span className="cp-rsvp-tile-icon">{icon}</span>
                     <span className="cp-rsvp-tile-label">
-                      {pending === choice ? "salvando…" : label}
+                      {interactive && pending === choice ? "salvando…" : label}
                     </span>
                   </button>
                 ))}
@@ -281,33 +318,35 @@ export function ConfirmarPresencaPage({
 
         <section className={`cp-promo${isVirtual ? "" : " cp-promo-narrow"}`}>
           <span className="cp-promo-glow" aria-hidden="true" />
-          <div className="cp-promo-content">
-            <span className="cp-promo-badge">
-              não deixe pra depois <IconHeart size={13} filled />
-            </span>
-            <h2 className="cp-promo-title">
-              escolha o <span className="hl">presente</span> sem sair de casa
-            </h2>
-            <p className="cp-promo-text">
-              Aproveite para escolher um presente da lista! Ela foi preparada pelos pais com tudo o que o bebê realmente precisa. Assim você acerta na escolha, evita filas e presentes repetidos e ainda pode deixar uma mensagem cheia de carinho. Tudo isso pode ser feito antes mesmo do evento.
-            </p>
-            <div className="cp-promo-tags">
-              <span className="cp-promo-tag">
-                <span className="cp-promo-check">✓</span> sem enfrentar filas
+          <div className="cp-promo-main">
+            <div className="cp-promo-content">
+              <span className="cp-promo-badge">
+                não deixe pra depois <IconHeart size={13} filled />
               </span>
-              <span className="cp-promo-tag">
-                <span className="cp-promo-check">✓</span> não erre no presente
-              </span>
-              <span className="cp-promo-tag">
-                <span className="cp-promo-check">✓</span> 100% virtual
-              </span>
+              <h2 className="cp-promo-title">
+                escolha o <span className="hl">presente</span> sem sair de casa
+              </h2>
+              <p className="cp-promo-text">
+                Aproveite para escolher um presente da lista! Ela foi preparada pelos pais com tudo o que o bebê realmente precisa. Assim você acerta na escolha, evita filas e presentes repetidos e ainda pode deixar uma mensagem cheia de carinho. Tudo isso pode ser feito antes mesmo do evento.
+              </p>
+            </div>
+            <div className="cp-promo-cta">
+              <a href={`/pagina/${slug}`} className="cp-promo-btn">
+                ver a lista de presentes <span className="cp-promo-btn-arrow" aria-hidden="true">→</span>
+              </a>
+              <span className="cp-promo-note">leva 2 minutinhos ♡</span>
             </div>
           </div>
-          <div className="cp-promo-cta">
-            <a href={`/pagina/${slug}`} className="cp-promo-btn">
-              ver a lista de presentes <span className="cp-promo-btn-arrow" aria-hidden="true">→</span>
-            </a>
-            <span className="cp-promo-note">leva 2 minutinhos ♡</span>
+          <div className="cp-promo-tags">
+            <span className="cp-promo-tag">
+              <span className="cp-promo-check">✓</span> sem enfrentar filas
+            </span>
+            <span className="cp-promo-tag">
+              <span className="cp-promo-check">✓</span> não erre no presente
+            </span>
+            <span className="cp-promo-tag">
+              <span className="cp-promo-check">✓</span> 100% virtual
+            </span>
           </div>
         </section>
       </div>
@@ -540,14 +579,20 @@ const CP_CSS: string = `
   overflow:hidden;
   margin-top:32px;
   width:100%;
-  display:grid;
-  grid-template-columns:1.4fr 1fr;
-  align-items:center;
-  gap:28px;
+  display:flex;
+  flex-direction:column;
+  gap:24px;
   padding:40px 44px;
   border-radius:28px;
   border:1px solid var(--line);
   background:linear-gradient(120deg, var(--lilac-soft) 0%, var(--pink-soft) 55%, var(--lilac-soft) 100%);
+}
+.cp-promo-main{
+  width:100%;
+  display:grid;
+  grid-template-columns:1.4fr 1fr;
+  align-items:center;
+  gap:28px;
 }
 .cp-promo-narrow{
   max-width:60%;
@@ -564,7 +609,7 @@ const CP_CSS: string = `
   background:radial-gradient(circle, rgba(247,213,96,.55), transparent 70%);
   pointer-events:none;
 }
-.cp-promo-content{ position:relative; z-index:1; }
+.cp-promo-content{ position:relative; z-index:1; min-width:0; }
 .cp-promo-badge{
   display:inline-flex;
   align-items:center;
@@ -593,10 +638,19 @@ const CP_CSS: string = `
   line-height:1.55;
   margin:0 0 18px;
 }
-.cp-promo-tags{ display:flex; flex-wrap:wrap; gap:10px; }
+.cp-promo-tags{
+  position:relative;
+  z-index:1;
+  width:100%;
+  display:flex;
+  flex-wrap:wrap;
+  justify-content:center;
+  gap:10px;
+}
 .cp-promo-tag{
   display:inline-flex;
   align-items:center;
+  justify-content:center;
   gap:5px;
   background:var(--paper);
   border:1px solid var(--line);
@@ -605,6 +659,7 @@ const CP_CSS: string = `
   font-size:12.5px;
   font-weight:600;
   color:var(--ink);
+  white-space:nowrap;
 }
 .cp-promo-check{ color:var(--green-deep); }
 .cp-promo-cta{
@@ -650,8 +705,10 @@ const CP_CSS: string = `
   .cp-col-right{ order:-1; }
 }
 @media (max-width: 720px){
-  .cp-promo{ grid-template-columns:1fr; text-align:center; padding:32px 26px; }
-  .cp-promo-tags{ justify-content:center; }
+  .cp-promo-main{ grid-template-columns:1fr; text-align:center; }
+  .cp-promo{ padding:32px 26px; }
+  .cp-promo-tags{ flex-direction:column; align-items:center; justify-content:center; }
+  .cp-promo-tag{ width:100%; justify-content:center; }
   .cp-promo-text{ max-width:none; }
 }
 `;
