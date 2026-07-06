@@ -12,7 +12,6 @@ import {
   IdEventoSchema,
   IdListaDeConvidadosSchema,
 } from '../../domain/evento/value-objects/ids.js';
-import { LinkConfirmacaoSchema } from '../../domain/evento/value-objects/link-confirmacao-lista.js';
 import { NomeConvidadoSchema } from '../../domain/evento/value-objects/nome-convidado.js';
 import { NumeroCelularConvidadoSchema } from '../../domain/evento/value-objects/numero-celular-convidado.js';
 import { StatusPresencaConvidadoSchema } from '../../domain/evento/value-objects/status-presenca-convidado.js';
@@ -31,7 +30,6 @@ const ConvidadoInputSchema = z.object({
 export const CriarListaDeConvidadosInputSchema = z.object({
   id: IdListaDeConvidadosSchema,
   idEvento: IdEventoSchema,
-  linkConfirmacao: LinkConfirmacaoSchema,
   formatoMensagemConvite: FormatoMensagemConviteSchema,
   convidados: z.array(ConvidadoInputSchema),
 });
@@ -78,7 +76,6 @@ export async function criarListaDeConvidados(
       const listaDeConvidados = criarListaDeConvidadosDominio({
         id: parsed.data.id,
         idEvento: parsed.data.idEvento,
-        linkConfirmacao: parsed.data.linkConfirmacao,
         formatoMensagemConvite: parsed.data.formatoMensagemConvite,
         convidados: parsed.data.convidados,
         criadoEm: now,

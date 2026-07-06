@@ -88,7 +88,6 @@ describe('criarListaDeConvidados', () => {
       {
         id: idLista,
         idEvento,
-        linkConfirmacao: 'https://eunenem.app/rsvp/lista-1',
         formatoMensagemConvite: 'texto',
         convidados: [convidadoBase()],
       },
@@ -116,7 +115,6 @@ describe('criarListaDeConvidados', () => {
         {
           id: randomUUID(),
           idEvento: randomUUID(),
-          linkConfirmacao: 'https://eunenem.app/rsvp/invalido',
           formatoMensagemConvite: 'texto',
           convidados: [],
         },
@@ -137,7 +135,6 @@ describe('criarListaDeConvidados', () => {
     await criarListaDeConvidados(deps, {
       id: randomUUID(),
       idEvento,
-      linkConfirmacao: 'https://eunenem.app/rsvp/lista-1',
       formatoMensagemConvite: 'texto',
       convidados: [],
     });
@@ -146,7 +143,6 @@ describe('criarListaDeConvidados', () => {
       criarListaDeConvidados(deps, {
         id: randomUUID(),
         idEvento,
-        linkConfirmacao: 'https://eunenem.app/rsvp/lista-2',
         formatoMensagemConvite: 'texto',
         convidados: [],
       }),
@@ -170,7 +166,6 @@ describe('obterListaDeConvidados', () => {
       {
         id: idLista,
         idEvento,
-        linkConfirmacao: 'https://eunenem.app/rsvp/lista-1',
         formatoMensagemConvite: 'texto',
         convidados: [],
       },
@@ -201,7 +196,6 @@ describe('obterListaDeConvidados', () => {
       {
         id: idLista,
         idEvento,
-        linkConfirmacao: 'https://eunenem.app/rsvp/lista-1',
         formatoMensagemConvite: 'texto',
         convidados: [],
       },
@@ -236,7 +230,6 @@ describe('atualizarListaDeConvidados', () => {
       {
         id: idLista,
         idEvento,
-        linkConfirmacao: 'https://eunenem.app/rsvp/lista-1',
         formatoMensagemConvite: 'texto',
         convidados: [],
       },
@@ -250,13 +243,11 @@ describe('atualizarListaDeConvidados', () => {
       },
       {
         id: idLista,
-        linkConfirmacao: 'https://eunenem.app/rsvp/lista-atualizada',
         formatoMensagemConvite: 'convite_virtual',
         convidados: [{ ...convidado, presenca: 'sim' }],
       },
     );
 
-    expect(updated.linkConfirmacao).toBe('https://eunenem.app/rsvp/lista-atualizada');
     expect(updated.formatoMensagemConvite).toBe('convite_virtual');
     expect(updated.convidados).toHaveLength(1);
     expect(updated.convidados[0]?.presenca).toBe('sim');
@@ -288,7 +279,6 @@ describe('alterarPresencaConvidado', () => {
       {
         id: idLista,
         idEvento,
-        linkConfirmacao: 'https://eunenem.app/rsvp/lista-1',
         formatoMensagemConvite: 'texto',
         convidados: [convidado, outroConvidado],
       },
@@ -329,7 +319,6 @@ describe('alterarPresencaConvidado', () => {
       {
         id: idLista,
         idEvento,
-        linkConfirmacao: 'https://eunenem.app/rsvp/lista-1',
         formatoMensagemConvite: 'texto',
         convidados: [convidado],
       },
@@ -366,7 +355,6 @@ describe('alterarPresencaConvidado', () => {
       {
         id: idLista,
         idEvento,
-        linkConfirmacao: 'https://eunenem.app/rsvp/lista-1',
         formatoMensagemConvite: 'texto',
         convidados: [convidadoBase()],
       },
@@ -404,7 +392,6 @@ describe('alterarPresencaConvidado', () => {
       {
         id: idLista,
         idEvento,
-        linkConfirmacao: 'https://eunenem.app/rsvp/lista-1',
         formatoMensagemConvite: 'texto',
         convidados: [convidado],
       },

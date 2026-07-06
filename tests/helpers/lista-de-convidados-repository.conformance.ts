@@ -192,7 +192,6 @@ export function makeListaDeConvidados(
   return {
     id: randomUUID(),
     idEvento: randomUUID(),
-    linkConfirmacao: 'https://eunenem.app/rsvp/lista-1',
     formatoMensagemConvite: 'texto',
     convidados: [makeConvidado()],
     criadoEm: new Date('2026-06-10T10:00:00.000Z'),

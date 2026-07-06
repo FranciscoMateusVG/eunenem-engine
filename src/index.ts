@@ -273,8 +273,6 @@ export {
 } from './domain/evento/value-objects/ids.js';
 export type { ImagemUrlConvite } from './domain/evento/value-objects/imagem-url-convite.js';
 export { ImagemUrlConviteSchema } from './domain/evento/value-objects/imagem-url-convite.js';
-export type { LinkConfirmacao } from './domain/evento/value-objects/link-confirmacao-lista.js';
-export { LinkConfirmacaoSchema } from './domain/evento/value-objects/link-confirmacao-lista.js';
 export type { MensagemConvite } from './domain/evento/value-objects/mensagem-convite.js';
 export { MensagemConviteSchema } from './domain/evento/value-objects/mensagem-convite.js';
 export type { ModalidadeEvento } from './domain/evento/value-objects/modalidade-evento.js';

@@ -1,6 +1,5 @@
 import type { FormatoMensagemConvite } from '../value-objects/formato-mensagem-convite.js';
 import type { IdConvidado, IdEvento, IdListaDeConvidados } from '../value-objects/ids.js';
-import type { LinkConfirmacao } from '../value-objects/link-confirmacao-lista.js';
 import type { NomeConvidado } from '../value-objects/nome-convidado.js';
 import type { NumeroCelularConvidado } from '../value-objects/numero-celular-convidado.js';
 import type { StatusPresencaConvidado } from '../value-objects/status-presenca-convidado.js';
@@ -23,7 +22,6 @@ export interface Convidado {
 export interface ListaDeConvidados {
   readonly id: IdListaDeConvidados;
   readonly idEvento: IdEvento;
-  readonly linkConfirmacao: LinkConfirmacao;
   readonly formatoMensagemConvite: FormatoMensagemConvite;
   readonly convidados: readonly Convidado[];
   readonly criadoEm: Date;
@@ -33,7 +31,6 @@ export interface ListaDeConvidados {
 export interface CriarListaDeConvidadosInput {
   readonly id: IdListaDeConvidados;
   readonly idEvento: IdEvento;
-  readonly linkConfirmacao: LinkConfirmacao;
   readonly formatoMensagemConvite: FormatoMensagemConvite;
   readonly convidados: readonly Convidado[];
   readonly criadoEm: Date;
@@ -44,7 +41,6 @@ export function criarListaDeConvidados(input: CriarListaDeConvidadosInput): List
   return {
     id: input.id,
     idEvento: input.idEvento,
-    linkConfirmacao: input.linkConfirmacao,
     formatoMensagemConvite: input.formatoMensagemConvite,
     convidados: [...input.convidados],
     criadoEm: input.criadoEm,
@@ -53,7 +49,6 @@ export function criarListaDeConvidados(input: CriarListaDeConvidadosInput): List
 }
 
 export interface AtualizarListaDeConvidadosCampos {
-  readonly linkConfirmacao: LinkConfirmacao;
   readonly formatoMensagemConvite: FormatoMensagemConvite;
   readonly convidados: readonly Convidado[];
 }
@@ -65,7 +60,6 @@ export function listaDeConvidadosComCamposAtualizados(
 ): ListaDeConvidados {
   return {
     ...lista,
-    linkConfirmacao: campos.linkConfirmacao,
     formatoMensagemConvite: campos.formatoMensagemConvite,
     convidados: [...campos.convidados],
     atualizadoEm,

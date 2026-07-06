@@ -129,7 +129,6 @@ const ConvidadoSnapshotSchema = z.object({
 
 const ListaDeConvidadosSnapshotSchema = z.object({
   id: z.string().uuid(),
-  linkConfirmacao: z.string(),
   formatoMensagemConvite: FormatoMensagemConviteSchema,
   convidados: z.array(ConvidadoSnapshotSchema),
 });
@@ -144,7 +143,6 @@ function toSnapshot(
   return {
     lista: {
       id: lista.id,
-      linkConfirmacao: lista.linkConfirmacao,
       formatoMensagemConvite: lista.formatoMensagemConvite,
       convidados: lista.convidados.map((convidado) => ({
         id: convidado.id,
@@ -313,7 +311,7 @@ export const eventoListaDeConvidadosRouter = t.router({
     .output(GetListaDeConvidadosOutputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        const { campanha, usuario } = await resolveCallerCampanha(ctx);
+        const { campanha } = await resolveCallerCampanha(ctx);
         const evento = await resolveCallerEvento(ctx, campanha);
         if (!evento) {
           throw new EventoAusenteError('Crie seu convite antes de adicionar convidados');
@@ -339,7 +337,6 @@ export const eventoListaDeConvidadosRouter = t.router({
               },
               {
                 id: existing.id,
-                linkConfirmacao: existing.linkConfirmacao,
                 formatoMensagemConvite: existing.formatoMensagemConvite,
                 convidados: [...existing.convidados, novoConvidado],
               },
@@ -354,10 +351,6 @@ export const eventoListaDeConvidadosRouter = t.router({
               {
                 id: randomUUID() as IdListaDeConvidados,
                 idEvento: evento.id as IdEvento,
-                linkConfirmacao: new URL(
-                  `/confirmar/${usuario.slug}`,
-                  ctx.deps.publicOrigin,
-                ).toString(),
                 formatoMensagemConvite: 'texto',
                 convidados: [novoConvidado],
               },
@@ -374,7 +367,7 @@ export const eventoListaDeConvidadosRouter = t.router({
     .output(GetListaDeConvidadosOutputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        const { campanha, usuario } = await resolveCallerCampanha(ctx);
+        const { campanha } = await resolveCallerCampanha(ctx);
         const evento = await resolveCallerEvento(ctx, campanha);
         if (!evento) {
           throw new EventoAusenteError('Crie seu convite antes de escolher o formato da mensagem');
@@ -393,7 +386,6 @@ export const eventoListaDeConvidadosRouter = t.router({
               },
               {
                 id: existing.id,
-                linkConfirmacao: existing.linkConfirmacao,
                 formatoMensagemConvite: input.formatoMensagemConvite,
                 convidados: [...existing.convidados],
               },
@@ -408,10 +400,6 @@ export const eventoListaDeConvidadosRouter = t.router({
               {
                 id: randomUUID() as IdListaDeConvidados,
                 idEvento: evento.id as IdEvento,
-                linkConfirmacao: new URL(
-                  `/confirmar/${usuario.slug}`,
-                  ctx.deps.publicOrigin,
-                ).toString(),
                 formatoMensagemConvite: input.formatoMensagemConvite,
                 convidados: [],
               },

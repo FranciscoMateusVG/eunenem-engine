@@ -27,7 +27,6 @@ type DbExecutor = Database | Transaction<DB>;
 type ListaRow = {
   id: string;
   id_evento: string;
-  link_confirmacao: string;
   formato_mensagem_convite: string;
   criado_em: Date;
   atualizado_em: Date;
@@ -54,7 +53,6 @@ export class ListaDeConvidadosRepositoryPostgres implements ListaDeConvidadosRep
             .values({
               id: listaDeConvidados.id,
               id_evento: listaDeConvidados.idEvento,
-              link_confirmacao: listaDeConvidados.linkConfirmacao,
               formato_mensagem_convite: listaDeConvidados.formatoMensagemConvite,
               criado_em: listaDeConvidados.criadoEm,
               atualizado_em: listaDeConvidados.atualizadoEm,
@@ -62,7 +60,6 @@ export class ListaDeConvidadosRepositoryPostgres implements ListaDeConvidadosRep
             .onConflict((oc) =>
               oc.column('id').doUpdateSet({
                 id_evento: listaDeConvidados.idEvento,
-                link_confirmacao: listaDeConvidados.linkConfirmacao,
                 formato_mensagem_convite: listaDeConvidados.formatoMensagemConvite,
                 atualizado_em: listaDeConvidados.atualizadoEm,
               }),
@@ -231,7 +228,6 @@ function toListaDeConvidados(
   return criarListaDeConvidadosDominio({
     id: row.id as IdListaDeConvidados,
     idEvento: row.id_evento as IdEvento,
-    linkConfirmacao: row.link_confirmacao as ListaDeConvidados['linkConfirmacao'],
     formatoMensagemConvite:
       row.formato_mensagem_convite as ListaDeConvidados['formatoMensagemConvite'],
     convidados: convidados.map(toConvidado),

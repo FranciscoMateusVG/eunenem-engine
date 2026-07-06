@@ -175,7 +175,6 @@ export interface ListasDeConvidados {
   formato_mensagem_convite: string;
   id: string;
   id_evento: string;
-  link_confirmacao: string;
 }
 
 export interface OpcoesContribuicao {
