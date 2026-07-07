@@ -6502,3 +6502,1039 @@ button.painel-topbar-link:hover {
     transform: translateY(0);
   }
 }
+
+/* =================================================================
+ * aperture-g7l09 — /campanhas (multicampanha migration bridge, POC)
+ * Mixed 1.0/2.0 grid + welcome modal + 2-step tour. Design source of
+ * truth: operator's Multicampanhas.pdf (2026-07-01). Scoped under
+ * .camp-* so it never collides with sibling surfaces. All colors flow
+ * from the :root tokens; the ONLY reference-exact values without a
+ * token are the 2.0 sage selo pair (#dce7b8/#c9d89a on #eef3d6, ink
+ * #5e6b2e) — softer than --green on purpose (the selo is a label, not
+ * a CTA) — and the mid-lilac selo border #d8bee4 (between --lilac-soft
+ * and --lilac). Both lifted verbatim from the operator artifact.
+ * ================================================================= */
+
+.camp-scope {
+  --camp-sel10-bg: var(--lilac-soft);
+  --camp-sel10-line: #d8bee4;
+  --camp-sel10-ink: var(--plum);
+  --camp-sel20-bg: #dce7b8;
+  --camp-sel20-line: #c9d89a;
+  --camp-sel20-row: #eef3d6;
+  --camp-sel20-ink: #5e6b2e;
+
+  min-height: 100vh;
+  background: radial-gradient(120% 90% at 100% 0%, var(--lilac-soft) 0%, transparent 46%), var(--cream);
+}
+
+/* ── Topbar ── */
+
+.camp-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  background: color-mix(in srgb, var(--cream) 78%, transparent);
+  border-bottom: 1px solid var(--line);
+}
+
+.camp-topbar-inner {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 13px 24px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.camp-brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  flex: none;
+  text-decoration: none;
+  border-radius: 12px;
+}
+
+.camp-brand-mark {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: var(--lilac-soft);
+  border: 1px solid var(--camp-sel10-line);
+  transform: rotate(-4deg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 22px;
+  color: var(--plum);
+  box-shadow: var(--shadow-sm);
+}
+
+.camp-brand-text {
+  line-height: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.camp-brand-name {
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 20px;
+  color: var(--plum);
+}
+
+.camp-brand-sub {
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+  margin-top: 1px;
+}
+
+/* ── Switcher dropdown ── */
+
+.camp-switch {
+  position: relative;
+  margin-left: 6px;
+}
+
+.camp-switch-btn {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  padding: 10px 13px;
+  min-height: 44px;
+  box-shadow: var(--shadow-sm);
+  font-family: inherit;
+  transition: border-color 0.18s ease;
+}
+
+.camp-switch-btn:hover {
+  border-color: var(--lilac-soft);
+}
+
+.camp-switch-lbl {
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+  font-weight: 700;
+}
+
+.camp-switch-val {
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 17px;
+  color: var(--plum);
+  white-space: nowrap;
+}
+
+.camp-switch-caret {
+  font-size: 11px;
+  color: var(--lilac-deep);
+  transition: transform 0.18s ease;
+}
+
+.camp-switch-caret.open {
+  transform: rotate(180deg);
+}
+
+.camp-switch-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+}
+
+.camp-switch-menu {
+  position: absolute;
+  top: calc(100% + 9px);
+  left: 0;
+  width: 288px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: var(--shadow-lg);
+  padding: 8px;
+  z-index: 60;
+  animation: campFloatIn 0.16s ease both;
+}
+
+.camp-switch-menu-eyebrow {
+  font-family: var(--font-caveat), cursive;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--green-deep);
+  transform: rotate(-3deg);
+  padding: 4px 10px 6px;
+}
+
+.camp-switch-item {
+  width: 100%;
+  text-align: left;
+  border-radius: 13px;
+  padding: 9px 11px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin-bottom: 2px;
+  text-decoration: none;
+  transition: background 0.15s ease;
+}
+
+.camp-switch-item:hover {
+  background: var(--cream-2);
+}
+
+.camp-switch-item-ini {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: 10px;
+  border: 1px solid rgba(107, 60, 94, 0.1);
+  transform: rotate(-3deg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 16px;
+  color: var(--plum);
+}
+
+.camp-switch-item-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.camp-switch-item-name {
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 16px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.camp-switch-item-sub {
+  font-size: 11px;
+  color: var(--ink-mute);
+}
+
+/* ── Topbar user ── */
+
+.camp-topbar-spacer {
+  flex: 1;
+}
+
+.camp-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+
+.camp-user-text {
+  text-align: right;
+  line-height: 1.15;
+  display: flex;
+  flex-direction: column;
+}
+
+.camp-user-greet {
+  font-family: var(--font-caveat), cursive;
+  font-size: 19px;
+  font-weight: 600;
+  color: var(--lilac-deep);
+  transform: rotate(-2deg);
+}
+
+.camp-user-sub {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+
+.camp-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--pink-soft);
+  border: 2px solid var(--coral-pink);
+  transform: rotate(-3deg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 19px;
+  color: var(--plum);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ── Hero ── */
+
+.camp-main {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 52px 24px 80px;
+}
+
+.camp-hero {
+  text-align: center;
+  margin-bottom: 44px;
+}
+
+.camp-hero-eyebrow {
+  font-family: var(--font-caveat), cursive;
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--lilac-deep);
+  transform: rotate(-2deg);
+  display: inline-block;
+}
+
+.camp-hero-title {
+  margin: 8px 0 0;
+  font-size: clamp(34px, 5.5vw, 46px);
+  line-height: 1.08;
+}
+
+.camp-hero-help {
+  cursor: pointer;
+  margin-top: 14px;
+  background: transparent;
+  border: none;
+  font-family: inherit;
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  color: var(--lilac-deep);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  padding: 10px;
+}
+
+/* ── Grid + cards ── */
+
+.camp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: 30px;
+}
+
+.camp-card {
+  position: relative;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  padding: 20px;
+  box-shadow: var(--shadow-md);
+  /* Equal-height row: grid stretches the card; the body flexes so the
+   * CTA lands on a shared baseline even when the mimos line is hidden
+   * (null counts — Rex's contract gotcha #2). */
+  display: flex;
+  flex-direction: column;
+}
+
+.camp-tape {
+  position: absolute;
+  top: -11px;
+  left: 32px;
+  width: 66px;
+  height: 22px;
+  opacity: 0.7;
+  transform: rotate(-4deg);
+  border-radius: 2px;
+}
+
+/* The platform selo — the modal's squircle vocabulary carried onto the
+ * cards. Counter-rotated (+3deg) against the tape's -4deg so the top edge
+ * reads as two separate scrapbook stickers, not one skewed banner. Text
+ * inside ("1.0"/"2.0") keeps the distinction non-color-dependent. */
+.camp-selo {
+  position: absolute;
+  top: -13px;
+  right: 20px;
+  width: 40px;
+  height: 40px;
+  border-radius: 13px;
+  transform: rotate(3deg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 15px;
+  box-shadow: var(--shadow-sm);
+  z-index: 1;
+}
+
+.camp-selo-10 {
+  background: var(--camp-sel10-bg);
+  border: 1px solid var(--camp-sel10-line);
+  color: var(--camp-sel10-ink);
+}
+
+.camp-selo-20 {
+  background: var(--camp-sel20-bg);
+  border: 1px solid var(--camp-sel20-line);
+  color: var(--camp-sel20-ink);
+}
+
+/* Modal variant sits inline in the version rows (reference: 46px, -3deg). */
+.camp-selo-modal {
+  position: static;
+  width: 46px;
+  height: 46px;
+  flex: none;
+  transform: rotate(-3deg);
+  font-size: 16px;
+  box-shadow: none;
+}
+
+.camp-cover {
+  height: 150px;
+  border-radius: 18px;
+  border: 1px solid rgba(107, 60, 94, 0.09);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.camp-cover-ini {
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 76px;
+  color: rgba(107, 60, 94, 0.28);
+  transform: rotate(-3deg);
+}
+
+.camp-card-body {
+  padding: 18px 6px 4px;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+/* The element right before the CTA always contributes the 18px gap;
+ * margin-top:auto on the CTA absorbs any leftover row height. */
+.camp-card-body > :nth-last-child(2) {
+  margin-bottom: 18px;
+}
+
+.camp-card-name {
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 28px;
+  color: var(--plum);
+  line-height: 1.1;
+  margin: 0;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+
+.camp-card-mimos {
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  color: var(--ink-mute);
+  margin-top: 4px;
+}
+
+.camp-cta {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: auto;
+  background: var(--lilac-deep);
+  color: #fff;
+  border: none;
+  border-radius: 15px;
+  padding: 14px;
+  min-height: 48px;
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  text-decoration: none;
+  box-shadow: var(--shadow-cta);
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.camp-cta:hover {
+  background: var(--plum);
+  transform: translateY(-1px);
+}
+
+/* ── NOVA LISTA (dashed slot) ── */
+
+.camp-nova {
+  cursor: pointer;
+  background: transparent;
+  border: 2px dashed var(--camp-sel10-line);
+  border-radius: 24px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  min-height: 280px;
+  color: var(--lilac-deep);
+  font-family: inherit;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.camp-nova:hover {
+  background: color-mix(in srgb, var(--lilac-soft) 35%, transparent);
+  border-color: var(--lilac);
+}
+
+.camp-nova-plus {
+  width: 66px;
+  height: 66px;
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--lilac-soft) 55%, var(--paper));
+  border: 1px solid var(--lilac-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: rotate(-4deg);
+}
+
+.camp-nova-plus > span {
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 44px;
+  line-height: 1;
+  color: var(--lilac-deep);
+}
+
+.camp-nova-lbl {
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+/* ── Skeleton / error / empty ── */
+
+.camp-skel-block {
+  background: var(--cream-2);
+  border: none;
+}
+
+.camp-skel-line {
+  height: 22px;
+  width: 70%;
+  border-radius: 8px;
+  background: var(--cream-2);
+}
+
+.camp-skel-line-sm {
+  height: 12px;
+  width: 40%;
+  margin-top: 8px;
+}
+
+.camp-skel-btn {
+  height: 48px;
+  border-radius: 15px;
+  background: var(--cream-2);
+  margin-top: 18px;
+}
+
+.camp-error {
+  max-width: 440px;
+  margin: 0 auto;
+  text-align: center;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  padding: 34px 28px;
+  box-shadow: var(--shadow-sm);
+}
+
+.camp-error-eyebrow {
+  font-family: var(--font-caveat), cursive;
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--coral-pink);
+  transform: rotate(-2deg);
+  display: inline-block;
+}
+
+.camp-error-text {
+  color: var(--ink-soft);
+  font-size: 14px;
+  line-height: 1.6;
+  margin: 10px 0 20px;
+}
+
+.camp-empty-note {
+  text-align: center;
+  font-family: var(--font-caveat), cursive;
+  font-size: 22px;
+  color: var(--ink-soft);
+  margin-top: 28px;
+  transform: rotate(-1deg);
+}
+
+/* ── Modals (welcome + tour) ── */
+
+.camp-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(107, 60, 94, 0.34);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: campFade 0.2s ease both;
+}
+
+.camp-overlay-tour {
+  z-index: 95;
+  background: rgba(107, 60, 94, 0.38);
+}
+
+.camp-modal {
+  position: relative;
+  width: 560px;
+  max-width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 26px;
+  box-shadow: var(--shadow-lg);
+  padding: 34px 34px 28px;
+  animation: campPop 0.26s cubic-bezier(0.2, 0.8, 0.3, 1) both;
+}
+
+.camp-modal-tour {
+  width: 460px;
+  padding: 30px;
+}
+
+.camp-modal-tape {
+  position: absolute;
+  top: -13px;
+  left: 44px;
+  width: 88px;
+  height: 26px;
+  opacity: 0.75;
+  transform: rotate(-4deg);
+  border-radius: 3px;
+}
+
+.camp-modal-eyebrow {
+  font-family: var(--font-caveat), cursive;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--green-deep);
+  transform: rotate(-2deg);
+  display: inline-block;
+}
+
+.camp-modal-title {
+  margin: 4px 0 0;
+  font-size: 34px;
+  line-height: 1.12;
+  font-weight: 400;
+}
+
+.camp-modal-title-sm {
+  font-size: 28px;
+}
+
+.camp-modal-copy {
+  margin: 16px 0 0;
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--ink-soft);
+}
+
+.camp-modal-kicker {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+  font-weight: 700;
+  margin: 22px 0 12px;
+}
+
+.camp-versoes {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.camp-versao {
+  display: flex;
+  gap: 13px;
+  border-radius: 16px;
+  padding: 15px 16px;
+}
+
+.camp-versao-10 {
+  background: color-mix(in srgb, var(--lilac-soft) 45%, var(--paper));
+  border: 1px solid var(--lilac-soft);
+}
+
+.camp-versao-20 {
+  background: var(--camp-sel20-row);
+  border: 1px solid var(--camp-sel20-line);
+}
+
+.camp-versao-name {
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 19px;
+  color: var(--plum);
+  line-height: 1.1;
+}
+
+.camp-versao-name-20 {
+  color: var(--camp-sel20-ink);
+}
+
+.camp-versao-desc {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-soft);
+  margin-top: 3px;
+}
+
+.camp-versao-desc-20 {
+  color: #6e7a50;
+}
+
+.camp-aviso {
+  display: flex;
+  gap: 10px;
+  background: var(--pink-soft);
+  border: 1px solid #f4c9d8;
+  border-radius: 14px;
+  padding: 12px 14px;
+  margin-top: 14px;
+}
+
+.camp-aviso-heart {
+  flex: none;
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 18px;
+  color: var(--coral-pink);
+  line-height: 1.3;
+}
+
+.camp-aviso p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #9c5a70;
+}
+
+.camp-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 11px;
+  margin-top: 24px;
+}
+
+.camp-btn-outline,
+.camp-btn-fill {
+  cursor: pointer;
+  flex: 1;
+  min-width: 130px;
+  min-height: 48px;
+  border-radius: 14px;
+  padding: 14px;
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.camp-btn-outline {
+  background: var(--paper);
+  color: var(--lilac-deep);
+  border: 1px solid var(--lilac-soft);
+}
+
+.camp-btn-outline:hover {
+  background: color-mix(in srgb, var(--lilac-soft) 35%, var(--paper));
+}
+
+.camp-btn-fill {
+  background: var(--lilac-deep);
+  color: #fff;
+  border: none;
+  box-shadow: var(--shadow-cta);
+}
+
+.camp-btn-fill:hover {
+  background: var(--plum);
+  transform: translateY(-1px);
+}
+
+.camp-btn-fill-sm {
+  flex: none;
+  min-width: 0;
+  padding: 12px 20px;
+  border-radius: 13px;
+}
+
+/* ── Tour internals ── */
+
+.camp-tour-stage {
+  margin: 18px 0;
+  background: var(--cream);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.camp-tour-stage-center {
+  align-items: center;
+  padding: 22px;
+  gap: 10px;
+}
+
+.camp-tour-pill {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 8px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  padding: 7px 11px;
+  box-shadow: var(--shadow-sm);
+  font-size: 10px;
+  color: var(--lilac-deep);
+}
+
+.camp-tour-pill-lbl {
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+  font-weight: 700;
+}
+
+.camp-tour-pill-val {
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 15px;
+  color: var(--plum);
+}
+
+.camp-tour-note {
+  font-family: var(--font-caveat), cursive;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--lilac-deep);
+  transform: rotate(-2deg);
+}
+
+.camp-tour-note-green {
+  color: var(--green-deep);
+}
+
+.camp-tour-cta {
+  align-self: flex-start;
+  background: var(--lilac-deep);
+  color: #fff;
+  border-radius: 11px;
+  padding: 9px 14px;
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  box-shadow: var(--shadow-cta);
+}
+
+.camp-tour-nova {
+  width: 180px;
+  border: 2px dashed var(--camp-sel10-line);
+  border-radius: 18px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  background: var(--paper);
+}
+
+.camp-tour-nova-plus {
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--lilac-soft) 55%, var(--paper));
+  border: 1px solid var(--lilac-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: rotate(-4deg);
+}
+
+.camp-tour-nova-plus > span {
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 34px;
+  line-height: 1;
+  color: var(--lilac-deep);
+}
+
+.camp-tour-nova-lbl {
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--lilac-deep);
+}
+
+.camp-tour-copy {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+
+.camp-tour-copy b {
+  color: var(--plum);
+}
+
+.camp-tour-controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 24px;
+}
+
+.camp-tour-dots {
+  display: flex;
+  gap: 7px;
+}
+
+.camp-tour-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #e3d3ea;
+}
+
+.camp-tour-dot.on {
+  background: var(--lilac-deep);
+}
+
+.camp-tour-back {
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+  padding: 12px;
+}
+
+/* ── Focus (WCAG 2.4.7 — Izzy's a11y baseline gate) ── */
+
+.camp-scope a:focus-visible,
+.camp-scope button:focus-visible {
+  outline: 3px solid var(--lilac-deep);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+.camp-cta:focus-visible,
+.camp-nova:focus-visible,
+.camp-btn-fill:focus-visible,
+.camp-btn-outline:focus-visible {
+  border-radius: 15px;
+}
+
+/* ── Animations ── */
+
+@keyframes campFloatIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes campFade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes campPop {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .camp-overlay,
+  .camp-modal,
+  .camp-switch-menu {
+    animation: none;
+  }
+  .camp-cta,
+  .camp-btn-fill,
+  .camp-nova,
+  .camp-switch-caret {
+    transition: none;
+  }
+}
+
+/* ── Mobile ── */
+
+@media (max-width: 640px) {
+  .camp-main {
+    padding: 36px 18px 64px;
+  }
+  .camp-hero {
+    margin-bottom: 32px;
+  }
+  .camp-grid {
+    gap: 24px;
+  }
+  .camp-modal {
+    padding: 26px 22px 22px;
+  }
+  .camp-user-text {
+    display: none; /* tight topbar — the avatar carries the identity */
+  }
+  .camp-switch-menu {
+    width: min(288px, calc(100vw - 48px));
+  }
+}

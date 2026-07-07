@@ -10,6 +10,7 @@ import { AuthDemoPage } from './AuthDemoPage.js';
 import { ConfirmarPresencaPage } from './ConfirmarPresencaPage.js';
 import { FaqPage } from './FaqPage.js';
 import { AuthModalProvider } from './components/eunenem/auth/AuthModalProvider.js';
+import { CampanhasPage } from './CampanhasPage.js';
 import { LandingPage } from './LandingPage.js';
 import { NotFoundPage } from './NotFoundPage.js';
 import { PainelConvitePreviewPage } from './PainelConvitePreviewPage.js';
@@ -44,6 +45,7 @@ const SLUG_REGEX = /^[a-z][a-z0-9-]{2,29}$/;
 // SSR) will still hit the SSR catch-all and get its 404 honestly.
 export function resolveRoute(pathname: string):
   | { kind: 'landing' }
+  | { kind: 'campanhas' }
   | { kind: 'pagina'; slug: string }
   | { kind: 'pagina-sucesso'; slug: string }
   | { kind: 'confirmar-presenca'; slug: string; idConvidado: string }
@@ -82,6 +84,15 @@ export function resolveRoute(pathname: string):
   // footer. Exact "/faq" only.
   if (pathname === '/faq') {
     return { kind: 'faq' };
+  }
+  // Multicampanha bridge (aperture-g7l09, epic aperture-7hm2g) — the mixed
+  // 1.0/2.0 campaign grid. Post-login default lands here for the POC (see
+  // AuthModalProvider + useOauthReturnRedirect). Authenticated surface: the
+  // page itself bounces anonymous visitors back to "/" client-side; the
+  // route resolves 200 unconditionally (same pattern as /painel — content,
+  // not status, reflects auth).
+  if (pathname === '/campanhas' || pathname === '/campanhas/') {
+    return { kind: 'campanhas' };
   }
   // Operator admin — DDD-trace drill-down (aperture-rsidz.1, W0). No auth
   // gate per operator directive. Sub-routes for the drills follow below
@@ -248,6 +259,7 @@ export function App({ pathname }: { pathname: string }) {
 
 function pickPage(route: ReturnType<typeof resolveRoute>, pathname: string) {
   if (route.kind === 'landing') return <LandingPage />;
+  if (route.kind === 'campanhas') return <CampanhasPage />;
   if (route.kind === 'termos-de-uso') return <TermosDeUsoPage />;
   if (route.kind === 'pagina') return <PaginaPage slug={route.slug} />;
   if (route.kind === 'pagina-sucesso') return <PaginaSucessoPage slug={route.slug} />;

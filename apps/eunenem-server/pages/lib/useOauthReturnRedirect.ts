@@ -50,7 +50,11 @@ export function useOauthReturnRedirect(): void {
         // by the OAuth callback, and we must not trust a hydrated anonymous value.
         const me = await utils.auth.me.fetch(undefined, { staleTime: 0 });
         if (cancelled || !me?.slug) return;
-        const target = `/painel/${me.slug}`;
+        // aperture-g7l09 (multicampanha POC) — OAuth returns land on
+        // /campanhas, matching the email-login default in AuthModalProvider.
+        // me.slug stays as the session-validity guard. OAuth users who still
+        // need onboarding reach the wizard when they open their painel.
+        const target = '/campanhas';
         if (window.location.pathname === target) return;
         window.location.assign(target);
       } catch {

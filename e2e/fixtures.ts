@@ -117,7 +117,12 @@ export const test = base.extend<SeedFixtures>({
     const deps = buildSeedDeps(db);
 
     const runSuffix = randomUUID().slice(0, 8);
-    const nomeExibicao = `E2E Helena ${runSuffix}`;
+    // The unique suffix MUST live in the FIRST name token: the slug base is
+    // derived from it, and a shared base ("e2e") exhausts the 50-attempt
+    // collision walk once enough e2e rows accumulate in the dev DB
+    // (resolveSlugInPlataforma, registrar-conta-usuario.ts — root-caused
+    // 2026-07-07, aperture-8jcec).
+    const nomeExibicao = `E2e${runSuffix} Helena`;
     const email = `e2e-test-${runSuffix}@e2e.local`;
 
     console.log(`[seededData] starting signup for ${email}…`);

@@ -1,6 +1,15 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      // Mirror apps/eunenem-server/tsconfig.json `"@/*": ["./pages/*"]` so
+      // tests can import page-layer modules (e.g. resolveRoute in App.tsx,
+      // tests/unit/8jcec-resolve-route.test.ts) whose import graph uses it.
+      '@': fileURLToPath(new URL('./apps/eunenem-server/pages', import.meta.url)),
+    },
+  },
   test: {
     globals: false,
     environment: 'node',
