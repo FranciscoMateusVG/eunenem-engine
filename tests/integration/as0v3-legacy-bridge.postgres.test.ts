@@ -152,6 +152,26 @@ async function hit(app: Hono, token: string | null): Promise<Response> {
 }
 
 describe('GET /api/legacy-bridge decision table (aperture-as0v3)', () => {
+  it('⭐ EMPTY-STRING LEGACY_SITE_ORIGIN env → ABSOLUTE fallback (regression: compose empty-string 404)', async () => {
+    // The compose wires LEGACY_SITE_ORIGIN=${LEGACY_SITE_ORIGIN:-} → empty
+    // string when unset. It must NOT produce a relative /minha-area (which 404s
+    // on the new domain — the operator's live-test break).
+    process.env.LEGACY_SITE_ORIGIN = '';
+    try {
+      const logs: Array<Record<string, unknown>> = [];
+      const deps = buildDeps(fakeClerk(), logs);
+      const token = await registerUser(deps, `emptyorigin-${randomUUID()}@x.com`, false);
+      const res = await hit(makeApp(deps, fakeClerk()), token);
+      expect(res.status).toBe(302);
+      expect(
+        res.headers.get('location'),
+        'empty-string env must fall back to the ABSOLUTE legacy URL, never a relative one',
+      ).toBe('https://eunenem.com/minha-area');
+    } finally {
+      delete process.env.LEGACY_SITE_ORIGIN;
+    }
+  });
+
   it('no session → 302 to "/" (never leaks an old-site URL to an anon prober)', async () => {
     const logs: Array<Record<string, unknown>> = [];
     const deps = buildDeps(fakeClerk(), logs);

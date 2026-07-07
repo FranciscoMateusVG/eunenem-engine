@@ -65,10 +65,26 @@ import {
   SessaoNaoAutenticadaError,
 } from './trpc/session-resolver.js';
 
-/** Legacy site origin. Overridable via env for a non-prod consumption target. */
-const LEGACY_ORIGIN = process.env.LEGACY_SITE_ORIGIN ?? 'https://eunenem.com';
-/** Where an authed-but-unminted click lands — today's live POC behavior. */
-const FALLBACK_URL = `${LEGACY_ORIGIN}/minha-area`;
+/** Default legacy site origin when LEGACY_SITE_ORIGIN is not meaningfully set. */
+const DEFAULT_LEGACY_ORIGIN = 'https://eunenem.com';
+
+/**
+ * Resolve the legacy site origin from env, RESOLVED AT REQUEST TIME.
+ *
+ * ⚠️ Must use `|| default` (with a trim), NOT `?? default`: the docker-compose
+ * wires `LEGACY_SITE_ORIGIN=${LEGACY_SITE_ORIGIN:-}`, so when the operator
+ * hasn't set it the container sees an EMPTY STRING, not undefined. `??` only
+ * defaults on null/undefined → an empty string would slip through → the
+ * fallback URL becomes the RELATIVE `/minha-area` → the browser resolves it on
+ * the NEW domain → 404 (the exact prod break the operator hit on the live
+ * test). Trim + `||` treats empty/whitespace as "unset" and fails safe to the
+ * absolute legacy domain. Read per-request (not a module const) so it also
+ * picks up env without a rebuild + is unit/integration testable.
+ */
+export function resolverLegacyOrigin(env: NodeJS.ProcessEnv = process.env): string {
+  return env.LEGACY_SITE_ORIGIN?.trim() || DEFAULT_LEGACY_ORIGIN;
+}
+
 /** Ticket consumption route on the old site (aperture-rj2rg). Hardcoded — no
  * request-controlled redirect target (open-redirect defence). */
 const CONSUMPTION_PATH = '/ponte';
@@ -281,6 +297,13 @@ export function createLegacyBridgeHandler(
     const log = (outcome: BridgeOutcome, extra: Record<string, unknown> = {}) =>
       logger.info('eunenem.legacy_bridge', { outcome, ipHashed, userAgent, ...extra });
 
+    // Resolved per-request (env may be empty-string from the compose default;
+    // resolverLegacyOrigin trims + `||`-defaults so the fallback is ALWAYS an
+    // absolute old-site URL — never a relative `/minha-area` that would 404 on
+    // the new domain).
+    const legacyOrigin = resolverLegacyOrigin();
+    const fallbackUrl = `${legacyOrigin}/minha-area`;
+
     // 1. AUTH — via the shared resolver (A2 + orphan-heal), never a bare cookie.
     let idUsuario: string;
     let email: string;
@@ -303,20 +326,20 @@ export function createLegacyBridgeHandler(
     // 2. TRUST GATE — verified email only (the whole security model).
     if (!(await emailVerificado(deps, idUsuario))) {
       log('nao_verificado', { idUsuario, emailHash });
-      return redirect(c, FALLBACK_URL);
+      return redirect(c, fallbackUrl);
     }
 
     // 3. KEY — absent → silent fallback (endpoint inert without sk).
     const secret = process.env.CLERK_SECRET_KEY;
     if (!secret || secret.length === 0) {
       log('sem_chave', { idUsuario, emailHash });
-      return redirect(c, FALLBACK_URL);
+      return redirect(c, fallbackUrl);
     }
 
     // 4. RATE-LIMIT the mint per user.
     if (!(await consumeMintBudget(deps, idUsuario))) {
       log('rate_limited', { idUsuario, emailHash });
-      return redirect(c, FALLBACK_URL);
+      return redirect(c, fallbackUrl);
     }
 
     // 5. RESOLVE + MINT. Any Clerk error → fallback (never an error page).
@@ -325,19 +348,19 @@ export function createLegacyBridgeHandler(
       const lookup = await clerk.findVerifiedUserByEmail(email);
       if (lookup.kind === 'none') {
         log('sem_usuario_clerk', { idUsuario, emailHash });
-        return redirect(c, FALLBACK_URL);
+        return redirect(c, fallbackUrl);
       }
       if (lookup.kind === 'ambiguous') {
         // >1 verified Clerk user for this email — never guess which legacy
         // account to log into. Fallback + loud (Cipher: fail closed + alert).
         logger.warn('eunenem.legacy_bridge.ambiguous_clerk_match', { idUsuario, emailHash });
         log('clerk_ambiguo', { idUsuario, emailHash });
-        return redirect(c, FALLBACK_URL);
+        return redirect(c, fallbackUrl);
       }
       const token = await clerk.mintSignInToken(lookup.userId);
       log('mintado', { idUsuario, emailHash, clerkUserId: lookup.userId });
       // NEVER log the token. Single-use + 60s; the old-site /ponte consumes it.
-      const url = `${LEGACY_ORIGIN}${CONSUMPTION_PATH}?__clerk_ticket=${encodeURIComponent(token)}`;
+      const url = `${legacyOrigin}${CONSUMPTION_PATH}?__clerk_ticket=${encodeURIComponent(token)}`;
       return redirect(c, url);
     } catch (err) {
       log('erro_clerk', {
@@ -345,7 +368,7 @@ export function createLegacyBridgeHandler(
         emailHash,
         erro: err instanceof Error ? err.message : String(err),
       });
-      return redirect(c, FALLBACK_URL);
+      return redirect(c, fallbackUrl);
     }
   };
 }

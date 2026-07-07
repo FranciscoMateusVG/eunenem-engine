@@ -1,5 +1,32 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { criarClerkBridgeClient } from '../../apps/eunenem-server/server/legacy-bridge.js';
+import {
+  criarClerkBridgeClient,
+  resolverLegacyOrigin,
+} from '../../apps/eunenem-server/server/legacy-bridge.js';
+
+/**
+ * aperture-legacy-origin-fix — the compose wires LEGACY_SITE_ORIGIN as an EMPTY
+ * STRING when unset (`${LEGACY_SITE_ORIGIN:-}`), and `?? default` would let ''
+ * through → a RELATIVE `/minha-area` fallback → 404 on the new domain (the prod
+ * break the operator hit). resolverLegacyOrigin must trim + `||`-default so the
+ * fallback is ALWAYS an absolute old-site URL.
+ */
+describe('resolverLegacyOrigin (empty-string env safety)', () => {
+  it('empty string → default absolute origin (NOT a relative fallback)', () => {
+    expect(resolverLegacyOrigin({ LEGACY_SITE_ORIGIN: '' })).toBe('https://eunenem.com');
+  });
+  it('whitespace-only → default', () => {
+    expect(resolverLegacyOrigin({ LEGACY_SITE_ORIGIN: '   ' })).toBe('https://eunenem.com');
+  });
+  it('unset (undefined) → default', () => {
+    expect(resolverLegacyOrigin({})).toBe('https://eunenem.com');
+  });
+  it('a real value is honored (trimmed)', () => {
+    expect(resolverLegacyOrigin({ LEGACY_SITE_ORIGIN: '  https://staging.eunenem.com  ' })).toBe(
+      'https://staging.eunenem.com',
+    );
+  });
+});
 
 /**
  * aperture-as0v3 — UNIT pins for the Clerk Backend API client used by the
