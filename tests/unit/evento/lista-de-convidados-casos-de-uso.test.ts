@@ -88,7 +88,7 @@ describe('criarListaDeConvidados', () => {
       {
         id: idLista,
         idEvento,
-        linkConfirmacao: 'https://eunenem.app/rsvp/lista-1',
+        formatoMensagemConvite: 'texto',
         convidados: [convidadoBase()],
       },
     );
@@ -115,7 +115,7 @@ describe('criarListaDeConvidados', () => {
         {
           id: randomUUID(),
           idEvento: randomUUID(),
-          linkConfirmacao: 'https://eunenem.app/rsvp/invalido',
+          formatoMensagemConvite: 'texto',
           convidados: [],
         },
       ),
@@ -135,7 +135,7 @@ describe('criarListaDeConvidados', () => {
     await criarListaDeConvidados(deps, {
       id: randomUUID(),
       idEvento,
-      linkConfirmacao: 'https://eunenem.app/rsvp/lista-1',
+      formatoMensagemConvite: 'texto',
       convidados: [],
     });
 
@@ -143,7 +143,7 @@ describe('criarListaDeConvidados', () => {
       criarListaDeConvidados(deps, {
         id: randomUUID(),
         idEvento,
-        linkConfirmacao: 'https://eunenem.app/rsvp/lista-2',
+        formatoMensagemConvite: 'texto',
         convidados: [],
       }),
     ).rejects.toBeInstanceOf(ListaDeConvidadosJaExisteError);
@@ -166,7 +166,7 @@ describe('obterListaDeConvidados', () => {
       {
         id: idLista,
         idEvento,
-        linkConfirmacao: 'https://eunenem.app/rsvp/lista-1',
+        formatoMensagemConvite: 'texto',
         convidados: [],
       },
     );
@@ -196,7 +196,7 @@ describe('obterListaDeConvidados', () => {
       {
         id: idLista,
         idEvento,
-        linkConfirmacao: 'https://eunenem.app/rsvp/lista-1',
+        formatoMensagemConvite: 'texto',
         convidados: [],
       },
     );
@@ -230,7 +230,7 @@ describe('atualizarListaDeConvidados', () => {
       {
         id: idLista,
         idEvento,
-        linkConfirmacao: 'https://eunenem.app/rsvp/lista-1',
+        formatoMensagemConvite: 'texto',
         convidados: [],
       },
     );
@@ -243,12 +243,12 @@ describe('atualizarListaDeConvidados', () => {
       },
       {
         id: idLista,
-        linkConfirmacao: 'https://eunenem.app/rsvp/lista-atualizada',
+        formatoMensagemConvite: 'convite_virtual',
         convidados: [{ ...convidado, presenca: 'sim' }],
       },
     );
 
-    expect(updated.linkConfirmacao).toBe('https://eunenem.app/rsvp/lista-atualizada');
+    expect(updated.formatoMensagemConvite).toBe('convite_virtual');
     expect(updated.convidados).toHaveLength(1);
     expect(updated.convidados[0]?.presenca).toBe('sim');
     expect(updated.atualizadoEm).toEqual(updateClock());
@@ -279,7 +279,7 @@ describe('alterarPresencaConvidado', () => {
       {
         id: idLista,
         idEvento,
-        linkConfirmacao: 'https://eunenem.app/rsvp/lista-1',
+        formatoMensagemConvite: 'texto',
         convidados: [convidado, outroConvidado],
       },
     );
@@ -302,6 +302,44 @@ describe('alterarPresencaConvidado', () => {
     expect(updated.atualizadoEm).toEqual(updateClock());
   });
 
+  it('transitions a guest from nao_enviado to enviado', async () => {
+    const repos = createEventoMemoryRepos();
+    const { idEvento } = await seedEvento(repos);
+    const idLista = randomUUID();
+    const convidado = { ...convidadoBase(), presenca: 'nao_enviado' as const };
+    const updateClock = () => new Date('2026-06-22T12:00:00.000Z');
+
+    await criarListaDeConvidados(
+      {
+        listaDeConvidadosRepository: repos.listaDeConvidadosRepository,
+        eventoRepository: repos.eventoRepository,
+        clock,
+        observability: silentObservability,
+      },
+      {
+        id: idLista,
+        idEvento,
+        formatoMensagemConvite: 'texto',
+        convidados: [convidado],
+      },
+    );
+
+    const updated = await alterarPresencaConvidado(
+      {
+        listaDeConvidadosRepository: repos.listaDeConvidadosRepository,
+        clock: updateClock,
+        observability: silentObservability,
+      },
+      {
+        idListaDeConvidados: idLista,
+        idConvidado: convidado.id,
+        presenca: 'enviado',
+      },
+    );
+
+    expect(updated.convidados.find((item) => item.id === convidado.id)?.presenca).toBe('enviado');
+  });
+
   it('throws when guest is missing', async () => {
     const repos = createEventoMemoryRepos();
     const { idEvento } = await seedEvento(repos);
@@ -317,7 +355,7 @@ describe('alterarPresencaConvidado', () => {
       {
         id: idLista,
         idEvento,
-        linkConfirmacao: 'https://eunenem.app/rsvp/lista-1',
+        formatoMensagemConvite: 'texto',
         convidados: [convidadoBase()],
       },
     );
@@ -354,7 +392,7 @@ describe('alterarPresencaConvidado', () => {
       {
         id: idLista,
         idEvento,
-        linkConfirmacao: 'https://eunenem.app/rsvp/lista-1',
+        formatoMensagemConvite: 'texto',
         convidados: [convidado],
       },
     );

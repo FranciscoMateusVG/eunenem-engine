@@ -23,6 +23,7 @@ import type { TrpcContext } from './context.js';
 import { dadosRecebimentoRouter } from './dados-recebimento-router.js';
 import { landingRouter } from './landing-router.js';
 import { eventoConviteRouter } from './evento-convite-router.js';
+import { eventoListaDeConvidadosRouter } from './evento-lista-de-convidados-router.js';
 import { paginaRouter } from './pagina-router.js';
 import { painelMensagensRouter } from './painel-mensagens-router.js';
 import { perfilRouter } from './perfil-router.js';
@@ -45,6 +46,7 @@ export const appRouter = t.router({
   contribuicao: contribuicaoRouter,
   dadosRecebimento: dadosRecebimentoRouter,
   eventoConvite: eventoConviteRouter,
+  eventoListaDeConvidados: eventoListaDeConvidadosRouter,
   landing: landingRouter,
   pagina: paginaRouter,
   painelMensagens: painelMensagensRouter,

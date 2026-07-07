@@ -4,7 +4,6 @@ import {
   listaDeConvidadosComCamposAtualizados,
   listaDeConvidadosComPresencaAlterada,
 } from '../../../src/domain/evento/entities/lista-de-convidados.js';
-import { LinkConfirmacaoSchema } from '../../../src/domain/evento/value-objects/link-confirmacao-lista.js';
 import { NomeConvidadoSchema } from '../../../src/domain/evento/value-objects/nome-convidado.js';
 import { NumeroCelularConvidadoSchema } from '../../../src/domain/evento/value-objects/numero-celular-convidado.js';
 import { StatusPresencaConvidadoSchema } from '../../../src/domain/evento/value-objects/status-presenca-convidado.js';
@@ -19,7 +18,7 @@ describe('criarListaDeConvidados (dominio)', () => {
     const lista = criarListaDeConvidados({
       id: idLista,
       idEvento,
-      linkConfirmacao: 'https://eunenem.app/rsvp/abc123',
+      formatoMensagemConvite: 'texto',
       convidados: [
         {
           id: idConvidado,
@@ -34,7 +33,6 @@ describe('criarListaDeConvidados (dominio)', () => {
 
     expect(lista.id).toBe(idLista);
     expect(lista.idEvento).toBe(idEvento);
-    expect(lista.linkConfirmacao).toBe('https://eunenem.app/rsvp/abc123');
     expect(lista.convidados).toHaveLength(1);
     expect(lista.convidados[0]?.nome).toBe('Mariana');
   });
@@ -45,7 +43,7 @@ describe('listaDeConvidados factories', () => {
     const base = criarListaDeConvidados({
       id: idLista,
       idEvento,
-      linkConfirmacao: 'https://eunenem.app/rsvp/original',
+      formatoMensagemConvite: 'texto',
       convidados: [],
       criadoEm: fixedDate,
       atualizadoEm: fixedDate,
@@ -55,7 +53,7 @@ describe('listaDeConvidados factories', () => {
     const updated = listaDeConvidadosComCamposAtualizados(
       base,
       {
-        linkConfirmacao: 'https://eunenem.app/rsvp/novo',
+        formatoMensagemConvite: 'convite_virtual',
         convidados: [
           {
             id: idConvidado,
@@ -68,7 +66,7 @@ describe('listaDeConvidados factories', () => {
       later,
     );
 
-    expect(updated.linkConfirmacao).toBe('https://eunenem.app/rsvp/novo');
+    expect(updated.formatoMensagemConvite).toBe('convite_virtual');
     expect(updated.convidados).toHaveLength(1);
     expect(updated.atualizadoEm).toEqual(later);
   });
@@ -77,7 +75,7 @@ describe('listaDeConvidados factories', () => {
     const base = criarListaDeConvidados({
       id: idLista,
       idEvento,
-      linkConfirmacao: 'https://eunenem.app/rsvp/base',
+      formatoMensagemConvite: 'texto',
       convidados: [
         {
           id: idConvidado,
@@ -110,9 +108,5 @@ describe('schemas', () => {
 
   it('rejects empty guest name', () => {
     expect(NomeConvidadoSchema.safeParse('   ').success).toBe(false);
-  });
-
-  it('accepts valid confirmation link', () => {
-    expect(LinkConfirmacaoSchema.safeParse('https://eunenem.app/rsvp/abc123').success).toBe(true);
   });
 });
