@@ -169,7 +169,7 @@ export function ConfirmarPresencaPage({
         setPending(presenca);
         try {
           await confirmarPresenca.mutateAsync({ slug, idConvidado, presenca });
-          toast.success("presença confirmada ♡");
+          toast.success("Salvo com sucesso.");
         } catch (error) {
           toast.error("não foi possível confirmar agora", {
             description: convidadosErrorMessage(error),
@@ -523,7 +523,7 @@ const CP_CSS: string = `
   display:grid;
   place-items:center;
 }
-.cp-rsvp-tile-label{ line-height:1; }
+.cp-rsvp-tile-label{ line-height:1; text-align:center; }
 .cp-rsvp-tile.cp-rsvp-sim.active{
   background:linear-gradient(135deg, var(--lilac), var(--lilac-deep));
   color:#fff;
@@ -542,7 +542,10 @@ const CP_CSS: string = `
   color:var(--coral-pink);
 }
 @media (max-width: 420px){
-  .cp-rsvp-grid{ grid-template-columns:1fr; }
+  .cp-rsvp-grid{ gap:6px; }
+  .cp-rsvp-tile{ padding:12px 4px; gap:6px; }
+  .cp-rsvp-tile-icon{ width:28px; height:28px; }
+  .cp-rsvp-tile-label{ font-size:9.5px; }
 }
 .cp-invite-frame{
   position:relative;

@@ -1472,10 +1472,16 @@ export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
       // CONTRACT: start from the full hydrated state, never a hand-built
       // partial — savePayloadFromConviteState re-serializes everything the
       // user set in ConviteBody (palette/template/image/host/babyName/mode).
-      await Promise.all([
-        salvarConvite.mutateAsync(savePayloadFromConviteState(state)),
-        salvarFormatoMensagem.mutateAsync({ formatoMensagemConvite: inviteType }),
-      ]);
+      //
+      // Sequential, not Promise.all: salvarFormatoMensagem depends on the
+      // Evento existing (eventoListaDeConvidados.salvarFormatoMensagem
+      // throws EventoAusenteError if it can't resolve one), and salvarConvite
+      // is what creates the Evento on a user's first save. Running them in
+      // parallel raced the two requests server-side — the first save could
+      // fail with a generic error while silently persisting the Evento,
+      // making a retry succeed.
+      await salvarConvite.mutateAsync(savePayloadFromConviteState(state));
+      await salvarFormatoMensagem.mutateAsync({ formatoMensagemConvite: inviteType });
       toast.success("Salvo com sucesso");
     } catch (error) {
       toast.error("não foi possível salvar agora", {
