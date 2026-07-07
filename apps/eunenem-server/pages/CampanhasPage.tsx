@@ -82,21 +82,36 @@ export function CampanhasPage() {
   }, [meQ.isLoading, meQ.data]);
 
   // First-visit welcome modal — only for users with 1.0 history (the copy
-  // is meaningless for pure-2.0 accounts) and only until dismissed once.
+  // is meaningless for pure-2.0 accounts). Shows on every visit until the
+  // user EXPLICITLY opts out via the checkbox (aperture-opfsj) — a plain
+  // dismiss no longer persists anything.
   useEffect(() => {
     if (!listQ.data || listQ.data.legado.length === 0) return;
     if (window.localStorage.getItem(CAMPANHAS_WELCOME_STORAGE_KEY)) return;
     setWelcomeOpen(true);
   }, [listQ.data]);
 
-  const dismissWelcome = useCallback((openTourAfter: boolean) => {
-    window.localStorage.setItem(CAMPANHAS_WELCOME_STORAGE_KEY, '1');
-    setWelcomeOpen(false);
-    if (openTourAfter) {
-      setTourStep(0);
-      setTourOpen(true);
-    }
-  }, []);
+  // aperture-opfsj — opt-out consent, default unchecked. All four dismiss
+  // paths (OK, SABER MAIS, overlay-click, Escape) funnel through
+  // dismissWelcome below, so the checkbox is honored everywhere by
+  // construction.
+  const [naoVerNovamente, setNaoVerNovamente] = useState(false);
+
+  const dismissWelcome = useCallback(
+    (openTourAfter: boolean) => {
+      // Persist ONLY on explicit opt-out — an unchecked dismiss lets the
+      // recadinho greet the user again next visit (operator request).
+      if (naoVerNovamente) {
+        window.localStorage.setItem(CAMPANHAS_WELCOME_STORAGE_KEY, '1');
+      }
+      setWelcomeOpen(false);
+      if (openTourAfter) {
+        setTourStep(0);
+        setTourOpen(true);
+      }
+    },
+    [naoVerNovamente],
+  );
 
   const openTour = useCallback(() => {
     setTourStep(0);
@@ -257,6 +272,34 @@ export function CampanhasPage() {
                 compartilhados entre elas.
               </p>
             </div>
+
+            {/* aperture-opfsj — opt-out consent. Hidden-but-focusable native
+             *  input + tilted scrapbook square; copy echoes the modal's own
+             *  "um recadinho pra você" eyebrow. */}
+            <label className="camp-optout">
+              <input
+                type="checkbox"
+                className="camp-optout-input"
+                data-testid="welcome-modal-optout"
+                checked={naoVerNovamente}
+                onChange={(e) => setNaoVerNovamente(e.target.checked)}
+              />
+              <span className="camp-optout-box" aria-hidden="true">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={3}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  width={14}
+                  height={14}
+                >
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              </span>
+              <span className="camp-optout-lbl">não quero ver esse recadinho de novo</span>
+            </label>
 
             <div className="camp-modal-actions">
               <button
