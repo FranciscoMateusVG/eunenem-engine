@@ -142,7 +142,14 @@ export function AuthModalProvider({
       try {
         const me = await utils.auth.me.fetch();
         if (!me?.slug) return;
-        const target = `/painel/${me.slug}`;
+        // aperture-g7l09 (multicampanha POC) — post-login default now lands
+        // on /campanhas (the mixed 1.0/2.0 bridge) instead of the first
+        // campanha's painel. The me.slug guard stays: it's the session-
+        // validity probe, even though the target no longer embeds the slug.
+        // New-account signups (session.criado above) still go through the
+        // OnboardingWizard → /painel/<slug> — they have no 1.0 history and
+        // the wizard's finish line IS their painel.
+        const target = '/campanhas';
         if (typeof window === "undefined") return;
         if (window.location.pathname === target) return;
         window.location.assign(target);
