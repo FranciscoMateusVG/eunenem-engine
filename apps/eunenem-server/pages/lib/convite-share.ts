@@ -1,7 +1,7 @@
 import { painelConvitePreviewHref } from './painelRoutes.js';
 
 export type ConviteShareResult = 'shared' | 'copied' | 'cancelled';
-export const CONVITE_SHARE_PRODUCTION_ORIGIN = 'https://eunenem.pocketsoftware.com.br/';
+export const CONVITE_SHARE_PRODUCTION_ORIGIN = 'https://eunenem.xeroxtoxerox.com/';
 export const CONVITE_SHARE_DEVELOPMENT_ORIGIN = 'http://localhost:3001/';
 
 
