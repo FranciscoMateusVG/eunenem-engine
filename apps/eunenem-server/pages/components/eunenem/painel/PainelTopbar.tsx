@@ -11,6 +11,10 @@ import { painelHref, type PainelSection } from "@/lib/painelRoutes";
 // PERFIL + BANCÁRIOS) is still reachable by scrolling the painel root menu,
 // so a dedicated top-nav anchor was redundant. The topbar nav is now just:
 //
+//   • MINHAS LISTAS — back to /campanhas (aperture-hdftp: a multi-campaign
+//                     user who entered a list was stranded — no way back to
+//                     the mixed 1.0/2.0 grid). Leads the nav (back-affordance
+//                     reads left), never active inside the painel.
 //   • MINHA PÁGINA  — anchors to the painel root; active when there's no
 //                     sub-section.
 
@@ -19,22 +23,22 @@ interface PainelTopbarProps {
   slug: string;
   /** Current section, or undefined when on the painel root (PainelPage). */
   activeSection?: PainelSection;
+  /**
+   * aperture-hdftp — which top-level surface is current. On 'campanhas'
+   * (the /campanhas multi-list grid) the MINHAS LISTAS chip renders as
+   * the active you-are-here chip (no back arrow) and MINHA PÁGINA is
+   * never active. Defaults to 'painel' (all /painel/:slug surfaces).
+   */
+  surface?: 'painel' | 'campanhas';
 }
-
-interface NavItem {
-  label: string;
-}
-
-// aperture-paf3m — AJUDA removed; MINHA PÁGINA is the sole topbar destination.
-const NAV_ITEMS: NavItem[] = [
-  { label: "MINHA PÁGINA" },
-];
 
 export function PainelTopbar({
   slug,
   activeSection,
+  surface = 'painel',
 }: PainelTopbarProps) {
-  const onPainelRoot = activeSection === undefined;
+  const onCampanhas = surface === 'campanhas';
+  const onPainelRoot = !onCampanhas && activeSection === undefined;
   // aperture-1wknu — wire the previously-dead logout button (it was a bare
   // <button> with no onClick, so clicking did nothing).
   const { signOut, isPending: isSigningOut } = useSignOut();
@@ -58,22 +62,48 @@ export function PainelTopbar({
 
         <nav className="painel-topbar-nav" aria-label="Seções do painel">
           <ul>
-            {NAV_ITEMS.map((item) => {
-              // MINHA PÁGINA — anchor to painel root, active when there's
-              // no sub-section. (aperture-paf3m: AJUDA branch removed.)
-              const active = onPainelRoot;
-              return (
-                <li key={item.label}>
-                  <a
-                    href={painelHref(slug)}
-                    aria-current={active ? "page" : undefined}
-                    className={`painel-topbar-link${active ? " is-active" : ""}`}
+            {/* aperture-hdftp — back to the multi-campaign grid. Leads the
+             *  nav (back-affordances read left-first); the stroke arrow
+             *  follows the topbar's SVG icon convention (logout button). */}
+            <li>
+              <a
+                href="/campanhas"
+                aria-current={onCampanhas ? "page" : undefined}
+                className={`painel-topbar-link painel-topbar-link--listas${onCampanhas ? " is-active" : ""}`}
+                data-testid="topbar-minhas-listas"
+              >
+                {/* Back arrow only when this chip IS a back-affordance —
+                 *  on /campanhas itself the chip is "you are here". */}
+                {!onCampanhas && (
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                    width={14}
+                    height={14}
                   >
-                    {item.label}
-                  </a>
-                </li>
-              );
-            })}
+                    <line x1="19" y1="12" x2="5" y2="12" />
+                    <polyline points="12 19 5 12 12 5" />
+                  </svg>
+                )}
+                MINHAS LISTAS
+              </a>
+            </li>
+            {/* MINHA PÁGINA — anchor to painel root, active when there's
+             *  no sub-section. (aperture-paf3m: AJUDA branch removed.) */}
+            <li>
+              <a
+                href={painelHref(slug)}
+                aria-current={onPainelRoot ? "page" : undefined}
+                className={`painel-topbar-link${onPainelRoot ? " is-active" : ""}`}
+              >
+                MINHA PÁGINA
+              </a>
+            </li>
           </ul>
         </nav>
 

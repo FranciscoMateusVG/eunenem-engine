@@ -24,6 +24,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
+import { PainelTopbar } from './components/eunenem/painel/PainelTopbar.js';
 import {
   CAMPANHAS_WELCOME_STORAGE_KEY,
   LEGACY_DASHBOARD_URL,
@@ -63,7 +64,6 @@ export function CampanhasPage() {
   const meQ = trpc.auth.me.useQuery();
   const listQ = useCampanhasList();
 
-  const [menuOpen, setMenuOpen] = useState(false);
   const [welcomeOpen, setWelcomeOpen] = useState(false);
   const [tourOpen, setTourOpen] = useState(false);
   const [tourStep, setTourStep] = useState(0);
@@ -128,74 +128,14 @@ export function CampanhasPage() {
 
   return (
     <div className="camp-scope">
-      {/* ── Topbar ── */}
-      <header className="camp-topbar">
-        <div className="camp-topbar-inner">
-          <a className="camp-brand" href="/" aria-label="EuNeném — página inicial">
-            <span className="camp-brand-mark" aria-hidden="true">e</span>
-            <span className="camp-brand-text">
-              <span className="camp-brand-name">euneném</span>
-              <span className="camp-brand-sub">listas de mimos</span>
-            </span>
-          </a>
-
-          {cards.length > 0 && (
-            <nav className="camp-switch" aria-label="Ir para uma lista">
-              <button
-                type="button"
-                className="camp-switch-btn"
-                aria-expanded={menuOpen}
-                aria-haspopup="menu"
-                onClick={() => setMenuOpen((v) => !v)}
-              >
-                <span className="camp-switch-lbl">ir para</span>
-                <span className="camp-switch-val">minhas listas</span>
-                <span className={`camp-switch-caret${menuOpen ? ' open' : ''}`} aria-hidden="true">▾</span>
-              </button>
-              {menuOpen && (
-                <>
-                  <div className="camp-switch-backdrop" onClick={() => setMenuOpen(false)} aria-hidden="true" />
-                  <div className="camp-switch-menu" role="menu">
-                    <div className="camp-switch-menu-eyebrow" aria-hidden="true">acessar uma lista ♡</div>
-                    {cards.map(({ tipo, c, i }) => (
-                      <a
-                        key={tipo === 'nova' ? (c as CampanhaNovaDTO).id : `legado-${i}`}
-                        role="menuitem"
-                        className="camp-switch-item"
-                        href={tipo === 'nova' ? `/painel/${(c as CampanhaNovaDTO).slug}` : LEGACY_DASHBOARD_URL}
-                      >
-                        <span className="camp-switch-item-ini" style={{ background: TINTS[i % TINTS.length] }} aria-hidden="true">
-                          {(tipo === 'nova' ? (c as CampanhaNovaDTO).titulo : (c as CampanhaLegadoDTO).nome).charAt(0).toLowerCase()}
-                        </span>
-                        <span className="camp-switch-item-body">
-                          <span className="camp-switch-item-name">
-                            {tipo === 'nova' ? (c as CampanhaNovaDTO).titulo : (c as CampanhaLegadoDTO).nome}
-                          </span>
-                          <span className="camp-switch-item-sub">
-                            {tipo === 'nova' ? 'euneném 2.0' : 'euneném 1.0'}
-                          </span>
-                        </span>
-                      </a>
-                    ))}
-                  </div>
-                </>
-              )}
-            </nav>
-          )}
-
-          <div className="camp-topbar-spacer" />
-
-          <div className="camp-user">
-            <span className="camp-user-text">
-              <span className="camp-user-greet">olá, {nome} ♡</span>
-              <span className="camp-user-sub">que bom te ver de novo</span>
-            </span>
-            <span className="camp-avatar" aria-hidden="true">
-              {nome.charAt(0).toUpperCase()}
-            </span>
-          </div>
-        </div>
-      </header>
+      {/* ── Topbar ──
+       *  aperture-hdftp — the canonical shared app header (PainelTopbar),
+       *  replacing the PDF-derived custom header (operator: header
+       *  consistency across surfaces). On this surface MINHAS LISTAS is
+       *  the active you-are-here chip; the greeting lives on in the hero
+       *  eyebrow below. Rendered once auth.me resolves (needs the slug
+       *  for the MINHA PÁGINA chip). */}
+      {me?.slug ? <PainelTopbar slug={me.slug} surface="campanhas" /> : null}
 
       {/* ── Hero ── */}
       <main className="camp-main">
@@ -359,18 +299,23 @@ export function CampanhasPage() {
                 <h2 id="camp-tour-title" className="camp-modal-title camp-modal-title-sm">
                   como <span className="hl">alternar</span> entre listas
                 </h2>
+                {/* aperture-hdftp — step reteaches the canonical header:
+                 *  MINHAS LISTAS in the topbar is the way back here from
+                 *  inside any list (the old IR PARA dropdown is gone). */}
                 <div className="camp-tour-stage">
-                  <span className="camp-tour-pill">
-                    <span className="camp-tour-pill-lbl">ir para</span>
-                    <span className="camp-tour-pill-val">minhas listas</span>
-                    <span aria-hidden="true">▾</span>
-                  </span>
-                  <span className="camp-tour-note">↑ o menu lá no topo abre qualquer lista</span>
                   <span className="camp-tour-cta" aria-hidden="true">acessar lista ♡</span>
+                  <span className="camp-tour-note">↑ entra na lista que você escolher</span>
+                  <span className="camp-tour-pill">
+                    <span aria-hidden="true">←</span>
+                    <span className="camp-tour-pill-val">minhas listas</span>
+                  </span>
+                  <span className="camp-tour-note camp-tour-note-green">
+                    ↑ e esse botão no topo te traz de volta pra cá
+                  </span>
                 </div>
                 <p className="camp-tour-copy">
-                  toque em <b>acessar lista</b> no quadrinho que você quer abrir — ou use o
-                  menu <b>ir para</b> no topo pra pular direto pra qualquer uma ♡
+                  toque em <b>acessar lista</b> no quadrinho que você quer abrir — e quando
+                  quiser trocar, <b>minhas listas</b> lá no topo te traz de volta ♡
                 </p>
               </>
             ) : (
@@ -397,7 +342,7 @@ export function CampanhasPage() {
                 <span className={`camp-tour-dot${tourStep === 0 ? ' on' : ''}`} />
                 <span className={`camp-tour-dot${tourStep === 1 ? ' on' : ''}`} />
               </span>
-              <span className="camp-topbar-spacer" />
+              <span className="camp-spacer" />
               {tourStep > 0 && (
                 <button type="button" className="camp-tour-back" onClick={() => setTourStep(0)}>
                   voltar

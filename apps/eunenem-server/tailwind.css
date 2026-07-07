@@ -6528,255 +6528,12 @@ button.painel-topbar-link:hover {
   background: radial-gradient(120% 90% at 100% 0%, var(--lilac-soft) 0%, transparent 46%), var(--cream);
 }
 
-/* ── Topbar ── */
+/* aperture-hdftp — the PDF-derived custom topbar was replaced by the
+ * shared PainelTopbar (operator: header consistency across surfaces).
+ * The old .camp-topbar/.camp-switch/.camp-user styles were removed. */
 
-.camp-topbar {
-  position: sticky;
-  top: 0;
-  z-index: 40;
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  background: color-mix(in srgb, var(--cream) 78%, transparent);
-  border-bottom: 1px solid var(--line);
-}
-
-.camp-topbar-inner {
-  max-width: 1120px;
-  margin: 0 auto;
-  padding: 13px 24px;
-  display: flex;
-  align-items: center;
-  gap: 18px;
-}
-
-.camp-brand {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  flex: none;
-  text-decoration: none;
-  border-radius: 12px;
-}
-
-.camp-brand-mark {
-  width: 38px;
-  height: 38px;
-  border-radius: 12px;
-  background: var(--lilac-soft);
-  border: 1px solid var(--camp-sel10-line);
-  transform: rotate(-4deg);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--font-patrick-hand), cursive;
-  font-size: 22px;
-  color: var(--plum);
-  box-shadow: var(--shadow-sm);
-}
-
-.camp-brand-text {
-  line-height: 1;
-  display: flex;
-  flex-direction: column;
-}
-
-.camp-brand-name {
-  font-family: var(--font-patrick-hand), cursive;
-  font-size: 20px;
-  color: var(--plum);
-}
-
-.camp-brand-sub {
-  font-size: 9px;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--ink-mute);
-  margin-top: 1px;
-}
-
-/* ── Switcher dropdown ── */
-
-.camp-switch {
-  position: relative;
-  margin-left: 6px;
-}
-
-.camp-switch-btn {
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  background: var(--paper);
-  border: 1px solid var(--line);
-  border-radius: 13px;
-  padding: 10px 13px;
-  min-height: 44px;
-  box-shadow: var(--shadow-sm);
-  font-family: inherit;
-  transition: border-color 0.18s ease;
-}
-
-.camp-switch-btn:hover {
-  border-color: var(--lilac-soft);
-}
-
-.camp-switch-lbl {
-  font-size: 9px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--ink-mute);
-  font-weight: 700;
-}
-
-.camp-switch-val {
-  font-family: var(--font-patrick-hand), cursive;
-  font-size: 17px;
-  color: var(--plum);
-  white-space: nowrap;
-}
-
-.camp-switch-caret {
-  font-size: 11px;
-  color: var(--lilac-deep);
-  transition: transform 0.18s ease;
-}
-
-.camp-switch-caret.open {
-  transform: rotate(180deg);
-}
-
-.camp-switch-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-}
-
-.camp-switch-menu {
-  position: absolute;
-  top: calc(100% + 9px);
-  left: 0;
-  width: 288px;
-  background: var(--paper);
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  box-shadow: var(--shadow-lg);
-  padding: 8px;
-  z-index: 60;
-  animation: campFloatIn 0.16s ease both;
-}
-
-.camp-switch-menu-eyebrow {
-  font-family: var(--font-caveat), cursive;
-  font-size: 17px;
-  font-weight: 600;
-  color: var(--green-deep);
-  transform: rotate(-3deg);
-  padding: 4px 10px 6px;
-}
-
-.camp-switch-item {
-  width: 100%;
-  text-align: left;
-  border-radius: 13px;
-  padding: 9px 11px;
-  min-height: 44px;
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  margin-bottom: 2px;
-  text-decoration: none;
-  transition: background 0.15s ease;
-}
-
-.camp-switch-item:hover {
-  background: var(--cream-2);
-}
-
-.camp-switch-item-ini {
-  width: 32px;
-  height: 32px;
-  flex: none;
-  border-radius: 10px;
-  border: 1px solid rgba(107, 60, 94, 0.1);
-  transform: rotate(-3deg);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--font-patrick-hand), cursive;
-  font-size: 16px;
-  color: var(--plum);
-}
-
-.camp-switch-item-body {
+.camp-spacer {
   flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.camp-switch-item-name {
-  font-family: var(--font-patrick-hand), cursive;
-  font-size: 16px;
-  color: var(--ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.camp-switch-item-sub {
-  font-size: 11px;
-  color: var(--ink-mute);
-}
-
-/* ── Topbar user ── */
-
-.camp-topbar-spacer {
-  flex: 1;
-}
-
-.camp-user {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex: none;
-}
-
-.camp-user-text {
-  text-align: right;
-  line-height: 1.15;
-  display: flex;
-  flex-direction: column;
-}
-
-.camp-user-greet {
-  font-family: var(--font-caveat), cursive;
-  font-size: 19px;
-  font-weight: 600;
-  color: var(--lilac-deep);
-  transform: rotate(-2deg);
-}
-
-.camp-user-sub {
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--ink-mute);
-}
-
-.camp-avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: var(--pink-soft);
-  border: 2px solid var(--coral-pink);
-  transform: rotate(-3deg);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--font-patrick-hand), cursive;
-  font-size: 19px;
-  color: var(--plum);
-  box-shadow: var(--shadow-sm);
 }
 
 /* ── Hero ── */
@@ -7471,17 +7228,6 @@ button.painel-topbar-link:hover {
 
 /* ── Animations ── */
 
-@keyframes campFloatIn {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
 @keyframes campFade {
   from {
     opacity: 0;
@@ -7504,14 +7250,12 @@ button.painel-topbar-link:hover {
 
 @media (prefers-reduced-motion: reduce) {
   .camp-overlay,
-  .camp-modal,
-  .camp-switch-menu {
+  .camp-modal {
     animation: none;
   }
   .camp-cta,
   .camp-btn-fill,
-  .camp-nova,
-  .camp-switch-caret {
+  .camp-nova {
     transition: none;
   }
 }
@@ -7531,10 +7275,24 @@ button.painel-topbar-link:hover {
   .camp-modal {
     padding: 26px 22px 22px;
   }
-  .camp-user-text {
-    display: none; /* tight topbar — the avatar carries the identity */
-  }
-  .camp-switch-menu {
-    width: min(288px, calc(100vw - 48px));
-  }
+}
+
+/* =================================================================
+ * aperture-hdftp — "MINHAS LISTAS" back-affordance in the painel
+ * topbar (route: /campanhas). Inherits the 0mplv ghost-chip system;
+ * this modifier only adds the icon+label flex layout so the stroke
+ * arrow sits optically aligned with the Patrick Hand label.
+ * ================================================================= */
+
+.painel-topbar a.painel-topbar-link--listas {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.painel-topbar a.painel-topbar-link--listas svg {
+  flex: none;
+  /* Patrick Hand sits slightly high on the line box — nudge the arrow
+   * down 1px so icon + text share an optical center. */
+  margin-top: 1px;
 }

@@ -88,14 +88,40 @@ describe('Migration round-trip', () => {
     //    this sequence must start at the LATEST migration and walk earlier.
     //    Adding a new migration on top REQUIRES prepending its down-step here.
 
-    // create_cha_rifa_waitlist (landed 2026-06-29) → the migration TIP. Its
+    // ── aperture-hdftp CI repair (2026-07-07): the three convite-feature
+    //    migrations below (032/033/034) landed on staging without prepending
+    //    their down-steps here — the exact off-by-one this block warns about,
+    //    now its THIRD occurrence. Prepended to restore alignment; the real
+    //    tip is 20260705_034.
+
+    // 034 drop_link_confirmacao_from_listas_de_convidados → the migration
+    //   TIP (20260705 sorts last), so the FIRST migrateDown unwinds it. Its
+    //   down() restores the link_confirmacao column as nullable text (shape
+    //   only — the dropped data is unrecoverable by design).
+    const downDropLinkConfirmacao = await migrator.migrateDown();
+    expect(downDropLinkConfirmacao.error).toBeUndefined();
+    const linkConfirmacaoCol = await getColumn(db, 'listas_de_convidados', 'link_confirmacao');
+    expect(linkConfirmacaoCol?.data_type).toBe('text');
+
+    // 033 add_formato_mensagem_convite_to_listas_de_convidados → down()
+    //   drops the formato CHECK constraint + the column.
+    const downFormatoMensagem = await migrator.migrateDown();
+    expect(downFormatoMensagem.error).toBeUndefined();
+    expect(await getColumn(db, 'listas_de_convidados', 'formato_mensagem_convite')).toBeUndefined();
+
+    // 032 expand_convidados_presenca_check → CHECK-constraint swap only
+    //   (no table/column change observable via information_schema.columns);
+    //   the error-undefined assertion is the observable here.
+    const downExpandPresenca = await migrator.migrateDown();
+    expect(downExpandPresenca.error).toBeUndefined();
+
+    // create_cha_rifa_waitlist (landed 2026-06-29) → now the FOURTH
+    //   migrateDown (the convite migrations above sort after it). Its
     //   filename (20260629_030_create_cha_rifa_waitlist) sorts AFTER
     //   20260628_031_add_genero_to_perfil_criador, so kysely's file-ordered
-    //   runner applies it LAST — it is the real tip, and the FIRST migrateDown
-    //   unwinds it (drops the cha_rifa_waitlist table). It landed after this
-    //   sequence was written without prepending its down-step, which put the
-    //   whole roll-back off-by-one (the resgates_pendentes assertion below
-    //   failed on the residual table). Prepended here to restore alignment.
+    //   runner applies it later — this down drops the cha_rifa_waitlist
+    //   table. (Historical note: it too originally landed without
+    //   prepending its down-step — same off-by-one, second occurrence.)
     const downChaRifaWaitlist = await migrator.migrateDown();
     expect(downChaRifaWaitlist.error).toBeUndefined();
     expect(await listTableNames(db)).not.toContain('cha_rifa_waitlist');
