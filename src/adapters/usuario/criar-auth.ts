@@ -694,12 +694,46 @@ export function criarAuth(kysely: Database, config: CriarAuthConfig) {
               return;
             }
             try {
-              await kysely
-                .updateTable('accounts')
-                .set({ password: null })
-                .where('user_id', '=', account.userId)
-                .where('provider_id', '=', 'credential')
-                .execute();
+              // aperture-as0v3 (Cipher, aperture-92oax) — password-NULL and
+              // session-revoke are ONE ATOMIC event: a credential just died, so
+              // the sessions born under it die with it. Both run in a single
+              // transaction so a DELETE failure ROLLS BACK the null too —
+              // otherwise the null commits, the retry sees `password IS NULL`,
+              // passwordMorto=false, the revoke never re-runs, and the squatter
+              // session survives to its 7-day expiry (the exact window this
+              // closes). The closed-over kysely doesn't join better-auth's
+              // internal txn, so the atomicity is explicit here.
+              // Captured as a const so the `typeof ... 'string'` narrowing above
+              // survives into the transaction callback (control-flow narrowing
+              // is lost inside a closure otherwise).
+              const userId = account.userId;
+              await kysely.transaction().execute(async (trx) => {
+                // NULL the live credential password. `WHERE password IS NOT NULL`
+                // is load-bearing: it makes numUpdatedRows an ACCURATE "a live
+                // password just died" signal — without it Postgres counts an
+                // already-null credential row as updated and the revoke would
+                // fire on every returning-user link.
+                const res = await trx
+                  .updateTable('accounts')
+                  .set({ password: null })
+                  .where('user_id', '=', userId)
+                  .where('provider_id', '=', 'credential')
+                  .where('password', 'is not', null)
+                  .execute();
+                const morto = res.reduce((n, r) => n + (r.numUpdatedRows ?? 0n), 0n) > 0n;
+                // Revoke ONLY when a live password actually died, never on the
+                // bare hook firing. This closes a LATENT qcrv4 gap independent of
+                // the legacy bridge. DELETE by user_id is safe here — the OAuth
+                // session is created AFTER this before-hook, so the incoming
+                // session isn't persisted yet; only pre-existing sessions die.
+                // ⚠️ UX COST: linking social while holding a live password logs
+                // the user out on OTHER devices at that moment (better-auth
+                // sessions aren't tagged by originating credential, so we can't
+                // tell squatter from legit device — fail-safe = revoke all).
+                if (morto) {
+                  await trx.deleteFrom('sessions').where('user_id', '=', userId).execute();
+                }
+              });
             } catch {
               // Fail-closed: if the password could not be invalidated, ABORT the
               // link rather than leave a usable pre-existing password alongside a
@@ -763,14 +797,39 @@ export function criarAuth(kysely: Database, config: CriarAuthConfig) {
               .executeTakeFirst();
             if (!usuario?.email_verified) return;
             try {
-              // COND C: ALL credential rows for this user, never OAuth rows.
-              // Mirrors the account.create.before query exactly.
-              await kysely
-                .updateTable('accounts')
-                .set({ password: null })
-                .where('user_id', '=', session.userId)
-                .where('provider_id', '=', 'credential')
-                .execute();
+              // aperture-as0v3 (Cipher, aperture-92oax) — same ATOMIC one-event
+              // rule as account.create.before: NULL the live credential password
+              // and revoke this user's OTHER sessions in a single transaction
+              // (a DELETE failure rolls back the null so a retry re-nulls +
+              // re-revokes atomically — no committed-null-without-revoke window).
+              // COND C: ALL credential rows for this user, never OAuth rows; the
+              // `password IS NOT NULL` guard makes numUpdatedRows an accurate "a
+              // live password just died" signal.
+              // Captured as a const so the `typeof ... 'string'` narrowing above
+              // survives into the transaction callback.
+              const userId = session.userId;
+              await kysely.transaction().execute(async (trx) => {
+                const res = await trx
+                  .updateTable('accounts')
+                  .set({ password: null })
+                  .where('user_id', '=', userId)
+                  .where('provider_id', '=', 'credential')
+                  .where('password', 'is not', null)
+                  .execute();
+                const morto = res.reduce((n, r) => n + (r.numUpdatedRows ?? 0n), 0n) > 0n;
+                // The gate is why this is NOT a single-session app: a steady-state
+                // verified user (no live password) nulls 0 rows → no revoke →
+                // multi-device intact. It fires only in the takeover-squatter
+                // state (email_verified=true co-existing with a live password).
+                // DELETE by user_id spares the incoming session — this hook runs
+                // BEFORE the session row is inserted, so only pre-existing
+                // sessions die. Without it a pre-registered attacker's LIVE
+                // session outlived the magic-link password-NULL and would have
+                // passed the legacy bridge's email_verified gate.
+                if (morto) {
+                  await trx.deleteFrom('sessions').where('user_id', '=', userId).execute();
+                }
+              });
             } catch {
               // COND B (fail-closed): if the NULL fails, ABORT this session
               // rather than authenticate while a live credential survives. The

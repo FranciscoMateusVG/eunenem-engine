@@ -27,7 +27,7 @@ import { toast } from 'sonner';
 import { PainelTopbar } from './components/eunenem/painel/PainelTopbar.js';
 import {
   CAMPANHAS_WELCOME_STORAGE_KEY,
-  LEGACY_DASHBOARD_URL,
+  LEGACY_BRIDGE_PATH,
   useCampanhasList,
   type CampanhaLegadoDTO,
   type CampanhaNovaDTO,
@@ -407,7 +407,7 @@ function CardLegado({ campanha, index }: { campanha: CampanhaLegadoDTO; index: n
         {campanha.mimos !== null && (
           <div className="camp-card-mimos">{mimosLabel(campanha.mimos)}</div>
         )}
-        <a className="camp-cta camp-cta-legado" href={LEGACY_DASHBOARD_URL}>
+        <a className="camp-cta camp-cta-legado" href={LEGACY_BRIDGE_PATH}>
           continuar na 1.0 <span aria-hidden="true">↗</span>
         </a>
       </div>

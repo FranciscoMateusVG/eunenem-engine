@@ -49,6 +49,17 @@ services:
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-}
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-}
       - MINIO_BUCKET=${MINIO_BUCKET:-eunenem-perfil-fotos}
+      # Legacy Clerk bridge (aperture-as0v3). CLERK_SECRET_KEY is the eunenem.com
+      # Clerk app's sk_live — RUNTIME server secret ONLY (read via process.env in
+      # server/legacy-bridge.ts), NEVER a build arg / esbuild define (it's the
+      # old-site's full user-admin API key). Wired through here (not just via the
+      # Dokploy-written .env the server reads) so PID 1 / `docker exec env` also
+      # sees it — that's the post-set verification path. Absent → the bridge is
+      # inert and falls back to the plain redirect (conditional-registration), so
+      # this deploys safe before the key is set. LEGACY_SITE_ORIGIN overrides the
+      # https://eunenem.com consumption target for a non-prod handoff.
+      - CLERK_SECRET_KEY=${CLERK_SECRET_KEY:-}
+      - LEGACY_SITE_ORIGIN=${LEGACY_SITE_ORIGIN:-}
 
   # Postgres sidecar — holds the engine domain schema (Arrecadação,
   # Pagamentos, Financeiro, Usuário) + BetterAuth's tables (users,

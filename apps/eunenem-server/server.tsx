@@ -8,6 +8,7 @@ import { renderToString } from 'react-dom/server';
 import { App, resolveRoute } from './pages/App.js';
 import { buildServerDeps, ID_PLATAFORMA_EUNENEM, loadEnv } from './server/auth/setup.js';
 import { installBlockedAuthHandlerGuard } from './server/blocked-auth-handler.js';
+import { createLegacyBridgeHandler } from './server/legacy-bridge.js';
 import { appRouter } from './server/trpc/router.js';
 import { createStripeWebhookHandler } from './server/webhooks/stripe-webhook.js';
 
@@ -109,6 +110,14 @@ app.all('/api/trpc/*', (c) =>
 // server/webhooks/stripe-webhook.ts for the full security rationale +
 // the local `stripe listen` dev workflow.
 app.post('/api/webhooks/stripe', createStripeWebhookHandler(deps));
+
+// Legacy bridge (aperture-as0v3) — authed silent login handoff into the 1.0
+// system. The /campanhas 1.0 card hits this; it mints a single-use Clerk
+// sign-in token for the caller's VERIFIED email and 302s to eunenem.com/ponte.
+// Mounted alongside the other /api/* handlers (before the SSR catch-all). All
+// security rationale (verified-email trust anchor, sk_live server-only, mint
+// rate-limit, fail-open-to-fallback) lives in server/legacy-bridge.ts.
+app.get('/api/legacy-bridge', createLegacyBridgeHandler(deps));
 
 // "/" SSRs the marketing landing page via the catch-all below —
 // resolveRoute maps the exact "/" pathname to { kind: 'landing' }.

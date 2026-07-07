@@ -31,8 +31,23 @@ export type CampanhaLegadoDTO = CampanhasListOutput['legado'][number];
  */
 export const CAMPANHAS_WELCOME_STORAGE_KEY = 'eunenem-campanhas:bemvindo-v1';
 
-/** Where the 1.0 card sends the user (spec §5 — Clerk resolves by email). */
+/**
+ * The 1.0 card's fallback target — the legacy dashboard, where Clerk resolves
+ * the user by email. Kept as the bridge's own fallback (server-side) and used
+ * directly only if the bridge is ever disabled.
+ */
 export const LEGACY_DASHBOARD_URL = 'https://eunenem.com/minha-area';
+
+/**
+ * Where the 1.0 card actually points (aperture-as0v3). Same-origin authed
+ * endpoint that mints a Clerk sign-in ticket for the caller's VERIFIED email
+ * and 302s into the 1.0 system LOGGED IN (falling back to LEGACY_DASHBOARD_URL
+ * server-side for unverified / no-match / no-key / error). A plain top-level
+ * anchor nav so the browser carries the session cookie. Izzy's E2E (aperture-
+ * 8jcec) asserts the anchor + this href — imported here so spec + test move
+ * together.
+ */
+export const LEGACY_BRIDGE_PATH = '/api/legacy-bridge';
 
 export function useCampanhasList() {
   return trpc.campanhas.list.useQuery(undefined, { staleTime: 30_000 });

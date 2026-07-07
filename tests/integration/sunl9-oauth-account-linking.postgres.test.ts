@@ -1492,4 +1492,179 @@ describe('Google-OAuth account-linking + password-invalidation (aperture-8655f /
       `exactly ${MAX} emails should be delivered for ${MAX + 1} requests — the over-cap send is skipped`,
     ).toBe(MAX);
   });
+
+  // ==========================================================================
+  // aperture-as0v3 — SESSION-REVOKE hardening (Cipher aperture-92oax refinement
+  // #4). Password-NULL and session-revoke are ONE event: when a live credential
+  // password dies on a verified-email link, that user's pre-existing sessions
+  // die with it — closing a LATENT qcrv4 gap (an attacker's live session used
+  // to outlive the password-NULL for up to 7 days) AND the legacy-bridge
+  // stale-session window. Gated on a live password ACTUALLY dying, so a
+  // steady-state verified user (no password) keeps multi-device.
+  // ==========================================================================
+
+  /** Seed a pre-existing session row for a user (a "device already logged in"). */
+  async function seedSession(userId: string, token: string): Promise<void> {
+    await testDb.db
+      .insertInto('sessions')
+      .values({
+        id: randomUUID(),
+        user_id: userId,
+        token,
+        expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        created_at: new Date(),
+        updated_at: new Date(),
+      })
+      .execute();
+  }
+
+  // (N) ⭐ OAuth link with a LIVE credential password NULLs it AND revokes the
+  //     user's pre-existing sessions — the squatter lockout.
+  it("(N) ⭐ OAuth link (live password) NULLs password AND revokes the user's pre-existing sessions", async () => {
+    const auth = buildAuthWithPlatformId();
+    const authService = new AuthServiceBetterAuth(testDb.db);
+
+    const userId = randomUUID();
+    const email = 'revoke-victim@example.com';
+    await authService.criarConta({
+      idUsuario: userId,
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
+      email,
+      senha: 'squatter-password-123',
+      nome: 'Revoke Victim',
+    });
+    await seedSession(userId, `attacker-session-${randomUUID()}`);
+    expect(await sessionCountForUser(userId), 'precondition: one pre-existing session').toBe(1);
+
+    const res = await driveRealCallback(auth, {
+      idTokenClaims: { sub: 'g-revoke-0001', email, email_verified: true, name: 'Victim G' },
+    });
+    expect(res.headers.get('location') ?? '', 'the link must succeed').toContain('dashboard');
+
+    const pw = await testDb.db
+      .selectFrom('accounts')
+      .select('password')
+      .where('user_id', '=', userId)
+      .where('provider_id', '=', 'credential')
+      .executeTakeFirstOrThrow();
+    expect(pw.password, 'credential password must be nulled').toBeNull();
+
+    const attackerSessions = await testDb.db
+      .selectFrom('sessions')
+      .select('id')
+      .where('user_id', '=', userId)
+      .where('token', 'like', 'attacker-session-%')
+      .execute();
+    expect(
+      attackerSessions,
+      'aperture-as0v3: the pre-existing (squatter) session MUST be revoked on the live-password link',
+    ).toHaveLength(0);
+  });
+
+  // (O) ⭐ multi-device guard: an OAuth re-login for a user with NO live
+  //     password does NOT revoke other sessions.
+  it('(O) ⭐ OAuth login with NO live password does NOT revoke other sessions (multi-device intact)', async () => {
+    const auth = buildAuthWithPlatformId();
+
+    const userId = randomUUID();
+    const email = 'multidevice@example.com';
+    const googleSub = 'g-multidevice-0001';
+    await testDb.db
+      .insertInto('users')
+      .values({
+        id: userId,
+        name: 'Multi Device',
+        email,
+        email_verified: true,
+        id_plataforma: ID_PLATAFORMA_EUNENEM,
+        created_at: new Date(),
+        updated_at: new Date(),
+      })
+      .execute();
+    await testDb.db
+      .insertInto('accounts')
+      .values({
+        id: randomUUID(),
+        user_id: userId,
+        provider_id: 'google',
+        account_id: googleSub,
+        password: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+      })
+      .execute();
+    await seedSession(userId, `device1-${randomUUID()}`);
+
+    const res = await driveRealCallback(auth, {
+      idTokenClaims: { sub: googleSub, email, email_verified: true, name: 'Multi Device' },
+    });
+    expect(res.headers.get('location') ?? '', 'clean re-login').toContain('dashboard');
+
+    const device1 = await testDb.db
+      .selectFrom('sessions')
+      .select('id')
+      .where('user_id', '=', userId)
+      .where('token', 'like', 'device1-%')
+      .execute();
+    expect(
+      device1,
+      'aperture-as0v3 multi-device guard: no live password died, so pre-existing sessions MUST survive',
+    ).toHaveLength(1);
+  });
+
+  // (P) ⭐ magic-link sign-in with a live password ALSO revokes other sessions
+  //     (the session.create.before path — same window, same fix).
+  it('(P) ⭐ magic-link (live password) revokes the pre-existing sessions', async () => {
+    let capturedUrl: string | null = null;
+    const auth = criarAuth(testDb.db, {
+      secret: SECRET,
+      baseURL: BASE_URL,
+      trustedOrigins: [BASE_URL],
+      sendResetPassword: async () => {},
+      useSecureCookies: false,
+      idPlataformaPadrao: ID_PLATAFORMA_EUNENEM,
+      sendMagicLink: async ({ url }) => {
+        capturedUrl = url;
+      },
+    });
+    const authService = new AuthServiceBetterAuth(testDb.db);
+
+    const userId = randomUUID();
+    const email = 'magic-revoke@example.com';
+    await authService.criarConta({
+      idUsuario: userId,
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
+      email,
+      senha: 'squatter-pw-123',
+      nome: 'Magic Revoke',
+    });
+    await seedSession(userId, `attacker-magic-${randomUUID()}`);
+
+    await auth.api.signInMagicLink({
+      body: { email, callbackURL: '/dashboard' },
+      headers: new Headers({ origin: BASE_URL }),
+    });
+    expect(capturedUrl, 'magic link sent').toBeTruthy();
+    await auth.handler(
+      new Request(capturedUrl as unknown as string, { method: 'GET', redirect: 'manual' }),
+    );
+
+    const pw = await testDb.db
+      .selectFrom('accounts')
+      .select('password')
+      .where('user_id', '=', userId)
+      .where('provider_id', '=', 'credential')
+      .executeTakeFirstOrThrow();
+    expect(pw.password, 'magic-link nulls the credential password').toBeNull();
+    const attackerSessions = await testDb.db
+      .selectFrom('sessions')
+      .select('id')
+      .where('user_id', '=', userId)
+      .where('token', 'like', 'attacker-magic-%')
+      .execute();
+    expect(
+      attackerSessions,
+      'aperture-as0v3: magic-link on a live-password account MUST revoke the pre-existing session',
+    ).toHaveLength(0);
+  });
 });
