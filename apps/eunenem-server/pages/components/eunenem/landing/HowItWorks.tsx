@@ -1,5 +1,4 @@
-import { useRef, type ReactNode } from 'react';
-import { useAuthModal } from '@/components/eunenem/auth/AuthModalProvider';
+import type { ReactNode } from 'react';
 
 // aperture-b8yn3 — v2 rewrite of section 03 "Como funciona".
 // Same 3-step structure + icons + tilted scrapbook tiles as v1, but tighter
@@ -90,9 +89,6 @@ const STEPS: ReadonlyArray<Step> = [
 ];
 
 export function HowItWorks() {
-  // aperture-nop8l — CTA opens signup modal.
-  const auth = useAuthModal();
-  const ctaRef = useRef<HTMLButtonElement | null>(null);
   return (
     <section id="como-funciona" className="fade-up py-22 bg-cream">
       <div className="mx-auto max-w-[1200px] px-6">

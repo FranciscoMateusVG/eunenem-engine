@@ -3,6 +3,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { ID_PLATAFORMA_EUNENEM } from '../../src/adapters/plataforma/repository.memory.js';
 import { AuthServiceBetterAuth } from '../../src/adapters/usuario/auth-service.better-auth.js';
 import { criarAuth } from '../../src/adapters/usuario/criar-auth.js';
+import { NomeExibicaoUsuarioSchema } from '../../src/domain/usuario/value-objects/nome-exibicao-usuario.js';
 import { createTestDatabase, type TestDatabase } from '../helpers/test-db.js';
 import { truncateBetterAuthTables } from '../helpers/truncate-better-auth.js';
 
@@ -1045,6 +1046,259 @@ describe('Google-OAuth account-linking + password-invalidation (aperture-8655f /
       after.idUsuario,
       'the victim password must still authenticate after the blocked attack',
     ).toBe(victimUserId);
+  });
+
+  // ==========================================================================
+  // aperture-uq69m — Microsoft PER-REQUEST email-ownership linking.
+  //
+  // Microsoft stays OUT of trustedProviders ((A)+(F) unchanged). The engine's
+  // mapProfileToUser predicate computes emailVerified from the id_token claims,
+  // so better-auth's EXISTING gate auto-links the ownership-PROVEN cases and
+  // refuses the rest. (J)/(K) prove the two link paths; (L) proves the tid
+  // anchor closes the domain-spoof nOAuth vector; (M) proves the empty-name
+  // fallback. The consumer tid (9188040d-…) is makeMicrosoftIdToken's default.
+  // ==========================================================================
+  const MS_ATTACKER_TID = '11111111-2222-3333-4444-555555555555';
+
+  // --------------------------------------------------------------------------
+  // (J) ⭐ CONSUMER MSA (hotmail) LINKS — thacyane's real prod case. An existing
+  //     email+password user signs in with a genuine personal Microsoft account
+  //     (consumer tid + hotmail domain). Even though the id_token carries
+  //     email_verified=false (Microsoft `common` routinely omits/falses it), the
+  //     engine predicate proves ownership from tid+domain → emailVerified=true →
+  //     better-auth links. The HOOK_COVERED password-NULL fires (same takeover
+  //     defence as Google), so the pre-existing local password is invalidated.
+  // --------------------------------------------------------------------------
+  it('(J) ⭐ consumer-MSA (hotmail) Microsoft sign-in LINKS to an existing account + NULLs the local password', async () => {
+    const auth = buildAuthWithMicrosoft();
+    const authService = new AuthServiceBetterAuth(testDb.db);
+
+    const existingUserId = randomUUID();
+    const email = 'thacyane-real@hotmail.com';
+    const oldPassword = 'pre-existing-local-pw-123';
+    await authService.criarConta({
+      idUsuario: existingUserId,
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
+      email,
+      senha: oldPassword,
+      nome: 'Thacyane Local',
+    });
+
+    // CONTROL: the local password authenticates before the link.
+    const before = await authService.iniciarSessao({
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
+      email,
+      senha: oldPassword,
+    });
+    expect(before.idUsuario, 'CONTROL: local password must authenticate pre-link').toBe(
+      existingUserId,
+    );
+
+    // Consumer tid (default) + hotmail domain, email_verified deliberately FALSE
+    // to prove the predicate — not the raw claim — drives the link.
+    const res = await driveRealMicrosoftCallback(auth, {
+      idTokenClaims: {
+        sub: 'ms-consumer-subject-0001',
+        email,
+        email_verified: false,
+        name: 'Thacyane MS',
+      },
+    });
+
+    // It LINKS: session minted, microsoft account row created, dashboard redirect.
+    const location = res.headers.get('location') ?? '';
+    expect([302, 303, 307]).toContain(res.status);
+    expect(
+      location,
+      'consumer-MSA hotmail must LINK (dashboard), not dead-end on account_not_linked',
+    ).toContain('dashboard');
+    expect(location).not.toContain('account_not_linked');
+    expect(setsSessionCookie(res), 'a session cookie MUST be minted on the consumer-MSA link').toBe(
+      true,
+    );
+    expect(await sessionCountForUser(existingUserId)).toBeGreaterThanOrEqual(1);
+    const linkedMs = await testDb.db
+      .selectFrom('accounts')
+      .select('id')
+      .where('user_id', '=', existingUserId)
+      .where('provider_id', '=', 'microsoft')
+      .execute();
+    expect(linkedMs, 'a microsoft account row MUST be linked to the existing user').toHaveLength(1);
+
+    // HOOK_COVERED defence: the pre-existing local password is invalidated.
+    const pwAfter = await testDb.db
+      .selectFrom('accounts')
+      .select('password')
+      .where('user_id', '=', existingUserId)
+      .where('provider_id', '=', 'credential')
+      .executeTakeFirstOrThrow();
+    expect(
+      pwAfter.password,
+      'linking microsoft (HOOK_COVERED) MUST NULL the local credential password',
+    ).toBeNull();
+    await expect(
+      authService.iniciarSessao({ idPlataforma: ID_PLATAFORMA_EUNENEM, email, senha: oldPassword }),
+      'the old local password MUST NOT authenticate after the microsoft link',
+    ).rejects.toThrow();
+  });
+
+  // --------------------------------------------------------------------------
+  // (K) VERIFIED CUSTOM DOMAIN (xms_edov) LINKS — diego@bessa.digital's path,
+  //     when the Entra app emits the optional claim. A NON-consumer tenant is
+  //     fine WHEN Microsoft asserts xms_edov=true (it verifiably owns the email
+  //     domain — not tenant-settable). Proves the second ownership path links.
+  // --------------------------------------------------------------------------
+  it('(K) xms_edov=true (Microsoft-verified custom domain) Microsoft sign-in LINKS', async () => {
+    const auth = buildAuthWithMicrosoft();
+    const authService = new AuthServiceBetterAuth(testDb.db);
+
+    const existingUserId = randomUUID();
+    const email = 'diego@bessa.digital';
+    await authService.criarConta({
+      idUsuario: existingUserId,
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
+      email,
+      senha: 'diego-local-pw-123',
+      nome: 'Diego Local',
+    });
+
+    const res = await driveRealMicrosoftCallback(auth, {
+      idTokenClaims: {
+        sub: 'ms-edov-subject-0001',
+        tid: MS_ATTACKER_TID, // a workplace tenant — trusted ONLY because xms_edov
+        email,
+        email_verified: false,
+        xms_edov: true,
+        name: 'Diego MS',
+      },
+    });
+
+    const location = res.headers.get('location') ?? '';
+    expect([302, 303, 307]).toContain(res.status);
+    expect(location, 'xms_edov-verified email must LINK (dashboard)').toContain('dashboard');
+    expect(location).not.toContain('account_not_linked');
+    expect(setsSessionCookie(res)).toBe(true);
+    const linkedMs = await testDb.db
+      .selectFrom('accounts')
+      .select('id')
+      .where('user_id', '=', existingUserId)
+      .where('provider_id', '=', 'microsoft')
+      .execute();
+    expect(linkedMs, 'a microsoft account MUST be linked on the xms_edov path').toHaveLength(1);
+  });
+
+  // --------------------------------------------------------------------------
+  // (L) ⭐⭐ nOAuth LOCKOUT — external tenant SPOOFING a consumer-domain email is
+  //     REFUSED. This is the security heart of the fix: an attacker owns their
+  //     OWN Entra tenant, sets a user's email attribute to victim@hotmail.com,
+  //     AND asserts email_verified=true. Domain-string-alone (the naive fix)
+  //     would trust this and hand over the victim's account. The tid anchor
+  //     (attacker tid !== consumer tid, and no xms_edov) refuses it. If this
+  //     ever LINKS, the takeover is reopened — do NOT massage to pass.
+  // --------------------------------------------------------------------------
+  it('(L) ⭐⭐ external tenant spoofing victim@hotmail.com (attacker-asserted email_verified) is REFUSED', async () => {
+    const auth = buildAuthWithMicrosoft();
+    const authService = new AuthServiceBetterAuth(testDb.db);
+
+    const victimUserId = randomUUID();
+    const email = 'takeover-target@hotmail.com';
+    const password = 'victim-local-pw-123';
+    await authService.criarConta({
+      idUsuario: victimUserId,
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
+      email,
+      senha: password,
+      nome: 'Takeover Target',
+    });
+
+    const res = await driveRealMicrosoftCallback(auth, {
+      idTokenClaims: {
+        sub: 'ms-attacker-consumer-domain-0001',
+        tid: MS_ATTACKER_TID, // attacker's OWN tenant, NOT the consumer tenant
+        email, // a consumer-domain email the attacker does NOT own
+        email_verified: true, // attacker asserts it — must be ignored
+        name: 'Attacker',
+        // NO xms_edov — the attacker's tenant does not own hotmail.com
+      },
+    });
+
+    const location = res.headers.get('location') ?? '';
+    expect(
+      location,
+      'domain-spoof from an external tenant must be REFUSED (tid anchor), never linked',
+    ).toContain('account_not_linked');
+    expect(location).not.toContain('dashboard');
+    expect(setsSessionCookie(res), 'no session may be minted for the domain-spoof attacker').toBe(
+      false,
+    );
+    const linkedMs = await testDb.db
+      .selectFrom('accounts')
+      .select('id')
+      .where('user_id', '=', victimUserId)
+      .where('provider_id', '=', 'microsoft')
+      .execute();
+    expect(linkedMs, 'no microsoft account may be linked to the victim').toHaveLength(0);
+    const pwAfter = await testDb.db
+      .selectFrom('accounts')
+      .select('password')
+      .where('user_id', '=', victimUserId)
+      .where('provider_id', '=', 'credential')
+      .executeTakeFirstOrThrow();
+    expect(
+      pwAfter.password,
+      "the victim's password must stay intact (no link happened)",
+    ).toBeTruthy();
+    const after = await authService.iniciarSessao({
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
+      email,
+      senha: password,
+    });
+    expect(after.idUsuario, 'the victim keeps their account after the blocked spoof').toBe(
+      victimUserId,
+    );
+  });
+
+  // --------------------------------------------------------------------------
+  // (M) EMPTY-NAME Microsoft signup → user created with a NON-EMPTY fallback
+  //     name (finding #5). Both prod victims (thacyane, diego) had users.name=''
+  //     which broke the domain-heal ("Nome de exibicao nao pode ser vazio").
+  //     A brand-new consumer-MSA signup with an EMPTY name claim must create a
+  //     user whose name is backfilled (email local-part) so the heal can never
+  //     fail on it.
+  // --------------------------------------------------------------------------
+  it('(M) empty-name Microsoft signup creates a user with a NON-EMPTY fallback name', async () => {
+    const auth = buildAuthWithMicrosoft();
+
+    const freshEmail = `ghost-${randomUUID()}@hotmail.com`;
+    const localPart = freshEmail.split('@')[0] ?? '';
+
+    const res = await driveRealMicrosoftCallback(auth, {
+      idTokenClaims: {
+        sub: `ms-emptyname-${randomUUID()}`,
+        email: freshEmail,
+        email_verified: false,
+        name: '', // Microsoft returned an empty display name (diego/thacyane shape)
+      },
+    });
+
+    // Signup succeeded (consumer MSA → emailVerified proven → clean create).
+    expect([302, 303, 307]).toContain(res.status);
+    const created = await testDb.db
+      .selectFrom('users')
+      .select(['id', 'name'])
+      .where('email', '=', freshEmail)
+      .executeTakeFirstOrThrow();
+    expect(
+      created.name,
+      'the user.create.before + mapProfileToUser fallback must backfill a NON-EMPTY name',
+    ).not.toBe('');
+    expect(
+      created.name,
+      'the fallback derives the email local-part when the name claim is empty',
+    ).toBe(localPart);
+
+    // And the derived name is a valid display name (the heal will accept it).
+    expect(() => NomeExibicaoUsuarioSchema.parse(created.name)).not.toThrow();
   });
 
   // --------------------------------------------------------------------------

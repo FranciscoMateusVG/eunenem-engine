@@ -3532,7 +3532,7 @@ h4 {
   transition: max-height 0.4s ease;
 }
 .faq-item.open .faq-a {
-  max-height: 400px;
+  max-height: 600px;
 }
 .faq-item.open .chev {
   transform: rotate(45deg);

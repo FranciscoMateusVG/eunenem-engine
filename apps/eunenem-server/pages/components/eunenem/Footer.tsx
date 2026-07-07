@@ -18,11 +18,16 @@ import {
 // aperture-zeueb — trust badges. The old site rendered these as images on a
 // LIGHT footer; on the new DARK plum footer they sit on small white chips so
 // the (dark/colored) brand marks stay legible. Assets copied into public/.
-const BADGES: ReadonlyArray<readonly [string, string]> = [
-  ['/public/stripe_logo.svg', 'Pagamento seguro via Stripe'],
-  ['/public/google-site-seguro.png', 'Google site seguro'],
-  ['/public/certificado-ssl.png', 'Certificado SSL'],
-  ['/public/logo-reclame-aqui.png', 'Verificada no ReclameAQUI'],
+// aperture-zeueb — stripe/google source images are wide (e.g. 736x200), so a
+// small fixed height still reads fine. certificado-ssl.png and
+// logo-reclame-aqui.png are square (500x500) with dense detail inside that
+// square, so the same height renders far less width/legible area — they need
+// a taller size class to stay readable.
+const BADGES: ReadonlyArray<readonly [string, string, string]> = [
+  ['/public/stripe_logo.svg', 'Pagamento seguro via Stripe', 'h-7'],
+  ['/public/google-site-seguro.png', 'Google site seguro', 'h-7'],
+  ['/public/certificado-ssl.png', 'Certificado SSL', 'h-27'],
+  ['/public/logo-reclame-aqui.png', 'Verificada no ReclameAQUI', 'h-25'],
 ];
 
 // aperture-zeueb — single-color brand glyphs (currentColor) so they read light
@@ -70,13 +75,13 @@ export function Footer() {
     <footer className="bg-plum text-[#F4DCEA] pt-16 pb-7">
       <div className="mx-auto max-w-[1200px] px-6">
         <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_2fr] gap-14 mb-12">
-          <div className="flex flex-col items-center text-center lg:items-start lg:text-left">
+          <div className="@container flex flex-col items-center text-center lg:items-start lg:text-left">
             <img
               src="/public/logo-landing.png"
               alt="EuNeném"
               width={220}
               height={70}
-              className="h-[70px] w-auto bg-white/95 px-4 py-2.5 rounded-2xl"
+              className="h-[70px] w-auto py-2.5"
             />
             <p className="mt-4.5 text-sm text-[#F4DCEA]/75 max-w-[320px] leading-relaxed">
               A plataforma líder e mais confiável de chá de bebê online no Brasil
@@ -84,17 +89,17 @@ export function Footer() {
             </p>
             {/* aperture-zeueb — 4 real trust badges (white chips for legibility
                 on the dark footer) replacing the 2 text pills. */}
-            <div className="flex gap-2.5 mt-5 flex-wrap items-center justify-center lg:justify-start">
-              {BADGES.map(([src, alt]) => (
+            <div className="grid grid-cols-2 @[560px]:grid-cols-4 gap-2.5 mt-5 place-items-center lg:place-items-start">
+              {BADGES.map(([src, alt, height]) => (
                 <span
                   key={src}
-                  className="inline-flex items-center bg-white/95 rounded-lg px-2.5 py-1.5 h-9"
+                  className="inline-flex items-center  rounded-lg px-2.5 py-1.5 h-11"
                   title={alt}
                 >
                   <img
                     src={src}
                     alt={alt}
-                    className="h-5 w-auto object-contain"
+                    className={`${height} w-auto object-contain`}
                     loading="lazy"
                     decoding="async"
                   />

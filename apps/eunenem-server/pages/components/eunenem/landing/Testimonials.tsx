@@ -118,6 +118,9 @@ export function Testimonials() {
     <section id="depoimentos" className="fade-up py-22 bg-cream">
       <div className="testi-inner mx-auto max-w-[1200px] px-6">
         <div className="testi-header text-center max-w-[760px] mx-auto mb-10 lg:mb-14">
+          <span className="font-script text-[28px] text-lilac-deep font-semibold inline-block -rotate-2 mb-1">
+            a EuNeném é confiável?
+          </span>
           <h2 className="font-display text-3xl sm:text-4xl lg:text-[44px] font-semibold text-plum leading-tight text-balance">
             deixa as{' '}
             <em className="not-italic text-lilac-deep">mães e pais</em> contarem

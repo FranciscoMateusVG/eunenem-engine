@@ -1,4 +1,5 @@
 import {
+  derivarNomeExibicaoFallback,
   provisionarContaUsuarioDominio,
   UsuarioEmailJaExisteError,
 } from '../../../../src/index.js';
@@ -126,7 +127,19 @@ async function resolverViaGetSession(
   return {
     idUsuario: user.id,
     expiraEm: session.expiresAt,
-    principal: { idPlataforma, email: user.email, nome: user.name },
+    // aperture-uq69m — HEAL existing live-session ghosts. Microsoft OAuth can
+    // return an empty/absent `name`, and prod already holds such rows
+    // (thacyane, diego: users.name='' + no usuarios domain row). Passing the raw
+    // empty name into `provisionarContaUsuarioDominio` makes
+    // NomeExibicaoUsuarioSchema throw ("nao pode ser vazio") → the heal fails
+    // → the user stays locked out forever. Deriving a non-empty fallback here
+    // lets the heal complete on their NEXT authenticated request. Belt to the
+    // criar-auth.ts create-hook's suspenders (which fixes only NEW signups).
+    principal: {
+      idPlataforma,
+      email: user.email,
+      nome: derivarNomeExibicaoFallback(user.name, user.email),
+    },
   };
 }
 

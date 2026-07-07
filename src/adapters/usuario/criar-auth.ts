@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { BetterAuthOptions, User } from 'better-auth';
 import { betterAuth } from 'better-auth';
 import { magicLink } from 'better-auth/plugins';
+import { derivarNomeExibicaoFallback } from '../../domain/usuario/value-objects/nome-exibicao-usuario.js';
 import type { Database } from '../database.js';
 
 /**
@@ -162,6 +163,144 @@ for (const trusted of TRUSTED_OAUTH_PROVIDERS) {
       `OAuth config invariant violated: trusted provider "${trusted}" is not in HOOK_COVERED_OAUTH_PROVIDERS (TRUSTED must be a subset of HOOK_COVERED)`,
     );
   }
+}
+
+// ── aperture-uq69m: Microsoft per-request email-ownership trust predicate ─────
+//
+// PROBLEM: Microsoft stays OUT of trustedProviders (etdx3 — a free multi-tenant
+// `common` Entra app can mint a token carrying ANY email; trusting the provider
+// blanket = nOAuth account takeover). But that made EVERY existing-email
+// Microsoft sign-in dead-end on `account_not_linked`, including genuine users
+// whose email Microsoft DOES vouch for (thacyane@hotmail — a real personal MSA).
+//
+// FIX (operator's refined option b): keep microsoft un-trusted, but decide
+// email trust PER REQUEST from the id_token claims. better-auth's link gate
+// (link-account.mjs) refuses only when `!isTrustedProvider && !emailVerified`,
+// so an UNTRUSTED provider whose profile reports `emailVerified === true` LINKS.
+// The microsoft provider's `getUserInfo` spreads `...mapProfileToUser(profile)`
+// OVER its computed emailVerified (verified in @better-auth/core
+// microsoft-entra-id.mjs, 1.6.12), and `mapProfileToUser` receives the FULL
+// decoded id_token. So we compute `emailVerified` ourselves from the claims and
+// let better-auth's EXISTING gate do the rest — no trustedProviders change, so
+// the (A) config pin + (F) takeover-lockout test stay green.
+//
+// ⚠️ Cipher hard gate (nOAuth/etdx3): the email STRING alone is NOT trustworthy
+// (an attacker's own Entra tenant can set a user's `email` attribute to
+// victim@hotmail.com). The trust anchors are values the ISSUING TENANT cannot
+// forge: the consumer `tid` (Microsoft controls that tenant) and `xms_edov`
+// (Microsoft-computed domain-owner-verified).
+
+/**
+ * Microsoft's well-known CONSUMER (MSA) tenant GUID. Tokens for genuine
+ * personal Microsoft accounts are issued by THIS tenant, which Microsoft
+ * operates and which validates email ownership at account creation. An
+ * arbitrary Azure/Entra tenant has its OWN `tid`; it CANNOT issue a token
+ * stamped with this tid, so the tid — not the email string — is the anchor.
+ */
+const MICROSOFT_CONSUMER_TENANT_ID = '9188040d-6c67-4c5b-b112-36a304b66dad';
+
+/**
+ * Consumer email domains Microsoft owns and verifies ownership of at MSA
+ * signup. Combined with the consumer `tid`, a match proves the `email` claim is
+ * genuinely the signing-in user's. Being non-exhaustive is SAFE, not a hole: an
+ * unlisted domain only routes a genuine consumer account to the (non-dead-end)
+ * refuse path — never a security downgrade, because the `tid` gate already
+ * bounds this branch to real Microsoft-issued consumer tokens.
+ */
+const MICROSOFT_CONSUMER_EMAIL_DOMAINS: ReadonlySet<string> = new Set([
+  'hotmail.com',
+  'outlook.com',
+  'live.com',
+  'msn.com',
+  'passport.com',
+  'windowslive.com',
+  'hotmail.co.uk',
+  'outlook.com.br',
+  'hotmail.com.br',
+  'live.com.br',
+]);
+
+/**
+ * aperture-uq69m — decide whether a Microsoft OIDC email is ownership-PROVEN
+ * enough to implicit-link into a pre-existing same-email local account. The
+ * boolean becomes the `emailVerified` we feed better-auth: `true` → auto-link
+ * (untrusted + verified → link), `false` → the safe `account_not_linked` refuse
+ * (which the frontend renders as a non-dead-end "already registered" message).
+ *
+ * TWO ownership-proving paths (either suffices):
+ *   1. VERIFIED CUSTOM DOMAIN — `xms_edov === true` (Microsoft-computed "Email
+ *      Domain Owner Verified"): the issuing tenant verifiably owns the email's
+ *      domain. Not tenant-settable, so trustworthy for any tenant. Covers
+ *      diego@bessa.digital IFF the Entra app emits the optional claim.
+ *   2. CONSUMER MSA — `tid === consumer tenant` AND the email is in a
+ *      Microsoft-owned consumer domain. Covers thacyane@hotmail.
+ *
+ * Anything else (external tenant + unverified email = the nOAuth vector) → false
+ * → refuse. Ignores the incoming `email_verified` claim by design: Microsoft
+ * `common` id_tokens routinely omit it or carry `false`, and a tenant-asserted
+ * `email_verified` is exactly what the nOAuth attack forges — so we derive trust
+ * from the unforgeable anchors above, never from a self-reported flag.
+ */
+export function microsoftEmailOwnershipProven(claims: {
+  readonly tid?: unknown;
+  readonly email?: unknown;
+  readonly xms_edov?: unknown;
+}): boolean {
+  // Path 1 — Microsoft-verified domain owner. Emitted as a JSON boolean; some
+  // token configs stringify optional claims, so accept the "1"/"true" forms too.
+  const edov = claims.xms_edov;
+  if (edov === true || edov === 1 || edov === '1' || edov === 'true') return true;
+
+  // Path 2 — genuine consumer MSA (tid anchor) with a Microsoft-owned domain.
+  if (claims.tid === MICROSOFT_CONSUMER_TENANT_ID) {
+    const email = typeof claims.email === 'string' ? claims.email.trim().toLowerCase() : '';
+    const at = email.lastIndexOf('@');
+    const domain = at >= 0 ? email.slice(at + 1) : '';
+    if (domain.length > 0 && MICROSOFT_CONSUMER_EMAIL_DOMAINS.has(domain)) return true;
+  }
+
+  return false;
+}
+
+/**
+ * aperture-uq69m — inject the Microsoft trust predicate + empty-name fallback
+ * into the microsoft provider's `mapProfileToUser`, so the SECURITY DECISION
+ * lives in the engine (next to the accountLinking invariants) and a consumer
+ * physically CANNOT wire a microsoft provider that skips the nOAuth gate. Every
+ * other provider (google, etc.) passes through untouched — Google self-reports a
+ * validated `emailVerified` and needs no override.
+ *
+ * `mapProfileToUser`'s return spreads OVER better-auth's provider defaults, so
+ * it (a) OVERRIDES `emailVerified` with our per-request ownership predicate —
+ * the flag link-account.mjs reads for implicit-link-vs-refuse — and (b)
+ * backfills a NON-EMPTY display name (Microsoft can return an empty/absent
+ * `name`; verified in prod for thacyane + diego), preferring the profile name,
+ * then split `given_name`+`family_name`, then the email local-part.
+ */
+function comPreditorMicrosoft(
+  socialProviders: NonNullable<BetterAuthOptions['socialProviders']>,
+): NonNullable<BetterAuthOptions['socialProviders']> {
+  const microsoft = socialProviders.microsoft;
+  if (!microsoft) return socialProviders;
+  return {
+    ...socialProviders,
+    microsoft: {
+      ...microsoft,
+      mapProfileToUser: (profile: Record<string, unknown>) => {
+        const email = typeof profile.email === 'string' ? profile.email : '';
+        const nomeDireto =
+          typeof profile.name === 'string' && profile.name.trim().length > 0
+            ? profile.name
+            : [profile.given_name, profile.family_name]
+                .filter((p): p is string => typeof p === 'string' && p.length > 0)
+                .join(' ');
+        return {
+          emailVerified: microsoftEmailOwnershipProven(profile),
+          name: derivarNomeExibicaoFallback(nomeDireto, email),
+        };
+      },
+    },
+  } as NonNullable<BetterAuthOptions['socialProviders']>;
 }
 
 // ── aperture-lwx2k (Camada C) gate item 5: magic-link SEND rate-limit ─────────
@@ -478,7 +617,12 @@ export function criarAuth(kysely: Database, config: CriarAuthConfig) {
     // aperture-8655f — social providers are CONDITIONAL: only spread in when
     // the consumer injected them (both OAuth env vars present on its side).
     // Absent → key is omitted entirely → email+password-only, boots cleanly.
-    ...(config.socialProviders ? { socialProviders: config.socialProviders } : {}),
+    // aperture-uq69m — route the microsoft provider through the engine-owned
+    // email-ownership predicate (+ empty-name fallback). Pass-through for any
+    // other provider. Keeps the nOAuth gate un-skippable by construction.
+    ...(config.socialProviders
+      ? { socialProviders: comPreditorMicrosoft(config.socialProviders) }
+      : {}),
     // aperture-dm7s3 — inject the default platform id on adapter-driven user
     // creation (OAuth signup) when the row carries none. The Google profile has
     // no idPlataforma + users.id_plataforma is notNull, so without this a
@@ -498,7 +642,20 @@ export function criarAuth(kysely: Database, config: CriarAuthConfig) {
             user: {
               create: {
                 before: async (user: Record<string, unknown>) => {
-                  return { data: { ...user, idPlataforma: idPlataformaPadrao } };
+                  // aperture-uq69m — provider-agnostic backstop: never persist a
+                  // user with an empty display name (Microsoft can return one;
+                  // the microsoft mapProfileToUser already backfills, this covers
+                  // EVERY adapter-create path so no future provider strands an
+                  // empty-name orphan the domain heal then can't provision).
+                  const email = typeof user.email === 'string' ? user.email : '';
+                  const nome = typeof user.name === 'string' ? user.name : '';
+                  return {
+                    data: {
+                      ...user,
+                      idPlataforma: idPlataformaPadrao,
+                      name: derivarNomeExibicaoFallback(nome, email),
+                    },
+                  };
                 },
               },
             },
