@@ -9,6 +9,7 @@ import {
 } from "react";
 
 import { trpc } from "@/lib/trpc";
+import { needsOnboarding } from "@/lib/onboarding-gate";
 import type { AuthSession } from "@/lib/auth";
 import { AuthModalShell, type AuthMode } from "./AuthModalShell.js";
 import { OnboardingWizard } from "./OnboardingWizard.js";
@@ -142,14 +143,18 @@ export function AuthModalProvider({
       try {
         const me = await utils.auth.me.fetch();
         if (!me?.slug) return;
-        // aperture-g7l09 (multicampanha POC) — post-login default now lands
-        // on /campanhas (the mixed 1.0/2.0 bridge) instead of the first
-        // campanha's painel. The me.slug guard stays: it's the session-
-        // validity probe, even though the target no longer embeds the slug.
-        // New-account signups (session.criado above) still go through the
-        // OnboardingWizard → /painel/<slug> — they have no 1.0 history and
-        // the wizard's finish line IS their painel.
-        const target = '/campanhas';
+        // aperture-g7l09 (multicampanha POC) — post-login default lands on
+        // /campanhas (the mixed 1.0/2.0 bridge). The me.slug guard stays:
+        // it's the session-validity probe.
+        //
+        // aperture-ivu2t — EXCEPT accounts that still need onboarding: a
+        // fresh OAuth signup that reaches this path (session.criado only
+        // covers the in-modal email flow) has no campaign data and /campanhas
+        // offers only the stub NOVA LISTA — a dead end. Route them to their
+        // painel instead, where PainelPage mounts the blocking
+        // OnboardingWizard (the normal creation flow). needsOnboarding() is
+        // the server-authoritative, provider-agnostic gate (aperture-8ysqu).
+        const target = needsOnboarding(me) ? `/painel/${me.slug}` : '/campanhas';
         if (typeof window === "undefined") return;
         if (window.location.pathname === target) return;
         window.location.assign(target);
