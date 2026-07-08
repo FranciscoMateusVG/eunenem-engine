@@ -2,6 +2,7 @@ import { useMemo, useState, type CSSProperties } from "react";
 import { toast } from "sonner";
 
 import type { PainelSectionBodyProps } from "@/PainelSectionPage";
+import { useCampanhaRota } from "@/lib/campanha-rota.js";
 import { trpc } from "@/lib/trpc";
 
 // aperture-5v766 Phase B + aperture-kih74 swap-over — admin mensagens page
@@ -458,8 +459,15 @@ export function MensagensBody({ slug }: PainelSectionBodyProps) {
   // aperture-kih74 — real wire. Slug-keyed; tenant chain runs server-side
   // (session-derived idUsuario → slug-owner-admin guard → idCampanha lookup).
   // No client-side slug→idCampanha resolver needed.
+  //
+  // aperture-z6vks — recados are campanha-scoped body content: pass the
+  // clicked /c/:idCampanha so campanha B shows B's mensagens, not the
+  // default's. Bare URL → slug-only → server default (back-compat).
+  // Invalidations below use invalidate({ slug }) — react-query's partial
+  // deep matching still hits the { slug, idCampanha } query key.
   const utils = trpc.useUtils();
-  const list = trpc.painelMensagens.list.useQuery({ slug });
+  const idCampanha = useCampanhaRota();
+  const list = trpc.painelMensagens.list.useQuery(idCampanha ? { slug, idCampanha } : { slug });
   // Both mutations invalidate the list on success so the NOVA badge +
   // filter counts repaint in one round-trip without optimistic updates.
   const marcarLida = trpc.painelMensagens.marcarLida.useMutation({

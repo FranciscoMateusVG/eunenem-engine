@@ -4,7 +4,7 @@ import { TweaksProvider } from "@/components/eunenem/TweaksContext";
 import type { Genero } from "@/lib/concordancia";
 import type { TweaksState } from "@/lib/mocks/tweaksDefaults";
 import type { PainelSection } from "@/lib/painelRoutes";
-import { CampanhaRotaProvider } from "@/lib/campanha-rota";
+import { CampanhaRotaProvider, useCampanhaRota } from "@/lib/campanha-rota";
 import { PainelTopbar } from "./PainelTopbar";
 
 // aperture-vv3i — Shared painel layout.
@@ -71,6 +71,13 @@ export function PainelLayout({
   genero,
   children,
 }: PainelLayoutProps) {
+  // aperture-z6vks — INHERIT the route-level campanha context when the prop
+  // is absent. The provider re-mounted here used to shadow App.tsx's
+  // route-level CampanhaRotaProvider with `undefined` for callers that don't
+  // thread the prop (PainelConvitePreviewPage), silently reverting every
+  // descendant hook to the DEFAULT campanha. Prop (when passed) still wins.
+  const idCampanhaRota = useCampanhaRota();
+  const idCampanhaEfetiva = idCampanha ?? idCampanhaRota;
   // aperture-3ic62 — resolve the initial babyName seed:
   //   • prop provided + non-empty → the creator's real nomeBebe.
   //   • prop provided but empty/null → neutral "bebê" default (creator
@@ -97,7 +104,7 @@ export function PainelLayout({
   if (genero !== undefined) initialTweaks.genero = genero;
 
   return (
-    <CampanhaRotaProvider idCampanha={idCampanha}>
+    <CampanhaRotaProvider idCampanha={idCampanhaEfetiva}>
       <TweaksProvider initialState={initialTweaks}>
         <PainelTopbar slug={slug} activeSection={activeSection} />
         <div className="painel-app">{children}</div>

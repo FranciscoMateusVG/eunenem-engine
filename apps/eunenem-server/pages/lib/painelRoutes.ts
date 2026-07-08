@@ -49,8 +49,12 @@ export function painelHref(
 }
 
 /** Dedicated read-only preview route for the saved convite. */
-export function painelConvitePreviewHref(slug: string): string {
-  return `/painel/${slug}/convite/preview`;
+export function painelConvitePreviewHref(slug: string, idCampanha?: string): string {
+  // aperture-z6vks — preserve the /c/:idCampanha context so the preview
+  // shows the CLICKED campanha's convite. Omitted → bare (oldest, back-compat).
+  return idCampanha
+    ? `/painel/${slug}/c/${idCampanha}/convite/preview`
+    : `/painel/${slug}/convite/preview`;
 }
 
 /** Public RSVP page a guest opens from a WhatsApp link — no auth required. */

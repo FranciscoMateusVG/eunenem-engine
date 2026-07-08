@@ -21,6 +21,7 @@ import { PainelSectionPage } from './PainelSectionPage.js';
 import { TermosDeUsoPage } from './TermosDeUsoPage.js';
 import { TrpcSmokePage } from './TrpcSmokePage.js';
 import { TrpcProvider } from './lib/TrpcProvider.js';
+import { CampanhaRotaProvider } from './lib/campanha-rota.js';
 import { isPainelSection, type PainelSection } from './lib/painelRoutes.js';
 
 // Slug shape — matches the SlugUsuario VO (src/domain/usuario/value-objects/
@@ -50,7 +51,7 @@ export function resolveRoute(pathname: string):
   | { kind: 'pagina-sucesso'; slug: string }
   | { kind: 'confirmar-presenca'; slug: string; idConvidado: string }
   | { kind: 'painel'; slug: string; idCampanha?: string }
-  | { kind: 'painel-convite-preview'; slug: string }
+  | { kind: 'painel-convite-preview'; slug: string; idCampanha?: string }
   | { kind: 'painel-section'; slug: string; section: PainelSection; idCampanha?: string }
   | { kind: 'termos-de-uso' }
   | { kind: 'trpc-smoke' }
@@ -232,6 +233,24 @@ export function resolveRoute(pathname: string):
   ) {
     return { kind: 'painel-convite-preview', slug: painelConvitePreviewMatch[1] };
   }
+  // /painel/<slug>/c/<idCampanha>/convite/preview (aperture-z6vks) — the
+  // per-campanha convite preview. The general /c/ matcher below only takes
+  // ONE trailing segment, so the two-segment preview path needs its own
+  // rule, matched BEFORE it.
+  const painelCampanhaConvitePreviewMatch = pathname.match(
+    /^\/painel\/([^/]+)\/c\/([^/]+)\/convite\/preview\/?$/,
+  );
+  if (
+    painelCampanhaConvitePreviewMatch?.[1] &&
+    painelCampanhaConvitePreviewMatch[2] &&
+    SLUG_REGEX.test(painelCampanhaConvitePreviewMatch[1])
+  ) {
+    return {
+      kind: 'painel-convite-preview',
+      slug: painelCampanhaConvitePreviewMatch[1],
+      idCampanha: painelCampanhaConvitePreviewMatch[2],
+    };
+  }
 
   // /painel/<slug>/c/<idCampanha>(/<section>) (aperture-h0hom, bvz0p
   // Phase 1) — a SPECIFIC campanha's painel. Matched BEFORE the bare rule;
@@ -300,22 +319,42 @@ function pickPage(route: ReturnType<typeof resolveRoute>, pathname: string) {
   if (route.kind === 'landing') return <LandingPage />;
   if (route.kind === 'campanhas') return <CampanhasPage />;
   if (route.kind === 'termos-de-uso') return <TermosDeUsoPage />;
+  // aperture-z6vks — CampanhaRotaProvider mounts at ROUTE level for every
+  // campanha-addressable page. Hooks that run in the PAGE's own body (e.g.
+  // useContribuicaoList in PainelPage) sit ABOVE the PainelLayout-mounted
+  // provider, so a layout-level mount alone leaves them reading undefined —
+  // the root cause of the "painel shows the default campanha" bug class.
+  // PainelLayout keeps its own (same-value) provider; nesting is harmless.
   if (route.kind === 'pagina')
-    return <PaginaPage slug={route.slug} idCampanha={route.idCampanha} />;
+    return (
+      <CampanhaRotaProvider idCampanha={route.idCampanha}>
+        <PaginaPage slug={route.slug} idCampanha={route.idCampanha} />
+      </CampanhaRotaProvider>
+    );
   if (route.kind === 'pagina-sucesso') return <PaginaSucessoPage slug={route.slug} />;
   if (route.kind === 'confirmar-presenca')
     return <ConfirmarPresencaPage slug={route.slug} idConvidado={route.idConvidado} />;
   if (route.kind === 'painel')
-    return <PainelPage slug={route.slug} idCampanha={route.idCampanha} />;
+    return (
+      <CampanhaRotaProvider idCampanha={route.idCampanha}>
+        <PainelPage slug={route.slug} idCampanha={route.idCampanha} />
+      </CampanhaRotaProvider>
+    );
   if (route.kind === 'painel-convite-preview')
-    return <PainelConvitePreviewPage slug={route.slug} />;
+    return (
+      <CampanhaRotaProvider idCampanha={route.idCampanha}>
+        <PainelConvitePreviewPage slug={route.slug} />
+      </CampanhaRotaProvider>
+    );
   if (route.kind === 'painel-section')
     return (
-      <PainelSectionPage
-        slug={route.slug}
-        section={route.section}
-        idCampanha={route.idCampanha}
-      />
+      <CampanhaRotaProvider idCampanha={route.idCampanha}>
+        <PainelSectionPage
+          slug={route.slug}
+          section={route.section}
+          idCampanha={route.idCampanha}
+        />
+      </CampanhaRotaProvider>
     );
   if (route.kind === 'trpc-smoke') return <TrpcSmokePage />;
   if (route.kind === 'auth-demo') return <AuthDemoPage />;

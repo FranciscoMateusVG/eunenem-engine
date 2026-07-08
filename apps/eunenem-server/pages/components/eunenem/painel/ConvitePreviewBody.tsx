@@ -60,7 +60,7 @@ export function ConvitePreviewBody({
           <a href={painelHref(slug, 'convite', idCampanha)} className="cv-preview-btn ghost sm">
             criar convite
           </a>
-          <a href={painelConvitePreviewHref(slug)} className="cv-preview-btn ghost sm">
+          <a href={painelConvitePreviewHref(slug, idCampanha)} className="cv-preview-btn ghost sm">
             atualizar página
           </a>
         </div>

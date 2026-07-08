@@ -1,6 +1,7 @@
 import { TRPCClientError } from '@trpc/client';
 import type { inferRouterInputs, inferRouterOutputs } from '@trpc/server';
 import { trpc } from './trpc.js';
+import { useCampanhaRota } from './campanha-rota.js';
 import { painelConvitePreviewHref, painelHref } from './painelRoutes.js';
 
 import type { AppRouter } from '../../server/trpc/router.js';
@@ -31,12 +32,18 @@ export type ConviteUiErrorKind =
   | 'conflict'
   | 'network';
 
+// aperture-z6vks — both convite queries resolve the ROUTE campanha
+// internally (useCampanhaRota) so /c/:idCampanha painéis show THAT
+// campanha's convite, not the session default. Bare URL → no idCampanha
+// → server defaults to oldest (back-compat).
 export function useConviteData() {
-  return trpc.eventoConvite.get.useQuery();
+  const idCampanha = useCampanhaRota();
+  return trpc.eventoConvite.get.useQuery(idCampanha ? { idCampanha } : undefined);
 }
 
 export function useConvitePreviewData(slug: string) {
-  return trpc.eventoConvite.getPreview.useQuery({ slug });
+  const idCampanha = useCampanhaRota();
+  return trpc.eventoConvite.getPreview.useQuery(idCampanha ? { slug, idCampanha } : { slug });
 }
 
 export function hasSavedConvite(data: ConviteQueryData | null | undefined): boolean {
@@ -46,8 +53,11 @@ export function hasSavedConvite(data: ConviteQueryData | null | undefined): bool
 export function conviteDestinationHref(
   slug: string,
   data: ConviteQueryData | null | undefined,
+  idCampanha?: string,
 ): string {
-  return hasSavedConvite(data) ? painelConvitePreviewHref(slug) : painelHref(slug, 'convite');
+  return hasSavedConvite(data)
+    ? painelConvitePreviewHref(slug, idCampanha)
+    : painelHref(slug, 'convite', idCampanha);
 }
 
 export function useSalvarConvite() {

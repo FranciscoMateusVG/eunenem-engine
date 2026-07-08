@@ -12,6 +12,7 @@ import {
   useConviteData,
   useSalvarConvite,
 } from "@/lib/convite";
+import { useCampanhaRota } from "@/lib/campanha-rota";
 import { shareConvitePreview } from "@/lib/convite-share";
 import { useConviteBackgroundUpload } from "@/lib/conviteUpload";
 import { painelConvitePreviewHref } from "@/lib/painelRoutes";
@@ -98,6 +99,8 @@ interface StepProps {
 // ─── shell ──────────────────────────────────────────────────────────
 
 export function MobileConviteBody({ slug }: PainelSectionBodyProps) {
+  // aperture-z6vks — keep the /c/:idCampanha context on the preview link.
+  const idCampanha = useCampanhaRota();
   const [state, setState] = useState<ConviteState>({ ...DEFAULT_STATE });
   const [step, setStep] = useState(0);
   const [previewExpanded, setPreviewExpanded] = useState(false);
@@ -206,7 +209,7 @@ export function MobileConviteBody({ slug }: PainelSectionBodyProps) {
         <button type="button" className="mcv-save" onClick={onSave} disabled={isSaving}>
           {isSaving ? "salvando..." : "salvar"}
         </button>
-        <a href={painelConvitePreviewHref(slug)} className="mcv-save">
+        <a href={painelConvitePreviewHref(slug, idCampanha)} className="mcv-save">
           ver salvo
         </a>
       </header>

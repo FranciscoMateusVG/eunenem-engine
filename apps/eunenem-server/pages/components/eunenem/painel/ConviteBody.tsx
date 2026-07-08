@@ -15,6 +15,7 @@ import {
   useConviteData,
   useSalvarConvite,
 } from "@/lib/convite";
+import { useCampanhaRota } from "@/lib/campanha-rota";
 import { painelConvitePreviewHref } from "@/lib/painelRoutes";
 import {
   countdownTo,
@@ -1408,6 +1409,8 @@ export function ConviteBody(props: PainelSectionBodyProps) {
 }
 
 function DesktopConviteBody({ slug }: PainelSectionBodyProps) {
+  // aperture-z6vks — keep the /c/:idCampanha context on the preview link.
+  const idCampanha = useCampanhaRota();
   const [state, setState] = useState<ConviteState>({ ...DEFAULT_STATE });
   const [step, setStep] = useState<number>(0);
   // aperture-rw880 — flips true once the user tries to advance/save with empty
@@ -1590,7 +1593,7 @@ function DesktopConviteBody({ slug }: PainelSectionBodyProps) {
         >
           {isSaving ? "salvando..." : "salvar"}
         </button>
-        <a href={painelConvitePreviewHref(slug)} className="cv-btn ghost sm" aria-label="ver convite salvo">
+        <a href={painelConvitePreviewHref(slug, idCampanha)} className="cv-btn ghost sm" aria-label="ver convite salvo">
           ver convite salvo
         </a>
       </header>

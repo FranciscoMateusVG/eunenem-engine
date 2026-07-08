@@ -1,6 +1,7 @@
 import { TRPCClientError } from '@trpc/client';
 import type { inferRouterOutputs } from '@trpc/server';
 import { trpc } from './trpc.js';
+import { useCampanhaRota } from './campanha-rota.js';
 
 import type { AppRouter } from '../../server/trpc/router.js';
 
@@ -48,8 +49,11 @@ export const PRESENCA_META: Record<StatusPresencaConvidado, { label: string; col
   nao: { label: 'não comparecerá', color: 'var(--coral-pink)' },
 };
 
+// aperture-z6vks — resolves the ROUTE campanha internally so /c/:idCampanha
+// shows THAT campanha's guest list. Bare URL → no input → server default.
 export function useListaDeConvidadosData() {
-  return trpc.eventoListaDeConvidados.get.useQuery();
+  const idCampanha = useCampanhaRota();
+  return trpc.eventoListaDeConvidados.get.useQuery(idCampanha ? { idCampanha } : undefined);
 }
 
 export function useAlterarPresencaConvidado() {

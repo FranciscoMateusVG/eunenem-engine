@@ -34,6 +34,7 @@ import {
   type DeleteInput,
   type UpdateInput,
 } from "./mocks/contribuicao-mock.js";
+import { useCampanhaRota } from "./campanha-rota.js";
 import { trpc } from "./trpc.js";
 
 // ── Re-exported contract types ─────────────────────────────────────────────
@@ -152,9 +153,18 @@ function extractTrpcCode(err: unknown): string | null {
 // pattern; introducing optimistic logic here would couple to a
 // pattern that hasn't landed elsewhere in this codebase).
 
-/** Live list query — drives the gift-grid render. */
+/**
+ * Live list query — drives the gift-grid render.
+ *
+ * aperture-z6vks — the hook resolves the ROUTE campanha itself via
+ * useCampanhaRota() so no call site can forget to pass it (the bug class
+ * behind snfin/n44wk/z6vks: naked useQuery() → server defaults to the
+ * user's oldest campanha, ignoring the clicked /c/:idCampanha). Bare URLs
+ * keep back-compat: context undefined → no input → server default.
+ */
 export function useContribuicaoList() {
-  return trpc.contribuicao.list.useQuery();
+  const idCampanha = useCampanhaRota();
+  return trpc.contribuicao.list.useQuery(idCampanha ? { idCampanha } : undefined);
 }
 
 /** Single-item create. One row with `quantidade=N` per Plan 0016. */
