@@ -19,7 +19,6 @@ export const LANDING_LINKS = {
 /** Navbar anchor links (label → in-page href). */
 export const NAV_LINKS: ReadonlyArray<readonly [string, string]> = [
   ['como funciona', '#como-funciona'],
-  ['por que dinheiro', '#diferencial'],
   ['convites', '#convites'],
   ['depoimentos', '#depoimentos'],
   ['dúvidas', '/faq'],
