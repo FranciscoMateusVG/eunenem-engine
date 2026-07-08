@@ -26,9 +26,10 @@ import {
 } from '../../../../src/index.js';
 import type { TrpcContext } from './context.js';
 import {
-  resolverUsuarioAutenticado,
-  SessaoNaoAutenticadaError,
-} from './session-resolver.js';
+  CampanhaAcessoNegadoError,
+  CampanhaInexistenteError,
+  resolverCampanhaAdministrada,
+} from './resolve-campanha-administrada.js';
 
 const t = initTRPC.context<TrpcContext>().create();
 
@@ -72,34 +73,22 @@ class CampanhaAusenteError extends Error {
  * the procedures — every write derives `idCampanha` + `idOpcaoContribuicao`
  * from this helper. Frontend NEVER sends them.
  */
-async function resolveCallerCampanha(ctx: TrpcContext): Promise<{
+async function resolveCallerCampanha(
+  ctx: TrpcContext,
+  idCampanha?: string,
+): Promise<{
   idUsuario: string;
   idConta: string;
   campanha: Campanha;
   idOpcaoPresentes: IdOpcaoContribuicao;
 }> {
-  const { deps, headers } = ctx;
-  // aperture-6wo1f: resolve via the shared central resolver — A2 (OAuth
-  // __Secure-/signed cookie fallback) fused with the OAuth-orphan self-heal.
-  // Map the shared sentinel to this router's UNAUTHORIZED-bearing sentinel
-  // (preserves the existence-leak posture). Any other error propagates.
-  let usuario;
-  try {
-    usuario = (await resolverUsuarioAutenticado(deps, headers)).usuario;
-  } catch (err) {
-    if (err instanceof SessaoNaoAutenticadaError) {
-      throw new SessaoAusenteError('Sessao invalida');
-    }
-    throw err;
-  }
-
-  const campanha = await deps.campanhaRepository.findByAdministrador(usuario.idConta);
-  if (!campanha) {
-    // Defensive: by convention every signed-up user owns one campanha.
-    // If they don't, the data model is in an inconsistent state — fail
-    // loud so we notice rather than silently returning an empty list.
-    throw new CampanhaAusenteError('Usuario nao administra nenhuma campanha');
-  }
+  // aperture-yeauv: resolve via the shared per-campanha resolver. PRESENT
+  // idCampanha → that campanha, owner-gated + non-leaking; ABSENT → the
+  // caller's OLDEST campanha (back-compat). The shared sentinels
+  // (CampanhaAcessoNegadoError / CampanhaInexistenteError) are mapped in
+  // toTRPCError below. We keep this router's local CampanhaAusenteError for
+  // the "no presente opção" case, which is contribuicao-specific.
+  const { usuario, campanha } = await resolverCampanhaAdministrada(ctx, idCampanha);
 
   const opcaoPresentes = campanha.opcoes.find((o) => o.tipo === 'presente');
   if (!opcaoPresentes) {
@@ -122,6 +111,15 @@ async function resolveCallerCampanha(ctx: TrpcContext): Promise<{
  * message body so the frontend can route to the right per-field message.
  */
 function toTRPCError(err: unknown): TRPCError {
+  // aperture-yeauv: shared per-campanha resolver sentinels. Access-denied
+  // (bad session / not-owner / not-found — all non-leaking) → UNAUTHORIZED;
+  // caller-administers-no-campanha (absent branch) → INTERNAL_SERVER_ERROR.
+  if (err instanceof CampanhaAcessoNegadoError) {
+    return new TRPCError({ code: 'UNAUTHORIZED', message: err.message, cause: err });
+  }
+  if (err instanceof CampanhaInexistenteError) {
+    return new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err.message, cause: err });
+  }
   if (err instanceof SessaoAusenteError) {
     return new TRPCError({ code: 'UNAUTHORIZED', message: err.message, cause: err });
   }
@@ -216,6 +214,9 @@ const ValorContribuicaoCentavosSchema = z
   .positive('valor deve ser maior que zero (em centavos)');
 
 const CreateInputSchema = z.object({
+  // aperture-yeauv: OPTIONAL per-campanha routing. Absent → oldest campanha
+  // (back-compat); present → that campanha, owner-gated.
+  idCampanha: z.string().optional(),
   nome: z.string().trim().min(1).max(120),
   valor: ValorContribuicaoCentavosSchema,
   imagemUrl: ImagemUrlSchema.optional(),
@@ -240,6 +241,8 @@ const CreateInputSchema = z.object({
  * quantidade).
  */
 const CreateBulkInputSchema = z.object({
+  // aperture-yeauv: OPTIONAL per-campanha routing (see CreateInputSchema).
+  idCampanha: z.string().optional(),
   items: z
     .array(
       z.object({
@@ -255,6 +258,8 @@ const CreateBulkInputSchema = z.object({
 });
 
 const UpdateInputSchema = z.object({
+  // aperture-yeauv: OPTIONAL per-campanha routing (see CreateInputSchema).
+  idCampanha: z.string().optional(),
   id: z.string().uuid(),
   nome: z.string().trim().min(1).max(120).optional(),
   valor: ValorContribuicaoCentavosSchema.optional(),
@@ -270,6 +275,8 @@ const UpdateInputSchema = z.object({
 });
 
 const DeleteInputSchema = z.object({
+  // aperture-yeauv: OPTIONAL per-campanha routing (see CreateInputSchema).
+  idCampanha: z.string().optional(),
   ids: z.array(z.string().uuid()).min(1).max(100),
 });
 
@@ -348,9 +355,11 @@ export const contribuicaoRouter = t.router({
    * uses this for the painel's gift-list page and re-fetches after every
    * mutation.
    */
-  list: t.procedure.query(async ({ ctx }) => {
+  list: t.procedure
+    .input(z.object({ idCampanha: z.string().optional() }).optional())
+    .query(async ({ ctx, input }) => {
     try {
-      const { campanha, idOpcaoPresentes } = await resolveCallerCampanha(ctx);
+      const { campanha, idOpcaoPresentes } = await resolveCallerCampanha(ctx, input?.idCampanha);
       const items = await listarContribuicoesDeOpcao(
         {
           contribuicaoRepository: ctx.deps.contribuicaoRepository,
@@ -407,7 +416,7 @@ export const contribuicaoRouter = t.router({
     .input(CreateInputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        const { campanha, idOpcaoPresentes } = await resolveCallerCampanha(ctx);
+        const { campanha, idOpcaoPresentes } = await resolveCallerCampanha(ctx, input.idCampanha);
         const result = await criarContribuicoesEmLote(
           {
             campanhaRepository: ctx.deps.campanhaRepository,
@@ -453,7 +462,7 @@ export const contribuicaoRouter = t.router({
     .input(CreateBulkInputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        const { campanha, idOpcaoPresentes } = await resolveCallerCampanha(ctx);
+        const { campanha, idOpcaoPresentes } = await resolveCallerCampanha(ctx, input.idCampanha);
         const result = await criarContribuicoesEmLote(
           {
             campanhaRepository: ctx.deps.campanhaRepository,
@@ -490,7 +499,10 @@ export const contribuicaoRouter = t.router({
    * content-type → BAD_REQUEST.
    */
   emitirUrlUploadImagemItem: t.procedure
-    .input(EmitirUrlUploadImagemItemInputSchema)
+    // aperture-yeauv: extend the engine input with OPTIONAL idCampanha for
+    // per-campanha routing. The use-case only reads idUsuario (session-
+    // derived), so idCampanha here just owner-gates the caller's campanha.
+    .input(EmitirUrlUploadImagemItemInputSchema.extend({ idCampanha: z.string().optional() }))
     .output(
       z.object({
         uploadUrl: z.string(),
@@ -500,14 +512,15 @@ export const contribuicaoRouter = t.router({
     )
     .mutation(async ({ ctx, input }) => {
       try {
-        const { idUsuario } = await resolveCallerCampanha(ctx);
+        const { idCampanha, ...uploadInput } = input;
+        const { idUsuario } = await resolveCallerCampanha(ctx, idCampanha);
         return await emitirUrlUploadImagemItem(
           {
             objectStorage: ctx.deps.objectStorage,
             observability: ctx.deps.observability,
           },
           idUsuario,
-          input,
+          uploadInput,
         );
       } catch (err) {
         throw toTRPCError(err);
@@ -518,7 +531,7 @@ export const contribuicaoRouter = t.router({
     .input(UpdateInputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        const { campanha } = await resolveCallerCampanha(ctx);
+        const { campanha } = await resolveCallerCampanha(ctx, input.idCampanha);
         const updated = await atualizarContribuicao(
           {
             contribuicaoRepository: ctx.deps.contribuicaoRepository,
@@ -578,7 +591,7 @@ export const contribuicaoRouter = t.router({
     .input(DeleteInputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        const { campanha } = await resolveCallerCampanha(ctx);
+        const { campanha } = await resolveCallerCampanha(ctx, input.idCampanha);
         const deletedIds: string[] = [];
         for (const id of input.ids) {
           await removerContribuicao(

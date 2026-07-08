@@ -33,11 +33,7 @@
 
 import { initTRPC, TRPCError } from "@trpc/server";
 import { z } from "zod";
-import type { Campanha } from "../../../../src/domain/arrecadacao/entities/campanha.js";
-import type {
-  IdCampanha,
-  IdConta,
-} from "../../../../src/domain/arrecadacao/value-objects/ids.js";
+import type { IdCampanha } from "../../../../src/domain/arrecadacao/value-objects/ids.js";
 import type { LancamentoFinanceiro } from "../../../../src/domain/pagamentos/financeiro/entities/lancamento-financeiro.js";
 import type { Pagamento } from "../../../../src/domain/pagamentos/entities/pagamento.js";
 import { randomUUID } from "node:crypto";
@@ -56,9 +52,10 @@ import {
 } from "../../../../src/index.js";
 import type { TrpcContext } from "./context.js";
 import {
-  resolverUsuarioAutenticado,
-  SessaoNaoAutenticadaError,
-} from "./session-resolver.js";
+  CampanhaAcessoNegadoError,
+  CampanhaInexistenteError,
+  resolverCampanhaAdministrada,
+} from "./resolve-campanha-administrada.js";
 
 const t = initTRPC.context<TrpcContext>().create();
 
@@ -274,53 +271,24 @@ const ListMovimentacoesOutputSchema = z.object({
 //  Auth helpers — same shape as contribuicao-router
 // ────────────────────────────────────────────────────────────────────
 
-class SessaoAusenteError extends Error {
-  public readonly name = "SessaoAusenteError";
-}
-
 /**
- * Resolve the caller's session and verify they administer `idCampanha`.
- * Throws UNAUTHORIZED on:
- *   - missing/invalid session
- *   - usuario row missing
- *   - the user is NOT in campanha.idsAdministradores
- *   - the campanha doesn't exist (don't leak existence — same code as
- *     forbidden)
- *
- * Returns the resolved campanha when authorized.
+ * aperture-yeauv: the local resolveAdminOfCampanha has been promoted into
+ * the shared `resolverCampanhaAdministrada`. Every recebedor procedure
+ * already passes an explicit `idCampanha`, so they always take the PRESENT
+ * (owner-gated, non-leaking) branch — behavior is identical to the old
+ * local helper. The shared sentinels are mapped in `toTRPCError` below.
  */
-async function resolveAdminOfCampanha(
-  ctx: TrpcContext,
-  idCampanha: string,
-): Promise<{ idConta: IdConta; campanha: Campanha }> {
-  const { deps, headers } = ctx;
-  // aperture-6wo1f: resolve via the shared central resolver — A2 (OAuth
-  // __Secure-/signed cookie fallback) fused with the OAuth-orphan self-heal.
-  // Map the shared sentinel to this router's UNAUTHORIZED-bearing sentinel.
-  let usuario;
-  try {
-    usuario = (await resolverUsuarioAutenticado(deps, headers)).usuario;
-  } catch (err) {
-    if (err instanceof SessaoNaoAutenticadaError) {
-      throw new SessaoAusenteError("Sessao invalida");
-    }
-    throw err;
-  }
-
-  const campanha = await deps.campanhaRepository.findById(idCampanha as IdCampanha);
-  if (!campanha) {
-    // Don't leak existence — same posture as wrong-tenant.
-    throw new SessaoAusenteError("Campanha nao encontrada ou nao autorizada");
-  }
-  if (!campanha.idsAdministradores.includes(usuario.idConta)) {
-    throw new SessaoAusenteError("Campanha nao encontrada ou nao autorizada");
-  }
-  return { idConta: usuario.idConta, campanha };
-}
 
 function toTRPCError(err: unknown): TRPCError {
-  if (err instanceof SessaoAusenteError) {
+  // aperture-yeauv: shared per-campanha resolver sentinels. Access-denied
+  // (bad session / not-owner / not-found — all non-leaking) → UNAUTHORIZED;
+  // caller-administers-no-campanha (absent branch, unreachable here since
+  // every recebedor call passes an explicit idCampanha) → 500.
+  if (err instanceof CampanhaAcessoNegadoError) {
     return new TRPCError({ code: "UNAUTHORIZED", message: err.message, cause: err });
+  }
+  if (err instanceof CampanhaInexistenteError) {
+    return new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: err.message, cause: err });
   }
   if (err instanceof FinanceiroRepasseJaPendenteError) {
     return new TRPCError({
@@ -361,8 +329,8 @@ function toTRPCError(err: unknown): TRPCError {
     return new TRPCError({ code: "UNAUTHORIZED", message: err.message, cause: err });
   }
   if (err instanceof ArrecadacaoCampanhaNaoEncontradaError) {
-    // Don't leak existence — surface as UNAUTHORIZED, same posture as
-    // resolveAdminOfCampanha.
+    // Don't leak existence — surface as UNAUTHORIZED, same posture as the
+    // shared resolverCampanhaAdministrada's CampanhaAcessoNegadoError.
     return new TRPCError({
       code: "UNAUTHORIZED",
       message: "campanha_nao_encontrada_ou_nao_autorizada",
@@ -517,7 +485,7 @@ const extratoRouter = t.router({
     .output(ExtratoSummaryDTOSchema)
     .query(async ({ ctx, input }) => {
       try {
-        await resolveAdminOfCampanha(ctx, input.idCampanha);
+        await resolverCampanhaAdministrada(ctx, input.idCampanha);
 
         const now = ctx.deps.clock();
         const states = await buildExtratoStates(ctx, input.idCampanha, now);
@@ -644,7 +612,7 @@ const extratoRouter = t.router({
     .output(ExtratoListOutputSchema)
     .query(async ({ ctx, input }) => {
       try {
-        await resolveAdminOfCampanha(ctx, input.idCampanha);
+        await resolverCampanhaAdministrada(ctx, input.idCampanha);
 
         const now = ctx.deps.clock();
         const allStates = await buildExtratoStates(ctx, input.idCampanha, now);
@@ -745,7 +713,7 @@ const transferenciaRouter = t.router({
     .output(TransferenciaSolicitarOutputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        await resolveAdminOfCampanha(ctx, input.idCampanha);
+        await resolverCampanhaAdministrada(ctx, input.idCampanha);
 
         const idRepasse = randomUUID();
         const repasse = await solicitarRepasseRecebedor(
@@ -796,12 +764,13 @@ const criarProcedure = t.procedure
   .output(RecebedorCriarOutputSchema)
   .mutation(async ({ ctx, input }) => {
     try {
-      // Admin guard + tenant resolution. resolveAdminOfCampanha throws
-      // UNAUTHORIZED on missing session / non-admin caller / unknown
-      // campanha (no existence leak). idConta is the caller's session-
-      // derived identity that the use-case re-validates via its admin
-      // guard (defense in depth).
-      const { idConta } = await resolveAdminOfCampanha(ctx, input.idCampanha);
+      // Admin guard + tenant resolution. resolverCampanhaAdministrada throws
+      // CampanhaAcessoNegadoError (→ UNAUTHORIZED) on missing session /
+      // non-admin caller / unknown campanha (no existence leak). idConta is
+      // the caller's session-derived identity that the use-case re-validates
+      // via its admin guard (defense in depth).
+      const { usuario } = await resolverCampanhaAdministrada(ctx, input.idCampanha);
+      const idConta = usuario.idConta;
 
       const result = await criarRecebedorParaCampanha(
         {
@@ -831,7 +800,7 @@ const listMovimentacoesProcedure = t.procedure
   .output(ListMovimentacoesOutputSchema)
   .query(async ({ ctx, input }) => {
     try {
-      await resolveAdminOfCampanha(ctx, input.idCampanha); // same auth as extrato.summary / extrato.list
+      await resolverCampanhaAdministrada(ctx, input.idCampanha); // same auth as extrato.summary / extrato.list
       const now = ctx.deps.clock();
       const states = await buildExtratoStates(ctx, input.idCampanha, now);
 

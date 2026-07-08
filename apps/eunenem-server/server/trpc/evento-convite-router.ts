@@ -14,6 +14,7 @@ import {
   EventoNaoEncontradoError,
   FonteConviteSchema,
   ID_PLATAFORMA_EUNENEM,
+  type IdCampanha,
   type IdCampanhaEvento,
   type IdConvite,
   type IdEvento,
@@ -30,19 +31,12 @@ import {
 } from '../../../../src/index.js';
 import type { TrpcContext } from './context.js';
 import {
-  resolverUsuarioAutenticado,
-  SessaoNaoAutenticadaError,
-} from './session-resolver.js';
+  CampanhaAcessoNegadoError,
+  CampanhaInexistenteError,
+  resolverCampanhaAdministrada,
+} from './resolve-campanha-administrada.js';
 
 const t = initTRPC.context<TrpcContext>().create();
-
-class SessaoAusenteError extends Error {
-  public readonly name = 'SessaoAusenteError';
-}
-
-class CampanhaAusenteError extends Error {
-  public readonly name = 'CampanhaAusenteError';
-}
 
 class CampanhaSlugNaoEncontradaError extends Error {
   public readonly name = 'CampanhaSlugNaoEncontradaError';
@@ -55,9 +49,28 @@ const ConviteSlugSchema = z
 
 const EventoConvitePreviewInputSchema = z.object({
   slug: ConviteSlugSchema,
+  // aperture-yeauv: OPTIONAL per-campanha routing on the PUBLIC preview hop.
+  // Present → that campanha (owner-gated to the slug's conta); absent →
+  // oldest campanha (back-compat).
+  idCampanha: z.string().optional(),
 });
 
-async function resolveCampanhaBySlug(ctx: TrpcContext, slug: string): Promise<{
+/**
+ * PUBLIC (no session) slug→campanha resolver for the preview hop.
+ *
+ * aperture-yeauv: OPTIONAL idCampanha. There is NO session here, so we do
+ * NOT call the shared resolverCampanhaAdministrada. Instead, after resolving
+ * the slug → usuario/conta:
+ *   - idCampanha PRESENT → findById + verify the campanha belongs to the
+ *     slug's conta (idsAdministradores includes usuario.idConta). Not-found
+ *     AND not-owned collapse to the SAME non-leaking error.
+ *   - idCampanha ABSENT → oldest campanha the slug's conta administers.
+ */
+async function resolveCampanhaBySlug(
+  ctx: TrpcContext,
+  slug: string,
+  idCampanha?: string,
+): Promise<{
   campanha: Campanha;
 }> {
   const usuario = await ctx.deps.usuarioRepository.findUsuarioBySlug(
@@ -66,6 +79,15 @@ async function resolveCampanhaBySlug(ctx: TrpcContext, slug: string): Promise<{
   );
   if (!usuario) {
     throw new CampanhaSlugNaoEncontradaError('Usuario do slug nao encontrado');
+  }
+
+  if (idCampanha !== undefined && idCampanha !== '') {
+    const campanha = await ctx.deps.campanhaRepository.findById(idCampanha as IdCampanha);
+    // Not-found AND not-owned-by-this-slug collapse to the same error.
+    if (!campanha || !campanha.idsAdministradores.includes(usuario.idConta)) {
+      throw new CampanhaSlugNaoEncontradaError('Campanha nao encontrada ou nao autorizada');
+    }
+    return { campanha };
   }
 
   const campanha = await ctx.deps.campanhaRepository.findByAdministrador(usuario.idConta);
@@ -78,32 +100,20 @@ async function resolveCampanhaBySlug(ctx: TrpcContext, slug: string): Promise<{
 
 async function resolveCallerCampanha(
   ctx: TrpcContext,
+  idCampanha?: string,
 ): Promise<{
   campanha: Campanha;
 }> {
-  const { deps, headers } = ctx;
-  // aperture-6wo1f: resolve via the shared central resolver — A2 (OAuth
-  // __Secure-/signed cookie fallback) fused with the OAuth-orphan self-heal.
-  // Map the shared sentinel to this router's UNAUTHORIZED-bearing sentinel.
-  let usuario;
-  try {
-    usuario = (await resolverUsuarioAutenticado(deps, headers)).usuario;
-  } catch (err) {
-    if (err instanceof SessaoNaoAutenticadaError) {
-      throw new SessaoAusenteError('Sessao invalida');
-    }
-    throw err;
-  }
-
-  const campanha = await deps.campanhaRepository.findByAdministrador(usuario.idConta);
-  if (!campanha) {
-    throw new CampanhaAusenteError('Usuario nao administra nenhuma campanha');
-  }
-
+  // aperture-yeauv: resolve via the shared per-campanha resolver. PRESENT
+  // idCampanha → that campanha, owner-gated; ABSENT → oldest (back-compat).
+  const { campanha } = await resolverCampanhaAdministrada(ctx, idCampanha);
   return { campanha };
 }
 
 const SaveEventoConviteInputSchema = z.object({
+  // aperture-yeauv: OPTIONAL per-campanha routing. Absent → oldest campanha
+  // (back-compat); present → that campanha, owner-gated.
+  idCampanha: z.string().optional(),
   tipoEvento: TipoEventoSchema,
   modalidade: ModalidadeEventoSchema,
   dataHoraIso: z.string().datetime(),
@@ -147,10 +157,11 @@ const GetEventoConviteOutputSchema = z.object({
 });
 
 function toTRPCError(err: unknown): TRPCError {
-  if (err instanceof SessaoAusenteError) {
+  // aperture-yeauv: shared per-campanha resolver sentinels (authed hops).
+  if (err instanceof CampanhaAcessoNegadoError) {
     return new TRPCError({ code: 'UNAUTHORIZED', message: err.message, cause: err });
   }
-  if (err instanceof CampanhaAusenteError) {
+  if (err instanceof CampanhaInexistenteError) {
     return new TRPCError({
       code: 'INTERNAL_SERVER_ERROR',
       message: err.message,
@@ -246,10 +257,11 @@ async function loadEventoConviteSnapshot(
 
 export const eventoConviteRouter = t.router({
   get: t.procedure
+    .input(z.object({ idCampanha: z.string().optional() }).optional())
     .output(GetEventoConviteOutputSchema)
-    .query(async ({ ctx }) => {
+    .query(async ({ ctx, input }) => {
       try {
-        const { campanha } = await resolveCallerCampanha(ctx);
+        const { campanha } = await resolveCallerCampanha(ctx, input?.idCampanha);
         return loadEventoConviteSnapshot(ctx, campanha);
       } catch (err) {
         throw toTRPCError(err);
@@ -261,7 +273,7 @@ export const eventoConviteRouter = t.router({
     .output(GetEventoConviteOutputSchema)
     .query(async ({ ctx, input }) => {
       try {
-        const { campanha } = await resolveCampanhaBySlug(ctx, input.slug);
+        const { campanha } = await resolveCampanhaBySlug(ctx, input.slug, input.idCampanha);
         return loadEventoConviteSnapshot(ctx, campanha);
       } catch (err) {
         throw toTRPCError(err);
@@ -273,7 +285,7 @@ export const eventoConviteRouter = t.router({
     .output(GetEventoConviteOutputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        const { campanha } = await resolveCallerCampanha(ctx);
+        const { campanha } = await resolveCallerCampanha(ctx, input.idCampanha);
         const existingEvento = await ctx.deps.eventoRepository.findByIdCampanha(
           campanha.id as IdCampanhaEvento,
         );
