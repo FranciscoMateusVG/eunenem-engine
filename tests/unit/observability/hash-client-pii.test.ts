@@ -1,0 +1,94 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { hashClientPII } from '../../../src/observability/hash-client-pii.js';
+
+describe('hashClientPII (aperture-3pqt7)', () => {
+  const SALT = 'test-salt-thirty-two-chars-aaaaaaaaaaaaaaa';
+
+  it('returns empty string for empty input (callers do not have to null-check)', () => {
+    expect(hashClientPII('', SALT)).toBe('');
+  });
+
+  describe('empty-salt posture (aperture-j0ccg)', () => {
+    // Save + restore NODE_ENV around each case so the suite is
+    // order-independent and a production assertion can't leak into other
+    // tests that run after.
+    let savedNodeEnv: string | undefined;
+    beforeEach(() => {
+      savedNodeEnv = process.env.NODE_ENV;
+    });
+    afterEach(() => {
+      if (savedNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = savedNodeEnv;
+      }
+    });
+
+    it('throws when salt is empty in NODE_ENV=production (prod posture: forgotten env var is a boot-time failure)', () => {
+      process.env.NODE_ENV = 'production';
+      expect(() => hashClientPII('user@example.com', '')).toThrow(/LOG_PII_HASH_SALT/);
+    });
+
+    it('returns "unhashed:" marker when salt is empty in dev mode (zero-config dev startup)', () => {
+      process.env.NODE_ENV = 'development';
+      expect(hashClientPII('user@example.com', '')).toBe('unhashed:user@example.com');
+    });
+
+    it('returns "unhashed:" marker when salt is empty and NODE_ENV is unset (treat as non-prod)', () => {
+      delete process.env.NODE_ENV;
+      expect(hashClientPII('user@example.com', '')).toBe('unhashed:user@example.com');
+    });
+
+    it('returns "unhashed:" marker when salt is empty in test mode (so this very test suite would not 500)', () => {
+      process.env.NODE_ENV = 'test';
+      expect(hashClientPII('203.0.113.45', '')).toBe('unhashed:203.0.113.45');
+    });
+
+    it('still returns empty for empty input even when salt is empty (the empty-input short-circuit wins)', () => {
+      process.env.NODE_ENV = 'development';
+      expect(hashClientPII('', '')).toBe('');
+    });
+  });
+
+  it('is deterministic — same input + same salt produces same hash', () => {
+    const a = hashClientPII('user@example.com', SALT);
+    const b = hashClientPII('user@example.com', SALT);
+    expect(a).toBe(b);
+  });
+
+  it('changes when salt rotates (correlation breaks across rotations, intentionally)', () => {
+    const before = hashClientPII('user@example.com', SALT);
+    const after = hashClientPII('user@example.com', 'different-salt-thirty-two-chars-bbbbbbb');
+    expect(after).not.toBe(before);
+  });
+
+  it('differentiates distinct inputs', () => {
+    const a = hashClientPII('user-a@example.com', SALT);
+    const b = hashClientPII('user-b@example.com', SALT);
+    expect(a).not.toBe(b);
+  });
+
+  it('produces a stable-length sha256 hex output (64 chars)', () => {
+    const a = hashClientPII('user@example.com', SALT);
+    expect(a).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('hashes IPs and emails into the same shape (caller-side semantics)', () => {
+    const ipHash = hashClientPII('203.0.113.45', SALT);
+    const emailHash = hashClientPII('user@example.com', SALT);
+    // Both consumed as opaque hex strings — caller does not need to
+    // distinguish IP-shaped from email-shaped hashes downstream.
+    expect(ipHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(emailHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(ipHash).not.toBe(emailHash);
+  });
+
+  it('salt is mixed in (changing only the value, not the salt, produces different hash)', () => {
+    // Sanity: implementation must use salt+value, not just hash(value).
+    // If salt were ignored, every same-value call would collide across
+    // salts. This test guards against that regression.
+    const a = hashClientPII('user@example.com', SALT);
+    const b = hashClientPII('user@example.com', SALT.split('').reverse().join(''));
+    expect(a).not.toBe(b);
+  });
+});
