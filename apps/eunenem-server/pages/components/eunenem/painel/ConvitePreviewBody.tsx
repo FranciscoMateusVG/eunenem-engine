@@ -1,5 +1,6 @@
+import { useMe } from '@/lib/auth';
 import { conviteStateFromData, useConvitePreviewData } from '@/lib/convite';
-import { painelConvitePreviewHref, painelHref } from '@/lib/painelRoutes';
+import { menuItemHref, painelConvitePreviewHref, painelHref } from '@/lib/painelRoutes';
 import { InvitePreview } from './ConviteBody';
 
 const PREVIEW_CSS = `
@@ -20,6 +21,12 @@ export function ConvitePreviewBody({
   slug: string;
 }) {
   const conviteQuery = useConvitePreviewData(slug);
+  // aperture — same ownership probe as Navbar.tsx: the signed-in user owns
+  // this convite iff their session slug matches the slug being previewed.
+  // Anonymous visitors (me.data null) or a different account never satisfy
+  // this, so they get the "ver lista de presentes" CTA instead of "editar".
+  const me = useMe();
+  const isOwner = me.data?.slug === slug;
 
   if (conviteQuery.isLoading) {
     return (
@@ -98,9 +105,16 @@ export function ConvitePreviewBody({
         </div>
       </div>
 
-      <a href={painelHref(slug, 'convite')} className="cv-preview-btn ghost sm">
-        editar convite
-      </a>
+      {!me.isLoading &&
+        (isOwner ? (
+          <a href={painelHref(slug, 'convite')} className="cv-preview-btn ghost sm">
+            editar convite
+          </a>
+        ) : (
+          <a href={menuItemHref(slug, 'preview')} className="cv-preview-btn sm">
+            Ver lista de presentes
+          </a>
+        ))}
     </section>
   );
 }
