@@ -53,19 +53,23 @@ export function trustedClientIp(
     .filter((s) => s.length > 0);
   if (entries.length === 0) return 'unknown';
 
-  // The "real" client IP is the (count+1)-th from the right — that's the
-  // last entry NOT injected by one of our trusted hops. Example with
-  // trustedHopCount=1: entries=[client, proxy] → return client (index 0
-  // from left = index 1 from right). For trustedHopCount=2: entries=
-  // [client, edge, app] → return client (index 0 from left = index 2
-  // from right).
-  const indexFromRight = trustedHopCount;
-  const indexFromLeft = entries.length - 1 - indexFromRight;
+  // A reverse proxy appends the IP of the PEER it observed (the client, or
+  // the previous proxy) — NOT its own address. So `trustedHopCount` trusted
+  // proxies contribute the rightmost `trustedHopCount` entries, and the real
+  // client is the LEFTMOST of that trusted suffix: index
+  // `entries.length - trustedHopCount`. Everything to the left of it is
+  // client-supplied and spoofable; we never pick from there.
+  //   - trustedHopCount=1: entries=[client]            → index 0  → client
+  //   - trustedHopCount=1, forged: [forged, client]    → index 1  → client
+  //     (Traefik overwrote the rightmost with the real observed peer)
+  //   - trustedHopCount=2 (CF→Traefik): [client, cf]   → index 0  → client
+  //   - trustedHopCount=2, forged: [forged, client, cf]→ index 1  → client
+  const indexFromLeft = entries.length - trustedHopCount;
   if (indexFromLeft < 0) {
-    // Caller said "trust N hops" but XFF doesn't have N+1 entries.
-    // Could be: (a) misconfigured TRUSTED_HOP_COUNT, (b) request bypassed
-    // the proxy chain somehow, (c) attacker manually setting XFF on a
-    // direct request. Safer to return "unknown" than to mis-trust.
+    // Caller said "trust N hops" but XFF has fewer than N entries. Could be:
+    // (a) misconfigured TRUSTED_HOP_COUNT, (b) request bypassed the proxy
+    // chain, (c) attacker setting XFF on a direct request. Safer to return
+    // "unknown" than to mis-trust.
     return 'unknown';
   }
   const candidate = entries[indexFromLeft];
