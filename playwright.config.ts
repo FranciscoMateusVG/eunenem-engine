@@ -1,6 +1,17 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
+ * Remote-target mode (aperture-118sb): when E2E_BASE_URL points at a
+ * deployed instance (anything non-localhost), do NOT spawn the local
+ * webServer — the tests exercise the deployment directly. Local runs
+ * (no E2E_BASE_URL, or an explicit localhost one) keep the Phase-1
+ * spawn-own-server behaviour unchanged.
+ */
+const REMOTE_TARGET = Boolean(
+  process.env.E2E_BASE_URL && !/localhost|127\.0\.0\.1/.test(process.env.E2E_BASE_URL),
+);
+
+/**
  * Playwright E2E configuration for the eunenem engine (aperture-ilji3).
  *
  * This is the FIRST E2E gate to land — the suite's purpose is to catch
@@ -61,27 +72,29 @@ export default defineConfig({
   // whatever operator's `pnpm dev` is shipping on 3001. Reuse-existing
   // is enabled outside CI so iterating on tests doesn't re-build every
   // time.
-  webServer: {
-    command:
-      'cd apps/eunenem-server && pnpm build && PORT=3002 NODE_ENV=development tsx server.tsx',
-    url: 'http://localhost:3002/healthz',
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-    stdout: 'pipe',
-    stderr: 'pipe',
-    env: {
-      // Same connection string as .env.example (engine's docker-compose).
-      // Override via shell env if needed.
-      DATABASE_URL:
-        process.env.E2E_DATABASE_URL ?? 'postgresql://frame:frame@localhost:54320/frame',
-      BETTER_AUTH_SECRET:
-        process.env.BETTER_AUTH_SECRET ?? 'e2e-test-secret-must-be-at-least-32-chars-long-ok',
-      BETTER_AUTH_URL: process.env.BETTER_AUTH_URL ?? 'http://localhost:3002',
-      TRUSTED_ORIGINS: process.env.TRUSTED_ORIGINS ?? 'http://localhost:3002',
-      // Optional Stripe vars stay empty — server falls back to fake adapter.
-      STRIPE_SECRET_KEY: '',
-      STRIPE_PUBLISHABLE_KEY: '',
-      STRIPE_WEBHOOK_SECRET: '',
-    },
-  },
+  webServer: REMOTE_TARGET
+    ? undefined
+    : {
+        command:
+          'cd apps/eunenem-server && pnpm build && PORT=3002 NODE_ENV=development tsx server.tsx',
+        url: 'http://localhost:3002/healthz',
+        reuseExistingServer: !process.env.CI,
+        timeout: 120_000,
+        stdout: 'pipe',
+        stderr: 'pipe',
+        env: {
+          // Same connection string as .env.example (engine's docker-compose).
+          // Override via shell env if needed.
+          DATABASE_URL:
+            process.env.E2E_DATABASE_URL ?? 'postgresql://frame:frame@localhost:54320/frame',
+          BETTER_AUTH_SECRET:
+            process.env.BETTER_AUTH_SECRET ?? 'e2e-test-secret-must-be-at-least-32-chars-long-ok',
+          BETTER_AUTH_URL: process.env.BETTER_AUTH_URL ?? 'http://localhost:3002',
+          TRUSTED_ORIGINS: process.env.TRUSTED_ORIGINS ?? 'http://localhost:3002',
+          // Optional Stripe vars stay empty — server falls back to fake adapter.
+          STRIPE_SECRET_KEY: '',
+          STRIPE_PUBLISHABLE_KEY: '',
+          STRIPE_WEBHOOK_SECRET: '',
+        },
+      },
 });
