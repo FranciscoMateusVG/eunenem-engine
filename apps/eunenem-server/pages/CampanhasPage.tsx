@@ -526,7 +526,12 @@ function CardNova({ campanha, index }: { campanha: CampanhaNovaDTO; index: numbe
 /** 1.0 card — real anchor out to the old site's /migracao explainer
  *  (aperture-pjd74): expectation-setting page, then Clerk login → the
  *  email-resolved 1.0 panel. Cross-origin → rel=noopener. */
-function CardLegado({ campanha, index }: { campanha: CampanhaLegadoDTO; index: number }) {
+function CardLegado({ index }: { campanha: CampanhaLegadoDTO; index: number }) {
+  // aperture-49l6j (operator): the legacy snapshot's `nome` is unreliable
+  // (test-y values like 'Teste') and the real export carries no trustworthy
+  // mimo count — show a stable 'EuNeném Legado' label and NO count line.
+  // The DTO stays in the props signature (the grid maps legado entries and
+  // future exports may restore per-entry display data).
   return (
     <article
       className="camp-card"
@@ -536,13 +541,10 @@ function CardLegado({ campanha, index }: { campanha: CampanhaLegadoDTO; index: n
       <span className="camp-tape" style={{ background: TAPES[index % TAPES.length] }} aria-hidden="true" />
       <span className="camp-selo camp-selo-10" title="lista na EuNeném 1.0">1.0</span>
       <div className="camp-cover" style={{ background: TINTS[index % TINTS.length] }}>
-        <span className="camp-cover-ini" aria-hidden="true">{campanha.nome.charAt(0).toLowerCase()}</span>
+        <span className="camp-cover-ini" aria-hidden="true">1.0</span>
       </div>
       <div className="camp-card-body">
-        <h3 className="camp-card-name">{campanha.nome}</h3>
-        {campanha.mimos !== null && (
-          <div className="camp-card-mimos">{mimosLabel(campanha.mimos)}</div>
-        )}
+        <h3 className="camp-card-name">EuNeném Legado</h3>
         <a className="camp-cta camp-cta-legado" href={LEGACY_MIGRACAO_URL} rel="noopener">
           continuar na 1.0 <span aria-hidden="true">↗</span>
         </a>
