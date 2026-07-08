@@ -20,3 +20,23 @@ export function needsOnboarding(me: unknown): boolean {
     (me as { needsOnboarding?: unknown }).needsOnboarding === true
   );
 }
+
+/**
+ * aperture-duk6x — server-authoritative legacy gate (field lands via Rex's
+ * parallel PR; coordinated name: `isLegacy`, boolean, true when the caller's
+ * email matches legacy-1.0-users.json). Legacy users OUTRANK the onboarding
+ * wizard in post-login routing: they're migrating from 1.0 — /campanhas (the
+ * migration hub with their 1.0 card) is their front door, even while their
+ * 2.0 profile is un-onboarded.
+ *
+ * Same defensive-read contract as needsOnboarding above: anything other than
+ * a literal `true` means "not legacy", so this no-ops safely until the
+ * backend field ships and keeps working after.
+ */
+export function isLegacy(me: unknown): boolean {
+  return (
+    typeof me === "object" &&
+    me !== null &&
+    (me as { isLegacy?: unknown }).isLegacy === true
+  );
+}

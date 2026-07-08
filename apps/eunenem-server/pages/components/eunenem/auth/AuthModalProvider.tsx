@@ -9,7 +9,7 @@ import {
 } from "react";
 
 import { trpc } from "@/lib/trpc";
-import { needsOnboarding } from "@/lib/onboarding-gate";
+import { isLegacy, needsOnboarding } from "@/lib/onboarding-gate";
 import type { AuthSession } from "@/lib/auth";
 import { AuthModalShell, type AuthMode } from "./AuthModalShell.js";
 import { OnboardingWizard } from "./OnboardingWizard.js";
@@ -154,7 +154,14 @@ export function AuthModalProvider({
         // painel instead, where PainelPage mounts the blocking
         // OnboardingWizard (the normal creation flow). needsOnboarding() is
         // the server-authoritative, provider-agnostic gate (aperture-8ysqu).
-        const target = needsOnboarding(me) ? `/painel/${me.slug}` : '/campanhas';
+        // aperture-duk6x — LEGACY FIRST (operator-found bug): a fresh legacy
+        // user is migrating from 1.0, not creating their first 2.0 list — the
+        // migration hub with their 1.0 card outranks the onboarding wizard.
+        const target = isLegacy(me)
+          ? '/campanhas'
+          : needsOnboarding(me)
+            ? `/painel/${me.slug}`
+            : '/campanhas';
         if (typeof window === "undefined") return;
         if (window.location.pathname === target) return;
         window.location.assign(target);

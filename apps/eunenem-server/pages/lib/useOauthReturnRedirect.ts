@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 
-import { needsOnboarding } from "./onboarding-gate.js";
+import { isLegacy, needsOnboarding } from "./onboarding-gate.js";
 import { trpc } from "./trpc.js";
 
 /**
@@ -61,7 +61,14 @@ export function useOauthReturnRedirect(): void {
         // where PainelPage mounts the blocking OnboardingWizard (the normal
         // creation flow). needsOnboarding() is the server-authoritative,
         // provider-agnostic gate (aperture-8ysqu).
-        const target = needsOnboarding(me) ? `/painel/${me.slug}` : '/campanhas';
+        // aperture-duk6x — LEGACY FIRST (operator-found bug): a fresh legacy
+        // user is migrating from 1.0, not creating their first 2.0 list — the
+        // migration hub with their 1.0 card outranks the onboarding wizard.
+        const target = isLegacy(me)
+          ? '/campanhas'
+          : needsOnboarding(me)
+            ? `/painel/${me.slug}`
+            : '/campanhas';
         if (window.location.pathname === target) return;
         window.location.assign(target);
       } catch {
