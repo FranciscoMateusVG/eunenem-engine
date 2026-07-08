@@ -1,9 +1,6 @@
 import { SpanStatusCode } from '@opentelemetry/api';
 import { z } from 'zod/v4';
-import type {
-  ObjectStorage,
-  UrlUploadPresignada,
-} from '../../adapters/storage/object-storage.js';
+import type { ObjectStorage, UrlUploadPresignada } from '../../adapters/storage/object-storage.js';
 import { IdUsuarioSchema } from '../../domain/usuario/value-objects/ids.js';
 import { UsuarioInputInvalidoError } from '../../errors/usuario/input-invalido.error.js';
 import type { Observability } from '../../observability/observability.js';

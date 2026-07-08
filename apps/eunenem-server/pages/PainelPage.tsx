@@ -66,11 +66,22 @@ import { trpc } from '@/lib/trpc';
 // stays closed for the rest of this session. The floating TUTORIAL CTA
 // (and the topbar chip) explicitly reset `dismissedThisSession=false`
 // before opening, so re-triggering still works.
-export function PainelPage({ slug }: { slug: string }) {
+export function PainelPage({
+  slug,
+  idCampanha: idCampanhaRota,
+}: {
+  slug: string;
+  /** aperture-h0hom — specific campanha (from /painel/:slug/c/:id); undefined = oldest. */
+  idCampanha?: string;
+}) {
   // Real data sources. Each falls back to the PAINEL_DEMO snapshot when
   // the user isn't logged in, has no campanha yet, or the query is
   // still loading — the painel always renders SOMETHING.
-  const { idCampanha } = useStubCampanhaIdForSlug(slug);
+  // aperture-h0hom — the ROUTE's campanha (from /c/:idCampanha) outranks the
+  // slug-derived default: inside a specific campanha's painel, the data hops
+  // below must read THAT campanha, not the oldest.
+  const { idCampanha: idCampanhaPadrao } = useStubCampanhaIdForSlug(slug);
+  const idCampanha = idCampanhaRota ?? idCampanhaPadrao;
   const summary = useStubExtratoSummary(idCampanha ?? '');
   const listaQuery = useContribuicaoList();
 
@@ -272,7 +283,13 @@ export function PainelPage({ slug }: { slug: string }) {
   }
 
   return (
-    <PainelLayout slug={slug} babyName={babyName} eventDate={eventDate} genero={genero}>
+    <PainelLayout
+      slug={slug}
+      idCampanha={idCampanhaRota}
+      babyName={babyName}
+      eventDate={eventDate}
+      genero={genero}
+    >
       <PainelHeaderCard snapshot={snapshot} slug={slug} />
       <PainelMenu groups={groups} slug={slug} />
       <PainelTutorialTrigger

@@ -7,11 +7,7 @@ import type {
 } from '../../domain/pagamentos/value-objects/ids.js';
 import { PagamentoJaExisteError } from '../../errors/pagamentos/ja-existe.error.js';
 import { PagamentoNaoEncontradoError } from '../../errors/pagamentos/nao-encontrado.error.js';
-import type {
-  AdminRecadoRow,
-  MuralRecadoProjection,
-  PagamentoRepository,
-} from './repository.js';
+import type { AdminRecadoRow, MuralRecadoProjection, PagamentoRepository } from './repository.js';
 
 const tracer = trace.getTracer('frame');
 
@@ -323,41 +319,38 @@ export class PagamentoRepositoryMemory implements PagamentoRepository {
     idCampanha: IdCampanha,
     limit: number,
   ): Promise<readonly MuralRecadoProjection[]> {
-    return tracer.startActiveSpan(
-      'db.pagamentos.findMensagensMuralByCampanha',
-      async (span) => {
-        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
-        try {
-          const matches: MuralRecadoProjection[] = [];
-          for (const pagamento of this.pagamentos.values()) {
-            if (pagamento.status !== 'aprovado') continue;
-            if (pagamento.intencao.idCampanha !== idCampanha) continue;
-            const contribuinte = pagamento.intencao.contribuinte;
-            if (contribuinte === null) continue;
-            const mensagem = contribuinte.mensagem;
-            if (typeof mensagem !== 'string' || mensagem.trim().length === 0) {
-              continue;
-            }
-            matches.push({
-              idPagamento: pagamento.id,
-              contribuinteNome: contribuinte.nome,
-              mensagem,
-              criadoEm: pagamento.criadoEm,
-            });
+    return tracer.startActiveSpan('db.pagamentos.findMensagensMuralByCampanha', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        const matches: MuralRecadoProjection[] = [];
+        for (const pagamento of this.pagamentos.values()) {
+          if (pagamento.status !== 'aprovado') continue;
+          if (pagamento.intencao.idCampanha !== idCampanha) continue;
+          const contribuinte = pagamento.intencao.contribuinte;
+          if (contribuinte === null) continue;
+          const mensagem = contribuinte.mensagem;
+          if (typeof mensagem !== 'string' || mensagem.trim().length === 0) {
+            continue;
           }
-          matches.sort((a, b) => b.criadoEm.getTime() - a.criadoEm.getTime());
-          const capped = matches.slice(0, Math.max(0, limit));
-          span.setStatus({ code: SpanStatusCode.OK });
-          return capped;
-        } catch (error: unknown) {
-          span.recordException(error as Error);
-          span.setStatus({ code: SpanStatusCode.ERROR });
-          throw error;
-        } finally {
-          span.end();
+          matches.push({
+            idPagamento: pagamento.id,
+            contribuinteNome: contribuinte.nome,
+            mensagem,
+            criadoEm: pagamento.criadoEm,
+          });
         }
-      },
-    );
+        matches.sort((a, b) => b.criadoEm.getTime() - a.criadoEm.getTime());
+        const capped = matches.slice(0, Math.max(0, limit));
+        span.setStatus({ code: SpanStatusCode.OK });
+        return capped;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
   }
 
   /**
@@ -368,57 +361,50 @@ export class PagamentoRepositoryMemory implements PagamentoRepository {
    * the first contribuição-tipo item by position) for the use-case
    * to decorate with the contribuição NAME.
    */
-  async findRecadosAdminByCampanha(
-    idCampanha: IdCampanha,
-  ): Promise<readonly AdminRecadoRow[]> {
-    return tracer.startActiveSpan(
-      'db.pagamentos.findRecadosAdminByCampanha',
-      async (span) => {
-        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
-        try {
-          const matches: AdminRecadoRow[] = [];
-          for (const pagamento of this.pagamentos.values()) {
-            if (pagamento.status !== 'aprovado') continue;
-            if (pagamento.intencao.idCampanha !== idCampanha) continue;
-            const contribuinte = pagamento.intencao.contribuinte;
-            if (contribuinte === null) continue;
-            const mensagem = contribuinte.mensagem;
-            if (typeof mensagem !== 'string' || mensagem.trim().length === 0) {
-              continue;
-            }
-            // First contribuição-tipo item by position. Items already
-            // arrive in caller-controlled position order on the entity;
-            // we don't re-sort here.
-            const firstContribuicaoItem = pagamento.intencao.items.find(
-              (item) => item.tipo === 'contribuicao',
-            );
-            const idPrimeiraContribuicao =
-              firstContribuicaoItem !== undefined
-                ? firstContribuicaoItem.idContribuicao
-                : null;
-            matches.push({
-              idPagamento: pagamento.id,
-              contribuinteNome: contribuinte.nome,
-              mensagem,
-              criadoEm: pagamento.criadoEm,
-              lidaEm: this.mensagemLidaEmByIdPagamento.get(pagamento.id) ?? null,
-              valorContribuicaoCents:
-                pagamento.intencao.composicaoValoresAggregate.totalContributionCents,
-              idPrimeiraContribuicao,
-            });
+  async findRecadosAdminByCampanha(idCampanha: IdCampanha): Promise<readonly AdminRecadoRow[]> {
+    return tracer.startActiveSpan('db.pagamentos.findRecadosAdminByCampanha', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        const matches: AdminRecadoRow[] = [];
+        for (const pagamento of this.pagamentos.values()) {
+          if (pagamento.status !== 'aprovado') continue;
+          if (pagamento.intencao.idCampanha !== idCampanha) continue;
+          const contribuinte = pagamento.intencao.contribuinte;
+          if (contribuinte === null) continue;
+          const mensagem = contribuinte.mensagem;
+          if (typeof mensagem !== 'string' || mensagem.trim().length === 0) {
+            continue;
           }
-          matches.sort((a, b) => b.criadoEm.getTime() - a.criadoEm.getTime());
-          span.setStatus({ code: SpanStatusCode.OK });
-          return matches;
-        } catch (error: unknown) {
-          span.recordException(error as Error);
-          span.setStatus({ code: SpanStatusCode.ERROR });
-          throw error;
-        } finally {
-          span.end();
+          // First contribuição-tipo item by position. Items already
+          // arrive in caller-controlled position order on the entity;
+          // we don't re-sort here.
+          const firstContribuicaoItem = pagamento.intencao.items.find(
+            (item) => item.tipo === 'contribuicao',
+          );
+          const idPrimeiraContribuicao =
+            firstContribuicaoItem !== undefined ? firstContribuicaoItem.idContribuicao : null;
+          matches.push({
+            idPagamento: pagamento.id,
+            contribuinteNome: contribuinte.nome,
+            mensagem,
+            criadoEm: pagamento.criadoEm,
+            lidaEm: this.mensagemLidaEmByIdPagamento.get(pagamento.id) ?? null,
+            valorContribuicaoCents:
+              pagamento.intencao.composicaoValoresAggregate.totalContributionCents,
+            idPrimeiraContribuicao,
+          });
         }
-      },
-    );
+        matches.sort((a, b) => b.criadoEm.getTime() - a.criadoEm.getTime());
+        span.setStatus({ code: SpanStatusCode.OK });
+        return matches;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
   }
 
   /**
@@ -457,33 +443,30 @@ export class PagamentoRepositoryMemory implements PagamentoRepository {
    * unread ones to `lidaEm`. Already-read rows are untouched.
    */
   async marcarTodosRecadosLidos(idCampanha: IdCampanha, lidaEm: Date): Promise<number> {
-    return tracer.startActiveSpan(
-      'db.pagamentos.marcarTodosRecadosLidos',
-      async (span) => {
-        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
-        try {
-          let flipped = 0;
-          for (const pagamento of this.pagamentos.values()) {
-            if (pagamento.status !== 'aprovado') continue;
-            if (pagamento.intencao.idCampanha !== idCampanha) continue;
-            const mensagem = pagamento.intencao.contribuinte?.mensagem;
-            if (typeof mensagem !== 'string' || mensagem.trim().length === 0) {
-              continue;
-            }
-            if (this.mensagemLidaEmByIdPagamento.has(pagamento.id)) continue;
-            this.mensagemLidaEmByIdPagamento.set(pagamento.id, lidaEm);
-            flipped += 1;
+    return tracer.startActiveSpan('db.pagamentos.marcarTodosRecadosLidos', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+      try {
+        let flipped = 0;
+        for (const pagamento of this.pagamentos.values()) {
+          if (pagamento.status !== 'aprovado') continue;
+          if (pagamento.intencao.idCampanha !== idCampanha) continue;
+          const mensagem = pagamento.intencao.contribuinte?.mensagem;
+          if (typeof mensagem !== 'string' || mensagem.trim().length === 0) {
+            continue;
           }
-          span.setStatus({ code: SpanStatusCode.OK });
-          return flipped;
-        } catch (error: unknown) {
-          span.recordException(error as Error);
-          span.setStatus({ code: SpanStatusCode.ERROR });
-          throw error;
-        } finally {
-          span.end();
+          if (this.mensagemLidaEmByIdPagamento.has(pagamento.id)) continue;
+          this.mensagemLidaEmByIdPagamento.set(pagamento.id, lidaEm);
+          flipped += 1;
         }
-      },
-    );
+        span.setStatus({ code: SpanStatusCode.OK });
+        return flipped;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
   }
 }

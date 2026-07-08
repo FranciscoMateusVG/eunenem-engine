@@ -57,6 +57,7 @@ class PainelMensagensSessaoError extends Error {
 async function resolvePainelAdminBySlug(
   ctx: TrpcContext,
   slug: string,
+  idCampanha?: string,
 ): Promise<{ usuario: Usuario; campanha: Campanha }> {
   const { deps, headers } = ctx;
   // aperture-6wo1f: resolve the SESSION usuario via the shared central resolver
@@ -79,9 +80,23 @@ async function resolvePainelAdminBySlug(
   if (!usuario) {
     throw new PainelMensagensSessaoError('Slug nao encontrado ou nao autorizado');
   }
-  const campanha = await deps.campanhaRepository.findByAdministrador(usuario.idConta);
-  if (!campanha) {
-    throw new PainelMensagensSessaoError('Campanha nao encontrada ou nao autorizada');
+  // aperture-yeauv: OPTIONAL per-campanha routing. This hop is SLUG-based
+  // (it resolves the SLUG's campanha, not the session's), so we mirror the
+  // shared resolver's contract locally instead of calling it. PRESENT
+  // idCampanha → that campanha, verified to belong to the slug's conta
+  // (idsAdministradores includes the slug owner) — not-found AND not-owned
+  // collapse to the SAME non-leaking sentinel. ABSENT → oldest (back-compat).
+  let campanha: Campanha | undefined;
+  if (idCampanha !== undefined && idCampanha !== '') {
+    campanha = await deps.campanhaRepository.findById(idCampanha as IdCampanha);
+    if (!campanha || !campanha.idsAdministradores.includes(usuario.idConta)) {
+      throw new PainelMensagensSessaoError('Campanha nao encontrada ou nao autorizada');
+    }
+  } else {
+    campanha = await deps.campanhaRepository.findByAdministrador(usuario.idConta);
+    if (!campanha) {
+      throw new PainelMensagensSessaoError('Campanha nao encontrada ou nao autorizada');
+    }
   }
   // Session admin must be one of campanha's administradores. Without
   // this, any authenticated user could read any campanha's recados.
@@ -109,14 +124,24 @@ function toTRPCError(err: unknown): TRPCError {
   });
 }
 
-const ListInputSchema = z.object({ slug: z.string().trim().min(1) });
+// aperture-yeauv: OPTIONAL per-campanha routing on the slug-addressed authed
+// hop. Absent → oldest campanha (back-compat); present → that campanha,
+// owner-gated to the slug's conta.
+const ListInputSchema = z.object({
+  slug: z.string().trim().min(1),
+  idCampanha: z.string().optional(),
+});
 
 const MarcarLidaInputSchema = z.object({
   slug: z.string().trim().min(1),
+  idCampanha: z.string().optional(),
   idPagamento: z.string().uuid(),
 });
 
-const MarcarTodasLidasInputSchema = z.object({ slug: z.string().trim().min(1) });
+const MarcarTodasLidasInputSchema = z.object({
+  slug: z.string().trim().min(1),
+  idCampanha: z.string().optional(),
+});
 
 export const painelMensagensRouter = t.router({
   /**
@@ -127,7 +152,7 @@ export const painelMensagensRouter = t.router({
    */
   list: t.procedure.input(ListInputSchema).query(async ({ ctx, input }) => {
     try {
-      const { campanha } = await resolvePainelAdminBySlug(ctx, input.slug);
+      const { campanha } = await resolvePainelAdminBySlug(ctx, input.slug, input.idCampanha);
       return await obterRecadosAdminDeCampanha(
         {
           pagamentoRepository: ctx.deps.pagamentoRepository,
@@ -148,7 +173,7 @@ export const painelMensagensRouter = t.router({
    */
   marcarLida: t.procedure.input(MarcarLidaInputSchema).mutation(async ({ ctx, input }) => {
     try {
-      const { campanha } = await resolvePainelAdminBySlug(ctx, input.slug);
+      const { campanha } = await resolvePainelAdminBySlug(ctx, input.slug, input.idCampanha);
       const pagamento = await ctx.deps.pagamentoRepository.findById(
         input.idPagamento as IdPagamento,
       );
@@ -184,7 +209,7 @@ export const painelMensagensRouter = t.router({
     .input(MarcarTodasLidasInputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        const { campanha } = await resolvePainelAdminBySlug(ctx, input.slug);
+        const { campanha } = await resolvePainelAdminBySlug(ctx, input.slug, input.idCampanha);
         return await marcarTodosRecadosComoLidos(
           {
             pagamentoRepository: ctx.deps.pagamentoRepository,

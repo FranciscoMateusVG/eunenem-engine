@@ -43,13 +43,15 @@ interface CheckResult {
 
 async function listRouterFiles(): Promise<string[]> {
   const entries = await fs.readdir(ROUTERS_DIR);
-  return entries
-    .filter((name) => name.endsWith('.ts'))
-    // router.ts is the root; the *-router.ts files are the leaves.
-    // Both go through resolution so we cover all of them.
-    .filter((name) => name === 'router.ts' || name.endsWith('-router.ts'))
-    .map((name) => join(ROUTERS_DIR, name))
-    .sort();
+  return (
+    entries
+      .filter((name) => name.endsWith('.ts'))
+      // router.ts is the root; the *-router.ts files are the leaves.
+      // Both go through resolution so we cover all of them.
+      .filter((name) => name === 'router.ts' || name.endsWith('-router.ts'))
+      .map((name) => join(ROUTERS_DIR, name))
+      .sort()
+  );
 }
 
 async function checkOne(absPath: string): Promise<CheckResult> {
@@ -103,13 +105,13 @@ async function main(): Promise<void> {
 
   const elapsed = Date.now() - start;
   console.log('');
-  console.log(`server-router resolution smoke: ${results.length - failures.length}/${results.length} ok in ${elapsed}ms`);
+  console.log(
+    `server-router resolution smoke: ${results.length - failures.length}/${results.length} ok in ${elapsed}ms`,
+  );
 
   if (failures.length > 0) {
     console.error('');
-    console.error(
-      'One or more server-side routers failed to load via the Node ESM resolver.',
-    );
+    console.error('One or more server-side routers failed to load via the Node ESM resolver.');
     console.error(
       'Common cause: relative-import-depth drift (e.g. ../../../src vs ../../../../src).',
     );
@@ -117,7 +119,7 @@ async function main(): Promise<void> {
       'TypeScript can resolve through tsconfig + node-walk; Node ESM resolves the literal path.',
     );
     console.error(
-      'Compare the failing file\'s `../../../*` imports against a sibling router\'s shape.',
+      "Compare the failing file's `../../../*` imports against a sibling router's shape.",
     );
     process.exit(1);
   }

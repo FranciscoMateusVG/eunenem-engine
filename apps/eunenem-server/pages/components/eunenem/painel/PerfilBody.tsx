@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { useTweaks } from "@/components/eunenem/TweaksContext";
 import { trpc } from "@/lib/trpc";
 import { painelHref } from "@/lib/painelRoutes";
+import { useCampanhaRota } from "@/lib/campanha-rota";
 import { PERFIL_RELATIONS } from "@/lib/mocks/perfil";
 import type { PainelSectionBodyProps } from "@/PainelSectionPage";
 
@@ -822,6 +823,7 @@ function PerfilDateField({
 }
 
 export function PerfilBody({ slug }: PainelSectionBodyProps) {
+  const idCampanha = useCampanhaRota();
   const { tweaks, setTweaks } = useTweaks();
   const utils = trpc.useUtils();
 
@@ -1193,7 +1195,7 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
       </PerfilSection>
 
       <div className="perfil-actions">
-        <a className="perfil-btn perfil-btn-ghost" href={painelHref(profileSlug)}>
+        <a className="perfil-btn perfil-btn-ghost" href={painelHref(profileSlug, undefined, idCampanha)}>
           {ico.back}
           <span>voltar para a minha área</span>
         </a>

@@ -3,8 +3,9 @@
  *
  * Mixed grid of the user's campaigns across BOTH platforms:
  *   - 2.0 cards → /painel/<slug> (the new-platform dashboard)
- *   - 1.0 cards → https://eunenem.com/minha-area (legacy; Clerk resolves by
- *     email — real <a href>, per Izzy's testability + a11y request)
+ *   - 1.0 cards → https://eunenem.com/migracao (the old site's explainer
+ *     page: re-login is intentional → Clerk modal → /minha-area; real
+ *     <a href>, per Izzy's testability + a11y request)
  *   - NOVA LISTA card → name-only create modal → campanhas.criar
  *     (aperture-rurre; V1 stays on /campanhas — no per-campanha routing)
  *
@@ -27,7 +28,7 @@ import { toast } from 'sonner';
 import { PainelTopbar } from './components/eunenem/painel/PainelTopbar.js';
 import {
   CAMPANHAS_WELCOME_STORAGE_KEY,
-  LEGACY_BRIDGE_PATH,
+  LEGACY_MIGRACAO_URL,
   useCampanhasCriar,
   useCampanhasList,
   type CampanhaLegadoDTO,
@@ -512,7 +513,9 @@ function CardNova({ campanha, index }: { campanha: CampanhaNovaDTO; index: numbe
         {campanha.quantidadeMimos !== null && (
           <div className="camp-card-mimos">{mimosLabel(campanha.quantidadeMimos)}</div>
         )}
-        <a className="camp-cta" href={`/painel/${campanha.slug}`}>
+        {/* aperture-h0hom — each card opens ITS OWN campanha's painel
+         *  (/c/:idCampanha), not the oldest-resolving bare URL. */}
+        <a className="camp-cta" href={`/painel/${campanha.slug}/c/${campanha.id}`}>
           acessar lista ♡
         </a>
       </div>
@@ -520,7 +523,9 @@ function CardNova({ campanha, index }: { campanha: CampanhaNovaDTO; index: numbe
   );
 }
 
-/** 1.0 card — real anchor out to the legacy dashboard (Clerk resolves by email). */
+/** 1.0 card — real anchor out to the old site's /migracao explainer
+ *  (aperture-pjd74): expectation-setting page, then Clerk login → the
+ *  email-resolved 1.0 panel. Cross-origin → rel=noopener. */
 function CardLegado({ campanha, index }: { campanha: CampanhaLegadoDTO; index: number }) {
   return (
     <article
@@ -538,7 +543,7 @@ function CardLegado({ campanha, index }: { campanha: CampanhaLegadoDTO; index: n
         {campanha.mimos !== null && (
           <div className="camp-card-mimos">{mimosLabel(campanha.mimos)}</div>
         )}
-        <a className="camp-cta camp-cta-legado" href={LEGACY_BRIDGE_PATH}>
+        <a className="camp-cta camp-cta-legado" href={LEGACY_MIGRACAO_URL} rel="noopener">
           continuar na 1.0 <span aria-hidden="true">↗</span>
         </a>
       </div>

@@ -1,6 +1,7 @@
 
 import type { PainelMenuItem } from "@/lib/mocks/painelDemo";
 import { menuItemHref } from "@/lib/painelRoutes";
+import { useCampanhaRota } from "@/lib/campanha-rota";
 
 // aperture-i01o — single row in the painel menu list.
 //
@@ -26,12 +27,14 @@ interface Props {
 }
 
 export function PainelMenuRow({ item, slug, href }: Props) {
+  // aperture-h0hom — preserve the campanha route context in destinations.
+  const idCampanha = useCampanhaRota();
   // aperture-vv3i — hrefs are resolved from the route convention
   // (lib/painelRoutes.ts), not hardcoded "#". `soon` rows stay non-navigable;
   // ids with no destination (e.g. nothing yet) fall back to "#".
   const resolvedHref = item.soon
     ? "#"
-    : (href ?? menuItemHref(slug, item.id) ?? "#");
+    : (href ?? menuItemHref(slug, item.id, idCampanha) ?? "#");
   const isExternal = resolvedHref.startsWith("http");
 
   const variantClass = item.variant ? `var-${item.variant}` : "";

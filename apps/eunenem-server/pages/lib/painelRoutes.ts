@@ -30,9 +30,22 @@ export function isPainelSection(value: string): value is PainelSection {
   return (PAINEL_SECTIONS as readonly string[]).includes(value);
 }
 
-/** Build the canonical href for the dashboard root or a sub-section. */
-export function painelHref(slug: string, section?: PainelSection): string {
-  return section ? `/painel/${slug}/${section}` : `/painel/${slug}`;
+/**
+ * Build the canonical href for the dashboard root or a sub-section.
+ *
+ * aperture-h0hom (per-campanha routing, bvz0p Phase 1): pass `idCampanha` to
+ * stay inside a SPECIFIC campanha's painel — the URL grows a `/c/:idCampanha`
+ * segment (the `c` marker dodges the :section namespace). Omitted → the bare
+ * URL, which keeps its historic meaning: resolve the OLDEST campanha
+ * (back-compat for shared links).
+ */
+export function painelHref(
+  slug: string,
+  section?: PainelSection,
+  idCampanha?: string,
+): string {
+  const base = idCampanha ? `/painel/${slug}/c/${idCampanha}` : `/painel/${slug}`;
+  return section ? `${base}/${section}` : base;
 }
 
 /** Dedicated read-only preview route for the saved convite. */
@@ -53,22 +66,26 @@ export function confirmarPresencaHref(slug: string, idConvidado: string): string
  *   - `rifa` is `soon` and never linked (PainelMenuRow disables it)
  * Returns `undefined` when the row should stay non-navigable.
  */
-export function menuItemHref(slug: string, id: string): string | undefined {
+export function menuItemHref(
+  slug: string,
+  id: string,
+  idCampanha?: string,
+): string | undefined {
   switch (id) {
     case "presentes":
-      return painelHref(slug, "presentes");
+      return painelHref(slug, "presentes", idCampanha);
     case "lista":
-      return painelHref(slug, "lista");
+      return painelHref(slug, "lista", idCampanha);
     case "convite":
-      return painelHref(slug, "convite");
+      return painelHref(slug, "convite", idCampanha);
     case "lista-convidados":
-      return painelHref(slug, "convidados");
+      return painelHref(slug, "convidados", idCampanha);
     case "mensagens":
-      return painelHref(slug, "mensagens");
+      return painelHref(slug, "mensagens", idCampanha);
     case "perfil":
-      return painelHref(slug, "perfil");
+      return painelHref(slug, "perfil", idCampanha);
     case "bancarios":
-      return painelHref(slug, "bancarios");
+      return painelHref(slug, "bancarios", idCampanha);
     case "preview":
       // aperture-slqtk — "ver como convidado" → the logged-in creator's OWN
       // public page. Was hardcoded "/pagina/francisco" (the 3rd francisco
@@ -76,7 +93,7 @@ export function menuItemHref(slug: string, id: string): string | undefined {
       // to Francisco's page — which ALSO read as "my edits didn't save" because
       // they were viewing someone else's page. `slug` here is the real creator
       // slug (the same one every other row above already threads correctly).
-      return `/pagina/${slug}`;
+      return idCampanha ? `/pagina/${slug}/c/${idCampanha}` : `/pagina/${slug}`;
     case "suporte":
       // External support channel — no in-app page in scope.
       return "https://wa.me/5531999999999";

@@ -6,6 +6,7 @@ import {
   type Campanha,
   computeCardSurchargeCents,
   quantidadeRestante,
+  type IdCampanha,
   type IdContribuicao,
   type IdIntencaoPagamento,
   type IdItemDoPagamento,
@@ -58,6 +59,9 @@ const t = initTRPC.context<TrpcContext>().create();
 
 export const ObterListaPresentesInputSchema = z.object({
   slug: z.string().trim().min(1).max(60),
+  // aperture-yeauv: OPTIONAL per-campanha routing. Absent → oldest campanha
+  // (back-compat); present → that campanha, owner-gated to the slug's conta.
+  idCampanha: z.string().optional(),
 });
 
 export const ObterListaPresentesOutputItemSchema = z.object({
@@ -124,6 +128,8 @@ export const ObterListaPresentesOutputItemSchema = z.object({
 
 export const IniciarPagamentoContribuicaoInputSchema = z.object({
   slug: z.string().trim().min(1).max(60),
+  // aperture-yeauv: OPTIONAL per-campanha routing (see ObterListaPresentes).
+  idCampanha: z.string().optional(),
   idContribuicao: z.string().uuid(),
   // aperture-m95f3: no contribuinte input. Stripe collects nome + email
   // + mensagem inside the embedded iframe via custom_fields +
@@ -153,6 +159,8 @@ export const IniciarPagamentoContribuicaoInputSchema = z.object({
  */
 export const IniciarPagamentoCarrinhoInputSchema = z.object({
   slug: z.string().trim().min(1).max(60),
+  // aperture-yeauv: OPTIONAL per-campanha routing (see ObterListaPresentes).
+  idCampanha: z.string().optional(),
   itens: z
     .array(
       z.object({
@@ -172,6 +180,8 @@ export const IniciarPagamentoContribuicaoOutputSchema = z.object({
 
 export const ObterSucessoPagamentoInputSchema = z.object({
   slug: z.string().trim().min(1).max(60),
+  // aperture-yeauv: OPTIONAL per-campanha routing (see ObterListaPresentes).
+  idCampanha: z.string().optional(),
   sessionId: z.string().trim().min(1).max(255),
 });
 
@@ -185,6 +195,8 @@ export const ObterSucessoPagamentoInputSchema = z.object({
 // criadoEm so the UI can render relative time.
 export const ObterMuralInputSchema = z.object({
   slug: z.string().trim().min(1).max(60),
+  // aperture-yeauv: OPTIONAL per-campanha routing (see ObterListaPresentes).
+  idCampanha: z.string().optional(),
 });
 
 export const ObterMuralOutputItemSchema = z.object({
@@ -227,6 +239,7 @@ export const ObterSucessoPagamentoOutputSchema = z.object({
 async function resolvePaginaBySlug(
   ctx: TrpcContext,
   slug: string,
+  idCampanha?: string,
 ): Promise<{
   usuario: Usuario;
   campanha: Campanha;
@@ -241,9 +254,23 @@ async function resolvePaginaBySlug(
     throw new TRPCError({ code: 'NOT_FOUND', message: 'Pagina nao encontrada' });
   }
 
-  const campanha = await deps.campanhaRepository.findByAdministrador(usuario.idConta);
-  if (!campanha) {
-    throw new TRPCError({ code: 'NOT_FOUND', message: 'Pagina nao encontrada' });
+  // aperture-yeauv: OPTIONAL per-campanha routing on this PUBLIC (no session)
+  // hop. PRESENT idCampanha → that campanha, verified to belong to the slug's
+  // conta (idsAdministradores includes usuario.idConta). Not-found AND
+  // not-owned collapse to the SAME non-leaking NOT_FOUND — a visitor can't
+  // distinguish "doesn't exist" from "belongs to someone else". ABSENT →
+  // oldest campanha (back-compat: bare /pagina/<slug> URLs keep working).
+  let campanha: Campanha | undefined;
+  if (idCampanha !== undefined && idCampanha !== '') {
+    campanha = await deps.campanhaRepository.findById(idCampanha as IdCampanha);
+    if (!campanha || !campanha.idsAdministradores.includes(usuario.idConta)) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Pagina nao encontrada' });
+    }
+  } else {
+    campanha = await deps.campanhaRepository.findByAdministrador(usuario.idConta);
+    if (!campanha) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Pagina nao encontrada' });
+    }
   }
 
   const opcaoPresentes = campanha.opcoes.find((o) => o.tipo === 'presente');
@@ -273,7 +300,11 @@ export const paginaRouter = t.router({
   obterListaPresentes: t.procedure
     .input(ObterListaPresentesInputSchema)
     .query(async ({ ctx, input }) => {
-      const { campanha, idOpcaoPresentes } = await resolvePaginaBySlug(ctx, input.slug);
+      const { campanha, idOpcaoPresentes } = await resolvePaginaBySlug(
+        ctx,
+        input.slug,
+        input.idCampanha,
+      );
 
       // aperture-ines9: load the active RegraTaxa for this plataforma so
       // we can fold the platform fee into the visible-to-visitor prices.
@@ -363,7 +394,7 @@ export const paginaRouter = t.router({
   obterMural: t.procedure
     .input(ObterMuralInputSchema)
     .query(async ({ ctx, input }) => {
-      const { campanha } = await resolvePaginaBySlug(ctx, input.slug);
+      const { campanha } = await resolvePaginaBySlug(ctx, input.slug, input.idCampanha);
 
       const recados = await ctx.deps.pagamentoRepository.findMensagensMuralByCampanha(
         campanha.id,
@@ -400,7 +431,7 @@ export const paginaRouter = t.router({
   iniciarPagamentoContribuicao: t.procedure
     .input(IniciarPagamentoContribuicaoInputSchema)
     .mutation(async ({ ctx, input }) => {
-      const { campanha } = await resolvePaginaBySlug(ctx, input.slug);
+      const { campanha } = await resolvePaginaBySlug(ctx, input.slug, input.idCampanha);
 
       const idPagamento = randomUUID() as IdPagamento;
       const idIntencaoPagamento = randomUUID() as IdIntencaoPagamento;
@@ -487,7 +518,7 @@ export const paginaRouter = t.router({
   iniciarPagamentoCarrinho: t.procedure
     .input(IniciarPagamentoCarrinhoInputSchema)
     .mutation(async ({ ctx, input }) => {
-      const { campanha } = await resolvePaginaBySlug(ctx, input.slug);
+      const { campanha } = await resolvePaginaBySlug(ctx, input.slug, input.idCampanha);
 
       const idPagamento = randomUUID() as IdPagamento;
       const idIntencaoPagamento = randomUUID() as IdIntencaoPagamento;
@@ -571,7 +602,7 @@ export const paginaRouter = t.router({
   obterSucessoPagamento: t.procedure
     .input(ObterSucessoPagamentoInputSchema)
     .query(async ({ ctx, input }) => {
-      const { usuario } = await resolvePaginaBySlug(ctx, input.slug);
+      const { usuario } = await resolvePaginaBySlug(ctx, input.slug, input.idCampanha);
 
       const pagamento = await ctx.deps.pagamentoRepository.findByExternalRef(input.sessionId);
       if (!pagamento) {

@@ -34,10 +34,7 @@ export async function marcarTodosRecadosComoLidos(
   return tracer.startActiveSpan('marcarTodosRecadosComoLidos', async (span) => {
     try {
       span.setAttribute('arrecadacao.campanha.id', idCampanha);
-      const marcadas = await pagamentoRepository.marcarTodosRecadosLidos(
-        idCampanha,
-        agora,
-      );
+      const marcadas = await pagamentoRepository.marcarTodosRecadosLidos(idCampanha, agora);
       span.setAttribute('arrecadacao.mensagens.marcadas', marcadas);
       span.setStatus({ code: SpanStatusCode.OK });
       return { marcadas };

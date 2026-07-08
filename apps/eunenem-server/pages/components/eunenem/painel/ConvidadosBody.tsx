@@ -34,6 +34,7 @@ import {
   type StatusPresencaConvidado,
 } from "@/lib/convidados";
 import { painelHref } from "@/lib/painelRoutes";
+import { useCampanhaRota } from "@/lib/campanha-rota";
 import { DEFAULT_STATE, EVENT_BY_ID, EVENT_TYPES, formatDateScrap, type ConviteState } from "@/lib/mocks/convite";
 import { getDefaultConviteShareOrigin } from "@/lib/convite-share";
 import {
@@ -1421,6 +1422,8 @@ function VirtualInvitePreviewSection({
   conviteQuery: ReturnType<typeof useConviteData>;
   state: ConviteState;
 }) {
+  // aperture-h0hom — preserve the campanha route context in the CTA link.
+  const idCampanha = useCampanhaRota();
   if (conviteQuery.isLoading) {
     return (
       <div className="cv-virtual-invite-status">
@@ -1444,7 +1447,7 @@ function VirtualInvitePreviewSection({
     return (
       <div className="cv-virtual-invite-status">
         <p>Você ainda não criou seu convite.</p>
-        <a href={painelHref(slug, "convite")} style={btnStyle("primary", "sm")}>
+        <a href={painelHref(slug, "convite", idCampanha)} style={btnStyle("primary", "sm")}>
           Criar convite
         </a>
       </div>

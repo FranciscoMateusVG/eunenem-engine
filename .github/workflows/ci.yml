@@ -63,6 +63,29 @@ jobs:
         working-directory: apps/eunenem-server
         run: pnpm typecheck
 
+  lint:
+    name: lint (biome)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      # pnpm version comes from package.json `packageManager` (pnpm@10.33.0).
+      # Do NOT also pass `version:` here — action-setup errors on the conflict.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            apps/eunenem-server/pnpm-lock.yaml
+      - name: Install (root)
+        run: pnpm install --frozen-lockfile
+      # `biome check .` — lint + format + import-organization drift gate
+      # (aperture-g3dg7). Warnings don't fail the job; errors do.
+      - name: Lint (biome)
+        run: pnpm lint
+
   test:
     name: test (vitest)
     runs-on: ubuntu-latest

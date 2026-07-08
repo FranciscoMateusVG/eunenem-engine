@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { ServerDeps } from '../../apps/eunenem-server/server/auth/setup.js';
 import type { TrpcContext } from '../../apps/eunenem-server/server/trpc/context.js';
@@ -138,9 +137,7 @@ function makeCaller(deps: ServerDeps) {
 }
 
 function lastStatuses(logger: CapturingLogger, event: string): string[] {
-  return logger.events
-    .filter((e) => e.event === event)
-    .map((e) => e.fields.status as string);
+  return logger.events.filter((e) => e.event === event).map((e) => e.fields.status as string);
 }
 
 const EMAIL = 'pessoa@example.com';
@@ -300,9 +297,7 @@ describe('auth.continuarComEmail — unified login-or-signup (aperture-d7993)', 
       }),
     ).rejects.toMatchObject({ code: 'TOO_MANY_REQUESTS' });
 
-    expect(lastStatuses(logger, 'usuario.continue_with_email.tentativa')).toContain(
-      'rate_limited',
-    );
+    expect(lastStatuses(logger, 'usuario.continue_with_email.tentativa')).toContain('rate_limited');
   });
 
   it('ANTI-BYPASS: consuming signIn cap via auth.signIn throttles the SAME (ip,email) bucket on continuarComEmail', async () => {
@@ -344,9 +339,7 @@ describe('auth.continuarComEmail — unified login-or-signup (aperture-d7993)', 
       }),
     ).rejects.toMatchObject({ code: 'TOO_MANY_REQUESTS' });
 
-    expect(lastStatuses(logger, 'usuario.continue_with_email.tentativa')).toContain(
-      'rate_limited',
-    );
+    expect(lastStatuses(logger, 'usuario.continue_with_email.tentativa')).toContain('rate_limited');
   });
 
   it('ANTI-BYPASS: consuming signUp cap via auth.signUp throttles continuarComEmail create branch (shared trpc:signUp:<ipHash> bucket)', async () => {
@@ -377,9 +370,7 @@ describe('auth.continuarComEmail — unified login-or-signup (aperture-d7993)', 
       }),
     ).rejects.toMatchObject({ code: 'TOO_MANY_REQUESTS' });
 
-    expect(lastStatuses(logger, 'usuario.continue_with_email.tentativa')).toContain(
-      'rate_limited',
-    );
+    expect(lastStatuses(logger, 'usuario.continue_with_email.tentativa')).toContain('rate_limited');
 
     // The brand-new account must NOT have been created (rate-limited before
     // registrarContaUsuario ran).

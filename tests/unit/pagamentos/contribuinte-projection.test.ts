@@ -49,7 +49,11 @@ const CONTRIBUINTE = {
   mensagem: 'Parabéns! 🎉',
 };
 
-function makeContribuicaoItem(idContribuicao: string, quantidade: number, unitContribution: number) {
+function makeContribuicaoItem(
+  idContribuicao: string,
+  quantidade: number,
+  unitContribution: number,
+) {
   return criarItemContribuicao({
     id: randomUUID() as never,
     composicaoValoresItem: {

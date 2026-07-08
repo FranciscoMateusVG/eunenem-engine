@@ -28,19 +28,12 @@ import {
 } from '../../../../src/index.js';
 import type { TrpcContext } from './context.js';
 import {
-  resolverUsuarioAutenticado,
-  SessaoNaoAutenticadaError,
-} from './session-resolver.js';
+  CampanhaAcessoNegadoError,
+  CampanhaInexistenteError,
+  resolverCampanhaAdministrada,
+} from './resolve-campanha-administrada.js';
 
 const t = initTRPC.context<TrpcContext>().create();
-
-class SessaoAusenteError extends Error {
-  public readonly name = 'SessaoAusenteError';
-}
-
-class CampanhaAusenteError extends Error {
-  public readonly name = 'CampanhaAusenteError';
-}
 
 class EventoAusenteError extends Error {
   public readonly name = 'EventoAusenteError';
@@ -68,31 +61,19 @@ async function resolveCampanhaBySlug(ctx: TrpcContext, slug: string): Promise<{ 
 
 async function resolveCallerCampanha(
   ctx: TrpcContext,
+  idCampanha?: string,
 ): Promise<{ campanha: Campanha; usuario: Usuario }> {
-  const { deps, headers } = ctx;
-  let usuario: Usuario;
-  try {
-    usuario = (await resolverUsuarioAutenticado(deps, headers)).usuario;
-  } catch (err) {
-    if (err instanceof SessaoNaoAutenticadaError) {
-      throw new SessaoAusenteError('Sessao invalida');
-    }
-    throw err;
-  }
-
-  const campanha = await deps.campanhaRepository.findByAdministrador(usuario.idConta);
-  if (!campanha) {
-    throw new CampanhaAusenteError('Usuario nao administra nenhuma campanha');
-  }
-
-  return { campanha, usuario };
+  // aperture-yeauv: resolve via the shared per-campanha resolver. PRESENT
+  // idCampanha → that campanha, owner-gated; ABSENT → oldest (back-compat).
+  return resolverCampanhaAdministrada(ctx, idCampanha);
 }
 
 function toTRPCError(err: unknown): TRPCError {
-  if (err instanceof SessaoAusenteError) {
+  // aperture-yeauv: shared per-campanha resolver sentinels (authed hops).
+  if (err instanceof CampanhaAcessoNegadoError) {
     return new TRPCError({ code: 'UNAUTHORIZED', message: err.message, cause: err });
   }
-  if (err instanceof CampanhaAusenteError) {
+  if (err instanceof CampanhaInexistenteError) {
     return new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err.message, cause: err });
   }
   if (err instanceof EventoAusenteError) {
@@ -194,11 +175,15 @@ async function loadListaSnapshot(
 }
 
 const AlterarPresencaInputSchema = z.object({
+  // aperture-yeauv: OPTIONAL per-campanha routing (authed hop).
+  idCampanha: z.string().optional(),
   idConvidado: z.string().uuid(),
   presenca: StatusPresencaConvidadoSchema,
 });
 
 const AdicionarConvidadoInputSchema = z.object({
+  // aperture-yeauv: OPTIONAL per-campanha routing (authed hop).
+  idCampanha: z.string().optional(),
   nome: NomeConvidadoSchema,
   numeroCelular: NumeroCelularConvidadoSchema,
 });
@@ -254,10 +239,11 @@ const ConfirmarPresencaInputSchema = z.object({
 
 export const eventoListaDeConvidadosRouter = t.router({
   get: t.procedure
+    .input(z.object({ idCampanha: z.string().optional() }).optional())
     .output(GetListaDeConvidadosOutputSchema)
-    .query(async ({ ctx }) => {
+    .query(async ({ ctx, input }) => {
       try {
-        const { campanha } = await resolveCallerCampanha(ctx);
+        const { campanha } = await resolveCallerCampanha(ctx, input?.idCampanha);
         const evento = await resolveCallerEvento(ctx, campanha);
         if (!evento) {
           return { lista: null };
@@ -273,7 +259,7 @@ export const eventoListaDeConvidadosRouter = t.router({
     .output(GetListaDeConvidadosOutputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        const { campanha } = await resolveCallerCampanha(ctx);
+        const { campanha } = await resolveCallerCampanha(ctx, input.idCampanha);
         const evento = await resolveCallerEvento(ctx, campanha);
         if (!evento) {
           throw new ListaDeConvidadosNaoEncontradaError();
@@ -311,7 +297,7 @@ export const eventoListaDeConvidadosRouter = t.router({
     .output(GetListaDeConvidadosOutputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        const { campanha } = await resolveCallerCampanha(ctx);
+        const { campanha } = await resolveCallerCampanha(ctx, input.idCampanha);
         const evento = await resolveCallerEvento(ctx, campanha);
         if (!evento) {
           throw new EventoAusenteError('Crie seu convite antes de adicionar convidados');
@@ -363,11 +349,17 @@ export const eventoListaDeConvidadosRouter = t.router({
     }),
 
   salvarFormatoMensagem: t.procedure
-    .input(z.object({ formatoMensagemConvite: FormatoMensagemConviteSchema }))
+    .input(
+      z.object({
+        // aperture-yeauv: OPTIONAL per-campanha routing (authed hop).
+        idCampanha: z.string().optional(),
+        formatoMensagemConvite: FormatoMensagemConviteSchema,
+      }),
+    )
     .output(GetListaDeConvidadosOutputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        const { campanha } = await resolveCallerCampanha(ctx);
+        const { campanha } = await resolveCallerCampanha(ctx, input.idCampanha);
         const evento = await resolveCallerEvento(ctx, campanha);
         if (!evento) {
           throw new EventoAusenteError('Crie seu convite antes de escolher o formato da mensagem');

@@ -2,7 +2,7 @@ import { SpanStatusCode } from '@opentelemetry/api';
 import { z } from 'zod/v4';
 import { computeCardSurchargeCents } from '../../adapters/pagamentos/card-surcharge.js';
 import { type MoneyCents, MoneyCentsSchema } from '../../domain/money.js';
-import { type MetodoPagamento } from '../../domain/pagamentos/value-objects/metodo-pagamento.js';
+import type { MetodoPagamento } from '../../domain/pagamentos/value-objects/metodo-pagamento.js';
 import type { SnapshotComposicaoValoresItemSurcharge } from '../../domain/pagamentos/value-objects/snapshot-composicao-valores-item.js';
 import type { Observability } from '../../observability/observability.js';
 
@@ -69,9 +69,7 @@ export async function calcularSurchargeParaCarrinho(
         return null;
       }
 
-      const surchargeCents = computeCardSurchargeCents(
-        parsed.totalContributionCents,
-      ) as MoneyCents;
+      const surchargeCents = computeCardSurchargeCents(parsed.totalContributionCents) as MoneyCents;
 
       logger.info('taxas.cart.surcharge_calculada', {
         totalContributionCents: parsed.totalContributionCents,

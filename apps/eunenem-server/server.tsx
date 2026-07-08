@@ -4,6 +4,7 @@ import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { StrictMode } from 'react';
+import type { IdCampanha } from '../../src/index.js';
 import { renderToString } from 'react-dom/server';
 import { App, resolveRoute } from './pages/App.js';
 import { buildServerDeps, ID_PLATAFORMA_EUNENEM, loadEnv } from './server/auth/setup.js';
@@ -152,6 +153,27 @@ app.get('*', async (c) => {
     );
     if (!owner) {
       status = 404;
+    } else {
+      // aperture-yeauv: per-campanha routing. The painel URL may carry an
+      // OPTIONAL campanha PATH segment — /painel/:slug/c/:idCampanha — per the
+      // frozen URL contract (the 'c' marker dodges the :section namespace).
+      // Extracted here with a self-contained regex so this gate needs no
+      // coupling to resolveRoute's route-object shape: until the parser
+      // recognizes the /c/ form those URLs are kind:'not-found' (404 above)
+      // and this branch never runs; once it does, the id is gated here.
+      // PRESENT → findById + confirm it belongs to the slug owner
+      // (idsAdministradores includes owner.idConta) — 404 on not-found OR
+      // not-owned (non-leaking, same posture as an unknown slug). ABSENT →
+      // the painel resolves the owner's oldest campanha at runtime
+      // (unchanged back-compat behavior for bare URLs).
+      const campanhaSegment = url.pathname.match(/^\/painel\/[^/]+\/c\/([^/]+)/);
+      const idCampanha = campanhaSegment?.[1];
+      if (idCampanha) {
+        const campanha = await deps.campanhaRepository.findById(idCampanha as IdCampanha);
+        if (!campanha || !campanha.idsAdministradores.includes(owner.idConta)) {
+          status = 404;
+        }
+      }
     }
   }
 
@@ -174,6 +196,12 @@ function envelope(ssrHtml: string, pathname: string): string {
          .fade-up reveal only hides content when JS can reveal it. No-JS /
          pre-hydration keeps all content visible. -->
     <script>document.documentElement.classList.add('js')</script>
+    <!-- aperture-pjd74: per-request runtime config for the client bundle.
+         LEGACY_MIGRACAO_URL lets each environment point the 1.0 card at its
+         own old-site host (iw-m4 staging → staging.eunenem.com; prod →
+         default) WITHOUT a client rebuild. Serialized with < escaped so an
+         operator-set value can never break out of this script tag. -->
+    <script>window.__EUNENEM_ENV__=${serializeRuntimeEnv()}</script>
     <title>eunenem · ${escapeHtml(pathname)}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -195,6 +223,19 @@ function envelope(ssrHtml: string, pathname: string): string {
     <script type="module" src="/public/client.js"></script>
   </body>
 </html>`;
+}
+
+/**
+ * aperture-pjd74 — runtime config → client. JSON with `<` escaped to \u003c
+ * (script-tag breakout guard). Read per-request so a container env change +
+ * restart is enough — no rebuild.
+ */
+function serializeRuntimeEnv(): string {
+  const env: { legacyMigracaoUrl?: string } = {};
+  if (process.env.LEGACY_MIGRACAO_URL) {
+    env.legacyMigracaoUrl = process.env.LEGACY_MIGRACAO_URL;
+  }
+  return JSON.stringify(env).replaceAll('<', '\\u003c');
 }
 
 function escapeHtml(s: string): string {

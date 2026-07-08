@@ -1,7 +1,7 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 import type { Transaction } from 'kysely';
-import type { IdCampanha, IdContribuicao } from '../../domain/arrecadacao/value-objects/ids.js';
 import { sql } from 'kysely';
+import type { IdCampanha, IdContribuicao } from '../../domain/arrecadacao/value-objects/ids.js';
 import {
   type ItemDoPagamento,
   ItemDoPagamentoSchema,
@@ -15,11 +15,7 @@ import { PagamentoJaExisteError } from '../../errors/pagamentos/ja-existe.error.
 import { PagamentoNaoEncontradoError } from '../../errors/pagamentos/nao-encontrado.error.js';
 import type { Database } from '../database.js';
 import type { DB } from '../db-types.generated.js';
-import type {
-  AdminRecadoRow,
-  MuralRecadoProjection,
-  PagamentoRepository,
-} from './repository.js';
+import type { AdminRecadoRow, MuralRecadoProjection, PagamentoRepository } from './repository.js';
 
 const tracer = trace.getTracer('frame');
 
@@ -104,8 +100,11 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
         await this.db.transaction().execute(async (trx) => {
           // Cast through any to satisfy kysely's `Insertable<pagamentos>`
           // ColumnType-branded shape vs the plain row object.
-          // biome-ignore lint/suspicious/noExplicitAny: kysely Insertable brand vs plain row object
-          await trx.insertInto('pagamentos').values(rowFromPagamento(pagamento) as any).execute();
+          await trx
+            .insertInto('pagamentos')
+            // biome-ignore lint/suspicious/noExplicitAny: kysely Insertable brand vs plain row object
+            .values(rowFromPagamento(pagamento) as any)
+            .execute();
           await insertItemsForPagamento(trx, pagamento);
         });
         span.setStatus({ code: SpanStatusCode.OK });
@@ -281,69 +280,63 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
   }
 
   async findByPaymentIntentExternalRef(pi: string): Promise<Pagamento | undefined> {
-    return tracer.startActiveSpan(
-      'db.pagamentos.findByPaymentIntentExternalRef',
-      async (span) => {
-        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
-        try {
-          // aperture-wif8s: uses partial index
-          // `pagamentos_intencao_pi_ref_idx ON
-          // (intencao_payment_intent_external_ref) WHERE … IS NOT NULL`
-          // (migration 018) for selective scan.
-          const row = await this.db
-            .selectFrom('pagamentos')
-            .selectAll()
-            .where('intencao_payment_intent_external_ref', '=', pi)
-            .executeTakeFirst();
-          if (!row) {
-            span.setStatus({ code: SpanStatusCode.OK });
-            return undefined;
-          }
-          const items = await loadItemsForPagamento(this.db, row.id as IdPagamento);
+    return tracer.startActiveSpan('db.pagamentos.findByPaymentIntentExternalRef', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        // aperture-wif8s: uses partial index
+        // `pagamentos_intencao_pi_ref_idx ON
+        // (intencao_payment_intent_external_ref) WHERE … IS NOT NULL`
+        // (migration 018) for selective scan.
+        const row = await this.db
+          .selectFrom('pagamentos')
+          .selectAll()
+          .where('intencao_payment_intent_external_ref', '=', pi)
+          .executeTakeFirst();
+        if (!row) {
           span.setStatus({ code: SpanStatusCode.OK });
-          return pagamentoFromRow(row as unknown as PagamentoRow, items);
-        } catch (error: unknown) {
-          span.recordException(error as Error);
-          span.setStatus({ code: SpanStatusCode.ERROR });
-          throw error;
-        } finally {
-          span.end();
+          return undefined;
         }
-      },
-    );
+        const items = await loadItemsForPagamento(this.db, row.id as IdPagamento);
+        span.setStatus({ code: SpanStatusCode.OK });
+        return pagamentoFromRow(row as unknown as PagamentoRow, items);
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
   }
 
   async findByChargeExternalRef(ch: string): Promise<Pagamento | undefined> {
-    return tracer.startActiveSpan(
-      'db.pagamentos.findByChargeExternalRef',
-      async (span) => {
-        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
-        try {
-          // aperture-wif8s: uses partial index
-          // `pagamentos_intencao_ch_ref_idx ON
-          // (intencao_charge_external_ref) WHERE … IS NOT NULL`
-          // (migration 018).
-          const row = await this.db
-            .selectFrom('pagamentos')
-            .selectAll()
-            .where('intencao_charge_external_ref', '=', ch)
-            .executeTakeFirst();
-          if (!row) {
-            span.setStatus({ code: SpanStatusCode.OK });
-            return undefined;
-          }
-          const items = await loadItemsForPagamento(this.db, row.id as IdPagamento);
+    return tracer.startActiveSpan('db.pagamentos.findByChargeExternalRef', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        // aperture-wif8s: uses partial index
+        // `pagamentos_intencao_ch_ref_idx ON
+        // (intencao_charge_external_ref) WHERE … IS NOT NULL`
+        // (migration 018).
+        const row = await this.db
+          .selectFrom('pagamentos')
+          .selectAll()
+          .where('intencao_charge_external_ref', '=', ch)
+          .executeTakeFirst();
+        if (!row) {
           span.setStatus({ code: SpanStatusCode.OK });
-          return pagamentoFromRow(row as unknown as PagamentoRow, items);
-        } catch (error: unknown) {
-          span.recordException(error as Error);
-          span.setStatus({ code: SpanStatusCode.ERROR });
-          throw error;
-        } finally {
-          span.end();
+          return undefined;
         }
-      },
-    );
+        const items = await loadItemsForPagamento(this.db, row.id as IdPagamento);
+        span.setStatus({ code: SpanStatusCode.OK });
+        return pagamentoFromRow(row as unknown as PagamentoRow, items);
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
   }
 
   /**
@@ -471,8 +464,7 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
             if (seen.has(idC)) continue;
             seen.add(idC);
             const hasContribuinte =
-              row.intencao_contribuinte_nome !== null &&
-              row.intencao_contribuinte_email !== null;
+              row.intencao_contribuinte_nome !== null && row.intencao_contribuinte_email !== null;
             if (!hasContribuinte) {
               result.set(idC, null);
               continue;
@@ -516,59 +508,56 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
     idCampanha: IdCampanha,
     limit: number,
   ): Promise<readonly MuralRecadoProjection[]> {
-    return tracer.startActiveSpan(
-      'db.pagamentos.findMensagensMuralByCampanha',
-      async (span) => {
-        span.setAttributes({
-          ...DB_ATTRS,
-          'db.operation.name': 'SELECT',
-          'mural.limit': limit,
-        });
-        try {
-          if (limit <= 0) {
-            span.setStatus({ code: SpanStatusCode.OK });
-            return [];
-          }
-          const rows = await this.db
-            .selectFrom('pagamentos')
-            .select([
-              'pagamentos.id as id',
-              'pagamentos.intencao_contribuinte_nome as intencao_contribuinte_nome',
-              'pagamentos.intencao_contribuinte_mensagem as intencao_contribuinte_mensagem',
-              'pagamentos.criado_em as criado_em',
-            ])
-            .where('pagamentos.status', '=', 'aprovado')
-            .where('pagamentos.intencao_id_campanha', '=', idCampanha)
-            .where('pagamentos.intencao_contribuinte_mensagem', 'is not', null)
-            .where('pagamentos.intencao_contribuinte_nome', 'is not', null)
-            .orderBy('pagamentos.criado_em', 'desc')
-            .limit(limit)
-            .execute();
-
-          const projection: MuralRecadoProjection[] = [];
-          for (const row of rows) {
-            const nome = row.intencao_contribuinte_nome;
-            const mensagem = row.intencao_contribuinte_mensagem;
-            if (nome === null || mensagem === null) continue;
-            if (mensagem.trim().length === 0) continue;
-            projection.push({
-              idPagamento: row.id as IdPagamento,
-              contribuinteNome: nome,
-              mensagem,
-              criadoEm: row.criado_em as Date,
-            });
-          }
+    return tracer.startActiveSpan('db.pagamentos.findMensagensMuralByCampanha', async (span) => {
+      span.setAttributes({
+        ...DB_ATTRS,
+        'db.operation.name': 'SELECT',
+        'mural.limit': limit,
+      });
+      try {
+        if (limit <= 0) {
           span.setStatus({ code: SpanStatusCode.OK });
-          return projection;
-        } catch (error: unknown) {
-          span.recordException(error as Error);
-          span.setStatus({ code: SpanStatusCode.ERROR });
-          throw error;
-        } finally {
-          span.end();
+          return [];
         }
-      },
-    );
+        const rows = await this.db
+          .selectFrom('pagamentos')
+          .select([
+            'pagamentos.id as id',
+            'pagamentos.intencao_contribuinte_nome as intencao_contribuinte_nome',
+            'pagamentos.intencao_contribuinte_mensagem as intencao_contribuinte_mensagem',
+            'pagamentos.criado_em as criado_em',
+          ])
+          .where('pagamentos.status', '=', 'aprovado')
+          .where('pagamentos.intencao_id_campanha', '=', idCampanha)
+          .where('pagamentos.intencao_contribuinte_mensagem', 'is not', null)
+          .where('pagamentos.intencao_contribuinte_nome', 'is not', null)
+          .orderBy('pagamentos.criado_em', 'desc')
+          .limit(limit)
+          .execute();
+
+        const projection: MuralRecadoProjection[] = [];
+        for (const row of rows) {
+          const nome = row.intencao_contribuinte_nome;
+          const mensagem = row.intencao_contribuinte_mensagem;
+          if (nome === null || mensagem === null) continue;
+          if (mensagem.trim().length === 0) continue;
+          projection.push({
+            idPagamento: row.id as IdPagamento,
+            contribuinteNome: nome,
+            mensagem,
+            criadoEm: row.criado_em as Date,
+          });
+        }
+        span.setStatus({ code: SpanStatusCode.OK });
+        return projection;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
   }
 
   /**
@@ -582,72 +571,66 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
    * `position` ASC). No JOIN to contribuicoes — name resolution
    * happens in the use-case via the contribuição repository.
    */
-  async findRecadosAdminByCampanha(
-    idCampanha: IdCampanha,
-  ): Promise<readonly AdminRecadoRow[]> {
-    return tracer.startActiveSpan(
-      'db.pagamentos.findRecadosAdminByCampanha',
-      async (span) => {
-        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
-        try {
-          const rows = await this.db
-            .selectFrom('pagamentos')
-            .leftJoinLateral(
-              (eb) =>
-                eb
-                  .selectFrom('intencao_items')
-                  .select('id_contribuicao')
-                  .whereRef('intencao_items.id_pagamento', '=', 'pagamentos.id')
-                  .where('intencao_items.tipo', '=', 'contribuicao')
-                  .orderBy('intencao_items.position', 'asc')
-                  .limit(1)
-                  .as('first_item'),
-              (join) => join.onTrue(),
-            )
-            .select([
-              'pagamentos.id as id',
-              'pagamentos.intencao_contribuinte_nome as intencao_contribuinte_nome',
-              'pagamentos.intencao_contribuinte_mensagem as intencao_contribuinte_mensagem',
-              'pagamentos.criado_em as criado_em',
-              'pagamentos.mensagem_lida_em as mensagem_lida_em',
-              'pagamentos.intencao_total_contribution_cents as intencao_total_contribution_cents',
-              'first_item.id_contribuicao as id_primeira_contribuicao',
-            ])
-            .where('pagamentos.status', '=', 'aprovado')
-            .where('pagamentos.intencao_id_campanha', '=', idCampanha)
-            .where('pagamentos.intencao_contribuinte_mensagem', 'is not', null)
-            .where('pagamentos.intencao_contribuinte_nome', 'is not', null)
-            .orderBy('pagamentos.criado_em', 'desc')
-            .execute();
+  async findRecadosAdminByCampanha(idCampanha: IdCampanha): Promise<readonly AdminRecadoRow[]> {
+    return tracer.startActiveSpan('db.pagamentos.findRecadosAdminByCampanha', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        const rows = await this.db
+          .selectFrom('pagamentos')
+          .leftJoinLateral(
+            (eb) =>
+              eb
+                .selectFrom('intencao_items')
+                .select('id_contribuicao')
+                .whereRef('intencao_items.id_pagamento', '=', 'pagamentos.id')
+                .where('intencao_items.tipo', '=', 'contribuicao')
+                .orderBy('intencao_items.position', 'asc')
+                .limit(1)
+                .as('first_item'),
+            (join) => join.onTrue(),
+          )
+          .select([
+            'pagamentos.id as id',
+            'pagamentos.intencao_contribuinte_nome as intencao_contribuinte_nome',
+            'pagamentos.intencao_contribuinte_mensagem as intencao_contribuinte_mensagem',
+            'pagamentos.criado_em as criado_em',
+            'pagamentos.mensagem_lida_em as mensagem_lida_em',
+            'pagamentos.intencao_total_contribution_cents as intencao_total_contribution_cents',
+            'first_item.id_contribuicao as id_primeira_contribuicao',
+          ])
+          .where('pagamentos.status', '=', 'aprovado')
+          .where('pagamentos.intencao_id_campanha', '=', idCampanha)
+          .where('pagamentos.intencao_contribuinte_mensagem', 'is not', null)
+          .where('pagamentos.intencao_contribuinte_nome', 'is not', null)
+          .orderBy('pagamentos.criado_em', 'desc')
+          .execute();
 
-          const projection: AdminRecadoRow[] = [];
-          for (const row of rows) {
-            const nome = row.intencao_contribuinte_nome;
-            const mensagem = row.intencao_contribuinte_mensagem;
-            if (nome === null || mensagem === null) continue;
-            if (mensagem.trim().length === 0) continue;
-            projection.push({
-              idPagamento: row.id as IdPagamento,
-              contribuinteNome: nome,
-              mensagem,
-              criadoEm: row.criado_em as Date,
-              lidaEm: (row.mensagem_lida_em as Date | null) ?? null,
-              valorContribuicaoCents: Number(row.intencao_total_contribution_cents),
-              idPrimeiraContribuicao:
-                (row.id_primeira_contribuicao as IdContribuicao | null) ?? null,
-            });
-          }
-          span.setStatus({ code: SpanStatusCode.OK });
-          return projection;
-        } catch (error: unknown) {
-          span.recordException(error as Error);
-          span.setStatus({ code: SpanStatusCode.ERROR });
-          throw error;
-        } finally {
-          span.end();
+        const projection: AdminRecadoRow[] = [];
+        for (const row of rows) {
+          const nome = row.intencao_contribuinte_nome;
+          const mensagem = row.intencao_contribuinte_mensagem;
+          if (nome === null || mensagem === null) continue;
+          if (mensagem.trim().length === 0) continue;
+          projection.push({
+            idPagamento: row.id as IdPagamento,
+            contribuinteNome: nome,
+            mensagem,
+            criadoEm: row.criado_em as Date,
+            lidaEm: (row.mensagem_lida_em as Date | null) ?? null,
+            valorContribuicaoCents: Number(row.intencao_total_contribution_cents),
+            idPrimeiraContribuicao: (row.id_primeira_contribuicao as IdContribuicao | null) ?? null,
+          });
         }
-      },
-    );
+        span.setStatus({ code: SpanStatusCode.OK });
+        return projection;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
   }
 
   /**
@@ -712,36 +695,33 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
    * Already-read rows skip via `mensagem_lida_em IS NULL`.
    */
   async marcarTodosRecadosLidos(idCampanha: IdCampanha, lidaEm: Date): Promise<number> {
-    return tracer.startActiveSpan(
-      'db.pagamentos.marcarTodosRecadosLidos',
-      async (span) => {
-        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
-        try {
-          const result = await this.db
-            .updateTable('pagamentos')
-            .set({ mensagem_lida_em: lidaEm })
-            .where('status', '=', 'aprovado')
-            .where('intencao_id_campanha', '=', idCampanha)
-            .where('intencao_contribuinte_mensagem', 'is not', null)
-            .where(sql`TRIM(intencao_contribuinte_mensagem)`, '<>', '')
-            .where('intencao_contribuinte_nome', 'is not', null)
-            .where('mensagem_lida_em', 'is', null)
-            .executeTakeFirst();
-          const flipped =
-            typeof result?.numUpdatedRows === 'bigint'
-              ? Number(result.numUpdatedRows)
-              : (result?.numUpdatedRows ?? 0);
-          span.setStatus({ code: SpanStatusCode.OK });
-          return flipped;
-        } catch (error: unknown) {
-          span.recordException(error as Error);
-          span.setStatus({ code: SpanStatusCode.ERROR });
-          throw error;
-        } finally {
-          span.end();
-        }
-      },
-    );
+    return tracer.startActiveSpan('db.pagamentos.marcarTodosRecadosLidos', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+      try {
+        const result = await this.db
+          .updateTable('pagamentos')
+          .set({ mensagem_lida_em: lidaEm })
+          .where('status', '=', 'aprovado')
+          .where('intencao_id_campanha', '=', idCampanha)
+          .where('intencao_contribuinte_mensagem', 'is not', null)
+          .where(sql`TRIM(intencao_contribuinte_mensagem)`, '<>', '')
+          .where('intencao_contribuinte_nome', 'is not', null)
+          .where('mensagem_lida_em', 'is', null)
+          .executeTakeFirst();
+        const flipped =
+          typeof result?.numUpdatedRows === 'bigint'
+            ? Number(result.numUpdatedRows)
+            : (result?.numUpdatedRows ?? 0);
+        span.setStatus({ code: SpanStatusCode.OK });
+        return flipped;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
   }
 }
 
@@ -846,14 +826,14 @@ async function insertItemsForPagamento(trx: Transaction<DB>, p: Pagamento): Prom
   // Cast through unknown to satisfy kysely's `Insertable<intencao_items>`
   // ColumnType-branded shape. The runtime values are correct; the brand
   // is a compile-time guard only.
-  // biome-ignore lint/suspicious/noExplicitAny: kysely Insertable brand vs plain row object
-  await trx.insertInto('intencao_items').values(rows as any).execute();
+  await trx
+    .insertInto('intencao_items')
+    // biome-ignore lint/suspicious/noExplicitAny: kysely Insertable brand vs plain row object
+    .values(rows as any)
+    .execute();
 }
 
-async function loadItemsForPagamento(
-  db: Database,
-  idPagamento: IdPagamento,
-): Promise<ItemRow[]> {
+async function loadItemsForPagamento(db: Database, idPagamento: IdPagamento): Promise<ItemRow[]> {
   const rows = await db
     .selectFrom('intencao_items')
     .selectAll()

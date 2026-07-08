@@ -118,9 +118,7 @@ export async function finalizarPagamentoRejeitado(
       // the cart-scope idCampanha.
       const anchorItem = rejeitado.intencao.items.find((it) => it.tipo === 'contribuicao');
       if (!anchorItem || anchorItem.tipo !== 'contribuicao') {
-        throw new Error(
-          `Pagamento ${rejeitado.id} has no contribuicao item — invalid cart shape.`,
-        );
+        throw new Error(`Pagamento ${rejeitado.id} has no contribuicao item — invalid cart shape.`);
       }
       const idContribuicaoAnchor = anchorItem.idContribuicao;
       const contribuicao = await contribuicaoRepository.findById(idContribuicaoAnchor);

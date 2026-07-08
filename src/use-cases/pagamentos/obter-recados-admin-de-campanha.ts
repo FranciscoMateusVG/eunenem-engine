@@ -1,10 +1,7 @@
 import { SpanStatusCode } from '@opentelemetry/api';
 import type { ContribuicaoRepository } from '../../adapters/arrecadacao/contribuicao-repository.js';
 import type { PagamentoRepository } from '../../adapters/pagamentos/repository.js';
-import type {
-  IdCampanha,
-  IdContribuicao,
-} from '../../domain/arrecadacao/value-objects/ids.js';
+import type { IdCampanha, IdContribuicao } from '../../domain/arrecadacao/value-objects/ids.js';
 import type { Observability } from '../../observability/observability.js';
 import type { AdminMensagensResponse } from './admin-recado-projection.js';
 
@@ -71,10 +68,7 @@ export async function obterRecadosAdminDeCampanha(
       }));
 
       const todas = recados.length;
-      const naoLidas = recados.reduce(
-        (acc, r) => acc + (r.lidaEm === null ? 1 : 0),
-        0,
-      );
+      const naoLidas = recados.reduce((acc, r) => acc + (r.lidaEm === null ? 1 : 0), 0);
 
       span.setAttribute('arrecadacao.mensagens.todas', todas);
       span.setAttribute('arrecadacao.mensagens.naoLidas', naoLidas);

@@ -72,7 +72,8 @@ export default defineConfig({
     env: {
       // Same connection string as .env.example (engine's docker-compose).
       // Override via shell env if needed.
-      DATABASE_URL: process.env.E2E_DATABASE_URL ?? 'postgresql://frame:frame@localhost:54320/frame',
+      DATABASE_URL:
+        process.env.E2E_DATABASE_URL ?? 'postgresql://frame:frame@localhost:54320/frame',
       BETTER_AUTH_SECRET:
         process.env.BETTER_AUTH_SECRET ?? 'e2e-test-secret-must-be-at-least-32-chars-long-ok',
       BETTER_AUTH_URL: process.env.BETTER_AUTH_URL ?? 'http://localhost:3002',
