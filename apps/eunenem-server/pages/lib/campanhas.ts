@@ -39,15 +39,16 @@ export const CAMPANHAS_WELCOME_STORAGE_KEY = 'eunenem-campanhas:bemvindo-v1';
 export const LEGACY_DASHBOARD_URL = 'https://eunenem.com/minha-area';
 
 /**
- * Where the 1.0 card actually points (aperture-as0v3). Same-origin authed
- * endpoint that mints a Clerk sign-in ticket for the caller's VERIFIED email
- * and 302s into the 1.0 system LOGGED IN (falling back to LEGACY_DASHBOARD_URL
- * server-side for unverified / no-match / no-key / error). A plain top-level
- * anchor nav so the browser carries the session cookie. Izzy's E2E (aperture-
- * 8jcec) asserts the anchor + this href — imported here so spec + test move
- * together.
+ * Where the 1.0 card actually points (aperture-pjd74, supersedes the silent
+ * bridge from aperture-as0v3 — operator pivot 2026-07-08). The old site's
+ * dedicated /migracao explainer page: sets the expectation that 1.0 and 2.0
+ * are separate systems ("você precisa fazer login de novo"), then a Clerk
+ * modal login → /minha-area (email-resolved 1.0 panel). The bridge endpoint
+ * stays registered but inert (cleanup tracked separately). Izzy's E2E
+ * (aperture-8jcec) asserts the anchor + this href — imported there so spec +
+ * test move together.
  */
-export const LEGACY_BRIDGE_PATH = '/api/legacy-bridge';
+export const LEGACY_MIGRACAO_URL = 'https://eunenem.com/migracao';
 
 /**
  * aperture-rurre — NOVA LISTA V1 create mutation.

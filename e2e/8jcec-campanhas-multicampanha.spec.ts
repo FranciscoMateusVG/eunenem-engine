@@ -28,7 +28,7 @@
 import { test as base, expect } from '@playwright/test';
 import {
   CAMPANHAS_WELCOME_STORAGE_KEY,
-  LEGACY_BRIDGE_PATH,
+  LEGACY_MIGRACAO_URL,
 } from '../apps/eunenem-server/pages/lib/campanhas.js';
 import { test as seededTest } from './fixtures.js';
 // Legacy-user fixture extracted to legacy-fixtures.ts (aperture-8bac7) so the
@@ -52,11 +52,11 @@ test.describe('/campanhas — legacy-matching user (the POC user path, spec §9)
     const cardLegado = legacyPage.getByTestId('card-legado').first();
     await expect(cardLegado).toBeVisible();
     await expect(cardLegado).toContainText('1.0');
-    // UPDATED for aperture-as0v3 (PR #325): the 1.0 CTA now points at the
-    // silent-login bridge (302s into the legacy system authenticated, falls
-    // back to /minha-area). Attribute assertion only — the bridge crosses to
-    // prod Clerk, which stays in the operator-assisted walk.
-    const legadoCta = cardLegado.locator(`a[href="${LEGACY_BRIDGE_PATH}"]`);
+    // UPDATED for aperture-pjd74: the 1.0 CTA points at the old site's
+    // /migracao explainer (supersedes the as0v3 silent bridge). Attribute
+    // assertion only — the target crosses to prod Clerk, which stays in the
+    // operator-assisted walk.
+    const legadoCta = cardLegado.locator(`a[href="${LEGACY_MIGRACAO_URL}"]`);
     await expect(legadoCta).toBeVisible();
 
     // 2.0 card — visible, selo text, CTA points at a /painel/:slug URL.
