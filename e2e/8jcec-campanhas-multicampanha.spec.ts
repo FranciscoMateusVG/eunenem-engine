@@ -15,9 +15,9 @@
  *   - pure-2.0 user: no 1.0 card, no welcome modal
  *   - anonymous: route resolves 200 (status asserted FIRST — playwright-gotchas §3)
  *     then client-side bounce to /
- *   - NOVA LISTA: POC stub — click fires a toast (NO creation flow exists yet;
- *     spec §11 deviation flagged to GLaDOS 2026-07-07, campanhas.criar is a filed
- *     follow-up. When the real flow ships, THIS test must be rewritten to walk it.)
+ *   - NOVA LISTA: opens the real create modal (campanhas.criar shipped via
+ *     #331/#332). Smoke here; the full create-flow walk lives in
+ *     u38rz-nova-lista-create.spec.ts.
  *
  * LEGACY SEED: the repo-shipped legacy-1.0-users.json contains exactly the
  * operator email, so the legacy-path tests authenticate as a local user
@@ -89,20 +89,22 @@ test.describe('/campanhas — legacy-matching user (the POC user path, spec §9)
     await expect(legacyPage.locator('body')).not.toContainText('Página não encontrada');
   });
 
-  test('NOVA LISTA click fires the POC stub toast (spec §11 deviation — see header)', async ({
+  test('NOVA LISTA click opens the create modal (real flow — deep coverage in u38rz-nova-lista-create.spec.ts)', async ({
     legacyPage,
   }) => {
-    // Not a modal test — pre-seed the dismissed flag (see click-test comment).
+    // REWRITTEN 2026-07-08: campanhas.criar shipped (#331/#332, aperture-rurre
+    // + x0unf) — the POC stub toast this test used to pin is gone, replaced by
+    // the real name-only create modal. This keeps the SMOKE assertion on the
+    // POC user path (the CTA does something real); the full create-flow walk
+    // (happy/validation/error/cancel) lives in u38rz-nova-lista-create.spec.ts.
     await legacyPage.addInitScript(
       ([key]) => window.localStorage.setItem(key, '1'),
       [CAMPANHAS_WELCOME_STORAGE_KEY],
     );
     await legacyPage.goto('/campanhas', { waitUntil: 'domcontentloaded' });
     await legacyPage.getByTestId('card-nova-lista').click();
-    // sonner toast — the current POC behavior. NOT the spec §11 acceptance
-    // ("starts a 2.0 campaign creation"); deviation flagged on aperture-8jcec
-    // + the epic. Rewrite this test when campanhas.criar ships.
-    await expect(legacyPage.locator('[data-sonner-toast]')).toBeVisible();
+    await expect(legacyPage.getByTestId('nova-lista-modal')).toBeVisible();
+    await expect(legacyPage.getByTestId('nova-lista-input')).toBeVisible();
   });
 
   test('welcome modal: first visit shows; OK dismisses within-session', async ({ legacyPage }) => {
