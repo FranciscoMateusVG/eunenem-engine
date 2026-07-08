@@ -7363,3 +7363,49 @@ button.painel-topbar-link:hover {
     transition: none;
   }
 }
+
+/* =================================================================
+ * aperture-rurre — NOVA LISTA create modal. Reuses the camp-modal
+ * shell (blue tape variant); only the name input is new — cream well,
+ * Patrick Hand entry text (the name IS the list's display face), lilac
+ * focus ring.
+ * ================================================================= */
+
+.camp-modal-nova {
+  width: 440px;
+}
+
+.camp-nova-input {
+  width: 100%;
+  margin-top: 18px;
+  background: var(--cream);
+  border: 1.5px solid transparent;
+  border-radius: 14px;
+  padding: 13px 16px;
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 22px;
+  color: var(--plum);
+  outline: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.camp-nova-input::placeholder {
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 14px;
+  color: var(--ink-mute);
+}
+
+.camp-nova-input:focus-visible {
+  border-color: var(--lilac);
+  background: var(--paper);
+}
+
+.camp-nova-input:disabled {
+  opacity: 0.6;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .camp-nova-input {
+    transition: none;
+  }
+}
