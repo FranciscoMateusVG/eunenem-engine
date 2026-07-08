@@ -315,13 +315,22 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
     return tracer.startActiveSpan('db.arrecadacao_campanhas.findByAdministrador', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
       try {
-        // 0..1 by today's invariant (one campanha per user). If/when the
-        // relationship loosens, this becomes findMany; the port comment
-        // documents the migration shape.
+        // aperture-x0unf 🚨 SAFETY: a conta can now own MULTIPLE campanhas
+        // (NOVA LISTA — multiple lists for the same baby). This single-resolve
+        // MUST be deterministic: without ORDER BY, `limit(1)` returned an
+        // ARBITRARY campanha, so the instant a user created a 2nd list their
+        // LIVE /pagina + painel + contribuicao + evento could silently swap to
+        // the new EMPTY list. We join to `campanhas` and order by
+        // `criada_em ASC, id ASC` so the OLDEST (the user's original, live)
+        // campanha always wins everywhere this resolves; `id` is the stable
+        // tiebreak for two lists created in the same instant.
         const adminRow = await executor
           .selectFrom('campanha_administradores')
-          .select('campanha_id')
-          .where('id_usuario', '=', idConta)
+          .innerJoin('campanhas', 'campanhas.id', 'campanha_administradores.campanha_id')
+          .select('campanha_administradores.campanha_id')
+          .where('campanha_administradores.id_usuario', '=', idConta)
+          .orderBy('campanhas.criada_em', 'asc')
+          .orderBy('campanhas.id', 'asc')
           .limit(1)
           .executeTakeFirst();
 
@@ -447,11 +456,7 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
           const idRows = await executor
             .selectFrom('campanhas')
             .innerJoin('contribuicoes', 'contribuicoes.campanha_id', 'campanhas.id')
-            .innerJoin(
-              'intencao_items',
-              'intencao_items.id_contribuicao',
-              'contribuicoes.id',
-            )
+            .innerJoin('intencao_items', 'intencao_items.id_contribuicao', 'contribuicoes.id')
             .innerJoin('pagamentos', 'pagamentos.id', 'intencao_items.id_pagamento')
             .select('campanhas.id')
             .distinct()

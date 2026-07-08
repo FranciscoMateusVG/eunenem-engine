@@ -49,6 +49,38 @@ export const LEGACY_DASHBOARD_URL = 'https://eunenem.com/minha-area';
  */
 export const LEGACY_BRIDGE_PATH = '/api/legacy-bridge';
 
+/**
+ * aperture-rurre — NOVA LISTA V1 create mutation.
+ *
+ * INTEGRATION SHIM (same pattern the list hook used pre-#320): Rex's
+ * campanhas.criar mutation ships in his parallel PR (aperture-x0unf,
+ * contract: authed, input {titulo} only — no slug/recebedor/perfil in V1).
+ * Until it merges, AppRouter has no `criar` key, so this reaches through
+ * the runtime proxy via one structurally-typed cast. When his PR lands,
+ * delete TrpcCriarShim and inline trpc.campanhas.criar.useMutation.
+ */
+type TrpcCriarShim = {
+  campanhas: {
+    criar: {
+      useMutation: (opts?: {
+        onSuccess?: () => void;
+        onError?: () => void;
+      }) => {
+        mutate: (input: { titulo: string }) => void;
+        isPending: boolean;
+      };
+    };
+  };
+};
+
+export function useCampanhasCriar(opts?: {
+  onSuccess?: () => void;
+  onError?: () => void;
+}) {
+  const shim = trpc as unknown as TrpcCriarShim;
+  return shim.campanhas.criar.useMutation(opts);
+}
+
 export function useCampanhasList() {
   return trpc.campanhas.list.useQuery(undefined, { staleTime: 30_000 });
 }

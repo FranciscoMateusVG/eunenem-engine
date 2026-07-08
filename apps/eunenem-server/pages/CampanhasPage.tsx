@@ -5,8 +5,8 @@
  *   - 2.0 cards → /painel/<slug> (the new-platform dashboard)
  *   - 1.0 cards → https://eunenem.com/minha-area (legacy; Clerk resolves by
  *     email — real <a href>, per Izzy's testability + a11y request)
- *   - NOVA LISTA card → POC stub (warm toast; swaps to the real creation
- *     flow when campanhas.criar ships — GLaDOS follow-up bead)
+ *   - NOVA LISTA card → name-only create modal → campanhas.criar
+ *     (aperture-rurre; V1 stays on /campanhas — no per-campanha routing)
  *
  * First visit + user HAS legacy entries → welcome modal explaining the
  * 1.0/2.0 split (the two platforms are separate — no data transfer). The
@@ -28,6 +28,7 @@ import { PainelTopbar } from './components/eunenem/painel/PainelTopbar.js';
 import {
   CAMPANHAS_WELCOME_STORAGE_KEY,
   LEGACY_BRIDGE_PATH,
+  useCampanhasCriar,
   useCampanhasList,
   type CampanhaLegadoDTO,
   type CampanhaNovaDTO,
@@ -121,15 +122,44 @@ export function CampanhasPage() {
   useEscape(tourOpen, () => setTourOpen(false));
   useEscape(welcomeOpen && !tourOpen, () => dismissWelcome(false));
 
-  // POC stub — no user-facing "create a 2nd campanha" flow exists yet
-  // (creation happens inside the signup saga only). A warm toast beats
-  // bouncing a logged-in user to the marketing landing. Swap to real
-  // navigation when campanhas.criar ships.
+  // aperture-rurre — NOVA LISTA V1: real create flow (replaces the POC
+  // stub toast). Name-only modal → campanhas.criar({titulo}) → invalidate
+  // campanhas.list → the new card appears in the grid; we STAY on
+  // /campanhas (campanhas have no slug / per-campanha routing in V1).
+  const [novaOpen, setNovaOpen] = useState(false);
+  const [novoTitulo, setNovoTitulo] = useState('');
+  const utils = trpc.useUtils();
+  const criarM = useCampanhasCriar({
+    onSuccess: () => {
+      void utils.campanhas.list.invalidate();
+      setNovaOpen(false);
+      setNovoTitulo('');
+      toast('prontinho ♡ seu novo cantinho tá na estante');
+    },
+    onError: () => {
+      // Saga-compensated backend — nothing half-created. Keep the modal
+      // open so the typed name isn't lost.
+      toast.error('não conseguimos criar sua lista agora — tenta de novo?');
+    },
+  });
+
   const onNovaLista = useCallback(() => {
-    toast('criar uma nova lista chega já já ♡', {
-      description: 'estamos preparando esse cantinho — sua lista atual continua aqui.',
-    });
+    setNovoTitulo('');
+    setNovaOpen(true);
   }, []);
+
+  const fecharNova = useCallback(() => {
+    if (criarM.isPending) return; // don't yank the modal mid-flight
+    setNovaOpen(false);
+  }, [criarM.isPending]);
+
+  const submitNova = useCallback(() => {
+    const titulo = novoTitulo.trim();
+    if (!titulo || criarM.isPending) return;
+    criarM.mutate({ titulo });
+  }, [novoTitulo, criarM]);
+
+  useEscape(novaOpen && !tourOpen, fecharNova);
 
   // One shared scrapbook sequence across BOTH platforms so tints/tapes/tilts
   // alternate through the whole grid instead of restarting per group.
@@ -219,6 +249,64 @@ export function CampanhasPage() {
           <p className="camp-empty-note">comece criando sua primeira lista ♡</p>
         )}
       </main>
+
+      {/* ── NOVA LISTA create modal (aperture-rurre) ── */}
+      {novaOpen && (
+        <div className="camp-overlay" onClick={fecharNova}>
+          <div
+            className="camp-modal camp-modal-nova"
+            data-testid="nova-lista-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="camp-nova-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <span className="camp-modal-tape" style={{ background: 'var(--blue)' }} aria-hidden="true" />
+            <span className="camp-modal-eyebrow">um cantinho novo ♡</span>
+            <h2 id="camp-nova-title" className="camp-modal-title camp-modal-title-sm">
+              dê um nome pro novo <span className="hl">cantinho</span>
+            </h2>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                submitNova();
+              }}
+            >
+              <input
+                type="text"
+                className="camp-nova-input"
+                data-testid="nova-lista-input"
+                placeholder="chá da aurora, enxoval, quartinho…"
+                aria-label="Nome da nova lista"
+                value={novoTitulo}
+                maxLength={200}
+                autoFocus
+                disabled={criarM.isPending}
+                onChange={(e) => setNovoTitulo(e.target.value)}
+              />
+              <div className="camp-modal-actions">
+                <button
+                  type="button"
+                  className="camp-btn-outline"
+                  data-testid="nova-lista-cancel"
+                  disabled={criarM.isPending}
+                  onClick={fecharNova}
+                >
+                  cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="camp-btn-fill"
+                  data-testid="nova-lista-submit"
+                  disabled={!novoTitulo.trim() || criarM.isPending}
+                >
+                  {criarM.isPending ? 'criando ♡…' : 'criar lista ♡'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* ── Welcome modal (first visit, legacy users only) ── */}
       {welcomeOpen && (

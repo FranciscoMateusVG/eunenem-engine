@@ -161,9 +161,20 @@ export class CampanhaRepositoryMemory implements CampanhaRepository {
     return tracer.startActiveSpan('db.arrecadacao_campanhas.findByAdministrador', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
       try {
-        const campanha = [...this.campanhas.values()].find((c) =>
-          c.idsAdministradores.includes(idConta),
-        );
+        // aperture-x0unf 🚨 SAFETY: deterministic OLDEST-wins, mirroring the
+        // postgres adapter's `ORDER BY criada_em ASC, id ASC`. A bare `.find()`
+        // returned insertion-order (arbitrary), so a conta's 2nd campanha could
+        // silently take over the resolved single-result. Same comparator as
+        // findCampanhasByAdministrador so single- and multi-result ports agree.
+        const campanha = [...this.campanhas.values()]
+          .filter((c) => c.idsAdministradores.includes(idConta))
+          .sort((a, b) => {
+            const dt = a.criadaEm.getTime() - b.criadaEm.getTime();
+            if (dt !== 0) return dt;
+            if (a.id < b.id) return -1;
+            if (a.id > b.id) return 1;
+            return 0;
+          })[0];
         if (!campanha) {
           span.setStatus({ code: SpanStatusCode.OK });
           return undefined;
@@ -175,13 +186,17 @@ export class CampanhaRepositoryMemory implements CampanhaRepository {
         }
 
         const recebedorAtivo = await this.recebedorRepository.findAtivoByCampanhaId(campanha.id);
-        if (!recebedorAtivo) {
-          span.setStatus({ code: SpanStatusCode.OK });
-          return undefined;
-        }
-
+        // aperture-x0unf/wthsg: a campanha WITHOUT an active recebedor is a
+        // legit 'pre-bank-info' lifecycle state (ENGINE-DDD §66klh) — the
+        // Postgres adapter (findById → criarCampanhaSemRecebedor) returns it,
+        // and NOVA LISTA creates exactly this (campanhas.criar is {titulo}-only,
+        // no recebedor). Memory previously returned `undefined` here, so tests
+        // lied about prod for every pre-bank-info user. Aligned to Postgres +
+        // findFirstByAdministrador: return the campanha sem recebedor.
         span.setStatus({ code: SpanStatusCode.OK });
-        return campanhaComRecebedorAtivo(campanha, recebedorAtivo);
+        return recebedorAtivo
+          ? campanhaComRecebedorAtivo(campanha, recebedorAtivo)
+          : campanhaSemRecebedor(campanha);
       } catch (error: unknown) {
         span.recordException(error as Error);
         span.setStatus({ code: SpanStatusCode.ERROR });

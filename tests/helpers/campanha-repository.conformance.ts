@@ -39,6 +39,118 @@ export function describeCampanhaRepositoryConformance(name: string, options: Con
       expect(found).toBeUndefined();
     });
 
+    // ─── aperture-u38rz — findByAdministrador DETERMINISM GUARD ────────────
+    //
+    // Once campanhas.criar (aperture-x0unf) lets a conta own MULTIPLE
+    // campanhas, every single-resolve site (/pagina, painel, contribuicao,
+    // evento routers) must keep resolving the SAME campanha it always did:
+    // the OLDEST (criada_em ASC, id ASC tiebreak). A LIMIT 1 with no ORDER BY
+    // is Postgres roulette — an existing user's LIVE gift page must never
+    // nondeterministically swap to a freshly-created empty list.
+    //
+    // Fixtures deliberately save the NEWER campanha FIRST so an
+    // insertion-order-accidental implementation fails loudly here.
+    describe('findByAdministrador — deterministic oldest-first (aperture-u38rz)', () => {
+      const REPEATS = 5;
+
+      it('returns undefined when the conta administers no campanha', async () => {
+        expect(await repo.findByAdministrador(randomUUID() as never)).toBeUndefined();
+      });
+
+      it('two campanhas, different criada_em → ALWAYS the oldest, across repeated calls', async () => {
+        const idConta = randomUUID();
+        const nova = makeCampanha({
+          idsAdministradores: [idConta],
+          titulo: 'Lista nova (vazia)',
+          criadaEm: new Date('2026-07-01T12:00:00.000Z'),
+        });
+        const antiga = makeCampanha({
+          idsAdministradores: [idConta],
+          titulo: 'Lista antiga (a página viva)',
+          criadaEm: new Date('2026-05-01T12:00:00.000Z'),
+        });
+        // NEWER saved FIRST — insertion order must not matter.
+        await options.saveCampanha(repo, nova);
+        await options.saveCampanha(repo, antiga);
+
+        for (let i = 0; i < REPEATS; i++) {
+          const found = await repo.findByAdministrador(idConta as never);
+          expect(found?.id, `call ${i + 1}/${REPEATS} must resolve the OLDEST campanha`).toBe(
+            antiga.id,
+          );
+        }
+      });
+
+      it('same criada_em → lowest id wins, stable across repeated calls', async () => {
+        const idConta = randomUUID();
+        const criadaEm = new Date('2026-06-15T09:30:00.000Z');
+        // Fixed ids make the tiebreak deterministic and readable: 0… < f….
+        const idBaixo = '00000000-0000-4000-8000-000000000001';
+        const idAlto = 'ffffffff-ffff-4fff-bfff-ffffffffffff';
+        const alta = makeCampanha({
+          id: idAlto as never,
+          idsAdministradores: [idConta],
+          titulo: 'Empate — id alto',
+          criadaEm,
+        });
+        const baixa = makeCampanha({
+          id: idBaixo as never,
+          idsAdministradores: [idConta],
+          titulo: 'Empate — id baixo',
+          criadaEm,
+        });
+        // Higher id saved FIRST — the tiebreak must come from ORDER BY, not
+        // from insertion order.
+        await options.saveCampanha(repo, alta);
+        await options.saveCampanha(repo, baixa);
+
+        for (let i = 0; i < REPEATS; i++) {
+          const found = await repo.findByAdministrador(idConta as never);
+          expect(found?.id, `call ${i + 1}/${REPEATS}: lowest id must win the tie`).toBe(idBaixo);
+        }
+      });
+
+      it('resolves a campanha SEM RECEBEDOR — pre-bank-info is a legit lifecycle state (parity ruling, aperture-x0unf)', async () => {
+        // Ruled by Rex 2026-07-08 (folded into #332): postgres was already
+        // returning the campanha for a recebedor-less resolve; memory used to
+        // return undefined (stale pre-66klh guard) — a tests-lie-about-prod
+        // divergence surfaced by the u38rz compensation test. This case PINS
+        // parity: both adapters resolve the campanha, recebedor-less. Matters
+        // because campanhas.criar mints exactly this state ({titulo} only).
+        const idConta = randomUUID();
+        const semRecebedor = makeCampanhaSemRecebedor({
+          idsAdministradores: [idConta],
+          criadaEm: new Date('2026-06-01T00:00:00.000Z'),
+        });
+        await options.saveCampanha(repo, semRecebedor);
+
+        const found = await repo.findByAdministrador(idConta as never);
+        expect(found?.id, 'a pre-bank-info campanha must still resolve').toBe(semRecebedor.id);
+        expect(found?.idRecebedor, 'and stay recebedor-less in the result').toBeNull();
+      });
+
+      it('an unrelated conta creating campanhas never changes MY resolution', async () => {
+        const minhaConta = randomUUID();
+        const outraConta = randomUUID();
+        const minha = makeCampanha({
+          idsAdministradores: [minhaConta],
+          criadaEm: new Date('2026-04-01T00:00:00.000Z'),
+        });
+        await options.saveCampanha(repo, minha);
+        // Noise: another conta's newer campanhas must be invisible to mine.
+        for (let i = 0; i < 3; i++) {
+          await options.saveCampanha(
+            repo,
+            makeCampanha({
+              idsAdministradores: [outraConta],
+              criadaEm: new Date(`2026-07-0${i + 1}T00:00:00.000Z`),
+            }),
+          );
+        }
+        expect((await repo.findByAdministrador(minhaConta as never))?.id).toBe(minha.id);
+      });
+    });
+
     it('round-trips campaign with administrators and options', async () => {
       const campanha = makeCampanha({
         idsAdministradores: [randomUUID(), randomUUID()],

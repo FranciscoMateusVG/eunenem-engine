@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 
+import { needsOnboarding } from "./onboarding-gate.js";
 import { trpc } from "./trpc.js";
 
 /**
@@ -52,9 +53,15 @@ export function useOauthReturnRedirect(): void {
         if (cancelled || !me?.slug) return;
         // aperture-g7l09 (multicampanha POC) — OAuth returns land on
         // /campanhas, matching the email-login default in AuthModalProvider.
-        // me.slug stays as the session-validity guard. OAuth users who still
-        // need onboarding reach the wizard when they open their painel.
-        const target = '/campanhas';
+        // me.slug stays as the session-validity guard.
+        //
+        // aperture-ivu2t — EXCEPT accounts that still need onboarding: a
+        // brand-new OAuth signup landing on /campanhas has no campaign and
+        // only the stub NOVA LISTA — stuck. Route them to /painel/<slug>,
+        // where PainelPage mounts the blocking OnboardingWizard (the normal
+        // creation flow). needsOnboarding() is the server-authoritative,
+        // provider-agnostic gate (aperture-8ysqu).
+        const target = needsOnboarding(me) ? `/painel/${me.slug}` : '/campanhas';
         if (window.location.pathname === target) return;
         window.location.assign(target);
       } catch {

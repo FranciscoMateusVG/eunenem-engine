@@ -18,6 +18,7 @@
 // export drops in later at the same path with the same shape — NO code change
 // (tracked as a separate bead; see spec §10).
 
+import { readFileSync } from 'node:fs';
 import { z } from 'zod/v4';
 import legacyUsersJson from './seed-data/legacy-1.0-users.json';
 
@@ -66,13 +67,65 @@ export interface CampanhaLegadoDTO {
 export const NOME_FALLBACK_LEGADO = 'Minha lista (EuNeném 1.0)';
 
 /**
- * The validated snapshot. Module-load validation → a malformed
- * `legacy-1.0-users.json` crashes the server AT BOOT with a pointed message
- * (never a silently-missing 1.0 card in prod).
+ * Load + validate the legacy-user snapshot (aperture-op09b / 791lz).
+ *
+ * The REAL customer list can't be committed — the Dokploy deploy mirror is
+ * PUBLIC. So the real file is mounted at runtime OUTSIDE the git tree (Cipher
+ * ses0u condition: a path outside `/app` so a Dockerfile `COPY` can never bake
+ * it) and its path is passed via `LEGACY_USERS_PATH`:
+ *   - LEGACY_USERS_PATH set + non-empty → read + Zod-validate THAT file.
+ *   - unset / empty → the committed 1-email stub (unchanged; stays a stub
+ *     forever — the PR carries zero real data).
+ * SAME shape validation both ways.
+ *
+ * FAIL-LOUD by design: a missing / unreadable / invalid-JSON / shape-drifted
+ * file throws HERE, at module load → the server crashes at boot (Peppy verifies
+ * post-deploy) rather than silently serving the stub or an empty list. We keep
+ * the DEFAULT ZodError (no custom handler that could dump row VALUES into logs)
+ * and never log the parsed list — it's customer PII.
+ *
+ * `env` is injectable for tests; the module-level `LEGACY_USERS_SEED` calls it
+ * with the real `process.env` once at import.
  */
-export const LEGACY_USERS_SEED: readonly LegacyUserEntry[] = z
-  .array(LegacyUserEntrySchema)
-  .parse(legacyUsersJson);
+export function carregarLegacyUsersSeed(
+  env: NodeJS.ProcessEnv = process.env,
+): readonly LegacyUserEntry[] {
+  const path = env.LEGACY_USERS_PATH?.trim();
+  // Server-controlled path (Dokploy env), never user input → no traversal risk.
+  const raw: unknown = path ? lerArquivoLegacy(path) : legacyUsersJson;
+  // Zod validation is PII-safe (default errors carry the field PATH, not the
+  // row VALUE) — kept loud on both branches.
+  return z.array(LegacyUserEntrySchema).parse(raw);
+}
+
+/**
+ * Read + JSON-parse the mounted legacy file, re-throwing a SANITIZED error
+ * (Cipher ses0u residual). A raw `JSON.parse` SyntaxError on a malformed REAL
+ * export can embed a ~10-char snippet of the bad region (Node/V8) — potentially
+ * a PII fragment of an email/name — which would land in the boot-crash log →
+ * Loki. In the exact feature built to keep customer PII out of the repo AND
+ * logs, we surface only the path + error code (fs errors carry `.code`;
+ * JSON.parse has none → 'PARSE_ERROR'), never the file contents. Stays
+ * fail-loud (throws → boot crash → Peppy's deploy verify catches it).
+ */
+function lerArquivoLegacy(path: string): unknown {
+  try {
+    return JSON.parse(readFileSync(path, 'utf8'));
+  } catch (err) {
+    const code =
+      typeof (err as { code?: unknown }).code === 'string'
+        ? (err as { code: string }).code
+        : 'PARSE_ERROR';
+    throw new Error(`legacy-users: failed to load ${path} (${code})`);
+  }
+}
+
+/**
+ * The validated snapshot, resolved once at import. Malformed source (committed
+ * stub OR the runtime-mounted real file) crashes the server AT BOOT — never a
+ * silently-missing 1.0 card in prod.
+ */
+export const LEGACY_USERS_SEED: readonly LegacyUserEntry[] = carregarLegacyUsersSeed();
 
 /**
  * Normalize an email for matching: trim + default-locale `toLowerCase()`.
