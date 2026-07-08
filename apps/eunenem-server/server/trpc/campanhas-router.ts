@@ -26,9 +26,17 @@
  * the 2.0 card DTO is the USUARIO's painel slug (Campanha has no slug of its
  * own); every card navigates to /painel/<slug> in the POC.
  */
+import { randomUUID } from 'node:crypto';
 import { initTRPC, TRPCError } from '@trpc/server';
 import { z } from 'zod/v4';
-import type { Campanha } from '../../../../src/index.js';
+import {
+  adicionarOpcaoContribuicao,
+  ArrecadacaoInputInvalidoError,
+  type Campanha,
+  criarCampanha,
+  type IdCampanha,
+  type IdOpcaoContribuicao,
+} from '../../../../src/index.js';
 import { buscarCampanhasLegado } from '../../lib/legacy-users.js';
 import type { TrpcContext } from './context.js';
 import {
@@ -69,6 +77,15 @@ const CampanhasListOutputSchema = z.object({
 });
 
 export type CampanhasListOutput = z.infer<typeof CampanhasListOutputSchema>;
+
+/**
+ * `campanhas.criar` input — name-only (aperture-x0unf NOVA LISTA V1). Bounds
+ * mirror the domain `CriarCampanhaInputSchema.titulo` (trimmed, 1..200) so a
+ * bad title is a clean tRPC BAD_REQUEST before the use-case runs.
+ */
+const CriarCampanhaInputDTOSchema = z.object({
+  titulo: z.string().trim().min(1, 'Titulo nao pode ser vazio').max(200),
+});
 
 function toCardDTO(
   campanha: Campanha,
@@ -118,6 +135,95 @@ export const campanhasRouter = t.router({
 
         return { novas, legado: [...legado] };
       } catch (err) {
+        throw err instanceof Error
+          ? new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err.message, cause: err })
+          : new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'unknown_error' });
+      }
+    }),
+
+  /**
+   * Create a new 2.0 campanha for the authed conta (aperture-x0unf — NOVA
+   * LISTA V1: multiple lists for the same baby). Name-only: {titulo} is the
+   * only input; no slug / recebedor / perfil at creation (perfil_criadores is
+   * per-USER, shared across the conta's lists). Returns the created card in the
+   * SAME shape as a `list` → `novas` element so the client can optimistically
+   * prepend it (or just invalidate `campanhas.list`); there is NO /painel
+   * landing in V1.
+   *
+   * Mini-saga (mirrors the signup provisioner): criarCampanha → (compensation:
+   * delete on downstream failure) → adicionarOpcaoContribuicao('presente').
+   * A failure deletes the half-created campanha and throws — never a campanha
+   * without its initial 'presente' opção.
+   */
+  criar: t.procedure
+    .input(CriarCampanhaInputDTOSchema)
+    .output(CampanhaNovaDTOSchema)
+    .mutation(async ({ ctx, input }): Promise<z.infer<typeof CampanhaNovaDTOSchema>> => {
+      const { deps, headers } = ctx;
+
+      let usuario: Awaited<ReturnType<typeof resolverUsuarioAutenticado>>['usuario'];
+      try {
+        ({ usuario } = await resolverUsuarioAutenticado(deps, headers));
+      } catch (err) {
+        if (err instanceof SessaoNaoAutenticadaError) {
+          throw new TRPCError({ code: 'UNAUTHORIZED', message: 'sessao_invalida' });
+        }
+        throw err;
+      }
+
+      const idCampanha = randomUUID() as IdCampanha;
+      try {
+        // Step 1 — the campanha aggregate (no Recebedor; user has no PIX at
+        // creation, exactly like the signup default list).
+        await criarCampanha(
+          {
+            campanhaRepository: deps.campanhaRepository,
+            recebedorRepository: deps.recebedorRepository,
+            plataformaRepository: deps.plataformaRepository,
+            clock: deps.clock,
+            observability: deps.observability,
+          },
+          {
+            id: idCampanha,
+            idPlataforma: usuario.idPlataforma,
+            idsAdministradores: [usuario.idConta],
+            titulo: input.titulo,
+          },
+        );
+
+        // Step 2 — the initial 'presente' opção. On failure, compensate by
+        // deleting the campanha (its opcoes cascade) so no half-built list
+        // survives, then rethrow the ORIGINAL error.
+        let campanhaComOpcao: Campanha;
+        try {
+          campanhaComOpcao = await adicionarOpcaoContribuicao(
+            { campanhaRepository: deps.campanhaRepository, observability: deps.observability },
+            { idCampanha, idOpcao: randomUUID() as IdOpcaoContribuicao, tipo: 'presente' },
+          );
+        } catch (opcaoErr) {
+          try {
+            await deps.campanhaRepository.delete(idCampanha);
+            deps.observability.logger.info('campanhas.criar.compensacao_executada', {
+              idCampanha,
+              erroOriginal: opcaoErr instanceof Error ? opcaoErr.message : String(opcaoErr),
+            });
+          } catch (compErr) {
+            deps.observability.logger.info('campanhas.criar.compensacao_falhou', {
+              idCampanha,
+              erroCompensacao: compErr instanceof Error ? compErr.message : String(compErr),
+            });
+          }
+          throw opcaoErr;
+        }
+
+        return toCardDTO(campanhaComOpcao, usuario.slug);
+      } catch (err) {
+        if (err instanceof TRPCError) throw err;
+        // Domain input rejection (e.g. an out-of-bounds title that slips past
+        // the DTO schema) → BAD_REQUEST; everything else → 500.
+        if (err instanceof ArrecadacaoInputInvalidoError) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: err.message, cause: err });
+        }
         throw err instanceof Error
           ? new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err.message, cause: err })
           : new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'unknown_error' });
