@@ -119,7 +119,7 @@ function toEvento(row: {
   id_campanha: string;
   tipo_evento: string;
   modalidade: string;
-  data_hora: Date;
+  data_hora: Date | null;
   endereco: string | null;
   criado_em: Date;
   atualizado_em: Date;

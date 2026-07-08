@@ -49,6 +49,14 @@ export function describeEventoRepositoryConformance(name: string, options: Confo
       expect(found).toEqual(evento);
     });
 
+    it('round-trips an event without dataHora (date/time undecided)', async () => {
+      const evento = makeEvento({ dataHora: null });
+      await options.saveEvento(repo, evento);
+
+      const found = await repo.findById(evento.id);
+      expect(found).toEqual(evento);
+    });
+
     it('returns undefined for unknown IDs', async () => {
       expect(await repo.findById(randomUUID())).toBeUndefined();
       expect(await repo.findByIdCampanha(randomUUID())).toBeUndefined();

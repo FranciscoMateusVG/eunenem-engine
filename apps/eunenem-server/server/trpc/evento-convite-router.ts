@@ -106,7 +106,7 @@ async function resolveCallerCampanha(
 const SaveEventoConviteInputSchema = z.object({
   tipoEvento: TipoEventoSchema,
   modalidade: ModalidadeEventoSchema,
-  dataHoraIso: z.string().datetime(),
+  dataHoraIso: z.string().datetime().nullable(),
   endereco: z.string().trim().min(1).max(500).nullable(),
   remetente: RemetenteConviteSchema,
   nomeExibido: NomeExibidoConviteSchema,
@@ -126,7 +126,7 @@ const EventoSnapshotSchema = z.object({
   id: z.string().uuid(),
   tipoEvento: TipoEventoSchema,
   modalidade: ModalidadeEventoSchema,
-  dataHoraIso: z.string().datetime(),
+  dataHoraIso: z.string().datetime().nullable(),
   endereco: z.string().nullable(),
 });
 
@@ -176,8 +176,8 @@ function toTRPCError(err: unknown): TRPCError {
   });
 }
 
-function toDate(dataHoraIso: string): Date {
-  return new Date(dataHoraIso);
+function toDate(dataHoraIso: string | null): Date | null {
+  return dataHoraIso === null ? null : new Date(dataHoraIso);
 }
 
 async function loadEventoConviteSnapshot(
@@ -226,7 +226,7 @@ async function loadEventoConviteSnapshot(
       id: evento.id,
       tipoEvento: evento.tipoEvento,
       modalidade: evento.modalidade,
-      dataHoraIso: evento.dataHora.toISOString(),
+      dataHoraIso: evento.dataHora?.toISOString() ?? null,
       endereco: evento.endereco,
     },
     convite: convite
@@ -358,7 +358,7 @@ export const eventoConviteRouter = t.router({
             id: evento.id,
             tipoEvento: evento.tipoEvento,
             modalidade: evento.modalidade,
-            dataHoraIso: evento.dataHora.toISOString(),
+            dataHoraIso: evento.dataHora?.toISOString() ?? null,
             endereco: evento.endereco,
           },
           convite: {

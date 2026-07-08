@@ -10,3 +10,6 @@ export const DataHoraEventoSchema = z
   .refine((d) => !Number.isNaN(d.getTime()), { message: 'Data e hora do evento invalidas' });
 
 export type DataHoraEvento = z.infer<typeof DataHoraEventoSchema>;
+
+/** Nullable dataHora for aggregate fields and use-case input — date/time are optional. */
+export const DataHoraEventoNullableSchema = DataHoraEventoSchema.nullable();

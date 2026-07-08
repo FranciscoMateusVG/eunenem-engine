@@ -3,7 +3,6 @@ import { toast } from "sonner";
 
 import type { PainelSectionBodyProps } from "@/PainelSectionPage";
 import {
-  CONVIDADOS_EVENT,
   avatarFor,
   initialsOf,
 } from "@/lib/mocks/convidados";
@@ -1615,14 +1614,14 @@ export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
             <IconCalendar size={13} />{" "}
             {(() => {
               const d = formatDateScrap(state.date);
-              return d ? `${d.day} de ${d.monthFull} de ${d.year}` : CONVIDADOS_EVENT.date;
+              return d ? `${d.day} de ${d.monthFull} de ${d.year}` : "data a definir";
             })()}
           </span>
           <span className="cv-event-meta-sep" aria-hidden="true">
             ·
           </span>
           <span className="cv-event-meta-item">
-            <IconClock size={13} /> {state.time ? formatHora(state.time) : CONVIDADOS_EVENT.time}
+            <IconClock size={13} /> {state.time ? formatHora(state.time) : "horário a definir"}
           </span>
         </p>
       </div>

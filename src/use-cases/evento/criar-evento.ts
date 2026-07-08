@@ -6,7 +6,7 @@ import {
   criarEvento as criarEventoDominio,
   type Evento,
 } from '../../domain/evento/entities/evento.js';
-import { DataHoraEventoSchema } from '../../domain/evento/value-objects/data-hora-evento.js';
+import { DataHoraEventoNullableSchema } from '../../domain/evento/value-objects/data-hora-evento.js';
 import { EnderecoEventoNullableSchema } from '../../domain/evento/value-objects/endereco-evento.js';
 import { IdCampanhaSchema, IdEventoSchema } from '../../domain/evento/value-objects/ids.js';
 import { ModalidadeEventoSchema } from '../../domain/evento/value-objects/modalidade-evento.js';
@@ -21,7 +21,7 @@ export const CriarEventoInputSchema = z.object({
   idCampanha: IdCampanhaSchema,
   tipoEvento: TipoEventoSchema,
   modalidade: ModalidadeEventoSchema,
-  dataHora: DataHoraEventoSchema,
+  dataHora: DataHoraEventoNullableSchema,
   endereco: EnderecoEventoNullableSchema,
 });
 
