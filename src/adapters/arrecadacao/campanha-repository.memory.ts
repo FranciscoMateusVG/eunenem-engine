@@ -186,13 +186,17 @@ export class CampanhaRepositoryMemory implements CampanhaRepository {
         }
 
         const recebedorAtivo = await this.recebedorRepository.findAtivoByCampanhaId(campanha.id);
-        if (!recebedorAtivo) {
-          span.setStatus({ code: SpanStatusCode.OK });
-          return undefined;
-        }
-
+        // aperture-x0unf/wthsg: a campanha WITHOUT an active recebedor is a
+        // legit 'pre-bank-info' lifecycle state (ENGINE-DDD §66klh) — the
+        // Postgres adapter (findById → criarCampanhaSemRecebedor) returns it,
+        // and NOVA LISTA creates exactly this (campanhas.criar is {titulo}-only,
+        // no recebedor). Memory previously returned `undefined` here, so tests
+        // lied about prod for every pre-bank-info user. Aligned to Postgres +
+        // findFirstByAdministrador: return the campanha sem recebedor.
         span.setStatus({ code: SpanStatusCode.OK });
-        return campanhaComRecebedorAtivo(campanha, recebedorAtivo);
+        return recebedorAtivo
+          ? campanhaComRecebedorAtivo(campanha, recebedorAtivo)
+          : campanhaSemRecebedor(campanha);
       } catch (error: unknown) {
         span.recordException(error as Error);
         span.setStatus({ code: SpanStatusCode.ERROR });
