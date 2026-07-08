@@ -196,6 +196,12 @@ function envelope(ssrHtml: string, pathname: string): string {
          .fade-up reveal only hides content when JS can reveal it. No-JS /
          pre-hydration keeps all content visible. -->
     <script>document.documentElement.classList.add('js')</script>
+    <!-- aperture-pjd74: per-request runtime config for the client bundle.
+         LEGACY_MIGRACAO_URL lets each environment point the 1.0 card at its
+         own old-site host (iw-m4 staging → staging.eunenem.com; prod →
+         default) WITHOUT a client rebuild. Serialized with < escaped so an
+         operator-set value can never break out of this script tag. -->
+    <script>window.__EUNENEM_ENV__=${serializeRuntimeEnv()}</script>
     <title>eunenem · ${escapeHtml(pathname)}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -217,6 +223,19 @@ function envelope(ssrHtml: string, pathname: string): string {
     <script type="module" src="/public/client.js"></script>
   </body>
 </html>`;
+}
+
+/**
+ * aperture-pjd74 — runtime config → client. JSON with `<` escaped to \u003c
+ * (script-tag breakout guard). Read per-request so a container env change +
+ * restart is enough — no rebuild.
+ */
+function serializeRuntimeEnv(): string {
+  const env: { legacyMigracaoUrl?: string } = {};
+  if (process.env.LEGACY_MIGRACAO_URL) {
+    env.legacyMigracaoUrl = process.env.LEGACY_MIGRACAO_URL;
+  }
+  return JSON.stringify(env).replaceAll('<', '\\u003c');
 }
 
 function escapeHtml(s: string): string {

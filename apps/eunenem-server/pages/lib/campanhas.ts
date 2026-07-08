@@ -48,7 +48,28 @@ export const LEGACY_DASHBOARD_URL = 'https://eunenem.com/minha-area';
  * (aperture-8jcec) asserts the anchor + this href — imported there so spec +
  * test move together.
  */
-export const LEGACY_MIGRACAO_URL = 'https://eunenem.com/migracao';
+declare global {
+  interface Window {
+    /** Runtime config injected by server.tsx's envelope() (aperture-pjd74). */
+    __EUNENEM_ENV__?: { legacyMigracaoUrl?: string };
+  }
+}
+
+/**
+ * Resolution order (aperture-pjd74 env-driven target — the /migracao page
+ * lives on the OLD site, whose staging/prod hosts differ, so the new-system
+ * staging must be able to point the card at staging.eunenem.com without a
+ * rebuild):
+ *   1. Browser: window.__EUNENEM_ENV__ — injected per-request by server.tsx
+ *      from the container's LEGACY_MIGRACAO_URL env (runtime, Dokploy-set).
+ *   2. Server/SSR + node test contexts: process.env.LEGACY_MIGRACAO_URL.
+ *   3. Default: the prod old-site URL.
+ * SSR and hydration read the same env → same value → no hydration mismatch.
+ */
+export const LEGACY_MIGRACAO_URL: string =
+  (typeof window !== 'undefined' && window.__EUNENEM_ENV__?.legacyMigracaoUrl) ||
+  (typeof process !== 'undefined' && process.env.LEGACY_MIGRACAO_URL) ||
+  'https://eunenem.com/migracao';
 
 /**
  * aperture-rurre — NOVA LISTA V1 create mutation.
