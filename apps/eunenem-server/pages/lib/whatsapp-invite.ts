@@ -15,15 +15,13 @@ export function buildConfirmarPresencaShareUrl(
   return new URL(confirmarPresencaHref(slug, idConvidado), origin).toString();
 }
 
-/** Strips everything but digits; rejects numbers too short to be real, and
- * assumes a bare 10-11 digit number is Brazilian (adds the "55" DDI). */
+/** Strips everything but digits. The DDI is already embedded in
+ * numeroCelular (set explicitly in the "adicionar convidado" form,
+ * defaulting to 55/Brazil) — no heuristic prefixing needed here anymore. */
 export function formatPhoneForWhatsapp(numeroCelular: string): string | undefined {
   const digits = numeroCelular.replace(/\D/g, '');
   if (digits.length < 10) {
     return undefined;
-  }
-  if (digits.length <= 11) {
-    return `55${digits}`;
   }
   return digits;
 }

@@ -106,6 +106,10 @@ describe('schemas', () => {
     expect(NumeroCelularConvidadoSchema.safeParse('abc').success).toBe(false);
   });
 
+  it('accepts a phone number with a non-BR DDI', () => {
+    expect(NumeroCelularConvidadoSchema.safeParse('+351 912 345 678').success).toBe(true);
+  });
+
   it('rejects empty guest name', () => {
     expect(NomeConvidadoSchema.safeParse('   ').success).toBe(false);
   });

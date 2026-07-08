@@ -795,6 +795,38 @@ function isValidBrMobilePhone(phone: string): boolean {
   return BR_MOBILE_PHONE_RE.test(phone);
 }
 
+const DEFAULT_DDI = "55";
+
+// Digits-only, capped at 3 (DDIs run 1-3 digits).
+function formatDdi(raw: string): string {
+  return raw.replace(/\D/g, "").slice(0, 3);
+}
+
+function isValidDdi(ddi: string): boolean {
+  return /^\d{1,3}$/.test(ddi);
+}
+
+// Non-BR numbers don't follow the "(DD) 9XXXX-XXXX" shape (DDD + mandatory
+// 9th digit is a Brazil-only convention) — no fixed mask, just digits,
+// loosely bounded to catch obvious typos while accepting real numbers from
+// most countries (E.164 national significant number: 8-14 digits).
+function formatGenericPhone(raw: string): string {
+  return raw.replace(/\D/g, "").slice(0, 14);
+}
+
+function isValidGenericPhone(phone: string): boolean {
+  const digits = phone.replace(/\D/g, "");
+  return digits.length >= 8 && digits.length <= 14;
+}
+
+function formatPhoneForDdi(ddi: string, raw: string): string {
+  return ddi === DEFAULT_DDI ? formatBrPhone(raw) : formatGenericPhone(raw);
+}
+
+function isValidPhoneForDdi(ddi: string, phone: string): boolean {
+  return ddi === DEFAULT_DDI ? isValidBrMobilePhone(phone) : isValidGenericPhone(phone);
+}
+
 function formatHora(time: string): string {
   const [h, m] = time.split(":");
   if (!h) return time;
@@ -817,6 +849,7 @@ function AddGuestModal({
   onClose: () => void;
 }) {
   const [name, setName] = useState("");
+  const [ddi, setDdi] = useState(DEFAULT_DDI);
   const [phone, setPhone] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -833,23 +866,33 @@ function AddGuestModal({
     };
   }, [onClose]);
 
+  const isBrDdi = ddi === DEFAULT_DDI;
+
   const submit = async () => {
     const n = name.trim();
-    if (!n || !isValidBrMobilePhone(phone) || isSubmitting) return;
+    if (!n || !isValidDdi(ddi) || !isValidPhoneForDdi(ddi, phone) || isSubmitting) return;
     setIsSubmitting(true);
-    const ok = await onAdd({ name: n, phone });
+    const ok = await onAdd({ name: n, phone: `+${ddi} ${phone}` });
     setIsSubmitting(false);
     if (ok) {
       setName("");
+      setDdi(DEFAULT_DDI);
       setPhone("");
       onClose();
     }
   };
 
-  const canSubmit = name.trim().length > 0 && isValidBrMobilePhone(phone) && !isSubmitting;
+  const canSubmit =
+    name.trim().length > 0 &&
+    isValidDdi(ddi) &&
+    isValidPhoneForDdi(ddi, phone) &&
+    !isSubmitting;
+  const ddiError = ddi.length > 0 && !isValidDdi(ddi) ? "ddi inválido" : null;
   const phoneError =
-    phone.length > 0 && !isValidBrMobilePhone(phone)
-      ? "formato inválido — use (DD) 9XXXX-XXXX"
+    phone.length > 0 && !isValidPhoneForDdi(ddi, phone)
+      ? isBrDdi
+        ? "formato inválido — use (DD) 9XXXX-XXXX"
+        : "número inválido"
       : null;
 
   return (
@@ -941,16 +984,72 @@ function AddGuestModal({
             </div>
             <div className="lista-field lista-field-full">
               <label htmlFor="convidado-phone">telefone (com ddd)</label>
-              <input
-                id="convidado-phone"
-                inputMode="tel"
-                placeholder="(11) 99999-9999"
-                value={phone}
-                onChange={(e) => setPhone(formatBrPhone(e.target.value))}
-                onKeyDown={(e) => e.key === "Enter" && canSubmit && submit()}
-                aria-invalid={phoneError ? true : undefined}
-                aria-describedby={phoneError ? "convidado-phone-error" : undefined}
-              />
+              <div style={{ display: "flex", gap: 8 }}>
+                <div style={{ flex: "0 0 72px" }}>
+                  <label htmlFor="convidado-ddi" className="sr-only">
+                    ddi
+                  </label>
+                  <div style={{ position: "relative" }}>
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        position: "absolute",
+                        left: 12,
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        color: "var(--ink-mute)",
+                        pointerEvents: "none",
+                      }}
+                    >
+                      +
+                    </span>
+                    <input
+                      id="convidado-ddi"
+                      inputMode="numeric"
+                      placeholder="55"
+                      value={ddi}
+                      onChange={(e) => {
+                        const nextDdi = formatDdi(e.target.value);
+                        setDdi(nextDdi);
+                        // Re-format the phone under the new DDI's rules — the
+                        // BR mask ("(DD) 9XXXX-XXXX") makes no sense once the
+                        // country changes away from Brazil, and vice-versa.
+                        setPhone((prev) => formatPhoneForDdi(nextDdi, prev));
+                      }}
+                      onKeyDown={(e) => e.key === "Enter" && canSubmit && submit()}
+                      aria-invalid={ddiError ? true : undefined}
+                      aria-describedby={ddiError ? "convidado-ddi-error" : undefined}
+                      style={{ paddingLeft: 22, width: "100%", boxSizing: "border-box" }}
+                    />
+                  </div>
+                </div>
+                <input
+                  id="convidado-phone"
+                  inputMode="tel"
+                  placeholder={isBrDdi ? "(11) 99999-9999" : "número do convidado"}
+                  value={phone}
+                  onChange={(e) => setPhone(formatPhoneForDdi(ddi, e.target.value))}
+                  onKeyDown={(e) => e.key === "Enter" && canSubmit && submit()}
+                  aria-invalid={phoneError ? true : undefined}
+                  aria-describedby={phoneError ? "convidado-phone-error" : undefined}
+                  style={{ flex: 1 }}
+                />
+              </div>
+              {ddiError && (
+                <p
+                  id="convidado-ddi-error"
+                  role="alert"
+                  style={{
+                    fontFamily: FONT_SANS,
+                    fontSize: 12,
+                    color: "var(--coral-pink)",
+                    margin: "6px 0 0",
+                    lineHeight: 1.4,
+                  }}
+                >
+                  {ddiError}
+                </p>
+              )}
               {phoneError && (
                 <p
                   id="convidado-phone-error"
