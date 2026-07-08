@@ -9,8 +9,8 @@ import type { ProvedorRegraTaxa } from '../../adapters/taxas/regra-provider.js';
 import { encontrarOpcaoContribuicao } from '../../domain/arrecadacao/entities/campanha.js';
 import type { Contribuicao } from '../../domain/arrecadacao/entities/contribuicao.js';
 import {
-  type IdContribuicao,
   IdCampanhaSchema,
+  type IdContribuicao,
   IdContribuicaoSchema,
   IdPlataformaReferenciaSchema,
 } from '../../domain/arrecadacao/value-objects/ids.js';
@@ -26,12 +26,12 @@ import {
   IdPagamentoSchema,
 } from '../../domain/pagamentos/value-objects/ids.js';
 import { MetodoPagamentoSchema } from '../../domain/pagamentos/value-objects/metodo-pagamento.js';
+import type { SnapshotComposicaoValoresAggregate } from '../../domain/pagamentos/value-objects/snapshot-composicao-valores-aggregate.js';
 import type {
   SnapshotComposicaoValoresItem,
   SnapshotComposicaoValoresItemContribuicao,
   SnapshotComposicaoValoresItemSurcharge,
 } from '../../domain/pagamentos/value-objects/snapshot-composicao-valores-item.js';
-import type { SnapshotComposicaoValoresAggregate } from '../../domain/pagamentos/value-objects/snapshot-composicao-valores-aggregate.js';
 import { ArrecadacaoCampanhaNaoEncontradaError } from '../../errors/arrecadacao/campanha-nao-encontrada.error.js';
 import { ArrecadacaoContribuicaoIndisponivelError } from '../../errors/arrecadacao/contribuicao-indisponivel.error.js';
 import { ArrecadacaoContribuicaoNaoEncontradaError } from '../../errors/arrecadacao/contribuicao-nao-encontrada.error.js';
@@ -243,9 +243,7 @@ export async function iniciarPagamentoCarrinho(
       // ─── step 5: build aggregate ────────────────────────────────────
       const allItemComposicoes: SnapshotComposicaoValoresItem[] = [
         ...itemComposicoes,
-        ...(surchargeItem
-          ? [surchargeItem as SnapshotComposicaoValoresItemSurcharge]
-          : []),
+        ...(surchargeItem ? [surchargeItem as SnapshotComposicaoValoresItemSurcharge] : []),
       ];
       const totalContribution = allItemComposicoes.reduce(
         (acc, c) => (c.tipo === 'contribuicao' ? acc + c.lineContributionAmountCents : acc),

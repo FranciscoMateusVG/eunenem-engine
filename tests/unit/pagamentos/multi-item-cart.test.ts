@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
-  criarPagamentoPendente,
-  type CriarPagamentoPendenteInput,
-} from '../../../src/domain/pagamentos/entities/pagamento.js';
-import {
   criarItemContribuicao,
   criarItemPassthroughSurcharge,
 } from '../../../src/domain/pagamentos/entities/item-do-pagamento.js';
+import {
+  type CriarPagamentoPendenteInput,
+  criarPagamentoPendente,
+} from '../../../src/domain/pagamentos/entities/pagamento.js';
 import {
   type SnapshotComposicaoValoresAggregate,
   validarComposicaoAggregate,
@@ -66,8 +66,9 @@ function composicaoContribuicaoValida(input: {
   };
 }
 
-function aggregateFor(items: ReadonlyArray<{ tipo: string; [k: string]: unknown }>):
-  SnapshotComposicaoValoresAggregate {
+function aggregateFor(
+  items: ReadonlyArray<{ tipo: string; [k: string]: unknown }>,
+): SnapshotComposicaoValoresAggregate {
   let totalContribution = 0;
   let totalFee = 0;
   let totalReceiver = 0;
@@ -274,12 +275,6 @@ describe('validarComposicaoAggregate', () => {
   });
 
   it('rejeita aggregate quando totalReceiver != totalContribution (responsavelTaxa=contribuinte)', () => {
-    const composicaoA = composicaoContribuicaoValida({
-      idContribuicao: ID_CONTRIBUICAO_A,
-      quantidade: 1,
-      unitContribution: 100,
-      unitFee: 10,
-    });
     // We pass an aggregate where totalReceiver < totalContribution to
     // trip the responsavelTaxa invariant. To get past the sum check,
     // craft both fields to be self-consistent against items but wrong

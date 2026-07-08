@@ -129,9 +129,7 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
 
         const rows = lancamentos.map(rowFromLancamento);
 
-        // biome-ignore lint/suspicious/noExplicitAny: row shape uses
-        // Record<string, unknown> for the heterogeneous date+null inserts;
-        // the Kysely DB type doesn't narrow that cleanly.
+        // biome-ignore lint/suspicious/noExplicitAny: row shape uses Record<string, unknown> for the heterogeneous date+null inserts; the Kysely DB type doesn't narrow that cleanly.
         await (this.db as any).insertInto('lancamentos_financeiros').values(rows).execute();
 
         span.setStatus({ code: SpanStatusCode.OK });
@@ -573,7 +571,6 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
       async (span) => {
         span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
         try {
-          // biome-ignore lint/suspicious/noExplicitAny: see saveLancamentos
           const rows = (await sql<LancamentoRow>`
             SELECT l.*
               FROM lancamentos_financeiros l
@@ -623,9 +620,7 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
       async (span) => {
         span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'INSERT' });
         try {
-          // biome-ignore lint/suspicious/noExplicitAny: Kysely tx type
-          // narrowing isn't worth chasing for the heterogeneous mix of
-          // sql`` + insertInto here.
+          // biome-ignore lint/suspicious/noExplicitAny: Kysely tx type narrowing isn't worth chasing for the heterogeneous mix of sql`` + insertInto here.
           const result = await (this.db as any).transaction().execute(async (tx: any) => {
             // 1. SELECT FOR UPDATE on the eligible set. The lock here +
             //    the unique partial index on (id_campanha) WHERE

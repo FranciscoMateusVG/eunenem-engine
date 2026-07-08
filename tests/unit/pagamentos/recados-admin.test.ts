@@ -31,10 +31,7 @@ import type {
   IdContribuicao,
   IdOpcaoContribuicao,
 } from '../../../src/domain/arrecadacao/value-objects/ids.js';
-import type {
-  IdContribuicaoPagamento,
-  IdPagamento,
-} from '../../../src/domain/pagamentos/value-objects/ids.js';
+import type { IdPagamento } from '../../../src/domain/pagamentos/value-objects/ids.js';
 import { PagamentoNaoEncontradoError } from '../../../src/errors/pagamentos/nao-encontrado.error.js';
 import { marcarRecadoComoLido } from '../../../src/use-cases/pagamentos/marcar-recado-como-lido.js';
 import { marcarTodosRecadosComoLidos } from '../../../src/use-cases/pagamentos/marcar-todos-recados-como-lidos.js';
@@ -111,7 +108,9 @@ describe('obterRecadosAdminDeCampanha (aperture-16wrk)', () => {
     );
 
     expect(result.recados).toHaveLength(1);
-    const r = result.recados[0]!;
+    const r = result.recados[0];
+    expect(r).toBeDefined();
+    if (!r) throw new Error('expected recados[0] to be defined');
     expect(r.contribuinteNome).toBe('Tia Rosângela');
     expect(r.mensagem).toBe('Parabéns!');
     expect(r.lidaEm).toBeNull();
@@ -156,10 +155,10 @@ describe('obterRecadosAdminDeCampanha (aperture-16wrk)', () => {
 
     expect(result.counts).toEqual({ todas: 2, naoLidas: 1 });
     // Newest first.
-    expect(result.recados[0]!.contribuinteNome).toBe('B');
-    expect(result.recados[0]!.lidaEm).toBeNull();
-    expect(result.recados[1]!.contribuinteNome).toBe('A');
-    expect(result.recados[1]!.lidaEm).toBe('2026-06-10T12:00:00.000Z');
+    expect(result.recados[0]?.contribuinteNome).toBe('B');
+    expect(result.recados[0]?.lidaEm).toBeNull();
+    expect(result.recados[1]?.contribuinteNome).toBe('A');
+    expect(result.recados[1]?.lidaEm).toBe('2026-06-10T12:00:00.000Z');
   });
 
   it('excludes pendente, anonymous, and empty-mensagem rows', async () => {
@@ -234,7 +233,7 @@ describe('obterRecadosAdminDeCampanha (aperture-16wrk)', () => {
       s.idCampanha,
     );
     expect(result.recados).toHaveLength(1);
-    expect(result.recados[0]!.contribuicaoNome).toBeNull();
+    expect(result.recados[0]?.contribuicaoNome).toBeNull();
   });
 });
 
@@ -358,10 +357,7 @@ describe('marcarTodosRecadosComoLidos (aperture-16wrk)', () => {
         contribuinte: { nome: 'B', email: 'b@x.com', mensagem: 'hi' },
       }),
     );
-    await s.pagamentoRepository.marcarRecadoLido(
-      id1,
-      new Date('2026-06-10T10:00:00.000Z'),
-    );
+    await s.pagamentoRepository.marcarRecadoLido(id1, new Date('2026-06-10T10:00:00.000Z'));
 
     const result = await marcarTodosRecadosComoLidos(
       { pagamentoRepository: s.pagamentoRepository, observability },
@@ -403,6 +399,7 @@ describe('marcarTodosRecadosComoLidos (aperture-16wrk)', () => {
 
     // Confirm other campanha is still unread.
     const other = await s.pagamentoRepository.findRecadosAdminByCampanha(otherCampanha);
-    expect(other[0]!.lidaEm).toBeNull();
+    expect(other).toHaveLength(1);
+    expect(other[0]?.lidaEm).toBeNull();
   });
 });

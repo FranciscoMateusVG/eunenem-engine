@@ -104,11 +104,7 @@ function makeAprovadoLancamentos(): readonly LancamentoFinanceiro[] {
       idLancamentoPassthroughSurcharge: randomUUID(),
     },
   ];
-  return criarLancamentosParaPagamentoAprovado(
-    input,
-    ids,
-    new Date('2026-06-09T02:03:12.000Z'),
-  );
+  return criarLancamentosParaPagamentoAprovado(input, ids, new Date('2026-06-09T02:03:12.000Z'));
 }
 
 /**
@@ -142,7 +138,6 @@ function makeCaptureDb(): {
     }),
   });
 
-  // biome-ignore lint/suspicious/noExplicitAny: stub
   const selectBuilder = (table: string) => {
     let predicate: ((row: Record<string, unknown>) => boolean) | null = null;
     const builder = {

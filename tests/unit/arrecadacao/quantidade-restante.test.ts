@@ -3,14 +3,12 @@ import { describe, expect, it } from 'vitest';
 import { ContribuicaoRepositoryMemory } from '../../../src/adapters/arrecadacao/contribuicao-repository.memory.js';
 import { PagamentoRepositoryMemory } from '../../../src/adapters/pagamentos/repository.memory.js';
 import { criarContribuicao } from '../../../src/domain/arrecadacao/entities/contribuicao.js';
-import {
-  type IdCampanha,
-  type IdContribuicao,
-  type IdOpcaoContribuicao,
+import type {
+  IdCampanha,
+  IdContribuicao,
+  IdOpcaoContribuicao,
 } from '../../../src/domain/arrecadacao/value-objects/ids.js';
-import {
-  criarItemContribuicao,
-} from '../../../src/domain/pagamentos/entities/item-do-pagamento.js';
+import { criarItemContribuicao } from '../../../src/domain/pagamentos/entities/item-do-pagamento.js';
 import {
   criarPagamentoPendente,
   type Pagamento,
@@ -88,7 +86,9 @@ function makeAprovadoPagamento(idContribuicao: string, quantidade: number): Paga
 describe('quantidadeRestante', () => {
   it('retorna null quando a contribuição não existe', async () => {
     const deps = makeRepos();
-    const result = await quantidadeRestante(deps, { idContribuicao: randomUUID() as IdContribuicao });
+    const result = await quantidadeRestante(deps, {
+      idContribuicao: randomUUID() as IdContribuicao,
+    });
     expect(result).toBeNull();
   });
 

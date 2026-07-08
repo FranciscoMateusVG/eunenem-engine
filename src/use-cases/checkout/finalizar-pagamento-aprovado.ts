@@ -165,9 +165,7 @@ export async function finalizarPagamentoAprovado(
       if (!anchorItem || anchorItem.tipo !== 'contribuicao') {
         // Per locked decision #7, every cart has at least one contribuição
         // item — this branch is a defensive throw, not a normal path.
-        throw new Error(
-          `Pagamento ${aprovado.id} has no contribuicao item — invalid cart shape.`,
-        );
+        throw new Error(`Pagamento ${aprovado.id} has no contribuicao item — invalid cart shape.`);
       }
       const idContribuicaoAnchor = anchorItem.idContribuicao;
 

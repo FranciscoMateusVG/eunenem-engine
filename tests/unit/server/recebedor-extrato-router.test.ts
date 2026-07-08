@@ -49,8 +49,7 @@ function makePagamento(args: {
     idContribuicao: args.idContribuicao,
     status: (args.status ?? 'aprovado') as never,
     criadoEm: args.criadoEm ?? FAKE_NOW,
-    balanceTransactionAvailableOn:
-      args.availableOn === undefined ? FAKE_NOW : args.availableOn,
+    balanceTransactionAvailableOn: args.availableOn === undefined ? FAKE_NOW : args.availableOn,
     contribuinte:
       args.contribuinteNome === null || args.contribuinteNome === undefined
         ? null
@@ -441,10 +440,26 @@ describe('recebedor.extrato.summary — KPI aggregation (aperture-7g5sx)', () =>
       }),
     );
     await rig.livroFinanceiroRepository.saveLancamentos([
-      makeLancamento({ idPagamento: idPag1, idContribuicao: rig.idContribuicao, idCampanha: rig.idCampanha }),
-      makeLancamento({ idPagamento: idPag2, idContribuicao: rig.idContribuicao, idCampanha: rig.idCampanha }),
-      makeLancamento({ idPagamento: idPag3, idContribuicao: rig.idContribuicao, idCampanha: rig.idCampanha }),
-      makeLancamento({ idPagamento: idPag4, idContribuicao: rig.idContribuicao, idCampanha: rig.idCampanha }),
+      makeLancamento({
+        idPagamento: idPag1,
+        idContribuicao: rig.idContribuicao,
+        idCampanha: rig.idCampanha,
+      }),
+      makeLancamento({
+        idPagamento: idPag2,
+        idContribuicao: rig.idContribuicao,
+        idCampanha: rig.idCampanha,
+      }),
+      makeLancamento({
+        idPagamento: idPag3,
+        idContribuicao: rig.idContribuicao,
+        idCampanha: rig.idCampanha,
+      }),
+      makeLancamento({
+        idPagamento: idPag4,
+        idContribuicao: rig.idContribuicao,
+        idCampanha: rig.idCampanha,
+      }),
     ]);
 
     const result = await rig.caller.recebedor.extrato.summary({
@@ -487,10 +502,26 @@ describe('recebedor.extrato.summary — KPI aggregation (aperture-7g5sx)', () =>
     // Multiple lançamentos against the same pagamento should NOT
     // double-count items (each pagamento's items tallied once).
     await rig.livroFinanceiroRepository.saveLancamentos([
-      makeLancamento({ idPagamento: idPag1, idContribuicao: rig.idContribuicao, idCampanha: rig.idCampanha }),
-      makeLancamento({ idPagamento: idPag1, idContribuicao: rig.idContribuicao, idCampanha: rig.idCampanha }),
-      makeLancamento({ idPagamento: idPag2, idContribuicao: rig.idContribuicao, idCampanha: rig.idCampanha }),
-      makeLancamento({ idPagamento: idPag3, idContribuicao: rig.idContribuicao, idCampanha: rig.idCampanha }),
+      makeLancamento({
+        idPagamento: idPag1,
+        idContribuicao: rig.idContribuicao,
+        idCampanha: rig.idCampanha,
+      }),
+      makeLancamento({
+        idPagamento: idPag1,
+        idContribuicao: rig.idContribuicao,
+        idCampanha: rig.idCampanha,
+      }),
+      makeLancamento({
+        idPagamento: idPag2,
+        idContribuicao: rig.idContribuicao,
+        idCampanha: rig.idCampanha,
+      }),
+      makeLancamento({
+        idPagamento: idPag3,
+        idContribuicao: rig.idContribuicao,
+        idCampanha: rig.idCampanha,
+      }),
     ]);
 
     const result = await rig.caller.recebedor.extrato.summary({
@@ -1293,19 +1324,20 @@ describe('recebedor.listMovimentacoes (aperture-2u5vw)', () => {
 
     expect(result.movimentacoes).toHaveLength(2);
     // Sorted data DESC → repasse B (06-08) first, then repasse A (06-05).
-    expect(result.movimentacoes.map((m) => m.idRepasse)).toEqual([
-      idRepasseB,
-      idRepasseA,
-    ]);
+    expect(result.movimentacoes.map((m) => m.idRepasse)).toEqual([idRepasseB, idRepasseA]);
 
     const byRepasse = new Map(result.movimentacoes.map((m) => [m.idRepasse, m]));
-    const movA = byRepasse.get(idRepasseA)!;
+    const movA = byRepasse.get(idRepasseA);
+    expect(movA).toBeDefined();
+    if (!movA) throw new Error('expected movimentacao for idRepasseA');
     expect(movA.valorCents).toBe(7000); // 4500 + 2500
     expect(movA.quantidade).toBe(2);
     expect(movA.data).toBe(transfA.toISOString());
     expect(movA.tipo).toBe('transferencia_conta');
 
-    const movB = byRepasse.get(idRepasseB)!;
+    const movB = byRepasse.get(idRepasseB);
+    expect(movB).toBeDefined();
+    if (!movB) throw new Error('expected movimentacao for idRepasseB');
     expect(movB.valorCents).toBe(3000);
     expect(movB.quantidade).toBe(1);
     expect(movB.data).toBe(transfB.toISOString());

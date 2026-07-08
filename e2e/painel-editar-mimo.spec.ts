@@ -84,7 +84,8 @@ test.describe('Painel — Editar mimo saveEdit', () => {
     // asserts on; any failure path (404, 500) bubbles up as a non-2xx
     // and the expect below catches it.
     const updateResponsePromise = page.waitForResponse(
-      (resp) => resp.url().includes('/api/trpc/contribuicao.update') && resp.request().method() === 'POST',
+      (resp) =>
+        resp.url().includes('/api/trpc/contribuicao.update') && resp.request().method() === 'POST',
       { timeout: 10_000 },
     );
     await page.getByTestId('edit-save-btn').click();

@@ -1,10 +1,10 @@
 import type { IdCampanha, IdContribuicao } from '../../domain/arrecadacao/value-objects/ids.js';
+import type { MoneyCents } from '../../domain/money.js';
 import type { Pagamento } from '../../domain/pagamentos/entities/pagamento.js';
 import type {
   IdContribuicaoPagamento,
   IdPagamento,
 } from '../../domain/pagamentos/value-objects/ids.js';
-import type { MoneyCents } from '../../domain/money.js';
 
 /**
  * Visitor-safe mural projection (aperture-7eci9). Surfaces ONLY the fields
@@ -231,9 +231,7 @@ export interface PagamentoRepository {
    * No `limit` parameter — the admin page is one campanha's recados;
    * pagination is a future concern. Empty array when no matches.
    */
-  findRecadosAdminByCampanha(
-    idCampanha: IdCampanha,
-  ): Promise<readonly AdminRecadoRow[]>;
+  findRecadosAdminByCampanha(idCampanha: IdCampanha): Promise<readonly AdminRecadoRow[]>;
   /**
    * aperture-16wrk / 5v766 Phase A — idempotent first-write-wins
    * mark-as-read.

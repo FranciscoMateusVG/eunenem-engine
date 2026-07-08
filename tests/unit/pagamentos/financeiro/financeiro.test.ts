@@ -43,13 +43,15 @@ const criadoEm = new Date('2026-05-01T12:00:00.000Z');
 
 // Per-item helpers — local fixtures for the multi-item cart shape. Mirror
 // the helper pattern in `tests/unit/pagamentos/multi-item-cart.test.ts`.
-function contribuicaoItem(opts: {
-  idItemPagamento?: string;
-  idContribuicao?: string;
-  quantidade?: number;
-  unitContribution?: number;
-  unitFee?: number;
-} = {}): ItemDoPagamentoFinanceiro {
+function contribuicaoItem(
+  opts: {
+    idItemPagamento?: string;
+    idContribuicao?: string;
+    quantidade?: number;
+    unitContribution?: number;
+    unitFee?: number;
+  } = {},
+): ItemDoPagamentoFinanceiro {
   const quantidade = opts.quantidade ?? 1;
   const unitContribution = opts.unitContribution ?? 8000;
   const unitFee = opts.unitFee ?? 400;
@@ -69,7 +71,10 @@ function contribuicaoItem(opts: {
   };
 }
 
-function surchargeItem(amountCents: number, idItemPagamento = idItemSurcharge): ItemDoPagamentoFinanceiro {
+function surchargeItem(
+  amountCents: number,
+  idItemPagamento = idItemSurcharge,
+): ItemDoPagamentoFinanceiro {
   return {
     idItemPagamento,
     composicaoValoresItem: {
@@ -159,11 +164,7 @@ describe('criarLancamentosParaPagamentoAprovado', () => {
       },
     };
     expect(() =>
-      criarLancamentosParaPagamentoAprovado(
-        { ...pixInput, items: [badItem] },
-        pixIds,
-        criadoEm,
-      ),
+      criarLancamentosParaPagamentoAprovado({ ...pixInput, items: [badItem] }, pixIds, criadoEm),
     ).toThrow(/lineContributionAmountCents/);
   });
 
@@ -201,10 +202,7 @@ describe('criarLancamentosParaPagamentoAprovado', () => {
       idCampanha,
       statusPagamento: 'aprovado',
       idContribuicaoAnchor: idContribuicao,
-      items: [
-        contribuicaoItem({ unitContribution: 4500, unitFee: 225 }),
-        surchargeItem(224),
-      ],
+      items: [contribuicaoItem({ unitContribution: 4500, unitFee: 225 }), surchargeItem(224)],
     };
     const idsCartao: IdsLancamentosFinanceirosPorPagamento = [
       {
@@ -249,10 +247,7 @@ describe('criarLancamentosParaPagamentoAprovado', () => {
       idCampanha,
       statusPagamento: 'aprovado',
       idContribuicaoAnchor: idContribuicao,
-      items: [
-        contribuicaoItem({ unitContribution: 4500, unitFee: 225 }),
-        surchargeItem(224),
-      ],
+      items: [contribuicaoItem({ unitContribution: 4500, unitFee: 225 }), surchargeItem(224)],
     };
     const incompleteIds: IdsLancamentosFinanceirosPorPagamento = [
       {

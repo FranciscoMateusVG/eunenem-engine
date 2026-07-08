@@ -77,8 +77,7 @@ export async function registrarEfeitosFinanceirosPagamentoAprovado(
         throw new FinanceiroInputInvalidoError(message);
       }
 
-      const { idPagamento, idContribuicaoAnchor, idCampanha, statusPagamento, items } =
-        parsed.data;
+      const { idPagamento, idContribuicaoAnchor, idCampanha, statusPagamento, items } = parsed.data;
 
       span.setAttributes({
         'financeiro.pagamento.id': idPagamento,

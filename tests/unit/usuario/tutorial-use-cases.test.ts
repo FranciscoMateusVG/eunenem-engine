@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { UsuarioRepositoryMemory } from '../../../src/adapters/usuario/repository.memory.js';
-import type { Usuario, Conta } from '../../../src/domain/usuario/entities/usuario.js';
+import type { Conta, Usuario } from '../../../src/domain/usuario/entities/usuario.js';
 import type {
   IdContaUsuario,
   IdPlataformaReferencia,

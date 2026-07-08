@@ -89,8 +89,6 @@ describe('contribuicaoAtualizada — quantidade', () => {
   });
 
   it('rejeita patch com quantidade não-inteira', () => {
-    expect(() => contribuicaoAtualizada(original, { quantidade: 2.7 })).toThrow(
-      /inteiro positivo/,
-    );
+    expect(() => contribuicaoAtualizada(original, { quantidade: 2.7 })).toThrow(/inteiro positivo/);
   });
 });

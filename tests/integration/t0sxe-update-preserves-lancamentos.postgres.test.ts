@@ -88,9 +88,7 @@ describe('PagamentoRepositoryPostgres.update() preserves booked lançamentos (ap
     // passthrough_surcharge item. Grab their real ids from the aggregate
     // so the lançamentos FK to rows that actually exist.
     const contribItem = pagamento.intencao.items.find((i) => i.tipo === 'contribuicao');
-    const surchargeItem = pagamento.intencao.items.find(
-      (i) => i.tipo === 'passthrough_surcharge',
-    );
+    const surchargeItem = pagamento.intencao.items.find((i) => i.tipo === 'passthrough_surcharge');
     expect(contribItem).toBeDefined();
     expect(surchargeItem).toBeDefined();
     if (!contribItem || !surchargeItem) throw new Error('fixture must carry both item tipos');

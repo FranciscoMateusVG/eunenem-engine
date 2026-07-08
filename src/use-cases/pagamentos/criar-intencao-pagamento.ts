@@ -4,12 +4,12 @@ import { z } from 'zod/v4';
 import type { PagamentoEventPublisher } from '../../adapters/pagamentos/event-publisher.js';
 import type { PagamentoRepository } from '../../adapters/pagamentos/repository.js';
 import { MoneyCentsSchema } from '../../domain/money.js';
+import { ItemDoPagamentoSchema } from '../../domain/pagamentos/entities/item-do-pagamento.js';
 import {
   criarEventoPagamento,
   criarPagamentoPendente,
   type Pagamento,
 } from '../../domain/pagamentos/entities/pagamento.js';
-import { ItemDoPagamentoSchema } from '../../domain/pagamentos/entities/item-do-pagamento.js';
 import {
   IdIntencaoPagamentoSchema,
   IdPagamentoSchema,

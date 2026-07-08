@@ -24,11 +24,11 @@ import { CampanhaRepositoryMemory } from '../../src/adapters/arrecadacao/campanh
 import { ContribuicaoRepositoryMemory } from '../../src/adapters/arrecadacao/contribuicao-repository.memory.js';
 import { RecebedorRepositoryMemory } from '../../src/adapters/arrecadacao/recebedor-repository.memory.js';
 import { PagamentoRepositoryMemory } from '../../src/adapters/pagamentos/repository.memory.js';
-import { ObjectStorageMemory } from '../../src/adapters/storage/object-storage.memory.js';
 import {
   ID_PLATAFORMA_EUNENEM,
   PlataformaRepositoryMemory,
 } from '../../src/adapters/plataforma/repository.memory.js';
+import { ObjectStorageMemory } from '../../src/adapters/storage/object-storage.memory.js';
 import { AuthServiceMemoria } from '../../src/adapters/usuario/auth-service.memory.js';
 import { UsuarioRepositoryMemory } from '../../src/adapters/usuario/repository.memory.js';
 import { criarRecebedorInicial } from '../../src/domain/arrecadacao/entities/recebedor.js';

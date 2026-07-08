@@ -21,13 +21,15 @@ const criadoEm = new Date('2026-05-01T12:00:00.000Z');
 
 // Plan 0016 Phase 2 (aperture-eg1s2): multi-item cart shape. Local
 // helpers mirror those in `tests/unit/financeiro/financeiro.test.ts`.
-function contribuicaoItem(opts: {
-  idItemPagamento?: string;
-  idContribuicao?: string;
-  quantidade?: number;
-  unitContribution?: number;
-  unitFee?: number;
-} = {}): ItemDoPagamentoFinanceiro {
+function contribuicaoItem(
+  opts: {
+    idItemPagamento?: string;
+    idContribuicao?: string;
+    quantidade?: number;
+    unitContribution?: number;
+    unitFee?: number;
+  } = {},
+): ItemDoPagamentoFinanceiro {
   const quantidade = opts.quantidade ?? 1;
   const unitContribution = opts.unitContribution ?? 8000;
   const unitFee = opts.unitFee ?? 400;
@@ -47,7 +49,10 @@ function contribuicaoItem(opts: {
   };
 }
 
-function surchargeItem(amountCents: number, idItemPagamento = idItemSurcharge): ItemDoPagamentoFinanceiro {
+function surchargeItem(
+  amountCents: number,
+  idItemPagamento = idItemSurcharge,
+): ItemDoPagamentoFinanceiro {
   return {
     idItemPagamento,
     composicaoValoresItem: {
@@ -171,11 +176,7 @@ describe('LivroFinanceiroRepositoryMemory', () => {
 
   it('cartao 3-lancamento round-trip: findLancamentosByIdPagamento returns all three (aperture-bjshv)', async () => {
     const repository = new LivroFinanceiroRepositoryMemory();
-    const lancamentos = criarLancamentosParaPagamentoAprovado(
-      cartaoInput,
-      cartaoIds(),
-      criadoEm,
-    );
+    const lancamentos = criarLancamentosParaPagamentoAprovado(cartaoInput, cartaoIds(), criadoEm);
     expect(lancamentos).toHaveLength(3);
 
     await repository.saveLancamentos(lancamentos);

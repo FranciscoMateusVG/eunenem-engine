@@ -713,7 +713,10 @@ export function makePagamento(overrides: MakePagamentoOverrides = {}): Pagamento
     items.push(
       criarItemPassthroughSurcharge({
         id: randomUUID() as never,
-        composicaoValoresItem: { tipo: 'passthrough_surcharge', amountCents: surchargeCents as never },
+        composicaoValoresItem: {
+          tipo: 'passthrough_surcharge',
+          amountCents: surchargeCents as never,
+        },
         criadoEm,
       }),
     );
