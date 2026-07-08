@@ -1,5 +1,6 @@
 import { TRPCClientError } from "@trpc/client";
 import { trpc } from "@/lib/trpc.js";
+import { useCampanhaRota } from "@/lib/campanha-rota.js";
 
 /**
  * Extrato data layer — plan q2d4b Track 4 (post-swap).
@@ -311,16 +312,29 @@ export function useStubSolicitarTransferencia(opts: {
 }
 
 /**
- * slug → idCampanha resolution via the authenticated user's session.
- * `trpc.auth.me()` already returns `idCampanha` for the current user's
- * default campanha (aperture-p8i01). v1 assumes one-campanha-per-user;
- * a future multi-campanha world will need a real slug-keyed lookup.
+ * Which campanha this painel surface is about.
  *
- * The `slug` param is informational v1 — we don't currently use it to
- * disambiguate. If the authenticated session's slug doesn't match the
- * URL slug, the wire still resolves to the session-user's campanha
- * (defensive). Operator visiting their own painel URL while logged in
- * sees their own data.
+ * aperture-n44wk (multi-campanha, the REAL Bug 2 fix): the ROUTE decides —
+ * /painel/:slug/c/:idCampanha resolves THAT campanha (via useCampanhaRota),
+ * so the extrato summary/list/transfer all read the CLICKED campanha's real
+ * data. Bare /painel/:slug falls back to `trpc.auth.me()`'s default
+ * campanha (aperture-p8i01 — the oldest), preserving back-compat. The
+ * backend owner-gates every idCampanha-keyed read/mutation
+ * (resolveAdminOfCampanha), so a non-owned route id fails server-side,
+ * non-leaking.
+ *
+ * The `slug` param remains informational — the session + route carry the
+ * real resolution.
+ *
+ * ⚠️ KNOWN EDGE (per-campanha recebedor): `hasRecebedor` still reflects the
+ * DEFAULT campanha's recebedor (auth.me has no per-campanha read). On a
+ * non-default campanha the TransferModal may open the wrong branch; the
+ * owner-gated mutation keeps it SAFE (server rejects), just not pretty.
+ * Tracked as a follow-up with Rex (per-campanha hasRecebedor read).
+ *
+ * NAMING NOTE: the "Stub" in these hook names is historical (pre-7g5sx) —
+ * the bodies call REAL tRPC. The lie in the names mis-diagnosed Bug 2 once
+ * already; rename tracked in the same follow-up.
  */
 export function useStubCampanhaIdForSlug(_slug: string): {
   idCampanha: string | null;
@@ -340,8 +354,11 @@ export function useStubCampanhaIdForSlug(_slug: string): {
   error: { message: string } | null;
 } {
   const me = trpc.auth.me.useQuery();
+  // Route campanha (clicked /c/:id) OUTRANKS the session default — this is
+  // the single line that makes every extrato surface per-campanha.
+  const idCampanhaRota = useCampanhaRota();
   return {
-    idCampanha: me.data?.idCampanha ?? null,
+    idCampanha: idCampanhaRota ?? me.data?.idCampanha ?? null,
     hasRecebedor: me.data?.hasRecebedor ?? false,
     isLoading: me.isLoading,
     error: me.error ? { message: me.error.message } : null,
