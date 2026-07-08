@@ -60,7 +60,7 @@ import { ConfirmarPresencaView } from "@/ConfirmarPresencaPage";
 //   - título + "adicionar convidado" affordance (inline form, local state)
 //   - mensagem padrão card with [nome]/[link] variable chips + invite-type toggle
 //   - guest list: per-guest card with WhatsApp send /
-//     reenviar / lembrar + an RSVP override dropdown, and the "recebido ♡"
+//     reenviar + an RSVP override dropdown, and the "recebido ♡"
 //     handwritten stamp on confirmed guests.
 //
 // Mock-first: no fetch / auth / backend. Every action mutates local state
@@ -113,12 +113,6 @@ const IconPlus = (p: { size?: number }) => (
   <Icon size={p.size}>
     <line x1="12" y1="5" x2="12" y2="19" />
     <line x1="5" y1="12" x2="19" y2="12" />
-  </Icon>
-);
-const IconBell = (p: { size?: number }) => (
-  <Icon size={p.size}>
-    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-    <path d="M13.7 21a2 2 0 0 1-3.4 0" />
   </Icon>
 );
 const IconPhone = (p: { size?: number; style?: CSSProperties }) => (
@@ -509,11 +503,9 @@ function RsvpMenu({
 function GuestSendActions({
   g,
   onSend,
-  onRemind,
 }: {
   g: Convidado;
   onSend: (id: string, isResend?: boolean) => void;
-  onRemind: (id: string) => void;
 }) {
   return (
     <>
@@ -522,17 +514,7 @@ function GuestSendActions({
           <IconWhatsapp /> enviar
         </Button>
       )}
-      {g.presenca === "talvez" && (
-        <Button
-          variant="coral"
-          size="sm"
-          disabled={g.reminded}
-          onClick={() => onRemind(g.id)}
-        >
-          <IconBell /> {g.reminded ? "lembrado" : "lembrar"}
-        </Button>
-      )}
-      {g.presenca !== "nao_enviado" && g.presenca !== "talvez" && (
+      {g.presenca !== "nao_enviado" && (
         <Button
           variant="ghost"
           size="sm"
@@ -549,29 +531,14 @@ function GuestSendActions({
 function GuestMobilePrimaryAction({
   g,
   onSend,
-  onRemind,
 }: {
   g: Convidado;
   onSend: (id: string, isResend?: boolean) => void;
-  onRemind: (id: string) => void;
 }) {
   if (g.presenca === "nao_enviado") {
     return (
       <Button variant="whatsapp" size="sm" onClick={() => onSend(g.id)}>
         <IconWhatsapp /> enviar
-      </Button>
-    );
-  }
-
-  if (g.presenca === "talvez") {
-    return (
-      <Button
-        variant="coral"
-        size="sm"
-        disabled={g.reminded}
-        onClick={() => onRemind(g.id)}
-      >
-        <IconBell /> {g.reminded ? "lembrado" : "lembrar"}
       </Button>
     );
   }
@@ -591,12 +558,10 @@ function GuestMobilePrimaryAction({
 function GuestCard({
   g,
   onSend,
-  onRemind,
   onSetRsvp,
 }: {
   g: Convidado;
   onSend: (id: string, isResend?: boolean) => void;
-  onRemind: (id: string) => void;
   onSetRsvp: (id: string, presenca: StatusPresencaConvidado) => void;
 }) {
   return (
@@ -638,23 +603,11 @@ function GuestCard({
               <IconPhone size={12} /> {g.phone}
             </span>
             <PresencaBadge presenca={g.presenca} />
-            {g.reminded && (
-              <span
-                style={{
-                  fontFamily: FONT_CAVEAT,
-                  fontSize: 16,
-                  color: "var(--coral-pink)",
-                  transform: "rotate(-3deg)",
-                }}
-              >
-                lembrete enviado ♡
-              </span>
-            )}
           </div>
         </div>
 
         <div className="cv-guest-desktop-actions">
-          <GuestSendActions g={g} onSend={onSend} onRemind={onRemind} />
+          <GuestSendActions g={g} onSend={onSend} />
           <RsvpMenu guestId={g.id} onSetRsvp={onSetRsvp} variant="desktop" />
         </div>
       </div>
@@ -676,17 +629,10 @@ function GuestCard({
 
         <div className="cv-guest-mobile-row2">
           <PresencaBadge presenca={g.presenca} />
-          {g.reminded && (
-            <span className="cv-guest-mobile-reminded">lembrete enviado ♡</span>
-          )}
         </div>
 
         <div className="cv-guest-mobile-row3">
-          <GuestMobilePrimaryAction
-            g={g}
-            onSend={onSend}
-            onRemind={onRemind}
-          />
+          <GuestMobilePrimaryAction g={g} onSend={onSend} />
         </div>
       </div>
     </div>
@@ -1518,22 +1464,16 @@ function VirtualInvitePreviewSection({
 
 // ---------- page body ----------
 export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
-  // aperture-lista-convidados — the guest list is the real backend source
-  // of truth; `reminded` has no domain field, so it's tracked locally
-  // (keyed by convidado id) and merged in on render.
+  // aperture-lista-convidados — the guest list is the real backend source of truth.
   const listaQuery = useListaDeConvidadosData();
   const alterarPresenca = useAlterarPresencaConvidado();
   const adicionarConvidado = useAdicionarConvidado();
   const salvarFormatoMensagem = useSalvarFormatoMensagem();
-  const [remindedIds, setRemindedIds] = useState<Set<string>>(new Set());
 
   const guests = useMemo<Convidado[]>(() => {
     const convidados = listaQuery.data?.lista?.convidados ?? [];
-    return convidados.map((c) => {
-      const g = convidadoFromSnapshot(c);
-      return remindedIds.has(g.id) ? { ...g, reminded: true } : g;
-    });
-  }, [listaQuery.data, remindedIds]);
+    return convidados.map((c) => convidadoFromSnapshot(c));
+  }, [listaQuery.data]);
 
   // aperture-dkkau — the compositor now holds the FULL ConviteState (mirroring
   // ConviteBody) so saving re-serializes the whole convite intact. We only
@@ -1625,10 +1565,6 @@ export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
   const sendOne = (id: string) => {
     const guest = guests.find((g) => g.id === id);
     if (guest) setSendTarget(guest);
-  };
-  const remindOne = (id: string) => {
-    setRemindedIds((ids) => new Set(ids).add(id));
-    toast.success("lembrete enviado ♡");
   };
   const setRsvp = async (id: string, presenca: StatusPresencaConvidado) => {
     try {
@@ -1938,7 +1874,6 @@ export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
                 key={g.id}
                 g={g}
                 onSend={sendOne}
-                onRemind={remindOne}
                 onSetRsvp={setRsvp}
               />
             ))
@@ -2272,12 +2207,6 @@ export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
           align-items: center;
           gap: 8px;
           flex-wrap: wrap;
-        }
-        .cv-guest-mobile-reminded {
-          font-family: var(--font-caveat), cursive;
-          font-size: 16px;
-          color: var(--coral-pink);
-          transform: rotate(-3deg);
         }
         .cv-guest-mobile-row3 {
           width: 100%;

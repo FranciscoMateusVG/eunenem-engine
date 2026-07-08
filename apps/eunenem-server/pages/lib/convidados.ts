@@ -16,13 +16,12 @@ export type FormatoMensagemConvite = ListaDeConvidadosSnapshot['formatoMensagemC
 export const FORMATO_MENSAGEM_CONVITE_DEFAULT: FormatoMensagemConvite = 'texto';
 
 /** UI-facing guest shape used by ConvidadosBody — `presenca` is the domain
- * source of truth; `reminded` is UI-only local state, never persisted. */
+ * source of truth. */
 export interface Convidado {
   id: string;
   name: string;
   phone: string;
   presenca: StatusPresencaConvidado;
-  reminded: boolean;
 }
 
 export function convidadoFromSnapshot(c: ConvidadoSnapshot): Convidado {
@@ -31,7 +30,6 @@ export function convidadoFromSnapshot(c: ConvidadoSnapshot): Convidado {
     name: c.nome,
     phone: c.numeroCelular,
     presenca: c.presenca,
-    reminded: false,
   };
 }
 
