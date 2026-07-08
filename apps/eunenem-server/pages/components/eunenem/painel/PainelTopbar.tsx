@@ -1,4 +1,5 @@
 import { useSignOut } from "@/lib/auth";
+import { useCampanhaRota } from "@/lib/campanha-rota";
 import { painelHref, type PainelSection } from "@/lib/painelRoutes";
 
 // aperture-7nius / aperture-0mplv / aperture-paf3m — Painel topbar nav.
@@ -42,12 +43,15 @@ export function PainelTopbar({
   // aperture-1wknu — wire the previously-dead logout button (it was a bare
   // <button> with no onClick, so clicking did nothing).
   const { signOut, isPending: isSigningOut } = useSignOut();
+  // aperture-h0hom — inside a specific campanha's painel, brand + MINHA
+  // PÁGINA keep that campanha's context (bare otherwise).
+  const idCampanha = useCampanhaRota();
 
   return (
     <header className="painel-topbar" aria-label="Painel — navegação">
       <div className="painel-topbar-inner">
         <a
-          href={painelHref(slug)}
+          href={painelHref(slug, undefined, idCampanha)}
           className="painel-topbar-brand"
           aria-label="EuNeném — painel"
         >
@@ -97,7 +101,7 @@ export function PainelTopbar({
              *  no sub-section. (aperture-paf3m: AJUDA branch removed.) */}
             <li>
               <a
-                href={painelHref(slug)}
+                href={painelHref(slug, undefined, idCampanha)}
                 aria-current={onPainelRoot ? "page" : undefined}
                 className={`painel-topbar-link${onPainelRoot ? " is-active" : ""}`}
               >

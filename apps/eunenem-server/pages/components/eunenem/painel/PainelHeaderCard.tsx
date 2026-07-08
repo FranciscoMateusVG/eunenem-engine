@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { useTweaks } from "../TweaksContext";
 import type { PainelEventSnapshot } from "@/lib/mocks/painelDemo";
 import { painelHref } from "@/lib/painelRoutes";
+import { useCampanhaRota } from "@/lib/campanha-rota";
 
 // aperture-9qu7k — Painel root hero composition (target screenshot 32).
 //
@@ -53,6 +54,7 @@ const MONTHS_PT = [
 ];
 
 export function PainelHeaderCard({ snapshot, slug }: Props) {
+  const idCampanha = useCampanhaRota();
   const { tweaks } = useTweaks();
   const [copied, setCopied] = useState(false);
   const [now, setNow] = useState<number>(() => Date.now());
@@ -210,7 +212,7 @@ export function PainelHeaderCard({ snapshot, slug }: Props) {
             (not a button) so the painel router picks it up via the same
             full-page nav path every other menu row uses. */}
         <a
-          href={painelHref(slug, "presentes")}
+          href={painelHref(slug, "presentes", idCampanha)}
           className="painel-recebido-cta"
         >
           <span>resgatar valores</span>

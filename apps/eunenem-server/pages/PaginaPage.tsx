@@ -35,7 +35,19 @@ import { NotFoundPage } from './NotFoundPage.js';
 // this slug). CartDrawerProvider sits inside it to surface open/close
 // for the navbar + add-to-cart triggers. The actual <CartDrawer /> mounts
 // at PaginaPage level so it overlays the entire page chrome.
-export function PaginaPage({ slug }: { slug: string }) {
+export function PaginaPage({
+  slug,
+  idCampanha,
+}: {
+  slug: string;
+  /**
+   * aperture-h0hom — specific campanha (from /pagina/:slug/c/:id). Threaded
+   * into getPerfilPublicoBySlug once Rex's optional-idCampanha inputs merge
+   * (aperture-yeauv); until then the route resolves the oldest, same as bare.
+   */
+  idCampanha?: string;
+}) {
+  void idCampanha; // held for the yeauv query-input wiring commit
   const perfil = trpc.perfil.getPerfilPublicoBySlug.useQuery(
     { slug },
     { staleTime: 60_000, retry: false },

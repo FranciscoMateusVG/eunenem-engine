@@ -46,12 +46,12 @@ const SLUG_REGEX = /^[a-z][a-z0-9-]{2,29}$/;
 export function resolveRoute(pathname: string):
   | { kind: 'landing' }
   | { kind: 'campanhas' }
-  | { kind: 'pagina'; slug: string }
+  | { kind: 'pagina'; slug: string; idCampanha?: string }
   | { kind: 'pagina-sucesso'; slug: string }
   | { kind: 'confirmar-presenca'; slug: string; idConvidado: string }
-  | { kind: 'painel'; slug: string }
+  | { kind: 'painel'; slug: string; idCampanha?: string }
   | { kind: 'painel-convite-preview'; slug: string }
-  | { kind: 'painel-section'; slug: string; section: PainelSection }
+  | { kind: 'painel-section'; slug: string; section: PainelSection; idCampanha?: string }
   | { kind: 'termos-de-uso' }
   | { kind: 'trpc-smoke' }
   | { kind: 'auth-demo' }
@@ -181,6 +181,23 @@ export function resolveRoute(pathname: string):
   if (sucessoMatch && sucessoMatch[1] && SLUG_REGEX.test(sucessoMatch[1])) {
     return { kind: 'pagina-sucesso', slug: sucessoMatch[1] };
   }
+  // /pagina/<slug>/c/<idCampanha> (aperture-h0hom, bvz0p Phase 1) — the
+  // public page of a SPECIFIC campanha. Matched BEFORE the bare rule; the
+  // 'c' segment marker keeps it out of any future sub-path namespace.
+  // idCampanha is free-shape (UUID today): unknown/unowned ids resolve to
+  // a not-found body at fetch time, same convention as the admin drills.
+  const paginaCampanhaMatch = pathname.match(/^\/pagina\/([^/]+)\/c\/([^/]+)\/?$/);
+  if (
+    paginaCampanhaMatch?.[1] &&
+    paginaCampanhaMatch[2] &&
+    SLUG_REGEX.test(paginaCampanhaMatch[1])
+  ) {
+    return {
+      kind: 'pagina',
+      slug: paginaCampanhaMatch[1],
+      idCampanha: paginaCampanhaMatch[2],
+    };
+  }
   const paginaMatch = pathname.match(/^\/pagina\/([^/]+)\/?$/);
   if (paginaMatch && paginaMatch[1] && SLUG_REGEX.test(paginaMatch[1])) {
     return { kind: 'pagina', slug: paginaMatch[1] };
@@ -216,6 +233,28 @@ export function resolveRoute(pathname: string):
     return { kind: 'painel-convite-preview', slug: painelConvitePreviewMatch[1] };
   }
 
+  // /painel/<slug>/c/<idCampanha>(/<section>) (aperture-h0hom, bvz0p
+  // Phase 1) — a SPECIFIC campanha's painel. Matched BEFORE the bare rule;
+  // bare /painel/<slug> keeps meaning the oldest campanha (back-compat).
+  const painelCampanhaMatch = pathname.match(
+    /^\/painel\/([^/]+)\/c\/([^/]+)(?:\/([^/]+))?\/?$/,
+  );
+  if (
+    painelCampanhaMatch?.[1] &&
+    painelCampanhaMatch[2] &&
+    SLUG_REGEX.test(painelCampanhaMatch[1])
+  ) {
+    const slug = painelCampanhaMatch[1];
+    const idCampanha = painelCampanhaMatch[2];
+    const section = painelCampanhaMatch[3];
+    if (!section) {
+      return { kind: 'painel', slug, idCampanha };
+    }
+    if (isPainelSection(section)) {
+      return { kind: 'painel-section', slug, section, idCampanha };
+    }
+    return { kind: 'not-found' };
+  }
   const painelMatch = pathname.match(/^\/painel\/([^/]+)(?:\/([^/]+))?\/?$/);
   if (painelMatch && painelMatch[1] && SLUG_REGEX.test(painelMatch[1])) {
     const slug = painelMatch[1];
@@ -261,15 +300,23 @@ function pickPage(route: ReturnType<typeof resolveRoute>, pathname: string) {
   if (route.kind === 'landing') return <LandingPage />;
   if (route.kind === 'campanhas') return <CampanhasPage />;
   if (route.kind === 'termos-de-uso') return <TermosDeUsoPage />;
-  if (route.kind === 'pagina') return <PaginaPage slug={route.slug} />;
+  if (route.kind === 'pagina')
+    return <PaginaPage slug={route.slug} idCampanha={route.idCampanha} />;
   if (route.kind === 'pagina-sucesso') return <PaginaSucessoPage slug={route.slug} />;
   if (route.kind === 'confirmar-presenca')
     return <ConfirmarPresencaPage slug={route.slug} idConvidado={route.idConvidado} />;
-  if (route.kind === 'painel') return <PainelPage slug={route.slug} />;
+  if (route.kind === 'painel')
+    return <PainelPage slug={route.slug} idCampanha={route.idCampanha} />;
   if (route.kind === 'painel-convite-preview')
     return <PainelConvitePreviewPage slug={route.slug} />;
   if (route.kind === 'painel-section')
-    return <PainelSectionPage slug={route.slug} section={route.section} />;
+    return (
+      <PainelSectionPage
+        slug={route.slug}
+        section={route.section}
+        idCampanha={route.idCampanha}
+      />
+    );
   if (route.kind === 'trpc-smoke') return <TrpcSmokePage />;
   if (route.kind === 'auth-demo') return <AuthDemoPage />;
   if (route.kind === 'faq') return <FaqPage />;

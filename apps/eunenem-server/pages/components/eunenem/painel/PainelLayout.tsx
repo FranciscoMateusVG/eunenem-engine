@@ -4,6 +4,7 @@ import { TweaksProvider } from "@/components/eunenem/TweaksContext";
 import type { Genero } from "@/lib/concordancia";
 import type { TweaksState } from "@/lib/mocks/tweaksDefaults";
 import type { PainelSection } from "@/lib/painelRoutes";
+import { CampanhaRotaProvider } from "@/lib/campanha-rota";
 import { PainelTopbar } from "./PainelTopbar";
 
 // aperture-vv3i — Shared painel layout.
@@ -23,6 +24,13 @@ import { PainelTopbar } from "./PainelTopbar";
 interface PainelLayoutProps {
   /** Creator slug (mock: "helena"). Used for routing + as the topbar key. */
   slug: string;
+  /**
+   * aperture-h0hom — the SPECIFIC campanha this painel is scoped to (from
+   * the /painel/:slug/c/:idCampanha route). Provided to every descendant
+   * via CampanhaRotaProvider so nav links preserve the context. undefined =
+   * bare URL (oldest campanha, back-compat).
+   */
+  idCampanha?: string;
   /**
    * aperture-3ic62 — the REAL baby name from the creator's own profile
    * (`perfil.getPerfil` → nomeBebe). When provided, it seeds the Tweaks
@@ -56,6 +64,7 @@ interface PainelLayoutProps {
 
 export function PainelLayout({
   slug,
+  idCampanha,
   activeSection,
   babyName,
   eventDate,
@@ -88,9 +97,11 @@ export function PainelLayout({
   if (genero !== undefined) initialTweaks.genero = genero;
 
   return (
-    <TweaksProvider initialState={initialTweaks}>
-      <PainelTopbar slug={slug} activeSection={activeSection} />
-      <div className="painel-app">{children}</div>
-    </TweaksProvider>
+    <CampanhaRotaProvider idCampanha={idCampanha}>
+      <TweaksProvider initialState={initialTweaks}>
+        <PainelTopbar slug={slug} activeSection={activeSection} />
+        <div className="painel-app">{children}</div>
+      </TweaksProvider>
+    </CampanhaRotaProvider>
   );
 }

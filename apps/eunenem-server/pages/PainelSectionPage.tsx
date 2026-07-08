@@ -50,13 +50,16 @@ export const PAINEL_SECTION_PAGES: Partial<
 export function PainelSectionPage({
   slug,
   section,
+  idCampanha,
 }: {
   slug: string;
   section: PainelSection;
+  /** aperture-h0hom — specific campanha; undefined = oldest (bare URL). */
+  idCampanha?: string;
 }) {
   const Body = PAINEL_SECTION_PAGES[section];
   return (
-    <PainelLayout slug={slug} activeSection={section}>
+    <PainelLayout slug={slug} idCampanha={idCampanha} activeSection={section}>
       {Body ? <Body slug={slug} /> : <PainelPlaceholder slug={slug} section={section} />}
     </PainelLayout>
   );

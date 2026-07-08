@@ -1,5 +1,6 @@
 import { conviteStateFromData, useConvitePreviewData } from '@/lib/convite';
 import { painelConvitePreviewHref, painelHref } from '@/lib/painelRoutes';
+import { useCampanhaRota } from '@/lib/campanha-rota';
 import { InvitePreview } from './ConviteBody';
 
 const PREVIEW_CSS = `
@@ -19,6 +20,7 @@ export function ConvitePreviewBody({
 }: {
   slug: string;
 }) {
+  const idCampanha = useCampanhaRota();
   const conviteQuery = useConvitePreviewData(slug);
 
   if (conviteQuery.isLoading) {
@@ -38,7 +40,7 @@ export function ConvitePreviewBody({
           não consegui carregar o convite salvo agora.
         </span>
         <div className="flex flex-wrap gap-3">
-          <a href={painelHref(slug, 'convite')} className="cv-preview-btn ghost sm">
+          <a href={painelHref(slug, 'convite', idCampanha)} className="cv-preview-btn ghost sm">
             voltar para editar
           </a>
           <button type="button" className="cv-preview-btn ghost sm" onClick={() => void conviteQuery.refetch()}>
@@ -55,7 +57,7 @@ export function ConvitePreviewBody({
         <style>{PREVIEW_CSS}</style>
         <span className="text-sm text-[var(--ink-soft)]">ainda não existe convite salvo para esse painel.</span>
         <div className="flex flex-wrap gap-3">
-          <a href={painelHref(slug, 'convite')} className="cv-preview-btn ghost sm">
+          <a href={painelHref(slug, 'convite', idCampanha)} className="cv-preview-btn ghost sm">
             criar convite
           </a>
           <a href={painelConvitePreviewHref(slug)} className="cv-preview-btn ghost sm">
@@ -98,7 +100,7 @@ export function ConvitePreviewBody({
         </div>
       </div>
 
-      <a href={painelHref(slug, 'convite')} className="cv-preview-btn ghost sm">
+      <a href={painelHref(slug, 'convite', idCampanha)} className="cv-preview-btn ghost sm">
         editar convite
       </a>
     </section>

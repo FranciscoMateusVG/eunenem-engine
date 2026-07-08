@@ -513,7 +513,9 @@ function CardNova({ campanha, index }: { campanha: CampanhaNovaDTO; index: numbe
         {campanha.quantidadeMimos !== null && (
           <div className="camp-card-mimos">{mimosLabel(campanha.quantidadeMimos)}</div>
         )}
-        <a className="camp-cta" href={`/painel/${campanha.slug}`}>
+        {/* aperture-h0hom — each card opens ITS OWN campanha's painel
+         *  (/c/:idCampanha), not the oldest-resolving bare URL. */}
+        <a className="camp-cta" href={`/painel/${campanha.slug}/c/${campanha.id}`}>
           acessar lista ♡
         </a>
       </div>

@@ -1,4 +1,5 @@
 import { PAINEL_SECTION_META, painelHref, type PainelSection } from "@/lib/painelRoutes";
+import { useCampanhaRota } from "@/lib/campanha-rota";
 
 // aperture-vv3i — "em construção" body for painel sections whose real page
 // hasn't been built yet. Rendered inside PainelLayout so the route is LIVE and
@@ -15,6 +16,7 @@ interface Props {
 }
 
 export function PainelPlaceholder({ slug, section }: Props) {
+  const idCampanha = useCampanhaRota();
   const meta = PAINEL_SECTION_META[section];
 
   return (
@@ -68,7 +70,7 @@ export function PainelPlaceholder({ slug, section }: Props) {
       </p>
 
       <a
-        href={painelHref(slug)}
+        href={painelHref(slug, undefined, idCampanha)}
         className="painel-cta"
         style={{
           display: "inline-flex",
