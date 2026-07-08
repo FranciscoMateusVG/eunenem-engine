@@ -37,6 +37,8 @@
       "!**/dist",
       "!**/node_modules",
       "!**/coverage",
+      "!**/test-results",
+      "!**/playwright-report",
       "!**/*.generated.ts",
       "!apps"
     ]
