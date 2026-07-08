@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 import { PainelHeaderCard } from '@/components/eunenem/painel/PainelHeaderCard';
 import { PainelLayout } from '@/components/eunenem/painel/PainelLayout';
+import { useCampanhasList } from '@/lib/campanhas';
 import { PainelMenu } from '@/components/eunenem/painel/PainelMenu';
 import { PainelTutorialOverlay } from '@/components/eunenem/painel/PainelTutorialOverlay';
 import { PainelTutorialTrigger } from '@/components/eunenem/painel/PainelTutorialTrigger';
@@ -82,6 +83,18 @@ export function PainelPage({
   // below must read THAT campanha, not the oldest.
   const { idCampanha: idCampanhaPadrao } = useStubCampanhaIdForSlug(slug);
   const idCampanha = idCampanhaRota ?? idCampanhaPadrao;
+
+  // aperture-snfin — the painel identity chip must name the DISPLAYED
+  // campanha (clicked /c/:id, or the default/oldest on bare). campanhas.list
+  // (mebax, deployed) carries every {id, titulo} the user owns — resolve the
+  // displayed id against it. null = still resolving (placeholder chip, never
+  // the wrong campanha's name); undefined = list unavailable (chip hidden).
+  const campanhasQ = useCampanhasList();
+  const campanhaTitulo = campanhasQ.data
+    ? (campanhasQ.data.novas.find((c) => c.id === idCampanha)?.titulo ?? null)
+    : campanhasQ.isLoading
+      ? null
+      : undefined;
   const summary = useStubExtratoSummary(idCampanha ?? '');
   const listaQuery = useContribuicaoList();
 
@@ -290,7 +303,7 @@ export function PainelPage({
       eventDate={eventDate}
       genero={genero}
     >
-      <PainelHeaderCard snapshot={snapshot} slug={slug} />
+      <PainelHeaderCard snapshot={snapshot} slug={slug} campanhaTitulo={campanhaTitulo} />
       <PainelMenu groups={groups} slug={slug} />
       <PainelTutorialTrigger
         visible={!overlayOpen}

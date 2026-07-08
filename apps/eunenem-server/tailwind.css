@@ -7409,3 +7409,31 @@ button.painel-topbar-link:hover {
     transition: none;
   }
 }
+
+/* =================================================================
+ * aperture-snfin — painel campanha-identity chip. Names WHICH list
+ * this painel belongs to (clicked /c/:id or the default on bare) —
+ * the h1 stays the per-user "página da <bebê>". Patrick Hand on a
+ * lilac wash, gently tilted like the scrapbook stickers.
+ * ================================================================= */
+
+.painel-campanha-chip {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 6px;
+  margin: 2px 0 4px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--lilac-soft) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--lilac) 45%, transparent);
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 16px;
+  color: var(--plum);
+  line-height: 1.2;
+  transform: rotate(-1deg);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

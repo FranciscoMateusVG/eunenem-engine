@@ -46,6 +46,15 @@ interface Props {
   /** Painel slug — needed to build the RESGATAR pill href to the
    *  extrato page (`/painel/<slug>/presentes`). */
   slug: string;
+  /**
+   * aperture-snfin — the DISPLAYED campanha's titulo (clicked /c/:id, or the
+   * default/oldest on a bare URL), resolved by PainelPage via campanhas.list.
+   * Renders as the identity chip so clicking card A vs card B shows painel A
+   * vs painel B (Izzy's 118sb gate asserts its text). null = still
+   * resolving (chip shows a placeholder — never the wrong campanha);
+   * undefined = list unavailable (chip hidden).
+   */
+  campanhaTitulo?: string | null;
 }
 
 const MONTHS_PT = [
@@ -53,7 +62,7 @@ const MONTHS_PT = [
   "jul", "ago", "set", "out", "nov", "dez",
 ];
 
-export function PainelHeaderCard({ snapshot, slug }: Props) {
+export function PainelHeaderCard({ snapshot, slug, campanhaTitulo }: Props) {
   const idCampanha = useCampanhaRota();
   const { tweaks } = useTweaks();
   const [copied, setCopied] = useState(false);
@@ -148,6 +157,14 @@ export function PainelHeaderCard({ snapshot, slug }: Props) {
         <span className="painel-hc-greeting">
           olá{snapshot.greetingTo ? `, ${snapshot.greetingTo}` : ""} ♡
         </span>
+        {/* aperture-snfin — which list this painel belongs to. Uniform across
+         *  bare (oldest) + /c/:id (clicked) routes; Izzy's click-through gate
+         *  asserts this text equals the campanha titulo. */}
+        {campanhaTitulo !== undefined && (
+          <span className="painel-campanha-chip" data-testid="painel-campanha-titulo">
+            {campanhaTitulo ?? "…"}
+          </span>
+        )}
         <h1 className="painel-hc-title">
           página {artigoPosse(tweaks.genero)} <span className="hl">{babyNameDisplay}</span>
         </h1>
