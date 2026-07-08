@@ -932,8 +932,8 @@ describe('g1wl4 — per-hop optional idCampanha, THROUGH the router (PR #344)', 
       // Sentinel B pins exactly this edge.
     });
 
-    // TODO(aperture-jlvet): flip both to it() when the cross-check lands.
-    it.fails('jlvet sentinel A: CROSS-USER — campanha A sessionId under victim slug B → NOT_FOUND, zero PII', async () => {
+    // aperture-jlvet LANDED (PR #348) — both sentinels flipped to it(), asserting the FIXED behavior.
+    it('jlvet sentinel A: CROSS-USER — campanha A sessionId under victim slug B → NOT_FOUND, zero PII', async () => {
       const rig = await buildRig();
       const owner = await rig.addUser(uniqueEmail('sucesso-owner'));
       const victim = await rig.addUser(uniqueEmail('sucesso-victim'));
@@ -967,7 +967,7 @@ describe('g1wl4 — per-hop optional idCampanha, THROUGH the router (PR #344)', 
       expect(crossSlug.message).toBe(garbage.message);
     });
 
-    it.fails('jlvet sentinel B: same owner, BARE success URL for a NON-oldest campanha pagamento → NOT_FOUND (success_url must be campanha-addressed)', async () => {
+    it('jlvet sentinel B: same owner, BARE success URL for a NON-oldest campanha pagamento → NOT_FOUND (success_url must be campanha-addressed)', async () => {
       const rig = await buildRig();
       const user = await rig.addUser(uniqueEmail('sucesso-bare'));
       const c2 = (await user.caller.campanhas.criar({ titulo: 'Segunda p/ sucesso' })).id;

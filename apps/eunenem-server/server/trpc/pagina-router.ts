@@ -435,7 +435,18 @@ export const paginaRouter = t.router({
 
       const idPagamento = randomUUID() as IdPagamento;
       const idIntencaoPagamento = randomUUID() as IdIntencaoPagamento;
-      const returnUrl = `${ctx.deps.publicOrigin}/pagina/${encodeURIComponent(input.slug)}/sucesso?sessionId={CHECKOUT_SESSION_ID}`;
+      // aperture-jlvet: when the checkout is campanha-ADDRESSED (yeauv
+      // per-campanha routing), the success_url must carry the same addressing
+      // (?idCampanha=) — post-jlvet the success page cross-checks the
+      // pagamento against the slug-resolved campanha, and a BARE success URL
+      // resolves the OLDEST, so an addressed checkout on a non-oldest
+      // campanha would fail-closed on its own success page without this.
+      // Query form (not /c/ path) because the pagina-sucesso route is bare
+      // (App.tsx resolveRoute has no /c/ sucesso variant).
+      const sucessoAddress = input.idCampanha
+        ? `&idCampanha=${encodeURIComponent(input.idCampanha)}`
+        : '';
+      const returnUrl = `${ctx.deps.publicOrigin}/pagina/${encodeURIComponent(input.slug)}/sucesso?sessionId={CHECKOUT_SESSION_ID}${sucessoAddress}`;
 
       // Plan 0016 (aperture-3htxg): visitor flow stays single-contribuição
       // for now (multi-item visitor cart is the separate 0017 follow-on).
@@ -522,7 +533,12 @@ export const paginaRouter = t.router({
 
       const idPagamento = randomUUID() as IdPagamento;
       const idIntencaoPagamento = randomUUID() as IdIntencaoPagamento;
-      const returnUrl = `${ctx.deps.publicOrigin}/pagina/${encodeURIComponent(input.slug)}/sucesso?sessionId={CHECKOUT_SESSION_ID}`;
+      // aperture-jlvet: campanha-addressed checkout → addressed success_url
+      // (see iniciarPagamentoContribuicao for the full rationale).
+      const sucessoAddress = input.idCampanha
+        ? `&idCampanha=${encodeURIComponent(input.idCampanha)}`
+        : '';
+      const returnUrl = `${ctx.deps.publicOrigin}/pagina/${encodeURIComponent(input.slug)}/sucesso?sessionId={CHECKOUT_SESSION_ID}${sucessoAddress}`;
 
       // Mint one item-id per cart line, plus one more for the surcharge
       // item when the visitor picked cartão. The saga enforces the
@@ -602,10 +618,24 @@ export const paginaRouter = t.router({
   obterSucessoPagamento: t.procedure
     .input(ObterSucessoPagamentoInputSchema)
     .query(async ({ ctx, input }) => {
-      const { usuario } = await resolvePaginaBySlug(ctx, input.slug, input.idCampanha);
+      const { usuario, campanha } = await resolvePaginaBySlug(ctx, input.slug, input.idCampanha);
 
       const pagamento = await ctx.deps.pagamentoRepository.findByExternalRef(input.sessionId);
       if (!pagamento) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Pagamento nao encontrado' });
+      }
+
+      // aperture-jlvet (Cipher ruling): the sessionId is a high-entropy but
+      // campanha-UNSCOPED bearer token, and this payload carries PII
+      // (contribuinte nome/email, recadinho, valor). Cross-check the pagamento
+      // against the slug-resolved campanha so a sessionId leaked through a
+      // side channel is NOT usable on any other slug's success page.
+      // `intencao.idCampanha` is the hoisted invariant carrier on the
+      // pagamento root. Mismatch → the SAME NOT_FOUND as an unknown sessionId
+      // (byte-equal — no existence signal, no FORBIDDEN oracle). A pagamento
+      // belongs to exactly one campanha, so no legit flow breaks; addressed
+      // checkouts carry ?idCampanha= on the success_url (see iniciar*).
+      if (pagamento.intencao.idCampanha !== campanha.id) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Pagamento nao encontrado' });
       }
 
