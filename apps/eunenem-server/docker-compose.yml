@@ -60,6 +60,19 @@ services:
       # https://eunenem.com consumption target for a non-prod handoff.
       - CLERK_SECRET_KEY=${CLERK_SECRET_KEY:-}
       - LEGACY_SITE_ORIGIN=${LEGACY_SITE_ORIGIN:-}
+      # Legacy-user snapshot injection (aperture-op09b / 791lz). The REAL
+      # customer list can't be committed (the deploy mirror is PUBLIC), so it's
+      # mounted at runtime OUTSIDE the git tree and its container path is passed
+      # here. Empty by default → the loader uses the committed 1-email stub.
+      # Prod: Peppy sets LEGACY_USERS_PATH=/data/legacy-users.json in Dokploy.
+      - LEGACY_USERS_PATH=${LEGACY_USERS_PATH:-}
+    # Mount the legacy-user source to a path OUTSIDE /app (Cipher ses0u: a path
+    # under /app could be baked by a Dockerfile COPY; /data cannot). Dev mounts
+    # the committed stub by default; prod overrides LEGACY_USERS_SOURCE (via
+    # Dokploy) to a files-dir path holding the real (0600, git-ignored) file.
+    # `:ro` — the container never writes it.
+    volumes:
+      - '${LEGACY_USERS_SOURCE:-./lib/seed-data/legacy-1.0-users.json}:/data/legacy-users.json:ro'
 
   # Postgres sidecar — holds the engine domain schema (Arrecadação,
   # Pagamentos, Financeiro, Usuário) + BetterAuth's tables (users,
