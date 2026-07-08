@@ -10,6 +10,7 @@ import {
   UsuarioPlataformaNaoEncontradaError,
   UsuarioSessaoInvalidaError,
 } from '../../../../src/index.js';
+import { buscarCampanhasLegado } from '../../lib/legacy-users.js';
 import { trustedClientIp } from '../lib/security/trusted-client-ip.js';
 import { isEmailAdmin } from '../auth/admin-allowlist.js';
 import type { TrpcContext } from './context.js';
@@ -850,6 +851,16 @@ export const authRouter = t.router({
     const perfil = await deps.perfilCriadorRepository.findByUsuarioId(usuario.id);
     const needsOnboarding = (perfil?.conteudo.nomeBebe ?? '').trim().length === 0;
 
+    // aperture — legacy-first routing signal. `true` when the caller's OWN
+    // email matches the 1.0 legacy list, via the SAME matcher campanhas.list
+    // uses (buscarCampanhasLegado, case-insensitive, self-only — no client
+    // email input). The frontend routes a legacy user to /campanhas BEFORE the
+    // needsOnboarding wizard gate: a fresh-signup legacy user has an empty
+    // profile (needsOnboarding=true) but must land on /campanhas to see their
+    // 1.0 card, never the onboarding wizard. Pure in-memory match over the
+    // static snapshot — no extra DB call, no legacy-system runtime call.
+    const isLegacy = buscarCampanhasLegado(usuario.email).length > 0;
+
     return {
       idUsuario: usuario.id,
       idConta: usuario.idConta,
@@ -905,6 +916,16 @@ export const authRouter = t.router({
        * baby name via perfil.atualizar.
        */
       needsOnboarding,
+      /**
+       * aperture — `true` when the caller's email is in the 1.0 legacy list
+       * (same case-insensitive matcher as campanhas.list; self-only). The
+       * frontend routing signal that takes PRECEDENCE over needsOnboarding: a
+       * legacy user always lands on /campanhas (to see their 1.0 card), even
+       * on a fresh signup where their empty profile would otherwise route them
+       * into the onboarding wizard. Provider-agnostic (keys off email, not how
+       * they authenticated). No extra DB call — in-memory snapshot match.
+       */
+      isLegacy,
       expiraEm,
     };
   }),
