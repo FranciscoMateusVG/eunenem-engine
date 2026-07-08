@@ -2,6 +2,7 @@ import { useMe } from '@/lib/auth';
 import { conviteStateFromData, useConvitePreviewData } from '@/lib/convite';
 import { menuItemHref, painelConvitePreviewHref, painelHref } from '@/lib/painelRoutes';
 import { InvitePreview } from './ConviteBody';
+import { useCampanhaRota } from "@/lib/campanha-rota";
 
 const PREVIEW_CSS = `
 .cv-preview-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:11px 18px;border-radius:999px;border:1px solid transparent;background:var(--lilac);color:#fff;font-family:var(--font-dm-sans),sans-serif;font-weight:600;font-size:12.5px;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;transition:transform .12s,box-shadow .15s,background .15s;color-scheme:light;text-decoration:none;box-shadow:var(--shadow-cta);white-space:nowrap}
