@@ -132,7 +132,14 @@ export function CampanhasPage() {
   const [novoTitulo, setNovoTitulo] = useState('');
   // aperture-1yx1n §1.5 — the setup wizard opens right after criar (and from
   // a card's "completar" affordance). null = closed.
-  const [setupCampanha, setSetupCampanha] = useState<{ id: string; titulo: string } | null>(null);
+  const [setupCampanha, setSetupCampanha] = useState<{
+    id: string;
+    titulo: string;
+    // aperture-y8e9w — the campanha's current slug (completar re-entry):
+    // the wizard prefills it and re-confirming it says so, instead of the
+    // misleading fresh-grab 'disponível'.
+    campanhaSlug?: string | null;
+  } | null>(null);
   const utils = trpc.useUtils();
   const criarM = useCampanhasCriar({
     onSuccess: (data) => {
@@ -170,7 +177,7 @@ export function CampanhasPage() {
   const fecharSetup = useCallback(() => setSetupCampanha(null), []);
   useEscape(setupCampanha !== null, fecharSetup);
   const abrirSetupDoCard = useCallback((c: CampanhaNovaDTO) => {
-    setSetupCampanha({ id: c.id, titulo: c.titulo });
+    setSetupCampanha({ id: c.id, titulo: c.titulo, campanhaSlug: c.campanhaSlug });
   }, []);
 
   // One shared scrapbook sequence across BOTH platforms so tints/tapes/tilts

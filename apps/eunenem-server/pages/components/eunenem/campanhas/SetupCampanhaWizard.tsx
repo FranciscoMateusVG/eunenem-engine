@@ -76,15 +76,29 @@ export function SetupCampanhaWizard({
   campanha,
   onClose,
 }: {
-  campanha: { id: string; titulo: string };
+  campanha: {
+    id: string;
+    titulo: string;
+    /**
+     * aperture-y8e9w — the campanha's CURRENT slug, when already chosen
+     * (completar re-entry). Drives the prefill AND the own-slug copy:
+     * re-confirming your existing slug is not a fresh grab, and 'disponível'
+     * read as one (operator's walk — validating Ameno's own 'francisco'
+     * looked like it was claiming a new address).
+     */
+    campanhaSlug?: string | null;
+  };
   onClose: () => void;
 }) {
   const utils = trpc.useUtils();
+  const slugAtual = campanha.campanhaSlug ?? null;
   const [babyName, setBabyName] = useState('');
   const [genero, setGenero] = useState<Genero | null>(null);
   const [eventType, setEventType] = useState<TipoEventoSlug | ''>('');
   const [eventDate, setEventDate] = useState('');
-  const [slug, setSlug] = useState(() => deriveCampanhaSlug(campanha.titulo));
+  // Prefill: the campanha's OWN slug when it has one, else the titulo
+  // suggestion (fresh campanha / never chosen).
+  const [slug, setSlug] = useState(() => slugAtual ?? deriveCampanhaSlug(campanha.titulo));
   const [slugError, setSlugError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -100,10 +114,13 @@ export function SetupCampanhaWizard({
     };
   }, [slug]);
 
+  // aperture-y8e9w — re-confirming the campanha's OWN current slug needs no
+  // server round-trip and must not read as a fresh grab.
+  const isOwnCurrentSlug = slugAtual !== null && debouncedSlug === slugAtual;
   const formatoOk = SLUG_RE.test(debouncedSlug);
   const validar = trpc.campanhas.validarSlug.useQuery(
     { idCampanha: campanha.id, slug: debouncedSlug },
-    { enabled: formatoOk, staleTime: 10_000, retry: false },
+    { enabled: formatoOk && !isOwnCurrentSlug, staleTime: 10_000, retry: false },
   );
 
   const slugStatus = useMemo(() => {
@@ -111,6 +128,10 @@ export function SetupCampanhaWizard({
     if (!slug.trim())
       return { tone: 'muted' as const, text: 'sem endereço por enquanto — dá pra escolher depois ♡' };
     if (slug !== debouncedSlug) return { tone: 'muted' as const, text: 'conferindo…' };
+    // aperture-y8e9w — own-slug copy: 'disponível ♡' on your own current
+    // address reads like a fresh claim (operator confusion). Name the truth.
+    if (isOwnCurrentSlug)
+      return { tone: 'good' as const, text: 'essa já é a slug dessa lista ♡' };
     if (!formatoOk) return { tone: 'bad' as const, text: MOTIVO_TEXT.formato };
     if (validar.isFetching) return { tone: 'muted' as const, text: 'conferindo…' };
     if (validar.data) {
@@ -123,7 +144,7 @@ export function SetupCampanhaWizard({
     // Shim window (backend not deployed yet) or transient error — stay
     // neutral; definirSlug adjudicates at submit either way.
     return { tone: 'muted' as const, text: '' };
-  }, [slug, debouncedSlug, formatoOk, validar.isFetching, validar.data, slugError]);
+  }, [slug, debouncedSlug, formatoOk, isOwnCurrentSlug, validar.isFetching, validar.data, slugError]);
 
   // aperture-1yx1n — real inference post-#359 (shim swap point fired).
   const definirSlug = trpc.campanhas.definirSlug.useMutation();
@@ -138,8 +159,9 @@ export function SetupCampanhaWizard({
 
     // 1. Slug first — a conflict keeps the modal open with the field error
     //    and NOTHING written (same order as the account OnboardingWizard).
+    //    aperture-y8e9w — unchanged own slug → skip the write (no-op).
     const slugTrim = slug.trim();
-    if (slugTrim) {
+    if (slugTrim && slugTrim !== slugAtual) {
       try {
         await definirSlug.mutateAsync({ idCampanha: campanha.id, slug: slugTrim });
       } catch (err) {
