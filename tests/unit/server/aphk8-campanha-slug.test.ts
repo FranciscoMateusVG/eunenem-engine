@@ -332,6 +332,49 @@ describe('campanhas.validarSlug (aperture-aphk8)', () => {
       rig.anonCaller.campanhas.validarSlug({ idCampanha: a.idCampanha, slug: 'qualquer' }),
     ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
   });
+
+  // ── aperture-y8e9w: adversarial repro of the operator report ─────────────
+  // Operator saw "francisco → disponível" in the slug picker while campanha
+  // "Ameno" (same conta) already held that slug. This pins the exact shape,
+  // BOTH directions, plus the self-exclusion explanation for what he saw.
+  it("y8e9w repro: a slug held by the conta's OTHER campanha is em_uso — both directions", async () => {
+    const rig = await buildRig();
+    // "Ameno" = the signup default (oldest) campanha.
+    const { caller, idCampanha: idAmeno } = await rig.addUser('y8e9w@example.com', 'Francisco');
+    rig.advanceClock(60_000);
+    const nova = await caller.campanhas.criar({ titulo: 'Segunda lista' });
+
+    // Direction 1: slug lives on the OLDEST (Ameno), validated from the
+    // newest campanha's wizard — the operator-reported shape.
+    await caller.campanhas.definirSlug({ idCampanha: idAmeno, slug: 'francisco' });
+    expect(await caller.campanhas.validarSlug({ idCampanha: nova.id, slug: 'francisco' })).toEqual({
+      disponivel: false,
+      motivo: 'em_uso',
+    });
+    // ...and definirSlug (the enforcement point) refuses it too.
+    await expect(
+      caller.campanhas.definirSlug({ idCampanha: nova.id, slug: 'francisco' }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST', message: 'slug_em_uso' });
+
+    // Direction 2: slug on the NEWEST, validated from the oldest's wizard.
+    await caller.campanhas.definirSlug({ idCampanha: nova.id, slug: 'outra-lista' });
+    expect(
+      await caller.campanhas.validarSlug({ idCampanha: idAmeno, slug: 'outra-lista' }),
+    ).toEqual({ disponivel: false, motivo: 'em_uso' });
+
+    // The benign explanation for the operator's screenshot: validating a
+    // campanha's OWN slug from its OWN wizard is self-excluded — available
+    // by design (the re-save flow must not self-collide).
+    expect(await caller.campanhas.validarSlug({ idCampanha: idAmeno, slug: 'francisco' })).toEqual({
+      disponivel: true,
+      motivo: null,
+    });
+    // Normalization can't dodge the check either: case/whitespace variants
+    // of the taken slug are still em_uso from the other campanha.
+    expect(
+      await caller.campanhas.validarSlug({ idCampanha: nova.id, slug: '  FRANCISCO ' }),
+    ).toEqual({ disponivel: false, motivo: 'em_uso' });
+  });
 });
 
 describe('pagina.resolverCampanhaSlug (aperture-aphk8, PUBLIC)', () => {

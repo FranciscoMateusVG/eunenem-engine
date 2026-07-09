@@ -467,6 +467,29 @@ export function describeCampanhaRepositoryConformance(name: string, options: Con
       await expect(repo.updateSlug(randomUUID(), 'qualquer')).resolves.not.toThrow();
     });
 
+    // aperture-y8e9w: validarSlug's em_uso check reads slugs THROUGH
+    // findCampanhasByAdministrador (checkCampanhaSlug iterates its result).
+    // The postgres impl currently hydrates via findById, so slug comes along
+    // transitively — but that delegation is an implementation detail. If a
+    // future optimization flattens the N+1 into a hand-rolled row mapping
+    // and forgets slug, validarSlug silently reports every taken slug as
+    // available (the exact operator-reported symptom). This pins the port
+    // promise explicitly at the read path validarSlug actually uses.
+    it('findCampanhasByAdministrador hydrates slug set via updateSlug (aperture-y8e9w)', async () => {
+      const idConta = randomUUID();
+      const campanhaA = makeCampanha({ idsAdministradores: [idConta] });
+      const campanhaB = makeCampanha({ idsAdministradores: [idConta] });
+      await options.saveCampanha(repo, campanhaA);
+      await options.saveCampanha(repo, campanhaB);
+
+      await repo.updateSlug(campanhaA.id, 'francisco');
+
+      const campanhas = await repo.findCampanhasByAdministrador(idConta);
+      const porId = new Map(campanhas.map((c) => [c.id, c.slug]));
+      expect(porId.get(campanhaA.id)).toBe('francisco');
+      expect(porId.get(campanhaB.id)).toBeNull();
+    });
+
     it('updateSlug emits db.arrecadacao_campanhas.updateSlug span (aperture-aphk8)', async () => {
       await repo.updateSlug(randomUUID(), 'qualquer');
       const span = findSpan(options.getSpans(), 'db.arrecadacao_campanhas.updateSlug');
