@@ -224,12 +224,23 @@ export function OnboardingWizard({ onDone }: { onDone: (slug: string) => void })
       await utils.auth.me.invalidate();
       onDone(finalSlug);
     } catch {
-      // The slug (if changed) is already committed at this point — redirect to
-      // the painel anyway so the user isn't trapped; the profile fields they can
-      // still set from the painel editor. Better than stranding them in the modal.
+      // aperture-5ho5j — perfil.atualizar FAILED: keep the wizard OPEN so the
+      // user can retry. (Previously we fired onDone here anyway, which closed
+      // the wizard with the profile still empty → needsOnboarding stayed true
+      // → the wizard reappeared on the next painel load in a silent loop.)
+      //
+      // Retry-safety of the slug half: if the slug was changed, atualizarSlug
+      // already committed it above — and re-running it with the same value is
+      // a backend no-op for the same owner (postgres adapter is a plain UPDATE
+      // on the user's own row, no self-conflict on UNIQUE(id_plataforma, slug);
+      // memory adapter explicitly allows owner === idUsuario), so no
+      // client-side "slugCommitted" guard is needed. We still invalidate
+      // auth.me so me.slug refreshes to the committed value → defaultSlug
+      // catches up → slugChanged goes false and the retry skips the slug
+      // mutation entirely.
       await utils.auth.me.invalidate();
-      toast.error("salvei seu link, mas não consegui salvar o resto agora — ajuste no seu perfil ♡");
-      onDone(finalSlug);
+      toast.error("não consegui salvar agora — tenta de novo? ♡");
+      setSubmitting(false);
     }
   };
 
