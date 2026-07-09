@@ -43,21 +43,9 @@ class CampanhaSlugNaoEncontradaError extends Error {
   public readonly name = 'CampanhaSlugNaoEncontradaError';
 }
 
-/** Public resolver — no session required. Mirrors evento-convite-router's
- *  resolveCampanhaBySlug (used by the public confirmar-presenca page). */
-async function resolveCampanhaBySlug(ctx: TrpcContext, slug: string): Promise<{ campanha: Campanha }> {
-  const usuario = await ctx.deps.usuarioRepository.findUsuarioBySlug(ID_PLATAFORMA_EUNENEM, slug as never);
-  if (!usuario) {
-    throw new CampanhaSlugNaoEncontradaError('Usuario do slug nao encontrado');
-  }
-
-  const campanha = await ctx.deps.campanhaRepository.findByAdministrador(usuario.idConta);
-  if (!campanha) {
-    throw new CampanhaSlugNaoEncontradaError('Usuario do slug nao administra nenhuma campanha');
-  }
-
-  return { campanha };
-}
+// aperture-rvhlt: the old public resolveCampanhaBySlug (slug → OLDEST
+// campanha) was removed — the public RSVP path now resolves convidado-first
+// (see resolveConvidadoPublico) and no longer needs a slug→campanha hop.
 
 async function resolveCallerCampanha(
   ctx: TrpcContext,
@@ -189,29 +177,53 @@ const AdicionarConvidadoInputSchema = z.object({
 });
 
 /** Resolves a convidado from public route params (slug + idConvidado), with
- *  no session — used by the /confirmar-presenca page. Verifies the convidado
- *  actually belongs to that slug's evento/lista before returning it. */
+ *  no session — used by the /confirmar-presenca page.
+ *
+ *  aperture-rvhlt (fblrt §3.3.1) — CONVIDADO-FIRST resolution. The old shape
+ *  resolved slug → OLDEST campanha → evento → lista and then searched for the
+ *  convidado, so a convidado on any NON-oldest campanha's lista was
+ *  unreachable (guest RSVP for a 2nd campanha impossible). `idConvidado`
+ *  (already in the guest URL) uniquely determines lista → evento → campanha
+ *  via the convidados.lista_id FK + UNIQUE(id_campanha) chain, so we resolve
+ *  FROM the convidado and use the slug ONLY as a validation cross-check: the
+ *  resolved campanha must belong to the slug's conta, else the SAME
+ *  NOT_FOUND a wrong/unknown convidado gets (no existence oracle). Zero URL
+ *  changes — every existing guest link keeps working. */
 async function resolveConvidadoPublico(
   ctx: TrpcContext,
   slug: string,
   idConvidado: string,
 ): Promise<{ lista: ListaDeConvidados; convidado: Convidado }> {
-  const { campanha } = await resolveCampanhaBySlug(ctx, slug);
-  const evento = await resolveCallerEvento(ctx, campanha);
-  if (!evento) {
-    throw new ListaDeConvidadosNaoEncontradaError();
-  }
-
-  const lista = await obterListaDeConvidadosPorIdEvento(
-    {
-      listaDeConvidadosRepository: ctx.deps.listaDeConvidadosRepository,
-      observability: ctx.deps.observability,
-    },
-    { idEvento: evento.id as IdEvento },
+  const lista = await ctx.deps.listaDeConvidadosRepository.findByConvidadoId(
+    idConvidado as IdConvidado,
   );
+  if (!lista) {
+    throw new ConvidadoNaoEncontradoError(idConvidado as IdConvidado);
+  }
 
   const convidado = lista.convidados.find((c) => c.id === idConvidado);
   if (!convidado) {
+    // Defensive — findByConvidadoId returned this lista BECAUSE it holds the
+    // convidado; a miss here means a torn read. Same non-leaking error.
+    throw new ConvidadoNaoEncontradoError(idConvidado as IdConvidado, lista.id);
+  }
+
+  // Slug cross-check: the convidado's campanha must belong to the slug's
+  // conta. Wrong slug behaves EXACTLY like an unknown convidado (the old
+  // behavior's posture, preserved).
+  const evento = await ctx.deps.eventoRepository.findById(lista.idEvento);
+  if (!evento) {
+    throw new ListaDeConvidadosNaoEncontradaError();
+  }
+  const usuario = await ctx.deps.usuarioRepository.findUsuarioBySlug(
+    ID_PLATAFORMA_EUNENEM,
+    slug as never,
+  );
+  if (!usuario) {
+    throw new CampanhaSlugNaoEncontradaError('Usuario do slug nao encontrado');
+  }
+  const campanha = await ctx.deps.campanhaRepository.findById(evento.idCampanha);
+  if (!campanha || !campanha.idsAdministradores.includes(usuario.idConta)) {
     throw new ConvidadoNaoEncontradoError(idConvidado as IdConvidado, lista.id);
   }
 

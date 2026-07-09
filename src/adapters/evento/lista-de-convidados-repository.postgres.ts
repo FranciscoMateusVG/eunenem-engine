@@ -128,6 +128,36 @@ export class ListaDeConvidadosRepositoryPostgres implements ListaDeConvidadosRep
     });
   }
 
+  async findByConvidadoId(idConvidado: IdConvidado): Promise<ListaDeConvidados | undefined> {
+    return tracer.startActiveSpan('db.listasDeConvidados.findByConvidadoId', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        // aperture-rvhlt: a convidado belongs to exactly one lista
+        // (convidados.lista_id FK) — resolve the lista_id, then reuse the
+        // hydrating loader so the returned aggregate is shaped identically
+        // to every other read path.
+        const row = await this.db
+          .selectFrom('convidados')
+          .select('lista_id')
+          .where('id', '=', idConvidado)
+          .executeTakeFirst();
+        if (!row) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return undefined;
+        }
+        const lista = await this.findHydratedBy('id', row.lista_id, this.db);
+        span.setStatus({ code: SpanStatusCode.OK });
+        return lista;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
   async alterarPresencaConvidado(
     id: IdListaDeConvidados,
     idConvidado: IdConvidado,

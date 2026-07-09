@@ -78,6 +78,31 @@ export class ListaDeConvidadosRepositoryMemory implements ListaDeConvidadosRepos
     });
   }
 
+  async findByConvidadoId(idConvidado: IdConvidado): Promise<ListaDeConvidados | undefined> {
+    return tracer.startActiveSpan('db.listasDeConvidados.findByConvidadoId', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        // aperture-rvhlt: a convidado belongs to exactly one lista — linear
+        // scan mirrors the postgres convidados.lista_id FK resolution.
+        let encontrada: ListaDeConvidados | undefined;
+        for (const lista of this.byId.values()) {
+          if (lista.convidados.some((c) => c.id === idConvidado)) {
+            encontrada = lista;
+            break;
+          }
+        }
+        span.setStatus({ code: SpanStatusCode.OK });
+        return encontrada;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
   async alterarPresencaConvidado(
     id: IdListaDeConvidados,
     idConvidado: IdConvidado,

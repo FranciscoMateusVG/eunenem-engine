@@ -55,6 +55,40 @@ export function describeListaDeConvidadosRepositoryConformance(
       expect(await repo.findByIdEvento(randomUUID())).toBeUndefined();
     });
 
+    // aperture-rvhlt — convidado-first resolution for the public RSVP flow.
+    it('finds the guest list by a convidado id', async () => {
+      const convidado = makeConvidado();
+      const lista = makeListaDeConvidados({ convidados: [makeConvidado(), convidado] });
+      await options.saveLista(repo, lista);
+
+      const found = await repo.findByConvidadoId(convidado.id);
+      // Order-insensitive on convidados — the port promises the RIGHT lista,
+      // not a convidado ordering (the postgres hydrator orders by id).
+      expect(found?.id).toBe(lista.id);
+      expect(found?.idEvento).toBe(lista.idEvento);
+      const byId = (c: Convidado, d: Convidado) => (c.id < d.id ? -1 : 1);
+      expect([...(found?.convidados ?? [])].sort(byId)).toEqual([...lista.convidados].sort(byId));
+    });
+
+    it('findByConvidadoId resolves the RIGHT lista among several (per-campanha isolation)', async () => {
+      const convidadoA = makeConvidado({ nome: 'Convidado A' });
+      const convidadoB = makeConvidado({ nome: 'Convidado B' });
+      const listaA = makeListaDeConvidados({ convidados: [convidadoA] });
+      const listaB = makeListaDeConvidados({ convidados: [convidadoB] });
+      await options.saveLista(repo, listaA);
+      await options.saveLista(repo, listaB);
+
+      expect((await repo.findByConvidadoId(convidadoA.id))?.id).toBe(listaA.id);
+      expect((await repo.findByConvidadoId(convidadoB.id))?.id).toBe(listaB.id);
+    });
+
+    it('findByConvidadoId returns undefined for an unknown convidado', async () => {
+      const lista = makeListaDeConvidados();
+      await options.saveLista(repo, lista);
+
+      expect(await repo.findByConvidadoId(randomUUID())).toBeUndefined();
+    });
+
     it('round-trips multiple guests', async () => {
       const lista = makeListaDeConvidados({
         convidados: [
