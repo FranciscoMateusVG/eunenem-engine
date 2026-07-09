@@ -1,13 +1,17 @@
 // Plan 0017 / aperture-16flf — visitor cart state for the public
-// `/pagina/<slug>` marketplace. React Context + useReducer + localStorage
-// persistence. No external state library — Context is enough for an MVP
-// scoped to one section's worth of state.
+// `/pagina/<slug>` marketplace. React Context + useReducer, IN-MEMORY ONLY.
+// No external state library — Context is enough for an MVP scoped to one
+// section's worth of state.
+//
+// aperture-90rab (operator decision) — NO persistence. The old
+// localStorage bucket was keyed by USER slug, so two campanhas of the same
+// account shared one cart (cross-campanha leak). Rather than re-key it,
+// the cart resets on every page load: a guest picking gifts is a
+// single-session flow, and no shared bucket = no leak, by construction.
 //
 // Cart-scope invariant (Plan 0016 locked decision #8): all items in one
-// cart share the same `idCampanha`. The visitor doesn't know the
-// campanha id directly but the slug 1:1 maps to one campanha server-side,
-// so we key the localStorage entry by slug. Visiting a different `/pagina/X`
-// loads the cart-for-X (empty if none) and Y's cart sits untouched.
+// cart share the same `idCampanha` — trivially true now, since the cart
+// lives and dies inside one page mount.
 //
 // Cart line shape: each line corresponds to one VisitorGift group (rows
 // sharing a `nome`). The line captures the visitor's chosen `quantidade`
@@ -35,7 +39,6 @@ import {
   createContext,
   type ReactNode,
   useContext,
-  useEffect,
   useMemo,
   useReducer,
 } from 'react';
@@ -88,8 +91,7 @@ type Action =
   | { type: 'increment'; nome: string }
   | { type: 'decrement'; nome: string }
   | { type: 'remove'; nome: string }
-  | { type: 'clear' }
-  | { type: 'hydrate'; state: CartState };
+  | { type: 'clear' };
 
 // ── Reducer ────────────────────────────────────────────────────────────────
 
@@ -166,9 +168,6 @@ function reducer(state: CartState, action: Action): CartState {
     case 'clear': {
       return { ...state, lines: [] };
     }
-    case 'hydrate': {
-      return action.state;
-    }
   }
 }
 
@@ -195,13 +194,6 @@ interface CartContextValue {
 
 const CartContext = createContext<CartContextValue | null>(null);
 
-// localStorage key — namespaced so multiple browser tabs on different
-// slugs don't collide. Hydration is lazy + defensive (silently ignores
-// malformed or wrong-slug payloads).
-function storageKey(slug: string): string {
-  return `eunenem.cart.v1.${slug}`;
-}
-
 interface CartProviderProps {
   slug: string;
   children: ReactNode;
@@ -210,57 +202,8 @@ interface CartProviderProps {
 export function CartProvider({ slug, children }: CartProviderProps) {
   const [state, dispatch] = useReducer(reducer, { slug, lines: [] } as CartState);
 
-  // One-time hydrate from localStorage on mount (and whenever the slug
-  // changes — visiting another `/pagina/X` triggers a re-mount via the
-  // PaginaPage key, but we defensively re-hydrate here too).
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      const raw = window.localStorage.getItem(storageKey(slug));
-      if (!raw) {
-        dispatch({ type: 'hydrate', state: { slug, lines: [] } });
-        return;
-      }
-      const parsed = JSON.parse(raw) as CartState | null;
-      if (
-        parsed &&
-        typeof parsed === 'object' &&
-        parsed.slug === slug &&
-        Array.isArray(parsed.lines)
-      ) {
-        // aperture-nz12u — defend against pre-nz12u localStorage payloads
-        // that lack the qtyAvailable field. For legacy cart lines
-        // qtyAvailable always equalled idsAvailable.length, so fall back
-        // to that for any line missing the field. New writes carry the
-        // field directly.
-        const migrated: CartState = {
-          slug: parsed.slug,
-          lines: parsed.lines.map((l) => {
-            const line = l as Partial<CartLine>;
-            if (typeof line.qtyAvailable === 'number') return line as CartLine;
-            const idsAvailable = Array.isArray(line.idsAvailable)
-              ? line.idsAvailable
-              : [];
-            return { ...(line as CartLine), qtyAvailable: idsAvailable.length };
-          }),
-        };
-        dispatch({ type: 'hydrate', state: migrated });
-      }
-    } catch {
-      // Malformed payload — ignore + start fresh. The cart is recoverable
-      // via re-adding; we don't surface a UI error for a parser miss.
-    }
-  }, [slug]);
-
-  // Persist on every state change (cheap: cart is small).
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      window.localStorage.setItem(storageKey(slug), JSON.stringify(state));
-    } catch {
-      // QuotaExceededError + private-browsing edge cases — silently skip.
-    }
-  }, [state, slug]);
+  // aperture-90rab — in-memory only: no hydrate, no persist. Navigation or
+  // refresh resets the cart (intentional; see header).
 
   const value = useMemo<CartContextValue>(() => {
     const totalUnits = state.lines.reduce((s, l) => s + l.quantidade, 0);
