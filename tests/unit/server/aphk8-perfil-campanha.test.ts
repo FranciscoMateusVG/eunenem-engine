@@ -390,3 +390,65 @@ describe('perfil.getPerfilPublicoBySlug per-campanha routing (aperture-aphk8)', 
     expect(porCampanha.tipoEvento).toBe('cha-bebe');
   });
 });
+
+// ── aperture-3vc12: needsOnboarding re-key (fblrt design §1.5) ──────────────
+// The gate's READ must match where the wizard WRITES. Pre-fix, auth.me read
+// the legacy per-user perfil_criadores while the setup wizard writes the
+// per-campanha perfil_campanhas (perfilCampanha.atualizar does NOT dual-write
+// the legacy table) — a fresh signup completing the wizard stayed stuck at
+// needsOnboarding=true forever: the onboarding loop.
+describe('auth.me needsOnboarding source (aperture-3vc12)', () => {
+  const conteudoVazio = {
+    relacao: null,
+    historia: null,
+    dataNascimento: null,
+    tipoEvento: null,
+    genero: null,
+    dataEvento: null,
+    fotoPerfilKey: null,
+    fotoCapaKey: null,
+    fotoHistoriaKey: null,
+  };
+
+  it('THE BUG SCENARIO: fresh signup + wizard via perfilCampanha.atualizar flips the gate', async () => {
+    const rig = await buildRig();
+    const { caller, idCampanha } = await rig.addUser('3vc12-a@example.com', 'Ana');
+
+    // Fresh signup: blank perfil → gate on.
+    expect((await caller.auth.me())?.needsOnboarding).toBe(true);
+
+    // The setup wizard's actual write path (per-campanha, NO legacy dual-write).
+    await caller.perfilCampanha.atualizar({ idCampanha, nomeBebe: 'Aurora', ...conteudoVazio });
+
+    // Pre-fix this stayed true forever (gate read perfil_criadores).
+    expect((await caller.auth.me())?.needsOnboarding).toBe(false);
+  });
+
+  it("gate keys on the OLDEST campanha only — a second campanha's perfil does not flip it", async () => {
+    const rig = await buildRig();
+    const { caller } = await rig.addUser('3vc12-b@example.com', 'Bia');
+    rig.advanceClock(60_000);
+    const segunda = await caller.campanhas.criar({ titulo: 'Segunda lista' });
+
+    // Filling the SECOND campanha's perfil is not "onboarding" — the gate
+    // follows the default-campanha rule (§1.5: oldest), same as every other
+    // unaddressed read.
+    await caller.perfilCampanha.atualizar({
+      idCampanha: segunda.id,
+      nomeBebe: 'Bento',
+      ...conteudoVazio,
+    });
+    expect((await caller.auth.me())?.needsOnboarding).toBe(true);
+  });
+
+  it('whitespace-only nomeBebe still needs onboarding (trim posture preserved)', async () => {
+    const rig = await buildRig();
+    const { caller, idCampanha } = await rig.addUser('3vc12-c@example.com', 'Caio');
+
+    // nomeBebe is trim().min(1) at the input schema, so a whitespace-only
+    // write is rejected upstream — assert the gate stays on when the perfil
+    // row exists with a NULL nomeBebe (partial wizard: only photos saved).
+    await caller.perfilCampanha.atualizar({ idCampanha, nomeBebe: null, ...conteudoVazio });
+    expect((await caller.auth.me())?.needsOnboarding).toBe(true);
+  });
+});

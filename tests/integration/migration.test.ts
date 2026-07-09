@@ -89,6 +89,10 @@ describe('Migration round-trip', () => {
     expect(conviteRemetenteCol?.character_maximum_length).toBe(120);
     expect(conviteRemetenteCol?.is_nullable).toBe('NO');
 
+    // 035 eventos_data_hora_nullable: data_hora is optional post-migration.
+    const eventoDataHoraCol = await getColumn(db, 'eventos', 'data_hora');
+    expect(eventoDataHoraCol?.is_nullable).toBe('YES');
+
     // ── Roll back the post-evento migrations first (latest → earliest),
     //    so the subsequent evento down-step actually targets the evento
     //    migration. Each migrateDown() unwinds exactly the current tip, so
@@ -101,9 +105,23 @@ describe('Migration round-trip', () => {
     //    now its THIRD occurrence. Prepended to restore alignment; the real
     //    tip is 20260705_034.
 
-    // 035 create_perfil_campanhas (aperture-aphk8) → the migration TIP
-    //   (20260708 sorts last), so the FIRST migrateDown unwinds it. Its
-    //   down() drops the perfil_campanhas table, the campanhas_slug_idx
+    // ── aperture-3vc12 CI repair (2026-07-09): 20260708_035_eventos_data_
+    //    hora_nullable landed on staging in parallel with #359 WITHOUT
+    //    prepending its down-step — the FOURTH occurrence of this off-by-one.
+    //    Worse, it DUPLICATES the 035 number ('..._035_eventos...' sorts
+    //    after '..._035_create_perfil...' so kysely ordering stays defined,
+    //    but the numeric prefix collision is a naming smell — see the 023
+    //    note above; renaming a DEPLOYED migration is forbidden because
+    //    kysely_migration keys on the filename and would re-run it).
+
+    // 035 eventos_data_hora_nullable → the actual TIP ('e' sorts after 'c'),
+    //   so the FIRST migrateDown unwinds it: data_hora back to NOT NULL.
+    const downEventosDataHora = await migrator.migrateDown();
+    expect(downEventosDataHora.error).toBeUndefined();
+    expect((await getColumn(db, 'eventos', 'data_hora'))?.is_nullable).toBe('NO');
+
+    // 035 create_perfil_campanhas (aperture-aphk8) → the SECOND migrateDown.
+    //   Its down() drops the perfil_campanhas table, the campanhas_slug_idx
     //   index, and the campanhas.slug column.
     const downPerfilCampanhas = await migrator.migrateDown();
     expect(downPerfilCampanhas.error).toBeUndefined();

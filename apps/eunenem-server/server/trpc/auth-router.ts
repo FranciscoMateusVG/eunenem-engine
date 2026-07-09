@@ -834,22 +834,35 @@ export const authRouter = t.router({
 
     // aperture-b6xr8 — server-side onboarding signal for the OAuth-signup
     // wizard gate (Vance's aperture-8ysqu). DERIVED, not an explicit flag: a
-    // user "needs onboarding" until their creator profile has a baby name —
-    // the core field the OnboardingWizard captures (alongside event date/type
-    // + slug via perfil.atualizar). PROVIDER-AGNOSTIC by construction: it keys
-    // off profile STATE, not how the user authenticated, so it covers email,
-    // Google, Microsoft (y5ual) and any future provider — plus the lazily-
-    // provisioned OAuth orphans whose profile starts empty.
+    // user "needs onboarding" until their profile has a baby name — the core
+    // field the OnboardingWizard captures. PROVIDER-AGNOSTIC by construction:
+    // it keys off profile STATE, not how the user authenticated, so it covers
+    // email, Google, Microsoft (y5ual) and any future provider — plus the
+    // lazily-provisioned OAuth orphans whose profile starts empty.
+    //
+    // aperture-3vc12 (fblrt design §1.5) — RE-KEYED to the OLDEST campanha's
+    // perfil_campanhas.nome_bebe, aligning the gate's READ with where the
+    // wizard now WRITES (perfilCampanha.atualizar is per-campanha and does
+    // NOT dual-write the legacy perfil_criadores; only perfil.atualizar's
+    // transitional shim does). Reading the old per-user table would leave a
+    // fresh signup stuck at needsOnboarding=true after completing the wizard
+    // — an onboarding loop. Identical behavior for existing users: the W1a
+    // backfill copied every owner's perfil_criadores content into their
+    // campanhas' perfil_campanhas rows. `campanha` is the oldest (resolved
+    // above via findFirstByAdministrador) — same default-campanha rule as
+    // every other unaddressed read. A campanha-less conta (pre-p8i01 caveat,
+    // verified zero rows in prod) conservatively reads as needs-onboarding.
     //
     // Why derive over an onboardingConcluidoEm timestamp: the wizard already
-    // persists nomeBebe via perfil.atualizar, so finishing it flips this with
-    // NO new mutation/migration and no backfill/grandfathering of existing
-    // users. Trade-off: if the profile editor ever lets a user CLEAR nomeBebe
-    // the gate would re-fire — acceptable today (the painel editor keeps it
-    // required); upgrade to an explicit timestamp (mirror tutorialCompletadoEm)
-    // if that ever becomes a real path. One extra indexed PK-keyed read.
-    const perfil = await deps.perfilCriadorRepository.findByUsuarioId(usuario.id);
-    const needsOnboarding = (perfil?.conteudo.nomeBebe ?? '').trim().length === 0;
+    // persists nomeBebe, so finishing it flips this with NO new mutation/
+    // migration and no backfill/grandfathering. Trade-off: if the profile
+    // editor ever lets a user CLEAR nomeBebe the gate would re-fire —
+    // acceptable today; upgrade to an explicit timestamp if that becomes a
+    // real path. One extra indexed UNIQUE-keyed read.
+    const perfilCampanha = campanha
+      ? await deps.perfilCampanhaRepository.findByIdCampanha(campanha.id)
+      : undefined;
+    const needsOnboarding = (perfilCampanha?.conteudo.nomeBebe ?? '').trim().length === 0;
 
     // aperture — legacy-first routing signal. `true` when the caller's OWN
     // email matches the 1.0 legacy list, via the SAME matcher campanhas.list
