@@ -3,7 +3,7 @@ import { z } from 'zod/v4';
 import type { EventoRepository } from '../../adapters/evento/evento-repository.js';
 import type { Evento } from '../../domain/evento/entities/evento.js';
 import { eventoComCamposAtualizados } from '../../domain/evento/entities/evento.js';
-import { DataHoraEventoSchema } from '../../domain/evento/value-objects/data-hora-evento.js';
+import { DataHoraEventoNullableSchema } from '../../domain/evento/value-objects/data-hora-evento.js';
 import { EnderecoEventoNullableSchema } from '../../domain/evento/value-objects/endereco-evento.js';
 import { IdEventoSchema } from '../../domain/evento/value-objects/ids.js';
 import { ModalidadeEventoSchema } from '../../domain/evento/value-objects/modalidade-evento.js';
@@ -16,7 +16,7 @@ export const AtualizarEventoInputSchema = z.object({
   id: IdEventoSchema,
   tipoEvento: TipoEventoSchema,
   modalidade: ModalidadeEventoSchema,
-  dataHora: DataHoraEventoSchema,
+  dataHora: DataHoraEventoNullableSchema,
   endereco: EnderecoEventoNullableSchema,
 });
 

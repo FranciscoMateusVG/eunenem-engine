@@ -10,6 +10,21 @@ import { ImageSlot } from "./ImageSlot";
 import { CountdownTimer } from "./CountdownTimer";
 import { useTweaks } from "./TweaksContext";
 import { artigoPosse, saudacao } from "@/lib/concordancia";
+import type { TipoEventoPerfil } from "../../../../../src/index.js";
+
+// aperture — pt-BR display labels for the creator's chosen event type
+// (TipoEventoPerfil, PerfilCriador aggregate). Mirrors PerfilBody's
+// EVENT_TYPE_LABELS (painel form) but lowercased to fit the "ao chá de X"
+// sentence here — kept local since Hero (public guest page) shouldn't
+// import from the painel layer.
+const HERO_EVENT_TYPE_LABEL: Record<TipoEventoPerfil, string> = {
+  "cha-bebe": "chá de bebê",
+  "cha-fraldas": "chá de fraldas",
+  "cha-surpresa": "chá surpresa",
+  "cha-revelacao": "chá revelação",
+  batizado: "batizado",
+  aniversario: "aniversário",
+};
 
 // aperture-3d9t — Hero section.
 //
@@ -36,14 +51,17 @@ export function Hero({
   coverUrl = null,
   profileUrl = null,
   eventDate = null,
+  tipoEvento = null,
 }: {
   coverUrl?: string | null;
   profileUrl?: string | null;
   eventDate?: string | null;
+  tipoEvento?: TipoEventoPerfil | null;
 } = {}) {
   const { tweaks } = useTweaks();
   const { babyName, genero } = tweaks;
   const hasEventDate = typeof eventDate === "string" && eventDate.length > 0;
+  const eventLabel = tipoEvento ? HERO_EVENT_TYPE_LABEL[tipoEvento] : "chá de bebê";
 
   return (
     <section className="relative overflow-hidden pt-4 pb-14 sm:pt-36 sm:pb-16">
@@ -96,7 +114,7 @@ export function Hero({
                 display: "inline-block",
               }}
             />
-            Chá de bebê online
+            {eventLabel} online
           </div>
 
           <h1
@@ -106,7 +124,7 @@ export function Hero({
               marginBottom: 16,
             }}
           >
-            {saudacao(genero)} ao <span className="hl">chá de bebê</span>
+            {saudacao(genero)} ao <span className="hl">{eventLabel}</span>
             <br />
             {artigoPosse(genero)} <span data-testid="pagina-baby-name" style={{ color: "var(--coral-pink)" }}>{babyName}</span>
             <span

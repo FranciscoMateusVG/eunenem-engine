@@ -130,7 +130,7 @@ export interface DadosRecebimentoUsuario {
 export interface Eventos {
   atualizado_em: Generated<Timestamp>;
   criado_em: Generated<Timestamp>;
-  data_hora: Timestamp;
+  data_hora: Timestamp | null;
   endereco: string | null;
   id: string;
   id_campanha: string;

@@ -131,8 +131,8 @@ export function MobileConviteBody({ slug }: PainelSectionBodyProps) {
   const goPrev = () => setStep((s) => Math.max(0, s - 1));
   const goNext = () => setStep((s) => Math.min(STEPS.length - 1, s + 1));
   // aperture-rw880 — block save/send when required fields (nomeExibido=babyName,
-  // remetente=host, dataHoraIso=date) are empty, with a friendly toast instead
-  // of the raw backend 400.
+  // remetente=host) are empty, with a friendly toast instead of the raw
+  // backend 400. Date/time (dataHoraIso) are optional.
   const guardComplete = (): boolean => {
     const errs = conviteFieldErrors(state);
     if (Object.keys(errs).length > 0) {
@@ -666,14 +666,16 @@ function MStepQuando({ state, update }: StepProps) {
             );
           })}
         </div>
-        {state.mode === "online" && (
-          <div className="mcv-note">✨ data e hora opcionais — viram countdown.</div>
-        )}
+        <div className="mcv-note">
+          {state.mode === "online"
+            ? "✨ data e hora são opcionais."
+            : "✨ data e hora são opcionais — você pode preencher depois."}
+        </div>
       </div>
 
       <div className="mcv-date-row">
         <div>
-          <label className="mcv-label" htmlFor="mcv-date">data</label>
+          <label className="mcv-label" htmlFor="mcv-date">data (opcional)</label>
           <input
             id="mcv-date"
             className="mcv-field"
@@ -684,7 +686,7 @@ function MStepQuando({ state, update }: StepProps) {
         </div>
         <div>
           <label className="mcv-label mcv-label-tilt" htmlFor="mcv-time">
-            horário
+            horário (opcional)
           </label>
           <input
             id="mcv-time"

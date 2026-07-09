@@ -4,7 +4,10 @@ import {
   eventoComCamposAtualizados,
   eventoComTipo,
 } from '../../../src/domain/evento/entities/evento.js';
-import { DataHoraEventoSchema } from '../../../src/domain/evento/value-objects/data-hora-evento.js';
+import {
+  DataHoraEventoNullableSchema,
+  DataHoraEventoSchema,
+} from '../../../src/domain/evento/value-objects/data-hora-evento.js';
 import { EnderecoEventoSchema } from '../../../src/domain/evento/value-objects/endereco-evento.js';
 import { ModalidadeEventoSchema } from '../../../src/domain/evento/value-objects/modalidade-evento.js';
 import { TipoEventoSchema } from '../../../src/domain/evento/value-objects/tipo-evento.js';
@@ -31,6 +34,21 @@ describe('criarEvento (dominio)', () => {
     expect(evento.tipoEvento).toBe('cha-bebe');
     expect(evento.modalidade).toBe('presencial');
     expect(evento.endereco).toBe('Rua das Flores, 10');
+  });
+
+  it('creates an event with a null dataHora (date/time undecided)', () => {
+    const evento = criarEvento({
+      id: idEvento,
+      idCampanha,
+      tipoEvento: 'cha-bebe',
+      modalidade: 'presencial',
+      dataHora: null,
+      endereco: null,
+      criadoEm: fixedDate,
+      atualizadoEm: fixedDate,
+    });
+
+    expect(evento.dataHora).toBeNull();
   });
 });
 
@@ -79,6 +97,31 @@ describe('evento factories', () => {
     expect(updated.modalidade).toBe('online');
     expect(updated.dataHora).toEqual(newDataHora);
   });
+
+  it('eventoComCamposAtualizados can clear dataHora back to null', () => {
+    const base = criarEvento({
+      id: idEvento,
+      idCampanha,
+      tipoEvento: 'batizado',
+      modalidade: 'presencial',
+      dataHora: fixedDate,
+      endereco: null,
+      criadoEm: fixedDate,
+      atualizadoEm: fixedDate,
+    });
+    const later = new Date('2026-07-01T12:00:00.000Z');
+    const updated = eventoComCamposAtualizados(
+      base,
+      {
+        tipoEvento: 'batizado',
+        modalidade: 'presencial',
+        dataHora: null,
+        endereco: null,
+      },
+      later,
+    );
+    expect(updated.dataHora).toBeNull();
+  });
 });
 
 describe('schemas', () => {
@@ -92,6 +135,14 @@ describe('schemas', () => {
 
   it('rejects invalid Date for dataHora', () => {
     expect(DataHoraEventoSchema.safeParse(new Date('invalid')).success).toBe(false);
+  });
+
+  it('DataHoraEventoNullableSchema accepts null', () => {
+    expect(DataHoraEventoNullableSchema.safeParse(null).success).toBe(true);
+  });
+
+  it('DataHoraEventoNullableSchema still validates a real Date when present', () => {
+    expect(DataHoraEventoNullableSchema.safeParse(new Date('invalid')).success).toBe(false);
   });
 
   it('accepts valid endereco', () => {

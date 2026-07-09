@@ -3,7 +3,6 @@ import { toast } from "sonner";
 
 import type { PainelSectionBodyProps } from "@/PainelSectionPage";
 import {
-  CONVIDADOS_EVENT,
   avatarFor,
   initialsOf,
 } from "@/lib/mocks/convidados";
@@ -61,7 +60,7 @@ import { ConfirmarPresencaView } from "@/ConfirmarPresencaPage";
 //   - título + "adicionar convidado" affordance (inline form, local state)
 //   - mensagem padrão card with [nome]/[link] variable chips + invite-type toggle
 //   - guest list: per-guest card with WhatsApp send /
-//     reenviar / lembrar + an RSVP override dropdown, and the "recebido ♡"
+//     reenviar + an RSVP override dropdown, and the "recebido ♡"
 //     handwritten stamp on confirmed guests.
 //
 // Mock-first: no fetch / auth / backend. Every action mutates local state
@@ -114,12 +113,6 @@ const IconPlus = (p: { size?: number }) => (
   <Icon size={p.size}>
     <line x1="12" y1="5" x2="12" y2="19" />
     <line x1="5" y1="12" x2="19" y2="12" />
-  </Icon>
-);
-const IconBell = (p: { size?: number }) => (
-  <Icon size={p.size}>
-    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-    <path d="M13.7 21a2 2 0 0 1-3.4 0" />
   </Icon>
 );
 const IconPhone = (p: { size?: number; style?: CSSProperties }) => (
@@ -510,11 +503,9 @@ function RsvpMenu({
 function GuestSendActions({
   g,
   onSend,
-  onRemind,
 }: {
   g: Convidado;
   onSend: (id: string, isResend?: boolean) => void;
-  onRemind: (id: string) => void;
 }) {
   return (
     <>
@@ -523,17 +514,7 @@ function GuestSendActions({
           <IconWhatsapp /> enviar
         </Button>
       )}
-      {g.presenca === "talvez" && (
-        <Button
-          variant="coral"
-          size="sm"
-          disabled={g.reminded}
-          onClick={() => onRemind(g.id)}
-        >
-          <IconBell /> {g.reminded ? "lembrado" : "lembrar"}
-        </Button>
-      )}
-      {g.presenca !== "nao_enviado" && g.presenca !== "talvez" && (
+      {g.presenca !== "nao_enviado" && (
         <Button
           variant="ghost"
           size="sm"
@@ -550,29 +531,14 @@ function GuestSendActions({
 function GuestMobilePrimaryAction({
   g,
   onSend,
-  onRemind,
 }: {
   g: Convidado;
   onSend: (id: string, isResend?: boolean) => void;
-  onRemind: (id: string) => void;
 }) {
   if (g.presenca === "nao_enviado") {
     return (
       <Button variant="whatsapp" size="sm" onClick={() => onSend(g.id)}>
         <IconWhatsapp /> enviar
-      </Button>
-    );
-  }
-
-  if (g.presenca === "talvez") {
-    return (
-      <Button
-        variant="coral"
-        size="sm"
-        disabled={g.reminded}
-        onClick={() => onRemind(g.id)}
-      >
-        <IconBell /> {g.reminded ? "lembrado" : "lembrar"}
       </Button>
     );
   }
@@ -592,12 +558,10 @@ function GuestMobilePrimaryAction({
 function GuestCard({
   g,
   onSend,
-  onRemind,
   onSetRsvp,
 }: {
   g: Convidado;
   onSend: (id: string, isResend?: boolean) => void;
-  onRemind: (id: string) => void;
   onSetRsvp: (id: string, presenca: StatusPresencaConvidado) => void;
 }) {
   return (
@@ -639,23 +603,11 @@ function GuestCard({
               <IconPhone size={12} /> {g.phone}
             </span>
             <PresencaBadge presenca={g.presenca} />
-            {g.reminded && (
-              <span
-                style={{
-                  fontFamily: FONT_CAVEAT,
-                  fontSize: 16,
-                  color: "var(--coral-pink)",
-                  transform: "rotate(-3deg)",
-                }}
-              >
-                lembrete enviado ♡
-              </span>
-            )}
           </div>
         </div>
 
         <div className="cv-guest-desktop-actions">
-          <GuestSendActions g={g} onSend={onSend} onRemind={onRemind} />
+          <GuestSendActions g={g} onSend={onSend} />
           <RsvpMenu guestId={g.id} onSetRsvp={onSetRsvp} variant="desktop" />
         </div>
       </div>
@@ -677,17 +629,10 @@ function GuestCard({
 
         <div className="cv-guest-mobile-row2">
           <PresencaBadge presenca={g.presenca} />
-          {g.reminded && (
-            <span className="cv-guest-mobile-reminded">lembrete enviado ♡</span>
-          )}
         </div>
 
         <div className="cv-guest-mobile-row3">
-          <GuestMobilePrimaryAction
-            g={g}
-            onSend={onSend}
-            onRemind={onRemind}
-          />
+          <GuestMobilePrimaryAction g={g} onSend={onSend} />
         </div>
       </div>
     </div>
@@ -796,6 +741,38 @@ function isValidBrMobilePhone(phone: string): boolean {
   return BR_MOBILE_PHONE_RE.test(phone);
 }
 
+const DEFAULT_DDI = "55";
+
+// Digits-only, capped at 3 (DDIs run 1-3 digits).
+function formatDdi(raw: string): string {
+  return raw.replace(/\D/g, "").slice(0, 3);
+}
+
+function isValidDdi(ddi: string): boolean {
+  return /^\d{1,3}$/.test(ddi);
+}
+
+// Non-BR numbers don't follow the "(DD) 9XXXX-XXXX" shape (DDD + mandatory
+// 9th digit is a Brazil-only convention) — no fixed mask, just digits,
+// loosely bounded to catch obvious typos while accepting real numbers from
+// most countries (E.164 national significant number: 8-14 digits).
+function formatGenericPhone(raw: string): string {
+  return raw.replace(/\D/g, "").slice(0, 14);
+}
+
+function isValidGenericPhone(phone: string): boolean {
+  const digits = phone.replace(/\D/g, "");
+  return digits.length >= 8 && digits.length <= 14;
+}
+
+function formatPhoneForDdi(ddi: string, raw: string): string {
+  return ddi === DEFAULT_DDI ? formatBrPhone(raw) : formatGenericPhone(raw);
+}
+
+function isValidPhoneForDdi(ddi: string, phone: string): boolean {
+  return ddi === DEFAULT_DDI ? isValidBrMobilePhone(phone) : isValidGenericPhone(phone);
+}
+
 function formatHora(time: string): string {
   const [h, m] = time.split(":");
   if (!h) return time;
@@ -818,6 +795,7 @@ function AddGuestModal({
   onClose: () => void;
 }) {
   const [name, setName] = useState("");
+  const [ddi, setDdi] = useState(DEFAULT_DDI);
   const [phone, setPhone] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -834,23 +812,33 @@ function AddGuestModal({
     };
   }, [onClose]);
 
+  const isBrDdi = ddi === DEFAULT_DDI;
+
   const submit = async () => {
     const n = name.trim();
-    if (!n || !isValidBrMobilePhone(phone) || isSubmitting) return;
+    if (!n || !isValidDdi(ddi) || !isValidPhoneForDdi(ddi, phone) || isSubmitting) return;
     setIsSubmitting(true);
-    const ok = await onAdd({ name: n, phone });
+    const ok = await onAdd({ name: n, phone: `+${ddi} ${phone}` });
     setIsSubmitting(false);
     if (ok) {
       setName("");
+      setDdi(DEFAULT_DDI);
       setPhone("");
       onClose();
     }
   };
 
-  const canSubmit = name.trim().length > 0 && isValidBrMobilePhone(phone) && !isSubmitting;
+  const canSubmit =
+    name.trim().length > 0 &&
+    isValidDdi(ddi) &&
+    isValidPhoneForDdi(ddi, phone) &&
+    !isSubmitting;
+  const ddiError = ddi.length > 0 && !isValidDdi(ddi) ? "ddi inválido" : null;
   const phoneError =
-    phone.length > 0 && !isValidBrMobilePhone(phone)
-      ? "formato inválido — use (DD) 9XXXX-XXXX"
+    phone.length > 0 && !isValidPhoneForDdi(ddi, phone)
+      ? isBrDdi
+        ? "formato inválido — use (DD) 9XXXX-XXXX"
+        : "número inválido"
       : null;
 
   return (
@@ -942,16 +930,72 @@ function AddGuestModal({
             </div>
             <div className="lista-field lista-field-full">
               <label htmlFor="convidado-phone">telefone (com ddd)</label>
-              <input
-                id="convidado-phone"
-                inputMode="tel"
-                placeholder="(11) 99999-9999"
-                value={phone}
-                onChange={(e) => setPhone(formatBrPhone(e.target.value))}
-                onKeyDown={(e) => e.key === "Enter" && canSubmit && submit()}
-                aria-invalid={phoneError ? true : undefined}
-                aria-describedby={phoneError ? "convidado-phone-error" : undefined}
-              />
+              <div style={{ display: "flex", gap: 8 }}>
+                <div style={{ flex: "0 0 72px" }}>
+                  <label htmlFor="convidado-ddi" className="sr-only">
+                    ddi
+                  </label>
+                  <div style={{ position: "relative" }}>
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        position: "absolute",
+                        left: 12,
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        color: "var(--ink-mute)",
+                        pointerEvents: "none",
+                      }}
+                    >
+                      +
+                    </span>
+                    <input
+                      id="convidado-ddi"
+                      inputMode="numeric"
+                      placeholder="55"
+                      value={ddi}
+                      onChange={(e) => {
+                        const nextDdi = formatDdi(e.target.value);
+                        setDdi(nextDdi);
+                        // Re-format the phone under the new DDI's rules — the
+                        // BR mask ("(DD) 9XXXX-XXXX") makes no sense once the
+                        // country changes away from Brazil, and vice-versa.
+                        setPhone((prev) => formatPhoneForDdi(nextDdi, prev));
+                      }}
+                      onKeyDown={(e) => e.key === "Enter" && canSubmit && submit()}
+                      aria-invalid={ddiError ? true : undefined}
+                      aria-describedby={ddiError ? "convidado-ddi-error" : undefined}
+                      style={{ paddingLeft: 22, width: "100%", boxSizing: "border-box" }}
+                    />
+                  </div>
+                </div>
+                <input
+                  id="convidado-phone"
+                  inputMode="tel"
+                  placeholder={isBrDdi ? "(11) 99999-9999" : "número do convidado"}
+                  value={phone}
+                  onChange={(e) => setPhone(formatPhoneForDdi(ddi, e.target.value))}
+                  onKeyDown={(e) => e.key === "Enter" && canSubmit && submit()}
+                  aria-invalid={phoneError ? true : undefined}
+                  aria-describedby={phoneError ? "convidado-phone-error" : undefined}
+                  style={{ flex: 1 }}
+                />
+              </div>
+              {ddiError && (
+                <p
+                  id="convidado-ddi-error"
+                  role="alert"
+                  style={{
+                    fontFamily: FONT_SANS,
+                    fontSize: 12,
+                    color: "var(--coral-pink)",
+                    margin: "6px 0 0",
+                    lineHeight: 1.4,
+                  }}
+                >
+                  {ddiError}
+                </p>
+              )}
               {phoneError && (
                 <p
                   id="convidado-phone-error"
@@ -1422,22 +1466,16 @@ function VirtualInvitePreviewSection({
 
 // ---------- page body ----------
 export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
-  // aperture-lista-convidados — the guest list is the real backend source
-  // of truth; `reminded` has no domain field, so it's tracked locally
-  // (keyed by convidado id) and merged in on render.
+  // aperture-lista-convidados — the guest list is the real backend source of truth.
   const listaQuery = useListaDeConvidadosData();
   const alterarPresenca = useAlterarPresencaConvidado();
   const adicionarConvidado = useAdicionarConvidado();
   const salvarFormatoMensagem = useSalvarFormatoMensagem();
-  const [remindedIds, setRemindedIds] = useState<Set<string>>(new Set());
 
   const guests = useMemo<Convidado[]>(() => {
     const convidados = listaQuery.data?.lista?.convidados ?? [];
-    return convidados.map((c) => {
-      const g = convidadoFromSnapshot(c);
-      return remindedIds.has(g.id) ? { ...g, reminded: true } : g;
-    });
-  }, [listaQuery.data, remindedIds]);
+    return convidados.map((c) => convidadoFromSnapshot(c));
+  }, [listaQuery.data]);
 
   // aperture-dkkau — the compositor now holds the FULL ConviteState (mirroring
   // ConviteBody) so saving re-serializes the whole convite intact. We only
@@ -1530,10 +1568,6 @@ export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
     const guest = guests.find((g) => g.id === id);
     if (guest) setSendTarget(guest);
   };
-  const remindOne = (id: string) => {
-    setRemindedIds((ids) => new Set(ids).add(id));
-    toast.success("lembrete enviado ♡");
-  };
   const setRsvp = async (id: string, presenca: StatusPresencaConvidado) => {
     try {
       await alterarPresenca.mutateAsync({ idConvidado: id, presenca });
@@ -1583,14 +1617,14 @@ export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
             <IconCalendar size={13} />{" "}
             {(() => {
               const d = formatDateScrap(state.date);
-              return d ? `${d.day} de ${d.monthFull} de ${d.year}` : CONVIDADOS_EVENT.date;
+              return d ? `${d.day} de ${d.monthFull} de ${d.year}` : "data a definir";
             })()}
           </span>
           <span className="cv-event-meta-sep" aria-hidden="true">
             ·
           </span>
           <span className="cv-event-meta-item">
-            <IconClock size={13} /> {state.time ? formatHora(state.time) : CONVIDADOS_EVENT.time}
+            <IconClock size={13} /> {state.time ? formatHora(state.time) : "horário a definir"}
           </span>
         </p>
       </div>
@@ -1842,7 +1876,6 @@ export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
                 key={g.id}
                 g={g}
                 onSend={sendOne}
-                onRemind={remindOne}
                 onSetRsvp={setRsvp}
               />
             ))
@@ -2176,12 +2209,6 @@ export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
           align-items: center;
           gap: 8px;
           flex-wrap: wrap;
-        }
-        .cv-guest-mobile-reminded {
-          font-family: var(--font-caveat), cursive;
-          font-size: 16px;
-          color: var(--coral-pink);
-          transform: rotate(-3deg);
         }
         .cv-guest-mobile-row3 {
           width: 100%;

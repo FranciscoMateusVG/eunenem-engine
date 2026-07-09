@@ -1343,17 +1343,17 @@ const STEPS: readonly WizardStep[] = [
 ] as const;
 
 // aperture-rw880 — client-side required-field validation, mirroring the backend
-// eventoConvite.save schema (remetente=host + nomeExibido=babyName are min(1);
-// dataHoraIso needs a real date). Blocks advancing / saving / sending with a
-// friendly inline message instead of leaking the raw backend 400.
-export type ConviteFieldKey = "babyName" | "host" | "date";
+// eventoConvite.save schema (remetente=host + nomeExibido=babyName are min(1)).
+// Blocks advancing / saving / sending with a friendly inline message instead
+// of leaking the raw backend 400. Date/time are optional — the creator may
+// not have them decided yet.
+export type ConviteFieldKey = "babyName" | "host";
 export type ConviteFieldErrors = Partial<Record<ConviteFieldKey, string>>;
 
 export function conviteFieldErrors(state: ConviteState): ConviteFieldErrors {
   const e: ConviteFieldErrors = {};
   if (!state.babyName.trim()) e.babyName = "preencha o nome do bebê ♡";
   if (!state.host.trim()) e.host = "diga de quem vem o convite ♡";
-  if (!state.date) e.date = "escolha a data do evento ♡";
   return e;
 }
 
@@ -1361,7 +1361,7 @@ export const STEP_REQUIRED_FIELDS: Record<WizardStepId, ConviteFieldKey[]> = {
   fundo: [],
   tipo: [],
   quem: ["babyName", "host"],
-  quando: ["date"],
+  quando: [],
   visual: [],
   pronto: [],
 };
@@ -1856,7 +1856,7 @@ function StepQuem({ state, update, errors }: StepViewProps) {
   );
 }
 
-function StepQuando({ state, update, errors }: StepViewProps) {
+function StepQuando({ state, update }: StepViewProps) {
   const isOnline = state.mode === "online";
   return (
     <>
@@ -1882,17 +1882,17 @@ function StepQuando({ state, update, errors }: StepViewProps) {
             só online
           </button>
         </div>
-        {isOnline && (
-          <div className="cv-note" style={{ marginTop: 12, marginBottom: 0 }}>
-            ✨ data e hora ficam opcionais — se preencher, vira countdown.
-          </div>
-        )}
+        <div className="cv-note" style={{ marginTop: 12, marginBottom: 0 }}>
+          {isOnline
+            ? "✨ data e hora são opcionais."
+            : "✨ data e hora são opcionais — você pode preencher depois."}
+        </div>
       </div>
 
       <div className="cv-grid-2" style={{ marginBottom: 18 }}>
         <div>
           <label className="cv-label" htmlFor="cv-date">
-            data
+            data (opcional)
           </label>
           <input
             id="cv-date"
@@ -1900,14 +1900,11 @@ function StepQuando({ state, update, errors }: StepViewProps) {
             className="cv-input"
             value={state.date}
             onChange={(e) => update("date", e.target.value)}
-            aria-invalid={errors?.date ? true : undefined}
-            style={errors?.date ? { borderColor: "#c2566f" } : undefined}
           />
-          <FieldError msg={errors?.date} />
         </div>
         <div>
           <label className="cv-label" htmlFor="cv-time" style={{ transform: "rotate(1deg)" }}>
-            horário
+            horário (opcional)
           </label>
           <input
             id="cv-time"

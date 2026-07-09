@@ -334,15 +334,15 @@ export function AuthModalShell({ onClose }: AuthModalShellProps) {
 
             {/* fineprint — always shown: a single entry can create accounts */}
             <p className="auth-fineprint">
-              Ao continuar você concorda com os{" "}
+              Ao criar minha conta, declaro que li e aceito os{" "}
               <a href="/termos-de-uso" target="_blank" rel="noopener noreferrer">
                 Termos de uso
               </a>{" "}
               e a{" "}
               <a href="/privacidade" target="_blank" rel="noopener noreferrer">
-                Política de privacidade
+                Política de Privacidade
               </a>
-              .
+              {" "}da EuNeném.
             </p>
           </>
         )}

@@ -11,7 +11,7 @@ export interface EventoConviteSnapshot {
   id: string;
   tipoEvento: TipoEvento;
   modalidade: ModalidadeEvento;
-  dataHoraIso: string;
+  dataHoraIso: string | null;
   endereco: string | null;
 }
 
@@ -34,7 +34,7 @@ export interface EventoConviteQueryData {
 export interface SaveConvitePayload {
   tipoEvento: TipoEvento;
   modalidade: ModalidadeEvento;
-  dataHoraIso: string;
+  dataHoraIso: string | null;
   endereco: string | null;
   remetente: string;
   nomeExibido: string;
@@ -218,7 +218,28 @@ export function templateFromDomain(modelo: ModeloConvite): string {
   return DOMAIN_TO_UI_TEMPLATE[modelo] ?? 'none';
 }
 
-function splitIsoToLocalFields(dataHoraIso: string): { date: string; time: string } {
+/**
+ * Sentinel-seconds trick: `dataHoraIso` is a SINGLE timestamp column, so when
+ * the creator fills in the date but leaves the time blank, we still have to
+ * persist *some* time-of-day alongside the date — there's no separate
+ * "horário indefinido" column. `<input type="time">` never produces seconds
+ * (its value is always "HH:MM"), so the seconds slot is free for us to use
+ * as an internal marker:
+ *   - time filled in by the creator → always saved with :00 seconds.
+ *   - time left blank             → saved with :01 seconds (impossible to
+ *     get from the input itself), meaning "no time chosen".
+ * On read, we check the seconds to tell a real (rounded-to-the-minute)
+ * midnight apart from "time was never filled in" — without that, a date
+ * with no time would round-trip as `00:00` and render as a fake "0h" on the
+ * public RSVP page instead of omitting the time entirely.
+ */
+const NO_TIME_CHOSEN_SECONDS = 1;
+
+function splitIsoToLocalFields(dataHoraIso: string | null): { date: string; time: string } {
+  if (dataHoraIso === null) {
+    return { date: '', time: '' };
+  }
+
   const date = new Date(dataHoraIso);
   if (Number.isNaN(date.getTime())) {
     return {
@@ -227,21 +248,30 @@ function splitIsoToLocalFields(dataHoraIso: string): { date: string; time: strin
     };
   }
 
+  const noTimeChosen = date.getSeconds() === NO_TIME_CHOSEN_SECONDS;
+
   return {
     date: [
       date.getFullYear(),
       String(date.getMonth() + 1).padStart(2, '0'),
       String(date.getDate()).padStart(2, '0'),
     ].join('-'),
-    time: [String(date.getHours()).padStart(2, '0'), String(date.getMinutes()).padStart(2, '0')].join(
-      ':',
-    ),
+    time: noTimeChosen
+      ? ''
+      : [String(date.getHours()).padStart(2, '0'), String(date.getMinutes()).padStart(2, '0')].join(
+          ':',
+        ),
   };
 }
 
-function combineLocalDateAndTime(date: string, time: string): string {
-  const normalizedTime = time.trim().length > 0 ? time : '00:00';
-  const combined = new Date(`${date}T${normalizedTime}:00`);
+function combineLocalDateAndTime(date: string, time: string): string | null {
+  if (!date) return null;
+  // See NO_TIME_CHOSEN_SECONDS docstring above — :01 seconds marks "no time
+  // chosen" so it can be told apart from a real midnight on read.
+  const combined =
+    time.trim().length > 0
+      ? new Date(`${date}T${time}:00`)
+      : new Date(`${date}T00:00:${String(NO_TIME_CHOSEN_SECONDS).padStart(2, '0')}`);
   if (Number.isNaN(combined.getTime())) {
     throw new Error('Data ou hora do convite invalida');
   }

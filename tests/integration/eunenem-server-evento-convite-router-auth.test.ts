@@ -207,4 +207,29 @@ describe('eventoConvite router (edicao autenticada + preview publico)', () => {
     expect(preview.convite?.remetente).toBe('Mariana e Tiago');
     expect(preview.convite?.modelo).toBe('scrapbook');
   });
+
+  it('salva um convite sem dataHoraIso (data/hora indefinidas)', async () => {
+    const rig = await buildRig();
+
+    const created = await rig.callerAuth.eventoConvite.save({
+      tipoEvento: 'cha-bebe',
+      modalidade: 'presencial',
+      dataHoraIso: null,
+      endereco: 'Rua das Acacias, 142',
+      remetente: 'Mariana e Tiago',
+      nomeExibido: 'Maria Helena',
+      mensagem: 'vem celebrar com a gente ♡',
+      paleta: 'lilas',
+      fonte: 'patrick',
+      modelo: 'scrapbook',
+    });
+
+    expect(created.evento?.dataHoraIso).toBeNull();
+
+    const reloadedWizard = await rig.callerAuth.eventoConvite.get();
+    expect(reloadedWizard.evento?.dataHoraIso).toBeNull();
+
+    const preview = await rig.callerAnon.eventoConvite.getPreview({ slug: rig.slug });
+    expect(preview.evento?.dataHoraIso).toBeNull();
+  });
 });

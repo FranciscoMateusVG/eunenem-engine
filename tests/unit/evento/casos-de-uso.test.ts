@@ -67,6 +67,34 @@ describe('criarEvento', () => {
     expect(loaded?.id).toBe(idEvento);
   });
 
+  it('creates event with a null dataHora (date/time undecided)', async () => {
+    const repos = createEventoMemoryRepos();
+    const idCampanha = await seedCampanha(repos);
+    const idEvento = randomUUID();
+
+    const evento = await criarEvento(
+      {
+        eventoRepository: repos.eventoRepository,
+        campanhaRepository: repos.campanhaRepository,
+        clock,
+        observability: silentObservability,
+      },
+      {
+        id: idEvento,
+        idCampanha,
+        tipoEvento: 'cha-fraldas',
+        modalidade: 'presencial',
+        dataHora: null,
+        endereco: null,
+      },
+    );
+
+    expect(evento.dataHora).toBeNull();
+
+    const loaded = await repos.eventoRepository.findByIdCampanha(idCampanha);
+    expect(loaded?.dataHora).toBeNull();
+  });
+
   it('throws EventoCampanhaNaoEncontradaError when campanha missing', async () => {
     const repos = createEventoMemoryRepos();
     await expect(
@@ -181,6 +209,47 @@ describe('atualizarEvento', () => {
     expect(updated.modalidade).toBe('online');
     expect(updated.endereco).toBe('Link Zoom');
     expect(updated.atualizadoEm).toEqual(updateClock());
+  });
+
+  it('can clear dataHora back to null', async () => {
+    const repos = createEventoMemoryRepos();
+    const idCampanha = await seedCampanha(repos);
+    const idEvento = randomUUID();
+    const updateClock = () => new Date('2026-06-20T12:00:00.000Z');
+
+    await criarEvento(
+      {
+        eventoRepository: repos.eventoRepository,
+        campanhaRepository: repos.campanhaRepository,
+        clock,
+        observability: silentObservability,
+      },
+      {
+        id: idEvento,
+        idCampanha,
+        tipoEvento: 'batizado',
+        modalidade: 'presencial',
+        dataHora: fixedDate,
+        endereco: null,
+      },
+    );
+
+    const updated = await atualizarEvento(
+      {
+        eventoRepository: repos.eventoRepository,
+        clock: updateClock,
+        observability: silentObservability,
+      },
+      {
+        id: idEvento,
+        tipoEvento: 'batizado',
+        modalidade: 'presencial',
+        dataHora: null,
+        endereco: null,
+      },
+    );
+
+    expect(updated.dataHora).toBeNull();
   });
 });
 

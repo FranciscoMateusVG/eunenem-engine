@@ -1,7 +1,8 @@
+import { useMe } from '@/lib/auth';
 import { conviteStateFromData, useConvitePreviewData } from '@/lib/convite';
-import { painelConvitePreviewHref, painelHref } from '@/lib/painelRoutes';
-import { useCampanhaRota } from '@/lib/campanha-rota';
+import { menuItemHref, painelConvitePreviewHref, painelHref } from '@/lib/painelRoutes';
 import { InvitePreview } from './ConviteBody';
+import { useCampanhaRota } from "@/lib/campanha-rota";
 
 const PREVIEW_CSS = `
 .cv-preview-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:11px 18px;border-radius:999px;border:1px solid transparent;background:var(--lilac);color:#fff;font-family:var(--font-dm-sans),sans-serif;font-weight:600;font-size:12.5px;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;transition:transform .12s,box-shadow .15s,background .15s;color-scheme:light;text-decoration:none;box-shadow:var(--shadow-cta);white-space:nowrap}
@@ -22,6 +23,12 @@ export function ConvitePreviewBody({
 }) {
   const idCampanha = useCampanhaRota();
   const conviteQuery = useConvitePreviewData(slug);
+  // aperture — same ownership probe as Navbar.tsx: the signed-in user owns
+  // this convite iff their session slug matches the slug being previewed.
+  // Anonymous visitors (me.data null) or a different account never satisfy
+  // this, so they get the "ver lista de presentes" CTA instead of "editar".
+  const me = useMe();
+  const isOwner = me.data?.slug === slug;
 
   if (conviteQuery.isLoading) {
     return (
@@ -103,9 +110,16 @@ export function ConvitePreviewBody({
         </div>
       </div>
 
-      <a href={painelHref(slug, 'convite', idCampanha)} className="cv-preview-btn ghost sm">
-        editar convite
-      </a>
+      {!me.isLoading &&
+        (isOwner ? (
+          <a href={painelHref(slug, 'convite')} className="cv-preview-btn ghost sm">
+            editar convite
+          </a>
+        ) : (
+          <a href={menuItemHref(slug, 'preview')} className="cv-preview-btn sm">
+            Ver lista de presentes
+          </a>
+        ))}
     </section>
   );
 }

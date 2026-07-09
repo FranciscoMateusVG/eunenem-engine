@@ -449,9 +449,11 @@ function GiftCard({
             {item.emoji}
           </span>
         )}
-        <span className={"lista-card-badge" + (item.custom ? " is-custom" : "")}>
-          {item.chipLabel}
-        </span>
+        {/* aperture — category badge hidden (visual-only), mirroring the
+            aperture-oa0th pattern applied elsewhere in this file (CATEGORIA
+            field + filter chips). The underlying category data model stays
+            intact (chipLabel/category still computed in groupContribuicoes)
+            in case this is reactivated later. */}
         <div className="lista-card-actions">
           <button
             type="button"

@@ -19,7 +19,7 @@ export interface Evento {
   readonly idCampanha: IdCampanha;
   readonly tipoEvento: TipoEvento;
   readonly modalidade: ModalidadeEvento;
-  readonly dataHora: DataHoraEvento;
+  readonly dataHora: DataHoraEvento | null;
   readonly endereco: EnderecoEvento | null;
   readonly criadoEm: Date;
   readonly atualizadoEm: Date;
@@ -30,7 +30,7 @@ export interface CriarEventoInput {
   readonly idCampanha: IdCampanha;
   readonly tipoEvento: TipoEvento;
   readonly modalidade: ModalidadeEvento;
-  readonly dataHora: DataHoraEvento;
+  readonly dataHora: DataHoraEvento | null;
   readonly endereco: EnderecoEvento | null;
   readonly criadoEm: Date;
   readonly atualizadoEm: Date;
@@ -63,7 +63,7 @@ export function eventoComModalidade(
 
 export function eventoComDataHora(
   evento: Evento,
-  dataHora: DataHoraEvento,
+  dataHora: DataHoraEvento | null,
   atualizadoEm: Date,
 ): Evento {
   return { ...evento, dataHora, atualizadoEm };
@@ -80,7 +80,7 @@ export function eventoComEndereco(
 export interface AtualizarEventoCampos {
   readonly tipoEvento: TipoEvento;
   readonly modalidade: ModalidadeEvento;
-  readonly dataHora: DataHoraEvento;
+  readonly dataHora: DataHoraEvento | null;
   readonly endereco: EnderecoEvento | null;
 }
 
