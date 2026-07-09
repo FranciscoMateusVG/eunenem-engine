@@ -104,6 +104,7 @@ export function PaginaPage({
               coverUrl={data?.fotoCapaUrl ?? null}
               profileUrl={data?.fotoPerfilUrl ?? null}
               eventDate={eventDate}
+              tipoEvento={data?.tipoEvento ?? null}
             />
             <Story
               historia={data?.historia ?? null}
