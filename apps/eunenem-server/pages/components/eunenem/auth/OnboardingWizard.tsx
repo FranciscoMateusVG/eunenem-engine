@@ -32,6 +32,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { trpc } from "@/lib/trpc";
+import { paginaShareDisplayPrefix } from "@/lib/pagina-share";
 import type { Genero } from "@/lib/concordancia";
 import { AUTH_CSS } from "./AuthModalShell";
 
@@ -68,7 +69,9 @@ const GENEROS: ReadonlyArray<{ value: Genero; label: string }> = [
 // aperture-4y1y4 — slug VO regex (mirror App.tsx SLUG_REGEX + PerfilBody
 // SLUG_RE): starts with a letter, a–z/0–9/hyphen, 3–30 chars total.
 const SLUG_RE = /^[a-z][a-z0-9-]{2,29}$/;
-const SHARE_BASE = "eunenem.com/";
+// aperture-1yx1n / ugttj — legacy "eunenem.com/" replaced by the real
+// public-page prefix (pagina-share seam). Fresh account = default campanha,
+// so the bare (un-addressed) display form is correct here.
 
 export function OnboardingWizard({ onDone }: { onDone: (slug: string) => void }) {
   const me = trpc.auth.me.useQuery(undefined, { staleTime: 0 });
@@ -363,7 +366,7 @@ export function OnboardingWizard({ onDone }: { onDone: (slug: string) => void })
             <p className="auth-fineprint" style={{ marginBottom: 4 }}>
               sua página:{" "}
               <strong style={{ color: "var(--ink)" }}>
-                {SHARE_BASE}
+                {paginaShareDisplayPrefix()}
                 {slug || "seu-link"}
               </strong>
             </p>

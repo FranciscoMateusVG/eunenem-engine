@@ -60,16 +60,22 @@ export function conviteDestinationHref(
     : painelHref(slug, 'convite', idCampanha);
 }
 
+// aperture-1yx1n — writes target the ROUTE campanha (bare URL → server default).
 export function useSalvarConvite() {
   const utils = trpc.useUtils();
-  const mutation = trpc.eventoConvite.save.useMutation({
+  const idCampanha = useCampanhaRota();
+  const m = trpc.eventoConvite.save.useMutation({
     onSuccess: () => {
       void utils.eventoConvite.get.invalidate();
       void utils.eventoConvite.getPreview.invalidate();
     },
   });
 
-  return mutation;
+  return {
+    ...m,
+    mutate: ((input, opts) => m.mutate(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutate,
+    mutateAsync: ((input, opts) => m.mutateAsync(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutateAsync,
+  };
 }
 
 export function toConviteUiErrorKind(err: unknown): ConviteUiErrorKind {

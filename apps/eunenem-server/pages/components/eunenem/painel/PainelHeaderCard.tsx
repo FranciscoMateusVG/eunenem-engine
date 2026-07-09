@@ -4,6 +4,7 @@ import { artigoPosse } from "@/lib/concordancia";
 import { toast } from "sonner";
 import { useTweaks } from "../TweaksContext";
 import type { PainelEventSnapshot } from "@/lib/mocks/painelDemo";
+import { paginaShareDisplayPrefix, paginaShareUrl } from "@/lib/pagina-share";
 import { painelHref } from "@/lib/painelRoutes";
 import { useCampanhaRota } from "@/lib/campanha-rota";
 
@@ -99,7 +100,12 @@ export function PainelHeaderCard({ snapshot, slug, campanhaTitulo }: Props) {
   const [reaisInt, reaisCents] = reais.split(",");
 
   const babyNameDisplay = tweaks.babyName;
-  const fullShareUrl = `https://${snapshot.shareUrl}${snapshot.shareSlug}`;
+  // aperture-1yx1n / ugttj — the copied/linked URL is the REAL public page,
+  // campanha-addressed when a /c/:id route is active. snapshot.shareUrl
+  // ("eunenem.com/") was the legacy-domain mock — dead link on both domain
+  // AND path axes. Display chip shows host/pagina/<slug> (no uuid noise);
+  // the copy carries the full addressing.
+  const fullShareUrl = paginaShareUrl(slug, idCampanha);
 
   const onCopy = async () => {
     try {
@@ -193,14 +199,14 @@ export function PainelHeaderCard({ snapshot, slug, campanhaTitulo }: Props) {
             </>
           )}
           <span className="painel-url-link">
-            {snapshot.shareUrl}
+            {paginaShareDisplayPrefix()}
             <a
               href={fullShareUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="painel-url-slug"
             >
-              {snapshot.shareSlug}
+              {slug}
             </a>
           </span>
         </div>

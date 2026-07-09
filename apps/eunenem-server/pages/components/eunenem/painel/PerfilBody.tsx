@@ -5,6 +5,7 @@ import { toast } from "sonner";
 
 import { useTweaks } from "@/components/eunenem/TweaksContext";
 import { trpc } from "@/lib/trpc";
+import { paginaShareDisplayPrefix, paginaShareUrl } from "@/lib/pagina-share";
 import { painelHref } from "@/lib/painelRoutes";
 import { useCampanhaRota } from "@/lib/campanha-rota";
 import { PERFIL_RELATIONS } from "@/lib/mocks/perfil";
@@ -27,7 +28,9 @@ import type { PainelSectionBodyProps } from "@/PainelSectionPage";
 //     Existing photo keys from getPerfil are preserved on save (passed back to
 //     atualizar) so V1 never wipes them.
 
-const SHARE_BASE = "eunenem.com/";
+// aperture-1yx1n / ugttj — legacy "eunenem.com/" SHARE_BASE removed: it was
+// a dead link (wrong domain AND wrong path). All share/display URLs come
+// from the pagina-share seam now (pages/lib/pagina-share.ts).
 const STORY_MAX = 600;
 
 // Slug format mirror of the domain VO (SlugUsuario): starts with a letter,
@@ -660,7 +663,7 @@ function SlugEditor({
   return (
     <Field label="nome do perfil (link da página)" htmlFor="perfil-slug">
       <div className="perfil-input-prefix">
-        <span className="perfil-prefix">{SHARE_BASE}</span>
+        <span className="perfil-prefix">{paginaShareDisplayPrefix()}</span>
         <input
           id="perfil-slug"
           className="perfil-input perfil-input-slug"
@@ -700,7 +703,7 @@ function SlugEditor({
             >
               <span style={{ fontSize: 13, color: "var(--ink)" }}>
                 trocar o link vai <strong>quebrar os links antigos</strong> que
-                você já compartilhou (<code>{SHARE_BASE}{currentSlug}</code>). tem certeza?
+                você já compartilhou (<code>{paginaShareDisplayPrefix()}{currentSlug}</code>). tem certeza?
               </span>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button
@@ -1064,15 +1067,17 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
         <div className="perfil-share">
           <span className="perfil-share-eyebrow">link da página</span>
           <div className="perfil-share-row">
-            <span className="perfil-share-url" title={`${SHARE_BASE}${profileSlug}`}>
-              {SHARE_BASE}
+            <span className="perfil-share-url" title={paginaShareUrl(profileSlug, idCampanha)}>
+              {paginaShareDisplayPrefix()}
               {profileSlug}
             </span>
             <button
               type="button"
               className="perfil-share-copy"
               onClick={() => {
-                const link = `${SHARE_BASE}${profileSlug}`;
+                // aperture-1yx1n — copy the REAL public page URL, campanha-
+                // addressed when this perfil sits under a /c/:id route.
+                const link = paginaShareUrl(profileSlug, idCampanha);
                 void navigator.clipboard
                   .writeText(link)
                   .then(() => toast.success("link copiado ♡"))

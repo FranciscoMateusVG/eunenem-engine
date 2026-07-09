@@ -48,17 +48,24 @@ export function PaginaSucessoPage({ slug }: { slug: string }) {
   // route resolver doesn't see query strings. First server render shows the
   // skeleton; client hydrates, reads the param, fires the query.
   const [sessionId, setSessionId] = useState<string | null>(null);
+  // aperture-1yx1n — the server stamps &idCampanha= on success_url at Stripe
+  // session creation (jlvet #348) for campanha-addressed checkouts, and the
+  // backend CROSS-CHECKS it. Ignoring it made addressed checkouts fail-closed
+  // NOT_FOUND on their own success page. Read it like sessionId and forward.
+  const [idCampanha, setIdCampanha] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     setSessionId(params.get("sessionId"));
+    setIdCampanha(params.get("idCampanha"));
     setHydrated(true);
   }, []);
 
   const { data, isError, isLoading } = useObterSucessoPagamento(slug, sessionId, {
     enabled: hydrated,
     pollWhilePending: true,
+    idCampanha,
   });
 
   // aperture-d52he — the /sucesso direct-URL race: the page can render ~50ms

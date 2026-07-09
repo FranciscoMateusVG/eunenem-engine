@@ -505,7 +505,8 @@ export function MensagensBody({ slug }: PainelSectionBodyProps) {
   );
 
   const handleMarcarLida = (idPagamento: string) => {
-    marcarLida.mutate({ slug, idPagamento });
+    // aperture-1yx1n — writes target the ROUTE campanha (bare URL → server default).
+    marcarLida.mutate(idCampanha ? { slug, idPagamento, idCampanha } : { slug, idPagamento });
   };
 
   const handleMarcarTodas = () => {
@@ -513,7 +514,8 @@ export function MensagensBody({ slug }: PainelSectionBodyProps) {
       toast("nenhum recado novo por aqui ♡");
       return;
     }
-    marcarTodasLidas.mutate({ slug });
+    // aperture-1yx1n — writes target the ROUTE campanha (bare URL → server default).
+    marcarTodasLidas.mutate(idCampanha ? { slug, idCampanha } : { slug });
     toast.success("tudo lido ♡");
   };
 

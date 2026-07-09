@@ -17,6 +17,7 @@
 
 import type { inferRouterInputs, inferRouterOutputs } from "@trpc/server";
 import type { PaginaRouter } from "../../server/trpc/pagina-router.js";
+import { useCampanhaRota } from "./campanha-rota.js";
 import { trpc } from "./trpc.js";
 
 type PaginaInputs = inferRouterInputs<PaginaRouter>;
@@ -61,10 +62,15 @@ export type PagamentoStatus = ObterSucessoResult["status"];
 
 /**
  * Visitor read of the public lista de presentes.
+ *
+ * aperture-1yx1n — resolves the ROUTE campanha (/pagina/:slug/c/:id) so a
+ * specific campanha's page shows ITS gifts. Bare URL → no idCampanha →
+ * server default (oldest). Same pattern as the painel hooks (PR #353).
  */
 export function usePaginaListaPresentes(slug: string) {
+  const idCampanha = useCampanhaRota();
   return trpc.pagina.obterListaPresentes.useQuery(
-    { slug },
+    idCampanha ? { slug, idCampanha } : { slug },
     { staleTime: 30_000 },
   );
 }
@@ -80,8 +86,10 @@ export function usePaginaListaPresentes(slug: string) {
  * becomes necessary.
  */
 export function usePaginaMural(slug: string) {
+  // aperture-1yx1n — route campanha's mural; bare URL → server default.
+  const idCampanha = useCampanhaRota();
   return trpc.pagina.obterMural.useQuery(
-    { slug },
+    idCampanha ? { slug, idCampanha } : { slug },
     { staleTime: 30_000 },
   );
 }
@@ -91,7 +99,18 @@ export function usePaginaMural(slug: string) {
  * session, returns { sessionId, clientSecret }.
  */
 export function useIniciarPagamentoContribuicao() {
-  return trpc.pagina.iniciarPagamentoContribuicao.useMutation();
+  // aperture-1yx1n — MONEY write: checkout must target the ROUTE campanha
+  // or the payment lands on the oldest one. Signature-preserving wrapper;
+  // bare guest URL → no idCampanha → server default (guest back-compat).
+  const idCampanha = useCampanhaRota();
+  const m = trpc.pagina.iniciarPagamentoContribuicao.useMutation();
+  return {
+    ...m,
+    mutate: ((input, opts) =>
+      m.mutate(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutate,
+    mutateAsync: ((input, opts) =>
+      m.mutateAsync(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutateAsync,
+  };
 }
 
 /**
@@ -100,7 +119,16 @@ export function useIniciarPagamentoContribuicao() {
  * so the embedded Stripe checkout mounts identically downstream.
  */
 export function useIniciarPagamentoCarrinho() {
-  return trpc.pagina.iniciarPagamentoCarrinho.useMutation();
+  // aperture-1yx1n — same money-write rule as the single-shot mutation.
+  const idCampanha = useCampanhaRota();
+  const m = trpc.pagina.iniciarPagamentoCarrinho.useMutation();
+  return {
+    ...m,
+    mutate: ((input, opts) =>
+      m.mutate(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutate,
+    mutateAsync: ((input, opts) =>
+      m.mutateAsync(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutateAsync,
+  };
 }
 
 /**
@@ -118,10 +146,17 @@ export function useIniciarPagamentoCarrinho() {
 export function useObterSucessoPagamento(
   slug: string,
   sessionId: string | null,
-  opts: { enabled?: boolean; pollWhilePending?: boolean } = {},
+  opts: { enabled?: boolean; pollWhilePending?: boolean; idCampanha?: string | null } = {},
 ) {
+  // aperture-1yx1n — the success URL carries idCampanha as a QUERY param
+  // (server stamps &idCampanha= on success_url at session creation, jlvet
+  // #348), NOT a /c/ path segment — so it arrives via opts, not route
+  // context. Without it, addressed checkouts fail-closed NOT_FOUND on
+  // their own success page.
   return trpc.pagina.obterSucessoPagamento.useQuery(
-    { slug, sessionId: sessionId ?? "" },
+    opts.idCampanha
+      ? { slug, sessionId: sessionId ?? "", idCampanha: opts.idCampanha }
+      : { slug, sessionId: sessionId ?? "" },
     {
       enabled: (opts.enabled ?? true) && Boolean(sessionId),
       refetchInterval: opts.pollWhilePending

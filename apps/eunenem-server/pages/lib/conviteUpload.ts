@@ -11,6 +11,7 @@
 // which now round-trips through eventoConvite.save as the convite's imagemUrl.
 import { useState } from 'react';
 
+import { useCampanhaRota } from './campanha-rota.js';
 import { trpc } from './trpc.js';
 
 // Cap the longest edge so the stored object (and its public URL) stay small;
@@ -61,15 +62,19 @@ async function fileToJpegBlob(file: File): Promise<Blob> {
  */
 export function useConviteBackgroundUpload() {
   const emitir = trpc.contribuicao.emitirUrlUploadImagemItem.useMutation();
+  // aperture-1yx1n — presign under the ROUTE campanha (bare → server default).
+  const idCampanha = useCampanhaRota();
   const [uploading, setUploading] = useState(false);
 
   const upload = async (file: File): Promise<string> => {
     setUploading(true);
     try {
       const blob = await fileToJpegBlob(file);
-      const { uploadUrl, publicUrl } = await emitir.mutateAsync({
-        contentType: 'image/jpeg',
-      });
+      const { uploadUrl, publicUrl } = await emitir.mutateAsync(
+        idCampanha
+          ? { contentType: 'image/jpeg', idCampanha }
+          : { contentType: 'image/jpeg' },
+      );
       const res = await fetch(uploadUrl, {
         method: 'PUT',
         headers: { 'Content-Type': 'image/jpeg' },

@@ -56,31 +56,52 @@ export function useListaDeConvidadosData() {
   return trpc.eventoListaDeConvidados.get.useQuery(idCampanha ? { idCampanha } : undefined);
 }
 
+// aperture-1yx1n — writes target the ROUTE campanha (bare URL → server default).
 export function useAlterarPresencaConvidado() {
   const utils = trpc.useUtils();
-  return trpc.eventoListaDeConvidados.alterarPresenca.useMutation({
+  const idCampanha = useCampanhaRota();
+  const m = trpc.eventoListaDeConvidados.alterarPresenca.useMutation({
     onSuccess: () => {
       void utils.eventoListaDeConvidados.get.invalidate();
     },
   });
+  return {
+    ...m,
+    mutate: ((input, opts) => m.mutate(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutate,
+    mutateAsync: ((input, opts) => m.mutateAsync(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutateAsync,
+  };
 }
 
+// aperture-1yx1n — writes target the ROUTE campanha (bare URL → server default).
 export function useAdicionarConvidado() {
   const utils = trpc.useUtils();
-  return trpc.eventoListaDeConvidados.adicionarConvidado.useMutation({
+  const idCampanha = useCampanhaRota();
+  const m = trpc.eventoListaDeConvidados.adicionarConvidado.useMutation({
     onSuccess: () => {
       void utils.eventoListaDeConvidados.get.invalidate();
     },
   });
+  return {
+    ...m,
+    mutate: ((input, opts) => m.mutate(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutate,
+    mutateAsync: ((input, opts) => m.mutateAsync(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutateAsync,
+  };
 }
 
+// aperture-1yx1n — writes target the ROUTE campanha (bare URL → server default).
 export function useSalvarFormatoMensagem() {
   const utils = trpc.useUtils();
-  return trpc.eventoListaDeConvidados.salvarFormatoMensagem.useMutation({
+  const idCampanha = useCampanhaRota();
+  const m = trpc.eventoListaDeConvidados.salvarFormatoMensagem.useMutation({
     onSuccess: () => {
       void utils.eventoListaDeConvidados.get.invalidate();
     },
   });
+  return {
+    ...m,
+    mutate: ((input, opts) => m.mutate(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutate,
+    mutateAsync: ((input, opts) => m.mutateAsync(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutateAsync,
+  };
 }
 
 export type ConvidadosUiErrorKind = 'unauthorized' | 'validation' | 'not-found' | 'conflict' | 'network';

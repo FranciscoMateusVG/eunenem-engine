@@ -41,17 +41,26 @@ export function PaginaPage({
 }: {
   slug: string;
   /**
-   * aperture-h0hom — specific campanha (from /pagina/:slug/c/:id). Threaded
-   * into getPerfilPublicoBySlug once Rex's optional-idCampanha inputs merge
-   * (aperture-yeauv); until then the route resolves the oldest, same as bare.
+   * aperture-h0hom / aperture-1yx1n — specific campanha (from
+   * /pagina/:slug/c/:id). Threaded into getPerfilPublicoBySlug so the page
+   * header (baby name, date, fotos) reflects THAT campanha's perfil.
    */
   idCampanha?: string;
 }) {
-  void idCampanha; // held for the yeauv query-input wiring commit
+  // aperture-1yx1n — PARALLEL-TRACK SHIM (contract-pinning, swap on Rex's
+  // aphk8 merge): getPerfilPublicoBySlug's input is { slug } until W1a adds
+  // optional idCampanha. zod (non-strict) STRIPS the unknown key pre-merge —
+  // harmless no-op — and honors it the moment W1a deploys. The cast below is
+  // the only lie; delete it + the comment when @/server perfil-router input
+  // includes idCampanha, letting inference take over.
   const perfil = trpc.perfil.getPerfilPublicoBySlug.useQuery(
-    { slug },
+    (idCampanha ? { slug, idCampanha } : { slug }) as { slug: string },
     { staleTime: 60_000, retry: false },
   );
+  // Marketplace + Messages need NO prop threading: their hooks
+  // (usePaginaListaPresentes / usePaginaMural) self-resolve the route
+  // campanha via useCampanhaRota() — the route-level CampanhaRotaProvider
+  // (App.tsx pickPage, PR #353) covers this whole tree.
 
   // Unknown slug → honest not-found (the public projection threw NOT_FOUND).
   if (perfil.error?.data?.code === 'NOT_FOUND') {

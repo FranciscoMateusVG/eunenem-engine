@@ -168,13 +168,20 @@ export function useContribuicaoList() {
 }
 
 /** Single-item create. One row with `quantidade=N` per Plan 0016. */
+// aperture-1yx1n — writes target the ROUTE campanha (bare URL → server default).
 export function useContribuicaoCreate() {
   const utils = trpc.useUtils();
-  return trpc.contribuicao.create.useMutation({
+  const idCampanha = useCampanhaRota();
+  const m = trpc.contribuicao.create.useMutation({
     onSuccess: () => {
       void utils.contribuicao.list.invalidate();
     },
   });
+  return {
+    ...m,
+    mutate: ((input, opts) => m.mutate(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutate,
+    mutateAsync: ((input, opts) => m.mutateAsync(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutateAsync,
+  };
 }
 
 /**
@@ -183,31 +190,52 @@ export function useContribuicaoCreate() {
  * this fanned out into `items[i].qty` rows per item; that pattern is
  * gone.
  */
+// aperture-1yx1n — writes target the ROUTE campanha (bare URL → server default).
 export function useContribuicaoCreateBulk() {
   const utils = trpc.useUtils();
-  return trpc.contribuicao.createBulk.useMutation({
+  const idCampanha = useCampanhaRota();
+  const m = trpc.contribuicao.createBulk.useMutation({
     onSuccess: () => {
       void utils.contribuicao.list.invalidate();
     },
   });
+  return {
+    ...m,
+    mutate: ((input, opts) => m.mutate(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutate,
+    mutateAsync: ((input, opts) => m.mutateAsync(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutateAsync,
+  };
 }
 
 /** Patch a single contribuicao. Throws `locked` on indisponivel rows. */
+// aperture-1yx1n — writes target the ROUTE campanha (bare URL → server default).
 export function useContribuicaoUpdate() {
   const utils = trpc.useUtils();
-  return trpc.contribuicao.update.useMutation({
+  const idCampanha = useCampanhaRota();
+  const m = trpc.contribuicao.update.useMutation({
     onSuccess: () => {
       void utils.contribuicao.list.invalidate();
     },
   });
+  return {
+    ...m,
+    mutate: ((input, opts) => m.mutate(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutate,
+    mutateAsync: ((input, opts) => m.mutateAsync(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutateAsync,
+  };
 }
 
 /** Bulk delete by ids. Missing ids are silently skipped. */
+// aperture-1yx1n — writes target the ROUTE campanha (bare URL → server default).
 export function useContribuicaoDelete() {
   const utils = trpc.useUtils();
-  return trpc.contribuicao.delete.useMutation({
+  const idCampanha = useCampanhaRota();
+  const m = trpc.contribuicao.delete.useMutation({
     onSuccess: () => {
       void utils.contribuicao.list.invalidate();
     },
   });
+  return {
+    ...m,
+    mutate: ((input, opts) => m.mutate(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutate,
+    mutateAsync: ((input, opts) => m.mutateAsync(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutateAsync,
+  };
 }

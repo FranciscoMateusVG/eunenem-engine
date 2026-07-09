@@ -16,6 +16,7 @@ import { useEffect, useRef, useState } from "react";
 import Cropper from "react-easy-crop";
 import { toast } from "sonner";
 
+import { useCampanhaRota } from "@/lib/campanha-rota.js";
 import { trpc } from "@/lib/trpc";
 
 type CropArea = { x: number; y: number; width: number; height: number };
@@ -203,15 +204,19 @@ export function ItemImageUpload({
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const emitir = trpc.contribuicao.emitirUrlUploadImagemItem.useMutation();
+  // aperture-1yx1n — writes target the ROUTE campanha (bare URL → server default).
+  const idCampanha = useCampanhaRota();
 
   const onCropped = async (blob: Blob) => {
     setPendingFile(null);
     setUploading(true);
     try {
       // cropToBlob always emits JPEG → content-type must match the presign.
-      const { uploadUrl, publicUrl } = await emitir.mutateAsync({
-        contentType: "image/jpeg",
-      });
+      const { uploadUrl, publicUrl } = await emitir.mutateAsync(
+        idCampanha
+          ? { contentType: "image/jpeg", idCampanha }
+          : { contentType: "image/jpeg" },
+      );
       const res = await fetch(uploadUrl, {
         method: "PUT",
         headers: { "Content-Type": "image/jpeg" },
