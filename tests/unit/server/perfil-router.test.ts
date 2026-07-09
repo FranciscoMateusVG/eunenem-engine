@@ -15,10 +15,13 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { ServerDeps } from '../../../apps/eunenem-server/server/auth/setup.js';
 import type { TrpcContext } from '../../../apps/eunenem-server/server/trpc/context.js';
 import { appRouter } from '../../../apps/eunenem-server/server/trpc/router.js';
+import { CampanhaRepositoryMemory } from '../../../src/adapters/arrecadacao/campanha-repository.memory.js';
+import { PerfilCampanhaRepositoryMemory } from '../../../src/adapters/arrecadacao/perfil-campanha-repository.memory.js';
 import { ID_PLATAFORMA_EUNENEM } from '../../../src/adapters/plataforma/repository.memory.js';
 import { ObjectStorageMemory } from '../../../src/adapters/storage/object-storage.memory.js';
 import { PerfilCriadorRepositoryMemory } from '../../../src/adapters/usuario/perfil-criador-repository.memory.js';
 import { UsuarioRepositoryMemory } from '../../../src/adapters/usuario/repository.memory.js';
+import { criarCampanhaSemRecebedor } from '../../../src/domain/arrecadacao/entities/campanha.js';
 import { NoopLogger } from '../../../src/observability/noop-logger.js';
 import { noopTracer } from '../../../src/observability/tracer.js';
 
@@ -39,9 +42,24 @@ async function buildRig(): Promise<Rig> {
   const observability = { logger: new NoopLogger(), tracer: noopTracer() };
   const usuarioRepository = new UsuarioRepositoryMemory();
   const perfilCriadorRepository = new PerfilCriadorRepositoryMemory();
+  // aperture-aphk8 shim: perfil.atualizar/getPerfil/getPerfilPublicoBySlug
+  // now resolve the caller's OLDEST campanha and read/write its
+  // perfil_campanhas row — the rig needs a campanha + the new repo.
+  const campanhaRepository = new CampanhaRepositoryMemory();
+  const perfilCampanhaRepository = new PerfilCampanhaRepositoryMemory();
 
   const idUsuario = randomUUID();
   const idConta = randomUUID();
+  await campanhaRepository.save(
+    criarCampanhaSemRecebedor({
+      id: randomUUID(),
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
+      idsAdministradores: [idConta],
+      titulo: 'Lista da Helena',
+      opcoes: [],
+      criadaEm: FAKE_NOW,
+    }),
+  );
   await usuarioRepository.saveRegistroDomain({
     usuario: {
       id: idUsuario as never,
@@ -74,6 +92,8 @@ async function buildRig(): Promise<Rig> {
     authService: authService as never,
     usuarioRepository,
     perfilCriadorRepository,
+    perfilCampanhaRepository,
+    campanhaRepository,
     objectStorage: new ObjectStorageMemory(),
     plataformaRepository: {} as never,
     observability,

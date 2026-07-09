@@ -44,6 +44,7 @@ const baseCampanha = {
   idRecebedor,
   dadosRecebedor: dadosRecebedorEmail,
   titulo: 'Campanha',
+  slug: null,
   opcoes: [] as const,
   criadaEm: new Date('2026-01-01T00:00:00.000Z'),
 };
@@ -307,6 +308,8 @@ describe('criarCampanhaSemRecebedor', () => {
         'idRecebedor',
         'idsAdministradores',
         'opcoes',
+        // aperture-aphk8: the campanha's own URL slug (defaults to null).
+        'slug',
         'titulo',
       ].sort(),
     );

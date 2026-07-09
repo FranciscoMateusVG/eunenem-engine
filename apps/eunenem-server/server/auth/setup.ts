@@ -25,6 +25,7 @@ import {
   type EmailTransport,
   EmailTransportNodemailer,
   EmailTransportNoop,
+  type EmitirUrlUploadCampanhaInput,
   type EmitirUrlUploadInput,
   type EmitirUrlUploadItemInput,
   type ObjectStorage,
@@ -42,6 +43,8 @@ import {
   PagamentoRepositoryPostgres,
   type DadosRecebimentoRepository,
   DadosRecebimentoRepositoryPostgres,
+  type PerfilCampanhaRepository,
+  PerfilCampanhaRepositoryPostgres,
   type PerfilCriadorRepository,
   PerfilCriadorRepositoryPostgres,
   type ResgatePendenteRepository,
@@ -82,6 +85,15 @@ export interface ServerDeps {
    * sharing the same Kysely instance as the other domain repos.
    */
   readonly perfilCriadorRepository: PerfilCriadorRepository;
+  /**
+   * PerfilCampanha BC adapter (aperture-aphk8, W1a). Backs the
+   * `perfilCampanha.*` tRPC procedures — per-campanha profile read/write —
+   * plus the perfil-router transitional shim (oldest-campanha baby-half) and
+   * the public `getPerfilPublicoBySlug` projection. Postgres-backed
+   * (migration 035), sharing the same Kysely instance as the other domain
+   * repos.
+   */
+  readonly perfilCampanhaRepository: PerfilCampanhaRepository;
   /**
    * DadosRecebimentoUsuario BC adapter (aperture-mcvyw). Backs the
    * `dadosRecebimento.*` tRPC procedures — authed read/write of the user-level
@@ -202,6 +214,12 @@ class ObjectStorageNaoConfigurado implements ObjectStorage {
 
   async emitirUrlUploadPresignadaItem(
     _input: EmitirUrlUploadItemInput,
+  ): Promise<UrlUploadPresignada> {
+    throw new Error('storage não configurado (MINIO_* ausente)');
+  }
+
+  async emitirUrlUploadPresignadaCampanha(
+    _input: EmitirUrlUploadCampanhaInput,
   ): Promise<UrlUploadPresignada> {
     throw new Error('storage não configurado (MINIO_* ausente)');
   }
@@ -542,6 +560,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
 
   const usuarioRepository = new UsuarioRepositoryPostgres(db);
   const perfilCriadorRepository = new PerfilCriadorRepositoryPostgres(db);
+  const perfilCampanhaRepository = new PerfilCampanhaRepositoryPostgres(db);
   const dadosRecebimentoRepository = new DadosRecebimentoRepositoryPostgres(db);
   const resgatePendenteRepository = new ResgatePendenteRepositoryPostgres(db);
 
@@ -653,6 +672,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     authService,
     usuarioRepository,
     perfilCriadorRepository,
+    perfilCampanhaRepository,
     dadosRecebimentoRepository,
     resgatePendenteRepository,
     plataformaRepository,

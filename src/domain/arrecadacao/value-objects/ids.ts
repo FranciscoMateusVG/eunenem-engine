@@ -28,3 +28,12 @@ export type IdRecebedor = z.infer<typeof IdRecebedorSchema>;
 
 export const IdContribuicaoSchema = z.uuid();
 export type IdContribuicao = z.infer<typeof IdContribuicaoSchema>;
+
+/**
+ * Identity of the `PerfilCampanha` aggregate (aperture-aphk8). Own UUID,
+ * distinct from `IdCampanha` — the profile is 1:1 with a Campanha but is a
+ * separate aggregate root (same pattern as Usuário's PerfilCriador) so the
+ * Campanha root stays free of presentation fields.
+ */
+export const IdPerfilCampanhaSchema = z.uuid();
+export type IdPerfilCampanha = z.infer<typeof IdPerfilCampanhaSchema>;

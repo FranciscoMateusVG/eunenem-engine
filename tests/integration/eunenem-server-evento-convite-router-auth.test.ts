@@ -5,6 +5,7 @@ import type { TrpcContext } from '../../apps/eunenem-server/server/trpc/context.
 import { appRouter } from '../../apps/eunenem-server/server/trpc/router.js';
 import { CampanhaRepositoryMemory } from '../../src/adapters/arrecadacao/campanha-repository.memory.js';
 import { ContribuicaoRepositoryMemory } from '../../src/adapters/arrecadacao/contribuicao-repository.memory.js';
+import { PerfilCampanhaRepositoryMemory } from '../../src/adapters/arrecadacao/perfil-campanha-repository.memory.js';
 import { RecebedorRepositoryMemory } from '../../src/adapters/arrecadacao/recebedor-repository.memory.js';
 import { ConviteRepositoryMemory } from '../../src/adapters/evento/convite-repository.memory.js';
 import { EventoRepositoryMemory } from '../../src/adapters/evento/evento-repository.memory.js';
@@ -69,6 +70,7 @@ async function buildRig(): Promise<TestRig> {
     auth: {} as never,
     authService,
     usuarioRepository,
+    perfilCampanhaRepository: new PerfilCampanhaRepositoryMemory(),
     plataformaRepository,
     campanhaRepository,
     contribuicaoRepository,

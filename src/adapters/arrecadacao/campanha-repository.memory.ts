@@ -318,4 +318,29 @@ export class CampanhaRepositoryMemory implements CampanhaRepository {
       }
     });
   }
+
+  async updateSlug(
+    idCampanha: IdCampanha,
+    slug: string | null,
+    _context?: ArrecadacaoRepositoryContext,
+  ): Promise<void> {
+    return tracer.startActiveSpan('db.arrecadacao_campanhas.updateSlug', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+      try {
+        // Single-column update mirroring the Postgres adapter — no-op for
+        // unknown id (the caller owner-gates before calling).
+        const campanha = this.campanhas.get(idCampanha);
+        if (campanha) {
+          this.campanhas.set(idCampanha, { ...campanha, slug });
+        }
+        span.setStatus({ code: SpanStatusCode.OK });
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
 }

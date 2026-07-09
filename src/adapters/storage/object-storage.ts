@@ -49,6 +49,23 @@ export interface EmitirUrlUploadItemInput {
   readonly contentType: string;
 }
 
+/**
+ * Caller input for a CAMPANHA-scoped profile photo upload (aperture-aphk8).
+ *
+ * SIBLING of `EmitirUrlUploadInput` but keyed by `idCampanha` instead of
+ * `idUsuario` — per-campanha profiles (perfil_campanhas) store photos under
+ * `campanha/<idCampanha>/<slot>-<uuid>.<ext>`. `idCampanha` is supplied by
+ * the tRPC procedure AFTER owner-gating (resolverCampanhaAdministrada),
+ * never raw client input — that's what namespaces the key per campanha.
+ */
+export interface EmitirUrlUploadCampanhaInput {
+  /** Owner-gated campanha id — supplied by the tRPC procedure, never raw client input. */
+  readonly idCampanha: string;
+  readonly slot: SlotFoto;
+  /** Validated upstream to one of the allowed image types; locked into the presign. */
+  readonly contentType: string;
+}
+
 export interface UrlUploadPresignada {
   /** Short-lived presigned PUT URL the client uploads the bytes to. */
   readonly uploadUrl: string;
@@ -82,6 +99,20 @@ export interface ObjectStorage {
    * the key, and the constructed public URL.
    */
   emitirUrlUploadPresignadaItem(input: EmitirUrlUploadItemInput): Promise<UrlUploadPresignada>;
+
+  /**
+   * Mint a presigned PUT URL for a CAMPANHA-scoped profile photo upload
+   * (aperture-aphk8).
+   *
+   * SIBLING of `emitirUrlUploadPresignada` but campanha-keyed: the key is
+   * `campanha/<idCampanha>/<slot>-<uuid>.<ext>`. Same security invariants:
+   * derives the extension from `contentType`, builds a namespaced key
+   * (campanha A can never overwrite campanha B's photo), and presigns a
+   * PutObjectCommand with the Content-Type locked in and a 5-minute expiry.
+   */
+  emitirUrlUploadPresignadaCampanha(
+    input: EmitirUrlUploadCampanhaInput,
+  ): Promise<UrlUploadPresignada>;
 
   /**
    * Construct the stable public read URL for a stored object key

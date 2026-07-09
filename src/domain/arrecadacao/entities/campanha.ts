@@ -45,6 +45,13 @@ export interface Campanha {
   readonly idRecebedor: IdRecebedor | null;
   readonly dadosRecebedor: DadosRecebedor | null;
   readonly titulo: string;
+  /**
+   * The campanha's own URL segment (aperture-aphk8, W1a) — null until the
+   * owner claims one via `campanhas.definirSlug`. Uniqueness is PER-CONTA,
+   * enforced at the application layer (NOT a DB constraint): two different
+   * contas may hold the same campanha slug.
+   */
+  readonly slug: string | null;
   readonly opcoes: readonly OpcaoContribuicao[];
   readonly criadaEm: Date;
 }
@@ -134,13 +141,16 @@ export function campanhaSemRecebedor(campanha: Campanha): Campanha {
 
 /** Monta campanha a partir de metadados e recebedor inicial ativo. */
 export function campanhaComRecebedorInicial(
-  params: Omit<Campanha, 'idRecebedor' | 'dadosRecebedor'> & {
+  params: Omit<Campanha, 'idRecebedor' | 'dadosRecebedor' | 'slug'> & {
     readonly recebedor: Recebedor;
+    /** Optional — defaults to null (aperture-aphk8; keeps existing call-sites intact). */
+    readonly slug?: string | null;
   },
 ): Campanha {
-  const { recebedor, ...rest } = params;
+  const { recebedor, slug, ...rest } = params;
   const next: Campanha = {
     ...rest,
+    slug: slug ?? null,
     idRecebedor: recebedor.id,
     dadosRecebedor: recebedor.dadosRecebedor,
   };
@@ -150,10 +160,15 @@ export function campanhaComRecebedorInicial(
 
 /** Monta campanha sem recebedor (lifecycle: pre-bank-info). */
 export function criarCampanhaSemRecebedor(
-  params: Omit<Campanha, 'idRecebedor' | 'dadosRecebedor'>,
+  params: Omit<Campanha, 'idRecebedor' | 'dadosRecebedor' | 'slug'> & {
+    /** Optional — defaults to null (aperture-aphk8; keeps existing call-sites intact). */
+    readonly slug?: string | null;
+  },
 ): Campanha {
+  const { slug, ...rest } = params;
   const next: Campanha = {
-    ...params,
+    ...rest,
+    slug: slug ?? null,
     idRecebedor: null,
     dadosRecebedor: null,
   };

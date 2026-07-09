@@ -26,6 +26,7 @@ import { eventoConviteRouter } from './evento-convite-router.js';
 import { eventoListaDeConvidadosRouter } from './evento-lista-de-convidados-router.js';
 import { paginaRouter } from './pagina-router.js';
 import { painelMensagensRouter } from './painel-mensagens-router.js';
+import { perfilCampanhaRouter } from './perfil-campanha-router.js';
 import { perfilRouter } from './perfil-router.js';
 import { recebedorRouter } from './recebedor-router.js';
 import { usuarioRouter } from './usuario-router.js';
@@ -51,6 +52,7 @@ export const appRouter = t.router({
   pagina: paginaRouter,
   painelMensagens: painelMensagensRouter,
   perfil: perfilRouter,
+  perfilCampanha: perfilCampanhaRouter,
   recebedor: recebedorRouter,
   usuario: usuarioRouter,
 });

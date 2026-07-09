@@ -689,6 +689,51 @@ export const paginaRouter = t.router({
         },
       };
     }),
+
+  /**
+   * PUBLIC campanha-slug resolution (aperture-aphk8): `(slug, campanhaSlug)`
+   * → `{ idCampanha }`. Powers the future `/pagina/<slug>/c/<campanhaSlug>`
+   * addressing: the frontend resolves the pair once, then calls the existing
+   * idCampanha-scoped procedures.
+   *
+   * Resolution: slug → usuario (same tenant chain as every pagina hop) →
+   * scan the conta's campanhas for one whose own `slug` equals the
+   * normalized `campanhaSlug`. Unknown user-slug, no match, and a
+   * campanhaSlug belonging to a DIFFERENT conta all collapse to the SAME
+   * non-leaking NOT_FOUND ('Pagina nao encontrada' — byte-equal with the
+   * other pagina 404s).
+   */
+  resolverCampanhaSlug: t.procedure
+    .input(
+      z.object({
+        slug: z.string().trim().min(1).max(60),
+        campanhaSlug: z.string().trim().min(1).max(60),
+      }),
+    )
+    .output(z.object({ idCampanha: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const { deps } = ctx;
+      const usuario = await deps.usuarioRepository.findUsuarioBySlug(
+        ID_PLATAFORMA_EUNENEM,
+        input.slug as SlugUsuario,
+      );
+      if (!usuario) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Pagina nao encontrada' });
+      }
+
+      // Slugs are stored normalized (trimmed, lowercase) by definirSlug —
+      // normalize the incoming segment the same way before comparing.
+      const alvo = input.campanhaSlug.trim().toLowerCase();
+      const campanhas = await deps.campanhaRepository.findCampanhasByAdministrador(
+        usuario.idConta,
+      );
+      const campanha = campanhas.find((c) => c.slug === alvo);
+      if (!campanha) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Pagina nao encontrada' });
+      }
+
+      return { idCampanha: campanha.id };
+    }),
 });
 
 export type PaginaRouter = typeof paginaRouter;

@@ -49,12 +49,14 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
             id: campanha.id,
             id_plataforma: campanha.idPlataforma,
             titulo: campanha.titulo,
+            slug: campanha.slug,
             criada_em: campanha.criadaEm,
           })
           .onConflict((oc) =>
             oc.column('id').doUpdateSet({
               titulo: campanha.titulo,
               id_plataforma: campanha.idPlataforma,
+              slug: campanha.slug,
             }),
           )
           .execute();
@@ -142,6 +144,7 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
           idPlataforma: row.id_plataforma as IdPlataformaReferencia,
           idsAdministradores: admins.map((a) => a.id_usuario as IdConta),
           titulo: row.titulo,
+          slug: row.slug,
           opcoes: opcoes.map(toOpcao),
           criadaEm: row.criada_em,
         };
@@ -203,6 +206,7 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
             idPlataforma: row.id_plataforma as IdPlataformaReferencia,
             idsAdministradores: admins.map((a) => a.id_usuario as IdConta),
             titulo: row.titulo,
+            slug: row.slug,
             opcoes: opcoes.map(toOpcao),
             criadaEm: row.criada_em,
           };
@@ -251,6 +255,7 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
               'campanhas.id',
               'campanhas.id_plataforma',
               'campanhas.titulo',
+              'campanhas.slug',
               'campanhas.criada_em',
             ])
             .where('campanha_administradores.id_usuario', '=', idConta)
@@ -288,6 +293,7 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
             idPlataforma: row.id_plataforma as IdPlataformaReferencia,
             idsAdministradores: admins.map((a) => a.id_usuario as IdConta),
             titulo: row.titulo,
+            slug: row.slug,
             opcoes: opcoes.map(toOpcao),
             criadaEm: row.criada_em,
           };
@@ -506,6 +512,33 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
         // clean up in one statement. Idempotent — affects zero rows for
         // unknown id.
         await executor.deleteFrom('campanhas').where('id', '=', idCampanha).execute();
+        span.setStatus({ code: SpanStatusCode.OK });
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  async updateSlug(
+    idCampanha: IdCampanha,
+    slug: string | null,
+    context?: ArrecadacaoRepositoryContext,
+  ): Promise<void> {
+    const executor = context?.trx ?? this.db;
+    return tracer.startActiveSpan('db.arrecadacao_campanhas.updateSlug', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+      try {
+        // Single-column update (aperture-aphk8). No-op for unknown id —
+        // the caller owner-gates before calling.
+        await executor
+          .updateTable('campanhas')
+          .set({ slug })
+          .where('id', '=', idCampanha)
+          .execute();
         span.setStatus({ code: SpanStatusCode.OK });
       } catch (error: unknown) {
         span.recordException(error as Error);

@@ -6,6 +6,9 @@ export { CampanhaRepositoryPostgres } from './adapters/arrecadacao/campanha-repo
 export type { ContribuicaoRepository } from './adapters/arrecadacao/contribuicao-repository.js';
 export { ContribuicaoRepositoryMemory } from './adapters/arrecadacao/contribuicao-repository.memory.js';
 export { ContribuicaoRepositoryPostgres } from './adapters/arrecadacao/contribuicao-repository.postgres.js';
+export type { PerfilCampanhaRepository } from './adapters/arrecadacao/perfil-campanha-repository.js';
+export { PerfilCampanhaRepositoryMemory } from './adapters/arrecadacao/perfil-campanha-repository.memory.js';
+export { PerfilCampanhaRepositoryPostgres } from './adapters/arrecadacao/perfil-campanha-repository.postgres.js';
 export type { RecebedorRepository } from './adapters/arrecadacao/recebedor-repository.js';
 export { RecebedorRepositoryMemory } from './adapters/arrecadacao/recebedor-repository.memory.js';
 export { RecebedorRepositoryPostgres } from './adapters/arrecadacao/recebedor-repository.postgres.js';
@@ -62,6 +65,7 @@ export {
 } from './adapters/plataforma/repository.memory.js';
 // aperture-kcasm: object storage — presigned-PUT photo uploads (infra boundary).
 export type {
+  EmitirUrlUploadCampanhaInput,
   EmitirUrlUploadInput,
   EmitirUrlUploadItemInput,
   ObjectStorage,
@@ -146,6 +150,15 @@ export {
   LIMITE_CONTRIBUICOES_POR_OPCAO,
   NomeContribuicaoSchema,
 } from './domain/arrecadacao/entities/contribuicao.js';
+export type {
+  AtualizarConteudoPerfilCampanhaInput,
+  CriarPerfilCampanhaInput,
+  PerfilCampanha,
+} from './domain/arrecadacao/entities/perfil-campanha.js';
+export {
+  atualizarConteudoPerfilCampanha,
+  criarPerfilCampanha,
+} from './domain/arrecadacao/entities/perfil-campanha.js';
 export type { Recebedor } from './domain/arrecadacao/entities/recebedor.js';
 export {
   criarNovoRecebedor,
@@ -175,6 +188,7 @@ export type {
   IdConta,
   IdContribuicao,
   IdOpcaoContribuicao,
+  IdPerfilCampanha,
   IdPlataformaReferencia as IdPlataformaReferenciaArrecadacao,
   IdRecebedor,
 } from './domain/arrecadacao/value-objects/ids.js';
@@ -183,6 +197,7 @@ export {
   IdContaSchema,
   IdContribuicaoSchema,
   IdOpcaoContribuicaoSchema,
+  IdPerfilCampanhaSchema,
   IdPlataformaReferenciaSchema as IdPlataformaReferenciaArrecadacaoSchema,
   IdRecebedorSchema,
 } from './domain/arrecadacao/value-objects/ids.js';
@@ -578,6 +593,7 @@ export type { Permissao } from './domain/usuario/value-objects/permissao.js';
 export { PERMISSOES_PADRAO, PermissaoSchema } from './domain/usuario/value-objects/permissao.js';
 export type { SlugUsuario } from './domain/usuario/value-objects/slug-usuario.js';
 export {
+  RESERVED_SLUGS,
   SLUG_USUARIO_REGEX,
   SlugUsuarioSchema,
 } from './domain/usuario/value-objects/slug-usuario.js';
@@ -736,6 +752,14 @@ export {
   CriarRecebedorParaCampanhaInputSchema,
   criarRecebedorParaCampanha,
 } from './use-cases/arrecadacao/criar-recebedor-para-campanha.js';
+export type {
+  EmitirUrlUploadFotoCampanhaDeps,
+  EmitirUrlUploadFotoCampanhaInput,
+} from './use-cases/arrecadacao/emitir-url-upload-foto-campanha.js';
+export {
+  EmitirUrlUploadFotoCampanhaInputSchema,
+  emitirUrlUploadFotoCampanha,
+} from './use-cases/arrecadacao/emitir-url-upload-foto-campanha.js';
 // Plan 0015 (aperture-7pqee): desassociarContribuinteContribuicao removed.
 // No saga compensation needed — there's no claim step to undo. Estorno
 // path uses estornar-pagamento (Phase 2).

@@ -423,6 +423,57 @@ export function describeCampanhaRepositoryConformance(name: string, options: Con
       const found = await repo.findCampanhasByContribuinte(randomUUID(), 'noone@example.com');
       expect(found).toEqual([]);
     });
+
+    // ───── slug + updateSlug (aperture-aphk8) ─────
+
+    it('save round-trips a campanha slug (aperture-aphk8)', async () => {
+      const campanha = makeCampanha({ slug: 'minha-lista' });
+      await options.saveCampanha(repo, campanha);
+      expect((await repo.findById(campanha.id))?.slug).toBe('minha-lista');
+    });
+
+    it('slug defaults to null and round-trips as null (aperture-aphk8)', async () => {
+      const campanha = makeCampanha();
+      await options.saveCampanha(repo, campanha);
+      expect((await repo.findById(campanha.id))?.slug).toBeNull();
+    });
+
+    it('updateSlug persists the slug without touching the rest of the aggregate (aperture-aphk8)', async () => {
+      const campanha = makeCampanha({
+        idsAdministradores: [randomUUID()],
+        opcoes: [{ id: randomUUID(), tipo: 'presente' }],
+      });
+      await options.saveCampanha(repo, campanha);
+
+      await repo.updateSlug(campanha.id, 'lista-da-helena');
+
+      const found = await repo.findById(campanha.id);
+      expect(found?.slug).toBe('lista-da-helena');
+      expect(found?.titulo).toBe(campanha.titulo);
+      expect(found?.idsAdministradores).toEqual(campanha.idsAdministradores);
+      expect(found?.opcoes).toEqual(campanha.opcoes);
+    });
+
+    it('updateSlug(null) clears a previously-set slug (aperture-aphk8)', async () => {
+      const campanha = makeCampanha({ slug: 'antigo' });
+      await options.saveCampanha(repo, campanha);
+
+      await repo.updateSlug(campanha.id, null);
+
+      expect((await repo.findById(campanha.id))?.slug).toBeNull();
+    });
+
+    it('updateSlug is a no-op for an unknown id (aperture-aphk8)', async () => {
+      await expect(repo.updateSlug(randomUUID(), 'qualquer')).resolves.not.toThrow();
+    });
+
+    it('updateSlug emits db.arrecadacao_campanhas.updateSlug span (aperture-aphk8)', async () => {
+      await repo.updateSlug(randomUUID(), 'qualquer');
+      const span = findSpan(options.getSpans(), 'db.arrecadacao_campanhas.updateSlug');
+      expect(span).toBeDefined();
+      expect(span?.attributes['db.system']).toBe(options.expectedDbSystem);
+      expect(span?.attributes['db.operation.name']).toBe('UPDATE');
+    });
   });
 }
 
@@ -440,6 +491,7 @@ export function makeCampanha(overrides: Partial<Campanha> = {}): Campanha {
       chavePix: 'maria@exemplo.com',
     },
     titulo: 'Campanha teste',
+    slug: null,
     opcoes: [],
     criadaEm: new Date('2026-05-01T12:00:00.000Z'),
     ...overrides,
@@ -455,6 +507,7 @@ export function makeCampanhaSemRecebedor(overrides: Partial<Campanha> = {}): Cam
     idRecebedor: null,
     dadosRecebedor: null,
     titulo: 'Campanha sem recebedor',
+    slug: null,
     opcoes: [],
     criadaEm: new Date('2026-05-01T12:00:00.000Z'),
     ...overrides,

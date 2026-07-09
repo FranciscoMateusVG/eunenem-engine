@@ -77,6 +77,13 @@ describe('Migration round-trip', () => {
     expect(tableNames).toContain('dados_recebimento_usuario');
     expect(tableNames).toContain('resgates_pendentes');
 
+    // 035 create_perfil_campanhas (aperture-aphk8): table + campanhas.slug.
+    expect(tableNames).toContain('perfil_campanhas');
+    const campanhaSlugCol = await getColumn(db, 'campanhas', 'slug');
+    expect(campanhaSlugCol?.data_type).toBe('character varying');
+    expect(campanhaSlugCol?.character_maximum_length).toBe(60);
+    expect(campanhaSlugCol?.is_nullable).toBe('YES');
+
     const conviteRemetenteCol = await getColumn(db, 'convites', 'remetente');
     expect(conviteRemetenteCol?.data_type).toBe('character varying');
     expect(conviteRemetenteCol?.character_maximum_length).toBe(120);
@@ -94,10 +101,20 @@ describe('Migration round-trip', () => {
     //    now its THIRD occurrence. Prepended to restore alignment; the real
     //    tip is 20260705_034.
 
-    // 034 drop_link_confirmacao_from_listas_de_convidados → the migration
-    //   TIP (20260705 sorts last), so the FIRST migrateDown unwinds it. Its
-    //   down() restores the link_confirmacao column as nullable text (shape
-    //   only — the dropped data is unrecoverable by design).
+    // 035 create_perfil_campanhas (aperture-aphk8) → the migration TIP
+    //   (20260708 sorts last), so the FIRST migrateDown unwinds it. Its
+    //   down() drops the perfil_campanhas table, the campanhas_slug_idx
+    //   index, and the campanhas.slug column.
+    const downPerfilCampanhas = await migrator.migrateDown();
+    expect(downPerfilCampanhas.error).toBeUndefined();
+    expect(await listTableNames(db)).not.toContain('perfil_campanhas');
+    expect(await getColumn(db, 'campanhas', 'slug')).toBeUndefined();
+    expect(await listIndexNames(db, 'campanhas')).not.toContain('campanhas_slug_idx');
+
+    // 034 drop_link_confirmacao_from_listas_de_convidados → previously the
+    //   tip; now the SECOND migrateDown. Its down() restores the
+    //   link_confirmacao column as nullable text (shape only — the dropped
+    //   data is unrecoverable by design).
     const downDropLinkConfirmacao = await migrator.migrateDown();
     expect(downDropLinkConfirmacao.error).toBeUndefined();
     const linkConfirmacaoCol = await getColumn(db, 'listas_de_convidados', 'link_confirmacao');

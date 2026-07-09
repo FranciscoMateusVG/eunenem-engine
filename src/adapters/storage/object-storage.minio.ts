@@ -4,6 +4,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 import {
   CONTENT_TYPE_EXTENSAO,
+  type EmitirUrlUploadCampanhaInput,
   type EmitirUrlUploadInput,
   type EmitirUrlUploadItemInput,
   type ObjectStorage,
@@ -121,6 +122,51 @@ export class ObjectStorageMinio implements ObjectStorage {
         // Per-user namespaced key — NO slot (item images aren't profile-scoped).
         // user A can never overwrite user B's item image.
         const objectKey = `itens/${input.idUsuario}/${randomUUID()}.${ext}`;
+
+        const uploadUrl = await getSignedUrl(
+          this.s3,
+          new PutObjectCommand({
+            Bucket: this.bucket,
+            Key: objectKey,
+            ContentType: input.contentType,
+          }),
+          { expiresIn: PRESIGN_EXPIRES_IN_SECONDS },
+        );
+
+        const publicUrl = this.urlPublica(objectKey);
+
+        span.setStatus({ code: SpanStatusCode.OK });
+        return { uploadUrl, objectKey, publicUrl };
+      } catch (error) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR, message: (error as Error).message });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  async emitirUrlUploadPresignadaCampanha(
+    input: EmitirUrlUploadCampanhaInput,
+  ): Promise<UrlUploadPresignada> {
+    return tracer.startActiveSpan('storage.emitirUrlUploadPresignadaCampanha', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'PRESIGN_PUT' });
+      try {
+        span.setAttribute('campanha.id', input.idCampanha);
+        span.setAttribute('storage.slot', input.slot);
+
+        const ext = CONTENT_TYPE_EXTENSAO[input.contentType];
+        if (ext === undefined) {
+          // Defense-in-depth: the use-case validates first, but the adapter
+          // refuses to mint a key for an unknown content-type so the
+          // Content-Type lock is never bypassed.
+          throw new Error(`contentType não suportado: ${input.contentType}`);
+        }
+
+        // Per-campanha namespaced key (aperture-aphk8) — campanha A can
+        // never overwrite campanha B's photo.
+        const objectKey = `campanha/${input.idCampanha}/${input.slot}-${randomUUID()}.${ext}`;
 
         const uploadUrl = await getSignedUrl(
           this.s3,

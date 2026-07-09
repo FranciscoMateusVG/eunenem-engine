@@ -125,4 +125,18 @@ export interface CampanhaRepository {
    * handle the contribuicoes first.
    */
   delete(idCampanha: IdCampanha, context?: ArrecadacaoRepositoryContext): Promise<void>;
+
+  /**
+   * Persists the campanha's own URL slug (aperture-aphk8, W1a). Narrow,
+   * single-column update — deliberately NOT part of `save` semantics so
+   * callers can set/clear a slug without re-writing the whole aggregate.
+   * `slug` is stored normalized (trimmed, lowercase) by the caller; `null`
+   * clears it. Per-conta uniqueness is APP-enforced by the caller
+   * (campanhas-router `definirSlug`), not here and not by the DB.
+   */
+  updateSlug(
+    idCampanha: IdCampanha,
+    slug: string | null,
+    context?: ArrecadacaoRepositoryContext,
+  ): Promise<void>;
 }

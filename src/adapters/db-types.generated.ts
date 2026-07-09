@@ -50,6 +50,7 @@ export interface Campanhas {
   criada_em: Generated<Timestamp>;
   id: string;
   id_plataforma: string;
+  slug: string | null;
   titulo: string;
 }
 
@@ -222,6 +223,23 @@ export interface PaymentWebhookEvents {
   signature_valid: boolean;
 }
 
+export interface PerfilCampanhas {
+  atualizado_em: Generated<Timestamp>;
+  criado_em: Generated<Timestamp>;
+  data_evento: Timestamp | null;
+  data_nascimento: Timestamp | null;
+  foto_capa_key: string | null;
+  foto_historia_key: string | null;
+  foto_perfil_key: string | null;
+  genero: string | null;
+  historia: string | null;
+  id: string;
+  id_campanha: string;
+  nome_bebe: string | null;
+  relacao: string | null;
+  tipo_evento: string | null;
+}
+
 export interface PerfilCriadores {
   atualizado_em: Generated<Timestamp>;
   criado_em: Generated<Timestamp>;
@@ -341,6 +359,7 @@ export interface DB {
   opcoes_contribuicao: OpcoesContribuicao;
   pagamentos: Pagamentos;
   payment_webhook_events: PaymentWebhookEvents;
+  perfil_campanhas: PerfilCampanhas;
   perfil_criadores: PerfilCriadores;
   rate_limit: RateLimit;
   recebedores: Recebedores;

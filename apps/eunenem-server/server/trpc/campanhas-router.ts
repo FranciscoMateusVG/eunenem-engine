@@ -36,9 +36,15 @@ import {
   criarCampanha,
   type IdCampanha,
   type IdOpcaoContribuicao,
+  RESERVED_SLUGS,
 } from '../../../../src/index.js';
 import { buscarCampanhasLegado } from '../../lib/legacy-users.js';
 import type { TrpcContext } from './context.js';
+import {
+  CampanhaAcessoNegadoError,
+  CampanhaInexistenteError,
+  resolverCampanhaAdministrada,
+} from './resolve-campanha-administrada.js';
 import {
   resolverUsuarioAutenticado,
   SessaoNaoAutenticadaError,
@@ -61,6 +67,27 @@ const CampanhaNovaDTOSchema = z.object({
   quantidadeMimos: z.number().int().nonnegative().nullable(),
   /** ISO-8601. `novas` is sorted by this, DESC. */
   criadaEm: z.string(),
+  /**
+   * Whether the campanha has an active Recebedor projected (aperture-aphk8).
+   * Read straight off the aggregate (`idRecebedor != null`) — NO extra query.
+   * Nullable in the schema for forward-compat; the server always sends a
+   * boolean today.
+   */
+  hasRecebedor: z.boolean().nullable(),
+  /**
+   * The campanha's OWN slug (aperture-aphk8, `campanhas.slug`) — null until
+   * the owner claims one via `campanhas.definirSlug`. Distinct from `slug`
+   * above, which is the USUARIO's painel slug.
+   */
+  campanhaSlug: z.string().nullable(),
+  /**
+   * The campanha's perfil_campanhas.nome_bebe (fblrt contract amendment #2)
+   * — null when the campanha has no perfil row OR a blank nome_bebe. This is
+   * the CANONICAL blank-perfil signal (the design doc defines "blank" as
+   * nome_bebe IS NULL): the client derives hasPerfil = nomeBebe !== null for
+   * the card's "completar" affordance, and may use it as the display name.
+   */
+  nomeBebe: z.string().nullable(),
 });
 
 const CampanhaLegadoDTOSchema = z.object({
@@ -90,6 +117,7 @@ const CriarCampanhaInputDTOSchema = z.object({
 function toCardDTO(
   campanha: Campanha,
   slug: string,
+  nomeBebe: string | null,
 ): z.infer<typeof CampanhaNovaDTOSchema> {
   return {
     id: campanha.id,
@@ -97,7 +125,89 @@ function toCardDTO(
     slug,
     quantidadeMimos: null,
     criadaEm: campanha.criadaEm.toISOString(),
+    hasRecebedor: campanha.idRecebedor != null,
+    campanhaSlug: campanha.slug,
+    nomeBebe,
   };
+}
+
+// ── campanha slug (aperture-aphk8) ─────────────────────────────────────────
+
+/**
+ * Campanha-slug shape — the EXISTING user-slug machinery widened to the
+ * campanha column bounds: same normalization posture (trimmed, lowercase,
+ * starts with a letter, alphanum+hyphens; see SLUG_USUARIO_REGEX), but
+ * min 3 / max 60 (`campanhas.slug` is varchar(60); the user regex caps at 30).
+ */
+const CAMPANHA_SLUG_REGEX = /^[a-z][a-z0-9-]{2,59}$/;
+
+/**
+ * Reserved set = the user-slug RESERVED_SLUGS denylist ∪ {'c', 'sucesso'}
+ * (aperture-aphk8): 'c' is the planned short public-path prefix for
+ * per-campanha URLs and 'sucesso' the checkout-success segment ('sucesso'
+ * is already in RESERVED_SLUGS; kept here explicitly per the frozen
+ * contract).
+ */
+const RESERVED_CAMPANHA_SLUGS: ReadonlySet<string> = new Set([...RESERVED_SLUGS, 'c', 'sucesso']);
+
+/** Normalize a raw campanha-slug input the same way the user slug is compared. */
+function normalizeCampanhaSlug(raw: string): string {
+  return raw.trim().toLowerCase();
+}
+
+type CampanhaSlugCheck =
+  | { readonly ok: true; readonly slug: string }
+  | { readonly ok: false; readonly motivo: 'formato' | 'reservado' | 'em_uso' };
+
+/**
+ * Shared validation for definirSlug/validarSlug: format → reserved →
+ * per-conta uniqueness (the conta's OTHER campanhas; a DIFFERENT conta
+ * holding the same slug is fine — uniqueness is per-conta only, matching
+ * the non-unique DB index).
+ */
+async function checkCampanhaSlug(
+  ctx: TrpcContext,
+  idConta: string,
+  idCampanha: string,
+  raw: string,
+): Promise<CampanhaSlugCheck> {
+  const slug = normalizeCampanhaSlug(raw);
+  if (!CAMPANHA_SLUG_REGEX.test(slug)) {
+    return { ok: false, motivo: 'formato' };
+  }
+  if (RESERVED_CAMPANHA_SLUGS.has(slug)) {
+    return { ok: false, motivo: 'reservado' };
+  }
+  const campanhas = await ctx.deps.campanhaRepository.findCampanhasByAdministrador(idConta);
+  const emUso = campanhas.some((c) => c.id !== idCampanha && c.slug === slug);
+  if (emUso) {
+    return { ok: false, motivo: 'em_uso' };
+  }
+  return { ok: true, slug };
+}
+
+function slugErrorMessage(motivo: 'formato' | 'reservado' | 'em_uso'): string {
+  switch (motivo) {
+    case 'formato':
+      return 'slug_formato_invalido';
+    case 'reservado':
+      return 'slug_reservado';
+    case 'em_uso':
+      return 'slug_em_uso';
+  }
+}
+
+function toSlugTRPCError(err: unknown): TRPCError {
+  if (err instanceof TRPCError) return err;
+  if (err instanceof CampanhaAcessoNegadoError) {
+    return new TRPCError({ code: 'UNAUTHORIZED', message: err.message, cause: err });
+  }
+  if (err instanceof CampanhaInexistenteError) {
+    return new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err.message, cause: err });
+  }
+  return err instanceof Error
+    ? new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err.message, cause: err })
+    : new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'unknown_error' });
 }
 
 export const campanhasRouter = t.router({
@@ -125,9 +235,23 @@ export const campanhasRouter = t.router({
         const campanhas = await deps.campanhaRepository.findCampanhasByAdministrador(
           usuario.idConta,
         );
+        // fblrt amendment #2: each card carries its perfil's nomeBebe (the
+        // canonical blank-perfil signal). One findByIdCampanha per card — a
+        // conta holds a handful of campanhas, so N small point-reads beat
+        // widening the port with a batch method today.
+        const perfis = await Promise.all(
+          campanhas.map((campanha) =>
+            deps.perfilCampanhaRepository.findByIdCampanha(campanha.id),
+          ),
+        );
+        const nomeBebePorCampanha = new Map(
+          campanhas.map((campanha, i) => [campanha.id, perfis[i]?.conteudo.nomeBebe ?? null]),
+        );
         const novas = [...campanhas]
           .sort((a, b) => b.criadaEm.getTime() - a.criadaEm.getTime())
-          .map((campanha) => toCardDTO(campanha, usuario.slug));
+          .map((campanha) =>
+            toCardDTO(campanha, usuario.slug, nomeBebePorCampanha.get(campanha.id) ?? null),
+          );
 
         // Static-snapshot legacy detection (spec §4) — pure, in-memory match;
         // no legacy-system call at runtime.
@@ -216,7 +340,9 @@ export const campanhasRouter = t.router({
           throw opcaoErr;
         }
 
-        return toCardDTO(campanhaComOpcao, usuario.slug);
+        // Fresh campanha has no perfil_campanhas row yet → nomeBebe null
+        // (blank-perfil by definition; the wizard fills it in).
+        return toCardDTO(campanhaComOpcao, usuario.slug, null);
       } catch (err) {
         if (err instanceof TRPCError) throw err;
         // Domain input rejection (e.g. an out-of-bounds title that slips past
@@ -227,6 +353,71 @@ export const campanhasRouter = t.router({
         throw err instanceof Error
           ? new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err.message, cause: err })
           : new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'unknown_error' });
+      }
+    }),
+
+  /**
+   * Claim/replace a campanha's own URL slug (aperture-aphk8). Owner-gated
+   * via resolverCampanhaAdministrada (present branch — not-found/not-owner
+   * collapse to UNAUTHORIZED). Validation order: formato → reservado →
+   * em_uso (per-conta: only the SAME conta's other campanhas conflict).
+   * Rejections are BAD_REQUEST with the message being EXACTLY one of
+   * 'slug_formato_invalido' | 'slug_reservado' | 'slug_em_uso' (frozen
+   * contract — the frontend switches on it). Persists the NORMALIZED slug
+   * and returns it.
+   */
+  definirSlug: t.procedure
+    .input(
+      z.object({
+        idCampanha: z.string().uuid(),
+        slug: z.string(),
+      }),
+    )
+    .output(z.object({ slug: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { usuario, campanha } = await resolverCampanhaAdministrada(ctx, input.idCampanha);
+
+        const check = await checkCampanhaSlug(ctx, usuario.idConta, campanha.id, input.slug);
+        if (!check.ok) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: slugErrorMessage(check.motivo) });
+        }
+
+        await ctx.deps.campanhaRepository.updateSlug(campanha.id, check.slug);
+        return { slug: check.slug };
+      } catch (err) {
+        throw toSlugTRPCError(err);
+      }
+    }),
+
+  /**
+   * Availability pre-check for the slug picker (aperture-aphk8). SAME checks
+   * as definirSlug but NEVER throws for a taken/invalid slug — only auth
+   * errors throw. `motivo` is null exactly when `disponivel` is true.
+   */
+  validarSlug: t.procedure
+    .input(
+      z.object({
+        idCampanha: z.string().uuid(),
+        slug: z.string(),
+      }),
+    )
+    .output(
+      z.object({
+        disponivel: z.boolean(),
+        motivo: z.enum(['formato', 'reservado', 'em_uso']).nullable(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      try {
+        const { usuario, campanha } = await resolverCampanhaAdministrada(ctx, input.idCampanha);
+
+        const check = await checkCampanhaSlug(ctx, usuario.idConta, campanha.id, input.slug);
+        return check.ok
+          ? { disponivel: true, motivo: null }
+          : { disponivel: false, motivo: check.motivo };
+      } catch (err) {
+        throw toSlugTRPCError(err);
       }
     }),
 });
