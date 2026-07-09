@@ -850,6 +850,14 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
     historia: string | null;
   }>({ perfil: null, capa: null, historia: null });
 
+  // aperture-7sb1h — genero is wizard-captured (no editor on this form) but
+  // perfil.atualizar is WHOLE-CONTENT replacement with a default-null genero:
+  // omitting it from the payload WIPES the wizard's answer on every painel
+  // perfil save. Echo the loaded value back, fotoKeys-style (ref, not state —
+  // nothing here edits it). Union mirrors GeneroBebeSchema
+  // (src/domain/usuario/value-objects/genero-bebe.ts).
+  const generoRef = useRef<"menino" | "menina" | "neutro" | "surpresa" | null>(null);
+
   const perfilQuery = trpc.perfil.getPerfil.useQuery(undefined, {
     staleTime: 30_000,
   });
@@ -878,6 +886,8 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
       capa: d.fotoCapaKey,
       historia: d.fotoHistoriaKey,
     };
+    // aperture-7sb1h — carry the wizard-captured gender through saves.
+    generoRef.current = d.genero;
     setFotoUrls({
       perfil: d.fotoPerfilUrl,
       capa: d.fotoCapaUrl,
@@ -902,6 +912,8 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
         historia: updated.fotoHistoriaUrl,
       });
       setTweaks({ babyName: updated.nomeBebe ?? babyName.trim() });
+      // aperture-7sb1h — keep the echo-ref fresh from the round-trip DTO.
+      generoRef.current = updated.genero;
       utils.perfil.getPerfil.setData(undefined, updated);
       toast.success("Tudo salvo! Feito com carinho ♡");
     },
@@ -924,6 +936,12 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
     historia: story.trim() || null,
     dataNascimento: birthDate.trim() ? brToISO(birthDate) : null,
     tipoEvento: eventType || null,
+    // aperture-7sb1h — whole-content replacement: EVERY AtualizarPerfilInput
+    // field must round-trip or it resets to its default. genero has no editor
+    // on this form, so echo the loaded value (generoRef). If you ADD a field
+    // to AtualizarPerfilInputSchema, add it HERE too — an omitted field is a
+    // silent wipe, not a no-op.
+    genero: generoRef.current,
     dataEvento: teaDate.trim() ? brToISO(teaDate) : null,
     fotoPerfilKey: fotoKeys.current.perfil,
     fotoCapaKey: fotoKeys.current.capa,
