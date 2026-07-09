@@ -98,6 +98,9 @@ export function menuItemHref(
   slug: string,
   id: string,
   idCampanha?: string,
+  /** aperture-ej436 — the campanha's chosen slug (pretty public URL); only
+   *  the 'preview' row uses it. */
+  campanhaSlug?: string | null,
 ): string | undefined {
   switch (id) {
     case "presentes":
@@ -121,7 +124,7 @@ export function menuItemHref(
       // to Francisco's page — which ALSO read as "my edits didn't save" because
       // they were viewing someone else's page. `slug` here is the real creator
       // slug (the same one every other row above already threads correctly).
-      return paginaSharePath(slug, idCampanha);
+      return paginaSharePath(slug, idCampanha, campanhaSlug);
     case "suporte":
       // External support channel — no in-app page in scope.
       return "https://wa.me/5531999999999";

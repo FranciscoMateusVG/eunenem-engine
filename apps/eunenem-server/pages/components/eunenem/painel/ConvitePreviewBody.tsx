@@ -3,6 +3,7 @@ import { conviteStateFromData, useConvitePreviewData } from '@/lib/convite';
 import { menuItemHref, painelConvitePreviewHref, painelHref } from '@/lib/painelRoutes';
 import { InvitePreview } from './ConviteBody';
 import { useCampanhaRota } from "@/lib/campanha-rota";
+import { useCampanhaSlugRota } from "@/lib/campanhas";
 
 const PREVIEW_CSS = `
 .cv-preview-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:11px 18px;border-radius:999px;border:1px solid transparent;background:var(--lilac);color:#fff;font-family:var(--font-dm-sans),sans-serif;font-weight:600;font-size:12.5px;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;transition:transform .12s,box-shadow .15s,background .15s;color-scheme:light;text-decoration:none;box-shadow:var(--shadow-cta);white-space:nowrap}
@@ -22,6 +23,7 @@ export function ConvitePreviewBody({
   slug: string;
 }) {
   const idCampanha = useCampanhaRota();
+  const campanhaSlug = useCampanhaSlugRota();
   const conviteQuery = useConvitePreviewData(slug);
   // aperture — same ownership probe as Navbar.tsx: the signed-in user owns
   // this convite iff their session slug matches the slug being previewed.
@@ -116,7 +118,10 @@ export function ConvitePreviewBody({
             editar convite
           </a>
         ) : (
-          <a href={menuItemHref(slug, 'preview')} className="cv-preview-btn sm">
+          // aperture-ej436 — was menuItemHref(slug,'preview') with NO campanha:
+          // bare URL resolved the OLDEST campanha's page (wrong preview on any
+          // non-oldest campanha). Thread the route campanha + pretty slug.
+          <a href={menuItemHref(slug, 'preview', idCampanha, campanhaSlug)} className="cv-preview-btn sm">
             Ver lista de presentes
           </a>
         ))}
