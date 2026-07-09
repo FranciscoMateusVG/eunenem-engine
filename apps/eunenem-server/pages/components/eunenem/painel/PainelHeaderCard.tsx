@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { useTweaks } from "../TweaksContext";
 import type { PainelEventSnapshot } from "@/lib/mocks/painelDemo";
 import { useCampanhaSlugRota } from "@/lib/campanhas";
-import { paginaShareDisplayPrefix, paginaShareUrl } from "@/lib/pagina-share";
+import { paginaShareDisplayPath, paginaShareDisplayPrefix, paginaShareUrl } from "@/lib/pagina-share";
 import { painelHref } from "@/lib/painelRoutes";
 import { useCampanhaRota } from "@/lib/campanha-rota";
 
@@ -209,7 +209,10 @@ export function PainelHeaderCard({ snapshot, slug, campanhaTitulo }: Props) {
               rel="noopener noreferrer"
               className="painel-url-slug"
             >
-              {slug}
+              {/* aperture-2v91z — the campanha's OWN address when it chose a
+                  slug ('francisco/teste'), never the same bare user-slug on
+                  every campanha. */}
+              {paginaShareDisplayPath(slug, campanhaSlug)}
             </a>
           </span>
         </div>

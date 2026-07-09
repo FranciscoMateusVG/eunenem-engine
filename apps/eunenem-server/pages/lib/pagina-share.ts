@@ -17,20 +17,9 @@
 
 import { getDefaultConviteShareOrigin } from './convite-share.js';
 
-/**
- * Path form, prettiest available:
- *   campanhaSlug present → /pagina/<slug>/<campanhaSlug>   (W1a pretty URL)
- *   idCampanha present   → /pagina/<slug>/c/<idCampanha>   (canonical fallback)
- *   neither              → /pagina/<slug>                  (oldest)
- */
-export function paginaSharePath(
-  slug: string,
-  idCampanha?: string | null,
-  campanhaSlug?: string | null,
-): string {
-  if (campanhaSlug) return `/pagina/${slug}/${campanhaSlug}`;
-  return idCampanha ? `/pagina/${slug}/c/${idCampanha}` : `/pagina/${slug}`;
-}
+import { paginaSharePath } from './painelRoutes.js';
+
+export { paginaSharePath, paginaShareDisplayPath } from './painelRoutes.js';
 
 /** Absolute URL for clipboard/share payloads. */
 export function paginaShareUrl(
@@ -48,9 +37,10 @@ export function paginaShareUrl(
  * Protocol-less display prefix for UI chips/inputs ("<host>/pagina/").
  * Display intentionally omits the /c/<uuid> tail — a 36-char UUID is visual
  * noise in a pill; the COPIED url (paginaShareUrl) carries the full
- * addressing. Both converge once pretty campanha slugs land.
+ * addressing.
  */
 export function paginaShareDisplayPrefix(): string {
   const origin = getDefaultConviteShareOrigin().replace(/^https?:\/\//, '').replace(/\/$/, '');
   return `${origin}/pagina/`;
 }
+

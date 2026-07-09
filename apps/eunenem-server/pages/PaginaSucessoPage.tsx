@@ -40,6 +40,7 @@ import {
   useObterSucessoPagamento,
   type ObterSucessoResult,
 } from "@/lib/paginaApi";
+import { paginaSharePath } from "@/lib/painelRoutes";
 
 // ── Page ──────────────────────────────────────────────────────────────────
 
@@ -106,15 +107,15 @@ export function PaginaSucessoPage({ slug }: { slug: string }) {
             {!hydrated || (isLoading && !data) ? (
               <SkeletonState />
             ) : !sessionId ? (
-              <ExpiredState slug={slug} />
+              <ExpiredState slug={slug} idCampanha={idCampanha} />
             ) : isError ? (
-              <FailedState slug={slug} />
+              <FailedState slug={slug} idCampanha={idCampanha} />
             ) : !data ? (
               <SkeletonState />
             ) : data.status === "approved" ? (
-              <ApprovedState data={data} slug={slug} />
+              <ApprovedState data={data} slug={slug} idCampanha={idCampanha} />
             ) : data.status === "rejected" ? (
-              <FailedState slug={slug} />
+              <FailedState slug={slug} idCampanha={idCampanha} />
             ) : withinDeadline ? (
               // aperture-d52he — pending OR unknown, still within the give-up
               // window: keep showing the warm "estamos confirmando seu
@@ -127,7 +128,7 @@ export function PaginaSucessoPage({ slug }: { slug: string }) {
               // the friendly "essa sessão já passou" fallback. The user can
               // revisit the link later (a fresh poll resolves once the webhook
               // has landed).
-              <ExpiredState slug={slug} />
+              <ExpiredState slug={slug} idCampanha={idCampanha} />
             )}
           </div>
         </main>
@@ -150,11 +151,13 @@ function SucessoCartDrawerMount({ slug }: { slug: string }) {
 // ── Approved (the warm moment) ────────────────────────────────────────────
 
 function ApprovedState({
+  idCampanha,
   data,
   slug,
 }: {
   data: ObterSucessoResult;
   slug: string;
+  idCampanha: string | null;
 }) {
   const valorBRL = useMemo(() => Math.round(data.valor / 100), [data.valor]);
   return (
@@ -232,7 +235,7 @@ function ApprovedState({
         ...e o <span className="sucesso-tagline-name">{data.babyName}</span> já vai saber! ♡
       </p>
 
-      <a href={`/pagina/${slug}`} className="btn-lilac sucesso-cta">
+      <a href={paginaSharePath(slug, idCampanha)} className="btn-lilac sucesso-cta">
         voltar pra listinha ←
       </a>
     </section>
@@ -282,7 +285,7 @@ function PendingState({
 
 // ── Failed ────────────────────────────────────────────────────────────────
 
-function FailedState({ slug }: { slug: string }) {
+function FailedState({ slug, idCampanha }: { slug: string; idCampanha: string | null }) {
   return (
     <section className="sucesso-section sucesso-section--failed">
       <span className="eyebrow eyebrow-coral sucesso-eyebrow">ops</span>
@@ -306,7 +309,7 @@ function FailedState({ slug }: { slug: string }) {
         que vai dar certo ♡
       </p>
 
-      <a href={`/pagina/${slug}`} className="btn-lilac sucesso-cta">
+      <a href={paginaSharePath(slug, idCampanha)} className="btn-lilac sucesso-cta">
         tentar de novo →
       </a>
     </section>
@@ -315,7 +318,7 @@ function FailedState({ slug }: { slug: string }) {
 
 // ── Expired / session-not-found ──────────────────────────────────────────
 
-function ExpiredState({ slug }: { slug: string }) {
+function ExpiredState({ slug, idCampanha }: { slug: string; idCampanha: string | null }) {
   return (
     <section className="sucesso-section sucesso-section--expired">
       <span className="eyebrow eyebrow-coral sucesso-eyebrow">sessão</span>
@@ -326,7 +329,7 @@ function ExpiredState({ slug }: { slug: string }) {
         preocupa, é só voltar pra listinha e escolher um presente de novo.
       </p>
 
-      <a href={`/pagina/${slug}`} className="btn-lilac sucesso-cta">
+      <a href={paginaSharePath(slug, idCampanha)} className="btn-lilac sucesso-cta">
         voltar pra listinha →
       </a>
     </section>

@@ -57,6 +57,30 @@ export function painelConvitePreviewHref(slug: string, idCampanha?: string): str
     : `/painel/${slug}/convite/preview`;
 }
 
+/**
+ * aperture-2v91z — canonical PUBLIC pagina path, prettiest available. Single
+ * source for every /pagina link in the app (share chips, back-links, navbar
+ * brand, menu rows) — inline `/pagina/${...}` builders are the leak class
+ * this replaces (each one silently dropped the campanha context).
+ *   campanhaSlug → /pagina/<slug>/<campanhaSlug>  (user-chosen pretty URL)
+ *   idCampanha   → /pagina/<slug>/c/<idCampanha>  (canonical fallback)
+ *   neither      → /pagina/<slug>                 (oldest, back-compat)
+ */
+export function paginaSharePath(
+  slug: string,
+  idCampanha?: string | null,
+  campanhaSlug?: string | null,
+): string {
+  if (campanhaSlug) return `/pagina/${slug}/${campanhaSlug}`;
+  return idCampanha ? `/pagina/${slug}/c/${idCampanha}` : `/pagina/${slug}`;
+}
+
+/** Display PATH for UI chips: "<user>/<campanha-slug>" | "<user>" (uuid
+ *  stays out of pills; the copied URL carries it). */
+export function paginaShareDisplayPath(slug: string, campanhaSlug?: string | null): string {
+  return campanhaSlug ? `${slug}/${campanhaSlug}` : slug;
+}
+
 /** Public RSVP page a guest opens from a WhatsApp link — no auth required. */
 export function confirmarPresencaHref(slug: string, idConvidado: string): string {
   return `/${slug}/confirmar-presenca/${idConvidado}`;
@@ -97,7 +121,7 @@ export function menuItemHref(
       // to Francisco's page — which ALSO read as "my edits didn't save" because
       // they were viewing someone else's page. `slug` here is the real creator
       // slug (the same one every other row above already threads correctly).
-      return idCampanha ? `/pagina/${slug}/c/${idCampanha}` : `/pagina/${slug}`;
+      return paginaSharePath(slug, idCampanha);
     case "suporte":
       // External support channel — no in-app page in scope.
       return "https://wa.me/5531999999999";

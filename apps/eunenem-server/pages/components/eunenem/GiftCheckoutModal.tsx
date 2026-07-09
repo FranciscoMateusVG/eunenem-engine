@@ -10,7 +10,9 @@ import {
   useObterSucessoPagamento,
   type MetodoPagamento,
 } from "@/lib/paginaApi";
+import { useCampanhaRota } from "@/lib/campanha-rota";
 import { formatBRL } from "@/lib/formatBRL";
+import { paginaSharePath } from "@/lib/painelRoutes";
 import { getStripePromise } from "@/lib/stripeClient";
 import type { VisitorGift } from "@/lib/visitorGift";
 
@@ -414,10 +416,14 @@ function SuccessPanel({
   const isConfirmed = phase === "completed_confirmed";
   const isSlow = phase === "completed_slow";
 
+  // aperture-2v91z — both escape hatches keep the CAMPANHA context: the
+  // sucesso link carries &idCampanha= (the backend cross-checks it for
+  // addressed checkouts) and the bare fallback goes to the campanha's page.
+  const idCampanhaCtx = useCampanhaRota();
   const escapeHref =
     sessionId !== null
-      ? `/pagina/${encodeURIComponent(slug)}/sucesso?sessionId=${encodeURIComponent(sessionId)}`
-      : `/pagina/${encodeURIComponent(slug)}`;
+      ? `/pagina/${encodeURIComponent(slug)}/sucesso?sessionId=${encodeURIComponent(sessionId)}${idCampanhaCtx ? `&idCampanha=${encodeURIComponent(idCampanhaCtx)}` : ""}`
+      : paginaSharePath(slug, idCampanhaCtx);
 
   return (
     <div

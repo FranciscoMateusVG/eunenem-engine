@@ -5,7 +5,8 @@ import { toast } from "sonner";
 
 import { useTweaks } from "@/components/eunenem/TweaksContext";
 import { trpc } from "@/lib/trpc";
-import { paginaShareDisplayPrefix, paginaShareUrl } from "@/lib/pagina-share";
+import { paginaShareDisplayPath, paginaShareDisplayPrefix, paginaShareUrl } from "@/lib/pagina-share";
+import { useCampanhaSlugRota } from "@/lib/campanhas";
 import { painelHref } from "@/lib/painelRoutes";
 import { useCampanhaRota } from "@/lib/campanha-rota";
 import { PERFIL_RELATIONS } from "@/lib/mocks/perfil";
@@ -827,6 +828,8 @@ function PerfilDateField({
 
 export function PerfilBody({ slug }: PainelSectionBodyProps) {
   const idCampanha = useCampanhaRota();
+  // aperture-2v91z — the route campanha's pretty slug for the share row.
+  const campanhaSlugRota = useCampanhaSlugRota();
   const { tweaks, setTweaks } = useTweaks();
   const utils = trpc.useUtils();
 
@@ -1229,9 +1232,14 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
         <div className="perfil-share">
           <span className="perfil-share-eyebrow">link da página</span>
           <div className="perfil-share-row">
-            <span className="perfil-share-url" title={paginaShareUrl(profileSlug, idCampanha)}>
+            {/* aperture-2v91z — display + copy both carry the campanha's own
+                pretty slug when chosen; /c/<uuid> copy fallback otherwise. */}
+            <span
+              className="perfil-share-url"
+              title={paginaShareUrl(profileSlug, idCampanha, campanhaSlugRota)}
+            >
               {paginaShareDisplayPrefix()}
-              {profileSlug}
+              {paginaShareDisplayPath(profileSlug, campanhaSlugRota)}
             </span>
             <button
               type="button"
@@ -1239,7 +1247,7 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
               onClick={() => {
                 // aperture-1yx1n — copy the REAL public page URL, campanha-
                 // addressed when this perfil sits under a /c/:id route.
-                const link = paginaShareUrl(profileSlug, idCampanha);
+                const link = paginaShareUrl(profileSlug, idCampanha, campanhaSlugRota);
                 void navigator.clipboard
                   .writeText(link)
                   .then(() => toast.success("link copiado ♡"))
