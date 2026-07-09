@@ -25,6 +25,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
+import { SetupCampanhaWizard } from './components/eunenem/campanhas/SetupCampanhaWizard.js';
 import { PainelTopbar } from './components/eunenem/painel/PainelTopbar.js';
 import {
   CAMPANHAS_WELCOME_STORAGE_KEY,
@@ -129,13 +130,17 @@ export function CampanhasPage() {
   // /campanhas (campanhas have no slug / per-campanha routing in V1).
   const [novaOpen, setNovaOpen] = useState(false);
   const [novoTitulo, setNovoTitulo] = useState('');
+  // aperture-1yx1n §1.5 — the setup wizard opens right after criar (and from
+  // a card's "completar" affordance). null = closed.
+  const [setupCampanha, setSetupCampanha] = useState<{ id: string; titulo: string } | null>(null);
   const utils = trpc.useUtils();
   const criarM = useCampanhasCriar({
-    onSuccess: () => {
+    onSuccess: (data) => {
       void utils.campanhas.list.invalidate();
       setNovaOpen(false);
       setNovoTitulo('');
-      toast('prontinho ♡ seu novo cantinho tá na estante');
+      // The wizard IS the continuation — no toast between the two moments.
+      setSetupCampanha({ id: data.id, titulo: data.titulo });
     },
     onError: () => {
       // Saga-compensated backend — nothing half-created. Keep the modal
@@ -161,6 +166,12 @@ export function CampanhasPage() {
   }, [novoTitulo, criarM]);
 
   useEscape(novaOpen && !tourOpen, fecharNova);
+
+  const fecharSetup = useCallback(() => setSetupCampanha(null), []);
+  useEscape(setupCampanha !== null, fecharSetup);
+  const abrirSetupDoCard = useCallback((c: CampanhaNovaDTO) => {
+    setSetupCampanha({ id: c.id, titulo: c.titulo });
+  }, []);
 
   // One shared scrapbook sequence across BOTH platforms so tints/tapes/tilts
   // alternate through the whole grid instead of restarting per group.
@@ -225,7 +236,12 @@ export function CampanhasPage() {
           <div className="camp-grid" data-testid="campanhas-grid">
             {cards.map(({ tipo, c, i }) =>
               tipo === 'nova' ? (
-                <CardNova key={(c as CampanhaNovaDTO).id} campanha={c as CampanhaNovaDTO} index={i} />
+                <CardNova
+                  key={(c as CampanhaNovaDTO).id}
+                  campanha={c as CampanhaNovaDTO}
+                  index={i}
+                  onCompletar={abrirSetupDoCard}
+                />
               ) : (
                 <CardLegado key={`legado-${i}`} campanha={c as CampanhaLegadoDTO} index={i} />
               ),
@@ -252,6 +268,11 @@ export function CampanhasPage() {
       </main>
 
       {/* ── NOVA LISTA create modal (aperture-rurre) ── */}
+      {/* ── Setup wizard (aperture-1yx1n §1.5) — post-criar + "completar" ── */}
+      {setupCampanha && (
+        <SetupCampanhaWizard campanha={setupCampanha} onClose={fecharSetup} />
+      )}
+
       {novaOpen && (
         <div className="camp-overlay" onClick={fecharNova}>
           <div
@@ -496,7 +517,18 @@ export function CampanhasPage() {
 }
 
 /** 2.0 card — navigates into the new-platform painel. */
-function CardNova({ campanha, index }: { campanha: CampanhaNovaDTO; index: number }) {
+function CardNova({
+  campanha,
+  index,
+  onCompletar,
+}: {
+  campanha: CampanhaNovaDTO;
+  index: number;
+  onCompletar: (c: CampanhaNovaDTO) => void;
+}) {
+  // aperture-1yx1n — the canonical blank-perfil signal (aphk8 amendment #2):
+  // nomeBebe === null EXACTLY (real DTO field post-#359).
+  const precisaCompletar = campanha.nomeBebe === null;
   return (
     <article
       className="camp-card"
@@ -512,6 +544,16 @@ function CardNova({ campanha, index }: { campanha: CampanhaNovaDTO; index: numbe
         <h3 className="camp-card-name">{campanha.titulo}</h3>
         {campanha.quantidadeMimos !== null && (
           <div className="camp-card-mimos">{mimosLabel(campanha.quantidadeMimos)}</div>
+        )}
+        {precisaCompletar && (
+          <button
+            type="button"
+            className="camp-card-completar"
+            data-testid="card-completar"
+            onClick={() => onCompletar(campanha)}
+          >
+            completar ♡
+          </button>
         )}
         {/* aperture-h0hom — each card opens ITS OWN campanha's painel
          *  (/c/:idCampanha), not the oldest-resolving bare URL. */}

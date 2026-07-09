@@ -12,6 +12,7 @@
  */
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '../../server/trpc/router.js';
+import { useCampanhaRota } from './campanha-rota.js';
 import { trpc } from './trpc.js';
 
 type CampanhasListOutput = inferRouterOutputs<AppRouter>['campanhas']['list'];
@@ -74,35 +75,35 @@ export const LEGACY_MIGRACAO_URL: string =
 /**
  * aperture-rurre — NOVA LISTA V1 create mutation.
  *
- * INTEGRATION SHIM (same pattern the list hook used pre-#320): Rex's
- * campanhas.criar mutation ships in his parallel PR (aperture-x0unf,
- * contract: authed, input {titulo} only — no slug/recebedor/perfil in V1).
- * Until it merges, AppRouter has no `criar` key, so this reaches through
- * the runtime proxy via one structurally-typed cast. When his PR lands,
- * delete TrpcCriarShim and inline trpc.campanhas.criar.useMutation.
+ * aperture-1yx1n — the rurre-era TrpcCriarShim is GONE (x0unf merged long
+ * ago; campanhas.criar is real on the router). Plain inference now, which
+ * also hands onSuccess the created campanha DTO — the setup wizard opens
+ * with it (§1.5).
  */
-type TrpcCriarShim = {
-  campanhas: {
-    criar: {
-      useMutation: (opts?: {
-        onSuccess?: () => void;
-        onError?: () => void;
-      }) => {
-        mutate: (input: { titulo: string }) => void;
-        isPending: boolean;
-      };
-    };
-  };
-};
-
 export function useCampanhasCriar(opts?: {
-  onSuccess?: () => void;
+  onSuccess?: (data: { id: string; titulo: string }) => void;
   onError?: () => void;
 }) {
-  const shim = trpc as unknown as TrpcCriarShim;
-  return shim.campanhas.criar.useMutation(opts);
+  return trpc.campanhas.criar.useMutation(opts);
 }
 
 export function useCampanhasList() {
   return trpc.campanhas.list.useQuery(undefined, { staleTime: 30_000 });
+}
+
+/**
+ * aperture-1yx1n — the ROUTE campanha's user-chosen slug, when it has one.
+ * Feeds the pretty /pagina/<slug>/<campanhaSlug> share form; undefined =
+ * bare route, unknown id, list not loaded, or slug not chosen — consumers
+ * fall back to the /c/<uuid> canonical form. (Real DTO field post-#359.)
+ */
+export function useCampanhaSlugRota(): string | undefined {
+  const idCampanha = useCampanhaRota();
+  const listQ = trpc.campanhas.list.useQuery(undefined, {
+    staleTime: 30_000,
+    enabled: Boolean(idCampanha),
+  });
+  if (!idCampanha) return undefined;
+  const card = listQ.data?.novas.find((c) => c.id === idCampanha);
+  return card?.campanhaSlug ?? undefined;
 }

@@ -7437,3 +7437,131 @@ button.painel-topbar-link:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ── aperture-1yx1n §1.5 — setup wizard (post-NOVA-LISTA) + completar chip ──
+ * Extends the /campanhas scrapbook vocabulary (.camp-modal shell, .camp-nova-
+ * input fields). Chips are Patrick Hand pills — lilac wash at rest, plum ink
+ * when chosen; the slug status line reuses the perfil hint tones. */
+
+.camp-setup-modal {
+  max-width: 480px;
+}
+
+.camp-setup-label {
+  display: block;
+  margin: 14px 2px 6px;
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 16px;
+  color: var(--plum);
+}
+
+.camp-setup-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.camp-setup-chip {
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 15px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease,
+    transform 0.15s ease;
+}
+
+.camp-setup-chip:hover {
+  border-color: var(--lilac-deep);
+  transform: translateY(-1px);
+}
+
+.camp-setup-chip.is-on {
+  background: var(--lilac-soft);
+  border-color: var(--lilac-deep);
+  color: var(--plum);
+  font-weight: 600;
+}
+
+.camp-setup-row {
+  display: flex;
+  gap: 10px;
+}
+
+.camp-setup-row .camp-setup-col {
+  flex: 1;
+  min-width: 0;
+}
+
+.camp-setup-select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236b3c5e' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 10l5 5 5-5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 16px;
+  padding-right: 36px;
+}
+
+.camp-setup-slug-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.camp-setup-slug-prefix {
+  flex-shrink: 0;
+  font-size: 12.5px;
+  color: var(--ink-mute);
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.camp-setup-slug-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.camp-setup-slug-status {
+  display: block;
+  min-height: 18px;
+  margin: 5px 2px 0;
+  font-size: 12.5px;
+  color: var(--ink-mute);
+}
+
+.camp-setup-slug-status.is-good {
+  color: var(--green-deep);
+  font-weight: 600;
+}
+
+.camp-setup-slug-status.is-bad {
+  color: var(--coral-pink);
+  font-weight: 600;
+}
+
+/* "completar" chip on a blank-perfil card — sits above the CTA, tilted like
+ * everything else on this shelf. */
+.camp-card-completar {
+  align-self: flex-start;
+  margin-bottom: 6px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px dashed var(--lilac-deep);
+  background: var(--lilac-soft);
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 14px;
+  color: var(--plum);
+  cursor: pointer;
+  transform: rotate(-1deg);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.camp-card-completar:hover {
+  transform: rotate(0deg) translateY(-1px);
+  background: var(--yellow);
+}

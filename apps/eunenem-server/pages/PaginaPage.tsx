@@ -47,14 +47,10 @@ export function PaginaPage({
    */
   idCampanha?: string;
 }) {
-  // aperture-1yx1n — PARALLEL-TRACK SHIM (contract-pinning, swap on Rex's
-  // aphk8 merge): getPerfilPublicoBySlug's input is { slug } until W1a adds
-  // optional idCampanha. zod (non-strict) STRIPS the unknown key pre-merge —
-  // harmless no-op — and honors it the moment W1a deploys. The cast below is
-  // the only lie; delete it + the comment when @/server perfil-router input
-  // includes idCampanha, letting inference take over.
+  // aperture-1yx1n — idCampanha is a real optional input post-#359 (shim
+  // swap point fired; plain inference).
   const perfil = trpc.perfil.getPerfilPublicoBySlug.useQuery(
-    (idCampanha ? { slug, idCampanha } : { slug }) as { slug: string },
+    idCampanha ? { slug, idCampanha } : { slug },
     { staleTime: 60_000, retry: false },
   );
   // Marketplace + Messages need NO prop threading: their hooks

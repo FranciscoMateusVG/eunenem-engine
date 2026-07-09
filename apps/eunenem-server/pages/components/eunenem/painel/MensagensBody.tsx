@@ -247,6 +247,7 @@ function RecadoCard({
 
   return (
     <article
+      data-testid={isUnread ? undefined : "recado-lida-badge"}
       style={{
         background: isUnread
           ? "linear-gradient(135deg, var(--paper), rgba(232, 213, 240, 0.35))"

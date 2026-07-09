@@ -37,6 +37,8 @@ export function GiftCard({ gift, onPick, onAdd }: GiftCardProps) {
 
   return (
     <article
+      data-testid="pagina-gift-item"
+      data-gift-nome={gift.nome}
       onMouseEnter={() => !isTaken && setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{

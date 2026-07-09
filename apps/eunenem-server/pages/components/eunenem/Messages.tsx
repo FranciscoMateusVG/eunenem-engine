@@ -127,6 +127,7 @@ function MessageCard({ recado }: { recado: PaginaMuralRecado }) {
 
   return (
     <article
+      data-testid="pagina-mural-recado"
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{

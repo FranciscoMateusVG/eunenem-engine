@@ -71,7 +71,10 @@ export function ConvitePreviewBody({
   const state = conviteStateFromData(conviteQuery.data);
 
   return (
-    <section className="mx-auto flex w-full max-w-[1080px] flex-col items-center gap-6 px-4 py-8 md:px-6">
+    <section
+      data-testid="convite-saved-state"
+      className="mx-auto flex w-full max-w-[1080px] flex-col items-center gap-6 px-4 py-8 md:px-6"
+    >
       <style>{PREVIEW_CSS}</style>
       <div
         style={{

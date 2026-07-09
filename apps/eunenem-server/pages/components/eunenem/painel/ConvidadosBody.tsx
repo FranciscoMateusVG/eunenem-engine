@@ -601,7 +601,7 @@ function GuestCard({
   onSetRsvp: (id: string, presenca: StatusPresencaConvidado) => void;
 }) {
   return (
-    <div className="cv-guest-card">
+    <div className="cv-guest-card" data-testid="convidado-row">
 
       {/* desktop */}
       <div className="cv-guest-layout-desktop">

@@ -17,14 +17,31 @@
 
 import { getDefaultConviteShareOrigin } from './convite-share.js';
 
-/** Path form: /pagina/<slug> or /pagina/<slug>/c/<idCampanha>. */
-export function paginaSharePath(slug: string, idCampanha?: string | null): string {
+/**
+ * Path form, prettiest available:
+ *   campanhaSlug present → /pagina/<slug>/<campanhaSlug>   (W1a pretty URL)
+ *   idCampanha present   → /pagina/<slug>/c/<idCampanha>   (canonical fallback)
+ *   neither              → /pagina/<slug>                  (oldest)
+ */
+export function paginaSharePath(
+  slug: string,
+  idCampanha?: string | null,
+  campanhaSlug?: string | null,
+): string {
+  if (campanhaSlug) return `/pagina/${slug}/${campanhaSlug}`;
   return idCampanha ? `/pagina/${slug}/c/${idCampanha}` : `/pagina/${slug}`;
 }
 
 /** Absolute URL for clipboard/share payloads. */
-export function paginaShareUrl(slug: string, idCampanha?: string | null): string {
-  return new URL(paginaSharePath(slug, idCampanha), getDefaultConviteShareOrigin()).toString();
+export function paginaShareUrl(
+  slug: string,
+  idCampanha?: string | null,
+  campanhaSlug?: string | null,
+): string {
+  return new URL(
+    paginaSharePath(slug, idCampanha, campanhaSlug),
+    getDefaultConviteShareOrigin(),
+  ).toString();
 }
 
 /**

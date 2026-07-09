@@ -106,12 +106,14 @@ export function ConfirmarPresencaPage({
   });
   // aperture-1yx1n — CONVIDADO-FIRST campanha resolution (Izzy's G3 red):
   // this URL carries no campanha, so the convite preview must come from the
-  // CONVIDADO's campanha, not the slug default (oldest) — for a non-oldest
-  // campanha's guest the mismatch rendered NotFound even with a valid
-  // convidado. getParaConfirmar carries idCampanha (fblrt amendment #3,
-  // #358) exactly for this hop. The preview query is GATED on the convidado
-  // resolving so the wrong campanha's convite never flashes.
-  const idCampanhaConvidado = convidadoQuery.data?.idCampanha;
+  // CONVIDADO's campanha, not the slug default (oldest). getParaConfirmar
+  // gains an additive idCampanha field (aphk8 amendment pending) — read it
+  // shim-style: pre-deploy it's undefined → today's oldest-campanha
+  // behavior; post-deploy the right convite loads. The preview query is
+  // GATED on the convidado hop so a non-oldest guest never flashes (or
+  // 404s on) the wrong campanha's convite.
+  const idCampanhaConvidado = (convidadoQuery.data as { idCampanha?: string } | undefined)
+    ?.idCampanha;
   const conviteQuery = useConvitePreviewData(slug, {
     idCampanha: idCampanhaConvidado,
     enabled: !convidadoQuery.isLoading,

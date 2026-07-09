@@ -176,7 +176,32 @@ describe('resolveRoute — /pagina/:slug (regression, spec §9)', () => {
     expect(resolveRoute('/pagina/')).toEqual({ kind: 'not-found' });
     expect(resolveRoute('/pagina')).toEqual({ kind: 'not-found' });
     expect(resolveRoute('/pagina/helena/sucesso/extra')).toEqual({ kind: 'not-found' });
-    expect(resolveRoute('/pagina/helena/outra')).toEqual({ kind: 'not-found' });
+    // THREE-segment tails still 404 at parse time (campanha-slug is exactly
+    // one segment).
+    expect(resolveRoute('/pagina/helena/outra/extra')).toEqual({ kind: 'not-found' });
+  });
+
+  // aperture-1yx1n (fblrt W1b) — /pagina/<user-slug>/<campanha-slug> is a
+  // REAL route now: a second slug-shaped segment parses as the pretty
+  // per-campanha public URL. Whether the campanha-slug EXISTS is resolved at
+  // fetch time (pagina.resolverCampanhaSlug → not-found body), the same
+  // convention as unknown /c/ ids — the pure router only validates shape.
+  it('second slug-shaped segment → pagina with campanhaSlug (1yx1n)', () => {
+    expect(resolveRoute('/pagina/helena/outra')).toEqual({
+      kind: 'pagina',
+      slug: 'helena',
+      campanhaSlug: 'outra',
+    });
+    // Reserved second segments never parse as campanha slugs: 'sucesso' is
+    // matched by its own earlier rule; 'c' fails the min-3 slug regex.
+    expect(resolveRoute('/pagina/helena/sucesso')).toEqual({
+      kind: 'pagina-sucesso',
+      slug: 'helena',
+    });
+    expect(resolveRoute('/pagina/helena/c')).toEqual({ kind: 'not-found' });
+    // Invalid campanha-slug shapes → not-found at parse time.
+    expect(resolveRoute('/pagina/helena/Outra')).toEqual({ kind: 'not-found' });
+    expect(resolveRoute('/pagina/helena/ab')).toEqual({ kind: 'not-found' });
   });
 });
 

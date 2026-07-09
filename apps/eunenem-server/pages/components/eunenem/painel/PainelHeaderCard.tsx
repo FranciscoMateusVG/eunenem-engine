@@ -4,6 +4,7 @@ import { artigoPosse } from "@/lib/concordancia";
 import { toast } from "sonner";
 import { useTweaks } from "../TweaksContext";
 import type { PainelEventSnapshot } from "@/lib/mocks/painelDemo";
+import { useCampanhaSlugRota } from "@/lib/campanhas";
 import { paginaShareDisplayPrefix, paginaShareUrl } from "@/lib/pagina-share";
 import { painelHref } from "@/lib/painelRoutes";
 import { useCampanhaRota } from "@/lib/campanha-rota";
@@ -104,8 +105,10 @@ export function PainelHeaderCard({ snapshot, slug, campanhaTitulo }: Props) {
   // campanha-addressed when a /c/:id route is active. snapshot.shareUrl
   // ("eunenem.com/") was the legacy-domain mock — dead link on both domain
   // AND path axes. Display chip shows host/pagina/<slug> (no uuid noise);
-  // the copy carries the full addressing.
-  const fullShareUrl = paginaShareUrl(slug, idCampanha);
+  // the copy carries the full addressing — PRETTY campanha-slug form when
+  // the user chose one (W1a), /c/<uuid> canonical fallback otherwise.
+  const campanhaSlug = useCampanhaSlugRota();
+  const fullShareUrl = paginaShareUrl(slug, idCampanha, campanhaSlug);
 
   const onCopy = async () => {
     try {

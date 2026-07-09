@@ -864,41 +864,68 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
   const perfilQuery = trpc.perfil.getPerfil.useQuery(undefined, {
     staleTime: 30_000,
   });
+  // aperture-1yx1n — route decides which perfil: /c/:id → perfilCampanha.*,
+  // bare → user-level (transitional shim repoints to oldest). Mode B loads the
+  // baby-half from the ROUTE campanha; the USER-half (creatorName, slug) still
+  // comes from perfil.getPerfil. Hook is unconditional (react-hooks rules) —
+  // `enabled` gates the fetch on bare URLs.
+  const perfilCampanhaQuery = trpc.perfilCampanha.get.useQuery(
+    { idCampanha: idCampanha ?? "" },
+    { enabled: Boolean(idCampanha), staleTime: 30_000 },
+  );
   const hydrated = useRef(false);
+
+  // aperture-1yx1n — Mode-B echo source: getPerfil's OWN DTO, held verbatim so
+  // the user-level save can echo the USER-level baby-half back untouched (see
+  // handleSaveCampanha for the clobber rationale). Refreshed from
+  // perfil.atualizar's round-trip response — same discipline as generoRef
+  // (aperture-7sb1h). creatorNameSaved is the skip-when-unchanged baseline.
+  const perfilEchoRef = useRef<typeof perfilQuery.data>(undefined);
+  const creatorNameSaved = useRef<string | null>(null);
 
   // Hydrate the form once from the real profile. Subsequent saves keep local
   // state authoritative (it already reflects the edit), so we don't re-seed.
   useEffect(() => {
     const d = perfilQuery.data;
     if (!d || hydrated.current) return;
+    // aperture-1yx1n — Mode B: baby-half hydrates from the ROUTE campanha's
+    // perfil; gate until BOTH queries resolve so we hydrate once, fully.
+    const c = idCampanha ? perfilCampanhaQuery.data : undefined;
+    if (idCampanha && !c) return;
+    // USER-half — always from perfil.getPerfil (per-user fields).
     setProfileSlug(d.slug || slug || "");
-    setBabyName(d.nomeBebe ?? "");
     setCreatorName(d.creatorName ?? "");
-    setRelation(d.relacao ?? "");
-    setEventType((d.tipoEvento as PerfilEventTypeSlug | null) ?? "");
-    setTeaDate(isoToBR(d.dataEvento));
-    setBirthDate(isoToBR(d.dataNascimento));
-    setStory(d.historia ?? "");
+    // BABY-half — route campanha in Mode B, user-level perfil on bare URLs.
+    const b = c ?? d;
+    setBabyName(b.nomeBebe ?? "");
+    setRelation(b.relacao ?? "");
+    setEventType((b.tipoEvento as PerfilEventTypeSlug | null) ?? "");
+    setTeaDate(isoToBR(b.dataEvento));
+    setBirthDate(isoToBR(b.dataNascimento));
+    setStory(b.historia ?? "");
     // aperture-qjgfr — the DTO carries TWO photo field sets (R5/#236):
     //   fotoXKey = BARE object key   → round-tripped to atualizar as fotoXKey
     //   fotoXUrl = RESOLVED publicUrl → display only (<img src>)
     // fotoKeys.current MUST hold bare keys; storing the resolved URL here is
     // what caused the re-prefix mangling this fix closes.
     fotoKeys.current = {
-      perfil: d.fotoPerfilKey,
-      capa: d.fotoCapaKey,
-      historia: d.fotoHistoriaKey,
+      perfil: b.fotoPerfilKey,
+      capa: b.fotoCapaKey,
+      historia: b.fotoHistoriaKey,
     };
     // aperture-7sb1h — carry the wizard-captured gender through saves.
-    generoRef.current = d.genero;
+    generoRef.current = b.genero;
     setFotoUrls({
-      perfil: d.fotoPerfilUrl,
-      capa: d.fotoCapaUrl,
-      historia: d.fotoHistoriaUrl,
+      perfil: b.fotoPerfilUrl,
+      capa: b.fotoCapaUrl,
+      historia: b.fotoHistoriaUrl,
     });
-    setTweaks({ babyName: d.nomeBebe ?? "" });
+    setTweaks({ babyName: b.nomeBebe ?? "" });
+    // aperture-1yx1n — capture the echo + skip baselines (Mode-B save flow).
+    perfilEchoRef.current = d;
+    creatorNameSaved.current = (d.creatorName ?? "").trim();
     hydrated.current = true;
-  }, [perfilQuery.data, slug, setTweaks]);
+  }, [perfilQuery.data, perfilCampanhaQuery.data, idCampanha, slug, setTweaks]);
 
   const atualizar = trpc.perfil.atualizar.useMutation({
     onSuccess: (updated) => {
@@ -927,6 +954,16 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
 
   const emitirUpload = trpc.perfil.emitirUrlUploadFoto.useMutation();
 
+  // aperture-1yx1n — Mode-B mutations. perfilCampanha.atualizar carries the
+  // FORM's baby-half to the ROUTE campanha. The user-level echo save uses a
+  // SEPARATE perfil.atualizar handle: the Mode-A `atualizar` above re-seeds
+  // photo/genero/tweaks state from the USER-level DTO in onSuccess, which
+  // would clobber the route campanha's state on screen.
+  const atualizarCampanha = trpc.perfilCampanha.atualizar.useMutation();
+  const atualizarUsuarioEco = trpc.perfil.atualizar.useMutation();
+  const emitirUploadCampanha =
+    trpc.perfilCampanha.emitirUrlUploadFoto.useMutation();
+
   // Single source of truth for the atualizar payload — shared by the manual
   // save and the photo-upload persist. Dates are parsed defensively (invalid →
   // null) so a half-typed date never blocks persisting a photo.
@@ -951,14 +988,113 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
     fotoHistoriaKey: fotoKeys.current.historia,
   });
 
+  // aperture-1yx1n — Mode-B payload: the FORM's baby-half addressed to the
+  // ROUTE campanha. Same whole-content-replacement semantics as currentPayload
+  // (incl. the aperture-7sb1h genero echo); the contract takes Date|null for
+  // the dates where the user-level input takes ISO strings.
+  const campanhaPayload = (id: string) => {
+    const nascISO = birthDate.trim() ? brToISO(birthDate) : null;
+    const eventoISO = teaDate.trim() ? brToISO(teaDate) : null;
+    return {
+      idCampanha: id,
+      nomeBebe: babyName.trim() || null,
+      relacao: relation.trim() || null,
+      historia: story.trim() || null,
+      dataNascimento: nascISO ? new Date(nascISO) : null,
+      tipoEvento: eventType || null,
+      genero: generoRef.current,
+      dataEvento: eventoISO ? new Date(eventoISO) : null,
+      fotoPerfilKey: fotoKeys.current.perfil,
+      fotoCapaKey: fotoKeys.current.capa,
+      fotoHistoriaKey: fotoKeys.current.historia,
+    };
+  };
+
+  // aperture-1yx1n — Mode-B step (a): whole-content save of the FORM's
+  // baby-half to the ROUTE campanha, then re-seed keys/urls/genero/tweaks from
+  // the fresh DTO (mirror of the Mode-A atualizar onSuccess). Throws on
+  // failure so callers can gate what follows.
+  const salvarCampanha = async () => {
+    if (!idCampanha) return; // Mode-B only (TS narrow; never hit on bare URLs)
+    const fresh = await atualizarCampanha.mutateAsync(campanhaPayload(idCampanha));
+    fotoKeys.current = {
+      perfil: fresh.fotoPerfilKey,
+      capa: fresh.fotoCapaKey,
+      historia: fresh.fotoHistoriaKey,
+    };
+    setFotoUrls({
+      perfil: fresh.fotoPerfilUrl,
+      capa: fresh.fotoCapaUrl,
+      historia: fresh.fotoHistoriaUrl,
+    });
+    generoRef.current = fresh.genero;
+    setTweaks({ babyName: fresh.nomeBebe ?? babyName.trim() });
+    utils.perfilCampanha.get.setData({ idCampanha }, fresh);
+  };
+
+  const saveErrorMessage = (err: unknown) =>
+    err instanceof Error && err.message
+      ? err.message
+      : "não consegui salvar — tenta de novo?";
+
+  // aperture-1yx1n — Mode-B save. Route decides which perfil: /c/:id →
+  // perfilCampanha.atualizar gets the FORM's baby-half; the user-level
+  // perfil.atualizar runs ONLY to persist nomeExibicao — and it must ECHO
+  // getPerfil's OWN baby-half (perfilEchoRef), NEVER the form's values.
+  // CLOBBER RATIONALE: during Rex's transitional shim window perfil.atualizar
+  // writes its baby-half to the OLDEST campanha, so sending the form's values
+  // there would overwrite that campanha with THIS route's data. Unchanged
+  // creatorName → skip the user-level half entirely (cheaper + zero clobber
+  // surface). Success toast only after every needed mutation resolves; a
+  // perfilCampanha failure aborts before the user-level half (no partial saves).
+  const handleSaveCampanha = async () => {
+    try {
+      await salvarCampanha();
+    } catch (err) {
+      toast.error(saveErrorMessage(err));
+      return;
+    }
+    const echo = perfilEchoRef.current;
+    if (echo && creatorName.trim() !== creatorNameSaved.current) {
+      try {
+        const updated = await atualizarUsuarioEco.mutateAsync({
+          nomeExibicao: creatorName.trim(),
+          // ECHO of getPerfil's OWN baby-half — NOT the form's (clobber trap).
+          nomeBebe: echo.nomeBebe,
+          relacao: echo.relacao,
+          historia: echo.historia,
+          dataNascimento: echo.dataNascimento,
+          tipoEvento: echo.tipoEvento,
+          genero: echo.genero,
+          dataEvento: echo.dataEvento,
+          fotoPerfilKey: echo.fotoPerfilKey,
+          fotoCapaKey: echo.fotoCapaKey,
+          fotoHistoriaKey: echo.fotoHistoriaKey,
+        });
+        // Keep the echo fresh from the round-trip DTO (aperture-7sb1h pattern).
+        perfilEchoRef.current = updated;
+        creatorNameSaved.current = creatorName.trim();
+        utils.perfil.getPerfil.setData(undefined, updated);
+      } catch (err) {
+        toast.error(saveErrorMessage(err));
+        return;
+      }
+    }
+    toast.success("Tudo salvo! Feito com carinho ♡");
+  };
+
   // V4 flow: presign (emitirUrlUploadFoto) → PUT the cropped blob DIRECT to
   // MinIO → persist the returned objectKey via atualizar → preview shows the
   // publicUrl immediately. Throws on failure so PhotoSlot surfaces the error.
   const uploadFoto = async (slot: FotoSlot, blob: Blob, contentType: FotoContentType) => {
-    const { uploadUrl, objectKey, publicUrl } = await emitirUpload.mutateAsync({
-      slot,
-      contentType,
-    });
+    // aperture-1yx1n — route decides which perfil: /c/:id → perfilCampanha.*,
+    // bare → user-level (transitional shim repoints to oldest). Same presign
+    // output; the campanha variant names the slot param `tipo`.
+    const { uploadUrl, objectKey, publicUrl } = idCampanha
+      ? // NOTE: shipped input param is `slot` (not the contract note's `tipo`) —
+          // real router shape wins, flagged to Rex on the aphk8 bead.
+          await emitirUploadCampanha.mutateAsync({ idCampanha, slot, contentType })
+      : await emitirUpload.mutateAsync({ slot, contentType });
     const res = await fetch(uploadUrl, {
       method: "PUT",
       headers: { "Content-Type": contentType },
@@ -967,6 +1103,18 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
     if (!res.ok) throw new Error(`upload falhou (${res.status})`);
     fotoKeys.current = { ...fotoKeys.current, [slot]: objectKey };
     setFotoUrls((prev) => ({ ...prev, [slot]: publicUrl }));
+    if (idCampanha) {
+      // aperture-1yx1n — Mode B persists the key on the ROUTE campanha.
+      // nomeExibicao isn't part of this save, so creatorName doesn't gate it;
+      // errors surface as the save toast (parity with Mode A's onError).
+      try {
+        await salvarCampanha();
+        toast.success("Tudo salvo! Feito com carinho ♡");
+      } catch (err) {
+        toast.error(saveErrorMessage(err));
+      }
+      return;
+    }
     // aperture-0xoy0 — persist the photo key the moment the bytes land, so they
     // never orphan in the bucket. babyName no longer gates this (nomeBebe is
     // nullable → currentPayload sends null when empty). Only the always-present
@@ -997,12 +1145,20 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
       toast.error("Data de nascimento inválida — use dd/mm/aaaa");
       return;
     }
-    // The dataEvento / dataNascimento locals above gate on validity; currentPayload
-    // re-parses them (same result) and assembles the full payload incl. photo keys.
-    atualizar.mutate(currentPayload());
+    // The dataEvento / dataNascimento locals above gate on validity; the payload
+    // builders re-parse them (same result) and assemble the full payload incl.
+    // photo keys.
+    // aperture-1yx1n — route decides which perfil: /c/:id → perfilCampanha.*,
+    // bare → user-level (transitional shim repoints to oldest).
+    if (idCampanha) {
+      void handleSaveCampanha();
+    } else {
+      atualizar.mutate(currentPayload());
+    }
   };
 
-  const saving = atualizar.isPending;
+  const saving =
+    atualizar.isPending || atualizarCampanha.isPending || atualizarUsuarioEco.isPending;
 
   // Event-type options: the 5 selectable slugs, plus the currently-loaded
   // value if it isn't one of them (so an existing chá-revelação still shows
@@ -1013,7 +1169,9 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
       : SELECTABLE_EVENT_TYPES;
 
   // ── Loading / error states (real, replacing the demo snapshot) ──
-  if (perfilQuery.isLoading) {
+  // aperture-1yx1n — Mode B waits on BOTH halves (user + route campanha) so
+  // the form hydrates once, fully. Bare URLs never enable the campanha query.
+  if (perfilQuery.isLoading || (idCampanha && perfilCampanhaQuery.isLoading)) {
     return (
       <div className="perfil-body">
         <div className="perfil-hero">
@@ -1028,7 +1186,7 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
     );
   }
 
-  if (perfilQuery.error) {
+  if (perfilQuery.error || (idCampanha && perfilCampanhaQuery.error)) {
     return (
       <div className="perfil-body">
         <div className="perfil-hero">
@@ -1043,7 +1201,11 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
           <button
             type="button"
             className="perfil-btn perfil-btn-primary"
-            onClick={() => void perfilQuery.refetch()}
+            onClick={() => {
+              void perfilQuery.refetch();
+              // aperture-1yx1n — Mode B: retry the campanha half too.
+              if (idCampanha) void perfilCampanhaQuery.refetch();
+            }}
           >
             <span>tentar de novo</span>
           </button>

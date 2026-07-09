@@ -48,9 +48,9 @@ export function useConvitePreviewData(
      * aperture-1yx1n — EXPLICIT campanha override, outranks route context.
      * The RSVP page (/:slug/confirmar-presenca/:idConvidado) has NO campanha
      * in its URL — the right campanha resolves CONVIDADO-FIRST from
-     * getParaConfirmar's idCampanha (fblrt amendment #3, #358); without it
-     * the preview renders the OLDEST campanha's convite and the page 404s
-     * for any non-oldest guest (Izzy's G3 red).
+     * getParaConfirmar (additive idCampanha field, aphk8 amendment pending);
+     * without it the preview renders the OLDEST campanha's convite and the
+     * page 404s for any non-oldest guest (Izzy's G3 red).
      */
     idCampanha?: string | null;
     /** Gate the fetch (RSVP waits for the convidado hop — no wrong-campanha flash). */

@@ -108,7 +108,7 @@ export function Hero({
           >
             {saudacao(genero)} ao <span className="hl">chá de bebê</span>
             <br />
-            {artigoPosse(genero)} <span style={{ color: "var(--coral-pink)" }}>{babyName}</span>
+            {artigoPosse(genero)} <span data-testid="pagina-baby-name" style={{ color: "var(--coral-pink)" }}>{babyName}</span>
             <span
               style={{
                 display: "inline-block",

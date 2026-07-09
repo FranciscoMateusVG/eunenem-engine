@@ -164,6 +164,7 @@ export function CountdownTimer({ targetISO }: CountdownTimerProps) {
       {/* aperture-xijyq — two-segment row centered within the remaining
           card width via margin-inline:auto on this inner flex track. */}
       <div
+        data-testid="pagina-event-date"
         style={{
           display: "flex",
           alignItems: "baseline",

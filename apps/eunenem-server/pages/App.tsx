@@ -14,6 +14,7 @@ import { CampanhasPage } from './CampanhasPage.js';
 import { LandingPage } from './LandingPage.js';
 import { NotFoundPage } from './NotFoundPage.js';
 import { PainelConvitePreviewPage } from './PainelConvitePreviewPage.js';
+import { PaginaCampanhaSlugResolver } from './PaginaCampanhaSlugResolver.js';
 import { PaginaPage } from './PaginaPage.js';
 import { PaginaSucessoPage } from './PaginaSucessoPage.js';
 import { PainelPage } from './PainelPage.js';
@@ -47,7 +48,7 @@ const SLUG_REGEX = /^[a-z][a-z0-9-]{2,29}$/;
 export function resolveRoute(pathname: string):
   | { kind: 'landing' }
   | { kind: 'campanhas' }
-  | { kind: 'pagina'; slug: string; idCampanha?: string }
+  | { kind: 'pagina'; slug: string; idCampanha?: string; campanhaSlug?: string }
   | { kind: 'pagina-sucesso'; slug: string }
   | { kind: 'confirmar-presenca'; slug: string; idConvidado: string }
   | { kind: 'painel'; slug: string; idCampanha?: string }
@@ -199,6 +200,27 @@ export function resolveRoute(pathname: string):
       idCampanha: paginaCampanhaMatch[2],
     };
   }
+  // /pagina/<user-slug>/<campanha-slug> (aperture-1yx1n Phase B, W1a contract
+  // §5) — the PRETTY per-campanha public URL. Matched AFTER the /sucesso and
+  // /c/ rules, so those two reserved second segments can never be read as a
+  // campanha slug ('c' is additionally impossible: the slug regex requires
+  // ≥3 chars). The campanha-slug → idCampanha resolution is ASYNC
+  // (pagina.resolverCampanhaSlug, ONE call) and happens at render time in
+  // PaginaCampanhaSlugResolver — resolveRoute stays pure. Unknown
+  // campanha-slug → not-found body at fetch time, same convention as /c/.
+  const paginaCampanhaSlugMatch = pathname.match(/^\/pagina\/([^/]+)\/([^/]+)\/?$/);
+  if (
+    paginaCampanhaSlugMatch?.[1] &&
+    paginaCampanhaSlugMatch[2] &&
+    SLUG_REGEX.test(paginaCampanhaSlugMatch[1]) &&
+    SLUG_REGEX.test(paginaCampanhaSlugMatch[2])
+  ) {
+    return {
+      kind: 'pagina',
+      slug: paginaCampanhaSlugMatch[1],
+      campanhaSlug: paginaCampanhaSlugMatch[2],
+    };
+  }
   const paginaMatch = pathname.match(/^\/pagina\/([^/]+)\/?$/);
   if (paginaMatch && paginaMatch[1] && SLUG_REGEX.test(paginaMatch[1])) {
     return { kind: 'pagina', slug: paginaMatch[1] };
@@ -325,12 +347,22 @@ function pickPage(route: ReturnType<typeof resolveRoute>, pathname: string) {
   // provider, so a layout-level mount alone leaves them reading undefined —
   // the root cause of the "painel shows the default campanha" bug class.
   // PainelLayout keeps its own (same-value) provider; nesting is harmless.
-  if (route.kind === 'pagina')
+  if (route.kind === 'pagina') {
+    // aperture-1yx1n Phase B — pretty campanha-slug URLs resolve async
+    // (ONE resolverCampanhaSlug call) then feed the SAME provider+page.
+    if (route.campanhaSlug)
+      return (
+        <PaginaCampanhaSlugResolver
+          slug={route.slug}
+          campanhaSlug={route.campanhaSlug}
+        />
+      );
     return (
       <CampanhaRotaProvider idCampanha={route.idCampanha}>
         <PaginaPage slug={route.slug} idCampanha={route.idCampanha} />
       </CampanhaRotaProvider>
     );
+  }
   if (route.kind === 'pagina-sucesso') return <PaginaSucessoPage slug={route.slug} />;
   if (route.kind === 'confirmar-presenca')
     return <ConfirmarPresencaPage slug={route.slug} idConvidado={route.idConvidado} />;
