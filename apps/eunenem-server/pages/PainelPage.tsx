@@ -114,9 +114,26 @@ export function PainelPage({
 
   // aperture-77512 — the creator's REAL first name for the "olá, {name}"
   // greeting (was the demo "Mari"). First word of nomeExibicao.
+  // aperture-ujvkp — this ACCOUNT-level query now feeds ONLY the greeting:
+  // creatorName is per-conta (same on every campanha) so it's correct here.
+  // The BABY-half (nomeBebe/genero/dataEvento) must NOT come from it — during
+  // the transitional shim it resolves the OLDEST campanha's perfil, which put
+  // "página do Teste" on Ameno's painel (operator's clean-slate walk).
   const perfilQ = trpc.perfil.getPerfil.useQuery(undefined, { staleTime: 30_000 });
   const greetingFirstName =
     (perfilQ.data?.creatorName ?? "").trim().split(/\s+/)[0] ?? "";
+
+  // aperture-ujvkp — the DISPLAYED campanha's own perfil for the header's
+  // baby-half. Owner-gated, REQUIRED uuid input → enabled-gate on shape
+  // (idCampanhaPadrao can briefly be null/non-uuid while auth.me resolves).
+  const idCampanhaValida =
+    idCampanha && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idCampanha)
+      ? idCampanha
+      : null;
+  const perfilCampanhaQ = trpc.perfilCampanha.get.useQuery(
+    { idCampanha: idCampanhaValida ?? "" },
+    { enabled: Boolean(idCampanhaValida), staleTime: 30_000 },
+  );
 
   // aperture-8ysqu — onboarding gate. A freshly-provisioned account that never
   // ran the in-modal email wizard (every OAuth signup — Google now, Microsoft
@@ -130,22 +147,21 @@ export function PainelPage({
   const mustOnboard = needsOnboarding(meQ.data);
 
   // aperture-3ic62 — the REAL baby name for the "página da <X>" header.
-  // Was seeded from the slug inside PainelLayout, which is the creator's
-  // OWN name → the header repeated the greeting ("olá, Teste" / "página da
-  // Teste"). Thread nomeBebe from the same getPerfil query; null (unset or
-  // still loading) → PainelLayout falls back to the neutral "bebê", never
-  // the slug.
-  const babyName = perfilQ.data?.nomeBebe ?? null;
-  // aperture-neiwx — seed the owner header's gender article from the same
-  // getPerfil source, so owner + guest never disagree on do/da/de.
-  const genero = perfilQ.data?.genero ?? null;
+  // null (unset or still loading) → PainelLayout falls back to the neutral
+  // "bebê", never the slug.
+  // aperture-ujvkp — sourced from the DISPLAYED campanha's perfilCampanha,
+  // NOT the account-level getPerfil (which resolves the oldest campanha):
+  // /painel/:slug/c/<Ameno> must read Ameno's Dorimenos, never "Teste".
+  const babyName = perfilCampanhaQ.data?.nomeBebe ?? null;
+  // aperture-neiwx — gender article from the SAME per-campanha source, so
+  // owner + guest never disagree on do/da/de.
+  const genero = perfilCampanhaQ.data?.genero ?? null;
 
   // aperture-84a21 — the REAL event date for the painel countdown + date chip.
   // null (unset / fresh account / still loading) → PainelHeaderCard shows NO
-  // date (the old mock "15 jun 2026" / "0 dias" gap is closed). Mirrors the
-  // guest Hero (3ic62), which already gates its countdown on the real date.
-  const eventDate = perfilQ.data?.dataEvento
-    ? String(perfilQ.data.dataEvento).slice(0, 10)
+  // date. Same per-campanha source (aperture-ujvkp).
+  const eventDate = perfilCampanhaQ.data?.dataEvento
+    ? String(perfilCampanhaQ.data.dataEvento).slice(0, 10)
     : null;
 
   // aperture-77512 — Merge REAL values over the demo snapshot, falling back to
@@ -259,7 +275,15 @@ export function PainelPage({
   // the dashboard before deciding the onboarding gate below (and the
   // TweaksProvider seed-once invariant above is preserved — this branch still
   // returns a DISTINCT element, so a FRESH PainelLayout mounts when loading ends).
-  if (perfilQ.isLoading || meQ.isLoading) {
+  // aperture-ujvkp — the per-campanha perfil (babyName/genero/eventDate source)
+  // must ALSO settle before the seed-once mount: on bare URLs it only starts
+  // fetching after auth.me resolves the default id, so without this clause the
+  // layout would mount mid-fetch and seed the neutral "bebê" forever.
+  if (
+    perfilQ.isLoading ||
+    meQ.isLoading ||
+    (idCampanhaValida !== null && perfilCampanhaQ.isLoading)
+  ) {
     return (
       <div
         style={{
