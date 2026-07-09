@@ -5,6 +5,7 @@ import { toast } from "sonner";
 
 import { useTweaks } from "@/components/eunenem/TweaksContext";
 import { trpc } from "@/lib/trpc";
+import type { Genero } from "@/lib/concordancia";
 import { paginaShareDisplayPrefix, paginaShareUrl } from "@/lib/pagina-share";
 import { painelHref } from "@/lib/painelRoutes";
 import { useCampanhaRota } from "@/lib/campanha-rota";
@@ -66,6 +67,15 @@ const SELECTABLE_EVENT_TYPES: PerfilEventTypeSlug[] = [
   "cha-surpresa",
   "aniversario",
   "batizado",
+];
+
+// aperture-neiwx — same options as OnboardingWizard's GENEROS (mirror, not
+// imported: OnboardingWizard doesn't export it, and it's 4 lines).
+const GENEROS: ReadonlyArray<{ value: Genero; label: string }> = [
+  { value: "menina", label: "Menina" },
+  { value: "menino", label: "Menino" },
+  { value: "surpresa", label: "Ainda é surpresa ✨" },
+  { value: "neutro", label: "Prefiro não dizer" },
 ];
 
 // dd/mm/aaaa ⇄ ISO. The backend stores dates and `getPerfil` returns ISO
@@ -853,13 +863,11 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
     historia: string | null;
   }>({ perfil: null, capa: null, historia: null });
 
-  // aperture-7sb1h — genero is wizard-captured (no editor on this form) but
-  // perfil.atualizar is WHOLE-CONTENT replacement with a default-null genero:
-  // omitting it from the payload WIPES the wizard's answer on every painel
-  // perfil save. Echo the loaded value back, fotoKeys-style (ref, not state —
-  // nothing here edits it). Union mirrors GeneroBebeSchema
-  // (src/domain/usuario/value-objects/genero-bebe.ts).
-  const generoRef = useRef<"menino" | "menina" | "neutro" | "surpresa" | null>(null);
+  // aperture-7sb1h — genero is wizard-captured; this form now also lets the
+  // user edit it. perfil.atualizar is WHOLE-CONTENT replacement, so this state
+  // is seeded from the loaded value (same as babyName/relation/eventType) and
+  // sent back on every save — omitting it would WIPE the stored value.
+  const [genero, setGenero] = useState<Genero | "">("");
 
   const perfilQuery = trpc.perfil.getPerfil.useQuery(undefined, {
     staleTime: 30_000,
@@ -878,8 +886,8 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
   // aperture-1yx1n — Mode-B echo source: getPerfil's OWN DTO, held verbatim so
   // the user-level save can echo the USER-level baby-half back untouched (see
   // handleSaveCampanha for the clobber rationale). Refreshed from
-  // perfil.atualizar's round-trip response — same discipline as generoRef
-  // (aperture-7sb1h). creatorNameSaved is the skip-when-unchanged baseline.
+  // perfil.atualizar's round-trip response — same discipline as the genero
+  // state (aperture-7sb1h). creatorNameSaved is the skip-when-unchanged baseline.
   const perfilEchoRef = useRef<typeof perfilQuery.data>(undefined);
   const creatorNameSaved = useRef<string | null>(null);
 
@@ -914,7 +922,7 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
       historia: b.fotoHistoriaKey,
     };
     // aperture-7sb1h — carry the wizard-captured gender through saves.
-    generoRef.current = b.genero;
+    setGenero(b.genero ?? "");
     setFotoUrls({
       perfil: b.fotoPerfilUrl,
       capa: b.fotoCapaUrl,
@@ -942,8 +950,8 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
         historia: updated.fotoHistoriaUrl,
       });
       setTweaks({ babyName: updated.nomeBebe ?? babyName.trim() });
-      // aperture-7sb1h — keep the echo-ref fresh from the round-trip DTO.
-      generoRef.current = updated.genero;
+      // aperture-7sb1h — keep the field fresh from the round-trip DTO.
+      setGenero(updated.genero ?? "");
       utils.perfil.getPerfil.setData(undefined, updated);
       toast.success("Tudo salvo! Feito com carinho ♡");
     },
@@ -977,11 +985,10 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
     dataNascimento: birthDate.trim() ? brToISO(birthDate) : null,
     tipoEvento: eventType || null,
     // aperture-7sb1h — whole-content replacement: EVERY AtualizarPerfilInput
-    // field must round-trip or it resets to its default. genero has no editor
-    // on this form, so echo the loaded value (generoRef). If you ADD a field
+    // field must round-trip or it resets to its default. If you ADD a field
     // to AtualizarPerfilInputSchema, add it HERE too — an omitted field is a
     // silent wipe, not a no-op.
-    genero: generoRef.current,
+    genero: genero || null,
     dataEvento: teaDate.trim() ? brToISO(teaDate) : null,
     fotoPerfilKey: fotoKeys.current.perfil,
     fotoCapaKey: fotoKeys.current.capa,
@@ -1002,7 +1009,7 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
       historia: story.trim() || null,
       dataNascimento: nascISO ? new Date(nascISO) : null,
       tipoEvento: eventType || null,
-      genero: generoRef.current,
+      genero: genero || null,
       dataEvento: eventoISO ? new Date(eventoISO) : null,
       fotoPerfilKey: fotoKeys.current.perfil,
       fotoCapaKey: fotoKeys.current.capa,
@@ -1027,7 +1034,7 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
       capa: fresh.fotoCapaUrl,
       historia: fresh.fotoHistoriaUrl,
     });
-    generoRef.current = fresh.genero;
+    setGenero(fresh.genero ?? "");
     setTweaks({ babyName: fresh.nomeBebe ?? babyName.trim() });
     utils.perfilCampanha.get.setData({ idCampanha }, fresh);
   };
@@ -1327,24 +1334,45 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
           />
         </Field>
 
-        <Field label="parentesco" htmlFor="perfil-relation">
-          <div className="perfil-select-wrap">
-            <select
-              id="perfil-relation"
-              className="perfil-input perfil-select"
-              value={relation}
-              onChange={(e) => setRelation(e.target.value)}
-            >
-              <option value="">selecione</option>
-              {PERFIL_RELATIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-            <span className="perfil-select-chev">{ico.chev}</span>
-          </div>
-        </Field>
+        <div className="perfil-field-pair">
+          <Field label="parentesco" htmlFor="perfil-relation">
+            <div className="perfil-select-wrap">
+              <select
+                id="perfil-relation"
+                className="perfil-input perfil-select"
+                value={relation}
+                onChange={(e) => setRelation(e.target.value)}
+              >
+                <option value="">selecione</option>
+                {PERFIL_RELATIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              <span className="perfil-select-chev">{ico.chev}</span>
+            </div>
+          </Field>
+
+          <Field label="sexo do bebê" htmlFor="perfil-genero">
+            <div className="perfil-select-wrap">
+              <select
+                id="perfil-genero"
+                className="perfil-input perfil-select"
+                value={genero}
+                onChange={(e) => setGenero(e.target.value as Genero | "")}
+              >
+                <option value="">selecione</option>
+                {GENEROS.map((g) => (
+                  <option key={g.value} value={g.value}>
+                    {g.label}
+                  </option>
+                ))}
+              </select>
+              <span className="perfil-select-chev">{ico.chev}</span>
+            </div>
+          </Field>
+        </div>
       </PerfilSection>
       </div>
 
