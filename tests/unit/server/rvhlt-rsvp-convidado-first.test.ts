@@ -242,12 +242,17 @@ describe('public RSVP convidado-first resolution (aperture-rvhlt)', () => {
       idConvidado: convidado.id,
     });
     expect(out.nome).toBe('Convidada da Segunda');
+    // fblrt amendment #3: the output carries the convidado's OWN campanha
+    // (the NON-oldest one) so the RSVP page can address the convite preview
+    // at the right campanha. Strongest isolation assertion available here.
+    expect(out.idCampanha).toBe(nova.id);
 
-    await rig.anonCaller.eventoListaDeConvidados.confirmarPresenca({
+    const confirmada = await rig.anonCaller.eventoListaDeConvidados.confirmarPresenca({
       slug: user.slug,
       idConvidado: convidado.id,
       presenca: 'sim',
     });
+    expect(confirmada.idCampanha).toBe(nova.id);
 
     // Content assertion: the presence landed on the NON-oldest campanha's
     // lista (the right lista, the right convidado).
@@ -272,6 +277,7 @@ describe('public RSVP convidado-first resolution (aperture-rvhlt)', () => {
       idConvidado: convidado.id,
     });
     expect(out.nome).toBe('Convidado do Oldest');
+    expect(out.idCampanha).toBe(me.idCampanha);
   });
 
   it('C. cross-check: the convidado under a DIFFERENT user slug → NOT_FOUND (no oracle)', async () => {

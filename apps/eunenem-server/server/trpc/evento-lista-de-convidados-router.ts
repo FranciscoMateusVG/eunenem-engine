@@ -193,7 +193,7 @@ async function resolveConvidadoPublico(
   ctx: TrpcContext,
   slug: string,
   idConvidado: string,
-): Promise<{ lista: ListaDeConvidados; convidado: Convidado }> {
+): Promise<{ lista: ListaDeConvidados; convidado: Convidado; idCampanha: string }> {
   const lista = await ctx.deps.listaDeConvidadosRepository.findByConvidadoId(
     idConvidado as IdConvidado,
   );
@@ -227,7 +227,7 @@ async function resolveConvidadoPublico(
     throw new ConvidadoNaoEncontradoError(idConvidado as IdConvidado, lista.id);
   }
 
-  return { lista, convidado };
+  return { lista, convidado, idCampanha: evento.idCampanha };
 }
 
 const GetParaConfirmarInputSchema = z.object({
@@ -239,6 +239,11 @@ const GetParaConfirmarOutputSchema = z.object({
   nome: z.string(),
   presenca: StatusPresencaConvidadoSchema,
   formatoMensagemConvite: FormatoMensagemConviteSchema,
+  // fblrt amendment #3 (aphk8 bead): the convidado's campanha, so the RSVP
+  // page can address eventoConvite.getPreview({slug, idCampanha}) at the
+  // RIGHT campanha instead of defaulting to the oldest. Public UUID exposure
+  // is already the norm (/pagina/:slug/c/:id). Additive — old clients ignore.
+  idCampanha: z.string().uuid(),
 });
 
 /** Public guests may only set one of the 3 final responses — nao_enviado/
@@ -422,7 +427,7 @@ export const eventoListaDeConvidadosRouter = t.router({
     .output(GetParaConfirmarOutputSchema)
     .query(async ({ ctx, input }) => {
       try {
-        const { convidado, lista } = await resolveConvidadoPublico(
+        const { convidado, lista, idCampanha } = await resolveConvidadoPublico(
           ctx,
           input.slug,
           input.idConvidado,
@@ -431,6 +436,7 @@ export const eventoListaDeConvidadosRouter = t.router({
           nome: convidado.nome,
           presenca: convidado.presenca,
           formatoMensagemConvite: lista.formatoMensagemConvite,
+          idCampanha,
         };
       } catch (err) {
         throw toTRPCError(err);
@@ -442,7 +448,11 @@ export const eventoListaDeConvidadosRouter = t.router({
     .output(GetParaConfirmarOutputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        const { lista } = await resolveConvidadoPublico(ctx, input.slug, input.idConvidado);
+        const { lista, idCampanha } = await resolveConvidadoPublico(
+          ctx,
+          input.slug,
+          input.idConvidado,
+        );
 
         const updated = await alterarPresencaConvidado(
           {
@@ -466,6 +476,7 @@ export const eventoListaDeConvidadosRouter = t.router({
           nome: convidado.nome,
           presenca: convidado.presenca,
           formatoMensagemConvite: updated.formatoMensagemConvite,
+          idCampanha,
         };
       } catch (err) {
         throw toTRPCError(err);
