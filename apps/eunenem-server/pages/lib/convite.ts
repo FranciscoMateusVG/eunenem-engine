@@ -41,9 +41,28 @@ export function useConviteData() {
   return trpc.eventoConvite.get.useQuery(idCampanha ? { idCampanha } : undefined);
 }
 
-export function useConvitePreviewData(slug: string) {
-  const idCampanha = useCampanhaRota();
-  return trpc.eventoConvite.getPreview.useQuery(idCampanha ? { slug, idCampanha } : { slug });
+export function useConvitePreviewData(
+  slug: string,
+  opts: {
+    /**
+     * aperture-1yx1n — EXPLICIT campanha override, outranks route context.
+     * The RSVP page (/:slug/confirmar-presenca/:idConvidado) has NO campanha
+     * in its URL — the right campanha resolves CONVIDADO-FIRST from
+     * getParaConfirmar's idCampanha (fblrt amendment #3, #358); without it
+     * the preview renders the OLDEST campanha's convite and the page 404s
+     * for any non-oldest guest (Izzy's G3 red).
+     */
+    idCampanha?: string | null;
+    /** Gate the fetch (RSVP waits for the convidado hop — no wrong-campanha flash). */
+    enabled?: boolean;
+  } = {},
+) {
+  const idCampanhaRota = useCampanhaRota();
+  const idCampanha = opts.idCampanha ?? idCampanhaRota;
+  return trpc.eventoConvite.getPreview.useQuery(
+    idCampanha ? { slug, idCampanha } : { slug },
+    { enabled: opts.enabled ?? true },
+  );
 }
 
 export function hasSavedConvite(data: ConviteQueryData | null | undefined): boolean {

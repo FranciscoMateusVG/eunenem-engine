@@ -100,10 +100,21 @@ export function ConfirmarPresencaPage({
   slug: string;
   idConvidado: string;
 }) {
-  const conviteQuery = useConvitePreviewData(slug);
   const convidadoQuery = trpc.eventoListaDeConvidados.getParaConfirmar.useQuery({
     slug,
     idConvidado,
+  });
+  // aperture-1yx1n — CONVIDADO-FIRST campanha resolution (Izzy's G3 red):
+  // this URL carries no campanha, so the convite preview must come from the
+  // CONVIDADO's campanha, not the slug default (oldest) — for a non-oldest
+  // campanha's guest the mismatch rendered NotFound even with a valid
+  // convidado. getParaConfirmar carries idCampanha (fblrt amendment #3,
+  // #358) exactly for this hop. The preview query is GATED on the convidado
+  // resolving so the wrong campanha's convite never flashes.
+  const idCampanhaConvidado = convidadoQuery.data?.idCampanha;
+  const conviteQuery = useConvitePreviewData(slug, {
+    idCampanha: idCampanhaConvidado,
+    enabled: !convidadoQuery.isLoading,
   });
   const utils = trpc.useUtils();
   const confirmarPresenca = trpc.eventoListaDeConvidados.confirmarPresenca.useMutation({
