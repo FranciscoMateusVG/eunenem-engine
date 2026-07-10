@@ -2,6 +2,7 @@ import { useMemo, useState, type CSSProperties } from "react";
 import { toast } from "sonner";
 
 import type { PainelSectionBodyProps } from "@/PainelSectionPage";
+import { useCampanhaEscrita } from "@/lib/campanha-escrita.js";
 import { useCampanhaRota } from "@/lib/campanha-rota.js";
 import { trpc } from "@/lib/trpc";
 
@@ -468,6 +469,10 @@ export function MensagensBody({ slug }: PainelSectionBodyProps) {
   // deep matching still hits the { slug, idCampanha } query key.
   const utils = trpc.useUtils();
   const idCampanha = useCampanhaRota();
+  // aperture-1kbyx — WRITES resolve rota ?? session-default (oldest) so the
+  // server can require idCampanha; the READ above stays rota-only (queries
+  // default oldest server-side by design, b8c8u).
+  const idCampanhaEscrita = useCampanhaEscrita();
   const list = trpc.painelMensagens.list.useQuery(idCampanha ? { slug, idCampanha } : { slug });
   // Both mutations invalidate the list on success so the NOVA badge +
   // filter counts repaint in one round-trip without optimistic updates.
@@ -506,8 +511,12 @@ export function MensagensBody({ slug }: PainelSectionBodyProps) {
   );
 
   const handleMarcarLida = (idPagamento: string) => {
-    // aperture-1yx1n — writes target the ROUTE campanha (bare URL → server default).
-    marcarLida.mutate(idCampanha ? { slug, idPagamento, idCampanha } : { slug, idPagamento });
+    // aperture-1kbyx — writes send an explicit id (rota ?? oldest).
+    marcarLida.mutate(
+      idCampanhaEscrita
+        ? { slug, idPagamento, idCampanha: idCampanhaEscrita }
+        : { slug, idPagamento },
+    );
   };
 
   const handleMarcarTodas = () => {
@@ -515,8 +524,10 @@ export function MensagensBody({ slug }: PainelSectionBodyProps) {
       toast("nenhum recado novo por aqui ♡");
       return;
     }
-    // aperture-1yx1n — writes target the ROUTE campanha (bare URL → server default).
-    marcarTodasLidas.mutate(idCampanha ? { slug, idCampanha } : { slug });
+    // aperture-1kbyx — writes send an explicit id (rota ?? oldest).
+    marcarTodasLidas.mutate(
+      idCampanhaEscrita ? { slug, idCampanha: idCampanhaEscrita } : { slug },
+    );
     toast.success("tudo lido ♡");
   };
 

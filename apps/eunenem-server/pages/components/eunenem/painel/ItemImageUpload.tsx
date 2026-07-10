@@ -16,7 +16,7 @@ import { useEffect, useRef, useState } from "react";
 import Cropper from "react-easy-crop";
 import { toast } from "sonner";
 
-import { useCampanhaRota } from "@/lib/campanha-rota.js";
+import { useCampanhaEscrita } from "@/lib/campanha-escrita.js";
 import { trpc } from "@/lib/trpc";
 
 type CropArea = { x: number; y: number; width: number; height: number };
@@ -204,8 +204,9 @@ export function ItemImageUpload({
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const emitir = trpc.contribuicao.emitirUrlUploadImagemItem.useMutation();
-  // aperture-1yx1n — writes target the ROUTE campanha (bare URL → server default).
-  const idCampanha = useCampanhaRota();
+  // aperture-1kbyx — presign under the ROUTE campanha; bare URL → explicit
+  // session-default (oldest) id, so the server can require idCampanha.
+  const idCampanha = useCampanhaEscrita();
 
   const onCropped = async (blob: Blob) => {
     setPendingFile(null);

@@ -34,6 +34,7 @@ import {
   type DeleteInput,
   type UpdateInput,
 } from "./mocks/contribuicao-mock.js";
+import { useCampanhaEscrita } from "./campanha-escrita.js";
 import { useCampanhaRota } from "./campanha-rota.js";
 import { trpc } from "./trpc.js";
 
@@ -168,10 +169,11 @@ export function useContribuicaoList() {
 }
 
 /** Single-item create. One row with `quantidade=N` per Plan 0016. */
-// aperture-1yx1n — writes target the ROUTE campanha (bare URL → server default).
+// aperture-1kbyx — writes target the ROUTE campanha; bare URL → explicit
+// session-default (oldest) id, so the server can require idCampanha.
 export function useContribuicaoCreate() {
   const utils = trpc.useUtils();
-  const idCampanha = useCampanhaRota();
+  const idCampanha = useCampanhaEscrita();
   const m = trpc.contribuicao.create.useMutation({
     onSuccess: () => {
       void utils.contribuicao.list.invalidate();
@@ -190,10 +192,11 @@ export function useContribuicaoCreate() {
  * this fanned out into `items[i].qty` rows per item; that pattern is
  * gone.
  */
-// aperture-1yx1n — writes target the ROUTE campanha (bare URL → server default).
+// aperture-1kbyx — writes target the ROUTE campanha; bare URL → explicit
+// session-default (oldest) id, so the server can require idCampanha.
 export function useContribuicaoCreateBulk() {
   const utils = trpc.useUtils();
-  const idCampanha = useCampanhaRota();
+  const idCampanha = useCampanhaEscrita();
   const m = trpc.contribuicao.createBulk.useMutation({
     onSuccess: () => {
       void utils.contribuicao.list.invalidate();
@@ -207,10 +210,11 @@ export function useContribuicaoCreateBulk() {
 }
 
 /** Patch a single contribuicao. Throws `locked` on indisponivel rows. */
-// aperture-1yx1n — writes target the ROUTE campanha (bare URL → server default).
+// aperture-1kbyx — writes target the ROUTE campanha; bare URL → explicit
+// session-default (oldest) id, so the server can require idCampanha.
 export function useContribuicaoUpdate() {
   const utils = trpc.useUtils();
-  const idCampanha = useCampanhaRota();
+  const idCampanha = useCampanhaEscrita();
   const m = trpc.contribuicao.update.useMutation({
     onSuccess: () => {
       void utils.contribuicao.list.invalidate();
@@ -224,10 +228,11 @@ export function useContribuicaoUpdate() {
 }
 
 /** Bulk delete by ids. Missing ids are silently skipped. */
-// aperture-1yx1n — writes target the ROUTE campanha (bare URL → server default).
+// aperture-1kbyx — writes target the ROUTE campanha; bare URL → explicit
+// session-default (oldest) id, so the server can require idCampanha.
 export function useContribuicaoDelete() {
   const utils = trpc.useUtils();
-  const idCampanha = useCampanhaRota();
+  const idCampanha = useCampanhaEscrita();
   const m = trpc.contribuicao.delete.useMutation({
     onSuccess: () => {
       void utils.contribuicao.list.invalidate();
