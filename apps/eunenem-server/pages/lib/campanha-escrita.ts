@@ -37,3 +37,16 @@ export function useCampanhaEscrita(): string | undefined {
   });
   return rotaId ?? meQ.data?.idCampanha ?? undefined;
 }
+
+/**
+ * aperture-48mxt (W2 enforce) — the 11 authed write mutations now REQUIRE
+ * idCampanha at the wire; this hook injects it, so the wrapper hooks expose
+ * an input type WITHOUT the field (components never supply it). The no-
+ * campanha edge (me.idCampanha null — zero rows in prod) sends an empty
+ * sentinel: it can never address anything and fails uuid validation with the
+ * same honest BAD_REQUEST the old omission produced. We still never invent
+ * a real id (guardrail b).
+ */
+export type SemIdCampanha<F> = F extends (input: infer I, ...rest: infer R) => infer Ret
+  ? (input: Omit<I, 'idCampanha'>, ...rest: R) => Ret
+  : never;

@@ -34,7 +34,7 @@ import {
   type DeleteInput,
   type UpdateInput,
 } from "./mocks/contribuicao-mock.js";
-import { useCampanhaEscrita } from "./campanha-escrita.js";
+import { type SemIdCampanha, useCampanhaEscrita } from "./campanha-escrita.js";
 import { useCampanhaRota } from "./campanha-rota.js";
 import { trpc } from "./trpc.js";
 
@@ -181,8 +181,8 @@ export function useContribuicaoCreate() {
   });
   return {
     ...m,
-    mutate: ((input, opts) => m.mutate(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutate,
-    mutateAsync: ((input, opts) => m.mutateAsync(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutateAsync,
+    mutate: ((input, opts) => m.mutate({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutate>,
+    mutateAsync: ((input, opts) => m.mutateAsync({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutateAsync>,
   };
 }
 
@@ -204,8 +204,8 @@ export function useContribuicaoCreateBulk() {
   });
   return {
     ...m,
-    mutate: ((input, opts) => m.mutate(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutate,
-    mutateAsync: ((input, opts) => m.mutateAsync(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutateAsync,
+    mutate: ((input, opts) => m.mutate({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutate>,
+    mutateAsync: ((input, opts) => m.mutateAsync({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutateAsync>,
   };
 }
 
@@ -222,8 +222,8 @@ export function useContribuicaoUpdate() {
   });
   return {
     ...m,
-    mutate: ((input, opts) => m.mutate(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutate,
-    mutateAsync: ((input, opts) => m.mutateAsync(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutateAsync,
+    mutate: ((input, opts) => m.mutate({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutate>,
+    mutateAsync: ((input, opts) => m.mutateAsync({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutateAsync>,
   };
 }
 
@@ -240,7 +240,7 @@ export function useContribuicaoDelete() {
   });
   return {
     ...m,
-    mutate: ((input, opts) => m.mutate(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutate,
-    mutateAsync: ((input, opts) => m.mutateAsync(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutateAsync,
+    mutate: ((input, opts) => m.mutate({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutate>,
+    mutateAsync: ((input, opts) => m.mutateAsync({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutateAsync>,
   };
 }

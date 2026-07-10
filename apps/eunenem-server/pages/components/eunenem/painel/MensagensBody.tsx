@@ -512,11 +512,9 @@ export function MensagensBody({ slug }: PainelSectionBodyProps) {
 
   const handleMarcarLida = (idPagamento: string) => {
     // aperture-1kbyx — writes send an explicit id (rota ?? oldest).
-    marcarLida.mutate(
-      idCampanhaEscrita
-        ? { slug, idPagamento, idCampanha: idCampanhaEscrita }
-        : { slug, idPagamento },
-    );
+    // aperture-48mxt: REQUIRED at the wire; '' sentinel on the no-campanha
+    // edge fails uuid validation with the same honest BAD_REQUEST.
+    marcarLida.mutate({ slug, idPagamento, idCampanha: idCampanhaEscrita ?? '' });
   };
 
   const handleMarcarTodas = () => {
@@ -525,9 +523,7 @@ export function MensagensBody({ slug }: PainelSectionBodyProps) {
       return;
     }
     // aperture-1kbyx — writes send an explicit id (rota ?? oldest).
-    marcarTodasLidas.mutate(
-      idCampanhaEscrita ? { slug, idCampanha: idCampanhaEscrita } : { slug },
-    );
+    marcarTodasLidas.mutate({ slug, idCampanha: idCampanhaEscrita ?? '' });
     toast.success("tudo lido ♡");
   };
 

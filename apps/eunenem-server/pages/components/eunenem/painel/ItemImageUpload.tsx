@@ -213,11 +213,12 @@ export function ItemImageUpload({
     setUploading(true);
     try {
       // cropToBlob always emits JPEG → content-type must match the presign.
-      const { uploadUrl, publicUrl } = await emitir.mutateAsync(
-        idCampanha
-          ? { contentType: "image/jpeg", idCampanha }
-          : { contentType: "image/jpeg" },
-      );
+      // aperture-48mxt: REQUIRED at the wire; '' sentinel on the no-campanha
+      // edge fails uuid validation with the same honest BAD_REQUEST.
+      const { uploadUrl, publicUrl } = await emitir.mutateAsync({
+        contentType: "image/jpeg",
+        idCampanha: idCampanha ?? "",
+      });
       const res = await fetch(uploadUrl, {
         method: "PUT",
         headers: { "Content-Type": "image/jpeg" },

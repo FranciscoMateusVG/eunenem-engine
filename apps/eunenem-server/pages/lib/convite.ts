@@ -1,7 +1,7 @@
 import { TRPCClientError } from '@trpc/client';
 import type { inferRouterInputs, inferRouterOutputs } from '@trpc/server';
 import { trpc } from './trpc.js';
-import { useCampanhaEscrita } from './campanha-escrita.js';
+import { type SemIdCampanha, useCampanhaEscrita } from './campanha-escrita.js';
 import { useCampanhaRota } from './campanha-rota.js';
 import { painelConvitePreviewHref, painelHref } from './painelRoutes.js';
 
@@ -94,8 +94,8 @@ export function useSalvarConvite() {
 
   return {
     ...m,
-    mutate: ((input, opts) => m.mutate(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutate,
-    mutateAsync: ((input, opts) => m.mutateAsync(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutateAsync,
+    mutate: ((input, opts) => m.mutate({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutate>,
+    mutateAsync: ((input, opts) => m.mutateAsync({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutateAsync>,
   };
 }
 

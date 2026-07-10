@@ -163,15 +163,15 @@ async function loadListaSnapshot(
 }
 
 const AlterarPresencaInputSchema = z.object({
-  // aperture-yeauv: OPTIONAL per-campanha routing (authed hop).
-  idCampanha: z.string().optional(),
+  // aperture-48mxt (W2 enforce): REQUIRED — authed writes are campanha-addressed.
+  idCampanha: z.string().uuid(),
   idConvidado: z.string().uuid(),
   presenca: StatusPresencaConvidadoSchema,
 });
 
 const AdicionarConvidadoInputSchema = z.object({
-  // aperture-yeauv: OPTIONAL per-campanha routing (authed hop).
-  idCampanha: z.string().optional(),
+  // aperture-48mxt (W2 enforce): REQUIRED — authed writes are campanha-addressed.
+  idCampanha: z.string().uuid(),
   nome: NomeConvidadoSchema,
   numeroCelular: NumeroCelularConvidadoSchema,
 });
@@ -368,8 +368,8 @@ export const eventoListaDeConvidadosRouter = t.router({
   salvarFormatoMensagem: t.procedure
     .input(
       z.object({
-        // aperture-yeauv: OPTIONAL per-campanha routing (authed hop).
-        idCampanha: z.string().optional(),
+        // aperture-48mxt (W2 enforce): REQUIRED — authed writes are campanha-addressed.
+        idCampanha: z.string().uuid(),
         formatoMensagemConvite: FormatoMensagemConviteSchema,
       }),
     )

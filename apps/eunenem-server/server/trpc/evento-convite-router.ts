@@ -111,9 +111,9 @@ async function resolveCallerCampanha(
 }
 
 const SaveEventoConviteInputSchema = z.object({
-  // aperture-yeauv: OPTIONAL per-campanha routing. Absent → oldest campanha
-  // (back-compat); present → that campanha, owner-gated.
-  idCampanha: z.string().optional(),
+  // aperture-48mxt (W2 enforce): REQUIRED. Authed writes must be explicitly
+  // campanha-addressed (fblrt design §2). Missing/bad uuid → BAD_REQUEST.
+  idCampanha: z.string().uuid(),
   tipoEvento: TipoEventoSchema,
   modalidade: ModalidadeEventoSchema,
   dataHoraIso: z.string().datetime().nullable(),

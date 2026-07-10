@@ -1,7 +1,7 @@
 import { TRPCClientError } from '@trpc/client';
 import type { inferRouterOutputs } from '@trpc/server';
 import { trpc } from './trpc.js';
-import { useCampanhaEscrita } from './campanha-escrita.js';
+import { type SemIdCampanha, useCampanhaEscrita } from './campanha-escrita.js';
 import { useCampanhaRota } from './campanha-rota.js';
 
 import type { AppRouter } from '../../server/trpc/router.js';
@@ -67,8 +67,8 @@ export function useAlterarPresencaConvidado() {
   });
   return {
     ...m,
-    mutate: ((input, opts) => m.mutate(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutate,
-    mutateAsync: ((input, opts) => m.mutateAsync(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutateAsync,
+    mutate: ((input, opts) => m.mutate({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutate>,
+    mutateAsync: ((input, opts) => m.mutateAsync({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutateAsync>,
   };
 }
 
@@ -84,8 +84,8 @@ export function useAdicionarConvidado() {
   });
   return {
     ...m,
-    mutate: ((input, opts) => m.mutate(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutate,
-    mutateAsync: ((input, opts) => m.mutateAsync(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutateAsync,
+    mutate: ((input, opts) => m.mutate({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutate>,
+    mutateAsync: ((input, opts) => m.mutateAsync({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutateAsync>,
   };
 }
 
@@ -101,8 +101,8 @@ export function useSalvarFormatoMensagem() {
   });
   return {
     ...m,
-    mutate: ((input, opts) => m.mutate(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutate,
-    mutateAsync: ((input, opts) => m.mutateAsync(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutateAsync,
+    mutate: ((input, opts) => m.mutate({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutate>,
+    mutateAsync: ((input, opts) => m.mutateAsync({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutateAsync>,
   };
 }
 

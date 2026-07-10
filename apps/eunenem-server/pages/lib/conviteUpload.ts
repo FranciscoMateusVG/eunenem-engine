@@ -71,11 +71,12 @@ export function useConviteBackgroundUpload() {
     setUploading(true);
     try {
       const blob = await fileToJpegBlob(file);
-      const { uploadUrl, publicUrl } = await emitir.mutateAsync(
-        idCampanha
-          ? { contentType: 'image/jpeg', idCampanha }
-          : { contentType: 'image/jpeg' },
-      );
+      // aperture-48mxt: REQUIRED at the wire; '' sentinel on the no-campanha
+      // edge fails uuid validation with the same honest BAD_REQUEST.
+      const { uploadUrl, publicUrl } = await emitir.mutateAsync({
+        contentType: 'image/jpeg',
+        idCampanha: idCampanha ?? '',
+      });
       const res = await fetch(uploadUrl, {
         method: 'PUT',
         headers: { 'Content-Type': 'image/jpeg' },

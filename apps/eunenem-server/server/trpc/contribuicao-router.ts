@@ -214,9 +214,11 @@ const ValorContribuicaoCentavosSchema = z
   .positive('valor deve ser maior que zero (em centavos)');
 
 const CreateInputSchema = z.object({
-  // aperture-yeauv: OPTIONAL per-campanha routing. Absent → oldest campanha
-  // (back-compat); present → that campanha, owner-gated.
-  idCampanha: z.string().optional(),
+  // aperture-48mxt (W2 enforce): REQUIRED. Writes to per-campanha data must
+  // be explicitly campanha-addressed (fblrt design §2); the frontend wrapper
+  // layer always injects idCampanha (rotaId ?? me.idCampanha). Missing/bad
+  // uuid → BAD_REQUEST at the wire boundary.
+  idCampanha: z.string().uuid(),
   nome: z.string().trim().min(1).max(120),
   valor: ValorContribuicaoCentavosSchema,
   imagemUrl: ImagemUrlSchema.optional(),
@@ -241,8 +243,8 @@ const CreateInputSchema = z.object({
  * quantidade).
  */
 const CreateBulkInputSchema = z.object({
-  // aperture-yeauv: OPTIONAL per-campanha routing (see CreateInputSchema).
-  idCampanha: z.string().optional(),
+  // aperture-48mxt (W2 enforce): REQUIRED (see CreateInputSchema).
+  idCampanha: z.string().uuid(),
   items: z
     .array(
       z.object({
@@ -258,8 +260,8 @@ const CreateBulkInputSchema = z.object({
 });
 
 const UpdateInputSchema = z.object({
-  // aperture-yeauv: OPTIONAL per-campanha routing (see CreateInputSchema).
-  idCampanha: z.string().optional(),
+  // aperture-48mxt (W2 enforce): REQUIRED (see CreateInputSchema).
+  idCampanha: z.string().uuid(),
   id: z.string().uuid(),
   nome: z.string().trim().min(1).max(120).optional(),
   valor: ValorContribuicaoCentavosSchema.optional(),
@@ -275,8 +277,8 @@ const UpdateInputSchema = z.object({
 });
 
 const DeleteInputSchema = z.object({
-  // aperture-yeauv: OPTIONAL per-campanha routing (see CreateInputSchema).
-  idCampanha: z.string().optional(),
+  // aperture-48mxt (W2 enforce): REQUIRED (see CreateInputSchema).
+  idCampanha: z.string().uuid(),
   ids: z.array(z.string().uuid()).min(1).max(100),
 });
 
@@ -502,7 +504,7 @@ export const contribuicaoRouter = t.router({
     // aperture-yeauv: extend the engine input with OPTIONAL idCampanha for
     // per-campanha routing. The use-case only reads idUsuario (session-
     // derived), so idCampanha here just owner-gates the caller's campanha.
-    .input(EmitirUrlUploadImagemItemInputSchema.extend({ idCampanha: z.string().optional() }))
+    .input(EmitirUrlUploadImagemItemInputSchema.extend({ idCampanha: z.string().uuid() }))
     .output(
       z.object({
         uploadUrl: z.string(),
