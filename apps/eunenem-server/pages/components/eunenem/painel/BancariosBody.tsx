@@ -102,6 +102,7 @@ const EMPTY_FORM: BancariosForm = {
   pixKey: "",
   nome: "",
   telefone: "",
+  cpfTitular: "",
 };
 
 // aperture-4a — placeholder shown until a bank is chosen (bankCode === "").
@@ -122,8 +123,9 @@ interface ValidationError {
 
 // Mirrors DadosRecebedorSchema (same pure validators the server uses):
 // pix → mensagemChavePixInvalida (per-type checksum/format); conta → COMPE
-// 3 digits, numeric agência/conta, holder CPF checksum + E.164-ish celular.
-// nomeTitular required in both modes.
+// 3 digits, numeric agência/conta, E.164-ish celular. nomeTitular + holder
+// CPF checksum are required in BOTH modes — the payout must be traceable to
+// the account holder's CPF regardless of rail.
 function validate(
   modo: BancariosMode,
   s: BancariosForm,
@@ -138,6 +140,9 @@ function validate(
       msg: "o nome do titular precisa ser igual ao do documento (nome e sobrenome).",
     });
   }
+
+  if (!cpfValido(cpfTitular))
+    errs.push({ k: "cpf", msg: "o cpf da sua conta parece inválido — confira e tente de novo." });
 
   if (modo === "conta") {
     if (!/^\d{3}$/.test(s.bankCode))
@@ -156,8 +161,6 @@ function validate(
         k: "telefone",
         msg: "o celular (com DDD) é obrigatório pra avisar você quando cair um mimo.",
       });
-    if (!cpfValido(cpfTitular))
-      errs.push({ k: "cpf", msg: "o cpf da sua conta parece inválido — confira e tente de novo." });
   } else {
     const domainType = PIX_TYPE_TO_DOMAIN[tipoPix];
     const msg = mensagemChavePixInvalida(domainType, normalizePixKey(domainType, s.pixKey));
@@ -182,6 +185,7 @@ function toDadosRecebedor(
     return {
       metodo: "pix",
       nomeTitular,
+      cpfTitular: onlyDigits(cpfTitular),
       tipoChavePix,
       chavePix: normalizePixKey(tipoChavePix, s.pixKey),
     };
@@ -209,11 +213,12 @@ function fromDadosRecebedor(d: DadosRecebedor): BancariosForm {
         : uiType === "celular"
           ? maskPhone(d.chavePix)
           : d.chavePix;
-    return { ...EMPTY_FORM, nome: d.nomeTitular, pixKey };
+    return { ...EMPTY_FORM, nome: d.nomeTitular, cpfTitular: maskCPF(d.cpfTitular), pixKey };
   }
   return {
     ...EMPTY_FORM,
     nome: d.nomeTitular,
+    cpfTitular: maskCPF(d.cpfTitular),
     telefone: maskPhone(d.celularTitular),
     bankCode: d.codigoBanco,
     agencia: d.agencia,
@@ -352,10 +357,9 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
   const dadosQuery = trpc.dadosRecebimento.get.useQuery(undefined, {
     staleTime: 30_000,
   });
-  // Real saved CPF (locked) — only the "conta" payload carries it. Empty until
-  // the user has a saved account; never a mock literal.
-  const cpfTitular =
-    dadosQuery.data?.metodo === "conta" ? maskCPF(dadosQuery.data.cpfTitular) : "";
+  // Real saved CPF (locked) — both pix and conta payloads carry it. Empty
+  // until the user has ever saved receiving data; never a mock literal.
+  const cpfTitular = dadosQuery.data ? maskCPF(dadosQuery.data.cpfTitular) : "";
   // aperture-3mlcw — the holder CPF is only immutable AFTER a real one is saved.
   // Until cpfTitular (the saved value) is non-empty, the field must be editable
   // so a new account can actually enter it. Previously the input was always

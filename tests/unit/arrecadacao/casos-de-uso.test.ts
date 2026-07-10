@@ -35,6 +35,7 @@ const clock = () => fixedDate;
 const dadosRecebedorPadrao = (): DadosRecebedor => ({
   metodo: 'pix',
   nomeTitular: 'Maria Silva',
+  cpfTitular: '52998224725',
   tipoChavePix: 'email',
   chavePix: 'maria@exemplo.com',
 });
@@ -344,6 +345,7 @@ describe('alterarDadosRecebedorCampanha', () => {
     const novosDados: DadosRecebedor = {
       metodo: 'pix',
       nomeTitular: 'Joao Santos',
+      cpfTitular: '52998224725',
       tipoChavePix: 'cpf',
       chavePix: '52998224725',
     };
@@ -439,6 +441,7 @@ describe('alterarDadosRecebedorCampanha', () => {
           dadosRecebedor: {
             metodo: 'pix',
             nomeTitular: 'X',
+            cpfTitular: '52998224725',
             tipoChavePix: 'email',
             chavePix: 'nao-e-email',
           },

@@ -119,6 +119,7 @@ async function buildRig(): Promise<TestRig> {
       dadosRecebedor: {
         metodo: 'pix',
         nomeTitular: 'Francisco',
+        cpfTitular: '52998224725',
         tipoChavePix: 'email',
         chavePix: TEST_EMAIL,
       },

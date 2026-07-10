@@ -26,6 +26,7 @@ const idOpcao = '550e8400-e29b-41d4-a716-446655440004';
 const dadosRecebedorEmail = {
   metodo: 'pix' as const,
   nomeTitular: 'Maria Silva',
+  cpfTitular: '52998224725',
   tipoChavePix: 'email' as const,
   chavePix: 'maria@exemplo.com',
 };
@@ -194,6 +195,7 @@ describe('campanhaComRecebedorAtivo', () => {
     const novosDados = {
       metodo: 'pix' as const,
       nomeTitular: 'Joao Santos',
+      cpfTitular: '52998224725',
       tipoChavePix: 'cpf' as const,
       chavePix: '12345678901',
     };

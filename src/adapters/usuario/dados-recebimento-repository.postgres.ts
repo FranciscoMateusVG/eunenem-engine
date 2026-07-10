@@ -36,9 +36,11 @@ type DadosRecebimentoRow = {
 };
 
 /**
- * Flattens a `DadosRecebedor` union member into the column set. Exactly one
- * variant's columns are populated; the other variant's columns are NULL —
- * enforced by the row-level CHECK (migration 028).
+ * Flattens a `DadosRecebedor` union member into the column set. `cpf_titular`
+ * is shared across both variants (migration 20260709 — previously conta-only,
+ * extended to require it on pix too). The remaining variant-specific columns
+ * follow the exactly-one-populated rule enforced by the row-level CHECK
+ * (migration 028, updated to include cpf_titular for pix).
  */
 function dadosToColumns(dados: DadosRecebedor) {
   if (dados.metodo === 'pix') {
@@ -47,7 +49,7 @@ function dadosToColumns(dados: DadosRecebedor) {
       nome_titular: dados.nomeTitular,
       tipo_chave_pix: dados.tipoChavePix,
       chave_pix: dados.chavePix,
-      cpf_titular: null,
+      cpf_titular: dados.cpfTitular,
       celular_titular: null,
       codigo_banco: null,
       agencia: null,
@@ -150,6 +152,7 @@ function toDadosRecebimento(row: DadosRecebimentoRow): DadosRecebimentoUsuario {
       : {
           metodo: 'pix',
           nomeTitular: row.nome_titular,
+          cpfTitular: row.cpf_titular as string,
           tipoChavePix: row.tipo_chave_pix as TipoChavePix,
           chavePix: row.chave_pix as string,
         };

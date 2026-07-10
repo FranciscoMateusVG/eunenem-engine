@@ -14,6 +14,7 @@ import { createTestObservability } from '../../helpers/observability.js';
 const DADOS_PIX: DadosRecebedor = {
   metodo: 'pix',
   nomeTitular: 'Maria Silva',
+  cpfTitular: '52998224725',
   tipoChavePix: 'email',
   chavePix: 'maria@exemplo.com',
 };

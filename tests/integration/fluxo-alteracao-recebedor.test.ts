@@ -52,6 +52,7 @@ const VALOR_CONTRIBUICAO_CENTS = 8000;
 const dadosRecebedorPadrao = () => ({
   metodo: 'pix' as const,
   nomeTitular: 'Maria Silva',
+  cpfTitular: '52998224725',
   tipoChavePix: 'email' as const,
   chavePix: 'maria@exemplo.com',
 });
@@ -59,6 +60,7 @@ const dadosRecebedorPadrao = () => ({
 const dadosRecebedorNovo = () => ({
   metodo: 'pix' as const,
   nomeTitular: 'Joao Santos',
+  cpfTitular: '52998224725',
   tipoChavePix: 'cpf' as const,
   chavePix: '52998224725',
 });

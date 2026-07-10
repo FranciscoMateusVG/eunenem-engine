@@ -510,6 +510,7 @@ export function makeCampanha(overrides: Partial<Campanha> = {}): Campanha {
     dadosRecebedor: {
       metodo: 'pix',
       nomeTitular: 'Maria Silva',
+      cpfTitular: '52998224725',
       tipoChavePix: 'email',
       chavePix: 'maria@exemplo.com',
     },

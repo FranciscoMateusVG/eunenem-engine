@@ -21,10 +21,23 @@ import {
   type PixType,
 } from "@/lib/mocks/bancarios";
 import { trpc } from "@/lib/trpc";
+// aperture-9abwt: deep-leaf import (zod-only, pg-free) — same rationale as
+// BancariosBody.tsx (the barrel drags the Postgres adapter's `pg` import
+// into the browser bundle).
+import { cpfValido } from "../../../../../../src/domain/arrecadacao/value-objects/dados-recebedor.js";
 // aperture-jtamj — local PIX-key-type tuple (used to be inferred from the
 // pre-swap CriarRecebedorInputSchema discriminated union; Rex's flat wire
 // landed with the same string set so we keep the same vocabulary).
 type PixKeyTipo = "cpf" | "cnpj" | "email" | "telefone" | "aleatoria";
+
+const onlyDigitsInline = (s: string): string => (s || "").replace(/\D/g, "");
+const maskCPFInline = (s: string): string => {
+  const d = onlyDigitsInline(s).slice(0, 11);
+  return d
+    .replace(/(\d{3})(\d)/, "$1.$2")
+    .replace(/(\d{3})\.(\d{3})(\d)/, "$1.$2.$3")
+    .replace(/\.(\d{3})(\d)/, ".$1-$2");
+};
 import {
   type ExtratoLiberacao,
   type ExtratoRowDTO,
@@ -928,6 +941,7 @@ const EMPTY_BANCARIOS_FORM: BancariosFormState = {
   pixKey: "",
   nome: "",
   telefone: "",
+  cpfTitular: "",
 };
 
 function TransferOnboardingModal({
@@ -974,6 +988,9 @@ function TransferOnboardingModal({
   const validate = (): string | null => {
     if (!s.nome || s.nome.trim().split(/\s+/).length < 2) {
       return "informe o nome completo do titular";
+    }
+    if (!cpfValido(s.cpfTitular)) {
+      return "cpf do titular inválido — confira e tente de novo";
     }
     if (!/^\(\d{2}\) \d{4,5}-\d{4}$/.test(s.telefone)) {
       return "celular inválido — use o formato (DD) 9XXXX-XXXX";
@@ -1024,6 +1041,7 @@ function TransferOnboardingModal({
       dadosRecebedor: {
         metodo: "pix",
         nomeTitular: s.nome.trim(),
+        cpfTitular: onlyDigitsInline(s.cpfTitular),
         tipoChavePix,
         chavePix: s.pixKey,
       },
@@ -1216,10 +1234,19 @@ function TransferOnboardingModal({
               aria-label="nome do titular"
             />
           </FieldRow>
-          {/* aperture-chamy — removed the "cpf (travado)" display field: it
-              only ever showed the mock CPF_FIXO (no real client-side session
-              CPF source exists; the backend locks the CPF from the session on
-              criarRecebedor). celular now spans the row. */}
+          {/* CPF do titular — required in BOTH pix and conta modes (payout
+              must be traceable to the account holder's CPF regardless of
+              rail; see DadosRecebedorSchema). */}
+          <FieldRow label="cpf do titular" required>
+            <input
+              style={inputStyle}
+              placeholder="000.000.000-00"
+              inputMode="numeric"
+              value={s.cpfTitular}
+              onChange={(e) => set({ cpfTitular: maskCPFInline(e.target.value) })}
+              aria-label="cpf do titular"
+            />
+          </FieldRow>
           <FieldRow label="celular" required>
             <input
               style={inputStyle}

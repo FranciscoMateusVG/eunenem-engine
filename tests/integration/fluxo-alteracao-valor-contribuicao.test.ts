@@ -54,6 +54,7 @@ const VALOR_ALTERACAO_CENTS = 15000;
 const dadosRecebedorPadrao = () => ({
   metodo: 'pix' as const,
   nomeTitular: 'Maria Silva',
+  cpfTitular: '52998224725',
   tipoChavePix: 'email' as const,
   chavePix: 'maria@exemplo.com',
 });

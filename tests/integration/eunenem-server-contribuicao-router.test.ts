@@ -193,6 +193,7 @@ async function seedUserWithCampanha(
     dadosRecebedor: {
       metodo: 'pix',
       nomeTitular: params.handle,
+      cpfTitular: '52998224725',
       tipoChavePix: 'email',
       chavePix: params.email,
     },

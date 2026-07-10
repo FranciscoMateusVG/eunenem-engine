@@ -31,6 +31,7 @@ function makeUsuario(id: string): { usuario: Usuario; conta: Conta } {
 const DADOS_PIX: DadosRecebedor = {
   metodo: 'pix',
   nomeTitular: 'Maria Silva',
+  cpfTitular: '52998224725',
   tipoChavePix: 'email',
   chavePix: 'maria@exemplo.com',
 };

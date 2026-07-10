@@ -114,8 +114,17 @@ describe('Migration round-trip', () => {
     //    note above; renaming a DEPLOYED migration is forbidden because
     //    kysely_migration keys on the filename and would re-run it).
 
-    // 035 eventos_data_hora_nullable → the actual TIP ('e' sorts after 'c'),
-    //   so the FIRST migrateDown unwinds it: data_hora back to NOT NULL.
+    // 20260709_036_require_cpf_titular_on_pix_recebedor → the actual TIP now
+    //   (FIFTH occurrence of the off-by-one this block warns about — this
+    //   migration was added on top and its down-step is prepended here per
+    //   the note above). Its down() reverts the two variant CHECK
+    //   constraints (recebedores + dados_recebimento_usuario) back to the
+    //   pre-036 shape (cpf_titular required on conta rows only).
+    const downRequireCpfTitularPix = await migrator.migrateDown();
+    expect(downRequireCpfTitularPix.error).toBeUndefined();
+
+    // 035 eventos_data_hora_nullable → now the SECOND migrateDown.
+    //   data_hora back to NOT NULL.
     const downEventosDataHora = await migrator.migrateDown();
     expect(downEventosDataHora.error).toBeUndefined();
     expect((await getColumn(db, 'eventos', 'data_hora'))?.is_nullable).toBe('NO');
