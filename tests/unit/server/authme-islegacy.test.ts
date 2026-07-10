@@ -25,6 +25,7 @@ import { CampanhaRepositoryMemory } from '../../../src/adapters/arrecadacao/camp
 import { ContribuicaoRepositoryMemory } from '../../../src/adapters/arrecadacao/contribuicao-repository.memory.js';
 import { PerfilCampanhaRepositoryMemory } from '../../../src/adapters/arrecadacao/perfil-campanha-repository.memory.js';
 import { RecebedorRepositoryMemory } from '../../../src/adapters/arrecadacao/recebedor-repository.memory.js';
+import { ResgatePendenteRepositoryMemory } from '../../../src/adapters/arrecadacao/resgate-pendente-repository.memory.js';
 import { ConviteRepositoryMemory } from '../../../src/adapters/evento/convite-repository.memory.js';
 import { EventoRepositoryMemory } from '../../../src/adapters/evento/evento-repository.memory.js';
 import { ListaDeConvidadosRepositoryMemory } from '../../../src/adapters/evento/lista-de-convidados-repository.memory.js';
@@ -42,10 +43,8 @@ import {
   REGRAS_TAXA_SEED,
 } from '../../../src/adapters/taxas/regra-provider.memory.js';
 import { AuthServiceMemoria } from '../../../src/adapters/usuario/auth-service.memory.js';
-import { DadosRecebimentoRepositoryMemory } from '../../../src/adapters/usuario/dados-recebimento-repository.memory.js';
 import { PerfilCriadorRepositoryMemory } from '../../../src/adapters/usuario/perfil-criador-repository.memory.js';
 import { UsuarioRepositoryMemory } from '../../../src/adapters/usuario/repository.memory.js';
-import { ResgatePendenteRepositoryMemory } from '../../../src/adapters/usuario/resgate-pendente-repository.memory.js';
 import { WebhookEventArchiveMemory } from '../../../src/adapters/webhook-archive/webhook-event-archive.memory.js';
 import { NoopLogger } from '../../../src/observability/noop-logger.js';
 import type { Observability } from '../../../src/observability/observability.js';
@@ -107,7 +106,6 @@ async function buildRig(email: string): Promise<{
     pagamentoEventPublisher,
     livroFinanceiroRepository,
     provedorRegraTaxa: new ProvedorRegraTaxaMemory(REGRAS_TAXA_SEED),
-    dadosRecebimentoRepository: new DadosRecebimentoRepositoryMemory(),
     resgatePendenteRepository: new ResgatePendenteRepositoryMemory(),
     observability,
     adminAllowedEmails: new Set<string>(),

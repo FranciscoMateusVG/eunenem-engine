@@ -1,5 +1,5 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
-import type { IdUsuario } from '../../domain/usuario/value-objects/ids.js';
+import type { IdCampanha } from '../../domain/arrecadacao/value-objects/ids.js';
 import type { Database } from '../database.js';
 import type { ResgatePendenteRepository } from './resgate-pendente-repository.js';
 
@@ -13,18 +13,18 @@ const DB_ATTRS = {
 export class ResgatePendenteRepositoryPostgres implements ResgatePendenteRepository {
   constructor(private readonly db: Database) {}
 
-  async marcarPendente(idUsuario: IdUsuario, pendenteDesde: Date, criadoEm: Date): Promise<void> {
+  async marcarPendente(idCampanha: IdCampanha, pendenteDesde: Date, criadoEm: Date): Promise<void> {
     return tracer.startActiveSpan('db.resgates_pendentes.marcarPendente', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPSERT' });
       try {
-        // 1:1 upsert keyed by id_usuario. `pendente_desde` is refreshed on
+        // 1:1 upsert keyed by id_campanha. `pendente_desde` is refreshed on
         // every marca; `criado_em` records the FIRST time the marker was set
         // and is preserved across subsequent upserts.
         await this.db
           .insertInto('resgates_pendentes')
-          .values({ id_usuario: idUsuario, pendente_desde: pendenteDesde, criado_em: criadoEm })
+          .values({ id_campanha: idCampanha, pendente_desde: pendenteDesde, criado_em: criadoEm })
           .onConflict((oc) =>
-            oc.column('id_usuario').doUpdateSet({ pendente_desde: pendenteDesde }),
+            oc.column('id_campanha').doUpdateSet({ pendente_desde: pendenteDesde }),
           )
           .execute();
         span.setStatus({ code: SpanStatusCode.OK });
@@ -38,14 +38,14 @@ export class ResgatePendenteRepositoryPostgres implements ResgatePendenteReposit
     });
   }
 
-  async limparPendente(idUsuario: IdUsuario): Promise<void> {
+  async limparPendente(idCampanha: IdCampanha): Promise<void> {
     return tracer.startActiveSpan('db.resgates_pendentes.limparPendente', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'DELETE' });
       try {
         // Idempotent: deleting an absent marker is a no-op.
         await this.db
           .deleteFrom('resgates_pendentes')
-          .where('id_usuario', '=', idUsuario)
+          .where('id_campanha', '=', idCampanha)
           .execute();
         span.setStatus({ code: SpanStatusCode.OK });
       } catch (error: unknown) {
@@ -58,14 +58,14 @@ export class ResgatePendenteRepositoryPostgres implements ResgatePendenteReposit
     });
   }
 
-  async obterPendenteDesde(idUsuario: IdUsuario): Promise<Date | null> {
+  async obterPendenteDesde(idCampanha: IdCampanha): Promise<Date | null> {
     return tracer.startActiveSpan('db.resgates_pendentes.obterPendenteDesde', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
       try {
         const row = await this.db
           .selectFrom('resgates_pendentes')
           .select('pendente_desde')
-          .where('id_usuario', '=', idUsuario)
+          .where('id_campanha', '=', idCampanha)
           .executeTakeFirst();
         span.setStatus({ code: SpanStatusCode.OK });
         return row ? row.pendente_desde : null;

@@ -109,24 +109,6 @@ export interface Convites {
   remetente: string;
 }
 
-export interface DadosRecebimentoUsuario {
-  agencia: string | null;
-  agencia_digito: string | null;
-  atualizado_em: Generated<Timestamp>;
-  celular_titular: string | null;
-  chave_pix: string | null;
-  codigo_banco: string | null;
-  conta: string | null;
-  conta_digito: string | null;
-  cpf_titular: string | null;
-  id: string;
-  id_usuario: string;
-  metodo: string;
-  nome_titular: string;
-  tipo_chave_pix: string | null;
-  tipo_conta: string | null;
-}
-
 export interface Eventos {
   atualizado_em: Generated<Timestamp>;
   criado_em: Generated<Timestamp>;
@@ -295,7 +277,7 @@ export interface RepassesRecebedor {
 
 export interface ResgatesPendentes {
   criado_em: Timestamp;
-  id_usuario: string;
+  id_campanha: string;
   pendente_desde: Timestamp;
 }
 
@@ -351,7 +333,6 @@ export interface DB {
   contribuicoes: Contribuicoes;
   convidados: Convidados;
   convites: Convites;
-  dados_recebimento_usuario: DadosRecebimentoUsuario;
   eventos: Eventos;
   intencao_items: IntencaoItems;
   lancamentos_financeiros: LancamentosFinanceiros;

@@ -13,6 +13,7 @@ const criadaEm = new Date('2026-05-01T12:00:00.000Z');
 const dadosPix = {
   metodo: 'pix' as const,
   nomeTitular: 'Maria Silva',
+  cpfTitular: '52998224725',
   tipoChavePix: 'email' as const,
   chavePix: 'maria@exemplo.com',
 };
@@ -55,6 +56,7 @@ describe('criarNovoRecebedor', () => {
     const novosDados = {
       metodo: 'pix' as const,
       nomeTitular: 'Joao',
+      cpfTitular: '52998224725',
       tipoChavePix: 'cpf' as const,
       chavePix: '12345678901',
     };

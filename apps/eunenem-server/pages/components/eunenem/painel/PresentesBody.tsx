@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { toast } from "sonner";
 
 import type { PainelSectionBodyProps } from "@/PainelSectionPage";
 import {
@@ -21,10 +22,23 @@ import {
   type PixType,
 } from "@/lib/mocks/bancarios";
 import { trpc } from "@/lib/trpc";
+// aperture-9abwt: deep-leaf import (zod-only, pg-free) — same rationale as
+// BancariosBody.tsx (the barrel drags the Postgres adapter's `pg` import
+// into the browser bundle).
+import { cpfValido } from "../../../../../../src/domain/arrecadacao/value-objects/dados-recebedor.js";
 // aperture-jtamj — local PIX-key-type tuple (used to be inferred from the
 // pre-swap CriarRecebedorInputSchema discriminated union; Rex's flat wire
 // landed with the same string set so we keep the same vocabulary).
 type PixKeyTipo = "cpf" | "cnpj" | "email" | "telefone" | "aleatoria";
+
+const onlyDigitsInline = (s: string): string => (s || "").replace(/\D/g, "");
+const maskCPFInline = (s: string): string => {
+  const d = onlyDigitsInline(s).slice(0, 11);
+  return d
+    .replace(/(\d{3})(\d)/, "$1.$2")
+    .replace(/(\d{3})\.(\d{3})(\d)/, "$1.$2.$3")
+    .replace(/\.(\d{3})(\d)/, ".$1-$2");
+};
 import {
   type ExtratoLiberacao,
   type ExtratoRowDTO,
@@ -738,9 +752,12 @@ function DetailDrawer({ tx, onClose }: { tx: PresentesTx | null; onClose: () => 
 //
 // aperture-kbmel (#9 deferred path) — when hasRecebedor === false, the
 // modal body becomes a slim BancariosBody form (Conta Completa / Chave Pix
-// tabs, titular guard, locked CPF from session). On submit the modal
-// chains: useCriarRecebedor.mutate() → on success →
-// solicitarState.mutate() → close. Both branches share the same modal
+// tabs, titular guard, locked CPF from session). On submit: recebedor.criar
+// → success message shown, recebedor.get invalidated → hasRecebedor flips
+// true → THIS component re-renders into the plain confirm branch below, so
+// the admin explicitly confirms the transfer as a separate step (no
+// auto-chained solicitar — that could hit a stale "já solicitada" state and
+// hid the cadastro's own success). Both branches share the same modal
 // chrome (header / scrim / close button); only the body swaps.
 function TransferModal({
   open,
@@ -901,9 +918,12 @@ function TransferModal({
 // Conta Completa / Chave Pix tabs, titular guard, CPF locked from session.
 //
 // On submit:
-//   1. useCriarRecebedor.mutateAsync({ idCampanha, dadosBancarios, titular })
-//   2. on success → solicitarState.mutate() (sweeps the saldo)
-//   3. solicitarState.onSuccess in the parent closes the modal + toasts
+//   1. trpc.recebedor.criar.mutate({ idCampanha, dadosRecebedor })
+//   2. on success → success message shown, recebedor.get + auth.me
+//      invalidated → hasRecebedor flips true → TransferModal re-renders
+//      into the plain confirm-amount body (this component unmounts). The
+//      admin then explicitly clicks "confirmar transferência" there — the
+//      cadastro and the transfer request are two distinct, visible steps.
 //
 // Embedded copy (not extracted) per the kbmel spec's "Simpler" option —
 // the full BancariosBody is 35KB with its own CSS recipe, and embedding it
@@ -928,6 +948,7 @@ const EMPTY_BANCARIOS_FORM: BancariosFormState = {
   pixKey: "",
   nome: "",
   telefone: "",
+  cpfTitular: "",
 };
 
 function TransferOnboardingModal({
@@ -949,17 +970,20 @@ function TransferOnboardingModal({
   const [validationError, setValidationError] = useState<string | null>(null);
 
   // aperture-jtamj — real trpc.recebedor.criar mutation (Rex's #193 Phase A).
-  // onSuccess invalidates auth.me so hasRecebedor flips true → next click
-  // on SOLICITAR routes to the confirm-amount modal (existing B2 #188 path).
+  // onSuccess invalidates recebedor.get (the source hasRecebedor now reads —
+  // see ExtratoStubData's per-campanha fix) so hasRecebedor flips true and
+  // TransferModal's next render swaps THIS onboarding body for the plain
+  // confirm-amount body (same modal, different branch) — the admin then
+  // explicitly confirms the transfer themselves instead of it firing
+  // automatically. Previously this chained straight into
+  // solicitarState.mutate(), which could hit a stale "transferência já
+  // solicitada" state and left the cadastro success invisible.
   const utils = trpc.useUtils();
   const criarRecebedor = trpc.recebedor.criar.useMutation({
     onSuccess: () => {
-      // Invalidate auth.me so the hasRecebedor signal refetches.
+      void utils.recebedor.get.invalidate();
       void utils.auth.me.invalidate();
-      // Chain into solicitar. The parent wires solicitarState.onSuccess
-      // to close the modal + show the toast, so a single side-effect
-      // terminates the whole flow.
-      solicitarState.mutate();
+      toast.success("Dados cadastrados com sucesso!");
     },
   });
 
@@ -974,6 +998,9 @@ function TransferOnboardingModal({
   const validate = (): string | null => {
     if (!s.nome || s.nome.trim().split(/\s+/).length < 2) {
       return "informe o nome completo do titular";
+    }
+    if (!cpfValido(s.cpfTitular)) {
+      return "cpf do titular inválido — confira e tente de novo";
     }
     if (!/^\(\d{2}\) \d{4,5}-\d{4}$/.test(s.telefone)) {
       return "celular inválido — use o formato (DD) 9XXXX-XXXX";
@@ -1024,6 +1051,7 @@ function TransferOnboardingModal({
       dadosRecebedor: {
         metodo: "pix",
         nomeTitular: s.nome.trim(),
+        cpfTitular: onlyDigitsInline(s.cpfTitular),
         tipoChavePix,
         chavePix: s.pixKey,
       },
@@ -1032,15 +1060,12 @@ function TransferOnboardingModal({
 
   const bank = bankByCode(s.bankCode);
   const tipo = PIX_TYPES.find((p) => p.v === tipoPix) ?? PIX_TYPES[0]!;
-  const isBusy = criarRecebedor.isPending || solicitarState.isPending;
+  const isBusy = criarRecebedor.isPending;
 
-  const solicitarError = solicitarState.error
-    ? formatSolicitarError(solicitarState.error)
-    : null;
   const criarError = criarRecebedor.error
     ? "não foi possível cadastrar — confira os dados e tente de novo"
     : null;
-  const inlineError = validationError ?? criarError ?? solicitarError;
+  const inlineError = validationError ?? criarError;
 
   return (
     <>
@@ -1061,8 +1086,8 @@ function TransferOnboardingModal({
         </header>
         <p className="ex-modal-text">
           pra transferir <strong>{fmtMoney(saldo)} (tudo)</strong> a gente
-          precisa dos dados da sua conta — só dessa vez. depois é só clicar
-          em "solicitar" e a transferência vai automática.
+          precisa dos dados da sua conta — só dessa vez. Depois de cadastrar,
+          é só confirmar a transferência.
         </p>
 
         {/* Mode toggle: conta completa ↔ chave pix */}
@@ -1216,10 +1241,19 @@ function TransferOnboardingModal({
               aria-label="nome do titular"
             />
           </FieldRow>
-          {/* aperture-chamy — removed the "cpf (travado)" display field: it
-              only ever showed the mock CPF_FIXO (no real client-side session
-              CPF source exists; the backend locks the CPF from the session on
-              criarRecebedor). celular now spans the row. */}
+          {/* CPF do titular — required in BOTH pix and conta modes (payout
+              must be traceable to the account holder's CPF regardless of
+              rail; see DadosRecebedorSchema). */}
+          <FieldRow label="cpf do titular" required>
+            <input
+              style={inputStyle}
+              placeholder="000.000.000-00"
+              inputMode="numeric"
+              value={s.cpfTitular}
+              onChange={(e) => set({ cpfTitular: maskCPFInline(e.target.value) })}
+              aria-label="cpf do titular"
+            />
+          </FieldRow>
           <FieldRow label="celular" required>
             <input
               style={inputStyle}
@@ -1265,14 +1299,10 @@ function TransferOnboardingModal({
             type="button"
             className="ex-btn-green"
             onClick={submit}
-            disabled={isBusy || saldo === 0}
+            disabled={isBusy}
             aria-busy={isBusy}
           >
-            {criarRecebedor.isPending
-              ? "cadastrando…"
-              : solicitarState.isPending
-                ? "solicitando…"
-                : "cadastrar e transferir"}
+            {criarRecebedor.isPending ? "cadastrando…" : "cadastrar"}
           </button>
         </div>
       </div>

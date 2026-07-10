@@ -20,7 +20,6 @@ import { authRouter } from './auth-router.js';
 import { campanhasRouter } from './campanhas-router.js';
 import { contribuicaoRouter } from './contribuicao-router.js';
 import type { TrpcContext } from './context.js';
-import { dadosRecebimentoRouter } from './dados-recebimento-router.js';
 import { landingRouter } from './landing-router.js';
 import { eventoConviteRouter } from './evento-convite-router.js';
 import { eventoListaDeConvidadosRouter } from './evento-lista-de-convidados-router.js';
@@ -45,7 +44,6 @@ export const appRouter = t.router({
   auth: authRouter,
   campanhas: campanhasRouter,
   contribuicao: contribuicaoRouter,
-  dadosRecebimento: dadosRecebimentoRouter,
   eventoConvite: eventoConviteRouter,
   eventoListaDeConvidados: eventoListaDeConvidadosRouter,
   landing: landingRouter,

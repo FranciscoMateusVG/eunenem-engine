@@ -50,6 +50,7 @@ export function describeRecebedorRepositoryConformance(name: string, options: Co
         dadosRecebedor: {
           metodo: 'pix',
           nomeTitular: 'Maria',
+          cpfTitular: '52998224725',
           tipoChavePix: 'email',
           chavePix: 'maria@exemplo.com',
         },
@@ -97,6 +98,7 @@ export function describeRecebedorRepositoryConformance(name: string, options: Co
         dadosRecebedor: {
           metodo: 'pix',
           nomeTitular: 'A',
+          cpfTitular: '52998224725',
           tipoChavePix: 'email',
           chavePix: 'a@exemplo.com',
         },
@@ -108,6 +110,7 @@ export function describeRecebedorRepositoryConformance(name: string, options: Co
         dadosRecebedor: {
           metodo: 'pix',
           nomeTitular: 'B',
+          cpfTitular: '52998224725',
           tipoChavePix: 'email',
           chavePix: 'b@exemplo.com',
         },
@@ -130,6 +133,7 @@ export function describeRecebedorRepositoryConformance(name: string, options: Co
           dadosRecebedor: {
             metodo: 'pix',
             nomeTitular: 'Maria',
+            cpfTitular: '52998224725',
             tipoChavePix: 'email',
             chavePix: 'maria@exemplo.com',
           },

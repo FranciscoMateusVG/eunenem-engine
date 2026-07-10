@@ -25,8 +25,9 @@ type RecebedorRow = {
   // pix variant (NULL on conta rows)
   tipo_chave_pix: string | null;
   chave_pix: string | null;
-  // conta variant (NULL on pix rows)
+  // shared across both variants
   cpf_titular: string | null;
+  // conta variant (NULL on pix rows)
   celular_titular: string | null;
   codigo_banco: string | null;
   agencia: string | null;
@@ -40,8 +41,10 @@ type RecebedorRow = {
 
 /**
  * Flattens a `DadosRecebedor` union member into the recebedores column set.
- * Exactly one variant's columns are populated; the other variant's columns
- * are NULL — enforced by the row-level CHECK (migration 027).
+ * `cpf_titular` is shared across both variants (migration 20260709 —
+ * previously conta-only, extended to require it on pix too). The remaining
+ * variant-specific columns follow the exactly-one-populated rule enforced by
+ * the row-level CHECK (migration 027, updated to include cpf_titular for pix).
  */
 function dadosRecebedorToColumns(dados: DadosRecebedor) {
   if (dados.metodo === 'pix') {
@@ -50,7 +53,7 @@ function dadosRecebedorToColumns(dados: DadosRecebedor) {
       nome_titular: dados.nomeTitular,
       tipo_chave_pix: dados.tipoChavePix,
       chave_pix: dados.chavePix,
-      cpf_titular: null,
+      cpf_titular: dados.cpfTitular,
       celular_titular: null,
       codigo_banco: null,
       agencia: null,
@@ -186,6 +189,7 @@ function toRecebedor(row: RecebedorRow): Recebedor {
       : {
           metodo: 'pix',
           nomeTitular: row.nome_titular,
+          cpfTitular: row.cpf_titular as string,
           tipoChavePix: row.tipo_chave_pix as TipoChavePix,
           chavePix: row.chave_pix as string,
         };

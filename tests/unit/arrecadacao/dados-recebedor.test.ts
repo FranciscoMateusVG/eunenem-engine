@@ -14,6 +14,7 @@ import {
 const PIX_VALIDO = {
   metodo: 'pix' as const,
   nomeTitular: 'Maria Silva',
+  cpfTitular: '52998224725', // valid CPF checksum
   tipoChavePix: 'email' as const,
   chavePix: 'maria@exemplo.com',
 };
@@ -82,6 +83,11 @@ describe('DadosRecebedorSchema', () => {
 
   it('rejects a conta variant with a bad-checksum CPF', () => {
     const r = DadosRecebedorSchema.safeParse({ ...CONTA_VALIDA, cpfTitular: '12345678901' });
+    expect(r.success).toBe(false);
+  });
+
+  it('rejects a pix variant with a bad-checksum CPF', () => {
+    const r = DadosRecebedorSchema.safeParse({ ...PIX_VALIDO, cpfTitular: '12345678901' });
     expect(r.success).toBe(false);
   });
 

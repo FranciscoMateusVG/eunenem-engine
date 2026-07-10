@@ -33,21 +33,27 @@
 
 import { initTRPC, TRPCError } from "@trpc/server";
 import { z } from "zod";
+import type { DadosRecebedor } from "../../../../src/domain/arrecadacao/value-objects/dados-recebedor.js";
 import type { IdCampanha } from "../../../../src/domain/arrecadacao/value-objects/ids.js";
 import type { LancamentoFinanceiro } from "../../../../src/domain/pagamentos/financeiro/entities/lancamento-financeiro.js";
 import type { Pagamento } from "../../../../src/domain/pagamentos/entities/pagamento.js";
 import { randomUUID } from "node:crypto";
 import {
+  alterarDadosRecebedorCampanha,
   ArrecadacaoCampanhaNaoEncontradaError,
   ArrecadacaoInputInvalidoError,
   ArrecadacaoNaoAutorizadoError,
   ArrecadacaoRecebedorJaExisteError,
+  ArrecadacaoRecebedorNaoEncontradoError,
   CheckoutRecebedorNaoPagavelViaPixError,
   criarRecebedorParaCampanha,
   CriarRecebedorParaCampanhaInputSchema,
+  DadosRecebedorSchema,
   FinanceiroRepasseJaPendenteError,
   FinanceiroSaldoDisponivelInsuficienteError,
   FinanceiroInputInvalidoError,
+  marcarResgatePendente,
+  obterResgatePendente,
   solicitarRepasseRecebedor,
 } from "../../../../src/index.js";
 import type { TrpcContext } from "./context.js";
@@ -322,6 +328,17 @@ function toTRPCError(err: unknown): TRPCError {
     return new TRPCError({
       code: "CONFLICT",
       message: "recebedor_ja_existe",
+      cause: err,
+    });
+  }
+  // recebedor.atualizar's edit branch (alterarDadosRecebedorCampanha) — the
+  // upsert already checks findAtivoByCampanhaId before choosing criar vs
+  // alterar, so this should never surface in practice; mapped defensively
+  // against a race between the read and the write.
+  if (err instanceof ArrecadacaoRecebedorNaoEncontradoError) {
+    return new TRPCError({
+      code: "NOT_FOUND",
+      message: "recebedor_nao_encontrado",
       cause: err,
     });
   }
@@ -849,8 +866,145 @@ const listMovimentacoesProcedure = t.procedure
     }
   });
 
+// ────────────────────────────────────────────────────────────────────
+//  recebedor.get / recebedor.atualizar — campanha-scoped bank/pix data
+//  (recebedor-per-campanha unification, replaces the old user-level
+//  dadosRecebimento.get/.salvar). BancariosBody.tsx is the editor for
+//  THIS campanha's recebedor — the same data the onboarding embed
+//  (TransferOnboardingModal, via recebedor.criar) creates.
+// ────────────────────────────────────────────────────────────────────
+
+const RecebedorGetInputSchema = z.object({ idCampanha: z.string().uuid() });
+
+const recebedorGetProcedure = t.procedure
+  .input(RecebedorGetInputSchema)
+  .output(DadosRecebedorSchema.nullable())
+  .query(async ({ ctx, input }): Promise<DadosRecebedor | null> => {
+    try {
+      await resolverCampanhaAdministrada(ctx, input.idCampanha);
+      const ativo = await ctx.deps.recebedorRepository.findAtivoByCampanhaId(
+        input.idCampanha as IdCampanha,
+      );
+      return ativo?.dadosRecebedor ?? null;
+    } catch (err) {
+      throw toTRPCError(err);
+    }
+  });
+
+const RecebedorAtualizarInputSchema = z.object({
+  idCampanha: z.string().uuid(),
+  dadosRecebedor: DadosRecebedorSchema,
+});
+
+const recebedorAtualizarProcedure = t.procedure
+  .input(RecebedorAtualizarInputSchema)
+  .output(DadosRecebedorSchema)
+  .mutation(async ({ ctx, input }): Promise<DadosRecebedor> => {
+    try {
+      const { usuario } = await resolverCampanhaAdministrada(ctx, input.idCampanha);
+      const idCampanha = input.idCampanha as IdCampanha;
+
+      const ativo = await ctx.deps.recebedorRepository.findAtivoByCampanhaId(idCampanha);
+
+      // aperture-3mlcw (backend defense-in-depth, ported from the retired
+      // usuario-level dadosRecebimento guard) — CPF is a fiscal-identity
+      // field: once a REAL cpfTitular has been saved for this campanha it is
+      // IMMUTABLE. Reject a save that would change it to a different value.
+      // Switching payment method (pix <-> conta) is a distinct operation and
+      // is allowed; this only guards the CPF VALUE itself.
+      if (ativo && ativo.dadosRecebedor.cpfTitular !== input.dadosRecebedor.cpfTitular) {
+        throw new ArrecadacaoInputInvalidoError(
+          'O CPF do titular nao pode ser alterado apos salvo.',
+        );
+      }
+
+      if (!ativo) {
+        await criarRecebedorParaCampanha(
+          {
+            campanhaRepository: ctx.deps.campanhaRepository,
+            recebedorRepository: ctx.deps.recebedorRepository,
+            clock: ctx.deps.clock,
+            observability: ctx.deps.observability,
+          },
+          {
+            idCampanha,
+            idContaCaller: usuario.idConta,
+            dadosRecebedor: input.dadosRecebedor,
+          },
+        );
+        // aperture-kj9el #4b — the campanha now has real receiving data;
+        // clear any "preencher depois" pending-intent marker.
+        await ctx.deps.resgatePendenteRepository.limparPendente(idCampanha);
+        return input.dadosRecebedor;
+      }
+
+      await alterarDadosRecebedorCampanha(
+        {
+          campanhaRepository: ctx.deps.campanhaRepository,
+          recebedorRepository: ctx.deps.recebedorRepository,
+          clock: ctx.deps.clock,
+          observability: ctx.deps.observability,
+        },
+        { idCampanha, dadosRecebedor: input.dadosRecebedor },
+      );
+      // aperture-kj9el #4b — a full edit also clears any pending marker.
+      await ctx.deps.resgatePendenteRepository.limparPendente(idCampanha);
+      return input.dadosRecebedor;
+    } catch (err) {
+      throw toTRPCError(err);
+    }
+  });
+
+// ────────────────────────────────────────────────────────────────────
+//  recebedor.getResgatePendente / recebedor.marcarResgatePendente
+//  (aperture-kj9el #4b, per-campanha) — "preencher depois / é para um
+//  amigo" intent marker. Moved from the retired dadosRecebimento router.
+// ────────────────────────────────────────────────────────────────────
+
+const getResgatePendenteProcedure = t.procedure
+  .input(z.object({ idCampanha: z.string().uuid() }))
+  .output(z.union([z.string(), z.date()]).nullable())
+  .query(async ({ ctx, input }): Promise<Date | null> => {
+    try {
+      await resolverCampanhaAdministrada(ctx, input.idCampanha);
+      return await obterResgatePendente(
+        {
+          resgatePendenteRepository: ctx.deps.resgatePendenteRepository,
+          observability: ctx.deps.observability,
+        },
+        input.idCampanha as IdCampanha,
+      );
+    } catch (err) {
+      throw toTRPCError(err);
+    }
+  });
+
+const marcarResgatePendenteProcedure = t.procedure
+  .input(z.object({ idCampanha: z.string().uuid() }))
+  .output(z.object({ pendenteDesde: z.date() }))
+  .mutation(async ({ ctx, input }): Promise<{ pendenteDesde: Date }> => {
+    try {
+      await resolverCampanhaAdministrada(ctx, input.idCampanha);
+      const { pendenteDesde } = await marcarResgatePendente(
+        {
+          resgatePendenteRepository: ctx.deps.resgatePendenteRepository,
+          observability: ctx.deps.observability,
+          clock: ctx.deps.clock,
+        },
+        { idCampanha: input.idCampanha as IdCampanha },
+      );
+      return { pendenteDesde };
+    } catch (err) {
+      throw toTRPCError(err);
+    }
+  });
+
 export const recebedorRouter = t.router({
   criar: criarProcedure,
+  get: recebedorGetProcedure,
+  atualizar: recebedorAtualizarProcedure,
+  getResgatePendente: getResgatePendenteProcedure,
+  marcarResgatePendente: marcarResgatePendenteProcedure,
   extrato: extratoRouter,
   transferencia: transferenciaRouter,
   listMovimentacoes: listMovimentacoesProcedure,

@@ -29,19 +29,19 @@ const STEPS: Step[] = [
   },
   {
     n: 2,
-    emoji: "✏️",
-    color: "var(--green)",
-    rot: 4,
-    title: "Deixe uma mensagem",
-    desc: "Escreva um recadinho carinhoso pros papais e pro bebê lerem no mural.",
-  },
-  {
-    n: 3,
     emoji: "💳",
     color: "var(--blue)",
     rot: -4,
     title: "Pague com Pix ou cartão",
     desc: "Checkout seguro, em poucos cliques. Pagamento processado por parceiro certificado.",
+  },
+    {
+    n: 3,
+    emoji: "✏️",
+    color: "var(--green)",
+    rot: 4,
+    title: "Deixe uma mensagem",
+    desc: "Escreva um recadinho carinhoso pros papais e pro bebê lerem no mural.",
   },
   {
     n: 4,

@@ -41,8 +41,6 @@ import {
   PagamentoProviderStripe,
   type PagamentoRepository,
   PagamentoRepositoryPostgres,
-  type DadosRecebimentoRepository,
-  DadosRecebimentoRepositoryPostgres,
   type PerfilCampanhaRepository,
   PerfilCampanhaRepositoryPostgres,
   type PerfilCriadorRepository,
@@ -95,17 +93,10 @@ export interface ServerDeps {
    */
   readonly perfilCampanhaRepository: PerfilCampanhaRepository;
   /**
-   * DadosRecebimentoUsuario BC adapter (aperture-mcvyw). Backs the
-   * `dadosRecebimento.*` tRPC procedures — authed read/write of the user-level
-   * receiving data (pix | conta). Postgres-backed (migration 028), sharing
-   * the same Kysely instance as the other domain repos.
-   */
-  readonly dadosRecebimentoRepository: DadosRecebimentoRepository;
-  /**
-   * Resgate-pendente marker store (aperture-kj9el #4b). Backs the
-   * `dadosRecebimento.marcarResgatePendente` mutation + the pending field on
-   * `dadosRecebimento.get`. Postgres-backed (migration 030), sharing the same
-   * Kysely instance as the other domain repos.
+   * Resgate-pendente marker store (aperture-kj9el #4b), per-campanha. Backs
+   * the `recebedor.marcarResgatePendente` mutation + `recebedor.getResgatePendente`
+   * query. Postgres-backed (migration 038), sharing the same Kysely instance
+   * as the other domain repos.
    */
   readonly resgatePendenteRepository: ResgatePendenteRepository;
   readonly plataformaRepository: PlataformaRepository;
@@ -561,7 +552,6 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
   const usuarioRepository = new UsuarioRepositoryPostgres(db);
   const perfilCriadorRepository = new PerfilCriadorRepositoryPostgres(db);
   const perfilCampanhaRepository = new PerfilCampanhaRepositoryPostgres(db);
-  const dadosRecebimentoRepository = new DadosRecebimentoRepositoryPostgres(db);
   const resgatePendenteRepository = new ResgatePendenteRepositoryPostgres(db);
 
   // Plataforma BC is still in-memory; the engine ships seeded values for
@@ -673,7 +663,6 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     usuarioRepository,
     perfilCriadorRepository,
     perfilCampanhaRepository,
-    dadosRecebimentoRepository,
     resgatePendenteRepository,
     plataformaRepository,
     campanhaRepository,

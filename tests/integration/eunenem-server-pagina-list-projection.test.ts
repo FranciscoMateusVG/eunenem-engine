@@ -140,6 +140,7 @@ describe('pagina.obterListaPresentes projection (aperture-ines9)', () => {
         dadosRecebedor: {
           metodo: 'pix',
           nomeTitular: 'Lista Projection Owner',
+          cpfTitular: '52998224725',
           tipoChavePix: 'email',
           chavePix: 'lista-projection@test.local',
         },

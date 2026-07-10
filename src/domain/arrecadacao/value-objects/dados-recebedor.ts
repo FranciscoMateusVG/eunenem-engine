@@ -3,13 +3,16 @@ import { z } from 'zod/v4';
 /**
  * Value object: the receiver's payout data — a DISCRIMINATED UNION by
  * `metodo` (aperture-mcvyw):
- *   - `metodo: 'pix'`   → nome titular + a typed PIX key (today's shape).
- *   - `metodo: 'conta'` → nome titular + full Brazilian bank-account coords.
+ *   - `metodo: 'pix'`   → nome titular + cpf titular + a typed PIX key.
+ *   - `metodo: 'conta'` → nome titular + full Brazilian bank-account coords
+ *                         (incl. cpf titular).
+ *
+ * Both variants carry `cpfTitular` (checksum-validated) — the payout must
+ * be traceable to the account holder's CPF regardless of rail.
  *
  * Immutable, validated by value, no identity of its own — equality is
  * structural. Lives inside the `Recebedor` aggregate root (one active per
- * campaign, history preserved) and is reused by the user-level
- * `DadosRecebimentoUsuario` store.
+ * campaign, history preserved).
  *
  * ⚠️ NO bank-transfer rail exists yet: a `'conta'` receiver is PERSISTED but
  * NOT payable via the PIX repasse path. The withdrawal orchestrator
@@ -107,6 +110,8 @@ const nomeTitular = z.string().trim().min(1, 'Nome do titular nao pode ser vazio
 export const DadosRecebedorPixSchema = z.object({
   metodo: z.literal('pix'),
   nomeTitular,
+  /** Account holder's CPF — checksum-validated, same rule as the conta branch. */
+  cpfTitular: z.string().trim().min(1).max(20),
   tipoChavePix: TipoChavePixSchema,
   chavePix: z.string().trim().min(1, 'Chave PIX nao pode ser vazia').max(140),
 });
@@ -146,6 +151,13 @@ export const DadosRecebedorContaSchema = z.object({
 export const DadosRecebedorSchema = z
   .discriminatedUnion('metodo', [DadosRecebedorPixSchema, DadosRecebedorContaSchema])
   .superRefine((dados, ctx) => {
+    if (!cpfValido(dados.cpfTitular)) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'CPF do titular invalido (digitos verificadores)',
+        path: ['cpfTitular'],
+      });
+    }
     if (dados.metodo === 'pix') {
       const mensagem = mensagemChavePixInvalida(dados.tipoChavePix, dados.chavePix);
       if (mensagem !== undefined) {
@@ -154,13 +166,6 @@ export const DadosRecebedorSchema = z
       return;
     }
     // metodo === 'conta'
-    if (!cpfValido(dados.cpfTitular)) {
-      ctx.addIssue({
-        code: 'custom',
-        message: 'CPF do titular invalido (digitos verificadores)',
-        path: ['cpfTitular'],
-      });
-    }
     if (!telefoneBrValido(dados.celularTitular)) {
       ctx.addIssue({
         code: 'custom',

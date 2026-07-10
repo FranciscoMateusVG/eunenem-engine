@@ -12,6 +12,9 @@ export { PerfilCampanhaRepositoryPostgres } from './adapters/arrecadacao/perfil-
 export type { RecebedorRepository } from './adapters/arrecadacao/recebedor-repository.js';
 export { RecebedorRepositoryMemory } from './adapters/arrecadacao/recebedor-repository.memory.js';
 export { RecebedorRepositoryPostgres } from './adapters/arrecadacao/recebedor-repository.postgres.js';
+export type { ResgatePendenteRepository } from './adapters/arrecadacao/resgate-pendente-repository.js';
+export { ResgatePendenteRepositoryMemory } from './adapters/arrecadacao/resgate-pendente-repository.memory.js';
+export { ResgatePendenteRepositoryPostgres } from './adapters/arrecadacao/resgate-pendente-repository.postgres.js';
 export type { CatRepository } from './adapters/cat-repository.js';
 export type { Database } from './adapters/database.js';
 export { createDatabase } from './adapters/database.js';
@@ -87,18 +90,12 @@ export type { AuthService } from './adapters/usuario/auth-service.js';
 export { AuthServiceMemoria } from './adapters/usuario/auth-service.memory.js';
 export type { Auth, CriarAuthConfig } from './adapters/usuario/criar-auth.js';
 export { criarAuth } from './adapters/usuario/criar-auth.js';
-export type { DadosRecebimentoRepository } from './adapters/usuario/dados-recebimento-repository.js';
-export { DadosRecebimentoRepositoryMemory } from './adapters/usuario/dados-recebimento-repository.memory.js';
-export { DadosRecebimentoRepositoryPostgres } from './adapters/usuario/dados-recebimento-repository.postgres.js';
 export type { PerfilCriadorRepository } from './adapters/usuario/perfil-criador-repository.js';
 export { PerfilCriadorRepositoryMemory } from './adapters/usuario/perfil-criador-repository.memory.js';
 export { PerfilCriadorRepositoryPostgres } from './adapters/usuario/perfil-criador-repository.postgres.js';
 export type { UsuarioRepository } from './adapters/usuario/repository.js';
 export { UsuarioRepositoryMemory } from './adapters/usuario/repository.memory.js';
 export { UsuarioRepositoryPostgres } from './adapters/usuario/repository.postgres.js';
-export type { ResgatePendenteRepository } from './adapters/usuario/resgate-pendente-repository.js';
-export { ResgatePendenteRepositoryMemory } from './adapters/usuario/resgate-pendente-repository.memory.js';
-export { ResgatePendenteRepositoryPostgres } from './adapters/usuario/resgate-pendente-repository.postgres.js';
 export type {
   StripeDispatchResult,
   StripePipelineArgs,
@@ -540,15 +537,6 @@ export {
 // --- Domain: Usuário ---
 
 export type {
-  AtualizarDadosRecebimentoUsuarioInput,
-  CriarDadosRecebimentoUsuarioInput,
-  DadosRecebimentoUsuario,
-} from './domain/usuario/entities/dados-recebimento-usuario.js';
-export {
-  atualizarDadosRecebimentoUsuario,
-  criarDadosRecebimentoUsuario,
-} from './domain/usuario/entities/dados-recebimento-usuario.js';
-export type {
   AtualizarConteudoPerfilCriadorInput,
   CriarPerfilCriadorInput,
   PerfilCriador,
@@ -771,6 +759,20 @@ export {
   ListarContribuicoesDeOpcaoInputSchema,
   listarContribuicoesDeOpcao,
 } from './use-cases/arrecadacao/listar-contribuicoes-de-opcao.js';
+// aperture-kj9el #4b — "resgate pendente" marker, per-campanha (recebedor
+// unification). Formerly usuario-scoped; moved alongside the recebedor
+// create/edit use-cases since it's cleared by them.
+export type {
+  MarcarResgatePendenteDeps,
+  MarcarResgatePendenteInput,
+  MarcarResgatePendenteResult,
+} from './use-cases/arrecadacao/marcar-resgate-pendente.js';
+export {
+  MarcarResgatePendenteInputSchema,
+  marcarResgatePendente,
+} from './use-cases/arrecadacao/marcar-resgate-pendente.js';
+export type { ObterResgatePendenteDeps } from './use-cases/arrecadacao/obter-resgate-pendente.js';
+export { obterResgatePendente } from './use-cases/arrecadacao/obter-resgate-pendente.js';
 // Plan 0016 Phase 2 (aperture-eg1s2). Replaces the pre-0016
 // contribuicaoEstaIndisponivel binary predicate with the
 // quantidadeRestante (count of remaining slots) + esgotada
@@ -1128,19 +1130,8 @@ export {
   EmitirUrlUploadImagemItemInputSchema,
   emitirUrlUploadImagemItem,
 } from './use-cases/usuario/emitir-url-upload-imagem-item.js';
-export type {
-  MarcarResgatePendenteDeps,
-  MarcarResgatePendenteInput,
-  MarcarResgatePendenteResult,
-} from './use-cases/usuario/marcar-resgate-pendente.js';
-export {
-  MarcarResgatePendenteInputSchema,
-  marcarResgatePendente,
-} from './use-cases/usuario/marcar-resgate-pendente.js';
 export type { MarcarTutorialUsuarioComoCompletadoDeps } from './use-cases/usuario/marcar-tutorial-usuario-como-completado.js';
 export { marcarTutorialUsuarioComoCompletado } from './use-cases/usuario/marcar-tutorial-usuario-como-completado.js';
-export type { ObterDadosRecebimentoUsuarioDeps } from './use-cases/usuario/obter-dados-recebimento-usuario.js';
-export { obterDadosRecebimentoUsuario } from './use-cases/usuario/obter-dados-recebimento-usuario.js';
 export type {
   ObterPerfilCriadorDeps,
   PerfilProprioDTO,
@@ -1157,8 +1148,6 @@ export {
   obterPerfilPublicoBySlug,
   PerfilPublicoDTOSchema,
 } from './use-cases/usuario/obter-perfil-publico-by-slug.js';
-export type { ObterResgatePendenteDeps } from './use-cases/usuario/obter-resgate-pendente.js';
-export { obterResgatePendente } from './use-cases/usuario/obter-resgate-pendente.js';
 export type { ObterStatusTutorialUsuarioDeps } from './use-cases/usuario/obter-status-tutorial-usuario.js';
 export { obterStatusTutorialUsuario } from './use-cases/usuario/obter-status-tutorial-usuario.js';
 export type {
@@ -1174,14 +1163,6 @@ export {
   RegistrarContaUsuarioInputSchema,
   registrarContaUsuario,
 } from './use-cases/usuario/registrar-conta-usuario.js';
-export type {
-  SalvarDadosRecebimentoUsuarioDeps,
-  SalvarDadosRecebimentoUsuarioInput,
-} from './use-cases/usuario/salvar-dados-recebimento-usuario.js';
-export {
-  SalvarDadosRecebimentoUsuarioInputSchema,
-  salvarDadosRecebimentoUsuario,
-} from './use-cases/usuario/salvar-dados-recebimento-usuario.js';
 // Plan 0018 Phase A (aperture-omswg) — first-time tutorial.
 export type { TutorialStatusResponse } from './use-cases/usuario/tutorial-status-response.js';
 export { TutorialStatusResponseSchema } from './use-cases/usuario/tutorial-status-response.js';

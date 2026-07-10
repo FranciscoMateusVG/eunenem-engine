@@ -52,6 +52,7 @@ const VALOR_TOTAL_CENTS = 8400;
 const dadosRecebedorPadrao = () => ({
   metodo: 'pix' as const,
   nomeTitular: 'Maria Silva',
+  cpfTitular: '52998224725',
   tipoChavePix: 'email' as const,
   chavePix: 'maria@exemplo.com',
 });

@@ -1,10 +1,11 @@
 import { afterAll, beforeAll } from 'vitest';
-import { UsuarioRepositoryPostgres } from '../../src/adapters/usuario/repository.postgres.js';
-import { ResgatePendenteRepositoryPostgres } from '../../src/adapters/usuario/resgate-pendente-repository.postgres.js';
+import { CampanhaRepositoryPostgres } from '../../src/adapters/arrecadacao/campanha-repository.postgres.js';
+import { RecebedorRepositoryPostgres } from '../../src/adapters/arrecadacao/recebedor-repository.postgres.js';
+import { ResgatePendenteRepositoryPostgres } from '../../src/adapters/arrecadacao/resgate-pendente-repository.postgres.js';
 import { createTestObservability } from '../helpers/observability.js';
 import { describeResgatePendenteRepositoryConformance } from '../helpers/resgate-pendente-repository.conformance.js';
 import { createTestDatabase, type TestDatabase } from '../helpers/test-db.js';
-import { truncateUsuarioTables } from '../helpers/truncate-usuario.js';
+import { truncateArrecadacaoTables } from '../helpers/truncate-arrecadacao.js';
 
 let testDb: TestDatabase;
 const testObs = createTestObservability();
@@ -19,15 +20,19 @@ afterAll(async () => {
 });
 
 describeResgatePendenteRepositoryConformance('Postgres', {
-  factory: () => ({
-    resgatePendenteRepository: new ResgatePendenteRepositoryPostgres(testDb.db),
-    usuarioRepository: new UsuarioRepositoryPostgres(testDb.db),
-  }),
+  factory: () => {
+    const recebedorRepository = new RecebedorRepositoryPostgres(testDb.db);
+    return {
+      resgatePendenteRepository: new ResgatePendenteRepositoryPostgres(testDb.db),
+      campanhaRepository: new CampanhaRepositoryPostgres(testDb.db, recebedorRepository),
+    };
+  },
   resetState: async () => {
-    // resgates_pendentes FK → usuarios ON DELETE CASCADE; delete it explicitly
-    // first for clarity and FK-direction independence.
+    // resgates_pendentes FK → campanhas ON DELETE CASCADE; delete it
+    // explicitly first (truncateArrecadacaoTables doesn't know about it),
+    // then reuse the shared Arrecadação truncation order for the rest.
     await testDb.db.deleteFrom('resgates_pendentes').execute();
-    await truncateUsuarioTables(testDb.db);
+    await truncateArrecadacaoTables(testDb.db);
   },
   getSpans: () => testObs.getSpans(),
   resetSpans: () => testObs.reset(),

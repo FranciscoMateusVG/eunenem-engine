@@ -125,6 +125,8 @@ export interface BancariosForm {
   pixKey: string;
   nome: string;
   telefone: string;
+  /** Account holder's CPF — required in BOTH pix and conta modes. */
+  cpfTitular: string;
 }
 
 /** The creator's CPF — fixed at signup, can't be edited here. */
@@ -141,6 +143,7 @@ export const BANCARIOS_DEMO: BancariosForm = {
   pixKey: "121.557.206-96",
   nome: "Thacyane Martinelli Maciel",
   telefone: "(31) 99443-4155",
+  cpfTitular: "121.557.206-96",
 };
 
 /** Default recebimento mode shown on load. */
