@@ -1,6 +1,7 @@
 import { useSignOut } from "@/lib/auth";
 import { useCampanhaRota } from "@/lib/campanha-rota";
 import { painelHref, type PainelSection } from "@/lib/painelRoutes";
+import { PainelCampanhaSwitcher } from "./PainelCampanhaSwitcher";
 
 // aperture-7nius / aperture-0mplv / aperture-paf3m — Painel topbar nav.
 //
@@ -66,36 +67,25 @@ export function PainelTopbar({
 
         <nav className="painel-topbar-nav" aria-label="Seções do painel">
           <ul>
-            {/* aperture-hdftp — back to the multi-campaign grid. Leads the
-             *  nav (back-affordances read left-first); the stroke arrow
-             *  follows the topbar's SVG icon convention (logout button). */}
+            {/* aperture-vtxk7 — inside the painel the MINHAS LISTAS chip is
+             *  now the "ir para" campanha SWITCHER (design-artifact dropdown,
+             *  operator green-lit): jump straight to any lista's painel, with
+             *  "ver todas as listas" keeping the /campanhas hub one tap away.
+             *  On /campanhas itself there's nothing to switch — keep the
+             *  plain "you are here" chip (aperture-hdftp behavior). */}
             <li>
-              <a
-                href="/campanhas"
-                aria-current={onCampanhas ? "page" : undefined}
-                className={`painel-topbar-link painel-topbar-link--listas${onCampanhas ? " is-active" : ""}`}
-                data-testid="topbar-minhas-listas"
-              >
-                {/* Back arrow only when this chip IS a back-affordance —
-                 *  on /campanhas itself the chip is "you are here". */}
-                {!onCampanhas && (
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                    width={14}
-                    height={14}
-                  >
-                    <line x1="19" y1="12" x2="5" y2="12" />
-                    <polyline points="12 19 5 12 12 5" />
-                  </svg>
-                )}
-                MINHAS LISTAS
-              </a>
+              {onCampanhas ? (
+                <a
+                  href="/campanhas"
+                  aria-current="page"
+                  className="painel-topbar-link painel-topbar-link--listas is-active"
+                  data-testid="topbar-minhas-listas"
+                >
+                  MINHAS LISTAS
+                </a>
+              ) : (
+                <PainelCampanhaSwitcher slug={slug} />
+              )}
             </li>
             {/* MINHA PÁGINA — anchor to painel root, active when there's
              *  no sub-section. (aperture-paf3m: AJUDA branch removed.) */}

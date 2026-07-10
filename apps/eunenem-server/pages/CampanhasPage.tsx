@@ -471,23 +471,25 @@ export function CampanhasPage() {
                 <h2 id="camp-tour-title" className="camp-modal-title camp-modal-title-sm">
                   como <span className="hl">alternar</span> entre listas
                 </h2>
-                {/* aperture-hdftp — step reteaches the canonical header:
-                 *  MINHAS LISTAS in the topbar is the way back here from
-                 *  inside any list (the old IR PARA dropdown is gone). */}
+                {/* aperture-vtxk7 — the topbar's MINHAS LISTAS is the "ir
+                 *  para" SWITCHER again (dropdown per lista, reinstated from
+                 *  the design artifact) — the copy teaches jump-anywhere, not
+                 *  the old hub-and-spoke-only "traz de volta" (hdftp era). */}
                 <div className="camp-tour-stage">
                   <span className="camp-tour-cta" aria-hidden="true">acessar lista ♡</span>
                   <span className="camp-tour-note">↑ entra na lista que você escolher</span>
                   <span className="camp-tour-pill">
-                    <span aria-hidden="true">←</span>
-                    <span className="camp-tour-pill-val">minhas listas</span>
+                    <span className="camp-tour-pill-val">ir para · minhas listas</span>
+                    <span aria-hidden="true">▾</span>
                   </span>
                   <span className="camp-tour-note camp-tour-note-green">
-                    ↑ e esse botão no topo te traz de volta pra cá
+                    ↑ e esse botão no topo troca de lista de onde você estiver
                   </span>
                 </div>
                 <p className="camp-tour-copy">
-                  toque em <b>acessar lista</b> no quadrinho que você quer abrir — e quando
-                  quiser trocar, <b>minhas listas</b> lá no topo te traz de volta ♡
+                  toque em <b>acessar lista</b> no quadrinho que você quer abrir — e pra
+                  trocar depois, <b>minhas listas</b> lá no topo abre um menu que pula
+                  direto pra qualquer outra ♡
                 </p>
               </>
             ) : (
