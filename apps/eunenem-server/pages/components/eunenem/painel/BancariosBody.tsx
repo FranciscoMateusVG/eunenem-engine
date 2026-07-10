@@ -31,6 +31,7 @@ import {
   type TipoConta,
   telefoneBrValido,
 } from "../../../../../../src/domain/arrecadacao/value-objects/dados-recebedor.js";
+import { sendEvent } from "@/lib/analytics";
 
 // aperture-6xjcw — Dados Bancários body for /painel/:slug/bancarios.
 //
@@ -400,6 +401,7 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
       // The campanha now has a recebedor — the "solicitar transferência" gate
       // (auth.me-derived hasRecebedor) can be stale until this refetches.
       void utils.auth.me.invalidate();
+      sendEvent("dados_bancarios_salvos");
       toast.success("dados salvos com carinho ♡");
     },
     onError: (err: { message?: string }) => {
@@ -424,6 +426,7 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
   const marcarPendente = trpc.recebedor.marcarResgatePendente.useMutation({
     onSuccess: () => {
       void utils.recebedor.getResgatePendente.invalidate();
+      sendEvent("dados_bancarios_adiados");
       toast.success(
         "tudo bem — guardamos seu lugar ♡ complete os dados quando puder",
       );

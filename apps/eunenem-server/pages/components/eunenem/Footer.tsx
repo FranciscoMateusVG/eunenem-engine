@@ -14,6 +14,7 @@ import {
   LANDING_FOOTER_COLS,
   LANDING_FOOTER_SOCIALS,
 } from '@/lib/mocks/landing';
+import { sendEvent } from '@/lib/analytics';
 
 // aperture-zeueb — trust badges. The old site rendered these as images on a
 // LIGHT footer; on the new DARK plum footer they sit on small white chips so
@@ -126,6 +127,7 @@ export function Footer() {
                       <a
                         href={href}
                         className="text-sm text-[#F4DCEA]/80 hover:text-yellow transition-colors"
+                        onClick={() => sendEvent('footer_link_click', { link_label: label })}
                       >
                         {label}
                       </a>
@@ -149,6 +151,7 @@ export function Footer() {
                 target="_blank"
                 rel="noopener noreferrer"
                 className="w-9 h-9 rounded-full bg-[#F4DCEA]/10 inline-flex items-center justify-center text-cream hover:bg-lilac hover:text-white hover:-translate-y-0.5 transition-all"
+                onClick={() => sendEvent('footer_link_click', { link_label: label })}
               >
                 <SocialIcon label={label} />
               </a>

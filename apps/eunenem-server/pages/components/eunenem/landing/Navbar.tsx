@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { NAV_LINKS } from '@/lib/mocks/landing';
 import { useAuthModal } from '@/components/eunenem/auth/AuthModalProvider';
 import { useMe, useSignOut } from '@/lib/auth';
+import { sendEvent } from '@/lib/analytics';
 
 // aperture-q1j2 — marketing landing navbar.
 // aperture-nop8l — CTA wiring: "Entrar" + "criar minha lista" now both
@@ -62,6 +63,7 @@ export function Navbar() {
               <a
                 href={href}
                 className="text-sm font-semibold text-ink hover:text-lilac-deep transition-colors tracking-wide"
+                onClick={() => sendEvent('nav_link_click', { link_label: label, href })}
               >
                 {label}
               </a>
@@ -92,7 +94,10 @@ export function Navbar() {
             <button
               ref={signinBtnRef}
               type="button"
-              onClick={() => auth.open('signin', signinBtnRef.current)}
+              onClick={() => {
+                sendEvent('nav_signin_click');
+                auth.open('signin', signinBtnRef.current);
+              }}
               className="btn-lilac !py-3 !px-5 !text-[12px]"
             >
               Entrar
@@ -160,6 +165,7 @@ function AccountChip({ nomeExibicao, slug, isSigningOut, onSignOut }: AccountChi
 
   const handleSignOut = async () => {
     setOpen(false);
+    sendEvent('nav_signout_click');
     await onSignOut();
     // Navbar rerenders automatically via useMe invalidation. We stay on
     // the current page per spec (no window.location.reload).
@@ -239,6 +245,7 @@ function AccountChip({ nomeExibicao, slug, isSigningOut, onSignOut }: AccountChi
             role="menuitem"
             href={`/painel/${slug}`}
             className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-semibold text-ink hover:text-lilac-deep hover:bg-lilac-soft/60 transition-colors no-underline focus-visible:outline-2 focus-visible:outline-lilac-deep focus-visible:outline-offset-1"
+            onClick={() => sendEvent('nav_link_click', { link_label: 'Meu painel', href: `/painel/${slug}` })}
           >
             <span aria-hidden="true">♡</span>
             <span>Meu painel</span>

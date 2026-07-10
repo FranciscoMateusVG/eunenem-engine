@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useOauthReturnRedirect } from '@/lib/useOauthReturnRedirect';
+import { sendPageView } from '@/lib/analytics';
 import { Calculadora } from '@/components/eunenem/landing/Calculadora';
 import { ChaRifa } from '@/components/eunenem/landing/ChaRifa';
 import { CTAFinal } from '@/components/eunenem/landing/CTAFinal';
@@ -35,6 +36,10 @@ export function LandingPage() {
   // aperture-ydj4a — forward OAuth users back to their painel after the
   // social-login callback returns here with the ?oauth=1 marker.
   useOauthReturnRedirect();
+
+  useEffect(() => {
+    sendPageView('Landing');
+  }, []);
 
   useEffect(() => {
     const io = new IntersectionObserver(

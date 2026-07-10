@@ -16,6 +16,7 @@ import { useCampanhaRota } from "@/lib/campanha-rota";
 import { shareConvitePreview } from "@/lib/convite-share";
 import { useConviteBackgroundUpload } from "@/lib/conviteUpload";
 import { painelConvitePreviewHref } from "@/lib/painelRoutes";
+import { sendEvent } from "@/lib/analytics";
 import {
   DEFAULT_STATE,
   DISABLED_EVENT_TYPES,
@@ -147,6 +148,7 @@ export function MobileConviteBody({ slug }: PainelSectionBodyProps) {
     if (!guardComplete()) return;
     try {
       await salvarConvite.mutateAsync(savePayloadFromConviteState(state));
+      sendEvent("convite_salvo");
       toast.success("rascunho salvo com carinho ♡");
     } catch (error) {
       toast.error("não deu pra salvar agora", {
@@ -170,6 +172,7 @@ export function MobileConviteBody({ slug }: PainelSectionBodyProps) {
           title: `Convite de ${state.babyName || 'nosso evento'}`,
           text: "Quero te mostrar este convite.",
         });
+        sendEvent("convite_compartilhado", { resultado: result });
 
         if (result === 'shared') {
           toast.success("interface de compartilhamento aberta ♡");
@@ -184,6 +187,7 @@ export function MobileConviteBody({ slug }: PainelSectionBodyProps) {
         });
       }
       await salvarConvite.mutateAsync(savePayloadFromConviteState(state));
+      sendEvent("convite_salvo");
     } catch (error) {
       toast.error("não deu pra salvar agora", {
         description: conviteErrorMessage(error),
@@ -211,7 +215,11 @@ export function MobileConviteBody({ slug }: PainelSectionBodyProps) {
         <button type="button" className="mcv-save" onClick={onSave} disabled={isSaving}>
           {isSaving ? "salvando..." : "salvar"}
         </button>
-        <a href={painelConvitePreviewHref(slug, idCampanha)} className="mcv-save">
+        <a
+          href={painelConvitePreviewHref(slug, idCampanha)}
+          className="mcv-save"
+          onClick={() => sendEvent("convite_ver_preview_click")}
+        >
           ver salvo
         </a>
       </header>
@@ -458,7 +466,10 @@ function MStepFundo({ state, update, updateMany }: StepProps) {
                 className={`mcv-tpl ${active ? "on" : ""}`}
                 aria-pressed={active}
                 aria-label={`template ${tpl.label}`}
-                onClick={() => updateMany(templateSelectionPatch(tpl))}
+                onClick={() => {
+                  sendEvent("convite_modelo_selecionado", { template_id: tpl.id });
+                  updateMany(templateSelectionPatch(tpl));
+                }}
               >
                 <div
                   className="mcv-tpl-thumb"

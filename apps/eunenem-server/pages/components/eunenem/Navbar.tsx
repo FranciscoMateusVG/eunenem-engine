@@ -6,6 +6,7 @@ import { useMe } from "@/lib/auth";
 import { useCampanhaRota } from "@/lib/campanha-rota";
 import { paginaSharePath } from "@/lib/painelRoutes";
 import { painelHref as buildPainelHref } from "@/lib/painelRoutes";
+import { sendEvent } from "@/lib/analytics";
 
 // aperture-3d9t / aperture-uk8q1 — visitor page header.
 //
@@ -158,6 +159,7 @@ export function Navbar({ slug }: { slug?: string } = {}) {
                     href={link.href}
                     aria-current={isActive(link.href) ? "true" : undefined}
                     className={`eu-nav-chip${isActive(link.href) ? " is-active" : ""}`}
+                    onClick={() => sendEvent("nav_link_click", { link_label: link.label, href: link.href })}
                   >
                     {link.label}
                   </a>
@@ -209,7 +211,11 @@ export function Navbar({ slug }: { slug?: string } = {}) {
             aria-controls="mobile-nav"
             onClick={(e) => {
               e.stopPropagation();
-              setMobileOpen((v) => !v);
+              setMobileOpen((v) => {
+                const next = !v;
+                if (next) sendEvent("mobile_menu_open");
+                return next;
+              });
             }}
             style={{
               display: "inline-flex",
@@ -296,7 +302,10 @@ export function Navbar({ slug }: { slug?: string } = {}) {
                   <li key={link.href}>
                     <a
                       href={link.href}
-                      onClick={() => setMobileOpen(false)}
+                      onClick={() => {
+                        sendEvent("nav_link_click", { link_label: link.label, href: link.href });
+                        setMobileOpen(false);
+                      }}
                       aria-current={isActive(link.href) ? "true" : undefined}
                       className={`eu-nav-chip-block${isActive(link.href) ? " is-active" : ""}`}
                     >

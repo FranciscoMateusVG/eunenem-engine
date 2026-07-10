@@ -45,6 +45,7 @@ import {
   useContribuicaoList,
   type ContribuicaoDTO,
 } from "@/lib/contribuicao.js";
+import { sendEvent } from "@/lib/analytics";
 
 // aperture-0ph83 — "Minha lista de presentes" (creator gift-list management).
 //
@@ -1524,6 +1525,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
       });
       setAddModalTab(null);
       const n = Number(draft.qty) || 1;
+      sendEvent("lista_item_personalizado_adicionado", { nome_item: draft.title });
       toast.success(
         n === 1
           ? "1 presente adicionado à sua lista ♡"
@@ -1567,6 +1569,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
         (s, it) => s + defaultSuggestedQty(it.id),
         0,
       );
+      sendEvent("lista_item_catalogo_adicionado", { quantidade_itens: totalUnits });
       toast.success(
         totalUnits === 1
           ? "1 presente adicionado à sua lista ♡"
@@ -1601,6 +1604,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
       setPresetsOpen(false);
       // aperture-p73kv — toast count mirrors the per-item djb2 helper.
       const n = picked.reduce((s, it) => s + defaultSuggestedQty(it.id), 0);
+      sendEvent("lista_pronta_itens_adicionados", { preset_id: presetId, quantidade_itens: n });
       toast.success(
         `${n} ${n === 1 ? "presente adicionado" : "presentes adicionados"} à sua lista ♡`,
       );
@@ -1830,7 +1834,10 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
                         <button
                           type="button"
                           className="lista-pronta-cta"
-                          onClick={() => setPresetDetail(preset.id)}
+                          onClick={() => {
+                            sendEvent("lista_pronta_visualizada", { preset_id: preset.id });
+                            setPresetDetail(preset.id);
+                          }}
                           aria-label={`Ver lista pronta: ${title}`}
                         >
                           VER LISTA →

@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { useAuthModal } from '@/components/eunenem/auth/AuthModalProvider';
 import { LANDING_FAQS } from '@/lib/mocks/landing';
+import { sendEvent } from '@/lib/analytics';
 // aperture-q1j2 — final CTA on a tri-stop gradient.
 
 export function CTAFinal() {
@@ -46,7 +47,10 @@ export function CTAFinal() {
         <button
           ref={ctaRef}
           type="button"
-          onClick={() => auth.open('signup', ctaRef.current)}
+          onClick={() => {
+            sendEvent('cta_final_signup_click');
+            auth.open('signup', ctaRef.current);
+          }}
           className="btn-lilac btn-lilac-lg"
         >
           → criar minha lista agora — é grátis

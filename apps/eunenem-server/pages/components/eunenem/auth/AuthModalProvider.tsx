@@ -11,6 +11,7 @@ import {
 import { trpc } from "@/lib/trpc";
 import { isLegacy, needsOnboarding } from "@/lib/onboarding-gate";
 import type { AuthSession } from "@/lib/auth";
+import { sendEvent } from "@/lib/analytics";
 import { AuthModalShell, type AuthMode } from "./AuthModalShell.js";
 import { OnboardingWizard } from "./OnboardingWizard.js";
 
@@ -137,9 +138,11 @@ export function AuthModalProvider({
       // `mode === "signup"` heuristic, which was wrong once a single entry could
       // resolve to either outcome at submit time.
       if (session.criado) {
+        sendEvent("signup_concluido");
         setShowOnboarding(true);
         return;
       }
+      sendEvent("login_concluido");
       try {
         const me = await utils.auth.me.fetch();
         if (!me?.slug) return;

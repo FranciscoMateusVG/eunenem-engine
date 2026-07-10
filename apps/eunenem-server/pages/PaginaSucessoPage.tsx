@@ -41,6 +41,7 @@ import {
   type ObterSucessoResult,
 } from "@/lib/paginaApi";
 import { paginaSharePath } from "@/lib/painelRoutes";
+import { sendEvent } from "@/lib/analytics";
 
 // ── Page ──────────────────────────────────────────────────────────────────
 
@@ -160,6 +161,14 @@ function ApprovedState({
   idCampanha: string | null;
 }) {
   const valorBRL = useMemo(() => Math.round(data.valor / 100), [data.valor]);
+  // aperture-ga4gtm: GA4 conversion event. Fires once per mount of the
+  // approved state — the page only reaches ApprovedState after the
+  // sessionId/status pair resolves to a terminal 'approved', so a fresh
+  // mount here corresponds to one confirmed payment.
+  useEffect(() => {
+    sendEvent("compra_concluida", { valor: data.valor, gift_name: data.giftName });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   return (
     <section className="sucesso-section sucesso-section--approved">
       {/* Soft doodles in the corners — same family as the visitor page so
@@ -286,6 +295,10 @@ function PendingState({
 // ── Failed ────────────────────────────────────────────────────────────────
 
 function FailedState({ slug, idCampanha }: { slug: string; idCampanha: string | null }) {
+  useEffect(() => {
+    sendEvent("pagamento_falhou");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   return (
     <section className="sucesso-section sucesso-section--failed">
       <span className="eyebrow eyebrow-coral sucesso-eyebrow">ops</span>

@@ -186,6 +186,46 @@ app.get('*', async (c) => {
   return c.html(envelope(ssrHtml, url.pathname));
 });
 
+// aperture-ga4gtm: GA4 measurement IDs are "G-XXXXXXXXXX", GTM container IDs
+// are "GTM-XXXXXXX". Validated before interpolation into the HTML template
+// (defense in depth — these come from trusted env vars, not user input, but
+// a malformed value should fail closed rather than risk breaking out of the
+// <script> tag).
+const GA_ID_PATTERN = /^G-[A-Z0-9]+$/;
+const GTM_ID_PATTERN = /^GTM-[A-Z0-9]+$/;
+
+function googleAnalyticsSnippet(): string {
+  const gaId = process.env.GOOGLE_ANALYTICS;
+  if (!gaId || !GA_ID_PATTERN.test(gaId)) return '';
+  return `
+    <script async src="https://www.googletagmanager.com/gtag/js?id=${gaId}"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments)}
+      gtag('js', new Date());
+      gtag('config', '${gaId}');
+    </script>`;
+}
+
+function googleTagManagerHeadSnippet(): string {
+  const gtmId = process.env.GOOGLE_TAG_MANAGER;
+  if (!gtmId || !GTM_ID_PATTERN.test(gtmId)) return '';
+  return `
+    <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+      new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+      j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+      'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+      })(window,document,'script','dataLayer','${gtmId}');</script>`;
+}
+
+function googleTagManagerBodySnippet(): string {
+  const gtmId = process.env.GOOGLE_TAG_MANAGER;
+  if (!gtmId || !GTM_ID_PATTERN.test(gtmId)) return '';
+  return `
+    <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=${gtmId}"
+      height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>`;
+}
+
 function envelope(ssrHtml: string, pathname: string): string {
   return `<!doctype html>
 <html lang="pt-BR" class="h-full antialiased">
@@ -216,9 +256,9 @@ function envelope(ssrHtml: string, pathname: string): string {
         --font-dm-sans: 'DM Sans', system-ui, sans-serif;
       }
     </style>
-    <link rel="stylesheet" href="/public/styles.css" />
+    <link rel="stylesheet" href="/public/styles.css" />${googleAnalyticsSnippet()}${googleTagManagerHeadSnippet()}
   </head>
-  <body class="min-h-full flex flex-col bg-cream text-ink">
+  <body class="min-h-full flex flex-col bg-cream text-ink">${googleTagManagerBodySnippet()}
     <div id="root">${ssrHtml}</div>
     <script type="module" src="/public/client.js"></script>
   </body>

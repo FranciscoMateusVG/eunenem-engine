@@ -12,6 +12,7 @@ import { painelHref } from "@/lib/painelRoutes";
 import { useCampanhaEscrita } from "@/lib/campanha-escrita";
 import { useCampanhaRota } from "@/lib/campanha-rota";
 import { PERFIL_RELATIONS } from "@/lib/mocks/perfil";
+import { sendEvent } from "@/lib/analytics";
 import type { PainelSectionBodyProps } from "@/PainelSectionPage";
 
 // aperture-1z6xa / aperture-bnj0z — Editar Perfil body (content only).
@@ -1291,6 +1292,7 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
                 // aperture-1yx1n — copy the REAL public page URL, campanha-
                 // addressed when this perfil sits under a /c/:id route.
                 const link = paginaShareUrl(profileSlug, idCampanha, campanhaSlugRota);
+                sendEvent("painel_compartilhar_link_click");
                 void navigator.clipboard
                   .writeText(link)
                   .then(() => toast.success("link copiado ♡"))

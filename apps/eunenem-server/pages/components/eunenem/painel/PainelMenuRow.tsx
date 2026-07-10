@@ -3,6 +3,7 @@ import type { PainelMenuItem } from "@/lib/mocks/painelDemo";
 import { menuItemHref } from "@/lib/painelRoutes";
 import { useCampanhaRota } from "@/lib/campanha-rota";
 import { useCampanhaSlugRota } from "@/lib/campanhas";
+import { sendEvent } from "@/lib/analytics";
 
 // aperture-i01o — single row in the painel menu list.
 //
@@ -61,7 +62,13 @@ export function PainelMenuRow({ item, slug, href }: Props) {
       // row exposes its painelDemo id here. No-op for non-tutorial paths.
       data-tutorial-target={item.id}
       aria-disabled={item.soon || undefined}
-      onClick={item.soon ? (e) => e.preventDefault() : undefined}
+      onClick={
+        item.soon
+          ? (e) => e.preventDefault()
+          : item.id === "suporte"
+            ? () => sendEvent("painel_suporte_whatsapp_click")
+            : undefined
+      }
       {...(isExternal ? { target: "_blank", rel: "noopener noreferrer" } : {})}
     >
       <span className="painel-row-icon">

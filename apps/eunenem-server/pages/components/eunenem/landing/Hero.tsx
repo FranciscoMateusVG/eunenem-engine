@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { useAuthModal } from '@/components/eunenem/auth/AuthModalProvider';
+import { sendEvent } from '@/lib/analytics';
 
 // aperture-ospu7 — v2 rewrite of section 01 "Hero" (data-screen-label="01 Hero"
 // in EuNenem Landing v2.html). Out goes the hero-bg.jpg page background +
@@ -114,7 +115,10 @@ export function Hero() {
             <button
               ref={ctaRef}
               type="button"
-              onClick={() => auth.open('signup', ctaRef.current)}
+              onClick={() => {
+                sendEvent('cta_hero_signup_click');
+                auth.open('signup', ctaRef.current);
+              }}
               className="btn-lilac btn-lilac-lg w-full justify-center lg:w-auto"
             >
               → criar minha lista grátis

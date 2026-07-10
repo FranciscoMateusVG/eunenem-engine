@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 
 import { BancariosBody } from "@/components/eunenem/painel/BancariosBody";
 import { ConviteBody } from "@/components/eunenem/painel/ConviteBody";
@@ -9,7 +9,8 @@ import { ListaPresentesBody } from "@/components/eunenem/painel/ListaPresentesBo
 import { MensagensBody } from "@/components/eunenem/painel/MensagensBody";
 import { PerfilBody } from "@/components/eunenem/painel/PerfilBody";
 import { PresentesBody } from "@/components/eunenem/painel/PresentesBody";
-import type { PainelSection } from "@/lib/painelRoutes";
+import { PAINEL_SECTION_META, type PainelSection } from "@/lib/painelRoutes";
+import { sendPageView } from "@/lib/analytics";
 
 // aperture-vv3i — Painel sub-page dispatch + section registry.
 //
@@ -58,6 +59,9 @@ export function PainelSectionPage({
   idCampanha?: string;
 }) {
   const Body = PAINEL_SECTION_PAGES[section];
+  useEffect(() => {
+    sendPageView(PAINEL_SECTION_META[section].title, { slug, section });
+  }, [slug, section]);
   return (
     <PainelLayout slug={slug} idCampanha={idCampanha} activeSection={section}>
       {Body ? <Body slug={slug} /> : <PainelPlaceholder slug={slug} section={section} />}

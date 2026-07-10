@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Footer } from "@/components/eunenem/Footer";
+import { sendEvent, sendPageView } from "@/lib/analytics";
 
 // aperture-sgjnn — /faq Perguntas Frequentes page.
 //
@@ -77,6 +78,10 @@ const FAQ: QA[] = [
   },
 ];
 
+function flattenQ(parts: QPart[]): string {
+  return parts.map((p) => (typeof p === "string" ? p : p.hl)).join("");
+}
+
 function renderQ(parts: QPart[]) {
   return parts.map((p, i) =>
     typeof p === "string" ? (
@@ -94,6 +99,10 @@ export function FaqPage() {
   // accordion: clicking an item closes whichever was open.
   const [openIdx, setOpenIdx] = useState<number>(0);
 
+  useEffect(() => {
+    sendPageView("FAQ");
+  }, []);
+
   return (
     <div className="faq-page">
       <style>{FAQ_CSS}</style>
@@ -104,7 +113,11 @@ export function FaqPage() {
             <img src="/public/logo-landing.png" alt="EuNeném" className="faq-logo-img" />
           </a>
           <nav className="faq-nav-right">
-            <a className="faq-nav-link" href={FALAR_CONOSCO_HREF}>
+            <a
+              className="faq-nav-link"
+              href={FALAR_CONOSCO_HREF}
+              onClick={() => sendEvent("faq_contato_whatsapp_click", { origem: "topbar" })}
+            >
               falar conosco
             </a>
           </nav>
@@ -135,7 +148,13 @@ export function FaqPage() {
                     type="button"
                     className="faq-qa-head"
                     aria-expanded={open}
-                    onClick={() => setOpenIdx(open ? -1 : i)}
+                    onClick={() => {
+                      const next = open ? -1 : i;
+                      if (next !== -1) {
+                        sendEvent("faq_pergunta_expandida", { pergunta: flattenQ(item.q) });
+                      }
+                      setOpenIdx(next);
+                    }}
                   >
                     <span className="faq-qa-num" aria-hidden="true">
                       {num}
@@ -153,7 +172,13 @@ export function FaqPage() {
                           <span>
                             estamos finalizando esse detalhe com todo o cuidado ♡ se
                             precisar dessa resposta agora, é só{" "}
-                            <a className="faq-inline-link" href={FALAR_CONOSCO_HREF}>
+                            <a
+                              className="faq-inline-link"
+                              href={FALAR_CONOSCO_HREF}
+                              onClick={() =>
+                                sendEvent("faq_contato_whatsapp_click", { origem: "resposta_pendente" })
+                              }
+                            >
                               falar com a gente
                             </a>
                             .
@@ -180,7 +205,11 @@ export function FaqPage() {
             entre em contato com a gente ♡ estamos aqui pra te ajudar a criar o chá de
             bebê perfeito, com todo o carinho que esse momento merece.
           </p>
-          <a className="faq-btn-coral" href={FALAR_CONOSCO_HREF}>
+          <a
+            className="faq-btn-coral"
+            href={FALAR_CONOSCO_HREF}
+            onClick={() => sendEvent("faq_contato_whatsapp_click", { origem: "cta_final" })}
+          >
             falar conosco
           </a>
         </section>

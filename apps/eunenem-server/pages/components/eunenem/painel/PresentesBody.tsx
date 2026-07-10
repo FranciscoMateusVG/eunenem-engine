@@ -26,6 +26,7 @@ import { trpc } from "@/lib/trpc";
 // BancariosBody.tsx (the barrel drags the Postgres adapter's `pg` import
 // into the browser bundle).
 import { cpfValido } from "../../../../../../src/domain/arrecadacao/value-objects/dados-recebedor.js";
+import { sendEvent } from "@/lib/analytics";
 // aperture-jtamj — local PIX-key-type tuple (used to be inferred from the
 // pre-swap CriarRecebedorInputSchema discriminated union; Rex's flat wire
 // landed with the same string set so we keep the same vocabulary).
@@ -1681,7 +1682,10 @@ export function PresentesBody(props: PainelSectionBodyProps) {
               <button
                 type="button"
                 className="ex-sheet-cta green"
-                onClick={() => setTransferOpen(true)}
+                onClick={() => {
+                  sendEvent("resgate_valores_click", { origem: "extrato" });
+                  setTransferOpen(true);
+                }}
                 disabled={summary.disponivel === 0}
                 aria-disabled={summary.disponivel === 0 || undefined}
               >

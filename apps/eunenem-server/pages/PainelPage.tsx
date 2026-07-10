@@ -12,6 +12,7 @@ import { useContribuicaoList } from '@/lib/contribuicao';
 import { buildPainelMenu, PAINEL_DEMO, type PainelEventSnapshot } from '@/lib/mocks/painelDemo';
 import { needsOnboarding } from '@/lib/onboarding-gate';
 import { trpc } from '@/lib/trpc';
+import { sendPageView } from '@/lib/analytics';
 
 // /painel/:slug — creator dashboard (was /painel/[slug]/page.tsx in
 // eunenem-v2). v1 only recognises the "helena" slug; the App.tsx router
@@ -327,6 +328,7 @@ export function PainelPage({
       eventDate={eventDate}
       genero={genero}
     >
+      <PainelPageView slug={slug} />
       <PainelHeaderCard snapshot={snapshot} slug={slug} campanhaTitulo={campanhaTitulo} />
       <PainelMenu groups={groups} slug={slug} />
       <PainelTutorialTrigger
@@ -340,4 +342,14 @@ export function PainelPage({
       />
     </PainelLayout>
   );
+}
+
+// Renders nothing — fires the custom pageview exactly once per mount of the
+// real dashboard (never during the loading/onboarding gates above, which
+// return early before this component exists).
+function PainelPageView({ slug }: { slug: string }) {
+  useEffect(() => {
+    sendPageView('Painel', { slug });
+  }, [slug]);
+  return null;
 }

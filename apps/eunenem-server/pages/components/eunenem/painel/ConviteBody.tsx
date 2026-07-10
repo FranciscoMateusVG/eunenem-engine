@@ -17,6 +17,7 @@ import {
 } from "@/lib/convite";
 import { useCampanhaRota } from "@/lib/campanha-rota";
 import { painelConvitePreviewHref } from "@/lib/painelRoutes";
+import { sendEvent } from "@/lib/analytics";
 import {
   countdownTo,
   DEFAULT_STATE,
@@ -1494,6 +1495,7 @@ function DesktopConviteBody({ slug }: PainelSectionBodyProps) {
     if (!guardComplete()) return;
     try {
       await salvarConvite.mutateAsync(savePayloadFromConviteState(state));
+      sendEvent("convite_salvo");
       toast.success("convite salvo com carinho ♡");
     } catch (error) {
       toast.error("não foi possível salvar agora", {
@@ -1511,19 +1513,21 @@ function DesktopConviteBody({ slug }: PainelSectionBodyProps) {
       // NotAllowedError. The share URL is slug-derived and valid before the
       // save, so sharing doesn't depend on the mutation; we persist after.
       try {
-        await shareConvitePreview({
+        const resultado = await shareConvitePreview({
           slug,
           // aperture-2v91z — share THIS campanha's convite, not the oldest's.
           idCampanha,
           title: `Convite de ${state.babyName || 'nosso evento'}`,
           text: "Quero te mostrar este convite.",
         });
+        sendEvent("convite_compartilhado", { resultado });
       } catch {
         toast.error("não deu pra compartilhar agora", {
           description: "Tente novamente em um navegador com suporte ou copie o link depois.",
         });
       }
       await salvarConvite.mutateAsync(savePayloadFromConviteState(state));
+      sendEvent("convite_salvo");
     } catch (error) {
       toast.error("não foi possível salvar agora", {
         description: conviteErrorMessage(error),
@@ -1595,7 +1599,12 @@ function DesktopConviteBody({ slug }: PainelSectionBodyProps) {
         >
           {isSaving ? "salvando..." : "salvar"}
         </button>
-        <a href={painelConvitePreviewHref(slug, idCampanha)} className="cv-btn ghost sm" aria-label="ver convite salvo">
+        <a
+          href={painelConvitePreviewHref(slug, idCampanha)}
+          className="cv-btn ghost sm"
+          aria-label="ver convite salvo"
+          onClick={() => sendEvent("convite_ver_preview_click")}
+        >
           ver convite salvo
         </a>
       </header>
@@ -2190,8 +2199,10 @@ function StepFundo({ state, update, updateMany }: StepViewProps) {
 
   const removeUpload = () => update("bgUpload", null);
 
-  const selectTemplate = (tpl: Template) =>
+  const selectTemplate = (tpl: Template) => {
+    sendEvent("convite_modelo_selecionado", { template_id: tpl.id });
     updateMany(templateSelectionPatch(tpl));
+  };
 
   const selectNone = () => updateMany(scrapbookSelectionPatch());
 

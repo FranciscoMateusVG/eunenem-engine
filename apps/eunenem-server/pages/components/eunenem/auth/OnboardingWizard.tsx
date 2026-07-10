@@ -38,6 +38,7 @@ import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { paginaShareDisplayPrefix } from "@/lib/pagina-share";
 import type { Genero } from "@/lib/concordancia";
+import { sendEvent } from "@/lib/analytics";
 import { AUTH_CSS } from "./AuthModalShell";
 
 // aperture-84a21 — tipoEvento canonical kebab slugs (mirror PerfilBody +
@@ -261,6 +262,7 @@ export function OnboardingWizard({ onDone }: { onDone: (slug: string) => void })
         await atualizarPerfilCampanha.mutateAsync({ idCampanha, ...babyHalf });
       }
       await utils.auth.me.invalidate();
+      sendEvent("onboarding_concluido");
       onDone(finalSlug);
     } catch {
       // aperture-5ho5j — a profile write FAILED (perfil.atualizar or the

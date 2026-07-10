@@ -15,6 +15,7 @@ import { formatBRL } from "@/lib/formatBRL";
 import { paginaSharePath } from "@/lib/painelRoutes";
 import { getStripePromise } from "@/lib/stripeClient";
 import type { VisitorGift } from "@/lib/visitorGift";
+import { sendEvent } from "@/lib/analytics";
 
 // aperture-3xgch (scaffold) → aperture-ra027 (real wiring + metodo step)
 // → aperture-kx9bl (drop contribuinte form — Stripe is source of truth)
@@ -176,6 +177,7 @@ export function GiftCheckoutModal({
         idContribuicao: gift.availableId,
         metodo,
       });
+      sendEvent("checkout_iniciado", { valor_centavos: gift.valorCents, metodo });
       setPhase({ kind: "checkout", step: "stripe" });
     } catch {
       // Error state surfaces via iniciarPagamento.isError on the metodo step.

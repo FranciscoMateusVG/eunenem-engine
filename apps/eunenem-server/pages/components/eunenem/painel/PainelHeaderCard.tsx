@@ -8,6 +8,7 @@ import { useCampanhaSlugRota } from "@/lib/campanhas";
 import { paginaShareDisplayPath, paginaShareDisplayPrefix, paginaShareUrl } from "@/lib/pagina-share";
 import { painelHref } from "@/lib/painelRoutes";
 import { useCampanhaRota } from "@/lib/campanha-rota";
+import { sendEvent } from "@/lib/analytics";
 
 // aperture-9qu7k — Painel root hero composition (target screenshot 32).
 //
@@ -122,6 +123,7 @@ export function PainelHeaderCard({ snapshot, slug, campanhaTitulo }: Props) {
     } catch {
       // fall through — still toast as visual confirmation
     }
+    sendEvent("painel_compartilhar_link_click");
     setCopied(true);
     toast.success("link copiado ♡");
     setTimeout(() => setCopied(false), 1800);
@@ -247,6 +249,7 @@ export function PainelHeaderCard({ snapshot, slug, campanhaTitulo }: Props) {
         <a
           href={painelHref(slug, "presentes", idCampanha)}
           className="painel-recebido-cta"
+          onClick={() => sendEvent("resgate_valores_click")}
         >
           <span>resgatar valores</span>
           <svg

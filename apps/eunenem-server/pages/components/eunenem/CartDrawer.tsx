@@ -13,6 +13,7 @@ import { useCart, toSagaInput, type CartLine } from "@/lib/cart.js";
 import { useCampanhaRota } from "@/lib/campanha-rota";
 import { formatBRL } from "@/lib/formatBRL";
 import { getStripePromise } from "@/lib/stripeClient";
+import { sendEvent } from "@/lib/analytics";
 
 // Plan 0017 / aperture-16flf — visitor cart drawer + checkout flow.
 //
@@ -155,6 +156,11 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
           idContribuicao: item.idContribuicao,
           quantidade: item.quantidade,
         })),
+        metodo,
+      });
+      sendEvent("checkout_iniciado", {
+        valor_centavos: metodo === "pix" ? cart.totalPixCents : cart.totalCartaoCents,
+        quantidade_itens: cart.totalUnits,
         metodo,
       });
       setPhase({ kind: "checkout", step: "stripe" });
