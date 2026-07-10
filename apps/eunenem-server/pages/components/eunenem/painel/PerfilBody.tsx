@@ -616,9 +616,14 @@ function SlugEditor({
     onSuccess: () => {
       setConfirming(false);
       setServerError(null);
-      onChanged(draft);
       void utils.perfil.getPerfil.invalidate();
       toast.success("link da página atualizado ♡");
+      // aperture — the app has no client-side router: every other painel
+      // component (header card, "ver como convidado", menu hrefs) reads the
+      // slug straight from the URL path, which never changes without a real
+      // navigation. Without this, they'd keep pointing at the OLD slug even
+      // though the DB (and this form) already reflect the new one.
+      onChanged(draft);
     },
     onError: (err) => {
       setConfirming(false);
@@ -1231,7 +1236,19 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
 
       {/* 1 — Informações da página */}
       <PerfilSection icon={ico.user} title="informações da página" variant="lilac">
-        <SlugEditor currentSlug={profileSlug} onChanged={setProfileSlug} />
+        <SlugEditor
+          currentSlug={profileSlug}
+          onChanged={(newSlug) => {
+            setProfileSlug(newSlug);
+            // aperture — full navigation (not client state) is required: the
+            // route's :slug segment is the source of truth every other painel
+            // component reads from (header card link, "ver como convidado",
+            // menu hrefs). Without this they'd keep pointing at the OLD slug.
+            if (typeof window !== "undefined") {
+              window.location.assign(painelHref(newSlug, "perfil", idCampanha));
+            }
+          }}
+        />
 
         <div className="perfil-share">
           <span className="perfil-share-eyebrow">link da página</span>
