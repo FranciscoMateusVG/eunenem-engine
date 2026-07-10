@@ -17,6 +17,7 @@ import type { TrpcContext } from '../../../apps/eunenem-server/server/trpc/conte
 import { appRouter } from '../../../apps/eunenem-server/server/trpc/router.js';
 import { CampanhaRepositoryMemory } from '../../../src/adapters/arrecadacao/campanha-repository.memory.js';
 import { PerfilCampanhaRepositoryMemory } from '../../../src/adapters/arrecadacao/perfil-campanha-repository.memory.js';
+import { EventoRepositoryMemory } from '../../../src/adapters/evento/evento-repository.memory.js';
 import { ID_PLATAFORMA_EUNENEM } from '../../../src/adapters/plataforma/repository.memory.js';
 import { ObjectStorageMemory } from '../../../src/adapters/storage/object-storage.memory.js';
 import { PerfilCriadorRepositoryMemory } from '../../../src/adapters/usuario/perfil-criador-repository.memory.js';
@@ -97,6 +98,9 @@ async function buildRig(): Promise<Rig> {
     perfilCriadorRepository,
     perfilCampanhaRepository,
     campanhaRepository,
+    // aperture-mu1v9: tipoEvento/dataEvento now live on the eventos single
+    // source — perfilCampanha.atualizar writes it, the perfil reads read it.
+    eventoRepository: new EventoRepositoryMemory(),
     objectStorage: new ObjectStorageMemory(),
     plataformaRepository: {} as never,
     observability,

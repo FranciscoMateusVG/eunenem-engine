@@ -20,6 +20,7 @@ import {
   EmitirUrlUploadFotoInputSchema,
   emitirUrlUploadFoto,
   type IdCampanha,
+  type IdCampanhaEvento,
   type IdUsuario,
   PerfilProprioDTOSchema,
   PerfilPublicoDTOSchema,
@@ -29,7 +30,7 @@ import {
 } from '../../../../src/index.js';
 import { ID_PLATAFORMA_EUNENEM } from '../auth/setup.js';
 import type { TrpcContext } from './context.js';
-import { fotoUrlResolver } from './perfil-campanha-router.js';
+import { type EventoDataPair, fotoUrlResolver } from './perfil-campanha-router.js';
 import {
   CampanhaAcessoNegadoError,
   CampanhaInexistenteError,
@@ -91,11 +92,16 @@ function dateToIso(value: Date | null | undefined): string | null {
  * content (aperture-aphk8 shim). Same shape `obterPerfilCriador` produced —
  * OUTPUT CONTRACT UNCHANGED — but the baby-half now comes from the OLDEST
  * campanha's perfil_campanhas row instead of perfil_criadores.
+ *
+ * aperture-mu1v9: `tipoEvento`/`dataEvento` re-sourced from the campanha's
+ * `eventos` row (single source) — perfil_campanhas' copy is legacy (PR2
+ * drops the columns). DTO shape unchanged.
  */
 function mapPerfilProprioFromCampanha(
   usuario: { slug: string; nomeExibicao: string },
   conteudo: ConteudoPerfilCriador | undefined,
   fotoUrl: (key: string | null) => string | null,
+  evento: EventoDataPair | null | undefined,
 ): z.infer<typeof PerfilProprioDTOSchema> {
   const c = conteudo;
   return {
@@ -104,9 +110,9 @@ function mapPerfilProprioFromCampanha(
     nomeBebe: c?.nomeBebe ?? null,
     relacao: c?.relacao ?? null,
     historia: c?.historia ?? null,
-    tipoEvento: c?.tipoEvento ?? null,
+    tipoEvento: evento?.tipoEvento ?? null,
     genero: c?.genero ?? null,
-    dataEvento: dateToIso(c?.dataEvento),
+    dataEvento: dateToIso(evento?.dataHora),
     dataNascimento: dateToIso(c?.dataNascimento),
     fotoPerfilUrl: fotoUrl(c?.fotoPerfilKey ?? null),
     fotoCapaUrl: fotoUrl(c?.fotoCapaKey ?? null),
@@ -121,11 +127,16 @@ function mapPerfilProprioFromCampanha(
  * Build the PII-safe public DTO from Usuario identity + a campanha profile's
  * content (aperture-aphk8). OUTPUT SHAPE UNCHANGED from the perfil_criadores
  * era — `nomeExibicao` (creatorName) still comes from the Usuario.
+ *
+ * aperture-mu1v9: `tipoEvento`/`dataEvento` re-sourced from the campanha's
+ * `eventos` row (single source) — the public page date now always equals the
+ * convite date. DTO shape unchanged.
  */
 function mapPerfilPublicoFromCampanha(
   usuario: { slug: string; nomeExibicao: string },
   conteudo: ConteudoPerfilCriador | undefined,
   fotoUrl: (key: string | null) => string | null,
+  evento: EventoDataPair | null | undefined,
 ): z.infer<typeof PerfilPublicoDTOSchema> {
   const c = conteudo;
   return {
@@ -134,9 +145,9 @@ function mapPerfilPublicoFromCampanha(
     nomeBebe: c?.nomeBebe ?? null,
     relacao: c?.relacao ?? null,
     historia: c?.historia ?? null,
-    tipoEvento: c?.tipoEvento ?? null,
+    tipoEvento: evento?.tipoEvento ?? null,
     genero: c?.genero ?? null,
-    dataEvento: dateToIso(c?.dataEvento),
+    dataEvento: dateToIso(evento?.dataHora),
     dataNascimento: dateToIso(c?.dataNascimento),
     fotoPerfilUrl: fotoUrl(c?.fotoPerfilKey ?? null),
     fotoCapaUrl: fotoUrl(c?.fotoCapaKey ?? null),
@@ -190,11 +201,15 @@ export const perfilRouter = t.router({
         );
 
         const perfil = await ctx.deps.perfilCampanhaRepository.findByIdCampanha(campanha.id);
+        const evento = await ctx.deps.eventoRepository.findByIdCampanha(
+          campanha.id as IdCampanhaEvento,
+        );
 
         return mapPerfilProprioFromCampanha(
           { slug: usuario.slug, nomeExibicao },
           perfil?.conteudo,
           fotoUrlResolver(ctx.deps.objectStorage),
+          evento,
         );
       } catch (err) {
         throw toTRPCError(err);
@@ -209,10 +224,14 @@ export const perfilRouter = t.router({
       // unchanged.
       const { usuario, campanha } = await resolverCampanhaAdministrada(ctx);
       const perfil = await ctx.deps.perfilCampanhaRepository.findByIdCampanha(campanha.id);
+      const evento = await ctx.deps.eventoRepository.findByIdCampanha(
+        campanha.id as IdCampanhaEvento,
+      );
       return mapPerfilProprioFromCampanha(
         usuario,
         perfil?.conteudo,
         fotoUrlResolver(ctx.deps.objectStorage),
+        evento,
       );
     } catch (err) {
       throw toTRPCError(err);
@@ -297,11 +316,15 @@ export const perfilRouter = t.router({
         const perfil = campanha
           ? await deps.perfilCampanhaRepository.findByIdCampanha(campanha.id)
           : undefined;
+        const evento = campanha
+          ? await deps.eventoRepository.findByIdCampanha(campanha.id as IdCampanhaEvento)
+          : undefined;
 
         return mapPerfilPublicoFromCampanha(
           usuario,
           perfil?.conteudo,
           fotoUrlResolver(ctx.deps.objectStorage),
+          evento,
         );
       } catch (err) {
         throw toTRPCError(err);

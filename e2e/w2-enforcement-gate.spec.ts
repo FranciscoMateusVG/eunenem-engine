@@ -183,7 +183,10 @@ test.describe('W2 enforcement gate — required idCampanha (aperture-8r5kp)', ()
       valor: 5_000,
       quantidade: 1,
     });
-    expect(created?.ids?.[0], 'addressed contribuicao.create must return the new item id').toBeTruthy();
+    expect(
+      created?.ids?.[0],
+      'addressed contribuicao.create must return the new item id',
+    ).toBeTruthy();
     // eventoConvite.save on B (upsert) → success.
     await trpcMutation(api, 'eventoConvite.save', conviteSaveInput('Bebe Gate B W2', campB.id));
     // adicionarConvidado on B → success (requires numeroCelular too).

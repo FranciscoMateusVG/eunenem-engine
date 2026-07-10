@@ -27,13 +27,18 @@ import {
   criarPerfilCampanha,
   EmitirUrlUploadFotoCampanhaInputSchema,
   emitirUrlUploadFotoCampanha,
+  type Evento,
+  EventoInputInvalidoError,
   GeneroBebeSchema,
   type IdCampanha,
+  type IdCampanhaEvento,
+  type IdEvento,
   type IdPerfilCampanha,
   type ObjectStorage,
   type PerfilCampanha,
   type PerfilCampanhaRepository,
   TipoEventoPerfilSchema,
+  upsertEventoParcial,
 } from '../../../../src/index.js';
 import type { TrpcContext } from './context.js';
 import {
@@ -55,6 +60,10 @@ function toTRPCError(err: unknown): TRPCError {
     return new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err.message, cause: err });
   }
   if (err instanceof ArrecadacaoInputInvalidoError) {
+    return new TRPCError({ code: 'BAD_REQUEST', message: err.message, cause: err });
+  }
+  // aperture-mu1v9: the evento-pair upsert validates its own input.
+  if (err instanceof EventoInputInvalidoError) {
     return new TRPCError({ code: 'BAD_REQUEST', message: err.message, cause: err });
   }
   return err instanceof Error
@@ -94,14 +103,26 @@ function dateToIso(value: Date | null | undefined): string | null {
 }
 
 /**
+ * The (tipoEvento, dataEvento) pair as sourced from the campanha's `eventos`
+ * row (aperture-mu1v9 single source). `null`/`undefined` evento → both null.
+ */
+export type EventoDataPair = Pick<Evento, 'tipoEvento' | 'dataHora'>;
+
+/**
  * Map a campanha id + (possibly absent) profile content to the DTO. A
  * campanha with no perfil_campanhas row yet renders as all-null content —
  * the form shows empty, not an error.
+ *
+ * aperture-mu1v9: `tipoEvento`/`dataEvento` are NO LONGER read from the
+ * perfil content — they come from the campanha's `eventos` row (single
+ * source; the perfil copy is legacy and is dropped in PR2). DTO SHAPE
+ * UNCHANGED — only the sourcing moved.
  */
 export function toPerfilCampanhaDTO(
   idCampanha: string,
   conteudo: ConteudoPerfilCriador | undefined,
   fotoUrl: (key: string | null) => string | null,
+  evento: EventoDataPair | null | undefined,
 ): PerfilCampanhaDTO {
   const c = conteudo;
   return {
@@ -109,9 +130,9 @@ export function toPerfilCampanhaDTO(
     nomeBebe: c?.nomeBebe ?? null,
     relacao: c?.relacao ?? null,
     historia: c?.historia ?? null,
-    tipoEvento: c?.tipoEvento ?? null,
+    tipoEvento: evento?.tipoEvento ?? null,
     genero: c?.genero ?? null,
-    dataEvento: dateToIso(c?.dataEvento),
+    dataEvento: dateToIso(evento?.dataHora),
     dataNascimento: dateToIso(c?.dataNascimento),
     fotoPerfilUrl: fotoUrl(c?.fotoPerfilKey ?? null),
     fotoCapaUrl: fotoUrl(c?.fotoCapaKey ?? null),
@@ -167,9 +188,14 @@ export interface UpsertConteudoPerfilCampanhaDeps {
  *   - existing row → replace content + bump atualizadoEm (id + criadoEm
  *     preserved by the adapter's 1:1 upsert); none → create fresh.
  *
- * Exported for the perfil-router transitional shim (dual-write of the
- * oldest campanha's baby-half). Auth is NOT enforced here — callers
- * owner-gate `idCampanha` first.
+ * (Was exported for the perfil-router transitional shim; the shim died in
+ * aperture-hsxim — the export remains for tests.) Auth is NOT enforced here
+ * — callers owner-gate `idCampanha` first.
+ *
+ * aperture-mu1v9: `tipoEvento`/`dataEvento` are STRIPPED from the perfil row
+ * (written as null — the ConteudoPerfilCriador VO still carries the fields
+ * until PR2 drops the columns). The pair is routed to the `eventos` single
+ * source via `upsertEventoParcial` by the atualizar procedure, NOT here.
  */
 export async function upsertConteudoPerfilCampanha(
   deps: UpsertConteudoPerfilCampanhaDeps,
@@ -182,6 +208,10 @@ export async function upsertConteudoPerfilCampanha(
 
   const conteudoParsed = ConteudoPerfilCriadorSchema.safeParse({
     ...conteudoInput,
+    // aperture-mu1v9: never persisted on the perfil row anymore — the pair
+    // lives on `eventos` (PR2 drops these perfil_campanhas columns).
+    tipoEvento: null,
+    dataEvento: null,
     fotoPerfilKey: normalizarKey(conteudoInput.fotoPerfilKey),
     fotoCapaKey: normalizarKey(conteudoInput.fotoCapaKey),
     fotoHistoriaKey: normalizarKey(conteudoInput.fotoHistoriaKey),
@@ -219,10 +249,16 @@ export const perfilCampanhaRouter = t.router({
       try {
         const { campanha } = await resolverCampanhaAdministrada(ctx, input.idCampanha);
         const perfil = await ctx.deps.perfilCampanhaRepository.findByIdCampanha(campanha.id);
+        // aperture-mu1v9: (tipoEvento, dataEvento) come from the campanha's
+        // eventos row — the single source shared with the convite.
+        const evento = await ctx.deps.eventoRepository.findByIdCampanha(
+          campanha.id as IdCampanhaEvento,
+        );
         return toPerfilCampanhaDTO(
           campanha.id,
           perfil?.conteudo,
           fotoUrlResolver(ctx.deps.objectStorage),
+          evento,
         );
       } catch (err) {
         throw toTRPCError(err);
@@ -252,10 +288,30 @@ export const perfilCampanhaRouter = t.router({
           conteudoInput,
         );
 
+        // aperture-mu1v9: the (tipoEvento, dataEvento) pair is routed to the
+        // eventos single source (whole-pair replacement, matching this
+        // endpoint's whole-content semantics). The wizard's write thereby
+        // SEEDS the evento row; a saved convite's modalidade/endereco are
+        // preserved by upsertEventoParcial.
+        const evento = await upsertEventoParcial(
+          {
+            eventoRepository: ctx.deps.eventoRepository,
+            clock: ctx.deps.clock,
+            observability: ctx.deps.observability,
+          },
+          {
+            id: randomUUID() as IdEvento,
+            idCampanha: campanha.id as IdCampanhaEvento,
+            tipoEvento: conteudoInput.tipoEvento,
+            dataHora: conteudoInput.dataEvento,
+          },
+        );
+
         return toPerfilCampanhaDTO(
           campanha.id,
           perfil.conteudo,
           fotoUrlResolver(ctx.deps.objectStorage),
+          evento,
         );
       } catch (err) {
         throw toTRPCError(err);

@@ -93,6 +93,11 @@ describe('Migration round-trip', () => {
     const eventoDataHoraCol = await getColumn(db, 'eventos', 'data_hora');
     expect(eventoDataHoraCol?.is_nullable).toBe('YES');
 
+    // 037 unify_evento_data_single_source (aperture-mu1v9): eventos rows may
+    // be PARTIAL — modalidade AND tipo_evento are optional post-migration.
+    expect((await getColumn(db, 'eventos', 'modalidade'))?.is_nullable).toBe('YES');
+    expect((await getColumn(db, 'eventos', 'tipo_evento'))?.is_nullable).toBe('YES');
+
     // ── Roll back the post-evento migrations first (latest → earliest),
     //    so the subsequent evento down-step actually targets the evento
     //    migration. Each migrateDown() unwinds exactly the current tip, so
@@ -114,13 +119,22 @@ describe('Migration round-trip', () => {
     //    note above; renaming a DEPLOYED migration is forbidden because
     //    kysely_migration keys on the filename and would re-run it).
 
-    // 035 eventos_data_hora_nullable → the actual TIP ('e' sorts after 'c'),
-    //   so the FIRST migrateDown unwinds it: data_hora back to NOT NULL.
+    // 037 unify_evento_data_single_source (aperture-mu1v9) → the actual TIP
+    //   (20260710_037 sorts last), so the FIRST migrateDown unwinds it:
+    //   modalidade + tipo_evento back to NOT NULL (shape-only/lossy down —
+    //   see the migration's comment).
+    const downUnifyEventoData = await migrator.migrateDown();
+    expect(downUnifyEventoData.error).toBeUndefined();
+    expect((await getColumn(db, 'eventos', 'modalidade'))?.is_nullable).toBe('NO');
+    expect((await getColumn(db, 'eventos', 'tipo_evento'))?.is_nullable).toBe('NO');
+
+    // 035 eventos_data_hora_nullable → the SECOND migrateDown ('e' sorts
+    //   after 'c'): data_hora back to NOT NULL.
     const downEventosDataHora = await migrator.migrateDown();
     expect(downEventosDataHora.error).toBeUndefined();
     expect((await getColumn(db, 'eventos', 'data_hora'))?.is_nullable).toBe('NO');
 
-    // 035 create_perfil_campanhas (aperture-aphk8) → the SECOND migrateDown.
+    // 035 create_perfil_campanhas (aperture-aphk8) → the THIRD migrateDown.
     //   Its down() drops the perfil_campanhas table, the campanhas_slug_idx
     //   index, and the campanhas.slug column.
     const downPerfilCampanhas = await migrator.migrateDown();

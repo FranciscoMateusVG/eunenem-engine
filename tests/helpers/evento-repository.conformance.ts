@@ -57,6 +57,22 @@ export function describeEventoRepositoryConformance(name: string, options: Confo
       expect(found).toEqual(evento);
     });
 
+    it('round-trips a PARTIAL wizard-seeded row (modalidade + dataHora null) — aperture-mu1v9', async () => {
+      const evento = makeEvento({ modalidade: null, dataHora: null, endereco: null });
+      await options.saveEvento(repo, evento);
+
+      const found = await repo.findById(evento.id);
+      expect(found).toEqual(evento);
+    });
+
+    it('round-trips a date-only partial row (tipoEvento null) — aperture-mu1v9', async () => {
+      const evento = makeEvento({ tipoEvento: null, modalidade: null, endereco: null });
+      await options.saveEvento(repo, evento);
+
+      const found = await repo.findByIdCampanha(evento.idCampanha);
+      expect(found).toEqual(evento);
+    });
+
     it('returns undefined for unknown IDs', async () => {
       expect(await repo.findById(randomUUID())).toBeUndefined();
       expect(await repo.findByIdCampanha(randomUUID())).toBeUndefined();

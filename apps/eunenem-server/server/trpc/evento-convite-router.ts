@@ -134,8 +134,12 @@ const SaveEventoConviteInputSchema = z.object({
 
 const EventoSnapshotSchema = z.object({
   id: z.string().uuid(),
-  tipoEvento: TipoEventoSchema,
-  modalidade: ModalidadeEventoSchema,
+  // aperture-mu1v9: the eventos row may be PARTIAL (wizard-seeded via
+  // upsertEventoParcial — tipo/data only, modalidade/endereco null). The
+  // SAVE input below stays strict (tipoEvento + modalidade required): the
+  // domain pin is that a publishable convite carries both.
+  tipoEvento: TipoEventoSchema.nullable(),
+  modalidade: ModalidadeEventoSchema.nullable(),
   dataHoraIso: z.string().datetime().nullable(),
   endereco: z.string().nullable(),
 });

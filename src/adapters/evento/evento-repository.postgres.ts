@@ -117,8 +117,8 @@ export class EventoRepositoryPostgres implements EventoRepository {
 function toEvento(row: {
   id: string;
   id_campanha: string;
-  tipo_evento: string;
-  modalidade: string;
+  tipo_evento: string | null;
+  modalidade: string | null;
   data_hora: Date | null;
   endereco: string | null;
   criado_em: Date;
