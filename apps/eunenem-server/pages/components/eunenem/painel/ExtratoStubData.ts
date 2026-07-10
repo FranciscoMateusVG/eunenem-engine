@@ -326,27 +326,26 @@ export function useStubSolicitarTransferencia(opts: {
  * The `slug` param remains informational — the session + route carry the
  * real resolution.
  *
- * ⚠️ KNOWN EDGE (per-campanha recebedor): `hasRecebedor` still reflects the
- * DEFAULT campanha's recebedor (auth.me has no per-campanha read). On a
- * non-default campanha the TransferModal may open the wrong branch; the
- * owner-gated mutation keeps it SAFE (server rejects), just not pretty.
- * Tracked as a follow-up with Rex (per-campanha hasRecebedor read).
+ * aperture — recebedor-per-campanha unification FIXES the previously-known
+ * edge here: `hasRecebedor` used to reflect ONLY the DEFAULT campanha's
+ * recebedor (`auth.me`'s `hasRecebedor` has no per-campanha read), so on a
+ * non-default campanha the TransferModal could open the wrong branch. Now
+ * `hasRecebedor` is derived from `recebedor.get({ idCampanha })` — the SAME
+ * campanha-scoped query BancariosBody.tsx uses to hydrate its form — so the
+ * onboarding-vs-confirm branch is correct for whichever campanha is routed.
  *
  * NAMING NOTE: the "Stub" in these hook names is historical (pre-7g5sx) —
- * the bodies call REAL tRPC. The lie in the names mis-diagnosed Bug 2 once
- * already; rename tracked in the same follow-up.
+ * the bodies call REAL tRPC.
  */
 export function useStubCampanhaIdForSlug(_slug: string): {
   idCampanha: string | null;
   /**
-   * Whether the authenticated user has a recebedor configured on the
-   * default campanha. Drives the TransferModal's onboarding-vs-confirm
-   * branch (aperture-kbmel + aperture-jtamj swap-over).
+   * Whether the ROUTED campanha (idCampanha above) has a recebedor
+   * configured. Drives the TransferModal's onboarding-vs-confirm branch
+   * (aperture-kbmel + aperture-jtamj swap-over).
    *
-   * Real source: trpc.auth.me carries `hasRecebedor: boolean` (Rex's
-   * Phase A #193 — derived from campanha?.idRecebedor != null with no
-   * extra DB call). Null campanha (pre-p8i01 backfill caveat) AND
-   * null recebedor both surface as false, both routing to the onboarding
+   * Derived from `recebedor.get({ idCampanha })` — `null` (no data yet, or
+   * genuinely no recebedor) surfaces as `false`, routing to the onboarding
    * embed.
    */
   hasRecebedor: boolean;
@@ -357,11 +356,22 @@ export function useStubCampanhaIdForSlug(_slug: string): {
   // Route campanha (clicked /c/:id) OUTRANKS the session default — this is
   // the single line that makes every extrato surface per-campanha.
   const idCampanhaRota = useCampanhaRota();
+  const idCampanha = idCampanhaRota ?? me.data?.idCampanha ?? null;
+
+  const recebedorQuery = trpc.recebedor.get.useQuery(
+    { idCampanha: idCampanha ?? "" },
+    { enabled: idCampanha !== null && isUuid(idCampanha) },
+  );
+
   return {
-    idCampanha: idCampanhaRota ?? me.data?.idCampanha ?? null,
-    hasRecebedor: me.data?.hasRecebedor ?? false,
-    isLoading: me.isLoading,
-    error: me.error ? { message: me.error.message } : null,
+    idCampanha,
+    hasRecebedor: recebedorQuery.data != null,
+    isLoading: me.isLoading || recebedorQuery.isLoading,
+    error: me.error
+      ? { message: me.error.message }
+      : recebedorQuery.error
+        ? { message: recebedorQuery.error.message }
+        : null,
   };
 }
 

@@ -1,17 +1,17 @@
 import { SpanStatusCode } from '@opentelemetry/api';
 import { z } from 'zod/v4';
-import type { ResgatePendenteRepository } from '../../adapters/usuario/resgate-pendente-repository.js';
-import { IdUsuarioSchema } from '../../domain/usuario/value-objects/ids.js';
-import { UsuarioInputInvalidoError } from '../../errors/usuario/input-invalido.error.js';
+import type { ResgatePendenteRepository } from '../../adapters/arrecadacao/resgate-pendente-repository.js';
+import { IdCampanhaSchema } from '../../domain/arrecadacao/value-objects/ids.js';
+import { ArrecadacaoInputInvalidoError } from '../../errors/arrecadacao/input-invalido.error.js';
 import type { Observability } from '../../observability/observability.js';
 
 /**
  * Input for the "resgate pendente" marker (aperture-kj9el #4b). Only the
- * caller's id is needed — no bank data is involved; this records the intent
+ * campanha's id is needed — no bank data is involved; this records the intent
  * to fill it in later ("preencher depois / estou fazendo para um amigo").
  */
 export const MarcarResgatePendenteInputSchema = z.object({
-  idUsuario: IdUsuarioSchema,
+  idCampanha: IdCampanhaSchema,
 });
 
 export type MarcarResgatePendenteInput = z.infer<typeof MarcarResgatePendenteInputSchema>;
@@ -27,14 +27,15 @@ export interface MarcarResgatePendenteDeps {
 }
 
 /**
- * Record (upsert) the caller's "resgate pendente" marker (1:1 with Usuario).
- * `pendente_desde` and `criado_em` are both stamped with `clock()`. Auth is
- * NOT enforced here — the tRPC procedure derives `idUsuario` from the session
- * and passes it in (keeps the use-case unit-testable). Invalid input →
- * `UsuarioInputInvalidoError` (mapped to BAD_REQUEST by the router).
+ * Record (upsert) the campanha's "resgate pendente" marker (1:1 with
+ * Campanha). `pendente_desde` and `criado_em` are both stamped with
+ * `clock()`. Auth is NOT enforced here — the tRPC procedure resolves +
+ * authorizes the campanha and passes its id in (keeps the use-case
+ * unit-testable). Invalid input → `ArrecadacaoInputInvalidoError` (mapped to
+ * BAD_REQUEST by the router).
  *
- * The marker is CLEARED when the user later saves full receiving data — see
- * `salvarDadosRecebimentoUsuario`.
+ * The marker is CLEARED when the campanha's recebedor is later saved — see
+ * `criarRecebedorParaCampanha`/`alterarDadosRecebedorCampanha`.
  */
 export async function marcarResgatePendente(
   deps: MarcarResgatePendenteDeps,
@@ -48,16 +49,16 @@ export async function marcarResgatePendente(
       const parsed = MarcarResgatePendenteInputSchema.safeParse(input);
       if (!parsed.success) {
         const message = parsed.error.issues.map((i) => i.message).join('; ');
-        throw new UsuarioInputInvalidoError(message);
+        throw new ArrecadacaoInputInvalidoError(message);
       }
 
-      const { idUsuario } = parsed.data;
-      span.setAttribute('usuario.id', idUsuario);
+      const { idCampanha } = parsed.data;
+      span.setAttribute('arrecadacao.campanha.id', idCampanha);
 
       const now = clock();
-      await resgatePendenteRepository.marcarPendente(idUsuario, now, now);
+      await resgatePendenteRepository.marcarPendente(idCampanha, now, now);
 
-      logger.info('usuario.resgate_pendente.marcado', { idUsuario });
+      logger.info('arrecadacao.resgate_pendente.marcado', { idCampanha });
       span.setStatus({ code: SpanStatusCode.OK });
       return { pendenteDesde: now };
     } catch (error) {

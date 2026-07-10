@@ -1,17 +1,18 @@
 /**
  * aperture-zt9ch — API/router-level regression test for the CPF-immutability
- * guard (backend defense-in-depth, merged via engine #298).
+ * guard (backend defense-in-depth, merged via engine #298; ported to the
+ * campanha-scoped recebedor.atualizar procedure during the recebedor-per-
+ * campanha unification).
  *
- * The frontend CPF disable (#296) is cosmetic/bypassable. The REAL enforcement
- * is the backend guard in `salvarDadosRecebimentoUsuario`: once a 'conta'
- * record has a non-empty `cpfTitular`, a save that submits a DIFFERENT
- * `cpfTitular` throws `UsuarioInputInvalidoError`, which the tRPC router maps
- * to a `BAD_REQUEST` `TRPCError` via `toTRPCError`.
+ * The frontend CPF disable is cosmetic/bypassable. The REAL enforcement is
+ * the backend guard in `recebedor.atualizar`: once a campanha's active
+ * recebedor has a non-empty `cpfTitular`, a save that submits a DIFFERENT
+ * `cpfTitular` throws `ArrecadacaoInputInvalidoError`, which the tRPC router
+ * maps to a `BAD_REQUEST` `TRPCError` via `toTRPCError`.
  *
- * Rex covered the USE-CASE level (tests/unit/usuario/dados-recebimento-usuario
- * .test.ts). THIS test is the ROUTER/API-level net: it drives a real
- * authenticated tRPC caller (session cookie → resolverUsuarioAutenticado) at
- * `dadosRecebimento.salvar` and proves a direct API call cannot mutate a saved
+ * THIS test is the ROUTER/API-level net: it drives a real authenticated tRPC
+ * caller (session cookie → resolverUsuarioAutenticado) at
+ * `recebedor.atualizar` and proves a direct API call cannot mutate a saved
  * CPF — the guard is wired into the API path AND error-mapped to a clean
  * client error. Follows the existing authed-router integration convention
  * (eunenem-server-evento-convite-router-auth.test.ts): appRouter.createCaller
@@ -19,7 +20,7 @@
  * deps.
  *
  * CPFs (checksum-valid, so they pass schema validation and REACH the guard
- * rather than being rejected for bad format — same pair Rex used):
+ * rather than being rejected for bad format):
  *   A = '52998224725'   B = '11144477735'
  */
 import { randomUUID } from 'node:crypto';
@@ -31,6 +32,7 @@ import { CampanhaRepositoryMemory } from '../../src/adapters/arrecadacao/campanh
 import { ContribuicaoRepositoryMemory } from '../../src/adapters/arrecadacao/contribuicao-repository.memory.js';
 import { PerfilCampanhaRepositoryMemory } from '../../src/adapters/arrecadacao/perfil-campanha-repository.memory.js';
 import { RecebedorRepositoryMemory } from '../../src/adapters/arrecadacao/recebedor-repository.memory.js';
+import { ResgatePendenteRepositoryMemory } from '../../src/adapters/arrecadacao/resgate-pendente-repository.memory.js';
 import { ConviteRepositoryMemory } from '../../src/adapters/evento/convite-repository.memory.js';
 import { EventoRepositoryMemory } from '../../src/adapters/evento/evento-repository.memory.js';
 import { PagamentoEventPublisherMemory } from '../../src/adapters/pagamentos/event-publisher.memory.js';
@@ -46,14 +48,9 @@ import {
   REGRAS_TAXA_SEED,
 } from '../../src/adapters/taxas/regra-provider.memory.js';
 import { AuthServiceMemoria } from '../../src/adapters/usuario/auth-service.memory.js';
-import { DadosRecebimentoRepositoryMemory } from '../../src/adapters/usuario/dados-recebimento-repository.memory.js';
 import { UsuarioRepositoryMemory } from '../../src/adapters/usuario/repository.memory.js';
-import { ResgatePendenteRepositoryMemory } from '../../src/adapters/usuario/resgate-pendente-repository.memory.js';
 import { WebhookEventArchiveMemory } from '../../src/adapters/webhook-archive/webhook-event-archive.memory.js';
-import type {
-  DadosRecebedor,
-  DadosRecebedorConta,
-} from '../../src/domain/arrecadacao/value-objects/dados-recebedor.js';
+import type { DadosRecebedorConta } from '../../src/domain/arrecadacao/value-objects/dados-recebedor.js';
 import { NoopLogger } from '../../src/observability/noop-logger.js';
 import type { Observability } from '../../src/observability/observability.js';
 import { noopTracer } from '../../src/observability/tracer.js';
@@ -82,14 +79,15 @@ const CONTA_A: DadosRecebedorConta = {
 
 interface TestRig {
   caller: ReturnType<typeof appRouter.createCaller>;
-  dadosRecebimentoRepository: DadosRecebimentoRepositoryMemory;
-  idUsuario: string;
+  recebedorRepository: RecebedorRepositoryMemory;
+  idCampanha: string;
 }
 
 /**
- * Build an AUTHENTICATED tRPC caller for a fresh random user U. Mirrors the
- * convite router-auth integration test: a real session token resolved from a
- * cookie header, the appRouter constructed against memory repos.
+ * Build an AUTHENTICATED tRPC caller for a fresh random user U, with their
+ * signup-saga default campanha. Mirrors the convite router-auth integration
+ * test: a real session token resolved from a cookie header, the appRouter
+ * constructed against memory repos.
  */
 async function buildRig(): Promise<TestRig> {
   const observability: Observability = {
@@ -114,7 +112,6 @@ async function buildRig(): Promise<TestRig> {
   );
   const provedorRegraTaxa = new ProvedorRegraTaxaMemory(REGRAS_TAXA_SEED);
   const webhookEventArchive = new WebhookEventArchiveMemory();
-  const dadosRecebimentoRepository = new DadosRecebimentoRepositoryMemory();
   const resgatePendenteRepository = new ResgatePendenteRepositoryMemory();
 
   const deps: ServerDeps = {
@@ -135,7 +132,6 @@ async function buildRig(): Promise<TestRig> {
     pagamentoEventPublisher,
     livroFinanceiroRepository,
     provedorRegraTaxa,
-    dadosRecebimentoRepository,
     resgatePendenteRepository,
     observability,
     clock: () => new Date('2026-06-11T12:00:00.000Z'),
@@ -147,9 +143,10 @@ async function buildRig(): Promise<TestRig> {
   };
 
   const idUsuario = randomUUID();
+  const idConta = randomUUID();
   const email = `cpf-${idUsuario}@example.com`;
 
-  await registrarContaUsuario(
+  const registro = await registrarContaUsuario(
     {
       usuarioRepository,
       plataformaRepository,
@@ -161,7 +158,7 @@ async function buildRig(): Promise<TestRig> {
     },
     {
       idUsuario,
-      idConta: randomUUID(),
+      idConta,
       idPlataforma: ID_PLATAFORMA_EUNENEM,
       email,
       nomeExibicao: 'Francisco',
@@ -192,40 +189,49 @@ async function buildRig(): Promise<TestRig> {
 
   return {
     caller: appRouter.createCaller(authCtx),
-    dadosRecebimentoRepository,
-    // resolverUsuarioAutenticado derives idUsuario from the session; this is
-    // the same user, exposed for repo-state assertions.
-    idUsuario,
+    recebedorRepository,
+    idCampanha: registro.campanha.id,
   };
 }
 
 /** Narrow the persisted VO to the 'conta' variant for cpf assertions. */
-function storedConta(dados: DadosRecebedor | undefined): DadosRecebedorConta {
-  if (!dados || dados.metodo !== 'conta') {
-    throw new Error(`expected a stored 'conta' record, got ${dados?.metodo ?? 'undefined'}`);
+function storedConta(
+  dados: ReturnType<RecebedorRepositoryMemory['findAtivoByCampanhaId']> extends Promise<infer R>
+    ? R
+    : never,
+): DadosRecebedorConta {
+  const d = dados?.dadosRecebedor;
+  if (!d || d.metodo !== 'conta') {
+    throw new Error(`expected a stored 'conta' record, got ${d?.metodo ?? 'undefined'}`);
   }
-  return dados;
+  return d;
 }
 
-describe('aperture-zt9ch — dadosRecebimento.salvar CPF immutability (router/API level)', () => {
+describe('aperture-zt9ch — recebedor.atualizar CPF immutability (router/API level)', () => {
   it('rejects a direct API call that mutates a saved cpfTitular (BAD_REQUEST), leaving it unchanged; allows non-CPF edits', async () => {
     const rig = await buildRig();
 
     // ── 1. Initial save: conta with cpfTitular=A → succeeds, stored as A. ──
-    const saved = await rig.caller.dadosRecebimento.salvar(CONTA_A);
+    const saved = await rig.caller.recebedor.atualizar({
+      idCampanha: rig.idCampanha,
+      dadosRecebedor: CONTA_A,
+    });
     expect(saved.metodo === 'conta' && saved.cpfTitular).toBe(CPF_A);
 
-    const afterFirst = await rig.dadosRecebimentoRepository.findByUsuarioId(rig.idUsuario as never);
-    expect(storedConta(afterFirst?.dados).cpfTitular).toBe(CPF_A);
+    const afterFirst = await rig.recebedorRepository.findAtivoByCampanhaId(rig.idCampanha as never);
+    expect(storedConta(afterFirst).cpfTitular).toBe(CPF_A);
 
-    // ── 2. ⭐ THE PIN: re-save same user, DIFFERENT valid CPF=B via the
+    // ── 2. ⭐ THE PIN: re-save same campanha, DIFFERENT valid CPF=B via the
     //        authed caller → must be REJECTED as a clean BAD_REQUEST
     //        TRPCError (NOT a 500/INTERNAL — the guard must surface as a
     //        client error). We capture the thrown error and assert its shape
     //        directly rather than weakening to a string match. ──
     let thrown: unknown;
     try {
-      await rig.caller.dadosRecebimento.salvar({ ...CONTA_A, cpfTitular: CPF_B });
+      await rig.caller.recebedor.atualizar({
+        idCampanha: rig.idCampanha,
+        dadosRecebedor: { ...CONTA_A, cpfTitular: CPF_B },
+      });
     } catch (err) {
       thrown = err;
     }
@@ -244,30 +250,32 @@ describe('aperture-zt9ch — dadosRecebimento.salvar CPF immutability (router/AP
     // Belt-and-suspenders: rejects-matcher form (the convite router-test
     // convention), asserting the mapped code.
     await expect(
-      rig.caller.dadosRecebimento.salvar({ ...CONTA_A, cpfTitular: CPF_B }),
+      rig.caller.recebedor.atualizar({
+        idCampanha: rig.idCampanha,
+        dadosRecebedor: { ...CONTA_A, cpfTitular: CPF_B },
+      }),
     ).rejects.toMatchObject({ name: 'TRPCError', code: 'BAD_REQUEST' });
 
     // ── 3. After the rejected attempt, the stored CPF is STILL A — the
     //        mutation was rejected, not partially applied. ──
-    const afterReject = await rig.dadosRecebimentoRepository.findByUsuarioId(
-      rig.idUsuario as never,
+    const afterReject = await rig.recebedorRepository.findAtivoByCampanhaId(
+      rig.idCampanha as never,
     );
-    expect(storedConta(afterReject?.dados).cpfTitular).toBe(CPF_A);
+    expect(storedConta(afterReject).cpfTitular).toBe(CPF_A);
 
-    // ── 4. CONTROL: same user, SAME CPF=A but a CHANGED bank field
+    // ── 4. CONTROL: same campanha, SAME CPF=A but a CHANGED bank field
     //        (agencia + conta) → must SUCCEED. Proves the guard blocks only
     //        CHANGING the cpf, not legitimate edits to other fields (i.e. the
     //        rejection is CPF-specific, not a blanket re-save block). ──
-    const legitimateEdit = await rig.caller.dadosRecebimento.salvar({
-      ...CONTA_A,
-      agencia: '9999',
-      conta: '11111',
+    const legitimateEdit = await rig.caller.recebedor.atualizar({
+      idCampanha: rig.idCampanha,
+      dadosRecebedor: { ...CONTA_A, agencia: '9999', conta: '11111' },
     });
     expect(legitimateEdit.metodo === 'conta' && legitimateEdit.cpfTitular).toBe(CPF_A);
     expect(legitimateEdit.metodo === 'conta' && legitimateEdit.agencia).toBe('9999');
 
-    const afterEdit = await rig.dadosRecebimentoRepository.findByUsuarioId(rig.idUsuario as never);
-    expect(storedConta(afterEdit?.dados).cpfTitular).toBe(CPF_A);
-    expect(storedConta(afterEdit?.dados).agencia).toBe('9999');
+    const afterEdit = await rig.recebedorRepository.findAtivoByCampanhaId(rig.idCampanha as never);
+    expect(storedConta(afterEdit).cpfTitular).toBe(CPF_A);
+    expect(storedConta(afterEdit).agencia).toBe('9999');
   });
 });

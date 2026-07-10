@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import type { PainelSectionBodyProps } from "@/PainelSectionPage";
+import { useCampanhaEscrita } from "@/lib/campanha-escrita";
 import { trpc } from "@/lib/trpc";
 import {
   ACCOUNT_TYPES,
@@ -340,6 +341,12 @@ const PIX_ICON: Record<PixType["v"], (p: IconProps) => React.ReactNode> = {
 
 export function BancariosBody(_props: PainelSectionBodyProps) {
   const utils = trpc.useUtils();
+  // aperture — recebedor-per-campanha unification: this form edits THIS
+  // campanha's recebedor (same data the "solicitar transferência" onboarding
+  // modal creates), not a user-level preference. idCampanha resolves the
+  // route's /c/:id when present, else the session's default campanha —
+  // mirrors PerfilBody.tsx / the 11 authed write mutations (aperture-48mxt).
+  const idCampanha = useCampanhaEscrita();
   const [s, setS] = useState<BancariosForm>({ ...EMPTY_FORM });
   // PIX is the default tab (initially-selected mode); fields start empty and
   // only hydrate from real saved data below — no mock prefills.
@@ -352,18 +359,19 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
   const errorKeys = errors.map((e) => e.k);
   const hasErr = (k: string) => errorKeys.includes(k);
 
-  // ── Load the saved receiving data (R4 dadosRecebimento.get). Hydrate once;
-  // null = never saved → empty form. ──
-  const dadosQuery = trpc.dadosRecebimento.get.useQuery(undefined, {
-    staleTime: 30_000,
-  });
+  // ── Load the campanha's saved recebedor data. Hydrate once; null = never
+  // saved → empty form. ──
+  const dadosQuery = trpc.recebedor.get.useQuery(
+    { idCampanha: idCampanha ?? "" },
+    { enabled: Boolean(idCampanha), staleTime: 30_000 },
+  );
   // Real saved CPF (locked) — both pix and conta payloads carry it. Empty
-  // until the user has ever saved receiving data; never a mock literal.
+  // until this campanha has ever saved receiving data; never a mock literal.
   const cpfTitular = dadosQuery.data ? maskCPF(dadosQuery.data.cpfTitular) : "";
   // aperture-3mlcw — the holder CPF is only immutable AFTER a real one is saved.
   // Until cpfTitular (the saved value) is non-empty, the field must be editable
-  // so a new account can actually enter it. Previously the input was always
-  // `disabled` and bound to cpfTitular ("" when unsaved) → a brand-new user
+  // so a new campanha can actually enter it. Previously the input was always
+  // `disabled` and bound to cpfTitular ("" when unsaved) → a brand-new campanha
   // could never type a CPF and could never save conta data.
   const [cpfInput, setCpfInput] = useState("");
   const effectiveCpf = cpfTitular || cpfInput;
@@ -383,47 +391,50 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
     hydrated.current = true;
   }, [dadosQuery.data, dadosQuery.isLoading]);
 
-  const salvar = trpc.dadosRecebimento.salvar.useMutation({
+  const salvar = trpc.recebedor.atualizar.useMutation({
     onSuccess: () => {
-      void utils.dadosRecebimento.get.invalidate();
+      void utils.recebedor.get.invalidate();
       // aperture-kj9el #4b — a full save clears the pending marker server-side;
       // refresh the banner query so the "resgate pendente" notice disappears.
-      void utils.dadosRecebimento.getResgatePendente.invalidate();
+      void utils.recebedor.getResgatePendente.invalidate();
+      // The campanha now has a recebedor — the "solicitar transferência" gate
+      // (auth.me-derived hasRecebedor) can be stale until this refetches.
+      void utils.auth.me.invalidate();
       toast.success("dados salvos com carinho ♡");
     },
-    onError: (err) => {
+    onError: (err: { message?: string }) => {
       toast.error(
         err.message || "não consegui salvar — confira os campos e tente de novo",
       );
     },
   });
 
-  // aperture-kj9el #4b — "resgate pendente" intent. getResgatePendente returns
-  // the timestamp the user clicked "preencher depois" (null when none / cleared
-  // by a later full save). marcarResgatePendente records the intent with NO bank
-  // data — for users setting up to receive on behalf of someone else.
-  const resgatePendenteQuery =
-    trpc.dadosRecebimento.getResgatePendente.useQuery(undefined, {
-      staleTime: 30_000,
-    });
+  // aperture-kj9el #4b — "resgate pendente" intent, per-campanha.
+  // getResgatePendente returns the timestamp the admin clicked "preencher
+  // depois" (null when none / cleared by a later full save).
+  // marcarResgatePendente records the intent with NO bank data — for admins
+  // setting up to receive on behalf of someone else.
+  const resgatePendenteQuery = trpc.recebedor.getResgatePendente.useQuery(
+    { idCampanha: idCampanha ?? "" },
+    { enabled: Boolean(idCampanha), staleTime: 30_000 },
+  );
   const resgatePendenteDesde = resgatePendenteQuery.data
     ? new Date(resgatePendenteQuery.data)
     : null;
-  const marcarPendente =
-    trpc.dadosRecebimento.marcarResgatePendente.useMutation({
-      onSuccess: () => {
-        void utils.dadosRecebimento.getResgatePendente.invalidate();
-        toast.success(
-          "tudo bem — guardamos seu lugar ♡ complete os dados quando puder",
-        );
-      },
-      onError: (err) => {
-        toast.error(
-          err.message ||
-            "não consegui marcar agora — tente de novo em instantes",
-        );
-      },
-    });
+  const marcarPendente = trpc.recebedor.marcarResgatePendente.useMutation({
+    onSuccess: () => {
+      void utils.recebedor.getResgatePendente.invalidate();
+      toast.success(
+        "tudo bem — guardamos seu lugar ♡ complete os dados quando puder",
+      );
+    },
+    onError: (err: { message?: string }) => {
+      toast.error(
+        err.message ||
+          "não consegui marcar agora — tente de novo em instantes",
+      );
+    },
+  });
 
   // Clear an error as soon as its field becomes valid.
   useEffect(() => {
@@ -437,10 +448,17 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
   const isComplete = validate(modo, s, tipoPix, effectiveCpf).length === 0;
 
   const onSave = () => {
+    if (!idCampanha) {
+      toast.error("aguardando dados da campanha — tente novamente em um instante");
+      return;
+    }
     const errs = validate(modo, s, tipoPix, effectiveCpf);
     setErrors(errs);
     if (errs.length > 0) return;
-    salvar.mutate(toDadosRecebedor(modo, s, tipoPix, effectiveCpf));
+    salvar.mutate({
+      idCampanha,
+      dadosRecebedor: toDadosRecebedor(modo, s, tipoPix, effectiveCpf),
+    });
   };
 
   const bank = useMemo(
@@ -918,7 +936,7 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
             <button
               type="button"
               className="bnc-btn ghost"
-              onClick={() => marcarPendente.mutate()}
+              onClick={() => idCampanha && marcarPendente.mutate({ idCampanha })}
               disabled={marcarPendente.isPending}
             >
               <IInfo size={16} />

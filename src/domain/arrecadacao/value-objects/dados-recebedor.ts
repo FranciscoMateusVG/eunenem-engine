@@ -12,8 +12,7 @@ import { z } from 'zod/v4';
  *
  * Immutable, validated by value, no identity of its own — equality is
  * structural. Lives inside the `Recebedor` aggregate root (one active per
- * campaign, history preserved) and is reused by the user-level
- * `DadosRecebimentoUsuario` store.
+ * campaign, history preserved).
  *
  * ⚠️ NO bank-transfer rail exists yet: a `'conta'` receiver is PERSISTED but
  * NOT payable via the PIX repasse path. The withdrawal orchestrator

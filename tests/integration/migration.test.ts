@@ -74,8 +74,13 @@ describe('Migration round-trip', () => {
     // smell. Renaming production migration files is out of scope/risky;
     // this test is made correct against the current files instead.
     expect(tableNames).toContain('perfil_criadores');
-    expect(tableNames).toContain('dados_recebimento_usuario');
+    // dados_recebimento_usuario (028) was DROPPED by migration 039 (recebedor-
+    // per-campanha unification) — no longer expected to exist post-migrateToLatest.
+    expect(tableNames).not.toContain('dados_recebimento_usuario');
     expect(tableNames).toContain('resgates_pendentes');
+    // 038 resgates_pendentes_por_campanha: PK is id_campanha now, not id_usuario.
+    expect(await getColumn(db, 'resgates_pendentes', 'id_campanha')).toBeDefined();
+    expect(await getColumn(db, 'resgates_pendentes', 'id_usuario')).toBeUndefined();
 
     // 035 create_perfil_campanhas (aperture-aphk8): table + campanhas.slug.
     expect(tableNames).toContain('perfil_campanhas');
@@ -119,12 +124,27 @@ describe('Migration round-trip', () => {
     //    note above; renaming a DEPLOYED migration is forbidden because
     //    kysely_migration keys on the filename and would re-run it).
 
-    // 20260709_036_require_cpf_titular_on_pix_recebedor → the actual TIP now
-    //   (FIFTH occurrence of the off-by-one this block warns about — this
+    // 20260710_039_drop_dados_recebimento_usuario → the actual TIP now
+    //   (SIXTH occurrence of the off-by-one this block warns about — this
     //   migration was added on top and its down-step is prepended here per
-    //   the note above). Its down() reverts the two variant CHECK
-    //   constraints (recebedores + dados_recebimento_usuario) back to the
-    //   pre-036 shape (cpf_titular required on conta rows only).
+    //   the note above). Its down() recreates dados_recebimento_usuario
+    //   (recebedor-per-campanha unification retired the usuario-level store).
+    const downDropDadosRecebimento = await migrator.migrateDown();
+    expect(downDropDadosRecebimento.error).toBeUndefined();
+    expect(await listTableNames(db)).toContain('dados_recebimento_usuario');
+
+    // 20260710_038_resgates_pendentes_por_campanha → the SECOND migrateDown.
+    //   Its down() recreates resgates_pendentes keyed by id_usuario (the
+    //   pre-recebedor-per-campanha shape).
+    const downResgatesPorCampanha = await migrator.migrateDown();
+    expect(downResgatesPorCampanha.error).toBeUndefined();
+    expect(await getColumn(db, 'resgates_pendentes', 'id_usuario')).toBeDefined();
+    expect(await getColumn(db, 'resgates_pendentes', 'id_campanha')).toBeUndefined();
+
+    // 20260709_036_require_cpf_titular_on_pix_recebedor → the THIRD
+    //   migrateDown. Its down() reverts the two variant CHECK constraints
+    //   (recebedores + dados_recebimento_usuario) back to the pre-036 shape
+    //   (cpf_titular required on conta rows only).
     const downRequireCpfTitularPix = await migrator.migrateDown();
     expect(downRequireCpfTitularPix.error).toBeUndefined();
 
