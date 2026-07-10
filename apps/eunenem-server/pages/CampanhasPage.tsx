@@ -23,7 +23,7 @@
  * so the user always knows which platform a card belongs to — WCAG 1.4.1
  * satisfied by the text inside the selo, not color alone.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { SetupCampanhaWizard } from './components/eunenem/campanhas/SetupCampanhaWizard.js';
 import { PainelTopbar } from './components/eunenem/painel/PainelTopbar.js';
@@ -85,12 +85,24 @@ export function CampanhasPage() {
   }, [meQ.isLoading, meQ.data]);
 
   // First-visit welcome modal — only for users with 1.0 history (the copy
-  // is meaningless for pure-2.0 accounts). Shows on every visit until the
+  // is meaningless for pure-2.0 accounts). Shows on every VISIT until the
   // user EXPLICITLY opts out via the checkbox (aperture-opfsj) — a plain
   // dismiss no longer persists anything.
+  //
+  // aperture-yvrtk — AT MOST ONCE PER MOUNT. The effect deps on listQ.data,
+  // and every campanhas.list invalidation (criar, definirSlug,
+  // perfilCampanha.atualizar — i.e. finishing the setup wizard) produces a
+  // fresh data ref → the effect re-ran → the modal RE-POPPED mid-session
+  // right on top of the 'prontinho' moment. The ref guard keeps the opfsj
+  // semantics intact: a new page load is a new mount (ref resets), so a
+  // dismiss-without-checkbox still greets again on the NEXT visit — just
+  // never twice inside one.
+  const welcomeShownThisMount = useRef(false);
   useEffect(() => {
+    if (welcomeShownThisMount.current) return;
     if (!listQ.data || listQ.data.legado.length === 0) return;
     if (window.localStorage.getItem(CAMPANHAS_WELCOME_STORAGE_KEY)) return;
+    welcomeShownThisMount.current = true;
     setWelcomeOpen(true);
   }, [listQ.data]);
 
@@ -459,23 +471,25 @@ export function CampanhasPage() {
                 <h2 id="camp-tour-title" className="camp-modal-title camp-modal-title-sm">
                   como <span className="hl">alternar</span> entre listas
                 </h2>
-                {/* aperture-hdftp — step reteaches the canonical header:
-                 *  MINHAS LISTAS in the topbar is the way back here from
-                 *  inside any list (the old IR PARA dropdown is gone). */}
+                {/* aperture-vtxk7 — the topbar's MINHAS LISTAS is the "ir
+                 *  para" SWITCHER again (dropdown per lista, reinstated from
+                 *  the design artifact) — the copy teaches jump-anywhere, not
+                 *  the old hub-and-spoke-only "traz de volta" (hdftp era). */}
                 <div className="camp-tour-stage">
                   <span className="camp-tour-cta" aria-hidden="true">acessar lista ♡</span>
                   <span className="camp-tour-note">↑ entra na lista que você escolher</span>
                   <span className="camp-tour-pill">
-                    <span aria-hidden="true">←</span>
-                    <span className="camp-tour-pill-val">minhas listas</span>
+                    <span className="camp-tour-pill-val">ir para · minhas listas</span>
+                    <span aria-hidden="true">▾</span>
                   </span>
                   <span className="camp-tour-note camp-tour-note-green">
-                    ↑ e esse botão no topo te traz de volta pra cá
+                    ↑ e esse botão no topo troca de lista de onde você estiver
                   </span>
                 </div>
                 <p className="camp-tour-copy">
-                  toque em <b>acessar lista</b> no quadrinho que você quer abrir — e quando
-                  quiser trocar, <b>minhas listas</b> lá no topo te traz de volta ♡
+                  toque em <b>acessar lista</b> no quadrinho que você quer abrir — e pra
+                  trocar depois, <b>minhas listas</b> lá no topo abre um menu que pula
+                  direto pra qualquer outra ♡
                 </p>
               </>
             ) : (

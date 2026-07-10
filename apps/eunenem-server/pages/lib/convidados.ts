@@ -1,6 +1,7 @@
 import { TRPCClientError } from '@trpc/client';
 import type { inferRouterOutputs } from '@trpc/server';
 import { trpc } from './trpc.js';
+import { type SemIdCampanha, useCampanhaEscrita } from './campanha-escrita.js';
 import { useCampanhaRota } from './campanha-rota.js';
 
 import type { AppRouter } from '../../server/trpc/router.js';
@@ -54,10 +55,11 @@ export function useListaDeConvidadosData() {
   return trpc.eventoListaDeConvidados.get.useQuery(idCampanha ? { idCampanha } : undefined);
 }
 
-// aperture-1yx1n — writes target the ROUTE campanha (bare URL → server default).
+// aperture-1kbyx — writes target the ROUTE campanha; bare URL → explicit
+// session-default (oldest) id, so the server can require idCampanha.
 export function useAlterarPresencaConvidado() {
   const utils = trpc.useUtils();
-  const idCampanha = useCampanhaRota();
+  const idCampanha = useCampanhaEscrita();
   const m = trpc.eventoListaDeConvidados.alterarPresenca.useMutation({
     onSuccess: () => {
       void utils.eventoListaDeConvidados.get.invalidate();
@@ -65,15 +67,16 @@ export function useAlterarPresencaConvidado() {
   });
   return {
     ...m,
-    mutate: ((input, opts) => m.mutate(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutate,
-    mutateAsync: ((input, opts) => m.mutateAsync(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutateAsync,
+    mutate: ((input, opts) => m.mutate({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutate>,
+    mutateAsync: ((input, opts) => m.mutateAsync({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutateAsync>,
   };
 }
 
-// aperture-1yx1n — writes target the ROUTE campanha (bare URL → server default).
+// aperture-1kbyx — writes target the ROUTE campanha; bare URL → explicit
+// session-default (oldest) id, so the server can require idCampanha.
 export function useAdicionarConvidado() {
   const utils = trpc.useUtils();
-  const idCampanha = useCampanhaRota();
+  const idCampanha = useCampanhaEscrita();
   const m = trpc.eventoListaDeConvidados.adicionarConvidado.useMutation({
     onSuccess: () => {
       void utils.eventoListaDeConvidados.get.invalidate();
@@ -81,15 +84,16 @@ export function useAdicionarConvidado() {
   });
   return {
     ...m,
-    mutate: ((input, opts) => m.mutate(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutate,
-    mutateAsync: ((input, opts) => m.mutateAsync(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutateAsync,
+    mutate: ((input, opts) => m.mutate({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutate>,
+    mutateAsync: ((input, opts) => m.mutateAsync({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutateAsync>,
   };
 }
 
-// aperture-1yx1n — writes target the ROUTE campanha (bare URL → server default).
+// aperture-1kbyx — writes target the ROUTE campanha; bare URL → explicit
+// session-default (oldest) id, so the server can require idCampanha.
 export function useSalvarFormatoMensagem() {
   const utils = trpc.useUtils();
-  const idCampanha = useCampanhaRota();
+  const idCampanha = useCampanhaEscrita();
   const m = trpc.eventoListaDeConvidados.salvarFormatoMensagem.useMutation({
     onSuccess: () => {
       void utils.eventoListaDeConvidados.get.invalidate();
@@ -97,8 +101,8 @@ export function useSalvarFormatoMensagem() {
   });
   return {
     ...m,
-    mutate: ((input, opts) => m.mutate(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutate,
-    mutateAsync: ((input, opts) => m.mutateAsync(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutateAsync,
+    mutate: ((input, opts) => m.mutate({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutate>,
+    mutateAsync: ((input, opts) => m.mutateAsync({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutateAsync>,
   };
 }
 

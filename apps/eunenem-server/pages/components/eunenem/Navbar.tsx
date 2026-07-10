@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { CartButton } from "./CartButton";
 import { useCartDrawer } from "./CartDrawerContext.js";
 import { useMe } from "@/lib/auth";
+import { useCampanhaRota } from "@/lib/campanha-rota";
+import { paginaSharePath } from "@/lib/painelRoutes";
 import { painelHref as buildPainelHref } from "@/lib/painelRoutes";
 
 // aperture-3d9t / aperture-uk8q1 — visitor page header.
@@ -37,6 +39,8 @@ const NAV_LINKS = [
 // PaginaPage / PaginaSucessoPage), not a hardcoded "/pagina/francisco". Falls
 // back to the site root when no slug is supplied.
 export function Navbar({ slug }: { slug?: string } = {}) {
+  // aperture-2v91z — the campanha the visitor is on (route-level provider).
+  const idCampanhaNav = useCampanhaRota();
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<string | null>(null);
@@ -135,7 +139,9 @@ export function Navbar({ slug }: { slug?: string } = {}) {
     >
       <div className="eu-container flex items-center justify-between py-4">
         <a
-          href={slug ? `/pagina/${slug}` : "/"}
+          // aperture-2v91z — brand link keeps the CAMPANHA context (a guest on
+          // /pagina/x/c/<id> or /pagina/x/<slug> stays on that campanha).
+          href={slug ? paginaSharePath(slug, idCampanhaNav) : "/"}
           className="inline-flex items-center no-underline"
           aria-label="EuNeném — início"
         >

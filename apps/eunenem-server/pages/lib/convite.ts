@@ -1,6 +1,7 @@
 import { TRPCClientError } from '@trpc/client';
 import type { inferRouterInputs, inferRouterOutputs } from '@trpc/server';
 import { trpc } from './trpc.js';
+import { type SemIdCampanha, useCampanhaEscrita } from './campanha-escrita.js';
 import { useCampanhaRota } from './campanha-rota.js';
 import { painelConvitePreviewHref, painelHref } from './painelRoutes.js';
 
@@ -79,10 +80,11 @@ export function conviteDestinationHref(
     : painelHref(slug, 'convite', idCampanha);
 }
 
-// aperture-1yx1n — writes target the ROUTE campanha (bare URL → server default).
+// aperture-1kbyx — writes target the ROUTE campanha; bare URL → explicit
+// session-default (oldest) id, so the server can require idCampanha.
 export function useSalvarConvite() {
   const utils = trpc.useUtils();
-  const idCampanha = useCampanhaRota();
+  const idCampanha = useCampanhaEscrita();
   const m = trpc.eventoConvite.save.useMutation({
     onSuccess: () => {
       void utils.eventoConvite.get.invalidate();
@@ -92,8 +94,8 @@ export function useSalvarConvite() {
 
   return {
     ...m,
-    mutate: ((input, opts) => m.mutate(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutate,
-    mutateAsync: ((input, opts) => m.mutateAsync(idCampanha ? { ...input, idCampanha } : input, opts)) as typeof m.mutateAsync,
+    mutate: ((input, opts) => m.mutate({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutate>,
+    mutateAsync: ((input, opts) => m.mutateAsync({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutateAsync>,
   };
 }
 

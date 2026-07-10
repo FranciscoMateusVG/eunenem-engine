@@ -7,9 +7,19 @@
  * — every assertion goes through `appRouter.createCaller`, so the wiring of
  * each hop (schema → resolver arg → toTRPCError mapping) is what's under test.
  *
- * PER-HOP MATRIX (each procedure that gained OPTIONAL idCampanha in #344):
- *   1. bare (no idCampanha)  → resolves the OLDEST campanha, even after a 2nd
- *      campanha is created mid-test (shared-bare-link back-compat pin);
+ * PER-HOP MATRIX (each procedure that gained idCampanha in #344), updated for
+ * aperture-48mxt (W2 enforce — authed writes are campanha-addressed):
+ *   1a. QUERIES + PUBLIC hops, bare (no idCampanha) → resolve the OLDEST
+ *       campanha, even after a 2nd campanha is created mid-test
+ *       (shared-bare-link back-compat pin — semantics UNCHANGED by W2);
+ *   1b. the 11 AUTHED MUTATIONS (contribuicao.create/createBulk/update/delete/
+ *       emitirUrlUploadImagemItem, eventoConvite.save, eventoListaDeConvidados.
+ *       alterarPresenca/adicionarConvidado/salvarFormatoMensagem,
+ *       painelMensagens.marcarLida/marcarTodasLidas) now REQUIRE
+ *       `idCampanha: z.string().uuid()` — a bare authed write is rejected at
+ *       the schema with BAD_REQUEST. The former bare→oldest write behavior is
+ *       pinned EXPLICITLY instead: addressing the oldest campanha's id
+ *       produces the effect the bare call used to;
  *   2. idCampanha = caller's SECOND campanha → resolves THAT one;
  *   3. idCampanha = another conta's campanha → rejected;
  *   4. idCampanha = unknown uuid            → rejected with the IDENTICAL
@@ -436,7 +446,7 @@ const OWNER_GATE_HOPS: OwnerGateHop[] = [
   },
 ];
 
-describe('g1wl4 — per-hop optional idCampanha, THROUGH the router (PR #344)', () => {
+describe('g1wl4 — per-hop idCampanha, THROUGH the router (PR #344 + aperture-48mxt W2 enforce)', () => {
   describe('owner gate: cross-owner vs unknown-id rejections are byte-identical (per hop)', () => {
     for (const hop of OWNER_GATE_HOPS) {
       it(`${hop.name} → ${hop.expectedCode}, no existence oracle`, async () => {
@@ -466,16 +476,29 @@ describe('g1wl4 — per-hop optional idCampanha, THROUGH the router (PR #344)', 
     }
   });
 
-  // ── contribuicao hops: bare→oldest pin + explicit second-campanha ────────
-  describe('contribuicao — bare resolves the OLDEST campanha; idCampanha addresses the second', () => {
-    it('create/list: bare create lands on the oldest even AFTER a 2nd campanha exists', async () => {
+  // ── contribuicao hops: aperture-48mxt (W2 enforce) — authed writes are
+  // campanha-addressed; bare authed write = BAD_REQUEST. Queries keep the
+  // bare→oldest default. ─────────────────────────────────────────────────────
+  describe('contribuicao — authed writes require idCampanha (W2); bare QUERY still resolves the OLDEST', () => {
+    it('create/list: bare create → BAD_REQUEST; create addressed to the oldest id lands on c1 (bare list ≡ oldest)', async () => {
       const rig = await buildRig();
       const user = await rig.addUser(uniqueEmail('contrib'));
       const c1 = user.campanhaSignup.id;
-      // 2nd campanha created MID-TEST, before the bare call — the pin.
+      // 2nd campanha created MID-TEST, before the calls under test.
       const c2 = (await user.caller.campanhas.criar({ titulo: 'Segunda Lista' })).id;
 
-      await user.caller.contribuicao.create({ nome: 'Item Bare', valor: 100, quantidade: 1 });
+      // aperture-48mxt (W2 enforce): bare authed write is schema-rejected.
+      await expect(
+        user.caller.contribuicao.create({ nome: 'Item Bare', valor: 100, quantidade: 1 }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+
+      // The oldest-addressing behavior stays pinned — now explicitly.
+      await user.caller.contribuicao.create({
+        idCampanha: c1,
+        nome: 'Item Bare',
+        valor: 100,
+        quantidade: 1,
+      });
 
       const listC1 = await user.caller.contribuicao.list({ idCampanha: c1 });
       const listC2 = await user.caller.contribuicao.list({ idCampanha: c2 });
@@ -483,7 +506,7 @@ describe('g1wl4 — per-hop optional idCampanha, THROUGH the router (PR #344)', 
 
       expect(listC1.map((i) => i.nome)).toContain('Item Bare');
       expect(listC2.map((i) => i.nome)).not.toContain('Item Bare');
-      // bare list ≡ oldest-campanha list
+      // bare list (QUERY — semantics unchanged) ≡ oldest-campanha list
       expect(listBare.map((i) => i.nome)).toEqual(listC1.map((i) => i.nome));
     });
 
@@ -506,12 +529,22 @@ describe('g1wl4 — per-hop optional idCampanha, THROUGH the router (PR #344)', 
       expect(listBare.map((i) => i.nome)).not.toContain('Item C2');
     });
 
-    it('createBulk: bare → oldest; idCampanha=c2 → second', async () => {
+    it('createBulk: bare → BAD_REQUEST (W2); idCampanha=c1 → oldest; idCampanha=c2 → second', async () => {
       const rig = await buildRig();
       const user = await rig.addUser(uniqueEmail('contrib'));
+      const c1 = user.campanhaSignup.id;
       const c2 = (await user.caller.campanhas.criar({ titulo: 'Segunda Lista' })).id;
 
+      // aperture-48mxt (W2 enforce): bare authed write is schema-rejected.
+      await expect(
+        user.caller.contribuicao.createBulk({
+          items: [{ nome: 'Bulk Bare', valor: 100, quantidade: 1 }],
+        }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+
+      // Oldest-addressing pinned explicitly (formerly the bare path).
       await user.caller.contribuicao.createBulk({
+        idCampanha: c1,
         items: [{ nome: 'Bulk Bare', valor: 100, quantidade: 1 }],
       });
       await user.caller.contribuicao.createBulk({
@@ -527,13 +560,19 @@ describe('g1wl4 — per-hop optional idCampanha, THROUGH the router (PR #344)', 
       expect(emC2).not.toContain('Bulk Bare');
     });
 
-    it('update + delete: bare operates on the oldest; idCampanha=c2 operates on the second', async () => {
+    it('update + delete: bare → BAD_REQUEST (W2); idCampanha=c1 operates on the oldest; idCampanha=c2 on the second', async () => {
       const rig = await buildRig();
       const user = await rig.addUser(uniqueEmail('contrib'));
+      const c1 = user.campanhaSignup.id;
       const c2 = (await user.caller.campanhas.criar({ titulo: 'Segunda Lista' })).id;
 
-      const [idBare] = (
-        await user.caller.contribuicao.create({ nome: 'Alvo Bare', valor: 100, quantidade: 1 })
+      const [idC1] = (
+        await user.caller.contribuicao.create({
+          idCampanha: c1,
+          nome: 'Alvo C1',
+          valor: 100,
+          quantidade: 1,
+        })
       ).ids;
       const [idC2] = (
         await user.caller.contribuicao.create({
@@ -543,44 +582,60 @@ describe('g1wl4 — per-hop optional idCampanha, THROUGH the router (PR #344)', 
           quantidade: 1,
         })
       ).ids;
-      if (!idBare || !idC2) throw new Error('setup: create não retornou ids');
+      if (!idC1 || !idC2) throw new Error('setup: create não retornou ids');
 
-      // update through each route
-      await user.caller.contribuicao.update({ id: idBare, nome: 'Alvo Bare v2' });
+      // aperture-48mxt (W2 enforce): bare authed writes are schema-rejected.
+      await expect(
+        user.caller.contribuicao.update({ id: idC1, nome: 'Alvo C1 v2' }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      await expect(user.caller.contribuicao.delete({ ids: [idC1] })).rejects.toMatchObject({
+        code: 'BAD_REQUEST',
+      });
+
+      // update through each addressed route (oldest pinned explicitly)
+      await user.caller.contribuicao.update({ idCampanha: c1, id: idC1, nome: 'Alvo C1 v2' });
       await user.caller.contribuicao.update({ idCampanha: c2, id: idC2, nome: 'Alvo C2 v2' });
-      expect((await user.caller.contribuicao.list()).map((i) => i.nome)).toContain('Alvo Bare v2');
+      expect((await user.caller.contribuicao.list()).map((i) => i.nome)).toContain('Alvo C1 v2');
       expect(
         (await user.caller.contribuicao.list({ idCampanha: c2 })).map((i) => i.nome),
       ).toContain('Alvo C2 v2');
 
-      // delete through each route
-      await user.caller.contribuicao.delete({ ids: [idBare] });
+      // delete through each addressed route
+      await user.caller.contribuicao.delete({ idCampanha: c1, ids: [idC1] });
       await user.caller.contribuicao.delete({ idCampanha: c2, ids: [idC2] });
-      expect((await user.caller.contribuicao.list()).map((i) => i.id)).not.toContain(idBare);
+      expect((await user.caller.contribuicao.list()).map((i) => i.id)).not.toContain(idC1);
       expect(
         (await user.caller.contribuicao.list({ idCampanha: c2 })).map((i) => i.id),
       ).not.toContain(idC2);
     });
 
-    it('emitirUrlUploadImagemItem: bare and idCampanha=c2 both resolve (owner-gate only — the use-case is campanha-agnostic)', async () => {
+    it('emitirUrlUploadImagemItem: bare → BAD_REQUEST (W2); idCampanha=c1 and =c2 both resolve (owner-gate only — the use-case is campanha-agnostic)', async () => {
       const rig = await buildRig();
       const user = await rig.addUser(uniqueEmail('contrib'));
+      const c1 = user.campanhaSignup.id;
       const c2 = (await user.caller.campanhas.criar({ titulo: 'Segunda Lista' })).id;
 
-      const bare = await user.caller.contribuicao.emitirUrlUploadImagemItem({
+      // aperture-48mxt (W2 enforce): bare authed write is schema-rejected.
+      await expect(
+        user.caller.contribuicao.emitirUrlUploadImagemItem({ contentType: 'image/png' }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+
+      const emC1 = await user.caller.contribuicao.emitirUrlUploadImagemItem({
+        idCampanha: c1,
         contentType: 'image/png',
       });
       const emC2 = await user.caller.contribuicao.emitirUrlUploadImagemItem({
         idCampanha: c2,
         contentType: 'image/png',
       });
-      expect(bare.uploadUrl.length).toBeGreaterThan(0);
+      expect(emC1.uploadUrl.length).toBeGreaterThan(0);
       expect(emC2.uploadUrl.length).toBeGreaterThan(0);
     });
   });
 
-  // ── eventoConvite hops ────────────────────────────────────────────────────
-  describe('eventoConvite — bare pins the oldest; idCampanha addresses the second', () => {
+  // ── eventoConvite hops — aperture-48mxt (W2 enforce): save (authed write)
+  // requires idCampanha; get/getPreview (queries) keep the bare→oldest default.
+  describe('eventoConvite — save requires idCampanha (W2); bare get/getPreview still pin the oldest', () => {
     it('save {idCampanha:c2} writes to the SECOND campanha; get bare still sees the (evento-less) oldest', async () => {
       const rig = await buildRig();
       const user = await rig.addUser(uniqueEmail('convite'));
@@ -596,12 +651,19 @@ describe('g1wl4 — per-hop optional idCampanha, THROUGH the router (PR #344)', 
       expect(emC2.convite?.nomeExibido).toBe('Bebe C2');
     });
 
-    it('save bare writes to the OLDEST (even with a 2nd campanha already present)', async () => {
+    it('save bare → BAD_REQUEST (W2); save addressed to the OLDEST id writes to c1 (even with a 2nd campanha present)', async () => {
       const rig = await buildRig();
       const user = await rig.addUser(uniqueEmail('convite'));
+      const c1 = user.campanhaSignup.id;
       const c2 = (await user.caller.campanhas.criar({ titulo: 'Segunda Lista' })).id;
 
-      await user.caller.eventoConvite.save(conviteSaveInput('Bebe C1'));
+      // aperture-48mxt (W2 enforce): bare authed write is schema-rejected.
+      await expect(
+        user.caller.eventoConvite.save(conviteSaveInput('Bebe C1')),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+
+      // Oldest-addressing pinned explicitly (formerly the bare path).
+      await user.caller.eventoConvite.save(conviteSaveInput('Bebe C1', c1));
 
       const bare = await user.caller.eventoConvite.get();
       const emC2 = await user.caller.eventoConvite.get({ idCampanha: c2 });
@@ -612,9 +674,11 @@ describe('g1wl4 — per-hop optional idCampanha, THROUGH the router (PR #344)', 
     it('getPreview (PUBLIC): bare → oldest campanha convite; idCampanha=c2 → the second', async () => {
       const rig = await buildRig();
       const user = await rig.addUser(uniqueEmail('convite'));
+      const c1 = user.campanhaSignup.id;
       const c2 = (await user.caller.campanhas.criar({ titulo: 'Segunda Lista' })).id;
 
-      await user.caller.eventoConvite.save(conviteSaveInput('Bebe C1'));
+      // setup writes are campanha-addressed (W2 — save requires idCampanha)
+      await user.caller.eventoConvite.save(conviteSaveInput('Bebe C1', c1));
       await user.caller.eventoConvite.save(conviteSaveInput('Bebe C2', c2));
 
       const bare = await rig.anonCaller.eventoConvite.getPreview({ slug: user.slug });
@@ -627,23 +691,35 @@ describe('g1wl4 — per-hop optional idCampanha, THROUGH the router (PR #344)', 
     });
   });
 
-  // ── eventoListaDeConvidados hops ─────────────────────────────────────────
-  describe('eventoListaDeConvidados — bare pins the oldest; idCampanha addresses the second', () => {
+  // ── eventoListaDeConvidados hops — aperture-48mxt (W2 enforce): the three
+  // authed writes require idCampanha; get (query) keeps the bare→oldest default.
+  describe('eventoListaDeConvidados — authed writes require idCampanha (W2); bare get still pins the oldest', () => {
     /** evento on BOTH campanhas so lista operations are reachable on each. */
-    async function setupEventos(): Promise<{ rig: Rig; user: RigUser; c2: string }> {
+    async function setupEventos(): Promise<{ rig: Rig; user: RigUser; c1: string; c2: string }> {
       const rig = await buildRig();
       const user = await rig.addUser(uniqueEmail('lista'));
+      const c1 = user.campanhaSignup.id;
       const c2 = (await user.caller.campanhas.criar({ titulo: 'Segunda Lista' })).id;
-      await user.caller.eventoConvite.save(conviteSaveInput('Bebe C1'));
+      await user.caller.eventoConvite.save(conviteSaveInput('Bebe C1', c1));
       await user.caller.eventoConvite.save(conviteSaveInput('Bebe C2', c2));
-      return { rig, user, c2 };
+      return { rig, user, c1, c2 };
     }
 
-    it('adicionarConvidado + get: bare lands on the oldest lista; c2 lista stays isolated', async () => {
-      const { user, c2 } = await setupEventos();
+    it('adicionarConvidado: bare → BAD_REQUEST (W2); idCampanha=c1 lands on the oldest lista (bare GET), c2 stays isolated', async () => {
+      const { user, c1, c2 } = await setupEventos();
 
+      // aperture-48mxt (W2 enforce): bare authed write is schema-rejected.
+      await expect(
+        user.caller.eventoListaDeConvidados.adicionarConvidado({
+          nome: 'Convidado C1',
+          numeroCelular: '11999990001',
+        }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+
+      // Oldest-addressing pinned explicitly (formerly the bare path).
       await user.caller.eventoListaDeConvidados.adicionarConvidado({
-        nome: 'Convidado Bare',
+        idCampanha: c1,
+        nome: 'Convidado C1',
         numeroCelular: '11999990001',
       });
       await user.caller.eventoListaDeConvidados.adicionarConvidado({
@@ -655,15 +731,16 @@ describe('g1wl4 — per-hop optional idCampanha, THROUGH the router (PR #344)', 
       const bare = await user.caller.eventoListaDeConvidados.get();
       const emC2 = await user.caller.eventoListaDeConvidados.get({ idCampanha: c2 });
 
-      expect(bare.lista?.convidados.map((c) => c.nome)).toEqual(['Convidado Bare']);
+      expect(bare.lista?.convidados.map((c) => c.nome)).toEqual(['Convidado C1']);
       expect(emC2.lista?.convidados.map((c) => c.nome)).toEqual(['Convidado C2']);
     });
 
-    it('alterarPresenca: bare mutates the oldest lista convidado; idCampanha=c2 the second', async () => {
-      const { user, c2 } = await setupEventos();
+    it('alterarPresenca: bare → BAD_REQUEST (W2); idCampanha=c1 mutates the oldest lista convidado, =c2 the second', async () => {
+      const { user, c1, c2 } = await setupEventos();
 
-      const bareAdd = await user.caller.eventoListaDeConvidados.adicionarConvidado({
-        nome: 'Convidado Bare',
+      const c1Add = await user.caller.eventoListaDeConvidados.adicionarConvidado({
+        idCampanha: c1,
+        nome: 'Convidado C1',
         numeroCelular: '11999990001',
       });
       const c2Add = await user.caller.eventoListaDeConvidados.adicionarConvidado({
@@ -671,12 +748,22 @@ describe('g1wl4 — per-hop optional idCampanha, THROUGH the router (PR #344)', 
         nome: 'Convidado C2',
         numeroCelular: '11999990002',
       });
-      const idBare = bareAdd.lista?.convidados[0]?.id;
+      const idC1 = c1Add.lista?.convidados[0]?.id;
       const idC2 = c2Add.lista?.convidados[0]?.id;
-      if (!idBare || !idC2) throw new Error('setup: adicionarConvidado não retornou convidado');
+      if (!idC1 || !idC2) throw new Error('setup: adicionarConvidado não retornou convidado');
 
-      const bare = await user.caller.eventoListaDeConvidados.alterarPresenca({
-        idConvidado: idBare,
+      // aperture-48mxt (W2 enforce): bare authed write is schema-rejected.
+      await expect(
+        user.caller.eventoListaDeConvidados.alterarPresenca({
+          idConvidado: idC1,
+          presenca: 'sim',
+        }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+
+      // Oldest-addressing pinned explicitly (formerly the bare path).
+      const emC1 = await user.caller.eventoListaDeConvidados.alterarPresenca({
+        idCampanha: c1,
+        idConvidado: idC1,
         presenca: 'sim',
       });
       const emC2 = await user.caller.eventoListaDeConvidados.alterarPresenca({
@@ -684,15 +771,16 @@ describe('g1wl4 — per-hop optional idCampanha, THROUGH the router (PR #344)', 
         idConvidado: idC2,
         presenca: 'nao',
       });
-      expect(bare.lista?.convidados[0]?.presenca).toBe('sim');
+      expect(emC1.lista?.convidados[0]?.presenca).toBe('sim');
       expect(emC2.lista?.convidados[0]?.presenca).toBe('nao');
     });
 
-    it('salvarFormatoMensagem: bare targets the oldest lista; idCampanha=c2 the second', async () => {
-      const { user, c2 } = await setupEventos();
-      // materialise both listas first
+    it('salvarFormatoMensagem: bare → BAD_REQUEST (W2); idCampanha=c1 targets the oldest lista, =c2 the second', async () => {
+      const { user, c1, c2 } = await setupEventos();
+      // materialise both listas first (addressed — W2)
       await user.caller.eventoListaDeConvidados.adicionarConvidado({
-        nome: 'Convidado Bare',
+        idCampanha: c1,
+        nome: 'Convidado C1',
         numeroCelular: '11999990001',
       });
       await user.caller.eventoListaDeConvidados.adicionarConvidado({
@@ -701,7 +789,16 @@ describe('g1wl4 — per-hop optional idCampanha, THROUGH the router (PR #344)', 
         numeroCelular: '11999990002',
       });
 
+      // aperture-48mxt (W2 enforce): bare authed write is schema-rejected.
+      await expect(
+        user.caller.eventoListaDeConvidados.salvarFormatoMensagem({
+          formatoMensagemConvite: 'texto',
+        }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+
+      // Oldest-addressing pinned explicitly (formerly the bare path).
       await user.caller.eventoListaDeConvidados.salvarFormatoMensagem({
+        idCampanha: c1,
         formatoMensagemConvite: 'texto',
       });
       await user.caller.eventoListaDeConvidados.salvarFormatoMensagem({
@@ -716,11 +813,14 @@ describe('g1wl4 — per-hop optional idCampanha, THROUGH the router (PR #344)', 
     });
   });
 
-  // ── painelMensagens hops ──────────────────────────────────────────────────
-  describe('painelMensagens — bare pins the oldest; idCampanha addresses the second', () => {
-    it('marcarLida discriminates the resolved campanha: bare (oldest) trips the cross-tenant guard for a c2 pagamento; idCampanha=c2 does not', async () => {
+  // ── painelMensagens hops — aperture-48mxt (W2 enforce): marcarLida /
+  // marcarTodasLidas (authed writes) require idCampanha; list (query) keeps
+  // the bare→oldest default. ───────────────────────────────────────────────
+  describe('painelMensagens — authed writes require idCampanha (W2); bare list still pins the oldest', () => {
+    it('marcarLida discriminates the addressed campanha: bare → BAD_REQUEST (W2); idCampanha=c1 (oldest) trips the cross-tenant guard for a c2 pagamento; idCampanha=c2 does not', async () => {
       const rig = await buildRig();
       const user = await rig.addUser(uniqueEmail('painel'));
+      const c1 = user.campanhaSignup.id;
       const c2 = (await user.caller.campanhas.criar({ titulo: 'Segunda Lista' })).id;
 
       // Seed a pagamento on c2 through the real checkout hop.
@@ -742,16 +842,27 @@ describe('g1wl4 — per-hop optional idCampanha, THROUGH the router (PR #344)', 
       const pagamento = await rig.deps.pagamentoRepository.findByExternalRef(sessionId);
       if (!pagamento) throw new Error('setup: pagamento não persistiu');
 
-      // BARE resolves the OLDEST campanha → the c2 pagamento fails the
-      // pagamento-belongs-to-campanha guard (proves bare ≠ c2).
-      const bare = await captureRejection(
+      // aperture-48mxt (W2 enforce): the BARE authed write is schema-rejected
+      // before any campanha resolution happens.
+      await expect(
         user.caller.painelMensagens.marcarLida({
           slug: user.slug,
           idPagamento: pagamento.id as string,
         }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+
+      // Addressing the OLDEST campanha explicitly (formerly the bare path):
+      // the c2 pagamento fails the pagamento-belongs-to-campanha guard
+      // (proves c1-addressing ≠ c2).
+      const emC1 = await captureRejection(
+        user.caller.painelMensagens.marcarLida({
+          slug: user.slug,
+          idCampanha: c1,
+          idPagamento: pagamento.id as string,
+        }),
       );
-      expect(bare.code).toBe('UNAUTHORIZED');
-      expect(bare.message).toBe('Pagamento nao encontrado ou nao autorizado');
+      expect(emC1.code).toBe('UNAUTHORIZED');
+      expect(emC1.message).toBe('Pagamento nao encontrado ou nao autorizado');
 
       // idCampanha=c2 resolves the SECOND campanha → the guard passes and
       // the mark-as-read completes.
@@ -763,22 +874,33 @@ describe('g1wl4 — per-hop optional idCampanha, THROUGH the router (PR #344)', 
       expect(typeof marcado.lidaEm).toBe('string');
     });
 
-    it('list + marcarTodasLidas: bare and idCampanha=c2 both resolve (empty-queue shapes)', async () => {
+    it('list (bare QUERY) resolves; marcarTodasLidas: bare → BAD_REQUEST (W2), idCampanha=c1/c2 resolve (empty-queue shapes)', async () => {
       const rig = await buildRig();
       const user = await rig.addUser(uniqueEmail('painel'));
+      const c1 = user.campanhaSignup.id;
       const c2 = (await user.caller.campanhas.criar({ titulo: 'Segunda Lista' })).id;
 
+      // list is a QUERY — bare semantics unchanged by W2.
       await expect(user.caller.painelMensagens.list({ slug: user.slug })).resolves.toBeDefined();
       await expect(
         user.caller.painelMensagens.list({ slug: user.slug, idCampanha: c2 }),
       ).resolves.toBeDefined();
 
-      const bare = await user.caller.painelMensagens.marcarTodasLidas({ slug: user.slug });
+      // aperture-48mxt (W2 enforce): bare authed write is schema-rejected.
+      await expect(
+        user.caller.painelMensagens.marcarTodasLidas({ slug: user.slug }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+
+      // Oldest-addressing pinned explicitly (formerly the bare path).
+      const emC1 = await user.caller.painelMensagens.marcarTodasLidas({
+        slug: user.slug,
+        idCampanha: c1,
+      });
       const emC2 = await user.caller.painelMensagens.marcarTodasLidas({
         slug: user.slug,
         idCampanha: c2,
       });
-      expect(bare.marcadas).toBe(0);
+      expect(emC1.marcadas).toBe(0);
       expect(emC2.marcadas).toBe(0);
     });
   });
@@ -788,8 +910,15 @@ describe('g1wl4 — per-hop optional idCampanha, THROUGH the router (PR #344)', 
     it('obterListaPresentes: bare → oldest items (2nd campanha created mid-test); idCampanha=c2 → its items', async () => {
       const rig = await buildRig();
       const user = await rig.addUser(uniqueEmail('pagina'));
+      const c1 = user.campanhaSignup.id;
       const c2 = (await user.caller.campanhas.criar({ titulo: 'Segunda Lista' })).id;
-      await user.caller.contribuicao.create({ nome: 'Item C1', valor: 100, quantidade: 1 });
+      // setup writes are campanha-addressed (W2 — create requires idCampanha)
+      await user.caller.contribuicao.create({
+        idCampanha: c1,
+        nome: 'Item C1',
+        valor: 100,
+        quantidade: 1,
+      });
       await user.caller.contribuicao.create({
         idCampanha: c2,
         nome: 'Item C2',
@@ -941,6 +1070,7 @@ describe('g1wl4 — per-hop optional idCampanha, THROUGH the router (PR #344)', 
       const victim = await rig.addUser(uniqueEmail('sucesso-victim'));
       const [idContribuicao] = (
         await owner.caller.contribuicao.create({
+          idCampanha: owner.campanhaSignup.id, // W2 — create requires idCampanha
           nome: 'Presente com PII',
           valor: 100,
           quantidade: 1,
@@ -1005,7 +1135,9 @@ describe('g1wl4 — per-hop optional idCampanha, THROUGH the router (PR #344)', 
       const victim = await rig.addUser(uniqueEmail('victim'));
       const attacker = await rig.addUser(uniqueEmail('attacker'));
       // give the attacker campanha real data that must NEVER surface
+      // (addressed — W2: create requires idCampanha)
       await attacker.caller.contribuicao.create({
+        idCampanha: attacker.campanhaSignup.id,
         nome: 'Segredo do Atacante',
         valor: 100,
         quantidade: 1,
@@ -1038,7 +1170,10 @@ describe('g1wl4 — per-hop optional idCampanha, THROUGH the router (PR #344)', 
       const rig = await buildRig();
       const victim = await rig.addUser(uniqueEmail('victim'));
       const attacker = await rig.addUser(uniqueEmail('attacker'));
-      await attacker.caller.eventoConvite.save(conviteSaveInput('Convite do Atacante'));
+      // addressed — W2: save requires idCampanha
+      await attacker.caller.eventoConvite.save(
+        conviteSaveInput('Convite do Atacante', attacker.campanhaSignup.id),
+      );
 
       const comIdAtacante = await captureRejection(
         rig.anonCaller.eventoConvite.getPreview({
@@ -1078,7 +1213,8 @@ describe('g1wl4 — per-hop optional idCampanha, THROUGH the router (PR #344)', 
         expect(rejeicao.code).toBe('BAD_REQUEST');
       }
 
-      // Still uuid-typed (unlike the new optional z.string() hops).
+      // Still uuid-typed (like the W2-flipped authed writes; unlike the
+      // still-optional z.string() QUERY hops).
       const naoUuid = await captureRejection(
         user.caller.recebedor.extrato.summary({ idCampanha: 'nao-e-uuid' } as never),
       );
@@ -1091,8 +1227,14 @@ describe('g1wl4 — per-hop optional idCampanha, THROUGH the router (PR #344)', 
       const c1 = user.campanhaSignup.id;
       // a 2nd campanha exists — the bare money path must NOT drift to it
       await user.caller.campanhas.criar({ titulo: 'Segunda Lista' });
+      // setup write is campanha-addressed (W2 — create requires idCampanha)
       const [idContribuicao] = (
-        await user.caller.contribuicao.create({ nome: 'Presente C1', valor: 100, quantidade: 1 })
+        await user.caller.contribuicao.create({
+          idCampanha: c1,
+          nome: 'Presente C1',
+          valor: 100,
+          quantidade: 1,
+        })
       ).ids;
       if (!idContribuicao) throw new Error('setup: create não retornou id');
 

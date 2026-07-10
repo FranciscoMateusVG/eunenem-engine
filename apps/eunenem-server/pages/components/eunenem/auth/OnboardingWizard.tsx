@@ -20,14 +20,18 @@
 //     surfaces a "reservado" motivo gracefully + relies on atualizarSlug's
 //     CONFLICT/BAD_REQUEST codes as the authoritative gate on save.
 //
-// Wiring: perfil.atualizar (existing use-case) for the profile fields +
+// Wiring (aperture-qmaoi, fblrt W2-c1): the BABY-half (nomeBebe/genero/
+// tipoEvento/dataEvento/…) goes to perfilCampanha.atualizar addressed to the
+// auto-created FIRST campanha (auth.me.idCampanha) — the needsOnboarding gate
+// reads perfil_campanhas.nome_bebe (aperture-3vc12), so this write is what
+// flips it. perfil.atualizar keeps ONLY the user-half (nomeExibicao) +
 // usuario.atualizarSlug (existing use-case, same guarded UNIQUE(plataforma,slug)
 // constraint the PerfilBody editor uses) for the chosen slug. On finish →
 // /painel/<finalSlug> (the chosen slug if changed, else the auto-derived one).
 //
 // A new account has every profile field null except nomeExibicao (set at
-// signup), so perfil.atualizar is sent with the other fields as null — correct
-// for the onboarding context (the wizard only ever runs post-signup).
+// signup), so perfil.atualizar sends the baby fields as null — correct for the
+// onboarding context (the wizard only ever runs post-signup).
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -77,6 +81,8 @@ export function OnboardingWizard({ onDone }: { onDone: (slug: string) => void })
   const me = trpc.auth.me.useQuery(undefined, { staleTime: 0 });
   const utils = trpc.useUtils();
   const atualizarPerfil = trpc.perfil.atualizar.useMutation();
+  // aperture-qmaoi — the baby-half's real home: the first campanha's perfil.
+  const atualizarPerfilCampanha = trpc.perfilCampanha.atualizar.useMutation();
   const atualizarSlug = trpc.usuario.atualizarSlug.useMutation();
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -204,12 +210,19 @@ export function OnboardingWizard({ onDone }: { onDone: (slug: string) => void })
       }
     }
 
-    // 2. Save the profile fields. Fresh account → non-captured fields are null.
-    //    nomeExibicao is required by the schema; carry the one set at signup.
+    // 2. Save the profile. aperture-qmaoi — the baby-half targets the
+    //    auto-created FIRST campanha via perfilCampanha.atualizar (per-campanha
+    //    isolation; the needsOnboarding gate reads perfil_campanhas.nome_bebe,
+    //    aperture-3vc12). perfil.atualizar keeps ONLY the user-half
+    //    (nomeExibicao). ORDER MATTERS during Rex's transitional shim window:
+    //    perfil.atualizar whole-content-writes its baby-half to the OLDEST
+    //    campanha, so it runs FIRST and the perfilCampanha write lands LAST —
+    //    the wizard's fresh values win. No-campanha edge (me.idCampanha
+    //    absent): send the baby-half through perfil.atualizar as before —
+    //    never invent an id (aperture-1kbyx guardrail).
     try {
-      await atualizarPerfil.mutateAsync({
-        nomeExibicao:
-          displayName.trim() || me.data?.nomeExibicao || babyName.trim() || "Família",
+      const idCampanha = me.data?.idCampanha ?? null;
+      const babyHalf = {
         nomeBebe: babyName.trim() || null,
         genero,
         relacao: null,
@@ -220,16 +233,50 @@ export function OnboardingWizard({ onDone }: { onDone: (slug: string) => void })
         fotoPerfilKey: null,
         fotoCapaKey: null,
         fotoHistoriaKey: null,
+      };
+      const nullBabyHalf = {
+        nomeBebe: null,
+        genero: null,
+        relacao: null,
+        historia: null,
+        dataNascimento: null,
+        tipoEvento: null,
+        dataEvento: null,
+        fotoPerfilKey: null,
+        fotoCapaKey: null,
+        fotoHistoriaKey: null,
+      };
+      await atualizarPerfil.mutateAsync({
+        nomeExibicao:
+          displayName.trim() || me.data?.nomeExibicao || babyName.trim() || "Família",
+        ...(idCampanha ? nullBabyHalf : babyHalf),
       });
+      if (idCampanha) {
+        await atualizarPerfilCampanha.mutateAsync({ idCampanha, ...babyHalf });
+      }
       await utils.auth.me.invalidate();
       onDone(finalSlug);
     } catch {
-      // The slug (if changed) is already committed at this point — redirect to
-      // the painel anyway so the user isn't trapped; the profile fields they can
-      // still set from the painel editor. Better than stranding them in the modal.
+      // aperture-5ho5j — a profile write FAILED (perfil.atualizar or the
+      // perfilCampanha.atualizar baby-half): keep the wizard OPEN so the user
+      // can retry. (Previously we fired onDone here anyway, which closed the
+      // wizard with the profile still empty → needsOnboarding stayed true →
+      // the wizard reappeared on the next painel load in a silent loop.)
+      // Retry re-runs BOTH writes — each is an idempotent whole-content
+      // replacement, so a half-committed first attempt heals on retry.
+      //
+      // Retry-safety of the slug half: if the slug was changed, atualizarSlug
+      // already committed it above — and re-running it with the same value is
+      // a backend no-op for the same owner (postgres adapter is a plain UPDATE
+      // on the user's own row, no self-conflict on UNIQUE(id_plataforma, slug);
+      // memory adapter explicitly allows owner === idUsuario), so no
+      // client-side "slugCommitted" guard is needed. We still invalidate
+      // auth.me so me.slug refreshes to the committed value → defaultSlug
+      // catches up → slugChanged goes false and the retry skips the slug
+      // mutation entirely.
       await utils.auth.me.invalidate();
-      toast.error("salvei seu link, mas não consegui salvar o resto agora — ajuste no seu perfil ♡");
-      onDone(finalSlug);
+      toast.error("não consegui salvar agora — tenta de novo? ♡");
+      setSubmitting(false);
     }
   };
 

@@ -98,7 +98,16 @@ export function useCampanhasList() {
  * fall back to the /c/<uuid> canonical form. (Real DTO field post-#359.)
  */
 export function useCampanhaSlugRota(): string | undefined {
-  const idCampanha = useCampanhaRota();
+  const idCampanhaRota = useCampanhaRota();
+  // aperture-2v91z (Wheatley's gotcha) — BARE routes resolve the DEFAULT
+  // campanha (auth.me) so the share chip shows ITS slug too; /c/:id-gating
+  // alone left every bare painel un-addressed even when the default
+  // campanha had a chosen slug.
+  const meQ = trpc.auth.me.useQuery(undefined, {
+    staleTime: 30_000,
+    enabled: !idCampanhaRota,
+  });
+  const idCampanha = idCampanhaRota ?? meQ.data?.idCampanha ?? undefined;
   const listQ = trpc.campanhas.list.useQuery(undefined, {
     staleTime: 30_000,
     enabled: Boolean(idCampanha),

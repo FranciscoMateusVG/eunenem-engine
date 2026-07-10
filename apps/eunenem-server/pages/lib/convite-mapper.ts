@@ -9,8 +9,11 @@ import { DEFAULT_STATE, type ConviteState } from './mocks/convite.js';
 
 export interface EventoConviteSnapshot {
   id: string;
-  tipoEvento: TipoEvento;
-  modalidade: ModalidadeEvento;
+  // aperture-mu1v9: the eventos row may be PARTIAL (wizard-seeded via
+  // perfilCampanha.atualizar — tipo/data only). tipoEvento/modalidade are
+  // nullable on read; the SAVE payload below stays strict.
+  tipoEvento: TipoEvento | null;
+  modalidade: ModalidadeEvento | null;
   dataHoraIso: string | null;
   endereco: string | null;
 }
@@ -166,8 +169,10 @@ export function conviteStateFromData(data: EventoConviteQueryData | undefined): 
 
   return {
     ...DEFAULT_STATE,
-    eventType: data.evento.tipoEvento,
-    mode: data.evento.modalidade,
+    // aperture-mu1v9: a wizard-seeded partial evento carries no tipo and/or
+    // no modalidade yet — fall back to the editor defaults explicitly.
+    eventType: data.evento.tipoEvento ?? DEFAULT_STATE.eventType,
+    mode: data.evento.modalidade ?? DEFAULT_STATE.mode,
     date,
     time,
     address: data.evento.modalidade === 'presencial' ? (data.evento.endereco ?? '') : '',

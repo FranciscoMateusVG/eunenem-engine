@@ -6,8 +6,10 @@ import { toast } from "sonner";
 import { useTweaks } from "@/components/eunenem/TweaksContext";
 import { trpc } from "@/lib/trpc";
 import type { Genero } from "@/lib/concordancia";
-import { paginaShareDisplayPrefix, paginaShareUrl } from "@/lib/pagina-share";
+import { paginaShareDisplayPath, paginaShareDisplayPrefix, paginaShareUrl } from "@/lib/pagina-share";
+import { useCampanhaSlugRota } from "@/lib/campanhas";
 import { painelHref } from "@/lib/painelRoutes";
+import { useCampanhaEscrita } from "@/lib/campanha-escrita";
 import { useCampanhaRota } from "@/lib/campanha-rota";
 import { PERFIL_RELATIONS } from "@/lib/mocks/perfil";
 import type { PainelSectionBodyProps } from "@/PainelSectionPage";
@@ -842,6 +844,15 @@ function PerfilDateField({
 
 export function PerfilBody({ slug }: PainelSectionBodyProps) {
   const idCampanha = useCampanhaRota();
+  // aperture-qmaoi (fblrt W2-c1) — WRITE target: rota ?? session-default
+  // (oldest). Bare /painel/:slug saves now address the default campanha's
+  // perfil via perfilCampanha.atualizar instead of feeding the legacy
+  // perfil.atualizar baby-half (Rex's hsxim shed prerequisite). READS keep the
+  // rota-only split: bare URLs hydrate from perfil.getPerfil, whose shim reads
+  // the oldest campanha — the same rows these writes now target.
+  const idCampanhaEscrita = useCampanhaEscrita();
+  // aperture-2v91z — the route campanha's pretty slug for the share row.
+  const campanhaSlugRota = useCampanhaSlugRota();
   const { tweaks, setTweaks } = useTweaks();
   const utils = trpc.useUtils();
 
@@ -1022,13 +1033,13 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
     };
   };
 
-  // aperture-1yx1n — Mode-B step (a): whole-content save of the FORM's
-  // baby-half to the ROUTE campanha, then re-seed keys/urls/genero/tweaks from
-  // the fresh DTO (mirror of the Mode-A atualizar onSuccess). Throws on
-  // failure so callers can gate what follows.
-  const salvarCampanha = async () => {
-    if (!idCampanha) return; // Mode-B only (TS narrow; never hit on bare URLs)
-    const fresh = await atualizarCampanha.mutateAsync(campanhaPayload(idCampanha));
+  // aperture-1yx1n — whole-content save of the FORM's baby-half to the target
+  // campanha, then re-seed keys/urls/genero/tweaks from the fresh DTO (mirror
+  // of the legacy atualizar onSuccess). Throws on failure so callers can gate
+  // what follows. aperture-qmaoi — target is now a param (rota ?? oldest), so
+  // bare-URL saves address the default campanha too.
+  const salvarCampanha = async (target: string) => {
+    const fresh = await atualizarCampanha.mutateAsync(campanhaPayload(target));
     fotoKeys.current = {
       perfil: fresh.fotoPerfilKey,
       capa: fresh.fotoCapaKey,
@@ -1041,7 +1052,11 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
     });
     setGenero(fresh.genero ?? "");
     setTweaks({ babyName: fresh.nomeBebe ?? babyName.trim() });
-    utils.perfilCampanha.get.setData({ idCampanha }, fresh);
+    utils.perfilCampanha.get.setData({ idCampanha: target }, fresh);
+    // aperture-qmaoi — when the target is the DEFAULT campanha, the cached
+    // perfil.getPerfil DTO (whose shim reads that same campanha) is now stale
+    // for its baby-half; invalidate so painel surfaces refetch fresh.
+    void utils.perfil.getPerfil.invalidate();
   };
 
   const saveErrorMessage = (err: unknown) =>
@@ -1049,39 +1064,23 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
       ? err.message
       : "não consegui salvar — tenta de novo?";
 
-  // aperture-1yx1n — Mode-B save. Route decides which perfil: /c/:id →
-  // perfilCampanha.atualizar gets the FORM's baby-half; the user-level
-  // perfil.atualizar runs ONLY to persist nomeExibicao — and it must ECHO
-  // getPerfil's OWN baby-half (perfilEchoRef), NEVER the form's values.
-  // CLOBBER RATIONALE: during Rex's transitional shim window perfil.atualizar
-  // writes its baby-half to the OLDEST campanha, so sending the form's values
-  // there would overwrite that campanha with THIS route's data. Unchanged
-  // creatorName → skip the user-level half entirely (cheaper + zero clobber
-  // surface). Success toast only after every needed mutation resolves; a
-  // perfilCampanha failure aborts before the user-level half (no partial saves).
-  const handleSaveCampanha = async () => {
-    try {
-      await salvarCampanha();
-    } catch (err) {
-      toast.error(saveErrorMessage(err));
-      return;
-    }
-    const echo = perfilEchoRef.current;
-    if (echo && creatorName.trim() !== creatorNameSaved.current) {
+  // aperture-1yx1n / aperture-qmaoi — campanha-addressed save (now EVERY save
+  // with a resolvable campanha: rota ?? oldest). perfilCampanha.atualizar gets
+  // the FORM's baby-half; the user-level perfil.atualizar persists ONLY
+  // nomeExibicao.
+  // aperture-hsxim (W2 shed): the qmaoi ECHO pattern is RETIRED —
+  // perfil.atualizar is slim ({nomeExibicao} only) and writes NO baby
+  // content anywhere, so the shim-era clobber surface (oldest-campanha
+  // overwrite) no longer exists. The response DTO still carries the
+  // read-through baby-half from the oldest campanha's perfil_campanhas, so
+  // the echo-ref/cache refresh keeps working unchanged. Unchanged
+  // creatorName → skip the user-level half entirely (cheaper). Order kept
+  // (name first, campanha save last) — no longer load-bearing, just stable.
+  const handleSaveCampanha = async (target: string) => {
+    if (creatorName.trim() !== creatorNameSaved.current) {
       try {
         const updated = await atualizarUsuarioEco.mutateAsync({
           nomeExibicao: creatorName.trim(),
-          // ECHO of getPerfil's OWN baby-half — NOT the form's (clobber trap).
-          nomeBebe: echo.nomeBebe,
-          relacao: echo.relacao,
-          historia: echo.historia,
-          dataNascimento: echo.dataNascimento,
-          tipoEvento: echo.tipoEvento,
-          genero: echo.genero,
-          dataEvento: echo.dataEvento,
-          fotoPerfilKey: echo.fotoPerfilKey,
-          fotoCapaKey: echo.fotoCapaKey,
-          fotoHistoriaKey: echo.fotoHistoriaKey,
         });
         // Keep the echo fresh from the round-trip DTO (aperture-7sb1h pattern).
         perfilEchoRef.current = updated;
@@ -1092,6 +1091,12 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
         return;
       }
     }
+    try {
+      await salvarCampanha(target);
+    } catch (err) {
+      toast.error(saveErrorMessage(err));
+      return;
+    }
     toast.success("Tudo salvo! Feito com carinho ♡");
   };
 
@@ -1099,13 +1104,17 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
   // MinIO → persist the returned objectKey via atualizar → preview shows the
   // publicUrl immediately. Throws on failure so PhotoSlot surfaces the error.
   const uploadFoto = async (slot: FotoSlot, blob: Blob, contentType: FotoContentType) => {
-    // aperture-1yx1n — route decides which perfil: /c/:id → perfilCampanha.*,
-    // bare → user-level (transitional shim repoints to oldest). Same presign
-    // output; the campanha variant names the slot param `tipo`.
-    const { uploadUrl, objectKey, publicUrl } = idCampanha
+    // aperture-qmaoi — presign under the WRITE campanha (rota ?? oldest); the
+    // user-level presign survives only for the no-campanha edge. Same presign
+    // output either way.
+    const { uploadUrl, objectKey, publicUrl } = idCampanhaEscrita
       ? // NOTE: shipped input param is `slot` (not the contract note's `tipo`) —
           // real router shape wins, flagged to Rex on the aphk8 bead.
-          await emitirUploadCampanha.mutateAsync({ idCampanha, slot, contentType })
+          await emitirUploadCampanha.mutateAsync({
+            idCampanha: idCampanhaEscrita,
+            slot,
+            contentType,
+          })
       : await emitirUpload.mutateAsync({ slot, contentType });
     const res = await fetch(uploadUrl, {
       method: "PUT",
@@ -1115,12 +1124,14 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
     if (!res.ok) throw new Error(`upload falhou (${res.status})`);
     fotoKeys.current = { ...fotoKeys.current, [slot]: objectKey };
     setFotoUrls((prev) => ({ ...prev, [slot]: publicUrl }));
-    if (idCampanha) {
-      // aperture-1yx1n — Mode B persists the key on the ROUTE campanha.
-      // nomeExibicao isn't part of this save, so creatorName doesn't gate it;
-      // errors surface as the save toast (parity with Mode A's onError).
+    if (idCampanhaEscrita) {
+      // aperture-qmaoi — persist the key on the WRITE campanha (rota ??
+      // oldest). nomeExibicao isn't part of this save, so creatorName doesn't
+      // gate it; errors surface as the save toast (parity with the legacy
+      // path's onError). No echo needed: salvarCampanha never touches
+      // perfil.atualizar.
       try {
-        await salvarCampanha();
+        await salvarCampanha(idCampanhaEscrita);
         toast.success("Tudo salvo! Feito com carinho ♡");
       } catch (err) {
         toast.error(saveErrorMessage(err));
@@ -1131,6 +1142,7 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
     // never orphan in the bucket. babyName no longer gates this (nomeBebe is
     // nullable → currentPayload sends null when empty). Only the always-present
     // creatorName (nomeExibicao is required) needs to be set to save.
+    // (no-campanha edge only — aperture-qmaoi)
     if (creatorName.trim()) {
       atualizar.mutate(currentPayload());
     } else {
@@ -1160,10 +1172,13 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
     // The dataEvento / dataNascimento locals above gate on validity; the payload
     // builders re-parse them (same result) and assemble the full payload incl.
     // photo keys.
-    // aperture-1yx1n — route decides which perfil: /c/:id → perfilCampanha.*,
-    // bare → user-level (transitional shim repoints to oldest).
-    if (idCampanha) {
-      void handleSaveCampanha();
+    // aperture-qmaoi — every save with a resolvable campanha (rota ?? oldest)
+    // is campanha-addressed: baby-half → perfilCampanha.atualizar, nomeExibicao
+    // → perfil.atualizar (echo discipline). The legacy full perfil.atualizar
+    // survives ONLY for the no-campanha edge — never invent an id
+    // (aperture-1kbyx guardrail).
+    if (idCampanhaEscrita) {
+      void handleSaveCampanha(idCampanhaEscrita);
     } else {
       atualizar.mutate(currentPayload());
     }
@@ -1253,9 +1268,14 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
         <div className="perfil-share">
           <span className="perfil-share-eyebrow">link da página</span>
           <div className="perfil-share-row">
-            <span className="perfil-share-url" title={paginaShareUrl(profileSlug, idCampanha)}>
+            {/* aperture-2v91z — display + copy both carry the campanha's own
+                pretty slug when chosen; /c/<uuid> copy fallback otherwise. */}
+            <span
+              className="perfil-share-url"
+              title={paginaShareUrl(profileSlug, idCampanha, campanhaSlugRota)}
+            >
               {paginaShareDisplayPrefix()}
-              {profileSlug}
+              {paginaShareDisplayPath(profileSlug, campanhaSlugRota)}
             </span>
             <button
               type="button"
@@ -1263,7 +1283,7 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
               onClick={() => {
                 // aperture-1yx1n — copy the REAL public page URL, campanha-
                 // addressed when this perfil sits under a /c/:id route.
-                const link = paginaShareUrl(profileSlug, idCampanha);
+                const link = paginaShareUrl(profileSlug, idCampanha, campanhaSlugRota);
                 void navigator.clipboard
                   .writeText(link)
                   .then(() => toast.success("link copiado ♡"))

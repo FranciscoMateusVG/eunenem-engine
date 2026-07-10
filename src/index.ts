@@ -954,6 +954,14 @@ export {
   ObterListaDeConvidadosPorIdEventoInputSchema,
   obterListaDeConvidadosPorIdEvento,
 } from './use-cases/evento/obter-lista-de-convidados-por-id-evento.js';
+export type {
+  UpsertEventoParcialDeps,
+  UpsertEventoParcialInput,
+} from './use-cases/evento/upsert-evento-parcial.js';
+export {
+  UpsertEventoParcialInputSchema,
+  upsertEventoParcial,
+} from './use-cases/evento/upsert-evento-parcial.js';
 // aperture-16wrk — admin mensagens backend (5v766 Phase A). SHARED with
 // the frontend (Vance / Phase B) — the schemas + use-case Result types
 // are the contract.

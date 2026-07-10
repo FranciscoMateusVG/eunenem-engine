@@ -6,6 +6,7 @@ import type { FormatoMensagemConvite, StatusPresencaConvidado } from "@/lib/conv
 import { convidadosErrorMessage } from "@/lib/convidados";
 import { formatDateScrap } from "@/lib/mocks/convite";
 import type { ConviteState } from "@/lib/mocks/convite";
+import { paginaSharePath } from "@/lib/painelRoutes";
 import { trpc } from "@/lib/trpc";
 import { NotFoundPage } from "./NotFoundPage";
 import { InvitePreview } from "./components/eunenem/painel/ConviteBody";
@@ -172,6 +173,7 @@ export function ConfirmarPresencaPage({
   return (
     <ConfirmarPresencaView
       slug={slug}
+      idCampanha={idCampanhaConvidado ?? null}
       nome={convidadoQuery.data.nome}
       presenca={convidadoQuery.data.presenca}
       formatoMensagemConvite={convidadoQuery.data.formatoMensagemConvite}
@@ -203,6 +205,7 @@ export function ConfirmarPresencaPage({
  */
 export function ConfirmarPresencaView({
   slug,
+  idCampanha = null,
   nome,
   presenca,
   formatoMensagemConvite,
@@ -212,6 +215,8 @@ export function ConfirmarPresencaView({
   pending = null,
 }: {
   slug: string;
+  /** aperture-2v91z — the convidado's campanha, so the promo CTA keeps context. */
+  idCampanha?: string | null;
   nome: string;
   presenca: StatusPresencaConvidado;
   formatoMensagemConvite: FormatoMensagemConvite;
@@ -344,7 +349,8 @@ export function ConfirmarPresencaView({
               </p>
             </div>
             <div className="cp-promo-cta">
-              <a href={`/pagina/${slug}`} className="cp-promo-btn">
+              {/* aperture-2v91z — promo CTA keeps the CONVIDADO's campanha. */}
+              <a href={paginaSharePath(slug, idCampanha)} className="cp-promo-btn">
                 ver a lista de presentes <span className="cp-promo-btn-arrow" aria-hidden="true">→</span>
               </a>
               <span className="cp-promo-note">leva 2 minutinhos ♡</span>

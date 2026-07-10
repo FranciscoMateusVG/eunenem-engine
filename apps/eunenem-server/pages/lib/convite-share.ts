@@ -5,8 +5,15 @@ export const CONVITE_SHARE_PRODUCTION_ORIGIN = 'https://eunenem.xeroxtoxerox.com
 export const CONVITE_SHARE_DEVELOPMENT_ORIGIN = 'http://localhost:3001/';
 
 
-export function buildConvitePreviewShareUrl(origin: string, slug: string): string {
-  return new URL(painelConvitePreviewHref(slug), origin).toString();
+// aperture-2v91z — idCampanha threads through so a native share targets THE
+// CAMPANHA'S convite; without it every share pointed at the OLDEST
+// campanha's preview (real leak — a guest opened the wrong chá's invite).
+export function buildConvitePreviewShareUrl(
+  origin: string,
+  slug: string,
+  idCampanha?: string | null,
+): string {
+  return new URL(painelConvitePreviewHref(slug, idCampanha ?? undefined), origin).toString();
 }
 
 export function getDefaultConviteShareOrigin(): string {
@@ -22,6 +29,8 @@ export function getDefaultConviteShareOrigin(): string {
 export interface ShareConvitePreviewOptions {
   origin?: string;
   slug: string;
+  /** aperture-2v91z — the campanha whose convite is being shared. */
+  idCampanha?: string | null;
   text?: string;
   title?: string;
 }
@@ -35,10 +44,11 @@ export interface ShareConvitePreviewOptions {
 function buildConviteShareData({
   origin = getDefaultConviteShareOrigin(),
   slug,
+  idCampanha,
   text = 'Quero te mostrar este convite.',
   title = 'Convite',
 }: ShareConvitePreviewOptions): ShareData {
-  const url = buildConvitePreviewShareUrl(origin, slug);
+  const url = buildConvitePreviewShareUrl(origin, slug, idCampanha);
   return { title, text, url };
 }
 
@@ -75,8 +85,8 @@ export function canShareConvitePreview(options: ShareConvitePreviewOptions): boo
 }
 
 async function copyConviteLink(options: ShareConvitePreviewOptions): Promise<ConviteShareResult> {
-  const { origin = getDefaultConviteShareOrigin(), slug } = options;
-  const url = buildConvitePreviewShareUrl(origin, slug);
+  const { origin = getDefaultConviteShareOrigin(), slug, idCampanha } = options;
+  const url = buildConvitePreviewShareUrl(origin, slug, idCampanha);
 
   if (typeof navigator !== 'undefined' && typeof navigator.clipboard?.writeText === 'function') {
     await navigator.clipboard.writeText(url);

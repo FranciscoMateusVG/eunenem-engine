@@ -134,13 +134,15 @@ const ListInputSchema = z.object({
 
 const MarcarLidaInputSchema = z.object({
   slug: z.string().trim().min(1),
-  idCampanha: z.string().optional(),
+  // aperture-48mxt (W2 enforce): REQUIRED — authed writes are campanha-addressed.
+  idCampanha: z.string().uuid(),
   idPagamento: z.string().uuid(),
 });
 
 const MarcarTodasLidasInputSchema = z.object({
   slug: z.string().trim().min(1),
-  idCampanha: z.string().optional(),
+  // aperture-48mxt (W2 enforce): REQUIRED — authed writes are campanha-addressed.
+  idCampanha: z.string().uuid(),
 });
 
 export const painelMensagensRouter = t.router({

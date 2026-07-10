@@ -17,6 +17,7 @@ import type { TrpcContext } from '../../../apps/eunenem-server/server/trpc/conte
 import { appRouter } from '../../../apps/eunenem-server/server/trpc/router.js';
 import { CampanhaRepositoryMemory } from '../../../src/adapters/arrecadacao/campanha-repository.memory.js';
 import { PerfilCampanhaRepositoryMemory } from '../../../src/adapters/arrecadacao/perfil-campanha-repository.memory.js';
+import { EventoRepositoryMemory } from '../../../src/adapters/evento/evento-repository.memory.js';
 import { ID_PLATAFORMA_EUNENEM } from '../../../src/adapters/plataforma/repository.memory.js';
 import { ObjectStorageMemory } from '../../../src/adapters/storage/object-storage.memory.js';
 import { PerfilCriadorRepositoryMemory } from '../../../src/adapters/usuario/perfil-criador-repository.memory.js';
@@ -36,6 +37,8 @@ interface Rig {
   callerAnon: ReturnType<typeof appRouter.createCaller>;
   idUsuario: string;
   idConta: string;
+  /** The caller's (oldest and only) campanha — baby content is written here. */
+  idCampanha: string;
 }
 
 async function buildRig(): Promise<Rig> {
@@ -50,9 +53,10 @@ async function buildRig(): Promise<Rig> {
 
   const idUsuario = randomUUID();
   const idConta = randomUUID();
+  const idCampanha = randomUUID();
   await campanhaRepository.save(
     criarCampanhaSemRecebedor({
-      id: randomUUID(),
+      id: idCampanha,
       idPlataforma: ID_PLATAFORMA_EUNENEM,
       idsAdministradores: [idConta],
       titulo: 'Lista da Helena',
@@ -94,6 +98,9 @@ async function buildRig(): Promise<Rig> {
     perfilCriadorRepository,
     perfilCampanhaRepository,
     campanhaRepository,
+    // aperture-mu1v9: tipoEvento/dataEvento now live on the eventos single
+    // source — perfilCampanha.atualizar writes it, the perfil reads read it.
+    eventoRepository: new EventoRepositoryMemory(),
     objectStorage: new ObjectStorageMemory(),
     plataformaRepository: {} as never,
     observability,
@@ -114,11 +121,15 @@ async function buildRig(): Promise<Rig> {
     callerAnon: appRouter.createCaller(ctxAnon),
     idUsuario,
     idConta,
+    idCampanha,
   };
 }
 
-const FULL_INPUT = {
-  nomeExibicao: 'Helena Mãe',
+// aperture-hsxim (W2 shed): perfil.atualizar is SLIM (nomeExibicao only);
+// baby content goes through perfilCampanha.atualizar({idCampanha, ...}).
+const NOME_INPUT = { nomeExibicao: 'Helena Mãe' };
+
+const CONTEUDO_INPUT = {
   nomeBebe: 'Helena',
   relacao: 'Mãe',
   historia: 'Uma espera cheia de amor.',
@@ -137,8 +148,9 @@ describe('perfil router', () => {
     rig = await buildRig();
   });
 
-  it('atualizar persists and getPerfil returns the saved profile + creatorName', async () => {
-    await rig.caller.perfil.atualizar(FULL_INPUT);
+  it('atualizar (slim) updates creatorName; getPerfil reads baby content from perfil_campanhas', async () => {
+    await rig.caller.perfilCampanha.atualizar({ idCampanha: rig.idCampanha, ...CONTEUDO_INPUT });
+    await rig.caller.perfil.atualizar(NOME_INPUT);
     const got = await rig.caller.perfil.getPerfil();
     expect(got.creatorName).toBe('Helena Mãe'); // nomeExibicao updated via atualizarPerfilUsuario
     expect(got.slug).toBe(SLUG);
@@ -154,13 +166,20 @@ describe('perfil router', () => {
     expect(got.fotoPerfilKey).toBe('perfis/helena/perfil.jpg'); // bare key for round-trip
   });
 
-  it('🔁 idempotent persist: a resolved URL fed back as fotoXKey self-heals to a bare key', async () => {
-    // First save with the bare key.
-    await rig.caller.perfil.atualizar(FULL_INPUT);
+  it('🔁 idempotent persist (qjgfr, via perfilCampanha.atualizar): a resolved URL fed back as fotoXKey self-heals', async () => {
+    // aperture-hsxim: the baby-half write path is perfilCampanha.atualizar —
+    // the qjgfr self-heal must hold THERE (upsertConteudoPerfilCampanha
+    // normalizes via extrairKey). First save with the bare key.
+    const idCampanha = rig.idCampanha;
+    await rig.caller.perfilCampanha.atualizar({ idCampanha, ...CONTEUDO_INPUT });
     // Simulate the bug: the client round-trips the RESOLVED url back as the key
     // (and even a doubly-mangled value). extrairKey must strip ALL base prefixes.
     const mangled = `memory://eunenem-perfil-fotos/memory://eunenem-perfil-fotos/perfis/helena/perfil.jpg`;
-    await rig.caller.perfil.atualizar({ ...FULL_INPUT, fotoPerfilKey: mangled });
+    await rig.caller.perfilCampanha.atualizar({
+      idCampanha,
+      ...CONTEUDO_INPUT,
+      fotoPerfilKey: mangled,
+    });
     const got = await rig.caller.perfil.getPerfil();
     // Stored as a single bare key → resolves to a SINGLE-prefixed url (no ×N).
     expect(got.fotoPerfilKey).toBe('perfis/helena/perfil.jpg');
@@ -168,7 +187,8 @@ describe('perfil router', () => {
   });
 
   it('getPerfilPublicoBySlug returns the projection', async () => {
-    await rig.caller.perfil.atualizar(FULL_INPUT);
+    await rig.caller.perfilCampanha.atualizar({ idCampanha: rig.idCampanha, ...CONTEUDO_INPUT });
+    await rig.caller.perfil.atualizar(NOME_INPUT);
     const pub = await rig.callerAnon.perfil.getPerfilPublicoBySlug({ slug: SLUG });
     expect(pub.creatorName).toBe('Helena Mãe');
     expect(pub.nomeBebe).toBe('Helena');
@@ -179,7 +199,8 @@ describe('perfil router', () => {
   });
 
   it('🔒 public projection leaks NO PII (email / idConta / idUsuario / idPlataforma)', async () => {
-    await rig.caller.perfil.atualizar(FULL_INPUT);
+    await rig.caller.perfilCampanha.atualizar({ idCampanha: rig.idCampanha, ...CONTEUDO_INPUT });
+    await rig.caller.perfil.atualizar(NOME_INPUT);
     const pub = await rig.callerAnon.perfil.getPerfilPublicoBySlug({ slug: SLUG });
 
     // 1. Key-level: only the whitelisted public keys are present.
@@ -223,7 +244,7 @@ describe('perfil router', () => {
   });
 
   it('atualizar without session → UNAUTHORIZED', async () => {
-    await expect(rig.callerAnon.perfil.atualizar(FULL_INPUT)).rejects.toMatchObject({
+    await expect(rig.callerAnon.perfil.atualizar(NOME_INPUT)).rejects.toMatchObject({
       code: 'UNAUTHORIZED',
     });
   });

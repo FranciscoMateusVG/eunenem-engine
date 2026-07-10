@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { useTweaks } from "../TweaksContext";
 import type { PainelEventSnapshot } from "@/lib/mocks/painelDemo";
 import { useCampanhaSlugRota } from "@/lib/campanhas";
-import { paginaShareDisplayPrefix, paginaShareUrl } from "@/lib/pagina-share";
+import { paginaShareDisplayPath, paginaShareDisplayPrefix, paginaShareUrl } from "@/lib/pagina-share";
 import { painelHref } from "@/lib/painelRoutes";
 import { useCampanhaRota } from "@/lib/campanha-rota";
 
@@ -81,14 +81,18 @@ export function PainelHeaderCard({ snapshot, slug, campanhaTitulo }: Props) {
   // NOT show the old mock "15 jun 2026" / "0 dias". The operator's tweaks panel
   // still drives both when a date is set.
   const rawTarget = (tweaks.targetDate ?? "").trim();
-  const targetDate = rawTarget ? new Date(`${rawTarget}T16:00:00-03:00`) : null;
+  // aperture-niw6o — noon-BRT anchor for DATE MATH ONLY (a bare yyyy-mm-dd
+  // parses as UTC midnight and shifts the day in BRT). The hour is NEVER
+  // displayed: the old '· 16h' was a demo-era fabrication (no surface lets
+  // the user choose an event time — that idea is parked on aperture-5lu4z).
+  const targetDate = rawTarget ? new Date(`${rawTarget}T12:00:00-03:00`) : null;
   const hasDate = targetDate !== null && !Number.isNaN(targetDate.getTime());
   const weekdayPt = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
   const daysLeft = hasDate
     ? Math.max(0, Math.floor((targetDate.getTime() - now) / 86_400_000))
     : 0;
   const inlineDate = hasDate
-    ? `${targetDate.getDate()} ${MONTHS_PT[targetDate.getMonth()]}, ${weekdayPt[targetDate.getDay()]} · 16h`
+    ? `${targetDate.getDate()} ${MONTHS_PT[targetDate.getMonth()]}, ${weekdayPt[targetDate.getDay()]}`
     : "";
   const chipDate = hasDate
     ? `${targetDate.getDate()} ${MONTHS_PT[targetDate.getMonth()]} ${targetDate.getFullYear()}`
@@ -209,7 +213,10 @@ export function PainelHeaderCard({ snapshot, slug, campanhaTitulo }: Props) {
               rel="noopener noreferrer"
               className="painel-url-slug"
             >
-              {slug}
+              {/* aperture-2v91z — the campanha's OWN address when it chose a
+                  slug ('francisco/teste'), never the same bare user-slug on
+                  every campanha. */}
+              {paginaShareDisplayPath(slug, campanhaSlug)}
             </a>
           </span>
         </div>

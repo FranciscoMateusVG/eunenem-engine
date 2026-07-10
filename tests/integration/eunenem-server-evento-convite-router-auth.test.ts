@@ -39,6 +39,8 @@ interface TestRig {
   callerAnon: ReturnType<typeof appRouter.createCaller>;
   callerAuth: ReturnType<typeof appRouter.createCaller>;
   slug: string;
+  /** aperture-48mxt: authed writes are campanha-addressed. */
+  idCampanha: string;
 }
 
 async function buildRig(): Promise<TestRig> {
@@ -157,6 +159,7 @@ async function buildRig(): Promise<TestRig> {
     callerAnon: appRouter.createCaller(anonCtx),
     callerAuth: appRouter.createCaller(authCtx),
     slug: usuario.slug,
+    idCampanha: campanha.id,
   };
 }
 
@@ -184,6 +187,7 @@ describe('eventoConvite router (edicao autenticada + preview publico)', () => {
     const rig = await buildRig();
 
     const created = await rig.callerAuth.eventoConvite.save({
+      idCampanha: rig.idCampanha,
       tipoEvento: 'cha-bebe',
       modalidade: 'presencial',
       dataHoraIso: '2026-08-15T18:30:00.000Z',
@@ -213,6 +217,7 @@ describe('eventoConvite router (edicao autenticada + preview publico)', () => {
     const rig = await buildRig();
 
     const created = await rig.callerAuth.eventoConvite.save({
+      idCampanha: rig.idCampanha,
       tipoEvento: 'cha-bebe',
       modalidade: 'presencial',
       dataHoraIso: null,

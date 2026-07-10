@@ -134,8 +134,8 @@ export interface Eventos {
   endereco: string | null;
   id: string;
   id_campanha: string;
-  modalidade: string;
-  tipo_evento: string;
+  modalidade: string | null;
+  tipo_evento: string | null;
 }
 
 export interface IntencaoItems {

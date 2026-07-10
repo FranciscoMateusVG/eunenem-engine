@@ -165,6 +165,8 @@ export function MobileConviteBody({ slug }: PainelSectionBodyProps) {
       try {
         const result = await shareConvitePreview({
           slug,
+          // aperture-2v91z — share THIS campanha's convite, not the oldest's.
+          idCampanha,
           title: `Convite de ${state.babyName || 'nosso evento'}`,
           text: "Quero te mostrar este convite.",
         });

@@ -345,6 +345,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       // `create({ quantidade: 8 })` to fan out into 8 identical rows — the
       // row-multiplier pattern that 0016 retired.)
       const created = (await caller.contribuicao.createBulk({
+        idCampanha: alice.idCampanha,
         items: Array.from({ length: 8 }, (_, i) => ({
           nome: `Fralda P ${i}`,
           valor: 5000,
@@ -370,6 +371,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
 
       const targetId = requireFirst(created.ids);
       const updated = (await caller.contribuicao.update({
+        idCampanha: alice.idCampanha,
         id: targetId,
         nome: 'Fralda M',
         valor: 7500,
@@ -379,6 +381,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       expect(updated.valor).toBe(7500);
 
       const deleted = (await caller.contribuicao.delete({
+        idCampanha: alice.idCampanha,
         ids: [requireAt(created.ids, 1), requireAt(created.ids, 2)],
       })) as { deletedIds: string[] };
       expect(deleted.deletedIds).toEqual([created.ids[1], created.ids[2]]);
@@ -404,7 +407,12 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       const aliceCaller = rig.callerFor(alice.cookieHeader);
       const bobCaller = rig.callerFor(bob.cookieHeader);
 
-      await aliceCaller.contribuicao.create({ nome: 'Fralda', valor: 3000, quantidade: 3 });
+      await aliceCaller.contribuicao.create({
+        idCampanha: alice.idCampanha,
+        nome: 'Fralda',
+        valor: 3000,
+        quantidade: 3,
+      });
 
       const bobList = (await bobCaller.contribuicao.list()) as Array<unknown>;
       expect(bobList).toEqual([]);
@@ -424,6 +432,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       const bobCaller = rig.callerFor(bob.cookieHeader);
 
       const create = (await aliceCaller.contribuicao.create({
+        idCampanha: alice.idCampanha,
         nome: 'Fralda',
         valor: 3000,
         quantidade: 1,
@@ -431,7 +440,11 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       const aliceItemId = requireFirst(create.ids);
 
       const err = await expectTrpcError(() =>
-        bobCaller.contribuicao.update({ id: aliceItemId, nome: 'Hacked' }),
+        bobCaller.contribuicao.update({
+          idCampanha: bob.idCampanha,
+          id: aliceItemId,
+          nome: 'Hacked',
+        }),
       );
       expect(err.code).toBe('UNAUTHORIZED');
     });
@@ -450,6 +463,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       const bobCaller = rig.callerFor(bob.cookieHeader);
 
       const create = (await aliceCaller.contribuicao.create({
+        idCampanha: alice.idCampanha,
         nome: 'Fralda',
         valor: 3000,
         quantidade: 1,
@@ -457,7 +471,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       const aliceItemId = requireFirst(create.ids);
 
       const err = await expectTrpcError(() =>
-        bobCaller.contribuicao.delete({ ids: [aliceItemId] }),
+        bobCaller.contribuicao.delete({ idCampanha: bob.idCampanha, ids: [aliceItemId] }),
       );
       expect(err.code).toBe('UNAUTHORIZED');
     });
@@ -481,6 +495,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       const caller = rig.callerFor(alice.cookieHeader);
 
       const create = (await caller.contribuicao.create({
+        idCampanha: alice.idCampanha,
         nome: 'Fralda',
         valor: 3000,
         quantidade: 1,
@@ -491,6 +506,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       await deps.pagamentoRepository.save(makeAprovadoPagamento(itemId, 1));
 
       const updated = (await caller.contribuicao.update({
+        idCampanha: alice.idCampanha,
         id: itemId,
         nome: 'New name',
       })) as { id: string; nome: string; indisponivel: boolean; quantidadeRestante: number };
@@ -509,6 +525,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       const caller = rig.callerFor(alice.cookieHeader);
 
       const create = (await caller.contribuicao.create({
+        idCampanha: alice.idCampanha,
         nome: 'Fralda',
         valor: 3000,
         quantidade: 1,
@@ -520,7 +537,9 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       // integrity for the lançamento ledger). Seed that sold state.
       await deps.pagamentoRepository.save(makeAprovadoPagamento(itemId, 1));
 
-      const err = await expectTrpcError(() => caller.contribuicao.delete({ ids: [itemId] }));
+      const err = await expectTrpcError(() =>
+        caller.contribuicao.delete({ idCampanha: alice.idCampanha, ids: [itemId] }),
+      );
       expect(err.code).toBe('BAD_REQUEST');
       expect(err.message).toBe('contribuicao_locked');
     });
@@ -536,7 +555,12 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
     it('create without session → UNAUTHORIZED', async () => {
       const caller = rig.callerFor();
       const err = await expectTrpcError(() =>
-        caller.contribuicao.create({ nome: 'X', valor: 100, quantidade: 1 }),
+        caller.contribuicao.create({
+          idCampanha: randomUUID(),
+          nome: 'X',
+          valor: 100,
+          quantidade: 1,
+        }),
       );
       expect(err.code).toBe('UNAUTHORIZED');
     });
@@ -544,14 +568,16 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
     it('update without session → UNAUTHORIZED', async () => {
       const caller = rig.callerFor();
       const err = await expectTrpcError(() =>
-        caller.contribuicao.update({ id: randomUUID(), nome: 'X' }),
+        caller.contribuicao.update({ idCampanha: randomUUID(), id: randomUUID(), nome: 'X' }),
       );
       expect(err.code).toBe('UNAUTHORIZED');
     });
 
     it('delete without session → UNAUTHORIZED', async () => {
       const caller = rig.callerFor();
-      const err = await expectTrpcError(() => caller.contribuicao.delete({ ids: [randomUUID()] }));
+      const err = await expectTrpcError(() =>
+        caller.contribuicao.delete({ idCampanha: randomUUID(), ids: [randomUUID()] }),
+      );
       expect(err.code).toBe('UNAUTHORIZED');
     });
   });
@@ -565,6 +591,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       const caller = rig.callerFor(alice.cookieHeader);
 
       const result = (await caller.contribuicao.createBulk({
+        idCampanha: alice.idCampanha,
         items: [{ nome: 'Fralda P', valor: 5000, quantidade: 1 }],
       })) as { ids: string[] };
       expect(result.ids).toHaveLength(1);
@@ -585,6 +612,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       // ONE row with `quantidade=10`, NOT 10 rows. Pre-0016 this fanned out
       // into 10 identical quantidade=1 rows (the retired row-multiplier).
       const result = (await caller.contribuicao.createBulk({
+        idCampanha: alice.idCampanha,
         items: [{ nome: 'Pacote Fraldas RN', valor: 8000, quantidade: 10 }],
       })) as { ids: string[] };
       expect(result.ids).toHaveLength(1);
@@ -619,7 +647,10 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
 
       // Plan 0016 (locked decision #1): each catalog item is ONE slot-row
       // carrying its own `quantidade`. 10 items → 10 rows (not 30).
-      const result = (await caller.contribuicao.createBulk({ items })) as { ids: string[] };
+      const result = (await caller.contribuicao.createBulk({
+        idCampanha: alice.idCampanha,
+        items,
+      })) as { ids: string[] };
       expect(result.ids).toHaveLength(10);
       expect(new Set(result.ids).size).toBe(10);
 
@@ -649,7 +680,10 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
         quantidade: 1,
       }));
 
-      const result = (await caller.contribuicao.createBulk({ items })) as { ids: string[] };
+      const result = (await caller.contribuicao.createBulk({
+        idCampanha: alice.idCampanha,
+        items,
+      })) as { ids: string[] };
       expect(result.ids).toHaveLength(50);
 
       const list = (await caller.contribuicao.list()) as Array<unknown>;
@@ -665,6 +699,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       const caller = rig.callerFor(alice.cookieHeader);
 
       const result = (await caller.contribuicao.createBulk({
+        idCampanha: alice.idCampanha,
         items: [
           { nome: 'A', valor: 100, quantidade: 2 },
           { nome: 'B', valor: 200, quantidade: 3 },
@@ -689,6 +724,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
 
       const err = await expectTrpcError(() =>
         caller.contribuicao.createBulk({
+          idCampanha: alice.idCampanha,
           items: [
             { nome: 'Valid', valor: 100, quantidade: 5 },
             { nome: 'Invalid', valor: -1, quantidade: 1 },
@@ -718,6 +754,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
 
       const err = await expectTrpcError(() =>
         caller.contribuicao.createBulk({
+          idCampanha: alice.idCampanha,
           items: [
             { nome: 'Valid', valor: 4990, quantidade: 1 },
             { nome: 'Zero-priced item', valor: 0, quantidade: 1 },
@@ -739,7 +776,12 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       const caller = rig.callerFor(alice.cookieHeader);
 
       const err = await expectTrpcError(() =>
-        caller.contribuicao.create({ nome: 'Zero', valor: 0, quantidade: 1 }),
+        caller.contribuicao.create({
+          idCampanha: alice.idCampanha,
+          nome: 'Zero',
+          valor: 0,
+          quantidade: 1,
+        }),
       );
       expect(err.code).toBe('BAD_REQUEST');
     });
@@ -748,6 +790,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       const caller = rig.callerFor();
       const err = await expectTrpcError(() =>
         caller.contribuicao.createBulk({
+          idCampanha: randomUUID(),
           items: [{ nome: 'X', valor: 100, quantidade: 1 }],
         }),
       );
@@ -765,6 +808,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       // `quantidade=N` (it delegates to createBulk with a single item),
       // NOT N rows. Pre-0016 this asserted 4 rows from the row-multiplier.
       const created = (await caller.contribuicao.create({
+        idCampanha: alice.idCampanha,
         nome: 'Fralda P',
         valor: 5000,
         quantidade: 4,
@@ -790,6 +834,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       const caller = rig.callerFor(alice.cookieHeader);
 
       const result = (await caller.contribuicao.emitirUrlUploadImagemItem({
+        idCampanha: alice.idCampanha,
         contentType: 'image/jpeg',
       })) as { uploadUrl: string; objectKey: string; publicUrl: string };
 
@@ -804,7 +849,10 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
     it('anonymous emitirUrlUploadImagemItem → UNAUTHORIZED', async () => {
       const caller = rig.callerFor();
       const err = await expectTrpcError(() =>
-        caller.contribuicao.emitirUrlUploadImagemItem({ contentType: 'image/jpeg' }),
+        caller.contribuicao.emitirUrlUploadImagemItem({
+          idCampanha: randomUUID(),
+          contentType: 'image/jpeg',
+        }),
       );
       expect(err.code).toBe('UNAUTHORIZED');
     });
@@ -824,6 +872,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       const bobCaller = rig.callerFor(bob.cookieHeader);
 
       const create = (await aliceCaller.contribuicao.create({
+        idCampanha: alice.idCampanha,
         nome: 'Fralda',
         valor: 3000,
         quantidade: 1,
@@ -836,7 +885,11 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       // "wrong tenant" signal consistent. NOT_FOUND would be wrong here
       // (the row exists; bob just doesn't own it).
       const err = await expectTrpcError(() =>
-        bobCaller.contribuicao.update({ id: aliceItemId, nome: 'Hacked' }),
+        bobCaller.contribuicao.update({
+          idCampanha: bob.idCampanha,
+          id: aliceItemId,
+          nome: 'Hacked',
+        }),
       );
       expect(err.code).toBe('UNAUTHORIZED');
     });
@@ -849,7 +902,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       const caller = rig.callerFor(alice.cookieHeader);
 
       const err = await expectTrpcError(() =>
-        caller.contribuicao.update({ id: randomUUID(), nome: 'X' }),
+        caller.contribuicao.update({ idCampanha: alice.idCampanha, id: randomUUID(), nome: 'X' }),
       );
       expect(err.code).toBe('NOT_FOUND');
     });

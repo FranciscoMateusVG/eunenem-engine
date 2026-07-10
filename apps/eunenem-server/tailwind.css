@@ -7577,3 +7577,195 @@ button.painel-topbar-link:hover {
   transform: rotate(0deg) translateY(-1px);
   background: var(--yellow);
 }
+
+/* ────────────────────────────────────────────────────────────────────────
+ * aperture-vtxk7 — topbar "ir para" campanha switcher (fblrt W3-b).
+ * Reinstates the multicampanhas-20260707 design artifact's dropdown; colors
+ * are the mock's values mapped onto the token palette (#E8D5F0 → --lilac-soft,
+ * #6B3C5E → --plum, #A18A99 → --ink-mute, #EFE2E9 → --line, #8AA53A →
+ * --green-deep).
+ * ──────────────────────────────────────────────────────────────────────── */
+.painel-switcher {
+  position: relative;
+  flex: none;
+}
+
+.painel-switcher-trigger {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  padding: 8px 13px;
+  box-shadow: var(--shadow-sm);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+.painel-switcher-trigger:hover {
+  border-color: color-mix(in srgb, var(--lilac) 55%, transparent);
+}
+.painel-switcher-trigger:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--plum) 45%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--lilac) 35%, transparent);
+}
+
+.painel-switcher-eyebrow {
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+
+.painel-switcher-label {
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 17px;
+  color: var(--plum);
+  white-space: nowrap;
+}
+
+.painel-switcher-caret {
+  font-size: 11px;
+  color: var(--lilac-deep);
+  transition: transform 0.16s ease;
+}
+.painel-switcher-caret[data-open="true"] {
+  transform: rotate(180deg);
+}
+
+@keyframes painel-switcher-floatin {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.painel-switcher-menu {
+  position: absolute;
+  top: calc(100% + 9px);
+  left: 0;
+  width: 288px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: 0 18px 40px rgba(107, 60, 94, 0.18);
+  padding: 8px;
+  z-index: 60;
+  animation: painel-switcher-floatin 0.16s ease both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .painel-switcher-menu {
+    animation: none;
+  }
+  .painel-switcher-caret {
+    transition: none;
+  }
+}
+
+.painel-switcher-head {
+  font-family: var(--font-caveat), cursive;
+  font-size: 17px;
+  color: var(--green-deep);
+  transform: rotate(-3deg);
+  padding: 4px 10px 6px;
+}
+
+.painel-switcher-item {
+  width: 100%;
+  cursor: pointer;
+  text-align: left;
+  text-decoration: none;
+  background: transparent;
+  border: none;
+  border-radius: 13px;
+  padding: 9px 11px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin-bottom: 2px;
+  transition: background 0.15s ease;
+}
+.painel-switcher-item:hover,
+.painel-switcher-item:focus-visible {
+  background: color-mix(in srgb, var(--lilac-soft) 40%, transparent);
+  outline: none;
+}
+.painel-switcher-item[aria-current="true"] {
+  background: color-mix(in srgb, var(--lilac-soft) 28%, transparent);
+}
+
+.painel-switcher-initial {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: 10px;
+  border: 1px solid rgba(107, 60, 94, 0.1);
+  transform: rotate(-3deg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 16px;
+  color: var(--plum);
+}
+
+.painel-switcher-item-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.painel-switcher-item-name {
+  display: block;
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 16px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.painel-switcher-item-sub {
+  display: block;
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 11px;
+  color: var(--ink-mute);
+}
+
+.painel-switcher-item-here {
+  display: block;
+  font-family: var(--font-caveat), cursive;
+  font-size: 14px;
+  color: var(--green-deep);
+}
+
+.painel-switcher-empty {
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 12px;
+  color: var(--ink-mute);
+  padding: 8px 11px 10px;
+}
+
+.painel-switcher-all {
+  display: block;
+  text-decoration: none;
+  border-top: 1px solid var(--line);
+  margin-top: 4px;
+  padding: 9px 11px 6px;
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--lilac-deep);
+  border-radius: 0 0 12px 12px;
+}
+.painel-switcher-all:hover,
+.painel-switcher-all:focus-visible {
+  color: var(--plum);
+  outline: none;
+}

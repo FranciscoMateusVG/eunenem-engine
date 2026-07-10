@@ -11,14 +11,22 @@ import type { TipoEvento } from '../value-objects/tipo-evento.js';
  * Holds when/where/type/modality — not invite copy or guest list (future
  * subdomains Convite and Lista de Convidados under the same BC).
  *
+ * aperture-mu1v9 (fblrt W3-c): the aggregate is the SINGLE SOURCE for the
+ * event type + date, so it must represent PARTIAL rows seeded by the setup
+ * wizard (`upsertEventoParcial`) — `tipoEvento`, `modalidade` and `dataHora`
+ * are all nullable at the entity level. The convite save path
+ * (`criarEvento`/`atualizarEvento` use-cases) stays STRICT: a publishable
+ * convite requires tipoEvento + modalidade non-null (DB permissive, domain
+ * strict at the use-case layer).
+ *
  * Persisted via: `EventoRepository`.
  *
  */
 export interface Evento {
   readonly id: IdEvento;
   readonly idCampanha: IdCampanha;
-  readonly tipoEvento: TipoEvento;
-  readonly modalidade: ModalidadeEvento;
+  readonly tipoEvento: TipoEvento | null;
+  readonly modalidade: ModalidadeEvento | null;
   readonly dataHora: DataHoraEvento | null;
   readonly endereco: EnderecoEvento | null;
   readonly criadoEm: Date;
@@ -28,8 +36,8 @@ export interface Evento {
 export interface CriarEventoInput {
   readonly id: IdEvento;
   readonly idCampanha: IdCampanha;
-  readonly tipoEvento: TipoEvento;
-  readonly modalidade: ModalidadeEvento;
+  readonly tipoEvento: TipoEvento | null;
+  readonly modalidade: ModalidadeEvento | null;
   readonly dataHora: DataHoraEvento | null;
   readonly endereco: EnderecoEvento | null;
   readonly criadoEm: Date;
@@ -49,13 +57,17 @@ export function criarEvento(input: CriarEventoInput): Evento {
   };
 }
 
-export function eventoComTipo(evento: Evento, tipoEvento: TipoEvento, atualizadoEm: Date): Evento {
+export function eventoComTipo(
+  evento: Evento,
+  tipoEvento: TipoEvento | null,
+  atualizadoEm: Date,
+): Evento {
   return { ...evento, tipoEvento, atualizadoEm };
 }
 
 export function eventoComModalidade(
   evento: Evento,
-  modalidade: ModalidadeEvento,
+  modalidade: ModalidadeEvento | null,
   atualizadoEm: Date,
 ): Evento {
   return { ...evento, modalidade, atualizadoEm };
@@ -78,8 +90,8 @@ export function eventoComEndereco(
 }
 
 export interface AtualizarEventoCampos {
-  readonly tipoEvento: TipoEvento;
-  readonly modalidade: ModalidadeEvento;
+  readonly tipoEvento: TipoEvento | null;
+  readonly modalidade: ModalidadeEvento | null;
   readonly dataHora: DataHoraEvento | null;
   readonly endereco: EnderecoEvento | null;
 }

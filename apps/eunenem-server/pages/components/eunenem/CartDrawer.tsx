@@ -10,6 +10,7 @@ import {
   type MetodoPagamento,
 } from "@/lib/paginaApi";
 import { useCart, toSagaInput, type CartLine } from "@/lib/cart.js";
+import { useCampanhaRota } from "@/lib/campanha-rota";
 import { formatBRL } from "@/lib/formatBRL";
 import { getStripePromise } from "@/lib/stripeClient";
 
@@ -878,6 +879,8 @@ function SuccessPanel({
   sessionId: string | null;
   onClose: () => void;
 }) {
+  // aperture-2v91z — sucesso link keeps the campanha context.
+  const idCampanhaCtx = useCampanhaRota();
   const isConfirmed = phase.kind === "completed_confirmed";
   const isSlow = phase.kind === "completed_slow";
 
@@ -1001,7 +1004,7 @@ function SuccessPanel({
         <p style={{ marginTop: 18, fontSize: 12, color: "var(--ink-mute)" }}>
           Se demorar muito,{" "}
           <a
-            href={`/pagina/${encodeURIComponent(slug)}/sucesso?sessionId=${encodeURIComponent(sessionId)}`}
+            href={`/pagina/${encodeURIComponent(slug)}/sucesso?sessionId=${encodeURIComponent(sessionId)}${idCampanhaCtx ? `&idCampanha=${encodeURIComponent(idCampanhaCtx)}` : ""}`}
             style={{ color: "var(--plum)", textDecoration: "underline" }}
           >
             consulte o status aqui

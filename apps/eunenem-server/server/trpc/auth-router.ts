@@ -4,6 +4,7 @@ import { z } from 'zod';
 import {
   criarSessaoUsuario,
   hashClientPII,
+  type IdCampanhaEvento,
   registrarContaUsuario,
   UsuarioEmailJaExisteError,
   UsuarioInputInvalidoError,
@@ -864,6 +865,17 @@ export const authRouter = t.router({
       : undefined;
     const needsOnboarding = (perfilCampanha?.conteudo.nomeBebe ?? '').trim().length === 0;
 
+    // aperture-mu1v9 (uxv83 rider) — the default campanha's event date,
+    // sourced from the `eventos` single source (the same value the convite
+    // and the perfil page show). The painel countdown's TODO(aperture-uxv83)
+    // in pages/lib/mocks/painelDemo.ts explicitly waits for "campanha.
+    // dataEvento … on auth.me"; this is that wire surface. Null when the
+    // campanha has no evento row or the date is undecided.
+    const eventoDefault = campanha
+      ? await deps.eventoRepository.findByIdCampanha(campanha.id as IdCampanhaEvento)
+      : undefined;
+    const dataEvento = eventoDefault?.dataHora?.toISOString() ?? null;
+
     // aperture — legacy-first routing signal. `true` when the caller's OWN
     // email matches the 1.0 legacy list, via the SAME matcher campanhas.list
     // uses (buscarCampanhasLegado, case-insensitive, self-only — no client
@@ -904,6 +916,13 @@ export const authRouter = t.router({
        * Campanha (aperture-p8i01). Same caveat as idCampanha.
        */
       idOpcaoPresentes: opcaoPresentes?.id ?? null,
+      /**
+       * aperture-mu1v9 (uxv83 rider) — ISO-8601 event date of the default
+       * campanha, from the `eventos` single source. Null when no evento row
+       * exists yet or the creator hasn't decided the date. Feeds the painel
+       * countdown (see TODO(aperture-uxv83) in painelDemo.ts).
+       */
+      dataEvento,
       /**
        * aperture-0bynm — Solicitar Transferência onboarding embed.
        * `true` when the user's default campanha has an active recebedor

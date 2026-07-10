@@ -16,7 +16,7 @@ import { useEffect, useRef, useState } from "react";
 import Cropper from "react-easy-crop";
 import { toast } from "sonner";
 
-import { useCampanhaRota } from "@/lib/campanha-rota.js";
+import { useCampanhaEscrita } from "@/lib/campanha-escrita.js";
 import { trpc } from "@/lib/trpc";
 
 type CropArea = { x: number; y: number; width: number; height: number };
@@ -204,19 +204,21 @@ export function ItemImageUpload({
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const emitir = trpc.contribuicao.emitirUrlUploadImagemItem.useMutation();
-  // aperture-1yx1n — writes target the ROUTE campanha (bare URL → server default).
-  const idCampanha = useCampanhaRota();
+  // aperture-1kbyx — presign under the ROUTE campanha; bare URL → explicit
+  // session-default (oldest) id, so the server can require idCampanha.
+  const idCampanha = useCampanhaEscrita();
 
   const onCropped = async (blob: Blob) => {
     setPendingFile(null);
     setUploading(true);
     try {
       // cropToBlob always emits JPEG → content-type must match the presign.
-      const { uploadUrl, publicUrl } = await emitir.mutateAsync(
-        idCampanha
-          ? { contentType: "image/jpeg", idCampanha }
-          : { contentType: "image/jpeg" },
-      );
+      // aperture-48mxt: REQUIRED at the wire; '' sentinel on the no-campanha
+      // edge fails uuid validation with the same honest BAD_REQUEST.
+      const { uploadUrl, publicUrl } = await emitir.mutateAsync({
+        contentType: "image/jpeg",
+        idCampanha: idCampanha ?? "",
+      });
       const res = await fetch(uploadUrl, {
         method: "PUT",
         headers: { "Content-Type": "image/jpeg" },
