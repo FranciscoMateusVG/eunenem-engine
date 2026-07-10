@@ -234,6 +234,9 @@ describe('perfilCampanha router (aperture-aphk8)', () => {
       fotoPerfilKey: null,
       fotoCapaKey: null,
       fotoHistoriaKey: null,
+      papais: null,
+      corPrimaria: null,
+      corAcento: null,
     });
   });
 

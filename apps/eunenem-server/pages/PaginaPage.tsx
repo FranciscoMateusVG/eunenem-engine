@@ -10,7 +10,9 @@ import { Marketplace } from '@/components/eunenem/Marketplace';
 import { Messages } from '@/components/eunenem/Messages';
 import { Navbar } from '@/components/eunenem/Navbar';
 import { Story } from '@/components/eunenem/Story';
+import { TweaksPanel } from '@/components/eunenem/TweaksPanel';
 import { TweaksProvider } from '@/components/eunenem/TweaksContext';
+import { PRIMARY_PRESETS } from '@/lib/mocks/tweaksDefaults';
 import type { TweaksState } from '@/lib/mocks/tweaksDefaults';
 import { CartProvider } from '@/lib/cart.js';
 import { trpc } from '@/lib/trpc';
@@ -98,6 +100,16 @@ export function PaginaPage({
   // tweaks.targetDate when a real date exists (other consumers may read it).
   const eventDate = data?.dataEvento ? data.dataEvento.slice(0, 10) : null;
   if (eventDate) initialTweaks.targetDate = eventDate;
+  if (data?.papais) initialTweaks.parents = data.papais;
+  if (data?.corPrimaria) {
+    initialTweaks.primary = data.corPrimaria;
+    const preset = PRIMARY_PRESETS[data.corPrimaria];
+    if (preset) {
+      initialTweaks.primaryDeep = preset.deep;
+      initialTweaks.primarySoft = preset.soft;
+    }
+  }
+  if (data?.corAcento) initialTweaks.accent = data.corAcento;
 
   return (
     <TweaksProvider initialState={initialTweaks}>
@@ -120,6 +132,10 @@ export function PaginaPage({
             <Messages slug={slug} />
           </main>
           <Footer />
+          <TweaksPanel
+            idCampanha={data?.idCampanha ?? undefined}
+            canSave={data?.isOwner ?? false}
+          />
           <CartDrawerMount slug={slug} />
         </CartDrawerProvider>
       </CartProvider>

@@ -37,6 +37,9 @@ const CONTEUDO_PREENCHIDO: ConteudoPerfilCriador = {
   fotoPerfilKey: 'campanha/helena/perfil.jpg',
   fotoCapaKey: 'campanha/helena/capa.jpg',
   fotoHistoriaKey: 'campanha/helena/historia.jpg',
+  papais: 'Mariana & Rodrigo',
+  corPrimaria: '#C9A5D8',
+  corAcento: '#E78FA7',
 };
 
 const CONTEUDO_ATUALIZADO: ConteudoPerfilCriador = {
@@ -50,6 +53,9 @@ const CONTEUDO_ATUALIZADO: ConteudoPerfilCriador = {
   fotoPerfilKey: null,
   fotoCapaKey: null,
   fotoHistoriaKey: null,
+  papais: null,
+  corPrimaria: null,
+  corAcento: null,
 };
 
 interface ConformanceOptions {
@@ -160,6 +166,9 @@ export function describePerfilCampanhaRepositoryConformance(
         fotoPerfilKey: null,
         fotoCapaKey: null,
         fotoHistoriaKey: null,
+        papais: null,
+        corPrimaria: null,
+        corAcento: null,
       };
       const perfil = makePerfilCampanha(idCampanha, vazio);
       await repo.save(perfil);

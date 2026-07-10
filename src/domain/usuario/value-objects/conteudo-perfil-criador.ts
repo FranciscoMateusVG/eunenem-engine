@@ -36,6 +36,20 @@ export const ConteudoPerfilCriadorSchema = z.object({
   fotoCapaKey: z.string().trim().min(1).max(512).nullable(),
   /** Object-storage key for the story photo. */
   fotoHistoriaKey: z.string().trim().min(1).max(512).nullable(),
+  /** Display line for the parents/family shown on the profile (TweaksPanel "parents"). */
+  papais: z.string().trim().min(1).max(120).nullable(),
+  /** Primary theme color (hex) chosen via the TweaksPanel swatches. */
+  corPrimaria: z
+    .string()
+    .trim()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .nullable(),
+  /** Accent theme color (hex) chosen via the TweaksPanel swatches. */
+  corAcento: z
+    .string()
+    .trim()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .nullable(),
 });
 
 export type ConteudoPerfilCriador = Readonly<z.infer<typeof ConteudoPerfilCriadorSchema>>;
@@ -53,5 +67,8 @@ export function conteudoPerfilCriadorVazio(): ConteudoPerfilCriador {
     fotoPerfilKey: null,
     fotoCapaKey: null,
     fotoHistoriaKey: null,
+    papais: null,
+    corPrimaria: null,
+    corAcento: null,
   };
 }

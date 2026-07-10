@@ -1030,6 +1030,13 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
       fotoPerfilKey: fotoKeys.current.perfil,
       fotoCapaKey: fotoKeys.current.capa,
       fotoHistoriaKey: fotoKeys.current.historia,
+      // aperture — TweaksPanel fields this form doesn't edit. Echoed from
+      // TweaksContext (hydrated from the same perfilCampanha.get source) so
+      // a PerfilBody save never wipes a TweaksPanel save, matching the
+      // whole-content-replacement contract (aperture-7sb1h).
+      papais: tweaks.parents.trim() || null,
+      corPrimaria: tweaks.primary || null,
+      corAcento: tweaks.accent || null,
     };
   };
 

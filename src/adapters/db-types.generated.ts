@@ -207,6 +207,8 @@ export interface PaymentWebhookEvents {
 
 export interface PerfilCampanhas {
   atualizado_em: Generated<Timestamp>;
+  cor_acento: string | null;
+  cor_primaria: string | null;
   criado_em: Generated<Timestamp>;
   data_evento: Timestamp | null;
   data_nascimento: Timestamp | null;
@@ -218,6 +220,7 @@ export interface PerfilCampanhas {
   id: string;
   id_campanha: string;
   nome_bebe: string | null;
+  papais: string | null;
   relacao: string | null;
   tipo_evento: string | null;
 }

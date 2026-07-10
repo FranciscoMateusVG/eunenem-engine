@@ -24,6 +24,8 @@ import type { Observability } from '../../observability/observability.js';
  */
 export const PerfilPublicoDTOSchema = z.object({
   slug: z.string(),
+  /** The campanha this projection was resolved from — null when the conta has none yet. */
+  idCampanha: z.string().nullable(),
   /** Public display name of the creator (= Usuario.nomeExibicao). */
   creatorName: z.string(),
   nomeBebe: z.string().nullable(),
@@ -41,6 +43,14 @@ export const PerfilPublicoDTOSchema = z.object({
   fotoPerfilUrl: z.string().nullable(),
   fotoCapaUrl: z.string().nullable(),
   fotoHistoriaUrl: z.string().nullable(),
+  /** TweaksPanel "parents" display line. */
+  papais: z.string().nullable(),
+  /** TweaksPanel primary theme color (hex). */
+  corPrimaria: z.string().nullable(),
+  /** TweaksPanel accent theme color (hex). */
+  corAcento: z.string().nullable(),
+  /** Whether the CURRENT caller session is an admin of this campanha (drives the TweaksPanel Save affordance). */
+  isOwner: z.boolean(),
 });
 
 export type PerfilPublicoDTO = z.infer<typeof PerfilPublicoDTOSchema>;
@@ -57,6 +67,7 @@ function mapPerfilPublicoDTO(
   const c = conteudo;
   return {
     slug: usuario.slug,
+    idCampanha: null,
     creatorName: usuario.nomeExibicao,
     nomeBebe: c?.nomeBebe ?? null,
     relacao: c?.relacao ?? null,
@@ -68,6 +79,13 @@ function mapPerfilPublicoDTO(
     fotoPerfilUrl: fotoUrl(c?.fotoPerfilKey ?? null),
     fotoCapaUrl: fotoUrl(c?.fotoCapaKey ?? null),
     fotoHistoriaUrl: fotoUrl(c?.fotoHistoriaKey ?? null),
+    papais: c?.papais ?? null,
+    corPrimaria: c?.corPrimaria ?? null,
+    corAcento: c?.corAcento ?? null,
+    // This legacy use case has no session access (superseded by the
+    // perfil-router procedure, which resolves the real isOwner via
+    // resolverUsuarioAutenticadoOuNull) — always false here.
+    isOwner: false,
   };
 }
 

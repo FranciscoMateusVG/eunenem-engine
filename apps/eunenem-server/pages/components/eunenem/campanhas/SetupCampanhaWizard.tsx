@@ -191,6 +191,9 @@ export function SetupCampanhaWizard({
         fotoPerfilKey: null,
         fotoCapaKey: null,
         fotoHistoriaKey: null,
+        papais: null,
+        corPrimaria: null,
+        corAcento: null,
       });
       void utils.campanhas.list.invalidate();
       toast.success('prontinho ♡ o cantinho já tem nome');

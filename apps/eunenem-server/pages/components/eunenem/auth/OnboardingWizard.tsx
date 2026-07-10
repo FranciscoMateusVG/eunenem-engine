@@ -233,6 +233,9 @@ export function OnboardingWizard({ onDone }: { onDone: (slug: string) => void })
         fotoPerfilKey: null,
         fotoCapaKey: null,
         fotoHistoriaKey: null,
+        papais: null,
+        corPrimaria: null,
+        corAcento: null,
       };
       const nullBabyHalf = {
         nomeBebe: null,
@@ -245,6 +248,9 @@ export function OnboardingWizard({ onDone }: { onDone: (slug: string) => void })
         fotoPerfilKey: null,
         fotoCapaKey: null,
         fotoHistoriaKey: null,
+        papais: null,
+        corPrimaria: null,
+        corAcento: null,
       };
       await atualizarPerfil.mutateAsync({
         nomeExibicao:

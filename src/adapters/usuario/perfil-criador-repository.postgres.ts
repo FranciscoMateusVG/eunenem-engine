@@ -121,6 +121,12 @@ function toPerfilCriador(row: PerfilCriadorRow): PerfilCriador {
     fotoPerfilKey: row.foto_perfil_key,
     fotoCapaKey: row.foto_capa_key,
     fotoHistoriaKey: row.foto_historia_key,
+    // perfil_criadores (legacy, per-usuario) never received the TweaksPanel
+    // columns — those live only on perfil_campanhas, the current source of
+    // truth (aperture-hsxim).
+    papais: null,
+    corPrimaria: null,
+    corAcento: null,
   };
 
   return {

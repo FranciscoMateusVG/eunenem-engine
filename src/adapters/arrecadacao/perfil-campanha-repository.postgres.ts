@@ -27,6 +27,9 @@ type PerfilCampanhaRow = {
   foto_perfil_key: string | null;
   foto_capa_key: string | null;
   foto_historia_key: string | null;
+  papais: string | null;
+  cor_primaria: string | null;
+  cor_acento: string | null;
   criado_em: Date;
   atualizado_em: Date;
 };
@@ -54,6 +57,9 @@ export class PerfilCampanhaRepositoryPostgres implements PerfilCampanhaRepositor
             foto_perfil_key: c.fotoPerfilKey,
             foto_capa_key: c.fotoCapaKey,
             foto_historia_key: c.fotoHistoriaKey,
+            papais: c.papais,
+            cor_primaria: c.corPrimaria,
+            cor_acento: c.corAcento,
             criado_em: perfil.criadoEm,
             atualizado_em: perfil.atualizadoEm,
           })
@@ -73,6 +79,9 @@ export class PerfilCampanhaRepositoryPostgres implements PerfilCampanhaRepositor
               foto_perfil_key: c.fotoPerfilKey,
               foto_capa_key: c.fotoCapaKey,
               foto_historia_key: c.fotoHistoriaKey,
+              papais: c.papais,
+              cor_primaria: c.corPrimaria,
+              cor_acento: c.corAcento,
               atualizado_em: perfil.atualizadoEm,
             }),
           )
@@ -122,6 +131,9 @@ function toPerfilCampanha(row: PerfilCampanhaRow): PerfilCampanha {
     fotoPerfilKey: row.foto_perfil_key,
     fotoCapaKey: row.foto_capa_key,
     fotoHistoriaKey: row.foto_historia_key,
+    papais: row.papais,
+    corPrimaria: row.cor_primaria,
+    corAcento: row.cor_acento,
   };
 
   return {

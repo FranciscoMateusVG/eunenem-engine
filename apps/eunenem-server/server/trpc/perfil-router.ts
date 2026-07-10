@@ -16,6 +16,7 @@ import { initTRPC, TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import {
   atualizarPerfilUsuario,
+  campanhaPossuiAdministrador,
   type ConteudoPerfilCriador,
   EmitirUrlUploadFotoInputSchema,
   emitirUrlUploadFoto,
@@ -38,6 +39,7 @@ import {
 } from './resolve-campanha-administrada.js';
 import {
   resolverUsuarioAutenticado,
+  resolverUsuarioAutenticadoOuNull,
   SessaoNaoAutenticadaError,
 } from './session-resolver.js';
 
@@ -134,13 +136,16 @@ function mapPerfilProprioFromCampanha(
  */
 function mapPerfilPublicoFromCampanha(
   usuario: { slug: string; nomeExibicao: string },
+  idCampanha: string | null,
   conteudo: ConteudoPerfilCriador | undefined,
   fotoUrl: (key: string | null) => string | null,
   evento: EventoDataPair | null | undefined,
+  isOwner: boolean,
 ): z.infer<typeof PerfilPublicoDTOSchema> {
   const c = conteudo;
   return {
     slug: usuario.slug,
+    idCampanha,
     creatorName: usuario.nomeExibicao,
     nomeBebe: c?.nomeBebe ?? null,
     relacao: c?.relacao ?? null,
@@ -152,6 +157,10 @@ function mapPerfilPublicoFromCampanha(
     fotoPerfilUrl: fotoUrl(c?.fotoPerfilKey ?? null),
     fotoCapaUrl: fotoUrl(c?.fotoCapaKey ?? null),
     fotoHistoriaUrl: fotoUrl(c?.fotoHistoriaKey ?? null),
+    papais: c?.papais ?? null,
+    corPrimaria: c?.corPrimaria ?? null,
+    corAcento: c?.corAcento ?? null,
+    isOwner,
   };
 }
 
@@ -320,11 +329,26 @@ export const perfilRouter = t.router({
           ? await deps.eventoRepository.findByIdCampanha(campanha.id as IdCampanhaEvento)
           : undefined;
 
+        // aperture — TweaksPanel "Salvar" ownership gate: a visitor's client
+        // shows the Save button only when THEY are logged in AND are an
+        // admin of the campanha being viewed. This probes the session
+        // WITHOUT requiring one (resolverUsuarioAutenticadoOuNull → null for
+        // anon/expired, same as auth.me) and reuses the domain's own
+        // includes() check (campanhaPossuiAdministrador) rather than
+        // reimplementing it. No new PII leaves this boundary — isOwner is a
+        // boolean, never the caller's idConta/idUsuario/email.
+        const sessao = await resolverUsuarioAutenticadoOuNull(ctx.deps, ctx.headers);
+        const isOwner = Boolean(
+          sessao && campanha && campanhaPossuiAdministrador(campanha, sessao.usuario.idConta),
+        );
+
         return mapPerfilPublicoFromCampanha(
           usuario,
+          campanha?.id ?? null,
           perfil?.conteudo,
           fotoUrlResolver(ctx.deps.objectStorage),
           evento,
+          isOwner,
         );
       } catch (err) {
         throw toTRPCError(err);

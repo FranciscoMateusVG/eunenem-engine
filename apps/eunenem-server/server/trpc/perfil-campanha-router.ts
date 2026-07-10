@@ -94,6 +94,12 @@ export const PerfilCampanhaDTOSchema = z.object({
   fotoPerfilKey: z.string().nullable(),
   fotoCapaKey: z.string().nullable(),
   fotoHistoriaKey: z.string().nullable(),
+  /** TweaksPanel "parents" display line. */
+  papais: z.string().nullable(),
+  /** TweaksPanel primary theme color (hex). */
+  corPrimaria: z.string().nullable(),
+  /** TweaksPanel accent theme color (hex). */
+  corAcento: z.string().nullable(),
 });
 
 export type PerfilCampanhaDTO = z.infer<typeof PerfilCampanhaDTOSchema>;
@@ -140,6 +146,9 @@ export function toPerfilCampanhaDTO(
     fotoPerfilKey: c?.fotoPerfilKey ?? null,
     fotoCapaKey: c?.fotoCapaKey ?? null,
     fotoHistoriaKey: c?.fotoHistoriaKey ?? null,
+    papais: c?.papais ?? null,
+    corPrimaria: c?.corPrimaria ?? null,
+    corAcento: c?.corAcento ?? null,
   };
 }
 
@@ -166,6 +175,19 @@ const ConteudoPerfilCampanhaInputSchema = z.object({
   fotoPerfilKey: z.string().trim().min(1).max(512).nullable(),
   fotoCapaKey: z.string().trim().min(1).max(512).nullable(),
   fotoHistoriaKey: z.string().trim().min(1).max(512).nullable(),
+  papais: z.string().trim().min(1).max(120).nullable().default(null),
+  corPrimaria: z
+    .string()
+    .trim()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .nullable()
+    .default(null),
+  corAcento: z
+    .string()
+    .trim()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .nullable()
+    .default(null),
 });
 
 const AtualizarPerfilCampanhaInputSchema = ConteudoPerfilCampanhaInputSchema.extend({
