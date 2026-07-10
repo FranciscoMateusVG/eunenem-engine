@@ -373,21 +373,35 @@ describe('perfil.getPerfilPublicoBySlug per-campanha routing (aperture-aphk8)', 
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 
-  it('perfil.atualizar shim round-trips through perfil_campanhas (getPerfil reads it back)', async () => {
+  // aperture-hsxim (W2 shed): perfil.atualizar is SLIM — nomeExibicao only.
+  // The baby-half write path is EXCLUSIVELY perfilCampanha.atualizar; the
+  // slim endpoint must not touch (and especially not WIPE — the upsert has
+  // whole-content-replacement semantics) the campanha perfil.
+  it('perfil.atualizar is slim: updates nomeExibicao, NEVER touches the campanha perfil', async () => {
     const rig = await buildRig();
     const { caller, idCampanha } = await rig.addUser('aphk8-shim@example.com', 'Sofia');
 
-    await caller.perfil.atualizar({ nomeExibicao: 'Sofia Mãe', ...CONTEUDO_INPUT });
+    // Baby content written via the canonical per-campanha path.
+    await caller.perfilCampanha.atualizar({ idCampanha, ...CONTEUDO_INPUT });
 
-    // The legacy-shaped read reflects the write...
+    // Slim name update — baby fields are no longer part of the input.
+    await caller.perfil.atualizar({ nomeExibicao: 'Sofia Mãe' });
+
+    // The legacy-shaped read reflects BOTH: the new name and the (untouched)
+    // campanha baby-half, read through from perfil_campanhas.
     const proprio = await caller.perfil.getPerfil();
     expect(proprio.creatorName).toBe('Sofia Mãe');
     expect(proprio.nomeBebe).toBe('Helena');
 
-    // ...and the write landed on the OLDEST campanha's perfil_campanhas row.
+    // The campanha perfil survived the name change intact (no wipe).
     const porCampanha = await caller.perfilCampanha.get({ idCampanha });
     expect(porCampanha.nomeBebe).toBe('Helena');
     expect(porCampanha.tipoEvento).toBe('cha-bebe');
+
+    // The atualizar RESPONSE itself carries the read-through baby-half.
+    const resposta = await caller.perfil.atualizar({ nomeExibicao: 'Sofia Mamãe' });
+    expect(resposta.creatorName).toBe('Sofia Mamãe');
+    expect(resposta.nomeBebe).toBe('Helena');
   });
 });
 

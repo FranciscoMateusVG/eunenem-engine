@@ -12,29 +12,24 @@
  * returns the PII-safe `PerfilPublicoDTO` only — same tenant-resolution chain
  * as `pagina-router`.
  */
-import { randomUUID } from 'node:crypto';
 import { initTRPC, TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import {
-  atualizarPerfilCriador,
   atualizarPerfilUsuario,
   type ConteudoPerfilCriador,
   EmitirUrlUploadFotoInputSchema,
   emitirUrlUploadFoto,
   type IdCampanha,
-  type IdPerfilCriador,
   type IdUsuario,
   PerfilProprioDTOSchema,
   PerfilPublicoDTOSchema,
-  GeneroBebeSchema,
   type SlugUsuario,
-  TipoEventoPerfilSchema,
   UsuarioInputInvalidoError,
   UsuarioNaoEncontradoError,
 } from '../../../../src/index.js';
 import { ID_PLATAFORMA_EUNENEM } from '../auth/setup.js';
 import type { TrpcContext } from './context.js';
-import { fotoUrlResolver, upsertConteudoPerfilCampanha } from './perfil-campanha-router.js';
+import { fotoUrlResolver } from './perfil-campanha-router.js';
 import {
   CampanhaAcessoNegadoError,
   CampanhaInexistenteError,
@@ -150,26 +145,16 @@ function mapPerfilPublicoFromCampanha(
 }
 
 /**
- * Editable profile fields. `nomeExibicao` (= creatorName) lives on Usuario
- * and is updated via `atualizarPerfilUsuario`; everything else is profile
- * content. Dates arrive as ISO strings → coerced. Photo keys are accepted so
- * the contract is R5-ready (the upload flow calls back with the keys).
+ * aperture-hsxim (fblrt W2): the baby-half is SHED — per-campanha profile
+ * content is written EXCLUSIVELY via `perfilCampanha.atualizar({idCampanha})`.
+ * This endpoint survives slim: `nomeExibicao` (= creatorName) lives on
+ * Usuario (usuarios.nome_exibicao, written by `atualizarPerfilUsuario`) and
+ * that is now ALL it updates. Baby fields sent by stale clients are stripped
+ * by zod (unknown keys) — harmless during the deploy window; the migrated
+ * frontend (aperture-qmaoi) targets perfilCampanha.atualizar.
  */
 const AtualizarPerfilInputSchema = z.object({
   nomeExibicao: z.string().trim().min(1).max(120),
-  nomeBebe: z.string().trim().min(1).max(120).nullable(),
-  relacao: z.string().trim().min(1).max(60).nullable(),
-  historia: z.string().trim().max(600).nullable(),
-  dataNascimento: z.coerce.date().nullable(),
-  tipoEvento: TipoEventoPerfilSchema.nullable(),
-  // Optional-with-default so existing callers (PerfilBody form, OnboardingWizard)
-  // compile before the frontend wires the gender selector; once they send it,
-  // it flows through. New field → no existing data to clobber in the interim.
-  genero: GeneroBebeSchema.nullable().default(null),
-  dataEvento: z.coerce.date().nullable(),
-  fotoPerfilKey: z.string().trim().min(1).max(512).nullable(),
-  fotoCapaKey: z.string().trim().min(1).max(512).nullable(),
-  fotoHistoriaKey: z.string().trim().min(1).max(512).nullable(),
 });
 
 export const perfilRouter = t.router({
@@ -183,13 +168,18 @@ export const perfilRouter = t.router({
     .output(PerfilProprioDTOSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        // aperture-aphk8 TRANSITIONAL SHIM — input/output shapes UNCHANGED.
-        // The baby-half now writes the caller's OLDEST campanha's
-        // perfil_campanhas row (absent-branch resolve = back-compat rule);
-        // nomeExibicao keeps its Usuario path.
+        // aperture-hsxim (W2 shed): SLIM endpoint — updates ONLY the
+        // Usuario's nomeExibicao. The dual-write to perfil_criadores and the
+        // baby-half upsert are GONE: per-campanha content is written
+        // exclusively via perfilCampanha.atualizar({idCampanha}). Note the
+        // baby-half write could not survive the slim input anyway — the
+        // upsert has whole-content-replacement semantics, so calling it with
+        // empty content would WIPE the campanha perfil on every name change.
+        // Output shape unchanged: the DTO's baby-half is READ (not written)
+        // from the oldest campanha's perfil_campanhas, same as getPerfil.
         const { usuario, campanha } = await resolverCampanhaAdministrada(ctx);
         const idUsuario = usuario.id as IdUsuario;
-        const { nomeExibicao, ...conteudo } = input;
+        const { nomeExibicao } = input;
 
         await atualizarPerfilUsuario(
           {
@@ -199,33 +189,11 @@ export const perfilRouter = t.router({
           { idUsuario, nomeExibicao },
         );
 
-        // DUAL-WRITE (aperture-aphk8): keep writing perfil_criadores too so
-        // nothing is lost if W1 rolls back — the READ side below already
-        // comes from perfil_campanhas. Remove this once W1 is locked in.
-        await atualizarPerfilCriador(
-          {
-            perfilCriadorRepository: ctx.deps.perfilCriadorRepository,
-            objectStorage: ctx.deps.objectStorage,
-            observability: ctx.deps.observability,
-            clock: ctx.deps.clock,
-            gerarId: () => randomUUID() as IdPerfilCriador,
-          },
-          { idUsuario, ...conteudo },
-        );
-
-        const perfil = await upsertConteudoPerfilCampanha(
-          {
-            perfilCampanhaRepository: ctx.deps.perfilCampanhaRepository,
-            objectStorage: ctx.deps.objectStorage,
-            clock: ctx.deps.clock,
-          },
-          campanha.id,
-          conteudo,
-        );
+        const perfil = await ctx.deps.perfilCampanhaRepository.findByIdCampanha(campanha.id);
 
         return mapPerfilProprioFromCampanha(
           { slug: usuario.slug, nomeExibicao },
-          perfil.conteudo,
+          perfil?.conteudo,
           fotoUrlResolver(ctx.deps.objectStorage),
         );
       } catch (err) {

@@ -1054,38 +1054,21 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
 
   // aperture-1yx1n / aperture-qmaoi — campanha-addressed save (now EVERY save
   // with a resolvable campanha: rota ?? oldest). perfilCampanha.atualizar gets
-  // the FORM's baby-half; the user-level perfil.atualizar runs ONLY to persist
-  // nomeExibicao — and it must ECHO getPerfil's OWN baby-half (perfilEchoRef),
-  // NEVER the form's values.
-  // CLOBBER RATIONALE: during Rex's transitional shim window perfil.atualizar
-  // writes its baby-half to the OLDEST campanha, so sending the form's values
-  // there would overwrite that campanha with THIS route's data. Unchanged
-  // creatorName → skip the user-level half entirely (cheaper + zero clobber
-  // surface).
-  // ORDER (aperture-qmaoi): the user-level ECHO runs FIRST, the campanha save
-  // LAST. When the target IS the oldest campanha (every bare-URL save, or
-  // /c/<oldest-id>), the shim writes the echo's PRE-SAVE baby-half to the same
-  // rows the campanha save targets — running the campanha save last means the
-  // FORM's fresh values always win. For target ≠ oldest the order is
-  // irrelevant (different rows). Success toast only after every needed
-  // mutation resolves; an echo failure aborts before the campanha half.
+  // the FORM's baby-half; the user-level perfil.atualizar persists ONLY
+  // nomeExibicao.
+  // aperture-hsxim (W2 shed): the qmaoi ECHO pattern is RETIRED —
+  // perfil.atualizar is slim ({nomeExibicao} only) and writes NO baby
+  // content anywhere, so the shim-era clobber surface (oldest-campanha
+  // overwrite) no longer exists. The response DTO still carries the
+  // read-through baby-half from the oldest campanha's perfil_campanhas, so
+  // the echo-ref/cache refresh keeps working unchanged. Unchanged
+  // creatorName → skip the user-level half entirely (cheaper). Order kept
+  // (name first, campanha save last) — no longer load-bearing, just stable.
   const handleSaveCampanha = async (target: string) => {
-    const echo = perfilEchoRef.current;
-    if (echo && creatorName.trim() !== creatorNameSaved.current) {
+    if (creatorName.trim() !== creatorNameSaved.current) {
       try {
         const updated = await atualizarUsuarioEco.mutateAsync({
           nomeExibicao: creatorName.trim(),
-          // ECHO of getPerfil's OWN baby-half — NOT the form's (clobber trap).
-          nomeBebe: echo.nomeBebe,
-          relacao: echo.relacao,
-          historia: echo.historia,
-          dataNascimento: echo.dataNascimento,
-          tipoEvento: echo.tipoEvento,
-          genero: echo.genero,
-          dataEvento: echo.dataEvento,
-          fotoPerfilKey: echo.fotoPerfilKey,
-          fotoCapaKey: echo.fotoCapaKey,
-          fotoHistoriaKey: echo.fotoHistoriaKey,
         });
         // Keep the echo fresh from the round-trip DTO (aperture-7sb1h pattern).
         perfilEchoRef.current = updated;
