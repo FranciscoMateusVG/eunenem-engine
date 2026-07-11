@@ -92,12 +92,13 @@ export function useCampanhasList() {
 }
 
 /**
- * aperture-1yx1n — the ROUTE campanha's user-chosen slug, when it has one.
- * Feeds the pretty /pagina/<slug>/<campanhaSlug> share form; undefined =
- * bare route, unknown id, list not loaded, or slug not chosen — consumers
- * fall back to the /c/<uuid> canonical form. (Real DTO field post-#359.)
+ * Shared resolution: the ROUTE campanha's card from `campanhas.list`
+ * (bare URL → the session's DEFAULT campanha via `auth.me`; /c/:id → that
+ * campanha). Underlies both `useCampanhaSlugRota` (existing consumers) and
+ * `useCampanhaSlugInfoRota` (adds `slugJaAlterado` for PerfilBody's 1-troca
+ * gate) so the two never drift on how `idCampanha` is resolved.
  */
-export function useCampanhaSlugRota(): string | undefined {
+function useCampanhaCardRota(): CampanhaNovaDTO | undefined {
   const idCampanhaRota = useCampanhaRota();
   // aperture-2v91z (Wheatley's gotcha) — BARE routes resolve the DEFAULT
   // campanha (auth.me) so the share chip shows ITS slug too; /c/:id-gating
@@ -113,6 +114,32 @@ export function useCampanhaSlugRota(): string | undefined {
     enabled: Boolean(idCampanha),
   });
   if (!idCampanha) return undefined;
-  const card = listQ.data?.novas.find((c) => c.id === idCampanha);
-  return card?.campanhaSlug ?? undefined;
+  return listQ.data?.novas.find((c) => c.id === idCampanha);
+}
+
+/**
+ * aperture-1yx1n — the ROUTE campanha's user-chosen slug, when it has one.
+ * Feeds the pretty /pagina/<slug>/<campanhaSlug> share form; undefined =
+ * bare route, unknown id, list not loaded, or slug not chosen — consumers
+ * fall back to the /c/<uuid> canonical form. (Real DTO field post-#359.)
+ */
+export function useCampanhaSlugRota(): string | undefined {
+  return useCampanhaCardRota()?.campanhaSlug ?? undefined;
+}
+
+/**
+ * aperture — 1-troca. The ROUTE campanha's own slug + whether it has
+ * already used its single allowed change via PerfilBody's SlugEditor.
+ * `slugJaAlterado` defaults to `false` while the list is still loading —
+ * the editor stays visible rather than flashing hidden-then-shown.
+ */
+export function useCampanhaSlugInfoRota(): {
+  campanhaSlug: string | undefined;
+  slugJaAlterado: boolean;
+} {
+  const card = useCampanhaCardRota();
+  return {
+    campanhaSlug: card?.campanhaSlug ?? undefined,
+    slugJaAlterado: card?.slugJaAlterado ?? false,
+  };
 }

@@ -33,6 +33,7 @@ import {
   adicionarOpcaoContribuicao,
   ArrecadacaoInputInvalidoError,
   type Campanha,
+  CampanhaSlugJaAlteradoError,
   criarCampanha,
   type IdCampanha,
   type IdOpcaoContribuicao,
@@ -81,6 +82,14 @@ const CampanhaNovaDTOSchema = z.object({
    */
   campanhaSlug: z.string().nullable(),
   /**
+   * Whether this campanha has already used its single slug change via the
+   * PERFIL editor (aperture — 1-troca). Derived from
+   * `campanha.slugAlteradoEm !== null` — defining the slug through the
+   * SETUP wizard does NOT set this. The frontend uses this to hide the
+   * `SlugEditor` once true (only the "copy link" block remains).
+   */
+  slugJaAlterado: z.boolean(),
+  /**
    * The campanha's perfil_campanhas.nome_bebe (fblrt contract amendment #2)
    * — null when the campanha has no perfil row OR a blank nome_bebe. This is
    * the CANONICAL blank-perfil signal (the design doc defines "blank" as
@@ -127,6 +136,7 @@ function toCardDTO(
     criadaEm: campanha.criadaEm.toISOString(),
     hasRecebedor: campanha.idRecebedor != null,
     campanhaSlug: campanha.slug,
+    slugJaAlterado: campanha.slugAlteradoEm !== null,
     nomeBebe,
   };
 }
@@ -204,6 +214,9 @@ function toSlugTRPCError(err: unknown): TRPCError {
   }
   if (err instanceof CampanhaInexistenteError) {
     return new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err.message, cause: err });
+  }
+  if (err instanceof CampanhaSlugJaAlteradoError) {
+    return new TRPCError({ code: 'FORBIDDEN', message: 'slug_ja_alterado', cause: err });
   }
   return err instanceof Error
     ? new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err.message, cause: err })
@@ -365,12 +378,25 @@ export const campanhasRouter = t.router({
    * 'slug_formato_invalido' | 'slug_reservado' | 'slug_em_uso' (frozen
    * contract — the frontend switches on it). Persists the NORMALIZED slug
    * and returns it.
+   *
+   * `origem` (aperture — 1-troca): distinguishes the SETUP wizard
+   * (`SetupCampanhaWizard`, right after `campanhas.criar` or from a card's
+   * "completar" affordance) from the PERFIL editor (`PerfilBody`'s
+   * `SlugEditor`). Only `origem: 'perfil'` reads/writes
+   * `campanha.slugAlteradoEm` — it is the ONE call site that consumes the
+   * campanha's single allowed slug change (FORBIDDEN 'slug_ja_alterado' on
+   * a second attempt). `origem: 'setup'` (the default — every EXISTING
+   * caller, including every test, predates this field and means "setup")
+   * never blocks and never marks the campanha as having used its change,
+   * so defining a slug during setup does NOT consume the perfil's later
+   * one-time edit.
    */
   definirSlug: t.procedure
     .input(
       z.object({
         idCampanha: z.string().uuid(),
         slug: z.string(),
+        origem: z.enum(['setup', 'perfil']).default('setup'),
       }),
     )
     .output(z.object({ slug: z.string() }))
@@ -378,12 +404,23 @@ export const campanhasRouter = t.router({
       try {
         const { usuario, campanha } = await resolverCampanhaAdministrada(ctx, input.idCampanha);
 
+        if (input.origem === 'perfil' && campanha.slugAlteradoEm !== null) {
+          throw new CampanhaSlugJaAlteradoError(campanha.id);
+        }
+
         const check = await checkCampanhaSlug(ctx, usuario.idConta, campanha.id, input.slug);
         if (!check.ok) {
           throw new TRPCError({ code: 'BAD_REQUEST', message: slugErrorMessage(check.motivo) });
         }
 
-        await ctx.deps.campanhaRepository.updateSlug(campanha.id, check.slug);
+        const marcarAlteracao = input.origem === 'perfil';
+        const alteradoEm = marcarAlteracao ? ctx.deps.clock() : campanha.slugAlteradoEm;
+        await ctx.deps.campanhaRepository.updateSlug(
+          campanha.id,
+          check.slug,
+          alteradoEm,
+          marcarAlteracao,
+        );
         return { slug: check.slug };
       } catch (err) {
         throw toSlugTRPCError(err);

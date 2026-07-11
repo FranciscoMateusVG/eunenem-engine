@@ -322,16 +322,22 @@ export class CampanhaRepositoryMemory implements CampanhaRepository {
   async updateSlug(
     idCampanha: IdCampanha,
     slug: string | null,
+    alteradoEm: Date | null,
+    marcarAlteracao: boolean,
     _context?: ArrecadacaoRepositoryContext,
   ): Promise<void> {
     return tracer.startActiveSpan('db.arrecadacao_campanhas.updateSlug', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
       try {
-        // Single-column update mirroring the Postgres adapter — no-op for
-        // unknown id (the caller owner-gates before calling).
+        // Mirrors the Postgres adapter — no-op for unknown id (the caller
+        // owner-gates before calling). marcarAlteracao=true (perfil editor
+        // consuming its one change) guards against a concurrent race via
+        // slugAlteradoEm === null; origem:'setup' calls pass
+        // marcarAlteracao=false and must NOT be blocked even when the
+        // campanha already has slugAlteradoEm set.
         const campanha = this.campanhas.get(idCampanha);
-        if (campanha) {
-          this.campanhas.set(idCampanha, { ...campanha, slug });
+        if (campanha && (!marcarAlteracao || campanha.slugAlteradoEm === null)) {
+          this.campanhas.set(idCampanha, { ...campanha, slug, slugAlteradoEm: alteradoEm });
         }
         span.setStatus({ code: SpanStatusCode.OK });
       } catch (error: unknown) {

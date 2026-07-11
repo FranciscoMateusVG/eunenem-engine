@@ -7,7 +7,7 @@ import { useTweaks } from "@/components/eunenem/TweaksContext";
 import { trpc } from "@/lib/trpc";
 import type { Genero } from "@/lib/concordancia";
 import { paginaShareDisplayPath, paginaShareDisplayPrefix, paginaShareUrl } from "@/lib/pagina-share";
-import { useCampanhaSlugRota } from "@/lib/campanhas";
+import { useCampanhaSlugInfoRota } from "@/lib/campanhas";
 import { painelHref } from "@/lib/painelRoutes";
 import { useCampanhaEscrita } from "@/lib/campanha-escrita";
 import { useCampanhaRota } from "@/lib/campanha-rota";
@@ -37,10 +37,13 @@ import type { PainelSectionBodyProps } from "@/PainelSectionPage";
 // from the pagina-share seam now (pages/lib/pagina-share.ts).
 const STORY_MAX = 600;
 
-// Slug format mirror of the domain VO (SlugUsuario): starts with a letter,
-// 3–30 chars, lowercase letters / digits / hyphen. Client-side gate before
-// we even ask the server for availability (aperture-e21v2 / V2).
-const SLUG_RE = /^[a-z][a-z0-9-]{2,29}$/;
+// Slug format mirror of the campanha's OWN slug (CAMPANHA_SLUG_REGEX in
+// campanhas-router.ts): starts with a letter, 3–60 chars, lowercase
+// letters / digits / hyphen. Client-side gate before we even ask the
+// server for availability. NOT the usuario slug regex ({2,29}) — this
+// component edits campanhas.slug (the campanha's own link), which is a
+// varchar(60) with its own bounds.
+const SLUG_RE = /^[a-z][a-z0-9-]{2,59}$/;
 
 // Canonical celebration slugs — kept in sync with the contract enum
 // (TipoEventoPerfilSchema, mirror of the Evento BC's TipoEvento). The form
@@ -576,15 +579,23 @@ function PhotoSlot({
   );
 }
 
-// aperture-e21v2 (V2) — slug edit UX. Inline availability (debounced) via
-// verificarDisponibilidadeSlug (R2), save via atualizarSlug with graceful
-// inline errors (CONFLICT / BAD_REQUEST never surface as a 500), and a
-// confirm step warning that changing the slug breaks already-shared links
-// (operator decision #5 = warn only; no redirect table in v1).
+// aperture-e21v2 (V2) / aperture (1-troca) — CAMPANHA slug edit UX (not the
+// usuario slug — that's account-wide and out of scope here). Inline
+// availability (debounced) via campanhas.validarSlug, save via
+// campanhas.definirSlug with graceful inline errors (BAD_REQUEST codes
+// never surface as a 500), and a confirm step warning both that changing
+// the slug breaks already-shared links AND that this is the campanha's
+// ONE allowed change via this screen (origem: 'perfil' consumes it — the
+// SetupCampanhaWizard's own definirSlug call, origem: 'setup', does not).
+// currentSlug may be "" when the campanha has no slug of its own yet
+// (falls back to the /c/<uuid> public link shown in the "copiar link"
+// block below, outside this component).
 function SlugEditor({
+  idCampanha,
   currentSlug,
   onChanged,
 }: {
+  idCampanha: string;
   currentSlug: string;
   onChanged: (slug: string) => void;
 }) {
@@ -610,35 +621,38 @@ function SlugEditor({
     return () => clearTimeout(t);
   }, [draft]);
 
-  const disponibilidade = trpc.usuario.verificarDisponibilidadeSlug.useQuery(
-    { slug: debounced },
+  const disponibilidade = trpc.campanhas.validarSlug.useQuery(
+    { idCampanha, slug: debounced },
     { enabled: dirty && formatOk && debounced === draft, staleTime: 0, retry: false },
   );
 
-  const atualizarSlug = trpc.usuario.atualizarSlug.useMutation({
+  const definirSlug = trpc.campanhas.definirSlug.useMutation({
     onSuccess: () => {
       setConfirming(false);
       setServerError(null);
-      void utils.perfil.getPerfil.invalidate();
+      // aperture — campanhas.list is the cache backing both campanhaSlug
+      // (share link display) and slugJaAlterado (this editor's own
+      // visibility gate) — invalidating it is what makes the editor
+      // disappear right after this, the ONE allowed, save.
+      void utils.campanhas.list.invalidate();
       toast.success("link da página atualizado ♡");
-      // aperture — the app has no client-side router: every other painel
-      // component (header card, "ver como convidado", menu hrefs) reads the
-      // slug straight from the URL path, which never changes without a real
-      // navigation. Without this, they'd keep pointing at the OLD slug even
-      // though the DB (and this form) already reflect the new one.
       onChanged(draft);
     },
     onError: (err) => {
       setConfirming(false);
-      const code = err.data?.code;
-      if (code === "CONFLICT") {
+      const msg = err.message || "";
+      if (msg === "slug_em_uso") {
         setServerError("esse endereço já está em uso — escolha outro ♡");
-      } else if (code === "BAD_REQUEST") {
+      } else if (msg === "slug_reservado") {
+        setServerError("esse endereço é reservado — escolha outro ♡");
+      } else if (msg === "slug_formato_invalido") {
         setServerError(
-          "formato inválido: 3–30 caracteres, começa com letra, só a–z, números e hífen",
+          "formato inválido: 3–60 caracteres, começa com letra, só a–z, números e hífen",
         );
+      } else if (msg === "slug_ja_alterado") {
+        setServerError("você já trocou o link dessa página uma vez — essa troca não pode ser feita de novo ♡");
       } else {
-        setServerError(err.message || "não consegui salvar o link — tenta de novo?");
+        setServerError(msg || "não consegui salvar o link — tenta de novo?");
       }
     },
   });
@@ -648,12 +662,12 @@ function SlugEditor({
     status = { text: serverError, tone: "bad" };
   } else if (!dirty) {
     status = {
-      text: "esse é o endereço público da sua página — dá pra trocar quando quiser",
+      text: "esse é o endereço público da sua página — você só pode trocar uma vez",
       tone: "muted",
     };
   } else if (!formatOk) {
     status = {
-      text: "3–30 caracteres, começa com letra, só a–z, números e hífen",
+      text: "3–60 caracteres, começa com letra, só a–z, números e hífen",
       tone: "bad",
     };
   } else if (disponibilidade.isFetching || debounced !== draft) {
@@ -662,6 +676,8 @@ function SlugEditor({
     status = { text: "disponível ♡", tone: "ok" };
   } else if (disponibilidade.data?.motivo === "em_uso") {
     status = { text: "esse endereço já está em uso", tone: "bad" };
+  } else if (disponibilidade.data?.motivo === "reservado") {
+    status = { text: "esse endereço é reservado", tone: "bad" };
   } else {
     status = { text: "formato inválido", tone: "bad" };
   }
@@ -670,7 +686,7 @@ function SlugEditor({
     dirty &&
     formatOk &&
     disponibilidade.data?.disponivel === true &&
-    !atualizarSlug.isPending;
+    !definirSlug.isPending;
   const toneColor =
     status.tone === "ok"
       ? "var(--lilac-deep)"
@@ -721,16 +737,17 @@ function SlugEditor({
             >
               <span style={{ fontSize: 13, color: "var(--ink)" }}>
                 trocar o link vai <strong>quebrar os links antigos</strong> que
-                você já compartilhou (<code>{paginaShareDisplayPrefix()}{currentSlug}</code>). tem certeza?
+                você já compartilhou{currentSlug ? <> (<code>{paginaShareDisplayPrefix()}{currentSlug}</code>)</> : null}, e{" "}
+                <strong>só pode ser feito uma vez</strong>. tem certeza?
               </span>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button
                   type="button"
                   className="perfil-btn perfil-btn-primary"
-                  disabled={atualizarSlug.isPending}
-                  onClick={() => atualizarSlug.mutate({ novoSlug: draft })}
+                  disabled={definirSlug.isPending}
+                  onClick={() => definirSlug.mutate({ idCampanha, slug: draft, origem: "perfil" })}
                 >
-                  {atualizarSlug.isPending ? (
+                  {definirSlug.isPending ? (
                     <>
                       <span className="perfil-spinner" aria-hidden="true" /> salvando…
                     </>
@@ -741,7 +758,7 @@ function SlugEditor({
                 <button
                   type="button"
                   className="perfil-btn perfil-btn-ghost"
-                  disabled={atualizarSlug.isPending}
+                  disabled={definirSlug.isPending}
                   onClick={() => {
                     setConfirming(false);
                     setDraft(currentSlug);
@@ -853,7 +870,9 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
   // the oldest campanha — the same rows these writes now target.
   const idCampanhaEscrita = useCampanhaEscrita();
   // aperture-2v91z — the route campanha's pretty slug for the share row.
-  const campanhaSlugRota = useCampanhaSlugRota();
+  // aperture (1-troca) — slugJaAlterado gates whether the SlugEditor
+  // renders at all (see the render below).
+  const { campanhaSlug: campanhaSlugRota, slugJaAlterado } = useCampanhaSlugInfoRota();
   const { tweaks, setTweaks } = useTweaks();
   const utils = trpc.useUtils();
 
@@ -1259,19 +1278,22 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
 
       {/* 1 — Informações da página */}
       <PerfilSection icon={ico.user} title="informações da página" variant="lilac">
-        <SlugEditor
-          currentSlug={profileSlug}
-          onChanged={(newSlug) => {
-            setProfileSlug(newSlug);
-            // aperture — full navigation (not client state) is required: the
-            // route's :slug segment is the source of truth every other painel
-            // component reads from (header card link, "ver como convidado",
-            // menu hrefs). Without this they'd keep pointing at the OLD slug.
-            if (typeof window !== "undefined") {
-              window.location.assign(painelHref(newSlug, "perfil", idCampanha));
-            }
-          }}
-        />
+        {/* aperture (1-troca) — the editor only renders until the campanha
+            has used its ONE allowed slug change via this screen; after
+            that, only the "copiar link" block below remains. idCampanhaEscrita
+            is the actual write target (mirrors every other save call in
+            this component — see currentPayload/campanhaPayload above). */}
+        {!slugJaAlterado && idCampanhaEscrita && (
+          <SlugEditor
+            idCampanha={idCampanhaEscrita}
+            currentSlug={campanhaSlugRota ?? ""}
+            onChanged={() => {
+              // campanhas.list invalidation (inside SlugEditor's onSuccess)
+              // already refreshes campanhaSlugRota + slugJaAlterado — no
+              // local state or navigation needed here.
+            }}
+          />
+        )}
 
         <div className="perfil-share">
           <span className="perfil-share-eyebrow">link da página</span>

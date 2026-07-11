@@ -46,6 +46,7 @@ const baseCampanha = {
   dadosRecebedor: dadosRecebedorEmail,
   titulo: 'Campanha',
   slug: null,
+  slugAlteradoEm: null,
   opcoes: [] as const,
   criadaEm: new Date('2026-01-01T00:00:00.000Z'),
 };
@@ -312,6 +313,8 @@ describe('criarCampanhaSemRecebedor', () => {
         'opcoes',
         // aperture-aphk8: the campanha's own URL slug (defaults to null).
         'slug',
+        // aperture: 1-troca timestamp (defaults to null).
+        'slugAlteradoEm',
         'titulo',
       ].sort(),
     );

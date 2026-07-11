@@ -51,6 +51,7 @@ export interface Campanhas {
   id: string;
   id_plataforma: string;
   slug: string | null;
+  slug_alterado_em: Timestamp | null;
   titulo: string;
 }
 

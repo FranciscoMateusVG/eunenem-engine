@@ -445,7 +445,7 @@ export function describeCampanhaRepositoryConformance(name: string, options: Con
       });
       await options.saveCampanha(repo, campanha);
 
-      await repo.updateSlug(campanha.id, 'lista-da-helena');
+      await repo.updateSlug(campanha.id, 'lista-da-helena', null, false);
 
       const found = await repo.findById(campanha.id);
       expect(found?.slug).toBe('lista-da-helena');
@@ -458,13 +458,70 @@ export function describeCampanhaRepositoryConformance(name: string, options: Con
       const campanha = makeCampanha({ slug: 'antigo' });
       await options.saveCampanha(repo, campanha);
 
-      await repo.updateSlug(campanha.id, null);
+      await repo.updateSlug(campanha.id, null, null, false);
 
       expect((await repo.findById(campanha.id))?.slug).toBeNull();
     });
 
     it('updateSlug is a no-op for an unknown id (aperture-aphk8)', async () => {
-      await expect(repo.updateSlug(randomUUID(), 'qualquer')).resolves.not.toThrow();
+      await expect(repo.updateSlug(randomUUID(), 'qualquer', null, false)).resolves.not.toThrow();
+    });
+
+    // ───── slugAlteradoEm — 1-troca via perfil (aperture) ─────
+
+    it('updateSlug persists a non-null alteradoEm when marcarAlteracao=true (perfil editor)', async () => {
+      const campanha = makeCampanha();
+      await options.saveCampanha(repo, campanha);
+      const agora = new Date('2026-07-11T10:00:00.000Z');
+
+      await repo.updateSlug(campanha.id, 'minha-lista', agora, true);
+
+      const found = await repo.findById(campanha.id);
+      expect(found?.slug).toBe('minha-lista');
+      expect(found?.slugAlteradoEm).toEqual(agora);
+    });
+
+    it('updateSlug with marcarAlteracao=false (origem: setup) never sets slugAlteradoEm', async () => {
+      const campanha = makeCampanha();
+      await options.saveCampanha(repo, campanha);
+
+      await repo.updateSlug(campanha.id, 'lista-inicial', null, false);
+
+      expect((await repo.findById(campanha.id))?.slugAlteradoEm).toBeNull();
+    });
+
+    it('updateSlug guards against overwriting an already-set alteradoEm when marcarAlteracao=true', async () => {
+      const campanha = makeCampanha();
+      await options.saveCampanha(repo, campanha);
+      const primeira = new Date('2026-07-11T10:00:00.000Z');
+      const segunda = new Date('2026-07-12T10:00:00.000Z');
+
+      await repo.updateSlug(campanha.id, 'primeiro-slug', primeira, true);
+      await repo.updateSlug(campanha.id, 'segundo-slug', segunda, true);
+
+      // Adapter-level guard is defense-in-depth (the router/use-case is the
+      // actual enforcement point) — the slug write itself is skipped once
+      // slugAlteradoEm is non-null, so BOTH slug and slugAlteradoEm stay
+      // pinned to the first write.
+      const found = await repo.findById(campanha.id);
+      expect(found?.slug).toBe('primeiro-slug');
+      expect(found?.slugAlteradoEm).toEqual(primeira);
+    });
+
+    it('updateSlug with marcarAlteracao=false (origem: setup) still works after slugAlteradoEm is set', async () => {
+      const campanha = makeCampanha();
+      await options.saveCampanha(repo, campanha);
+      const jaAlterado = new Date('2026-07-11T10:00:00.000Z');
+      await repo.updateSlug(campanha.id, 'trocado-pelo-perfil', jaAlterado, true);
+
+      // origem:'setup' calls pass marcarAlteracao=false and must not be
+      // blocked even though slugAlteradoEm is already set — only
+      // origem:'perfil' (marcarAlteracao=true) is guarded.
+      await repo.updateSlug(campanha.id, 'editado-pelo-setup', jaAlterado, false);
+
+      const found = await repo.findById(campanha.id);
+      expect(found?.slug).toBe('editado-pelo-setup');
+      expect(found?.slugAlteradoEm).toEqual(jaAlterado);
     });
 
     // aperture-y8e9w: validarSlug's em_uso check reads slugs THROUGH
@@ -482,7 +539,7 @@ export function describeCampanhaRepositoryConformance(name: string, options: Con
       await options.saveCampanha(repo, campanhaA);
       await options.saveCampanha(repo, campanhaB);
 
-      await repo.updateSlug(campanhaA.id, 'francisco');
+      await repo.updateSlug(campanhaA.id, 'francisco', null, false);
 
       const campanhas = await repo.findCampanhasByAdministrador(idConta);
       const porId = new Map(campanhas.map((c) => [c.id, c.slug]));
@@ -491,7 +548,7 @@ export function describeCampanhaRepositoryConformance(name: string, options: Con
     });
 
     it('updateSlug emits db.arrecadacao_campanhas.updateSlug span (aperture-aphk8)', async () => {
-      await repo.updateSlug(randomUUID(), 'qualquer');
+      await repo.updateSlug(randomUUID(), 'qualquer', null, false);
       const span = findSpan(options.getSpans(), 'db.arrecadacao_campanhas.updateSlug');
       expect(span).toBeDefined();
       expect(span?.attributes['db.system']).toBe(options.expectedDbSystem);
@@ -516,6 +573,7 @@ export function makeCampanha(overrides: Partial<Campanha> = {}): Campanha {
     },
     titulo: 'Campanha teste',
     slug: null,
+    slugAlteradoEm: null,
     opcoes: [],
     criadaEm: new Date('2026-05-01T12:00:00.000Z'),
     ...overrides,
@@ -532,6 +590,7 @@ export function makeCampanhaSemRecebedor(overrides: Partial<Campanha> = {}): Cam
     dadosRecebedor: null,
     titulo: 'Campanha sem recebedor',
     slug: null,
+    slugAlteradoEm: null,
     opcoes: [],
     criadaEm: new Date('2026-05-01T12:00:00.000Z'),
     ...overrides,

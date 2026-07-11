@@ -52,6 +52,16 @@ export interface Campanha {
    * contas may hold the same campanha slug.
    */
   readonly slug: string | null;
+  /**
+   * Momento em que a campanha teve seu slug alterado pelo PAINEL DE
+   * PERFIL (aperture — 1-troca). `null` = ainda não trocou por lá;
+   * não-null = já usou a única troca — `campanhas.definirSlug` com
+   * `origem: 'perfil'` rejeita novas tentativas com
+   * `CampanhaSlugJaAlteradoError`. Chamadas com `origem: 'setup'` (o
+   * modal de configuração inicial da campanha) nunca leem nem gravam
+   * este campo — só a troca feita pelo perfil conta.
+   */
+  readonly slugAlteradoEm: Date | null;
   readonly opcoes: readonly OpcaoContribuicao[];
   readonly criadaEm: Date;
 }
@@ -141,16 +151,19 @@ export function campanhaSemRecebedor(campanha: Campanha): Campanha {
 
 /** Monta campanha a partir de metadados e recebedor inicial ativo. */
 export function campanhaComRecebedorInicial(
-  params: Omit<Campanha, 'idRecebedor' | 'dadosRecebedor' | 'slug'> & {
+  params: Omit<Campanha, 'idRecebedor' | 'dadosRecebedor' | 'slug' | 'slugAlteradoEm'> & {
     readonly recebedor: Recebedor;
     /** Optional — defaults to null (aperture-aphk8; keeps existing call-sites intact). */
     readonly slug?: string | null;
+    /** Optional — defaults to null (keeps existing call-sites intact). */
+    readonly slugAlteradoEm?: Date | null;
   },
 ): Campanha {
-  const { recebedor, slug, ...rest } = params;
+  const { recebedor, slug, slugAlteradoEm, ...rest } = params;
   const next: Campanha = {
     ...rest,
     slug: slug ?? null,
+    slugAlteradoEm: slugAlteradoEm ?? null,
     idRecebedor: recebedor.id,
     dadosRecebedor: recebedor.dadosRecebedor,
   };
@@ -160,15 +173,18 @@ export function campanhaComRecebedorInicial(
 
 /** Monta campanha sem recebedor (lifecycle: pre-bank-info). */
 export function criarCampanhaSemRecebedor(
-  params: Omit<Campanha, 'idRecebedor' | 'dadosRecebedor' | 'slug'> & {
+  params: Omit<Campanha, 'idRecebedor' | 'dadosRecebedor' | 'slug' | 'slugAlteradoEm'> & {
     /** Optional — defaults to null (aperture-aphk8; keeps existing call-sites intact). */
     readonly slug?: string | null;
+    /** Optional — defaults to null (keeps existing call-sites intact). */
+    readonly slugAlteradoEm?: Date | null;
   },
 ): Campanha {
-  const { slug, ...rest } = params;
+  const { slug, slugAlteradoEm, ...rest } = params;
   const next: Campanha = {
     ...rest,
     slug: slug ?? null,
+    slugAlteradoEm: slugAlteradoEm ?? null,
     idRecebedor: null,
     dadosRecebedor: null,
   };

@@ -595,6 +595,7 @@ export { TokenSessaoSchema } from './domain/usuario/value-objects/token-sessao.j
 export { ArrecadacaoAdministradorDuplicadoError } from './errors/arrecadacao/administrador-duplicado.error.js';
 export { ArrecadacaoAdministradorNaoEncontradoError } from './errors/arrecadacao/administrador-nao-encontrado.error.js';
 export { ArrecadacaoCampanhaNaoEncontradaError } from './errors/arrecadacao/campanha-nao-encontrada.error.js';
+export { CampanhaSlugJaAlteradoError } from './errors/arrecadacao/campanha-slug-ja-alterado.error.js';
 // Plan 0015 (aperture-ucgok): the ja-disponivel / nao-disponivel errors
 // were replaced by a single ContribuicaoIndisponivelError with the
 // EXISTS-aprovado-pagamento semantic.

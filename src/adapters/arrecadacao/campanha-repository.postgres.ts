@@ -50,6 +50,7 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
             id_plataforma: campanha.idPlataforma,
             titulo: campanha.titulo,
             slug: campanha.slug,
+            slug_alterado_em: campanha.slugAlteradoEm,
             criada_em: campanha.criadaEm,
           })
           .onConflict((oc) =>
@@ -57,6 +58,7 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
               titulo: campanha.titulo,
               id_plataforma: campanha.idPlataforma,
               slug: campanha.slug,
+              slug_alterado_em: campanha.slugAlteradoEm,
             }),
           )
           .execute();
@@ -145,6 +147,7 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
           idsAdministradores: admins.map((a) => a.id_usuario as IdConta),
           titulo: row.titulo,
           slug: row.slug,
+          slugAlteradoEm: row.slug_alterado_em,
           opcoes: opcoes.map(toOpcao),
           criadaEm: row.criada_em,
         };
@@ -256,6 +259,7 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
               'campanhas.id_plataforma',
               'campanhas.titulo',
               'campanhas.slug',
+              'campanhas.slug_alterado_em',
               'campanhas.criada_em',
             ])
             .where('campanha_administradores.id_usuario', '=', idConta)
@@ -526,19 +530,30 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
   async updateSlug(
     idCampanha: IdCampanha,
     slug: string | null,
+    alteradoEm: Date | null,
+    marcarAlteracao: boolean,
     context?: ArrecadacaoRepositoryContext,
   ): Promise<void> {
     const executor = context?.trx ?? this.db;
     return tracer.startActiveSpan('db.arrecadacao_campanhas.updateSlug', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
       try {
-        // Single-column update (aperture-aphk8). No-op for unknown id —
-        // the caller owner-gates before calling.
-        await executor
-          .updateTable('campanhas')
-          .set({ slug })
-          .where('id', '=', idCampanha)
-          .execute();
+        // (aperture-aphk8). No-op for unknown id — the caller owner-gates
+        // before calling. `marcarAlteracao` (only true for the perfil
+        // editor's ONE allowed change) adds a `slug_alterado_em IS NULL`
+        // guard as defense-in-depth against a concurrent race — the
+        // router already rejected the request if IT read a non-null
+        // value first. origem:'setup' calls pass marcarAlteracao=false
+        // (they may run on a campanha that already has slugAlteradoEm
+        // set) and must NOT be blocked by this guard.
+        let query = executor.updateTable('campanhas').set({
+          slug,
+          slug_alterado_em: alteradoEm,
+        });
+        if (marcarAlteracao) {
+          query = query.where('slug_alterado_em', 'is', null);
+        }
+        await query.where('id', '=', idCampanha).execute();
         span.setStatus({ code: SpanStatusCode.OK });
       } catch (error: unknown) {
         span.recordException(error as Error);

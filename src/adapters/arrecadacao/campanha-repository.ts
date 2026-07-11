@@ -128,15 +128,32 @@ export interface CampanhaRepository {
 
   /**
    * Persists the campanha's own URL slug (aperture-aphk8, W1a). Narrow,
-   * single-column update — deliberately NOT part of `save` semantics so
-   * callers can set/clear a slug without re-writing the whole aggregate.
-   * `slug` is stored normalized (trimmed, lowercase) by the caller; `null`
-   * clears it. Per-conta uniqueness is APP-enforced by the caller
-   * (campanhas-router `definirSlug`), not here and not by the DB.
+   * single-column-pair update — deliberately NOT part of `save` semantics
+   * so callers can set/clear a slug without re-writing the whole
+   * aggregate. `slug` is stored normalized (trimmed, lowercase) by the
+   * caller; `null` clears it. Per-conta uniqueness is APP-enforced by the
+   * caller (campanhas-router `definirSlug`), not here and not by the DB.
+   *
+   * `alteradoEm` is written verbatim to `slug_alterado_em` — the CALLER
+   * decides what to pass (the campanha's UNCHANGED existing
+   * `slugAlteradoEm` for `origem: 'setup'` calls, which must never move
+   * this column in either direction; or a fresh timestamp for the ONE
+   * perfil-editor change).
+   *
+   * `marcarAlteracao` gates a defense-in-depth guard: when `true` (the
+   * perfil editor is consuming its one allowed change), the adapter also
+   * requires `slug_alterado_em IS NULL` in the WHERE clause, so a
+   * concurrent race can't double-write the timestamp — the router is the
+   * actual source of the rejection the user sees (it already read
+   * `slugAlteradoEm` and threw before calling this). `origem: 'setup'`
+   * calls MUST pass `false` — they may run on a campanha that already has
+   * `slugAlteradoEm` set, and must not be blocked by it.
    */
   updateSlug(
     idCampanha: IdCampanha,
     slug: string | null,
+    alteradoEm: Date | null,
+    marcarAlteracao: boolean,
     context?: ArrecadacaoRepositoryContext,
   ): Promise<void>;
 }
