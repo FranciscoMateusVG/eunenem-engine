@@ -149,6 +149,9 @@ async function seedUser(opts: { onboarded: boolean }): Promise<SeededUser> {
       dadosRecebedor: {
         metodo: 'pix',
         nomeTitular: nomeExibicao,
+        // Migration 20260709_036 requires cpf_titular NOT NULL on the
+        // recebedores_variante_check constraint. Checksum-valid fake.
+        cpfTitular: '11144477735',
         tipoChavePix: 'email',
         chavePix: email,
       },

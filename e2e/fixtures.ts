@@ -156,6 +156,10 @@ export const test = base.extend<SeedFixtures>({
         // recebedores_variante_check constraint at save time.
         metodo: 'pix',
         nomeTitular: nomeExibicao,
+        // Migration 20260709_036 tightened recebedores_variante_check to
+        // require cpf_titular NOT NULL. Checksum-valid canonical fake so
+        // the seed satisfies both the DB constraint and the domain refine.
+        cpfTitular: '11144477735',
         tipoChavePix: 'email',
         chavePix: email,
       },
