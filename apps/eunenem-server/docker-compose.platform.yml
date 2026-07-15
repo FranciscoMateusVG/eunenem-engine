@@ -1,0 +1,70 @@
+# Platform compose for pocketsoftware (aperture-48z56) — server service ONLY.
+# The platform provides Postgres + MinIO as shared services, and Dokploy
+# `domain.create` provides routing — so no db/minio sidecars and no Traefik
+# labels here. Derived from docker-compose.yml on staging; env wire-through
+# rationale (Dokploy .env layer-skip) documented there and in the dokploy-api
+# skill §12.
+services:
+  eunenem-server:
+    build:
+      # Repo root — Dockerfile COPYs both apps/eunenem-server/ AND src/
+      # because the app uses relative cross-app imports (../../../../src/...).
+      context: ../../
+      dockerfile: apps/eunenem-server/Dockerfile
+      args:
+        # esbuild bakes the client bundle at build time — the publishable key
+        # must be present THEN, not just at runtime (see Dockerfile +
+        # setup.ts build-time-inline rationale in the staging compose).
+        STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      APP_NAME: ${APP_NAME:-eunenem}
+      DATABASE_URL: ${DATABASE_URL:-}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-}
+      TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-}
+      TRUSTED_HOP_COUNT: ${TRUSTED_HOP_COUNT:-1}
+      LOG_PII_HASH_SALT: ${LOG_PII_HASH_SALT:-}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      # Object storage for profile photos — platform MinIO. Endpoint must be
+      # the PUBLIC storage domain so browser presigned PUTs reach it;
+      # access/secret are a bucket-scoped key.
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-}
+      MINIO_REGION: ${MINIO_REGION:-us-east-1}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-}
+      MINIO_BUCKET: ${MINIO_BUCKET:-eunenem-perfil-fotos}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID:-}
+      MICROSOFT_TENANT_ID: ${MICROSOFT_TENANT_ID:-}
+      MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_SECURE: ${SMTP_SECURE:-}
+      ADMIN_ALLOWED_EMAILS: ${ADMIN_ALLOWED_EMAILS:-}
+      # Legacy 1.0 bridge/migration. CLERK_SECRET_KEY intentionally dropped —
+      # vestigial on the platform target.
+      LEGACY_SITE_ORIGIN: ${LEGACY_SITE_ORIGIN:-}
+      LEGACY_USERS_PATH: ${LEGACY_USERS_PATH:-}
+      LEGACY_MIGRACAO_URL: ${LEGACY_MIGRACAO_URL:-}
+    # Legacy-user snapshot mounted OUTSIDE /app (a path under /app could be
+    # baked by a Dockerfile COPY; /data cannot). Default is the committed
+    # 1-email stub; prod overrides LEGACY_USERS_SOURCE via Dokploy to a
+    # files-dir path holding the real (0600, git-ignored) file. `:ro` — the
+    # container never writes it.
+    volumes:
+      - '${LEGACY_USERS_SOURCE:-./lib/seed-data/legacy-1.0-users.json}:/data/legacy-users.json:ro'
+    networks:
+      - dokploy-network
+
+networks:
+  dokploy-network:
+    external: true
