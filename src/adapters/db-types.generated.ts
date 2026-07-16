@@ -269,6 +269,17 @@ export interface Recebedores {
   tipo_conta: string | null;
 }
 
+export interface RepasseReconciliacaoCandidatos {
+  chave_mascarada: string | null;
+  codigo_solicitacao: string;
+  criado_em: Timestamp;
+  data_movimento: string | null;
+  descricao_pix: string | null;
+  id: string;
+  repasse_id: string;
+  valor_cents: number;
+}
+
 export interface RepassesRecebedor {
   amount_cents: number;
   aprovado_em: Timestamp | null;
@@ -277,6 +288,7 @@ export interface RepassesRecebedor {
   id_campanha: string;
   inter_codigo_solicitacao: string | null;
   last_transfer_error: string | null;
+  needs_manual_resolution: Generated<boolean>;
   solicitado_em: Timestamp;
   status: string;
   transfer_attempts: Generated<number>;
@@ -365,6 +377,7 @@ export interface DB {
   perfil_criadores: PerfilCriadores;
   rate_limit: RateLimit;
   recebedores: Recebedores;
+  repasse_reconciliacao_candidatos: RepasseReconciliacaoCandidatos;
   repasse_transfer_attempts: RepasseTransferAttempts;
   repasses_recebedor: RepassesRecebedor;
   resgates_pendentes: ResgatesPendentes;

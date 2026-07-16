@@ -121,6 +121,15 @@ describe('Migration round-trip', () => {
     expect(await getColumn(db, 'repasses_recebedor', 'inter_codigo_solicitacao')).toBeDefined();
     expect(await getColumn(db, 'repasses_recebedor', 'last_transfer_error')).toBeDefined();
 
+    // 20260716_043_repasse_manual_resolution (aperture-477nz): the actual TIP
+    //   now. Adds repasses_recebedor.needs_manual_resolution (NOT NULL default
+    //   false) + the repasse_reconciliacao_candidatos table (masked-chave
+    //   search candidates for admin manual resolution).
+    expect(tableNames).toContain('repasse_reconciliacao_candidatos');
+    expect(
+      (await getColumn(db, 'repasses_recebedor', 'needs_manual_resolution'))?.is_nullable,
+    ).toBe('NO');
+
     const conviteRemetenteCol = await getColumn(db, 'convites', 'remetente');
     expect(conviteRemetenteCol?.data_type).toBe('character varying');
     expect(conviteRemetenteCol?.character_maximum_length).toBe(120);
@@ -156,11 +165,19 @@ describe('Migration round-trip', () => {
     //    note above; renaming a DEPLOYED migration is forbidden because
     //    kysely_migration keys on the filename and would re-run it).
 
-    // 20260716_042_repasse_transfer (aperture-vvh2j) → the actual TIP now.
-    //   Prepended per the contract above (NINTH occurrence of the off-by-one
-    //   this block warns about). Its down() drops repasse_transfer_attempts +
-    //   the 4 transfer columns and restores the 2-state status CHECK. THIS is
-    //   the true first migrateDown.
+    // 20260716_043_repasse_manual_resolution (aperture-477nz) → the actual TIP
+    //   now. Prepended per the contract above (TENTH occurrence of the
+    //   off-by-one this block warns about). Its down() drops the
+    //   repasse_reconciliacao_candidatos table + the needs_manual_resolution
+    //   column. THIS is the true first migrateDown.
+    const downManualResolution = await migrator.migrateDown();
+    expect(downManualResolution.error).toBeUndefined();
+    expect(await getColumn(db, 'repasses_recebedor', 'needs_manual_resolution')).toBeUndefined();
+    expect(await listTableNames(db)).not.toContain('repasse_reconciliacao_candidatos');
+
+    // 20260716_042_repasse_transfer (aperture-vvh2j) → now the tip after the
+    //   043 down-step above. Its down() drops repasse_transfer_attempts + the
+    //   4 transfer columns and restores the 2-state status CHECK.
     const downRepasseTransfer = await migrator.migrateDown();
     expect(downRepasseTransfer.error).toBeUndefined();
     expect(await getColumn(db, 'repasses_recebedor', 'transfer_referencia')).toBeUndefined();
