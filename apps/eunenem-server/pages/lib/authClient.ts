@@ -10,7 +10,8 @@
 // baseURL is left to BetterAuth's same-origin default: the client bundle is
 // served from the same origin as the auth handler (eunenem-server serves both
 // the SSR pages and /api/auth/*), so relative `/api/auth/*` calls resolve to
-// the right host in dev (localhost:3001) and prod (eunenem.xeroxtoxerox.com).
+// the right host automatically — dev (localhost:3001) or whatever live domain
+// serves the app (no hardcoded host; aperture-ejghb).
 import { createAuthClient } from 'better-auth/react';
 import { magicLinkClient } from 'better-auth/client/plugins';
 
