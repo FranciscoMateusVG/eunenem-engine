@@ -213,6 +213,11 @@ export interface ServerDeps {
   readonly boss: PgBoss;
   readonly repasseJobEnqueuer: RepasseJobEnqueuer;
   readonly transferenciaProvider: TransferenciaProvider;
+  /**
+   * aperture-477nz — INTER_EXTRATO_VERIFIED parsed to a boolean. Gates the
+   * confirmar search fallback's zero-candidate auto-falhou (see the env docs).
+   */
+  readonly extratoVerified: boolean;
 }
 
 /**
@@ -349,6 +354,15 @@ const ServerEnvSchema = z
     INTER_CERT_BASE64: z.string().default(''),
     INTER_KEY_BASE64: z.string().default(''),
     INTER_CONTA_CORRENTE: z.string().default(''),
+    /**
+     * aperture-477nz — has the Inter extrato/search response SHAPE been
+     * empirically verified against a real outbound PIX? Default 'false'. While
+     * false, the confirmar search fallback NEVER auto-`falhou`s on zero
+     * candidates (a shape mismatch silently drops real rows) — it escalates to
+     * needs-manual-resolution instead. Flip to 'true' ONLY after a prod/sandbox
+     * smoke fires a R$1 PIX and confirms buscarPagamentos finds it.
+     */
+    INTER_EXTRATO_VERIFIED: z.enum(['true', 'false']).default('false'),
     /**
      * Trusted reverse-proxy hop count (aperture-uc2ix). Default 0 for
      * dev (no proxy in front of localhost:3001). Prod MUST set this
@@ -838,6 +852,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     boss,
     repasseJobEnqueuer,
     transferenciaProvider,
+    extratoVerified: env.INTER_EXTRATO_VERIFIED === 'true',
   };
 }
 
