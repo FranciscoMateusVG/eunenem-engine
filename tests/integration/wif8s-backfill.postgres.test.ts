@@ -384,24 +384,34 @@ describe('migration 018 backfill (aperture-wif8s)', () => {
       });
     }
 
-    const piExplain = (
-      await sql<{ 'QUERY PLAN': string }>`
-      EXPLAIN SELECT id FROM pagamentos
-        WHERE intencao_payment_intent_external_ref = ${pi}
-    `.execute(testDb.db)
-    ).rows
-      .map((r) => r['QUERY PLAN'])
-      .join('\n');
+    // aperture-6hkhh — determinism fix. On a small/freshly-loaded test table
+    // the planner LEGITIMATELY prefers a seq scan (cheaper than an index scan
+    // for a handful of rows), and shared-container row volume + ANALYZE timing
+    // tip it unpredictably — so a bare `EXPLAIN … toMatch(index)` flakes on
+    // unrelated PRs. `SET LOCAL enable_seqscan = off` makes the planner prove
+    // the index is USABLE for the lookup (the actual intent of this test)
+    // rather than testing planner mood. SET LOCAL is scoped to the surrounding
+    // transaction, so it never leaks to other tests on the shared container.
+    // (enable_seqscan=off is a soft cost penalty, not a hard block: if the
+    // index were missing/unusable the planner would still seq-scan and the
+    // assertion would correctly fail.)
+    async function explainIndexPlan(query: ReturnType<typeof sql>): Promise<string> {
+      // biome-ignore lint/suspicious/noExplicitAny: kysely transaction executor
+      return (testDb.db as any).transaction().execute(async (tx: any) => {
+        await sql`SET LOCAL enable_seqscan = off`.execute(tx);
+        const result = (await query.execute(tx)) as { rows: Array<{ 'QUERY PLAN': string }> };
+        return result.rows.map((r) => r['QUERY PLAN']).join('\n');
+      });
+    }
+
+    const piExplain = await explainIndexPlan(
+      sql`EXPLAIN SELECT id FROM pagamentos WHERE intencao_payment_intent_external_ref = ${pi}`,
+    );
     expect(piExplain).toMatch(/pagamentos_intencao_pi_ref_idx/);
 
-    const chExplain = (
-      await sql<{ 'QUERY PLAN': string }>`
-      EXPLAIN SELECT id FROM pagamentos
-        WHERE intencao_charge_external_ref = ${ch}
-    `.execute(testDb.db)
-    ).rows
-      .map((r) => r['QUERY PLAN'])
-      .join('\n');
+    const chExplain = await explainIndexPlan(
+      sql`EXPLAIN SELECT id FROM pagamentos WHERE intencao_charge_external_ref = ${ch}`,
+    );
     expect(chExplain).toMatch(/pagamentos_intencao_ch_ref_idx/);
   });
 });
