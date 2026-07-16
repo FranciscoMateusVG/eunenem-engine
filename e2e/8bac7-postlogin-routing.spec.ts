@@ -59,6 +59,7 @@ import { randomUUID } from 'node:crypto';
 import { type Browser, type BrowserContext, expect, type Page, test } from '@playwright/test';
 import { CAMPANHAS_WELCOME_STORAGE_KEY } from '../apps/eunenem-server/pages/lib/campanhas.js';
 import { CampanhaRepositoryPostgres } from '../src/adapters/arrecadacao/campanha-repository.postgres.js';
+import { PerfilCampanhaRepositoryPostgres } from '../src/adapters/arrecadacao/perfil-campanha-repository.postgres.js';
 import { RecebedorRepositoryPostgres } from '../src/adapters/arrecadacao/recebedor-repository.postgres.js';
 import { createDatabase, type Database } from '../src/adapters/database.js';
 import {
@@ -68,8 +69,8 @@ import {
 import { AuthServiceBetterAuth } from '../src/adapters/usuario/auth-service.better-auth.js';
 import { PerfilCriadorRepositoryPostgres } from '../src/adapters/usuario/perfil-criador-repository.postgres.js';
 import { UsuarioRepositoryPostgres } from '../src/adapters/usuario/repository.postgres.js';
+import { criarPerfilCampanha } from '../src/domain/arrecadacao/entities/perfil-campanha.js';
 import { criarRecebedorInicial } from '../src/domain/arrecadacao/entities/recebedor.js';
-import { criarPerfilCriador } from '../src/domain/usuario/entities/perfil-criador.js';
 import { conteudoPerfilCriadorVazio } from '../src/domain/usuario/value-objects/conteudo-perfil-criador.js';
 import { NoopLogger } from '../src/observability/noop-logger.js';
 import { noopTracer } from '../src/observability/tracer.js';
@@ -160,13 +161,16 @@ async function seedUser(opts: { onboarded: boolean }): Promise<SeededUser> {
     await deps.recebedorRepository.save(recebedor);
 
     if (opts.onboarded) {
-      const perfil = criarPerfilCriador({
-        id: randomUUID(),
-        idUsuario: usuario.id,
+      // The needsOnboarding gate reads perfil_campanhas (auth-router.ts:864-866,
+      // re-keyed by aperture-3vc12), NOT the legacy perfil_criadores table.
+      // Seed the profile where the gate actually looks — keyed by idCampanha.
+      const perfil = criarPerfilCampanha({
+        id: randomUUID() as never,
+        idCampanha: campanha.id,
         conteudo: { ...conteudoPerfilCriadorVazio(), nomeBebe: 'Helena' },
         criadoEm: deps.clock(),
       });
-      await deps.perfilCriadorRepository.save(perfil);
+      await new PerfilCampanhaRepositoryPostgres(db).save(perfil);
     }
 
     const sessao = await criarSessaoUsuario(deps, {

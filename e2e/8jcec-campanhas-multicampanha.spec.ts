@@ -59,13 +59,16 @@ test.describe('/campanhas — legacy-matching user (the POC user path, spec §9)
     const legadoCta = cardLegado.locator(`a[href="${LEGACY_MIGRACAO_URL}"]`);
     await expect(legadoCta).toBeVisible();
 
-    // 2.0 card — visible, selo text, CTA points at a /painel/:slug URL.
+    // 2.0 card — visible, selo text, CTA points at the multicampanha
+    // /painel/:slug/c/:idCampanha URL (CampanhasPage.tsx:581). The
+    // pre-migration slug-only shape was retired when /c/:idCampanha
+    // routing landed.
     const cardNova = legacyPage.getByTestId('card-campanha').first();
     await expect(cardNova).toBeVisible();
     await expect(cardNova).toContainText('2.0');
     await expect(cardNova.locator('a.camp-cta')).toHaveAttribute(
       'href',
-      /^\/painel\/[a-z][a-z0-9-]{2,29}$/,
+      /^\/painel\/[a-z][a-z0-9-]{2,29}\/c\/[0-9a-f-]{36}$/,
     );
 
     // NOVA LISTA card present.
@@ -84,7 +87,7 @@ test.describe('/campanhas — legacy-matching user (the POC user path, spec §9)
     );
     await legacyPage.goto('/campanhas', { waitUntil: 'domcontentloaded' });
     await legacyPage.getByTestId('card-campanha').first().locator('a.camp-cta').click();
-    await legacyPage.waitForURL(/\/painel\/[a-z][a-z0-9-]{2,29}$/);
+    await legacyPage.waitForURL(/\/painel\/[a-z][a-z0-9-]{2,29}\/c\/[0-9a-f-]{36}$/);
     // Destination is a real page, not the not-found shell.
     await expect(legacyPage.locator('body')).not.toContainText('Página não encontrada');
   });
