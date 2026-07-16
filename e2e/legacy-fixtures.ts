@@ -179,6 +179,9 @@ async function repairExistingLegacyUser(
       dadosRecebedor: {
         metodo: 'pix',
         nomeTitular: 'Legacy Walker E2E',
+        // Migration 20260709_036 requires cpf_titular NOT NULL on the
+        // recebedores_variante_check constraint. Checksum-valid fake.
+        cpfTitular: '11144477735',
         tipoChavePix: 'email',
         chavePix: emailLower,
       },
