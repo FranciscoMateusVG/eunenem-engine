@@ -1,4 +1,5 @@
 import { TRPCClientError } from "@trpc/client";
+import { useState } from "react";
 import { trpc } from "@/lib/trpc.js";
 
 /**
@@ -30,7 +31,27 @@ import { trpc } from "@/lib/trpc.js";
 // avoids pulling server-only deps via the router file path into the frontend
 // bundle. Shapes match `admin-router.ts` lines 1179-1206 verbatim.
 
-export type RepasseStatus = "solicitado" | "aprovado";
+/**
+ * aperture-voao0 — the FSM widened from the 2-state manual flow to the full
+ * 7-state Inter PIX transfer lifecycle (spec §4.1, frozen; mirrors Rex's
+ * `StatusRepasseSchema` on aperture-vvh2j verbatim).
+ *
+ *   solicitado → aprovado → transferindo → pago
+ *                                ├→ verificando → pago | falhou
+ *                                └→ falhou ─(retry)→ transferindo
+ *                                       └─(cancel)→ cancelado
+ *
+ * The `conta` (manual bankTransferRef) path stays `solicitado → aprovado` and
+ * never enters the transfer states — those are `pix`-metodo only.
+ */
+export type RepasseStatus =
+  | "solicitado"
+  | "aprovado"
+  | "transferindo"
+  | "verificando"
+  | "pago"
+  | "falhou"
+  | "cancelado";
 
 export type RepasseListRow = {
   idRepasse: string;
@@ -44,6 +65,17 @@ export type RepasseListRow = {
   solicitadoEm: string;
   aprovadoEm: string | null;
   bankTransferRef: string | null;
+  // ── Inter transfer fields (spec §4.2, frozen). Rex's admin-router DTO is
+  //    NOT yet widened to send these — the list hook defaults them until his
+  //    aperture-vvh2j tRPC surface lands (see the swap note on the hook). ──
+  /** Stable idempotency anchor, generated once at approval. Null pre-approval. */
+  transferReferencia: string | null;
+  /** Inter's payment id (codigoSolicitacao), set as soon as known. */
+  interCodigoSolicitacao: string | null;
+  /** Monotonic attempt counter; 0 before the first transfer fires. */
+  transferAttempts: number;
+  /** Operator-facing Inter error code (never PII). Null unless a failure occurred. */
+  lastTransferError: string | null;
 };
 
 export type RepasseDetailLancamento = {
@@ -57,8 +89,34 @@ export type RepasseDetailLancamento = {
   pagamentoCriadoEm: string;
 };
 
+/**
+ * One row of the append-only `repasse_transfer_attempts` audit table (spec
+ * §4.2). The intent row is committed BEFORE the Inter HTTP call, so an
+ * attempt with `finishedAt === null` is an in-flight (or crashed-mid-call)
+ * attempt — the reconciliation signal. Ordered by `attemptNo` ascending.
+ */
+export type RepasseTransferAttempt = {
+  attemptNo: number;
+  referencia: string;
+  startedAt: string;
+  finishedAt: string | null;
+  /** Non-PII summary (valor + masked chave type). */
+  requestSummary: string | null;
+  /** pago | agendado_aprovacao | rejeitado | ambiguo | transitorio | null (in-flight). */
+  outcome: string | null;
+  codigoSolicitacao: string | null;
+  /** Inter error code only, never PII. */
+  error: string | null;
+};
+
 export type RepasseDetail = RepasseListRow & {
   lancamentos: readonly RepasseDetailLancamento[];
+  /**
+   * Transfer attempt history (newest work last). Empty until the first
+   * transfer fires. Pending Rex's `repasses.show` DTO widening — the detail
+   * hook defaults this to `[]` until then.
+   */
+  attempts: readonly RepasseTransferAttempt[];
 };
 
 export type AprovarMutationResult = {
@@ -66,6 +124,21 @@ export type AprovarMutationResult = {
   aprovadoEm: string;
   numLancamentosTransferidos: number;
   totalCents: number;
+};
+
+export type RetryMutationResult = {
+  idRepasse: string;
+  /** State after re-firing — `transferindo`. */
+  status: RepasseStatus;
+  transferAttempts: number;
+};
+
+export type CancelarMutationResult = {
+  idRepasse: string;
+  /** Terminal `cancelado`. */
+  status: RepasseStatus;
+  /** Lançamentos released back to the recebedor's saldo. */
+  numLancamentosLiberados: number;
 };
 
 // ── Hook-shaped surface (real trpc) ────────────────────────────────────────
@@ -106,10 +179,57 @@ export function useStubRepassesList(): RepassesListResult {
     limit: 100,
   });
   return {
-    rows: query.data?.rows ?? [],
+    rows: (query.data?.rows ?? []).map(toListRow),
     isLoading: query.isLoading,
     error: query.error ? { message: query.error.message } : null,
   };
+}
+
+/**
+ * Wire → UI row adapter. Rex's `RepasseAdminDTO` is still the 2-state shape and
+ * does NOT yet carry the transfer fields (aperture-vvh2j widens it). Reading
+ * the new fields DEFENSIVELY (typeof-guarded off the raw row) makes this
+ * forward-compatible: it defaults today and flows real values the moment his
+ * DTO widening lands — no consumer change, single swap point stays this file.
+ */
+function toListRow(row: {
+  idRepasse: string;
+  idCampanha: string;
+  campanhaTitulo: string;
+  recebedorNome: string | null;
+  amountCents: number;
+  numLancamentos: number;
+  status: RepasseStatus;
+  solicitadoEm: string;
+  aprovadoEm: string | null;
+  bankTransferRef: string | null;
+}): RepasseListRow {
+  return {
+    idRepasse: row.idRepasse,
+    idCampanha: row.idCampanha,
+    campanhaTitulo: row.campanhaTitulo,
+    recebedorNome: row.recebedorNome,
+    amountCents: row.amountCents,
+    numLancamentos: row.numLancamentos,
+    status: row.status,
+    solicitadoEm: row.solicitadoEm,
+    aprovadoEm: row.aprovadoEm,
+    bankTransferRef: row.bankTransferRef,
+    transferReferencia: optStr(row, "transferReferencia"),
+    interCodigoSolicitacao: optStr(row, "interCodigoSolicitacao"),
+    transferAttempts: optNum(row, "transferAttempts"),
+    lastTransferError: optStr(row, "lastTransferError"),
+  };
+}
+
+function optStr(row: object, key: string): string | null {
+  const v = (row as Record<string, unknown>)[key];
+  return typeof v === "string" ? v : null;
+}
+
+function optNum(row: object, key: string): number {
+  const v = (row as Record<string, unknown>)[key];
+  return typeof v === "number" ? v : 0;
 }
 
 /**
@@ -122,10 +242,33 @@ export function useStubRepasseDetail(idRepasse: string): RepasseDetailResult {
     { enabled: isUuid(idRepasse) },
   );
   return {
-    data: query.data?.repasse ?? null,
+    data: query.data?.repasse ? toDetail(query.data.repasse) : null,
     isLoading: query.isLoading,
     error: query.error ? { message: query.error.message } : null,
   };
+}
+
+/**
+ * Wire → UI detail adapter. Same forward-compatible defaulting as `toListRow`,
+ * plus the attempt history: Rex's `repasses.show` DTO does not yet embed
+ * `attempts` (reads `repasse_transfer_attempts`), so it defaults to `[]` until
+ * his DTO widening lands.
+ */
+function toDetail(
+  repasse: Parameters<typeof toListRow>[0] & {
+    lancamentos: readonly RepasseDetailLancamento[];
+  },
+): RepasseDetail {
+  return {
+    ...toListRow(repasse),
+    lancamentos: repasse.lancamentos,
+    attempts: readAttempts(repasse),
+  };
+}
+
+function readAttempts(repasse: object): readonly RepasseTransferAttempt[] {
+  const v = (repasse as Record<string, unknown>).attempts;
+  return Array.isArray(v) ? (v as RepasseTransferAttempt[]) : [];
 }
 
 /**
@@ -157,6 +300,71 @@ export function useStubRepasseAprovar(
     isPending: mutation.isPending,
     error,
     data: mutation.data ?? null,
+  };
+}
+
+// ── Retry / Cancelar (falhou-only actions) ─────────────────────────────────
+//
+// PLACEHOLDER MUTATIONS. `trpc.admin.repasses.retry` and `.cancelar` do NOT
+// exist yet — Rex owes them on aperture-vvh2j (see the contract request in the
+// aperture-voao0 bead). These local simulations keep the scaffold interactive
+// for design review; at ship time each becomes a real
+// `trpc.admin.repasses.<retry|cancelar>.useMutation({ onSuccess })` with the
+// same list+detail invalidation the aprovar hook does — no consumer change.
+
+export type RetryMutationState = {
+  mutate: (input: { idRepasse: string }) => void;
+  isPending: boolean;
+  error: { code: string; message: string } | null;
+  data: RetryMutationResult | null;
+};
+
+export function useStubRepasseRetry(
+  onSuccess: (result: RetryMutationResult) => void,
+): RetryMutationState {
+  const [data, setData] = useState<RetryMutationResult | null>(null);
+  return {
+    mutate: (input) => {
+      const result: RetryMutationResult = {
+        idRepasse: input.idRepasse,
+        status: "transferindo",
+        transferAttempts: 0,
+      };
+      setData(result);
+      onSuccess(result);
+    },
+    isPending: false,
+    error: null,
+    data,
+  };
+}
+
+export type CancelarMutationState = {
+  mutate: (input: { idRepasse: string }) => void;
+  isPending: boolean;
+  error: { code: string; message: string } | null;
+  data: CancelarMutationResult | null;
+};
+
+export function useStubRepasseCancelar(
+  onSuccess: (result: CancelarMutationResult) => void,
+): CancelarMutationState {
+  const [data, setData] = useState<CancelarMutationResult | null>(null);
+  return {
+    mutate: (input) => {
+      const result: CancelarMutationResult = {
+        idRepasse: input.idRepasse,
+        status: "cancelado",
+        // Real backend returns the count of released lançamentos; the
+        // placeholder omits it (0 → the success UI hides the count line).
+        numLancamentosLiberados: 0,
+      };
+      setData(result);
+      onSuccess(result);
+    },
+    isPending: false,
+    error: null,
+    data,
   };
 }
 
