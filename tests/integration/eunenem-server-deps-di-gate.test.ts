@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildServerDeps, loadEnv } from '../../apps/eunenem-server/server/auth/setup.js';
 import { __resetStripeForTests } from '../../apps/eunenem-server/src/lib/stripe/stripe.js';
-import { PagamentoProviderFake, PagamentoProviderStripe } from '../../src/index.js';
+import {
+  PagamentoProviderFake,
+  PagamentoProviderStripe,
+  TransferenciaProviderFake,
+  TransferenciaProviderInter,
+} from '../../src/index.js';
 
 /**
  * Regression tests for the payment-provider DI gate (aperture-ozlcr).
@@ -114,6 +119,83 @@ describe('eunenem-server payment-provider DI gate (aperture-ozlcr)', () => {
       expect(deps.checkoutSessionProvider).toBeInstanceOf(PagamentoProviderStripe);
     } finally {
       void deps.db.destroy();
+    }
+  });
+});
+
+/**
+ * aperture-ju5w2 — the Inter PIX transfer rail boot guard. Two structural
+ * money-safety invariants live in the env superRefine: (1) 'inter' is ONLY
+ * selectable in production (staging/dev can NEVER fire a real transfer);
+ * (2) selecting 'inter' requires every INTER_* credential to be present, so a
+ * half-configured prod deploy fails fast at boot rather than on the first PIX.
+ */
+describe('eunenem-server Inter transfer-rail boot guard (aperture-ju5w2)', () => {
+  const B64 = (s: string) => Buffer.from(s).toString('base64');
+
+  function prodInterEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+    return {
+      ...baseEnv(),
+      NODE_ENV: 'production',
+      STRIPE_PUBLISHABLE_KEY: 'pk_live_dummy',
+      STRIPE_SECRET_KEY: 'sk_live_dummy',
+      STRIPE_WEBHOOK_SECRET: 'whsec_live_dummy',
+      LOG_PII_HASH_SALT: 'live-salt-thirty-two-chars-aaaaaaaaaaaaaaaaaaaa',
+      TRUSTED_HOP_COUNT: '1',
+      TRANSFERENCIA_PROVIDER: 'inter',
+      INTER_BASE_URL: 'https://cdpj.partners.bancointer.com.br',
+      INTER_CLIENT_ID: 'cid',
+      INTER_CLIENT_SECRET: 'csecret',
+      INTER_SCOPE: 'pagamento-pix.write extrato.read',
+      INTER_CERT_BASE64: B64('DUMMY-CERT-PEM'),
+      INTER_KEY_BASE64: B64('DUMMY-KEY-PEM'),
+      ...overrides,
+    } as NodeJS.ProcessEnv;
+  }
+
+  it("REJECTS 'inter' outside production (staging/dev can never fire a real transfer)", () => {
+    expect(() =>
+      loadEnv({ ...baseEnv(), NODE_ENV: 'development', TRANSFERENCIA_PROVIDER: 'inter' }),
+    ).toThrow(/production/i);
+  });
+
+  it("REJECTS 'inter' in production when INTER_* credentials are missing (fail fast)", () => {
+    expect(() =>
+      loadEnv(
+        prodInterEnv({
+          INTER_CLIENT_SECRET: '',
+          INTER_CERT_BASE64: '',
+          INTER_KEY_BASE64: '',
+        }),
+      ),
+    ).toThrow(/INTER_/);
+  });
+
+  it("ACCEPTS 'inter' in production with all credentials present", () => {
+    const env = loadEnv(prodInterEnv());
+    expect(env.TRANSFERENCIA_PROVIDER).toBe('inter');
+  });
+
+  it("binds TransferenciaProviderInter when 'inter' is fully configured in production", () => {
+    // getStripe() (fired inside buildServerDeps' pagamento gate) reads the LIVE
+    // process.env.STRIPE_SECRET_KEY, not the synthetic loadEnv object — mirror
+    // the Stripe prod test and set it before building, restore after.
+    const original = process.env.STRIPE_SECRET_KEY;
+    process.env.STRIPE_SECRET_KEY = 'sk_live_dummy';
+    __resetStripeForTests();
+    const env = loadEnv(prodInterEnv());
+    const deps = buildServerDeps(env);
+    try {
+      expect(deps.transferenciaProvider).toBeInstanceOf(TransferenciaProviderInter);
+      expect(deps.transferenciaProvider).not.toBeInstanceOf(TransferenciaProviderFake);
+    } finally {
+      void deps.db.destroy();
+      if (original === undefined) {
+        delete process.env.STRIPE_SECRET_KEY;
+      } else {
+        process.env.STRIPE_SECRET_KEY = original;
+      }
+      __resetStripeForTests();
     }
   });
 });
