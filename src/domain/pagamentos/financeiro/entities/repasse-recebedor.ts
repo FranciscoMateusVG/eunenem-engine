@@ -112,6 +112,15 @@ export const RepasseRecebedorSchema = z.object({
   transferAttempts: z.number().int().nonnegative(),
   /** Operator-facing error detail — Inter error codes only, never PII. */
   lastTransferError: z.string().nullable(),
+  /**
+   * aperture-477nz. TRUE ⇒ a `verificando` repasse whose search
+   * reconciliation surfaced candidate payment(s) that cannot be auto-confirmed
+   * as ours (Inter exposes no reliable caller-supplied identifier in the
+   * extrato). The repasse STAYS `verificando` and awaits an admin's manual
+   * `resolverManualPago` / `resolverManualFalhou`. A search match NEVER
+   * auto-books `pago`. Cleared when the repasse leaves `verificando`.
+   */
+  needsManualResolution: z.boolean(),
 });
 
 export type RepasseRecebedor = Readonly<z.infer<typeof RepasseRecebedorSchema>>;
@@ -139,6 +148,7 @@ export function criarRepasseRecebedorSolicitado(
     interCodigoSolicitacao: null,
     transferAttempts: 0,
     lastTransferError: null,
+    needsManualResolution: false,
   };
 }
 
@@ -264,6 +274,8 @@ export function marcarRepassePago(
     status: 'pago',
     interCodigoSolicitacao,
     lastTransferError: null,
+    // Leaving verificando always clears the manual-resolution flag.
+    needsManualResolution: false,
   };
 }
 
@@ -296,6 +308,8 @@ export function marcarRepasseFalhou(repasse: RepasseRecebedor, erro: string): Re
     ...repasse,
     status: 'falhou',
     lastTransferError: erro,
+    // Leaving verificando always clears the manual-resolution flag.
+    needsManualResolution: false,
   };
 }
 
@@ -310,5 +324,74 @@ export function cancelarRepasse(repasse: RepasseRecebedor): RepasseRecebedor {
   return {
     ...repasse,
     status: 'cancelado',
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// aperture-477nz — manual reconciliation (search-fallback) transitions.
+//
+// When confirmar's search reconciliation surfaces candidate payment(s) it
+// cannot auto-confirm as ours (Inter has no reliable caller-supplied
+// identifier in the extrato), the repasse STAYS `verificando` and is
+// flagged for manual admin resolution. A search match NEVER auto-books
+// `pago`. The two escape hatches are legal ONLY from that flagged state.
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Search reconciliation found candidate(s): stay `verificando`, raise the
+ * `needsManualResolution` flag. Idempotent self-transition (verificando →
+ * verificando). The candidate rows are persisted separately by the repo.
+ */
+export function marcarRepasseNeedsManualResolution(repasse: RepasseRecebedor): RepasseRecebedor {
+  assertStatus(repasse, ['verificando'], 'verificando');
+  return {
+    ...repasse,
+    needsManualResolution: true,
+  };
+}
+
+/**
+ * Admin manual resolution → `pago`. Legal ONLY from a `verificando` repasse
+ * already flagged `needsManualResolution`. The admin supplies the matched
+ * Inter `codigoSolicitacao` (from the persisted candidate list) — books
+ * IDENTICALLY to the auto-pago path (records the codigo, clears error + flag;
+ * the repository stamps `transferido_em` in the same transaction).
+ */
+export function resolverManualPago(
+  repasse: RepasseRecebedor,
+  interCodigoSolicitacao: string,
+): RepasseRecebedor {
+  if (!repasse.needsManualResolution) {
+    throw new Error(
+      `RepasseRecebedor ${repasse.id} cannot resolverManualPago: not flagged needsManualResolution.`,
+    );
+  }
+  assertStatus(repasse, ['verificando'], 'pago');
+  return {
+    ...repasse,
+    status: 'pago',
+    interCodigoSolicitacao,
+    lastTransferError: null,
+    needsManualResolution: false,
+  };
+}
+
+/**
+ * Admin manual resolution → `falhou` (a positive no-payment assertion by the
+ * admin). Legal ONLY from a `verificando` repasse flagged
+ * `needsManualResolution`. From `falhou` the admin can retry or cancel.
+ */
+export function resolverManualFalhou(repasse: RepasseRecebedor, erro: string): RepasseRecebedor {
+  if (!repasse.needsManualResolution) {
+    throw new Error(
+      `RepasseRecebedor ${repasse.id} cannot resolverManualFalhou: not flagged needsManualResolution.`,
+    );
+  }
+  assertStatus(repasse, ['verificando'], 'falhou');
+  return {
+    ...repasse,
+    status: 'falhou',
+    lastTransferError: erro,
+    needsManualResolution: false,
   };
 }

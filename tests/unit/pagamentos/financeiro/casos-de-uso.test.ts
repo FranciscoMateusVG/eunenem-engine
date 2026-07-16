@@ -185,6 +185,7 @@ describe('financial use cases', () => {
       interCodigoSolicitacao: null,
       transferAttempts: 0,
       lastTransferError: null,
+      needsManualResolution: false,
     });
     expect(await livroFinanceiroRepository.findRepasseById(idRepasse)).toEqual(repasse);
     // The eligible lancamento now carries idRepasse linkage.

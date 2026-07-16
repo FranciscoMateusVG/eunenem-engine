@@ -120,6 +120,8 @@ type RepasseRow = {
   inter_codigo_solicitacao: string | null;
   transfer_attempts: number;
   last_transfer_error: string | null;
+  // aperture-477nz — manual reconciliation flag.
+  needs_manual_resolution: boolean;
 };
 
 /**
@@ -1378,6 +1380,7 @@ function repasseFromRow(row: RepasseRow): RepasseRecebedor {
     interCodigoSolicitacao: row.inter_codigo_solicitacao,
     transferAttempts: row.transfer_attempts,
     lastTransferError: row.last_transfer_error,
+    needsManualResolution: row.needs_manual_resolution,
   });
 }
 
