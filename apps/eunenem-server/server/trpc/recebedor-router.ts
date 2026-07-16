@@ -970,6 +970,7 @@ const getResgatePendenteProcedure = t.procedure
       return await obterResgatePendente(
         {
           resgatePendenteRepository: ctx.deps.resgatePendenteRepository,
+          recebedorRepository: ctx.deps.recebedorRepository,
           observability: ctx.deps.observability,
         },
         input.idCampanha as IdCampanha,
