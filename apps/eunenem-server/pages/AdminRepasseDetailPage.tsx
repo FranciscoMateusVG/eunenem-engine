@@ -2,12 +2,21 @@ import { useEffect, useState } from "react";
 import { AdminShell } from "@/components/eunenem/admin/AdminShell";
 import { DddBadge } from "@/components/eunenem/admin/DddBadge";
 import {
+  REPASSE_STATUS_GLOSS,
+  RepasseStatusPill,
+} from "@/components/eunenem/admin/repasse-status";
+import {
   type AprovarMutationResult,
+  type CancelarMutationResult,
   type RepasseDetail,
   type RepasseDetailLancamento,
   type RepasseStatus,
+  type RepasseTransferAttempt,
+  type RetryMutationResult,
   useStubRepasseAprovar,
+  useStubRepasseCancelar,
   useStubRepasseDetail,
+  useStubRepasseRetry,
 } from "@/components/eunenem/admin/RepassesStubData";
 
 /**
@@ -96,10 +105,26 @@ function Body({ repasse }: { repasse: RepasseDetail }) {
       {aprovalResult !== null && (
         <ApprovalSuccessCard result={aprovalResult} />
       )}
+      {repasse.attempts.length > 0 && (
+        <AttemptHistory attempts={repasse.attempts} />
+      )}
       <LancamentosList lancamentos={repasse.lancamentos} />
+
+      {/* Actions + status context are state-driven. Only `solicitado`
+          (aprovar) and `falhou` (retry / cancelar) carry actions; the
+          in-flight and terminal states render an explainer instead. */}
       {repasse.status === "solicitado" && aprovalResult === null && (
         <ApproveAction onOpen={() => setModalOpen(true)} />
       )}
+      {repasse.status === "falhou" && <FailedActions repasse={repasse} />}
+      {(repasse.status === "aprovado" ||
+        repasse.status === "transferindo" ||
+        repasse.status === "verificando") && (
+        <InFlightNote status={repasse.status} />
+      )}
+      {repasse.status === "pago" && <TerminalNote status="pago" />}
+      {repasse.status === "cancelado" && <TerminalNote status="cancelado" />}
+
       {modalOpen && (
         <ConfirmAprovarModal
           repasse={repasse}
@@ -111,6 +136,247 @@ function Body({ repasse }: { repasse: RepasseDetail }) {
         />
       )}
     </section>
+  );
+}
+
+/* -----------------------------------------------------------------------
+ * Transfer attempt history (repasse_transfer_attempts, spec §4.2)
+ * --------------------------------------------------------------------- */
+
+const ATTEMPT_OUTCOME_TINT: Record<string, { dot: string; text: string }> = {
+  pago: { dot: "bg-emerald-500", text: "text-emerald-800" },
+  agendado_aprovacao: { dot: "bg-blue-500", text: "text-blue-800" },
+  rejeitado: { dot: "bg-red-500", text: "text-red-800" },
+  ambiguo: { dot: "bg-amber-500", text: "text-amber-800" },
+  transitorio: { dot: "bg-amber-500", text: "text-amber-800" },
+};
+
+function AttemptHistory({
+  attempts,
+}: {
+  attempts: readonly RepasseTransferAttempt[];
+}) {
+  // Newest first for scan-ability; the wire order is attemptNo ascending.
+  const ordered = [...attempts].sort((a, b) => b.attemptNo - a.attemptNo);
+  return (
+    <div className="rounded-md border border-line bg-paper">
+      <div className="flex items-center gap-2 border-b border-line bg-cream-2/40 px-5 py-2">
+        <DddBadge bc="financeiro" size="sm" />
+        <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-ink-soft">
+          tentativas de transferência · {attempts.length}
+        </p>
+      </div>
+      <ul className="divide-y divide-line">
+        {ordered.map((a) => (
+          <AttemptRow key={a.attemptNo} attempt={a} />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function AttemptRow({ attempt }: { attempt: RepasseTransferAttempt }) {
+  const tint =
+    attempt.outcome !== null
+      ? (ATTEMPT_OUTCOME_TINT[attempt.outcome] ?? {
+          dot: "bg-stone-400",
+          text: "text-stone-600",
+        })
+      : { dot: "bg-purple-500", text: "text-purple-800" };
+  const inFlight = attempt.finishedAt === null;
+  return (
+    <li className="space-y-1.5 px-5 py-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="font-mono text-[11px] tabular-nums text-ink-mute">
+          #{attempt.attemptNo}
+        </span>
+        <span
+          className={`inline-flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.12em] ${tint.text}`}
+        >
+          <span
+            aria-hidden
+            className={`inline-block size-[6px] rounded-full ${tint.dot}`}
+          />
+          {inFlight ? "em andamento" : (attempt.outcome ?? "—")}
+        </span>
+        <span className="font-mono text-[11px] tabular-nums text-ink-soft">
+          {formatLongDate(attempt.startedAt)}
+          {attempt.finishedAt !== null && (
+            <>
+              <span className="mx-1 text-ink-mute">→</span>
+              {formatLongDate(attempt.finishedAt)}
+            </>
+          )}
+        </span>
+      </div>
+      {(attempt.codigoSolicitacao !== null ||
+        attempt.error !== null ||
+        attempt.requestSummary !== null) && (
+        <dl className="grid gap-x-4 gap-y-0.5 pl-6 sm:grid-cols-[max-content_1fr]">
+          {attempt.codigoSolicitacao !== null && (
+            <AttemptMeta label="cód. inter" value={attempt.codigoSolicitacao} />
+          )}
+          {attempt.requestSummary !== null && (
+            <AttemptMeta label="requisição" value={attempt.requestSummary} />
+          )}
+          {attempt.error !== null && (
+            <AttemptMeta label="erro" value={attempt.error} tone="error" />
+          )}
+        </dl>
+      )}
+    </li>
+  );
+}
+
+function AttemptMeta({
+  label,
+  value,
+  tone = "default",
+}: {
+  label: string;
+  value: string;
+  tone?: "default" | "error";
+}) {
+  return (
+    <div className="contents [&>dt]:font-mono [&>dt]:text-[9px] [&>dt]:uppercase [&>dt]:tracking-[0.14em] [&>dt]:text-ink-mute">
+      <dt className="pt-0.5">{label}</dt>
+      <dd
+        className={[
+          "pb-0.5 font-mono text-[11px]",
+          tone === "error" ? "text-red-700" : "text-ink-soft",
+        ].join(" ")}
+      >
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+/* -----------------------------------------------------------------------
+ * State-driven action + note blocks
+ * --------------------------------------------------------------------- */
+
+/**
+ * `falhou` is the only state with post-approval actions (spec §4.1/§5.5):
+ * Retry re-fires the transfer, Cancelar is the irreversible claim-release
+ * (confirm modal). Both disappear once the operator acts.
+ */
+function FailedActions({ repasse }: { repasse: RepasseDetail }) {
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [retryResult, setRetryResult] = useState<RetryMutationResult | null>(
+    null,
+  );
+  const [cancelResult, setCancelResult] =
+    useState<CancelarMutationResult | null>(null);
+  const retry = useStubRepasseRetry(setRetryResult);
+
+  if (cancelResult !== null) {
+    return <TerminalNote status="cancelado" />;
+  }
+  if (retryResult !== null) {
+    return (
+      <div className="rounded-md border border-purple-200 bg-purple-50 px-5 py-4">
+        <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-purple-800">
+          transferência reprocessada
+        </p>
+        <p className="mt-1.5 text-[13px] text-purple-900">
+          A transferência voltou para a fila e está sendo reprocessada no Inter.
+          Atualize a página em instantes para acompanhar o novo resultado.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4 rounded-md border border-red-200 bg-red-50 p-5">
+      <div className="space-y-1">
+        <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-red-800">
+          transferência falhou
+        </p>
+        <p className="text-[13px] text-red-900">
+          Nenhum valor foi movido. Reprocesse para tentar novamente, ou cancele
+          o repasse para devolver os valores ao saldo do recebedor.
+        </p>
+        {repasse.lastTransferError !== null && (
+          <p className="mt-1 font-mono text-[12px] text-red-700">
+            detalhe: {repasse.lastTransferError}
+          </p>
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => retry.mutate({ idRepasse: repasse.idRepasse })}
+          disabled={retry.isPending}
+          className="inline-flex items-center gap-2 rounded-md border border-purple-300 bg-purple-50 px-4 py-2 font-mono text-[12px] uppercase tracking-[0.14em] text-purple-800 transition-colors hover:bg-purple-100 focus:outline-none focus:ring-2 focus:ring-purple-300 disabled:opacity-50"
+        >
+          <span aria-hidden>↻</span>
+          {retry.isPending ? "Reprocessando…" : "Reprocessar transferência"}
+        </button>
+        <button
+          type="button"
+          onClick={() => setCancelOpen(true)}
+          className="inline-flex items-center gap-2 rounded-md border border-stone-300 bg-paper px-4 py-2 font-mono text-[12px] uppercase tracking-[0.14em] text-stone-600 transition-colors hover:bg-stone-100 focus:outline-none focus:ring-2 focus:ring-stone-300"
+        >
+          Cancelar repasse
+        </button>
+      </div>
+      {cancelOpen && (
+        <ConfirmCancelarModal
+          repasse={repasse}
+          onClose={() => setCancelOpen(false)}
+          onSuccess={(result) => {
+            setCancelResult(result);
+            setCancelOpen(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Non-actionable in-flight states — the operator waits; the worker drives. */
+function InFlightNote({
+  status,
+}: {
+  status: Extract<RepasseStatus, "aprovado" | "transferindo" | "verificando">;
+}) {
+  return (
+    <div className="flex items-start gap-3 rounded-md border border-line bg-paper px-5 py-4">
+      <RepasseStatusPill status={status} />
+      <p className="text-[13px] text-ink-soft">
+        {REPASSE_STATUS_GLOSS[status]}. Nenhuma ação manual é necessária — o
+        repasse avança automaticamente. Esta página reflete o novo estado ao ser
+        atualizada.
+      </p>
+    </div>
+  );
+}
+
+/** Terminal states — settled (`pago`) or released (`cancelado`). No actions. */
+function TerminalNote({ status }: { status: "pago" | "cancelado" }) {
+  const isPaid = status === "pago";
+  return (
+    <div
+      className={[
+        "flex items-start gap-3 rounded-md border px-5 py-4",
+        isPaid
+          ? "border-emerald-200 bg-emerald-50"
+          : "border-stone-300 bg-stone-100",
+      ].join(" ")}
+    >
+      <RepasseStatusPill status={status} />
+      <p
+        className={[
+          "text-[13px]",
+          isPaid ? "text-emerald-900" : "text-stone-600",
+        ].join(" ")}
+      >
+        {isPaid
+          ? "Transferência concluída — o valor foi enviado ao recebedor."
+          : "Repasse cancelado — os valores retornaram ao saldo do recebedor, que pode solicitar um novo resgate."}
+      </p>
+    </div>
   );
 }
 
@@ -220,7 +486,7 @@ function Headline({ repasse }: { repasse: RepasseDetail }) {
       <h3 className="text-xl font-semibold tracking-tight text-ink">
         {repasse.campanhaTitulo}
       </h3>
-      <StatusPill status={repasse.status} />
+      <RepasseStatusPill status={repasse.status} size="md" />
     </div>
   );
 }
@@ -286,6 +552,56 @@ function FactsGrid({ repasse }: { repasse: RepasseDetail }) {
           </code>
         ),
     },
+    // ── Inter transfer facts — shown only once the payout lifecycle has data
+    //    to show (spec §4.2). Absent for pre-transfer + manual `conta` rows. ──
+    ...(repasse.transferReferencia !== null
+      ? [
+          {
+            label: "referência transf.",
+            value: (
+              <code className="rounded bg-cream-2 px-1.5 py-0.5 font-mono text-[12px] text-ink">
+                {repasse.transferReferencia}
+              </code>
+            ),
+          },
+        ]
+      : []),
+    ...(repasse.interCodigoSolicitacao !== null
+      ? [
+          {
+            label: "cód. inter",
+            value: (
+              <code className="rounded bg-cream-2 px-1.5 py-0.5 font-mono text-[12px] text-ink">
+                {repasse.interCodigoSolicitacao}
+              </code>
+            ),
+          },
+        ]
+      : []),
+    ...(repasse.transferAttempts > 0
+      ? [
+          {
+            label: "tentativas",
+            value: (
+              <span className="font-mono text-[12px] tabular-nums text-ink-soft">
+                {repasse.transferAttempts}
+              </span>
+            ),
+          },
+        ]
+      : []),
+    ...(repasse.lastTransferError !== null
+      ? [
+          {
+            label: "último erro",
+            value: (
+              <span className="font-mono text-[12px] text-red-700">
+                {repasse.lastTransferError}
+              </span>
+            ),
+          },
+        ]
+      : []),
   ];
   return (
     <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-[max-content_1fr]">
@@ -612,39 +928,101 @@ function ModalFooter({
 }
 
 /* -----------------------------------------------------------------------
- * Status pill
+ * Cancelar modal — irreversible claim-release (spec §4.1)
  * --------------------------------------------------------------------- */
 
-function StatusPill({ status }: { status: RepasseStatus }) {
-  const palette =
-    status === "aprovado"
-      ? {
-          border: "border-emerald-200",
-          bg: "bg-emerald-50",
-          text: "text-emerald-800",
-          dot: "bg-emerald-500",
-        }
-      : {
-          border: "border-amber-200",
-          bg: "bg-amber-50",
-          text: "text-amber-800",
-          dot: "bg-amber-500",
-        };
+function ConfirmCancelarModal({
+  repasse,
+  onClose,
+  onSuccess,
+}: {
+  repasse: RepasseDetail;
+  onClose: () => void;
+  onSuccess: (result: CancelarMutationResult) => void;
+}) {
+  const cancelar = useStubRepasseCancelar(onSuccess);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   return (
-    <span
-      className={[
-        "inline-flex items-center gap-1.5 rounded-full border px-2 py-[3px] font-mono text-[10px] uppercase tracking-[0.12em]",
-        palette.border,
-        palette.bg,
-        palette.text,
-      ].join(" ")}
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Confirmar cancelamento de repasse"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
     >
-      <span
-        aria-hidden
-        className={`inline-block size-[6px] rounded-full ${palette.dot}`}
+      <button
+        type="button"
+        aria-label="Fechar"
+        onClick={onClose}
+        className="absolute inset-0 bg-ink/30 backdrop-blur-[1px]"
+        tabIndex={-1}
       />
-      {status}
-    </span>
+      <div className="relative flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-lg border border-red-200 bg-paper shadow-lg">
+        <div className="flex items-start justify-between gap-4 border-b border-red-200 bg-red-50 px-5 py-3">
+          <div className="min-w-0 space-y-1">
+            <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-red-700">
+              cancelar repasse
+            </p>
+            <p className="font-mono text-[13px] text-red-900">
+              Esta ação é irreversível
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Fechar modal"
+            className="-mr-2 -mt-1 rounded-md px-2 py-1 font-mono text-[16px] leading-none text-red-700 transition-colors hover:bg-paper"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
+          <p className="text-[13px] text-ink-soft">
+            Cancelar este repasse devolve{" "}
+            <span className="font-semibold text-ink">
+              {repasse.numLancamentos} lançamento
+              {repasse.numLancamentos === 1 ? "" : "s"}
+            </span>{" "}
+            ({formatBRL(repasse.amountCents)}) ao saldo do recebedor. O repasse
+            fica marcado como <span className="font-mono">cancelado</span> em
+            definitivo e{" "}
+            <span className="font-semibold text-ink">não pode ser retomado</span>
+            . O recebedor precisará solicitar um novo resgate.
+          </p>
+          <SummaryFacts repasse={repasse} />
+          {cancelar.error && (
+            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-800">
+              {cancelar.error.message}
+            </div>
+          )}
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t border-line bg-cream-2/30 px-5 py-3">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={cancelar.isPending}
+            className="rounded-md px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.14em] text-ink-soft hover:text-plum focus:outline-none focus:ring-2 focus:ring-lilac-soft disabled:opacity-50"
+          >
+            Voltar
+          </button>
+          <button
+            type="button"
+            onClick={() => cancelar.mutate({ idRepasse: repasse.idRepasse })}
+            disabled={cancelar.isPending}
+            className="inline-flex items-center gap-2 rounded-md border border-red-300 bg-red-50 px-4 py-1.5 font-mono text-[11px] uppercase tracking-[0.14em] text-red-800 transition-colors hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:opacity-50"
+          >
+            {cancelar.isPending ? "Cancelando…" : "Confirmar cancelamento"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
