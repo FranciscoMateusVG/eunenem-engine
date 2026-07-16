@@ -929,6 +929,120 @@ describe('LivroFinanceiroRepositoryPostgres — manual resolution (aperture-477n
     expect(manualRow?.requestSummary).toContain('resolucao_manual_falhou_por:admin@eunenem.com');
   });
 
+  // ── ADVERSARIAL (Izzy jguar verification pass, aperture-477nz) ──
+  // The sequential no-op tests above prove idempotency VIA the status
+  // transition. These prove the FOR UPDATE row-lock actually SERIALIZES true
+  // concurrent writers — the money-path concurrency guarantee that a
+  // sequential double-call cannot exercise.
+
+  it('CONCURRENT double resolverManualPago (two admins, same instant) → exactly ONE debit + ONE manual-pago audit row (FOR UPDATE serializes)', async () => {
+    const { idRepasse, idPagamento } = await seedVerificando();
+    await repo.flagNeedsManualResolutionTransaction({
+      idRepasse,
+      candidatos: [CANDIDATO],
+      agora: new Date('2026-07-16T12:05:00Z'),
+    });
+
+    // Two admins click "Pago" simultaneously. FOR UPDATE must serialize: one
+    // books pago, the other blocks, re-reads pago inside its txn → no-op.
+    const results = await Promise.allSettled([
+      repo.resolverManualPagoTransaction({
+        idRepasse,
+        interCodigoSolicitacao: CANDIDATO.codigoSolicitacao,
+        resolvidoPor: 'admin-a@eunenem.com',
+        agora: new Date('2026-07-16T12:10:00Z'),
+      }),
+      repo.resolverManualPagoTransaction({
+        idRepasse,
+        interCodigoSolicitacao: CANDIDATO.codigoSolicitacao,
+        resolvidoPor: 'admin-b@eunenem.com',
+        agora: new Date('2026-07-16T12:10:00Z'),
+      }),
+    ]);
+    // Neither errors; both resolve to pago (one booked, one saw-it-booked).
+    expect(results.every((r) => r.status === 'fulfilled')).toBe(true);
+
+    const repasse = await repo.findRepasseById(idRepasse);
+    expect(repasse?.status).toBe('pago');
+    expect(repasse?.needsManualResolution).toBe(false);
+
+    // THE invariant: exactly ONE debit stamp, exactly ONE manual-pago audit row.
+    const [linked] = await repo.findLancamentosByIdPagamento(idPagamento);
+    expect(linked?.transferidoEm).not.toBeNull();
+    const attempts = await repo.findTransferAttemptsByRepasseId(idRepasse);
+    const manualPagoRows = attempts.filter(
+      (a) => a.outcome === 'pago' && a.requestSummary?.includes('resolucao_manual_pago_por'),
+    );
+    expect(manualPagoRows).toHaveLength(1); // NOT two — the lock held
+  });
+
+  it('CONCURRENT resolverManualPago vs resolverManualFalhou (two admins disagree) → exactly ONE terminal outcome, never both', async () => {
+    const { idRepasse, idPagamento } = await seedVerificando();
+    await repo.flagNeedsManualResolutionTransaction({
+      idRepasse,
+      candidatos: [CANDIDATO],
+      agora: new Date('2026-07-16T12:05:00Z'),
+    });
+
+    // One admin books pago, another asserts falhou, at the same instant.
+    const settled = await Promise.allSettled([
+      repo.resolverManualPagoTransaction({
+        idRepasse,
+        interCodigoSolicitacao: CANDIDATO.codigoSolicitacao,
+        resolvidoPor: 'admin-a@eunenem.com',
+        agora: new Date('2026-07-16T12:10:00Z'),
+      }),
+      repo.resolverManualFalhouTransaction({
+        idRepasse,
+        erro: 'RESOLUCAO_MANUAL_FALHOU',
+        resolvidoPor: 'admin-b@eunenem.com',
+        agora: new Date('2026-07-16T12:10:00Z'),
+      }),
+    ]);
+    expect(settled.every((r) => r.status === 'fulfilled')).toBe(true);
+
+    // Settles in exactly ONE terminal state; the loser no-oped on re-read.
+    const repasse = await repo.findRepasseById(idRepasse);
+    expect(['pago', 'falhou']).toContain(repasse?.status);
+    expect(repasse?.needsManualResolution).toBe(false);
+
+    // Debit is consistent with the winner: pago stamps, falhou never does.
+    const [linked] = await repo.findLancamentosByIdPagamento(idPagamento);
+    if (repasse?.status === 'pago') {
+      expect(linked?.transferidoEm).not.toBeNull();
+    } else {
+      expect(linked?.transferidoEm).toBeNull();
+    }
+    // Exactly ONE manual-resolution audit row (the winner) — never two.
+    const attempts = await repo.findTransferAttemptsByRepasseId(idRepasse);
+    const manualRows = attempts.filter((a) => a.requestSummary?.includes('resolucao_manual'));
+    expect(manualRows).toHaveLength(1);
+  });
+
+  it('resolverManualPago on a ZERO-candidate flagged repasse (disarm-false exhaustion) books pago on the admin-supplied out-of-band codigo', async () => {
+    const { idRepasse, idPagamento } = await seedVerificando();
+    // The disarmed zero-candidate window-exhaustion flags with an EMPTY list;
+    // the admin later finds the payment out-of-band and supplies its codigo.
+    await repo.flagNeedsManualResolutionTransaction({
+      idRepasse,
+      candidatos: [],
+      agora: new Date('2026-07-16T12:05:00Z'),
+    });
+
+    const result = await repo.resolverManualPagoTransaction({
+      idRepasse,
+      interCodigoSolicitacao: 'inter_out_of_band_codigo',
+      resolvidoPor: 'admin@eunenem.com',
+      agora: new Date('2026-07-16T12:10:00Z'),
+    });
+    expect(result.repasse.status).toBe('pago');
+    expect(result.repasse.interCodigoSolicitacao).toBe('inter_out_of_band_codigo');
+    expect(result.repasse.needsManualResolution).toBe(false);
+
+    const [linked] = await repo.findLancamentosByIdPagamento(idPagamento);
+    expect(linked?.transferidoEm).not.toBeNull(); // single debit point still fires
+  });
+
   // ── DISARM BOUNDARY end-to-end (confirmar handler → real postgres) ──
   // THE load-bearing transition: at tentativa 12 the ~48h window is exhausted
   // with zero candidates. extratoVerified gates whether that becomes auto-falhou
