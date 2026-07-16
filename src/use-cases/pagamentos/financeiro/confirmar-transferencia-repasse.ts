@@ -1,7 +1,13 @@
 import { SpanStatusCode } from '@opentelemetry/api';
-import type { LivroFinanceiroRepository } from '../../../adapters/pagamentos/financeiro/livro-repository.js';
+import type {
+  LivroFinanceiroRepository,
+  RepasseReconciliacaoCandidato,
+} from '../../../adapters/pagamentos/financeiro/livro-repository.js';
 import type { RepasseJobEnqueuer } from '../../../adapters/pagamentos/transferencia-enqueuer.js';
-import type { TransferenciaProvider } from '../../../adapters/pagamentos/transferencia-provider.js';
+import type {
+  PagamentoEncontrado,
+  TransferenciaProvider,
+} from '../../../adapters/pagamentos/transferencia-provider.js';
 import type { IdRepasse } from '../../../domain/pagamentos/financeiro/value-objects/ids.js';
 import type { Observability } from '../../../observability/observability.js';
 
@@ -46,6 +52,18 @@ export interface ConfirmarTransferenciaRepasseDeps {
   readonly repasseJobEnqueuer: RepasseJobEnqueuer;
   readonly clock: () => Date;
   readonly observability: Observability;
+  /**
+   * aperture-477nz — has the Inter extrato/search response SHAPE been
+   * empirically verified against a real outbound PIX (a prod/sandbox smoke
+   * that fired a payment and confirmed buscarPagamentos finds it)? Until this
+   * is true the search path CANNOT be trusted to conclude "no payment exists"
+   * from zero candidates — a shape mismatch silently drops real rows. So while
+   * false, a zero-candidate window exhaustion escalates to needs-manual-
+   * resolution (a human decides) instead of auto-`falhou` (which would let an
+   * invisible-but-real payment be retried → double PIX). Sourced from
+   * INTER_EXTRATO_VERIFIED.
+   */
+  readonly extratoVerified: boolean;
 }
 
 export interface ConfirmarTransferenciaRepasseInput {
@@ -63,6 +81,7 @@ export async function confirmarTransferenciaRepasse(
     repasseJobEnqueuer,
     clock,
     observability,
+    extratoVerified,
   } = deps;
   const { logger, tracer } = observability;
   const { idRepasse, tentativaConfirmacao } = input;
@@ -94,39 +113,59 @@ export async function confirmarTransferenciaRepasse(
         const chave = recebedor?.metodo === 'pix' ? recebedor.chavePix : undefined;
         const janela = janelaBusca(repasse.aprovadoEm ?? repasse.solicitadoEm, agora);
         const encontrados = await transferenciaProvider.buscarPagamentos(janela);
-        // STRONG key: the stable per-repasse `referencia` we sent to Inter.
-        // Matching on valor alone can adopt an unrelated same-amount payment
-        // (falsely pago) or miss the real one (falsely falhou → double PIX on
-        // retry). Require referencia; keep valor + chave as extra guards.
-        const match = encontrados.find(
+        // NEVER auto-book pago from a search match (aperture-477nz). Inter
+        // exposes no reliable caller-supplied identifier in the extrato, so we
+        // cannot PROVE a found payment is OURS. Collect the plausibly-ours
+        // candidates (valor + chave) and hand the decision to an admin — a
+        // search match is never auto-resolved to pago.
+        const candidatos = encontrados.filter(
           (p) =>
-            p.referencia === repasse.transferReferencia &&
             p.valorCents === repasse.amountCents &&
             (p.chave === undefined || chave === undefined || p.chave === chave),
         );
-        if (match) {
-          codigo = match.codigoSolicitacao; // adopt, then poll precisely below
-        } else {
-          // Absence is only strong evidence AFTER the full ~48h escalation
-          // window — a PIX can lag in Inter's search index for minutes.
-          // Declaring falhou early (the old `>= 2` ≈ 2.5min) risks an
-          // in-flight payment → admin retry → second PIX. Only when the
-          // window is exhausted (next reschedule would exceed MAX) is
-          // sustained absence enough to declare falhou (safe to retry).
-          if (proximoDelayConfirmacao(tentativaConfirmacao + 1) === null) {
+        if (candidatos.length > 0) {
+          await livroFinanceiroRepository.flagNeedsManualResolutionTransaction({
+            idRepasse,
+            candidatos: candidatos.map(paraCandidato),
+            agora,
+          });
+          logger.warn('financeiro.repasse.confirmar.candidatos_manual', {
+            idRepasse,
+            candidatos: candidatos.length,
+          });
+          span.setStatus({ code: SpanStatusCode.OK });
+          return;
+        }
+
+        // ZERO candidates. This is only evidence of absence AFTER the full
+        // ~48h window — a PIX can lag in the extrato — AND only when the
+        // extrato SHAPE is empirically verified. A shape mismatch silently
+        // drops real rows, so an UNVERIFIED zero could be a real-but-invisible
+        // payment; auto-`falhou` there → admin retry → double PIX. Until
+        // INTER_EXTRATO_VERIFIED, a zero at window-exhaustion escalates to a
+        // human (needs-manual-resolution) instead of auto-falhou.
+        if (proximoDelayConfirmacao(tentativaConfirmacao + 1) === null) {
+          if (extratoVerified) {
             await livroFinanceiroRepository.resolverVerificacaoTransferencia({
               idRepasse,
               resultado: { tipo: 'falhou', erro: 'NAO_ENCONTRADO_NA_BUSCA' },
-              reconciliacaoResumo: `busca:sem_match;janela_esgotada;tentativa:${tentativaConfirmacao}`,
+              reconciliacaoResumo: `busca:sem_candidatos;janela_esgotada;tentativa:${tentativaConfirmacao}`,
               agora,
             });
-            logger.warn('financeiro.repasse.confirmar.sem_match_esgotado', { idRepasse });
-            span.setStatus({ code: SpanStatusCode.OK });
-            return;
+            logger.warn('financeiro.repasse.confirmar.sem_candidatos_falhou', { idRepasse });
+          } else {
+            await livroFinanceiroRepository.flagNeedsManualResolutionTransaction({
+              idRepasse,
+              candidatos: [],
+              agora,
+            });
+            logger.warn('financeiro.repasse.confirmar.sem_candidatos_manual', { idRepasse });
           }
-          await reagendar(repasseJobEnqueuer, idRepasse, tentativaConfirmacao, logger, span);
+          span.setStatus({ code: SpanStatusCode.OK });
           return;
         }
+        await reagendar(repasseJobEnqueuer, idRepasse, tentativaConfirmacao, logger, span);
+        return;
       }
 
       // Poll the (now-known) codigo for a precise status.
@@ -167,6 +206,29 @@ export async function confirmarTransferenciaRepasse(
       span.end();
     }
   });
+}
+
+/**
+ * Masks a PIX chave for at-rest persistence in the candidate list — the full
+ * chave is never stored (Cipher gate). Keeps just enough to be recognisable to
+ * an admin (first char + a hint of the tail).
+ */
+function maskChave(chave: string): string {
+  if (chave.length <= 4) {
+    return '***';
+  }
+  return `${chave.slice(0, 1)}***${chave.slice(-2)}`;
+}
+
+/** Maps a found Inter payment to a persisted candidate (chave masked at rest). */
+function paraCandidato(p: PagamentoEncontrado): RepasseReconciliacaoCandidato {
+  return {
+    codigoSolicitacao: p.codigoSolicitacao,
+    valorCents: p.valorCents,
+    dataMovimento: p.dataMovimento ?? null,
+    chaveMascarada: p.chave !== undefined ? maskChave(p.chave) : null,
+    descricaoPix: p.referencia !== '' ? p.referencia : null,
+  };
 }
 
 function janelaBusca(inicio: Date, fim: Date): { dataInicio: string; dataFim: string } {
