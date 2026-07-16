@@ -66,6 +66,7 @@ import {
   paginaSharePath,
   painelConvitePreviewHref,
 } from '../apps/eunenem-server/pages/lib/painelRoutes.js';
+import { seedGateWalker } from './gate-fixtures.js';
 
 const GATE_EMAIL = process.env.E2E_GATE_EMAIL;
 const GATE_SENHA = process.env.E2E_GATE_SENHA;
@@ -149,6 +150,10 @@ test.describe('slug / share-link isolation gate (aperture-al8c0 / fblrt #367)', 
   let campB: CampanhaCard; // pretty-slug 'gate-camp-b'
 
   test.beforeAll(async ({ browser, baseURL }) => {
+    // Hermetic seed (coverage-expansion): find-or-create the gate-walker +
+    // campanhas A/B directly in the DB so the login/self-heal below finds the
+    // full contract already correct on a fresh local DB. No-op when creds unset.
+    await seedGateWalker();
     expect(baseURL, 'baseURL must be configured').toBeTruthy();
     api = await pwRequest.newContext({ baseURL });
 

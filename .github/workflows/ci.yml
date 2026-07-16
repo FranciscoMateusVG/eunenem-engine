@@ -263,6 +263,15 @@ jobs:
     env:
       DATABASE_URL: postgresql://frame:frame@localhost:5432/frame
       E2E_DATABASE_URL: postgresql://frame:frame@localhost:5432/frame
+      # Hermetic gate-walker creds (aperture-sjydl). seedGateWalker() in the five
+      # gate specs' beforeAll is a NO-OP when these are unset — so the 39
+      # isolation/enforcement tests SKIPPED on every CI run, exercising zero
+      # isolation. Setting them here (plaintext, hermetic LOCAL-DB-only walker
+      # built directly through the engine's repos — never staging/prod) lights
+      # up all 39 to RUN + pass per PR. Same plaintext-in-ci.yml pattern as the
+      # incluir e2e-admin test-walker.
+      E2E_GATE_EMAIL: e2e-gate-walker@e2e.local
+      E2E_GATE_SENHA: senha-e2e-gate-walker-123
     steps:
       - uses: actions/checkout@v4
       # pnpm version comes from package.json `packageManager` (pnpm@10.33.0).
