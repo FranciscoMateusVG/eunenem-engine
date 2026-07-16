@@ -91,6 +91,12 @@ export default defineConfig({
             process.env.BETTER_AUTH_SECRET ?? 'e2e-test-secret-must-be-at-least-32-chars-long-ok',
           BETTER_AUTH_URL: process.env.BETTER_AUTH_URL ?? 'http://localhost:3002',
           TRUSTED_ORIGINS: process.env.TRUSTED_ORIGINS ?? 'http://localhost:3002',
+          // Admin allowlist (aperture-4n222) — pins the e2e admin fixture's
+          // fixed email so `auth.me.isAdmin` resolves true and the AdminShell
+          // gate (aperture-r5fg0) renders the real /admin chrome instead of
+          // bouncing to the landing page. MUST match ADMIN_EMAIL in
+          // e2e/fixtures.ts.
+          ADMIN_ALLOWED_EMAILS: process.env.ADMIN_ALLOWED_EMAILS ?? 'e2e-admin@e2e.local',
           // Optional Stripe vars stay empty — server falls back to fake adapter.
           STRIPE_SECRET_KEY: '',
           STRIPE_PUBLISHABLE_KEY: '',

@@ -7,8 +7,11 @@
  * one ItemContribuicaoRow per item — each showing the contribuição name, and a
  * `× N` quantidade chip for items with quantidade > 1.
  *
- * Admin routes have NO auth gate ("v1 has NO auth gate. Anyone with the URL
- * gets in."), so this uses the default anonymous `page` fixture — no login.
+ * Admin routes are gated by the AdminShell UX auth gate (aperture-r5fg0):
+ * a non-admin visitor is bounced to the landing page. This uses the
+ * `adminAuthenticatedPage` fixture (allowlisted admin session) so the real
+ * pagamento chrome renders. The backend `adminProcedure` (aperture-4n222) is
+ * the real security boundary.
  *
  * Seeds via the seedMultiItemApprovedPagamento helper (NEW/UNPROVEN). If the
  * seed throws, the test fails with the helper's error + stack — we do NOT work
@@ -26,7 +29,7 @@ const DATABASE_URL =
 
 test.describe('Admin pagamento detail — multi-item card', () => {
   test('renders the multi-item PagamentoCard with each contribuição item row', async ({
-    page,
+    adminAuthenticatedPage: page,
     seededData,
   }) => {
     const suffix = randomUUID().slice(0, 8);
@@ -51,7 +54,7 @@ test.describe('Admin pagamento detail — multi-item card', () => {
       await db.destroy();
     }
 
-    // Anonymous admin view of the pagamento detail page.
+    // Admin view of the pagamento detail page (allowlisted admin session).
     await page.goto(`/admin/pagamento/${pagamentoId}`);
 
     // The PagamentoCard renders inside an <article>.
