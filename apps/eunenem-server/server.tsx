@@ -11,8 +11,10 @@ import {
   executarTransferenciaRepasse,
   REPASSE_CONFIRMAR_QUEUE,
   REPASSE_EXECUTAR_QUEUE,
+  REPASSE_SWEEP_VERIFICANDO_QUEUE,
   type RepasseConfirmarJobData,
   type RepasseExecutarJobData,
+  varrerRepassesVerificandoOrfaos,
 } from '../../src/index.js';
 import { renderToString } from 'react-dom/server';
 import { App, resolveRoute } from './pages/App.js';
@@ -67,7 +69,20 @@ try {
     },
   );
 
-  console.log('✅ pg-boss repasse workers registered (executar + confirmar)');
+  // aperture-taacl — orphaned-verificando sweeper. A pg-boss cron schedule
+  // lands one job on this queue every 5 minutes; the worker re-arms any
+  // repasse stuck in verificando with no pending confirmar job (a confirmar
+  // enqueue lost to a crash in the non-atomic window). Money-safe + idempotent
+  // (confirmar never pays and no-ops on a non-verificando repasse).
+  await deps.boss.createQueue(REPASSE_SWEEP_VERIFICANDO_QUEUE);
+  await deps.boss.work(REPASSE_SWEEP_VERIFICANDO_QUEUE, async () => {
+    await varrerRepassesVerificandoOrfaos(deps);
+  });
+  await deps.boss.schedule(REPASSE_SWEEP_VERIFICANDO_QUEUE, '*/5 * * * *');
+
+  console.log(
+    '✅ pg-boss repasse workers registered (executar + confirmar + verificando-sweeper)',
+  );
 } catch (err) {
   console.error('❌ Failed to start pg-boss repasse workers:', err);
   throw err;

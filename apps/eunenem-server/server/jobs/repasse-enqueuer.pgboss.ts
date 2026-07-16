@@ -1,5 +1,7 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
+import { type Kysely, sql } from 'kysely';
 import type { Db, PgBoss } from 'pg-boss';
+import type { Database } from '../../../../src/adapters/database.js';
 import type { RepasseTransactionExecutor } from '../../../../src/adapters/pagamentos/financeiro/livro-repository.js';
 import {
   REPASSE_CONFIRMAR_QUEUE,
@@ -65,7 +67,14 @@ function toPgBossDb(executor: RepasseTransactionExecutor): Db {
  * the shared `PgBoss` instance is started/stopped by the composition root.
  */
 export class RepasseJobEnqueuerPgBoss implements RepasseJobEnqueuer {
-  constructor(private readonly boss: PgBoss) {}
+  /**
+   * `db` shares the same Kysely instance / pool as the domain repos — used only
+   * to introspect the pg-boss job table for {@link hasPendingConfirmar}.
+   */
+  constructor(
+    private readonly boss: PgBoss,
+    private readonly db: Database,
+  ) {}
 
   /**
    * Transactional enqueue: the job INSERT rides `executor`'s transaction via
@@ -140,5 +149,46 @@ export class RepasseJobEnqueuerPgBoss implements RepasseJobEnqueuer {
         }
       },
     );
+  }
+
+  /**
+   * aperture-taacl — true iff a NOT-yet-terminal confirmar job exists for this
+   * repasse. pg-boss v12 job states: created / retry / active are pending (job
+   * will still run or is running); completed / cancelled / failed are terminal.
+   * The sweeper re-enqueues confirmar only when this is false (the enqueue was
+   * lost) — a healthy repasse mid-escalation always has a `created` job with a
+   * future `start_after`.
+   */
+  hasPendingConfirmar(idRepasse: string): Promise<boolean> {
+    return tracer.startActiveSpan('repasse.has_pending_confirmar', async (span) => {
+      span.setAttribute('repasse.id', idRepasse);
+      try {
+        // `this.db` is the engine's Kysely (root package); `sql` here resolves
+        // to the app package's Kysely. They differ only at the patch level and
+        // are runtime-compatible, but the dual-package types don't unify — cast
+        // at this single execute boundary (same pattern as the postgres repos'
+        // `this.db as any` raw ops).
+        const result = await sql<{ exists: boolean }>`
+          SELECT EXISTS (
+            SELECT 1 FROM pgboss.job
+            WHERE name = ${REPASSE_CONFIRMAR_QUEUE}
+              AND data->>'idRepasse' = ${idRepasse}
+              AND state IN ('created', 'retry', 'active')
+          ) AS exists
+        `.execute(this.db as unknown as Kysely<unknown>);
+        const pending = result.rows[0]?.exists ?? false;
+        span.setAttribute('repasse.has_pending_confirmar', pending);
+        span.setStatus({ code: SpanStatusCode.OK });
+        return pending;
+      } catch (err) {
+        span.setStatus({
+          code: SpanStatusCode.ERROR,
+          message: err instanceof Error ? err.message : 'query failed',
+        });
+        throw err;
+      } finally {
+        span.end();
+      }
+    });
   }
 }

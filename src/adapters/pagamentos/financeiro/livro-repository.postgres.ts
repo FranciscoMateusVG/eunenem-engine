@@ -471,6 +471,46 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
     });
   }
 
+  async findVerificandoRepassesMaisVelhasQue(input: {
+    readonly agora: Date;
+    readonly minIdadeMinutos: number;
+  }): Promise<readonly IdRepasse[]> {
+    return tracer.startActiveSpan(
+      'db.financeiro_livro.repasses.findVerificandoOrfaos',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+        try {
+          const cutoff = new Date(input.agora.getTime() - input.minIdadeMinutos * 60_000);
+          // "Entered verificando" = the newest repasse_transfer_attempts row
+          // with outcome='verificando' for this repasse. A row whose most-recent
+          // verificando transition is older than the cutoff is a candidate. A
+          // repasse with no such attempt row (should never happen) yields NULL
+          // and is conservatively excluded (we never sweep what we can't age).
+          const result = await sql<{ id: string }>`
+            SELECT r.id
+              FROM repasses_recebedor r
+              WHERE r.status = 'verificando'
+                AND (
+                  SELECT MAX(a.finished_at)
+                    FROM repasse_transfer_attempts a
+                    WHERE a.repasse_id = r.id AND a.outcome = 'verificando'
+                ) < ${cutoff}
+          `.execute(this.db);
+          const ids = result.rows.map((row) => row.id as IdRepasse);
+          span.setAttribute('financeiro.repasse.orfaos_encontrados', ids.length);
+          span.setStatus({ code: SpanStatusCode.OK });
+          return ids;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
   /**
    * aperture-riywh. Admin-facing cursor-paginated browse. Cursor
    * encodes `(solicitadoEm-ms):(id)` for stable DESC sort.

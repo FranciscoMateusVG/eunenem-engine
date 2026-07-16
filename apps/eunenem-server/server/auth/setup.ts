@@ -800,7 +800,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
   // by the composition root in server.tsx. The enqueuer adapter rides this
   // exact instance so the transactional enqueue path works.
   const boss = new PgBoss(env.DATABASE_URL);
-  const repasseJobEnqueuer = new RepasseJobEnqueuerPgBoss(boss);
+  const repasseJobEnqueuer = new RepasseJobEnqueuerPgBoss(boss, db);
 
   // Transfer rail DI. Mirrors the pagamentoProvider fake-vs-real gate above.
   // 'inter' binds the real Banco Inter PIX adapter (aperture-ju5w2); the env

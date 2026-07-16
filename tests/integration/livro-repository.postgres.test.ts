@@ -1096,3 +1096,104 @@ describe('LivroFinanceiroRepositoryPostgres — manual resolution (aperture-477n
     expect(linked?.transferidoEm).toBeNull();
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+//  aperture-taacl — orphaned-verificando sweeper query (pg-backed)
+//
+//  findVerificandoRepassesMaisVelhasQue joins repasses_recebedor to the newest
+//  repasse_transfer_attempts row with outcome='verificando' (its finished_at =
+//  the moment the FSM committed verificando) and returns rows older than the
+//  age gate. Exercises the real correlated-subquery + timestamp arithmetic.
+// ─────────────────────────────────────────────────────────────────────
+describe('LivroFinanceiroRepositoryPostgres — verificando sweeper query (aperture-taacl)', () => {
+  let repo: LivroFinanceiroRepositoryPostgres;
+
+  beforeEach(async () => {
+    // biome-ignore lint/suspicious/noExplicitAny: tables not yet in generated types
+    await (testDb.db as any).deleteFrom('repasse_reconciliacao_candidatos').execute();
+    // biome-ignore lint/suspicious/noExplicitAny: tables not yet in generated types
+    await (testDb.db as any).deleteFrom('repasse_transfer_attempts').execute();
+    // biome-ignore lint/suspicious/noExplicitAny: tables not yet in generated types
+    await (testDb.db as any).deleteFrom('lancamentos_financeiros').execute();
+    // biome-ignore lint/suspicious/noExplicitAny: tables not yet in generated types
+    await (testDb.db as any).deleteFrom('repasses_recebedor').execute();
+    repo = withLancamentoSeeding(new LivroFinanceiroRepositoryPostgres(testDb.db), testDb.db);
+  });
+
+  /** Drive a repasse to verificando, committing the transition at `entrouEm`. */
+  async function seedVerificandoAt(entrouEm: Date): Promise<IdRepasse> {
+    const idCampanha = randomUUID() as IdCampanha;
+    const repasse = makeRepasse({ idCampanha, amountCents: 5000, status: 'solicitado' });
+    await repo.saveRepasse(repasse);
+    await repo.saveLancamentos([
+      makeLancamentoRecebedor({ idCampanha, amountCents: 5000, idRepasse: repasse.id }),
+    ]);
+    await repo.aprovarRepassePixTransaction(
+      {
+        idRepasse: repasse.id,
+        aprovadoEm: entrouEm,
+        transferReferencia: `EN${String(repasse.id).replace(/-/g, '')}`,
+      },
+      async () => {},
+    );
+    const ini = await repo.iniciarTransferenciaTransaction({
+      idRepasse: repasse.id,
+      requestSummary: 'seed',
+      agora: entrouEm,
+    });
+    await repo.finalizarTentativaTransferencia({
+      idRepasse: repasse.id,
+      attemptId: ini.attemptId,
+      resultado: { tipo: 'verificando', codigoSolicitacao: null },
+      agora: entrouEm, // repasse_transfer_attempts.finished_at
+    });
+    return repasse.id;
+  }
+
+  const T_ENTROU = new Date('2026-07-16T10:00:00Z');
+  const T_AGORA = new Date('2026-07-16T10:20:00Z'); // 20 min later
+
+  it('returns a verificando repasse whose transition is older than the age gate', async () => {
+    const idRepasse = await seedVerificandoAt(T_ENTROU);
+    const ids = await repo.findVerificandoRepassesMaisVelhasQue({
+      agora: T_AGORA,
+      minIdadeMinutos: 10,
+    });
+    expect(ids).toEqual([idRepasse]);
+  });
+
+  it('excludes a verificando repasse younger than the age gate', async () => {
+    // entered only 5 min before agora — inside a 10-min gate.
+    await seedVerificandoAt(new Date(T_AGORA.getTime() - 5 * 60_000));
+    const ids = await repo.findVerificandoRepassesMaisVelhasQue({
+      agora: T_AGORA,
+      minIdadeMinutos: 10,
+    });
+    expect(ids).toHaveLength(0);
+  });
+
+  it('excludes a repasse that already left verificando (resolved to pago)', async () => {
+    const idRepasse = await seedVerificandoAt(T_ENTROU);
+    await repo.resolverVerificacaoTransferencia({
+      idRepasse,
+      resultado: { tipo: 'pago', codigoSolicitacao: 'inter_ok' },
+      reconciliacaoResumo: 'consulta:pago',
+      agora: new Date('2026-07-16T10:05:00Z'),
+    });
+    const ids = await repo.findVerificandoRepassesMaisVelhasQue({
+      agora: T_AGORA,
+      minIdadeMinutos: 10,
+    });
+    expect(ids).toHaveLength(0);
+  });
+
+  it('returns only the stale verificando rows among a mixed set', async () => {
+    const stale = await seedVerificandoAt(T_ENTROU); // 20 min old → included
+    await seedVerificandoAt(new Date(T_AGORA.getTime() - 3 * 60_000)); // 3 min → excluded
+    const ids = await repo.findVerificandoRepassesMaisVelhasQue({
+      agora: T_AGORA,
+      minIdadeMinutos: 10,
+    });
+    expect(ids).toEqual([stale]);
+  });
+});

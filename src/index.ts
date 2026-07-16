@@ -69,6 +69,7 @@ export { PagamentoRepositoryPostgres } from './adapters/pagamentos/repository.po
 export {
   REPASSE_CONFIRMAR_QUEUE,
   REPASSE_EXECUTAR_QUEUE,
+  REPASSE_SWEEP_VERIFICANDO_QUEUE,
   type RepasseConfirmarJobData,
   type RepasseExecutarJobData,
   type RepasseJobEnqueuer,
@@ -1119,6 +1120,16 @@ export {
   SolicitarRepasseRecebedorInputSchema,
   solicitarRepasseRecebedor,
 } from './use-cases/pagamentos/financeiro/solicitar-repasse-recebedor.js';
+// aperture-taacl — orphaned-verificando sweeper.
+export type {
+  VarrerRepassesVerificandoOrfaosDeps,
+  VarrerRepassesVerificandoOrfaosInput,
+  VarrerRepassesVerificandoOrfaosOutput,
+} from './use-cases/pagamentos/financeiro/varrer-repasses-verificando-orfaos.js';
+export {
+  SWEEP_MIN_IDADE_MINUTOS_DEFAULT,
+  varrerRepassesVerificandoOrfaos,
+} from './use-cases/pagamentos/financeiro/varrer-repasses-verificando-orfaos.js';
 export type {
   MarcarRecadoComoLidoDeps,
   MarcarRecadoComoLidoResult,

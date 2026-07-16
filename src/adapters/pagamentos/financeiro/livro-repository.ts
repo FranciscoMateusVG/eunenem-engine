@@ -88,6 +88,21 @@ export interface LivroFinanceiroRepository {
   findRepasseById(idRepasse: IdRepasse): Promise<RepasseRecebedor | undefined>;
   findRepassesByIdCampanha(idCampanha: IdCampanha): Promise<readonly RepasseRecebedor[]>;
   /**
+   * aperture-taacl — repasses stuck in `verificando` whose transition into
+   * that state committed more than `minIdadeMinutos` ago. The orphaned-
+   * verificando sweeper uses this to find candidates whose non-atomic
+   * confirmar enqueue may have been lost (crash between the FSM commit and the
+   * enqueue). "Entered verificando" is the newest `repasse_transfer_attempts`
+   * row with `outcome='verificando'` (its `finished_at`); the age gate avoids
+   * racing a just-committed verificando whose enqueue is milliseconds away.
+   * Returns only the ids — the sweeper checks each against the job queue
+   * (enqueuer.hasPendingConfirmar) before re-enqueuing.
+   */
+  findVerificandoRepassesMaisVelhasQue(input: {
+    readonly agora: Date;
+    readonly minIdadeMinutos: number;
+  }): Promise<readonly IdRepasse[]>;
+  /**
    * aperture-riywh. Admin-facing paginated browse across ALL campanhas.
    * Filters by `statusFilter` (solicitado | aprovado | all); the default
    * filter used by the admin UI is 'solicitado' (the action queue).

@@ -383,6 +383,44 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
     });
   }
 
+  async findVerificandoRepassesMaisVelhasQue(input: {
+    readonly agora: Date;
+    readonly minIdadeMinutos: number;
+  }): Promise<readonly IdRepasse[]> {
+    return tracer.startActiveSpan(
+      'db.financeiro_livro.repasses.findVerificandoOrfaos',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+        try {
+          const cutoff = new Date(input.agora.getTime() - input.minIdadeMinutos * 60_000);
+          const ids = [...this.repasses.values()]
+            .filter((r) => r.status === 'verificando')
+            .filter((r) => {
+              // Newest verificando-transition timestamp for this repasse.
+              const enteredVerificando = this.repasseTransferAttempts
+                .filter((a) => a.repasseId === r.id && a.outcome === 'verificando' && a.finishedAt)
+                .reduce<Date | null>(
+                  (max, a) =>
+                    max === null || (a.finishedAt as Date) > max ? (a.finishedAt as Date) : max,
+                  null,
+                );
+              // No verificando attempt row → conservatively excluded (as in SQL).
+              return enteredVerificando !== null && enteredVerificando < cutoff;
+            })
+            .map((r) => r.id);
+          span.setStatus({ code: SpanStatusCode.OK });
+          return ids;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
   /**
    * aperture-riywh. Cursor-paginated admin browse. Cursor encodes the
    * (solicitadoEm-iso, id) of the last row of the previous page; we
