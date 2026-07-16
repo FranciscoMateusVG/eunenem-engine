@@ -39,19 +39,19 @@ function signStripePayload(rawBody: string, secret: string): string {
 }
 
 test.describe('Stripe webhook — checkout.session.completed (cartão)', () => {
-  // KNOWN BLOCKER (test.fixme): the card finalizarPagamentoAprovado path
-  // requires a non-null intencao.balanceTransactionAvailableOn to build the
-  // financeiro lançamento. In prod that's resolved from the real payment-intent
-  // balance transaction; criarPagamentoPendente hardcodes it to null and there
-  // is no seed-level setter, so a minimal pendente seed makes the dispatch
-  // throw → webhook 500. Unblocking this needs either a stubbed
-  // pagamentoProvider.obterAvailableOnDoPaymentIntent on the :3003 server or a
-  // seed path that sets balanceTransactionAvailableOn. The PIX sibling
-  // (stripe-webhook-pix.spec.ts) proves the webhook resolution + signature +
-  // status-advance path end-to-end, and the card cs.completed→aprovado FSM is
-  // covered at the unit tier (tests/unit/phase3-dispatcher.test.ts). Tracked as
-  // a follow-up; verified the signature + seed wiring are correct (the 500 is
-  // strictly the available_on/financeiro requirement, not the webhook harness).
+  // STILL BLOCKED — partial groundwork landed (aperture-44mfy), root cause
+  // re-diagnosed. seedPendentePagamento now takes balanceTransactionAvailableOn
+  // and it DOES persist (verified: intencao_balance_transaction_available_on
+  // non-null in the DB), but the card webhook still 500s. Verified against a
+  // live :3003 server: PIX green, cartão 500 AFTER contribuinte_stamped. The
+  // 500 originates inside finalizarPagamentoAprovado's provider interaction —
+  // the 'paid' branch omits payment_intent (to skip obterAvailableOnDoPaymentIntent),
+  // but finalize still reaches pagamentoProvider with a dummy Stripe key and
+  // throws building the financeiro lançamento. Needs a backend fix: either a
+  // stubbed pagamentoProvider on :3003 or finalize preferring the persisted
+  // balanceTransactionAvailableOn over a provider lookup. Routed to Rex.
+  // (PIX sibling proves the webhook resolution + signature + status-advance
+  // path e2e; card cs.completed→aprovado FSM is covered at the unit tier.)
   test.fixme('paid card session advances the pendente pagamento to aprovado (200, no 500)', async ({
     request,
     seededData,
@@ -70,6 +70,9 @@ test.describe('Stripe webhook — checkout.session.completed (cartão)', () => {
         valorCents: 5000,
         metodo: 'credit_card',
         externalRef,
+        // Card finalize builds a financeiro lançamento off this — seed it
+        // non-null so the dispatch reaches 'aprovado' instead of throwing.
+        balanceTransactionAvailableOn: new Date(),
       });
       pagamentoId = seeded.pagamentoId;
     } finally {
