@@ -82,6 +82,13 @@ const STRIPE_ENV_3003: Record<string, string> = {
   STRIPE_SECRET_KEY: process.env.E2E_STRIPE_SECRET_KEY ?? 'sk_test_dummy_e2e',
   STRIPE_WEBHOOK_SECRET:
     process.env.E2E_STRIPE_WEBHOOK_SECRET ?? 'whsec_test_e2e_secret_for_signing_0000',
+  // aperture-07x5c: the dummy STRIPE_SECRET_KEY above unblocks getStripe() for
+  // pure-HMAC webhook signature verification (constructEvent), but would flip DI
+  // to the real Stripe provider whose solicitarPagamento re-retrieves the
+  // Checkout Session over the API and 500s without a live account. This seam
+  // forces the deterministic fake provider while keeping verification real.
+  // Hard-disabled when NODE_ENV=production (setup.ts superRefine rejects it).
+  E2E_FAKE_PAGAMENTO_PROVIDER: '1',
 };
 
 export default defineConfig({

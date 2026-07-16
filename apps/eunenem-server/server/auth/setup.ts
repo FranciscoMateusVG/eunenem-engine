@@ -288,6 +288,18 @@ const ServerEnvSchema = z
     STRIPE_SECRET_KEY: z.string().default(''),
     STRIPE_WEBHOOK_SECRET: z.string().default(''),
     /**
+     * TEST-ONLY DI seam (aperture-07x5c). When '1', binds the deterministic
+     * PagamentoProviderFake even though STRIPE_SECRET_KEY is set. This lets a
+     * test server (the e2e :3003 webhook server) keep getStripe() alive for
+     * webhook signature verification — `getStripe().webhooks.constructEvent`
+     * is pure local HMAC, needs a dummy key, makes no API call — while
+     * stubbing the settlement round-trip (`solicitarPagamento` re-retrieves
+     * the Checkout Session via the Stripe API, which cannot work without a
+     * live account). HARD-DISABLED in production by the superRefine below, so
+     * it can never silently down-grade the real provider on a prod deploy.
+     */
+    E2E_FAKE_PAGAMENTO_PROVIDER: z.string().default(''),
+    /**
      * Trusted reverse-proxy hop count (aperture-uc2ix). Default 0 for
      * dev (no proxy in front of localhost:3001). Prod MUST set this
      * to 1+ matching deploy topology — see ServerDeps.trustedHopCount.
@@ -393,6 +405,14 @@ const ServerEnvSchema = z
           path: ['TRUSTED_HOP_COUNT'],
           message:
             'TRUSTED_HOP_COUNT must be ≥1 in production (set to the number of trusted reverse-proxy hops; rate-limit + audit log accuracy depends on it).',
+        });
+      }
+      if (env.E2E_FAKE_PAGAMENTO_PROVIDER.length > 0) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['E2E_FAKE_PAGAMENTO_PROVIDER'],
+          message:
+            'E2E_FAKE_PAGAMENTO_PROVIDER must NOT be set in production — it is a test-only DI seam that stubs the real Stripe payment provider (aperture-07x5c).',
         });
       }
     }
@@ -637,14 +657,24 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
   // Production safety is preserved by the env-schema superRefine above:
   // NODE_ENV=production STILL requires STRIPE_SECRET_KEY (and prevents
   // the empty-string branch from firing in prod).
-  if (env.STRIPE_SECRET_KEY.length > 0) {
+  // aperture-07x5c: test-only seam. The e2e :3003 webhook server sets a dummy
+  // STRIPE_SECRET_KEY (so getStripe() can do local HMAC signature verification)
+  // but has no live Stripe account, so the settlement round-trip in
+  // solicitarPagamento (checkout.sessions.retrieve) would 500. This flag forces
+  // the deterministic fake provider in that case. Hard-guarded to non-prod:
+  // the superRefine above rejects the flag when NODE_ENV === 'production', and
+  // this NODE_ENV check is the belt to that suspenders.
+  const useFakeProviderSeam =
+    env.NODE_ENV !== 'production' && env.E2E_FAKE_PAGAMENTO_PROVIDER === '1';
+  if (env.STRIPE_SECRET_KEY.length > 0 && !useFakeProviderSeam) {
     const stripeAdapter = new PagamentoProviderStripe({ stripe: getStripe() });
     pagamentoProvider = stripeAdapter;
     checkoutSessionProvider = stripeAdapter;
   } else {
-    // Fresh-clone / unconfigured-dev fallback: deterministic fake. No
-    // network, no real Stripe account needed. Drop test-mode keys into
-    // .env to flip to the real adapter automatically on next boot.
+    // Fresh-clone / unconfigured-dev fallback OR the test-only fake-provider
+    // seam: deterministic fake. No network, no real Stripe account needed.
+    // Drop test-mode keys into .env to flip to the real adapter automatically
+    // on next boot.
     const fakeAdapter = new PagamentoProviderFake();
     pagamentoProvider = fakeAdapter;
     checkoutSessionProvider = fakeAdapter;

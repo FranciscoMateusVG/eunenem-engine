@@ -241,6 +241,14 @@ export async function seedPendentePagamento(
     readonly metodo: 'pix' | 'credit_card';
     readonly externalRef: string;
     readonly quantidade?: number;
+    /**
+     * Seed a non-null intencao.balanceTransactionAvailableOn. The card
+     * finalizarPagamentoAprovado path needs this to build the financeiro
+     * lançamento; in prod the dispatcher resolves it from the payment-intent
+     * balance transaction, but criarPagamentoPendente always starts it null.
+     * Pass a date to unblock the cartão webhook e2e (aperture-44mfy).
+     */
+    readonly balanceTransactionAvailableOn?: Date;
   },
 ): Promise<SeedPendenteResult> {
   const q = opts.quantidade ?? 1;
@@ -287,7 +295,18 @@ export async function seedPendentePagamento(
     externalRef: opts.externalRef,
     criadoEm: new Date(),
   });
+  // Optionally seed a non-null balanceTransactionAvailableOn (nested under
+  // intencao) so the card finalize path can build its financeiro lançamento.
+  const pagamentoToSave = opts.balanceTransactionAvailableOn
+    ? {
+        ...pagamento,
+        intencao: {
+          ...pagamento.intencao,
+          balanceTransactionAvailableOn: opts.balanceTransactionAvailableOn,
+        },
+      }
+    : pagamento;
   // Stays pendente — the webhook advances it.
-  await repos.pagamentoRepository.save(pagamento);
+  await repos.pagamentoRepository.save(pagamentoToSave);
   return { pagamentoId, externalRef: opts.externalRef, idContribuicao };
 }
