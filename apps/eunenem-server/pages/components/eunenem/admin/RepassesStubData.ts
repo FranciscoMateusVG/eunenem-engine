@@ -30,7 +30,17 @@ import { trpc } from "@/lib/trpc.js";
 // avoids pulling server-only deps via the router file path into the frontend
 // bundle. Shapes match `admin-router.ts` lines 1179-1206 verbatim.
 
-export type RepasseStatus = "solicitado" | "aprovado";
+// aperture-vvh2j (Rex) — widened to the full 7-state transfer FSM so the
+// list/show procs' real DTOs assign cleanly. Vance owns the UI-side type
+// enrichment (the 4 transfer fields + attempts[]) in aperture-voao0.
+export type RepasseStatus =
+  | "solicitado"
+  | "aprovado"
+  | "transferindo"
+  | "verificando"
+  | "pago"
+  | "falhou"
+  | "cancelado";
 
 export type RepasseListRow = {
   idRepasse: string;

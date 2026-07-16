@@ -54,11 +54,16 @@ import {
   REGRAS_TAXA_SEED,
   type RecebedorRepository,
   RecebedorRepositoryPostgres,
+  type RepasseJobEnqueuer,
+  type TransferenciaProvider,
+  TransferenciaProviderFake,
   UsuarioRepositoryPostgres,
   type UsuarioRepository,
 } from '../../../../src/index.js';
+import { PgBoss } from 'pg-boss';
 import { renderMagicLinkEmail } from './magic-link-email.js';
 import { parseAdminAllowedEmails } from './admin-allowlist.js';
+import { RepasseJobEnqueuerPgBoss } from '../jobs/repasse-enqueuer.pgboss.js';
 import { noopTracer } from '../../../../src/observability/tracer.js';
 import { getStripe } from '../../src/lib/stripe/stripe.js';
 
@@ -191,6 +196,22 @@ export interface ServerDeps {
    * upload fails loudly). NOT a domain concept — infrastructure boundary.
    */
   readonly objectStorage: ObjectStorage;
+  /**
+   * aperture-vvh2j — automated PIX repasse infrastructure.
+   *
+   * `boss` is the shared pg-boss instance (backed by DATABASE_URL). Its
+   * lifecycle (start/createQueue/work/stop) is owned by the composition root
+   * in server.tsx — buildServerDeps only constructs it. The
+   * `repasseJobEnqueuer` (pg-boss adapter) rides the SAME instance so the
+   * transactional enqueue (job INSERT on the FSM-write's connection) works.
+   * `transferenciaProvider` is the PIX transfer rail: the deterministic fake
+   * in dev/staging, and the real Inter adapter in prod once aperture-ju5w2
+   * lands (today `'inter'` is boot-guarded to throw). All three are shared
+   * singletons — no per-request state.
+   */
+  readonly boss: PgBoss;
+  readonly repasseJobEnqueuer: RepasseJobEnqueuer;
+  readonly transferenciaProvider: TransferenciaProvider;
 }
 
 /**
@@ -299,6 +320,16 @@ const ServerEnvSchema = z
      * it can never silently down-grade the real provider on a prod deploy.
      */
     E2E_FAKE_PAGAMENTO_PROVIDER: z.string().default(''),
+    /**
+     * aperture-vvh2j — automated PIX repasse rail selector. `'fake'` (default)
+     * binds the deterministic in-process TransferenciaProviderFake; `'inter'`
+     * selects the real Banco Inter PIX transfer adapter. The real adapter does
+     * NOT exist yet (aperture-ju5w2) — until it lands, `'inter'` throws at boot
+     * (see the buildServerDeps boot guard). Additionally hard-gated by the
+     * superRefine below: `'inter'` is ONLY permitted when NODE_ENV==='production'
+     * so a staging/dev deploy can NEVER structurally fire a real money transfer.
+     */
+    TRANSFERENCIA_PROVIDER: z.enum(['fake', 'inter']).default('fake'),
     /**
      * Trusted reverse-proxy hop count (aperture-uc2ix). Default 0 for
      * dev (no proxy in front of localhost:3001). Prod MUST set this
@@ -415,6 +446,17 @@ const ServerEnvSchema = z
             'E2E_FAKE_PAGAMENTO_PROVIDER must NOT be set in production — it is a test-only DI seam that stubs the real Stripe payment provider (aperture-07x5c).',
         });
       }
+    }
+    // aperture-vvh2j — the real Inter PIX transfer rail may ONLY be selected
+    // in production. A staging/dev deploy selecting 'inter' is a
+    // structural error: it must never be able to fire a real money transfer.
+    if (env.TRANSFERENCIA_PROVIDER === 'inter' && env.NODE_ENV !== 'production') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['TRANSFERENCIA_PROVIDER'],
+        message:
+          "TRANSFERENCIA_PROVIDER='inter' is only allowed when NODE_ENV==='production' — staging/dev must never select the real PIX transfer rail (aperture-vvh2j).",
+      });
     }
   });
 
@@ -686,6 +728,32 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
   // Silence the "unused import" complaint if we ever drop REGRAS_TAXA_SEED above.
   void REGRAS_TAXA_SEED;
 
+  // aperture-vvh2j — automated PIX repasse infrastructure.
+  //
+  // Shared pg-boss instance on the same Postgres (DATABASE_URL). We only
+  // CONSTRUCT it here; its lifecycle (start/createQueue/work/stop) is owned
+  // by the composition root in server.tsx. The enqueuer adapter rides this
+  // exact instance so the transactional enqueue path works.
+  const boss = new PgBoss(env.DATABASE_URL);
+  const repasseJobEnqueuer = new RepasseJobEnqueuerPgBoss(boss);
+
+  // Transfer rail DI. Mirrors the pagamentoProvider fake-vs-real gate above,
+  // but with a HARDER posture: the real 'inter' adapter does not exist yet
+  // (aperture-ju5w2), so selecting it throws at boot rather than half-wiring
+  // a broken rail. Combined with the env superRefine (which only permits
+  // 'inter' when NODE_ENV==='production'), staging/dev is STRUCTURALLY unable
+  // to fire a real money transfer — this is the boot guard.
+  let transferenciaProvider: TransferenciaProvider;
+  if (env.TRANSFERENCIA_PROVIDER === 'inter') {
+    // TODO(aperture-ju5w2): swap in `new TransferenciaProviderInter(...)` here
+    // once the real Banco Inter PIX transfer adapter (provider.inter.ts) lands.
+    throw new Error(
+      'Real Inter transfer adapter not yet available (aperture-ju5w2). Set TRANSFERENCIA_PROVIDER=fake.',
+    );
+  } else {
+    transferenciaProvider = new TransferenciaProviderFake();
+  }
+
   return {
     db,
     auth,
@@ -720,6 +788,9 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     logPiiHashSalt: env.LOG_PII_HASH_SALT,
     webhookEventArchive,
     objectStorage,
+    boss,
+    repasseJobEnqueuer,
+    transferenciaProvider,
   };
 }
 

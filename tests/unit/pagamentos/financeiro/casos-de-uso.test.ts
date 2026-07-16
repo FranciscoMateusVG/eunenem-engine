@@ -180,6 +180,11 @@ describe('financial use cases', () => {
       solicitadoEm: fixedDate,
       aprovadoEm: null,
       bankTransferRef: null,
+      // aperture-vvh2j — transfer bookkeeping defaults.
+      transferReferencia: null,
+      interCodigoSolicitacao: null,
+      transferAttempts: 0,
+      lastTransferError: null,
     });
     expect(await livroFinanceiroRepository.findRepasseById(idRepasse)).toEqual(repasse);
     // The eligible lancamento now carries idRepasse linkage.

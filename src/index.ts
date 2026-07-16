@@ -46,7 +46,14 @@ export type {
 } from './adapters/pagamentos/checkout-session-provider.js';
 export type { PagamentoEventPublisher } from './adapters/pagamentos/event-publisher.js';
 export { PagamentoEventPublisherMemory } from './adapters/pagamentos/event-publisher.memory.js';
-export type { LivroFinanceiroRepository } from './adapters/pagamentos/financeiro/livro-repository.js';
+// aperture-vvh2j — automated PIX transfer (repasse) port + adapters.
+export type {
+  LivroFinanceiroRepository,
+  RepasseTransactionExecutor,
+  RepasseTransferAttempt,
+  RepasseTransferResultado,
+  RepasseTransferResultadoTerminal,
+} from './adapters/pagamentos/financeiro/livro-repository.js';
 export { LivroFinanceiroRepositoryMemory } from './adapters/pagamentos/financeiro/livro-repository.memory.js';
 export { LivroFinanceiroRepositoryPostgres } from './adapters/pagamentos/financeiro/livro-repository.postgres.js';
 export { PagamentoProviderFake } from './adapters/pagamentos/provider.fake.js';
@@ -59,6 +66,27 @@ export type {
 } from './adapters/pagamentos/repository.js';
 export { PagamentoRepositoryMemory } from './adapters/pagamentos/repository.memory.js';
 export { PagamentoRepositoryPostgres } from './adapters/pagamentos/repository.postgres.js';
+export {
+  REPASSE_CONFIRMAR_QUEUE,
+  REPASSE_EXECUTAR_QUEUE,
+  type RepasseConfirmarJobData,
+  type RepasseExecutarJobData,
+  type RepasseJobEnqueuer,
+} from './adapters/pagamentos/transferencia-enqueuer.js';
+export {
+  TransferenciaProviderFake,
+  type TransferenciaProviderFakeOptions,
+} from './adapters/pagamentos/transferencia-provider.fake.js';
+export {
+  type BuscarPagamentosInput,
+  type ConsultarPagamentoResult,
+  type ConsultarPagamentoStatus,
+  type PagamentoEncontrado,
+  type PagarPixInput,
+  type PagarPixOutcome,
+  type TransferenciaProvider,
+  TransferenciaTransitoriaError,
+} from './adapters/pagamentos/transferencia-provider.js';
 export type { PlataformaRepository } from './adapters/plataforma/repository.js';
 export {
   ID_PLATAFORMA_EUCASEI,
@@ -994,7 +1022,36 @@ export type {
 export {
   AprovarRepasseRecebedorInputSchema,
   aprovarRepasseRecebedor,
+  gerarTransferReferencia,
 } from './use-cases/pagamentos/financeiro/aprovar-repasse-recebedor.js';
+// aperture-vvh2j — automated PIX transfer use-cases.
+export type {
+  CancelarRepasseRecebedorDeps,
+  CancelarRepasseRecebedorInput,
+  CancelarRepasseRecebedorOutput,
+} from './use-cases/pagamentos/financeiro/cancelar-repasse-recebedor.js';
+export {
+  CancelarRepasseRecebedorInputSchema,
+  cancelarRepasseRecebedor,
+} from './use-cases/pagamentos/financeiro/cancelar-repasse-recebedor.js';
+export type {
+  ConfirmarTransferenciaRepasseDeps,
+  ConfirmarTransferenciaRepasseInput,
+} from './use-cases/pagamentos/financeiro/confirmar-transferencia-repasse.js';
+export {
+  confirmarTransferenciaRepasse,
+  MAX_TENTATIVAS_CONFIRMACAO,
+  proximoDelayConfirmacao,
+} from './use-cases/pagamentos/financeiro/confirmar-transferencia-repasse.js';
+export type {
+  ExecutarTransferenciaRepasseDeps,
+  ExecutarTransferenciaRepasseInput,
+} from './use-cases/pagamentos/financeiro/executar-transferencia-repasse.js';
+export {
+  CONFIRMAR_DELAY_INICIAL_SEGUNDOS,
+  executarTransferenciaRepasse,
+  MAX_TENTATIVAS_TRANSITORIAS,
+} from './use-cases/pagamentos/financeiro/executar-transferencia-repasse.js';
 export type {
   MarcarLancamentoTransferidoDeps,
   MarcarLancamentoTransferidoInput,
@@ -1027,6 +1084,15 @@ export {
   RegistrarEfeitosFinanceirosPagamentoAprovadoInputSchema,
   registrarEfeitosFinanceirosPagamentoAprovado,
 } from './use-cases/pagamentos/financeiro/registrar-efeitos-financeiros-pagamento-aprovado.js';
+export type {
+  RetentarTransferenciaRepasseDeps,
+  RetentarTransferenciaRepasseInput,
+  RetentarTransferenciaRepasseOutput,
+} from './use-cases/pagamentos/financeiro/retentar-transferencia-repasse.js';
+export {
+  RetentarTransferenciaRepasseInputSchema,
+  retentarTransferenciaRepasse,
+} from './use-cases/pagamentos/financeiro/retentar-transferencia-repasse.js';
 export type {
   SolicitarRepasseRecebedorDeps,
   SolicitarRepasseRecebedorInput,

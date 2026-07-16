@@ -38,6 +38,7 @@ interface TestRig {
   idCampanha: string;
   idContribuicao: string;
   clock: () => Date;
+  enqueued: { executar: string[]; confirmar: Array<{ id: string; delay: number }> };
 }
 
 const T0 = new Date('2026-06-04T10:00:00.000Z');
@@ -93,6 +94,21 @@ async function buildRig(): Promise<TestRig> {
   const contribuicaoRepository = new ContribuicaoRepositoryMemory();
   const pagamentoRepository = new PagamentoRepositoryMemory();
   const livroFinanceiroRepository = new LivroFinanceiroRepositoryMemory(recebedorRepository);
+
+  // aperture-vvh2j — spy enqueuer: the pix aprovar path enqueues the executar
+  // job transactionally. Records calls so tests can assert enqueue behavior.
+  const enqueued = {
+    executar: [] as string[],
+    confirmar: [] as Array<{ id: string; delay: number }>,
+  };
+  const repasseJobEnqueuer = {
+    async enqueueExecutar(data: { idRepasse: string }) {
+      enqueued.executar.push(data.idRepasse);
+    },
+    async enqueueConfirmar(data: { idRepasse: string }, delaySeconds: number) {
+      enqueued.confirmar.push({ id: data.idRepasse, delay: delaySeconds });
+    },
+  };
 
   const idCampanha = randomUUID();
   await campanhaRepository.save({
@@ -153,6 +169,7 @@ async function buildRig(): Promise<TestRig> {
     checkoutSessionProvider: {} as never,
     pagamentoEventPublisher: {} as never,
     livroFinanceiroRepository,
+    repasseJobEnqueuer: repasseJobEnqueuer as never,
     provedorRegraTaxa: {} as never,
     observability,
     clock,
@@ -179,6 +196,7 @@ async function buildRig(): Promise<TestRig> {
     idCampanha,
     idContribuicao,
     clock,
+    enqueued,
   };
 }
 
@@ -300,53 +318,57 @@ describe('admin.repasses.aprovar (aperture-riywh)', () => {
     rig = await buildRig();
   });
 
-  it('approves a pending repasse and stamps transferidoEm on linked lançamentos', async () => {
+  // aperture-vvh2j — the rig recebedor is pix, so aprovar takes the AUTOMATED
+  // path: it does NOT stamp transferido_em at approval (the debit books at
+  // pago) and it enqueues the executar job transactionally. The manual/conta
+  // stamp-at-approval + bankTransferRef idempotency is covered separately.
+  it('approves a pix repasse without stamping transferidoEm, and enqueues executar once', async () => {
     const { idRepasse, idsLancamentos } = await seedPendingRepasse(rig);
 
     const result = await rig.caller.admin.repasses.aprovar({
       idRepasse,
-      bankTransferRef: 'PIX-XYZ-001',
+      bankTransferRef: null,
     });
 
     expect(result.idRepasse).toBe(idRepasse);
-    expect(result.aprovadoEm).toBe(T1.toISOString());
-    expect(result.numLancamentosTransferidos).toBe(2);
-    expect(result.totalCents).toBe(4500);
+    // pix: the debit books at pago, so approval stamps nothing.
+    expect(result.numLancamentosTransferidos).toBe(0);
 
     const refetched = await rig.livroFinanceiroRepository.findLancamentosByIds(
       idsLancamentos as never,
     );
     for (const l of refetched) {
-      expect(l.transferidoEm).toEqual(T1);
+      expect(l.transferidoEm).toBeNull();
     }
+
+    // The executar job was enqueued exactly once, transactionally.
+    expect(rig.enqueued.executar).toEqual([idRepasse]);
+
+    // The repasse is aprovado and carries the stable transfer reference.
+    const repasse = await rig.livroFinanceiroRepository.findRepasseById(idRepasse as never);
+    expect(repasse?.status).toBe('aprovado');
+    expect(repasse?.transferReferencia).not.toBeNull();
   });
 
-  it('is idempotent on re-approval with the same bankTransferRef', async () => {
+  it('is idempotent on re-approval (pix): no double enqueue', async () => {
     const { idRepasse } = await seedPendingRepasse(rig);
-    const first = await rig.caller.admin.repasses.aprovar({
-      idRepasse,
-      bankTransferRef: 'PIX-XYZ',
-    });
+    await rig.caller.admin.repasses.aprovar({ idRepasse, bankTransferRef: null });
+    const second = await rig.caller.admin.repasses.aprovar({ idRepasse, bankTransferRef: null });
+    expect(second.numLancamentosTransferidos).toBe(0);
+    // Second approve is a no-op — the job is NOT enqueued twice.
+    expect(rig.enqueued.executar).toEqual([idRepasse]);
+  });
+
+  it('pix re-approval ignores bankTransferRef and stays idempotent (referencia is the key)', async () => {
+    const { idRepasse } = await seedPendingRepasse(rig);
+    await rig.caller.admin.repasses.aprovar({ idRepasse, bankTransferRef: 'IGNORED-1' });
+    // A different bankTransferRef does NOT conflict on the pix path.
     const second = await rig.caller.admin.repasses.aprovar({
       idRepasse,
-      bankTransferRef: 'PIX-XYZ',
+      bankTransferRef: 'IGNORED-2',
     });
     expect(second.numLancamentosTransferidos).toBe(0);
-    expect(second.aprovadoEm).toBe(first.aprovadoEm);
-  });
-
-  it('throws CONFLICT on re-approval with a mismatched bankTransferRef', async () => {
-    const { idRepasse } = await seedPendingRepasse(rig);
-    await rig.caller.admin.repasses.aprovar({
-      idRepasse,
-      bankTransferRef: 'PIX-1',
-    });
-    await expect(
-      rig.caller.admin.repasses.aprovar({
-        idRepasse,
-        bankTransferRef: 'PIX-2',
-      }),
-    ).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(rig.enqueued.executar).toEqual([idRepasse]);
   });
 
   it('throws NOT_FOUND when the repasse does not exist', async () => {

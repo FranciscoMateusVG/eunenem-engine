@@ -6,6 +6,14 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { StrictMode } from 'react';
 import type { IdCampanha } from '../../src/index.js';
+import {
+  confirmarTransferenciaRepasse,
+  executarTransferenciaRepasse,
+  REPASSE_CONFIRMAR_QUEUE,
+  REPASSE_EXECUTAR_QUEUE,
+  type RepasseConfirmarJobData,
+  type RepasseExecutarJobData,
+} from '../../src/index.js';
 import { renderToString } from 'react-dom/server';
 import { App, resolveRoute } from './pages/App.js';
 import { buildServerDeps, ID_PLATAFORMA_EUNENEM, loadEnv } from './server/auth/setup.js';
@@ -22,6 +30,48 @@ const PORT = Number(process.env.PORT ?? 3001);
 // log instead of a cryptic auth failure on the first request.
 const env = loadEnv();
 const deps = buildServerDeps(env);
+
+// aperture-vvh2j — automated PIX repasse workers. Start the shared pg-boss
+// instance, ensure both queues exist, and register the two workers BEFORE the
+// HTTP server comes up. Wrapped so a boss failure logs clearly with full
+// context instead of a bare unhandled rejection. pg-boss v12's work handler
+// receives an ARRAY of jobs (`Job<Data>[]`); with `batchSize: 1` that array
+// holds a single job, giving one-at-a-time processing on the executar queue.
+try {
+  await deps.boss.start();
+  await deps.boss.createQueue(REPASSE_EXECUTAR_QUEUE);
+  await deps.boss.createQueue(REPASSE_CONFIRMAR_QUEUE);
+
+  // Executar worker — concurrency 1 (batchSize: 1). Each job drives the
+  // transferencia FSM forward (solicitado/falhou → transferindo → aguardando).
+  await deps.boss.work<RepasseExecutarJobData>(
+    REPASSE_EXECUTAR_QUEUE,
+    { batchSize: 1 },
+    async (jobs) => {
+      for (const job of jobs) {
+        await executarTransferenciaRepasse(deps, { idRepasse: job.data.idRepasse });
+      }
+    },
+  );
+
+  // Confirmar worker — reconcile/poll the provider for terminal status.
+  await deps.boss.work<RepasseConfirmarJobData>(
+    REPASSE_CONFIRMAR_QUEUE,
+    async (jobs) => {
+      for (const job of jobs) {
+        await confirmarTransferenciaRepasse(deps, {
+          idRepasse: job.data.idRepasse,
+          tentativaConfirmacao: job.data.tentativaConfirmacao,
+        });
+      }
+    },
+  );
+
+  console.log('✅ pg-boss repasse workers registered (executar + confirmar)');
+} catch (err) {
+  console.error('❌ Failed to start pg-boss repasse workers:', err);
+  throw err;
+}
 
 const app = new Hono();
 

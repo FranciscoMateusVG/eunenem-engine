@@ -36,10 +36,12 @@ import type { Pagamento } from "../../../../src/domain/pagamentos/entities/pagam
 import type { IdContribuicaoPagamento } from "../../../../src/domain/pagamentos/value-objects/ids.js";
 import {
   aprovarRepasseRecebedor,
+  cancelarRepasseRecebedor,
   FinanceiroInputInvalidoError,
   FinanceiroRepasseNaoEncontradoError,
   FinanceiroRepasseStatusInvalidoError,
   ID_PLATAFORMA_EUNENEM,
+  retentarTransferenciaRepasse,
 } from "../../../../src/index.js";
 import type { TrpcContext } from "./context.js";
 import { isEmailAdmin } from "../auth/admin-allowlist.js";
@@ -1741,7 +1743,17 @@ const webhooksRouter = t.router({
  * per-lançamento flip.
  * ────────────────────────────────────────────────────────────────────── */
 
-const RepasseStatusSchema = z.enum(["solicitado", "aprovado"]);
+// aperture-vvh2j — widened to the full 7-state transfer FSM (mirrors the
+// engine StatusRepasseSchema). Consumed by Vance's /admin/repasses UI.
+const RepasseStatusSchema = z.enum([
+  "solicitado",
+  "aprovado",
+  "transferindo",
+  "verificando",
+  "pago",
+  "falhou",
+  "cancelado",
+]);
 export type RepasseStatus = z.infer<typeof RepasseStatusSchema>;
 
 const RepasseAdminDTOSchema = z.object({
@@ -1755,8 +1767,27 @@ const RepasseAdminDTOSchema = z.object({
   solicitadoEm: z.string(),
   aprovadoEm: z.string().nullable(),
   bankTransferRef: z.string().nullable(),
+  // aperture-vvh2j — automated PIX transfer fields.
+  transferReferencia: z.string().nullable(),
+  interCodigoSolicitacao: z.string().nullable(),
+  transferAttempts: z.number().int().nonnegative(),
+  lastTransferError: z.string().nullable(),
 });
 export type RepasseAdminDTO = z.infer<typeof RepasseAdminDTOSchema>;
+
+// aperture-vvh2j — attempt-history row for the admin detail view.
+const RepasseTransferAttemptDTOSchema = z.object({
+  id: z.string(),
+  attemptNo: z.number().int().nonnegative(),
+  referencia: z.string(),
+  startedAt: z.string(),
+  finishedAt: z.string().nullable(),
+  requestSummary: z.string().nullable(),
+  outcome: z.string().nullable(),
+  codigoSolicitacao: z.string().nullable(),
+  error: z.string().nullable(),
+});
+export type RepasseTransferAttemptDTO = z.infer<typeof RepasseTransferAttemptDTOSchema>;
 
 const RepasseLancamentoDetailSchema = z.object({
   idLancamento: z.string(),
@@ -1770,6 +1801,8 @@ export type RepasseLancamentoDetail = z.infer<typeof RepasseLancamentoDetailSche
 
 const RepasseDetailDTOSchema = RepasseAdminDTOSchema.extend({
   lancamentos: z.array(RepasseLancamentoDetailSchema),
+  // aperture-vvh2j — transfer attempt history, attemptNo ASC.
+  attempts: z.array(RepasseTransferAttemptDTOSchema),
 });
 export type RepasseDetailDTO = z.infer<typeof RepasseDetailDTOSchema>;
 
@@ -1814,6 +1847,10 @@ function toRepasseAdminDTO(
     solicitadoEm: Date;
     aprovadoEm: Date | null;
     bankTransferRef: string | null;
+    transferReferencia: string | null;
+    interCodigoSolicitacao: string | null;
+    transferAttempts: number;
+    lastTransferError: string | null;
   },
   campanhaTitulo: string,
   recebedorNome: string | null,
@@ -1830,6 +1867,10 @@ function toRepasseAdminDTO(
     solicitadoEm: repasse.solicitadoEm.toISOString(),
     aprovadoEm: repasse.aprovadoEm?.toISOString() ?? null,
     bankTransferRef: repasse.bankTransferRef,
+    transferReferencia: repasse.transferReferencia,
+    interCodigoSolicitacao: repasse.interCodigoSolicitacao,
+    transferAttempts: repasse.transferAttempts,
+    lastTransferError: repasse.lastTransferError,
   };
 }
 
@@ -1884,6 +1925,9 @@ const repassesRouter = t.router({
             livroFinanceiroRepository: ctx.deps.livroFinanceiroRepository,
             clock: ctx.deps.clock,
             observability: ctx.deps.observability,
+            // aperture-vvh2j — approve now transactionally enqueues the
+            // executar job on the FSM-write's connection (approve = pay).
+            repasseJobEnqueuer: ctx.deps.repasseJobEnqueuer,
           },
           {
             idRepasse: input.idRepasse as never,
@@ -1967,6 +2011,22 @@ const repassesRouter = t.router({
         }),
       );
 
+      const attemptRows =
+        await ctx.deps.livroFinanceiroRepository.findTransferAttemptsByRepasseId(
+          input.idRepasse as never,
+        );
+      const attempts: RepasseTransferAttemptDTO[] = attemptRows.map((a) => ({
+        id: a.id,
+        attemptNo: a.attemptNo,
+        referencia: a.referencia,
+        startedAt: a.startedAt.toISOString(),
+        finishedAt: a.finishedAt?.toISOString() ?? null,
+        requestSummary: a.requestSummary,
+        outcome: a.outcome,
+        codigoSolicitacao: a.codigoSolicitacao,
+        error: a.error,
+      }));
+
       const detailDTO: RepasseDetailDTO = {
         ...toRepasseAdminDTO(
           repasse,
@@ -1975,9 +2035,132 @@ const repassesRouter = t.router({
           linked.length,
         ),
         lancamentos,
+        attempts,
       };
 
       return { repasse: detailDTO };
+    }),
+
+  /**
+   * cancelar({ idRepasse }) — aperture-vvh2j. The ONLY claim-release path:
+   * transitions a `falhou` repasse to `cancelado`, freeing its lançamentos
+   * back to the recebedor's disponivel bucket. Acting admin recorded on the
+   * audit trail (canceladoPor). Typed errors map like aprovar:
+   *   - FinanceiroRepasseNaoEncontradoError → NOT_FOUND
+   *   - FinanceiroRepasseStatusInvalidoError → CONFLICT (só cancela um `falhou`)
+   *   - FinanceiroInputInvalidoError → BAD_REQUEST
+   */
+  cancelar: adminProcedure
+    .input(z.object({ idRepasse: z.string().uuid() }))
+    .output(
+      z.object({
+        idRepasse: z.string(),
+        status: z.string(),
+        numLancamentosLiberados: z.number().int().nonnegative(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      // Acting admin's email for the audit trail — resolved the same way the
+      // adminMiddleware gate does (central session resolver).
+      const { usuario } = await resolverUsuarioAutenticado(
+        ctx.deps,
+        ctx.headers,
+      );
+      try {
+        const result = await cancelarRepasseRecebedor(
+          {
+            livroFinanceiroRepository: ctx.deps.livroFinanceiroRepository,
+            clock: ctx.deps.clock,
+            observability: ctx.deps.observability,
+          },
+          {
+            idRepasse: input.idRepasse,
+            canceladoPor: usuario.email,
+          },
+        );
+
+        return {
+          idRepasse: result.repasse.id,
+          status: result.repasse.status,
+          numLancamentosLiberados: result.lancamentosLiberados,
+        };
+      } catch (error: unknown) {
+        if (error instanceof FinanceiroRepasseNaoEncontradoError) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "repasse_nao_encontrado",
+          });
+        }
+        if (error instanceof FinanceiroRepasseStatusInvalidoError) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "só é possível cancelar um repasse em falhou",
+          });
+        }
+        if (error instanceof FinanceiroInputInvalidoError) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: error.message,
+          });
+        }
+        throw error;
+      }
+    }),
+
+  /**
+   * retry({ idRepasse }) — aperture-vvh2j. Re-enqueues the executar job for a
+   * `falhou` repasse (reusing its stable transferReferencia). Only a `falhou`
+   * repasse is retryable. Same error mapping as cancelar; StatusInvalido →
+   * CONFLICT for a non-`falhou` repasse.
+   */
+  retry: adminProcedure
+    .input(z.object({ idRepasse: z.string().uuid() }))
+    .output(
+      z.object({
+        idRepasse: z.string(),
+        status: z.string(),
+        transferAttempts: z.number().int().nonnegative(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const result = await retentarTransferenciaRepasse(
+          {
+            livroFinanceiroRepository: ctx.deps.livroFinanceiroRepository,
+            repasseJobEnqueuer: ctx.deps.repasseJobEnqueuer,
+            observability: ctx.deps.observability,
+          },
+          {
+            idRepasse: input.idRepasse,
+          },
+        );
+
+        return {
+          idRepasse: result.repasse.id,
+          status: result.repasse.status,
+          transferAttempts: result.repasse.transferAttempts,
+        };
+      } catch (error: unknown) {
+        if (error instanceof FinanceiroRepasseNaoEncontradoError) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "repasse_nao_encontrado",
+          });
+        }
+        if (error instanceof FinanceiroRepasseStatusInvalidoError) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "só é possível retentar um repasse em falhou",
+          });
+        }
+        if (error instanceof FinanceiroInputInvalidoError) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: error.message,
+          });
+        }
+        throw error;
+      }
     }),
 });
 

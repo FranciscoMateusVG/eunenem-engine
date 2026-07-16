@@ -275,8 +275,25 @@ export interface RepassesRecebedor {
   bank_transfer_ref: string | null;
   id: string;
   id_campanha: string;
+  inter_codigo_solicitacao: string | null;
+  last_transfer_error: string | null;
   solicitado_em: Timestamp;
   status: string;
+  transfer_attempts: Generated<number>;
+  transfer_referencia: string | null;
+}
+
+export interface RepasseTransferAttempts {
+  attempt_no: number;
+  codigo_solicitacao: string | null;
+  error: string | null;
+  finished_at: Timestamp | null;
+  id: string;
+  outcome: string | null;
+  referencia: string;
+  repasse_id: string;
+  request_summary: string | null;
+  started_at: Timestamp;
 }
 
 export interface ResgatesPendentes {
@@ -348,6 +365,7 @@ export interface DB {
   perfil_criadores: PerfilCriadores;
   rate_limit: RateLimit;
   recebedores: Recebedores;
+  repasse_transfer_attempts: RepasseTransferAttempts;
   repasses_recebedor: RepassesRecebedor;
   resgates_pendentes: ResgatesPendentes;
   sessions: Sessions;
