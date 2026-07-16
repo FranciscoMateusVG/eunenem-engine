@@ -95,7 +95,10 @@ Current: `solicitado → aprovado`. New:
 solicitado → aprovado → transferindo → pago
                              ├→ verificando → pago | falhou
                              └→ falhou ──(admin retry)──→ transferindo
+                                   └──(admin cancel)──→ cancelado
 ```
+
+- `cancelado` (terminal, admin-only, reachable only from `falhou`): the escape hatch for **permanent** failure causes (invalid/typo'd chave). Inside a `FOR UPDATE` transaction: clear `id_repasse` on the linked lancamentos (they return to the `disponivel` bucket naturally — the bucket derivation keys on `id_repasse IS NULL`) + FSM → `cancelado`. The user fixes their recebedor and re-solicitars fresh. This is the only claim-release path in the system; it carries an audit line with the acting admin. A cancelled repasse can never be retried.
 
 - `aprovado` becomes transient: the admin action commits `aprovado` + enqueues the job; the worker moves it to `transferindo` when it picks up.
 - `verificando` = "a payment may exist at Inter and we don't know its outcome." Only the confirm/reconcile path may leave this state. **No new `pagarPix` call is ever made from `verificando`.**
@@ -137,7 +140,7 @@ New table `repasse_transfer_attempts` (append-only audit): `id, repasse_id, atte
    - With `codigoSolicitacao`: poll `consultarPagamento` → terminal `pago`/`rejeitado`/`cancelado` resolves the FSM accordingly (`rejeitado`/`cancelado` → `falhou`, retryable by admin).
    - Without it (crash before response): `buscarPagamentos` over the attempt window, match by valor + chave + referencia. Found → adopt its codigoSolicitacao and resolve. Definitively absent after the search window → `falhou` (safe to retry).
    - Exhausted schedule without resolution → stay `verificando`, alert operator (this should be ~never).
-5. Admin UI (`/admin/repasses`, currently stubbed): show the new states, error detail, attempt history, and a **Retry** action enabled only in `falhou`. Extrato UI: user-facing states map to simple copy (aprovado/transferindo/verificando → "transferência em andamento"; pago → "transferido"; falhou → "problema na transferência — nossa equipe foi notificada").
+5. Admin UI (`/admin/repasses`, currently stubbed): show the new states, error detail, attempt history, and — in `falhou` only — two actions: **Retry** (re-fires the transfer) and **Cancelar** (terminal; releases the claimed funds; confirm modal, irreversible). `cancelado` rows render terminal/muted, no actions. Extrato UI: user-facing states map to simple copy (aprovado/transferindo/verificando → "transferência em andamento"; pago → "transferido"; falhou → "problema na transferência — nossa equipe foi notificada"; cancelado → "resgate cancelado — valores devolvidos ao seu saldo" or Vance's wording).
 
 ## 6. Idempotency & double-pay prevention (the core invariant)
 
