@@ -1,5 +1,4 @@
 import type { Kysely } from 'kysely';
-import { sql } from 'kysely';
 
 /**
  * aperture-477nz — Inter repasse reconciliation fallback (Part B).

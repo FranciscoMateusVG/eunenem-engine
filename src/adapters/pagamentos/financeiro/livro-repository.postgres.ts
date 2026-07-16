@@ -1350,7 +1350,10 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
 
             // Idempotent: only a verificando + flagged repasse is manually
             // resolvable. Anything else (already resolved) is a no-op.
-            if (existingRepasse.status !== 'verificando' || !existingRepasse.needsManualResolution) {
+            if (
+              existingRepasse.status !== 'verificando' ||
+              !existingRepasse.needsManualResolution
+            ) {
               return { repasse: existingRepasse };
             }
 
@@ -1427,7 +1430,10 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
             }
             const existingRepasse = repasseFromRow(existing);
 
-            if (existingRepasse.status !== 'verificando' || !existingRepasse.needsManualResolution) {
+            if (
+              existingRepasse.status !== 'verificando' ||
+              !existingRepasse.needsManualResolution
+            ) {
               return { repasse: existingRepasse };
             }
 
@@ -1472,48 +1478,45 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
   async findCandidatosByRepasseId(
     idRepasse: IdRepasse,
   ): Promise<readonly RepasseReconciliacaoCandidato[]> {
-    return tracer.startActiveSpan(
-      'db.financeiro_livro.repasses.findCandidatos',
-      async (span) => {
-        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
-        try {
-          const rows = (await sql<{
-            codigo_solicitacao: string;
-            valor_cents: number;
-            data_movimento: string | null;
-            chave_mascarada: string | null;
-            descricao_pix: string | null;
-          }>`
+    return tracer.startActiveSpan('db.financeiro_livro.repasses.findCandidatos', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        const rows = (await sql<{
+          codigo_solicitacao: string;
+          valor_cents: number;
+          data_movimento: string | null;
+          chave_mascarada: string | null;
+          descricao_pix: string | null;
+        }>`
             SELECT codigo_solicitacao, valor_cents, data_movimento, chave_mascarada, descricao_pix
               FROM repasse_reconciliacao_candidatos
               WHERE repasse_id = ${idRepasse}
               ORDER BY criado_em ASC
           `.execute(this.db)) as unknown as {
-            rows: Array<{
-              codigo_solicitacao: string;
-              valor_cents: number;
-              data_movimento: string | null;
-              chave_mascarada: string | null;
-              descricao_pix: string | null;
-            }>;
-          };
-          span.setStatus({ code: SpanStatusCode.OK });
-          return rows.rows.map((r) => ({
-            codigoSolicitacao: r.codigo_solicitacao,
-            valorCents: r.valor_cents,
-            dataMovimento: r.data_movimento,
-            chaveMascarada: r.chave_mascarada,
-            descricaoPix: r.descricao_pix,
-          }));
-        } catch (error: unknown) {
-          span.recordException(error as Error);
-          span.setStatus({ code: SpanStatusCode.ERROR });
-          throw error;
-        } finally {
-          span.end();
-        }
-      },
-    );
+          rows: Array<{
+            codigo_solicitacao: string;
+            valor_cents: number;
+            data_movimento: string | null;
+            chave_mascarada: string | null;
+            descricao_pix: string | null;
+          }>;
+        };
+        span.setStatus({ code: SpanStatusCode.OK });
+        return rows.rows.map((r) => ({
+          codigoSolicitacao: r.codigo_solicitacao,
+          valorCents: r.valor_cents,
+          dataMovimento: r.data_movimento,
+          chaveMascarada: r.chave_mascarada,
+          descricaoPix: r.descricao_pix,
+        }));
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
   }
 
   async findTransferAttemptsByRepasseId(

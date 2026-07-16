@@ -371,6 +371,11 @@ describe('LivroFinanceiroRepositoryPostgres — repasses', () => {
   let repo: LivroFinanceiroRepositoryPostgres;
 
   beforeEach(async () => {
+    // aperture-477nz — candidatos FK-references repasses_recebedor; delete the
+    // child rows before the parent (shared-container suite, prior blocks may
+    // have left candidatos).
+    // biome-ignore lint/suspicious/noExplicitAny: tables not yet in generated types
+    await (testDb.db as any).deleteFrom('repasse_reconciliacao_candidatos').execute();
     // biome-ignore lint/suspicious/noExplicitAny: tables not yet in generated types
     await (testDb.db as any).deleteFrom('repasses_recebedor').execute();
     repo = new LivroFinanceiroRepositoryPostgres(testDb.db);
@@ -581,6 +586,9 @@ describe('LivroFinanceiroRepositoryPostgres — transfer FSM audit rows (apertur
   let repo: LivroFinanceiroRepositoryPostgres;
 
   beforeEach(async () => {
+    // aperture-477nz — candidatos FK-references repasses_recebedor; child first.
+    // biome-ignore lint/suspicious/noExplicitAny: tables not yet in generated types
+    await (testDb.db as any).deleteFrom('repasse_reconciliacao_candidatos').execute();
     // biome-ignore lint/suspicious/noExplicitAny: tables not yet in generated types
     await (testDb.db as any).deleteFrom('repasse_transfer_attempts').execute();
     // biome-ignore lint/suspicious/noExplicitAny: tables not yet in generated types

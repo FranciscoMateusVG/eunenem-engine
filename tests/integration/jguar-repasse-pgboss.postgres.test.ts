@@ -132,6 +132,9 @@ afterAll(async () => {
 
 async function cleanTables(): Promise<void> {
   const db = testDb.db;
+  // aperture-477nz — candidatos FK-references repasses_recebedor; delete the
+  // child rows before the parent or the repasses_recebedor DELETE 23503s.
+  await sql`DELETE FROM repasse_reconciliacao_candidatos`.execute(db);
   await sql`DELETE FROM repasse_transfer_attempts`.execute(db);
   await sql`DELETE FROM lancamentos_financeiros`.execute(db);
   await sql`DELETE FROM repasses_recebedor`.execute(db);
@@ -313,13 +316,20 @@ interface UseCaseDeps {
   readonly observability: Observability;
 }
 
-function makeDeps(provider: TransferenciaProvider, jobEnqueuer: RepasseJobEnqueuer): UseCaseDeps {
+function makeDeps(
+  provider: TransferenciaProvider,
+  jobEnqueuer: RepasseJobEnqueuer,
+  extratoVerified = false,
+): UseCaseDeps {
   return {
     livroFinanceiroRepository: repo,
     transferenciaProvider: provider,
     repasseJobEnqueuer: jobEnqueuer,
     clock: () => new Date(),
     observability,
+    // aperture-477nz — confirmar's disarm gate. Default DISARMED (prod default):
+    // ignored by executar; only the confirmar zero-candidate exhaustion reads it.
+    extratoVerified,
   };
 }
 
@@ -530,23 +540,25 @@ describe('crash-mid-call and re-delivery reconciliation', () => {
   // Rex now UPDATEs the existing verificando row instead of inserting a colliding
   // one (and cancelarRepasse uses MAX(attempt_no)+1 at :1238 for the sibling gap).
   // This is a POSTGRES-only fix — the memory adapter never had the collision, so
-  // it needs a real-Postgres regression lock. Flipped it.fails → it().
+  // it needs a real-Postgres regression lock. Since aperture-477nz the SEARCH
+  // path no longer resolves via resolverVerificacaoTransferencia (it flags
+  // needs-manual instead); the resolver-23505 lock now lives on the CONSULT-path
+  // test below (which still resolves pago via resolverVerificacaoTransferencia).
   //
-  // NB (s8v26): the search hit MUST carry the repasse's referencia — Rex's
-  // strong-key match (p.referencia === repasse.transferReferencia) is what makes
-  // buscarPagamentos safe. Without it, this test would stay `verificando` and
-  // never reach the resolver at all, masking the fix.
-  it('reconciliation via buscarPagamentos resolves a codigo-less verificando to pago (no 23505 on the audit insert)', async () => {
+  // aperture-477nz: a codigo-less verificando reconciled via buscarPagamentos is
+  // NEVER auto-booked pago — Inter exposes no reliable caller-supplied identifier
+  // in the extrato, so a search match cannot PROVE the payment is ours. A
+  // valor+chave candidate flags needs-manual-resolution and is persisted (chave
+  // masked) for an admin to resolve. This locks the never-auto-pago behavior +
+  // the flagNeedsManualResolution transaction on real Postgres.
+  it('reconciliation via buscarPagamentos flags needs-manual-resolution + persists a masked candidate — NEVER auto-pago', async () => {
     const amountCents = 4500;
     const { idRepasse, idCampanha } = await seedRepasseSolicitado({ amountCents });
     await seedClaimedLancamento({ idCampanha, idRepasse, amountCents });
     await aprovarPix(idRepasse);
     const referencia = gerarTransferReferencia(idRepasse);
 
-    // Crash shape: verificando with NO codigoSolicitacao captured. Driven
-    // through the repository primitives (the executar catch path that would
-    // produce this in-process is separately covered by the ambiguous-throw
-    // divert test above).
+    // Crash shape: verificando with NO codigoSolicitacao captured.
     const claimed = await repo.iniciarTransferenciaTransaction({
       idRepasse,
       requestSummary: 'test-setup',
@@ -559,8 +571,6 @@ describe('crash-mid-call and re-delivery reconciliation', () => {
       agora: new Date(),
     });
 
-    // Confirmar reconciles by searching Inter's history and adopting the match
-    // (referencia-strong-keyed, per s8v26 fix).
     const reconciler = new TransferenciaProviderFake({
       buscarResultados: [
         {
@@ -569,6 +579,7 @@ describe('crash-mid-call and re-delivery reconciliation', () => {
           chave: PIX_RECEBEDOR.chavePix,
           referencia,
           status: 'pago',
+          dataMovimento: '2026-07-16',
         },
       ],
       consultSequence: ['pago'],
@@ -580,11 +591,21 @@ describe('crash-mid-call and re-delivery reconciliation', () => {
     });
 
     expect(reconciler.pagarPixCalls).toBe(0); // confirmar NEVER pays
+    expect(reconciler.consultarPagamentoCalls).toBe(0); // deferred to admin, not consulted
 
+    // NEVER auto-pago: stays verificando, flagged, money not moved.
     const persisted = await repo.findRepasseById(idRepasse);
-    expect(persisted?.status).toBe('pago');
-    expect(persisted?.interCodigoSolicitacao).toBe('inter_recovered_123');
-    expect(await stampedLancamentoCount(idRepasse)).toBe(1);
+    expect(persisted?.status).toBe('verificando');
+    expect(persisted?.needsManualResolution).toBe(true);
+    expect(persisted?.interCodigoSolicitacao).toBeNull();
+    expect(await stampedLancamentoCount(idRepasse)).toBe(0);
+
+    // The candidate is persisted with the chave MASKED at rest.
+    const candidatos = await repo.findCandidatosByRepasseId(idRepasse as never);
+    expect(candidatos).toHaveLength(1);
+    expect(candidatos[0]?.codigoSolicitacao).toBe('inter_recovered_123');
+    expect(candidatos[0]?.chaveMascarada).not.toBeNull();
+    expect(candidatos[0]?.chaveMascarada).not.toContain('@'); // full chave never at rest
   });
 
   // VERIFIED-FIXED (resolver 23505, Rex PR #8) on the CONSULT path — the common

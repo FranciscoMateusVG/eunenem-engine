@@ -103,7 +103,7 @@ export async function confirmarTransferenciaRepasse(
       }
 
       const agora = clock();
-      let codigo = repasse.interCodigoSolicitacao;
+      const codigo = repasse.interCodigoSolicitacao;
 
       // No codigo (crashed before response) → reconcile via search.
       if (codigo === null) {

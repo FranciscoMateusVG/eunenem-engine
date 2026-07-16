@@ -534,9 +534,7 @@ function reaisToCents(valor: string | number): number {
   // cents); otherwise the dot is the decimal separator ('1234.56'). The old
   // first-comma-only replace turned '1.234,56' into NaN and silently dropped
   // the row from search — a false zero-candidate (aperture-477nz / GLaDOS).
-  const normalized = valor.includes(',')
-    ? valor.replace(/\./g, '').replace(',', '.')
-    : valor;
+  const normalized = valor.includes(',') ? valor.replace(/\./g, '').replace(',', '.') : valor;
   return Math.round(Number(normalized) * 100);
 }
 
