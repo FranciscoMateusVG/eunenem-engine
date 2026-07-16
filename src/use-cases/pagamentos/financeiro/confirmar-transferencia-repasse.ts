@@ -94,23 +94,33 @@ export async function confirmarTransferenciaRepasse(
         const chave = recebedor?.metodo === 'pix' ? recebedor.chavePix : undefined;
         const janela = janelaBusca(repasse.aprovadoEm ?? repasse.solicitadoEm, agora);
         const encontrados = await transferenciaProvider.buscarPagamentos(janela);
+        // STRONG key: the stable per-repasse `referencia` we sent to Inter.
+        // Matching on valor alone can adopt an unrelated same-amount payment
+        // (falsely pago) or miss the real one (falsely falhou → double PIX on
+        // retry). Require referencia; keep valor + chave as extra guards.
         const match = encontrados.find(
           (p) =>
+            p.referencia === repasse.transferReferencia &&
             p.valorCents === repasse.amountCents &&
             (p.chave === undefined || chave === undefined || p.chave === chave),
         );
         if (match) {
           codigo = match.codigoSolicitacao; // adopt, then poll precisely below
         } else {
-          // Definitively absent after a couple of tries → safe to retry (falhou).
-          if (tentativaConfirmacao >= 2) {
+          // Absence is only strong evidence AFTER the full ~48h escalation
+          // window — a PIX can lag in Inter's search index for minutes.
+          // Declaring falhou early (the old `>= 2` ≈ 2.5min) risks an
+          // in-flight payment → admin retry → second PIX. Only when the
+          // window is exhausted (next reschedule would exceed MAX) is
+          // sustained absence enough to declare falhou (safe to retry).
+          if (proximoDelayConfirmacao(tentativaConfirmacao + 1) === null) {
             await livroFinanceiroRepository.resolverVerificacaoTransferencia({
               idRepasse,
               resultado: { tipo: 'falhou', erro: 'NAO_ENCONTRADO_NA_BUSCA' },
-              reconciliacaoResumo: `busca:sem_match;tentativa:${tentativaConfirmacao}`,
+              reconciliacaoResumo: `busca:sem_match;janela_esgotada;tentativa:${tentativaConfirmacao}`,
               agora,
             });
-            logger.warn('financeiro.repasse.confirmar.sem_match', { idRepasse });
+            logger.warn('financeiro.repasse.confirmar.sem_match_esgotado', { idRepasse });
             span.setStatus({ code: SpanStatusCode.OK });
             return;
           }

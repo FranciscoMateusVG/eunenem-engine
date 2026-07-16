@@ -89,7 +89,9 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn('started_at', 'timestamptz', (col) => col.notNull())
     // Non-PII summary of the request (e.g. valor + masked chave type). No raw chave/CPF/name.
     .addColumn('request_summary', 'text')
-    // Outcome of the attempt: pago | agendado_aprovacao | rejeitado | ambiguo | transitorio.
+    // Terminal outcome written to the attempt row by the FSM handlers:
+    // pago | verificando | falhou | transitorio | cancelado. (NULL while the
+    // intent row is still open, before finalizarTentativa closes it.)
     .addColumn('outcome', 'text')
     .addColumn('codigo_solicitacao', 'text')
     // Error detail — Inter code only, no PII.

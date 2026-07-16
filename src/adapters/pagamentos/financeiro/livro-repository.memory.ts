@@ -94,6 +94,29 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
     private readonly pagamentoRepository?: PagamentoRepository,
   ) {}
 
+  /**
+   * Insert an attempt row, ENFORCING the same (repasse_id, attempt_no) unique
+   * constraint the Postgres schema carries
+   * (repasse_transfer_attempts_repasse_attempt_uniq). Without this, the memory
+   * adapter's plain `push` silently accepts duplicate attempt_no rows that the
+   * real database rejects with 23505 — which is exactly how the resolver/cancel
+   * audit-row collision shipped green (aperture-vvh2j, GLaDOS money-flow review
+   * 2026-07-16). This makes the fast unit suite faithful to that constraint.
+   */
+  private pushTransferAttempt(record: RepasseTransferAttemptRecord): void {
+    const collision = this.repasseTransferAttempts.some(
+      (a) => a.repasseId === record.repasseId && a.attemptNo === record.attemptNo,
+    );
+    if (collision) {
+      const err = new Error(
+        `duplicate key value violates unique constraint "repasse_transfer_attempts_repasse_attempt_uniq" (repasse_id=${record.repasseId}, attempt_no=${record.attemptNo})`,
+      ) as Error & { code: string };
+      err.code = '23505';
+      throw err;
+    }
+    this.repasseTransferAttempts.push(record);
+  }
+
   async saveLancamentos(lancamentos: readonly LancamentoFinanceiro[]): Promise<void> {
     return tracer.startActiveSpan('db.financeiro_livro.lancamentos.save', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'INSERT' });
@@ -719,7 +742,7 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
 
           // Committed intent row (open attempt) — the crash-recovery signal.
           const attemptId = randomUUID();
-          this.repasseTransferAttempts.push({
+          this.pushTransferAttempt({
             id: attemptId,
             repasseId: updated.id,
             attemptNo: updated.transferAttempts,
@@ -876,19 +899,22 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
             }
           }
 
-          // Reconciliation audit row.
-          this.repasseTransferAttempts.push({
-            id: randomUUID(),
-            repasseId: updated.id,
-            attemptNo: existing.transferAttempts,
-            referencia: updated.transferReferencia,
-            startedAt: input.agora,
-            requestSummary: input.reconciliacaoResumo,
-            outcome: resultado.tipo,
-            codigoSolicitacao: resultado.tipo === 'pago' ? resultado.codigoSolicitacao : null,
-            error: resultado.tipo === 'falhou' ? resultado.erro : null,
-            finishedAt: input.agora,
-          });
+          // Close out the CURRENT attempt row (attempt_no = transferAttempts)
+          // with its reconciled terminal outcome — an UPDATE, mirroring the
+          // Postgres adapter. Inserting a fresh row that reuses attempt_no
+          // would collide with the intent row under the unique constraint.
+          const codigo = resultado.tipo === 'pago' ? resultado.codigoSolicitacao : null;
+          const erro = resultado.tipo === 'falhou' ? resultado.erro : null;
+          const attemptRow = this.repasseTransferAttempts.find(
+            (a) => a.repasseId === updated.id && a.attemptNo === existing.transferAttempts,
+          );
+          if (attemptRow) {
+            attemptRow.outcome = resultado.tipo;
+            attemptRow.codigoSolicitacao = codigo ?? attemptRow.codigoSolicitacao;
+            attemptRow.error = erro;
+            attemptRow.finishedAt = input.agora;
+            attemptRow.requestSummary = `${attemptRow.requestSummary} | reconciliacao: ${input.reconciliacaoResumo}`;
+          }
 
           span.setStatus({ code: SpanStatusCode.OK });
           return { repasse: updated };
@@ -935,11 +961,17 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
             lancamentosLiberados += 1;
           }
 
-          // Audit row carrying the acting admin.
-          this.repasseTransferAttempts.push({
+          // Audit row carrying the acting admin. Cancel is not a payment
+          // attempt — number it MAX+1 so it never collides with the last
+          // intent row (collision-free: `cancelado` is terminal). Mirrors the
+          // Postgres MAX(attempt_no)+1 insert.
+          const maxAttemptNo = this.repasseTransferAttempts
+            .filter((a) => a.repasseId === updated.id)
+            .reduce((max, a) => Math.max(max, a.attemptNo), 0);
+          this.pushTransferAttempt({
             id: randomUUID(),
             repasseId: updated.id,
-            attemptNo: updated.transferAttempts,
+            attemptNo: maxAttemptNo + 1,
             referencia: updated.transferReferencia ?? '',
             startedAt: input.agora,
             requestSummary: `cancelado_por:${input.canceladoPor}`,

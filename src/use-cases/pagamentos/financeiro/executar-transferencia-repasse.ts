@@ -165,12 +165,16 @@ export async function executarTransferenciaRepasse(
           referencia,
         });
       } catch (err: unknown) {
-        const finalizar = livroFinanceiroRepository.finalizarTentativaTransferencia;
+        // NB: call finalizarTentativaTransferencia directly on the repository —
+        // detaching it into a `const` drops the method's `this` binding, so the
+        // Postgres adapter's `this.db` (and the memory adapter's `this.repasses`)
+        // become undefined and EVERY thrown-pagarPix path TypeErrors, wedging
+        // the repasse in `transferindo` (aperture-oxqlf, Izzy jguar suite).
         if (err instanceof TransferenciaTransitoriaError) {
           // Definitely no payment created. Exhausted → falhou; else revert
           // to aprovado and rethrow so pg-boss retries a clean fresh claim.
           if (iniciado.attemptNo >= MAX_TENTATIVAS_TRANSITORIAS) {
-            await finalizar({
+            await livroFinanceiroRepository.finalizarTentativaTransferencia({
               idRepasse,
               attemptId: iniciado.attemptId,
               resultado: { tipo: 'falhou', erro: 'TRANSITORIO_ESGOTADO' },
@@ -183,7 +187,7 @@ export async function executarTransferenciaRepasse(
             span.setStatus({ code: SpanStatusCode.OK });
             return;
           }
-          await finalizar({
+          await livroFinanceiroRepository.finalizarTentativaTransferencia({
             idRepasse,
             attemptId: iniciado.attemptId,
             resultado: { tipo: 'transitorio', erro: 'TRANSITORIO' },
@@ -195,7 +199,7 @@ export async function executarTransferenciaRepasse(
         }
 
         // AMBIGUOUS — a payment may exist. Never auto-retry; reconcile.
-        await finalizar({
+        await livroFinanceiroRepository.finalizarTentativaTransferencia({
           idRepasse,
           attemptId: iniciado.attemptId,
           resultado: { tipo: 'verificando', codigoSolicitacao: null },

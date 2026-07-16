@@ -12,6 +12,39 @@ import {
 const tracer = trace.getTracer('eunenem-server');
 
 /**
+ * Explicit retry policy for the executar queue. pg-boss v12 defaults
+ * retryLimit to 2 — BELOW the executar handler's in-process transient cap
+ * (MAX_TENTATIVAS_TRANSITORIAS = 4). If pg-boss gives up after 2 retries, a
+ * persistently-transient failure strands the repasse in `aprovado` (the last
+ * transitorio revert) with a dead job and NO sweeper. This limit MUST stay
+ * strictly greater than that cap so the handler's own falhou terminator fires
+ * first; the +buffer covers the initial delivery. `retryBackoff` spaces the
+ * transient retries (15s, 30s, 60s…). `expireInSeconds` bounds a hung handler
+ * (a stalled Inter HTTP call) — re-delivery is money-safe because iniciar's
+ * FOR-UPDATE `reconciliar` branch diverts a re-delivered in-flight attempt to
+ * verificando instead of re-calling pagarPix.
+ */
+const EXECUTAR_JOB_OPTIONS = {
+  retryLimit: 6, // > MAX_TENTATIVAS_TRANSITORIAS (4) — handler terminates first
+  retryDelay: 15,
+  retryBackoff: true,
+  expireInSeconds: 120,
+} as const;
+
+/**
+ * Retry policy for the confirmar queue. Confirmar self-reschedules on its own
+ * escalating backoff (via enqueueConfirmar), so pg-boss retries only cover
+ * transient handler faults (e.g. a provider blip). It NEVER moves money, so a
+ * few quick retries are safe. `expireInSeconds` bounds a hung poll.
+ */
+const CONFIRMAR_JOB_OPTIONS = {
+  retryLimit: 3,
+  retryDelay: 30,
+  retryBackoff: true,
+  expireInSeconds: 60,
+} as const;
+
+/**
  * Wraps the engine's transaction-bound {@link RepasseTransactionExecutor} into
  * the {@link Db} shape pg-boss expects for its `db` send option. pg-boss calls
  * `executeSql(text, values)` on this object, so the job INSERT rides the SAME
@@ -52,10 +85,13 @@ export class RepasseJobEnqueuerPgBoss implements RepasseJobEnqueuer {
         try {
           // Transactional (approve = pay) when an executor is supplied;
           // plain enqueue on pg-boss's own pool for the admin retry path.
+          // Explicit retry policy either way (see EXECUTAR_JOB_OPTIONS).
           await this.boss.send(
             REPASSE_EXECUTAR_QUEUE,
             data,
-            executor ? { db: toPgBossDb(executor) } : {},
+            executor
+              ? { ...EXECUTAR_JOB_OPTIONS, db: toPgBossDb(executor) }
+              : { ...EXECUTAR_JOB_OPTIONS },
           );
         } catch (err) {
           span.setStatus({
@@ -90,6 +126,7 @@ export class RepasseJobEnqueuerPgBoss implements RepasseJobEnqueuer {
         span.setAttribute('repasse.delay_seconds', delaySeconds);
         try {
           await this.boss.send(REPASSE_CONFIRMAR_QUEUE, data, {
+            ...CONFIRMAR_JOB_OPTIONS,
             startAfter: delaySeconds,
           });
         } catch (err) {

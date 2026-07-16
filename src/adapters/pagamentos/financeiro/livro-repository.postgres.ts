@@ -1148,14 +1148,24 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
               `.execute(tx);
             }
 
-            // Append a reconciliation audit row (attempt history).
+            // Close out the CURRENT attempt row with its reconciled terminal
+            // outcome. We UPDATE the existing intent/verificando row (attempt_no
+            // = transferAttempts) rather than INSERT a new one: inserting a row
+            // that reuses attempt_no collides with the intent row under
+            // repasse_transfer_attempts_repasse_attempt_uniq (23505 → the whole
+            // resolution rolls back, so a confirmed payment never books). This
+            // mirrors finalizarTentativa, which already closes the same row.
+            // The reconciliation note is appended to request_summary so the
+            // original attempt context is preserved.
             await sql`
-              INSERT INTO repasse_transfer_attempts
-                (id, repasse_id, attempt_no, referencia, started_at,
-                 request_summary, outcome, codigo_solicitacao, error, finished_at)
-                VALUES (${randomUUID()}, ${updated.id}, ${updated.transferAttempts},
-                        ${updated.transferReferencia ?? ''}, ${input.agora},
-                        ${input.reconciliacaoResumo}, ${resultado.tipo}, ${codigo}, ${erro}, ${input.agora})
+              UPDATE repasse_transfer_attempts
+                SET outcome = ${resultado.tipo},
+                    codigo_solicitacao = COALESCE(${codigo}, codigo_solicitacao),
+                    error = ${erro},
+                    finished_at = ${input.agora},
+                    request_summary = COALESCE(request_summary, '') || ${` | reconciliacao: ${input.reconciliacaoResumo}`}
+                WHERE repasse_id = ${updated.id}
+                  AND attempt_no = ${updated.transferAttempts}
             `.execute(tx);
 
             return { repasse: updated };
@@ -1213,13 +1223,23 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
             const lancamentosLiberados = Number(releaseResult.numAffectedRows ?? 0n);
 
             // Audit row carrying the acting admin (no PII beyond the admin id).
+            // Cancel is NOT a payment attempt — it must not reuse the last
+            // attempt_no (that collides with the intent row under
+            // repasse_transfer_attempts_repasse_attempt_uniq → 23505, killing
+            // the only claim-release path). Give it its own number via MAX+1.
+            // This is collision-free because `cancelado` is terminal: no
+            // future iniciarTransferencia can ever claim MAX+1 (cancel and a
+            // racing retry are mutually exclusive under FOR UPDATE).
             await sql`
               INSERT INTO repasse_transfer_attempts
                 (id, repasse_id, attempt_no, referencia, started_at,
                  request_summary, outcome, finished_at)
-                VALUES (${randomUUID()}, ${updated.id}, ${updated.transferAttempts},
-                        ${updated.transferReferencia ?? ''}, ${input.agora},
-                        ${`cancelado_por:${input.canceladoPor}`}, ${'cancelado'}, ${input.agora})
+                SELECT ${randomUUID()}, ${updated.id},
+                       COALESCE(MAX(attempt_no), 0) + 1,
+                       ${updated.transferReferencia ?? ''}, ${input.agora},
+                       ${`cancelado_por:${input.canceladoPor}`}, ${'cancelado'}, ${input.agora}
+                  FROM repasse_transfer_attempts
+                  WHERE repasse_id = ${updated.id}
             `.execute(tx);
 
             return { repasse: updated, lancamentosLiberados };

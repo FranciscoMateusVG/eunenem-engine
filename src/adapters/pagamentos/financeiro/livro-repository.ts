@@ -309,8 +309,10 @@ export interface LivroFinanceiroRepository {
   /**
    * confirmar — resolve a `verificando` repasse from reconciliation.
    * SELECT FOR UPDATE, require status='verificando', apply `pago` or
-   * `falhou` (pago stamps transferido_em), and append a reconciliation
-   * audit row. No-op if the repasse already left `verificando`.
+   * `falhou` (pago stamps transferido_em), and close the CURRENT attempt
+   * row in place (UPDATE — reusing attempt_no on a fresh INSERT collides
+   * with the intent row's unique constraint). No-op if the repasse already
+   * left `verificando`.
    */
   resolverVerificacaoTransferencia(input: {
     readonly idRepasse: IdRepasse;

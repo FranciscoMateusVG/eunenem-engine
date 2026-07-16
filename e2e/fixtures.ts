@@ -271,7 +271,6 @@ export const test = base.extend<SeedFixtures>({
    * `ADMIN_ALLOWED_EMAILS` env so `auth.me.isAdmin` resolves true and the
    * AdminShell gate (aperture-r5fg0) lets the real admin chrome render.
    */
-  // biome-ignore lint/correctness/noEmptyPattern: fixture instantiates its own deps; no upstream fixture needed.
   adminAuthenticatedContext: async ({ browser, baseURL }, use) => {
     const db = createDatabase(DATABASE_URL);
     const deps = buildSeedDeps(db);

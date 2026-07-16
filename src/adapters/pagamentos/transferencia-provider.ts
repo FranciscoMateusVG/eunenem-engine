@@ -66,6 +66,16 @@ export interface BuscarPagamentosInput {
 export interface PagamentoEncontrado {
   readonly codigoSolicitacao: string;
   readonly valorCents: MoneyCents;
+  /**
+   * The stable per-repasse `referencia` we sent to Inter, echoed back on the
+   * payment record. This is the STRONG reconciliation key — the caller
+   * matches on it, NOT on valor alone. Matching on valor-only can adopt an
+   * unrelated same-amount payment (falsely `pago`) or miss the real one
+   * (falsely `falhou` → admin retry → second PIX). The real adapter
+   * (aperture-ju5w2) MUST populate this from Inter's payment record; a
+   * record whose referencia can't be recovered is NOT a safe match.
+   */
+  readonly referencia: string;
   readonly chave?: string;
   readonly status: string;
 }
