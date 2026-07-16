@@ -1,3 +1,4 @@
+import './src/lib/glitchtip/instrument.js'; // MUST stay first — GlitchTip/Sentry init (aperture-sm4el)
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch';

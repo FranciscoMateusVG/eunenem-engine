@@ -33,6 +33,10 @@ services:
       - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY:-}
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
       - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
+      # GlitchTip error tracking (aperture-sm4el). Absent/empty → SDK is a
+      # boot-safe no-op (src/lib/glitchtip/instrument.ts logs one line and
+      # skips init). DSN is set per-environment in Dokploy, never committed.
+      - GLITCHTIP_DSN=${GLITCHTIP_DSN:-}
       - LOG_PII_HASH_SALT=${LOG_PII_HASH_SALT:-}
       - TRUSTED_HOP_COUNT=${TRUSTED_HOP_COUNT:-1}
       # Object storage for profile photos (aperture-0bgo3 / R5 aperture-kcasm).

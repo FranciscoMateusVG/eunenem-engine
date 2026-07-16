@@ -30,6 +30,10 @@ services:
       STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      # GlitchTip error tracking (aperture-sm4el). Absent/empty → SDK is a
+      # boot-safe no-op (src/lib/glitchtip/instrument.ts logs one line and
+      # skips init). DSN is set per-environment in Dokploy, never committed.
+      GLITCHTIP_DSN: ${GLITCHTIP_DSN:-}
       # Object storage for profile photos — platform MinIO. Endpoint must be
       # the PUBLIC storage domain so browser presigned PUTs reach it;
       # access/secret are a bucket-scoped key.
