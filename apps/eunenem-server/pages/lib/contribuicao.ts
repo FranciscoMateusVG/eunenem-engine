@@ -25,34 +25,44 @@
 // `trpc.useUtils().contribuicao.list.invalidate()`. Mock-era manual
 // queryKey + useQueryClient dropped — trpc-react-query manages its own keys.
 
-import { TRPCClientError } from "@trpc/client";
-
-import {
-  type BulkCreateInput,
-  type ContribuicaoDTO,
-  type CreateInput,
-  type DeleteInput,
-  type UpdateInput,
-} from "./mocks/contribuicao-mock.js";
-import { type SemIdCampanha, useCampanhaEscrita } from "./campanha-escrita.js";
-import { useCampanhaRota } from "./campanha-rota.js";
-import { trpc } from "./trpc.js";
-
-// ── Re-exported contract types ─────────────────────────────────────────────
-
-export type {
+import { TRPCClientError } from '@trpc/client';
+import { type SemIdCampanha, useCampanhaEscrita } from './campanha-escrita.js';
+import { useCampanhaRota } from './campanha-rota.js';
+import type {
   BulkCreateInput,
   ContribuicaoDTO,
   CreateInput,
   DeleteInput,
   UpdateInput,
-};
+} from './mocks/contribuicao-mock.js';
+import { trpc } from './trpc.js';
+
+// ── Re-exported contract types ─────────────────────────────────────────────
+
+export type { BulkCreateInput, ContribuicaoDTO, CreateInput, DeleteInput, UpdateInput };
 
 // ── Money helpers ──────────────────────────────────────────────────────────
 
 /** BRL float (49.9) → cents (4990). Source of truth for write paths. */
 export function centsFromBRL(brl: number): number {
   return Math.round(brl * 100);
+}
+
+/**
+ * Parse a Brazilian-formatted price string → BRL float.
+ *
+ * BR convention: `.` is the thousand separator, `,` is the decimal separator.
+ * The old inline `parseFloat(s.replace(",", "."))` collapsed thousand
+ * separators (only the FIRST comma was swapped and dots were left in place),
+ * so `"1.500,00"` parsed as `1.5` → a ~1000× undercharge on high-value gifts
+ * (aperture-t8zj5). Strip every thousand-dot, normalize the decimal comma,
+ * then parse. `|| 0` guards empty / non-numeric input.
+ *
+ *   "1.500,00" → 1500      "1.234,56" → 1234.56
+ *   "2.000"    → 2000      "50,00"    → 50        "" / "abc" → 0
+ */
+export function parseValorBRL(input: string): number {
+  return parseFloat(input.trim().replace(/\./g, '').replace(',', '.')) || 0;
 }
 
 /** Cents (4990) → BRL float (49.9). For display formatters. */
@@ -72,13 +82,13 @@ export function brlFromCents(cents: number): number {
 // on the most-common catalog tint for that category (peach-soft).
 
 const CATEGORY_BG_COLOR: Record<string, string> = {
-  fraldas: "var(--lilac-soft)",
-  higiene: "var(--pink-soft)",
-  roupa: "var(--pink-soft)",
-  soninho: "var(--lilac-soft)",
-  alimentacao: "var(--blue)",
-  passeio: "var(--peach-soft)",
-  personalizado: "var(--cream-2)",
+  fraldas: 'var(--lilac-soft)',
+  higiene: 'var(--pink-soft)',
+  roupa: 'var(--pink-soft)',
+  soninho: 'var(--lilac-soft)',
+  alimentacao: 'var(--blue)',
+  passeio: 'var(--peach-soft)',
+  personalizado: 'var(--cream-2)',
 };
 
 /**
@@ -87,30 +97,30 @@ const CATEGORY_BG_COLOR: Record<string, string> = {
  * don't appear in ListaCategory) fall back to the lilac soft tint.
  */
 export function deriveBgColor(grupo: string | null): string {
-  if (grupo === null) return "var(--lilac-soft)";
-  return CATEGORY_BG_COLOR[grupo] ?? "var(--lilac-soft)";
+  if (grupo === null) return 'var(--lilac-soft)';
+  return CATEGORY_BG_COLOR[grupo] ?? 'var(--lilac-soft)';
 }
 
 // ── Error mapping ──────────────────────────────────────────────────────────
 
 /** Discriminated error type so the UI can render the right toast. */
 export type ContribuicaoError =
-  | { kind: "locked" }
-  | { kind: "not-found" }
-  | { kind: "unauthorized" }
-  | { kind: "network" };
+  | { kind: 'locked' }
+  | { kind: 'not-found' }
+  | { kind: 'unauthorized' }
+  | { kind: 'network' };
 
 /** pt-BR friendly message per error kind. */
 export function contribuicaoErrorMessage(err: ContribuicaoError): string {
   switch (err.kind) {
-    case "locked":
-      return "esse mimo já foi reservado, não dá pra mudar agora ♡";
-    case "not-found":
-      return "esse mimo não existe mais";
-    case "unauthorized":
-      return "sem permissão pra essa ação";
-    case "network":
-      return "deu ruim na conexão — tenta de novo daqui a pouco ♡";
+    case 'locked':
+      return 'esse mimo já foi reservado, não dá pra mudar agora ♡';
+    case 'not-found':
+      return 'esse mimo não existe mais';
+    case 'unauthorized':
+      return 'sem permissão pra essa ação';
+    case 'network':
+      return 'deu ruim na conexão — tenta de novo daqui a pouco ♡';
   }
 }
 
@@ -122,26 +132,26 @@ export function contribuicaoErrorMessage(err: ContribuicaoError): string {
  */
 export function toContribuicaoError(err: unknown): ContribuicaoError {
   const code = extractTrpcCode(err);
-  const message = err instanceof Error ? err.message : "";
+  const message = err instanceof Error ? err.message : '';
   switch (code) {
-    case "BAD_REQUEST":
-      if (message.includes("contribuicao_locked")) {
-        return { kind: "locked" };
+    case 'BAD_REQUEST':
+      if (message.includes('contribuicao_locked')) {
+        return { kind: 'locked' };
       }
-      return { kind: "network" };
-    case "NOT_FOUND":
-      return { kind: "not-found" };
-    case "UNAUTHORIZED":
-      return { kind: "unauthorized" };
+      return { kind: 'network' };
+    case 'NOT_FOUND':
+      return { kind: 'not-found' };
+    case 'UNAUTHORIZED':
+      return { kind: 'unauthorized' };
     default:
-      return { kind: "network" };
+      return { kind: 'network' };
   }
 }
 
 /** Duck-typed code extraction. Returns null for non-tRPC errors. */
 function extractTrpcCode(err: unknown): string | null {
   if (err instanceof TRPCClientError) {
-    return typeof err.data?.code === "string" ? err.data.code : null;
+    return typeof err.data?.code === 'string' ? err.data.code : null;
   }
   return null;
 }
@@ -181,8 +191,12 @@ export function useContribuicaoCreate() {
   });
   return {
     ...m,
-    mutate: ((input, opts) => m.mutate({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutate>,
-    mutateAsync: ((input, opts) => m.mutateAsync({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutateAsync>,
+    mutate: ((input, opts) =>
+      m.mutate({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutate>,
+    mutateAsync: ((input, opts) =>
+      m.mutateAsync({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<
+      typeof m.mutateAsync
+    >,
   };
 }
 
@@ -204,8 +218,12 @@ export function useContribuicaoCreateBulk() {
   });
   return {
     ...m,
-    mutate: ((input, opts) => m.mutate({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutate>,
-    mutateAsync: ((input, opts) => m.mutateAsync({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutateAsync>,
+    mutate: ((input, opts) =>
+      m.mutate({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutate>,
+    mutateAsync: ((input, opts) =>
+      m.mutateAsync({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<
+      typeof m.mutateAsync
+    >,
   };
 }
 
@@ -222,8 +240,12 @@ export function useContribuicaoUpdate() {
   });
   return {
     ...m,
-    mutate: ((input, opts) => m.mutate({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutate>,
-    mutateAsync: ((input, opts) => m.mutateAsync({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutateAsync>,
+    mutate: ((input, opts) =>
+      m.mutate({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutate>,
+    mutateAsync: ((input, opts) =>
+      m.mutateAsync({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<
+      typeof m.mutateAsync
+    >,
   };
 }
 
@@ -240,7 +262,11 @@ export function useContribuicaoDelete() {
   });
   return {
     ...m,
-    mutate: ((input, opts) => m.mutate({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutate>,
-    mutateAsync: ((input, opts) => m.mutateAsync({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutateAsync>,
+    mutate: ((input, opts) =>
+      m.mutate({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<typeof m.mutate>,
+    mutateAsync: ((input, opts) =>
+      m.mutateAsync({ ...input, idCampanha: idCampanha ?? '' }, opts)) as SemIdCampanha<
+      typeof m.mutateAsync
+    >,
   };
 }
