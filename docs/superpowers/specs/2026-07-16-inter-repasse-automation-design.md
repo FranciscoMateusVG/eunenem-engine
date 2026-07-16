@@ -158,6 +158,7 @@ Enforcement layers:
 - OAuth scopes minimal: payment-write + the consult/search read scope. No other banking scopes.
 - No PII (chave, CPF, recipient name) in logs, traces, or error strings persisted to `last_transfer_error` — error detail references Inter's error codes + codigoSolicitacao only.
 - Staging **cannot** hold prod Inter credentials (fake adapter only, or a separate Inter sandbox credential if adopted later — ties into `aperture-68zbw` prod/staging secret differentiation).
+- **Adapter selection is env-driven** (`TRANSFERENCIA_PROVIDER=fake|inter`) with a **boot guard**: the server refuses to start with the real adapter unless `NODE_ENV=production`. Staging structurally cannot fire real transfers.
 - Cipher reviews the adapter + the aprovar path pre-merge (money movement = mandatory security gate).
 
 ## 8. Testing
