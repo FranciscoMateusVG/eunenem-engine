@@ -3,11 +3,9 @@
  *
  * User-path spec (design spec §9) against Vance's CampanhasPage (PR #321) +
  * Rex's campanhas.list (PR #320):
- *   - legacy-matching user sees the mixed grid: 1.0 card + 2.0 card + NOVA LISTA
- *   - 1.0 card is a REAL anchor to the silent-login bridge /api/legacy-bridge
- *     (post-#325; 302s into the legacy system). We assert the attribute — no
- *     cross-navigation into prod Clerk from CI; the Clerk leg is covered by
- *     the operator-assisted walk, per verify-user-path
+ *   - aperture-6ykni (Thacy QA 2026-07-16, operator call): the 1.0 bridge
+ *     card is REMOVED — a legacy-matching user sees the 2.0-only grid; the
+ *     welcome modal is the only remaining legacy-history surface here
  *   - 2.0 card CTA navigates to the user's /painel/:slug (clicked, not just seen)
  *   - welcome modal: first-visit shows (legado > 0 + flag absent), OK dismisses
  *     within-session. Post-#327 the dismiss×opt-out persistence matrix lives in
@@ -26,17 +24,14 @@
  */
 
 import { test as base, expect } from '@playwright/test';
-import {
-  CAMPANHAS_WELCOME_STORAGE_KEY,
-  LEGACY_MIGRACAO_URL,
-} from '../apps/eunenem-server/pages/lib/campanhas.js';
+import { CAMPANHAS_WELCOME_STORAGE_KEY } from '../apps/eunenem-server/pages/lib/campanhas.js';
 import { test as seededTest } from './fixtures.js';
 // Legacy-user fixture extracted to legacy-fixtures.ts (aperture-8bac7) so the
 // welcome-optout spec shares the same self-healing seed.
 import { test } from './legacy-fixtures.js';
 
 test.describe('/campanhas — legacy-matching user (the POC user path, spec §9)', () => {
-  test('mixed grid renders: 1.0 card + 2.0 card + NOVA LISTA, with correct CTA targets', async ({
+  test('grid renders 2.0 card + NOVA LISTA — and NO 1.0 card (aperture-6ykni rollback)', async ({
     legacyPage,
   }) => {
     const res = await legacyPage.goto('/campanhas', { waitUntil: 'domcontentloaded' });
@@ -46,18 +41,11 @@ test.describe('/campanhas — legacy-matching user (the POC user path, spec §9)
     const grid = legacyPage.getByTestId('campanhas-grid');
     await expect(grid).toBeVisible();
 
-    // 1.0 card — visible, selo carries literal text (WCAG 1.4.1: not color-only),
-    // CTA is a REAL anchor to the legacy dashboard. Attribute assertion, no
-    // cross-nav: the Clerk leg belongs to the operator-assisted staging walk.
-    const cardLegado = legacyPage.getByTestId('card-legado').first();
-    await expect(cardLegado).toBeVisible();
-    await expect(cardLegado).toContainText('1.0');
-    // UPDATED for aperture-pjd74: the 1.0 CTA points at the old site's
-    // /migracao explainer (supersedes the as0v3 silent bridge). Attribute
-    // assertion only — the target crosses to prod Clerk, which stays in the
-    // operator-assisted walk.
-    const legadoCta = cardLegado.locator(`a[href="${LEGACY_MIGRACAO_URL}"]`);
-    await expect(legadoCta).toBeVisible();
+    // aperture-6ykni (Thacy QA, operator call): the 7hm2g "EuNeném Legado /
+    // continuar na 1.0" bridge card is REMOVED — even for a legacy-matching
+    // user the grid is 2.0-only. The welcome modal (asserted below) remains
+    // the only legacy-history surface on this page.
+    await expect(legacyPage.getByTestId('card-legado')).toHaveCount(0);
 
     // 2.0 card — visible, selo text, CTA points at the multicampanha
     // /painel/:slug/c/:idCampanha URL (CampanhasPage.tsx:581). The
