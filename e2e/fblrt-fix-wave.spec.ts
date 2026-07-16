@@ -43,6 +43,7 @@ import { expect, request as pwRequest, test } from '@playwright/test';
 import { CAMPANHAS_WELCOME_STORAGE_KEY } from '../apps/eunenem-server/pages/lib/campanhas.js';
 import { ID_PLATAFORMA_EUNENEM } from '../apps/eunenem-server/pages/lib/constants.js';
 import { menuItemHref } from '../apps/eunenem-server/pages/lib/painelRoutes.js';
+import { seedGateWalker } from './gate-fixtures.js';
 
 const GATE_EMAIL = process.env.E2E_GATE_EMAIL;
 const GATE_SENHA = process.env.E2E_GATE_SENHA;
@@ -119,6 +120,10 @@ test.describe('fblrt fix-wave regression gates (aperture-iu9ji)', () => {
   let legadoCount = 0;
 
   test.beforeAll(async ({ browser, baseURL }) => {
+    // Hermetic seed (coverage-expansion): find-or-create the gate-walker +
+    // campanhas A/B directly in the DB so the login/self-heal below finds the
+    // full contract already correct on a fresh local DB. No-op when creds unset.
+    await seedGateWalker();
     expect(baseURL, 'baseURL must be configured').toBeTruthy();
     api = await pwRequest.newContext({ baseURL });
 
