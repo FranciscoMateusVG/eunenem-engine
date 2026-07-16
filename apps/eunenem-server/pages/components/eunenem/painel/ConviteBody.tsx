@@ -25,6 +25,7 @@ import {
   EVENT_BY_ID,
   EVENT_TYPES,
   formatDateScrap,
+  MENSAGEM_CONVITE_PADRAO,
   NAME_FONT_BY_ID,
   NAME_FONTS,
   PALETTE_BY_ID,
@@ -1855,14 +1856,20 @@ function StepQuem({ state, update, errors }: StepViewProps) {
       <label className="cv-label" htmlFor="cv-message">
         mensagem afetiva
       </label>
+      {/* aperture-xipsr — placeholder mirrors the SERVER DEFAULT applied to a
+          blank message on save (Rex's PR #24), plus an explicit hint, so the
+          defaulting reads as intentional rather than silent. */}
       <textarea
         id="cv-message"
         className="cv-textarea"
         rows={3}
         value={state.message}
         onChange={(e) => update("message", e.target.value)}
-        placeholder="uma mensagem curtinha, do coração ♡"
+        placeholder={MENSAGEM_CONVITE_PADRAO}
       />
+      <div className="cv-note" style={{ marginTop: 8, marginBottom: 0 }}>
+        ✨ se deixar em branco, usamos essa mensagem padrão ♡
+      </div>
     </>
   );
 }

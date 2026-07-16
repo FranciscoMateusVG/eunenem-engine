@@ -22,13 +22,14 @@ import {
   DISABLED_EVENT_TYPES,
   EVENT_BY_ID,
   EVENT_TYPES,
+  MENSAGEM_CONVITE_PADRAO,
   NAME_FONTS,
   PALETTES,
   type ConviteState,
 } from "@/lib/mocks/convite";
 import { TEMPLATES, type Template } from "@/lib/mocks/templates";
 
-import { InvitePreview, SUGGEST, conviteFieldErrors } from "./ConviteBody";
+import { InvitePreview, conviteFieldErrors } from "./ConviteBody";
 
 // aperture-zlrd2 — Mobile-specific convites wizard.
 //
@@ -612,9 +613,6 @@ function MStepTipo({ state, update }: StepProps) {
 
 function MStepQuem({ state, update }: StepProps) {
   const ev = EVENT_BY_ID[state.eventType] ?? EVENT_TYPES[0]!;
-  // aperture-39blz — the "✦ sugestão" (pedir ajuda à IA) pill was removed; the
-  // SUGGEST copy is still used only as the textarea placeholder hint.
-  const suggestion = SUGGEST[state.eventType] ?? SUGGEST["cha-bebe"]!;
 
   return (
     <div className="mcv-stack">
@@ -644,7 +642,10 @@ function MStepQuem({ state, update }: StepProps) {
       </div>
       <div>
         {/* aperture-39blz — removed the "✦ sugestão" (pedir ajuda à IA) pill;
-            the affectionate message should be the creator's own words. */}
+            the affectionate message should be the creator's own words.
+            aperture-xipsr — the placeholder is now the SERVER DEFAULT the
+            save applies when left blank (not a per-event suggestion), plus
+            an explicit hint, so defaulting reads as intentional. */}
         <label className="mcv-label" htmlFor="mcv-message">
           mensagem afetiva
         </label>
@@ -654,8 +655,11 @@ function MStepQuem({ state, update }: StepProps) {
           rows={3}
           value={state.message}
           onChange={(e) => update("message", e.target.value)}
-          placeholder={suggestion.message}
+          placeholder={MENSAGEM_CONVITE_PADRAO}
         />
+        <div className="mcv-note">
+          ✨ se deixar em branco, usamos essa mensagem padrão ♡
+        </div>
       </div>
     </div>
   );
