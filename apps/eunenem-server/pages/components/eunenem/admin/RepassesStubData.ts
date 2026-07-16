@@ -1,5 +1,4 @@
 import { TRPCClientError } from "@trpc/client";
-import { useState } from "react";
 import { trpc } from "@/lib/trpc.js";
 
 /**
@@ -8,10 +7,12 @@ import { trpc } from "@/lib/trpc.js";
  *
  * Procs in play (all under `trpc.admin.repasses.*`):
  *   - list({ statusFilter, cursor, limit })   → query (7-state DTO + transfer fields)
- *   - show({ idRepasse })                     → query (detail + attempts[] history)
+ *   - show({ idRepasse })                     → query (detail + attempts[] + candidatos)
  *   - aprovar({ idRepasse, bankTransferRef }) → mutation
  *   - retry({ idRepasse })                    → mutation (falhou → transferindo)
  *   - cancelar({ idRepasse })                 → mutation (falhou → cancelado)
+ *   - resolverManualPago({ idRepasse, codigoSolicitacao }) → mutation (§5.4)
+ *   - resolverManualFalhou({ idRepasse })     → mutation (§5.4)
  *
  * Auth: admin-scope (no recebedor session check — operators see ALL
  * repasses across campanhas). v1 has no admin auth gate per dispatch.
@@ -20,16 +21,16 @@ import { trpc } from "@/lib/trpc.js";
  *   - `recebedorNome: string` → `string | null`. Rex's wire allows null
  *     for deactivated-recebedor cases. Consumer renders a
  *     "(sem recebedor)" affordance for null.
- *   - retry/cancelar output `status` as plain `string` on the wire (not the
+ *   - Mutation outputs type `status` as plain `string` on the wire (not the
  *     enum); the hooks narrow it — the FSM guarantees the value.
- *
- * STILL PLACEHOLDER (spec §5.4 amendment, Rex's aperture-ju5w2 pending):
- * manual resolution of search-fallback `verificando` repasses — the
- * needs-manual-resolution flag, the search-candidate list, and the
- * resolverManualPago/resolverManualFalhou mutations. Flag + candidates are
- * defensive-read off the wire (default off/empty) so the UI activates the
- * moment his DTO widening lands; the two mutations are local simulations
- * to swap exactly like retry/cancelar were.
+ *   - §5.4 candidates ride the show DTO as `candidatos`
+ *     (RepasseReconciliacaoCandidatoDTO[]) with `dataMovimento: string|null`
+ *     — NOT the `searchCandidates`/`data` shape this module scaffolded.
+ *     Wire name mapped here; UI keeps `searchCandidates`.
+ *   - resolverManual* are IDEMPOTENT NO-OPS from any non-legal state (the
+ *     repository concurrency guard): they return the CURRENT status instead
+ *     of erroring. Consumers must render off the returned status, not the
+ *     asserted one (concurrent-resolution race, aperture-477nz).
  */
 
 // ── Locked contract types (mirror Rex's exports verbatim) ──────────────────
@@ -85,7 +86,7 @@ export type RepasseListRow = {
    * Spec §5.4 (amended): Inter cannot echo our referencia, so search-fallback
    * reconciliation is human-resolved. True on a `verificando` repasse whose
    * reconciliation found search candidates and parked awaiting an operator.
-   * DEFENSIVE-READ (defaults false) until Rex's aperture-ju5w2 DTO lands.
+   * Live on both list + show DTOs since aperture-477nz.
    */
   needsManualResolution: boolean;
 };
@@ -127,15 +128,15 @@ export type RepasseTransferAttempt = {
  * One persisted search-fallback candidate (spec §5.4 amended): an Inter
  * payment surfaced by `buscarPagamentos` that MIGHT be our transfer. The
  * operator resolves the ambiguity by matching (or asserting no match).
- * Shape is Vance's contract request to Rex (aperture-ju5w2) — mirror his
- * export verbatim when it lands.
+ * Mirrors Rex's `RepasseReconciliacaoCandidatoDTO` (aperture-477nz)
+ * verbatim; rides the show DTO under the wire name `candidatos`.
  */
 export type RepasseSearchCandidate = {
   /** Inter's payment id — what "Marcar como pago" records as the match. */
   codigoSolicitacao: string;
   valorCents: number;
-  /** ISO date of the payment on Inter's side. */
-  data: string;
+  /** ISO date of the payment movement on Inter's side; null when unknown. */
+  dataMovimento: string | null;
   /** Masked destination chave (never the full key — PII discipline). */
   chaveMascarada: string | null;
   /** Free-text PIX description when Inter returns one. */
@@ -151,7 +152,7 @@ export type RepasseDetail = RepasseListRow & {
   attempts: readonly RepasseTransferAttempt[];
   /**
    * Persisted search candidates for a needs-manual-resolution repasse
-   * (spec §5.4). DEFENSIVE-READ (defaults `[]`) until aperture-ju5w2 lands.
+   * (spec §5.4). Wire field `candidatos` (aperture-477nz), mapped here.
    */
   searchCandidates: readonly RepasseSearchCandidate[];
 };
@@ -223,11 +224,9 @@ export function useStubRepassesList(): RepassesListResult {
 }
 
 /**
- * Wire → UI row adapter. Rex's `RepasseAdminDTO` carries the 7-state status
- * and the four transfer fields since vvh2j — those map directly. Only the
- * §5.4 manual-resolution flag is still read DEFENSIVELY (typeof-guarded off
- * the raw row): it defaults today and flows the moment his aperture-ju5w2
- * DTO widening lands — no consumer change, single swap point stays this file.
+ * Wire → UI row adapter. Rex's `RepasseAdminDTO` carries the 7-state status,
+ * the four transfer fields (vvh2j) and the §5.4 manual-resolution flag
+ * (477nz) — everything maps directly; the single swap point stays this file.
  */
 function toListRow(row: {
   idRepasse: string;
@@ -244,6 +243,7 @@ function toListRow(row: {
   interCodigoSolicitacao: string | null;
   transferAttempts: number;
   lastTransferError: string | null;
+  needsManualResolution: boolean;
 }): RepasseListRow {
   return {
     idRepasse: row.idRepasse,
@@ -260,13 +260,8 @@ function toListRow(row: {
     interCodigoSolicitacao: row.interCodigoSolicitacao,
     transferAttempts: row.transferAttempts,
     lastTransferError: row.lastTransferError,
-    needsManualResolution: optBool(row, "needsManualResolution"),
+    needsManualResolution: row.needsManualResolution,
   };
-}
-
-function optBool(row: object, key: string): boolean {
-  const v = (row as Record<string, unknown>)[key];
-  return typeof v === "boolean" ? v : false;
 }
 
 /**
@@ -286,30 +281,24 @@ export function useStubRepasseDetail(idRepasse: string): RepasseDetailResult {
 }
 
 /**
- * Wire → UI detail adapter. `attempts` is embedded on the show DTO since
- * vvh2j (attemptNo ascending, from `repasse_transfer_attempts`). The §5.4
- * `searchCandidates` list stays defensive-read (defaults `[]`) until
- * aperture-ju5w2 lands.
+ * Wire → UI detail adapter. `attempts` (vvh2j, attemptNo ascending) and
+ * `candidatos` (477nz, §5.4 masked reconciliation candidates) are embedded
+ * on the show DTO — `candidatos` is renamed to the UI-side
+ * `searchCandidates` here, the module's single wire↔UI seam.
  */
 function toDetail(
   repasse: Parameters<typeof toListRow>[0] & {
     lancamentos: readonly RepasseDetailLancamento[];
     attempts: readonly RepasseTransferAttempt[];
+    candidatos: readonly RepasseSearchCandidate[];
   },
 ): RepasseDetail {
   return {
     ...toListRow(repasse),
     lancamentos: repasse.lancamentos,
     attempts: repasse.attempts,
-    searchCandidates: readSearchCandidates(repasse),
+    searchCandidates: repasse.candidatos,
   };
-}
-
-function readSearchCandidates(
-  repasse: object,
-): readonly RepasseSearchCandidate[] {
-  const v = (repasse as Record<string, unknown>).searchCandidates;
-  return Array.isArray(v) ? (v as RepasseSearchCandidate[]) : [];
 }
 
 /**
@@ -407,21 +396,24 @@ export function useStubRepasseCancelar(
 
 // ── Manual resolution (spec §5.4 amended — search-fallback verificando) ────
 //
-// PLACEHOLDER MUTATIONS. `trpc.admin.repasses.resolverManualPago` and
-// `.resolverManualFalhou` do NOT exist yet — Rex is building them on
-// aperture-ju5w2 (Inter can't echo our referencia, so an operator resolves
-// parked `verificando` repasses by matching a search candidate or asserting
-// no payment exists). These local simulations keep the scaffold interactive;
-// at ship time each becomes a real
-// `trpc.admin.repasses.resolverManual<Pago|Falhou>.useMutation({ onSuccess })`
-// with the same list+show invalidation the hooks above do — no consumer
-// change. Exactly the pattern retry/cancelar followed before vvh2j landed.
+// REAL since aperture-477nz (7a43952). Both mirror retry/cancelar:
+// list+show invalidation, typed-code errors (NOT_FOUND / CONFLICT /
+// BAD_REQUEST). IDEMPOTENCY CONTRACT: from any state other than a flagged
+// `verificando`, the backend no-ops and returns the CURRENT status — no
+// error. Consumers key their success UI off `result.status`, never off the
+// assertion they made (two admins can race on the same parked repasse).
 
 export type ResolverManualPagoResult = {
   idRepasse: string;
-  /** Terminal `pago` — the matched payment is recorded as ours. */
+  /**
+   * `pago` when this call resolved the repasse; any other value means a
+   * concurrent resolution won and this is the actual current state.
+   */
   status: RepasseStatus;
-  /** The codigoSolicitacao the operator matched. */
+  /**
+   * The codigoSolicitacao the operator submitted (echoed client-side —
+   * the wire output doesn't carry it).
+   */
   codigoSolicitacao: string;
 };
 
@@ -435,26 +427,41 @@ export type ResolverManualPagoState = {
 export function useStubRepasseResolverManualPago(
   onSuccess: (result: ResolverManualPagoResult) => void,
 ): ResolverManualPagoState {
-  const [data, setData] = useState<ResolverManualPagoResult | null>(null);
-  return {
-    mutate: (input) => {
-      const result: ResolverManualPagoResult = {
-        idRepasse: input.idRepasse,
-        status: "pago",
+  const utils = trpc.useUtils();
+  const mutation = trpc.admin.repasses.resolverManualPago.useMutation({
+    onSuccess: async (result, input) => {
+      await Promise.all([
+        utils.admin.repasses.list.invalidate(),
+        utils.admin.repasses.show.invalidate(),
+      ]);
+      onSuccess({
+        idRepasse: result.idRepasse,
+        status: result.status as RepasseStatus,
         codigoSolicitacao: input.codigoSolicitacao,
-      };
-      setData(result);
-      onSuccess(result);
+      });
     },
-    isPending: false,
-    error: null,
-    data,
+  });
+  return {
+    mutate: (input) => mutation.mutate(input),
+    isPending: mutation.isPending,
+    error: toMutationError(mutation.error),
+    data:
+      mutation.data && mutation.variables
+        ? {
+            idRepasse: mutation.data.idRepasse,
+            status: mutation.data.status as RepasseStatus,
+            codigoSolicitacao: mutation.variables.codigoSolicitacao,
+          }
+        : null,
   };
 }
 
 export type ResolverManualFalhouResult = {
   idRepasse: string;
-  /** `falhou` — retry/cancelar affordances take over from here. */
+  /**
+   * `falhou` when this call resolved the repasse (retry/cancelar take over);
+   * any other value means a concurrent resolution won.
+   */
   status: RepasseStatus;
 };
 
@@ -468,19 +475,29 @@ export type ResolverManualFalhouState = {
 export function useStubRepasseResolverManualFalhou(
   onSuccess: (result: ResolverManualFalhouResult) => void,
 ): ResolverManualFalhouState {
-  const [data, setData] = useState<ResolverManualFalhouResult | null>(null);
-  return {
-    mutate: (input) => {
-      const result: ResolverManualFalhouResult = {
-        idRepasse: input.idRepasse,
-        status: "falhou",
-      };
-      setData(result);
-      onSuccess(result);
+  const utils = trpc.useUtils();
+  const mutation = trpc.admin.repasses.resolverManualFalhou.useMutation({
+    onSuccess: async (result) => {
+      await Promise.all([
+        utils.admin.repasses.list.invalidate(),
+        utils.admin.repasses.show.invalidate(),
+      ]);
+      onSuccess({
+        idRepasse: result.idRepasse,
+        status: result.status as RepasseStatus,
+      });
     },
-    isPending: false,
-    error: null,
-    data,
+  });
+  return {
+    mutate: (input) => mutation.mutate(input),
+    isPending: mutation.isPending,
+    error: toMutationError(mutation.error),
+    data: mutation.data
+      ? {
+          idRepasse: mutation.data.idRepasse,
+          status: mutation.data.status as RepasseStatus,
+        }
+      : null,
   };
 }
 

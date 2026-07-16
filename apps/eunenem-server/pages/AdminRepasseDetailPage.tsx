@@ -363,6 +363,25 @@ function FailedActions({ repasse }: { repasse: RepasseDetail }) {
  *     Inter side (confirm modal). Retry/cancelar take over from `falhou`.
  * --------------------------------------------------------------------- */
 
+/**
+ * Rendered when a manual-resolution assertion lost the race — the wire
+ * no-op'd and returned the state someone (or something) else already set.
+ */
+function ResolvedElsewhereNote({ status }: { status: RepasseStatus }) {
+  return (
+    <div className="rounded-md border border-line bg-paper px-5 py-4">
+      <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-ink-soft">
+        repasse já resolvido
+      </p>
+      <p className="mt-1.5 flex flex-wrap items-center gap-2 text-[13px] text-ink-soft">
+        Este repasse já havia sido resolvido de outra forma — estado atual:
+        <RepasseStatusPill status={status} />. Nenhuma alteração foi feita por
+        esta ação; a página foi atualizada.
+      </p>
+    </div>
+  );
+}
+
 function ManualResolutionActions({ repasse }: { repasse: RepasseDetail }) {
   const [pagoOpen, setPagoOpen] = useState(false);
   const [falhouOpen, setFalhouOpen] = useState(false);
@@ -371,7 +390,15 @@ function ManualResolutionActions({ repasse }: { repasse: RepasseDetail }) {
   const [falhouResult, setFalhouResult] =
     useState<ResolverManualFalhouResult | null>(null);
 
+  // The resolver procs are IDEMPOTENT NO-OPS from any non-legal state: a
+  // concurrent resolution (second admin, or the reconciler landing a
+  // definitive answer) makes the wire return the ACTUAL current status
+  // instead of erroring. Key every success card off `result.status` — the
+  // asserted outcome may have lost the race (aperture-477nz contract).
   if (pagoResult !== null) {
+    if (pagoResult.status !== "pago") {
+      return <ResolvedElsewhereNote status={pagoResult.status} />;
+    }
     return (
       <div className="rounded-md border border-emerald-200 bg-emerald-50 px-5 py-4">
         <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-emerald-800">
@@ -387,6 +414,9 @@ function ManualResolutionActions({ repasse }: { repasse: RepasseDetail }) {
     );
   }
   if (falhouResult !== null) {
+    if (falhouResult.status !== "falhou") {
+      return <ResolvedElsewhereNote status={falhouResult.status} />;
+    }
     return (
       <div className="rounded-md border border-red-200 bg-red-50 px-5 py-4">
         <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-red-800">
@@ -512,7 +542,9 @@ function CandidateRow({ candidate }: { candidate: RepasseSearchCandidate }) {
         {formatBRL(candidate.valorCents)}
       </td>
       <td className="px-3 py-2 font-mono text-[12px] tabular-nums text-ink-soft">
-        {formatShortDate(candidate.data)}
+        {candidate.dataMovimento !== null
+          ? formatShortDate(candidate.dataMovimento)
+          : "—"}
       </td>
       <td className="px-3 py-2 font-mono text-[12px] text-ink-soft">
         {candidate.chaveMascarada ?? "—"}
@@ -626,7 +658,9 @@ function ConfirmMarcarPagoModal({
                       {c.codigoSolicitacao}
                     </span>
                     <span className="block text-[12px] text-ink-soft">
-                      {formatBRL(c.valorCents)} · {formatShortDate(c.data)}
+                      {formatBRL(c.valorCents)}
+                      {c.dataMovimento !== null &&
+                        ` · ${formatShortDate(c.dataMovimento)}`}
                       {c.chaveMascarada !== null && ` · ${c.chaveMascarada}`}
                       {c.descricaoPix !== null && ` · ${c.descricaoPix}`}
                     </span>
@@ -702,6 +736,13 @@ function ConfirmMarcarFalhouModal({
   onSuccess: (result: ResolverManualFalhouResult) => void;
 }) {
   const resolver = useStubRepasseResolverManualFalhou(onSuccess);
+  // aperture-477nz verification finding (Izzy): asserting falhou WHILE
+  // candidates exist, then retrying, is the ONE residual double-pay path in
+  // the whole Inter flow — it rides on this human judgment. With candidates
+  // present the modal escalates: unmissable warning + explicit acknowledgment
+  // gating the confirm.
+  const hasCandidates = repasse.searchCandidates.length > 0;
+  const [acknowledged, setAcknowledged] = useState(false);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -753,9 +794,51 @@ function ConfirmMarcarFalhouModal({
             a esta transferência — confira o extrato do Inter antes de
             confirmar. O repasse vai para{" "}
             <span className="font-mono">falhou</span>, de onde pode ser
-            reprocessado ou cancelado. Se o pagamento na verdade existir,
-            reprocessar pode gerar um pagamento duplicado.
+            reprocessado ou cancelado.
           </p>
+          {hasCandidates && (
+            <div className="space-y-3 rounded-md border-2 border-red-400 bg-red-50 px-4 py-3">
+              <p className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.16em] text-red-800">
+                <span aria-hidden className="text-[15px]">
+                  ⚠
+                </span>
+                risco de pagamento em dobro
+              </p>
+              <p className="text-[13px] leading-relaxed text-red-900">
+                Existe{repasse.searchCandidates.length === 1 ? "" : "m"}{" "}
+                <span className="font-semibold">
+                  {repasse.searchCandidates.length} pagamento
+                  {repasse.searchCandidates.length === 1 ? "" : "s"} candidato
+                  {repasse.searchCandidates.length === 1 ? "" : "s"}
+                </span>{" "}
+                que pode{repasse.searchCandidates.length === 1 ? "" : "m"} ser
+                esta transferência. Se um deles for o pagamento real e este
+                repasse for marcado como falhou,{" "}
+                <span className="font-semibold">
+                  reprocessar enviará um SEGUNDO PIX de{" "}
+                  {formatBRL(repasse.amountCents)} — o recebedor será pago em
+                  dobro e o sistema não tem como impedir
+                </span>
+                . Este é o único ponto de todo o fluxo em que isso pode
+                acontecer, e ele depende exclusivamente desta confirmação.
+              </p>
+              <label className="flex cursor-pointer items-start gap-2.5 rounded-md bg-paper px-3 py-2.5">
+                <input
+                  type="checkbox"
+                  checked={acknowledged}
+                  onChange={(e) => setAcknowledged(e.target.checked)}
+                  className="mt-0.5 accent-red-600"
+                />
+                <span className="text-[13px] leading-snug text-ink">
+                  Conferi o extrato do Inter e confirmo que{" "}
+                  <span className="font-semibold">
+                    nenhum destes candidatos é o pagamento deste repasse
+                  </span>
+                  .
+                </span>
+              </label>
+            </div>
+          )}
           {resolver.error && (
             <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-800">
               {resolver.error.message}
@@ -774,7 +857,7 @@ function ConfirmMarcarFalhouModal({
           <button
             type="button"
             onClick={() => resolver.mutate({ idRepasse: repasse.idRepasse })}
-            disabled={resolver.isPending}
+            disabled={resolver.isPending || (hasCandidates && !acknowledged)}
             className="inline-flex items-center gap-2 rounded-md border border-red-300 bg-red-50 px-4 py-1.5 font-mono text-[11px] uppercase tracking-[0.14em] text-red-800 transition-colors hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:opacity-50"
           >
             {resolver.isPending ? "Confirmando…" : "Confirmar falha"}
