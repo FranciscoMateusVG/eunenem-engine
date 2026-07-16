@@ -2,6 +2,12 @@ import { useMemo, useState } from "react";
 import { AdminShell } from "@/components/eunenem/admin/AdminShell";
 import { DddBadge } from "@/components/eunenem/admin/DddBadge";
 import {
+  ManualResolutionPill,
+  REPASSE_STATUS_ORDER,
+  REPASSE_STATUS_PALETTE,
+  RepasseStatusPill,
+} from "@/components/eunenem/admin/repasse-status";
+import {
   type RepasseListRow,
   type RepasseStatus,
   useStubRepassesList,
@@ -46,13 +52,13 @@ export function AdminRepassesPage() {
     () => rows.filter((r) => r.status === statusFilter),
     [rows, statusFilter],
   );
-  const counts = useMemo(
-    () => ({
-      solicitado: rows.filter((r) => r.status === "solicitado").length,
-      aprovado: rows.filter((r) => r.status === "aprovado").length,
-    }),
-    [rows],
-  );
+  const counts = useMemo(() => {
+    const acc = Object.fromEntries(
+      REPASSE_STATUS_ORDER.map((s) => [s, 0]),
+    ) as Record<RepasseStatus, number>;
+    for (const r of rows) acc[r.status] += 1;
+    return acc;
+  }, [rows]);
 
   return (
     <AdminShell
@@ -110,30 +116,22 @@ function FilterChips({
 }: {
   active: RepasseStatus;
   onChange: (status: RepasseStatus) => void;
-  counts: { solicitado: number; aprovado: number };
+  counts: Record<RepasseStatus, number>;
 }) {
-  const filters: ReadonlyArray<{
-    key: RepasseStatus;
-    label: string;
-    count: number;
-  }> = [
-    { key: "solicitado", label: "solicitado", count: counts.solicitado },
-    { key: "aprovado", label: "aprovado", count: counts.aprovado },
-  ];
   return (
     <div
       role="tablist"
       aria-label="Filtrar repasses por status"
       className="flex flex-wrap items-center gap-2"
     >
-      {filters.map((f) => (
+      {REPASSE_STATUS_ORDER.map((key) => (
         <FilterChip
-          key={f.key}
-          status={f.key}
-          label={f.label}
-          count={f.count}
-          active={active === f.key}
-          onClick={() => onChange(f.key)}
+          key={key}
+          status={key}
+          label={key}
+          count={counts[key]}
+          active={active === key}
+          onClick={() => onChange(key)}
         />
       ))}
     </div>
@@ -153,7 +151,7 @@ function FilterChip({
   active: boolean;
   onClick: () => void;
 }) {
-  const palette = STATUS_PALETTE[status];
+  const palette = REPASSE_STATUS_PALETTE[status];
   return (
     <button
       type="button"
@@ -179,69 +177,6 @@ function FilterChip({
     </button>
   );
 }
-
-/* -----------------------------------------------------------------------
- * Status palette — local to this surface; mirrors PagamentosList palette
- * shape (band color + dot + label) so the visual vocabulary across admin
- * stays consistent. solicitado=amber (pending action), aprovado=emerald
- * (settled / journal entry).
- * --------------------------------------------------------------------- */
-
-type ChipPalette = {
-  border: string;
-  bg: string;
-  text: string;
-  dot: string;
-};
-
-const STATUS_PALETTE: Record<RepasseStatus, ChipPalette> = {
-  solicitado: {
-    border: "border-amber-200",
-    bg: "bg-amber-50",
-    text: "text-amber-800",
-    dot: "bg-amber-500",
-  },
-  aprovado: {
-    border: "border-emerald-200",
-    bg: "bg-emerald-50",
-    text: "text-emerald-800",
-    dot: "bg-emerald-500",
-  },
-  // aperture-vvh2j (Rex) — placeholder palettes for the new transfer states
-  // so the exhaustive Record compiles; Vance refines the visual vocabulary
-  // in aperture-voao0 (transferindo/verificando = in-flight, pago = settled,
-  // falhou = error, cancelado = neutral/terminal).
-  transferindo: {
-    border: "border-sky-200",
-    bg: "bg-sky-50",
-    text: "text-sky-800",
-    dot: "bg-sky-500",
-  },
-  verificando: {
-    border: "border-amber-200",
-    bg: "bg-amber-50",
-    text: "text-amber-800",
-    dot: "bg-amber-500",
-  },
-  pago: {
-    border: "border-emerald-200",
-    bg: "bg-emerald-50",
-    text: "text-emerald-800",
-    dot: "bg-emerald-500",
-  },
-  falhou: {
-    border: "border-red-200",
-    bg: "bg-red-50",
-    text: "text-red-800",
-    dot: "bg-red-500",
-  },
-  cancelado: {
-    border: "border-slate-200",
-    bg: "bg-slate-50",
-    text: "text-slate-700",
-    dot: "bg-slate-400",
-  },
-};
 
 /* -----------------------------------------------------------------------
  * Table
@@ -317,29 +252,14 @@ function RepasseRow({ row }: { row: RepasseListRow }) {
         {formatShortDate(row.solicitadoEm)}
       </td>
       <td className="px-4 py-3">
-        <StatusPill status={row.status} />
+        <span className="inline-flex flex-wrap items-center gap-1.5">
+          <RepasseStatusPill status={row.status} />
+          {row.status === "verificando" && row.needsManualResolution && (
+            <ManualResolutionPill />
+          )}
+        </span>
       </td>
     </tr>
-  );
-}
-
-function StatusPill({ status }: { status: RepasseStatus }) {
-  const palette = STATUS_PALETTE[status];
-  return (
-    <span
-      className={[
-        "inline-flex items-center gap-1.5 rounded-full border px-2 py-[3px] font-mono text-[10px] uppercase tracking-[0.12em]",
-        palette.border,
-        palette.bg,
-        palette.text,
-      ].join(" ")}
-    >
-      <span
-        aria-hidden
-        className={`inline-block size-[6px] rounded-full ${palette.dot}`}
-      />
-      {status}
-    </span>
   );
 }
 
