@@ -89,6 +89,24 @@ describe('Migration round-trip', () => {
     expect(campanhaSlugCol?.character_maximum_length).toBe(60);
     expect(campanhaSlugCol?.is_nullable).toBe('YES');
 
+    // 040 add_personalizacao_to_perfil_campanhas (aperture-hsxim): the actual
+    //   TIP now (20260710_040 sorts last). Adds three nullable TweaksPanel
+    //   ("Personalizar") columns to perfil_campanhas — papais (varchar 120),
+    //   cor_primaria + cor_acento (varchar 20). All nullable free text/hex.
+    const papaisCol = await getColumn(db, 'perfil_campanhas', 'papais');
+    expect(papaisCol?.data_type).toBe('character varying');
+    expect(papaisCol?.character_maximum_length).toBe(120);
+    expect(papaisCol?.is_nullable).toBe('YES');
+    expect((await getColumn(db, 'perfil_campanhas', 'cor_primaria'))?.is_nullable).toBe('YES');
+    expect((await getColumn(db, 'perfil_campanhas', 'cor_acento'))?.is_nullable).toBe('YES');
+
+    // 041 add_slug_alterado_em_to_campanhas (aperture-aphk8): the actual TIP
+    //   now (20260711_041 sorts last). Adds nullable campanhas.slug_alterado_em
+    //   (timestamptz) — the "already used the one-time perfil slug swap?" flag.
+    const slugAlteradoCol = await getColumn(db, 'campanhas', 'slug_alterado_em');
+    expect(slugAlteradoCol?.data_type).toBe('timestamp with time zone');
+    expect(slugAlteradoCol?.is_nullable).toBe('YES');
+
     const conviteRemetenteCol = await getColumn(db, 'convites', 'remetente');
     expect(conviteRemetenteCol?.data_type).toBe('character varying');
     expect(conviteRemetenteCol?.character_maximum_length).toBe(120);
@@ -124,10 +142,26 @@ describe('Migration round-trip', () => {
     //    note above; renaming a DEPLOYED migration is forbidden because
     //    kysely_migration keys on the filename and would re-run it).
 
-    // 20260710_039_drop_dados_recebimento_usuario → the actual TIP now
-    //   (SIXTH occurrence of the off-by-one this block warns about — this
-    //   migration was added on top and its down-step is prepended here per
-    //   the note above). Its down() recreates dados_recebimento_usuario
+    // 20260711_041_add_slug_alterado_em_to_campanhas (aperture-aphk8) → the
+    //   actual TIP now (SEVENTH occurrence of the off-by-one this block warns
+    //   about — landed on top without prepending its down-step). Its down()
+    //   drops campanhas.slug_alterado_em. THIS is the true first migrateDown.
+    const downSlugAlteradoEm = await migrator.migrateDown();
+    expect(downSlugAlteradoEm.error).toBeUndefined();
+    expect(await getColumn(db, 'campanhas', 'slug_alterado_em')).toBeUndefined();
+
+    // 20260710_040_add_personalizacao_to_perfil_campanhas (aperture-hsxim) →
+    //   now the SECOND migrateDown (EIGHTH occurrence of the off-by-one —
+    //   also landed on top without prepending its down-step). Its down() drops
+    //   the three TweaksPanel columns from perfil_campanhas.
+    const downPersonalizacao = await migrator.migrateDown();
+    expect(downPersonalizacao.error).toBeUndefined();
+    expect(await getColumn(db, 'perfil_campanhas', 'papais')).toBeUndefined();
+    expect(await getColumn(db, 'perfil_campanhas', 'cor_primaria')).toBeUndefined();
+    expect(await getColumn(db, 'perfil_campanhas', 'cor_acento')).toBeUndefined();
+
+    // 20260710_039_drop_dados_recebimento_usuario → now the SECOND migrateDown.
+    //   Its down() recreates dados_recebimento_usuario
     //   (recebedor-per-campanha unification retired the usuario-level store).
     const downDropDadosRecebimento = await migrator.migrateDown();
     expect(downDropDadosRecebimento.error).toBeUndefined();
