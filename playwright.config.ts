@@ -42,6 +42,13 @@ function makeServer(port: number, extraEnv: Record<string, string>) {
         process.env.BETTER_AUTH_SECRET ?? 'e2e-test-secret-must-be-at-least-32-chars-long-ok',
       BETTER_AUTH_URL: `http://localhost:${port}`,
       TRUSTED_ORIGINS: `http://localhost:${port}`,
+      // aperture-r5y94: arm the E2E magic-chave forced-outcome path on the fake
+      // transferencia rail (aperture-4ifbm). TRANSFERENCIA_PROVIDER defaults to
+      // 'fake' and 'inter' is superRefine-rejected off production, so both local
+      // servers bind TransferenciaProviderFake; this flag lets the repasse E2E
+      // drive pagarPix outcomes (pago/rejeitado/ambiguo/…) from the recebedor's
+      // marker chave. Off by default everywhere else — zero blast radius.
+      EUNENEM_FAKE_E2E_MAGIC: 'true',
       // Base server (:3002): empty STRIPE_* → server falls back to the fake
       // payment adapter (visitor-cart + UI specs rely on this).
       STRIPE_SECRET_KEY: '',
