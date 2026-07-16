@@ -1088,6 +1088,20 @@ export {
   RegistrarEfeitosFinanceirosPagamentoAprovadoInputSchema,
   registrarEfeitosFinanceirosPagamentoAprovado,
 } from './use-cases/pagamentos/financeiro/registrar-efeitos-financeiros-pagamento-aprovado.js';
+// aperture-477nz — admin manual-resolution use-cases.
+export type {
+  ResolverManualFalhouRepasseInput,
+  ResolverManualPagoRepasseInput,
+  ResolverManualRepasseDeps,
+  ResolverManualRepasseOutput,
+} from './use-cases/pagamentos/financeiro/resolver-manual-repasse.js';
+export {
+  RESOLUCAO_MANUAL_FALHOU_ERRO,
+  ResolverManualFalhouRepasseInputSchema,
+  ResolverManualPagoRepasseInputSchema,
+  resolverManualFalhouRepasse,
+  resolverManualPagoRepasse,
+} from './use-cases/pagamentos/financeiro/resolver-manual-repasse.js';
 export type {
   RetentarTransferenciaRepasseDeps,
   RetentarTransferenciaRepasseInput,
