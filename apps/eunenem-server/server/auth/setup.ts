@@ -337,6 +337,16 @@ const ServerEnvSchema = z
      */
     TRANSFERENCIA_PROVIDER: z.enum(['fake', 'inter']).default('fake'),
     /**
+     * aperture-4ifbm — enable MAGIC-CHAVE outcome selection on the FAKE transfer
+     * rail for browser E2E. Default 'false'. When 'true' AND the fake is bound,
+     * `pagarPix` selects its outcome from a magic marker in the recebedor's
+     * chave PIX (see TransferenciaProviderFake / parseE2eMagicChave), letting a
+     * single booted server produce any repasse outcome per-test. Ignored when
+     * TRANSFERENCIA_PROVIDER='inter' (the real adapter has no magic path). Set
+     * by Peppy on the E2E env only; off everywhere else.
+     */
+    EUNENEM_FAKE_E2E_MAGIC: z.enum(['true', 'false']).default('false'),
+    /**
      * aperture-ju5w2 — Banco Inter Banking API credentials for the real PIX
      * transfer rail. ALL optional with '' defaults so a fresh-clone / fake-rail
      * boot never crashes; the superRefine below makes them REQUIRED (non-empty)
@@ -812,7 +822,10 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
       ...(contaCorrente !== '' ? { contaCorrente } : {}),
     });
   } else {
-    transferenciaProvider = new TransferenciaProviderFake();
+    transferenciaProvider = new TransferenciaProviderFake({
+      // aperture-4ifbm — E2E magic-chave outcome selection (fake-only, gated).
+      e2eMagicOutcomes: env.EUNENEM_FAKE_E2E_MAGIC === 'true',
+    });
   }
 
   return {
