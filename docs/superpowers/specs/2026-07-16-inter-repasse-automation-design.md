@@ -169,7 +169,7 @@ Enforcement layers:
 - **Integration** (real Postgres + pg-boss, fake adapter): transactional enqueue (approve rollback ⇒ no job; approve commit ⇒ exactly one job); crash-mid-call simulation → orphan intent row → reconciliation resolves; confirm-job polling sequences; double-approve race (two admins) yields one transfer.
 - **Adversarial** (Izzy): try to make it double-pay — concurrent approves, retry storms, worker restarts mid-`transferindo`, poison consult responses.
 - **E2E**: fake adapter; the resgate → approve → "transferido" walk on staging.
-- **Prod smoke** (operator-gated): one real repasse of ~R$1 to the operator's own chave PIX; verify arrival, `pago` state, attempt audit row, and clean logs.
+- **Prod smoke** (operator-gated): one real repasse of ~R$1 to the operator's own chave PIX; verify arrival, `pago` state, attempt audit row, and clean logs. **Additionally (amended 2026-07-16, PR #11 review): after the R$1 lands, run `buscarPagamentos` over the window and verify the payment IS found** — this empirically confirms Inter's extrato shape (tipoTransacao label, valor format, descricaoPix echo). Only then may the `zero-candidates-48h → auto-falhou` rule be armed (it ships disarmed behind `INTER_EXTRATO_VERIFIED`; until flipped, zero-candidates escalates to needs-manual-resolution instead). A shape mismatch there is the one remaining double-pay path; it stays closed until proven open-able.
 
 ## 9. Out of scope
 
