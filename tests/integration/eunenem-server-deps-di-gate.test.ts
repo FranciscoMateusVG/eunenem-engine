@@ -199,3 +199,38 @@ describe('eunenem-server Inter transfer-rail boot guard (aperture-ju5w2)', () =>
     }
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+//  MINIO_ENDPOINT browser-reachability boot guard (aperture-9wqh1)
+// ─────────────────────────────────────────────────────────────────────
+describe('eunenem-server MINIO_ENDPOINT boot guard (aperture-9wqh1)', () => {
+  it('rejects the INTERNAL service host (the reported bug: broken images)', () => {
+    expect(() => loadEnv({ ...baseEnv(), MINIO_ENDPOINT: 'http://eunenem-minio:9000' })).toThrow(
+      /MINIO_ENDPOINT/,
+    );
+  });
+
+  it('rejects a bare host with no scheme', () => {
+    expect(() => loadEnv({ ...baseEnv(), MINIO_ENDPOINT: 'eunenem-minio:9000' })).toThrow(
+      /MINIO_ENDPOINT/,
+    );
+  });
+
+  it('accepts the public per-stack domain (https, dotted host)', () => {
+    expect(() =>
+      loadEnv({
+        ...baseEnv(),
+        MINIO_ENDPOINT: 'https://storage-eunenem.test.pocketsoftware.com.br',
+      }),
+    ).not.toThrow();
+  });
+
+  it('accepts a local MinIO on localhost for dev', () => {
+    expect(() => loadEnv({ ...baseEnv(), MINIO_ENDPOINT: 'http://localhost:9000' })).not.toThrow();
+    expect(() => loadEnv({ ...baseEnv(), MINIO_ENDPOINT: 'http://127.0.0.1:9000' })).not.toThrow();
+  });
+
+  it('is skipped entirely when MINIO_ENDPOINT is unset (fresh-clone boot)', () => {
+    expect(() => loadEnv({ ...baseEnv() })).not.toThrow();
+  });
+});

@@ -490,6 +490,41 @@ const ServerEnvSchema = z
         });
       }
     }
+    // aperture-9wqh1 — MINIO_ENDPOINT, when set, MUST be a URL the BROWSER can
+    // reach. The perfil/capa/historia photo pipeline signs a presigned PUT and
+    // persists a bare object KEY; the public page re-derives the <img src> as
+    // `${MINIO_ENDPOINT}/${bucket}/${key}`. So BOTH the browser upload AND every
+    // public image render resolve against MINIO_ENDPOINT. If it is the INTERNAL
+    // MinIO service host (e.g. http://eunenem-minio:9000) instead of the public
+    // per-stack domain, the browser PUT fails to resolve (upload never persists)
+    // AND every <img> points at an unreachable host (blue-? broken placeholder)
+    // — exactly the reported symptom, shipped silently. Fail fast at boot:
+    // reject a non-http(s) scheme or a bare service hostname (no dot and not
+    // localhost). localhost/127.0.0.1 stay valid for a local MinIO in dev.
+    if (env.MINIO_ENDPOINT.length > 0) {
+      let hostname: string | null = null;
+      let scheme: string | null = null;
+      try {
+        const parsed = new URL(env.MINIO_ENDPOINT);
+        hostname = parsed.hostname;
+        scheme = parsed.protocol;
+      } catch {
+        hostname = null;
+      }
+      const localhostHosts = new Set(['localhost', '127.0.0.1', '::1']);
+      const browserReachable =
+        hostname !== null &&
+        (scheme === 'http:' || scheme === 'https:') &&
+        (hostname.includes('.') || localhostHosts.has(hostname));
+      if (!browserReachable) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['MINIO_ENDPOINT'],
+          message:
+            "MINIO_ENDPOINT must be a browser-reachable absolute URL (the public per-stack MinIO domain, e.g. https://storage-eunenem.<host>) — NOT the internal service host like http://eunenem-minio:9000. It backs both the browser presigned PUT and every public <img> src; an internal host makes photo uploads fail and every image render a broken placeholder (aperture-9wqh1).",
+        });
+      }
+    }
     // aperture-vvh2j — the real Inter PIX transfer rail may ONLY be selected
     // in production. A staging/dev deploy selecting 'inter' is a
     // structural error: it must never be able to fire a real money transfer.
