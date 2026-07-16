@@ -191,7 +191,12 @@ export function SetupCampanhaWizard({
         dataNascimento: null,
         tipoEvento: eventType || null,
         genero,
-        dataEvento: eventDate ? new Date(`${eventDate}T12:00:00`) : null,
+        // aperture-bt0ic — :01 seconds is the convite mapper's NO-TIME-CHOSEN
+        // sentinel (see NO_TIME_CHOSEN_SECONDS in lib/convite-mapper.ts). The
+        // wizard only collects a DATE; writing :00 seconds made the convite
+        // editor + card render a phantom "12:00" as if the creator chose it.
+        // Noon (not midnight) keeps the calendar day stable across timezones.
+        dataEvento: eventDate ? new Date(`${eventDate}T12:00:01`) : null,
         fotoPerfilKey: null,
         fotoCapaKey: null,
         fotoHistoriaKey: null,

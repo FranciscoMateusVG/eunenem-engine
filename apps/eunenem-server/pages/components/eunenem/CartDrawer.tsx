@@ -920,11 +920,15 @@ function SuccessPanel({
           lineHeight: 1.2,
         }}
       >
+        {/* aperture-1pahb (Thacy QA) — the pending headline used to say
+            "Recebemos seu pagamento", which read as DONE and made buyers
+            leave before the bank confirmed. Pending copy now says, in so
+            many words, that confirmation is still happening. */}
         {isConfirmed
           ? "Compra confirmada ♡"
           : isSlow
             ? "Quase lá..."
-            : "Recebemos seu pagamento"}
+            : "Confirmando seu pagamento…"}
       </h3>
       <p
         style={{
@@ -938,7 +942,7 @@ function SuccessPanel({
           ? `${snapshot.totalUnits} presente${snapshot.totalUnits === 1 ? "" : "s"} a caminho do coração ♡`
           : isSlow
             ? "Ainda confirmando com o banco — pode levar 1-2 min."
-            : "Confirmando com o banco..."}
+            : "ainda não terminou — aguarde nesta tela só um instantinho ♡"}
       </p>
       <p
         style={{
@@ -1019,17 +1023,25 @@ function SuccessPanel({
         </p>
       )}
 
+      {/* aperture-1pahb — disabled while the bank is still confirming
+          (mirrors GiftCheckoutModal's pending-disabled CTAs); the slow
+          phase re-enables it alongside its status-page escape link. */}
       <button
         type="button"
         onClick={onClose}
         className="btn-lilac"
+        disabled={!isConfirmed && !isSlow}
         style={{
           marginTop: 24,
           width: "100%",
           justifyContent: "center",
+          opacity: !isConfirmed && !isSlow ? 0.5 : 1,
+          cursor: !isConfirmed && !isSlow ? "not-allowed" : "pointer",
         }}
       >
-        Voltar pra listinha ♡
+        {!isConfirmed && !isSlow
+          ? "aguardando confirmação…"
+          : "Voltar pra listinha ♡"}
       </button>
     </div>
   );

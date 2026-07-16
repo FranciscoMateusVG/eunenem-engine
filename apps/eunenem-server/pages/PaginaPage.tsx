@@ -132,7 +132,7 @@ export function PaginaPage({
             <Messages slug={slug} />
           </main>
           <Footer />
-          <TweaksPanel
+          <TweaksPanelMount
             idCampanha={data?.idCampanha ?? undefined}
             canSave={data?.isOwner ?? false}
           />
@@ -148,4 +148,20 @@ export function PaginaPage({
 function CartDrawerMount({ slug }: { slug: string }) {
   const drawer = useCartDrawer();
   return <CartDrawer open={drawer.isOpen} onClose={drawer.close} slug={slug} />;
+}
+
+// aperture-v6mpf (Thacy QA) — the floating TweaksPanel is position:fixed, so
+// without a gate it painted OVER the checkout overlays (cart drawer + single-
+// gift GiftCheckoutModal). Same indirection pattern as CartDrawerMount:
+// reads the purchase-overlay signal below the provider and unmounts the
+// panel while any purchase flow covers the page. Unsaved tweak edits survive
+// (they live in TweaksContext, not in the panel). TweaksPanel itself stays
+// provider-agnostic — PainelLayout mounts it with no cart context at all.
+function TweaksPanelMount(props: {
+  idCampanha?: string;
+  canSave?: boolean;
+}) {
+  const drawer = useCartDrawer();
+  if (drawer.purchaseOverlayVisible) return null;
+  return <TweaksPanel {...props} />;
 }

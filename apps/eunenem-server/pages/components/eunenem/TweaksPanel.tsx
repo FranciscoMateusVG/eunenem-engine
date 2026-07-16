@@ -26,12 +26,6 @@ import { useTweaks } from "./TweaksContext";
 // current profile is fetched first and merged, mirroring PerfilBody.tsx's
 // campanhaPayload()/salvarCampanha() pattern.
 
-function formatBR(iso: string): string {
-  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!m) return "";
-  return `${m[3]}/${m[2]}/${m[1]}`;
-}
-
 export function TweaksPanel({
   idCampanha,
   canSave = false,
@@ -322,10 +316,11 @@ function TweakText({
 }
 
 // aperture — targetDate is already ISO YYYY-MM-DD in TweaksState (unlike
-// PerfilBody's dd/mm/aaaa fields), so this only needs a display formatter,
-// not the brToISO/isoToBR round-trip PerfilDateField carries. The native
-// <input type="date"> is visually hidden and opened via showPicker() from
-// the calendar button — same trick as PerfilDateField in PerfilBody.tsx.
+// PerfilBody's dd/mm/aaaa fields), so the native input binds directly.
+// aperture-prdbu (Thacy QA, iPhone Safari): the readOnly-text +
+// hidden-native-input + showPicker() trick never opened the picker on iOS
+// Safari (showPicker unsupported there) — the visible native
+// <input type="date"> is now the field itself, same fix as PerfilDateField.
 function TweakDate({
   label,
   value,
@@ -344,8 +339,9 @@ function TweakDate({
     try {
       el.showPicker?.();
     } catch {
-      // Older browsers without showPicker(): clicking still focuses it.
+      // Browsers without showPicker(): fall through to focus below.
     }
+    el.focus();
   };
   return (
     <label
@@ -359,15 +355,16 @@ function TweakDate({
       }}
     >
       {label}
-      <span style={{ position: "relative", display: "flex" }}>
+      <span style={{ display: "flex" }}>
         <input
-          type="text"
-          value={value ? formatBR(value) : ""}
-          readOnly
-          placeholder="dd/mm/aaaa"
-          onClick={openPicker}
+          ref={dateRef}
+          type="date"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
           style={{
             flex: 1,
+            minWidth: 0,
+            minHeight: 24,
             padding: "8px 12px",
             borderRadius: 10,
             border: "1px solid var(--line)",
@@ -376,7 +373,8 @@ function TweakDate({
             background: "var(--cream)",
             fontFamily: "inherit",
             outline: "none",
-            cursor: "pointer",
+            WebkitAppearance: "none",
+            appearance: "none",
           }}
         />
         <button
@@ -407,20 +405,6 @@ function TweakDate({
             <path d="M3.5 10h17M8 3v4M16 3v4" />
           </svg>
         </button>
-        <input
-          ref={dateRef}
-          type="date"
-          tabIndex={-1}
-          aria-hidden="true"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          style={{
-            position: "absolute",
-            inset: 0,
-            opacity: 0,
-            pointerEvents: "none",
-          }}
-        />
       </span>
     </label>
   );

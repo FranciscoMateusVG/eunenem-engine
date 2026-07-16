@@ -934,20 +934,29 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
           </button>
           {/* aperture-kj9el #4b — defer bank data: marks a pending resgate so a
               user setting up for someone else can complete it later. Hidden once
-              already pending (the banner above covers that state). */}
-          {!resgatePendenteDesde && (
-            <button
-              type="button"
-              className="bnc-btn ghost"
-              onClick={() => idCampanha && marcarPendente.mutate({ idCampanha })}
-              disabled={marcarPendente.isPending}
-            >
-              <IInfo size={16} />
-              {marcarPendente.isPending
-                ? "salvando…"
-                : "preencher depois · é para um amigo"}
-            </button>
-          )}
+              already pending (the banner above covers that state).
+              aperture-pegw8 (Thacy QA) — ALSO hidden once this campanha has
+              real saved recebedor data: deferring "para preencher depois"
+              after the data exists is meaningless, and its "complete os dados
+              quando puder" toast contradicted the prontinho summary right
+              above it. */}
+          {!resgatePendenteDesde &&
+            !dadosQuery.isLoading &&
+            !dadosQuery.data && (
+              <button
+                type="button"
+                className="bnc-btn ghost"
+                onClick={() =>
+                  idCampanha && marcarPendente.mutate({ idCampanha })
+                }
+                disabled={marcarPendente.isPending}
+              >
+                <IInfo size={16} />
+                {marcarPendente.isPending
+                  ? "salvando…"
+                  : "preencher depois · é para um amigo"}
+              </button>
+            )}
         </div>
 
         <div className="bnc-security-strip">

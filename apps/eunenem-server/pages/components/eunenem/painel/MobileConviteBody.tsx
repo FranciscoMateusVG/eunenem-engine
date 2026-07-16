@@ -15,7 +15,7 @@ import {
 import { useCampanhaRota } from "@/lib/campanha-rota";
 import { shareConvitePreview } from "@/lib/convite-share";
 import { useConviteBackgroundUpload } from "@/lib/conviteUpload";
-import { painelConvitePreviewHref } from "@/lib/painelRoutes";
+import { painelConvitePreviewHref, painelHref } from "@/lib/painelRoutes";
 import { sendEvent } from "@/lib/analytics";
 import {
   DEFAULT_STATE,
@@ -205,6 +205,17 @@ export function MobileConviteBody({ slug }: PainelSectionBodyProps) {
 
       {/* HEADER (sticky top, safe-area top inset) */}
       <header className="mcv-header">
+        {/* aperture-g0tdc (Thacy QA) — the wizard is a full-viewport fixed
+            overlay (.mcv-wiz) that paints OVER the shared topbar, making
+            convite the only section with no way back to the painel. The back
+            affordance must live INSIDE this header; ≥44pt tap target. */}
+        <a
+          className="mcv-back"
+          href={painelHref(slug, undefined, idCampanha ?? undefined)}
+          aria-label="Voltar para minha página"
+        >
+          <span aria-hidden="true">←</span>
+        </a>
         <div className="mcv-mark" aria-hidden="true">m</div>
         <div className="mcv-brand">
           <div className="mcv-brand-name">meu convite</div>
@@ -834,6 +845,18 @@ const MCV_CSS = `
 .mcv-wiz *{box-sizing:border-box}
 
 /* HEADER ─────────────────────────────── */
+/* aperture-g0tdc — back to the painel from inside the fixed overlay. */
+.mcv-back{
+  display:flex;align-items:center;justify-content:center;
+  min-width:44px;min-height:44px;
+  margin-left:-10px;
+  color:var(--ink-soft);
+  font-size:20px;line-height:1;
+  border-radius:12px;
+  flex:0 0 auto;
+  text-decoration:none;
+}
+.mcv-back:active{background:var(--cream-2)}
 .mcv-header{
   flex:0 0 auto;
   padding:calc(env(safe-area-inset-top,0px) + 14px) 14px 8px;
