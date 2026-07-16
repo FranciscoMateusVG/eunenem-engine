@@ -131,6 +131,39 @@ export function canCancelRepasse(status: RepasseStatus): boolean {
 }
 
 /**
+ * Manual-resolution pill (spec §5.4 amended) — rendered NEXT TO the
+ * `verificando` status pill when reconciliation parked the repasse awaiting
+ * an operator (Inter can't echo our referencia; search-fallback candidates
+ * need a human match). Rose — deliberately outside the status hue set so a
+ * flagged row reads as "needs a person" at a glance, distinct from the blue
+ * "system is still working" verificando.
+ */
+export function ManualResolutionPill({
+  size = "sm",
+}: {
+  size?: "sm" | "md";
+}) {
+  const sizing =
+    size === "md"
+      ? "px-2.5 py-[4px] text-[11px]"
+      : "px-2 py-[3px] text-[10px]";
+  return (
+    <span
+      className={[
+        "inline-flex items-center gap-1.5 rounded-full border border-rose-300 bg-rose-50 font-mono uppercase tracking-[0.12em] text-rose-800",
+        sizing,
+      ].join(" ")}
+    >
+      <span
+        aria-hidden
+        className="inline-block size-[6px] rounded-full bg-rose-500"
+      />
+      ação manual
+    </span>
+  );
+}
+
+/**
  * Status pill — the single source of truth for how a repasse status renders
  * across the admin surfaces. `size="sm"` is the row/inline size; `size="md"`
  * is the headline size on the detail page.

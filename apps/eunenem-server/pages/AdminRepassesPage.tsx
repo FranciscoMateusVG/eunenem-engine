@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { AdminShell } from "@/components/eunenem/admin/AdminShell";
 import { DddBadge } from "@/components/eunenem/admin/DddBadge";
 import {
+  ManualResolutionPill,
   REPASSE_STATUS_ORDER,
   REPASSE_STATUS_PALETTE,
   RepasseStatusPill,
@@ -251,7 +252,12 @@ function RepasseRow({ row }: { row: RepasseListRow }) {
         {formatShortDate(row.solicitadoEm)}
       </td>
       <td className="px-4 py-3">
-        <RepasseStatusPill status={row.status} />
+        <span className="inline-flex flex-wrap items-center gap-1.5">
+          <RepasseStatusPill status={row.status} />
+          {row.status === "verificando" && row.needsManualResolution && (
+            <ManualResolutionPill />
+          )}
+        </span>
       </td>
     </tr>
   );
