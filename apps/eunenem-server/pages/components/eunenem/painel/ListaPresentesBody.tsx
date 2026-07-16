@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
 
 // aperture-tua9o — image upload+crop for the custom ("personalizado") item form.
-import { ItemImageUpload } from "./ItemImageUpload";
+import { ItemImageUpload } from './ItemImageUpload';
 
 // aperture-p73kv — deterministic random "sugerido N un" in [5, 10] keyed
 // by item id (djb2 hash). The hardcoded `1` operators saw was unrealistic
@@ -22,30 +22,31 @@ function defaultSuggestedQty(itemId: string): number {
   return 5 + (djb2(itemId) % 6);
 }
 
-import type { PainelSectionBodyProps } from "@/PainelSectionPage";
-import {
-  loadCatalog,
-  loadListasProntas,
-  type ListaCatalogItem,
-  type ListaCategory,
-  type ListaProntaDetail,
-  type ListaProntaId,
-  type PresetItem,
-} from "../../../../lib/templates/index.js";
+import { sendEvent } from '@/lib/analytics';
 import {
   brlFromCents,
+  type ContribuicaoDTO,
   centsFromBRL,
   contribuicaoErrorMessage,
   deriveBgColor,
+  parseValorBRL,
   toContribuicaoError,
   useContribuicaoCreate,
   useContribuicaoCreateBulk,
   useContribuicaoDelete,
-  useContribuicaoUpdate,
   useContribuicaoList,
-  type ContribuicaoDTO,
-} from "@/lib/contribuicao.js";
-import { sendEvent } from "@/lib/analytics";
+  useContribuicaoUpdate,
+} from '@/lib/contribuicao.js';
+import type { PainelSectionBodyProps } from '@/PainelSectionPage';
+import {
+  type ListaCatalogItem,
+  type ListaCategory,
+  type ListaProntaDetail,
+  type ListaProntaId,
+  loadCatalog,
+  loadListasProntas,
+  type PresetItem,
+} from '../../../../lib/templates/index.js';
 
 // aperture-0ph83 — "Minha lista de presentes" (creator gift-list management).
 //
@@ -78,8 +79,8 @@ import { sendEvent } from "@/lib/analytics";
 // the seed-driven era — visual recipe is byte-identical per OUT OF SCOPE).
 
 const brl = (n: number) =>
-  "R$ " +
-  n.toLocaleString("pt-BR", {
+  'R$ ' +
+  n.toLocaleString('pt-BR', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
@@ -91,84 +92,168 @@ const brl = (n: number) =>
 // PersonalizadoForm uses it as the default category for user-authored items
 // (the seed catalog itself never contains personalizado — validator enforces).
 const LISTA_CATEGORY_LABEL: Record<ListaCategory, string> = {
-  fraldas: "fraldas",
-  higiene: "higiene",
-  roupa: "roupinhas",
-  soninho: "soninho",
-  alimentacao: "alimentação",
-  passeio: "passeio",
-  brinquedo: "brinquedos",
-  outros: "outros",
-  personalizado: "personalizado",
+  fraldas: 'fraldas',
+  higiene: 'higiene',
+  roupa: 'roupinhas',
+  soninho: 'soninho',
+  alimentacao: 'alimentação',
+  passeio: 'passeio',
+  brinquedo: 'brinquedos',
+  outros: 'outros',
+  personalizado: 'personalizado',
 };
 
 const CATEGORY_OPTIONS: ListaCategory[] = [
-  "fraldas",
-  "higiene",
-  "roupa",
-  "soninho",
-  "alimentacao",
-  "passeio",
-  "brinquedo",
-  "outros",
-  "personalizado",
+  'fraldas',
+  'higiene',
+  'roupa',
+  'soninho',
+  'alimentacao',
+  'passeio',
+  'brinquedo',
+  'outros',
+  'personalizado',
 ];
 
 /* ─── Icons (stroke style) ─── */
 const icon = {
   plus: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" aria-hidden="true">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
       <path d="M12 5v14M5 12h14" />
     </svg>
   ),
   search: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" aria-hidden="true">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
       <circle cx="11" cy="11" r="7" />
       <path d="m20 20-3.5-3.5" />
     </svg>
   ),
   edit: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.7}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <path d="M18 2l4 4-13 13H5v-4z" />
     </svg>
   ),
   trash: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.7}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M6 6l1 14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-14" />
     </svg>
   ),
   x: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" aria-hidden="true">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
       <path d="M18 6 6 18M6 6l12 12" />
     </svg>
   ),
   heart: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 0 0 0-7.78z" />
     </svg>
   ),
   sparkle: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" />
     </svg>
   ),
   listLines: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" aria-hidden="true">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
       <path d="M4 6h16M4 12h16M4 18h10" />
     </svg>
   ),
   caretDown: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <path d="m6 9 6 6 6-6" />
     </svg>
   ),
   check: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.4}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <path d="m5 12 5 5L20 7" />
     </svg>
   ),
   alert: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <circle cx="12" cy="12" r="10" />
       <path d="M12 8v4M12 16h.01" />
     </svg>
@@ -189,34 +274,34 @@ interface ListaProntaPreset {
 }
 const LISTA_PRONTAS: ListaProntaPreset[] = [
   {
-    id: "ilustrativa-especial",
-    emoji: "👕",
-    tileVar: "var(--lilac-soft)",
+    id: 'ilustrativa-especial',
+    emoji: '👕',
+    tileVar: 'var(--lilac-soft)',
   },
   {
-    id: "cha-de-fralda",
-    emoji: "🧷",
-    tileVar: "var(--pink-soft)",
+    id: 'cha-de-fralda',
+    emoji: '🧷',
+    tileVar: 'var(--pink-soft)',
   },
   {
-    id: "cha-de-rifa",
-    emoji: "🎁",
-    tileVar: "var(--yellow-soft)",
+    id: 'cha-de-rifa',
+    emoji: '🎁',
+    tileVar: 'var(--yellow-soft)',
   },
   {
-    id: "ilustrativa",
-    emoji: "✨",
-    tileVar: "var(--cream-2)",
+    id: 'ilustrativa',
+    emoji: '✨',
+    tileVar: 'var(--cream-2)',
   },
   {
-    id: "carrinhos",
-    emoji: "🚼",
-    tileVar: "var(--blue-soft)",
+    id: 'carrinhos',
+    emoji: '🚼',
+    tileVar: 'var(--blue-soft)',
   },
 ];
 
-type CatFilter = "all" | ListaCategory;
-type AddTab = "catalogo" | "personalizado";
+type CatFilter = 'all' | ListaCategory;
+type AddTab = 'catalogo' | 'personalizado';
 
 interface DraftFields {
   title: string;
@@ -228,7 +313,7 @@ interface DraftFields {
 }
 
 function emptyDraft(): DraftFields {
-  return { title: "", price: "", qty: 1, category: "personalizado", imageUrl: null };
+  return { title: '', price: '', qty: 1, category: 'personalizado', imageUrl: null };
 }
 
 /* ─── Grouping ─── */
@@ -260,15 +345,15 @@ interface GroupedGift {
 
 const isListaCategory = (g: string | null | undefined): g is ListaCategory => {
   return (
-    g === "fraldas" ||
-    g === "higiene" ||
-    g === "roupa" ||
-    g === "soninho" ||
-    g === "alimentacao" ||
-    g === "passeio" ||
-    g === "brinquedo" ||
-    g === "outros" ||
-    g === "personalizado"
+    g === 'fraldas' ||
+    g === 'higiene' ||
+    g === 'roupa' ||
+    g === 'soninho' ||
+    g === 'alimentacao' ||
+    g === 'passeio' ||
+    g === 'brinquedo' ||
+    g === 'outros' ||
+    g === 'personalizado'
   );
 };
 
@@ -277,7 +362,7 @@ const isListaCategory = (g: string | null | undefined): g is ListaCategory => {
 // rows, etc.) is treated as text content. Mirrors the catalog modal's
 // it.imageUrl rendering at line ~1176.
 const isImagePath = (v: string | null | undefined): v is string =>
-  typeof v === "string" && /^(\/|https?:\/\/)/.test(v);
+  typeof v === 'string' && /^(\/|https?:\/\/)/.test(v);
 
 function groupContribuicoes(items: ContribuicaoDTO[]): GroupedGift[] {
   const map = new Map<string, GroupedGift>();
@@ -287,12 +372,13 @@ function groupContribuicoes(items: ContribuicaoDTO[]): GroupedGift[] {
     // unknown grupos (e.g. lista-pronta IDs like "ilustrativa" that the seed
     // path stuffed into the column) we use "outros" as the typed bucket but
     // render the raw grupo as the chip text below — see chipLabel.
-    const category: ListaCategory = isListaCategory(c.grupo) ? c.grupo : "outros";
+    const category: ListaCategory = isListaCategory(c.grupo) ? c.grupo : 'outros';
     const knownLabel = isListaCategory(c.grupo) ? LISTA_CATEGORY_LABEL[c.grupo] : null;
     const chipLabel =
-      knownLabel ?? (typeof c.grupo === "string" && c.grupo.trim() !== "" ? c.grupo.toLowerCase() : "outros");
+      knownLabel ??
+      (typeof c.grupo === 'string' && c.grupo.trim() !== '' ? c.grupo.toLowerCase() : 'outros');
     const imageUrl = isImagePath(c.imagemUrl) ? c.imagemUrl : null;
-    const emoji = imageUrl ? "🎁" : c.imagemUrl ?? "🎁";
+    const emoji = imageUrl ? '🎁' : (c.imagemUrl ?? '🎁');
     const existing = map.get(c.nome);
     // Plan 0015 derived-availability (aperture-ocw8r). The legacy
     // `c.status === "indisponivel"` comparison breaks once Rex's Phase 1
@@ -358,7 +444,7 @@ function groupContribuicoes(items: ContribuicaoDTO[]): GroupedGift[] {
         // `custom` styling (pink chip + locked semantics) is reserved for true
         // user-created items, i.e. grupo === "personalizado". Don't flag rows
         // we merely couldn't categorize.
-        custom: c.grupo === "personalizado",
+        custom: c.grupo === 'personalizado',
       });
     }
   }
@@ -387,7 +473,7 @@ function Visor({ items }: { items: GroupedGift[] }) {
       </div>
       <div className="lista-visor-progress">
         <div className="lista-visor-bar">
-          <div className="lista-visor-fill" style={{ width: pct + "%" }}>
+          <div className="lista-visor-fill" style={{ width: pct + '%' }}>
             <span className="lista-visor-knob" />
           </div>
         </div>
@@ -401,7 +487,7 @@ function Visor({ items }: { items: GroupedGift[] }) {
         <span className="lista-visor-eyebrow">total da lista</span>
         <div className="lista-visor-amount">{brl(totalValue)}</div>
         <div className="lista-visor-meta">
-          {items.length} {items.length === 1 ? "presente" : "presentes"}
+          {items.length} {items.length === 1 ? 'presente' : 'presentes'}
         </div>
       </div>
     </div>
@@ -423,10 +509,10 @@ function GiftCard({
   // aperture-0ph83 — Edit/Remove disabled when any unit is claimed
   // (status='indisponivel'). The tooltip explains why the buttons are inert.
   const lockedTip = item.hasClaimed
-    ? "não dá pra mexer — algum presente desse grupo já foi reservado ♡"
+    ? 'não dá pra mexer — algum presente desse grupo já foi reservado ♡'
     : undefined;
   return (
-    <div className={"lista-card" + (isComplete ? " is-complete" : "")} data-testid="lista-card">
+    <div className={'lista-card' + (isComplete ? ' is-complete' : '')} data-testid="lista-card">
       <div className="lista-card-thumb" style={{ background: item.bgColor }}>
         {/* aperture-intake-grxsh-followup — real product image when imagemUrl
             is a same-origin path or absolute URL; emoji fallback otherwise.
@@ -438,11 +524,11 @@ function GiftCard({
             loading="lazy"
             decoding="async"
             style={{
-              width: "100%",
-              height: "100%",
-              objectFit: "cover",
-              borderRadius: "inherit",
-              display: "block",
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              borderRadius: 'inherit',
+              display: 'block',
             }}
           />
         ) : (
@@ -487,7 +573,7 @@ function GiftCard({
           <span className="lista-card-qty">{item.qty} un</span>
         </div>
         <div className="lista-card-progress">
-          <i style={{ width: pct + "%" }} />
+          <i style={{ width: pct + '%' }} />
         </div>
         <div className="lista-card-progress-meta">
           <span>
@@ -516,23 +602,19 @@ function Modal({
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === 'Escape') onClose();
     };
-    document.addEventListener("keydown", onKey);
-    document.body.style.overflow = "hidden";
+    document.addEventListener('keydown', onKey);
+    document.body.style.overflow = 'hidden';
     return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = "";
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = '';
     };
   }, [onClose]);
   return (
     <div className="lista-scrim" onClick={onClose}>
       <div
-        className={
-          "lista-modal" +
-          (sm ? " lista-modal-sm" : "") +
-          (lg ? " lista-modal-lg" : "")
-        }
+        className={'lista-modal' + (sm ? ' lista-modal-sm' : '') + (lg ? ' lista-modal-lg' : '')}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -557,12 +639,14 @@ function PersonalizadoForm({
     <>
       {showBanner && (
         <div className="lista-info-banner">
-          <span className="lista-info-banner-ic" aria-hidden="true">{icon.sparkle}</span>
+          <span className="lista-info-banner-ic" aria-hidden="true">
+            {icon.sparkle}
+          </span>
           <div className="lista-info-banner-text">
             <strong>Algo único da sua história?</strong>
             <p>
-              Adicione presentes que não estão no catálogo — uma cadeirinha específica,
-              decoração do quartinho ou aquele item dos sonhos.
+              Adicione presentes que não estão no catálogo — uma cadeirinha específica, decoração do
+              quartinho ou aquele item dos sonhos.
             </p>
           </div>
         </div>
@@ -601,9 +685,7 @@ function PersonalizadoForm({
             <input
               value={f.qty}
               inputMode="numeric"
-              onChange={(e) =>
-                setF({ ...f, qty: Number(e.target.value.replace(/\D/g, "")) || 1 })
-              }
+              onChange={(e) => setF({ ...f, qty: Number(e.target.value.replace(/\D/g, '')) || 1 })}
               aria-label="Quantidade"
               data-testid="qty-input"
             />
@@ -638,10 +720,7 @@ function PersonalizadoForm({
           </div>
         )}
         {/* aperture-tua9o — optional image (upload + crop → MinIO). */}
-        <ItemImageUpload
-          value={f.imageUrl}
-          onChange={(url) => setF({ ...f, imageUrl: url })}
-        />
+        <ItemImageUpload value={f.imageUrl} onChange={(url) => setF({ ...f, imageUrl: url })} />
       </div>
     </>
   );
@@ -671,18 +750,18 @@ function PersonalizadoForm({
 // search="", visible=24).
 
 const CATEGORY_CHIP_EMOJI: Record<ListaCategory, string> = {
-  fraldas: "🧷",
-  higiene: "🧴",
-  roupa: "👕",
-  soninho: "🛏️",
-  alimentacao: "🍼",
-  passeio: "🚼",
-  brinquedo: "🧸",
-  outros: "🎁",
-  personalizado: "✨",
+  fraldas: '🧷',
+  higiene: '🧴',
+  roupa: '👕',
+  soninho: '🛏️',
+  alimentacao: '🍼',
+  passeio: '🚼',
+  brinquedo: '🧸',
+  outros: '🎁',
+  personalizado: '✨',
 };
 
-type CatScope = "todos" | ListaCategory;
+type CatScope = 'todos' | ListaCategory;
 const PAGE_SIZE = 24;
 
 function CatalogoView({
@@ -692,8 +771,8 @@ function CatalogoView({
   selected: Set<string>;
   onToggle: (item: ListaCatalogItem) => void;
 }) {
-  const [search, setSearch] = useState("");
-  const [scope, setScope] = useState<CatScope>("todos");
+  const [search, setSearch] = useState('');
+  const [scope, setScope] = useState<CatScope>('todos');
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
@@ -703,19 +782,16 @@ function CatalogoView({
 
   // Build the flat all-items list + per-category buckets once. Section labels
   // double as chip labels (one source of truth for pt-BR vocabulary).
-  const allItems = useMemo(
-    () => catalog.flatMap((sec) => sec.items),
-    [catalog],
-  );
+  const allItems = useMemo(() => catalog.flatMap((sec) => sec.items), [catalog]);
   const chips = useMemo(() => {
     const list: Array<{ scope: CatScope; label: string; emoji: string; count: number }> = [
-      { scope: "todos", label: "todos", emoji: "✨", count: allItems.length },
+      { scope: 'todos', label: 'todos', emoji: '✨', count: allItems.length },
     ];
     for (const sec of catalog) {
       list.push({
         scope: sec.category,
         label: sec.label,
-        emoji: CATEGORY_CHIP_EMOJI[sec.category] ?? "🎁",
+        emoji: CATEGORY_CHIP_EMOJI[sec.category] ?? '🎁',
         count: sec.items.length,
       });
     }
@@ -725,7 +801,7 @@ function CatalogoView({
   // Pool of items in the selected scope, then the search filter on top of that.
   const q = search.trim().toLowerCase();
   const pool = useMemo(() => {
-    if (scope === "todos") return allItems;
+    if (scope === 'todos') return allItems;
     const sec = catalog.find((s) => s.category === scope);
     return sec?.items ?? [];
   }, [scope, allItems, catalog]);
@@ -756,7 +832,7 @@ function CatalogoView({
     let scrollRoot: Element | null = el.parentElement;
     while (scrollRoot) {
       const cs = getComputedStyle(scrollRoot);
-      if (cs.overflowY === "auto" || cs.overflowY === "scroll") break;
+      if (cs.overflowY === 'auto' || cs.overflowY === 'scroll') break;
       scrollRoot = scrollRoot.parentElement;
     }
     const obs = new IntersectionObserver(
@@ -765,23 +841,25 @@ function CatalogoView({
           setVisibleCount((c) => Math.min(filtered.length, c + PAGE_SIZE));
         }
       },
-      { root: scrollRoot, rootMargin: "200px" },
+      { root: scrollRoot, rootMargin: '200px' },
     );
     obs.observe(el);
     return () => obs.disconnect();
   }, [hasMore, filtered.length]);
 
-  const activeLabel = chips.find((c) => c.scope === scope)?.label ?? "todos";
+  const activeLabel = chips.find((c) => c.scope === scope)?.label ?? 'todos';
 
   return (
     <div className="lista-catalogo">
       <div className="lista-cat-search">
-        <span className="lista-cat-search-ic" aria-hidden="true">{icon.search}</span>
+        <span className="lista-cat-search-ic" aria-hidden="true">
+          {icon.search}
+        </span>
         <input
           type="text"
           placeholder={
-            scope === "todos"
-              ? "buscar no catálogo (fralda, mamadeira...)"
+            scope === 'todos'
+              ? 'buscar no catálogo (fralda, mamadeira...)'
               : `buscar em ${activeLabel}...`
           }
           value={search}
@@ -796,17 +874,17 @@ function CatalogoView({
         role="tablist"
         aria-label="Filtrar por categoria"
         style={{
-          display: "flex",
+          display: 'flex',
           gap: 8,
-          overflowX: "auto",
-          padding: "8px 2px 12px",
-          position: "sticky",
+          overflowX: 'auto',
+          padding: '8px 2px 12px',
+          position: 'sticky',
           top: 0,
           zIndex: 2,
-          background: "var(--paper)",
-          margin: "0 -2px",
-          WebkitOverflowScrolling: "touch",
-          scrollbarWidth: "none",
+          background: 'var(--paper)',
+          margin: '0 -2px',
+          WebkitOverflowScrolling: 'touch',
+          scrollbarWidth: 'none',
         }}
       >
         {chips.map((chip) => {
@@ -819,23 +897,21 @@ function CatalogoView({
               aria-selected={active}
               onClick={() => setScope(chip.scope)}
               style={{
-                flex: "0 0 auto",
-                display: "inline-flex",
-                alignItems: "center",
+                flex: '0 0 auto',
+                display: 'inline-flex',
+                alignItems: 'center',
                 gap: 6,
-                padding: "8px 14px",
+                padding: '8px 14px',
                 borderRadius: 999,
-                border: active
-                  ? "1.5px solid var(--lilac-deep)"
-                  : "1.5px solid var(--lilac-soft)",
-                background: active ? "var(--lilac-soft)" : "var(--paper)",
-                color: active ? "var(--plum)" : "var(--ink-soft)",
-                fontFamily: "var(--font-dm-sans), system-ui, sans-serif",
+                border: active ? '1.5px solid var(--lilac-deep)' : '1.5px solid var(--lilac-soft)',
+                background: active ? 'var(--lilac-soft)' : 'var(--paper)',
+                color: active ? 'var(--plum)' : 'var(--ink-soft)',
+                fontFamily: 'var(--font-dm-sans), system-ui, sans-serif',
                 fontSize: 13,
                 fontWeight: active ? 600 : 500,
-                cursor: "pointer",
-                whiteSpace: "nowrap",
-                transition: "all 120ms cubic-bezier(0.4, 0, 0.2, 1)",
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                transition: 'all 120ms cubic-bezier(0.4, 0, 0.2, 1)',
               }}
             >
               <span aria-hidden="true">{chip.emoji}</span>
@@ -844,7 +920,7 @@ function CatalogoView({
                 aria-hidden="true"
                 style={{
                   fontSize: 11,
-                  color: active ? "var(--lilac-deep)" : "var(--ink-mute)",
+                  color: active ? 'var(--lilac-deep)' : 'var(--ink-mute)',
                   fontWeight: 500,
                 }}
               >
@@ -858,24 +934,24 @@ function CatalogoView({
       {filtered.length === 0 ? (
         <div className="lista-cat-empty">
           <span className="eyebrow coral">nada por aqui</span>
-          {scope === "todos" ? (
+          {scope === 'todos' ? (
             <p>
               Tente outra palavra — ou monte o presente pela aba <b>personalizado</b>.
             </p>
           ) : (
             <p>
-              Nenhum presente em <b>{activeLabel}</b> pra essa busca.{" "}
+              Nenhum presente em <b>{activeLabel}</b> pra essa busca.{' '}
               <button
                 type="button"
-                onClick={() => setScope("todos")}
+                onClick={() => setScope('todos')}
                 style={{
-                  background: "none",
-                  border: "none",
+                  background: 'none',
+                  border: 'none',
                   padding: 0,
-                  color: "var(--lilac-deep)",
-                  textDecoration: "underline",
-                  cursor: "pointer",
-                  font: "inherit",
+                  color: 'var(--lilac-deep)',
+                  textDecoration: 'underline',
+                  cursor: 'pointer',
+                  font: 'inherit',
                 }}
               >
                 buscar em todas as categorias →
@@ -892,7 +968,7 @@ function CatalogoView({
                 <li key={it.id}>
                   <button
                     type="button"
-                    className={"lista-cat-item" + (on ? " is-selected" : "")}
+                    className={'lista-cat-item' + (on ? ' is-selected' : '')}
                     onClick={() => onToggle(it)}
                     aria-pressed={on}
                   >
@@ -908,15 +984,17 @@ function CatalogoView({
                           decoding="async"
                           className="lista-cat-img"
                           style={{
-                            width: "100%",
-                            height: "100%",
-                            objectFit: "cover",
-                            borderRadius: "inherit",
-                            display: "block",
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover',
+                            borderRadius: 'inherit',
+                            display: 'block',
                           }}
                         />
                       ) : (
-                        <span className="lista-cat-emoji" aria-hidden="true">{it.emoji}</span>
+                        <span className="lista-cat-emoji" aria-hidden="true">
+                          {it.emoji}
+                        </span>
                       )}
                     </span>
                     <span className="lista-cat-meta">
@@ -925,10 +1003,7 @@ function CatalogoView({
                         {brl(it.price)} · sugerido {defaultSuggestedQty(it.id)} un
                       </span>
                     </span>
-                    <span
-                      className={"lista-cat-check" + (on ? " is-on" : "")}
-                      aria-hidden="true"
-                    >
+                    <span className={'lista-cat-check' + (on ? ' is-on' : '')} aria-hidden="true">
                       {on ? icon.check : null}
                     </span>
                   </button>
@@ -941,25 +1016,21 @@ function CatalogoView({
               kicks in 200px before it scrolls into view, so the next batch
               is ready by the time the user reaches it. */}
           {hasMore ? (
-            <div
-              ref={sentinelRef}
-              aria-hidden="true"
-              style={{ height: 1, margin: "8px 0 24px" }}
-            />
+            <div ref={sentinelRef} aria-hidden="true" style={{ height: 1, margin: '8px 0 24px' }} />
           ) : (
             <div
               style={{
-                textAlign: "center",
-                padding: "16px 12px 24px",
-                color: "var(--ink-mute)",
+                textAlign: 'center',
+                padding: '16px 12px 24px',
+                color: 'var(--ink-mute)',
                 fontSize: 13,
-                fontFamily: "var(--font-caveat), cursive",
+                fontFamily: 'var(--font-caveat), cursive',
                 fontWeight: 500,
               }}
             >
-              fim do catálogo 💜 — {filtered.length}{" "}
-              {filtered.length === 1 ? "presente" : "presentes"}
-              {scope !== "todos" ? ` em ${activeLabel}` : ""}
+              fim do catálogo 💜 — {filtered.length}{' '}
+              {filtered.length === 1 ? 'presente' : 'presentes'}
+              {scope !== 'todos' ? ` em ${activeLabel}` : ''}
             </div>
           )}
         </>
@@ -988,7 +1059,7 @@ function AddGiftModal({
 
   const catalog = useMemo(() => loadCatalog(), []);
 
-  const personPriceNum = parseFloat(f.price.replace(",", ".")) || 0;
+  const personPriceNum = parseValorBRL(f.price);
   const personValid = f.title.trim().length > 0 && personPriceNum > 0;
 
   const selectedItems = useMemo(() => {
@@ -1003,10 +1074,7 @@ function AddGiftModal({
   // aperture-p73kv — mirror the picker's djb2-derived "sugerido N un"
   // (display + submit) on the running total so the footer R$ amount
   // doesn't drift from what the user sees per card.
-  const catTotal = selectedItems.reduce(
-    (s, i) => s + i.price * defaultSuggestedQty(i.id),
-    0,
-  );
+  const catTotal = selectedItems.reduce((s, i) => s + i.price * defaultSuggestedQty(i.id), 0);
 
   const toggleCatItem = (it: ListaCatalogItem) => {
     setSelected((cur) => {
@@ -1046,10 +1114,10 @@ function AddGiftModal({
           type="button"
           role="tab"
           id="lista-tab-catalogo"
-          aria-selected={tab === "catalogo"}
+          aria-selected={tab === 'catalogo'}
           aria-controls="lista-tabpanel-catalogo"
-          className={"lista-tab" + (tab === "catalogo" ? " is-active" : "")}
-          onClick={() => setTab("catalogo")}
+          className={'lista-tab' + (tab === 'catalogo' ? ' is-active' : '')}
+          onClick={() => setTab('catalogo')}
         >
           Catálogo
         </button>
@@ -1057,22 +1125,18 @@ function AddGiftModal({
           type="button"
           role="tab"
           id="lista-tab-personalizado"
-          aria-selected={tab === "personalizado"}
+          aria-selected={tab === 'personalizado'}
           aria-controls="lista-tabpanel-personalizado"
-          className={"lista-tab" + (tab === "personalizado" ? " is-active" : "")}
-          onClick={() => setTab("personalizado")}
+          className={'lista-tab' + (tab === 'personalizado' ? ' is-active' : '')}
+          onClick={() => setTab('personalizado')}
         >
           Personalizado
         </button>
       </div>
 
       <div className="lista-modal-body">
-        {tab === "catalogo" ? (
-          <div
-            role="tabpanel"
-            id="lista-tabpanel-catalogo"
-            aria-labelledby="lista-tab-catalogo"
-          >
+        {tab === 'catalogo' ? (
+          <div role="tabpanel" id="lista-tabpanel-catalogo" aria-labelledby="lista-tab-catalogo">
             <CatalogoView selected={selected} onToggle={toggleCatItem} />
           </div>
         ) : (
@@ -1087,36 +1151,36 @@ function AddGiftModal({
       </div>
 
       <div className="lista-modal-foot">
-        {tab === "catalogo" ? (
+        {tab === 'catalogo' ? (
           <div className="lista-sel-count">
             {selectedItems.length === 0 ? (
               <>0 presentes selecionados</>
             ) : (
               <>
-                {selectedItems.length}{" "}
-                {selectedItems.length === 1 ? "presente selecionado" : "presentes selecionados"} ·{" "}
+                {selectedItems.length}{' '}
+                {selectedItems.length === 1 ? 'presente selecionado' : 'presentes selecionados'} ·{' '}
                 <b>{brl(catTotal)}</b>
               </>
             )}
           </div>
         ) : (
           <div className="lista-sel-count">
-            novo presente: <b>{f.title.trim() || "—"}</b>
+            novo presente: <b>{f.title.trim() || '—'}</b>
           </div>
         )}
         <div className="lista-foot-actions">
           <button type="button" className="btn btn-ghost" onClick={onClose} disabled={submitting}>
             Cancelar
           </button>
-          {tab === "catalogo" ? (
+          {tab === 'catalogo' ? (
             <button
               type="button"
               className="btn btn-primary"
               disabled={selectedItems.length === 0 || submitting}
               onClick={submitCatalogo}
             >
-              <span className="lista-btn-ic">{icon.plus}</span>{" "}
-              {submitting ? "Adicionando..." : "Adicionar"}
+              <span className="lista-btn-ic">{icon.plus}</span>{' '}
+              {submitting ? 'Adicionando...' : 'Adicionar'}
             </button>
           ) : (
             <button
@@ -1125,8 +1189,8 @@ function AddGiftModal({
               disabled={!personValid || submitting}
               onClick={submitPersonalizado}
             >
-              <span className="lista-btn-ic">{icon.plus}</span>{" "}
-              {submitting ? "Adicionando..." : "Adicionar à lista"}
+              <span className="lista-btn-ic">{icon.plus}</span>{' '}
+              {submitting ? 'Adicionando...' : 'Adicionar à lista'}
             </button>
           )}
         </div>
@@ -1148,7 +1212,7 @@ function EditItemModal({
   submitting: boolean;
 }) {
   const [f, setF] = useState<DraftFields>(initial);
-  const priceNum = parseFloat(f.price.replace(",", ".")) || 0;
+  const priceNum = parseValorBRL(f.price);
   const valid = f.title.trim().length > 0 && priceNum > 0;
   const previewTotal = priceNum * (Number(f.qty) || 0);
 
@@ -1186,7 +1250,7 @@ function EditItemModal({
             onClick={submit}
             data-testid="edit-save-btn"
           >
-            {submitting ? "Salvando..." : "Salvar alterações"}
+            {submitting ? 'Salvando...' : 'Salvar alterações'}
           </button>
         </div>
       </div>
@@ -1229,8 +1293,13 @@ function ConfirmRemove({
           <button type="button" className="btn btn-ghost" onClick={onClose} disabled={submitting}>
             Manter na lista
           </button>
-          <button type="button" className="btn btn-danger" onClick={onConfirm} disabled={submitting}>
-            {submitting ? "Removendo..." : "Sim, remover"}
+          <button
+            type="button"
+            className="btn btn-danger"
+            onClick={onConfirm}
+            disabled={submitting}
+          >
+            {submitting ? 'Removendo...' : 'Sim, remover'}
           </button>
         </div>
       </div>
@@ -1265,10 +1334,7 @@ function PresetDetailModal({
 
   const selectedItems = preset.items.filter((it) => selected.has(it.id));
   // aperture-p73kv — same djb2-derived mirror as the catalogo path.
-  const total = selectedItems.reduce(
-    (s, it) => s + it.price * defaultSuggestedQty(it.id),
-    0,
-  );
+  const total = selectedItems.reduce((s, it) => s + it.price * defaultSuggestedQty(it.id), 0);
   const count = selectedItems.length;
 
   const submit = () => {
@@ -1301,10 +1367,10 @@ function PresetDetailModal({
               <button
                 type="button"
                 key={it.id}
-                className={"lista-preset-item" + (on ? " is-selected" : "")}
+                className={'lista-preset-item' + (on ? ' is-selected' : '')}
                 onClick={() => toggle(it.id)}
                 aria-pressed={on}
-                aria-label={`${on ? "Remover" : "Adicionar"} ${it.name}`}
+                aria-label={`${on ? 'Remover' : 'Adicionar'} ${it.name}`}
               >
                 <div
                   className="lista-preset-thumb"
@@ -1322,11 +1388,11 @@ function PresetDetailModal({
                       loading="lazy"
                       decoding="async"
                       style={{
-                        width: "100%",
-                        height: "100%",
-                        objectFit: "cover",
-                        borderRadius: "inherit",
-                        display: "block",
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'cover',
+                        borderRadius: 'inherit',
+                        display: 'block',
                       }}
                     />
                   ) : (
@@ -1339,10 +1405,7 @@ function PresetDetailModal({
                     {brl(it.price)} · sugerido {defaultSuggestedQty(it.id)} un
                   </span>
                 </div>
-                <span
-                  className={"lista-preset-check" + (on ? " is-on" : "")}
-                  aria-hidden="true"
-                >
+                <span className={'lista-preset-check' + (on ? ' is-on' : '')} aria-hidden="true">
                   {on && icon.check}
                 </span>
               </button>
@@ -1353,7 +1416,7 @@ function PresetDetailModal({
 
       <div className="lista-modal-foot">
         <div className="lista-sel-count">
-          {count} {count === 1 ? "presente selecionado" : "presentes selecionados"} ·{" "}
+          {count} {count === 1 ? 'presente selecionado' : 'presentes selecionados'} ·{' '}
           <b>{brl(total)}</b>
         </div>
         <div className="lista-foot-actions">
@@ -1367,7 +1430,7 @@ function PresetDetailModal({
             onClick={submit}
           >
             <span className="lista-btn-ic">{icon.heart}</span>
-            {submitting ? "Adicionando..." : "Adicionar à minha lista →"}
+            {submitting ? 'Adicionando...' : 'Adicionar à minha lista →'}
           </button>
         </div>
       </div>
@@ -1394,11 +1457,11 @@ function ListaSkeleton() {
             className="lista-skeleton-line"
             style={{
               height: 14,
-              width: "60%",
-              background: "var(--lilac-soft)",
+              width: '60%',
+              background: 'var(--lilac-soft)',
               borderRadius: 6,
               opacity: 0.5,
-              margin: "12px 0 16px",
+              margin: '12px 0 16px',
             }}
           />
           <div className="lista-header-actions" aria-hidden="true">
@@ -1409,7 +1472,7 @@ function ListaSkeleton() {
                 style={{
                   height: 40,
                   width: w,
-                  background: "var(--lilac-soft)",
+                  background: 'var(--lilac-soft)',
                   borderRadius: 999,
                   opacity: 0.5,
                 }}
@@ -1425,9 +1488,9 @@ function ListaSkeleton() {
             className="lista-card"
             style={{
               minHeight: 240,
-              background: "var(--paper)",
+              background: 'var(--paper)',
               opacity: 0.5,
-              animation: "pulse 1.6s ease-in-out infinite",
+              animation: 'pulse 1.6s ease-in-out infinite',
             }}
           />
         ))}
@@ -1446,9 +1509,7 @@ function ListaErrorBanner({ onRetry }: { onRetry: () => void }) {
           <h1>
             Não rolou de carregar <span className="hl">sua lista</span>
           </h1>
-          <p className="lista-header-sub">
-            Algo travou aqui do nosso lado — bora tentar de novo?
-          </p>
+          <p className="lista-header-sub">Algo travou aqui do nosso lado — bora tentar de novo?</p>
           <div className="lista-header-actions">
             <button type="button" className="btn btn-primary" onClick={onRetry}>
               <span className="lista-btn-ic">{icon.alert}</span> Tentar de novo
@@ -1470,8 +1531,8 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
   const deleteMut = useContribuicaoDelete();
   const updateMut = useContribuicaoUpdate();
 
-  const [search, setSearch] = useState("");
-  const [cat, setCat] = useState<CatFilter>("all");
+  const [search, setSearch] = useState('');
+  const [cat, setCat] = useState<CatFilter>('all');
   const [addModalTab, setAddModalTab] = useState<AddTab | null>(null);
   const [editItem, setEditItem] = useState<GroupedGift | null>(null);
   const [removeItem, setRemoveItem] = useState<GroupedGift | null>(null);
@@ -1494,12 +1555,12 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
   }, [items]);
 
   const order = useMemo<CatFilter[]>(
-    () => ["all", ...CATEGORY_OPTIONS.filter((k) => counts[k])],
+    () => ['all', ...CATEGORY_OPTIONS.filter((k) => counts[k])],
     [counts],
   );
 
   const filtered = items.filter((i) => {
-    if (cat !== "all" && i.category !== cat) return false;
+    if (cat !== 'all' && i.category !== cat) return false;
     if (search && !i.nome.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
@@ -1510,7 +1571,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
   // ── Mutations ─────────────────────────────────────────────────────────────
 
   const addItem = async (draft: DraftFields) => {
-    const price = parseFloat(draft.price.replace(",", ".")) || 0;
+    const price = parseValorBRL(draft.price);
     try {
       await createMut.mutateAsync({
         nome: draft.title,
@@ -1525,10 +1586,10 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
       });
       setAddModalTab(null);
       const n = Number(draft.qty) || 1;
-      sendEvent("lista_item_personalizado_adicionado", { nome_item: draft.title });
+      sendEvent('lista_item_personalizado_adicionado', { nome_item: draft.title });
       toast.success(
         n === 1
-          ? "1 presente adicionado à sua lista ♡"
+          ? '1 presente adicionado à sua lista ♡'
           : `${n} presentes adicionados à sua lista ♡`,
       );
     } catch (err) {
@@ -1565,14 +1626,11 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
         })),
       });
       setAddModalTab(null);
-      const totalUnits = picked.reduce(
-        (s, it) => s + defaultSuggestedQty(it.id),
-        0,
-      );
-      sendEvent("lista_item_catalogo_adicionado", { quantidade_itens: totalUnits });
+      const totalUnits = picked.reduce((s, it) => s + defaultSuggestedQty(it.id), 0);
+      sendEvent('lista_item_catalogo_adicionado', { quantidade_itens: totalUnits });
       toast.success(
         totalUnits === 1
-          ? "1 presente adicionado à sua lista ♡"
+          ? '1 presente adicionado à sua lista ♡'
           : `${totalUnits} presentes adicionados à sua lista ♡`,
       );
     } catch (err) {
@@ -1604,9 +1662,9 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
       setPresetsOpen(false);
       // aperture-p73kv — toast count mirrors the per-item djb2 helper.
       const n = picked.reduce((s, it) => s + defaultSuggestedQty(it.id), 0);
-      sendEvent("lista_pronta_itens_adicionados", { preset_id: presetId, quantidade_itens: n });
+      sendEvent('lista_pronta_itens_adicionados', { preset_id: presetId, quantidade_itens: n });
       toast.success(
-        `${n} ${n === 1 ? "presente adicionado" : "presentes adicionados"} à sua lista ♡`,
+        `${n} ${n === 1 ? 'presente adicionado' : 'presentes adicionados'} à sua lista ♡`,
       );
     } catch (err) {
       toast.error(contribuicaoErrorMessage(toContribuicaoError(err)));
@@ -1648,7 +1706,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
   // refetch.
   const saveEdit = async (draft: DraftFields) => {
     if (!editItem) return;
-    const price = parseFloat(draft.price.replace(",", ".")) || 0;
+    const price = parseValorBRL(draft.price);
     const newQty = Number(draft.qty) || 1;
     // aperture-qxntg follow-up — `editItem.emoji` is a UI-only display
     // fallback derived from the grupo when the row has no real image
@@ -1665,7 +1723,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
     const imagemUrl = draft.imageUrl ?? null;
     const idToUpdate = editItem.ids[0];
     if (!idToUpdate) {
-      toast.error("Não consegui identificar esse presente — recarrega a página ♡");
+      toast.error('Não consegui identificar esse presente — recarrega a página ♡');
       return;
     }
     try {
@@ -1678,17 +1736,17 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
         quantidade: newQty,
       });
       setEditItem(null);
-      toast.success("Alterações salvas ♡");
+      toast.success('Alterações salvas ♡');
     } catch (err) {
       const error = toContribuicaoError(err);
       // Stale-row recovery: the slot was deleted between the visitor's
       // fetch + this edit. Invalidate so the next render reflects
       // reality + nudge the visitor with a calmer message than the
       // dead-end "esse presente não existe mais" the legacy flow used.
-      if (error.kind === "not-found") {
+      if (error.kind === 'not-found') {
         void listQuery.refetch();
         setEditItem(null);
-        toast("essa lista mudou — atualizamos para você ♡");
+        toast('essa lista mudou — atualizamos para você ♡');
         return;
       }
       toast.error(contribuicaoErrorMessage(error));
@@ -1699,7 +1757,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
     if (!removeItem) return;
     try {
       await deleteMut.mutateAsync({ ids: removeItem.ids });
-      toast("Presente removido");
+      toast('Presente removido');
       setRemoveItem(null);
     } catch (err) {
       toast.error(contribuicaoErrorMessage(toContribuicaoError(err)));
@@ -1739,21 +1797,21 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
           <p className="lista-header-sub">
             <b>
               {claimedUnits} de {totalUnits}
-            </b>{" "}
+            </b>{' '}
             presentes já recebidos
           </p>
           <div className="lista-header-actions">
             <button
               type="button"
               className="btn btn-primary"
-              onClick={() => setAddModalTab("catalogo")}
+              onClick={() => setAddModalTab('catalogo')}
             >
               <span className="lista-btn-ic">{icon.plus}</span> Adicionar presente
             </button>
             <button
               type="button"
               className="btn btn-ghost"
-              onClick={() => setAddModalTab("personalizado")}
+              onClick={() => setAddModalTab('personalizado')}
               aria-label="Criar item personalizado"
             >
               <span className="lista-btn-ic">{icon.sparkle}</span> Criar item personalizado
@@ -1771,8 +1829,8 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
               <span
                 className="lista-btn-ic"
                 style={{
-                  transform: presetsOpen ? "rotate(180deg)" : "none",
-                  transition: "transform 0.2s ease",
+                  transform: presetsOpen ? 'rotate(180deg)' : 'none',
+                  transition: 'transform 0.2s ease',
                 }}
               >
                 {icon.caretDown}
@@ -1799,7 +1857,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
                   // template — UI only carries the emoji + tile-tint deltas.
                   // Fall back to safe defaults if the loader is somehow stale.
                   const title = detail?.title ?? preset.id;
-                  const desc = detail?.description ?? "";
+                  const desc = detail?.description ?? '';
                   const cover = detail?.imageUrl ?? null;
                   return (
                     <article key={preset.id} className="lista-pronta-card">
@@ -1814,11 +1872,11 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
                             alt=""
                             loading="lazy"
                             style={{
-                              width: "100%",
-                              height: "100%",
-                              objectFit: "cover",
-                              borderRadius: "inherit",
-                              display: "block",
+                              width: '100%',
+                              height: '100%',
+                              objectFit: 'cover',
+                              borderRadius: 'inherit',
+                              display: 'block',
                             }}
                           />
                         ) : (
@@ -1829,13 +1887,13 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
                       <p className="lista-pronta-desc">{desc}</p>
                       <div className="lista-pronta-foot">
                         <span className="lista-pronta-count">
-                          {itemCount} {itemCount === 1 ? "item" : "itens"}
+                          {itemCount} {itemCount === 1 ? 'item' : 'itens'}
                         </span>
                         <button
                           type="button"
                           className="lista-pronta-cta"
                           onClick={() => {
-                            sendEvent("lista_pronta_visualizada", { preset_id: preset.id });
+                            sendEvent('lista_pronta_visualizada', { preset_id: preset.id });
                             setPresetDetail(preset.id);
                           }}
                           aria-label={`Ver lista pronta: ${title}`}
@@ -1855,9 +1913,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
       {items.length > 0 && <Visor items={items} />}
 
       <div className="lista-group-title">
-        <span>
-          os presentes da sua lista
-        </span>
+        <span>os presentes da sua lista</span>
       </div>
 
       <div className="lista-frame">
@@ -1885,10 +1941,10 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
                   <button
                     type="button"
                     key={k}
-                    className={"lista-chip" + (cat === k ? " active" : "")}
+                    className={'lista-chip' + (cat === k ? ' active' : '')}
                     onClick={() => setCat(k)}
                   >
-                    {k === "all" ? "todos" : LISTA_CATEGORY_LABEL[k]}
+                    {k === 'all' ? 'todos' : LISTA_CATEGORY_LABEL[k]}
                     <span className="lista-chip-count">{counts[k] || 0}</span>
                   </button>
                 ))}
@@ -1906,7 +1962,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
             <button
               type="button"
               className="btn btn-primary"
-              onClick={() => setAddModalTab("catalogo")}
+              onClick={() => setAddModalTab('catalogo')}
             >
               <span className="lista-btn-ic">{icon.plus}</span> Adicionar primeiro item
             </button>
@@ -1920,17 +1976,12 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
         ) : (
           <div className="lista-grid">
             {filtered.map((it) => (
-              <GiftCard
-                key={it.nome}
-                item={it}
-                onEdit={setEditItem}
-                onRemove={setRemoveItem}
-              />
+              <GiftCard key={it.nome} item={it} onEdit={setEditItem} onRemove={setRemoveItem} />
             ))}
             <button
               type="button"
               className="lista-card lista-card-add"
-              onClick={() => setAddModalTab("catalogo")}
+              onClick={() => setAddModalTab('catalogo')}
             >
               <span className="lista-card-add-plus">{icon.plus}</span>
               <span className="lista-card-add-label">adicionar outro presente</span>
@@ -1953,7 +2004,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
         <EditItemModal
           initial={{
             title: editItem.nome,
-            price: editItem.price.toFixed(2).replace(".", ","),
+            price: editItem.price.toFixed(2).replace('.', ','),
             qty: editItem.qty,
             category: editItem.category,
             // aperture-tua9o — pre-fill the existing image so editing keeps it

@@ -34,18 +34,21 @@
  *   "1.500,00" (R$1.500,00) → 150 cents (R$1,50). Reported to Izzy.
  */
 import { describe, expect, it } from 'vitest';
-import { brlFromCents, centsFromBRL } from '../../../apps/eunenem-server/pages/lib/contribuicao.js';
+import {
+  brlFromCents,
+  centsFromBRL,
+  parseValorBRL,
+} from '../../../apps/eunenem-server/pages/lib/contribuicao.js';
 
 /**
- * CHAR-FOR-CHAR mirror of the inline parse at ListaPresentesBody.tsx
- * :991 / :1151 / :1513 / :1651, composed with the REAL centsFromBRL. This
- * is exactly the string→cents pipeline a user's typed price travels on
- * add/edit. If those four call sites are ever refactored into a shared
- * helper, replace this mirror with a direct import of that helper.
+ * The string→cents pipeline a user's typed price travels on add/edit. As of
+ * aperture-t8zj5 the inline parse at ListaPresentesBody.tsx :991/:1151/:1513/
+ * :1651 was extracted into the shared `parseValorBRL` helper (which fixes the
+ * thousand-separator bug), so this now composes the REAL helper directly
+ * instead of mirroring the old buggy inline expression.
  */
 function parseValorInput(raw: string): number {
-  const brl = parseFloat(raw.replace(',', '.')) || 0;
-  return centsFromBRL(brl);
+  return centsFromBRL(parseValorBRL(raw));
 }
 
 describe('aperture-twnf0 — centsFromBRL / brlFromCents (real exported helpers)', () => {
@@ -94,37 +97,33 @@ describe('aperture-twnf0 — reais→cents parser (typed price → cents)', () =
 });
 
 /**
- * KNOWN BUG — thousand-separator prices collapse catastrophically.
+ * FIXED (aperture-t8zj5) — thousand-separator prices now parse correctly.
  *
- * These `it.fails` cases encode the CORRECT expectation. They pass today
- * ONLY because the assertion inside throws (the parser is wrong). When the
- * parser is fixed, each `it.fails` will start FAILING — that is the signal
- * to drop `.fails` and promote it to a normal assertion.
+ * These were `it.fails` cases holding the CORRECT expectation while the bug
+ * was live; the parser is now fixed (`parseValorBRL` strips thousand-dots and
+ * normalizes the decimal comma), so they are promoted to normal `it`
+ * assertions. If they ever start failing again, the ~1000× undercharge has
+ * regressed.
  *
- * Repro (all values in cents; expected → actual):
- *   "1.500,00"     150000 → 150     (R$1.500,00 becomes R$1,50)
- *   "1.234,56"     123456 → 123     (R$1.234,56 becomes R$1,23)
- *   "2.000"        200000 → 200     (R$2.000    becomes R$2,00)
- *   "1.234.567,89" ... catastrophic truncation at the 2nd dot
- *
- * Root cause: apps/.../ListaPresentesBody.tsx `.replace(",", ".")` replaces
- * only the FIRST comma and leaves the thousand-separator dot(s) in place, so
- * parseFloat("1.500.00") === 1.5.
+ *   "1.500,00"     → 150000    (R$1.500,00, not R$1,50)
+ *   "1.234,56"     → 123456
+ *   "2.000"        → 200000    (R$2.000, thousand-separated)
+ *   "1.234.567,89" → 123456789
  */
-describe('aperture-twnf0 — reais→cents parser KNOWN BUG (thousand separators)', () => {
-  it.fails('"1.500,00" SHOULD be 150000 cents (actual: 150 — R$1,50)', () => {
+describe('aperture-t8zj5 — reais→cents parser handles thousand separators', () => {
+  it('"1.500,00" → 150000 cents', () => {
     expect(parseValorInput('1.500,00')).toBe(150000);
   });
 
-  it.fails('"1.234,56" SHOULD be 123456 cents (actual: 123 — R$1,23)', () => {
+  it('"1.234,56" → 123456 cents', () => {
     expect(parseValorInput('1.234,56')).toBe(123456);
   });
 
-  it.fails('"2.000" SHOULD be 200000 cents (actual: 200 — R$2,00)', () => {
+  it('"2.000" → 200000 cents', () => {
     expect(parseValorInput('2.000')).toBe(200000);
   });
 
-  it.fails('"1.234.567,89" SHOULD be 123456789 cents (actual: 123)', () => {
+  it('"1.234.567,89" → 123456789 cents', () => {
     expect(parseValorInput('1.234.567,89')).toBe(123456789);
   });
 });
