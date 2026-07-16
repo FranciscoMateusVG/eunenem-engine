@@ -1,9 +1,12 @@
 import { painelConvitePreviewHref } from './painelRoutes.js';
 
 export type ConviteShareResult = 'shared' | 'copied' | 'cancelled';
-export const CONVITE_SHARE_PRODUCTION_ORIGIN = 'https://eunenem.xeroxtoxerox.com/';
 export const CONVITE_SHARE_DEVELOPMENT_ORIGIN = 'http://localhost:3001/';
 
+/** Normalise an origin to exactly one trailing slash (URL() joins expect it). */
+function comBarraFinal(origin: string): string {
+  return origin.endsWith('/') ? origin : `${origin}/`;
+}
 
 // aperture-2v91z — idCampanha threads through so a native share targets THE
 // CAMPANHA'S convite; without it every share pointed at the OLDEST
@@ -16,14 +19,37 @@ export function buildConvitePreviewShareUrl(
   return new URL(painelConvitePreviewHref(slug, idCampanha ?? undefined), origin).toString();
 }
 
+/**
+ * The origin used for shared convite / página links.
+ *
+ * aperture-ejghb: this was a hardcoded `https://eunenem.xeroxtoxerox.com/`
+ * constant, so every shared invite pointed at a dead domain the moment the app
+ * moved hosts — funnel-breaking (dead links = no guests). The canonical origin
+ * for a SAME-SITE convite link is simply wherever the app is actually served,
+ * which in the browser is `window.location.origin` — automatically correct on
+ * ANY domain (test / prod / future), with nothing to hardcode or misconfigure.
+ * Every real caller is a browser event handler, so this is the live path.
+ *
+ * The non-browser fallback (SSR pre-hydration / tests) is env-driven: NODE_ENV
+ * dev|test → localhost; otherwise the server-provided `EUNENEM_PUBLIC_ORIGIN`
+ * (falling back to localhost rather than any hardcoded host). No dead domain
+ * survives anywhere in this function.
+ */
 export function getDefaultConviteShareOrigin(): string {
-  const nodeEnv = typeof process !== 'undefined' ? process.env.NODE_ENV : undefined;
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return comBarraFinal(window.location.origin);
+  }
 
+  const nodeEnv = typeof process !== 'undefined' ? process.env.NODE_ENV : undefined;
   if (nodeEnv === 'development' || nodeEnv === 'test') {
     return CONVITE_SHARE_DEVELOPMENT_ORIGIN;
   }
 
-  return CONVITE_SHARE_PRODUCTION_ORIGIN;
+  const envOrigin =
+    typeof process !== 'undefined' ? process.env.EUNENEM_PUBLIC_ORIGIN : undefined;
+  return comBarraFinal(
+    envOrigin && envOrigin.length > 0 ? envOrigin : CONVITE_SHARE_DEVELOPMENT_ORIGIN,
+  );
 }
 
 export interface ShareConvitePreviewOptions {
