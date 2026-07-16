@@ -66,7 +66,7 @@ test.describe('Painel — Adicionar mimo (quantidade single-row)', () => {
     await expect(qtyInput).toBeVisible();
 
     // Nome — reached via its label "nome do mimo" (case-insensitive substring).
-    const nomeField = page.getByLabel('Nome do mimo', { exact: false });
+    const nomeField = page.getByLabel('nome do presente', { exact: false });
     await expect(nomeField).toBeVisible();
     await nomeField.fill(newGiftName);
 

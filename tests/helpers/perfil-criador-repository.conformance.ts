@@ -53,6 +53,12 @@ const CONTEUDO_PREENCHIDO: ConteudoPerfilCriador = {
   fotoPerfilKey: 'perfis/helena/perfil.jpg',
   fotoCapaKey: 'perfis/helena/capa.jpg',
   fotoHistoriaKey: 'perfis/helena/historia.jpg',
+  // TweaksPanel personalizacao fields (aperture-hsxim / migration _040) live
+  // ONLY on perfil_campanhas; the legacy perfil_criadores repo hardcodes them
+  // to null on read, so fixtures for THIS table must be null to round-trip.
+  papais: null,
+  corPrimaria: null,
+  corAcento: null,
 };
 
 const CONTEUDO_ATUALIZADO: ConteudoPerfilCriador = {
@@ -66,6 +72,9 @@ const CONTEUDO_ATUALIZADO: ConteudoPerfilCriador = {
   fotoPerfilKey: null,
   fotoCapaKey: null,
   fotoHistoriaKey: null,
+  papais: null,
+  corPrimaria: null,
+  corAcento: null,
 };
 
 interface ConformanceOptions {
@@ -167,6 +176,9 @@ export function describePerfilCriadorRepositoryConformance(
         fotoPerfilKey: null,
         fotoCapaKey: null,
         fotoHistoriaKey: null,
+        papais: null,
+        corPrimaria: null,
+        corAcento: null,
       };
       const perfil = makePerfilCriador(idUsuario, vazio);
       await repo.save(perfil);

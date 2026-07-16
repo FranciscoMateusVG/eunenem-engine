@@ -1,0 +1,28 @@
+{
+  "//": "aperture-zaz5r: typecheck path for the e2e/ suite. The base tsconfig.json uses include:[src] + rootDir:src, so e2e/*.ts were NEVER typechecked — that is why the suite rotted silently. This config extends the base (inheriting all strict flags) but widens the program to e2e/ + playwright.config.ts with noEmit. DOM is added to lib because Playwright page.evaluate() callbacks legitimately reference browser globals (window/document). Run via `pnpm typecheck:e2e`; wired into the ci.yml typecheck job.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "paths": { "@/*": ["./apps/eunenem-server/pages/*"] },
+    // STRICTNESS: exactOptionalPropertyTypes + noUncheckedIndexedAccess are relaxed to
+    // match the APP's own baseline (apps/eunenem-server/tsconfig.json enables neither).
+    // This is the correct baseline for a suite that tests that app — NOT a relaxation to
+    // hide bugs. The gate still enforces the drift class this epic exists to catch:
+    // missing required fields (e.g. the constraint-036 cpfTitular it caught on its first
+    // run), renamed exports, wrong types. noUncheckedIndexedAccess specifically trips the
+    // idiomatic Playwright addInitScript(([key]) => ..., [CONST]) destructure on test-glue
+    // code. Do NOT blindly re-tighten — see the fast-follow bead (re-tighten + rewrite the
+    // 11 addInitScript sites to pass the const directly instead of tuple-wrapped).
+    "exactOptionalPropertyTypes": false,
+    "noUncheckedIndexedAccess": false,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "composite": false
+  },
+  "include": ["e2e", "playwright.config.ts"],
+  "exclude": ["node_modules", "dist"]
+}

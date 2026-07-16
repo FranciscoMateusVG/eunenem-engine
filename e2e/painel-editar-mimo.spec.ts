@@ -71,7 +71,7 @@ test.describe('Painel — Editar mimo saveEdit', () => {
 
     // Modify ONLY the nome — qty must stay identical to trigger the
     // qty-unchanged code path. The nome field uses an aria-label.
-    const nomeField = page.getByLabel('Nome do mimo', { exact: false });
+    const nomeField = page.getByLabel('nome do presente', { exact: false });
     await expect(nomeField).toBeVisible();
     const newName = `${seededData.nomeContribuicao} — edited`;
     await nomeField.fill(newName);

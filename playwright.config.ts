@@ -11,38 +11,85 @@ const REMOTE_TARGET = Boolean(
   process.env.E2E_BASE_URL && !/localhost|127\.0\.0\.1/.test(process.env.E2E_BASE_URL),
 );
 
+// Same connection string as .env.example (engine's docker-compose). In CI the
+// ci.yml `e2e` job overrides this to point at its `services: postgres:16`.
+const E2E_DATABASE_URL =
+  process.env.E2E_DATABASE_URL ?? 'postgresql://frame:frame@localhost:54320/frame';
+
 /**
- * Playwright E2E configuration for the eunenem engine (aperture-ilji3).
+ * Build one webServer entry for the engine's eunenem-server on `port`.
  *
- * This is the FIRST E2E gate to land — the suite's purpose is to catch
- * user-facing regressions that slip past unit + integration tests.
+ * NOTE (aperture-zaz5r): the client bundle is built ONCE by the `test:e2e`
+ * script BEFORE Playwright starts (`(cd apps/eunenem-server && pnpm build) &&
+ * playwright test`). The webServer commands below therefore only start the
+ * server (`tsx server.tsx`) and do NOT build. This is deliberate: Playwright
+ * launches all webServers concurrently, so two `pnpm build` invocations would
+ * race on the same apps/eunenem-server/public/client.js output and corrupt the
+ * bundle. Single pre-build → both servers serve the identical, already-built
+ * worktree bundle.
+ */
+function makeServer(port: number, extraEnv: Record<string, string>) {
+  return {
+    command: `cd apps/eunenem-server && PORT=${port} NODE_ENV=development tsx server.tsx`,
+    url: `http://localhost:${port}/healthz`,
+    reuseExistingServer: !process.env.CI,
+    timeout: 120_000,
+    stdout: 'pipe' as const,
+    stderr: 'pipe' as const,
+    env: {
+      DATABASE_URL: E2E_DATABASE_URL,
+      BETTER_AUTH_SECRET:
+        process.env.BETTER_AUTH_SECRET ?? 'e2e-test-secret-must-be-at-least-32-chars-long-ok',
+      BETTER_AUTH_URL: `http://localhost:${port}`,
+      TRUSTED_ORIGINS: `http://localhost:${port}`,
+      // Base server (:3002): empty STRIPE_* → server falls back to the fake
+      // payment adapter (visitor-cart + UI specs rely on this).
+      STRIPE_SECRET_KEY: '',
+      STRIPE_PUBLISHABLE_KEY: '',
+      STRIPE_WEBHOOK_SECRET: '',
+      // Per-port overrides (:3003 sets the real Stripe-env, below).
+      ...extraEnv,
+    },
+  };
+}
+
+/**
+ * Playwright E2E configuration for the eunenem engine.
  *
- * Phase 1 (this PR): local-only. Playwright spawns its OWN copy of the
- * eunenem-server on port 3002 (so it picks up the worktree's current
- * code, not whatever operator has running on 3001 for dev). The spawned
- * server reuses the same Postgres the engine's docker-compose ships
- * (frame@localhost:54320). Each test seeds a fresh user + campaign +
- * contribuição via direct engine calls (NOT through the UI). Operator's
- * dev data is untouched — different port + isolated test users.
+ * Two local webServers (aperture-zaz5r, folding in Izzy's cluster-E fix):
+ *   :3002  default server, EMPTY STRIPE_* env → fake payment adapter. Serves
+ *          the visitor-cart / routing / admin / UI specs.
+ *   :3003  dedicated Stripe-env server: STRIPE_WEBHOOK_SECRET set so
+ *          /api/webhooks/stripe does real HMAC signature verification
+ *          (constructEvent is pure local HMAC — no Stripe API call). A
+ *          non-empty STRIPE_SECRET_KEY flips DI to the real Stripe provider,
+ *          which is exactly what the webhook-signature specs
+ *          (stripe-webhook-pix / -cartao) need. Setting these on :3002 would
+ *          break the fake-adapter specs — hence a separate server.
  *
- * Phase 2 (separate child PR): testcontainers Postgres per run +
- * GitHub Actions workflow so the gate runs in CI on every PR with full
- * hermetic isolation.
+ * The WEBHOOK_SECRET below MUST match the value the specs sign with
+ * (e2e/stripe-webhook-*.spec.ts → WEBHOOK_SECRET).
  *
  * RUN LOCALLY:
  *   docker compose -f docker/docker-compose.yml up -d  # Postgres only, once
- *   pnpm test:e2e                                       # Playwright handles the rest
+ *   pnpm test:e2e                                       # builds once, spawns both servers
  *
- * The Postgres must be reachable at the connection string in
- * E2E_DATABASE_URL (defaults to .env.example's frame@localhost:54320).
+ * CI: the ci.yml `e2e` job supplies a fresh `services: postgres:16` per run
+ * (hermetic per-run isolation; approved swap from the old "testcontainers"
+ * Phase-2 note — identical isolation, mirrors the existing `migrate` job).
  */
+const STRIPE_ENV_3003: Record<string, string> = {
+  STRIPE_SECRET_KEY: process.env.E2E_STRIPE_SECRET_KEY ?? 'sk_test_dummy_e2e',
+  STRIPE_WEBHOOK_SECRET:
+    process.env.E2E_STRIPE_WEBHOOK_SECRET ?? 'whsec_test_e2e_secret_for_signing_0000',
+};
+
 export default defineConfig({
   testDir: './e2e',
   timeout: 30_000,
   expect: { timeout: 5_000 },
-  // Single worker until per-worker DB isolation lands in the CI phase.
-  // E2E tests share the operator's dev DB; running them sequentially
-  // prevents cross-test fixture collisions.
+  // Single worker until per-worker DB isolation lands. E2E tests share one DB;
+  // running them sequentially prevents cross-test fixture collisions.
   workers: 1,
   fullyParallel: false,
   // Fail the run if `test.only` was accidentally committed.
@@ -51,8 +98,6 @@ export default defineConfig({
   reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'list',
   use: {
     baseURL: process.env.E2E_BASE_URL ?? 'http://localhost:3002',
-    // Each test gets a fresh browser context (no shared cookies).
-    // Auth comes via the per-test fixture in e2e/fixtures/auth.ts.
     storageState: undefined,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
@@ -66,35 +111,18 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
   ],
-  // Spawn the engine's eunenem-server from THIS worktree on port 3002.
-  // Build the client bundle once (no watch), then start the server. This
-  // guarantees the served bundle is the worktree's current code — not
-  // whatever operator's `pnpm dev` is shipping on 3001. Reuse-existing
-  // is enabled outside CI so iterating on tests doesn't re-build every
-  // time.
-  webServer: REMOTE_TARGET
-    ? undefined
+  // Conditional key (not `webServer: undefined`): under exactOptionalPropertyTypes
+  // an explicit `undefined` is not assignable to the optional `webServer`.
+  ...(REMOTE_TARGET
+    ? {}
     : {
-        command:
-          'cd apps/eunenem-server && pnpm build && PORT=3002 NODE_ENV=development tsx server.tsx',
-        url: 'http://localhost:3002/healthz',
-        reuseExistingServer: !process.env.CI,
-        timeout: 120_000,
-        stdout: 'pipe',
-        stderr: 'pipe',
-        env: {
-          // Same connection string as .env.example (engine's docker-compose).
-          // Override via shell env if needed.
-          DATABASE_URL:
-            process.env.E2E_DATABASE_URL ?? 'postgresql://frame:frame@localhost:54320/frame',
-          BETTER_AUTH_SECRET:
-            process.env.BETTER_AUTH_SECRET ?? 'e2e-test-secret-must-be-at-least-32-chars-long-ok',
-          BETTER_AUTH_URL: process.env.BETTER_AUTH_URL ?? 'http://localhost:3002',
-          TRUSTED_ORIGINS: process.env.TRUSTED_ORIGINS ?? 'http://localhost:3002',
-          // Optional Stripe vars stay empty — server falls back to fake adapter.
-          STRIPE_SECRET_KEY: '',
-          STRIPE_PUBLISHABLE_KEY: '',
-          STRIPE_WEBHOOK_SECRET: '',
-        },
-      },
+        webServer: [
+          // :3002 carries ADMIN_ALLOWED_EMAILS (Vance cluster-C): admin routes +
+          // auth.me live on the eunenem-server default port, not the stripe server.
+          makeServer(3002, {
+            ADMIN_ALLOWED_EMAILS: process.env.ADMIN_ALLOWED_EMAILS ?? 'e2e-admin@e2e.local',
+          }),
+          makeServer(3003, STRIPE_ENV_3003),
+        ],
+      }),
 });

@@ -12,8 +12,11 @@
  * each) and asserts the admin campaign view renders ONE row for that nome,
  * carrying a "× 4 slots" chip.
  *
- * The admin routes have NO auth gate (operator directive — anyone with the
- * URL gets in), so we use the default anonymous `page` fixture.
+ * The admin routes are gated by the AdminShell UX auth gate (aperture-r5fg0):
+ * `auth.me.isAdmin` must be true or the shell bounces to the landing page.
+ * The backend `adminProcedure` (aperture-4n222) is the real boundary. We use
+ * the `adminAuthenticatedPage` fixture (allowlisted admin session) so the real
+ * admin chrome renders.
  */
 import { randomUUID } from 'node:crypto';
 import { createDatabase } from '../src/adapters/database.js';
@@ -27,7 +30,7 @@ const DATABASE_URL =
 
 test.describe('Admin campaign view — grouped legacy contribuições', () => {
   test('collapses 4 legacy multi-rows into ONE card showing a "× 4 slots" chip', async ({
-    page,
+    adminAuthenticatedPage: page,
     seededData,
   }) => {
     const LEGACY_ROWS = 4;
@@ -54,7 +57,9 @@ test.describe('Admin campaign view — grouped legacy contribuições', () => {
       await db.destroy();
     }
 
-    // Anonymous admin view of the campaign (no auth gate).
+    // Admin view of the campaign. AdminShell (aperture-r5fg0) gates on an
+    // allowlisted admin session — the adminAuthenticatedPage fixture supplies
+    // one, so the real admin chrome renders instead of the landing-page bounce.
     await page.goto(`/admin/campanha/${seededData.idCampanha}`);
 
     // The "catálogo · slots da campanha" section is collapsed by default —

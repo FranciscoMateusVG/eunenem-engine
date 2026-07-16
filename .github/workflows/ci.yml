@@ -62,6 +62,13 @@ jobs:
       - name: Typecheck (eunenem-server)
         working-directory: apps/eunenem-server
         run: pnpm typecheck
+      # aperture-zaz5r: e2e/ was NEVER typechecked — the base tsconfig uses
+      # include:[src], so type drift in the e2e specs shipped silently (half of
+      # why the suite rotted). tsconfig.e2e.json covers e2e/ + playwright.config.ts
+      # with the same strict flags. Runs from root (both root + eunenem-server
+      # deps are installed above, so specs importing either resolve).
+      - name: Typecheck (e2e specs)
+        run: pnpm typecheck:e2e
 
   lint:
     name: lint (biome)
@@ -224,3 +231,74 @@ jobs:
           rm -rf migrations
           cp -r /tmp/pr-migrations migrations
           pnpm db:migrate
+
+  # aperture-zaz5r: THE Playwright e2e gate. Previously ci.yml ran
+  # typecheck/lint/test/build/migrate only — the e2e suite existed but never
+  # ran in CI (line 24 "E2E ... = phase 2"), so it rotted undetected. This job
+  # runs it on every staging PR. Hermetic per-run isolation via a fresh
+  # `services: postgres:16` (approved swap from the config's old "testcontainers"
+  # Phase-2 note — identical per-run isolation, mirrors the migrate job, far
+  # fewer moving parts). Specs self-seed per-test via e2e/fixtures, so no
+  # separate seed step is needed. `pnpm test:e2e` builds the client bundle ONCE
+  # then Playwright spawns two servers: :3002 (empty STRIPE_* → fake payment
+  # adapter) and :3003 (real STRIPE_WEBHOOK_SECRET → webhook signature specs).
+  e2e:
+    name: e2e (playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: frame
+          POSTGRES_PASSWORD: frame
+          POSTGRES_DB: frame
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U frame -d frame"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://frame:frame@localhost:5432/frame
+      E2E_DATABASE_URL: postgresql://frame:frame@localhost:5432/frame
+    steps:
+      - uses: actions/checkout@v4
+      # pnpm version comes from package.json `packageManager` (pnpm@10.33.0).
+      # Do NOT also pass `version:` here — action-setup errors on the conflict.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            apps/eunenem-server/pnpm-lock.yaml
+      - name: Install (root)
+        run: pnpm install --frozen-lockfile
+      # The e2e webServers build + run apps/eunenem-server, so its deps must be
+      # installed too.
+      - name: Install (eunenem-server)
+        working-directory: apps/eunenem-server
+        run: pnpm install --frozen-lockfile
+      # Schema for the e2e run. Specs self-seed their own users/campaigns via
+      # e2e/fixtures per-test — this migrate is the only DB-prep step needed.
+      - name: Apply migrations
+        run: pnpm db:migrate
+      # --with-deps pulls the OS libraries chromium needs on ubuntu-latest
+      # (test:e2e:install alone omits them).
+      - name: Install Playwright browser (chromium + OS deps)
+        run: pnpm exec playwright install --with-deps chromium
+      # test:e2e builds the client bundle once, then Playwright spawns the
+      # :3002 (fake-adapter) + :3003 (stripe-env) servers and runs the suite.
+      - name: Run Playwright e2e
+        run: pnpm test:e2e
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
