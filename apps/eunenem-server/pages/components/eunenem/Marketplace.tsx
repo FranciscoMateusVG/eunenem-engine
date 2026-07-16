@@ -1,5 +1,5 @@
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { artigoPosse } from "@/lib/concordancia";
 import { BottleDoodle, FlowerDoodle } from "./Doodles";
 import { GiftCard } from "./GiftCard";
@@ -37,6 +37,15 @@ export function Marketplace({ slug }: MarketplaceProps) {
 
   const cart = useCart();
   const drawer = useCartDrawer();
+
+  // aperture-v6mpf — report the single-gift checkout modal's visibility so
+  // PaginaPage can hide the floating TweaksPanel behind purchase overlays
+  // (the drawer already reports itself via isOpen).
+  const { setCheckoutModalOpen } = drawer;
+  useEffect(() => {
+    setCheckoutModalOpen(selectedGift !== null);
+    return () => setCheckoutModalOpen(false);
+  }, [selectedGift, setCheckoutModalOpen]);
 
   const onPick = useCallback((gift: VisitorGift) => {
     setSelectedGift(gift);

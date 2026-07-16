@@ -117,14 +117,19 @@ function isoToBR(iso: string | null): string {
   return `${dd}/${mm}/${dt.getUTCFullYear()}`;
 }
 
-// aperture-rbbpw — numeric dd/mm/aaaa mask: keep digits only, cap at 8, and
-// auto-insert the slashes. Free text like "bvjvhb" can never reach state.
-function maskBRDate(raw: string): string {
-  const digits = raw.replace(/\D/g, "").slice(0, 8);
-  let out = digits.slice(0, 2);
-  if (digits.length > 2) out += "/" + digits.slice(2, 4);
-  if (digits.length > 4) out += "/" + digits.slice(4, 8);
-  return out;
+// aperture-bt0ic — dataEvento variant of brToISO: the event date flows into
+// the campanha's `eventos.dataHora`, which the convite editor + card read as
+// a date-TIME. :01 seconds is the convite mapper's NO-TIME-CHOSEN sentinel
+// (NO_TIME_CHOSEN_SECONDS in lib/convite-mapper.ts); without it a perfil save
+// wrote UTC midnight, which hydrated the convite's optional time with a
+// phantom "21:00" on the PREVIOUS day in BRT. Local noon keeps the calendar
+// day stable across timezones; the sentinel keeps the time genuinely blank.
+function brToEventoISO(br: string): string | null {
+  const m = br.trim().match(BR_DATE_RE);
+  if (!m) return null;
+  if (brToISO(br) === null) return null; // reuse overflow validation
+  const dt = new Date(`${m[3]}-${m[2]}-${m[1]}T12:00:01`);
+  return dt.toISOString();
 }
 
 // BR (dd/mm/aaaa) <-> native <input type="date"> value (yyyy-mm-dd).
@@ -785,9 +790,15 @@ function SlugEditor({
   );
 }
 
-// aperture-rbbpw — decent date input. The masked text field is the primary
-// path (numeric dd/mm/aaaa, no free text); the calendar icon is a real button
-// that opens the native date picker for zero-typing selection.
+// aperture-prdbu (Thacy QA, iPhone Safari) — the previous shape (masked
+// type="text" inputMode="numeric" as the tappable field + a HIDDEN native
+// date input fired via showPicker() from the calendar icon) popped the iOS
+// NUMERIC KEYPAD: showPicker() is unreliable on iOS Safari, so the keypad
+// was the only working path on iPhone. The native <input type="date"> is
+// now the VISIBLE primary field (same pattern as the convite wizard's
+// MStepQuando, which works natively on iOS) — tapping it opens the platform
+// calendar everywhere. The calendar icon stays as a secondary affordance
+// (showPicker() where supported, focus otherwise).
 function PerfilDateField({
   id,
   value,
@@ -810,20 +821,19 @@ function PerfilDateField({
     try {
       el.showPicker?.();
     } catch {
-      // Older browsers without showPicker(): the masked field still works.
+      // Browsers without showPicker(): fall through to focus below.
     }
+    el.focus();
   };
   return (
     <div className={`perfil-input perfil-date ${value ? "" : "is-empty"}`}>
       <input
+        ref={dateRef}
         id={id}
-        className="perfil-date-field"
-        type="text"
-        inputMode="numeric"
-        value={value}
-        placeholder="dd/mm/aaaa"
-        maxLength={10}
-        onChange={(e) => onChange(maskBRDate(e.target.value))}
+        className="perfil-date-field perfil-date-field-native"
+        type="date"
+        value={brToInputValue(value)}
+        onChange={(e) => onChange(inputValueToBR(e.target.value))}
       />
       <span className="perfil-date-actions">
         {value && (
@@ -836,25 +846,14 @@ function PerfilDateField({
             {ico.x}
           </button>
         )}
-        <span className="perfil-date-cal-wrap">
-          <button
-            type="button"
-            className="perfil-date-cal"
-            onClick={openPicker}
-            aria-label={calLabel}
-          >
-            {ico.calendar}
-          </button>
-          <input
-            ref={dateRef}
-            type="date"
-            className="perfil-date-native"
-            tabIndex={-1}
-            aria-hidden="true"
-            value={brToInputValue(value)}
-            onChange={(e) => onChange(inputValueToBR(e.target.value))}
-          />
-        </span>
+        <button
+          type="button"
+          className="perfil-date-cal"
+          onClick={openPicker}
+          aria-label={calLabel}
+        >
+          {ico.calendar}
+        </button>
       </span>
     </div>
   );
@@ -1025,7 +1024,9 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
     // to AtualizarPerfilInputSchema, add it HERE too — an omitted field is a
     // silent wipe, not a no-op.
     genero: genero || null,
-    dataEvento: teaDate.trim() ? brToISO(teaDate) : null,
+    // aperture-bt0ic — sentinel-seconds shape (see brToEventoISO): this value
+    // feeds the convite's optional date/time fields.
+    dataEvento: teaDate.trim() ? brToEventoISO(teaDate) : null,
     fotoPerfilKey: fotoKeys.current.perfil,
     fotoCapaKey: fotoKeys.current.capa,
     fotoHistoriaKey: fotoKeys.current.historia,
@@ -1037,7 +1038,8 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
   // the dates where the user-level input takes ISO strings.
   const campanhaPayload = (id: string) => {
     const nascISO = birthDate.trim() ? brToISO(birthDate) : null;
-    const eventoISO = teaDate.trim() ? brToISO(teaDate) : null;
+    // aperture-bt0ic — sentinel-seconds shape (see brToEventoISO).
+    const eventoISO = teaDate.trim() ? brToEventoISO(teaDate) : null;
     return {
       idCampanha: id,
       nomeBebe: babyName.trim() || null,
