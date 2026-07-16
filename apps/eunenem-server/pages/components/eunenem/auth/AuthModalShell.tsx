@@ -63,6 +63,24 @@ const OAUTH_PROVIDERS = [
   { id: "microsoft", label: "Microsoft", icon: MicrosoftIcon },
 ] as const;
 
+/**
+ * Maps a BetterAuth sign-in error status to a distinguishable, user-friendly
+ * pt-BR message (aperture-svwyp). No PII, no server internals — a human can
+ * tell rate-limited from origin-rejected from generic apart:
+ *   - 429 → BetterAuth's built-in 3-per-10s /sign-in/* rate limit
+ *   - 403 → "Invalid origin" (a config problem, not the user's fault)
+ *   - anything else / unknown → generic transient copy
+ */
+function messageForOauthError(status: number | undefined, label: string): string {
+  if (status === 429) {
+    return "muitas tentativas em sequência — espera alguns segundos antes de tentar de novo ♡";
+  }
+  if (status === 403) {
+    return `não consegui iniciar o login com ${label} por aqui. se continuar, avisa a nossa equipe ♡`;
+  }
+  return `não consegui abrir o ${label} agora ♡ — tenta de novo em instantes`;
+}
+
 export function AuthModalShell({ onClose }: AuthModalShellProps) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const titleId = useId();
@@ -75,6 +93,26 @@ export function AuthModalShell({ onClose }: AuthModalShellProps) {
   const [status, setStatus] = useState<Status>("idle");
 
   const isSending = status === "sending";
+
+  // ── Social sign-in feedback (aperture-svwyp) ──────────────────────────────
+  // BetterAuth's client resolves `signIn.social` with `{ data, error }` — it
+  // does NOT throw on a 403 (invalid origin) or 429 (rate limit), so the old
+  // try/catch never fired and the failure was invisible. The operator hammered
+  // the button 4× in 20s (nothing appeared to happen) and walked straight into
+  // BetterAuth's 3-per-10s /sign-in/* limit. We now read the returned error,
+  // surface a distinguishable pt-BR message, and lock the social buttons for a
+  // short cooldown so rapid re-clicks can't escalate a 403 into a lockout.
+  // `oauthPending` is the provider id mid-redirect (also disables the row).
+  const [oauthPending, setOauthPending] = useState<string | null>(null);
+  const [oauthError, setOauthError] = useState<string | null>(null);
+  const [oauthCooldown, setOauthCooldown] = useState(false);
+  const oauthTimer = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (oauthTimer.current !== null) window.clearTimeout(oauthTimer.current);
+    },
+    [],
+  );
 
   // ── Lifecycle: ESC, body scroll lock ──────────────────────────────────────
   useEffect(() => {
@@ -134,6 +172,17 @@ export function AuthModalShell({ onClose }: AuthModalShellProps) {
   // aperture-ydj4a — callbackURL is "/?oauth=1" (NOT bare "/"). The OAuth return
   // is a full page load, so the ?oauth=1 marker lets useOauthReturnRedirect
   // (mounted on the landing) resolve auth.me and forward to /painel/<slug>.
+  const startOauthCooldown = () => {
+    setOauthCooldown(true);
+    if (oauthTimer.current !== null) window.clearTimeout(oauthTimer.current);
+    // 6s > the rapid-hammer window that walks a 403 into the 3-per-10s limit,
+    // short enough not to feel punitive for a genuine retry.
+    oauthTimer.current = window.setTimeout(() => {
+      setOauthCooldown(false);
+      oauthTimer.current = null;
+    }, 6000);
+  };
+
   const onOauth = async (id: string, label: string) => {
     if (id !== "google" && id !== "microsoft") {
       toast("em breve ♡", {
@@ -141,16 +190,32 @@ export function AuthModalShell({ onClose }: AuthModalShellProps) {
       });
       return;
     }
+    // Guard rapid re-clicks even before the disabled prop paints (defense in
+    // depth against the exact retry loop that caused the lockout).
+    if (oauthPending !== null || oauthCooldown) return;
+    setOauthError(null);
+    setOauthPending(id);
     try {
-      await authClient.signIn.social({
+      const { error } = await authClient.signIn.social({
         provider: id as "google" | "microsoft",
         callbackURL: "/?oauth=1",
       });
-      // On success the browser is navigating away — nothing else to do.
+      // BetterAuth resolves (not throws) on an API error — inspect the result.
+      if (error) {
+        setOauthError(messageForOauthError(error.status, label));
+        setOauthPending(null);
+        startOauthCooldown();
+        return;
+      }
+      // On success the browser is navigating to the provider — keep the row
+      // disabled (oauthPending stays set) through the redirect/unload.
     } catch {
-      toast(`não consegui abrir o ${label} agora ♡`, {
-        description: "tenta de novo em instantes",
-      });
+      // Network-level failure (request never reached the server).
+      setOauthError(
+        `não consegui abrir o ${label} agora ♡ — confere sua conexão e tenta de novo`,
+      );
+      setOauthPending(null);
+      startOauthCooldown();
     }
   };
 
@@ -259,19 +324,39 @@ export function AuthModalShell({ onClose }: AuthModalShellProps) {
 
             <form onSubmit={onSubmit} className="auth-form" noValidate>
               <div className="auth-oauth-row">
-                {OAUTH_PROVIDERS.map(({ id, label, icon: Icon }) => (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => onOauth(id, label)}
-                    aria-label={`Continuar com ${label}`}
-                    className="auth-oauth"
-                  >
-                    <Icon />
-                    <span>Continuar com <strong>{label}</strong></span>
-                  </button>
-                ))}
+                {OAUTH_PROVIDERS.map(({ id, label, icon: Icon }) => {
+                  const pending = oauthPending === id;
+                  // Disable the whole row while one provider is redirecting or
+                  // during the post-failure cooldown (aperture-svwyp).
+                  const disabled = oauthPending !== null || oauthCooldown;
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => onOauth(id, label)}
+                      disabled={disabled}
+                      aria-busy={pending}
+                      aria-label={`Continuar com ${label}`}
+                      className="auth-oauth"
+                    >
+                      <Icon />
+                      <span>
+                        {pending ? (
+                          <>Abrindo o {label}…</>
+                        ) : (
+                          <>Continuar com <strong>{label}</strong></>
+                        )}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
+
+              {oauthError && (
+                <p className="auth-oauth-error" role="alert">
+                  {oauthError}
+                </p>
+              )}
 
               <div className="auth-divider" aria-hidden="true">
                 <span className="auth-divider-line" />
@@ -529,9 +614,26 @@ export const AUTH_CSS = `
   transition:border-color .15s ease,background .15s ease,transform .12s ease;
 }
 .auth-oauth strong{font-weight:600;color:var(--plum)}
-.auth-oauth:hover{border-color:var(--lilac);background:var(--lilac-soft)}
+.auth-oauth:hover:not(:disabled){border-color:var(--lilac);background:var(--lilac-soft)}
 .auth-oauth:focus-visible{outline:2px solid var(--lilac-deep);outline-offset:2px}
 .auth-oauth svg{flex:0 0 auto}
+/* aperture-svwyp — disabled while a provider is redirecting or during the
+   post-failure cooldown that breaks the rapid-retry → rate-limit loop. */
+.auth-oauth:disabled{opacity:.5;cursor:not-allowed}
+.auth-oauth[aria-busy="true"]{opacity:.7;cursor:progress}
+/* aperture-svwyp — inline, screen-reader-announced sign-in error (role=alert).
+   Distinct pt-BR copy per failure class; sits directly under the OAuth row. */
+.auth-oauth-error{
+  margin:-6px 0 16px;
+  padding:9px 12px;
+  border-radius:10px;
+  background:var(--cream-2);
+  border:1px solid var(--lilac);
+  color:var(--plum);
+  font-family:var(--font-dm-sans),sans-serif;
+  font-size:12.5px;line-height:1.4;
+  text-align:center;
+}
 
 .auth-divider{
   display:flex;align-items:center;gap:12px;
