@@ -410,3 +410,151 @@ export async function seedGateWalker(): Promise<void> {
     await db.destroy();
   }
 }
+
+/** The victim gate-walker's painel slug + campanha titles — the cross-user
+ *  denial spec targets campanha A by titulo, exactly as seeded above. */
+export const VICTIM_SLUG = WALKER_SLUG;
+export const VICTIM_TITULO_A = TITULO_A;
+
+export interface VictimCampanhaA {
+  idCampanha: string;
+  slug: string;
+}
+
+/**
+ * Resolve the victim's campanha A (titulo 'Lista de Izzygate Walker') straight
+ * from the DB — the id the intruder will attack + the painel slug it lives
+ * under. Call AFTER seedGateWalker(). Returns null when the gate creds are unset
+ * (spec skips). Throws if the walker or A is missing (seed contract violated).
+ */
+export async function resolveVictimCampanhaA(): Promise<VictimCampanhaA | null> {
+  const email = process.env.E2E_GATE_EMAIL;
+  if (!email || !process.env.E2E_GATE_SENHA) return null;
+
+  const db = createDatabase(DATABASE_URL);
+  const deps = buildDeps(db);
+  try {
+    const usuario = await deps.usuarioRepository.findUsuarioByEmail(
+      ID_PLATAFORMA_EUNENEM as never,
+      email,
+    );
+    if (!usuario) throw new Error(`resolveVictimCampanhaA: no walker for ${email}`);
+    const campanhas = await deps.campanhaRepository.findCampanhasByAdministrador(usuario.idConta);
+    const campanhaA = campanhas.find((c) => c.titulo === TITULO_A);
+    if (!campanhaA) {
+      throw new Error(
+        `resolveVictimCampanhaA: walker owns no "${TITULO_A}" — got ${JSON.stringify(campanhas.map((c) => c.titulo))}`,
+      );
+    }
+    return { idCampanha: campanhaA.id as string, slug: usuario.slug as string };
+  } finally {
+    await db.destroy();
+  }
+}
+
+// ── Intruder (cross-USER rival) seed (aperture cross-user-denial) ────────────
+//
+// The gate-walker above is the VICTIM: one owner, campanhas A + B. Every
+// existing gate spec proves same-owner A↮B separation but NEVER that a RIVAL
+// user is denied the victim's campanhas. cross-user-denial.spec.ts closes that:
+// it logs in AS THIS INTRUDER and attempts to read/mutate the victim's campanha
+// A across the enforcement points, asserting DENIAL on each (and a NEGATIVE
+// control on the intruder's OWN campanha to prove the denial is ownership-based,
+// not a blanket failure).
+//
+// The intruder is a fully valid, authenticatable user who simply administers
+// NONE of the victim's campanhas — exactly the shape that exercises the
+// idsAdministradores ownership gate. Distinct hardcoded creds (hermetic-only);
+// idempotent find-or-create in the same direct-repo style as seedGateWalker.
+
+/** Intruder credentials — hermetic-only literals (never a deployed user). */
+export const INTRUDER_EMAIL = process.env.E2E_INTRUDER_EMAIL ?? 'e2e-intruder@e2e.local';
+export const INTRUDER_SENHA = process.env.E2E_INTRUDER_SENHA ?? 'senha-e2e-intruder-123';
+const INTRUDER_NOME_EXIBICAO = 'Intruso Rival';
+export const INTRUDER_SLUG = 'intruso';
+/** The intruder's OWN default campanha (registrarContaUsuario names it
+ *  "Lista de <nomeExibicao>") — the target of the negative-control ops. */
+export const INTRUDER_TITULO_CAMPANHA = `Lista de ${INTRUDER_NOME_EXIBICAO}`;
+
+export interface IntruderSeed {
+  email: string;
+  senha: string;
+  slug: string;
+  tituloCampanha: string;
+  idCampanha: string;
+}
+
+/**
+ * Idempotently seed the intruder: a SECOND valid user who owns their OWN
+ * campanha but administers none of the victim's. Returns the creds + the
+ * intruder's own campanha id/slug so the spec can drive negative-control ops.
+ *
+ * Gated on the SAME E2E_GATE creds as the spec (no-op when unset) — the spec
+ * skips without them, so seeding would be wasted work against a fresh DB.
+ * Returns null in that case.
+ */
+export async function seedIntruderWalker(): Promise<IntruderSeed | null> {
+  if (!process.env.E2E_GATE_EMAIL || !process.env.E2E_GATE_SENHA) return null;
+
+  const db = createDatabase(DATABASE_URL);
+  const deps = buildDeps(db);
+  try {
+    let usuario: Usuario;
+    const existing = await deps.usuarioRepository.findUsuarioByEmail(
+      ID_PLATAFORMA_EUNENEM as never,
+      INTRUDER_EMAIL,
+    );
+    if (existing) {
+      usuario = existing;
+      await repairCredential(db, usuario, INTRUDER_EMAIL, INTRUDER_SENHA);
+    } else {
+      const res = await registrarContaUsuario(
+        {
+          usuarioRepository: deps.usuarioRepository,
+          plataformaRepository: deps.plataformaRepository,
+          campanhaRepository: deps.campanhaRepository,
+          recebedorRepository: deps.recebedorRepository,
+          authService: deps.authService,
+          clock: () => CLOCK_A,
+          observability: deps.observability,
+        },
+        {
+          idUsuario: randomUUID() as never,
+          idConta: randomUUID() as never,
+          idPlataforma: ID_PLATAFORMA_EUNENEM as never,
+          email: INTRUDER_EMAIL,
+          nomeExibicao: INTRUDER_NOME_EXIBICAO,
+          senhaSimulada: INTRUDER_SENHA,
+        },
+      );
+      usuario = res.usuario;
+    }
+
+    // Stable painel slug for the negative-control painelMensagens.list read.
+    if (usuario.slug !== INTRUDER_SLUG) {
+      await deps.usuarioRepository.atualizarSlugUsuario(usuario.id, INTRUDER_SLUG as never);
+    }
+    await deps.usuarioRepository.marcarTutorialCompletado(usuario.id, CLOCK_A);
+
+    // Resolve the intruder's own default campanha + ensure it can take gifts
+    // (a 'presente' opcao) so the contribuicao negative controls succeed.
+    const campanhas = await deps.campanhaRepository.findCampanhasByAdministrador(usuario.idConta);
+    let campanha = campanhas.find((c) => c.titulo === INTRUDER_TITULO_CAMPANHA);
+    if (!campanha) {
+      throw new Error(
+        `seedIntruderWalker: intruder owns no "${INTRUDER_TITULO_CAMPANHA}" — got ${JSON.stringify(campanhas.map((c) => c.titulo))}`,
+      );
+    }
+    campanha = await ensurePresenteOpcao(deps, campanha);
+
+    return {
+      email: INTRUDER_EMAIL,
+      senha: INTRUDER_SENHA,
+      slug: INTRUDER_SLUG,
+      tituloCampanha: INTRUDER_TITULO_CAMPANHA,
+      idCampanha: campanha.id as string,
+    };
+  } finally {
+    await db.destroy();
+  }
+}
