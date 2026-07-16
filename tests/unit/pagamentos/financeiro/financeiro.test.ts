@@ -346,6 +346,7 @@ describe('criarRepasseRecebedorSolicitado', () => {
       interCodigoSolicitacao: null,
       transferAttempts: 0,
       lastTransferError: null,
+      needsManualResolution: false,
     });
   });
 });

@@ -335,6 +335,69 @@ export interface LivroFinanceiroRepository {
     readonly repasse: RepasseRecebedor;
     readonly lancamentosLiberados: number;
   }>;
+
+  /**
+   * aperture-477nz — search reconciliation surfaced candidate payment(s)
+   * that cannot be auto-confirmed as ours. SELECT FOR UPDATE, require
+   * status='verificando', set needs_manual_resolution, and PERSIST the
+   * candidate rows (idempotent on (repasse_id, codigo_solicitacao)). The
+   * repasse STAYS verificando — a search match NEVER auto-books pago. No-op
+   * if the repasse already left verificando.
+   */
+  flagNeedsManualResolutionTransaction(input: {
+    readonly idRepasse: IdRepasse;
+    readonly candidatos: readonly RepasseReconciliacaoCandidato[];
+    readonly agora: Date;
+  }): Promise<{ readonly repasse: RepasseRecebedor }>;
+
+  /**
+   * Admin manual resolution → pago. SELECT FOR UPDATE, require
+   * status='verificando' AND needs_manual_resolution=true, domain
+   * resolverManualPago (records the admin-supplied interCodigoSolicitacao),
+   * STAMP transferido_em on the linked lançamentos exactly like the auto-pago
+   * path (the single §10.1 debit point), append an audit row carrying the
+   * acting admin. Idempotent: a repasse that already left verificando is a
+   * no-op returning the current repasse.
+   */
+  resolverManualPagoTransaction(input: {
+    readonly idRepasse: IdRepasse;
+    readonly interCodigoSolicitacao: string;
+    readonly resolvidoPor: string;
+    readonly agora: Date;
+  }): Promise<{ readonly repasse: RepasseRecebedor }>;
+
+  /**
+   * Admin manual resolution → falhou (a positive no-payment assertion).
+   * SELECT FOR UPDATE, require status='verificando' AND
+   * needs_manual_resolution=true, domain resolverManualFalhou, append an
+   * audit row carrying the acting admin. No money moves. From falhou the
+   * admin can retry or cancel.
+   */
+  resolverManualFalhouTransaction(input: {
+    readonly idRepasse: IdRepasse;
+    readonly erro: string;
+    readonly resolvidoPor: string;
+    readonly agora: Date;
+  }): Promise<{ readonly repasse: RepasseRecebedor }>;
+
+  /** The persisted search candidates for a repasse, for admin inspection. */
+  findCandidatosByRepasseId(
+    idRepasse: IdRepasse,
+  ): Promise<readonly RepasseReconciliacaoCandidato[]>;
+}
+
+/**
+ * A persisted search-reconciliation candidate (repasse_reconciliacao_candidatos).
+ * `chaveMascarada` is the recipient chave in MASKED form only — the full chave
+ * is never persisted here (Cipher gate). `codigoSolicitacao` is Inter's
+ * server-generated id that an admin copies into resolverManualPago.
+ */
+export interface RepasseReconciliacaoCandidato {
+  readonly codigoSolicitacao: string;
+  readonly valorCents: number;
+  readonly dataMovimento: string | null;
+  readonly chaveMascarada: string | null;
+  readonly descricaoPix: string | null;
 }
 
 /** A row of the append-only transfer attempt audit trail (repasse_transfer_attempts). */

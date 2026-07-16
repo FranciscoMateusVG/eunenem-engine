@@ -24,6 +24,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { LivroFinanceiroRepositoryPostgres } from '../../src/adapters/pagamentos/financeiro/livro-repository.postgres.js';
+import { TransferenciaProviderFake } from '../../src/adapters/pagamentos/transferencia-provider.fake.js';
 import type { IdCampanha } from '../../src/domain/arrecadacao/value-objects/ids.js';
 import type { LancamentoFinanceiro } from '../../src/domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
 import type { RepasseRecebedor } from '../../src/domain/pagamentos/financeiro/entities/repasse-recebedor.js';
@@ -35,6 +36,12 @@ import type {
 } from '../../src/domain/pagamentos/financeiro/value-objects/ids.js';
 import type { IdItemDoPagamento } from '../../src/domain/pagamentos/value-objects/ids.js';
 import { FinanceiroPagamentoJaRegistradoError } from '../../src/errors/pagamentos/financeiro/pagamento-ja-registrado.error.js';
+import { NoopLogger } from '../../src/observability/noop-logger.js';
+import { noopTracer } from '../../src/observability/tracer.js';
+import {
+  confirmarTransferenciaRepasse,
+  MAX_TENTATIVAS_CONFIRMACAO,
+} from '../../src/use-cases/pagamentos/financeiro/confirmar-transferencia-repasse.js';
 import { withLancamentoSeeding } from '../helpers/seed-lancamento-parents.js';
 import { createTestDatabase, type TestDatabase } from '../helpers/test-db.js';
 
@@ -364,6 +371,11 @@ describe('LivroFinanceiroRepositoryPostgres — repasses', () => {
   let repo: LivroFinanceiroRepositoryPostgres;
 
   beforeEach(async () => {
+    // aperture-477nz — candidatos FK-references repasses_recebedor; delete the
+    // child rows before the parent (shared-container suite, prior blocks may
+    // have left candidatos).
+    // biome-ignore lint/suspicious/noExplicitAny: tables not yet in generated types
+    await (testDb.db as any).deleteFrom('repasse_reconciliacao_candidatos').execute();
     // biome-ignore lint/suspicious/noExplicitAny: tables not yet in generated types
     await (testDb.db as any).deleteFrom('repasses_recebedor').execute();
     repo = new LivroFinanceiroRepositoryPostgres(testDb.db);
@@ -574,6 +586,9 @@ describe('LivroFinanceiroRepositoryPostgres — transfer FSM audit rows (apertur
   let repo: LivroFinanceiroRepositoryPostgres;
 
   beforeEach(async () => {
+    // aperture-477nz — candidatos FK-references repasses_recebedor; child first.
+    // biome-ignore lint/suspicious/noExplicitAny: tables not yet in generated types
+    await (testDb.db as any).deleteFrom('repasse_reconciliacao_candidatos').execute();
     // biome-ignore lint/suspicious/noExplicitAny: tables not yet in generated types
     await (testDb.db as any).deleteFrom('repasse_transfer_attempts').execute();
     // biome-ignore lint/suspicious/noExplicitAny: tables not yet in generated types
@@ -739,5 +754,345 @@ describe('LivroFinanceiroRepositoryPostgres — transfer FSM audit rows (apertur
 
     const attempts = await repo.findTransferAttemptsByRepasseId(idRepasse);
     expect(attempts.map((a) => a.attemptNo)).toEqual([1, 2]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+//  aperture-477nz — manual-resolution FSM (pg-backed)
+//
+//  The never-auto-pago reconciliation path. A search match cannot PROVE it's
+//  ours (Inter has no reliable caller-supplied identifier), so it flags
+//  needs-manual-resolution and persists masked candidates; an admin then
+//  resolves to pago (booking identically to auto-pago) or falhou. Plus the
+//  DISARM BOUNDARY: zero-candidate window exhaustion routes to needs-manual
+//  (flag OFF) or auto-falhou (flag ON) — verified end-to-end against real SQL.
+// ─────────────────────────────────────────────────────────────────────
+describe('LivroFinanceiroRepositoryPostgres — manual resolution (aperture-477nz)', () => {
+  let repo: LivroFinanceiroRepositoryPostgres;
+
+  beforeEach(async () => {
+    // biome-ignore lint/suspicious/noExplicitAny: tables not yet in generated types
+    await (testDb.db as any).deleteFrom('repasse_reconciliacao_candidatos').execute();
+    // biome-ignore lint/suspicious/noExplicitAny: tables not yet in generated types
+    await (testDb.db as any).deleteFrom('repasse_transfer_attempts').execute();
+    // biome-ignore lint/suspicious/noExplicitAny: tables not yet in generated types
+    await (testDb.db as any).deleteFrom('lancamentos_financeiros').execute();
+    // biome-ignore lint/suspicious/noExplicitAny: tables not yet in generated types
+    await (testDb.db as any).deleteFrom('repasses_recebedor').execute();
+    repo = withLancamentoSeeding(new LivroFinanceiroRepositoryPostgres(testDb.db), testDb.db);
+  });
+
+  async function seedVerificando(): Promise<{
+    idRepasse: IdRepasse;
+    idCampanha: IdCampanha;
+    idPagamento: IdPagamentoReferencia;
+  }> {
+    const idCampanha = randomUUID() as IdCampanha;
+    const repasse = makeRepasse({ idCampanha, amountCents: 5000, status: 'solicitado' });
+    await repo.saveRepasse(repasse);
+    const lancamento = makeLancamentoRecebedor({
+      idCampanha,
+      amountCents: 5000,
+      idRepasse: repasse.id,
+    });
+    await repo.saveLancamentos([lancamento]);
+    await repo.aprovarRepassePixTransaction(
+      {
+        idRepasse: repasse.id,
+        aprovadoEm: new Date('2026-07-16T12:00:00Z'),
+        transferReferencia: `EN${String(repasse.id).replace(/-/g, '')}`,
+      },
+      async () => {},
+    );
+    const ini = await repo.iniciarTransferenciaTransaction({
+      idRepasse: repasse.id,
+      requestSummary: 'pagarPix valor=5000',
+      agora: new Date('2026-07-16T12:00:01Z'),
+    });
+    await repo.finalizarTentativaTransferencia({
+      idRepasse: repasse.id,
+      attemptId: ini.attemptId,
+      resultado: { tipo: 'verificando', codigoSolicitacao: null },
+      agora: new Date('2026-07-16T12:00:02Z'),
+    });
+    return { idRepasse: repasse.id, idCampanha, idPagamento: lancamento.idPagamento };
+  }
+
+  const CANDIDATO = {
+    codigoSolicitacao: 'inter_manual_codigo_xyz',
+    valorCents: 5000,
+    dataMovimento: '2026-07-16',
+    chaveMascarada: 'b***om', // bia@example.com masked — the full chave never at rest
+    descricaoPix: null,
+  } as const;
+
+  it('flagNeedsManualResolutionTransaction — stays verificando, sets the flag, persists masked candidates (idempotent)', async () => {
+    const { idRepasse } = await seedVerificando();
+
+    await repo.flagNeedsManualResolutionTransaction({
+      idRepasse,
+      candidatos: [CANDIDATO],
+      agora: new Date('2026-07-16T12:05:00Z'),
+    });
+    // Idempotent on (repasse_id, codigo_solicitacao) — a duplicate flag does
+    // not create a second candidate row.
+    await repo.flagNeedsManualResolutionTransaction({
+      idRepasse,
+      candidatos: [CANDIDATO],
+      agora: new Date('2026-07-16T12:06:00Z'),
+    });
+
+    const repasse = await repo.findRepasseById(idRepasse);
+    expect(repasse?.status).toBe('verificando');
+    expect(repasse?.needsManualResolution).toBe(true);
+
+    const candidatos = await repo.findCandidatosByRepasseId(idRepasse);
+    expect(candidatos).toHaveLength(1);
+    expect(candidatos[0]?.codigoSolicitacao).toBe(CANDIDATO.codigoSolicitacao);
+    expect(candidatos[0]?.valorCents).toBe(5000);
+    expect(candidatos[0]?.dataMovimento).toBe('2026-07-16');
+    expect(candidatos[0]?.chaveMascarada).toBe('b***om');
+    // No full chave at rest.
+    expect(candidatos[0]?.chaveMascarada).not.toContain('@');
+  });
+
+  it('resolverManualPagoTransaction — books identically to auto-pago (records codigo, stamps transferido_em, MAX+1 audit row, clears flag)', async () => {
+    const { idRepasse, idPagamento } = await seedVerificando();
+    await repo.flagNeedsManualResolutionTransaction({
+      idRepasse,
+      candidatos: [CANDIDATO],
+      agora: new Date('2026-07-16T12:05:00Z'),
+    });
+
+    const result = await repo.resolverManualPagoTransaction({
+      idRepasse,
+      interCodigoSolicitacao: CANDIDATO.codigoSolicitacao,
+      resolvidoPor: 'admin@eunenem.com',
+      agora: new Date('2026-07-16T12:10:00Z'),
+    });
+    expect(result.repasse.status).toBe('pago');
+    expect(result.repasse.interCodigoSolicitacao).toBe(CANDIDATO.codigoSolicitacao);
+    expect(result.repasse.needsManualResolution).toBe(false);
+
+    // §10.1 single debit point — stamped exactly like the auto-pago path.
+    const [linked] = await repo.findLancamentosByIdPagamento(idPagamento);
+    expect(linked?.transferidoEm).not.toBeNull();
+
+    // Audit: closed intent (attempt_no=1) + manual-pago event (MAX+1=2).
+    const attempts = await repo.findTransferAttemptsByRepasseId(idRepasse);
+    expect(attempts.map((a) => a.attemptNo)).toEqual([1, 2]);
+    const manualRow = attempts.find((a) => a.attemptNo === 2);
+    expect(manualRow?.outcome).toBe('pago');
+    expect(manualRow?.codigoSolicitacao).toBe(CANDIDATO.codigoSolicitacao);
+    expect(manualRow?.requestSummary).toContain('resolucao_manual_pago_por:admin@eunenem.com');
+  });
+
+  it('resolverManualPagoTransaction — idempotent no-op on a non-flagged repasse (never books an unflagged verificando)', async () => {
+    const { idRepasse, idPagamento } = await seedVerificando();
+    // NOT flagged. A manual-pago must not fire — the repasse is still under
+    // automated reconciliation, so booking here could double-pay.
+    const result = await repo.resolverManualPagoTransaction({
+      idRepasse,
+      interCodigoSolicitacao: CANDIDATO.codigoSolicitacao,
+      resolvidoPor: 'admin@eunenem.com',
+      agora: new Date('2026-07-16T12:10:00Z'),
+    });
+    expect(result.repasse.status).toBe('verificando'); // unchanged
+    const [linked] = await repo.findLancamentosByIdPagamento(idPagamento);
+    expect(linked?.transferidoEm).toBeNull(); // no debit
+  });
+
+  it('resolverManualFalhouTransaction — falhou, no debit, MAX+1 audit row, clears flag', async () => {
+    const { idRepasse, idPagamento } = await seedVerificando();
+    await repo.flagNeedsManualResolutionTransaction({
+      idRepasse,
+      candidatos: [],
+      agora: new Date('2026-07-16T12:05:00Z'),
+    });
+
+    const result = await repo.resolverManualFalhouTransaction({
+      idRepasse,
+      erro: 'RESOLUCAO_MANUAL_FALHOU',
+      resolvidoPor: 'admin@eunenem.com',
+      agora: new Date('2026-07-16T12:10:00Z'),
+    });
+    expect(result.repasse.status).toBe('falhou');
+    expect(result.repasse.needsManualResolution).toBe(false);
+
+    const [linked] = await repo.findLancamentosByIdPagamento(idPagamento);
+    expect(linked?.transferidoEm).toBeNull(); // money never moved
+
+    const attempts = await repo.findTransferAttemptsByRepasseId(idRepasse);
+    const manualRow = attempts.at(-1);
+    expect(manualRow?.outcome).toBe('falhou');
+    expect(manualRow?.error).toBe('RESOLUCAO_MANUAL_FALHOU');
+    expect(manualRow?.requestSummary).toContain('resolucao_manual_falhou_por:admin@eunenem.com');
+  });
+
+  // ── ADVERSARIAL (Izzy jguar verification pass, aperture-477nz) ──
+  // The sequential no-op tests above prove idempotency VIA the status
+  // transition. These prove the FOR UPDATE row-lock actually SERIALIZES true
+  // concurrent writers — the money-path concurrency guarantee that a
+  // sequential double-call cannot exercise.
+
+  it('CONCURRENT double resolverManualPago (two admins, same instant) → exactly ONE debit + ONE manual-pago audit row (FOR UPDATE serializes)', async () => {
+    const { idRepasse, idPagamento } = await seedVerificando();
+    await repo.flagNeedsManualResolutionTransaction({
+      idRepasse,
+      candidatos: [CANDIDATO],
+      agora: new Date('2026-07-16T12:05:00Z'),
+    });
+
+    // Two admins click "Pago" simultaneously. FOR UPDATE must serialize: one
+    // books pago, the other blocks, re-reads pago inside its txn → no-op.
+    const results = await Promise.allSettled([
+      repo.resolverManualPagoTransaction({
+        idRepasse,
+        interCodigoSolicitacao: CANDIDATO.codigoSolicitacao,
+        resolvidoPor: 'admin-a@eunenem.com',
+        agora: new Date('2026-07-16T12:10:00Z'),
+      }),
+      repo.resolverManualPagoTransaction({
+        idRepasse,
+        interCodigoSolicitacao: CANDIDATO.codigoSolicitacao,
+        resolvidoPor: 'admin-b@eunenem.com',
+        agora: new Date('2026-07-16T12:10:00Z'),
+      }),
+    ]);
+    // Neither errors; both resolve to pago (one booked, one saw-it-booked).
+    expect(results.every((r) => r.status === 'fulfilled')).toBe(true);
+
+    const repasse = await repo.findRepasseById(idRepasse);
+    expect(repasse?.status).toBe('pago');
+    expect(repasse?.needsManualResolution).toBe(false);
+
+    // THE invariant: exactly ONE debit stamp, exactly ONE manual-pago audit row.
+    const [linked] = await repo.findLancamentosByIdPagamento(idPagamento);
+    expect(linked?.transferidoEm).not.toBeNull();
+    const attempts = await repo.findTransferAttemptsByRepasseId(idRepasse);
+    const manualPagoRows = attempts.filter(
+      (a) => a.outcome === 'pago' && a.requestSummary?.includes('resolucao_manual_pago_por'),
+    );
+    expect(manualPagoRows).toHaveLength(1); // NOT two — the lock held
+  });
+
+  it('CONCURRENT resolverManualPago vs resolverManualFalhou (two admins disagree) → exactly ONE terminal outcome, never both', async () => {
+    const { idRepasse, idPagamento } = await seedVerificando();
+    await repo.flagNeedsManualResolutionTransaction({
+      idRepasse,
+      candidatos: [CANDIDATO],
+      agora: new Date('2026-07-16T12:05:00Z'),
+    });
+
+    // One admin books pago, another asserts falhou, at the same instant.
+    const settled = await Promise.allSettled([
+      repo.resolverManualPagoTransaction({
+        idRepasse,
+        interCodigoSolicitacao: CANDIDATO.codigoSolicitacao,
+        resolvidoPor: 'admin-a@eunenem.com',
+        agora: new Date('2026-07-16T12:10:00Z'),
+      }),
+      repo.resolverManualFalhouTransaction({
+        idRepasse,
+        erro: 'RESOLUCAO_MANUAL_FALHOU',
+        resolvidoPor: 'admin-b@eunenem.com',
+        agora: new Date('2026-07-16T12:10:00Z'),
+      }),
+    ]);
+    expect(settled.every((r) => r.status === 'fulfilled')).toBe(true);
+
+    // Settles in exactly ONE terminal state; the loser no-oped on re-read.
+    const repasse = await repo.findRepasseById(idRepasse);
+    expect(['pago', 'falhou']).toContain(repasse?.status);
+    expect(repasse?.needsManualResolution).toBe(false);
+
+    // Debit is consistent with the winner: pago stamps, falhou never does.
+    const [linked] = await repo.findLancamentosByIdPagamento(idPagamento);
+    if (repasse?.status === 'pago') {
+      expect(linked?.transferidoEm).not.toBeNull();
+    } else {
+      expect(linked?.transferidoEm).toBeNull();
+    }
+    // Exactly ONE manual-resolution audit row (the winner) — never two.
+    const attempts = await repo.findTransferAttemptsByRepasseId(idRepasse);
+    const manualRows = attempts.filter((a) => a.requestSummary?.includes('resolucao_manual'));
+    expect(manualRows).toHaveLength(1);
+  });
+
+  it('resolverManualPago on a ZERO-candidate flagged repasse (disarm-false exhaustion) books pago on the admin-supplied out-of-band codigo', async () => {
+    const { idRepasse, idPagamento } = await seedVerificando();
+    // The disarmed zero-candidate window-exhaustion flags with an EMPTY list;
+    // the admin later finds the payment out-of-band and supplies its codigo.
+    await repo.flagNeedsManualResolutionTransaction({
+      idRepasse,
+      candidatos: [],
+      agora: new Date('2026-07-16T12:05:00Z'),
+    });
+
+    const result = await repo.resolverManualPagoTransaction({
+      idRepasse,
+      interCodigoSolicitacao: 'inter_out_of_band_codigo',
+      resolvidoPor: 'admin@eunenem.com',
+      agora: new Date('2026-07-16T12:10:00Z'),
+    });
+    expect(result.repasse.status).toBe('pago');
+    expect(result.repasse.interCodigoSolicitacao).toBe('inter_out_of_band_codigo');
+    expect(result.repasse.needsManualResolution).toBe(false);
+
+    const [linked] = await repo.findLancamentosByIdPagamento(idPagamento);
+    expect(linked?.transferidoEm).not.toBeNull(); // single debit point still fires
+  });
+
+  // ── DISARM BOUNDARY end-to-end (confirmar handler → real postgres) ──
+  // THE load-bearing transition: at tentativa 12 the ~48h window is exhausted
+  // with zero candidates. extratoVerified gates whether that becomes auto-falhou
+  // (trusted extrato shape) or needs-manual-resolution (untrusted — a shape
+  // mismatch could be hiding a real payment; auto-falhou → retry → double PIX).
+
+  function confirmarDeps(extratoVerified: boolean) {
+    return {
+      livroFinanceiroRepository: repo,
+      transferenciaProvider: new TransferenciaProviderFake({ buscarResultados: [] }),
+      repasseJobEnqueuer: {
+        async enqueueExecutar() {},
+        async enqueueConfirmar() {},
+      },
+      clock: () => new Date('2026-07-18T12:00:00Z'),
+      observability: { logger: new NoopLogger(), tracer: noopTracer() },
+      extratoVerified,
+    };
+  }
+
+  it('DISARMED (extratoVerified=false): zero-candidate exhaustion escalates to needs-manual-resolution in the DB — not falhou', async () => {
+    const { idRepasse, idPagamento } = await seedVerificando();
+
+    await confirmarTransferenciaRepasse(confirmarDeps(false), {
+      idRepasse,
+      tentativaConfirmacao: MAX_TENTATIVAS_CONFIRMACAO,
+    });
+
+    const repasse = await repo.findRepasseById(idRepasse);
+    expect(repasse?.status).toBe('verificando');
+    expect(repasse?.needsManualResolution).toBe(true);
+    const [linked] = await repo.findLancamentosByIdPagamento(idPagamento);
+    expect(linked?.transferidoEm).toBeNull(); // door stays shut
+    const candidatos = await repo.findCandidatosByRepasseId(idRepasse);
+    expect(candidatos).toHaveLength(0);
+  });
+
+  it('ARMED (extratoVerified=true): zero-candidate exhaustion resolves falhou/NAO_ENCONTRADO_NA_BUSCA in the DB', async () => {
+    const { idRepasse, idPagamento } = await seedVerificando();
+
+    await confirmarTransferenciaRepasse(confirmarDeps(true), {
+      idRepasse,
+      tentativaConfirmacao: MAX_TENTATIVAS_CONFIRMACAO,
+    });
+
+    const repasse = await repo.findRepasseById(idRepasse);
+    expect(repasse?.status).toBe('falhou');
+    expect(repasse?.lastTransferError).toBe('NAO_ENCONTRADO_NA_BUSCA');
+    expect(repasse?.needsManualResolution).toBe(false);
+    const [linked] = await repo.findLancamentosByIdPagamento(idPagamento);
+    expect(linked?.transferidoEm).toBeNull();
   });
 });

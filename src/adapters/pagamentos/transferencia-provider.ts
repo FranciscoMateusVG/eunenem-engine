@@ -78,6 +78,11 @@ export interface PagamentoEncontrado {
   readonly referencia: string;
   readonly chave?: string;
   readonly status: string;
+  /**
+   * The movement date (yyyy-mm-dd) from Inter's extrato, when present — gives
+   * the admin a real timestamp on a reconciliation candidate (aperture-477nz).
+   */
+  readonly dataMovimento?: string;
 }
 
 export interface TransferenciaProvider {

@@ -159,6 +159,7 @@ async function seedVerificando(
 function makeDeps(
   rig: Rig,
   provider: TransferenciaProviderFake,
+  extratoVerified = false,
 ): ConfirmarTransferenciaRepasseDeps {
   return {
     livroFinanceiroRepository: rig.livro,
@@ -166,6 +167,10 @@ function makeDeps(
     repasseJobEnqueuer: rig.enqueuer,
     clock: rig.clock,
     observability: { logger: new NoopLogger(), tracer: noopTracer() },
+    // aperture-477nz — default DISARMED (matches prod default): a
+    // zero-candidate window exhaustion escalates to needs-manual-resolution,
+    // not auto-falhou, until the extrato SHAPE is empirically verified.
+    extratoVerified,
   };
 }
 
@@ -174,8 +179,9 @@ function confirmar(
   provider: TransferenciaProviderFake,
   idRepasse: string,
   tentativaConfirmacao: number,
+  extratoVerified = false,
 ): Promise<void> {
-  return confirmarTransferenciaRepasse(makeDeps(rig, provider), {
+  return confirmarTransferenciaRepasse(makeDeps(rig, provider, extratoVerified), {
     idRepasse: idRepasse as never,
     tentativaConfirmacao,
   });
@@ -290,16 +296,13 @@ describe('confirmarTransferenciaRepasse — escalation schedule', () => {
 });
 
 describe('confirmarTransferenciaRepasse — no-codigo reconciliation via buscarPagamentos', () => {
-  it('adopts the codigoSolicitacao of a valor+referencia-matching search hit, then resolves via consult', async () => {
+  it('aperture-477nz: a valor+chave-matching search hit is NEVER auto-booked pago — it flags needs-manual-resolution, persists the candidate (chave masked), stays verificando, no consult', async () => {
     const rig = await buildRig();
     const { idRepasse, idsLancamentos } = await seedVerificando(rig, { codigo: null });
-    // s8v26 fix: referencia is the STRONG match key. A matching hit MUST
-    // carry the repasse's stable referencia (what we sent to Inter).
     const referencia = gerarTransferReferencia(idRepasse as never);
     const provider = fake({
       buscarResultados: [
-        // Same referencia but WRONG valor — must be skipped: valor is an
-        // AND-guard alongside referencia, not subsumed by it.
+        // WRONG valor — filtered out of candidates.
         {
           codigoSolicitacao: 'inter_outro',
           valorCents: 100 as never,
@@ -307,34 +310,49 @@ describe('confirmarTransferenciaRepasse — no-codigo reconciliation via buscarP
           referencia,
           status: 'pago',
         },
+        // Matching valor+chave — becomes a candidate, but is NOT auto-pago.
         {
           codigoSolicitacao: 'inter_found',
           valorCents: VALOR_REPASSE_CENTS as never,
           chave: CHAVE_PIX,
           referencia,
           status: 'pago',
+          dataMovimento: '2026-07-16',
         },
       ],
+      // Provided but must NOT be consumed — confirmar does not consult a
+      // search candidate; it defers to the admin.
       consultSequence: ['pago'],
     });
 
     await confirmar(rig, provider, idRepasse, 1);
 
+    // NEVER auto-pago: Inter has no reliable caller-supplied identifier, so a
+    // search match cannot PROVE the payment is ours. Stays verificando, flagged.
     const repasse = await rig.livro.findRepasseById(idRepasse as never);
-    expect(repasse?.status).toBe('pago');
-    expect(repasse?.interCodigoSolicitacao).toBe('inter_found');
+    expect(repasse?.status).toBe('verificando');
+    expect(repasse?.needsManualResolution).toBe(true);
+    expect(repasse?.interCodigoSolicitacao).toBeNull();
     for (const l of await rig.livro.findLancamentosByIds(idsLancamentos as never)) {
-      expect(l.transferidoEm).toEqual(T2);
+      expect(l.transferidoEm).toBeNull(); // no debit until an admin resolves
     }
-    expect(provider.consultarPagamentoCalls).toBe(1);
+    // The single matching candidate is persisted with the chave MASKED at rest.
+    const candidatos = await rig.livro.findCandidatosByRepasseId(idRepasse as never);
+    expect(candidatos).toHaveLength(1);
+    expect(candidatos[0]?.codigoSolicitacao).toBe('inter_found');
+    expect(candidatos[0]?.valorCents).toBe(VALOR_REPASSE_CENTS);
+    expect(candidatos[0]?.dataMovimento).toBe('2026-07-16');
+    expect(candidatos[0]?.chaveMascarada).toBe('b***om'); // bia@example.com → b***om
+    expect(candidatos[0]?.chaveMascarada).not.toContain('@'); // full chave never at rest
+    // Deferred to the admin — no consult, no reschedule.
+    expect(provider.consultarPagamentoCalls).toBe(0);
+    expect(rig.enqueued.confirmar).toHaveLength(0);
     expect(provider.pagarPixCalls).toBe(0); // confirmar NEVER pays
   });
 
-  it('is chave-tolerant: a referencia+valor-matching hit with no chave still matches (chave is a secondary guard)', async () => {
+  it('aperture-477nz: a chave-less matching hit still becomes a candidate (chave a secondary guard), persisted with chaveMascarada null', async () => {
     const rig = await buildRig();
     const { idRepasse } = await seedVerificando(rig, { codigo: null });
-    // referencia already pins payment identity, so an absent chave on the
-    // search row is tolerated (chave is only an extra guard, never the key).
     const referencia = gerarTransferReferencia(idRepasse as never);
     const provider = fake({
       buscarResultados: [
@@ -345,14 +363,17 @@ describe('confirmarTransferenciaRepasse — no-codigo reconciliation via buscarP
           status: 'pago',
         },
       ],
-      consultSequence: ['pago'],
     });
 
     await confirmar(rig, provider, idRepasse, 1);
 
     const repasse = await rig.livro.findRepasseById(idRepasse as never);
-    expect(repasse?.status).toBe('pago');
-    expect(repasse?.interCodigoSolicitacao).toBe('inter_sem_chave');
+    expect(repasse?.status).toBe('verificando');
+    expect(repasse?.needsManualResolution).toBe(true);
+    const candidatos = await rig.livro.findCandidatosByRepasseId(idRepasse as never);
+    expect(candidatos).toHaveLength(1);
+    expect(candidatos[0]?.codigoSolicitacao).toBe('inter_sem_chave');
+    expect(candidatos[0]?.chaveMascarada).toBeNull(); // no chave on the row → null
     expect(provider.pagarPixCalls).toBe(0); // confirmar NEVER pays
   });
 
@@ -394,20 +415,50 @@ describe('confirmarTransferenciaRepasse — no-codigo reconciliation via buscarP
     expect(provider.pagarPixCalls).toBe(0); // confirmar NEVER pays
   });
 
-  it('empty search at the EXHAUSTED window (tentativa 12) resolves falhou/NAO_ENCONTRADO_NA_BUSCA (safe to retry)', async () => {
-    // At tentativa MAX_TENTATIVAS_CONFIRMACAO (12) the next reschedule would be
-    // 13 > 12 → proximoDelayConfirmacao returns null → sustained-absence over
-    // the full window is now real evidence of no payment → auto-falhou. This
-    // is the amended-§5.4 "zero candidates across 48h → falhou" boundary.
+  // ── aperture-477nz DISARM BOUNDARY ──────────────────────────────────
+  // At tentativa MAX_TENTATIVAS_CONFIRMACAO (12) the next reschedule would be
+  // 13 > 12 → proximoDelayConfirmacao returns null → the ~48h window is
+  // exhausted with ZERO candidates. What happens then is GATED on
+  // extratoVerified (INTER_EXTRATO_VERIFIED). This is THE load-bearing
+  // transition: auto-falhou here → admin retry → SECOND PIX if the "zero" was
+  // actually a shape-mismatch dropping a real-but-invisible payment.
+
+  it('DISARMED (extratoVerified=false, prod default): zero-candidate window exhaustion escalates to needs-manual-resolution — NOT auto-falhou', async () => {
     const rig = await buildRig();
     const { idRepasse, idsLancamentos } = await seedVerificando(rig, { codigo: null });
     const provider = fake({ buscarResultados: [] });
 
-    await confirmar(rig, provider, idRepasse, MAX_TENTATIVAS_CONFIRMACAO);
+    await confirmar(rig, provider, idRepasse, MAX_TENTATIVAS_CONFIRMACAO, false);
 
+    // Flag OFF: a zero could be a shape-mismatch dropping a real payment, so a
+    // human decides. Stays verificando, flagged — the double-pay door stays shut.
+    const repasse = await rig.livro.findRepasseById(idRepasse as never);
+    expect(repasse?.status).toBe('verificando');
+    expect(repasse?.needsManualResolution).toBe(true);
+    for (const l of await rig.livro.findLancamentosByIds(idsLancamentos as never)) {
+      expect(l.transferidoEm).toBeNull();
+    }
+    // No candidates found → flagged with an empty candidate list.
+    const candidatos = await rig.livro.findCandidatosByRepasseId(idRepasse as never);
+    expect(candidatos).toHaveLength(0);
+    // Exhausted → no further reschedule.
+    expect(rig.enqueued.confirmar).toHaveLength(0);
+    expect(provider.pagarPixCalls).toBe(0); // confirmar NEVER pays
+  });
+
+  it('ARMED (extratoVerified=true): zero-candidate window exhaustion resolves falhou/NAO_ENCONTRADO_NA_BUSCA (safe to retry) + audit row', async () => {
+    const rig = await buildRig();
+    const { idRepasse, idsLancamentos } = await seedVerificando(rig, { codigo: null });
+    const provider = fake({ buscarResultados: [] });
+
+    await confirmar(rig, provider, idRepasse, MAX_TENTATIVAS_CONFIRMACAO, true);
+
+    // Flag ON: the extrato SHAPE is empirically trusted, so sustained absence
+    // over the full window is real evidence of no payment → auto-falhou.
     const repasse = await rig.livro.findRepasseById(idRepasse as never);
     expect(repasse?.status).toBe('falhou');
     expect(repasse?.lastTransferError).toBe('NAO_ENCONTRADO_NA_BUSCA');
+    expect(repasse?.needsManualResolution).toBe(false);
     for (const l of await rig.livro.findLancamentosByIds(idsLancamentos as never)) {
       expect(l.transferidoEm).toBeNull();
     }
@@ -417,6 +468,20 @@ describe('confirmarTransferenciaRepasse — no-codigo reconciliation via buscarP
     expect(attempts.at(-1)?.error).toBe('NAO_ENCONTRADO_NA_BUSCA');
     // Exhausted → no further reschedule.
     expect(rig.enqueued.confirmar).toHaveLength(0);
+    expect(provider.pagarPixCalls).toBe(0); // confirmar NEVER pays
+  });
+
+  it('ARMED but BEFORE exhaustion (tentativa 2): zero candidates still reschedules — the flag only gates the exhaustion boundary, not early absence', async () => {
+    const rig = await buildRig();
+    const { idRepasse } = await seedVerificando(rig, { codigo: null });
+    const provider = fake({ buscarResultados: [] });
+
+    await confirmar(rig, provider, idRepasse, 2, true);
+
+    expect(rig.enqueued.confirmar).toEqual([{ id: idRepasse, tentativa: 3, delay: 600 }]);
+    const repasse = await rig.livro.findRepasseById(idRepasse as never);
+    expect(repasse?.status).toBe('verificando');
+    expect(repasse?.needsManualResolution).toBe(false);
     expect(provider.pagarPixCalls).toBe(0); // confirmar NEVER pays
   });
 });

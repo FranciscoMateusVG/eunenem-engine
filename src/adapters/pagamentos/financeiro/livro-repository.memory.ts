@@ -9,9 +9,12 @@ import {
   criarRepasseRecebedorSolicitado,
   iniciarTransferencia,
   marcarRepasseFalhou,
+  marcarRepasseNeedsManualResolution,
   marcarRepassePago,
   marcarRepasseVerificando,
   type RepasseRecebedor,
+  resolverManualFalhou,
+  resolverManualPago,
   reverterTransferenciaParaAprovado,
   type StatusRepasse,
 } from '../../../domain/pagamentos/financeiro/entities/repasse-recebedor.js';
@@ -29,6 +32,7 @@ import type { RecebedorRepository } from '../../arrecadacao/recebedor-repository
 import type { PagamentoRepository } from '../repository.js';
 import type {
   LivroFinanceiroRepository,
+  RepasseReconciliacaoCandidato,
   RepasseTransactionExecutor,
   RepasseTransferAttempt,
   RepasseTransferResultado,
@@ -88,6 +92,9 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
   private readonly lancamentos = new Map<IdLancamentoFinanceiro, LancamentoFinanceiro>();
   private readonly repasses = new Map<IdRepasse, RepasseRecebedor>();
   private readonly repasseTransferAttempts: RepasseTransferAttemptRecord[] = [];
+  private readonly repasseCandidatos: Array<
+    { readonly repasseId: IdRepasse; readonly criadoEm: Date } & RepasseReconciliacaoCandidato
+  > = [];
 
   constructor(
     private readonly recebedorRepository?: RecebedorRepository,
@@ -992,6 +999,115 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
         }
       },
     );
+  }
+
+  private nextAttemptNo(idRepasse: IdRepasse): number {
+    return (
+      this.repasseTransferAttempts
+        .filter((a) => a.repasseId === idRepasse)
+        .reduce((max, a) => Math.max(max, a.attemptNo), 0) + 1
+    );
+  }
+
+  async flagNeedsManualResolutionTransaction(input: {
+    readonly idRepasse: IdRepasse;
+    readonly candidatos: readonly RepasseReconciliacaoCandidato[];
+    readonly agora: Date;
+  }): Promise<{ readonly repasse: RepasseRecebedor }> {
+    const existing = this.repasses.get(input.idRepasse);
+    if (!existing) {
+      throw new FinanceiroRepasseNaoEncontradoError(input.idRepasse);
+    }
+    if (existing.status !== 'verificando') {
+      return { repasse: existing };
+    }
+    const updated = marcarRepasseNeedsManualResolution(existing);
+    this.repasses.set(updated.id, updated);
+    for (const c of input.candidatos) {
+      const dup = this.repasseCandidatos.some(
+        (x) => x.repasseId === updated.id && x.codigoSolicitacao === c.codigoSolicitacao,
+      );
+      if (!dup) {
+        this.repasseCandidatos.push({ repasseId: updated.id, criadoEm: input.agora, ...c });
+      }
+    }
+    return { repasse: updated };
+  }
+
+  async resolverManualPagoTransaction(input: {
+    readonly idRepasse: IdRepasse;
+    readonly interCodigoSolicitacao: string;
+    readonly resolvidoPor: string;
+    readonly agora: Date;
+  }): Promise<{ readonly repasse: RepasseRecebedor }> {
+    const existing = this.repasses.get(input.idRepasse);
+    if (!existing) {
+      throw new FinanceiroRepasseNaoEncontradoError(input.idRepasse);
+    }
+    if (existing.status !== 'verificando' || !existing.needsManualResolution) {
+      return { repasse: existing };
+    }
+    const updated = resolverManualPago(existing, input.interCodigoSolicitacao);
+    this.repasses.set(updated.id, updated);
+    this.stampTransferidoEm(updated.id, input.agora);
+    this.pushTransferAttempt({
+      id: randomUUID(),
+      repasseId: updated.id,
+      attemptNo: this.nextAttemptNo(updated.id),
+      referencia: updated.transferReferencia ?? '',
+      startedAt: input.agora,
+      requestSummary: `resolucao_manual_pago_por:${input.resolvidoPor}`,
+      outcome: 'pago',
+      codigoSolicitacao: input.interCodigoSolicitacao,
+      error: null,
+      finishedAt: input.agora,
+    });
+    return { repasse: updated };
+  }
+
+  async resolverManualFalhouTransaction(input: {
+    readonly idRepasse: IdRepasse;
+    readonly erro: string;
+    readonly resolvidoPor: string;
+    readonly agora: Date;
+  }): Promise<{ readonly repasse: RepasseRecebedor }> {
+    const existing = this.repasses.get(input.idRepasse);
+    if (!existing) {
+      throw new FinanceiroRepasseNaoEncontradoError(input.idRepasse);
+    }
+    if (existing.status !== 'verificando' || !existing.needsManualResolution) {
+      return { repasse: existing };
+    }
+    const updated = resolverManualFalhou(existing, input.erro);
+    this.repasses.set(updated.id, updated);
+    this.pushTransferAttempt({
+      id: randomUUID(),
+      repasseId: updated.id,
+      attemptNo: this.nextAttemptNo(updated.id),
+      referencia: updated.transferReferencia ?? '',
+      startedAt: input.agora,
+      requestSummary: `resolucao_manual_falhou_por:${input.resolvidoPor}`,
+      outcome: 'falhou',
+      codigoSolicitacao: null,
+      error: input.erro,
+      finishedAt: input.agora,
+    });
+    return { repasse: updated };
+  }
+
+  async findCandidatosByRepasseId(
+    idRepasse: IdRepasse,
+  ): Promise<readonly RepasseReconciliacaoCandidato[]> {
+    return this.repasseCandidatos
+      .filter((c) => c.repasseId === idRepasse)
+      .sort((a, b) => a.criadoEm.getTime() - b.criadoEm.getTime())
+      .map((c) => ({
+        codigoSolicitacao: c.codigoSolicitacao,
+        valorCents: c.valorCents,
+        dataMovimento: c.dataMovimento,
+        chaveMascarada: c.chaveMascarada,
+        descricaoPix: c.descricaoPix,
+      }));
   }
 
   async findTransferAttemptsByRepasseId(

@@ -13,10 +13,13 @@ import {
   criarRepasseRecebedorSolicitado,
   iniciarTransferencia,
   marcarRepasseFalhou,
+  marcarRepasseNeedsManualResolution,
   marcarRepassePago,
   marcarRepasseVerificando,
   type RepasseRecebedor,
   RepasseRecebedorSchema,
+  resolverManualFalhou,
+  resolverManualPago,
   reverterTransferenciaParaAprovado,
   type StatusRepasse,
 } from '../../../domain/pagamentos/financeiro/entities/repasse-recebedor.js';
@@ -34,6 +37,7 @@ import type { RecebedorRepository } from '../../arrecadacao/recebedor-repository
 import type { Database } from '../../database.js';
 import type {
   LivroFinanceiroRepository,
+  RepasseReconciliacaoCandidato,
   RepasseTransactionExecutor,
   RepasseTransferAttempt,
   RepasseTransferResultado,
@@ -120,6 +124,8 @@ type RepasseRow = {
   inter_codigo_solicitacao: string | null;
   transfer_attempts: number;
   last_transfer_error: string | null;
+  // aperture-477nz — manual reconciliation flag.
+  needs_manual_resolution: boolean;
 };
 
 /**
@@ -1257,6 +1263,262 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
     );
   }
 
+  async flagNeedsManualResolutionTransaction(input: {
+    readonly idRepasse: IdRepasse;
+    readonly candidatos: readonly RepasseReconciliacaoCandidato[];
+    readonly agora: Date;
+  }): Promise<{ readonly repasse: RepasseRecebedor }> {
+    return tracer.startActiveSpan(
+      'db.financeiro_livro.repasses.flagNeedsManualResolution',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+        try {
+          // biome-ignore lint/suspicious/noExplicitAny: see aprovarRepasseTransaction
+          const result = await (this.db as any).transaction().execute(async (tx: any) => {
+            const lockedRows = (await sql<RepasseRow>`
+              SELECT * FROM repasses_recebedor WHERE id = ${input.idRepasse} FOR UPDATE
+            `.execute(tx)) as unknown as { rows: RepasseRow[] };
+            const existing = lockedRows.rows[0];
+            if (!existing) {
+              throw new FinanceiroRepasseNaoEncontradoError(input.idRepasse);
+            }
+            const existingRepasse = repasseFromRow(existing);
+
+            // Idempotent: only a verificando repasse gets flagged here.
+            if (existingRepasse.status !== 'verificando') {
+              return { repasse: existingRepasse };
+            }
+
+            const updated = marcarRepasseNeedsManualResolution(existingRepasse);
+            await sql`
+              UPDATE repasses_recebedor
+                SET needs_manual_resolution = TRUE
+                WHERE id = ${updated.id}
+            `.execute(tx);
+
+            // Persist candidates — idempotent on (repasse_id, codigo_solicitacao)
+            // so a re-run of the search never double-inserts. chave is stored
+            // MASKED only (never the full chave at rest — Cipher gate).
+            for (const c of input.candidatos) {
+              await sql`
+                INSERT INTO repasse_reconciliacao_candidatos
+                  (id, repasse_id, codigo_solicitacao, valor_cents, data_movimento,
+                   chave_mascarada, descricao_pix, criado_em)
+                  VALUES (${randomUUID()}, ${updated.id}, ${c.codigoSolicitacao},
+                          ${c.valorCents}, ${c.dataMovimento}, ${c.chaveMascarada},
+                          ${c.descricaoPix}, ${input.agora})
+                  ON CONFLICT (repasse_id, codigo_solicitacao) DO NOTHING
+              `.execute(tx);
+            }
+
+            return { repasse: updated };
+          });
+          span.setStatus({ code: SpanStatusCode.OK });
+          return result;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  async resolverManualPagoTransaction(input: {
+    readonly idRepasse: IdRepasse;
+    readonly interCodigoSolicitacao: string;
+    readonly resolvidoPor: string;
+    readonly agora: Date;
+  }): Promise<{ readonly repasse: RepasseRecebedor }> {
+    return tracer.startActiveSpan(
+      'db.financeiro_livro.repasses.resolverManualPago',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+        try {
+          // biome-ignore lint/suspicious/noExplicitAny: see aprovarRepasseTransaction
+          const result = await (this.db as any).transaction().execute(async (tx: any) => {
+            const lockedRows = (await sql<RepasseRow>`
+              SELECT * FROM repasses_recebedor WHERE id = ${input.idRepasse} FOR UPDATE
+            `.execute(tx)) as unknown as { rows: RepasseRow[] };
+            const existing = lockedRows.rows[0];
+            if (!existing) {
+              throw new FinanceiroRepasseNaoEncontradoError(input.idRepasse);
+            }
+            const existingRepasse = repasseFromRow(existing);
+
+            // Idempotent: only a verificando + flagged repasse is manually
+            // resolvable. Anything else (already resolved) is a no-op.
+            if (
+              existingRepasse.status !== 'verificando' ||
+              !existingRepasse.needsManualResolution
+            ) {
+              return { repasse: existingRepasse };
+            }
+
+            // Domain guard books like auto-pago (records the admin-supplied
+            // codigo, clears error + flag).
+            const updated = resolverManualPago(existingRepasse, input.interCodigoSolicitacao);
+            await sql`
+              UPDATE repasses_recebedor
+                SET status = ${updated.status},
+                    inter_codigo_solicitacao = ${updated.interCodigoSolicitacao},
+                    last_transfer_error = NULL,
+                    needs_manual_resolution = FALSE
+                WHERE id = ${updated.id}
+            `.execute(tx);
+            // §10.1 single debit point — identical to the auto-pago path.
+            await sql`
+              UPDATE lancamentos_financeiros
+                SET transferido_em = ${input.agora}
+                WHERE id_repasse = ${updated.id}
+                  AND transferido_em IS NULL
+                  AND cancelado_em IS NULL
+            `.execute(tx);
+
+            // Audit row carrying the acting admin. Manual resolution is NOT a
+            // payment attempt — number it MAX+1 (collision-free; the repasse is
+            // now terminal-pago) rather than reuse the intent attempt_no.
+            await sql`
+              INSERT INTO repasse_transfer_attempts
+                (id, repasse_id, attempt_no, referencia, started_at,
+                 request_summary, outcome, codigo_solicitacao, finished_at)
+                SELECT ${randomUUID()}, ${updated.id},
+                       COALESCE(MAX(attempt_no), 0) + 1,
+                       ${updated.transferReferencia ?? ''}, ${input.agora},
+                       ${`resolucao_manual_pago_por:${input.resolvidoPor}`}, ${'pago'},
+                       ${input.interCodigoSolicitacao}, ${input.agora}
+                  FROM repasse_transfer_attempts
+                  WHERE repasse_id = ${updated.id}
+            `.execute(tx);
+
+            return { repasse: updated };
+          });
+          span.setStatus({ code: SpanStatusCode.OK });
+          return result;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  async resolverManualFalhouTransaction(input: {
+    readonly idRepasse: IdRepasse;
+    readonly erro: string;
+    readonly resolvidoPor: string;
+    readonly agora: Date;
+  }): Promise<{ readonly repasse: RepasseRecebedor }> {
+    return tracer.startActiveSpan(
+      'db.financeiro_livro.repasses.resolverManualFalhou',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+        try {
+          // biome-ignore lint/suspicious/noExplicitAny: see aprovarRepasseTransaction
+          const result = await (this.db as any).transaction().execute(async (tx: any) => {
+            const lockedRows = (await sql<RepasseRow>`
+              SELECT * FROM repasses_recebedor WHERE id = ${input.idRepasse} FOR UPDATE
+            `.execute(tx)) as unknown as { rows: RepasseRow[] };
+            const existing = lockedRows.rows[0];
+            if (!existing) {
+              throw new FinanceiroRepasseNaoEncontradoError(input.idRepasse);
+            }
+            const existingRepasse = repasseFromRow(existing);
+
+            if (
+              existingRepasse.status !== 'verificando' ||
+              !existingRepasse.needsManualResolution
+            ) {
+              return { repasse: existingRepasse };
+            }
+
+            const updated = resolverManualFalhou(existingRepasse, input.erro);
+            await sql`
+              UPDATE repasses_recebedor
+                SET status = ${updated.status},
+                    last_transfer_error = ${updated.lastTransferError},
+                    needs_manual_resolution = FALSE
+                WHERE id = ${updated.id}
+            `.execute(tx);
+
+            // Audit row — MAX+1 (not a payment attempt). No money moved.
+            await sql`
+              INSERT INTO repasse_transfer_attempts
+                (id, repasse_id, attempt_no, referencia, started_at,
+                 request_summary, outcome, error, finished_at)
+                SELECT ${randomUUID()}, ${updated.id},
+                       COALESCE(MAX(attempt_no), 0) + 1,
+                       ${updated.transferReferencia ?? ''}, ${input.agora},
+                       ${`resolucao_manual_falhou_por:${input.resolvidoPor}`}, ${'falhou'},
+                       ${input.erro}, ${input.agora}
+                  FROM repasse_transfer_attempts
+                  WHERE repasse_id = ${updated.id}
+            `.execute(tx);
+
+            return { repasse: updated };
+          });
+          span.setStatus({ code: SpanStatusCode.OK });
+          return result;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  async findCandidatosByRepasseId(
+    idRepasse: IdRepasse,
+  ): Promise<readonly RepasseReconciliacaoCandidato[]> {
+    return tracer.startActiveSpan('db.financeiro_livro.repasses.findCandidatos', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        const rows = (await sql<{
+          codigo_solicitacao: string;
+          valor_cents: number;
+          data_movimento: string | null;
+          chave_mascarada: string | null;
+          descricao_pix: string | null;
+        }>`
+            SELECT codigo_solicitacao, valor_cents, data_movimento, chave_mascarada, descricao_pix
+              FROM repasse_reconciliacao_candidatos
+              WHERE repasse_id = ${idRepasse}
+              ORDER BY criado_em ASC
+          `.execute(this.db)) as unknown as {
+          rows: Array<{
+            codigo_solicitacao: string;
+            valor_cents: number;
+            data_movimento: string | null;
+            chave_mascarada: string | null;
+            descricao_pix: string | null;
+          }>;
+        };
+        span.setStatus({ code: SpanStatusCode.OK });
+        return rows.rows.map((r) => ({
+          codigoSolicitacao: r.codigo_solicitacao,
+          valorCents: r.valor_cents,
+          dataMovimento: r.data_movimento,
+          chaveMascarada: r.chave_mascarada,
+          descricaoPix: r.descricao_pix,
+        }));
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
   async findTransferAttemptsByRepasseId(
     idRepasse: IdRepasse,
   ): Promise<readonly RepasseTransferAttempt[]> {
@@ -1378,6 +1640,7 @@ function repasseFromRow(row: RepasseRow): RepasseRecebedor {
     interCodigoSolicitacao: row.inter_codigo_solicitacao,
     transferAttempts: row.transfer_attempts,
     lastTransferError: row.last_transfer_error,
+    needsManualResolution: row.needs_manual_resolution,
   });
 }
 

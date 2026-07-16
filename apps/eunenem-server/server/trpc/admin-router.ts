@@ -41,6 +41,8 @@ import {
   FinanceiroRepasseNaoEncontradoError,
   FinanceiroRepasseStatusInvalidoError,
   ID_PLATAFORMA_EUNENEM,
+  resolverManualFalhouRepasse,
+  resolverManualPagoRepasse,
   retentarTransferenciaRepasse,
 } from "../../../../src/index.js";
 import type { TrpcContext } from "./context.js";
@@ -1772,8 +1774,24 @@ const RepasseAdminDTOSchema = z.object({
   interCodigoSolicitacao: z.string().nullable(),
   transferAttempts: z.number().int().nonnegative(),
   lastTransferError: z.string().nullable(),
+  // aperture-477nz — verificando repasse awaiting admin manual resolution.
+  needsManualResolution: z.boolean(),
 });
 export type RepasseAdminDTO = z.infer<typeof RepasseAdminDTOSchema>;
+
+// aperture-477nz — a persisted reconciliation candidate (chave MASKED at rest)
+// for the admin detail view. The admin copies codigoSolicitacao into
+// repasses.resolverManualPago to book a payment they confirm is theirs.
+const RepasseReconciliacaoCandidatoDTOSchema = z.object({
+  codigoSolicitacao: z.string(),
+  valorCents: z.number().int().nonnegative(),
+  dataMovimento: z.string().nullable(),
+  chaveMascarada: z.string().nullable(),
+  descricaoPix: z.string().nullable(),
+});
+export type RepasseReconciliacaoCandidatoDTO = z.infer<
+  typeof RepasseReconciliacaoCandidatoDTOSchema
+>;
 
 // aperture-vvh2j — attempt-history row for the admin detail view.
 const RepasseTransferAttemptDTOSchema = z.object({
@@ -1803,6 +1821,8 @@ const RepasseDetailDTOSchema = RepasseAdminDTOSchema.extend({
   lancamentos: z.array(RepasseLancamentoDetailSchema),
   // aperture-vvh2j — transfer attempt history, attemptNo ASC.
   attempts: z.array(RepasseTransferAttemptDTOSchema),
+  // aperture-477nz — persisted search candidates (masked) for manual resolution.
+  candidatos: z.array(RepasseReconciliacaoCandidatoDTOSchema),
 });
 export type RepasseDetailDTO = z.infer<typeof RepasseDetailDTOSchema>;
 
@@ -1851,6 +1871,7 @@ function toRepasseAdminDTO(
     interCodigoSolicitacao: string | null;
     transferAttempts: number;
     lastTransferError: string | null;
+    needsManualResolution: boolean;
   },
   campanhaTitulo: string,
   recebedorNome: string | null,
@@ -1871,6 +1892,7 @@ function toRepasseAdminDTO(
     interCodigoSolicitacao: repasse.interCodigoSolicitacao,
     transferAttempts: repasse.transferAttempts,
     lastTransferError: repasse.lastTransferError,
+    needsManualResolution: repasse.needsManualResolution,
   };
 }
 
@@ -2027,6 +2049,23 @@ const repassesRouter = t.router({
         error: a.error,
       }));
 
+      // aperture-477nz — persisted search-reconciliation candidates (chave
+      // MASKED at rest). The admin reads these and copies a codigoSolicitacao
+      // into repasses.resolverManualPago to book a payment they confirm is ours.
+      const candidatoRows =
+        await ctx.deps.livroFinanceiroRepository.findCandidatosByRepasseId(
+          input.idRepasse as never,
+        );
+      const candidatos: RepasseReconciliacaoCandidatoDTO[] = candidatoRows.map(
+        (c) => ({
+          codigoSolicitacao: c.codigoSolicitacao,
+          valorCents: c.valorCents,
+          dataMovimento: c.dataMovimento,
+          chaveMascarada: c.chaveMascarada,
+          descricaoPix: c.descricaoPix,
+        }),
+      );
+
       const detailDTO: RepasseDetailDTO = {
         ...toRepasseAdminDTO(
           repasse,
@@ -2036,6 +2075,7 @@ const repassesRouter = t.router({
         ),
         lancamentos,
         attempts,
+        candidatos,
       };
 
       return { repasse: detailDTO };
@@ -2151,6 +2191,142 @@ const repassesRouter = t.router({
           throw new TRPCError({
             code: "CONFLICT",
             message: "só é possível retentar um repasse em falhou",
+          });
+        }
+        if (error instanceof FinanceiroInputInvalidoError) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: error.message,
+          });
+        }
+        throw error;
+      }
+    }),
+
+  /**
+   * resolverManualPago({ idRepasse, codigoSolicitacao }) — aperture-477nz.
+   * The admin CONFIRMED that one of the persisted reconciliation candidates is
+   * ours and supplies its Inter codigoSolicitacao. Books IDENTICALLY to the
+   * auto-pago path (stamps transferido_em on the linked lançamentos + audit
+   * row carrying the acting admin). Legal ONLY from a `verificando` repasse
+   * flagged `needsManualResolution`; any other state is an idempotent no-op
+   * (the repository's concurrency guard) that returns the current status —
+   * the frontend re-reads and shows the actual resolution. Acting admin's
+   * email is recorded on the audit trail (resolvidoPor). NOT_FOUND if the
+   * repasse doesn't exist.
+   */
+  resolverManualPago: adminProcedure
+    .input(
+      z.object({
+        idRepasse: z.string().uuid(),
+        codigoSolicitacao: z.string().trim().min(1).max(255),
+      }),
+    )
+    .output(
+      z.object({
+        idRepasse: z.string(),
+        status: z.string(),
+        needsManualResolution: z.boolean(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { usuario } = await resolverUsuarioAutenticado(
+        ctx.deps,
+        ctx.headers,
+      );
+      try {
+        const result = await resolverManualPagoRepasse(
+          {
+            livroFinanceiroRepository: ctx.deps.livroFinanceiroRepository,
+            clock: ctx.deps.clock,
+            observability: ctx.deps.observability,
+          },
+          {
+            idRepasse: input.idRepasse,
+            interCodigoSolicitacao: input.codigoSolicitacao,
+            resolvidoPor: usuario.email,
+          },
+        );
+
+        return {
+          idRepasse: result.repasse.id,
+          status: result.repasse.status,
+          needsManualResolution: result.repasse.needsManualResolution,
+        };
+      } catch (error: unknown) {
+        if (error instanceof FinanceiroRepasseNaoEncontradoError) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "repasse_nao_encontrado",
+          });
+        }
+        if (error instanceof FinanceiroRepasseStatusInvalidoError) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "repasse_status_invalido",
+          });
+        }
+        if (error instanceof FinanceiroInputInvalidoError) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: error.message,
+          });
+        }
+        throw error;
+      }
+    }),
+
+  /**
+   * resolverManualFalhou({ idRepasse }) — aperture-477nz. The admin ASSERTS no
+   * payment was made (a positive no-payment assertion). Transitions to
+   * `falhou`; no money moves. From `falhou` the admin can retry or cancelar.
+   * Legal ONLY from a `verificando` repasse flagged `needsManualResolution`;
+   * any other state is an idempotent no-op returning the current status. Acting
+   * admin recorded on the audit trail. NOT_FOUND if the repasse doesn't exist.
+   */
+  resolverManualFalhou: adminProcedure
+    .input(z.object({ idRepasse: z.string().uuid() }))
+    .output(
+      z.object({
+        idRepasse: z.string(),
+        status: z.string(),
+        needsManualResolution: z.boolean(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { usuario } = await resolverUsuarioAutenticado(
+        ctx.deps,
+        ctx.headers,
+      );
+      try {
+        const result = await resolverManualFalhouRepasse(
+          {
+            livroFinanceiroRepository: ctx.deps.livroFinanceiroRepository,
+            clock: ctx.deps.clock,
+            observability: ctx.deps.observability,
+          },
+          {
+            idRepasse: input.idRepasse,
+            resolvidoPor: usuario.email,
+          },
+        );
+
+        return {
+          idRepasse: result.repasse.id,
+          status: result.repasse.status,
+          needsManualResolution: result.repasse.needsManualResolution,
+        };
+      } catch (error: unknown) {
+        if (error instanceof FinanceiroRepasseNaoEncontradoError) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "repasse_nao_encontrado",
+          });
+        }
+        if (error instanceof FinanceiroRepasseStatusInvalidoError) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "repasse_status_invalido",
           });
         }
         if (error instanceof FinanceiroInputInvalidoError) {

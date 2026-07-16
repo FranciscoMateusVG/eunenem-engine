@@ -26,6 +26,7 @@ import {
 import { criarRecebedorInicial } from '../../../src/domain/arrecadacao/entities/recebedor.js';
 import { NoopLogger } from '../../../src/observability/noop-logger.js';
 import { noopTracer } from '../../../src/observability/tracer.js';
+import { gerarTransferReferencia } from '../../../src/use-cases/pagamentos/financeiro/aprovar-repasse-recebedor.js';
 import { adminAuthOverrides } from '../../helpers/admin-auth.js';
 import { makePagamento as makePagamentoBase } from '../../helpers/pagamento-repository.conformance.js';
 
@@ -422,5 +423,202 @@ describe('admin.repasses.show (aperture-riywh)', () => {
 
     const result = await rig.caller.admin.repasses.show({ idRepasse });
     expect(result.repasse).toBeNull();
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────
+//  (E) admin.repasses.resolverManualPago / resolverManualFalhou (aperture-477nz)
+// ────────────────────────────────────────────────────────────────────
+
+const CANDIDATO_CODIGO = 'inter_codigo_manual_abc';
+
+/**
+ * Drive a repasse all the way to `verificando` + `needsManualResolution`, with
+ * one persisted search candidate (chave masked) — the ONLY state from which the
+ * manual-resolution mutations are legal.
+ */
+async function seedVerificandoFlagged(rig: TestRig): Promise<{
+  idRepasse: string;
+  idsLancamentos: string[];
+}> {
+  const { idRepasse, idsLancamentos } = await seedPendingRepasse(rig);
+  const repo = rig.livroFinanceiroRepository;
+  await repo.aprovarRepassePixTransaction(
+    {
+      idRepasse: idRepasse as never,
+      aprovadoEm: T1,
+      transferReferencia: gerarTransferReferencia(idRepasse as never),
+    },
+    async () => {},
+  );
+  const iniciado = await repo.iniciarTransferenciaTransaction({
+    idRepasse: idRepasse as never,
+    requestSummary: 'seed',
+    agora: T1,
+  });
+  await repo.finalizarTentativaTransferencia({
+    idRepasse: idRepasse as never,
+    attemptId: iniciado.attemptId,
+    resultado: { tipo: 'verificando', codigoSolicitacao: null },
+    agora: T1,
+  });
+  await repo.flagNeedsManualResolutionTransaction({
+    idRepasse: idRepasse as never,
+    candidatos: [
+      {
+        codigoSolicitacao: CANDIDATO_CODIGO,
+        valorCents: 4500,
+        dataMovimento: '2026-06-04',
+        chaveMascarada: 'b***om',
+        descricaoPix: null,
+      },
+    ],
+    agora: T1,
+  });
+  return { idRepasse, idsLancamentos };
+}
+
+describe('admin.repasses.resolverManualPago (aperture-477nz)', () => {
+  let rig: TestRig;
+  beforeEach(async () => {
+    rig = await buildRig();
+  });
+
+  it('books identically to auto-pago: status pago, records admin codigo, stamps transferidoEm, clears flag', async () => {
+    const { idRepasse, idsLancamentos } = await seedVerificandoFlagged(rig);
+
+    const result = await rig.caller.admin.repasses.resolverManualPago({
+      idRepasse,
+      codigoSolicitacao: CANDIDATO_CODIGO,
+    });
+
+    expect(result.status).toBe('pago');
+    expect(result.needsManualResolution).toBe(false);
+
+    const repasse = await rig.livroFinanceiroRepository.findRepasseById(idRepasse as never);
+    expect(repasse?.status).toBe('pago');
+    expect(repasse?.interCodigoSolicitacao).toBe(CANDIDATO_CODIGO);
+    expect(repasse?.needsManualResolution).toBe(false);
+    // §10.1 debit point — the linked lançamentos stamp transferidoEm, exactly
+    // like the auto-pago path.
+    for (const l of await rig.livroFinanceiroRepository.findLancamentosByIds(
+      idsLancamentos as never,
+    )) {
+      expect(l.transferidoEm).toEqual(T1);
+    }
+    // An audit row carrying the acting admin was appended.
+    const attempts = await rig.livroFinanceiroRepository.findTransferAttemptsByRepasseId(
+      idRepasse as never,
+    );
+    expect(attempts.at(-1)?.outcome).toBe('pago');
+    expect(attempts.at(-1)?.codigoSolicitacao).toBe(CANDIDATO_CODIGO);
+    expect(attempts.at(-1)?.requestSummary).toContain('resolucao_manual_pago_por:');
+  });
+
+  it('is a no-op on a non-flagged repasse (never entered manual resolution): does not book, does not stamp', async () => {
+    // solicitado repasse — never flagged. The idempotent repo guard no-ops.
+    const { idRepasse, idsLancamentos } = await seedPendingRepasse(rig);
+
+    const result = await rig.caller.admin.repasses.resolverManualPago({
+      idRepasse,
+      codigoSolicitacao: CANDIDATO_CODIGO,
+    });
+
+    // Returns the current (unchanged) state — no illegal booking.
+    expect(result.status).toBe('solicitado');
+    const repasse = await rig.livroFinanceiroRepository.findRepasseById(idRepasse as never);
+    expect(repasse?.status).toBe('solicitado');
+    expect(repasse?.interCodigoSolicitacao).toBeNull();
+    for (const l of await rig.livroFinanceiroRepository.findLancamentosByIds(
+      idsLancamentos as never,
+    )) {
+      expect(l.transferidoEm).toBeNull();
+    }
+  });
+
+  it('is idempotent under a double-click: the second call is a no-op, no second debit', async () => {
+    const { idRepasse, idsLancamentos } = await seedVerificandoFlagged(rig);
+
+    await rig.caller.admin.repasses.resolverManualPago({
+      idRepasse,
+      codigoSolicitacao: CANDIDATO_CODIGO,
+    });
+    const second = await rig.caller.admin.repasses.resolverManualPago({
+      idRepasse,
+      codigoSolicitacao: 'a_different_codigo',
+    });
+
+    // Already pago — the second call neither re-books nor overwrites the codigo.
+    expect(second.status).toBe('pago');
+    const repasse = await rig.livroFinanceiroRepository.findRepasseById(idRepasse as never);
+    expect(repasse?.interCodigoSolicitacao).toBe(CANDIDATO_CODIGO);
+    for (const l of await rig.livroFinanceiroRepository.findLancamentosByIds(
+      idsLancamentos as never,
+    )) {
+      expect(l.transferidoEm).toEqual(T1); // stamped once, not re-stamped
+    }
+  });
+
+  it('maps a missing repasse to NOT_FOUND', async () => {
+    await expect(
+      rig.caller.admin.repasses.resolverManualPago({
+        idRepasse: randomUUID(),
+        codigoSolicitacao: CANDIDATO_CODIGO,
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it('rejects a blank codigoSolicitacao with BAD_REQUEST', async () => {
+    const { idRepasse } = await seedVerificandoFlagged(rig);
+    await expect(
+      rig.caller.admin.repasses.resolverManualPago({ idRepasse, codigoSolicitacao: '   ' }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+});
+
+describe('admin.repasses.resolverManualFalhou (aperture-477nz)', () => {
+  let rig: TestRig;
+  beforeEach(async () => {
+    rig = await buildRig();
+  });
+
+  it('positive no-payment assertion: status falhou, no money moves, clears flag, audit row', async () => {
+    const { idRepasse, idsLancamentos } = await seedVerificandoFlagged(rig);
+
+    const result = await rig.caller.admin.repasses.resolverManualFalhou({ idRepasse });
+
+    expect(result.status).toBe('falhou');
+    expect(result.needsManualResolution).toBe(false);
+
+    const repasse = await rig.livroFinanceiroRepository.findRepasseById(idRepasse as never);
+    expect(repasse?.status).toBe('falhou');
+    expect(repasse?.needsManualResolution).toBe(false);
+    // No money moved — the debit point is never touched on a falhou resolution.
+    for (const l of await rig.livroFinanceiroRepository.findLancamentosByIds(
+      idsLancamentos as never,
+    )) {
+      expect(l.transferidoEm).toBeNull();
+    }
+    const attempts = await rig.livroFinanceiroRepository.findTransferAttemptsByRepasseId(
+      idRepasse as never,
+    );
+    expect(attempts.at(-1)?.outcome).toBe('falhou');
+    expect(attempts.at(-1)?.requestSummary).toContain('resolucao_manual_falhou_por:');
+  });
+
+  it('is a no-op on a non-flagged repasse: does not force falhou', async () => {
+    const { idRepasse } = await seedPendingRepasse(rig);
+
+    const result = await rig.caller.admin.repasses.resolverManualFalhou({ idRepasse });
+
+    expect(result.status).toBe('solicitado');
+    const repasse = await rig.livroFinanceiroRepository.findRepasseById(idRepasse as never);
+    expect(repasse?.status).toBe('solicitado');
+  });
+
+  it('maps a missing repasse to NOT_FOUND', async () => {
+    await expect(
+      rig.caller.admin.repasses.resolverManualFalhou({ idRepasse: randomUUID() }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 });

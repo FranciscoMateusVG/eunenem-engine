@@ -121,6 +121,8 @@ interface InterExtratoTransacao {
   readonly tipoTransacao?: string;
   readonly tipoOperacao?: string;
   readonly valor?: string | number;
+  /** Extrato movement date (yyyy-mm-dd), surfaced to admins on a candidate. */
+  readonly dataInclusao?: string;
   readonly detalhes?: InterExtratoDetalhePix;
 }
 
@@ -524,8 +526,16 @@ function centsToReais(valorCents: MoneyCents): number {
 
 /** reais (string or number, dot or comma decimal) → integer cents. */
 function reaisToCents(valor: string | number): number {
-  const normalized = typeof valor === 'number' ? valor : Number(String(valor).replace(',', '.'));
-  return Math.round(normalized * 100);
+  if (typeof valor === 'number') {
+    return Math.round(valor * 100);
+  }
+  // Locale-formatted string: when a comma is present it is the DECIMAL
+  // separator and any dots are THOUSANDS separators ('1.234,56' → 123456
+  // cents); otherwise the dot is the decimal separator ('1234.56'). The old
+  // first-comma-only replace turned '1.234,56' into NaN and silently dropped
+  // the row from search — a false zero-candidate (aperture-477nz / GLaDOS).
+  const normalized = valor.includes(',') ? valor.replace(/\./g, '').replace(',', '.') : valor;
+  return Math.round(Number(normalized) * 100);
 }
 
 function parseJson<T>(body: string): T | null {
@@ -679,12 +689,14 @@ function mapPixOutTransacao(transacao: InterExtratoTransacao): PagamentoEncontra
   }
 
   const chave = detalhes?.chavePixRecebedor;
+  const dataMovimento = transacao.dataInclusao;
   return {
     codigoSolicitacao,
     valorCents,
     referencia: detalhes?.descricaoPix ?? '',
-    // exactOptionalPropertyTypes: include `chave` only when present.
+    // exactOptionalPropertyTypes: include optional fields only when present.
     ...(typeof chave === 'string' && chave !== '' ? { chave } : {}),
+    ...(typeof dataMovimento === 'string' && dataMovimento !== '' ? { dataMovimento } : {}),
     status: transacao.tipoTransacao ?? '',
   };
 }
