@@ -37,6 +37,13 @@ services:
       # boot-safe no-op (src/lib/glitchtip/instrument.ts logs one line and
       # skips init). DSN is set per-environment in Dokploy, never committed.
       - GLITCHTIP_DSN=${GLITCHTIP_DSN:-}
+      # PIX transfer rail selection + E2E magic-outcome gate (aperture-k9ajk).
+      # Defaults mirror the zod schema in server/auth/setup.ts (fake/false) so
+      # absent values are behavior-neutral. TRANSFERENCIA_PROVIDER='inter' is
+      # prod-only (guard in setup.ts, aperture-vvh2j); EUNENEM_FAKE_E2E_MAGIC
+      # ='true' only where the fake rail runs (aperture-4ifbm).
+      - TRANSFERENCIA_PROVIDER=${TRANSFERENCIA_PROVIDER:-fake}
+      - EUNENEM_FAKE_E2E_MAGIC=${EUNENEM_FAKE_E2E_MAGIC:-false}
       - LOG_PII_HASH_SALT=${LOG_PII_HASH_SALT:-}
       - TRUSTED_HOP_COUNT=${TRUSTED_HOP_COUNT:-1}
       # Object storage for profile photos (aperture-0bgo3 / R5 aperture-kcasm).
