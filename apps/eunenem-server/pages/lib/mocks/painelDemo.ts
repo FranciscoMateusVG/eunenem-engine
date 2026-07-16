@@ -254,16 +254,22 @@ export function buildPainelMenu(
           variant: null,
           icon: "edit-profile",
         },
-        // TODO(aperture-aqiu7): only render the "verificado" chip when
-        // the Stripe Connect account is truly verified (charges_enabled
-        // + payouts_enabled). Today it's hard-coded.
+        // aperture-tja4d — NO "verificado" badge. eunenem 2.0 performs ZERO
+        // bank-data / PIX-key-ownership / identity verification (recebedores
+        // supply a raw PIX chave; Inter has no DICT key-lookup — aperture-1n53f).
+        // A hardcoded "verificado" chip on a PAYOUT surface is a FALSE trust
+        // signal: it told the user we confirmed their account, which never
+        // happened, and it rendered before ANY bank data was filled (Thacy's
+        // report). It can mask a mistyped PIX chave → money to the wrong key.
+        // The badge is removed until a genuine verification path exists (the
+        // "verified" kind stays available for that future — tracked by
+        // aperture-aqiu7, re-scoped to "IF a real verification ever ships").
         {
           id: "bancarios",
           label: "dados bancários",
           sub: "para onde a gente envia o dinheiro",
           variant: null,
           icon: "bank",
-          badge: { kind: "verified", text: "verificado" },
         },
         {
           id: "suporte",
