@@ -78,6 +78,10 @@ export {
   type TransferenciaProviderFakeOptions,
 } from './adapters/pagamentos/transferencia-provider.fake.js';
 export {
+  type InterProviderConfig,
+  TransferenciaProviderInter,
+} from './adapters/pagamentos/transferencia-provider.inter.js';
+export {
   type BuscarPagamentosInput,
   type ConsultarPagamentoResult,
   type ConsultarPagamentoStatus,

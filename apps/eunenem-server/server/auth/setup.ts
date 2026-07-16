@@ -57,6 +57,7 @@ import {
   type RepasseJobEnqueuer,
   type TransferenciaProvider,
   TransferenciaProviderFake,
+  TransferenciaProviderInter,
   UsuarioRepositoryPostgres,
   type UsuarioRepository,
 } from '../../../../src/index.js';
@@ -331,6 +332,24 @@ const ServerEnvSchema = z
      */
     TRANSFERENCIA_PROVIDER: z.enum(['fake', 'inter']).default('fake'),
     /**
+     * aperture-ju5w2 — Banco Inter Banking API credentials for the real PIX
+     * transfer rail. ALL optional with '' defaults so a fresh-clone / fake-rail
+     * boot never crashes; the superRefine below makes them REQUIRED (non-empty)
+     * whenever TRANSFERENCIA_PROVIDER==='inter'. Sourced from Infisical only —
+     * never compose files, never Dokploy env fields for the secret material.
+     * INTER_CERT_BASE64 / INTER_KEY_BASE64 are base64-encoded PEM (client cert +
+     * private key for mTLS); decoded to PEM text at construction. INTER_BASE_URL
+     * is the environment root (prod cdpj.partners.bancointer.com.br). The mTLS
+     * handshake uses DEFAULT TLS verification — no bypass anywhere.
+     */
+    INTER_BASE_URL: z.string().default(''),
+    INTER_CLIENT_ID: z.string().default(''),
+    INTER_CLIENT_SECRET: z.string().default(''),
+    INTER_SCOPE: z.string().default(''),
+    INTER_CERT_BASE64: z.string().default(''),
+    INTER_KEY_BASE64: z.string().default(''),
+    INTER_CONTA_CORRENTE: z.string().default(''),
+    /**
      * Trusted reverse-proxy hop count (aperture-uc2ix). Default 0 for
      * dev (no proxy in front of localhost:3001). Prod MUST set this
      * to 1+ matching deploy topology — see ServerDeps.trustedHopCount.
@@ -457,6 +476,28 @@ const ServerEnvSchema = z
         message:
           "TRANSFERENCIA_PROVIDER='inter' is only allowed when NODE_ENV==='production' — staging/dev must never select the real PIX transfer rail (aperture-vvh2j).",
       });
+    }
+    // aperture-ju5w2 — when the real Inter rail is selected, every credential
+    // must be present. Fail fast at boot with a precise message rather than
+    // half-wiring a rail that would throw on the first payment.
+    if (env.TRANSFERENCIA_PROVIDER === 'inter') {
+      const requeridos = [
+        'INTER_BASE_URL',
+        'INTER_CLIENT_ID',
+        'INTER_CLIENT_SECRET',
+        'INTER_SCOPE',
+        'INTER_CERT_BASE64',
+        'INTER_KEY_BASE64',
+      ] as const;
+      for (const chave of requeridos) {
+        if (!env[chave] || env[chave].trim() === '') {
+          ctx.addIssue({
+            code: 'custom',
+            path: [chave],
+            message: `${chave} is required when TRANSFERENCIA_PROVIDER='inter' (aperture-ju5w2).`,
+          });
+        }
+      }
     }
   });
 
@@ -737,19 +778,25 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
   const boss = new PgBoss(env.DATABASE_URL);
   const repasseJobEnqueuer = new RepasseJobEnqueuerPgBoss(boss);
 
-  // Transfer rail DI. Mirrors the pagamentoProvider fake-vs-real gate above,
-  // but with a HARDER posture: the real 'inter' adapter does not exist yet
-  // (aperture-ju5w2), so selecting it throws at boot rather than half-wiring
-  // a broken rail. Combined with the env superRefine (which only permits
-  // 'inter' when NODE_ENV==='production'), staging/dev is STRUCTURALLY unable
-  // to fire a real money transfer — this is the boot guard.
+  // Transfer rail DI. Mirrors the pagamentoProvider fake-vs-real gate above.
+  // 'inter' binds the real Banco Inter PIX adapter (aperture-ju5w2); the env
+  // superRefine already guarantees (a) 'inter' is only reachable when
+  // NODE_ENV==='production' and (b) every INTER_* credential is present, so
+  // staging/dev is STRUCTURALLY unable to fire a real money transfer — the
+  // boot guard. cert/key arrive base64-encoded (Infisical) and are decoded to
+  // PEM text here; nothing else touches TLS verification.
   let transferenciaProvider: TransferenciaProvider;
   if (env.TRANSFERENCIA_PROVIDER === 'inter') {
-    // TODO(aperture-ju5w2): swap in `new TransferenciaProviderInter(...)` here
-    // once the real Banco Inter PIX transfer adapter (provider.inter.ts) lands.
-    throw new Error(
-      'Real Inter transfer adapter not yet available (aperture-ju5w2). Set TRANSFERENCIA_PROVIDER=fake.',
-    );
+    const contaCorrente = env.INTER_CONTA_CORRENTE.trim();
+    transferenciaProvider = new TransferenciaProviderInter({
+      baseUrl: env.INTER_BASE_URL,
+      clientId: env.INTER_CLIENT_ID,
+      clientSecret: env.INTER_CLIENT_SECRET,
+      scope: env.INTER_SCOPE,
+      certPem: Buffer.from(env.INTER_CERT_BASE64, 'base64').toString('utf8'),
+      keyPem: Buffer.from(env.INTER_KEY_BASE64, 'base64').toString('utf8'),
+      ...(contaCorrente !== '' ? { contaCorrente } : {}),
+    });
   } else {
     transferenciaProvider = new TransferenciaProviderFake();
   }
