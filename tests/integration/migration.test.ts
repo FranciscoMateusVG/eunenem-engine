@@ -107,6 +107,20 @@ describe('Migration round-trip', () => {
     expect(slugAlteradoCol?.data_type).toBe('timestamp with time zone');
     expect(slugAlteradoCol?.is_nullable).toBe('YES');
 
+    // 20260716_042_repasse_transfer (aperture-vvh2j): the actual TIP now.
+    //   Adds the transfer bookkeeping columns to repasses_recebedor + the
+    //   append-only repasse_transfer_attempts audit table, and widens the
+    //   status CHECK to the full 7-state transfer FSM.
+    expect(tableNames).toContain('repasse_transfer_attempts');
+    expect((await getColumn(db, 'repasses_recebedor', 'transfer_referencia'))?.is_nullable).toBe(
+      'YES',
+    );
+    expect((await getColumn(db, 'repasses_recebedor', 'transfer_attempts'))?.is_nullable).toBe(
+      'NO',
+    );
+    expect(await getColumn(db, 'repasses_recebedor', 'inter_codigo_solicitacao')).toBeDefined();
+    expect(await getColumn(db, 'repasses_recebedor', 'last_transfer_error')).toBeDefined();
+
     const conviteRemetenteCol = await getColumn(db, 'convites', 'remetente');
     expect(conviteRemetenteCol?.data_type).toBe('character varying');
     expect(conviteRemetenteCol?.character_maximum_length).toBe(120);
@@ -142,10 +156,18 @@ describe('Migration round-trip', () => {
     //    note above; renaming a DEPLOYED migration is forbidden because
     //    kysely_migration keys on the filename and would re-run it).
 
-    // 20260711_041_add_slug_alterado_em_to_campanhas (aperture-aphk8) → the
-    //   actual TIP now (SEVENTH occurrence of the off-by-one this block warns
-    //   about — landed on top without prepending its down-step). Its down()
-    //   drops campanhas.slug_alterado_em. THIS is the true first migrateDown.
+    // 20260716_042_repasse_transfer (aperture-vvh2j) → the actual TIP now.
+    //   Prepended per the contract above (NINTH occurrence of the off-by-one
+    //   this block warns about). Its down() drops repasse_transfer_attempts +
+    //   the 4 transfer columns and restores the 2-state status CHECK. THIS is
+    //   the true first migrateDown.
+    const downRepasseTransfer = await migrator.migrateDown();
+    expect(downRepasseTransfer.error).toBeUndefined();
+    expect(await getColumn(db, 'repasses_recebedor', 'transfer_referencia')).toBeUndefined();
+    expect(await listTableNames(db)).not.toContain('repasse_transfer_attempts');
+
+    // 20260711_041_add_slug_alterado_em_to_campanhas (aperture-aphk8) → now
+    //   the SECOND migrateDown. Its down() drops campanhas.slug_alterado_em.
     const downSlugAlteradoEm = await migrator.migrateDown();
     expect(downSlugAlteradoEm.error).toBeUndefined();
     expect(await getColumn(db, 'campanhas', 'slug_alterado_em')).toBeUndefined();

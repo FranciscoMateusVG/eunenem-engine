@@ -341,6 +341,11 @@ describe('criarRepasseRecebedorSolicitado', () => {
       solicitadoEm: criadoEm,
       aprovadoEm: null,
       bankTransferRef: null,
+      // aperture-vvh2j — transfer bookkeeping defaults.
+      transferReferencia: null,
+      interCodigoSolicitacao: null,
+      transferAttempts: 0,
+      lastTransferError: null,
     });
   });
 });

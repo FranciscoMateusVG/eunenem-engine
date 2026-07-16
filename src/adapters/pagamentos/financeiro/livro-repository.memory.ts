@@ -1,10 +1,19 @@
+import { randomUUID } from 'node:crypto';
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 import type { IdCampanha } from '../../../domain/arrecadacao/value-objects/ids.js';
 import type { LancamentoFinanceiro } from '../../../domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
 import {
   aprovarRepasse,
+  aprovarRepassePix,
+  cancelarRepasse,
   criarRepasseRecebedorSolicitado,
+  iniciarTransferencia,
+  marcarRepasseFalhou,
+  marcarRepassePago,
+  marcarRepasseVerificando,
   type RepasseRecebedor,
+  reverterTransferenciaParaAprovado,
+  type StatusRepasse,
 } from '../../../domain/pagamentos/financeiro/entities/repasse-recebedor.js';
 import type { DadosRecebedorAtivo } from '../../../domain/pagamentos/financeiro/value-objects/dados-recebedor-ativo.js';
 import type {
@@ -18,7 +27,13 @@ import { FinanceiroRepasseNaoEncontradoError } from '../../../errors/pagamentos/
 import { FinanceiroRepasseStatusInvalidoError } from '../../../errors/pagamentos/financeiro/repasse-status-invalido.error.js';
 import type { RecebedorRepository } from '../../arrecadacao/recebedor-repository.js';
 import type { PagamentoRepository } from '../repository.js';
-import type { LivroFinanceiroRepository } from './livro-repository.js';
+import type {
+  LivroFinanceiroRepository,
+  RepasseTransactionExecutor,
+  RepasseTransferAttempt,
+  RepasseTransferResultado,
+  RepasseTransferResultadoTerminal,
+} from './livro-repository.js';
 
 const tracer = trace.getTracer('frame');
 
@@ -49,14 +64,58 @@ const DB_ATTRS = {
  *     `transferidoEm` on the linked lançamento set with the same
  *     timestamp.
  */
+/**
+ * aperture-vvh2j. In-memory mirror of the `repasse_transfer_attempts`
+ * table — one row per executar pickup + one audit row per reconciliation
+ * resolve / admin cancel. Fields are mutable so `fecharTentativa` can
+ * close an open intent row in place (matches the postgres UPDATE ... SET
+ * outcome/finished_at on the open attempt).
+ */
+interface RepasseTransferAttemptRecord {
+  id: string;
+  repasseId: IdRepasse;
+  attemptNo: number;
+  referencia: string | null;
+  startedAt: Date;
+  requestSummary: string;
+  outcome: string | null;
+  codigoSolicitacao: string | null;
+  error: string | null;
+  finishedAt: Date | null;
+}
+
 export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepository {
   private readonly lancamentos = new Map<IdLancamentoFinanceiro, LancamentoFinanceiro>();
   private readonly repasses = new Map<IdRepasse, RepasseRecebedor>();
+  private readonly repasseTransferAttempts: RepasseTransferAttemptRecord[] = [];
 
   constructor(
     private readonly recebedorRepository?: RecebedorRepository,
     private readonly pagamentoRepository?: PagamentoRepository,
   ) {}
+
+  /**
+   * Insert an attempt row, ENFORCING the same (repasse_id, attempt_no) unique
+   * constraint the Postgres schema carries
+   * (repasse_transfer_attempts_repasse_attempt_uniq). Without this, the memory
+   * adapter's plain `push` silently accepts duplicate attempt_no rows that the
+   * real database rejects with 23505 — which is exactly how the resolver/cancel
+   * audit-row collision shipped green (aperture-vvh2j, GLaDOS money-flow review
+   * 2026-07-16). This makes the fast unit suite faithful to that constraint.
+   */
+  private pushTransferAttempt(record: RepasseTransferAttemptRecord): void {
+    const collision = this.repasseTransferAttempts.some(
+      (a) => a.repasseId === record.repasseId && a.attemptNo === record.attemptNo,
+    );
+    if (collision) {
+      const err = new Error(
+        `duplicate key value violates unique constraint "repasse_transfer_attempts_repasse_attempt_uniq" (repasse_id=${record.repasseId}, attempt_no=${record.attemptNo})`,
+      ) as Error & { code: string };
+      err.code = '23505';
+      throw err;
+    }
+    this.repasseTransferAttempts.push(record);
+  }
 
   async saveLancamentos(lancamentos: readonly LancamentoFinanceiro[]): Promise<void> {
     return tracer.startActiveSpan('db.financeiro_livro.lancamentos.save', async (span) => {
@@ -324,7 +383,7 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
    * Plain string encoding `${ms}:${id}` — opaque to callers.
    */
   async findRepassesPaginated(input: {
-    readonly statusFilter: 'solicitado' | 'aprovado' | 'all';
+    readonly statusFilter: StatusRepasse | 'all';
     readonly cursor: string | null;
     readonly limit: number;
   }): Promise<{
@@ -563,6 +622,401 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
     );
   }
 
+  // ───────────────────────────────────────────────────────────────────
+  // aperture-vvh2j — automated PIX transfer FSM (pix recebedores only).
+  // ───────────────────────────────────────────────────────────────────
+
+  async aprovarRepassePixTransaction(
+    input: {
+      readonly idRepasse: IdRepasse;
+      readonly aprovadoEm: Date;
+      readonly transferReferencia: string;
+    },
+    enqueueDentroDaTransacao: (executor: RepasseTransactionExecutor) => Promise<void>,
+  ): Promise<{ readonly repasse: RepasseRecebedor }> {
+    return tracer.startActiveSpan(
+      'db.financeiro_livro.repasses.aprovarPixTransaction',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+        try {
+          const existing = this.repasses.get(input.idRepasse);
+          if (!existing) {
+            throw new FinanceiroRepasseNaoEncontradoError(input.idRepasse);
+          }
+
+          // Idempotent at the SAME aprovado state — only if the stable
+          // referencia matches. A different referencia is a caller bug.
+          if (existing.status === 'aprovado') {
+            if (existing.transferReferencia === input.transferReferencia) {
+              span.setStatus({ code: SpanStatusCode.OK });
+              return { repasse: existing };
+            }
+            throw new FinanceiroRepasseStatusInvalidoError(input.idRepasse, existing.status);
+          }
+
+          if (existing.status !== 'solicitado') {
+            throw new FinanceiroRepasseStatusInvalidoError(input.idRepasse, existing.status);
+          }
+
+          // Domain pix approval — binds the stable transferReferencia.
+          // Does NOT stamp transferido_em (moved to `pago`, aperture-vvh2j).
+          const updated = aprovarRepassePix(existing, input.transferReferencia, input.aprovadoEm);
+          this.repasses.set(updated.id, updated);
+
+          // Memory has no real transaction; we still invoke the enqueue
+          // callback with a stub executor so tests can assert the enqueue
+          // was attempted inside the (logical) transaction.
+          await enqueueDentroDaTransacao({
+            executeSql: async () => ({ rows: [] }),
+          });
+
+          span.setStatus({ code: SpanStatusCode.OK });
+          return { repasse: updated };
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  async iniciarTransferenciaTransaction(input: {
+    readonly idRepasse: IdRepasse;
+    readonly requestSummary: string;
+    readonly agora: Date;
+  }): Promise<{
+    readonly repasse: RepasseRecebedor;
+    readonly attemptId: string;
+    readonly attemptNo: number;
+    readonly acao: 'prosseguir' | 'reconciliar' | 'concluido';
+  }> {
+    return tracer.startActiveSpan(
+      'db.financeiro_livro.repasses.iniciarTransferenciaTransaction',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+        try {
+          const existing = this.repasses.get(input.idRepasse);
+          if (!existing) {
+            throw new FinanceiroRepasseNaoEncontradoError(input.idRepasse);
+          }
+
+          // Already resolved / being reconciled → re-delivered job no-ops.
+          if (
+            existing.status === 'pago' ||
+            existing.status === 'cancelado' ||
+            existing.status === 'verificando'
+          ) {
+            span.setStatus({ code: SpanStatusCode.OK });
+            return {
+              repasse: existing,
+              attemptId: '',
+              attemptNo: existing.transferAttempts,
+              acao: 'concluido' as const,
+            };
+          }
+
+          // Crash re-delivery: a pagarPix MAY have gone out. Hand back the
+          // still-open attempt so the handler diverts to verificando.
+          if (existing.status === 'transferindo') {
+            const open = this.repasseTransferAttempts
+              .filter(
+                (a) => a.repasseId === existing.id && a.attemptNo === existing.transferAttempts,
+              )
+              .at(-1);
+            span.setStatus({ code: SpanStatusCode.OK });
+            return {
+              repasse: existing,
+              attemptId: open?.id ?? '',
+              attemptNo: existing.transferAttempts,
+              acao: 'reconciliar' as const,
+            };
+          }
+
+          // Fresh claim: aprovado|falhou → transferindo, ++attempts,
+          // clears last_transfer_error (reuses the stable referencia).
+          const updated = iniciarTransferencia(existing);
+          this.repasses.set(updated.id, updated);
+
+          // Committed intent row (open attempt) — the crash-recovery signal.
+          const attemptId = randomUUID();
+          this.pushTransferAttempt({
+            id: attemptId,
+            repasseId: updated.id,
+            attemptNo: updated.transferAttempts,
+            referencia: updated.transferReferencia,
+            startedAt: input.agora,
+            requestSummary: input.requestSummary,
+            outcome: null,
+            codigoSolicitacao: null,
+            error: null,
+            finishedAt: null,
+          });
+
+          span.setStatus({ code: SpanStatusCode.OK });
+          return {
+            repasse: updated,
+            attemptId,
+            attemptNo: updated.transferAttempts,
+            acao: 'prosseguir' as const,
+          };
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  async finalizarTentativaTransferencia(input: {
+    readonly idRepasse: IdRepasse;
+    readonly attemptId: string;
+    readonly resultado: RepasseTransferResultado;
+    readonly agora: Date;
+  }): Promise<{ readonly repasse: RepasseRecebedor }> {
+    return tracer.startActiveSpan(
+      'db.financeiro_livro.repasses.finalizarTentativaTransferencia',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+        try {
+          const existing = this.repasses.get(input.idRepasse);
+          if (!existing) {
+            throw new FinanceiroRepasseNaoEncontradoError(input.idRepasse);
+          }
+
+          const resultado = input.resultado;
+          let updated: RepasseRecebedor;
+          switch (resultado.tipo) {
+            case 'pago': {
+              updated = marcarRepassePago(existing, resultado.codigoSolicitacao);
+              this.repasses.set(updated.id, updated);
+              // Single debit point — stamp transferido_em on the linked,
+              // un-transferred, un-cancelled lançamentos.
+              this.stampTransferidoEm(updated.id, input.agora);
+              this.fecharTentativa(input.attemptId, {
+                outcome: 'pago',
+                codigoSolicitacao: resultado.codigoSolicitacao,
+                finishedAt: input.agora,
+              });
+              break;
+            }
+            case 'verificando': {
+              updated = marcarRepasseVerificando(existing, resultado.codigoSolicitacao);
+              this.repasses.set(updated.id, updated);
+              // No stamp — payment outcome is still unknown.
+              this.fecharTentativa(input.attemptId, {
+                outcome: 'verificando',
+                codigoSolicitacao: resultado.codigoSolicitacao,
+                finishedAt: input.agora,
+              });
+              break;
+            }
+            case 'falhou': {
+              updated = marcarRepasseFalhou(existing, resultado.erro);
+              this.repasses.set(updated.id, updated);
+              // No stamp — confirmed no money moved.
+              this.fecharTentativa(input.attemptId, {
+                outcome: 'falhou',
+                error: resultado.erro,
+                finishedAt: input.agora,
+              });
+              break;
+            }
+            case 'transitorio': {
+              // Definitely no payment — revert so the retry is a clean claim.
+              updated = reverterTransferenciaParaAprovado(existing);
+              this.repasses.set(updated.id, updated);
+              this.fecharTentativa(input.attemptId, {
+                outcome: 'transitorio',
+                error: resultado.erro,
+                finishedAt: input.agora,
+              });
+              break;
+            }
+            default: {
+              const _exhaustive: never = resultado;
+              throw new Error(`resultado.tipo inesperado: ${JSON.stringify(_exhaustive)}`);
+            }
+          }
+
+          span.setStatus({ code: SpanStatusCode.OK });
+          return { repasse: updated };
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  async resolverVerificacaoTransferencia(input: {
+    readonly idRepasse: IdRepasse;
+    readonly resultado: RepasseTransferResultadoTerminal;
+    readonly reconciliacaoResumo: string;
+    readonly agora: Date;
+  }): Promise<{ readonly repasse: RepasseRecebedor }> {
+    return tracer.startActiveSpan(
+      'db.financeiro_livro.repasses.resolverVerificacaoTransferencia',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+        try {
+          const existing = this.repasses.get(input.idRepasse);
+          if (!existing) {
+            throw new FinanceiroRepasseNaoEncontradoError(input.idRepasse);
+          }
+
+          // Idempotent — only a repasse still in `verificando` is resolvable.
+          if (existing.status !== 'verificando') {
+            span.setStatus({ code: SpanStatusCode.OK });
+            return { repasse: existing };
+          }
+
+          const resultado = input.resultado;
+          let updated: RepasseRecebedor;
+          switch (resultado.tipo) {
+            case 'pago': {
+              updated = marcarRepassePago(existing, resultado.codigoSolicitacao);
+              this.repasses.set(updated.id, updated);
+              this.stampTransferidoEm(updated.id, input.agora);
+              break;
+            }
+            case 'falhou': {
+              updated = marcarRepasseFalhou(existing, resultado.erro);
+              this.repasses.set(updated.id, updated);
+              break;
+            }
+            default: {
+              const _exhaustive: never = resultado;
+              throw new Error(`resultado.tipo inesperado: ${JSON.stringify(_exhaustive)}`);
+            }
+          }
+
+          // Close out the CURRENT attempt row (attempt_no = transferAttempts)
+          // with its reconciled terminal outcome — an UPDATE, mirroring the
+          // Postgres adapter. Inserting a fresh row that reuses attempt_no
+          // would collide with the intent row under the unique constraint.
+          const codigo = resultado.tipo === 'pago' ? resultado.codigoSolicitacao : null;
+          const erro = resultado.tipo === 'falhou' ? resultado.erro : null;
+          const attemptRow = this.repasseTransferAttempts.find(
+            (a) => a.repasseId === updated.id && a.attemptNo === existing.transferAttempts,
+          );
+          if (attemptRow) {
+            attemptRow.outcome = resultado.tipo;
+            attemptRow.codigoSolicitacao = codigo ?? attemptRow.codigoSolicitacao;
+            attemptRow.error = erro;
+            attemptRow.finishedAt = input.agora;
+            attemptRow.requestSummary = `${attemptRow.requestSummary} | reconciliacao: ${input.reconciliacaoResumo}`;
+          }
+
+          span.setStatus({ code: SpanStatusCode.OK });
+          return { repasse: updated };
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  async cancelarRepasseTransaction(input: {
+    readonly idRepasse: IdRepasse;
+    readonly canceladoPor: string;
+    readonly agora: Date;
+  }): Promise<{
+    readonly repasse: RepasseRecebedor;
+    readonly lancamentosLiberados: number;
+  }> {
+    return tracer.startActiveSpan(
+      'db.financeiro_livro.repasses.cancelarTransaction',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+        try {
+          const existing = this.repasses.get(input.idRepasse);
+          if (!existing) {
+            throw new FinanceiroRepasseNaoEncontradoError(input.idRepasse);
+          }
+
+          // Domain transition falhou → cancelado (defense-in-depth guard).
+          const updated = cancelarRepasse(existing);
+          this.repasses.set(updated.id, updated);
+
+          // The ONLY claim-release path: clear id_repasse on linked,
+          // un-transferred lançamentos so funds return to disponivel.
+          let lancamentosLiberados = 0;
+          for (const [id, l] of this.lancamentos.entries()) {
+            if (l.idRepasse !== updated.id) continue;
+            if (l.transferidoEm !== null) continue;
+            this.lancamentos.set(id, { ...l, idRepasse: null });
+            lancamentosLiberados += 1;
+          }
+
+          // Audit row carrying the acting admin. Cancel is not a payment
+          // attempt — number it MAX+1 so it never collides with the last
+          // intent row (collision-free: `cancelado` is terminal). Mirrors the
+          // Postgres MAX(attempt_no)+1 insert.
+          const maxAttemptNo = this.repasseTransferAttempts
+            .filter((a) => a.repasseId === updated.id)
+            .reduce((max, a) => Math.max(max, a.attemptNo), 0);
+          this.pushTransferAttempt({
+            id: randomUUID(),
+            repasseId: updated.id,
+            attemptNo: maxAttemptNo + 1,
+            referencia: updated.transferReferencia ?? '',
+            startedAt: input.agora,
+            requestSummary: `cancelado_por:${input.canceladoPor}`,
+            outcome: 'cancelado',
+            codigoSolicitacao: null,
+            error: null,
+            finishedAt: input.agora,
+          });
+
+          span.setStatus({ code: SpanStatusCode.OK });
+          return { repasse: updated, lancamentosLiberados };
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  async findTransferAttemptsByRepasseId(
+    idRepasse: IdRepasse,
+  ): Promise<readonly RepasseTransferAttempt[]> {
+    const attempts = this.repasseTransferAttempts
+      .filter((a) => a.repasseId === idRepasse)
+      .sort((a, b) => a.attemptNo - b.attemptNo || a.startedAt.getTime() - b.startedAt.getTime())
+      .map(
+        (a): RepasseTransferAttempt => ({
+          id: a.id,
+          repasseId: a.repasseId,
+          attemptNo: a.attemptNo,
+          referencia: a.referencia ?? '',
+          startedAt: a.startedAt,
+          finishedAt: a.finishedAt,
+          requestSummary: a.requestSummary,
+          outcome: a.outcome,
+          codigoSolicitacao: a.codigoSolicitacao,
+          error: a.error,
+        }),
+      );
+    return attempts;
+  }
+
   async findRecebedorAtivoPorIdCampanha(
     idCampanha: IdCampanha,
   ): Promise<DadosRecebedorAtivo | undefined> {
@@ -592,6 +1046,48 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
   private async temLancamentosParaPagamento(idPagamento: IdPagamentoReferencia): Promise<boolean> {
     const lancamentos = await this.findLancamentosByIdPagamento(idPagamento);
     return lancamentos.length > 0;
+  }
+
+  /**
+   * aperture-vvh2j. Stamp `transferidoEm` on every lançamento linked to
+   * the repasse that is not already transferred or cancelled — the single
+   * debit point (mirrors the postgres WHERE id_repasse = X AND
+   * transferido_em IS NULL AND cancelado_em IS NULL). Replaces the row
+   * object since lançamentos are readonly (same idiom as
+   * `marcarLancamentosComoTransferidos`).
+   */
+  private stampTransferidoEm(idRepasse: IdRepasse, transferidoEm: Date): void {
+    for (const [id, l] of this.lancamentos.entries()) {
+      if (l.idRepasse !== idRepasse) continue;
+      if (l.transferidoEm !== null || l.canceladoEm !== null) continue;
+      this.lancamentos.set(id, { ...l, transferidoEm });
+    }
+  }
+
+  /**
+   * aperture-vvh2j. Close an open intent attempt row in place. No-op if
+   * the attempt id is unknown (defensive — matches the postgres UPDATE
+   * touching zero rows).
+   */
+  private fecharTentativa(
+    attemptId: string,
+    patch: {
+      readonly outcome: string;
+      readonly finishedAt: Date;
+      readonly codigoSolicitacao?: string | null;
+      readonly error?: string | null;
+    },
+  ): void {
+    const attempt = this.repasseTransferAttempts.find((a) => a.id === attemptId);
+    if (!attempt) return;
+    attempt.outcome = patch.outcome;
+    attempt.finishedAt = patch.finishedAt;
+    if (patch.codigoSolicitacao !== undefined) {
+      attempt.codigoSolicitacao = patch.codigoSolicitacao;
+    }
+    if (patch.error !== undefined) {
+      attempt.error = patch.error;
+    }
   }
 }
 

@@ -557,3 +557,187 @@ describe('LivroFinanceiroRepositoryPostgres — transferidoEm flow (Plan 0015)',
     ).resolves.not.toThrow();
   });
 });
+
+/**
+ * Transfer-FSM audit-row regression suite (aperture-vvh2j, GLaDOS money-flow
+ * review 2026-07-16). These exercise resolverVerificacaoTransferencia and
+ * cancelarRepasseTransaction against REAL Postgres — the memory adapter's
+ * plain-push audit trail masked a (repasse_id, attempt_no) unique-constraint
+ * collision: both methods used to INSERT an audit row reusing the intent
+ * row's attempt_no, so in real Postgres they threw 23505 and rolled back —
+ * confirmed payments never booked and cancel (the only claim-release path)
+ * was dead. The fix: resolver UPDATEs the existing attempt row in place;
+ * cancel numbers its audit row MAX(attempt_no)+1 (collision-free because
+ * `cancelado` is terminal). These tests fail on the pre-fix code.
+ */
+describe('LivroFinanceiroRepositoryPostgres — transfer FSM audit rows (aperture-vvh2j)', () => {
+  let repo: LivroFinanceiroRepositoryPostgres;
+
+  beforeEach(async () => {
+    // biome-ignore lint/suspicious/noExplicitAny: tables not yet in generated types
+    await (testDb.db as any).deleteFrom('repasse_transfer_attempts').execute();
+    // biome-ignore lint/suspicious/noExplicitAny: tables not yet in generated types
+    await (testDb.db as any).deleteFrom('lancamentos_financeiros').execute();
+    // biome-ignore lint/suspicious/noExplicitAny: tables not yet in generated types
+    await (testDb.db as any).deleteFrom('repasses_recebedor').execute();
+    repo = withLancamentoSeeding(new LivroFinanceiroRepositoryPostgres(testDb.db), testDb.db);
+  });
+
+  // Walk solicitado → aprovado(pix) → transferindo → verificando, with one
+  // linked lançamento claimed by the repasse. Mirrors the real executar path.
+  async function seedVerificando(): Promise<{
+    idRepasse: IdRepasse;
+    idPagamento: IdPagamentoReferencia;
+    idLancamento: IdLancamentoFinanceiro;
+  }> {
+    const idCampanha = randomUUID() as IdCampanha;
+    const repasse = makeRepasse({ idCampanha, amountCents: 5000, status: 'solicitado' });
+    await repo.saveRepasse(repasse);
+
+    const lancamento = makeLancamentoRecebedor({
+      idCampanha,
+      amountCents: 5000,
+      idRepasse: repasse.id,
+    });
+    await repo.saveLancamentos([lancamento]);
+
+    const referencia = `EN${String(repasse.id).replace(/-/g, '')}`;
+    await repo.aprovarRepassePixTransaction(
+      {
+        idRepasse: repasse.id,
+        aprovadoEm: new Date('2026-07-16T12:00:00Z'),
+        transferReferencia: referencia,
+      },
+      // no-op enqueue — the transactional job seam is covered elsewhere.
+      async () => {},
+    );
+
+    const ini = await repo.iniciarTransferenciaTransaction({
+      idRepasse: repasse.id,
+      requestSummary: 'pagarPix valor=5000',
+      agora: new Date('2026-07-16T12:00:01Z'),
+    });
+    expect(ini.acao).toBe('prosseguir');
+    expect(ini.attemptNo).toBe(1);
+
+    await repo.finalizarTentativaTransferencia({
+      idRepasse: repasse.id,
+      attemptId: ini.attemptId,
+      resultado: { tipo: 'verificando', codigoSolicitacao: null },
+      agora: new Date('2026-07-16T12:00:02Z'),
+    });
+
+    return {
+      idRepasse: repasse.id,
+      idPagamento: lancamento.idPagamento,
+      idLancamento: lancamento.id,
+    };
+  }
+
+  it('resolverVerificacaoTransferencia(pago) — closes the attempt row in place (no 23505), books the debit', async () => {
+    const { idRepasse, idPagamento } = await seedVerificando();
+
+    await expect(
+      repo.resolverVerificacaoTransferencia({
+        idRepasse,
+        resultado: { tipo: 'pago', codigoSolicitacao: 'inter_fake_pago' },
+        reconciliacaoResumo: 'consulta:pago',
+        agora: new Date('2026-07-16T12:05:00Z'),
+      }),
+    ).resolves.not.toThrow();
+
+    const repasse = await repo.findRepasseById(idRepasse);
+    expect(repasse?.status).toBe('pago');
+    expect(repasse?.interCodigoSolicitacao).toBe('inter_fake_pago');
+
+    // transferido_em stamped — the single §10.1 debit point.
+    const [linked] = await repo.findLancamentosByIdPagamento(idPagamento);
+    expect(linked?.transferidoEm).not.toBeNull();
+
+    // Exactly ONE attempt row — the intent row, closed to pago (not a 2nd row).
+    const attempts = await repo.findTransferAttemptsByRepasseId(idRepasse);
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]?.attemptNo).toBe(1);
+    expect(attempts[0]?.outcome).toBe('pago');
+    expect(attempts[0]?.codigoSolicitacao).toBe('inter_fake_pago');
+  });
+
+  it('resolverVerificacaoTransferencia(falhou) — closes the attempt row in place (no 23505), no debit', async () => {
+    const { idRepasse, idPagamento } = await seedVerificando();
+
+    await expect(
+      repo.resolverVerificacaoTransferencia({
+        idRepasse,
+        resultado: { tipo: 'falhou', erro: 'NAO_ENCONTRADO_NA_BUSCA' },
+        reconciliacaoResumo: 'busca:sem_match;janela_esgotada',
+        agora: new Date('2026-07-16T12:05:00Z'),
+      }),
+    ).resolves.not.toThrow();
+
+    const repasse = await repo.findRepasseById(idRepasse);
+    expect(repasse?.status).toBe('falhou');
+    expect(repasse?.lastTransferError).toBe('NAO_ENCONTRADO_NA_BUSCA');
+
+    // Money never moved — transferido_em stays null.
+    const [linked] = await repo.findLancamentosByIdPagamento(idPagamento);
+    expect(linked?.transferidoEm).toBeNull();
+
+    const attempts = await repo.findTransferAttemptsByRepasseId(idRepasse);
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]?.outcome).toBe('falhou');
+  });
+
+  it('cancelarRepasseTransaction — releases the claim + writes a MAX+1 audit row (no 23505)', async () => {
+    const { idRepasse, idPagamento } = await seedVerificando();
+    // Cancel is only valid from falhou — drive verificando → falhou first.
+    await repo.resolverVerificacaoTransferencia({
+      idRepasse,
+      resultado: { tipo: 'falhou', erro: 'NAO_ENCONTRADO_NA_BUSCA' },
+      reconciliacaoResumo: 'busca:sem_match;janela_esgotada',
+      agora: new Date('2026-07-16T12:05:00Z'),
+    });
+
+    const result = await repo.cancelarRepasseTransaction({
+      idRepasse,
+      canceladoPor: 'admin@eunenem.com',
+      agora: new Date('2026-07-16T12:10:00Z'),
+    });
+    expect(result.repasse.status).toBe('cancelado');
+    expect(result.lancamentosLiberados).toBe(1);
+
+    // The claim is released — id_repasse cleared, funds return to disponivel.
+    const [linked] = await repo.findLancamentosByIdPagamento(idPagamento);
+    expect(linked?.idRepasse).toBeNull();
+
+    // Two audit rows: closed intent (attempt_no=1) + cancel event (MAX+1=2).
+    // The pre-fix code reused attempt_no=1 for the cancel row → 23505.
+    const attempts = await repo.findTransferAttemptsByRepasseId(idRepasse);
+    expect(attempts).toHaveLength(2);
+    expect(attempts.map((a) => a.attemptNo)).toEqual([1, 2]);
+    const cancelRow = attempts.find((a) => a.outcome === 'cancelado');
+    expect(cancelRow?.attemptNo).toBe(2);
+    expect(cancelRow?.requestSummary).toContain('cancelado_por:admin@eunenem.com');
+  });
+
+  it('retry after falhou increments attempt_no monotonically with no collision', async () => {
+    const { idRepasse } = await seedVerificando();
+    await repo.resolverVerificacaoTransferencia({
+      idRepasse,
+      resultado: { tipo: 'falhou', erro: 'CONSULTA_REJEITADO' },
+      reconciliacaoResumo: 'consulta:rejeitado',
+      agora: new Date('2026-07-16T12:05:00Z'),
+    });
+
+    // Admin retry → fresh claim, attempt_no increments to 2, new intent row.
+    const ini2 = await repo.iniciarTransferenciaTransaction({
+      idRepasse,
+      requestSummary: 'pagarPix valor=5000 (retry)',
+      agora: new Date('2026-07-16T12:06:00Z'),
+    });
+    expect(ini2.acao).toBe('prosseguir');
+    expect(ini2.attemptNo).toBe(2);
+
+    const attempts = await repo.findTransferAttemptsByRepasseId(idRepasse);
+    expect(attempts.map((a) => a.attemptNo)).toEqual([1, 2]);
+  });
+});

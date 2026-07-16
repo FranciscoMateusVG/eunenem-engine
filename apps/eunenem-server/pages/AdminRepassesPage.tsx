@@ -207,6 +207,40 @@ const STATUS_PALETTE: Record<RepasseStatus, ChipPalette> = {
     text: "text-emerald-800",
     dot: "bg-emerald-500",
   },
+  // aperture-vvh2j (Rex) — placeholder palettes for the new transfer states
+  // so the exhaustive Record compiles; Vance refines the visual vocabulary
+  // in aperture-voao0 (transferindo/verificando = in-flight, pago = settled,
+  // falhou = error, cancelado = neutral/terminal).
+  transferindo: {
+    border: "border-sky-200",
+    bg: "bg-sky-50",
+    text: "text-sky-800",
+    dot: "bg-sky-500",
+  },
+  verificando: {
+    border: "border-amber-200",
+    bg: "bg-amber-50",
+    text: "text-amber-800",
+    dot: "bg-amber-500",
+  },
+  pago: {
+    border: "border-emerald-200",
+    bg: "bg-emerald-50",
+    text: "text-emerald-800",
+    dot: "bg-emerald-500",
+  },
+  falhou: {
+    border: "border-red-200",
+    bg: "bg-red-50",
+    text: "text-red-800",
+    dot: "bg-red-500",
+  },
+  cancelado: {
+    border: "border-slate-200",
+    bg: "bg-slate-50",
+    text: "text-slate-700",
+    dot: "bg-slate-400",
+  },
 };
 
 /* -----------------------------------------------------------------------
