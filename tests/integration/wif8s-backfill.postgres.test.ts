@@ -384,24 +384,31 @@ describe('migration 018 backfill (aperture-wif8s)', () => {
       });
     }
 
-    const piExplain = (
-      await sql<{ 'QUERY PLAN': string }>`
-      EXPLAIN SELECT id FROM pagamentos
-        WHERE intencao_payment_intent_external_ref = ${pi}
-    `.execute(testDb.db)
-    ).rows
-      .map((r) => r['QUERY PLAN'])
-      .join('\n');
+    // The INTENT is "the partial index SUPPORTS this lookup", not "the planner
+    // CHOOSES it at N rows". On a tiny table (a few rows) Postgres rationally
+    // prefers a Seq Scan regardless of the index, and that choice rides on
+    // planner cost estimates + stale stats — non-deterministic across
+    // environments (this flaked index↔SeqScan in CI, aperture-go333). Disable
+    // seqscan for the plan so the assertion deterministically proves the index
+    // is USABLE: with seqscan off the planner uses the matching partial index
+    // if it can, and only falls back (revealing the index is absent/unusable)
+    // if it genuinely cannot. Scoped via SET LOCAL inside a transaction so it
+    // never leaks to other queries on the pooled connection.
+    const explainWithIndexPreferred = (whereColumn: string, value: string): Promise<string> =>
+      testDb.db.transaction().execute(async (trx) => {
+        await sql`SET LOCAL enable_seqscan = off`.execute(trx);
+        const rows = (
+          await sql<{ 'QUERY PLAN': string }>`
+            EXPLAIN SELECT id FROM pagamentos WHERE ${sql.ref(whereColumn)} = ${value}
+          `.execute(trx)
+        ).rows;
+        return rows.map((r) => r['QUERY PLAN']).join('\n');
+      });
+
+    const piExplain = await explainWithIndexPreferred('intencao_payment_intent_external_ref', pi);
     expect(piExplain).toMatch(/pagamentos_intencao_pi_ref_idx/);
 
-    const chExplain = (
-      await sql<{ 'QUERY PLAN': string }>`
-      EXPLAIN SELECT id FROM pagamentos
-        WHERE intencao_charge_external_ref = ${ch}
-    `.execute(testDb.db)
-    ).rows
-      .map((r) => r['QUERY PLAN'])
-      .join('\n');
+    const chExplain = await explainWithIndexPreferred('intencao_charge_external_ref', ch);
     expect(chExplain).toMatch(/pagamentos_intencao_ch_ref_idx/);
   });
 });
