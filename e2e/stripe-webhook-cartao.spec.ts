@@ -39,20 +39,18 @@ function signStripePayload(rawBody: string, secret: string): string {
 }
 
 test.describe('Stripe webhook — checkout.session.completed (cartão)', () => {
-  // STILL BLOCKED — partial groundwork landed (aperture-44mfy), root cause
-  // re-diagnosed. seedPendentePagamento now takes balanceTransactionAvailableOn
-  // and it DOES persist (verified: intencao_balance_transaction_available_on
-  // non-null in the DB), but the card webhook still 500s. Verified against a
-  // live :3003 server: PIX green, cartão 500 AFTER contribuinte_stamped. The
-  // 500 originates inside finalizarPagamentoAprovado's provider interaction —
-  // the 'paid' branch omits payment_intent (to skip obterAvailableOnDoPaymentIntent),
-  // but finalize still reaches pagamentoProvider with a dummy Stripe key and
-  // throws building the financeiro lançamento. Needs a backend fix: either a
-  // stubbed pagamentoProvider on :3003 or finalize preferring the persisted
-  // balanceTransactionAvailableOn over a provider lookup. Routed to Rex.
-  // (PIX sibling proves the webhook resolution + signature + status-advance
-  // path e2e; card cs.completed→aprovado FSM is covered at the unit tier.)
-  test.fixme('paid card session advances the pendente pagamento to aprovado (200, no 500)', async ({
+  // FIXED (aperture-07x5c). Root cause was NOT the availableOn path: finalize
+  // → aprovarPagamento → pagamentoProvider.solicitarPagamento() calls
+  // stripe.checkout.sessions.retrieve(externalRef) to re-confirm the session,
+  // a REAL Stripe API call that 500s on the :3003 dummy key. The persisted
+  // balanceTransactionAvailableOn is read persisted-first downstream and was
+  // never the problem. Fix: the :3003 server now runs with
+  // E2E_FAKE_PAGAMENTO_PROVIDER=1 — a NODE_ENV!=production-guarded, defaults-off
+  // DI seam that forces the deterministic fake PagamentoProvider while keeping
+  // getStripe() alive for the pure-HMAC constructEvent signature verification.
+  // So the webhook signature is still verified for real; only the settlement
+  // round-trip (which needs a live Stripe account) is stubbed.
+  test('paid card session advances the pendente pagamento to aprovado (200, no 500)', async ({
     request,
     seededData,
   }) => {
