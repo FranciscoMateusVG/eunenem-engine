@@ -29,10 +29,8 @@ import { SetupCampanhaWizard } from './components/eunenem/campanhas/SetupCampanh
 import { PainelTopbar } from './components/eunenem/painel/PainelTopbar.js';
 import {
   CAMPANHAS_WELCOME_STORAGE_KEY,
-  LEGACY_MIGRACAO_URL,
   useCampanhasCriar,
   useCampanhasList,
-  type CampanhaLegadoDTO,
   type CampanhaNovaDTO,
 } from './lib/campanhas.js';
 import { trpc } from './lib/trpc.js';
@@ -192,13 +190,14 @@ export function CampanhasPage() {
     setSetupCampanha({ id: c.id, titulo: c.titulo, campanhaSlug: c.campanhaSlug });
   }, []);
 
-  // One shared scrapbook sequence across BOTH platforms so tints/tapes/tilts
-  // alternate through the whole grid instead of restarting per group.
-  const cards = useMemo(() => {
-    const nova = novas.map((c, i) => ({ tipo: 'nova' as const, c, i }));
-    const antiga = legado.map((c, i) => ({ tipo: 'legado' as const, c, i: novas.length + i }));
-    return [...nova, ...antiga];
-  }, [novas, legado]);
+  // aperture-6ykni (operator, Thacy QA 2026-07-16): the grid renders 2.0
+  // campanhas ONLY — the 7hm2g "EuNeném Legado / continuar na 1.0" bridge
+  // card is removed entirely. The `legado` array stays consumed above for
+  // the welcome modal + greeting (1.0-history detection only).
+  const cards = useMemo(
+    () => novas.map((c, i) => ({ c, i })),
+    [novas],
+  );
 
   const carregando = meQ.isLoading || listQ.isLoading;
 
@@ -253,18 +252,14 @@ export function CampanhasPage() {
           </div>
         ) : (
           <div className="camp-grid" data-testid="campanhas-grid">
-            {cards.map(({ tipo, c, i }) =>
-              tipo === 'nova' ? (
-                <CardNova
-                  key={(c as CampanhaNovaDTO).id}
-                  campanha={c as CampanhaNovaDTO}
-                  index={i}
-                  onCompletar={abrirSetupDoCard}
-                />
-              ) : (
-                <CardLegado key={`legado-${i}`} campanha={c as CampanhaLegadoDTO} index={i} />
-              ),
-            )}
+            {cards.map(({ c, i }) => (
+              <CardNova
+                key={c.id}
+                campanha={c}
+                index={i}
+                onCompletar={abrirSetupDoCard}
+              />
+            ))}
 
             {/* NOVA LISTA — dashed scrapbook slot, per the PDF's page 2. */}
             <button
@@ -586,32 +581,3 @@ function CardNova({
   );
 }
 
-/** 1.0 card — real anchor out to the old site's /migracao explainer
- *  (aperture-pjd74): expectation-setting page, then Clerk login → the
- *  email-resolved 1.0 panel. Cross-origin → rel=noopener. */
-function CardLegado({ index }: { campanha: CampanhaLegadoDTO; index: number }) {
-  // aperture-49l6j (operator): the legacy snapshot's `nome` is unreliable
-  // (test-y values like 'Teste') and the real export carries no trustworthy
-  // mimo count — show a stable 'EuNeném Legado' label and NO count line.
-  // The DTO stays in the props signature (the grid maps legado entries and
-  // future exports may restore per-entry display data).
-  return (
-    <article
-      className="camp-card"
-      data-testid="card-legado"
-      style={{ transform: TILTS[index % TILTS.length] }}
-    >
-      <span className="camp-tape" style={{ background: TAPES[index % TAPES.length] }} aria-hidden="true" />
-      <span className="camp-selo camp-selo-10" title="lista na EuNeném 1.0">1.0</span>
-      <div className="camp-cover" style={{ background: TINTS[index % TINTS.length] }}>
-        <span className="camp-cover-ini" aria-hidden="true">1.0</span>
-      </div>
-      <div className="camp-card-body">
-        <h3 className="camp-card-name">EuNeném Legado</h3>
-        <a className="camp-cta camp-cta-legado" href={LEGACY_MIGRACAO_URL} rel="noopener">
-          continuar na 1.0 <span aria-hidden="true">↗</span>
-        </a>
-      </div>
-    </article>
-  );
-}
