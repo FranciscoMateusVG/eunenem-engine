@@ -5,7 +5,10 @@ import {
 } from '../../../src/domain/evento/entities/convite.js';
 import { FonteConviteSchema } from '../../../src/domain/evento/value-objects/fonte-convite.js';
 import { ImagemUrlConviteSchema } from '../../../src/domain/evento/value-objects/imagem-url-convite.js';
-import { MensagemConviteSchema } from '../../../src/domain/evento/value-objects/mensagem-convite.js';
+import {
+  MENSAGEM_CONVITE_PADRAO,
+  MensagemConviteSchema,
+} from '../../../src/domain/evento/value-objects/mensagem-convite.js';
 import { ModeloConviteSchema } from '../../../src/domain/evento/value-objects/modelo-convite.js';
 import { NomeExibidoConviteSchema } from '../../../src/domain/evento/value-objects/nome-exibido-convite.js';
 import { PaletaConviteSchema } from '../../../src/domain/evento/value-objects/paleta-convite.js';
@@ -93,8 +96,20 @@ describe('schemas', () => {
     expect(RemetenteConviteSchema.safeParse('   ').success).toBe(false);
   });
 
-  it('rejects empty mensagem', () => {
-    expect(MensagemConviteSchema.safeParse('').success).toBe(false);
+  it('aperture-xipsr: DEFAULTS an empty mensagem instead of rejecting it (no raw Zod leak on save)', () => {
+    const empty = MensagemConviteSchema.safeParse('');
+    expect(empty.success).toBe(true);
+    expect(empty.success && empty.data).toBe(MENSAGEM_CONVITE_PADRAO);
+    // whitespace-only trims to empty → also defaulted
+    const blank = MensagemConviteSchema.safeParse('   ');
+    expect(blank.success && blank.data).toBe(MENSAGEM_CONVITE_PADRAO);
+    // a real message passes through untouched
+    const real = MensagemConviteSchema.safeParse('  Venha comemorar!  ');
+    expect(real.success && real.data).toBe('Venha comemorar!');
+  });
+
+  it('still rejects an over-long mensagem (the ceiling validates user input first)', () => {
+    expect(MensagemConviteSchema.safeParse('x'.repeat(2001)).success).toBe(false);
   });
 
   it('rejects invalid paleta', () => {
