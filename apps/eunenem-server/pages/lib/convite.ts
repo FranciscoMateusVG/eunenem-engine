@@ -118,12 +118,44 @@ export function toConviteUiErrorKind(err: unknown): ConviteUiErrorKind {
   return 'network';
 }
 
+/**
+ * aperture-xipsr (Thacy QA finding a) — a tRPC BAD_REQUEST carries the
+ * stringified Zod ISSUES ARRAY as err.message, so returning it verbatim
+ * leaked raw JSON to the user ('[ { "origin": "string", "code": "too_small",
+ * … } ]'). The per-issue `message` strings are already human-written PT-BR
+ * in the schemas — extract and join those; anything unparseable falls back
+ * to a friendly generic. Raw JSON must never reach a toast.
+ */
+function friendlyValidationMessage(err: unknown): string {
+  const fallback = 'algum campo do convite ficou inválido — confere os passos?';
+  if (!(err instanceof Error) || !err.message) return fallback;
+  const raw = err.message.trim();
+  if (!raw.startsWith('[') && !raw.startsWith('{')) {
+    // Already a plain sentence (single-message errors) — pass it through.
+    return raw;
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    const issues = Array.isArray(parsed) ? parsed : [parsed];
+    const messages = issues
+      .map((i) =>
+        typeof (i as { message?: unknown }).message === 'string'
+          ? (i as { message: string }).message
+          : null,
+      )
+      .filter((m): m is string => m !== null && m.trim().length > 0);
+    return messages.length > 0 ? messages.join(' · ') : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export function conviteErrorMessage(err: unknown): string {
   switch (toConviteUiErrorKind(err)) {
     case 'unauthorized':
       return 'faça login novamente para editar o convite';
     case 'validation':
-      return err instanceof Error ? err.message : 'algum campo do convite ficou inválido';
+      return friendlyValidationMessage(err);
     case 'not-found':
       return 'não consegui reencontrar o convite salvo';
     case 'conflict':

@@ -135,6 +135,16 @@ export interface ConviteState {
   bgUpload: string | null;
 }
 
+/**
+ * aperture-xipsr — frontend mirror of the server's MENSAGEM_CONVITE_PADRAO
+ * (evento convite schema, Rex's PR #24): an empty/whitespace mensagem is
+ * DEFAULTED to this on save instead of hard-failing. The editors show it as
+ * the placeholder + a "se deixar em branco" hint so the defaulting reads as
+ * intentional. Keep the copy in sync with the server constant.
+ */
+export const MENSAGEM_CONVITE_PADRAO =
+  "Vai ser muito especial ter você com a gente ♡";
+
 export const DEFAULT_STATE: ConviteState = {
   eventType: "cha-bebe",
   mode: "presencial",
