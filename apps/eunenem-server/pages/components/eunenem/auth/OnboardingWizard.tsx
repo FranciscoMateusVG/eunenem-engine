@@ -38,7 +38,7 @@ import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { paginaShareDisplayPrefix } from "@/lib/pagina-share";
 import type { Genero } from "@/lib/concordancia";
-import { sendEvent } from "@/lib/analytics";
+import { sendEvent, identifyWithUtm } from "@/lib/analytics";
 import { AUTH_CSS } from "./AuthModalShell";
 
 // aperture-84a21 — tipoEvento canonical kebab slugs (mirror PerfilBody +
@@ -263,6 +263,11 @@ export function OnboardingWizard({ onDone }: { onDone: (slug: string) => void })
       }
       await utils.auth.me.invalidate();
       sendEvent("onboarding_concluido");
+      // aperture-ppuay — signup-path identify. The login branch in
+      // AuthModalProvider returns early into this wizard for brand-new accounts,
+      // so this is the first point a new account gets identified on Mixpanel
+      // (distinct_id = idConta) + first-touch utm_source. No-op when dark.
+      if (me.data?.idConta) identifyWithUtm(me.data.idConta);
       onDone(finalSlug);
     } catch {
       // aperture-5ho5j — a profile write FAILED (perfil.atualizar or the
