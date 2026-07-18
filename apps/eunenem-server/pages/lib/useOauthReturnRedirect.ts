@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 
-import { isLegacy, needsOnboarding } from "./onboarding-gate.js";
+import { postLoginTarget, resolveMeWithRetry } from "./post-login-route.js";
 import { trpc } from "./trpc.js";
 
 /**
@@ -47,28 +47,22 @@ export function useOauthReturnRedirect(): void {
     let cancelled = false;
     void (async () => {
       try {
-        // staleTime: 0 forces a fresh resolve — the session cookie was just set
-        // by the OAuth callback, and we must not trust a hydrated anonymous value.
-        const me = await utils.auth.me.fetch(undefined, { staleTime: 0 });
-        if (cancelled || !me?.slug) return;
-        // aperture-g7l09 (multicampanha POC) — OAuth returns land on
-        // /campanhas, matching the email-login default in AuthModalProvider.
-        // me.slug stays as the session-validity guard.
-        //
-        // aperture-ivu2t — EXCEPT accounts that still need onboarding: a
-        // brand-new OAuth signup landing on /campanhas has no campaign and
-        // only the stub NOVA LISTA — stuck. Route them to /painel/<slug>,
-        // where PainelPage mounts the blocking OnboardingWizard (the normal
-        // creation flow). needsOnboarding() is the server-authoritative,
-        // provider-agnostic gate (aperture-8ysqu).
-        // aperture-duk6x — LEGACY FIRST (operator-found bug): a fresh legacy
-        // user is migrating from 1.0, not creating their first 2.0 list — the
-        // migration hub with their 1.0 card outranks the onboarding wizard.
-        const target = isLegacy(me)
-          ? '/campanhas'
-          : needsOnboarding(me)
-            ? `/painel/${me.slug}`
-            : '/campanhas';
+        // aperture-w3rrd (gap 2) — resolve auth.me through the just-set OAuth
+        // cookie race with a bounded retry, so a real session is never mistaken
+        // for anonymous and stranded on the landing. staleTime: 0 forces a fresh
+        // resolve on each attempt (the session cookie was just set by the
+        // callback; a hydrated anonymous value must not be trusted).
+        const me = await resolveMeWithRetry(() =>
+          utils.auth.me.fetch(undefined, { staleTime: 0 }),
+        );
+        if (cancelled) return;
+        // Genuinely-unauthenticated (or a persistent race) → me stays null: keep
+        // the user on the landing; the navbar renders the correct auth state.
+        if (!me?.slug) return;
+        // Route by the single shared post-login rule (legacy → /campanhas;
+        // needs-onboarding → wizard; onboarded → /campanhas) so no entry point
+        // can drift — see pages/lib/post-login-route.ts.
+        const target = postLoginTarget(me);
         if (window.location.pathname === target) return;
         window.location.assign(target);
       } catch {

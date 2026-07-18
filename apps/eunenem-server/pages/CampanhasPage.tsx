@@ -34,6 +34,7 @@ import {
   useCampanhasList,
   type CampanhaNovaDTO,
 } from './lib/campanhas.js';
+import { postLoginTarget } from './lib/post-login-route.js';
 import { trpc } from './lib/trpc.js';
 
 /* Scrapbook cycles — same rotation the reference artifact uses. */
@@ -84,6 +85,20 @@ export function CampanhasPage() {
   useEffect(() => {
     if (meQ.isLoading || meQ.data !== null) return;
     window.location.assign('/');
+  }, [meQ.isLoading, meQ.data]);
+
+  // aperture-w3rrd (gap 3) — a NON-legacy, un-onboarded user who navigates
+  // DIRECTLY to /campanhas would see only the NOVA-LISTA stub instead of being
+  // pushed through the onboarding wizard (mounted by PainelPage). Enforce the
+  // same post-login rule regardless of entry point: postLoginTarget returns a
+  // /painel/<slug> wizard path for them, and '/campanhas' for legacy + onboarded
+  // users (who render here normally).
+  useEffect(() => {
+    if (meQ.isLoading || !meQ.data) return;
+    const target = postLoginTarget(meQ.data);
+    if (target !== '/campanhas' && window.location.pathname !== target) {
+      window.location.assign(target);
+    }
   }, [meQ.isLoading, meQ.data]);
 
   // First-visit welcome modal — only for users with 1.0 history (the copy

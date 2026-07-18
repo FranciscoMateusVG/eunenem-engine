@@ -9,7 +9,7 @@ import {
 } from "react";
 
 import { trpc } from "@/lib/trpc";
-import { isLegacy, needsOnboarding } from "@/lib/onboarding-gate";
+import { postLoginTarget, resolveMeWithRetry } from "@/lib/post-login-route";
 import type { AuthSession } from "@/lib/auth";
 import { sendEvent } from "@/lib/analytics";
 import { AuthModalShell, type AuthMode } from "./AuthModalShell.js";
@@ -144,27 +144,19 @@ export function AuthModalProvider({
       }
       sendEvent("login_concluido");
       try {
-        const me = await utils.auth.me.fetch();
+        // aperture-w3rrd (gap 2) — resolve auth.me through the just-set login
+        // cookie race with a bounded retry, so a real session isn't mistaken
+        // for anonymous and left stranded on the landing.
+        const me = await resolveMeWithRetry(() =>
+          utils.auth.me.fetch(undefined, { staleTime: 0 }),
+        );
+        // Genuinely-unauthenticated (or a persistent race) → me stays null:
+        // stay put, the navbar renders the correct auth state.
         if (!me?.slug) return;
-        // aperture-g7l09 (multicampanha POC) — post-login default lands on
-        // /campanhas (the mixed 1.0/2.0 bridge). The me.slug guard stays:
-        // it's the session-validity probe.
-        //
-        // aperture-ivu2t — EXCEPT accounts that still need onboarding: a
-        // fresh OAuth signup that reaches this path (session.criado only
-        // covers the in-modal email flow) has no campaign data and /campanhas
-        // offers only the stub NOVA LISTA — a dead end. Route them to their
-        // painel instead, where PainelPage mounts the blocking
-        // OnboardingWizard (the normal creation flow). needsOnboarding() is
-        // the server-authoritative, provider-agnostic gate (aperture-8ysqu).
-        // aperture-duk6x — LEGACY FIRST (operator-found bug): a fresh legacy
-        // user is migrating from 1.0, not creating their first 2.0 list — the
-        // migration hub with their 1.0 card outranks the onboarding wizard.
-        const target = isLegacy(me)
-          ? '/campanhas'
-          : needsOnboarding(me)
-            ? `/painel/${me.slug}`
-            : '/campanhas';
+        // Route by the single shared post-login rule (legacy → /campanhas;
+        // needs-onboarding → wizard; onboarded → /campanhas) — one source of
+        // truth in pages/lib/post-login-route.ts so no entry point drifts.
+        const target = postLoginTarget(me);
         if (typeof window === "undefined") return;
         if (window.location.pathname === target) return;
         window.location.assign(target);
