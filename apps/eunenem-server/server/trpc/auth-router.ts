@@ -833,37 +833,50 @@ export const authRouter = t.router({
     const campanha = await deps.campanhaRepository.findFirstByAdministrador(usuario.idConta);
     const opcaoPresentes = campanha?.opcoes.find((o) => o.tipo === 'presente');
 
-    // aperture-b6xr8 — server-side onboarding signal for the OAuth-signup
-    // wizard gate (Vance's aperture-8ysqu). DERIVED, not an explicit flag: a
-    // user "needs onboarding" until their profile has a baby name — the core
-    // field the OnboardingWizard captures. PROVIDER-AGNOSTIC by construction:
-    // it keys off profile STATE, not how the user authenticated, so it covers
-    // email, Google, Microsoft (y5ual) and any future provider — plus the
-    // lazily-provisioned OAuth orphans whose profile starts empty.
+    // aperture-b6xr8 / aperture-lrl1h — server-side onboarding signal for the
+    // wizard gate (Vance's aperture-8ysqu). PROVIDER-AGNOSTIC: it keys off
+    // profile STATE, not how the user authenticated (email / Google / Microsoft
+    // y5ual / lazily-provisioned OAuth orphans).
     //
-    // aperture-3vc12 (fblrt design §1.5) — RE-KEYED to the OLDEST campanha's
-    // perfil_campanhas.nome_bebe, aligning the gate's READ with where the
-    // wizard now WRITES (perfilCampanha.atualizar is per-campanha and does
-    // NOT dual-write the legacy perfil_criadores; only perfil.atualizar's
-    // transitional shim does). Reading the old per-user table would leave a
-    // fresh signup stuck at needsOnboarding=true after completing the wizard
-    // — an onboarding loop. Identical behavior for existing users: the W1a
-    // backfill copied every owner's perfil_criadores content into their
-    // campanhas' perfil_campanhas rows. `campanha` is the oldest (resolved
-    // above via findFirstByAdministrador) — same default-campanha rule as
-    // every other unaddressed read. A campanha-less conta (pre-p8i01 caveat,
-    // verified zero rows in prod) conservatively reads as needs-onboarding.
+    // The signal means "the user has NO usable campaign at all". It is derived
+    // from whether ANY of the user's campanhas has a non-empty nomeBebe — NOT
+    // just the OLDEST one. aperture-lrl1h fixed a false-wizard bug: a non-legacy
+    // user whose OLDEST campanha had an empty nomeBebe but who owned NEWER named
+    // lists was wrongly sent to the wizard. Read perfil_campanhas (where the
+    // wizard WRITES via perfilCampanha.atualizar), never the legacy per-user
+    // perfil_criadores (reading that would loop a fresh signup at true).
     //
-    // Why derive over an onboardingConcluidoEm timestamp: the wizard already
-    // persists nomeBebe, so finishing it flips this with NO new mutation/
-    // migration and no backfill/grandfathering. Trade-off: if the profile
-    // editor ever lets a user CLEAR nomeBebe the gate would re-fire —
-    // acceptable today; upgrade to an explicit timestamp if that becomes a
-    // real path. One extra indexed UNIQUE-keyed read.
-    const perfilCampanha = campanha
-      ? await deps.perfilCampanhaRepository.findByIdCampanha(campanha.id)
-      : undefined;
-    const needsOnboarding = (perfilCampanha?.conteudo.nomeBebe ?? '').trim().length === 0;
+    // Gap 4 — an editable nomeBebe must not un-onboard a user who has a list.
+    // Latch `onboarding_concluido_em` the first time we observe a named campanha
+    // (best-effort: a write failure never breaks auth.me; first-write-wins in
+    // the repo). Once latched, needsOnboarding stays false even if the user
+    // later clears nomeBebe. Self-heals existing users on their next login with
+    // NO backfill — they already read not-needing-onboarding via the named-
+    // campanha derivation, and the latch fills in lazily. isLegacy still
+    // outranks this downstream (a fresh legacy signup is empty but must route
+    // to /campanhas, never the wizard).
+    const campanhasDoUsuario = await deps.campanhaRepository.findCampanhasByAdministrador(
+      usuario.idConta,
+    );
+    const perfisDoUsuario = await Promise.all(
+      campanhasDoUsuario.map((c) => deps.perfilCampanhaRepository.findByIdCampanha(c.id)),
+    );
+    const temCampanhaNomeada = perfisDoUsuario.some(
+      (p) => (p?.conteudo.nomeBebe ?? '').trim().length > 0,
+    );
+    let onboardingConcluidoEm = usuario.onboardingConcluidoEm;
+    if (temCampanhaNomeada && onboardingConcluidoEm === null) {
+      const agora = new Date();
+      try {
+        await deps.usuarioRepository.marcarOnboardingConcluido(usuario.id, agora);
+        onboardingConcluidoEm = agora;
+      } catch {
+        // Best-effort latch — never break auth.me. needsOnboarding still reads
+        // correct this request via temCampanhaNomeada; the latch retries on a
+        // future login.
+      }
+    }
+    const needsOnboarding = onboardingConcluidoEm === null && !temCampanhaNomeada;
 
     // aperture-mu1v9 (uxv83 rider) — the default campanha's event date,
     // sourced from the `eventos` single source (the same value the convite

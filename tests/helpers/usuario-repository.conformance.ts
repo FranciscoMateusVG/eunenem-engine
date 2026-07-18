@@ -55,6 +55,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
         slug: 'owner',
         criadoEm: fixedDate,
         tutorialCompletadoEm: null,
+        onboardingConcluidoEm: null,
       };
       const conta = {
         id: idConta,
@@ -94,6 +95,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
           slug,
           criadoEm: fixedDate,
           tutorialCompletadoEm: null,
+          onboardingConcluidoEm: null,
         },
         conta: {
           id: aid,
@@ -129,6 +131,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
           slug: 'shared-slug',
           criadoEm: fixedDate,
           tutorialCompletadoEm: null,
+          onboardingConcluidoEm: null,
         },
         conta: {
           id: a1,
@@ -151,6 +154,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
             slug: 'shared-slug',
             criadoEm: fixedDate,
             tutorialCompletadoEm: null,
+            onboardingConcluidoEm: null,
           },
           conta: {
             id: a2,
@@ -174,6 +178,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
           slug,
           criadoEm: fixedDate,
           tutorialCompletadoEm: null,
+          onboardingConcluidoEm: null,
         },
         conta: {
           id: aid,
@@ -216,6 +221,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
           slug: 'lookup',
           criadoEm: fixedDate,
           tutorialCompletadoEm: null,
+          onboardingConcluidoEm: null,
         },
         conta: {
           id: idConta,
@@ -250,6 +256,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
           slug: 'cross-tenant-target',
           criadoEm: fixedDate,
           tutorialCompletadoEm: null,
+          onboardingConcluidoEm: null,
         },
         conta: {
           id: idConta,
@@ -286,6 +293,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
           slug: 'twin-slug',
           criadoEm: fixedDate,
           tutorialCompletadoEm: null,
+          onboardingConcluidoEm: null,
         },
         conta: {
           id: a1,
@@ -304,6 +312,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
           slug: 'twin-slug',
           criadoEm: fixedDate,
           tutorialCompletadoEm: null,
+          onboardingConcluidoEm: null,
         },
         conta: {
           id: a2,
@@ -332,6 +341,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
           slug,
           criadoEm: fixedDate,
           tutorialCompletadoEm: null,
+          onboardingConcluidoEm: null,
         },
         conta: {
           id: aid,
@@ -370,6 +380,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
           slug: 'isolated',
           criadoEm: fixedDate,
           tutorialCompletadoEm: null,
+          onboardingConcluidoEm: null,
         },
         conta: {
           id: idConta,
@@ -397,6 +408,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
           slug: 'old-name',
           criadoEm: fixedDate,
           tutorialCompletadoEm: null,
+          onboardingConcluidoEm: null,
         },
         conta: {
           id: idConta,
@@ -426,6 +438,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
           slug: 'old-slug',
           criadoEm: fixedDate,
           tutorialCompletadoEm: null,
+          onboardingConcluidoEm: null,
         },
         conta: {
           id: idConta,
@@ -461,6 +474,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
           slug: 'taken-slug',
           criadoEm: fixedDate,
           tutorialCompletadoEm: null,
+          onboardingConcluidoEm: null,
         },
         conta: {
           id: a1,
@@ -482,6 +496,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
           slug: 'collider-slug',
           criadoEm: fixedDate,
           tutorialCompletadoEm: null,
+          onboardingConcluidoEm: null,
         },
         conta: {
           id: a2,
@@ -511,6 +526,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
           slug: 'self-slug',
           criadoEm: fixedDate,
           tutorialCompletadoEm: null,
+          onboardingConcluidoEm: null,
         },
         conta: {
           id: idConta,
@@ -543,6 +559,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
           slug: 'shared-edit',
           criadoEm: fixedDate,
           tutorialCompletadoEm: null,
+          onboardingConcluidoEm: null,
         },
         conta: {
           id: aOther,
@@ -564,6 +581,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
           slug: 'editor-original',
           criadoEm: fixedDate,
           tutorialCompletadoEm: null,
+          onboardingConcluidoEm: null,
         },
         conta: {
           id: idConta,
@@ -603,6 +621,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
           slug,
           criadoEm: fixedDate,
           tutorialCompletadoEm: null,
+          onboardingConcluidoEm: null,
         },
         conta: {
           id: idConta,
@@ -633,6 +652,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
             slug,
             criadoEm: fixedDate,
             tutorialCompletadoEm: null,
+            onboardingConcluidoEm: null,
           },
           conta: {
             id: idConta2,
@@ -667,6 +687,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
             slug,
             criadoEm: fixedDate,
             tutorialCompletadoEm: null,
+            onboardingConcluidoEm: null,
           },
           conta: {
             id: idConta,
@@ -1048,6 +1069,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
             slug,
             criadoEm: fixedDate,
             tutorialCompletadoEm: null,
+            onboardingConcluidoEm: null,
           },
           conta: {
             id: idConta,
@@ -1142,6 +1164,7 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
           slug,
           criadoEm: fixedDate,
           tutorialCompletadoEm: null,
+          onboardingConcluidoEm: null,
         },
         conta: {
           id: idConta,

@@ -418,6 +418,7 @@ export async function provisionarContaUsuarioDominio(
         // with `null` so the first-time tutorial overlay fires on first
         // visit.
         tutorialCompletadoEm: null,
+        onboardingConcluidoEm: null,
       };
 
       const conta: Conta = {

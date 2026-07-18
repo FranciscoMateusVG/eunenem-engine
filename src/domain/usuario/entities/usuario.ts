@@ -50,6 +50,14 @@ export interface Usuario {
    * is a no-op if already non-null).
    */
   readonly tutorialCompletadoEm: Date | null;
+  /**
+   * aperture-lrl1h — onboarding-completed latch. null = not yet
+   * onboarded. Non-null = the user has had at least one named campanha
+   * (first-write-wins; set lazily by auth.me, no-op if already
+   * non-null). Decouples the onboarding gate from the editable nomeBebe
+   * so clearing it can't un-onboard a user with a list.
+   */
+  readonly onboardingConcluidoEm: Date | null;
 }
 
 /** @entity Conta (within Usuario aggregate) — permissions and admin grouping. */

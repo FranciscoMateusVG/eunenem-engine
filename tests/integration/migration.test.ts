@@ -165,11 +165,18 @@ describe('Migration round-trip', () => {
     //    note above; renaming a DEPLOYED migration is forbidden because
     //    kysely_migration keys on the filename and would re-run it).
 
-    // 20260716_043_repasse_manual_resolution (aperture-477nz) → the actual TIP
-    //   now. Prepended per the contract above (TENTH occurrence of the
-    //   off-by-one this block warns about). Its down() drops the
+    // 20260718_044_add_onboarding_concluido_em_to_usuarios (aperture-lrl1h) →
+    //   the actual TIP now. Prepended per the contract above (ELEVENTH
+    //   occurrence of the off-by-one this block warns about). Its down() drops
+    //   usuarios.onboarding_concluido_em. THIS is the true first migrateDown.
+    const downOnboardingConcluido = await migrator.migrateDown();
+    expect(downOnboardingConcluido.error).toBeUndefined();
+    expect(await getColumn(db, 'usuarios', 'onboarding_concluido_em')).toBeUndefined();
+
+    // 20260716_043_repasse_manual_resolution (aperture-477nz) → the TIP after
+    //   the 044 down-step above. Its down() drops the
     //   repasse_reconciliacao_candidatos table + the needs_manual_resolution
-    //   column. THIS is the true first migrateDown.
+    //   column.
     const downManualResolution = await migrator.migrateDown();
     expect(downManualResolution.error).toBeUndefined();
     expect(await getColumn(db, 'repasses_recebedor', 'needs_manual_resolution')).toBeUndefined();

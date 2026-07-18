@@ -412,6 +412,41 @@ export class UsuarioRepositoryMemory implements UsuarioRepository {
     });
   }
 
+  /**
+   * aperture-lrl1h. First-write-wins; mirror of the postgres adapter's
+   * `WHERE onboarding_concluido_em IS NULL` guard. Already-onboarded →
+   * no-op (the original timestamp is preserved). Unknown id → no-op.
+   */
+  async marcarOnboardingConcluido(idUsuario: IdUsuario, concluidoEm: Date): Promise<void> {
+    return tracer.startActiveSpan('db.usuarios.marcarOnboardingConcluido', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+      try {
+        const existing = this.usuarios.get(idUsuario);
+        if (!existing) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return;
+        }
+        if (existing.onboardingConcluidoEm !== null) {
+          // First-write-wins: do not overwrite a previously persisted
+          // timestamp.
+          span.setStatus({ code: SpanStatusCode.OK });
+          return;
+        }
+        this.usuarios.set(idUsuario, {
+          ...existing,
+          onboardingConcluidoEm: concluidoEm,
+        });
+        span.setStatus({ code: SpanStatusCode.OK });
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
   async removeRegistroDomain(idUsuario: IdUsuario): Promise<void> {
     return tracer.startActiveSpan('db.usuarios.removeRegistroDomain', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'DELETE' });
