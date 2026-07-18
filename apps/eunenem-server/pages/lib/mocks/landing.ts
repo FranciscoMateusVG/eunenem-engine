@@ -9,13 +9,6 @@ import { templateSelectionPatch } from '../convite';
 import { DEFAULT_STATE, type ConviteState } from './convite';
 import { TEMPLATE_BY_ID } from './templates';
 
-/** External app URLs the marketing CTAs point at (real eunenem.com). */
-export const LANDING_LINKS = {
-  criarLista: 'https://eunenem.com/minha-area',
-  convites: 'https://eunenem.com/convite',
-  faq: 'https://eunenem.com/faq',
-} as const;
-
 /** Navbar anchor links (label → in-page href). */
 export const NAV_LINKS: ReadonlyArray<readonly [string, string]> = [
   ['como funciona', '#como-funciona'],

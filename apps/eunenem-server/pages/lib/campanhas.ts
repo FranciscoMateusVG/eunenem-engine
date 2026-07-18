@@ -33,13 +33,6 @@ export type CampanhaLegadoDTO = CampanhasListOutput['legado'][number];
 export const CAMPANHAS_WELCOME_STORAGE_KEY = 'eunenem-campanhas:bemvindo-v1';
 
 /**
- * The 1.0 card's fallback target — the legacy dashboard, where Clerk resolves
- * the user by email. Kept as the bridge's own fallback (server-side) and used
- * directly only if the bridge is ever disabled.
- */
-export const LEGACY_DASHBOARD_URL = 'https://eunenem.com/minha-area';
-
-/**
  * Where the 1.0 card actually points (aperture-pjd74, supersedes the silent
  * bridge from aperture-as0v3 — operator pivot 2026-07-08). The old site's
  * dedicated /migracao explainer page: sets the expectation that 1.0 and 2.0
@@ -51,26 +44,44 @@ export const LEGACY_DASHBOARD_URL = 'https://eunenem.com/minha-area';
  */
 declare global {
   interface Window {
-    /** Runtime config injected by server.tsx's envelope() (aperture-pjd74). */
-    __EUNENEM_ENV__?: { legacyMigracaoUrl?: string };
+    /** Runtime config injected by server.tsx's envelope() (aperture-pjd74 +
+     *  aperture-gejcw). Both keys are whitelisted in serializeRuntimeEnv. */
+    __EUNENEM_ENV__?: { legacyMigracaoUrl?: string; legacySiteOrigin?: string };
   }
 }
 
+function runtimeEnv(
+  key: 'legacyMigracaoUrl' | 'legacySiteOrigin',
+): string | undefined {
+  const win =
+    typeof window !== 'undefined' ? window.__EUNENEM_ENV__?.[key] : undefined;
+  const proc =
+    typeof process !== 'undefined'
+      ? key === 'legacyMigracaoUrl'
+        ? process.env.LEGACY_MIGRACAO_URL
+        : process.env.LEGACY_SITE_ORIGIN
+      : undefined;
+  const v = (win || proc || '').trim();
+  return v.length > 0 ? v : undefined;
+}
+
 /**
- * Resolution order (aperture-pjd74 env-driven target — the /migracao page
- * lives on the OLD site, whose staging/prod hosts differ, so the new-system
- * staging must be able to point the card at staging.eunenem.com without a
- * rebuild):
- *   1. Browser: window.__EUNENEM_ENV__ — injected per-request by server.tsx
- *      from the container's LEGACY_MIGRACAO_URL env (runtime, Dokploy-set).
- *   2. Server/SSR + node test contexts: process.env.LEGACY_MIGRACAO_URL.
- *   3. Default: the prod old-site URL.
+ * Where the 1.0 card points (aperture-gejcw — domain-swap env-drive). Derived
+ * from the ONE canonical legacy var so a cutover is config-only:
+ *   1. LEGACY_MIGRACAO_URL — explicit override (runtime whitelist or SSR env).
+ *      Wins when set; keeps back-compat with the current Dokploy config.
+ *   2. LEGACY_SITE_ORIGIN + '/migracao' — the derived default.
+ *   3. null — no legacy origin resolvable. FAIL-LOUD: NO hardcoded eunenem.com
+ *      fallback (it would self-loop after the swap). Prod can't reach here (the
+ *      boot guard requires LEGACY_SITE_ORIGIN); dev/test hides the card instead.
  * SSR and hydration read the same env → same value → no hydration mismatch.
  */
-export const LEGACY_MIGRACAO_URL: string =
-  (typeof window !== 'undefined' && window.__EUNENEM_ENV__?.legacyMigracaoUrl) ||
-  (typeof process !== 'undefined' && process.env.LEGACY_MIGRACAO_URL) ||
-  'https://eunenem.com/migracao';
+export const LEGACY_MIGRACAO_URL: string | null = (() => {
+  const override = runtimeEnv('legacyMigracaoUrl');
+  if (override) return override;
+  const origin = runtimeEnv('legacySiteOrigin');
+  return origin ? `${origin.replace(/\/+$/, '')}/migracao` : null;
+})();
 
 /**
  * aperture-rurre — NOVA LISTA V1 create mutation.

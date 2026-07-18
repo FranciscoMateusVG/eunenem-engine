@@ -3,9 +3,9 @@
  *
  * User-path spec (design spec §9) against Vance's CampanhasPage (PR #321) +
  * Rex's campanhas.list (PR #320):
- *   - aperture-6ykni (Thacy QA 2026-07-16, operator call): the 1.0 bridge
- *     card is REMOVED — a legacy-matching user sees the 2.0-only grid; the
- *     welcome modal is the only remaining legacy-history surface here
+ *   - aperture-gejcw (operator reversal of 6ykni): the 1.0 bridge card is
+ *     RESTORED for a legacy-matching user — relabeled (no "Legado" word, 1.0
+ *     selo) with an env-driven CTA (LEGACY_SITE_ORIGIN → /migracao)
  *   - 2.0 card CTA navigates to the user's /painel/:slug (clicked, not just seen)
  *   - welcome modal: first-visit shows (legado > 0 + flag absent), OK dismisses
  *     within-session. Post-#327 the dismiss×opt-out persistence matrix lives in
@@ -24,14 +24,17 @@
  */
 
 import { test as base, expect } from '@playwright/test';
-import { CAMPANHAS_WELCOME_STORAGE_KEY } from '../apps/eunenem-server/pages/lib/campanhas.js';
+import {
+  CAMPANHAS_WELCOME_STORAGE_KEY,
+  LEGACY_MIGRACAO_URL,
+} from '../apps/eunenem-server/pages/lib/campanhas.js';
 import { test as seededTest } from './fixtures.js';
 // Legacy-user fixture extracted to legacy-fixtures.ts (aperture-8bac7) so the
 // welcome-optout spec shares the same self-healing seed.
 import { test } from './legacy-fixtures.js';
 
 test.describe('/campanhas — legacy-matching user (the POC user path, spec §9)', () => {
-  test('grid renders 2.0 card + NOVA LISTA — and NO 1.0 card (aperture-6ykni rollback)', async ({
+  test('grid renders 2.0 card + the 1.0 bridge card + NOVA LISTA (aperture-gejcw restore)', async ({
     legacyPage,
   }) => {
     const res = await legacyPage.goto('/campanhas', { waitUntil: 'domcontentloaded' });
@@ -41,11 +44,16 @@ test.describe('/campanhas — legacy-matching user (the POC user path, spec §9)
     const grid = legacyPage.getByTestId('campanhas-grid');
     await expect(grid).toBeVisible();
 
-    // aperture-6ykni (Thacy QA, operator call): the 7hm2g "EuNeném Legado /
-    // continuar na 1.0" bridge card is REMOVED — even for a legacy-matching
-    // user the grid is 2.0-only. The welcome modal (asserted below) remains
-    // the only legacy-history surface on this page.
-    await expect(legacyPage.getByTestId('card-legado')).toHaveCount(0);
+    // aperture-gejcw (operator reversal of 6ykni): the 1.0 bridge card is
+    // RESTORED for a legacy-matching user — relabeled (no "Legado" word, 1.0
+    // selo) with an env-driven CTA out to the old site's /migracao explainer.
+    const cardLegado = legacyPage.getByTestId('card-legado').first();
+    await expect(cardLegado).toBeVisible();
+    await expect(cardLegado).toContainText('1.0');
+    // CTA href is env-driven (LEGACY_MIGRACAO_URL override, else derived from
+    // LEGACY_SITE_ORIGIN + /migracao). Resolved non-null in the test env.
+    expect(LEGACY_MIGRACAO_URL, 'legacy CTA must resolve in the test env').toBeTruthy();
+    await expect(cardLegado.locator(`a[href="${LEGACY_MIGRACAO_URL}"]`)).toBeVisible();
 
     // 2.0 card — visible, selo text, CTA points at the multicampanha
     // /painel/:slug/c/:idCampanha URL (CampanhasPage.tsx:581). The

@@ -41,6 +41,9 @@ function baseEnv(): NodeJS.ProcessEnv {
     TRUSTED_ORIGINS: 'http://localhost:3001',
     DATABASE_URL: DEV_DATABASE_URL,
     NODE_ENV: 'development',
+    // aperture-gejcw — required (non-empty) in production by the env-schema
+    // superRefine guard (the 1.0 card + legacy bridge derive from it).
+    LEGACY_SITE_ORIGIN: 'https://eunenem.com',
   } as NodeJS.ProcessEnv;
 }
 
