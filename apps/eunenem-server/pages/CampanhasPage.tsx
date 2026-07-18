@@ -29,6 +29,7 @@ import { SetupCampanhaWizard } from './components/eunenem/campanhas/SetupCampanh
 import { PainelTopbar } from './components/eunenem/painel/PainelTopbar.js';
 import {
   CAMPANHAS_WELCOME_STORAGE_KEY,
+  LEGACY_MIGRACAO_URL,
   useCampanhasCriar,
   useCampanhasList,
   type CampanhaNovaDTO,
@@ -73,6 +74,9 @@ export function CampanhasPage() {
   const nome = firstName(me?.nomeExibicao);
   const novas = listQ.data?.novas ?? [];
   const legado = listQ.data?.legado ?? [];
+  // Env-driven 1.0 CTA (null when no legacy origin resolves → card hidden).
+  // Local const so the truthy guard narrows it to string for CardLegado.
+  const legacyCardHref = LEGACY_MIGRACAO_URL;
   const temLegado = legado.length > 0;
 
   // Logged-out visitors have nothing to see here — back to the landing.
@@ -260,6 +264,20 @@ export function CampanhasPage() {
                 onCompletar={abrirSetupDoCard}
               />
             ))}
+
+            {/* 1.0 bridge card (aperture-gejcw restore). Shown for users with a
+                legacy list; the CTA is env-driven (LEGACY_MIGRACAO_URL). Client
+                defense: hide it when the legacy origin can't be resolved so we
+                never render a self-looping link. */}
+            {temLegado &&
+              legacyCardHref &&
+              legado.map((_, i) => (
+                <CardLegado
+                  key={`legado-${i}`}
+                  index={novas.length + i}
+                  href={legacyCardHref}
+                />
+              ))}
 
             {/* NOVA LISTA — dashed scrapbook slot, per the PDF's page 2. */}
             <button
@@ -575,6 +593,33 @@ function CardNova({
          *  (/c/:idCampanha), not the oldest-resolving bare URL. */}
         <a className="camp-cta" href={`/painel/${campanha.slug}/c/${campanha.id}`}>
           acessar lista ♡
+        </a>
+      </div>
+    </article>
+  );
+}
+
+/** 1.0 bridge card (aperture-gejcw restore — relabeled, NO "Legado" word).
+ *  Mirrors CardNova's scrapbook visual with the 1.0 selo to distinguish it;
+ *  the CTA is an env-driven anchor out to the old site's /migracao explainer
+ *  (href resolved from LEGACY_SITE_ORIGIN — cross-origin, so rel=noopener).
+ *  The grid only renders this when the href resolves (never a self-loop). */
+function CardLegado({ index, href }: { index: number; href: string }) {
+  return (
+    <article
+      className="camp-card"
+      data-testid="card-legado"
+      style={{ transform: TILTS[index % TILTS.length] }}
+    >
+      <span className="camp-tape" style={{ background: TAPES[index % TAPES.length] }} aria-hidden="true" />
+      <span className="camp-selo camp-selo-10" title="lista na EuNeném 1.0">1.0</span>
+      <div className="camp-cover" style={{ background: TINTS[index % TINTS.length] }}>
+        <span className="camp-cover-ini" aria-hidden="true">1.0</span>
+      </div>
+      <div className="camp-card-body">
+        <h3 className="camp-card-name">EuNeném 1.0</h3>
+        <a className="camp-cta" href={href} rel="noopener">
+          continuar na 1.0 <span aria-hidden="true">↗</span>
         </a>
       </div>
     </article>

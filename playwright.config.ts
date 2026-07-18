@@ -16,6 +16,13 @@ const REMOTE_TARGET = Boolean(
 const E2E_DATABASE_URL =
   process.env.E2E_DATABASE_URL ?? 'postgresql://frame:frame@localhost:54320/frame';
 
+// aperture-gejcw — the 1.0 /campanhas card CTA env-derives from
+// LEGACY_SITE_ORIGIN (no hardcoded fallback anymore). Set a stable e2e default
+// for BOTH the test runner (the spec imports LEGACY_MIGRACAO_URL, which reads
+// process.env at module load) and the spawned webServer (env block below).
+const LEGACY_SITE_ORIGIN = process.env.LEGACY_SITE_ORIGIN ?? 'https://eunenem.com';
+process.env.LEGACY_SITE_ORIGIN = LEGACY_SITE_ORIGIN;
+
 /**
  * Build one webServer entry for the engine's eunenem-server on `port`.
  *
@@ -42,6 +49,9 @@ function makeServer(port: number, extraEnv: Record<string, string>) {
         process.env.BETTER_AUTH_SECRET ?? 'e2e-test-secret-must-be-at-least-32-chars-long-ok',
       BETTER_AUTH_URL: `http://localhost:${port}`,
       TRUSTED_ORIGINS: `http://localhost:${port}`,
+      // aperture-gejcw — the 1.0 card CTA derives from this (no hardcoded
+      // fallback). Set so the card renders + its href assertion resolves.
+      LEGACY_SITE_ORIGIN,
       // aperture-r5y94: arm the E2E magic-chave forced-outcome path on the fake
       // transferencia rail (aperture-4ifbm). TRANSFERENCIA_PROVIDER defaults to
       // 'fake' and 'inter' is superRefine-rejected off production, so both local

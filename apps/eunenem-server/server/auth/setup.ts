@@ -400,6 +400,14 @@ const ServerEnvSchema = z
     MINIO_SECRET_KEY: z.string().default(''),
     MINIO_BUCKET: z.string().default('eunenem-perfil-fotos'),
     /**
+     * aperture-gejcw — canonical old-system origin. The 1.0 /campanhas card +
+     * the legacy bridge derive every legacy URL from this, so the domain swap
+     * is config-only. Compose wires `${LEGACY_SITE_ORIGIN:-}` → unset arrives
+     * as an EMPTY STRING (not undefined), so `.default('')` + the prod
+     * superRefine guard below (fail if empty in production).
+     */
+    LEGACY_SITE_ORIGIN: z.string().default(''),
+    /**
      * Google OAuth credentials (aperture-8655f). Both OPTIONAL so the server
      * still boots in environments without them — when EITHER is absent the
      * google social provider is NOT registered (email+password still works).
@@ -444,6 +452,19 @@ const ServerEnvSchema = z
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === 'production') {
+      // aperture-gejcw — LEGACY_SITE_ORIGIN is the canonical old-system origin
+      // the 1.0 /campanhas card + legacy bridge derive from. It MUST be set in
+      // production, else the card would render a self-looping/broken link after
+      // the domain swap. Compose passes `${LEGACY_SITE_ORIGIN:-}` so unset =
+      // EMPTY STRING — guard on trimmed length, not undefined.
+      if (env.LEGACY_SITE_ORIGIN.trim().length === 0) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['LEGACY_SITE_ORIGIN'],
+          message:
+            'LEGACY_SITE_ORIGIN required in production (the 1.0 card + legacy bridge derive every legacy URL from it).',
+        });
+      }
       if (env.STRIPE_SECRET_KEY.length === 0) {
         ctx.addIssue({
           code: 'custom',

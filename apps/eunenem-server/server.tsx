@@ -322,9 +322,14 @@ function envelope(ssrHtml: string, pathname: string): string {
  * restart is enough — no rebuild.
  */
 function serializeRuntimeEnv(): string {
-  const env: { legacyMigracaoUrl?: string } = {};
+  const env: { legacyMigracaoUrl?: string; legacySiteOrigin?: string } = {};
   if (process.env.LEGACY_MIGRACAO_URL) {
     env.legacyMigracaoUrl = process.env.LEGACY_MIGRACAO_URL;
+  }
+  // aperture-gejcw — the 1.0 card derives its CTA from LEGACY_SITE_ORIGIN when
+  // no explicit LEGACY_MIGRACAO_URL override is set, so the swap is config-only.
+  if (process.env.LEGACY_SITE_ORIGIN) {
+    env.legacySiteOrigin = process.env.LEGACY_SITE_ORIGIN;
   }
   return JSON.stringify(env).replaceAll('<', '\\u003c');
 }
