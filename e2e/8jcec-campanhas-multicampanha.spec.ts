@@ -142,10 +142,41 @@ test.describe('/campanhas — legacy-matching user (the POC user path, spec §9)
 
 seededTest.describe('/campanhas — pure-2.0 user (no legacy entry)', () => {
   seededTest(
-    'shows 2.0 card + NOVA LISTA but NO 1.0 card and NO welcome modal',
-    async ({ authenticatedPage }) => {
+    'onboarded pure-2.0 user sees 2.0 card + NOVA LISTA but NO 1.0 card and NO welcome modal',
+    async ({ authenticatedPage, seededData }) => {
       // seededData mints a random @e2e.local email — guaranteed absent from
       // legacy-1.0-users.json.
+      //
+      // aperture-w3rrd — the fresh seed is un-onboarded (registrarContaUsuario
+      // makes an UNNAMED campanha → needsOnboarding=true post-#29), so the new
+      // /campanhas gate correctly PUSHES it into the onboarding wizard (that
+      // push is covered by the tqp4t GAP-3 spec). This test asserts the
+      // migration-bridge surface for a NON-legacy user who is actually ON
+      // /campanhas — so onboard first (gf733 wizard-drive), then assert.
+      await authenticatedPage.goto(`/painel/${seededData.slug}`, {
+        waitUntil: 'domcontentloaded',
+      });
+      const wizard = authenticatedPage.getByRole('dialog', {
+        name: 'Vamos montar sua página',
+      });
+      await expect(wizard, 'fresh seed must be gated by the wizard').toBeVisible();
+      await authenticatedPage.locator('#ob-name').fill(seededData.nomeExibicao);
+      await authenticatedPage.locator('#ob-baby').fill('Bebe 8jcec');
+      await authenticatedPage.getByRole('button', { name: /próximo/ }).click();
+      await authenticatedPage.locator('#ob-date').fill('2030-01-01');
+      await authenticatedPage.getByRole('button', { name: /próximo/ }).click();
+      await authenticatedPage.getByRole('button', { name: /criar minha página/ }).click();
+      // A successful save reloads /painel with needsOnboarding now false, which
+      // CLOSES the wizard (gf733's completion signal). We're already on the
+      // /painel/<slug> URL, so wait on the wizard closing — NOT on the URL,
+      // which would match immediately and race ahead of the save.
+      await expect(
+        wizard,
+        'onboarding must complete (wizard closes on the post-save reload)',
+      ).toBeHidden({ timeout: 15000 });
+
+      // Now the onboarded pure-2.0 user renders /campanhas normally (the gate
+      // no longer fires): 2.0 grid + card + NOVA LISTA, and NO 1.0 surface.
       const res = await authenticatedPage.goto('/campanhas', { waitUntil: 'domcontentloaded' });
       expect(res?.status()).toBe(200);
 
