@@ -41,6 +41,18 @@ services:
       # ='true' only where the fake rail runs (aperture-4ifbm).
       TRANSFERENCIA_PROVIDER: ${TRANSFERENCIA_PROVIDER:-fake}
       EUNENEM_FAKE_E2E_MAGIC: ${EUNENEM_FAKE_E2E_MAGIC:-false}
+      # Banco Inter PIX payout rail (aperture-ju5w2 / 40twz). Required by the
+      # setup.ts superRefine boot guard ONLY when TRANSFERENCIA_PROVIDER='inter';
+      # ${VAR:-} defaults keep them absent-neutral while the rail is 'fake'.
+      # CERT/KEY are base64-encoded PEM (decoded at construction, setup.ts:855).
+      INTER_BASE_URL: ${INTER_BASE_URL:-}
+      INTER_CLIENT_ID: ${INTER_CLIENT_ID:-}
+      INTER_CLIENT_SECRET: ${INTER_CLIENT_SECRET:-}
+      INTER_SCOPE: ${INTER_SCOPE:-}
+      INTER_CERT_BASE64: ${INTER_CERT_BASE64:-}
+      INTER_KEY_BASE64: ${INTER_KEY_BASE64:-}
+      INTER_CONTA_CORRENTE: ${INTER_CONTA_CORRENTE:-}
+      INTER_EXTRATO_VERIFIED: ${INTER_EXTRATO_VERIFIED:-false}
       # Object storage for profile photos — platform MinIO. Endpoint must be
       # the PUBLIC storage domain so browser presigned PUTs reach it;
       # access/secret are a bucket-scoped key.
