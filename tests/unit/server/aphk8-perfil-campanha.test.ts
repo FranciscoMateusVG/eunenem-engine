@@ -439,21 +439,22 @@ describe('auth.me needsOnboarding source (aperture-3vc12)', () => {
     expect((await caller.auth.me())?.needsOnboarding).toBe(false);
   });
 
-  it("gate keys on the OLDEST campanha only — a second campanha's perfil does not flip it", async () => {
+  it("ANY named campanha flips the gate — a NEWER campanha's perfil onboards even if the oldest is blank (aperture-lrl1h)", async () => {
     const rig = await buildRig();
     const { caller } = await rig.addUser('3vc12-b@example.com', 'Bia');
     rig.advanceClock(60_000);
     const segunda = await caller.campanhas.criar({ titulo: 'Segunda lista' });
 
-    // Filling the SECOND campanha's perfil is not "onboarding" — the gate
-    // follows the default-campanha rule (§1.5: oldest), same as every other
-    // unaddressed read.
+    // aperture-lrl1h — the gate means "has NO usable campaign at all", so
+    // naming the SECOND (newer) campanha onboards the user even though the
+    // oldest campanha's perfil is still blank. (Pre-fix this keyed on the
+    // oldest campanha only and wrongly stayed true — the false-wizard bug.)
     await caller.perfilCampanha.atualizar({
       idCampanha: segunda.id,
       nomeBebe: 'Bento',
       ...conteudoVazio,
     });
-    expect((await caller.auth.me())?.needsOnboarding).toBe(true);
+    expect((await caller.auth.me())?.needsOnboarding).toBe(false);
   });
 
   it('whitespace-only nomeBebe still needs onboarding (trim posture preserved)', async () => {

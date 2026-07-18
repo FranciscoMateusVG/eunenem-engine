@@ -63,6 +63,7 @@ type UsuarioRow = {
   criado_em: Date;
   /** Plan 0018 Phase A (aperture-omswg / migration 024). */
   tutorial_completado_em: Date | null;
+  onboarding_concluido_em: Date | null;
 };
 
 type ContaRow = {
@@ -136,6 +137,7 @@ export class UsuarioRepositoryPostgres implements UsuarioRepository {
               // registrations start with tutorial_completado_em NULL so
               // the overlay fires on first visit.
               tutorial_completado_em: usuario.tutorialCompletadoEm,
+              onboarding_concluido_em: usuario.onboardingConcluidoEm,
             })
             .execute();
 
@@ -418,6 +420,7 @@ export class UsuarioRepositoryPostgres implements UsuarioRepository {
             'usuarios.criado_em as criado_em',
             // Plan 0018 Phase A (aperture-omswg / migration 024).
             'usuarios.tutorial_completado_em as tutorial_completado_em',
+            'usuarios.onboarding_concluido_em as onboarding_concluido_em',
           ])
           .where('contas.id', '=', idConta)
           .where('usuarios.id_plataforma', '=', idPlataforma)
@@ -528,6 +531,33 @@ export class UsuarioRepositoryPostgres implements UsuarioRepository {
     });
   }
 
+  /**
+   * aperture-lrl1h. First-write-wins via the `WHERE onboarding_concluido_em
+   * IS NULL` guard — already-onboarded usuarios are skipped (UPDATE affects
+   * 0 rows, no error). Mirrors `atualizarNomeExibicaoUsuario` shape: silent
+   * no-op for unknown id.
+   */
+  async marcarOnboardingConcluido(idUsuario: IdUsuario, concluidoEm: Date): Promise<void> {
+    return tracer.startActiveSpan('db.usuarios.marcarOnboardingConcluido', async (span) => {
+      span.setAttributes({ ...DB_USUARIOS_ATTRS, 'db.operation.name': 'UPDATE' });
+      try {
+        await this.db
+          .updateTable('usuarios')
+          .set({ onboarding_concluido_em: concluidoEm })
+          .where('id', '=', idUsuario)
+          .where('onboarding_concluido_em', 'is', null)
+          .execute();
+        span.setStatus({ code: SpanStatusCode.OK });
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
   async removeRegistroDomain(idUsuario: IdUsuario): Promise<void> {
     return tracer.startActiveSpan('db.usuarios.removeRegistroDomain', async (span) => {
       span.setAttributes({ ...DB_USUARIOS_ATTRS, 'db.operation.name': 'DELETE' });
@@ -587,6 +617,7 @@ function toUsuario(row: UsuarioRow): Usuario {
     // Plan 0018 Phase A (aperture-omswg / migration 024). null until
     // the user completes (or skips) the tutorial overlay.
     tutorialCompletadoEm: row.tutorial_completado_em,
+    onboardingConcluidoEm: row.onboarding_concluido_em,
   };
 }
 

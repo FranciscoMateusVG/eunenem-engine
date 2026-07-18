@@ -343,6 +343,7 @@ export interface Usuarios {
   id_conta: string;
   id_plataforma: string;
   nome_exibicao: string;
+  onboarding_concluido_em: Timestamp | null;
   slug: string;
   tutorial_completado_em: Timestamp | null;
 }

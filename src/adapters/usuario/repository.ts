@@ -206,6 +206,19 @@ export interface UsuarioRepository {
   marcarTutorialCompletado(idUsuario: IdUsuario, completadoEm: Date): Promise<void>;
 
   /**
+   * aperture-lrl1h. Sets `onboarding_concluido_em` if and only if it is
+   * currently NULL — first-write-wins, idempotent at the SQL layer
+   * (`UPDATE ... WHERE onboarding_concluido_em IS NULL`). Returns no
+   * value; callers re-read via `findUsuarioById` when they need the
+   * persisted timestamp.
+   *
+   * Unknown `idUsuario` is a silent no-op (mirrors
+   * `atualizarNomeExibicaoUsuario`). Already-onboarded usuarios are also
+   * a no-op (the predicate filter matches zero rows).
+   */
+  marcarOnboardingConcluido(idUsuario: IdUsuario, concluidoEm: Date): Promise<void>;
+
+  /**
    * Removes the domain Usuario aggregate (Usuario root + Conta inner entity).
    * Used by the `registrarContaUsuario` saga as a T3 compensation when a
    * downstream step (e.g. campanha creation) fails after `saveRegistroDomain`
