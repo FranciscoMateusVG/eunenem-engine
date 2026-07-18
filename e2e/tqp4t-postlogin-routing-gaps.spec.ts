@@ -72,7 +72,7 @@ import { registrarContaUsuario } from '../src/use-cases/usuario/registrar-conta-
  * the behaviors they assert do not exist yet, so running them would be a false
  * red on #29 alone. The assertions below are the frozen contract for w3rrd.
  */
-const W3RRD_WIRED = false;
+const W3RRD_WIRED = true;
 
 const SESSION_COOKIE = 'better-auth.session_token';
 
