@@ -34,6 +34,7 @@ import {
   useCampanhasList,
   type CampanhaNovaDTO,
 } from './lib/campanhas.js';
+import { sendPageView } from './lib/analytics.js';
 import { postLoginTarget } from './lib/post-login-route.js';
 import { trpc } from './lib/trpc.js';
 
@@ -79,6 +80,11 @@ export function CampanhasPage() {
   // Local const so the truthy guard narrows it to string for CardLegado.
   const legacyCardHref = LEGACY_MIGRACAO_URL;
   const temLegado = legado.length > 0;
+
+  // aperture-ppuay — page-view tracking (EVENT_MAP addition), the post-login hub.
+  useEffect(() => {
+    sendPageView('Campanhas');
+  }, []);
 
   // Logged-out visitors have nothing to see here — back to the landing.
   // auth.me resolves to null (not an error) for anonymous sessions.

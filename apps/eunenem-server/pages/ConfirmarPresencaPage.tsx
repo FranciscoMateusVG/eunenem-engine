@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
+import { sendEvent, sendPageView } from "@/lib/analytics";
 import { conviteStateFromData, useConvitePreviewData } from "@/lib/convite";
 import type { FormatoMensagemConvite, StatusPresencaConvidado } from "@/lib/convidados";
 import { convidadosErrorMessage } from "@/lib/convidados";
@@ -101,6 +102,11 @@ export function ConfirmarPresencaPage({
   slug: string;
   idConvidado: string;
 }) {
+  // aperture-ppuay — page-view tracking (EVENT_MAP addition), the RSVP surface.
+  useEffect(() => {
+    sendPageView('Confirmar Presenca');
+  }, []);
+
   const convidadoQuery = trpc.eventoListaDeConvidados.getParaConfirmar.useQuery({
     slug,
     idConvidado,
@@ -121,7 +127,10 @@ export function ConfirmarPresencaPage({
   });
   const utils = trpc.useUtils();
   const confirmarPresenca = trpc.eventoListaDeConvidados.confirmarPresenca.useMutation({
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
+      // aperture-ppuay — RSVP confirmation (EVENT_MAP addition). resposta is the
+      // guest's choice (sim | talvez | nao).
+      sendEvent("presenca_confirmada", { resposta: variables.presenca });
       void utils.eventoListaDeConvidados.getParaConfirmar.invalidate({ slug, idConvidado });
     },
   });

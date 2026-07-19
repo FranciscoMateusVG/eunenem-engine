@@ -408,6 +408,14 @@ const ServerEnvSchema = z
      */
     LEGACY_SITE_ORIGIN: z.string().default(''),
     /**
+     * aperture-ppuay — Mixpanel project token (PUBLIC write-only ingestion key,
+     * safe in compose env + client-side). Injected into the client at runtime
+     * via serializeRuntimeEnv (window.__EUNENEM_ENV__.mixpanelToken) and read
+     * directly by the server-side Mixpanel adapter. Absent → both sinks stay
+     * dark (mounts-dark, NO boot-guard — analytics is non-critical).
+     */
+    MIXPANEL_TOKEN: z.string().default(''),
+    /**
      * Google OAuth credentials (aperture-8655f). Both OPTIONAL so the server
      * still boots in environments without them — when EITHER is absent the
      * google social provider is NOT registered (email+password still works).

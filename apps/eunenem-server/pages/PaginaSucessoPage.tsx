@@ -41,7 +41,7 @@ import {
   type ObterSucessoResult,
 } from "@/lib/paginaApi";
 import { paginaSharePath } from "@/lib/painelRoutes";
-import { sendEvent } from "@/lib/analytics";
+import { sendEvent, sendPageView } from "@/lib/analytics";
 
 // ── Page ──────────────────────────────────────────────────────────────────
 
@@ -56,6 +56,12 @@ export function PaginaSucessoPage({ slug }: { slug: string }) {
   // NOT_FOUND on their own success page. Read it like sessionId and forward.
   const [idCampanha, setIdCampanha] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
+
+  // aperture-ppuay — page-view tracking (EVENT_MAP addition). compra_concluida
+  // / pagamento_falhou already fire from the approved/failed sub-states.
+  useEffect(() => {
+    sendPageView('Sucesso');
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);

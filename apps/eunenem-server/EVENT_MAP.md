@@ -1,13 +1,18 @@
-# Mapa de eventos GTM/GA — eunenem-server
+# Mapa de eventos GTM/GA + Mixpanel — eunenem-server
 
 Todos os eventos são enviados via `sendEvent`/`sendPageView` de
-[pages/lib/analytics.ts](pages/lib/analytics.ts), que chama `window.gtag('event', ...)`
-diretamente (o formato que o GA4 realmente processa), com fallback para um
-push de objeto em `window.dataLayer` quando `gtag` ainda não carregou — esse
-fallback só é visível a um container GTM, não ao GA4, a menos que uma tag
-seja configurada lá para reencaminhá-lo. GTM/GA carregam server-side via
-`envelope()` em [server.tsx](server.tsx) (ver `GOOGLE_ANALYTICS`/
-`GOOGLE_TAG_MANAGER` no `.env`).
+[pages/lib/analytics.ts](pages/lib/analytics.ts), que agora alimenta **dois
+sinks** a partir do MESMO ponto de chamada (zero mudança por call-site):
+
+1. **GTM/GA** — chama `window.gtag('event', ...)` diretamente (o formato que o
+   GA4 realmente processa), com fallback para um push de objeto em
+   `window.dataLayer` quando `gtag` ainda não carregou — esse fallback só é
+   visível a um container GTM, não ao GA4, a menos que uma tag seja configurada
+   lá para reencaminhá-lo. GTM/GA carregam server-side via `envelope()` em
+   [server.tsx](server.tsx) (ver `GOOGLE_ANALYTICS`/`GOOGLE_TAG_MANAGER` no `.env`).
+2. **Mixpanel** (aperture-ppuay) — segundo sink dentro de `sendEvent`; ver a
+   seção [## Mixpanel](#mixpanel) abaixo. Todo evento desta tabela também vai
+   para o Mixpanel quando o token está presente.
 
 ## Conversões
 
@@ -37,6 +42,11 @@ page load) e deseja-se saber qual página/seção foi vista, não só a URL.
 | `page_view_custom` | `FAQ` | — | [pages/FaqPage.tsx](pages/FaqPage.tsx) |
 | `page_view_custom` | `Painel` | `slug` | [pages/PainelPage.tsx](pages/PainelPage.tsx) — `PainelPageView` |
 | `page_view_custom` | título da seção (ex: "minha lista de presentes", "dados bancários") via `PAINEL_SECTION_META` | `slug`, `section` | [pages/PainelSectionPage.tsx](pages/PainelSectionPage.tsx) |
+| `page_view_custom` | `Pagina` | `slug` | [pages/PaginaPage.tsx](pages/PaginaPage.tsx) — página pública de presentes (GIFT PAGE), guarda em `perfil.data` (aperture-ppuay) |
+| `page_view_custom` | `Sucesso` | — | [pages/PaginaSucessoPage.tsx](pages/PaginaSucessoPage.tsx) (aperture-ppuay) |
+| `page_view_custom` | `Confirmar Presenca` | — | [pages/ConfirmarPresencaPage.tsx](pages/ConfirmarPresencaPage.tsx) (aperture-ppuay) |
+| `page_view_custom` | `Campanhas` | — | [pages/CampanhasPage.tsx](pages/CampanhasPage.tsx) (aperture-ppuay) |
+| `page_view_custom` | `Termos de Uso` | — | [pages/TermosDeUsoPage.tsx](pages/TermosDeUsoPage.tsx) (aperture-ppuay) |
 
 ## Convite
 
@@ -92,3 +102,47 @@ page load) e deseja-se saber qual página/seção foi vista, não só a URL.
 | `page_view_custom` | Visualização da página de FAQ | `page_name: "FAQ"` | [pages/FaqPage.tsx](pages/FaqPage.tsx) |
 | `faq_contato_whatsapp_click` | Clique em "falar conosco" / "falar com a gente" | `origem` (`topbar`\|`resposta_pendente`\|`cta_final`) | pages/FaqPage.tsx |
 | `faq_pergunta_expandida` | Expansão de uma pergunta do acordeão | `pergunta` | pages/FaqPage.tsx |
+
+## Confirmação de Presença (RSVP)
+
+| Evento | Ação | Propriedades | Arquivo |
+|---|---|---|---|
+| `presenca_confirmada` | Convidado responde ao RSVP com sucesso | `resposta` (`sim`\|`talvez`\|`nao`) | [pages/ConfirmarPresencaPage.tsx](pages/ConfirmarPresencaPage.tsx) — `confirmarPresenca.onSuccess` (aperture-ppuay) |
+
+## Mixpanel
+
+O Mixpanel (aperture-ppuay) é um **segundo sink** dentro de `sendEvent` em
+[pages/lib/analytics.ts](pages/lib/analytics.ts). Todo evento das tabelas acima
+também é enviado ao Mixpanel — nenhuma mudança por call-site foi necessária.
+
+- **Init**: lazy e idempotente (`mixpanelOn()`), decidido só no cliente. Lê o
+  token de `window.__EUNENEM_ENV__.mixpanelToken` (injetado por request pelo
+  `serializeRuntimeEnv` em [server.tsx](server.tsx), a partir de
+  `process.env.MIXPANEL_TOKEN`). Config: `autocapture: true`,
+  `record_sessions_percent: 100` (Session Replay integral), `persistence: 'localStorage'`.
+- **Mounts-dark**: sem token, o sink fica escuro — `track`/`identify`/`people`
+  viram no-op e o comportamento é byte-idêntico ao anterior (GA/GTM intactos).
+  O token é um write-only ingestion key público, seguro no cliente.
+- **Autocapture**: aditivo — clicks/pageviews automáticos POR CIMA dos eventos
+  explícitos do EVENT_MAP. Mantemos os dois.
+
+### Identidade
+
+| Ponto | `distinct_id` | Notas |
+|---|---|---|
+| Login (conta existente) | `idConta` | `identifyWithUtm(me.idConta)` em [AuthModalProvider.tsx](pages/components/eunenem/auth/AuthModalProvider.tsx) — `onAuthenticated`, ramo login, após `me` resolver |
+| Signup (conta nova) | `idConta` | `identifyWithUtm(me.data.idConta)` em [OnboardingWizard.tsx](pages/components/eunenem/auth/OnboardingWizard.tsx) — `finish`, após `onboarding_concluido` (o ramo login retorna cedo para o wizard em contas novas) |
+
+`identifyWithUtm` chama `mixpanel.identify(idConta)` e, em seguida,
+`people.set_once({ utm_source })` — o `utm_source` de primeiro toque é capturado
+em [LandingPage.tsx](pages/LandingPage.tsx) (`URLSearchParams` → `localStorage`
+`eunenem:utm_source`) e sobrevive até o identify. `set_once` nunca sobrescreve a
+fonte de aquisição original em visitas posteriores. Leituras de `localStorage`
+são protegidas (modo privado do Safari lança exceção).
+
+### Eventos de servidor
+
+Os 6 eventos de servidor (verdade de pagamento via webhook, `conta_criada`
+cobrindo OAuth, etc.), todos com `distinct_id`, são o **segundo PR** desta
+feature (adapter server-side + `buildServerDeps` gated em `MIXPANEL_TOKEN`).
+Ainda não implementados nesta entrega (client-half).

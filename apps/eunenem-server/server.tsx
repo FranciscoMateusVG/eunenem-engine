@@ -322,7 +322,11 @@ function envelope(ssrHtml: string, pathname: string): string {
  * restart is enough — no rebuild.
  */
 function serializeRuntimeEnv(): string {
-  const env: { legacyMigracaoUrl?: string; legacySiteOrigin?: string } = {};
+  const env: {
+    legacyMigracaoUrl?: string;
+    legacySiteOrigin?: string;
+    mixpanelToken?: string;
+  } = {};
   if (process.env.LEGACY_MIGRACAO_URL) {
     env.legacyMigracaoUrl = process.env.LEGACY_MIGRACAO_URL;
   }
@@ -330,6 +334,11 @@ function serializeRuntimeEnv(): string {
   // no explicit LEGACY_MIGRACAO_URL override is set, so the swap is config-only.
   if (process.env.LEGACY_SITE_ORIGIN) {
     env.legacySiteOrigin = process.env.LEGACY_SITE_ORIGIN;
+  }
+  // aperture-ppuay — Mixpanel client token (public write-only). Runtime-injected
+  // so the sink activates without a rebuild; absent → analytics.ts stays dark.
+  if (process.env.MIXPANEL_TOKEN) {
+    env.mixpanelToken = process.env.MIXPANEL_TOKEN;
   }
   return JSON.stringify(env).replaceAll('<', '\\u003c');
 }

@@ -11,7 +11,7 @@ import {
 import { trpc } from "@/lib/trpc";
 import { postLoginTarget, resolveMeWithRetry } from "@/lib/post-login-route";
 import type { AuthSession } from "@/lib/auth";
-import { sendEvent } from "@/lib/analytics";
+import { sendEvent, identifyWithUtm } from "@/lib/analytics";
 import { AuthModalShell, type AuthMode } from "./AuthModalShell.js";
 import { OnboardingWizard } from "./OnboardingWizard.js";
 
@@ -153,6 +153,11 @@ export function AuthModalProvider({
         // Genuinely-unauthenticated (or a persistent race) → me stays null:
         // stay put, the navbar renders the correct auth state.
         if (!me?.slug) return;
+        // aperture-ppuay — identify the returning account on Mixpanel
+        // (distinct_id = idConta) + attach first-touch utm_source. No-op when
+        // the sink is dark. Placed after the slug guard so we only identify a
+        // confirmed-resolved session, not a mid-race null.
+        if (me.idConta) identifyWithUtm(me.idConta);
         // Route by the single shared post-login rule (legacy → /campanhas;
         // needs-onboarding → wizard; onboarded → /campanhas) — one source of
         // truth in pages/lib/post-login-route.ts so no entry point drifts.

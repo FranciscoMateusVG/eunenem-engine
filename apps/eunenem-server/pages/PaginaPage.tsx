@@ -14,8 +14,10 @@ import { TweaksPanel } from '@/components/eunenem/TweaksPanel';
 import { TweaksProvider } from '@/components/eunenem/TweaksContext';
 import { PRIMARY_PRESETS } from '@/lib/mocks/tweaksDefaults';
 import type { TweaksState } from '@/lib/mocks/tweaksDefaults';
+import { sendPageView } from '@/lib/analytics.js';
 import { CartProvider } from '@/lib/cart.js';
 import { trpc } from '@/lib/trpc';
+import { useEffect } from 'react';
 import { NotFoundPage } from './NotFoundPage.js';
 
 // /pagina/:slug — contributor-facing event page (was /pagina/[slug]/page.tsx
@@ -55,6 +57,12 @@ export function PaginaPage({
     idCampanha ? { slug, idCampanha } : { slug },
     { staleTime: 60_000, retry: false },
   );
+
+  // aperture-ppuay — the public GIFT PAGE was the headline untracked surface.
+  // Fire the page-view once the perfil resolves to a real page (not NOT_FOUND).
+  useEffect(() => {
+    if (perfil.data) sendPageView('Pagina', { slug });
+  }, [perfil.data, slug]);
   // Marketplace + Messages need NO prop threading: their hooks
   // (usePaginaListaPresentes / usePaginaMural) self-resolve the route
   // campanha via useCampanhaRota() — the route-level CampanhaRotaProvider

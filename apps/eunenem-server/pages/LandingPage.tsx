@@ -41,6 +41,14 @@ export function LandingPage() {
     sendPageView('Landing');
   }, []);
 
+  // aperture-ppuay — first-touch utm_source capture. Persist to localStorage so
+  // it survives to identify-time (AuthModalProvider fires people.set_once after
+  // the account resolves), attributing the account to its acquisition source.
+  useEffect(() => {
+    const utm = new URLSearchParams(window.location.search).get('utm_source');
+    if (utm) window.localStorage.setItem('eunenem:utm_source', utm);
+  }, []);
+
   useEffect(() => {
     const io = new IntersectionObserver(
       (entries) => {
