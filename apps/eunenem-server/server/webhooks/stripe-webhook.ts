@@ -485,6 +485,20 @@ export async function dispatchVerifiedStripeEvent(
           transition: 'aprovado',
           paymentStatus: 'paid',
         });
+        // aperture-ppuay — server-truth payment approval. distinct_id = the
+        // campanha owner's conta; resolve via campanha (Recebedor has no idConta).
+        const campanhaDoPagamento = await deps.campanhaRepository.findById(
+          pagamento.intencao.idCampanha,
+        );
+        deps.serverAnalytics?.track(
+          'pagamento_aprovado',
+          campanhaDoPagamento?.idsAdministradores[0] ?? null,
+          {
+            idPagamento: pagamento.id,
+            idCampanha: pagamento.intencao.idCampanha,
+            paymentStatus: 'paid',
+          },
+        );
       } else if (session.payment_status === 'unpaid') {
         // Write contribuinte first (first-writer-wins) — finalize-aprovado
         // isn't being called yet, so its own contribuinte-write logic
@@ -750,6 +764,20 @@ export async function dispatchVerifiedStripeEvent(
         idPagamento: pagamento.id,
         transition: 'aprovado',
       });
+      // aperture-ppuay — server-truth payment approval (charge.succeeded / PIX
+      // settle). distinct_id = the campanha owner's conta (resolved via campanha).
+      const campanhaDoPagamento = await deps.campanhaRepository.findById(
+        pagamento.intencao.idCampanha,
+      );
+      deps.serverAnalytics?.track(
+        'pagamento_aprovado',
+        campanhaDoPagamento?.idsAdministradores[0] ?? null,
+        {
+          idPagamento: pagamento.id,
+          idCampanha: pagamento.intencao.idCampanha,
+          paymentStatus: 'charge_succeeded',
+        },
+      );
       return { pagamentoId: pagamento.id };
     }
 

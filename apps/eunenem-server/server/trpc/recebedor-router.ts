@@ -730,7 +730,9 @@ const transferenciaRouter = t.router({
     .output(TransferenciaSolicitarOutputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        await resolverCampanhaAdministrada(ctx, input.idCampanha);
+        // Capture the resolved admin usuario for the analytics distinct_id
+        // (aperture-ppuay) — the auth check itself is the primary purpose.
+        const { usuario } = await resolverCampanhaAdministrada(ctx, input.idCampanha);
 
         const idRepasse = randomUUID();
         const repasse = await solicitarRepasseRecebedor(
@@ -750,6 +752,14 @@ const transferenciaRouter = t.router({
           await ctx.deps.livroFinanceiroRepository.findLancamentosByIdRepasse(
             repasse.id,
           );
+
+        // aperture-ppuay — server-truth repasse (PIX payout) request.
+        ctx.deps.serverAnalytics?.track('repasse_solicitado', usuario.idConta, {
+          idRepasse: repasse.id,
+          idCampanha: input.idCampanha,
+          amountCents: repasse.amountCents as unknown as number,
+          numLancamentos: linked.length,
+        });
 
         return {
           idRepasse: repasse.id,

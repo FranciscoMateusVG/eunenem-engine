@@ -472,6 +472,15 @@ export const eventoListaDeConvidadosRouter = t.router({
           throw new ConvidadoNaoEncontradoError(input.idConvidado as IdConvidado, updated.id);
         }
 
+        // aperture-ppuay — server-truth RSVP. A guest action (no session), so
+        // the distinct_id is anonymous; the identifying context rides in props.
+        ctx.deps.serverAnalytics?.track('presenca_confirmada', null, {
+          idCampanha,
+          idConvidado: input.idConvidado,
+          idLista: lista.id,
+          presenca: convidado.presenca,
+        });
+
         return {
           nome: convidado.nome,
           presenca: convidado.presenca,
