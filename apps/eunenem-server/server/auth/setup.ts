@@ -67,6 +67,11 @@ import { parseAdminAllowedEmails } from './admin-allowlist.js';
 import { RepasseJobEnqueuerPgBoss } from '../jobs/repasse-enqueuer.pgboss.js';
 import { noopTracer } from '../../../../src/observability/tracer.js';
 import { getStripe } from '../../src/lib/stripe/stripe.js';
+import {
+  type ServerAnalytics,
+  ServerAnalyticsMixpanel,
+  ServerAnalyticsNaoConfigurado,
+} from '../analytics/server-analytics.js';
 
 /**
  * Engine-side dependencies wired for the eunenem-server (aperture-ht7sq +
@@ -197,6 +202,19 @@ export interface ServerDeps {
    * upload fails loudly). NOT a domain concept — infrastructure boundary.
    */
   readonly objectStorage: ObjectStorage;
+  /**
+   * Server-side analytics sink (aperture-ppuay PR2). Fires server-truth events
+   * (payment approved, account created, login, campaign created, repasse, RSVP)
+   * with distinct_id = idConta. Gated real-vs-noop on MIXPANEL_TOKEN, mirroring
+   * objectStorage / pagamentoProvider — no token → no-op (mounts-dark). NOT a
+   * domain concept — an infrastructure boundary; never a boot guard.
+   *
+   * Call sites invoke it as `serverAnalytics?.track(...)`: a non-critical
+   * observability sink must NEVER break a request path, so an absent sink
+   * (e.g. a partial test double that omits it) no-ops rather than throwing —
+   * the same "never throw into a request" guarantee the sink itself upholds.
+   */
+  readonly serverAnalytics: ServerAnalytics;
   /**
    * aperture-vvh2j — automated PIX repasse infrastructure.
    *
@@ -805,6 +823,18 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     objectStorage = new ObjectStorageNaoConfigurado();
   }
 
+  // Server analytics sink (aperture-ppuay PR2) — gate on MIXPANEL_TOKEN,
+  // mirroring the objectStorage/pagamentoProvider real-vs-noop gate. Present →
+  // real Mixpanel Node sink; otherwise a no-op (mounts-dark, byte-identical to
+  // the client sink's tokenless behavior). Analytics is non-critical: no boot
+  // guard, the no-op branch is a first-class configuration.
+  let serverAnalytics: ServerAnalytics;
+  if (env.MIXPANEL_TOKEN.length > 0) {
+    serverAnalytics = new ServerAnalyticsMixpanel(env.MIXPANEL_TOKEN);
+  } else {
+    serverAnalytics = new ServerAnalyticsNaoConfigurado();
+  }
+
   let pagamentoProvider: PagamentoProvider;
   let checkoutSessionProvider: CheckoutSessionProvider;
   // aperture-ozlcr: gate on STRIPE_SECRET_KEY presence, NOT NODE_ENV.
@@ -926,6 +956,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     logPiiHashSalt: env.LOG_PII_HASH_SALT,
     webhookEventArchive,
     objectStorage,
+    serverAnalytics,
     boss,
     repasseJobEnqueuer,
     transferenciaProvider,

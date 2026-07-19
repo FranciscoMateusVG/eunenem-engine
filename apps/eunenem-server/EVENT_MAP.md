@@ -142,7 +142,22 @@ são protegidas (modo privado do Safari lança exceção).
 
 ### Eventos de servidor
 
-Os 6 eventos de servidor (verdade de pagamento via webhook, `conta_criada`
-cobrindo OAuth, etc.), todos com `distinct_id`, são o **segundo PR** desta
-feature (adapter server-side + `buildServerDeps` gated em `MIXPANEL_TOKEN`).
-Ainda não implementados nesta entrega (client-half).
+Os eventos de **verdade de servidor** (aperture-ppuay) disparam do backend via o
+sink `ServerAnalytics` ([server/analytics/server-analytics.ts](server/analytics/server-analytics.ts)),
+injetado em `ServerDeps` e gated real-vs-noop em `MIXPANEL_TOKEN` no
+`buildServerDeps` (mesmo padrão mounts-dark do `objectStorage`/`pagamentoProvider`).
+Todo evento de servidor carrega `source: 'server'` — assim um evento de mesmo
+nome que um do cliente (ex. `presenca_confirmada`) é distinguível no Mixpanel.
+
+| Evento | `distinct_id` | Origem |
+|---|---|---|
+| `pagamento_aprovado` | `idConta` do dono da campanha (via `campanhaRepository.findById(...).idsAdministradores[0]`; anônimo se não resolver) | webhook Stripe — `dispatchVerifiedStripeEvent`, ramos `paid` + `charge.succeeded` em [stripe-webhook.ts](server/webhooks/stripe-webhook.ts) |
+| `conta_criada` | `idConta` | signup email/senha ([auth-router.ts](server/trpc/auth-router.ts) `signUp`) + self-heal OAuth órfão ([session-resolver.ts](server/trpc/session-resolver.ts) `autoProvisionarUsuarioOrfao`); prop `metodo: 'email' \| 'oauth'` |
+| `login` | `idConta` | [auth-router.ts](server/trpc/auth-router.ts) `signIn` (distinto do `login_concluido` do cliente) |
+| `campanha_criada` | `idConta` | [campanhas-router.ts](server/trpc/campanhas-router.ts) `criar` |
+| `repasse_solicitado` | `idConta` | [recebedor-router.ts](server/trpc/recebedor-router.ts) `transferencia.solicitar` (repasse PIX) |
+| `presenca_confirmada` | anônimo (guest, sem sessão) | [evento-lista-de-convidados-router.ts](server/trpc/evento-lista-de-convidados-router.ts) `confirmarPresenca` — contexto (`idCampanha`/`idConvidado`/`presenca`) vai nas props |
+
+O sink server-side é fire-and-forget (nunca bloqueia nem lança no request path).
+Sem `MIXPANEL_TOKEN`, o `ServerAnalyticsNaoConfigurado` no-op mantém o build
+byte-idêntico — mesmo mounts-dark do sink cliente.

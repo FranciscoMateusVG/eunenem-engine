@@ -360,6 +360,13 @@ export const authRouter = t.router({
           status: 'success',
         });
 
+        // aperture-ppuay — server-truth account creation (email/password path;
+        // the OAuth path fires from session-resolver's orphan self-heal).
+        deps.serverAnalytics?.track('conta_criada', idConta, {
+          idPlataforma: input.idPlataforma,
+          metodo: 'email',
+        });
+
         return {
           idUsuario,
           idConta,
@@ -437,6 +444,12 @@ export const authRouter = t.router({
           emailHash,
           ipHashed,
           status: 'success',
+        });
+
+        // aperture-ppuay — server-truth login (distinct from the client's
+        // login_concluido; the source:'server' stamp separates them).
+        deps.serverAnalytics?.track('login', sessao.idConta, {
+          idPlataforma: input.idPlataforma,
         });
 
         return {

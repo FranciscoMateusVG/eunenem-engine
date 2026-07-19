@@ -353,6 +353,12 @@ export const campanhasRouter = t.router({
           throw opcaoErr;
         }
 
+        // aperture-ppuay — server-truth campaign creation.
+        deps.serverAnalytics?.track('campanha_criada', usuario.idConta, {
+          idCampanha,
+          titulo: input.titulo,
+        });
+
         // Fresh campanha has no perfil_campanhas row yet → nomeBebe null
         // (blank-perfil by definition; the wizard fills it in).
         return toCardDTO(campanhaComOpcao, usuario.slug, null);

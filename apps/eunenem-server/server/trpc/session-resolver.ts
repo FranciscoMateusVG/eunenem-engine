@@ -217,6 +217,12 @@ async function autoProvisionarUsuarioOrfao(
         // caller-supplied idConta; the email+password saga passes its own).
       },
     );
+    // aperture-ppuay — server-truth account creation via the OAuth orphan
+    // self-heal (the email/password path fires from auth-router.signUp).
+    deps.serverAnalytics?.track('conta_criada', resultado.usuario.idConta, {
+      idPlataforma: principal.idPlataforma,
+      metodo: 'oauth',
+    });
     return resultado.usuario;
   } catch (err) {
     // Concurrent-double-provision race (Cipher #4): another in-flight resolve
