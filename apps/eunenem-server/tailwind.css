@@ -4745,10 +4745,9 @@ html {
 }
 
 /* =================================================================
- * aperture-hsm41 — Landing §04 Diferenciais (5-card bento)
- * Ported from EuNeném Landing v2.html. The bento needs bespoke grid
- * spans, a plum hero variant, a timeline progress bar, and a floating
- * currency cluster — none of which map cleanly to existing utilities.
+ * aperture-hsm41 — Landing §04 Diferenciais (4-card row)
+ * Ported from EuNeném Landing v2.html. The desktop row and mobile
+ * scroll-snap carousel need bespoke responsive layout rules.
  * All colors resolve to canonical tokens (--lilac-soft, --plum,
  * --coral-pink, --yellow, --pink-soft, --line, --ink-mute, --ink-soft,
  * --cream-2, --shadow-sm, --shadow-md).
@@ -4798,34 +4797,6 @@ html {
   text-wrap: pretty;
   margin-top: auto;
 }
-.diff-num {
-  font-size: clamp(72px, 9vw, 110px);
-  line-height: 0.9;
-  color: var(--plum);
-}
-.diff-num small {
-  font-size: 0.38em;
-  color: var(--ink-mute);
-  font-weight: 400;
-}
-.diff-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 12px;
-  border-radius: 999px;
-  background: var(--yellow);
-  color: var(--plum);
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  align-self: flex-start;
-}
-.diff-tag-lilac {
-  background: var(--lilac-deep);
-  color: #fff;
-}
 .diff-icon {
   width: 48px;
   height: 48px;
@@ -4867,46 +4838,9 @@ html {
   stroke-linejoin: round;
 }
 
-/* 5-card bento: hero (span 7) + since (span 5) / world-no-fee-support (4/4/4) */
-.diff-hero {
-  grid-column: span 7;
-  background: var(--plum);
-  color: #fff;
-  border: none;
-  padding: 36px;
-  min-height: 280px;
-}
-.diff-hero .diff-eyebrow {
-  color: rgba(255, 255, 255, 0.75);
-}
-.diff-hero h3 {
-  color: #fff;
-  font-size: 32px;
-}
-.diff-hero p {
-  color: rgba(255, 255, 255, 0.85);
-  font-size: 16px;
-}
-.diff-hero-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 24px;
-  margin-top: 8px;
-  flex-wrap: wrap;
-}
-.diff-hero .diff-num {
-  color: #fff;
-}
-.diff-hero .diff-num small {
-  color: rgba(255, 255, 255, 0.7);
-}
-.diff-hero .diff-tag {
-  background: var(--yellow);
-  color: var(--plum);
-}
-
+/* Four equal-width cards on one desktop row. */
 .diff-since {
-  grid-column: span 5;
+  grid-column: span 3;
 }
 .timeline-bar {
   height: 8px;
@@ -4939,17 +4873,17 @@ html {
 }
 
 .diff-world {
-  grid-column: span 4;
+  grid-column: span 3;
 }
 
 .diff-no-fee {
-  grid-column: span 4;
+  grid-column: span 3;
 }
 .diff-support {
-  grid-column: span 4;
+  grid-column: span 3;
 }
 
-/* Mobile carousel — horizontal scroll-snap (< lg keeps desktop bento) */
+/* Mobile carousel — horizontal scroll-snap (< lg keeps desktop row) */
 .diff-carousel-track {
   scrollbar-width: none;
 }
@@ -5010,24 +4944,6 @@ html {
   }
   .diff-carousel-track .diff-card:hover {
     transform: none;
-  }
-  .diff-hero {
-    padding: 28px;
-    min-height: 300px;
-  }
-  .diff-hero h3 {
-    font-size: 22px;
-  }
-  .diff-hero .diff-num {
-    font-size: clamp(64px, 18vw, 88px);
-    margin: 8px auto;
-    text-align: center;
-    width: 100%;
-  }
-  .diff-hero-row {
-    justify-content: center;
-    margin-top: 4px;
-    margin-bottom: 4px;
   }
   .diff-card h3 {
     font-size: 22px;
