@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 // aperture-hsm41 — v2 §04 Diferenciais
-// 5-card bento on desktop (lg+); horizontal scroll-snap carousel on mobile.
+// 4-card row on desktop (lg+); horizontal scroll-snap carousel on mobile.
 // Bespoke layout in tailwind.css under /* aperture-hsm41 */.
 
-const CARD_COUNT = 5;
+const CARD_COUNT = 4;
 
 export function Differential() {
   const trackRef = useRef<HTMLDivElement | null>(null);
@@ -70,22 +70,7 @@ export function Differential() {
         </div>
 
         <div ref={trackRef} className="diff-grid diff-carousel-track">
-          {/* 1. HERO — taxa */}
-          <div className="diff-card diff-hero">
-            <span className="diff-tag">menor taxa do mercado</span>
-            <h3 className="font-display">7,8% — e você ainda recebe 100%</h3>
-            <div className="diff-hero-row">
-              <div className="diff-num font-display">
-                7,8<small>%</small>
-              </div>
-            </div>
-            <p>
-              Concorrentes cobram 8% a 12% — convidado paga a taxa e você
-              recebe 100% do valor do presente.
-            </p>
-          </div>
-
-          {/* 2. Pioneira 2014 */}
+          {/* 1. Pioneira 2014 */}
           <div className="diff-card diff-since">
             <div className="diff-icon c2">
               <svg
@@ -105,7 +90,7 @@ export function Differential() {
             </p>
           </div>
 
-          {/* 3. Multimoedas */}
+          {/* 2. Multimoedas */}
           <div className="diff-card diff-world">
             <div className="diff-icon c3">
               <svg
@@ -127,7 +112,7 @@ export function Differential() {
             </p>
           </div>
 
-          {/* 4. Sem taxa de resgate */}
+          {/* 3. Sem taxa de resgate */}
           <div className="diff-card diff-no-fee">
             <div className="diff-icon c1">
               <svg
@@ -148,7 +133,7 @@ export function Differential() {
             </p>
           </div>
 
-          {/* 5. Suporte humano */}
+          {/* 4. Suporte humano */}
           <div className="diff-card diff-support">
             <div className="diff-icon c4">
               <svg
