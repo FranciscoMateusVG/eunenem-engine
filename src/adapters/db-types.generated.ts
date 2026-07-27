@@ -55,6 +55,51 @@ export interface Campanhas {
   titulo: string;
 }
 
+export interface CatalogoCategorias {
+  criado_em: Generated<Timestamp>;
+  id: string;
+  label: string;
+  position: number;
+  slug: string;
+}
+
+export interface CatalogoListaItens {
+  id: string;
+  id_lista: string;
+  id_produto: string;
+  position: number;
+  quantidade: Generated<number>;
+}
+
+export interface CatalogoListas {
+  ativo: Generated<boolean>;
+  atualizado_em: Generated<Timestamp>;
+  criado_em: Generated<Timestamp>;
+  descricao: string | null;
+  id: string;
+  image_url: string | null;
+  nome: string;
+  position: number;
+  slug: string | null;
+}
+
+export interface CatalogoProdutos {
+  ativo: Generated<boolean>;
+  atualizado_em: Generated<Timestamp>;
+  bg_color: string;
+  criado_em: Generated<Timestamp>;
+  emoji: string;
+  id: string;
+  id_categoria: string;
+  id_legado: string | null;
+  image_url: string | null;
+  nome: string;
+  popularidade: number | null;
+  position: number;
+  preco_cents: Int8;
+  quantidade_sugerida: Generated<number>;
+}
+
 export interface Cats {
   created_at: Generated<Timestamp>;
   id: string;
@@ -361,6 +406,10 @@ export interface DB {
   accounts: Accounts;
   campanha_administradores: CampanhaAdministradores;
   campanhas: Campanhas;
+  catalogo_categorias: CatalogoCategorias;
+  catalogo_lista_itens: CatalogoListaItens;
+  catalogo_listas: CatalogoListas;
+  catalogo_produtos: CatalogoProdutos;
   cats: Cats;
   cha_rifa_waitlist: ChaRifaWaitlist;
   contas: Contas;

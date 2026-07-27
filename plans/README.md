@@ -24,6 +24,7 @@ Read plans in dependency order, not file order — see the graph below.
 | 0014 | [banking-provider-and-repasse-execution](./0014-banking-provider-and-repasse-execution.md) | 📝 drafted (deferred by 0015) | ⚠️ Real bank transfers (Inter/Nubank); HIGH-RISK — v1 uses manual `transferidoEm`, automated banking is post-0015 |
 | 0015 | [contribuicao-pagamento-financeiro-collapse](./0015-contribuicao-pagamento-financeiro-collapse.md) | ✅ shipped to staging 2026-06-04 | Single Pagamento FSM; Contribuição → slot; Financeiro → module of Pagamentos; supersedes parts of 0006/0008/0012 |
 | 0016 | [multi-item-pagamento-and-quantidade](./0016-multi-item-pagamento-and-quantidade.md) | 🚧 in flight (Phase 5 — docs) | Contribuição gains `quantidade: number`; IntencaoPagamento → multi-item cart (`ItemDoPagamento[]` discriminated by `tipo`); surcharge becomes an item; uniform per-item lançamento emission; depends on 0015 + 0013 |
+| 0017 | [admin-catalogo-management](./0017-admin-catalogo-management.md)                  | 🚧 in flight (Phase 0 — foundation) | DB-backed global gift catalog; admin products/categories/curated lists; static-loader read-path retirement |
 
 ## Dependency graph
 

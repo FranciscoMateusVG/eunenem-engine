@@ -50,7 +50,7 @@ const BC_FOLDERS = ['arrecadacao', 'taxas', 'pagamentos', 'evento', 'usuario', '
  * language; they are ports to the outside world (SMTP, object storage, the
  * raw-webhook archive).
  */
-const INFRA_ADAPTER_FOLDERS = ['email', 'storage', 'webhook-archive'];
+const INFRA_ADAPTER_FOLDERS = ['catalogo', 'email', 'storage', 'webhook-archive'];
 
 /**
  * Application/orchestration folders — NOT BCs. They live only under

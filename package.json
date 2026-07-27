@@ -57,6 +57,7 @@
     "depcruise": "depcruise src",
     "verify-hooks": "node scripts/verify-hooks.js",
     "check:codegen-drift": "tsx scripts/check-codegen-drift.ts",
+    "check:catalogo-integrity": "tsx scripts/check-catalogo-integrity.ts",
     "check:barrel-exports": "tsx scripts/check-barrel-exports.ts",
     "check:server-router-resolution": "tsx scripts/check-server-router-resolution.ts",
     "check": "pnpm lint && pnpm lint:structure && pnpm depcruise && pnpm typecheck && pnpm check:codegen-drift && pnpm check:barrel-exports && pnpm check:server-router-resolution && pnpm test:coverage && tsx examples/create-cat.ts && tsx examples/create-cat.with-otel.ts && tsx examples/create-cat.hono.ts && pnpm verify-hooks",
