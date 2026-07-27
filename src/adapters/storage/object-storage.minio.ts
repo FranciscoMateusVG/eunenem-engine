@@ -5,6 +5,7 @@ import { SpanStatusCode, trace } from '@opentelemetry/api';
 import {
   CONTENT_TYPE_EXTENSAO,
   type EmitirUrlUploadCampanhaInput,
+  type EmitirUrlUploadCatalogoInput,
   type EmitirUrlUploadInput,
   type EmitirUrlUploadItemInput,
   type ObjectStorage,
@@ -167,6 +168,44 @@ export class ObjectStorageMinio implements ObjectStorage {
         // Per-campanha namespaced key (aperture-aphk8) — campanha A can
         // never overwrite campanha B's photo.
         const objectKey = `campanha/${input.idCampanha}/${input.slot}-${randomUUID()}.${ext}`;
+
+        const uploadUrl = await getSignedUrl(
+          this.s3,
+          new PutObjectCommand({
+            Bucket: this.bucket,
+            Key: objectKey,
+            ContentType: input.contentType,
+          }),
+          { expiresIn: PRESIGN_EXPIRES_IN_SECONDS },
+        );
+
+        const publicUrl = this.urlPublica(objectKey);
+
+        span.setStatus({ code: SpanStatusCode.OK });
+        return { uploadUrl, objectKey, publicUrl };
+      } catch (error) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR, message: (error as Error).message });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  async emitirUrlUploadPresignadaCatalogo(
+    input: EmitirUrlUploadCatalogoInput,
+  ): Promise<UrlUploadPresignada> {
+    return tracer.startActiveSpan('storage.emitirUrlUploadPresignadaCatalogo', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'PRESIGN_PUT' });
+      try {
+        const ext = CONTENT_TYPE_EXTENSAO[input.contentType];
+        if (ext === undefined) {
+          throw new Error(`contentType não suportado: ${input.contentType}`);
+        }
+
+        // Admin catalogue key — every path segment is server-generated.
+        const objectKey = `catalogo/produtos/${randomUUID()}.${ext}`;
 
         const uploadUrl = await getSignedUrl(
           this.s3,

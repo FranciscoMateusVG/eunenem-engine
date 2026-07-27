@@ -15,6 +15,7 @@ import type {
   FindCatalogoProdutosPageOutput,
   ReplaceCatalogoListaItensOutcome,
 } from './repository.js';
+import { CatalogoConflictError } from './repository.js';
 
 const tracer = trace.getTracer('frame');
 
@@ -328,7 +329,7 @@ export class CatalogoRepositoryMemory implements CatalogoRepository {
     for (const existing of this.categorias.values()) {
       if (existing.id === exceptId) continue;
       if (existing.slug === categoria.slug) {
-        throw new Error(`Slug de categoria ${categoria.slug} já existe`);
+        throw new CatalogoConflictError('categoria.slug', categoria.slug);
       }
     }
   }

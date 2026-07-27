@@ -38,8 +38,8 @@ generated `AppRouter` client rather than assemble HTTP URLs.
 | emoji | trimmed, 1..32 characters |
 | list description | `null` or trimmed string up to 2,000 characters |
 | search | literal case-insensitive substring, up to 200 characters |
-| price/quantity | positive safe integer |
-| popularity/position | non-negative safe integer |
+| price/quantity | positive PostgreSQL `integer` (maximum 2,147,483,647) |
+| popularity/position | non-negative PostgreSQL `integer` (maximum 2,147,483,647) |
 | pagination | page 1..100,000; page size 1..100 |
 | list items | at most 1,000; product IDs and positions must each be unique |
 
@@ -88,7 +88,7 @@ not add an instance-local counter.
   id: string;
   idLegado: string | null;
   nome: string;
-  precoCents: number;             // positive safe integer
+  precoCents: number;             // positive PostgreSQL integer
   quantidadeSugerida: number;     // positive integer
   emoji: string;
   bgColor: string;

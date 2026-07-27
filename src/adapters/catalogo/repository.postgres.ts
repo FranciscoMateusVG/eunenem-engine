@@ -17,6 +17,7 @@ import type {
   FindCatalogoProdutosPageOutput,
   ReplaceCatalogoListaItensOutcome,
 } from './repository.js';
+import { CatalogoConflictError } from './repository.js';
 
 const tracer = trace.getTracer('frame');
 
@@ -29,6 +30,17 @@ type CategoriaRow = Selectable<import('../db-types.generated.js').CatalogoCatego
 type ProdutoRow = Selectable<import('../db-types.generated.js').CatalogoProdutos>;
 type ListaRow = Selectable<import('../db-types.generated.js').CatalogoListas>;
 type ListaItemRow = Selectable<import('../db-types.generated.js').CatalogoListaItens>;
+
+interface PostgresError {
+  readonly code?: string;
+  readonly constraint?: string;
+}
+
+function isCategoriaSlugUniqueViolation(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const pgError = error as PostgresError;
+  return pgError.code === '23505' && pgError.constraint === 'catalogo_categorias_slug_key';
+}
 
 function compareText(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
@@ -157,16 +169,23 @@ export class CatalogoRepositoryPostgres implements CatalogoRepository {
 
   async createCategoria(categoria: CatalogoCategoria): Promise<void> {
     return withPostgresSpan('createCategoria', 'INSERT', async () => {
-      await this.db
-        .insertInto('catalogo_categorias')
-        .values({
-          id: categoria.id,
-          slug: categoria.slug,
-          label: categoria.label,
-          position: categoria.position,
-          criado_em: categoria.criadoEm,
-        })
-        .execute();
+      try {
+        await this.db
+          .insertInto('catalogo_categorias')
+          .values({
+            id: categoria.id,
+            slug: categoria.slug,
+            label: categoria.label,
+            position: categoria.position,
+            criado_em: categoria.criadoEm,
+          })
+          .execute();
+      } catch (error: unknown) {
+        if (isCategoriaSlugUniqueViolation(error)) {
+          throw new CatalogoConflictError('categoria.slug', categoria.slug);
+        }
+        throw error;
+      }
     });
   }
 

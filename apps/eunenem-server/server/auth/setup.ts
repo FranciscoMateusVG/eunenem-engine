@@ -28,6 +28,7 @@ import {
   EmailTransportNodemailer,
   EmailTransportNoop,
   type EmitirUrlUploadCampanhaInput,
+  type EmitirUrlUploadCatalogoInput,
   type EmitirUrlUploadInput,
   type EmitirUrlUploadItemInput,
   type ObjectStorage,
@@ -264,6 +265,12 @@ class ObjectStorageNaoConfigurado implements ObjectStorage {
 
   async emitirUrlUploadPresignadaCampanha(
     _input: EmitirUrlUploadCampanhaInput,
+  ): Promise<UrlUploadPresignada> {
+    throw new Error('storage não configurado (MINIO_* ausente)');
+  }
+
+  async emitirUrlUploadPresignadaCatalogo(
+    _input: EmitirUrlUploadCatalogoInput,
   ): Promise<UrlUploadPresignada> {
     throw new Error('storage não configurado (MINIO_* ausente)');
   }
@@ -554,29 +561,33 @@ const ServerEnvSchema = z
     // per-stack domain, the browser PUT fails to resolve (upload never persists)
     // AND every <img> points at an unreachable host (blue-? broken placeholder)
     // — exactly the reported symptom, shipped silently. Fail fast at boot:
-    // reject a non-http(s) scheme or a bare service hostname (no dot and not
-    // localhost). localhost/127.0.0.1 stay valid for a local MinIO in dev.
+    // public endpoints require HTTPS and credentials never belong in a public
+    // URL. Plain HTTP remains available only on loopback for local MinIO.
     if (env.MINIO_ENDPOINT.length > 0) {
       let hostname: string | null = null;
       let scheme: string | null = null;
+      let hasCredentials = false;
       try {
         const parsed = new URL(env.MINIO_ENDPOINT);
         hostname = parsed.hostname;
         scheme = parsed.protocol;
+        hasCredentials = parsed.username !== '' || parsed.password !== '';
       } catch {
         hostname = null;
       }
-      const localhostHosts = new Set(['localhost', '127.0.0.1', '::1']);
+      const localhostHosts = new Set(['localhost', '127.0.0.1', '[::1]']);
+      const isLoopback = hostname !== null && localhostHosts.has(hostname);
       const browserReachable =
         hostname !== null &&
-        (scheme === 'http:' || scheme === 'https:') &&
-        (hostname.includes('.') || localhostHosts.has(hostname));
+        !hasCredentials &&
+        (scheme === 'https:' || (scheme === 'http:' && isLoopback)) &&
+        (hostname.includes('.') || isLoopback);
       if (!browserReachable) {
         ctx.addIssue({
           code: 'custom',
           path: ['MINIO_ENDPOINT'],
           message:
-            "MINIO_ENDPOINT must be a browser-reachable absolute URL (the public per-stack MinIO domain, e.g. https://storage-eunenem.<host>) — NOT the internal service host like http://eunenem-minio:9000. It backs both the browser presigned PUT and every public <img> src; an internal host makes photo uploads fail and every image render a broken placeholder (aperture-9wqh1).",
+            "MINIO_ENDPOINT must be a credential-free HTTPS public URL (e.g. https://storage-eunenem.<host>) or an HTTP loopback URL for local development. Internal service hosts and non-loopback HTTP are rejected. It backs both the browser presigned PUT and every public <img> src.",
         });
       }
     }

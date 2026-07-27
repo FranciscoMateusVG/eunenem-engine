@@ -1,11 +1,11 @@
 /**
  * Object storage — infrastructure port (aperture-kcasm).
  *
- * Emits short-lived presigned PUT URLs so the client can upload profile
- * photos DIRECTLY to the bucket (MinIO / S3-compatible), bypassing the
- * server for the byte stream. The returned `objectKey` is later persisted
- * on the profile via the EXISTING `perfil.atualizar` mutation (R3) — this
- * port does NOT touch the profile.
+ * Emits short-lived presigned PUT URLs so the client can upload images
+ * DIRECTLY to the bucket (MinIO / S3-compatible), bypassing the server for
+ * the byte stream. The returned `objectKey` is persisted later by the
+ * owning profile, item, campanha, or catalogue mutation — this port does
+ * NOT touch domain state.
  *
  * NOT a domain concept — object storage is a transport artifact at the
  * infrastructure boundary (same precedent as
@@ -16,8 +16,9 @@
  *   - presigned URLs expire in 5 minutes (`expiresIn: 300`).
  *   - the upload's Content-Type is LOCKED into the presigned request, so
  *     the client cannot smuggle a different MIME type past the signature.
- *   - keys are namespaced per `idUsuario` (`perfis/<idUsuario>/...`) so
- *     user A can never overwrite user B's photo.
+ *   - keys are namespaced by their owning surface. Profile/item keys are
+ *     per-user, campanha keys are per-campanha, and admin catalogue product
+ *     keys live under `catalogo/produtos/` with a server-generated UUID.
  *
  * R5 returns the constructed `publicUrl` only — read-back (public-read or
  * presigned-GET) is Peppy's bucket-policy concern, out of scope here.
@@ -66,10 +67,22 @@ export interface EmitirUrlUploadCampanhaInput {
   readonly contentType: string;
 }
 
+/**
+ * Caller input for an admin catalogue product image upload (aperture-d4pmw).
+ *
+ * The caller controls only the validated MIME type. The adapter generates the
+ * complete key (`catalogo/produtos/<uuid>.<ext>`), so no client-controlled
+ * filename, path segment, or identifier reaches object storage.
+ */
+export interface EmitirUrlUploadCatalogoInput {
+  /** Validated upstream to one of the allowed image types; locked into the presign. */
+  readonly contentType: string;
+}
+
 export interface UrlUploadPresignada {
   /** Short-lived presigned PUT URL the client uploads the bytes to. */
   readonly uploadUrl: string;
-  /** Namespaced object key (`perfis/<idUsuario>/<slot>-<uuid>.<ext>`) to persist on the profile. */
+  /** Server-generated, surface-namespaced object key to persist on the owning record. */
   readonly objectKey: string;
   /** Constructed public URL for later read-back (assumes public-read / presigned-GET bucket policy). */
   readonly publicUrl: string;
@@ -112,6 +125,19 @@ export interface ObjectStorage {
    */
   emitirUrlUploadPresignadaCampanha(
     input: EmitirUrlUploadCampanhaInput,
+  ): Promise<UrlUploadPresignada>;
+
+  /**
+   * Mint a presigned PUT URL for an admin catalogue product image
+   * (aperture-d4pmw).
+   *
+   * The key is generated entirely server-side as
+   * `catalogo/produtos/<uuid>.<ext>`. The Content-Type is locked into the
+   * signature and the URL expires after 5 minutes, matching every other image
+   * upload surface.
+   */
+  emitirUrlUploadPresignadaCatalogo(
+    input: EmitirUrlUploadCatalogoInput,
   ): Promise<UrlUploadPresignada>;
 
   /**

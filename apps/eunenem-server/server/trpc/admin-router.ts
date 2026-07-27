@@ -9,9 +9,9 @@
  *                 `listByUsuario`, `listByContribuinte`, `findById`
  *                 (contribuicoes lookups are W3 territory — rsidz.4)
  *
- * v1 has NO auth gate (operator directive). Anyone with the URL gets in.
- * When auth lands in v2, this is one of the boundaries that gates against
- * the operator role.
+ * The entire `admin.*` surface is protected by `adminProcedure`: callers need
+ * a valid session and an email present in `ADMIN_ALLOWED_EMAILS`. The gate is
+ * server-side; client redirects are presentation only.
  *
  * Tenant scope is hardcoded to `ID_PLATAFORMA_EUNENEM`. Multi-tenancy is
  * deferred; for v1 every admin query is implicitly scoped to eunenem.
@@ -21,6 +21,7 @@
  * aggregate over the wire — that's both a footprint and a discipline win:
  * the wire contract is decoupled from the domain model.
  */
+import { randomUUID } from "node:crypto";
 import { initTRPC, TRPCError } from "@trpc/server";
 import { z } from "zod";
 import type { Campanha } from "../../../../src/domain/arrecadacao/entities/campanha.js";
@@ -37,6 +38,7 @@ import type { IdContribuicaoPagamento } from "../../../../src/domain/pagamentos/
 import {
   aprovarRepasseRecebedor,
   cancelarRepasseRecebedor,
+  CatalogoConflictError,
   FinanceiroInputInvalidoError,
   FinanceiroRepasseNaoEncontradoError,
   FinanceiroRepasseStatusInvalidoError,
@@ -45,6 +47,11 @@ import {
   resolverManualPagoRepasse,
   retentarTransferenciaRepasse,
 } from "../../../../src/index.js";
+import type {
+  CatalogoCategoria,
+  CatalogoLista,
+  CatalogoProduto,
+} from "../../../../src/adapters/catalogo/repository.js";
 import type { TrpcContext } from "./context.js";
 import { isEmailAdmin } from "../auth/admin-allowlist.js";
 import {
@@ -2337,12 +2344,660 @@ const repassesRouter = t.router({
         }
         throw error;
       }
+  }),
+});
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * admin.catalog — editable catalogue administration (aperture-d4pmw).
+ *
+ * The repository persists full records, so this transport layer owns input
+ * validation, server-generated identifiers, patch semantics and timestamps.
+ * Every procedure uses the existing adminProcedure security boundary above.
+ * ────────────────────────────────────────────────────────────────────── */
+
+const UuidSchema = z.string().uuid();
+const IsoDateSchema = z.string().datetime();
+const POSTGRES_INTEGER_MAX = 2_147_483_647;
+const SafePositiveIntegerSchema = z
+  .number()
+  .int()
+  .min(1)
+  .max(POSTGRES_INTEGER_MAX);
+const NonNegativeIntegerSchema = z
+  .number()
+  .int()
+  .min(0)
+  .max(POSTGRES_INTEGER_MAX);
+const ProductNameSchema = z.string().trim().min(1).max(200);
+const ListNameSchema = z.string().trim().min(1).max(200);
+const CategoryLabelSchema = z.string().trim().min(1).max(120);
+const DescriptionSchema = z.string().trim().max(2_000);
+const EmojiSchema = z.string().trim().min(1).max(32);
+const BG_COLOR_TOKENS = [
+  "var(--blue)",
+  "var(--blue-soft)",
+  "var(--cream-2)",
+  "var(--lilac-soft)",
+  "var(--pink-soft)",
+  "var(--yellow-soft)",
+] as const;
+const BgColorInputSchema = z.enum(BG_COLOR_TOKENS);
+const BgColorOutputSchema = z
+  .string()
+  .refine((value) => (BG_COLOR_TOKENS as readonly string[]).includes(value));
+const CATALOG_IMAGE_BASE = new URL("https://catalogo.eunenem.invalid");
+const HTTP_LOOPBACK_HOSTS = new Set([
+  "localhost",
+  "127.0.0.1",
+  "::1",
+  "[::1]",
+]);
+
+const ImageUrlSchema = z
+  .string()
+  .min(1)
+  .max(2048)
+  .refine((value) => {
+    // WHATWG normalizes backslashes in special URLs. Reject them before
+    // parsing so `/\evil.example` can never resolve as protocol-relative.
+    if (value.includes("\\")) return false;
+    if (value.startsWith("/")) {
+      if (value.startsWith("//")) return false;
+      return new URL(value, CATALOG_IMAGE_BASE).origin === CATALOG_IMAGE_BASE.origin;
+    }
+    try {
+      const parsed = new URL(value);
+      if (parsed.username !== "" || parsed.password !== "") return false;
+      if (parsed.protocol === "https:") return true;
+      return (
+        parsed.protocol === "http:" && HTTP_LOOPBACK_HOSTS.has(parsed.hostname)
+      );
+    } catch {
+      return false;
+    }
+  }, "imageUrl deve ser local à origem, HTTPS sem credenciais ou HTTP loopback");
+
+const CategoriaSlugSchema = z
+  .string()
+  .max(80)
+  .regex(
+    /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
+    "slug deve usar somente minúsculas, números e hífens",
+  )
+  .refine((value) => value !== "personalizado", {
+    message: "slug reservado",
+  });
+
+const ProdutoAdminDTOSchema = z.object({
+  id: UuidSchema,
+  idLegado: z.string().nullable(),
+  nome: z.string().min(1).max(200),
+  precoCents: SafePositiveIntegerSchema,
+  quantidadeSugerida: SafePositiveIntegerSchema,
+  emoji: z.string().min(1).max(32),
+  bgColor: BgColorOutputSchema,
+  idCategoria: UuidSchema,
+  position: NonNegativeIntegerSchema,
+  imageUrl: ImageUrlSchema.nullable(),
+  popularidade: NonNegativeIntegerSchema.nullable(),
+  ativo: z.boolean(),
+  criadoEm: IsoDateSchema,
+  atualizadoEm: IsoDateSchema,
+});
+
+const CategoriaAdminDTOSchema = z.object({
+  id: UuidSchema,
+  slug: z.string().min(1).max(80),
+  label: z.string().min(1).max(120),
+  position: NonNegativeIntegerSchema,
+  quantidadeProdutos: NonNegativeIntegerSchema,
+  criadoEm: IsoDateSchema,
+});
+
+const ListaAdminDTOSchema = z.object({
+  id: UuidSchema,
+  slug: z.string().max(80).nullable(),
+  nome: z.string().min(1).max(200),
+  descricao: DescriptionSchema.nullable(),
+  imageUrl: ImageUrlSchema.nullable(),
+  position: NonNegativeIntegerSchema,
+  ativo: z.boolean(),
+  quantidadeItens: NonNegativeIntegerSchema,
+  criadoEm: IsoDateSchema,
+  atualizadoEm: IsoDateSchema,
+});
+
+const ListaAdminDetailDTOSchema = ListaAdminDTOSchema.extend({
+  items: z.array(
+    z.object({
+      idProduto: UuidSchema,
+      quantidade: SafePositiveIntegerSchema,
+      position: NonNegativeIntegerSchema,
     }),
+  ),
+});
+
+function produtoAdminDTO(produto: CatalogoProduto) {
+  return {
+    id: produto.id,
+    idLegado: produto.idLegado,
+    nome: produto.nome,
+    precoCents: produto.precoCents,
+    quantidadeSugerida: produto.quantidadeSugerida,
+    emoji: produto.emoji,
+    bgColor: produto.bgColor,
+    idCategoria: produto.idCategoria,
+    position: produto.position,
+    imageUrl: produto.imageUrl,
+    popularidade: produto.popularidade,
+    ativo: produto.ativo,
+    criadoEm: produto.criadoEm.toISOString(),
+    atualizadoEm: produto.atualizadoEm.toISOString(),
+  };
+}
+
+function categoriaAdminDTO(
+  categoria: CatalogoCategoria,
+  quantidadeProdutos: number,
+) {
+  return {
+    id: categoria.id,
+    slug: categoria.slug,
+    label: categoria.label,
+    position: categoria.position,
+    quantidadeProdutos,
+    criadoEm: categoria.criadoEm.toISOString(),
+  };
+}
+
+function listaAdminDTO(lista: CatalogoLista, quantidadeItens: number) {
+  return {
+    id: lista.id,
+    slug: lista.slug,
+    nome: lista.nome,
+    descricao: lista.descricao,
+    imageUrl: lista.imageUrl,
+    position: lista.position,
+    ativo: lista.ativo,
+    quantidadeItens,
+    criadoEm: lista.criadoEm.toISOString(),
+    atualizadoEm: lista.atualizadoEm.toISOString(),
+  };
+}
+
+function catalogNotFound(message: string): TRPCError {
+  return new TRPCError({ code: "NOT_FOUND", message });
+}
+
+const CreateProductInputSchema = z
+  .object({
+    nome: ProductNameSchema,
+    precoCents: SafePositiveIntegerSchema,
+    quantidadeSugerida: SafePositiveIntegerSchema.default(1),
+    emoji: EmojiSchema,
+    bgColor: BgColorInputSchema,
+    idCategoria: UuidSchema,
+    imageUrl: ImageUrlSchema.nullable().optional().default(null),
+    popularidade: NonNegativeIntegerSchema.nullable().optional().default(null),
+  })
+  .strict();
+
+const UpdateProductInputSchema = z
+  .object({
+    id: UuidSchema,
+    nome: ProductNameSchema.optional(),
+    precoCents: SafePositiveIntegerSchema.optional(),
+    quantidadeSugerida: SafePositiveIntegerSchema.optional(),
+    emoji: EmojiSchema.optional(),
+    bgColor: BgColorInputSchema.optional(),
+    idCategoria: UuidSchema.optional(),
+    imageUrl: ImageUrlSchema.nullable().optional(),
+    popularidade: NonNegativeIntegerSchema.nullable().optional(),
+  })
+  .strict()
+  .refine(
+    (input) =>
+      input.nome !== undefined ||
+      input.precoCents !== undefined ||
+      input.quantidadeSugerida !== undefined ||
+      input.emoji !== undefined ||
+      input.bgColor !== undefined ||
+      input.idCategoria !== undefined ||
+      input.imageUrl !== undefined ||
+      input.popularidade !== undefined,
+    "ao menos um campo deve ser informado",
+  );
+
+const UpdateListInputSchema = z
+  .object({
+    id: UuidSchema,
+    nome: ListNameSchema.optional(),
+    descricao: DescriptionSchema.nullable().optional(),
+    imageUrl: ImageUrlSchema.nullable().optional(),
+  })
+  .strict()
+  .refine(
+    (input) =>
+      input.nome !== undefined ||
+      input.descricao !== undefined ||
+      input.imageUrl !== undefined,
+    "ao menos um campo deve ser informado",
+  );
+
+const catalogRouter = t.router({
+  listProducts: adminProcedure
+    .input(
+      z
+        .object({
+          search: z.string().max(200).optional(),
+          idCategoria: UuidSchema.optional(),
+          includeInactive: z.boolean().default(false),
+          page: z.number().int().min(1).max(100_000).default(1),
+          pageSize: z.number().int().min(1).max(100).default(20),
+        })
+        .strict()
+        .default({ includeInactive: false, page: 1, pageSize: 20 }),
+    )
+    .output(
+      z.object({
+        products: z.array(ProdutoAdminDTOSchema),
+        total: NonNegativeIntegerSchema,
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const result = await ctx.deps.catalogoRepository.findProdutosPage({
+        search: input.search,
+        idCategoria: input.idCategoria,
+        includeInactive: input.includeInactive,
+        offset: (input.page - 1) * input.pageSize,
+        limit: input.pageSize,
+      });
+      return {
+        products: result.items.map(({ produto }) => produtoAdminDTO(produto)),
+        total: result.total,
+      };
+    }),
+
+  createProduct: adminProcedure
+    .input(CreateProductInputSchema)
+    .output(ProdutoAdminDTOSchema)
+    .mutation(async ({ ctx, input }) => {
+      const categoria = await ctx.deps.catalogoRepository.findCategoriaById(
+        input.idCategoria,
+      );
+      if (!categoria) throw catalogNotFound("Categoria não encontrada.");
+
+      const now = ctx.deps.clock();
+      const produto: CatalogoProduto = {
+        id: randomUUID(),
+        idLegado: null,
+        nome: input.nome,
+        precoCents: input.precoCents,
+        quantidadeSugerida: input.quantidadeSugerida,
+        emoji: input.emoji,
+        bgColor: input.bgColor,
+        idCategoria: input.idCategoria,
+        position:
+          await ctx.deps.catalogoRepository.findNextProdutoPosition(
+            input.idCategoria,
+          ),
+        imageUrl: input.imageUrl,
+        popularidade: input.popularidade,
+        ativo: true,
+        criadoEm: now,
+        atualizadoEm: now,
+      };
+      await ctx.deps.catalogoRepository.createProduto(produto);
+      return produtoAdminDTO(produto);
+    }),
+
+  updateProduct: adminProcedure
+    .input(UpdateProductInputSchema)
+    .output(ProdutoAdminDTOSchema)
+    .mutation(async ({ ctx, input }) => {
+      const existing = await ctx.deps.catalogoRepository.findProdutoById(
+        input.id,
+      );
+      if (!existing) throw catalogNotFound("Produto não encontrado.");
+
+      const categoryChanged =
+        input.idCategoria !== undefined &&
+        input.idCategoria !== existing.idCategoria;
+      if (categoryChanged) {
+        const categoria =
+          await ctx.deps.catalogoRepository.findCategoriaById(
+            input.idCategoria as string,
+          );
+        if (!categoria) throw catalogNotFound("Categoria não encontrada.");
+      }
+
+      const idCategoria = input.idCategoria ?? existing.idCategoria;
+      const produto: CatalogoProduto = {
+        ...existing,
+        nome: input.nome ?? existing.nome,
+        precoCents: input.precoCents ?? existing.precoCents,
+        quantidadeSugerida:
+          input.quantidadeSugerida ?? existing.quantidadeSugerida,
+        emoji: input.emoji ?? existing.emoji,
+        bgColor: input.bgColor ?? existing.bgColor,
+        idCategoria,
+        position: categoryChanged
+          ? await ctx.deps.catalogoRepository.findNextProdutoPosition(
+              idCategoria,
+            )
+          : existing.position,
+        imageUrl:
+          input.imageUrl === undefined ? existing.imageUrl : input.imageUrl,
+        popularidade:
+          input.popularidade === undefined
+            ? existing.popularidade
+            : input.popularidade,
+        atualizadoEm: ctx.deps.clock(),
+      };
+      const updated =
+        await ctx.deps.catalogoRepository.updateProduto(produto);
+      if (!updated) throw catalogNotFound("Produto não encontrado.");
+      return produtoAdminDTO(produto);
+    }),
+
+  setProductAtivo: adminProcedure
+    .input(z.object({ id: UuidSchema, ativo: z.boolean() }).strict())
+    .output(ProdutoAdminDTOSchema)
+    .mutation(async ({ ctx, input }) => {
+      const existing = await ctx.deps.catalogoRepository.findProdutoById(
+        input.id,
+      );
+      if (!existing) throw catalogNotFound("Produto não encontrado.");
+      const produto: CatalogoProduto = {
+        ...existing,
+        ativo: input.ativo,
+        atualizadoEm: ctx.deps.clock(),
+      };
+      const updated =
+        await ctx.deps.catalogoRepository.updateProduto(produto);
+      if (!updated) throw catalogNotFound("Produto não encontrado.");
+      return produtoAdminDTO(produto);
+    }),
+
+  listCategories: adminProcedure
+    .input(z.object({}).strict().optional())
+    .output(z.array(CategoriaAdminDTOSchema))
+    .query(async ({ ctx }) => {
+      const rows =
+        await ctx.deps.catalogoRepository.findCategoriasComContagem();
+      return rows.map(({ categoria, quantidadeProdutos }) =>
+        categoriaAdminDTO(categoria, quantidadeProdutos),
+      );
+    }),
+
+  createCategory: adminProcedure
+    .input(
+      z.object({
+        slug: CategoriaSlugSchema,
+        label: CategoryLabelSchema,
+        position: NonNegativeIntegerSchema,
+      }).strict(),
+    )
+    .output(CategoriaAdminDTOSchema)
+    .mutation(async ({ ctx, input }) => {
+      const categoria: CatalogoCategoria = {
+        id: randomUUID(),
+        slug: input.slug,
+        label: input.label,
+        position: input.position,
+        criadoEm: ctx.deps.clock(),
+      };
+      try {
+        await ctx.deps.catalogoRepository.createCategoria(categoria);
+      } catch (error: unknown) {
+        if (error instanceof CatalogoConflictError) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "Slug de categoria já existe.",
+          });
+        }
+        throw error;
+      }
+      return categoriaAdminDTO(categoria, 0);
+    }),
+
+  updateCategory: adminProcedure
+    .input(
+      z
+        .object({
+          id: UuidSchema,
+          label: CategoryLabelSchema.optional(),
+          position: NonNegativeIntegerSchema.optional(),
+        })
+        .strict()
+        .refine(
+          (input) => input.label !== undefined || input.position !== undefined,
+          "ao menos um campo deve ser informado",
+        ),
+    )
+    .output(CategoriaAdminDTOSchema)
+    .mutation(async ({ ctx, input }) => {
+      const currentRows =
+        await ctx.deps.catalogoRepository.findCategoriasComContagem();
+      const current = currentRows.find(
+        ({ categoria }) => categoria.id === input.id,
+      );
+      if (!current) throw catalogNotFound("Categoria não encontrada.");
+      const categoria: CatalogoCategoria = {
+        ...current.categoria,
+        label: input.label ?? current.categoria.label,
+        position: input.position ?? current.categoria.position,
+      };
+      const updated =
+        await ctx.deps.catalogoRepository.updateCategoria(categoria);
+      if (!updated) throw catalogNotFound("Categoria não encontrada.");
+      return categoriaAdminDTO(categoria, current.quantidadeProdutos);
+    }),
+
+  deleteCategory: adminProcedure
+    .input(z.object({ id: UuidSchema }).strict())
+    .output(z.object({ deleted: z.literal(true) }))
+    .mutation(async ({ ctx, input }) => {
+      const outcome =
+        await ctx.deps.catalogoRepository.deleteCategoriaVazia(input.id);
+      if (outcome === "not_found") {
+        throw catalogNotFound("Categoria não encontrada.");
+      }
+      if (outcome === "not_empty") {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "Categoria possui produtos.",
+        });
+      }
+      return { deleted: true as const };
+    }),
+
+  listLists: adminProcedure
+    .input(
+      z
+        .object({
+          includeInactive: z.boolean().default(false),
+        })
+        .strict()
+        .default({ includeInactive: false }),
+    )
+    .output(z.array(ListaAdminDTOSchema))
+    .query(async ({ ctx, input }) => {
+      const rows = await ctx.deps.catalogoRepository.findListasResumo(input);
+      return rows.map(({ lista, quantidadeItens }) =>
+        listaAdminDTO(lista, quantidadeItens),
+      );
+    }),
+
+  getList: adminProcedure
+    .input(z.object({ id: UuidSchema }).strict())
+    .output(ListaAdminDetailDTOSchema)
+    .query(async ({ ctx, input }) => {
+      const current =
+        await ctx.deps.catalogoRepository.findListaByIdComItens(input.id);
+      if (!current) throw catalogNotFound("Lista não encontrada.");
+      return {
+        ...listaAdminDTO(current.lista, current.itens.length),
+        items: current.itens.map(({ item }) => ({
+          idProduto: item.idProduto,
+          quantidade: item.quantidade,
+          position: item.position,
+        })),
+      };
+    }),
+
+  createList: adminProcedure
+    .input(
+      z.object({
+        nome: ListNameSchema,
+        descricao: DescriptionSchema.nullable().optional().default(null),
+        imageUrl: ImageUrlSchema.nullable().optional().default(null),
+      }).strict(),
+    )
+    .output(ListaAdminDTOSchema)
+    .mutation(async ({ ctx, input }) => {
+      const now = ctx.deps.clock();
+      const lista: CatalogoLista = {
+        id: randomUUID(),
+        slug: null,
+        nome: input.nome,
+        descricao: input.descricao,
+        imageUrl: input.imageUrl,
+        position: await ctx.deps.catalogoRepository.findNextListaPosition(),
+        ativo: true,
+        criadoEm: now,
+        atualizadoEm: now,
+      };
+      await ctx.deps.catalogoRepository.createLista(lista);
+      return listaAdminDTO(lista, 0);
+    }),
+
+  updateList: adminProcedure
+    .input(UpdateListInputSchema)
+    .output(ListaAdminDTOSchema)
+    .mutation(async ({ ctx, input }) => {
+      const current =
+        await ctx.deps.catalogoRepository.findListaByIdComItens(input.id);
+      if (!current) throw catalogNotFound("Lista não encontrada.");
+      const lista: CatalogoLista = {
+        ...current.lista,
+        nome: input.nome ?? current.lista.nome,
+        descricao:
+          input.descricao === undefined
+            ? current.lista.descricao
+            : input.descricao,
+        imageUrl:
+          input.imageUrl === undefined
+            ? current.lista.imageUrl
+            : input.imageUrl,
+        atualizadoEm: ctx.deps.clock(),
+      };
+      const updated = await ctx.deps.catalogoRepository.updateLista(lista);
+      if (!updated) throw catalogNotFound("Lista não encontrada.");
+      return listaAdminDTO(lista, current.itens.length);
+    }),
+
+  setListAtivo: adminProcedure
+    .input(z.object({ id: UuidSchema, ativo: z.boolean() }).strict())
+    .output(ListaAdminDTOSchema)
+    .mutation(async ({ ctx, input }) => {
+      const current =
+        await ctx.deps.catalogoRepository.findListaByIdComItens(input.id);
+      if (!current) throw catalogNotFound("Lista não encontrada.");
+      const lista: CatalogoLista = {
+        ...current.lista,
+        ativo: input.ativo,
+        atualizadoEm: ctx.deps.clock(),
+      };
+      const updated = await ctx.deps.catalogoRepository.updateLista(lista);
+      if (!updated) throw catalogNotFound("Lista não encontrada.");
+      return listaAdminDTO(lista, current.itens.length);
+    }),
+
+  setListItems: adminProcedure
+    .input(
+      z.object({
+        idLista: UuidSchema,
+        items: z
+          .array(
+            z.object({
+              idProduto: UuidSchema,
+              quantidade: SafePositiveIntegerSchema,
+              position: NonNegativeIntegerSchema,
+            }).strict(),
+          )
+          .max(1_000),
+      }).strict(),
+    )
+    .output(z.object({ updated: z.literal(true) }))
+    .mutation(async ({ ctx, input }) => {
+      const productIds = new Set<string>();
+      const positions = new Set<number>();
+      for (const item of input.items) {
+        if (productIds.has(item.idProduto)) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Produto duplicado na lista.",
+          });
+        }
+        if (positions.has(item.position)) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Posição duplicada na lista.",
+          });
+        }
+        productIds.add(item.idProduto);
+        positions.add(item.position);
+      }
+
+      const outcome =
+        await ctx.deps.catalogoRepository.replaceListaItens(
+          input.idLista,
+          input.items.map((item) => ({
+            id: randomUUID(),
+            idLista: input.idLista,
+            idProduto: item.idProduto,
+            quantidade: item.quantidade,
+            position: item.position,
+          })),
+        );
+      if (outcome.status === "list_not_found") {
+        throw catalogNotFound("Lista não encontrada.");
+      }
+      if (outcome.status === "products_not_found") {
+        throw catalogNotFound("Produto referenciado não encontrado.");
+      }
+      return { updated: true as const };
+    }),
+
+  emitirUrlUploadImagemProduto: adminProcedure
+    .input(
+      z.object({
+        contentType: z.enum(["image/jpeg", "image/png", "image/webp"]),
+      }).strict(),
+    )
+    .output(
+      z.object({
+        uploadUrl: z.string(),
+        objectKey: z
+          .string()
+          .regex(
+            /^catalogo\/produtos\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(?:jpg|png|webp)$/,
+          ),
+        publicUrl: ImageUrlSchema,
+      }),
+    )
+    .mutation(async ({ ctx, input }) =>
+      ctx.deps.objectStorage.emitirUrlUploadPresignadaCatalogo(input),
+    ),
 });
 
 export const adminRouter = t.router({
   /** Nested sub-router for usuarios browse + paginated list. */
   usuarios: usuariosRouter,
+
+  /** Editable catalogue administration. Every child inherits adminProcedure. */
+  catalog: catalogRouter,
 
   /**
    * Prefix-search usuarios by email. Case-insensitive (the postgres

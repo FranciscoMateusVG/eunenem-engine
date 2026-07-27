@@ -32,6 +32,7 @@ export type {
   FindCatalogoProdutosPageOutput,
   ReplaceCatalogoListaItensOutcome,
 } from './adapters/catalogo/repository.js';
+export { CatalogoConflictError } from './adapters/catalogo/repository.js';
 export { CatalogoRepositoryMemory } from './adapters/catalogo/repository.memory.js';
 export { CatalogoRepositoryPostgres } from './adapters/catalogo/repository.postgres.js';
 export type { Database } from './adapters/database.js';
@@ -119,6 +120,7 @@ export {
 // aperture-kcasm: object storage — presigned-PUT photo uploads (infra boundary).
 export type {
   EmitirUrlUploadCampanhaInput,
+  EmitirUrlUploadCatalogoInput,
   EmitirUrlUploadInput,
   EmitirUrlUploadItemInput,
   ObjectStorage,

@@ -8,6 +8,7 @@ import type {
   CatalogoProduto,
   CatalogoRepository,
 } from '../../src/adapters/catalogo/repository.js';
+import { CatalogoConflictError } from '../../src/adapters/catalogo/repository.js';
 
 const CREATED_AT = new Date('2026-07-27T12:00:00.000Z');
 const UPDATED_AT = new Date('2026-07-27T13:00:00.000Z');
@@ -112,6 +113,15 @@ export function describeCatalogoRepositoryConformance(
       expect(await repo.updateCategoria(updated)).toBe(true);
       expect(await repo.findCategoriaById(original.id)).toEqual(updated);
       expect(await repo.updateCategoria(makeCatalogoCategoria())).toBe(false);
+    });
+
+    it('maps a duplicate category slug to the stable typed conflict', async () => {
+      const original = makeCatalogoCategoria({ slug: 'slug-unico' });
+      await repo.createCategoria(original);
+
+      await expect(
+        repo.createCategoria(makeCatalogoCategoria({ slug: original.slug })),
+      ).rejects.toBeInstanceOf(CatalogoConflictError);
     });
 
     it('returns category counts including inactive products in category order', async () => {

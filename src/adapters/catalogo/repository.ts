@@ -107,6 +107,21 @@ export type ReplaceCatalogoListaItensOutcome =
     };
 
 /**
+ * Stable port-level conflict surfaced by both adapters when a catalogue
+ * category slug is already in use. Transport callers map this type to their
+ * own conflict vocabulary without parsing database or localized messages.
+ */
+export class CatalogoConflictError extends Error {
+  constructor(
+    readonly field: 'categoria.slug',
+    readonly value: string,
+  ) {
+    super(`Valor de catálogo já existe para ${field}`);
+    this.name = 'CatalogoConflictError';
+  }
+}
+
+/**
  * Persistence port used by the catalogue administration and public read
  * routers. Mutations receive complete records; route/use-case code owns
  * validation, UUID generation and timestamps.

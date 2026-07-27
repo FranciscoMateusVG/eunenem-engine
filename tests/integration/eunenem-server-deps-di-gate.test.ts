@@ -240,9 +240,26 @@ describe('eunenem-server MINIO_ENDPOINT boot guard (aperture-9wqh1)', () => {
     ).not.toThrow();
   });
 
+  it('rejects non-loopback HTTP endpoints', () => {
+    expect(() =>
+      loadEnv({
+        ...baseEnv(),
+        MINIO_ENDPOINT: 'http://storage-eunenem.test.pocketsoftware.com.br',
+      }),
+    ).toThrow(/MINIO_ENDPOINT/);
+  });
+
+  it.each([
+    'https://access:secret@storage-eunenem.test.pocketsoftware.com.br',
+    'http://access:secret@localhost:9000',
+  ])('rejects endpoints with embedded credentials: %s', (endpoint) => {
+    expect(() => loadEnv({ ...baseEnv(), MINIO_ENDPOINT: endpoint })).toThrow(/MINIO_ENDPOINT/);
+  });
+
   it('accepts a local MinIO on localhost for dev', () => {
     expect(() => loadEnv({ ...baseEnv(), MINIO_ENDPOINT: 'http://localhost:9000' })).not.toThrow();
     expect(() => loadEnv({ ...baseEnv(), MINIO_ENDPOINT: 'http://127.0.0.1:9000' })).not.toThrow();
+    expect(() => loadEnv({ ...baseEnv(), MINIO_ENDPOINT: 'http://[::1]:9000' })).not.toThrow();
   });
 
   it('is skipped entirely when MINIO_ENDPOINT is unset (fresh-clone boot)', () => {
