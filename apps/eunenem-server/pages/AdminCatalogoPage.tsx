@@ -1,6 +1,7 @@
 import { useId, useState } from "react";
 import { AdminShell } from "@/components/eunenem/admin/AdminShell";
 import { CategoriasTab } from "@/components/eunenem/admin/catalogo/CategoriasTab";
+import { ListasTab } from "@/components/eunenem/admin/catalogo/ListasTab";
 import { ProdutosTab } from "@/components/eunenem/admin/catalogo/ProdutosTab";
 
 /**
@@ -22,18 +23,10 @@ import { ProdutosTab } from "@/components/eunenem/admin/catalogo/ProdutosTab";
  * headers). Per surface-fetch-errors, every data panel renders error state
  * DISTINCTLY from empty state — never a silent-empty fallback.
  *
- * DATA LAYER (stacked-pr-verification, aperture-ytct2 build anchor):
- *   The tab bodies consume the B2 tRPC contract (aperture-d4pmw,
- *   plans/0017-catalog-api-contract.md). B2's admin.catalog.* + catalogo.*
- *   routers are not yet on origin and the contract is still being amended
- *   (admin.catalog.getList detail proc incoming). Following the house
- *   RepassesStubData playbook, each tab wires through a contract-shaped
- *   data hook so the tRPC swap is a one-file change once B2 lands and the
- *   call sites are verified against Rex's actual handler bodies.
- *
- * This module currently ships the SHELL + tab structure. Tab bodies land
- * once the amended B2 contract is final (won't merge ahead of B2 —
- * hold-the-dependent-merge).
+ * DATA LAYER: the tab bodies consume the merged B2 tRPC contract
+ * (aperture-d4pmw / PR #38): admin.catalog.* for management and
+ * catalogo.listSections for the LISTAS item picker. DTO shapes are inferred
+ * from AppRouter (inferRouterOutputs) so the UI tracks the server contract.
  */
 
 type TabKey = "produtos" | "listas" | "categorias";
@@ -61,10 +54,7 @@ export function AdminCatalogoPage() {
             <ProdutosTab />
           </TabPanel>
           <TabPanel active={active} tab="listas">
-            <PendingPanel
-              title="Listas"
-              note="listas prontas · criar/editar · seletor de itens com quantidade"
-            />
+            <ListasTab />
           </TabPanel>
           <TabPanel active={active} tab="categorias">
             <CategoriasTab />
@@ -165,29 +155,6 @@ function TabPanel({
   return (
     <div role="tabpanel" hidden={hidden} aria-hidden={hidden}>
       {!hidden && children}
-    </div>
-  );
-}
-
-/* -----------------------------------------------------------------------
- * PendingPanel — placeholder shown while the tab body waits on the B2
- * tRPC routers. Uses the admin empty-state chrome so the surface reads as
- * intentionally in-progress, not broken. Replaced tab-by-tab once the
- * amended B2 contract is final.
- * --------------------------------------------------------------------- */
-
-function PendingPanel({ title, note }: { title: string; note: string }) {
-  return (
-    <div className="rounded-md border border-dashed border-line bg-paper px-5 py-10 text-center">
-      <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-ink-soft">
-        {title}
-      </p>
-      <p className="mt-2 font-mono text-[12px] italic tracking-[0.04em] text-ink-mute">
-        {note}
-      </p>
-      <p className="mt-3 font-mono text-[10px] uppercase tracking-[0.14em] text-ink-mute">
-        aguardando API do catálogo
-      </p>
     </div>
   );
 }
