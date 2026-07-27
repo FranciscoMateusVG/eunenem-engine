@@ -201,6 +201,9 @@ O teste de migração compara o banco com os snapshots, não apenas contagens. O
 
 ## Backend contracts
 
+The procedure-by-procedure wire contract, including validation, errors, examples and rate tiers,
+lives in [`0017-catalog-api-contract.md`](./0017-catalog-api-contract.md).
+
 ### Repository port
 
 `src/adapters/catalogo/repository.ts` define um `CatalogoRepository` único para o contexto,
@@ -239,11 +242,16 @@ Sub-router `admin.catalog`, composto no admin router. Todo procedimento usa `adm
 - `updateCategory({ id, label?, position? })`
 - `deleteCategory({ id })` → `CONFLICT` quando não vazia
 - `listLists({ includeInactive? })`
+- `getList({ id })` → detalhe com itens ordenados; leitura necessária antes do replace completo
 - `createList({ nome, descricao?, imageUrl? })`
 - `updateList({ id, ...partial })`
 - `setListAtivo({ id, ativo })`
 - `setListItems({ idLista, items: [{ idProduto, quantidade, position }] })`
 - `emitirUrlUploadImagemProduto({ contentType })`
+
+`getList` is an implementation-time contract correction: the original sketch exposed only list
+summaries plus a whole-set replacement mutation, which made editing an existing or inactive list
+impossible without first reading its persisted item set.
 
 `ProdutoAdminDTO` expõe a linha completa, inclusive `ativo`, `idLegado`, `precoCents` e `position`.
 `position` é read-only no contrato admin v1. Schemas zod validam entrada e saída. Cada classe de

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { BetterAuthOptions, User } from 'better-auth';
 import { betterAuth } from 'better-auth';
 import { magicLink } from 'better-auth/plugins';
+import { sql } from 'kysely';
 import { derivarNomeExibicaoFallback } from '../../domain/usuario/value-objects/nome-exibicao-usuario.js';
 import type { Database } from '../database.js';
 
@@ -339,54 +340,36 @@ const MAGIC_LINK_IP_MAX_SENDS = 5; // sends per IP per window
  * counter row is namespaced `magic-link-email:<normalized-email>` so it never
  * collides with better-auth's own `<ip>:<path>` keys in the shared table.
  *
- * Read-then-write is non-atomic under a concurrent burst (this mirrors
- * better-auth's own onResponseRateLimit shape) — acceptable for a send-cost
- * shield: a small over-count on a simultaneous burst cannot defeat the cap's
- * intent. On a storage error we FAIL-CLOSED (skip the send) rather than open an
- * unbounded send path; in practice better-auth has already inserted the
- * verification token (proving the DB is up) before sendMagicLink runs, so the
- * catch is for truly exotic failures only.
+ * The one-row fixed window is updated atomically. `last_request` stores the
+ * window START and is preserved for in-window sends and denials, so retries
+ * cannot extend a lockout indefinitely. On a storage error we FAIL-CLOSED
+ * (skip the send) rather than open an unbounded send path; in practice
+ * better-auth has already inserted the verification token (proving the DB is
+ * up) before sendMagicLink runs, so the catch is for truly exotic failures
+ * only.
  */
 async function consumeMagicLinkEmailBudget(db: Database, email: string): Promise<boolean> {
   const key = `magic-link-email:${email.trim().toLowerCase()}`;
   const now = Date.now();
+  const resetBoundary = now - MAGIC_LINK_EMAIL_WINDOW_MS;
   try {
-    const row = await db
-      .selectFrom('rate_limit')
-      .select(['count', 'last_request'])
-      .where('key', '=', key)
-      .executeTakeFirst();
-
-    if (!row) {
-      // First send for this email — create the row (onConflict guards the
-      // race where a concurrent first-send created it between SELECT/INSERT).
-      await db
-        .insertInto('rate_limit')
-        .values({ id: randomUUID(), key, count: 1, last_request: now })
-        .onConflict((oc) => oc.column('key').doUpdateSet({ count: 1, last_request: now }))
-        .execute();
-      return true;
-    }
-
-    const last = Number(row.last_request);
-    if (now - last > MAGIC_LINK_EMAIL_WINDOW_MS) {
-      // Window elapsed — reset the counter.
-      await db
-        .updateTable('rate_limit')
-        .set({ count: 1, last_request: now })
-        .where('key', '=', key)
-        .execute();
-      return true;
-    }
-    if (row.count >= MAGIC_LINK_EMAIL_MAX_SENDS) {
-      return false; // cap hit within the window — caller skips the send
-    }
-    await db
-      .updateTable('rate_limit')
-      .set({ count: row.count + 1, last_request: now })
-      .where('key', '=', key)
-      .execute();
-    return true;
+    const result = await sql<{ count: number }>`
+      INSERT INTO rate_limit (id, key, count, last_request)
+      VALUES (${randomUUID()}, ${key}, 1, ${now})
+      ON CONFLICT (key) DO UPDATE
+      SET
+        count = CASE
+          WHEN rate_limit.last_request <= ${resetBoundary} THEN 1
+          ELSE rate_limit.count + 1
+        END,
+        last_request = CASE
+          WHEN rate_limit.last_request <= ${resetBoundary} THEN ${now}
+          ELSE rate_limit.last_request
+        END
+      RETURNING count
+    `.execute(db);
+    const row = result.rows[0];
+    return row !== undefined && row.count <= MAGIC_LINK_EMAIL_MAX_SENDS;
   } catch {
     return false; // counter unavailable → fail-closed (no unbounded send path)
   }

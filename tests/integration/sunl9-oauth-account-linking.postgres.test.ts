@@ -1,5 +1,5 @@
 import { createHmac, randomUUID } from 'node:crypto';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ID_PLATAFORMA_EUNENEM } from '../../src/adapters/plataforma/repository.memory.js';
 import { AuthServiceBetterAuth } from '../../src/adapters/usuario/auth-service.better-auth.js';
 import { criarAuth } from '../../src/adapters/usuario/criar-auth.js';
@@ -409,6 +409,7 @@ describe('Google-OAuth account-linking + password-invalidation (aperture-8655f /
 
   afterEach(async () => {
     // Defensive: ensure no test leaves a patched global fetch behind.
+    vi.restoreAllMocks();
   });
 
   // --------------------------------------------------------------------------
@@ -1491,6 +1492,67 @@ describe('Google-OAuth account-linking + password-invalidation (aperture-8655f /
       sendCount,
       `exactly ${MAX} emails should be delivered for ${MAX + 1} requests — the over-cap send is skipped`,
     ).toBe(MAX);
+  });
+
+  it('(I2) magic-link fixed window survives sustained retries and resets at the inclusive boundary', async () => {
+    const start = Date.UTC(2026, 6, 27, 12, 0, 0);
+    let now = start;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+
+    let sendCount = 0;
+    const auth = criarAuth(testDb.db, {
+      secret: SECRET,
+      baseURL: BASE_URL,
+      trustedOrigins: [BASE_URL],
+      sendResetPassword: async () => {
+        /* no-op */
+      },
+      useSecureCookies: false,
+      idPlataformaPadrao: ID_PLATAFORMA_EUNENEM,
+      sendMagicLink: async () => {
+        sendCount += 1;
+      },
+    });
+    const email = 'cadence-target@example.com';
+    await new AuthServiceBetterAuth(testDb.db).criarConta({
+      idUsuario: randomUUID(),
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
+      email,
+      senha: 'irrelevant-never-verified-123',
+      nome: 'Cadence Target',
+    });
+    const requestLink = () =>
+      auth.api.signInMagicLink({
+        body: { email, callbackURL: '/dashboard' },
+        headers: new Headers({ origin: BASE_URL }),
+      });
+
+    // Five allowed sends distributed across the hour.
+    for (const elapsedMinutes of [0, 10, 20, 30, 40]) {
+      now = start + elapsedMinutes * 60_000;
+      await requestLink();
+    }
+    expect(sendCount).toBe(5);
+
+    // Denied retries at 50m and 59m do not move the original window start.
+    for (const elapsedMinutes of [50, 59]) {
+      now = start + elapsedMinutes * 60_000;
+      await requestLink();
+    }
+    expect(sendCount).toBe(5);
+
+    // Exactly one hour from t=0 resets, even though the latest retry was t=59m.
+    now = start + 60 * 60_000;
+    await requestLink();
+    expect(sendCount).toBe(6);
+
+    const row = await testDb.db
+      .selectFrom('rate_limit')
+      .select(['count', 'last_request'])
+      .where('key', '=', `magic-link-email:${email}`)
+      .executeTakeFirstOrThrow();
+    expect(row.count).toBe(1);
+    expect(Number(row.last_request)).toBe(start + 60 * 60_000);
   });
 
   // ==========================================================================

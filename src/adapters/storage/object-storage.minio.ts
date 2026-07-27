@@ -5,8 +5,10 @@ import { SpanStatusCode, trace } from '@opentelemetry/api';
 import {
   CONTENT_TYPE_EXTENSAO,
   type EmitirUrlUploadCampanhaInput,
+  type EmitirUrlUploadCatalogoInput,
   type EmitirUrlUploadInput,
   type EmitirUrlUploadItemInput,
+  MAX_CATALOGO_IMAGEM_SIZE_BYTES,
   type ObjectStorage,
   type UrlUploadPresignada,
 } from './object-storage.js';
@@ -176,6 +178,60 @@ export class ObjectStorageMinio implements ObjectStorage {
             ContentType: input.contentType,
           }),
           { expiresIn: PRESIGN_EXPIRES_IN_SECONDS },
+        );
+
+        const publicUrl = this.urlPublica(objectKey);
+
+        span.setStatus({ code: SpanStatusCode.OK });
+        return { uploadUrl, objectKey, publicUrl };
+      } catch (error) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR, message: (error as Error).message });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  async emitirUrlUploadPresignadaCatalogo(
+    input: EmitirUrlUploadCatalogoInput,
+  ): Promise<UrlUploadPresignada> {
+    return tracer.startActiveSpan('storage.emitirUrlUploadPresignadaCatalogo', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'PRESIGN_PUT' });
+      try {
+        const ext = CONTENT_TYPE_EXTENSAO[input.contentType];
+        if (ext === undefined) {
+          throw new Error(`contentType não suportado: ${input.contentType}`);
+        }
+        if (
+          !Number.isSafeInteger(input.sizeBytes) ||
+          input.sizeBytes < 1 ||
+          input.sizeBytes > MAX_CATALOGO_IMAGEM_SIZE_BYTES
+        ) {
+          throw new Error(
+            `sizeBytes deve ser um inteiro entre 1 e ${MAX_CATALOGO_IMAGEM_SIZE_BYTES}`,
+          );
+        }
+
+        // Admin catalogue key — every path segment is server-generated.
+        const objectKey = `catalogo/produtos/${randomUUID()}.${ext}`;
+
+        const uploadUrl = await getSignedUrl(
+          this.s3,
+          new PutObjectCommand({
+            Bucket: this.bucket,
+            Key: objectKey,
+            ContentType: input.contentType,
+            ContentLength: input.sizeBytes,
+          }),
+          {
+            expiresIn: PRESIGN_EXPIRES_IN_SECONDS,
+            // S3RequestPresigner intentionally treats content-type as
+            // unsignable by default. Opt both body invariants back into the
+            // canonical request so changing either invalidates the signature.
+            signableHeaders: new Set(['content-type', 'content-length']),
+          },
         );
 
         const publicUrl = this.urlPublica(objectKey);

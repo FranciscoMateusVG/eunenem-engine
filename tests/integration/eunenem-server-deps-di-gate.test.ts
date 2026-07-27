@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { buildServerDeps, loadEnv } from '../../apps/eunenem-server/server/auth/setup.js';
 import { __resetStripeForTests } from '../../apps/eunenem-server/src/lib/stripe/stripe.js';
 import {
+  CatalogoAdminAuditPostgres,
   CatalogoRepositoryPostgres,
   PagamentoProviderFake,
   PagamentoProviderStripe,
@@ -53,6 +54,7 @@ describe('eunenem-server catalog composition root (aperture-ldo5d)', () => {
     const deps = buildServerDeps(loadEnv(baseEnv()));
     try {
       expect(deps.catalogoRepository).toBeInstanceOf(CatalogoRepositoryPostgres);
+      expect(deps.catalogoAdminAudit).toBeInstanceOf(CatalogoAdminAuditPostgres);
     } finally {
       void deps.db.destroy();
     }
@@ -219,6 +221,19 @@ describe('eunenem-server Inter transfer-rail boot guard (aperture-ju5w2)', () =>
 //  MINIO_ENDPOINT browser-reachability boot guard (aperture-9wqh1)
 // ─────────────────────────────────────────────────────────────────────
 describe('eunenem-server MINIO_ENDPOINT boot guard (aperture-9wqh1)', () => {
+  function productionEnv(minioEndpoint: string): NodeJS.ProcessEnv {
+    return {
+      ...baseEnv(),
+      NODE_ENV: 'production',
+      STRIPE_PUBLISHABLE_KEY: 'pk_live_dummy',
+      STRIPE_SECRET_KEY: 'sk_live_dummy',
+      STRIPE_WEBHOOK_SECRET: 'whsec_live_dummy',
+      LOG_PII_HASH_SALT: 'live-salt-thirty-two-chars-aaaaaaaaaaaaaaaaaaaa',
+      TRUSTED_HOP_COUNT: '1',
+      MINIO_ENDPOINT: minioEndpoint,
+    } as NodeJS.ProcessEnv;
+  }
+
   it('rejects the INTERNAL service host (the reported bug: broken images)', () => {
     expect(() => loadEnv({ ...baseEnv(), MINIO_ENDPOINT: 'http://eunenem-minio:9000' })).toThrow(
       /MINIO_ENDPOINT/,
@@ -240,9 +255,49 @@ describe('eunenem-server MINIO_ENDPOINT boot guard (aperture-9wqh1)', () => {
     ).not.toThrow();
   });
 
+  it('rejects non-loopback HTTP endpoints', () => {
+    expect(() =>
+      loadEnv({
+        ...baseEnv(),
+        MINIO_ENDPOINT: 'http://storage-eunenem.test.pocketsoftware.com.br',
+      }),
+    ).toThrow(/MINIO_ENDPOINT/);
+  });
+
+  it.each([
+    'https://access:secret@storage-eunenem.test.pocketsoftware.com.br',
+    'http://access:secret@localhost:9000',
+  ])('rejects endpoints with embedded credentials: %s', (endpoint) => {
+    expect(() => loadEnv({ ...baseEnv(), MINIO_ENDPOINT: endpoint })).toThrow(/MINIO_ENDPOINT/);
+  });
+
   it('accepts a local MinIO on localhost for dev', () => {
     expect(() => loadEnv({ ...baseEnv(), MINIO_ENDPOINT: 'http://localhost:9000' })).not.toThrow();
     expect(() => loadEnv({ ...baseEnv(), MINIO_ENDPOINT: 'http://127.0.0.1:9000' })).not.toThrow();
+    expect(() => loadEnv({ ...baseEnv(), MINIO_ENDPOINT: 'http://[::1]:9000' })).not.toThrow();
+  });
+
+  it.each([
+    'https://localhost:9000',
+    'https://10.0.0.1:9000',
+    'https://100.64.0.1:9000',
+    'https://127.0.0.1:9000',
+    'https://169.254.169.254:9000',
+    'https://172.16.0.1:9000',
+    'https://192.168.1.1:9000',
+    'https://[::1]:9000',
+    'https://[fc00::1]:9000',
+    'https://[fd12:3456:789a::1]:9000',
+    'https://[fe80::1]:9000',
+  ])('rejects a private/special numeric endpoint in production: %s', (endpoint) => {
+    expect(() => loadEnv(productionEnv(endpoint))).toThrow(/MINIO_ENDPOINT/);
+  });
+
+  it.each([
+    'https://8.8.8.8:9000',
+    'https://[2606:4700:4700::1111]:9000',
+  ])('accepts a public numeric HTTPS endpoint in production: %s', (endpoint) => {
+    expect(() => loadEnv(productionEnv(endpoint))).not.toThrow();
   });
 
   it('is skipped entirely when MINIO_ENDPOINT is unset (fresh-clone boot)', () => {

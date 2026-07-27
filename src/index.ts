@@ -32,8 +32,27 @@ export type {
   FindCatalogoProdutosPageOutput,
   ReplaceCatalogoListaItensOutcome,
 } from './adapters/catalogo/repository.js';
+export { CatalogoConflictError } from './adapters/catalogo/repository.js';
 export { CatalogoRepositoryMemory } from './adapters/catalogo/repository.memory.js';
 export { CatalogoRepositoryPostgres } from './adapters/catalogo/repository.postgres.js';
+export type {
+  AppendCatalogoAdminAuditEventInput,
+  CatalogoAdminAudit,
+  CatalogoAdminAuditEvent,
+  CatalogoAdminAuditPhase,
+  CatalogoAuditJsonObject,
+  CatalogoAuditJsonPrimitive,
+  CatalogoAuditJsonValue,
+} from './adapters/catalogo-admin-audit/catalogo-admin-audit.js';
+export {
+  assertValidCatalogoAdminAuditEvent,
+  CATALOGO_AUDIT_ACTION_MAX_LENGTH,
+  CATALOGO_AUDIT_METADATA_MAX_JSON_BYTES,
+  CATALOGO_AUDIT_TARGET_ID_MAX_LENGTH,
+  CATALOGO_AUDIT_TARGET_TYPE_MAX_LENGTH,
+} from './adapters/catalogo-admin-audit/catalogo-admin-audit.js';
+export { CatalogoAdminAuditMemory } from './adapters/catalogo-admin-audit/catalogo-admin-audit.memory.js';
+export { CatalogoAdminAuditPostgres } from './adapters/catalogo-admin-audit/catalogo-admin-audit.postgres.js';
 export type { Database } from './adapters/database.js';
 export { createDatabase } from './adapters/database.js';
 // aperture-lwx2k — shared email transport (magic-link + future transactional).
@@ -119,13 +138,17 @@ export {
 // aperture-kcasm: object storage — presigned-PUT photo uploads (infra boundary).
 export type {
   EmitirUrlUploadCampanhaInput,
+  EmitirUrlUploadCatalogoInput,
   EmitirUrlUploadInput,
   EmitirUrlUploadItemInput,
   ObjectStorage,
   SlotFoto,
   UrlUploadPresignada,
 } from './adapters/storage/object-storage.js';
-export { CONTENT_TYPE_EXTENSAO } from './adapters/storage/object-storage.js';
+export {
+  CONTENT_TYPE_EXTENSAO,
+  MAX_CATALOGO_IMAGEM_SIZE_BYTES,
+} from './adapters/storage/object-storage.js';
 export type { UploadRegistrado } from './adapters/storage/object-storage.memory.js';
 export { ObjectStorageMemory } from './adapters/storage/object-storage.memory.js';
 export type { ObjectStorageMinioConfig } from './adapters/storage/object-storage.minio.js';

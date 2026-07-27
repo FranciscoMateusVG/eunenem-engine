@@ -3,8 +3,10 @@ import { SpanStatusCode, trace } from '@opentelemetry/api';
 import {
   CONTENT_TYPE_EXTENSAO,
   type EmitirUrlUploadCampanhaInput,
+  type EmitirUrlUploadCatalogoInput,
   type EmitirUrlUploadInput,
   type EmitirUrlUploadItemInput,
+  MAX_CATALOGO_IMAGEM_SIZE_BYTES,
   type ObjectStorage,
   type UrlUploadPresignada,
 } from './object-storage.js';
@@ -58,6 +60,16 @@ export class ObjectStorageMemory implements ObjectStorage {
     resultado: UrlUploadPresignada;
   }[] = [];
 
+  /**
+   * Every emitirUrlUploadPresignadaCatalogo call, in order
+   * (aperture-d4pmw). Kept separate because catalogue uploads are not owned
+   * by an end user or campanha.
+   */
+  public readonly catalogoUploads: {
+    input: EmitirUrlUploadCatalogoInput;
+    resultado: UrlUploadPresignada;
+  }[] = [];
+
   constructor(private readonly bucket: string = BUCKET_PADRAO) {}
 
   async emitirUrlUploadPresignada(input: EmitirUrlUploadInput): Promise<UrlUploadPresignada> {
@@ -71,7 +83,6 @@ export class ObjectStorageMemory implements ObjectStorage {
         if (ext === undefined) {
           throw new Error(`contentType não suportado: ${input.contentType}`);
         }
-
         const objectKey = `perfis/${input.idUsuario}/${input.slot}-${randomUUID()}.${ext}`;
         const resultado: UrlUploadPresignada = {
           uploadUrl: `memory://upload/${this.bucket}/${objectKey}`,
@@ -162,7 +173,55 @@ export class ObjectStorageMemory implements ObjectStorage {
     });
   }
 
-  /** Deterministic public URL — same shape as `publicUrl` from a presign. */
+  async emitirUrlUploadPresignadaCatalogo(
+    input: EmitirUrlUploadCatalogoInput,
+  ): Promise<UrlUploadPresignada> {
+    return tracer.startActiveSpan('storage.emitirUrlUploadPresignadaCatalogo', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'PRESIGN_PUT' });
+      try {
+        const ext = CONTENT_TYPE_EXTENSAO[input.contentType];
+        if (ext === undefined) {
+          throw new Error(`contentType não suportado: ${input.contentType}`);
+        }
+        if (
+          !Number.isSafeInteger(input.sizeBytes) ||
+          input.sizeBytes < 1 ||
+          input.sizeBytes > MAX_CATALOGO_IMAGEM_SIZE_BYTES
+        ) {
+          throw new Error(
+            `sizeBytes deve ser um inteiro entre 1 e ${MAX_CATALOGO_IMAGEM_SIZE_BYTES}`,
+          );
+        }
+
+        const objectKey = `catalogo/produtos/${randomUUID()}.${ext}`;
+        const resultado: UrlUploadPresignada = {
+          uploadUrl: `memory://upload/${this.bucket}/${objectKey}`,
+          objectKey,
+          // Catalogue image inputs accept root-relative public paths. Keep the
+          // in-memory upload transport synthetic, but return a value that can
+          // be round-tripped directly into create/update product mutations.
+          publicUrl: `/${objectKey}`,
+        };
+
+        this.catalogoUploads.push({ input, resultado });
+
+        span.setStatus({ code: SpanStatusCode.OK });
+        return resultado;
+      } catch (error) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR, message: (error as Error).message });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  /**
+   * Deterministic synthetic read URL used by the profile/item/campanha test
+   * surfaces. Catalog presigns deliberately return a root-relative public URL
+   * so that value can round-trip through the catalog mutation schema.
+   */
   urlPublica(objectKey: string): string {
     return `memory://${this.bucket}/${objectKey}`;
   }

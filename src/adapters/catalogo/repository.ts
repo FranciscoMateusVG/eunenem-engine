@@ -78,6 +78,43 @@ export interface CatalogoListaResumo {
   readonly quantidadeItens: number;
 }
 
+/**
+ * Mutable product fields accepted by the persistence boundary.
+ *
+ * This is deliberately a patch rather than a complete record: admin edits
+ * and activation toggles may race, and a read/merge/full-write cycle can
+ * otherwise restore fields changed by the concurrent request.
+ */
+export type UpdateCatalogoProdutoPatch = Readonly<
+  Partial<
+    Pick<
+      CatalogoProduto,
+      | 'idLegado'
+      | 'nome'
+      | 'precoCents'
+      | 'quantidadeSugerida'
+      | 'emoji'
+      | 'bgColor'
+      | 'idCategoria'
+      | 'position'
+      | 'imageUrl'
+      | 'popularidade'
+      | 'ativo'
+    >
+  > & {
+    atualizadoEm: Date;
+  }
+>;
+
+/** Mutable ready-list fields with the same atomic patch semantics. */
+export type UpdateCatalogoListaPatch = Readonly<
+  Partial<
+    Pick<CatalogoLista, 'slug' | 'nome' | 'descricao' | 'imageUrl' | 'position' | 'ativo'>
+  > & {
+    atualizadoEm: Date;
+  }
+>;
+
 export interface FindCatalogoProdutosPageInput {
   /**
    * Case-insensitive literal substring of `nome`. Pattern-language
@@ -107,9 +144,26 @@ export type ReplaceCatalogoListaItensOutcome =
     };
 
 /**
+ * Stable port-level conflict surfaced by both adapters when a catalogue
+ * category slug is already in use. Transport callers map this type to their
+ * own conflict vocabulary without parsing database or localized messages.
+ */
+export class CatalogoConflictError extends Error {
+  constructor(
+    readonly field: 'categoria.slug',
+    readonly value: string,
+  ) {
+    super(`Valor de catálogo já existe para ${field}`);
+    this.name = 'CatalogoConflictError';
+  }
+}
+
+/**
  * Persistence port used by the catalogue administration and public read
- * routers. Mutations receive complete records; route/use-case code owns
- * validation, UUID generation and timestamps.
+ * routers. Creates receive complete records. Updates receive field patches
+ * so adapters can perform one atomic UPDATE without overwriting concurrent
+ * changes to unrelated fields. Route/use-case code owns validation, UUID
+ * generation and timestamps.
  */
 export interface CatalogoRepository {
   createCategoria(categoria: CatalogoCategoria): Promise<void>;
@@ -123,7 +177,10 @@ export interface CatalogoRepository {
   deleteCategoriaVazia(id: string): Promise<DeleteCatalogoCategoriaVaziaOutcome>;
 
   createProduto(produto: CatalogoProduto): Promise<void>;
-  updateProduto(produto: CatalogoProduto): Promise<boolean>;
+  updateProduto(
+    id: string,
+    patch: UpdateCatalogoProdutoPatch,
+  ): Promise<CatalogoProduto | undefined>;
   findProdutoById(id: string): Promise<CatalogoProduto | undefined>;
   /** Next append-only position in a category, including inactive products. */
   findNextProdutoPosition(idCategoria: string): Promise<number>;
@@ -135,7 +192,7 @@ export interface CatalogoRepository {
   findProdutosAtivosComCategoria(): Promise<readonly CatalogoProdutoComCategoria[]>;
 
   createLista(lista: CatalogoLista): Promise<void>;
-  updateLista(lista: CatalogoLista): Promise<boolean>;
+  updateLista(id: string, patch: UpdateCatalogoListaPatch): Promise<CatalogoLista | undefined>;
   /** Next global append-only position, including inactive lists. */
   findNextListaPosition(): Promise<number>;
   findListaByIdComItens(id: string): Promise<CatalogoListaComItens | undefined>;

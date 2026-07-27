@@ -57,6 +57,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { Context } from 'hono';
+import { sql } from 'kysely';
 import { hashClientPII } from '../../../src/index.js';
 import type { ServerDeps } from './auth/setup.js';
 import { trustedClientIp } from './lib/security/trusted-client-ip.js';
@@ -211,36 +212,32 @@ export function criarClerkBridgeClient(secret: string): ClerkBridgeClient {
  */
 async function consumeMintBudget(deps: ServerDeps, idUsuario: string): Promise<boolean> {
   const key = `legacy-bridge-mint:${idUsuario}`;
-  const now = Date.now();
+  const now = deps.clock().getTime();
+  const resetBoundary = now - MINT_WINDOW_MS;
   try {
-    const row = await deps.db
-      .selectFrom('rate_limit')
-      .select(['count', 'last_request'])
-      .where('key', '=', key)
-      .executeTakeFirst();
-    if (!row) {
-      await deps.db
-        .insertInto('rate_limit')
-        .values({ id: randomUUID(), key, count: 1, last_request: now })
-        .onConflict((oc) => oc.column('key').doUpdateSet({ count: 1, last_request: now }))
-        .execute();
-      return true;
-    }
-    if (now - Number(row.last_request) > MINT_WINDOW_MS) {
-      await deps.db
-        .updateTable('rate_limit')
-        .set({ count: 1, last_request: now })
-        .where('key', '=', key)
-        .execute();
-      return true;
-    }
-    if (row.count >= MINT_MAX_PER_WINDOW) return false;
-    await deps.db
-      .updateTable('rate_limit')
-      .set({ count: row.count + 1, last_request: now })
-      .where('key', '=', key)
-      .execute();
-    return true;
+    // One-row fixed window, atomically updated. `last_request` is the window
+    // START, not the latest attempt: in-window retries increment the count
+    // without extending the lockout. The inclusive boundary starts a new
+    // window exactly at MINT_WINDOW_MS.
+    // The app workspace resolves its own Kysely patch version; the runtime
+    // executor is the same Postgres database provided by ServerDeps.
+    const result = await sql<{ count: number }>`
+      INSERT INTO rate_limit (id, key, count, last_request)
+      VALUES (${randomUUID()}, ${key}, 1, ${now})
+      ON CONFLICT (key) DO UPDATE
+      SET
+        count = CASE
+          WHEN rate_limit.last_request <= ${resetBoundary} THEN 1
+          ELSE rate_limit.count + 1
+        END,
+        last_request = CASE
+          WHEN rate_limit.last_request <= ${resetBoundary} THEN ${now}
+          ELSE rate_limit.last_request
+        END
+      RETURNING count
+    `.execute(deps.db as never);
+    const row = result.rows[0];
+    return row !== undefined && row.count <= MINT_MAX_PER_WINDOW;
   } catch {
     return false;
   }

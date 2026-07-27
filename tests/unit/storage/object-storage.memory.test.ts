@@ -56,4 +56,53 @@ describe('ObjectStorageMemory', () => {
       }),
     ).rejects.toThrow(/não suportado/);
   });
+
+  it.each([
+    ['image/jpeg', 'jpg'],
+    ['image/png', 'png'],
+    ['image/webp', 'webp'],
+  ])('mints a server-generated catalogue key for %s', async (contentType, extension) => {
+    const storage = new ObjectStorageMemory('test-bucket');
+
+    const result = await storage.emitirUrlUploadPresignadaCatalogo({
+      contentType,
+      sizeBytes: 1_024,
+    });
+
+    expect(result.objectKey).toMatch(new RegExp(`^catalogo/produtos/[0-9a-f-]+\\.${extension}$`));
+    expect(result.uploadUrl).toBe(`memory://upload/test-bucket/${result.objectKey}`);
+    expect(result.publicUrl).toBe(`/${result.objectKey}`);
+    expect(storage.catalogoUploads).toEqual([
+      { input: { contentType, sizeBytes: 1_024 }, resultado: result },
+    ]);
+  });
+
+  it('rejects an unsupported catalogue content-type without recording an upload', async () => {
+    const storage = new ObjectStorageMemory();
+
+    await expect(
+      storage.emitirUrlUploadPresignadaCatalogo({
+        contentType: 'image/gif',
+        sizeBytes: 1_024,
+      }),
+    ).rejects.toThrow(/não suportado/);
+    expect(storage.catalogoUploads).toHaveLength(0);
+  });
+
+  it.each([
+    0,
+    5 * 1024 * 1024 + 1,
+    1.5,
+    Number.NaN,
+  ])('rejects invalid catalogue sizeBytes %s without recording an upload', async (sizeBytes) => {
+    const storage = new ObjectStorageMemory();
+
+    await expect(
+      storage.emitirUrlUploadPresignadaCatalogo({
+        contentType: 'image/png',
+        sizeBytes,
+      }),
+    ).rejects.toThrow(/sizeBytes/);
+    expect(storage.catalogoUploads).toHaveLength(0);
+  });
 });

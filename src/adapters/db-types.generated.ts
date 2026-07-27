@@ -55,6 +55,18 @@ export interface Campanhas {
   titulo: string;
 }
 
+export interface CatalogoAdminAuditEvents {
+  action: string;
+  actor_usuario_id: string;
+  id: string;
+  metadata: Generated<Json>;
+  occurred_at: Generated<Timestamp>;
+  phase: string;
+  request_id: string;
+  target_id: string | null;
+  target_type: string | null;
+}
+
 export interface CatalogoCategorias {
   criado_em: Generated<Timestamp>;
   id: string;
@@ -406,6 +418,7 @@ export interface DB {
   accounts: Accounts;
   campanha_administradores: CampanhaAdministradores;
   campanhas: Campanhas;
+  catalogo_admin_audit_events: CatalogoAdminAuditEvents;
   catalogo_categorias: CatalogoCategorias;
   catalogo_lista_itens: CatalogoListaItens;
   catalogo_listas: CatalogoListas;
