@@ -61,7 +61,7 @@ Partial update mutations reject an input containing only `id`. Unknown object ke
 | `FORBIDDEN` | valid session, but email is not in `ADMIN_ALLOWED_EMAILS` |
 | `NOT_FOUND` | requested category, product, list or referenced product does not exist |
 | `CONFLICT` | category is non-empty or a unique catalog value already exists |
-| `TOO_MANY_REQUESTS` | the admin exceeded 10 catalog-image presigns in the current minute |
+| `TOO_MANY_REQUESTS` | the admin exceeded 10 catalog-image presigns in the current fixed 60-second window |
 | `INTERNAL_SERVER_ERROR` | unexpected repository/storage failure; never converted to empty data |
 
 Example error:
@@ -80,11 +80,13 @@ Example error:
 | Tier | Procedures | Application budget |
 | --- | --- | --- |
 | `admin-allowlist-unthrottled` | admin catalog queries and non-presign mutations | no application counter; session + allowlist authorization is mandatory |
-| `admin-catalog-presign` | `admin.catalog.emitirUrlUploadImagemProduto` | durable Postgres-backed 10 requests/minute per authenticated admin `usuario.id` |
+| `admin-catalog-presign` | `admin.catalog.emitirUrlUploadImagemProduto` | durable Postgres-backed 10 requests per fixed 60-second window per authenticated admin `usuario.id` |
 | `public-read-unthrottled` | `catalogo.listSections`, `catalogo.listListasProntas` | no application counter in B2; read-only |
 
 Unthrottled tiers inherit deployment-level request/body limits. The presign limiter uses the
-existing Postgres `rate_limit` table, survives restarts and coordinates multiple instances. No
+existing Postgres `rate_limit` table, survives restarts and coordinates multiple instances. The
+first attempt starts a fixed window; in-window attempts and denials do not move its boundary, and
+an attempt at elapsed time greater than or equal to 60 seconds starts a fresh window. No
 instance-local counter is used.
 
 ## DTOs

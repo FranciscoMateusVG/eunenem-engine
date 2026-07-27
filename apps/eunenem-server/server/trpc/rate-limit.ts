@@ -3,24 +3,20 @@ import { sql } from 'kysely';
 import type { Database } from '../../../../src/index.js';
 
 /**
- * DB-backed sliding-window rate limiter (aperture-uc2ix).
+ * DB-backed fixed-window rate limiter (aperture-uc2ix).
  *
  * Backed by the `rate_limit` table from migration 009 — the same table
  * BetterAuth uses for its /api/auth/* throttling, keeping rate-limit
  * storage centralized (multi-instance safe, survives container restart).
  *
- * **Algorithm (fixed window with last-request gate):** for each (key,
- * window) bucket, atomically increment a counter and read the prior
- * value. If `now - last_request > windowMs`, RESET count to 1 (the
- * current request counts as the first attempt in a fresh window).
- * Otherwise increment count; if count > max, reject.
+ * **Algorithm (fixed window):** for each key, `last_request` stores the
+ * start of the current window. If `now - last_request >= windowMs`,
+ * RESET count to 1 and start a fresh window at `now`. Otherwise increment
+ * count while preserving `last_request`; if count > max, reject.
  *
- * Reset semantics use `last_request` per row (not a wall-clock window
- * boundary), which is technically a "rolling reset" rather than a fixed
- * window — slightly more permissive at the boundary than BetterAuth's
- * default, but symmetric and predictable. The trade-off is acceptable
- * for visitor-facing auth flows; tighten via separate beads if a
- * specific abuse pattern emerges.
+ * Rejected attempts increment the count but do not move the window
+ * start. This prevents sustained retries from extending a lockout
+ * indefinitely: the bucket always resets at the original boundary.
  *
  * **Atomic upsert:** uses `INSERT ... ON CONFLICT (key) DO UPDATE`
  * with a CASE expression so the increment + reset decision happen in a
@@ -69,16 +65,16 @@ export async function consumeRateLimit(
   }
 
   const now = clock().getTime();
-  const windowStart = now - windowMs;
+  const resetBoundary = now - windowMs;
 
   // Atomic upsert + read. PostgreSQL's `RETURNING` exposes the row state
   // AFTER the upsert ran, so we get the post-increment count + decision
   // in one round-trip.
   //
   //   - If no existing row: INSERT with count=1, last_request=now
-  //   - If existing row and last_request < windowStart: reset count to 1,
-  //     bump last_request to now
-  //   - Else: increment count, bump last_request to now
+  //   - If existing row and last_request <= resetBoundary: reset count
+  //     to 1 and start a fresh window at now
+  //   - Else: increment count and preserve the existing window start
   //
   // The CASE in the SET expression encodes the reset-vs-increment branch.
   // biome-ignore lint/suspicious/noExplicitAny: Kysely<unknown> + raw SQL
@@ -88,10 +84,13 @@ export async function consumeRateLimit(
     ON CONFLICT (key) DO UPDATE
     SET
       count = CASE
-        WHEN rate_limit.last_request < ${windowStart} THEN 1
+        WHEN rate_limit.last_request <= ${resetBoundary} THEN 1
         ELSE rate_limit.count + 1
       END,
-      last_request = ${now}
+      last_request = CASE
+        WHEN rate_limit.last_request <= ${resetBoundary} THEN ${now}
+        ELSE rate_limit.last_request
+      END
     RETURNING count
   `.execute(db as never);
 

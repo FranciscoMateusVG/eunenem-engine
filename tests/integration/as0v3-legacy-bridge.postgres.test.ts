@@ -60,7 +60,11 @@ function fakeClerk(overrides: Partial<ClerkBridgeClient> = {}): ClerkBridgeClien
   };
 }
 
-function buildDeps(clerk: ClerkBridgeClient, logs: Array<Record<string, unknown>>): ServerDeps {
+function buildDeps(
+  _clerk: ClerkBridgeClient,
+  logs: Array<Record<string, unknown>>,
+  clock: () => Date = () => new Date(),
+): ServerDeps {
   const observability: Observability = {
     logger: {
       info: (event: string, ctx: Record<string, unknown>) => logs.push({ event, ...ctx }),
@@ -88,7 +92,7 @@ function buildDeps(clerk: ClerkBridgeClient, logs: Array<Record<string, unknown>
     recebedorRepository,
     campanhaRepository: new CampanhaRepositoryPostgres(testDb.db, recebedorRepository),
     observability,
-    clock: () => new Date(),
+    clock,
     sessionCookieName: SESSION_COOKIE,
     logPiiHashSalt: SALT,
     trustedHopCount: 0,
@@ -269,5 +273,41 @@ describe('GET /api/legacy-bridge decision table (aperture-as0v3)', () => {
     }
     expect(outcomes.slice(0, 5).every((o) => o === 'mintado')).toBe(true);
     expect(outcomes[5]).toBe('rate_limited');
+  });
+
+  it('⭐ mint fixed window survives sustained retries and resets at the inclusive boundary', async () => {
+    const logs: Array<Record<string, unknown>> = [];
+    const start = Date.UTC(2026, 6, 27, 12, 0, 0);
+    let now = start;
+    const deps = buildDeps(fakeClerk(), logs, () => new Date(now));
+    const token = await registerUser(deps, `cadence-${randomUUID()}@x.com`, true);
+    const app = makeApp(deps, fakeClerk());
+
+    // Five allowed mints spread across the window.
+    for (const elapsedSeconds of [0, 10, 20, 30, 40]) {
+      now = start + elapsedSeconds * 1000;
+      await hit(app, token);
+      expect(logs.at(-1)?.outcome).toBe('mintado');
+    }
+
+    // Denials at 50s and 59s must preserve the original t=0 window start.
+    for (const elapsedSeconds of [50, 59]) {
+      now = start + elapsedSeconds * 1000;
+      await hit(app, token);
+      expect(logs.at(-1)?.outcome).toBe('rate_limited');
+    }
+
+    // Inclusive boundary: t=60s starts a fresh window despite the retry at 59s.
+    now = start + 60_000;
+    await hit(app, token);
+    expect(logs.at(-1)?.outcome).toBe('mintado');
+
+    const row = await testDb.db
+      .selectFrom('rate_limit')
+      .select(['count', 'last_request'])
+      .where('key', 'like', 'legacy-bridge-mint:%')
+      .executeTakeFirstOrThrow();
+    expect(row.count).toBe(1);
+    expect(Number(row.last_request)).toBe(start + 60_000);
   });
 });

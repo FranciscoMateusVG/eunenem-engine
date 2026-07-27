@@ -121,4 +121,95 @@ describe('admin.catalog.emitirUrlUploadImagemProduto durable rate limit', () => 
       .execute();
     expect(resetRows.map((row) => row.count).sort((a, b) => a - b)).toEqual([1, 1]);
   });
+
+  it('uses the original window start under sustained cadence and resets at the exact boundary', async () => {
+    let now = new Date(START);
+    const clock = () => new Date(now);
+    const storage = new ObjectStorageMemory('catalog-rate-limit-cadence');
+    const { caller } = buildCaller({
+      email: 'catalog-rate-limit-cadence@example.com',
+      now: clock,
+      storage,
+    });
+    const input = { contentType: 'image/png' as const, sizeBytes: 1_024 };
+
+    // Ten requests spaced ten seconds apart cross the first window boundary.
+    // The boundary request at t=60s starts a new window; later requests must
+    // not keep moving that window start forward.
+    for (let seconds = 0; seconds <= 90; seconds += 10) {
+      now = new Date(START.getTime() + seconds * 1_000);
+      await expect(caller.admin.catalog.emitirUrlUploadImagemProduto(input)).resolves.toMatchObject(
+        {
+          objectKey: expect.stringMatching(/^catalogo\/produtos\/.+\.png$/),
+        },
+      );
+    }
+
+    now = new Date(START.getTime() + 100_000);
+    await expect(caller.admin.catalog.emitirUrlUploadImagemProduto(input)).resolves.toMatchObject({
+      objectKey: expect.stringMatching(/^catalogo\/produtos\/.+\.png$/),
+    });
+    expect(storage.catalogoUploads).toHaveLength(11);
+
+    const row = await testDb.db
+      .selectFrom('rate_limit')
+      .select(['count', 'last_request'])
+      .where('key', 'like', `${RATE_LIMIT_KEY_PREFIX}%`)
+      .executeTakeFirstOrThrow();
+    expect(row.count).toBe(5);
+    expect(Number(row.last_request)).toBe(START.getTime() + 60_000);
+  });
+
+  it('does not let denied retries extend lockout beyond the original window boundary', async () => {
+    let now = new Date(START);
+    const clock = () => new Date(now);
+    const storage = new ObjectStorageMemory('catalog-rate-limit-denied-retry');
+    const { caller } = buildCaller({
+      email: 'catalog-rate-limit-denied-retry@example.com',
+      now: clock,
+      storage,
+    });
+    const input = { contentType: 'image/png' as const, sizeBytes: 1_024 };
+
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await expect(caller.admin.catalog.emitirUrlUploadImagemProduto(input)).resolves.toMatchObject(
+        {
+          objectKey: expect.stringMatching(/^catalogo\/produtos\/.+\.png$/),
+        },
+      );
+    }
+
+    now = new Date(START.getTime() + 10_000);
+    await expect(caller.admin.catalog.emitirUrlUploadImagemProduto(input)).rejects.toMatchObject({
+      code: 'TOO_MANY_REQUESTS',
+    });
+    now = new Date(START.getTime() + 59_999);
+    await expect(caller.admin.catalog.emitirUrlUploadImagemProduto(input)).rejects.toMatchObject({
+      code: 'TOO_MANY_REQUESTS',
+    });
+    expect(storage.catalogoUploads).toHaveLength(10);
+
+    const deniedRow = await testDb.db
+      .selectFrom('rate_limit')
+      .select(['count', 'last_request'])
+      .where('key', 'like', `${RATE_LIMIT_KEY_PREFIX}%`)
+      .executeTakeFirstOrThrow();
+    expect(deniedRow.count).toBe(12);
+    expect(Number(deniedRow.last_request)).toBe(START.getTime());
+
+    // Boundary is inclusive: elapsed >= windowMs starts a fresh window.
+    now = new Date(START.getTime() + 60_000);
+    await expect(caller.admin.catalog.emitirUrlUploadImagemProduto(input)).resolves.toMatchObject({
+      objectKey: expect.stringMatching(/^catalogo\/produtos\/.+\.png$/),
+    });
+    expect(storage.catalogoUploads).toHaveLength(11);
+
+    const resetRow = await testDb.db
+      .selectFrom('rate_limit')
+      .select(['count', 'last_request'])
+      .where('key', 'like', `${RATE_LIMIT_KEY_PREFIX}%`)
+      .executeTakeFirstOrThrow();
+    expect(resetRow.count).toBe(1);
+    expect(Number(resetRow.last_request)).toBe(START.getTime() + 60_000);
+  });
 });
