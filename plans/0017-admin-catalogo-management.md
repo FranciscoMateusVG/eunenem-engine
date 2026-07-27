@@ -201,6 +201,9 @@ O teste de migração compara o banco com os snapshots, não apenas contagens. O
 
 ## Backend contracts
 
+The procedure-by-procedure wire contract, including validation, errors, examples and rate tiers,
+lives in [`0017-catalog-api-contract.md`](./0017-catalog-api-contract.md).
+
 ### Repository port
 
 `src/adapters/catalogo/repository.ts` define um `CatalogoRepository` único para o contexto,
