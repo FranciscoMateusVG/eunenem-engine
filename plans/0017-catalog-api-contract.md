@@ -16,11 +16,34 @@ generated `AppRouter` client rather than assemble HTTP URLs.
 - `imageUrl` is `null` or one of:
   - a root-relative path beginning with one `/`, such as `/products/558361.png`;
   - an absolute `https:` URL without embedded credentials.
-- Empty strings, protocol-relative URLs, `http:`, `data:`, `javascript:` and URLs with credentials
-  are rejected. The maximum URL length is 2,048 characters.
+  - a credential-free `http:` URL whose host is exactly `localhost`, `127.0.0.1` or `::1`, for
+    the supported local MinIO development configuration only.
+- Empty strings, protocol-relative URLs, paths containing a backslash, non-loopback `http:`,
+  `data:`, `javascript:` and URLs with credentials are rejected. Root-relative paths must resolve
+  against the application's own origin. The maximum URL length is 2,048 characters.
+- `bgColor` is one of the six catalog tokens already present in the immutable seed:
+  `var(--blue)`, `var(--blue-soft)`, `var(--cream-2)`, `var(--lilac-soft)`,
+  `var(--pink-soft)` or `var(--yellow-soft)`. Arbitrary CSS is rejected.
 - `position` is a non-negative integer. Product and list positions are server-owned in v1.
 - Error envelope is the standard tRPC error response. Client code switches on `error.data.code`,
   not localized message text.
+
+### Input bounds
+
+| Field | Rule |
+| --- | --- |
+| product/list name | trimmed, 1..200 characters |
+| category label | trimmed, 1..120 characters |
+| category slug | 1..80 characters, lowercase kebab, not `personalizado` |
+| emoji | trimmed, 1..32 characters |
+| list description | `null` or trimmed string up to 2,000 characters |
+| search | literal case-insensitive substring, up to 200 characters |
+| price/quantity | positive safe integer |
+| popularity/position | non-negative safe integer |
+| pagination | page 1..100,000; page size 1..100 |
+| list items | at most 1,000; product IDs and positions must each be unique |
+
+Partial update mutations reject an input containing only `id`. Unknown object keys are rejected.
 
 ### Error codes
 
@@ -44,15 +67,16 @@ Example error:
 }
 ```
 
-### Rate-limit tiers
+### Traffic tiers
 
-| Tier | Procedures | Enforcement |
+| Tier | Procedures | Application budget |
 | --- | --- | --- |
-| `admin-allowlist` | every `admin.catalog.*` procedure | session + allowlist gate; no additional per-procedure counter in B2 |
-| `public-read` | `catalogo.listSections`, `catalogo.listListasProntas` | read-only; no additional per-procedure counter in B2 |
+| `admin-allowlist-unthrottled` | every `admin.catalog.*` procedure | no application counter in B2; session + allowlist authorization is mandatory |
+| `public-read-unthrottled` | `catalogo.listSections`, `catalogo.listListasProntas` | no application counter in B2; read-only |
 
-Both tiers inherit deployment-level request/body limits. B2 adds no in-memory limiter. If an
-endpoint-specific abuse signal appears, use the existing Postgres-backed `rate_limit` adapter; do
+These are explicitly unthrottled application tiers, not rate limits disguised as authorization.
+Both inherit deployment-level request/body limits. B2 adds no in-memory limiter. A production
+request budget requires a durable multi-instance adapter and a separately reviewed contract; do
 not add an instance-local counter.
 
 ## DTOs
@@ -108,6 +132,22 @@ not add an instance-local counter.
 }
 ```
 
+### `ListaAdminDetailDTO`
+
+```ts
+{
+  ...ListaAdminDTO;
+  items: {
+    idProduto: string;
+    quantidade: number;
+    position: number;
+  }[];
+}
+```
+
+Items are ordered by persisted position and UUID tie-break. The detail read is the source of truth
+before calling the whole-set `setListItems` mutation.
+
 ### Public catalog DTOs
 
 ```ts
@@ -147,11 +187,12 @@ product's catalog default.
 
 ## Admin procedures
 
-Every procedure below uses `adminProcedure` and therefore belongs to rate tier `admin-allowlist`.
+Every procedure below uses `adminProcedure` and therefore belongs to traffic tier
+`admin-allowlist-unthrottled`.
 
 | Procedure | Kind | Input | Success |
 | --- | --- | --- | --- |
-| `admin.catalog.listProducts` | query | `{ search?: string(<=200), idCategoria?: uuid, includeInactive?: boolean=false, page?: int>=1=1, pageSize?: int 1..100=20 }` | `{ products: ProdutoAdminDTO[], total: int>=0 }` |
+| `admin.catalog.listProducts` | query | `{ search?: string(<=200), idCategoria?: uuid, includeInactive?: boolean=false, page?: int 1..100000=1, pageSize?: int 1..100=20 }` | `{ products: ProdutoAdminDTO[], total: int>=0 }` |
 | `admin.catalog.createProduct` | mutation | `{ nome, precoCents, quantidadeSugerida?=1, emoji, bgColor, idCategoria, imageUrl?, popularidade? }` | `ProdutoAdminDTO` |
 | `admin.catalog.updateProduct` | mutation | `{ id, nome?, precoCents?, quantidadeSugerida?, emoji?, bgColor?, idCategoria?, imageUrl?, popularidade? }` | `ProdutoAdminDTO` |
 | `admin.catalog.setProductAtivo` | mutation | `{ id, ativo }` | `ProdutoAdminDTO` |
@@ -160,6 +201,7 @@ Every procedure below uses `adminProcedure` and therefore belongs to rate tier `
 | `admin.catalog.updateCategory` | mutation | `{ id, label?, position? }` | `CategoriaAdminDTO` |
 | `admin.catalog.deleteCategory` | mutation | `{ id }` | `{ deleted: true }` |
 | `admin.catalog.listLists` | query | `{ includeInactive?: boolean=false }` | `ListaAdminDTO[]` |
+| `admin.catalog.getList` | query | `{ id }` | `ListaAdminDetailDTO` |
 | `admin.catalog.createList` | mutation | `{ nome, descricao?, imageUrl? }` | `ListaAdminDTO` |
 | `admin.catalog.updateList` | mutation | `{ id, nome?, descricao?, imageUrl? }` | `ListaAdminDTO` |
 | `admin.catalog.setListAtivo` | mutation | `{ id, ativo }` | `ListaAdminDTO` |
@@ -176,11 +218,14 @@ Mutation rules:
   `personalizado`, which remains exclusive to user-authored contribution items.
 - omitted nullable fields preserve their existing value; explicit `null` clears them.
 - `setListItems` replaces the complete set transactionally. Empty input clears the list. Repeated
-  equivalent input is idempotent.
+  equivalent input is idempotent. The array is capped at 1,000 entries; duplicate product IDs or
+  duplicate positions return `BAD_REQUEST`.
 - category deletion returns `CONFLICT` when active or inactive products reference it.
 - upload keys are server-generated as `catalogo/produtos/<uuid>.<ext>`. The presign expires after
   300 seconds and locks the supplied `Content-Type`. The input does not accept a filename, key,
   path, product ID or admin identity.
+- `listProducts` search is a case-insensitive literal substring match. Products, categories, lists
+  and list-detail items have deterministic persisted-position/UUID ordering.
 
 Example list request/response:
 
@@ -225,13 +270,83 @@ Expected procedure-specific errors:
 | create category | `CONFLICT` for duplicate slug |
 | update/delete category | `NOT_FOUND` for missing category |
 | delete category | `CONFLICT` for non-empty category |
-| update/toggle list | `NOT_FOUND` for missing list |
+| get/update/toggle list | `NOT_FOUND` for missing list |
 | set list items | `NOT_FOUND` for missing list or any referenced product |
+| partial updates | `BAD_REQUEST` when no mutable field is supplied |
+| set list items | `BAD_REQUEST` for more than 1,000 items or duplicate product IDs/positions |
 | upload presign | `BAD_REQUEST` for any non-enumerated MIME type |
+
+### Compact admin examples
+
+The examples use shortened but schema-complete payloads. UUIDs and timestamps are illustrative.
+
+```jsonc
+// admin.catalog.createProduct
+// input
+{"nome":"Fralda RN","precoCents":2990,"emoji":"🧷","bgColor":"var(--pink-soft)","idCategoria":"96a4ec31-dfeb-438f-9c35-9bb0350fb360"}
+// output: ProdutoAdminDTO
+{"id":"5ee01433-f760-4fab-97dc-cd55154918ee","idLegado":null,"nome":"Fralda RN","precoCents":2990,"quantidadeSugerida":1,"emoji":"🧷","bgColor":"var(--pink-soft)","idCategoria":"96a4ec31-dfeb-438f-9c35-9bb0350fb360","position":12,"imageUrl":null,"popularidade":null,"ativo":true,"criadoEm":"2026-07-27T12:00:00.000Z","atualizadoEm":"2026-07-27T12:00:00.000Z"}
+
+// admin.catalog.updateProduct
+{"id":"5ee01433-f760-4fab-97dc-cd55154918ee","imageUrl":"/catalogo/produtos/a.png","popularidade":null}
+// output: ProdutoAdminDTO with those fields updated
+
+// admin.catalog.setProductAtivo
+{"id":"5ee01433-f760-4fab-97dc-cd55154918ee","ativo":false}
+// output: ProdutoAdminDTO with ativo=false
+
+// admin.catalog.listCategories
+// input: none
+[{"id":"96a4ec31-dfeb-438f-9c35-9bb0350fb360","slug":"fraldas","label":"Fraldas","position":0,"quantidadeProdutos":82,"criadoEm":"2026-07-27T12:00:00.000Z"}]
+
+// admin.catalog.createCategory
+{"slug":"alimentacao","label":"Alimentação","position":8}
+// output
+{"id":"0d4cdb88-27ce-4c49-86c6-714eaab1352b","slug":"alimentacao","label":"Alimentação","position":8,"quantidadeProdutos":0,"criadoEm":"2026-07-27T12:00:00.000Z"}
+
+// admin.catalog.updateCategory
+{"id":"0d4cdb88-27ce-4c49-86c6-714eaab1352b","label":"Alimentação do bebê"}
+// output: CategoriaAdminDTO with the updated label
+
+// admin.catalog.deleteCategory
+{"id":"0d4cdb88-27ce-4c49-86c6-714eaab1352b"}
+// output
+{"deleted":true}
+
+// admin.catalog.listLists
+{"includeInactive":true}
+[{"id":"ad4aa121-550d-41df-a39b-697f7c2e54a2","slug":"cha-de-fralda","nome":"Chá de fralda","descricao":"Uma seleção prática","imageUrl":null,"position":0,"ativo":true,"quantidadeItens":20,"criadoEm":"2026-07-27T12:00:00.000Z","atualizadoEm":"2026-07-27T12:00:00.000Z"}]
+
+// admin.catalog.getList
+{"id":"ad4aa121-550d-41df-a39b-697f7c2e54a2"}
+{"id":"ad4aa121-550d-41df-a39b-697f7c2e54a2","slug":"cha-de-fralda","nome":"Chá de fralda","descricao":"Uma seleção prática","imageUrl":null,"position":0,"ativo":true,"quantidadeItens":1,"criadoEm":"2026-07-27T12:00:00.000Z","atualizadoEm":"2026-07-27T12:00:00.000Z","items":[{"idProduto":"5ee01433-f760-4fab-97dc-cd55154918ee","quantidade":3,"position":0}]}
+
+// admin.catalog.createList
+{"nome":"Lista enxoval","descricao":null,"imageUrl":null}
+// output: ListaAdminDTO with slug=null, ativo=true and a server-owned position
+
+// admin.catalog.updateList
+{"id":"ad4aa121-550d-41df-a39b-697f7c2e54a2","descricao":null}
+// output: ListaAdminDTO with descricao=null
+
+// admin.catalog.setListAtivo
+{"id":"ad4aa121-550d-41df-a39b-697f7c2e54a2","ativo":false}
+// output: ListaAdminDTO with ativo=false
+
+// admin.catalog.setListItems
+{"idLista":"ad4aa121-550d-41df-a39b-697f7c2e54a2","items":[{"idProduto":"5ee01433-f760-4fab-97dc-cd55154918ee","quantidade":3,"position":0}]}
+// output
+{"updated":true}
+
+// admin.catalog.emitirUrlUploadImagemProduto
+{"contentType":"image/png"}
+{"uploadUrl":"https://storage.example/upload-signed","objectKey":"catalogo/produtos/50f01c31-e37f-45ac-b62b-3af7230663b4.png","publicUrl":"https://storage.example/catalog/catalogo/produtos/50f01c31-e37f-45ac-b62b-3af7230663b4.png"}
+```
 
 ## Public procedures
 
-Both procedures are queries, unauthenticated, read-only and belong to rate tier `public-read`.
+Both procedures are queries, unauthenticated, read-only and belong to traffic tier
+`public-read-unthrottled`.
 
 ### `catalogo.listSections`
 
@@ -247,7 +362,7 @@ Example:
 [
   {
     "category": "fraldas",
-    "label": "fraldas",
+        "label": "Fraldas",
     "items": [
       {
         "id": "5ee01433-f760-4fab-97dc-cd55154918ee",
@@ -299,3 +414,15 @@ Example:
 
 Unexpected repository failures propagate as `INTERNAL_SERVER_ERROR`; neither procedure converts an
 error into `[]` or `{}`.
+
+## Frontend migration requirements
+
+- Catalog product IDs are UUIDs. The current `ListaPresentesBody` hashes legacy item IDs to invent
+  quantities; F2 must remove that behavior and use each API item's `suggestedQty` for both display
+  and persistence. Curated-list quantities come from the list-item relation.
+- Ready-list tiles must be enumerated from the returned record. The fixed five-entry
+  `LISTA_PRONTAS` array and closed `ListaProntaId` union are retired; client IDs become `string`.
+  Lists without legacy presentation metadata use a documented neutral fallback emoji and tile
+  token.
+- Fetch failures remain errors. They are never translated to empty sections or empty ready-list
+  records.
