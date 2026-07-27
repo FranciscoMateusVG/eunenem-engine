@@ -1,5 +1,6 @@
 import { useId, useState } from "react";
 import { AdminShell } from "@/components/eunenem/admin/AdminShell";
+import { CategoriasTab } from "@/components/eunenem/admin/catalogo/CategoriasTab";
 import { ProdutosTab } from "@/components/eunenem/admin/catalogo/ProdutosTab";
 
 /**
@@ -66,10 +67,7 @@ export function AdminCatalogoPage() {
             />
           </TabPanel>
           <TabPanel active={active} tab="categorias">
-            <PendingPanel
-              title="Categorias"
-              note="tabela · criar/renomear/reordenar · excluir apenas quando vazia"
-            />
+            <CategoriasTab />
           </TabPanel>
         </div>
       </section>
