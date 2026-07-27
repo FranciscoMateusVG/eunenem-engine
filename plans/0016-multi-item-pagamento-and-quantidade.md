@@ -90,7 +90,7 @@ Following the operator + GLaDOS review pass after the first draft of this plan l
 
 **Plan-doc nits applied:**
 
-A. **Phase 0 pure drop.** The migration adds `quantidade`, adds the `intencao_items` table, drops the old `intencao_id_contribuicao` column + the per-pagamento composição columns + the asymmetric `surcharge_cents`. No synthetic-row insertion. Operator framing: *"no migration needed, all staging."*
+A. **Phase 0 pure drop.** The migration adds `quantidade`, adds the `intencao_items` table, drops the old `intencao_id_contribuicao` column + the per-pagamento composição JSONB blob (`intencao_composicao_valores`) + the asymmetric `surcharge_cents`. No synthetic-row insertion. Operator framing: *"no migration needed, all staging."*
 
 B. **Phase 4 badge simplified to two states.** The plan's first draft proposed `DISPONÍVEL | PARCIAL | ESGOTADA` semantics. Operator collapses to:
    - When `quantidadeRestante > 0`: show `N/M` count only (e.g. `2/5`). No word badge.
@@ -228,7 +228,7 @@ Each phase ends with **STOP for confirmation**. Don't roll forward without expli
 
 ### Phase 0 — Migrations + schema surgery
 
-**Objective.** Add `quantidade` to `contribuicoes`. Add `intencao_items` table (or item columns under `pagamentos`, depending on the post-0015 persistence shape). Drop `intencao_id_contribuicao` and any single-item composição columns from `pagamentos`. Drop the asymmetric `surcharge_cents` field at the pagamento level.
+**Objective.** Add `quantidade` to `contribuicoes`. Add `intencao_items` table (or item columns under `pagamentos`, depending on the post-0015 persistence shape). Drop `intencao_id_contribuicao` and the single-item composição JSONB blob (`intencao_composicao_valores`) from `pagamentos`. Drop the asymmetric `surcharge_cents` field at the pagamento level.
 
 **Files NEW:**
 
@@ -240,8 +240,8 @@ Each phase ends with **STOP for confirmation**. Don't roll forward without expli
   - ADD `quantidade INTEGER NOT NULL DEFAULT 1` with `CHECK (quantidade >= 1)`. Default ensures the migration applies cleanly to existing rows without backfill.
 - `pagamentos` (or `intencoes_pagamento` — verify shape post-0015; the IntencaoPagamento is currently flattened into `pagamentos` per `pagamento-repository.postgres.ts`):
   - DROP `intencao_id_contribuicao` (moves to per-item)
-  - DROP the SnapshotComposicaoValores root columns that move to per-item:
-    `intencao_contribution_amount_cents`, `intencao_fee_amount_cents`, `intencao_receiver_amount_cents`, `intencao_surcharge_cents`. Keep the aggregate columns that survive: `intencao_amount_cents` (= totalPaid; renamed `intencao_total_paid_cents` for clarity), `intencao_id_campanha` (NEW, hoisted from items).
+  - DROP `intencao_composicao_valores` (the single JSONB blob holding the per-pagamento SnapshotComposicaoValores composição since migration 011 — its contents move to per-item rows). Keep the aggregate columns that survive: `intencao_amount_cents` (= totalPaid; renamed `intencao_total_paid_cents` for clarity), `intencao_id_campanha` (NEW, hoisted from items).
+    > **What was actually here:** the per-pagamento composição never existed as individual cents columns (`intencao_contribution_amount_cents` etc.) — it has lived as the single `intencao_composicao_valores` JSONB blob since the `pagamentos` table was first created (migration 011). An earlier draft of this plan listed four separate columns as being dropped; the end-state schema after Phase 0 is identical either way, only the verb on the column change differs ("drop blob" vs "drop individual columns"). See aperture-h8qux.
   - ADD `intencao_total_contribution_cents BIGINT NOT NULL`, `intencao_total_fee_cents BIGINT NOT NULL`, `intencao_total_receiver_cents BIGINT NOT NULL`, `intencao_total_surcharge_cents BIGINT NOT NULL` (the aggregate snapshot — denormalised at intent-creation for read-path simplicity).
   - ADD `intencao_id_campanha UUID NOT NULL REFERENCES campanhas(id)` (the cart's recebedor scope).
 - `intencao_items` (NEW table — items live in their own table since they're a 1:N collection child of IntencaoPagamento; flattening into JSONB on `pagamentos` is tempting but loses indexability for `quantidadeRestante`'s GROUP BY):
@@ -286,7 +286,7 @@ Each phase ends with **STOP for confirmation**. Don't roll forward without expli
 
 - `pnpm db:migrate` runs clean against a fresh DB.
 - `psql -c "\d contribuicoes"` shows `quantidade INTEGER NOT NULL DEFAULT 1` with the positive CHECK.
-- `psql -c "\d pagamentos"` shows the dropped composição columns gone, the aggregate ones present, `intencao_id_campanha` present.
+- `psql -c "\d pagamentos"` shows the dropped `intencao_composicao_valores` JSONB blob gone, the aggregate ones present, `intencao_id_campanha` present.
 - `psql -c "\d intencao_items"` shows the discriminator CHECK constraint enforced.
 - `EXPLAIN ANALYZE` on the `quantidadeRestante` query (join intencao_items + pagamentos on aprovado) uses the new partial index.
 - `pnpm db:codegen` regenerates `src/adapters/db-types.generated.ts` cleanly (no orphan references to dropped columns).
