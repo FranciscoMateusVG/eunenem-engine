@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { buildServerDeps, loadEnv } from '../../apps/eunenem-server/server/auth/setup.js';
 import { __resetStripeForTests } from '../../apps/eunenem-server/src/lib/stripe/stripe.js';
 import {
+  CatalogoRepositoryPostgres,
   PagamentoProviderFake,
   PagamentoProviderStripe,
   TransferenciaProviderFake,
@@ -46,6 +47,17 @@ function baseEnv(): NodeJS.ProcessEnv {
     LEGACY_SITE_ORIGIN: 'https://eunenem.com',
   } as NodeJS.ProcessEnv;
 }
+
+describe('eunenem-server catalog composition root (aperture-ldo5d)', () => {
+  it('binds the required Postgres catalog adapter into production-shaped ServerDeps', () => {
+    const deps = buildServerDeps(loadEnv(baseEnv()));
+    try {
+      expect(deps.catalogoRepository).toBeInstanceOf(CatalogoRepositoryPostgres);
+    } finally {
+      void deps.db.destroy();
+    }
+  });
+});
 
 describe('eunenem-server payment-provider DI gate (aperture-ozlcr)', () => {
   // getStripe() reads process.env.STRIPE_SECRET_KEY at call time and

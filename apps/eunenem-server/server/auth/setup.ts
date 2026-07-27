@@ -5,6 +5,8 @@ import {
   type Auth,
   type CampanhaRepository,
   CampanhaRepositoryPostgres,
+  type CatalogoRepository,
+  CatalogoRepositoryPostgres,
   type ConviteRepository,
   ConviteRepositoryPostgres,
   type CheckoutSessionProvider,
@@ -87,6 +89,12 @@ export interface ServerDeps {
   readonly auth: Auth;
   readonly authService: AuthService;
   readonly usuarioRepository: UsuarioRepository;
+  /**
+   * Global editable gift catalogue. Required production dependency: public
+   * catalogue reads and admin mutations must never fall back to bundled JSON
+   * after migration 045.
+   */
+  readonly catalogoRepository: CatalogoRepository;
   /**
    * PerfilCriador BC adapter (aperture-cdo69). Backs the `perfil.*` tRPC
    * procedures — authed read/write of the creator profile + the public
@@ -652,6 +660,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
   };
 
   const db = createDatabase(env.DATABASE_URL);
+  const catalogoRepository = new CatalogoRepositoryPostgres(db);
 
   // Google OAuth (aperture-8655f) — CONDITIONAL on BOTH env vars being
   // present. When either is missing, `socialProviders` stays undefined and
@@ -927,6 +936,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     auth,
     authService,
     usuarioRepository,
+    catalogoRepository,
     perfilCriadorRepository,
     perfilCampanhaRepository,
     resgatePendenteRepository,

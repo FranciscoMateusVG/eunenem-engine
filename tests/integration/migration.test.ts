@@ -1,8 +1,32 @@
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { Kysely, Migrator, PostgresDialect, sql } from 'kysely';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import catalogSnapshot from '../../migrations/seed/20260727_045_catalog.json';
+import listasSnapshot from '../../migrations/seed/20260727_045_listas-prontas.json';
 import { createMigrationProvider } from '../helpers/migration-provider.js';
+
+const CATALOG_CATEGORY_LABELS = [
+  ['fraldas', 'fraldas'],
+  ['higiene', 'higiene'],
+  ['roupa', 'roupinhas'],
+  ['soninho', 'soninho'],
+  ['alimentacao', 'alimentação'],
+  ['passeio', 'passeio'],
+  ['brinquedo', 'brinquedos'],
+  ['outros', 'outros'],
+] as const;
+
+const CATALOG_SNAPSHOT_SHA256 = '31345d2e3c1580f49186f311efedd8379f405c7064ed70690fc8c651553157b7';
+const LISTAS_SNAPSHOT_SHA256 = '450b7404db7c38af67d30d04cfff778605139d1e93a76487a81cc7f7517c1c2a';
+
+async function sha256(url: URL): Promise<string> {
+  return createHash('sha256')
+    .update(await readFile(url))
+    .digest('hex');
+}
 
 describe('Migration round-trip', () => {
   let container: StartedPostgreSqlContainer;
@@ -25,6 +49,17 @@ describe('Migration round-trip', () => {
   afterAll(async () => {
     await db.destroy();
     await container.stop();
+  });
+
+  it('pins immutable catalog seed snapshot bytes', async () => {
+    expect(
+      await sha256(new URL('../../migrations/seed/20260727_045_catalog.json', import.meta.url)),
+    ).toBe(CATALOG_SNAPSHOT_SHA256);
+    expect(
+      await sha256(
+        new URL('../../migrations/seed/20260727_045_listas-prontas.json', import.meta.url),
+      ),
+    ).toBe(LISTAS_SNAPSHOT_SHA256);
   });
 
   it('should migrate up and down cleanly', async () => {
@@ -130,6 +165,123 @@ describe('Migration round-trip', () => {
       (await getColumn(db, 'repasses_recebedor', 'needs_manual_resolution'))?.is_nullable,
     ).toBe('NO');
 
+    // 20260727_045_catalogo_admin (aperture-ldo5d): immutable JSON snapshots
+    // become the platform-global catalog. Assert full field equivalence rather
+    // than only "migration returned success": an empty/partial backfill is a
+    // broken catalog even when its tables exist.
+    expect(tableNames).toContain('catalogo_categorias');
+    expect(tableNames).toContain('catalogo_produtos');
+    expect(tableNames).toContain('catalogo_listas');
+    expect(tableNames).toContain('catalogo_lista_itens');
+
+    const categoryRows = await sql<{
+      slug: string;
+      label: string;
+      position: number;
+    }>`SELECT slug, label, position
+       FROM catalogo_categorias
+       ORDER BY position`.execute(db);
+    expect(categoryRows.rows).toEqual(
+      CATALOG_CATEGORY_LABELS.map(([slug, label], position) => ({ slug, label, position })),
+    );
+
+    const productRows = await sql<{
+      id_legado: string;
+      nome: string;
+      preco_cents: string;
+      quantidade_sugerida: number;
+      emoji: string;
+      bg_color: string;
+      category_slug: string;
+      position: number;
+      image_url: string | null;
+      popularidade: number | null;
+      ativo: boolean;
+    }>`SELECT
+         p.id_legado, p.nome, p.preco_cents, p.quantidade_sugerida,
+         p.emoji, p.bg_color, c.slug AS category_slug, p.position,
+         p.image_url, p.popularidade, p.ativo
+       FROM catalogo_produtos p
+       JOIN catalogo_categorias c ON c.id = p.id_categoria
+       ORDER BY c.position, p.position`.execute(db);
+
+    const expectedProducts = [];
+    const nextPositionByCategory = new Map<string, number>();
+    for (const product of catalogSnapshot) {
+      const position = nextPositionByCategory.get(product.category) ?? 0;
+      nextPositionByCategory.set(product.category, position + 1);
+      expectedProducts.push({
+        id_legado: product.id,
+        nome: product.name,
+        preco_cents: String(Math.round(product.price * 100)),
+        quantidade_sugerida: product.suggestedQty,
+        emoji: product.emoji,
+        bg_color: product.bgColor,
+        category_slug: product.category,
+        position,
+        image_url: product.imageUrl,
+        popularidade: 'popularity' in product ? product.popularity : null,
+        ativo: true,
+      });
+    }
+    const categoryRank = new Map<string, number>(
+      CATALOG_CATEGORY_LABELS.map(([slug], position) => [slug, position]),
+    );
+    expectedProducts.sort(
+      (left, right) =>
+        (categoryRank.get(left.category_slug) ?? -1) -
+          (categoryRank.get(right.category_slug) ?? -1) || left.position - right.position,
+    );
+    expect(productRows.rows).toHaveLength(501);
+    expect(productRows.rows).toEqual(expectedProducts);
+
+    const listRows = await sql<{
+      slug: string;
+      nome: string;
+      descricao: string | null;
+      image_url: string | null;
+      position: number;
+      ativo: boolean;
+    }>`SELECT slug, nome, descricao, image_url, position, ativo
+       FROM catalogo_listas
+       ORDER BY position`.execute(db);
+    expect(listRows.rows).toEqual(
+      listasSnapshot.map((lista, position) => ({
+        slug: lista.id,
+        nome: lista.title,
+        descricao: lista.description,
+        image_url: lista.imageUrl,
+        position,
+        ativo: true,
+      })),
+    );
+
+    const listItemRows = await sql<{
+      list_slug: string;
+      product_legacy_id: string;
+      quantidade: number;
+      position: number;
+    }>`SELECT
+         l.slug AS list_slug,
+         p.id_legado AS product_legacy_id,
+         li.quantidade,
+         li.position
+       FROM catalogo_lista_itens li
+       JOIN catalogo_listas l ON l.id = li.id_lista
+       JOIN catalogo_produtos p ON p.id = li.id_produto
+       ORDER BY l.position, li.position`.execute(db);
+    expect(listItemRows.rows).toHaveLength(77);
+    expect(listItemRows.rows).toEqual(
+      listasSnapshot.flatMap((lista) =>
+        lista.items.map((item, position) => ({
+          list_slug: lista.id,
+          product_legacy_id: item.id,
+          quantidade: item.suggestedQty,
+          position,
+        })),
+      ),
+    );
+
     const conviteRemetenteCol = await getColumn(db, 'convites', 'remetente');
     expect(conviteRemetenteCol?.data_type).toBe('character varying');
     expect(conviteRemetenteCol?.character_maximum_length).toBe(120);
@@ -165,8 +317,18 @@ describe('Migration round-trip', () => {
     //    note above; renaming a DEPLOYED migration is forbidden because
     //    kysely_migration keys on the filename and would re-run it).
 
+    // 20260727_045_catalogo_admin (aperture-ldo5d) → the actual TIP now.
+    // Its down() drops all four catalog tables in FK-safe order.
+    const downCatalogoAdmin = await migrator.migrateDown();
+    expect(downCatalogoAdmin.error).toBeUndefined();
+    const tablesAfterCatalogoDown = await listTableNames(db);
+    expect(tablesAfterCatalogoDown).not.toContain('catalogo_lista_itens');
+    expect(tablesAfterCatalogoDown).not.toContain('catalogo_listas');
+    expect(tablesAfterCatalogoDown).not.toContain('catalogo_produtos');
+    expect(tablesAfterCatalogoDown).not.toContain('catalogo_categorias');
+
     // 20260718_044_add_onboarding_concluido_em_to_usuarios (aperture-lrl1h) →
-    //   the actual TIP now. Prepended per the contract above (ELEVENTH
+    //   the actual TIP after 045. Prepended per the contract above (ELEVENTH
     //   occurrence of the off-by-one this block warns about). Its down() drops
     //   usuarios.onboarding_concluido_em. THIS is the true first migrateDown.
     const downOnboardingConcluido = await migrator.migrateDown();

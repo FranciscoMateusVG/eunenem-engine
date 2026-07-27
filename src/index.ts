@@ -16,6 +16,24 @@ export type { ResgatePendenteRepository } from './adapters/arrecadacao/resgate-p
 export { ResgatePendenteRepositoryMemory } from './adapters/arrecadacao/resgate-pendente-repository.memory.js';
 export { ResgatePendenteRepositoryPostgres } from './adapters/arrecadacao/resgate-pendente-repository.postgres.js';
 export type { CatRepository } from './adapters/cat-repository.js';
+export type {
+  CatalogoCategoria,
+  CatalogoCategoriaComContagem,
+  CatalogoLista,
+  CatalogoListaComItens,
+  CatalogoListaItem,
+  CatalogoListaItemComProduto,
+  CatalogoListaResumo,
+  CatalogoProduto,
+  CatalogoProdutoComCategoria,
+  CatalogoRepository,
+  DeleteCatalogoCategoriaVaziaOutcome,
+  FindCatalogoProdutosPageInput,
+  FindCatalogoProdutosPageOutput,
+  ReplaceCatalogoListaItensOutcome,
+} from './adapters/catalogo/repository.js';
+export { CatalogoRepositoryMemory } from './adapters/catalogo/repository.memory.js';
+export { CatalogoRepositoryPostgres } from './adapters/catalogo/repository.postgres.js';
 export type { Database } from './adapters/database.js';
 export { createDatabase } from './adapters/database.js';
 // aperture-lwx2k — shared email transport (magic-link + future transactional).
