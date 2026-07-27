@@ -48,7 +48,7 @@ type AdminShellProps = {
   activeNav?: NavKey;
 };
 
-type NavKey = "landing" | "repasses";
+type NavKey = "landing" | "repasses" | "catalogo";
 
 const NAV_ITEMS: ReadonlyArray<{ key: NavKey; label: string; href: string }> = [
   { key: "landing", label: "Visão geral", href: "/admin" },
@@ -57,6 +57,10 @@ const NAV_ITEMS: ReadonlyArray<{ key: NavKey; label: string; href: string }> = [
   // operator workflow surface (action queue + historical record), not a
   // drill-down off the landing table.
   { key: "repasses", label: "Repasses", href: "/admin/repasses" },
+  // plan ckru9 F1 — catalog management (produtos/listas/categorias).
+  // Operator workflow surface like Repasses; DB-backed catalog CRUD that
+  // the customer /painel read-path (F2) consumes.
+  { key: "catalogo", label: "Catálogo", href: "/admin/catalogo" },
 ];
 
 export function AdminShell({
