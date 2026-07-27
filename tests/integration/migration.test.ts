@@ -317,7 +317,14 @@ describe('Migration round-trip', () => {
     //    note above; renaming a DEPLOYED migration is forbidden because
     //    kysely_migration keys on the filename and would re-run it).
 
-    // 20260727_045_catalogo_admin (aperture-ldo5d) → the actual TIP now.
+    // 20260727_046_catalogo_admin_audit (aperture-1bity) → the actual TIP.
+    // Its down() removes only the immutable audit trail and leaves the catalog.
+    const downCatalogoAdminAudit = await migrator.migrateDown();
+    expect(downCatalogoAdminAudit.error).toBeUndefined();
+    expect(await listTableNames(db)).not.toContain('catalogo_admin_audit_events');
+    expect(await listTableNames(db)).toContain('catalogo_produtos');
+
+    // 20260727_045_catalogo_admin (aperture-ldo5d) → the TIP after 046.
     // Its down() drops all four catalog tables in FK-safe order.
     const downCatalogoAdmin = await migrator.migrateDown();
     expect(downCatalogoAdmin.error).toBeUndefined();

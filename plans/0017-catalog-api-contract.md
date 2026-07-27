@@ -13,14 +13,20 @@ generated `AppRouter` client rather than assemble HTTP URLs.
 - Money is an integer number of cents in admin procedures and a BRL decimal number in public
   projections.
 - Timestamps are ISO-8601 strings.
-- `imageUrl` is `null` or one of:
-  - a root-relative path beginning with one `/`, such as `/products/558361.png`;
-  - an absolute `https:` URL without embedded credentials.
-  - a credential-free `http:` URL whose host is exactly `localhost`, `127.0.0.1` or `::1`, for
-    the supported local MinIO development configuration only.
-- Empty strings, protocol-relative URLs, paths containing a backslash, non-loopback `http:`,
-  `data:`, `javascript:` and URLs with credentials are rejected. Root-relative paths must resolve
-  against the application's own origin. The maximum URL length is 2,048 characters.
+- New admin `imageUrl` writes are `null` or one of:
+  - a root-relative path under `/products/`, `/listas-prontas/` or
+    `/catalogo/produtos/`;
+  - the canonical URL produced by the configured object-storage adapter for a
+    `catalogo/produtos/<uuid>.(jpg|png|webp)` object.
+- Public/admin reads temporarily grandfather the exact migration-045 legacy product hosts
+  `http2.mlstatic.com` and `rihappy.vteximg.com.br`. The Mercado Livre host permits no query;
+  Rihappy permits only one numeric `v` cache-version parameter. New writes cannot use either
+  vendor host. This preserves the 213 backfilled legacy images while blocking arbitrary remote
+  tracking origins until the assets are mirrored into owned storage.
+- Empty strings, protocol-relative URLs, paths containing a backslash, credentials, fragments,
+  arbitrary query parameters, path traversal/encoded separators, arbitrary HTTPS origins,
+  private/special numeric addresses, `data:` and `javascript:` are rejected. The maximum URL
+  length is 2,048 characters.
 - `bgColor` is one of the six catalog tokens already present in the immutable seed:
   `var(--blue)`, `var(--blue-soft)`, `var(--cream-2)`, `var(--lilac-soft)`,
   `var(--pink-soft)` or `var(--yellow-soft)`. Arbitrary CSS is rejected.
@@ -42,6 +48,7 @@ generated `AppRouter` client rather than assemble HTTP URLs.
 | popularity/position | non-negative PostgreSQL `integer` (maximum 2,147,483,647) |
 | pagination | page 1..100,000; page size 1..100 |
 | list items | at most 1,000; product IDs and positions must each be unique |
+| catalog image upload | `sizeBytes` integer 1..5,242,880; MIME is JPEG, PNG or WebP |
 
 Partial update mutations reject an input containing only `id`. Unknown object keys are rejected.
 
@@ -54,6 +61,7 @@ Partial update mutations reject an input containing only `id`. Unknown object ke
 | `FORBIDDEN` | valid session, but email is not in `ADMIN_ALLOWED_EMAILS` |
 | `NOT_FOUND` | requested category, product, list or referenced product does not exist |
 | `CONFLICT` | category is non-empty or a unique catalog value already exists |
+| `TOO_MANY_REQUESTS` | the admin exceeded 10 catalog-image presigns in the current minute |
 | `INTERNAL_SERVER_ERROR` | unexpected repository/storage failure; never converted to empty data |
 
 Example error:
@@ -71,13 +79,13 @@ Example error:
 
 | Tier | Procedures | Application budget |
 | --- | --- | --- |
-| `admin-allowlist-unthrottled` | every `admin.catalog.*` procedure | no application counter in B2; session + allowlist authorization is mandatory |
+| `admin-allowlist-unthrottled` | admin catalog queries and non-presign mutations | no application counter; session + allowlist authorization is mandatory |
+| `admin-catalog-presign` | `admin.catalog.emitirUrlUploadImagemProduto` | durable Postgres-backed 10 requests/minute per authenticated admin `usuario.id` |
 | `public-read-unthrottled` | `catalogo.listSections`, `catalogo.listListasProntas` | no application counter in B2; read-only |
 
-These are explicitly unthrottled application tiers, not rate limits disguised as authorization.
-Both inherit deployment-level request/body limits. B2 adds no in-memory limiter. A production
-request budget requires a durable multi-instance adapter and a separately reviewed contract; do
-not add an instance-local counter.
+Unthrottled tiers inherit deployment-level request/body limits. The presign limiter uses the
+existing Postgres `rate_limit` table, survives restarts and coordinates multiple instances. No
+instance-local counter is used.
 
 ## DTOs
 
@@ -206,7 +214,7 @@ Every procedure below uses `adminProcedure` and therefore belongs to traffic tie
 | `admin.catalog.updateList` | mutation | `{ id, nome?, descricao?, imageUrl? }` | `ListaAdminDTO` |
 | `admin.catalog.setListAtivo` | mutation | `{ id, ativo }` | `ListaAdminDTO` |
 | `admin.catalog.setListItems` | mutation | `{ idLista, items: [{ idProduto, quantidade, position }] }` | `{ updated: true }` |
-| `admin.catalog.emitirUrlUploadImagemProduto` | mutation | `{ contentType: "image/jpeg" | "image/png" | "image/webp" }` | `{ uploadUrl, objectKey, publicUrl }` |
+| `admin.catalog.emitirUrlUploadImagemProduto` | mutation | `{ contentType: "image/jpeg" | "image/png" | "image/webp", sizeBytes: int 1..5242880 }` | `{ uploadUrl, objectKey, publicUrl }` |
 
 Mutation rules:
 
@@ -217,15 +225,41 @@ Mutation rules:
 - `createCategory.slug` is a lowercase kebab slug and rejects the reserved value
   `personalizado`, which remains exclusive to user-authored contribution items.
 - omitted nullable fields preserve their existing value; explicit `null` clears them.
+- Product/list partial updates are atomic at the repository boundary. They update only supplied
+  columns plus `atualizadoEm`; a concurrent activation/deactivation cannot be overwritten by a
+  stale read-merge-full-write cycle.
 - `setListItems` replaces the complete set transactionally. Empty input clears the list. Repeated
   equivalent input is idempotent. The array is capped at 1,000 entries; duplicate product IDs or
   duplicate positions return `BAD_REQUEST`.
 - category deletion returns `CONFLICT` when active or inactive products reference it.
 - upload keys are server-generated as `catalogo/produtos/<uuid>.<ext>`. The presign expires after
-  300 seconds and locks the supplied `Content-Type`. The input does not accept a filename, key,
-  path, product ID or admin identity.
+  300 seconds and signs the exact `Content-Type` and `Content-Length` headers. Uploading with a
+  different MIME, byte length or omitted signed header fails signature validation at object
+  storage. Browsers derive `Content-Length` from the exact `Blob`; client code supplies the exact
+  `Content-Type`. The input does not accept a filename, key, path, product ID or admin identity.
 - `listProducts` search is a case-insensitive literal substring match. Products, categories, lists
   and list-detail items have deterministic persisted-position/UUID ordering.
+
+### Immutable admin audit
+
+All 11 catalog mutations/presign procedures append an immutable lifecycle under one request UUID:
+`requested` before the side effect, followed by `succeeded` or `failed`. The actor is the
+server-resolved `usuario.id`. Audit rows contain only bounded identifiers and operational metadata
+(changed field names, active flag, item count, MIME, size and generated object key); names, email,
+descriptions and signed URLs are never stored. Migration 046 rejects `UPDATE` and `DELETE` with a
+database trigger.
+
+### Staging presign negative proof
+
+After deploy, obtain a presign for a known byte payload and verify all three cases against the
+returned `uploadUrl`:
+
+1. exact body, exact `Content-Type`, naturally matching `Content-Length` -> 2xx;
+2. same body with a different `Content-Type` -> signature rejection;
+3. body with a different byte length -> signature rejection.
+
+Also call the tRPC procedure with missing, zero and `5_242_881` `sizeBytes`; each must return
+`BAD_REQUEST`, no storage object must exist, and no catalog product row may be created.
 
 Example list request/response:
 

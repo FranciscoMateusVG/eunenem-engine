@@ -16,6 +16,8 @@ import type {
   FindCatalogoProdutosPageInput,
   FindCatalogoProdutosPageOutput,
   ReplaceCatalogoListaItensOutcome,
+  UpdateCatalogoListaPatch,
+  UpdateCatalogoProdutoPatch,
 } from './repository.js';
 import { CatalogoConflictError } from './repository.js';
 
@@ -109,6 +111,12 @@ function listaItemFromRow(row: ListaItemRow): CatalogoListaItem {
 
 function escapeLikePattern(value: string): string {
   return value.replace(/[\\%_]/g, '\\$&');
+}
+
+function withoutUndefined<T extends Record<string, unknown>>(values: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(values).filter(([, value]) => value !== undefined),
+  ) as Partial<T>;
 }
 
 function validateListaItens(idLista: string, itens: readonly CatalogoListaItem[]): void {
@@ -286,28 +294,33 @@ export class CatalogoRepositoryPostgres implements CatalogoRepository {
     });
   }
 
-  async updateProduto(produto: CatalogoProduto): Promise<boolean> {
+  async updateProduto(
+    id: string,
+    patch: UpdateCatalogoProdutoPatch,
+  ): Promise<CatalogoProduto | undefined> {
     return withPostgresSpan('updateProduto', 'UPDATE', async () => {
-      const result = await this.db
+      const row = await this.db
         .updateTable('catalogo_produtos')
-        .set({
-          id_legado: produto.idLegado,
-          nome: produto.nome,
-          preco_cents: produto.precoCents,
-          quantidade_sugerida: produto.quantidadeSugerida,
-          emoji: produto.emoji,
-          bg_color: produto.bgColor,
-          id_categoria: produto.idCategoria,
-          position: produto.position,
-          image_url: produto.imageUrl,
-          popularidade: produto.popularidade,
-          ativo: produto.ativo,
-          criado_em: produto.criadoEm,
-          atualizado_em: produto.atualizadoEm,
-        })
-        .where('id', '=', produto.id)
+        .set(
+          withoutUndefined({
+            id_legado: patch.idLegado,
+            nome: patch.nome,
+            preco_cents: patch.precoCents,
+            quantidade_sugerida: patch.quantidadeSugerida,
+            emoji: patch.emoji,
+            bg_color: patch.bgColor,
+            id_categoria: patch.idCategoria,
+            position: patch.position,
+            image_url: patch.imageUrl,
+            popularidade: patch.popularidade,
+            ativo: patch.ativo,
+            atualizado_em: patch.atualizadoEm,
+          }),
+        )
+        .where('id', '=', id)
+        .returningAll()
         .executeTakeFirst();
-      return Number(result.numUpdatedRows) > 0;
+      return row ? produtoFromRow(row) : undefined;
     });
   }
 
@@ -448,23 +461,28 @@ export class CatalogoRepositoryPostgres implements CatalogoRepository {
     });
   }
 
-  async updateLista(lista: CatalogoLista): Promise<boolean> {
+  async updateLista(
+    id: string,
+    patch: UpdateCatalogoListaPatch,
+  ): Promise<CatalogoLista | undefined> {
     return withPostgresSpan('updateLista', 'UPDATE', async () => {
-      const result = await this.db
+      const row = await this.db
         .updateTable('catalogo_listas')
-        .set({
-          slug: lista.slug,
-          nome: lista.nome,
-          descricao: lista.descricao,
-          image_url: lista.imageUrl,
-          position: lista.position,
-          ativo: lista.ativo,
-          criado_em: lista.criadoEm,
-          atualizado_em: lista.atualizadoEm,
-        })
-        .where('id', '=', lista.id)
+        .set(
+          withoutUndefined({
+            slug: patch.slug,
+            nome: patch.nome,
+            descricao: patch.descricao,
+            image_url: patch.imageUrl,
+            position: patch.position,
+            ativo: patch.ativo,
+            atualizado_em: patch.atualizadoEm,
+          }),
+        )
+        .where('id', '=', id)
+        .returningAll()
         .executeTakeFirst();
-      return Number(result.numUpdatedRows) > 0;
+      return row ? listaFromRow(row) : undefined;
     });
   }
 

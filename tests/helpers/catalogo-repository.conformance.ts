@@ -184,12 +184,46 @@ export function describeCatalogoRepositoryConformance(
         ativo: false,
         atualizadoEm: UPDATED_AT,
       };
-      expect(await repo.updateProduto(updated)).toBe(true);
+      expect(
+        await repo.updateProduto(original.id, {
+          nome: updated.nome,
+          ativo: updated.ativo,
+          atualizadoEm: updated.atualizadoEm,
+        }),
+      ).toEqual(updated);
       expect(await repo.findProdutoById(original.id)).toEqual(updated);
-      expect(await repo.updateProduto(makeCatalogoProduto(category.id))).toBe(false);
+      expect(
+        await repo.updateProduto(randomUUID(), {
+          nome: 'Ausente',
+          atualizadoEm: UPDATED_AT,
+        }),
+      ).toBeUndefined();
       await expect(
         repo.createProduto(makeCatalogoProduto(category.id, { position: -1 })),
       ).rejects.toThrow();
+    });
+
+    it('atomically patches products without restoring unrelated concurrently changed fields', async () => {
+      const category = makeCatalogoCategoria();
+      await repo.createCategoria(category);
+      const original = makeCatalogoProduto(category.id);
+      await repo.createProduto(original);
+
+      const deactivated = await repo.updateProduto(original.id, {
+        ativo: false,
+        atualizadoEm: UPDATED_AT,
+      });
+      expect(deactivated?.ativo).toBe(false);
+
+      const renamed = await repo.updateProduto(original.id, {
+        nome: 'Nome concorrente',
+        atualizadoEm: new Date('2026-07-27T14:00:00.000Z'),
+      });
+      expect(renamed).toMatchObject({
+        nome: 'Nome concorrente',
+        ativo: false,
+      });
+      expect((await repo.findProdutoById(original.id))?.ativo).toBe(false);
     });
 
     it('allocates the next product position from all rows in the target category', async () => {
@@ -325,9 +359,40 @@ export function describeCatalogoRepositoryConformance(
         nome: 'Lista atualizada',
         atualizadoEm: UPDATED_AT,
       };
-      expect(await repo.updateLista(updated)).toBe(true);
+      expect(
+        await repo.updateLista(activeList.id, {
+          nome: updated.nome,
+          atualizadoEm: updated.atualizadoEm,
+        }),
+      ).toEqual(updated);
       expect((await repo.findListaByIdComItens(activeList.id))?.lista).toEqual(updated);
-      expect(await repo.updateLista(makeCatalogoLista())).toBe(false);
+      expect(
+        await repo.updateLista(randomUUID(), {
+          nome: 'Ausente',
+          atualizadoEm: UPDATED_AT,
+        }),
+      ).toBeUndefined();
+    });
+
+    it('atomically patches lists without republishing a concurrently deactivated row', async () => {
+      const original = makeCatalogoLista();
+      await repo.createLista(original);
+
+      const deactivated = await repo.updateLista(original.id, {
+        ativo: false,
+        atualizadoEm: UPDATED_AT,
+      });
+      expect(deactivated?.ativo).toBe(false);
+
+      const renamed = await repo.updateLista(original.id, {
+        nome: 'Lista concorrente',
+        atualizadoEm: new Date('2026-07-27T14:00:00.000Z'),
+      });
+      expect(renamed).toMatchObject({
+        nome: 'Lista concorrente',
+        ativo: false,
+      });
+      expect((await repo.findListaByIdComItens(original.id))?.lista.ativo).toBe(false);
     });
 
     it('allocates the next list position including inactive lists', async () => {

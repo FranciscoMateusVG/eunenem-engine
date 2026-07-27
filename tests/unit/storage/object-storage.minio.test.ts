@@ -1,63 +1,65 @@
-import { PutObjectCommand } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { ObjectStorageMinio } from '../../../src/adapters/storage/object-storage.minio.js';
 
-vi.mock('@aws-sdk/s3-request-presigner', () => ({
-  getSignedUrl: vi.fn(),
-}));
-
-const getSignedUrlMock = vi.mocked(getSignedUrl);
-
-describe('ObjectStorageMinio catalogue presign', () => {
-  beforeEach(() => {
-    getSignedUrlMock.mockReset();
-    getSignedUrlMock.mockResolvedValue('https://minio.example/upload-signed');
+const createStorage = () =>
+  new ObjectStorageMinio({
+    endpoint: 'https://minio.example',
+    region: 'us-east-1',
+    accessKeyId: 'test-access-key',
+    secretAccessKey: 'test-secret-key',
+    bucket: 'test-bucket',
   });
 
-  it('locks ContentType, uses a server-generated catalogue key, and expires in 300 seconds', async () => {
-    const storage = new ObjectStorageMinio({
-      endpoint: 'https://minio.example',
-      region: 'us-east-1',
-      accessKeyId: 'test-access-key',
-      secretAccessKey: 'test-secret-key',
-      bucket: 'test-bucket',
-    });
+describe('ObjectStorageMinio catalogue presign', () => {
+  it('real-presigns MIME and exact length with a 300-second catalogue PUT', async () => {
+    const storage = createStorage();
 
     const result = await storage.emitirUrlUploadPresignadaCatalogo({
       contentType: 'image/png',
+      sizeBytes: 4_096,
     });
 
     expect(result.objectKey).toMatch(/^catalogo\/produtos\/[0-9a-f-]+\.png$/);
-    expect(result).toEqual({
-      uploadUrl: 'https://minio.example/upload-signed',
-      objectKey: result.objectKey,
-      publicUrl: `https://minio.example/test-bucket/${result.objectKey}`,
-    });
+    expect(result.publicUrl).toBe(`https://minio.example/test-bucket/${result.objectKey}`);
 
-    expect(getSignedUrlMock).toHaveBeenCalledOnce();
-    const [, command, options] = getSignedUrlMock.mock.calls[0];
-    expect(command).toBeInstanceOf(PutObjectCommand);
-    expect((command as PutObjectCommand).input).toEqual({
-      Bucket: 'test-bucket',
-      Key: result.objectKey,
-      ContentType: 'image/png',
-    });
-    expect(options).toEqual({ expiresIn: 300 });
+    // This intentionally exercises @aws-sdk/s3-request-presigner itself.
+    // A mocked getSignedUrl cannot prove which headers SDK 3.1075 actually
+    // includes in the SigV4 canonical request.
+    const uploadUrl = new URL(result.uploadUrl);
+    expect(uploadUrl.origin).toBe('https://minio.example');
+    expect(decodeURIComponent(uploadUrl.pathname)).toBe(`/test-bucket/${result.objectKey}`);
+    expect(uploadUrl.searchParams.get('X-Amz-Algorithm')).toBe('AWS4-HMAC-SHA256');
+    expect(uploadUrl.searchParams.get('X-Amz-Expires')).toBe('300');
+    expect(uploadUrl.searchParams.get('X-Amz-SignedHeaders')).toBe(
+      'content-length;content-type;host',
+    );
+    expect(uploadUrl.searchParams.get('X-Amz-Signature')).toMatch(/^[0-9a-f]{64}$/);
   });
 
-  it('rejects unsupported MIME types before asking MinIO to sign', async () => {
-    const storage = new ObjectStorageMinio({
-      endpoint: 'https://minio.example',
-      region: 'us-east-1',
-      accessKeyId: 'test-access-key',
-      secretAccessKey: 'test-secret-key',
-      bucket: 'test-bucket',
-    });
+  it('rejects unsupported MIME types before signing', async () => {
+    const storage = createStorage();
 
     await expect(
-      storage.emitirUrlUploadPresignadaCatalogo({ contentType: 'image/gif' }),
+      storage.emitirUrlUploadPresignadaCatalogo({
+        contentType: 'image/gif',
+        sizeBytes: 1_024,
+      }),
     ).rejects.toThrow(/não suportado/);
-    expect(getSignedUrlMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    0,
+    5 * 1024 * 1024 + 1,
+    1.5,
+    Number.NaN,
+  ])('rejects invalid sizeBytes %s before signing', async (sizeBytes) => {
+    const storage = createStorage();
+
+    await expect(
+      storage.emitirUrlUploadPresignadaCatalogo({
+        contentType: 'image/webp',
+        sizeBytes,
+      }),
+    ).rejects.toThrow(/sizeBytes/);
   });
 });

@@ -38,11 +38,13 @@ import type { IdContribuicaoPagamento } from "../../../../src/domain/pagamentos/
 import {
   aprovarRepasseRecebedor,
   cancelarRepasseRecebedor,
+  type CatalogoAuditJsonObject,
   CatalogoConflictError,
   FinanceiroInputInvalidoError,
   FinanceiroRepasseNaoEncontradoError,
   FinanceiroRepasseStatusInvalidoError,
   ID_PLATAFORMA_EUNENEM,
+  MAX_CATALOGO_IMAGEM_SIZE_BYTES,
   resolverManualFalhouRepasse,
   resolverManualPagoRepasse,
   retentarTransferenciaRepasse,
@@ -58,6 +60,11 @@ import {
   resolverUsuarioAutenticado,
   SessaoNaoAutenticadaError,
 } from "./session-resolver.js";
+import {
+  isCatalogImageUrlReadable,
+  isCatalogImageUrlWritable,
+} from "../lib/security/catalog-image-url.js";
+import { enforceRateLimit } from "./rate-limit.js";
 
 const t = initTRPC.context<TrpcContext>().create();
 
@@ -83,10 +90,10 @@ const t = initTRPC.context<TrpcContext>().create();
 const adminMiddleware = t.middleware(async ({ ctx, next }) => {
   const { deps, headers } = ctx;
 
-  let email: string;
+  let adminUsuario;
   try {
     const { usuario } = await resolverUsuarioAutenticado(deps, headers);
-    email = usuario.email;
+    adminUsuario = usuario;
   } catch (err) {
     if (err instanceof SessaoNaoAutenticadaError) {
       throw new TRPCError({
@@ -97,11 +104,11 @@ const adminMiddleware = t.middleware(async ({ ctx, next }) => {
     throw err;
   }
 
-  if (!isEmailAdmin(deps.adminAllowedEmails, email)) {
+  if (!isEmailAdmin(deps.adminAllowedEmails, adminUsuario.email)) {
     throw new TRPCError({ code: "FORBIDDEN", message: "Acesso restrito." });
   }
 
-  return next();
+  return next({ ctx: { ...ctx, adminUsuario } });
 });
 
 /** Base procedure for the admin router — gated by `adminMiddleware`. */
@@ -2385,37 +2392,7 @@ const BgColorInputSchema = z.enum(BG_COLOR_TOKENS);
 const BgColorOutputSchema = z
   .string()
   .refine((value) => (BG_COLOR_TOKENS as readonly string[]).includes(value));
-const CATALOG_IMAGE_BASE = new URL("https://catalogo.eunenem.invalid");
-const HTTP_LOOPBACK_HOSTS = new Set([
-  "localhost",
-  "127.0.0.1",
-  "::1",
-  "[::1]",
-]);
-
-const ImageUrlSchema = z
-  .string()
-  .min(1)
-  .max(2048)
-  .refine((value) => {
-    // WHATWG normalizes backslashes in special URLs. Reject them before
-    // parsing so `/\evil.example` can never resolve as protocol-relative.
-    if (value.includes("\\")) return false;
-    if (value.startsWith("/")) {
-      if (value.startsWith("//")) return false;
-      return new URL(value, CATALOG_IMAGE_BASE).origin === CATALOG_IMAGE_BASE.origin;
-    }
-    try {
-      const parsed = new URL(value);
-      if (parsed.username !== "" || parsed.password !== "") return false;
-      if (parsed.protocol === "https:") return true;
-      return (
-        parsed.protocol === "http:" && HTTP_LOOPBACK_HOSTS.has(parsed.hostname)
-      );
-    } catch {
-      return false;
-    }
-  }, "imageUrl deve ser local à origem, HTTPS sem credenciais ou HTTP loopback");
+const ImageUrlSchema = z.string().min(1).max(2048);
 
 const CategoriaSlugSchema = z
   .string()
@@ -2477,7 +2454,40 @@ const ListaAdminDetailDTOSchema = ListaAdminDTOSchema.extend({
   ),
 });
 
-function produtoAdminDTO(produto: CatalogoProduto) {
+function requireCatalogImageUrlWritable(
+  ctx: Pick<TrpcContext, "deps">,
+  value: string | null | undefined,
+): void {
+  if (
+    value !== null &&
+    value !== undefined &&
+    !isCatalogImageUrlWritable(value, ctx.deps.objectStorage)
+  ) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message:
+        "imageUrl deve apontar para um ativo local ou upload gerenciado do catálogo.",
+    });
+  }
+}
+
+function requireCatalogImageUrlReadable(
+  ctx: Pick<TrpcContext, "deps">,
+  value: string | null,
+): void {
+  if (
+    value !== null &&
+    !isCatalogImageUrlReadable(value, ctx.deps.objectStorage)
+  ) {
+    throw new Error("stored catalog image URL violates the read policy");
+  }
+}
+
+function produtoAdminDTO(
+  ctx: Pick<TrpcContext, "deps">,
+  produto: CatalogoProduto,
+) {
+  requireCatalogImageUrlReadable(ctx, produto.imageUrl);
   return {
     id: produto.id,
     idLegado: produto.idLegado,
@@ -2510,7 +2520,12 @@ function categoriaAdminDTO(
   };
 }
 
-function listaAdminDTO(lista: CatalogoLista, quantidadeItens: number) {
+function listaAdminDTO(
+  ctx: Pick<TrpcContext, "deps">,
+  lista: CatalogoLista,
+  quantidadeItens: number,
+) {
+  requireCatalogImageUrlReadable(ctx, lista.imageUrl);
   return {
     id: lista.id,
     slug: lista.slug,
@@ -2527,6 +2542,70 @@ function listaAdminDTO(lista: CatalogoLista, quantidadeItens: number) {
 
 function catalogNotFound(message: string): TRPCError {
   return new TRPCError({ code: "NOT_FOUND", message });
+}
+
+interface CatalogAuditSpec {
+  readonly action: string;
+  readonly targetType: "produto" | "categoria" | "lista" | "object";
+  readonly targetId: string | null;
+  readonly metadata?: CatalogoAuditJsonObject;
+}
+
+function failureCode(error: unknown): string {
+  return error instanceof TRPCError ? error.code : "INTERNAL_SERVER_ERROR";
+}
+
+async function withCatalogAudit<T>(
+  ctx: Pick<TrpcContext, "deps"> & {
+    readonly adminUsuario: { readonly id: string };
+  },
+  spec: CatalogAuditSpec,
+  operation: () => Promise<T>,
+  successMetadata?: (result: T) => CatalogoAuditJsonObject,
+): Promise<T> {
+  const requestId = randomUUID();
+  const common = {
+    requestId,
+    actorUsuarioId: ctx.adminUsuario.id,
+    action: spec.action,
+    targetType: spec.targetType,
+    targetId: spec.targetId,
+  } as const;
+
+  await ctx.deps.catalogoAdminAudit.append({
+    ...common,
+    phase: "requested",
+    metadata: spec.metadata ?? {},
+  });
+
+  let result: T;
+  try {
+    result = await operation();
+  } catch (error: unknown) {
+    await ctx.deps.catalogoAdminAudit.append({
+      ...common,
+      phase: "failed",
+      metadata: {
+        ...(spec.metadata ?? {}),
+        failureCode: failureCode(error),
+      },
+    });
+    throw error;
+  }
+
+  // This append intentionally sits outside the operation catch. If the side
+  // effect completed but the terminal audit write fails, the durable
+  // `requested` row remains visibly incomplete; recording `failed` would lie
+  // about the domain outcome.
+  await ctx.deps.catalogoAdminAudit.append({
+    ...common,
+    phase: "succeeded",
+    metadata: {
+      ...(spec.metadata ?? {}),
+      ...(successMetadata?.(result) ?? {}),
+    },
+  });
+  return result;
 }
 
 const CreateProductInputSchema = z
@@ -2613,7 +2692,9 @@ const catalogRouter = t.router({
         limit: input.pageSize,
       });
       return {
-        products: result.items.map(({ produto }) => produtoAdminDTO(produto)),
+        products: result.items.map(({ produto }) =>
+          produtoAdminDTO(ctx, produto),
+        ),
         total: result.total,
       };
     }),
@@ -2622,102 +2703,154 @@ const catalogRouter = t.router({
     .input(CreateProductInputSchema)
     .output(ProdutoAdminDTOSchema)
     .mutation(async ({ ctx, input }) => {
-      const categoria = await ctx.deps.catalogoRepository.findCategoriaById(
-        input.idCategoria,
-      );
-      if (!categoria) throw catalogNotFound("Categoria não encontrada.");
+      requireCatalogImageUrlWritable(ctx, input.imageUrl);
+      const produtoId = randomUUID();
+      return withCatalogAudit(
+        ctx,
+        {
+          action: "catalog.product.create",
+          targetType: "produto",
+          targetId: produtoId,
+          metadata: { idCategoria: input.idCategoria },
+        },
+        async () => {
+          const categoria =
+            await ctx.deps.catalogoRepository.findCategoriaById(
+              input.idCategoria,
+            );
+          if (!categoria) throw catalogNotFound("Categoria não encontrada.");
 
-      const now = ctx.deps.clock();
-      const produto: CatalogoProduto = {
-        id: randomUUID(),
-        idLegado: null,
-        nome: input.nome,
-        precoCents: input.precoCents,
-        quantidadeSugerida: input.quantidadeSugerida,
-        emoji: input.emoji,
-        bgColor: input.bgColor,
-        idCategoria: input.idCategoria,
-        position:
-          await ctx.deps.catalogoRepository.findNextProdutoPosition(
-            input.idCategoria,
-          ),
-        imageUrl: input.imageUrl,
-        popularidade: input.popularidade,
-        ativo: true,
-        criadoEm: now,
-        atualizadoEm: now,
-      };
-      await ctx.deps.catalogoRepository.createProduto(produto);
-      return produtoAdminDTO(produto);
+          const now = ctx.deps.clock();
+          const produto: CatalogoProduto = {
+            id: produtoId,
+            idLegado: null,
+            nome: input.nome,
+            precoCents: input.precoCents,
+            quantidadeSugerida: input.quantidadeSugerida,
+            emoji: input.emoji,
+            bgColor: input.bgColor,
+            idCategoria: input.idCategoria,
+            position:
+              await ctx.deps.catalogoRepository.findNextProdutoPosition(
+                input.idCategoria,
+              ),
+            imageUrl: input.imageUrl,
+            popularidade: input.popularidade,
+            ativo: true,
+            criadoEm: now,
+            atualizadoEm: now,
+          };
+          await ctx.deps.catalogoRepository.createProduto(produto);
+          return produtoAdminDTO(ctx, produto);
+        },
+      );
     }),
 
   updateProduct: adminProcedure
     .input(UpdateProductInputSchema)
     .output(ProdutoAdminDTOSchema)
     .mutation(async ({ ctx, input }) => {
-      const existing = await ctx.deps.catalogoRepository.findProdutoById(
-        input.id,
-      );
-      if (!existing) throw catalogNotFound("Produto não encontrado.");
-
-      const categoryChanged =
-        input.idCategoria !== undefined &&
-        input.idCategoria !== existing.idCategoria;
-      if (categoryChanged) {
-        const categoria =
-          await ctx.deps.catalogoRepository.findCategoriaById(
-            input.idCategoria as string,
+      return withCatalogAudit(
+        ctx,
+        {
+          action: "catalog.product.update",
+          targetType: "produto",
+          targetId: input.id,
+          metadata: {
+            fields: Object.keys(input)
+              .filter((field) => field !== "id" && field !== "imageUrl")
+              .sort(),
+            imageUrlSupplied: input.imageUrl !== undefined,
+          },
+        },
+        async () => {
+          const existing = await ctx.deps.catalogoRepository.findProdutoById(
+            input.id,
           );
-        if (!categoria) throw catalogNotFound("Categoria não encontrada.");
-      }
+          if (!existing) throw catalogNotFound("Produto não encontrado.");
 
-      const idCategoria = input.idCategoria ?? existing.idCategoria;
-      const produto: CatalogoProduto = {
-        ...existing,
-        nome: input.nome ?? existing.nome,
-        precoCents: input.precoCents ?? existing.precoCents,
-        quantidadeSugerida:
-          input.quantidadeSugerida ?? existing.quantidadeSugerida,
-        emoji: input.emoji ?? existing.emoji,
-        bgColor: input.bgColor ?? existing.bgColor,
-        idCategoria,
-        position: categoryChanged
-          ? await ctx.deps.catalogoRepository.findNextProdutoPosition(
-              idCategoria,
-            )
-          : existing.position,
-        imageUrl:
-          input.imageUrl === undefined ? existing.imageUrl : input.imageUrl,
-        popularidade:
-          input.popularidade === undefined
-            ? existing.popularidade
-            : input.popularidade,
-        atualizadoEm: ctx.deps.clock(),
-      };
-      const updated =
-        await ctx.deps.catalogoRepository.updateProduto(produto);
-      if (!updated) throw catalogNotFound("Produto não encontrado.");
-      return produtoAdminDTO(produto);
+          const imageUrlChanged =
+            input.imageUrl !== undefined &&
+            input.imageUrl !== existing.imageUrl;
+          if (imageUrlChanged) {
+            requireCatalogImageUrlWritable(ctx, input.imageUrl);
+          }
+
+          const categoryChanged =
+            input.idCategoria !== undefined &&
+            input.idCategoria !== existing.idCategoria;
+          if (categoryChanged) {
+            const categoria =
+              await ctx.deps.catalogoRepository.findCategoriaById(
+                input.idCategoria as string,
+              );
+            if (!categoria) throw catalogNotFound("Categoria não encontrada.");
+          }
+
+          const idCategoria = input.idCategoria ?? existing.idCategoria;
+          const produto = await ctx.deps.catalogoRepository.updateProduto(
+            input.id,
+            {
+              ...(input.nome !== undefined ? { nome: input.nome } : {}),
+              ...(input.precoCents !== undefined
+                ? { precoCents: input.precoCents }
+                : {}),
+              ...(input.quantidadeSugerida !== undefined
+                ? { quantidadeSugerida: input.quantidadeSugerida }
+                : {}),
+              ...(input.emoji !== undefined ? { emoji: input.emoji } : {}),
+              ...(input.bgColor !== undefined
+                ? { bgColor: input.bgColor }
+                : {}),
+              ...(input.idCategoria !== undefined ? { idCategoria } : {}),
+              ...(categoryChanged
+                ? {
+                    position:
+                      await ctx.deps.catalogoRepository.findNextProdutoPosition(
+                        idCategoria,
+                      ),
+                  }
+                : {}),
+              ...(imageUrlChanged
+                ? { imageUrl: input.imageUrl }
+                : {}),
+              ...(input.popularidade !== undefined
+                ? { popularidade: input.popularidade }
+                : {}),
+              atualizadoEm: ctx.deps.clock(),
+            },
+          );
+          if (!produto) throw catalogNotFound("Produto não encontrado.");
+          return produtoAdminDTO(ctx, produto);
+        },
+      );
     }),
 
   setProductAtivo: adminProcedure
     .input(z.object({ id: UuidSchema, ativo: z.boolean() }).strict())
     .output(ProdutoAdminDTOSchema)
-    .mutation(async ({ ctx, input }) => {
-      const existing = await ctx.deps.catalogoRepository.findProdutoById(
-        input.id,
-      );
-      if (!existing) throw catalogNotFound("Produto não encontrado.");
-      const produto: CatalogoProduto = {
-        ...existing,
-        ativo: input.ativo,
-        atualizadoEm: ctx.deps.clock(),
-      };
-      const updated =
-        await ctx.deps.catalogoRepository.updateProduto(produto);
-      if (!updated) throw catalogNotFound("Produto não encontrado.");
-      return produtoAdminDTO(produto);
-    }),
+    .mutation(async ({ ctx, input }) =>
+      withCatalogAudit(
+        ctx,
+        {
+          action: "catalog.product.set_active",
+          targetType: "produto",
+          targetId: input.id,
+          metadata: { ativo: input.ativo },
+        },
+        async () => {
+          const produto = await ctx.deps.catalogoRepository.updateProduto(
+            input.id,
+            {
+              ativo: input.ativo,
+              atualizadoEm: ctx.deps.clock(),
+            },
+          );
+          if (!produto) throw catalogNotFound("Produto não encontrado.");
+          return produtoAdminDTO(ctx, produto);
+        },
+      ),
+    ),
 
   listCategories: adminProcedure
     .input(z.object({}).strict().optional())
@@ -2740,25 +2873,37 @@ const catalogRouter = t.router({
     )
     .output(CategoriaAdminDTOSchema)
     .mutation(async ({ ctx, input }) => {
-      const categoria: CatalogoCategoria = {
-        id: randomUUID(),
-        slug: input.slug,
-        label: input.label,
-        position: input.position,
-        criadoEm: ctx.deps.clock(),
-      };
-      try {
-        await ctx.deps.catalogoRepository.createCategoria(categoria);
-      } catch (error: unknown) {
-        if (error instanceof CatalogoConflictError) {
-          throw new TRPCError({
-            code: "CONFLICT",
-            message: "Slug de categoria já existe.",
-          });
-        }
-        throw error;
-      }
-      return categoriaAdminDTO(categoria, 0);
+      const categoriaId = randomUUID();
+      return withCatalogAudit(
+        ctx,
+        {
+          action: "catalog.category.create",
+          targetType: "categoria",
+          targetId: categoriaId,
+          metadata: { position: input.position },
+        },
+        async () => {
+          const categoria: CatalogoCategoria = {
+            id: categoriaId,
+            slug: input.slug,
+            label: input.label,
+            position: input.position,
+            criadoEm: ctx.deps.clock(),
+          };
+          try {
+            await ctx.deps.catalogoRepository.createCategoria(categoria);
+          } catch (error: unknown) {
+            if (error instanceof CatalogoConflictError) {
+              throw new TRPCError({
+                code: "CONFLICT",
+                message: "Slug de categoria já existe.",
+              });
+            }
+            throw error;
+          }
+          return categoriaAdminDTO(categoria, 0);
+        },
+      );
     }),
 
   updateCategory: adminProcedure
@@ -2776,41 +2921,66 @@ const catalogRouter = t.router({
         ),
     )
     .output(CategoriaAdminDTOSchema)
-    .mutation(async ({ ctx, input }) => {
-      const currentRows =
-        await ctx.deps.catalogoRepository.findCategoriasComContagem();
-      const current = currentRows.find(
-        ({ categoria }) => categoria.id === input.id,
-      );
-      if (!current) throw catalogNotFound("Categoria não encontrada.");
-      const categoria: CatalogoCategoria = {
-        ...current.categoria,
-        label: input.label ?? current.categoria.label,
-        position: input.position ?? current.categoria.position,
-      };
-      const updated =
-        await ctx.deps.catalogoRepository.updateCategoria(categoria);
-      if (!updated) throw catalogNotFound("Categoria não encontrada.");
-      return categoriaAdminDTO(categoria, current.quantidadeProdutos);
-    }),
+    .mutation(async ({ ctx, input }) =>
+      withCatalogAudit(
+        ctx,
+        {
+          action: "catalog.category.update",
+          targetType: "categoria",
+          targetId: input.id,
+          metadata: {
+            fields: Object.keys(input)
+              .filter((field) => field !== "id")
+              .sort(),
+          },
+        },
+        async () => {
+          const currentRows =
+            await ctx.deps.catalogoRepository.findCategoriasComContagem();
+          const current = currentRows.find(
+            ({ categoria }) => categoria.id === input.id,
+          );
+          if (!current) throw catalogNotFound("Categoria não encontrada.");
+          const categoria: CatalogoCategoria = {
+            ...current.categoria,
+            label: input.label ?? current.categoria.label,
+            position: input.position ?? current.categoria.position,
+          };
+          const updated =
+            await ctx.deps.catalogoRepository.updateCategoria(categoria);
+          if (!updated) throw catalogNotFound("Categoria não encontrada.");
+          return categoriaAdminDTO(categoria, current.quantidadeProdutos);
+        },
+      ),
+    ),
 
   deleteCategory: adminProcedure
     .input(z.object({ id: UuidSchema }).strict())
     .output(z.object({ deleted: z.literal(true) }))
-    .mutation(async ({ ctx, input }) => {
-      const outcome =
-        await ctx.deps.catalogoRepository.deleteCategoriaVazia(input.id);
-      if (outcome === "not_found") {
-        throw catalogNotFound("Categoria não encontrada.");
-      }
-      if (outcome === "not_empty") {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: "Categoria possui produtos.",
-        });
-      }
-      return { deleted: true as const };
-    }),
+    .mutation(async ({ ctx, input }) =>
+      withCatalogAudit(
+        ctx,
+        {
+          action: "catalog.category.delete",
+          targetType: "categoria",
+          targetId: input.id,
+        },
+        async () => {
+          const outcome =
+            await ctx.deps.catalogoRepository.deleteCategoriaVazia(input.id);
+          if (outcome === "not_found") {
+            throw catalogNotFound("Categoria não encontrada.");
+          }
+          if (outcome === "not_empty") {
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: "Categoria possui produtos.",
+            });
+          }
+          return { deleted: true as const };
+        },
+      ),
+    ),
 
   listLists: adminProcedure
     .input(
@@ -2825,7 +2995,7 @@ const catalogRouter = t.router({
     .query(async ({ ctx, input }) => {
       const rows = await ctx.deps.catalogoRepository.findListasResumo(input);
       return rows.map(({ lista, quantidadeItens }) =>
-        listaAdminDTO(lista, quantidadeItens),
+        listaAdminDTO(ctx, lista, quantidadeItens),
       );
     }),
 
@@ -2837,7 +3007,7 @@ const catalogRouter = t.router({
         await ctx.deps.catalogoRepository.findListaByIdComItens(input.id);
       if (!current) throw catalogNotFound("Lista não encontrada.");
       return {
-        ...listaAdminDTO(current.lista, current.itens.length),
+        ...listaAdminDTO(ctx, current.lista, current.itens.length),
         items: current.itens.map(({ item }) => ({
           idProduto: item.idProduto,
           quantidade: item.quantidade,
@@ -2856,63 +3026,109 @@ const catalogRouter = t.router({
     )
     .output(ListaAdminDTOSchema)
     .mutation(async ({ ctx, input }) => {
-      const now = ctx.deps.clock();
-      const lista: CatalogoLista = {
-        id: randomUUID(),
-        slug: null,
-        nome: input.nome,
-        descricao: input.descricao,
-        imageUrl: input.imageUrl,
-        position: await ctx.deps.catalogoRepository.findNextListaPosition(),
-        ativo: true,
-        criadoEm: now,
-        atualizadoEm: now,
-      };
-      await ctx.deps.catalogoRepository.createLista(lista);
-      return listaAdminDTO(lista, 0);
+      requireCatalogImageUrlWritable(ctx, input.imageUrl);
+      const listaId = randomUUID();
+      return withCatalogAudit(
+        ctx,
+        {
+          action: "catalog.list.create",
+          targetType: "lista",
+          targetId: listaId,
+        },
+        async () => {
+          const now = ctx.deps.clock();
+          const lista: CatalogoLista = {
+            id: listaId,
+            slug: null,
+            nome: input.nome,
+            descricao: input.descricao,
+            imageUrl: input.imageUrl,
+            position:
+              await ctx.deps.catalogoRepository.findNextListaPosition(),
+            ativo: true,
+            criadoEm: now,
+            atualizadoEm: now,
+          };
+          await ctx.deps.catalogoRepository.createLista(lista);
+          return listaAdminDTO(ctx, lista, 0);
+        },
+      );
     }),
 
   updateList: adminProcedure
     .input(UpdateListInputSchema)
     .output(ListaAdminDTOSchema)
     .mutation(async ({ ctx, input }) => {
-      const current =
-        await ctx.deps.catalogoRepository.findListaByIdComItens(input.id);
-      if (!current) throw catalogNotFound("Lista não encontrada.");
-      const lista: CatalogoLista = {
-        ...current.lista,
-        nome: input.nome ?? current.lista.nome,
-        descricao:
-          input.descricao === undefined
-            ? current.lista.descricao
-            : input.descricao,
-        imageUrl:
-          input.imageUrl === undefined
-            ? current.lista.imageUrl
-            : input.imageUrl,
-        atualizadoEm: ctx.deps.clock(),
-      };
-      const updated = await ctx.deps.catalogoRepository.updateLista(lista);
-      if (!updated) throw catalogNotFound("Lista não encontrada.");
-      return listaAdminDTO(lista, current.itens.length);
+      return withCatalogAudit(
+        ctx,
+        {
+          action: "catalog.list.update",
+          targetType: "lista",
+          targetId: input.id,
+          metadata: {
+            fields: Object.keys(input)
+              .filter((field) => field !== "id" && field !== "imageUrl")
+              .sort(),
+            imageUrlSupplied: input.imageUrl !== undefined,
+          },
+        },
+        async () => {
+          const current =
+            await ctx.deps.catalogoRepository.findListaByIdComItens(input.id);
+          if (!current) throw catalogNotFound("Lista não encontrada.");
+          const imageUrlChanged =
+            input.imageUrl !== undefined &&
+            input.imageUrl !== current.lista.imageUrl;
+          if (imageUrlChanged) {
+            requireCatalogImageUrlWritable(ctx, input.imageUrl);
+          }
+          const lista = await ctx.deps.catalogoRepository.updateLista(
+            input.id,
+            {
+              ...(input.nome !== undefined ? { nome: input.nome } : {}),
+              ...(input.descricao !== undefined
+                ? { descricao: input.descricao }
+                : {}),
+              ...(imageUrlChanged
+                ? { imageUrl: input.imageUrl }
+                : {}),
+              atualizadoEm: ctx.deps.clock(),
+            },
+          );
+          if (!lista) throw catalogNotFound("Lista não encontrada.");
+          return listaAdminDTO(ctx, lista, current.itens.length);
+        },
+      );
     }),
 
   setListAtivo: adminProcedure
     .input(z.object({ id: UuidSchema, ativo: z.boolean() }).strict())
     .output(ListaAdminDTOSchema)
-    .mutation(async ({ ctx, input }) => {
-      const current =
-        await ctx.deps.catalogoRepository.findListaByIdComItens(input.id);
-      if (!current) throw catalogNotFound("Lista não encontrada.");
-      const lista: CatalogoLista = {
-        ...current.lista,
-        ativo: input.ativo,
-        atualizadoEm: ctx.deps.clock(),
-      };
-      const updated = await ctx.deps.catalogoRepository.updateLista(lista);
-      if (!updated) throw catalogNotFound("Lista não encontrada.");
-      return listaAdminDTO(lista, current.itens.length);
-    }),
+    .mutation(async ({ ctx, input }) =>
+      withCatalogAudit(
+        ctx,
+        {
+          action: "catalog.list.set_active",
+          targetType: "lista",
+          targetId: input.id,
+          metadata: { ativo: input.ativo },
+        },
+        async () => {
+          const current =
+            await ctx.deps.catalogoRepository.findListaByIdComItens(input.id);
+          if (!current) throw catalogNotFound("Lista não encontrada.");
+          const lista = await ctx.deps.catalogoRepository.updateLista(
+            input.id,
+            {
+              ativo: input.ativo,
+              atualizadoEm: ctx.deps.clock(),
+            },
+          );
+          if (!lista) throw catalogNotFound("Lista não encontrada.");
+          return listaAdminDTO(ctx, lista, current.itens.length);
+        },
+      ),
+    ),
 
   setListItems: adminProcedure
     .input(
@@ -2930,50 +3146,66 @@ const catalogRouter = t.router({
       }).strict(),
     )
     .output(z.object({ updated: z.literal(true) }))
-    .mutation(async ({ ctx, input }) => {
-      const productIds = new Set<string>();
-      const positions = new Set<number>();
-      for (const item of input.items) {
-        if (productIds.has(item.idProduto)) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: "Produto duplicado na lista.",
-          });
-        }
-        if (positions.has(item.position)) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: "Posição duplicada na lista.",
-          });
-        }
-        productIds.add(item.idProduto);
-        positions.add(item.position);
-      }
+    .mutation(async ({ ctx, input }) =>
+      withCatalogAudit(
+        ctx,
+        {
+          action: "catalog.list.set_items",
+          targetType: "lista",
+          targetId: input.idLista,
+          metadata: { itemCount: input.items.length },
+        },
+        async () => {
+          const productIds = new Set<string>();
+          const positions = new Set<number>();
+          for (const item of input.items) {
+            if (productIds.has(item.idProduto)) {
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: "Produto duplicado na lista.",
+              });
+            }
+            if (positions.has(item.position)) {
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: "Posição duplicada na lista.",
+              });
+            }
+            productIds.add(item.idProduto);
+            positions.add(item.position);
+          }
 
-      const outcome =
-        await ctx.deps.catalogoRepository.replaceListaItens(
-          input.idLista,
-          input.items.map((item) => ({
-            id: randomUUID(),
-            idLista: input.idLista,
-            idProduto: item.idProduto,
-            quantidade: item.quantidade,
-            position: item.position,
-          })),
-        );
-      if (outcome.status === "list_not_found") {
-        throw catalogNotFound("Lista não encontrada.");
-      }
-      if (outcome.status === "products_not_found") {
-        throw catalogNotFound("Produto referenciado não encontrado.");
-      }
-      return { updated: true as const };
-    }),
+          const outcome =
+            await ctx.deps.catalogoRepository.replaceListaItens(
+              input.idLista,
+              input.items.map((item) => ({
+                id: randomUUID(),
+                idLista: input.idLista,
+                idProduto: item.idProduto,
+                quantidade: item.quantidade,
+                position: item.position,
+              })),
+            );
+          if (outcome.status === "list_not_found") {
+            throw catalogNotFound("Lista não encontrada.");
+          }
+          if (outcome.status === "products_not_found") {
+            throw catalogNotFound("Produto referenciado não encontrado.");
+          }
+          return { updated: true as const };
+        },
+      ),
+    ),
 
   emitirUrlUploadImagemProduto: adminProcedure
     .input(
       z.object({
         contentType: z.enum(["image/jpeg", "image/png", "image/webp"]),
+        sizeBytes: z
+          .number()
+          .int()
+          .min(1)
+          .max(MAX_CATALOGO_IMAGEM_SIZE_BYTES),
       }).strict(),
     )
     .output(
@@ -2988,7 +3220,34 @@ const catalogRouter = t.router({
       }),
     )
     .mutation(async ({ ctx, input }) =>
-      ctx.deps.objectStorage.emitirUrlUploadPresignadaCatalogo(input),
+      withCatalogAudit(
+        ctx,
+        {
+          action: "catalog.product_image.presign",
+          targetType: "object",
+          targetId: null,
+          metadata: {
+            contentType: input.contentType,
+            sizeBytes: input.sizeBytes,
+          },
+        },
+        async () => {
+          await enforceRateLimit(ctx.deps.db, {
+            key: `trpc:admin.catalog.presign:user:${ctx.adminUsuario.id}`,
+            max: 10,
+            windowMs: 60_000,
+            clock: ctx.deps.clock,
+          });
+
+          const result =
+            await ctx.deps.objectStorage.emitirUrlUploadPresignadaCatalogo(
+              input,
+            );
+          requireCatalogImageUrlWritable(ctx, result.publicUrl);
+          return result;
+        },
+        (result) => ({ objectKey: result.objectKey }),
+      ),
     ),
 });
 

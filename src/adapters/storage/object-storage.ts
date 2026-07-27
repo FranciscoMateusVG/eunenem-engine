@@ -14,8 +14,9 @@
  *
  * Security invariants baked into every implementation:
  *   - presigned URLs expire in 5 minutes (`expiresIn: 300`).
- *   - the upload's Content-Type is LOCKED into the presigned request, so
- *     the client cannot smuggle a different MIME type past the signature.
+ *   - catalogue uploads lock both Content-Type and Content-Length into the
+ *     presigned request, so the client cannot smuggle a different MIME type
+ *     or an unbounded body past the signature.
  *   - keys are namespaced by their owning surface. Profile/item keys are
  *     per-user, campanha keys are per-campanha, and admin catalogue product
  *     keys live under `catalogo/produtos/` with a server-generated UUID.
@@ -77,6 +78,8 @@ export interface EmitirUrlUploadCampanhaInput {
 export interface EmitirUrlUploadCatalogoInput {
   /** Validated upstream to one of the allowed image types; locked into the presign. */
   readonly contentType: string;
+  /** Exact upload body size in bytes; locked into the presign. */
+  readonly sizeBytes: number;
 }
 
 export interface UrlUploadPresignada {
@@ -132,9 +135,9 @@ export interface ObjectStorage {
    * (aperture-d4pmw).
    *
    * The key is generated entirely server-side as
-   * `catalogo/produtos/<uuid>.<ext>`. The Content-Type is locked into the
-   * signature and the URL expires after 5 minutes, matching every other image
-   * upload surface.
+   * `catalogo/produtos/<uuid>.<ext>`. Content-Type and Content-Length are
+   * locked into the signature, the body is capped at 5 MiB, and the URL
+   * expires after 5 minutes.
    */
   emitirUrlUploadPresignadaCatalogo(
     input: EmitirUrlUploadCatalogoInput,
@@ -177,3 +180,12 @@ export const CONTENT_TYPE_EXTENSAO: Readonly<Record<string, string>> = {
   'image/png': 'png',
   'image/webp': 'webp',
 };
+
+/**
+ * Hard upper bound for catalogue product images.
+ *
+ * Five MiB is deliberately conservative for a web catalogue thumbnail while
+ * still allowing high-resolution JPEG/PNG/WebP source images. The value is
+ * exported so the tRPC boundary and adapters share one invariant.
+ */
+export const MAX_CATALOGO_IMAGEM_SIZE_BYTES = 5 * 1024 * 1024;

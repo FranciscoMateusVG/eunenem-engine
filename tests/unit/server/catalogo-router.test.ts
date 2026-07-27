@@ -8,6 +8,7 @@ import type { TrpcContext } from '../../../apps/eunenem-server/server/trpc/conte
 import { appRouter } from '../../../apps/eunenem-server/server/trpc/router.js';
 import type { CatalogoRepository } from '../../../src/adapters/catalogo/repository.js';
 import { CatalogoRepositoryMemory } from '../../../src/adapters/catalogo/repository.memory.js';
+import { ObjectStorageMemory } from '../../../src/adapters/storage/object-storage.memory.js';
 import {
   makeCatalogoCategoria,
   makeCatalogoLista,
@@ -17,7 +18,10 @@ import {
 
 function callerFor(catalogoRepository: CatalogoRepository) {
   const context: TrpcContext = {
-    deps: { catalogoRepository } as ServerDeps,
+    deps: {
+      catalogoRepository,
+      objectStorage: new ObjectStorageMemory('catalog-test'),
+    } as ServerDeps,
     headers: new Headers(),
     resHeaders: new Headers(),
   };
@@ -58,28 +62,11 @@ describe('catalogo public router', () => {
     ).toBe(false);
   });
 
-  it.each([
-    '/ok',
-    'https://cdn.example.com/catalogo/item.png',
-    'http://localhost:9000/catalogo/item.png',
-    'http://127.0.0.1:9000/catalogo/item.png',
-    'http://[::1]:9000/catalogo/item.png',
-  ])('accepts safe catalog image URL %s', (imageUrl) => {
-    expect(CatalogoImageUrlPublicaSchema.safeParse(imageUrl).success).toBe(true);
-  });
-
-  it.each([
-    '//evil.example/item.png',
-    '/\\evil.example/item.png',
-    '/catalogo\\item.png',
-    'https://cdn.example.com/catalogo\\item.png',
-    'https://user:password@cdn.example.com/item.png',
-    'http://user:password@localhost:9000/item.png',
-    'http://cdn.example.com/item.png',
-    'data:image/png;base64,AA==',
-    'javascript:alert(1)',
-  ])('rejects unsafe catalog image URL %s', (imageUrl) => {
-    expect(CatalogoImageUrlPublicaSchema.safeParse(imageUrl).success).toBe(false);
+  it('keeps the static output schema structural; the runtime projection owns origin policy', () => {
+    expect(CatalogoImageUrlPublicaSchema.safeParse('/products/item.png').success).toBe(true);
+    expect(CatalogoImageUrlPublicaSchema.safeParse(null).success).toBe(true);
+    expect(CatalogoImageUrlPublicaSchema.safeParse('').success).toBe(false);
+    expect(CatalogoImageUrlPublicaSchema.safeParse('x'.repeat(2_049)).success).toBe(false);
   });
 
   it('listSections groups ordered active products with data-driven category fields', async () => {
@@ -198,7 +185,7 @@ describe('catalogo public router', () => {
       slug: 'kit-personalizado',
       nome: 'Kit personalizado',
       descricao: 'Descrição do banco',
-      imageUrl: '/listas/kit.png',
+      imageUrl: '/listas-prontas/kit.png',
       position: 1,
     });
     const listaInativa = makeCatalogoLista({
@@ -236,7 +223,7 @@ describe('catalogo public router', () => {
         id: 'kit-personalizado',
         title: 'Kit personalizado',
         description: 'Descrição do banco',
-        imageUrl: '/listas/kit.png',
+        imageUrl: '/listas-prontas/kit.png',
         items: [
           {
             id: produtoAtivo.id,
@@ -252,7 +239,7 @@ describe('catalogo public router', () => {
     });
   });
 
-  it('propagates repository failures instead of returning an empty projection', async () => {
+  it('surfaces repository failures generically instead of returning an empty projection', async () => {
     const failure = new Error('catalog database unavailable');
     const repository = {
       findProdutosAtivosComCategoria: vi.fn().mockRejectedValue(failure),
@@ -260,9 +247,40 @@ describe('catalogo public router', () => {
     } as unknown as CatalogoRepository;
     const caller = callerFor(repository);
 
-    await expect(caller.catalogo.listSections()).rejects.toThrow('catalog database unavailable');
-    await expect(caller.catalogo.listListasProntas()).rejects.toThrow(
-      'catalog database unavailable',
+    await expect(caller.catalogo.listSections()).rejects.toMatchObject({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: 'Não foi possível carregar o catálogo.',
+    });
+    await expect(caller.catalogo.listListasProntas()).rejects.toMatchObject({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: 'Não foi possível carregar o catálogo.',
+    });
+  });
+
+  it('fails loudly when a stored product or list image violates the read policy', async () => {
+    const repository = new CatalogoRepositoryMemory();
+    const categoria = makeCatalogoCategoria();
+    await repository.createCategoria(categoria);
+    await repository.createProduto(
+      makeCatalogoProduto(categoria.id, {
+        imageUrl: 'https://attacker.example/tracker.png',
+      }),
     );
+
+    await expect(callerFor(repository).catalogo.listSections()).rejects.toMatchObject({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: 'Não foi possível carregar o catálogo.',
+    });
+
+    const cleanRepository = new CatalogoRepositoryMemory();
+    await cleanRepository.createLista(
+      makeCatalogoLista({
+        imageUrl: 'https://127.0.0.1/private.png',
+      }),
+    );
+    await expect(callerFor(cleanRepository).catalogo.listListasProntas()).rejects.toMatchObject({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: 'Não foi possível carregar o catálogo.',
+    });
   });
 });

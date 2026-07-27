@@ -8,6 +8,7 @@ import {
   type EmitirUrlUploadCatalogoInput,
   type EmitirUrlUploadInput,
   type EmitirUrlUploadItemInput,
+  MAX_CATALOGO_IMAGEM_SIZE_BYTES,
   type ObjectStorage,
   type UrlUploadPresignada,
 } from './object-storage.js';
@@ -203,6 +204,15 @@ export class ObjectStorageMinio implements ObjectStorage {
         if (ext === undefined) {
           throw new Error(`contentType não suportado: ${input.contentType}`);
         }
+        if (
+          !Number.isSafeInteger(input.sizeBytes) ||
+          input.sizeBytes < 1 ||
+          input.sizeBytes > MAX_CATALOGO_IMAGEM_SIZE_BYTES
+        ) {
+          throw new Error(
+            `sizeBytes deve ser um inteiro entre 1 e ${MAX_CATALOGO_IMAGEM_SIZE_BYTES}`,
+          );
+        }
 
         // Admin catalogue key — every path segment is server-generated.
         const objectKey = `catalogo/produtos/${randomUUID()}.${ext}`;
@@ -213,8 +223,15 @@ export class ObjectStorageMinio implements ObjectStorage {
             Bucket: this.bucket,
             Key: objectKey,
             ContentType: input.contentType,
+            ContentLength: input.sizeBytes,
           }),
-          { expiresIn: PRESIGN_EXPIRES_IN_SECONDS },
+          {
+            expiresIn: PRESIGN_EXPIRES_IN_SECONDS,
+            // S3RequestPresigner intentionally treats content-type as
+            // unsignable by default. Opt both body invariants back into the
+            // canonical request so changing either invalidates the signature.
+            signableHeaders: new Set(['content-type', 'content-length']),
+          },
         );
 
         const publicUrl = this.urlPublica(objectKey);

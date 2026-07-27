@@ -7,6 +7,8 @@ import {
   CampanhaRepositoryPostgres,
   type CatalogoRepository,
   CatalogoRepositoryPostgres,
+  type CatalogoAdminAudit,
+  CatalogoAdminAuditPostgres,
   type ConviteRepository,
   ConviteRepositoryPostgres,
   type CheckoutSessionProvider,
@@ -75,6 +77,10 @@ import {
   ServerAnalyticsMixpanel,
   ServerAnalyticsNaoConfigurado,
 } from '../analytics/server-analytics.js';
+import {
+  isIpLiteralHostname,
+  isPrivateOrSpecialIpHostname,
+} from '../lib/security/network-address.js';
 
 /**
  * Engine-side dependencies wired for the eunenem-server (aperture-ht7sq +
@@ -96,6 +102,12 @@ export interface ServerDeps {
    * after migration 045.
    */
   readonly catalogoRepository: CatalogoRepository;
+  /**
+   * Immutable catalogue-administration audit sink. Required in production:
+   * every admin catalog mutation/presign appends requested + terminal events
+   * to the Postgres-backed audit trail.
+   */
+  readonly catalogoAdminAudit: CatalogoAdminAudit;
   /**
    * PerfilCriador BC adapter (aperture-cdo69). Backs the `perfil.*` tRPC
    * procedures — authed read/write of the creator profile + the public
@@ -577,17 +589,24 @@ const ServerEnvSchema = z
       }
       const localhostHosts = new Set(['localhost', '127.0.0.1', '[::1]']);
       const isLoopback = hostname !== null && localhostHosts.has(hostname);
+      const isIpLiteral = hostname !== null && isIpLiteralHostname(hostname);
+      const isPrivateOrSpecialIp =
+        hostname !== null && isPrivateOrSpecialIpHostname(hostname);
+      const localDevelopmentLoopback =
+        env.NODE_ENV !== 'production' && isLoopback;
       const browserReachable =
         hostname !== null &&
         !hasCredentials &&
         (scheme === 'https:' || (scheme === 'http:' && isLoopback)) &&
-        (hostname.includes('.') || isLoopback);
+        (hostname.includes('.') || isIpLiteral || isLoopback) &&
+        (!isPrivateOrSpecialIp || localDevelopmentLoopback) &&
+        (env.NODE_ENV !== 'production' || !isLoopback);
       if (!browserReachable) {
         ctx.addIssue({
           code: 'custom',
           path: ['MINIO_ENDPOINT'],
           message:
-            "MINIO_ENDPOINT must be a credential-free HTTPS public URL (e.g. https://storage-eunenem.<host>) or an HTTP loopback URL for local development. Internal service hosts and non-loopback HTTP are rejected. It backs both the browser presigned PUT and every public <img> src.",
+            "MINIO_ENDPOINT must be a credential-free HTTPS public URL (e.g. https://storage-eunenem.<host>) or a loopback URL for local development. Internal service hosts, private/special numeric IPs, and non-loopback HTTP are rejected. It backs both the browser presigned PUT and every public <img> src.",
         });
       }
     }
@@ -672,6 +691,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
 
   const db = createDatabase(env.DATABASE_URL);
   const catalogoRepository = new CatalogoRepositoryPostgres(db);
+  const catalogoAdminAudit = new CatalogoAdminAuditPostgres(db);
 
   // Google OAuth (aperture-8655f) — CONDITIONAL on BOTH env vars being
   // present. When either is missing, `socialProviders` stays undefined and
@@ -948,6 +968,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     authService,
     usuarioRepository,
     catalogoRepository,
+    catalogoAdminAudit,
     perfilCriadorRepository,
     perfilCampanhaRepository,
     resgatePendenteRepository,

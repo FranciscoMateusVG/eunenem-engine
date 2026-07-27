@@ -1,41 +1,19 @@
-import { initTRPC } from "@trpc/server";
+import { initTRPC, TRPCError } from "@trpc/server";
 import { z } from "zod";
 import type {
   CatalogoListaItemComProduto,
   CatalogoProdutoComCategoria,
 } from "../../../../src/index.js";
+import type { ObjectStorage } from "../../../../src/adapters/storage/object-storage.js";
+import { isCatalogImageUrlReadable } from "../lib/security/catalog-image-url.js";
 import type { TrpcContext } from "./context.js";
 
 const t = initTRPC.context<TrpcContext>().create();
 
-const PUBLIC_IMAGE_BASE = new URL("https://catalogo.eunenem.invalid");
-const HTTP_LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
-
-function isCatalogoImageUrl(value: string): boolean {
-  // WHATWG URL parsing treats backslashes as slashes in special schemes.
-  // Reject before parsing so `/\evil.example` cannot become `//evil.example`.
-  if (value.includes("\\")) return false;
-
-  if (value.startsWith("/")) {
-    if (value.startsWith("//")) return false;
-    const resolved = new URL(value, PUBLIC_IMAGE_BASE);
-    return resolved.origin === PUBLIC_IMAGE_BASE.origin;
-  }
-
-  try {
-    const url = new URL(value);
-    if (url.username !== "" || url.password !== "") return false;
-    if (url.protocol === "https:") return true;
-    return url.protocol === "http:" && HTTP_LOOPBACK_HOSTS.has(url.hostname);
-  } catch {
-    return false;
-  }
-}
-
 export const CatalogoImageUrlPublicaSchema = z
   .string()
+  .min(1)
   .max(2_048)
-  .refine(isCatalogoImageUrl)
   .nullable();
 
 export const CatalogoBgColorPublicoSchema = z.enum([
@@ -105,7 +83,34 @@ function produtoPublico({ produto, categoria }: CatalogoProdutoComCategoria) {
   };
 }
 
-function listaProntaItemPublico({ item, produto }: CatalogoListaItemComProduto) {
+function requireReadableImageUrl(
+  imageUrl: string | null,
+  objectStorage: ObjectStorage,
+): string | null {
+  if (
+    imageUrl !== null &&
+    !isCatalogImageUrlReadable(imageUrl, objectStorage)
+  ) {
+    throw new Error("catalog image URL violates the owned/legacy host policy");
+  }
+  return imageUrl;
+}
+
+function produtoPublicoSeguro(
+  row: CatalogoProdutoComCategoria,
+  objectStorage: ObjectStorage,
+) {
+  const dto = produtoPublico(row);
+  return {
+    ...dto,
+    imageUrl: requireReadableImageUrl(dto.imageUrl, objectStorage),
+  };
+}
+
+function listaProntaItemPublico(
+  { item, produto }: CatalogoListaItemComProduto,
+  objectStorage: ObjectStorage,
+) {
   return {
     id: produto.id,
     name: produto.nome,
@@ -115,8 +120,21 @@ function listaProntaItemPublico({ item, produto }: CatalogoListaItemComProduto) 
     suggestedQty: item.quantidade,
     emoji: produto.emoji,
     bgColor: CatalogoBgColorPublicoSchema.parse(produto.bgColor),
-    imageUrl: produto.imageUrl,
+    imageUrl: requireReadableImageUrl(produto.imageUrl, objectStorage),
   };
+}
+
+async function runPublicCatalogQuery<T>(
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch {
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "Não foi possível carregar o catálogo.",
+    });
+  }
 }
 
 /**
@@ -124,65 +142,84 @@ function listaProntaItemPublico({ item, produto }: CatalogoListaItemComProduto) 
  *
  * The repository owns active-row filtering and deterministic position/UUID
  * ordering. This layer only groups and translates persistence records into
- * the stable public DTOs. Repository failures are intentionally not caught:
- * tRPC must surface them as INTERNAL_SERVER_ERROR rather than lying with an
- * empty catalogue.
+ * the stable public DTOs. Repository/projection failures become a generic
+ * INTERNAL_SERVER_ERROR rather than leaking internals or lying with an empty
+ * catalogue.
  */
 export const catalogoRouter = t.router({
   listSections: t.procedure
     .input(z.object({}).strict().optional())
     .output(CatalogoListSectionsOutputSchema)
-    .query(async ({ ctx }) => {
-      const produtos = await ctx.deps.catalogoRepository.findProdutosAtivosComCategoria();
-      const sections = new Map<
-        string,
-        {
-          category: string;
-          label: string;
-          items: ReturnType<typeof produtoPublico>[];
+    .query(({ ctx }) =>
+      runPublicCatalogQuery(async () => {
+        const produtos =
+          await ctx.deps.catalogoRepository.findProdutosAtivosComCategoria();
+        const sections = new Map<
+          string,
+          {
+            category: string;
+            label: string;
+            items: ReturnType<typeof produtoPublico>[];
+          }
+        >();
+
+        for (const produtoComCategoria of produtos) {
+          const { categoria } = produtoComCategoria;
+          const section = sections.get(categoria.id) ?? {
+            category: categoria.slug,
+            label: categoria.label,
+            items: [],
+          };
+          section.items.push(
+            produtoPublicoSeguro(
+              produtoComCategoria,
+              ctx.deps.objectStorage,
+            ),
+          );
+          sections.set(categoria.id, section);
         }
-      >();
 
-      for (const produtoComCategoria of produtos) {
-        const { categoria } = produtoComCategoria;
-        const section = sections.get(categoria.id) ?? {
-          category: categoria.slug,
-          label: categoria.label,
-          items: [],
-        };
-        section.items.push(produtoPublico(produtoComCategoria));
-        sections.set(categoria.id, section);
-      }
-
-      return [...sections.values()];
-    }),
+        return [...sections.values()];
+      }),
+    ),
 
   listListasProntas: t.procedure
     .input(z.object({}).strict().optional())
     .output(CatalogoListasProntasOutputSchema)
-    .query(async ({ ctx }) => {
-      const listas = await ctx.deps.catalogoRepository.findListasAtivasComItensAtivos();
-      const entries: [string, z.infer<typeof ListaProntaDetailPublicoSchema>][] = [];
-      const keys = new Set<string>();
+    .query(({ ctx }) =>
+      runPublicCatalogQuery(async () => {
+        const listas =
+          await ctx.deps.catalogoRepository.findListasAtivasComItensAtivos();
+        const entries: [
+          string,
+          z.infer<typeof ListaProntaDetailPublicoSchema>,
+        ][] = [];
+        const keys = new Set<string>();
 
-      for (const { lista, itens } of listas) {
-        const key = lista.slug ?? lista.id;
-        if (keys.has(key)) {
-          throw new Error(`Chave pública duplicada em listas prontas: ${key}`);
+        for (const { lista, itens } of listas) {
+          const key = lista.slug ?? lista.id;
+          if (keys.has(key)) {
+            throw new Error(`duplicate public ready-list key: ${key}`);
+          }
+          keys.add(key);
+          entries.push([
+            key,
+            {
+              id: key,
+              title: lista.nome,
+              description: lista.descricao ?? "",
+              imageUrl: requireReadableImageUrl(
+                lista.imageUrl,
+                ctx.deps.objectStorage,
+              ),
+              items: itens.map((item) =>
+                listaProntaItemPublico(item, ctx.deps.objectStorage),
+              ),
+            },
+          ]);
         }
-        keys.add(key);
-        entries.push([
-          key,
-          {
-            id: key,
-            title: lista.nome,
-            description: lista.descricao ?? "",
-            imageUrl: lista.imageUrl,
-            items: itens.map(listaProntaItemPublico),
-          },
-        ]);
-      }
 
-      return Object.fromEntries(entries);
-    }),
+        return Object.fromEntries(entries);
+      }),
+    ),
 });

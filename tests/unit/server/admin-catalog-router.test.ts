@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { ServerDeps } from '../../../apps/eunenem-server/server/auth/setup.js';
 import type { TrpcContext } from '../../../apps/eunenem-server/server/trpc/context.js';
 import { appRouter } from '../../../apps/eunenem-server/server/trpc/router.js';
 import { CatalogoRepositoryMemory } from '../../../src/adapters/catalogo/repository.memory.js';
+import { CatalogoAdminAuditMemory } from '../../../src/adapters/catalogo-admin-audit/catalogo-admin-audit.memory.js';
 import { ObjectStorageMemory } from '../../../src/adapters/storage/object-storage.memory.js';
 import { adminAuthOverrides } from '../../helpers/admin-auth.js';
 import {
@@ -12,19 +13,31 @@ import {
   makeCatalogoProduto,
 } from '../../helpers/catalogo-repository.conformance.js';
 
+vi.mock('../../../apps/eunenem-server/server/trpc/rate-limit.js', () => ({
+  enforceRateLimit: vi.fn().mockResolvedValue({
+    allowed: true,
+    count: 1,
+    max: 10,
+    windowMs: 60_000,
+  }),
+}));
+
 type Caller = ReturnType<typeof appRouter.createCaller>;
 
 const NOW = new Date('2026-07-27T15:30:00.000Z');
 
 function buildRig(args: { allowAdmin?: boolean } = {}): {
   caller: Caller;
+  audit: CatalogoAdminAuditMemory;
   repository: CatalogoRepositoryMemory;
   storage: ObjectStorageMemory;
 } {
   const repository = new CatalogoRepositoryMemory();
   const storage = new ObjectStorageMemory('catalog-test');
+  const audit = new CatalogoAdminAuditMemory(() => new Date(NOW));
   const auth = adminAuthOverrides();
   const deps = {
+    catalogoAdminAudit: audit,
     catalogoRepository: repository,
     objectStorage: storage,
     clock: () => new Date(NOW),
@@ -36,7 +49,12 @@ function buildRig(args: { allowAdmin?: boolean } = {}): {
     headers: auth.headers,
     resHeaders: new Headers(),
   };
-  return { caller: appRouter.createCaller(context), repository, storage };
+  return {
+    audit,
+    caller: appRouter.createCaller(context),
+    repository,
+    storage,
+  };
 }
 
 describe('admin.catalog authorization', () => {
@@ -100,6 +118,7 @@ describe('admin.catalog authorization', () => {
       (caller: Caller) =>
         caller.admin.catalog.emitirUrlUploadImagemProduto({
           contentType: 'image/png',
+          sizeBytes: 1_024,
         }),
     ],
   ])('%s rejects a valid non-allowlisted caller with FORBIDDEN', async (_name, invoke) => {
@@ -228,6 +247,7 @@ describe('admin.catalog strict inputs', () => {
       (caller: Caller) =>
         caller.admin.catalog.emitirUrlUploadImagemProduto({
           contentType: 'image/png',
+          sizeBytes: 1_024,
           extra: true,
         } as never),
     ],
@@ -395,8 +415,28 @@ describe('admin.catalog products', () => {
         id: existing.id,
         imageUrl: 'http://127.0.0.1:9000/catalog/product.png',
       }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+
+  it('accepts an unchanged grandfathered product image without rewriting it', async () => {
+    const { caller, repository } = buildRig();
+    const category = makeCatalogoCategoria();
+    const legacyImageUrl = 'https://http2.mlstatic.com/D_NQ_NP_123.jpg';
+    const product = makeCatalogoProduto(category.id, {
+      imageUrl: legacyImageUrl,
+    });
+    await repository.createCategoria(category);
+    await repository.createProduto(product);
+
+    await expect(
+      caller.admin.catalog.updateProduct({
+        id: product.id,
+        nome: 'Nome atualizado',
+        imageUrl: legacyImageUrl,
+      }),
     ).resolves.toMatchObject({
-      imageUrl: 'http://127.0.0.1:9000/catalog/product.png',
+      nome: 'Nome atualizado',
+      imageUrl: legacyImageUrl,
     });
   });
 
@@ -440,6 +480,40 @@ describe('admin.catalog products', () => {
     await expect(caller.admin.catalog.listProducts({ page: 100_001 })).rejects.toMatchObject({
       code: 'BAD_REQUEST',
     });
+  });
+
+  it('does not reactivate a product changed between the route read and atomic patch', async () => {
+    const { caller, repository } = buildRig();
+    const category = makeCatalogoCategoria();
+    const product = makeCatalogoProduto(category.id, { ativo: true });
+    await repository.createCategoria(category);
+    await repository.createProduto(product);
+
+    const originalFind = repository.findProdutoById.bind(repository);
+    const originalUpdate = repository.updateProduto.bind(repository);
+    let injectedConcurrentWrite = false;
+    vi.spyOn(repository, 'findProdutoById').mockImplementation(async (id) => {
+      const staleSnapshot = await originalFind(id);
+      if (!injectedConcurrentWrite) {
+        injectedConcurrentWrite = true;
+        await originalUpdate(id, {
+          ativo: false,
+          atualizadoEm: new Date('2026-07-27T15:29:59.000Z'),
+        });
+      }
+      return staleSnapshot;
+    });
+
+    await expect(
+      caller.admin.catalog.updateProduct({
+        id: product.id,
+        nome: 'Nome atualizado',
+      }),
+    ).resolves.toMatchObject({
+      nome: 'Nome atualizado',
+      ativo: false,
+    });
+    expect((await originalFind(product.id))?.ativo).toBe(false);
   });
 });
 
@@ -547,14 +621,14 @@ describe('admin.catalog lists', () => {
     const created = await caller.admin.catalog.createList({
       nome: '  Lista nova  ',
       descricao: 'Descrição',
-      imageUrl: 'https://cdn.example.com/lista.png',
+      imageUrl: '/listas-prontas/lista.png',
     });
     expect(created).toEqual({
       id: expect.any(String),
       slug: null,
       nome: 'Lista nova',
       descricao: 'Descrição',
-      imageUrl: 'https://cdn.example.com/lista.png',
+      imageUrl: '/listas-prontas/lista.png',
       position: 5,
       ativo: true,
       quantidadeItens: 0,
@@ -568,7 +642,7 @@ describe('admin.catalog lists', () => {
     });
     expect(renamed).toMatchObject({
       descricao: 'Descrição',
-      imageUrl: 'https://cdn.example.com/lista.png',
+      imageUrl: '/listas-prontas/lista.png',
     });
     const cleared = await caller.admin.catalog.updateList({
       id: created.id,
@@ -601,6 +675,24 @@ describe('admin.catalog lists', () => {
     });
   });
 
+  it('accepts an unchanged grandfathered list image without rewriting it', async () => {
+    const { caller, repository } = buildRig();
+    const legacyImageUrl = 'https://rihappy.vteximg.com.br/arquivos/lista.png?v=638001234567890000';
+    const list = makeCatalogoLista({ imageUrl: legacyImageUrl });
+    await repository.createLista(list);
+
+    await expect(
+      caller.admin.catalog.updateList({
+        id: list.id,
+        nome: 'Nome atualizado',
+        imageUrl: legacyImageUrl,
+      }),
+    ).resolves.toMatchObject({
+      nome: 'Nome atualizado',
+      imageUrl: legacyImageUrl,
+    });
+  });
+
   it('rejects empty list patches and bounded name/description overflow', async () => {
     const { caller, repository } = buildRig();
     const list = makeCatalogoLista();
@@ -624,6 +716,38 @@ describe('admin.catalog lists', () => {
         descricao: '  descrição aparada  ',
       }),
     ).resolves.toMatchObject({ descricao: 'descrição aparada' });
+  });
+
+  it('does not republish a list changed between the route read and atomic patch', async () => {
+    const { caller, repository } = buildRig();
+    const list = makeCatalogoLista({ ativo: true });
+    await repository.createLista(list);
+
+    const originalFind = repository.findListaByIdComItens.bind(repository);
+    const originalUpdate = repository.updateLista.bind(repository);
+    let injectedConcurrentWrite = false;
+    vi.spyOn(repository, 'findListaByIdComItens').mockImplementation(async (id) => {
+      const staleSnapshot = await originalFind(id);
+      if (!injectedConcurrentWrite) {
+        injectedConcurrentWrite = true;
+        await originalUpdate(id, {
+          ativo: false,
+          atualizadoEm: new Date('2026-07-27T15:29:59.000Z'),
+        });
+      }
+      return staleSnapshot;
+    });
+
+    await expect(
+      caller.admin.catalog.updateList({
+        id: list.id,
+        nome: 'Nome atualizado',
+      }),
+    ).resolves.toMatchObject({
+      nome: 'Nome atualizado',
+      ativo: false,
+    });
+    expect((await originalFind(list.id))?.lista.ativo).toBe(false);
   });
 });
 
@@ -730,12 +854,16 @@ describe('admin.catalog setListItems and upload presign', () => {
     const { caller, repository, storage } = buildRig();
     const result = await caller.admin.catalog.emitirUrlUploadImagemProduto({
       contentType: 'image/webp',
+      sizeBytes: 4_096,
     });
     expect(result.objectKey).toMatch(/^catalogo\/produtos\/[0-9a-f-]{36}\.webp$/);
     expect(result.uploadUrl).toContain(result.objectKey);
     expect(result.publicUrl).toContain(result.objectKey);
     expect(storage.catalogoUploads).toHaveLength(1);
-    expect(storage.catalogoUploads[0]?.input).toEqual({ contentType: 'image/webp' });
+    expect(storage.catalogoUploads[0]?.input).toEqual({
+      contentType: 'image/webp',
+      sizeBytes: 4_096,
+    });
 
     const category = makeCatalogoCategoria();
     await repository.createCategoria(category);
@@ -750,10 +878,168 @@ describe('admin.catalog setListItems and upload presign', () => {
       }),
     ).resolves.toMatchObject({ imageUrl: result.publicUrl });
 
+    const uploadsBeforeInvalidInput = storage.catalogoUploads.length;
+    const productsBeforeInvalidInput = (
+      await repository.findProdutosPage({
+        includeInactive: true,
+        offset: 0,
+        limit: 100,
+      })
+    ).total;
     await expect(
       caller.admin.catalog.emitirUrlUploadImagemProduto({
         contentType: 'image/gif' as 'image/png',
+        sizeBytes: 4_096,
       }),
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(
+      caller.admin.catalog.emitirUrlUploadImagemProduto({
+        contentType: 'image/png',
+      } as never),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(
+      caller.admin.catalog.emitirUrlUploadImagemProduto({
+        contentType: 'image/png',
+        sizeBytes: 0,
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(
+      caller.admin.catalog.emitirUrlUploadImagemProduto({
+        contentType: 'image/png',
+        sizeBytes: 5 * 1024 * 1024 + 1,
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(storage.catalogoUploads).toHaveLength(uploadsBeforeInvalidInput);
+    expect(
+      (
+        await repository.findProdutosPage({
+          includeInactive: true,
+          offset: 0,
+          limit: 100,
+        })
+      ).total,
+    ).toBe(productsBeforeInvalidInput);
+  });
+
+  it('audits requested and succeeded phases for all 11 catalog mutations', async () => {
+    const { audit, caller } = buildRig();
+
+    const category = await caller.admin.catalog.createCategory({
+      slug: 'audit-category',
+      label: 'Audit category',
+      position: 0,
+    });
+    const product = await caller.admin.catalog.createProduct({
+      nome: 'Audit product',
+      precoCents: 100,
+      emoji: '🎁',
+      bgColor: 'var(--blue-soft)',
+      idCategoria: category.id,
+    });
+    await caller.admin.catalog.updateProduct({
+      id: product.id,
+      precoCents: 200,
+    });
+    await caller.admin.catalog.setProductAtivo({
+      id: product.id,
+      ativo: false,
+    });
+    await caller.admin.catalog.updateCategory({
+      id: category.id,
+      label: 'Audit category updated',
+    });
+
+    const emptyCategory = await caller.admin.catalog.createCategory({
+      slug: 'audit-empty',
+      label: 'Audit empty',
+      position: 1,
+    });
+    await caller.admin.catalog.deleteCategory({ id: emptyCategory.id });
+
+    const list = await caller.admin.catalog.createList({
+      nome: 'Audit list',
+    });
+    await caller.admin.catalog.updateList({
+      id: list.id,
+      descricao: 'Updated',
+    });
+    await caller.admin.catalog.setListAtivo({
+      id: list.id,
+      ativo: false,
+    });
+    await caller.admin.catalog.setListItems({
+      idLista: list.id,
+      items: [{ idProduto: product.id, quantidade: 1, position: 0 }],
+    });
+    await caller.admin.catalog.emitirUrlUploadImagemProduto({
+      contentType: 'image/png',
+      sizeBytes: 2_048,
+    });
+
+    const expectedActions = [
+      'catalog.category.create',
+      'catalog.category.delete',
+      'catalog.category.update',
+      'catalog.list.create',
+      'catalog.list.set_active',
+      'catalog.list.set_items',
+      'catalog.list.update',
+      'catalog.product.create',
+      'catalog.product.set_active',
+      'catalog.product.update',
+      'catalog.product_image.presign',
+    ];
+    const succeeded = [
+      ...new Set(
+        audit.events.filter((event) => event.phase === 'succeeded').map((event) => event.action),
+      ),
+    ].sort();
+    expect(succeeded).toEqual(expectedActions);
+
+    for (const requestId of new Set(audit.events.map((event) => event.requestId))) {
+      expect(
+        audit.events.filter((event) => event.requestId === requestId).map((event) => event.phase),
+      ).toEqual(['requested', 'succeeded']);
+    }
+
+    const presignEvent = audit.events.find(
+      (event) => event.action === 'catalog.product_image.presign' && event.phase === 'succeeded',
+    );
+    expect(presignEvent?.metadata).toMatchObject({
+      contentType: 'image/png',
+      sizeBytes: 2_048,
+      objectKey: expect.stringMatching(/^catalogo\/produtos\//),
+    });
+    expect(JSON.stringify(presignEvent?.metadata)).not.toContain('uploadUrl');
+  });
+
+  it('audits failed catalog mutations without persisting the rejected side effect', async () => {
+    const { audit, caller, repository } = buildRig();
+    const missingCategoryId = randomUUID();
+
+    await expect(
+      caller.admin.catalog.createProduct({
+        nome: 'Rejected product',
+        precoCents: 100,
+        emoji: '🎁',
+        bgColor: 'var(--blue-soft)',
+        idCategoria: missingCategoryId,
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+
+    expect(
+      (
+        await repository.findProdutosPage({
+          includeInactive: true,
+          offset: 0,
+          limit: 100,
+        })
+      ).total,
+    ).toBe(0);
+    expect(audit.events.map((event) => event.phase)).toEqual(['requested', 'failed']);
+    expect(audit.events[1]?.metadata).toMatchObject({
+      failureCode: 'NOT_FOUND',
+      idCategoria: missingCategoryId,
+    });
   });
 });

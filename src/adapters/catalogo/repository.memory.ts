@@ -14,6 +14,8 @@ import type {
   FindCatalogoProdutosPageInput,
   FindCatalogoProdutosPageOutput,
   ReplaceCatalogoListaItensOutcome,
+  UpdateCatalogoListaPatch,
+  UpdateCatalogoProdutoPatch,
 } from './repository.js';
 import { CatalogoConflictError } from './repository.js';
 
@@ -141,13 +143,18 @@ export class CatalogoRepositoryMemory implements CatalogoRepository {
     });
   }
 
-  async updateProduto(produto: CatalogoProduto): Promise<boolean> {
+  async updateProduto(
+    id: string,
+    patch: UpdateCatalogoProdutoPatch,
+  ): Promise<CatalogoProduto | undefined> {
     return withMemorySpan('updateProduto', 'UPDATE', () => {
-      if (!this.produtos.has(produto.id)) return false;
+      const current = this.produtos.get(id);
+      if (!current) return undefined;
+      const produto = { ...current, ...patch };
       this.assertProdutoValid(produto);
-      this.assertProdutoUnique(produto, produto.id);
-      this.produtos.set(produto.id, cloneProduto(produto));
-      return true;
+      this.assertProdutoUnique(produto, id);
+      this.produtos.set(id, cloneProduto(produto));
+      return cloneProduto(produto);
     });
   }
 
@@ -220,13 +227,18 @@ export class CatalogoRepositoryMemory implements CatalogoRepository {
     });
   }
 
-  async updateLista(lista: CatalogoLista): Promise<boolean> {
+  async updateLista(
+    id: string,
+    patch: UpdateCatalogoListaPatch,
+  ): Promise<CatalogoLista | undefined> {
     return withMemorySpan('updateLista', 'UPDATE', () => {
-      if (!this.listas.has(lista.id)) return false;
+      const current = this.listas.get(id);
+      if (!current) return undefined;
+      const lista = { ...current, ...patch };
       this.assertPositionValid(lista.position, 'lista');
-      this.assertListaUnique(lista, lista.id);
-      this.listas.set(lista.id, cloneLista(lista));
-      return true;
+      this.assertListaUnique(lista, id);
+      this.listas.set(id, cloneLista(lista));
+      return cloneLista(lista);
     });
   }
 

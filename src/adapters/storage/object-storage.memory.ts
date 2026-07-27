@@ -6,6 +6,7 @@ import {
   type EmitirUrlUploadCatalogoInput,
   type EmitirUrlUploadInput,
   type EmitirUrlUploadItemInput,
+  MAX_CATALOGO_IMAGEM_SIZE_BYTES,
   type ObjectStorage,
   type UrlUploadPresignada,
 } from './object-storage.js';
@@ -82,7 +83,6 @@ export class ObjectStorageMemory implements ObjectStorage {
         if (ext === undefined) {
           throw new Error(`contentType não suportado: ${input.contentType}`);
         }
-
         const objectKey = `perfis/${input.idUsuario}/${input.slot}-${randomUUID()}.${ext}`;
         const resultado: UrlUploadPresignada = {
           uploadUrl: `memory://upload/${this.bucket}/${objectKey}`,
@@ -182,6 +182,15 @@ export class ObjectStorageMemory implements ObjectStorage {
         const ext = CONTENT_TYPE_EXTENSAO[input.contentType];
         if (ext === undefined) {
           throw new Error(`contentType não suportado: ${input.contentType}`);
+        }
+        if (
+          !Number.isSafeInteger(input.sizeBytes) ||
+          input.sizeBytes < 1 ||
+          input.sizeBytes > MAX_CATALOGO_IMAGEM_SIZE_BYTES
+        ) {
+          throw new Error(
+            `sizeBytes deve ser um inteiro entre 1 e ${MAX_CATALOGO_IMAGEM_SIZE_BYTES}`,
+          );
         }
 
         const objectKey = `catalogo/produtos/${randomUUID()}.${ext}`;
