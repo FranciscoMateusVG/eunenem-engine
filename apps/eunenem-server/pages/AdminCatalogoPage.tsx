@@ -1,5 +1,6 @@
 import { useId, useState } from "react";
 import { AdminShell } from "@/components/eunenem/admin/AdminShell";
+import { ProdutosTab } from "@/components/eunenem/admin/catalogo/ProdutosTab";
 
 /**
  * /admin/catalogo — operator-facing catalog management (plan ckru9 F1,
@@ -56,10 +57,7 @@ export function AdminCatalogoPage() {
         <CatalogoTabs active={active} onChange={setActive} />
         <div className="pt-1">
           <TabPanel active={active} tab="produtos">
-            <PendingPanel
-              title="Produtos"
-              note="tabela · busca · filtro por categoria · adicionar/editar · ativar/desativar"
-            />
+            <ProdutosTab />
           </TabPanel>
           <TabPanel active={active} tab="listas">
             <PendingPanel
