@@ -1358,16 +1358,21 @@ function PresetDetailModal({
   onSubmit,
   submitting,
   syncing,
+  errored,
 }: {
   preset: ListaProntaPub;
   onClose: () => void;
   onSubmit: (selected: PresetItemPub[]) => void;
   submitting: boolean;
-  // aperture-7tyqh — true while a background poll of listListasProntas is in
-  // flight. While syncing, item controls + submit are disabled so a stale
-  // (about-to-change) preset item can't be picked/submitted mid-sync.
+  // aperture-7tyqh — the preset is "busy" while a background poll of
+  // listListasProntas is in flight (syncing) OR the query is errored (errored).
+  // While busy, item controls + submit are disabled so a stale (about-to-change
+  // or known-stale-on-error) preset item can't be picked/submitted. Mirrors the
+  // picker's catalogBusy = catalogSyncing || catalogError.
   syncing: boolean;
+  errored: boolean;
 }) {
+  const busy = syncing || errored;
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(preset.items.map((it) => it.id)),
   );
@@ -1390,8 +1395,8 @@ function PresetDetailModal({
   }, [preset]);
 
   const toggle = (id: string) => {
-    // aperture-7tyqh — no selection changes while the preset is syncing.
-    if (syncing) return;
+    // aperture-7tyqh — no selection changes while the preset is syncing/errored.
+    if (busy) return;
     setSelected((cur) => {
       const next = new Set(cur);
       if (next.has(id)) next.delete(id);
@@ -1407,9 +1412,10 @@ function PresetDetailModal({
   const count = selectedItems.length;
 
   const submit = () => {
-    // aperture-7tyqh — never submit while the preset is syncing; selectedItems is
-    // derived from the live preset so any item that disappeared is excluded.
-    if (count === 0 || submitting || syncing) return;
+    // aperture-7tyqh — never submit while the preset is syncing/errored;
+    // selectedItems is derived from the live preset so any item that disappeared
+    // is excluded.
+    if (count === 0 || submitting || busy) return;
     onSubmit(selectedItems);
   };
 
@@ -1442,7 +1448,7 @@ function PresetDetailModal({
                 onClick={() => toggle(it.id)}
                 aria-pressed={on}
                 aria-label={`${on ? 'Remover' : 'Adicionar'} ${it.name}`}
-                disabled={syncing}
+                disabled={busy}
               >
                 <div
                   className="lista-preset-thumb"
@@ -1498,7 +1504,7 @@ function PresetDetailModal({
           <button
             type="button"
             className="btn btn-primary"
-            disabled={count === 0 || submitting || syncing}
+            disabled={count === 0 || submitting || busy}
             onClick={submit}
           >
             <span className="lista-btn-ic">{icon.heart}</span>
@@ -1979,6 +1985,37 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
                 Curadoria com o <span className="hl">essencial para cada fase</span>
               </h2>
               <p className="lista-prontas-sub">Toque pra ver os presentes antes de adicionar.</p>
+              {/* aperture-7tyqh — a background-poll error keeps the last-good tiles
+                  (error ≠ empty) but surfaces a distinct, retryable error state and
+                  makes the tiles non-actionable (VER LISTA disabled below) so stale
+                  lists can't be opened/selected/submitted while errored. */}
+              {listasProntasQuery.error && (
+                <div
+                  className="lista-prontas-erro"
+                  role="alert"
+                  style={{ margin: '0.25rem 0 0.75rem' }}
+                >
+                  <span className="eyebrow coral">opa</span>
+                  <p>
+                    Não rolou atualizar as listas prontas.{' '}
+                    <button
+                      type="button"
+                      onClick={() => void listasProntasQuery.refetch()}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        padding: 0,
+                        color: 'var(--lilac-deep)',
+                        textDecoration: 'underline',
+                        cursor: 'pointer',
+                        font: 'inherit',
+                      }}
+                    >
+                      tentar de novo →
+                    </button>
+                  </p>
+                </div>
+              )}
               <div className="lista-prontas-grid">
                 {/* aperture-tb0rh F2 — presets are now dynamic (live tRPC
                     record). Iterate the record's own entries so `detail` is
@@ -2024,9 +2061,13 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
                           type="button"
                           className="lista-pronta-cta"
                           onClick={() => {
+                            // aperture-7tyqh — don't open a stale preset detail
+                            // while the listas-prontas query is errored.
+                            if (listasProntasQuery.error) return;
                             sendEvent('lista_pronta_visualizada', { preset_id: id });
                             setPresetDetail(id);
                           }}
+                          disabled={!!listasProntasQuery.error}
                           aria-label={`Ver lista pronta: ${title}`}
                         >
                           VER LISTA →
@@ -2175,6 +2216,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
               onSubmit={(selected) => void addPresetItems(selected, presetDetail)}
               submitting={presetSubmitting}
               syncing={listasProntasQuery.isFetching}
+              errored={!!listasProntasQuery.error}
             />
           );
         })()}
