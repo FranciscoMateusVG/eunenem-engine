@@ -115,9 +115,10 @@ app.get('/healthz', (c) => c.text('ok'));
 // Deny-by-default auth guard (aperture-9tca0, supersedes ln3de denylist) —
 // install BEFORE the `auth.handler` catch-all so it wins the route match and
 // runs first. Blocks ALL /api/auth/* with byte-identical 410 Gone EXCEPT the
-// OAuth allowlist (sign-in/social + callback/*). Closes the cross-tenant
-// escalation via /api/auth/update-user + the saga-bypass surface that the
-// bq2c9 adapter-casing fix activated. See server/blocked-auth-handler.ts.
+// reviewed allowlist (social OAuth, own-session read, display/health, and the
+// tenant-scoped magic-link send/verify pair). Closes the cross-tenant escalation
+// via /api/auth/update-user + the saga-bypass surface that the bq2c9
+// adapter-casing fix activated. See server/blocked-auth-handler.ts.
 installBlockedAuthHandlerGuard(app);
 
 // BetterAuth handler mount (aperture-ht7sq) — MUST come before any
@@ -130,9 +131,8 @@ installBlockedAuthHandlerGuard(app);
 // here is safe. The CORS middleware above only reads headers + sets
 // response headers — never reads the body.
 //
-// Only the OAuth allowlist (sign-in/social + callback/*) reaches this
-// catch-all; the deny-by-default guard above (aperture-9tca0) 410s every
-// other /api/auth/* route before it gets here.
+// Only the reviewed allowlist reaches this catch-all; the deny-by-default guard
+// above (aperture-9tca0) 410s every other /api/auth/* route before it gets here.
 app.on(['POST', 'GET'], '/api/auth/*', (c) => deps.auth.handler(c.req.raw));
 
 // tRPC handler (aperture-kungg + aperture-ht7sq) — routes under

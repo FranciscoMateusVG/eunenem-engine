@@ -25,10 +25,11 @@ import type { Hono } from 'hono';
  * The engine policy: every authn flow runs through tRPC at `/api/trpc/auth.*`
  * so the saga executes end-to-end (plataforma validation, domain Usuario
  * aggregate, slug, PERMISSOES_PADRAO, Conta, compensation on partial failure).
- * The ONLY BetterAuth HTTP routes the engine deliberately exposes are the
- * Google OAuth init + provider callback. EVERYTHING else under /api/auth/* is
- * denied with a byte-identical 410 Gone (no status/body/latency signal that
- * could distinguish a blocked route or enumerate registered emails).
+ * Only explicitly reviewed BetterAuth HTTP routes are exposed: social OAuth,
+ * own-session reads, display/health, and the tenant-scoped magic-link send and
+ * verify pair. EVERYTHING else under /api/auth/* is denied with a byte-identical
+ * 410 Gone (no status/body/latency signal that could distinguish a blocked
+ * route or enumerate registered emails).
  *
  * Adding a new exposed flow REQUIRES adding it to the allowlist below AND a
  * Cipher review — the deny-by-default posture means new better-auth routes are
@@ -37,10 +38,9 @@ import type { Hono } from 'hono';
 
 /**
  * The allowlist: the exact (method, path) pairs permitted to reach
- * `auth.handler`. METHOD-SPECIFIC on purpose — only the two requests the
- * Google OAuth flow actually issues are allowed; every other method on these
- * same paths (e.g. GET /sign-in/social, POST /callback/*) is denied with the
- * uniform 410, so there is no method-probing signal.
+ * `auth.handler`. METHOD-SPECIFIC on purpose: every other method on these same
+ * paths (e.g. GET /sign-in/social, POST /callback/*) is denied with the uniform
+ * 410, so there is no method-probing signal.
  *
  *   - POST /api/auth/sign-in/social     — OAuth init (returns provider redirect)
  *   - GET  /api/auth/callback/<provider> — OAuth provider callback (the FAMILY,
@@ -89,13 +89,13 @@ export function isAllowedAuthRequest(method: string, path: string): boolean {
   // relaxation; a new exposed route still requires a Cipher review.
   if (method === 'GET' && path === '/api/auth/error') return true;
   if (method === 'GET' && path === '/api/auth/ok') return true;
-  // aperture-eww0g P0 containment: magic-link SEND + VERIFY deliberately stay
-  // denied. Better Auth 1.6.22 resolves verification by email alone
-  // (`findUserByEmail(email)`), while this database permits the same email in
-  // multiple platform tenants. The selected row is therefore ambiguous and
-  // core may delete credentials/sessions for the wrong tenant before issuing a
-  // session. There is no tenant-resolver hook in the plugin. Keep both routes
-  // behind the uniform 410 until a tenant-scoped implementation replaces it.
+  // aperture-x9yrx: PR #45 moved Better Auth identity selection behind the
+  // fixed EuNeném tenant adapter, so the magic-link verifier can no longer
+  // select or mutate a foreign same-email user. Expose only the exact SEND and
+  // VERIFY method/path pairs; native email/password and every account-management
+  // route remain behind the uniform 410.
+  if (method === 'POST' && path === '/api/auth/sign-in/magic-link') return true;
+  if (method === 'GET' && path === '/api/auth/magic-link/verify') return true;
   return false;
 }
 

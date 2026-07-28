@@ -1,11 +1,10 @@
 // BetterAuth browser client (aperture-8655f).
 //
 // The app's email+password auth goes through the tRPC `auth.*` procedures
-// (see lib/auth.ts) — that path is unchanged. This client exists ONLY for
-// the social-login redirect flow, which BetterAuth drives directly against
-// its `/api/auth/*` handler (mounted in server.tsx). `signIn.social` issues
-// the provider redirect and, after the OAuth callback at
-// `/api/auth/callback/google`, returns the browser to `callbackURL`.
+// (see lib/auth.ts) — that path is unchanged. This client owns the social
+// redirect and passwordless magic-link flows, which BetterAuth drives directly
+// against its `/api/auth/*` handler (mounted in server.tsx). `signIn.social`
+// issues the provider redirect; `signIn.magicLink` requests the email.
 //
 // baseURL is left to BetterAuth's same-origin default: the client bundle is
 // served from the same origin as the auth handler (eunenem-server serves both
@@ -13,8 +12,9 @@
 // the right host automatically — dev (localhost:3001) or whatever live domain
 // serves the app (no hardcoded host; aperture-ejghb).
 import { createAuthClient } from 'better-auth/react';
+import { magicLinkClient } from 'better-auth/client/plugins';
 
-// Password login is owned by the tenant-bound tRPC procedures. Magic-link is
-// deliberately absent on both client and server while Better Auth's verifier
-// remains email-global. This client exposes only the social redirect surface.
-export const authClient = createAuthClient();
+// Password login remains owned by the tenant-bound tRPC procedures. The magic
+// link client adds only the passwordless send call; native Better Auth
+// email/password routes stay retired.
+export const authClient = createAuthClient({ plugins: [magicLinkClient()] });

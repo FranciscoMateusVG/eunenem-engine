@@ -1,11 +1,14 @@
+import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import nodemailer from 'nodemailer';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   BLOCKED_AUTH_BODY,
   BLOCKED_AUTH_STATUS,
   installBlockedAuthHandlerGuard,
 } from '../../apps/eunenem-server/server/blocked-auth-handler.js';
-import { criarAuth } from '../../src/adapters/usuario/criar-auth.js';
+import { EmailTransportNodemailer } from '../../src/adapters/email/email-transport.nodemailer.js';
+import { criarAuth, ID_PLATAFORMA_EUCASEI, ID_PLATAFORMA_EUNENEM } from '../../src/index.js';
 import { createTestDatabase, type TestDatabase } from '../helpers/test-db.js';
 
 /**
@@ -55,9 +58,42 @@ const BASE_URL = 'http://localhost:3001';
 // tenants (aperture-9tca0 HIGH).
 const OTHER_PLATFORM_ID = '00000000-0000-0000-0000-0000000000ff';
 
+describe('EmailTransportNodemailer TLS posture', () => {
+  it.each([
+    { secure: false, requireTLS: true },
+    { secure: true, requireTLS: false },
+  ])('pins TLS 1.2 + certificate verification when secure=$secure', ({ secure, requireTLS }) => {
+    const createTransport = vi
+      .spyOn(nodemailer, 'createTransport')
+      .mockReturnValue({ sendMail: vi.fn() } as never);
+
+    new EmailTransportNodemailer({
+      host: 'smtp.example.test',
+      port: secure ? 465 : 587,
+      user: 'user',
+      pass: 'pass',
+      from: 'EuNeném <oi@example.test>',
+      secure,
+    });
+
+    expect(createTransport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        secure,
+        requireTLS,
+        tls: {
+          minVersion: 'TLSv1.2',
+          rejectUnauthorized: true,
+        },
+      }),
+    );
+    createTransport.mockRestore();
+  });
+});
+
 let testDb: TestDatabase;
 let app: Hono;
 let magicLinkSendCount = 0;
+const magicLinkUrls = new Map<string, string>();
 
 beforeAll(async () => {
   testDb = await createTestDatabase();
@@ -71,8 +107,10 @@ beforeAll(async () => {
     sendResetPassword: async () => {
       /* no-op for this test */
     },
-    sendMagicLink: async () => {
+    idPlataformaPadrao: ID_PLATAFORMA_EUNENEM,
+    sendMagicLink: async ({ email, url }) => {
       magicLinkSendCount += 1;
+      magicLinkUrls.set(email, url);
     },
     useSecureCookies: false,
     socialProviders: {
@@ -135,6 +173,116 @@ async function probeWithHeaders(
   };
 }
 
+async function seedIdentity(input: {
+  tenant: string;
+  email: string;
+  name: string;
+  withCredentialAndSession?: boolean;
+}): Promise<string> {
+  const userId = randomUUID();
+  const fixtureTime = new Date('2026-01-01T00:00:00.000Z');
+  await testDb.db
+    .insertInto('users')
+    .values({
+      id: userId,
+      name: input.name,
+      email: input.email,
+      email_verified: false,
+      image: null,
+      id_plataforma: input.tenant,
+      created_at: fixtureTime,
+      updated_at: fixtureTime,
+    })
+    .execute();
+
+  if (input.withCredentialAndSession) {
+    await testDb.db
+      .insertInto('accounts')
+      .values({
+        id: randomUUID(),
+        user_id: userId,
+        provider_id: 'credential',
+        account_id: `${input.tenant}::${input.email}`,
+        password: 'credential-must-not-change',
+        access_token: null,
+        refresh_token: null,
+        id_token: null,
+        access_token_expires_at: null,
+        refresh_token_expires_at: null,
+        scope: null,
+        created_at: fixtureTime,
+        updated_at: fixtureTime,
+      })
+      .execute();
+    await testDb.db
+      .insertInto('sessions')
+      .values({
+        id: randomUUID(),
+        user_id: userId,
+        token: `session-${randomUUID()}`,
+        expires_at: new Date('2030-01-01T00:00:00.000Z'),
+        ip_address: 'fixture-ip',
+        user_agent: 'fixture-agent',
+        created_at: fixtureTime,
+        updated_at: fixtureTime,
+      })
+      .execute();
+  }
+  return userId;
+}
+
+async function identitySnapshot(userIds: readonly string[]) {
+  const ids = [...userIds];
+  const users = await testDb.db
+    .selectFrom('users')
+    .selectAll()
+    .where('id', 'in', ids)
+    .orderBy('id')
+    .execute();
+  const accounts = await testDb.db
+    .selectFrom('accounts')
+    .selectAll()
+    .where('user_id', 'in', ids)
+    .orderBy('id')
+    .execute();
+  const sessions = await testDb.db
+    .selectFrom('sessions')
+    .selectAll()
+    .where('user_id', 'in', ids)
+    .orderBy('id')
+    .execute();
+  return { users, accounts, sessions };
+}
+
+async function sendAndVerifyMagicLink(email: string): Promise<Response> {
+  magicLinkUrls.delete(email);
+  const send = await app.request('/api/auth/sign-in/magic-link', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      origin: BASE_URL,
+    },
+    body: JSON.stringify({
+      email,
+      callbackURL: `${BASE_URL}/dashboard`,
+    }),
+  });
+  expect(send.status).toBe(200);
+  const url = magicLinkUrls.get(email);
+  expect(url, 'configured sender must receive the magic-link URL').toBeTruthy();
+  return app.request(url as string, {
+    method: 'GET',
+    redirect: 'manual',
+  });
+}
+
+function sessionCookie(response: Response): string | null {
+  const setCookie = response.headers
+    .getSetCookie()
+    .find((value) => value.includes('session_token='));
+  return setCookie?.split(';')[0] ?? null;
+}
+
 describe('DENY-BY-DEFAULT /api/auth/* on the REAL handler (aperture-sxj32 pins 9tca0)', () => {
   // --------------------------------------------------------------------------
   // 1. HIGHEST-VALUE PIN — the cross-tenant escalation route is dead.
@@ -166,7 +314,6 @@ describe('DENY-BY-DEFAULT /api/auth/* on the REAL handler (aperture-sxj32 pins 9
       '/api/auth/request-password-reset',
       '/api/auth/link-social',
       '/api/auth/unlink-account',
-      '/api/auth/sign-in/magic-link',
     ] as const;
 
     for (const path of DENIED_POST) {
@@ -183,24 +330,97 @@ describe('DENY-BY-DEFAULT /api/auth/* on the REAL handler (aperture-sxj32 pins 9
       expect(body).toBe(BLOCKED_AUTH_BODY);
     });
 
-    it('GET /api/auth/magic-link/verify → 410 before token lookup or session mutation', async () => {
-      const { status, body } = await probe(
+    it('GET /api/auth/magic-link/verify reaches the tenant-scoped verifier', async () => {
+      const { status } = await probe(
         'GET',
         '/api/auth/magic-link/verify?token=foreign-tenant-probe',
       );
-      expect(status).toBe(BLOCKED_AUTH_STATUS);
-      expect(body).toBe(BLOCKED_AUTH_BODY);
+      expect(status).not.toBe(BLOCKED_AUTH_STATUS);
     });
 
-    it('POST /api/auth/sign-in/magic-link → 410 before sender or verification mutation', async () => {
+    it('POST /api/auth/sign-in/magic-link reaches the configured sender', async () => {
       const before = magicLinkSendCount;
-      const { status, body } = await probe('POST', '/api/auth/sign-in/magic-link', {
-        email: 'cross-platform@example.com',
+      const { status } = await probe('POST', '/api/auth/sign-in/magic-link', {
+        email: 'magic-link-route@example.com',
         callbackURL: '/',
       });
-      expect(status).toBe(BLOCKED_AUTH_STATUS);
-      expect(body).toBe(BLOCKED_AUTH_BODY);
-      expect(magicLinkSendCount).toBe(before);
+      expect(status).not.toBe(BLOCKED_AUTH_STATUS);
+      expect(magicLinkSendCount).toBe(before + 1);
+    });
+  });
+
+  describe('tenant-bound magic-link SEND → VERIFY through the guarded production shape', () => {
+    it('establishes a session only for the local EuNeném identity', async () => {
+      const email = `magic-local-${randomUUID()}@example.com`;
+      const localId = await seedIdentity({
+        tenant: ID_PLATAFORMA_EUNENEM,
+        email,
+        name: 'Magic Local',
+      });
+
+      const verify = await sendAndVerifyMagicLink(email);
+
+      expect([302, 303, 307]).toContain(verify.status);
+      expect(sessionCookie(verify)).not.toBeNull();
+      const sessions = await testDb.db
+        .selectFrom('sessions')
+        .select(['user_id'])
+        .where('user_id', '=', localId)
+        .execute();
+      expect(sessions).toEqual([{ user_id: localId }]);
+      const local = await testDb.db
+        .selectFrom('users')
+        .select(['id_plataforma', 'email_verified'])
+        .where('id', '=', localId)
+        .executeTakeFirstOrThrow();
+      expect(local).toEqual({
+        id_plataforma: ID_PLATAFORMA_EUNENEM,
+        email_verified: true,
+      });
+    });
+
+    it('fails closed for a foreign-only email with no cookie or identity mutation', async () => {
+      const email = `magic-foreign-${randomUUID()}@example.com`;
+      const foreignId = await seedIdentity({
+        tenant: ID_PLATAFORMA_EUCASEI,
+        email,
+        name: 'Magic Foreign',
+        withCredentialAndSession: true,
+      });
+      const before = await identitySnapshot([foreignId]);
+
+      const verify = await sendAndVerifyMagicLink(email);
+
+      expect(sessionCookie(verify)).toBeNull();
+      expect(await identitySnapshot([foreignId])).toEqual(before);
+      const matches = await testDb.db
+        .selectFrom('users')
+        .select(['id'])
+        .where('email', '=', email)
+        .execute();
+      expect(matches).toEqual([{ id: foreignId }]);
+    });
+
+    it('fails closed for a local+foreign duplicate with no cookie or identity mutation', async () => {
+      const email = `magic-duplicate-${randomUUID()}@example.com`;
+      const localId = await seedIdentity({
+        tenant: ID_PLATAFORMA_EUNENEM,
+        email,
+        name: 'Magic Duplicate Local',
+        withCredentialAndSession: true,
+      });
+      const foreignId = await seedIdentity({
+        tenant: ID_PLATAFORMA_EUCASEI,
+        email,
+        name: 'Magic Duplicate Foreign',
+        withCredentialAndSession: true,
+      });
+      const before = await identitySnapshot([localId, foreignId]);
+
+      const verify = await sendAndVerifyMagicLink(email);
+
+      expect(sessionCookie(verify)).toBeNull();
+      expect(await identitySnapshot([localId, foreignId])).toEqual(before);
     });
   });
 
@@ -401,15 +621,6 @@ describe('DENY-BY-DEFAULT /api/auth/* on the REAL handler (aperture-sxj32 pins 9
         { method: 'POST', path: '/api/auth/request-password-reset' },
         { method: 'POST', path: '/api/auth/link-social' },
         { method: 'POST', path: '/api/auth/unlink-account' },
-        {
-          method: 'POST',
-          path: '/api/auth/sign-in/magic-link',
-          body: { email: 'cross-platform@example.com' },
-        },
-        {
-          method: 'GET',
-          path: '/api/auth/magic-link/verify?token=foreign-tenant-probe',
-        },
         { method: 'GET', path: '/api/auth/list-accounts' },
         { method: 'GET', path: '/api/auth/__deny_by_default_probe__' },
         { method: 'GET', path: '/api/auth/sign-in/social' },
