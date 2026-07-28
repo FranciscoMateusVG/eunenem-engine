@@ -4,6 +4,7 @@ import { AdminContribuicaoPage } from './AdminContribuicaoPage.js';
 import { AdminPage } from './AdminPage.js';
 import { AdminPagamentoPage } from './AdminPagamentoPage.js';
 import { AdminRepasseDetailPage } from './AdminRepasseDetailPage.js';
+import { AdminCatalogoPage } from './AdminCatalogoPage.js';
 import { AdminRepassesPage } from './AdminRepassesPage.js';
 import { AdminUsuarioPage } from './AdminUsuarioPage.js';
 import { AuthDemoPage } from './AuthDemoPage.js';
@@ -64,6 +65,7 @@ export function resolveRoute(pathname: string):
   | { kind: 'admin-contribuicao'; idContribuicao: string }
   | { kind: 'admin-pagamento'; idPagamento: string }
   | { kind: 'admin-repasses' }
+  | { kind: 'admin-catalogo' }
   | { kind: 'admin-repasse-detail'; idRepasse: string }
   | { kind: 'not-found' } {
   // Marketing landing page (aperture-q1j2) — exact "/" only.
@@ -166,6 +168,9 @@ export function resolveRoute(pathname: string):
   }
   if (pathname === '/admin/repasses' || pathname === '/admin/repasses/') {
     return { kind: 'admin-repasses' };
+  }
+  if (pathname === '/admin/catalogo' || pathname === '/admin/catalogo/') {
+    return { kind: 'admin-catalogo' };
   }
   if (pathname === '/admin' || pathname === '/admin/') {
     return { kind: 'admin' };
@@ -401,6 +406,7 @@ function pickPage(route: ReturnType<typeof resolveRoute>, pathname: string) {
   if (route.kind === 'admin-pagamento')
     return <AdminPagamentoPage idPagamento={route.idPagamento} />;
   if (route.kind === 'admin-repasses') return <AdminRepassesPage />;
+  if (route.kind === 'admin-catalogo') return <AdminCatalogoPage />;
   if (route.kind === 'admin-repasse-detail')
     return <AdminRepasseDetailPage idRepasse={route.idRepasse} />;
   return <NotFoundPage pathname={pathname} />;
