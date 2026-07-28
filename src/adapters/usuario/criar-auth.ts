@@ -5,6 +5,7 @@ import { magicLink } from 'better-auth/plugins';
 import { sql } from 'kysely';
 import { derivarNomeExibicaoFallback } from '../../domain/usuario/value-objects/nome-exibicao-usuario.js';
 import type { Database } from '../database.js';
+import { tenantBoundBetterAuthAdapter } from './better-auth-tenant-adapter.js';
 
 /**
  * Config shape accepted by `criarAuth` (aperture-g7f68).
@@ -383,18 +384,24 @@ export function criarAuth(kysely: Database, config: CriarAuthConfig) {
   const idPlataformaPadrao = config.idPlataformaPadrao;
 
   const options = {
-    database: {
-      db: kysely,
-      type: 'postgres' as const,
-      // aperture-bq2c9: in better-auth@1.6.12 `casing` only affects TABLE names —
-      // it is NOT applied to COLUMN names by the kysely adapter (verified in
-      // @better-auth/core get-tables.mjs + @better-auth/kysely-adapter: columns
-      // resolve via per-field `fieldName` only, no casing transform). Table names
-      // are already pinned explicitly via each model's `modelName` below, so this
-      // is belt-and-suspenders. COLUMN snake_casing is done by the explicit
-      // `fields` maps on every model below — do NOT delete them trusting this.
-      casing: 'snake' as const,
-    },
+    // aperture-k2y3l: OAuth identity selection must be tenant-aware BEFORE
+    // Better Auth reaches account/user/session hooks or writes. When this auth
+    // instance has a fixed platform, use the official Kysely adapter through
+    // our tenant-bound DBAdapterInstance wrapper. The wrapper rejects a foreign
+    // provider account and any cross-platform email collision, recursively
+    // guards transactions, and hides foreign signed sessions from get-session.
+    //
+    // The generic raw Kysely path remains for engine consumers that genuinely
+    // do not have a fixed tenant. EuNeném always supplies idPlataformaPadrao.
+    database: idPlataformaPadrao
+      ? tenantBoundBetterAuthAdapter(kysely, idPlataformaPadrao)
+      : {
+          db: kysely,
+          type: 'postgres' as const,
+          // aperture-bq2c9: `casing` only affects TABLE names — COLUMN
+          // snake_casing is pinned by the explicit fields maps below.
+          casing: 'snake' as const,
+        },
     secret: config.secret,
     baseURL: config.baseURL,
     trustedOrigins: [...config.trustedOrigins],
@@ -652,9 +659,10 @@ export function criarAuth(kysely: Database, config: CriarAuthConfig) {
       // defeats the pre-hijack takeover: a pre-registered attacker's password no
       // longer authenticates once the victim's Google links (login rejects on
       // !password), while the legit Google user keeps access (they auth via
-      // Google). Runs in `before` (not `after`) so the clear happens — and can
-      // ABORT the link (return false) on failure — BEFORE the Google account
-      // exists: there is NEVER a "Google linked + old password still works" window.
+      // Google). Runs in `before` (not `after`) so the clear happens BEFORE the
+      // provider account exists. Better Auth 1.6.22 does not treat a false
+      // account hook result as a full OAuth abort, so the tenant adapter above
+      // is the identity boundary; this hook is credential-invalidation only.
       // No-op for non-google account creates (credential signup, brand-new Google
       // signup with no prior credential row → 0 rows updated).
       account: {
@@ -692,6 +700,22 @@ export function criarAuth(kysely: Database, config: CriarAuthConfig) {
               // is lost inside a closure otherwise).
               const userId = account.userId;
               await kysely.transaction().execute(async (trx) => {
+                // aperture-k2y3l defence-in-depth: this hook runs BEFORE the
+                // adapter account insert. Prove the target user belongs to the
+                // fixed platform before touching its credential or sessions.
+                // Returning false without this check is insufficient because
+                // Better Auth continues after a null linkAccount result.
+                if (idPlataformaPadrao) {
+                  const owner = await trx
+                    .selectFrom('users')
+                    .select('id')
+                    .where('id', '=', userId)
+                    .where('id_plataforma', '=', idPlataformaPadrao)
+                    .executeTakeFirst();
+                  if (!owner) {
+                    throw new Error('Better Auth tenant boundary rejected hook target');
+                  }
+                }
                 // NULL the live credential password. `WHERE password IS NOT NULL`
                 // is load-bearing: it makes numUpdatedRows an ACCURATE "a live
                 // password just died" signal — without it Postgres counts an
@@ -719,11 +743,11 @@ export function criarAuth(kysely: Database, config: CriarAuthConfig) {
                 }
               });
             } catch {
-              // Fail-closed: if the password could not be invalidated, ABORT the
-              // link rather than leave a usable pre-existing password alongside a
-              // freshly-linked Google identity (that would be the takeover state).
-              // The user can retry Google (this before-hook re-fires) to recover.
-              return false;
+              // Throw, rather than return false: Better Auth 1.6.22 treats a
+              // false account hook result as a null insert but may continue the
+              // outer OAuth flow. An exception is the only fail-closed result
+              // when credential invalidation itself fails.
+              throw new Error('Better Auth credential invalidation hook failed');
             }
             return;
           },
@@ -777,9 +801,15 @@ export function criarAuth(kysely: Database, config: CriarAuthConfig) {
             // email_verified=false → skip → their password is preserved.
             const usuario = await kysely
               .selectFrom('users')
-              .select('email_verified')
+              .select(['email_verified', 'id_plataforma'])
               .where('id', '=', session.userId)
               .executeTakeFirst();
+            // aperture-k2y3l: never let this pre-session hook mutate a foreign
+            // user's credential/session state. The tenant adapter should have
+            // rejected that identity earlier; this is the final pre-write pin.
+            if (idPlataformaPadrao && usuario?.id_plataforma !== idPlataformaPadrao) {
+              return false;
+            }
             if (!usuario?.email_verified) return;
             try {
               // aperture-as0v3 (Cipher, aperture-92oax) — same ATOMIC one-event
