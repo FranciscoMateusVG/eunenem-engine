@@ -82,6 +82,8 @@ export function Footer() {
               alt="EuNeném"
               width={220}
               height={70}
+              loading="lazy"
+              decoding="async"
               className="h-[70px] w-auto py-2.5"
             />
             <p className="mt-4.5 text-sm text-[#F4DCEA]/75 max-w-[320px] leading-relaxed">

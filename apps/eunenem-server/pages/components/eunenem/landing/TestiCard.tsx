@@ -15,6 +15,8 @@ export function TestiCard({ quote, img, name, meta }: LandingTestimonial) {
           alt={name}
           width={48}
           height={48}
+          loading="lazy"
+          decoding="async"
           className="w-12 h-12 rounded-full object-cover border-2 border-cream-2 flex-shrink-0"
         />
         <div>
