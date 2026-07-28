@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CatalogoAdminAuditMemory } from '../../src/adapters/catalogo-admin-audit/catalogo-admin-audit.memory.js';
+import { CatalogoAdminAuditMemory } from '../../../src/adapters/catalogo-admin-audit/catalogo-admin-audit.memory.js';
 
 describe('CatalogoAdminAuditMemory', () => {
   it('appends immutable lifecycle events with JSON-safe metadata', async () => {
