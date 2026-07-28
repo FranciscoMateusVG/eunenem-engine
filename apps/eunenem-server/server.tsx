@@ -283,6 +283,15 @@ function envelope(ssrHtml: string, pathname: string): string {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <!-- aperture-re96d (Vance): the landing LCP element is .hero-photo, whose
+         image is a CSS background (url(/public/hero-bg.jpg)) — NOT discoverable
+         in the initial document, so on slow-4G the browser only fetches it
+         after CSS parse + layout, queued behind the JS bundle → LCP ~14s.
+         Lighthouse lcp-discovery-insight flags exactly this (requestDiscoverable
+         + priorityHinted both false). Preload it high-priority on the landing
+         route ("/" only, per App.tsx) so the fetch starts immediately. Scoped
+         to landing so other routes don't pull a 186KB image they never show. -->
+    ${pathname === '/' ? '<link rel="preload" as="image" href="/public/hero-bg.jpg" fetchpriority="high" />' : ''}
     <!-- aperture-q1j2 (Vance): mark JS-active before paint so the landing
          .fade-up reveal only hides content when JS can reveal it. No-JS /
          pre-hydration keeps all content visible. -->
