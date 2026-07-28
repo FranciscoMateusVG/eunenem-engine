@@ -24,7 +24,7 @@ import { describe, expect, it } from 'vitest';
 import type { ServerDeps } from '../../../apps/eunenem-server/server/auth/setup.js';
 import type { TrpcContext } from '../../../apps/eunenem-server/server/trpc/context.js';
 import { appRouter } from '../../../apps/eunenem-server/server/trpc/router.js';
-import { ID_PLATAFORMA_EUNENEM } from '../../../src/index.js';
+import { ID_PLATAFORMA_EUCASEI, ID_PLATAFORMA_EUNENEM } from '../../../src/index.js';
 
 const SESSION_COOKIE = 'better-auth.session_token';
 const TOKEN = 'admin-gate-test-token';
@@ -36,7 +36,11 @@ const TOKEN = 'admin-gate-test-token';
  * anon PATH-2 fallback (`auth.api.getSession` → null) are stubbed — the gate
  * runs before any other dep is touched.
  */
-function makeDeps(args: { email: string | null; allowlist: readonly string[] }): {
+function makeDeps(args: {
+  email: string | null;
+  allowlist: readonly string[];
+  idPlataforma?: string;
+}): {
   deps: ServerDeps;
   headers: Headers;
 } {
@@ -44,7 +48,7 @@ function makeDeps(args: { email: string | null; allowlist: readonly string[] }):
   const usuario = {
     id: idUsuario,
     idConta: randomUUID(),
-    idPlataforma: ID_PLATAFORMA_EUNENEM,
+    idPlataforma: args.idPlataforma ?? ID_PLATAFORMA_EUNENEM,
     email: args.email ?? '',
     nomeExibicao: 'Gate Test',
     slug: 'gate-test',
@@ -60,6 +64,9 @@ function makeDeps(args: { email: string | null; allowlist: readonly string[] }):
     },
     usuarioRepository: {
       findUsuarioById: async (id: string) => (id === idUsuario ? usuario : undefined),
+    },
+    observability: {
+      logger: { info: () => {} },
     },
     adminAllowedEmails: new Set(args.allowlist.map((e) => e.trim().toLowerCase())),
     sessionCookieName: SESSION_COOKIE,
@@ -108,5 +115,16 @@ describe('admin authz gate (aperture-4n222)', () => {
   it('(5) allowlist match is case/whitespace-insensitive', async () => {
     const { deps, headers } = makeDeps({ email: ' Admin@X.com ', allowlist: ['admin@x.com'] });
     await expect(caller(deps, headers).admin.searchUsers({ prefix: '' })).resolves.toEqual([]);
+  });
+
+  it('(P0) allowlisted email on a foreign tenant is UNAUTHORIZED before admin allowlist evaluation', async () => {
+    const { deps, headers } = makeDeps({
+      email: 'admin@x.com',
+      allowlist: ['admin@x.com'],
+      idPlataforma: ID_PLATAFORMA_EUCASEI,
+    });
+    await expect(caller(deps, headers).admin.searchUsers({ prefix: '' })).rejects.toMatchObject({
+      code: 'UNAUTHORIZED',
+    });
   });
 });

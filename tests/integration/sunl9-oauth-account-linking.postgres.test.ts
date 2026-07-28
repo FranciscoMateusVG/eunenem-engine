@@ -1317,10 +1317,10 @@ describe('Google-OAuth account-linking + password-invalidation (aperture-8655f /
   //
   //     NON-VACUOUS, ORDERED: (1) CONTROL the password authenticates pre-link;
   //     (2) run the REAL magic-link flow (signInMagicLink → consume the link);
-  //     (3a) the credential password is NULL; (3b) the old password no longer
+  //     (3a) the credential account is deleted; (3b) the old password no longer
   //     authenticates. Mirror of the OAuth (b) proof for the magic-link path.
   // --------------------------------------------------------------------------
-  it('(G) ⭐ magic-link sign-in NULLs a pre-existing credential password (keystone attacker lockout)', async () => {
+  it('(G) ⭐ magic-link sign-in deletes a pre-existing credential account (keystone attacker lockout)', async () => {
     let capturedUrl: string | null = null;
     const auth = criarAuth(testDb.db, {
       secret: SECRET,
@@ -1372,17 +1372,19 @@ describe('Google-OAuth account-linking + password-invalidation (aperture-8655f /
       verifyRes.status,
     );
 
-    // 3a. KEYSTONE — the credential password is now NULL.
-    const pwAfter = await testDb.db
+    // 3a. KEYSTONE — Better Auth 1.6.22 removes the pre-account credential
+    // entirely after the verified magic-link claims the email. Keeping a
+    // password-null credential row was the pre-1.6.22 behavior.
+    const credentialAfter = await testDb.db
       .selectFrom('accounts')
-      .select('password')
+      .select('id')
       .where('user_id', '=', victimUserId)
       .where('provider_id', '=', 'credential')
-      .executeTakeFirstOrThrow();
+      .executeTakeFirst();
     expect(
-      pwAfter.password,
-      'magic-link to a credential account MUST NULL the pre-existing password (keystone)',
-    ).toBeNull();
+      credentialAfter,
+      'magic-link adoption MUST delete the pre-existing credential account',
+    ).toBeUndefined();
 
     // 3b. The old password no longer authenticates — attacker locked out.
     await expect(
@@ -1674,8 +1676,9 @@ describe('Google-OAuth account-linking + password-invalidation (aperture-8655f /
     ).toHaveLength(1);
   });
 
-  // (P) ⭐ magic-link sign-in with a live password ALSO revokes other sessions
-  //     (the session.create.before path — same window, same fix).
+  // (P) ⭐ magic-link sign-in with a live password ALSO revokes other sessions.
+  //     Better Auth 1.6.22 performs both deletions before creating the victim's
+  //     replacement session; our session hook remains defense-in-depth.
   it('(P) ⭐ magic-link (live password) revokes the pre-existing sessions', async () => {
     let capturedUrl: string | null = null;
     const auth = criarAuth(testDb.db, {
@@ -1711,13 +1714,16 @@ describe('Google-OAuth account-linking + password-invalidation (aperture-8655f /
       new Request(capturedUrl as unknown as string, { method: 'GET', redirect: 'manual' }),
     );
 
-    const pw = await testDb.db
+    const credential = await testDb.db
       .selectFrom('accounts')
-      .select('password')
+      .select('id')
       .where('user_id', '=', userId)
       .where('provider_id', '=', 'credential')
-      .executeTakeFirstOrThrow();
-    expect(pw.password, 'magic-link nulls the credential password').toBeNull();
+      .executeTakeFirst();
+    expect(
+      credential,
+      'Better Auth 1.6.22 magic-link adoption deletes the credential account',
+    ).toBeUndefined();
     const attackerSessions = await testDb.db
       .selectFrom('sessions')
       .select('id')

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { ServerDeps } from '../../apps/eunenem-server/server/auth/setup.js';
 import type { TrpcContext } from '../../apps/eunenem-server/server/trpc/context.js';
@@ -12,6 +13,7 @@ import { LivroFinanceiroRepositoryMemory } from '../../src/adapters/pagamentos/f
 import { PagamentoProviderFake } from '../../src/adapters/pagamentos/provider.fake.js';
 import { PagamentoRepositoryMemory } from '../../src/adapters/pagamentos/repository.memory.js';
 import {
+  ID_PLATAFORMA_EUCASEI,
   ID_PLATAFORMA_EUNENEM,
   PlataformaRepositoryMemory,
 } from '../../src/adapters/plataforma/repository.memory.js';
@@ -25,6 +27,7 @@ import { WebhookEventArchiveMemory } from '../../src/adapters/webhook-archive/we
 import type { Logger } from '../../src/observability/logger.js';
 import type { Observability } from '../../src/observability/observability.js';
 import { noopTracer } from '../../src/observability/tracer.js';
+import { registrarContaUsuario } from '../../src/use-cases/usuario/registrar-conta-usuario.js';
 import { createTestDatabase, type TestDatabase } from '../helpers/test-db.js';
 import { truncateArrecadacaoTables } from '../helpers/truncate-arrecadacao.js';
 import { truncateBetterAuthTables } from '../helpers/truncate-better-auth.js';
@@ -136,6 +139,34 @@ function makeCaller(deps: ServerDeps) {
   return { caller: appRouter.createCaller(ctx), resHeaders: ctx.resHeaders };
 }
 
+async function seedForeignTenantAccount(
+  deps: ServerDeps,
+  email: string,
+  senha: string,
+): Promise<{ idUsuario: string }> {
+  const idUsuario = randomUUID();
+  await registrarContaUsuario(
+    {
+      usuarioRepository: deps.usuarioRepository,
+      plataformaRepository: deps.plataformaRepository,
+      campanhaRepository: deps.campanhaRepository,
+      recebedorRepository: deps.recebedorRepository,
+      authService: deps.authService,
+      clock: deps.clock,
+      observability: deps.observability,
+    },
+    {
+      idUsuario,
+      idConta: randomUUID(),
+      idPlataforma: ID_PLATAFORMA_EUCASEI,
+      email,
+      nomeExibicao: 'Foreign Tenant User',
+      senhaSimulada: senha,
+    },
+  );
+  return { idUsuario };
+}
+
 function lastStatuses(logger: CapturingLogger, event: string): string[] {
   return logger.events.filter((e) => e.event === event).map((e) => e.fields.status as string);
 }
@@ -156,6 +187,87 @@ afterEach(async () => {
 });
 
 describe('auth.continuarComEmail — unified login-or-signup (aperture-d7993)', () => {
+  it('P0: signUp ignores a caller-selected foreign tenant and creates only an EuNeném principal', async () => {
+    const logger = makeCapturingLogger();
+    const deps = buildDeps(logger);
+    const { caller, resHeaders } = makeCaller(deps);
+
+    const result = await caller.auth.signUp({
+      email: 'foreign-signup@example.com',
+      senha: PASSWORD,
+      nomeExibicao: 'Server Bound',
+      idPlataforma: ID_PLATAFORMA_EUCASEI,
+    });
+
+    const rows = await testDb.db
+      .selectFrom('users')
+      .select(['id', 'id_plataforma'])
+      .where('email', '=', 'foreign-signup@example.com')
+      .execute();
+    expect(rows).toEqual([
+      expect.objectContaining({
+        id: result.idUsuario,
+        id_plataforma: ID_PLATAFORMA_EUNENEM,
+      }),
+    ]);
+    expect(resHeaders.get('set-cookie')).toContain(`${SESSION_COOKIE}=`);
+  });
+
+  it('P0: signIn cannot authenticate a foreign-tenant credential through EuNeném', async () => {
+    const logger = makeCapturingLogger();
+    const deps = buildDeps(logger);
+    await seedForeignTenantAccount(deps, 'foreign-signin@example.com', PASSWORD);
+    const { caller, resHeaders } = makeCaller(deps);
+
+    await expect(
+      caller.auth.signIn({
+        email: 'foreign-signin@example.com',
+        senha: PASSWORD,
+        idPlataforma: ID_PLATAFORMA_EUCASEI,
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+
+    expect(resHeaders.get('set-cookie')).toBeNull();
+    const sessions = await testDb.db.selectFrom('sessions').select('id').execute();
+    expect(sessions).toHaveLength(0);
+  });
+
+  it('P0: continuarComEmail binds to EuNeném even when the same email exists in a foreign tenant', async () => {
+    const logger = makeCapturingLogger();
+    const deps = buildDeps(logger);
+    const foreign = await seedForeignTenantAccount(deps, 'foreign-continue@example.com', PASSWORD);
+    const { caller, resHeaders } = makeCaller(deps);
+
+    const result = await caller.auth.continuarComEmail({
+      email: 'foreign-continue@example.com',
+      senha: PASSWORD,
+      idPlataforma: ID_PLATAFORMA_EUCASEI,
+      nomeExibicao: 'EuNeném Account',
+    });
+
+    expect(result.criado).toBe(true);
+    expect(result.idUsuario).not.toBe(foreign.idUsuario);
+    const rows = await testDb.db
+      .selectFrom('users')
+      .select(['id', 'id_plataforma'])
+      .where('email', '=', 'foreign-continue@example.com')
+      .orderBy('id_plataforma')
+      .execute();
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: foreign.idUsuario,
+          id_plataforma: ID_PLATAFORMA_EUCASEI,
+        }),
+        expect.objectContaining({
+          id: result.idUsuario,
+          id_plataforma: ID_PLATAFORMA_EUNENEM,
+        }),
+      ]),
+    );
+    expect(resHeaders.get('set-cookie')).toContain(`${SESSION_COOKIE}=`);
+  });
+
   it('new email → creates account (emailVerified false), returns session, emits signup_success', async () => {
     const logger = makeCapturingLogger();
     const deps = buildDeps(logger);

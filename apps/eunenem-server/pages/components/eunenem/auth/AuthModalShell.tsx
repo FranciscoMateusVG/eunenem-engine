@@ -238,10 +238,21 @@ export function AuthModalShell({ onClose }: AuthModalShellProps) {
 
     setStatus("sending");
     try {
-      await authClient.signIn.magicLink({
+      const { error } = await authClient.signIn.magicLink({
         email,
         callbackURL: `${window.location.origin}/?oauth=1`,
       });
+      // aperture-eww0g: Better Auth resolves HTTP failures as {error}; it does
+      // not throw. The tenant-unsafe magic-link routes are deliberately 410,
+      // so never claim an email was sent when the containment guard rejected
+      // the request. OAuth remains available while email login is disabled.
+      if (error) {
+        setStatus("error");
+        setSubmitError(
+          "entrada por email temporariamente indisponível — usa Google ou Microsoft por enquanto ♡",
+        );
+        return;
+      }
       setStatus("sent");
     } catch {
       setStatus("error");

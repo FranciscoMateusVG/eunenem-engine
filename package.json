@@ -99,8 +99,8 @@
     "@aws-sdk/s3-request-presigner": "^3.1075.0",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/api-logs": "^0.215.0",
-    "better-auth": "^1.6.12",
-    "kysely": "^0.28.16",
+    "better-auth": "1.6.22",
+    "kysely": "^0.28.17",
     "nodemailer": "^9.0.1",
     "pg": "^8.20.0",
     "stripe": "^18.5.0",
@@ -131,6 +131,7 @@
     "tsup": "^8.5.1",
     "tsx": "^4.21.0",
     "typescript": "^6.0.3",
+    "vite": "8.0.16",
     "vitest": "^4.1.5"
   },
   "pnpm": {

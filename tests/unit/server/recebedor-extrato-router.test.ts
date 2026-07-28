@@ -152,7 +152,13 @@ async function buildRig(): Promise<TestRig> {
   const usuarioRepository = {
     findUsuarioById: async (id: string) =>
       id === idUsuario
-        ? { idConta: idConta as never, idUsuario: id, nomeExibicao: 'T', email: 't@t.com' }
+        ? {
+            idConta: idConta as never,
+            idUsuario: id,
+            idPlataforma: ID_PLATAFORMA_EUNENEM as never,
+            nomeExibicao: 'T',
+            email: 't@t.com',
+          }
         : null,
   };
 

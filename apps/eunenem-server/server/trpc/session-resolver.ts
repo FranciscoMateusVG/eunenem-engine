@@ -1,5 +1,6 @@
 import {
   derivarNomeExibicaoFallback,
+  ID_PLATAFORMA_EUNENEM,
   provisionarContaUsuarioDominio,
   UsuarioEmailJaExisteError,
 } from '../../../../src/index.js';
@@ -72,9 +73,24 @@ interface SessaoResolvida {
  */
 export class SessaoNaoAutenticadaError extends Error {
   public readonly name = 'SessaoNaoAutenticadaError';
-  constructor(public readonly motivo: 'sem_sessao' | 'orfao_heal_falhou') {
+  constructor(
+    public readonly motivo: 'sem_sessao' | 'orfao_heal_falhou' | 'tenant_invalido',
+  ) {
     super(motivo);
   }
+}
+
+function rejeitarTenantInvalido(
+  deps: ServerDeps,
+  idUsuario: string,
+  idPlataforma: string,
+): never {
+  deps.observability.logger.info('usuario.sessao.tenant_rejeitado', {
+    idUsuario,
+    idPlataforma,
+    tenantEsperado: ID_PLATAFORMA_EUNENEM,
+  });
+  throw new SessaoNaoAutenticadaError('tenant_invalido');
 }
 
 /**
@@ -123,6 +139,9 @@ async function resolverViaGetSession(
   const idPlataforma = (user as { idPlataforma?: unknown }).idPlataforma;
   if (typeof idPlataforma !== 'string' || idPlataforma.length === 0) {
     return null;
+  }
+  if (idPlataforma !== ID_PLATAFORMA_EUNENEM) {
+    rejeitarTenantInvalido(deps, user.id, idPlataforma);
   }
   return {
     idUsuario: user.id,
@@ -254,7 +273,12 @@ export async function resolverUsuarioAutenticado(
   const existente = await deps.usuarioRepository.findUsuarioById(
     sessao.idUsuario as IdUsuario,
   );
-  if (existente) return { usuario: existente, expiraEm: sessao.expiraEm };
+  if (existente) {
+    if (existente.idPlataforma !== ID_PLATAFORMA_EUNENEM) {
+      rejeitarTenantInvalido(deps, existente.id, existente.idPlataforma);
+    }
+    return { usuario: existente, expiraEm: sessao.expiraEm };
+  }
 
   // Orphan. Heal requires the provisioning principal — present only on the
   // getSession/OAuth path. A bare-cookie session whose usuarios row is gone is
@@ -276,6 +300,9 @@ export async function resolverUsuarioAutenticado(
       erro: err instanceof Error ? err.message : String(err),
     });
     throw new SessaoNaoAutenticadaError('orfao_heal_falhou');
+  }
+  if (usuario.idPlataforma !== ID_PLATAFORMA_EUNENEM) {
+    rejeitarTenantInvalido(deps, usuario.id, usuario.idPlataforma);
   }
   return { usuario, expiraEm: sessao.expiraEm };
 }

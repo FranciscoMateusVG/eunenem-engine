@@ -77,7 +77,6 @@ export async function consumeRateLimit(
   //   - Else: increment count and preserve the existing window start
   //
   // The CASE in the SET expression encodes the reset-vs-increment branch.
-  // biome-ignore lint/suspicious/noExplicitAny: Kysely<unknown> + raw SQL
   const result = await sql<{ count: number }>`
     INSERT INTO rate_limit (id, key, count, last_request)
     VALUES (${cryptoRandomId()}, ${key}, 1, ${now})
@@ -92,7 +91,7 @@ export async function consumeRateLimit(
         ELSE rate_limit.last_request
       END
     RETURNING count
-  `.execute(db as never);
+  `.execute(db);
 
   const row = result.rows[0];
   if (!row) {

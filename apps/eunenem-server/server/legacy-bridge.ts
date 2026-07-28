@@ -219,8 +219,6 @@ async function consumeMintBudget(deps: ServerDeps, idUsuario: string): Promise<b
     // START, not the latest attempt: in-window retries increment the count
     // without extending the lockout. The inclusive boundary starts a new
     // window exactly at MINT_WINDOW_MS.
-    // The app workspace resolves its own Kysely patch version; the runtime
-    // executor is the same Postgres database provided by ServerDeps.
     const result = await sql<{ count: number }>`
       INSERT INTO rate_limit (id, key, count, last_request)
       VALUES (${randomUUID()}, ${key}, 1, ${now})
@@ -235,7 +233,7 @@ async function consumeMintBudget(deps: ServerDeps, idUsuario: string): Promise<b
           ELSE rate_limit.last_request
         END
       RETURNING count
-    `.execute(deps.db as never);
+    `.execute(deps.db);
     const row = result.rows[0];
     return row !== undefined && row.count <= MINT_MAX_PER_WINDOW;
   } catch {
