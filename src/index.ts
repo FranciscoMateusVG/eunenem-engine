@@ -163,6 +163,7 @@ export type { AuthService } from './adapters/usuario/auth-service.js';
 export { AuthServiceMemoria } from './adapters/usuario/auth-service.memory.js';
 export type { Auth, CriarAuthConfig } from './adapters/usuario/criar-auth.js';
 export { criarAuth } from './adapters/usuario/criar-auth.js';
+export { consumeDummyPasswordVerificationWork } from './adapters/usuario/password-verification-work.js';
 export type { PerfilCriadorRepository } from './adapters/usuario/perfil-criador-repository.js';
 export { PerfilCriadorRepositoryMemory } from './adapters/usuario/perfil-criador-repository.memory.js';
 export { PerfilCriadorRepositoryPostgres } from './adapters/usuario/perfil-criador-repository.postgres.js';
