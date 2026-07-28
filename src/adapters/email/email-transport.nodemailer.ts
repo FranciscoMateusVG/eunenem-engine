@@ -40,6 +40,14 @@ export class EmailTransportNodemailer implements EmailTransport {
       host: config.host,
       port: config.port,
       secure: config.secure,
+      // Authentication emails contain a bearer token. Port 587 must fail
+      // closed if STARTTLS is unavailable or stripped; implicit TLS on 465 is
+      // already encrypted from connect. Never weaken certificate validation.
+      requireTLS: !config.secure,
+      tls: {
+        minVersion: 'TLSv1.2',
+        rejectUnauthorized: true,
+      },
       auth: { user: config.user, pass: config.pass },
       // Pool so a burst of magic-link sends reuses connections rather than
       // opening one socket per email.
