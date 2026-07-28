@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { ServerDeps } from '../../apps/eunenem-server/server/auth/setup.js';
 import {
@@ -8,6 +9,7 @@ import {
 import { CampanhaRepositoryMemory } from '../../src/adapters/arrecadacao/campanha-repository.memory.js';
 import { RecebedorRepositoryMemory } from '../../src/adapters/arrecadacao/recebedor-repository.memory.js';
 import {
+  ID_PLATAFORMA_EUCASEI,
   ID_PLATAFORMA_EUNENEM,
   PlataformaRepositoryMemory,
 } from '../../src/adapters/plataforma/repository.memory.js';
@@ -16,6 +18,7 @@ import { criarAuth } from '../../src/adapters/usuario/criar-auth.js';
 import { UsuarioRepositoryMemory } from '../../src/adapters/usuario/repository.memory.js';
 import { NoopLogger } from '../../src/observability/noop-logger.js';
 import { noopTracer } from '../../src/observability/tracer.js';
+import { registrarContaUsuario } from '../../src/use-cases/usuario/registrar-conta-usuario.js';
 import { createTestDatabase, type TestDatabase } from '../helpers/test-db.js';
 import { truncateBetterAuthTables } from '../helpers/truncate-better-auth.js';
 
@@ -67,13 +70,13 @@ describe('central session resolver — OAuth A2 + orphan self-heal (aperture-6wo
    * `useSecureCookies` is parameterized so we can assert BOTH the default
    * (unprefixed signed cookie) and the prod (`__Secure-` prefixed) shapes.
    */
-  function buildDeps(opts: { useSecureCookies: boolean }) {
+  function buildDeps(opts: { useSecureCookies: boolean; idPlataformaPadrao?: string }) {
     const auth = criarAuth(testDb.db, {
       secret: 'test-secret-at-least-thirty-two-characters-long',
       baseURL: 'http://localhost:3001',
       trustedOrigins: ['http://localhost:3001'],
       sendResetPassword: async () => {},
-      idPlataformaPadrao: ID_PLATAFORMA_EUNENEM,
+      idPlataformaPadrao: opts.idPlataformaPadrao ?? ID_PLATAFORMA_EUNENEM,
       socialProviders: { google: { clientId: 'x', clientSecret: 'y' } },
       useSecureCookies: opts.useSecureCookies,
     });
@@ -155,6 +158,64 @@ describe('central session resolver — OAuth A2 + orphan self-heal (aperture-6wo
     const { usuario } = await resolverUsuarioAutenticado(deps, headersComCookie(cookie));
     expect(usuario.idPlataforma).toBe(ID_PLATAFORMA_EUNENEM);
     expect(usuario.email).toBe('secure@example.com');
+  });
+
+  it('P0: a signed Better Auth cookie for a foreign tenant is rejected and never self-healed', async () => {
+    const { deps, auth } = buildDeps({
+      useSecureCookies: false,
+      idPlataformaPadrao: ID_PLATAFORMA_EUCASEI,
+    });
+    const cookie = await criarOrfaoOAuthCookie(
+      auth,
+      'foreign-signed@example.com',
+      'Foreign Signed',
+    );
+
+    expect(await resolverUsuarioAutenticadoOuNull(deps, headersComCookie(cookie))).toBeNull();
+    const foreignRow = await testDb.db
+      .selectFrom('users')
+      .select(['id', 'id_plataforma'])
+      .where('email', '=', 'foreign-signed@example.com')
+      .executeTakeFirstOrThrow();
+    expect(foreignRow.id_plataforma).toBe(ID_PLATAFORMA_EUCASEI);
+    expect(await deps.usuarioRepository.findUsuarioById(foreignRow.id as never)).toBeUndefined();
+  });
+
+  it('P0: a bare engine cookie for a foreign tenant is rejected', async () => {
+    const { deps } = buildDeps({ useSecureCookies: false });
+    const email = 'foreign-bare@example.com';
+    const senha = 'BogusBogus123!';
+    await registrarContaUsuario(
+      {
+        usuarioRepository: deps.usuarioRepository,
+        plataformaRepository: deps.plataformaRepository,
+        campanhaRepository: deps.campanhaRepository,
+        recebedorRepository: deps.recebedorRepository,
+        authService: deps.authService,
+        clock: deps.clock,
+        observability: deps.observability,
+      },
+      {
+        idUsuario: randomUUID(),
+        idConta: randomUUID(),
+        idPlataforma: ID_PLATAFORMA_EUCASEI,
+        email,
+        nomeExibicao: 'Foreign Bare',
+        senhaSimulada: senha,
+      },
+    );
+    const sessao = await deps.authService.iniciarSessao({
+      idPlataforma: ID_PLATAFORMA_EUCASEI,
+      email,
+      senha,
+    });
+
+    expect(
+      await resolverUsuarioAutenticadoOuNull(
+        deps,
+        headersComCookie(`better-auth.session_token=${encodeURIComponent(sessao.token)}`),
+      ),
+    ).toBeNull();
   });
 
   it('idempotent: a second resolve finds the healed user, provisions nothing new', async () => {

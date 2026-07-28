@@ -26,9 +26,6 @@ import {
   ListaDeConvidadosRepositoryPostgres,
   type LivroFinanceiroRepository,
   LivroFinanceiroRepositoryPostgres,
-  type EmailTransport,
-  EmailTransportNodemailer,
-  EmailTransportNoop,
   type EmitirUrlUploadCampanhaInput,
   type EmitirUrlUploadCatalogoInput,
   type EmitirUrlUploadInput,
@@ -67,7 +64,6 @@ import {
   type UsuarioRepository,
 } from '../../../../src/index.js';
 import { PgBoss } from 'pg-boss';
-import { renderMagicLinkEmail } from './magic-link-email.js';
 import { parseAdminAllowedEmails } from './admin-allowlist.js';
 import { RepasseJobEnqueuerPgBoss } from '../jobs/repasse-enqueuer.pgboss.js';
 import { noopTracer } from '../../../../src/observability/tracer.js';
@@ -485,12 +481,10 @@ const ServerEnvSchema = z
     MICROSOFT_CLIENT_SECRET: z.string().optional(),
     MICROSOFT_TENANT_ID: z.string().optional().default('common'),
     /**
-     * aperture-lwx2k (Camada C) — SMTP transport for magic-link + future
-     * transactional email. Same conditional-registration posture as the OAuth
-     * providers: when HOST/USER/PASS are absent the transport is a boot-safe
-     * no-op and the magicLink plugin is NOT registered (passwordless off). Set
-     * in the deploy env (Dokploy); the PASS is never committed. SECURE=false +
-     * PORT 587 → STARTTLS; SECURE=true + PORT 465 → implicit TLS.
+     * SMTP settings retained for future tenant-scoped transactional email.
+     * aperture-eww0g disables EuNeném's Better Auth magic-link registration
+     * even when these are configured; the upstream verifier is email-global
+     * and unsafe with our cross-platform duplicate-email schema.
      */
     SMTP_HOST: z.string().optional(),
     SMTP_PORT: z.coerce.number().int().positive().optional().default(587),
@@ -735,25 +729,6 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
       : {}),
   };
 
-  // aperture-lwx2k (Camada C) — SMTP transport, CONDITIONAL like the OAuth
-  // providers: a real nodemailer transport only when HOST+USER+PASS are all
-  // present; otherwise a boot-safe no-op (and magic-link stays OFF — we only
-  // pass sendMagicLink to criarAuth when configured, so the plugin isn't
-  // registered without a real sender). The transport is SHARED — magic-link
-  // now; the c0a5s thank-you + future reset/verify reuse the same seam.
-  const smtpConfigured =
-    !!env.SMTP_HOST?.length && !!env.SMTP_USER?.length && !!env.SMTP_PASS?.length;
-  const emailTransport: EmailTransport = smtpConfigured
-    ? new EmailTransportNodemailer({
-        host: env.SMTP_HOST as string,
-        port: env.SMTP_PORT,
-        user: env.SMTP_USER as string,
-        pass: env.SMTP_PASS as string,
-        from: env.SMTP_FROM,
-        secure: env.SMTP_SECURE,
-      })
-    : new EmailTransportNoop(observability.logger);
-
   const authConfig: CriarAuthConfig = {
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.BETTER_AUTH_URL,
@@ -770,18 +745,12 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
       });
     },
     useSecureCookies: env.NODE_ENV === 'production',
-    // aperture-lwx2k (Camada C) — enable magic-link ONLY when SMTP is
-    // configured (passing sendMagicLink is what makes criarAuth spread the
-    // plugin). The keystone password-invalidation hook (session.create.before)
-    // ships in criar-auth.ts regardless; the plugin is what activates the
-    // verify path it protects.
-    ...(smtpConfigured
-      ? {
-          sendMagicLink: async ({ email, url }: { email: string; url: string }) => {
-            await emailTransport.enviar(renderMagicLinkEmail(email, url));
-          },
-        }
-      : {}),
+    // aperture-eww0g P0 containment: EuNeném deliberately does NOT register
+    // Better Auth's magic-link plugin. Its verifier selects users by global
+    // email while our auth schema permits the same email in multiple platform
+    // tenants, so it cannot safely identify which row to verify/revoke. The
+    // engine retains the optional capability for isolated tests/consumers; the
+    // EuNeném HTTP guard also denies both public magic-link routes.
     // aperture-dm7s3 — default platform id for adapter-created users (OAuth
     // signup). The Google profile carries no idPlataforma + the column is
     // notNull, so a new-user Google signup needs this injected. eunenem-server

@@ -63,11 +63,12 @@ export interface CriarAuthConfig {
    * environments without SMTP creds (eunenem-server gates this on
    * SMTP_HOST/USER/PASS all being present, mirroring the google spread).
    *
-   * ⚠️ SECURITY (Cipher keystone, aperture-79b31): enabling magic-link is an
-   * email-ownership-proving sign-in. The `session.create.before` hook below
-   * NULLs any local credential password on a verified-email session so a
-   * pre-registered attacker's password cannot survive the victim's magic-link
-   * login. Enabling this WITHOUT that hook re-opens an account-takeover.
+   * ⚠️ SECURITY (Cipher keystone, aperture-79b31 / aperture-llkdu): enabling
+   * magic-link is an email-ownership-proving sign-in. Better Auth 1.6.22
+   * deletes a pre-account credential and its existing sessions before it
+   * verifies the user and creates the victim session. The
+   * `session.create.before` hook below remains defense-in-depth for OAuth,
+   * legacy rows, and any other verified-session path.
    */
   readonly sendMagicLink?: (input: { email: string; url: string; token: string }) => Promise<void>;
 
@@ -728,14 +729,14 @@ export function criarAuth(kysely: Database, config: CriarAuthConfig) {
           },
         },
       },
-      // aperture-lwx2k / 79b31 (Cipher KEYSTONE) — magic-link password
-      // invalidation. The OAuth account.create.before above covers the
-      // link-account path; this covers the OTHER email-ownership-proving path:
-      // magic-link sign-in authenticates an existing user WITHOUT an
-      // account.create event (it sets users.email_verified=true then creates a
-      // session), so the OAuth hook never fires. Without THIS hook a
-      // pre-registered attacker's password survives the victim's magic-link
-      // login = account takeover.
+      // aperture-lwx2k / 79b31 / llkdu (Cipher KEYSTONE) — defense-in-depth
+      // credential invalidation. Better Auth 1.6.22 now closes the magic-link
+      // pre-account takeover in core: it re-reads the unverified user, deletes
+      // credential accounts + existing sessions, verifies the user, then
+      // creates the victim session. The OAuth account.create.before above
+      // covers the link-account path. This state-based session hook remains a
+      // fail-closed backstop for OAuth, legacy database states, and any other
+      // verified-session path where a live credential somehow remains.
       //
       // MECHANISM (Cipher-approved over user.update.before, which is
       // identity-blind + non-transactional): key on the SESSION being created.
@@ -748,16 +749,17 @@ export function criarAuth(kysely: Database, config: CriarAuthConfig) {
       // a user whose email is verified must not coexist with a live local
       // credential password. We key on STATE (users.email_verified===true), not
       // a fragile "came-from-magic-link" guard:
-      //   - magic-link verify just set email_verified=true → NULL the password.
+      //   - patched magic-link adoption already deleted credentials/sessions →
+      //     0 rows, no-op.
       //   - OAuth: account.create.before already nulled it → 0 rows, no-op.
       //   - pure password user (never verified): email_verified=FALSE → SKIP →
       //     password preserved (coexistence login is NOT broken). New credential
       //     rows are created email_verified=false, so normal password login is
       //     never touched.
-      //   - email_verified=true + a live password only co-occurs in the takeover
-      //     state (or the very magic-link session establishing verification) →
-      //     nulling is exactly the fix. Idempotent + self-healing: every
-      //     session.create re-enforces it (0 rows once there's no live password).
+      //   - email_verified=true + a live password is a legacy/inconsistent
+      //     takeover state → nulling remains the fail-safe. Idempotent +
+      //     self-healing: every session.create re-enforces it (0 rows once
+      //     there's no live password).
       //
       // ⚠️ FORWARD-FRICTION (Cipher — re-review REQUIRED if any of these land):
       // enabling the email-otp plugin, core emailVerification
@@ -806,9 +808,9 @@ export function criarAuth(kysely: Database, config: CriarAuthConfig) {
                 // state (email_verified=true co-existing with a live password).
                 // DELETE by user_id spares the incoming session — this hook runs
                 // BEFORE the session row is inserted, so only pre-existing
-                // sessions die. Without it a pre-registered attacker's LIVE
-                // session outlived the magic-link password-NULL and would have
-                // passed the legacy bridge's email_verified gate.
+                // sessions die. Without this backstop, a legacy/inconsistent
+                // verified user could retain an attacker's live session after
+                // credential invalidation and pass the legacy bridge gate.
                 if (morto) {
                   await trx.deleteFrom('sessions').where('user_id', '=', userId).execute();
                 }

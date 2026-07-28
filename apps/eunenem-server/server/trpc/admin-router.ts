@@ -104,7 +104,10 @@ const adminMiddleware = t.middleware(async ({ ctx, next }) => {
     throw err;
   }
 
-  if (!isEmailAdmin(deps.adminAllowedEmails, adminUsuario.email)) {
+  if (
+    adminUsuario.idPlataforma !== ID_PLATAFORMA_EUNENEM ||
+    !isEmailAdmin(deps.adminAllowedEmails, adminUsuario.email)
+  ) {
     throw new TRPCError({ code: "FORBIDDEN", message: "Acesso restrito." });
   }
 

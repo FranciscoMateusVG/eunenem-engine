@@ -4,6 +4,7 @@ import { z } from 'zod';
 import {
   criarSessaoUsuario,
   hashClientPII,
+  ID_PLATAFORMA_EUNENEM,
   type IdCampanhaEvento,
   registrarContaUsuario,
   UsuarioEmailJaExisteError,
@@ -140,18 +141,32 @@ function emitContinueWithEmailAttempt(
 
 const t = initTRPC.context<TrpcContext>().create();
 
+/**
+ * Compatibility-only client field. Existing web clients still send the tenant
+ * UUID, but EuNeném is a single-tenant auth surface: the server overwrites any
+ * supplied value with the EuNeném tenant before business logic, audit emission,
+ * lookup, or session creation can observe it.
+ */
+const ClientPlatformCompatibilitySchema = z.uuid().optional();
+
+function bindEunenemAuthTenant<T extends object>(
+  input: T,
+): T & { readonly idPlataforma: typeof ID_PLATAFORMA_EUNENEM } {
+  return { ...input, idPlataforma: ID_PLATAFORMA_EUNENEM };
+}
+
 const SignUpInputSchema = z.object({
   email: z.email(),
   senha: z.string().min(8, 'Senha precisa de pelo menos 8 caracteres').max(200),
   nomeExibicao: z.string().min(1).max(120),
-  idPlataforma: z.uuid(),
-});
+  idPlataforma: ClientPlatformCompatibilitySchema,
+}).transform(bindEunenemAuthTenant);
 
 const SignInInputSchema = z.object({
   email: z.email(),
   senha: z.string().min(1).max(200),
-  idPlataforma: z.uuid(),
-});
+  idPlataforma: ClientPlatformCompatibilitySchema,
+}).transform(bindEunenemAuthTenant);
 
 /**
  * Unified login-or-signup input (aperture-d7993, Option B). email + senha
@@ -164,9 +179,9 @@ const SignInInputSchema = z.object({
 const ContinuarComEmailInputSchema = z.object({
   email: z.email(),
   senha: z.string().min(8, 'Senha precisa de pelo menos 8 caracteres').max(200),
-  idPlataforma: z.uuid(),
+  idPlataforma: ClientPlatformCompatibilitySchema,
   nomeExibicao: z.string().min(1).max(120).optional(),
-});
+}).transform(bindEunenemAuthTenant);
 
 /**
  * Append a Set-Cookie header that pins the session token (aperture-ht7sq).

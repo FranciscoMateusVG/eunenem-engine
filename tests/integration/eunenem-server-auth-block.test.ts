@@ -49,6 +49,11 @@ const MUST_BLOCK_PATHS = [
   '/api/auth/sign-in/email',
   '/api/auth/sign-out',
   '/api/auth/verify-email', // not needed for Google OAuth → denied by default
+  // aperture-eww0g: Better Auth magic-link lookup is email-global while the
+  // schema permits duplicate email across platform tenants. Both halves stay
+  // uniformly denied until verification is tenant-scoped.
+  '/api/auth/sign-in/magic-link',
+  '/api/auth/magic-link/verify',
 ] as const;
 
 // The only paths permitted through to auth.handler.
@@ -163,6 +168,8 @@ describe('eunenem-server deny-by-default auth guard (aperture-9tca0)', () => {
       expect(isAllowedAuthRequest('GET', '/api/auth/list-sessions')).toBe(false);
       expect(isAllowedAuthRequest('POST', '/api/auth/sign-in/email')).toBe(false);
       expect(isAllowedAuthRequest('GET', '/api/auth/verify-email')).toBe(false);
+      expect(isAllowedAuthRequest('POST', '/api/auth/sign-in/magic-link')).toBe(false);
+      expect(isAllowedAuthRequest('GET', '/api/auth/magic-link/verify')).toBe(false);
       // not a prefix-confusion: 'callback' without trailing slash, social-evil
       expect(isAllowedAuthRequest('GET', '/api/auth/callback')).toBe(false);
       expect(isAllowedAuthRequest('POST', '/api/auth/sign-in/social-evil')).toBe(false);
