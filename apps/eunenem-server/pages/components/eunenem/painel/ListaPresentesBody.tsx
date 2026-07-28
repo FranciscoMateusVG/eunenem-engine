@@ -1531,18 +1531,48 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
   const deleteMut = useContribuicaoDelete();
   const updateMut = useContribuicaoUpdate();
 
+  // aperture-wpsfp — the AddGiftModal open-state gates the catalog poll below, so
+  // it is declared before catalogQuery (whose refetchInterval reacts to it).
+  const [addModalTab, setAddModalTab] = useState<AddTab | null>(null);
+  // aperture-wpsfp — true only while an explicit picker-open refetch is in flight.
+  // Gates the picker loading state so a just-deactivated item can't be selected
+  // during THAT refetch — without flashing loading on the 3s background poll
+  // (which updates the grid seamlessly).
+  const [catalogRefreshing, setCatalogRefreshing] = useState(false);
+
   // aperture-tb0rh F2 — live catalog + listas-prontas from the tRPC procs so
   // admin catalog CRUD propagates to /painel. Catalog (listSections) is only
   // needed inside the AddGiftModal picker; listas prontas drive the preset
   // tiles in the main body.
-  const catalogQuery = trpc.catalogo.listSections.useQuery(undefined, { staleTime: 30_000 });
+  //
+  // aperture-wpsfp — cross-Page cache coherence. Admin catalog mutations live in
+  // a DIFFERENT Page's QueryClient (TrpcProvider is per-Page), so this customer
+  // query is never invalidated by them. Two mechanisms keep an ALREADY-OPEN
+  // picker current within the 5s acceptance window: (1) a poll gated to
+  // picker-open (refetchInterval; refetchIntervalInBackground so a two-context
+  // test's backgrounded customer tab still polls); (2) an explicit refetch on
+  // every picker-open (openAddModal) for instant freshness + stale-selection
+  // blocking. The poll is OFF whenever the modal is closed.
+  const catalogQuery = trpc.catalogo.listSections.useQuery(undefined, {
+    staleTime: 30_000,
+    refetchInterval: addModalTab !== null ? 3000 : false,
+    refetchIntervalInBackground: true,
+  });
   const listasProntasQuery = trpc.catalogo.listListasProntas.useQuery(undefined, {
     staleTime: 30_000,
   });
 
+  // aperture-wpsfp — shared picker-open handler for every add-gift CTA. Force-
+  // refetches listSections so the picker opens against current server truth;
+  // catalogRefreshing gates the picker loading state during the refresh.
+  const openAddModal = (tab: AddTab) => {
+    setAddModalTab(tab);
+    setCatalogRefreshing(true);
+    void catalogQuery.refetch().finally(() => setCatalogRefreshing(false));
+  };
+
   const [search, setSearch] = useState('');
   const [cat, setCat] = useState<CatFilter>('all');
-  const [addModalTab, setAddModalTab] = useState<AddTab | null>(null);
   const [editItem, setEditItem] = useState<GroupedGift | null>(null);
   const [removeItem, setRemoveItem] = useState<GroupedGift | null>(null);
   const [presetsOpen, setPresetsOpen] = useState(false);
@@ -1821,14 +1851,14 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
             <button
               type="button"
               className="btn btn-primary"
-              onClick={() => setAddModalTab('catalogo')}
+              onClick={() => openAddModal('catalogo')}
             >
               <span className="lista-btn-ic">{icon.plus}</span> Adicionar presente
             </button>
             <button
               type="button"
               className="btn btn-ghost"
-              onClick={() => setAddModalTab('personalizado')}
+              onClick={() => openAddModal('personalizado')}
               aria-label="Criar item personalizado"
             >
               <span className="lista-btn-ic">{icon.sparkle}</span> Criar item personalizado
@@ -1980,7 +2010,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
             <button
               type="button"
               className="btn btn-primary"
-              onClick={() => setAddModalTab('catalogo')}
+              onClick={() => openAddModal('catalogo')}
             >
               <span className="lista-btn-ic">{icon.plus}</span> Adicionar primeiro item
             </button>
@@ -1999,7 +2029,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
             <button
               type="button"
               className="lista-card lista-card-add"
-              onClick={() => setAddModalTab('catalogo')}
+              onClick={() => openAddModal('catalogo')}
             >
               <span className="lista-card-add-plus">{icon.plus}</span>
               <span className="lista-card-add-label">adicionar outro presente</span>
@@ -2017,7 +2047,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
           onSubmitCatalogo={addCatalogItems}
           submitting={addSubmitting}
           catalog={catalogQuery.data ?? []}
-          catalogLoading={catalogQuery.isPending}
+          catalogLoading={catalogQuery.isPending || catalogRefreshing}
           catalogError={!!catalogQuery.error}
           onRetryCatalog={() => void catalogQuery.refetch()}
         />
