@@ -92,12 +92,14 @@ describe('foreign-tenant admin denial — real Postgres composition (aperture-ew
         email: email as never,
         senha: password,
       });
-      const liveSessionBefore = await deps.db
+      const liveSessionsBefore = await deps.db
         .selectFrom('sessions')
-        .select('id')
-        .where('token', '=', session.token)
-        .executeTakeFirst();
-      expect(liveSessionBefore).toBeDefined();
+        .selectAll()
+        .where('user_id', '=', idUsuario)
+        .orderBy('id')
+        .execute();
+      expect(liveSessionsBefore).toHaveLength(1);
+      expect(liveSessionsBefore[0]?.token).toBe(session.token);
 
       const categoryBefore = await deps.db
         .selectFrom('catalogo_categorias')
@@ -139,15 +141,16 @@ describe('foreign-tenant admin denial — real Postgres composition (aperture-ew
         .select('id')
         .where('actor_usuario_id', '=', idUsuario)
         .execute();
-      const liveSessionAfter = await deps.db
+      const liveSessionsAfter = await deps.db
         .selectFrom('sessions')
-        .select('id')
-        .where('token', '=', session.token)
-        .executeTakeFirst();
+        .selectAll()
+        .where('user_id', '=', idUsuario)
+        .orderBy('id')
+        .execute();
 
       expect(categoryAfter).toBeUndefined();
       expect(auditAfter).toEqual([]);
-      expect(liveSessionAfter).toEqual(liveSessionBefore);
+      expect(liveSessionsAfter).toEqual(liveSessionsBefore);
     } finally {
       await deps.db
         .deleteFrom('catalogo_admin_audit_events')
