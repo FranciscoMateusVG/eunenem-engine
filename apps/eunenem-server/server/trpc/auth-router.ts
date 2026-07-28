@@ -2,7 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { initTRPC, TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import {
+  consumeDummyPasswordVerificationWork,
   criarSessaoUsuario,
+  EmailUsuarioSchema,
   hashClientPII,
   ID_PLATAFORMA_EUNENEM,
   type IdCampanhaEvento,
@@ -24,17 +26,19 @@ import {
 
 /**
  * Rate-limit posture (aperture-uc2ix) — matches Cipher's recommendation:
- *   signIn: 10 attempts per 60s per (ip, email)
+ *   signIn: 10 attempts per 60s per email AND per (ip, email)
  *   signUp:  3 attempts per 60s per ip
  * Buckets are DB-backed (rate_limit table from migration 009; multi-instance
- * safe, survives container restart). Per-(ip,email) on signIn means a botnet
- * spreading across distributed IPs hits the per-email cap even if no
- * individual IP exceeds the limit; per-ip on signUp protects against a
- * single attacker mass-registering accounts.
+ * safe, survives container restart). The independent email bucket stops
+ * rotating-IP credential stuffing; the per-(ip,email) bucket retains
+ * client-local throttling. Per-ip on signUp protects against a single
+ * attacker mass-registering accounts.
  */
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_SIGN_IN_MAX = 10;
 const RATE_LIMIT_SIGN_UP_MAX = 3;
+
+const AMBIGUOUS_CREDENTIAL_ERROR = 'Email ou senha invalidos';
 
 /**
  * Structured emission shape (aperture-3pqt7 / T9). Fired BEFORE
@@ -156,14 +160,14 @@ function bindEunenemAuthTenant<T extends object>(
 }
 
 const SignUpInputSchema = z.object({
-  email: z.email(),
+  email: EmailUsuarioSchema,
   senha: z.string().min(8, 'Senha precisa de pelo menos 8 caracteres').max(200),
   nomeExibicao: z.string().min(1).max(120),
   idPlataforma: ClientPlatformCompatibilitySchema,
 }).transform(bindEunenemAuthTenant);
 
 const SignInInputSchema = z.object({
-  email: z.email(),
+  email: EmailUsuarioSchema,
   senha: z.string().min(1).max(200),
   idPlataforma: ClientPlatformCompatibilitySchema,
 }).transform(bindEunenemAuthTenant);
@@ -177,11 +181,82 @@ const SignInInputSchema = z.object({
  * derive a default the same way the engine would (see the procedure body).
  */
 const ContinuarComEmailInputSchema = z.object({
-  email: z.email(),
+  email: EmailUsuarioSchema,
   senha: z.string().min(8, 'Senha precisa de pelo menos 8 caracteres').max(200),
   idPlataforma: ClientPlatformCompatibilitySchema,
   nomeExibicao: z.string().min(1).max(120).optional(),
 }).transform(bindEunenemAuthTenant);
+
+function normalizeOrigin(value: string): string | null {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Public credential mutations accept browser requests only from the same
+ * explicit origin set Better Auth uses. Requests without Origin remain valid
+ * for server/CLI callers; browsers always send Origin on these cross-site
+ * mutation shapes, so a present-but-untrusted Origin is rejected before any
+ * limiter, lookup, log, or write.
+ */
+function assertTrustedAuthMutationOrigin(ctx: TrpcContext): void {
+  const requestOrigin = ctx.headers.get('origin');
+  if (requestOrigin === null) return;
+
+  const allowedOrigins = new Set<string>();
+  const publicOrigin = normalizeOrigin(ctx.deps.publicOrigin);
+  if (publicOrigin !== null) allowedOrigins.add(publicOrigin);
+
+  const configured = ctx.deps.auth.options.trustedOrigins;
+  const configuredOrigins = Array.isArray(configured) ? configured : [];
+
+  for (const candidate of configuredOrigins) {
+    if (candidate === null || candidate === undefined) continue;
+    const normalized = normalizeOrigin(candidate);
+    if (normalized !== null) allowedOrigins.add(normalized);
+  }
+
+  const normalizedRequestOrigin = normalizeOrigin(requestOrigin);
+  if (
+    normalizedRequestOrigin === null ||
+    requestOrigin !== normalizedRequestOrigin ||
+    !allowedOrigins.has(normalizedRequestOrigin)
+  ) {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: 'Origem nao autorizada',
+    });
+  }
+}
+
+/**
+ * Both public credential entry points share both buckets. The email-only
+ * bucket is independent of source IP, so rotating IP addresses cannot multiply
+ * the password-guess budget. The pair bucket preserves client-local controls.
+ */
+async function enforceSignInRateLimits(
+  ctx: TrpcContext,
+  fields: {
+    readonly emailHash: string;
+    readonly ipHashed: string;
+  },
+): Promise<void> {
+  await enforceRateLimit(ctx.deps.db, {
+    key: `trpc:signIn:email:${fields.emailHash}`,
+    max: RATE_LIMIT_SIGN_IN_MAX,
+    windowMs: RATE_LIMIT_WINDOW_MS,
+    clock: ctx.deps.clock,
+  });
+  await enforceRateLimit(ctx.deps.db, {
+    key: `trpc:signIn:${fields.ipHashed}:${fields.emailHash}`,
+    max: RATE_LIMIT_SIGN_IN_MAX,
+    windowMs: RATE_LIMIT_WINDOW_MS,
+    clock: ctx.deps.clock,
+  });
+}
 
 /**
  * Append a Set-Cookie header that pins the session token (aperture-ht7sq).
@@ -286,6 +361,7 @@ export const authRouter = t.router({
     .input(SignUpInputSchema)
     .mutation(async ({ ctx, input }) => {
       const { deps, headers, resHeaders } = ctx;
+      assertTrustedAuthMutationOrigin(ctx);
       const idUsuario = randomUUID();
       const idConta = randomUUID();
 
@@ -402,6 +478,7 @@ export const authRouter = t.router({
     .input(SignInInputSchema)
     .mutation(async ({ ctx, input }) => {
       const { deps, headers, resHeaders } = ctx;
+      assertTrustedAuthMutationOrigin(ctx);
 
       // aperture-3pqt7: capture + hash BEFORE any decision (see signUp
       // comments for rationale). Same shape, different bucket strategy
@@ -410,17 +487,10 @@ export const authRouter = t.router({
       const ipHashed = hashClientPII(rawIp, deps.logPiiHashSalt);
       const emailHash = hashClientPII(input.email, deps.logPiiHashSalt);
 
-      // aperture-uc2ix: rate-limit signIn per (ip, email) — catches both
-      // single-IP brute-force AND distributed credential stuffing (a
-      // botnet hitting the same email from 1000 IPs still trips the
-      // per-email cap). 10 per 60s per (ip, email) per Cipher's posture.
+      // Independent email-only + per-(ip,email) buckets. Both are shared
+      // with continuarComEmail, preventing endpoint and rotating-IP bypass.
       try {
-        await enforceRateLimit(deps.db, {
-          key: `trpc:signIn:${ipHashed}:${emailHash}`,
-          max: RATE_LIMIT_SIGN_IN_MAX,
-          windowMs: RATE_LIMIT_WINDOW_MS,
-          clock: deps.clock,
-        });
+        await enforceSignInRateLimits(ctx, { ipHashed, emailHash });
       } catch (err) {
         emitSignInAttempt(ctx, {
           idPlataforma: input.idPlataforma,
@@ -501,11 +571,11 @@ export const authRouter = t.router({
    * them in, returning the SAME session shape in both cases.
    *
    * SECURITY ORDER (locked — do not reorder):
-   *   1. Login-grade rate limit FIRST, BEFORE any DB lookup. Shares the
-   *      EXACT bucket key the existing `signIn` uses
-   *      (`trpc:signIn:<ipHash>:<emailHash>`), so an attacker cannot
-   *      bypass signIn's per-(ip,email) cap by funnelling guesses through
-   *      this endpoint — the buckets are the same row.
+   *   1. Login-grade rate limits FIRST, BEFORE any DB lookup. Shares the
+   *      EXACT two bucket keys the existing `signIn` uses:
+   *      `trpc:signIn:email:<emailHash>` and
+   *      `trpc:signIn:<ipHash>:<emailHash>`. The first closes rotating-IP
+   *      bypass; sharing both closes endpoint bypass.
    *   2. `findUsuarioByEmail` (tenant-scoped).
    *   3a. EXISTS → login path (one scrypt via `criarSessaoUsuario`).
    *       Wrong password throws the SAME ambiguous error `signIn` throws —
@@ -513,7 +583,10 @@ export const authRouter = t.router({
    *       user-enumeration oracle on the unified flow).
    *   3b. NOT-EXISTS → creation. Check the signup-grade rate limit NOW
    *       (per-ip, sharing `signUp`'s `trpc:signUp:<ipHash>` bucket — same
-   *       anti-bypass reasoning), then `registrarContaUsuario` (which sets
+   *       anti-bypass reasoning). If exhausted, pay dummy password work and
+   *       return the same ambiguous credential error as a wrong-password
+   *       login; the actual rate-limit reason stays internal-only. Otherwise
+   *       run `registrarContaUsuario` (which sets
    *       `email_verified = false` in the BetterAuth adapter's
    *       `criarConta` — forward-compat for future email verification) +
    *       sign in (one scrypt — the hashPassword inside criarConta).
@@ -535,6 +608,7 @@ export const authRouter = t.router({
     .input(ContinuarComEmailInputSchema)
     .mutation(async ({ ctx, input }) => {
       const { deps, headers, resHeaders } = ctx;
+      assertTrustedAuthMutationOrigin(ctx);
 
       // Capture + hash client PII once, reused across rate-limit + emission
       // (same discipline as signIn/signUp).
@@ -542,15 +616,10 @@ export const authRouter = t.router({
       const ipHashed = hashClientPII(rawIp, deps.logPiiHashSalt);
       const emailHash = hashClientPII(input.email, deps.logPiiHashSalt);
 
-      // STEP 1 — login-grade rate limit FIRST, before any DB lookup.
-      // SAME key + helper as signIn (anti-bypass: shared bucket row).
+      // STEP 1 — both login-grade rate limits FIRST, before any DB lookup.
+      // SAME keys + helper as signIn (endpoint + rotating-IP anti-bypass).
       try {
-        await enforceRateLimit(deps.db, {
-          key: `trpc:signIn:${ipHashed}:${emailHash}`,
-          max: RATE_LIMIT_SIGN_IN_MAX,
-          windowMs: RATE_LIMIT_WINDOW_MS,
-          clock: deps.clock,
-        });
+        await enforceSignInRateLimits(ctx, { ipHashed, emailHash });
       } catch (err) {
         emitContinueWithEmailAttempt(ctx, {
           idPlataforma: input.idPlataforma,
@@ -649,8 +718,14 @@ export const authRouter = t.router({
             ipHashed,
             status: 'rate_limited',
           });
-          // Re-throw the SAME TOO_MANY_REQUESTS error signUp throws.
-          throw err;
+          // The create-only cap must not reveal that this email was absent.
+          // Pay the same real Better Auth verification work as a wrong-password
+          // login, then return the same ambiguous BAD_REQUEST. The internal
+          // emission above keeps the actual rate-limit classification visible.
+          await consumeDummyPasswordVerificationWork(input.senha);
+          throw toTRPCError(
+            new UsuarioInputInvalidoError(AMBIGUOUS_CREDENTIAL_ERROR),
+          );
         }
 
         // Derive a display name when the caller didn't supply one. Mirrors
@@ -709,7 +784,7 @@ export const authRouter = t.router({
               status: 'signup_collision',
             });
             throw toTRPCError(
-              new UsuarioInputInvalidoError('Email ou senha invalidos'),
+              new UsuarioInputInvalidoError(AMBIGUOUS_CREDENTIAL_ERROR),
             );
           }
           throw err;

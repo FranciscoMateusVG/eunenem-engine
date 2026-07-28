@@ -13,9 +13,8 @@
 // the right host automatically — dev (localhost:3001) or whatever live domain
 // serves the app (no hardcoded host; aperture-ejghb).
 import { createAuthClient } from 'better-auth/react';
-import { magicLinkClient } from 'better-auth/client/plugins';
 
-// aperture-3mq5q — register the magic-link CLIENT plugin so the single smart
-// entry flow can call `authClient.signIn.magicLink({ email, callbackURL })`.
-// Without this plugin that method does not exist on the client.
-export const authClient = createAuthClient({ plugins: [magicLinkClient()] });
+// Password login is owned by the tenant-bound tRPC procedures. Magic-link is
+// deliberately absent on both client and server while Better Auth's verifier
+// remains email-global. This client exposes only the social redirect surface.
+export const authClient = createAuthClient();

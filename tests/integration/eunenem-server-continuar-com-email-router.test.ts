@@ -80,7 +80,13 @@ afterAll(async () => {
   await testDb.teardown();
 });
 
-function buildDeps(logger: CapturingLogger): ServerDeps {
+function buildDeps(
+  logger: CapturingLogger,
+  options: {
+    readonly trustedHopCount?: number;
+    readonly trustedOrigins?: readonly string[];
+  } = {},
+): ServerDeps {
   const observability: Observability = { logger, tracer: noopTracer() };
   const db = testDb.db;
 
@@ -105,7 +111,12 @@ function buildDeps(logger: CapturingLogger): ServerDeps {
   return {
     db,
     // setSessionCookie reads deps.auth.options.advanced?.useSecureCookies.
-    auth: { options: { advanced: { useSecureCookies: false } } } as never,
+    auth: {
+      options: {
+        advanced: { useSecureCookies: false },
+        trustedOrigins: options.trustedOrigins ?? ['http://localhost:3001'],
+      },
+    } as never,
     authService,
     usuarioRepository,
     plataformaRepository,
@@ -124,16 +135,16 @@ function buildDeps(logger: CapturingLogger): ServerDeps {
     clock: () => new Date(),
     sessionCookieName: SESSION_COOKIE,
     publicOrigin: 'http://localhost:3001',
-    trustedHopCount: 0,
+    trustedHopCount: options.trustedHopCount ?? 0,
     logPiiHashSalt: '',
     webhookEventArchive,
   } as never as ServerDeps;
 }
 
-function makeCaller(deps: ServerDeps) {
+function makeCaller(deps: ServerDeps, headers?: HeadersInit) {
   const ctx: TrpcContext = {
     deps,
-    headers: new Headers(),
+    headers: new Headers(headers),
     resHeaders: new Headers(),
   };
   return { caller: appRouter.createCaller(ctx), resHeaders: ctx.resHeaders };
@@ -301,6 +312,110 @@ describe('auth.continuarComEmail — unified login-or-signup (aperture-d7993)', 
     );
   });
 
+  it('accepts public/trusted/no Origin and rejects a hostile browser Origin before limiter, audit, lookup, or write', async () => {
+    const logger = makeCapturingLogger();
+    const deps = buildDeps(logger, {
+      trustedOrigins: ['https://trusted.example'],
+    });
+
+    const hostile = makeCaller(deps, {
+      origin: 'https://attacker.example',
+    });
+    await expect(
+      hostile.caller.auth.continuarComEmail({
+        email: 'hostile-origin@example.com',
+        senha: PASSWORD,
+        idPlataforma: ID_PLATAFORMA_EUNENEM,
+      }),
+    ).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+      message: 'Origem nao autorizada',
+    });
+
+    expect(await testDb.db.selectFrom('rate_limit').select('id').execute()).toHaveLength(0);
+    expect(
+      await testDb.db
+        .selectFrom('users')
+        .select('id')
+        .where('email', '=', 'hostile-origin@example.com')
+        .execute(),
+    ).toHaveLength(0);
+    expect(logger.events).toHaveLength(0);
+
+    const publicOrigin = makeCaller(deps, {
+      origin: 'http://localhost:3001',
+    });
+    await expect(
+      publicOrigin.caller.auth.continuarComEmail({
+        email: 'same-origin@example.com',
+        senha: PASSWORD,
+        idPlataforma: ID_PLATAFORMA_EUNENEM,
+      }),
+    ).resolves.toMatchObject({ criado: true });
+
+    const configuredOrigin = makeCaller(deps, {
+      origin: 'https://trusted.example',
+    });
+    await expect(
+      configuredOrigin.caller.auth.continuarComEmail({
+        email: 'trusted-origin@example.com',
+        senha: PASSWORD,
+        idPlataforma: ID_PLATAFORMA_EUNENEM,
+      }),
+    ).resolves.toMatchObject({ criado: true });
+
+    const serverCaller = makeCaller(deps);
+    await expect(
+      serverCaller.caller.auth.continuarComEmail({
+        email: 'no-origin@example.com',
+        senha: PASSWORD,
+        idPlataforma: ID_PLATAFORMA_EUNENEM,
+      }),
+    ).resolves.toMatchObject({ criado: true });
+  });
+
+  it('canonicalizes email once before hashing, tenant lookup, persistence, and account-result selection', async () => {
+    const logger = makeCapturingLogger();
+    const deps = buildDeps(logger);
+    const { caller } = makeCaller(deps);
+
+    const created = await caller.auth.continuarComEmail({
+      email: '  Pessoa@EXAMPLE.COM  ',
+      senha: PASSWORD,
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
+      nomeExibicao: 'Pessoa Canonica',
+    });
+
+    const loggedIn = await caller.auth.continuarComEmail({
+      email: ' PESSOA@example.com ',
+      senha: PASSWORD,
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
+    });
+
+    expect(loggedIn).toMatchObject({
+      criado: false,
+      idUsuario: created.idUsuario,
+      idConta: created.idConta,
+    });
+
+    const rows = await testDb.db
+      .selectFrom('users')
+      .select(['id', 'email'])
+      .where('id_plataforma', '=', ID_PLATAFORMA_EUNENEM)
+      .where('email', '=', EMAIL)
+      .execute();
+    expect(rows).toEqual([{ id: created.idUsuario, email: EMAIL }]);
+
+    const attempts = logger.events.filter(
+      (event) => event.event === 'usuario.continue_with_email.tentativa',
+    );
+    expect(attempts).toHaveLength(2);
+    expect(attempts.map((event) => event.fields.emailHash)).toEqual([
+      `unhashed:${EMAIL}`,
+      `unhashed:${EMAIL}`,
+    ]);
+  });
+
   it('returning user + correct password → login_success, session returned', async () => {
     // First call creates the account.
     {
@@ -412,7 +527,7 @@ describe('auth.continuarComEmail — unified login-or-signup (aperture-d7993)', 
     expect(lastStatuses(logger, 'usuario.continue_with_email.tentativa')).toContain('rate_limited');
   });
 
-  it('ANTI-BYPASS: consuming signIn cap via auth.signIn throttles the SAME (ip,email) bucket on continuarComEmail', async () => {
+  it('ANTI-BYPASS: consuming signIn cap via auth.signIn throttles the shared sign-in buckets on continuarComEmail', async () => {
     // Register via signUp (trpc:signUp bucket) so the trpc:signIn bucket
     // starts fresh for the exhaustion loop below.
     {
@@ -431,7 +546,7 @@ describe('auth.continuarComEmail — unified login-or-signup (aperture-d7993)', 
     const deps = buildDeps(logger);
     const { caller } = makeCaller(deps);
 
-    // Exhaust the per-(ip,email) signIn bucket through auth.signIn (10/60s).
+    // Exhaust both shared sign-in buckets through auth.signIn (10/60s).
     for (let i = 0; i < 10; i++) {
       await caller.auth.signIn({
         email: EMAIL,
@@ -440,9 +555,8 @@ describe('auth.continuarComEmail — unified login-or-signup (aperture-d7993)', 
       });
     }
 
-    // continuarComEmail shares `trpc:signIn:<ipHash>:<emailHash>`, so the
-    // very next call through the unified endpoint is already throttled —
-    // an attacker cannot bypass signIn's cap by routing through it.
+    // continuarComEmail shares both the email-only and (ip,email) rows, so
+    // the very next call through the unified endpoint is already throttled.
     await expect(
       caller.auth.continuarComEmail({
         email: EMAIL,
@@ -454,10 +568,103 @@ describe('auth.continuarComEmail — unified login-or-signup (aperture-d7993)', 
     expect(lastStatuses(logger, 'usuario.continue_with_email.tentativa')).toContain('rate_limited');
   });
 
-  it('ANTI-BYPASS: consuming signUp cap via auth.signUp throttles continuarComEmail create branch (shared trpc:signUp:<ipHash> bucket)', async () => {
+  it('ANTI-BYPASS: the email-only 10/60 bucket is shared across rotating IPs and both credential procedures', async () => {
+    {
+      const logger = makeCapturingLogger();
+      const deps = buildDeps(logger);
+      const { caller } = makeCaller(deps);
+      await caller.auth.signUp({
+        email: EMAIL,
+        senha: PASSWORD,
+        nomeExibicao: 'Pessoa Teste',
+        idPlataforma: ID_PLATAFORMA_EUNENEM,
+      });
+    }
+
+    const logger = makeCapturingLogger();
+    const deps = buildDeps(logger, { trustedHopCount: 1 });
+
+    // Every request uses a different trusted client IP, so every pair bucket
+    // remains at count=1. Five attempts use signIn and five use the unified
+    // procedure; only the independent email bucket can reject attempt 11.
+    for (let i = 0; i < 5; i++) {
+      const { caller } = makeCaller(deps, {
+        'x-forwarded-for': `203.0.113.${i + 1}`,
+      });
+      await caller.auth.signIn({
+        email: EMAIL,
+        senha: PASSWORD,
+        idPlataforma: ID_PLATAFORMA_EUNENEM,
+      });
+    }
+    for (let i = 0; i < 5; i++) {
+      const { caller } = makeCaller(deps, {
+        'x-forwarded-for': `198.51.100.${i + 1}`,
+      });
+      await caller.auth.continuarComEmail({
+        email: EMAIL,
+        senha: PASSWORD,
+        idPlataforma: ID_PLATAFORMA_EUNENEM,
+      });
+    }
+
+    const { caller } = makeCaller(deps, {
+      'x-forwarded-for': '192.0.2.250',
+    });
+    await expect(
+      caller.auth.signIn({
+        email: EMAIL,
+        senha: PASSWORD,
+        idPlataforma: ID_PLATAFORMA_EUNENEM,
+      }),
+    ).rejects.toMatchObject({ code: 'TOO_MANY_REQUESTS' });
+
+    const emailBucket = await testDb.db
+      .selectFrom('rate_limit')
+      .select(['count', 'key'])
+      .where('key', '=', `trpc:signIn:email:unhashed:${EMAIL}`)
+      .executeTakeFirstOrThrow();
+    expect(emailBucket).toEqual({
+      count: 11,
+      key: `trpc:signIn:email:unhashed:${EMAIL}`,
+    });
+
+    const pairBuckets = await testDb.db
+      .selectFrom('rate_limit')
+      .select(['count'])
+      .where('key', 'like', 'trpc:signIn:unhashed:%')
+      .execute();
+    expect(pairBuckets).toHaveLength(10);
+    expect(pairBuckets.every((row) => row.count === 1)).toBe(true);
+  });
+
+  it('ENUMERATION: exhausted create cap returns the same ambiguous error as a wrong password and creates no user', async () => {
     const logger = makeCapturingLogger();
     const deps = buildDeps(logger);
     const { caller } = makeCaller(deps);
+
+    await caller.auth.signUp({
+      email: EMAIL,
+      senha: PASSWORD,
+      nomeExibicao: 'Existing User',
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
+    });
+    // Isolate the assertion from the setup call's signup bucket.
+    await testDb.db.deleteFrom('rate_limit').execute();
+
+    const wrongPasswordError: unknown = await caller.auth
+      .continuarComEmail({
+        email: EMAIL,
+        senha: 'senha-errada-999',
+        idPlataforma: ID_PLATAFORMA_EUNENEM,
+      })
+      .catch((error: unknown) => error);
+    expect(wrongPasswordError).toMatchObject({ code: 'BAD_REQUEST' });
+    expect(wrongPasswordError).toBeInstanceOf(Error);
+    if (!(wrongPasswordError instanceof Error)) {
+      throw new Error('Expected wrong-password attempt to reject');
+    }
+    expect(wrongPasswordError.message).toContain('Email ou senha invalidos');
 
     // signUp cap = 3 per 60s per IP. Create 3 distinct accounts via signUp
     // (same IP — empty rawIp in dev → same ipHash → same bucket).
@@ -470,17 +677,24 @@ describe('auth.continuarComEmail — unified login-or-signup (aperture-d7993)', 
       });
     }
 
-    // Now a continuarComEmail CREATE branch (brand-new email, so it reaches
-    // the signup-grade rate limit) must be throttled — the signUp bucket is
-    // already full and the buckets are shared.
-    await expect(
-      caller.auth.continuarComEmail({
+    // A brand-new email reaches the exhausted create-only bucket. The router
+    // deliberately executes consumeDummyPasswordVerificationWork (the real
+    // Better Auth verifyPassword helper in password-verification-work.ts)
+    // before returning. ESM module binding makes a non-invasive invocation spy
+    // unreliable here; the stable contract evidence is identical code/message,
+    // the internal-only rate_limited event, and absence of the user write.
+    const exhaustedCreateError: unknown = await caller.auth
+      .continuarComEmail({
         email: 'brand-new@example.com',
         senha: PASSWORD,
         idPlataforma: ID_PLATAFORMA_EUNENEM,
         nomeExibicao: 'Brand New',
-      }),
-    ).rejects.toMatchObject({ code: 'TOO_MANY_REQUESTS' });
+      })
+      .catch((error: unknown) => error);
+    expect(exhaustedCreateError).toMatchObject({
+      code: 'BAD_REQUEST',
+      message: wrongPasswordError.message,
+    });
 
     expect(lastStatuses(logger, 'usuario.continue_with_email.tentativa')).toContain('rate_limited');
 
