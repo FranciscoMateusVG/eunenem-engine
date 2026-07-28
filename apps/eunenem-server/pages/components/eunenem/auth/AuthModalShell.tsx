@@ -13,7 +13,7 @@ import { authClient } from "@/lib/authClient";
 // only after successful authentication.
 //
 // Flow:
-//   "email"    → OAuth row + "ou" divider + email input
+//   "email"    → OAuth row + email input + password or magic-link actions
 //   "password" → password input + one unified login-or-create submission
 //
 // OAuth providers: Google + Microsoft, wired to the real BetterAuth social
@@ -89,6 +89,7 @@ export function AuthModalShell({ onClose, onAuthenticated }: AuthModalShellProps
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [magicLinkStatus, setMagicLinkStatus] = useState<"idle" | "sending" | "sent">("idle");
   const { continuarComEmail } = useContinuarComEmail();
 
   // ── Social sign-in feedback (aperture-svwyp) ──────────────────────────────
@@ -240,6 +241,37 @@ export function AuthModalShell({ onClose, onAuthenticated }: AuthModalShellProps
     setShowPassword(false);
     setPasswordError(null);
     setSubmitError(null);
+    setMagicLinkStatus("idle");
+  };
+
+  const onMagicLink = async () => {
+    setEmailError(null);
+    setSubmitError(null);
+    if (!email.trim()) {
+      setEmailError("preenche aqui pra eu te enviar o link ♡");
+      return;
+    }
+    if (!isValidEmail(email)) {
+      setEmailError("esse e-mail tá meio torto — confere pra mim?");
+      return;
+    }
+
+    setMagicLinkStatus("sending");
+    try {
+      const { error } = await authClient.signIn.magicLink({
+        email: email.trim().toLowerCase(),
+        callbackURL: `${window.location.origin}/?oauth=1`,
+      });
+      if (error) {
+        setMagicLinkStatus("idle");
+        setSubmitError("não consegui enviar agora — tenta de novo em instantes ♡");
+        return;
+      }
+      setMagicLinkStatus("sent");
+    } catch {
+      setMagicLinkStatus("idle");
+      setSubmitError("não consegui enviar agora — tenta de novo em instantes ♡");
+    }
   };
 
   const onBack = () => {
@@ -381,9 +413,24 @@ export function AuthModalShell({ onClose, onAuthenticated }: AuthModalShellProps
               </p>
             )}
 
-            <button type="submit" className="auth-cta">
+            <button type="submit" className="auth-cta" disabled={magicLinkStatus === "sending"}>
               CONTINUAR <span aria-hidden="true">→</span>
             </button>
+
+            <button
+              type="button"
+              className="auth-magic-link"
+              onClick={onMagicLink}
+              disabled={magicLinkStatus !== "idle"}
+              aria-busy={magicLinkStatus === "sending"}
+            >
+              {magicLinkStatus === "sending" ? "ENVIANDO LINK…" : "ENVIAR LINK MÁGICO"}
+            </button>
+            {magicLinkStatus === "sent" && (
+              <p className="auth-magic-link-sent" role="status">
+                se esse e-mail estiver certo, o link já está a caminho ♡
+              </p>
+            )}
           </form>
         ) : (
           <form onSubmit={onPasswordSubmit} className="auth-form" noValidate>
@@ -772,6 +819,28 @@ export const AUTH_CSS = `
 .auth-cta:hover:not(:disabled){background:var(--lilac-deep);transform:translateY(-1px)}
 .auth-cta:focus-visible{outline:2px solid var(--lilac-deep);outline-offset:3px}
 .auth-cta:disabled{opacity:.7;cursor:not-allowed;box-shadow:none}
+.auth-magic-link{
+  width:100%;
+  margin-top:12px;
+  padding:12px 16px;
+  background:transparent;
+  border:1.5px solid var(--lilac);
+  border-radius:14px;
+  color:var(--plum);
+  font-family:var(--font-dm-sans),sans-serif;
+  font-size:12px;font-weight:600;letter-spacing:.08em;
+  cursor:pointer;
+}
+.auth-magic-link:hover:not(:disabled){background:rgba(166,139,179,.08)}
+.auth-magic-link:focus-visible{outline:2px solid var(--lilac-deep);outline-offset:3px}
+.auth-magic-link:disabled{opacity:.65;cursor:not-allowed}
+.auth-magic-link-sent{
+  margin:10px 4px 0;
+  text-align:center;
+  font-family:var(--font-dm-sans),sans-serif;
+  font-size:13px;line-height:1.4;
+  color:var(--plum);
+}
 
 .auth-spin{animation:authSpin .9s linear infinite}
 @keyframes authSpin{to{transform:rotate(360deg)}}

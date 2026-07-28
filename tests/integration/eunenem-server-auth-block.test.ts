@@ -15,8 +15,8 @@ import {
  * casing fix made the whole BetterAuth HTTP surface functional, so the old
  * allow-by-default-with-4-denials posture was unsafe (cross-tenant escalation
  * via /api/auth/update-user, saga-bypass routes, a stale block name). The guard
- * is now DENY-BY-DEFAULT: only the OAuth allowlist (sign-in/social + callback/*)
- * reaches auth.handler; everything else returns a byte-identical 410 Gone.
+ * is now DENY-BY-DEFAULT: only explicitly reviewed method/path pairs reach
+ * auth.handler; everything else returns a byte-identical 410 Gone.
  *
  * These tests exist so a future re-mount, router change, or middleware reorder
  * cannot reopen the surface — and so the escalation route specifically stays
@@ -49,14 +49,9 @@ const MUST_BLOCK_PATHS = [
   '/api/auth/sign-in/email',
   '/api/auth/sign-out',
   '/api/auth/verify-email', // not needed for Google OAuth → denied by default
-  // aperture-eww0g: Better Auth magic-link lookup is email-global while the
-  // schema permits duplicate email across platform tenants. Both halves stay
-  // uniformly denied until verification is tenant-scoped.
-  '/api/auth/sign-in/magic-link',
-  '/api/auth/magic-link/verify',
 ] as const;
 
-// The only paths permitted through to auth.handler.
+// The reviewed paths permitted through to auth.handler.
 const MUST_ALLOW = [
   { method: 'POST', path: '/api/auth/sign-in/social' },
   { method: 'GET', path: '/api/auth/callback/google' },
@@ -64,6 +59,9 @@ const MUST_ALLOW = [
   // aperture-3c9na: the frontend BetterAuth client's own-session READ endpoint.
   // Own-cookie-scoped (no IDOR / no enumeration / no cross-tenant); GET only.
   { method: 'GET', path: '/api/auth/get-session' },
+  // PR #45 tenant-scopes the verifier's user lookup before writes.
+  { method: 'POST', path: '/api/auth/sign-in/magic-link' },
+  { method: 'GET', path: '/api/auth/magic-link/verify' },
 ] as const;
 
 describe('eunenem-server deny-by-default auth guard (aperture-9tca0)', () => {
@@ -149,7 +147,7 @@ describe('eunenem-server deny-by-default auth guard (aperture-9tca0)', () => {
   });
 
   describe('allowlist predicate shape (method-specific)', () => {
-    it('allows exactly POST sign-in/social + GET callback/*', () => {
+    it('allows the exact social, session, and magic-link method/path pairs', () => {
       expect(isAllowedAuthRequest('POST', '/api/auth/sign-in/social')).toBe(true);
       expect(isAllowedAuthRequest('GET', '/api/auth/callback/google')).toBe(true);
       expect(isAllowedAuthRequest('GET', '/api/auth/callback/apple')).toBe(true);
@@ -168,8 +166,10 @@ describe('eunenem-server deny-by-default auth guard (aperture-9tca0)', () => {
       expect(isAllowedAuthRequest('GET', '/api/auth/list-sessions')).toBe(false);
       expect(isAllowedAuthRequest('POST', '/api/auth/sign-in/email')).toBe(false);
       expect(isAllowedAuthRequest('GET', '/api/auth/verify-email')).toBe(false);
-      expect(isAllowedAuthRequest('POST', '/api/auth/sign-in/magic-link')).toBe(false);
-      expect(isAllowedAuthRequest('GET', '/api/auth/magic-link/verify')).toBe(false);
+      expect(isAllowedAuthRequest('POST', '/api/auth/sign-in/magic-link')).toBe(true);
+      expect(isAllowedAuthRequest('GET', '/api/auth/magic-link/verify')).toBe(true);
+      expect(isAllowedAuthRequest('GET', '/api/auth/sign-in/magic-link')).toBe(false);
+      expect(isAllowedAuthRequest('POST', '/api/auth/magic-link/verify')).toBe(false);
       // not a prefix-confusion: 'callback' without trailing slash, social-evil
       expect(isAllowedAuthRequest('GET', '/api/auth/callback')).toBe(false);
       expect(isAllowedAuthRequest('POST', '/api/auth/sign-in/social-evil')).toBe(false);

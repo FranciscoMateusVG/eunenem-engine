@@ -166,7 +166,6 @@ describe('DENY-BY-DEFAULT /api/auth/* on the REAL handler (aperture-sxj32 pins 9
       '/api/auth/request-password-reset',
       '/api/auth/link-social',
       '/api/auth/unlink-account',
-      '/api/auth/sign-in/magic-link',
     ] as const;
 
     for (const path of DENIED_POST) {
@@ -183,24 +182,22 @@ describe('DENY-BY-DEFAULT /api/auth/* on the REAL handler (aperture-sxj32 pins 9
       expect(body).toBe(BLOCKED_AUTH_BODY);
     });
 
-    it('GET /api/auth/magic-link/verify → 410 before token lookup or session mutation', async () => {
-      const { status, body } = await probe(
+    it('GET /api/auth/magic-link/verify reaches the tenant-scoped verifier', async () => {
+      const { status } = await probe(
         'GET',
         '/api/auth/magic-link/verify?token=foreign-tenant-probe',
       );
-      expect(status).toBe(BLOCKED_AUTH_STATUS);
-      expect(body).toBe(BLOCKED_AUTH_BODY);
+      expect(status).not.toBe(BLOCKED_AUTH_STATUS);
     });
 
-    it('POST /api/auth/sign-in/magic-link → 410 before sender or verification mutation', async () => {
+    it('POST /api/auth/sign-in/magic-link reaches the configured sender', async () => {
       const before = magicLinkSendCount;
-      const { status, body } = await probe('POST', '/api/auth/sign-in/magic-link', {
-        email: 'cross-platform@example.com',
+      const { status } = await probe('POST', '/api/auth/sign-in/magic-link', {
+        email: 'magic-link-route@example.com',
         callbackURL: '/',
       });
-      expect(status).toBe(BLOCKED_AUTH_STATUS);
-      expect(body).toBe(BLOCKED_AUTH_BODY);
-      expect(magicLinkSendCount).toBe(before);
+      expect(status).not.toBe(BLOCKED_AUTH_STATUS);
+      expect(magicLinkSendCount).toBe(before + 1);
     });
   });
 
@@ -401,15 +398,6 @@ describe('DENY-BY-DEFAULT /api/auth/* on the REAL handler (aperture-sxj32 pins 9
         { method: 'POST', path: '/api/auth/request-password-reset' },
         { method: 'POST', path: '/api/auth/link-social' },
         { method: 'POST', path: '/api/auth/unlink-account' },
-        {
-          method: 'POST',
-          path: '/api/auth/sign-in/magic-link',
-          body: { email: 'cross-platform@example.com' },
-        },
-        {
-          method: 'GET',
-          path: '/api/auth/magic-link/verify?token=foreign-tenant-probe',
-        },
         { method: 'GET', path: '/api/auth/list-accounts' },
         { method: 'GET', path: '/api/auth/__deny_by_default_probe__' },
         { method: 'GET', path: '/api/auth/sign-in/social' },
