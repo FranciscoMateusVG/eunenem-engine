@@ -268,6 +268,14 @@ export function AuthModalShell({ onClose, onAuthenticated }: AuthModalShellProps
         return;
       }
       setMagicLinkStatus("sent");
+      // aperture-l3mkv — prominent success confirmation, uniform with the
+      // password flow's toast.success. The inline .auth-magic-link-sent copy
+      // below stays as a persistent in-modal reminder (unlike the password
+      // flow, magic-link keeps the modal open so the user can go check email).
+      // Copy is privacy-preserving — it never confirms the address exists.
+      toast.success("link mágico enviado ♡", {
+        description: "se esse e-mail estiver certo, confere tua caixa de entrada ♡",
+      });
     } catch {
       setMagicLinkStatus("idle");
       setSubmitError("não consegui enviar agora — tenta de novo em instantes ♡");
