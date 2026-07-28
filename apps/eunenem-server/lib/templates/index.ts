@@ -371,12 +371,20 @@ const LISTAS_PRONTAS: Record<ListaProntaId, ListaProntaDetail> = (() => {
 
 // ── Public loaders ─────────────────────────────────────────────────────────
 
-/** All catalog sections, in canonical display order. */
+/**
+ * All catalog sections, in canonical display order.
+ *
+ * @deprecated Customer read-path now uses trpc.catalogo.listSections / listListasProntas (aperture-tb0rh F2). Retained for demo/mock only; removal tracked in aperture-0daoy.
+ */
 export function loadCatalog(): ListaCatalogSection[] {
   return CATALOG;
 }
 
-/** All known "listas prontas" presets, keyed by id. */
+/**
+ * All known "listas prontas" presets, keyed by id.
+ *
+ * @deprecated Customer read-path now uses trpc.catalogo.listSections / listListasProntas (aperture-tb0rh F2). Retained for demo/mock only; removal tracked in aperture-0daoy.
+ */
 export function loadListasProntas(): Record<ListaProntaId, ListaProntaDetail> {
   return LISTAS_PRONTAS;
 }

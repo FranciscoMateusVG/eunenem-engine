@@ -4,24 +4,6 @@ import { toast } from 'sonner';
 // aperture-tua9o — image upload+crop for the custom ("personalizado") item form.
 import { ItemImageUpload } from './ItemImageUpload';
 
-// aperture-p73kv — deterministic random "sugerido N un" in [5, 10] keyed
-// by item id (djb2 hash). The hardcoded `1` operators saw was unrealistic
-// for baby-shower lists ("sugerido is still only 1 unidade and i cant add
-// or remove more"). djb2 is fast + deterministic per session so the same
-// card always shows the same number across re-renders. The inline stepper
-// (PartB) lets the user adjust before adding the item to their list.
-function djb2(s: string): number {
-  let h = 5381;
-  for (let i = 0; i < s.length; i++) {
-    h = ((h << 5) + h + s.charCodeAt(i)) | 0;
-  }
-  return h >>> 0;
-}
-function defaultSuggestedQty(itemId: string): number {
-  // [5, 10] inclusive — 6 buckets.
-  return 5 + (djb2(itemId) % 6);
-}
-
 import { sendEvent } from '@/lib/analytics';
 import {
   brlFromCents,
@@ -38,15 +20,20 @@ import {
   useContribuicaoUpdate,
 } from '@/lib/contribuicao.js';
 import type { PainelSectionBodyProps } from '@/PainelSectionPage';
-import {
-  type ListaCatalogItem,
-  type ListaCategory,
-  type ListaProntaDetail,
-  type ListaProntaId,
-  loadCatalog,
-  loadListasProntas,
-  type PresetItem,
-} from '../../../../lib/templates/index.js';
+import type { inferRouterOutputs } from '@trpc/server';
+import { trpc } from '@/lib/trpc.js';
+import type { AppRouter } from '../../../../server/trpc/router.js';
+
+// aperture-tb0rh F2 — the customer /painel catalog read-path now reads the LIVE
+// tRPC procs (trpc.catalogo.listSections / listListasProntas) instead of the
+// client-bundled JSON loaders, so admin catalog CRUD propagates to /painel. The
+// inferred Pub types below replace the retired loader types (ListaCatalogItem /
+// ListaProntaDetail / ListaProntaId / PresetItem / ListaCategory).
+type RouterOutputs = inferRouterOutputs<AppRouter>;
+type CatalogSection = RouterOutputs['catalogo']['listSections'][number];
+type CatalogItem = CatalogSection['items'][number];
+type ListaProntaPub = RouterOutputs['catalogo']['listListasProntas'][string];
+type PresetItemPub = ListaProntaPub['items'][number];
 
 // aperture-0ph83 — "Minha lista de presentes" (creator gift-list management).
 //
@@ -91,7 +78,10 @@ const brl = (n: number) =>
 // taxonomy landed. `personalizado` stays in the local options list because the
 // PersonalizadoForm uses it as the default category for user-authored items
 // (the seed catalog itself never contains personalizado — validator enforces).
-const LISTA_CATEGORY_LABEL: Record<ListaCategory, string> = {
+// aperture-tb0rh F2 — categories are open strings now (DB-driven catalog). This
+// map is a FALLBACK label lookup for the 9 legacy slugs; unknown slugs fall
+// through to the raw value at the call sites.
+const LISTA_CATEGORY_LABEL: Record<string, string> = {
   fraldas: 'fraldas',
   higiene: 'higiene',
   roupa: 'roupinhas',
@@ -103,7 +93,7 @@ const LISTA_CATEGORY_LABEL: Record<ListaCategory, string> = {
   personalizado: 'personalizado',
 };
 
-const CATEGORY_OPTIONS: ListaCategory[] = [
+const CATEGORY_OPTIONS: string[] = [
   'fraldas',
   'higiene',
   'roupa',
@@ -260,54 +250,29 @@ const icon = {
   ),
 };
 
-// aperture-g70uv / aperture-0ph83 / aperture-cdwdt — visual identity overlay
-// for the curated preset cards surfaced by the "Usar lista pronta" expand/
-// collapse panel. Title + description + cover imageUrl now live in the JSON
-// template (loaded via loadListasProntas), so the array below only carries
-// the presentation deltas (emoji + backdrop tint). Item count + title +
-// description + cover all come from the loaded detail at render time, so
-// the data and the UI stay in lock-step.
-interface ListaProntaPreset {
-  id: ListaProntaId;
-  emoji: string;
-  tileVar: string;
-}
-const LISTA_PRONTAS: ListaProntaPreset[] = [
-  {
-    id: 'ilustrativa-especial',
-    emoji: '👕',
-    tileVar: 'var(--lilac-soft)',
-  },
-  {
-    id: 'cha-de-fralda',
-    emoji: '🧷',
-    tileVar: 'var(--pink-soft)',
-  },
-  {
-    id: 'cha-de-rifa',
-    emoji: '🎁',
-    tileVar: 'var(--yellow-soft)',
-  },
-  {
-    id: 'ilustrativa',
-    emoji: '✨',
-    tileVar: 'var(--cream-2)',
-  },
-  {
-    id: 'carrinhos',
-    emoji: '🚼',
-    tileVar: 'var(--blue-soft)',
-  },
-];
+// aperture-g70uv / aperture-0ph83 / aperture-cdwdt / aperture-tb0rh F2 — visual
+// identity overlay for the curated preset cards surfaced by the "Usar lista
+// pronta" panel. Title + description + cover imageUrl + item count all come from
+// the LIVE tRPC detail at render time. The presets themselves are now dynamic
+// (keyed by the wire record), so this is a per-slug style lookup (emoji +
+// backdrop tint) with a safe fallback for slugs the UI doesn't have art for.
+const PRESET_TILE_STYLE: Record<string, { emoji: string; tileVar: string }> = {
+  'ilustrativa-especial': { emoji: '👕', tileVar: 'var(--lilac-soft)' },
+  'cha-de-fralda': { emoji: '🧷', tileVar: 'var(--pink-soft)' },
+  'cha-de-rifa': { emoji: '🎁', tileVar: 'var(--yellow-soft)' },
+  ilustrativa: { emoji: '✨', tileVar: 'var(--cream-2)' },
+  carrinhos: { emoji: '🚼', tileVar: 'var(--blue-soft)' },
+};
+const PRESET_TILE_FALLBACK = { emoji: '🎁', tileVar: 'var(--cream-2)' };
 
-type CatFilter = 'all' | ListaCategory;
+type CatFilter = string;
 type AddTab = 'catalogo' | 'personalizado';
 
 interface DraftFields {
   title: string;
   price: string;
   qty: number;
-  category: ListaCategory;
+  category: string;
   // aperture-tua9o — optional uploaded image (publicUrl) for the custom item.
   imageUrl: string | null;
 }
@@ -325,7 +290,7 @@ interface GroupedGift {
   ids: string[];
   nome: string;
   price: number; // BRL (converted from valor cents at the adapter boundary)
-  category: ListaCategory;
+  category: string;
   // aperture-intake-grxsh-followup — split emoji vs real image. `imageUrl` is a
   // same-origin path or absolute http(s) URL; when set, the card renders an
   // <img>. Otherwise `emoji` (a per-grupo glyph fallback) is rendered as text.
@@ -343,20 +308,6 @@ interface GroupedGift {
   custom: boolean;
 }
 
-const isListaCategory = (g: string | null | undefined): g is ListaCategory => {
-  return (
-    g === 'fraldas' ||
-    g === 'higiene' ||
-    g === 'roupa' ||
-    g === 'soninho' ||
-    g === 'alimentacao' ||
-    g === 'passeio' ||
-    g === 'brinquedo' ||
-    g === 'outros' ||
-    g === 'personalizado'
-  );
-};
-
 // aperture-intake-grxsh-followup — `imagemUrl` is an image when it starts with
 // `/` (same-origin) or `http(s)://`. Anything else (a stray emoji from legacy
 // rows, etc.) is treated as text content. Mirrors the catalog modal's
@@ -372,11 +323,16 @@ function groupContribuicoes(items: ContribuicaoDTO[]): GroupedGift[] {
     // unknown grupos (e.g. lista-pronta IDs like "ilustrativa" that the seed
     // path stuffed into the column) we use "outros" as the typed bucket but
     // render the raw grupo as the chip text below — see chipLabel.
-    const category: ListaCategory = isListaCategory(c.grupo) ? c.grupo : 'outros';
-    const knownLabel = isListaCategory(c.grupo) ? LISTA_CATEGORY_LABEL[c.grupo] : null;
+    const category: string =
+      typeof c.grupo === 'string' && c.grupo.trim() !== '' ? c.grupo : 'outros';
+    // aperture-tb0rh F2 — categories are open strings; prefer a known pt-BR
+    // label, else surface the raw slug, else "outros" for null/empty grupos.
+    // The index access is guarded by the string-narrow so `c.grupo` (string |
+    // null) can't index the label map as null.
     const chipLabel =
-      knownLabel ??
-      (typeof c.grupo === 'string' && c.grupo.trim() !== '' ? c.grupo.toLowerCase() : 'outros');
+      typeof c.grupo === 'string' && c.grupo.trim() !== ''
+        ? (LISTA_CATEGORY_LABEL[c.grupo] ?? c.grupo.toLowerCase())
+        : 'outros';
     const imageUrl = isImagePath(c.imagemUrl) ? c.imagemUrl : null;
     const emoji = imageUrl ? '🎁' : (c.imagemUrl ?? '🎁');
     const existing = map.get(c.nome);
@@ -709,7 +665,7 @@ function PersonalizadoForm({
             <select
               id="lista-cat"
               value={f.category}
-              onChange={(e) => setF({ ...f, category: e.target.value as ListaCategory })}
+              onChange={(e) => setF({ ...f, category: e.target.value })}
             >
               {CATEGORY_OPTIONS.map((c) => (
                 <option key={c} value={c}>
@@ -749,7 +705,9 @@ function PersonalizadoForm({
 // when the modal opens, so each open gets fresh useState defaults (cat="todos",
 // search="", visible=24).
 
-const CATEGORY_CHIP_EMOJI: Record<ListaCategory, string> = {
+// aperture-tb0rh F2 — fallback chip emoji for the 9 legacy slugs; the picker
+// guards unknown slugs with `?? '🎁'`.
+const CATEGORY_CHIP_EMOJI: Record<string, string> = {
   fraldas: '🧷',
   higiene: '🧴',
   roupa: '👕',
@@ -761,24 +719,24 @@ const CATEGORY_CHIP_EMOJI: Record<ListaCategory, string> = {
   personalizado: '✨',
 };
 
-type CatScope = 'todos' | ListaCategory;
+type CatScope = string;
 const PAGE_SIZE = 24;
 
 function CatalogoView({
+  catalog,
   selected,
   onToggle,
 }: {
+  // aperture-tb0rh F2 — catalog sections come from the LIVE tRPC proc
+  // (trpc.catalogo.listSections), threaded down from the body via AddGiftModal.
+  catalog: CatalogSection[];
   selected: Set<string>;
-  onToggle: (item: ListaCatalogItem) => void;
+  onToggle: (item: CatalogItem) => void;
 }) {
   const [search, setSearch] = useState('');
   const [scope, setScope] = useState<CatScope>('todos');
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
-
-  // aperture-0ph83 — sourced from JSON loader (aperture-cwcn0) instead of the
-  // legacy mock.
-  const catalog = useMemo(() => loadCatalog(), []);
 
   // Build the flat all-items list + per-category buckets once. Section labels
   // double as chip labels (one source of truth for pt-BR vocabulary).
@@ -1000,7 +958,7 @@ function CatalogoView({
                     <span className="lista-cat-meta">
                       <span className="lista-cat-name">{it.name}</span>
                       <span className="lista-cat-sub">
-                        {brl(it.price)} · sugerido {defaultSuggestedQty(it.id)} un
+                        {brl(it.price)} · sugerido {it.suggestedQty} un
                       </span>
                     </span>
                     <span className={'lista-cat-check' + (on ? ' is-on' : '')} aria-hidden="true">
@@ -1046,24 +1004,34 @@ function AddGiftModal({
   onSubmitPersonalizado,
   onSubmitCatalogo,
   submitting,
+  catalog,
+  catalogLoading,
+  catalogError,
+  onRetryCatalog,
 }: {
   defaultTab: AddTab;
   onClose: () => void;
   onSubmitPersonalizado: (draft: DraftFields) => void;
-  onSubmitCatalogo: (items: ListaCatalogItem[]) => void;
+  onSubmitCatalogo: (items: CatalogItem[]) => void;
   submitting: boolean;
+  // aperture-tb0rh F2 — catalog is fetched once in the body (trpc.catalogo
+  // .listSections) and threaded down. The picker renders its own inline
+  // loading/error state so it NEVER shows an empty grid while the catalog is
+  // still loading or errored (surface-fetch-errors: error ≠ empty).
+  catalog: CatalogSection[];
+  catalogLoading: boolean;
+  catalogError: boolean;
+  onRetryCatalog: () => void;
 }) {
   const [tab, setTab] = useState<AddTab>(defaultTab);
   const [f, setF] = useState<DraftFields>(emptyDraft);
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
 
-  const catalog = useMemo(() => loadCatalog(), []);
-
   const personPriceNum = parseValorBRL(f.price);
   const personValid = f.title.trim().length > 0 && personPriceNum > 0;
 
   const selectedItems = useMemo(() => {
-    const out: ListaCatalogItem[] = [];
+    const out: CatalogItem[] = [];
     catalog.forEach((sec) =>
       sec.items.forEach((it) => {
         if (selected.has(it.id)) out.push(it);
@@ -1071,12 +1039,13 @@ function AddGiftModal({
     );
     return out;
   }, [catalog, selected]);
-  // aperture-p73kv — mirror the picker's djb2-derived "sugerido N un"
-  // (display + submit) on the running total so the footer R$ amount
-  // doesn't drift from what the user sees per card.
-  const catTotal = selectedItems.reduce((s, i) => s + i.price * defaultSuggestedQty(i.id), 0);
+  // aperture-p73kv / aperture-tb0rh F2 — mirror the picker's "sugerido N un"
+  // (display + submit) on the running total so the footer R$ amount doesn't
+  // drift from what the user sees per card. suggestedQty is now the operator-set
+  // DB value (produto.quantidadeSugerida), not the retired djb2 hash.
+  const catTotal = selectedItems.reduce((s, i) => s + i.price * i.suggestedQty, 0);
 
-  const toggleCatItem = (it: ListaCatalogItem) => {
+  const toggleCatItem = (it: CatalogItem) => {
     setSelected((cur) => {
       const next = new Set(cur);
       if (next.has(it.id)) next.delete(it.id);
@@ -1137,7 +1106,37 @@ function AddGiftModal({
       <div className="lista-modal-body">
         {tab === 'catalogo' ? (
           <div role="tabpanel" id="lista-tabpanel-catalogo" aria-labelledby="lista-tab-catalogo">
-            <CatalogoView selected={selected} onToggle={toggleCatItem} />
+            {/* aperture-tb0rh F2 — inline picker loading/error. NEVER render an
+                empty catalog grid while loading or errored (error ≠ empty). */}
+            {catalogLoading ? (
+              <div className="lista-cat-empty">
+                <span className="eyebrow">carregando catálogo…</span>
+              </div>
+            ) : catalogError ? (
+              <div className="lista-cat-empty">
+                <span className="eyebrow coral">opa</span>
+                <p>
+                  Não rolou carregar o catálogo.{' '}
+                  <button
+                    type="button"
+                    onClick={onRetryCatalog}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      padding: 0,
+                      color: 'var(--lilac-deep)',
+                      textDecoration: 'underline',
+                      cursor: 'pointer',
+                      font: 'inherit',
+                    }}
+                  >
+                    tentar de novo →
+                  </button>
+                </p>
+              </div>
+            ) : (
+              <CatalogoView catalog={catalog} selected={selected} onToggle={toggleCatItem} />
+            )}
           </div>
         ) : (
           <div
@@ -1314,9 +1313,9 @@ function PresetDetailModal({
   onSubmit,
   submitting,
 }: {
-  preset: ListaProntaDetail;
+  preset: ListaProntaPub;
   onClose: () => void;
-  onSubmit: (selected: PresetItem[]) => void;
+  onSubmit: (selected: PresetItemPub[]) => void;
   submitting: boolean;
 }) {
   const [selected, setSelected] = useState<Set<string>>(
@@ -1333,8 +1332,9 @@ function PresetDetailModal({
   };
 
   const selectedItems = preset.items.filter((it) => selected.has(it.id));
-  // aperture-p73kv — same djb2-derived mirror as the catalogo path.
-  const total = selectedItems.reduce((s, it) => s + it.price * defaultSuggestedQty(it.id), 0);
+  // aperture-p73kv / aperture-tb0rh F2 — same suggestedQty mirror as the
+  // catalogo path (DB value item.quantidade, not the retired djb2 hash).
+  const total = selectedItems.reduce((s, it) => s + it.price * it.suggestedQty, 0);
   const count = selectedItems.length;
 
   const submit = () => {
@@ -1402,7 +1402,7 @@ function PresetDetailModal({
                 <div className="lista-preset-meta">
                   <span className="lista-preset-name">{it.name}</span>
                   <span className="lista-preset-sub">
-                    {brl(it.price)} · sugerido {defaultSuggestedQty(it.id)} un
+                    {brl(it.price)} · sugerido {it.suggestedQty} un
                   </span>
                 </div>
                 <span className={'lista-preset-check' + (on ? ' is-on' : '')} aria-hidden="true">
@@ -1531,15 +1531,26 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
   const deleteMut = useContribuicaoDelete();
   const updateMut = useContribuicaoUpdate();
 
+  // aperture-tb0rh F2 — live catalog + listas-prontas from the tRPC procs so
+  // admin catalog CRUD propagates to /painel. Catalog (listSections) is only
+  // needed inside the AddGiftModal picker; listas prontas drive the preset
+  // tiles in the main body.
+  const catalogQuery = trpc.catalogo.listSections.useQuery(undefined, { staleTime: 30_000 });
+  const listasProntasQuery = trpc.catalogo.listListasProntas.useQuery(undefined, {
+    staleTime: 30_000,
+  });
+
   const [search, setSearch] = useState('');
   const [cat, setCat] = useState<CatFilter>('all');
   const [addModalTab, setAddModalTab] = useState<AddTab | null>(null);
   const [editItem, setEditItem] = useState<GroupedGift | null>(null);
   const [removeItem, setRemoveItem] = useState<GroupedGift | null>(null);
   const [presetsOpen, setPresetsOpen] = useState(false);
-  const [presetDetail, setPresetDetail] = useState<ListaProntaId | null>(null);
+  const [presetDetail, setPresetDetail] = useState<string | null>(null);
 
-  const listasProntas = useMemo(() => loadListasProntas(), []);
+  // aperture-tb0rh F2 — live listas prontas keyed by slug. Empty object until
+  // the query resolves; the gate below blocks render until it's ready.
+  const listasProntas: Record<string, ListaProntaPub> = listasProntasQuery.data ?? {};
 
   const items = useMemo<GroupedGift[]>(
     () => groupContribuicoes(listQuery.data ?? []),
@@ -1597,20 +1608,18 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
     }
   };
 
-  const addCatalogItems = async (picked: ListaCatalogItem[]) => {
+  const addCatalogItems = async (picked: CatalogItem[]) => {
     try {
       await createBulkMut.mutateAsync({
         // Plan 0016 (aperture-putz5): one ROW per catalog item with
         // `quantidade=suggestedQty`. Pre-0016 this fanned out into
         // suggestedQty rows per item — locked decision #1 retires that.
         //
-        // aperture-p73kv: `it.suggestedQty` from the catalog data is
-        // a static `1`, which surfaces as "sugerido 1 un" on the picker
-        // — unrealistic for typical baby-shower lists. The display uses
-        // `defaultSuggestedQty(it.id)` (djb2-derived 5–10) and the
-        // submit MUST mirror that same value or the actual list
-        // count diverges from what the user saw. Inline stepper +
-        // per-card override is the next layer (filed as follow-up).
+        // aperture-tb0rh F2: `it.suggestedQty` is the operator-set DB value
+        // (produto.quantidadeSugerida), surfaced verbatim as "sugerido N un"
+        // on the picker. The display and this submit MUST use the same value
+        // or the actual list count diverges from what the user saw. Inline
+        // stepper + per-card override is the next layer (filed as follow-up).
         items: picked.map((it) => ({
           nome: it.name,
           valor: centsFromBRL(it.price),
@@ -1622,11 +1631,11 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
           // to keep the field unset for image-less items.
           imagemUrl: it.imageUrl ?? undefined,
           grupo: it.category,
-          quantidade: defaultSuggestedQty(it.id),
+          quantidade: it.suggestedQty,
         })),
       });
       setAddModalTab(null);
-      const totalUnits = picked.reduce((s, it) => s + defaultSuggestedQty(it.id), 0);
+      const totalUnits = picked.reduce((s, it) => s + it.suggestedQty, 0);
       sendEvent('lista_item_catalogo_adicionado', { quantidade_itens: totalUnits });
       toast.success(
         totalUnits === 1
@@ -1638,7 +1647,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
     }
   };
 
-  const addPresetItems = async (picked: PresetItem[], presetId: ListaProntaId) => {
+  const addPresetItems = async (picked: PresetItemPub[], presetId: string) => {
     try {
       await createBulkMut.mutateAsync({
         // Plan 0016 (aperture-putz5): one ROW per preset item with
@@ -1655,13 +1664,14 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
           // addCatalogItems for the undefined-vs-null reasoning.
           imagemUrl: it.imageUrl ?? undefined,
           grupo: presetId,
-          quantidade: defaultSuggestedQty(it.id),
+          quantidade: it.suggestedQty,
         })),
       });
       setPresetDetail(null);
       setPresetsOpen(false);
-      // aperture-p73kv — toast count mirrors the per-item djb2 helper.
-      const n = picked.reduce((s, it) => s + defaultSuggestedQty(it.id), 0);
+      // aperture-tb0rh F2 — toast count mirrors the per-item suggestedQty
+      // (DB value item.quantidade), matching display + submit.
+      const n = picked.reduce((s, it) => s + it.suggestedQty, 0);
       sendEvent('lista_pronta_itens_adicionados', { preset_id: presetId, quantidade_itens: n });
       toast.success(
         `${n} ${n === 1 ? 'presente adicionado' : 'presentes adicionados'} à sua lista ♡`,
@@ -1766,11 +1776,18 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
 
   // ── Initial loading + error gates ────────────────────────────────────────
 
-  if (listQuery.isPending) {
+  if (listQuery.isPending || listasProntasQuery.isPending) {
     return <ListaSkeleton />;
   }
-  if (listQuery.error) {
-    return <ListaErrorBanner onRetry={() => void listQuery.refetch()} />;
+  if (listQuery.error || listasProntasQuery.error) {
+    return (
+      <ListaErrorBanner
+        onRetry={() => {
+          void listQuery.refetch();
+          void listasProntasQuery.refetch();
+        }}
+      />
+    );
   }
 
   const addSubmitting = createMut.isPending || createBulkMut.isPending;
@@ -1850,20 +1867,21 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
               </h2>
               <p className="lista-prontas-sub">Toque pra ver os presentes antes de adicionar.</p>
               <div className="lista-prontas-grid">
-                {LISTA_PRONTAS.map((preset) => {
-                  const detail = listasProntas[preset.id];
-                  const itemCount = detail?.items.length ?? 0;
-                  // aperture-cdwdt: title/desc/cover now live in the JSON
-                  // template — UI only carries the emoji + tile-tint deltas.
-                  // Fall back to safe defaults if the loader is somehow stale.
-                  const title = detail?.title ?? preset.id;
-                  const desc = detail?.description ?? '';
-                  const cover = detail?.imageUrl ?? null;
+                {/* aperture-tb0rh F2 — presets are now dynamic (live tRPC
+                    record). Iterate the record's own entries so `detail` is
+                    guaranteed present; the per-slug style lookup supplies the
+                    emoji + tile tint (fallback for slugs the UI lacks art for). */}
+                {Object.entries(listasProntas).map(([id, detail]) => {
+                  const style = PRESET_TILE_STYLE[id] ?? PRESET_TILE_FALLBACK;
+                  const itemCount = detail.items.length;
+                  const title = detail.title;
+                  const desc = detail.description;
+                  const cover = detail.imageUrl;
                   return (
-                    <article key={preset.id} className="lista-pronta-card">
+                    <article key={id} className="lista-pronta-card">
                       <div
                         className="lista-pronta-icon"
-                        style={{ background: preset.tileVar }}
+                        style={{ background: style.tileVar }}
                         aria-hidden="true"
                       >
                         {cover ? (
@@ -1880,7 +1898,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
                             }}
                           />
                         ) : (
-                          <span>{preset.emoji}</span>
+                          <span>{style.emoji}</span>
                         )}
                       </div>
                       <h3 className="lista-pronta-title">{title}</h3>
@@ -1893,8 +1911,8 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
                           type="button"
                           className="lista-pronta-cta"
                           onClick={() => {
-                            sendEvent('lista_pronta_visualizada', { preset_id: preset.id });
-                            setPresetDetail(preset.id);
+                            sendEvent('lista_pronta_visualizada', { preset_id: id });
+                            setPresetDetail(id);
                           }}
                           aria-label={`Ver lista pronta: ${title}`}
                         >
@@ -1998,6 +2016,10 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
           onSubmitPersonalizado={addItem}
           onSubmitCatalogo={addCatalogItems}
           submitting={addSubmitting}
+          catalog={catalogQuery.data ?? []}
+          catalogLoading={catalogQuery.isPending}
+          catalogError={!!catalogQuery.error}
+          onRetryCatalog={() => void catalogQuery.refetch()}
         />
       )}
       {editItem && (
@@ -2024,14 +2046,23 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
           submitting={removeSubmitting}
         />
       )}
-      {presetDetail && listasProntas[presetDetail] && (
-        <PresetDetailModal
-          preset={listasProntas[presetDetail]}
-          onClose={() => setPresetDetail(null)}
-          onSubmit={(selected) => void addPresetItems(selected, presetDetail)}
-          submitting={presetSubmitting}
-        />
-      )}
+      {presetDetail &&
+        (() => {
+          // aperture-tb0rh F2 — listasProntas is a string-indexed record now, so
+          // the lookup is `ListaProntaPub | undefined`. Bind it once to narrow
+          // for the `preset` prop (presetDetail is const, so it stays narrowed
+          // to string inside this closure for addPresetItems).
+          const detail = listasProntas[presetDetail];
+          if (!detail) return null;
+          return (
+            <PresetDetailModal
+              preset={detail}
+              onClose={() => setPresetDetail(null)}
+              onSubmit={(selected) => void addPresetItems(selected, presetDetail)}
+              submitting={presetSubmitting}
+            />
+          );
+        })()}
     </div>
   );
 }
