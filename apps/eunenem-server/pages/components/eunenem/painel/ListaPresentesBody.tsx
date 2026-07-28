@@ -726,12 +726,16 @@ function CatalogoView({
   catalog,
   selected,
   onToggle,
+  disabled = false,
 }: {
   // aperture-tb0rh F2 — catalog sections come from the LIVE tRPC proc
   // (trpc.catalogo.listSections), threaded down from the body via AddGiftModal.
   catalog: CatalogSection[];
   selected: Set<string>;
   onToggle: (item: CatalogItem) => void;
+  // aperture-wpsfp — when the catalog is syncing/errored, the item buttons are
+  // disabled so a stale (about-to-change) product can't be picked mid-sync.
+  disabled?: boolean;
 }) {
   const [search, setSearch] = useState('');
   const [scope, setScope] = useState<CatScope>('todos');
@@ -929,6 +933,7 @@ function CatalogoView({
                     className={'lista-cat-item' + (on ? ' is-selected' : '')}
                     onClick={() => onToggle(it)}
                     aria-pressed={on}
+                    disabled={disabled}
                   >
                     <span className="lista-cat-thumb" style={{ background: it.bgColor }}>
                       {/* aperture-cdwdt: real product image when available; emoji fallback
@@ -1006,6 +1011,7 @@ function AddGiftModal({
   submitting,
   catalog,
   catalogLoading,
+  catalogSyncing,
   catalogError,
   onRetryCatalog,
 }: {
@@ -1020,6 +1026,11 @@ function AddGiftModal({
   // still loading or errored (surface-fetch-errors: error ≠ empty).
   catalog: CatalogSection[];
   catalogLoading: boolean;
+  // aperture-wpsfp — true while a BACKGROUND poll of listSections is in flight
+  // (catalogQuery.isFetching). While the catalog is syncing OR errored, item
+  // controls + submit are disabled so a stale (about-to-change) product can't be
+  // selected or submitted mid-sync.
+  catalogSyncing: boolean;
   catalogError: boolean;
   onRetryCatalog: () => void;
 }) {
@@ -1039,6 +1050,30 @@ function AddGiftModal({
     );
     return out;
   }, [catalog, selected]);
+
+  // aperture-wpsfp — reconcile the selection against the live catalog. When a
+  // product disappears (admin deactivate lands via the poll), drop its id from
+  // `selected` so it can't RESURRECT into the selection if the product is
+  // reactivated later. selectedItems already excludes absent ids from the
+  // submit payload; this prunes the id itself so reactivation doesn't re-add it.
+  useEffect(() => {
+    const validIds = new Set<string>();
+    catalog.forEach((sec) => sec.items.forEach((it) => validIds.add(it.id)));
+    setSelected((cur) => {
+      let changed = false;
+      const next = new Set<string>();
+      cur.forEach((id) => {
+        if (validIds.has(id)) next.add(id);
+        else changed = true;
+      });
+      return changed ? next : cur;
+    });
+  }, [catalog]);
+
+  // aperture-wpsfp — catalog is "busy" while a background poll is syncing or the
+  // query is errored. Item controls + submit are disabled while busy so the user
+  // can't act on catalog data that is mid-change or known-stale.
+  const catalogBusy = catalogSyncing || catalogError;
   // aperture-p73kv / aperture-tb0rh F2 — mirror the picker's "sugerido N un"
   // (display + submit) on the running total so the footer R$ amount doesn't
   // drift from what the user sees per card. suggestedQty is now the operator-set
@@ -1046,6 +1081,8 @@ function AddGiftModal({
   const catTotal = selectedItems.reduce((s, i) => s + i.price * i.suggestedQty, 0);
 
   const toggleCatItem = (it: CatalogItem) => {
+    // aperture-wpsfp — no selection changes while the catalog is syncing/errored.
+    if (catalogBusy) return;
     setSelected((cur) => {
       const next = new Set(cur);
       if (next.has(it.id)) next.delete(it.id);
@@ -1060,7 +1097,10 @@ function AddGiftModal({
   };
 
   const submitCatalogo = () => {
-    if (selectedItems.length === 0 || submitting) return;
+    // aperture-wpsfp — never submit while the catalog is syncing/errored;
+    // selectedItems is already derived from the live catalog so any product that
+    // has since disappeared is excluded from the payload.
+    if (selectedItems.length === 0 || submitting || catalogBusy) return;
     onSubmitCatalogo(selectedItems);
   };
 
@@ -1135,7 +1175,12 @@ function AddGiftModal({
                 </p>
               </div>
             ) : (
-              <CatalogoView catalog={catalog} selected={selected} onToggle={toggleCatItem} />
+              <CatalogoView
+                catalog={catalog}
+                selected={selected}
+                onToggle={toggleCatItem}
+                disabled={catalogBusy}
+              />
             )}
           </div>
         ) : (
@@ -1175,7 +1220,7 @@ function AddGiftModal({
             <button
               type="button"
               className="btn btn-primary"
-              disabled={selectedItems.length === 0 || submitting}
+              disabled={selectedItems.length === 0 || submitting || catalogBusy}
               onClick={submitCatalogo}
             >
               <span className="lista-btn-ic">{icon.plus}</span>{' '}
@@ -1312,17 +1357,41 @@ function PresetDetailModal({
   onClose,
   onSubmit,
   submitting,
+  syncing,
 }: {
   preset: ListaProntaPub;
   onClose: () => void;
   onSubmit: (selected: PresetItemPub[]) => void;
   submitting: boolean;
+  // aperture-7tyqh — true while a background poll of listListasProntas is in
+  // flight. While syncing, item controls + submit are disabled so a stale
+  // (about-to-change) preset item can't be picked/submitted mid-sync.
+  syncing: boolean;
 }) {
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(preset.items.map((it) => it.id)),
   );
 
+  // aperture-7tyqh — reconcile the selection against the live preset items. When
+  // an item disappears (admin edit lands via the poll), drop its id so it can't
+  // resurrect if the item returns. selectedItems already excludes absent ids
+  // from the submit payload; this prunes the id itself.
+  useEffect(() => {
+    const validIds = new Set(preset.items.map((it) => it.id));
+    setSelected((cur) => {
+      let changed = false;
+      const next = new Set<string>();
+      cur.forEach((id) => {
+        if (validIds.has(id)) next.add(id);
+        else changed = true;
+      });
+      return changed ? next : cur;
+    });
+  }, [preset]);
+
   const toggle = (id: string) => {
+    // aperture-7tyqh — no selection changes while the preset is syncing.
+    if (syncing) return;
     setSelected((cur) => {
       const next = new Set(cur);
       if (next.has(id)) next.delete(id);
@@ -1338,7 +1407,9 @@ function PresetDetailModal({
   const count = selectedItems.length;
 
   const submit = () => {
-    if (count === 0 || submitting) return;
+    // aperture-7tyqh — never submit while the preset is syncing; selectedItems is
+    // derived from the live preset so any item that disappeared is excluded.
+    if (count === 0 || submitting || syncing) return;
     onSubmit(selectedItems);
   };
 
@@ -1371,6 +1442,7 @@ function PresetDetailModal({
                 onClick={() => toggle(it.id)}
                 aria-pressed={on}
                 aria-label={`${on ? 'Remover' : 'Adicionar'} ${it.name}`}
+                disabled={syncing}
               >
                 <div
                   className="lista-preset-thumb"
@@ -1426,7 +1498,7 @@ function PresetDetailModal({
           <button
             type="button"
             className="btn btn-primary"
-            disabled={count === 0 || submitting}
+            disabled={count === 0 || submitting || syncing}
             onClick={submit}
           >
             <span className="lista-btn-ic">{icon.heart}</span>
@@ -1531,28 +1603,31 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
   const deleteMut = useContribuicaoDelete();
   const updateMut = useContribuicaoUpdate();
 
-  // aperture-wpsfp — the AddGiftModal open-state gates the catalog poll below, so
-  // it is declared before catalogQuery (whose refetchInterval reacts to it).
+  // aperture-wpsfp / aperture-7tyqh — modal/panel open-states gate the catalog +
+  // listas-prontas polls below, so ALL local state is declared before the
+  // queries whose refetchInterval reacts to it.
   const [addModalTab, setAddModalTab] = useState<AddTab | null>(null);
+  const [presetsOpen, setPresetsOpen] = useState(false);
+  const [presetDetail, setPresetDetail] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [cat, setCat] = useState<CatFilter>('all');
+  const [editItem, setEditItem] = useState<GroupedGift | null>(null);
+  const [removeItem, setRemoveItem] = useState<GroupedGift | null>(null);
   // aperture-wpsfp — true only while an explicit picker-open refetch is in flight.
   // Gates the picker loading state so a just-deactivated item can't be selected
-  // during THAT refetch — without flashing loading on the 3s background poll
-  // (which updates the grid seamlessly).
+  // during THAT refetch — without flashing loading on the 3s background poll.
   const [catalogRefreshing, setCatalogRefreshing] = useState(false);
 
-  // aperture-tb0rh F2 — live catalog + listas-prontas from the tRPC procs so
-  // admin catalog CRUD propagates to /painel. Catalog (listSections) is only
-  // needed inside the AddGiftModal picker; listas prontas drive the preset
-  // tiles in the main body.
-  //
-  // aperture-wpsfp — cross-Page cache coherence. Admin catalog mutations live in
-  // a DIFFERENT Page's QueryClient (TrpcProvider is per-Page), so this customer
-  // query is never invalidated by them. Two mechanisms keep an ALREADY-OPEN
-  // picker current within the 5s acceptance window: (1) a poll gated to
-  // picker-open (refetchInterval; refetchIntervalInBackground so a two-context
-  // test's backgrounded customer tab still polls); (2) an explicit refetch on
-  // every picker-open (openAddModal) for instant freshness + stale-selection
-  // blocking. The poll is OFF whenever the modal is closed.
+  // aperture-tb0rh F2 / aperture-wpsfp / aperture-7tyqh — live catalog + listas-
+  // prontas from the tRPC procs so admin CRUD propagates to /painel. Cross-Page
+  // cache coherence: admin mutations live in a DIFFERENT Page's QueryClient
+  // (TrpcProvider is per-Page), so these customer queries are never invalidated
+  // by them. Each surface keeps an ALREADY-OPEN modal/panel current within the
+  // 5s acceptance window by polling its query WHILE THAT SURFACE IS OPEN
+  // (refetchInterval gated to the open-state; refetchIntervalInBackground so a
+  // two-context test's backgrounded customer tab still polls) PLUS an explicit
+  // refetch on open (openAddModal / openPresets). Both polls are OFF whenever
+  // their surface is closed — zero polling on the normal customer view.
   const catalogQuery = trpc.catalogo.listSections.useQuery(undefined, {
     staleTime: 30_000,
     refetchInterval: addModalTab !== null ? 3000 : false,
@@ -1560,6 +1635,8 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
   });
   const listasProntasQuery = trpc.catalogo.listListasProntas.useQuery(undefined, {
     staleTime: 30_000,
+    refetchInterval: presetsOpen ? 3000 : false,
+    refetchIntervalInBackground: true,
   });
 
   // aperture-wpsfp — shared picker-open handler for every add-gift CTA. Force-
@@ -1571,12 +1648,14 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
     void catalogQuery.refetch().finally(() => setCatalogRefreshing(false));
   };
 
-  const [search, setSearch] = useState('');
-  const [cat, setCat] = useState<CatFilter>('all');
-  const [editItem, setEditItem] = useState<GroupedGift | null>(null);
-  const [removeItem, setRemoveItem] = useState<GroupedGift | null>(null);
-  const [presetsOpen, setPresetsOpen] = useState(false);
-  const [presetDetail, setPresetDetail] = useState<string | null>(null);
+  // aperture-7tyqh — toggle the "usar lista pronta" panel; on OPEN, force-refetch
+  // listListasProntas so the tiles open against current server truth (same
+  // cross-Page coherence as the picker).
+  const openPresets = () => {
+    const next = !presetsOpen;
+    setPresetsOpen(next);
+    if (next) void listasProntasQuery.refetch();
+  };
 
   // aperture-tb0rh F2 — live listas prontas keyed by slug. Empty object until
   // the query resolves; the gate below blocks render until it's ready.
@@ -1809,7 +1888,11 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
   if (listQuery.isPending || listasProntasQuery.isPending) {
     return <ListaSkeleton />;
   }
-  if (listQuery.error || listasProntasQuery.error) {
+  // aperture-7tyqh — only the INITIAL load failure nukes the page. Once listas-
+  // prontas has data, a background-poll error (listasProntasQuery.error with
+  // last-good data retained) must NOT replace the whole page — the panel keeps
+  // showing last-good tiles and the preset flow handles its own busy/error.
+  if (listQuery.error || (listasProntasQuery.error && listasProntasQuery.data === undefined)) {
     return (
       <ListaErrorBanner
         onRetry={() => {
@@ -1866,7 +1949,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
             <button
               type="button"
               className="btn btn-ghost"
-              onClick={() => setPresetsOpen((v) => !v)}
+              onClick={openPresets}
               aria-label="Usar lista pronta"
               aria-expanded={presetsOpen}
               aria-controls="lista-prontas-panel"
@@ -2048,6 +2131,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
           submitting={addSubmitting}
           catalog={catalogQuery.data ?? []}
           catalogLoading={catalogQuery.isPending || catalogRefreshing}
+          catalogSyncing={catalogQuery.isFetching}
           catalogError={!!catalogQuery.error}
           onRetryCatalog={() => void catalogQuery.refetch()}
         />
@@ -2090,6 +2174,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
               onClose={() => setPresetDetail(null)}
               onSubmit={(selected) => void addPresetItems(selected, presetDetail)}
               submitting={presetSubmitting}
+              syncing={listasProntasQuery.isFetching}
             />
           );
         })()}
