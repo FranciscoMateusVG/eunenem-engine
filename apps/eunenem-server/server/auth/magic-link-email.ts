@@ -17,9 +17,12 @@ import type { EmailMessage } from '../../../../src/index.js';
  * Email-client robustness (aperture-lqcgb — branded restyle):
  *   - Table-based layout + fully INLINE CSS. No flexbox/grid, no transforms,
  *     no background-images — the fragile things Gmail/Outlook choke on.
- *   - The handwritten "EuNeném ♡" wordmark uses Caveat via a <link> as
- *     progressive enhancement; Gmail & co strip web fonts and fall back to a
- *     cursive stack, which still reads warm. Body uses a system-font stack.
+ *   - Header + footer show the REAL "eu, NENÉM" tile logo (the same asset the
+ *     live site header uses), referenced by an ABSOLUTE public URL — email
+ *     clients strip relative/local image paths. The URL is derived from the
+ *     magic-link's own origin (staging vs prod) with an alt="EuNeném" fallback
+ *     for image-blocking clients. Body text uses a system-font stack (DM Sans
+ *     as progressive enhancement).
  *   - Button is a bulletproof-ish pill: bgcolor on the <td> gives Outlook a
  *     solid (square-cornered) button; border-radius rounds it everywhere else.
  *   - Copy + security language are UNCHANGED from the original plain version.
@@ -43,15 +46,27 @@ const INK_SOFT = '#7a5a6c';
 const INK_MUTE = '#a18a99';
 const LILAC_SOFT = '#e8d5f0';
 const LILAC_DEEP = '#a77bbe';
-const CORAL_PINK = '#e78fa7';
 
-const SCRIPT_STACK = "'Caveat','Segoe Script','Bradley Hand',cursive";
 const BODY_STACK =
   "'DM Sans',-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
 
 export function renderMagicLinkEmail(to: string, url: string): EmailMessage {
   const safeUrl = escapeHtml(url);
   const subject = 'Seu link de acesso ao EuNeném ♡';
+
+  // Absolute, publicly-fetchable logo URL. Email clients (Gmail etc.) strip
+  // relative/local image paths, so the real "eu, NENÉM" tile logo — served at
+  // /public/logo-landing.png, the same asset the live site header uses — must
+  // be referenced from a real hosted origin. Derived from the magic-link URL's
+  // own origin so staging emails point at staging and prod at prod, with a
+  // prod fallback if the (BetterAuth-built, normally-valid) URL can't parse.
+  let origin = 'https://eunenem.pocketsoftware.com.br';
+  try {
+    origin = new URL(url).origin;
+  } catch {
+    // keep the prod fallback origin
+  }
+  const logoUrl = escapeHtml(`${origin}/public/logo-landing.png`);
 
   const html = `<!doctype html>
 <html lang="pt-BR">
@@ -62,7 +77,7 @@ export function renderMagicLinkEmail(to: string, url: string): EmailMessage {
     <meta name="supported-color-schemes" content="light" />
     <title>Entrar no EuNeném</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&amp;family=DM+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet" />
     <style>
       @media (max-width:520px){
         .en-card{ width:100% !important; border-radius:0 !important; }
@@ -76,8 +91,8 @@ export function renderMagicLinkEmail(to: string, url: string): EmailMessage {
         <td align="center" style="padding:32px 16px;">
           <table role="presentation" class="en-card" width="480" cellpadding="0" cellspacing="0" border="0" style="width:480px;max-width:480px;background:#ffffff;border-radius:20px;border:1px solid ${CREAM_2};border-collapse:separate;overflow:hidden;">
             <tr>
-              <td align="center" style="background:${LILAC_SOFT};padding:28px 24px 24px;">
-                <div style="font-family:${SCRIPT_STACK};font-size:36px;line-height:1;font-weight:700;color:${PLUM};">EuNeném <span style="color:${CORAL_PINK};">&#9825;</span></div>
+              <td align="center" style="background:${LILAC_SOFT};padding:26px 24px;">
+                <img src="${logoUrl}" alt="EuNeném" width="188" height="63" style="display:block;margin:0 auto;border:0;outline:none;text-decoration:none;width:188px;height:auto;max-width:70%;" />
               </td>
             </tr>
             <tr>
@@ -110,7 +125,7 @@ export function renderMagicLinkEmail(to: string, url: string): EmailMessage {
             </tr>
             <tr>
               <td align="center" style="background:${CREAM};padding:18px 24px;">
-                <div style="font-family:${SCRIPT_STACK};font-size:17px;color:${INK_MUTE};">EuNeném <span style="color:${CORAL_PINK};">&#9825;</span></div>
+                <img src="${logoUrl}" alt="EuNeném" width="104" height="35" style="display:block;margin:0 auto;border:0;outline:none;text-decoration:none;width:104px;height:auto;opacity:0.85;" />
               </td>
             </tr>
           </table>
