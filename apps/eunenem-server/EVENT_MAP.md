@@ -152,8 +152,7 @@ nome que um do cliente (ex. `presenca_confirmada`) é distinguível no Mixpanel.
 | Evento | `distinct_id` | Origem |
 |---|---|---|
 | `pagamento_aprovado` | `idConta` do dono da campanha (via `campanhaRepository.findById(...).idsAdministradores[0]`; anônimo se não resolver) | webhook Stripe — `dispatchVerifiedStripeEvent`, ramos `paid` + `charge.succeeded` em [stripe-webhook.ts](server/webhooks/stripe-webhook.ts) |
-| `conta_criada` | `idConta` | signup email/senha ([auth-router.ts](server/trpc/auth-router.ts) `signUp`) + self-heal OAuth órfão ([session-resolver.ts](server/trpc/session-resolver.ts) `autoProvisionarUsuarioOrfao`); prop `metodo: 'email' \| 'oauth'` |
-| `login` | `idConta` | [auth-router.ts](server/trpc/auth-router.ts) `signIn` (distinto do `login_concluido` do cliente) |
+| `conta_criada` | `idConta` | self-heal após OAuth ou magic link ([session-resolver.ts](server/trpc/session-resolver.ts) `autoProvisionarUsuarioOrfao`); a prop atual é `metodo: 'oauth'` |
 | `campanha_criada` | `idConta` | [campanhas-router.ts](server/trpc/campanhas-router.ts) `criar` |
 | `repasse_solicitado` | `idConta` | [recebedor-router.ts](server/trpc/recebedor-router.ts) `transferencia.solicitar` (repasse PIX) |
 | `presenca_confirmada` | anônimo (guest, sem sessão) | [evento-lista-de-convidados-router.ts](server/trpc/evento-lista-de-convidados-router.ts) `confirmarPresenca` — contexto (`idCampanha`/`idConvidado`/`presenca`) vai nas props |

@@ -39,7 +39,7 @@ A **Plataforma** (§2.6) é o BC fundacional **multi-tenant**: cada Usuário, Ca
 
 **Decisão de produto:** o **contribuinte não cria conta**, para reduzir fricção no fluxo de pagamento. O snapshot do contribuinte vive em `IntencaoPagamento.contribuinte` (BC Pagamentos), populado pelo webhook do provedor.
 
-**Decisão arquitetural (Pattern A — Infrastructure Adapter, epic aperture-pgqih):** o domínio Usuário é **auth-implementation-agnostic**. Credencial, sessão, rate-limit e password-hashing **vivem fora do agregado**, atrás da porta `AuthService` (`src/adapters/usuario/auth-service.ts`). Dois adaptadores: `AuthServiceMemoria` (testes/dev, in-process) e `AuthServiceBetterAuth` (produção, BetterAuth + Postgres). A uniqueness composta `(idPlataforma, email)` é preservada em **duas camadas independentes** (schema do domínio + schema BetterAuth).
+**Decisão arquitetural (Pattern A — Infrastructure Adapter, epic aperture-pgqih):** o domínio Usuário é **auth-implementation-agnostic**. Sessão, rate-limit e integração BetterAuth **vivem fora do agregado**. O `eunenem-server` aceita entrada de conta somente por OAuth ou magic link; não configura email+senha e não expõe procedures de senha. A porta `AuthService` (`src/adapters/usuario/auth-service.ts`) permanece como abstração interna de biblioteca/teste; na composição de produção, `AuthServiceBetterAuth` é usado somente para validar e revogar sessões.
 
 **Conceitos principais**
 
@@ -49,7 +49,7 @@ A **Plataforma** (§2.6) é o BC fundacional **multi-tenant**: cada Usuário, Ca
 | Conta | Entidade aninhada 1:1 com Usuário; agrupa permissões e recursos administrativos |
 | Perfil | Dados exibíveis (`nomeExibicao`, `slug` derivado para URLs públicas) |
 | Permissões | O que a Conta pode fazer (ex.: criar campanha) |
-| **AuthService (porta)** | Contrato para credencial + sessão; vive **fora** do agregado. Métodos: `criarConta`, `iniciarSessao`, `validarSessao`, `revogarSessao`, `alterarSenha`, `removerConta`. Cada um recebe `idPlataforma` para a composta. |
+| **AuthService (porta)** | Contrato interno de credencial + sessão, fora do agregado. A biblioteca ainda define métodos históricos de senha para testes/compatibilidade, mas nenhum caller de rede os usa; a produção chama somente `validarSessao` e `revogarSessao`. |
 | **Sessão** | Owned pelo AuthService adapter (BetterAuth gerencia cookies + expiry em produção); o domínio só vê o resultado de `validarSessao` (`{idUsuario, idPlataforma, idConta} \| null`). |
 
 ---

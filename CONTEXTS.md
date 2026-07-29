@@ -462,21 +462,17 @@ Este documento descreve o **bounded context Usuário** pós-integração BetterA
 
 ## Decisão arquitetural: Pattern A — Infrastructure Adapter
 
-A integração BetterAuth seguiu o Pattern A: o **domínio Usuário fica intacto**; BetterAuth vive **fora do agregado**, atrás de uma porta `AuthService`. O agregado Usuario continua sendo apenas a identidade do administrador (id, idPlataforma, email, nomeExibicao, slug, idConta); a **credencial** (hash de senha, sessão, rate-limit) é responsabilidade do `AuthService` adapter, não do domínio.
+A integração BetterAuth seguiu o Pattern A: o **domínio Usuário fica intacto**; BetterAuth vive **fora do agregado**. O agregado Usuario continua sendo apenas a identidade do administrador (id, idPlataforma, email, nomeExibicao, slug, idConta). A entrada de conta do `eunenem-server` usa OAuth ou magic link diretamente pela composição BetterAuth; a porta `AuthService` permanece como abstração interna de biblioteca/teste e, no runtime de produção, é usada somente para validar e revogar sessões.
 
 Trade-off: o domínio fica **auth-implementation-agnostic** (testes usam `AuthServiceMemoria` sem qualquer dependência de BetterAuth, Postgres ou crypto). A composta `(idPlataforma, email)` é preservada em **duas camadas independentes**: no schema do domínio (`usuarios_plataforma_email_uniq` em `usuarios`) e no schema BetterAuth (`users_plataforma_email_uniq` em `users` da BetterAuth) — a invariante é replicada porque cada camada tem um dado próprio (registro de domínio vs. credencial), e nenhuma pode confiar na outra.
 
 ## Resumo em linguagem simples
 
-1. Um **administrador** se cadastra **dentro de uma plataforma** (ex.: eunenem) com email, nome de exibição e senha. O caso de uso `registrarContaUsuario`:
-   - Valida que a plataforma existe (`plataformaRepository.findById` → `UsuarioPlataformaNaoEncontradaError` se não).
-   - Cria o registro de domínio: `Usuario` + `Conta` 1:1 + slug derivado do nome de exibição, persistido via `saveRegistroDomain({usuario, conta})`.
-   - Chama `authService.criarConta({idPlataforma, idUsuario, email, senha})` para criar o principal BetterAuth com `idUsuario` controlado pelo chamador (não-padrão para BetterAuth — vide `AuthServiceBetterAuth` para o workaround via Kysely direto).
-   - **Compensação T3:** se a escrita BetterAuth falha após o registro de domínio ter sido persistido, o caso de uso rola o domínio para trás (best-effort) e levanta erro tipado. Cipher revisou isso na assinatura de segurança da epic.
-2. **Login (`signIn`)** vai pela porta `authService.iniciarSessao({idPlataforma, email, senha})` que devolve um token de sessão BetterAuth (cookie em produção, opaco em memória nos testes).
-3. **Sessão (`me`)** valida o token via `authService.validarSessao(token)` e devolve `{idUsuario, idPlataforma, idConta}`; sessão inválida ou expirada retorna `null`.
-4. **Logout (`signOut`)** chama `authService.revogarSessao(token)` (idempotente).
-5. **Alterar senha / remover conta** existem como métodos do port (`alterarSenha`, `removerConta`) e são exercidos por testes; rotas de admin não foram expostas em v1.
+1. Um **administrador** entra via OAuth (Google/Microsoft) ou magic link. Na primeira sessão, `session-resolver.ts` provisiona `Usuario` + `Conta` 1:1 + campanha padrão e deriva o slug; nenhuma senha é criada.
+2. O `eunenem-server` não expõe cadastro, login, reset ou alteração de senha. As antigas procedures tRPC `auth.signUp`, `auth.signIn` e `auth.continuarComEmail` foram removidas; as rotas nativas de senha da BetterAuth permanecem bloqueadas uniformemente com HTTP 410.
+3. **Sessão (`me`)** resolve o cookie BetterAuth e devolve `{idUsuario, idPlataforma, idConta}`; sessão inválida ou expirada retorna `null`.
+4. **Logout (`signOut`)** revoga a sessão de forma idempotente.
+5. Métodos de credencial e casos de uso antigos (`registrarContaUsuario`, `criarSessaoUsuario`) permanecem apenas como primitivas internas de biblioteca/teste, sem caller em rota ou composição de entrada de conta.
 6. O **`idConta`** (UUID) da conta é o mesmo tipo de identificador que o BC **Arrecadação** usa em `idsAdministradores` — a ligação é por **ID**, sem importar modelos entre contextos.
 
 A **uniqueness composta** `(idPlataforma, email)` é provada por teste de integração testcontainers (registrar mesmo email em duas plataformas distintas → ambos sucessos; mesmo email duas vezes na mesma plataforma → erro tipado).
@@ -490,20 +486,20 @@ A **uniqueness composta** `(idPlataforma, email)` é provada por teste de integr
 | Usuário (raiz do agregado, com `idPlataforma`) | [`src/domain/usuario/entities/usuario.ts`](src/domain/usuario/entities/usuario.ts) — `Usuario`, `Conta`, `contaTemPermissao`. **Sem `CredencialSimulada`** — credencial saiu do agregado pelo Pattern A. |
 | Identificadores (`IdUsuario`, `IdContaUsuario`, mirror VO `IdPlataformaReferencia`) | [`src/domain/usuario/value-objects/ids.ts`](src/domain/usuario/value-objects/ids.ts) |
 | Demais value objects (email, nome de exibição, slug, permissão, token de sessão) | [`src/domain/usuario/value-objects/`](src/domain/usuario/value-objects) |
-| **Porta `AuthService`** (credencial + sessão fora do agregado) | [`src/adapters/usuario/auth-service.ts`](src/adapters/usuario/auth-service.ts) — métodos: `criarConta`, `iniciarSessao`, `validarSessao`, `revogarSessao`, `alterarSenha`, `removerConta`. Cada método recebe `idPlataforma` como parâmetro para a uniqueness composta. |
+| **Porta `AuthService`** (credencial + sessão fora do agregado) | [`src/adapters/usuario/auth-service.ts`](src/adapters/usuario/auth-service.ts) — abstração interna mantida para biblioteca/testes. O runtime do `eunenem-server` usa somente `validarSessao` e `revogarSessao`; métodos de senha não têm caller de rede. |
 | Adaptador `AuthServiceMemoria` (testes + dev) | [`src/adapters/usuario/auth-service.memory.ts`](src/adapters/usuario/auth-service.memory.ts) — maps in-process, chave `{idPlataforma}::{email}` |
-| Adaptador `AuthServiceBetterAuth` (produção) | [`src/adapters/usuario/auth-service.better-auth.ts`](src/adapters/usuario/auth-service.better-auth.ts) — escreve direto em Kysely (bypass do pipeline HTTP da BetterAuth para preservar `idUsuario` controlado pelo chamador e pular rate-limit interno). Usa `hashPassword` / `verifyPassword` de `better-auth/crypto`. |
-| Helper `criarAuth` (config BetterAuth) | [`src/adapters/usuario/criar-auth.ts`](src/adapters/usuario/criar-auth.ts) — pool Kysely compartilhado, casing snake, sessão 7 dias / refresh 1 dia / fresh 1 dia, rate-limit DB-backed (multi-instance safe), `additionalFields.idPlataforma` requerido, **email + senha only** (sem OAuth, sem magic link, sem admin plugin) |
+| Adaptador `AuthServiceBetterAuth` | [`src/adapters/usuario/auth-service.better-auth.ts`](src/adapters/usuario/auth-service.better-auth.ts) — valida/revoga sessões na composição de produção. Operações de credencial preservadas no adapter são primitivas internas sem rota pública. |
+| Helper `criarAuth` (config BetterAuth) | [`src/adapters/usuario/criar-auth.ts`](src/adapters/usuario/criar-auth.ts) — pool Kysely compartilhado, casing snake, sessão 7 dias / refresh 1 dia / fresh 1 dia, rate-limit DB-backed (multi-instance safe), `additionalFields.idPlataforma`, OAuth Google/Microsoft e magic link quando configurados. Não configura `emailAndPassword`. |
 | Migration BetterAuth (5 tabelas) | [`migrations/20260530_009_create_better_auth.ts`](migrations/20260530_009_create_better_auth.ts) — `users` (com `id_plataforma` + composta `(id_plataforma, email)`), `sessions`, `accounts` (com `account_id = {idPlataforma}::{email}` para evitar colisão cross-tenant), `verifications`, `rate_limit` |
 | Porta de persistência do domínio | [`src/adapters/usuario/repository.ts`](src/adapters/usuario/repository.ts) — `UsuarioRepository.saveRegistroDomain({usuario, conta})`, `findUsuarioByEmail(idPlataforma, email)`, `findUsuarioById`, … |
 | Adaptador em memória | [`src/adapters/usuario/repository.memory.ts`](src/adapters/usuario/repository.memory.ts) |
 | Adaptador Postgres | [`src/adapters/usuario/repository.postgres.ts`](src/adapters/usuario/repository.postgres.ts) |
-| Caso de uso: cadastro (gate de plataforma + Pattern A) | [`src/use-cases/usuario/registrar-conta-usuario.ts`](src/use-cases/usuario/registrar-conta-usuario.ts) — deps incluem `plataformaRepository` + `authService` |
+| Caso de uso interno legado: cadastro por credencial | [`src/use-cases/usuario/registrar-conta-usuario.ts`](src/use-cases/usuario/registrar-conta-usuario.ts) — preservado para biblioteca/testes; não é chamado pelo `eunenem-server` |
 | Caso de uso: atualizar perfil | [`src/use-cases/usuario/atualizar-perfil-usuario.ts`](src/use-cases/usuario/atualizar-perfil-usuario.ts) |
-| Caso de uso: criar sessão (delega à porta) | [`src/use-cases/usuario/criar-sessao-usuario.ts`](src/use-cases/usuario/criar-sessao-usuario.ts) — chama `authService.iniciarSessao` |
+| Caso de uso interno legado: criar sessão por credencial | [`src/use-cases/usuario/criar-sessao-usuario.ts`](src/use-cases/usuario/criar-sessao-usuario.ts) — preservado para biblioteca/testes; não é chamado pelo `eunenem-server` |
 | Caso de uso: autorizar permissão | [`src/use-cases/usuario/autorizar-permissao-usuario.ts`](src/use-cases/usuario/autorizar-permissao-usuario.ts) — chama `authService.validarSessao` |
 | Consumer eunenem-server: mount handler | [`apps/eunenem-server/server/`](apps/eunenem-server/server/) — `auth.handler` montado no Hono entry (rota `/api/auth/**`) |
-| Consumer eunenem-server: procedures tRPC | mesmo diretório — `auth.signUp`, `auth.signIn`, `auth.signOut`, `auth.me` |
+| Consumer eunenem-server: procedures tRPC | mesmo diretório — somente `auth.signOut` e `auth.me` |
 | Erros tipados | [`src/errors/usuario/`](src/errors/usuario) — `UsuarioPlataformaNaoEncontradaError`, `UsuarioEmailJaCadastradoError`, … |
 | API pública | [`src/index.ts`](src/index.ts) — seção `Domain: Usuario` + re-exports dos adapters BetterAuth |
 | Testes unitários + integração | [`tests/unit/usuario/`](tests/unit/usuario), [`tests/integration/`](tests/integration) — incluindo conformance compartilhada Memória vs Postgres+BetterAuth via testcontainers (composta + saga T3) |
