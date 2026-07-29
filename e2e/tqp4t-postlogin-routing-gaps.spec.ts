@@ -54,7 +54,6 @@ import {
   ID_PLATAFORMA_EUNENEM,
   PlataformaRepositoryMemory,
 } from '../src/adapters/plataforma/repository.memory.js';
-import { AuthServiceBetterAuth } from '../src/adapters/usuario/auth-service.better-auth.js';
 import { PerfilCriadorRepositoryPostgres } from '../src/adapters/usuario/perfil-criador-repository.postgres.js';
 import { UsuarioRepositoryPostgres } from '../src/adapters/usuario/repository.postgres.js';
 import { criarPerfilCampanha } from '../src/domain/arrecadacao/entities/perfil-campanha.js';
@@ -63,8 +62,11 @@ import { conteudoPerfilCriadorVazio } from '../src/domain/usuario/value-objects/
 import { NoopLogger } from '../src/observability/noop-logger.js';
 import { noopTracer } from '../src/observability/tracer.js';
 import { criarCampanha } from '../src/use-cases/arrecadacao/criar-campanha.js';
-import { criarSessaoUsuario } from '../src/use-cases/usuario/criar-sessao-usuario.js';
-import { registrarContaUsuario } from '../src/use-cases/usuario/registrar-conta-usuario.js';
+import {
+  browserCookieFor,
+  type MagicLinkSession,
+  mintMagicLinkSession,
+} from './magic-link-auth.js';
 
 /**
  * Flip to true when aperture-w3rrd lands on staging (auth.me retry/safe-redirect
@@ -73,8 +75,6 @@ import { registrarContaUsuario } from '../src/use-cases/usuario/registrar-conta-
  * red on #29 alone. The assertions below are the frozen contract for w3rrd.
  */
 const W3RRD_WIRED = true;
-
-const SESSION_COOKIE = 'better-auth.session_token';
 
 const DATABASE_URL =
   process.env.E2E_DATABASE_URL ??
@@ -88,7 +88,7 @@ const WIZARD_LABEL = 'Vamos montar sua página';
 
 interface SeededUser {
   slug: string;
-  sessionToken: string;
+  session: MagicLinkSession;
   /** The user's OLDEST (auto-created) campanha id — the one seeds name/clear. */
   campanhaId: string;
 }
@@ -103,7 +103,6 @@ function buildSeedDeps(db: Database) {
     campanhaRepository: new CampanhaRepositoryPostgres(db, recebedorRepository),
     recebedorRepository,
     perfilCriadorRepository: new PerfilCriadorRepositoryPostgres(db),
-    authService: new AuthServiceBetterAuth(db, { clock: () => new Date() }),
     clock: () => new Date(),
     observability,
   };
@@ -167,14 +166,19 @@ async function seedUser(
     const nomeExibicao = `E2e${runSuffix} Helena`;
     const email = `e2e-tqp4t-${runSuffix}@e2e.local`;
 
-    const { usuario, campanha } = await registrarContaUsuario(deps, {
-      idUsuario: randomUUID() as never,
-      idConta: randomUUID() as never,
-      idPlataforma: ID_PLATAFORMA_EUNENEM as never,
+    const session = await mintMagicLinkSession(db, {
       email,
-      nomeExibicao,
-      senhaSimulada: 'senha-e2e-teste-123',
+      name: nomeExibicao,
+      baseURL: BASE_URL,
     });
+    const usuario = await deps.usuarioRepository.findUsuarioByEmail(
+      ID_PLATAFORMA_EUNENEM as never,
+      email,
+    );
+    if (!usuario) throw new Error(`Magic-link self-heal did not create usuario for ${email}`);
+    const campanhas = await deps.campanhaRepository.findCampanhasByAdministrador(usuario.idConta);
+    const campanha = campanhas.find((item) => item.titulo === `Lista de ${nomeExibicao}`);
+    if (!campanha) throw new Error(`Magic-link self-heal did not create campanha for ${email}`);
     await attachRecebedor(deps, campanha.id, nomeExibicao, email);
 
     if (opts.nomearDefault) {
@@ -194,13 +198,7 @@ async function seedUser(
       await setNomeBebe(db, segunda.id, 'Aurora');
     }
 
-    const sessao = await criarSessaoUsuario(deps, {
-      idPlataforma: ID_PLATAFORMA_EUNENEM as never,
-      email,
-      senhaSimulada: 'senha-e2e-teste-123',
-    });
-
-    return { slug: usuario.slug, sessionToken: sessao.token, campanhaId: campanha.id };
+    return { slug: usuario.slug, session, campanhaId: campanha.id };
   } finally {
     await db.destroy();
   }
@@ -222,18 +220,8 @@ async function openAuthedPage(
   browser: Browser,
   user: SeededUser,
 ): Promise<{ context: BrowserContext; page: Page }> {
-  const url = new URL(BASE_URL);
   const context = await browser.newContext();
-  await context.addCookies([
-    {
-      name: SESSION_COOKIE,
-      value: encodeURIComponent(user.sessionToken),
-      domain: url.hostname,
-      path: '/',
-      httpOnly: true,
-      sameSite: 'Lax',
-    },
-  ]);
+  await context.addCookies([browserCookieFor(user.session, BASE_URL)]);
   await context.addInitScript(
     ([key]) => window.localStorage.setItem(key, '1'),
     [CAMPANHAS_WELCOME_STORAGE_KEY],

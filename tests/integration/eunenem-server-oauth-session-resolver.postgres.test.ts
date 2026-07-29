@@ -71,14 +71,17 @@ describe('central session resolver — OAuth A2 + orphan self-heal (aperture-6wo
    * (unprefixed signed cookie) and the prod (`__Secure-` prefixed) shapes.
    */
   function buildDeps(opts: { useSecureCookies: boolean; idPlataformaPadrao?: string }) {
+    let capturedMagicLinkUrl: string | null = null;
     const auth = criarAuth(testDb.db, {
       secret: 'test-secret-at-least-thirty-two-characters-long',
       baseURL: 'http://localhost:3001',
       trustedOrigins: ['http://localhost:3001'],
-      sendResetPassword: async () => {},
       idPlataformaPadrao: opts.idPlataformaPadrao ?? ID_PLATAFORMA_EUNENEM,
       socialProviders: { google: { clientId: 'x', clientSecret: 'y' } },
       useSecureCookies: opts.useSecureCookies,
+      sendMagicLink: async ({ url }) => {
+        capturedMagicLinkUrl = url;
+      },
     });
     const authService = new AuthServiceBetterAuth(testDb.db);
     const recebedorRepository = new RecebedorRepositoryMemory();
@@ -94,28 +97,35 @@ describe('central session resolver — OAuth A2 + orphan self-heal (aperture-6wo
       clock: () => new Date(),
       sessionCookieName: 'better-auth.session_token',
     } as unknown as ServerDeps;
-    return { deps, auth };
+    return { deps, auth, readMagicLinkUrl: () => capturedMagicLinkUrl };
   }
 
   /**
-   * Create the OAuth orphan: `signUpEmail` drives BetterAuth's internal
-   * adapter create (users + sessions + accounts + the dm7s3 idPlataforma hook)
-   * WITHOUT running the engine domain saga — exactly the post-OAuth-callback
-   * state. Returns the `Cookie` header for the established session.
+   * Create the OAuth-shaped orphan through the real magic-link request + verify
+   * flow. BetterAuth writes users + sessions and runs the dm7s3 idPlataforma
+   * hook WITHOUT running the engine domain saga — exactly the post-OAuth
+   * callback state this resolver must heal. Returns the `Cookie` header for the
+   * established session.
    */
   async function criarOrfaoOAuthCookie(
     auth: ReturnType<typeof criarAuth>,
     email: string,
     name: string,
+    readMagicLinkUrl: () => string | null,
   ): Promise<string> {
-    const { headers } = await auth.api.signUpEmail({
-      body: { email, password: 'BogusBogus123!', name },
-      returnHeaders: true,
+    await auth.api.signInMagicLink({
+      body: { email, name, callbackURL: '/dashboard' },
+      headers: new Headers({ origin: 'http://localhost:3001' }),
     });
-    const setCookies = headers.getSetCookie();
-    const sessionSet = setCookies.find((c) => c.includes('session_token='));
+    const url = readMagicLinkUrl();
+    if (!url) throw new Error('signInMagicLink did not invoke the configured sender');
+    const verifyResponse = await auth.handler(
+      new Request(url, { method: 'GET', redirect: 'manual' }),
+    );
+    const setCookies = verifyResponse.headers.getSetCookie();
+    const sessionSet = setCookies.find((cookie) => cookie.includes('session_token='));
     if (!sessionSet) {
-      throw new Error(`signUpEmail set no session cookie; got: ${setCookies.join(' | ')}`);
+      throw new Error(`magic-link verify set no session cookie; got: ${setCookies.join(' | ')}`);
     }
     // `name=value` — drop the attributes after the first ';'.
     return sessionSet.split(';')[0];
@@ -128,8 +138,13 @@ describe('central session resolver — OAuth A2 + orphan self-heal (aperture-6wo
   }
 
   it('OAuth orphan → getSession resolves the signed cookie + heal provisions the domain user', async () => {
-    const { deps, auth } = buildDeps({ useSecureCookies: false });
-    const cookie = await criarOrfaoOAuthCookie(auth, 'orphan@example.com', 'Orphan OAuth');
+    const { deps, auth, readMagicLinkUrl } = buildDeps({ useSecureCookies: false });
+    const cookie = await criarOrfaoOAuthCookie(
+      auth,
+      'orphan@example.com',
+      'Orphan OAuth',
+      readMagicLinkUrl,
+    );
 
     // PRECONDITION: no domain usuarios row exists yet (the orphan).
     // (resolver will heal it.)
@@ -149,8 +164,13 @@ describe('central session resolver — OAuth A2 + orphan self-heal (aperture-6wo
   });
 
   it('also resolves under prod useSecureCookies=true (__Secure- prefixed signed cookie)', async () => {
-    const { deps, auth } = buildDeps({ useSecureCookies: true });
-    const cookie = await criarOrfaoOAuthCookie(auth, 'secure@example.com', 'Secure User');
+    const { deps, auth, readMagicLinkUrl } = buildDeps({ useSecureCookies: true });
+    const cookie = await criarOrfaoOAuthCookie(
+      auth,
+      'secure@example.com',
+      'Secure User',
+      readMagicLinkUrl,
+    );
     // Sanity: the prod cookie name carries the __Secure- prefix — the exact
     // name the BARE tRPC read can't match, which is WHY A2 is needed.
     expect(cookie.startsWith('__Secure-')).toBe(true);
@@ -161,7 +181,7 @@ describe('central session resolver — OAuth A2 + orphan self-heal (aperture-6wo
   });
 
   it('P0: a signed Better Auth cookie for a foreign tenant is rejected and never self-healed', async () => {
-    const { deps, auth } = buildDeps({
+    const { deps, auth, readMagicLinkUrl } = buildDeps({
       useSecureCookies: false,
       idPlataformaPadrao: ID_PLATAFORMA_EUCASEI,
     });
@@ -169,6 +189,7 @@ describe('central session resolver — OAuth A2 + orphan self-heal (aperture-6wo
       auth,
       'foreign-signed@example.com',
       'Foreign Signed',
+      readMagicLinkUrl,
     );
 
     expect(await resolverUsuarioAutenticadoOuNull(deps, headersComCookie(cookie))).toBeNull();
@@ -219,8 +240,13 @@ describe('central session resolver — OAuth A2 + orphan self-heal (aperture-6wo
   });
 
   it('idempotent: a second resolve finds the healed user, provisions nothing new', async () => {
-    const { deps, auth } = buildDeps({ useSecureCookies: false });
-    const cookie = await criarOrfaoOAuthCookie(auth, 'idem@example.com', 'Idem User');
+    const { deps, auth, readMagicLinkUrl } = buildDeps({ useSecureCookies: false });
+    const cookie = await criarOrfaoOAuthCookie(
+      auth,
+      'idem@example.com',
+      'Idem User',
+      readMagicLinkUrl,
+    );
     const h = headersComCookie(cookie);
 
     const first = await resolverUsuarioAutenticado(deps, h);
@@ -231,8 +257,13 @@ describe('central session resolver — OAuth A2 + orphan self-heal (aperture-6wo
   });
 
   it('concurrent double-resolve provisions exactly once (UNIQUE backstop, Cipher #4)', async () => {
-    const { deps, auth } = buildDeps({ useSecureCookies: false });
-    const cookie = await criarOrfaoOAuthCookie(auth, 'race@example.com', 'Race User');
+    const { deps, auth, readMagicLinkUrl } = buildDeps({ useSecureCookies: false });
+    const cookie = await criarOrfaoOAuthCookie(
+      auth,
+      'race@example.com',
+      'Race User',
+      readMagicLinkUrl,
+    );
     const h = headersComCookie(cookie);
 
     const [a, b] = await Promise.all([

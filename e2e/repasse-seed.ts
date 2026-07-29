@@ -31,7 +31,6 @@ import {
   ID_PLATAFORMA_EUNENEM,
   PlataformaRepositoryMemory,
 } from '../src/adapters/plataforma/repository.memory.js';
-import { AuthServiceBetterAuth } from '../src/adapters/usuario/auth-service.better-auth.js';
 import { UsuarioRepositoryPostgres } from '../src/adapters/usuario/repository.postgres.js';
 import { criarRecebedorInicial } from '../src/domain/arrecadacao/entities/recebedor.js';
 import type { IdCampanha } from '../src/domain/arrecadacao/value-objects/ids.js';
@@ -41,14 +40,15 @@ import type { IdRepasse } from '../src/domain/pagamentos/financeiro/value-object
 import { NoopLogger } from '../src/observability/noop-logger.js';
 import { noopTracer } from '../src/observability/tracer.js';
 import { gerarTransferReferencia } from '../src/use-cases/pagamentos/financeiro/aprovar-repasse-recebedor.js';
-import { criarSessaoUsuario } from '../src/use-cases/usuario/criar-sessao-usuario.js';
-import { registrarContaUsuario } from '../src/use-cases/usuario/registrar-conta-usuario.js';
 import { seedLancamentoParents } from '../tests/helpers/seed-lancamento-parents.js';
+import { mintMagicLinkSession } from './magic-link-auth.js';
 
 export const REPASSE_SEED_DATABASE_URL =
   process.env.E2E_DATABASE_URL ??
   process.env.DATABASE_URL ??
   'postgresql://frame:frame@localhost:54320/frame';
+
+const BASE_URL = process.env.E2E_BASE_URL ?? 'http://localhost:3002';
 
 const T0 = new Date('2026-07-16T12:00:00Z');
 
@@ -67,7 +67,6 @@ function buildRepasseSeedDeps(db: Database) {
     campanhaRepository: new CampanhaRepositoryPostgres(db, recebedorRepository),
     recebedorRepository,
     contribuicaoRepository: new ContribuicaoRepositoryPostgres(db),
-    authService: new AuthServiceBetterAuth(db, { clock: () => new Date() }),
     clock: () => new Date(),
     observability,
   };
@@ -78,14 +77,12 @@ export interface SeededCampanhaOwner {
   idRecebedor: string;
   slug: string;
   email: string;
-  /** BetterAuth session token for the campaign OWNER (a non-admin). */
-  sessionToken: string;
 }
 
 /**
  * Seed a fresh usuario + campanha + active PIX recebedor whose chave PIX is the
  * given magic marker. Returns the owner's identifiers + a non-admin session
- * token (used for the extrato view + the RBAC-denial walk).
+ * The magic-link flow provisions the real domain user/campaign via auth.me.
  */
 export async function seedCampanhaOwner(
   db: Database,
@@ -98,14 +95,19 @@ export async function seedCampanhaOwner(
   const nomeExibicao = `E2e${runSuffix} Repasse`;
   const email = `e2e-repasse-${runSuffix}@e2e.local`;
 
-  const { usuario, campanha } = await registrarContaUsuario(deps, {
-    idUsuario: randomUUID() as never,
-    idConta: randomUUID() as never,
-    idPlataforma: ID_PLATAFORMA_EUNENEM as never,
+  await mintMagicLinkSession(db, {
     email,
-    nomeExibicao,
-    senhaSimulada: 'senha-e2e-repasse-123',
+    name: nomeExibicao,
+    baseURL: BASE_URL,
   });
+  const usuario = await deps.usuarioRepository.findUsuarioByEmail(
+    ID_PLATAFORMA_EUNENEM as never,
+    email,
+  );
+  if (!usuario) throw new Error(`Magic-link self-heal did not create usuario for ${email}`);
+  const campanhas = await deps.campanhaRepository.findCampanhasByAdministrador(usuario.idConta);
+  const campanha = campanhas.find((item) => item.titulo === `Lista de ${nomeExibicao}`);
+  if (!campanha) throw new Error(`Magic-link self-heal did not create campanha for ${email}`);
 
   const idRecebedor = randomUUID();
   const recebedor = criarRecebedorInicial({
@@ -124,18 +126,11 @@ export async function seedCampanhaOwner(
   });
   await deps.recebedorRepository.save(recebedor);
 
-  const sessao = await criarSessaoUsuario(deps, {
-    idPlataforma: ID_PLATAFORMA_EUNENEM as never,
-    email,
-    senhaSimulada: 'senha-e2e-repasse-123',
-  });
-
   return {
     idCampanha: campanha.id,
     idRecebedor,
     slug: usuario.slug,
     email,
-    sessionToken: sessao.token,
   };
 }
 

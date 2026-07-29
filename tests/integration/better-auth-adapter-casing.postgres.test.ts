@@ -35,9 +35,6 @@ describe('better-auth adapter — snake_case column mapping (aperture-bq2c9)', (
       secret: 'test-secret-at-least-thirty-two-characters-long',
       baseURL: 'http://localhost:3001',
       trustedOrigins: ['http://localhost:3001'],
-      sendResetPassword: async () => {
-        /* no-op for this adapter-layer test */
-      },
       socialProviders: {
         google: { clientId: 'test-client-id', clientSecret: 'test-client-secret' },
       },

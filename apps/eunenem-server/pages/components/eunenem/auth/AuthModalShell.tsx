@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 
-import { type AuthSession, isValidEmail } from "@/lib/auth";
+import { isValidEmail } from "@/lib/auth";
 import { authClient } from "@/lib/authClient";
 
 // aperture-qp12y — AuthModalShell (passwordless-only entry).
@@ -16,10 +16,6 @@ import { authClient } from "@/lib/authClient";
 // The magic-link submit is enumeration-safe: we never pre-check whether the
 // email exists, and the confirmation copy never reveals it. The server decides
 // login-vs-create when the emailed link is clicked.
-//
-// The tenant-scoped `auth.continuarComEmail` tRPC procedure still exists
-// server-side — retiring it is a separate, backend-scoped decision. This
-// component simply no longer reaches it.
 //
 // OAuth providers: Google + Microsoft, wired to the real BetterAuth social
 // flow (onOauth → authClient.signIn.social). ZERO Apple.
@@ -51,12 +47,6 @@ export interface AuthModalShellProps {
    * mode swap anymore, so this is never called.
    */
   onModeChange?: (next: AuthMode) => void;
-  /**
-   * Retained for API compatibility. The magic-link flow authenticates via a
-   * full-page redirect after the user clicks the emailed link, so the modal
-   * never resolves a session inline and never calls this.
-   */
-  onAuthenticated?: (session: AuthSession) => void;
 }
 
 const OAUTH_PROVIDERS = [

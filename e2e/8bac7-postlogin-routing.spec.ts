@@ -14,9 +14,9 @@
  * DESIGN DECISIONS (fixed by the QA lead — do not re-litigate here):
  *
  *  - NO auth.me MOCKING. `needsOnboarding` is DERIVED server-side from
- *    perfil.nomeBebe (auth-router.ts `me` procedure): registrarContaUsuario
- *    creates NO PerfilCriador row, so a fresh seeded user is GENUINELY
- *    needsOnboarding=true. For the =false case we seed a perfil with
+ *    perfil.nomeBebe (auth-router.ts `me` procedure): magic-link auth.me
+ *    self-heal creates NO PerfilCriador row, so a fresh seeded user is
+ *    GENUINELY needsOnboarding=true. For the =false case we seed a perfil with
  *    nomeBebe set via a direct PerfilCriadorRepositoryPostgres write
  *    (criarPerfilCriador + save — same direct-engine-write style as
  *    e2e/fixtures.ts). Real derivation beats mock drift: a route.fulfill
@@ -66,7 +66,6 @@ import {
   ID_PLATAFORMA_EUNENEM,
   PlataformaRepositoryMemory,
 } from '../src/adapters/plataforma/repository.memory.js';
-import { AuthServiceBetterAuth } from '../src/adapters/usuario/auth-service.better-auth.js';
 import { PerfilCriadorRepositoryPostgres } from '../src/adapters/usuario/perfil-criador-repository.postgres.js';
 import { UsuarioRepositoryPostgres } from '../src/adapters/usuario/repository.postgres.js';
 import { criarPerfilCampanha } from '../src/domain/arrecadacao/entities/perfil-campanha.js';
@@ -74,10 +73,11 @@ import { criarRecebedorInicial } from '../src/domain/arrecadacao/entities/recebe
 import { conteudoPerfilCriadorVazio } from '../src/domain/usuario/value-objects/conteudo-perfil-criador.js';
 import { NoopLogger } from '../src/observability/noop-logger.js';
 import { noopTracer } from '../src/observability/tracer.js';
-import { criarSessaoUsuario } from '../src/use-cases/usuario/criar-sessao-usuario.js';
-import { registrarContaUsuario } from '../src/use-cases/usuario/registrar-conta-usuario.js';
-
-const SESSION_COOKIE = 'better-auth.session_token';
+import {
+  browserCookieFor,
+  type MagicLinkSession,
+  mintMagicLinkSession,
+} from './magic-link-auth.js';
 
 const DATABASE_URL =
   process.env.E2E_DATABASE_URL ??
@@ -91,7 +91,7 @@ const WIZARD_LABEL = 'Vamos montar sua página';
 
 interface SeededUser {
   slug: string;
-  sessionToken: string;
+  session: MagicLinkSession;
 }
 
 /** Engine deps for the seed flow — mirrors e2e/fixtures.ts buildSeedDeps. */
@@ -104,7 +104,6 @@ function buildSeedDeps(db: Database) {
     campanhaRepository: new CampanhaRepositoryPostgres(db, recebedorRepository),
     recebedorRepository,
     perfilCriadorRepository: new PerfilCriadorRepositoryPostgres(db),
-    authService: new AuthServiceBetterAuth(db, { clock: () => new Date() }),
     clock: () => new Date(),
     observability,
   };
@@ -113,9 +112,9 @@ function buildSeedDeps(db: Database) {
 /**
  * Seed a fresh user + session directly through the engine (no UI).
  *
- * registrarContaUsuario creates usuario + conta + default campanha but NO
- * PerfilCriador row → the account is GENUINELY needsOnboarding=true (the
- * auth.me derivation reads perfil.nomeBebe). With `onboarded: true` we
+ * Magic-link auth + auth.me self-heal creates usuario + conta + default
+ * campanha but NO PerfilCriador row → the account is GENUINELY
+ * needsOnboarding=true. With `onboarded: true` we
  * additionally write a perfil whose nomeBebe is set — a direct
  * criarPerfilCriador + PerfilCriadorRepositoryPostgres.save (the same
  * row the wizard's perfil.atualizar mutation would upsert) → the REAL
@@ -132,14 +131,19 @@ async function seedUser(opts: { onboarded: boolean }): Promise<SeededUser> {
     const nomeExibicao = `E2e${runSuffix} Helena`;
     const email = `e2e-test-${runSuffix}@e2e.local`;
 
-    const { usuario, campanha } = await registrarContaUsuario(deps, {
-      idUsuario: randomUUID() as never,
-      idConta: randomUUID() as never,
-      idPlataforma: ID_PLATAFORMA_EUNENEM as never,
+    const session = await mintMagicLinkSession(db, {
       email,
-      nomeExibicao,
-      senhaSimulada: 'senha-e2e-teste-123',
+      name: nomeExibicao,
+      baseURL: BASE_URL,
     });
+    const usuario = await deps.usuarioRepository.findUsuarioByEmail(
+      ID_PLATAFORMA_EUNENEM as never,
+      email,
+    );
+    if (!usuario) throw new Error(`8bac7 seed: auth.me did not provision ${email}`);
+    const campanhas = await deps.campanhaRepository.findCampanhasByAdministrador(usuario.idConta);
+    const campanha = campanhas.find((candidate) => candidate.titulo === `Lista de ${nomeExibicao}`);
+    if (!campanha) throw new Error(`8bac7 seed: no default campanha for ${email}`);
 
     // Attach a recebedor so the campanha is "complete" (mirrors
     // e2e/fixtures.ts — findByAdministrador otherwise resolves undefined
@@ -173,13 +177,7 @@ async function seedUser(opts: { onboarded: boolean }): Promise<SeededUser> {
       await new PerfilCampanhaRepositoryPostgres(db).save(perfil);
     }
 
-    const sessao = await criarSessaoUsuario(deps, {
-      idPlataforma: ID_PLATAFORMA_EUNENEM as never,
-      email,
-      senhaSimulada: 'senha-e2e-teste-123',
-    });
-
-    return { slug: usuario.slug, sessionToken: sessao.token };
+    return { slug: usuario.slug, session };
   } finally {
     await db.destroy();
   }
@@ -194,18 +192,8 @@ async function openAuthedPage(
   browser: Browser,
   user: SeededUser,
 ): Promise<{ context: BrowserContext; page: Page }> {
-  const url = new URL(BASE_URL);
   const context = await browser.newContext();
-  await context.addCookies([
-    {
-      name: SESSION_COOKIE,
-      value: encodeURIComponent(user.sessionToken),
-      domain: url.hostname,
-      path: '/',
-      httpOnly: true,
-      sameSite: 'Lax',
-    },
-  ]);
+  await context.addCookies([browserCookieFor(user.session, BASE_URL)]);
   await context.addInitScript(
     ([key]) => window.localStorage.setItem(key, '1'),
     [CAMPANHAS_WELCOME_STORAGE_KEY],

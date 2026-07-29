@@ -33,7 +33,7 @@
  * prod-serving DB. Therefore this spec uses a PERMANENT, IDEMPOTENT
  * gate-walker user (incluir o0kt/9yaa precedent) instead of per-run junk
  * accounts:
- *   - auth.continuarComEmail (login-or-signup) with fixed credentials
+ *   - real BetterAuth magic-link sign-in with a fixed email
  *     from env — first run creates the walker (+ auto campanha A
  *     "Lista de <nomeExibicao>"), completes the onboarding wizard via
  *     the real UI, and creates campanha B via campanhas.criar.
@@ -43,25 +43,24 @@
  *
  * RUN (against the deployed app):
  *   E2E_BASE_URL=https://eunenem.xeroxtoxerox.com \
- *   E2E_GATE_EMAIL=<walker email> E2E_GATE_SENHA=<walker senha> \
+ *   E2E_GATE_EMAIL=<walker email> \
  *   pnpm exec playwright test e2e/118sb-clickthrough-gate.spec.ts
  * (playwright.config.ts skips the local webServer when E2E_BASE_URL is
  * remote.) Also runs against local dev unchanged — the walker pattern is
  * deployment-agnostic.
  *
  * AUTH POSTURE NOTE: /api/auth/sign-{up,in}/email are 410 (deny-by-default)
- * on the deployed build; the tRPC procedures auth.continuarComEmail /
+ * on the deployed build; the former password tRPC procedures are retired.
  * campanhas.criar are the supported scriptable surface (probed live,
  * rate-limited 10/min/(ip,email) — fine at test cadence).
  */
 import type { APIRequestContext, BrowserContext, Page } from '@playwright/test';
 import { expect, request as pwRequest, test } from '@playwright/test';
 import { CAMPANHAS_WELCOME_STORAGE_KEY } from '../apps/eunenem-server/pages/lib/campanhas.js';
-import { ID_PLATAFORMA_EUNENEM } from '../apps/eunenem-server/pages/lib/constants.js';
 import { seedGateWalker } from './gate-fixtures.js';
+import { browserCookieFor } from './magic-link-auth.js';
 
 const GATE_EMAIL = process.env.E2E_GATE_EMAIL;
-const GATE_SENHA = process.env.E2E_GATE_SENHA;
 
 /** Walker identity — deterministic so re-runs are read-only. Signup
  *  auto-creates campanha A titled `Lista de <NOME_EXIBICAO>`. */
@@ -134,8 +133,8 @@ async function completeWizard(page: Page, slug: string): Promise<void> {
 test.describe
   .serial('/campanhas → painel click-through gate (aperture-118sb)', () => {
     test.skip(
-      !GATE_EMAIL || !GATE_SENHA,
-      'E2E_GATE_EMAIL / E2E_GATE_SENHA not set — gate-walker credentials live in env/mempalace, see spec header',
+      !GATE_EMAIL,
+      'E2E_GATE_EMAIL not set — gate-walker credentials live in env/mempalace, see spec header',
     );
 
     let api: APIRequestContext;
@@ -146,26 +145,14 @@ test.describe
 
     test.beforeAll(async ({ browser, baseURL }) => {
       // Hermetic seed (coverage-expansion): find-or-create the gate-walker +
-      // campanhas A/B directly in the DB so the login/self-heal below finds the
+      // campanhas A/B directly in the DB so the magic-link session below finds the
       // full contract already correct on a fresh local DB. No-op when creds unset.
-      await seedGateWalker();
-      expect(baseURL, 'baseURL must be configured').toBeTruthy();
-      api = await pwRequest.newContext({ baseURL });
-
-      // Login-or-signup — idempotent by design. `criado` tells us whether
-      // this run bootstraps or reuses the permanent walker.
-      const cont = await api.post('/api/trpc/auth.continuarComEmail', {
-        data: {
-          email: GATE_EMAIL,
-          senha: GATE_SENHA,
-          idPlataforma: ID_PLATAFORMA_EUNENEM,
-          nomeExibicao: NOME_EXIBICAO,
-        },
+      const session = await seedGateWalker(baseURL);
+      expect(session, 'magic-link helper must return the gate session').toBeTruthy();
+      api = await pwRequest.newContext({
+        baseURL,
+        extraHTTPHeaders: { cookie: session?.cookie.header ?? '' },
       });
-      expect(
-        cont.ok(),
-        `continuarComEmail must succeed — got ${cont.status()}: ${await cont.text()}`,
-      ).toBe(true);
 
       const me = await trpcQuery<{ slug: string; needsOnboarding: boolean }>(api, 'auth.me');
       slug = me.slug;
@@ -174,7 +161,8 @@ test.describe
       // Browser context carries the walker session + pre-dismissed welcome
       // modal (hydration-race gotcha: the modal mounts after campanhas.list
       // resolves and intercepts clicks — pre-seed BEFORE any goto).
-      context = await browser.newContext({ storageState: await api.storageState() });
+      context = await browser.newContext();
+      await context.addCookies([browserCookieFor(session as NonNullable<typeof session>, baseURL)]);
       await context.addInitScript(
         ([key]) => window.localStorage.setItem(key, '1'),
         [CAMPANHAS_WELCOME_STORAGE_KEY],

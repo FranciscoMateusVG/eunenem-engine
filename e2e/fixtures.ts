@@ -14,12 +14,11 @@
  * DB; until then operator's dev DB accumulates `e2e-test-*` rows that
  * can be wiped periodically.
  *
- * Auth pattern mirrors `tests/integration/eunenem-server-contribuicao-router.test.ts:121-203`
- * — the canonical engine pattern. We sign up via `registrarContaUsuario`
- * (which auto-creates a default campanha + 'presente' opção), attach a
- * recebedor (PIX) directly so the campanha is "complete", then call
- * `criarSessaoUsuario` to mint a BetterAuth session token. The token
- * becomes a cookie injected into the Playwright browser context.
+ * Authentication uses the real BetterAuth magic-link plugin with a captured
+ * delivery URL. The running server then resolves that signed cookie through
+ * auth.me and self-heals the domain Usuario + default campanha exactly as the
+ * production OAuth/magic-link path does. The fixture only adds domain data
+ * needed by its tests after that passwordless provisioning completes.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -32,18 +31,17 @@ import {
   ID_PLATAFORMA_EUNENEM,
   PlataformaRepositoryMemory,
 } from '../src/adapters/plataforma/repository.memory.js';
-import { AuthServiceBetterAuth } from '../src/adapters/usuario/auth-service.better-auth.js';
 import { UsuarioRepositoryPostgres } from '../src/adapters/usuario/repository.postgres.js';
 import { criarContribuicao } from '../src/domain/arrecadacao/entities/contribuicao.js';
 import { criarRecebedorInicial } from '../src/domain/arrecadacao/entities/recebedor.js';
 import type { IdCampanha } from '../src/domain/arrecadacao/value-objects/ids.js';
-import { UsuarioEmailJaExisteError } from '../src/errors/usuario/email-ja-existe.error.js';
 import { NoopLogger } from '../src/observability/noop-logger.js';
 import { noopTracer } from '../src/observability/tracer.js';
-import { criarSessaoUsuario } from '../src/use-cases/usuario/criar-sessao-usuario.js';
-import { registrarContaUsuario } from '../src/use-cases/usuario/registrar-conta-usuario.js';
-
-const SESSION_COOKIE = 'better-auth.session_token';
+import {
+  browserCookieFor,
+  type MagicLinkSession,
+  mintMagicLinkSession,
+} from './magic-link-auth.js';
 
 // Admin allowlist session (aperture-0k84n, cluster C).
 //
@@ -66,7 +64,6 @@ const SESSION_COOKIE = 'better-auth.session_token';
 // which also sidesteps the slug-walk exhaustion that a fresh signup every run
 // would cause (see the `seededData` suffix note below).
 const ADMIN_EMAIL = 'e2e-admin@e2e.local';
-const ADMIN_SENHA = 'senha-e2e-admin-123';
 const ADMIN_NOME = 'E2e Admin';
 
 // Defaults to the engine's docker-compose Postgres on port 54320 (per
@@ -85,7 +82,7 @@ export interface SeededData {
   nomeExibicao: string;
   /** Email used during signup — unique per test run. */
   email: string;
-  /** Campanha id created by the registrarContaUsuario saga. */
+  /** Campanha id created by magic-link auth.me self-heal. */
   idCampanha: IdCampanha;
   /** The default 'presente' opção id (where contribuições live). */
   idOpcaoPresentes: string;
@@ -95,8 +92,8 @@ export interface SeededData {
   nomeContribuicao: string;
   /** Original gift cents value. */
   valorContribuicao: number;
-  /** BetterAuth session token — injected into the browser context cookie. */
-  sessionToken: string;
+  /** Signed BetterAuth session minted through the real magic-link flow. */
+  session: MagicLinkSession;
 }
 
 interface SeedFixtures {
@@ -118,10 +115,8 @@ interface SeedFixtures {
 }
 
 /**
- * Engine deps shaped for the seed flow. We instantiate only what
- * registrarContaUsuario + criarRecebedorInicial + criarSessaoUsuario
- * need — full ServerDeps would drag in Stripe and OTel that the
- * seed doesn't touch.
+ * Engine deps shaped for the post-auth seed flow. Full ServerDeps would drag
+ * in Stripe and OTel that the seed does not touch.
  */
 function buildSeedDeps(db: Database) {
   const logger = new NoopLogger();
@@ -133,7 +128,6 @@ function buildSeedDeps(db: Database) {
     campanhaRepository: new CampanhaRepositoryPostgres(db, recebedorRepository),
     recebedorRepository,
     contribuicaoRepository: new ContribuicaoRepositoryPostgres(db),
-    authService: new AuthServiceBetterAuth(db, { clock: () => new Date() }),
     clock: () => new Date(),
     observability,
   };
@@ -141,7 +135,7 @@ function buildSeedDeps(db: Database) {
 
 export const test = base.extend<SeedFixtures>({
   /**
-   * Per-test seed: registers a fresh usuario, attaches a recebedor,
+   * Per-test seed: provisions a fresh usuario, attaches a recebedor,
    * inserts a single contribuição, returns identifiers + a fresh
    * BetterAuth session token. No cleanup yet (Phase 1).
    */
@@ -159,17 +153,31 @@ export const test = base.extend<SeedFixtures>({
     const nomeExibicao = `E2e${runSuffix} Helena`;
     const email = `e2e-test-${runSuffix}@e2e.local`;
 
-    console.log(`[seededData] starting signup for ${email}…`);
-    // Step 1 — registrarContaUsuario auto-creates campanha + 'presente' opção.
-    const { usuario, campanha } = await registrarContaUsuario(deps, {
-      idUsuario: randomUUID() as never,
-      idConta: randomUUID() as never,
-      idPlataforma: ID_PLATAFORMA_EUNENEM as never,
+    console.log(`[seededData] starting magic-link signup for ${email}…`);
+    // Step 1 — BetterAuth creates the auth principal; auth.me self-heals the
+    // domain Usuario + default campanha through the production path.
+    const session = await mintMagicLinkSession(db, {
       email,
-      nomeExibicao,
-      senhaSimulada: 'senha-e2e-teste-123',
+      name: nomeExibicao,
+      baseURL: BASE_URL,
     });
-    console.log(`[seededData] signup OK, slug=${usuario.slug}, idCampanha=${campanha.id}`);
+    const usuario = await deps.usuarioRepository.findUsuarioByEmail(
+      ID_PLATAFORMA_EUNENEM as never,
+      email,
+    );
+    if (!usuario) throw new Error(`seededData: auth.me did not provision ${email}`);
+    const campanhas = await deps.campanhaRepository.findCampanhasByAdministrador(usuario.idConta);
+    const campanha = campanhas.find((candidate) => candidate.titulo === `Lista de ${nomeExibicao}`);
+    if (!campanha) {
+      throw new Error(
+        `seededData: no default campanha for ${email}; got ${JSON.stringify(
+          campanhas.map((candidate) => candidate.titulo),
+        )}`,
+      );
+    }
+    console.log(
+      `[seededData] magic-link signup OK, slug=${usuario.slug}, idCampanha=${campanha.id}`,
+    );
 
     const opcaoPresentes = campanha.opcoes.find((o) => o.tipo === 'presente');
     if (!opcaoPresentes) {
@@ -214,13 +222,6 @@ export const test = base.extend<SeedFixtures>({
     });
     await deps.contribuicaoRepository.save(contribuicao);
 
-    // Step 4 — mint a BetterAuth session.
-    const sessao = await criarSessaoUsuario(deps, {
-      idPlataforma: ID_PLATAFORMA_EUNENEM as never,
-      email,
-      senhaSimulada: 'senha-e2e-teste-123',
-    });
-
     await use({
       slug: usuario.slug,
       nomeExibicao,
@@ -230,7 +231,7 @@ export const test = base.extend<SeedFixtures>({
       idContribuicao: contribuicao.id as unknown as string,
       nomeContribuicao,
       valorContribuicao,
-      sessionToken: sessao.token,
+      session,
     });
 
     await db.destroy();
@@ -238,18 +239,9 @@ export const test = base.extend<SeedFixtures>({
 
   /** Browser context with the BetterAuth session cookie pre-set. */
   authenticatedContext: async ({ browser, seededData, baseURL }, use) => {
-    const url = new URL(baseURL ?? BASE_URL);
+    const resolvedBaseURL = baseURL ?? BASE_URL;
     const context = await browser.newContext();
-    await context.addCookies([
-      {
-        name: SESSION_COOKIE,
-        value: encodeURIComponent(seededData.sessionToken),
-        domain: url.hostname,
-        path: '/',
-        httpOnly: true,
-        sameSite: 'Lax',
-      },
-    ]);
+    await context.addCookies([browserCookieFor(seededData.session, resolvedBaseURL)]);
     await use(context);
     await context.close();
   },
@@ -264,58 +256,23 @@ export const test = base.extend<SeedFixtures>({
   /**
    * Browser context with an ALLOWLISTED ADMIN session cookie pre-set.
    *
-   * Find-or-create idempotent on the fixed ADMIN_EMAIL: register the admin
-   * account only if it doesn't already exist (catching the concurrent-create
-   * race), then mint a fresh BetterAuth session via the same password path the
-   * campaign-owner flow uses. The email is pinned into the webServer's
+   * Find-or-create idempotent on the fixed ADMIN_EMAIL through the shared
+   * magic-link helper. The email is pinned into the webServer's
    * `ADMIN_ALLOWED_EMAILS` env so `auth.me.isAdmin` resolves true and the
    * AdminShell gate (aperture-r5fg0) lets the real admin chrome render.
    */
   adminAuthenticatedContext: async ({ browser, baseURL }, use) => {
     const db = createDatabase(DATABASE_URL);
-    const deps = buildSeedDeps(db);
-
-    // Idempotent create — the admin account is fixed + reused across runs.
-    const existing = await deps.usuarioRepository.findUsuarioByEmail(
-      ID_PLATAFORMA_EUNENEM as never,
-      ADMIN_EMAIL,
-    );
-    if (!existing) {
-      try {
-        await registrarContaUsuario(deps, {
-          idUsuario: randomUUID() as never,
-          idConta: randomUUID() as never,
-          idPlataforma: ID_PLATAFORMA_EUNENEM as never,
-          email: ADMIN_EMAIL,
-          nomeExibicao: ADMIN_NOME,
-          senhaSimulada: ADMIN_SENHA,
-        });
-      } catch (err) {
-        // Lost a create race with a parallel worker — the account now exists,
-        // which is all we need. Any other failure is a real error → rethrow.
-        if (!(err instanceof UsuarioEmailJaExisteError)) throw err;
-      }
-    }
-
-    const sessao = await criarSessaoUsuario(deps, {
-      idPlataforma: ID_PLATAFORMA_EUNENEM as never,
+    const resolvedBaseURL = baseURL ?? BASE_URL;
+    const session = await mintMagicLinkSession(db, {
       email: ADMIN_EMAIL,
-      senhaSimulada: ADMIN_SENHA,
+      name: ADMIN_NOME,
+      baseURL: resolvedBaseURL,
     });
     await db.destroy();
 
-    const url = new URL(baseURL ?? BASE_URL);
     const context = await browser.newContext();
-    await context.addCookies([
-      {
-        name: SESSION_COOKIE,
-        value: encodeURIComponent(sessao.token),
-        domain: url.hostname,
-        path: '/',
-        httpOnly: true,
-        sameSite: 'Lax',
-      },
-    ]);
+    await context.addCookies([browserCookieFor(session, resolvedBaseURL)]);
     await use(context);
     await context.close();
   },

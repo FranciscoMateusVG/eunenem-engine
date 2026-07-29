@@ -14,16 +14,14 @@
  * load-bearing):
  *
  *  TRUST ANCHOR = users.email_verified === true. NOT "has a session".
- *    emailAndPassword signup is enabled with NO verification flow, so a
- *    password signup has email_verified=FALSE and proves NOTHING about inbox
- *    ownership. Most 1.0 users never registered on the new site, so without
- *    this gate an attacker could register victim@x.com + any password, get a
- *    session whose email == the victim's, and mint a Clerk ticket into the
- *    victim's OLD account = one-click cross-system takeover. email_verified is
- *    true ONLY via the ownership-proving paths (Google trusted+verified,
- *    Microsoft via the uq69m predicate, magic-link verify) — that IS the
- *    anchor. Password-only sessions fall back to the plain redirect (Clerk
- *    makes them log in the old way — today's live behavior, no regression).
+ *    Historical password-created users can have email_verified=FALSE and
+ *    prove NOTHING about inbox ownership. Most 1.0 users never registered on
+ *    the new site, so this gate prevents any pre-retirement credential from
+ *    being used to mint a Clerk ticket into the victim's OLD account.
+ *    email_verified is true ONLY via ownership-proving paths (Google
+ *    trusted+verified, Microsoft via the uq69m predicate, magic-link verify)
+ *    — that IS the anchor. Historical password sessions fall back to the plain
+ *    redirect (Clerk makes them log in the old way).
  *    Reinforced by the qcrv4/79b31 invariant: a verified-email user cannot
  *    retain a live credential password, and (aperture-as0v3 hardening) their
  *    pre-existing sessions are revoked the instant that password dies — so a

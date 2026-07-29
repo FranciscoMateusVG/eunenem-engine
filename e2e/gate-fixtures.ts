@@ -4,7 +4,7 @@
  * The five "gate" specs — w2-enforcement-gate, llol4-isolation-gates,
  * slug-isolation-gate, 118sb-clickthrough-gate, fblrt-fix-wave — were written
  * against a PERMANENT walker user pre-provisioned on a deployed target (their
- * beforeAll only LOGS IN via auth.continuarComEmail and self-heals a few bits).
+ * beforeAll authenticates through the deterministic magic-link helper).
  * Against a fresh LOCAL DB (docker Postgres :54320, spawned :3002 server) that
  * walker does not exist, so the specs either skip (no creds) or fail (login /
  * campanha-A assertions).
@@ -18,13 +18,13 @@
  * up to five times per run and must converge to the same state every time.
  *
  * After it runs, each spec's existing login/self-heal logic finds everything
- * already correct: continuarComEmail LOGS IN (the walker exists with matching
- * credentials), me.needsOnboarding is already false (A's perfil_campanhas has a
+ * already correct: the magic-link helper logs in and auth.me self-heals the domain identity;
+ * needsOnboarding is already false (A's perfil_campanhas has a
  * baby name), the tutorial is already dismissed, both campanhas exist with the
  * right titles/slugs/perfis/convite.
  *
  * CONTRACT (see the task brief):
- *   WALKER   email=E2E_GATE_EMAIL senha=E2E_GATE_SENHA, nomeExibicao
+ *   WALKER   email=E2E_GATE_EMAIL, nomeExibicao
  *            'Izzygate Walker', painel slug 'izzygate', tutorial complete,
  *            perfil_criadores nomeBebe 'Bebe Gate', EMPTY legado (pure 2.0).
  *   CAMPANHA A (OLDEST) titulo 'Lista de Izzygate Walker', slug=null, one gift
@@ -42,7 +42,6 @@
  * LOCAL dev DB only — this never touches staging/prod.
  */
 import { randomUUID } from 'node:crypto';
-import { hashPassword } from 'better-auth/crypto';
 import { CampanhaRepositoryPostgres } from '../src/adapters/arrecadacao/campanha-repository.postgres.js';
 import { ContribuicaoRepositoryPostgres } from '../src/adapters/arrecadacao/contribuicao-repository.postgres.js';
 import { PerfilCampanhaRepositoryPostgres } from '../src/adapters/arrecadacao/perfil-campanha-repository.postgres.js';
@@ -54,7 +53,6 @@ import {
   ID_PLATAFORMA_EUNENEM,
   PlataformaRepositoryMemory,
 } from '../src/adapters/plataforma/repository.memory.js';
-import { AuthServiceBetterAuth } from '../src/adapters/usuario/auth-service.better-auth.js';
 import { PerfilCriadorRepositoryPostgres } from '../src/adapters/usuario/perfil-criador-repository.postgres.js';
 import { UsuarioRepositoryPostgres } from '../src/adapters/usuario/repository.postgres.js';
 import type { Campanha } from '../src/domain/arrecadacao/entities/campanha.js';
@@ -62,7 +60,6 @@ import { criarContribuicao } from '../src/domain/arrecadacao/entities/contribuic
 import { criarPerfilCampanha } from '../src/domain/arrecadacao/entities/perfil-campanha.js';
 import { criarRecebedorInicial } from '../src/domain/arrecadacao/entities/recebedor.js';
 import { criarPerfilCriador } from '../src/domain/usuario/entities/perfil-criador.js';
-import type { Usuario } from '../src/domain/usuario/entities/usuario.js';
 import { conteudoPerfilCriadorVazio } from '../src/domain/usuario/value-objects/conteudo-perfil-criador.js';
 import { NoopLogger } from '../src/observability/noop-logger.js';
 import { noopTracer } from '../src/observability/tracer.js';
@@ -70,7 +67,7 @@ import { adicionarOpcaoContribuicao } from '../src/use-cases/arrecadacao/adicion
 import { criarCampanha } from '../src/use-cases/arrecadacao/criar-campanha.js';
 import { criarConvite } from '../src/use-cases/evento/criar-convite.js';
 import { criarEvento } from '../src/use-cases/evento/criar-evento.js';
-import { registrarContaUsuario } from '../src/use-cases/usuario/registrar-conta-usuario.js';
+import { type MagicLinkSession, mintMagicLinkSession } from './magic-link-auth.js';
 
 const DATABASE_URL =
   process.env.E2E_DATABASE_URL ??
@@ -114,7 +111,6 @@ function buildDeps(db: Database) {
     perfilCriadorRepository: new PerfilCriadorRepositoryPostgres(db),
     eventoRepository: new EventoRepositoryPostgres(db),
     conviteRepository: new ConviteRepositoryPostgres(db),
-    authService: new AuthServiceBetterAuth(db, { clock: () => new Date() }),
   };
 }
 
@@ -147,7 +143,7 @@ async function ensureRecebedor(deps: Deps, campanha: Campanha): Promise<void> {
 }
 
 /** The 'presente' opcao a campanha's gifts hang off. Adds one if absent
- *  (criarCampanha yields an EMPTY campanha; registrarContaUsuario's default
+ *  (criarCampanha yields an EMPTY campanha; auth.me self-heal's default
  *  campanha already has it). Returns the campanha refreshed with the opcao. */
 async function ensurePresenteOpcao(deps: Deps, campanha: Campanha): Promise<Campanha> {
   const presente = campanha.opcoes.find((o) => o.tipo === 'presente');
@@ -252,99 +248,33 @@ async function ensureConvite(deps: Deps, campanha: Campanha): Promise<void> {
   );
 }
 
-/** Upsert the BetterAuth credential row for an already-existing walker so
- *  email+password login (continuarComEmail → criarSessaoUsuario) verifies
- *  against OUR senha. Mirrors legacy-fixtures.repairExistingLegacyUser: the
- *  accounts write shape criarConta uses (provider_id='credential',
- *  account_id=`{plataforma}::{email}`). Only needed on the repair branch —
- *  registrarContaUsuario writes this row itself on first creation. */
-async function repairCredential(
-  db: Database,
-  usuario: Usuario,
-  email: string,
-  senha: string,
-): Promise<void> {
-  const passwordHash = await hashPassword(senha);
-  const accountId = `${ID_PLATAFORMA_EUNENEM}::${email.toLowerCase()}`;
-  const existing = await db
-    .selectFrom('accounts')
-    .select('id')
-    .where('provider_id', '=', 'credential')
-    .where('account_id', '=', accountId)
-    .executeTakeFirst();
-  const now = new Date();
-  if (existing) {
-    await db
-      .updateTable('accounts')
-      .set({ password: passwordHash, updated_at: now })
-      .where('id', '=', existing.id)
-      .execute();
-  } else {
-    await db
-      .insertInto('accounts')
-      .values({
-        id: randomUUID(),
-        user_id: usuario.id,
-        provider_id: 'credential',
-        account_id: accountId,
-        password: passwordHash,
-        access_token: null,
-        refresh_token: null,
-        id_token: null,
-        access_token_expires_at: null,
-        refresh_token_expires_at: null,
-        scope: null,
-        created_at: now,
-        updated_at: now,
-      })
-      .execute();
-  }
-}
-
 /**
  * Idempotently seed the full gate-walker contract. Safe to call in every
- * spec's beforeAll (find-or-create throughout). No-op when the gate creds are
+ * spec's beforeAll (find-or-create throughout). No-op when E2E_GATE_EMAIL is
  * unset — the specs skip in that case anyway, so seeding would be wasted work.
  */
-export async function seedGateWalker(): Promise<void> {
+export async function seedGateWalker(baseURL?: string): Promise<MagicLinkSession | null> {
   const email = process.env.E2E_GATE_EMAIL;
-  const senha = process.env.E2E_GATE_SENHA;
-  if (!email || !senha) return;
+  if (!email) return null;
 
   const db = createDatabase(DATABASE_URL);
   const deps = buildDeps(db);
   try {
-    // ── 1. Walker + campanha A (default "Lista de <nome>", pure 2.0 signup) ──
-    let usuario: Usuario;
-    const existing = await deps.usuarioRepository.findUsuarioByEmail(
+    // ── 1. Real magic-link session + production self-heal ──────────────
+    // mintMagicLinkSession drives criarAuth -> captured URL -> auth.handler
+    // verify, then calls the running server's auth.me. That resolver provisions
+    // the domain Usuario + default campanha through the same path as production
+    // OAuth/magic-link sign-in — no password or credential account exists.
+    const session = await mintMagicLinkSession(db, {
+      email,
+      name: NOME_EXIBICAO,
+      baseURL,
+    });
+    const usuario = await deps.usuarioRepository.findUsuarioByEmail(
       ID_PLATAFORMA_EUNENEM as never,
       email,
     );
-    if (existing) {
-      usuario = existing;
-      await repairCredential(db, usuario, email, senha);
-    } else {
-      const res = await registrarContaUsuario(
-        {
-          usuarioRepository: deps.usuarioRepository,
-          plataformaRepository: deps.plataformaRepository,
-          campanhaRepository: deps.campanhaRepository,
-          recebedorRepository: deps.recebedorRepository,
-          authService: deps.authService,
-          clock: () => CLOCK_A,
-          observability: deps.observability,
-        },
-        {
-          idUsuario: randomUUID() as never,
-          idConta: randomUUID() as never,
-          idPlataforma: ID_PLATAFORMA_EUNENEM as never,
-          email,
-          nomeExibicao: NOME_EXIBICAO,
-          senhaSimulada: senha,
-        },
-      );
-      usuario = res.usuario;
-    }
+    if (!usuario) throw new Error(`seedGateWalker: auth.me did not provision ${email}`);
 
     // Painel slug MUST be 'izzygate' (derived naturally from 'Izzygate Walker',
     // but forced defensively in case a collision-suffixed it).
@@ -375,6 +305,16 @@ export async function seedGateWalker(): Promise<void> {
         `seedGateWalker: walker owns no "${TITULO_A}" — got ${JSON.stringify(campanhas.map((c) => c.titulo))}`,
       );
     }
+    // The production magic-link self-heal creates the default campanha with
+    // the current clock. This fixture creates B with CLOCK_B below, so leaving
+    // A at "now" would make B the oldest and invert every bare-route contract.
+    // Pin the synthetic A row to the fixture's declared clock just as the
+    // retired registrarContaUsuario seed did before password auth was removed.
+    await db
+      .updateTable('campanhas')
+      .set({ criada_em: CLOCK_A })
+      .where('id', '=', campanhaA.id)
+      .execute();
     campanhaA = await ensurePresenteOpcao(deps, campanhaA);
     await ensureRecebedor(deps, campanhaA);
     await ensureGift(deps, campanhaA, GIFT_A_NOME, GIFT_A_VALOR);
@@ -406,6 +346,7 @@ export async function seedGateWalker(): Promise<void> {
     await ensureConvite(deps, campanhaB);
     // B's perfil MUST differ from A's (the isolation axis) — distinct nomeBebe.
     await seedPerfilCampanha(deps, campanhaB, BEBE_B, DATA_EVENTO_B);
+    return session;
   } finally {
     await db.destroy();
   }
@@ -424,12 +365,12 @@ export interface VictimCampanhaA {
 /**
  * Resolve the victim's campanha A (titulo 'Lista de Izzygate Walker') straight
  * from the DB — the id the intruder will attack + the painel slug it lives
- * under. Call AFTER seedGateWalker(). Returns null when the gate creds are unset
+ * under. Call AFTER seedGateWalker(). Returns null when E2E_GATE_EMAIL is unset
  * (spec skips). Throws if the walker or A is missing (seed contract violated).
  */
 export async function resolveVictimCampanhaA(): Promise<VictimCampanhaA | null> {
   const email = process.env.E2E_GATE_EMAIL;
-  if (!email || !process.env.E2E_GATE_SENHA) return null;
+  if (!email) return null;
 
   const db = createDatabase(DATABASE_URL);
   const deps = buildDeps(db);
@@ -464,21 +405,20 @@ export async function resolveVictimCampanhaA(): Promise<VictimCampanhaA | null> 
 //
 // The intruder is a fully valid, authenticatable user who simply administers
 // NONE of the victim's campanhas — exactly the shape that exercises the
-// idsAdministradores ownership gate. Distinct hardcoded creds (hermetic-only);
-// idempotent find-or-create in the same direct-repo style as seedGateWalker.
+// idsAdministradores ownership gate. The fixed hermetic identity authenticates
+// through the shared magic-link helper, same as seedGateWalker.
 
-/** Intruder credentials — hermetic-only literals (never a deployed user). */
+/** Intruder identity — hermetic-only literal (never a deployed user). */
 export const INTRUDER_EMAIL = process.env.E2E_INTRUDER_EMAIL ?? 'e2e-intruder@e2e.local';
-export const INTRUDER_SENHA = process.env.E2E_INTRUDER_SENHA ?? 'senha-e2e-intruder-123';
 const INTRUDER_NOME_EXIBICAO = 'Intruso Rival';
 export const INTRUDER_SLUG = 'intruso';
-/** The intruder's OWN default campanha (registrarContaUsuario names it
+/** The intruder's OWN default campanha (auth.me self-heal names it
  *  "Lista de <nomeExibicao>") — the target of the negative-control ops. */
 export const INTRUDER_TITULO_CAMPANHA = `Lista de ${INTRUDER_NOME_EXIBICAO}`;
 
 export interface IntruderSeed {
   email: string;
-  senha: string;
+  session: MagicLinkSession;
   slug: string;
   tituloCampanha: string;
   idCampanha: string;
@@ -486,48 +426,30 @@ export interface IntruderSeed {
 
 /**
  * Idempotently seed the intruder: a SECOND valid user who owns their OWN
- * campanha but administers none of the victim's. Returns the creds + the
+ * campanha but administers none of the victim's. Returns the session + the
  * intruder's own campanha id/slug so the spec can drive negative-control ops.
  *
- * Gated on the SAME E2E_GATE creds as the spec (no-op when unset) — the spec
+ * Gated on the SAME E2E_GATE_EMAIL as the spec (no-op when unset) — the spec
  * skips without them, so seeding would be wasted work against a fresh DB.
  * Returns null in that case.
  */
-export async function seedIntruderWalker(): Promise<IntruderSeed | null> {
-  if (!process.env.E2E_GATE_EMAIL || !process.env.E2E_GATE_SENHA) return null;
+export async function seedIntruderWalker(baseURL?: string): Promise<IntruderSeed | null> {
+  if (!process.env.E2E_GATE_EMAIL) return null;
 
   const db = createDatabase(DATABASE_URL);
   const deps = buildDeps(db);
   try {
-    let usuario: Usuario;
-    const existing = await deps.usuarioRepository.findUsuarioByEmail(
+    const session = await mintMagicLinkSession(db, {
+      email: INTRUDER_EMAIL,
+      name: INTRUDER_NOME_EXIBICAO,
+      baseURL,
+    });
+    const usuario = await deps.usuarioRepository.findUsuarioByEmail(
       ID_PLATAFORMA_EUNENEM as never,
       INTRUDER_EMAIL,
     );
-    if (existing) {
-      usuario = existing;
-      await repairCredential(db, usuario, INTRUDER_EMAIL, INTRUDER_SENHA);
-    } else {
-      const res = await registrarContaUsuario(
-        {
-          usuarioRepository: deps.usuarioRepository,
-          plataformaRepository: deps.plataformaRepository,
-          campanhaRepository: deps.campanhaRepository,
-          recebedorRepository: deps.recebedorRepository,
-          authService: deps.authService,
-          clock: () => CLOCK_A,
-          observability: deps.observability,
-        },
-        {
-          idUsuario: randomUUID() as never,
-          idConta: randomUUID() as never,
-          idPlataforma: ID_PLATAFORMA_EUNENEM as never,
-          email: INTRUDER_EMAIL,
-          nomeExibicao: INTRUDER_NOME_EXIBICAO,
-          senhaSimulada: INTRUDER_SENHA,
-        },
-      );
-      usuario = res.usuario;
+    if (!usuario) {
+      throw new Error(`seedIntruderWalker: auth.me did not provision ${INTRUDER_EMAIL}`);
     }
 
     // Stable painel slug for the negative-control painelMensagens.list read.
@@ -549,7 +471,7 @@ export async function seedIntruderWalker(): Promise<IntruderSeed | null> {
 
     return {
       email: INTRUDER_EMAIL,
-      senha: INTRUDER_SENHA,
+      session,
       slug: INTRUDER_SLUG,
       tituloCampanha: INTRUDER_TITULO_CAMPANHA,
       idCampanha: campanha.id as string,

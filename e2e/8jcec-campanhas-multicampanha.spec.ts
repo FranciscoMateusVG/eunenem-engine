@@ -147,7 +147,7 @@ seededTest.describe('/campanhas — pure-2.0 user (no legacy entry)', () => {
       // seededData mints a random @e2e.local email — guaranteed absent from
       // legacy-1.0-users.json.
       //
-      // aperture-w3rrd — the fresh seed is un-onboarded (registrarContaUsuario
+      // aperture-w3rrd — the fresh seed is un-onboarded (auth.me self-heal
       // makes an UNNAMED campanha → needsOnboarding=true post-#29), so the new
       // /campanhas gate correctly PUSHES it into the onboarding wizard (that
       // push is covered by the tqp4t GAP-3 spec). This test asserts the

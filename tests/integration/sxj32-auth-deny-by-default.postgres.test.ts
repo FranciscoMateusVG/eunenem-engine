@@ -92,6 +92,7 @@ describe('EmailTransportNodemailer TLS posture', () => {
 
 let testDb: TestDatabase;
 let app: Hono;
+let authOptions: Record<string, unknown>;
 let magicLinkSendCount = 0;
 const magicLinkUrls = new Map<string, string>();
 
@@ -104,9 +105,6 @@ beforeAll(async () => {
     secret: SECRET,
     baseURL: BASE_URL,
     trustedOrigins: [BASE_URL],
-    sendResetPassword: async () => {
-      /* no-op for this test */
-    },
     idPlataformaPadrao: ID_PLATAFORMA_EUNENEM,
     sendMagicLink: async ({ email, url }) => {
       magicLinkSendCount += 1;
@@ -120,6 +118,7 @@ beforeAll(async () => {
       },
     },
   });
+  authOptions = auth.options as Record<string, unknown>;
 
   // Mirror server.tsx EXACTLY: deny-by-default guard, THEN the real
   // auth.handler catch-all. No sentinel — denied routes that slip past the
@@ -131,6 +130,10 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await testDb.teardown();
+});
+
+it('does not register BetterAuth email/password capability', () => {
+  expect(authOptions).not.toHaveProperty('emailAndPassword');
 });
 
 /** Drive the real app and return { status, body } for a denied-route probe. */

@@ -50,9 +50,9 @@ export interface RateLimitResult {
  * `{ allowed, count, max, windowMs }`. Caller decides what to do on
  * `!allowed` — usually throw a TRPCError TOO_MANY_REQUESTS.
  *
- * Key naming convention: `"<surface>:<bucket>"` — e.g.
- * `"trpc:signIn:<ipHash>:<emailHash>"`, `"trpc:signUp:<ipHash>"`. Keep
- * each key ≤255 chars (rate_limit.key is varchar(255) per migration 009).
+ * Key naming convention: `"<surface>:<bucket>"`, for example
+ * `"landing:newsletter:<ipHash>:<emailHash>"`. Keep each key ≤255 chars
+ * (rate_limit.key is varchar(255) per migration 009).
  */
 export async function consumeRateLimit(
   db: Database,

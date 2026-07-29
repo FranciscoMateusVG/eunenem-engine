@@ -8,18 +8,11 @@ import {
   type ReactNode,
 } from "react";
 
-import { trpc } from "@/lib/trpc";
-import { postLoginTarget, resolveMeWithRetry } from "@/lib/post-login-route";
-import type { AuthSession } from "@/lib/auth";
-import { sendEvent, identifyWithUtm } from "@/lib/analytics";
 import { AuthModalShell, type AuthMode } from "./AuthModalShell.js";
-import { OnboardingWizard } from "./OnboardingWizard.js";
 
 // aperture-nop8l — AuthModalProvider
-// aperture-tgkh3 — Post-auth navigation wired here (vs the shell) so every
-// consumer that summons the modal (landing CTAs, future authed-page guards,
-// the auth-demo page) gets the same redirect-to-/painel/<slug> behaviour
-// for free. The shell already exposes `onAuthenticated`; we plug into it.
+// OAuth and magic-link authentication complete through full-page redirects;
+// there is no inline password mutation or session callback.
 //
 // Singleton auth modal mounted at the App.tsx tree root. Any descendant
 // can summon it via `useAuthModal()` — landing CTAs, painel header,
@@ -33,7 +26,6 @@ import { OnboardingWizard } from "./OnboardingWizard.js";
 //   - focus restoration to whatever element actually triggered the open,
 //     even when that element lives in a totally different component
 //     than the AuthModalShell render site
-//   - one redirect policy (aperture-tgkh3) for every entry point
 //
 // Public API:
 //   <AuthModalProvider>{children}</AuthModalProvider>
@@ -71,17 +63,6 @@ export function AuthModalProvider({
   const [isOpen, setIsOpen] = useState(false);
   const [mode, setModeState] = useState<AuthMode>(initialMode);
   const triggerRef = useRef<HTMLElement | null>(null);
-  // aperture-84a21 — a fresh signup opens the onboarding wizard (slug + baby
-  // name + event date/type) instead of redirecting straight to the painel.
-  const [showOnboarding, setShowOnboarding] = useState(false);
-
-  // tRPC utils for fetching the freshly-authenticated user's slug
-  // (aperture-tgkh3). The signUp / signIn mutations already invalidate
-  // `auth.me` on success (see lib/auth.ts), so `utils.auth.me.fetch()`
-  // here will hit the network and pick up the user the cookie now points
-  // at — including their slug.
-  const utils = trpc.useUtils();
-
   const open = useCallback((next: AuthMode, trigger?: HTMLElement | null) => {
     // Stash the trigger (or the currently-focused element as a fallback) so
     // the modal returns focus on close. SSR-safe — document is only touched
@@ -103,75 +84,6 @@ export function AuthModalProvider({
     setModeState(next);
   }, []);
 
-  // ── Post-auth navigation (aperture-tgkh3) ────────────────────────────────
-  //
-  // Fired by AuthModalShell after a successful signUp / signIn (and after
-  // the success toast). We don't trust the mutation response for slug —
-  // signUp/signIn return only {idUsuario,idConta,expiraEm} (Rex's PR #61
-  // contract). Instead we read `auth.me` fresh: the mutations have
-  // already invalidated it, so .fetch() goes to network and returns the
-  // newly-authenticated user with their slug.
-  //
-  // Self-redirect guard: if the user already happens to be on their own
-  // painel (rare — e.g. they typed the URL, hit "Entrar", signed in),
-  // skip the reload. Anywhere else, full-page navigate so the SSR side
-  // of the painel route gets the freshly-set cookie and renders the
-  // authenticated dashboard server-side.
-  //
-  // Failure modes — never strand the user inside the modal:
-  //   - me() returns null (race: cookie already expired) → stay put,
-  //     navbar will rerender to anonymous on its own
-  //   - slug missing on the response (shouldn't happen post-khbow but
-  //     belt-and-braces) → stay put, modal is already closed
-  //   - fetch throws (network blip mid-success) → stay put
-  //
-  // The user is already signed in at this point (cookie set), so leaving
-  // them on the current page with an updated navbar is graceful
-  // degradation.
-  const onAuthenticated = useCallback(
-    async (session: AuthSession) => {
-      // aperture-d7993 — the unified email-first flow (continuarComEmail) hands
-      // us `session.criado`: the server's authoritative login-vs-create branch.
-      // A brand-NEW account goes through the onboarding wizard first (it captures
-      // slug + babyName + dataEvento + tipoEvento, then redirects to the painel);
-      // an existing LOGIN gets the straight redirect. This replaces the old
-      // `mode === "signup"` heuristic, which was wrong once a single entry could
-      // resolve to either outcome at submit time.
-      if (session.criado) {
-        sendEvent("signup_concluido");
-        setShowOnboarding(true);
-        return;
-      }
-      sendEvent("login_concluido");
-      try {
-        // aperture-w3rrd (gap 2) — resolve auth.me through the just-set login
-        // cookie race with a bounded retry, so a real session isn't mistaken
-        // for anonymous and left stranded on the landing.
-        const me = await resolveMeWithRetry(() =>
-          utils.auth.me.fetch(undefined, { staleTime: 0 }),
-        );
-        // Genuinely-unauthenticated (or a persistent race) → me stays null:
-        // stay put, the navbar renders the correct auth state.
-        if (!me?.slug) return;
-        // aperture-ppuay — identify the returning account on Mixpanel
-        // (distinct_id = idConta) + attach first-touch utm_source. No-op when
-        // the sink is dark. Placed after the slug guard so we only identify a
-        // confirmed-resolved session, not a mid-race null.
-        if (me.idConta) identifyWithUtm(me.idConta);
-        // Route by the single shared post-login rule (legacy → /campanhas;
-        // needs-onboarding → wizard; onboarded → /campanhas) — one source of
-        // truth in pages/lib/post-login-route.ts so no entry point drifts.
-        const target = postLoginTarget(me);
-        if (typeof window === "undefined") return;
-        if (window.location.pathname === target) return;
-        window.location.assign(target);
-      } catch {
-        // Graceful degradation — see comment above.
-      }
-    },
-    [utils],
-  );
-
   // Focus restoration. Runs AFTER the modal has unmounted (next animation
   // frame) so the dialog's focus trap doesn't fight us for the focus target.
   useEffect(() => {
@@ -190,22 +102,7 @@ export function AuthModalProvider({
     <AuthModalContext.Provider value={value}>
       {children}
       {isOpen && (
-        <AuthModalShell
-          mode={mode}
-          onClose={close}
-          onModeChange={setMode}
-          onAuthenticated={onAuthenticated}
-        />
-      )}
-      {showOnboarding && (
-        <OnboardingWizard
-          onDone={(slug) => {
-            setShowOnboarding(false);
-            if (typeof window !== "undefined") {
-              window.location.assign(`/painel/${slug}`);
-            }
-          }}
-        />
+        <AuthModalShell mode={mode} onClose={close} onModeChange={setMode} />
       )}
     </AuthModalContext.Provider>
   );
