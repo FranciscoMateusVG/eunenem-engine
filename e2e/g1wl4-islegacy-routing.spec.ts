@@ -57,8 +57,8 @@
 import { type Browser, type BrowserContext, expect, type Page, test } from '@playwright/test';
 import { CAMPANHAS_WELCOME_STORAGE_KEY } from '../apps/eunenem-server/pages/lib/campanhas.js';
 import { mintLegacySession } from './legacy-fixtures.js';
+import { browserCookieFor } from './magic-link-auth.js';
 
-const SESSION_COOKIE = 'better-auth.session_token';
 const BASE_URL = process.env.E2E_BASE_URL ?? 'http://localhost:3002';
 
 /** Wizard dialog — OnboardingWizard.tsx renders role=dialog with this label. */
@@ -70,19 +70,9 @@ const WIZARD_LABEL = 'Vamos montar sua página';
  * openAuthedPage in 8bac7-postlogin-routing.spec.ts.
  */
 async function openLegacyPage(browser: Browser): Promise<{ context: BrowserContext; page: Page }> {
-  const sessionToken = await mintLegacySession();
-  const url = new URL(BASE_URL);
+  const session = await mintLegacySession(BASE_URL);
   const context = await browser.newContext();
-  await context.addCookies([
-    {
-      name: SESSION_COOKIE,
-      value: encodeURIComponent(sessionToken),
-      domain: url.hostname,
-      path: '/',
-      httpOnly: true,
-      sameSite: 'Lax',
-    },
-  ]);
+  await context.addCookies([browserCookieFor(session, BASE_URL)]);
   await context.addInitScript(
     ([key]) => window.localStorage.setItem(key, '1'),
     [CAMPANHAS_WELCOME_STORAGE_KEY],

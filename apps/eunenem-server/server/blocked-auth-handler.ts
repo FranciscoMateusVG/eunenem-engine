@@ -22,14 +22,12 @@ import type { Hono } from 'hono';
  *     /unlink-account, /list-accounts, /account-info — all saga-bypass /
  *     unreviewed surfaces, newly functional.
  *
- * The engine policy: every authn flow runs through tRPC at `/api/trpc/auth.*`
- * so the saga executes end-to-end (plataforma validation, domain Usuario
- * aggregate, slug, PERMISSOES_PADRAO, Conta, compensation on partial failure).
- * Only explicitly reviewed BetterAuth HTTP routes are exposed: social OAuth,
- * own-session reads, display/health, and the tenant-scoped magic-link send and
- * verify pair. EVERYTHING else under /api/auth/* is denied with a byte-identical
- * 410 Gone (no status/body/latency signal that could distinguish a blocked
- * route or enumerate registered emails).
+ * The engine policy is passwordless. Only explicitly reviewed BetterAuth HTTP
+ * routes are exposed: social OAuth, own-session reads, display/health, and the
+ * tenant-scoped magic-link send and verify pair. tRPC owns only auth.me and
+ * auth.signOut. EVERYTHING else under /api/auth/* is denied with a byte-
+ * identical 410 Gone (no status/body/latency signal that could distinguish a
+ * blocked route or enumerate registered emails).
  *
  * Adding a new exposed flow REQUIRES adding it to the allowlist below AND a
  * Cipher review — the deny-by-default posture means new better-auth routes are

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { BetterAuthOptions, User } from 'better-auth';
+import type { BetterAuthOptions } from 'better-auth';
 import { betterAuth } from 'better-auth';
 import { magicLink } from 'better-auth/plugins';
 import { sql } from 'kysely';
@@ -30,12 +30,6 @@ export interface CriarAuthConfig {
   readonly trustedOrigins: readonly string[];
 
   /**
-   * Callback BetterAuth invokes when issuing a password-reset link. The
-   * consumer wires SMTP / SES / etc. Engine never touches transports.
-   */
-  readonly sendResetPassword: (input: { user: User; url: string; token: string }) => Promise<void>;
-
-  /**
    * HTTPS-only cookies. Defaults to `process.env.NODE_ENV === 'production'`
    * per T8 from recon §4 — flip explicitly in tests if you need to override.
    */
@@ -45,7 +39,7 @@ export interface CriarAuthConfig {
    * OPTIONAL social-login providers (aperture-8655f). Engine ships the
    * helper; consumers inject deployment-specific OAuth credentials read
    * from env. When omitted/undefined, NO social provider is registered and
-   * BetterAuth runs email+password only — the server still boots cleanly in
+   * BetterAuth runs without social login — the server still boots cleanly in
    * environments without OAuth credentials (the eunenem-server gates this on
    * GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET both being present).
    *
@@ -60,7 +54,7 @@ export interface CriarAuthConfig {
    * BetterAuth `magicLink` plugin is enabled and this callback delivers the
    * link (the consumer wires the SMTP transport; the engine never touches
    * transports). When omitted/undefined the plugin is NOT registered and
-   * BetterAuth runs without passwordless — the server still boots cleanly in
+   * BetterAuth runs without magic-link — the server still boots cleanly in
    * environments without SMTP creds (eunenem-server gates this on
    * SMTP_HOST/USER/PASS all being present, mirroring the google spread).
    *
@@ -77,10 +71,8 @@ export interface CriarAuthConfig {
    * Default platform id injected into adapter-created users (e.g. OAuth signup)
    * that don't carry one (aperture-dm7s3). The Google profile has NO
    * idPlataforma and the `users.id_plataforma` column is notNull, so without
-   * this a brand-new Google signup fails at user-create. Email+password signup
-   * sets idPlataforma explicitly via raw Kysely (criarConta) and bypasses
-   * BetterAuth's create path entirely, so it never relies on this. Consumers
-   * enabling OAuth signup MUST provide it — eunenem-server passes
+   * this a brand-new provider signup fails at user-create. Consumers enabling
+   * OAuth or magic-link signup MUST provide it — eunenem-server passes
    * ID_PLATAFORMA_EUNENEM (it is effectively single-tenant for OAuth signup).
    */
   readonly idPlataformaPadrao?: string;
@@ -95,11 +87,9 @@ export interface CriarAuthConfig {
  * monorepo-incluir's raw-pg.Pool pattern (recon anti-trap §8 #2 —
  * maintainer-recommended, one Kysely, one pool, one migration runner).
  *
- * **Email + password** always on (operator decision #5). Social providers
- * are OPTIONAL (aperture-8655f) — registered only when the consumer injects
- * `config.socialProviders`; absent → email+password-only. NO plugins
- * (admin/magicLink/twoFactor/etc all skipped). Add them in later beads if the
- * operator opts in.
+ * **Password authentication is disabled** (aperture-cusen). Social providers
+ * and magic-link are conditional — registered only when the consumer injects
+ * the corresponding deployment configuration.
  *
  * **Rate-limit storage = database** (operator decision #4). The
  * `rate_limit` table from migration 009 backs it. Survives multi-instance
@@ -110,18 +100,18 @@ export interface CriarAuthConfig {
  *   - expiresIn 7 days  — week-long browser sessions, typical for
  *     dashboard apps
  *   - updateAge 1 day   — refresh server-side every ~24h of activity
- *   - freshAge 1 day    — operations like password change require a
- *     session  ≤24h old
+ *   - freshAge 1 day    — sensitive BetterAuth operations require a
+ *     session ≤24h old
  *
  * **snake_case** via `database.casing: 'snake'` — matches the column
  * names in migration 009 (BetterAuth's defaults would otherwise write
  * camelCase column names like `emailVerified`).
  *
  * **Composite uniqueness** preserved via additionalFields: BetterAuth's
- * `users` table carries `idPlataforma` (required) so the migration's
- * `users_plataforma_email_uniq` constraint enforces tenancy at the auth
- * layer too. The eunenem-server (child 4) must include `idPlataforma`
- * in the signUp payload — anti-trap §8 #8 multi-tenant auth.
+ * `users` table carries `idPlataforma` so the migration's
+ * `users_plataforma_email_uniq` constraint enforces tenancy at the auth layer
+ * too. The value is injected from server configuration; no auth request may
+ * select its tenant.
  */
 /**
  * Two DISTINCT OAuth provider sets, with a one-way safety invariant between
@@ -411,24 +401,17 @@ export function criarAuth(kysely: Database, config: CriarAuthConfig) {
       // UUID id. The domain `usuarios.id` column is Postgres `uuid` (migration
       // 008) and `IdUsuarioSchema` is `z.uuid()`, while the documented
       // invariant (migration 009 header) is `users.id == usuarios.id`. The
-      // email+password path supplies its own UUID via raw Kysely in
-      // `criarConta` (bypassing this generator), but BetterAuth's NATIVE
-      // create path (OAuth) would otherwise mint its default non-UUID base62
+      // Historical engine-created credential rows supplied their own UUID via
+      // raw Kysely in `criarConta` (bypassing this generator), but BetterAuth's
+      // adapter create path (OAuth/magic-link) would otherwise mint its default non-UUID base62
       // id — which can NEVER be inserted into the uuid-typed `usuarios.id`
       // during the `me`-resolver self-heal. A custom `() => randomUUID()` is
       // used rather than `generateId: 'uuid'` because the kysely-adapter's
       // built-in 'uuid' mode relies on a DB-side `gen_random_uuid()` DEFAULT
       // (our columns have none → it inserts NULL and the create fails). This
-      // generator runs ONLY on adapter-driven creates (OAuth) — email+password
-      // never reaches it.
+      // generator runs only on adapter-driven creates.
       database: {
         generateId: () => randomUUID(),
-      },
-    },
-    emailAndPassword: {
-      enabled: true,
-      sendResetPassword: async ({ user, url, token }) => {
-        await config.sendResetPassword({ user, url, token });
       },
     },
     session: {
@@ -484,8 +467,8 @@ export function criarAuth(kysely: Database, config: CriarAuthConfig) {
       // aperture-bq2c9: map every multi-word BetterAuth `account` field to its
       // snake_case column (migration 009). Without this the adapter emits
       // camelCase (accounts.accountId) → Postgres 42703 → 500 on the whole OAuth
-      // flow. The OAuth path is the FIRST consumer of the adapter (email+password
-      // bypasses it via raw Kysely), which is why this was latent until #284.
+      // flow. OAuth was the first production consumer of the adapter, which is
+      // why this was latent until #284.
       fields: {
         userId: 'user_id',
         providerId: 'provider_id',
@@ -501,12 +484,12 @@ export function criarAuth(kysely: Database, config: CriarAuthConfig) {
       },
       // aperture-qcrv4 (Cipher) — supersedes the w2bty disableImplicitLinking:true.
       // POLICY: trust Google to link to a pre-existing same-email account, so a
-      // returning email/password user can sign in with Google (w2bty's hard refuse
-      // produced account_not_linked, blocking legit login on a consumer product).
+      // a returning legacy credential user can adopt Google (w2bty's hard
+      // refuse produced account_not_linked, blocking legitimate migration).
       //
       // THREAT MODEL — why this is SAFE despite reopening implicit linking:
-      // The classic pre-hijack is: attacker pre-registers victim@email via
-      // email/password (unverified — eunenem has no verification flow), victim later
+      // The classic pre-hijack is: attacker historically pre-registers victim@email
+      // via email/password without verification, then the victim later
       // "Sign in with Google", the Google login auto-links to the ATTACKER's
       // pre-existing account, and the attacker's PASSWORD still opens it. w2bty
       // closed this by refusing all implicit linking. We reopen linking but close
@@ -573,7 +556,7 @@ export function criarAuth(kysely: Database, config: CriarAuthConfig) {
     },
     // aperture-lwx2k (Camada C) — magic-link plugin, CONDITIONAL: only spread
     // in when the consumer injected a sender (SMTP creds present). Absent → no
-    // plugin → passwordless off, boots clean (mirrors the google spread).
+    // magic-link route, boots clean (mirrors the google spread).
     // TOKEN HARDENING (Cipher gate item 3, aperture-79b31):
     //   - expiresIn: 300s (5 min) — magic links are used immediately; short
     //     TTL minimises the intercept/replay window.
@@ -607,7 +590,7 @@ export function criarAuth(kysely: Database, config: CriarAuthConfig) {
       : {}),
     // aperture-8655f — social providers are CONDITIONAL: only spread in when
     // the consumer injected them (both OAuth env vars present on its side).
-    // Absent → key is omitted entirely → email+password-only, boots cleanly.
+    // Absent → key is omitted entirely; magic-link may still provide entry.
     // aperture-uq69m — route the microsoft provider through the engine-owned
     // email-ownership predicate (+ empty-name fallback). Pass-through for any
     // other provider. Keeps the nOAuth gate un-skippable by construction.
@@ -617,8 +600,7 @@ export function criarAuth(kysely: Database, config: CriarAuthConfig) {
     // aperture-dm7s3 — inject the default platform id on adapter-driven user
     // creation (OAuth signup) when the row carries none. The Google profile has
     // no idPlataforma + users.id_plataforma is notNull, so without this a
-    // brand-new Google signup fails at user-create. Email+password (raw Kysely
-    // criarConta) bypasses BetterAuth's create path, so it never hits this hook.
+    // brand-new Google or magic-link signup fails at user-create.
     databaseHooks: {
       // aperture-dm7s3 — inject the default platform id on adapter-driven user
       // creation (OAuth signup). Only registered when the consumer injects
@@ -663,8 +645,7 @@ export function criarAuth(kysely: Database, config: CriarAuthConfig) {
       // provider account exists. Better Auth 1.6.22 does not treat a false
       // account hook result as a full OAuth abort, so the tenant adapter above
       // is the identity boundary; this hook is credential-invalidation only.
-      // No-op for non-google account creates (credential signup, brand-new Google
-      // signup with no prior credential row → 0 rows updated).
+      // No-op when an OAuth signup has no historical credential row.
       account: {
         create: {
           before: async (account: { providerId?: unknown; userId?: unknown }) => {
@@ -776,10 +757,9 @@ export function criarAuth(kysely: Database, config: CriarAuthConfig) {
       //   - patched magic-link adoption already deleted credentials/sessions →
       //     0 rows, no-op.
       //   - OAuth: account.create.before already nulled it → 0 rows, no-op.
-      //   - pure password user (never verified): email_verified=FALSE → SKIP →
-      //     password preserved (coexistence login is NOT broken). New credential
-      //     rows are created email_verified=false, so normal password login is
-      //     never touched.
+      //   - unverified historical credential user: email_verified=FALSE → SKIP.
+      //     The row is inert because no password entry endpoint exists; the
+      //     hook only mutates it after a verified provider proves ownership.
       //   - email_verified=true + a live password is a legacy/inconsistent
       //     takeover state → nulling remains the fail-safe. Idempotent +
       //     self-healing: every session.create re-enforces it (0 rows once

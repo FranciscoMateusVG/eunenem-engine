@@ -1,7 +1,7 @@
 import { useRef } from "react";
 
 import { useAuthModal } from "./components/eunenem/auth/AuthModalProvider.js";
-import { MIN_PASSWORD_LENGTH, useMe, useSignOut } from "./lib/auth.js";
+import { useMe, useSignOut } from "./lib/auth.js";
 
 // aperture-ubpnl + aperture-d0x1w — Dev demo surface for the auth modals.
 //
@@ -11,10 +11,8 @@ import { MIN_PASSWORD_LENGTH, useMe, useSignOut } from "./lib/auth.js";
 // can exercise the success + error paths end-to-end against the real
 // backend.
 //
-// aperture-d0x1w: removed the mock-creds hint card (mock contract is gone —
-// every signup creates a real user row in Postgres). Added a live session
-// card that reads `auth.me` so you can see the cookie round-trip without
-// shelling into psql for each verify.
+// aperture-d0x1w: added a live session card that reads `auth.me` so you can
+// see the cookie round-trip without shelling into psql for each verify.
 //
 // Routed at /auth-demo via App.tsx::resolveRoute. The route is unlisted in
 // any nav — it's reachable only by typing the URL, which is the right
@@ -67,13 +65,10 @@ export function AuthDemoPage() {
             lineHeight: 1.55,
           }}
         >
-          Surface for verifying the{" "}
-          <code style={inlineCode}>aperture-ubpnl</code> AuthModalShell against
-          the real tRPC contract (
-          <code style={inlineCode}>aperture-d0x1w</code> swap from mock →{" "}
-          <code style={inlineCode}>auth.signUp / signIn / signOut / me</code>).
-          Both modes share 90% of the chrome; mode toggles in-place via the
-          footer cross-link.
+          Surface for verifying the passwordless AuthModalShell against the
+          real auth contract: Google OAuth or magic link for entry, plus{" "}
+          <code style={inlineCode}>auth.signOut / me</code> for the active
+          session.
         </p>
 
         <div
@@ -217,10 +212,8 @@ export function AuthDemoPage() {
               <p style={textBody}>
                 Sem sessão ativa. Use{" "}
                 <strong style={{ color: "var(--plum)" }}>Abrir cadastro</strong>{" "}
-                pra criar uma conta real (a linha aparece em{" "}
-                <code style={codeStyle}>users</code> no Postgres) ou{" "}
-                <strong style={{ color: "var(--plum)" }}>Abrir login</strong>{" "}
-                pra entrar com uma conta existente.
+                ou <strong style={{ color: "var(--plum)" }}>Abrir login</strong>{" "}
+                para entrar com Google ou receber um link mágico por e-mail.
               </p>
               <p
                 style={{
@@ -230,9 +223,9 @@ export function AuthDemoPage() {
                   color: "var(--ink-mute)",
                 }}
               >
-                Senhas precisam de no mínimo <strong>{MIN_PASSWORD_LENGTH}</strong>{" "}
-                caracteres. OAuth (Google / Apple / Microsoft) ainda é stub —
-                clicar dispara toast <code style={codeStyle}>em breve ♡</code>.
+                A autenticação por senha foi removida. A sessão é criada
+                somente depois de concluir o provedor OAuth ou consumir o link
+                mágico enviado para o endereço informado.
               </p>
             </>
           )}
@@ -247,9 +240,8 @@ export function AuthDemoPage() {
             lineHeight: 1.3,
           }}
         >
-          troca de modo: rodapé "Já tem conta? <strong>Entrar</strong>" / "Ainda
-          não tem conta? <strong>Criar grátis</strong>" — sem remount, mantém o
-          e-mail digitado.
+          O seletor de modo continua disponível por compatibilidade visual; os
+          dois modos usam somente métodos de entrada sem senha.
         </p>
       </div>
 

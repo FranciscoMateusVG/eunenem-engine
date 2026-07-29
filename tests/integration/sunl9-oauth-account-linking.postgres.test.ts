@@ -113,9 +113,6 @@ function buildAuth() {
     secret: SECRET,
     baseURL: BASE_URL,
     trustedOrigins: [BASE_URL],
-    sendResetPassword: async () => {
-      /* no-op for this test */
-    },
     useSecureCookies: false,
     socialProviders: {
       google: {
@@ -147,9 +144,6 @@ function buildAuthWithPlatformId() {
     secret: SECRET,
     baseURL: BASE_URL,
     trustedOrigins: [BASE_URL],
-    sendResetPassword: async () => {
-      /* no-op for this test */
-    },
     useSecureCookies: false,
     // aperture-dm7s3 — the server constant prod injects on OAuth user-create.
     idPlataformaPadrao: ID_PLATAFORMA_EUNENEM,
@@ -279,9 +273,6 @@ function buildAuthWithMicrosoft() {
     secret: SECRET,
     baseURL: BASE_URL,
     trustedOrigins: [BASE_URL],
-    sendResetPassword: async () => {
-      /* no-op for this test */
-    },
     useSecureCookies: false,
     idPlataformaPadrao: ID_PLATAFORMA_EUNENEM,
     socialProviders: {
@@ -1326,9 +1317,6 @@ describe('Google-OAuth account-linking + password-invalidation (aperture-8655f /
       secret: SECRET,
       baseURL: BASE_URL,
       trustedOrigins: [BASE_URL],
-      sendResetPassword: async () => {
-        /* no-op */
-      },
       useSecureCookies: false,
       idPlataformaPadrao: ID_PLATAFORMA_EUNENEM,
       sendMagicLink: async ({ url }) => {
@@ -1459,9 +1447,6 @@ describe('Google-OAuth account-linking + password-invalidation (aperture-8655f /
       secret: SECRET,
       baseURL: BASE_URL,
       trustedOrigins: [BASE_URL],
-      sendResetPassword: async () => {
-        /* no-op */
-      },
       useSecureCookies: false,
       idPlataformaPadrao: ID_PLATAFORMA_EUNENEM,
       sendMagicLink: async () => {
@@ -1506,9 +1491,6 @@ describe('Google-OAuth account-linking + password-invalidation (aperture-8655f /
       secret: SECRET,
       baseURL: BASE_URL,
       trustedOrigins: [BASE_URL],
-      sendResetPassword: async () => {
-        /* no-op */
-      },
       useSecureCookies: false,
       idPlataformaPadrao: ID_PLATAFORMA_EUNENEM,
       sendMagicLink: async () => {
@@ -1685,7 +1667,6 @@ describe('Google-OAuth account-linking + password-invalidation (aperture-8655f /
       secret: SECRET,
       baseURL: BASE_URL,
       trustedOrigins: [BASE_URL],
-      sendResetPassword: async () => {},
       useSecureCookies: false,
       idPlataformaPadrao: ID_PLATAFORMA_EUNENEM,
       sendMagicLink: async ({ url }) => {

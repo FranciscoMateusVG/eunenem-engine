@@ -82,7 +82,6 @@ function buildDeps(
       secret: 'test-secret-at-least-32-chars-long-xxxxx',
       baseURL: 'http://localhost:3001',
       trustedOrigins: ['http://localhost:3001'],
-      sendResetPassword: async () => {},
       useSecureCookies: false,
       idPlataformaPadrao: ID_PLATAFORMA_EUNENEM,
     }),

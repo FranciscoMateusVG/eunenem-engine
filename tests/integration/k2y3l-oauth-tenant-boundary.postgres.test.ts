@@ -527,20 +527,30 @@ describe('OAuth tenant boundary — real production composition (aperture-k2y3l)
 
   it('a signed foreign cookie yields null get-session/resolver and cannot reach admin writes', async () => {
     const email = `signed-foreign-${randomUUID()}@test.local`;
+    let foreignMagicLinkUrl: string | null = null;
     const foreignAuth = criarAuth(testDb.db, {
       secret: SECRET,
       baseURL: BASE_URL,
       trustedOrigins: [BASE_URL],
-      sendResetPassword: async () => {},
       useSecureCookies: false,
       idPlataformaPadrao: ID_PLATAFORMA_EUCASEI,
+      sendMagicLink: async ({ url }) => {
+        foreignMagicLinkUrl = url;
+      },
     });
-    const signUp = await foreignAuth.api.signUpEmail({
-      body: { email, password: 'ForeignSignedCookie123!', name: 'Signed Foreign' },
-      returnHeaders: true,
+    await foreignAuth.api.signInMagicLink({
+      body: { email, name: 'Signed Foreign', callbackURL: '/dashboard' },
+      headers: new Headers({ origin: BASE_URL }),
     });
+    expect(foreignMagicLinkUrl, 'foreign auth sender must receive a verification URL').toBeTruthy();
+    const verifyResponse = await foreignAuth.handler(
+      new Request(foreignMagicLinkUrl as string, {
+        method: 'GET',
+        redirect: 'manual',
+      }),
+    );
     const cookie =
-      signUp.headers
+      verifyResponse.headers
         .getSetCookie()
         .find((value) => value.includes('session_token='))
         ?.split(';')[0] ?? null;

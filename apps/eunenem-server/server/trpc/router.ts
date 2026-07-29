@@ -3,10 +3,10 @@
  *
  * Procedures:
  *   - `listFruits`              — original smoke test from aperture-kungg
- *   - `auth.signUp`             — wraps `registrarContaUsuario` (Mount-Option-A2)
- *   - `auth.signIn`             — wraps `criarSessaoUsuario`
  *   - `auth.signOut`            — revokes the session + clears cookie
  *   - `auth.me`                 — returns the current Usuario or null
+ *     Account entry is passwordless and handled by BetterAuth OAuth/magic-link
+ *     endpoints. No tRPC route accepts or creates a password.
  *   - `catalogo.*`              — public database-backed catalogue projections
  *   - `contribuicao.list`       — list caller's presentes (aperture-d6atj)
  *   - `contribuicao.create`     — batched create-by-qty

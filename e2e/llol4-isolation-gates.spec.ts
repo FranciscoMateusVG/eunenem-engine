@@ -51,17 +51,16 @@
  *
  * RUN:
  *   E2E_BASE_URL=https://eunenem.xeroxtoxerox.com \
- *   E2E_GATE_EMAIL=<walker email> E2E_GATE_SENHA=<walker senha> \
+ *   E2E_GATE_EMAIL=<walker email> \
  *   pnpm exec playwright test e2e/llol4-isolation-gates.spec.ts
  */
 import type { APIRequestContext, BrowserContext, Page } from '@playwright/test';
 import { expect, request as pwRequest, test } from '@playwright/test';
 import { CAMPANHAS_WELCOME_STORAGE_KEY } from '../apps/eunenem-server/pages/lib/campanhas.js';
-import { ID_PLATAFORMA_EUNENEM } from '../apps/eunenem-server/pages/lib/constants.js';
 import { seedGateWalker } from './gate-fixtures.js';
+import { browserCookieFor } from './magic-link-auth.js';
 
 const GATE_EMAIL = process.env.E2E_GATE_EMAIL;
-const GATE_SENHA = process.env.E2E_GATE_SENHA;
 
 const NOME_EXIBICAO = 'Izzygate Walker';
 const TITULO_A = `Lista de ${NOME_EXIBICAO}`;
@@ -279,10 +278,7 @@ async function completeWizard(page: Page, slug: string): Promise<void> {
 // Ordering + shared beforeAll state are already guaranteed by workers=1 in
 // playwright.config.ts.
 test.describe('multicampanha isolation gates (aperture-llol4 / fblrt W1c)', () => {
-  test.skip(
-    !GATE_EMAIL || !GATE_SENHA,
-    'E2E_GATE_EMAIL / E2E_GATE_SENHA not set — gate-walker creds live in env/mempalace',
-  );
+  test.skip(!GATE_EMAIL, 'E2E_GATE_EMAIL not set — gate-walker creds live in env/mempalace');
 
   let api: APIRequestContext;
   let context: BrowserContext;
@@ -292,26 +288,20 @@ test.describe('multicampanha isolation gates (aperture-llol4 / fblrt W1c)', () =
 
   test.beforeAll(async ({ browser, baseURL }) => {
     // Hermetic seed (coverage-expansion): find-or-create the gate-walker +
-    // campanhas A/B directly in the DB so the login/self-heal below finds the
+    // campanhas A/B directly in the DB so the magic-link session below finds the
     // full contract already correct on a fresh local DB. No-op when creds unset.
-    await seedGateWalker();
-    expect(baseURL, 'baseURL must be configured').toBeTruthy();
-    api = await pwRequest.newContext({ baseURL });
-
-    const cont = await api.post('/api/trpc/auth.continuarComEmail', {
-      data: {
-        email: GATE_EMAIL,
-        senha: GATE_SENHA,
-        idPlataforma: ID_PLATAFORMA_EUNENEM,
-        nomeExibicao: NOME_EXIBICAO,
-      },
+    const session = await seedGateWalker(baseURL);
+    expect(session, 'magic-link helper must return the gate session').toBeTruthy();
+    api = await pwRequest.newContext({
+      baseURL,
+      extraHTTPHeaders: { cookie: session?.cookie.header ?? '' },
     });
-    expect(cont.ok(), `continuarComEmail failed: ${cont.status()} ${await cont.text()}`).toBe(true);
 
     const me = await trpcQuery<{ slug: string; needsOnboarding: boolean }>(api, 'auth.me');
     slug = me.slug;
 
-    context = await browser.newContext({ storageState: await api.storageState() });
+    context = await browser.newContext();
+    await context.addCookies([browserCookieFor(session as NonNullable<typeof session>, baseURL)]);
     await context.addInitScript(
       ([key]) => window.localStorage.setItem(key, '1'),
       [CAMPANHAS_WELCOME_STORAGE_KEY],

@@ -30,18 +30,16 @@
  * collapse to the same non-leaking code. We accept the family {UNAUTHORIZED,
  * NOT_FOUND, FORBIDDEN} as "denied" but pin the SPECIFIC code each router throws.
  *
- * Gated on the SAME E2E_GATE_EMAIL/E2E_GATE_SENHA creds as the other gate specs
+ * Gated on the SAME E2E_GATE_EMAIL gate as the other gate specs
  * (skips when unset) so it runs in the same CI job. Intruder creds are distinct
  * hardcoded hermetic-only literals (E2E_INTRUDER_EMAIL / _SENHA override optional).
  *
  * RUN:
  *   E2E_GATE_EMAIL=e2e-gate-walker@e2e.local \
- *   E2E_GATE_SENHA=senha-e2e-gate-walker-123 \
  *   pnpm test:e2e e2e/cross-user-denial.spec.ts
  */
 import type { APIRequestContext } from '@playwright/test';
 import { expect, request as pwRequest, test } from '@playwright/test';
-import { ID_PLATAFORMA_EUNENEM } from '../apps/eunenem-server/pages/lib/constants.js';
 import {
   type IntruderSeed,
   resolveVictimCampanhaA,
@@ -51,9 +49,7 @@ import {
 } from './gate-fixtures.js';
 
 const GATE_EMAIL = process.env.E2E_GATE_EMAIL;
-const GATE_SENHA = process.env.E2E_GATE_SENHA;
 
-const INTRUDER_NOME_EXIBICAO = 'Intruso Rival';
 const RUN = Math.random().toString(36).slice(2, 8);
 // Valid-UUID-format placeholder — the ownership gate rejects BEFORE this id is
 // ever looked up, so a non-existent id is fine (and proves the point: the gate
@@ -153,10 +149,7 @@ function assertDenied(r: RawResult, proc: string, expectedCode: string) {
 }
 
 test.describe('Cross-USER access-denial gate (aperture cross-user-denial)', () => {
-  test.skip(
-    !GATE_EMAIL || !GATE_SENHA,
-    'E2E_GATE_EMAIL / E2E_GATE_SENHA not set — gate-walker creds live in env/mempalace',
-  );
+  test.skip(!GATE_EMAIL, 'E2E_GATE_EMAIL not set — gate-walker creds live in env/mempalace');
 
   let intruderApi: APIRequestContext;
   let intruder: IntruderSeed;
@@ -165,8 +158,8 @@ test.describe('Cross-USER access-denial gate (aperture cross-user-denial)', () =
   test.beforeAll(async ({ baseURL }) => {
     // Seed victim (owns A + B) and intruder (owns their own campanha) directly
     // in the DB, then resolve the victim's campanha A id + painel slug.
-    await seedGateWalker();
-    const intruderSeed = await seedIntruderWalker();
+    await seedGateWalker(baseURL);
+    const intruderSeed = await seedIntruderWalker(baseURL);
     const victimSeed = await resolveVictimCampanhaA();
     expect(
       intruderSeed,
@@ -180,19 +173,10 @@ test.describe('Cross-USER access-denial gate (aperture cross-user-denial)', () =
     victimA = victimSeed as VictimCampanhaA;
 
     expect(baseURL, 'baseURL must be configured').toBeTruthy();
-    intruderApi = await pwRequest.newContext({ baseURL });
-
-    // Log in AS THE INTRUDER — a fully valid session for a user who admins none
-    // of the victim's campanhas.
-    const cont = await intruderApi.post('/api/trpc/auth.continuarComEmail', {
-      data: {
-        email: intruder.email,
-        senha: intruder.senha,
-        idPlataforma: ID_PLATAFORMA_EUNENEM,
-        nomeExibicao: INTRUDER_NOME_EXIBICAO,
-      },
+    intruderApi = await pwRequest.newContext({
+      baseURL,
+      extraHTTPHeaders: { cookie: intruder.session.cookie.header },
     });
-    expect(cont.ok(), `intruder login failed: ${cont.status()} ${await cont.text()}`).toBe(true);
 
     // Sanity: the intruder must NOT be resolvable as an admin of A — assert the
     // seed shapes are actually distinct campanhas (guards a mis-seed that would

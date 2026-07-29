@@ -463,7 +463,8 @@ const ServerEnvSchema = z
     /**
      * Google OAuth credentials (aperture-8655f). Both OPTIONAL so the server
      * still boots in environments without them — when EITHER is absent the
-     * google social provider is NOT registered (email+password still works).
+     * google social provider is NOT registered (magic-link remains available
+     * when SMTP is configured).
      * Set in the deploy env (Dokploy) by the infra owner; the SECRET is never
      * committed. The OAuth callback lands at the BetterAuth-standard
      * `<BETTER_AUTH_URL>/api/auth/callback/google` path (auth.handler is
@@ -474,7 +475,7 @@ const ServerEnvSchema = z
     /**
      * aperture-y5ual — Microsoft (Entra) OAuth, mirrors GOOGLE_*. Same
      * conditional-registration posture: when CLIENT_ID/SECRET are absent the
-     * microsoft provider is NOT registered (email+password still works). The
+     * microsoft provider is NOT registered (magic-link remains available). The
      * SECRET is set in the deploy env (Dokploy), never committed. Callback
      * lands at `<BETTER_AUTH_URL>/api/auth/callback/microsoft`.
      * TENANT_ID defaults to 'common' (multi-tenant work/school + personal
@@ -668,9 +669,8 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): ServerEnv {
  * - Single Kysely instance powers BOTH the engine's domain repos AND the
  *   BetterAuth tables (anti-trap §8 #2 — pool-sharing, one Kysely, one
  *   migration runner).
- * - `criarAuth` accepts an injected `sendResetPassword`. For now this is
- *   a console-log stub — the actual email transport is a follow-up bead
- *   (Vance / operator's choice of SMTP / SES).
+ * - Authentication is passwordless: OAuth and the tenant-scoped magic-link
+ *   plugin are the only account-entry paths.
  * - `PlataformaRepository` is in-memory (the seeded plataformas
  *   eunenem + eucasei live in the engine package). When Plataforma BC
  *   gets a Postgres adapter, swap it here.
@@ -691,9 +691,9 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
 
   // Google OAuth (aperture-8655f) — CONDITIONAL on BOTH env vars being
   // present. When either is missing, `socialProviders` stays undefined and
-  // criarAuth omits the key entirely → email+password-only BetterAuth that
-  // boots cleanly in envs without Google credentials (the critical safety
-  // property). The real CLIENT_SECRET is set in the deploy env (Dokploy),
+  // criarAuth omits the key entirely; magic-link can still provide passwordless
+  // entry. The server boots cleanly without Google credentials. The real
+  // CLIENT_SECRET is set in the deploy env (Dokploy),
   // never committed.
   const googleConfigured =
     !!env.GOOGLE_CLIENT_ID?.length && !!env.GOOGLE_CLIENT_SECRET?.length;
@@ -707,7 +707,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
   // conditional `...(x ? { socialProviders: {...} } : {})` spreads would
   // clobber each other (last-write-wins drops the first provider). We spread
   // the whole key in only when at least one provider is configured, preserving
-  // the "undefined → email+password-only, boots cleanly" safety property.
+  // the "undefined provider set still boots cleanly" safety property.
   const socialProviders = {
     ...(googleConfigured
       ? {
@@ -750,15 +750,6 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     trustedOrigins: env.TRUSTED_ORIGINS.split(',')
       .map((s) => s.trim())
       .filter(Boolean),
-    sendResetPassword: async ({ user, url }) => {
-      // Stub — log only. Real transport (SMTP/SES) lands in a follow-up
-      // bead. Keep the contract here so swapping is a one-line change.
-      observability.logger.info('eunenem.auth.password_reset_email_stub', {
-        idUsuario: user.id,
-        email: user.email,
-        url,
-      });
-    },
     useSecureCookies: env.NODE_ENV === 'production',
     // Enable magic-link only with a real SMTP sender. PR #45's adapter scopes
     // the plugin's user lookup and all subsequent writes to EuNeném before the

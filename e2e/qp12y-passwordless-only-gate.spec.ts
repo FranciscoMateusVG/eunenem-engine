@@ -8,9 +8,8 @@
  * This spec is the absence gate that keeps it from returning a second time.
  *
  * Replaces e2e/k4o0y-email-login-boundary.spec.ts, which drove the removed
- * password UI. The server-side auth.continuarComEmail procedure still exists
- * (e2e fixtures authenticate through it at the API level); what this gate pins
- * is that the MODAL UI can never reach it.
+ * password UI. All server-side password tRPC procedures are retired; fixtures
+ * authenticate through the same magic-link flow used by production.
  *
  * Why E2E and not unit: a unit test on AuthModalShell would pass against a
  * stale bundle. Only the built app proves what the deployed modal renders
@@ -25,6 +24,11 @@ import { expect, test } from './fixtures.js';
 // The magic-link endpoints are deliberately NOT in this list — they were
 // restored as the primary email flow (PR #46).
 const RETIRED_EMAIL_AUTH_PATHS = new Set(['/api/auth/sign-up/email', '/api/auth/sign-in/email']);
+const RETIRED_PASSWORD_TRPC_PROCEDURES = [
+  'auth.signUp',
+  'auth.signIn',
+  'auth.continuarComEmail',
+] as const;
 
 function trpcProcedures(url: string): string[] {
   const match = url.match(/\/api\/trpc\/([^?]+)/);
@@ -98,10 +102,12 @@ test('submitting an email sends a magic link and never reaches a password step',
   await expect(authDialog.getByRole('button', { name: 'CONTINUAR', exact: true })).toHaveCount(0);
 
   expect(observedAuthPaths).toContain('/api/auth/sign-in/magic-link');
-  expect(
-    observedTrpcProcedures,
-    'the modal UI must never call auth.continuarComEmail — that path is API-only for fixtures',
-  ).not.toContain('auth.continuarComEmail');
+  for (const retiredProcedure of RETIRED_PASSWORD_TRPC_PROCEDURES) {
+    expect(
+      observedTrpcProcedures,
+      `auth modal must never call retired password procedure ${retiredProcedure}`,
+    ).not.toContain(retiredProcedure);
+  }
   for (const retiredPath of RETIRED_EMAIL_AUTH_PATHS) {
     expect(
       observedAuthPaths,

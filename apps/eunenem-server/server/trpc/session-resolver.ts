@@ -14,9 +14,10 @@ import type { ServerDeps } from '../auth/setup.js';
  * exists to fix two coupled production bugs and to keep their fix ATOMIC
  * across all routers (Cipher's invariant — see below):
  *
- *   BUG A (cookie read). The tRPC signUp/signIn procedures set the BARE
- *   cookie name `better-auth.session_token` (unsigned, the engine session
- *   token). But BetterAuth's OAuth HTTP flow under `useSecureCookies=true`
+ *   BUG A (cookie read). The retired tRPC password procedures set the BARE
+ *   cookie name `better-auth.session_token` (unsigned, engine session token).
+ *   Those pre-retirement sessions remain readable until their seven-day TTL.
+ *   BetterAuth's OAuth HTTP flow under `useSecureCookies=true`
  *   (prod) sets a `__Secure-`-PREFIXED, HMAC-SIGNED cookie. A bare-name
  *   string match MISSES it → OAuth users resolved to "no session" → landed
  *   logged-out. Fix (A2): when the bare path yields no live session, FALL
@@ -27,7 +28,7 @@ import type { ServerDeps } from '../auth/setup.js';
  *
  *   BUG B (orphan domain user). BetterAuth's NATIVE create (OAuth) writes only
  *   users/sessions/accounts — never the engine `usuarios`/`contas`/`campanhas`
- *   domain rows (only the email+password saga creates those). So a freshly
+ *   domain rows (the retired password saga created those synchronously). So a freshly
  *   OAuth-authenticated user resolves to a valid session whose `usuarios` row
  *   is MISSING. Fix: idempotently self-heal — provision the domain side by
  *   REUSING the saga's extracted domain logic (`provisionarContaUsuarioDominio`,
@@ -49,9 +50,8 @@ import type { ServerDeps } from '../auth/setup.js';
 /**
  * A resolved session principal. `idUsuario` + `expiraEm` are always present.
  * `principal` carries the fields needed to self-heal an orphan and is present
- * ONLY on the getSession/OAuth path — the bare-cookie (email+password) path
- * never needs it because those users always have a `usuarios` row from the
- * signup saga, so the heal branch is never reached for them.
+ * ONLY on the getSession/OAuth path — the pre-retirement bare-cookie path never
+ * needs it because those users already have a `usuarios` row from the old saga.
  */
 interface SessaoResolvida {
   readonly idUsuario: string;
@@ -164,18 +164,17 @@ async function resolverViaGetSession(
 
 /**
  * A2 session resolution (module-PRIVATE — never exported; see the atomicity
- * invariant above). PATH 1 is the bare-cookie email+password posture: the
+ * invariant above). PATH 1 handles pre-retirement bare-cookie sessions: the
  * engine session is the source of truth, `validarSessao` yields idUsuario +
  * expiraEm directly, and the full domain user comes from `findUsuarioById`
- * downstream — so NO getSession round-trip is needed (and email+password must
- * not depend on getSession, which can't resolve the bare unsigned cookie).
- * PATH 2 is the OAuth fallback.
+ * downstream — so NO getSession round-trip is needed. PATH 2 is the current
+ * OAuth/magic-link fallback.
  */
 async function resolverSessao(
   deps: ServerDeps,
   headers: Headers,
 ): Promise<SessaoResolvida | null> {
-  // PATH 1 — bare cookie (email+password). Source of truth = engine session.
+  // PATH 1 — pre-retirement bare cookie. Source of truth = engine session.
   const token = readSessionCookie(headers, deps.sessionCookieName);
   if (token) {
     try {
@@ -233,11 +232,11 @@ async function autoProvisionarUsuarioOrfao(
         email: principal.email,
         nome: principal.nome,
         // idConta omitted — the provisioner mints one (OAuth self-heal has no
-        // caller-supplied idConta; the email+password saga passes its own).
+        // caller-supplied idConta; the retired password saga supplied its own).
       },
     );
     // aperture-ppuay — server-truth account creation via the OAuth orphan
-    // self-heal (the email/password path fires from auth-router.signUp).
+    // self-heal. Password account creation has been retired.
     deps.serverAnalytics?.track('conta_criada', resultado.usuario.idConta, {
       idPlataforma: principal.idPlataforma,
       metodo: 'oauth',

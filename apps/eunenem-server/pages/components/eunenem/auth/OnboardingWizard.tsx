@@ -1,7 +1,7 @@
 // aperture-84a21 / aperture-4y1y4 — post-signup onboarding capture.
 //
-// Fires right AFTER a successful signUp (session present), opened by
-// AuthModalProvider in place of the immediate redirect-to-painel. Captures the
+// Fires after the first successful OAuth/magic-link session, mounted by the
+// page-level auth.me onboarding gate. Captures the
 // fields a brand-new account would otherwise leave null (→ the mock "15 jun
 // 2026" date + "página da bebê" fallback the operator kept hitting):
 //
