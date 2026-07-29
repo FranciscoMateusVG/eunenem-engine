@@ -305,6 +305,16 @@ export async function seedGateWalker(baseURL?: string): Promise<MagicLinkSession
         `seedGateWalker: walker owns no "${TITULO_A}" — got ${JSON.stringify(campanhas.map((c) => c.titulo))}`,
       );
     }
+    // The production magic-link self-heal creates the default campanha with
+    // the current clock. This fixture creates B with CLOCK_B below, so leaving
+    // A at "now" would make B the oldest and invert every bare-route contract.
+    // Pin the synthetic A row to the fixture's declared clock just as the
+    // retired registrarContaUsuario seed did before password auth was removed.
+    await db
+      .updateTable('campanhas')
+      .set({ criada_em: CLOCK_A })
+      .where('id', '=', campanhaA.id)
+      .execute();
     campanhaA = await ensurePresenteOpcao(deps, campanhaA);
     await ensureRecebedor(deps, campanhaA);
     await ensureGift(deps, campanhaA, GIFT_A_NOME, GIFT_A_VALOR);
