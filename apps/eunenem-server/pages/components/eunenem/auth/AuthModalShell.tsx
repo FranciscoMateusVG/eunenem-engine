@@ -1,20 +1,25 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 
-import { type AuthError, type AuthSession, authErrorMessage, isValidEmail, MIN_PASSWORD_LENGTH, useContinuarComEmail } from "@/lib/auth";
+import { type AuthSession, isValidEmail } from "@/lib/auth";
 import { authClient } from "@/lib/authClient";
 
-// aperture-k4o0y — AuthModalShell (single smart two-step entry).
+// aperture-qp12y — AuthModalShell (passwordless-only entry).
 //
-// There is ONE flow, not separate sign-in/sign-up modes. The first step collects
-// the email without checking whether it exists; the second collects the
-// password and calls the tenant-scoped `auth.continuarComEmail` procedure. The
-// server decides whether to log in or create an account and reports the outcome
-// only after successful authentication.
+// The CONTINUAR → password step (aperture-k4o0y's two-step flow) is REMOVED by
+// operator decision (2026-07-29): no reachable path in this modal may ask for
+// or create a password. What remains is exactly three ways in:
+//   1. Google OAuth
+//   2. Microsoft OAuth
+//   3. email + magic link (now the form's primary CTA — Enter sends the link)
 //
-// Flow:
-//   "email"    → OAuth row + email input + password or magic-link actions
-//   "password" → password input + one unified login-or-create submission
+// The magic-link submit is enumeration-safe: we never pre-check whether the
+// email exists, and the confirmation copy never reveals it. The server decides
+// login-vs-create when the emailed link is clicked.
+//
+// The tenant-scoped `auth.continuarComEmail` tRPC procedure still exists
+// server-side — retiring it is a separate, backend-scoped decision. This
+// component simply no longer reaches it.
 //
 // OAuth providers: Google + Microsoft, wired to the real BetterAuth social
 // flow (onOauth → authClient.signIn.social). ZERO Apple.
@@ -25,14 +30,13 @@ import { authClient } from "@/lib/authClient";
 //
 // Accessibility:
 //   - role="dialog" + aria-modal + aria-labelledby/-describedby
-//   - ESC closes (unless submitting), backdrop click closes (unless submitting)
+//   - ESC closes (unless mid-send), backdrop click closes (unless mid-send)
 //   - Focus trap: Tab cycles within modal; Shift+Tab wraps backward
-//   - Email receives focus on step 1; back control receives focus on step 2
+//   - Email input receives focus on open
 //   - Focus returns to the trigger element on close (provider owns the ref)
 //   - Body scroll locked while open
 
 export type AuthMode = "signup" | "signin";
-type Step = "email" | "password";
 
 export interface AuthModalShellProps {
   /**
@@ -47,7 +51,11 @@ export interface AuthModalShellProps {
    * mode swap anymore, so this is never called.
    */
   onModeChange?: (next: AuthMode) => void;
-  /** Called with the server-authoritative login-or-create result. */
+  /**
+   * Retained for API compatibility. The magic-link flow authenticates via a
+   * full-page redirect after the user clicks the emailed link, so the modal
+   * never resolves a session inline and never calls this.
+   */
   onAuthenticated?: (session: AuthSession) => void;
 }
 
@@ -74,23 +82,19 @@ function messageForOauthError(status: number | undefined, label: string): string
   return `não consegui abrir o ${label} agora ♡ — tenta de novo em instantes`;
 }
 
-export function AuthModalShell({ onClose, onAuthenticated }: AuthModalShellProps) {
+export function AuthModalShell({ onClose }: AuthModalShellProps) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const titleId = useId();
   const subtitleId = useId();
   const emailId = useId();
-  const passwordId = useId();
 
-  const [step, setStep] = useState<Step>("email");
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
   const [emailError, setEmailError] = useState<string | null>(null);
-  const [passwordError, setPasswordError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [magicLinkStatus, setMagicLinkStatus] = useState<"idle" | "sending" | "sent">("idle");
-  const { continuarComEmail } = useContinuarComEmail();
+
+  // Block dismissal only while the magic-link request is in flight.
+  const isSending = magicLinkStatus === "sending";
 
   // ── Social sign-in feedback (aperture-svwyp) ──────────────────────────────
   // BetterAuth's client resolves `signIn.social` with `{ data, error }` — it
@@ -115,11 +119,11 @@ export function AuthModalShell({ onClose, onAuthenticated }: AuthModalShellProps
   // ── Lifecycle: ESC, body scroll lock ──────────────────────────────────────
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !isSubmitting) onClose();
+      if (e.key === "Escape" && !isSending) onClose();
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [onClose, isSubmitting]);
+  }, [onClose, isSending]);
 
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -129,14 +133,14 @@ export function AuthModalShell({ onClose, onAuthenticated }: AuthModalShellProps
     };
   }, []);
 
-  // ── Initial / step-change focus ───────────────────────────────────────────
+  // ── Initial / status-change focus ─────────────────────────────────────────
   useEffect(() => {
     const root = dialogRef.current;
     if (!root) return;
     const focusables = getFocusables(root);
     const initial = root.querySelector<HTMLElement>("[data-autofocus]");
     (initial ?? focusables[0])?.focus();
-  }, [step]);
+  }, [magicLinkStatus]);
 
   // ── Focus trap ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -215,36 +219,21 @@ export function AuthModalShell({ onClose, onAuthenticated }: AuthModalShellProps
     }
   };
 
-  // Step 1 deliberately performs no account lookup. Existence remains a
-  // server-side decision inside continuarComEmail, after the login-grade rate
-  // limit has already run.
-  const onEmailSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setEmailError(null);
-    setSubmitError(null);
-    if (!email.trim()) {
-      setEmailError("preenche aqui pra eu te encontrar ♡");
-      return;
-    }
-    if (!isValidEmail(email)) {
-      setEmailError("esse e-mail tá meio torto — confere pra mim?");
-      return;
-    }
-    setStep("password");
-  };
-
   const onEmailChange = (nextEmail: string) => {
     setEmail(nextEmail);
-    // A password is scoped to the identity entered on step one. Never carry a
-    // secret (or its reveal state) across an email edit.
-    setPassword("");
-    setShowPassword(false);
-    setPasswordError(null);
+    // Editing the email re-arms the flow: clear stale errors and allow a fresh
+    // magic-link send for the new address.
+    setEmailError(null);
     setSubmitError(null);
     setMagicLinkStatus("idle");
   };
 
-  const onMagicLink = async () => {
+  // aperture-qp12y — the form's ONLY submit path. No account lookup happens
+  // client-side (no enumeration oracle): BetterAuth sends a magic link either
+  // way and the confirmation copy is uniform.
+  const onMagicLink = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (magicLinkStatus !== "idle") return;
     setEmailError(null);
     setSubmitError(null);
     if (!email.trim()) {
@@ -282,54 +271,12 @@ export function AuthModalShell({ onClose, onAuthenticated }: AuthModalShellProps
     }
   };
 
-  const onBack = () => {
-    if (isSubmitting) return;
-    setStep("email");
-    setPassword("");
-    setShowPassword(false);
-    setPasswordError(null);
-    setSubmitError(null);
-  };
-
-  const onPasswordSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setPasswordError(null);
-    setSubmitError(null);
-    if (!password) {
-      setPasswordError("escolhe uma senha pra fechar a porta ♡");
-      return;
-    }
-    if (password.length < MIN_PASSWORD_LENGTH) {
-      setPasswordError(`a senha precisa ter pelo menos ${MIN_PASSWORD_LENGTH} caracteres ♡`);
-      return;
-    }
-
-    setIsSubmitting(true);
-    try {
-      const session = await continuarComEmail({ email, password });
-      toast.success(session.criado ? "conta criada ♡" : "bem-vinda de volta ♡", {
-        description: session.user.email,
-      });
-      onAuthenticated?.(session);
-      onClose();
-    } catch (err) {
-      const error = err as AuthError;
-      if (error.kind === "credentials" || error.kind === "short-password") {
-        setPasswordError(authErrorMessage(error));
-      } else {
-        setSubmitError(authErrorMessage(error ?? { kind: "network" }));
-      }
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div
       className="auth-backdrop"
       onClick={(e) => {
-        if (e.target === e.currentTarget && !isSubmitting) onClose();
+        if (e.target === e.currentTarget && !isSending) onClose();
       }}
     >
       <style>{AUTH_CSS}</style>
@@ -337,27 +284,21 @@ export function AuthModalShell({ onClose, onAuthenticated }: AuthModalShellProps
         {/* washi tape */}
         <span aria-hidden="true" className="auth-tape" />
 
-        <button type="button" onClick={() => !isSubmitting && onClose()} disabled={isSubmitting} aria-label="Fechar" className="auth-close">
+        <button type="button" onClick={() => !isSending && onClose()} disabled={isSending} aria-label="Fechar" className="auth-close">
           ×
         </button>
 
         <header className="auth-head">
-          {step === "password" && (
-            <button type="button" onClick={onBack} disabled={isSubmitting} aria-label="Voltar para o passo anterior" data-autofocus className="auth-back">
-              ← voltar
-            </button>
-          )}
           <p className="auth-eyebrow">entra que é rapidinho ♡</p>
           <h2 id={titleId} className="auth-title">
             entrar ou criar sua lista
           </h2>
           <p id={subtitleId} className="auth-subtitle">
-            {step === "email" ? "começa pelo seu email — a gente cuida do resto ♡" : `é só a senha pra ${email} ♡`}
+            sem senha — a gente te manda um link mágico ♡
           </p>
         </header>
 
-        {step === "email" ? (
-          <form onSubmit={onEmailSubmit} className="auth-form" noValidate>
+        <form onSubmit={onMagicLink} className="auth-form" noValidate>
             <div className="auth-oauth-row">
               {OAUTH_PROVIDERS.map(({ id, label, icon: Icon }) => {
                 const pending = oauthPending === id;
@@ -411,6 +352,7 @@ export function AuthModalShell({ onClose, onAuthenticated }: AuthModalShellProps
                 aria-required="true"
                 aria-invalid={Boolean(emailError)}
                 aria-describedby={emailError ? `${emailId}-err` : undefined}
+                disabled={isSending}
                 data-autofocus
                 className="auth-input"
               />
@@ -421,18 +363,15 @@ export function AuthModalShell({ onClose, onAuthenticated }: AuthModalShellProps
               </p>
             )}
 
-            <button type="submit" className="auth-cta" disabled={magicLinkStatus === "sending"}>
-              CONTINUAR <span aria-hidden="true">→</span>
-            </button>
-
-            <button
-              type="button"
-              className="auth-magic-link"
-              onClick={onMagicLink}
-              disabled={magicLinkStatus !== "idle"}
-              aria-busy={magicLinkStatus === "sending"}
-            >
-              {magicLinkStatus === "sending" ? "ENVIANDO LINK…" : "ENVIAR LINK MÁGICO"}
+            <button type="submit" className="auth-cta" disabled={magicLinkStatus !== "idle"} aria-busy={isSending}>
+              {isSending ? (
+                <>
+                  <Spinner />
+                  ENVIANDO LINK…
+                </>
+              ) : (
+                <>ENVIAR LINK MÁGICO ♡</>
+              )}
             </button>
             {magicLinkStatus === "sent" && (
               <p className="auth-magic-link-sent" role="status">
@@ -440,52 +379,6 @@ export function AuthModalShell({ onClose, onAuthenticated }: AuthModalShellProps
               </p>
             )}
           </form>
-        ) : (
-          <form onSubmit={onPasswordSubmit} className="auth-form" noValidate>
-            <input type="email" value={email} autoComplete="username" readOnly aria-hidden="true" tabIndex={-1} style={{ display: "none" }} />
-
-            <label htmlFor={passwordId} className="auth-label">
-              Sua senha — ou crie uma
-            </label>
-            <div className={`auth-input-wrap ${passwordError ? "has-error" : ""}`}>
-              <LockIcon />
-              <input
-                id={passwordId}
-                type={showPassword ? "text" : "password"}
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder={`Mínimo ${MIN_PASSWORD_LENGTH} caracteres`}
-                aria-required="true"
-                aria-invalid={Boolean(passwordError)}
-                aria-describedby={passwordError ? `${passwordId}-err` : undefined}
-                disabled={isSubmitting}
-                className="auth-input"
-              />
-              <button type="button" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? "Esconder senha" : "Mostrar senha"} aria-pressed={showPassword} className="auth-pw-toggle" disabled={isSubmitting}>
-                {showPassword ? <EyeOffIcon /> : <EyeIcon />}
-              </button>
-            </div>
-            {passwordError && (
-              <p id={`${passwordId}-err`} role="alert" className="auth-field-error">
-                {passwordError}
-              </p>
-            )}
-
-            <button type="submit" className="auth-cta" disabled={isSubmitting} aria-busy={isSubmitting}>
-              {isSubmitting ? (
-                <>
-                  <Spinner />
-                  CONTINUANDO…
-                </>
-              ) : (
-                <>
-                  CONTINUAR <span aria-hidden="true">→</span>
-                </>
-              )}
-            </button>
-          </form>
-        )}
 
         {submitError && (
           <p role="alert" className="auth-error-banner">
@@ -551,33 +444,6 @@ function EnvelopeIcon() {
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
       <polyline points="22,6 12,13 2,6" />
-    </svg>
-  );
-}
-
-function LockIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-    </svg>
-  );
-}
-
-function EyeIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-      <circle cx="12" cy="12" r="3" />
-    </svg>
-  );
-}
-
-function EyeOffIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
-      <line x1="1" y1="1" x2="23" y2="23" />
     </svg>
   );
 }
@@ -653,20 +519,6 @@ export const AUTH_CSS = `
   margin:0 0 22px;
   position:relative;
 }
-.auth-back{
-  position:absolute;top:-12px;left:-8px;
-  background:transparent;border:none;cursor:pointer;
-  font-family:var(--font-dm-sans),sans-serif;
-  font-size:12px;font-weight:600;letter-spacing:.08em;
-  color:var(--ink-soft);
-  min-width:44px;min-height:44px;padding:8px 12px;border-radius:999px;
-  display:inline-flex;align-items:center;justify-content:center;
-  transition:background .15s ease,color .15s ease;
-}
-.auth-back:hover:not(:disabled){background:var(--cream-2);color:var(--plum)}
-.auth-back:focus-visible{outline:2px solid var(--lilac-deep);outline-offset:2px}
-.auth-back:disabled{opacity:.4;cursor:not-allowed}
-
 .auth-eyebrow{
   margin:0 0 2px;
   font-family:var(--font-caveat),cursive;
@@ -780,17 +632,6 @@ export const AUTH_CSS = `
 .auth-input::placeholder{color:var(--ink-mute)}
 .auth-input:disabled{cursor:not-allowed;color:var(--ink-mute)}
 
-.auth-pw-toggle{
-  background:transparent;border:none;cursor:pointer;
-  color:var(--ink-mute);
-  width:44px;height:44px;padding:6px;border-radius:8px;
-  display:flex;align-items:center;justify-content:center;
-  transition:color .15s ease,background .15s ease;
-}
-.auth-pw-toggle:hover:not(:disabled){color:var(--plum);background:var(--cream-2)}
-.auth-pw-toggle:focus-visible{outline:2px solid var(--lilac-deep);outline-offset:2px}
-.auth-pw-toggle:disabled{opacity:.4;cursor:not-allowed}
-
 .auth-field-error{
   margin:6px 4px 12px;
   font-family:var(--font-caveat),cursive;
@@ -827,21 +668,6 @@ export const AUTH_CSS = `
 .auth-cta:hover:not(:disabled){background:var(--lilac-deep);transform:translateY(-1px)}
 .auth-cta:focus-visible{outline:2px solid var(--lilac-deep);outline-offset:3px}
 .auth-cta:disabled{opacity:.7;cursor:not-allowed;box-shadow:none}
-.auth-magic-link{
-  width:100%;
-  margin-top:12px;
-  padding:12px 16px;
-  background:transparent;
-  border:1.5px solid var(--lilac);
-  border-radius:14px;
-  color:var(--plum);
-  font-family:var(--font-dm-sans),sans-serif;
-  font-size:12px;font-weight:600;letter-spacing:.08em;
-  cursor:pointer;
-}
-.auth-magic-link:hover:not(:disabled){background:rgba(166,139,179,.08)}
-.auth-magic-link:focus-visible{outline:2px solid var(--lilac-deep);outline-offset:3px}
-.auth-magic-link:disabled{opacity:.65;cursor:not-allowed}
 .auth-magic-link-sent{
   margin:10px 4px 0;
   text-align:center;
@@ -891,8 +717,8 @@ export const AUTH_CSS = `
 }
 
 @media (prefers-reduced-motion:reduce){
-  .auth-backdrop,.auth-card,.auth-cta,.auth-oauth,.auth-close,.auth-back,
-  .auth-input-wrap,.auth-pw-toggle,.auth-spin,.auth-swap{
+  .auth-backdrop,.auth-card,.auth-cta,.auth-oauth,.auth-close,
+  .auth-input-wrap,.auth-spin,.auth-swap{
     animation:none;transition:none;
   }
 }
