@@ -6,6 +6,7 @@
 
 import { useCallback } from "react";
 
+import { resetAnalyticsIdentity } from "./analytics.js";
 import { trpc } from "./trpc.js";
 
 /** Currently-authenticated user as returned by `auth.me`. */
@@ -30,6 +31,11 @@ export function useSignOut() {
   const mutation = trpc.auth.signOut.useMutation({
     onSuccess: () => {
       void utils.auth.me.invalidate();
+      // aperture-d2r21 — drop the Mixpanel identity with the session so the
+      // next login on this browser can't inherit (or extend) this account's
+      // tracked identity. Mirrors identifyWithUtm at the login-resolution
+      // sites (useOauthReturnRedirect, OnboardingWizard).
+      resetAnalyticsIdentity();
     },
   });
 

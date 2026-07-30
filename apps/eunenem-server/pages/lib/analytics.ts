@@ -89,12 +89,25 @@ export function setOnceUserProps(props: Record<string, unknown>): void {
   }
 }
 
+// aperture-d2r21 — un-merge the identity on logout. Without this, the NEXT
+// person to log in on a shared/borrowed browser would keep tracking under the
+// previous account's distinct_id (cross-user identity bleed), and the previous
+// user's post-logout anonymous browsing would wrongly extend their retention.
+// No-op when Mixpanel is dark. Call sites: useSignOut (pages/lib/auth.ts) —
+// the single shared logout hook (Navbar, PainelTopbar).
+export function resetAnalyticsIdentity(): void {
+  if (mixpanelOn()) {
+    mixpanel.reset();
+  }
+}
+
 // Identify the resolved account AND attach its first-touch utm_source (captured
 // to localStorage by the landing page). identify() runs BEFORE set_once() so the
 // props land on the identified profile rather than the anonymous one. This is the
-// one call auth-resolution sites make — login (AuthModalProvider) and signup
-// completion (OnboardingWizard). No-op when Mixpanel is dark. localStorage reads
-// are guarded: Safari private mode throws on access.
+// one call auth-resolution sites make — login (useOauthReturnRedirect: OAuth +
+// magic-link returns, aperture-d2r21) and signup completion (OnboardingWizard).
+// No-op when Mixpanel is dark. localStorage reads are guarded: Safari private
+// mode throws on access.
 export function identifyWithUtm(distinctId: string): void {
   identifyUser(distinctId);
   if (typeof window === 'undefined') return;

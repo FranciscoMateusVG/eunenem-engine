@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 
+import { identifyWithUtm } from "./analytics.js";
 import { postLoginTarget, resolveMeWithRetry } from "./post-login-route.js";
 import { trpc } from "./trpc.js";
 
@@ -59,6 +60,14 @@ export function useOauthReturnRedirect(): void {
         // Genuinely-unauthenticated (or a persistent race) → me stays null: keep
         // the user on the landing; the navbar renders the correct auth state.
         if (!me?.slug) return;
+        // aperture-d2r21 — merge this session into the account's Mixpanel
+        // identity at the login-resolution moment. Both login flows (OAuth and
+        // magic link) return through this hook via the ?oauth=1 marker, so this
+        // is THE client-side "login succeeded" site. identify() writes the
+        // distinct_id to localStorage synchronously, so it survives the
+        // window.location.assign below even if the network flush doesn't.
+        // Signup completion identifies separately in OnboardingWizard.
+        identifyWithUtm(me.idConta);
         // Route by the single shared post-login rule (legacy → /campanhas;
         // needs-onboarding → wizard; onboarded → /campanhas) so no entry point
         // can drift — see pages/lib/post-login-route.ts.
