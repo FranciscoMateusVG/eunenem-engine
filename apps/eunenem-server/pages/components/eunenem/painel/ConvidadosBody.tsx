@@ -34,6 +34,8 @@ import {
   type StatusPresencaConvidado,
 } from "@/lib/convidados";
 import { painelHref } from "@/lib/painelRoutes";
+import { sendEvent } from "@/lib/analytics";
+import { useCampanhaEscrita } from "@/lib/campanha-escrita";
 import { useCampanhaRota } from "@/lib/campanha-rota";
 import { DEFAULT_STATE, EVENT_BY_ID, EVENT_TYPES, formatDateScrap, type ConviteState } from "@/lib/mocks/convite";
 import { getDefaultConviteShareOrigin } from "@/lib/convite-share";
@@ -1471,6 +1473,9 @@ export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
   const alterarPresenca = useAlterarPresencaConvidado();
   const adicionarConvidado = useAdicionarConvidado();
   const salvarFormatoMensagem = useSalvarFormatoMensagem();
+  // aperture-7g30v — the campanha id the guest-add mutation addresses (route
+  // /c/:id when present, else session default). Only used as an analytics prop.
+  const idCampanhaEvento = useCampanhaEscrita();
 
   const guests = useMemo<Convidado[]>(() => {
     const convidados = listaQuery.data?.lista?.convidados ?? [];
@@ -1555,6 +1560,18 @@ export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
   const addGuest = async ({ name, phone }: { name: string; phone: string }) => {
     try {
       await adicionarConvidado.mutateAsync({ nome: name, numeroCelular: phone });
+      // aperture-7g30v — "convites" metric = guests ADDED to a list (operator
+      // definition, 2026-07-30). This was previously unmeasured anywhere (no
+      // event, no DB timestamp). Event-only instrumentation: Mixpanel carries
+      // the timestamp natively; the owner is the event's distinct_id (the
+      // painel is an authenticated owner surface, identified via aperture-d2r21
+      // / OnboardingWizard). id_campanha is the same write-target id the
+      // mutation itself addresses (useCampanhaEscrita: route id ?? session
+      // default). NO guest PII in the props — name/phone stay out of Mixpanel.
+      sendEvent("convidado_adicionado", {
+        id_campanha: idCampanhaEvento ?? null,
+        slug,
+      });
       toast.success("convidado adicionado à lista ♡");
       return true;
     } catch (error) {
