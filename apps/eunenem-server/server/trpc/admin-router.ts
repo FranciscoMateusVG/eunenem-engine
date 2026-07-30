@@ -2419,7 +2419,6 @@ const ProdutoAdminDTOSchema = z.object({
   idCategoria: UuidSchema,
   position: NonNegativeIntegerSchema,
   imageUrl: ImageUrlSchema.nullable(),
-  popularidade: NonNegativeIntegerSchema.nullable(),
   ativo: z.boolean(),
   criadoEm: IsoDateSchema,
   atualizadoEm: IsoDateSchema,
@@ -2502,7 +2501,6 @@ function produtoAdminDTO(
     idCategoria: produto.idCategoria,
     position: produto.position,
     imageUrl: produto.imageUrl,
-    popularidade: produto.popularidade,
     ativo: produto.ativo,
     criadoEm: produto.criadoEm.toISOString(),
     atualizadoEm: produto.atualizadoEm.toISOString(),
@@ -2620,7 +2618,6 @@ const CreateProductInputSchema = z
     bgColor: BgColorInputSchema,
     idCategoria: UuidSchema,
     imageUrl: ImageUrlSchema.nullable().optional().default(null),
-    popularidade: NonNegativeIntegerSchema.nullable().optional().default(null),
   })
   .strict();
 
@@ -2634,7 +2631,6 @@ const UpdateProductInputSchema = z
     bgColor: BgColorInputSchema.optional(),
     idCategoria: UuidSchema.optional(),
     imageUrl: ImageUrlSchema.nullable().optional(),
-    popularidade: NonNegativeIntegerSchema.nullable().optional(),
   })
   .strict()
   .refine(
@@ -2645,8 +2641,7 @@ const UpdateProductInputSchema = z
       input.emoji !== undefined ||
       input.bgColor !== undefined ||
       input.idCategoria !== undefined ||
-      input.imageUrl !== undefined ||
-      input.popularidade !== undefined,
+      input.imageUrl !== undefined,
     "ao menos um campo deve ser informado",
   );
 
@@ -2738,7 +2733,11 @@ const catalogRouter = t.router({
                 input.idCategoria,
               ),
             imageUrl: input.imageUrl,
-            popularidade: input.popularidade,
+            // aperture: the admin UI no longer exposes popularidade (operator
+            // request, 2026-07-30). The domain field + DB column stay — new
+            // products simply carry null. The customer read path
+            // (catalogo-router popularity mapping) is untouched.
+            popularidade: null,
             ativo: true,
             criadoEm: now,
             atualizadoEm: now,
@@ -2816,9 +2815,6 @@ const catalogRouter = t.router({
                 : {}),
               ...(imageUrlChanged
                 ? { imageUrl: input.imageUrl }
-                : {}),
-              ...(input.popularidade !== undefined
-                ? { popularidade: input.popularidade }
                 : {}),
               atualizadoEm: ctx.deps.clock(),
             },

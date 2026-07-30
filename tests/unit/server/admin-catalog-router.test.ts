@@ -275,7 +275,6 @@ describe('admin.catalog products', () => {
       bgColor: 'var(--pink-soft)',
       idCategoria: sourceCategory.id,
       imageUrl: '/products/fralda.png',
-      popularidade: 10,
     });
 
     expect(created).toEqual({
@@ -289,11 +288,12 @@ describe('admin.catalog products', () => {
       idCategoria: sourceCategory.id,
       position: 0,
       imageUrl: '/products/fralda.png',
-      popularidade: 10,
       ativo: true,
       criadoEm: NOW.toISOString(),
       atualizadoEm: NOW.toISOString(),
     });
+    // aperture: popularidade removed from the admin surface (operator request,
+    // 2026-07-30) — absent from input AND output; the DB column stays.
     expect(Object.keys(created).sort()).toEqual(
       [
         'ativo',
@@ -306,7 +306,6 @@ describe('admin.catalog products', () => {
         'idLegado',
         'imageUrl',
         'nome',
-        'popularidade',
         'position',
         'precoCents',
         'quantidadeSugerida',
@@ -325,7 +324,6 @@ describe('admin.catalog products', () => {
       idCategoria: targetCategory.id,
       nome: 'Fralda atualizada',
       imageUrl: null,
-      popularidade: null,
     });
     expect(moved).toMatchObject({
       id: created.id,
@@ -333,7 +331,6 @@ describe('admin.catalog products', () => {
       idCategoria: targetCategory.id,
       position: 5,
       imageUrl: null,
-      popularidade: null,
       criadoEm: NOW.toISOString(),
       atualizadoEm: NOW.toISOString(),
     });
