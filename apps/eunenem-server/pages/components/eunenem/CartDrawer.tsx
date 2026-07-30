@@ -84,9 +84,17 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
     }
     if (successQuery.data?.status === "approved") {
       setPhase({ kind: "completed_confirmed" });
+      // aperture-e69ur — conversion event for the INLINE success path (see
+      // GiftCheckoutModal for the full rationale). Same name + props as the
+      // redirect path's PaginaSucessoPage event; same obterSucessoPagamento
+      // source. Fires exactly once via the phase guard above.
+      sendEvent("compra_concluida", {
+        valor: successQuery.data.valor,
+        gift_name: successQuery.data.giftName,
+      });
       void invalidarListaPresentes(slug);
     }
-  }, [successQuery.data?.status, phase.kind, invalidarListaPresentes, slug]);
+  }, [successQuery.data, phase.kind, invalidarListaPresentes, slug]);
 
   // 30s pending → slow timeout.
   useEffect(() => {
