@@ -150,7 +150,6 @@ export function ProdutosTab() {
                   <Th>categoria</Th>
                   <Th align="right">preço</Th>
                   <Th align="right">sugerido</Th>
-                  <Th align="right">popularidade</Th>
                   <Th>status</Th>
                   <Th align="right">ações</Th>
                 </tr>
@@ -181,9 +180,6 @@ export function ProdutosTab() {
                     </td>
                     <td className="px-4 py-3 text-right font-mono text-[13px] tabular-nums text-ink-soft">
                       {p.quantidadeSugerida}
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono text-[13px] tabular-nums text-ink-soft">
-                      {p.popularidade ?? "—"}
                     </td>
                     <td className="px-4 py-3">
                       <AtivoBadge ativo={p.ativo} />
@@ -286,7 +282,6 @@ interface FieldErrors {
   emoji?: string;
   idCategoria?: string;
   quantidadeSugerida?: string;
-  popularidade?: string;
 }
 
 function ProdutoFormModal({
@@ -318,9 +313,6 @@ function ProdutoFormModal({
   const [imageUrl, setImageUrl] = useState<string | null>(
     produto?.imageUrl ?? null,
   );
-  const [popularidade, setPopularidade] = useState(
-    produto?.popularidade != null ? String(produto.popularidade) : "",
-  );
   const [errors, setErrors] = useState<FieldErrors>({});
 
   const utils = trpc.useUtils();
@@ -332,13 +324,10 @@ function ProdutoFormModal({
     ok: boolean;
     precoCents: number;
     qtd: number;
-    pop: number | null;
   } {
     const next: FieldErrors = {};
     const precoCents = parsePriceToCents(precoText);
     const qtd = Number(quantidadeSugerida);
-    const popTrim = popularidade.trim();
-    const pop = popTrim === "" ? null : Number(popTrim);
 
     if (nome.trim().length < 1 || nome.trim().length > 200)
       next.nome = "informe um nome (até 200 caracteres).";
@@ -349,15 +338,12 @@ function ProdutoFormModal({
     if (!idCategoria) next.idCategoria = "selecione uma categoria.";
     if (!Number.isInteger(qtd) || qtd < 1)
       next.quantidadeSugerida = "quantidade sugerida deve ser ≥ 1.";
-    if (pop !== null && (!Number.isInteger(pop) || pop < 0))
-      next.popularidade = "popularidade deve ser um inteiro ≥ 0.";
 
     setErrors(next);
     return {
       ok: Object.keys(next).length === 0,
       precoCents: precoCents ?? 0,
       qtd,
-      pop,
     };
   }
 
@@ -375,7 +361,6 @@ function ProdutoFormModal({
           bgColor,
           idCategoria,
           imageUrl,
-          popularidade: v.pop,
         });
         toast.success("produto atualizado.");
       } else {
@@ -387,7 +372,6 @@ function ProdutoFormModal({
           bgColor,
           idCategoria,
           imageUrl,
-          popularidade: v.pop,
         });
         toast.success("produto criado.");
       }
@@ -492,19 +476,6 @@ function ProdutoFormModal({
         <div>
           <FieldLabel>Cor de fundo</FieldLabel>
           <SwatchSelect value={bgColor} onChange={setBgColor} />
-        </div>
-
-        <div>
-          <FieldLabel htmlFor="pf-pop">Popularidade (opcional)</FieldLabel>
-          <TextField
-            id="pf-pop"
-            value={popularidade}
-            onChange={setPopularidade}
-            inputMode="numeric"
-            placeholder="—"
-            invalid={!!errors.popularidade}
-          />
-          {errors.popularidade && <FieldError>{errors.popularidade}</FieldError>}
         </div>
 
         <ImageUploadField value={imageUrl} onChange={setImageUrl} />
