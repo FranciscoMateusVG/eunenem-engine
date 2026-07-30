@@ -122,6 +122,16 @@ export function GiftCheckoutModal({
     }
     if (successQuery.data?.status === "approved") {
       setPhase({ kind: "completed_confirmed" });
+      // aperture-e69ur — conversion event for the INLINE success path. The
+      // redirect flow fires this on PaginaSucessoPage's ApprovedState mount;
+      // this inline flow (the default — no redirect) previously fired nothing,
+      // undercounting real purchases. Same event name + props as the redirect
+      // path, sourced from the same obterSucessoPagamento read. Fires exactly
+      // once: after setPhase the guard above early-returns on re-runs.
+      sendEvent("compra_concluida", {
+        valor: successQuery.data.valor,
+        gift_name: successQuery.data.giftName,
+      });
       // aperture-6g58e operator follow-up: invalidate the Marketplace
       // cache so the gift grid re-renders the just-purchased gift as
       // PRESENTEADO without a manual page refresh. Fire-and-forget — the
@@ -129,7 +139,7 @@ export function GiftCheckoutModal({
       // is still in the success panel.
       void invalidarListaPresentes(slug);
     }
-  }, [successQuery.data?.status, phase.kind, invalidarListaPresentes, slug]);
+  }, [successQuery.data, phase.kind, invalidarListaPresentes, slug]);
 
   // 30s timeout: pending → slow. Cleared if the phase changes before then
   // (confirmed lands, or visitor closes + reopens which remounts).
