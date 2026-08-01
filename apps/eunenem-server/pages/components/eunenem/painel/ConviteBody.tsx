@@ -20,8 +20,8 @@ import { painelConvitePreviewHref } from "@/lib/painelRoutes";
 import { sendEvent } from "@/lib/analytics";
 import {
   countdownTo,
-  DEFAULT_STATE,
   DISABLED_EVENT_TYPES,
+  EMPTY_STATE,
   EVENT_BY_ID,
   EVENT_TYPES,
   formatDateScrap,
@@ -355,7 +355,7 @@ function ScrapbookInvite({
             textWrap: "pretty",
           }}
         >
-          {state.babyName || (state.eventType === "aniversario" ? "Mariana" : "Maria Helena")}
+          {state.babyName || (state.eventType === "aniversario" ? "nome da criança" : "nome do bebê")}
         </div>
         {/* polaroid */}
         {state.density === "muita" && format !== "link" && (
@@ -547,7 +547,7 @@ function ScrapbookInvite({
               {state.message}
             </div>
           )}
-          {state.host && (
+          {(state.assinatura.trim() || state.host) && (
             <div
               style={{
                 fontFamily: "var(--font-caveat), cursive",
@@ -558,7 +558,9 @@ function ScrapbookInvite({
                 display: "inline-block",
               }}
             >
-              com amor, {state.host}
+              {/* aperture-zy4uo — user's own signature line wins verbatim;
+                  legacy fallback derives from the host; neither → no line. */}
+              {state.assinatura.trim() ? state.assinatura.trim() : `com amor, ${state.host}`}
             </div>
           )}
           {state.hashtag && state.showHashtag && (
@@ -653,7 +655,7 @@ function CleanInvite({
             textWrap: "pretty",
           }}
         >
-          {state.babyName || "Maria Helena"}
+          {state.babyName || "nome do bebê"}
         </div>
         <div style={{ width: 36, height: 1, background: pal.deep, margin: "20px auto" }} />
         {isOnline ? (
@@ -914,7 +916,7 @@ function TemplateInvite({
               textWrap: "pretty",
             }}
           >
-            {state.babyName || (state.eventType === "aniversario" ? "Mariana" : "Maria Helena")}
+            {state.babyName || (state.eventType === "aniversario" ? "nome da criança" : "nome do bebê")}
           </div>
 
           {/* date or online */}
@@ -1174,7 +1176,7 @@ function UploadedInvite({
               textShadow: "0 2px 14px rgba(0,0,0,.4)",
             }}
           >
-            {state.babyName || "Maria Helena"}
+            {state.babyName || "nome do bebê"}
           </div>
 
           {isOnline ? (
@@ -1413,7 +1415,9 @@ export function ConviteBody(props: PainelSectionBodyProps) {
 function DesktopConviteBody({ slug }: PainelSectionBodyProps) {
   // aperture-z6vks — keep the /c/:idCampanha context on the preview link.
   const idCampanha = useCampanhaRota();
-  const [state, setState] = useState<ConviteState>({ ...DEFAULT_STATE });
+  // aperture-zy4uo — init from EMPTY_STATE: demo content (DEFAULT_STATE) must
+  // never flash as if user-entered while the query hydrates a real account.
+  const [state, setState] = useState<ConviteState>({ ...EMPTY_STATE });
   const [step, setStep] = useState<number>(0);
   // aperture-rw880 — flips true once the user tries to advance/save with empty
   // required fields, so inline errors only appear after an attempt (not on a
@@ -1847,6 +1851,28 @@ function StepQuem({ state, update, errors }: StepViewProps) {
         style={errors?.host ? { borderColor: "#c2566f" } : undefined}
       />
       <FieldError msg={errors?.host} />
+
+      <hr className="cv-dotline" />
+
+      {/* aperture-zy4uo — optional closing-signature line. Empty = the card
+          signs "com amor, {host}" automatically; typing here replaces the
+          whole line with the creator's own words. */}
+      <label className="cv-label" htmlFor="cv-assinatura">
+        assinatura do convite
+      </label>
+      <input
+        id="cv-assinatura"
+        className="cv-input cv-input-md"
+        value={state.assinatura}
+        onChange={(e) => update("assinatura", e.target.value)}
+        maxLength={200}
+        placeholder="ex: com amor, Ana & João ♡"
+      />
+      <div className="cv-note" style={{ marginTop: 8, marginBottom: 0 }}>
+        {state.host.trim()
+          ? `✨ se deixar em branco, assinamos “com amor, ${state.host.trim()}” ♡`
+          : "✨ se deixar em branco, assinamos com o nome de quem convida ♡"}
+      </div>
 
       <hr className="cv-dotline" />
 

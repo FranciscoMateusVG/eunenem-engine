@@ -37,7 +37,7 @@ import { painelHref } from "@/lib/painelRoutes";
 import { sendEvent } from "@/lib/analytics";
 import { useCampanhaEscrita } from "@/lib/campanha-escrita";
 import { useCampanhaRota } from "@/lib/campanha-rota";
-import { DEFAULT_STATE, EVENT_BY_ID, EVENT_TYPES, formatDateScrap, type ConviteState } from "@/lib/mocks/convite";
+import { EMPTY_STATE, EVENT_BY_ID, EVENT_TYPES, formatDateScrap, type ConviteState } from "@/lib/mocks/convite";
 import { getDefaultConviteShareOrigin } from "@/lib/convite-share";
 import {
   buildConfirmarPresencaShareUrl,
@@ -1487,7 +1487,8 @@ export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
   // expose 4 fields here (message/date/time/address); palette, template,
   // background image, host, babyName, mode etc. are hydrated from the saved
   // convite and round-tripped untouched on save.
-  const [state, setState] = useState<ConviteState>({ ...DEFAULT_STATE });
+  // aperture-zy4uo — EMPTY_STATE: never flash demo content as user content.
+  const [state, setState] = useState<ConviteState>({ ...EMPTY_STATE });
   const conviteQuery = useConviteData();
   const salvarConvite = useSalvarConvite();
   const hydratedRef = useRef(false);
@@ -1873,9 +1874,28 @@ export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
               </div>
             </div>
           ) : guests.length === 0 ? (
+            /* aperture-zy4uo — a fresh list is an invitation, not a gap:
+               warm headline + subtext + a CTA into the same AddGuestModal
+               the header button opens. Renders ONLY on a real empty list —
+               fetch errors take the branch above and never land here. */
             <div style={{ padding: "48px 16px", textAlign: "center", color: "var(--ink-mute)" }}>
               <div style={{ fontFamily: FONT_HAND, fontSize: 28, color: "var(--plum)" }}>
                 Sua lista ainda não possui convidados.
+              </div>
+              <div
+                style={{
+                  fontFamily: FONT_SANS,
+                  fontSize: 15,
+                  color: "var(--ink-soft)",
+                  marginTop: 8,
+                }}
+              >
+                comece adicionando as pessoas queridas que você quer por perto ♡
+              </div>
+              <div style={{ marginTop: 16 }}>
+                <Button variant="primary" onClick={() => setShowAdd(true)}>
+                  <IconPlus size={16} /> adicionar primeiro convidado
+                </Button>
               </div>
             </div>
           ) : filteredGuests.length === 0 ? (

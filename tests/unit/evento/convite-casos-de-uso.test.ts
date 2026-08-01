@@ -84,6 +84,7 @@ describe('criarConvite', () => {
         fonte: 'patrick',
         modelo: 'scrapbook',
         imagemUrl: 'https://cdn.example.com/convites/maria-helena.png',
+        assinatura: 'Com carinho, os pais',
       },
     );
 
@@ -92,10 +93,12 @@ describe('criarConvite', () => {
     expect(convite.remetente).toBe('Os pais');
     expect(convite.nomeExibido).toBe('Maria Helena');
     expect(convite.imagemUrl).toBe('https://cdn.example.com/convites/maria-helena.png');
+    expect(convite.assinatura).toBe('Com carinho, os pais');
 
     const loaded = await repos.conviteRepository.findByIdEvento(idEvento);
     expect(loaded?.id).toBe(idConvite);
     expect(loaded?.imagemUrl).toBe('https://cdn.example.com/convites/maria-helena.png');
+    expect(loaded?.assinatura).toBe('Com carinho, os pais');
   });
 
   it('throws EventoNaoEncontradoError when evento is missing', async () => {
@@ -296,16 +299,70 @@ describe('atualizarConvite', () => {
         fonte: 'caveat',
         modelo: 'elefantinho',
         imagemUrl: 'https://cdn.example.com/convites/theo.jpg',
+        assinatura: 'Com amor, a madrinha',
       },
     );
 
     expect(updated.remetente).toBe('A madrinha');
+    expect(updated.assinatura).toBe('Com amor, a madrinha');
     expect(updated.nomeExibido).toBe('Theo');
     expect(updated.paleta).toBe('amarelo');
     expect(updated.fonte).toBe('caveat');
     expect(updated.modelo).toBe('elefantinho');
     expect(updated.imagemUrl).toBe('https://cdn.example.com/convites/theo.jpg');
     expect(updated.atualizadoEm).toEqual(updateClock());
+  });
+
+  it('aperture-zy4uo: keeps assinatura when omitted and clears it when null', async () => {
+    const repos = createEventoMemoryRepos();
+    const { idEvento } = await seedEvento(repos);
+    const idConvite = randomUUID();
+
+    await criarConvite(
+      {
+        conviteRepository: repos.conviteRepository,
+        eventoRepository: repos.eventoRepository,
+        clock,
+        observability: silentObservability,
+      },
+      {
+        id: idConvite,
+        idEvento,
+        remetente: 'Os pais',
+        nomeExibido: 'Maria Helena',
+        mensagem: 'Mensagem inicial',
+        paleta: 'lilas',
+        fonte: 'patrick',
+        modelo: 'scrapbook',
+        assinatura: 'Com carinho, os pais',
+      },
+    );
+
+    const camposBase = {
+      id: idConvite,
+      remetente: 'Os pais',
+      nomeExibido: 'Maria Helena',
+      mensagem: 'Mensagem atualizada',
+      paleta: 'lilas' as const,
+      fonte: 'patrick' as const,
+      modelo: 'scrapbook' as const,
+    };
+    const deps = {
+      conviteRepository: repos.conviteRepository,
+      clock,
+      observability: silentObservability,
+    };
+
+    // undefined (campo ausente) mantem a assinatura existente
+    const mantida = await atualizarConvite(deps, camposBase);
+    expect(mantida.assinatura).toBe('Com carinho, os pais');
+
+    // null limpa explicitamente
+    const limpa = await atualizarConvite(deps, { ...camposBase, assinatura: null });
+    expect(limpa.assinatura).toBeUndefined();
+
+    const loaded = await repos.conviteRepository.findById(idConvite);
+    expect(loaded?.assinatura).toBeUndefined();
   });
 
   it('rejects invalid palette', async () => {

@@ -254,7 +254,15 @@ export function ConfirmarPresencaView({
             <section className="cp-card">
               <span className="cp-card-eyebrow">um recadinho do anfitrião</span>
               {state.message && <p className="cp-message">{state.message}</p>}
-              {state.host && <p className="cp-signature">com carinho, {state.host} ♡</p>}
+              {/* aperture-zy4uo — user's own signature wins verbatim; legacy
+                  fallback derives from the host; neither → no signature. */}
+              {(state.assinatura.trim() || state.host) && (
+                <p className="cp-signature">
+                  {state.assinatura.trim()
+                    ? state.assinatura.trim()
+                    : `com carinho, ${state.host} ♡`}
+                </p>
+              )}
             </section>
 
             <section className="cp-card cp-info-card">

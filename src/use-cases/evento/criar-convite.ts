@@ -6,6 +6,7 @@ import {
   type Convite,
   criarConvite as criarConviteDominio,
 } from '../../domain/evento/entities/convite.js';
+import { AssinaturaConviteSchema } from '../../domain/evento/value-objects/assinatura-convite.js';
 import { FonteConviteSchema } from '../../domain/evento/value-objects/fonte-convite.js';
 import { IdConviteSchema, IdEventoSchema } from '../../domain/evento/value-objects/ids.js';
 import { ImagemUrlConviteSchema } from '../../domain/evento/value-objects/imagem-url-convite.js';
@@ -29,9 +30,19 @@ export const CriarConviteInputSchema = z.object({
   fonte: FonteConviteSchema,
   modelo: ModeloConviteSchema,
   imagemUrl: ImagemUrlConviteSchema.optional(),
+  // aperture-zy4uo — assinatura opcional na criacao; ausente = nao definida.
+  assinatura: AssinaturaConviteSchema.optional(),
 });
 
 export type CriarConviteInput = z.infer<typeof CriarConviteInputSchema>;
+
+// aperture-zy4uo — omite a chave quando a assinatura nao foi enviada
+// (exactOptionalPropertyTypes: ausente = nao definida).
+function campoAssinatura(assinatura: CriarConviteInput['assinatura']): {
+  assinatura?: string;
+} {
+  return assinatura === undefined ? {} : { assinatura };
+}
 
 export interface CriarConviteDeps {
   readonly conviteRepository: ConviteRepository;
@@ -68,6 +79,9 @@ export async function criarConvite(
       if (parsed.data.imagemUrl !== undefined) {
         span.setAttribute('convite.imagem_url', parsed.data.imagemUrl);
       }
+      if (parsed.data.assinatura !== undefined) {
+        span.setAttribute('convite.assinatura.length', parsed.data.assinatura.length);
+      }
 
       const evento = await eventoRepository.findById(parsed.data.idEvento);
       if (!evento) {
@@ -89,6 +103,7 @@ export async function criarConvite(
         fonte: parsed.data.fonte,
         modelo: parsed.data.modelo,
         ...(parsed.data.imagemUrl === undefined ? {} : { imagemUrl: parsed.data.imagemUrl }),
+        ...campoAssinatura(parsed.data.assinatura),
         criadoEm: now,
         atualizadoEm: now,
       });
@@ -103,6 +118,7 @@ export async function criarConvite(
         fonte: convite.fonte,
         modelo: convite.modelo,
         imagemUrl: convite.imagemUrl,
+        assinatura: convite.assinatura,
       });
 
       span.setStatus({ code: SpanStatusCode.OK });

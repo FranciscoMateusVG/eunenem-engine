@@ -5,7 +5,7 @@ import type {
   PaletaConvite,
   TipoEvento,
 } from '../../../../src/index.js';
-import { DEFAULT_STATE, type ConviteState } from './mocks/convite.js';
+import { DEFAULT_STATE, EMPTY_STATE, type ConviteState } from './mocks/convite.js';
 
 export interface EventoConviteSnapshot {
   id: string;
@@ -27,6 +27,8 @@ export interface ConviteSnapshot {
   fonte: FonteConvite;
   modelo: ModeloConvite;
   imagemUrl: string | null;
+  /** aperture-zy4uo — user-set closing-signature line; null = never set. */
+  assinatura: string | null;
 }
 
 export interface EventoConviteQueryData {
@@ -47,6 +49,8 @@ export interface SaveConvitePayload {
   modelo: ModeloConvite;
   /** aperture-j4zjw — custom-photo background URL (null for template/paper). */
   imagemUrl: string | null;
+  /** aperture-zy4uo — closing-signature line; null clears/leaves unset. */
+  assinatura: string | null;
 }
 
 const UI_TO_DOMAIN_PALETTE = {
@@ -151,14 +155,18 @@ const DOMAIN_TO_UI_TEMPLATE = {
 } satisfies Record<ModeloConvite, string>;
 
 export function conviteStateFromData(data: EventoConviteQueryData | undefined): ConviteState {
+  // aperture-zy4uo — real flows fall back to EMPTY_STATE, never DEFAULT_STATE:
+  // DEFAULT_STATE carries demo content (fake names/address) for the landing
+  // showcases, and leaking it here rendered "Maria Helena" / "com amor,
+  // Mariana & Tiago" on brand-new accounts as if user-entered.
   if (!data?.evento) {
-    return { ...DEFAULT_STATE };
+    return { ...EMPTY_STATE };
   }
 
   const { date, time } = splitIsoToLocalFields(data.evento.dataHoraIso);
   const convite = data.convite;
 
-  const bgTemplate = convite ? templateFromDomain(convite.modelo) : DEFAULT_STATE.bgTemplate;
+  const bgTemplate = convite ? templateFromDomain(convite.modelo) : EMPTY_STATE.bgTemplate;
   // aperture-j4zjw — rehydrate the custom photo ONLY when the modelo maps to the
   // "none" (scrapbook) slot, since bgTemplate and bgUpload are mutually
   // exclusive in state and a watercolor template must win over any stale
@@ -168,19 +176,21 @@ export function conviteStateFromData(data: EventoConviteQueryData | undefined): 
     bgTemplate === 'none' && convite?.imagemUrl ? convite.imagemUrl : null;
 
   return {
-    ...DEFAULT_STATE,
+    ...EMPTY_STATE,
     // aperture-mu1v9: a wizard-seeded partial evento carries no tipo and/or
     // no modalidade yet — fall back to the editor defaults explicitly.
-    eventType: data.evento.tipoEvento ?? DEFAULT_STATE.eventType,
-    mode: data.evento.modalidade ?? DEFAULT_STATE.mode,
+    eventType: data.evento.tipoEvento ?? EMPTY_STATE.eventType,
+    mode: data.evento.modalidade ?? EMPTY_STATE.mode,
     date,
     time,
     address: data.evento.modalidade === 'presencial' ? (data.evento.endereco ?? '') : '',
-    babyName: convite?.nomeExibido ?? DEFAULT_STATE.babyName,
-    host: convite?.remetente ?? DEFAULT_STATE.host,
-    message: convite?.mensagem ?? DEFAULT_STATE.message,
-    palette: convite ? paletteFromDomain(convite.paleta) : DEFAULT_STATE.palette,
-    nameFont: convite?.fonte ?? DEFAULT_STATE.nameFont,
+    // aperture-zy4uo — content fields fall back to EMPTY (''), not demo mocks.
+    babyName: convite?.nomeExibido ?? '',
+    host: convite?.remetente ?? '',
+    message: convite?.mensagem ?? '',
+    assinatura: convite?.assinatura ?? '',
+    palette: convite ? paletteFromDomain(convite.paleta) : EMPTY_STATE.palette,
+    nameFont: convite?.fonte ?? EMPTY_STATE.nameFont,
     bgTemplate,
     bgUpload,
     onlineLink: '',
@@ -204,6 +214,9 @@ export function savePayloadFromConviteState(state: ConviteState): SaveConvitePay
     // dataUrl). Send it as imagemUrl so the custom photo persists; null when a
     // template/paper is chosen (bgUpload is cleared on template/paper select).
     imagemUrl: state.bgUpload && state.bgUpload.length > 0 ? state.bgUpload : null,
+    // aperture-zy4uo — blank input saves as null (= clear). The card then
+    // falls back to the legacy "com amor, {remetente}" line.
+    assinatura: normalizeNullableString(state.assinatura),
   };
 }
 
