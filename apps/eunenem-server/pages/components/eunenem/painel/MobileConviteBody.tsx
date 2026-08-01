@@ -18,7 +18,7 @@ import { useConviteBackgroundUpload } from "@/lib/conviteUpload";
 import { painelConvitePreviewHref, painelHref } from "@/lib/painelRoutes";
 import { sendEvent } from "@/lib/analytics";
 import {
-  DEFAULT_STATE,
+  EMPTY_STATE,
   DISABLED_EVENT_TYPES,
   EVENT_BY_ID,
   EVENT_TYPES,
@@ -103,7 +103,8 @@ interface StepProps {
 export function MobileConviteBody({ slug }: PainelSectionBodyProps) {
   // aperture-z6vks — keep the /c/:idCampanha context on the preview link.
   const idCampanha = useCampanhaRota();
-  const [state, setState] = useState<ConviteState>({ ...DEFAULT_STATE });
+  // aperture-zy4uo — EMPTY_STATE: never flash demo content as user content.
+  const [state, setState] = useState<ConviteState>({ ...EMPTY_STATE });
   const [step, setStep] = useState(0);
   const [previewExpanded, setPreviewExpanded] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
@@ -639,6 +640,26 @@ function MStepQuem({ state, update }: StepProps) {
           onChange={(e) => update("host", e.target.value)}
           placeholder="Mariana & Tiago"
         />
+      </div>
+      <div>
+        {/* aperture-zy4uo — optional closing-signature line; blank = the card
+            signs "com amor, {host}" automatically. */}
+        <label className="mcv-label" htmlFor="mcv-assinatura">
+          assinatura do convite
+        </label>
+        <input
+          id="mcv-assinatura"
+          className="mcv-field"
+          value={state.assinatura}
+          onChange={(e) => update("assinatura", e.target.value)}
+          maxLength={200}
+          placeholder="ex: com amor, Ana & João ♡"
+        />
+        <div className="mcv-note">
+          {state.host.trim()
+            ? `✨ se deixar em branco, assinamos “com amor, ${state.host.trim()}” ♡`
+            : "✨ se deixar em branco, assinamos com o nome de quem convida ♡"}
+        </div>
       </div>
       <div>
         {/* aperture-39blz — removed the "✦ sugestão" (pedir ajuda à IA) pill;

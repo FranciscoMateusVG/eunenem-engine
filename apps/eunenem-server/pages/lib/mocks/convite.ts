@@ -133,6 +133,11 @@ export interface ConviteState {
    *  Mutually exclusive with bgTemplate (set one, clear the other). The upload
    *  pipeline + preview renderer for it ship in aperture-hzcy5. */
   bgUpload: string | null;
+  /** aperture-zy4uo — user-editable closing-signature line for the card
+   *  ("com amor, Ana & João ♡"). Empty string = not set: the preview then
+   *  falls back to the legacy "com amor, {host}" (when host is set) or
+   *  renders no signature line at all. Persisted as `convites.assinatura`. */
+  assinatura: string;
 }
 
 /**
@@ -164,6 +169,28 @@ export const DEFAULT_STATE: ConviteState = {
   density: "media",
   bgTemplate: "none",
   bgUpload: null,
+  assinatura: "",
+};
+
+/**
+ * aperture-zy4uo — the state for REAL user flows (editor init + mapper
+ * fallbacks when no convite row exists yet). DEFAULT_STATE above carries
+ * demo CONTENT (fake names, fake address, fake meet link) and is for the
+ * landing-page showcases ONLY — using it as a fallback in real flows made
+ * brand-new accounts render "Maria Helena" / "com amor, Mariana & Tiago"
+ * as if the user had typed them (operator-reported, aperture-edd7u twin).
+ * Structural aesthetics (event type, palette, font, template) are kept —
+ * they are preferences, not content, and the editor needs valid defaults.
+ * Content fields start genuinely empty; inputs guide via placeholders.
+ */
+export const EMPTY_STATE: ConviteState = {
+  ...DEFAULT_STATE,
+  babyName: "",
+  host: "",
+  address: "",
+  onlineLink: "",
+  message: "",
+  assinatura: "",
 };
 
 // ── date helpers ──────────────────────────────────────────────────────────
