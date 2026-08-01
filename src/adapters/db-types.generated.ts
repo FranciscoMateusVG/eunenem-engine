@@ -154,6 +154,7 @@ export interface Convidados {
 }
 
 export interface Convites {
+  assinatura: string | null;
   atualizado_em: Generated<Timestamp>;
   criado_em: Generated<Timestamp>;
   fonte: string;

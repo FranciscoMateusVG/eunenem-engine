@@ -49,6 +49,14 @@ export function describeConviteRepositoryConformance(name: string, options: Conf
       expect(found).toEqual(convite);
     });
 
+    it('round-trips an invite without assinatura', async () => {
+      const convite = makeConvite({ assinatura: undefined });
+      await options.saveConvite(repo, convite);
+
+      const found = await repo.findById(convite.id);
+      expect(found).toEqual(convite);
+    });
+
     it('returns undefined for unknown IDs', async () => {
       expect(await repo.findById(randomUUID())).toBeUndefined();
       expect(await repo.findByIdEvento(randomUUID())).toBeUndefined();
@@ -131,6 +139,7 @@ export function makeConvite(overrides: Partial<Convite> = {}): Convite {
     fonte: 'patrick',
     modelo: 'scrapbook',
     imagemUrl: 'https://cdn.example.com/convite.png',
+    assinatura: 'Com carinho, os pais',
     criadoEm: new Date('2026-06-10T10:00:00.000Z'),
     atualizadoEm: new Date('2026-06-10T10:00:00.000Z'),
     ...overrides,
