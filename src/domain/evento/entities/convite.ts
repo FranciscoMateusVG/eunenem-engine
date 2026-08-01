@@ -1,3 +1,4 @@
+import type { AssinaturaConvite } from '../value-objects/assinatura-convite.js';
 import type { FonteConvite } from '../value-objects/fonte-convite.js';
 import type { IdConvite, IdEvento } from '../value-objects/ids.js';
 import type { ImagemUrlConvite } from '../value-objects/imagem-url-convite.js';
@@ -25,6 +26,8 @@ export interface Convite {
   readonly fonte: FonteConvite;
   readonly modelo: ModeloConvite;
   readonly imagemUrl?: ImagemUrlConvite;
+  // aperture-zy4uo — linha de assinatura editavel do convite; ausente = nao definida.
+  readonly assinatura?: AssinaturaConvite;
   readonly criadoEm: Date;
   readonly atualizadoEm: Date;
 }
@@ -39,6 +42,7 @@ export interface CriarConviteInput {
   readonly fonte: FonteConvite;
   readonly modelo: ModeloConvite;
   readonly imagemUrl?: ImagemUrlConvite;
+  readonly assinatura?: AssinaturaConvite;
   readonly criadoEm: Date;
   readonly atualizadoEm: Date;
 }
@@ -54,6 +58,7 @@ export function criarConvite(input: CriarConviteInput): Convite {
     fonte: input.fonte,
     modelo: input.modelo,
     ...(input.imagemUrl === undefined ? {} : { imagemUrl: input.imagemUrl }),
+    ...(input.assinatura === undefined ? {} : { assinatura: input.assinatura }),
     criadoEm: input.criadoEm,
     atualizadoEm: input.atualizadoEm,
   };
@@ -67,6 +72,9 @@ export interface AtualizarConviteCampos {
   readonly fonte: FonteConvite;
   readonly modelo: ModeloConvite;
   readonly imagemUrl?: ImagemUrlConvite;
+  // aperture-zy4uo — tri-state: undefined = mantem a assinatura atual,
+  // null = limpa (usuario apagou a assinatura), string = define.
+  readonly assinatura?: AssinaturaConvite | null;
 }
 
 export function conviteComCamposAtualizados(
@@ -79,8 +87,19 @@ export function conviteComCamposAtualizados(
       ? { ...(convite.imagemUrl === undefined ? {} : { imagemUrl: convite.imagemUrl }) }
       : { imagemUrl: campos.imagemUrl };
 
+  // aperture-zy4uo — undefined mantem, null limpa, string define. O convite e
+  // desestruturado (em vez de espalhado direto) para que "limpar" realmente
+  // remova a chave `assinatura` do snapshot resultante.
+  const { assinatura: assinaturaAnterior, ...conviteSemAssinatura } = convite;
+  const assinaturaAtualizada =
+    campos.assinatura === undefined
+      ? { ...(assinaturaAnterior === undefined ? {} : { assinatura: assinaturaAnterior }) }
+      : campos.assinatura === null
+        ? {}
+        : { assinatura: campos.assinatura };
+
   return {
-    ...convite,
+    ...conviteSemAssinatura,
     remetente: campos.remetente,
     nomeExibido: campos.nomeExibido,
     mensagem: campos.mensagem,
@@ -88,6 +107,7 @@ export function conviteComCamposAtualizados(
     fonte: campos.fonte,
     modelo: campos.modelo,
     ...imagemUrlAtualizada,
+    ...assinaturaAtualizada,
     atualizadoEm,
   };
 }

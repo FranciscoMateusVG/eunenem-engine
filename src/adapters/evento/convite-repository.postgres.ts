@@ -33,6 +33,7 @@ export class ConviteRepositoryPostgres implements ConviteRepository {
             fonte: convite.fonte,
             modelo: convite.modelo,
             imagem_url: convite.imagemUrl ?? null,
+            assinatura: convite.assinatura ?? null,
             criado_em: convite.criadoEm,
             atualizado_em: convite.atualizadoEm,
           })
@@ -46,6 +47,7 @@ export class ConviteRepositoryPostgres implements ConviteRepository {
               fonte: convite.fonte,
               modelo: convite.modelo,
               imagem_url: convite.imagemUrl ?? null,
+              assinatura: convite.assinatura ?? null,
               atualizado_em: convite.atualizadoEm,
             }),
           )
@@ -130,6 +132,7 @@ function toConvite(row: {
   fonte: string;
   modelo: string;
   imagem_url: string | null;
+  assinatura: string | null;
   criado_em: Date;
   atualizado_em: Date;
 }): Convite {
@@ -146,10 +149,13 @@ function toConvite(row: {
     atualizadoEm: row.atualizado_em,
   };
 
-  return row.imagem_url === null
-    ? criarConviteDominio(base)
-    : criarConviteDominio({
-        ...base,
-        imagemUrl: row.imagem_url as NonNullable<Convite['imagemUrl']>,
-      });
+  return criarConviteDominio({
+    ...base,
+    ...(row.imagem_url === null
+      ? {}
+      : { imagemUrl: row.imagem_url as NonNullable<Convite['imagemUrl']> }),
+    ...(row.assinatura === null
+      ? {}
+      : { assinatura: row.assinatura as NonNullable<Convite['assinatura']> }),
+  });
 }

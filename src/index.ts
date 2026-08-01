@@ -332,6 +332,8 @@ export {
   listaDeConvidadosComCamposAtualizados,
   listaDeConvidadosComPresencaAlterada,
 } from './domain/evento/entities/lista-de-convidados.js';
+export type { AssinaturaConvite } from './domain/evento/value-objects/assinatura-convite.js';
+export { AssinaturaConviteSchema } from './domain/evento/value-objects/assinatura-convite.js';
 export type { DataHoraEvento } from './domain/evento/value-objects/data-hora-evento.js';
 export { DataHoraEventoSchema } from './domain/evento/value-objects/data-hora-evento.js';
 export type { EnderecoEvento } from './domain/evento/value-objects/endereco-evento.js';

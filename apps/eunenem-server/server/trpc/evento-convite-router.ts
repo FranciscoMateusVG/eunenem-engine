@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { initTRPC, TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import {
+  AssinaturaConviteSchema,
   atualizarConvite,
   atualizarEvento,
   type Campanha,
@@ -130,6 +131,10 @@ const SaveEventoConviteInputSchema = z.object({
   // callers that never set a photo stay valid. The domain use-cases already
   // accept imagemUrl; this wires it through the BFF save procedure.
   imagemUrl: ImagemUrlConviteSchema.nullish(),
+  // aperture-zy4uo — linha de assinatura do convite. Nullish para que clientes
+  // antigos (que nunca enviam o campo) continuem validos. Semantica tri-state
+  // no UPDATE: string define, null LIMPA explicitamente, ausente mantem.
+  assinatura: AssinaturaConviteSchema.nullish(),
 });
 
 const EventoSnapshotSchema = z.object({
@@ -153,6 +158,7 @@ const ConviteSnapshotSchema = z.object({
   fonte: FonteConviteSchema,
   modelo: ModeloConviteSchema,
   imagemUrl: z.string().nullable(),
+  assinatura: AssinaturaConviteSchema.nullable(),
 });
 
 const GetEventoConviteOutputSchema = z.object({
@@ -254,6 +260,7 @@ async function loadEventoConviteSnapshot(
           fonte: convite.fonte,
           modelo: convite.modelo,
           imagemUrl: convite.imagemUrl ?? null,
+          assinatura: convite.assinatura ?? null,
         }
       : null,
   };
@@ -346,6 +353,9 @@ export const eventoConviteRouter = t.router({
                 // leaves the existing value (the entity has no cleared state —
                 // clearing a stale photo is a follow-up, see PR notes).
                 imagemUrl: input.imagemUrl ?? undefined,
+                // aperture-zy4uo — tri-state passthrough (unlike imagemUrl):
+                // string sets, null CLEARS the signature, absent leaves it.
+                assinatura: input.assinatura,
               },
             )
           : await criarConvite(
@@ -366,6 +376,9 @@ export const eventoConviteRouter = t.router({
                 modelo: input.modelo,
                 // aperture-j4zjw — persist the custom-photo URL on first save.
                 imagemUrl: input.imagemUrl ?? undefined,
+                // aperture-zy4uo — on create there is nothing to clear, so
+                // null collapses to undefined (nao definida).
+                assinatura: input.assinatura ?? undefined,
               },
             );
 
@@ -386,6 +399,7 @@ export const eventoConviteRouter = t.router({
             fonte: convite.fonte,
             modelo: convite.modelo,
             imagemUrl: convite.imagemUrl ?? null,
+            assinatura: convite.assinatura ?? null,
           },
         };
       } catch (err) {

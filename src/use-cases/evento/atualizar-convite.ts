@@ -3,6 +3,7 @@ import { z } from 'zod/v4';
 import type { ConviteRepository } from '../../adapters/evento/convite-repository.js';
 import type { Convite } from '../../domain/evento/entities/convite.js';
 import { conviteComCamposAtualizados } from '../../domain/evento/entities/convite.js';
+import { AssinaturaConviteSchema } from '../../domain/evento/value-objects/assinatura-convite.js';
 import { FonteConviteSchema } from '../../domain/evento/value-objects/fonte-convite.js';
 import { IdConviteSchema } from '../../domain/evento/value-objects/ids.js';
 import { ImagemUrlConviteSchema } from '../../domain/evento/value-objects/imagem-url-convite.js';
@@ -24,9 +25,22 @@ export const AtualizarConviteInputSchema = z.object({
   fonte: FonteConviteSchema,
   modelo: ModeloConviteSchema,
   imagemUrl: ImagemUrlConviteSchema.optional(),
+  // aperture-zy4uo — tri-state, diferente do imagemUrl acima: undefined =
+  // mantem a assinatura atual, null = LIMPA explicitamente (usuario apagou),
+  // string = define.
+  assinatura: AssinaturaConviteSchema.nullish(),
 });
 
 export type AtualizarConviteInput = z.infer<typeof AtualizarConviteInputSchema>;
+
+// aperture-zy4uo — traduz o tri-state do input para os campos do dominio:
+// undefined omite a chave (mantem a assinatura atual), null/string passam
+// adiante (limpar/definir).
+function camposAssinatura(assinatura: AtualizarConviteInput['assinatura']): {
+  assinatura?: string | null;
+} {
+  return assinatura === undefined ? {} : { assinatura };
+}
 
 export interface AtualizarConviteDeps {
   readonly conviteRepository: ConviteRepository;
@@ -57,6 +71,9 @@ export async function atualizarConvite(
       if (parsed.data.imagemUrl !== undefined) {
         span.setAttribute('convite.imagem_url', parsed.data.imagemUrl);
       }
+      if (typeof parsed.data.assinatura === 'string') {
+        span.setAttribute('convite.assinatura.length', parsed.data.assinatura.length);
+      }
 
       const existing = await conviteRepository.findById(parsed.data.id);
       if (!existing) {
@@ -73,6 +90,7 @@ export async function atualizarConvite(
           fonte: parsed.data.fonte,
           modelo: parsed.data.modelo,
           ...(parsed.data.imagemUrl === undefined ? {} : { imagemUrl: parsed.data.imagemUrl }),
+          ...camposAssinatura(parsed.data.assinatura),
         },
         clock(),
       );
@@ -87,6 +105,7 @@ export async function atualizarConvite(
         fonte: updated.fonte,
         modelo: updated.modelo,
         imagemUrl: updated.imagemUrl,
+        assinatura: updated.assinatura,
       });
 
       span.setStatus({ code: SpanStatusCode.OK });
