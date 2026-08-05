@@ -48,7 +48,10 @@ import {
   formatPhoneForWhatsapp,
   openWhatsappUrl,
 } from "@/lib/whatsapp-invite";
-import { InvitePreview } from "./ConviteBody";
+// aperture-d3tlf — conviteFieldErrors + FieldError: the compositor saves the
+// FULL convite payload, so it must gate on (and surface) the same required
+// fields the wizard does, instead of dead-ending on the backend 400.
+import { conviteFieldErrors, FieldError, InvitePreview } from "./ConviteBody";
 import { ConfirmarPresencaView } from "@/ConfirmarPresencaPage";
 
 // aperture-x1b3u — Lista de convidados (RSVP + convites por WhatsApp).
@@ -1514,7 +1517,34 @@ export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
     formatoHydratedRef.current = true;
   }, [listaQuery.data]);
 
+  // aperture-d3tlf — flips true on the first blocked save attempt so inline
+  // errors only appear after the user tries (mirrors ConviteBody's showErrors).
+  const [showErrors, setShowErrors] = useState(false);
+  const fieldErrors = showErrors ? conviteFieldErrors(state) : {};
+
   const onSaveConvite = async () => {
+    // aperture-d3tlf — client-side pre-flight on the SAME required fields the
+    // backend enforces (remetente=host + nomeExibido=babyName, min(1)).
+    // Without this, a user who never completed the convite wizard hit a raw
+    // backend 400 ("Remetente do convite não pode ser vazio") from a panel
+    // that had NO field to fix it — a dead end. Now: texto mode surfaces the
+    // two inputs inline (below); virtual mode points at the "Criar convite"
+    // CTA already rendered in the collapse.
+    const errs = conviteFieldErrors(state);
+    if (Object.keys(errs).length > 0) {
+      setShowErrors(true);
+      if (inviteType === "convite_virtual" && !hasSavedConvite(conviteQuery.data)) {
+        toast.error("crie seu convite primeiro ♡", {
+          description:
+            "toque em “Criar convite” logo acima pra preencher o nome do bebê e de quem vem o convite",
+        });
+      } else {
+        toast.error("faltou só um detalhe ♡", {
+          description: Object.values(errs).join(" · "),
+        });
+      }
+      return;
+    }
     try {
       // CONTRACT: start from the full hydrated state, never a hand-built
       // partial — savePayloadFromConviteState re-serializes everything the
@@ -1727,6 +1757,45 @@ export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
             ) : (
               <div className="convidados-msg-grid">
                 <div className="convidados-msg-fields">
+                  {/* aperture-d3tlf — babyName + host are REQUIRED by the
+                      convite save schema (nomeExibido/remetente min(1)), and
+                      this panel saves the full payload. Surfacing them here
+                      means a user who skipped the convite wizard can still
+                      save — no more dead-end validation error naming fields
+                      that had no input on this screen. */}
+                  <div className="convidados-msg-names">
+                    <label className="cv-invite-field">
+                      <span className="cv-invite-label">nome do bebê</span>
+                      <input
+                        className="cv-invite-input"
+                        type="text"
+                        value={state.babyName}
+                        placeholder="Maria Helena"
+                        aria-invalid={fieldErrors.babyName ? true : undefined}
+                        style={fieldErrors.babyName ? { borderColor: "#c2566f" } : undefined}
+                        onChange={(e) =>
+                          setState((s) => ({ ...s, babyName: e.target.value }))
+                        }
+                      />
+                      <FieldError msg={fieldErrors.babyName} />
+                    </label>
+                    <label className="cv-invite-field">
+                      <span className="cv-invite-label">de quem vem o convite</span>
+                      <input
+                        className="cv-invite-input"
+                        type="text"
+                        value={state.host}
+                        placeholder="Mariana & Tiago"
+                        aria-invalid={fieldErrors.host ? true : undefined}
+                        style={fieldErrors.host ? { borderColor: "#c2566f" } : undefined}
+                        onChange={(e) =>
+                          setState((s) => ({ ...s, host: e.target.value }))
+                        }
+                      />
+                      <FieldError msg={fieldErrors.host} />
+                    </label>
+                  </div>
+
                   <label className="cv-invite-field">
                     <span className="cv-invite-label">mensagem</span>
                     <textarea
@@ -2018,6 +2087,13 @@ export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
           grid-template-columns: 1fr 1fr;
           gap: 14px;
         }
+        /* aperture-d3tlf — babyName/host row: names are longer than date/time
+           values, so stack full-width on mobile and only go 2-col on desktop. */
+        .convidados-msg-names {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 14px;
+        }
         .convidados-msg-vars {
           display: flex;
           flex-direction: column;
@@ -2256,6 +2332,7 @@ export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
         }
         @media (min-width: 760px) {
           .convidados-msg-grid { grid-template-columns: 1fr auto; }
+          .convidados-msg-names { grid-template-columns: 1fr 1fr; }
           .convidados-preview-actions {
             align-items: center;
           }

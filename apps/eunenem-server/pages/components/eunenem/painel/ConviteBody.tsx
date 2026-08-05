@@ -1798,7 +1798,9 @@ function StepTipo({ state, update }: StepViewProps) {
 }
 
 // aperture-rw880 — inline validation error text shown under a required field.
-function FieldError({ msg }: { msg?: string }) {
+// aperture-d3tlf — exported so ConvidadosBody's "Mensagem do convite"
+// compositor renders the same inline errors for the same required fields.
+export function FieldError({ msg }: { msg?: string }) {
   if (!msg) return null;
   return (
     <span
