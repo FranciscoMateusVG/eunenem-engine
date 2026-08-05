@@ -317,7 +317,19 @@ describe('Migration round-trip', () => {
     //    note above; renaming a DEPLOYED migration is forbidden because
     //    kysely_migration keys on the filename and would re-run it).
 
-    // 20260727_046_catalogo_admin_audit (aperture-1bity) → the actual TIP.
+    // ── aperture-d3tlf CI repair (2026-08-05): 20260801_047_add_assinatura_
+    //    to_convites (PR #55) landed on staging WITHOUT prepending its
+    //    down-step here — the TWELFTH occurrence of the off-by-one this block
+    //    warns about. Every staging PR inherited the red until this prepend.
+
+    // 20260801_047_add_assinatura_to_convites (aperture-zy4uo) → the actual
+    // TIP. Its down() drops only convites.assinatura.
+    const downAssinatura = await migrator.migrateDown();
+    expect(downAssinatura.error).toBeUndefined();
+    expect(await getColumn(db, 'convites', 'assinatura')).toBeUndefined();
+    expect(await listTableNames(db)).toContain('catalogo_admin_audit_events');
+
+    // 20260727_046_catalogo_admin_audit (aperture-1bity) → the TIP after 047.
     // Its down() removes only the immutable audit trail and leaves the catalog.
     const downCatalogoAdminAudit = await migrator.migrateDown();
     expect(downCatalogoAdminAudit.error).toBeUndefined();
