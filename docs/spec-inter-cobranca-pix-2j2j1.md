@@ -166,3 +166,15 @@ Routing: `metodo === 'pix'` AND `COBRANCA_PIX_PROVIDER === 'inter'` → Inter br
 ## 13. Deploy spec
 
 - Repo: eunenem-engine (this repo). No new service; new webhook route rides the existing `apps/eunenem-server` deployment. Public HTTPS (TLS ≥1.2) already satisfied. Ingress IP-allowlist config for Inter ranges: Peppy, optional hardening. No new subdomain.
+
+## 14. Deviation log (post-approval, binding for implementers)
+
+**D1 (2026-08-05, found by Rex during B3 — supersedes the literal mechanism text in §5/§6 for settlement + refunds):**
+The spec's original mechanism assumed the Stripe-era use-cases compose as-is. They don't, on two points:
+
+1. **Settlement:** `finalizarPagamentoAprovado` unconditionally calls `PagamentoProvider.solicitarPagamento` (a Stripe read-and-synthesize step). Re-firing it after an Inter `GET /cob/{txid}` already confirmed `CONCLUIDA` would be wrong — the authoritative verification HAS the settlement facts.
+2. **Refunds:** `estornarPagamento` triggers a provider refund call. An Inter refund *webhook* reports money that has ALREADY moved (post-money-movement) — re-firing a refund trigger on that signal is the wrong direction entirely.
+
+**Resolution:** B3 (Rex) introduces a **verified-result bookkeeping seam** — settlement/refund facts verified via authoritative re-query enter domain bookkeeping through that seam, without re-firing provider calls. **B5 and B6 MUST design against Rex's seam (see B3's PR/bead for its exact shape), not against this spec's literal "branch inside estornar-pagamento / call the finalizer" wording.** The provenance-branching INTENT of §6 stands: Stripe-provedor payments keep the existing Stripe paths; Inter-provedor flows route through the seam.
+
+*(Process note: this is spec-deviation-discipline working as designed — the spec was written against port surfaces; implementation recon traced the use-case internals and found the composition gap. Deviations belong here, not in silence.)*
