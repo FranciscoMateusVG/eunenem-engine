@@ -6,6 +6,8 @@ import {
   CatalogoRepositoryPostgres,
   PagamentoProviderFake,
   PagamentoProviderStripe,
+  PixCobrancaProviderFake,
+  PixCobrancaProviderInter,
   TransferenciaProviderFake,
   TransferenciaProviderInter,
 } from '../../src/index.js';
@@ -302,5 +304,234 @@ describe('eunenem-server MINIO_ENDPOINT boot guard (aperture-9wqh1)', () => {
 
   it('is skipped entirely when MINIO_ENDPOINT is unset (fresh-clone boot)', () => {
     expect(() => loadEnv({ ...baseEnv() })).not.toThrow();
+  });
+});
+
+/**
+ * aperture-18j3j (B7 of 2j2j1) — the PIX-in charge rail DI gate + boot guard.
+ *
+ * Invariants pinned here:
+ * 1. Default/unset → 'stripe' → the PixCobrancaNaoConfigurado throw-on-use
+ *    stub is bound AND the existing Stripe/fake checkout bindings are
+ *    byte-for-byte unchanged (zero-behavior-change proof for the merge).
+ * 2. 'fake' → deterministic PixCobrancaProviderFake.
+ * 3. 'inter' + full INTER_COB_* creds → real PixCobrancaProviderInter.
+ * 4. 'inter' + ANY missing cred → boot rejection in EVERY environment
+ *    (inter-selected-but-unusable is a misconfiguration; fail closed).
+ * 5. DELIBERATE ASYMMETRY vs TRANSFERENCIA_PROVIDER (spec 2j2j1 §6): 'inter'
+ *    is allowed OUTSIDE production (sandbox stance — a PIX charge has no
+ *    double-pay hazard, unlike a PIX transfer). Pinned so a future refactor
+ *    doesn't "harmonize" the two gates and kill sandbox verification.
+ */
+describe('eunenem-server PIX cobrança rail DI gate (aperture-18j3j)', () => {
+  const B64 = (s: string) => Buffer.from(s).toString('base64');
+
+  function interCobEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+    return {
+      ...baseEnv(),
+      COBRANCA_PIX_PROVIDER: 'inter',
+      INTER_COB_BASE_URL: 'https://cdpj-sandbox.partners.uatinter.co',
+      INTER_COB_CLIENT_ID: 'cob-cid',
+      INTER_COB_CLIENT_SECRET: 'cob-csecret',
+      INTER_COB_SCOPE: 'cob.write cob.read pix.read pix.write',
+      INTER_COB_CERT_BASE64: B64('DUMMY-COB-CERT-PEM'),
+      INTER_COB_KEY_BASE64: B64('DUMMY-COB-KEY-PEM'),
+      INTER_COB_PIX_KEY: 'chave-pix-recebimento@eunenem.com',
+      ...overrides,
+    } as NodeJS.ProcessEnv;
+  }
+
+  function prodEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+    return {
+      ...baseEnv(),
+      NODE_ENV: 'production',
+      STRIPE_PUBLISHABLE_KEY: 'pk_live_dummy',
+      STRIPE_SECRET_KEY: 'sk_live_dummy',
+      STRIPE_WEBHOOK_SECRET: 'whsec_live_dummy',
+      LOG_PII_HASH_SALT: 'live-salt-thirty-two-chars-aaaaaaaaaaaaaaaaaaaa',
+      TRUSTED_HOP_COUNT: '1',
+      ...overrides,
+    } as NodeJS.ProcessEnv;
+  }
+
+  it("defaults to 'stripe' and binds the throw-on-use stub when the var is unset", async () => {
+    const env = loadEnv(baseEnv());
+    expect(env.COBRANCA_PIX_PROVIDER).toBe('stripe');
+    const deps = buildServerDeps(env);
+    try {
+      expect(deps.pixCobrancaProvider).not.toBeInstanceOf(PixCobrancaProviderFake);
+      expect(deps.pixCobrancaProvider).not.toBeInstanceOf(PixCobrancaProviderInter);
+      expect(deps.pixCobrancaProvider.constructor.name).toBe('PixCobrancaNaoConfigurado');
+      // Every method throws loudly, naming the selector var — under 'stripe'
+      // routing this port must never be reached, so a call is a wiring bug.
+      await expect(deps.pixCobrancaProvider.consultarCobranca('A'.repeat(26))).rejects.toThrow(
+        /COBRANCA_PIX_PROVIDER/,
+      );
+    } finally {
+      void deps.db.destroy();
+    }
+  });
+
+  describe('zero-behavior-change proof: stripe-parity table (aperture-18j3j QA hold)', () => {
+    // The claim to prove: introducing COBRANCA_PIX_PROVIDER changes NOTHING
+    // about the existing checkout wiring under BOTH configurations of the
+    // Stripe gate — not just the Fake branch. Table: STRIPE_SECRET_KEY in
+    // [empty, set] × COBRANCA_PIX_PROVIDER in [unset (pre-merge env shape),
+    // explicit 'stripe' default]. Every cell asserts (a) the gate resolves to
+    // the class the key state demands, identically whether the new var is
+    // present or absent, and (b) the dual-port binding stays ONE shared
+    // instance serving both deps (the existing single-instance invariant).
+    const ORIGINAL_STRIPE_SECRET = process.env.STRIPE_SECRET_KEY;
+    afterEach(() => {
+      if (ORIGINAL_STRIPE_SECRET === undefined) {
+        delete process.env.STRIPE_SECRET_KEY;
+      } else {
+        process.env.STRIPE_SECRET_KEY = ORIGINAL_STRIPE_SECRET;
+      }
+      __resetStripeForTests();
+    });
+
+    const KEY_STATES = [
+      {
+        keyState: 'STRIPE_SECRET_KEY empty (fresh clone → Fake)',
+        stripeKey: '',
+        expected: PagamentoProviderFake,
+      },
+      {
+        keyState: 'STRIPE_SECRET_KEY set (test keys → Stripe)',
+        stripeKey: 'sk_test_dummy_zero_behavior_change',
+        expected: PagamentoProviderStripe,
+      },
+    ];
+    const COB_STATES = [
+      { cobState: 'COBRANCA_PIX_PROVIDER unset (pre-merge env shape)', cobrancaVar: undefined },
+      { cobState: "COBRANCA_PIX_PROVIDER='stripe' (explicit default)", cobrancaVar: 'stripe' },
+    ];
+    const CELLS = KEY_STATES.flatMap((k) => COB_STATES.map((c) => ({ ...k, ...c })));
+
+    it.each(CELLS)('$keyState × $cobState → checkout wiring unchanged', ({
+      stripeKey,
+      expected,
+      cobrancaVar,
+    }) => {
+      // getStripe() reads the LIVE process.env at call time — mirror the
+      // payment-gate describe above and write it before building.
+      process.env.STRIPE_SECRET_KEY = stripeKey;
+      __resetStripeForTests();
+      const env = loadEnv({
+        ...baseEnv(),
+        STRIPE_SECRET_KEY: stripeKey,
+        ...(cobrancaVar !== undefined ? { COBRANCA_PIX_PROVIDER: cobrancaVar } : {}),
+      });
+      const deps = buildServerDeps(env);
+      try {
+        expect(deps.pagamentoProvider).toBeInstanceOf(expected);
+        expect(deps.checkoutSessionProvider).toBeInstanceOf(expected);
+        // ONE shared instance serving both ports — the pre-existing
+        // dual-port invariant must survive the new var in every cell.
+        expect(deps.pagamentoProvider).toBe(deps.checkoutSessionProvider);
+        expect(deps.pixCobrancaProvider.constructor.name).toBe('PixCobrancaNaoConfigurado');
+      } finally {
+        void deps.db.destroy();
+      }
+    });
+  });
+
+  it("binds PixCobrancaProviderFake when COBRANCA_PIX_PROVIDER='fake'", () => {
+    const deps = buildServerDeps(loadEnv({ ...baseEnv(), COBRANCA_PIX_PROVIDER: 'fake' }));
+    try {
+      expect(deps.pixCobrancaProvider).toBeInstanceOf(PixCobrancaProviderFake);
+    } finally {
+      void deps.db.destroy();
+    }
+  });
+
+  it("binds PixCobrancaProviderInter when 'inter' is fully configured in production", () => {
+    // getStripe() (fired inside buildServerDeps' pagamento gate) reads the
+    // LIVE process.env.STRIPE_SECRET_KEY — mirror the transfer-rail prod test.
+    const original = process.env.STRIPE_SECRET_KEY;
+    process.env.STRIPE_SECRET_KEY = 'sk_live_dummy';
+    __resetStripeForTests();
+    const env = loadEnv(prodEnv(interCobEnv({ NODE_ENV: 'production' })));
+    const deps = buildServerDeps(env);
+    try {
+      expect(deps.pixCobrancaProvider).toBeInstanceOf(PixCobrancaProviderInter);
+      expect(deps.pixCobrancaProvider).not.toBeInstanceOf(PixCobrancaProviderFake);
+    } finally {
+      void deps.db.destroy();
+      if (original === undefined) {
+        delete process.env.STRIPE_SECRET_KEY;
+      } else {
+        process.env.STRIPE_SECRET_KEY = original;
+      }
+      __resetStripeForTests();
+    }
+  });
+
+  // ── fail-closed matrix (aperture-18j3j QA hold) ──────────────────────────
+  // Code + comments promise rejection in EVERY environment. Prove the full
+  // claim, not a sample: each of the 7 INTER_COB_* credentials × each
+  // NODE_ENV × two absence variants — truly unset (exercises the zod ''
+  // default) and whitespace-only (exercises the .trim() in the superRefine).
+  // 7 × 3 × 2 = 42 cells, every one executed, every one asserting a
+  // boot/schema rejection that NAMES the missing credential.
+  const INTER_COB_CREDS = [
+    'INTER_COB_BASE_URL',
+    'INTER_COB_CLIENT_ID',
+    'INTER_COB_CLIENT_SECRET',
+    'INTER_COB_SCOPE',
+    'INTER_COB_CERT_BASE64',
+    'INTER_COB_KEY_BASE64',
+    'INTER_COB_PIX_KEY',
+  ] as const;
+  const NODE_ENVS = ['production', 'development', 'test'] as const;
+  const ABSENCE_VARIANTS = [
+    {
+      variant: 'unset (zod default "")',
+      apply: (env: NodeJS.ProcessEnv, cred: string) => {
+        delete env[cred];
+      },
+    },
+    {
+      variant: 'whitespace-only',
+      apply: (env: NodeJS.ProcessEnv, cred: string) => {
+        env[cred] = '   ';
+      },
+    },
+  ] as const;
+  const FAIL_CLOSED_CELLS = INTER_COB_CREDS.flatMap((cred) =>
+    NODE_ENVS.flatMap((nodeEnv) =>
+      ABSENCE_VARIANTS.map(({ variant, apply }) => ({ cred, nodeEnv, variant, apply })),
+    ),
+  );
+
+  it.each(
+    FAIL_CLOSED_CELLS,
+  )("REJECTS 'inter' when $cred is $variant in NODE_ENV=$nodeEnv (fail closed in EVERY environment)", ({
+    cred,
+    nodeEnv,
+    apply,
+  }) => {
+    const env =
+      nodeEnv === 'production'
+        ? prodEnv(interCobEnv({ NODE_ENV: 'production' }))
+        : interCobEnv({ NODE_ENV: nodeEnv });
+    apply(env, cred);
+    expect(() => loadEnv(env)).toThrow(new RegExp(`${cred}.*COBRANCA_PIX_PROVIDER`));
+  });
+
+  it("ACCEPTS 'inter' in development with full creds (sandbox stance — asymmetry vs TRANSFERENCIA_PROVIDER)", () => {
+    // spec 2j2j1 §6: PIX-out is prod-only (double-pay hazard); PIX-in is not.
+    // This test pins the asymmetry: the same NODE_ENV=development that REJECTS
+    // TRANSFERENCIA_PROVIDER='inter' BOOTS with COBRANCA_PIX_PROVIDER='inter'.
+    const env = loadEnv(interCobEnv());
+    expect(env.NODE_ENV).toBe('development');
+    expect(env.COBRANCA_PIX_PROVIDER).toBe('inter');
+    const deps = buildServerDeps(env);
+    try {
+      expect(deps.pixCobrancaProvider).toBeInstanceOf(PixCobrancaProviderInter);
+    } finally {
+      void deps.db.destroy();
+    }
   });
 });
