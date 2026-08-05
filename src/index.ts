@@ -93,6 +93,25 @@ export type {
 } from './adapters/pagamentos/financeiro/livro-repository.js';
 export { LivroFinanceiroRepositoryMemory } from './adapters/pagamentos/financeiro/livro-repository.memory.js';
 export { LivroFinanceiroRepositoryPostgres } from './adapters/pagamentos/financeiro/livro-repository.postgres.js';
+export {
+  PIX_COBRANCA_FAKE_MAGIC_CENTS,
+  PixCobrancaProviderFake,
+  type PixCobrancaProviderFakeOptions,
+} from './adapters/pagamentos/pix-cobranca-provider.fake.js';
+export {
+  type InterPixCobrancaConfig,
+  PixCobrancaProviderInter,
+} from './adapters/pagamentos/pix-cobranca-provider.inter.js';
+export {
+  type CobrancaCriada,
+  type ConsultarCobrancaResult,
+  type CriarCobrancaInput,
+  type DevolucaoOutcome,
+  PixCobrancaAmbiguaError,
+  type PixCobrancaProvider,
+  PixCobrancaTransitoriaError,
+  type SolicitarDevolucaoInput,
+} from './adapters/pagamentos/pix-cobranca-provider.js';
 export { PagamentoProviderFake } from './adapters/pagamentos/provider.fake.js';
 export type { PagamentoProvider, SolicitarPagamentoInput } from './adapters/pagamentos/provider.js';
 export { PagamentoProviderStripe } from './adapters/pagamentos/provider.stripe.js';
