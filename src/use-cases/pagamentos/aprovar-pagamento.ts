@@ -8,6 +8,8 @@ import {
   criarEventoPagamento,
   type Pagamento,
   podeAprovarPagamento,
+  type TransacaoExterna,
+  TransacaoExternaSchema,
 } from '../../domain/pagamentos/entities/pagamento.js';
 import { PagamentosInputInvalidoError } from '../../errors/pagamentos/input-invalido.error.js';
 import { PagamentoNaoEncontradoError } from '../../errors/pagamentos/nao-encontrado.error.js';
@@ -27,6 +29,22 @@ export interface AprovarPagamentoDeps {
   readonly observability: Observability;
 }
 
+export interface AprovarPagamentoComTransacaoVerificadaDeps {
+  readonly pagamentoRepository: PagamentoRepository;
+  readonly pagamentoEventPublisher: PagamentoEventPublisher;
+  readonly clock: () => Date;
+  readonly observability: Observability;
+}
+
+export interface AprovarPagamentoComTransacaoVerificadaInput extends ComandoPagamentoInput {
+  /**
+   * Provider result that the caller has already verified against the
+   * provider's authoritative read API. This function never contacts a
+   * provider; it only applies the verified fact to our aggregate.
+   */
+  readonly transacao: TransacaoExterna;
+}
+
 /**
  * Aprova um pagamento a partir de uma transação externa simulada pelo provedor fake.
  */
@@ -36,7 +54,7 @@ export async function aprovarPagamento(
 ): Promise<Pagamento> {
   const { pagamentoRepository, pagamentoProvider, pagamentoEventPublisher, clock, observability } =
     deps;
-  const { logger, tracer } = observability;
+  const { tracer } = observability;
 
   return tracer.startActiveSpan('aprovarPagamento', async (span) => {
     try {
@@ -69,38 +87,11 @@ export async function aprovarPagamento(
         externalRef: pagamento.intencao.externalRef,
       });
 
-      if (transacao.status !== 'aprovado') {
-        throw new PagamentoTransicaoStatusInvalidaError(pagamento.id, pagamento.status, 'aprovado');
-      }
-
-      if (transacao.amountCents !== pagamento.intencao.composicaoValoresAggregate.totalPaidCents) {
-        throw new PagamentoValorDivergenteError(
-          pagamento.intencao.composicaoValoresAggregate.totalPaidCents,
-          transacao.amountCents,
-        );
-      }
-
-      const now = clock();
-      const aprovado = aprovarPagamentoPendente(pagamento, transacao, now);
-      await pagamentoRepository.update(aprovado);
-      await pagamentoEventPublisher.publish(
-        criarEventoPagamento({
-          id: randomUUID(),
-          tipo: 'payment.approved',
-          pagamento: aprovado,
-          ocorridoEm: now,
-        }),
+      const aprovado = await aplicarTransacaoVerificada(
+        { pagamentoRepository, pagamentoEventPublisher, clock, observability },
+        pagamento,
+        transacao,
       );
-
-      logger.info('pagamento.aprovado', {
-        idPagamento: aprovado.id,
-        idIntencaoPagamento: aprovado.intencao.id,
-        idCampanha: aprovado.intencao.idCampanha,
-        numeroDeItens: aprovado.intencao.items.length,
-        amountCents: aprovado.intencao.composicaoValoresAggregate.totalPaidCents,
-        idTransacaoExterna: transacao.id,
-      });
-
       span.setStatus({ code: SpanStatusCode.OK });
       return aprovado;
     } catch (error) {
@@ -111,4 +102,77 @@ export async function aprovarPagamento(
       span.end();
     }
   });
+}
+
+/**
+ * Apply an already-authoritatively-verified provider transaction.
+ *
+ * This is the bookkeeping seam for provider callbacks whose trust root is a
+ * separate read (Banco Inter webhook -> GET /cob/{txid}). Calling the regular
+ * `aprovarPagamento` here would contact `PagamentoProvider` again and, during
+ * the Stripe/Inter coexistence window, could call the wrong provider. The
+ * caller must supply the exact verified transaction; amount/status/domain
+ * invariants are still enforced here before persistence.
+ */
+export async function aprovarPagamentoComTransacaoVerificada(
+  deps: AprovarPagamentoComTransacaoVerificadaDeps,
+  input: AprovarPagamentoComTransacaoVerificadaInput,
+): Promise<Pagamento> {
+  const parsedInput = ComandoPagamentoInputSchema.safeParse(input);
+  if (!parsedInput.success) {
+    const message = parsedInput.error.issues.map((issue) => issue.message).join('; ');
+    throw new PagamentosInputInvalidoError(message);
+  }
+  const transacao = TransacaoExternaSchema.parse(input.transacao);
+  const pagamento = await deps.pagamentoRepository.findById(parsedInput.data.idPagamento);
+  if (!pagamento) {
+    throw new PagamentoNaoEncontradoError(parsedInput.data.idPagamento);
+  }
+  if (!podeAprovarPagamento(pagamento)) {
+    throw new PagamentoTransicaoStatusInvalidaError(pagamento.id, pagamento.status, 'aprovado');
+  }
+
+  return aplicarTransacaoVerificada(deps, pagamento, transacao);
+}
+
+async function aplicarTransacaoVerificada(
+  deps: AprovarPagamentoComTransacaoVerificadaDeps,
+  pagamento: Pagamento,
+  transacao: TransacaoExterna,
+): Promise<Pagamento> {
+  const { pagamentoRepository, pagamentoEventPublisher, clock, observability } = deps;
+  const { logger } = observability;
+
+  if (transacao.status !== 'aprovado') {
+    throw new PagamentoTransicaoStatusInvalidaError(pagamento.id, pagamento.status, 'aprovado');
+  }
+  if (transacao.amountCents !== pagamento.intencao.composicaoValoresAggregate.totalPaidCents) {
+    throw new PagamentoValorDivergenteError(
+      pagamento.intencao.composicaoValoresAggregate.totalPaidCents,
+      transacao.amountCents,
+    );
+  }
+
+  const now = clock();
+  const aprovado = aprovarPagamentoPendente(pagamento, transacao, now);
+  await pagamentoRepository.update(aprovado);
+  await pagamentoEventPublisher.publish(
+    criarEventoPagamento({
+      id: randomUUID(),
+      tipo: 'payment.approved',
+      pagamento: aprovado,
+      ocorridoEm: now,
+    }),
+  );
+
+  logger.info('pagamento.aprovado', {
+    idPagamento: aprovado.id,
+    idIntencaoPagamento: aprovado.intencao.id,
+    idCampanha: aprovado.intencao.idCampanha,
+    numeroDeItens: aprovado.intencao.items.length,
+    amountCents: aprovado.intencao.composicaoValoresAggregate.totalPaidCents,
+    idTransacaoExterna: transacao.id,
+  });
+
+  return aprovado;
 }

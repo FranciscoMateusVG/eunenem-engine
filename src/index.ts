@@ -190,6 +190,23 @@ export type { UsuarioRepository } from './adapters/usuario/repository.js';
 export { UsuarioRepositoryMemory } from './adapters/usuario/repository.memory.js';
 export { UsuarioRepositoryPostgres } from './adapters/usuario/repository.postgres.js';
 export type {
+  InterPixChargeConfirmed,
+  InterPixDispatchResult,
+  InterPixItemOutcome,
+  InterPixItemResult,
+  InterPixPipelineArgs,
+  InterPixPipelineResult,
+  InterPixRefundConfirmed,
+} from './adapters/webhook-archive/inter-pix-webhook-pipeline.js';
+export {
+  archiveAndDispatchInterPixWebhook,
+  INTER_PIX_CHARGE_EVENT_TYPE,
+  INTER_PIX_MAX_ITEMS,
+  INTER_PIX_MAX_REFUNDS_PER_ITEM,
+  INTER_PIX_REFUND_EVENT_TYPE,
+  INTER_PIX_SIGNATURE_SENTINEL,
+} from './adapters/webhook-archive/inter-pix-webhook-pipeline.js';
+export type {
   StripeDispatchResult,
   StripePipelineArgs,
   StripePipelineResult,
@@ -912,6 +929,8 @@ export {
   PagamentoEstornoRecusadoPeloProvedorError,
 } from './use-cases/checkout/estornar-pagamento.js';
 export type {
+  FinalizarPagamentoAprovadoComTransacaoVerificadaDeps,
+  FinalizarPagamentoAprovadoComTransacaoVerificadaInput,
   FinalizarPagamentoAprovadoDeps,
   FinalizarPagamentoAprovadoInput,
   FinalizarPagamentoAprovadoResult,
@@ -919,6 +938,7 @@ export type {
 export {
   FinalizarPagamentoAprovadoInputSchema,
   finalizarPagamentoAprovado,
+  finalizarPagamentoAprovadoComTransacaoVerificada,
 } from './use-cases/checkout/finalizar-pagamento-aprovado.js';
 export type {
   FinalizarPagamentoRejeitadoDeps,
@@ -1071,8 +1091,15 @@ export {
   AdminMensagensResponseSchema,
   AdminRecadoProjectionSchema,
 } from './use-cases/pagamentos/admin-recado-projection.js';
-export type { AprovarPagamentoDeps } from './use-cases/pagamentos/aprovar-pagamento.js';
-export { aprovarPagamento } from './use-cases/pagamentos/aprovar-pagamento.js';
+export type {
+  AprovarPagamentoComTransacaoVerificadaDeps,
+  AprovarPagamentoComTransacaoVerificadaInput,
+  AprovarPagamentoDeps,
+} from './use-cases/pagamentos/aprovar-pagamento.js';
+export {
+  aprovarPagamento,
+  aprovarPagamentoComTransacaoVerificada,
+} from './use-cases/pagamentos/aprovar-pagamento.js';
 export type {
   CriarIntencaoPagamentoDeps,
   CriarIntencaoPagamentoInput,
