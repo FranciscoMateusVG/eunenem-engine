@@ -78,4 +78,70 @@ describe('Inter Pix pipeline + real Postgres archive composition', () => {
       processedAt: expect.any(Date),
     });
   });
+
+  it('atomically claims one concurrent redelivery of a failed Inter event', async () => {
+    await sql`TRUNCATE TABLE payment_webhook_events`.execute(testDb.db);
+    const archive = new WebhookEventArchivePostgres(testDb.db);
+    const e2eId = 'R'.repeat(32);
+    const txid = 'T'.repeat(26);
+    const rawBody = JSON.stringify({ pix: [{ txid, endToEndId: e2eId }] });
+    const seeded = await archive.saveReceived({
+      provider: 'inter',
+      providerEventId: e2eId,
+      eventType: 'pix.recebido',
+      rawPayload: { txid, endToEndId: e2eId },
+      signatureHeader: 'not-provided-by-inter',
+      signatureValid: false,
+    });
+    await archive.markFailed(seeded.id, 'charge_bookkeeping_failed');
+
+    let releaseAuthoritativeRead: (() => void) | undefined;
+    const authoritativeReadGate = new Promise<void>((resolve) => {
+      releaseAuthoritativeRead = resolve;
+    });
+    const consultarCobranca = vi.fn().mockImplementation(async () => {
+      await authoritativeReadGate;
+      return {
+        status: 'concluida' as const,
+        e2eId,
+        valorPagoCents: 10_500,
+        horario: new Date('2026-08-05T12:00:00.000Z'),
+      };
+    });
+    const provider = {
+      criarCobranca: vi.fn(),
+      consultarCobranca,
+      solicitarDevolucao: vi.fn(),
+      consultarDevolucao: vi.fn(),
+    } satisfies PixCobrancaProvider;
+    const onChargeConfirmed = vi.fn().mockResolvedValue({ pagamentoId: null });
+    const args = {
+      rawBody,
+      pixCobrancaProvider: provider,
+      onChargeConfirmed,
+      onRefundConfirmed: vi.fn(),
+    };
+
+    const deliveries = Promise.all([
+      archiveAndDispatchInterPixWebhook(archive, args),
+      archiveAndDispatchInterPixWebhook(archive, args),
+    ]);
+    await vi.waitFor(() => expect(consultarCobranca).toHaveBeenCalledTimes(1));
+    // Keep the claimant inside the authoritative read long enough for the
+    // competing delivery to observe the durable in-flight state.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(consultarCobranca).toHaveBeenCalledTimes(1);
+    releaseAuthoritativeRead?.();
+
+    const results = await deliveries;
+    expect(results.map((result) => result.items[0]?.outcome).sort()).toEqual([
+      'dispatched_success',
+      'duplicate_in_flight',
+    ]);
+    expect(onChargeConfirmed).toHaveBeenCalledTimes(1);
+    await expect(archive.findById(seeded.id)).resolves.toMatchObject({
+      processedAt: expect.any(Date),
+      processingError: null,
+    });
+  });
 });

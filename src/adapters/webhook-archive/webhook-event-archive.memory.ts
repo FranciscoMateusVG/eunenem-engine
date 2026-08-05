@@ -88,6 +88,35 @@ export class WebhookEventArchiveMemory implements WebhookEventArchive {
     });
   }
 
+  async tryClaimFailedForRetry(id: string): Promise<boolean> {
+    return tracer.startActiveSpan(
+      'db.payment_webhook_events.tryClaimFailedForRetry',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+        try {
+          // Map read + write occur synchronously before this method yields,
+          // mirroring Postgres's single-statement compare-and-set semantics.
+          const existing = this.rows.get(id);
+          if (!existing || existing.processedAt !== null || existing.processingError === null) {
+            span.setAttribute('retry.claimed', false);
+            span.setStatus({ code: SpanStatusCode.OK });
+            return false;
+          }
+          this.rows.set(id, { ...existing, processingError: null });
+          span.setAttribute('retry.claimed', true);
+          span.setStatus({ code: SpanStatusCode.OK });
+          return true;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
   async markProcessed(id: string, pagamentoId: string | null): Promise<void> {
     return tracer.startActiveSpan('db.payment_webhook_events.markProcessed', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
@@ -122,6 +151,12 @@ export class WebhookEventArchiveMemory implements WebhookEventArchive {
       try {
         const existing = this.rows.get(id);
         if (!existing) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return;
+        }
+        if (existing.processedAt !== null) {
+          // A terminal success wins over a late failure from any stale
+          // attempt; keep processedAt and processingError coherent.
           span.setStatus({ code: SpanStatusCode.OK });
           return;
         }

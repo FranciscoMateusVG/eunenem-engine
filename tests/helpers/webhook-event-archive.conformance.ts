@@ -165,6 +165,57 @@ export function describeWebhookEventArchiveConformance(name: string, options: Co
       expect(long?.processedAt).toBeNull();
     });
 
+    it('tryClaimFailedForRetry atomically grants one failed-to-in-flight claimant', async () => {
+      const inserted = await archive.saveReceived({
+        provider: 'inter',
+        providerEventId: `pix_${randomUUID()}`,
+        eventType: 'pix.recebido',
+        rawPayload: { txid: 'retry-claim' },
+        signatureHeader: 'not-provided-by-inter',
+        signatureValid: false,
+      });
+
+      // Fresh/in-flight rows are not retryable.
+      await expect(archive.tryClaimFailedForRetry(inserted.id)).resolves.toBe(false);
+      await archive.markFailed(inserted.id, 'charge_bookkeeping_failed');
+
+      const claims = await Promise.all([
+        archive.tryClaimFailedForRetry(inserted.id),
+        archive.tryClaimFailedForRetry(inserted.id),
+      ]);
+      expect(claims.filter(Boolean)).toHaveLength(1);
+      await expect(archive.findById(inserted.id)).resolves.toMatchObject({
+        processedAt: null,
+        processingError: null,
+      });
+
+      // A failed claimant may release the row for a later redelivery.
+      await archive.markFailed(inserted.id, 'charge_requery_failed');
+      await expect(archive.tryClaimFailedForRetry(inserted.id)).resolves.toBe(true);
+    });
+
+    it('a late markFailed cannot poison a terminally processed row', async () => {
+      const inserted = await archive.saveReceived({
+        provider: 'inter',
+        providerEventId: `pix_${randomUUID()}`,
+        eventType: 'pix.recebido',
+        rawPayload: { txid: 'terminal-wins' },
+        signatureHeader: 'not-provided-by-inter',
+        signatureValid: false,
+      });
+
+      const pagamentoId = randomUUID();
+      await archive.markProcessed(inserted.id, pagamentoId);
+      await archive.markFailed(inserted.id, 'charge_bookkeeping_failed');
+
+      await expect(archive.findById(inserted.id)).resolves.toMatchObject({
+        processedAt: expect.any(Date),
+        processingError: null,
+        pagamentoId,
+      });
+      await expect(archive.tryClaimFailedForRetry(inserted.id)).resolves.toBe(false);
+    });
+
     it('findByProviderEventId matches; returns undefined for unknown (aperture-1n6u8)', async () => {
       const providerEventId = `evt_${randomUUID()}`;
       const inserted = await archive.saveReceived({

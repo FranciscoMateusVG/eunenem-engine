@@ -126,6 +126,44 @@ describe('archiveAndDispatchInterPixWebhook', () => {
     expect(onChargeConfirmed).toHaveBeenCalledTimes(1);
   });
 
+  it('grants one failed-event retry claimant under concurrent redelivery', async () => {
+    const consultarCobranca = vi.fn().mockResolvedValue({
+      status: 'concluida',
+      e2eId: E2E_A,
+      valorPagoCents: 10_500,
+      horario: PAID_AT,
+    });
+    const args = {
+      rawBody: envelope([{ txid: TXID_A, endToEndId: E2E_A }]),
+      pixCobrancaProvider: provider({ consultarCobranca }),
+      onChargeConfirmed,
+      onRefundConfirmed,
+    };
+
+    onChargeConfirmed.mockRejectedValueOnce(new Error('first bookkeeping attempt failed'));
+    const failed = await archiveAndDispatchInterPixWebhook(archive, args);
+    expect(failed.items[0]?.outcome).toBe('charge_bookkeeping_failed');
+
+    consultarCobranca.mockClear();
+    onChargeConfirmed.mockClear().mockResolvedValue({ pagamentoId: 'pagamento-a' });
+    const retries = await Promise.all([
+      archiveAndDispatchInterPixWebhook(archive, args),
+      archiveAndDispatchInterPixWebhook(archive, args),
+    ]);
+
+    expect(retries.map((retry) => retry.items[0]?.outcome).sort()).toEqual([
+      'dispatched_success',
+      'duplicate_in_flight',
+    ]);
+    expect(consultarCobranca).toHaveBeenCalledTimes(1);
+    expect(onChargeConfirmed).toHaveBeenCalledTimes(1);
+    await expect(archive.findByProviderEventId('inter', E2E_A)).resolves.toMatchObject({
+      processedAt: expect.any(Date),
+      processingError: null,
+      pagamentoId: 'pagamento-a',
+    });
+  });
+
   it('marks a failed authoritative read categorically and performs no state change', async () => {
     const consultarCobranca = vi.fn().mockRejectedValue(new Error('provider body with payer PII'));
     const result = await archiveAndDispatchInterPixWebhook(archive, {

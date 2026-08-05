@@ -199,9 +199,19 @@ async function processEvent(
     if (!existing?.processingError) {
       return result(event, saved.id, 'duplicate_in_flight');
     }
-    // A prior authoritative read/bookkeeping attempt failed. Re-delivery is
-    // allowed to retry the safe verify-then-act path; successful processing
-    // clears the prior categorical failure via markProcessed.
+    // A prior authoritative read/bookkeeping attempt failed. Claim the retry
+    // with one durable compare-and-set before re-querying or dispatching.
+    // Only the successful claimant may proceed; concurrent redeliveries see
+    // the cleared failure as in-flight and cannot duplicate side effects.
+    const claimed = await archive.tryClaimFailedForRetry(saved.id);
+    if (!claimed) {
+      const afterClaim = await archive.findById(saved.id);
+      return result(
+        event,
+        saved.id,
+        afterClaim?.processedAt ? 'duplicate_processed' : 'duplicate_in_flight',
+      );
+    }
   }
 
   if (event.eventType === INTER_PIX_CHARGE_EVENT_TYPE) {
