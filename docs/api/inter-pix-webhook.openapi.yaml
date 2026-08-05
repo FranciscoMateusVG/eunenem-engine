@@ -1,0 +1,154 @@
+openapi: 3.1.0
+info:
+  title: EuNeném Banco Inter Pix webhook
+  version: 1.0.0
+  description: |
+    Banco Inter Pix delivery contract. Inter does not sign this webhook, so
+    the request is a bounded routing hint only. Every item is archived and
+    re-queried through Banco Inter's authoritative read API before any local
+    payment state may change.
+servers:
+  - url: https://eunenem.pocketsoftware.com.br
+paths:
+  /api/webhooks/inter/pix:
+    post:
+      operationId: receiveInterPixWebhook
+      summary: Receive a Banco Inter Pix notification envelope
+      description: |
+        Register this base URL in Banco Inter. Some real deliveries append
+        `/pix`; the suffix route below is the same handler. No application
+        session or payload signature is required. A 200 means the envelope
+        was durably archived, not that every item changed payment state.
+      security: []
+      x-rate-limit-tier: inter-webhook-600-per-minute-per-ip
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InterPixEnvelope'
+            example:
+              pix:
+                - endToEndId: EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE
+                  txid: AAAAAAAAAAAAAAAAAAAAAAAAAA
+      responses:
+        '200':
+          $ref: '#/components/responses/Accepted'
+        '400':
+          $ref: '#/components/responses/Malformed'
+        '413':
+          $ref: '#/components/responses/TooLarge'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalFailure'
+  /api/webhooks/inter/pix/pix:
+    post:
+      operationId: receiveInterPixWebhookWithInterSuffix
+      summary: Receive a Banco Inter Pix notification at the appended suffix
+      description: Same handler and guarantees as `/api/webhooks/inter/pix`.
+      security: []
+      x-rate-limit-tier: inter-webhook-600-per-minute-per-ip
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InterPixEnvelope'
+      responses:
+        '200':
+          $ref: '#/components/responses/Accepted'
+        '400':
+          $ref: '#/components/responses/Malformed'
+        '413':
+          $ref: '#/components/responses/TooLarge'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalFailure'
+components:
+  schemas:
+    InterPixEnvelope:
+      type: object
+      additionalProperties: true
+      required:
+        - pix
+      properties:
+        pix:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/InterPixItem'
+    InterPixItem:
+      type: object
+      additionalProperties: true
+      required:
+        - endToEndId
+        - txid
+      properties:
+        endToEndId:
+          type: string
+          pattern: '^[A-Za-z0-9]{32}$'
+        txid:
+          type: string
+          pattern: '^[A-Za-z0-9]{26,35}$'
+        devolucoes:
+          type: array
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/InterPixRefundHint'
+    InterPixRefundHint:
+      type: object
+      additionalProperties: true
+      required:
+        - id
+      properties:
+        id:
+          type: string
+          pattern: '^[A-Za-z0-9]{1,35}$'
+  responses:
+    Accepted:
+      description: |
+        Envelope durably archived. Individual items may remain pending after
+        a failed or non-terminal authoritative re-query; no unverified state
+        transition occurs.
+      content:
+        text/plain:
+          schema:
+            type: string
+            const: ok
+          example: ok
+    Malformed:
+      description: JSON is invalid or violates the bounded envelope schema.
+      content:
+        text/plain:
+          schema:
+            type: string
+            const: invalid event shape
+    TooLarge:
+      description: Request exceeds the 262144-byte body cap.
+      content:
+        text/plain:
+          schema:
+            type: string
+            const: payload too large
+    RateLimited:
+      description: More than 600 requests in the fixed one-minute per-IP window.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+            const: 60
+      content:
+        text/plain:
+          schema:
+            type: string
+            const: too many requests
+    InternalFailure:
+      description: Archive or infrastructure failure; caller may retry.
+      content:
+        text/plain:
+          schema:
+            type: string
+            const: internal error

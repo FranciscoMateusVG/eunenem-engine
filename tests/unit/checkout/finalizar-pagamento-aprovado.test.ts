@@ -17,7 +17,10 @@ import { noopTracer } from '../../../src/observability/tracer.js';
 import { adicionarOpcaoContribuicao } from '../../../src/use-cases/arrecadacao/adicionar-opcao-contribuicao.js';
 import { criarCampanha } from '../../../src/use-cases/arrecadacao/criar-campanha.js';
 import { criarContribuicao } from '../../../src/use-cases/arrecadacao/criar-contribuicao.js';
-import { finalizarPagamentoAprovado } from '../../../src/use-cases/checkout/finalizar-pagamento-aprovado.js';
+import {
+  finalizarPagamentoAprovado,
+  finalizarPagamentoAprovadoComTransacaoVerificada,
+} from '../../../src/use-cases/checkout/finalizar-pagamento-aprovado.js';
 import { aprovarPagamento } from '../../../src/use-cases/pagamentos/aprovar-pagamento.js';
 import { createArrecadacaoMemoryRepos } from '../../helpers/arrecadacao-repos.js';
 import { makePagamento } from '../../helpers/pagamento-repository.conformance.js';
@@ -284,5 +287,113 @@ describe('finalizarPagamentoAprovado — idempotency contract', () => {
     const lancamentosAfter =
       await deps.livroFinanceiroRepository.findLancamentosByIdPagamento(idPagamento);
     expect(lancamentosAfter).toHaveLength(2);
+  });
+});
+
+describe('finalizarPagamentoAprovadoComTransacaoVerificada — provider-free Inter seam', () => {
+  it('applies the exact authoritative transaction without a PagamentoProvider dependency', async () => {
+    const { deps, idPagamento } = await setupPagamentoPendente(ID_PLATAFORMA_EUNENEM, 'presente');
+
+    const result = await finalizarPagamentoAprovadoComTransacaoVerificada(
+      {
+        pagamentoRepository: deps.pagamentoRepository,
+        pagamentoEventPublisher: deps.pagamentoEventPublisher,
+        contribuicaoRepository: deps.contribuicaoRepository,
+        campanhaRepository: deps.campanhaRepository,
+        livroFinanceiroRepository: deps.livroFinanceiroRepository,
+        clock: deps.clock,
+        observability: deps.observability,
+      },
+      {
+        idPagamento,
+        transacao: {
+          id: 'E1234567890123456789012345678901',
+          provedor: 'inter',
+          status: 'aprovado',
+          amountCents: 8400,
+          criadaEm: new Date('2026-08-05T12:00:00.000Z'),
+        },
+      },
+    );
+
+    expect(result.pagamento).toMatchObject({
+      status: 'aprovado',
+      transacaoExterna: {
+        id: 'E1234567890123456789012345678901',
+        provedor: 'inter',
+        status: 'aprovado',
+        amountCents: 8400,
+      },
+    });
+    expect(result.lancamentos).toHaveLength(2);
+  });
+
+  it('rejects an amount mismatch before persistence', async () => {
+    const { deps, idPagamento } = await setupPagamentoPendente(ID_PLATAFORMA_EUNENEM, 'presente');
+
+    await expect(
+      finalizarPagamentoAprovadoComTransacaoVerificada(
+        {
+          pagamentoRepository: deps.pagamentoRepository,
+          pagamentoEventPublisher: deps.pagamentoEventPublisher,
+          contribuicaoRepository: deps.contribuicaoRepository,
+          campanhaRepository: deps.campanhaRepository,
+          livroFinanceiroRepository: deps.livroFinanceiroRepository,
+          clock: deps.clock,
+          observability: deps.observability,
+        },
+        {
+          idPagamento,
+          transacao: {
+            id: 'E1234567890123456789012345678901',
+            provedor: 'inter',
+            status: 'aprovado',
+            amountCents: 8399,
+            criadaEm: new Date('2026-08-05T12:00:00.000Z'),
+          },
+        },
+      ),
+    ).rejects.toThrow('Valor do pagamento divergente');
+
+    await expect(deps.pagamentoRepository.findById(idPagamento)).resolves.toMatchObject({
+      status: 'pendente',
+    });
+  });
+
+  it('accepts an exact replay but rejects a different authoritative transaction identity', async () => {
+    const { deps, idPagamento } = await setupPagamentoPendente(ID_PLATAFORMA_EUNENEM, 'presente');
+    const verifiedDeps = {
+      pagamentoRepository: deps.pagamentoRepository,
+      pagamentoEventPublisher: deps.pagamentoEventPublisher,
+      contribuicaoRepository: deps.contribuicaoRepository,
+      campanhaRepository: deps.campanhaRepository,
+      livroFinanceiroRepository: deps.livroFinanceiroRepository,
+      clock: deps.clock,
+      observability: deps.observability,
+    };
+    const transacao = {
+      id: 'E1234567890123456789012345678901',
+      provedor: 'inter',
+      status: 'aprovado' as const,
+      amountCents: 8400,
+      criadaEm: new Date('2026-08-05T12:00:00.000Z'),
+    };
+
+    const first = await finalizarPagamentoAprovadoComTransacaoVerificada(verifiedDeps, {
+      idPagamento,
+      transacao,
+    });
+    const replay = await finalizarPagamentoAprovadoComTransacaoVerificada(verifiedDeps, {
+      idPagamento,
+      transacao: { ...transacao },
+    });
+    expect(replay.pagamento.transacaoExterna).toEqual(first.pagamento.transacaoExterna);
+
+    await expect(
+      finalizarPagamentoAprovadoComTransacaoVerificada(verifiedDeps, {
+        idPagamento,
+        transacao: { ...transacao, id: 'DIFFERENT-E2E-ID' },
+      }),
+    ).rejects.toThrow('transacao verificada diverge');
   });
 });
