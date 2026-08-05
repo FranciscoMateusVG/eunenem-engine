@@ -131,6 +131,28 @@ function cloneDevolucaoInput(input: SolicitarDevolucaoInput): SolicitarDevolucao
   return { ...input };
 }
 
+function cloneCobrancaCriada(result: CobrancaCriada): CobrancaCriada {
+  return { ...result, expiraEm: new Date(result.expiraEm.getTime()) };
+}
+
+function cloneConsultarCobrancaResult(result: ConsultarCobrancaResult): ConsultarCobrancaResult {
+  return result.status === 'concluida'
+    ? { ...result, horario: new Date(result.horario.getTime()) }
+    : { ...result };
+}
+
+function cloneConsultarCobrancaFakeStep(
+  step: ConsultarCobrancaFakeStep,
+): ConsultarCobrancaFakeStep {
+  return step.status === 'concluida' && step.horario !== undefined
+    ? { ...step, horario: new Date(step.horario.getTime()) }
+    : { ...step };
+}
+
+function cloneDevolucaoOutcome(outcome: DevolucaoOutcome): DevolucaoOutcome {
+  return { ...outcome };
+}
+
 function isCobrancaTerminal(
   outcome: ConsultarCobrancaResult,
 ): outcome is Extract<ConsultarCobrancaResult, { status: 'concluida' | 'removida' }> {
@@ -144,8 +166,9 @@ function isDevolucaoTerminal(outcome: DevolucaoOutcome): boolean {
 /**
  * In-memory fake with two indexes for charges (`idPagamento` and `txid`) and a
  * refund ledger keyed by `(e2eId,idDevolucao)`. Retrying with the same identity
- * and payload returns the exact stored result object; changing the payload is a
- * conflict. This mirrors provider idempotency rather than silently accepting a
+ * and payload returns an equal copy of the ledger-owned result; changing the
+ * payload is a conflict. Callers and snapshots never receive mutable ledger
+ * objects. This mirrors provider idempotency rather than silently accepting a
  * different operation under the same key.
  */
 export class PixCobrancaProviderFake implements PixCobrancaProvider {
@@ -175,9 +198,16 @@ export class PixCobrancaProviderFake implements PixCobrancaProvider {
   private _consultarDevolucaoCalls = 0;
 
   constructor(options: PixCobrancaProviderFakeOptions = {}) {
-    this.chargeScript = [...(options.consultarCobrancaSequence ?? DEFAULT_CHARGE_SCRIPT)];
-    this.refundInitialOutcome = options.solicitarDevolucaoOutcome;
-    this.refundScript = [...(options.consultarDevolucaoSequence ?? DEFAULT_REFUND_SCRIPT)];
+    this.chargeScript = (options.consultarCobrancaSequence ?? DEFAULT_CHARGE_SCRIPT).map(
+      cloneConsultarCobrancaFakeStep,
+    );
+    this.refundInitialOutcome =
+      options.solicitarDevolucaoOutcome === undefined
+        ? undefined
+        : cloneDevolucaoOutcome(options.solicitarDevolucaoOutcome);
+    this.refundScript = (options.consultarDevolucaoSequence ?? DEFAULT_REFUND_SCRIPT).map(
+      cloneDevolucaoOutcome,
+    );
     this.txidFactory = options.txidFactory ?? ((_input, ordinal) => deterministicTxid(ordinal));
     this.e2eIdFactory = options.e2eIdFactory ?? ((_txid, ordinal) => deterministicE2eId(ordinal));
     this.rtrIdFactory =
@@ -213,18 +243,18 @@ export class PixCobrancaProviderFake implements PixCobrancaProvider {
   get cobrancas(): readonly PixCobrancaFakeCobrancaSnapshot[] {
     return [...this.chargeByPaymentId.values()].map((entry) => ({
       input: cloneCobrancaInput(entry.input),
-      result: entry.result,
+      result: cloneCobrancaCriada(entry.result),
       consultas: entry.consultCalls,
-      ...(entry.terminal ? { terminal: entry.terminal } : {}),
+      ...(entry.terminal ? { terminal: cloneConsultarCobrancaResult(entry.terminal) } : {}),
     }));
   }
 
   get devolucoes(): readonly PixCobrancaFakeDevolucaoSnapshot[] {
     return [...this.refundByKey.values()].map((entry) => ({
       input: cloneDevolucaoInput(entry.input),
-      result: entry.result,
+      result: cloneDevolucaoOutcome(entry.result),
       consultas: entry.consultCalls,
-      ...(entry.terminal ? { terminal: entry.terminal } : {}),
+      ...(entry.terminal ? { terminal: cloneDevolucaoOutcome(entry.terminal) } : {}),
     }));
   }
 
@@ -235,7 +265,7 @@ export class PixCobrancaProviderFake implements PixCobrancaProvider {
       if (!sameCobrancaPayload(replay.input, input)) {
         throw new Error(`pix fake charge conflict for idPagamento ${input.idPagamento}`);
       }
-      return replay.result;
+      return cloneCobrancaCriada(replay.result);
     }
     if (this.criarCobrancaError) throw this.criarCobrancaError;
 
@@ -254,14 +284,14 @@ export class PixCobrancaProviderFake implements PixCobrancaProvider {
       // `readonly` is compile-time only. Keep an owned comparison baseline so
       // caller/snapshot mutation cannot rewrite idempotency history.
       input: cloneCobrancaInput(input),
-      result,
+      result: cloneCobrancaCriada(result),
       consultScript: [...this.chargeScript],
       consultCursor: 0,
       consultCalls: 0,
     };
     this.chargeByPaymentId.set(input.idPagamento, entry);
     this.chargeByTxid.set(txid, entry);
-    return result;
+    return cloneCobrancaCriada(entry.result);
   }
 
   async consultarCobranca(txid: string): Promise<ConsultarCobrancaResult> {
@@ -269,7 +299,7 @@ export class PixCobrancaProviderFake implements PixCobrancaProvider {
     const entry = this.chargeByTxid.get(txid);
     if (!entry) throw new Error(`pix fake charge not found for txid ${txid}`);
     entry.consultCalls += 1;
-    if (entry.terminal) return entry.terminal;
+    if (entry.terminal) return cloneConsultarCobrancaResult(entry.terminal);
 
     let step: ConsultarCobrancaFakeStep;
     if (
@@ -291,8 +321,10 @@ export class PixCobrancaProviderFake implements PixCobrancaProvider {
     entry.consultCursor += 1;
 
     const outcome = this.materializeChargeStep(step, entry);
-    if (isCobrancaTerminal(outcome)) entry.terminal = outcome;
-    return outcome;
+    if (isCobrancaTerminal(outcome)) {
+      entry.terminal = cloneConsultarCobrancaResult(outcome);
+    }
+    return cloneConsultarCobrancaResult(outcome);
   }
 
   async solicitarDevolucao(input: SolicitarDevolucaoInput): Promise<DevolucaoOutcome> {
@@ -305,7 +337,7 @@ export class PixCobrancaProviderFake implements PixCobrancaProvider {
           `pix fake refund conflict for e2eId ${input.e2eId} and idDevolucao ${input.idDevolucao}`,
         );
       }
-      return replay.result;
+      return cloneDevolucaoOutcome(replay.result);
     }
     if (this.solicitarDevolucaoError) throw this.solicitarDevolucaoError;
 
@@ -317,16 +349,17 @@ export class PixCobrancaProviderFake implements PixCobrancaProvider {
             status: 'em_processamento',
             rtrId: this.rtrIdFactory(input, this.refundOrdinal),
           });
+    const ownedResult = cloneDevolucaoOutcome(result);
     const entry: DevolucaoLedgerEntry = {
       input: cloneDevolucaoInput(input),
-      result,
+      result: ownedResult,
       consultScript: [...this.refundScript],
       consultCursor: 0,
       consultCalls: 0,
-      ...(isDevolucaoTerminal(result) ? { terminal: result } : {}),
+      ...(isDevolucaoTerminal(ownedResult) ? { terminal: cloneDevolucaoOutcome(ownedResult) } : {}),
     };
     this.refundByKey.set(key, entry);
-    return result;
+    return cloneDevolucaoOutcome(ownedResult);
   }
 
   async consultarDevolucao(e2eId: string, idDevolucao: string): Promise<DevolucaoOutcome> {
@@ -338,20 +371,22 @@ export class PixCobrancaProviderFake implements PixCobrancaProvider {
       );
     }
     entry.consultCalls += 1;
-    if (entry.terminal) return entry.terminal;
+    if (entry.terminal) return cloneDevolucaoOutcome(entry.terminal);
 
     const index = Math.min(entry.consultCursor, Math.max(0, entry.consultScript.length - 1));
-    const outcome = entry.consultScript[index] ?? entry.result;
+    const outcome = cloneDevolucaoOutcome(entry.consultScript[index] ?? entry.result);
     entry.consultCursor += 1;
-    if (isDevolucaoTerminal(outcome)) entry.terminal = outcome;
-    return outcome;
+    if (isDevolucaoTerminal(outcome)) {
+      entry.terminal = cloneDevolucaoOutcome(outcome);
+    }
+    return cloneDevolucaoOutcome(outcome);
   }
 
   private materializeChargeStep(
     step: ConsultarCobrancaFakeStep,
     entry: CobrancaLedgerEntry,
   ): ConsultarCobrancaResult {
-    if (step.status !== 'concluida') return step;
+    if (step.status !== 'concluida') return cloneConsultarCobrancaResult(step);
     this.e2eOrdinal += 1;
     return {
       status: 'concluida',

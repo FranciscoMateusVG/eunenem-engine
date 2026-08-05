@@ -28,6 +28,10 @@ const tracer = trace.getTracer('frame');
 
 const CHARGE_EXPIRATION_SECONDS = 600;
 const DESCRIPTION_MAX_LENGTH = 140;
+// Inter's Pix OpenAPI money schema is `\d{1,10}\.\d{2}`. Keep both outgoing
+// formatting and authoritative response parsing inside that exact wire domain.
+const INTER_MAX_AMOUNT_CENTS = 999_999_999_999;
+const INTER_MONEY_PATTERN = /^(\d{1,10})\.(\d{2})$/;
 const TXID_PATTERN = /^[A-Za-z0-9]{26,35}$/;
 const E2E_ID_PATTERN = /^[A-Za-z0-9]{32}$/;
 const REFUND_ID_PATTERN = /^[A-Za-z0-9]{1,35}$/;
@@ -291,7 +295,11 @@ function validateRefundIds(e2eId: string, idDevolucao: string, operation: string
 }
 
 function validateAmount(amountCents: MoneyCents, operation: string): void {
-  if (!Number.isSafeInteger(amountCents) || amountCents <= 0) {
+  if (
+    !Number.isSafeInteger(amountCents) ||
+    amountCents <= 0 ||
+    amountCents > INTER_MAX_AMOUNT_CENTS
+  ) {
     throw new PixCobrancaTransitoriaError(`${operation}: valor inválido`);
   }
 }
@@ -474,14 +482,14 @@ function parseReaisToCents(value: unknown): MoneyCents | null {
   if (typeof value !== 'string') {
     return null;
   }
-  const match = /^(\d+)(?:[.,](\d{1,2}))?$/.exec(value);
+  const match = INTER_MONEY_PATTERN.exec(value);
   if (match === null) {
     return null;
   }
   const whole = BigInt(match[1] ?? '0');
-  const fraction = BigInt((match[2] ?? '').padEnd(2, '0'));
+  const fraction = BigInt(match[2] ?? '0');
   const cents = whole * 100n + fraction;
-  if (cents <= 0n || cents > BigInt(Number.MAX_SAFE_INTEGER)) {
+  if (cents <= 0n || cents > BigInt(INTER_MAX_AMOUNT_CENTS)) {
     return null;
   }
   return Number(cents) as MoneyCents;

@@ -93,7 +93,9 @@ describe('PixCobrancaProviderFake — charge ledger', () => {
     const created = await fake.criarCobranca(input);
     const replay = await fake.criarCobranca({ ...input });
 
-    expect(replay).toBe(created);
+    expect(replay).toEqual(created);
+    expect(replay).not.toBe(created);
+    expect(replay.expiraEm).not.toBe(created.expiraEm);
     expect(fake.cobrancas).toHaveLength(1);
     await expect(fake.criarCobranca({ ...input, amountCents: 5001 })).rejects.toThrow(
       'pix fake charge conflict',
@@ -108,10 +110,35 @@ describe('PixCobrancaProviderFake — charge ledger', () => {
     (input as { amountCents: number }).amountCents = 5001;
     (fake.cobrancas[0]?.input as { amountCents: number }).amountCents = 5002;
 
-    await expect(fake.criarCobranca(chargeInput())).resolves.toBe(created);
+    await expect(fake.criarCobranca(chargeInput())).resolves.toEqual(created);
     await expect(fake.criarCobranca(chargeInput({ amountCents: 5001 }))).rejects.toThrow(
       'pix fake charge conflict',
     );
+  });
+
+  it('keeps charge result and Date baselines private from caller and snapshot mutation', async () => {
+    const fake = new PixCobrancaProviderFake();
+    const expected = {
+      txid: 'FAKE0000000000000000000000000001',
+      pixCopiaECola: '000201FAKE-PIX-FAKE0000000000000000000000000001',
+      expiraEm: new Date('2026-01-01T00:10:00.000Z'),
+    };
+    const created = await fake.criarCobranca(chargeInput());
+
+    (created as { txid: string; pixCopiaECola: string }).txid = 'CORRUPTED';
+    (created as { pixCopiaECola: string }).pixCopiaECola = 'CORRUPTED';
+    created.expiraEm.setTime(0);
+    const firstSnapshot = fake.cobrancas[0];
+    if (firstSnapshot === undefined) throw new Error('expected charge snapshot');
+    expect(firstSnapshot.result).toEqual(expected);
+    (firstSnapshot.result as { txid: string }).txid = 'SNAPSHOT-CORRUPTED';
+    firstSnapshot.result.expiraEm.setTime(1);
+
+    const replay = await fake.criarCobranca(chargeInput());
+    expect(replay).toEqual(expected);
+    expect(replay).not.toBe(created);
+    expect(replay.expiraEm).not.toBe(created.expiraEm);
+    expect(fake.cobrancas[0]?.result).toEqual(expected);
   });
 
   it('rejects duplicate factory txids across different payments', async () => {
@@ -124,6 +151,7 @@ describe('PixCobrancaProviderFake — charge ledger', () => {
 
   it('scripts ativa/desconhecido/concluida and keeps the terminal result sticky', async () => {
     const paidAt = new Date('2032-03-04T05:06:07.000Z');
+    const expectedPaidAt = new Date(paidAt.getTime());
     const fake = new PixCobrancaProviderFake({
       consultarCobrancaSequence: [
         { status: 'ativa' },
@@ -137,6 +165,7 @@ describe('PixCobrancaProviderFake — charge ledger', () => {
         { status: 'removida' },
       ],
     });
+    paidAt.setTime(0);
     const { txid } = await fake.criarCobranca(chargeInput());
 
     await expect(fake.consultarCobranca(txid)).resolves.toEqual({ status: 'ativa' });
@@ -149,10 +178,41 @@ describe('PixCobrancaProviderFake — charge ledger', () => {
       status: 'concluida',
       e2eId: 'E2E-SCRIPTED',
       valorPagoCents: 4999,
-      horario: paidAt,
+      horario: expectedPaidAt,
     });
-    expect(await fake.consultarCobranca(txid)).toBe(concluded);
-    expect(fake.cobrancas[0]).toMatchObject({ consultas: 4, terminal: concluded });
+    if (concluded.status !== 'concluida') throw new Error('expected concluded charge');
+    (concluded as { e2eId: string }).e2eId = 'CALLER-CORRUPTED';
+    concluded.horario.setTime(1);
+
+    const sticky = await fake.consultarCobranca(txid);
+    expect(sticky).toEqual({
+      status: 'concluida',
+      e2eId: 'E2E-SCRIPTED',
+      valorPagoCents: 4999,
+      horario: expectedPaidAt,
+    });
+    const snapshot = fake.cobrancas[0];
+    if (snapshot?.terminal?.status !== 'concluida') {
+      throw new Error('expected concluded charge snapshot');
+    }
+    (snapshot.terminal as { e2eId: string }).e2eId = 'SNAPSHOT-CORRUPTED';
+    snapshot.terminal.horario.setTime(2);
+
+    await expect(fake.consultarCobranca(txid)).resolves.toEqual({
+      status: 'concluida',
+      e2eId: 'E2E-SCRIPTED',
+      valorPagoCents: 4999,
+      horario: expectedPaidAt,
+    });
+    expect(fake.cobrancas[0]).toMatchObject({
+      consultas: 5,
+      terminal: {
+        status: 'concluida',
+        e2eId: 'E2E-SCRIPTED',
+        valorPagoCents: 4999,
+        horario: expectedPaidAt,
+      },
+    });
   });
 
   it('keeps removida terminal and throws for an unknown txid (never desconhecido)', async () => {
@@ -162,7 +222,7 @@ describe('PixCobrancaProviderFake — charge ledger', () => {
     const { txid } = await fake.criarCobranca(chargeInput());
     const removed = await fake.consultarCobranca(txid);
     expect(removed).toEqual({ status: 'removida' });
-    expect(await fake.consultarCobranca(txid)).toBe(removed);
+    expect(await fake.consultarCobranca(txid)).toEqual(removed);
     await expect(fake.consultarCobranca('UNKNOWN')).rejects.toThrow('charge not found');
   });
 });
@@ -175,7 +235,9 @@ describe('PixCobrancaProviderFake — refund ledger', () => {
     { status: 'rejeitada', codigo: 'VALOR_INVALIDO' },
   ])('returns configured option-driven outcome $status', async (outcome) => {
     const fake = new PixCobrancaProviderFake({ solicitarDevolucaoOutcome: outcome });
-    await expect(fake.solicitarDevolucao(refundInput())).resolves.toBe(outcome);
+    const returned = await fake.solicitarDevolucao(refundInput());
+    expect(returned).toEqual(outcome);
+    expect(returned).not.toBe(outcome);
   });
 
   it('uses the caller idDevolucao, replays byte-for-byte, and rejects payload drift', async () => {
@@ -185,8 +247,10 @@ describe('PixCobrancaProviderFake — refund ledger', () => {
 
     const created = await fake.solicitarDevolucao(input);
     const replay = await fake.solicitarDevolucao({ ...input });
-    expect(created).toBe(initial);
-    expect(replay).toBe(created);
+    expect(created).toEqual(initial);
+    expect(created).not.toBe(initial);
+    expect(replay).toEqual(created);
+    expect(replay).not.toBe(created);
     expect(fake.devolucoes).toHaveLength(1);
     expect(fake.devolucoes[0]?.input.idDevolucao).toBe('callerownedid35');
     expect(fake.solicitarDevolucaoCalls).toBe(2);
@@ -204,10 +268,32 @@ describe('PixCobrancaProviderFake — refund ledger', () => {
     (input as { amountCents: number }).amountCents = 5001;
     (fake.devolucoes[0]?.input as { amountCents: number }).amountCents = 5002;
 
-    await expect(fake.solicitarDevolucao(refundInput())).resolves.toBe(created);
+    await expect(fake.solicitarDevolucao(refundInput())).resolves.toEqual(created);
     await expect(fake.solicitarDevolucao(refundInput({ amountCents: 5001 }))).rejects.toThrow(
       'pix fake refund conflict',
     );
+  });
+
+  it('keeps configured, returned and snapshotted refund results outside the ledger', async () => {
+    const configured: DevolucaoOutcome = { status: 'em_processamento', rtrId: 'RTR-OWNED' };
+    const fake = new PixCobrancaProviderFake({ solicitarDevolucaoOutcome: configured });
+    (configured as { rtrId: string }).rtrId = 'CONFIG-CORRUPTED';
+
+    const created = await fake.solicitarDevolucao(refundInput());
+    expect(created).toEqual({ status: 'em_processamento', rtrId: 'RTR-OWNED' });
+    (created as { rtrId: string }).rtrId = 'CALLER-CORRUPTED';
+    const firstSnapshot = fake.devolucoes[0];
+    if (firstSnapshot === undefined) throw new Error('expected refund snapshot');
+    expect(firstSnapshot?.result).toEqual({ status: 'em_processamento', rtrId: 'RTR-OWNED' });
+    (firstSnapshot.result as { rtrId: string }).rtrId = 'SNAPSHOT-CORRUPTED';
+
+    const replay = await fake.solicitarDevolucao(refundInput());
+    expect(replay).toEqual({ status: 'em_processamento', rtrId: 'RTR-OWNED' });
+    expect(replay).not.toBe(created);
+    expect(fake.devolucoes[0]?.result).toEqual({
+      status: 'em_processamento',
+      rtrId: 'RTR-OWNED',
+    });
   });
 
   it('scripts refund consultation and keeps devolvida terminal', async () => {
@@ -217,14 +303,27 @@ describe('PixCobrancaProviderFake — refund ledger', () => {
       solicitarDevolucaoOutcome: processing,
       consultarDevolucaoSequence: [processing, refunded, { status: 'rejeitada', codigo: 'LATE' }],
     });
+    (processing as { rtrId: string }).rtrId = 'CONFIG-CORRUPTED';
+    (refunded as { status: string }).status = 'rejeitada';
     const input = refundInput();
     await fake.solicitarDevolucao(input);
 
-    expect(await fake.consultarDevolucao(input.e2eId, input.idDevolucao)).toBe(processing);
-    expect(await fake.consultarDevolucao(input.e2eId, input.idDevolucao)).toBe(refunded);
-    expect(await fake.consultarDevolucao(input.e2eId, input.idDevolucao)).toBe(refunded);
-    expect(fake.consultarDevolucaoCalls).toBe(3);
-    expect(fake.devolucoes[0]).toMatchObject({ consultas: 3, terminal: refunded });
+    const first = await fake.consultarDevolucao(input.e2eId, input.idDevolucao);
+    expect(first).toEqual({ status: 'em_processamento', rtrId: 'RTR-POLL' });
+    (first as { rtrId: string }).rtrId = 'CALLER-CORRUPTED';
+    const second = await fake.consultarDevolucao(input.e2eId, input.idDevolucao);
+    expect(second).toEqual({ status: 'devolvida' });
+    (second as { status: string }).status = 'nao_realizada';
+    const third = await fake.consultarDevolucao(input.e2eId, input.idDevolucao);
+    expect(third).toEqual({ status: 'devolvida' });
+    const snapshot = fake.devolucoes[0];
+    if (snapshot?.terminal === undefined) throw new Error('expected refund terminal snapshot');
+    (snapshot.terminal as { status: string }).status = 'rejeitada';
+    expect(await fake.consultarDevolucao(input.e2eId, input.idDevolucao)).toEqual({
+      status: 'devolvida',
+    });
+    expect(fake.consultarDevolucaoCalls).toBe(4);
+    expect(fake.devolucoes[0]).toMatchObject({ consultas: 4, terminal: { status: 'devolvida' } });
   });
 
   it('throws for an unknown (e2eId,idDevolucao) pair', async () => {
@@ -268,10 +367,10 @@ describe('PixCobrancaProviderFake — opt-in magic and explicit failures', () =>
       e2eId: 'E2EFAKE0000000000000000000000001',
       valorPagoCents: 1337,
     });
-    expect(await fake.consultarCobranca(auto.txid)).toBe(completedResult);
+    expect(await fake.consultarCobranca(auto.txid)).toEqual(completedResult);
     const removedResult = await fake.consultarCobranca(removed.txid);
     expect(removedResult).toEqual({ status: 'removida' });
-    expect(await fake.consultarCobranca(removed.txid)).toBe(removedResult);
+    expect(await fake.consultarCobranca(removed.txid)).toEqual(removedResult);
   });
 
   it('rejects the 1422 refund magic without generating or replacing idDevolucao', async () => {

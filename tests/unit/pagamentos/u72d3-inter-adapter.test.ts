@@ -155,7 +155,7 @@ describe('PixCobrancaProviderInter — criarCobranca request + create response',
     [10, '0.10'],
     [101, '1.01'],
     [1_005, '10.05'],
-    [Number.MAX_SAFE_INTEGER, '90071992547409.91'],
+    [999_999_999_999, '9999999999.99'],
   ])('formats %i cents as %s without floating-point money arithmetic', async (amount, expected) => {
     const transport = new ScriptedTransport().push(TOKEN_OK, createResponse());
     await provider(transport).criarCobranca({ ...createInput, amountCents: cents(amount) });
@@ -238,6 +238,13 @@ describe('PixCobrancaProviderInter — charge status classification', () => {
     ],
     ['missing endToEndId', [{ valor: '1.00', horario: '2026-08-05T12:00:00Z' }]],
     ['malformed amount', [{ endToEndId: e2eId, valor: '1e3', horario: '2026-08-05T12:00:00Z' }]],
+    ['comma amount', [{ endToEndId: e2eId, valor: '10,05', horario: '2026-08-05T12:00:00Z' }]],
+    ['integer-only amount', [{ endToEndId: e2eId, valor: '10', horario: '2026-08-05T12:00:00Z' }]],
+    ['one-decimal amount', [{ endToEndId: e2eId, valor: '10.5', horario: '2026-08-05T12:00:00Z' }]],
+    [
+      'amount over the provider wire cap',
+      [{ endToEndId: e2eId, valor: '10000000000.00', horario: '2026-08-05T12:00:00Z' }],
+    ],
     [
       'numeric amount that already crossed IEEE-754',
       [{ endToEndId: e2eId, valor: 10.05, horario: '2026-08-05T12:00:00Z' }],
@@ -342,6 +349,10 @@ describe('PixCobrancaProviderInter — devolução request + status matrix', () 
     ['missing id', { id: undefined }],
     ['mismatched id', { id: 'AnotherRefund123' }],
     ['mismatched PUT amount', { valor: '10.06' }],
+    ['comma PUT amount', { valor: '10,05' }],
+    ['integer-only PUT amount', { valor: '10' }],
+    ['one-decimal PUT amount', { valor: '10.5' }],
+    ['PUT amount over the provider wire cap', { valor: '10000000000.00' }],
   ])('%s on refund PUT cannot terminalize the requested refund', async (_label, extra) => {
     const transport = new ScriptedTransport().push(TOKEN_OK, refundResponse('DEVOLVIDO', extra));
     await expect(provider(transport).solicitarDevolucao(refundInput)).rejects.toBeInstanceOf(
@@ -428,6 +439,7 @@ describe('PixCobrancaProviderInter — preflight, token cache and NO-PII errors'
       { ...createInput, idIntencaoPagamento: 'not-a-uuid' as IdIntencaoPagamento },
     ],
     ['zero amount', { ...createInput, amountCents: cents(0) }],
+    ['amount over provider wire cap', { ...createInput, amountCents: cents(1_000_000_000_000) }],
     ['unsafe integer amount', { ...createInput, amountCents: cents(Number.MAX_SAFE_INTEGER + 1) }],
     ['description > 140', { ...createInput, solicitacaoPagador: 'x'.repeat(141) }],
   ])('charge %s fails before token/transport', async (_label, input) => {
@@ -442,6 +454,7 @@ describe('PixCobrancaProviderInter — preflight, token cache and NO-PII errors'
     ['invalid e2eId', { ...refundInput, e2eId: 'short' }],
     ['invalid idDevolucao', { ...refundInput, idDevolucao: 'contains-hyphen' }],
     ['zero amount', { ...refundInput, amountCents: cents(0) }],
+    ['amount over provider wire cap', { ...refundInput, amountCents: cents(1_000_000_000_000) }],
     ['unsafe integer amount', { ...refundInput, amountCents: cents(Number.MAX_SAFE_INTEGER + 1) }],
     ['description > 140', { ...refundInput, descricao: 'x'.repeat(141) }],
   ])('refund %s fails before token/transport', async (_label, input) => {
