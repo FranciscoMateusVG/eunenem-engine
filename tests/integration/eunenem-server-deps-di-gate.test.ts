@@ -372,25 +372,69 @@ describe('eunenem-server PIX cobrança rail DI gate (aperture-18j3j)', () => {
     }
   });
 
-  it('zero-behavior-change: existing checkout bindings are identical with and without the new var present', () => {
-    // Without COBRANCA_PIX_PROVIDER at all (pre-merge env shape) vs with it
-    // explicitly set to its default — the Stripe/fake checkout gate must
-    // resolve identically in both worlds.
-    const withoutVar = buildServerDeps(loadEnv({ ...baseEnv(), STRIPE_SECRET_KEY: '' }));
-    const withVar = buildServerDeps(
-      loadEnv({ ...baseEnv(), STRIPE_SECRET_KEY: '', COBRANCA_PIX_PROVIDER: 'stripe' }),
-    );
-    try {
-      for (const deps of [withoutVar, withVar]) {
-        expect(deps.pagamentoProvider).toBeInstanceOf(PagamentoProviderFake);
-        expect(deps.checkoutSessionProvider).toBeInstanceOf(PagamentoProviderFake);
+  describe('zero-behavior-change proof: stripe-parity table (aperture-18j3j QA hold)', () => {
+    // The claim to prove: introducing COBRANCA_PIX_PROVIDER changes NOTHING
+    // about the existing checkout wiring under BOTH configurations of the
+    // Stripe gate — not just the Fake branch. Table: STRIPE_SECRET_KEY in
+    // [empty, set] × COBRANCA_PIX_PROVIDER in [unset (pre-merge env shape),
+    // explicit 'stripe' default]. Every cell asserts (a) the gate resolves to
+    // the class the key state demands, identically whether the new var is
+    // present or absent, and (b) the dual-port binding stays ONE shared
+    // instance serving both deps (the existing single-instance invariant).
+    const ORIGINAL_STRIPE_SECRET = process.env.STRIPE_SECRET_KEY;
+    afterEach(() => {
+      if (ORIGINAL_STRIPE_SECRET === undefined) {
+        delete process.env.STRIPE_SECRET_KEY;
+      } else {
+        process.env.STRIPE_SECRET_KEY = ORIGINAL_STRIPE_SECRET;
+      }
+      __resetStripeForTests();
+    });
+
+    const KEY_STATES = [
+      {
+        keyState: 'STRIPE_SECRET_KEY empty (fresh clone → Fake)',
+        stripeKey: '',
+        expected: PagamentoProviderFake,
+      },
+      {
+        keyState: 'STRIPE_SECRET_KEY set (test keys → Stripe)',
+        stripeKey: 'sk_test_dummy_zero_behavior_change',
+        expected: PagamentoProviderStripe,
+      },
+    ];
+    const COB_STATES = [
+      { cobState: 'COBRANCA_PIX_PROVIDER unset (pre-merge env shape)', cobrancaVar: undefined },
+      { cobState: "COBRANCA_PIX_PROVIDER='stripe' (explicit default)", cobrancaVar: 'stripe' },
+    ];
+    const CELLS = KEY_STATES.flatMap((k) => COB_STATES.map((c) => ({ ...k, ...c })));
+
+    it.each(CELLS)('$keyState × $cobState → checkout wiring unchanged', ({
+      stripeKey,
+      expected,
+      cobrancaVar,
+    }) => {
+      // getStripe() reads the LIVE process.env at call time — mirror the
+      // payment-gate describe above and write it before building.
+      process.env.STRIPE_SECRET_KEY = stripeKey;
+      __resetStripeForTests();
+      const env = loadEnv({
+        ...baseEnv(),
+        STRIPE_SECRET_KEY: stripeKey,
+        ...(cobrancaVar !== undefined ? { COBRANCA_PIX_PROVIDER: cobrancaVar } : {}),
+      });
+      const deps = buildServerDeps(env);
+      try {
+        expect(deps.pagamentoProvider).toBeInstanceOf(expected);
+        expect(deps.checkoutSessionProvider).toBeInstanceOf(expected);
+        // ONE shared instance serving both ports — the pre-existing
+        // dual-port invariant must survive the new var in every cell.
         expect(deps.pagamentoProvider).toBe(deps.checkoutSessionProvider);
         expect(deps.pixCobrancaProvider.constructor.name).toBe('PixCobrancaNaoConfigurado');
+      } finally {
+        void deps.db.destroy();
       }
-    } finally {
-      void withoutVar.db.destroy();
-      void withVar.db.destroy();
-    }
+    });
   });
 
   it("binds PixCobrancaProviderFake when COBRANCA_PIX_PROVIDER='fake'", () => {
@@ -424,7 +468,14 @@ describe('eunenem-server PIX cobrança rail DI gate (aperture-18j3j)', () => {
     }
   });
 
-  it.each([
+  // ── fail-closed matrix (aperture-18j3j QA hold) ──────────────────────────
+  // Code + comments promise rejection in EVERY environment. Prove the full
+  // claim, not a sample: each of the 7 INTER_COB_* credentials × each
+  // NODE_ENV × two absence variants — truly unset (exercises the zod ''
+  // default) and whitespace-only (exercises the .trim() in the superRefine).
+  // 7 × 3 × 2 = 42 cells, every one executed, every one asserting a
+  // boot/schema rejection that NAMES the missing credential.
+  const INTER_COB_CREDS = [
     'INTER_COB_BASE_URL',
     'INTER_COB_CLIENT_ID',
     'INTER_COB_CLIENT_SECRET',
@@ -432,16 +483,41 @@ describe('eunenem-server PIX cobrança rail DI gate (aperture-18j3j)', () => {
     'INTER_COB_CERT_BASE64',
     'INTER_COB_KEY_BASE64',
     'INTER_COB_PIX_KEY',
-  ])("REJECTS 'inter' in production when %s is missing (fail fast at boot)", (missing) => {
-    expect(() => loadEnv(prodEnv(interCobEnv({ NODE_ENV: 'production', [missing]: '' })))).toThrow(
-      new RegExp(`${missing}.*COBRANCA_PIX_PROVIDER`),
-    );
-  });
+  ] as const;
+  const NODE_ENVS = ['production', 'development', 'test'] as const;
+  const ABSENCE_VARIANTS = [
+    {
+      variant: 'unset (zod default "")',
+      apply: (env: NodeJS.ProcessEnv, cred: string) => {
+        delete env[cred];
+      },
+    },
+    {
+      variant: 'whitespace-only',
+      apply: (env: NodeJS.ProcessEnv, cred: string) => {
+        env[cred] = '   ';
+      },
+    },
+  ] as const;
+  const FAIL_CLOSED_CELLS = INTER_COB_CREDS.flatMap((cred) =>
+    NODE_ENVS.flatMap((nodeEnv) =>
+      ABSENCE_VARIANTS.map(({ variant, apply }) => ({ cred, nodeEnv, variant, apply })),
+    ),
+  );
 
-  it("REJECTS 'inter' in development when a credential is missing (fail closed in EVERY env)", () => {
-    expect(() => loadEnv(interCobEnv({ INTER_COB_CLIENT_SECRET: '' }))).toThrow(
-      /INTER_COB_CLIENT_SECRET.*COBRANCA_PIX_PROVIDER/,
-    );
+  it.each(
+    FAIL_CLOSED_CELLS,
+  )("REJECTS 'inter' when $cred is $variant in NODE_ENV=$nodeEnv (fail closed in EVERY environment)", ({
+    cred,
+    nodeEnv,
+    apply,
+  }) => {
+    const env =
+      nodeEnv === 'production'
+        ? prodEnv(interCobEnv({ NODE_ENV: 'production' }))
+        : interCobEnv({ NODE_ENV: nodeEnv });
+    apply(env, cred);
+    expect(() => loadEnv(env)).toThrow(new RegExp(`${cred}.*COBRANCA_PIX_PROVIDER`));
   });
 
   it("ACCEPTS 'inter' in development with full creds (sandbox stance — asymmetry vs TRANSFERENCIA_PROVIDER)", () => {
