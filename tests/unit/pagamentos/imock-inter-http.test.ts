@@ -205,6 +205,112 @@ describe('extractInterErrorCode — NO-PII gate (codigo → title → HTTP_<stat
   });
 });
 
+describe('extractInterErrorCode — PII hardening (aperture-0nkvg): codigo grammar + title allowlist', () => {
+  const res = (statusCode: number, body: string): InterHttpResponse => ({ statusCode, body });
+
+  it.each([
+    ['raw 11-digit CPF', '12345678901'],
+    ['formatted CPF', '123.456.789-01'],
+    ['e-mail address', 'someone@example.com'],
+    ['lowercase-uuid PIX key', 'a3f1c2d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d'],
+    ['+55 phone number', '+5511987654321'],
+  ])('codigo echoing PII (%s) is rejected → HTTP fallback, PII absent', (_label, pii) => {
+    const code = extractInterErrorCode(res(400, JSON.stringify({ codigo: pii })));
+    expect(code).toBe('HTTP_400');
+    expect(code).not.toContain(pii);
+  });
+
+  it.each([
+    ['raw 11-digit CPF', '12345678901'],
+    ['formatted CPF', '123.456.789-01'],
+    ['e-mail address', 'someone@example.com'],
+    ['lowercase-uuid PIX key', 'a3f1c2d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d'],
+    ['+55 phone number', '+5511987654321'],
+  ])('title echoing PII (%s) is not allowlisted → HTTP fallback, PII absent', (_label, pii) => {
+    const code = extractInterErrorCode(
+      res(400, JSON.stringify({ title: `chave ${pii} inválida` })),
+    );
+    expect(code).toBe('HTTP_400');
+    expect(code).not.toContain(pii);
+  });
+
+  it('a ~1,000,000-char title is rejected promptly and never returned whole', () => {
+    const flood = 'A'.repeat(1_000_000);
+    const started = performance.now();
+    const code = extractInterErrorCode(res(400, JSON.stringify({ title: flood })));
+    const elapsedMs = performance.now() - started;
+    expect(code).toBe('HTTP_400');
+    expect(code.length).toBeLessThan(20);
+    expect(elapsedMs).toBeLessThan(1000);
+  });
+
+  it('a numeric CPF-shaped codigo (11 digits as a JSON number) is rejected', () => {
+    expect(extractInterErrorCode(res(400, '{"codigo":12345678901}'))).toBe('HTTP_400');
+  });
+
+  it('legit short numeric codigo still passes the grammar', () => {
+    expect(extractInterErrorCode(res(400, '{"codigo":"4711"}'))).toBe('4711');
+  });
+
+  it('legit UPPERCASE_TOKEN codigo still passes the grammar', () => {
+    expect(extractInterErrorCode(res(400, '{"codigo":"SALDO_INSUFICIENTE"}'))).toBe(
+      'SALDO_INSUFICIENTE',
+    );
+  });
+});
+
+describe('InterHttpClient — getToken single-flight (OAuth endpoint is rate-limited 5/min)', () => {
+  it('3 concurrent cold getToken calls issue exactly 1 token fetch', async () => {
+    const t = new ScriptedTransport().push(tokenOk('tkn-shared'));
+    const client = new InterHttpClient(config(), t.fn);
+    const tokens = await Promise.all([client.getToken(), client.getToken(), client.getToken()]);
+    expect(tokens).toEqual(['tkn-shared', 'tkn-shared', 'tkn-shared']);
+    expect(t.tokenCalls()).toBe(1);
+  });
+
+  it('a failed in-flight fetch is NOT cached — the next call issues a NEW fetch and succeeds', async () => {
+    const t = new ScriptedTransport().push(
+      { statusCode: 500, body: 'oauth down' },
+      tokenOk('tkn-recovered'),
+    );
+    const client = new InterHttpClient(config(), t.fn);
+    await expect(client.getToken()).rejects.toThrow('token: HTTP 500');
+    expect(await client.getToken()).toBe('tkn-recovered');
+    expect(t.tokenCalls()).toBe(2);
+  });
+
+  it('concurrent callers all reject on a failed fetch, then recovery works', async () => {
+    const t = new ScriptedTransport().push(
+      { statusCode: 503, body: 'oauth down' },
+      tokenOk('tkn-after'),
+    );
+    const client = new InterHttpClient(config(), t.fn);
+    const [a, b] = await Promise.allSettled([client.getToken(), client.getToken()]);
+    expect(a?.status).toBe('rejected');
+    expect(b?.status).toBe('rejected');
+    expect(t.tokenCalls()).toBe(1); // the burst coalesced into ONE failed fetch
+    expect(await client.getToken()).toBe('tkn-after');
+    expect(t.tokenCalls()).toBe(2);
+  });
+
+  it('no cross-instance coalescing: two clients bursting cold fetch one token EACH', async () => {
+    const tA = new ScriptedTransport().push(tokenOk('tkn-a'));
+    const tB = new ScriptedTransport().push(tokenOk('tkn-b'));
+    const clientA = new InterHttpClient(config({ clientId: 'id-a' }), tA.fn);
+    const clientB = new InterHttpClient(config({ clientId: 'id-b' }), tB.fn);
+    const [a1, b1, a2, b2] = await Promise.all([
+      clientA.getToken(),
+      clientB.getToken(),
+      clientA.getToken(),
+      clientB.getToken(),
+    ]);
+    expect([a1, a2]).toEqual(['tkn-a', 'tkn-a']);
+    expect([b1, b2]).toEqual(['tkn-b', 'tkn-b']);
+    expect(tA.tokenCalls()).toBe(1);
+    expect(tB.tokenCalls()).toBe(1);
+  });
+});
+
 describe('createInterMtlsAgent — TLS verification stays ON', () => {
   it('presents cert/key with keepAlive and touches NOTHING else about TLS', () => {
     const agent = createInterMtlsAgent('CERT-PEM', 'KEY-PEM');

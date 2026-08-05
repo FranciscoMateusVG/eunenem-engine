@@ -103,6 +103,13 @@ export class InterHttpClient {
   /** In-memory OAuth token cache; refreshed within the safety margin. */
   private tokenCache: TokenCache | null = null;
 
+  /**
+   * Single-flight slot: the token fetch currently in flight, if any.
+   * Instance-local by design — the per-credential-set token isolation
+   * (one client = one cache) must hold, so no module-global state.
+   */
+  private tokenInFlight: Promise<string> | null = null;
+
   /** The transport actually used for every request (real mTLS or injected). */
   private readonly transport: InterHttpTransport;
 
@@ -127,13 +134,30 @@ export class InterHttpClient {
     return this.transport(method, path, headers, body);
   }
 
-  /** Returns a cached token when still fresh, else fetches and caches one. */
+  /**
+   * Returns a cached token when still fresh, else fetches and caches one.
+   *
+   * Single-flight: when a fetch is already in flight, concurrent callers
+   * await the SAME promise instead of issuing new fetches — Inter's OAuth
+   * endpoint is rate-limited (5/min), so a cold/refresh concurrency burst
+   * would otherwise self-DoS. A FAILED fetch clears the slot so the next
+   * caller retries fresh; a rejection is never cached.
+   */
   async getToken(): Promise<string> {
     const now = Date.now();
     if (this.tokenCache !== null && this.tokenCache.expiresAtMs - TOKEN_REFRESH_MARGIN_MS > now) {
       return this.tokenCache.accessToken;
     }
+    if (this.tokenInFlight === null) {
+      this.tokenInFlight = this.fetchToken().finally(() => {
+        this.tokenInFlight = null;
+      });
+    }
+    return this.tokenInFlight;
+  }
 
+  /** Performs one OAuth client-credentials fetch and caches the result. */
+  private async fetchToken(): Promise<string> {
     const body = new URLSearchParams({
       grant_type: 'client_credentials',
       client_id: this.config.clientId,
@@ -247,22 +271,59 @@ export function parseJson<T>(body: string): T | null {
 }
 
 /**
+ * Machine-code grammars for `codigo`. Inter can echo payer identifiers —
+ * CPF, CNPJ, phone numbers, e-mail addresses, PIX keys — in free-text error
+ * fields, so `codigo` is only trusted when it matches a strict machine-code
+ * shape:
+ *   - short numeric codes (1–8 digits) — deliberately too short for an
+ *     11-digit CPF, a 14-digit CNPJ, or a phone number;
+ *   - uppercase machine tokens (starts A–Z; then A–Z/0–9/_ up to 32 chars
+ *     total) — excludes e-mail addresses (@ / dot), UUID/EVP PIX keys
+ *     (lowercase + hyphens), and formatted CPFs (dots / hyphens).
+ * Anything else is ignored.
+ */
+const CODIGO_NUMERIC = /^\d{1,8}$/;
+const CODIGO_TOKEN = /^[A-Z][A-Z0-9_]{0,31}$/;
+
+/**
+ * `title` is free text with no length bound on Inter's side, so it can echo
+ * the same payer identifiers (and be arbitrarily large). It is only trusted
+ * when it EXACTLY matches a known, generic Inter error label. Seeded from
+ * the title values the existing contract tests depend on
+ * (tests/unit/pagamentos/imock-inter-http.test.ts). Absent an allowlist
+ * entry, title is never surfaced.
+ */
+const TITLE_ALLOWLIST: ReadonlySet<string> = new Set(['Campo inválido']);
+
+/** Cheap pre-allowlist bound: no legit Inter error label approaches this. */
+const MAX_TITLE_LENGTH = 64;
+
+/**
  * Extracts a NO-PII error code from an Inter error response. Prefers a
- * machine `codigo`, falls back to the short error `title` (a generic error
- * label, never the chave/name value), and finally to the HTTP status. The
- * `detail`/`violacoes` fields are deliberately ignored — they can echo the
- * chave or recipient name.
+ * machine `codigo` (only if it matches the strict grammar above), falls back
+ * to the error `title` ONLY when it exactly matches the allowlist of known
+ * generic labels, and finally to the HTTP status. The `detail`/`violacoes`
+ * fields are deliberately ignored — they can echo the chave or recipient
+ * name — and `codigo`/`title` are gated because Inter can echo payer
+ * identifiers (CPF, e-mail, PIX key) in those fields too.
  */
 export function extractInterErrorCode(response: InterHttpResponse): string {
   const parsed = parseJson<InterErrorBody>(response.body);
   if (parsed !== null) {
-    if (typeof parsed.codigo === 'string' && parsed.codigo !== '') {
-      return parsed.codigo;
+    const codigo =
+      typeof parsed.codigo === 'string'
+        ? parsed.codigo
+        : typeof parsed.codigo === 'number'
+          ? String(parsed.codigo)
+          : null;
+    if (codigo !== null && (CODIGO_NUMERIC.test(codigo) || CODIGO_TOKEN.test(codigo))) {
+      return codigo;
     }
-    if (typeof parsed.codigo === 'number') {
-      return String(parsed.codigo);
-    }
-    if (typeof parsed.title === 'string' && parsed.title !== '') {
+    if (
+      typeof parsed.title === 'string' &&
+      parsed.title.length <= MAX_TITLE_LENGTH &&
+      TITLE_ALLOWLIST.has(parsed.title)
+    ) {
       return parsed.title;
     }
   }
