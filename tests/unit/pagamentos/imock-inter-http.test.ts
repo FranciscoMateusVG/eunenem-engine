@@ -205,7 +205,7 @@ describe('extractInterErrorCode — NO-PII gate (codigo → title → HTTP_<stat
   });
 });
 
-describe('extractInterErrorCode — PII hardening (aperture-0nkvg): codigo grammar + title allowlist', () => {
+describe('extractInterErrorCode — PII hardening (aperture-0nkvg): codigo + title allowlists', () => {
   const res = (statusCode: number, body: string): InterHttpResponse => ({ statusCode, body });
 
   it.each([
@@ -248,14 +248,33 @@ describe('extractInterErrorCode — PII hardening (aperture-0nkvg): codigo gramm
     expect(extractInterErrorCode(res(400, '{"codigo":12345678901}'))).toBe('HTTP_400');
   });
 
-  it('legit short numeric codigo still passes the grammar', () => {
-    expect(extractInterErrorCode(res(400, '{"codigo":"4711"}'))).toBe('4711');
+  // QA bypass payloads (verbatim, from the e6eb644 review): each of these
+  // PASSED the retired "machine-token / short-numeric" grammars while
+  // carrying PII verbatim — proving shape checks cannot establish semantic
+  // non-PII. Under the finite allowlist they must ALL fall through.
+  it.each([
+    ['CPF encoded in an uppercase token', 'CPF_12345678901'],
+    ['phone encoded in an uppercase token', 'PHONE_5511987654321'],
+    ['personal name encoded in an uppercase token', 'MARIA_DA_SILVA'],
+    ['8-digit numeric (partial document / grammar-conforming)', '12345678'],
+  ])('QA bypass payload (%s) falls through to HTTP fallback, PII absent', (_label, payload) => {
+    const code = extractInterErrorCode(res(400, JSON.stringify({ codigo: payload })));
+    expect(code).toBe('HTTP_400');
+    expect(code).not.toContain(payload);
   });
 
-  it('legit UPPERCASE_TOKEN codigo still passes the grammar', () => {
-    expect(extractInterErrorCode(res(400, '{"codigo":"SALDO_INSUFICIENTE"}'))).toBe(
-      'SALDO_INSUFICIENTE',
-    );
+  it('a grammar-conforming machine token NOT in the allowlist falls through', () => {
+    expect(extractInterErrorCode(res(400, '{"codigo":"SALDO_INSUFICIENTE"}'))).toBe('HTTP_400');
+  });
+
+  // Positive coverage: one test per CODIGO_ALLOWLIST entry.
+  it('allowlisted codigo CHAVE_INVALIDA is surfaced (ju5w2 guard contract)', () => {
+    expect(extractInterErrorCode(res(400, '{"codigo":"CHAVE_INVALIDA"}'))).toBe('CHAVE_INVALIDA');
+  });
+
+  it("allowlisted codigo '4711' is surfaced, as string or JSON number", () => {
+    expect(extractInterErrorCode(res(400, '{"codigo":"4711"}'))).toBe('4711');
+    expect(extractInterErrorCode(res(400, '{"codigo":4711}'))).toBe('4711');
   });
 });
 

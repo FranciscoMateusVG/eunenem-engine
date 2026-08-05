@@ -271,19 +271,30 @@ export function parseJson<T>(body: string): T | null {
 }
 
 /**
- * Machine-code grammars for `codigo`. Inter can echo payer identifiers —
- * CPF, CNPJ, phone numbers, e-mail addresses, PIX keys — in free-text error
- * fields, so `codigo` is only trusted when it matches a strict machine-code
- * shape:
- *   - short numeric codes (1–8 digits) — deliberately too short for an
- *     11-digit CPF, a 14-digit CNPJ, or a phone number;
- *   - uppercase machine tokens (starts A–Z; then A–Z/0–9/_ up to 32 chars
- *     total) — excludes e-mail addresses (@ / dot), UUID/EVP PIX keys
- *     (lowercase + hyphens), and formatted CPFs (dots / hyphens).
- * Anything else is ignored.
+ * Finite allowlist for `codigo`. Inter can echo payer identifiers — CPF,
+ * CNPJ, phone numbers, e-mail addresses, PIX keys, names — in free-text
+ * error fields, INCLUDING `codigo`.
+ *
+ * Shape/grammar-based sanitization was tried here and DEFEATED by QA:
+ * "uppercase machine token" and "short numeric" grammars still pass strings
+ * that encode PII verbatim — e.g. `CPF_12345678901`, `PHONE_5511987654321`,
+ * `MARIA_DA_SILVA`, and `12345678` all match any reasonable machine-token
+ * grammar. A syntactic check can never prove a string is semantically
+ * PII-free. The ONLY sound contract is allowlist-or-HTTP-fallback.
+ *
+ * Future editors: extend this set with documented, known Inter error codes
+ * (one comment per entry naming its source). NEVER reintroduce pattern
+ * matching, prefixes, regexes, or length heuristics for `codigo`.
  */
-const CODIGO_NUMERIC = /^\d{1,8}$/;
-const CODIGO_TOKEN = /^[A-Z][A-Z0-9_]{0,31}$/;
+const CODIGO_ALLOWLIST: ReadonlySet<string> = new Set([
+  // Required by the ju5w2 guard contract (tests/unit/pagamentos/
+  // ju5w2-inter-adapter.test.ts — byte-immutable) and the pre-existing
+  // imock contract test 'prefers a machine codigo string'.
+  'CHAVE_INVALIDA',
+  // Required by the pre-existing imock contract test 'stringifies a
+  // numeric codigo' ({"codigo":4711} must surface as '4711').
+  '4711',
+]);
 
 /**
  * `title` is free text with no length bound on Inter's side, so it can echo
@@ -299,13 +310,16 @@ const TITLE_ALLOWLIST: ReadonlySet<string> = new Set(['Campo inválido']);
 const MAX_TITLE_LENGTH = 64;
 
 /**
- * Extracts a NO-PII error code from an Inter error response. Prefers a
- * machine `codigo` (only if it matches the strict grammar above), falls back
- * to the error `title` ONLY when it exactly matches the allowlist of known
- * generic labels, and finally to the HTTP status. The `detail`/`violacoes`
- * fields are deliberately ignored — they can echo the chave or recipient
- * name — and `codigo`/`title` are gated because Inter can echo payer
- * identifiers (CPF, e-mail, PIX key) in those fields too.
+ * Extracts a NO-PII error code from an Inter error response. Surfaces
+ * `codigo` ONLY when it exactly matches the finite allowlist above (numeric
+ * codigo values are stringified first and get NO other special-casing —
+ * membership decides), falls back to the error `title` ONLY when it exactly
+ * matches the title allowlist of known generic labels, and finally to the
+ * HTTP status. The `detail`/`violacoes` fields are deliberately ignored —
+ * they can echo the chave or recipient name — and `codigo`/`title` are
+ * allowlist-gated because Inter can echo payer identifiers (CPF, e-mail,
+ * PIX key, names) in those fields too; see the CODIGO_ALLOWLIST comment for
+ * why pattern matching is forbidden here.
  */
 export function extractInterErrorCode(response: InterHttpResponse): string {
   const parsed = parseJson<InterErrorBody>(response.body);
@@ -316,7 +330,7 @@ export function extractInterErrorCode(response: InterHttpResponse): string {
         : typeof parsed.codigo === 'number'
           ? String(parsed.codigo)
           : null;
-    if (codigo !== null && (CODIGO_NUMERIC.test(codigo) || CODIGO_TOKEN.test(codigo))) {
+    if (codigo !== null && CODIGO_ALLOWLIST.has(codigo)) {
       return codigo;
     }
     if (
