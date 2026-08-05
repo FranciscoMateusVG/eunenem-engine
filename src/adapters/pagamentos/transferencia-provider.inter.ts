@@ -1,6 +1,14 @@
-import https from 'node:https';
 import { type Span, SpanStatusCode, trace } from '@opentelemetry/api';
 import { type MoneyCents, MoneyCentsSchema } from '../../domain/money.js';
+import {
+  extractInterErrorCode,
+  InterHttpClient,
+  type InterHttpConfig,
+  type InterHttpResponse,
+  type InterHttpTransport,
+  isSuccess,
+  parseJson,
+} from './inter-http.js';
 import {
   type BuscarPagamentosInput,
   type ConsultarPagamentoResult,
@@ -20,6 +28,12 @@ const tracer = trace.getTracer('frame');
  * over mTLS. Mirrors `transferencia-provider.fake.ts`: an OTel span per
  * method, business outcomes RETURN-TYPED, only infra faults throw.
  *
+ * The provider-agnostic HTTP plumbing (mTLS keep-alive agent, OAuth token
+ * cache, error-code extraction, transport seam) lives in `inter-http.ts`
+ * (aperture-imock, B1 of 2j2j1) and is shared with the PIX-in cobrança
+ * adapter under a SEPARATE credential set. Everything money-safety-shaped
+ * stays HERE — this file owns the classification policy.
+ *
  * MONEY-SAFETY is the whole point of this file. The FSM behind the port
  * treats a `TransferenciaTransitoriaError` as "no payment was created,
  * safe to auto-retry" and EVERY OTHER throw as "a payment MAY exist,
@@ -35,12 +49,6 @@ const tracer = trace.getTracer('frame');
  * error bodies are mined for a CODE/field-name only — the raw body may
  * contain the chave/name and is never echoed.
  */
-
-/** Milliseconds of headroom before token expiry at which we refresh. */
-const TOKEN_REFRESH_MARGIN_MS = 60_000;
-
-/** Per-request socket timeout. A timeout is ALWAYS ambiguous (post-send). */
-const REQUEST_TIMEOUT_MS = 30_000;
 
 /** Inter `descricao` hard limit (API rejects > 140 chars). */
 const DESCRICAO_MAX_LEN = 140;
@@ -60,46 +68,13 @@ const PRE_SEND_ERROR_CODES: ReadonlySet<string> = new Set([
   'ECONNREFUSED',
 ]);
 
-export interface InterProviderConfig {
-  /** e.g. prod `https://cdpj.partners.bancointer.com.br`. Never hardcoded. */
-  readonly baseUrl: string;
-  readonly clientId: string;
-  readonly clientSecret: string;
-  /** Space-separated OAuth scopes, e.g. `pagamento-pix.write extrato.read`. */
-  readonly scope: string;
-  /** Already-decoded client certificate PEM text (mTLS). */
-  readonly certPem: string;
-  /** Already-decoded private key PEM text (mTLS). */
-  readonly keyPem: string;
-  /** Optional Inter conta-corrente; sent as `x-conta-corrente` when set. */
-  readonly contaCorrente?: string;
-}
-
-export interface InterHttpResponse {
-  readonly statusCode: number;
-  readonly body: string;
-}
-
 /**
- * The mTLS transport seam. Production uses {@link TransferenciaProviderInter}'s
- * own `node:https` implementation; tests inject a scripted transport to
- * exercise the money-safety classification WITHOUT a live Inter or real TLS.
- * A transport MUST reject (throw) on a connection-level failure (so the caller
- * can classify pre-send vs ambiguous) and MUST resolve — never reject — on any
- * received HTTP status.
+ * The PIX-out credential/config shape — structurally the shared
+ * `InterHttpConfig`; the alias keeps this adapter's public API stable.
  */
-export type InterHttpTransport = (
-  method: 'GET' | 'POST',
-  path: string,
-  headers: Record<string, string>,
-  body?: string,
-) => Promise<InterHttpResponse>;
+export type InterProviderConfig = InterHttpConfig;
 
-interface InterTokenResponse {
-  readonly access_token: string;
-  readonly token_type: string;
-  readonly expires_in: number;
-}
+export type { InterHttpResponse, InterHttpTransport } from './inter-http.js';
 
 interface InterPagarPixResponse {
   readonly tipoRetorno?: string;
@@ -132,37 +107,15 @@ interface InterExtratoResponse {
   readonly totalPaginas?: number;
 }
 
-interface InterErrorBody {
-  readonly codigo?: unknown;
-  readonly title?: unknown;
-}
-
-type TokenCache = { readonly accessToken: string; readonly expiresAtMs: number };
-
 export class TransferenciaProviderInter implements TransferenciaProvider {
-  private readonly config: InterProviderConfig;
-
-  /** ONE mTLS agent, reused for every request (token + banking). */
-  private readonly agent: https.Agent;
-
-  /** In-memory OAuth token cache; refreshed within the safety margin. */
-  private tokenCache: TokenCache | null = null;
-
-  /** The transport actually used for every request (real mTLS or injected). */
-  private readonly transport: InterHttpTransport;
+  /**
+   * The shared Inter HTTP core: mTLS agent + OAuth token cache + transport,
+   * all PER-INSTANCE (this adapter's credential set only).
+   */
+  private readonly http: InterHttpClient;
 
   constructor(config: InterProviderConfig, transport?: InterHttpTransport) {
-    this.config = config;
-    // Default TLS verification MUST stay ON: no `rejectUnauthorized`, no
-    // custom `ca`, no `NODE_TLS_REJECT_UNAUTHORIZED`. We only present the
-    // client cert/key for mutual TLS.
-    this.agent = new https.Agent({
-      cert: config.certPem,
-      key: config.keyPem,
-      keepAlive: true,
-    });
-    // Injected transport (tests) or the real mTLS `node:https` sender.
-    this.transport = transport ?? this.sendOverMtls.bind(this);
+    this.http = new InterHttpClient(config, transport);
   }
 
   async pagarPix(input: PagarPixInput): Promise<PagarPixOutcome> {
@@ -195,10 +148,10 @@ export class TransferenciaProviderInter implements TransferenciaProvider {
         // The moment of truth: the payment request goes on the wire here.
         let response: InterHttpResponse;
         try {
-          response = await this.transport(
+          response = await this.http.request(
             'POST',
             '/banking/v2/pix',
-            this.jsonHeaders(token),
+            this.http.jsonHeaders(token),
             requestBody,
           );
         } catch (err: unknown) {
@@ -234,11 +187,11 @@ export class TransferenciaProviderInter implements TransferenciaProvider {
       async (span) => {
         span.setAttribute('transferencia.codigo_solicitacao', codigoSolicitacao);
         try {
-          const token = await this.getToken();
-          const response = await this.transport(
+          const token = await this.http.getToken();
+          const response = await this.http.request(
             'GET',
             `/banking/v2/pix/${encodeURIComponent(codigoSolicitacao)}`,
-            this.jsonHeaders(token),
+            this.http.jsonHeaders(token),
           );
           span.setAttribute('transferencia.http_status', response.statusCode);
 
@@ -273,7 +226,7 @@ export class TransferenciaProviderInter implements TransferenciaProvider {
       span.setAttribute('transferencia.data_inicio', input.dataInicio);
       span.setAttribute('transferencia.data_fim', input.dataFim);
       try {
-        const token = await this.getToken();
+        const token = await this.http.getToken();
         const transacoes = await this.fetchExtratoCompleto(input, token);
 
         const resultados: PagamentoEncontrado[] = [];
@@ -306,56 +259,13 @@ export class TransferenciaProviderInter implements TransferenciaProvider {
    */
   private async getTokenForPagar(span: Span): Promise<string> {
     try {
-      return await this.getToken();
+      return await this.http.getToken();
     } catch (err: unknown) {
       span.setAttribute('transferencia.token_falhou', true);
       throw new TransferenciaTransitoriaError('pagarPix: falha ao obter token (pré-envio)', {
         cause: err,
       });
     }
-  }
-
-  /** Returns a cached token when still fresh, else fetches and caches one. */
-  private async getToken(): Promise<string> {
-    const now = Date.now();
-    if (this.tokenCache !== null && this.tokenCache.expiresAtMs - TOKEN_REFRESH_MARGIN_MS > now) {
-      return this.tokenCache.accessToken;
-    }
-
-    const body = new URLSearchParams({
-      grant_type: 'client_credentials',
-      client_id: this.config.clientId,
-      client_secret: this.config.clientSecret,
-      scope: this.config.scope,
-    }).toString();
-
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Accept: 'application/json',
-    };
-    this.applyContaCorrente(headers);
-
-    const response = await this.transport('POST', '/oauth/v2/token', headers, body);
-    if (!isSuccess(response.statusCode)) {
-      // NO-PII: never echo the token error body (it echoes nothing sensitive
-      // here, but we keep to codes on principle).
-      throw new Error(`token: HTTP ${response.statusCode}`);
-    }
-
-    const parsed = parseJson<InterTokenResponse>(response.body);
-    if (parsed === null || typeof parsed.access_token !== 'string' || !parsed.access_token) {
-      throw new Error('token: resposta sem access_token');
-    }
-
-    const expiresInMs =
-      typeof parsed.expires_in === 'number' && parsed.expires_in > 0
-        ? parsed.expires_in * 1000
-        : TOKEN_REFRESH_MARGIN_MS;
-    this.tokenCache = {
-      accessToken: parsed.access_token,
-      expiresAtMs: Date.now() + expiresInMs,
-    };
-    return parsed.access_token;
   }
 
   /**
@@ -423,10 +333,10 @@ export class TransferenciaProviderInter implements TransferenciaProvider {
         tamanhoPagina: String(EXTRATO_PAGE_SIZE),
       }).toString();
 
-      const response = await this.transport(
+      const response = await this.http.request(
         'GET',
         `/banking/v2/extrato/completo?${query}`,
-        this.jsonHeaders(token),
+        this.http.jsonHeaders(token),
       );
       if (!isSuccess(response.statusCode)) {
         throw new Error(`buscarPagamentos: HTTP ${response.statusCode}`);
@@ -451,73 +361,9 @@ export class TransferenciaProviderInter implements TransferenciaProvider {
     }
     return transacoes;
   }
-
-  /** Builds a Promise around a single mTLS request. Never rejects on status. */
-  private sendOverMtls(
-    method: 'GET' | 'POST',
-    path: string,
-    headers: Record<string, string>,
-    body?: string,
-  ): Promise<InterHttpResponse> {
-    return new Promise<InterHttpResponse>((resolve, reject) => {
-      const url = new URL(path, this.config.baseUrl);
-      const options: https.RequestOptions = {
-        method,
-        hostname: url.hostname,
-        port: url.port === '' ? 443 : Number(url.port),
-        path: `${url.pathname}${url.search}`,
-        headers,
-        agent: this.agent,
-      };
-
-      const req = https.request(options, (res) => {
-        const chunks: Buffer[] = [];
-        res.on('data', (chunk: Buffer) => chunks.push(chunk));
-        res.on('end', () => {
-          resolve({
-            statusCode: res.statusCode ?? 0,
-            body: Buffer.concat(chunks).toString('utf8'),
-          });
-        });
-      });
-
-      req.setTimeout(REQUEST_TIMEOUT_MS, () => {
-        // A timeout is ambiguous by design: the request may already be
-        // sitting at Inter. We destroy with a NON-pre-send code so the
-        // caller classifies it as ambiguous, never as safe-to-retry.
-        req.destroy(Object.assign(new Error('inter request timeout'), { code: 'INTER_TIMEOUT' }));
-      });
-      req.on('error', (err: unknown) => reject(err));
-
-      if (body !== undefined) {
-        req.write(body);
-      }
-      req.end();
-    });
-  }
-
-  private jsonHeaders(token: string): Record<string, string> {
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    };
-    this.applyContaCorrente(headers);
-    return headers;
-  }
-
-  private applyContaCorrente(headers: Record<string, string>): void {
-    if (this.config.contaCorrente !== undefined && this.config.contaCorrente !== '') {
-      headers['x-conta-corrente'] = this.config.contaCorrente;
-    }
-  }
 }
 
 // --- module-level pure helpers ---------------------------------------------
-
-function isSuccess(statusCode: number): boolean {
-  return statusCode >= 200 && statusCode < 300;
-}
 
 /** valorCents (integer cents) → reais NUMBER with 2-decimal precision. */
 function centsToReais(valorCents: MoneyCents): number {
@@ -536,14 +382,6 @@ function reaisToCents(valor: string | number): number {
   // the row from search — a false zero-candidate (aperture-477nz / GLaDOS).
   const normalized = valor.includes(',') ? valor.replace(/\./g, '').replace(',', '.') : valor;
   return Math.round(Number(normalized) * 100);
-}
-
-function parseJson<T>(body: string): T | null {
-  try {
-    return JSON.parse(body) as T;
-  } catch {
-    return null;
-  }
 }
 
 /**
@@ -633,29 +471,6 @@ function mapConsultStatus(status: string | undefined): ConsultarPagamentoStatus 
       // PARCIALMENTE_*, EM_PROCESSAMENTO and any unknown value: keep polling.
       return 'em_processamento';
   }
-}
-
-/**
- * Extracts a NO-PII error code from an Inter error response. Prefers a
- * machine `codigo`, falls back to the short error `title` (a generic error
- * label, never the chave/name value), and finally to the HTTP status. The
- * `detail`/`violacoes` fields are deliberately ignored — they can echo the
- * chave or recipient name.
- */
-function extractInterErrorCode(response: InterHttpResponse): string {
-  const parsed = parseJson<InterErrorBody>(response.body);
-  if (parsed !== null) {
-    if (typeof parsed.codigo === 'string' && parsed.codigo !== '') {
-      return parsed.codigo;
-    }
-    if (typeof parsed.codigo === 'number') {
-      return String(parsed.codigo);
-    }
-    if (typeof parsed.title === 'string' && parsed.title !== '') {
-      return parsed.title;
-    }
-  }
-  return `HTTP_${response.statusCode}`;
 }
 
 /**
