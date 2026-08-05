@@ -21,6 +21,7 @@ import { installBlockedAuthHandlerGuard } from './server/blocked-auth-handler.js
 import { createLegacyBridgeHandler } from './server/legacy-bridge.js';
 import { appRouter } from './server/trpc/router.js';
 import { createStripeWebhookHandler } from './server/webhooks/stripe-webhook.js';
+import { mountInterPixWebhookRoutes } from './server/webhooks/inter-pix-webhook.js';
 
 const PORT = Number(process.env.PORT ?? 3001);
 
@@ -162,6 +163,12 @@ app.all('/api/trpc/*', (c) =>
 // server/webhooks/stripe-webhook.ts for the full security rationale +
 // the local `stripe listen` dev workflow.
 app.post('/api/webhooks/stripe', createStripeWebhookHandler(deps));
+
+// Banco Inter Pix webhook (aperture-711fd / B3 of 2j2j1). Inter does not
+// sign callback payloads, so the mounted handler treats them only as routing
+// hints and re-queries the authoritative cobrança API before changing state.
+// Mount both the registered base URL and Inter's delivery-time `/pix` suffix.
+mountInterPixWebhookRoutes(app, deps);
 
 // Legacy bridge (aperture-as0v3) — authed silent login handoff into the 1.0
 // system. The /campanhas 1.0 card hits this; it mints a single-use Clerk
@@ -377,6 +384,10 @@ serve({ fetch: app.fetch, port: PORT }, (info) => {
   console.log('  /api/trpc/*        → tRPC procedures (listFruits, auth.*)');
   console.log('  /api/auth/*        → BetterAuth handler (sign-in/sign-up/sign-out/...)');
   console.log('  /api/webhooks/stripe → Stripe webhook (sig-verified; aperture-24n36)');
+  console.log('  /api/webhooks/inter/pix → Inter Pix webhook (verify-by-requery; aperture-711fd)');
+  console.log(
+    '  /api/webhooks/inter/pix/pix → Inter Pix delivery suffix (verify-by-requery; aperture-711fd)',
+  );
   console.log('  /healthz           → plain text health check');
   console.log('');
 });
