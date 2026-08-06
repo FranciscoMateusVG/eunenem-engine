@@ -444,10 +444,40 @@ describe('eunenem-server PIX cobrança rail DI gate (aperture-18j3j)', () => {
     });
   });
 
-  it("binds PixCobrancaProviderFake when COBRANCA_PIX_PROVIDER='fake'", () => {
-    const deps = buildServerDeps(loadEnv({ ...baseEnv(), COBRANCA_PIX_PROVIDER: 'fake' }));
+  it("binds a worker-eligible PixCobrancaProviderFake when COBRANCA_PIX_PROVIDER='fake'", async () => {
+    const deps = buildServerDeps(
+      loadEnv({
+        ...baseEnv(),
+        COBRANCA_PIX_PROVIDER: 'fake',
+        EUNENEM_FAKE_E2E_MAGIC: 'true',
+      }),
+    );
     try {
       expect(deps.pixCobrancaProvider).toBeInstanceOf(PixCobrancaProviderFake);
+      const firstPaymentId = '00000000-0000-4000-8000-000000000123';
+      const secondPaymentId = 'f0000000-0000-4000-8000-000000000123';
+      const first = await deps.pixCobrancaProvider.criarCobranca({
+        idPagamento: firstPaymentId,
+        idIntencaoPagamento: '10000000-0000-4000-8000-000000000123',
+        amountCents: 1337,
+      });
+      const second = await deps.pixCobrancaProvider.criarCobranca({
+        idPagamento: secondPaymentId,
+        idIntencaoPagamento: '20000000-0000-4000-8000-000000000123',
+        amountCents: 1337,
+      });
+      expect(first.txid).toBe(firstPaymentId.replaceAll('-', ''));
+      expect(second.txid).toBe(secondPaymentId.replaceAll('-', ''));
+      expect(first.txid).not.toBe(second.txid);
+
+      await expect(deps.pixCobrancaProvider.consultarCobranca(first.txid)).resolves.toMatchObject({
+        status: 'concluida',
+        e2eId: first.txid,
+      });
+      await expect(deps.pixCobrancaProvider.consultarCobranca(second.txid)).resolves.toMatchObject({
+        status: 'concluida',
+        e2eId: second.txid,
+      });
     } finally {
       void deps.db.destroy();
     }
