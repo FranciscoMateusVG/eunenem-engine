@@ -207,6 +207,12 @@ export const IniciarPagamentoContribuicaoOutputSchema = z.discriminatedUnion('ti
     txid: z.string(),
     pixCopiaECola: z.string(),
     expiraEm: z.string(),
+    /**
+     * aperture-irhxi (blocker 3): the AUTHORITATIVE charged amount
+     * (contribution + platform fee). The QR screen renders this — the
+     * raw gift/cart price understates what the visitor actually pays.
+     */
+    valorCents: z.number().int().nonnegative(),
   }),
 ]);
 
@@ -539,6 +545,7 @@ export const paginaRouter = t.router({
             txid: result.txid,
             pixCopiaECola: result.pixCopiaECola,
             expiraEm: result.expiraEm.toISOString(),
+            valorCents: result.valorCents,
           };
         }
         return {
@@ -650,6 +657,7 @@ export const paginaRouter = t.router({
             txid: result.txid,
             pixCopiaECola: result.pixCopiaECola,
             expiraEm: result.expiraEm.toISOString(),
+            valorCents: result.valorCents,
           };
         }
         return {

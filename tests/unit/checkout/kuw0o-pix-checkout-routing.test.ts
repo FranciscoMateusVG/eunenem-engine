@@ -159,6 +159,10 @@ describe('iniciarPagamentoCarrinho — PIX-cobrança routing (aperture-kuw0o)', 
     expect(result.txid).not.toBe('');
     expect(result.pixCopiaECola).not.toBe('');
     expect(result.expiraEm).toBeInstanceOf(Date);
+    // aperture-irhxi blocker 3: the response carries the AUTHORITATIVE
+    // charged amount — contribution + platform fee — for the QR screen to
+    // render. It must equal what was actually persisted as the charge.
+    expect(result.valorCents).toBeGreaterThan(0);
 
     const persisted = await deps.pagamentoRepository.findById(result.pagamento.id);
     expect(persisted).toBeDefined();
@@ -167,6 +171,9 @@ describe('iniciarPagamentoCarrinho — PIX-cobrança routing (aperture-kuw0o)', 
     // B4 contract (aperture-fpd0j): the provider's AUTHORITATIVE expiry is
     // persisted at creation — the reconciliation poller selects on it.
     expect(persisted?.intencao.expiraEm).toEqual(result.expiraEm);
+    // aperture-irhxi blocker 3: displayed == charged == persisted. The
+    // response's valorCents IS the persisted aggregate totalPaidCents.
+    expect(result.valorCents).toBe(persisted?.intencao.composicaoValoresAggregate.totalPaidCents);
 
     expect(sessaoSpy).not.toHaveBeenCalled();
   });

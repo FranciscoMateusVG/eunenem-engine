@@ -74,6 +74,10 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
   // aperture-kuw0o: boot-time flag — PIX via our QR flow vs Stripe iframe.
   const configCheckout = useObterConfigCheckout();
   const pixViaQr = configCheckout.data?.pixViaQr ?? false;
+  // aperture-irhxi blocker 1: fail closed while resolving; a config error
+  // blocks only the PIX path (cartão never depends on the flag).
+  const configLoading = configCheckout.isLoading;
+  const configError = configCheckout.isError;
   const [pixContribuinte, setPixContribuinte] = useState<ContribuinteInput | null>(null);
 
   // aperture-kuw0o: the mutation result is a discriminated union now.
@@ -166,6 +170,12 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
     if (cart.state.lines.length === 0 || iniciar.isPending) return;
     const itens = toSagaInput(cart.state.lines);
     if (itens.length === 0) return;
+    // aperture-irhxi blocker 1: fail closed until the config is KNOWN —
+    // a presumed-Stripe fast-click against an Inter/fake backend lands a
+    // pix_qr response in a Stripe-shaped phase (blank checkout). The CTA
+    // is also disabled below; this is the belt to that suspender.
+    if (configLoading) return;
+    if (metodo === "pix" && configError) return;
     setCheckoutSnapshot({
       lines: cart.state.lines.slice(),
       totalUnits: cart.totalUnits,
@@ -177,7 +187,7 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
       return;
     }
     try {
-      await iniciar.mutateAsync({
+      const result = await iniciar.mutateAsync({
         slug,
         itens: itens.map((item) => ({
           idContribuicao: item.idContribuicao,
@@ -190,7 +200,13 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
         quantidade_itens: cart.totalUnits,
         metodo,
       });
-      setPhase({ kind: "checkout", step: "stripe" });
+      // aperture-irhxi blocker 1 (defensive): the RESPONSE decides the
+      // screen — a pix_qr answer renders the QR flow even when the flag
+      // was presumed Stripe.
+      setPhase({
+        kind: "checkout",
+        step: result.tipo === "pix_qr" ? "pix_qr" : "stripe",
+      });
     } catch {
       // Error surfaces via iniciar.isError on the summary panel.
       // Stay on summary; reset snapshot so the visitor can edit + retry.
@@ -222,7 +238,7 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
         totalCents: cart.totalPixCents,
       });
       try {
-        await iniciar.mutateAsync({
+        const result = await iniciar.mutateAsync({
           slug,
           itens: itens.map((item) => ({
             idContribuicao: item.idContribuicao,
@@ -236,7 +252,11 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
           quantidade_itens: cart.totalUnits,
           metodo: "pix",
         });
-        setPhase({ kind: "checkout", step: "pix_qr" });
+        // Response-driven (aperture-irhxi blocker 1).
+        setPhase({
+          kind: "checkout",
+          step: result.tipo === "pix_qr" ? "pix_qr" : "stripe",
+        });
       } catch {
         // isError surfaces inline on the identity form; visitor retries there.
       }
@@ -351,6 +371,10 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
             isPending={iniciar.isPending}
             isError={iniciar.isError}
             errorMessage={iniciar.error?.message}
+            configLoading={configLoading}
+            configError={configError}
+            onRetryConfig={() => void configCheckout.refetch()}
+            pixViaQr={pixViaQr}
           />
         )}
 
@@ -372,7 +396,6 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
             <PixQrPanel
               slug={slug}
               pix={pixData}
-              valorCents={checkoutSnapshot?.totalCents ?? cart.totalPixCents}
               onConfirmed={onPixConfirmed}
               onRetry={onPixRetry}
             />
@@ -494,6 +517,10 @@ function SummaryStep({
   isPending,
   isError,
   errorMessage,
+  configLoading,
+  configError,
+  onRetryConfig,
+  pixViaQr,
 }: {
   metodo: MetodoPagamento;
   setMetodo: (m: MetodoPagamento) => void;
@@ -501,6 +528,13 @@ function SummaryStep({
   isPending: boolean;
   isError: boolean;
   errorMessage?: string;
+  /** aperture-irhxi blocker 1: config still resolving — CTA fails closed. */
+  configLoading: boolean;
+  /** Config failed — PIX blocked (with retry); cartão unaffected. */
+  configError: boolean;
+  onRetryConfig: () => void;
+  /** aperture-irhxi blocker 2: processor copy must match the real rail. */
+  pixViaQr: boolean;
 }) {
   const cart = useCart();
   const totalCents = metodo === "pix" ? cart.totalPixCents : cart.totalCartaoCents;
@@ -585,19 +619,65 @@ function SummaryStep({
           </p>
         )}
 
+        {configError && metodo === "pix" && (
+          <div
+            role="alert"
+            style={{
+              background: "var(--pink-soft)",
+              color: "var(--plum)",
+              padding: "10px 12px",
+              borderRadius: 12,
+              marginBottom: 10,
+              fontSize: 13,
+              lineHeight: 1.4,
+            }}
+          >
+            não conseguimos preparar o checkout pix agora —{" "}
+            <button
+              type="button"
+              onClick={onRetryConfig}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "var(--plum)",
+                textDecoration: "underline",
+                cursor: "pointer",
+                font: "inherit",
+                padding: 0,
+              }}
+            >
+              tentar de novo
+            </button>{" "}
+            ♡
+          </div>
+        )}
         <button
           type="button"
           onClick={onFinalizar}
-          disabled={isPending || cart.state.lines.length === 0}
+          // aperture-irhxi blocker 1: fail closed while the checkout config
+          // resolves; PIX stays blocked on a config error (retry above).
+          disabled={
+            isPending ||
+            cart.state.lines.length === 0 ||
+            configLoading ||
+            (configError && metodo === "pix")
+          }
           className="btn-lilac"
           style={{
             width: "100%",
             justifyContent: "center",
-            opacity: isPending ? 0.7 : 1,
+            opacity:
+              isPending || configLoading || (configError && metodo === "pix")
+                ? 0.7
+                : 1,
             cursor: isPending ? "wait" : "pointer",
           }}
         >
-          {isPending ? "preparando..." : `Finalizar compra • ${formatBRL(totalCents)}`}
+          {isPending
+            ? "preparando..."
+            : configLoading
+              ? "preparando checkout..."
+              : `Finalizar compra • ${formatBRL(totalCents)}`}
         </button>
         <p
           style={{
@@ -609,8 +689,11 @@ function SummaryStep({
             lineHeight: 1.4,
           }}
         >
-          Pagamento seguro pelo Stripe ♡ Você completa nome + email + recadinho no
-          próximo passo.
+          {/* aperture-irhxi blocker 2: the processor line must tell the
+              truth for the rail this click actually takes. */}
+          {metodo === "pix" && pixViaQr
+            ? "Pagamento PIX seguro pelo Banco Inter ♡ Você completa nome + email + recadinho no próximo passo."
+            : "Pagamento seguro pelo Stripe ♡ Você completa nome + email + recadinho no próximo passo."}
         </p>
       </footer>
     </>

@@ -259,8 +259,13 @@ export function PixIdentityForm({
 
 interface PixQrPanelProps {
   slug: string;
+  /**
+   * The initiation response — including `valorCents`, the AUTHORITATIVE
+   * charged amount (aperture-irhxi blocker 3). The panel renders THAT,
+   * never a caller-supplied price: the number next to a scannable code
+   * must be the number the bank will confirm.
+   */
   pix: PixQrData;
-  valorCents: number;
   /** Fired ONCE when the poll reports 'confirmado'. */
   onConfirmed: () => void;
   /** Charge expired or rejected — caller sends the visitor back to retry. */
@@ -274,13 +279,7 @@ function formatCountdown(msLeft: number): string {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-export function PixQrPanel({
-  slug,
-  pix,
-  valorCents,
-  onConfirmed,
-  onRetry,
-}: PixQrPanelProps) {
+export function PixQrPanel({ slug, pix, onConfirmed, onRetry }: PixQrPanelProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [copied, setCopied] = useState(false);
   const [msLeft, setMsLeft] = useState<number>(() =>
@@ -401,7 +400,7 @@ export function PixQrPanel({
           fontWeight: 400,
         }}
       >
-        paga com pix — {formatBRL(valorCents)}
+        paga com pix — {formatBRL(pix.valorCents)}
       </h3>
       <p
         style={{

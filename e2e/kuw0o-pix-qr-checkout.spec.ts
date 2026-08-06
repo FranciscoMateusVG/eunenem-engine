@@ -94,6 +94,7 @@ async function openModalAndPickPix(
   origin: string,
   slug: string,
   giftName: string,
+  opts: { clickContinuar?: boolean } = {},
 ) {
   // Arm BEFORE goto: obterConfigCheckout fires on page load (CartDrawer
   // mounts the hook) or at modal mount — either way it resolves before the
@@ -125,7 +126,9 @@ async function openModalAndPickPix(
   await expect(pixRadio).toHaveAttribute('aria-checked', 'true');
 
   await configPromise;
-  await modal.getByRole('button', { name: 'Continuar →' }).click();
+  if (opts.clickContinuar !== false) {
+    await modal.getByRole('button', { name: 'Continuar →' }).click();
+  }
   return modal;
 }
 
@@ -245,6 +248,150 @@ test.describe('kuw0o — PIX checkout routing (:3004, fake cobrança provider)',
   });
 });
 
+test.describe('kuw0o — irhxi QA regressions (:3004, fake cobrança provider)', () => {
+  test('BLOCKER 1: unresolved/failed config fails CLOSED — PIX blocked with retry, never a silent Stripe default', async ({
+    page,
+    seededData,
+  }) => {
+    const gift = await seedMagicGift(seededData, 4200);
+
+    // obterConfigCheckout rides a 4-procedure tRPC batch (auth.me + lista
+    // + mural + config — one URL), so a naive route-hold starves the whole
+    // page. Instead: forward the batch upstream and rewrite ONLY the
+    // config entry to a tRPC error. Deterministic: the config query FAILS
+    // (configError leg — the same `disabled` expression also covers the
+    // transient isLoading leg), lista/mural render normally.
+    let sabotageConfig = true;
+    await page.route(/\/api\/trpc\/[^?]*obterConfigCheckout/, async (route) => {
+      if (!sabotageConfig) {
+        await route.continue();
+        return;
+      }
+      const upstream = await route.fetch();
+      const procedures = (
+        new URL(route.request().url()).pathname.split('/api/trpc/')[1] ?? ''
+      ).split(',');
+      const configIndex = procedures.findIndex((p) => p.includes('obterConfigCheckout'));
+      const json = (await upstream.json()) as unknown[];
+      json[configIndex] = {
+        error: {
+          message: 'sabotaged by e2e',
+          code: -32603,
+          data: { code: 'INTERNAL_SERVER_ERROR', httpStatus: 500 },
+        },
+      };
+      await route.fulfill({ response: upstream, json });
+    });
+
+    const modal = await openModalAndPickPix(page, PIX_SERVER, seededData.slug, gift.nome, {
+      clickContinuar: false,
+    });
+
+    // PIX selected + config errored: CTA blocked, error surfaced with a
+    // retry — NOT a silent fall-through to the Stripe branch.
+    await expect(modal.getByText(/não conseguimos preparar o checkout pix/)).toBeVisible();
+    await expect(modal.getByRole('button', { name: 'Continuar →' })).toBeDisabled();
+
+    // Retry with the sabotage lifted → config lands → the flow proceeds
+    // to OUR identity form; never a blank Stripe-shaped phase.
+    sabotageConfig = false;
+    await modal.getByRole('button', { name: 'tentar de novo' }).click();
+    await expect(modal.getByRole('button', { name: 'Continuar →' })).toBeEnabled({
+      timeout: 10_000,
+    });
+    await modal.getByRole('button', { name: 'Continuar →' }).click();
+    await expect(modal.getByRole('heading', { name: 'de quem vem esse carinho?' })).toBeVisible();
+    await expect(modal.locator('iframe')).toHaveCount(0);
+  });
+
+  test('BLOCKER 2: processor copy tells the truth on the Inter rail (modal + drawer)', async ({
+    page,
+    seededData,
+  }) => {
+    const gift = await seedMagicGift(seededData, 4200);
+    const modal = await openModalAndPickPix(page, PIX_SERVER, seededData.slug, gift.nome);
+
+    // Modal metodo step, PIX selected on the Inter/fake rail: Banco Inter
+    // copy present, the Stripe-processor line absent.
+    await expect(modal.getByRole('heading', { name: 'de quem vem esse carinho?' })).toBeVisible();
+    // (copy is asserted on the metodo step — reopen it via voltar)
+    await modal.getByRole('button', { name: 'voltar' }).click();
+    await expect(modal.getByText(/Pagamento via PIX pelo Banco Inter/)).toBeVisible();
+    await expect(modal.getByText(/Pagamento processado pelo Stripe/)).toHaveCount(0);
+
+    // Drawer footer, same rail: Banco Inter copy, no Stripe claim. The
+    // helper already added the gift to the cart — reopen the drawer via
+    // the floating cart trigger (the card now shows the qty stepper).
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: /Abrir carrinho/ }).click();
+    const drawer = page.locator('[role="dialog"][aria-labelledby="cart-drawer-title"]');
+    await expect(drawer.getByText(/Pagamento PIX seguro pelo Banco Inter/)).toBeVisible();
+    await expect(drawer.getByText(/Pagamento seguro pelo Stripe/)).toHaveCount(0);
+  });
+
+  test('BLOCKER 3 (single + cart): displayed amount == charged == persisted', async ({
+    page,
+    seededData,
+  }) => {
+    // 4200-cent gift → charge = 4200 + ceil(5%) = 4410. The QR screen must
+    // show the CHARGED amount from the pix_qr response — bound here against
+    // the wire value AND the persisted aggregate, with zero client-side
+    // fee arithmetic.
+    const gift = await seedMagicGift(seededData, 4200);
+    const modal = await openModalAndPickPix(page, PIX_SERVER, seededData.slug, gift.nome);
+
+    await modal.getByPlaceholder('Ana & João').fill('E2e Visitante Pix');
+    await modal.getByPlaceholder('ana@email.com').fill('e2e-pix-visitor@e2e.local');
+    const initiationPromise = page.waitForResponse(
+      (res) =>
+        res.url().includes('iniciarPagamentoContribuicao') && res.request().method() === 'POST',
+    );
+    await modal.getByRole('button', { name: 'continuar para o pix ♡' }).click();
+    const initiation = await initiationPromise;
+    const body = JSON.parse(await initiation.text()) as Array<{
+      result?: { data?: { valorCents?: number; txid?: string } };
+    }>;
+    const wire = body[0]?.result?.data;
+    expect(wire?.valorCents, 'pix_qr response must carry the charged amount').toBe(4410);
+
+    // Displayed: the QR heading renders the wire amount (R$ 44,10).
+    await expect(modal.getByRole('heading', { name: /paga com pix — R\$\s*44,10/ })).toBeVisible();
+
+    // Persisted: the charge row's aggregate equals the wire amount.
+    const db = createDatabase(DATABASE_URL);
+    try {
+      const row = await db
+        .selectFrom('pagamentos')
+        .select(['intencao_total_paid_cents'])
+        .where('intencao_external_ref', '=', wire?.txid ?? '')
+        .executeTakeFirst();
+      expect(Number(row?.intencao_total_paid_cents)).toBe(4410);
+    } finally {
+      await db.destroy();
+    }
+
+    // CART path: same binding through the drawer flow.
+    await page.goto(`${PIX_SERVER}/pagina/${seededData.slug}`);
+    const card = page.locator('article').filter({ hasText: gift.nome });
+    await card.getByRole('button', { name: /\+ Adicionar/i }).click();
+    const drawer = page.locator('[role="dialog"][aria-labelledby="cart-drawer-title"]');
+    await expect(drawer.getByRole('button', { name: /Finalizar compra/ })).toBeEnabled();
+    await drawer.getByRole('button', { name: /Finalizar compra/ }).click();
+    await expect(drawer.getByRole('heading', { name: 'de quem vem esse carinho?' })).toBeVisible();
+    await drawer.getByPlaceholder('Ana & João').fill('E2e Carrinho Pix');
+    await drawer.getByPlaceholder('ana@email.com').fill('e2e-pix-cart@e2e.local');
+    const cartInitiation = page.waitForResponse(
+      (res) => res.url().includes('iniciarPagamentoCarrinho') && res.request().method() === 'POST',
+    );
+    await drawer.getByRole('button', { name: 'continuar para o pix ♡' }).click();
+    const cartBody = JSON.parse(await (await cartInitiation).text()) as Array<{
+      result?: { data?: { valorCents?: number } };
+    }>;
+    expect(cartBody[0]?.result?.data?.valorCents).toBe(4410);
+    await expect(drawer.getByRole('heading', { name: /paga com pix — R\$\s*44,10/ })).toBeVisible();
+  });
+});
+
 test.describe('kuw0o — flag gate (:3002, default stripe provider)', () => {
   test('with COBRANCA_PIX_PROVIDER unset, the PIX pick does NOT show our identity form', async ({
     page,
@@ -275,5 +422,19 @@ test.describe('kuw0o — flag gate (:3002, default stripe provider)', () => {
     // identity form never rendered.
     await expect(modal.getByRole('button', { name: 'Continuar →' })).toBeHidden();
     await expect(modal.getByRole('heading', { name: 'de quem vem esse carinho?' })).toHaveCount(0);
+  });
+
+  test('BLOCKER 2 negative: Stripe processor copy stays on the default rail', async ({
+    page,
+    seededData,
+  }) => {
+    const configPromise = page.waitForResponse((res) => res.url().includes('obterConfigCheckout'));
+    await page.goto(`http://localhost:3002/pagina/${seededData.slug}`);
+    const card = page.locator('article').filter({ hasText: seededData.nomeContribuicao });
+    await card.getByRole('button', { name: /\+ Adicionar/i }).click();
+    const drawer = page.locator('[role="dialog"][aria-labelledby="cart-drawer-title"]');
+    await configPromise;
+    await expect(drawer.getByText(/Pagamento seguro pelo Stripe/)).toBeVisible();
+    await expect(drawer.getByText(/Banco Inter/)).toHaveCount(0);
   });
 });

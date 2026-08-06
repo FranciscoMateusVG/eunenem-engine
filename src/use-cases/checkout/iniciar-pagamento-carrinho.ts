@@ -104,6 +104,14 @@ export type IniciarPagamentoCarrinhoResult = {
       readonly txid: string;
       readonly pixCopiaECola: string;
       readonly expiraEm: Date;
+      /**
+       * aperture-irhxi (Izzy QA blocker 3 — money display): the
+       * AUTHORITATIVE charged amount (aggregate totalPaidCents =
+       * contribution + platform fee). The QR screen renders THIS — never
+       * the raw gift price. On the Stripe path the iframe shows Stripe's
+       * own total; our QR flow owes the visitor the same honesty.
+       */
+      readonly valorCents: number;
     }
 );
 
@@ -408,6 +416,7 @@ export async function iniciarPagamentoCarrinho(
             txid: cobranca.txid,
             pixCopiaECola: cobranca.pixCopiaECola,
             expiraEm: cobranca.expiraEm,
+            valorCents: aggregate.totalPaidCents as unknown as number,
           };
         }
 
