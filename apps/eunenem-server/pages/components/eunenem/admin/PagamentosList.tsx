@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { EstornoBlock } from "@/components/eunenem/admin/EstornoBlock";
 import JsonViewer from "@/components/eunenem/admin/JsonViewer";
 import LancamentosBlock, {
   type LancamentoRow,
@@ -531,6 +532,10 @@ export function PagamentoCard({
         pagamentoStatus={pagamento.status}
         lancamentos={pagamento.lancamentos}
       />
+      {/* aperture-4uvgf — admin refund action + status (renders only for
+          aprovado/estornado pagamentos; both provenances). Sits after the
+          Financeiro block: money data first, money ACTION under it. */}
+      <EstornoBlock pagamento={pagamento} />
       <ExpandToggle expanded={expanded} onToggle={() => setExpanded((v) => !v)} />
       {expanded && (
         <div className="space-y-3 border-t border-line pt-4">
