@@ -115,6 +115,7 @@ export function createInterPixWebhookHandler(
             const pagamentoId =
               await deps.pagamentoRepository.claimPixCobrancaProviderReadByTxid({
                 txid: identity.txid,
+                e2eId: identity.e2eId,
                 now,
                 leaseUntil: new Date(now.getTime() + INTER_PIX_WEBHOOK_PROVIDER_READ_LEASE_MS),
               });

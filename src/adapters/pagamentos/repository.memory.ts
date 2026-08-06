@@ -119,11 +119,20 @@ export class PagamentoRepositoryMemory implements PagamentoRepository {
           const lease = pagamento
             ? this.pixReconciliacaoClaimedUntilByIdPagamento.get(pagamento.id)
             : undefined;
+          const persistedTransaction = pagamento?.transacaoExterna;
+          const awaitingSettlement =
+            pagamento?.status === 'pendente' || pagamento?.status === 'processing';
+          const exactApprovedReplay =
+            pagamento?.status === 'aprovado' &&
+            pagamento.intencao.e2eExternalRef === input.e2eId &&
+            persistedTransaction?.provedor === 'inter' &&
+            persistedTransaction.id === input.e2eId &&
+            persistedTransaction.status === 'aprovado';
           const eligible =
             pagamento !== undefined &&
             pagamento.intencao.externalRef === pagamento.id.replaceAll('-', '') &&
             pagamento.intencao.metodo === 'pix' &&
-            (pagamento.status === 'pendente' || pagamento.status === 'processing') &&
+            (awaitingSettlement || exactApprovedReplay) &&
             (lease === undefined || lease.getTime() <= input.now.getTime());
 
           if (!eligible || pagamento === undefined) {

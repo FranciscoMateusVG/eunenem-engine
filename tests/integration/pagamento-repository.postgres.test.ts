@@ -221,6 +221,7 @@ describe('PagamentoRepositoryPostgres — Postgres-specific', () => {
     const secondWorker = new PagamentoRepositoryPostgres(testDb.db);
     const input = {
       txid,
+      e2eId: 'E'.repeat(32),
       now: new Date('2026-08-05T12:00:00.000Z'),
       leaseUntil: new Date('2026-08-05T12:01:00.000Z'),
     };

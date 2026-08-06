@@ -8,8 +8,10 @@ info:
     strict, PII-free identifier projection. A charge is re-queried through
     Banco Inter's authoritative read API only after its txid is atomically
     bound to an eligible local Inter payment and a durable provider-read lease
-    is acquired; unknown, ineligible, or already-leased txids never cause
-    provider I/O.
+    is acquired. Pending/processing payments are eligible; approved payments
+    are eligible only for an exact replay whose endToEndId matches the stored
+    authoritative Inter transaction identity. Unknown, mismatched, ineligible,
+    or already-leased txids never cause provider I/O.
 servers:
   - url: https://eunenem.pocketsoftware.com.br
 paths:

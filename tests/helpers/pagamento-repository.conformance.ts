@@ -185,12 +185,18 @@ export function describePagamentoRepositoryConformance(name: string, options: Co
       );
 
       await expect(
-        repo.claimPixCobrancaProviderReadByTxid({ txid, now, leaseUntil: submittedLeaseUntil }),
+        repo.claimPixCobrancaProviderReadByTxid({
+          txid,
+          e2eId: 'E'.repeat(32),
+          now,
+          leaseUntil: submittedLeaseUntil,
+        }),
       ).resolves.toBe(id);
       submittedLeaseUntil.setTime(now.getTime());
       await expect(
         repo.claimPixCobrancaProviderReadByTxid({
           txid,
+          e2eId: 'E'.repeat(32),
           now: new Date('2026-05-01T13:00:59.999Z'),
           leaseUntil: new Date('2026-05-01T13:02:00.000Z'),
         }),
@@ -198,7 +204,66 @@ export function describePagamentoRepositoryConformance(name: string, options: Co
       await expect(
         repo.claimPixCobrancaProviderReadByTxid({
           txid,
+          e2eId: 'E'.repeat(32),
           now: leaseUntil,
+          leaseUntil: new Date('2026-05-01T13:02:00.000Z'),
+        }),
+      ).resolves.toBe(id);
+    });
+
+    it('reclaims an approved Inter payment only for its exact persisted e2e identity', async () => {
+      const id = '00000000-0000-4000-8000-000000000027' as IdPagamento;
+      const txid = id.replaceAll('-', '');
+      const e2eId = 'E'.repeat(32);
+      const mismatchedE2eId = 'F'.repeat(32);
+      const now = new Date('2026-05-01T13:00:00.000Z');
+      const approved = makePagamento({
+        id,
+        externalRef: txid,
+        e2eExternalRef: e2eId,
+        status: 'aprovado',
+        expiraEm: new Date('2026-05-01T12:00:00.000Z'),
+      });
+      await repo.save({
+        ...approved,
+        transacaoExterna: {
+          id: e2eId,
+          provedor: 'inter',
+          status: 'aprovado',
+          amountCents: approved.intencao.composicaoValoresAggregate.totalPaidCents,
+          criadaEm: new Date('2026-05-01T12:30:00.000Z'),
+        },
+      });
+
+      await expect(
+        repo.claimPixCobrancaProviderReadByTxid({
+          txid,
+          e2eId: mismatchedE2eId,
+          now,
+          leaseUntil: new Date('2026-05-01T13:01:00.000Z'),
+        }),
+      ).resolves.toBeUndefined();
+      await expect(
+        repo.claimPixCobrancaProviderReadByTxid({
+          txid,
+          e2eId,
+          now,
+          leaseUntil: new Date('2026-05-01T13:01:00.000Z'),
+        }),
+      ).resolves.toBe(id);
+      await expect(
+        repo.claimPixCobrancaProviderReadByTxid({
+          txid,
+          e2eId,
+          now: new Date('2026-05-01T13:00:59.999Z'),
+          leaseUntil: new Date('2026-05-01T13:02:00.000Z'),
+        }),
+      ).resolves.toBeUndefined();
+      await expect(
+        repo.claimPixCobrancaProviderReadByTxid({
+          txid,
+          e2eId,
+          now: new Date('2026-05-01T13:01:00.000Z'),
           leaseUntil: new Date('2026-05-01T13:02:00.000Z'),
         }),
       ).resolves.toBe(id);
@@ -250,6 +315,7 @@ export function describePagamentoRepositoryConformance(name: string, options: Co
       await expect(
         repo.claimPixCobrancaProviderReadByTxid({
           txid: webhookTxid,
+          e2eId: 'E'.repeat(32),
           now,
           leaseUntil: webhookLeaseUntil,
         }),
@@ -264,6 +330,7 @@ export function describePagamentoRepositoryConformance(name: string, options: Co
       await expect(
         repo.claimPixCobrancaProviderReadByTxid({
           txid: b4FirstId.replaceAll('-', ''),
+          e2eId: 'E'.repeat(32),
           now,
           leaseUntil: webhookLeaseUntil,
         }),
@@ -283,7 +350,12 @@ export function describePagamentoRepositoryConformance(name: string, options: Co
         terminalId.replaceAll('-', ''),
       ]) {
         await expect(
-          repo.claimPixCobrancaProviderReadByTxid({ txid, now, leaseUntil: webhookLeaseUntil }),
+          repo.claimPixCobrancaProviderReadByTxid({
+            txid,
+            e2eId: 'E'.repeat(32),
+            now,
+            leaseUntil: webhookLeaseUntil,
+          }),
         ).resolves.toBeUndefined();
       }
     });

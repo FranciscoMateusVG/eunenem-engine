@@ -256,7 +256,16 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
           WHERE p.intencao_external_ref = ${input.txid}
             AND p.intencao_external_ref = replace(p.id::text, '-', '')
             AND p.intencao_metodo = 'pix'
-            AND p.status IN ('pendente', 'processing')
+            AND (
+              p.status IN ('pendente', 'processing')
+              OR (
+                p.status = 'aprovado'
+                AND p.intencao_e2e_external_ref = ${input.e2eId}
+                AND p.transacao_externa ->> 'provedor' = 'inter'
+                AND p.transacao_externa ->> 'id' = ${input.e2eId}
+                AND p.transacao_externa ->> 'status' = 'aprovado'
+              )
+            )
             AND (
               p.pix_reconciliacao_claimed_until IS NULL
               OR p.pix_reconciliacao_claimed_until <= ${input.now}
