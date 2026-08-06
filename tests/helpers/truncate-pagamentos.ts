@@ -3,13 +3,14 @@ import type { Database } from '../../src/adapters/database.js';
 /**
  * Trunca a tabela `pagamentos` para testes de conformance.
  *
- * Não há FKs apontando para `pagamentos` no schema atual — por design, as
- * referências cross-BC (lancamentos_financeiros.id_pagamento +
- * payment_webhook_events.pagamento_id) são UUIDs sem enforcement
- * relacional, para manter os BCs frouxamente acoplados (ver migrations
- * 20260531_012_create_financeiro.ts §18-19 + 20260602_016_create
- * _payment_webhook_events.ts §20-24). Um único DELETE basta.
+ * Most cross-BC references remain unconstrained UUIDs, but migration 049's
+ * refund state intentionally owns a real FK to pagamentos. Delete that child
+ * first, then clear the aggregate table.
  */
 export async function truncatePagamentosTables(db: Database): Promise<void> {
+  // Migration 049 adds a real FK from PIX refund attempts to pagamentos.
+  // Delete children first; the FK intentionally uses the default RESTRICT
+  // semantics so payment history cannot disappear under a refund record.
+  await db.deleteFrom('pix_cobranca_devolucoes').execute();
   await db.deleteFrom('pagamentos').execute();
 }

@@ -37,6 +37,13 @@ export interface SolicitarDevolucaoInput {
   readonly descricao?: string;
 }
 
+/** Trusted persisted identity expected from one authoritative refund GET. */
+export interface ConsultarDevolucaoInput {
+  readonly e2eId: string;
+  readonly idDevolucao: string;
+  readonly amountCents: MoneyCents;
+}
+
 export type DevolucaoOutcome =
   | { readonly status: 'em_processamento'; readonly rtrId: string }
   | { readonly status: 'devolvida' }
@@ -47,7 +54,7 @@ export interface PixCobrancaProvider {
   criarCobranca(input: CriarCobrancaInput): Promise<CobrancaCriada>;
   consultarCobranca(txid: string): Promise<ConsultarCobrancaResult>;
   solicitarDevolucao(input: SolicitarDevolucaoInput): Promise<DevolucaoOutcome>;
-  consultarDevolucao(e2eId: string, idDevolucao: string): Promise<DevolucaoOutcome>;
+  consultarDevolucao(input: ConsultarDevolucaoInput): Promise<DevolucaoOutcome>;
 }
 
 /**

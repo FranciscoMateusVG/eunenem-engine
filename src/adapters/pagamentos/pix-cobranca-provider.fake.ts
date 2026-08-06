@@ -14,6 +14,7 @@ import type { MoneyCents } from '../../domain/money.js';
 import type {
   CobrancaCriada,
   ConsultarCobrancaResult,
+  ConsultarDevolucaoInput,
   CriarCobrancaInput,
   DevolucaoOutcome,
   PixCobrancaProvider,
@@ -362,13 +363,16 @@ export class PixCobrancaProviderFake implements PixCobrancaProvider {
     return cloneDevolucaoOutcome(ownedResult);
   }
 
-  async consultarDevolucao(e2eId: string, idDevolucao: string): Promise<DevolucaoOutcome> {
+  async consultarDevolucao(input: ConsultarDevolucaoInput): Promise<DevolucaoOutcome> {
     this._consultarDevolucaoCalls += 1;
-    const entry = this.refundByKey.get(this.refundKey(e2eId, idDevolucao));
+    const entry = this.refundByKey.get(this.refundKey(input.e2eId, input.idDevolucao));
     if (!entry) {
       throw new Error(
-        `pix fake refund not found for e2eId ${e2eId} and idDevolucao ${idDevolucao}`,
+        `pix fake refund not found for e2eId ${input.e2eId} and idDevolucao ${input.idDevolucao}`,
       );
+    }
+    if (entry.input.amountCents !== input.amountCents) {
+      throw new Error('pix fake refund amount mismatch');
     }
     entry.consultCalls += 1;
     if (entry.terminal) return cloneDevolucaoOutcome(entry.terminal);

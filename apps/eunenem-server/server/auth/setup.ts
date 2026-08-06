@@ -49,9 +49,12 @@ import {
   type CriarCobrancaInput,
   type CobrancaCriada,
   type ConsultarCobrancaResult,
+  type ConsultarDevolucaoInput,
   type DevolucaoOutcome,
   type CobrancaPixProviderKind,
   type PixCobrancaProvider,
+  type PixCobrancaDevolucaoRepository,
+  PixCobrancaDevolucaoRepositoryPostgres,
   PixCobrancaProviderFake,
   PixCobrancaProviderInter,
   type SolicitarDevolucaoInput,
@@ -181,6 +184,12 @@ export interface ServerDeps {
    * the QR flow). Mirrors env.COBRANCA_PIX_PROVIDER verbatim.
    */
   readonly cobrancaPixProviderKind: CobrancaPixProviderKind;
+  /**
+   * Durable Inter refund lifecycle. One database-backed adapter serves admin
+   * retries and verified webhook completion; the finance adapter reads the
+   * same table under the shared per-payment advisory-lock convention.
+   */
+  readonly pixCobrancaDevolucaoRepository: PixCobrancaDevolucaoRepository;
   /**
    * Financeiro BC — livro de lançamentos. Required by the
    * `finalizarPagamentoAprovado` use-case dispatched by the Stripe
@@ -354,7 +363,7 @@ class PixCobrancaNaoConfigurado implements PixCobrancaProvider {
     throw PixCobrancaNaoConfigurado.erro('solicitarDevolucao');
   }
 
-  async consultarDevolucao(_e2eId: string, _idDevolucao: string): Promise<DevolucaoOutcome> {
+  async consultarDevolucao(_input: ConsultarDevolucaoInput): Promise<DevolucaoOutcome> {
     throw PixCobrancaNaoConfigurado.erro('consultarDevolucao');
   }
 }
@@ -929,6 +938,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
   // (PagamentoProvider + CheckoutSessionProvider).
   const pagamentoRepository = new PagamentoRepositoryPostgres(db);
   const pagamentoEventPublisher = new PagamentoEventPublisherMemory();
+  const pixCobrancaDevolucaoRepository = new PixCobrancaDevolucaoRepositoryPostgres(db);
 
   // Financeiro BC — postgres-backed livro (aperture-id3ay, migration
   // 012). Before this swap, the memory adapter was losing every
@@ -1129,6 +1139,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     pagamentoEventPublisher,
     pixCobrancaProvider,
     cobrancaPixProviderKind: env.COBRANCA_PIX_PROVIDER,
+    pixCobrancaDevolucaoRepository,
     livroFinanceiroRepository,
     provedorRegraTaxa,
     observability,

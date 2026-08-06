@@ -137,3 +137,29 @@ describe('PagamentoProviderStripe.criarSessaoCheckout — Stripe handoff contrac
     expect(options.idempotencyKey).toBe('pagamento:pag_idem_9:create-session');
   });
 });
+
+describe('PagamentoProviderStripe.refundarPagamento — coexistence contract', () => {
+  it('ignores the Inter e2e reference and preserves Stripe refund params and idempotency', async () => {
+    const createRefund = vi.fn().mockResolvedValue({
+      id: 're_contract_1',
+      status: 'succeeded',
+    });
+    const stripe = { refunds: { create: createRefund } } as unknown as Stripe;
+    const provider = new PagamentoProviderStripe({ stripe, clock: () => new Date(0) });
+
+    const result = await provider.refundarPagamento({
+      idPagamento: '550e8400-e29b-41d4-a716-446655440301',
+      e2eExternalRef: 'E1234567890123456789012345678901',
+      chargeExternalRef: 'ch_contract_1',
+      paymentIntentExternalRef: 'pi_contract_1',
+      amountCents: 8400 as never,
+      reason: 'requested_by_customer',
+    });
+
+    expect(createRefund).toHaveBeenCalledWith(
+      { charge: 'ch_contract_1', reason: 'requested_by_customer' },
+      { idempotencyKey: 'pagamento:550e8400-e29b-41d4-a716-446655440301:refund' },
+    );
+    expect(result).toMatchObject({ id: 're_contract_1', status: 'aceito', amountCents: 8400 });
+  });
+});

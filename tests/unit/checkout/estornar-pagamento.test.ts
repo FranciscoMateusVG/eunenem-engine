@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { PagamentoEventPublisherMemory } from '../../../src/adapters/pagamentos/event-publisher.memory.js';
 import { LivroFinanceiroRepositoryMemory } from '../../../src/adapters/pagamentos/financeiro/livro-repository.memory.js';
+import { PixCobrancaDevolucaoRepositoryMemory } from '../../../src/adapters/pagamentos/pix-cobranca-devolucao-repository.memory.js';
+import type { PixCobrancaProvider } from '../../../src/adapters/pagamentos/pix-cobranca-provider.js';
 import { PagamentoProviderFake } from '../../../src/adapters/pagamentos/provider.fake.js';
 import { PagamentoRepositoryMemory } from '../../../src/adapters/pagamentos/repository.memory.js';
 import {
@@ -41,6 +43,28 @@ const idTransacaoExterna = '550e8400-e29b-41d4-a716-446655440306';
 
 const observability = { logger: new NoopLogger(), tracer: noopTracer() };
 
+const pixCobrancaProviderNever: PixCobrancaProvider = {
+  criarCobranca: async () => {
+    throw new Error('unexpected Inter charge call');
+  },
+  consultarCobranca: async () => {
+    throw new Error('unexpected Inter charge query');
+  },
+  solicitarDevolucao: async () => {
+    throw new Error('unexpected Inter refund call');
+  },
+  consultarDevolucao: async () => {
+    throw new Error('unexpected Inter refund query');
+  },
+};
+
+function legacyRefundDeps() {
+  return {
+    pixCobrancaProvider: pixCobrancaProviderNever,
+    pixCobrancaDevolucaoRepository: new PixCobrancaDevolucaoRepositoryMemory(),
+  };
+}
+
 async function seedAprovado(deps: {
   pagamentoRepository: PagamentoRepositoryMemory;
   livroFinanceiroRepository: LivroFinanceiroRepositoryMemory;
@@ -66,7 +90,9 @@ async function seedAprovado(deps: {
     pendenteComIntencao,
     {
       id: idTransacaoExterna,
-      provedor: 'fake-provider',
+      // Historical Stripe provenance must keep using PagamentoProvider even
+      // while Banco Inter refunds coexist in the same orchestration.
+      provedor: 'stripe',
       status: 'aprovado',
       amountCents: 8400,
       criadaEm: new Date('2026-05-01T12:05:00Z'),
@@ -122,6 +148,7 @@ describe('estornarPagamento — happy path (no transferred lançamentos)', () =>
       {
         pagamentoRepository,
         pagamentoProvider,
+        ...legacyRefundDeps(),
         pagamentoEventPublisher,
         livroFinanceiroRepository,
         clock: () => new Date('2026-05-02T15:00:00Z'),
@@ -167,6 +194,7 @@ describe('estornarPagamento — happy path (no transferred lançamentos)', () =>
       {
         pagamentoRepository,
         pagamentoProvider,
+        ...legacyRefundDeps(),
         pagamentoEventPublisher,
         livroFinanceiroRepository,
         clock: () => new Date('2026-05-02T15:00:00Z'),
@@ -184,6 +212,12 @@ describe('estornarPagamento — 409 gate (any lançamento already transferred)',
     const pagamentoRepository = new PagamentoRepositoryMemory();
     const livroFinanceiroRepository = new LivroFinanceiroRepositoryMemory();
     const pagamentoProvider = new PagamentoProviderFake({ statusRefund: 'aceito' });
+    let providerCalls = 0;
+    const originalRefund = pagamentoProvider.refundarPagamento.bind(pagamentoProvider);
+    pagamentoProvider.refundarPagamento = async (input) => {
+      providerCalls += 1;
+      return originalRefund(input);
+    };
     const pagamentoEventPublisher = new PagamentoEventPublisherMemory();
 
     await seedAprovado({ pagamentoRepository, livroFinanceiroRepository });
@@ -198,6 +232,7 @@ describe('estornarPagamento — 409 gate (any lançamento already transferred)',
         {
           pagamentoRepository,
           pagamentoProvider,
+          ...legacyRefundDeps(),
           pagamentoEventPublisher,
           livroFinanceiroRepository,
           clock: () => new Date('2026-05-02T15:00:00Z'),
@@ -206,6 +241,7 @@ describe('estornarPagamento — 409 gate (any lançamento already transferred)',
         { idPagamento },
       ),
     ).rejects.toBeInstanceOf(PagamentoEstornoLancamentoJaTransferidoError);
+    expect(providerCalls).toBe(0);
 
     // Pagamento stays aprovado — no partial state.
     const persisted = await pagamentoRepository.findById(idPagamento);
@@ -231,6 +267,7 @@ describe('estornarPagamento — provider refusal', () => {
         {
           pagamentoRepository,
           pagamentoProvider,
+          ...legacyRefundDeps(),
           pagamentoEventPublisher,
           livroFinanceiroRepository,
           clock: () => new Date('2026-05-02T15:00:00Z'),
@@ -269,6 +306,7 @@ describe('estornarPagamento — idempotency', () => {
       {
         pagamentoRepository,
         pagamentoProvider,
+        ...legacyRefundDeps(),
         pagamentoEventPublisher,
         livroFinanceiroRepository,
         clock: () => new Date('2026-05-02T15:00:00Z'),
@@ -283,6 +321,7 @@ describe('estornarPagamento — idempotency', () => {
       {
         pagamentoRepository,
         pagamentoProvider,
+        ...legacyRefundDeps(),
         pagamentoEventPublisher,
         livroFinanceiroRepository,
         clock: () => new Date('2026-05-02T16:00:00Z'),
@@ -316,6 +355,7 @@ describe('estornarPagamento — invalid source states', () => {
         {
           pagamentoRepository,
           pagamentoProvider,
+          ...legacyRefundDeps(),
           pagamentoEventPublisher,
           livroFinanceiroRepository,
           clock: () => new Date('2026-05-02T15:00:00Z'),
@@ -337,6 +377,7 @@ describe('estornarPagamento — invalid source states', () => {
         {
           pagamentoRepository,
           pagamentoProvider,
+          ...legacyRefundDeps(),
           pagamentoEventPublisher,
           livroFinanceiroRepository,
           clock: () => new Date('2026-05-02T15:00:00Z'),

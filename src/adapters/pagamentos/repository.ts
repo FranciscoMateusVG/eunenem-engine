@@ -132,6 +132,8 @@ export interface PagamentoRepository {
   ): Promise<boolean>;
   findById(id: IdPagamento): Promise<Pagamento | undefined>;
   findByExternalRef(externalRef: string): Promise<Pagamento | undefined>;
+  /** Lookup by verified Banco Inter PIX end-to-end settlement id. */
+  findByE2eExternalRef(e2eId: string): Promise<Pagamento | undefined>;
   /**
    * Returns every Pagamento whose `intencao.idContribuicao` matches the
    * given contribuicao reference, in `criadoEm ASC` order (aperture-i0pz8).

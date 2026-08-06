@@ -249,7 +249,7 @@ describe('reconciliarCobrancasPix', () => {
   it('allows only one overlapping worker to claim and requery the same due payment', async () => {
     const context = await setup({
       status: 'concluida',
-      e2eId: 'E-ONE-WORKER-WINS',
+      e2eId: 'E2234567890123456789012345678901',
       valorPagoCents: 8400,
       horario: NOW,
     });
@@ -266,7 +266,7 @@ describe('reconciliarCobrancasPix', () => {
     ).toEqual(['payment.approved']);
     expect(await context.pagamentoRepository.findById(context.idPagamento)).toMatchObject({
       status: 'aprovado',
-      transacaoExterna: { id: 'E-ONE-WORKER-WINS' },
+      transacaoExterna: { id: 'E2234567890123456789012345678901' },
     });
   });
 });

@@ -9,6 +9,7 @@ import type { IdCampanha } from '../../src/index.js';
 import {
   confirmarTransferenciaRepasse,
   executarTransferenciaRepasse,
+  finalizarEstornoPixVerificado,
   REPASSE_CONFIRMAR_QUEUE,
   REPASSE_EXECUTAR_QUEUE,
   type RepasseConfirmarJobData,
@@ -175,7 +176,19 @@ app.post('/api/webhooks/stripe', createStripeWebhookHandler(deps));
 // sign callback payloads, so the mounted handler treats them only as routing
 // hints and re-queries the authoritative cobrança API before changing state.
 // Mount both the registered base URL and Inter's delivery-time `/pix` suffix.
-mountInterPixWebhookRoutes(app, deps);
+mountInterPixWebhookRoutes(app, {
+  ...deps,
+  onInterPixRefundConfirmed: (confirmed) =>
+    finalizarEstornoPixVerificado(
+      {
+        pagamentoRepository: deps.pagamentoRepository,
+        pixCobrancaDevolucaoRepository: deps.pixCobrancaDevolucaoRepository,
+        livroFinanceiroRepository: deps.livroFinanceiroRepository,
+        clock: deps.clock,
+      },
+      confirmed,
+    ),
+});
 
 // Legacy bridge (aperture-as0v3) — authed silent login handoff into the 1.0
 // system. The /campanhas 1.0 card hits this; it mints a single-use Clerk

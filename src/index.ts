@@ -94,6 +94,20 @@ export type {
 export { LivroFinanceiroRepositoryMemory } from './adapters/pagamentos/financeiro/livro-repository.memory.js';
 export { LivroFinanceiroRepositoryPostgres } from './adapters/pagamentos/financeiro/livro-repository.postgres.js';
 export {
+  type CreatePixCobrancaDevolucaoInput,
+  PixCobrancaDevolucaoConflictError,
+  type PixCobrancaDevolucaoIdentity,
+  type PixCobrancaDevolucaoRecord,
+  type PixCobrancaDevolucaoRepository,
+  type PixCobrancaDevolucaoStatus,
+  PixCobrancaDevolucaoStatusSchema,
+  PixCobrancaE2eIdSchema,
+  PixCobrancaIdDevolucaoSchema,
+  type UpdatePixCobrancaDevolucaoOutcomeInput,
+} from './adapters/pagamentos/pix-cobranca-devolucao-repository.js';
+export { PixCobrancaDevolucaoRepositoryMemory } from './adapters/pagamentos/pix-cobranca-devolucao-repository.memory.js';
+export { PixCobrancaDevolucaoRepositoryPostgres } from './adapters/pagamentos/pix-cobranca-devolucao-repository.postgres.js';
+export {
   PIX_COBRANCA_FAKE_MAGIC_CENTS,
   PixCobrancaProviderFake,
   type PixCobrancaProviderFakeOptions,
@@ -105,6 +119,7 @@ export {
 export {
   type CobrancaCriada,
   type ConsultarCobrancaResult,
+  type ConsultarDevolucaoInput,
   type CriarCobrancaInput,
   type DevolucaoOutcome,
   PixCobrancaAmbiguaError,
@@ -740,6 +755,10 @@ export { EventoNaoEncontradoError } from './errors/evento/nao-encontrado.error.j
 export { InvalidCatNameError } from './errors/invalid-cat-name.error.js';
 export { FinanceiroInputInvalidoError } from './errors/pagamentos/financeiro/input-invalido.error.js';
 export { FinanceiroPagamentoJaRegistradoError } from './errors/pagamentos/financeiro/pagamento-ja-registrado.error.js';
+export {
+  type FinanceiroMovimentacaoSolicitada,
+  FinanceiroPagamentoMovimentacaoConflitanteError,
+} from './errors/pagamentos/financeiro/pagamento-movimentacao-conflitante.error.js';
 export { FinanceiroPagamentoNaoAprovadoError } from './errors/pagamentos/financeiro/pagamento-nao-aprovado.error.js';
 export { FinanceiroSaldoDisponivelInsuficienteError } from './errors/pagamentos/financeiro/saldo-disponivel-insuficiente.error.js';
 export { PagamentosInputInvalidoError } from './errors/pagamentos/input-invalido.error.js';
@@ -926,8 +945,16 @@ export {
   EstornarPagamentoInputSchema,
   estornarPagamento,
   PagamentoEstornoLancamentoJaTransferidoError,
+  PagamentoEstornoPixNaoConcluidoError,
+  PagamentoEstornoPixVinculoInvalidoError,
   PagamentoEstornoRecusadoPeloProvedorError,
 } from './use-cases/checkout/estornar-pagamento.js';
+export type {
+  FinalizarEstornoPixVerificadoDeps,
+  FinalizarEstornoPixVerificadoInput,
+  FinalizarEstornoPixVerificadoResult,
+} from './use-cases/checkout/finalizar-estorno-pix-verificado.js';
+export { finalizarEstornoPixVerificado } from './use-cases/checkout/finalizar-estorno-pix-verificado.js';
 export type {
   FinalizarPagamentoAprovadoComTransacaoVerificadaDeps,
   FinalizarPagamentoAprovadoComTransacaoVerificadaInput,
