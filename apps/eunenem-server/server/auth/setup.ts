@@ -165,14 +165,12 @@ export interface ServerDeps {
   readonly checkoutSessionProvider: CheckoutSessionProvider;
   readonly pagamentoEventPublisher: PagamentoEventPublisher;
   /**
-   * aperture-18j3j (B7 of 2j2j1) — Inter PIX-in charge rail. ALWAYS bound
-   * (non-optional): `'inter'` → real PixCobrancaProviderInter; `'fake'` →
-   * deterministic PixCobrancaProviderFake; `'stripe'` (default) → the
-   * PixCobrancaNaoConfigurado throw-on-use stub, because under Stripe the
-   * checkout routing never touches this port — a loud throw surfaces wiring
-   * bugs instead of silently faking a charge. Selected by
-   * COBRANCA_PIX_PROVIDER; credential completeness for `'inter'` is enforced
-   * by the env-schema superRefine (fail-closed at boot in EVERY environment).
+   * Inter PIX-in charge/reconciliation rail. ALWAYS bound (non-optional).
+   * `COBRANCA_PIX_PROVIDER` selects the rail used for NEW checkouts, but does
+   * not disable recovery of already-created Inter charges: when the complete
+   * INTER_COB_* credential set remains present, the real adapter stays bound
+   * after a rollback to `stripe` so webhooks and B4 reconciliation can finish
+   * in-flight charges. `fake` stays deterministic for test composition.
    */
   readonly pixCobrancaProvider: PixCobrancaProvider;
   /**
@@ -351,6 +349,20 @@ class PixCobrancaNaoConfigurado implements PixCobrancaProvider {
   async consultarDevolucao(_e2eId: string, _idDevolucao: string): Promise<DevolucaoOutcome> {
     throw PixCobrancaNaoConfigurado.erro('consultarDevolucao');
   }
+}
+
+const INTER_COB_CREDENTIAL_KEYS = [
+  'INTER_COB_BASE_URL',
+  'INTER_COB_CLIENT_ID',
+  'INTER_COB_CLIENT_SECRET',
+  'INTER_COB_SCOPE',
+  'INTER_COB_CERT_BASE64',
+  'INTER_COB_KEY_BASE64',
+  'INTER_COB_PIX_KEY',
+] as const;
+
+function hasCompleteInterCobrancaCredentials(env: ServerEnv): boolean {
+  return INTER_COB_CREDENTIAL_KEYS.every((key) => env[key].trim().length > 0);
 }
 
 /**
@@ -734,16 +746,7 @@ const ServerEnvSchema = z
     // allowed in non-prod for manual verification (CI keeps 'fake' — the
     // sandbox's business-hours window + 30-day certs would make CI flaky).
     if (env.COBRANCA_PIX_PROVIDER === 'inter') {
-      const requeridos = [
-        'INTER_COB_BASE_URL',
-        'INTER_COB_CLIENT_ID',
-        'INTER_COB_CLIENT_SECRET',
-        'INTER_COB_SCOPE',
-        'INTER_COB_CERT_BASE64',
-        'INTER_COB_KEY_BASE64',
-        'INTER_COB_PIX_KEY',
-      ] as const;
-      for (const chave of requeridos) {
+      for (const chave of INTER_COB_CREDENTIAL_KEYS) {
         if (!env[chave] || env[chave].trim() === '') {
           ctx.addIssue({
             code: 'custom',
@@ -1054,16 +1057,18 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     });
   }
 
-  // aperture-18j3j (B7 of 2j2j1) — PIX-in charge rail DI. Mirrors the
-  // transferenciaProvider gate above with one deliberate difference: 'inter'
-  // is legal in ANY environment (spec §6 sandbox stance — a PIX charge has no
-  // double-pay hazard; the superRefine still fail-closes on missing
-  // INTER_COB_* creds everywhere). cert/key arrive base64-encoded (Infisical)
-  // and are decoded to PEM text ONLY on the 'inter' branch — never eagerly.
-  // 'stripe' (default) binds the throw-on-use stub: under Stripe routing this
-  // port is never called, so any call is a wiring bug and must be loud.
+  // Checkout routing and reconciliation availability are deliberately
+  // separate. The selector chooses NEW checkout behavior, while complete
+  // Inter credentials keep the real read adapter alive after a Stripe
+  // rollback so an in-flight <=10 minute charge can still settle via webhook
+  // or B4's poller. Without this split, the documented rollback path replaces
+  // the recovery adapter with a throw stub and strands those charges.
+  // `fake` remains an explicit deterministic test rail.
   let pixCobrancaProvider: PixCobrancaProvider;
-  if (env.COBRANCA_PIX_PROVIDER === 'inter') {
+  if (
+    env.COBRANCA_PIX_PROVIDER === 'inter' ||
+    (env.COBRANCA_PIX_PROVIDER === 'stripe' && hasCompleteInterCobrancaCredentials(env))
+  ) {
     pixCobrancaProvider = new PixCobrancaProviderInter({
       baseUrl: env.INTER_COB_BASE_URL,
       clientId: env.INTER_COB_CLIENT_ID,

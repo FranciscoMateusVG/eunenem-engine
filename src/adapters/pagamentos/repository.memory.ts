@@ -1,13 +1,19 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 import type { IdCampanha } from '../../domain/arrecadacao/value-objects/ids.js';
-import type { Pagamento } from '../../domain/pagamentos/entities/pagamento.js';
+import type { Pagamento, StatusPagamento } from '../../domain/pagamentos/entities/pagamento.js';
 import type {
   IdContribuicaoPagamento,
   IdPagamento,
 } from '../../domain/pagamentos/value-objects/ids.js';
 import { PagamentoJaExisteError } from '../../errors/pagamentos/ja-existe.error.js';
 import { PagamentoNaoEncontradoError } from '../../errors/pagamentos/nao-encontrado.error.js';
-import type { AdminRecadoRow, MuralRecadoProjection, PagamentoRepository } from './repository.js';
+import type {
+  AdminRecadoRow,
+  ClaimPixCobrancaReconciliationCandidatesInput,
+  MuralRecadoProjection,
+  PagamentoRepository,
+  PixCobrancaReconciliationCandidate,
+} from './repository.js';
 
 const tracer = trace.getTracer('frame');
 
@@ -30,6 +36,8 @@ export class PagamentoRepositoryMemory implements PagamentoRepository {
    * the timestamp the admin marked-as-read; first-write-wins.
    */
   private readonly mensagemLidaEmByIdPagamento = new Map<IdPagamento, Date>();
+  /** Operational lease state; deliberately kept outside the aggregate. */
+  private readonly pixReconciliacaoClaimedUntilByIdPagamento = new Map<IdPagamento, Date>();
 
   async save(pagamento: Pagamento): Promise<void> {
     return tracer.startActiveSpan('db.pagamentos.save', async (span) => {
@@ -69,6 +77,118 @@ export class PagamentoRepositoryMemory implements PagamentoRepository {
         span.end();
       }
     });
+  }
+
+  async updateIfStatusIn(
+    pagamento: Pagamento,
+    expectedStatuses: readonly StatusPagamento[],
+  ): Promise<boolean> {
+    return tracer.startActiveSpan('db.pagamentos.updateIfStatusIn', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+      try {
+        const persisted = this.pagamentos.get(pagamento.id);
+        if (persisted === undefined || !expectedStatuses.includes(persisted.status)) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return false;
+        }
+        this.pagamentos.set(pagamento.id, pagamento);
+        span.setStatus({ code: SpanStatusCode.OK });
+        return true;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  async claimPixCobrancaReconciliationCandidates(
+    input: ClaimPixCobrancaReconciliationCandidatesInput,
+  ): Promise<readonly PixCobrancaReconciliationCandidate[]> {
+    return tracer.startActiveSpan(
+      'db.pagamentos.claimPixCobrancaReconciliationCandidates',
+      async (span) => {
+        span.setAttributes({
+          ...DB_ATTRS,
+          'db.operation.name': 'UPDATE',
+          'batch.size': input.limit,
+        });
+        try {
+          if (input.limit <= 0) {
+            span.setStatus({ code: SpanStatusCode.OK });
+            return [];
+          }
+
+          const candidates = [...this.pagamentos.values()]
+            .filter((pagamento) => {
+              const expiry = pagamento.intencao.expiraEm;
+              const lease = this.pixReconciliacaoClaimedUntilByIdPagamento.get(pagamento.id);
+              return (
+                (pagamento.status === 'pendente' || pagamento.status === 'processing') &&
+                pagamento.intencao.metodo === 'pix' &&
+                expiry !== null &&
+                expiry.getTime() <= input.now.getTime() &&
+                pagamento.intencao.externalRef === pagamento.id.replaceAll('-', '') &&
+                (lease === undefined || lease.getTime() <= input.now.getTime())
+              );
+            })
+            .sort((a, b) => {
+              const byExpiry =
+                // The filter above proves both values are non-null.
+                (a.intencao.expiraEm as Date).getTime() - (b.intencao.expiraEm as Date).getTime();
+              return byExpiry !== 0 ? byExpiry : a.id.localeCompare(b.id);
+            })
+            .slice(0, input.limit);
+
+          const claimed = candidates.map((pagamento) => {
+            this.pixReconciliacaoClaimedUntilByIdPagamento.set(pagamento.id, input.leaseUntil);
+            return {
+              idPagamento: pagamento.id,
+              txid: pagamento.intencao.externalRef as string,
+              expiraEm: pagamento.intencao.expiraEm as Date,
+            };
+          });
+          span.setStatus({ code: SpanStatusCode.OK });
+          return claimed;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  async releasePixCobrancaReconciliationClaim(
+    idPagamento: IdPagamento,
+    claimedUntil: Date,
+  ): Promise<boolean> {
+    return tracer.startActiveSpan(
+      'db.pagamentos.releasePixCobrancaReconciliationClaim',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+        try {
+          const persisted = this.pixReconciliacaoClaimedUntilByIdPagamento.get(idPagamento);
+          if (persisted === undefined || persisted.getTime() !== claimedUntil.getTime()) {
+            span.setStatus({ code: SpanStatusCode.OK });
+            return false;
+          }
+          this.pixReconciliacaoClaimedUntilByIdPagamento.delete(idPagamento);
+          span.setStatus({ code: SpanStatusCode.OK });
+          return true;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
   }
 
   async findById(id: IdPagamento): Promise<Pagamento | undefined> {

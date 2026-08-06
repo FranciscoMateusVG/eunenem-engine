@@ -138,6 +138,12 @@ export const IntencaoPagamentoSchema = z.object({
   composicaoValoresAggregate: SnapshotComposicaoValoresAggregateSchema,
   metodo: MetodoPagamentoSchema,
   externalRef: z.string().trim().min(1).max(255).nullable(),
+  /**
+   * Provider intent expiry. Stripe Checkout does not expose this field on
+   * the legacy path, so old intents hydrate as null. PIX providers that
+   * publish an authoritative expiry persist it here for reconciliation.
+   */
+  expiraEm: z.date().nullable(),
   paymentIntentExternalRef: z.string().trim().min(1).max(255).nullable(),
   chargeExternalRef: z.string().trim().min(1).max(255).nullable(),
   contribuinte: DadosContribuinteSchema.nullable(),
@@ -209,6 +215,8 @@ export interface CriarPagamentoPendenteInput {
    * don't have to thread this through).
    */
   readonly externalRef?: string | null;
+  /** Provider intent expiry; omitted legacy callers persist null. */
+  readonly expiraEm?: Date | null;
 }
 
 /**
@@ -283,6 +291,7 @@ export function criarPagamentoPendente(input: CriarPagamentoPendenteInput): Paga
       composicaoValoresAggregate,
       metodo: input.metodo,
       externalRef: input.externalRef ?? null,
+      expiraEm: input.expiraEm ?? null,
       // aperture-wif8s: pi_xxx + ch_xxx populated post-creation by the
       // webhook handler as Stripe events arrive. Always start null at
       // intent-creation time — checkout flow hasn't talked to Stripe
