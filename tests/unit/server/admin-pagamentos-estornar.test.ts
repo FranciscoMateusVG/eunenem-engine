@@ -32,6 +32,7 @@ import { PixCobrancaDevolucaoRepositoryMemory } from '../../../src/adapters/paga
 import { PixCobrancaProviderFake } from '../../../src/adapters/pagamentos/pix-cobranca-provider.fake.js';
 import { PagamentoProviderFake } from '../../../src/adapters/pagamentos/provider.fake.js';
 import { PagamentoRepositoryMemory } from '../../../src/adapters/pagamentos/repository.memory.js';
+import { ID_PLATAFORMA_EUNENEM } from '../../../src/adapters/plataforma/repository.memory.js';
 import {
   aprovarPagamentoPendente,
   type Pagamento,
@@ -41,6 +42,33 @@ import { NoopLogger } from '../../../src/observability/noop-logger.js';
 import { noopTracer } from '../../../src/observability/tracer.js';
 import { adminAuthOverrides } from '../../helpers/admin-auth.js';
 import { makePagamento } from '../../helpers/pagamento-repository.conformance.js';
+
+/**
+ * Minimal campanha lookup for the tenant guard. Both endpoints now call
+ * resolveAdminPagamentoContext, which reads campanhaRepository.findById to
+ * check idPlataforma — so the rig must register each seeded pagamento's
+ * campanha with a platform. Cross-platform tests register a foreign one.
+ */
+const campanhaPlataformaById = new Map<string, string>();
+const fakeCampanhaRepository = {
+  findById: async (idCampanha: string) => {
+    const idPlataforma = campanhaPlataformaById.get(idCampanha);
+    if (!idPlataforma) return undefined;
+    // resolveAdminPagamentoContext reads .id + .idPlataforma only.
+    return { id: idCampanha, idPlataforma } as never;
+  },
+} as never;
+
+/**
+ * The guard's contribuição fallback runs AFTER the platform check (which
+ * FORBIDs cross-platform before reaching here), only on same-platform
+ * payments. Callers of estornar/devolucaoStatus discard the returned
+ * contribuição entirely — the guard just presence-checks it — so any
+ * truthy shape satisfies the happy paths.
+ */
+const fakeContribuicaoRepository = {
+  findById: async (id: string) => ({ id }) as never,
+} as never;
 
 const T0 = new Date('2026-08-05T12:00:00.000Z');
 const T1 = new Date('2026-08-06T15:00:00.000Z');
@@ -73,8 +101,8 @@ function buildRig(): TestRig {
     authService: {} as never,
     usuarioRepository: {} as never,
     plataformaRepository: {} as never,
-    campanhaRepository: {} as never,
-    contribuicaoRepository: {} as never,
+    campanhaRepository: fakeCampanhaRepository,
+    contribuicaoRepository: fakeContribuicaoRepository,
     recebedorRepository: {} as never,
     pagamentoRepository,
     pagamentoProvider,
@@ -128,10 +156,17 @@ function buildRig(): TestRig {
  * 'stripe' + chargeExternalRef) — mirrors seedAprovado in
  * tests/unit/checkout/estornar-pagamento.test.ts.
  */
-async function seedAprovadoStripe(rig: TestRig): Promise<Pagamento> {
+async function seedAprovadoStripe(
+  rig: TestRig,
+  opts: { idPlataforma?: string } = {},
+): Promise<Pagamento> {
   const id = randomUUID();
+  const idCampanha = randomUUID();
+  // Register the campanha's platform so the tenant guard resolves it.
+  campanhaPlataformaById.set(idCampanha, opts.idPlataforma ?? ID_PLATAFORMA_EUNENEM);
   const pendente = makePagamento({
     id: id as never,
+    idCampanha,
     idContribuicao: randomUUID() as never,
     criadoEm: T0,
     metodo: 'pix',
@@ -163,8 +198,11 @@ async function seedAprovadoStripe(rig: TestRig): Promise<Pagamento> {
  */
 async function seedAprovadoInter(rig: TestRig): Promise<Pagamento> {
   const id = randomUUID();
+  const idCampanha = randomUUID();
+  campanhaPlataformaById.set(idCampanha, ID_PLATAFORMA_EUNENEM);
   const pendente = makePagamento({
     id: id as never,
+    idCampanha,
     idContribuicao: randomUUID() as never,
     criadoEm: T0,
     metodo: 'pix',
@@ -210,6 +248,7 @@ async function seedLancamentoRecebedor(
 describe('admin.pagamentos.estornar (aperture-4uvgf)', () => {
   let rig: TestRig;
   beforeEach(() => {
+    campanhaPlataformaById.clear();
     rig = buildRig();
   });
 
@@ -286,8 +325,11 @@ describe('admin.pagamentos.estornar (aperture-4uvgf)', () => {
 
   it('maps a non-aprovado (pendente) pagamento to CONFLICT pagamento_status_invalido', async () => {
     const id = randomUUID();
+    const idCampanha = randomUUID();
+    campanhaPlataformaById.set(idCampanha, ID_PLATAFORMA_EUNENEM);
     const pendente = makePagamento({
       id: id as never,
+      idCampanha,
       idContribuicao: randomUUID() as never,
       criadoEm: T0,
       metodo: 'pix',
@@ -320,11 +362,36 @@ describe('admin.pagamentos.estornar (aperture-4uvgf)', () => {
     const persisted = await rig.pagamentoRepository.findById(pagamento.id);
     expect(persisted?.status).toBe('aprovado');
   });
+
+  // aperture-irhxi QA (Izzy/GLaDOS hold 3): cross-PLATFORM authz. An
+  // allowlisted EuNeném admin must NOT be able to refund a payment that
+  // belongs to a DIFFERENT platform — resolveAdminPagamentoContext rejects
+  // it BEFORE any provider / refund-repository I/O.
+  it('rejects estornar on a cross-platform (non-EuNeném) pagamento with FORBIDDEN — zero provider/repo work', async () => {
+    const pagamento = await seedAprovadoStripe(rig, {
+      idPlataforma: 'PLATAFORMA_EUCASEI_00000000000000000',
+    });
+    await seedLancamentoRecebedor(rig, pagamento);
+
+    await expect(
+      rig.caller.admin.pagamentos.estornar({ idPagamento: pagamento.id }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+
+    // No money moved, no provider call, no ledger cancellation.
+    const persisted = await rig.pagamentoRepository.findById(pagamento.id);
+    expect(persisted?.status).toBe('aprovado');
+    expect(rig.pixCobrancaProvider.solicitarDevolucaoCalls).toBe(0);
+    const lancamentos = await rig.livroFinanceiroRepository.findLancamentosByIdPagamento(
+      pagamento.id,
+    );
+    expect(lancamentos[0]?.canceladoEm ?? null).toBeNull();
+  });
 });
 
 describe('admin.pagamentos.devolucaoStatus (aperture-4uvgf)', () => {
   let rig: TestRig;
   beforeEach(() => {
+    campanhaPlataformaById.clear();
     rig = buildRig();
   });
 
@@ -335,5 +402,17 @@ describe('admin.pagamentos.devolucaoStatus (aperture-4uvgf)', () => {
       idPagamento: pagamento.id,
     });
     expect(status.devolucao).toBeNull();
+  });
+
+  // aperture-irhxi QA (hold 3): reading a cross-platform payment's refund
+  // lifecycle is also a tenant leak — the same guard blocks it.
+  it('rejects devolucaoStatus on a cross-platform pagamento with FORBIDDEN', async () => {
+    const pagamento = await seedAprovadoStripe(rig, {
+      idPlataforma: 'PLATAFORMA_EUCASEI_00000000000000000',
+    });
+
+    await expect(
+      rig.caller.admin.pagamentos.devolucaoStatus({ idPagamento: pagamento.id }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 });

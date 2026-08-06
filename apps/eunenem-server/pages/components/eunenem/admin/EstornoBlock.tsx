@@ -85,6 +85,20 @@ export function EstornoBlock({ pagamento }: { pagamento: PagamentoDTO }) {
   const [reason, setReason] = useState<EstornoReason>("requested_by_customer");
 
   const estornar = useEstornarPagamento();
+
+  // aperture-irhxi QA (Izzy): the irreversibility acknowledgment is
+  // PER-ATTEMPT — every open starts unchecked and every dismissal clears
+  // it. Without this, cancel→reopen arrived with the confirm pre-armed,
+  // which defeats the entire point of the gate.
+  const openModal = () => {
+    setAck(false);
+    setModalOpen(true);
+  };
+  const closeModal = () => {
+    if (estornar.isPending) return;
+    setAck(false);
+    setModalOpen(false);
+  };
   const provedor = pagamento.transacaoExterna?.provedor ?? "stripe";
   const isInter = provedor === "inter";
 
@@ -108,8 +122,8 @@ export function EstornoBlock({ pagamento }: { pagamento: PagamentoDTO }) {
       },
       {
         onSuccess: () => {
-          setModalOpen(false);
           setAck(false);
+          setModalOpen(false);
         },
       },
     );
@@ -133,7 +147,7 @@ export function EstornoBlock({ pagamento }: { pagamento: PagamentoDTO }) {
         ) : (
           <button
             type="button"
-            onClick={() => setModalOpen(true)}
+            onClick={openModal}
             className="inline-flex items-center gap-2 rounded-md border border-red-300 bg-red-50 px-4 py-2 font-mono text-[12px] uppercase tracking-[0.14em] text-red-800 transition-colors hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:opacity-50"
           >
             estornar pagamento
@@ -171,7 +185,7 @@ export function EstornoBlock({ pagamento }: { pagamento: PagamentoDTO }) {
           <div
             aria-hidden="true"
             className="absolute inset-0 bg-ink/30 backdrop-blur-[1px]"
-            onClick={() => !estornar.isPending && setModalOpen(false)}
+            onClick={closeModal}
           />
           <div className="relative w-full max-w-md space-y-4 rounded-lg border border-line bg-paper p-6 shadow-lg">
             <h4 className="font-mono text-[13px] uppercase tracking-[0.14em] text-ink">
@@ -236,7 +250,7 @@ export function EstornoBlock({ pagamento }: { pagamento: PagamentoDTO }) {
             <div className="flex justify-end gap-2">
               <button
                 type="button"
-                onClick={() => setModalOpen(false)}
+                onClick={closeModal}
                 disabled={estornar.isPending}
                 className="inline-flex items-center gap-2 rounded-md border border-stone-300 bg-stone-50 px-4 py-2 font-mono text-[12px] uppercase tracking-[0.14em] text-stone-700 transition-colors hover:bg-stone-100 focus:outline-none focus:ring-2 focus:ring-stone-300 disabled:opacity-50"
               >
@@ -274,21 +288,43 @@ function EstornoResultStrip({
   estornado: boolean;
   devolucaoStatus: "em_processamento" | "devolvida" | "nao_realizada" | "rejeitada" | null;
 }) {
-  const pendingInter = refundStatus === "em_processamento" && devolucaoStatus !== "devolvida";
-  const label = pendingInter
-    ? "estorno solicitado — aguardando o banco"
-    : "pagamento estornado";
-  const classes = pendingInter
-    ? "border-amber-300 bg-amber-50 text-amber-800"
-    : "border-emerald-300 bg-emerald-50 text-emerald-800";
-  // estornado-without-fresh-mutation: settled long ago, render settled.
-  const settled = estornado && refundStatus === null;
+  // aperture-irhxi QA (Izzy, 2nd hold): EXPLICIT tri-state — the old
+  // binary devolvida-check dressed a terminal bank failure in the amber
+  // pending copy, contradicting the red badge beside it. An admin must
+  // never read "aguardando o banco" over a refund that FAILED and needs
+  // manual follow-up.
+  type StripState = "pending" | "success" | "failure";
+  const failed = devolucaoStatus === "nao_realizada" || devolucaoStatus === "rejeitada";
+  const state: StripState = failed
+    ? "failure"
+    : refundStatus === "em_processamento" && devolucaoStatus !== "devolvida"
+      ? "pending"
+      : "success"; // aceito / devolvida / settled estornado (refundStatus null)
+  const STRIP: Record<StripState, { label: string; classes: string }> = {
+    pending: {
+      label: "estorno solicitado — aguardando o banco",
+      classes: "border-amber-300 bg-amber-50 text-amber-800",
+    },
+    success: {
+      label: "pagamento estornado",
+      classes: "border-emerald-300 bg-emerald-50 text-emerald-800",
+    },
+    failure: {
+      label: "devolução falhou — requer ação manual",
+      classes: "border-red-300 bg-red-50 text-red-800",
+    },
+  };
+  // `estornado` settled-state renders through the success arm (refundStatus
+  // null falls to "success") — kept explicit for readers: a long-settled
+  // estornado card with a terminal-FAILED devolução record still shows
+  // failure (the record outranks the flag).
+  void estornado;
   return (
     <span
-      className={`inline-flex items-center rounded-md border px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.14em] ${settled ? "border-emerald-300 bg-emerald-50 text-emerald-800" : classes}`}
+      className={`inline-flex items-center rounded-md border px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.14em] ${STRIP[state].classes}`}
       data-testid="estorno-result"
     >
-      {settled ? "pagamento estornado" : label}
+      {STRIP[state].label}
     </span>
   );
 }

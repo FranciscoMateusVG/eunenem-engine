@@ -1580,6 +1580,16 @@ const pagamentosRouter = t.router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      // aperture-irhxi QA (Izzy/GLaDOS hold 3 — cross-PLATFORM authz gap):
+      // adminProcedure only proves the CALLER is an allowlisted EuNeném
+      // admin; it does NOT bind the TARGET payment to EuNeném. This engine
+      // serves multiple platforms — without this guard a EuNeném admin who
+      // knows a EuCasei payment UUID could move that platform's money. The
+      // guard runs BEFORE any use-case / provider / repository I/O: it
+      // findById's the pagamento, resolves its campanha, and throws
+      // FORBIDDEN (tenant_mismatch) for non-EuNeném platforms / NOT_FOUND
+      // for unknown ids — the exact check findById already uses.
+      await resolveAdminPagamentoContext(ctx, input.idPagamento);
       try {
         const result = await estornarPagamento(
           {
@@ -1667,6 +1677,10 @@ const pagamentosRouter = t.router({
       }),
     )
     .query(async ({ ctx, input }) => {
+      // aperture-irhxi QA (hold 3): same cross-platform guard as estornar —
+      // reading another platform's refund lifecycle is also a tenant leak.
+      // Runs before the devolução-repository read.
+      await resolveAdminPagamentoContext(ctx, input.idPagamento);
       const record = await ctx.deps.pixCobrancaDevolucaoRepository.findByPagamentoId(
         input.idPagamento as never,
       );

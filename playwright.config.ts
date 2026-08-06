@@ -153,7 +153,14 @@ export default defineConfig({
           // Stripe iframe. Deliberately NOT set on :3002 — that would break
           // visitor-cart-checkout.spec.ts's pix-to-Stripe-iframe path.
           // Serves e2e/kuw0o-pix-qr-checkout.spec.ts.
-          makeServer(3004, { COBRANCA_PIX_PROVIDER: 'fake' }),
+          // aperture-4uvgf: ADMIN_ALLOWED_EMAILS added so the Inter-provenance
+          // admin-estorno walk (4uvgf-admin-estorno.spec.ts) can drive
+          // /admin/pagamento/:id against the fake-PIX binding — without it
+          // adminProcedure 403s every admin call on this server.
+          makeServer(3004, {
+            COBRANCA_PIX_PROVIDER: 'fake',
+            ADMIN_ALLOWED_EMAILS: process.env.ADMIN_ALLOWED_EMAILS ?? 'e2e-admin@e2e.local',
+          }),
         ],
       }),
 });
