@@ -40,11 +40,18 @@ import {
   cancelarRepasseRecebedor,
   type CatalogoAuditJsonObject,
   CatalogoConflictError,
+  estornarPagamento,
   FinanceiroInputInvalidoError,
   FinanceiroRepasseNaoEncontradoError,
   FinanceiroRepasseStatusInvalidoError,
   ID_PLATAFORMA_EUNENEM,
   MAX_CATALOGO_IMAGEM_SIZE_BYTES,
+  PagamentoEstornoLancamentoJaTransferidoError,
+  PagamentoEstornoPixNaoConcluidoError,
+  PagamentoEstornoPixVinculoInvalidoError,
+  PagamentoEstornoRecusadoPeloProvedorError,
+  PagamentoNaoEncontradoError,
+  PagamentoTransicaoStatusInvalidaError,
   resolverManualFalhouRepasse,
   resolverManualPagoRepasse,
   retentarTransferenciaRepasse,
@@ -1533,6 +1540,158 @@ const pagamentosRouter = t.router({
           lancamentos: lancamentos.map(toLancamentoAdminDTO),
         },
         webhookEvents: webhookRecords.map(toWebhookEventAdminDTO),
+      };
+    }),
+
+  /**
+   * aperture-4uvgf — admin refund trigger (the missing caller for B6's
+   * estornarPagamento machinery; spec §10.6 requires this to be literally
+   * walkable for BOTH provenances).
+   *
+   * This mutation is a THIN WRAPPER: every money-safety rule lives inside
+   * the use-case and is NOT duplicated here — the 409 lançamento gate
+   * (PagamentoEstornoLancamentoJaTransferidoError precedes every external
+   * money call), the aprovado/estornado status guard, the provenance
+   * routing (transacaoExterna.provedor → Stripe refund vs Inter
+   * devolução), and the replay-safe already-estornado path. The only
+   * authz this layer adds is adminProcedure's server-side allowlist —
+   * satisfying Cipher checklist #5 (devolução callable only through the
+   * existing estorno use-case behind its gate; no new public money-out
+   * semantics).
+   *
+   * `reason` is Stripe-only (threaded to refundarPagamento); the Inter
+   * path ignores it. Result carries the ACTUAL refund status — 'aceito'
+   * (Stripe, synchronous), 'em_processamento' (Inter, webhook will
+   * finalize), or 'devolvida' (Inter, already verified) — so the UI can
+   * show truth instead of fire-and-forget.
+   */
+  estornar: adminProcedure
+    .input(
+      z.object({
+        idPagamento: z.string().uuid(),
+        reason: z.enum(["duplicate", "fraudulent", "requested_by_customer"]).optional(),
+      }),
+    )
+    .output(
+      z.object({
+        refundId: z.string(),
+        refundStatus: z.enum(["aceito", "em_processamento", "devolvida"]),
+        pagamentoStatus: PagamentoStatusSchema,
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      // aperture-irhxi QA (Izzy/GLaDOS hold 3 — cross-PLATFORM authz gap):
+      // adminProcedure only proves the CALLER is an allowlisted EuNeném
+      // admin; it does NOT bind the TARGET payment to EuNeném. This engine
+      // serves multiple platforms — without this guard a EuNeném admin who
+      // knows a EuCasei payment UUID could move that platform's money. The
+      // guard runs BEFORE any use-case / provider / repository I/O: it
+      // findById's the pagamento, resolves its campanha, and throws
+      // FORBIDDEN (tenant_mismatch) for non-EuNeném platforms / NOT_FOUND
+      // for unknown ids — the exact check findById already uses.
+      await resolveAdminPagamentoContext(ctx, input.idPagamento);
+      try {
+        const result = await estornarPagamento(
+          {
+            pagamentoRepository: ctx.deps.pagamentoRepository,
+            pagamentoProvider: ctx.deps.pagamentoProvider,
+            pixCobrancaProvider: ctx.deps.pixCobrancaProvider,
+            pixCobrancaDevolucaoRepository: ctx.deps.pixCobrancaDevolucaoRepository,
+            pagamentoEventPublisher: ctx.deps.pagamentoEventPublisher,
+            livroFinanceiroRepository: ctx.deps.livroFinanceiroRepository,
+            clock: ctx.deps.clock,
+            observability: ctx.deps.observability,
+          },
+          {
+            idPagamento: input.idPagamento as never,
+            ...(input.reason ? { reason: input.reason } : {}),
+          },
+        );
+
+        return {
+          refundId: result.refundId,
+          refundStatus: result.refundStatus,
+          pagamentoStatus: result.pagamento.status,
+        };
+      } catch (error: unknown) {
+        if (error instanceof PagamentoNaoEncontradoError) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "pagamento_nao_encontrado",
+          });
+        }
+        if (error instanceof PagamentoTransicaoStatusInvalidaError) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "pagamento_status_invalido",
+          });
+        }
+        if (error instanceof PagamentoEstornoLancamentoJaTransferidoError) {
+          // The use-case's 409 gate: repasse money already left the house.
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "lancamento_ja_transferido",
+          });
+        }
+        if (error instanceof PagamentoEstornoRecusadoPeloProvedorError) {
+          throw new TRPCError({
+            code: "BAD_GATEWAY",
+            message: "estorno_recusado_pelo_provedor",
+          });
+        }
+        if (error instanceof PagamentoEstornoPixNaoConcluidoError) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: `devolucao_${error.status}`,
+          });
+        }
+        if (error instanceof PagamentoEstornoPixVinculoInvalidoError) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "devolucao_vinculo_invalido",
+          });
+        }
+        throw error;
+      }
+    }),
+
+  /**
+   * aperture-4uvgf — devolução status read for the refund UI. Inter
+   * devoluções are ASYNC (em_processamento → the webhook's verify-then-
+   * finalize flips them); this read lets the admin surface poll the
+   * persisted record until a terminal state. Stripe payments have no
+   * devolução row → null.
+   */
+  devolucaoStatus: adminProcedure
+    .input(z.object({ idPagamento: z.string().uuid() }))
+    .output(
+      z.object({
+        devolucao: z
+          .object({
+            status: z.enum(["em_processamento", "devolvida", "nao_realizada", "rejeitada"]),
+            idDevolucao: z.string(),
+            rtrId: z.string().nullable(),
+            atualizadoEm: z.string(),
+          })
+          .nullable(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      // aperture-irhxi QA (hold 3): same cross-platform guard as estornar —
+      // reading another platform's refund lifecycle is also a tenant leak.
+      // Runs before the devolução-repository read.
+      await resolveAdminPagamentoContext(ctx, input.idPagamento);
+      const record = await ctx.deps.pixCobrancaDevolucaoRepository.findByPagamentoId(
+        input.idPagamento as never,
+      );
+      if (!record) return { devolucao: null };
+      return {
+        devolucao: {
+          status: record.status,
+          idDevolucao: record.idDevolucao,
+          rtrId: record.rtrId ?? null,
+          atualizadoEm: record.atualizadoEm.toISOString(),
+        },
       };
     }),
 });
