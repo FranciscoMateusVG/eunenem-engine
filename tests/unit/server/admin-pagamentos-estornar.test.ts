@@ -22,7 +22,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ServerDeps } from '../../../apps/eunenem-server/server/auth/setup.js';
 import type { TrpcContext } from '../../../apps/eunenem-server/server/trpc/context.js';
 import { appRouter } from '../../../apps/eunenem-server/server/trpc/router.js';
@@ -78,6 +78,9 @@ interface TestRig {
   caller: ReturnType<typeof appRouter.createCaller>;
   pagamentoRepository: PagamentoRepositoryMemory;
   livroFinanceiroRepository: LivroFinanceiroRepositoryMemory;
+  /** The STRIPE refund provider — the branch a Stripe-provenance estorno
+   *  would hit; spied to prove the tenant guard blocks BEFORE it. */
+  pagamentoProvider: PagamentoProviderFake;
   pixCobrancaProvider: PixCobrancaProviderFake;
   pixCobrancaDevolucaoRepository: PixCobrancaDevolucaoRepositoryMemory;
   /** Same deps, but the session email is NOT in the admin allowlist. */
@@ -145,6 +148,7 @@ function buildRig(): TestRig {
     caller: appRouter.createCaller(ctx),
     pagamentoRepository,
     livroFinanceiroRepository,
+    pagamentoProvider,
     pixCobrancaProvider,
     pixCobrancaDevolucaoRepository,
     nonAdminCaller: appRouter.createCaller(nonAdminCtx),
@@ -373,14 +377,20 @@ describe('admin.pagamentos.estornar (aperture-4uvgf)', () => {
     });
     await seedLancamentoRecebedor(rig, pagamento);
 
+    // Spy the STRIPE refund method — the branch THIS (stripe-provenance)
+    // estorno would actually take. Asserting the Inter provider is untouched
+    // proves nothing here (wrong branch — Izzy's regression-proof HOLD).
+    const refundSpy = vi.spyOn(rig.pagamentoProvider, 'refundarPagamento');
+
     await expect(
       rig.caller.admin.pagamentos.estornar({ idPagamento: pagamento.id }),
     ).rejects.toMatchObject({ code: 'FORBIDDEN' });
 
-    // No money moved, no provider call, no ledger cancellation.
+    // The guard fired BEFORE any money call: refund never invoked, status
+    // unchanged, ledger not cancelled.
+    expect(refundSpy).not.toHaveBeenCalled();
     const persisted = await rig.pagamentoRepository.findById(pagamento.id);
     expect(persisted?.status).toBe('aprovado');
-    expect(rig.pixCobrancaProvider.solicitarDevolucaoCalls).toBe(0);
     const lancamentos = await rig.livroFinanceiroRepository.findLancamentosByIdPagamento(
       pagamento.id,
     );
@@ -406,13 +416,19 @@ describe('admin.pagamentos.devolucaoStatus (aperture-4uvgf)', () => {
 
   // aperture-irhxi QA (hold 3): reading a cross-platform payment's refund
   // lifecycle is also a tenant leak — the same guard blocks it.
-  it('rejects devolucaoStatus on a cross-platform pagamento with FORBIDDEN', async () => {
+  it('rejects devolucaoStatus on a cross-platform pagamento with FORBIDDEN — devolução repo untouched', async () => {
     const pagamento = await seedAprovadoStripe(rig, {
       idPlataforma: 'PLATAFORMA_EUCASEI_00000000000000000',
     });
 
+    // Prove the guard blocks BEFORE the devolução read — the exact
+    // downstream method this endpoint would call (Izzy's HOLD).
+    const readSpy = vi.spyOn(rig.pixCobrancaDevolucaoRepository, 'findByPagamentoId');
+
     await expect(
       rig.caller.admin.pagamentos.devolucaoStatus({ idPagamento: pagamento.id }),
     ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+
+    expect(readSpy).not.toHaveBeenCalled();
   });
 });
