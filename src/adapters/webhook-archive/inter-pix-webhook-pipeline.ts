@@ -8,6 +8,8 @@ export const INTER_PIX_REFUND_EVENT_TYPE = 'pix.devolucao';
 export const INTER_PIX_SIGNATURE_SENTINEL = 'not-provided-by-inter';
 export const INTER_PIX_MAX_ITEMS = 100;
 export const INTER_PIX_MAX_REFUNDS_PER_ITEM = 20;
+export const INTER_PIX_MAX_REFUNDS_PER_ENVELOPE = 20;
+export const INTER_PIX_MAX_PARSED_EVENTS = 100;
 export const INTER_PIX_MAX_ARCHIVED_PROJECTION_BYTES = 128;
 
 const RefundHintSchema = z
@@ -27,6 +29,8 @@ const PixHintSchema = z
 const InterPixEnvelopeSchema = z.object({
   pix: z.array(PixHintSchema).min(1).max(INTER_PIX_MAX_ITEMS),
 });
+
+type PixHint = z.infer<typeof PixHintSchema>;
 
 export interface InterPixChargeConfirmed {
   readonly pagamentoId: string;
@@ -66,8 +70,11 @@ export interface InterPixPipelineArgs {
     confirmed: InterPixChargeConfirmed,
   ) => Promise<InterPixDispatchResult>;
   /**
-   * Binds the untrusted webhook txid to an eligible local Inter payment.
-   * This check MUST finish before any provider API request is attempted.
+   * Atomically binds the untrusted webhook txid to an eligible local Inter
+   * payment AND acquires its durable provider-read lease. This check MUST
+   * finish before any provider API request is attempted. Returning null
+   * covers unknown/ineligible txids and a live lease held by another webhook
+   * or the B4 reconciliation worker.
    */
   readonly resolveChargeBinding: (
     identity: InterPixChargeIdentity,
@@ -171,6 +178,75 @@ export async function archiveAndDispatchInterPixWebhook(
   return { status: 200, body: 'ok', outcome: 'accepted', items };
 }
 
+function exceedsEnvelopeWorkCaps(pixItems: readonly PixHint[]): boolean {
+  let refundCount = 0;
+  let expandedEventCount = 0;
+  for (const pix of pixItems) {
+    const itemRefundCount = pix.devolucoes?.length ?? 0;
+    refundCount += itemRefundCount;
+    expandedEventCount += Math.max(1, itemRefundCount);
+  }
+  return (
+    refundCount > INTER_PIX_MAX_REFUNDS_PER_ENVELOPE ||
+    expandedEventCount > INTER_PIX_MAX_PARSED_EVENTS
+  );
+}
+
+function registerChargeIdentity(
+  pix: PixHint,
+  e2eByTxid: Map<string, string>,
+  txidByE2e: Map<string, string>,
+): boolean {
+  const existingE2e = e2eByTxid.get(pix.txid);
+  const existingTxid = txidByE2e.get(pix.endToEndId);
+  if (
+    (existingE2e !== undefined && existingE2e !== pix.endToEndId) ||
+    (existingTxid !== undefined && existingTxid !== pix.txid)
+  ) {
+    return false;
+  }
+  e2eByTxid.set(pix.txid, pix.endToEndId);
+  txidByE2e.set(pix.endToEndId, pix.txid);
+  return true;
+}
+
+function appendEventsForPix(events: Map<string, ParsedEvent>, pix: PixHint): void {
+  const refunds = pix.devolucoes ?? [];
+  if (refunds.length > 0) {
+    for (const refund of refunds) {
+      const providerEventId = `${pix.endToEndId}:devolucao:${refund.id}`;
+      if (events.has(providerEventId)) continue;
+      events.set(providerEventId, {
+        providerEventId,
+        eventType: INTER_PIX_REFUND_EVENT_TYPE,
+        archivePayload: {
+          endToEndId: pix.endToEndId,
+          idDevolucao: refund.id,
+        },
+        hint: {
+          kind: 'refund',
+          e2eId: pix.endToEndId,
+          idDevolucao: refund.id,
+        },
+      });
+    }
+    return;
+  }
+
+  // Inter does not provide a signed event id. The durable charge identity
+  // must therefore include BOTH txid and e2e. Keying only by e2e allowed a
+  // failed {txid:A,e2e:E} row to be retried as {txid:B,e2e:E} and then
+  // linked to payment B while its immutable projection still named A.
+  const providerEventId = `${pix.txid}:${pix.endToEndId}`;
+  if (events.has(providerEventId)) return;
+  events.set(providerEventId, {
+    providerEventId,
+    eventType: INTER_PIX_CHARGE_EVENT_TYPE,
+    archivePayload: { txid: pix.txid, endToEndId: pix.endToEndId },
+    hint: { kind: 'charge', txid: pix.txid, e2eId: pix.endToEndId },
+  });
+}
+
 function parseEnvelope(rawBody: string): readonly ParsedEvent[] | null {
   let raw: unknown;
   try {
@@ -181,38 +257,28 @@ function parseEnvelope(rawBody: string): readonly ParsedEvent[] | null {
 
   const parsed = InterPixEnvelopeSchema.safeParse(raw);
   if (!parsed.success) return null;
-  const events: ParsedEvent[] = [];
 
-  parsed.data.pix.forEach((pix) => {
-    const refunds = pix.devolucoes ?? [];
-    if (refunds.length > 0) {
-      for (const refund of refunds) {
-        events.push({
-          providerEventId: `${pix.endToEndId}:devolucao:${refund.id}`,
-          eventType: INTER_PIX_REFUND_EVENT_TYPE,
-          archivePayload: {
-            endToEndId: pix.endToEndId,
-            idDevolucao: refund.id,
-          },
-          hint: {
-            kind: 'refund',
-            e2eId: pix.endToEndId,
-            idDevolucao: refund.id,
-          },
-        });
-      }
-      return;
+  // Validate the raw fan-out before deduplication or any durable/external
+  // work. Per-item array limits are insufficient here: 100 PIX entries with
+  // 20 refunds each would otherwise expand one unsigned request into 2,000
+  // archive writes and provider reads.
+  if (exceedsEnvelopeWorkCaps(parsed.data.pix)) return null;
+
+  const events = new Map<string, ParsedEvent>();
+  const e2eByTxid = new Map<string, string>();
+  const txidByE2e = new Map<string, string>();
+
+  for (const pix of parsed.data.pix) {
+    if (!registerChargeIdentity(pix, e2eByTxid, txidByE2e)) {
+      // A charge has one txid/e2e identity. Ambiguous mappings are rejected
+      // atomically rather than letting source order choose which untrusted
+      // hint gets the single authoritative provider read.
+      return null;
     }
+    appendEventsForPix(events, pix);
+  }
 
-    events.push({
-      providerEventId: pix.endToEndId,
-      eventType: INTER_PIX_CHARGE_EVENT_TYPE,
-      archivePayload: { txid: pix.txid, endToEndId: pix.endToEndId },
-      hint: { kind: 'charge', txid: pix.txid, e2eId: pix.endToEndId },
-    });
-  });
-
-  return events;
+  return [...events.values()];
 }
 
 async function processEvent(

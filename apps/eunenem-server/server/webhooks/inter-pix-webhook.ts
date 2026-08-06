@@ -16,6 +16,13 @@ const tracer = trace.getTracer('eunenem-server');
 export const INTER_PIX_WEBHOOK_MAX_BODY_BYTES = 256 * 1024;
 export const INTER_PIX_WEBHOOK_RATE_LIMIT_MAX = 600;
 export const INTER_PIX_WEBHOOK_RATE_LIMIT_WINDOW_MS = 60_000;
+/**
+ * One unsigned callback may cause at most one provider read per known txid
+ * during a rate-limit window. The durable repository lease is shared with
+ * B4 reconciliation, so another process cannot race this cooldown and a
+ * crashed worker becomes reclaimable after expiry.
+ */
+export const INTER_PIX_WEBHOOK_PROVIDER_READ_LEASE_MS = 60_000;
 export const INTER_PIX_WEBHOOK_PATHS = [
   '/api/webhooks/inter/pix',
   '/api/webhooks/inter/pix/pix',
@@ -104,26 +111,16 @@ export function createInterPixWebhookHandler(
           rawBody,
           pixCobrancaProvider: deps.pixCobrancaProvider,
           resolveChargeBinding: async (identity) => {
-            const pagamento = await deps.pagamentoRepository.findByExternalRef(identity.txid);
-            if (!pagamento) return null;
-
-            const isDeterministicInterTxid =
-              identity.txid === pagamento.id.replaceAll('-', '') &&
-              pagamento.intencao.metodo === 'pix' &&
-              pagamento.intencao.externalRef === identity.txid;
-            if (!isDeterministicInterTxid) return null;
-
-            const isAwaitingSettlement =
-              pagamento.status === 'pendente' || pagamento.status === 'processing';
-            const isExactApprovedReplay =
-              pagamento.status === 'aprovado' &&
-              pagamento.intencao.e2eExternalRef === identity.e2eId &&
-              pagamento.transacaoExterna?.provedor === 'inter' &&
-              pagamento.transacaoExterna.id === identity.e2eId &&
-              pagamento.transacaoExterna.status === 'aprovado';
-            if (!isAwaitingSettlement && !isExactApprovedReplay) return null;
-
-            return { pagamentoId: pagamento.id, txid: identity.txid };
+            const now = deps.clock();
+            const pagamentoId =
+              await deps.pagamentoRepository.claimPixCobrancaProviderReadByTxid({
+                txid: identity.txid,
+                now,
+                leaseUntil: new Date(now.getTime() + INTER_PIX_WEBHOOK_PROVIDER_READ_LEASE_MS),
+              });
+            return pagamentoId === undefined
+              ? null
+              : { pagamentoId, txid: identity.txid };
           },
           onChargeConfirmed: async (confirmed) => {
             const finalized = await finalizarPagamentoAprovadoComTransacaoVerificada(

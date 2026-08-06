@@ -86,7 +86,7 @@ describe('Banco Inter Pix webhook HTTP shell', () => {
     const txid = 'A'.repeat(26);
     const e2eId = 'E'.repeat(32);
     const consultarCobranca = vi.fn();
-    const findByExternalRef = vi.fn().mockResolvedValue(undefined);
+    const claimPixCobrancaProviderReadByTxid = vi.fn().mockResolvedValue(undefined);
     const archive = new WebhookEventArchiveMemory(() => new Date('2026-08-05T12:30:00.000Z'));
     const app = new Hono();
     mountInterPixWebhookRoutes(
@@ -94,7 +94,7 @@ describe('Banco Inter Pix webhook HTTP shell', () => {
       {
         ...routeDeps(),
         webhookEventArchive: archive,
-        pagamentoRepository: { findByExternalRef },
+        pagamentoRepository: { claimPixCobrancaProviderReadByTxid },
         pixCobrancaProvider: { consultarCobranca },
       } as unknown as InterPixWebhookDeps,
       {
@@ -114,13 +114,119 @@ describe('Banco Inter Pix webhook HTTP shell', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(findByExternalRef).toHaveBeenCalledTimes(1);
-    expect(findByExternalRef).toHaveBeenCalledWith(txid);
+    expect(claimPixCobrancaProviderReadByTxid).toHaveBeenCalledTimes(1);
+    expect(claimPixCobrancaProviderReadByTxid).toHaveBeenCalledWith({
+      txid,
+      now: new Date('2026-08-05T12:00:00.000Z'),
+      leaseUntil: new Date('2026-08-05T12:01:00.000Z'),
+    });
     expect(consultarCobranca).not.toHaveBeenCalled();
-    await expect(archive.findByProviderEventId('inter', e2eId)).resolves.toMatchObject({
-      rawPayload: { txid, endToEndId: e2eId },
+    await expect(archive.findByProviderEventId('inter', `${txid}:${e2eId}`)).resolves.toMatchObject(
+      {
+        rawPayload: { txid, endToEndId: e2eId },
+        processingError: 'charge_binding_failed',
+        processedAt: null,
+      },
+    );
+  });
+
+  it('suppresses a second provider read for the same eligible txid during the durable lease', async () => {
+    const txid = 'A'.repeat(26);
+    const firstE2eId = 'E'.repeat(32);
+    const secondE2eId = 'F'.repeat(32);
+    const claimPixCobrancaProviderReadByTxid = vi
+      .fn()
+      .mockResolvedValueOnce('00000000-0000-4000-8000-000000000001')
+      .mockResolvedValueOnce(undefined);
+    const consultarCobranca = vi.fn().mockResolvedValue({
+      status: 'ativa',
+      e2eId: null,
+      valorPagoCents: 0,
+      horario: null,
+    });
+    const archive = new WebhookEventArchiveMemory(() => new Date('2026-08-05T12:30:00.000Z'));
+    const app = new Hono();
+    mountInterPixWebhookRoutes(
+      app,
+      {
+        ...routeDeps(),
+        webhookEventArchive: archive,
+        pagamentoRepository: { claimPixCobrancaProviderReadByTxid },
+        pixCobrancaProvider: { consultarCobranca },
+      } as unknown as InterPixWebhookDeps,
+      {
+        consumeRateLimit: vi.fn().mockResolvedValue({
+          allowed: true,
+          count: 1,
+          max: 600,
+          windowMs: 60_000,
+        }),
+      },
+    );
+
+    const first = await app.request(INTER_PIX_WEBHOOK_PATHS[0], {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pix: [{ txid, endToEndId: firstE2eId }] }),
+    });
+    const second = await app.request(INTER_PIX_WEBHOOK_PATHS[0], {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pix: [{ txid, endToEndId: secondE2eId }] }),
+    });
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(claimPixCobrancaProviderReadByTxid).toHaveBeenCalledTimes(2);
+    expect(consultarCobranca).toHaveBeenCalledTimes(1);
+    await expect(
+      archive.findByProviderEventId('inter', `${txid}:${secondE2eId}`),
+    ).resolves.toMatchObject({
       processingError: 'charge_binding_failed',
       processedAt: null,
     });
+  });
+
+  it('rejects 100 conflicting e2e hints for one txid before archive, claim, or provider work', async () => {
+    const txid = 'A'.repeat(26);
+    const claimPixCobrancaProviderReadByTxid = vi.fn();
+    const consultarCobranca = vi.fn();
+    const archive = new WebhookEventArchiveMemory();
+    const saveReceived = vi.spyOn(archive, 'saveReceived');
+    const app = new Hono();
+    mountInterPixWebhookRoutes(
+      app,
+      {
+        ...routeDeps(),
+        webhookEventArchive: archive,
+        pagamentoRepository: { claimPixCobrancaProviderReadByTxid },
+        pixCobrancaProvider: { consultarCobranca },
+      } as unknown as InterPixWebhookDeps,
+      {
+        consumeRateLimit: vi.fn().mockResolvedValue({
+          allowed: true,
+          count: 1,
+          max: 600,
+          windowMs: 60_000,
+        }),
+      },
+    );
+
+    const response = await app.request(INTER_PIX_WEBHOOK_PATHS[0], {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        pix: Array.from({ length: 100 }, (_, index) => ({
+          txid,
+          endToEndId: String(index).padStart(32, '0'),
+        })),
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.text()).resolves.toBe('invalid event shape');
+    expect(saveReceived).not.toHaveBeenCalled();
+    expect(claimPixCobrancaProviderReadByTxid).not.toHaveBeenCalled();
+    expect(consultarCobranca).not.toHaveBeenCalled();
   });
 });

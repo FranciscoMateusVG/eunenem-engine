@@ -21,6 +21,7 @@ import type { Database } from '../database.js';
 import type { DB } from '../db-types.generated.js';
 import type {
   AdminRecadoRow,
+  ClaimPixCobrancaProviderReadByTxidInput,
   ClaimPixCobrancaReconciliationCandidatesInput,
   MuralRecadoProjection,
   PagamentoRepository,
@@ -232,6 +233,48 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
         span.end();
       }
     });
+  }
+
+  async claimPixCobrancaProviderReadByTxid(
+    input: ClaimPixCobrancaProviderReadByTxidInput,
+  ): Promise<IdPagamento | undefined> {
+    return tracer.startActiveSpan(
+      'db.pagamentos.claimPixCobrancaProviderReadByTxid',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+        try {
+          interface ClaimedRow {
+            id_pagamento: string;
+          }
+
+          // The txid unique index narrows this to at most one row. Keeping the
+          // binding predicate and lease CAS in the same UPDATE means concurrent
+          // webhook deliveries and the scheduled reconciler share one owner.
+          const result = await sql<ClaimedRow>`
+          UPDATE pagamentos AS p
+          SET pix_reconciliacao_claimed_until = ${input.leaseUntil}
+          WHERE p.intencao_external_ref = ${input.txid}
+            AND p.intencao_external_ref = replace(p.id::text, '-', '')
+            AND p.intencao_metodo = 'pix'
+            AND p.status IN ('pendente', 'processing')
+            AND (
+              p.pix_reconciliacao_claimed_until IS NULL
+              OR p.pix_reconciliacao_claimed_until <= ${input.now}
+            )
+          RETURNING p.id AS id_pagamento
+        `.execute(this.db);
+
+          span.setStatus({ code: SpanStatusCode.OK });
+          return result.rows[0]?.id_pagamento as IdPagamento | undefined;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
   }
 
   async claimPixCobrancaReconciliationCandidates(

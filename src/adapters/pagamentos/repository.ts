@@ -83,6 +83,12 @@ export interface ClaimPixCobrancaReconciliationCandidatesInput {
   readonly limit: number;
 }
 
+export interface ClaimPixCobrancaProviderReadByTxidInput {
+  readonly txid: string;
+  readonly now: Date;
+  readonly leaseUntil: Date;
+}
+
 /**
  * Persistência de Pagamentos (porta).
  *
@@ -113,6 +119,15 @@ export interface PagamentoRepository {
     pagamento: Pagamento,
     expectedStatuses: readonly StatusPagamento[],
   ): Promise<boolean>;
+  /**
+   * Atomically binds a deterministic Banco Inter txid to a local PIX payment
+   * and claims the shared provider-read lease. The claim is deliberately not
+   * released by webhook processing: its expiry is the retry cooldown and lets
+   * the scheduled reconciliation job recover the payment later.
+   */
+  claimPixCobrancaProviderReadByTxid(
+    input: ClaimPixCobrancaProviderReadByTxidInput,
+  ): Promise<IdPagamento | undefined>;
   /**
    * Atomically leases due PIX intents for reconciliation. Eligible rows
    * are pending/processing, expired, deterministically addressed by

@@ -9,6 +9,7 @@ import { PagamentoJaExisteError } from '../../errors/pagamentos/ja-existe.error.
 import { PagamentoNaoEncontradoError } from '../../errors/pagamentos/nao-encontrado.error.js';
 import type {
   AdminRecadoRow,
+  ClaimPixCobrancaProviderReadByTxidInput,
   ClaimPixCobrancaReconciliationCandidatesInput,
   MuralRecadoProjection,
   PagamentoRepository,
@@ -102,6 +103,51 @@ export class PagamentoRepositoryMemory implements PagamentoRepository {
         span.end();
       }
     });
+  }
+
+  async claimPixCobrancaProviderReadByTxid(
+    input: ClaimPixCobrancaProviderReadByTxidInput,
+  ): Promise<IdPagamento | undefined> {
+    return tracer.startActiveSpan(
+      'db.pagamentos.claimPixCobrancaProviderReadByTxid',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+        try {
+          const pagamento = [...this.pagamentos.values()].find(
+            (candidate) => candidate.intencao.externalRef === input.txid,
+          );
+          const lease = pagamento
+            ? this.pixReconciliacaoClaimedUntilByIdPagamento.get(pagamento.id)
+            : undefined;
+          const eligible =
+            pagamento !== undefined &&
+            pagamento.intencao.externalRef === pagamento.id.replaceAll('-', '') &&
+            pagamento.intencao.metodo === 'pix' &&
+            (pagamento.status === 'pendente' || pagamento.status === 'processing') &&
+            (lease === undefined || lease.getTime() <= input.now.getTime());
+
+          if (!eligible || pagamento === undefined) {
+            span.setStatus({ code: SpanStatusCode.OK });
+            return undefined;
+          }
+
+          // No await occurs between eligibility and the write, mirroring the
+          // atomic UPDATE used by PostgreSQL for concurrent callers.
+          this.pixReconciliacaoClaimedUntilByIdPagamento.set(
+            pagamento.id,
+            new Date(input.leaseUntil),
+          );
+          span.setStatus({ code: SpanStatusCode.OK });
+          return pagamento.id;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
   }
 
   async claimPixCobrancaReconciliationCandidates(

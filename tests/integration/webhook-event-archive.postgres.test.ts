@@ -1,8 +1,11 @@
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { PixCobrancaProvider } from '../../src/adapters/pagamentos/pix-cobranca-provider.js';
+import { PagamentoRepositoryPostgres } from '../../src/adapters/pagamentos/repository.postgres.js';
 import { archiveAndDispatchInterPixWebhook } from '../../src/adapters/webhook-archive/inter-pix-webhook-pipeline.js';
 import { WebhookEventArchivePostgres } from '../../src/adapters/webhook-archive/webhook-event-archive.postgres.js';
+import { makePagamento } from '../helpers/pagamento-repository.conformance.js';
+import { seedPagamentoParents } from '../helpers/seed-pagamento-parents.js';
 import { createTestDatabase, type TestDatabase } from '../helpers/test-db.js';
 import { describeWebhookEventArchiveConformance } from '../helpers/webhook-event-archive.conformance.js';
 
@@ -95,8 +98,8 @@ describe('Inter Pix pipeline + real Postgres archive composition', () => {
       amountCents: 2000,
       horario: new Date('2026-08-05T12:00:00.000Z'),
     });
-    const archivedA = await archive.findByProviderEventId('inter', e2eA);
-    const archivedB = await archive.findByProviderEventId('inter', e2eB);
+    const archivedA = await archive.findByProviderEventId('inter', `${txidA}:${e2eA}`);
+    const archivedB = await archive.findByProviderEventId('inter', `${txidB}:${e2eB}`);
     expect(archivedA).toMatchObject({
       signatureValid: false,
       processedAt: expect.any(Date),
@@ -115,6 +118,86 @@ describe('Inter Pix pipeline + real Postgres archive composition', () => {
     );
   });
 
+  it('never links a second txid onto a failed row that used the same e2e id', async () => {
+    await sql`TRUNCATE TABLE payment_webhook_events`.execute(testDb.db);
+    const archive = new WebhookEventArchivePostgres(testDb.db);
+    const e2eId = 'E'.repeat(32);
+    const pagamentoAId = '00000000-0000-4000-8000-000000000041';
+    const pagamentoBId = '00000000-0000-4000-8000-000000000042';
+    const txidA = pagamentoAId.replaceAll('-', '');
+    const txidB = pagamentoBId.replaceAll('-', '');
+    const pagamentoB = makePagamento({ id: pagamentoBId, externalRef: txidB });
+    await seedPagamentoParents(testDb.db, pagamentoB);
+    await new PagamentoRepositoryPostgres(testDb.db).save(pagamentoB);
+    const consultarCobranca = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('first authoritative read failed'))
+      .mockResolvedValueOnce({
+        status: 'concluida' as const,
+        e2eId,
+        valorPagoCents: 2050,
+        horario: new Date('2026-08-05T12:00:00.000Z'),
+      });
+    const provider = {
+      criarCobranca: vi.fn(),
+      consultarCobranca,
+      solicitarDevolucao: vi.fn(),
+      consultarDevolucao: vi.fn(),
+    } satisfies PixCobrancaProvider;
+    const onChargeConfirmed = vi.fn().mockResolvedValue({ pagamentoId: pagamentoBId });
+    const resolveChargeBinding = vi.fn(async ({ txid }: { readonly txid: string }) => ({
+      pagamentoId: txid === txidA ? pagamentoAId : pagamentoBId,
+      txid,
+    }));
+    const args = {
+      pixCobrancaProvider: provider,
+      resolveChargeBinding,
+      resolveRefundBinding: vi.fn().mockResolvedValue(null),
+      onChargeConfirmed,
+      onRefundConfirmed: vi.fn(),
+    };
+
+    const failedA = await archiveAndDispatchInterPixWebhook(archive, {
+      ...args,
+      rawBody: JSON.stringify({ pix: [{ txid: txidA, endToEndId: e2eId }] }),
+    });
+    const succeededB = await archiveAndDispatchInterPixWebhook(archive, {
+      ...args,
+      rawBody: JSON.stringify({ pix: [{ txid: txidB, endToEndId: e2eId }] }),
+    });
+
+    expect(failedA.items[0]).toMatchObject({
+      providerEventId: `${txidA}:${e2eId}`,
+      outcome: 'charge_requery_failed',
+    });
+    expect(succeededB.items[0]).toMatchObject({
+      providerEventId: `${txidB}:${e2eId}`,
+      outcome: 'dispatched_success',
+    });
+    expect(failedA.items[0]?.archiveId).not.toBe(succeededB.items[0]?.archiveId);
+    expect(consultarCobranca).toHaveBeenCalledTimes(2);
+    expect(onChargeConfirmed).toHaveBeenCalledTimes(1);
+    expect(onChargeConfirmed).toHaveBeenCalledWith(
+      expect.objectContaining({ pagamentoId: pagamentoBId, txid: txidB, e2eId }),
+    );
+    await expect(
+      archive.findByProviderEventId('inter', `${txidA}:${e2eId}`),
+    ).resolves.toMatchObject({
+      rawPayload: { txid: txidA, endToEndId: e2eId },
+      pagamentoId: null,
+      processedAt: null,
+      processingError: 'charge_requery_failed',
+    });
+    await expect(
+      archive.findByProviderEventId('inter', `${txidB}:${e2eId}`),
+    ).resolves.toMatchObject({
+      rawPayload: { txid: txidB, endToEndId: e2eId },
+      pagamentoId: pagamentoBId,
+      processedAt: expect.any(Date),
+      processingError: null,
+    });
+  });
+
   it('atomically claims one concurrent redelivery of a failed Inter event', async () => {
     await sql`TRUNCATE TABLE payment_webhook_events`.execute(testDb.db);
     const archive = new WebhookEventArchivePostgres(testDb.db);
@@ -123,7 +206,7 @@ describe('Inter Pix pipeline + real Postgres archive composition', () => {
     const rawBody = JSON.stringify({ pix: [{ txid, endToEndId: e2eId }] });
     const seeded = await archive.saveReceived({
       provider: 'inter',
-      providerEventId: e2eId,
+      providerEventId: `${txid}:${e2eId}`,
       eventType: 'pix.recebido',
       rawPayload: { txid, endToEndId: e2eId },
       signatureHeader: 'not-provided-by-inter',
