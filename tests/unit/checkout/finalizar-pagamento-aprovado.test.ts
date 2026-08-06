@@ -318,6 +318,9 @@ describe('finalizarPagamentoAprovadoComTransacaoVerificada — provider-free Int
 
     expect(result.pagamento).toMatchObject({
       status: 'aprovado',
+      intencao: {
+        e2eExternalRef: 'E1234567890123456789012345678901',
+      },
       transacaoExterna: {
         id: 'E1234567890123456789012345678901',
         provedor: 'inter',

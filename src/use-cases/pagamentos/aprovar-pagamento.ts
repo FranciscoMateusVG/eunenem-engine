@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { SpanStatusCode } from '@opentelemetry/api';
 import type { PagamentoEventPublisher } from '../../adapters/pagamentos/event-publisher.js';
+import { PixCobrancaE2eIdSchema } from '../../adapters/pagamentos/pix-cobranca-devolucao-repository.js';
 import type { PagamentoProvider } from '../../adapters/pagamentos/provider.js';
 import type { PagamentoRepository } from '../../adapters/pagamentos/repository.js';
 import {
@@ -142,7 +143,10 @@ export async function aprovarPagamentoComTransacaoVerificada(
   validarTransacaoAprovada(pagamento, transacao);
 
   const now = deps.clock();
-  const aprovado = aprovarPagamentoPendente(pagamento, transacao, now);
+  const aprovado = stampVerifiedProviderIdentity(
+    aprovarPagamentoPendente(pagamento, transacao, now),
+    transacao,
+  );
   const venceuCas = await deps.pagamentoRepository.updateIfStatusIn(
     aprovado,
     STATUS_ORIGEM_VERIFICADA,
@@ -174,7 +178,10 @@ async function aplicarTransacaoVerificada(
   validarTransacaoAprovada(pagamento, transacao);
 
   const now = clock();
-  const aprovado = aprovarPagamentoPendente(pagamento, transacao, now);
+  const aprovado = stampVerifiedProviderIdentity(
+    aprovarPagamentoPendente(pagamento, transacao, now),
+    transacao,
+  );
   await pagamentoRepository.update(aprovado);
   await publicarAprovacao(deps, aprovado, transacao, now);
 
@@ -200,10 +207,39 @@ function validarRepeticaoVerificada(pagamento: Pagamento, transacao: TransacaoEx
     existente.id !== transacao.id ||
     existente.provedor !== transacao.provedor ||
     existente.status !== transacao.status ||
-    existente.amountCents !== transacao.amountCents
+    existente.amountCents !== transacao.amountCents ||
+    (transacao.provedor === 'inter' && pagamento.intencao.e2eExternalRef !== transacao.id)
   ) {
     throw new PagamentosInputInvalidoError('transacao verificada diverge do pagamento ja aprovado');
   }
+}
+
+/**
+ * Persist the provider identity needed by later provider-specific operations.
+ *
+ * Banco Inter refunds are addressed by the authoritative Pix end-to-end id,
+ * not by the checkout txid.  Only this verified settlement path may stamp it;
+ * caller-supplied intent creation can never choose the value.  Other
+ * providers keep the nullable column untouched so historic Stripe routing is
+ * still driven solely by `transacaoExterna.provedor`.
+ */
+function stampVerifiedProviderIdentity(
+  pagamento: Pagamento,
+  transacao: TransacaoExterna,
+): Pagamento {
+  if (transacao.provedor !== 'inter') return pagamento;
+  const parsedE2eId = PixCobrancaE2eIdSchema.safeParse(transacao.id);
+  if (!parsedE2eId.success) {
+    throw new PagamentosInputInvalidoError('e2e id Inter verificado invalido');
+  }
+  const e2eExternalRef = parsedE2eId.data;
+  return {
+    ...pagamento,
+    intencao: {
+      ...pagamento.intencao,
+      e2eExternalRef,
+    },
+  };
 }
 
 async function publicarAprovacao(

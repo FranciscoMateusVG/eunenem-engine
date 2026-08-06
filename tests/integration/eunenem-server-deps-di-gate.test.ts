@@ -6,6 +6,7 @@ import {
   CatalogoRepositoryPostgres,
   PagamentoProviderFake,
   PagamentoProviderStripe,
+  PixCobrancaDevolucaoRepositoryPostgres,
   PixCobrancaProviderFake,
   PixCobrancaProviderInter,
   TransferenciaProviderFake,
@@ -57,6 +58,9 @@ describe('eunenem-server catalog composition root (aperture-ldo5d)', () => {
     try {
       expect(deps.catalogoRepository).toBeInstanceOf(CatalogoRepositoryPostgres);
       expect(deps.catalogoAdminAudit).toBeInstanceOf(CatalogoAdminAuditPostgres);
+      expect(deps.pixCobrancaDevolucaoRepository).toBeInstanceOf(
+        PixCobrancaDevolucaoRepositoryPostgres,
+      );
     } finally {
       void deps.db.destroy();
     }

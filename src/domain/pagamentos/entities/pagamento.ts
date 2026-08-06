@@ -147,6 +147,14 @@ export const IntencaoPagamentoSchema = z.object({
    * publish an authoritative expiry persist it here for reconciliation.
    */
   expiraEm: z.date().nullable(),
+  /**
+   * Banco Inter end-to-end settlement id. It is never accepted at intent
+   * creation: only a verified PIX settlement may stamp this reference.
+   */
+  e2eExternalRef: z
+    .string()
+    .regex(/^[A-Za-z0-9]{32}$/)
+    .nullable(),
   paymentIntentExternalRef: z.string().trim().min(1).max(255).nullable(),
   chargeExternalRef: z.string().trim().min(1).max(255).nullable(),
   contribuinte: DadosContribuinteSchema.nullable(),
@@ -304,6 +312,7 @@ export function criarPagamentoPendente(input: CriarPagamentoPendenteInput): Paga
       metodo: input.metodo,
       externalRef: input.externalRef ?? null,
       expiraEm: input.expiraEm ?? null,
+      e2eExternalRef: null,
       // aperture-wif8s: pi_xxx + ch_xxx populated post-creation by the
       // webhook handler as Stripe events arrive. Always start null at
       // intent-creation time — checkout flow hasn't talked to Stripe

@@ -433,6 +433,32 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
     });
   }
 
+  async findByE2eExternalRef(e2eId: string): Promise<Pagamento | undefined> {
+    return tracer.startActiveSpan('db.pagamentos.findByE2eExternalRef', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        const row = await this.db
+          .selectFrom('pagamentos')
+          .selectAll()
+          .where('intencao_e2e_external_ref', '=', e2eId)
+          .executeTakeFirst();
+        if (!row) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return undefined;
+        }
+        const items = await loadItemsForPagamento(this.db, row.id as IdPagamento);
+        span.setStatus({ code: SpanStatusCode.OK });
+        return pagamentoFromRow(row as unknown as PagamentoRow, items);
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
   async findByPaymentIntentExternalRef(pi: string): Promise<Pagamento | undefined> {
     return tracer.startActiveSpan('db.pagamentos.findByPaymentIntentExternalRef', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
@@ -905,6 +931,7 @@ function rowFromPagamento(p: Pagamento): Record<string, unknown> {
     intencao_metodo: p.intencao.metodo,
     intencao_external_ref: p.intencao.externalRef,
     intencao_expira_em: p.intencao.expiraEm,
+    intencao_e2e_external_ref: p.intencao.e2eExternalRef,
     // aperture-wif8s: webhook-populated provider refs. New rows always
     // start null; update() rewrites them when the handler sets them.
     intencao_payment_intent_external_ref: p.intencao.paymentIntentExternalRef,
@@ -1091,6 +1118,7 @@ function pagamentoFromRow(row: PagamentoRow, itemRows: ItemRow[]): Pagamento {
       metodo: row.intencao_metodo,
       externalRef: row.intencao_external_ref,
       expiraEm: row.intencao_expira_em,
+      e2eExternalRef: row.intencao_e2e_external_ref,
       paymentIntentExternalRef: row.intencao_payment_intent_external_ref,
       chargeExternalRef: row.intencao_charge_external_ref,
       contribuinte,

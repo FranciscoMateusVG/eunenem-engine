@@ -134,6 +134,17 @@ export function describePagamentoRepositoryConformance(name: string, options: Co
       expect(found?.intencao.expiraEm).toEqual(expiraEm);
     });
 
+    it('round-trips and finds a verified PIX end-to-end reference', async () => {
+      const e2eExternalRef = 'E1234567890123456789012345678901';
+      const pagamento = makePagamento({ e2eExternalRef });
+      await repo.save(pagamento);
+
+      const found = await repo.findByE2eExternalRef(e2eExternalRef);
+      expect(found?.id).toBe(pagamento.id);
+      expect(found?.intencao.e2eExternalRef).toBe(e2eExternalRef);
+      await expect(repo.findByE2eExternalRef('unknown-e2e')).resolves.toBeUndefined();
+    });
+
     // ───────── lifecycle compare-and-set ─────────
 
     it('updateIfStatusIn applies only when the persisted status is expected', async () => {
@@ -709,6 +720,16 @@ export function describePagamentoRepositoryConformance(name: string, options: Co
       expect(span?.attributes['db.collection.name']).toBe('pagamentos');
     });
 
+    it('findByE2eExternalRef emits a db.pagamentos.findByE2eExternalRef span with correct attributes', async () => {
+      await repo.findByE2eExternalRef('E1234567890123456789012345678901');
+
+      const span = findSpan(options.getSpans(), 'db.pagamentos.findByE2eExternalRef');
+      expect(span).toBeDefined();
+      expect(span?.attributes['db.system']).toBe(options.expectedDbSystem);
+      expect(span?.attributes['db.operation.name']).toBe('SELECT');
+      expect(span?.attributes['db.collection.name']).toBe('pagamentos');
+    });
+
     it('findByContribuicao emits a db.pagamentos.findByContribuicao span with correct attributes', async () => {
       await repo.findByContribuicao(randomUUID());
 
@@ -782,6 +803,8 @@ interface MakePagamentoOverrides {
   status?: Pagamento['status'];
   /** IntencaoPagamento.externalRef. Defaults to null. */
   externalRef?: string | null;
+  /** Verified Inter PIX end-to-end settlement id. Defaults to null. */
+  e2eExternalRef?: string | null;
   /** IntencaoPagamento.paymentIntentExternalRef. Defaults to null. */
   paymentIntentExternalRef?: string | null;
   /** IntencaoPagamento.chargeExternalRef. Defaults to null. */
@@ -914,6 +937,8 @@ export function makePagamento(overrides: MakePagamentoOverrides = {}): Pagamento
   // findIdsContribuicoes..., findContribuintes...), we mutate here.
   const intencaoOverrides: Partial<Pagamento['intencao']> = {};
   if (overrides.externalRef !== undefined) intencaoOverrides.externalRef = overrides.externalRef;
+  if (overrides.e2eExternalRef !== undefined)
+    intencaoOverrides.e2eExternalRef = overrides.e2eExternalRef;
   if (overrides.paymentIntentExternalRef !== undefined)
     intencaoOverrides.paymentIntentExternalRef = overrides.paymentIntentExternalRef;
   if (overrides.chargeExternalRef !== undefined)

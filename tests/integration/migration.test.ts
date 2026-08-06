@@ -304,6 +304,77 @@ describe('Migration round-trip', () => {
       'pagamentos_pix_reconciliacao_due_idx',
     );
 
+    // 20260805_049_add_inter_pix_refunds: Inter refund state is durable
+    // because devolucao is asynchronous. Provider identifiers only; no PII.
+    expect(tableNames).toContain('pix_cobranca_devolucoes');
+    const e2eExternalRefCol = await getColumn(db, 'pagamentos', 'intencao_e2e_external_ref');
+    expect(e2eExternalRefCol?.data_type).toBe('text');
+    expect(e2eExternalRefCol?.is_nullable).toBe('YES');
+    expect(await listIndexNames(db, 'pagamentos')).toContain('pagamentos_intencao_e2e_ref_uniq');
+    const e2eExternalRefIndex = await getIndexDefinition(db, 'pagamentos_intencao_e2e_ref_uniq');
+    expect(e2eExternalRefIndex).toContain('CREATE UNIQUE INDEX');
+    expect(e2eExternalRefIndex).toContain('WHERE (intencao_e2e_external_ref IS NOT NULL)');
+
+    const refundIdCol = await getColumn(db, 'pix_cobranca_devolucoes', 'id_devolucao');
+    expect(refundIdCol?.data_type).toBe('character varying');
+    expect(refundIdCol?.character_maximum_length).toBe(35);
+    expect(refundIdCol?.is_nullable).toBe('NO');
+    expect((await getColumn(db, 'pix_cobranca_devolucoes', 'amount_cents'))?.data_type).toBe(
+      'bigint',
+    );
+    expect((await getColumn(db, 'pix_cobranca_devolucoes', 'status'))?.is_nullable).toBe('NO');
+    expect((await getColumn(db, 'pix_cobranca_devolucoes', 'rtr_id'))?.is_nullable).toBe('YES');
+    expect(await listIndexNames(db, 'pix_cobranca_devolucoes')).toEqual(
+      expect.arrayContaining([
+        'pix_cobranca_devolucoes_pkey',
+        'pix_cobranca_devolucoes_id_pagamento_uniq',
+        'pix_cobranca_devolucoes_e2e_id_id_devolucao_uniq',
+        'pix_cobranca_devolucoes_rtr_id_idx',
+      ]),
+    );
+
+    const refundIdConstraint = await getConstraintDefinition(
+      db,
+      'pix_cobranca_devolucoes_id_devolucao_check',
+    );
+    expect(refundIdConstraint).toContain('^[A-Za-z0-9]+$');
+    expect(refundIdConstraint).toContain('char_length');
+    expect(refundIdConstraint).toContain('26');
+    expect(refundIdConstraint).toContain('35');
+    const refundE2eConstraint = await getConstraintDefinition(
+      db,
+      'pix_cobranca_devolucoes_e2e_id_check',
+    );
+    expect(refundE2eConstraint).toContain('char_length');
+    expect(refundE2eConstraint).toContain('32');
+    expect(refundE2eConstraint).toContain('^[A-Za-z0-9]+$');
+    expect(
+      await getConstraintDefinition(db, 'pix_cobranca_devolucoes_amount_cents_check'),
+    ).toContain('amount_cents > 0');
+    const refundStatusConstraint = await getConstraintDefinition(
+      db,
+      'pix_cobranca_devolucoes_status_check',
+    );
+    for (const status of ['em_processamento', 'devolvida', 'nao_realizada', 'rejeitada']) {
+      expect(refundStatusConstraint).toContain(status);
+    }
+    expect(refundStatusConstraint).not.toContain('cancelada');
+
+    // The DB backstop accepts both identifier boundaries and rejects values
+    // outside them, non-ASCII-alphanumeric ids, and non-positive amounts.
+    await insertRefundConstraintFixture(db);
+    await expectInsertRefund(db, 'A'.repeat(26), 1, true, 'E'.repeat(32));
+    await expectInsertRefund(db, 'Z'.repeat(35), 1, true);
+    await expectInsertRefund(db, 'A'.repeat(25), 1, false);
+    await expectInsertRefund(db, 'A'.repeat(36), 1, false);
+    await expectInsertRefund(db, `${'A'.repeat(25)}-`, 1, false);
+    await expectInsertRefund(db, 'A'.repeat(26), 0, false);
+    await expectInsertRefund(db, 'A'.repeat(26), 1, false, 'E'.repeat(31));
+    await expectInsertRefund(db, 'A'.repeat(26), 1, false, 'E'.repeat(33));
+    await expectInsertRefund(db, 'A'.repeat(26), 1, false, `${'E'.repeat(31)}-`);
+    await sql`DELETE FROM pagamentos WHERE id = '20000000-0000-4000-8000-000000000049'`.execute(db);
+    await sql`DELETE FROM campanhas WHERE id = '10000000-0000-4000-8000-000000000049'`.execute(db);
+
     // 037 unify_evento_data_single_source (aperture-mu1v9): eventos rows may
     // be PARTIAL — modalidade AND tipo_evento are optional post-migration.
     expect((await getColumn(db, 'eventos', 'modalidade'))?.is_nullable).toBe('YES');
@@ -315,8 +386,19 @@ describe('Migration round-trip', () => {
     //    this sequence must start at the LATEST migration and walk earlier.
     //    Adding a new migration on top REQUIRES prepending its down-step here.
 
+    // 20260805_049_add_inter_pix_refunds (aperture-2nbg6) → the actual TIP.
+    // Its down() removes the refund table, e2e reference, and lookup index.
+    const downInterPixRefunds = await migrator.migrateDown();
+    expect(downInterPixRefunds.error).toBeUndefined();
+    expect(await listTableNames(db)).not.toContain('pix_cobranca_devolucoes');
+    expect(await getColumn(db, 'pagamentos', 'intencao_e2e_external_ref')).toBeUndefined();
+    expect(await listIndexNames(db, 'pagamentos')).not.toContain(
+      'pagamentos_intencao_e2e_ref_uniq',
+    );
+    expect(await getColumn(db, 'pagamentos', 'intencao_expira_em')).toBeDefined();
+
     // 20260805_048_add_pix_cobranca_reconciliation (aperture-fpd0j) → the
-    // actual TIP. Its down() removes the partial candidate index and both
+    // TIP after 049. Its down() removes the partial candidate index and both
     // nullable reconciliation columns without touching payment rows.
     const downPixCobrancaReconciliation = await migrator.migrateDown();
     expect(downPixCobrancaReconciliation.error).toBeUndefined();
@@ -821,6 +903,118 @@ async function listIndexNames(db: Kysely<unknown>, tableName: string): Promise<s
     .execute();
 
   return indexes.map((index: Record<string, unknown>) => String(index.indexname));
+}
+
+async function getConstraintDefinition(
+  db: Kysely<unknown>,
+  constraintName: string,
+): Promise<string | undefined> {
+  const result = (await db
+    .selectFrom('pg_constraint' as never)
+    .select((_eb) => [
+      // biome-ignore lint/suspicious/noExplicitAny: pg_constraint is not in generated DB types
+      sql<string>`pg_get_constraintdef(oid)`.as('definition') as any,
+    ])
+    .where('conname' as never, '=', constraintName as never)
+    .executeTakeFirst()) as { definition: string } | undefined;
+
+  return result?.definition;
+}
+
+async function getIndexDefinition(
+  db: Kysely<unknown>,
+  indexName: string,
+): Promise<string | undefined> {
+  const result = (await db
+    .selectFrom('pg_indexes' as never)
+    .select('indexdef' as never)
+    .where('schemaname' as never, '=', 'public' as never)
+    .where('indexname' as never, '=', indexName as never)
+    .executeTakeFirst()) as { indexdef: string } | undefined;
+
+  return result?.indexdef;
+}
+
+async function insertRefundConstraintFixture(db: Kysely<unknown>): Promise<void> {
+  await sql`
+    INSERT INTO campanhas (id, titulo, id_plataforma, criada_em)
+    VALUES (
+      '10000000-0000-4000-8000-000000000049',
+      'Migration 049 constraint fixture',
+      '50000000-0000-4000-8000-000000000049',
+      now()
+    )
+  `.execute(db);
+
+  await sql`
+    INSERT INTO pagamentos (
+      id,
+      status,
+      criado_em,
+      atualizado_em,
+      intencao_id,
+      intencao_criada_em,
+      intencao_id_campanha,
+      intencao_metodo,
+      intencao_total_paid_cents,
+      intencao_total_contribution_cents,
+      intencao_total_fee_cents,
+      intencao_total_receiver_cents,
+      intencao_total_surcharge_cents
+    ) VALUES (
+      '20000000-0000-4000-8000-000000000049',
+      'pendente',
+      now(),
+      now(),
+      '30000000-0000-4000-8000-000000000049',
+      now(),
+      '10000000-0000-4000-8000-000000000049',
+      'pix',
+      1,
+      1,
+      0,
+      1,
+      0
+    )
+  `.execute(db);
+}
+
+async function expectInsertRefund(
+  db: Kysely<unknown>,
+  idDevolucao: string,
+  amountCents: number,
+  shouldSucceed: boolean,
+  e2eId = 'E1234567890123456789012345678901',
+): Promise<void> {
+  const insert = () =>
+    sql`
+    INSERT INTO pix_cobranca_devolucoes (
+      id,
+      id_pagamento,
+      e2e_id,
+      id_devolucao,
+      amount_cents,
+      status
+    ) VALUES (
+      '40000000-0000-4000-8000-000000000049',
+      '20000000-0000-4000-8000-000000000049',
+      ${e2eId},
+      ${idDevolucao},
+      ${amountCents},
+      'em_processamento'
+    )
+  `.execute(db);
+
+  if (shouldSucceed) {
+    await expect(insert()).resolves.toBeDefined();
+    await sql`
+      DELETE FROM pix_cobranca_devolucoes
+      WHERE id = '40000000-0000-4000-8000-000000000049'
+    `.execute(db);
+    return;
+  }
+
+  await expect(insert()).rejects.toThrow();
 }
 
 async function getColumn(

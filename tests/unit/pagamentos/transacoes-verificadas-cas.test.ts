@@ -59,6 +59,7 @@ describe('provider-free verified payment transitions — CAS', () => {
 
     expect(first).toEqual(second);
     expect(first.status).toBe('aprovado');
+    expect(first.intencao.e2eExternalRef).toBe(authoritative.id);
     expect(pagamentoEventPublisher.getEventosPublicados().map((event) => event.tipo)).toEqual([
       'payment.approved',
     ]);
@@ -71,17 +72,45 @@ describe('provider-free verified payment transitions — CAS', () => {
     expect(pagamentoEventPublisher.getEventosPublicados()).toHaveLength(1);
   });
 
+  it('leaves the Inter e2e reference unset for a verified non-Inter transaction', async () => {
+    const { pagamento, deps } = await setup();
+    const authoritative: TransacaoExterna = {
+      ...transacao('aprovado', 'pi_verified_stripe'),
+      provedor: 'stripe',
+    };
+
+    const approved = await aprovarPagamentoComTransacaoVerificada(deps, {
+      idPagamento: pagamento.id,
+      transacao: authoritative,
+    });
+
+    expect(approved.intencao.e2eExternalRef).toBeNull();
+  });
+
+  it('rejects a malformed authoritative Inter e2e reference before persistence', async () => {
+    const { pagamento, pagamentoRepository, deps } = await setup();
+
+    await expect(
+      aprovarPagamentoComTransacaoVerificada(deps, {
+        idPagamento: pagamento.id,
+        transacao: transacao('aprovado', 'not-an-inter-e2e'),
+      }),
+    ).rejects.toBeInstanceOf(PagamentosInputInvalidoError);
+
+    expect((await pagamentoRepository.findById(pagamento.id))?.status).toBe('pendente');
+  });
+
   it('fails closed when concurrent approvals carry different transaction identities', async () => {
     const { pagamento, pagamentoEventPublisher, deps } = await setup();
 
     const results = await Promise.allSettled([
       aprovarPagamentoComTransacaoVerificada(deps, {
         idPagamento: pagamento.id,
-        transacao: transacao('aprovado', 'E-FIRST-APPROVAL'),
+        transacao: transacao('aprovado', 'A'.repeat(32)),
       }),
       aprovarPagamentoComTransacaoVerificada(deps, {
         idPagamento: pagamento.id,
-        transacao: transacao('aprovado', 'E-CONFLICTING-APPROVAL'),
+        transacao: transacao('aprovado', 'B'.repeat(32)),
       }),
     ]);
 

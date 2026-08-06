@@ -883,6 +883,8 @@ export async function dispatchVerifiedStripeEvent(
           {
             pagamentoRepository: deps.pagamentoRepository,
             pagamentoProvider: deps.pagamentoProvider,
+            pixCobrancaProvider: deps.pixCobrancaProvider,
+            pixCobrancaDevolucaoRepository: deps.pixCobrancaDevolucaoRepository,
             pagamentoEventPublisher: deps.pagamentoEventPublisher,
             livroFinanceiroRepository: deps.livroFinanceiroRepository,
             clock: deps.clock,

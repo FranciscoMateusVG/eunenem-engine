@@ -1,7 +1,17 @@
+import { randomUUID } from 'node:crypto';
 import { SpanStatusCode } from '@opentelemetry/api';
 import { z } from 'zod/v4';
 import type { PagamentoEventPublisher } from '../../adapters/pagamentos/event-publisher.js';
 import type { LivroFinanceiroRepository } from '../../adapters/pagamentos/financeiro/livro-repository.js';
+import type {
+  PixCobrancaDevolucaoRecord,
+  PixCobrancaDevolucaoRepository,
+} from '../../adapters/pagamentos/pix-cobranca-devolucao-repository.js';
+import {
+  type DevolucaoOutcome,
+  type PixCobrancaProvider,
+  PixCobrancaTransitoriaError,
+} from '../../adapters/pagamentos/pix-cobranca-provider.js';
 import type { PagamentoProvider } from '../../adapters/pagamentos/provider.js';
 import type { PagamentoRepository } from '../../adapters/pagamentos/repository.js';
 import {
@@ -12,6 +22,20 @@ import { IdPagamentoSchema } from '../../domain/pagamentos/value-objects/ids.js'
 import { PagamentoNaoEncontradoError } from '../../errors/pagamentos/nao-encontrado.error.js';
 import { PagamentoTransicaoStatusInvalidaError } from '../../errors/pagamentos/transicao-status-invalida.error.js';
 import type { Observability } from '../../observability/observability.js';
+import {
+  PagamentoEstornoLancamentoJaTransferidoError,
+  PagamentoEstornoPixNaoConcluidoError,
+  PagamentoEstornoPixVinculoInvalidoError,
+  PagamentoEstornoRecusadoPeloProvedorError,
+} from './estorno-pagamento-errors.js';
+import { finalizarEstornoPixVerificado } from './finalizar-estorno-pix-verificado.js';
+
+export {
+  PagamentoEstornoLancamentoJaTransferidoError,
+  PagamentoEstornoPixNaoConcluidoError,
+  PagamentoEstornoPixVinculoInvalidoError,
+  PagamentoEstornoRecusadoPeloProvedorError,
+} from './estorno-pagamento-errors.js';
 
 export const EstornarPagamentoInputSchema = z.object({
   idPagamento: IdPagamentoSchema,
@@ -28,45 +52,14 @@ export type EstornarPagamentoInput = z.infer<typeof EstornarPagamentoInputSchema
 export interface EstornarPagamentoResult {
   readonly pagamento: Pagamento;
   readonly refundId: string;
-}
-
-/**
- * Thrown when the admin tries to estornar a pagamento that has at least
- * one already-transferred lançamento. Once the money has reached the
- * recebedor it can't be clawed back through this path — disputes /
- * chargebacks would have to follow the (out-of-scope) disputes flow.
- *
- * HTTP layer maps this to 409 Conflict (locked decision #10 of plan 0015).
- */
-export class PagamentoEstornoLancamentoJaTransferidoError extends Error {
-  constructor(public readonly idPagamento: string) {
-    super(
-      `Estorno bloqueado: pelo menos um lancamento financeiro deste pagamento ja foi transferido ao recebedor. idPagamento=${idPagamento}`,
-    );
-    this.name = 'PagamentoEstornoLancamentoJaTransferidoError';
-  }
-}
-
-/**
- * Thrown when the provider's refund call returns `recusado`. Surfaces
- * upstream so the admin sees why the estorno failed (and the pagamento
- * stays `aprovado` — no partial state).
- */
-export class PagamentoEstornoRecusadoPeloProvedorError extends Error {
-  constructor(
-    public readonly idPagamento: string,
-    public readonly statusBruto: string | undefined,
-  ) {
-    super(
-      `Provedor recusou o estorno do pagamento ${idPagamento} (status bruto: ${statusBruto ?? 'desconhecido'}).`,
-    );
-    this.name = 'PagamentoEstornoRecusadoPeloProvedorError';
-  }
+  readonly refundStatus: 'aceito' | 'em_processamento' | 'devolvida';
 }
 
 export interface EstornarPagamentoDeps {
   readonly pagamentoRepository: PagamentoRepository;
   readonly pagamentoProvider: PagamentoProvider;
+  readonly pixCobrancaProvider: PixCobrancaProvider;
+  readonly pixCobrancaDevolucaoRepository: PixCobrancaDevolucaoRepository;
   readonly pagamentoEventPublisher: PagamentoEventPublisher;
   readonly livroFinanceiroRepository: LivroFinanceiroRepository;
   readonly clock: () => Date;
@@ -74,74 +67,36 @@ export interface EstornarPagamentoDeps {
 }
 
 /**
- * Plan 0015 (aperture-ucgok). Admin-action use-case: estorno an aprovado
- * pagamento. Five-step orchestration:
+ * Admin refund orchestration with provider-provenance routing.
  *
- *   1. Load + validate the pagamento is `aprovado` (the entity
- *      transition is `aprovado → estornado`; any other source state
- *      throws PagamentoTransicaoStatusInvalidaError).
- *   2. Pre-transfer gate: ask the financeiro module whether any
- *      lançamento on this pagamento has `transferidoEm IS NOT NULL`.
- *      If yes → 409 (locked decision #10). The money has already
- *      reached the recebedor; the refund path is closed.
- *   3. Fire the provider's refund call. Provider returns `aceito`
- *      (money path committed) or `recusado` (surface upstream;
- *      pagamento stays aprovado).
- *   4. Transition pagamento → estornado in the domain; update repo.
- *   5. Cascade `canceladoEm` onto every untransferred lançamento for
- *      this pagamento (the financeiro adapter's WHERE clause
- *      enforces this defensively — but step 2's gate already
- *      guarantees no transferred rows exist).
- *
- * **NOT atomic across BCs in v1.** Step 3 (provider) and steps 4–5
- * (DB) happen in sequence. If the provider returns `aceito` and
- * step 4 fails, the money is refunded but our state still says
- * aprovado — the next admin retry hits the idempotent fact that
- * the provider already refunded (Stripe deduplicates via the
- * idempotency-key in `pagamento:{id}:refund`), so the use-case
- * can be re-run safely without double-refunding. A proper
- * outbox/saga around this is a follow-up bead.
- *
- * **Idempotency contract:** invoking on an already-estornado
- * pagamento returns the existing state without re-firing the
- * provider call.
+ * Historical payments keep the Stripe-compatible refund port and its
+ * idempotency key. Banco Inter payments first persist a deterministic pending
+ * identity, issue at most one PUT, and resolve every replay through an
+ * authoritative GET. Only a persisted `devolvida` fact may enter the
+ * provider-free local finalizer. The ledger transfer gate always runs before
+ * the first external money call.
  */
 export async function estornarPagamento(
   deps: EstornarPagamentoDeps,
   input: EstornarPagamentoInput,
 ): Promise<EstornarPagamentoResult> {
-  const {
-    pagamentoRepository,
-    pagamentoProvider,
-    livroFinanceiroRepository,
-    clock,
-    observability,
-  } = deps;
+  const { pagamentoRepository, livroFinanceiroRepository, observability } = deps;
   const { logger, tracer } = observability;
 
   return tracer.startActiveSpan('estornarPagamento', async (span) => {
     try {
       const parsed = EstornarPagamentoInputSchema.parse(input);
       span.setAttribute('checkout.pagamento.id', parsed.idPagamento);
-      if (parsed.reason) {
-        span.setAttribute('refund.reason', parsed.reason);
-      }
+      if (parsed.reason) span.setAttribute('refund.reason', parsed.reason);
 
-      // step 1: load + validate
       const pagamento = await pagamentoRepository.findById(parsed.idPagamento);
-      if (!pagamento) {
-        throw new PagamentoNaoEncontradoError(parsed.idPagamento);
-      }
+      if (!pagamento) throw new PagamentoNaoEncontradoError(parsed.idPagamento);
+
       if (pagamento.status === 'estornado') {
-        // Idempotent: already estornado. Return the existing snapshot.
-        // The refundId is unknowable at this point (we didn't fire the
-        // provider call); emit a synthetic "replay" marker so callers
-        // can distinguish from a first-run.
-        logger.info('checkout.pagamento.replay_estorno', {
-          idPagamento: pagamento.id,
-        });
+        const replay = await replayJaEstornado(deps, pagamento);
+        logger.info('checkout.pagamento.replay_estorno', { idPagamento: pagamento.id });
         span.setStatus({ code: SpanStatusCode.OK });
-        return { pagamento, refundId: 'replay' };
+        return replay;
       }
       if (pagamento.status !== 'aprovado') {
         throw new PagamentoTransicaoStatusInvalidaError(
@@ -151,52 +106,19 @@ export async function estornarPagamento(
         );
       }
 
-      // step 2: 409 gate — has ANY lançamento on this pagamento been
-      // transferred to the recebedor? If yes, refuse.
-      const hasTransferidos = await livroFinanceiroRepository.hasLancamentosTransferidos(
-        pagamento.id,
-      );
-      if (hasTransferidos) {
+      // This gate precedes every external money call, for both providers.
+      if (await livroFinanceiroRepository.hasLancamentosTransferidos(pagamento.id)) {
         throw new PagamentoEstornoLancamentoJaTransferidoError(pagamento.id);
       }
 
-      // step 3: fire the provider's refund call.
-      const refundResult = await pagamentoProvider.refundarPagamento({
-        idPagamento: pagamento.id,
-        chargeExternalRef: pagamento.intencao.chargeExternalRef,
-        paymentIntentExternalRef: pagamento.intencao.paymentIntentExternalRef,
-        amountCents: pagamento.intencao.composicaoValoresAggregate.totalPaidCents,
-        ...(parsed.reason ? { reason: parsed.reason } : {}),
-      });
-      if (refundResult.status === 'recusado') {
-        throw new PagamentoEstornoRecusadoPeloProvedorError(pagamento.id, refundResult.statusBruto);
-      }
-      span.setAttribute('refund.id', refundResult.id);
-
-      // step 4: transition pagamento → estornado (domain) + persist.
-      const now = clock();
-      const estornado = estornarPagamentoAprovado(pagamento, now);
-      await pagamentoRepository.update(estornado);
-
-      // step 5: cascade canceladoEm on the untransferred lançamentos.
-      // The adapter's WHERE clause is defense-in-depth — step 2's gate
-      // guarantees zero already-transferred rows could match here.
-      await livroFinanceiroRepository.marcarLancamentosComoCanceladosPorPagamento(
-        pagamento.id,
-        now,
-      );
-
-      logger.info('checkout.pagamento.estornado', {
-        idPagamento: pagamento.id,
-        idCampanha: pagamento.intencao.idCampanha,
-        numeroDeItens: pagamento.intencao.items.length,
-        amountCents: pagamento.intencao.composicaoValoresAggregate.totalPaidCents,
-        refundId: refundResult.id,
-        refundReason: parsed.reason ?? 'requested_by_customer',
-      });
-
+      const result =
+        pagamento.transacaoExterna?.provedor === 'inter'
+          ? await estornarInter(deps, pagamento)
+          : await estornarHistorico(deps, pagamento, parsed.reason);
+      span.setAttribute('refund.id', result.refundId);
+      span.setAttribute('refund.status', result.refundStatus);
       span.setStatus({ code: SpanStatusCode.OK });
-      return { pagamento: estornado, refundId: refundResult.id };
+      return result;
     } catch (error) {
       span.recordException(error as Error);
       span.setStatus({ code: SpanStatusCode.ERROR, message: (error as Error).message });
@@ -205,4 +127,208 @@ export async function estornarPagamento(
       span.end();
     }
   });
+}
+
+async function estornarHistorico(
+  deps: EstornarPagamentoDeps,
+  pagamento: Pagamento,
+  reason: EstornarPagamentoInput['reason'],
+): Promise<EstornarPagamentoResult> {
+  const refundResult = await deps.pagamentoProvider.refundarPagamento({
+    idPagamento: pagamento.id,
+    e2eExternalRef: pagamento.intencao.e2eExternalRef,
+    chargeExternalRef: pagamento.intencao.chargeExternalRef,
+    paymentIntentExternalRef: pagamento.intencao.paymentIntentExternalRef,
+    amountCents: pagamento.intencao.composicaoValoresAggregate.totalPaidCents,
+    ...(reason ? { reason } : {}),
+  });
+  if (refundResult.status === 'recusado') {
+    throw new PagamentoEstornoRecusadoPeloProvedorError(pagamento.id, refundResult.statusBruto);
+  }
+
+  const now = deps.clock();
+  const estornado = estornarPagamentoAprovado(pagamento, now);
+  await deps.pagamentoRepository.update(estornado);
+  await deps.livroFinanceiroRepository.marcarLancamentosComoCanceladosPorPagamento(
+    pagamento.id,
+    now,
+  );
+  deps.observability.logger.info('checkout.pagamento.estornado', {
+    idPagamento: pagamento.id,
+    refundId: refundResult.id,
+    refundReason: reason ?? 'requested_by_customer',
+  });
+  return { pagamento: estornado, refundId: refundResult.id, refundStatus: 'aceito' };
+}
+
+async function estornarInter(
+  deps: EstornarPagamentoDeps,
+  pagamento: Pagamento,
+): Promise<EstornarPagamentoResult> {
+  const e2eId = pagamento.intencao.e2eExternalRef;
+  const transacao = pagamento.transacaoExterna;
+  const amountCents = pagamento.intencao.composicaoValoresAggregate.totalPaidCents;
+  if (
+    !e2eId ||
+    transacao?.provedor !== 'inter' ||
+    transacao.id !== e2eId ||
+    transacao.amountCents !== amountCents
+  ) {
+    throw new PagamentoEstornoPixVinculoInvalidoError();
+  }
+
+  const idDevolucao = pagamento.id.replaceAll('-', '');
+  const established = await deps.pixCobrancaDevolucaoRepository.createIfAbsent({
+    id: randomUUID(),
+    idPagamento: pagamento.id,
+    e2eId,
+    idDevolucao,
+    amountCents,
+    criadoEm: deps.clock(),
+  });
+
+  if (!bindingMatches(established.record, pagamento)) {
+    throw new PagamentoEstornoPixVinculoInvalidoError();
+  }
+
+  if (!established.created) {
+    return replayInter(deps, pagamento, established.record);
+  }
+
+  try {
+    const outcome = await deps.pixCobrancaProvider.solicitarDevolucao({
+      e2eId,
+      idDevolucao,
+      amountCents,
+    });
+    return persistirOutcomeInter(deps, pagamento, established.record, outcome);
+  } catch (error) {
+    // A definitely pre-send failure may be retried with the same deterministic
+    // identity. Ambiguous failures deliberately leave the pending row in place;
+    // replays consult Inter before any further PUT.
+    if (error instanceof PixCobrancaTransitoriaError) {
+      await deps.pixCobrancaDevolucaoRepository.deleteIfPending({
+        e2eId,
+        idDevolucao,
+      });
+    }
+    throw error;
+  }
+}
+
+async function replayInter(
+  deps: EstornarPagamentoDeps,
+  pagamento: Pagamento,
+  record: PixCobrancaDevolucaoRecord,
+): Promise<EstornarPagamentoResult> {
+  if (record.status === 'devolvida') {
+    return finalizarInterLocalmente(deps, pagamento, record);
+  }
+  if (record.status === 'nao_realizada' || record.status === 'rejeitada') {
+    throw new PagamentoEstornoPixNaoConcluidoError(pagamento.id, record.status);
+  }
+
+  // Existing pending means a prior PUT may have reached Inter. The only safe
+  // replay is an authoritative GET; never issue a second PUT from this path.
+  const outcome = await deps.pixCobrancaProvider.consultarDevolucao(
+    record.e2eId,
+    record.idDevolucao,
+  );
+  return persistirOutcomeInter(deps, pagamento, record, outcome);
+}
+
+async function persistirOutcomeInter(
+  deps: EstornarPagamentoDeps,
+  pagamento: Pagamento,
+  record: PixCobrancaDevolucaoRecord,
+  outcome: DevolucaoOutcome,
+): Promise<EstornarPagamentoResult> {
+  const updated = await deps.pixCobrancaDevolucaoRepository.updateOutcome({
+    e2eId: record.e2eId,
+    idDevolucao: record.idDevolucao,
+    status: outcome.status,
+    ...(outcome.status === 'em_processamento' ? { rtrId: outcome.rtrId } : {}),
+    atualizadoEm: deps.clock(),
+  });
+  if (!updated || !bindingMatches(updated, pagamento)) {
+    throw new PagamentoEstornoPixVinculoInvalidoError();
+  }
+
+  // A verified callback can race the provider response. Always branch on the
+  // canonical persisted lifecycle, never on the stale raw response.
+  if (updated.status === 'devolvida') {
+    return finalizarInterLocalmente(deps, pagamento, updated);
+  }
+  if (updated.status === 'nao_realizada' || updated.status === 'rejeitada') {
+    throw new PagamentoEstornoPixNaoConcluidoError(pagamento.id, updated.status);
+  }
+  return {
+    pagamento,
+    refundId: record.idDevolucao,
+    refundStatus: 'em_processamento',
+  };
+}
+
+async function finalizarInterLocalmente(
+  deps: EstornarPagamentoDeps,
+  pagamento: Pagamento,
+  record: PixCobrancaDevolucaoRecord,
+): Promise<EstornarPagamentoResult> {
+  await finalizarEstornoPixVerificado(
+    {
+      pagamentoRepository: deps.pagamentoRepository,
+      pixCobrancaDevolucaoRepository: deps.pixCobrancaDevolucaoRepository,
+      livroFinanceiroRepository: deps.livroFinanceiroRepository,
+      clock: deps.clock,
+    },
+    { e2eId: record.e2eId, idDevolucao: record.idDevolucao },
+  );
+  const canonical = await deps.pagamentoRepository.findById(pagamento.id);
+  if (!canonical || canonical.status !== 'estornado' || !bindingMatches(record, canonical)) {
+    throw new PagamentoEstornoPixVinculoInvalidoError();
+  }
+  return {
+    pagamento: canonical,
+    refundId: record.idDevolucao,
+    refundStatus: 'devolvida',
+  };
+}
+
+async function replayJaEstornado(
+  deps: EstornarPagamentoDeps,
+  pagamento: Pagamento,
+): Promise<EstornarPagamentoResult> {
+  if (pagamento.transacaoExterna?.provedor !== 'inter') {
+    return { pagamento, refundId: 'replay', refundStatus: 'aceito' };
+  }
+  const record = await deps.pixCobrancaDevolucaoRepository.findByPagamentoId(pagamento.id);
+  if (!record || record.status !== 'devolvida' || !bindingMatches(record, pagamento)) {
+    throw new PagamentoEstornoPixVinculoInvalidoError();
+  }
+  await finalizarEstornoPixVerificado(
+    {
+      pagamentoRepository: deps.pagamentoRepository,
+      pixCobrancaDevolucaoRepository: deps.pixCobrancaDevolucaoRepository,
+      livroFinanceiroRepository: deps.livroFinanceiroRepository,
+      clock: deps.clock,
+    },
+    { e2eId: record.e2eId, idDevolucao: record.idDevolucao },
+  );
+  const canonical = await deps.pagamentoRepository.findById(pagamento.id);
+  if (!canonical || canonical.status !== 'estornado' || !bindingMatches(record, canonical)) {
+    throw new PagamentoEstornoPixVinculoInvalidoError();
+  }
+  return { pagamento: canonical, refundId: record.idDevolucao, refundStatus: 'devolvida' };
+}
+
+function bindingMatches(record: PixCobrancaDevolucaoRecord, pagamento: Pagamento): boolean {
+  return (
+    record.idPagamento === pagamento.id &&
+    record.e2eId === pagamento.intencao.e2eExternalRef &&
+    record.idDevolucao === pagamento.id.replaceAll('-', '') &&
+    record.amountCents === pagamento.intencao.composicaoValoresAggregate.totalPaidCents &&
+    pagamento.transacaoExterna?.provedor === 'inter' &&
+    pagamento.transacaoExterna.id === record.e2eId &&
+    pagamento.transacaoExterna.amountCents === record.amountCents
+  );
 }
