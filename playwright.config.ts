@@ -147,6 +147,13 @@ export default defineConfig({
             ADMIN_ALLOWED_EMAILS: process.env.ADMIN_ALLOWED_EMAILS ?? 'e2e-admin@e2e.local',
           }),
           makeServer(3003, STRIPE_ENV_3003),
+          // :3004 — aperture-kuw0o Inter-PIX checkout routing. Dedicated server
+          // with COBRANCA_PIX_PROVIDER='fake' so metodo=pix routes through OUR
+          // identity-form → QR flow (PixCobrancaProviderFake) instead of the
+          // Stripe iframe. Deliberately NOT set on :3002 — that would break
+          // visitor-cart-checkout.spec.ts's pix-to-Stripe-iframe path.
+          // Serves e2e/kuw0o-pix-qr-checkout.spec.ts.
+          makeServer(3004, { COBRANCA_PIX_PROVIDER: 'fake' }),
         ],
       }),
 });

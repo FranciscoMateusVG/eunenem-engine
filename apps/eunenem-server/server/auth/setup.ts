@@ -1087,7 +1087,21 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
       pixKey: env.INTER_COB_PIX_KEY,
     });
   } else if (env.COBRANCA_PIX_PROVIDER === 'fake') {
-    pixCobrancaProvider = new PixCobrancaProviderFake();
+    // aperture-kuw0o (e2e composition-root findings) — the bare fake was
+    // undrivable through the real UI: (a) its default frozen clock
+    // (2026-01-01) births every charge already expired, so the QR screen
+    // rendered the expired panel on mount; (b) magic outcomes were never
+    // armed (EUNENEM_FAKE_E2E_MAGIC only reached TransferenciaProviderFake);
+    // (c) the deterministic per-boot txid ordinal collided with persisted
+    // rows under the unique intencao_external_ref index on the second run.
+    // Real clock + gated magic (same 4ifbm env) + per-boot-unique txids.
+    const bootNonce = Date.now().toString(36).toUpperCase();
+    pixCobrancaProvider = new PixCobrancaProviderFake({
+      clock: () => new Date(),
+      e2eMagicOutcomes: env.EUNENEM_FAKE_E2E_MAGIC === 'true',
+      txidFactory: (_input, ordinal) =>
+        `FAKE${bootNonce}${String(ordinal).padStart(24 - bootNonce.length, '0')}`,
+    });
   } else {
     pixCobrancaProvider = new PixCobrancaNaoConfigurado();
   }
