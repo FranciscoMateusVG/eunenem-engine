@@ -382,6 +382,10 @@ export async function iniciarPagamentoCarrinho(
               metodo: parsed.metodo,
               externalRef: cobranca.txid,
               contribuinte: parsed.contribuinte,
+              // B4 contract (aperture-fpd0j): persist the provider's
+              // AUTHORITATIVE expiry so the reconciliation poller selects
+              // expired charges from stored truth.
+              expiraEm: cobranca.expiraEm,
             },
           );
 

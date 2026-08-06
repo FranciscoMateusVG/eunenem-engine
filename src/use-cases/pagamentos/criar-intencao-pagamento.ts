@@ -54,6 +54,14 @@ export const CriarIntencaoPagamentoInputSchema = z.object({
    * omit it (the webhook stamps at finalization, plan 0015).
    */
   contribuinte: DadosContribuinteSchema.nullable().optional(),
+  /**
+   * aperture-kuw0o × B4 (aperture-fpd0j): the provider's authoritative
+   * charge expiry, stamped at creation on the PIX-cobrança path so the
+   * reconciliation poller selects expired charges from persisted truth
+   * (never a derived criadaEm+600s approximation). Stripe-flow callers
+   * omit it → null (Stripe sessions carry no expiry on this path).
+   */
+  expiraEm: z.date().nullable().optional(),
 });
 
 export type CriarIntencaoPagamentoInput = z.infer<typeof CriarIntencaoPagamentoInputSchema>;
@@ -94,6 +102,7 @@ export async function criarIntencaoPagamento(
         metodo,
         externalRef,
         contribuinte,
+        expiraEm,
       } = parsed.data;
 
       span.setAttributes({
@@ -130,6 +139,7 @@ export async function criarIntencaoPagamento(
         metodo,
         externalRef: externalRef ?? null,
         contribuinte: contribuinte ?? null,
+        expiraEm: expiraEm ?? null,
         criadoEm: now,
       });
 

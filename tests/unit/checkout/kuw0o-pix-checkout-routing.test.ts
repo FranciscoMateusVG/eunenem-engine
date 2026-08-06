@@ -164,6 +164,9 @@ describe('iniciarPagamentoCarrinho — PIX-cobrança routing (aperture-kuw0o)', 
     expect(persisted).toBeDefined();
     expect(persisted?.intencao.externalRef).toBe(result.txid);
     expect(persisted?.intencao.contribuinte).toEqual(contribuinte);
+    // B4 contract (aperture-fpd0j): the provider's AUTHORITATIVE expiry is
+    // persisted at creation — the reconciliation poller selects on it.
+    expect(persisted?.intencao.expiraEm).toEqual(result.expiraEm);
 
     expect(sessaoSpy).not.toHaveBeenCalled();
   });
