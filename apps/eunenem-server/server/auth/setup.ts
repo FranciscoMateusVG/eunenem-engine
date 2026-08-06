@@ -49,6 +49,7 @@ import {
   type CriarCobrancaInput,
   type CobrancaCriada,
   type ConsultarCobrancaResult,
+  type ConsultarDevolucaoInput,
   type DevolucaoOutcome,
   type CobrancaPixProviderKind,
   type PixCobrancaProvider,
@@ -362,7 +363,7 @@ class PixCobrancaNaoConfigurado implements PixCobrancaProvider {
     throw PixCobrancaNaoConfigurado.erro('solicitarDevolucao');
   }
 
-  async consultarDevolucao(_e2eId: string, _idDevolucao: string): Promise<DevolucaoOutcome> {
+  async consultarDevolucao(_input: ConsultarDevolucaoInput): Promise<DevolucaoOutcome> {
     throw PixCobrancaNaoConfigurado.erro('consultarDevolucao');
   }
 }

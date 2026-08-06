@@ -119,6 +119,7 @@ export {
 export {
   type CobrancaCriada,
   type ConsultarCobrancaResult,
+  type ConsultarDevolucaoInput,
   type CriarCobrancaInput,
   type DevolucaoOutcome,
   PixCobrancaAmbiguaError,

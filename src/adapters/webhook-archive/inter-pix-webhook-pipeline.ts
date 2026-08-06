@@ -1,4 +1,5 @@
 import { z } from 'zod/v4';
+import type { MoneyCents } from '../../domain/money.js';
 import type { PixCobrancaProvider } from '../pagamentos/pix-cobranca-provider.js';
 import type { WebhookEventArchive } from './webhook-event-archive.js';
 
@@ -38,6 +39,10 @@ export interface InterPixRefundConfirmed {
   readonly idDevolucao: string;
 }
 
+export interface InterPixRefundBinding extends InterPixRefundConfirmed {
+  readonly amountCents: MoneyCents;
+}
+
 export interface InterPixDispatchResult {
   readonly pagamentoId: string | null;
 }
@@ -48,6 +53,10 @@ export interface InterPixPipelineArgs {
   readonly onChargeConfirmed: (
     confirmed: InterPixChargeConfirmed,
   ) => Promise<InterPixDispatchResult>;
+  /** Resolves the persisted amount; webhook payload values are never trusted. */
+  readonly resolveRefundBinding: (
+    identity: InterPixRefundConfirmed,
+  ) => Promise<InterPixRefundBinding | null>;
   /**
    * B6 plugs refund bookkeeping into this verified-result seam. B3 never
    * calls a refund initiation method from a post-money-movement webhook.
@@ -66,6 +75,7 @@ export type InterPixItemOutcome =
   | 'charge_requery_failed'
   | 'charge_bookkeeping_failed'
   | 'refund_not_confirmed'
+  | 'refund_binding_failed'
   | 'refund_requery_failed'
   | 'refund_bookkeeping_failed';
 
@@ -260,12 +270,26 @@ async function processRefund(
   event: ParsedRefundEvent,
   archiveId: string,
 ): Promise<InterPixItemResult> {
+  let binding: InterPixRefundBinding | null;
+  try {
+    binding = await args.resolveRefundBinding({
+      e2eId: event.hint.e2eId,
+      idDevolucao: event.hint.idDevolucao,
+    });
+  } catch {
+    return fail(archive, event, archiveId, 'refund_binding_failed');
+  }
+  if (
+    binding === null ||
+    binding.e2eId !== event.hint.e2eId ||
+    binding.idDevolucao !== event.hint.idDevolucao
+  ) {
+    return fail(archive, event, archiveId, 'refund_binding_failed');
+  }
+
   let authoritative: Awaited<ReturnType<PixCobrancaProvider['consultarDevolucao']>>;
   try {
-    authoritative = await args.pixCobrancaProvider.consultarDevolucao(
-      event.hint.e2eId,
-      event.hint.idDevolucao,
-    );
+    authoritative = await args.pixCobrancaProvider.consultarDevolucao(binding);
   } catch {
     return fail(archive, event, archiveId, 'refund_requery_failed');
   }

@@ -21,6 +21,7 @@ const idIntencaoPagamento = 'a6f3be1a-5ef5-4aaa-9b98-60f607552298' as IdIntencao
 const txid = '550e8400e29b41d4a716446655440000';
 const e2eId = 'E'.repeat(32);
 const idDevolucao = 'RefundStable123';
+const refundConsultInput = { e2eId, idDevolucao, amountCents: cents(1005) };
 const pixKey = 'merchant-pix-key@example.com';
 const pii = 'payer.sensitive@example.com';
 
@@ -318,7 +319,7 @@ describe('PixCobrancaProviderInter — devolução request + status matrix', () 
 
   it('consultarDevolucao uses GET and the same status mapping', async () => {
     const transport = new ScriptedTransport().push(TOKEN_OK, refundResponse('DEVOLVIDO'));
-    await expect(provider(transport).consultarDevolucao(e2eId, idDevolucao)).resolves.toEqual({
+    await expect(provider(transport).consultarDevolucao(refundConsultInput)).resolves.toEqual({
       status: 'devolvida',
     });
     expect(transport.apiCalls()[0]).toMatchObject({
@@ -340,7 +341,7 @@ describe('PixCobrancaProviderInter — devolução request + status matrix', () 
 
   it('unknown refund 2xx is also ambiguous on authoritative GET', async () => {
     const transport = new ScriptedTransport().push(TOKEN_OK, refundResponse('INVENTADO'));
-    await expect(provider(transport).consultarDevolucao(e2eId, idDevolucao)).rejects.toBeInstanceOf(
+    await expect(provider(transport).consultarDevolucao(refundConsultInput)).rejects.toBeInstanceOf(
       PixCobrancaAmbiguaError,
     );
   });
@@ -363,9 +364,17 @@ describe('PixCobrancaProviderInter — devolução request + status matrix', () 
   it.each([
     ['missing id', { id: undefined }],
     ['mismatched id', { id: 'AnotherRefund123' }],
+    ['wrong amount', { valor: '10.06' }],
+    ['missing amount', { valor: undefined }],
+    ['numeric amount', { valor: 10.05 }],
+    ['comma amount', { valor: '10,05' }],
+    ['integer-only amount', { valor: '10' }],
+    ['one-decimal amount', { valor: '10.5' }],
+    ['zero amount', { valor: '0.00' }],
+    ['amount over the provider wire cap', { valor: '10000000000.00' }],
   ])('%s on refund GET cannot terminalize the requested refund', async (_label, extra) => {
     const transport = new ScriptedTransport().push(TOKEN_OK, refundResponse('DEVOLVIDO', extra));
-    await expect(provider(transport).consultarDevolucao(e2eId, idDevolucao)).rejects.toBeInstanceOf(
+    await expect(provider(transport).consultarDevolucao(refundConsultInput)).rejects.toBeInstanceOf(
       PixCobrancaAmbiguaError,
     );
   });
@@ -419,19 +428,30 @@ describe('PixCobrancaProviderInter — devolução request + status matrix', () 
       transportError('INTER_TIMEOUT'),
     );
     await expect(
-      provider(transportFailure).consultarDevolucao(e2eId, idDevolucao),
+      provider(transportFailure).consultarDevolucao(refundConsultInput),
     ).rejects.toBeInstanceOf(PixCobrancaTransitoriaError);
 
     for (const statusCode of [400, 503]) {
       const httpFailure = new ScriptedTransport().push(TOKEN_OK, { statusCode, body: '{}' });
       await expect(
-        provider(httpFailure).consultarDevolucao(e2eId, idDevolucao),
+        provider(httpFailure).consultarDevolucao(refundConsultInput),
       ).rejects.toBeInstanceOf(PixCobrancaTransitoriaError);
     }
   });
 });
 
 describe('PixCobrancaProviderInter — preflight, token cache and NO-PII errors', () => {
+  it('refund GET rejects an invalid expected amount before token or transport', async () => {
+    const transport = new ScriptedTransport();
+    await expect(
+      provider(transport).consultarDevolucao({
+        ...refundConsultInput,
+        amountCents: cents(0),
+      }),
+    ).rejects.toBeInstanceOf(PixCobrancaTransitoriaError);
+    expect(transport.calls).toHaveLength(0);
+  });
+
   it.each([
     ['invalid idPagamento', { ...createInput, idPagamento: 'not-a-uuid' as IdPagamento }],
     [
@@ -477,7 +497,7 @@ describe('PixCobrancaProviderInter — preflight, token cache and NO-PII errors'
     await inter.criarCobranca(createInput);
     await inter.consultarCobranca(txid);
     await inter.solicitarDevolucao(refundInput);
-    await inter.consultarDevolucao(e2eId, idDevolucao);
+    await inter.consultarDevolucao(refundConsultInput);
     expect(transport.tokenCalls()).toBe(1);
     expect(transport.apiCalls()).toHaveLength(4);
   });

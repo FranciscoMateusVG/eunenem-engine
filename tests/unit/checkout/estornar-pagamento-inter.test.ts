@@ -179,7 +179,7 @@ describe('estornarPagamento — Banco Inter orchestration', () => {
   });
 
   it('replays pending via authoritative GET and never issues a second PUT', async () => {
-    const { deps, inter } = await setup({
+    const { deps, inter, pagamento } = await setup({
       put: { status: 'em_processamento', rtrId: 'D-first' },
       get: { status: 'devolvida' },
     });
@@ -192,6 +192,11 @@ describe('estornarPagamento — Banco Inter orchestration', () => {
     );
     expect(inter.solicitarDevolucao).toHaveBeenCalledOnce();
     expect(inter.consultarDevolucao).toHaveBeenCalledOnce();
+    expect(inter.consultarDevolucao).toHaveBeenCalledWith({
+      e2eId: E2E_ID,
+      idDevolucao: ID_DEVOLUCAO,
+      amountCents: pagamento.intencao.composicaoValoresAggregate.totalPaidCents,
+    });
   });
 
   it('keeps an ambiguous PUT pending, then consults before any retry', async () => {

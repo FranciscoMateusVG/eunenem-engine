@@ -52,6 +52,7 @@ describe('Inter Pix pipeline + real Postgres archive composition', () => {
         ],
       }),
       pixCobrancaProvider: provider,
+      resolveRefundBinding: vi.fn().mockResolvedValue(null),
       onChargeConfirmed,
       onRefundConfirmed: vi.fn(),
     };
@@ -118,6 +119,7 @@ describe('Inter Pix pipeline + real Postgres archive composition', () => {
     const args = {
       rawBody,
       pixCobrancaProvider: provider,
+      resolveRefundBinding: vi.fn().mockResolvedValue(null),
       onChargeConfirmed,
       onRefundConfirmed: vi.fn(),
     };

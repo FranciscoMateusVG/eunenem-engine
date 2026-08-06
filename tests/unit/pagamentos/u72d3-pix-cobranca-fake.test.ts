@@ -308,18 +308,18 @@ describe('PixCobrancaProviderFake — refund ledger', () => {
     const input = refundInput();
     await fake.solicitarDevolucao(input);
 
-    const first = await fake.consultarDevolucao(input.e2eId, input.idDevolucao);
+    const first = await fake.consultarDevolucao(input);
     expect(first).toEqual({ status: 'em_processamento', rtrId: 'RTR-POLL' });
     (first as { rtrId: string }).rtrId = 'CALLER-CORRUPTED';
-    const second = await fake.consultarDevolucao(input.e2eId, input.idDevolucao);
+    const second = await fake.consultarDevolucao(input);
     expect(second).toEqual({ status: 'devolvida' });
     (second as { status: string }).status = 'nao_realizada';
-    const third = await fake.consultarDevolucao(input.e2eId, input.idDevolucao);
+    const third = await fake.consultarDevolucao(input);
     expect(third).toEqual({ status: 'devolvida' });
     const snapshot = fake.devolucoes[0];
     if (snapshot?.terminal === undefined) throw new Error('expected refund terminal snapshot');
     (snapshot.terminal as { status: string }).status = 'rejeitada';
-    expect(await fake.consultarDevolucao(input.e2eId, input.idDevolucao)).toEqual({
+    expect(await fake.consultarDevolucao(input)).toEqual({
       status: 'devolvida',
     });
     expect(fake.consultarDevolucaoCalls).toBe(4);
@@ -328,7 +328,25 @@ describe('PixCobrancaProviderFake — refund ledger', () => {
 
   it('throws for an unknown (e2eId,idDevolucao) pair', async () => {
     const fake = new PixCobrancaProviderFake();
-    await expect(fake.consultarDevolucao('missing', 'missing')).rejects.toThrow('refund not found');
+    await expect(
+      fake.consultarDevolucao({ e2eId: 'missing', idDevolucao: 'missing', amountCents: 1000 }),
+    ).rejects.toThrow('refund not found');
+  });
+
+  it('rejects a mismatched expected amount without advancing the consultation script', async () => {
+    const fake = new PixCobrancaProviderFake({
+      consultarDevolucaoSequence: [{ status: 'em_processamento', rtrId: 'FIRST' }],
+    });
+    const input = refundInput();
+    await fake.solicitarDevolucao(input);
+
+    await expect(
+      fake.consultarDevolucao({ ...input, amountCents: input.amountCents + 1 }),
+    ).rejects.toThrow('amount mismatch');
+    await expect(fake.consultarDevolucao(input)).resolves.toEqual({
+      status: 'em_processamento',
+      rtrId: 'FIRST',
+    });
   });
 });
 

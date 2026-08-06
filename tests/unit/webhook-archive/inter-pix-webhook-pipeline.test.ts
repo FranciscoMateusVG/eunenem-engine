@@ -5,12 +5,14 @@ import {
   INTER_PIX_SIGNATURE_SENTINEL,
 } from '../../../src/adapters/webhook-archive/inter-pix-webhook-pipeline.js';
 import { WebhookEventArchiveMemory } from '../../../src/adapters/webhook-archive/webhook-event-archive.memory.js';
+import type { MoneyCents } from '../../../src/domain/money.js';
 
 const TXID_A = 'A'.repeat(26);
 const TXID_B = 'B'.repeat(26);
 const E2E_A = 'E'.repeat(32);
 const E2E_B = 'F'.repeat(32);
 const PAID_AT = new Date('2026-08-05T12:00:00.000Z');
+const REFUND_AMOUNT = 1005 as MoneyCents;
 
 function provider(overrides: Partial<PixCobrancaProvider> = {}): PixCobrancaProvider {
   return {
@@ -35,11 +37,16 @@ describe('archiveAndDispatchInterPixWebhook', () => {
   let archive: WebhookEventArchiveMemory;
   let onChargeConfirmed: ReturnType<typeof vi.fn>;
   let onRefundConfirmed: ReturnType<typeof vi.fn>;
+  let resolveRefundBinding: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     archive = new WebhookEventArchiveMemory(() => new Date('2026-08-05T12:30:00.000Z'));
     onChargeConfirmed = vi.fn().mockResolvedValue({ pagamentoId: 'pagamento-a' });
     onRefundConfirmed = vi.fn().mockResolvedValue({ pagamentoId: 'pagamento-a' });
+    resolveRefundBinding = vi.fn(async (identity) => ({
+      ...identity,
+      amountCents: REFUND_AMOUNT,
+    }));
   });
 
   it('splits pix[] into per-item rows, re-queries each txid and dispatches only authoritative values', async () => {
@@ -62,6 +69,7 @@ describe('archiveAndDispatchInterPixWebhook', () => {
         { txid: TXID_A, endToEndId: E2E_A, valor: '1.00', pagador: { cpf: 'hidden' } },
         { txid: TXID_B, endToEndId: E2E_B, valor: '999.00' },
       ]),
+      resolveRefundBinding,
       pixCobrancaProvider: provider({ consultarCobranca }),
       onChargeConfirmed,
       onRefundConfirmed,
@@ -109,6 +117,7 @@ describe('archiveAndDispatchInterPixWebhook', () => {
     });
     const args = {
       rawBody: envelope([{ txid: TXID_A, endToEndId: E2E_A }]),
+      resolveRefundBinding,
       pixCobrancaProvider: provider({ consultarCobranca }),
       onChargeConfirmed,
       onRefundConfirmed,
@@ -135,6 +144,7 @@ describe('archiveAndDispatchInterPixWebhook', () => {
     });
     const args = {
       rawBody: envelope([{ txid: TXID_A, endToEndId: E2E_A }]),
+      resolveRefundBinding,
       pixCobrancaProvider: provider({ consultarCobranca }),
       onChargeConfirmed,
       onRefundConfirmed,
@@ -168,6 +178,7 @@ describe('archiveAndDispatchInterPixWebhook', () => {
     const consultarCobranca = vi.fn().mockRejectedValue(new Error('provider body with payer PII'));
     const result = await archiveAndDispatchInterPixWebhook(archive, {
       rawBody: envelope([{ txid: TXID_A, endToEndId: E2E_A }]),
+      resolveRefundBinding,
       pixCobrancaProvider: provider({ consultarCobranca }),
       onChargeConfirmed,
       onRefundConfirmed,
@@ -188,6 +199,7 @@ describe('archiveAndDispatchInterPixWebhook', () => {
   it('rejects an e2e identity mismatch after GET /cob and does not dispatch', async () => {
     const result = await archiveAndDispatchInterPixWebhook(archive, {
       rawBody: envelope([{ txid: TXID_A, endToEndId: E2E_A }]),
+      resolveRefundBinding,
       pixCobrancaProvider: provider({
         consultarCobranca: vi.fn().mockResolvedValue({
           status: 'concluida',
@@ -212,9 +224,13 @@ describe('archiveAndDispatchInterPixWebhook', () => {
         {
           txid: TXID_A,
           endToEndId: E2E_A,
-          devolucoes: [{ id: 'refund1' }, { id: 'refund2' }],
+          devolucoes: [
+            { id: 'refund1', valor: '999.99' },
+            { id: 'refund2', valor: '0.01' },
+          ],
         },
       ]),
+      resolveRefundBinding,
       pixCobrancaProvider: provider({ consultarCobranca, consultarDevolucao }),
       onChargeConfirmed,
       onRefundConfirmed,
@@ -226,15 +242,62 @@ describe('archiveAndDispatchInterPixWebhook', () => {
       `${E2E_A}:devolucao:refund2`,
     ]);
     expect(consultarCobranca).not.toHaveBeenCalled();
-    expect(consultarDevolucao).toHaveBeenNthCalledWith(1, E2E_A, 'refund1');
-    expect(consultarDevolucao).toHaveBeenNthCalledWith(2, E2E_A, 'refund2');
+    expect(consultarDevolucao).toHaveBeenNthCalledWith(1, {
+      e2eId: E2E_A,
+      idDevolucao: 'refund1',
+      amountCents: REFUND_AMOUNT,
+    });
+    expect(consultarDevolucao).toHaveBeenNthCalledWith(2, {
+      e2eId: E2E_A,
+      idDevolucao: 'refund2',
+      amountCents: REFUND_AMOUNT,
+    });
     expect(onChargeConfirmed).not.toHaveBeenCalled();
     expect(onRefundConfirmed).toHaveBeenCalledTimes(2);
+  });
+
+  it('fails closed before provider GET when no persisted refund amount is bound', async () => {
+    const consultarDevolucao = vi.fn().mockResolvedValue({ status: 'devolvida' });
+    resolveRefundBinding.mockResolvedValueOnce(null);
+
+    const result = await archiveAndDispatchInterPixWebhook(archive, {
+      rawBody: envelope([{ txid: TXID_A, endToEndId: E2E_A, devolucoes: [{ id: 'refund1' }] }]),
+      resolveRefundBinding,
+      pixCobrancaProvider: provider({ consultarDevolucao }),
+      onChargeConfirmed,
+      onRefundConfirmed,
+    });
+
+    expect(result.items[0]?.outcome).toBe('refund_binding_failed');
+    expect(consultarDevolucao).not.toHaveBeenCalled();
+    expect(onRefundConfirmed).not.toHaveBeenCalled();
+  });
+
+  it('rejects a resolver identity mismatch before provider GET', async () => {
+    const consultarDevolucao = vi.fn().mockResolvedValue({ status: 'devolvida' });
+    resolveRefundBinding.mockResolvedValueOnce({
+      e2eId: E2E_B,
+      idDevolucao: 'another-refund',
+      amountCents: REFUND_AMOUNT,
+    });
+
+    const result = await archiveAndDispatchInterPixWebhook(archive, {
+      rawBody: envelope([{ txid: TXID_A, endToEndId: E2E_A, devolucoes: [{ id: 'refund1' }] }]),
+      resolveRefundBinding,
+      pixCobrancaProvider: provider({ consultarDevolucao }),
+      onChargeConfirmed,
+      onRefundConfirmed,
+    });
+
+    expect(result.items[0]?.outcome).toBe('refund_binding_failed');
+    expect(consultarDevolucao).not.toHaveBeenCalled();
+    expect(onRefundConfirmed).not.toHaveBeenCalled();
   });
 
   it('returns 400 and archives nothing for malformed or over-fanout envelopes', async () => {
     const invalidJson = await archiveAndDispatchInterPixWebhook(archive, {
       rawBody: '{',
+      resolveRefundBinding,
       pixCobrancaProvider: provider(),
       onChargeConfirmed,
       onRefundConfirmed,
@@ -246,6 +309,7 @@ describe('archiveAndDispatchInterPixWebhook', () => {
           endToEndId: `E2E-${index}`,
         })),
       ),
+      resolveRefundBinding,
       pixCobrancaProvider: provider(),
       onChargeConfirmed,
       onRefundConfirmed,

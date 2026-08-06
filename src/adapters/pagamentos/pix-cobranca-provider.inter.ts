@@ -16,6 +16,7 @@ import {
 import {
   type CobrancaCriada,
   type ConsultarCobrancaResult,
+  type ConsultarDevolucaoInput,
   type CriarCobrancaInput,
   type DevolucaoOutcome,
   PixCobrancaAmbiguaError,
@@ -211,16 +212,17 @@ export class PixCobrancaProviderInter implements PixCobrancaProvider {
     });
   }
 
-  async consultarDevolucao(e2eId: string, idDevolucao: string): Promise<DevolucaoOutcome> {
+  async consultarDevolucao(input: ConsultarDevolucaoInput): Promise<DevolucaoOutcome> {
     return this.withSpan('pix_cobranca.inter.consultar_devolucao', async (span) => {
-      validateRefundIds(e2eId, idDevolucao, 'consultarDevolucao');
+      validateRefundIds(input.e2eId, input.idDevolucao, 'consultarDevolucao');
+      validateAmount(input.amountCents, 'consultarDevolucao');
       const token = await this.getTokenTransient('consultarDevolucao');
 
       let response: InterHttpResponse;
       try {
         response = await this.http.request(
           'GET',
-          refundPath(e2eId, idDevolucao),
+          refundPath(input.e2eId, input.idDevolucao),
           this.http.jsonHeaders(token),
         );
       } catch {
@@ -232,8 +234,8 @@ export class PixCobrancaProviderInter implements PixCobrancaProvider {
         response,
         span,
         'consultarDevolucao',
-        idDevolucao,
-        undefined,
+        input.idDevolucao,
+        input.amountCents,
         false,
       );
     });

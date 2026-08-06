@@ -29,6 +29,7 @@ export interface InterPixWebhookDeps
     | 'db'
     | 'webhookEventArchive'
     | 'pagamentoRepository'
+    | 'pixCobrancaDevolucaoRepository'
     | 'pagamentoEventPublisher'
     | 'contribuicaoRepository'
     | 'campanhaRepository'
@@ -139,6 +140,19 @@ export function createInterPixWebhookHandler(
               },
             );
             return { pagamentoId: finalized.pagamento.id };
+          },
+          resolveRefundBinding: async (identity) => {
+            const record = await deps.pixCobrancaDevolucaoRepository.findByIdentity(
+              identity.e2eId,
+              identity.idDevolucao,
+            );
+            return record === undefined
+              ? null
+              : {
+                  e2eId: record.e2eId,
+                  idDevolucao: record.idDevolucao,
+                  amountCents: record.amountCents,
+                };
           },
           onRefundConfirmed: async (confirmed) => {
             if (!deps.onInterPixRefundConfirmed) {

@@ -230,10 +230,11 @@ async function replayInter(
 
   // Existing pending means a prior PUT may have reached Inter. The only safe
   // replay is an authoritative GET; never issue a second PUT from this path.
-  const outcome = await deps.pixCobrancaProvider.consultarDevolucao(
-    record.e2eId,
-    record.idDevolucao,
-  );
+  const outcome = await deps.pixCobrancaProvider.consultarDevolucao({
+    e2eId: record.e2eId,
+    idDevolucao: record.idDevolucao,
+    amountCents: record.amountCents,
+  });
   return persistirOutcomeInter(deps, pagamento, record, outcome);
 }
 
