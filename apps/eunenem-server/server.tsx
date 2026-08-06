@@ -19,6 +19,7 @@ import { App, resolveRoute } from './pages/App.js';
 import { buildServerDeps, ID_PLATAFORMA_EUNENEM, loadEnv } from './server/auth/setup.js';
 import { installBlockedAuthHandlerGuard } from './server/blocked-auth-handler.js';
 import { createLegacyBridgeHandler } from './server/legacy-bridge.js';
+import { registerPixCobrancaReconciliationJob } from './server/jobs/pix-cobranca-reconciliation.pgboss.js';
 import { appRouter } from './server/trpc/router.js';
 import { createStripeWebhookHandler } from './server/webhooks/stripe-webhook.js';
 import { mountInterPixWebhookRoutes } from './server/webhooks/inter-pix-webhook.js';
@@ -68,9 +69,15 @@ try {
     },
   );
 
-  console.log('✅ pg-boss repasse workers registered (executar + confirmar)');
+  // aperture-fpd0j — durable recovery for expired/missed Inter PIX
+  // callbacks. Queue, worker, and singleton schedule are all registered
+  // before HTTP starts; a registration failure fails boot loudly rather than
+  // leaving payments permanently pending behind an apparently healthy API.
+  await registerPixCobrancaReconciliationJob(deps.boss, deps);
+
+  console.log('✅ pg-boss workers registered (repasse + PIX cobranca reconciliation)');
 } catch (err) {
-  console.error('❌ Failed to start pg-boss repasse workers:', err);
+  console.error('❌ Failed to start pg-boss workers:', err);
   throw err;
 }
 

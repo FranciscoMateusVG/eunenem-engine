@@ -291,6 +291,19 @@ describe('Migration round-trip', () => {
     const eventoDataHoraCol = await getColumn(db, 'eventos', 'data_hora');
     expect(eventoDataHoraCol?.is_nullable).toBe('YES');
 
+    // 20260805_048_add_pix_cobranca_reconciliation: persisted PIX expiry plus
+    // an operational worker lease. Both are nullable so legacy rows remain
+    // valid; the partial index covers only deterministic due-PIX candidates.
+    const pixExpiraEmCol = await getColumn(db, 'pagamentos', 'intencao_expira_em');
+    expect(pixExpiraEmCol?.data_type).toBe('timestamp with time zone');
+    expect(pixExpiraEmCol?.is_nullable).toBe('YES');
+    const pixClaimedUntilCol = await getColumn(db, 'pagamentos', 'pix_reconciliacao_claimed_until');
+    expect(pixClaimedUntilCol?.data_type).toBe('timestamp with time zone');
+    expect(pixClaimedUntilCol?.is_nullable).toBe('YES');
+    expect(await listIndexNames(db, 'pagamentos')).toContain(
+      'pagamentos_pix_reconciliacao_due_idx',
+    );
+
     // 037 unify_evento_data_single_source (aperture-mu1v9): eventos rows may
     // be PARTIAL — modalidade AND tipo_evento are optional post-migration.
     expect((await getColumn(db, 'eventos', 'modalidade'))?.is_nullable).toBe('YES');
@@ -301,6 +314,18 @@ describe('Migration round-trip', () => {
     //    migration. Each migrateDown() unwinds exactly the current tip, so
     //    this sequence must start at the LATEST migration and walk earlier.
     //    Adding a new migration on top REQUIRES prepending its down-step here.
+
+    // 20260805_048_add_pix_cobranca_reconciliation (aperture-fpd0j) → the
+    // actual TIP. Its down() removes the partial candidate index and both
+    // nullable reconciliation columns without touching payment rows.
+    const downPixCobrancaReconciliation = await migrator.migrateDown();
+    expect(downPixCobrancaReconciliation.error).toBeUndefined();
+    expect(await getColumn(db, 'pagamentos', 'intencao_expira_em')).toBeUndefined();
+    expect(await getColumn(db, 'pagamentos', 'pix_reconciliacao_claimed_until')).toBeUndefined();
+    expect(await listIndexNames(db, 'pagamentos')).not.toContain(
+      'pagamentos_pix_reconciliacao_due_idx',
+    );
+    expect(await getColumn(db, 'convites', 'assinatura')).toBeDefined();
 
     // ── aperture-hdftp CI repair (2026-07-07): the three convite-feature
     //    migrations below (032/033/034) landed on staging without prepending

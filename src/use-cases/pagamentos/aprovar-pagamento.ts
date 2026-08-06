@@ -45,6 +45,8 @@ export interface AprovarPagamentoComTransacaoVerificadaInput extends ComandoPaga
   readonly transacao: TransacaoExterna;
 }
 
+const STATUS_ORIGEM_VERIFICADA = ['pendente', 'processing'] as const;
+
 /**
  * Aprova um pagamento a partir de uma transação externa simulada pelo provedor fake.
  */
@@ -128,11 +130,38 @@ export async function aprovarPagamentoComTransacaoVerificada(
   if (!pagamento) {
     throw new PagamentoNaoEncontradoError(parsedInput.data.idPagamento);
   }
+
+  if (pagamento.status === 'aprovado') {
+    validarRepeticaoVerificada(pagamento, transacao);
+    return pagamento;
+  }
   if (!podeAprovarPagamento(pagamento)) {
     throw new PagamentoTransicaoStatusInvalidaError(pagamento.id, pagamento.status, 'aprovado');
   }
 
-  return aplicarTransacaoVerificada(deps, pagamento, transacao);
+  validarTransacaoAprovada(pagamento, transacao);
+
+  const now = deps.clock();
+  const aprovado = aprovarPagamentoPendente(pagamento, transacao, now);
+  const venceuCas = await deps.pagamentoRepository.updateIfStatusIn(
+    aprovado,
+    STATUS_ORIGEM_VERIFICADA,
+  );
+
+  if (!venceuCas) {
+    const canonical = await deps.pagamentoRepository.findById(pagamento.id);
+    if (!canonical) {
+      throw new PagamentoNaoEncontradoError(pagamento.id);
+    }
+    if (canonical.status === 'aprovado') {
+      validarRepeticaoVerificada(canonical, transacao);
+      return canonical;
+    }
+    throw new PagamentoTransicaoStatusInvalidaError(canonical.id, canonical.status, 'aprovado');
+  }
+
+  await publicarAprovacao(deps, aprovado, transacao, now);
+  return aprovado;
 }
 
 async function aplicarTransacaoVerificada(
@@ -140,9 +169,19 @@ async function aplicarTransacaoVerificada(
   pagamento: Pagamento,
   transacao: TransacaoExterna,
 ): Promise<Pagamento> {
-  const { pagamentoRepository, pagamentoEventPublisher, clock, observability } = deps;
-  const { logger } = observability;
+  const { pagamentoRepository, clock } = deps;
 
+  validarTransacaoAprovada(pagamento, transacao);
+
+  const now = clock();
+  const aprovado = aprovarPagamentoPendente(pagamento, transacao, now);
+  await pagamentoRepository.update(aprovado);
+  await publicarAprovacao(deps, aprovado, transacao, now);
+
+  return aprovado;
+}
+
+function validarTransacaoAprovada(pagamento: Pagamento, transacao: TransacaoExterna): void {
   if (transacao.status !== 'aprovado') {
     throw new PagamentoTransicaoStatusInvalidaError(pagamento.id, pagamento.status, 'aprovado');
   }
@@ -152,20 +191,37 @@ async function aplicarTransacaoVerificada(
       transacao.amountCents,
     );
   }
+}
 
-  const now = clock();
-  const aprovado = aprovarPagamentoPendente(pagamento, transacao, now);
-  await pagamentoRepository.update(aprovado);
-  await pagamentoEventPublisher.publish(
+function validarRepeticaoVerificada(pagamento: Pagamento, transacao: TransacaoExterna): void {
+  const existente = pagamento.transacaoExterna;
+  if (
+    !existente ||
+    existente.id !== transacao.id ||
+    existente.provedor !== transacao.provedor ||
+    existente.status !== transacao.status ||
+    existente.amountCents !== transacao.amountCents
+  ) {
+    throw new PagamentosInputInvalidoError('transacao verificada diverge do pagamento ja aprovado');
+  }
+}
+
+async function publicarAprovacao(
+  deps: AprovarPagamentoComTransacaoVerificadaDeps,
+  aprovado: Pagamento,
+  transacao: TransacaoExterna,
+  ocorridoEm: Date,
+): Promise<void> {
+  await deps.pagamentoEventPublisher.publish(
     criarEventoPagamento({
       id: randomUUID(),
       tipo: 'payment.approved',
       pagamento: aprovado,
-      ocorridoEm: now,
+      ocorridoEm,
     }),
   );
 
-  logger.info('pagamento.aprovado', {
+  deps.observability.logger.info('pagamento.aprovado', {
     idPagamento: aprovado.id,
     idIntencaoPagamento: aprovado.intencao.id,
     idCampanha: aprovado.intencao.idCampanha,
@@ -173,6 +229,4 @@ async function aplicarTransacaoVerificada(
     amountCents: aprovado.intencao.composicaoValoresAggregate.totalPaidCents,
     idTransacaoExterna: transacao.id,
   });
-
-  return aprovado;
 }

@@ -176,4 +176,32 @@ describe('PagamentoRepositoryPostgres — Postgres-specific', () => {
     expect(span).toBeDefined();
     expect(span?.attributes['batch.size']).toBe(2);
   });
+
+  it('concurrent PIX reconciliation claims never return the same pagamento twice', async () => {
+    const now = new Date('2026-08-05T12:00:00.000Z');
+    const leaseUntil = new Date('2026-08-05T12:05:00.000Z');
+    const pagamentos = Array.from({ length: 4 }, (_, index) => {
+      const id = `00000000-0000-4000-8000-00000000001${index}`;
+      return makePagamento({
+        id,
+        externalRef: id.replaceAll('-', ''),
+        expiraEm: new Date(`2026-08-05T11:0${index}:00.000Z`),
+      });
+    });
+    for (const pagamento of pagamentos) {
+      await seedPagamentoParents(testDb.db, pagamento);
+      await repo.save(pagamento);
+    }
+
+    const secondWorker = new PagamentoRepositoryPostgres(testDb.db);
+    const [workerA, workerB] = await Promise.all([
+      repo.claimPixCobrancaReconciliationCandidates({ now, leaseUntil, limit: 3 }),
+      secondWorker.claimPixCobrancaReconciliationCandidates({ now, leaseUntil, limit: 3 }),
+    ]);
+    const combinedIds = [...workerA, ...workerB].map((candidate) => candidate.idPagamento);
+
+    expect(combinedIds).toHaveLength(4);
+    expect(new Set(combinedIds).size).toBe(4);
+    expect(combinedIds.sort()).toEqual(pagamentos.map((pagamento) => pagamento.id).sort());
+  });
 });

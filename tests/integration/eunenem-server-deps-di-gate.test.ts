@@ -311,9 +311,9 @@ describe('eunenem-server MINIO_ENDPOINT boot guard (aperture-9wqh1)', () => {
  * aperture-18j3j (B7 of 2j2j1) — the PIX-in charge rail DI gate + boot guard.
  *
  * Invariants pinned here:
- * 1. Default/unset → 'stripe' → the PixCobrancaNaoConfigurado throw-on-use
- *    stub is bound AND the existing Stripe/fake checkout bindings are
- *    byte-for-byte unchanged (zero-behavior-change proof for the merge).
+ * 1. Default/unset + no Inter credentials → 'stripe' checkout routing and the
+ *    PixCobrancaNaoConfigurado throw-on-use stub; existing Stripe/fake
+ *    checkout bindings stay byte-for-byte unchanged.
  * 2. 'fake' → deterministic PixCobrancaProviderFake.
  * 3. 'inter' + full INTER_COB_* creds → real PixCobrancaProviderInter.
  * 4. 'inter' + ANY missing cred → boot rejection in EVERY environment
@@ -322,6 +322,9 @@ describe('eunenem-server MINIO_ENDPOINT boot guard (aperture-9wqh1)', () => {
  *    is allowed OUTSIDE production (sandbox stance — a PIX charge has no
  *    double-pay hazard, unlike a PIX transfer). Pinned so a future refactor
  *    doesn't "harmonize" the two gates and kill sandbox verification.
+ * 6. 'stripe' + complete Inter credentials keeps the real Inter adapter bound
+ *    for webhook/poller recovery of in-flight charges while NEW checkouts use
+ *    Stripe. Checkout routing and reconciliation availability are separate.
  */
 describe('eunenem-server PIX cobrança rail DI gate (aperture-18j3j)', () => {
   const B64 = (s: string) => Buffer.from(s).toString('base64');
@@ -441,6 +444,19 @@ describe('eunenem-server PIX cobrança rail DI gate (aperture-18j3j)', () => {
     const deps = buildServerDeps(loadEnv({ ...baseEnv(), COBRANCA_PIX_PROVIDER: 'fake' }));
     try {
       expect(deps.pixCobrancaProvider).toBeInstanceOf(PixCobrancaProviderFake);
+    } finally {
+      void deps.db.destroy();
+    }
+  });
+
+  it("keeps the real Inter adapter available after checkout routing rolls back to 'stripe'", () => {
+    const deps = buildServerDeps(loadEnv(interCobEnv({ COBRANCA_PIX_PROVIDER: 'stripe' })));
+    try {
+      // The selector routes NEW PIX checkouts. Complete Inter credentials are
+      // a separate recovery signal: already-created Inter charges must remain
+      // queryable by the webhook and B4 poller during the rollback window.
+      expect(deps.pixCobrancaProvider).toBeInstanceOf(PixCobrancaProviderInter);
+      expect(deps.pixCobrancaProvider).not.toBeInstanceOf(PixCobrancaProviderFake);
     } finally {
       void deps.db.destroy();
     }

@@ -235,6 +235,7 @@ export interface Pagamentos {
   intencao_contribuinte_mensagem: string | null;
   intencao_contribuinte_nome: string | null;
   intencao_criada_em: Timestamp;
+  intencao_expira_em: Timestamp | null;
   intencao_external_ref: string | null;
   intencao_id: string;
   intencao_id_campanha: string;
@@ -246,6 +247,7 @@ export interface Pagamentos {
   intencao_total_receiver_cents: Int8;
   intencao_total_surcharge_cents: Int8;
   mensagem_lida_em: Timestamp | null;
+  pix_reconciliacao_claimed_until: Timestamp | null;
   status: string;
   transacao_externa: Json | null;
 }

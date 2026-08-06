@@ -1229,8 +1229,24 @@ export {
 } from './use-cases/pagamentos/obter-pagamento-por-id.js';
 export type { ObterRecadosAdminDeCampanhaDeps } from './use-cases/pagamentos/obter-recados-admin-de-campanha.js';
 export { obterRecadosAdminDeCampanha } from './use-cases/pagamentos/obter-recados-admin-de-campanha.js';
-export type { RejeitarPagamentoDeps } from './use-cases/pagamentos/rejeitar-pagamento.js';
-export { rejeitarPagamento } from './use-cases/pagamentos/rejeitar-pagamento.js';
+export type {
+  ReconciliarCobrancasPixDeps,
+  ReconciliarCobrancasPixResult,
+} from './use-cases/pagamentos/reconciliar-cobrancas-pix.js';
+export {
+  PIX_COBRANCA_RECONCILIATION_BATCH_SIZE,
+  PIX_COBRANCA_RECONCILIATION_LEASE_MS,
+  reconciliarCobrancasPix,
+} from './use-cases/pagamentos/reconciliar-cobrancas-pix.js';
+export type {
+  RejeitarPagamentoComTransacaoVerificadaDeps,
+  RejeitarPagamentoComTransacaoVerificadaInput,
+  RejeitarPagamentoDeps,
+} from './use-cases/pagamentos/rejeitar-pagamento.js';
+export {
+  rejeitarPagamento,
+  rejeitarPagamentoComTransacaoVerificada,
+} from './use-cases/pagamentos/rejeitar-pagamento.js';
 // Plan 0016 Phase 2 (aperture-eg1s2): split per-item + cart-wide surcharge.
 export type {
   CalcularComposicaoValoresParaItemDeps,
