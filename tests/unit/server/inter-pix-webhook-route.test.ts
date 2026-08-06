@@ -7,6 +7,7 @@ import {
   mountInterPixWebhookRoutes,
   readBoundedBody,
 } from '../../../apps/eunenem-server/server/webhooks/inter-pix-webhook.js';
+import { WebhookEventArchiveMemory } from '../../../src/adapters/webhook-archive/webhook-event-archive.memory.js';
 import { NoopLogger } from '../../../src/observability/noop-logger.js';
 import { noopTracer } from '../../../src/observability/tracer.js';
 
@@ -79,5 +80,47 @@ describe('Banco Inter Pix webhook HTTP shell', () => {
 
     expect(response.status).toBe(429);
     expect(response.headers.get('retry-after')).toBe('60');
+  });
+
+  it('archives an unknown charge categorically without calling Banco Inter', async () => {
+    const txid = 'A'.repeat(26);
+    const e2eId = 'E'.repeat(32);
+    const consultarCobranca = vi.fn();
+    const findByExternalRef = vi.fn().mockResolvedValue(undefined);
+    const archive = new WebhookEventArchiveMemory(() => new Date('2026-08-05T12:30:00.000Z'));
+    const app = new Hono();
+    mountInterPixWebhookRoutes(
+      app,
+      {
+        ...routeDeps(),
+        webhookEventArchive: archive,
+        pagamentoRepository: { findByExternalRef },
+        pixCobrancaProvider: { consultarCobranca },
+      } as unknown as InterPixWebhookDeps,
+      {
+        consumeRateLimit: vi.fn().mockResolvedValue({
+          allowed: true,
+          count: 1,
+          max: 600,
+          windowMs: 60_000,
+        }),
+      },
+    );
+
+    const response = await app.request(INTER_PIX_WEBHOOK_PATHS[0], {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pix: [{ txid, endToEndId: e2eId }] }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(findByExternalRef).toHaveBeenCalledTimes(1);
+    expect(findByExternalRef).toHaveBeenCalledWith(txid);
+    expect(consultarCobranca).not.toHaveBeenCalled();
+    await expect(archive.findByProviderEventId('inter', e2eId)).resolves.toMatchObject({
+      rawPayload: { txid, endToEndId: e2eId },
+      processingError: 'charge_binding_failed',
+      processedAt: null,
+    });
   });
 });

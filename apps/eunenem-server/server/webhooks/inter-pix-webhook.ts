@@ -67,10 +67,11 @@ class InterPixWebhookBodyTooLargeError extends Error {
  * Banco Inter Pix callback handler.
  *
  * Inter supplies no payload signature. The payload is only a routing hint;
- * `archiveAndDispatchInterPixWebhook` re-queries the authoritative cobrança
- * API before either verified-result callback can run. Accepted, durably
- * archived envelopes return 200 even when an item remains unconfirmed so the
- * route stays fast and B4 reconciliation owns eventual recovery.
+ * `archiveAndDispatchInterPixWebhook` first binds charge txids to eligible
+ * local Inter payments, then re-queries the authoritative cobrança API before
+ * either verified-result callback can run. Accepted, durably archived
+ * envelopes return 200 even when an item remains unconfirmed so the route
+ * stays fast and B4 reconciliation owns eventual recovery.
  */
 export function createInterPixWebhookHandler(
   deps: InterPixWebhookDeps,
@@ -102,10 +103,29 @@ export function createInterPixWebhookHandler(
         const result = await archiveAndDispatchInterPixWebhook(deps.webhookEventArchive, {
           rawBody,
           pixCobrancaProvider: deps.pixCobrancaProvider,
-          onChargeConfirmed: async (confirmed) => {
-            const pagamento = await deps.pagamentoRepository.findByExternalRef(confirmed.txid);
-            if (!pagamento) throw new Error('inter_charge_unknown_payment');
+          resolveChargeBinding: async (identity) => {
+            const pagamento = await deps.pagamentoRepository.findByExternalRef(identity.txid);
+            if (!pagamento) return null;
 
+            const isDeterministicInterTxid =
+              identity.txid === pagamento.id.replaceAll('-', '') &&
+              pagamento.intencao.metodo === 'pix' &&
+              pagamento.intencao.externalRef === identity.txid;
+            if (!isDeterministicInterTxid) return null;
+
+            const isAwaitingSettlement =
+              pagamento.status === 'pendente' || pagamento.status === 'processing';
+            const isExactApprovedReplay =
+              pagamento.status === 'aprovado' &&
+              pagamento.intencao.e2eExternalRef === identity.e2eId &&
+              pagamento.transacaoExterna?.provedor === 'inter' &&
+              pagamento.transacaoExterna.id === identity.e2eId &&
+              pagamento.transacaoExterna.status === 'aprovado';
+            if (!isAwaitingSettlement && !isExactApprovedReplay) return null;
+
+            return { pagamentoId: pagamento.id, txid: identity.txid };
+          },
+          onChargeConfirmed: async (confirmed) => {
             const finalized = await finalizarPagamentoAprovadoComTransacaoVerificada(
               {
                 pagamentoRepository: deps.pagamentoRepository,
@@ -117,7 +137,7 @@ export function createInterPixWebhookHandler(
                 observability: deps.observability,
               },
               {
-                idPagamento: pagamento.id,
+                idPagamento: confirmed.pagamentoId,
                 transacao: {
                   id: confirmed.e2eId,
                   provedor: 'inter',

@@ -4,9 +4,10 @@ info:
   version: 1.0.0
   description: |
     Banco Inter Pix delivery contract. Inter does not sign this webhook, so
-    the request is a bounded routing hint only. Every item is archived and
-    re-queried through Banco Inter's authoritative read API before any local
-    payment state may change.
+    the request is a bounded routing hint only. Every item is archived as a
+    strict, PII-free identifier projection. A charge is re-queried through
+    Banco Inter's authoritative read API only after its txid is bound to an
+    eligible local Inter payment; unknown txids never cause provider I/O.
 servers:
   - url: https://eunenem.pocketsoftware.com.br
 paths:
@@ -19,6 +20,9 @@ paths:
         `/pix`; the suffix route below is the same handler. No application
         session or payload signature is required. A 200 means the envelope
         was durably archived, not that every item changed payment state.
+        Additional provider fields are accepted for compatibility but are
+        discarded before archival. Charge rows retain only `txid` and
+        `endToEndId`; refund rows retain only `endToEndId` and `idDevolucao`.
       security: []
       x-rate-limit-tier: inter-webhook-600-per-minute-per-ip
       requestBody:
@@ -112,7 +116,8 @@ components:
       description: |
         Envelope durably archived. Individual items may remain pending after
         a failed or non-terminal authoritative re-query; no unverified state
-        transition occurs.
+        transition occurs. Unknown or ineligible charge txids are recorded as
+        categorical binding failures without a Banco Inter API request.
       content:
         text/plain:
           schema:

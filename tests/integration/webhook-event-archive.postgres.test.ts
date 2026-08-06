@@ -44,14 +44,24 @@ describe('Inter Pix pipeline + real Postgres archive composition', () => {
       consultarDevolucao: vi.fn(),
     } satisfies PixCobrancaProvider;
     const onChargeConfirmed = vi.fn().mockResolvedValue({ pagamentoId: null });
+    const resolveChargeBinding = vi.fn(async ({ txid }: { readonly txid: string }) => ({
+      pagamentoId: txid === txidA ? 'pagamento-a' : 'pagamento-b',
+      txid,
+    }));
     const args = {
       rawBody: JSON.stringify({
         pix: [
-          { txid: txidA, endToEndId: e2eA },
-          { txid: txidB, endToEndId: e2eB },
+          {
+            txid: txidA,
+            endToEndId: e2eA,
+            valor: '1.00',
+            pagador: { cpf: 'must-not-persist', nome: 'PII' },
+          },
+          { txid: txidB, endToEndId: e2eB, campoLivre: 'attacker-controlled' },
         ],
       }),
       pixCobrancaProvider: provider,
+      resolveChargeBinding,
       resolveRefundBinding: vi.fn().mockResolvedValue(null),
       onChargeConfirmed,
       onRefundConfirmed: vi.fn(),
@@ -69,15 +79,40 @@ describe('Inter Pix pipeline + real Postgres archive composition', () => {
       'duplicate_processed',
     ]);
     expect(consultarCobranca).toHaveBeenCalledTimes(2);
+    expect(resolveChargeBinding).toHaveBeenCalledTimes(2);
     expect(onChargeConfirmed).toHaveBeenCalledTimes(2);
-    await expect(archive.findByProviderEventId('inter', e2eA)).resolves.toMatchObject({
+    expect(onChargeConfirmed).toHaveBeenNthCalledWith(1, {
+      pagamentoId: 'pagamento-a',
+      txid: txidA,
+      e2eId: e2eA,
+      amountCents: 1000,
+      horario: new Date('2026-08-05T12:00:00.000Z'),
+    });
+    expect(onChargeConfirmed).toHaveBeenNthCalledWith(2, {
+      pagamentoId: 'pagamento-b',
+      txid: txidB,
+      e2eId: e2eB,
+      amountCents: 2000,
+      horario: new Date('2026-08-05T12:00:00.000Z'),
+    });
+    const archivedA = await archive.findByProviderEventId('inter', e2eA);
+    const archivedB = await archive.findByProviderEventId('inter', e2eB);
+    expect(archivedA).toMatchObject({
       signatureValid: false,
       processedAt: expect.any(Date),
     });
-    await expect(archive.findByProviderEventId('inter', e2eB)).resolves.toMatchObject({
+    expect(archivedB).toMatchObject({
       signatureValid: false,
       processedAt: expect.any(Date),
     });
+    expect(archivedA?.rawPayload).toEqual({ txid: txidA, endToEndId: e2eA });
+    expect(archivedB?.rawPayload).toEqual({ txid: txidB, endToEndId: e2eB });
+    expect(JSON.stringify([archivedA?.rawPayload, archivedB?.rawPayload])).not.toContain(
+      'must-not-persist',
+    );
+    expect(JSON.stringify([archivedA?.rawPayload, archivedB?.rawPayload])).not.toContain(
+      'attacker-controlled',
+    );
   });
 
   it('atomically claims one concurrent redelivery of a failed Inter event', async () => {
@@ -119,6 +154,7 @@ describe('Inter Pix pipeline + real Postgres archive composition', () => {
     const args = {
       rawBody,
       pixCobrancaProvider: provider,
+      resolveChargeBinding: vi.fn(async () => ({ pagamentoId: 'pagamento-a', txid })),
       resolveRefundBinding: vi.fn().mockResolvedValue(null),
       onChargeConfirmed,
       onRefundConfirmed: vi.fn(),

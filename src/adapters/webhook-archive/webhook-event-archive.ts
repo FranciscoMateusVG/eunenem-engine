@@ -32,8 +32,10 @@
 
 /**
  * Persisted shape — mirrors `payment_webhook_events` columns 1:1.
- * The `rawPayload` field is the full event body as received from the
- * provider; opaque to this port (the handler's dispatch step reads it).
+ * The `rawPayload` field is the handler-owned archived representation,
+ * opaque to this port. A handler may retain a full provider body only when
+ * its trust and PII policy permits it. Unsigned Inter callbacks deliberately
+ * persist a strict bounded identifier projection instead.
  */
 export interface WebhookEventRecord {
   readonly id: string;
