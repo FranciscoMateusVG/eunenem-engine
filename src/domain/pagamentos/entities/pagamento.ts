@@ -2,7 +2,10 @@ import { z } from 'zod/v4';
 import { IdCampanhaSchema } from '../../arrecadacao/value-objects/ids.js';
 import type { MoneyCents } from '../../money.js';
 import { MoneyCentsSchema } from '../../money.js';
-import { DadosContribuinteSchema } from '../value-objects/dados-contribuinte.js';
+import {
+  type DadosContribuinte,
+  DadosContribuinteSchema,
+} from '../value-objects/dados-contribuinte.js';
 import {
   EventoPagamentoSchema,
   NomeProvedorPagamentoSchema,
@@ -217,6 +220,15 @@ export interface CriarPagamentoPendenteInput {
   readonly externalRef?: string | null;
   /** Provider intent expiry; omitted legacy callers persist null. */
   readonly expiraEm?: Date | null;
+  /**
+   * aperture-kuw0o (Inter PIX, spec §4.3): contribuinte captured at
+   * intent-creation time. The Stripe flow leaves this null (the iframe
+   * collects it and the webhook stamps it at finalization — plan 0015);
+   * the Inter PIX flow collects nome/email/mensagem in OUR OWN form
+   * BEFORE checkout, so the data exists up-front and is stamped here.
+   * Finalization's "only write when null" guard preserves it.
+   */
+  readonly contribuinte?: DadosContribuinte | null;
 }
 
 /**
@@ -299,11 +311,12 @@ export function criarPagamentoPendente(input: CriarPagamentoPendenteInput): Paga
       // confirms in the Stripe-hosted UI).
       paymentIntentExternalRef: null,
       chargeExternalRef: null,
-      // plan 0015 / aperture-7pqee: contribuinte starts null. The
-      // visitor data is collected by Stripe's iframe (custom_fields)
-      // and delivered on `checkout.session.completed`; the handler
-      // writes it atomically with the status transition.
-      contribuinte: null,
+      // plan 0015 / aperture-7pqee: contribuinte starts null on the
+      // Stripe flow — the iframe collects it (custom_fields) and the
+      // webhook handler writes it atomically with the status flip.
+      // aperture-kuw0o: the Inter PIX flow collects it in our own form
+      // pre-checkout and stamps it here at creation instead.
+      contribuinte: input.contribuinte ?? null,
       // plan 0015 / aperture-mjgxe: balanceTransactionAvailableOn starts
       // null; dispatcher populates at payment_intent.succeeded based
       // on metodo (NOW for pix, Stripe API for cartão).

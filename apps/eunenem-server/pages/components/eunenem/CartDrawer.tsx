@@ -6,9 +6,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   useIniciarPagamentoCarrinho,
   useInvalidarListaPresentes,
+  useObterConfigCheckout,
   useObterSucessoPagamento,
+  type ContribuinteInput,
   type MetodoPagamento,
 } from "@/lib/paginaApi";
+import { PixIdentityForm, PixQrPanel } from "./PixCheckout";
 import { useCart, toSagaInput, type CartLine } from "@/lib/cart.js";
 import { useCampanhaRota } from "@/lib/campanha-rota";
 import { formatBRL } from "@/lib/formatBRL";
@@ -43,9 +46,12 @@ interface CartDrawerProps {
   slug: string;
 }
 
+// aperture-kuw0o: pix_identity + pix_qr steps mirror GiftCheckoutModal —
+// our identity form BEFORE initiation, then the QR screen whose poll flips
+// straight to completed_confirmed (completed_pending is Stripe-specific).
 type Phase =
   | { kind: "summary" }
-  | { kind: "checkout"; step: "stripe" }
+  | { kind: "checkout"; step: "stripe" | "pix_identity" | "pix_qr" }
   | { kind: "completed_pending" }
   | { kind: "completed_confirmed" }
   | { kind: "completed_slow" };
@@ -65,9 +71,17 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
 
   const iniciar = useIniciarPagamentoCarrinho();
   const invalidarListaPresentes = useInvalidarListaPresentes();
+  // aperture-kuw0o: boot-time flag — PIX via our QR flow vs Stripe iframe.
+  const configCheckout = useObterConfigCheckout();
+  const pixViaQr = configCheckout.data?.pixViaQr ?? false;
+  const [pixContribuinte, setPixContribuinte] = useState<ContribuinteInput | null>(null);
 
-  const sessionId = iniciar.data?.sessionId ?? null;
-  const clientSecret = iniciar.data?.clientSecret ?? null;
+  // aperture-kuw0o: the mutation result is a discriminated union now.
+  const stripeData = iniciar.data?.tipo === "stripe_embedded" ? iniciar.data : null;
+  const pixData = iniciar.data?.tipo === "pix_qr" ? iniciar.data : null;
+
+  const sessionId = stripeData?.sessionId ?? null;
+  const clientSecret = stripeData?.clientSecret ?? null;
 
   // Poll the success endpoint while we're in pending/slow so we can flip
   // to confirmed the moment the webhook lands.
@@ -157,6 +171,11 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
       totalUnits: cart.totalUnits,
       totalCents: metodo === "pix" ? cart.totalPixCents : cart.totalCartaoCents,
     });
+    // aperture-kuw0o: PIX via our QR flow — identity first, no network yet.
+    if (metodo === "pix" && pixViaQr) {
+      setPhase({ kind: "checkout", step: "pix_identity" });
+      return;
+    }
     try {
       await iniciar.mutateAsync({
         slug,
@@ -184,8 +203,64 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
     cart.totalCartaoCents,
     iniciar,
     metodo,
+    pixViaQr,
     slug,
   ]);
+
+  // aperture-kuw0o: identity submitted → initiate the PIX charge → QR step.
+  // Cart lines are re-read at submit time (the visitor may have gone back
+  // and edited between snapshot and submit).
+  const onSubmitPixIdentity = useCallback(
+    async (contribuinte: ContribuinteInput) => {
+      if (cart.state.lines.length === 0 || iniciar.isPending) return;
+      const itens = toSagaInput(cart.state.lines);
+      if (itens.length === 0) return;
+      setPixContribuinte(contribuinte);
+      setCheckoutSnapshot({
+        lines: cart.state.lines.slice(),
+        totalUnits: cart.totalUnits,
+        totalCents: cart.totalPixCents,
+      });
+      try {
+        await iniciar.mutateAsync({
+          slug,
+          itens: itens.map((item) => ({
+            idContribuicao: item.idContribuicao,
+            quantidade: item.quantidade,
+          })),
+          metodo: "pix",
+          contribuinte,
+        });
+        sendEvent("checkout_iniciado", {
+          valor_centavos: cart.totalPixCents,
+          quantidade_itens: cart.totalUnits,
+          metodo: "pix",
+        });
+        setPhase({ kind: "checkout", step: "pix_qr" });
+      } catch {
+        // isError surfaces inline on the identity form; visitor retries there.
+      }
+    },
+    [cart.state.lines, cart.totalUnits, cart.totalPixCents, iniciar, slug],
+  );
+
+  // aperture-kuw0o: QR poll confirmed the payment — clear the cart (the
+  // Stripe path clears it on completed_pending; PIX skips that phase) and
+  // land on the confirmed panel.
+  const onPixConfirmed = useCallback(() => {
+    setPhase({ kind: "completed_confirmed" });
+    sendEvent("compra_concluida", {
+      valor: checkoutSnapshot?.totalCents ?? cart.totalPixCents,
+      gift_name: checkoutSnapshot?.lines[0]?.nome ?? "",
+    });
+    cart.clear();
+    void invalidarListaPresentes(slug);
+  }, [checkoutSnapshot, cart, invalidarListaPresentes, slug]);
+
+  const onPixRetry = useCallback(() => {
+    iniciar.reset();
+    setPhase({ kind: "checkout", step: "pix_identity" });
+  }, [iniciar]);
 
   const onStripeComplete = useCallback(() => {
     setPhase((cur) => (cur.kind === "checkout" ? { kind: "completed_pending" } : cur));
@@ -277,6 +352,31 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
             isError={iniciar.isError}
             errorMessage={iniciar.error?.message}
           />
+        )}
+
+        {phase.kind === "checkout" && phase.step === "pix_identity" && (
+          <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 20 }}>
+            <PixIdentityForm
+              valorCents={cart.totalPixCents}
+              submitting={iniciar.isPending}
+              submitError={iniciar.isError}
+              initial={pixContribuinte}
+              onSubmit={onSubmitPixIdentity}
+              onBack={() => setPhase({ kind: "summary" })}
+            />
+          </div>
+        )}
+
+        {phase.kind === "checkout" && phase.step === "pix_qr" && pixData && (
+          <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 20 }}>
+            <PixQrPanel
+              slug={slug}
+              pix={pixData}
+              valorCents={checkoutSnapshot?.totalCents ?? cart.totalPixCents}
+              onConfirmed={onPixConfirmed}
+              onRetry={onPixRetry}
+            />
+          </div>
         )}
 
         {phase.kind === "checkout" &&

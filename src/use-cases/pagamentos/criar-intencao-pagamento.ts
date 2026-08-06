@@ -10,6 +10,7 @@ import {
   criarPagamentoPendente,
   type Pagamento,
 } from '../../domain/pagamentos/entities/pagamento.js';
+import { DadosContribuinteSchema } from '../../domain/pagamentos/value-objects/dados-contribuinte.js';
 import {
   IdIntencaoPagamentoSchema,
   IdPagamentoSchema,
@@ -47,6 +48,12 @@ export const CriarIntencaoPagamentoInputSchema = z.object({
    * flow; omit / pass null for the synchronous solicitarPagamento flow.
    */
   externalRef: z.string().trim().min(1).max(255).nullable().optional(),
+  /**
+   * aperture-kuw0o (Inter PIX, spec §4.3): contribuinte captured by OUR
+   * OWN form before checkout, stamped at creation. Stripe-flow callers
+   * omit it (the webhook stamps at finalization, plan 0015).
+   */
+  contribuinte: DadosContribuinteSchema.nullable().optional(),
 });
 
 export type CriarIntencaoPagamentoInput = z.infer<typeof CriarIntencaoPagamentoInputSchema>;
@@ -86,6 +93,7 @@ export async function criarIntencaoPagamento(
         valorACobrarCents,
         metodo,
         externalRef,
+        contribuinte,
       } = parsed.data;
 
       span.setAttributes({
@@ -121,6 +129,7 @@ export async function criarIntencaoPagamento(
         valorACobrarCents,
         metodo,
         externalRef: externalRef ?? null,
+        contribuinte: contribuinte ?? null,
         criadoEm: now,
       });
 

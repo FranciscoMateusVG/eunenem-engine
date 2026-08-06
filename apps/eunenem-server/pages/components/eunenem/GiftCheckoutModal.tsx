@@ -7,9 +7,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   useIniciarPagamentoContribuicao,
   useInvalidarListaPresentes,
+  useObterConfigCheckout,
   useObterSucessoPagamento,
+  type ContribuinteInput,
   type MetodoPagamento,
 } from "@/lib/paginaApi";
+import { PixIdentityForm, PixQrPanel } from "./PixCheckout";
 import { useCampanhaRota } from "@/lib/campanha-rota";
 import { formatBRL } from "@/lib/formatBRL";
 import { paginaSharePath } from "@/lib/painelRoutes";
@@ -66,8 +69,12 @@ interface GiftCheckoutModalProps {
   onClose: () => void;
 }
 
+// aperture-kuw0o: two PIX-cobrança steps join the machine — pix_identity
+// (our nome/email/recadinho form, BEFORE initiation) and pix_qr (the QR
+// screen; its poll flips us straight to completed_confirmed — the
+// completed_pending window is Stripe-onComplete-specific).
 type Phase =
-  | { kind: "checkout"; step: "metodo" | "stripe" }
+  | { kind: "checkout"; step: "metodo" | "pix_identity" | "pix_qr" | "stripe" }
   | { kind: "completed_pending" }
   | { kind: "completed_confirmed" }
   | { kind: "completed_slow" };
@@ -84,13 +91,25 @@ export function GiftCheckoutModal({
   const iniciarPagamento = useIniciarPagamentoContribuicao();
   const invalidarListaPresentes = useInvalidarListaPresentes();
   const stripePromise = useMemo(() => getStripePromise(), []);
+  // aperture-kuw0o: boot-time flag — PIX via our QR flow vs Stripe iframe.
+  const configCheckout = useObterConfigCheckout();
+  const pixViaQr = configCheckout.data?.pixViaQr ?? false;
+  // Identity the visitor typed in OUR form (PIX path) — held so the
+  // success panel can show nome/recadinho without a session read.
+  const [pixContribuinte, setPixContribuinte] = useState<ContribuinteInput | null>(null);
+
+  // aperture-kuw0o: the mutation result is a discriminated union now —
+  // narrow each arm once, here.
+  const stripeData =
+    iniciarPagamento.data?.tipo === "stripe_embedded" ? iniciarPagamento.data : null;
+  const pixData = iniciarPagamento.data?.tipo === "pix_qr" ? iniciarPagamento.data : null;
 
   // Captured at session-create time and held for the success phase so we
   // can both (a) poll obterSucessoPagamento by sessionId and (b) hand the
   // visitor an escape-hatch URL pointing at the legacy /sucesso page if
-  // the webhook is slow.
-  const sessionId = iniciarPagamento.data?.sessionId ?? null;
-  const clientSecret = iniciarPagamento.data?.clientSecret;
+  // the webhook is slow. (Stripe arm only — the PIX flow has no session.)
+  const sessionId = stripeData?.sessionId ?? null;
+  const clientSecret = stripeData?.clientSecret;
 
   // Poll the success-read while we're in the pending/slow window. The hook
   // already auto-cancels polling once status reaches a terminal value, and
@@ -181,6 +200,13 @@ export function GiftCheckoutModal({
 
   async function onConfirmMetodo() {
     if (!gift.availableId || iniciarPagamento.isPending) return;
+    // aperture-kuw0o: PIX via our QR flow needs the identity FIRST (it
+    // rides the initiation mutation and is stamped at creation) — detour
+    // through our form before any network call.
+    if (metodo === "pix" && pixViaQr) {
+      setPhase({ kind: "checkout", step: "pix_identity" });
+      return;
+    }
     try {
       await iniciarPagamento.mutateAsync({
         slug,
@@ -194,6 +220,45 @@ export function GiftCheckoutModal({
       // Stay on the metodo step so the visitor can retry or close.
     }
   }
+
+  // aperture-kuw0o: identity submitted → initiate the PIX charge → QR step.
+  async function onSubmitPixIdentity(contribuinte: ContribuinteInput) {
+    if (!gift.availableId || iniciarPagamento.isPending) return;
+    setPixContribuinte(contribuinte);
+    try {
+      await iniciarPagamento.mutateAsync({
+        slug,
+        idContribuicao: gift.availableId,
+        metodo: "pix",
+        contribuinte,
+      });
+      sendEvent("checkout_iniciado", { valor_centavos: gift.valorCents, metodo: "pix" });
+      setPhase({ kind: "checkout", step: "pix_qr" });
+    } catch {
+      // isError surfaces inline on the identity form; visitor retries there.
+    }
+  }
+
+  // aperture-kuw0o: QR poll reported confirmado — the webhook/poller (or
+  // the authoritative provider consult) says the money moved. Straight to
+  // the confirmed panel; the Stripe-specific completed_pending window
+  // doesn't apply (no onComplete race here).
+  const onPixConfirmed = useCallback(() => {
+    setPhase({ kind: "completed_confirmed" });
+    sendEvent("compra_concluida", {
+      valor: gift.valorCents,
+      gift_name: gift.nome,
+    });
+    void invalidarListaPresentes(slug);
+  }, [gift.valorCents, gift.nome, invalidarListaPresentes, slug]);
+
+  // aperture-kuw0o: expired/rejected QR → back to a fresh identity step
+  // (the typed identity survives in pixContribuinte state; the mutation
+  // resets so a NEW idPagamento/txid is minted — charges are single-use).
+  const onPixRetry = useCallback(() => {
+    iniciarPagamento.reset();
+    setPhase({ kind: "checkout", step: "pix_identity" });
+  }, [iniciarPagamento]);
 
   // Stripe's onComplete fires client-side when the embedded checkout
   // confirms a payment in an iframe-resident flow (i.e. when the server
@@ -336,6 +401,27 @@ export function GiftCheckoutModal({
           />
         )}
 
+        {phase.kind === "checkout" && phase.step === "pix_identity" && (
+          <PixIdentityForm
+            valorCents={gift.valorCents}
+            submitting={iniciarPagamento.isPending}
+            submitError={iniciarPagamento.isError}
+            initial={pixContribuinte}
+            onSubmit={onSubmitPixIdentity}
+            onBack={() => setPhase({ kind: "checkout", step: "metodo" })}
+          />
+        )}
+
+        {phase.kind === "checkout" && phase.step === "pix_qr" && pixData && (
+          <PixQrPanel
+            slug={slug}
+            pix={pixData}
+            valorCents={gift.valorCents}
+            onConfirmed={onPixConfirmed}
+            onRetry={onPixRetry}
+          />
+        )}
+
         {phase.kind === "checkout" && phase.step === "stripe" && embeddedOptions && (
           <div
             style={{
@@ -366,8 +452,12 @@ export function GiftCheckoutModal({
             slug={slug}
             sessionId={sessionId}
             phase={phase.kind}
-            recadinho={successQuery.data?.recadinho ?? null}
-            contribuinteNome={successQuery.data?.contribuinte?.nome ?? null}
+            // aperture-kuw0o: PIX identity came from OUR form — no session
+            // read needed (and none exists for the pix flow).
+            recadinho={successQuery.data?.recadinho ?? pixContribuinte?.mensagem ?? null}
+            contribuinteNome={
+              successQuery.data?.contribuinte?.nome ?? pixContribuinte?.nome ?? null
+            }
             onComprarOutro={handleComprarOutro}
             onVerNoMural={handleVerNoMural}
             onFechar={handleFechar}

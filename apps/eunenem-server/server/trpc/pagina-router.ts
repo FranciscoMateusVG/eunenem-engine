@@ -126,17 +126,32 @@ export const ObterListaPresentesOutputItemSchema = z.object({
   valorComTaxaCartao: z.number().int().nonnegative(),
 });
 
+/**
+ * aperture-kuw0o (Inter PIX, spec §4.3): visitor identity for the PIX
+ * QR flow, captured by OUR OWN pre-checkout form. Wire-level mirror of
+ * the domain's DadosContribuinte (nome + email required, mensagem
+ * optional ≤255 — Stripe's custom_fields text limit, kept for parity).
+ */
+export const ContribuinteInputSchema = z.object({
+  nome: z.string().trim().min(1).max(120),
+  email: z.string().trim().email().max(320),
+  mensagem: z.string().trim().max(255).optional(),
+});
+
 export const IniciarPagamentoContribuicaoInputSchema = z.object({
   slug: z.string().trim().min(1).max(60),
   // aperture-yeauv: OPTIONAL per-campanha routing (see ObterListaPresentes).
   idCampanha: z.string().optional(),
   idContribuicao: z.string().uuid(),
-  // aperture-m95f3: no contribuinte input. Stripe collects nome + email
-  // + mensagem inside the embedded iframe via custom_fields +
-  // customer_creation. The webhook reads them from the completed session
-  // and finalize associates at payment-settled time. Operator decision —
-  // mirrors legacy eunenem.
+  // aperture-m95f3: on the STRIPE path there is no contribuinte input —
+  // Stripe collects nome + email + mensagem inside the embedded iframe
+  // via custom_fields + customer_creation, and the webhook stamps them
+  // at finalization. Operator decision — mirrors legacy eunenem.
+  // aperture-kuw0o: on the PIX-cobrança path (COBRANCA_PIX_PROVIDER not
+  // 'stripe') Inter collects nothing, so the identity arrives HERE from
+  // our own form; the saga requires it for that branch.
   metodo: z.enum(['pix', 'credit_card']),
+  contribuinte: ContribuinteInputSchema.optional(),
 });
 
 /**
@@ -171,12 +186,29 @@ export const IniciarPagamentoCarrinhoInputSchema = z.object({
     .min(1)
     .max(50),
   metodo: z.enum(['pix', 'credit_card']),
+  // aperture-kuw0o: see IniciarPagamentoContribuicaoInputSchema.
+  contribuinte: ContribuinteInputSchema.optional(),
 });
 
-export const IniciarPagamentoContribuicaoOutputSchema = z.object({
-  sessionId: z.string(),
-  clientSecret: z.string(),
-});
+/**
+ * aperture-kuw0o (spec §4.3): discriminated union on the wire — the
+ * Stripe arm mounts the embedded iframe; the pix_qr arm renders our QR
+ * screen. `expiraEm` crosses as ISO-8601 (this app registers no tRPC
+ * transformer, so Dates don't survive the wire — serialize explicitly).
+ */
+export const IniciarPagamentoContribuicaoOutputSchema = z.discriminatedUnion('tipo', [
+  z.object({
+    tipo: z.literal('stripe_embedded'),
+    sessionId: z.string(),
+    clientSecret: z.string(),
+  }),
+  z.object({
+    tipo: z.literal('pix_qr'),
+    txid: z.string(),
+    pixCopiaECola: z.string(),
+    expiraEm: z.string(),
+  }),
+]);
 
 export const ObterSucessoPagamentoInputSchema = z.object({
   slug: z.string().trim().min(1).max(60),
@@ -469,6 +501,8 @@ export const paginaRouter = t.router({
             pagamentoRepository: ctx.deps.pagamentoRepository,
             pagamentoEventPublisher: ctx.deps.pagamentoEventPublisher,
             checkoutSessionProvider: ctx.deps.checkoutSessionProvider,
+            pixCobrancaProvider: ctx.deps.pixCobrancaProvider,
+            cobrancaPixProviderKind: ctx.deps.cobrancaPixProviderKind,
             clock: ctx.deps.clock,
             observability: ctx.deps.observability,
           },
@@ -486,6 +520,9 @@ export const paginaRouter = t.router({
             idIntencaoPagamento,
             idsItens,
             returnUrl,
+            // aperture-kuw0o: identity from OUR form — required by the
+            // saga's PIX-cobrança branch, ignored by the Stripe branch.
+            ...(input.contribuinte ? { contribuinte: input.contribuinte } : {}),
             // aperture-6g58e: browser-originated checkout uses inline
             // success — Stripe fires onComplete in the iframe instead of
             // redirecting. The /sucesso page remains the fallback for
@@ -494,7 +531,21 @@ export const paginaRouter = t.router({
             redirectOnCompletion: 'if_required' as const,
           },
         );
-        return { sessionId: result.sessionId, clientSecret: result.clientSecret };
+        // aperture-kuw0o (spec §4.3): discriminated union on the wire.
+        // expiraEm → ISO string (no tRPC transformer in this app).
+        if (result.tipo === 'pix_qr') {
+          return {
+            tipo: 'pix_qr' as const,
+            txid: result.txid,
+            pixCopiaECola: result.pixCopiaECola,
+            expiraEm: result.expiraEm.toISOString(),
+          };
+        }
+        return {
+          tipo: 'stripe_embedded' as const,
+          sessionId: result.sessionId,
+          clientSecret: result.clientSecret,
+        };
       } catch (err) {
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
@@ -562,6 +613,8 @@ export const paginaRouter = t.router({
             pagamentoRepository: ctx.deps.pagamentoRepository,
             pagamentoEventPublisher: ctx.deps.pagamentoEventPublisher,
             checkoutSessionProvider: ctx.deps.checkoutSessionProvider,
+            pixCobrancaProvider: ctx.deps.pixCobrancaProvider,
+            cobrancaPixProviderKind: ctx.deps.cobrancaPixProviderKind,
             clock: ctx.deps.clock,
             observability: ctx.deps.observability,
           },
@@ -577,6 +630,9 @@ export const paginaRouter = t.router({
             idIntencaoPagamento,
             idsItens,
             returnUrl,
+            // aperture-kuw0o: identity from OUR form — required by the
+            // saga's PIX-cobrança branch, ignored by the Stripe branch.
+            ...(input.contribuinte ? { contribuinte: input.contribuinte } : {}),
             // Same inline-success policy as the single-shot procedure:
             // browser-originated checkout uses redirect_on_completion =
             // 'if_required' so Stripe fires onComplete inside the iframe
@@ -586,7 +642,21 @@ export const paginaRouter = t.router({
             redirectOnCompletion: 'if_required' as const,
           },
         );
-        return { sessionId: result.sessionId, clientSecret: result.clientSecret };
+        // aperture-kuw0o (spec §4.3): discriminated union on the wire.
+        // expiraEm → ISO string (no tRPC transformer in this app).
+        if (result.tipo === 'pix_qr') {
+          return {
+            tipo: 'pix_qr' as const,
+            txid: result.txid,
+            pixCopiaECola: result.pixCopiaECola,
+            expiraEm: result.expiraEm.toISOString(),
+          };
+        }
+        return {
+          tipo: 'stripe_embedded' as const,
+          sessionId: result.sessionId,
+          clientSecret: result.clientSecret,
+        };
       } catch (err) {
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
@@ -733,6 +803,95 @@ export const paginaRouter = t.router({
       }
 
       return { idCampanha: campanha.id };
+    }),
+
+  /**
+   * aperture-kuw0o (spec §4.3): checkout config for the visitor UI. The
+   * frontend must know BEFORE initiation whether the PIX path runs
+   * through our own QR flow (identity form + QR screen) or the Stripe
+   * iframe — the identity data has to ride the initiation mutation
+   * (stamped at creation). One boolean; no provider internals leak.
+   */
+  obterConfigCheckout: t.procedure
+    .output(z.object({ pixViaQr: z.boolean() }))
+    .query(({ ctx }) => {
+      return { pixViaQr: ctx.deps.cobrancaPixProviderKind !== 'stripe' };
+    }),
+
+  /**
+   * aperture-kuw0o (spec §4.3): poll target for the PIX QR screen.
+   *
+   * D1-compliant (deviation log): this is a READ — pagamento status from
+   * OUR DB first (the webhook/poller pipeline via Rex's verified-result
+   * seam is what transitions state), falling back to an authoritative
+   * provider consult for DISPLAY only (the QR screen can flip to
+   * "confirmado" the moment Inter reports CONCLUIDA, before bookkeeping
+   * lands). No state transition happens here, ever.
+   *
+   * Tenant-scoping mirrors obterSucessoPagamento (aperture-jlvet): txid
+   * is high-entropy but campanha-unscoped — cross-check against the
+   * slug-resolved campanha, mismatch → byte-equal NOT_FOUND. Output is
+   * status-only: no PII, no amounts.
+   *
+   * Rollback edge (spec §6): under COBRANCA_PIX_PROVIDER='stripe' the
+   * bound provider is the throw-on-use stub — never consult it; in-flight
+   * Inter charges keep resolving via the webhook/poller writing OUR DB,
+   * which this query reads as 'confirmado'/'rejeitado'.
+   */
+  obterStatusPix: t.procedure
+    .input(
+      z.object({
+        slug: z.string().trim().min(1).max(60),
+        idCampanha: z.string().optional(),
+        txid: z
+          .string()
+          .trim()
+          .regex(/^[a-zA-Z0-9]{26,35}$/),
+      }),
+    )
+    .output(
+      z.object({
+        status: z.enum(['pendente', 'confirmado', 'expirado', 'rejeitado']),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const { campanha } = await resolvePaginaBySlug(ctx, input.slug, input.idCampanha);
+
+      const pagamento = await ctx.deps.pagamentoRepository.findByExternalRef(input.txid);
+      if (!pagamento) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Pagamento nao encontrado' });
+      }
+      if (pagamento.intencao.idCampanha !== campanha.id) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Pagamento nao encontrado' });
+      }
+
+      // OUR DB is the source of truth for terminal states.
+      if (pagamento.status === 'aprovado') {
+        return { status: 'confirmado' as const };
+      }
+      if (pagamento.status === 'rejeitado') {
+        return { status: 'rejeitado' as const };
+      }
+
+      // Pending in our DB + a configured PIX provider → authoritative
+      // consult for display. Transitory provider errors degrade to
+      // 'pendente' (the poll retries in 2s; a public query must not
+      // surface transport noise).
+      if (ctx.deps.cobrancaPixProviderKind !== 'stripe') {
+        try {
+          const cobranca = await ctx.deps.pixCobrancaProvider.consultarCobranca(input.txid);
+          if (cobranca.status === 'concluida') {
+            return { status: 'confirmado' as const };
+          }
+          if (cobranca.status === 'removida') {
+            return { status: 'expirado' as const };
+          }
+        } catch {
+          // transient/ambiguous consult failure — stay 'pendente'
+        }
+      }
+
+      return { status: 'pendente' as const };
     }),
 });
 

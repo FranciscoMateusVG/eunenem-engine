@@ -50,6 +50,7 @@ import {
   type CobrancaCriada,
   type ConsultarCobrancaResult,
   type DevolucaoOutcome,
+  type CobrancaPixProviderKind,
   type PixCobrancaProvider,
   PixCobrancaProviderFake,
   PixCobrancaProviderInter,
@@ -173,6 +174,13 @@ export interface ServerDeps {
    * in-flight charges. `fake` stays deterministic for test composition.
    */
   readonly pixCobrancaProvider: PixCobrancaProvider;
+  /**
+   * aperture-kuw0o (B5): which PixCobrancaProvider binding is active —
+   * the checkout saga routes metodo='pix' through the PIX-cobrança
+   * branch when this is not 'stripe' (fake included, so e2e can drive
+   * the QR flow). Mirrors env.COBRANCA_PIX_PROVIDER verbatim.
+   */
+  readonly cobrancaPixProviderKind: CobrancaPixProviderKind;
   /**
    * Financeiro BC — livro de lançamentos. Required by the
    * `finalizarPagamentoAprovado` use-case dispatched by the Stripe
@@ -1106,6 +1114,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     checkoutSessionProvider,
     pagamentoEventPublisher,
     pixCobrancaProvider,
+    cobrancaPixProviderKind: env.COBRANCA_PIX_PROVIDER,
     livroFinanceiroRepository,
     provedorRegraTaxa,
     observability,
