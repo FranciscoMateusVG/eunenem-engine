@@ -249,7 +249,90 @@ test.describe('kuw0o — PIX checkout routing (:3004, fake cobrança provider)',
 });
 
 test.describe('kuw0o — irhxi QA regressions (:3004, fake cobrança provider)', () => {
-  test('BLOCKER 1: unresolved/failed config fails CLOSED — PIX blocked with retry, never a silent Stripe default', async ({
+  test('BLOCKER 1 (race, loading window): fast click during config load is impossible — CTAs disabled, copy neutral, then recovery', async ({
+    page,
+    seededData,
+  }) => {
+    const gift = await seedMagicGift(seededData, 4200);
+
+    // THE actual timing race, made deterministic. Config rides the page's
+    // 4-procedure batch, so a plain route-hold would starve the gift list
+    // too. Instead: fail the config ENTRY inside batch #1 (lista/mural
+    // resolve normally → cards render), then HOLD the standalone retry
+    // request React Query fires next. RQ keeps the query in `pending`
+    // (isLoading true) through the whole retry cycle — the loading window
+    // now lasts exactly as long as the assertions need, WITH the page
+    // fully interactive around it.
+    let releaseRetry!: () => void;
+    const retryHeld = new Promise<void>((resolve) => {
+      releaseRetry = resolve;
+    });
+    let configRequestCount = 0;
+    await page.route(/\/api\/trpc\/[^?]*obterConfigCheckout/, async (route) => {
+      configRequestCount += 1;
+      if (configRequestCount === 1) {
+        const upstream = await route.fetch();
+        const procedures = (
+          new URL(route.request().url()).pathname.split('/api/trpc/')[1] ?? ''
+        ).split(',');
+        const configIndex = procedures.findIndex((p) => p.includes('obterConfigCheckout'));
+        const json = (await upstream.json()) as unknown[];
+        json[configIndex] = {
+          error: {
+            message: 'sabotaged by e2e (attempt 1)',
+            code: -32603,
+            data: { code: 'INTERNAL_SERVER_ERROR', httpStatus: 500 },
+          },
+        };
+        await route.fulfill({ response: upstream, json });
+        return;
+      }
+      await retryHeld;
+      await route.continue();
+    });
+
+    await page.goto(`${PIX_SERVER}/pagina/${seededData.slug}`);
+    const card = page.locator('article').filter({ hasText: gift.nome });
+    await card.getByRole('button', { name: /\+ Adicionar/i }).click();
+
+    // DRAWER entry point, inside the loading window: Finalizar is DISABLED
+    // ('preparando checkout...') and the processor copy is NEUTRAL — no
+    // Stripe claim from the false default, no premature Inter claim.
+    const drawer = page.locator('[role="dialog"][aria-labelledby="cart-drawer-title"]');
+    const finalizarLoading = drawer.getByRole('button', { name: 'preparando checkout...' });
+    await expect(finalizarLoading).toBeVisible();
+    await expect(finalizarLoading).toBeDisabled();
+    await expect(drawer.getByText('Pagamento seguro ♡', { exact: true })).toBeVisible();
+    await expect(drawer.getByText(/pelo Stripe|Banco Inter/)).toHaveCount(0);
+
+    await drawer.getByRole('button', { name: 'Fechar carrinho' }).click();
+    await card.getByRole('button', { name: /ou comprar agora/ }).click();
+    const modal = page.locator('[role="dialog"][aria-labelledby="gift-checkout-title"]');
+    await expect(modal).toBeVisible();
+    await modal.getByRole('radio', { name: /^Pix/ }).click();
+
+    // MODAL entry point, same window: the fast click physically cannot
+    // take the presumed-Stripe branch — the CTA is disabled — and the
+    // copy stays neutral.
+    const continuarLoading = modal.getByRole('button', { name: 'Preparando checkout...' });
+    await expect(continuarLoading).toBeVisible();
+    await expect(continuarLoading).toBeDisabled();
+    await expect(modal.getByText('Pagamento seguro ♡', { exact: true })).toBeVisible();
+    await expect(modal.getByText(/pelo Stripe|Banco Inter/)).toHaveCount(0);
+
+    // Release the held retry → config succeeds → CTA opens, the copy
+    // names the REAL rail, and the flow lands on OUR identity form.
+    releaseRetry();
+    await expect(modal.getByRole('button', { name: 'Continuar →' })).toBeEnabled({
+      timeout: 10_000,
+    });
+    await expect(modal.getByText(/Pagamento via PIX pelo Banco Inter/)).toBeVisible();
+    await modal.getByRole('button', { name: 'Continuar →' }).click();
+    await expect(modal.getByRole('heading', { name: 'de quem vem esse carinho?' })).toBeVisible();
+    await expect(modal.locator('iframe')).toHaveCount(0);
+  });
+
+  test('BLOCKER 1 (error leg): failed config fails CLOSED — PIX blocked with retry, never a silent Stripe default', async ({
     page,
     seededData,
   }) => {
@@ -288,9 +371,13 @@ test.describe('kuw0o — irhxi QA regressions (:3004, fake cobrança provider)',
     });
 
     // PIX selected + config errored: CTA blocked, error surfaced with a
-    // retry — NOT a silent fall-through to the Stripe branch.
+    // retry — NOT a silent fall-through to the Stripe branch. And the
+    // processor copy stays NEUTRAL beside the error (residual 2): the
+    // false pixViaQr default must never leak a Stripe claim into the UI.
     await expect(modal.getByText(/não conseguimos preparar o checkout pix/)).toBeVisible();
     await expect(modal.getByRole('button', { name: 'Continuar →' })).toBeDisabled();
+    await expect(modal.getByText('Pagamento seguro ♡', { exact: true })).toBeVisible();
+    await expect(modal.getByText(/pelo Stripe|Banco Inter/)).toHaveCount(0);
 
     // Retry with the sabotage lifted → config lands → the flow proceeds
     // to OUR identity form; never a blank Stripe-shaped phase.

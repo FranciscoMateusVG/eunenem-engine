@@ -373,6 +373,7 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
             errorMessage={iniciar.error?.message}
             configLoading={configLoading}
             configError={configError}
+            configResolved={configCheckout.isSuccess}
             onRetryConfig={() => void configCheckout.refetch()}
             pixViaQr={pixViaQr}
           />
@@ -519,6 +520,7 @@ function SummaryStep({
   errorMessage,
   configLoading,
   configError,
+  configResolved,
   onRetryConfig,
   pixViaQr,
 }: {
@@ -532,6 +534,8 @@ function SummaryStep({
   configLoading: boolean;
   /** Config failed — PIX blocked (with retry); cartão unaffected. */
   configError: boolean;
+  /** aperture-irhxi residual 2: named-rail copy only after config success. */
+  configResolved: boolean;
   onRetryConfig: () => void;
   /** aperture-irhxi blocker 2: processor copy must match the real rail. */
   pixViaQr: boolean;
@@ -689,11 +693,13 @@ function SummaryStep({
             lineHeight: 1.4,
           }}
         >
-          {/* aperture-irhxi blocker 2: the processor line must tell the
-              truth for the rail this click actually takes. */}
-          {metodo === "pix" && pixViaQr
-            ? "Pagamento PIX seguro pelo Banco Inter ♡ Você completa nome + email + recadinho no próximo passo."
-            : "Pagamento seguro pelo Stripe ♡ Você completa nome + email + recadinho no próximo passo."}
+          {/* aperture-irhxi blocker 2 + residual 2: named-rail copy only
+              once config SUCCEEDS — neutral while unknown/errored. */}
+          {!configResolved
+            ? "Pagamento seguro ♡"
+            : metodo === "pix" && pixViaQr
+              ? "Pagamento PIX seguro pelo Banco Inter ♡ Você completa nome + email + recadinho no próximo passo."
+              : "Pagamento seguro pelo Stripe ♡ Você completa nome + email + recadinho no próximo passo."}
         </p>
       </footer>
     </>

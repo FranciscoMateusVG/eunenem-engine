@@ -424,6 +424,7 @@ export function GiftCheckoutModal({
             isError={iniciarPagamento.isError}
             configLoading={configLoading}
             configError={configError}
+            configResolved={configCheckout.isSuccess}
             onRetryConfig={() => void configCheckout.refetch()}
             pixViaQr={pixViaQr}
           />
@@ -779,6 +780,7 @@ function MetodoStep({
   isError,
   configLoading,
   configError,
+  configResolved,
   onRetryConfig,
   pixViaQr,
 }: {
@@ -792,6 +794,9 @@ function MetodoStep({
   configLoading: boolean;
   /** Config failed — PIX blocked (with retry); cartão doesn't depend on it. */
   configError: boolean;
+  /** aperture-irhxi residual 2: processor copy only renders a NAMED rail
+   *  once the config has actually succeeded — never a presumed one. */
+  configResolved: boolean;
   onRetryConfig: () => void;
   /** aperture-irhxi blocker 2: processor copy must match the real rail. */
   pixViaQr: boolean;
@@ -954,11 +959,16 @@ function MetodoStep({
           marginTop: 10,
         }}
       >
-        {/* aperture-irhxi blocker 2: the processor line must tell the truth
-            for the rail this click actually takes. */}
-        {metodo === "pix" && pixViaQr
-          ? "Pagamento via PIX pelo Banco Inter — o recadinho você deixa aqui com a gente ♡"
-          : "Pagamento processado pelo Stripe — você deixa o recadinho lá ♡"}
+        {/* aperture-irhxi blocker 2 + residual 2: the processor line must
+            tell the truth for the rail this click actually takes — and
+            until the config SUCCEEDS the rail is unknown, so the copy
+            stays neutral (never a presumed Stripe claim beside a config
+            error or during loading). */}
+        {!configResolved
+          ? "Pagamento seguro ♡"
+          : metodo === "pix" && pixViaQr
+            ? "Pagamento via PIX pelo Banco Inter — o recadinho você deixa aqui com a gente ♡"
+            : "Pagamento processado pelo Stripe — você deixa o recadinho lá ♡"}
       </p>
     </div>
   );
