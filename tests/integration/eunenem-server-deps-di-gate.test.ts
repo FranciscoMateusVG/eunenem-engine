@@ -449,17 +449,79 @@ describe('eunenem-server PIX cobrança rail DI gate (aperture-18j3j)', () => {
     }
   });
 
-  it("keeps the real Inter adapter available after checkout routing rolls back to 'stripe'", () => {
-    const deps = buildServerDeps(loadEnv(interCobEnv({ COBRANCA_PIX_PROVIDER: 'stripe' })));
-    try {
-      // The selector routes NEW PIX checkouts. Complete Inter credentials are
-      // a separate recovery signal: already-created Inter charges must remain
-      // queryable by the webhook and B4 poller during the rollback window.
-      expect(deps.pixCobrancaProvider).toBeInstanceOf(PixCobrancaProviderInter);
-      expect(deps.pixCobrancaProvider).not.toBeInstanceOf(PixCobrancaProviderFake);
-    } finally {
-      void deps.db.destroy();
+  const INTER_COB_CREDS = [
+    'INTER_COB_BASE_URL',
+    'INTER_COB_CLIENT_ID',
+    'INTER_COB_CLIENT_SECRET',
+    'INTER_COB_SCOPE',
+    'INTER_COB_CERT_BASE64',
+    'INTER_COB_KEY_BASE64',
+    'INTER_COB_PIX_KEY',
+  ] as const;
+
+  describe("checkout rollback to 'stripe'", () => {
+    const ORIGINAL_STRIPE_SECRET = process.env.STRIPE_SECRET_KEY;
+    const ROLLBACK_STRIPE_SECRET = 'sk_test_dummy_inter_cob_rollback';
+
+    afterEach(() => {
+      if (ORIGINAL_STRIPE_SECRET === undefined) {
+        delete process.env.STRIPE_SECRET_KEY;
+      } else {
+        process.env.STRIPE_SECRET_KEY = ORIGINAL_STRIPE_SECRET;
+      }
+      __resetStripeForTests();
+    });
+
+    function buildRollbackDeps(overrides: NodeJS.ProcessEnv = {}) {
+      // getStripe() reads the live process env. A synthetic loadEnv key alone
+      // would silently exercise the fake adapter and prove the wrong rollback.
+      process.env.STRIPE_SECRET_KEY = ROLLBACK_STRIPE_SECRET;
+      __resetStripeForTests();
+      return buildServerDeps(
+        loadEnv(
+          interCobEnv({
+            COBRANCA_PIX_PROVIDER: 'stripe',
+            STRIPE_SECRET_KEY: ROLLBACK_STRIPE_SECRET,
+            ...overrides,
+          }),
+        ),
+      );
     }
+
+    it('keeps the real Inter recovery adapter while payment checkout uses one Stripe instance', () => {
+      const deps = buildRollbackDeps();
+      try {
+        // The selector routes NEW PIX checkouts. Complete Inter credentials are
+        // a separate recovery signal: already-created Inter charges must remain
+        // queryable by the webhook and B4 poller during the rollback window.
+        expect(deps.pagamentoProvider).toBeInstanceOf(PagamentoProviderStripe);
+        expect(deps.checkoutSessionProvider).toBeInstanceOf(PagamentoProviderStripe);
+        expect(deps.pagamentoProvider).toBe(deps.checkoutSessionProvider);
+        expect(deps.pixCobrancaProvider).toBeInstanceOf(PixCobrancaProviderInter);
+        expect(deps.pixCobrancaProvider).not.toBeInstanceOf(PixCobrancaProviderFake);
+      } finally {
+        void deps.db.destroy();
+      }
+    });
+
+    it.each(
+      INTER_COB_CREDS,
+    )('keeps Stripe identity and binds the throw-on-use PIX stub when rollback lacks %s', async (missingCredential) => {
+      const deps = buildRollbackDeps({ [missingCredential]: '' });
+      try {
+        expect(deps.pagamentoProvider).toBeInstanceOf(PagamentoProviderStripe);
+        expect(deps.checkoutSessionProvider).toBeInstanceOf(PagamentoProviderStripe);
+        expect(deps.pagamentoProvider).toBe(deps.checkoutSessionProvider);
+        expect(deps.pixCobrancaProvider.constructor.name).toBe('PixCobrancaNaoConfigurado');
+        expect(deps.pixCobrancaProvider).not.toBeInstanceOf(PixCobrancaProviderInter);
+        expect(deps.pixCobrancaProvider).not.toBeInstanceOf(PixCobrancaProviderFake);
+        await expect(deps.pixCobrancaProvider.consultarCobranca('A'.repeat(26))).rejects.toThrow(
+          /COBRANCA_PIX_PROVIDER/,
+        );
+      } finally {
+        void deps.db.destroy();
+      }
+    });
   });
 
   it("binds PixCobrancaProviderInter when 'inter' is fully configured in production", () => {
@@ -491,15 +553,6 @@ describe('eunenem-server PIX cobrança rail DI gate (aperture-18j3j)', () => {
   // default) and whitespace-only (exercises the .trim() in the superRefine).
   // 7 × 3 × 2 = 42 cells, every one executed, every one asserting a
   // boot/schema rejection that NAMES the missing credential.
-  const INTER_COB_CREDS = [
-    'INTER_COB_BASE_URL',
-    'INTER_COB_CLIENT_ID',
-    'INTER_COB_CLIENT_SECRET',
-    'INTER_COB_SCOPE',
-    'INTER_COB_CERT_BASE64',
-    'INTER_COB_KEY_BASE64',
-    'INTER_COB_PIX_KEY',
-  ] as const;
   const NODE_ENVS = ['production', 'development', 'test'] as const;
   const ABSENCE_VARIANTS = [
     {
