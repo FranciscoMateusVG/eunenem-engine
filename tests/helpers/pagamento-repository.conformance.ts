@@ -168,6 +168,198 @@ export function describePagamentoRepositoryConformance(name: string, options: Co
       expect((await repo.findById(pagamento.id))?.status).toBe('processing');
     });
 
+    // ───────── PIX provider-read claims ─────────
+
+    it('claims a deterministic local PIX txid, holds the cooldown, and recovers at exact expiry', async () => {
+      const id = '00000000-0000-4000-8000-000000000021' as IdPagamento;
+      const txid = id.replaceAll('-', '');
+      const now = new Date('2026-05-01T13:00:00.000Z');
+      const leaseUntil = new Date('2026-05-01T13:01:00.000Z');
+      const submittedLeaseUntil = new Date(leaseUntil);
+      await repo.save(
+        makePagamento({
+          id,
+          externalRef: txid,
+          expiraEm: new Date('2026-05-01T14:00:00.000Z'),
+        }),
+      );
+
+      await expect(
+        repo.claimPixCobrancaProviderReadByTxid({
+          txid,
+          e2eId: 'E'.repeat(32),
+          now,
+          leaseUntil: submittedLeaseUntil,
+        }),
+      ).resolves.toBe(id);
+      submittedLeaseUntil.setTime(now.getTime());
+      await expect(
+        repo.claimPixCobrancaProviderReadByTxid({
+          txid,
+          e2eId: 'E'.repeat(32),
+          now: new Date('2026-05-01T13:00:59.999Z'),
+          leaseUntil: new Date('2026-05-01T13:02:00.000Z'),
+        }),
+      ).resolves.toBeUndefined();
+      await expect(
+        repo.claimPixCobrancaProviderReadByTxid({
+          txid,
+          e2eId: 'E'.repeat(32),
+          now: leaseUntil,
+          leaseUntil: new Date('2026-05-01T13:02:00.000Z'),
+        }),
+      ).resolves.toBe(id);
+    });
+
+    it('reclaims an approved Inter payment only for its exact persisted e2e identity', async () => {
+      const id = '00000000-0000-4000-8000-000000000027' as IdPagamento;
+      const txid = id.replaceAll('-', '');
+      const e2eId = 'E'.repeat(32);
+      const mismatchedE2eId = 'F'.repeat(32);
+      const now = new Date('2026-05-01T13:00:00.000Z');
+      const approved = makePagamento({
+        id,
+        externalRef: txid,
+        e2eExternalRef: e2eId,
+        status: 'aprovado',
+        expiraEm: new Date('2026-05-01T12:00:00.000Z'),
+      });
+      await repo.save({
+        ...approved,
+        transacaoExterna: {
+          id: e2eId,
+          provedor: 'inter',
+          status: 'aprovado',
+          amountCents: approved.intencao.composicaoValoresAggregate.totalPaidCents,
+          criadaEm: new Date('2026-05-01T12:30:00.000Z'),
+        },
+      });
+
+      await expect(
+        repo.claimPixCobrancaProviderReadByTxid({
+          txid,
+          e2eId: mismatchedE2eId,
+          now,
+          leaseUntil: new Date('2026-05-01T13:01:00.000Z'),
+        }),
+      ).resolves.toBeUndefined();
+      await expect(
+        repo.claimPixCobrancaProviderReadByTxid({
+          txid,
+          e2eId,
+          now,
+          leaseUntil: new Date('2026-05-01T13:01:00.000Z'),
+        }),
+      ).resolves.toBe(id);
+      await expect(
+        repo.claimPixCobrancaProviderReadByTxid({
+          txid,
+          e2eId,
+          now: new Date('2026-05-01T13:00:59.999Z'),
+          leaseUntil: new Date('2026-05-01T13:02:00.000Z'),
+        }),
+      ).resolves.toBeUndefined();
+      await expect(
+        repo.claimPixCobrancaProviderReadByTxid({
+          txid,
+          e2eId,
+          now: new Date('2026-05-01T13:01:00.000Z'),
+          leaseUntil: new Date('2026-05-01T13:02:00.000Z'),
+        }),
+      ).resolves.toBe(id);
+    });
+
+    it('shares its lease with B4 and rejects unknown or ineligible txids', async () => {
+      const now = new Date('2026-05-01T13:00:00.000Z');
+      const webhookLeaseUntil = new Date('2026-05-01T13:01:00.000Z');
+      const b4LeaseUntil = new Date('2026-05-01T13:10:00.000Z');
+      const webhookFirstId = '00000000-0000-4000-8000-000000000022' as IdPagamento;
+      const b4FirstId = '00000000-0000-4000-8000-000000000023' as IdPagamento;
+      const wrongProvenanceId = '00000000-0000-4000-8000-000000000024' as IdPagamento;
+      const cardId = '00000000-0000-4000-8000-000000000025' as IdPagamento;
+      const terminalId = '00000000-0000-4000-8000-000000000026' as IdPagamento;
+
+      for (const pagamento of [
+        makePagamento({
+          id: webhookFirstId,
+          externalRef: webhookFirstId.replaceAll('-', ''),
+          expiraEm: new Date('2026-05-01T12:00:00.000Z'),
+        }),
+        makePagamento({
+          id: b4FirstId,
+          externalRef: b4FirstId.replaceAll('-', ''),
+          expiraEm: new Date('2026-05-01T12:01:00.000Z'),
+        }),
+        makePagamento({
+          id: wrongProvenanceId,
+          externalRef: 'provider-generated-txid',
+          expiraEm: new Date('2026-05-01T12:02:00.000Z'),
+        }),
+        makePagamento({
+          id: cardId,
+          metodo: 'credit_card',
+          externalRef: cardId.replaceAll('-', ''),
+          expiraEm: new Date('2026-05-01T12:03:00.000Z'),
+        }),
+        makePagamento({
+          id: terminalId,
+          status: 'aprovado',
+          externalRef: terminalId.replaceAll('-', ''),
+          expiraEm: new Date('2026-05-01T12:04:00.000Z'),
+        }),
+      ]) {
+        await repo.save(pagamento);
+      }
+
+      const webhookTxid = webhookFirstId.replaceAll('-', '');
+      await expect(
+        repo.claimPixCobrancaProviderReadByTxid({
+          txid: webhookTxid,
+          e2eId: 'E'.repeat(32),
+          now,
+          leaseUntil: webhookLeaseUntil,
+        }),
+      ).resolves.toBe(webhookFirstId);
+
+      const b4FirstClaim = await repo.claimPixCobrancaReconciliationCandidates({
+        now,
+        leaseUntil: b4LeaseUntil,
+        limit: 10,
+      });
+      expect(b4FirstClaim.map((candidate) => candidate.idPagamento)).toEqual([b4FirstId]);
+      await expect(
+        repo.claimPixCobrancaProviderReadByTxid({
+          txid: b4FirstId.replaceAll('-', ''),
+          e2eId: 'E'.repeat(32),
+          now,
+          leaseUntil: webhookLeaseUntil,
+        }),
+      ).resolves.toBeUndefined();
+
+      const recoveredByB4 = await repo.claimPixCobrancaReconciliationCandidates({
+        now: webhookLeaseUntil,
+        leaseUntil: new Date('2026-05-01T13:11:00.000Z'),
+        limit: 10,
+      });
+      expect(recoveredByB4.map((candidate) => candidate.idPagamento)).toEqual([webhookFirstId]);
+
+      for (const txid of [
+        'unknown-txid',
+        'provider-generated-txid',
+        cardId.replaceAll('-', ''),
+        terminalId.replaceAll('-', ''),
+      ]) {
+        await expect(
+          repo.claimPixCobrancaProviderReadByTxid({
+            txid,
+            e2eId: 'E'.repeat(32),
+            now,
+            leaseUntil: webhookLeaseUntil,
+          }),
+        ).resolves.toBeUndefined();
+      }
+    });
+
     // ───────── PIX reconciliation claims ─────────
 
     it('claims only due deterministic PIX intents in expiry/id order and honors leases', async () => {

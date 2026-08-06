@@ -204,4 +204,33 @@ describe('PagamentoRepositoryPostgres — Postgres-specific', () => {
     expect(new Set(combinedIds).size).toBe(4);
     expect(combinedIds.sort()).toEqual(pagamentos.map((pagamento) => pagamento.id).sort());
   });
+
+  it('concurrent provider-read claims for one txid have exactly one winner', async () => {
+    const id = '00000000-0000-4000-8000-000000000030';
+    const txid = id.replaceAll('-', '');
+    const pagamento = makePagamento({
+      id,
+      externalRef: txid,
+      // Provider-read claims are valid before expiry; only the shared lease
+      // and local deterministic binding gate this webhook path.
+      expiraEm: new Date('2026-08-05T14:00:00.000Z'),
+    });
+    await seedPagamentoParents(testDb.db, pagamento);
+    await repo.save(pagamento);
+
+    const secondWorker = new PagamentoRepositoryPostgres(testDb.db);
+    const input = {
+      txid,
+      e2eId: 'E'.repeat(32),
+      now: new Date('2026-08-05T12:00:00.000Z'),
+      leaseUntil: new Date('2026-08-05T12:01:00.000Z'),
+    };
+    const claims = await Promise.all([
+      repo.claimPixCobrancaProviderReadByTxid(input),
+      secondWorker.claimPixCobrancaProviderReadByTxid(input),
+    ]);
+
+    expect(claims.filter((claimed) => claimed === id)).toHaveLength(1);
+    expect(claims.filter((claimed) => claimed === undefined)).toHaveLength(1);
+  });
 });

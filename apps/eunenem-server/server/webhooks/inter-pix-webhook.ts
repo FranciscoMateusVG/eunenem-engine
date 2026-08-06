@@ -16,6 +16,13 @@ const tracer = trace.getTracer('eunenem-server');
 export const INTER_PIX_WEBHOOK_MAX_BODY_BYTES = 256 * 1024;
 export const INTER_PIX_WEBHOOK_RATE_LIMIT_MAX = 600;
 export const INTER_PIX_WEBHOOK_RATE_LIMIT_WINDOW_MS = 60_000;
+/**
+ * One unsigned callback may cause at most one provider read per known txid
+ * during a rate-limit window. The durable repository lease is shared with
+ * B4 reconciliation, so another process cannot race this cooldown and a
+ * crashed worker becomes reclaimable after expiry.
+ */
+export const INTER_PIX_WEBHOOK_PROVIDER_READ_LEASE_MS = 60_000;
 export const INTER_PIX_WEBHOOK_PATHS = [
   '/api/webhooks/inter/pix',
   '/api/webhooks/inter/pix/pix',
@@ -67,10 +74,11 @@ class InterPixWebhookBodyTooLargeError extends Error {
  * Banco Inter Pix callback handler.
  *
  * Inter supplies no payload signature. The payload is only a routing hint;
- * `archiveAndDispatchInterPixWebhook` re-queries the authoritative cobrança
- * API before either verified-result callback can run. Accepted, durably
- * archived envelopes return 200 even when an item remains unconfirmed so the
- * route stays fast and B4 reconciliation owns eventual recovery.
+ * `archiveAndDispatchInterPixWebhook` first binds charge txids to eligible
+ * local Inter payments, then re-queries the authoritative cobrança API before
+ * either verified-result callback can run. Accepted, durably archived
+ * envelopes return 200 even when an item remains unconfirmed so the route
+ * stays fast and B4 reconciliation owns eventual recovery.
  */
 export function createInterPixWebhookHandler(
   deps: InterPixWebhookDeps,
@@ -102,10 +110,20 @@ export function createInterPixWebhookHandler(
         const result = await archiveAndDispatchInterPixWebhook(deps.webhookEventArchive, {
           rawBody,
           pixCobrancaProvider: deps.pixCobrancaProvider,
+          resolveChargeBinding: async (identity) => {
+            const now = deps.clock();
+            const pagamentoId =
+              await deps.pagamentoRepository.claimPixCobrancaProviderReadByTxid({
+                txid: identity.txid,
+                e2eId: identity.e2eId,
+                now,
+                leaseUntil: new Date(now.getTime() + INTER_PIX_WEBHOOK_PROVIDER_READ_LEASE_MS),
+              });
+            return pagamentoId === undefined
+              ? null
+              : { pagamentoId, txid: identity.txid };
+          },
           onChargeConfirmed: async (confirmed) => {
-            const pagamento = await deps.pagamentoRepository.findByExternalRef(confirmed.txid);
-            if (!pagamento) throw new Error('inter_charge_unknown_payment');
-
             const finalized = await finalizarPagamentoAprovadoComTransacaoVerificada(
               {
                 pagamentoRepository: deps.pagamentoRepository,
@@ -117,7 +135,7 @@ export function createInterPixWebhookHandler(
                 observability: deps.observability,
               },
               {
-                idPagamento: pagamento.id,
+                idPagamento: confirmed.pagamentoId,
                 transacao: {
                   id: confirmed.e2eId,
                   provedor: 'inter',
