@@ -24,9 +24,11 @@
  * expired — PixQrPanel rendered the expired panel on mount, and (3) the
  * per-boot ordinal txids collided with persisted rows under the unique
  * intencao_external_ref index on the second local run. The composition root
- * now wires a real clock, the gated magic flag, and a per-boot-unique
- * txidFactory. Classic e2e-catches-what-lower-cant: the unit suite injects
- * its own options and never sees the binding.
+ * now wires a real clock, the gated magic flag, and payment-derived txid/e2e
+ * factories. The identities mirror Inter's real B3/B4 repository predicates,
+ * so this suite can drive the actual webhook/reconciliation seams instead of
+ * stopping at a display-only poll. Classic e2e-catches-what-lower-cant: the
+ * unit suite injects its own options and never sees the binding.
  *
  * The magic test seeds a 1273-cent gift so the CHARGE totals exactly
  * PIX_COBRANCA_FAKE_MAGIC_CENTS.autoComplete (1337 = 1273 + ceil(5% fee))
@@ -67,10 +69,6 @@ async function seedMagicGift(
   const nome = `Pix QR ${randomUUID().slice(0, 8)}`;
   const db = createDatabase(DATABASE_URL);
   try {
-    // Belt-and-suspenders: purge fake-charge rows from PRE-nonce runs
-    // (finding #3's collisions are fixed by the per-boot txidFactory, but
-    // legacy FAKE0000… rows may persist in long-lived local DBs).
-    await db.deleteFrom('pagamentos').where('intencao_external_ref', 'like', 'FAKE%').execute();
     await seedAvailableGift(buildSeedGiftRepos(db), {
       idCampanha: seededData.idCampanha,
       idOpcaoPresentes: seededData.idOpcaoPresentes,
@@ -222,8 +220,9 @@ test.describe('kuw0o — PIX checkout routing (:3004, fake cobrança provider)',
     await expect(modal.getByRole('button', { name: 'copiado ♡' })).toBeVisible();
   });
 
-  test('magic 1337-cent charge auto-confirms — the poll flips the panel to the success state', async ({
+  test('magic 1337-cent charge confirms through the real webhook and persists before the UI succeeds', async ({
     page,
+    request,
     seededData,
   }) => {
     // MAGIC total: the fake matches criarCobranca's amountCents — which is
@@ -240,7 +239,75 @@ test.describe('kuw0o — PIX checkout routing (:3004, fake cobrança provider)',
     await modal.getByPlaceholder('Ana & João').fill('E2e Visitante Pix');
     await modal.getByPlaceholder('ana@email.com').fill('e2e-pix-visitor@e2e.local');
     await modal.getByPlaceholder('a gente já te ama tanto ♡').fill('um recadinho de teste ♡');
+    const initiationPromise = page.waitForResponse(
+      (res) =>
+        res.url().includes('iniciarPagamentoContribuicao') && res.request().method() === 'POST',
+    );
     await modal.getByRole('button', { name: 'continuar para o pix ♡' }).click();
+
+    const initiationBody = JSON.parse(await (await initiationPromise).text()) as Array<{
+      result?: { data?: { txid?: string } };
+    }>;
+    const txid = initiationBody[0]?.result?.data?.txid;
+    expect(txid).toMatch(/^[a-f0-9]{32}$/);
+    if (!txid) throw new Error('pix_qr response did not include txid');
+
+    const db = createDatabase(DATABASE_URL);
+    try {
+      const pending = await db
+        .selectFrom('pagamentos')
+        .select(['id', 'status', 'intencao_e2e_external_ref'])
+        .where('intencao_external_ref', '=', txid)
+        .executeTakeFirstOrThrow();
+      expect(txid).toBe(pending.id.replaceAll('-', ''));
+      expect(pending.status).toBe('pendente');
+      expect(pending.intencao_e2e_external_ref).toBeNull();
+
+      // The fake's deterministic e2e factory is part of the :3004 fixture.
+      // POST the real unsigned Inter route; it must bind the local txid,
+      // re-query the SAME fake instance, and run verified bookkeeping.
+      const e2eId = txid;
+      const webhook = await request.post(`${PIX_SERVER}/api/webhooks/inter/pix`, {
+        data: { pix: [{ txid, endToEndId: e2eId }] },
+      });
+      expect(webhook.status()).toBe(200);
+      expect(await webhook.text()).toBe('ok');
+
+      await expect
+        .poll(async () => {
+          const row = await db
+            .selectFrom('pagamentos')
+            .select(['status', 'intencao_e2e_external_ref', 'transacao_externa'])
+            .where('id', '=', pending.id)
+            .executeTakeFirstOrThrow();
+          return row;
+        })
+        .toMatchObject({
+          status: 'aprovado',
+          intencao_e2e_external_ref: e2eId,
+          transacao_externa: expect.objectContaining({
+            id: e2eId,
+            provedor: 'inter',
+            status: 'aprovado',
+            amountCents: MAGIC_AUTO_COMPLETE_CENTS,
+          }),
+        });
+
+      const archive = await db
+        .selectFrom('payment_webhook_events')
+        .select(['processed_at', 'processing_error', 'pagamento_id', 'raw_payload'])
+        .where('provider', '=', 'inter')
+        .where('provider_event_id', '=', `${txid}:${e2eId}`)
+        .executeTakeFirstOrThrow();
+      expect(archive).toMatchObject({
+        processing_error: null,
+        pagamento_id: pending.id,
+        raw_payload: { txid, endToEndId: e2eId },
+      });
+      expect(archive.processed_at).not.toBeNull();
+    } finally {
+      await db.destroy();
+    }
 
     await expect(modal.getByText('recebemos seu carinho ♡')).toBeVisible({
       timeout: 10_000,

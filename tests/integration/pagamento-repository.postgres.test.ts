@@ -46,8 +46,13 @@
  */
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { PagamentoEventPublisherMemory } from '../../src/adapters/pagamentos/event-publisher.memory.js';
+import { PixCobrancaProviderFake } from '../../src/adapters/pagamentos/pix-cobranca-provider.fake.js';
 import { PagamentoRepositoryPostgres } from '../../src/adapters/pagamentos/repository.postgres.js';
 import { PagamentoJaExisteError } from '../../src/errors/pagamentos/ja-existe.error.js';
+import { NoopLogger } from '../../src/observability/noop-logger.js';
+import { noopTracer } from '../../src/observability/tracer.js';
+import { reconciliarCobrancasPix } from '../../src/use-cases/pagamentos/reconciliar-cobrancas-pix.js';
 import { createTestObservability } from '../helpers/observability.js';
 import {
   describePagamentoRepositoryConformance,
@@ -203,6 +208,74 @@ describe('PagamentoRepositoryPostgres — Postgres-specific', () => {
     expect(combinedIds).toHaveLength(4);
     expect(new Set(combinedIds).size).toBe(4);
     expect(combinedIds.sort()).toEqual(pagamentos.map((pagamento) => pagamento.id).sort());
+  });
+
+  it('claims and rejects a UUID-bound fake PIX charge without a webhook', async () => {
+    const now = new Date('2026-08-05T12:00:00.000Z');
+    const id = '00000000-0000-4000-8000-000000000029';
+    const txid = id.replaceAll('-', '');
+    const pagamento = makePagamento({
+      id,
+      externalRef: txid,
+      expiraEm: new Date('2026-08-05T11:55:00.000Z'),
+    });
+    await seedPagamentoParents(testDb.db, pagamento);
+    await repo.save(pagamento);
+
+    const pixCobrancaProvider = new PixCobrancaProviderFake({
+      txidFactory: () => txid,
+      consultarCobrancaSequence: [{ status: 'removida' }],
+      clock: () => now,
+    });
+    await expect(
+      pixCobrancaProvider.criarCobranca({
+        idPagamento: pagamento.id,
+        idIntencaoPagamento: pagamento.intencao.id,
+        amountCents: pagamento.intencao.composicaoValoresAggregate.totalPaidCents,
+      }),
+    ).resolves.toMatchObject({ txid });
+
+    const deps = {
+      pagamentoRepository: repo,
+      pixCobrancaProvider,
+      pagamentoEventPublisher: new PagamentoEventPublisherMemory(),
+      // The removed terminal branch rejects before any Financeiro or
+      // campaign/contribution read, keeping this regression on the real
+      // Postgres claim seam rather than unrelated bookkeeping adapters.
+      contribuicaoRepository: {} as never,
+      campanhaRepository: {} as never,
+      livroFinanceiroRepository: {} as never,
+      clock: () => now,
+      observability: { logger: new NoopLogger(), tracer: noopTracer() },
+    };
+
+    await expect(reconciliarCobrancasPix(deps)).resolves.toEqual({
+      claimed: 1,
+      approved: 0,
+      rejected: 1,
+      deferred: 0,
+      failed: 0,
+    });
+    expect(pixCobrancaProvider.consultarCobrancaCalls).toBe(1);
+    await expect(repo.findById(id)).resolves.toMatchObject({
+      status: 'rejeitado',
+      transacaoExterna: {
+        id: txid,
+        provedor: 'inter',
+        status: 'rejeitado',
+        statusBruto: 'REMOVIDA',
+      },
+    });
+    await expect(
+      testDb.db
+        .selectFrom('pagamentos')
+        .select('pix_reconciliacao_claimed_until')
+        .where('id', '=', id)
+        .executeTakeFirstOrThrow(),
+    ).resolves.toEqual({ pix_reconciliacao_claimed_until: null });
+
+    await expect(reconciliarCobrancasPix(deps)).resolves.toMatchObject({ claimed: 0 });
+    expect(pixCobrancaProvider.consultarCobrancaCalls).toBe(1);
   });
 
   it('concurrent provider-read claims for one txid have exactly one winner', async () => {
