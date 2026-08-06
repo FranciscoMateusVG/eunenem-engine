@@ -951,6 +951,7 @@ export {
 } from './use-cases/checkout/finalizar-pagamento-rejeitado.js';
 // Plan 0016 Phase 2 (aperture-eg1s2): saga renamed to multi-item carrinho.
 export type {
+  CobrancaPixProviderKind,
   IniciarPagamentoCarrinhoDeps,
   IniciarPagamentoCarrinhoInput,
   IniciarPagamentoCarrinhoResult,

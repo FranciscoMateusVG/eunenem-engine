@@ -7,9 +7,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   useIniciarPagamentoContribuicao,
   useInvalidarListaPresentes,
+  useObterConfigCheckout,
   useObterSucessoPagamento,
+  type ContribuinteInput,
   type MetodoPagamento,
 } from "@/lib/paginaApi";
+import { PixIdentityForm, PixQrPanel } from "./PixCheckout";
 import { useCampanhaRota } from "@/lib/campanha-rota";
 import { formatBRL } from "@/lib/formatBRL";
 import { paginaSharePath } from "@/lib/painelRoutes";
@@ -66,8 +69,12 @@ interface GiftCheckoutModalProps {
   onClose: () => void;
 }
 
+// aperture-kuw0o: two PIX-cobrança steps join the machine — pix_identity
+// (our nome/email/recadinho form, BEFORE initiation) and pix_qr (the QR
+// screen; its poll flips us straight to completed_confirmed — the
+// completed_pending window is Stripe-onComplete-specific).
 type Phase =
-  | { kind: "checkout"; step: "metodo" | "stripe" }
+  | { kind: "checkout"; step: "metodo" | "pix_identity" | "pix_qr" | "stripe" }
   | { kind: "completed_pending" }
   | { kind: "completed_confirmed" }
   | { kind: "completed_slow" };
@@ -84,13 +91,30 @@ export function GiftCheckoutModal({
   const iniciarPagamento = useIniciarPagamentoContribuicao();
   const invalidarListaPresentes = useInvalidarListaPresentes();
   const stripePromise = useMemo(() => getStripePromise(), []);
+  // aperture-kuw0o: boot-time flag — PIX via our QR flow vs Stripe iframe.
+  // aperture-irhxi blocker 1: NEVER silently default to the Stripe branch —
+  // while the config is unresolved the CTA fails closed (disabled), and a
+  // config ERROR blocks the PIX path with a retry instead of guessing.
+  const configCheckout = useObterConfigCheckout();
+  const pixViaQr = configCheckout.data?.pixViaQr ?? false;
+  const configLoading = configCheckout.isLoading;
+  const configError = configCheckout.isError;
+  // Identity the visitor typed in OUR form (PIX path) — held so the
+  // success panel can show nome/recadinho without a session read.
+  const [pixContribuinte, setPixContribuinte] = useState<ContribuinteInput | null>(null);
+
+  // aperture-kuw0o: the mutation result is a discriminated union now —
+  // narrow each arm once, here.
+  const stripeData =
+    iniciarPagamento.data?.tipo === "stripe_embedded" ? iniciarPagamento.data : null;
+  const pixData = iniciarPagamento.data?.tipo === "pix_qr" ? iniciarPagamento.data : null;
 
   // Captured at session-create time and held for the success phase so we
   // can both (a) poll obterSucessoPagamento by sessionId and (b) hand the
   // visitor an escape-hatch URL pointing at the legacy /sucesso page if
-  // the webhook is slow.
-  const sessionId = iniciarPagamento.data?.sessionId ?? null;
-  const clientSecret = iniciarPagamento.data?.clientSecret;
+  // the webhook is slow. (Stripe arm only — the PIX flow has no session.)
+  const sessionId = stripeData?.sessionId ?? null;
+  const clientSecret = stripeData?.clientSecret;
 
   // Poll the success-read while we're in the pending/slow window. The hook
   // already auto-cancels polling once status reaches a terminal value, and
@@ -181,19 +205,84 @@ export function GiftCheckoutModal({
 
   async function onConfirmMetodo() {
     if (!gift.availableId || iniciarPagamento.isPending) return;
+    // aperture-irhxi blocker 1: fail closed. No initiation until the
+    // checkout config is KNOWN — a presumed-Stripe fast-click against an
+    // Inter/fake backend would land a pix_qr response in a Stripe-shaped
+    // phase (blank checkout). The CTA is also disabled below; this guard
+    // is the belt to that suspender. A config ERROR blocks only the PIX
+    // path (cartão never depends on the flag).
+    if (configLoading) return;
+    if (metodo === "pix" && configError) return;
+    // aperture-kuw0o: PIX via our QR flow needs the identity FIRST (it
+    // rides the initiation mutation and is stamped at creation) — detour
+    // through our form before any network call.
+    if (metodo === "pix" && pixViaQr) {
+      setPhase({ kind: "checkout", step: "pix_identity" });
+      return;
+    }
     try {
-      await iniciarPagamento.mutateAsync({
+      const result = await iniciarPagamento.mutateAsync({
         slug,
         idContribuicao: gift.availableId,
         metodo,
       });
       sendEvent("checkout_iniciado", { valor_centavos: gift.valorCents, metodo });
-      setPhase({ kind: "checkout", step: "stripe" });
+      // aperture-irhxi blocker 1 (defensive branch): the RESPONSE decides
+      // the screen, never the presumed flag — if the backend answered
+      // pix_qr, render the QR flow even though we expected Stripe.
+      setPhase({
+        kind: "checkout",
+        step: result.tipo === "pix_qr" ? "pix_qr" : "stripe",
+      });
     } catch {
       // Error state surfaces via iniciarPagamento.isError on the metodo step.
       // Stay on the metodo step so the visitor can retry or close.
     }
   }
+
+  // aperture-kuw0o: identity submitted → initiate the PIX charge → QR step.
+  async function onSubmitPixIdentity(contribuinte: ContribuinteInput) {
+    if (!gift.availableId || iniciarPagamento.isPending) return;
+    setPixContribuinte(contribuinte);
+    try {
+      const result = await iniciarPagamento.mutateAsync({
+        slug,
+        idContribuicao: gift.availableId,
+        metodo: "pix",
+        contribuinte,
+      });
+      sendEvent("checkout_iniciado", { valor_centavos: gift.valorCents, metodo: "pix" });
+      // Response-driven (aperture-irhxi blocker 1): stripe_embedded here
+      // means the flag flipped server-side mid-session — render Stripe.
+      setPhase({
+        kind: "checkout",
+        step: result.tipo === "pix_qr" ? "pix_qr" : "stripe",
+      });
+    } catch {
+      // isError surfaces inline on the identity form; visitor retries there.
+    }
+  }
+
+  // aperture-kuw0o: QR poll reported confirmado — the webhook/poller (or
+  // the authoritative provider consult) says the money moved. Straight to
+  // the confirmed panel; the Stripe-specific completed_pending window
+  // doesn't apply (no onComplete race here).
+  const onPixConfirmed = useCallback(() => {
+    setPhase({ kind: "completed_confirmed" });
+    sendEvent("compra_concluida", {
+      valor: gift.valorCents,
+      gift_name: gift.nome,
+    });
+    void invalidarListaPresentes(slug);
+  }, [gift.valorCents, gift.nome, invalidarListaPresentes, slug]);
+
+  // aperture-kuw0o: expired/rejected QR → back to a fresh identity step
+  // (the typed identity survives in pixContribuinte state; the mutation
+  // resets so a NEW idPagamento/txid is minted — charges are single-use).
+  const onPixRetry = useCallback(() => {
+    iniciarPagamento.reset();
+    setPhase({ kind: "checkout", step: "pix_identity" });
+  }, [iniciarPagamento]);
 
   // Stripe's onComplete fires client-side when the embedded checkout
   // confirms a payment in an iframe-resident flow (i.e. when the server
@@ -333,6 +422,31 @@ export function GiftCheckoutModal({
             onContinue={onConfirmMetodo}
             isPending={iniciarPagamento.isPending}
             isError={iniciarPagamento.isError}
+            configLoading={configLoading}
+            configError={configError}
+            configResolved={configCheckout.isSuccess}
+            onRetryConfig={() => void configCheckout.refetch()}
+            pixViaQr={pixViaQr}
+          />
+        )}
+
+        {phase.kind === "checkout" && phase.step === "pix_identity" && (
+          <PixIdentityForm
+            valorCents={gift.valorCents}
+            submitting={iniciarPagamento.isPending}
+            submitError={iniciarPagamento.isError}
+            initial={pixContribuinte}
+            onSubmit={onSubmitPixIdentity}
+            onBack={() => setPhase({ kind: "checkout", step: "metodo" })}
+          />
+        )}
+
+        {phase.kind === "checkout" && phase.step === "pix_qr" && pixData && (
+          <PixQrPanel
+            slug={slug}
+            pix={pixData}
+            onConfirmed={onPixConfirmed}
+            onRetry={onPixRetry}
           />
         )}
 
@@ -366,8 +480,12 @@ export function GiftCheckoutModal({
             slug={slug}
             sessionId={sessionId}
             phase={phase.kind}
-            recadinho={successQuery.data?.recadinho ?? null}
-            contribuinteNome={successQuery.data?.contribuinte?.nome ?? null}
+            // aperture-kuw0o: PIX identity came from OUR form — no session
+            // read needed (and none exists for the pix flow).
+            recadinho={successQuery.data?.recadinho ?? pixContribuinte?.mensagem ?? null}
+            contribuinteNome={
+              successQuery.data?.contribuinte?.nome ?? pixContribuinte?.nome ?? null
+            }
             onComprarOutro={handleComprarOutro}
             onVerNoMural={handleVerNoMural}
             onFechar={handleFechar}
@@ -660,6 +778,11 @@ function MetodoStep({
   onContinue,
   isPending,
   isError,
+  configLoading,
+  configError,
+  configResolved,
+  onRetryConfig,
+  pixViaQr,
 }: {
   gift: VisitorGift;
   metodo: MetodoPagamento;
@@ -667,6 +790,16 @@ function MetodoStep({
   onContinue: () => void;
   isPending: boolean;
   isError: boolean;
+  /** aperture-irhxi blocker 1: checkout config still resolving — fail closed. */
+  configLoading: boolean;
+  /** Config failed — PIX blocked (with retry); cartão doesn't depend on it. */
+  configError: boolean;
+  /** aperture-irhxi residual 2: processor copy only renders a NAMED rail
+   *  once the config has actually succeeded — never a presumed one. */
+  configResolved: boolean;
+  onRetryConfig: () => void;
+  /** aperture-irhxi blocker 2: processor copy must match the real rail. */
+  pixViaQr: boolean;
 }) {
   const pixRef = useRef<HTMLButtonElement | null>(null);
   const cardRef = useRef<HTMLButtonElement | null>(null);
@@ -763,19 +896,60 @@ function MetodoStep({
         </div>
       )}
 
+      {configError && metodo === "pix" && (
+        <div
+          role="alert"
+          style={{
+            background: "var(--pink-soft)",
+            color: "var(--plum)",
+            padding: "12px 14px",
+            borderRadius: 14,
+            marginTop: 16,
+            fontSize: 13.5,
+            lineHeight: 1.4,
+          }}
+        >
+          não conseguimos preparar o checkout pix agora —{" "}
+          <button
+            type="button"
+            onClick={onRetryConfig}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "var(--plum)",
+              textDecoration: "underline",
+              cursor: "pointer",
+              font: "inherit",
+              padding: 0,
+            }}
+          >
+            tentar de novo
+          </button>{" "}
+          ♡
+        </div>
+      )}
+
       <button
         type="button"
         onClick={onContinue}
-        disabled={isPending}
+        // aperture-irhxi blocker 1: fail closed while the checkout config
+        // resolves (a fast click must never take the presumed-Stripe
+        // branch), and keep PIX blocked on a config error.
+        disabled={isPending || configLoading || (configError && metodo === "pix")}
         className="btn-lilac"
         style={{
           width: "100%",
           justifyContent: "center",
           marginTop: 22,
-          opacity: isPending ? 0.7 : 1,
+          opacity:
+            isPending || configLoading || (configError && metodo === "pix") ? 0.7 : 1,
         }}
       >
-        {isPending ? "Abrindo checkout..." : "Continuar →"}
+        {isPending
+          ? "Abrindo checkout..."
+          : configLoading
+            ? "Preparando checkout..."
+            : "Continuar →"}
       </button>
       <p
         style={{
@@ -785,7 +959,16 @@ function MetodoStep({
           marginTop: 10,
         }}
       >
-        Pagamento processado pelo Stripe — você deixa o recadinho lá ♡
+        {/* aperture-irhxi blocker 2 + residual 2: the processor line must
+            tell the truth for the rail this click actually takes — and
+            until the config SUCCEEDS the rail is unknown, so the copy
+            stays neutral (never a presumed Stripe claim beside a config
+            error or during loading). */}
+        {!configResolved
+          ? "Pagamento seguro ♡"
+          : metodo === "pix" && pixViaQr
+            ? "Pagamento via PIX pelo Banco Inter — o recadinho você deixa aqui com a gente ♡"
+            : "Pagamento processado pelo Stripe — você deixa o recadinho lá ♡"}
       </p>
     </div>
   );
