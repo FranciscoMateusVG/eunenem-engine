@@ -46,6 +46,18 @@ import {
   PagamentoProviderStripe,
   type PagamentoRepository,
   PagamentoRepositoryPostgres,
+  type CriarCobrancaInput,
+  type CobrancaCriada,
+  type ConsultarCobrancaResult,
+  type ConsultarDevolucaoInput,
+  type DevolucaoOutcome,
+  type CobrancaPixProviderKind,
+  type PixCobrancaProvider,
+  type PixCobrancaDevolucaoRepository,
+  PixCobrancaDevolucaoRepositoryPostgres,
+  PixCobrancaProviderFake,
+  PixCobrancaProviderInter,
+  type SolicitarDevolucaoInput,
   type PerfilCampanhaRepository,
   PerfilCampanhaRepositoryPostgres,
   type PerfilCriadorRepository,
@@ -156,6 +168,28 @@ export interface ServerDeps {
   readonly pagamentoProvider: PagamentoProvider;
   readonly checkoutSessionProvider: CheckoutSessionProvider;
   readonly pagamentoEventPublisher: PagamentoEventPublisher;
+  /**
+   * Inter PIX-in charge/reconciliation rail. ALWAYS bound (non-optional).
+   * `COBRANCA_PIX_PROVIDER` selects the rail used for NEW checkouts, but does
+   * not disable recovery of already-created Inter charges: when the complete
+   * INTER_COB_* credential set remains present, the real adapter stays bound
+   * after a rollback to `stripe` so webhooks and B4 reconciliation can finish
+   * in-flight charges. `fake` stays deterministic for test composition.
+   */
+  readonly pixCobrancaProvider: PixCobrancaProvider;
+  /**
+   * aperture-kuw0o (B5): which PixCobrancaProvider binding is active —
+   * the checkout saga routes metodo='pix' through the PIX-cobrança
+   * branch when this is not 'stripe' (fake included, so e2e can drive
+   * the QR flow). Mirrors env.COBRANCA_PIX_PROVIDER verbatim.
+   */
+  readonly cobrancaPixProviderKind: CobrancaPixProviderKind;
+  /**
+   * Durable Inter refund lifecycle. One database-backed adapter serves admin
+   * retries and verified webhook completion; the finance adapter reads the
+   * same table under the shared per-payment advisory-lock convention.
+   */
+  readonly pixCobrancaDevolucaoRepository: PixCobrancaDevolucaoRepository;
   /**
    * Financeiro BC — livro de lançamentos. Required by the
    * `finalizarPagamentoAprovado` use-case dispatched by the Stripe
@@ -301,6 +335,54 @@ class ObjectStorageNaoConfigurado implements ObjectStorage {
 }
 
 /**
+ * aperture-18j3j — throw-on-use PixCobrancaProvider for
+ * COBRANCA_PIX_PROVIDER='stripe' (the default). Mirrors the
+ * ObjectStorageNaoConfigurado precedent above: under 'stripe', PIX checkout
+ * routes through the existing Stripe path and NOTHING should ever call this
+ * port — so every method throws loudly, naming the selector env var, instead
+ * of silently faking a charge and masking a routing/wiring bug.
+ */
+class PixCobrancaNaoConfigurado implements PixCobrancaProvider {
+  private static erro(metodo: string): Error {
+    return new Error(
+      `PixCobrancaProvider não configurado (COBRANCA_PIX_PROVIDER='stripe'): ` +
+        `${metodo} nunca deve ser chamado no caminho Stripe — ` +
+        `selecione 'inter' ou 'fake' para usar o rail de cobrança PIX (aperture-18j3j).`,
+    );
+  }
+
+  async criarCobranca(_input: CriarCobrancaInput): Promise<CobrancaCriada> {
+    throw PixCobrancaNaoConfigurado.erro('criarCobranca');
+  }
+
+  async consultarCobranca(_txid: string): Promise<ConsultarCobrancaResult> {
+    throw PixCobrancaNaoConfigurado.erro('consultarCobranca');
+  }
+
+  async solicitarDevolucao(_input: SolicitarDevolucaoInput): Promise<DevolucaoOutcome> {
+    throw PixCobrancaNaoConfigurado.erro('solicitarDevolucao');
+  }
+
+  async consultarDevolucao(_input: ConsultarDevolucaoInput): Promise<DevolucaoOutcome> {
+    throw PixCobrancaNaoConfigurado.erro('consultarDevolucao');
+  }
+}
+
+const INTER_COB_CREDENTIAL_KEYS = [
+  'INTER_COB_BASE_URL',
+  'INTER_COB_CLIENT_ID',
+  'INTER_COB_CLIENT_SECRET',
+  'INTER_COB_SCOPE',
+  'INTER_COB_CERT_BASE64',
+  'INTER_COB_KEY_BASE64',
+  'INTER_COB_PIX_KEY',
+] as const;
+
+function hasCompleteInterCobrancaCredentials(env: ServerEnv): boolean {
+  return INTER_COB_CREDENTIAL_KEYS.every((key) => env[key].trim().length > 0);
+}
+
+/**
  * Env vars consumed at boot. **All required in production** (T6 from recon
  * §4 — no defaults that leak into prod). Dev defaults live in `.env.example`
  * so a fresh clone can `pnpm dev` without crashing on missing secrets;
@@ -372,6 +454,15 @@ const ServerEnvSchema = z
      */
     E2E_FAKE_PAGAMENTO_PROVIDER: z.string().default(''),
     /**
+     * TEST-ONLY composition seam. The local Playwright topology boots three
+     * servers against one PostgreSQL/pg-boss database, but only :3004 owns the
+     * fake Inter cobrança provider. Disable the PIX reconciliation worker on
+     * :3002/:3003 so a Stripe-configured worker cannot claim an Inter-shaped
+     * due row and hold its durable lease before :3004 reads it. Empty by
+     * default and forbidden in production by the superRefine below.
+     */
+    E2E_DISABLE_PIX_RECONCILIATION_WORKER: z.string().default(''),
+    /**
      * aperture-vvh2j — automated PIX repasse rail selector. `'fake'` (default)
      * binds the deterministic in-process TransferenciaProviderFake; `'inter'`
      * selects the real Banco Inter PIX transfer adapter. The real adapter does
@@ -418,6 +509,35 @@ const ServerEnvSchema = z
      * smoke fires a R$1 PIX and confirms buscarPagamentos finds it.
      */
     INTER_EXTRATO_VERIFIED: z.enum(['true', 'false']).default('false'),
+    /**
+     * aperture-18j3j (B7 of 2j2j1) — PIX-in charge rail selector (spec §6).
+     * `'stripe'` (default → zero behavior change at merge): PIX checkout keeps
+     * the existing Stripe path and the pixCobrancaProvider dep is a
+     * throw-on-use stub. `'inter'`: real Banco Inter cobrança adapter
+     * (immediate PIX charge + devolução), requires the full INTER_COB_* set
+     * below. `'fake'`: deterministic in-process fake (CI/dev). Rollback is a
+     * config flip back to 'stripe' — no data migration.
+     */
+    COBRANCA_PIX_PROVIDER: z.enum(['stripe', 'inter', 'fake']).default('stripe'),
+    /**
+     * aperture-18j3j — Banco Inter PIX cobrança (PIX-in) credentials. A
+     * SEPARATE Inter integration from the INTER_* transferência set above
+     * (different scopes: cob.write cob.read pix.read pix.write webhook.*).
+     * ALL optional with '' defaults so fresh-clone / stripe / fake boots never
+     * crash; the superRefine below makes them REQUIRED (non-empty) whenever
+     * COBRANCA_PIX_PROVIDER==='inter'. Sourced from Infisical only — never
+     * compose files. CERT/KEY are base64-encoded PEM (mTLS client cert +
+     * private key), decoded at construction; default TLS verification, no
+     * bypass. INTER_COB_PIX_KEY is the receiving PIX key the charges are
+     * issued against (cob + webhook are both keyed on it).
+     */
+    INTER_COB_BASE_URL: z.string().default(''),
+    INTER_COB_CLIENT_ID: z.string().default(''),
+    INTER_COB_CLIENT_SECRET: z.string().default(''),
+    INTER_COB_SCOPE: z.string().default(''),
+    INTER_COB_CERT_BASE64: z.string().default(''),
+    INTER_COB_KEY_BASE64: z.string().default(''),
+    INTER_COB_PIX_KEY: z.string().default(''),
     /**
      * Trusted reverse-proxy hop count (aperture-uc2ix). Default 0 for
      * dev (no proxy in front of localhost:3001). Prod MUST set this
@@ -560,6 +680,14 @@ const ServerEnvSchema = z
             'E2E_FAKE_PAGAMENTO_PROVIDER must NOT be set in production — it is a test-only DI seam that stubs the real Stripe payment provider (aperture-07x5c).',
         });
       }
+      if (env.E2E_DISABLE_PIX_RECONCILIATION_WORKER.length > 0) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['E2E_DISABLE_PIX_RECONCILIATION_WORKER'],
+          message:
+            'E2E_DISABLE_PIX_RECONCILIATION_WORKER must NOT be set in production — production recovery workers must always register.',
+        });
+      }
     }
     // aperture-9wqh1 — MINIO_ENDPOINT, when set, MUST be a URL the BROWSER can
     // reach. The perfil/capa/historia photo pipeline signs a presigned PUT and
@@ -636,6 +764,28 @@ const ServerEnvSchema = z
             code: 'custom',
             path: [chave],
             message: `${chave} is required when TRANSFERENCIA_PROVIDER='inter' (aperture-ju5w2).`,
+          });
+        }
+      }
+    }
+    // aperture-18j3j — when the real Inter PIX-in charge rail is selected,
+    // every INTER_COB_* credential must be present, in EVERY environment:
+    // 'inter' selected but unusable is a misconfiguration; fail closed at boot
+    // rather than half-wiring a rail that throws on the first charge.
+    //
+    // DELIBERATE ASYMMETRY vs TRANSFERENCIA_PROVIDER (spec 2j2j1 §6): there is
+    // NO prod-only gate here. PIX-out is production-only because a real
+    // transfer double-pays real money; PIX-in's worst dev-mode failure is a
+    // test charge nobody pays. 'inter' + the sandbox base URL is therefore
+    // allowed in non-prod for manual verification (CI keeps 'fake' — the
+    // sandbox's business-hours window + 30-day certs would make CI flaky).
+    if (env.COBRANCA_PIX_PROVIDER === 'inter') {
+      for (const chave of INTER_COB_CREDENTIAL_KEYS) {
+        if (!env[chave] || env[chave].trim() === '') {
+          ctx.addIssue({
+            code: 'custom',
+            path: [chave],
+            message: `${chave} is required when COBRANCA_PIX_PROVIDER='inter' (aperture-18j3j).`,
           });
         }
       }
@@ -805,6 +955,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
   // (PagamentoProvider + CheckoutSessionProvider).
   const pagamentoRepository = new PagamentoRepositoryPostgres(db);
   const pagamentoEventPublisher = new PagamentoEventPublisherMemory();
+  const pixCobrancaDevolucaoRepository = new PixCobrancaDevolucaoRepositoryPostgres(db);
 
   // Financeiro BC — postgres-backed livro (aperture-id3ay, migration
   // 012). Before this swap, the memory adapter was losing every
@@ -941,6 +1092,46 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     });
   }
 
+  // Checkout routing and reconciliation availability are deliberately
+  // separate. The selector chooses NEW checkout behavior, while complete
+  // Inter credentials keep the real read adapter alive after a Stripe
+  // rollback so an in-flight <=10 minute charge can still settle via webhook
+  // or B4's poller. Without this split, the documented rollback path replaces
+  // the recovery adapter with a throw stub and strands those charges.
+  // `fake` remains an explicit deterministic test rail.
+  let pixCobrancaProvider: PixCobrancaProvider;
+  if (
+    env.COBRANCA_PIX_PROVIDER === 'inter' ||
+    (env.COBRANCA_PIX_PROVIDER === 'stripe' && hasCompleteInterCobrancaCredentials(env))
+  ) {
+    pixCobrancaProvider = new PixCobrancaProviderInter({
+      baseUrl: env.INTER_COB_BASE_URL,
+      clientId: env.INTER_COB_CLIENT_ID,
+      clientSecret: env.INTER_COB_CLIENT_SECRET,
+      scope: env.INTER_COB_SCOPE,
+      certPem: Buffer.from(env.INTER_COB_CERT_BASE64, 'base64').toString('utf8'),
+      keyPem: Buffer.from(env.INTER_COB_KEY_BASE64, 'base64').toString('utf8'),
+      pixKey: env.INTER_COB_PIX_KEY,
+    });
+  } else if (env.COBRANCA_PIX_PROVIDER === 'fake') {
+    // aperture-kuw0o + aperture-x6ntl (E2E composition-root findings).
+    // The test rail mirrors Inter's production identities so the same fake
+    // checkout can pass the REAL B3/B4 repository predicates:
+    //   txid = payment UUID without hyphens
+    //   e2e  = the same full 32-char identity (no lossy transformation)
+    // Payment IDs are already unique/idempotent, so this also removes the
+    // old persisted-row collision without inventing a per-boot namespace.
+    // Real clock + gated magic keep the QR surface browser-drivable.
+    pixCobrancaProvider = new PixCobrancaProviderFake({
+      clock: () => new Date(),
+      e2eMagicOutcomes: env.EUNENEM_FAKE_E2E_MAGIC === 'true',
+      txidFactory: (input) => input.idPagamento.replaceAll('-', ''),
+      e2eIdFactory: (txid) => txid,
+    });
+  } else {
+    pixCobrancaProvider = new PixCobrancaNaoConfigurado();
+  }
+
   return {
     db,
     auth,
@@ -962,6 +1153,9 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     pagamentoProvider,
     checkoutSessionProvider,
     pagamentoEventPublisher,
+    pixCobrancaProvider,
+    cobrancaPixProviderKind: env.COBRANCA_PIX_PROVIDER,
+    pixCobrancaDevolucaoRepository,
     livroFinanceiroRepository,
     provedorRegraTaxa,
     observability,

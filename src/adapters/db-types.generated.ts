@@ -235,6 +235,8 @@ export interface Pagamentos {
   intencao_contribuinte_mensagem: string | null;
   intencao_contribuinte_nome: string | null;
   intencao_criada_em: Timestamp;
+  intencao_e2e_external_ref: string | null;
+  intencao_expira_em: Timestamp | null;
   intencao_external_ref: string | null;
   intencao_id: string;
   intencao_id_campanha: string;
@@ -246,6 +248,7 @@ export interface Pagamentos {
   intencao_total_receiver_cents: Int8;
   intencao_total_surcharge_cents: Int8;
   mensagem_lida_em: Timestamp | null;
+  pix_reconciliacao_claimed_until: Timestamp | null;
   status: string;
   transacao_externa: Json | null;
 }
@@ -299,6 +302,18 @@ export interface PerfilCriadores {
   nome_bebe: string | null;
   relacao: string | null;
   tipo_evento: string | null;
+}
+
+export interface PixCobrancaDevolucoes {
+  amount_cents: Int8;
+  atualizado_em: Generated<Timestamp>;
+  criado_em: Generated<Timestamp>;
+  e2e_id: string;
+  id: string;
+  id_devolucao: string;
+  id_pagamento: string;
+  rtr_id: string | null;
+  status: string;
 }
 
 export interface RateLimit {
@@ -439,6 +454,7 @@ export interface DB {
   payment_webhook_events: PaymentWebhookEvents;
   perfil_campanhas: PerfilCampanhas;
   perfil_criadores: PerfilCriadores;
+  pix_cobranca_devolucoes: PixCobrancaDevolucoes;
   rate_limit: RateLimit;
   recebedores: Recebedores;
   repasse_reconciliacao_candidatos: RepasseReconciliacaoCandidatos;

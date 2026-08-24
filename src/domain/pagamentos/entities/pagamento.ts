@@ -2,7 +2,10 @@ import { z } from 'zod/v4';
 import { IdCampanhaSchema } from '../../arrecadacao/value-objects/ids.js';
 import type { MoneyCents } from '../../money.js';
 import { MoneyCentsSchema } from '../../money.js';
-import { DadosContribuinteSchema } from '../value-objects/dados-contribuinte.js';
+import {
+  type DadosContribuinte,
+  DadosContribuinteSchema,
+} from '../value-objects/dados-contribuinte.js';
 import {
   EventoPagamentoSchema,
   NomeProvedorPagamentoSchema,
@@ -138,6 +141,20 @@ export const IntencaoPagamentoSchema = z.object({
   composicaoValoresAggregate: SnapshotComposicaoValoresAggregateSchema,
   metodo: MetodoPagamentoSchema,
   externalRef: z.string().trim().min(1).max(255).nullable(),
+  /**
+   * Provider intent expiry. Stripe Checkout does not expose this field on
+   * the legacy path, so old intents hydrate as null. PIX providers that
+   * publish an authoritative expiry persist it here for reconciliation.
+   */
+  expiraEm: z.date().nullable(),
+  /**
+   * Banco Inter end-to-end settlement id. It is never accepted at intent
+   * creation: only a verified PIX settlement may stamp this reference.
+   */
+  e2eExternalRef: z
+    .string()
+    .regex(/^[A-Za-z0-9]{32}$/)
+    .nullable(),
   paymentIntentExternalRef: z.string().trim().min(1).max(255).nullable(),
   chargeExternalRef: z.string().trim().min(1).max(255).nullable(),
   contribuinte: DadosContribuinteSchema.nullable(),
@@ -209,6 +226,17 @@ export interface CriarPagamentoPendenteInput {
    * don't have to thread this through).
    */
   readonly externalRef?: string | null;
+  /** Provider intent expiry; omitted legacy callers persist null. */
+  readonly expiraEm?: Date | null;
+  /**
+   * aperture-kuw0o (Inter PIX, spec §4.3): contribuinte captured at
+   * intent-creation time. The Stripe flow leaves this null (the iframe
+   * collects it and the webhook stamps it at finalization — plan 0015);
+   * the Inter PIX flow collects nome/email/mensagem in OUR OWN form
+   * BEFORE checkout, so the data exists up-front and is stamped here.
+   * Finalization's "only write when null" guard preserves it.
+   */
+  readonly contribuinte?: DadosContribuinte | null;
 }
 
 /**
@@ -283,6 +311,8 @@ export function criarPagamentoPendente(input: CriarPagamentoPendenteInput): Paga
       composicaoValoresAggregate,
       metodo: input.metodo,
       externalRef: input.externalRef ?? null,
+      expiraEm: input.expiraEm ?? null,
+      e2eExternalRef: null,
       // aperture-wif8s: pi_xxx + ch_xxx populated post-creation by the
       // webhook handler as Stripe events arrive. Always start null at
       // intent-creation time — checkout flow hasn't talked to Stripe
@@ -290,11 +320,12 @@ export function criarPagamentoPendente(input: CriarPagamentoPendenteInput): Paga
       // confirms in the Stripe-hosted UI).
       paymentIntentExternalRef: null,
       chargeExternalRef: null,
-      // plan 0015 / aperture-7pqee: contribuinte starts null. The
-      // visitor data is collected by Stripe's iframe (custom_fields)
-      // and delivered on `checkout.session.completed`; the handler
-      // writes it atomically with the status transition.
-      contribuinte: null,
+      // plan 0015 / aperture-7pqee: contribuinte starts null on the
+      // Stripe flow — the iframe collects it (custom_fields) and the
+      // webhook handler writes it atomically with the status flip.
+      // aperture-kuw0o: the Inter PIX flow collects it in our own form
+      // pre-checkout and stamps it here at creation instead.
+      contribuinte: input.contribuinte ?? null,
       // plan 0015 / aperture-mjgxe: balanceTransactionAvailableOn starts
       // null; dispatcher populates at payment_intent.succeeded based
       // on metodo (NOW for pix, Stripe API for cartão).

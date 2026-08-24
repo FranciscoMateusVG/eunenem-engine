@@ -32,8 +32,10 @@
 
 /**
  * Persisted shape — mirrors `payment_webhook_events` columns 1:1.
- * The `rawPayload` field is the full event body as received from the
- * provider; opaque to this port (the handler's dispatch step reads it).
+ * The `rawPayload` field is the handler-owned archived representation,
+ * opaque to this port. A handler may retain a full provider body only when
+ * its trust and PII policy permits it. Unsigned Inter callbacks deliberately
+ * persist a strict bounded identifier projection instead.
  */
 export interface WebhookEventRecord {
   readonly id: string;
@@ -96,6 +98,17 @@ export interface WebhookEventArchive {
   saveReceived(input: SaveReceivedInput): Promise<SaveReceivedResult>;
 
   /**
+   * Atomically claim a previously-failed, still-unprocessed event for retry.
+   *
+   * The successful claimant clears `processing_error`, making the row look
+   * in-flight to concurrent redeliveries. Exactly one caller may transition
+   * `failed -> in-flight`; callers receiving `false` MUST NOT re-dispatch.
+   * This is a compare-and-set operation in durable adapters, not a read then
+   * write pair.
+   */
+  tryClaimFailedForRetry(id: string): Promise<boolean>;
+
+  /**
    * Mark a successful domain dispatch: sets `processed_at = now()`,
    * sets `pagamento_id` (nullable — not every event type resolves to a
    * pagamento), and clears any previously-set `processing_error` so a
@@ -105,9 +118,10 @@ export interface WebhookEventArchive {
 
   /**
    * Mark a failed domain dispatch: sets `processing_error` (truncated
-   * to PROCESSING_ERROR_MAX_LENGTH). `processed_at` stays NULL so
-   * forensic queries can distinguish "never processed" from
-   * "successfully processed."
+   * to PROCESSING_ERROR_MAX_LENGTH) only while `processed_at` is NULL.
+   * A late failure can therefore never poison a row already completed by
+   * another attempt. `processed_at` stays NULL so forensic queries can
+   * distinguish "never processed" from "successfully processed."
    */
   markFailed(id: string, error: string): Promise<void>;
 

@@ -84,6 +84,38 @@ export class WebhookEventArchivePostgres implements WebhookEventArchive {
     });
   }
 
+  async tryClaimFailedForRetry(id: string): Promise<boolean> {
+    return tracer.startActiveSpan(
+      'db.payment_webhook_events.tryClaimFailedForRetry',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+        try {
+          // One SQL statement is the concurrency boundary. Clearing the
+          // categorical failure is the durable failed -> in-flight state
+          // transition; concurrent redeliveries no longer satisfy the WHERE.
+          const claimed = await sql<{ id: string }>`
+            UPDATE payment_webhook_events
+               SET processing_error = NULL
+             WHERE id = ${id}
+               AND processed_at IS NULL
+               AND processing_error IS NOT NULL
+            RETURNING id
+          `.execute(this.db);
+          const didClaim = claimed.rows.length === 1;
+          span.setAttribute('retry.claimed', didClaim);
+          span.setStatus({ code: SpanStatusCode.OK });
+          return didClaim;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
   async markProcessed(id: string, pagamentoId: string | null): Promise<void> {
     return tracer.startActiveSpan('db.payment_webhook_events.markProcessed', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
@@ -115,6 +147,7 @@ export class WebhookEventArchivePostgres implements WebhookEventArchive {
           UPDATE payment_webhook_events
             SET processing_error = ${truncated}
             WHERE id = ${id}
+              AND processed_at IS NULL
         `.execute(this.db);
         span.setStatus({ code: SpanStatusCode.OK });
       } catch (error_: unknown) {

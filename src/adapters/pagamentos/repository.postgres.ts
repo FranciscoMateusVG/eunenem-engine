@@ -6,7 +6,11 @@ import {
   type ItemDoPagamento,
   ItemDoPagamentoSchema,
 } from '../../domain/pagamentos/entities/item-do-pagamento.js';
-import { type Pagamento, PagamentoSchema } from '../../domain/pagamentos/entities/pagamento.js';
+import {
+  type Pagamento,
+  PagamentoSchema,
+  type StatusPagamento,
+} from '../../domain/pagamentos/entities/pagamento.js';
 import type {
   IdContribuicaoPagamento,
   IdPagamento,
@@ -15,7 +19,14 @@ import { PagamentoJaExisteError } from '../../errors/pagamentos/ja-existe.error.
 import { PagamentoNaoEncontradoError } from '../../errors/pagamentos/nao-encontrado.error.js';
 import type { Database } from '../database.js';
 import type { DB } from '../db-types.generated.js';
-import type { AdminRecadoRow, MuralRecadoProjection, PagamentoRepository } from './repository.js';
+import type {
+  AdminRecadoRow,
+  ClaimPixCobrancaProviderReadByTxidInput,
+  ClaimPixCobrancaReconciliationCandidatesInput,
+  MuralRecadoProjection,
+  PagamentoRepository,
+  PixCobrancaReconciliationCandidate,
+} from './repository.js';
 
 const tracer = trace.getTracer('frame');
 
@@ -188,6 +199,201 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
     });
   }
 
+  async updateIfStatusIn(
+    pagamento: Pagamento,
+    expectedStatuses: readonly StatusPagamento[],
+  ): Promise<boolean> {
+    return tracer.startActiveSpan('db.pagamentos.updateIfStatusIn', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+      try {
+        if (expectedStatuses.length === 0) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return false;
+        }
+        const result = await this.db
+          .updateTable('pagamentos')
+          // Operational lease columns are intentionally omitted by the
+          // mapper, so lifecycle CAS cannot clear an active job claim.
+          // biome-ignore lint/suspicious/noExplicitAny: kysely Updateable brand vs plain row object
+          .set(rowFromPagamento(pagamento) as any)
+          .where('id', '=', pagamento.id)
+          .where('status', 'in', expectedStatuses)
+          .executeTakeFirst();
+        const matched =
+          typeof result?.numUpdatedRows === 'bigint'
+            ? Number(result.numUpdatedRows)
+            : (result?.numUpdatedRows ?? 0);
+        span.setStatus({ code: SpanStatusCode.OK });
+        return matched > 0;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  async claimPixCobrancaProviderReadByTxid(
+    input: ClaimPixCobrancaProviderReadByTxidInput,
+  ): Promise<IdPagamento | undefined> {
+    return tracer.startActiveSpan(
+      'db.pagamentos.claimPixCobrancaProviderReadByTxid',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+        try {
+          interface ClaimedRow {
+            id_pagamento: string;
+          }
+
+          // The txid unique index narrows this to at most one row. Keeping the
+          // binding predicate and lease CAS in the same UPDATE means concurrent
+          // webhook deliveries and the scheduled reconciler share one owner.
+          const result = await sql<ClaimedRow>`
+          UPDATE pagamentos AS p
+          SET pix_reconciliacao_claimed_until = ${input.leaseUntil}
+          WHERE p.intencao_external_ref = ${input.txid}
+            AND p.intencao_external_ref = replace(p.id::text, '-', '')
+            AND p.intencao_metodo = 'pix'
+            AND (
+              p.status IN ('pendente', 'processing')
+              OR (
+                p.status = 'aprovado'
+                AND p.intencao_e2e_external_ref = ${input.e2eId}
+                AND p.transacao_externa ->> 'provedor' = 'inter'
+                AND p.transacao_externa ->> 'id' = ${input.e2eId}
+                AND p.transacao_externa ->> 'status' = 'aprovado'
+              )
+            )
+            AND (
+              p.pix_reconciliacao_claimed_until IS NULL
+              OR p.pix_reconciliacao_claimed_until <= ${input.now}
+            )
+          RETURNING p.id AS id_pagamento
+        `.execute(this.db);
+
+          span.setStatus({ code: SpanStatusCode.OK });
+          return result.rows[0]?.id_pagamento as IdPagamento | undefined;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  async claimPixCobrancaReconciliationCandidates(
+    input: ClaimPixCobrancaReconciliationCandidatesInput,
+  ): Promise<readonly PixCobrancaReconciliationCandidate[]> {
+    return tracer.startActiveSpan(
+      'db.pagamentos.claimPixCobrancaReconciliationCandidates',
+      async (span) => {
+        span.setAttributes({
+          ...DB_ATTRS,
+          'db.operation.name': 'UPDATE',
+          'batch.size': input.limit,
+        });
+        try {
+          if (input.limit <= 0) {
+            span.setStatus({ code: SpanStatusCode.OK });
+            return [];
+          }
+
+          interface ClaimedRow {
+            id_pagamento: string;
+            txid: string;
+            expira_em: Date | string;
+          }
+
+          // One statement owns selection + lease write. SKIP LOCKED lets
+          // concurrent workers partition the due set without duplicates;
+          // the final SELECT restores deterministic ordering because
+          // UPDATE ... RETURNING itself does not promise row order.
+          const result = await sql<ClaimedRow>`
+            WITH candidates AS (
+              SELECT p.id
+              FROM pagamentos AS p
+              WHERE p.status IN ('pendente', 'processing')
+                AND p.intencao_metodo = 'pix'
+                AND p.intencao_expira_em IS NOT NULL
+                AND p.intencao_expira_em <= ${input.now}
+                AND p.intencao_external_ref = replace(p.id::text, '-', '')
+                AND (
+                  p.pix_reconciliacao_claimed_until IS NULL
+                  OR p.pix_reconciliacao_claimed_until <= ${input.now}
+                )
+              ORDER BY p.intencao_expira_em ASC, p.id ASC
+              FOR UPDATE SKIP LOCKED
+              LIMIT ${input.limit}
+            ), claimed AS (
+              UPDATE pagamentos AS p
+              SET pix_reconciliacao_claimed_until = ${input.leaseUntil}
+              FROM candidates AS c
+              WHERE p.id = c.id
+              RETURNING
+                p.id AS id_pagamento,
+                p.intencao_external_ref AS txid,
+                p.intencao_expira_em AS expira_em
+            )
+            SELECT id_pagamento, txid, expira_em
+            FROM claimed
+            ORDER BY expira_em ASC, id_pagamento ASC
+          `.execute(this.db);
+
+          const candidates = result.rows.map((row) => ({
+            idPagamento: row.id_pagamento as IdPagamento,
+            txid: row.txid,
+            expiraEm: row.expira_em instanceof Date ? row.expira_em : new Date(row.expira_em),
+          }));
+          span.setStatus({ code: SpanStatusCode.OK });
+          return candidates;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  async releasePixCobrancaReconciliationClaim(
+    idPagamento: IdPagamento,
+    claimedUntil: Date,
+  ): Promise<boolean> {
+    return tracer.startActiveSpan(
+      'db.pagamentos.releasePixCobrancaReconciliationClaim',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+        try {
+          const result = await this.db
+            .updateTable('pagamentos')
+            .set({ pix_reconciliacao_claimed_until: null })
+            .where('id', '=', idPagamento)
+            .where('pix_reconciliacao_claimed_until', '=', claimedUntil)
+            .executeTakeFirst();
+          const matched =
+            typeof result?.numUpdatedRows === 'bigint'
+              ? Number(result.numUpdatedRows)
+              : (result?.numUpdatedRows ?? 0);
+          span.setStatus({ code: SpanStatusCode.OK });
+          return matched > 0;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
   async findById(id: IdPagamento): Promise<Pagamento | undefined> {
     return tracer.startActiveSpan('db.pagamentos.findById', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
@@ -261,6 +467,32 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
           .selectFrom('pagamentos')
           .selectAll()
           .where('intencao_external_ref', '=', externalRef)
+          .executeTakeFirst();
+        if (!row) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return undefined;
+        }
+        const items = await loadItemsForPagamento(this.db, row.id as IdPagamento);
+        span.setStatus({ code: SpanStatusCode.OK });
+        return pagamentoFromRow(row as unknown as PagamentoRow, items);
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  async findByE2eExternalRef(e2eId: string): Promise<Pagamento | undefined> {
+    return tracer.startActiveSpan('db.pagamentos.findByE2eExternalRef', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
+      try {
+        const row = await this.db
+          .selectFrom('pagamentos')
+          .selectAll()
+          .where('intencao_e2e_external_ref', '=', e2eId)
           .executeTakeFirst();
         if (!row) {
           span.setStatus({ code: SpanStatusCode.OK });
@@ -750,6 +982,8 @@ function rowFromPagamento(p: Pagamento): Record<string, unknown> {
     intencao_total_surcharge_cents: aggregate.totalSurchargeCents,
     intencao_metodo: p.intencao.metodo,
     intencao_external_ref: p.intencao.externalRef,
+    intencao_expira_em: p.intencao.expiraEm,
+    intencao_e2e_external_ref: p.intencao.e2eExternalRef,
     // aperture-wif8s: webhook-populated provider refs. New rows always
     // start null; update() rewrites them when the handler sets them.
     intencao_payment_intent_external_ref: p.intencao.paymentIntentExternalRef,
@@ -935,6 +1169,8 @@ function pagamentoFromRow(row: PagamentoRow, itemRows: ItemRow[]): Pagamento {
       composicaoValoresAggregate,
       metodo: row.intencao_metodo,
       externalRef: row.intencao_external_ref,
+      expiraEm: row.intencao_expira_em,
+      e2eExternalRef: row.intencao_e2e_external_ref,
       paymentIntentExternalRef: row.intencao_payment_intent_external_ref,
       chargeExternalRef: row.intencao_charge_external_ref,
       contribuinte,

@@ -93,6 +93,40 @@ export type {
 } from './adapters/pagamentos/financeiro/livro-repository.js';
 export { LivroFinanceiroRepositoryMemory } from './adapters/pagamentos/financeiro/livro-repository.memory.js';
 export { LivroFinanceiroRepositoryPostgres } from './adapters/pagamentos/financeiro/livro-repository.postgres.js';
+export {
+  type CreatePixCobrancaDevolucaoInput,
+  PixCobrancaDevolucaoConflictError,
+  type PixCobrancaDevolucaoIdentity,
+  type PixCobrancaDevolucaoRecord,
+  type PixCobrancaDevolucaoRepository,
+  type PixCobrancaDevolucaoStatus,
+  PixCobrancaDevolucaoStatusSchema,
+  PixCobrancaE2eIdSchema,
+  PixCobrancaIdDevolucaoSchema,
+  type UpdatePixCobrancaDevolucaoOutcomeInput,
+} from './adapters/pagamentos/pix-cobranca-devolucao-repository.js';
+export { PixCobrancaDevolucaoRepositoryMemory } from './adapters/pagamentos/pix-cobranca-devolucao-repository.memory.js';
+export { PixCobrancaDevolucaoRepositoryPostgres } from './adapters/pagamentos/pix-cobranca-devolucao-repository.postgres.js';
+export {
+  PIX_COBRANCA_FAKE_MAGIC_CENTS,
+  PixCobrancaProviderFake,
+  type PixCobrancaProviderFakeOptions,
+} from './adapters/pagamentos/pix-cobranca-provider.fake.js';
+export {
+  type InterPixCobrancaConfig,
+  PixCobrancaProviderInter,
+} from './adapters/pagamentos/pix-cobranca-provider.inter.js';
+export {
+  type CobrancaCriada,
+  type ConsultarCobrancaResult,
+  type ConsultarDevolucaoInput,
+  type CriarCobrancaInput,
+  type DevolucaoOutcome,
+  PixCobrancaAmbiguaError,
+  type PixCobrancaProvider,
+  PixCobrancaTransitoriaError,
+  type SolicitarDevolucaoInput,
+} from './adapters/pagamentos/pix-cobranca-provider.js';
 export { PagamentoProviderFake } from './adapters/pagamentos/provider.fake.js';
 export type { PagamentoProvider, SolicitarPagamentoInput } from './adapters/pagamentos/provider.js';
 export { PagamentoProviderStripe } from './adapters/pagamentos/provider.stripe.js';
@@ -170,6 +204,23 @@ export { PerfilCriadorRepositoryPostgres } from './adapters/usuario/perfil-criad
 export type { UsuarioRepository } from './adapters/usuario/repository.js';
 export { UsuarioRepositoryMemory } from './adapters/usuario/repository.memory.js';
 export { UsuarioRepositoryPostgres } from './adapters/usuario/repository.postgres.js';
+export type {
+  InterPixChargeConfirmed,
+  InterPixDispatchResult,
+  InterPixItemOutcome,
+  InterPixItemResult,
+  InterPixPipelineArgs,
+  InterPixPipelineResult,
+  InterPixRefundConfirmed,
+} from './adapters/webhook-archive/inter-pix-webhook-pipeline.js';
+export {
+  archiveAndDispatchInterPixWebhook,
+  INTER_PIX_CHARGE_EVENT_TYPE,
+  INTER_PIX_MAX_ITEMS,
+  INTER_PIX_MAX_REFUNDS_PER_ITEM,
+  INTER_PIX_REFUND_EVENT_TYPE,
+  INTER_PIX_SIGNATURE_SENTINEL,
+} from './adapters/webhook-archive/inter-pix-webhook-pipeline.js';
 export type {
   StripeDispatchResult,
   StripePipelineArgs,
@@ -704,6 +755,10 @@ export { EventoNaoEncontradoError } from './errors/evento/nao-encontrado.error.j
 export { InvalidCatNameError } from './errors/invalid-cat-name.error.js';
 export { FinanceiroInputInvalidoError } from './errors/pagamentos/financeiro/input-invalido.error.js';
 export { FinanceiroPagamentoJaRegistradoError } from './errors/pagamentos/financeiro/pagamento-ja-registrado.error.js';
+export {
+  type FinanceiroMovimentacaoSolicitada,
+  FinanceiroPagamentoMovimentacaoConflitanteError,
+} from './errors/pagamentos/financeiro/pagamento-movimentacao-conflitante.error.js';
 export { FinanceiroPagamentoNaoAprovadoError } from './errors/pagamentos/financeiro/pagamento-nao-aprovado.error.js';
 export { FinanceiroSaldoDisponivelInsuficienteError } from './errors/pagamentos/financeiro/saldo-disponivel-insuficiente.error.js';
 export { PagamentosInputInvalidoError } from './errors/pagamentos/input-invalido.error.js';
@@ -890,9 +945,19 @@ export {
   EstornarPagamentoInputSchema,
   estornarPagamento,
   PagamentoEstornoLancamentoJaTransferidoError,
+  PagamentoEstornoPixNaoConcluidoError,
+  PagamentoEstornoPixVinculoInvalidoError,
   PagamentoEstornoRecusadoPeloProvedorError,
 } from './use-cases/checkout/estornar-pagamento.js';
 export type {
+  FinalizarEstornoPixVerificadoDeps,
+  FinalizarEstornoPixVerificadoInput,
+  FinalizarEstornoPixVerificadoResult,
+} from './use-cases/checkout/finalizar-estorno-pix-verificado.js';
+export { finalizarEstornoPixVerificado } from './use-cases/checkout/finalizar-estorno-pix-verificado.js';
+export type {
+  FinalizarPagamentoAprovadoComTransacaoVerificadaDeps,
+  FinalizarPagamentoAprovadoComTransacaoVerificadaInput,
   FinalizarPagamentoAprovadoDeps,
   FinalizarPagamentoAprovadoInput,
   FinalizarPagamentoAprovadoResult,
@@ -900,6 +965,7 @@ export type {
 export {
   FinalizarPagamentoAprovadoInputSchema,
   finalizarPagamentoAprovado,
+  finalizarPagamentoAprovadoComTransacaoVerificada,
 } from './use-cases/checkout/finalizar-pagamento-aprovado.js';
 export type {
   FinalizarPagamentoRejeitadoDeps,
@@ -912,6 +978,7 @@ export {
 } from './use-cases/checkout/finalizar-pagamento-rejeitado.js';
 // Plan 0016 Phase 2 (aperture-eg1s2): saga renamed to multi-item carrinho.
 export type {
+  CobrancaPixProviderKind,
   IniciarPagamentoCarrinhoDeps,
   IniciarPagamentoCarrinhoInput,
   IniciarPagamentoCarrinhoResult,
@@ -1052,8 +1119,15 @@ export {
   AdminMensagensResponseSchema,
   AdminRecadoProjectionSchema,
 } from './use-cases/pagamentos/admin-recado-projection.js';
-export type { AprovarPagamentoDeps } from './use-cases/pagamentos/aprovar-pagamento.js';
-export { aprovarPagamento } from './use-cases/pagamentos/aprovar-pagamento.js';
+export type {
+  AprovarPagamentoComTransacaoVerificadaDeps,
+  AprovarPagamentoComTransacaoVerificadaInput,
+  AprovarPagamentoDeps,
+} from './use-cases/pagamentos/aprovar-pagamento.js';
+export {
+  aprovarPagamento,
+  aprovarPagamentoComTransacaoVerificada,
+} from './use-cases/pagamentos/aprovar-pagamento.js';
 export type {
   CriarIntencaoPagamentoDeps,
   CriarIntencaoPagamentoInput,
@@ -1183,8 +1257,24 @@ export {
 } from './use-cases/pagamentos/obter-pagamento-por-id.js';
 export type { ObterRecadosAdminDeCampanhaDeps } from './use-cases/pagamentos/obter-recados-admin-de-campanha.js';
 export { obterRecadosAdminDeCampanha } from './use-cases/pagamentos/obter-recados-admin-de-campanha.js';
-export type { RejeitarPagamentoDeps } from './use-cases/pagamentos/rejeitar-pagamento.js';
-export { rejeitarPagamento } from './use-cases/pagamentos/rejeitar-pagamento.js';
+export type {
+  ReconciliarCobrancasPixDeps,
+  ReconciliarCobrancasPixResult,
+} from './use-cases/pagamentos/reconciliar-cobrancas-pix.js';
+export {
+  PIX_COBRANCA_RECONCILIATION_BATCH_SIZE,
+  PIX_COBRANCA_RECONCILIATION_LEASE_MS,
+  reconciliarCobrancasPix,
+} from './use-cases/pagamentos/reconciliar-cobrancas-pix.js';
+export type {
+  RejeitarPagamentoComTransacaoVerificadaDeps,
+  RejeitarPagamentoComTransacaoVerificadaInput,
+  RejeitarPagamentoDeps,
+} from './use-cases/pagamentos/rejeitar-pagamento.js';
+export {
+  rejeitarPagamento,
+  rejeitarPagamentoComTransacaoVerificada,
+} from './use-cases/pagamentos/rejeitar-pagamento.js';
 // Plan 0016 Phase 2 (aperture-eg1s2): split per-item + cart-wide surcharge.
 export type {
   CalcularComposicaoValoresParaItemDeps,

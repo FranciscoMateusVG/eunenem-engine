@@ -1,6 +1,6 @@
 import type { IdCampanha, IdContribuicao } from '../../domain/arrecadacao/value-objects/ids.js';
 import type { MoneyCents } from '../../domain/money.js';
-import type { Pagamento } from '../../domain/pagamentos/entities/pagamento.js';
+import type { Pagamento, StatusPagamento } from '../../domain/pagamentos/entities/pagamento.js';
 import type {
   IdContribuicaoPagamento,
   IdPagamento,
@@ -67,6 +67,30 @@ export interface AdminRecadoRow {
 }
 
 /**
+ * Minimal provider-free projection claimed by the PIX reconciliation job.
+ * The operational lease is intentionally absent: it is repository state,
+ * not part of the Pagamento aggregate or the job's provider input.
+ */
+export interface PixCobrancaReconciliationCandidate {
+  readonly idPagamento: IdPagamento;
+  readonly txid: string;
+  readonly expiraEm: Date;
+}
+
+export interface ClaimPixCobrancaReconciliationCandidatesInput {
+  readonly now: Date;
+  readonly leaseUntil: Date;
+  readonly limit: number;
+}
+
+export interface ClaimPixCobrancaProviderReadByTxidInput {
+  readonly txid: string;
+  readonly e2eId: string;
+  readonly now: Date;
+  readonly leaseUntil: Date;
+}
+
+/**
  * Persistência de Pagamentos (porta).
  *
  * `findByExternalRef` (aperture-xaha2): lookup by the provider-side session
@@ -86,8 +110,50 @@ export interface AdminRecadoRow {
 export interface PagamentoRepository {
   save(pagamento: Pagamento): Promise<void>;
   update(pagamento: Pagamento): Promise<void>;
+  /**
+   * Atomic compare-and-set for lifecycle transitions. Returns false when
+   * the row is missing or its persisted status is no longer expected.
+   * Implementations update only the aggregate row; cart items are
+   * write-once and must never be rewritten by a status transition.
+   */
+  updateIfStatusIn(
+    pagamento: Pagamento,
+    expectedStatuses: readonly StatusPagamento[],
+  ): Promise<boolean>;
+  /**
+   * Atomically binds a deterministic Banco Inter txid to a local PIX payment
+   * and claims the shared provider-read lease. Pending/processing payments are
+   * eligible before settlement; an approved payment is eligible only when its
+   * persisted Inter transaction identity exactly matches `e2eId`, allowing a
+   * failed downstream bookkeeping attempt to replay without turning an
+   * attacker-controlled e2e hint into provider I/O. The claim is deliberately
+   * not released by webhook processing: its expiry is the retry cooldown and
+   * lets the scheduled reconciliation job recover the payment later.
+   */
+  claimPixCobrancaProviderReadByTxid(
+    input: ClaimPixCobrancaProviderReadByTxidInput,
+  ): Promise<IdPagamento | undefined>;
+  /**
+   * Atomically leases due PIX intents for reconciliation. Eligible rows
+   * are pending/processing, expired, deterministically addressed by
+   * UUID-without-hyphens txid, and not covered by a live lease.
+   */
+  claimPixCobrancaReconciliationCandidates(
+    input: ClaimPixCobrancaReconciliationCandidatesInput,
+  ): Promise<readonly PixCobrancaReconciliationCandidate[]>;
+  /**
+   * Releases an operational reconciliation lease only when the supplied
+   * lease value is still current. The CAS prevents a stale worker from
+   * clearing a newer worker's lease after expiry/reclaim.
+   */
+  releasePixCobrancaReconciliationClaim(
+    idPagamento: IdPagamento,
+    claimedUntil: Date,
+  ): Promise<boolean>;
   findById(id: IdPagamento): Promise<Pagamento | undefined>;
   findByExternalRef(externalRef: string): Promise<Pagamento | undefined>;
+  /** Lookup by verified Banco Inter PIX end-to-end settlement id. */
+  findByE2eExternalRef(e2eId: string): Promise<Pagamento | undefined>;
   /**
    * Returns every Pagamento whose `intencao.idContribuicao` matches the
    * given contribuicao reference, in `criadoEm ASC` order (aperture-i0pz8).

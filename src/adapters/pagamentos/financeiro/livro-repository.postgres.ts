@@ -35,6 +35,12 @@ import { FinanceiroRepasseNaoEncontradoError } from '../../../errors/pagamentos/
 import { FinanceiroRepasseStatusInvalidoError } from '../../../errors/pagamentos/financeiro/repasse-status-invalido.error.js';
 import type { RecebedorRepository } from '../../arrecadacao/recebedor-repository.js';
 import type { Database } from '../../database.js';
+import {
+  acquirePaymentMoneyMovementLocks,
+  assertTransfersAllowed,
+  findPaymentIdsForLancamentos,
+  findPaymentIdsForRepasse,
+} from '../payment-money-movement-lock.postgres.js';
 import type {
   LivroFinanceiroRepository,
   RepasseReconciliacaoCandidato,
@@ -315,16 +321,22 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
             span.setStatus({ code: SpanStatusCode.OK });
             return;
           }
-          // Idempotent at the WHERE: rows already transferred OR cancelled
-          // are silently skipped. The UPDATE matches only the
-          // pre-transfer subset of the input ids.
-          await sql`
-            UPDATE lancamentos_financeiros
-              SET transferido_em = ${transferidoEm}
-              WHERE id = ANY(${[...idsLancamentos]}::uuid[])
-                AND transferido_em IS NULL
-                AND cancelado_em IS NULL
-          `.execute(this.db);
+          // The financial state check and transfer stamp share the same
+          // per-payment advisory locks as refund marker creation. There is no
+          // gap in which both irreversible directions can win.
+          // biome-ignore lint/suspicious/noExplicitAny: heterogeneous raw SQL transaction
+          await (this.db as any).transaction().execute(async (tx: any) => {
+            const idsPagamento = await findPaymentIdsForLancamentos(tx, idsLancamentos);
+            const lockedIds = await acquirePaymentMoneyMovementLocks(tx, idsPagamento);
+            await assertTransfersAllowed(tx, lockedIds);
+            await sql`
+              UPDATE lancamentos_financeiros
+                SET transferido_em = ${transferidoEm}
+                WHERE id = ANY(${[...idsLancamentos]}::uuid[])
+                  AND transferido_em IS NULL
+                  AND cancelado_em IS NULL
+            `.execute(tx);
+          });
           span.setStatus({ code: SpanStatusCode.OK });
         } catch (error: unknown) {
           span.recordException(error as Error);
@@ -609,6 +621,11 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
                 AND p.status = 'aprovado'
                 AND p.intencao_balance_transaction_available_on IS NOT NULL
                 AND p.intencao_balance_transaction_available_on <= ${now}
+                AND NOT EXISTS (
+                  SELECT 1 FROM pix_cobranca_devolucoes d
+                    WHERE d.id_pagamento = l.id_pagamento
+                      AND d.status IN ('em_processamento', 'devolvida')
+                )
           `.execute(this.db)) as unknown as { rows: LancamentoRow[] };
 
           const result = rows.rows.map(lancamentoFromRow);
@@ -664,6 +681,11 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
                   AND p.status = 'aprovado'
                   AND p.intencao_balance_transaction_available_on IS NOT NULL
                   AND p.intencao_balance_transaction_available_on <= ${input.now}
+                  AND NOT EXISTS (
+                    SELECT 1 FROM pix_cobranca_devolucoes d
+                      WHERE d.id_pagamento = l.id_pagamento
+                        AND d.status IN ('em_processamento', 'devolvida')
+                  )
                 FOR UPDATE OF l
             `.execute(tx)) as unknown as { rows: LancamentoRow[] };
 
@@ -736,6 +758,13 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
         try {
           // biome-ignore lint/suspicious/noExplicitAny: see solicitarRepasseTransaction
           const result = await (this.db as any).transaction().execute(async (tx: any) => {
+            // Advisory locks must precede the repasse row lock: refund marker
+            // creation takes the advisory lock first and then reads repasse
+            // state. Reversing that order would create a deadlock cycle.
+            const idsPagamento = await findPaymentIdsForRepasse(tx, input.idRepasse);
+            const lockedIds = await acquirePaymentMoneyMovementLocks(tx, idsPagamento);
+            await assertTransfersAllowed(tx, lockedIds);
+
             // 1. SELECT FOR UPDATE the target repasse.
             const lockedRows = (await sql<RepasseRow>`
               SELECT * FROM repasses_recebedor
@@ -896,6 +925,13 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
         try {
           // biome-ignore lint/suspicious/noExplicitAny: see aprovarRepasseTransaction
           const result = await (this.db as any).transaction().execute(async (tx: any) => {
+            // Serialize the fresh external PIX claim against charge refunds.
+            // This is intentionally before SELECT ... FOR UPDATE on repasse;
+            // refund creation takes the advisory lock then reads repasse state.
+            const idsPagamento = await findPaymentIdsForRepasse(tx, input.idRepasse);
+            const lockedIds = await acquirePaymentMoneyMovementLocks(tx, idsPagamento);
+            await assertTransfersAllowed(tx, lockedIds);
+
             const lockedRows = (await sql<RepasseRow>`
               SELECT * FROM repasses_recebedor WHERE id = ${input.idRepasse} FOR UPDATE
             `.execute(tx)) as unknown as { rows: RepasseRow[] };
@@ -989,6 +1025,11 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
         try {
           // biome-ignore lint/suspicious/noExplicitAny: see aprovarRepasseTransaction
           const result = await (this.db as any).transaction().execute(async (tx: any) => {
+            if (input.resultado.tipo === 'pago') {
+              const idsPagamento = await findPaymentIdsForRepasse(tx, input.idRepasse);
+              const lockedIds = await acquirePaymentMoneyMovementLocks(tx, idsPagamento);
+              await assertTransfersAllowed(tx, lockedIds);
+            }
             const lockedRows = (await sql<RepasseRow>`
               SELECT * FROM repasses_recebedor WHERE id = ${input.idRepasse} FOR UPDATE
             `.execute(tx)) as unknown as { rows: RepasseRow[] };
@@ -1107,6 +1148,11 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
         try {
           // biome-ignore lint/suspicious/noExplicitAny: see aprovarRepasseTransaction
           const result = await (this.db as any).transaction().execute(async (tx: any) => {
+            if (input.resultado.tipo === 'pago') {
+              const idsPagamento = await findPaymentIdsForRepasse(tx, input.idRepasse);
+              const lockedIds = await acquirePaymentMoneyMovementLocks(tx, idsPagamento);
+              await assertTransfersAllowed(tx, lockedIds);
+            }
             const lockedRows = (await sql<RepasseRow>`
               SELECT * FROM repasses_recebedor WHERE id = ${input.idRepasse} FOR UPDATE
             `.execute(tx)) as unknown as { rows: RepasseRow[] };
@@ -1339,6 +1385,9 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
         try {
           // biome-ignore lint/suspicious/noExplicitAny: see aprovarRepasseTransaction
           const result = await (this.db as any).transaction().execute(async (tx: any) => {
+            const idsPagamento = await findPaymentIdsForRepasse(tx, input.idRepasse);
+            const lockedIds = await acquirePaymentMoneyMovementLocks(tx, idsPagamento);
+            await assertTransfersAllowed(tx, lockedIds);
             const lockedRows = (await sql<RepasseRow>`
               SELECT * FROM repasses_recebedor WHERE id = ${input.idRepasse} FOR UPDATE
             `.execute(tx)) as unknown as { rows: RepasseRow[] };

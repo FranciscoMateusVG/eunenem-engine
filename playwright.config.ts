@@ -145,8 +145,30 @@ export default defineConfig({
           // auth.me live on the eunenem-server default port, not the stripe server.
           makeServer(3002, {
             ADMIN_ALLOWED_EMAILS: process.env.ADMIN_ALLOWED_EMAILS ?? 'e2e-admin@e2e.local',
+            // All local servers share one pg-boss database. Only :3004 owns
+            // the fake Inter cobrança state; if this Stripe-shaped server
+            // consumes the shared reconciliation queue first, it leases the
+            // due row without being able to resolve that provider identity.
+            E2E_DISABLE_PIX_RECONCILIATION_WORKER: '1',
           }),
-          makeServer(3003, STRIPE_ENV_3003),
+          makeServer(3003, {
+            ...STRIPE_ENV_3003,
+            E2E_DISABLE_PIX_RECONCILIATION_WORKER: '1',
+          }),
+          // :3004 — aperture-kuw0o Inter-PIX checkout routing. Dedicated server
+          // with COBRANCA_PIX_PROVIDER='fake' so metodo=pix routes through OUR
+          // identity-form → QR flow (PixCobrancaProviderFake) instead of the
+          // Stripe iframe. Deliberately NOT set on :3002 — that would break
+          // visitor-cart-checkout.spec.ts's pix-to-Stripe-iframe path.
+          // Serves e2e/kuw0o-pix-qr-checkout.spec.ts.
+          // aperture-4uvgf: ADMIN_ALLOWED_EMAILS added so the Inter-provenance
+          // admin-estorno walk (4uvgf-admin-estorno.spec.ts) can drive
+          // /admin/pagamento/:id against the fake-PIX binding — without it
+          // adminProcedure 403s every admin call on this server.
+          makeServer(3004, {
+            COBRANCA_PIX_PROVIDER: 'fake',
+            ADMIN_ALLOWED_EMAILS: process.env.ADMIN_ALLOWED_EMAILS ?? 'e2e-admin@e2e.local',
+          }),
         ],
       }),
 });

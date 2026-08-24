@@ -200,3 +200,61 @@ export function useInvalidarListaPresentes() {
   const utils = trpc.useUtils();
   return (slug: string) => utils.pagina.obterListaPresentes.invalidate({ slug });
 }
+
+// ── Inter PIX checkout (aperture-kuw0o, spec §4.3) ────────────────────────
+
+/** The pix_qr arm of the initiation union — what the QR screen renders. */
+export type PixQrData = Extract<IniciarPagamentoResult, { tipo: "pix_qr" }>;
+
+/** Identity captured by OUR pre-checkout form (PIX-cobrança path only). */
+export type ContribuinteInput = NonNullable<IniciarPagamentoInput["contribuinte"]>;
+
+export type StatusPixResult = PaginaOutputs["obterStatusPix"];
+
+/**
+ * Checkout config — whether the PIX path runs through our own QR flow
+ * (identity form + QR screen) instead of the Stripe iframe. Resolved
+ * once per page: the flag is boot-time env, it never changes mid-session.
+ */
+export function useObterConfigCheckout() {
+  return trpc.pagina.obterConfigCheckout.useQuery(undefined, {
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: 1,
+  });
+}
+
+/**
+ * Poll target for the PIX QR screen. Mirrors useObterSucessoPagamento's
+ * poll shape: 2s interval while 'pendente', stops on any terminal status.
+ * The give-up cap is generous (~12min = expiry window + grace) — the QR
+ * screen's own countdown flips the UI to 'expirado' at expiraEm; the poll
+ * cap is just the backstop against a zombie tab polling forever.
+ */
+export function useObterStatusPix(
+  slug: string,
+  txid: string | null,
+  opts: { enabled?: boolean } = {},
+) {
+  const idCampanha = useCampanhaRota();
+  return trpc.pagina.obterStatusPix.useQuery(
+    idCampanha
+      ? { slug, txid: txid ?? "", idCampanha }
+      : { slug, txid: txid ?? "" },
+    {
+      enabled: (opts.enabled ?? true) && Boolean(txid),
+      refetchInterval: (query) => {
+        const status = query.state.data?.status;
+        if (status === "confirmado" || status === "expirado" || status === "rejeitado") {
+          return false;
+        }
+        // ~12min: 600s charge window + grace, at 2s per poll.
+        if (query.state.dataUpdateCount >= 360) {
+          return false;
+        }
+        return 2000;
+      },
+      staleTime: 1_000,
+      retry: 1,
+    },
+  );
+}

@@ -9,6 +9,7 @@ import type { IdCampanha } from '../../src/index.js';
 import {
   confirmarTransferenciaRepasse,
   executarTransferenciaRepasse,
+  finalizarEstornoPixVerificado,
   REPASSE_CONFIRMAR_QUEUE,
   REPASSE_EXECUTAR_QUEUE,
   type RepasseConfirmarJobData,
@@ -19,8 +20,10 @@ import { App, resolveRoute } from './pages/App.js';
 import { buildServerDeps, ID_PLATAFORMA_EUNENEM, loadEnv } from './server/auth/setup.js';
 import { installBlockedAuthHandlerGuard } from './server/blocked-auth-handler.js';
 import { createLegacyBridgeHandler } from './server/legacy-bridge.js';
+import { registerPixCobrancaReconciliationJob } from './server/jobs/pix-cobranca-reconciliation.pgboss.js';
 import { appRouter } from './server/trpc/router.js';
 import { createStripeWebhookHandler } from './server/webhooks/stripe-webhook.js';
+import { mountInterPixWebhookRoutes } from './server/webhooks/inter-pix-webhook.js';
 
 const PORT = Number(process.env.PORT ?? 3001);
 
@@ -67,9 +70,27 @@ try {
     },
   );
 
-  console.log('✅ pg-boss repasse workers registered (executar + confirmar)');
+  // aperture-fpd0j — durable recovery for expired/missed Inter PIX
+  // callbacks. Queue, worker, and singleton schedule are all registered
+  // before HTTP starts; a registration failure fails boot loudly rather than
+  // leaving payments permanently pending behind an apparently healthy API.
+  // The production schema forbids this test-only disable flag. Playwright
+  // boots three server compositions against one pg-boss database; only the
+  // :3004 fake-Inter composition may own this worker, otherwise a Stripe
+  // composition can claim the due row and hold its durable lease before the
+  // correctly configured provider gets a turn.
+  const pixReconciliationWorkerDisabled = env.E2E_DISABLE_PIX_RECONCILIATION_WORKER === '1';
+  if (!pixReconciliationWorkerDisabled) {
+    await registerPixCobrancaReconciliationJob(deps.boss, deps);
+  }
+
+  console.log(
+    pixReconciliationWorkerDisabled
+      ? '✅ pg-boss workers registered (repasse; PIX cobranca reconciliation disabled for E2E)'
+      : '✅ pg-boss workers registered (repasse + PIX cobranca reconciliation)',
+  );
 } catch (err) {
-  console.error('❌ Failed to start pg-boss repasse workers:', err);
+  console.error('❌ Failed to start pg-boss workers:', err);
   throw err;
 }
 
@@ -162,6 +183,24 @@ app.all('/api/trpc/*', (c) =>
 // server/webhooks/stripe-webhook.ts for the full security rationale +
 // the local `stripe listen` dev workflow.
 app.post('/api/webhooks/stripe', createStripeWebhookHandler(deps));
+
+// Banco Inter Pix webhook (aperture-711fd / B3 of 2j2j1). Inter does not
+// sign callback payloads, so the mounted handler treats them only as routing
+// hints and re-queries the authoritative cobrança API before changing state.
+// Mount both the registered base URL and Inter's delivery-time `/pix` suffix.
+mountInterPixWebhookRoutes(app, {
+  ...deps,
+  onInterPixRefundConfirmed: (confirmed) =>
+    finalizarEstornoPixVerificado(
+      {
+        pagamentoRepository: deps.pagamentoRepository,
+        pixCobrancaDevolucaoRepository: deps.pixCobrancaDevolucaoRepository,
+        livroFinanceiroRepository: deps.livroFinanceiroRepository,
+        clock: deps.clock,
+      },
+      confirmed,
+    ),
+});
 
 // Legacy bridge (aperture-as0v3) — authed silent login handoff into the 1.0
 // system. The /campanhas 1.0 card hits this; it mints a single-use Clerk
@@ -377,6 +416,10 @@ serve({ fetch: app.fetch, port: PORT }, (info) => {
   console.log('  /api/trpc/*        → tRPC procedures (listFruits, auth.*)');
   console.log('  /api/auth/*        → BetterAuth handler (sign-in/sign-up/sign-out/...)');
   console.log('  /api/webhooks/stripe → Stripe webhook (sig-verified; aperture-24n36)');
+  console.log('  /api/webhooks/inter/pix → Inter Pix webhook (verify-by-requery; aperture-711fd)');
+  console.log(
+    '  /api/webhooks/inter/pix/pix → Inter Pix delivery suffix (verify-by-requery; aperture-711fd)',
+  );
   console.log('  /healthz           → plain text health check');
   console.log('');
 });

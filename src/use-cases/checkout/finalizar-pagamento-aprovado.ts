@@ -6,15 +6,23 @@ import type { PagamentoEventPublisher } from '../../adapters/pagamentos/event-pu
 import type { LivroFinanceiroRepository } from '../../adapters/pagamentos/financeiro/livro-repository.js';
 import type { PagamentoProvider } from '../../adapters/pagamentos/provider.js';
 import type { PagamentoRepository } from '../../adapters/pagamentos/repository.js';
-import type { Pagamento } from '../../domain/pagamentos/entities/pagamento.js';
+import {
+  type Pagamento,
+  type TransacaoExterna,
+  TransacaoExternaSchema,
+} from '../../domain/pagamentos/entities/pagamento.js';
 import type { LancamentoFinanceiro } from '../../domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
 import { DadosContribuinteSchema } from '../../domain/pagamentos/value-objects/dados-contribuinte.js';
 import { IdPagamentoSchema } from '../../domain/pagamentos/value-objects/ids.js';
 import { ArrecadacaoCampanhaNaoEncontradaError } from '../../errors/arrecadacao/campanha-nao-encontrada.error.js';
 import { ArrecadacaoContribuicaoNaoEncontradaError } from '../../errors/arrecadacao/contribuicao-nao-encontrada.error.js';
+import { PagamentosInputInvalidoError } from '../../errors/pagamentos/input-invalido.error.js';
 import { PagamentoTransicaoStatusInvalidaError } from '../../errors/pagamentos/transicao-status-invalida.error.js';
 import type { Observability } from '../../observability/observability.js';
-import { aprovarPagamento } from '../pagamentos/aprovar-pagamento.js';
+import {
+  aprovarPagamento,
+  aprovarPagamentoComTransacaoVerificada,
+} from '../pagamentos/aprovar-pagamento.js';
 import { registrarEfeitosFinanceirosPagamentoAprovado } from '../pagamentos/financeiro/registrar-efeitos-financeiros-pagamento-aprovado.js';
 
 export const FinalizarPagamentoAprovadoInputSchema = z.object({
@@ -55,6 +63,16 @@ export interface FinalizarPagamentoAprovadoDeps {
   readonly observability: Observability;
 }
 
+export type FinalizarPagamentoAprovadoComTransacaoVerificadaDeps = Omit<
+  FinalizarPagamentoAprovadoDeps,
+  'pagamentoProvider'
+>;
+
+export interface FinalizarPagamentoAprovadoComTransacaoVerificadaInput
+  extends FinalizarPagamentoAprovadoInput {
+  readonly transacao: TransacaoExterna;
+}
+
 /**
  * Process Manager: depois que o provedor responde, este orquestrador *avança*
  * o workflow — aprova o Pagamento, persiste o contribuinte na intencao,
@@ -86,10 +104,71 @@ export async function finalizarPagamentoAprovado(
   deps: FinalizarPagamentoAprovadoDeps,
   input: FinalizarPagamentoAprovadoInput,
 ): Promise<FinalizarPagamentoAprovadoResult> {
+  return finalizarPagamentoAprovadoInterno(deps, input, async (idPagamento) =>
+    aprovarPagamento(
+      {
+        pagamentoRepository: deps.pagamentoRepository,
+        pagamentoProvider: deps.pagamentoProvider,
+        pagamentoEventPublisher: deps.pagamentoEventPublisher,
+        clock: deps.clock,
+        observability: deps.observability,
+      },
+      { idPagamento },
+    ),
+  );
+}
+
+/**
+ * Finalize bookkeeping from an already-authoritatively-verified transaction.
+ *
+ * Banco Inter webhooks are unsigned hints; the caller first re-queries
+ * GET /cob/{txid}. Once that read confirms the exact e2eId and amount, this
+ * entry point applies the verified transaction without re-contacting the
+ * generic PagamentoProvider (which can still be Stripe during coexistence).
+ */
+export async function finalizarPagamentoAprovadoComTransacaoVerificada(
+  deps: FinalizarPagamentoAprovadoComTransacaoVerificadaDeps,
+  input: FinalizarPagamentoAprovadoComTransacaoVerificadaInput,
+): Promise<FinalizarPagamentoAprovadoResult> {
+  const transacao = TransacaoExternaSchema.parse(input.transacao);
+  return finalizarPagamentoAprovadoInterno(
+    deps,
+    input,
+    async (idPagamento) =>
+      aprovarPagamentoComTransacaoVerificada(
+        {
+          pagamentoRepository: deps.pagamentoRepository,
+          pagamentoEventPublisher: deps.pagamentoEventPublisher,
+          clock: deps.clock,
+          observability: deps.observability,
+        },
+        { idPagamento, transacao },
+      ),
+    (pagamento) => {
+      const existente = pagamento.transacaoExterna;
+      if (
+        !existente ||
+        existente.id !== transacao.id ||
+        existente.provedor !== transacao.provedor ||
+        existente.status !== transacao.status ||
+        existente.amountCents !== transacao.amountCents
+      ) {
+        throw new PagamentosInputInvalidoError(
+          'transacao verificada diverge do pagamento ja aprovado',
+        );
+      }
+    },
+  );
+}
+
+async function finalizarPagamentoAprovadoInterno(
+  deps: FinalizarPagamentoAprovadoComTransacaoVerificadaDeps,
+  input: FinalizarPagamentoAprovadoInput,
+  aprovar: (idPagamento: string) => Promise<Pagamento>,
+  validarRepeticao: (pagamento: Pagamento) => void = validarRepeticaoSemRestricoes,
+): Promise<FinalizarPagamentoAprovadoResult> {
   const {
     pagamentoRepository,
-    pagamentoProvider,
-    pagamentoEventPublisher,
     contribuicaoRepository,
     campanhaRepository,
     livroFinanceiroRepository,
@@ -137,6 +216,7 @@ export async function finalizarPagamentoAprovado(
       const refreshed = await pagamentoRepository.findById(parsed.idPagamento);
       let aprovado: Pagamento;
       if (refreshed?.status === 'aprovado') {
+        validarRepeticao(refreshed);
         aprovado = refreshed;
         logger.info('checkout.pagamento.replay_aprovacao', { idPagamento: parsed.idPagamento });
       } else if (
@@ -146,16 +226,7 @@ export async function finalizarPagamentoAprovado(
       ) {
         throw new PagamentoTransicaoStatusInvalidaError(refreshed.id, refreshed.status, 'aprovado');
       } else {
-        aprovado = await aprovarPagamento(
-          {
-            pagamentoRepository,
-            pagamentoProvider,
-            pagamentoEventPublisher,
-            clock,
-            observability,
-          },
-          { idPagamento: parsed.idPagamento },
-        );
+        aprovado = await aprovar(parsed.idPagamento);
       }
 
       // step 2: cross-BC context — Plan 0016 Phase 2 (aperture-eg1s2):
@@ -235,3 +306,5 @@ export async function finalizarPagamentoAprovado(
     }
   });
 }
+
+function validarRepeticaoSemRestricoes(_pagamento: Pagamento): void {}

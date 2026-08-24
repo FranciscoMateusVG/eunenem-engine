@@ -53,6 +53,32 @@ services:
       INTER_KEY_BASE64: ${INTER_KEY_BASE64:-}
       INTER_CONTA_CORRENTE: ${INTER_CONTA_CORRENTE:-}
       INTER_EXTRATO_VERIFIED: ${INTER_EXTRATO_VERIFIED:-false}
+      # Banco Inter PIX COBRANÇA rail (PIX-in) — a SEPARATE Inter integration
+      # from the transferência (payout) set above (aperture-18j3j; cz6wg wires
+      # it through). COBRANCA_PIX_PROVIDER selects the checkout rail ('stripe'
+      # default = zero behavior change; 'inter' = real Inter cobrança; 'fake' =
+      # CI/dev). The 7 INTER_COB_* become REQUIRED (superRefine) only when
+      # COBRANCA_PIX_PROVIDER='inter'; ${VAR:-} defaults keep stripe/fake/fresh
+      # boots absent-neutral. CERT/KEY are base64 PEM decoded in-memory at
+      # construction (setup.ts:1095-96) — never written to disk.
+      #
+      # DEVIATION NOTE (cz6wg): setup.ts's schema comment says these are
+      # "sourced from Infisical only — never compose files". That reflects an
+      # `infisical run` runtime assumption that is NOT how eunenem actually
+      # runs — eunenem reads process.env populated by THIS Dokploy compose env
+      # (verified aperture-40twz; the entrypoint has no `infisical run`).
+      # Infisical stays the durable store, but ${VAR:-} interpolation here is
+      # the ONLY path a Dokploy-set value reaches the container; without it the
+      # vars silently never arrive (the "compose env layer-skip", dokploy-api
+      # §12) — which is the exact P0 (cz6wg) this block fixes.
+      COBRANCA_PIX_PROVIDER: ${COBRANCA_PIX_PROVIDER:-stripe}
+      INTER_COB_BASE_URL: ${INTER_COB_BASE_URL:-}
+      INTER_COB_CLIENT_ID: ${INTER_COB_CLIENT_ID:-}
+      INTER_COB_CLIENT_SECRET: ${INTER_COB_CLIENT_SECRET:-}
+      INTER_COB_SCOPE: ${INTER_COB_SCOPE:-}
+      INTER_COB_CERT_BASE64: ${INTER_COB_CERT_BASE64:-}
+      INTER_COB_KEY_BASE64: ${INTER_COB_KEY_BASE64:-}
+      INTER_COB_PIX_KEY: ${INTER_COB_PIX_KEY:-}
       # Object storage for profile photos — platform MinIO. Endpoint must be
       # the PUBLIC storage domain so browser presigned PUTs reach it;
       # access/secret are a bucket-scoped key.

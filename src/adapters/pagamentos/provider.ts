@@ -36,6 +36,12 @@ export interface SolicitarPagamentoInput {
  */
 export interface RefundarPagamentoInput {
   readonly idPagamento: IdPagamento;
+  /**
+   * Banco Inter PIX end-to-end settlement id. Stripe and legacy adapters
+   * deliberately ignore this field; carrying it explicitly prevents callers
+   * from reinterpreting a Stripe reference as an Inter e2e id.
+   */
+  readonly e2eExternalRef: string | null;
   readonly chargeExternalRef: string | null;
   readonly paymentIntentExternalRef: string | null;
   readonly amountCents: MoneyCents;

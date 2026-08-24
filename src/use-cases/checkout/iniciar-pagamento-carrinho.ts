@@ -4,6 +4,7 @@ import type { CampanhaRepository } from '../../adapters/arrecadacao/campanha-rep
 import type { ContribuicaoRepository } from '../../adapters/arrecadacao/contribuicao-repository.js';
 import type { CheckoutSessionProvider } from '../../adapters/pagamentos/checkout-session-provider.js';
 import type { PagamentoEventPublisher } from '../../adapters/pagamentos/event-publisher.js';
+import type { PixCobrancaProvider } from '../../adapters/pagamentos/pix-cobranca-provider.js';
 import type { PagamentoRepository } from '../../adapters/pagamentos/repository.js';
 import type { ProvedorRegraTaxa } from '../../adapters/taxas/regra-provider.js';
 import { encontrarOpcaoContribuicao } from '../../domain/arrecadacao/entities/campanha.js';
@@ -20,6 +21,7 @@ import {
   type ItemDoPagamento,
 } from '../../domain/pagamentos/entities/item-do-pagamento.js';
 import type { Pagamento } from '../../domain/pagamentos/entities/pagamento.js';
+import { DadosContribuinteSchema } from '../../domain/pagamentos/value-objects/dados-contribuinte.js';
 import {
   IdIntencaoPagamentoSchema,
   IdItemDoPagamentoSchema,
@@ -38,6 +40,7 @@ import { ArrecadacaoContribuicaoNaoEncontradaError } from '../../errors/arrecada
 import { ArrecadacaoOpcaoContribuicaoNaoEncontradaError } from '../../errors/arrecadacao/opcao-contribuicao-nao-encontrada.error.js';
 import { CarrinhoMultiplasCampanhasError } from '../../errors/checkout/carrinho-multiplas-campanhas.error.js';
 import { CheckoutPlataformaMismatchError } from '../../errors/checkout/plataforma-mismatch.error.js';
+import { PagamentosInputInvalidoError } from '../../errors/pagamentos/input-invalido.error.js';
 import type { Observability } from '../../observability/observability.js';
 import { esgotada } from '../arrecadacao/quantidade-restante.js';
 import { criarIntencaoPagamento } from '../pagamentos/criar-intencao-pagamento.js';
@@ -69,16 +72,57 @@ export const IniciarPagamentoCarrinhoInputSchema = z.object({
   idsItens: z.array(IdItemDoPagamentoSchema).min(1),
   returnUrl: z.string().trim().min(1).max(2000),
   redirectOnCompletion: z.enum(['always', 'if_required', 'never']).optional(),
+  /**
+   * aperture-kuw0o (Inter PIX, spec §4.3): visitor identity captured by
+   * OUR OWN form before checkout. REQUIRED when the saga routes to the
+   * PIX-cobrança branch (Inter's cob API collects nothing, unlike
+   * Stripe's iframe custom_fields); Stripe-branch callers omit it.
+   * Includes email — the domain's DadosContribuinte requires it (the
+   * spec's "nome/mensagem" wording listed only the custom_fields pair;
+   * Stripe also collected email natively, so our form collects all 3 —
+   * documented deviation, follows aperture-m95f3's data-must-exist
+   * intent).
+   */
+  contribuinte: DadosContribuinteSchema.optional(),
 });
 
 export type IniciarPagamentoCarrinhoInput = z.infer<typeof IniciarPagamentoCarrinhoInputSchema>;
 
-export interface IniciarPagamentoCarrinhoResult {
+/**
+ * aperture-kuw0o (spec §4.3): discriminated union — no phantom fields.
+ * `stripe_embedded` carries the iframe pair; `pix_qr` carries the BR Code
+ * trio the QR screen renders. Common saga outputs (contribuicoes +
+ * pagamento) ride alongside for router-side consumers.
+ */
+export type IniciarPagamentoCarrinhoResult = {
   readonly contribuicoes: readonly Contribuicao[];
   readonly pagamento: Pagamento;
-  readonly sessionId: string;
-  readonly clientSecret: string;
-}
+} & (
+  | { readonly tipo: 'stripe_embedded'; readonly sessionId: string; readonly clientSecret: string }
+  | {
+      readonly tipo: 'pix_qr';
+      readonly txid: string;
+      readonly pixCopiaECola: string;
+      readonly expiraEm: Date;
+      /**
+       * aperture-irhxi (Izzy QA blocker 3 — money display): the
+       * AUTHORITATIVE charged amount (aggregate totalPaidCents =
+       * contribution + platform fee). The QR screen renders THIS — never
+       * the raw gift price. On the Stripe path the iframe shows Stripe's
+       * own total; our QR flow owes the visitor the same honesty.
+       */
+      readonly valorCents: number;
+    }
+);
+
+/**
+ * aperture-kuw0o: which PixCobrancaProvider binding is active (B7's
+ * COBRANCA_PIX_PROVIDER env). Routing DEVIATION from the spec's literal
+ * "=== 'inter'": the fake binding must also route through the PIX branch,
+ * or the spec's own §7 e2e (fake provider → QR screen) is unreachable.
+ * 'stripe' (the default) keeps every flow on the untouched Stripe path.
+ */
+export type CobrancaPixProviderKind = 'stripe' | 'inter' | 'fake';
 
 export interface IniciarPagamentoCarrinhoDeps {
   readonly campanhaRepository: CampanhaRepository;
@@ -87,6 +131,8 @@ export interface IniciarPagamentoCarrinhoDeps {
   readonly pagamentoRepository: PagamentoRepository;
   readonly pagamentoEventPublisher: PagamentoEventPublisher;
   readonly checkoutSessionProvider: CheckoutSessionProvider;
+  readonly pixCobrancaProvider: PixCobrancaProvider;
+  readonly cobrancaPixProviderKind: CobrancaPixProviderKind;
   readonly clock: () => Date;
   readonly observability: Observability;
 }
@@ -102,254 +148,336 @@ export async function iniciarPagamentoCarrinho(
     pagamentoRepository,
     pagamentoEventPublisher,
     checkoutSessionProvider,
+    pixCobrancaProvider,
+    cobrancaPixProviderKind,
     clock,
     observability,
   } = deps;
   const { logger, tracer } = observability;
 
-  return tracer.startActiveSpan('iniciarPagamentoCarrinho', async (span) => {
-    try {
-      const parsed = IniciarPagamentoCarrinhoInputSchema.parse(input);
+  return tracer.startActiveSpan(
+    'iniciarPagamentoCarrinho',
+    async (span): Promise<IniciarPagamentoCarrinhoResult> => {
+      try {
+        const parsed = IniciarPagamentoCarrinhoInputSchema.parse(input);
 
-      span.setAttributes({
-        'checkout.plataforma.id': parsed.idPlataforma,
-        'checkout.campanha.id': parsed.idCampanha,
-        'checkout.cart.itens_count': parsed.itens.length,
-        'checkout.pagamento.id': parsed.idPagamento,
-        'checkout.metodo': parsed.metodo,
-      });
+        span.setAttributes({
+          'checkout.plataforma.id': parsed.idPlataforma,
+          'checkout.campanha.id': parsed.idCampanha,
+          'checkout.cart.itens_count': parsed.itens.length,
+          'checkout.pagamento.id': parsed.idPagamento,
+          'checkout.metodo': parsed.metodo,
+        });
 
-      // ─── step 1: plataforma membership check ────────────────────────
-      const campanha = await campanhaRepository.findById(parsed.idCampanha);
-      if (!campanha) {
-        throw new ArrecadacaoCampanhaNaoEncontradaError(parsed.idCampanha);
-      }
-      if (campanha.idPlataforma !== parsed.idPlataforma) {
-        throw new CheckoutPlataformaMismatchError(parsed.idPlataforma, campanha.idPlataforma);
-      }
-
-      // ─── step 2: load contribuições + cart-construction invariant ───
-      const contribuicoes: Contribuicao[] = [];
-      const campanhasInCart = new Set<string>();
-      for (const item of parsed.itens) {
-        const contribuicao = await contribuicaoRepository.findById(
-          item.idContribuicao as IdContribuicao,
-        );
-        if (!contribuicao) {
-          throw new ArrecadacaoContribuicaoNaoEncontradaError(item.idContribuicao);
+        // ─── step 1: plataforma membership check ────────────────────────
+        const campanha = await campanhaRepository.findById(parsed.idCampanha);
+        if (!campanha) {
+          throw new ArrecadacaoCampanhaNaoEncontradaError(parsed.idCampanha);
         }
-        campanhasInCart.add(contribuicao.idCampanha);
-        contribuicoes.push(contribuicao);
-      }
-      if (campanhasInCart.size > 1) {
-        throw new CarrinhoMultiplasCampanhasError([...campanhasInCart]);
-      }
-      // Single-campanha cart: must equal the saga's input idCampanha.
-      if (!campanhasInCart.has(parsed.idCampanha)) {
-        throw new ArrecadacaoContribuicaoNaoEncontradaError(parsed.itens[0]?.idContribuicao ?? '');
-      }
-
-      // ─── step 3: per-item esgotada UX gate ─────────────────────────
-      for (const item of parsed.itens) {
-        const sold = await esgotada(
-          {
-            pagamentoRepository,
-            contribuicaoRepository,
-            observability,
-          },
-          { idContribuicao: item.idContribuicao as IdContribuicao },
-        );
-        if (sold) {
-          throw new ArrecadacaoContribuicaoIndisponivelError(item.idContribuicao);
+        if (campanha.idPlataforma !== parsed.idPlataforma) {
+          throw new CheckoutPlataformaMismatchError(parsed.idPlataforma, campanha.idPlataforma);
         }
-      }
 
-      // ─── step 4: composição per-item + cart-wide surcharge ─────────
-      const itemComposicoes: SnapshotComposicaoValoresItemContribuicao[] = [];
-      for (let i = 0; i < parsed.itens.length; i++) {
-        const item = parsed.itens[i];
-        const contribuicao = contribuicoes[i];
-        if (!item || !contribuicao) {
-          throw new Error('Internal saga error: itens / contribuicoes desalinhados');
+        // ─── step 2: load contribuições + cart-construction invariant ───
+        const contribuicoes: Contribuicao[] = [];
+        const campanhasInCart = new Set<string>();
+        for (const item of parsed.itens) {
+          const contribuicao = await contribuicaoRepository.findById(
+            item.idContribuicao as IdContribuicao,
+          );
+          if (!contribuicao) {
+            throw new ArrecadacaoContribuicaoNaoEncontradaError(item.idContribuicao);
+          }
+          campanhasInCart.add(contribuicao.idCampanha);
+          contribuicoes.push(contribuicao);
         }
-        const opcao = encontrarOpcaoContribuicao(campanha, contribuicao.idOpcaoContribuicao);
-        if (!opcao) {
-          throw new ArrecadacaoOpcaoContribuicaoNaoEncontradaError(
-            campanha.id,
-            contribuicao.idOpcaoContribuicao,
+        if (campanhasInCart.size > 1) {
+          throw new CarrinhoMultiplasCampanhasError([...campanhasInCart]);
+        }
+        // Single-campanha cart: must equal the saga's input idCampanha.
+        if (!campanhasInCart.has(parsed.idCampanha)) {
+          throw new ArrecadacaoContribuicaoNaoEncontradaError(
+            parsed.itens[0]?.idContribuicao ?? '',
           );
         }
-        const composicao = await calcularComposicaoValoresParaItem(
-          { provedorRegraTaxa, observability },
+
+        // ─── step 3: per-item esgotada UX gate ─────────────────────────
+        for (const item of parsed.itens) {
+          const sold = await esgotada(
+            {
+              pagamentoRepository,
+              contribuicaoRepository,
+              observability,
+            },
+            { idContribuicao: item.idContribuicao as IdContribuicao },
+          );
+          if (sold) {
+            throw new ArrecadacaoContribuicaoIndisponivelError(item.idContribuicao);
+          }
+        }
+
+        // ─── step 4: composição per-item + cart-wide surcharge ─────────
+        const itemComposicoes: SnapshotComposicaoValoresItemContribuicao[] = [];
+        for (let i = 0; i < parsed.itens.length; i++) {
+          const item = parsed.itens[i];
+          const contribuicao = contribuicoes[i];
+          if (!item || !contribuicao) {
+            throw new Error('Internal saga error: itens / contribuicoes desalinhados');
+          }
+          const opcao = encontrarOpcaoContribuicao(campanha, contribuicao.idOpcaoContribuicao);
+          if (!opcao) {
+            throw new ArrecadacaoOpcaoContribuicaoNaoEncontradaError(
+              campanha.id,
+              contribuicao.idOpcaoContribuicao,
+            );
+          }
+          const composicao = await calcularComposicaoValoresParaItem(
+            { provedorRegraTaxa, observability },
+            {
+              idPlataforma: parsed.idPlataforma,
+              idContribuicao: item.idContribuicao,
+              tipo: opcao.tipo,
+              contributionUnitAmountCents: contribuicao.valor,
+              quantidade: item.quantidade,
+            },
+          );
+          itemComposicoes.push(composicao);
+        }
+
+        const totalContributionCents = itemComposicoes.reduce(
+          (acc, c) => acc + c.lineContributionAmountCents,
+          0,
+        );
+        const surchargeItem = await calcularSurchargeParaCarrinho(
+          { observability },
           {
-            idPlataforma: parsed.idPlataforma,
-            idContribuicao: item.idContribuicao,
-            tipo: opcao.tipo,
-            contributionUnitAmountCents: contribuicao.valor,
-            quantidade: item.quantidade,
+            totalContributionCents: totalContributionCents as never,
+            metodo: parsed.metodo,
           },
         );
-        itemComposicoes.push(composicao);
-      }
 
-      const totalContributionCents = itemComposicoes.reduce(
-        (acc, c) => acc + c.lineContributionAmountCents,
-        0,
-      );
-      const surchargeItem = await calcularSurchargeParaCarrinho(
-        { observability },
-        {
-          totalContributionCents: totalContributionCents as never,
-          metodo: parsed.metodo,
-        },
-      );
-
-      // ─── step 4b: build items (caller-controlled UUIDs) ─────────────
-      const expectedIdsCount = parsed.itens.length + (surchargeItem ? 1 : 0);
-      if (parsed.idsItens.length !== expectedIdsCount) {
-        throw new Error(
-          `idsItens length (${parsed.idsItens.length}) must match itens.length (${parsed.itens.length}) plus ${surchargeItem ? 1 : 0} for the surcharge item.`,
-        );
-      }
-
-      const now = clock();
-      const items: ItemDoPagamento[] = [];
-      for (let i = 0; i < itemComposicoes.length; i++) {
-        const id = parsed.idsItens[i];
-        const composicao = itemComposicoes[i];
-        if (!id || !composicao) continue;
-        items.push(
-          criarItemContribuicao({
-            id,
-            composicaoValoresItem: composicao,
-            criadoEm: now,
-          }),
-        );
-      }
-      if (surchargeItem) {
-        const surchargeId = parsed.idsItens[parsed.itens.length];
-        if (!surchargeId) {
-          throw new Error('Internal saga error: surchargeId não encontrado em idsItens');
+        // ─── step 4b: build items (caller-controlled UUIDs) ─────────────
+        const expectedIdsCount = parsed.itens.length + (surchargeItem ? 1 : 0);
+        if (parsed.idsItens.length !== expectedIdsCount) {
+          throw new Error(
+            `idsItens length (${parsed.idsItens.length}) must match itens.length (${parsed.itens.length}) plus ${surchargeItem ? 1 : 0} for the surcharge item.`,
+          );
         }
-        items.push(
-          criarItemPassthroughSurcharge({
-            id: surchargeId,
-            composicaoValoresItem: surchargeItem,
-            criadoEm: now,
-          }),
+
+        const now = clock();
+        const items: ItemDoPagamento[] = [];
+        for (let i = 0; i < itemComposicoes.length; i++) {
+          const id = parsed.idsItens[i];
+          const composicao = itemComposicoes[i];
+          if (!id || !composicao) continue;
+          items.push(
+            criarItemContribuicao({
+              id,
+              composicaoValoresItem: composicao,
+              criadoEm: now,
+            }),
+          );
+        }
+        if (surchargeItem) {
+          const surchargeId = parsed.idsItens[parsed.itens.length];
+          if (!surchargeId) {
+            throw new Error('Internal saga error: surchargeId não encontrado em idsItens');
+          }
+          items.push(
+            criarItemPassthroughSurcharge({
+              id: surchargeId,
+              composicaoValoresItem: surchargeItem,
+              criadoEm: now,
+            }),
+          );
+        }
+
+        // ─── step 5: build aggregate ────────────────────────────────────
+        const allItemComposicoes: SnapshotComposicaoValoresItem[] = [
+          ...itemComposicoes,
+          ...(surchargeItem ? [surchargeItem as SnapshotComposicaoValoresItemSurcharge] : []),
+        ];
+        const totalContribution = allItemComposicoes.reduce(
+          (acc, c) => (c.tipo === 'contribuicao' ? acc + c.lineContributionAmountCents : acc),
+          0,
         );
-      }
+        const totalFee = allItemComposicoes.reduce(
+          (acc, c) => (c.tipo === 'contribuicao' ? acc + c.lineFeeAmountCents : acc),
+          0,
+        );
+        const totalReceiver = allItemComposicoes.reduce(
+          (acc, c) => (c.tipo === 'contribuicao' ? acc + c.lineReceiverAmountCents : acc),
+          0,
+        );
+        const totalSurcharge = allItemComposicoes.reduce(
+          (acc, c) => (c.tipo === 'passthrough_surcharge' ? acc + c.amountCents : acc),
+          0,
+        );
+        const totalPaid = totalReceiver + totalFee + totalSurcharge;
 
-      // ─── step 5: build aggregate ────────────────────────────────────
-      const allItemComposicoes: SnapshotComposicaoValoresItem[] = [
-        ...itemComposicoes,
-        ...(surchargeItem ? [surchargeItem as SnapshotComposicaoValoresItemSurcharge] : []),
-      ];
-      const totalContribution = allItemComposicoes.reduce(
-        (acc, c) => (c.tipo === 'contribuicao' ? acc + c.lineContributionAmountCents : acc),
-        0,
-      );
-      const totalFee = allItemComposicoes.reduce(
-        (acc, c) => (c.tipo === 'contribuicao' ? acc + c.lineFeeAmountCents : acc),
-        0,
-      );
-      const totalReceiver = allItemComposicoes.reduce(
-        (acc, c) => (c.tipo === 'contribuicao' ? acc + c.lineReceiverAmountCents : acc),
-        0,
-      );
-      const totalSurcharge = allItemComposicoes.reduce(
-        (acc, c) => (c.tipo === 'passthrough_surcharge' ? acc + c.amountCents : acc),
-        0,
-      );
-      const totalPaid = totalReceiver + totalFee + totalSurcharge;
+        const aggregate: SnapshotComposicaoValoresAggregate = {
+          idCampanha: parsed.idCampanha,
+          totalContributionCents: totalContribution as never,
+          totalFeeCents: totalFee as never,
+          totalReceiverCents: totalReceiver as never,
+          totalSurchargeCents: totalSurcharge,
+          totalPaidCents: totalPaid as never,
+          responsavelTaxa: 'contribuinte',
+        };
 
-      const aggregate: SnapshotComposicaoValoresAggregate = {
-        idCampanha: parsed.idCampanha,
-        totalContributionCents: totalContribution as never,
-        totalFeeCents: totalFee as never,
-        totalReceiverCents: totalReceiver as never,
-        totalSurchargeCents: totalSurcharge,
-        totalPaidCents: totalPaid as never,
-        responsavelTaxa: 'contribuinte',
-      };
-
-      // ─── step 6: provider session ──────────────────────────────────
-      const anchorContribuicao = contribuicoes[0];
-      if (!anchorContribuicao) {
-        throw new Error('Internal saga error: contribuicoes array vazio');
-      }
-      const anchorOpcao = encontrarOpcaoContribuicao(
-        campanha,
-        anchorContribuicao.idOpcaoContribuicao,
-      );
-      if (!anchorOpcao) {
-        throw new ArrecadacaoOpcaoContribuicaoNaoEncontradaError(
-          campanha.id,
+        // ─── step 6: provider session ──────────────────────────────────
+        const anchorContribuicao = contribuicoes[0];
+        if (!anchorContribuicao) {
+          throw new Error('Internal saga error: contribuicoes array vazio');
+        }
+        const anchorOpcao = encontrarOpcaoContribuicao(
+          campanha,
           anchorContribuicao.idOpcaoContribuicao,
         );
-      }
+        if (!anchorOpcao) {
+          throw new ArrecadacaoOpcaoContribuicaoNaoEncontradaError(
+            campanha.id,
+            anchorContribuicao.idOpcaoContribuicao,
+          );
+        }
 
-      const nomeItem =
-        parsed.itens.length === 1
-          ? anchorContribuicao.nome
-          : `Carrinho — ${parsed.itens.length} itens (${anchorContribuicao.nome} + ${parsed.itens.length - 1} mais)`;
+        const nomeItem =
+          parsed.itens.length === 1
+            ? anchorContribuicao.nome
+            : `Carrinho — ${parsed.itens.length} itens (${anchorContribuicao.nome} + ${parsed.itens.length - 1} mais)`;
 
-      const sessao = await checkoutSessionProvider.criarSessaoCheckout({
-        idPagamento: parsed.idPagamento,
-        idIntencaoPagamento: parsed.idIntencaoPagamento,
-        idCampanha: parsed.idCampanha,
-        idContribuicao: anchorContribuicao.id,
-        idOpcaoContribuicao: anchorContribuicao.idOpcaoContribuicao,
-        tipoOpcao: anchorOpcao.tipo,
-        nomeItem,
-        amountCents: aggregate.totalPaidCents,
-        surchargeCents: aggregate.totalSurchargeCents,
-        metodo: parsed.metodo,
-        returnUrl: parsed.returnUrl,
-        ...(parsed.redirectOnCompletion
-          ? { redirectOnCompletion: parsed.redirectOnCompletion }
-          : {}),
-      });
+        // ─── aperture-kuw0o: PIX-cobrança branch (spec §4.3) ────────────
+        // metodo pix + a configured PixCobrancaProvider ('inter' or 'fake';
+        // see CobrancaPixProviderKind for why not literal 'inter') → create
+        // the Inter charge instead of a Stripe session. Everything above
+        // (validation, composição, items, aggregate) is method-agnostic and
+        // shared; everything below this block is the untouched Stripe path.
+        // Explicit allowlist (not `!== 'stripe'`): an absent/unknown kind —
+        // e.g. a stale caller that never learned this dep — must fall
+        // through to the Stripe path, never into a provider it didn't bind.
+        const viaPixCobranca =
+          parsed.metodo === 'pix' &&
+          (cobrancaPixProviderKind === 'inter' || cobrancaPixProviderKind === 'fake');
+        if (viaPixCobranca) {
+          if (!parsed.contribuinte) {
+            throw new PagamentosInputInvalidoError(
+              'contribuinte (nome + email) é obrigatório para pagamento PIX via cobrança — a coleta acontece no nosso formulário, não no provedor.',
+            );
+          }
 
-      span.setAttribute('checkout.session.id', sessao.sessionId);
+          const cobranca = await pixCobrancaProvider.criarCobranca({
+            idPagamento: parsed.idPagamento,
+            idIntencaoPagamento: parsed.idIntencaoPagamento,
+            amountCents: aggregate.totalPaidCents,
+            solicitacaoPagador: nomeItem,
+          });
 
-      // ─── step 7: persist intencao + items + publish event ──────────
-      const pagamento = await criarIntencaoPagamento(
-        { pagamentoRepository, pagamentoEventPublisher, clock, observability },
-        {
+          span.setAttribute('checkout.cobranca.txid', cobranca.txid);
+
+          // txid fills the same semantic slot as Stripe's session id:
+          // "provider-side collection object id" (spec §4.4 —
+          // intencao_external_ref, partial unique index already fits).
+          // contribuinte is stamped atomically at creation; finalization's
+          // only-write-when-null guard (plan 0015 step 0) preserves it.
+          const pagamentoPix = await criarIntencaoPagamento(
+            { pagamentoRepository, pagamentoEventPublisher, clock, observability },
+            {
+              idPagamento: parsed.idPagamento,
+              idIntencaoPagamento: parsed.idIntencaoPagamento,
+              items,
+              composicaoValoresAggregate: aggregate,
+              valorACobrarCents: aggregate.totalPaidCents,
+              metodo: parsed.metodo,
+              externalRef: cobranca.txid,
+              contribuinte: parsed.contribuinte,
+              // B4 contract (aperture-fpd0j): persist the provider's
+              // AUTHORITATIVE expiry so the reconciliation poller selects
+              // expired charges from stored truth.
+              expiraEm: cobranca.expiraEm,
+            },
+          );
+
+          logger.info('checkout.pagamento.iniciado', {
+            idPlataforma: parsed.idPlataforma,
+            idCampanha: campanha.id,
+            idPagamento: pagamentoPix.id,
+            txid: cobranca.txid,
+            numeroDeItens: parsed.itens.length,
+            totalPaidCents: aggregate.totalPaidCents,
+            metodo: parsed.metodo,
+            via: 'pix_cobranca',
+          });
+
+          span.setStatus({ code: SpanStatusCode.OK });
+          return {
+            contribuicoes,
+            pagamento: pagamentoPix,
+            tipo: 'pix_qr',
+            txid: cobranca.txid,
+            pixCopiaECola: cobranca.pixCopiaECola,
+            expiraEm: cobranca.expiraEm,
+            valorCents: aggregate.totalPaidCents as unknown as number,
+          };
+        }
+
+        const sessao = await checkoutSessionProvider.criarSessaoCheckout({
           idPagamento: parsed.idPagamento,
           idIntencaoPagamento: parsed.idIntencaoPagamento,
-          items,
-          composicaoValoresAggregate: aggregate,
-          valorACobrarCents: aggregate.totalPaidCents,
+          idCampanha: parsed.idCampanha,
+          idContribuicao: anchorContribuicao.id,
+          idOpcaoContribuicao: anchorContribuicao.idOpcaoContribuicao,
+          tipoOpcao: anchorOpcao.tipo,
+          nomeItem,
+          amountCents: aggregate.totalPaidCents,
+          surchargeCents: aggregate.totalSurchargeCents,
           metodo: parsed.metodo,
-          externalRef: sessao.externalRef,
-        },
-      );
+          returnUrl: parsed.returnUrl,
+          ...(parsed.redirectOnCompletion
+            ? { redirectOnCompletion: parsed.redirectOnCompletion }
+            : {}),
+        });
 
-      logger.info('checkout.pagamento.iniciado', {
-        idPlataforma: parsed.idPlataforma,
-        idCampanha: campanha.id,
-        idPagamento: pagamento.id,
-        sessionId: sessao.sessionId,
-        numeroDeItens: parsed.itens.length,
-        totalPaidCents: aggregate.totalPaidCents,
-        metodo: parsed.metodo,
-      });
+        span.setAttribute('checkout.session.id', sessao.sessionId);
 
-      span.setStatus({ code: SpanStatusCode.OK });
-      return {
-        contribuicoes,
-        pagamento,
-        sessionId: sessao.sessionId,
-        clientSecret: sessao.clientSecret,
-      };
-    } catch (error) {
-      span.recordException(error as Error);
-      span.setStatus({ code: SpanStatusCode.ERROR, message: (error as Error).message });
-      throw error;
-    } finally {
-      span.end();
-    }
-  });
+        // ─── step 7: persist intencao + items + publish event ──────────
+        const pagamento = await criarIntencaoPagamento(
+          { pagamentoRepository, pagamentoEventPublisher, clock, observability },
+          {
+            idPagamento: parsed.idPagamento,
+            idIntencaoPagamento: parsed.idIntencaoPagamento,
+            items,
+            composicaoValoresAggregate: aggregate,
+            valorACobrarCents: aggregate.totalPaidCents,
+            metodo: parsed.metodo,
+            externalRef: sessao.externalRef,
+          },
+        );
+
+        logger.info('checkout.pagamento.iniciado', {
+          idPlataforma: parsed.idPlataforma,
+          idCampanha: campanha.id,
+          idPagamento: pagamento.id,
+          sessionId: sessao.sessionId,
+          numeroDeItens: parsed.itens.length,
+          totalPaidCents: aggregate.totalPaidCents,
+          metodo: parsed.metodo,
+        });
+
+        span.setStatus({ code: SpanStatusCode.OK });
+        return {
+          contribuicoes,
+          pagamento,
+          tipo: 'stripe_embedded',
+          sessionId: sessao.sessionId,
+          clientSecret: sessao.clientSecret,
+        };
+      } catch (error) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR, message: (error as Error).message });
+        throw error;
+      } finally {
+        span.end();
+      }
+    },
+  );
 }
