@@ -58,8 +58,14 @@ interface ArchiveRow {
   readonly processed_at: Date | null;
   readonly processing_error: string | null;
   readonly pagamento_id: string | null;
-  readonly raw_payload_text: string;
+  readonly raw_payload: unknown;
   readonly raw_payload_bytes: number;
+}
+
+interface LedgerCascadeRow {
+  readonly total: number;
+  readonly cancelled: number;
+  readonly transferred: number;
 }
 
 async function seedWebhookGift(
@@ -161,8 +167,16 @@ async function postInterWebhook(page: Page, body: unknown): Promise<void> {
   expect(response.status(), await response.text()).toBe(200);
 }
 
-async function walkToArmedRefund(page: Page, pagamentoId: string) {
-  await page.goto(`${PIX_SERVER}/admin/pagamento/${pagamentoId}`);
+async function walkToArmedRefund(page: Page, idCampanha: string, pagamentoId: string) {
+  // Follow the same discovery path an operator uses: campanha payment list →
+  // payment detail. A direct detail-page goto would miss a broken/missing
+  // campaign-row link while still letting the refund dialog test pass.
+  await page.goto(`${PIX_SERVER}/admin/campanha/${idCampanha}`);
+  const paymentLink = page.locator(`a[href="/admin/pagamento/${pagamentoId}"]`);
+  await expect(paymentLink).toBeVisible();
+  await paymentLink.click();
+  await expect(page).toHaveURL(`${PIX_SERVER}/admin/pagamento/${pagamentoId}`);
+
   const block = page.getByTestId('estorno-block');
   await expect(block).toBeVisible();
   await block.getByRole('button', { name: 'estornar pagamento' }).click();
@@ -192,22 +206,26 @@ async function refundRecord(db: Database, pagamentoId: string): Promise<RefundRe
   return row.rows[0];
 }
 
-function expectExactArchiveBytes(
+function expectExactArchiveProjection(
   row: ArchiveRow | undefined,
-  expectedCanonicalJsonbText: string,
+  expectedProjection: Record<string, string>,
   label: string,
 ): void {
   expect(row, `${label} archive row must exist`).toBeDefined();
   if (!row) throw new Error(`${label}_archive_missing`);
 
-  const actualBytes = Buffer.from(row.raw_payload_text, 'utf8');
-  const expectedBytes = Buffer.from(expectedCanonicalJsonbText, 'utf8');
-  expect(actualBytes, `${label} must persist only the canonical jsonb projection bytes`).toEqual(
-    expectedBytes,
-  );
-  expect(row.raw_payload_bytes).toBe(actualBytes.byteLength);
-  expect(actualBytes.byteLength).toBeLessThanOrEqual(MAX_ARCHIVED_PROJECTION_BYTES);
+  // raw_payload is JSONB: transport whitespace, key order and duplicate keys
+  // are intentionally not a persistence contract. Assert the exact semantic
+  // projection (including the exact key set) instead of pretending the DB can
+  // reproduce request bytes. The byte count remains a bounded serialized-
+  // projection guard.
+  expect(
+    row.raw_payload,
+    `${label} must persist only the exact bounded PII-free routing projection`,
+  ).toStrictEqual(expectedProjection);
+  expect(row.raw_payload_bytes).toBeLessThanOrEqual(MAX_ARCHIVED_PROJECTION_BYTES);
 
+  const serializedProjection = Buffer.from(JSON.stringify(row.raw_payload), 'utf8');
   for (const forbidden of [
     INJECTED_PAYER_NAME,
     INJECTED_PAYER_CPF,
@@ -215,10 +233,38 @@ function expectExactArchiveBytes(
     INJECTED_EXTRA_FIELD,
   ]) {
     expect(
-      actualBytes.includes(Buffer.from(forbidden, 'utf8')),
+      serializedProjection.includes(Buffer.from(forbidden, 'utf8')),
       `${label} archive must strip injected payer/extra field ${forbidden}`,
     ).toBe(false);
   }
+}
+
+async function readLedgerCascade(db: Database, pagamentoId: string): Promise<LedgerCascadeRow> {
+  const result = await sql<LedgerCascadeRow>`
+    SELECT count(*)::int AS total,
+           count(*) FILTER (WHERE cancelado_em IS NOT NULL)::int AS cancelled,
+           count(*) FILTER (WHERE transferido_em IS NOT NULL)::int AS transferred
+      FROM lancamentos_financeiros
+     WHERE id_pagamento = ${pagamentoId}
+  `.execute(db);
+  const ledger = result.rows[0];
+  if (!ledger) throw new Error(`ledger_cascade_missing:${pagamentoId}`);
+  return ledger;
+}
+
+function expectApprovedLedger(ledger: LedgerCascadeRow): void {
+  // This one-item fixture creates exactly the receiver principal and platform
+  // fee rows. Locking cardinality prevents a duplicate/missing ledger effect
+  // from hiding behind a merely non-empty terminal snapshot.
+  expect(ledger.total, 'approved Inter payment must create both Financeiro ledger rows').toBe(2);
+  expect(ledger.cancelled).toBe(0);
+  expect(ledger.transferred).toBe(0);
+}
+
+function expectRefundedLedger(ledger: LedgerCascadeRow, approvedTotal: number): void {
+  expect(ledger.total).toBe(approvedTotal);
+  expect(ledger.cancelled).toBe(ledger.total);
+  expect(ledger.transferred).toBe(0);
 }
 
 async function cleanupOwned(
@@ -329,8 +375,14 @@ test.describe('a4pqt — literal admin refund journeys', () => {
         provedor: 'inter',
         amountCents: 1337,
       });
+      const approvedLedger = await readLedgerCascade(db, identity.pagamentoId);
+      expectApprovedLedger(approvedLedger);
 
-      const { dialog, confirm } = await walkToArmedRefund(admin, identity.pagamentoId);
+      const { dialog, confirm } = await walkToArmedRefund(
+        admin,
+        seededData.idCampanha,
+        identity.pagamentoId,
+      );
       // Reason belongs only to Stripe. Inter collects no provider reason.
       await expect(dialog.getByRole('combobox')).toHaveCount(0);
       await expect(dialog.getByText(/devolução PIX \(Inter\)/i)).toBeVisible();
@@ -390,10 +442,11 @@ test.describe('a4pqt — literal admin refund journeys', () => {
       await expect(strip).toHaveText(/pagamento estornado/i, { timeout: 12_000 });
       await expect(admin.getByText('devolução concluída')).toBeVisible({ timeout: 12_000 });
       await expect(strip).not.toHaveText(/aguardando o banco/i);
+      expectRefundedLedger(await readLedgerCascade(db, identity.pagamentoId), approvedLedger.total);
 
       const chargeArchive = await sql<ArchiveRow>`
         SELECT processed_at, processing_error, pagamento_id,
-               raw_payload::text AS raw_payload_text,
+               raw_payload,
                octet_length(raw_payload::text) AS raw_payload_bytes
           FROM payment_webhook_events
          WHERE provider = 'inter'
@@ -404,15 +457,15 @@ test.describe('a4pqt — literal admin refund journeys', () => {
         pagamento_id: identity.pagamentoId,
       });
       expect(chargeArchive.rows[0]?.processed_at).not.toBeNull();
-      expectExactArchiveBytes(
+      expectExactArchiveProjection(
         chargeArchive.rows[0],
-        `{"txid": ${JSON.stringify(identity.txid)}, "endToEndId": ${JSON.stringify(identity.e2eId)}}`,
+        { txid: identity.txid, endToEndId: identity.e2eId },
         'charge',
       );
 
       const refundArchive = await sql<ArchiveRow>`
         SELECT processed_at, processing_error, pagamento_id,
-               raw_payload::text AS raw_payload_text,
+               raw_payload,
                octet_length(raw_payload::text) AS raw_payload_bytes
           FROM payment_webhook_events
          WHERE provider = 'inter'
@@ -423,9 +476,9 @@ test.describe('a4pqt — literal admin refund journeys', () => {
         pagamento_id: identity.pagamentoId,
       });
       expect(refundArchive.rows[0]?.processed_at).not.toBeNull();
-      expectExactArchiveBytes(
+      expectExactArchiveProjection(
         refundArchive.rows[0],
-        `{"endToEndId": ${JSON.stringify(identity.e2eId)}, "idDevolucao": ${JSON.stringify(pending.id_devolucao)}}`,
+        { endToEndId: identity.e2eId, idDevolucao: pending.id_devolucao },
         'refund',
       );
     } finally {
@@ -450,7 +503,11 @@ test.describe('a4pqt — literal admin refund journeys', () => {
       paymentIds.push(seeded.pagamentoId);
       contributionIds.push(...seeded.contribuicaoIds);
 
-      const { dialog, confirm } = await walkToArmedRefund(admin, seeded.pagamentoId);
+      const { dialog, confirm } = await walkToArmedRefund(
+        admin,
+        seededData.idCampanha,
+        seeded.pagamentoId,
+      );
       const reason = dialog.getByRole('combobox');
       await expect(reason).toBeVisible();
       await reason.selectOption('requested_by_customer');

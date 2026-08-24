@@ -74,9 +74,21 @@ try {
   // callbacks. Queue, worker, and singleton schedule are all registered
   // before HTTP starts; a registration failure fails boot loudly rather than
   // leaving payments permanently pending behind an apparently healthy API.
-  await registerPixCobrancaReconciliationJob(deps.boss, deps);
+  // The production schema forbids this test-only disable flag. Playwright
+  // boots three server compositions against one pg-boss database; only the
+  // :3004 fake-Inter composition may own this worker, otherwise a Stripe
+  // composition can claim the due row and hold its durable lease before the
+  // correctly configured provider gets a turn.
+  const pixReconciliationWorkerDisabled = env.E2E_DISABLE_PIX_RECONCILIATION_WORKER === '1';
+  if (!pixReconciliationWorkerDisabled) {
+    await registerPixCobrancaReconciliationJob(deps.boss, deps);
+  }
 
-  console.log('✅ pg-boss workers registered (repasse + PIX cobranca reconciliation)');
+  console.log(
+    pixReconciliationWorkerDisabled
+      ? '✅ pg-boss workers registered (repasse; PIX cobranca reconciliation disabled for E2E)'
+      : '✅ pg-boss workers registered (repasse + PIX cobranca reconciliation)',
+  );
 } catch (err) {
   console.error('❌ Failed to start pg-boss workers:', err);
   throw err;
