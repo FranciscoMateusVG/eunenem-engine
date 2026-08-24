@@ -1,0 +1,88 @@
+openapi: 3.1.0
+info:
+  title: EuNenem Banco Inter PIX Webhook
+  version: 1.0.0
+paths:
+  /api/webhooks/inter/pix:
+    post:
+      operationId: receiveInterPixWebhook
+      summary: Receive Banco Inter PIX notifications
+      description: |
+        Public provider callback. The route is registered only while the real
+        Banco Inter cobranca adapter is bound, including the Stripe rollback
+        state with complete Inter credentials so in-flight charges can settle.
+        Payloads are routing hints only; the server re-queries Banco Inter
+        before changing payment state.
+      security: []
+      x-rate-limit-tier: webhook-provider
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+            example:
+              pix:
+                - txid: 00000000000000000000000000
+                  endToEndId: E00000000000000000000000000000
+      responses:
+        "200":
+          description: Notification durably accepted for verification or reconciliation.
+          content:
+            text/plain:
+              schema:
+                type: string
+        "404":
+          description: Inter cobranca adapter is not bound; the route is absent.
+        "413":
+          description: Request body exceeds 256 KiB.
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: payload too large
+        "429":
+          description: Per-client rate limit exceeded (600 requests per 60 seconds).
+          headers:
+            Retry-After:
+              schema:
+                type: string
+              description: Seconds until the rate-limit window resets.
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: too many requests
+        "500":
+          description: Unexpected processing failure; no provider payload details are exposed.
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: internal error
+  /api/webhooks/inter/pix/pix:
+    post:
+      operationId: receiveInterPixWebhookDeliverySuffix
+      summary: Receive Banco Inter PIX notifications at the provider-appended suffix
+      description: Same contract and conditional registration as /api/webhooks/inter/pix.
+      security: []
+      x-rate-limit-tier: webhook-provider
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Notification durably accepted for verification or reconciliation.
+        "404":
+          description: Inter cobranca adapter is not bound; the route is absent.
+        "413":
+          description: Request body exceeds 256 KiB.
+        "429":
+          description: Per-client rate limit exceeded (600 requests per 60 seconds).
+        "500":
+          description: Unexpected processing failure.

@@ -378,8 +378,28 @@ const INTER_COB_CREDENTIAL_KEYS = [
   'INTER_COB_PIX_KEY',
 ] as const;
 
-function hasCompleteInterCobrancaCredentials(env: ServerEnv): boolean {
+type InterCobrancaAdapterBindingEnv = Readonly<
+  Record<(typeof INTER_COB_CREDENTIAL_KEYS)[number], string> & {
+    COBRANCA_PIX_PROVIDER: CobrancaPixProviderKind;
+  }
+>;
+
+function hasCompleteInterCobrancaCredentials(env: InterCobrancaAdapterBindingEnv): boolean {
   return INTER_COB_CREDENTIAL_KEYS.every((key) => env[key].trim().length > 0);
+}
+
+/**
+ * Single source of truth for binding the real Inter cobranca adapter.
+ *
+ * Complete credentials deliberately keep the adapter available after the
+ * checkout selector rolls back to Stripe. In-flight Inter charges can then
+ * still settle through the webhook or reconciliation worker.
+ */
+export function shouldBindInterCobrancaAdapter(env: InterCobrancaAdapterBindingEnv): boolean {
+  return (
+    env.COBRANCA_PIX_PROVIDER === 'inter' ||
+    (env.COBRANCA_PIX_PROVIDER === 'stripe' && hasCompleteInterCobrancaCredentials(env))
+  );
 }
 
 /**
@@ -1100,10 +1120,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
   // the recovery adapter with a throw stub and strands those charges.
   // `fake` remains an explicit deterministic test rail.
   let pixCobrancaProvider: PixCobrancaProvider;
-  if (
-    env.COBRANCA_PIX_PROVIDER === 'inter' ||
-    (env.COBRANCA_PIX_PROVIDER === 'stripe' && hasCompleteInterCobrancaCredentials(env))
-  ) {
+  if (shouldBindInterCobrancaAdapter(env)) {
     pixCobrancaProvider = new PixCobrancaProviderInter({
       baseUrl: env.INTER_COB_BASE_URL,
       clientId: env.INTER_COB_CLIENT_ID,

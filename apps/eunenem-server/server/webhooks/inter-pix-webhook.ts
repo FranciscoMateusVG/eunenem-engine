@@ -7,7 +7,11 @@ import {
   type InterPixRefundConfirmed,
   type PixCobrancaProvider,
 } from '../../../../src/index.js';
-import type { ServerDeps } from '../auth/setup.js';
+import {
+  shouldBindInterCobrancaAdapter,
+  type ServerDeps,
+  type ServerEnv,
+} from '../auth/setup.js';
 import { trustedClientIp } from '../lib/security/trusted-client-ip.js';
 import { consumeRateLimit } from '../trpc/rate-limit.js';
 
@@ -61,6 +65,25 @@ export interface InterPixWebhookDeps
 export interface InterPixWebhookHandlerOptions {
   /** Test seam; production always uses the durable Postgres limiter. */
   readonly consumeRateLimit?: ConsumeInterPixRateLimit;
+}
+
+/**
+ * Register the public Inter callback only when the real Inter adapter is
+ * available. This deliberately shares the composition-root predicate so a
+ * rollback to Stripe keeps callbacks alive while complete Inter credentials
+ * remain configured for in-flight charges.
+ */
+export function mountInterPixWebhookRoutesWhenBound(
+  app: Hono,
+  env: ServerEnv,
+  deps: InterPixWebhookDeps,
+  options: InterPixWebhookHandlerOptions = {},
+): boolean {
+  if (!shouldBindInterCobrancaAdapter(env)) {
+    return false;
+  }
+  mountInterPixWebhookRoutes(app, deps, options);
+  return true;
 }
 
 class InterPixWebhookBodyTooLargeError extends Error {
