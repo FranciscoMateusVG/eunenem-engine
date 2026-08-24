@@ -31,10 +31,11 @@ const EMPTY_INTER_COB_CREDENTIALS = {
 } as const;
 
 function env(
+  nodeEnv: ServerEnv['NODE_ENV'],
   provider: ServerEnv['COBRANCA_PIX_PROVIDER'],
   credentials: typeof COMPLETE_INTER_COB_CREDENTIALS | typeof EMPTY_INTER_COB_CREDENTIALS,
 ): ServerEnv {
-  return { COBRANCA_PIX_PROVIDER: provider, ...credentials } as ServerEnv;
+  return { NODE_ENV: nodeEnv, COBRANCA_PIX_PROVIDER: provider, ...credentials } as ServerEnv;
 }
 
 const deps = {
@@ -67,24 +68,33 @@ async function statusesFor(config: ServerEnv): Promise<number[]> {
 
 describe('Inter PIX webhook composition-root mount gate', () => {
   it.each([
-    ['Stripe with no credentials', env('stripe', EMPTY_INTER_COB_CREDENTIALS)],
+    ['fake in non-production', env('test', 'fake', EMPTY_INTER_COB_CREDENTIALS)],
+    ['Inter in non-production', env('development', 'inter', COMPLETE_INTER_COB_CREDENTIALS)],
+    [
+      'Stripe with complete Inter credentials in non-production',
+      env('test', 'stripe', COMPLETE_INTER_COB_CREDENTIALS),
+    ],
+    ['Stripe with no credentials', env('production', 'stripe', EMPTY_INTER_COB_CREDENTIALS)],
     [
       'Stripe with incomplete credentials',
-      env('stripe', { ...COMPLETE_INTER_COB_CREDENTIALS, INTER_COB_KEY_BASE64: '' }),
+      env('production', 'stripe', {
+        ...COMPLETE_INTER_COB_CREDENTIALS,
+        INTER_COB_KEY_BASE64: '',
+      }),
     ],
   ])('leaves both routes absent for %s', async (_name, config) => {
     await expect(statusesFor(config)).resolves.toEqual([404, 404]);
   });
 
   it('mounts both routes when Inter is selected', async () => {
-    await expect(statusesFor(env('inter', COMPLETE_INTER_COB_CREDENTIALS))).resolves.toEqual([
-      413, 413,
-    ]);
+    await expect(
+      statusesFor(env('production', 'inter', COMPLETE_INTER_COB_CREDENTIALS)),
+    ).resolves.toEqual([413, 413]);
   });
 
   it('keeps both routes mounted after rollback to Stripe with complete credentials', async () => {
-    await expect(statusesFor(env('stripe', COMPLETE_INTER_COB_CREDENTIALS))).resolves.toEqual([
-      413, 413,
-    ]);
+    await expect(
+      statusesFor(env('production', 'stripe', COMPLETE_INTER_COB_CREDENTIALS)),
+    ).resolves.toEqual([413, 413]);
   });
 });
