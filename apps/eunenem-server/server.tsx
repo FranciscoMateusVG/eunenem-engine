@@ -17,13 +17,17 @@ import {
 } from '../../src/index.js';
 import { renderToString } from 'react-dom/server';
 import { App, resolveRoute } from './pages/App.js';
-import { buildServerDeps, ID_PLATAFORMA_EUNENEM, loadEnv } from './server/auth/setup.js';
+import {
+  buildServerDeps,
+  ID_PLATAFORMA_EUNENEM,
+  loadEnv,
+} from './server/auth/setup.js';
 import { installBlockedAuthHandlerGuard } from './server/blocked-auth-handler.js';
 import { createLegacyBridgeHandler } from './server/legacy-bridge.js';
 import { registerPixCobrancaReconciliationJob } from './server/jobs/pix-cobranca-reconciliation.pgboss.js';
 import { appRouter } from './server/trpc/router.js';
 import { createStripeWebhookHandler } from './server/webhooks/stripe-webhook.js';
-import { mountInterPixWebhookRoutes } from './server/webhooks/inter-pix-webhook.js';
+import { mountInterPixWebhookRoutesWhenBound } from './server/webhooks/inter-pix-webhook.js';
 
 const PORT = Number(process.env.PORT ?? 3001);
 
@@ -188,19 +192,27 @@ app.post('/api/webhooks/stripe', createStripeWebhookHandler(deps));
 // sign callback payloads, so the mounted handler treats them only as routing
 // hints and re-queries the authoritative cobrança API before changing state.
 // Mount both the registered base URL and Inter's delivery-time `/pix` suffix.
-mountInterPixWebhookRoutes(app, {
-  ...deps,
-  onInterPixRefundConfirmed: (confirmed) =>
-    finalizarEstornoPixVerificado(
-      {
-        pagamentoRepository: deps.pagamentoRepository,
-        pixCobrancaDevolucaoRepository: deps.pixCobrancaDevolucaoRepository,
-        livroFinanceiroRepository: deps.livroFinanceiroRepository,
-        clock: deps.clock,
-      },
-      confirmed,
-    ),
-});
+// Reuse the adapter-binding predicate: complete credentials intentionally keep
+// this recovery surface mounted after a rollback to Stripe so in-flight Inter
+// charges are not stranded. Without the real adapter, the public route is
+// absent rather than exposing work that cannot settle anything.
+const interPixWebhookRoutesMounted = mountInterPixWebhookRoutesWhenBound(
+  app,
+  env,
+  {
+    ...deps,
+    onInterPixRefundConfirmed: (confirmed) =>
+      finalizarEstornoPixVerificado(
+        {
+          pagamentoRepository: deps.pagamentoRepository,
+          pixCobrancaDevolucaoRepository: deps.pixCobrancaDevolucaoRepository,
+          livroFinanceiroRepository: deps.livroFinanceiroRepository,
+          clock: deps.clock,
+        },
+        confirmed,
+      ),
+  },
+);
 
 // Legacy bridge (aperture-as0v3) — authed silent login handoff into the 1.0
 // system. The /campanhas 1.0 card hits this; it mints a single-use Clerk
@@ -416,10 +428,14 @@ serve({ fetch: app.fetch, port: PORT }, (info) => {
   console.log('  /api/trpc/*        → tRPC procedures (listFruits, auth.*)');
   console.log('  /api/auth/*        → BetterAuth handler (sign-in/sign-up/sign-out/...)');
   console.log('  /api/webhooks/stripe → Stripe webhook (sig-verified; aperture-24n36)');
-  console.log('  /api/webhooks/inter/pix → Inter Pix webhook (verify-by-requery; aperture-711fd)');
-  console.log(
-    '  /api/webhooks/inter/pix/pix → Inter Pix delivery suffix (verify-by-requery; aperture-711fd)',
-  );
+  if (interPixWebhookRoutesMounted) {
+    console.log(
+      '  /api/webhooks/inter/pix → Inter Pix webhook (verify-by-requery; aperture-711fd)',
+    );
+    console.log(
+      '  /api/webhooks/inter/pix/pix → Inter Pix delivery suffix (verify-by-requery; aperture-711fd)',
+    );
+  }
   console.log('  /healthz           → plain text health check');
   console.log('');
 });

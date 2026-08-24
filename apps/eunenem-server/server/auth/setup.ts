@@ -378,8 +378,31 @@ const INTER_COB_CREDENTIAL_KEYS = [
   'INTER_COB_PIX_KEY',
 ] as const;
 
-function hasCompleteInterCobrancaCredentials(env: ServerEnv): boolean {
+type InterCobrancaAdapterBindingEnv = Readonly<
+  Record<(typeof INTER_COB_CREDENTIAL_KEYS)[number], string> & {
+    COBRANCA_PIX_PROVIDER: CobrancaPixProviderKind;
+    NODE_ENV: 'development' | 'production' | 'test';
+  }
+>;
+
+function hasCompleteInterCobrancaCredentials(env: InterCobrancaAdapterBindingEnv): boolean {
   return INTER_COB_CREDENTIAL_KEYS.every((key) => env[key].trim().length > 0);
+}
+
+/**
+ * Single source of truth for binding the real Inter cobranca adapter.
+ *
+ * Real Inter binding is structurally production-only. In production,
+ * complete credentials deliberately keep the adapter available after the
+ * checkout selector rolls back to Stripe so in-flight Inter charges can still
+ * settle through the webhook or reconciliation worker.
+ */
+export function shouldBindInterCobrancaAdapter(env: InterCobrancaAdapterBindingEnv): boolean {
+  return (
+    env.NODE_ENV === 'production' &&
+    (env.COBRANCA_PIX_PROVIDER === 'inter' ||
+      (env.COBRANCA_PIX_PROVIDER === 'stripe' && hasCompleteInterCobrancaCredentials(env)))
+  );
 }
 
 /**
@@ -768,18 +791,21 @@ const ServerEnvSchema = z
         }
       }
     }
-    // aperture-18j3j — when the real Inter PIX-in charge rail is selected,
-    // every INTER_COB_* credential must be present, in EVERY environment:
-    // 'inter' selected but unusable is a misconfiguration; fail closed at boot
-    // rather than half-wiring a rail that throws on the first charge.
-    //
-    // DELIBERATE ASYMMETRY vs TRANSFERENCIA_PROVIDER (spec 2j2j1 §6): there is
-    // NO prod-only gate here. PIX-out is production-only because a real
-    // transfer double-pays real money; PIX-in's worst dev-mode failure is a
-    // test charge nobody pays. 'inter' + the sandbox base URL is therefore
-    // allowed in non-prod for manual verification (CI keeps 'fake' — the
-    // sandbox's business-hours window + 30-day certs would make CI flaky).
-    if (env.COBRANCA_PIX_PROVIDER === 'inter') {
+    // aperture-18j3j — the real Inter PIX-in rail is production-only. Staging,
+    // development, and E2E use the deterministic fake provider; real Inter
+    // credentials must never be required or activated outside production.
+    if (env.COBRANCA_PIX_PROVIDER === 'inter' && env.NODE_ENV !== 'production') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['COBRANCA_PIX_PROVIDER'],
+        message:
+          "COBRANCA_PIX_PROVIDER='inter' is only allowed when NODE_ENV==='production' — staging/dev must use the fake PIX charge rail (aperture-oljzt).",
+      });
+    }
+
+    // In production, selecting Inter without every credential is a boot-time
+    // misconfiguration. Fail closed rather than exposing a half-wired rail.
+    if (env.NODE_ENV === 'production' && env.COBRANCA_PIX_PROVIDER === 'inter') {
       for (const chave of INTER_COB_CREDENTIAL_KEYS) {
         if (!env[chave] || env[chave].trim() === '') {
           ctx.addIssue({
@@ -1100,10 +1126,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
   // the recovery adapter with a throw stub and strands those charges.
   // `fake` remains an explicit deterministic test rail.
   let pixCobrancaProvider: PixCobrancaProvider;
-  if (
-    env.COBRANCA_PIX_PROVIDER === 'inter' ||
-    (env.COBRANCA_PIX_PROVIDER === 'stripe' && hasCompleteInterCobrancaCredentials(env))
-  ) {
+  if (shouldBindInterCobrancaAdapter(env)) {
     pixCobrancaProvider = new PixCobrancaProviderInter({
       baseUrl: env.INTER_COB_BASE_URL,
       clientId: env.INTER_COB_CLIENT_ID,
