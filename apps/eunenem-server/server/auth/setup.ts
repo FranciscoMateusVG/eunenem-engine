@@ -454,6 +454,15 @@ const ServerEnvSchema = z
      */
     E2E_FAKE_PAGAMENTO_PROVIDER: z.string().default(''),
     /**
+     * TEST-ONLY composition seam. The local Playwright topology boots three
+     * servers against one PostgreSQL/pg-boss database, but only :3004 owns the
+     * fake Inter cobrança provider. Disable the PIX reconciliation worker on
+     * :3002/:3003 so a Stripe-configured worker cannot claim an Inter-shaped
+     * due row and hold its durable lease before :3004 reads it. Empty by
+     * default and forbidden in production by the superRefine below.
+     */
+    E2E_DISABLE_PIX_RECONCILIATION_WORKER: z.string().default(''),
+    /**
      * aperture-vvh2j — automated PIX repasse rail selector. `'fake'` (default)
      * binds the deterministic in-process TransferenciaProviderFake; `'inter'`
      * selects the real Banco Inter PIX transfer adapter. The real adapter does
@@ -669,6 +678,14 @@ const ServerEnvSchema = z
           path: ['E2E_FAKE_PAGAMENTO_PROVIDER'],
           message:
             'E2E_FAKE_PAGAMENTO_PROVIDER must NOT be set in production — it is a test-only DI seam that stubs the real Stripe payment provider (aperture-07x5c).',
+        });
+      }
+      if (env.E2E_DISABLE_PIX_RECONCILIATION_WORKER.length > 0) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['E2E_DISABLE_PIX_RECONCILIATION_WORKER'],
+          message:
+            'E2E_DISABLE_PIX_RECONCILIATION_WORKER must NOT be set in production — production recovery workers must always register.',
         });
       }
     }

@@ -146,6 +146,31 @@ describe('eunenem-server payment-provider DI gate (aperture-ozlcr)', () => {
   });
 });
 
+describe('eunenem-server PIX reconciliation worker E2E seam', () => {
+  it('accepts the worker-disable seam only outside production', () => {
+    const env = loadEnv({
+      ...baseEnv(),
+      E2E_DISABLE_PIX_RECONCILIATION_WORKER: '1',
+    });
+    expect(env.E2E_DISABLE_PIX_RECONCILIATION_WORKER).toBe('1');
+  });
+
+  it('rejects disabling the recovery worker in production', () => {
+    expect(() =>
+      loadEnv({
+        ...baseEnv(),
+        NODE_ENV: 'production',
+        STRIPE_PUBLISHABLE_KEY: 'pk_live_dummy',
+        STRIPE_SECRET_KEY: 'sk_live_dummy',
+        STRIPE_WEBHOOK_SECRET: 'whsec_live_dummy',
+        LOG_PII_HASH_SALT: 'live-salt-thirty-two-chars-aaaaaaaaaaaaaaaaaaaa',
+        TRUSTED_HOP_COUNT: '1',
+        E2E_DISABLE_PIX_RECONCILIATION_WORKER: '1',
+      }),
+    ).toThrow(/E2E_DISABLE_PIX_RECONCILIATION_WORKER/);
+  });
+});
+
 /**
  * aperture-ju5w2 — the Inter PIX transfer rail boot guard. Two structural
  * money-safety invariants live in the env superRefine: (1) 'inter' is ONLY
