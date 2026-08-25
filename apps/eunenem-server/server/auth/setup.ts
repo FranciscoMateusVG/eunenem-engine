@@ -506,6 +506,14 @@ const ServerEnvSchema = z
      */
     EUNENEM_FAKE_E2E_MAGIC: z.enum(['true', 'false']).default('false'),
     /**
+     * aperture-1y6ar — staging-only fake PIX checkout convenience. When true,
+     * ordinary (non-magic) fake charges conclude on their first poll. Opt-in
+     * and false by default so existing unit/E2E scenarios retain the fake's
+     * long-standing `ativa` behavior. Magic outcomes are evaluated first by
+     * PixCobrancaProviderFake and therefore remain authoritative.
+     */
+    EUNENEM_FAKE_PIX_AUTOCOMPLETE: z.enum(['true', 'false']).default('false'),
+    /**
      * aperture-ju5w2 — Banco Inter Banking API credentials for the real PIX
      * transfer rail. ALL optional with '' defaults so a fresh-clone / fake-rail
      * boot never crashes; the superRefine below makes them REQUIRED (non-empty)
@@ -1148,6 +1156,8 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     pixCobrancaProvider = new PixCobrancaProviderFake({
       clock: () => new Date(),
       e2eMagicOutcomes: env.EUNENEM_FAKE_E2E_MAGIC === 'true',
+      consultarCobrancaSequence:
+        env.EUNENEM_FAKE_PIX_AUTOCOMPLETE === 'true' ? [{ status: 'concluida' }] : undefined,
       txidFactory: (input) => input.idPagamento.replaceAll('-', ''),
       e2eIdFactory: (txid) => txid,
     });

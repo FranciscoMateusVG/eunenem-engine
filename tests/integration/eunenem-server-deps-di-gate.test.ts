@@ -344,13 +344,11 @@ describe('eunenem-server MINIO_ENDPOINT boot guard (aperture-9wqh1)', () => {
  *    PixCobrancaNaoConfigurado throw-on-use stub; existing Stripe/fake
  *    checkout bindings stay byte-for-byte unchanged.
  * 2. 'fake' → deterministic PixCobrancaProviderFake.
- * 3. 'inter' + full INTER_COB_* creds → real PixCobrancaProviderInter.
- * 4. 'inter' + ANY missing cred → boot rejection in EVERY environment
- *    (inter-selected-but-unusable is a misconfiguration; fail closed).
- * 5. DELIBERATE ASYMMETRY vs TRANSFERENCIA_PROVIDER (spec 2j2j1 §6): 'inter'
- *    is allowed OUTSIDE production (sandbox stance — a PIX charge has no
- *    double-pay hazard, unlike a PIX transfer). Pinned so a future refactor
- *    doesn't "harmonize" the two gates and kill sandbox verification.
+ * 3. Production 'inter' + full INTER_COB_* creds → real PixCobrancaProviderInter.
+ * 4. Production 'inter' + ANY missing cred → boot rejection (selected but
+ *    unusable is a misconfiguration; fail closed).
+ * 5. Real Inter is production-only. Development/test reject 'inter' even with
+ *    complete credentials and use the explicit fake rail instead.
  * 6. 'stripe' + complete Inter credentials keeps the real Inter adapter bound
  *    for webhook/poller recovery of in-flight charges while NEW checkouts use
  *    Stripe. Checkout routing and reconciliation availability are separate.
@@ -508,6 +506,96 @@ describe('eunenem-server PIX cobrança rail DI gate (aperture-18j3j)', () => {
     }
   });
 
+  it.each([
+    undefined,
+    'false',
+  ] as const)('keeps ordinary fake PIX charges ativa when autocomplete is %s', async (autocomplete) => {
+    const deps = buildServerDeps(
+      loadEnv({
+        ...baseEnv(),
+        COBRANCA_PIX_PROVIDER: 'fake',
+        ...(autocomplete === undefined ? {} : { EUNENEM_FAKE_PIX_AUTOCOMPLETE: autocomplete }),
+      }),
+    );
+    try {
+      const charge = await deps.pixCobrancaProvider.criarCobranca({
+        idPagamento: '00000000-0000-4000-8000-000000000500',
+        idIntencaoPagamento: '10000000-0000-4000-8000-000000000500',
+        amountCents: 5000,
+      });
+      await expect(deps.pixCobrancaProvider.consultarCobranca(charge.txid)).resolves.toEqual({
+        status: 'ativa',
+      });
+    } finally {
+      void deps.db.destroy();
+    }
+  });
+
+  it('concludes an ordinary fake PIX charge on first poll when autocomplete is true', async () => {
+    const deps = buildServerDeps(
+      loadEnv({
+        ...baseEnv(),
+        COBRANCA_PIX_PROVIDER: 'fake',
+        EUNENEM_FAKE_PIX_AUTOCOMPLETE: 'true',
+      }),
+    );
+    try {
+      const paymentId = '00000000-0000-4000-8000-000000000501';
+      const charge = await deps.pixCobrancaProvider.criarCobranca({
+        idPagamento: paymentId,
+        idIntencaoPagamento: '10000000-0000-4000-8000-000000000501',
+        amountCents: 5000,
+      });
+      await expect(deps.pixCobrancaProvider.consultarCobranca(charge.txid)).resolves.toMatchObject({
+        status: 'concluida',
+        e2eId: paymentId.replaceAll('-', ''),
+        valorPagoCents: 5000,
+      });
+    } finally {
+      void deps.db.destroy();
+    }
+  });
+
+  it('keeps fake PIX magic outcomes ahead of autocomplete', async () => {
+    const deps = buildServerDeps(
+      loadEnv({
+        ...baseEnv(),
+        COBRANCA_PIX_PROVIDER: 'fake',
+        EUNENEM_FAKE_E2E_MAGIC: 'true',
+        EUNENEM_FAKE_PIX_AUTOCOMPLETE: 'true',
+      }),
+    );
+    try {
+      const completed = await deps.pixCobrancaProvider.criarCobranca({
+        idPagamento: '00000000-0000-4000-8000-000000001337',
+        idIntencaoPagamento: '10000000-0000-4000-8000-000000001337',
+        amountCents: 1337,
+      });
+      await expect(
+        deps.pixCobrancaProvider.consultarCobranca(completed.txid),
+      ).resolves.toMatchObject({ status: 'concluida', valorPagoCents: 1337 });
+
+      const removed = await deps.pixCobrancaProvider.criarCobranca({
+        idPagamento: '00000000-0000-4000-8000-000000001404',
+        idIntencaoPagamento: '10000000-0000-4000-8000-000000001404',
+        amountCents: 1404,
+      });
+      await expect(deps.pixCobrancaProvider.consultarCobranca(removed.txid)).resolves.toEqual({
+        status: 'removida',
+      });
+
+      await expect(
+        deps.pixCobrancaProvider.solicitarDevolucao({
+          e2eId: completed.txid,
+          idDevolucao: 'refundautocomplete1422',
+          amountCents: 1422,
+        }),
+      ).resolves.toEqual({ status: 'rejeitada', codigo: 'FAKE_MAGIC_REFUND_REJECTED' });
+    } finally {
+      void deps.db.destroy();
+    }
+  });
+
   const INTER_COB_CREDS = [
     'INTER_COB_BASE_URL',
     'INTER_COB_CLIENT_ID',
@@ -538,11 +626,14 @@ describe('eunenem-server PIX cobrança rail DI gate (aperture-18j3j)', () => {
       __resetStripeForTests();
       return buildServerDeps(
         loadEnv(
-          interCobEnv({
-            COBRANCA_PIX_PROVIDER: 'stripe',
-            STRIPE_SECRET_KEY: ROLLBACK_STRIPE_SECRET,
-            ...overrides,
-          }),
+          interCobEnv(
+            prodEnv({
+              NODE_ENV: 'production',
+              COBRANCA_PIX_PROVIDER: 'stripe',
+              STRIPE_SECRET_KEY: ROLLBACK_STRIPE_SECRET,
+              ...overrides,
+            }),
+          ),
         ),
       );
     }
@@ -606,13 +697,11 @@ describe('eunenem-server PIX cobrança rail DI gate (aperture-18j3j)', () => {
   });
 
   // ── fail-closed matrix (aperture-18j3j QA hold) ──────────────────────────
-  // Code + comments promise rejection in EVERY environment. Prove the full
-  // claim, not a sample: each of the 7 INTER_COB_* credentials × each
-  // NODE_ENV × two absence variants — truly unset (exercises the zod ''
-  // default) and whitespace-only (exercises the .trim() in the superRefine).
-  // 7 × 3 × 2 = 42 cells, every one executed, every one asserting a
+  // In production, prove every required credential independently: each of the
+  // 7 INTER_COB_* credentials × two absence variants — truly unset (exercises
+  // the zod '' default) and whitespace-only (exercises superRefine trimming).
+  // 7 × 2 = 14 cells, every one executed, every one asserting a
   // boot/schema rejection that NAMES the missing credential.
-  const NODE_ENVS = ['production', 'development', 'test'] as const;
   const ABSENCE_VARIANTS = [
     {
       variant: 'unset (zod default "")',
@@ -628,36 +717,39 @@ describe('eunenem-server PIX cobrança rail DI gate (aperture-18j3j)', () => {
     },
   ] as const;
   const FAIL_CLOSED_CELLS = INTER_COB_CREDS.flatMap((cred) =>
-    NODE_ENVS.flatMap((nodeEnv) =>
-      ABSENCE_VARIANTS.map(({ variant, apply }) => ({ cred, nodeEnv, variant, apply })),
-    ),
+    ABSENCE_VARIANTS.map(({ variant, apply }) => ({ cred, variant, apply })),
   );
 
-  it.each(
-    FAIL_CLOSED_CELLS,
-  )("REJECTS 'inter' when $cred is $variant in NODE_ENV=$nodeEnv (fail closed in EVERY environment)", ({
+  it.each(FAIL_CLOSED_CELLS)("REJECTS production 'inter' when $cred is $variant", ({
     cred,
-    nodeEnv,
     apply,
   }) => {
-    const env =
-      nodeEnv === 'production'
-        ? prodEnv(interCobEnv({ NODE_ENV: 'production' }))
-        : interCobEnv({ NODE_ENV: nodeEnv });
+    const env = prodEnv(interCobEnv({ NODE_ENV: 'production' }));
     apply(env, cred);
     expect(() => loadEnv(env)).toThrow(new RegExp(`${cred}.*COBRANCA_PIX_PROVIDER`));
   });
 
-  it("ACCEPTS 'inter' in development with full creds (sandbox stance — asymmetry vs TRANSFERENCIA_PROVIDER)", () => {
-    // spec 2j2j1 §6: PIX-out is prod-only (double-pay hazard); PIX-in is not.
-    // This test pins the asymmetry: the same NODE_ENV=development that REJECTS
-    // TRANSFERENCIA_PROVIDER='inter' BOOTS with COBRANCA_PIX_PROVIDER='inter'.
-    const env = loadEnv(interCobEnv());
-    expect(env.NODE_ENV).toBe('development');
-    expect(env.COBRANCA_PIX_PROVIDER).toBe('inter');
+  it.each([
+    'development',
+    'test',
+  ] as const)("REJECTS 'inter' with complete credentials in NODE_ENV=%s", (nodeEnv) => {
+    expect(() => loadEnv(interCobEnv({ NODE_ENV: nodeEnv }))).toThrow(
+      /COBRANCA_PIX_PROVIDER='inter'.*NODE_ENV==='production'/,
+    );
+  });
+
+  it.each([
+    'development',
+    'test',
+  ] as const)('ACCEPTS the fake PIX charge rail in NODE_ENV=%s', (nodeEnv) => {
+    const env = loadEnv({
+      ...baseEnv(),
+      NODE_ENV: nodeEnv,
+      COBRANCA_PIX_PROVIDER: 'fake',
+    });
     const deps = buildServerDeps(env);
     try {
-      expect(deps.pixCobrancaProvider).toBeInstanceOf(PixCobrancaProviderInter);
+      expect(deps.pixCobrancaProvider).toBeInstanceOf(PixCobrancaProviderFake);
     } finally {
       void deps.db.destroy();
     }

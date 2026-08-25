@@ -72,6 +72,7 @@ services:
       # vars silently never arrive (the "compose env layer-skip", dokploy-api
       # §12) — which is the exact P0 (cz6wg) this block fixes.
       COBRANCA_PIX_PROVIDER: ${COBRANCA_PIX_PROVIDER:-stripe}
+      EUNENEM_FAKE_PIX_AUTOCOMPLETE: ${EUNENEM_FAKE_PIX_AUTOCOMPLETE:-false}
       INTER_COB_BASE_URL: ${INTER_COB_BASE_URL:-}
       INTER_COB_CLIENT_ID: ${INTER_COB_CLIENT_ID:-}
       INTER_COB_CLIENT_SECRET: ${INTER_COB_CLIENT_SECRET:-}
