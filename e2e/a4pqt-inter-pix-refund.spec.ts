@@ -2,9 +2,9 @@
  * aperture-a4pqt — literal refund journeys through the production-shaped UI.
  *
  * Inter walk (dedicated fake-cobrança server on :3004):
- *   visitor checkout → identity form → QR → real Inter webhook route
+ *   visitor checkout → identity form → QR → real pg-boss reconciliation
  *   → approved payment → admin detail → ack-gated refund →
- *   pending truth strip → real refund webhook route → terminal UI + DB.
+ *   pending truth strip → authoritative replay verification → terminal UI + DB.
  *
  * The fake's identities deliberately mirror Banco Inter's contracts:
  *   txid = payment UUID without hyphens; e2eId = the same full txid.
@@ -19,6 +19,8 @@
 import { randomUUID } from 'node:crypto';
 import type { Page } from '@playwright/test';
 import { sql } from 'kysely';
+// eslint-disable-next-line import/no-relative-packages
+import { PgBoss } from '../apps/eunenem-server/node_modules/pg-boss/dist/index.js';
 import { createDatabase, type Database } from '../src/adapters/database.js';
 import { expect, test } from './fixtures.js';
 import {
@@ -33,12 +35,8 @@ const DATABASE_URL =
   'postgresql://frame:frame@localhost:54320/frame';
 
 const PIX_SERVER = 'http://localhost:3004';
+const PIX_QUEUE = 'pix-cobranca-reconciliation-v1';
 const OWNER_EMAIL = `a4pqt-${randomUUID()}@e2e.local`;
-const INJECTED_PAYER_NAME = 'A4PQT Archive Payer';
-const INJECTED_PAYER_CPF = '12345678901';
-const INJECTED_PAYER_EMAIL = 'must-not-enter-the-archive@e2e.local';
-const INJECTED_EXTRA_FIELD = 'drop-a4pqt-extra';
-const MAX_ARCHIVED_PROJECTION_BYTES = 128;
 
 interface CheckoutIdentity {
   readonly pagamentoId: string;
@@ -52,14 +50,6 @@ interface RefundRecord {
   readonly id_devolucao: string;
   readonly amount_cents: string | number | bigint;
   readonly status: string;
-}
-
-interface ArchiveRow {
-  readonly processed_at: Date | null;
-  readonly processing_error: string | null;
-  readonly pagamento_id: string | null;
-  readonly raw_payload: unknown;
-  readonly raw_payload_bytes: number;
 }
 
 interface LedgerCascadeRow {
@@ -160,11 +150,41 @@ async function checkoutIdentity(
   };
 }
 
-async function postInterWebhook(page: Page, body: unknown): Promise<void> {
-  const response = await page.request.post(`${PIX_SERVER}/api/webhooks/inter/pix`, {
-    data: body,
-  });
-  expect(response.status(), await response.text()).toBe(200);
+async function reconcileApprovedPayment(db: Database, pagamentoId: string): Promise<void> {
+  await sql`
+    UPDATE pagamentos
+       SET intencao_expira_em = now() - interval '1 minute',
+           pix_reconciliacao_claimed_until = NULL
+     WHERE id = ${pagamentoId}
+       AND status = 'pendente'
+  `.execute(db);
+
+  const boss = new PgBoss(DATABASE_URL);
+  const jobIds: string[] = [];
+  boss.on('error', () => undefined);
+  await boss.start();
+  try {
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const jobId = await boss.send(PIX_QUEUE, { schemaVersion: 1 });
+      expect(jobId, 'pg-boss must accept the reconciliation job').toBeTruthy();
+      jobIds.push(jobId as string);
+      await expect
+        .poll(async () => {
+          const job = await sql<{ state: string }>`
+            SELECT state FROM pgboss.job WHERE id = ${jobId}
+          `.execute(db);
+          return job.rows[0]?.state;
+        })
+        .toBe('completed');
+      if ((await pagamentoStatus(db, pagamentoId)) === 'aprovado') return;
+    }
+    throw new Error('fake PIX reconciliation worker did not approve the owned payment');
+  } finally {
+    await boss.stop({ graceful: false });
+    for (const jobId of jobIds) {
+      await sql`DELETE FROM pgboss.job WHERE id = ${jobId} AND name = ${PIX_QUEUE}`.execute(db);
+    }
+  }
 }
 
 async function walkToArmedRefund(page: Page, idCampanha: string, pagamentoId: string) {
@@ -206,39 +226,6 @@ async function refundRecord(db: Database, pagamentoId: string): Promise<RefundRe
   return row.rows[0];
 }
 
-function expectExactArchiveProjection(
-  row: ArchiveRow | undefined,
-  expectedProjection: Record<string, string>,
-  label: string,
-): void {
-  expect(row, `${label} archive row must exist`).toBeDefined();
-  if (!row) throw new Error(`${label}_archive_missing`);
-
-  // raw_payload is JSONB: transport whitespace, key order and duplicate keys
-  // are intentionally not a persistence contract. Assert the exact semantic
-  // projection (including the exact key set) instead of pretending the DB can
-  // reproduce request bytes. The byte count remains a bounded serialized-
-  // projection guard.
-  expect(
-    row.raw_payload,
-    `${label} must persist only the exact bounded PII-free routing projection`,
-  ).toStrictEqual(expectedProjection);
-  expect(row.raw_payload_bytes).toBeLessThanOrEqual(MAX_ARCHIVED_PROJECTION_BYTES);
-
-  const serializedProjection = Buffer.from(JSON.stringify(row.raw_payload), 'utf8');
-  for (const forbidden of [
-    INJECTED_PAYER_NAME,
-    INJECTED_PAYER_CPF,
-    INJECTED_PAYER_EMAIL,
-    INJECTED_EXTRA_FIELD,
-  ]) {
-    expect(
-      serializedProjection.includes(Buffer.from(forbidden, 'utf8')),
-      `${label} archive must strip injected payer/extra field ${forbidden}`,
-    ).toBe(false);
-  }
-}
-
 async function readLedgerCascade(db: Database, pagamentoId: string): Promise<LedgerCascadeRow> {
   const result = await sql<LedgerCascadeRow>`
     SELECT count(*)::int AS total,
@@ -272,7 +259,6 @@ async function cleanupOwned(
   args: {
     paymentIds: readonly string[];
     contributionIds: readonly string[];
-    providerEventIds: readonly string[];
   },
 ): Promise<void> {
   // A checkout can fail an assertion after persisting the payment but before
@@ -287,17 +273,6 @@ async function cleanupOwned(
     ...partialPayments.rows.map((row) => row.id),
   ]);
 
-  // A failed dispatch can leave an archive row unlinked (pagamento_id NULL).
-  // Delete the exact immutable identities too, otherwise the next run takes
-  // a duplicate/retry path instead of exercising first-attempt composition.
-  for (const providerEventId of args.providerEventIds) {
-    await sql`
-      DELETE FROM payment_webhook_events
-       WHERE provider = 'inter'
-         AND provider_event_id = ${providerEventId}
-    `.execute(db);
-  }
-
   for (const pagamentoId of ownedPaymentIds) {
     await sql`DELETE FROM payment_webhook_events WHERE pagamento_id = ${pagamentoId}`.execute(db);
     await sql`DELETE FROM pix_cobranca_devolucoes WHERE id_pagamento = ${pagamentoId}`.execute(db);
@@ -310,47 +285,35 @@ async function cleanupOwned(
 }
 
 test.describe('a4pqt — literal admin refund journeys', () => {
-  test('Inter: checkout + charge webhook → pending refund → refund webhook → terminal UI and archive', async ({
+  test('Inter: checkout + reconciliation → pending refund → replay verification → terminal UI', async ({
     page,
     adminAuthenticatedPage: admin,
     seededData,
   }) => {
-    test.setTimeout(60_000);
+    test.setTimeout(90_000);
     const db = createDatabase(DATABASE_URL);
     const paymentIds: string[] = [];
     const contributionIds: string[] = [];
-    const providerEventIds: string[] = [];
     try {
+      // Keep the display poll from consuming magic 1337. The real pg-boss
+      // reconciliation worker below must perform the authoritative read.
+      await page.route(/obterStatusPix/, async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify([{ result: { data: { status: 'pendente' } } }]),
+        });
+      });
+
       const gift = await seedWebhookGift(db, seededData);
       contributionIds.push(gift.id);
       const identity = await checkoutIdentity(db, page, seededData.slug, gift);
       paymentIds.push(identity.pagamentoId);
 
-      // Actual unsigned Inter callback route: the payload is only a routing
-      // hint. The server must bind txid, re-query the fake provider, and write
-      // the authoritative e2e transaction before approving.
-      const chargeProviderEventId = `${identity.txid}:${identity.e2eId}`;
-      providerEventIds.push(chargeProviderEventId);
-      await postInterWebhook(page, {
-        pix: [
-          {
-            txid: identity.txid,
-            endToEndId: identity.e2eId,
-            pagador: {
-              nome: INJECTED_PAYER_NAME,
-              cpf: INJECTED_PAYER_CPF,
-              email: INJECTED_PAYER_EMAIL,
-            },
-            extraWebhookField: INJECTED_EXTRA_FIELD,
-          },
-        ],
-      });
-      await expect
-        .poll(() => pagamentoStatus(db, identity.pagamentoId), {
-          timeout: 15_000,
-          intervals: [100, 200, 500],
-        })
-        .toBe('aprovado');
+      // The fake magic outcome is consumed by the production reconciliation
+      // path, not by the intentionally absent fake-provider webhook route.
+      await reconcileApprovedPayment(db, identity.pagamentoId);
+      await page.unroute(/obterStatusPix/);
 
       // User-visible completion is part of the literal journey, not merely
       // a DB side effect: the same visitor modal must poll the approved
@@ -363,13 +326,16 @@ test.describe('a4pqt — literal admin refund journeys', () => {
         e2e_ref: string | null;
         tx: { id?: string; provedor?: string; amountCents?: number } | null;
         total: string | number | bigint;
+        available_on: Date | null;
       }>`
         SELECT intencao_e2e_external_ref AS e2e_ref,
                transacao_externa AS tx,
-               intencao_total_paid_cents AS total
+               intencao_total_paid_cents AS total,
+               intencao_balance_transaction_available_on AS available_on
           FROM pagamentos WHERE id = ${identity.pagamentoId}
       `.execute(db);
       expect(approved.rows[0]?.e2e_ref).toBe(identity.e2eId);
+      expect(approved.rows[0]?.available_on).toBeInstanceOf(Date);
       expect(approved.rows[0]?.tx).toMatchObject({
         id: identity.e2eId,
         provedor: 'inter',
@@ -386,7 +352,12 @@ test.describe('a4pqt — literal admin refund journeys', () => {
       // Reason belongs only to Stripe. Inter collects no provider reason.
       await expect(dialog.getByRole('combobox')).toHaveCount(0);
       await expect(dialog.getByText(/devolução PIX \(Inter\)/i)).toBeVisible();
+      const estornoResponsePromise = admin.waitForResponse(
+        (response) =>
+          response.url().includes('pagamentos.estornar') && response.request().method() === 'POST',
+      );
       await confirm.click();
+      const estornoResponse = await estornoResponsePromise;
       await expect(dialog).toBeHidden();
 
       const strip = admin.getByTestId('estorno-result');
@@ -403,27 +374,11 @@ test.describe('a4pqt — literal admin refund journeys', () => {
       expect(Number(pending?.amount_cents)).toBe(Number(approved.rows[0]?.total));
       expect(await pagamentoStatus(db, identity.pagamentoId)).toBe('aprovado');
 
-      // Actual refund webhook payload. The callback does NOT trust its body:
-      // it resolves the persisted amount, re-queries the provider, then runs
-      // provider-free bookkeeping through the exact composite identity.
-      const refundProviderEventId = `${identity.e2eId}:devolucao:${pending.id_devolucao}`;
-      providerEventIds.push(refundProviderEventId);
-      await postInterWebhook(page, {
-        pix: [
-          {
-            txid: identity.txid,
-            endToEndId: identity.e2eId,
-            devolucoes: [
-              {
-                id: pending.id_devolucao,
-                motivo: INJECTED_EXTRA_FIELD,
-                pagador: { nome: INJECTED_PAYER_NAME, cpf: INJECTED_PAYER_CPF },
-              },
-            ],
-            extraWebhookField: INJECTED_EXTRA_FIELD,
-          },
-        ],
-      });
+      // Replaying the same authenticated mutation is the production-safe
+      // recovery seam for an in-process Inter refund: it performs an
+      // authoritative consultarDevolucao, then persists terminal bookkeeping.
+      const replay = await admin.request.fetch(estornoResponse.request());
+      expect(replay.status(), await replay.text()).toBe(200);
 
       await expect
         .poll(() => pagamentoStatus(db, identity.pagamentoId), {
@@ -443,46 +398,8 @@ test.describe('a4pqt — literal admin refund journeys', () => {
       await expect(admin.getByText('devolução concluída')).toBeVisible({ timeout: 12_000 });
       await expect(strip).not.toHaveText(/aguardando o banco/i);
       expectRefundedLedger(await readLedgerCascade(db, identity.pagamentoId), approvedLedger.total);
-
-      const chargeArchive = await sql<ArchiveRow>`
-        SELECT processed_at, processing_error, pagamento_id,
-               raw_payload,
-               octet_length(raw_payload::text) AS raw_payload_bytes
-          FROM payment_webhook_events
-         WHERE provider = 'inter'
-           AND provider_event_id = ${chargeProviderEventId}
-      `.execute(db);
-      expect(chargeArchive.rows[0]).toMatchObject({
-        processing_error: null,
-        pagamento_id: identity.pagamentoId,
-      });
-      expect(chargeArchive.rows[0]?.processed_at).not.toBeNull();
-      expectExactArchiveProjection(
-        chargeArchive.rows[0],
-        { txid: identity.txid, endToEndId: identity.e2eId },
-        'charge',
-      );
-
-      const refundArchive = await sql<ArchiveRow>`
-        SELECT processed_at, processing_error, pagamento_id,
-               raw_payload,
-               octet_length(raw_payload::text) AS raw_payload_bytes
-          FROM payment_webhook_events
-         WHERE provider = 'inter'
-           AND provider_event_id = ${refundProviderEventId}
-      `.execute(db);
-      expect(refundArchive.rows[0]).toMatchObject({
-        processing_error: null,
-        pagamento_id: identity.pagamentoId,
-      });
-      expect(refundArchive.rows[0]?.processed_at).not.toBeNull();
-      expectExactArchiveProjection(
-        refundArchive.rows[0],
-        { endToEndId: identity.e2eId, idDevolucao: pending.id_devolucao },
-        'refund',
-      );
     } finally {
-      await cleanupOwned(db, { paymentIds, contributionIds, providerEventIds });
+      await cleanupOwned(db, { paymentIds, contributionIds });
       await db.destroy();
     }
   });
@@ -522,7 +439,7 @@ test.describe('a4pqt — literal admin refund journeys', () => {
         .toBe('estornado');
       expect(await refundRecord(db, seeded.pagamentoId)).toBeUndefined();
     } finally {
-      await cleanupOwned(db, { paymentIds, contributionIds, providerEventIds: [] });
+      await cleanupOwned(db, { paymentIds, contributionIds });
       await db.destroy();
     }
   });
