@@ -28,10 +28,10 @@ function transacao(
   };
 }
 
-async function setup() {
+async function setup(overrides: Parameters<typeof makePagamento>[0] = {}) {
   const pagamentoRepository = new PagamentoRepositoryMemory();
   const pagamentoEventPublisher = new PagamentoEventPublisherMemory();
-  const pagamento = makePagamento({ id: randomUUID() as never, criadoEm: fixedDate });
+  const pagamento = makePagamento({ id: randomUUID() as never, criadoEm: fixedDate, ...overrides });
   await pagamentoRepository.save(pagamento);
   return {
     pagamento,
@@ -60,6 +60,7 @@ describe('provider-free verified payment transitions — CAS', () => {
     expect(first).toEqual(second);
     expect(first.status).toBe('aprovado');
     expect(first.intencao.e2eExternalRef).toBe(authoritative.id);
+    expect(first.intencao.balanceTransactionAvailableOn).toEqual(fixedDate);
     expect(pagamentoEventPublisher.getEventosPublicados().map((event) => event.tipo)).toEqual([
       'payment.approved',
     ]);
@@ -69,10 +70,11 @@ describe('provider-free verified payment transitions — CAS', () => {
       transacao: { ...authoritative },
     });
     expect(replay).toEqual(first);
+    expect(replay.intencao.balanceTransactionAvailableOn).toEqual(fixedDate);
     expect(pagamentoEventPublisher.getEventosPublicados()).toHaveLength(1);
   });
 
-  it('leaves the Inter e2e reference unset for a verified non-Inter transaction', async () => {
+  it('leaves Inter settlement metadata unset for a verified non-Inter transaction', async () => {
     const { pagamento, deps } = await setup();
     const authoritative: TransacaoExterna = {
       ...transacao('aprovado', 'pi_verified_stripe'),
@@ -85,6 +87,21 @@ describe('provider-free verified payment transitions — CAS', () => {
     });
 
     expect(approved.intencao.e2eExternalRef).toBeNull();
+    expect(approved.intencao.balanceTransactionAvailableOn).toBeNull();
+  });
+
+  it('preserves an existing Inter availability timestamp on verified approval', async () => {
+    const existingAvailableOn = new Date('2026-08-04T09:30:00.000Z');
+    const { pagamento, deps } = await setup({
+      balanceTransactionAvailableOn: existingAvailableOn,
+    });
+
+    const approved = await aprovarPagamentoComTransacaoVerificada(deps, {
+      idPagamento: pagamento.id,
+      transacao: transacao('aprovado'),
+    });
+
+    expect(approved.intencao.balanceTransactionAvailableOn).toEqual(existingAvailableOn);
   });
 
   it('rejects a malformed authoritative Inter e2e reference before persistence', async () => {

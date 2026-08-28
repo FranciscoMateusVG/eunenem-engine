@@ -36,6 +36,9 @@
  * confirmed. Non-magic tests seed 4200 so the scannable state holds still.
  */
 import { randomUUID } from 'node:crypto';
+import { sql } from 'kysely';
+// eslint-disable-next-line import/no-relative-packages
+import { PgBoss } from '../apps/eunenem-server/node_modules/pg-boss/dist/index.js';
 import { createDatabase } from '../src/adapters/database.js';
 import { expect, test } from './fixtures.js';
 import { buildSeedGiftRepos, seedAvailableGift } from './seed-helpers.js';
@@ -47,6 +50,7 @@ const DATABASE_URL =
 
 /** Dedicated COBRANCA_PIX_PROVIDER='fake' server (playwright.config.ts). */
 const PIX_SERVER = 'http://localhost:3004';
+const PIX_QUEUE = 'pix-cobranca-reconciliation-v1';
 
 /** PIX_COBRANCA_FAKE_MAGIC_CENTS.autoComplete — arms the fake's first-consult
  *  'concluida' the moment e2eMagicOutcomes gets wired in setup.ts. */
@@ -220,9 +224,8 @@ test.describe('kuw0o — PIX checkout routing (:3004, fake cobrança provider)',
     await expect(modal.getByRole('button', { name: 'copiado ♡' })).toBeVisible();
   });
 
-  test('magic 1337-cent charge confirms through the real webhook and persists before the UI succeeds', async ({
+  test('magic 1337-cent charge confirms through reconciliation and persists before the UI succeeds', async ({
     page,
-    request,
     seededData,
   }) => {
     // MAGIC total: the fake matches criarCobranca's amountCents — which is
@@ -233,6 +236,16 @@ test.describe('kuw0o — PIX checkout routing (:3004, fake cobrança provider)',
     // reports 'concluida' and the panel flips within one poll cycle. No
     // scannable-state assertions here — that surface is covered by the
     // non-magic test above precisely because this flip is instant.
+    // Keep the display-only poll from consuming the fake's first authoritative
+    // magic outcome. The production reconciliation worker must own that read.
+    await page.route(/obterStatusPix/, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([{ result: { data: { status: 'pendente' } } }]),
+      });
+    });
+
     const gift = await seedMagicGift(seededData, 1273);
     const modal = await openModalAndPickPix(page, PIX_SERVER, seededData.slug, gift.nome);
 
@@ -263,21 +276,60 @@ test.describe('kuw0o — PIX checkout routing (:3004, fake cobrança provider)',
       expect(pending.status).toBe('pendente');
       expect(pending.intencao_e2e_external_ref).toBeNull();
 
-      // The fake's deterministic e2e factory is part of the :3004 fixture.
-      // POST the real unsigned Inter route; it must bind the local txid,
-      // re-query the SAME fake instance, and run verified bookkeeping.
-      const e2eId = txid;
-      const webhook = await request.post(`${PIX_SERVER}/api/webhooks/inter/pix`, {
-        data: { pix: [{ txid, endToEndId: e2eId }] },
-      });
-      expect(webhook.status()).toBe(200);
-      expect(await webhook.text()).toBe('ok');
+      // Make this exact owned payment due, then dispatch the real pg-boss
+      // reconciliation queue. Three local servers share PostgreSQL, so retry
+      // completed no-op jobs until the :3004 fake-provider worker claims it.
+      await db
+        .updateTable('pagamentos')
+        .set({
+          intencao_expira_em: new Date(Date.now() - 60_000),
+          pix_reconciliacao_claimed_until: null,
+        })
+        .where('id', '=', pending.id)
+        .executeTakeFirstOrThrow();
 
+      const boss = new PgBoss(DATABASE_URL);
+      const jobIds: string[] = [];
+      boss.on('error', () => undefined);
+      await boss.start();
+      try {
+        for (let attempt = 0; attempt < 12; attempt += 1) {
+          const jobId = await boss.send(PIX_QUEUE, { schemaVersion: 1 });
+          expect(jobId, 'pg-boss must accept the reconciliation job').toBeTruthy();
+          jobIds.push(jobId as string);
+          await expect
+            .poll(async () => {
+              const job = await sql<{ state: string }>`
+                SELECT state FROM pgboss.job WHERE id = ${jobId}
+              `.execute(db);
+              return job.rows[0]?.state;
+            })
+            .toBe('completed');
+          const status = await db
+            .selectFrom('pagamentos')
+            .select('status')
+            .where('id', '=', pending.id)
+            .executeTakeFirstOrThrow();
+          if (status.status === 'aprovado') break;
+        }
+      } finally {
+        await boss.stop({ graceful: false });
+        for (const jobId of jobIds) {
+          await sql`DELETE FROM pgboss.job WHERE id = ${jobId} AND name = ${PIX_QUEUE}`.execute(db);
+        }
+      }
+
+      const e2eId = txid;
       await expect
         .poll(async () => {
           const row = await db
             .selectFrom('pagamentos')
-            .select(['status', 'intencao_e2e_external_ref', 'transacao_externa'])
+            .select([
+              'status',
+              'intencao_e2e_external_ref',
+              'intencao_balance_transaction_available_on',
+              'transacao_externa',
+            ])
             .where('id', '=', pending.id)
             .executeTakeFirstOrThrow();
           return row;
@@ -285,6 +337,7 @@ test.describe('kuw0o — PIX checkout routing (:3004, fake cobrança provider)',
         .toMatchObject({
           status: 'aprovado',
           intencao_e2e_external_ref: e2eId,
+          intencao_balance_transaction_available_on: expect.any(Date),
           transacao_externa: expect.objectContaining({
             id: e2eId,
             provedor: 'inter',
@@ -293,18 +346,9 @@ test.describe('kuw0o — PIX checkout routing (:3004, fake cobrança provider)',
           }),
         });
 
-      const archive = await db
-        .selectFrom('payment_webhook_events')
-        .select(['processed_at', 'processing_error', 'pagamento_id', 'raw_payload'])
-        .where('provider', '=', 'inter')
-        .where('provider_event_id', '=', `${txid}:${e2eId}`)
-        .executeTakeFirstOrThrow();
-      expect(archive).toMatchObject({
-        processing_error: null,
-        pagamento_id: pending.id,
-        raw_payload: { txid, endToEndId: e2eId },
-      });
-      expect(archive.processed_at).not.toBeNull();
+      // Resume the real UI poll only after durable approval. It now reads our
+      // DB terminal state and renders success without consuming provider state.
+      await page.unroute(/obterStatusPix/);
     } finally {
       await db.destroy();
     }
