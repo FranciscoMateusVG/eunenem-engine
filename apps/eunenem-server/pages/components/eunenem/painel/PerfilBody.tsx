@@ -883,6 +883,20 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
   const [teaDate, setTeaDate] = useState("");
   const [birthDate, setBirthDate] = useState("");
   const [story, setStory] = useState("");
+  // aperture-ohum1 — "papais" moved HERE from the guest-view TweaksPanel
+  // (now palette-only): the owner Perfil form is the event-identity edit
+  // surface. Editable field; hydrates from the WRITE campanha (see the
+  // personalização effect below).
+  const [papais, setPapais] = useState("");
+  // aperture-ohum1 — palette echo source. The painel never hydrates
+  // TweaksContext with the SAVED colors, so the old `tweaks.primary/accent`
+  // echo silently reset a TweaksPanel-saved palette to the demo defaults on
+  // every Perfil save. Echo the stored values instead.
+  const coresRef = useRef<{
+    corPrimaria: string | null;
+    corAcento: string | null;
+  }>({ corPrimaria: null, corAcento: null });
+  const personalizacaoHydrated = useRef(false);
 
   // aperture-w4afb (V4) — photo display URLs (seeded from getPerfil on hydrate;
   // set to the presigned publicUrl right after an upload). fotoKeys holds the
@@ -915,6 +929,15 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
   const perfilCampanhaQuery = trpc.perfilCampanha.get.useQuery(
     { idCampanha: idCampanha ?? "" },
     { enabled: Boolean(idCampanha), staleTime: 30_000 },
+  );
+  // aperture-ohum1 — the personalização half (papais + palette) lives on the
+  // WRITE campanha (rota ?? oldest). Separate query from perfilCampanhaQuery
+  // because bare URLs never enable that one (idCampanhaEscrita also resolves
+  // later, via auth.me); on /c/:id routes both share a cache key, so this
+  // costs no extra fetch there.
+  const personalizacaoQuery = trpc.perfilCampanha.get.useQuery(
+    { idCampanha: idCampanhaEscrita ?? "" },
+    { enabled: Boolean(idCampanhaEscrita), staleTime: 30_000 },
   );
   const hydrated = useRef(false);
 
@@ -969,6 +992,18 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
     creatorNameSaved.current = (d.creatorName ?? "").trim();
     hydrated.current = true;
   }, [perfilQuery.data, perfilCampanhaQuery.data, idCampanha, slug, setTweaks]);
+
+  // aperture-ohum1 — one-shot personalização hydrate (papais + palette),
+  // SEPARATE from the main hydrate: on bare URLs idCampanhaEscrita resolves
+  // only after auth.me, i.e. potentially after the main hydrate already ran.
+  // Local state stays authoritative after the first seed (same discipline).
+  useEffect(() => {
+    const p = personalizacaoQuery.data;
+    if (!p || personalizacaoHydrated.current) return;
+    setPapais(p.papais ?? "");
+    coresRef.current = { corPrimaria: p.corPrimaria, corAcento: p.corAcento };
+    personalizacaoHydrated.current = true;
+  }, [personalizacaoQuery.data]);
 
   const atualizar = trpc.perfil.atualizar.useMutation({
     onSuccess: (updated) => {
@@ -1052,13 +1087,15 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
       fotoPerfilKey: fotoKeys.current.perfil,
       fotoCapaKey: fotoKeys.current.capa,
       fotoHistoriaKey: fotoKeys.current.historia,
-      // aperture — TweaksPanel fields this form doesn't edit. Echoed from
-      // TweaksContext (hydrated from the same perfilCampanha.get source) so
-      // a PerfilBody save never wipes a TweaksPanel save, matching the
-      // whole-content-replacement contract (aperture-7sb1h).
-      papais: tweaks.parents.trim() || null,
-      corPrimaria: tweaks.primary || null,
-      corAcento: tweaks.accent || null,
+      // aperture-ohum1 — papais is a real form field here now (the guest-view
+      // TweaksPanel went palette-only); the palette is echoed from the STORED
+      // values (coresRef, hydrated from perfilCampanha.get) so a Perfil save
+      // never wipes a TweaksPanel palette save — the old tweaks.* echo sent
+      // the never-hydrated demo defaults (whole-content-replacement contract,
+      // aperture-7sb1h).
+      papais: papais.trim() || null,
+      corPrimaria: coresRef.current.corPrimaria,
+      corAcento: coresRef.current.corAcento,
     };
   };
 
@@ -1068,7 +1105,36 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
   // what follows. aperture-qmaoi — target is now a param (rota ?? oldest), so
   // bare-URL saves address the default campanha too.
   const salvarCampanha = async (target: string) => {
+    // aperture-ohum1 — never blind-write the personalização half: if its
+    // hydrate hasn't landed yet (save racing auth.me on a bare URL), read the
+    // stored values first — same fetch-then-merge discipline as TweaksPanel's
+    // onSave. Seeds state/refs so campanhaPayload() below echoes them.
+    if (!personalizacaoHydrated.current) {
+      const atual = await utils.perfilCampanha.get.fetch({ idCampanha: target });
+      setPapais(atual.papais ?? "");
+      coresRef.current = {
+        corPrimaria: atual.corPrimaria,
+        corAcento: atual.corAcento,
+      };
+      personalizacaoHydrated.current = true;
+      // setPapais is async — this save must echo the stored value directly.
+      const fresh = await atualizarCampanha.mutateAsync({
+        ...campanhaPayload(target),
+        papais: atual.papais,
+      });
+      finalizarSalvarCampanha(target, fresh);
+      return;
+    }
     const fresh = await atualizarCampanha.mutateAsync(campanhaPayload(target));
+    finalizarSalvarCampanha(target, fresh);
+  };
+
+  // Shared post-save re-seed (both salvarCampanha branches): keys/urls/
+  // genero/tweaks/personalização from the fresh DTO, then cache refresh.
+  const finalizarSalvarCampanha = (
+    target: string,
+    fresh: Awaited<ReturnType<typeof atualizarCampanha.mutateAsync>>,
+  ) => {
     fotoKeys.current = {
       perfil: fresh.fotoPerfilKey,
       capa: fresh.fotoCapaKey,
@@ -1081,6 +1147,13 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
     });
     setGenero(fresh.genero ?? "");
     setTweaks({ babyName: fresh.nomeBebe ?? babyName.trim() });
+    // aperture-ohum1 — keep the personalização half fresh from the round-trip
+    // DTO (aperture-7sb1h discipline).
+    setPapais(fresh.papais ?? "");
+    coresRef.current = {
+      corPrimaria: fresh.corPrimaria,
+      corAcento: fresh.corAcento,
+    };
     utils.perfilCampanha.get.setData({ idCampanha: target }, fresh);
     // aperture-qmaoi — when the target is the DEFAULT campanha, the cached
     // perfil.getPerfil DTO (whose shim reads that same campanha) is now stale
@@ -1401,6 +1474,20 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
             value={creatorName}
             placeholder="como te chamam"
             onChange={(e) => setCreatorName(e.target.value)}
+          />
+        </Field>
+
+        {/* aperture-ohum1 — moved here from the guest-view TweaksPanel (now
+            palette-only): this form is the identity edit surface. */}
+        <Field label="papais (exibidos na página)" htmlFor="perfil-papais">
+          <input
+            id="perfil-papais"
+            className="perfil-input"
+            type="text"
+            value={papais}
+            maxLength={120}
+            placeholder="ex: Mariana & Rodrigo"
+            onChange={(e) => setPapais(e.target.value)}
           />
         </Field>
 
