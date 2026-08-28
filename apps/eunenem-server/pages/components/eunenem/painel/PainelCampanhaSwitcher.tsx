@@ -17,6 +17,7 @@
 //   • quantidadeMimos === null HIDES the mimo line (contract gotcha, PR
 //     #320): the sub-line falls back to nomeBebe, then to nothing.
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { useCampanhaEscrita } from "@/lib/campanha-escrita";
 import { useCampanhasList } from "@/lib/campanhas";
@@ -30,22 +31,57 @@ const TINTS = [
   "var(--blue-soft)",
 ] as const;
 
+/** Menu panel width — must match .painel-switcher-menu's CSS width. */
+const MENU_WIDTH = 288;
+/** Minimum gutter between the fixed-position menu and the viewport edge. */
+const MENU_GUTTER = 8;
+
 export function PainelCampanhaSwitcher({ slug }: { slug: string }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  // aperture-acr3t — portal coords for the body-portalled menu. Below the
+  // 900px breakpoint .painel-topbar-nav is a horizontal scroll strip
+  // (overflow-x: auto), and per the CSS spec a non-visible overflow-x forces
+  // overflow-y to `auto` too — so the nav clipped the in-tree absolute menu
+  // into invisibility on mobile (tap toggled `open`; nothing painted).
+  // Portalling to <body> with position: fixed sidesteps every ancestor
+  // overflow/mask, same idiom as PresentesBody's FilterButton
+  // (aperture-sm7uc). Coords anchor to the trigger, clamped so the panel
+  // never hangs past the viewport edge on narrow screens.
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
   const listQ = useCampanhasList();
   // The campanha this painel is showing: rota ?? session default (same
   // resolution as the write path — here it only drives the "você tá aqui"
   // marker, never a payload).
   const idCampanhaAtual = useCampanhaEscrita();
 
-  // Close on click-outside + Escape (returns focus to the trigger on Esc).
+  // Place the portalled menu + close on click-outside + Escape (returns
+  // focus to the trigger on Esc).
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setCoords(null);
+      return;
+    }
+    const place = () => {
+      const r = rootRef.current?.getBoundingClientRect();
+      if (!r) return;
+      setCoords({
+        top: r.bottom + 9,
+        left: Math.max(
+          MENU_GUTTER,
+          Math.min(r.left, window.innerWidth - MENU_WIDTH - MENU_GUTTER),
+        ),
+      });
+    };
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
     const onPointerDown = (e: PointerEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      const target = e.target as Node;
+      if (rootRef.current?.contains(target)) return;
+      if (menuRef.current?.contains(target)) return;
+      setOpen(false);
     };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -56,6 +92,8 @@ export function PainelCampanhaSwitcher({ slug }: { slug: string }) {
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
     return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
       document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
     };
@@ -80,8 +118,17 @@ export function PainelCampanhaSwitcher({ slug }: { slug: string }) {
         </span>
       </button>
 
-      {open && (
-        <div className="painel-switcher-menu" role="menu" aria-label="Acessar uma lista">
+      {open &&
+        coords !== null &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className="painel-switcher-menu"
+            role="menu"
+            aria-label="Acessar uma lista"
+            style={{ position: "fixed", top: coords.top, left: coords.left }}
+          >
           <div className="painel-switcher-head" aria-hidden="true">
             acessar uma lista ♡
           </div>
@@ -135,8 +182,9 @@ export function PainelCampanhaSwitcher({ slug }: { slug: string }) {
             ver todas as listas
             <span aria-hidden="true"> →</span>
           </a>
-        </div>
-      )}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

@@ -3616,7 +3616,6 @@ html {
 .painel-topbar-nav {
   flex: 1 1 auto;
   display: flex;
-  justify-content: center;
   min-width: 0;
   /* Below the 900px desktop breakpoint the nav becomes a horizontally
    * scrollable strip so the chips remain reachable without forcing a
@@ -3632,7 +3631,14 @@ html {
   display: flex;
   align-items: center;
   gap: 4px;
-  margin: 0;
+  /* aperture-acr3t — safe centering. The old `justify-content: center`
+   * on the scroll container clipped the strip's LEFT side into an
+   * unreachable zone once the chips overflowed (centered overflow spills
+   * both ways; scroll can only reach the right spill), which cut the
+   * switcher trigger's "ir para" eyebrow off under the brand on mobile.
+   * Auto inline margins center the list when it fits and collapse to 0
+   * when it overflows, keeping the whole strip scroll-reachable. */
+  margin: 0 auto;
   padding: 0;
   list-style: none;
 }
@@ -7512,7 +7518,11 @@ button.painel-topbar-link:hover {
 .painel-switcher-trigger {
   cursor: pointer;
   display: flex;
-  align-items: center;
+  /* aperture-acr3t — baseline, not center: the 9px uppercase eyebrow and
+   * the 17px Patrick Hand label have very different line boxes, so
+   * box-centering floated the eyebrow visibly high against the label.
+   * Sharing a text baseline is what reads as "aligned" here. */
+  align-items: baseline;
   gap: 9px;
   background: var(--paper);
   border: 1px solid var(--line);
@@ -7536,6 +7546,10 @@ button.painel-topbar-link:hover {
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--ink-mute);
+  /* aperture-acr3t — the mobile scroll-strip nav squeezes flex children;
+   * without nowrap "ir para" wrapped onto two 9px lines and the whole
+   * trigger read scrambled. The label already declares nowrap. */
+  white-space: nowrap;
 }
 
 .painel-switcher-label {
@@ -7566,9 +7580,11 @@ button.painel-topbar-link:hover {
 }
 
 .painel-switcher-menu {
-  position: absolute;
-  top: calc(100% + 9px);
-  left: 0;
+  /* aperture-acr3t — the menu is portalled to <body> with position: fixed
+   * coords set inline by PainelCampanhaSwitcher (the in-tree absolute menu
+   * was clipped by .painel-topbar-nav's mobile overflow-x: auto scroll
+   * strip, which forces overflow-y to auto and clips both axes). Only the
+   * panel's visuals live here; positioning is the component's job. */
   width: 288px;
   background: var(--paper);
   border: 1px solid var(--line);
