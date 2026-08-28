@@ -50,8 +50,9 @@ export const PRESENCA_META: Record<StatusPresencaConvidado, { label: string; col
 
 // aperture-z6vks — resolves the ROUTE campanha internally so /c/:idCampanha
 // shows THAT campanha's guest list. Bare URL → no input → server default.
-export function useListaDeConvidadosData() {
-  const idCampanha = useCampanhaRota();
+export function useListaDeConvidadosData(idCampanhaOverride?: string) {
+  const idCampanhaRota = useCampanhaRota();
+  const idCampanha = idCampanhaOverride ?? idCampanhaRota;
   return trpc.eventoListaDeConvidados.get.useQuery(idCampanha ? { idCampanha } : undefined);
 }
 
