@@ -88,6 +88,7 @@ export type ExtratoRowDTO = {
   idLancamento: string;
   idPagamento: string;
   contribuinteNome: string | null;
+  metodo: "pix" | "credit_card" | null;
   amountCents: number;
   liberacao: ExtratoLiberacao;
   timestamp: string;
@@ -248,6 +249,7 @@ export function useStubExtratoList(input: {
               idLancamento: r.idLancamento,
               idPagamento: r.idPagamento,
               contribuinteNome: r.contribuinteNome,
+              metodo: r.metodo,
               amountCents: r.amountCents,
               liberacao: r.liberacao,
               timestamp: r.timestamp,

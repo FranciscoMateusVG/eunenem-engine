@@ -22,6 +22,7 @@ import type { Observability } from '../../observability/observability.js';
 import {
   aprovarPagamento,
   aprovarPagamentoComTransacaoVerificada,
+  type PixReceiptNotifier,
 } from '../pagamentos/aprovar-pagamento.js';
 import { registrarEfeitosFinanceirosPagamentoAprovado } from '../pagamentos/financeiro/registrar-efeitos-financeiros-pagamento-aprovado.js';
 
@@ -61,6 +62,7 @@ export interface FinalizarPagamentoAprovadoDeps {
   readonly livroFinanceiroRepository: LivroFinanceiroRepository;
   readonly clock: () => Date;
   readonly observability: Observability;
+  readonly pixReceiptNotifier?: PixReceiptNotifier;
 }
 
 export type FinalizarPagamentoAprovadoComTransacaoVerificadaDeps = Omit<
@@ -112,6 +114,7 @@ export async function finalizarPagamentoAprovado(
         pagamentoEventPublisher: deps.pagamentoEventPublisher,
         clock: deps.clock,
         observability: deps.observability,
+        ...(deps.pixReceiptNotifier ? { pixReceiptNotifier: deps.pixReceiptNotifier } : {}),
       },
       { idPagamento },
     ),
@@ -141,6 +144,7 @@ export async function finalizarPagamentoAprovadoComTransacaoVerificada(
           pagamentoEventPublisher: deps.pagamentoEventPublisher,
           clock: deps.clock,
           observability: deps.observability,
+          ...(deps.pixReceiptNotifier ? { pixReceiptNotifier: deps.pixReceiptNotifier } : {}),
         },
         { idPagamento, transacao },
       ),

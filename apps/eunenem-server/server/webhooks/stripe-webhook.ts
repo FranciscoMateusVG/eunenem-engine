@@ -472,6 +472,7 @@ export async function dispatchVerifiedStripeEvent(
             livroFinanceiroRepository: deps.livroFinanceiroRepository,
             clock: deps.clock,
             observability: deps.observability,
+            pixReceiptNotifier: deps.pixReceiptNotifier,
           },
           {
             idPagamento: pagamento.id,
@@ -755,6 +756,7 @@ export async function dispatchVerifiedStripeEvent(
           livroFinanceiroRepository: deps.livroFinanceiroRepository,
           clock: deps.clock,
           observability: deps.observability,
+          pixReceiptNotifier: deps.pixReceiptNotifier,
         },
         { idPagamento: pagamento.id },
       );

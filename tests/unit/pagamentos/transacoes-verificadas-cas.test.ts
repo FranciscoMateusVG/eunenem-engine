@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { PagamentoEventPublisherMemory } from '../../../src/adapters/pagamentos/event-publisher.memory.js';
 import { PagamentoRepositoryMemory } from '../../../src/adapters/pagamentos/repository.memory.js';
 import type { TransacaoExterna } from '../../../src/domain/pagamentos/entities/pagamento.js';
@@ -43,15 +43,19 @@ async function setup(overrides: Parameters<typeof makePagamento>[0] = {}) {
 
 describe('provider-free verified payment transitions — CAS', () => {
   it('publishes approval once when concurrent exact deliveries race', async () => {
-    const { pagamento, pagamentoEventPublisher, deps } = await setup();
+    const { pagamento, pagamentoEventPublisher, deps } = await setup({
+      contribuinte: { nome: 'Convidada', email: 'payer@example.com' },
+    });
+    const pixReceiptNotifier = vi.fn(async () => undefined);
+    const depsWithReceipt = { ...deps, pixReceiptNotifier };
     const authoritative = transacao('aprovado');
 
     const [first, second] = await Promise.all([
-      aprovarPagamentoComTransacaoVerificada(deps, {
+      aprovarPagamentoComTransacaoVerificada(depsWithReceipt, {
         idPagamento: pagamento.id,
         transacao: authoritative,
       }),
-      aprovarPagamentoComTransacaoVerificada(deps, {
+      aprovarPagamentoComTransacaoVerificada(depsWithReceipt, {
         idPagamento: pagamento.id,
         transacao: { ...authoritative },
       }),
@@ -64,14 +68,57 @@ describe('provider-free verified payment transitions — CAS', () => {
     expect(pagamentoEventPublisher.getEventosPublicados().map((event) => event.tipo)).toEqual([
       'payment.approved',
     ]);
+    expect(pixReceiptNotifier).toHaveBeenCalledOnce();
 
-    const replay = await aprovarPagamentoComTransacaoVerificada(deps, {
+    const replay = await aprovarPagamentoComTransacaoVerificada(depsWithReceipt, {
       idPagamento: pagamento.id,
       transacao: { ...authoritative },
     });
     expect(replay).toEqual(first);
     expect(replay.intencao.balanceTransactionAvailableOn).toEqual(fixedDate);
     expect(pagamentoEventPublisher.getEventosPublicados()).toHaveLength(1);
+    expect(pixReceiptNotifier).toHaveBeenCalledOnce();
+  });
+
+  it('does not notify a verified non-PIX approval', async () => {
+    const { pagamento, deps } = await setup({
+      metodo: 'credit_card',
+      contribuinte: { nome: 'Convidada', email: 'payer@example.com' },
+    });
+    const pixReceiptNotifier = vi.fn(async () => undefined);
+
+    await aprovarPagamentoComTransacaoVerificada(
+      { ...deps, pixReceiptNotifier },
+      {
+        idPagamento: pagamento.id,
+        transacao: {
+          ...transacao('aprovado', 'pi_verified_stripe'),
+          provedor: 'stripe',
+          amountCents: pagamento.intencao.composicaoValoresAggregate.totalPaidCents,
+        },
+      },
+    );
+
+    expect(pixReceiptNotifier).not.toHaveBeenCalled();
+  });
+
+  it('keeps an authoritative PIX approval when receipt delivery fails', async () => {
+    const { pagamento, pagamentoRepository, deps } = await setup({
+      contribuinte: { nome: 'Convidada', email: 'payer@example.com' },
+    });
+    const pixReceiptNotifier = vi.fn(async () => {
+      throw new Error('smtp unavailable');
+    });
+
+    await expect(
+      aprovarPagamentoComTransacaoVerificada(
+        { ...deps, pixReceiptNotifier },
+        { idPagamento: pagamento.id, transacao: transacao('aprovado') },
+      ),
+    ).resolves.toMatchObject({ status: 'aprovado' });
+
+    expect((await pagamentoRepository.findById(pagamento.id))?.status).toBe('aprovado');
+    expect(pixReceiptNotifier).toHaveBeenCalledOnce();
   });
 
   it('leaves Inter settlement metadata unset for a verified non-Inter transaction', async () => {

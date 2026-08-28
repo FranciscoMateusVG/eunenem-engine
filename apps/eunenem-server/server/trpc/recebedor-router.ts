@@ -171,6 +171,8 @@ const ExtratoRowDTOSchema = z.object({
    * Null on anonymous OR pre-Phase-3 rows.
    */
   contribuinteNome: z.string().nullable(),
+  /** Payment rail used by the payer. */
+  metodo: z.enum(['pix', 'credit_card']).nullable(),
   /**
    * aperture-k6fbz — the gift (contribuição) name. Resolved via
    * lancamento → pagamento → contribuição lookup. Surfaces as the
@@ -698,6 +700,7 @@ const extratoRouter = t.router({
           idLancamento: s.lancamento.id,
           idPagamento: s.lancamento.idPagamento,
           contribuinteNome: s.pagamento?.intencao.contribuinte?.nome ?? null,
+          metodo: s.pagamento?.intencao.metodo ?? null,
           // aperture-k6fbz: empty string + null fallback when the
           // contribuição is gone or unresolvable. UI handles either
           // with a neutral "lançamento" affordance.

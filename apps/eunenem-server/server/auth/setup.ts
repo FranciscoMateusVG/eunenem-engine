@@ -42,6 +42,7 @@ import {
   type PagamentoEventPublisher,
   PagamentoEventPublisherMemory,
   type PagamentoProvider,
+  type Pagamento,
   PagamentoProviderFake,
   PagamentoProviderStripe,
   type PagamentoRepository,
@@ -80,6 +81,7 @@ import {
 } from '../../../../src/index.js';
 import { PgBoss } from 'pg-boss';
 import { renderMagicLinkEmail } from './magic-link-email.js';
+import { renderPixPaymentReceiptEmail } from './pix-payment-receipt-email.js';
 import { parseAdminAllowedEmails } from './admin-allowlist.js';
 import { RepasseJobEnqueuerPgBoss } from '../jobs/repasse-enqueuer.pgboss.js';
 import { noopTracer } from '../../../../src/observability/tracer.js';
@@ -168,6 +170,7 @@ export interface ServerDeps {
   readonly pagamentoProvider: PagamentoProvider;
   readonly checkoutSessionProvider: CheckoutSessionProvider;
   readonly pagamentoEventPublisher: PagamentoEventPublisher;
+  readonly pixReceiptNotifier: (pagamento: Pagamento) => Promise<void>;
   /**
    * Inter PIX-in charge/reconciliation rail. ALWAYS bound (non-optional).
    * `COBRANCA_PIX_PROVIDER` selects the rail used for NEW checkouts, but does
@@ -927,6 +930,10 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
         secure: env.SMTP_SECURE,
       })
     : new EmailTransportNoop(observability.logger);
+  const pixReceiptNotifier = async (pagamento: Pagamento): Promise<void> => {
+    const message = renderPixPaymentReceiptEmail(pagamento);
+    if (message !== null) await emailTransport.enviar(message);
+  };
 
   const authConfig: CriarAuthConfig = {
     secret: env.BETTER_AUTH_SECRET,
@@ -1186,6 +1193,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     pagamentoProvider,
     checkoutSessionProvider,
     pagamentoEventPublisher,
+    pixReceiptNotifier,
     pixCobrancaProvider,
     cobrancaPixProviderKind: env.COBRANCA_PIX_PROVIDER,
     pixCobrancaDevolucaoRepository,

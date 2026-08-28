@@ -28,6 +28,7 @@ export interface AprovarPagamentoDeps {
   readonly pagamentoEventPublisher: PagamentoEventPublisher;
   readonly clock: () => Date;
   readonly observability: Observability;
+  readonly pixReceiptNotifier?: PixReceiptNotifier;
 }
 
 export interface AprovarPagamentoComTransacaoVerificadaDeps {
@@ -35,7 +36,14 @@ export interface AprovarPagamentoComTransacaoVerificadaDeps {
   readonly pagamentoEventPublisher: PagamentoEventPublisher;
   readonly clock: () => Date;
   readonly observability: Observability;
+  readonly pixReceiptNotifier?: PixReceiptNotifier;
 }
+
+/**
+ * Outbound receipt seam. It is invoked only by the approval CAS winner, so
+ * webhook/reconciler replay cannot send the same PIX receipt twice.
+ */
+export type PixReceiptNotifier = (pagamento: Pagamento) => Promise<void>;
 
 export interface AprovarPagamentoComTransacaoVerificadaInput extends ComandoPagamentoInput {
   /**
@@ -55,8 +63,14 @@ export async function aprovarPagamento(
   deps: AprovarPagamentoDeps,
   input: ComandoPagamentoInput,
 ): Promise<Pagamento> {
-  const { pagamentoRepository, pagamentoProvider, pagamentoEventPublisher, clock, observability } =
-    deps;
+  const {
+    pagamentoRepository,
+    pagamentoProvider,
+    pagamentoEventPublisher,
+    clock,
+    observability,
+    pixReceiptNotifier,
+  } = deps;
   const { tracer } = observability;
 
   return tracer.startActiveSpan('aprovarPagamento', async (span) => {
@@ -91,7 +105,13 @@ export async function aprovarPagamento(
       });
 
       const aprovado = await aplicarTransacaoVerificada(
-        { pagamentoRepository, pagamentoEventPublisher, clock, observability },
+        {
+          pagamentoRepository,
+          pagamentoEventPublisher,
+          clock,
+          observability,
+          ...(pixReceiptNotifier ? { pixReceiptNotifier } : {}),
+        },
         pagamento,
         transacao,
       );
@@ -260,6 +280,19 @@ async function publicarAprovacao(
       ocorridoEm,
     }),
   );
+
+  if (aprovado.intencao.metodo === 'pix' && aprovado.intencao.contribuinte !== null) {
+    try {
+      await deps.pixReceiptNotifier?.(aprovado);
+    } catch (error) {
+      // Payment settlement is authoritative and must not be rolled back by a
+      // downstream SMTP outage. No recipient is logged (no email oracle/PII).
+      deps.observability.logger.error('pagamento.comprovante_pix_email_falhou', {
+        idPagamento: aprovado.id,
+        errorName: error instanceof Error ? error.name : 'unknown',
+      });
+    }
+  }
 
   deps.observability.logger.info('pagamento.aprovado', {
     idPagamento: aprovado.id,
