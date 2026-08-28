@@ -29,7 +29,13 @@ import {
 } from "@/lib/mocks/convite";
 import { TEMPLATES, type Template } from "@/lib/mocks/templates";
 
-import { InvitePreview, conviteFieldErrors } from "./ConviteBody";
+import {
+  FieldError,
+  InvitePreview,
+  STEP_REQUIRED_FIELDS,
+  conviteFieldErrors,
+  type ConviteFieldErrors,
+} from "./ConviteBody";
 
 // aperture-zlrd2 — Mobile-specific convites wizard.
 //
@@ -96,6 +102,9 @@ interface StepProps {
   update: <K extends keyof ConviteState>(k: K, v: ConviteState[K]) => void;
   /** aperture-qa2m3 — atomic multi-field patch for the shared template cascade. */
   updateMany: (patch: Partial<ConviteState>) => void;
+  /** aperture-n06ca — current step's required-field errors, populated only
+   *  after a blocked "próximo passo" attempt (mirrors desktop's StepViewProps). */
+  errors?: ConviteFieldErrors;
 }
 
 // ─── shell ──────────────────────────────────────────────────────────
@@ -107,6 +116,9 @@ export function MobileConviteBody({ slug }: PainelSectionBodyProps) {
   const [state, setState] = useState<ConviteState>({ ...EMPTY_STATE });
   const [step, setStep] = useState(0);
   const [previewExpanded, setPreviewExpanded] = useState(false);
+  // aperture-n06ca — flips true on a blocked advance/save so inline required-
+  // field errors only appear after an attempt (mirrors desktop's showErrors).
+  const [showErrors, setShowErrors] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
   const conviteQuery = useConviteData();
   const salvarConvite = useSalvarConvite();
@@ -131,14 +143,33 @@ export function MobileConviteBody({ slug }: PainelSectionBodyProps) {
   const isSaving = salvarConvite.isPending;
   const isSending = isSaving || isSharing;
 
+  // aperture-n06ca — per-step gate mirroring desktop: "próximo passo" blocks
+  // while the current step's required fields (quem: babyName/host, quando:
+  // date/time) are empty, surfacing inline errors + a toast.
+  const allErrors = conviteFieldErrors(state);
+  const curErrors: ConviteFieldErrors = Object.fromEntries(
+    STEP_REQUIRED_FIELDS[cur.id]
+      .filter((f) => allErrors[f])
+      .map((f) => [f, allErrors[f]!]),
+  );
+
   const goPrev = () => setStep((s) => Math.max(0, s - 1));
-  const goNext = () => setStep((s) => Math.min(STEPS.length - 1, s + 1));
-  // aperture-rw880 — block save/send when required fields (nomeExibido=babyName,
-  // remetente=host) are empty, with a friendly toast instead of the raw
-  // backend 400. Date/time (dataHoraIso) are optional.
+  const goNext = () => {
+    if (Object.keys(curErrors).length > 0) {
+      setShowErrors(true);
+      toast.error("preencha os campos obrigatórios deste passo ♡");
+      return;
+    }
+    setShowErrors(false);
+    setStep((s) => Math.min(STEPS.length - 1, s + 1));
+  };
+  // aperture-rw880 — block save/send when required fields are empty, with a
+  // friendly toast instead of the raw backend 400. aperture-n06ca — date/time
+  // (dataHoraIso) are required now, same as babyName/host.
   const guardComplete = (): boolean => {
     const errs = conviteFieldErrors(state);
     if (Object.keys(errs).length > 0) {
+      setShowErrors(true);
       toast.error("faltou preencher alguns campos ♡", {
         description: Object.values(errs).join(" · "),
       });
@@ -199,7 +230,12 @@ export function MobileConviteBody({ slug }: PainelSectionBodyProps) {
     }
   };
 
-  const stepProps: StepProps = { state, update, updateMany };
+  const stepProps: StepProps = {
+    state,
+    update,
+    updateMany,
+    errors: showErrors ? curErrors : undefined,
+  };
 
   return (
     <div className="mcv-wiz">
@@ -688,7 +724,7 @@ function MStepQuem({ state, update }: StepProps) {
 
 // ─── step: quando ────────────────────────────────────────────────────
 
-function MStepQuando({ state, update }: StepProps) {
+function MStepQuando({ state, update, errors }: StepProps) {
   return (
     <div className="mcv-stack">
       <div>
@@ -715,27 +751,27 @@ function MStepQuando({ state, update }: StepProps) {
             );
           })}
         </div>
-        <div className="mcv-note">
-          {state.mode === "online"
-            ? "✨ data e hora são opcionais."
-            : "✨ data e hora são opcionais — você pode preencher depois."}
-        </div>
       </div>
 
+      {/* aperture-n06ca — date + time are required now: the "são opcionais /
+          preencher depois" note is gone and the labels dropped "(opcional)". */}
       <div className="mcv-date-row">
         <div>
-          <label className="mcv-label" htmlFor="mcv-date">data (opcional)</label>
+          <label className="mcv-label" htmlFor="mcv-date">data</label>
           <input
             id="mcv-date"
             className="mcv-field"
             type="date"
             value={state.date}
             onChange={(e) => update("date", e.target.value)}
+            aria-invalid={errors?.date ? true : undefined}
+            style={errors?.date ? { borderColor: "#c2566f" } : undefined}
           />
+          <FieldError msg={errors?.date} />
         </div>
         <div>
           <label className="mcv-label mcv-label-tilt" htmlFor="mcv-time">
-            horário (opcional)
+            horário
           </label>
           <input
             id="mcv-time"
@@ -743,7 +779,10 @@ function MStepQuando({ state, update }: StepProps) {
             type="time"
             value={state.time}
             onChange={(e) => update("time", e.target.value)}
+            aria-invalid={errors?.time ? true : undefined}
+            style={errors?.time ? { borderColor: "#c2566f" } : undefined}
           />
+          <FieldError msg={errors?.time} />
         </div>
       </div>
 

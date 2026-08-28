@@ -13,9 +13,8 @@
  *     date (perfilCampanha.get.dataEvento) equals the convite date
  *     (eventoConvite.get evento.dataHoraIso) — and same for tipoEvento;
  *   - domain-strict pin: eventoConvite.save still REJECTS a null/absent
- *     modalidade. (dataHoraIso null is ACCEPTED on save — that is the
- *     PRE-EXISTING 20260708_035 behavior "date/time optional on the
- *     convite"; see the DEVIATION note on the test below.)
+ *     modalidade. (aperture-n06ca: dataHoraIso is now REQUIRED on save too —
+ *     null and the ":01 seconds" no-time sentinel are both rejected.)
  *
  * Rig: self-contained copy of the buildRig convention from
  * aphk8-perfil-campanha.test.ts (mutable clock via advanceClock).
@@ -325,17 +324,32 @@ describe('mu1v9 — eventos as single source for tipo_evento + date', () => {
       caller.eventoConvite.save({ idCampanha, ...semModalidade } as any),
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
 
-    // DEVIATION NOTE (flagged in the PR): the mu1v9 spec asked to pin save
-    // rejecting null dataHora as well, but dataHoraIso has been NULLABLE on
-    // save since 20260708_035 ("date/time optional while creating/editing a
-    // convite") — regressing that would break the shipped convite editor.
-    // Pin the ACTUAL contract: null dataHoraIso is accepted, modalidade is not.
+    // aperture-n06ca — date/time are REQUIRED on save now (operator decision:
+    // invites must carry a real date + time). null dataHoraIso → BAD_REQUEST,
+    // and so is the ":01 seconds" no-time-chosen sentinel (see
+    // NO_TIME_CHOSEN_SECONDS in apps/eunenem-server/pages/lib/convite-mapper.ts).
+    await expect(
+      caller.eventoConvite.save({
+        idCampanha,
+        ...CONVITE_INPUT,
+        // biome-ignore lint/suspicious/noExplicitAny: invalid input on purpose
+        dataHoraIso: null as any,
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(
+      caller.eventoConvite.save({
+        idCampanha,
+        ...CONVITE_INPUT,
+        dataHoraIso: '2026-08-15T00:00:01.000Z',
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+
     const saved = await caller.eventoConvite.save({
       idCampanha,
       ...CONVITE_INPUT,
-      dataHoraIso: null,
+      dataHoraIso: '2026-08-15T16:00:00.000Z',
     });
-    expect(saved.evento?.dataHoraIso).toBeNull();
+    expect(saved.evento?.dataHoraIso).toBe('2026-08-15T16:00:00.000Z');
     expect(saved.evento?.modalidade).toBe('presencial');
   });
 });

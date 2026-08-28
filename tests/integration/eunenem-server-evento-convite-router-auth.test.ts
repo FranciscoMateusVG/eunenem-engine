@@ -213,14 +213,16 @@ describe('eventoConvite router (edicao autenticada + preview publico)', () => {
     expect(preview.convite?.modelo).toBe('scrapbook');
   });
 
-  it('salva um convite sem dataHoraIso (data/hora indefinidas)', async () => {
+  // aperture-n06ca — date/time are REQUIRED on save now: null dataHoraIso and
+  // the ":01 seconds" no-time-chosen sentinel (NO_TIME_CHOSEN_SECONDS in
+  // apps/eunenem-server/pages/lib/convite-mapper.ts) are both BAD_REQUEST.
+  it('rejeita salvar um convite sem dataHoraIso (data/hora obrigatorias)', async () => {
     const rig = await buildRig();
 
-    const created = await rig.callerAuth.eventoConvite.save({
+    const basePayload = {
       idCampanha: rig.idCampanha,
       tipoEvento: 'cha-bebe',
       modalidade: 'presencial',
-      dataHoraIso: null,
       endereco: 'Rua das Acacias, 142',
       remetente: 'Mariana e Tiago',
       nomeExibido: 'Maria Helena',
@@ -228,14 +230,25 @@ describe('eventoConvite router (edicao autenticada + preview publico)', () => {
       paleta: 'lilas',
       fonte: 'patrick',
       modelo: 'scrapbook',
-    });
+    } as const;
 
-    expect(created.evento?.dataHoraIso).toBeNull();
+    await expect(
+      rig.callerAuth.eventoConvite.save({
+        ...basePayload,
+        // biome-ignore lint/suspicious/noExplicitAny: invalid input on purpose
+        dataHoraIso: null as any,
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
 
+    await expect(
+      rig.callerAuth.eventoConvite.save({
+        ...basePayload,
+        dataHoraIso: '2026-08-15T00:00:01.000Z',
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+
+    // Nothing was persisted by the rejected saves.
     const reloadedWizard = await rig.callerAuth.eventoConvite.get();
-    expect(reloadedWizard.evento?.dataHoraIso).toBeNull();
-
-    const preview = await rig.callerAnon.eventoConvite.getPreview({ slug: rig.slug });
-    expect(preview.evento?.dataHoraIso).toBeNull();
+    expect(reloadedWizard.evento).toBeNull();
   });
 });

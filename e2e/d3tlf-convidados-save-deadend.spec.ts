@@ -28,6 +28,10 @@ import { expect, test } from './fixtures';
 // Wizard-mirrored inline error copy (ConviteBody.conviteFieldErrors).
 const ERR_BABY = 'preencha o nome do bebê ♡';
 const ERR_HOST = 'diga de quem vem o convite ♡';
+// aperture-n06ca — date/time are required now; the compositor renders both
+// inputs, so a blocked save stays fixable from this panel.
+const ERR_DATE = 'escolha a data do evento ♡';
+const ERR_TIME = 'escolha o horário do evento ♡';
 // The backend zod message that used to leak through as a dead end.
 const DEADEND_BACKEND_MSG = 'Remetente do convite não pode ser vazio';
 
@@ -61,10 +65,13 @@ test.describe('aperture-d3tlf — convidados compositor save is never a dead end
     const salvar = page.getByRole('button', { name: 'Salvar convite' });
     await salvar.click();
 
-    // Pre-flight blocks: inline errors render under the two inputs, with the
+    // Pre-flight blocks: inline errors render under the inputs, with the
     // wizard's copy. The user can fix everything from THIS panel.
+    // aperture-n06ca — date/horário are required now and error inline too.
     await expect(page.getByRole('alert').filter({ hasText: ERR_BABY })).toBeVisible();
     await expect(page.getByRole('alert').filter({ hasText: ERR_HOST })).toBeVisible();
+    await expect(page.getByRole('alert').filter({ hasText: ERR_DATE })).toBeVisible();
+    await expect(page.getByRole('alert').filter({ hasText: ERR_TIME })).toBeVisible();
     await expect(babyInput).toHaveAttribute('aria-invalid', 'true');
     await expect(hostInput).toHaveAttribute('aria-invalid', 'true');
 
@@ -76,6 +83,10 @@ test.describe('aperture-d3tlf — convidados compositor save is never a dead end
     await expect(page.getByRole('alert').filter({ hasText: ERR_BABY })).toHaveCount(0);
     await hostInput.fill('Ana & João');
     await expect(page.getByRole('alert').filter({ hasText: ERR_HOST })).toHaveCount(0);
+    await page.locator('input[type="date"]').fill('2027-03-20');
+    await expect(page.getByRole('alert').filter({ hasText: ERR_DATE })).toHaveCount(0);
+    await page.locator('input[type="time"]').fill('15:30');
+    await expect(page.getByRole('alert').filter({ hasText: ERR_TIME })).toHaveCount(0);
 
     await salvar.click();
     await expect(page.getByText('Salvo com sucesso')).toBeVisible();
