@@ -25,7 +25,9 @@ import {
 import { installBlockedAuthHandlerGuard } from './server/blocked-auth-handler.js';
 import { createLegacyBridgeHandler } from './server/legacy-bridge.js';
 import { registerPixCobrancaReconciliationJob } from './server/jobs/pix-cobranca-reconciliation.pgboss.js';
+import { shouldRedirectPainelRequest } from './server/painel-access.js';
 import { appRouter } from './server/trpc/router.js';
+import { resolverUsuarioAutenticadoOuNull } from './server/trpc/session-resolver.js';
 import { createStripeWebhookHandler } from './server/webhooks/stripe-webhook.js';
 import { mountInterPixWebhookRoutesWhenBound } from './server/webhooks/inter-pix-webhook.js';
 
@@ -256,6 +258,23 @@ app.get('*', async (c) => {
     if (!owner) {
       status = 404;
     } else {
+      // aperture-ij2g5 — every /painel surface is owner-private. Resolving a
+      // syntactically valid slug is not authorization: without this gate an
+      // incognito visitor received the complete server-rendered dashboard
+      // shell and could trigger its owner-data queries during hydration.
+      // Redirect before renderToString so no private painel markup enters the
+      // unauthenticated response. Authenticated non-owners get the same public
+      // destination; the response does not disclose which owner check failed.
+      const session = await resolverUsuarioAutenticadoOuNull(deps, c.req.raw.headers);
+      if (
+        shouldRedirectPainelRequest({
+          ownerAccountId: owner.idConta,
+          sessionAccountId: session?.usuario.idConta ?? null,
+        })
+      ) {
+        return c.redirect(`/pagina/${route.slug}`, 302);
+      }
+
       // aperture-yeauv: per-campanha routing. The painel URL may carry an
       // OPTIONAL campanha PATH segment — /painel/:slug/c/:idCampanha — per the
       // frozen URL contract (the 'c' marker dodges the :section namespace).
