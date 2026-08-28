@@ -146,6 +146,7 @@ export async function aprovarPagamentoComTransacaoVerificada(
   const aprovado = stampVerifiedProviderIdentity(
     aprovarPagamentoPendente(pagamento, transacao, now),
     transacao,
+    now,
   );
   const venceuCas = await deps.pagamentoRepository.updateIfStatusIn(
     aprovado,
@@ -181,6 +182,7 @@ async function aplicarTransacaoVerificada(
   const aprovado = stampVerifiedProviderIdentity(
     aprovarPagamentoPendente(pagamento, transacao, now),
     transacao,
+    now,
   );
   await pagamentoRepository.update(aprovado);
   await publicarAprovacao(deps, aprovado, transacao, now);
@@ -226,6 +228,7 @@ function validarRepeticaoVerificada(pagamento: Pagamento, transacao: TransacaoEx
 function stampVerifiedProviderIdentity(
   pagamento: Pagamento,
   transacao: TransacaoExterna,
+  now: Date,
 ): Pagamento {
   if (transacao.provedor !== 'inter') return pagamento;
   const parsedE2eId = PixCobrancaE2eIdSchema.safeParse(transacao.id);
@@ -238,6 +241,7 @@ function stampVerifiedProviderIdentity(
     intencao: {
       ...pagamento.intencao,
       e2eExternalRef,
+      balanceTransactionAvailableOn: pagamento.intencao.balanceTransactionAvailableOn ?? now,
     },
   };
 }

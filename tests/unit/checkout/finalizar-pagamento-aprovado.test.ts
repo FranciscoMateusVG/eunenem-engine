@@ -320,6 +320,7 @@ describe('finalizarPagamentoAprovadoComTransacaoVerificada — provider-free Int
       status: 'aprovado',
       intencao: {
         e2eExternalRef: 'E1234567890123456789012345678901',
+        balanceTransactionAvailableOn: fixedDate,
       },
       transacaoExterna: {
         id: 'E1234567890123456789012345678901',
