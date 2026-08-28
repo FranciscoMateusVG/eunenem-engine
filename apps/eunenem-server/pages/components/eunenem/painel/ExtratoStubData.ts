@@ -172,26 +172,17 @@ export function useStubExtratoList(input: {
   limit?: number;
 }): ExtratoListResultHook {
   // Rex's input schema:
-  //   statusFilters → enum subset (no 'cancelado' — operator never filters
-  //                                for cancelled; we strip it client-side
-  //                                if any leak through). aperture-1ut92
-  //                                added 'solicitado' to the accepted set.
+  //   statusFilters → enum subset including 'cancelado', so refunded rows
+  //                   remain explicitly filterable as well as visible in
+  //                   the unfiltered statement. aperture-1ut92 added
+  //                   'solicitado' to the accepted set.
   //   cursor       → string | null (required slot, even when null)
   //   limit        → 1..100 (default 20). Use 100 so the current "filter
   //                  client-side" approach has enough data without paging.
-  const wireFilters = (input.statusFilters ?? []).filter(
-    (
-      s,
-    ): s is
-      | "aguardando_liberacao"
-      | "disponivel"
-      | "solicitado"
-      | "transferido" => s !== "cancelado",
-  );
   const query = trpc.recebedor.extrato.list.useQuery(
     {
       idCampanha: input.idCampanha,
-      statusFilters: wireFilters,
+      statusFilters: input.statusFilters ?? [],
       cursor: input.cursor ?? null,
       limit: input.limit ?? 100,
     },
