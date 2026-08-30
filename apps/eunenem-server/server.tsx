@@ -5,7 +5,6 @@ import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { StrictMode } from 'react';
-import type { IdCampanha } from '../../src/index.js';
 import {
   confirmarTransferenciaRepasse,
   executarTransferenciaRepasse,
@@ -25,7 +24,9 @@ import {
 import { installBlockedAuthHandlerGuard } from './server/blocked-auth-handler.js';
 import { createLegacyBridgeHandler } from './server/legacy-bridge.js';
 import { registerPixCobrancaReconciliationJob } from './server/jobs/pix-cobranca-reconciliation.pgboss.js';
+import { createPainelAccessMiddleware } from './server/painel-access.js';
 import { appRouter } from './server/trpc/router.js';
+import { resolverUsuarioAutenticadoOuNull } from './server/trpc/session-resolver.js';
 import { createStripeWebhookHandler } from './server/webhooks/stripe-webhook.js';
 import { mountInterPixWebhookRoutesWhenBound } from './server/webhooks/inter-pix-webhook.js';
 
@@ -222,6 +223,28 @@ const interPixWebhookRoutesMounted = mountInterPixWebhookRoutesWhenBound(
 // rate-limit, fail-open-to-fallback) lives in server/legacy-bridge.ts.
 app.get('/api/legacy-bridge', createLegacyBridgeHandler(deps));
 
+// aperture-ij2g5 — owner-private painel access runs before the SSR catch-all.
+// Cache policy is attached before every redirect/404/owner response, and denied
+// requests never reach renderToString.
+app.use(
+  '/painel/*',
+  createPainelAccessMiddleware({
+    findOwnerAccountId: async (slug) =>
+      (
+        await deps.usuarioRepository.findUsuarioBySlug(
+          ID_PLATAFORMA_EUNENEM,
+          slug,
+        )
+      )?.idConta ?? null,
+    resolveSessionAccountId: async (headers) =>
+      (await resolverUsuarioAutenticadoOuNull(deps, headers))?.usuario.idConta ?? null,
+    campaignBelongsToOwner: async (campaignId, ownerAccountId) => {
+      const campaign = await deps.campanhaRepository.findById(campaignId as never);
+      return Boolean(campaign?.idsAdministradores.includes(ownerAccountId));
+    },
+  }),
+);
+
 // "/" SSRs the marketing landing page via the catch-all below —
 // resolveRoute maps the exact "/" pathname to { kind: 'landing' }.
 //
@@ -239,45 +262,6 @@ app.get('*', async (c) => {
   const route = resolveRoute(url.pathname);
 
   let status = route.kind === 'not-found' ? 404 : 200;
-
-  // Painel routes: confirm the slug's owner exists in the eunenem plataforma.
-  // If not, the URL is structurally valid but unowned → 404. The React tree
-  // still renders the painel chrome (helps debugging in dev — see the slug
-  // we tried), but the HTTP status is honest.
-  if (
-    route.kind === 'painel' ||
-    route.kind === 'painel-section' ||
-    route.kind === 'painel-convite-preview'
-  ) {
-    const owner = await deps.usuarioRepository.findUsuarioBySlug(
-      ID_PLATAFORMA_EUNENEM,
-      route.slug,
-    );
-    if (!owner) {
-      status = 404;
-    } else {
-      // aperture-yeauv: per-campanha routing. The painel URL may carry an
-      // OPTIONAL campanha PATH segment — /painel/:slug/c/:idCampanha — per the
-      // frozen URL contract (the 'c' marker dodges the :section namespace).
-      // Extracted here with a self-contained regex so this gate needs no
-      // coupling to resolveRoute's route-object shape: until the parser
-      // recognizes the /c/ form those URLs are kind:'not-found' (404 above)
-      // and this branch never runs; once it does, the id is gated here.
-      // PRESENT → findById + confirm it belongs to the slug owner
-      // (idsAdministradores includes owner.idConta) — 404 on not-found OR
-      // not-owned (non-leaking, same posture as an unknown slug). ABSENT →
-      // the painel resolves the owner's oldest campanha at runtime
-      // (unchanged back-compat behavior for bare URLs).
-      const campanhaSegment = url.pathname.match(/^\/painel\/[^/]+\/c\/([^/]+)/);
-      const idCampanha = campanhaSegment?.[1];
-      if (idCampanha) {
-        const campanha = await deps.campanhaRepository.findById(idCampanha as IdCampanha);
-        if (!campanha || !campanha.idsAdministradores.includes(owner.idConta)) {
-          status = 404;
-        }
-      }
-    }
-  }
 
   const ssrHtml = renderToString(
     <StrictMode>
