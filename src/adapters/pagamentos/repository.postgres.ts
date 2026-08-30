@@ -11,6 +11,7 @@ import {
   PagamentoSchema,
   type StatusPagamento,
 } from '../../domain/pagamentos/entities/pagamento.js';
+import type { DadosContribuinte } from '../../domain/pagamentos/value-objects/dados-contribuinte.js';
 import type {
   IdContribuicaoPagamento,
   IdPagamento,
@@ -199,25 +200,25 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
     });
   }
 
-  async updateIfStatusIn(
-    pagamento: Pagamento,
-    expectedStatuses: readonly StatusPagamento[],
+  async setContribuinteIfAbsent(
+    idPagamento: IdPagamento,
+    contribuinte: DadosContribuinte,
+    atualizadoEm: Date,
   ): Promise<boolean> {
-    return tracer.startActiveSpan('db.pagamentos.updateIfStatusIn', async (span) => {
+    return tracer.startActiveSpan('db.pagamentos.setContribuinteIfAbsent', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
       try {
-        if (expectedStatuses.length === 0) {
-          span.setStatus({ code: SpanStatusCode.OK });
-          return false;
-        }
         const result = await this.db
           .updateTable('pagamentos')
-          // Operational lease columns are intentionally omitted by the
-          // mapper, so lifecycle CAS cannot clear an active job claim.
-          // biome-ignore lint/suspicious/noExplicitAny: kysely Updateable brand vs plain row object
-          .set(rowFromPagamento(pagamento) as any)
-          .where('id', '=', pagamento.id)
-          .where('status', 'in', expectedStatuses)
+          .set({
+            intencao_contribuinte_nome: contribuinte.nome,
+            intencao_contribuinte_email: contribuinte.email,
+            intencao_contribuinte_mensagem: contribuinte.mensagem ?? null,
+            atualizado_em: atualizadoEm,
+          })
+          .where('id', '=', idPagamento)
+          .where('intencao_contribuinte_nome', 'is', null)
+          .where('intencao_contribuinte_email', 'is', null)
           .executeTakeFirst();
         const matched =
           typeof result?.numUpdatedRows === 'bigint'
@@ -225,6 +226,43 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
             : (result?.numUpdatedRows ?? 0);
         span.setStatus({ code: SpanStatusCode.OK });
         return matched > 0;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  async updateIfStatusIn(
+    pagamento: Pagamento,
+    expectedStatuses: readonly StatusPagamento[],
+  ): Promise<Pagamento | undefined> {
+    return tracer.startActiveSpan('db.pagamentos.updateIfStatusIn', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+      try {
+        if (expectedStatuses.length === 0) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return undefined;
+        }
+        const result = await this.db
+          .updateTable('pagamentos')
+          // Operational lease columns are intentionally omitted by the
+          // mapper. Contributor columns are also omitted: they belong to the
+          // independent first-write-wins projection and a stale lifecycle
+          // aggregate must not erase or replace its canonical value.
+          // biome-ignore lint/suspicious/noExplicitAny: kysely Updateable brand vs plain row object
+          .set(lifecycleRowFromPagamento(pagamento) as any)
+          .where('id', '=', pagamento.id)
+          .where('status', 'in', expectedStatuses)
+          .returningAll()
+          .executeTakeFirst();
+        span.setStatus({ code: SpanStatusCode.OK });
+        if (!result) return undefined;
+        const itemRows = await loadItemsForPagamento(this.db, pagamento.id);
+        return pagamentoFromRow(result as unknown as PagamentoRow, itemRows);
       } catch (error: unknown) {
         span.recordException(error as Error);
         span.setStatus({ code: SpanStatusCode.ERROR });
@@ -999,6 +1037,14 @@ function rowFromPagamento(p: Pagamento): Record<string, unknown> {
     intencao_criada_em: p.intencao.criadaEm,
     transacao_externa: p.transacaoExterna ? JSON.stringify(p.transacaoExterna) : null,
   };
+}
+
+function lifecycleRowFromPagamento(pagamento: Pagamento): Record<string, unknown> {
+  const row = rowFromPagamento(pagamento);
+  delete row.intencao_contribuinte_nome;
+  delete row.intencao_contribuinte_email;
+  delete row.intencao_contribuinte_mensagem;
+  return row;
 }
 
 /**

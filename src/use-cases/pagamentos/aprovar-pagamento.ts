@@ -168,12 +168,12 @@ export async function aprovarPagamentoComTransacaoVerificada(
     transacao,
     now,
   );
-  const venceuCas = await deps.pagamentoRepository.updateIfStatusIn(
+  const aprovacaoPersistida = await deps.pagamentoRepository.updateIfStatusIn(
     aprovado,
     STATUS_ORIGEM_VERIFICADA,
   );
 
-  if (!venceuCas) {
+  if (!aprovacaoPersistida) {
     const canonical = await deps.pagamentoRepository.findById(pagamento.id);
     if (!canonical) {
       throw new PagamentoNaoEncontradoError(pagamento.id);
@@ -185,8 +185,8 @@ export async function aprovarPagamentoComTransacaoVerificada(
     throw new PagamentoTransicaoStatusInvalidaError(canonical.id, canonical.status, 'aprovado');
   }
 
-  await publicarAprovacao(deps, aprovado, transacao, now);
-  return aprovado;
+  await publicarAprovacao(deps, aprovacaoPersistida, transacao, now);
+  return aprovacaoPersistida;
 }
 
 async function aplicarTransacaoVerificada(
@@ -204,9 +204,12 @@ async function aplicarTransacaoVerificada(
     transacao,
     now,
   );
-  const venceuCas = await pagamentoRepository.updateIfStatusIn(aprovado, STATUS_ORIGEM_VERIFICADA);
+  const aprovacaoPersistida = await pagamentoRepository.updateIfStatusIn(
+    aprovado,
+    STATUS_ORIGEM_VERIFICADA,
+  );
 
-  if (!venceuCas) {
+  if (!aprovacaoPersistida) {
     const canonical = await pagamentoRepository.findById(pagamento.id);
     if (!canonical) {
       throw new PagamentoNaoEncontradoError(pagamento.id);
@@ -218,9 +221,9 @@ async function aplicarTransacaoVerificada(
     throw new PagamentoTransicaoStatusInvalidaError(canonical.id, canonical.status, 'aprovado');
   }
 
-  await publicarAprovacao(deps, aprovado, transacao, now);
+  await publicarAprovacao(deps, aprovacaoPersistida, transacao, now);
 
-  return aprovado;
+  return aprovacaoPersistida;
 }
 
 function validarTransacaoAprovada(pagamento: Pagamento, transacao: TransacaoExterna): void {

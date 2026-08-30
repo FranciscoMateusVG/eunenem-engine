@@ -147,6 +147,74 @@ export function describePagamentoRepositoryConformance(name: string, options: Co
 
     // ───────── lifecycle compare-and-set ─────────
 
+    it('stamps contribuinte first-write-wins without changing lifecycle/provider state', async () => {
+      const approved = makePagamento({ status: 'aprovado', contribuinte: null });
+      const transacaoExterna = {
+        id: 'pi_contributor_projection',
+        provedor: 'stripe' as const,
+        status: 'aprovado' as const,
+        amountCents: approved.intencao.composicaoValoresAggregate.totalPaidCents,
+        criadaEm: new Date('2026-05-01T12:01:00.000Z'),
+      };
+      await repo.save({ ...approved, transacaoExterna });
+
+      await expect(
+        repo.setContribuinteIfAbsent(
+          approved.id,
+          { nome: 'Primeira', email: 'primeira@example.com' },
+          new Date('2026-05-01T12:02:00.000Z'),
+        ),
+      ).resolves.toBe(true);
+      await expect(
+        repo.setContribuinteIfAbsent(
+          approved.id,
+          { nome: 'Segunda', email: 'segunda@example.com' },
+          new Date('2026-05-01T12:03:00.000Z'),
+        ),
+      ).resolves.toBe(false);
+
+      await expect(repo.findById(approved.id)).resolves.toMatchObject({
+        status: 'aprovado',
+        intencao: { contribuinte: { email: 'primeira@example.com' } },
+        transacaoExterna,
+      });
+    });
+
+    it('preserves a concurrently stamped contribuinte when stale approval CAS commits', async () => {
+      const pending = makePagamento({ contribuinte: null });
+      await repo.save(pending);
+      const staleApproval: Pagamento = {
+        ...pending,
+        status: 'aprovado',
+        atualizadoEm: new Date('2026-05-01T12:03:00.000Z'),
+        transacaoExterna: {
+          id: 'pi_inverse_interleaving',
+          provedor: 'stripe',
+          status: 'aprovado',
+          amountCents: pending.intencao.composicaoValoresAggregate.totalPaidCents,
+          criadaEm: new Date('2026-05-01T12:03:00.000Z'),
+        },
+      };
+
+      await expect(
+        repo.setContribuinteIfAbsent(
+          pending.id,
+          { nome: 'Primeira', email: 'primeira@example.com' },
+          new Date('2026-05-01T12:02:00.000Z'),
+        ),
+      ).resolves.toBe(true);
+      await expect(repo.updateIfStatusIn(staleApproval, ['pendente'])).resolves.toMatchObject({
+        status: 'aprovado',
+        intencao: { contribuinte: { email: 'primeira@example.com' } },
+      });
+
+      await expect(repo.findById(pending.id)).resolves.toMatchObject({
+        status: 'aprovado',
+        intencao: { contribuinte: { email: 'primeira@example.com' } },
+        transacaoExterna: staleApproval.transacaoExterna,
+      });
+    });
+
     it('updateIfStatusIn applies only when the persisted status is expected', async () => {
       const pagamento = makePagamento();
       await repo.save(pagamento);
@@ -157,14 +225,16 @@ export function describePagamentoRepositoryConformance(name: string, options: Co
         atualizadoEm: new Date('2026-05-01T12:05:00.000Z'),
       };
 
-      await expect(repo.updateIfStatusIn(processing, ['processing'])).resolves.toBe(false);
+      await expect(repo.updateIfStatusIn(processing, ['processing'])).resolves.toBeUndefined();
       expect((await repo.findById(pagamento.id))?.status).toBe('pendente');
 
-      await expect(repo.updateIfStatusIn(processing, ['pendente'])).resolves.toBe(true);
+      await expect(repo.updateIfStatusIn(processing, ['pendente'])).resolves.toMatchObject({
+        status: 'processing',
+      });
       expect((await repo.findById(pagamento.id))?.status).toBe('processing');
 
       // The stale writer cannot overwrite the state it no longer owns.
-      await expect(repo.updateIfStatusIn(pagamento, ['pendente'])).resolves.toBe(false);
+      await expect(repo.updateIfStatusIn(pagamento, ['pendente'])).resolves.toBeUndefined();
       expect((await repo.findById(pagamento.id))?.status).toBe('processing');
     });
 

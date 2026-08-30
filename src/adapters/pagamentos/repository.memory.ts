@@ -1,6 +1,7 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 import type { IdCampanha } from '../../domain/arrecadacao/value-objects/ids.js';
 import type { Pagamento, StatusPagamento } from '../../domain/pagamentos/entities/pagamento.js';
+import type { DadosContribuinte } from '../../domain/pagamentos/value-objects/dados-contribuinte.js';
 import type {
   IdContribuicaoPagamento,
   IdPagamento,
@@ -80,21 +81,61 @@ export class PagamentoRepositoryMemory implements PagamentoRepository {
     });
   }
 
+  async setContribuinteIfAbsent(
+    idPagamento: IdPagamento,
+    contribuinte: DadosContribuinte,
+    atualizadoEm: Date,
+  ): Promise<boolean> {
+    return tracer.startActiveSpan('db.pagamentos.setContribuinteIfAbsent', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+      try {
+        const persisted = this.pagamentos.get(idPagamento);
+        if (persisted === undefined || persisted.intencao.contribuinte !== null) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return false;
+        }
+        this.pagamentos.set(idPagamento, {
+          ...persisted,
+          intencao: { ...persisted.intencao, contribuinte },
+          atualizadoEm,
+        });
+        span.setStatus({ code: SpanStatusCode.OK });
+        return true;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
   async updateIfStatusIn(
     pagamento: Pagamento,
     expectedStatuses: readonly StatusPagamento[],
-  ): Promise<boolean> {
+  ): Promise<Pagamento | undefined> {
     return tracer.startActiveSpan('db.pagamentos.updateIfStatusIn', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
       try {
         const persisted = this.pagamentos.get(pagamento.id);
         if (persisted === undefined || !expectedStatuses.includes(persisted.status)) {
           span.setStatus({ code: SpanStatusCode.OK });
-          return false;
+          return undefined;
         }
-        this.pagamentos.set(pagamento.id, pagamento);
+        // Lifecycle CAS owns lifecycle/provider columns, not the separately
+        // claimed contributor projection. Preserve the canonical contributor
+        // even when the caller built this aggregate from a stale null read.
+        const updated: Pagamento = {
+          ...pagamento,
+          intencao: {
+            ...pagamento.intencao,
+            contribuinte: persisted.intencao.contribuinte,
+          },
+        };
+        this.pagamentos.set(pagamento.id, updated);
         span.setStatus({ code: SpanStatusCode.OK });
-        return true;
+        return updated;
       } catch (error: unknown) {
         span.recordException(error as Error);
         span.setStatus({ code: SpanStatusCode.ERROR });
