@@ -13,6 +13,8 @@ import { buildPainelMenu, PAINEL_DEMO, type PainelEventSnapshot } from '@/lib/mo
 import { needsOnboarding } from '@/lib/onboarding-gate';
 import { trpc } from '@/lib/trpc';
 import { sendPageView } from '@/lib/analytics';
+import { useListaDeConvidadosData } from '@/lib/convidados';
+import { derivePainelCounts } from '@/lib/painel-counts';
 
 // /painel/:slug — creator dashboard (was /painel/[slug]/page.tsx in
 // eunenem-v2). v1 only recognises the "helena" slug; the App.tsx router
@@ -98,14 +100,21 @@ export function PainelPage({
       : undefined;
   const summary = useStubExtratoSummary(idCampanha ?? '');
   const listaQuery = useContribuicaoList();
+  const convidadosQuery = useListaDeConvidadosData(idCampanha ?? undefined);
 
   const liveReceivedCents = summary.data?.totalRecebidoCents;
-  const livePresentes = summary.data?.totalPresentes;
   // aperture-kvpvf — finishes the B1 audit. Wire the strip-only
   // PRESENTES + RECADOS counters from the same summary proc. Optional
   // reads keep the swap safe across the trpc cache-rotation window.
-  const livePresentesStrip = summary.data?.totalPresentesItensCount;
   const liveRecadosStrip = summary.data?.totalRecadosCount;
+
+  // aperture-45k6x — one normalisation seam feeds every related badge.
+  // Gift counts use received ITEMS (not distinct payment attempts), while
+  // guest totals come from the same live lista rendered by ConvidadosBody.
+  const painelCounts = derivePainelCounts({
+    summary: summary.data,
+    guests: convidadosQuery.data?.lista?.convidados,
+  });
 
   const liveItems = listaQuery.data ?? null;
   const liveListaTotal = liveItems?.length;
@@ -176,12 +185,12 @@ export function PainelPage({
     greetingTo: greetingFirstName,
     shareSlug: slug,
     receivedCents: liveReceivedCents ?? 0,
-    giftsClaimed: livePresentes ?? 0,
-    guestsConfirmed: 0,
-    guestsTotal: 0,
+    giftsClaimed: painelCounts.giftsReceived,
+    guestsConfirmed: painelCounts.guestsConfirmed,
+    guestsTotal: painelCounts.guestsTotal,
     messagesTotal: liveRecadosStrip ?? 0,
     messagesNew: 0,
-    presentesStripCount: livePresentesStrip ?? 0,
+    presentesStripCount: painelCounts.giftsReceived,
     recadosStripCount: liveRecadosStrip ?? 0,
   };
 
