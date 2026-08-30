@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { PagamentoEventPublisherMemory } from '../../../src/adapters/pagamentos/event-publisher.memory.js';
 import { PagamentoProviderFake } from '../../../src/adapters/pagamentos/provider.fake.js';
 import { PagamentoRepositoryMemory } from '../../../src/adapters/pagamentos/repository.memory.js';
@@ -116,6 +116,98 @@ describe('payment use cases', () => {
       'payment.intent_created',
       'payment.approved',
     ]);
+  });
+
+  it('publishes and sends one PIX receipt when concurrent regular approvals race', async () => {
+    const pagamentoRepository = new PagamentoRepositoryMemory();
+    const pagamentoEventPublisher = new PagamentoEventPublisherMemory();
+    const pagamentoProvider = new PagamentoProviderFake({
+      nomeProvedor: 'stripe',
+      idTransacaoFactory: () => idTransacaoExterna,
+      clock,
+    });
+    const pixReceiptNotifier = vi.fn(async () => undefined);
+
+    await criarIntencaoPagamento(
+      { pagamentoRepository, pagamentoEventPublisher, clock, observability: silentObservability },
+      makeCriarIntencaoPagamentoInput({
+        contribuinte: { nome: 'Convidada', email: 'payer@example.com' },
+      }),
+    );
+
+    const deps = {
+      pagamentoRepository,
+      pagamentoProvider,
+      pagamentoEventPublisher,
+      clock,
+      observability: silentObservability,
+      pixReceiptNotifier,
+    };
+    const [first, second] = await Promise.all([
+      aprovarPagamento(deps, { idPagamento }),
+      aprovarPagamento(deps, { idPagamento }),
+    ]);
+
+    expect(first).toEqual(second);
+    expect(first.status).toBe('aprovado');
+    expect(pagamentoEventPublisher.getEventosPublicados().map((event) => event.tipo)).toEqual([
+      'payment.intent_created',
+      'payment.approved',
+    ]);
+    expect(pixReceiptNotifier).toHaveBeenCalledOnce();
+  });
+
+  it('never logs caller-controlled receipt error fields', async () => {
+    const pagamentoRepository = new PagamentoRepositoryMemory();
+    const pagamentoEventPublisher = new PagamentoEventPublisherMemory();
+    const pagamentoProvider = new PagamentoProviderFake({
+      idTransacaoFactory: () => idTransacaoExterna,
+      clock,
+    });
+    const error = new Error('RCPT TO <sentinel-payer@example.invalid> rejected');
+    error.name = 'sentinel-payer@example.invalid';
+    error.stack = 'smtp stack sentinel-payer@example.invalid';
+    const errorLog = vi.fn();
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: errorLog,
+      debug: vi.fn(),
+    };
+
+    await criarIntencaoPagamento(
+      {
+        pagamentoRepository,
+        pagamentoEventPublisher,
+        clock,
+        observability: { logger, tracer: noopTracer() },
+      },
+      makeCriarIntencaoPagamentoInput({
+        contribuinte: { nome: 'Convidada', email: 'payer@example.com' },
+      }),
+    );
+
+    await expect(
+      aprovarPagamento(
+        {
+          pagamentoRepository,
+          pagamentoProvider,
+          pagamentoEventPublisher,
+          clock,
+          observability: { logger, tracer: noopTracer() },
+          pixReceiptNotifier: async () => {
+            throw error;
+          },
+        },
+        { idPagamento },
+      ),
+    ).resolves.toMatchObject({ status: 'aprovado' });
+
+    expect(errorLog).toHaveBeenCalledWith('pagamento.comprovante_pix_email_falhou', {
+      idPagamento,
+      errorType: 'PixReceiptDeliveryError',
+    });
+    expect(JSON.stringify(errorLog.mock.calls)).not.toContain('sentinel-payer@example.invalid');
   });
 
   it('creates and rejects a payment from provider response', async () => {

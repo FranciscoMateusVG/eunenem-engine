@@ -204,7 +204,20 @@ async function aplicarTransacaoVerificada(
     transacao,
     now,
   );
-  await pagamentoRepository.update(aprovado);
+  const venceuCas = await pagamentoRepository.updateIfStatusIn(aprovado, STATUS_ORIGEM_VERIFICADA);
+
+  if (!venceuCas) {
+    const canonical = await pagamentoRepository.findById(pagamento.id);
+    if (!canonical) {
+      throw new PagamentoNaoEncontradoError(pagamento.id);
+    }
+    if (canonical.status === 'aprovado') {
+      validarRepeticaoVerificada(canonical, transacao);
+      return canonical;
+    }
+    throw new PagamentoTransicaoStatusInvalidaError(canonical.id, canonical.status, 'aprovado');
+  }
+
   await publicarAprovacao(deps, aprovado, transacao, now);
 
   return aprovado;
@@ -284,12 +297,14 @@ async function publicarAprovacao(
   if (aprovado.intencao.metodo === 'pix' && aprovado.intencao.contribuinte !== null) {
     try {
       await deps.pixReceiptNotifier?.(aprovado);
-    } catch (error) {
+    } catch {
       // Payment settlement is authoritative and must not be rolled back by a
       // downstream SMTP outage. No recipient is logged (no email oracle/PII).
       deps.observability.logger.error('pagamento.comprovante_pix_email_falhou', {
         idPagamento: aprovado.id,
-        errorName: error instanceof Error ? error.name : 'unknown',
+        // Never forward caller-controlled Error fields. SMTP exceptions can
+        // carry RCPT addresses in name/message/stack.
+        errorType: 'PixReceiptDeliveryError',
       });
     }
   }
