@@ -7595,6 +7595,56 @@ button.painel-topbar-link:hover {
   padding: 4px 10px 6px;
 }
 
+/* aperture-45k6x — PainelDataBoundary loading/error states. The retry
+   button is a real affordance: >=44px target (Preflight floor), painel
+   plum/lilac idiom, authored focus-visible ring. */
+.painel-data-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+  background: var(--paper);
+  border: 1px dashed var(--line);
+  border-radius: 16px;
+  padding: 26px 18px;
+  margin: 14px 0;
+}
+.painel-data-state p {
+  margin: 0;
+  font-size: 14px;
+  color: var(--ink-soft, var(--ink));
+}
+.painel-data-state strong {
+  font-size: 15px;
+  color: var(--plum);
+}
+.painel-data-retry {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  min-width: 44px;
+  margin-top: 6px;
+  padding: 10px 22px;
+  border: 1px solid color-mix(in srgb, var(--plum) 55%, transparent);
+  border-radius: 999px;
+  background: var(--plum);
+  color: #fff;
+  font-weight: 600;
+  font-size: 14px;
+  transition: background 0.18s ease, box-shadow 0.18s ease;
+}
+.painel-data-retry:hover {
+  background: color-mix(in srgb, var(--plum) 85%, #000 8%);
+}
+.painel-data-retry:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--plum) 45%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--lilac) 45%, transparent);
+}
+
 .painel-switcher-item {
   width: 100%;
   cursor: pointer;

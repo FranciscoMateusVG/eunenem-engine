@@ -27,7 +27,7 @@ export function PainelDataBoundary({ isLoading, hasError, onRetry }: Props): Rea
       <section className="painel-data-state" role="alert" aria-live="assertive">
         <strong>não foi possível carregar os números da sua página</strong>
         <p>Seus dados continuam salvos. Tente buscar o resumo novamente.</p>
-        <button type="button" onClick={onRetry}>
+        <button type="button" className="painel-data-retry" onClick={onRetry}>
           tentar novamente
         </button>
       </section>
