@@ -268,6 +268,7 @@ describe('recebedor.extrato.summary — KPI aggregation (aperture-7g5sx)', () =>
       // aperture-kvpvf — strip counters: both zero on empty campanha.
       totalRecadosCount: 0,
       totalPresentesItensCount: 0,
+      totalPresentesUnidades: 0,
       dateRangeStart: null,
       dateRangeEnd: null,
     });
@@ -364,6 +365,7 @@ describe('recebedor.extrato.summary — KPI aggregation (aperture-7g5sx)', () =>
     });
     expect(result.totalRecebidoCents).toBe(0);
     expect(result.totalPresentes).toBe(0);
+    expect(result.totalPresentesUnidades).toBe(0);
   });
 
   it('excludes non-saldo_recebedor tipos (plataforma + passthrough surcharge)', async () => {
@@ -538,6 +540,9 @@ describe('recebedor.extrato.summary — KPI aggregation (aperture-7g5sx)', () =>
     // pag1 has 1 contribuicao item, pag2 has 1 contribuicao item (surcharge
     // skipped), pag3 has 1 contribuicao item → 3.
     expect(result.totalPresentesItensCount).toBe(3);
+    // Canonical purchased-unit count: pag1 contributes 3 units, while pag2
+    // and pag3 contribute one each. The surcharge remains excluded.
+    expect(result.totalPresentesUnidades).toBe(5);
   });
 });
 

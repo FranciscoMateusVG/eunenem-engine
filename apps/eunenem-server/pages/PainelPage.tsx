@@ -14,7 +14,8 @@ import { needsOnboarding } from '@/lib/onboarding-gate';
 import { trpc } from '@/lib/trpc';
 import { sendPageView } from '@/lib/analytics';
 import { useListaDeConvidadosData } from '@/lib/convidados';
-import { derivePainelCounts } from '@/lib/painel-counts';
+import { deriveGiftListUnitCounts, derivePainelCounts } from '@/lib/painel-counts';
+import { PainelDataBoundary } from '@/components/eunenem/painel/PainelDataBoundary';
 
 // /painel/:slug — creator dashboard (was /painel/[slug]/page.tsx in
 // eunenem-v2). v1 only recognises the "helena" slug; the App.tsx router
@@ -117,10 +118,7 @@ export function PainelPage({
   });
 
   const liveItems = listaQuery.data ?? null;
-  const liveListaTotal = liveItems?.length;
-  const liveListaClaimed = liveItems
-    ? liveItems.filter((c) => c.indisponivel).length
-    : undefined;
+  const liveListaCounts = deriveGiftListUnitCounts(liveItems);
 
   // aperture-77512 — the creator's REAL first name for the "olá, {name}"
   // greeting (was the demo "Mari"). First word of nomeExibicao.
@@ -195,8 +193,8 @@ export function PainelPage({
   };
 
   const groups = buildPainelMenu(snapshot, {
-    listaTotal: liveListaTotal,
-    listaClaimed: liveListaClaimed,
+    listaTotal: liveListaCounts.total,
+    listaClaimed: liveListaCounts.claimed,
   });
 
   // aperture-7nius / aperture-4my2a — tutorial state (Plan 0018 Phase B,
@@ -326,6 +324,36 @@ export function PainelPage({
           }
         }}
       />
+    );
+  }
+
+  const dashboardDataLoading =
+    summary.isLoading || convidadosQuery.isLoading || listaQuery.isLoading;
+  const dashboardDataFailed = Boolean(
+    summary.error || convidadosQuery.error || listaQuery.error,
+  );
+
+  if (dashboardDataLoading || dashboardDataFailed) {
+    const retryDashboardData = () => {
+      if (summary.error) void summary.refetch();
+      if (convidadosQuery.error) void convidadosQuery.refetch();
+      if (listaQuery.error) void listaQuery.refetch();
+    };
+
+    return (
+      <PainelLayout
+        slug={slug}
+        idCampanha={idCampanhaRota}
+        babyName={babyName}
+        eventDate={eventDate}
+        genero={genero}
+      >
+        <PainelDataBoundary
+          isLoading={dashboardDataLoading}
+          hasError={dashboardDataFailed}
+          onRetry={retryDashboardData}
+        />
+      </PainelLayout>
     );
   }
 

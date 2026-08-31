@@ -125,6 +125,14 @@ const ExtratoSummaryDTOSchema = z.object({
    * surcharges, not gifts.
    */
   totalPresentesItensCount: z.number().int().nonnegative(),
+  /**
+   * Canonical purchased gift-unit count. Sums `quantidade` from every
+   * `contribuicao` item belonging to an approved payment represented by a
+   * live (non-cancelled) receiver ledger entry. Unlike
+   * `totalPresentesItensCount`, a single cart item with quantidade=5 counts
+   * as five purchased gifts.
+   */
+  totalPresentesUnidades: z.number().int().nonnegative(),
   /** Earliest contribution date (ISO). Null when no contributions. */
   dateRangeStart: z.string().nullable(),
   /** Latest contribution date (ISO). Null when no contributions. */
@@ -536,6 +544,7 @@ const extratoRouter = t.router({
         const recadosPagamentoIds = new Set<string>();
         const presentesItensCountedFor = new Set<string>();
         let totalPresentesItensCount = 0;
+        let totalPresentesUnidades = 0;
 
         for (const state of liveStates) {
           const { lancamento, pagamento, liberacao } = state;
@@ -553,6 +562,7 @@ const extratoRouter = t.router({
               for (const item of pagamento.intencao.items) {
                 if (item.tipo === "contribuicao") {
                   totalPresentesItensCount += 1;
+                  totalPresentesUnidades += item.quantidade;
                 }
               }
             }
@@ -617,6 +627,7 @@ const extratoRouter = t.router({
           totalPresentes: distinctPagamentos.size,
           totalRecadosCount: recadosPagamentoIds.size,
           totalPresentesItensCount,
+          totalPresentesUnidades,
           dateRangeStart:
             dateRangeStartMs === null ? null : new Date(dateRangeStartMs).toISOString(),
           dateRangeEnd:

@@ -1,11 +1,33 @@
 export type PainelCountSummary = {
   totalPresentes: number;
   totalPresentesItensCount?: number;
+  totalPresentesUnidades?: number;
 };
 
 export type PainelCountGuest = {
   presenca: 'nao_enviado' | 'enviado' | 'sim' | 'talvez' | 'nao';
 };
+
+export type PainelGiftListItem = {
+  quantidade?: number;
+  quantidadeRestante?: number;
+  indisponivel?: boolean;
+};
+
+export function deriveGiftListUnitCounts(items: readonly PainelGiftListItem[] | null | undefined) {
+  if (!items) return { total: undefined, claimed: undefined };
+
+  return items.reduce(
+    (counts, item) => {
+      const quantidade = item.quantidade ?? 1;
+      const restante = item.quantidadeRestante ?? (item.indisponivel ? 0 : quantidade);
+      counts.total += quantidade;
+      counts.claimed += Math.max(0, quantidade - restante);
+      return counts;
+    },
+    { total: 0, claimed: 0 },
+  );
+}
 
 /**
  * Normalises the dashboard counters before they reach individual cards.
@@ -21,7 +43,10 @@ export function derivePainelCounts(input: {
   guests: readonly PainelCountGuest[] | null | undefined;
 }) {
   const giftsReceived =
-    input.summary?.totalPresentesItensCount ?? input.summary?.totalPresentes ?? 0;
+    input.summary?.totalPresentesUnidades ??
+    input.summary?.totalPresentesItensCount ??
+    input.summary?.totalPresentes ??
+    0;
   const guests = input.guests ?? [];
 
   return {
