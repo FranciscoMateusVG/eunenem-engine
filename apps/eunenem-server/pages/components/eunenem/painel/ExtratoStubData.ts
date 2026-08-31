@@ -80,6 +80,8 @@ export type ExtratoSummaryDTO = {
    * mirror for the same merge-window reason as totalRecadosCount.
    */
   totalPresentesItensCount?: number;
+  /** Canonical purchased gift-unit count across approved payments. */
+  totalPresentesUnidades?: number;
   dateRangeStart: string | null;
   dateRangeEnd: string | null;
 };
@@ -129,6 +131,7 @@ export type ExtratoSummaryResult = {
   data: ExtratoSummaryDTO | null;
   isLoading: boolean;
   error: { message: string } | null;
+  refetch: () => Promise<unknown>;
 };
 
 export type ExtratoListResult = {
@@ -162,6 +165,7 @@ export function useStubExtratoSummary(
     data: query.data ?? null,
     isLoading: query.isLoading,
     error: query.error ? { message: query.error.message } : null,
+    refetch: async () => query.refetch(),
   };
 }
 

@@ -185,7 +185,7 @@ interface PresentesSummaryUI {
 function adaptSummary(s: ExtratoSummaryDTO): PresentesSummaryUI {
   return {
     recebido: s.totalRecebidoCents,
-    presentes: s.totalPresentes,
+    presentes: s.totalPresentesUnidades ?? s.totalPresentesItensCount ?? s.totalPresentes,
     // aperture-eqdxl — the RESGATADO figure sums TWO buckets: already
     // transferred (resgatadoCents) PLUS in-flight admin-approval
     // (aguardandoAprovacaoCents). Both are money the user has already
