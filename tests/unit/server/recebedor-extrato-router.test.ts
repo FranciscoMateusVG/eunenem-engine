@@ -1102,7 +1102,7 @@ describe('recebedor.extrato — solicitado state (aperture-1ut92)', () => {
     expect(result.rows[0].liberacao).toBe('transferido');
   });
 
-  it('precedence: canceladoEm set DOMINATES even idRepasse + transferidoEm → row hidden (cancelado)', async () => {
+  it('shows refunded rows by default and preserves cancelado precedence', async () => {
     const past = new Date('2026-06-01T10:00:00.000Z');
     const idPag = randomUUID();
     await rig.pagamentoRepository.save(
@@ -1128,8 +1128,57 @@ describe('recebedor.extrato — solicitado state (aperture-1ut92)', () => {
       cursor: null,
       limit: 20,
     });
-    // Cancelado rows are filtered out of the extrato view entirely.
-    expect(result.rows).toHaveLength(0);
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]).toMatchObject({
+      idPagamento: idPag,
+      liberacao: 'cancelado',
+    });
+  });
+
+  it('statusFilters supports cancelado and excludes live rows', async () => {
+    const past = new Date('2026-06-01T10:00:00.000Z');
+    const refundedId = randomUUID();
+    const liveId = randomUUID();
+    await rig.pagamentoRepository.save(
+      makePagamento({
+        id: refundedId,
+        idContribuicao: rig.idContribuicao,
+        availableOn: past,
+      }),
+    );
+    await rig.pagamentoRepository.save(
+      makePagamento({
+        id: liveId,
+        idContribuicao: rig.idContribuicao,
+        availableOn: past,
+      }),
+    );
+    await rig.livroFinanceiroRepository.saveLancamentos([
+      makeLancamento({
+        idPagamento: refundedId,
+        idContribuicao: rig.idContribuicao,
+        idCampanha: rig.idCampanha,
+        canceladoEm: new Date('2026-06-02T08:00:00.000Z'),
+      }),
+      makeLancamento({
+        idPagamento: liveId,
+        idContribuicao: rig.idContribuicao,
+        idCampanha: rig.idCampanha,
+      }),
+    ]);
+
+    const result = await rig.caller.recebedor.extrato.list({
+      idCampanha: rig.idCampanha,
+      statusFilters: ['cancelado'],
+      cursor: null,
+      limit: 20,
+    });
+
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]).toMatchObject({
+      idPagamento: refundedId,
+      liberacao: 'cancelado',
+    });
   });
 
   it('summary: solicitado cents flow into aguardandoAprovacaoCents, NOT saldoDisponivelCents', async () => {

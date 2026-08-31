@@ -224,6 +224,7 @@ const ExtratoStatusFilterSchema = z.enum([
   "disponivel",
   "solicitado",
   "transferido",
+  "cancelado",
 ]);
 
 const ExtratoListInputSchema = z.object({
@@ -634,12 +635,10 @@ const extratoRouter = t.router({
         const now = ctx.deps.clock();
         const allStates = await buildExtratoStates(ctx, input.idCampanha, now);
 
-        // Filter: exclude cancelados from the extrato view (the recebedor
-        // doesn't see refunded contributions on their extrato — they're
-        // not part of their saldo trajectory). Status filters narrow
-        // further when present.
+        // Refunded rows remain part of the owner's statement history even
+        // though summary totals exclude them from the live balance. Status
+        // filters narrow the complete history when present.
         const filtered = allStates.filter((s) => {
-          if (s.liberacao === "cancelado") return false;
           if (input.statusFilters.length === 0) return true;
           return (input.statusFilters as readonly ExtratoLiberacao[]).includes(
             s.liberacao,

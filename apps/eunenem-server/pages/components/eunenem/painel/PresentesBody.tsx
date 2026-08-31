@@ -2169,6 +2169,7 @@ const EXTRATO_CSS = `
 .presentes-extrato .ex-filter { position: relative; display: inline-block; }
 .presentes-extrato .ex-filter-btn {
   display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: var(--r-pill);
+  min-height: 44px; /* aperture-xg6sh QA HOLD — mobile touch-target floor */
   border: 1px dashed var(--sheet-line); background: rgba(255, 255, 255, 0.4); color: var(--sheet-ink-soft);
   cursor: pointer; font-family: var(--font-dm-sans), sans-serif; font-weight: 600; font-size: 10.5px;
   letter-spacing: 0.08em; text-transform: uppercase; transition: background 0.14s, border-color 0.14s, color 0.14s;
@@ -2211,6 +2212,7 @@ const EXTRATO_CSS = `
 }
 .ex-filter-panel.presentes-extrato-portal .ex-filter-pill {
   display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 10px;
+  min-height: 44px; /* aperture-xg6sh QA HOLD — mobile touch-target floor */
   border: 1px solid #efe2e9; background: #f8f7f6; color: #7a5a6c; cursor: pointer;
   font-size: 12px; font-weight: 500; text-align: left; transition: background 0.12s, border-color 0.12s, color 0.12s;
   font-family: var(--font-dm-sans), sans-serif;
@@ -2233,6 +2235,7 @@ const EXTRATO_CSS = `
 .presentes-extrato .ex-filter-pills { display: flex; flex-direction: column; gap: 6px; }
 .presentes-extrato .ex-filter-pill {
   display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 10px;
+  min-height: 44px; /* aperture-xg6sh QA HOLD — mobile touch-target floor */
   border: 1px solid var(--line); background: var(--cream); color: var(--ink-soft); cursor: pointer;
   font-size: 12px; font-weight: 500; text-align: left; transition: background 0.12s, border-color 0.12s, color 0.12s;
 }
