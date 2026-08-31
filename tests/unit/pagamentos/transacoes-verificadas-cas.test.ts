@@ -42,6 +42,43 @@ async function setup(overrides: Parameters<typeof makePagamento>[0] = {}) {
 }
 
 describe('provider-free verified payment transitions — CAS', () => {
+  it('returns and publishes the rejection CAS snapshot with a concurrently stamped contributor', async () => {
+    const { pagamento, pagamentoRepository, pagamentoEventPublisher, deps } = await setup({
+      contribuinte: null,
+    });
+    const originalCas = pagamentoRepository.updateIfStatusIn.bind(pagamentoRepository);
+    let stampInjected = false;
+    pagamentoRepository.updateIfStatusIn = async (...args) => {
+      if (!stampInjected) {
+        stampInjected = true;
+        await pagamentoRepository.setContribuinteIfAbsent(
+          pagamento.id,
+          { nome: 'Convidada', email: 'payer@example.com' },
+          new Date(fixedDate.getTime() - 1),
+        );
+      }
+      return originalCas(...args);
+    };
+
+    const rejected = await rejeitarPagamentoComTransacaoVerificada(deps, {
+      idPagamento: pagamento.id,
+      transacao: transacao('rejeitado'),
+    });
+
+    expect(rejected).toMatchObject({
+      status: 'rejeitado',
+      intencao: { contribuinte: { email: 'payer@example.com' } },
+      transacaoExterna: transacao('rejeitado'),
+    });
+    await expect(pagamentoRepository.findById(pagamento.id)).resolves.toEqual(rejected);
+    expect(pagamentoEventPublisher.getEventosPublicados()).toHaveLength(1);
+    expect(pagamentoEventPublisher.getEventosPublicados()[0]).toMatchObject({
+      tipo: 'payment.rejected',
+      status: 'rejeitado',
+      idTransacaoExterna: transacao('rejeitado').id,
+    });
+  });
+
   it('publishes approval once when concurrent exact deliveries race', async () => {
     const { pagamento, pagamentoEventPublisher, deps } = await setup({
       contribuinte: { nome: 'Convidada', email: 'payer@example.com' },

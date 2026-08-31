@@ -168,12 +168,12 @@ export async function rejeitarPagamentoComTransacaoVerificada(
   validarTransacaoRejeitada(pagamento, transacao);
   const now = deps.clock();
   const rejeitado = rejeitarPagamentoPendente(pagamento, transacao, now);
-  const venceuCas = await deps.pagamentoRepository.updateIfStatusIn(
+  const rejeicaoPersistida = await deps.pagamentoRepository.updateIfStatusIn(
     rejeitado,
     STATUS_ORIGEM_VERIFICADA,
   );
 
-  if (!venceuCas) {
+  if (!rejeicaoPersistida) {
     const canonical = await deps.pagamentoRepository.findById(pagamento.id);
     if (!canonical) {
       throw new PagamentoNaoEncontradoError(pagamento.id);
@@ -185,8 +185,8 @@ export async function rejeitarPagamentoComTransacaoVerificada(
     throw new PagamentoTransicaoStatusInvalidaError(canonical.id, canonical.status, 'rejeitado');
   }
 
-  await publicarRejeicaoVerificada(deps, rejeitado, transacao, now);
-  return rejeitado;
+  await publicarRejeicaoVerificada(deps, rejeicaoPersistida, transacao, now);
+  return rejeicaoPersistida;
 }
 
 function validarTransacaoRejeitada(pagamento: Pagamento, transacao: TransacaoExterna): void {
