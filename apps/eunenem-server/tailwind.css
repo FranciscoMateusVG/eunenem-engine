@@ -7641,8 +7641,11 @@ button.painel-topbar-link:hover {
 }
 .painel-data-retry:focus-visible {
   outline: none;
-  border-color: color-mix(in srgb, var(--plum) 45%, transparent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--lilac) 45%, transparent);
+  border-color: #fff;
+  /* plum 75% composites to #906d86 on the white card = 4.45:1 vs the 3:1
+     non-text floor. The topbar's lilac-45% ring pattern computes to 1.37:1
+     and cannot pass on white — do not copy it for focus indicators. */
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--plum) 75%, transparent);
 }
 
 .painel-switcher-item {
