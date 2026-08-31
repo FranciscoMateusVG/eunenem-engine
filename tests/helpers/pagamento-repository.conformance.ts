@@ -51,6 +51,7 @@ import type {
 } from '../../src/domain/pagamentos/value-objects/ids.js';
 import { PagamentoJaExisteError } from '../../src/errors/pagamentos/ja-existe.error.js';
 import { PagamentoNaoEncontradoError } from '../../src/errors/pagamentos/nao-encontrado.error.js';
+import { PagamentoProviderProjectionConflictError } from '../../src/errors/pagamentos/provider-projection-conflict.error.js';
 
 interface ConformanceOptions {
   /** Factory that returns a fresh PagamentoRepository instance. */
@@ -178,6 +179,90 @@ export function describePagamentoRepositoryConformance(name: string, options: Co
         intencao: { contribuinte: { email: 'primeira@example.com' } },
         transacaoExterna,
       });
+    });
+
+    it('updates provider references without changing lifecycle, contributor, or settlement', async () => {
+      const approved = makePagamento({
+        status: 'aprovado',
+        contribuinte: { nome: 'Canonical', email: 'canonical@example.com' },
+      });
+      const transacaoExterna = {
+        id: 'pi_canonical_settlement',
+        provedor: 'stripe' as const,
+        status: 'aprovado' as const,
+        amountCents: approved.intencao.composicaoValoresAggregate.totalPaidCents,
+        criadaEm: new Date('2026-05-01T12:01:00.000Z'),
+      };
+      await repo.save({ ...approved, transacaoExterna });
+
+      const projected = await repo.updateProviderProjection(
+        approved.id,
+        {
+          paymentIntentExternalRef: 'pi_projection',
+          chargeExternalRef: 'ch_projection',
+          balanceTransactionAvailableOn: new Date('2026-05-07T12:00:00.000Z'),
+        },
+        new Date('2026-05-01T12:02:00.000Z'),
+      );
+
+      expect(projected).toMatchObject({
+        status: 'aprovado',
+        transacaoExterna,
+        intencao: {
+          contribuinte: { email: 'canonical@example.com' },
+          paymentIntentExternalRef: 'pi_projection',
+          chargeExternalRef: 'ch_projection',
+          balanceTransactionAvailableOn: new Date('2026-05-07T12:00:00.000Z'),
+        },
+      });
+      await expect(
+        repo.updateProviderProjection(
+          approved.id,
+          {
+            paymentIntentExternalRef: 'pi_stale_different',
+            chargeExternalRef: 'ch_stale_different',
+            balanceTransactionAvailableOn: null,
+          },
+          new Date('2026-05-01T12:03:00.000Z'),
+        ),
+      ).rejects.toBeInstanceOf(PagamentoProviderProjectionConflictError);
+      await expect(
+        repo.updateProviderProjection(
+          approved.id,
+          {
+            paymentIntentExternalRef: 'pi_projection',
+            chargeExternalRef: 'ch_stale_different',
+          },
+          new Date('2026-05-01T12:03:30.000Z'),
+        ),
+      ).rejects.toMatchObject({ field: 'chargeExternalRef' });
+      const replay = await repo.updateProviderProjection(
+        approved.id,
+        {
+          paymentIntentExternalRef: 'pi_projection',
+          chargeExternalRef: 'ch_projection',
+          balanceTransactionAvailableOn: null,
+        },
+        new Date('2026-05-01T12:04:00.000Z'),
+      );
+      expect(replay).toMatchObject({
+        status: 'aprovado',
+        transacaoExterna,
+        intencao: {
+          contribuinte: { email: 'canonical@example.com' },
+          paymentIntentExternalRef: 'pi_projection',
+          chargeExternalRef: 'ch_projection',
+          balanceTransactionAvailableOn: new Date('2026-05-07T12:00:00.000Z'),
+        },
+      });
+      await expect(repo.findById(approved.id)).resolves.toMatchObject(replay as Pagamento);
+      await expect(
+        repo.updateProviderProjection(
+          randomUUID(),
+          { paymentIntentExternalRef: 'pi_missing' },
+          new Date(),
+        ),
+      ).resolves.toBeUndefined();
     });
 
     it('preserves a concurrently stamped contribuinte when stale approval CAS commits', async () => {

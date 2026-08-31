@@ -18,6 +18,7 @@ import type {
 } from '../../domain/pagamentos/value-objects/ids.js';
 import { PagamentoJaExisteError } from '../../errors/pagamentos/ja-existe.error.js';
 import { PagamentoNaoEncontradoError } from '../../errors/pagamentos/nao-encontrado.error.js';
+import { PagamentoProviderProjectionConflictError } from '../../errors/pagamentos/provider-projection-conflict.error.js';
 import type { Database } from '../database.js';
 import type { DB } from '../db-types.generated.js';
 import type {
@@ -25,6 +26,7 @@ import type {
   ClaimPixCobrancaProviderReadByTxidInput,
   ClaimPixCobrancaReconciliationCandidatesInput,
   MuralRecadoProjection,
+  PagamentoProviderProjection,
   PagamentoRepository,
   PixCobrancaReconciliationCandidate,
 } from './repository.js';
@@ -190,6 +192,105 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
           // fresh booking). update() now touches ONLY the pagamentos row.
         });
         span.setStatus({ code: SpanStatusCode.OK });
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  async updateProviderProjection(
+    idPagamento: IdPagamento,
+    projection: PagamentoProviderProjection,
+    atualizadoEm: Date,
+  ): Promise<Pagamento | undefined> {
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: one atomic SQL projection validates three independently optional fields and distinguishes missing rows from conflicts
+    return tracer.startActiveSpan('db.pagamentos.updateProviderProjection', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+      try {
+        const providerColumns = {
+          ...('paymentIntentExternalRef' in projection
+            ? {
+                intencao_payment_intent_external_ref: sql<string | null>`coalesce(
+                  intencao_payment_intent_external_ref,
+                  ${projection.paymentIntentExternalRef ?? null}
+                )`,
+              }
+            : {}),
+          ...('chargeExternalRef' in projection
+            ? {
+                intencao_charge_external_ref: sql<string | null>`coalesce(
+                  intencao_charge_external_ref,
+                  ${projection.chargeExternalRef ?? null}
+                )`,
+              }
+            : {}),
+          ...('balanceTransactionAvailableOn' in projection
+            ? {
+                intencao_balance_transaction_available_on: sql<Date | null>`coalesce(
+                  intencao_balance_transaction_available_on,
+                  ${projection.balanceTransactionAvailableOn ?? null}
+                )`,
+              }
+            : {}),
+          atualizado_em: atualizadoEm,
+        };
+        let updateQuery = this.db
+          .updateTable('pagamentos')
+          .set(providerColumns)
+          .where('id', '=', idPagamento);
+        if (projection.paymentIntentExternalRef != null) {
+          updateQuery = updateQuery.where((eb) =>
+            eb.or([
+              eb('intencao_payment_intent_external_ref', 'is', null),
+              eb(
+                'intencao_payment_intent_external_ref',
+                '=',
+                projection.paymentIntentExternalRef as string,
+              ),
+            ]),
+          );
+        }
+        if (projection.chargeExternalRef != null) {
+          updateQuery = updateQuery.where((eb) =>
+            eb.or([
+              eb('intencao_charge_external_ref', 'is', null),
+              eb('intencao_charge_external_ref', '=', projection.chargeExternalRef as string),
+            ]),
+          );
+        }
+        const row = await updateQuery.returningAll().executeTakeFirst();
+        span.setStatus({ code: SpanStatusCode.OK });
+        if (!row) {
+          const canonical = await this.db
+            .selectFrom('pagamentos')
+            .select(['intencao_payment_intent_external_ref', 'intencao_charge_external_ref'])
+            .where('id', '=', idPagamento)
+            .executeTakeFirst();
+          if (!canonical) return undefined;
+          if (
+            projection.paymentIntentExternalRef != null &&
+            canonical.intencao_payment_intent_external_ref != null &&
+            canonical.intencao_payment_intent_external_ref !== projection.paymentIntentExternalRef
+          ) {
+            throw new PagamentoProviderProjectionConflictError('paymentIntentExternalRef');
+          }
+          throw new PagamentoProviderProjectionConflictError('chargeExternalRef');
+        }
+        const canonicalAvailableOn = row.intencao_balance_transaction_available_on;
+        if (
+          projection.balanceTransactionAvailableOn != null &&
+          canonicalAvailableOn != null &&
+          new Date(canonicalAvailableOn).getTime() !==
+            projection.balanceTransactionAvailableOn.getTime()
+        ) {
+          span.addEvent('provider_projection.available_on_mismatch');
+        }
+        const itemRows = await loadItemsForPagamento(this.db, idPagamento);
+        return pagamentoFromRow(row as unknown as PagamentoRow, itemRows);
       } catch (error: unknown) {
         span.recordException(error as Error);
         span.setStatus({ code: SpanStatusCode.ERROR });

@@ -91,6 +91,12 @@ export interface ClaimPixCobrancaProviderReadByTxidInput {
   readonly leaseUntil: Date;
 }
 
+export interface PagamentoProviderProjection {
+  readonly paymentIntentExternalRef?: string | null;
+  readonly chargeExternalRef?: string | null;
+  readonly balanceTransactionAvailableOn?: Date | null;
+}
+
 /**
  * Persistência de Pagamentos (porta).
  *
@@ -111,6 +117,22 @@ export interface ClaimPixCobrancaProviderReadByTxidInput {
 export interface PagamentoRepository {
   save(pagamento: Pagamento): Promise<void>;
   update(pagamento: Pagamento): Promise<void>;
+  /**
+   * Atomically updates only Stripe/provider lookup and availability fields.
+   * It must never rewrite lifecycle, contributor, cart, or authoritative
+   * settlement transaction state. Every projected field is monotonic:
+   * missing canonical values may be filled, while established references or
+   * a non-null availability timestamp are never cleared or replaced. A
+   * conflicting non-null provider identity throws a typed conflict; a
+   * different availability timestamp preserves the first value and emits
+   * bounded mismatch telemetry. Returns the canonical row from the same
+   * mutation, or undefined when the payment no longer exists.
+   */
+  updateProviderProjection(
+    idPagamento: IdPagamento,
+    projection: PagamentoProviderProjection,
+    atualizadoEm: Date,
+  ): Promise<Pagamento | undefined>;
   /**
    * Atomically stamps the checkout contributor only when it is still absent.
    * This projection update must never rewrite lifecycle or provider fields.

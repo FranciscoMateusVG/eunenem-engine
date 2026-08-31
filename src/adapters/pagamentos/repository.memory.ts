@@ -8,11 +8,13 @@ import type {
 } from '../../domain/pagamentos/value-objects/ids.js';
 import { PagamentoJaExisteError } from '../../errors/pagamentos/ja-existe.error.js';
 import { PagamentoNaoEncontradoError } from '../../errors/pagamentos/nao-encontrado.error.js';
+import { PagamentoProviderProjectionConflictError } from '../../errors/pagamentos/provider-projection-conflict.error.js';
 import type {
   AdminRecadoRow,
   ClaimPixCobrancaProviderReadByTxidInput,
   ClaimPixCobrancaReconciliationCandidatesInput,
   MuralRecadoProjection,
+  PagamentoProviderProjection,
   PagamentoRepository,
   PixCobrancaReconciliationCandidate,
 } from './repository.js';
@@ -101,6 +103,84 @@ export class PagamentoRepositoryMemory implements PagamentoRepository {
         });
         span.setStatus({ code: SpanStatusCode.OK });
         return true;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  async updateProviderProjection(
+    idPagamento: IdPagamento,
+    projection: PagamentoProviderProjection,
+    atualizadoEm: Date,
+  ): Promise<Pagamento | undefined> {
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: one atomic projection validates and merges three independently optional fields
+    return tracer.startActiveSpan('db.pagamentos.updateProviderProjection', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+      try {
+        const persisted = this.pagamentos.get(idPagamento);
+        if (!persisted) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return undefined;
+        }
+        if (
+          projection.paymentIntentExternalRef != null &&
+          persisted.intencao.paymentIntentExternalRef != null &&
+          persisted.intencao.paymentIntentExternalRef !== projection.paymentIntentExternalRef
+        ) {
+          throw new PagamentoProviderProjectionConflictError('paymentIntentExternalRef');
+        }
+        if (
+          projection.chargeExternalRef != null &&
+          persisted.intencao.chargeExternalRef != null &&
+          persisted.intencao.chargeExternalRef !== projection.chargeExternalRef
+        ) {
+          throw new PagamentoProviderProjectionConflictError('chargeExternalRef');
+        }
+        if (
+          projection.balanceTransactionAvailableOn != null &&
+          persisted.intencao.balanceTransactionAvailableOn != null &&
+          persisted.intencao.balanceTransactionAvailableOn.getTime() !==
+            projection.balanceTransactionAvailableOn.getTime()
+        ) {
+          span.addEvent('provider_projection.available_on_mismatch');
+        }
+        const updated: Pagamento = {
+          ...persisted,
+          intencao: {
+            ...persisted.intencao,
+            ...('paymentIntentExternalRef' in projection
+              ? {
+                  paymentIntentExternalRef:
+                    persisted.intencao.paymentIntentExternalRef ??
+                    projection.paymentIntentExternalRef ??
+                    null,
+                }
+              : {}),
+            ...('chargeExternalRef' in projection
+              ? {
+                  chargeExternalRef:
+                    persisted.intencao.chargeExternalRef ?? projection.chargeExternalRef ?? null,
+                }
+              : {}),
+            ...('balanceTransactionAvailableOn' in projection
+              ? {
+                  balanceTransactionAvailableOn:
+                    persisted.intencao.balanceTransactionAvailableOn ??
+                    projection.balanceTransactionAvailableOn ??
+                    null,
+                }
+              : {}),
+          },
+          atualizadoEm,
+        };
+        this.pagamentos.set(idPagamento, updated);
+        span.setStatus({ code: SpanStatusCode.OK });
+        return updated;
       } catch (error: unknown) {
         span.recordException(error as Error);
         span.setStatus({ code: SpanStatusCode.ERROR });

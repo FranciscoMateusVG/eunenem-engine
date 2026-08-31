@@ -32,7 +32,10 @@ import { PagamentoEventPublisherMemory } from '../../../src/adapters/pagamentos/
 import { LivroFinanceiroRepositoryMemory } from '../../../src/adapters/pagamentos/financeiro/livro-repository.memory.js';
 import { PagamentoProviderFake } from '../../../src/adapters/pagamentos/provider.fake.js';
 import { PagamentoRepositoryMemory } from '../../../src/adapters/pagamentos/repository.memory.js';
+import { archiveAndDispatchStripeEvent } from '../../../src/adapters/webhook-archive/stripe-webhook-pipeline.js';
 import { WebhookEventArchiveMemory } from '../../../src/adapters/webhook-archive/webhook-event-archive.memory.js';
+import type { Pagamento } from '../../../src/domain/pagamentos/entities/pagamento.js';
+import { PagamentoProviderProjectionConflictError } from '../../../src/errors/pagamentos/provider-projection-conflict.error.js';
 import { NoopLogger } from '../../../src/observability/noop-logger.js';
 import type { Observability } from '../../../src/observability/observability.js';
 import { noopTracer } from '../../../src/observability/tracer.js';
@@ -42,7 +45,18 @@ interface TestRig {
   deps: ServerDeps;
   pagamentoRepository: PagamentoRepositoryMemory;
   livroFinanceiroRepository: LivroFinanceiroRepositoryMemory;
+  pagamentoEventPublisher: PagamentoEventPublisherMemory;
+  receipts: Pagamento[];
+  transactionId: string;
   provider: PagamentoProviderFake;
+}
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
 }
 
 function buildRig(overrides?: {
@@ -66,9 +80,12 @@ function buildRig(overrides?: {
   const contribuicaoRepository = new ContribuicaoRepositoryMemory();
   const livroFinanceiroRepository = new LivroFinanceiroRepositoryMemory();
   const pagamentoEventPublisher = new PagamentoEventPublisherMemory();
+  const receipts: Pagamento[] = [];
+  const transactionId = randomUUID();
   const provider = new PagamentoProviderFake({
     statusRefund: overrides?.refundStatus ?? 'aceito',
     statusResultado: overrides?.solicitarStatus ?? 'aprovado',
+    idTransacaoFactory: () => transactionId,
   });
 
   const deps = {
@@ -94,9 +111,20 @@ function buildRig(overrides?: {
     logPiiHashSalt: 'test-salt-thirty-two-chars-aaaaaaaaa',
     // aperture-v4ax3: cs.completed sweeps orphans via the archive.
     webhookEventArchive: new WebhookEventArchiveMemory(),
+    pixReceiptNotifier: async (pagamento) => {
+      receipts.push(pagamento);
+    },
   } as unknown as ServerDeps;
 
-  return { deps, pagamentoRepository, livroFinanceiroRepository, provider };
+  return {
+    deps,
+    pagamentoRepository,
+    livroFinanceiroRepository,
+    pagamentoEventPublisher,
+    receipts,
+    transactionId,
+    provider,
+  };
 }
 
 interface SeededIds {
@@ -311,6 +339,205 @@ describe('Phase 3 dispatcher: checkout.session.completed', () => {
     expect(lancs).toHaveLength(0);
   });
 
+  it('stale unpaid processing CAS cannot revert a concurrent charge approval', async () => {
+    const sessionId = `cs_test_${randomUUID()}`;
+    const piId = `pi_test_${randomUUID()}`;
+    const chId = `ch_test_${randomUUID()}`;
+    const ids = await seedFullChain(rig, sessionId, 'pix');
+    const processingCasEntered = deferred();
+    const resumeProcessingCas = deferred();
+    const originalCas = rig.pagamentoRepository.updateIfStatusIn.bind(rig.pagamentoRepository);
+    let casCalls = 0;
+    rig.pagamentoRepository.updateIfStatusIn = async (pagamento, expectedStatuses) => {
+      casCalls += 1;
+      if (casCalls === 1) {
+        processingCasEntered.resolve();
+        await resumeProcessingCas.promise;
+      }
+      return originalCas(pagamento, expectedStatuses);
+    };
+
+    const unpaid = dispatchVerifiedStripeEvent(
+      rig.deps,
+      noopSpan,
+      makeEvent('checkout.session.completed', {
+        id: sessionId,
+        payment_intent: piId,
+        payment_status: 'unpaid',
+        customer_details: { email: 'race@example.com' },
+        custom_fields: [{ key: 'nome', text: { value: 'Race' } }],
+      }),
+    );
+    await processingCasEntered.promise;
+
+    await dispatchVerifiedStripeEvent(
+      rig.deps,
+      noopSpan,
+      makeEvent('charge.succeeded', { id: chId, payment_intent: piId }),
+    );
+    resumeProcessingCas.resolve();
+    await unpaid;
+
+    const canonical = await rig.pagamentoRepository.findById(ids.idPagamento as never);
+    expect(canonical?.status).toBe('aprovado');
+    expect(canonical?.transacaoExterna).toMatchObject({
+      id: rig.transactionId,
+      provedor: 'fake-provider',
+      status: 'aprovado',
+      amountCents: 4725,
+    });
+    expect(canonical?.intencao.contribuinte).toMatchObject({
+      nome: 'Race',
+      email: 'race@example.com',
+    });
+    const approvalEvents = rig.pagamentoEventPublisher
+      .getEventosPublicados()
+      .filter((published) => published.tipo === 'payment.approved');
+    expect(approvalEvents).toHaveLength(1);
+    expect(approvalEvents[0]?.idTransacaoExterna).toBe(rig.transactionId);
+    expect(rig.receipts).toHaveLength(1);
+    expect(rig.receipts[0]).toMatchObject({
+      id: ids.idPagamento,
+      status: 'aprovado',
+      transacaoExterna: { id: rig.transactionId, provedor: 'fake-provider' },
+      intencao: { contribuinte: { email: 'race@example.com' } },
+    });
+  });
+
+  it('provider-reference projection cannot revert approval while its caller is paused', async () => {
+    const sessionId = `cs_test_${randomUUID()}`;
+    const piId = `pi_canonical_${randomUUID()}`;
+    const chId = `ch_test_${randomUUID()}`;
+    const availableOn = new Date('2026-06-03T12:00:00.000Z');
+    const ids = await seedFullChain(rig, sessionId, 'pix');
+    await rig.pagamentoRepository.setContribuinteIfAbsent(
+      ids.idPagamento as never,
+      { nome: 'Projection Race', email: 'projection-race@example.com' },
+      new Date('2026-06-03T11:59:00.000Z'),
+    );
+    await rig.pagamentoRepository.updateProviderProjection(
+      ids.idPagamento as never,
+      {
+        paymentIntentExternalRef: piId,
+        chargeExternalRef: chId,
+      },
+      new Date('2026-06-03T11:59:30.000Z'),
+    );
+    const projectionAttempted = deferred();
+    const allowProjectionMutation = deferred();
+    const originalProjection = rig.pagamentoRepository.updateProviderProjection.bind(
+      rig.pagamentoRepository,
+    );
+    let projectionCalls = 0;
+    rig.pagamentoRepository.updateProviderProjection = async (
+      idPagamento,
+      projection,
+      atualizadoEm,
+    ) => {
+      projectionCalls += 1;
+      if (projectionCalls === 1) {
+        projectionAttempted.resolve();
+        await allowProjectionMutation.promise;
+      }
+      return originalProjection(idPagamento, projection, atualizadoEm);
+    };
+
+    const unpaid = dispatchVerifiedStripeEvent(
+      rig.deps,
+      noopSpan,
+      makeEvent('checkout.session.completed', {
+        id: sessionId,
+        payment_intent: piId,
+        payment_status: 'unpaid',
+        customer_details: { email: 'projection-race@example.com' },
+        custom_fields: [{ key: 'nome', text: { value: 'Projection Race' } }],
+      }),
+    );
+    await projectionAttempted.promise;
+    await dispatchVerifiedStripeEvent(
+      rig.deps,
+      noopSpan,
+      makeEvent('charge.succeeded', { id: chId, payment_intent: piId }),
+    );
+    allowProjectionMutation.resolve();
+    await unpaid;
+
+    const canonical = await rig.pagamentoRepository.findById(ids.idPagamento as never);
+    expect(canonical).toMatchObject({
+      status: 'aprovado',
+      transacaoExterna: {
+        id: rig.transactionId,
+        provedor: 'fake-provider',
+        status: 'aprovado',
+        amountCents: 4725,
+      },
+      intencao: {
+        paymentIntentExternalRef: piId,
+        chargeExternalRef: chId,
+        balanceTransactionAvailableOn: availableOn,
+        contribuinte: { email: 'projection-race@example.com' },
+      },
+    });
+    const approvalEvents = rig.pagamentoEventPublisher
+      .getEventosPublicados()
+      .filter((published) => published.tipo === 'payment.approved');
+    expect(approvalEvents).toHaveLength(1);
+    expect(approvalEvents[0]?.idTransacaoExterna).toBe(rig.transactionId);
+    expect(rig.receipts).toHaveLength(1);
+    expect(rig.receipts[0]).toMatchObject({
+      status: 'aprovado',
+      transacaoExterna: { id: rig.transactionId, provedor: 'fake-provider' },
+      intencao: { contribuinte: { email: 'projection-race@example.com' } },
+    });
+  });
+
+  it('fails closed before downstream effects when session PI conflicts with canonical identity', async () => {
+    const sessionId = `cs_test_${randomUUID()}`;
+    const canonicalPi = `pi_canonical_${randomUUID()}`;
+    const conflictingPi = `pi_conflict_${randomUUID()}`;
+    const ids = await seedFullChain(rig, sessionId, 'pix');
+    await rig.pagamentoRepository.updateProviderProjection(
+      ids.idPagamento as never,
+      { paymentIntentExternalRef: canonicalPi },
+      new Date('2026-06-03T11:59:00.000Z'),
+    );
+
+    const event = makeEvent('checkout.session.completed', {
+      id: sessionId,
+      payment_intent: conflictingPi,
+      payment_status: 'unpaid',
+      customer_details: { email: 'must-not-stamp@example.com' },
+      custom_fields: [{ key: 'nome', text: { value: 'Must Not Stamp' } }],
+    });
+    const archive = new WebhookEventArchiveMemory();
+    const result = await archiveAndDispatchStripeEvent(archive, {
+      rawBody: JSON.stringify(event),
+      signatureHeader: 'verified-test-signature',
+      verifyEvent: () => event,
+      dispatch: (verified) => dispatchVerifiedStripeEvent(rig.deps, noopSpan, verified),
+    });
+
+    expect(result).toMatchObject({ status: 500, outcome: 'dispatched_failed' });
+    const archived = await archive.findByProviderEventId('stripe', event.id);
+    expect(archived).toMatchObject({
+      processedAt: null,
+      pagamentoId: null,
+    });
+    expect(archived?.processingError).toContain('paymentIntentExternalRef');
+
+    await expect(rig.pagamentoRepository.findById(ids.idPagamento as never)).resolves.toMatchObject(
+      {
+        status: 'pendente',
+        intencao: { paymentIntentExternalRef: canonicalPi, contribuinte: null },
+      },
+    );
+    expect(
+      (await rig.pagamentoRepository.findById(ids.idPagamento as never))?.transacaoExterna,
+    ).toBeUndefined();
+    expect(rig.pagamentoEventPublisher.getEventosPublicados()).toHaveLength(0);
+    expect(rig.receipts).toHaveLength(0);
+  });
+
   it('unknown session: no-op + null pagamentoId', async () => {
     const event = makeEvent('checkout.session.completed', {
       id: `cs_test_unknown_${randomUUID()}`,
@@ -373,6 +600,48 @@ describe('Phase 3 dispatcher: checkout.session.expired', () => {
   });
 });
 
+describe('Phase 3 dispatcher: payment_intent.succeeded identity conflict', () => {
+  it('fails closed before downstream effects when charge ref conflicts', async () => {
+    const rig = buildRig();
+    const sessionId = `cs_test_${randomUUID()}`;
+    const piId = `pi_canonical_${randomUUID()}`;
+    const canonicalCharge = `ch_canonical_${randomUUID()}`;
+    const conflictingCharge = `ch_conflict_${randomUUID()}`;
+    const ids = await seedFullChain(rig, sessionId, 'pix');
+    await rig.pagamentoRepository.updateProviderProjection(
+      ids.idPagamento as never,
+      { paymentIntentExternalRef: piId, chargeExternalRef: canonicalCharge },
+      new Date('2026-06-03T11:59:00.000Z'),
+    );
+
+    await expect(
+      dispatchVerifiedStripeEvent(
+        rig.deps,
+        noopSpan,
+        makeEvent('payment_intent.succeeded', {
+          id: piId,
+          latest_charge: conflictingCharge,
+        }),
+      ),
+    ).rejects.toBeInstanceOf(PagamentoProviderProjectionConflictError);
+
+    await expect(rig.pagamentoRepository.findById(ids.idPagamento as never)).resolves.toMatchObject(
+      {
+        status: 'pendente',
+        intencao: {
+          paymentIntentExternalRef: piId,
+          chargeExternalRef: canonicalCharge,
+        },
+      },
+    );
+    expect(
+      (await rig.pagamentoRepository.findById(ids.idPagamento as never))?.transacaoExterna,
+    ).toBeUndefined();
+    expect(rig.pagamentoEventPublisher.getEventosPublicados()).toHaveLength(0);
+    expect(rig.receipts).toHaveLength(0);
+  });
+});
+
 describe('Phase 3 dispatcher: payment_intent.processing', () => {
   let rig: TestRig;
   beforeEach(() => {
@@ -421,6 +690,75 @@ describe('Phase 3 dispatcher: payment_intent.processing', () => {
 
     const updated = await rig.pagamentoRepository.findById(ids.idPagamento as never);
     expect(updated?.status).toBe('aprovado'); // unchanged
+  });
+
+  it('stale processing event cannot revert a concurrent charge approval', async () => {
+    const sessionId = `cs_test_${randomUUID()}`;
+    const piId = `pi_test_${randomUUID()}`;
+    const chId = `ch_test_${randomUUID()}`;
+    const ids = await seedFullChain(rig, sessionId, 'pix');
+    const seeded = await rig.pagamentoRepository.findById(ids.idPagamento as never);
+    if (!seeded) throw new Error('pagamento not seeded');
+    await rig.pagamentoRepository.update({
+      ...seeded,
+      intencao: {
+        ...seeded.intencao,
+        paymentIntentExternalRef: piId,
+        contribuinte: { nome: 'Processing Race', email: 'processing-race@example.com' },
+      },
+    });
+
+    const processingCasEntered = deferred();
+    const resumeProcessingCas = deferred();
+    const originalCas = rig.pagamentoRepository.updateIfStatusIn.bind(rig.pagamentoRepository);
+    let casCalls = 0;
+    rig.pagamentoRepository.updateIfStatusIn = async (pagamento, expectedStatuses) => {
+      casCalls += 1;
+      if (casCalls === 1) {
+        processingCasEntered.resolve();
+        await resumeProcessingCas.promise;
+      }
+      return originalCas(pagamento, expectedStatuses);
+    };
+
+    const processing = dispatchVerifiedStripeEvent(
+      rig.deps,
+      noopSpan,
+      makeEvent('payment_intent.processing', { id: piId }),
+    );
+    await processingCasEntered.promise;
+    await dispatchVerifiedStripeEvent(
+      rig.deps,
+      noopSpan,
+      makeEvent('charge.succeeded', { id: chId, payment_intent: piId }),
+    );
+    resumeProcessingCas.resolve();
+    await processing;
+
+    const canonical = await rig.pagamentoRepository.findById(ids.idPagamento as never);
+    expect(canonical?.status).toBe('aprovado');
+    expect(canonical?.transacaoExterna).toMatchObject({
+      id: rig.transactionId,
+      provedor: 'fake-provider',
+      status: 'aprovado',
+      amountCents: 4725,
+    });
+    expect(canonical?.intencao.contribuinte).toMatchObject({
+      nome: 'Processing Race',
+      email: 'processing-race@example.com',
+    });
+    const approvalEvents = rig.pagamentoEventPublisher
+      .getEventosPublicados()
+      .filter((published) => published.tipo === 'payment.approved');
+    expect(approvalEvents).toHaveLength(1);
+    expect(approvalEvents[0]?.idTransacaoExterna).toBe(rig.transactionId);
+    expect(rig.receipts).toHaveLength(1);
+    expect(rig.receipts[0]).toMatchObject({
+      id: ids.idPagamento,
+      status: 'aprovado',
+      transacaoExterna: { id: rig.transactionId, provedor: 'fake-provider' },
+      intencao: { contribuinte: { email: 'processing-race@example.com' } },
+    });
   });
 });
 

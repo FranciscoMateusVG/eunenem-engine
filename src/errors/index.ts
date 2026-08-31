@@ -14,6 +14,7 @@ export { FinanceiroSaldoDisponivelInsuficienteError } from './pagamentos/finance
 export { PagamentosInputInvalidoError } from './pagamentos/input-invalido.error.js';
 export { PagamentoJaExisteError } from './pagamentos/ja-existe.error.js';
 export { PagamentoNaoEncontradoError } from './pagamentos/nao-encontrado.error.js';
+export { PagamentoProviderProjectionConflictError } from './pagamentos/provider-projection-conflict.error.js';
 export { PagamentoTransicaoStatusInvalidaError } from './pagamentos/transicao-status-invalida.error.js';
 export { PagamentoValorDivergenteError } from './pagamentos/valor-divergente.error.js';
 export { TaxasInputInvalidoError } from './taxas/input-invalido.error.js';
