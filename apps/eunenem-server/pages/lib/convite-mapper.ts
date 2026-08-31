@@ -39,7 +39,9 @@ export interface EventoConviteQueryData {
 export interface SaveConvitePayload {
   tipoEvento: TipoEvento;
   modalidade: ModalidadeEvento;
-  dataHoraIso: string | null;
+  /** aperture-n06ca — required on save now: the wizard blocks empty date/time
+   *  before the payload is ever built, and the server schema rejects null. */
+  dataHoraIso: string;
   endereco: string | null;
   remetente: string;
   nomeExibido: string;
@@ -282,8 +284,11 @@ function splitIsoToLocalFields(dataHoraIso: string | null): { date: string; time
   };
 }
 
-function combineLocalDateAndTime(date: string, time: string): string | null {
-  if (!date) return null;
+function combineLocalDateAndTime(date: string, time: string): string {
+  // aperture-n06ca — date is required now. The wizard's step gate blocks the
+  // save before an empty date can reach here; throwing keeps the contract
+  // honest for any future caller that skips the gate.
+  if (!date) throw new Error('Data do convite é obrigatória');
   // See NO_TIME_CHOSEN_SECONDS docstring above — :01 seconds marks "no time
   // chosen" so it can be told apart from a real midnight on read.
   const combined =

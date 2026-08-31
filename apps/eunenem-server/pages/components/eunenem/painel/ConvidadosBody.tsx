@@ -1833,7 +1833,10 @@ export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
                         onChange={(e) =>
                           setState((s) => ({ ...s, date: e.target.value }))
                         }
+                        aria-invalid={fieldErrors.date ? true : undefined}
+                        style={fieldErrors.date ? { borderColor: "#c2566f" } : undefined}
                       />
+                      <FieldError msg={fieldErrors.date} />
                     </label>
                     <label className="cv-invite-field">
                       <span className="cv-invite-label">
@@ -1846,7 +1849,10 @@ export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
                         onChange={(e) =>
                           setState((s) => ({ ...s, time: e.target.value }))
                         }
+                        aria-invalid={fieldErrors.time ? true : undefined}
+                        style={fieldErrors.time ? { borderColor: "#c2566f" } : undefined}
                       />
+                      <FieldError msg={fieldErrors.time} />
                     </label>
                   </div>
                 </div>

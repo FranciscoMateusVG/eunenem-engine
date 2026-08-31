@@ -117,7 +117,17 @@ const SaveEventoConviteInputSchema = z.object({
   idCampanha: z.string().uuid(),
   tipoEvento: TipoEventoSchema,
   modalidade: ModalidadeEventoSchema,
-  dataHoraIso: z.string().datetime().nullable(),
+  // aperture-n06ca — date + time are REQUIRED on save now (was .nullable()).
+  // Belt-and-braces with the wizard's client-side gate: null is rejected, and
+  // so is the ":01 seconds" sentinel the client mapper writes for "date filled
+  // but no time chosen" (see NO_TIME_CHOSEN_SECONDS in pages/lib/
+  // convite-mapper.ts) — a real <input type="time"> value always lands on :00.
+  dataHoraIso: z
+    .string()
+    .datetime()
+    .refine((iso) => new Date(iso).getSeconds() === 0, {
+      message: 'Data e horário do evento são obrigatórios',
+    }),
   endereco: z.string().trim().min(1).max(500).nullable(),
   remetente: RemetenteConviteSchema,
   nomeExibido: NomeExibidoConviteSchema,

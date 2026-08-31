@@ -1349,15 +1349,20 @@ const STEPS: readonly WizardStep[] = [
 // aperture-rw880 — client-side required-field validation, mirroring the backend
 // eventoConvite.save schema (remetente=host + nomeExibido=babyName are min(1)).
 // Blocks advancing / saving / sending with a friendly inline message instead
-// of leaking the raw backend 400. Date/time are optional — the creator may
-// not have them decided yet.
-export type ConviteFieldKey = "babyName" | "host";
+// of leaking the raw backend 400.
+// aperture-n06ca — date + time are now REQUIRED too (operator: guests need to
+// know when the event happens; "preencher depois" led to invites sent with no
+// date). The save schema (eventoConvite.save) rejects a null/sentinel
+// dataHoraIso to match.
+export type ConviteFieldKey = "babyName" | "host" | "date" | "time";
 export type ConviteFieldErrors = Partial<Record<ConviteFieldKey, string>>;
 
 export function conviteFieldErrors(state: ConviteState): ConviteFieldErrors {
   const e: ConviteFieldErrors = {};
   if (!state.babyName.trim()) e.babyName = "preencha o nome do bebê ♡";
   if (!state.host.trim()) e.host = "diga de quem vem o convite ♡";
+  if (!state.date.trim()) e.date = "escolha a data do evento ♡";
+  if (!state.time.trim()) e.time = "escolha o horário do evento ♡";
   return e;
 }
 
@@ -1365,7 +1370,7 @@ export const STEP_REQUIRED_FIELDS: Record<WizardStepId, ConviteFieldKey[]> = {
   fundo: [],
   tipo: [],
   quem: ["babyName", "host"],
-  quando: [],
+  quando: ["date", "time"],
   visual: [],
   pronto: [],
 };
@@ -1902,7 +1907,7 @@ function StepQuem({ state, update, errors }: StepViewProps) {
   );
 }
 
-function StepQuando({ state, update }: StepViewProps) {
+function StepQuando({ state, update, errors }: StepViewProps) {
   const isOnline = state.mode === "online";
   return (
     <>
@@ -1928,17 +1933,15 @@ function StepQuando({ state, update }: StepViewProps) {
             só online
           </button>
         </div>
-        <div className="cv-note" style={{ marginTop: 12, marginBottom: 0 }}>
-          {isOnline
-            ? "✨ data e hora são opcionais."
-            : "✨ data e hora são opcionais — você pode preencher depois."}
-        </div>
       </div>
 
+      {/* aperture-n06ca — date + time are required now: the "são opcionais /
+          preencher depois" note is gone and the labels dropped "(opcional)".
+          Inline errors mirror StepQuem's required-field idiom. */}
       <div className="cv-grid-2" style={{ marginBottom: 18 }}>
         <div>
           <label className="cv-label" htmlFor="cv-date">
-            data (opcional)
+            data
           </label>
           <input
             id="cv-date"
@@ -1946,11 +1949,14 @@ function StepQuando({ state, update }: StepViewProps) {
             className="cv-input"
             value={state.date}
             onChange={(e) => update("date", e.target.value)}
+            aria-invalid={errors?.date ? true : undefined}
+            style={errors?.date ? { borderColor: "#c2566f" } : undefined}
           />
+          <FieldError msg={errors?.date} />
         </div>
         <div>
           <label className="cv-label" htmlFor="cv-time" style={{ transform: "rotate(1deg)" }}>
-            horário (opcional)
+            horário
           </label>
           <input
             id="cv-time"
@@ -1958,7 +1964,10 @@ function StepQuando({ state, update }: StepViewProps) {
             className="cv-input"
             value={state.time}
             onChange={(e) => update("time", e.target.value)}
+            aria-invalid={errors?.time ? true : undefined}
+            style={errors?.time ? { borderColor: "#c2566f" } : undefined}
           />
+          <FieldError msg={errors?.time} />
         </div>
       </div>
 
