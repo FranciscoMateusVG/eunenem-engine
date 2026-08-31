@@ -62,14 +62,14 @@ async function seedWebhookGift(
   db: Database,
   seed: { idCampanha: string; idOpcaoPresentes: string },
 ): Promise<{ id: string; nome: string }> {
-  // Gift 1273 + ceil(5% fee) = 1337. The e2e-only fake therefore returns
+  // Gift 1226 + ceil(8.98% fee) = 1337. The e2e-only fake therefore returns
   // `concluida` when the unsigned callback triggers its authoritative read.
   const nome = `A4PQT Inter ${randomUUID().slice(0, 8)}`;
   const id = await seedAvailableGift(buildSeedGiftRepos(db), {
     idCampanha: seed.idCampanha,
     idOpcaoPresentes: seed.idOpcaoPresentes,
     nome,
-    valorCents: 1273,
+    valorCents: 1226,
   });
   return { id, nome };
 }

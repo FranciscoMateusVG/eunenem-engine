@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 // aperture-cvhlm — "Taxas" / transparent fees section (v2 HTML section 06).
 // Cream card with the 100% headline on the left + a 3-column payout-method
 // grid on the right (Pix / Cartão / Transferência). Backs the "100% em
-// dinheiro" positioning by showing that the 7.5% fee is paid by guests and
+// dinheiro" positioning by showing that the 8.98% fee is paid by guests and
 // the creator's payout is never reduced.
 type FeeItem = {
   label: string;

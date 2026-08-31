@@ -52,7 +52,7 @@ const contribuinteValido = () => ({
  * finalize use-case finds them) and the pagamento via the shared
  * `makePagamento` factory (cart shape). The pagamento's
  * `composicaoValoresAggregate` reflects the FROZEN per-platform fee —
- * eunenem 5% (fee 400) vs eucasei 8% (fee 640) — so the orchestrator's
+ * historical eunenem 5% snapshot (fee 400) vs eucasei 8% (fee 640) — so the orchestrator's
  * "no re-query RegraTaxa" contract is honored.
  */
 async function setupPagamentoPendente(idPlataforma: string, tipoOpcao: 'presente' | 'rifa') {
@@ -100,7 +100,8 @@ async function setupPagamentoPendente(idPlataforma: string, tipoOpcao: 'presente
     },
   );
 
-  // Frozen per-platform fee: eunenem 5% of R$80 = R$4; eucasei 8% = R$6,40.
+  // Historical frozen snapshot: eunenem 5% of R$80 = R$4; eucasei 8% = R$6,40.
+  // This intentionally does not consult today's fee rule.
   const feeUnitAmountCents = idPlataforma === ID_PLATAFORMA_EUCASEI ? 640 : 400;
 
   const pendente = makePagamento({
@@ -133,7 +134,7 @@ async function setupPagamentoPendente(idPlataforma: string, tipoOpcao: 'presente
 }
 
 describe('finalizarPagamentoAprovado — happy path', () => {
-  it('approves the pagamento and registers Financeiro effects (eunenem 5% presente)', async () => {
+  it('approves a historical pagamento frozen at the old eunenem 5% presente rate', async () => {
     const { deps, idPagamento, idCampanha, idContribuicao } = await setupPagamentoPendente(
       ID_PLATAFORMA_EUNENEM,
       'presente',
@@ -172,7 +173,7 @@ describe('finalizarPagamentoAprovado — happy path', () => {
     const { lancamentos } = await finalizarPagamentoAprovado(deps, { idPagamento });
 
     const total = lancamentos.reduce((sum, l) => sum + l.amountCents, 0);
-    expect(total).toBe(8400); // R$80 receiver + R$4 receita = R$84
+    expect(total).toBe(8400); // Historical R$80 receiver + R$4 receita = R$84
   });
 });
 

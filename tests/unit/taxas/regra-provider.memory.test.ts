@@ -7,21 +7,21 @@ import { ProvedorRegraTaxaMemory } from '../../../src/adapters/taxas/regra-provi
 import { RegraTaxaNaoEncontradaError } from '../../../src/errors/taxas/regra-nao-encontrada.error.js';
 
 describe('ProvedorRegraTaxaMemory', () => {
-  it('returns the seeded eunenem regra (5 percent across all tipos, contribuinte pays)', async () => {
+  it('returns the seeded eunenem regra (8.98 percent across all tipos, contribuinte pays)', async () => {
     const provider = new ProvedorRegraTaxaMemory();
     const regra = await provider.getRegraAtiva(ID_PLATAFORMA_EUNENEM);
 
     expect(regra.idPlataforma).toBe(ID_PLATAFORMA_EUNENEM);
     expect(regra.tarifasPorTipo.presente).toEqual({
-      percentageBps: 500,
+      percentageBps: 898,
       responsavelTaxa: 'contribuinte',
     });
     expect(regra.tarifasPorTipo.rifa).toEqual({
-      percentageBps: 500,
+      percentageBps: 898,
       responsavelTaxa: 'contribuinte',
     });
     expect(regra.tarifasPorTipo.convite).toEqual({
-      percentageBps: 500,
+      percentageBps: 898,
       responsavelTaxa: 'contribuinte',
     });
   });

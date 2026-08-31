@@ -204,7 +204,7 @@ export interface ServerDeps {
   readonly livroFinanceiroRepository: LivroFinanceiroRepository;
   /**
    * Taxas BC — provider of fee rules per plataforma+tipo. v1 uses the
-   * in-memory seed (eunenem: 10% on presentes). When operators need
+   * in-memory seed (eunenem: 8.98% on every payment type). When operators need
    * dynamic per-plataforma fees, swap for a Postgres-backed provider.
    */
   readonly provedorRegraTaxa: ProvedorRegraTaxa;
@@ -1092,7 +1092,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     checkoutSessionProvider = fakeAdapter;
   }
 
-  // Taxas BC — in-memory seed (10% on eunenem presentes; see REGRAS_TAXA_SEED).
+  // Taxas BC — in-memory seed (8.98% on all eunenem payment types).
   // Default-construction is also seed-backed; passing explicitly for clarity.
   const provedorRegraTaxa = new ProvedorRegraTaxaMemory(REGRAS_TAXA_SEED);
   // Silence the "unused import" complaint if we ever drop REGRAS_TAXA_SEED above.

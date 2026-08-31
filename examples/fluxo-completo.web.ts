@@ -493,13 +493,13 @@ app.get('/', async (c) => {
 
     <h3>Roteiro sugerido para testar tudo</h3>
     <ol>
-      <li>Escolha uma plataforma abaixo (<em>eunenem</em>: 5% em tudo; <em>eucasei</em>: 6% presente / 8% rifa).</li>
+      <li>Escolha uma plataforma abaixo (<em>eunenem</em>: 8,98% em tudo; <em>eucasei</em>: 6% presente / 8% rifa).</li>
       <li><strong>Admin</strong>: crie um usuário, depois uma campanha com esse usuário como admin.</li>
       <li>Na página da campanha: adicione uma opção (ex: <em>presente</em>) e uma contribuição (ex: "Fralda", 8000 centavos).</li>
       <li><strong>Loja</strong>: confira o preço pré-calculado, clique "Comprar", preencha contribuinte, pague.</li>
       <li><strong>Status</strong>: veja a contribuição como <em>indisponivel</em> e o pagamento como <em>aprovado</em>.</li>
       <li><strong>Financeiro</strong>: veja o saldo pendente + receita. Clique <em>"Maturar pendentes"</em>. Solicite um repasse.</li>
-      <li>Volte ao home e teste a outra plataforma para ver a diferença de preço (R$80 vira R$84 em eunenem vs R$86.40 em rifa eucasei).</li>
+      <li>Volte ao home e teste a outra plataforma para ver a diferença de preço (R$80 vira R$87,19 em eunenem vs R$86,40 em rifa eucasei).</li>
     </ol>
 
     <h2>Plataformas disponíveis</h2>

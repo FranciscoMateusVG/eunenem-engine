@@ -30,8 +30,8 @@
  * stopping at a display-only poll. Classic e2e-catches-what-lower-cant: the
  * unit suite injects its own options and never sees the binding.
  *
- * The magic test seeds a 1273-cent gift so the CHARGE totals exactly
- * PIX_COBRANCA_FAKE_MAGIC_CENTS.autoComplete (1337 = 1273 + ceil(5% fee))
+ * The magic test seeds a 1226-cent gift so the CHARGE totals exactly
+ * PIX_COBRANCA_FAKE_MAGIC_CENTS.autoComplete (1337 = 1226 + ceil(8.98% fee))
  * → first consult reports 'concluida' → the poll flips the panel to
  * confirmed. Non-magic tests seed 4200 so the scannable state holds still.
  */
@@ -229,10 +229,10 @@ test.describe('kuw0o — PIX checkout routing (:3004, fake cobrança provider)',
     seededData,
   }) => {
     // MAGIC total: the fake matches criarCobranca's amountCents — which is
-    // the aggregate totalPaidCents = contribution + platform fee (5% / 500
+    // the aggregate totalPaidCents = contribution + platform fee (8.98% / 898
     // bps on eunenem presentes, REGRAS_TAXA_SEED, Math.ceil —
-    // calculo-taxa.ts:52). Seed the GIFT at 1273 so the CHARGE lands
-    // exactly on 1337: 1273 + ceil(63.65) = 1337. Then the FIRST consult
+    // calculo-taxa.ts:52). Seed the GIFT at 1226 so the CHARGE lands
+    // exactly on 1337: 1226 + ceil(110.0948) = 1337. Then the FIRST consult
     // reports 'concluida' and the panel flips within one poll cycle. No
     // scannable-state assertions here — that surface is covered by the
     // non-magic test above precisely because this flip is instant.
@@ -246,7 +246,7 @@ test.describe('kuw0o — PIX checkout routing (:3004, fake cobrança provider)',
       });
     });
 
-    const gift = await seedMagicGift(seededData, 1273);
+    const gift = await seedMagicGift(seededData, 1226);
     const modal = await openModalAndPickPix(page, PIX_SERVER, seededData.slug, gift.nome);
 
     await modal.getByPlaceholder('Ana & João').fill('E2e Visitante Pix');
@@ -531,7 +531,7 @@ test.describe('kuw0o — irhxi QA regressions (:3004, fake cobrança provider)',
     page,
     seededData,
   }) => {
-    // 4200-cent gift → charge = 4200 + ceil(5%) = 4410. The QR screen must
+    // 4200-cent gift → charge = 4200 + ceil(8.98%) = 4578. The QR screen must
     // show the CHARGED amount from the pix_qr response — bound here against
     // the wire value AND the persisted aggregate, with zero client-side
     // fee arithmetic.
@@ -550,10 +550,10 @@ test.describe('kuw0o — irhxi QA regressions (:3004, fake cobrança provider)',
       result?: { data?: { valorCents?: number; txid?: string } };
     }>;
     const wire = body[0]?.result?.data;
-    expect(wire?.valorCents, 'pix_qr response must carry the charged amount').toBe(4410);
+    expect(wire?.valorCents, 'pix_qr response must carry the charged amount').toBe(4578);
 
-    // Displayed: the QR heading renders the wire amount (R$ 44,10).
-    await expect(modal.getByRole('heading', { name: /paga com pix — R\$\s*44,10/ })).toBeVisible();
+    // Displayed: the QR heading renders the wire amount (R$ 45,78).
+    await expect(modal.getByRole('heading', { name: /paga com pix — R\$\s*45,78/ })).toBeVisible();
 
     // Persisted: the charge row's aggregate equals the wire amount.
     const db = createDatabase(DATABASE_URL);
@@ -563,7 +563,7 @@ test.describe('kuw0o — irhxi QA regressions (:3004, fake cobrança provider)',
         .select(['intencao_total_paid_cents'])
         .where('intencao_external_ref', '=', wire?.txid ?? '')
         .executeTakeFirst();
-      expect(Number(row?.intencao_total_paid_cents)).toBe(4410);
+      expect(Number(row?.intencao_total_paid_cents)).toBe(4578);
     } finally {
       await db.destroy();
     }
@@ -585,8 +585,8 @@ test.describe('kuw0o — irhxi QA regressions (:3004, fake cobrança provider)',
     const cartBody = JSON.parse(await (await cartInitiation).text()) as Array<{
       result?: { data?: { valorCents?: number } };
     }>;
-    expect(cartBody[0]?.result?.data?.valorCents).toBe(4410);
-    await expect(drawer.getByRole('heading', { name: /paga com pix — R\$\s*44,10/ })).toBeVisible();
+    expect(cartBody[0]?.result?.data?.valorCents).toBe(4578);
+    await expect(drawer.getByRole('heading', { name: /paga com pix — R\$\s*45,78/ })).toBeVisible();
   });
 });
 

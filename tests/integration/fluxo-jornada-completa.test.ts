@@ -46,8 +46,8 @@ const fixedDate = new Date('2026-05-01T12:00:00.000Z');
 const clock = () => fixedDate;
 
 const VALOR_CONTRIBUICAO_CENTS = 8000;
-const VALOR_TAXA_CENTS = 400;
-const VALOR_TOTAL_CENTS = 8400;
+const VALOR_TAXA_CENTS = 719;
+const VALOR_TOTAL_CENTS = 8719;
 
 const dadosRecebedorPadrao = () => ({
   metodo: 'pix' as const,

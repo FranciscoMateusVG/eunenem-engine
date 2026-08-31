@@ -4,7 +4,7 @@
  *
  * Operator caught on live-walk: the marketplace card showed bare
  * `contribuicao.valor` (e.g. R$ 1.00 for BABADOR B) while Stripe
- * actually charged R$ 1.05 — contribution + 5% eunenem fee.
+ * actually charged the fee-inclusive amount — contribution + eunenem fee.
  *
  * The fee is invisible to the visitor (operator's intent — taxa de
  * serviço lives IN the displayed price). Same goes for the Cartão
@@ -20,14 +20,14 @@
  * original bug) fails this test.
  *
  * Math reference for `contribuicao.valor = 100` cents:
- *   - eunenem RegraTaxa: presente = 5% (REGRAS_TAXA_SEED)
- *   - fee  = ceil(100 × 500 / 10_000) = 5
- *   - valor = 100 + 5 = 105
+ *   - eunenem RegraTaxa: presente = 8.98% (REGRAS_TAXA_SEED)
+ *   - fee  = ceil(100 × 898 / 10_000) = 9
+ *   - valor = 100 + 9 = 109
  *   - surcharge = ceil((100 × 0.039 + 39) / (1 − 0.039))
  *               = ceil(42.9 / 0.961)
  *               = ceil(44.64)
  *               = 45
- *   - valorComTaxaCartao = 105 + 45 = 150
+ *   - valorComTaxaCartao = 109 + 45 = 154
  */
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
@@ -100,7 +100,7 @@ function buildPaginaTestDeps(): ServerDeps {
 }
 
 describe('pagina.obterListaPresentes projection (aperture-ines9)', () => {
-  it('returns valor = contribution + 5% eunenem fee and valorComTaxaCartao = valor + Stripe Brazil card surcharge', async () => {
+  it('returns valor = contribution + 8.98% eunenem fee and valorComTaxaCartao = valor + Stripe Brazil card surcharge', async () => {
     const deps = buildPaginaTestDeps();
 
     // Seed: register a user → saga creates their campanha + presente opção
@@ -174,10 +174,10 @@ describe('pagina.obterListaPresentes projection (aperture-ines9)', () => {
     const [item] = items;
     if (!item) throw new Error('seed: projection returned empty array');
     expect(item.nome).toBe('BABADOR B');
-    // valor = 100 + 5 (5% eunenem fee) = 105
-    expect(item.valor).toBe(105);
-    // valorComTaxaCartao = 105 + 45 (Stripe Brazil 3.9% + R$0.39 gross-up
-    // computed off the bare 100 base) = 150
-    expect(item.valorComTaxaCartao).toBe(150);
+    // valor = 100 + ceil(8.98) = 109
+    expect(item.valor).toBe(109);
+    // valorComTaxaCartao = 109 + 45 (Stripe Brazil 3.9% + R$0.39 gross-up
+    // computed off the bare 100 base) = 154
+    expect(item.valorComTaxaCartao).toBe(154);
   });
 });

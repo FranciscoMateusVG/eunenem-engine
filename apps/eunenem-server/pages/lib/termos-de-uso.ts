@@ -94,11 +94,11 @@ A EuNeném somente será remunerada pelas taxas de serviço incidentes sobre as 
 Os COMPRADORES poderão adquirir PRESENTES VIRTUAIS de forma integral ou parcial, respeitados os valores mínimos estabelecidos pela plataforma.
 Cada contribuição corresponderá exclusivamente à manifestação espontânea de vontade do COMPRADOR.
 4.3 Taxa de Serviço
-Sobre cada contribuição realizada será acrescida ao valor do PRESENTE VIRTUAL uma taxa de serviço correspondente a 7,8% (sete vírgula oito por cento).
+Sobre cada contribuição realizada será acrescida ao valor do PRESENTE VIRTUAL uma taxa de serviço correspondente a 8,98% (oito vírgula noventa e oito por cento).
 Esta taxa será integralmente suportada pelo COMPRADOR e constitui a remuneração da EuNeném pela disponibilização da plataforma e pelos serviços de intermediação financeira.
 Em nenhuma hipótese esta taxa será descontada do valor recebido pelo CLIENTE.
 4.4 Pagamentos por Cartão de Crédito
-Quando o COMPRADOR optar pelo pagamento mediante cartão de crédito, será acrescida ao valor total da operação uma taxa adicional correspondente a 3,99% (três vírgula noventa e nove por cento).
+Quando o COMPRADOR optar pelo pagamento mediante cartão de crédito, será acrescido um valor calculado para cobrir a tarifa de processamento de 3,9% (três vírgula nove por cento) sobre o total processado, mais R$ 0,39 (trinta e nove centavos) por transação, com arredondamento para cima em centavos.
 Esta taxa destina-se exclusivamente aos custos operacionais do processamento do pagamento e será suportada exclusivamente pelo COMPRADOR.
 4.5 Valor Recebido pelo CLIENTE
 O CLIENTE receberá integralmente o valor definido para cada PRESENTE VIRTUAL adquirido pelos COMPRADORES.
