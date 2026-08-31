@@ -341,7 +341,6 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
     pagamento: Pagamento,
     expectedStatuses: readonly StatusPagamento[],
   ): Promise<Pagamento | undefined> {
-    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: one atomic CAS must distinguish lifecycle loss from two independently conflicting provider identities
     return tracer.startActiveSpan('db.pagamentos.updateIfStatusIn', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
       try {
@@ -364,51 +363,22 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
             ${pagamento.intencao.balanceTransactionAvailableOn}
           )`,
         };
-        let updateQuery = this.db
-          .updateTable('pagamentos')
-          // Operational lease columns are intentionally omitted by the
-          // mapper. Contributor columns are also omitted: they belong to the
-          // independent first-write-wins projection and a stale lifecycle
-          // aggregate must not erase or replace its canonical value.
-          // biome-ignore lint/suspicious/noExplicitAny: kysely Updateable brand vs plain row object
-          .set(providerAwareLifecycleRow as any)
-          .where('id', '=', pagamento.id)
-          .where('status', 'in', expectedStatuses);
-        if (pagamento.intencao.paymentIntentExternalRef != null) {
-          updateQuery = updateQuery.where((eb) =>
-            eb.or([
-              eb('intencao_payment_intent_external_ref', 'is', null),
-              eb(
-                'intencao_payment_intent_external_ref',
-                '=',
-                pagamento.intencao.paymentIntentExternalRef as string,
-              ),
-            ]),
-          );
-        }
-        if (pagamento.intencao.chargeExternalRef != null) {
-          updateQuery = updateQuery.where((eb) =>
-            eb.or([
-              eb('intencao_charge_external_ref', 'is', null),
-              eb(
-                'intencao_charge_external_ref',
-                '=',
-                pagamento.intencao.chargeExternalRef as string,
-              ),
-            ]),
-          );
-        }
-        const result = await updateQuery.returningAll().executeTakeFirst();
-        span.setStatus({ code: SpanStatusCode.OK });
-        if (!result) {
-          const canonical = await this.db
+        // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: locked classification validates two identities and monotonic availability in one transaction
+        const result = await this.db.transaction().execute(async (trx) => {
+          // Lock and classify from one transaction snapshot. A competing
+          // lifecycle/projection writer must finish before this read or wait
+          // until this mutation commits, so status loss cannot be mistaken
+          // for an identity conflict (or vice versa).
+          const canonical = await trx
             .selectFrom('pagamentos')
             .select([
               'status',
               'intencao_payment_intent_external_ref',
               'intencao_charge_external_ref',
+              'intencao_balance_transaction_available_on',
             ])
             .where('id', '=', pagamento.id)
+            .forUpdate()
             .executeTakeFirst();
           if (!canonical || !expectedStatuses.includes(canonical.status as StatusPagamento)) {
             return undefined;
@@ -421,8 +391,36 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
           ) {
             throw new PagamentoProviderProjectionConflictError('paymentIntentExternalRef');
           }
-          throw new PagamentoProviderProjectionConflictError('chargeExternalRef');
-        }
+          if (
+            pagamento.intencao.chargeExternalRef != null &&
+            canonical.intencao_charge_external_ref != null &&
+            canonical.intencao_charge_external_ref !== pagamento.intencao.chargeExternalRef
+          ) {
+            throw new PagamentoProviderProjectionConflictError('chargeExternalRef');
+          }
+          if (
+            pagamento.intencao.balanceTransactionAvailableOn != null &&
+            canonical.intencao_balance_transaction_available_on != null &&
+            new Date(canonical.intencao_balance_transaction_available_on).getTime() !==
+              pagamento.intencao.balanceTransactionAvailableOn.getTime()
+          ) {
+            span.addEvent('provider_projection.available_on_mismatch');
+          }
+          return (
+            trx
+              .updateTable('pagamentos')
+              // Operational lease and contributor columns are intentionally
+              // omitted. Provider facts are canonical-first monotonic merges.
+              // biome-ignore lint/suspicious/noExplicitAny: kysely Updateable brand vs plain row object
+              .set(providerAwareLifecycleRow as any)
+              .where('id', '=', pagamento.id)
+              .where('status', 'in', expectedStatuses)
+              .returningAll()
+              .executeTakeFirst()
+          );
+        });
+        span.setStatus({ code: SpanStatusCode.OK });
+        if (!result) return undefined;
         const itemRows = await loadItemsForPagamento(this.db, pagamento.id);
         return pagamentoFromRow(result as unknown as PagamentoRow, itemRows);
       } catch (error: unknown) {

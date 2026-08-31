@@ -195,6 +195,7 @@ export class PagamentoRepositoryMemory implements PagamentoRepository {
     pagamento: Pagamento,
     expectedStatuses: readonly StatusPagamento[],
   ): Promise<Pagamento | undefined> {
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: atomic lifecycle CAS validates and merges independent monotonic projections
     return tracer.startActiveSpan('db.pagamentos.updateIfStatusIn', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
       try {
@@ -217,6 +218,14 @@ export class PagamentoRepositoryMemory implements PagamentoRepository {
           persisted.intencao.chargeExternalRef !== pagamento.intencao.chargeExternalRef
         ) {
           throw new PagamentoProviderProjectionConflictError('chargeExternalRef');
+        }
+        if (
+          pagamento.intencao.balanceTransactionAvailableOn != null &&
+          persisted.intencao.balanceTransactionAvailableOn != null &&
+          persisted.intencao.balanceTransactionAvailableOn.getTime() !==
+            pagamento.intencao.balanceTransactionAvailableOn.getTime()
+        ) {
+          span.addEvent('provider_projection.available_on_mismatch');
         }
         // Contributor and provider identity/availability are independently
         // claimed monotonic projections. Merge them from canonical storage in

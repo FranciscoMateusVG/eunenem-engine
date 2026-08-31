@@ -417,6 +417,48 @@ export function describePagamentoRepositoryConformance(name: string, options: Co
       });
     });
 
+    it('lifecycle CAS keeps canonical available-on and emits bounded mismatch telemetry', async () => {
+      const canonicalAvailableOn = new Date('2026-05-07T12:00:00.000Z');
+      const conflictingAvailableOn = new Date('2026-05-09T15:45:12.345Z');
+      const pending = makePagamento({
+        balanceTransactionAvailableOn: canonicalAvailableOn,
+      });
+      await repo.save(pending);
+      options.resetSpans();
+
+      const processing: Pagamento = {
+        ...pending,
+        status: 'processing',
+        atualizadoEm: new Date('2026-05-01T12:03:00.000Z'),
+        intencao: {
+          ...pending.intencao,
+          balanceTransactionAvailableOn: conflictingAvailableOn,
+        },
+      };
+
+      await expect(repo.updateIfStatusIn(processing, ['pendente'])).resolves.toMatchObject({
+        status: 'processing',
+        intencao: { balanceTransactionAvailableOn: canonicalAvailableOn },
+      });
+
+      const span = findSpan(options.getSpans(), 'db.pagamentos.updateIfStatusIn');
+      const mismatch = span?.events.find(
+        (event) => event.name === 'provider_projection.available_on_mismatch',
+      );
+      expect(mismatch).toBeDefined();
+      expect(mismatch?.attributes ?? {}).toEqual({});
+      const serializedTelemetry = JSON.stringify({
+        attributes: span?.attributes,
+        events: span?.events,
+      });
+      expect(serializedTelemetry).not.toContain(canonicalAvailableOn.toISOString());
+      expect(serializedTelemetry).not.toContain(conflictingAvailableOn.toISOString());
+      await expect(repo.findById(pending.id)).resolves.toMatchObject({
+        status: 'processing',
+        intencao: { balanceTransactionAvailableOn: canonicalAvailableOn },
+      });
+    });
+
     it('updateIfStatusIn applies only when the persisted status is expected', async () => {
       const pagamento = makePagamento();
       await repo.save(pagamento);
