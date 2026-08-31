@@ -203,14 +203,38 @@ export class PagamentoRepositoryMemory implements PagamentoRepository {
           span.setStatus({ code: SpanStatusCode.OK });
           return undefined;
         }
-        // Lifecycle CAS owns lifecycle/provider columns, not the separately
-        // claimed contributor projection. Preserve the canonical contributor
-        // even when the caller built this aggregate from a stale null read.
+        if (
+          pagamento.intencao.paymentIntentExternalRef != null &&
+          persisted.intencao.paymentIntentExternalRef != null &&
+          persisted.intencao.paymentIntentExternalRef !==
+            pagamento.intencao.paymentIntentExternalRef
+        ) {
+          throw new PagamentoProviderProjectionConflictError('paymentIntentExternalRef');
+        }
+        if (
+          pagamento.intencao.chargeExternalRef != null &&
+          persisted.intencao.chargeExternalRef != null &&
+          persisted.intencao.chargeExternalRef !== pagamento.intencao.chargeExternalRef
+        ) {
+          throw new PagamentoProviderProjectionConflictError('chargeExternalRef');
+        }
+        // Contributor and provider identity/availability are independently
+        // claimed monotonic projections. Merge them from canonical storage in
+        // the same lifecycle CAS so neither write direction can erase the
+        // other projection.
         const updated: Pagamento = {
           ...pagamento,
           intencao: {
             ...pagamento.intencao,
             contribuinte: persisted.intencao.contribuinte,
+            paymentIntentExternalRef:
+              persisted.intencao.paymentIntentExternalRef ??
+              pagamento.intencao.paymentIntentExternalRef,
+            chargeExternalRef:
+              persisted.intencao.chargeExternalRef ?? pagamento.intencao.chargeExternalRef,
+            balanceTransactionAvailableOn:
+              persisted.intencao.balanceTransactionAvailableOn ??
+              pagamento.intencao.balanceTransactionAvailableOn,
           },
         };
         this.pagamentos.set(pagamento.id, updated);

@@ -300,6 +300,123 @@ export function describePagamentoRepositoryConformance(name: string, options: Co
       });
     });
 
+    it('preserves a concurrently committed provider projection when a stale lifecycle CAS commits', async () => {
+      const pending = makePagamento({ contribuinte: null });
+      await repo.save(pending);
+
+      // This aggregate represents a lifecycle writer that read before the
+      // provider projection committed. It must be allowed to advance the
+      // lifecycle without erasing the later canonical provider facts.
+      const staleProcessing: Pagamento = {
+        ...pending,
+        status: 'processing',
+        atualizadoEm: new Date('2026-05-01T12:03:00.000Z'),
+      };
+      const canonicalAvailableOn = new Date('2026-05-07T12:00:00.000Z');
+
+      await expect(
+        repo.updateProviderProjection(
+          pending.id,
+          {
+            paymentIntentExternalRef: 'pi_projection_committed_after_read',
+            chargeExternalRef: 'ch_projection_committed_after_read',
+            balanceTransactionAvailableOn: canonicalAvailableOn,
+          },
+          new Date('2026-05-01T12:02:00.000Z'),
+        ),
+      ).resolves.toMatchObject({
+        status: 'pendente',
+        intencao: {
+          paymentIntentExternalRef: 'pi_projection_committed_after_read',
+          chargeExternalRef: 'ch_projection_committed_after_read',
+          balanceTransactionAvailableOn: canonicalAvailableOn,
+        },
+      });
+
+      await expect(repo.updateIfStatusIn(staleProcessing, ['pendente'])).resolves.toMatchObject({
+        status: 'processing',
+        intencao: {
+          paymentIntentExternalRef: 'pi_projection_committed_after_read',
+          chargeExternalRef: 'ch_projection_committed_after_read',
+          balanceTransactionAvailableOn: canonicalAvailableOn,
+        },
+      });
+      await expect(repo.findById(pending.id)).resolves.toMatchObject({
+        status: 'processing',
+        intencao: {
+          paymentIntentExternalRef: 'pi_projection_committed_after_read',
+          chargeExternalRef: 'ch_projection_committed_after_read',
+          balanceTransactionAvailableOn: canonicalAvailableOn,
+        },
+      });
+    });
+
+    it('fails a lifecycle CAS closed when its provider identity conflicts with canonical storage', async () => {
+      const pending = makePagamento({
+        paymentIntentExternalRef: 'pi_canonical_lifecycle',
+        chargeExternalRef: 'ch_canonical_lifecycle',
+      });
+      await repo.save(pending);
+
+      const conflictingProcessing: Pagamento = {
+        ...pending,
+        status: 'processing',
+        atualizadoEm: new Date('2026-05-01T12:03:00.000Z'),
+        intencao: {
+          ...pending.intencao,
+          paymentIntentExternalRef: 'pi_conflicting_lifecycle',
+          chargeExternalRef: 'ch_conflicting_lifecycle',
+        },
+      };
+
+      await expect(
+        repo.updateIfStatusIn(conflictingProcessing, ['pendente']),
+      ).rejects.toBeInstanceOf(PagamentoProviderProjectionConflictError);
+      await expect(repo.findById(pending.id)).resolves.toMatchObject({
+        status: 'pendente',
+        intencao: {
+          paymentIntentExternalRef: 'pi_canonical_lifecycle',
+          chargeExternalRef: 'ch_canonical_lifecycle',
+        },
+      });
+    });
+
+    it('keeps the first available-on timestamp and emits only bounded mismatch telemetry', async () => {
+      const canonicalAvailableOn = new Date('2026-05-07T12:00:00.000Z');
+      const conflictingAvailableOn = new Date('2026-05-09T15:45:12.345Z');
+      const pending = makePagamento({
+        balanceTransactionAvailableOn: canonicalAvailableOn,
+      });
+      await repo.save(pending);
+      options.resetSpans();
+
+      await expect(
+        repo.updateProviderProjection(
+          pending.id,
+          { balanceTransactionAvailableOn: conflictingAvailableOn },
+          new Date('2026-05-01T12:03:00.000Z'),
+        ),
+      ).resolves.toMatchObject({
+        intencao: { balanceTransactionAvailableOn: canonicalAvailableOn },
+      });
+
+      const span = findSpan(options.getSpans(), 'db.pagamentos.updateProviderProjection');
+      const mismatch = span?.events.find(
+        (event) => event.name === 'provider_projection.available_on_mismatch',
+      );
+      expect(mismatch).toBeDefined();
+      expect(mismatch?.attributes ?? {}).toEqual({});
+      const serializedTelemetry = JSON.stringify({
+        attributes: span?.attributes,
+        events: span?.events,
+      });
+      expect(serializedTelemetry).not.toContain(canonicalAvailableOn.toISOString());
+      expect(serializedTelemetry).not.toContain(conflictingAvailableOn.toISOString());
+      await expect(repo.findById(pending.id)).resolves.toMatchObject({
+        intencao: { balanceTransactionAvailableOn: canonicalAvailableOn },
+      });
+    });
+
     it('updateIfStatusIn applies only when the persisted status is expected', async () => {
       const pagamento = makePagamento();
       await repo.save(pagamento);
