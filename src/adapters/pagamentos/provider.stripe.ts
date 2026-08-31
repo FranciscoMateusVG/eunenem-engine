@@ -104,7 +104,7 @@ export class PagamentoProviderStripe implements PagamentoProvider, CheckoutSessi
       try {
         // Build line items. The visitor picks ONE gift per checkout
         // session, so the gift itself is a single line item. The platform
-        // fee (eunenem 10%) is bundled INTO the gift line item — buyer
+        // fee (eunenem 8.98%) is bundled INTO the gift line item — buyer
         // sees an opaque "gift price" that already includes the fee
         // (matches operator's "mirror legacy UX" intent; legacy never
         // surfaced the platform fee to the buyer).

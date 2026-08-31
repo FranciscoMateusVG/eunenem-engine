@@ -15,7 +15,7 @@ import { CalcularComposicaoValoresParaItemInputSchema } from '../../../src/use-c
 const idContribuicao = '550e8400-e29b-41d4-a716-446655440020';
 
 const TARIFA_EUNENEM_PRESENTE: TarifaTipo = {
-  percentageBps: 500,
+  percentageBps: 898,
   responsavelTaxa: 'contribuinte',
 };
 
@@ -49,8 +49,8 @@ describe('criarRegraTaxa + obterTarifaPorTipo', () => {
     idPlataforma: ID_PLATAFORMA_EUNENEM,
     tarifasPorTipo: {
       presente: TARIFA_EUNENEM_PRESENTE,
-      rifa: { percentageBps: 800, responsavelTaxa: 'contribuinte' },
-      convite: { percentageBps: 800, responsavelTaxa: 'contribuinte' },
+      rifa: { percentageBps: 898, responsavelTaxa: 'contribuinte' },
+      convite: { percentageBps: 898, responsavelTaxa: 'contribuinte' },
     },
     criadaEm: new Date('2026-01-01T00:00:00.000Z'),
   });
@@ -58,11 +58,11 @@ describe('criarRegraTaxa + obterTarifaPorTipo', () => {
   it('returns the tarifa for each configured tipo', () => {
     expect(obterTarifaPorTipo(regra, 'presente')).toEqual(TARIFA_EUNENEM_PRESENTE);
     expect(obterTarifaPorTipo(regra, 'rifa')).toEqual({
-      percentageBps: 800,
+      percentageBps: 898,
       responsavelTaxa: 'contribuinte',
     });
     expect(obterTarifaPorTipo(regra, 'convite')).toEqual({
-      percentageBps: 800,
+      percentageBps: 898,
       responsavelTaxa: 'contribuinte',
     });
   });
@@ -130,12 +130,12 @@ describe('CalcularComposicaoValoresParaItemInputSchema', () => {
 });
 
 describe('calcularValorTaxaPercentual', () => {
-  it('calculates 5 percent for the canonical R$ 80 contribution', () => {
-    expect(calcularValorTaxaPercentual(8000, 500)).toBe(400);
+  it('calculates 8.98 percent for the canonical R$ 80 contribution', () => {
+    expect(calcularValorTaxaPercentual(8000, 898)).toBe(719);
   });
 
   it('rounds fractional cents up', () => {
-    expect(calcularValorTaxaPercentual(101, 500)).toBe(6);
+    expect(calcularValorTaxaPercentual(101, 898)).toBe(10);
   });
 });
 
@@ -149,9 +149,9 @@ describe('calcularComposicaoValores (domain pure)', () => {
     expect(composicao).toEqual({
       idContribuicao,
       contributionAmountCents: 8000,
-      feeAmountCents: 400,
+      feeAmountCents: 719,
       surchargeCents: 0,
-      totalPaidCents: 8400,
+      totalPaidCents: 8719,
       receiverAmountCents: 8000,
       responsavelTaxa: 'contribuinte',
     });

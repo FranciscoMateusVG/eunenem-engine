@@ -6,7 +6,7 @@ import { useAuthModal } from '@/components/eunenem/auth/AuthModalProvider';
 
 // aperture-5mgiw — Section 05 (Calculadora) of the v2 landing.
 // Interactive two-slider income calculator: guests x ticket = total
-// the creator nets (EuNeném is "100% em dinheiro", so the 7,5% fee
+// the creator nets (EuNeném is "100% em dinheiro", so the 8,98% fee
 // is paid by the guest at checkout and the displayed total is what
 // the creator actually receives).
 //
@@ -58,7 +58,7 @@ export function Calculadora() {
   );
 
   // === Core derivation =====================================
-  // total = guests x ticket. The 7,5% platform fee is paid by the
+  // total = guests x ticket. The 8,98% platform fee is paid by the
   // guest on top of the gift, so the creator's payout equals the
   // displayed total. If/when the fee model changes, edit here.
   const total = useMemo(() => guests * ticket, [guests, ticket]);

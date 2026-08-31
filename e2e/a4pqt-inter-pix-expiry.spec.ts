@@ -166,8 +166,8 @@ test('checkout → no webhook → real pg-boss expiry worker persists REMOVIDA r
       idCampanha: seededData.idCampanha,
       idOpcaoPresentes: seededData.idOpcaoPresentes,
       nome: `A4PQT Expiry ${randomUUID().slice(0, 8)}`,
-      // 1337 + ceil(5%) = 1404, the fake's authoritative REMOVIDA outcome.
-      valorCents: 1337,
+      // 1288 + ceil(8.98%) = 1404, the fake's authoritative REMOVIDA outcome.
+      valorCents: 1288,
     });
     const giftName = (
       await sql<{

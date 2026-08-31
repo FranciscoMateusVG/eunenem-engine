@@ -103,7 +103,7 @@ export const ObterListaPresentesOutputItemSchema = z.object({
    * Visitor-paid total in cents for the **Pix** path (aperture-ines9 —
    * semantic shift). Equals `contributionAmountCents + feeAmountCents`
    * where `feeAmountCents` is the platform fee from the active RegraTaxa
-   * (eunenem presente = 5%). Matches the Stripe gift line item charged
+   * (eunenem presente = 8.98%). Matches the Stripe gift line item charged
    * on the iframe. **NOT the bare contribuicao.valor** — the operator's
    * intent is that the visible price already includes the platform fee
    * (the fee is invisible to the visitor; it "lives in" the price they

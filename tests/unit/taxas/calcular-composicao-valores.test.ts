@@ -15,7 +15,7 @@ import { calcularComposicaoValoresParaItem } from '../../../src/use-cases/taxas/
  *   - `calcularComposicaoValoresParaItem` (per-item math; this file)
  *   - `calcularSurchargeParaCarrinho` (cart-wide surcharge; sibling tests)
  *
- * These tests pin the platform-fee-rule behavior (eunenem 5%, eucasei 6%
+ * These tests pin the platform-fee-rule behavior (eunenem 8.98%, eucasei 6%
  * presente / 8% rifa) onto the per-item shape. The new use-case returns
  * a `SnapshotComposicaoValoresItemContribuicao` (per-unit + per-line
  * denormalised totals) rather than the pre-0016 single
@@ -30,7 +30,7 @@ const silentObservability = {
 const idContribuicao = '550e8400-e29b-41d4-a716-446655440021';
 
 describe('calcularComposicaoValoresParaItem', () => {
-  it('applies the eunenem 5 percent rule for a presente (quantidade=1)', async () => {
+  it('applies the eunenem 8.98 percent rule for a presente (quantidade=1)', async () => {
     const provedorRegraTaxa = new ProvedorRegraTaxaMemory();
 
     const composicao = await calcularComposicaoValoresParaItem(
@@ -49,10 +49,10 @@ describe('calcularComposicaoValoresParaItem', () => {
       idContribuicao,
       quantidade: 1,
       contributionUnitAmountCents: 8000,
-      feeUnitAmountCents: 400,
+      feeUnitAmountCents: 719,
       receiverUnitAmountCents: 8000,
       lineContributionAmountCents: 8000,
-      lineFeeAmountCents: 400,
+      lineFeeAmountCents: 719,
       lineReceiverAmountCents: 8000,
     });
   });
@@ -111,10 +111,10 @@ describe('calcularComposicaoValoresParaItem', () => {
 
     expect(composicao.quantidade).toBe(3);
     expect(composicao.contributionUnitAmountCents).toBe(8000);
-    expect(composicao.feeUnitAmountCents).toBe(400);
+    expect(composicao.feeUnitAmountCents).toBe(719);
     expect(composicao.receiverUnitAmountCents).toBe(8000);
     expect(composicao.lineContributionAmountCents).toBe(24000);
-    expect(composicao.lineFeeAmountCents).toBe(1200);
+    expect(composicao.lineFeeAmountCents).toBe(2157);
     expect(composicao.lineReceiverAmountCents).toBe(24000);
   });
 
@@ -136,9 +136,9 @@ describe('calcularComposicaoValoresParaItem', () => {
       { ...baseInput, idPlataforma: ID_PLATAFORMA_EUCASEI },
     );
 
-    expect(eunenem.feeUnitAmountCents).toBe(400);
+    expect(eunenem.feeUnitAmountCents).toBe(719);
     expect(eucasei.feeUnitAmountCents).toBe(480);
-    expect(eucasei.feeUnitAmountCents).toBeGreaterThan(eunenem.feeUnitAmountCents);
+    expect(eunenem.feeUnitAmountCents).toBeGreaterThan(eucasei.feeUnitAmountCents);
   });
 
   it('throws TaxasInputInvalidoError for invalid input (zero contribution)', async () => {

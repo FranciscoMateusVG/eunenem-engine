@@ -189,14 +189,14 @@ Este documento descreve a primeira fatia do **bounded context Taxas** na engine 
 ## Resumo em linguagem simples
 
 1. O contexto **Taxas** recebe uma referência pública de contribuição e o valor da contribuição em centavos.
-2. A regra ativa nesta fase é uma taxa percentual fixa de **5%**, paga pelo **contribuinte**.
+2. A regra ativa da EuNeném é uma taxa percentual fixa de **8,98%**, paga pelo **contribuinte**, para presentes, rifas e convites.
 3. O domínio calcula a taxa e devolve uma **composição de valores**: contribuição, taxa, total pago, valor destinado ao recebedor e responsável pela taxa.
 
 Exemplo canônico:
 
 - Valor da contribuição: R$ 80,00 (`8000` centavos)
-- Taxa de 5%: R$ 4,00 (`400` centavos)
-- Total pago pelo contribuinte: R$ 84,00 (`8400` centavos)
+- Taxa de 8,98%: R$ 7,19 (`719` centavos, arredondada para cima)
+- Total pago pelo contribuinte: R$ 87,19 (`8719` centavos)
 - Valor destinado ao recebedor: R$ 80,00 (`8000` centavos)
 
 Como a taxa é paga pelo contribuinte, ela é somada ao total cobrado e não é descontada do recebedor.
@@ -230,7 +230,7 @@ Como a taxa é paga pelo contribuinte, ela é somada ao total cobrado e não é 
 
 - **Função pura de domínio:** `calcularComposicaoValores` calcula a composição sem banco, HTTP, logs ou efeitos colaterais.
 
-- **Porta e adapter:** `ProvedorRegraTaxa` é a porta; `ProvedorRegraTaxaMemory` é um adapter em memória que entrega a regra ativa de 5%.
+- **Porta e adapter:** `ProvedorRegraTaxa` é a porta; `ProvedorRegraTaxaMemory` é um adapter em memória que entrega a regra ativa da EuNeném de 8,98%.
 
 - **Caso de uso / serviço de aplicação:** `calcularComposicaoValores` valida a entrada, busca a regra ativa, chama o domínio e registra observabilidade.
 
@@ -240,9 +240,9 @@ Como a taxa é paga pelo contribuinte, ela é somada ao total cobrado e não é 
 
 ## Arredondamento
 
-A taxa percentual é representada em **basis points** (`500` = 5%) para evitar `number` decimal como `0.05`.
+A taxa percentual é representada em **basis points** (`898` = 8,98%) para evitar `number` decimal como `0.0898`.
 
-Quando o cálculo gera fração de centavo, a implementação arredonda para cima com `Math.ceil`. Assim, uma contribuição de `101` centavos com taxa de 5% gera taxa de `6` centavos.
+Quando o cálculo gera fração de centavo, a implementação arredonda para cima com `Math.ceil`. Assim, uma contribuição de `101` centavos com taxa de 8,98% gera taxa de `10` centavos.
 
 ---
 

@@ -117,7 +117,7 @@ async function seedCampanha(idPlataforma: string) {
 }
 
 describe('obterContribuicoesPrecalculadasCampanha', () => {
-  it('returns plataforma-scoped DTO with composição per contribuição (eunenem 5% on all tipos)', async () => {
+  it('returns plataforma-scoped DTO with composição per contribuição (eunenem 8.98% on all tipos)', async () => {
     const { deps, idCampanha, idOpcaoPresente, idOpcaoRifa, idContribFralda, idContribRifa } =
       await seedCampanha(ID_PLATAFORMA_EUNENEM);
 
@@ -143,8 +143,8 @@ describe('obterContribuicoesPrecalculadasCampanha', () => {
       disponivel: true,
       composicao: {
         contributionAmountCents: 8000,
-        feeAmountCents: 400,
-        totalPaidCents: 8400,
+        feeAmountCents: 719,
+        totalPaidCents: 8719,
         receiverAmountCents: 8000,
         responsavelTaxa: 'contribuinte',
       },
@@ -153,7 +153,7 @@ describe('obterContribuicoesPrecalculadasCampanha', () => {
     expect(rifa?.tipo).toBe('rifa');
     expect(rifa?.contribuicoes[0]).toMatchObject({
       idContribuicao: idContribRifa,
-      composicao: { feeAmountCents: 400, totalPaidCents: 8400 },
+      composicao: { feeAmountCents: 719, totalPaidCents: 8719 },
     });
   });
 

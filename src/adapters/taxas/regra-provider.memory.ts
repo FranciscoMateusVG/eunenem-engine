@@ -20,7 +20,7 @@ const ID_REGRA_EUCASEI: IdRegraTaxa = 'aaaaaaaa-2222-4222-8222-aaaaaaaaaaaa';
 /**
  * Regras seed das plataformas iniciais.
  *
- * - eunenem: 5% sobre o contribuinte em todos os tipos (modelo legado).
+ * - eunenem: 8,98% sobre o contribuinte em todos os tipos.
  * - eucasei: 6% em presente e 8% em rifa/convite, sempre sobre o contribuinte.
  */
 export const REGRAS_TAXA_SEED: readonly RegraTaxa[] = [
@@ -28,9 +28,9 @@ export const REGRAS_TAXA_SEED: readonly RegraTaxa[] = [
     id: ID_REGRA_EUNENEM,
     idPlataforma: ID_PLATAFORMA_EUNENEM,
     tarifasPorTipo: {
-      presente: { percentageBps: 500, responsavelTaxa: 'contribuinte' },
-      rifa: { percentageBps: 500, responsavelTaxa: 'contribuinte' },
-      convite: { percentageBps: 500, responsavelTaxa: 'contribuinte' },
+      presente: { percentageBps: 898, responsavelTaxa: 'contribuinte' },
+      rifa: { percentageBps: 898, responsavelTaxa: 'contribuinte' },
+      convite: { percentageBps: 898, responsavelTaxa: 'contribuinte' },
     },
     criadaEm: SEED_DATE,
   }),
