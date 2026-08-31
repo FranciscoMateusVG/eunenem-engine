@@ -764,6 +764,7 @@ export { FinanceiroSaldoDisponivelInsuficienteError } from './errors/pagamentos/
 export { PagamentosInputInvalidoError } from './errors/pagamentos/input-invalido.error.js';
 export { PagamentoJaExisteError } from './errors/pagamentos/ja-existe.error.js';
 export { PagamentoNaoEncontradoError } from './errors/pagamentos/nao-encontrado.error.js';
+export { PagamentoProviderProjectionConflictError } from './errors/pagamentos/provider-projection-conflict.error.js';
 export { PagamentoTransicaoStatusInvalidaError } from './errors/pagamentos/transicao-status-invalida.error.js';
 export { PagamentoValorDivergenteError } from './errors/pagamentos/valor-divergente.error.js';
 export { PlataformaNaoEncontradaError } from './errors/plataforma/nao-encontrada.error.js';

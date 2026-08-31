@@ -43,6 +43,7 @@ function makePagamento(args: {
   availableOn?: Date | null;
   criadoEm?: Date;
   contribuinteNome?: string | null;
+  metodo?: 'pix' | 'credit_card';
 }) {
   return makePagamentoBase({
     id: args.id,
@@ -54,6 +55,7 @@ function makePagamento(args: {
       args.contribuinteNome === null || args.contribuinteNome === undefined
         ? null
         : ({ nome: args.contribuinteNome, email: 'x@y.com' } as never),
+    metodo: args.metodo,
   });
 }
 
@@ -556,6 +558,7 @@ describe('recebedor.extrato.list — rows + sort + filter + contribuinte (apertu
         id: idPag,
         idContribuicao: rig.idContribuicao,
         contribuinteNome: 'Teste Teste',
+        metodo: 'credit_card',
       }),
     );
     await rig.livroFinanceiroRepository.saveLancamentos([
@@ -575,6 +578,7 @@ describe('recebedor.extrato.list — rows + sort + filter + contribuinte (apertu
 
     expect(result.rows).toHaveLength(1);
     expect(result.rows[0].contribuinteNome).toBe('Teste Teste');
+    expect(result.rows[0].metodo).toBe('credit_card');
     expect(result.hasMore).toBe(false);
     expect(result.nextCursor).toBeNull();
   });

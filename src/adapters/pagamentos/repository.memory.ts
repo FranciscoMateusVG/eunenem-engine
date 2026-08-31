@@ -1,17 +1,20 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 import type { IdCampanha } from '../../domain/arrecadacao/value-objects/ids.js';
 import type { Pagamento, StatusPagamento } from '../../domain/pagamentos/entities/pagamento.js';
+import type { DadosContribuinte } from '../../domain/pagamentos/value-objects/dados-contribuinte.js';
 import type {
   IdContribuicaoPagamento,
   IdPagamento,
 } from '../../domain/pagamentos/value-objects/ids.js';
 import { PagamentoJaExisteError } from '../../errors/pagamentos/ja-existe.error.js';
 import { PagamentoNaoEncontradoError } from '../../errors/pagamentos/nao-encontrado.error.js';
+import { PagamentoProviderProjectionConflictError } from '../../errors/pagamentos/provider-projection-conflict.error.js';
 import type {
   AdminRecadoRow,
   ClaimPixCobrancaProviderReadByTxidInput,
   ClaimPixCobrancaReconciliationCandidatesInput,
   MuralRecadoProjection,
+  PagamentoProviderProjection,
   PagamentoRepository,
   PixCobrancaReconciliationCandidate,
 } from './repository.js';
@@ -80,21 +83,172 @@ export class PagamentoRepositoryMemory implements PagamentoRepository {
     });
   }
 
+  async setContribuinteIfAbsent(
+    idPagamento: IdPagamento,
+    contribuinte: DadosContribuinte,
+    atualizadoEm: Date,
+  ): Promise<boolean> {
+    return tracer.startActiveSpan('db.pagamentos.setContribuinteIfAbsent', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+      try {
+        const persisted = this.pagamentos.get(idPagamento);
+        if (persisted === undefined || persisted.intencao.contribuinte !== null) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return false;
+        }
+        this.pagamentos.set(idPagamento, {
+          ...persisted,
+          intencao: { ...persisted.intencao, contribuinte },
+          atualizadoEm,
+        });
+        span.setStatus({ code: SpanStatusCode.OK });
+        return true;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  async updateProviderProjection(
+    idPagamento: IdPagamento,
+    projection: PagamentoProviderProjection,
+    atualizadoEm: Date,
+  ): Promise<Pagamento | undefined> {
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: one atomic projection validates and merges three independently optional fields
+    return tracer.startActiveSpan('db.pagamentos.updateProviderProjection', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+      try {
+        const persisted = this.pagamentos.get(idPagamento);
+        if (!persisted) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return undefined;
+        }
+        if (
+          projection.paymentIntentExternalRef != null &&
+          persisted.intencao.paymentIntentExternalRef != null &&
+          persisted.intencao.paymentIntentExternalRef !== projection.paymentIntentExternalRef
+        ) {
+          throw new PagamentoProviderProjectionConflictError('paymentIntentExternalRef');
+        }
+        if (
+          projection.chargeExternalRef != null &&
+          persisted.intencao.chargeExternalRef != null &&
+          persisted.intencao.chargeExternalRef !== projection.chargeExternalRef
+        ) {
+          throw new PagamentoProviderProjectionConflictError('chargeExternalRef');
+        }
+        if (
+          projection.balanceTransactionAvailableOn != null &&
+          persisted.intencao.balanceTransactionAvailableOn != null &&
+          persisted.intencao.balanceTransactionAvailableOn.getTime() !==
+            projection.balanceTransactionAvailableOn.getTime()
+        ) {
+          span.addEvent('provider_projection.available_on_mismatch');
+        }
+        const updated: Pagamento = {
+          ...persisted,
+          intencao: {
+            ...persisted.intencao,
+            ...('paymentIntentExternalRef' in projection
+              ? {
+                  paymentIntentExternalRef:
+                    persisted.intencao.paymentIntentExternalRef ??
+                    projection.paymentIntentExternalRef ??
+                    null,
+                }
+              : {}),
+            ...('chargeExternalRef' in projection
+              ? {
+                  chargeExternalRef:
+                    persisted.intencao.chargeExternalRef ?? projection.chargeExternalRef ?? null,
+                }
+              : {}),
+            ...('balanceTransactionAvailableOn' in projection
+              ? {
+                  balanceTransactionAvailableOn:
+                    persisted.intencao.balanceTransactionAvailableOn ??
+                    projection.balanceTransactionAvailableOn ??
+                    null,
+                }
+              : {}),
+          },
+          atualizadoEm,
+        };
+        this.pagamentos.set(idPagamento, updated);
+        span.setStatus({ code: SpanStatusCode.OK });
+        return updated;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
   async updateIfStatusIn(
     pagamento: Pagamento,
     expectedStatuses: readonly StatusPagamento[],
-  ): Promise<boolean> {
+  ): Promise<Pagamento | undefined> {
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: atomic lifecycle CAS validates and merges independent monotonic projections
     return tracer.startActiveSpan('db.pagamentos.updateIfStatusIn', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
       try {
         const persisted = this.pagamentos.get(pagamento.id);
         if (persisted === undefined || !expectedStatuses.includes(persisted.status)) {
           span.setStatus({ code: SpanStatusCode.OK });
-          return false;
+          return undefined;
         }
-        this.pagamentos.set(pagamento.id, pagamento);
+        if (
+          pagamento.intencao.paymentIntentExternalRef != null &&
+          persisted.intencao.paymentIntentExternalRef != null &&
+          persisted.intencao.paymentIntentExternalRef !==
+            pagamento.intencao.paymentIntentExternalRef
+        ) {
+          throw new PagamentoProviderProjectionConflictError('paymentIntentExternalRef');
+        }
+        if (
+          pagamento.intencao.chargeExternalRef != null &&
+          persisted.intencao.chargeExternalRef != null &&
+          persisted.intencao.chargeExternalRef !== pagamento.intencao.chargeExternalRef
+        ) {
+          throw new PagamentoProviderProjectionConflictError('chargeExternalRef');
+        }
+        if (
+          pagamento.intencao.balanceTransactionAvailableOn != null &&
+          persisted.intencao.balanceTransactionAvailableOn != null &&
+          persisted.intencao.balanceTransactionAvailableOn.getTime() !==
+            pagamento.intencao.balanceTransactionAvailableOn.getTime()
+        ) {
+          span.addEvent('provider_projection.available_on_mismatch');
+        }
+        // Contributor and provider identity/availability are independently
+        // claimed monotonic projections. Merge them from canonical storage in
+        // the same lifecycle CAS so neither write direction can erase the
+        // other projection.
+        const updated: Pagamento = {
+          ...pagamento,
+          intencao: {
+            ...pagamento.intencao,
+            contribuinte: persisted.intencao.contribuinte,
+            paymentIntentExternalRef:
+              persisted.intencao.paymentIntentExternalRef ??
+              pagamento.intencao.paymentIntentExternalRef,
+            chargeExternalRef:
+              persisted.intencao.chargeExternalRef ?? pagamento.intencao.chargeExternalRef,
+            balanceTransactionAvailableOn:
+              persisted.intencao.balanceTransactionAvailableOn ??
+              pagamento.intencao.balanceTransactionAvailableOn,
+          },
+        };
+        this.pagamentos.set(pagamento.id, updated);
         span.setStatus({ code: SpanStatusCode.OK });
-        return true;
+        return updated;
       } catch (error: unknown) {
         span.recordException(error as Error);
         span.setStatus({ code: SpanStatusCode.ERROR });

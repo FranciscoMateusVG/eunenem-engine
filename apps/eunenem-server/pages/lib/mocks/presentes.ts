@@ -29,6 +29,8 @@ export interface PresentesTx {
   /** Amount in centavos — positive; the sign comes from `type`. */
   amount: number;
   status: PresentesStatus;
+  /** Payment method for received gifts. Live wire rows always provide it. */
+  metodo?: "pix" | "credit_card" | null;
   /**
    * ISO timestamp — when the row's funds become available for transfer.
    * Populated from the wire's ExtratoRowDTO.liberacaoPrevistaEm only when

@@ -232,6 +232,7 @@ function adaptRow(row: ExtratoRowDTO): PresentesTx {
     note: "",
     amount: row.amountCents,
     status: LIBERACAO_TO_STATUS[row.liberacao],
+    metodo: row.metodo,
     // aperture-m58zm — populated only when liberacao='aguardando_liberacao'
     // AND parent pagamento has balanceTransactionAvailableOn. Drives the
     // drawer's "libera em DD/MM/YYYY" sub-label; null state renders an
@@ -693,6 +694,12 @@ function DetailDrawer({ tx, onClose }: { tx: PresentesTx | null; onClose: () => 
             <dt>data</dt>
             <dd>{dateLong(t.d)}</dd>
           </div>
+          {isIn && t.metodo && (
+            <div>
+              <dt>forma de pagamento</dt>
+              <dd>{t.metodo === "pix" ? "PIX" : "cartão de crédito"}</dd>
+            </div>
+          )}
           {/* aperture-qp4mq — IDENTIFICADOR row removed (internal UUID,
               not user-actionable). The id stays available on the underlying
               tx for support / debugging purposes but no longer renders in

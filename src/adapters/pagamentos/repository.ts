@@ -1,6 +1,7 @@
 import type { IdCampanha, IdContribuicao } from '../../domain/arrecadacao/value-objects/ids.js';
 import type { MoneyCents } from '../../domain/money.js';
 import type { Pagamento, StatusPagamento } from '../../domain/pagamentos/entities/pagamento.js';
+import type { DadosContribuinte } from '../../domain/pagamentos/value-objects/dados-contribuinte.js';
 import type {
   IdContribuicaoPagamento,
   IdPagamento,
@@ -90,6 +91,12 @@ export interface ClaimPixCobrancaProviderReadByTxidInput {
   readonly leaseUntil: Date;
 }
 
+export interface PagamentoProviderProjection {
+  readonly paymentIntentExternalRef?: string | null;
+  readonly chargeExternalRef?: string | null;
+  readonly balanceTransactionAvailableOn?: Date | null;
+}
+
 /**
  * Persistência de Pagamentos (porta).
  *
@@ -111,15 +118,42 @@ export interface PagamentoRepository {
   save(pagamento: Pagamento): Promise<void>;
   update(pagamento: Pagamento): Promise<void>;
   /**
-   * Atomic compare-and-set for lifecycle transitions. Returns false when
+   * Atomically updates only Stripe/provider lookup and availability fields.
+   * It must never rewrite lifecycle, contributor, cart, or authoritative
+   * settlement transaction state. Every projected field is monotonic:
+   * missing canonical values may be filled, while established references or
+   * a non-null availability timestamp are never cleared or replaced. A
+   * conflicting non-null provider identity throws a typed conflict; a
+   * different availability timestamp preserves the first value and emits
+   * bounded mismatch telemetry. Returns the canonical row from the same
+   * mutation, or undefined when the payment no longer exists.
+   */
+  updateProviderProjection(
+    idPagamento: IdPagamento,
+    projection: PagamentoProviderProjection,
+    atualizadoEm: Date,
+  ): Promise<Pagamento | undefined>;
+  /**
+   * Atomically stamps the checkout contributor only when it is still absent.
+   * This projection update must never rewrite lifecycle or provider fields.
+   * Returns true only for the first writer.
+   */
+  setContribuinteIfAbsent(
+    idPagamento: IdPagamento,
+    contribuinte: DadosContribuinte,
+    atualizadoEm: Date,
+  ): Promise<boolean>;
+  /**
+   * Atomic compare-and-set for lifecycle transitions. Returns undefined when
    * the row is missing or its persisted status is no longer expected.
-   * Implementations update only the aggregate row; cart items are
+   * Implementations preserve the independently claimed contributor projection
+   * and update only lifecycle/provider aggregate columns; cart items are
    * write-once and must never be rewritten by a status transition.
    */
   updateIfStatusIn(
     pagamento: Pagamento,
     expectedStatuses: readonly StatusPagamento[],
-  ): Promise<boolean>;
+  ): Promise<Pagamento | undefined>;
   /**
    * Atomically binds a deterministic Banco Inter txid to a local PIX payment
    * and claims the shared provider-read lease. Pending/processing payments are

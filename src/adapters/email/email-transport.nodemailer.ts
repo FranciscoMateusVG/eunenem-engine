@@ -26,7 +26,8 @@ export interface SmtpConfig {
  * eunenem SMTP infrastructure. One pooled transporter per process.
  *
  * NO per-email logging of address→status (Cipher no-oracle posture): the span
- * records only success/failure + the transport host, never the recipient.
+ * records only bounded success/failure metadata + the transport host. Raw
+ * SMTP exceptions are never attached because they may embed RCPT addresses.
  */
 export class EmailTransportNodemailer implements EmailTransport {
   private readonly transporter: Transporter;
@@ -71,7 +72,9 @@ export class EmailTransportNodemailer implements EmailTransport {
         });
         span.setStatus({ code: SpanStatusCode.OK });
       } catch (error) {
-        span.recordException(error as Error);
+        span.addEvent('email.send_failed', {
+          'error.type': classifySmtpError(error),
+        });
         span.setStatus({ code: SpanStatusCode.ERROR });
         throw error;
       } finally {
@@ -79,4 +82,20 @@ export class EmailTransportNodemailer implements EmailTransport {
       }
     });
   }
+}
+
+const SAFE_SMTP_ERROR_CODES = new Set([
+  'EAUTH',
+  'ECONNECTION',
+  'EDNS',
+  'EENVELOPE',
+  'EMESSAGE',
+  'ENETWORK',
+  'ETIMEDOUT',
+]);
+
+function classifySmtpError(error: unknown): string {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return 'Error';
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' && SAFE_SMTP_ERROR_CODES.has(code) ? code : 'Error';
 }

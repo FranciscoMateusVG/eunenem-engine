@@ -11,12 +11,14 @@ import {
   PagamentoSchema,
   type StatusPagamento,
 } from '../../domain/pagamentos/entities/pagamento.js';
+import type { DadosContribuinte } from '../../domain/pagamentos/value-objects/dados-contribuinte.js';
 import type {
   IdContribuicaoPagamento,
   IdPagamento,
 } from '../../domain/pagamentos/value-objects/ids.js';
 import { PagamentoJaExisteError } from '../../errors/pagamentos/ja-existe.error.js';
 import { PagamentoNaoEncontradoError } from '../../errors/pagamentos/nao-encontrado.error.js';
+import { PagamentoProviderProjectionConflictError } from '../../errors/pagamentos/provider-projection-conflict.error.js';
 import type { Database } from '../database.js';
 import type { DB } from '../db-types.generated.js';
 import type {
@@ -24,6 +26,7 @@ import type {
   ClaimPixCobrancaProviderReadByTxidInput,
   ClaimPixCobrancaReconciliationCandidatesInput,
   MuralRecadoProjection,
+  PagamentoProviderProjection,
   PagamentoRepository,
   PixCobrancaReconciliationCandidate,
 } from './repository.js';
@@ -199,25 +202,124 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
     });
   }
 
-  async updateIfStatusIn(
-    pagamento: Pagamento,
-    expectedStatuses: readonly StatusPagamento[],
-  ): Promise<boolean> {
-    return tracer.startActiveSpan('db.pagamentos.updateIfStatusIn', async (span) => {
+  async updateProviderProjection(
+    idPagamento: IdPagamento,
+    projection: PagamentoProviderProjection,
+    atualizadoEm: Date,
+  ): Promise<Pagamento | undefined> {
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: one atomic SQL projection validates three independently optional fields and distinguishes missing rows from conflicts
+    return tracer.startActiveSpan('db.pagamentos.updateProviderProjection', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
       try {
-        if (expectedStatuses.length === 0) {
-          span.setStatus({ code: SpanStatusCode.OK });
-          return false;
+        const providerColumns = {
+          ...('paymentIntentExternalRef' in projection
+            ? {
+                intencao_payment_intent_external_ref: sql<string | null>`coalesce(
+                  intencao_payment_intent_external_ref,
+                  ${projection.paymentIntentExternalRef ?? null}
+                )`,
+              }
+            : {}),
+          ...('chargeExternalRef' in projection
+            ? {
+                intencao_charge_external_ref: sql<string | null>`coalesce(
+                  intencao_charge_external_ref,
+                  ${projection.chargeExternalRef ?? null}
+                )`,
+              }
+            : {}),
+          ...('balanceTransactionAvailableOn' in projection
+            ? {
+                intencao_balance_transaction_available_on: sql<Date | null>`coalesce(
+                  intencao_balance_transaction_available_on,
+                  ${projection.balanceTransactionAvailableOn ?? null}
+                )`,
+              }
+            : {}),
+          atualizado_em: atualizadoEm,
+        };
+        let updateQuery = this.db
+          .updateTable('pagamentos')
+          .set(providerColumns)
+          .where('id', '=', idPagamento);
+        if (projection.paymentIntentExternalRef != null) {
+          updateQuery = updateQuery.where((eb) =>
+            eb.or([
+              eb('intencao_payment_intent_external_ref', 'is', null),
+              eb(
+                'intencao_payment_intent_external_ref',
+                '=',
+                projection.paymentIntentExternalRef as string,
+              ),
+            ]),
+          );
         }
+        if (projection.chargeExternalRef != null) {
+          updateQuery = updateQuery.where((eb) =>
+            eb.or([
+              eb('intencao_charge_external_ref', 'is', null),
+              eb('intencao_charge_external_ref', '=', projection.chargeExternalRef as string),
+            ]),
+          );
+        }
+        const row = await updateQuery.returningAll().executeTakeFirst();
+        span.setStatus({ code: SpanStatusCode.OK });
+        if (!row) {
+          const canonical = await this.db
+            .selectFrom('pagamentos')
+            .select(['intencao_payment_intent_external_ref', 'intencao_charge_external_ref'])
+            .where('id', '=', idPagamento)
+            .executeTakeFirst();
+          if (!canonical) return undefined;
+          if (
+            projection.paymentIntentExternalRef != null &&
+            canonical.intencao_payment_intent_external_ref != null &&
+            canonical.intencao_payment_intent_external_ref !== projection.paymentIntentExternalRef
+          ) {
+            throw new PagamentoProviderProjectionConflictError('paymentIntentExternalRef');
+          }
+          throw new PagamentoProviderProjectionConflictError('chargeExternalRef');
+        }
+        const canonicalAvailableOn = row.intencao_balance_transaction_available_on;
+        if (
+          projection.balanceTransactionAvailableOn != null &&
+          canonicalAvailableOn != null &&
+          new Date(canonicalAvailableOn).getTime() !==
+            projection.balanceTransactionAvailableOn.getTime()
+        ) {
+          span.addEvent('provider_projection.available_on_mismatch');
+        }
+        const itemRows = await loadItemsForPagamento(this.db, idPagamento);
+        return pagamentoFromRow(row as unknown as PagamentoRow, itemRows);
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  async setContribuinteIfAbsent(
+    idPagamento: IdPagamento,
+    contribuinte: DadosContribuinte,
+    atualizadoEm: Date,
+  ): Promise<boolean> {
+    return tracer.startActiveSpan('db.pagamentos.setContribuinteIfAbsent', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+      try {
         const result = await this.db
           .updateTable('pagamentos')
-          // Operational lease columns are intentionally omitted by the
-          // mapper, so lifecycle CAS cannot clear an active job claim.
-          // biome-ignore lint/suspicious/noExplicitAny: kysely Updateable brand vs plain row object
-          .set(rowFromPagamento(pagamento) as any)
-          .where('id', '=', pagamento.id)
-          .where('status', 'in', expectedStatuses)
+          .set({
+            intencao_contribuinte_nome: contribuinte.nome,
+            intencao_contribuinte_email: contribuinte.email,
+            intencao_contribuinte_mensagem: contribuinte.mensagem ?? null,
+            atualizado_em: atualizadoEm,
+          })
+          .where('id', '=', idPagamento)
+          .where('intencao_contribuinte_nome', 'is', null)
+          .where('intencao_contribuinte_email', 'is', null)
           .executeTakeFirst();
         const matched =
           typeof result?.numUpdatedRows === 'bigint'
@@ -225,6 +327,102 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
             : (result?.numUpdatedRows ?? 0);
         span.setStatus({ code: SpanStatusCode.OK });
         return matched > 0;
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  async updateIfStatusIn(
+    pagamento: Pagamento,
+    expectedStatuses: readonly StatusPagamento[],
+  ): Promise<Pagamento | undefined> {
+    return tracer.startActiveSpan('db.pagamentos.updateIfStatusIn', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+      try {
+        if (expectedStatuses.length === 0) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return undefined;
+        }
+        const providerAwareLifecycleRow = {
+          ...lifecycleRowFromPagamento(pagamento),
+          intencao_payment_intent_external_ref: sql<string | null>`coalesce(
+            intencao_payment_intent_external_ref,
+            ${pagamento.intencao.paymentIntentExternalRef}
+          )`,
+          intencao_charge_external_ref: sql<string | null>`coalesce(
+            intencao_charge_external_ref,
+            ${pagamento.intencao.chargeExternalRef}
+          )`,
+          intencao_balance_transaction_available_on: sql<Date | null>`coalesce(
+            intencao_balance_transaction_available_on,
+            ${pagamento.intencao.balanceTransactionAvailableOn}
+          )`,
+        };
+        // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: locked classification validates two identities and monotonic availability in one transaction
+        const result = await this.db.transaction().execute(async (trx) => {
+          // Lock and classify from one transaction snapshot. A competing
+          // lifecycle/projection writer must finish before this read or wait
+          // until this mutation commits, so status loss cannot be mistaken
+          // for an identity conflict (or vice versa).
+          const canonical = await trx
+            .selectFrom('pagamentos')
+            .select([
+              'status',
+              'intencao_payment_intent_external_ref',
+              'intencao_charge_external_ref',
+              'intencao_balance_transaction_available_on',
+            ])
+            .where('id', '=', pagamento.id)
+            .forUpdate()
+            .executeTakeFirst();
+          if (!canonical || !expectedStatuses.includes(canonical.status as StatusPagamento)) {
+            return undefined;
+          }
+          if (
+            pagamento.intencao.paymentIntentExternalRef != null &&
+            canonical.intencao_payment_intent_external_ref != null &&
+            canonical.intencao_payment_intent_external_ref !==
+              pagamento.intencao.paymentIntentExternalRef
+          ) {
+            throw new PagamentoProviderProjectionConflictError('paymentIntentExternalRef');
+          }
+          if (
+            pagamento.intencao.chargeExternalRef != null &&
+            canonical.intencao_charge_external_ref != null &&
+            canonical.intencao_charge_external_ref !== pagamento.intencao.chargeExternalRef
+          ) {
+            throw new PagamentoProviderProjectionConflictError('chargeExternalRef');
+          }
+          if (
+            pagamento.intencao.balanceTransactionAvailableOn != null &&
+            canonical.intencao_balance_transaction_available_on != null &&
+            new Date(canonical.intencao_balance_transaction_available_on).getTime() !==
+              pagamento.intencao.balanceTransactionAvailableOn.getTime()
+          ) {
+            span.addEvent('provider_projection.available_on_mismatch');
+          }
+          return (
+            trx
+              .updateTable('pagamentos')
+              // Operational lease and contributor columns are intentionally
+              // omitted. Provider facts are canonical-first monotonic merges.
+              // biome-ignore lint/suspicious/noExplicitAny: kysely Updateable brand vs plain row object
+              .set(providerAwareLifecycleRow as any)
+              .where('id', '=', pagamento.id)
+              .where('status', 'in', expectedStatuses)
+              .returningAll()
+              .executeTakeFirst()
+          );
+        });
+        span.setStatus({ code: SpanStatusCode.OK });
+        if (!result) return undefined;
+        const itemRows = await loadItemsForPagamento(this.db, pagamento.id);
+        return pagamentoFromRow(result as unknown as PagamentoRow, itemRows);
       } catch (error: unknown) {
         span.recordException(error as Error);
         span.setStatus({ code: SpanStatusCode.ERROR });
@@ -999,6 +1197,17 @@ function rowFromPagamento(p: Pagamento): Record<string, unknown> {
     intencao_criada_em: p.intencao.criadaEm,
     transacao_externa: p.transacaoExterna ? JSON.stringify(p.transacaoExterna) : null,
   };
+}
+
+function lifecycleRowFromPagamento(pagamento: Pagamento): Record<string, unknown> {
+  const row = rowFromPagamento(pagamento);
+  delete row.intencao_contribuinte_nome;
+  delete row.intencao_contribuinte_email;
+  delete row.intencao_contribuinte_mensagem;
+  delete row.intencao_payment_intent_external_ref;
+  delete row.intencao_charge_external_ref;
+  delete row.intencao_balance_transaction_available_on;
+  return row;
 }
 
 /**

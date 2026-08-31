@@ -124,6 +124,8 @@ import {
   finalizarPagamentoRejeitado,
   IdPagamentoSchema,
   iniciarProcessamentoPagamento,
+  type Pagamento,
+  PagamentoNaoEncontradoError,
   PagamentoEstornoLancamentoJaTransferidoError,
 } from '../../../../src/index.js';
 import type { ServerDeps } from '../auth/setup.js';
@@ -166,6 +168,27 @@ function extractContribuinteFromSession(
     email,
     ...(mensagem.length > 0 ? { mensagem } : {}),
   };
+}
+
+async function iniciarProcessamentoSePendente(
+  deps: ServerDeps,
+  pagamento: Pagamento,
+): Promise<Pagamento> {
+  if (pagamento.status !== 'pendente') {
+    return pagamento;
+  }
+
+  const processing = iniciarProcessamentoPagamento(pagamento, deps.clock());
+  const persisted = await deps.pagamentoRepository.updateIfStatusIn(processing, ['pendente']);
+  if (persisted) {
+    return persisted;
+  }
+
+  const canonical = await deps.pagamentoRepository.findById(pagamento.id);
+  if (!canonical) {
+    throw new PagamentoNaoEncontradoError(pagamento.id);
+  }
+  return canonical;
 }
 
 /**
@@ -342,6 +365,7 @@ export async function dispatchVerifiedStripeEvent(
       const piId = extractStripeId(session.payment_intent);
       const piRefNeedsUpdate =
         piId !== null && pagamento.intencao.paymentIntentExternalRef !== piId;
+      let piRefPersisted = false;
 
       // Compute available_on + chargeRef updates if still null on pagamento.
       let newChargeRef: string | null = null;
@@ -379,32 +403,38 @@ export async function dispatchVerifiedStripeEvent(
       }
 
       if (piRefNeedsUpdate || chargeRefNeedsUpdate || availableOnNeedsUpdate) {
-        pagamento = {
-          ...pagamento,
-          intencao: {
-            ...pagamento.intencao,
+        const projected = await deps.pagamentoRepository.updateProviderProjection(
+          pagamento.id,
+          {
             ...(piRefNeedsUpdate ? { paymentIntentExternalRef: piId } : {}),
             ...(chargeRefNeedsUpdate ? { chargeExternalRef: newChargeRef } : {}),
             ...(availableOnNeedsUpdate ? { balanceTransactionAvailableOn: newAvailableOn } : {}),
           },
-          atualizadoEm: deps.clock(),
-        };
-        await deps.pagamentoRepository.update(pagamento);
-        if (piRefNeedsUpdate) {
+          deps.clock(),
+        );
+        if (!projected) throw new PagamentoNaoEncontradoError(pagamento.id);
+        pagamento = projected;
+        piRefPersisted = piRefNeedsUpdate && pagamento.intencao.paymentIntentExternalRef === piId;
+        const chargeRefPersisted =
+          chargeRefNeedsUpdate && pagamento.intencao.chargeExternalRef === newChargeRef;
+        const availableOnPersisted =
+          availableOnNeedsUpdate &&
+          pagamento.intencao.balanceTransactionAvailableOn?.getTime() === newAvailableOn?.getTime();
+        if (piRefPersisted) {
           logger.info('webhook.stripe.pi_ref_persisted', {
             eventId: event.id,
             idPagamento: pagamento.id,
             paymentIntentId: piId,
           });
         }
-        if (chargeRefNeedsUpdate) {
+        if (chargeRefPersisted) {
           logger.info('webhook.stripe.cs_ch_ref_persisted', {
             eventId: event.id,
             idPagamento: pagamento.id,
             chargeId: newChargeRef,
           });
         }
-        if (availableOnNeedsUpdate) {
+        if (availableOnPersisted) {
           logger.info('webhook.stripe.cs_available_on_persisted', {
             eventId: event.id,
             idPagamento: pagamento.id,
@@ -414,7 +444,7 @@ export async function dispatchVerifiedStripeEvent(
         }
       }
 
-      if (piRefNeedsUpdate && piId !== null) {
+      if (piRefPersisted && piId !== null) {
         // aperture-v4ax3 retroactive sweep — Stripe frequently delivers
         // payment_intent.* and charge.* events BEFORE the
         // checkout.session.completed event that carries the
@@ -472,6 +502,7 @@ export async function dispatchVerifiedStripeEvent(
             livroFinanceiroRepository: deps.livroFinanceiroRepository,
             clock: deps.clock,
             observability: deps.observability,
+            pixReceiptNotifier: deps.pixReceiptNotifier,
           },
           {
             idPagamento: pagamento.id,
@@ -505,21 +536,30 @@ export async function dispatchVerifiedStripeEvent(
         // doesn't fire. When charge.succeeded later triggers finalize-aprovado,
         // it sees contribuinte already set and skips its write.
         if (contribuinte && pagamento.intencao.contribuinte === null) {
-          pagamento = {
-            ...pagamento,
-            intencao: { ...pagamento.intencao, contribuinte },
-            atualizadoEm: deps.clock(),
-          };
-          await deps.pagamentoRepository.update(pagamento);
-          logger.info('webhook.stripe.contribuinte_stamped', {
-            eventId: event.id,
-            idPagamento: pagamento.id,
-          });
+          const stamped = await deps.pagamentoRepository.setContribuinteIfAbsent(
+            pagamento.id,
+            contribuinte,
+            deps.clock(),
+          );
+          if (stamped) {
+            logger.info('webhook.stripe.contribuinte_stamped', {
+              eventId: event.id,
+              idPagamento: pagamento.id,
+            });
+          }
         }
-        // pendente → processing. Idempotent on processing → processing.
-        if (pagamento.status === 'pendente') {
-          pagamento = iniciarProcessamentoPagamento(pagamento, deps.clock());
-          await deps.pagamentoRepository.update(pagamento);
+        // pendente → processing through a lifecycle CAS. A concurrent
+        // approval/rejection/refund wins permanently; the loser reloads the
+        // canonical row instead of writing this handler's stale aggregate.
+        pagamento = await iniciarProcessamentoSePendente(deps, pagamento);
+        if (pagamento.status !== 'processing') {
+          logger.info('webhook.stripe.processing_skipped', {
+            eventId: event.id,
+            eventType: event.type,
+            idPagamento: pagamento.id,
+            currentStatus: pagamento.status,
+          });
+          return { pagamentoId: pagamento.id };
         }
         logger.info('webhook.stripe.dispatched', {
           eventId: event.id,
@@ -577,8 +617,8 @@ export async function dispatchVerifiedStripeEvent(
     //     API call returns null (transient failure, no balance_transaction
     //     yet), persist NULL and log; admin can inspect Stripe directly.
     //
-    // The new column is updated atomically with the ch ref so a single
-    // pagamentoRepository.update() carries both writes.
+    // The new column is updated atomically with the ch ref through the
+    // provider-only projection.
     case 'payment_intent.succeeded': {
       const pi = event.data.object as Stripe.PaymentIntent;
       let pagamento = await resolvePagamentoFromPaymentIntent(deps, pi);
@@ -593,8 +633,8 @@ export async function dispatchVerifiedStripeEvent(
       span.setAttribute('pagamento.id', pagamento.id);
 
       // ch_xxx persistence (existing wif8s logic) + plan-0015 availableOn
-      // resolution. We collapse both writes into one update() call so the
-      // pagamento snapshot stays atomic.
+      // resolution. Both fields share one narrow provider projection; it
+      // cannot overwrite lifecycle or authoritative settlement state.
       const chId = extractStripeId(pi.latest_charge);
       const newChRef =
         chId !== null && pagamento.intencao.chargeExternalRef !== chId ? chId : null;
@@ -637,24 +677,27 @@ export async function dispatchVerifiedStripeEvent(
       }
 
       if (newChRef !== null || availableOnNeedsUpdate) {
-        pagamento = {
-          ...pagamento,
-          intencao: {
-            ...pagamento.intencao,
+        const projected = await deps.pagamentoRepository.updateProviderProjection(
+          pagamento.id,
+          {
             ...(newChRef !== null ? { chargeExternalRef: newChRef } : {}),
             ...(availableOnNeedsUpdate ? { balanceTransactionAvailableOn: newAvailableOn } : {}),
           },
-          atualizadoEm: deps.clock(),
-        };
-        await deps.pagamentoRepository.update(pagamento);
-        if (newChRef !== null) {
+          deps.clock(),
+        );
+        if (!projected) throw new PagamentoNaoEncontradoError(pagamento.id);
+        pagamento = projected;
+        if (newChRef !== null && pagamento.intencao.chargeExternalRef === newChRef) {
           logger.info('webhook.stripe.ch_ref_persisted', {
             eventId: event.id,
             idPagamento: pagamento.id,
             chargeId: newChRef,
           });
         }
-        if (availableOnNeedsUpdate) {
+        if (
+          availableOnNeedsUpdate &&
+          pagamento.intencao.balanceTransactionAvailableOn?.getTime() === newAvailableOn?.getTime()
+        ) {
           logger.info('webhook.stripe.available_on_persisted', {
             eventId: event.id,
             idPagamento: pagamento.id,
@@ -689,8 +732,16 @@ export async function dispatchVerifiedStripeEvent(
       }
       span.setAttribute('pagamento.id', pagamento.id);
       if (pagamento.status === 'pendente') {
-        pagamento = iniciarProcessamentoPagamento(pagamento, deps.clock());
-        await deps.pagamentoRepository.update(pagamento);
+        pagamento = await iniciarProcessamentoSePendente(deps, pagamento);
+        if (pagamento.status !== 'processing') {
+          logger.info('webhook.stripe.processing_skipped', {
+            eventId: event.id,
+            eventType: event.type,
+            idPagamento: pagamento.id,
+            currentStatus: pagamento.status,
+          });
+          return { pagamentoId: pagamento.id };
+        }
         logger.info('webhook.stripe.dispatched', {
           eventId: event.id,
           eventType: event.type,
@@ -755,6 +806,7 @@ export async function dispatchVerifiedStripeEvent(
           livroFinanceiroRepository: deps.livroFinanceiroRepository,
           clock: deps.clock,
           observability: deps.observability,
+          pixReceiptNotifier: deps.pixReceiptNotifier,
         },
         { idPagamento: pagamento.id },
       );
@@ -954,29 +1006,35 @@ export async function dispatchVerifiedStripeEvent(
           // Persist whatever we got (including null, since the schema
           // allows it). The idempotency check above means we won't
           // re-fetch on subsequent charge.updated events once non-null.
-          pagamento = {
-            ...pagamento,
-            intencao: {
-              ...pagamento.intencao,
+          const projected = await deps.pagamentoRepository.updateProviderProjection(
+            pagamento.id,
+            {
               balanceTransactionAvailableOn: fetched,
               // chargeExternalRef may still be null if cs.completed
               // didn't carry it (rare edge); persist now for parity
-              // with cs.completed's atomic 3-write.
+              // with cs.completed's atomic provider projection.
               ...(pagamento.intencao.chargeExternalRef === null && chargeRef !== null
                 ? { chargeExternalRef: chargeRef }
                 : {}),
             },
-            atualizadoEm: deps.clock(),
-          };
-          await deps.pagamentoRepository.update(pagamento);
-          if (fetched === null) {
+            deps.clock(),
+          );
+          if (!projected) throw new PagamentoNaoEncontradoError(pagamento.id);
+          pagamento = projected;
+          if (
+            fetched === null &&
+            pagamento.intencao.balanceTransactionAvailableOn === null
+          ) {
             logger.warn('webhook.stripe.cu_available_on_unknown', {
               eventId: event.id,
               idPagamento: pagamento.id,
               chargeId: chargeRef,
             });
             span.setAttribute('available_on.source', 'cu_stripe_api_null');
-          } else {
+          } else if (
+            fetched !== null &&
+            pagamento.intencao.balanceTransactionAvailableOn?.getTime() === fetched.getTime()
+          ) {
             logger.info('webhook.stripe.cu_available_on_persisted', {
               eventId: event.id,
               idPagamento: pagamento.id,

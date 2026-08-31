@@ -22,6 +22,7 @@ import type { Observability } from '../../observability/observability.js';
 import {
   aprovarPagamento,
   aprovarPagamentoComTransacaoVerificada,
+  type PixReceiptNotifier,
 } from '../pagamentos/aprovar-pagamento.js';
 import { registrarEfeitosFinanceirosPagamentoAprovado } from '../pagamentos/financeiro/registrar-efeitos-financeiros-pagamento-aprovado.js';
 
@@ -32,8 +33,8 @@ export const FinalizarPagamentoAprovadoInputSchema = z.object({
    * payment provider in the webhook event. For Stripe this comes from
    * `checkout.session.completed`'s `custom_fields` (nome + mensagem)
    * + `customer_details` (email). The use-case writes it to
-   * `IntencaoPagamento.contribuinte` atomically with the status flip
-   * — the per-pagamento snapshot model under plan 0015 (each gift
+   * `IntencaoPagamento.contribuinte` through an atomic first-write-wins
+   * projection before approval — the per-pagamento snapshot model under plan 0015 (each gift
    * attempt carries its own contribuinte; the contribuição aggregate
    * holds none).
    *
@@ -61,6 +62,7 @@ export interface FinalizarPagamentoAprovadoDeps {
   readonly livroFinanceiroRepository: LivroFinanceiroRepository;
   readonly clock: () => Date;
   readonly observability: Observability;
+  readonly pixReceiptNotifier?: PixReceiptNotifier;
 }
 
 export type FinalizarPagamentoAprovadoComTransacaoVerificadaDeps = Omit<
@@ -84,7 +86,7 @@ export interface FinalizarPagamentoAprovadoComTransacaoVerificadaInput
  *    saga had a separate `associarContribuinteContribuicao` step that
  *    flipped the contribuição's status field. With status gone,
  *    contribuinte lives on `IntencaoPagamento` and gets stamped at
- *    finalize time alongside the status transition.
+ *    finalize time without rewriting lifecycle/provider state.
  *
  * 2. **5-state FSM (`pendente | processing | aprovado | rejeitado |
  *    estornado`).** Both `pendente` and `processing` are valid source
@@ -112,6 +114,7 @@ export async function finalizarPagamentoAprovado(
         pagamentoEventPublisher: deps.pagamentoEventPublisher,
         clock: deps.clock,
         observability: deps.observability,
+        ...(deps.pixReceiptNotifier ? { pixReceiptNotifier: deps.pixReceiptNotifier } : {}),
       },
       { idPagamento },
     ),
@@ -141,6 +144,7 @@ export async function finalizarPagamentoAprovadoComTransacaoVerificada(
           pagamentoEventPublisher: deps.pagamentoEventPublisher,
           clock: deps.clock,
           observability: deps.observability,
+          ...(deps.pixReceiptNotifier ? { pixReceiptNotifier: deps.pixReceiptNotifier } : {}),
         },
         { idPagamento, transacao },
       ),
@@ -182,9 +186,9 @@ async function finalizarPagamentoAprovadoInterno(
       const parsed = FinalizarPagamentoAprovadoInputSchema.parse(input);
       span.setAttribute('checkout.pagamento.id', parsed.idPagamento);
 
-      // step 0 (plan 0015): contribuinte write — must happen BEFORE the
-      // aprovar step so the persisted Pagamento snapshot reflects both
-      // the new status AND the new contribuinte in a single update().
+      // step 0 (plan 0015): atomic first-write-wins contributor projection.
+      // This deliberately updates no lifecycle/provider columns: a stale
+      // webhook must never revert a concurrent approval CAS.
       const existingPagamento = await pagamentoRepository.findById(parsed.idPagamento);
       if (
         existingPagamento &&
@@ -194,18 +198,16 @@ async function finalizarPagamentoAprovadoInterno(
         // Only write when (a) we have a contribuinte AND (b) the
         // pagamento doesn't already have one (preserves first-writer
         // wins on retry; matches the existing pi/ch external-ref shape).
-        const withContribuinte: Pagamento = {
-          ...existingPagamento,
-          intencao: {
-            ...existingPagamento.intencao,
-            contribuinte: parsed.contribuinte,
-          },
-          atualizadoEm: clock(),
-        };
-        await pagamentoRepository.update(withContribuinte);
-        logger.info('checkout.pagamento.contribuinte_stamped', {
-          idPagamento: parsed.idPagamento,
-        });
+        const stamped = await pagamentoRepository.setContribuinteIfAbsent(
+          existingPagamento.id,
+          parsed.contribuinte,
+          clock(),
+        );
+        if (stamped) {
+          logger.info('checkout.pagamento.contribuinte_stamped', {
+            idPagamento: parsed.idPagamento,
+          });
+        }
       }
 
       // step 1: approve via Pagamentos — with idempotent replay

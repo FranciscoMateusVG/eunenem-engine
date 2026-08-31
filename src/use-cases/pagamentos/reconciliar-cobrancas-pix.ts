@@ -7,6 +7,7 @@ import type { PagamentoRepository } from '../../adapters/pagamentos/repository.j
 import type { TransacaoExterna } from '../../domain/pagamentos/entities/pagamento.js';
 import type { Observability } from '../../observability/observability.js';
 import { finalizarPagamentoAprovadoComTransacaoVerificada } from '../checkout/finalizar-pagamento-aprovado.js';
+import type { PixReceiptNotifier } from './aprovar-pagamento.js';
 import { rejeitarPagamentoComTransacaoVerificada } from './rejeitar-pagamento.js';
 
 /**
@@ -26,6 +27,7 @@ export interface ReconciliarCobrancasPixDeps {
   readonly livroFinanceiroRepository: LivroFinanceiroRepository;
   readonly clock: () => Date;
   readonly observability: Observability;
+  readonly pixReceiptNotifier?: PixReceiptNotifier;
 }
 
 export interface ReconciliarCobrancasPixResult {
@@ -91,6 +93,7 @@ export async function reconciliarCobrancasPix(
               livroFinanceiroRepository: deps.livroFinanceiroRepository,
               clock: deps.clock,
               observability: deps.observability,
+              ...(deps.pixReceiptNotifier ? { pixReceiptNotifier: deps.pixReceiptNotifier } : {}),
             },
             {
               idPagamento: candidate.idPagamento,

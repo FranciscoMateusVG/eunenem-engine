@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ContribuicaoRepositoryMemory } from '../../../src/adapters/arrecadacao/contribuicao-repository.memory.js';
 import { PagamentoEventPublisherMemory } from '../../../src/adapters/pagamentos/event-publisher.memory.js';
 import { LivroFinanceiroRepositoryMemory } from '../../../src/adapters/pagamentos/financeiro/livro-repository.memory.js';
@@ -221,6 +221,105 @@ describe('finalizarPagamentoAprovado — error paths', () => {
 });
 
 describe('finalizarPagamentoAprovado — idempotency contract', () => {
+  it('preserves a contributor committed between stale approval read and lifecycle CAS', async () => {
+    const { deps, idPagamento } = await setupPagamentoPendente(ID_PLATAFORMA_EUNENEM, 'presente');
+    const initial = await deps.pagamentoRepository.findById(idPagamento as never);
+    if (!initial) throw new Error('fixture pagamento missing');
+    await deps.pagamentoRepository.update({
+      ...initial,
+      intencao: { ...initial.intencao, contribuinte: null },
+    });
+
+    let releaseApprovalCas!: () => void;
+    let announceApprovalCas!: () => void;
+    const approvalCasEntered = new Promise<void>((resolve) => {
+      announceApprovalCas = resolve;
+    });
+    const approvalCasGate = new Promise<void>((resolve) => {
+      releaseApprovalCas = resolve;
+    });
+    const originalLifecycleCas = deps.pagamentoRepository.updateIfStatusIn.bind(
+      deps.pagamentoRepository,
+    );
+    let lifecycleCasCalls = 0;
+    deps.pagamentoRepository.updateIfStatusIn = async (...args) => {
+      lifecycleCasCalls += 1;
+      if (lifecycleCasCalls === 1) {
+        announceApprovalCas();
+        await approvalCasGate;
+      }
+      return originalLifecycleCas(...args);
+    };
+
+    let releaseFinalizerBRead!: () => void;
+    let announceFinalizerBRead!: () => void;
+    const finalizerBReadEntered = new Promise<void>((resolve) => {
+      announceFinalizerBRead = resolve;
+    });
+    const finalizerBReadGate = new Promise<void>((resolve) => {
+      releaseFinalizerBRead = resolve;
+    });
+    const originalFind = deps.pagamentoRepository.findById.bind(deps.pagamentoRepository);
+    const originalStamp = deps.pagamentoRepository.setContribuinteIfAbsent.bind(
+      deps.pagamentoRepository,
+    );
+    let pauseNextReadAfterStamp = false;
+    deps.pagamentoRepository.setContribuinteIfAbsent = async (...args) => {
+      const stamped = await originalStamp(...args);
+      pauseNextReadAfterStamp = true;
+      return stamped;
+    };
+    deps.pagamentoRepository.findById = async (...args) => {
+      if (pauseNextReadAfterStamp) {
+        pauseNextReadAfterStamp = false;
+        announceFinalizerBRead();
+        await finalizerBReadGate;
+      }
+      return originalFind(...args);
+    };
+    const pixReceiptNotifier = vi.fn(async () => undefined);
+    const concurrentDeps = { ...deps, pixReceiptNotifier };
+
+    // A reads the null-contributor aggregate, calls the provider, then pauses
+    // immediately before committing its stale lifecycle CAS.
+    const finalizerA = finalizarPagamentoAprovado(concurrentDeps, { idPagamento });
+    await approvalCasEntered;
+
+    // B commits the contributor projection, then pauses before its refreshed
+    // lifecycle read so A's stale CAS is forced to interleave after the stamp.
+    const finalizerB = finalizarPagamentoAprovado(concurrentDeps, {
+      idPagamento,
+      contribuinte: { nome: 'Vencedora', email: 'vencedora@example.com' },
+    });
+    await finalizerBReadEntered;
+    releaseApprovalCas();
+    const approvedByA = await finalizerA;
+    releaseFinalizerBRead();
+    const replayedByB = await finalizerB;
+
+    const canonical = await deps.pagamentoRepository.findById(idPagamento as never);
+    expect(canonical).toMatchObject({
+      status: 'aprovado',
+      intencao: { contribuinte: { email: 'vencedora@example.com' } },
+      transacaoExterna: approvedByA.pagamento.transacaoExterna,
+    });
+    expect(replayedByB.pagamento.transacaoExterna).toEqual(approvedByA.pagamento.transacaoExterna);
+    expect(
+      deps.pagamentoEventPublisher
+        .getEventosPublicados()
+        .filter((event) => event.tipo === 'payment.approved'),
+    ).toHaveLength(1);
+    expect(pixReceiptNotifier).toHaveBeenCalledOnce();
+    expect(pixReceiptNotifier).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'aprovado',
+        intencao: expect.objectContaining({
+          contribuinte: expect.objectContaining({ email: 'vencedora@example.com' }),
+        }),
+      }),
+    );
+  });
+
   it('calling twice returns the same pagamento + same lancamento ids', async () => {
     const { deps, idPagamento } = await setupPagamentoPendente(ID_PLATAFORMA_EUNENEM, 'presente');
 

@@ -42,6 +42,7 @@ export interface InterPixWebhookDeps
     | 'pagamentoRepository'
     | 'pixCobrancaDevolucaoRepository'
     | 'pagamentoEventPublisher'
+    | 'pixReceiptNotifier'
     | 'contribuicaoRepository'
     | 'campanhaRepository'
     | 'livroFinanceiroRepository'
@@ -156,6 +157,7 @@ export function createInterPixWebhookHandler(
                 livroFinanceiroRepository: deps.livroFinanceiroRepository,
                 clock: deps.clock,
                 observability: deps.observability,
+                pixReceiptNotifier: deps.pixReceiptNotifier,
               },
               {
                 idPagamento: confirmed.pagamentoId,
