@@ -263,30 +263,24 @@ test.describe('fblrt fix-wave regression gates (aperture-iu9ji)', () => {
     const anon = await browser.newContext();
     const page = await anon.newPage();
     try {
+      const malformedResponse = await page.goto(
+        `/painel/${userSlug}/c/wrong-campaign/convite/preview`,
+        { waitUntil: 'domcontentloaded' },
+      );
+      expect(
+        malformedResponse?.status(),
+        'a malformed public campaign id must fail as 404 before reaching the UUID-typed repository',
+      ).toBe(404);
+
       const previewUrl = `/painel/${userSlug}/c/${campB.id}/convite/preview`;
       const res = await page.goto(previewUrl, { waitUntil: 'networkidle' });
-      // If the preview page isn't anon-reachable on this build, don't false-
-      // fail the seam — record it and lean on the menu-row arms (same seam).
-      test.skip(
-        !res || res.status() !== 200,
-        `convite preview not anon-reachable (status ${res?.status()}) — menu-row arms cover the same menuItemHref seam`,
-      );
+      expect(res?.status()).toBe(200);
+      await expect(page.locator('[data-testid="convite-saved-state"]')).toBeVisible();
 
-      // The guest-CTA renders CLIENT-side after hydration + the convite data
-      // fetch. Wait for it (bounded) rather than counting instantly. If it
-      // never appears (preview data is authed-only for anon, or owner branch),
-      // skip with the observed page state — the menu-row arms cover the same
-      // menuItemHref seam either way.
+      // The guest CTA renders client-side after hydration + the public convite
+      // fetch, so wait for it rather than counting synchronously.
       const guestCta = page.locator('a', { hasText: /ver lista de presentes/i });
-      const appeared = await guestCta
-        .first()
-        .waitFor({ state: 'visible', timeout: 6_000 })
-        .then(() => true)
-        .catch(() => false);
-      test.skip(
-        !appeared,
-        'guest-CTA never rendered for anon (preview data likely authed-only / owner branch) — menu-row arms cover the seam',
-      );
+      await expect(guestCta.first()).toBeVisible({ timeout: 6_000 });
       // Anon can't resolve the pretty slug (no authed campanhas.list), so the
       // CTA carries the /c/<idB> CANONICAL form — the RIGHT campanha (B), NOT
       // the oldest. That is the ej436 fix on the guest path.
