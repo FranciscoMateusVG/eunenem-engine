@@ -7,8 +7,12 @@ import { useCampanhaSlugRota } from "@/lib/campanhas";
 import { sendEvent } from "@/lib/analytics";
 
 const PREVIEW_CSS = `
-.cv-preview-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:11px 18px;border-radius:999px;border:1px solid transparent;background:var(--lilac);color:#fff;font-family:var(--font-dm-sans),sans-serif;font-weight:600;font-size:12.5px;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;transition:transform .12s,box-shadow .15s,background .15s;color-scheme:light;text-decoration:none;box-shadow:var(--shadow-cta);white-space:nowrap}
-.cv-preview-btn:hover:not(:disabled){transform:translateY(-1px);background:var(--lilac-deep)}
+.cv-preview-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:11px 18px;border-radius:999px;border:1px solid transparent;background:var(--plum);color:#fff;font-family:var(--font-dm-sans),sans-serif;font-weight:600;font-size:12.5px;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;transition:transform .12s,box-shadow .15s,background .15s;color-scheme:light;text-decoration:none;box-shadow:var(--shadow-cta);white-space:nowrap}
+/* aperture-oy81q QA HOLD — bg was var(--lilac): white text composited 2.13:1,
+   and NO lilac-family value can reach the 4.5:1 text floor on white (tops out
+   ~2.1). Plum bg = 8.63:1. min-height:44px = touch floor (sm was 35px). */
+.cv-preview-btn:hover:not(:disabled){transform:translateY(-1px);background:color-mix(in srgb, var(--plum) 85%, #000 8%)}
+.cv-preview-btn:focus-visible{outline:none;box-shadow:0 0 0 3px color-mix(in srgb, var(--plum) 75%, transparent)}
 .cv-preview-btn:disabled{opacity:.4;cursor:not-allowed;box-shadow:none}
 .cv-preview-btn.sm{padding:8px 13px;font-size:11px}
 .cv-preview-btn.ghost{background:transparent;color:var(--ink);border-color:var(--cv-line-strong);box-shadow:none}
@@ -116,7 +120,10 @@ export function ConvitePreviewBody({
       {!me.isLoading &&
         (isOwner ? (
           <a
-            href={painelHref(slug, 'convite')}
+            // aperture-oy81q QA HOLD — was painelHref(slug,'convite') with NO
+            // campanha: bare URL edits the OLDEST campanha (same bug class as
+            // ej436's guest-branch fix below; the error branch already threads it).
+            href={painelHref(slug, 'convite', idCampanha)}
             className="cv-preview-btn ghost sm"
             onClick={() => sendEvent("convite_editar_click")}
           >
