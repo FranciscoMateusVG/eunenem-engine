@@ -1,5 +1,8 @@
 import type { MiddlewareHandler } from 'hono';
+import { z } from 'zod';
 import { resolveRoute } from '../pages/App.js';
+
+const CampaignIdSchema = z.uuid();
 
 export interface PainelAccessDependencies {
   findOwnerAccountId(slug: string): Promise<string | null>;
@@ -33,7 +36,8 @@ export function createPainelAccessMiddleware(
     if (route.kind === 'painel-convite-preview') {
       if (
         route.idCampanha &&
-        !(await deps.campaignBelongsToOwner(route.idCampanha, ownerAccountId))
+        (!CampaignIdSchema.safeParse(route.idCampanha).success ||
+          !(await deps.campaignBelongsToOwner(route.idCampanha, ownerAccountId)))
       ) {
         return c.text('Not found', 404);
       }
@@ -53,7 +57,8 @@ export function createPainelAccessMiddleware(
 
     if (
       route.idCampanha &&
-      !(await deps.campaignBelongsToOwner(route.idCampanha, ownerAccountId))
+      (!CampaignIdSchema.safeParse(route.idCampanha).success ||
+        !(await deps.campaignBelongsToOwner(route.idCampanha, ownerAccountId)))
     ) {
       return c.text('Not found', 404);
     }

@@ -8,6 +8,7 @@ import {
 
 const SSR_SENTINEL = 'SSR_PAGE_RENDERED';
 const OWNER_ACCOUNT = 'owner-account';
+const CAMPAIGN_ID = '00000000-0000-4000-8000-000000000002';
 
 function createTestApp(overrides: Partial<PainelAccessDependencies> = {}) {
   const deps: PainelAccessDependencies = {
@@ -82,7 +83,7 @@ describe('painel SSR access middleware', () => {
 
   it('returns a cache-safe 404 for a campaign not owned by the slug owner', async () => {
     const response = await createTestApp({ campaignBelongsToOwner: async () => false }).request(
-      '/painel/helena/c/campaign-2',
+      `/painel/helena/c/${CAMPAIGN_ID}`,
     );
 
     expect(response.status).toBe(404);
@@ -99,7 +100,7 @@ describe('painel SSR access middleware', () => {
       resolveSessionAccountId: async () => sessionAccountId,
       campaignBelongsToOwner,
     });
-    const response = await app.request('/painel/helena/c/campaign-2', {
+    const response = await app.request(`/painel/helena/c/${CAMPAIGN_ID}`, {
       redirect: 'manual',
     });
 
@@ -123,7 +124,7 @@ describe('painel SSR access middleware', () => {
 
   it('renders a campaign convite preview anonymously after ownership validation', async () => {
     const app = createTestApp({ resolveSessionAccountId: async () => null });
-    const response = await app.request('/painel/helena/c/campaign-2/convite/preview');
+    const response = await app.request(`/painel/helena/c/${CAMPAIGN_ID}/convite/preview`);
 
     expect(response.status).toBe(200);
     expect(await response.text()).toContain(SSR_SENTINEL);
@@ -155,10 +156,22 @@ describe('painel SSR access middleware', () => {
 
   it('returns 404 for a preview campaign not owned by the slug owner', async () => {
     const response = await createTestApp({ campaignBelongsToOwner: async () => false }).request(
-      '/painel/helena/c/campaign-2/convite/preview',
+      `/painel/helena/c/${CAMPAIGN_ID}/convite/preview`,
     );
 
     expect(response.status).toBe(404);
+    expect(await response.text()).not.toContain(SSR_SENTINEL);
+    expectPrivateCacheHeaders(response);
+  });
+
+  it('returns 404 for a malformed public preview campaign id without querying storage', async () => {
+    const campaignBelongsToOwner = vi.fn(async () => true);
+    const response = await createTestApp({ campaignBelongsToOwner }).request(
+      '/painel/helena/c/wrong-campaign/convite/preview',
+    );
+
+    expect(response.status).toBe(404);
+    expect(campaignBelongsToOwner).not.toHaveBeenCalled();
     expect(await response.text()).not.toContain(SSR_SENTINEL);
     expectPrivateCacheHeaders(response);
   });

@@ -263,6 +263,15 @@ test.describe('fblrt fix-wave regression gates (aperture-iu9ji)', () => {
     const anon = await browser.newContext();
     const page = await anon.newPage();
     try {
+      const malformedResponse = await page.goto(
+        `/painel/${userSlug}/c/wrong-campaign/convite/preview`,
+        { waitUntil: 'domcontentloaded' },
+      );
+      expect(
+        malformedResponse?.status(),
+        'a malformed public campaign id must fail as 404 before reaching the UUID-typed repository',
+      ).toBe(404);
+
       const previewUrl = `/painel/${userSlug}/c/${campB.id}/convite/preview`;
       const res = await page.goto(previewUrl, { waitUntil: 'networkidle' });
       expect(res?.status()).toBe(200);
