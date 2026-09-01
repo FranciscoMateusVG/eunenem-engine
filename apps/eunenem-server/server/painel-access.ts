@@ -7,7 +7,7 @@ export interface PainelAccessDependencies {
   campaignBelongsToOwner(campaignId: string, ownerAccountId: string): Promise<boolean>;
 }
 
-/** Owner-only SSR gate for every recognised `/painel` route. */
+/** SSR gate: convite previews are public; dashboard routes remain owner-only. */
 export function createPainelAccessMiddleware(
   deps: PainelAccessDependencies,
 ): MiddlewareHandler {
@@ -27,6 +27,19 @@ export function createPainelAccessMiddleware(
 
     const ownerAccountId = await deps.findOwnerAccountId(route.slug);
     if (!ownerAccountId) return c.text('Not found', 404);
+
+    // Invite previews are deliberately shareable. Validate the slug/campaign
+    // relationship, but do not require the viewer to own the dashboard.
+    if (route.kind === 'painel-convite-preview') {
+      if (
+        route.idCampanha &&
+        !(await deps.campaignBelongsToOwner(route.idCampanha, ownerAccountId))
+      ) {
+        return c.text('Not found', 404);
+      }
+      await next();
+      return;
+    }
 
     let sessionAccountId: string | null;
     try {
