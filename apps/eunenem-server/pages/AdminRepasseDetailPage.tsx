@@ -4,6 +4,7 @@ import { DddBadge } from "@/components/eunenem/admin/DddBadge";
 import {
   ManualResolutionPill,
   REPASSE_STATUS_GLOSS,
+  humanizeTransferError,
   RepasseStatusPill,
 } from "@/components/eunenem/admin/repasse-status";
 import {
@@ -311,7 +312,8 @@ function FailedActions({ repasse }: { repasse: RepasseDetail }) {
         </p>
         {repasse.lastTransferError !== null && (
           <p className="mt-1 font-mono text-[12px] text-red-700">
-            detalhe: {repasse.lastTransferError}
+            detalhe: {repasse.lastTransferError} —{" "}
+            {humanizeTransferError(repasse.lastTransferError)}
           </p>
         )}
         {retry.error && (

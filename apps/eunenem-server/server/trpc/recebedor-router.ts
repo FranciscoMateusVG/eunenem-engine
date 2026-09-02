@@ -747,6 +747,21 @@ const transferenciaRouter = t.router({
         // (aperture-ppuay) — the auth check itself is the primary purpose.
         const { usuario } = await resolverCampanhaAdministrada(ctx, input.idCampanha);
 
+        // aperture-gdyii bug 2 — SERVER-SIDE recebedor gate. The frontend
+        // hasRecebedor gate is advisory only; without this check a campanha
+        // with saldo but NO active recebedor creates a pending repasse the
+        // admin can only approve into a guaranteed transfer failure. The
+        // use-case itself only validates saldo (by design, aperture-s03dr),
+        // so the wire boundary owns this policy.
+        const recebedorAtivo = await ctx.deps.recebedorRepository.findAtivoByCampanhaId(
+          input.idCampanha as never,
+        );
+        if (!recebedorAtivo) {
+          throw new FinanceiroInputInvalidoError(
+            'Cadastre os dados de recebimento (PIX ou conta) antes de solicitar a transferência.',
+          );
+        }
+
         const idRepasse = randomUUID();
         const repasse = await solicitarRepasseRecebedor(
           {

@@ -94,6 +94,7 @@ interface TestRig {
   idCampanha: string;
   idCampanhaOutsider: string;
   idContribuicao: string;
+  idConta: string;
 }
 
 async function buildRig(): Promise<TestRig> {
@@ -128,6 +129,24 @@ async function buildRig(): Promise<TestRig> {
     opcoes: [],
     idRecebedor: null,
     dadosRecebedor: null,
+    criadaEm: new Date(),
+  } as never);
+
+  // aperture-gdyii bug 2 — the solicitar wire now REQUIRES an active
+  // recebedor; seed one so the pre-existing solicitar tests keep their
+  // original semantics (they test saldo/conflict, not the gate).
+  await recebedorRepository.save({
+    id: randomUUID() as never,
+    idCampanha: idCampanha as never,
+    dadosRecebedor: {
+      metodo: 'pix',
+      tipoChavePix: 'cpf',
+      chavePix: '39053344705',
+      cpfTitular: '39053344705',
+      nomeTitular: 'Titular Teste',
+      celularTitular: '31999999999',
+    } as never,
+    isActive: true,
     criadaEm: new Date(),
   } as never);
 
@@ -211,6 +230,7 @@ async function buildRig(): Promise<TestRig> {
     idCampanha,
     idCampanhaOutsider,
     idContribuicao,
+    idConta,
   };
 }
 
@@ -815,6 +835,27 @@ describe('recebedor.transferencia.solicitar (aperture-7g5sx)', () => {
     ).rejects.toMatchObject({
       code: 'UNPROCESSABLE_CONTENT',
       message: 'saldo_disponivel_insuficiente',
+    });
+  });
+
+  it('aperture-gdyii — no active recebedor → BAD_REQUEST with actionable message', async () => {
+    // Fresh campanha owned by the same admin, saldo present, NO recebedor.
+    const idSemRecebedor = randomUUID();
+    await rig.campanhaRepository.save({
+      id: idSemRecebedor as never,
+      idPlataforma: ID_PLATAFORMA_EUNENEM as never,
+      idsAdministradores: [rig.idConta] as never,
+      titulo: 'SEM RECEBEDOR',
+      opcoes: [],
+      idRecebedor: null,
+      dadosRecebedor: null,
+      criadaEm: new Date(),
+    } as never);
+    await expect(
+      rig.caller.recebedor.transferencia.solicitar({ idCampanha: idSemRecebedor }),
+    ).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+      message: expect.stringContaining('dados de recebimento'),
     });
   });
 
