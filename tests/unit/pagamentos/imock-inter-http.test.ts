@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   createInterMtlsAgent,
+  describeResponseShape,
   extractInterErrorCode,
   InterHttpClient,
   type InterHttpConfig,
   type InterHttpResponse,
-  type InterHttpTransport,,
-  describeResponseShape,
+  type InterHttpTransport,
 } from '../../../src/adapters/pagamentos/inter-http.js';
 
 /**
@@ -350,39 +350,55 @@ describe('createInterMtlsAgent — TLS verification stays ON', () => {
 // ────────────────────────────────────────────────────────────────────
 
 describe('describeResponseShape (aperture-gdyii)', () => {
-  it('JSON bank rejection → bodyIsJson true, content-type surfaced', () => {
+  it('JSON bank rejection → bodyIsJson true, contentClass json (params stripped)', () => {
     const shape = describeResponseShape({
       statusCode: 400,
       body: '{"codigo":"X","detail":"NEVER-READ"}',
-      contentType: 'application/json',
+      contentType: 'application/json;charset=UTF-8',
     });
     expect(shape).toEqual({
       status: 400,
-      contentType: 'application/json',
-      bodyLength: 36,
+      contentClass: 'json',
+      bodyByteLength: 36,
       bodyIsJson: true,
     });
   });
 
-  it('gateway/WAF HTML rejection → bodyIsJson false', () => {
+  it('gateway/WAF HTML rejection → contentClass html, bodyIsJson false', () => {
     const shape = describeResponseShape({
       statusCode: 400,
       body: '<html>Bad Request</html>',
       contentType: 'text/html',
     });
     expect(shape.bodyIsJson).toBe(false);
-    expect(shape.contentType).toBe('text/html');
-    expect(shape.bodyLength).toBe(24);
+    expect(shape.contentClass).toBe('html');
+    expect(shape.bodyByteLength).toBe(24);
   });
 
-  it('transport without contentType (scripted test transports) → desconhecido', () => {
+  it('raw header never escapes — exotic/hostile content-type classifies to other', () => {
+    const hostile = `application/x-evil; boundary=${'A'.repeat(500)}`;
+    const shape = describeResponseShape({ statusCode: 400, body: '', contentType: hostile });
+    expect(shape.contentClass).toBe('other');
+    expect(JSON.stringify(shape)).not.toContain('x-evil');
+  });
+
+  it('transport without contentType (scripted test transports) → unknown', () => {
     const shape = describeResponseShape({ statusCode: 502, body: '' });
     expect(shape).toEqual({
       status: 502,
-      contentType: 'desconhecido',
-      bodyLength: 0,
+      contentClass: 'unknown',
+      bodyByteLength: 0,
       bodyIsJson: false,
     });
+  });
+
+  it('byte length is BYTES: multibyte utf-8 counts bytes not UTF-16 code units', () => {
+    // 'ção' = 5 bytes in utf-8, 3 UTF-16 code units.
+    const fallback = describeResponseShape({ statusCode: 400, body: 'ção' });
+    expect(fallback.bodyByteLength).toBe(5);
+    // transport-supplied pre-decode byte count wins when present
+    const supplied = describeResponseShape({ statusCode: 400, body: 'ção', bodyByteLength: 5 });
+    expect(supplied.bodyByteLength).toBe(5);
   });
 
   it('derives NOTHING from body content — PII in detail/violacoes never surfaces', () => {

@@ -33,8 +33,9 @@ const tracer = trace.getTracer('frame');
 function setRespShapeAttrs(span: Span, response: InterHttpResponse): void {
   const shape = describeResponseShape(response);
   span.setAttribute('transferencia.resp_http_status', shape.status);
-  span.setAttribute('transferencia.resp_content_type', shape.contentType);
-  span.setAttribute('transferencia.resp_body_length', shape.bodyLength);
+  // finite classification, never the raw header (unbounded cardinality)
+  span.setAttribute('transferencia.resp_content_class', shape.contentClass);
+  span.setAttribute('transferencia.resp_body_bytes', shape.bodyByteLength);
   span.setAttribute('transferencia.resp_body_is_json', shape.bodyIsJson);
 }
 

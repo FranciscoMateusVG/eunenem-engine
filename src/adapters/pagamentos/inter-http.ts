@@ -49,6 +49,12 @@ export interface InterHttpResponse {
    * supply it. Shape metadata only; never carries body content.
    */
   readonly contentType?: string;
+  /**
+   * aperture-gdyii diag — raw body BYTE count, captured from the Buffer
+   * BEFORE utf-8 decode (body.length is UTF-16 code units, not bytes —
+   * Cipher catch). OPTIONAL for scripted test transports.
+   */
+  readonly bodyByteLength?: number;
 }
 
 /**
@@ -240,10 +246,11 @@ export class InterHttpClient {
         res.on('data', (chunk: Buffer) => chunks.push(chunk));
         res.on('end', () => {
           const contentTypeHeader = res.headers['content-type'];
+          const raw = Buffer.concat(chunks);
           resolve({
             statusCode: res.statusCode ?? 0,
-            body: Buffer.concat(chunks).toString('utf8'),
-            // header VALUE only (e.g. "application/json") — shape metadata
+            body: raw.toString('utf8'),
+            bodyByteLength: raw.byteLength,
             ...(typeof contentTypeHeader === 'string' ? { contentType: contentTypeHeader } : {}),
           });
         });
@@ -339,16 +346,35 @@ const MAX_TITLE_LENGTH = 64;
  * only the status, the content-type header value, the body's byte length,
  * and whether it parsed as JSON at all.
  */
+export type ResponseContentClass = 'json' | 'html' | 'text' | 'other' | 'unknown';
+
+/**
+ * Classify a Content-Type header VALUE to a finite set (Cipher gate: the
+ * raw header is upstream/attacker-controlled and unbounded — never emit it
+ * verbatim as a span value). Parameters (charset etc.) are stripped before
+ * matching; anything unrecognized is 'other', absent is 'unknown'.
+ */
+export function classifyContentType(header: string | undefined): ResponseContentClass {
+  if (header === undefined) return 'unknown';
+  const mime = header.split(';')[0]?.trim().toLowerCase() ?? '';
+  if (mime === 'application/json' || mime.endsWith('+json')) return 'json';
+  if (mime === 'text/html' || mime === 'application/xhtml+xml') return 'html';
+  if (mime.startsWith('text/')) return 'text';
+  return 'other';
+}
+
 export function describeResponseShape(response: InterHttpResponse): {
   readonly status: number;
-  readonly contentType: string;
-  readonly bodyLength: number;
+  readonly contentClass: ResponseContentClass;
+  readonly bodyByteLength: number;
   readonly bodyIsJson: boolean;
 } {
   return {
     status: response.statusCode,
-    contentType: response.contentType ?? 'desconhecido',
-    bodyLength: response.body.length,
+    contentClass: classifyContentType(response.contentType),
+    // Prefer the transport's pre-decode byte count; fall back to an honest
+    // utf-8 re-encode for transports that did not supply it.
+    bodyByteLength: response.bodyByteLength ?? Buffer.byteLength(response.body, 'utf8'),
     bodyIsJson: parseJson<unknown>(response.body) !== null,
   };
 }
