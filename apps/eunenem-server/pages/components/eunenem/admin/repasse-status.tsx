@@ -111,6 +111,25 @@ export const REPASSE_STATUS_GLOSS: Record<RepasseStatus, string> = {
   cancelado: "cancelado — valores devolvidos ao saldo",
 };
 
+/**
+ * aperture-gdyii bug 4 — honest operator copy for `lastTransferError`.
+ * The raw code (HTTP_400, RECEBEDOR_NAO_PIX, ...) stays visible for
+ * debugging; this gloss tells the operator what it MEANS and what to do.
+ */
+export function humanizeTransferError(code: string): string {
+  if (code === "RECEBEDOR_NAO_PIX")
+    return "o recebedor é conta bancária — transferência automática só existe para PIX; faça o repasse manual e use 'marcar como pago'";
+  if (code === "SEM_REFERENCIA")
+    return "a transferência não gerou referência no Inter — verifique no painel do banco antes de tentar de novo";
+  if (code === "TRANSITORIO_ESGOTADO")
+    return "o Inter ficou indisponível nas tentativas — nenhum valor saiu; tente de novo mais tarde";
+  if (/^HTTP_4\d\d$/.test(code))
+    return "o banco recusou a transferência — confira os dados do recebedor (chave PIX válida?) antes de tentar de novo";
+  if (/^HTTP_5\d\d$/.test(code))
+    return "erro do lado do banco — nenhum valor confirmado; tente de novo mais tarde";
+  return "falha não catalogada — verifique o painel do Inter antes de agir";
+}
+
 /** Terminal states carry no further admin action. */
 export function isTerminalRepasse(status: RepasseStatus): boolean {
   return status === "pago" || status === "cancelado";

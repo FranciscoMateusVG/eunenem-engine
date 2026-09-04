@@ -378,7 +378,15 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
   const effectiveCpf = cpfTitular || cpfInput;
   const hydrated = useRef(false);
   useEffect(() => {
-    if (hydrated.current || dadosQuery.isLoading) return;
+    // aperture-gdyii bug 1 — gate on isSuccess, NOT !isLoading. On bare
+    // URLs idCampanha resolves via auth.me one async hop late; during that
+    // hop the query is DISABLED and TanStack v5 reports isLoading=false
+    // (isPending && isFetching), so a !isLoading guard burns hydrated on
+    // the first render with NO data and the real data is ignored forever —
+    // saved bank data looked like it never persisted (it did; staging DB
+    // proved 11 rows). isSuccess is only true after a real fetch resolves.
+    // Same disabled-query race PerfilBody guards for personalização.
+    if (hydrated.current || !dadosQuery.isSuccess) return;
     const d = dadosQuery.data;
     if (d) {
       setS(fromDadosRecebedor(d));
@@ -390,7 +398,7 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
       }
     }
     hydrated.current = true;
-  }, [dadosQuery.data, dadosQuery.isLoading]);
+  }, [dadosQuery.data, dadosQuery.isSuccess]);
 
   const salvar = trpc.recebedor.atualizar.useMutation({
     onSuccess: () => {
