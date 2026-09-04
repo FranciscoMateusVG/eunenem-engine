@@ -5,7 +5,8 @@ import {
   InterHttpClient,
   type InterHttpConfig,
   type InterHttpResponse,
-  type InterHttpTransport,
+  type InterHttpTransport,,
+  describeResponseShape,
 } from '../../../src/adapters/pagamentos/inter-http.js';
 
 /**
@@ -341,5 +342,58 @@ describe('createInterMtlsAgent — TLS verification stays ON', () => {
     expect(agent.options).not.toHaveProperty('rejectUnauthorized');
     expect(agent.options).not.toHaveProperty('ca');
     agent.destroy();
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────
+//  describeResponseShape (aperture-gdyii diag) — zero-PII shape metadata
+// ────────────────────────────────────────────────────────────────────
+
+describe('describeResponseShape (aperture-gdyii)', () => {
+  it('JSON bank rejection → bodyIsJson true, content-type surfaced', () => {
+    const shape = describeResponseShape({
+      statusCode: 400,
+      body: '{"codigo":"X","detail":"NEVER-READ"}',
+      contentType: 'application/json',
+    });
+    expect(shape).toEqual({
+      status: 400,
+      contentType: 'application/json',
+      bodyLength: 36,
+      bodyIsJson: true,
+    });
+  });
+
+  it('gateway/WAF HTML rejection → bodyIsJson false', () => {
+    const shape = describeResponseShape({
+      statusCode: 400,
+      body: '<html>Bad Request</html>',
+      contentType: 'text/html',
+    });
+    expect(shape.bodyIsJson).toBe(false);
+    expect(shape.contentType).toBe('text/html');
+    expect(shape.bodyLength).toBe(24);
+  });
+
+  it('transport without contentType (scripted test transports) → desconhecido', () => {
+    const shape = describeResponseShape({ statusCode: 502, body: '' });
+    expect(shape).toEqual({
+      status: 502,
+      contentType: 'desconhecido',
+      bodyLength: 0,
+      bodyIsJson: false,
+    });
+  });
+
+  it('derives NOTHING from body content — PII in detail/violacoes never surfaces', () => {
+    const shape = describeResponseShape({
+      statusCode: 422,
+      body: '{"detail":"chave 39053344705 invalida","violacoes":[{"razao":"Nome Da Pessoa"}]}',
+      contentType: 'application/json',
+    });
+    const serialized = JSON.stringify(shape);
+    expect(serialized).not.toContain('39053344705');
+    expect(serialized).not.toContain('Nome Da Pessoa');
+    expect(serialized).not.toContain('chave');
   });
 });

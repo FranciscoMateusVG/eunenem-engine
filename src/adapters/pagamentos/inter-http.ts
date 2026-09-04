@@ -43,6 +43,12 @@ export interface InterHttpConfig {
 export interface InterHttpResponse {
   readonly statusCode: number;
   readonly body: string;
+  /**
+   * aperture-gdyii diag — the response Content-Type header, when the
+   * transport captured it. OPTIONAL so scripted test transports need not
+   * supply it. Shape metadata only; never carries body content.
+   */
+  readonly contentType?: string;
 }
 
 /**
@@ -233,9 +239,12 @@ export class InterHttpClient {
         const chunks: Buffer[] = [];
         res.on('data', (chunk: Buffer) => chunks.push(chunk));
         res.on('end', () => {
+          const contentTypeHeader = res.headers['content-type'];
           resolve({
             statusCode: res.statusCode ?? 0,
             body: Buffer.concat(chunks).toString('utf8'),
+            // header VALUE only (e.g. "application/json") — shape metadata
+            ...(typeof contentTypeHeader === 'string' ? { contentType: contentTypeHeader } : {}),
           });
         });
       });
@@ -321,6 +330,29 @@ const MAX_TITLE_LENGTH = 64;
  * PIX key, names) in those fields too; see the CODIGO_ALLOWLIST comment for
  * why pattern matching is forbidden here.
  */
+/**
+ * aperture-gdyii diag — ZERO-PII response-shape metadata for failure
+ * diagnostics. Motivated by the first-ever prod payout rejection landing as
+ * a bare "HTTP_400" with no way to tell a gateway rejection from a bank
+ * business rejection. Deliberately derives NOTHING from the body's content
+ * (detail/violacoes can echo the PIX key/recipient name — Cipher gate):
+ * only the status, the content-type header value, the body's byte length,
+ * and whether it parsed as JSON at all.
+ */
+export function describeResponseShape(response: InterHttpResponse): {
+  readonly status: number;
+  readonly contentType: string;
+  readonly bodyLength: number;
+  readonly bodyIsJson: boolean;
+} {
+  return {
+    status: response.statusCode,
+    contentType: response.contentType ?? 'desconhecido',
+    bodyLength: response.body.length,
+    bodyIsJson: parseJson<unknown>(response.body) !== null,
+  };
+}
+
 export function extractInterErrorCode(response: InterHttpResponse): string {
   const parsed = parseJson<InterErrorBody>(response.body);
   if (parsed !== null) {

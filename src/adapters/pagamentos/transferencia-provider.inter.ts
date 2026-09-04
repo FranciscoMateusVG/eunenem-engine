@@ -1,6 +1,7 @@
 import { type Span, SpanStatusCode, trace } from '@opentelemetry/api';
 import { type MoneyCents, MoneyCentsSchema } from '../../domain/money.js';
 import {
+  describeResponseShape,
   extractInterErrorCode,
   InterHttpClient,
   type InterHttpConfig,
@@ -21,6 +22,21 @@ import {
 } from './transferencia-provider.js';
 
 const tracer = trace.getTracer('frame');
+
+/**
+ * aperture-gdyii diag — attach zero-PII response-shape metadata to a failure
+ * span so "gateway rejected the request" is distinguishable from "bank
+ * rejected the business operation" (a bank rejection is JSON with a codigo;
+ * a gateway/WAF rejection is typically HTML/empty). Additive to — never a
+ * replacement for — the codigo→title→HTTP_<status> erro_code precedence.
+ */
+function setRespShapeAttrs(span: Span, response: InterHttpResponse): void {
+  const shape = describeResponseShape(response);
+  span.setAttribute('transferencia.resp_http_status', shape.status);
+  span.setAttribute('transferencia.resp_content_type', shape.contentType);
+  span.setAttribute('transferencia.resp_body_length', shape.bodyLength);
+  span.setAttribute('transferencia.resp_body_is_json', shape.bodyIsJson);
+}
 
 /**
  * Real Banco Inter PIX-out adapter (aperture-ju5w2) for the
@@ -307,6 +323,7 @@ export class TransferenciaProviderInter implements TransferenciaProvider {
       // before creating any payment. Definite no-payment → rejeitado.
       const erro = extractInterErrorCode(response);
       span.setAttribute('transferencia.erro_code', erro);
+      setRespShapeAttrs(span, response);
       const codigoSolicitacao = parseJson<InterPagarPixResponse>(response.body)?.codigoSolicitacao;
       return typeof codigoSolicitacao === 'string'
         ? { outcome: 'rejeitado', erro, codigoSolicitacao }
@@ -316,6 +333,7 @@ export class TransferenciaProviderInter implements TransferenciaProvider {
     // 401/403/404/409/429 and every 5xx: we cannot assert no payment was
     // created (e.g. a 5xx after the payment already landed). Ambiguous.
     span.setAttribute('transferencia.erro_code', extractInterErrorCode(response));
+    setRespShapeAttrs(span, response);
     throw new Error(`pagarPix: HTTP ${response.statusCode} (ambíguo)`);
   }
 
