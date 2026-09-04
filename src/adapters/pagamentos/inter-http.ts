@@ -43,6 +43,18 @@ export interface InterHttpConfig {
 export interface InterHttpResponse {
   readonly statusCode: number;
   readonly body: string;
+  /**
+   * aperture-gdyii diag — the response Content-Type header, when the
+   * transport captured it. OPTIONAL so scripted test transports need not
+   * supply it. Shape metadata only; never carries body content.
+   */
+  readonly contentType?: string;
+  /**
+   * aperture-gdyii diag — raw body BYTE count, captured from the Buffer
+   * BEFORE utf-8 decode (body.length is UTF-16 code units, not bytes —
+   * Cipher catch). OPTIONAL for scripted test transports.
+   */
+  readonly bodyByteLength?: number;
 }
 
 /**
@@ -233,9 +245,13 @@ export class InterHttpClient {
         const chunks: Buffer[] = [];
         res.on('data', (chunk: Buffer) => chunks.push(chunk));
         res.on('end', () => {
+          const contentTypeHeader = res.headers['content-type'];
+          const raw = Buffer.concat(chunks);
           resolve({
             statusCode: res.statusCode ?? 0,
-            body: Buffer.concat(chunks).toString('utf8'),
+            body: raw.toString('utf8'),
+            bodyByteLength: raw.byteLength,
+            ...(typeof contentTypeHeader === 'string' ? { contentType: contentTypeHeader } : {}),
           });
         });
       });
@@ -321,6 +337,48 @@ const MAX_TITLE_LENGTH = 64;
  * PIX key, names) in those fields too; see the CODIGO_ALLOWLIST comment for
  * why pattern matching is forbidden here.
  */
+/**
+ * aperture-gdyii diag — ZERO-PII response-shape metadata for failure
+ * diagnostics. Motivated by the first-ever prod payout rejection landing as
+ * a bare "HTTP_400" with no way to tell a gateway rejection from a bank
+ * business rejection. Deliberately derives NOTHING from the body's content
+ * (detail/violacoes can echo the PIX key/recipient name — Cipher gate):
+ * only the status, the content-type header value, the body's byte length,
+ * and whether it parsed as JSON at all.
+ */
+export type ResponseContentClass = 'json' | 'html' | 'text' | 'other' | 'unknown';
+
+/**
+ * Classify a Content-Type header VALUE to a finite set (Cipher gate: the
+ * raw header is upstream/attacker-controlled and unbounded — never emit it
+ * verbatim as a span value). Parameters (charset etc.) are stripped before
+ * matching; anything unrecognized is 'other', absent is 'unknown'.
+ */
+export function classifyContentType(header: string | undefined): ResponseContentClass {
+  if (header === undefined) return 'unknown';
+  const mime = header.split(';')[0]?.trim().toLowerCase() ?? '';
+  if (mime === 'application/json' || mime.endsWith('+json')) return 'json';
+  if (mime === 'text/html' || mime === 'application/xhtml+xml') return 'html';
+  if (mime.startsWith('text/')) return 'text';
+  return 'other';
+}
+
+export function describeResponseShape(response: InterHttpResponse): {
+  readonly status: number;
+  readonly contentClass: ResponseContentClass;
+  readonly bodyByteLength: number;
+  readonly bodyIsJson: boolean;
+} {
+  return {
+    status: response.statusCode,
+    contentClass: classifyContentType(response.contentType),
+    // Prefer the transport's pre-decode byte count; fall back to an honest
+    // utf-8 re-encode for transports that did not supply it.
+    bodyByteLength: response.bodyByteLength ?? Buffer.byteLength(response.body, 'utf8'),
+    bodyIsJson: parseJson<unknown>(response.body) !== null,
+  };
+}
+
 export function extractInterErrorCode(response: InterHttpResponse): string {
   const parsed = parseJson<InterErrorBody>(response.body);
   if (parsed !== null) {
