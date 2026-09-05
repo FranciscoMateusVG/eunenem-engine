@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest';
-import { classifyTarget, formatTargetVerdict } from '../../e2e/target-classifier.js';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  classifyTarget,
+  DEFAULT_LOCAL_BASE_URL,
+  formatTargetVerdict,
+  logTargetVerdict,
+} from '../../e2e/target-classifier.js';
 
 /**
  * aperture-odyxd — regressions for the exact-host E2E target classifier.
@@ -40,11 +45,17 @@ describe('classifyTarget — genuine local targets are allowed', () => {
     expect(classifyTarget('http://LOCALHOST:3002').isLocal).toBe(true);
   });
 
-  it('unset → LOCAL, flagged as the documented default (suite spawns its own server)', () => {
+  it('unset → LOCAL, resolves the existing localhost:3002 default', () => {
     const v = classifyTarget(undefined);
     expect(v.isLocal).toBe(true);
     expect(v.provided).toBe(false);
     expect(v.reason).toBe('unset-default-local');
+    expect(v.baseUrl).toBe(DEFAULT_LOCAL_BASE_URL);
+    expect(v.baseUrl).toBe('http://localhost:3002');
+  });
+
+  it('a supplied local URL is echoed back as baseUrl (trimmed)', () => {
+    expect(classifyTarget('  http://localhost:3002  ').baseUrl).toBe('http://localhost:3002');
   });
 
   it('empty and whitespace-only are treated as unset → LOCAL', () => {
@@ -120,7 +131,16 @@ describe('classifyTarget — malformed input FAILS CLOSED (remote)', () => {
     const v = classifyTarget('not a url at all');
     expect(v.isLocal).toBe(false);
     expect(v.reason).toBe('malformed-fail-closed');
-    expect(v.hostname).toBeNull();
+    expect(v.hostname).toBe('');
+  });
+
+  it('a malformed target yields an EMPTY baseUrl, never the raw value', () => {
+    // Deliberate: returning the raw string would risk it being logged or
+    // dialled downstream. Callers must refuse to proceed on an empty baseUrl.
+    const v = classifyTarget('https://user:sekret@ ??? not-a-url');
+    expect(v.reason).toBe('malformed-fail-closed');
+    expect(v.baseUrl).toBe('');
+    expect(v.baseUrl).not.toContain('sekret');
   });
 
   it('scheme-less "localhost:3002" → REMOTE (no host component)', () => {
@@ -160,5 +180,24 @@ describe('formatTargetVerdict — privacy contract', () => {
     expect(line).toContain('<unparseable>');
     expect(line).toContain('REMOTE');
     expect(line).toContain('malformed-fail-closed');
+  });
+});
+
+describe('logTargetVerdict — emits exactly one line, same privacy contract', () => {
+  it('writes the formatted verdict to stdout', () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const verdict = classifyTarget('https://staging.eunenem.com/?token=abc123#localhost');
+      logTargetVerdict(verdict);
+      expect(spy).toHaveBeenCalledTimes(1);
+      const emitted = String(spy.mock.calls[0]?.[0]);
+      expect(emitted).toBe(formatTargetVerdict(verdict));
+      expect(emitted).toContain('staging.eunenem.com');
+      expect(emitted).toContain('REMOTE');
+      expect(emitted).not.toContain('abc123');
+      expect(emitted).not.toContain('#localhost');
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

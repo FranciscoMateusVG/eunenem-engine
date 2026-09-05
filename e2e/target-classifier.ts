@@ -55,19 +55,33 @@ export type TargetVerdictReason =
   /** Unparseable or hostname-less. Fails CLOSED → treated as remote. */
   | 'malformed-fail-closed';
 
+/** Playwright's existing fallback when no E2E_BASE_URL is supplied. */
+export const DEFAULT_LOCAL_BASE_URL = 'http://localhost:3002';
+
 export type TargetVerdict = {
-  /** Whether a non-empty E2E_BASE_URL was supplied at all. */
-  readonly provided: boolean;
   /**
    * Parsed hostname, normalised (lowercased, IPv6 brackets stripped, single
-   * trailing dot removed). `null` when the input was unparseable.
+   * trailing dot removed). EMPTY STRING when the input was unparseable —
+   * check `reason === 'malformed-fail-closed'` to detect that case.
    *
    * SAFE TO LOG: this is the host only. It deliberately never carries the
    * query, fragment, userinfo/credentials, port or path.
    */
-  readonly hostname: string | null;
+  readonly hostname: string;
   /** True only for an exact local-hostname match, or an unset target. */
   readonly isLocal: boolean;
+  /**
+   * The base URL a caller should actually use.
+   * - unset    → DEFAULT_LOCAL_BASE_URL (Playwright's existing default)
+   * - parseable → the trimmed input
+   * - malformed → EMPTY STRING. Deliberately not the raw value: a malformed
+   *   target is unusable, and returning the raw risks it being logged or
+   *   dialled downstream. Callers must refuse to proceed on an empty baseUrl.
+   */
+  readonly baseUrl: string;
+  /** Whether a non-empty E2E_BASE_URL was supplied at all. */
+  readonly provided: boolean;
+  /** Precise cause, so exclusion messages can say WHY rather than just "blocked". */
   readonly reason: TargetVerdictReason;
 };
 
@@ -108,30 +122,44 @@ function normaliseHostname(raw: string): string {
 export function classifyTarget(raw: string | undefined | null): TargetVerdict {
   if (raw === undefined || raw === null || raw.trim() === '') {
     return {
-      provided: false,
       hostname: 'localhost',
       isLocal: true,
+      baseUrl: DEFAULT_LOCAL_BASE_URL,
+      provided: false,
       reason: 'unset-default-local',
     };
   }
 
+  const trimmed = raw.trim();
+  const failClosed: TargetVerdict = {
+    hostname: '',
+    isLocal: false,
+    baseUrl: '',
+    provided: true,
+    reason: 'malformed-fail-closed',
+  };
+
   let parsed: URL;
   try {
-    parsed = new URL(raw.trim());
+    parsed = new URL(trimmed);
   } catch {
     // Unparseable. We cannot prove it is local, so it is remote.
-    return { provided: true, hostname: null, isLocal: false, reason: 'malformed-fail-closed' };
+    return failClosed;
   }
 
   const hostname = normaliseHostname(parsed.hostname);
   if (hostname === '') {
     // Parsed, but no host component (e.g. a scheme-less "localhost:3002").
-    return { provided: true, hostname: null, isLocal: false, reason: 'malformed-fail-closed' };
+    return failClosed;
   }
 
-  return LOCAL_HOSTNAMES.has(hostname)
-    ? { provided: true, hostname, isLocal: true, reason: 'exact-local-host' }
-    : { provided: true, hostname, isLocal: false, reason: 'remote-host' };
+  return {
+    hostname,
+    isLocal: LOCAL_HOSTNAMES.has(hostname),
+    baseUrl: trimmed,
+    provided: true,
+    reason: LOCAL_HOSTNAMES.has(hostname) ? 'exact-local-host' : 'remote-host',
+  };
 }
 
 /**
@@ -146,7 +174,21 @@ export function classifyTarget(raw: string | undefined | null): TargetVerdict {
  * is how a substring regex survived this long unnoticed.
  */
 export function formatTargetVerdict(verdict: TargetVerdict): string {
-  const host = verdict.hostname ?? '<unparseable>';
+  const host = verdict.hostname === '' ? '<unparseable>' : verdict.hostname;
   const mode = verdict.isLocal ? 'LOCAL' : 'REMOTE';
   return `[e2e-target] host=${host} verdict=${mode} reason=${verdict.reason}`;
+}
+
+/**
+ * Emit the verdict to stdout. Thin wrapper over `formatTargetVerdict` so the
+ * privacy-sensitive string construction stays independently testable while
+ * callers get a one-line side-effecting helper.
+ *
+ * Call this UNCONDITIONALLY at Playwright startup, on every run. An invisible
+ * classification is precisely how the old substring regex survived unnoticed:
+ * nothing ever printed which branch had been taken.
+ */
+export function logTargetVerdict(verdict: TargetVerdict): void {
+  // eslint-disable-next-line no-console -- deliberate: this line is the audit trail.
+  console.log(formatTargetVerdict(verdict));
 }
