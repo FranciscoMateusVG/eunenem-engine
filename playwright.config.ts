@@ -1,4 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
+import { logMoneyMovementPolicy, resolveMoneyMovementPolicy } from './e2e/e2e-spec-safety.js';
+import { classifyTarget, logTargetVerdict } from './e2e/target-classifier.js';
 
 /**
  * Remote-target mode (aperture-118sb): when E2E_BASE_URL points at a
@@ -7,9 +9,25 @@ import { defineConfig, devices } from '@playwright/test';
  * (no E2E_BASE_URL, or an explicit localhost one) keep the Phase-1
  * spawn-own-server behaviour unchanged.
  */
-const REMOTE_TARGET = Boolean(
-  process.env.E2E_BASE_URL && !/localhost|127\.0\.0\.1/.test(process.env.E2E_BASE_URL),
-);
+const TARGET = classifyTarget(process.env.E2E_BASE_URL);
+logTargetVerdict(TARGET);
+
+if (TARGET.baseUrl === '') {
+  throw new Error(
+    'E2E_BASE_URL is malformed or has no hostname; refusing to start Playwright (fail closed).',
+  );
+}
+
+const REMOTE_TARGET = !TARGET.isLocal;
+const MONEY_MOVEMENT_POLICY = resolveMoneyMovementPolicy({
+  isRemote: REMOTE_TARGET,
+  overrideValue: process.env.E2E_OPERATOR_ALLOW_REMOTE_MONEY_MOVEMENT,
+  isCi: Boolean(process.env.CI || process.env.GITHUB_ACTIONS),
+  stdinIsTty: process.stdin.isTTY === true,
+  stdoutIsTty: process.stdout.isTTY === true,
+  argv: process.argv,
+});
+logMoneyMovementPolicy(MONEY_MOVEMENT_POLICY);
 
 // Same connection string as .env.example (engine's docker-compose). In CI the
 // ci.yml `e2e` job overrides this to point at its `services: postgres:16`.
@@ -110,6 +128,12 @@ const STRIPE_ENV_3003: Record<string, string> = {
 
 export default defineConfig({
   testDir: './e2e',
+  // This filter is resolved while Playwright loads its configuration, before
+  // an excluded spec module, browser, auth helper, database fixture, or test
+  // action can run. The policy rejects explicitly named guarded specs before
+  // collection (including mixed safe + guarded selections), and also rejects
+  // --pass-with-no-tests so callers cannot hide an empty guarded selection.
+  testIgnore: [...MONEY_MOVEMENT_POLICY.excludedSpecGlobs],
   timeout: 30_000,
   expect: { timeout: 5_000 },
   // Single worker until per-worker DB isolation lands. E2E tests share one DB;
@@ -121,7 +145,7 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'list',
   use: {
-    baseURL: process.env.E2E_BASE_URL ?? 'http://localhost:3002',
+    baseURL: TARGET.baseUrl,
     storageState: undefined,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
