@@ -47,6 +47,9 @@ diferente do host atual; configuração ausente ou inválida falha com o 404 nor
 do Engine. Não há proxy de HTML/assets, lookup de existência nem fallback
 hardcoded.
 
+O formato de slug acompanha o contrato legado: 3–50 caracteres ASCII
+alfanuméricos/hífens, início e fim alfanuméricos e sem hífens consecutivos.
+
 Rotas e namespaces do Engine sempre vencem, inclusive subpaths inválidos de
 `api`, `auth`, `admin`, `pagina`, `painel`, `assets` e dos mounts estáticos. Isso
 deixa uma limitação histórica explícita: um slug legado igual a um nome reservado

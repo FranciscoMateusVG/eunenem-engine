@@ -5,6 +5,7 @@ import { createLegacyGuestRedirectMiddleware } from '../../../apps/eunenem-serve
 const ENGINE_ORIGIN = 'https://staging.eunenem.com';
 const LEGACY_ORIGIN = 'https://staging-legado.eunenem.com';
 const UUID = 'cbbf5913-ca0d-428d-ac43-792d33f4c70d';
+const FIFTY_CHAR_SLUG = `a${'b'.repeat(48)}1`;
 
 function testApp(legacySiteOrigin: string | undefined) {
   const app = new Hono();
@@ -38,8 +39,10 @@ describe('legacy guest-link redirect', () => {
 
   it.each([
     ['/casamento-da-ana', `${LEGACY_ORIGIN}/casamento-da-ana`],
+    ['/123-bebe', `${LEGACY_ORIGIN}/123-bebe`],
     [`/${UUID}/checkout?item=2`, `${LEGACY_ORIGIN}/${UUID}/checkout?item=2`],
     ['/casamento-da-ana/checkout?item=2', `${LEGACY_ORIGIN}/casamento-da-ana/checkout?item=2`],
+    [`/${FIFTY_CHAR_SLUG}/checkout`, `${LEGACY_ORIGIN}/${FIFTY_CHAR_SLUG}/checkout`],
   ])('redirects eligible legacy path %s', async (path, location) => {
     const response = await request(path);
     expect(response.status).toBe(302);
@@ -76,7 +79,10 @@ describe('legacy guest-link redirect', () => {
     '/products/item.png',
     '/listas-prontas/capa.png',
     '/casamento-da-ana/unknown',
-  ])('leaves Engine routes and reserved namespaces at %s', async (path) => {
+    '/casal--feliz',
+    '/casal-',
+    `/a${'b'.repeat(50)}`,
+  ])('does not redirect Engine, reserved, or invalid path %s', async (path) => {
     const response = await request(path);
     expect(response.status).not.toBe(302);
     expect(response.headers.get('location')).toBeNull();

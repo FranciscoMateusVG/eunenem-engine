@@ -3,7 +3,11 @@ import { resolveRoute } from "../pages/App.js";
 
 const LEGACY_UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const LEGACY_CUSTOM_SLUG = /^[a-z][a-z0-9-]{2,29}$/;
+// Mirrors legacy origin/main src/lib/validations/utm.ts: 3–50 ASCII
+// alphanumeric/hyphen characters, alphanumeric at both ends, no "--".
+// The legacy write schema lowercases new values, but uppercase remains an
+// accepted input shape and is preserved here rather than rewritten.
+const LEGACY_CUSTOM_SLUG = /^(?!.*--)[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$/i;
 
 // Engine namespaces win even when the remainder of the path is invalid.
 // This prevents a typo below an Engine surface from being reinterpreted as
