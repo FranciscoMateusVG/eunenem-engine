@@ -9,15 +9,15 @@
  * default off production).
  *
  * Five walks:
- *   1. HAPPY   — solicitado → Aprovar → fake pago → status pago + lançamento settled.
- *   2. RETRY   — forced rejeitado → falhou → Reprocessar (chave swapped to pago) → pago.
+ *   1. HAPPY   — solicitado → Aprovar → accepted handoff with receipt; funds remain claimed.
+ *   2. RETRY   — forced rejeitado → falhou → Reprocessar → accepted handoff.
  *   3. CANCEL  — forced rejeitado → falhou → Cancelar → funds return to disponível.
  *   4. MANUAL  — seeded verificando+needs-manual+candidates → candidate list +
  *                scary duplicate-pay warning + Marcar como pago (codigoSolicitacao) → pago.
  *   5. RBAC    — logged-out + non-admin denied at /admin/repasses AND at the mutation.
  *
  * State assertions are AUTHORITATIVE against the DB (the async pg-boss executar
- * job settles out-of-band); the UI is exercised for every CTA + the operator-
+ * job records the bank handoff out-of-band); the UI is exercised for every CTA + the operator-
  * facing copy. DB observation opens its own connection (destroyed in finally).
  */
 
@@ -62,7 +62,7 @@ async function aprovar(page: import('@playwright/test').Page): Promise<void> {
 }
 
 test.describe('aperture-r5y94 — repasse admin payout walks', () => {
-  test('walk 1 — happy path: Aprovar → fake pago → repasse pago + lançamento settled', async ({
+  test('walk 1 — happy path: Aprovar → accepted bank handoff with receipt and funds locked', async ({
     adminAuthenticatedPage: page,
   }) => {
     const db = openSeedDb();
@@ -79,22 +79,24 @@ test.describe('aperture-r5y94 — repasse admin payout walks', () => {
 
       await aprovar(page);
 
-      // The pg-boss executar job settles pago out-of-band — DB is authoritative.
-      await expectRepasseStatus(db, idRepasse, 'pago');
+      // The pg-boss executar job records platform handoff — DB is authoritative.
+      await expectRepasseStatus(db, idRepasse, 'enviado_ao_banco');
       const lanc = await getLancamentoById(db, idLancamento);
-      expect(lanc?.transferido_em, 'lançamento must be settled at pago').not.toBeNull();
-      expect(lanc?.id_repasse, 'settled lançamento stays claimed').toBe(idRepasse);
+      expect(lanc?.transferido_em, 'bank acceptance is not settlement').toBeNull();
+      expect(lanc?.id_repasse, 'handed-off funds stay claimed').toBe(idRepasse);
+      expect((await getRepasseRow(db, idRepasse))?.inter_codigo_solicitacao).not.toBeNull();
 
-      // UI reflects pago after a reload.
+      // UI reflects the platform handoff after a reload and offers no resend.
       await page.reload();
-      await expect(page.getByText('pago', { exact: true }).first()).toBeVisible();
+      await expect(page.getByText('enviado_ao_banco', { exact: true }).first()).toBeVisible();
       await expect(page.getByRole('button', { name: 'Aprovar repasse' })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Reprocessar transferência' })).toHaveCount(0);
     } finally {
       await db.destroy();
     }
   });
 
-  test('walk 2 — falhou/retry: rejeitado → Reprocessar (chave→pago) → pago', async ({
+  test('walk 2 — falhou/retry: rejeitado → Reprocessar → accepted bank handoff', async ({
     adminAuthenticatedPage: page,
   }) => {
     const db = openSeedDb();
@@ -117,16 +119,19 @@ test.describe('aperture-r5y94 — repasse admin payout walks', () => {
       await expect(page.getByText('falhou', { exact: true }).first()).toBeVisible();
       await page.getByRole('button', { name: 'Reprocessar transferência' }).click();
 
-      await expectRepasseStatus(db, idRepasse, 'pago');
+      await expectRepasseStatus(db, idRepasse, 'enviado_ao_banco');
       const lanc = await getLancamentoById(db, idLancamento);
-      expect(lanc?.transferido_em, 'lançamento settled after retry').not.toBeNull();
+      expect(lanc?.transferido_em, 'accepted retry is not settlement').toBeNull();
+      expect(lanc?.id_repasse, 'accepted retry keeps funds claimed').toBe(idRepasse);
       const row = await getRepasseRow(db, idRepasse);
       expect(row?.transfer_attempts, 'retry increments the attempt counter').toBeGreaterThanOrEqual(
         2,
       );
+      expect(row?.inter_codigo_solicitacao).not.toBeNull();
 
       await page.reload();
-      await expect(page.getByText('pago', { exact: true }).first()).toBeVisible();
+      await expect(page.getByText('enviado_ao_banco', { exact: true }).first()).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Reprocessar transferência' })).toHaveCount(0);
     } finally {
       await db.destroy();
     }

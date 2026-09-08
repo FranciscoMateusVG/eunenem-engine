@@ -183,6 +183,52 @@ describe('PIX charge refund × payout mutual exclusion — Postgres', () => {
     ).resolves.toBeUndefined();
   });
 
+  it('blocks a refund after the linked payout was accepted by the bank', async () => {
+    const lancamento = await seedLancamento();
+    const idRepasse = randomUUID() as IdRepasse;
+    await livroRepo.saveRepasse({
+      id: idRepasse,
+      idCampanha: lancamento.idCampanha as IdCampanha,
+      amountCents: lancamento.amountCents,
+      status: 'solicitado',
+      solicitadoEm: new Date('2026-08-05T11:00:00Z'),
+      aprovadoEm: null,
+      enviadoAoBancoEm: null,
+      bankTransferRef: null,
+      transferReferencia: null,
+      interCodigoSolicitacao: null,
+      transferAttempts: 0,
+      lastTransferError: null,
+      needsManualResolution: false,
+    });
+    // The probe reads persisted state only. Move this fixture to the terminal
+    // handoff representation without invoking another transfer workflow.
+    // biome-ignore lint/suspicious/noExplicitAny: focused finance-table fixture
+    await (testDb.db as any)
+      .updateTable('repasses_recebedor')
+      .set({
+        status: 'enviado_ao_banco',
+        aprovado_em: new Date('2026-08-05T11:30:00Z'),
+        enviado_ao_banco_em: new Date('2026-08-05T12:00:00Z'),
+        inter_codigo_solicitacao: 'inter-accepted-receipt',
+      })
+      .where('id', '=', idRepasse)
+      .execute();
+    // biome-ignore lint/suspicious/noExplicitAny: focused finance-table fixture
+    await (testDb.db as any)
+      .updateTable('lancamentos_financeiros')
+      .set({ id_repasse: idRepasse })
+      .where('id', '=', lancamento.id)
+      .execute();
+
+    await expect(
+      refundRepo.createIfAbsent(refundInput(lancamento.idPagamento as IdPagamento)),
+    ).rejects.toBeInstanceOf(FinanceiroPagamentoMovimentacaoConflitanteError);
+    await expect(
+      refundRepo.findByPagamentoId(lancamento.idPagamento as IdPagamento),
+    ).resolves.toBeUndefined();
+  });
+
   it('serializes a real fresh PIX payout claim against refund creation for the same payment', async () => {
     const { lancamento, idRepasse } = await seedApprovedPixRepasse();
     const [refund, payout] = await Promise.allSettled([

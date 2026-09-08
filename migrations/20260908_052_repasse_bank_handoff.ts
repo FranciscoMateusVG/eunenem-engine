@@ -11,7 +11,8 @@ import { sql } from 'kysely';
  * The final DO block is an operator-authorized, staging-targeted correction
  * for the existing R$20 repasse whose fourth attempt already has the durable
  * acceptance receipt. It is a no-op where the target does not exist and fails
- * closed if any expected predicate differs. Attempt history is never changed.
+ * closed if any exact, read-only-verified predicate differs. Attempt history
+ * is never changed by the forward migration.
  */
 export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema
@@ -76,12 +77,12 @@ export async function up(db: Kysely<unknown>): Promise<void> {
           JOIN repasse_transfer_attempts a
             ON a.repasse_id = r.id AND a.attempt_no = 4
           WHERE r.id = 'e2c18fc0-a5f9-4d23-a0e7-104b68327b57'::uuid
+            AND r.amount_cents = 2000
             AND r.status = 'verificando'
-            AND a.finished_at IS NOT NULL
+            AND a.finished_at = '2026-09-08T12:12:09.139000Z'::timestamptz
             AND a.http_status = 200
-            AND a.outcome = 'agendado_aprovacao'
-            AND a.codigo_solicitacao IS NOT NULL
-            AND length(btrim(a.codigo_solicitacao)) > 0
+            AND a.outcome = 'verificando'
+            AND a.codigo_solicitacao = '203f4559-72d8-4675-9f79-aa360b9f4456'
             AND r.inter_codigo_solicitacao = a.codigo_solicitacao
             AND NOT EXISTS (
               SELECT 1
@@ -89,6 +90,14 @@ export async function up(db: Kysely<unknown>): Promise<void> {
                 WHERE l.id_repasse = r.id
                   AND l.transferido_em IS NOT NULL
             )
+            AND (
+              SELECT count(*) FROM lancamentos_financeiros l WHERE l.id_repasse = r.id
+            ) = 2
+            AND (
+              SELECT coalesce(sum(l.amount_cents), 0)
+                FROM lancamentos_financeiros l
+                WHERE l.id_repasse = r.id
+            ) = 2000
       ) INTO target_matches;
 
       IF NOT target_matches THEN
@@ -117,6 +126,22 @@ export async function down(db: Kysely<unknown>): Promise<void> {
     UPDATE repasses_recebedor
       SET status = 'verificando', enviado_ao_banco_em = NULL
       WHERE status = 'enviado_ao_banco';
+
+    -- Rollback-only representational mapping. The old schema cannot encode the
+    -- handoff state in attempt snapshots, so preserve the rows and their
+    -- receipts/outcomes while mapping only that state label to its old-schema
+    -- predecessor before reinstating the old CHECK constraints.
+    UPDATE repasse_transfer_attempts
+      SET state_before = CASE
+            WHEN state_before = 'enviado_ao_banco' THEN 'verificando'
+            ELSE state_before
+          END,
+          state_after = CASE
+            WHEN state_after = 'enviado_ao_banco' THEN 'verificando'
+            ELSE state_after
+          END
+      WHERE state_before = 'enviado_ao_banco'
+         OR state_after = 'enviado_ao_banco';
 
     ALTER TABLE repasses_recebedor
       DROP CONSTRAINT repasses_recebedor_status_check,

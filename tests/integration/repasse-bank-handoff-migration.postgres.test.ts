@@ -2,11 +2,11 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testconta
 import { Kysely, PostgresDialect, sql } from 'kysely';
 import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { up } from '../../migrations/20260908_052_repasse_bank_handoff.js';
+import { down, up } from '../../migrations/20260908_052_repasse_bank_handoff.js';
 
 const TARGET = 'e2c18fc0-a5f9-4d23-a0e7-104b68327b57';
-const RECEIPT = '5653aadc-4a37-c3ab-2998-c188115c2a29';
-const FINISHED = new Date('2026-09-08T06:00:40.466Z');
+const RECEIPT = '203f4559-72d8-4675-9f79-aa360b9f4456';
+const FINISHED = new Date('2026-09-08T12:12:09.139Z');
 
 describe('052 guarded operator-authorized payout handoff migration', () => {
   let container: StartedPostgreSqlContainer;
@@ -30,6 +30,7 @@ describe('052 guarded operator-authorized payout handoff migration', () => {
     await sql`
       CREATE TABLE repasses_recebedor (
         id uuid PRIMARY KEY,
+        amount_cents integer NOT NULL,
         status text NOT NULL,
         inter_codigo_solicitacao text,
         last_transfer_error text,
@@ -58,6 +59,7 @@ describe('052 guarded operator-authorized payout handoff migration', () => {
       CREATE TABLE lancamentos_financeiros (
         id uuid PRIMARY KEY,
         id_repasse uuid,
+        amount_cents integer NOT NULL,
         transferido_em timestamptz
       )
     `.execute(db);
@@ -71,8 +73,9 @@ describe('052 guarded operator-authorized payout handoff migration', () => {
   it('converts only the exact accepted attempt 4 and preserves receipt, timestamp, history and unsettled ledger', async () => {
     await sql`
       INSERT INTO repasses_recebedor
-        (id, status, inter_codigo_solicitacao, last_transfer_error, needs_manual_resolution)
-      VALUES (${TARGET}::uuid, 'verificando', ${RECEIPT}, 'legacy', true)
+        (id, amount_cents, status, inter_codigo_solicitacao,
+         last_transfer_error, needs_manual_resolution)
+      VALUES (${TARGET}::uuid, 2000, 'verificando', ${RECEIPT}, 'legacy', true)
     `.execute(db);
     await sql`
       INSERT INTO repasse_transfer_attempts
@@ -82,11 +85,13 @@ describe('052 guarded operator-authorized payout handoff migration', () => {
         ('10000000-0000-4000-8000-000000000001', ${TARGET}::uuid, 1,
          '2026-09-08T05:00:00Z', 400, 'falhou', NULL, 'transferindo', 'falhou'),
         ('10000000-0000-4000-8000-000000000004', ${TARGET}::uuid, 4,
-         ${FINISHED}, 200, 'agendado_aprovacao', ${RECEIPT}, 'transferindo', 'verificando')
+         ${FINISHED}, 200, 'verificando', ${RECEIPT}, 'transferindo', 'verificando')
     `.execute(db);
     await sql`
-      INSERT INTO lancamentos_financeiros (id, id_repasse, transferido_em)
-      VALUES ('20000000-0000-4000-8000-000000000001', ${TARGET}::uuid, NULL)
+      INSERT INTO lancamentos_financeiros (id, id_repasse, amount_cents, transferido_em)
+      VALUES
+        ('20000000-0000-4000-8000-000000000001', ${TARGET}::uuid, 1000, NULL),
+        ('20000000-0000-4000-8000-000000000002', ${TARGET}::uuid, 1000, NULL)
     `.execute(db);
 
     await db.transaction().execute((trx) => up(trx));
@@ -120,16 +125,26 @@ describe('052 guarded operator-authorized payout handoff migration', () => {
     ).toBeNull();
   });
 
-  it('fails closed and rolls back when the target exists but the accepted-attempt predicates differ', async () => {
+  it.each([
+    ['amount', 1_999, RECEIPT, FINISHED],
+    ['receipt', 2_000, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', FINISHED],
+    ['finished timestamp', 2_000, RECEIPT, new Date('2026-09-08T12:12:09.140Z')],
+  ] as const)('fails closed and rolls back when the target %s differs from the verified receipt', async (_predicate, amountCents, receipt, finishedAt) => {
     await sql`
-      INSERT INTO repasses_recebedor (id, status, inter_codigo_solicitacao)
-      VALUES (${TARGET}::uuid, 'verificando', ${RECEIPT})
+      INSERT INTO repasses_recebedor (id, amount_cents, status, inter_codigo_solicitacao)
+      VALUES (${TARGET}::uuid, ${amountCents}, 'verificando', ${receipt})
     `.execute(db);
     await sql`
       INSERT INTO repasse_transfer_attempts
         (id, repasse_id, attempt_no, finished_at, http_status, outcome, codigo_solicitacao)
       VALUES ('10000000-0000-4000-8000-000000000004', ${TARGET}::uuid, 4,
-              ${FINISHED}, 400, 'falhou', ${RECEIPT})
+              ${finishedAt}, 200, 'verificando', ${receipt})
+    `.execute(db);
+    await sql`
+      INSERT INTO lancamentos_financeiros (id, id_repasse, amount_cents, transferido_em)
+      VALUES
+        ('20000000-0000-4000-8000-000000000001', ${TARGET}::uuid, 1000, NULL),
+        ('20000000-0000-4000-8000-000000000002', ${TARGET}::uuid, 1000, NULL)
     `.execute(db);
 
     await expect(db.transaction().execute((trx) => up(trx))).rejects.toThrow(
@@ -143,5 +158,51 @@ describe('052 guarded operator-authorized payout handoff migration', () => {
         }>`SELECT status FROM repasses_recebedor WHERE id = ${TARGET}::uuid`.execute(db)
       ).rows[0]?.status,
     ).toBe('verificando');
+  });
+
+  it('maps accepted state snapshots on down so old checks can be restored without losing the attempt', async () => {
+    await db.transaction().execute((trx) => up(trx));
+    const repasseId = '30000000-0000-4000-8000-000000000001';
+    const attemptId = '30000000-0000-4000-8000-000000000002';
+    await sql`
+      INSERT INTO repasses_recebedor
+        (id, amount_cents, status, enviado_ao_banco_em, inter_codigo_solicitacao)
+      VALUES (${repasseId}::uuid, 2000, 'enviado_ao_banco', ${FINISHED}, ${RECEIPT})
+    `.execute(db);
+    await sql`
+      INSERT INTO repasse_transfer_attempts
+        (id, repasse_id, attempt_no, finished_at, http_status, outcome,
+         codigo_solicitacao, state_before, state_after)
+      VALUES (${attemptId}::uuid, ${repasseId}::uuid, 1, ${FINISHED}, 200,
+              'aceito_pelo_banco', ${RECEIPT}, 'enviado_ao_banco', 'enviado_ao_banco')
+    `.execute(db);
+
+    await db.transaction().execute((trx) => down(trx));
+
+    const repasse = await sql<{ status: string; inter_codigo_solicitacao: string | null }>`
+      SELECT status, inter_codigo_solicitacao
+        FROM repasses_recebedor
+        WHERE id = ${repasseId}::uuid
+    `.execute(db);
+    expect(repasse.rows[0]).toEqual({
+      status: 'verificando',
+      inter_codigo_solicitacao: RECEIPT,
+    });
+    const attempt = await sql<{
+      state_before: string | null;
+      state_after: string | null;
+      outcome: string | null;
+      codigo_solicitacao: string | null;
+    }>`
+      SELECT state_before, state_after, outcome, codigo_solicitacao
+        FROM repasse_transfer_attempts
+        WHERE id = ${attemptId}::uuid
+    `.execute(db);
+    expect(attempt.rows[0]).toEqual({
+      state_before: 'verificando',
+      state_after: 'verificando',
+      outcome: 'aceito_pelo_banco',
+      codigo_solicitacao: RECEIPT,
+    });
   });
 });

@@ -112,12 +112,25 @@ export const REPASSE_STATUS_GLOSS: Record<RepasseStatus, string> = {
   solicitado: "aguardando aprovação",
   aprovado: "na fila de transferência",
   transferindo: "transferência em andamento no Inter",
-  verificando: "confirmando o resultado no Inter",
+  verificando: "resultado do envio incerto — revisão manual necessária",
   enviado_ao_banco: "solicitação aceita e entregue ao banco",
   pago: "transferido com sucesso",
   falhou: "falhou — nenhum valor foi movido",
   cancelado: "cancelado — valores devolvidos ao saldo",
 };
+
+export function repasseInFlightExplanation(
+  status: Extract<RepasseStatus, "aprovado" | "transferindo" | "verificando">,
+): string {
+  switch (status) {
+    case "aprovado":
+      return `${REPASSE_STATUS_GLOSS[status]}. O envio inicial foi enfileirado e ainda não começou.`;
+    case "transferindo":
+      return `${REPASSE_STATUS_GLOSS[status]}. O envio inicial está em andamento; não inicie outro pagamento.`;
+    case "verificando":
+      return `${REPASSE_STATUS_GLOSS[status]}. Nenhum novo envio ou consulta automática será feito. Confira o caso manualmente antes de qualquer ação financeira.`;
+  }
+}
 
 /**
  * aperture-gdyii bug 4 — honest operator copy for `lastTransferError`.

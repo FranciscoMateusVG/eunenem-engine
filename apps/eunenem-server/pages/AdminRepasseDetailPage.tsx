@@ -4,7 +4,7 @@ import { DddBadge } from "@/components/eunenem/admin/DddBadge";
 import { PrivateProviderErrorBody } from "@/components/eunenem/admin/PrivateProviderErrorBody";
 import {
   ManualResolutionPill,
-  REPASSE_STATUS_GLOSS,
+  repasseInFlightExplanation,
   humanizeTransferError,
   RepasseStatusPill,
 } from "@/components/eunenem/admin/repasse-status";
@@ -937,10 +937,7 @@ function InFlightNote({
   return (
     <div className="flex items-start gap-3 rounded-md border border-line bg-paper px-5 py-4">
       <RepasseStatusPill status={status} />
-      <p className="text-[13px] text-ink-soft">
-        {REPASSE_STATUS_GLOSS[status]}. Nenhum novo envio ou consulta automática
-        será feito. Confira o caso manualmente antes de qualquer ação financeira.
-      </p>
+      <p className="text-[13px] text-ink-soft">{repasseInFlightExplanation(status)}</p>
     </div>
   );
 }

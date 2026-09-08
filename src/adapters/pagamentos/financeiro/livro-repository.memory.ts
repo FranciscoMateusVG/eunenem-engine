@@ -155,7 +155,12 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
         if (lancamento.transferidoEm !== null) return true;
         if (lancamento.idRepasse === null) return false;
         const status = this.repasses.get(lancamento.idRepasse)?.status;
-        return status === 'transferindo' || status === 'verificando' || status === 'pago';
+        return (
+          status === 'transferindo' ||
+          status === 'verificando' ||
+          status === 'enviado_ao_banco' ||
+          status === 'pago'
+        );
       }),
     );
   }
