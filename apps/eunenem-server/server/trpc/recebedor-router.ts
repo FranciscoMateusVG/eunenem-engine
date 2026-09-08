@@ -36,6 +36,10 @@ import { z } from "zod";
 import type { DadosRecebedor } from "../../../../src/domain/arrecadacao/value-objects/dados-recebedor.js";
 import type { IdCampanha } from "../../../../src/domain/arrecadacao/value-objects/ids.js";
 import type { LancamentoFinanceiro } from "../../../../src/domain/pagamentos/financeiro/entities/lancamento-financeiro.js";
+import type {
+  RepasseRecebedor,
+  StatusRepasse,
+} from "../../../../src/domain/pagamentos/financeiro/entities/repasse-recebedor.js";
 import type { Pagamento } from "../../../../src/domain/pagamentos/entities/pagamento.js";
 import { randomUUID } from "node:crypto";
 import {
@@ -264,20 +268,42 @@ const TransferenciaSolicitarOutputSchema = z.object({
 // ────────────────────────────────────────────────────────────────────
 //  recebedor.listMovimentacoes — OUT-movement projection (aperture-2u5vw)
 //
-//  The resgatado-detail modal previously showed "0 movimentações"
-//  because nothing projected the account-transfer (repasse) side of the
-//  ledger. This query groups the TRANSFERIDO recebedor lançamentos by
-//  idRepasse — one movimentação per admin transfer (transfer date +
-//  summed amount + ticket count). Only an out-type exists today
+//  The request is the stable row grain. Authoritative receiver-ledger
+//  entries are composed into that request so pending and terminal states
+//  remain visible without duplicating one amount per gift. Historical
+//  transferred ledger groups without a surviving request row are retained
+//  once for compatibility. Only an out-type exists today
 //  (transferencia_conta); there is no resgate-loja concept.
 // ────────────────────────────────────────────────────────────────────
 
+const MovimentoRepasseEstadoSchema = z.enum([
+  "aguardando_aprovacao",
+  "em_transferencia",
+  "concluido",
+  "falhou",
+  "cancelado",
+  "inconsistente",
+]);
+
 const MovimentacaoDTOSchema = z.object({
   idRepasse: z.string(),
-  data: z.string(), // ISO transferidoEm (the transfer date)
+  solicitadoEm: z.string(),
+  concluidoEm: z.string().nullable(),
   valorCents: z.number().int().nonnegative(),
-  quantidade: z.number().int().positive(),
+  quantidade: z.number().int().nonnegative(),
   tipo: z.literal("transferencia_conta"), // only out-type today; no resgate-loja concept exists
+  estado: MovimentoRepasseEstadoSchema,
+  statusRepasse: z
+    .enum([
+      "solicitado",
+      "aprovado",
+      "transferindo",
+      "verificando",
+      "pago",
+      "falhou",
+      "cancelado",
+    ])
+    .nullable(),
 });
 
 const ListMovimentacoesOutputSchema = z.object({
@@ -399,6 +425,120 @@ interface ExtratoLancamentoState {
   liberacao: ExtratoLiberacao;
 }
 
+const ACTIVE_PENDING_REPASSE_STATUSES = new Set<StatusRepasse>([
+  "solicitado",
+  "aprovado",
+  "transferindo",
+  "verificando",
+]);
+
+function isActivePendingRepasse(status: StatusRepasse | undefined): boolean {
+  return status !== undefined && ACTIVE_PENDING_REPASSE_STATUSES.has(status);
+}
+
+type MovimentoRepasseEstado = z.infer<typeof MovimentoRepasseEstadoSchema>;
+
+interface RepasseLedgerGroup {
+  valorTransferidoCents: number;
+  quantidade: number;
+  concluidoEm: Date | null;
+}
+
+function projectRepasseEstado(
+  repasse: RepasseRecebedor,
+  ledger: RepasseLedgerGroup | undefined,
+): MovimentoRepasseEstado {
+  if (ledger?.concluidoEm) {
+    return ledger.valorTransferidoCents === (repasse.amountCents as unknown as number)
+      ? "concluido"
+      : "inconsistente";
+  }
+  switch (repasse.status) {
+    case "solicitado":
+      return "aguardando_aprovacao";
+    case "aprovado":
+    case "transferindo":
+    case "verificando":
+      return "em_transferencia";
+    case "falhou":
+      return "falhou";
+    case "cancelado":
+      return "cancelado";
+    case "pago":
+      // A paid PIX repasse and its ledger transfer stamp are committed in
+      // the same transaction. Do not invent a completed movement if those
+      // two authoritative records disagree.
+      return "inconsistente";
+  }
+}
+
+function buildMovimentacoes(
+  repasses: readonly RepasseRecebedor[],
+  states: readonly ExtratoLancamentoState[],
+): z.infer<typeof MovimentacaoDTOSchema>[] {
+  const ledgerByRepasse = new Map<string, RepasseLedgerGroup>();
+  for (const state of states) {
+    const idRepasse = state.lancamento.idRepasse;
+    if (idRepasse === null) continue;
+    const key = idRepasse as unknown as string;
+    const existing = ledgerByRepasse.get(key) ?? {
+      valorTransferidoCents: 0,
+      quantidade: 0,
+      concluidoEm: null,
+    };
+    existing.quantidade += 1;
+    if (state.lancamento.transferidoEm !== null) {
+      existing.valorTransferidoCents += state.lancamento.amountCents as unknown as number;
+      existing.concluidoEm =
+        existing.concluidoEm === null ||
+        state.lancamento.transferidoEm.getTime() < existing.concluidoEm.getTime()
+          ? state.lancamento.transferidoEm
+          : existing.concluidoEm;
+    }
+    ledgerByRepasse.set(key, existing);
+  }
+
+  const knownRepasseIds = new Set(repasses.map((repasse) => repasse.id as unknown as string));
+  const result: z.infer<typeof MovimentacaoDTOSchema>[] = repasses.map((repasse) => {
+    const key = repasse.id as unknown as string;
+    const ledger = ledgerByRepasse.get(key);
+    return {
+      idRepasse: key,
+      solicitadoEm: repasse.solicitadoEm.toISOString(),
+      concluidoEm: ledger?.concluidoEm?.toISOString() ?? null,
+      valorCents: repasse.amountCents as unknown as number,
+      quantidade: ledger?.quantidade ?? 0,
+      tipo: "transferencia_conta" as const,
+      estado: projectRepasseEstado(repasse, ledger),
+      statusRepasse: repasse.status,
+    };
+  });
+
+  // Compatibility: preserve transferred ledger groups whose historical
+  // repasse record is unavailable. They were the only rows emitted by the
+  // previous endpoint and must not disappear or duplicate during rollout.
+  for (const [idRepasse, ledger] of ledgerByRepasse) {
+    if (knownRepasseIds.has(idRepasse) || ledger.concluidoEm === null) continue;
+    result.push({
+      idRepasse,
+      solicitadoEm: ledger.concluidoEm.toISOString(),
+      concluidoEm: ledger.concluidoEm.toISOString(),
+      valorCents: ledger.valorTransferidoCents,
+      quantidade: ledger.quantidade,
+      tipo: "transferencia_conta",
+      estado: "concluido",
+      statusRepasse: null,
+    });
+  }
+
+  return result.sort((a, b) => {
+    if (a.solicitadoEm !== b.solicitadoEm) {
+      return a.solicitadoEm < b.solicitadoEm ? 1 : -1;
+    }
+    return a.idRepasse.localeCompare(b.idRepasse);
+  });
+}
+
 /**
  * Walk every recebedor-tipo lançamento for the campanha and resolve
  * each one's parent pagamento + contribuição + derived liberação state.
@@ -516,7 +656,15 @@ const extratoRouter = t.router({
         await resolverCampanhaAdministrada(ctx, input.idCampanha);
 
         const now = ctx.deps.clock();
-        const states = await buildExtratoStates(ctx, input.idCampanha, now);
+        const [states, repasses] = await Promise.all([
+          buildExtratoStates(ctx, input.idCampanha, now),
+          ctx.deps.livroFinanceiroRepository.findRepassesByIdCampanha(
+            input.idCampanha as IdCampanha,
+          ),
+        ]);
+        const repasseStatusById = new Map(
+          repasses.map((repasse) => [repasse.id as unknown as string, repasse.status]),
+        );
 
         const liveStates = states.filter((s) => s.liberacao !== "cancelado");
 
@@ -597,7 +745,13 @@ const extratoRouter = t.router({
           // admin-pipeline bucket; they no longer count as actionable
           // saldo. saldoDisponivel only includes rows the recebedor
           // can still SOLICITAR on.
-          if (liberacao === "solicitado") {
+          if (
+            liberacao === "solicitado" &&
+            lancamento.idRepasse !== null &&
+            isActivePendingRepasse(
+              repasseStatusById.get(lancamento.idRepasse as unknown as string),
+            )
+          ) {
             aguardandoAprovacaoCents += lancamento.amountCents;
             continue;
           }
@@ -856,47 +1010,13 @@ const listMovimentacoesProcedure = t.procedure
   .query(async ({ ctx, input }) => {
     try {
       await resolverCampanhaAdministrada(ctx, input.idCampanha); // same auth as extrato.summary / extrato.list
-      const now = ctx.deps.clock();
-      const states = await buildExtratoStates(ctx, input.idCampanha, now);
-
-      // Group the TRANSFERIDO recebedor lançamentos by idRepasse — one
-      // movimentação per admin transfer (date + summed amount). The grain
-      // here is credito_saldo_recebedor (buildExtratoStates already
-      // filters to it), matching resgatadoCents in extrato.summary.
-      const porRepasse = new Map<
-        string,
-        { data: Date; valorCents: number; quantidade: number }
-      >();
-      for (const s of states) {
-        if (s.liberacao !== "transferido") continue;
-        const idRepasse = s.lancamento.idRepasse;
-        const transferidoEm = s.lancamento.transferidoEm;
-        // Defensive — a transferido lançamento implies both are set.
-        if (idRepasse === null || transferidoEm === null) continue;
-        const key = idRepasse as unknown as string;
-        const existing = porRepasse.get(key);
-        if (existing) {
-          existing.valorCents += s.lancamento.amountCents as unknown as number;
-          existing.quantidade += 1;
-          // keep the first transferidoEm — they should match within a repasse
-        } else {
-          porRepasse.set(key, {
-            data: transferidoEm,
-            valorCents: s.lancamento.amountCents as unknown as number,
-            quantidade: 1,
-          });
-        }
-      }
-
-      const movimentacoes = [...porRepasse.entries()]
-        .map(([idRepasse, g]) => ({
-          idRepasse,
-          data: g.data.toISOString(),
-          valorCents: g.valorCents,
-          quantidade: g.quantidade,
-          tipo: "transferencia_conta" as const,
-        }))
-        .sort((a, b) => (a.data < b.data ? 1 : a.data > b.data ? -1 : 0)); // data desc
+      const [states, repasses] = await Promise.all([
+        buildExtratoStates(ctx, input.idCampanha, ctx.deps.clock()),
+        ctx.deps.livroFinanceiroRepository.findRepassesByIdCampanha(
+          input.idCampanha as IdCampanha,
+        ),
+      ]);
+      const movimentacoes = buildMovimentacoes(repasses, states);
 
       return { movimentacoes };
     } catch (err) {

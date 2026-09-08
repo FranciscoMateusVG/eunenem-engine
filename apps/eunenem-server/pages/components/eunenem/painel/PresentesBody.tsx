@@ -44,6 +44,8 @@ import {
   type ExtratoLiberacao,
   type ExtratoRowDTO,
   type ExtratoSummaryDTO,
+  type MovimentacaoRepasseDTO,
+  type MovimentoRepasseEstado,
   type SolicitarTransferenciaState,
   useStubCampanhaIdForSlug,
   useStubExtratoList,
@@ -87,7 +89,7 @@ import {
  *   ExtratoSummaryDTO        →  PresentesSummary subset
  *   ├ totalRecebidoCents     →  summary.recebido
  *   ├ totalPresentes         →  summary.presentes
- *   ├ resgatadoCents         →  summary.resgatado (+ aguardandoAprovacaoCents, aperture-eqdxl)
+ *   ├ resgatadoCents         →  summary.resgatado
  *   ├ saldoDisponivelCents   →  summary.disponivel
  *   ├ aguardandoLiberacaoCents → summary.aguardando
  *   ├ aguardandoAprovacaoCents → summary.aguardandoAprovacao (aperture-1ut92)
@@ -173,30 +175,22 @@ interface PresentesSummaryUI {
   resgatado: number;
   disponivel: number;
   aguardando: number;
-  /** Sum of solicitado lançamentos — money in the admin-approval queue
-   *  (aperture-1ut92). Surfaced as a dedicated aux pill in the summary
+  /** Sum of lançamentos claimed by active payout requests. Surfaced as a
+   *  dedicated aux pill in the summary
    *  block so the operator sees all three liquidity buckets honestly:
-   *  saldoDisponivel (actionable) · aguardandoAprovacao (admin queue) ·
+   *  saldoDisponivel (actionable) · aguardandoAprovacao (in flight) ·
    *  aguardandoLiberacao (Stripe maturação). */
   aguardandoAprovacao: number;
   opening: number;
 }
 
-function adaptSummary(s: ExtratoSummaryDTO): PresentesSummaryUI {
+export function adaptSummary(s: ExtratoSummaryDTO): PresentesSummaryUI {
   return {
     recebido: s.totalRecebidoCents,
     presentes: s.totalPresentesUnidades ?? s.totalPresentesItensCount ?? s.totalPresentes,
-    // aperture-eqdxl — the RESGATADO figure sums TWO buckets: already
-    // transferred (resgatadoCents) PLUS in-flight admin-approval
-    // (aguardandoAprovacaoCents). Both are money the user has already
-    // SOLICITAR'd out of their disponível balance — from the operator's
-    // mental model it's "resgatado" the moment a transfer is requested,
-    // not only once admin approves. These are disjoint backend buckets
-    // (transferidoEm IS NOT NULL vs solicitado-but-not-transferred), so
-    // summing them does NOT double-count. The dedicated "aguardando
-    // aprovação" aux pill below still surfaces the in-flight slice
-    // separately as a breakdown.
-    resgatado: s.resgatadoCents + (s.aguardandoAprovacaoCents ?? 0),
+    // Completed means the authoritative receiver ledger has a transfer
+    // timestamp. A requested/in-flight payout is deliberately separate.
+    resgatado: s.resgatadoCents,
     disponivel: s.saldoDisponivelCents,
     aguardando: s.aguardandoLiberacaoCents,
     // aperture-1ut92 — fall back to 0 for the trpc-cache-rotation window
@@ -1419,6 +1413,73 @@ function formatSolicitarError(err: { code: string; message: string }): string {
 // ── Resgatado modal (all outgoing movements) ─────────────────────────────────
 const RESG_TINT = { "--tint-bg": "#F3E9F0", "--tint-stripe": "#6b3c5e" } as React.CSSProperties;
 
+const MOVIMENTO_ESTADO_LABEL: Record<MovimentoRepasseEstado, string> = {
+  aguardando_aprovacao: "aguardando aprovação",
+  em_transferencia: "em transferência",
+  concluido: "transferência concluída",
+  falhou: "transferência falhou",
+  cancelado: "transferência cancelada",
+  inconsistente: "status pendente de conferência",
+};
+
+export function movementStateLabel(estado: MovimentoRepasseEstado): string {
+  return MOVIMENTO_ESTADO_LABEL[estado];
+}
+
+function fmtMovementDateTime(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "data indisponível";
+  return date.toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "America/Sao_Paulo",
+  });
+}
+
+export function movementRowViewModel(movement: MovimentacaoRepasseDTO) {
+  const completed = movement.estado === "concluido";
+  return {
+    completed,
+    amountPrefix: completed ? "− " : "",
+    statusLabel: movementStateLabel(movement.estado),
+    requestedLabel: `solicitada ${fmtMovementDateTime(movement.solicitadoEm)}`,
+    completedLabel:
+      completed && movement.concluidoEm
+        ? `concluída ${fmtMovementDateTime(movement.concluidoEm)}`
+        : null,
+  };
+}
+
+export function WithdrawalMovementRow({ movement }: { movement: MovimentacaoRepasseDTO }) {
+  const view = movementRowViewModel(movement);
+  return (
+    <li className="ex-resg-row" style={RESG_TINT}>
+      <span className="ex-resg-stripe" />
+      <div className="ex-resg-body">
+        <div className="ex-resg-l1">
+          <span className="ex-hand ex-resg-item">transferência para conta corrente</span>
+          <span className="ex-hand ex-resg-val">
+            {view.amountPrefix}
+            {fmtMoney(movement.valorCents)}
+          </span>
+        </div>
+        <div className="ex-resg-l2">
+          <span className="ex-mono">{view.requestedLabel}</span>
+          <span className="ex-mono">{view.statusLabel}</span>
+          {view.completedLabel && <span className="ex-mono">{view.completedLabel}</span>}
+          {movement.quantidade > 0 && (
+            <span className="ex-mono">
+              {movement.quantidade} {movement.quantidade === 1 ? "presente" : "presentes"}
+            </span>
+          )}
+        </div>
+      </div>
+    </li>
+  );
+}
+
 function ResgatadoModal({
   open,
   idCampanha,
@@ -1450,18 +1511,16 @@ function ResgatadoModal({
 
   if (!open) return null;
 
-  const movs = movQuery.data?.movimentacoes ?? [];
-  const fmtDM = (iso: string) => {
-    const d = new Date(iso);
-    return Number.isNaN(d.getTime())
-      ? ""
-      : d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
-  };
+  const movs: readonly MovimentacaoRepasseDTO[] = movQuery.data?.movimentacoes ?? [];
 
   return (
     <>
       <div className="ex-scrim is-open" onClick={onClose} />
-      <div className="ex-modal ex-modal-wide" role="dialog" aria-label="Detalhes do resgatado">
+      <div
+        className="ex-modal ex-modal-wide"
+        role="dialog"
+        aria-label="Detalhes das solicitações e transferências"
+      >
         <header className="ex-modal-hd">
           <div>
             {/* aperture-2gceh — no bogus hardcoded date range. */}
@@ -1473,7 +1532,7 @@ function ResgatadoModal({
           </button>
         </header>
         <p className="ex-modal-text">
-          suas transferências para conta corrente.
+          suas solicitações e transferências para conta corrente.
         </p>
         <ul className="ex-resg-rows">
           {movQuery.isLoading && (
@@ -1496,28 +1555,12 @@ function ResgatadoModal({
               </div>
             </li>
           )}
-          {movs.map((m) => (
-            <li key={m.idRepasse} className="ex-resg-row" style={RESG_TINT}>
-              <span className="ex-resg-stripe" />
-              <div className="ex-resg-body">
-                <div className="ex-resg-l1">
-                  <span className="ex-hand ex-resg-item">
-                    transferência para conta corrente
-                  </span>
-                  <span className="ex-hand ex-resg-val">− {fmtMoney(m.valorCents)}</span>
-                </div>
-                <div className="ex-resg-l2">
-                  <span className="ex-mono">{fmtDM(m.data)}</span>
-                  <span className="ex-mono">
-                    {m.quantidade} {m.quantidade === 1 ? "presente" : "presentes"}
-                  </span>
-                </div>
-              </div>
-            </li>
+          {movs.map((movement) => (
+            <WithdrawalMovementRow key={movement.idRepasse} movement={movement} />
           ))}
         </ul>
         <div className="ex-modal-actions ex-modal-actions-split">
-          <span className="ex-caps">{movs.length} movimentações</span>
+          <span className="ex-caps">{movs.length} solicitações</span>
           <button type="button" className="ex-btn-primary" onClick={onClose}>
             fechar
           </button>
@@ -1706,26 +1749,21 @@ export function PresentesBody(props: PainelSectionBodyProps) {
                 <span className="ex-aux-num">{fmtMoney(summary.aguardando)}</span>
                 <span>aguardando liberação</span>
               </span>
-              {/* aperture-1ut92 — admin-pipeline bucket. Renders only when
-                  there's actually money in it; an empty pill reads as
-                  visual noise. Lilac/purple matches the row badge for
-                  in-flight solicitado lançamentos. */}
+              {/* Active payout requests. Renders only when there's money
+                  in flight; an empty pill reads as visual noise. The broad
+                  label stays accurate from request through verification. */}
               {summary.aguardandoAprovacao > 0 && (
                 <span className="ex-aux-pill lilac">
                   <span className="ex-aux-num">
                     {fmtMoney(summary.aguardandoAprovacao)}
                   </span>
-                  <span>aguardando aprovação</span>
+                  <span>em transferência</span>
                 </span>
               )}
               {/* aperture-lwkwx — `próxima transf.` chip removed.
                   It rendered the SAME value as `aguardando aprovação`
                   above (both keyed on `aguardandoAprovacao > 0`), which
-                  duplicated information for no UX benefit. `aguardando
-                  aprovação` is clearer about WHY the money isn't moving
-                  yet (admin approval pending) so it's the chip we
-                  keep. Operator's call: "why 2 tags that are the same
-                  thing choos one or another please". */}
+                  duplicated information for no UX benefit. */}
             </div>
           </header>
 
