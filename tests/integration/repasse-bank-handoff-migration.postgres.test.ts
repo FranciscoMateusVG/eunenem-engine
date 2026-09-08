@@ -256,23 +256,55 @@ describe('052 guarded operator-authorized payout handoff migration', () => {
     });
     await driftReady;
 
-    let migrationSettled = false;
+    let signalMigrationPid: ((pid: number) => void) | undefined;
+    const migrationPidReady = new Promise<number>((resolve) => {
+      signalMigrationPid = resolve;
+    });
     const migration = db
       .transaction()
-      .execute((trx) => up(trx))
+      .execute(async (trx) => {
+        const pid = await sql<{ pid: number }>`
+          SELECT pg_backend_pid()::integer AS pid
+        `.execute(trx);
+        signalMigrationPid?.(pid.rows[0]?.pid as number);
+        await up(trx);
+      })
       .then(
         () => ({ succeeded: true as const, error: undefined }),
         (error: unknown) => ({ succeeded: false as const, error }),
-      )
-      .finally(() => {
-        migrationSettled = true;
-      });
-    await new Promise((resolve) => setTimeout(resolve, 75));
-    const settledBeforeDriftCommit = migrationSettled;
-    releaseDrift?.();
-    await drift;
-    const result = await migration;
-    expect(settledBeforeDriftCommit).toBe(false);
+      );
+    const migrationPid = await migrationPidReady;
+    let result: Awaited<typeof migration> | undefined;
+    try {
+      await expect
+        .poll(
+          async () => {
+            const waiting = await sql<{ waiting: boolean }>`
+              SELECT EXISTS (
+                SELECT 1
+                  FROM pg_locks held
+                  JOIN pg_class relation ON relation.oid = held.relation
+                  JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+                  WHERE held.pid = ${migrationPid}
+                    AND held.mode = 'ShareLock'
+                    AND held.granted = FALSE
+                    AND namespace.nspname = 'public'
+                    AND relation.relname = 'lancamentos_financeiros'
+              ) AS waiting
+            `.execute(db);
+            return waiting.rows[0]?.waiting;
+          },
+          { timeout: 5_000, interval: 10 },
+        )
+        .toBe(true);
+    } finally {
+      releaseDrift?.();
+      await drift;
+      result = await migration;
+    }
+
+    expect(result).toBeDefined();
+    if (result === undefined) throw new Error('migration result unavailable');
     expect(result.succeeded).toBe(false);
     expect(result.error).toBeInstanceOf(Error);
     expect((result.error as Error).message).toContain(
