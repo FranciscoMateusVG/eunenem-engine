@@ -3,6 +3,7 @@ import { AdminCampanhaPage } from './AdminCampanhaPage.js';
 import { AdminContribuicaoPage } from './AdminContribuicaoPage.js';
 import { AdminPage } from './AdminPage.js';
 import { AdminPagamentoPage } from './AdminPagamentoPage.js';
+import { AdminPagamentosPage } from './AdminPagamentosPage.js';
 import { AdminRepasseDetailPage } from './AdminRepasseDetailPage.js';
 import { AdminCatalogoPage } from './AdminCatalogoPage.js';
 import { AdminRepassesPage } from './AdminRepassesPage.js';
@@ -64,6 +65,7 @@ export function resolveRoute(pathname: string):
   | { kind: 'admin-campanha'; idCampanha: string }
   | { kind: 'admin-contribuicao'; idContribuicao: string }
   | { kind: 'admin-pagamento'; idPagamento: string }
+  | { kind: 'admin-pagamentos' }
   | { kind: 'admin-repasses' }
   | { kind: 'admin-catalogo' }
   | { kind: 'admin-repasse-detail'; idRepasse: string }
@@ -151,6 +153,9 @@ export function resolveRoute(pathname: string):
       kind: 'admin-pagamento',
       idPagamento: adminPagamentoMatch[1],
     };
+  }
+  if (pathname === '/admin/pagamentos' || pathname === '/admin/pagamentos/') {
+    return { kind: 'admin-pagamentos' };
   }
   // /admin/repasses/<idRepasse> (plan q2d4b Track 3, aperture-vi0hy) —
   // single-repasse approval flow. Matched BEFORE the bare /admin/repasses
@@ -405,6 +410,7 @@ function pickPage(route: ReturnType<typeof resolveRoute>, pathname: string) {
     return <AdminContribuicaoPage idContribuicao={route.idContribuicao} />;
   if (route.kind === 'admin-pagamento')
     return <AdminPagamentoPage idPagamento={route.idPagamento} />;
+  if (route.kind === 'admin-pagamentos') return <AdminPagamentosPage />;
   if (route.kind === 'admin-repasses') return <AdminRepassesPage />;
   if (route.kind === 'admin-catalogo') return <AdminCatalogoPage />;
   if (route.kind === 'admin-repasse-detail')

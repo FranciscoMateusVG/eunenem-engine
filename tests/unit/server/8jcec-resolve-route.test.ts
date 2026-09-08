@@ -20,6 +20,7 @@
  *   /admin/campanha/:idCampanha[/]   → admin-campanha    (free-shape id)
  *   /admin/contribuicao/:id[/]       → admin-contribuicao (free-shape id)
  *   /admin/pagamento/:id[/]          → admin-pagamento   (free-shape id)
+ *   /admin/pagamentos[/]             → admin-pagamentos  (evidence browse)
  *   /admin/repasses/:idRepasse[/]    → admin-repasse-detail (free-shape id)
  *   /admin/repasses[/]               → admin-repasses
  *   /admin[/]                        → admin
@@ -106,6 +107,11 @@ describe('resolveRoute — /admin/* (regression, spec §9)', () => {
       kind: 'admin-pagamento',
       idPagamento: 'pag-7',
     });
+  });
+
+  it('/admin/pagamentos → admin-pagamentos (with and without trailing slash)', () => {
+    expect(resolveRoute('/admin/pagamentos')).toEqual({ kind: 'admin-pagamentos' });
+    expect(resolveRoute('/admin/pagamentos/')).toEqual({ kind: 'admin-pagamentos' });
   });
 
   it('/admin/repasses → admin-repasses (list)', () => {

@@ -72,6 +72,13 @@ import {
   isCatalogImageUrlWritable,
 } from "../lib/security/catalog-image-url.js";
 import { enforceRateLimit } from "./rate-limit.js";
+import {
+  AdminPaymentEvidenceSchema,
+  InvalidPaymentEvidenceCursorError,
+  listAdminPaymentEvidence,
+  PaymentEvidenceProviderFilterSchema,
+  PaymentEvidenceStatusFilterSchema,
+} from "../admin-payment-evidence.js";
 
 const t = initTRPC.context<TrpcContext>().create();
 
@@ -1267,6 +1274,47 @@ const WebhookEventDetailDTOSchema = WebhookEventAdminDTOSchema.extend({
 export type WebhookEventDetailDTO = z.infer<typeof WebhookEventDetailDTOSchema>;
 
 const pagamentosRouter = t.router({
+  /**
+   * Platform-wide, stored-only payment evidence browse. This intentionally
+   * excludes provider payloads, contributor/recipient data and credentials;
+   * the existing findById drill remains the richer object view.
+   */
+  listEvidencePaginated: adminProcedure
+    .input(
+      z.object({
+        cursor: z.string().max(1024).nullable().default(null),
+        limit: z.number().int().min(1).max(100).default(50),
+        provider: PaymentEvidenceProviderFilterSchema.nullable().default(null),
+        status: PaymentEvidenceStatusFilterSchema.nullable().default(null),
+      }),
+    )
+    .output(
+      z.object({
+        rows: z.array(AdminPaymentEvidenceSchema),
+        nextCursor: z.string().nullable(),
+        totalCount: z.number().int().nonnegative(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      try {
+        return await listAdminPaymentEvidence(ctx.deps.db, {
+          platformId: ID_PLATAFORMA_EUNENEM,
+          cursor: input.cursor,
+          limit: input.limit,
+          provider: input.provider,
+          status: input.status,
+        });
+      } catch (error: unknown) {
+        if (error instanceof InvalidPaymentEvidenceCursorError) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "invalid_payment_evidence_cursor",
+          });
+        }
+        throw error;
+      }
+    }),
+
   /**
    * All pagamentos for a contribuicao, sorted criadoEm DESC (latest first).
    * Each pagamento now carries its lançamentos inline (plan 0015 /
