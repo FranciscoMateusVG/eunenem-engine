@@ -165,9 +165,31 @@ describe('PIX-first recipient setup', () => {
       'utf8',
     );
     expect(source).toMatch(/\.bnc-method-choice button\{[^}]*min-height:44px/);
+    expect(source).toMatch(/\.bnc-chip\{[^}]*min-height:44px/);
     expect(source).toMatch(/button:focus-visible\{outline:3px solid var\(--lilac\)/);
-    expect(source).toMatch(/@media \(max-width:439px\)\{\.bnc-method-choice/);
+    expect(source).toMatch(/@media \(max-width:639px\)\{\.bnc-method-choice/);
     expect(source).not.toContain('bnc-mode-toggle');
     expect(source).not.toContain('bnc-slider');
+  });
+
+  it('keeps required fields in one compact card without a duplicate destination preview', () => {
+    const source = readFileSync(
+      'apps/eunenem-server/pages/components/eunenem/painel/BancariosBody.tsx',
+      'utf8',
+    );
+
+    expect(source.match(/<section className="bnc-card/g)).toHaveLength(1);
+    expect(source).toContain('Receber por Pix');
+    expect(source).toContain('Use uma chave ou conta vinculada ao mesmo CPF da sua conta EuNeném.');
+    expect(source).toContain('Depois de salvar, o CPF não poderá ser alterado.');
+    expect(source).toContain('CPF protegido: não pode ser alterado.');
+    expect(source).toContain('bnc-holder-fields');
+    expect(source).toContain('bnc-section-divider');
+
+    expect(source).not.toContain('bnc-callout');
+    expect(source).not.toContain('bnc-cpf-warn');
+    expect(source).not.toContain('bnc-summary');
+    expect(source).not.toContain('prontinho, vamos depositar em');
+    expect(source).not.toContain('bnc-card-head');
   });
 });
