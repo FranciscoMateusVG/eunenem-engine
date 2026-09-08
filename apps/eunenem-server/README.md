@@ -37,6 +37,26 @@ Abre em http://localhost:3001.
 4. Cliente carrega `client.js`, chama `hydrateRoot()` com o mesmo `<App pathname={location.pathname} />` — React acopla os listeners.
 5. Navegar entre `/` e `/contador` é full page nav (links HTML normais). Sem SPA router — se quiser depois, adiciona react-router ou hand-roll.
 
+### Links públicos do site legado
+
+Antes do fallback SSR, requisições `GET` e `HEAD` para um identificador de
+convidado legado na raiz (`/<uuid-ou-slug>` e `/<uuid-ou-slug>/checkout`) são
+redirecionadas temporariamente (`302`) para o mesmo caminho e query string em
+`LEGACY_SITE_ORIGIN`. A origem precisa ser absoluta, HTTP(S), sem path/query e
+diferente do host atual; configuração ausente ou inválida falha com o 404 normal
+do Engine. Não há proxy de HTML/assets, lookup de existência nem fallback
+hardcoded.
+
+O formato de slug acompanha o contrato legado: 3–50 caracteres ASCII
+alfanuméricos/hífens, início e fim alfanuméricos e sem hífens consecutivos.
+
+Rotas e namespaces do Engine sempre vencem, inclusive subpaths inválidos de
+`api`, `auth`, `admin`, `pagina`, `painel`, `assets` e dos mounts estáticos. Isso
+deixa uma limitação histórica explícita: um slug legado igual a um nome reservado
+não pode ser servido pelo host compartilhado; ele continua acessível diretamente
+no domínio legado. Slugs elegíveis mas inexistentes são responsabilidade do 404
+do site legado.
+
 ## Estrutura
 
 ```
