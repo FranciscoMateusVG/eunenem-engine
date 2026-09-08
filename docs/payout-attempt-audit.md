@@ -6,9 +6,9 @@ the row and changing `repasses_recebedor.status` happen in the same database
 transaction. A failed close therefore leaves `transferindo` plus an open row.
 Redelivery reconciles that row and **does not issue another PIX**.
 
-This document covers Slice 1 only. It does not create a generic payment-event
-system or change payout, retry, idempotency, reconciliation, or accounting
-rules.
+This document covers the payout-attempt audit trail and its bounded private
+error-response follow-up. It does not create a generic payment-event system or
+change payout, retry, idempotency, reconciliation, or accounting rules.
 
 ## Safe diagnostic projection
 
@@ -26,6 +26,8 @@ guesses why an old request failed.
 | `diagnostic_reason` | Finite reason class; never the provider's raw reason text. |
 | `duration_ms` | Bounded local elapsed time for the provider call. |
 | `state_before`, `state_after` | Observed repasse FSM states closed atomically with the attempt. |
+| `provider_error_body_private` | Exact decoded body of a non-2xx PIX payment response, truncated at a complete UTF-8 boundary to at most 16 KiB. Private admin evidence; null for successful, local/pre-send and historical attempts. |
+| `provider_error_body_truncated` | Whether the private body exceeded 16 KiB. Null whenever no body was captured. |
 
 The existing `outcome`, `codigo_solicitacao`, `error`, timestamps and stable
 `referencia` remain authoritative. In particular:
@@ -41,10 +43,16 @@ The existing `outcome`, `codigo_solicitacao`, `error`, timestamps and stable
 ## Data excluded by construction
 
 Never persist or log the access token, Authorization header, certificate,
-private key, raw headers/body, full CPF/CNPJ, PIX key, bank-account data,
-recipient name, provider `detail`, violation `valor`, or arbitrary
-`razao`/`title` text. The adapter maps only exact known codes/labels and
-allowlisted field/reason patterns to application-owned enums.
+private key, request body, raw headers, full CPF/CNPJ, PIX key, or bank-account
+request data. Never emit the private provider error body to logs, spans, public
+DTOs, BEADS, or model-visible output.
+
+The single approved exception is the bounded non-2xx PIX response body on the
+private attempt row. It may contain recipient-related provider diagnostics and
+is exposed only by the existing authorized admin detail below. It is retained
+for the same lifetime as its attempt row; this slice adds no independent purge
+job and makes no indefinite-retention guarantee. The finite diagnostic fields
+remain the safe summary for normal operation.
 
 Banco Inter's official Banking API documents PIX payment creation and its
 `codigoSolicitacao`, `tipoRetorno`, validation response, and reconciliation
@@ -55,9 +63,11 @@ uses that shape but retains only the bounded projection above.
 
 The existing authorized `admin.repasses.show` response includes the diagnostic
 projection. The repasse detail page shows HTTP status, correlation identifier,
-duration, state transition, and a canonical diagnosis. Historical rows without
-structured evidence display diagnosis as unavailable rather than inferring a
-cause from `HTTP_400`.
+duration, state transition, and a canonical diagnosis. When a private body was
+captured, the same page offers it in a collapsed, React-escaped block and marks
+truncation explicitly. The body is never returned by list procedures.
+Historical rows without structured evidence display diagnosis as unavailable
+rather than inferring a cause from `HTTP_400`.
 
 ## Verification
 
@@ -70,6 +80,8 @@ Focused synthetic tests cover:
 - a post-provider persistence failure leaving an open intent whose redelivery
   reconciles without calling the provider again;
 - migration round-trip, repository recreation, and authorized admin retrieval.
+- exact and multibyte 16 KiB capture boundaries, success/null behavior,
+  private admin rendering, and unauthorized/cross-campaign denial.
 
 No verification command in this slice calls Banco Inter or uses provider
 credentials.

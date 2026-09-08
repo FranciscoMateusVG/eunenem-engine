@@ -32,6 +32,7 @@ import { makePagamento as makePagamentoBase } from '../../helpers/pagamento-repo
 
 interface TestRig {
   caller: ReturnType<typeof appRouter.createCaller>;
+  deps: ServerDeps;
   pagamentoRepository: PagamentoRepositoryMemory;
   livroFinanceiroRepository: LivroFinanceiroRepositoryMemory;
   campanhaRepository: CampanhaRepositoryMemory;
@@ -190,6 +191,7 @@ async function buildRig(): Promise<TestRig> {
 
   return {
     caller: appRouter.createCaller(ctx),
+    deps: ctx.deps,
     pagamentoRepository,
     livroFinanceiroRepository,
     campanhaRepository,
@@ -425,6 +427,10 @@ describe('admin.repasses.show (aperture-riywh)', () => {
       requestSummary: 'valor:4500;tipo_chave:email',
       agora: T1,
     });
+    const privateBody = JSON.stringify({
+      title: 'Dados inválidos.',
+      detail: '<script>must remain text</script>',
+    });
     await rig.livroFinanceiroRepository.finalizarTentativaTransferencia({
       idRepasse: idRepasse as never,
       attemptId: started.attemptId,
@@ -440,6 +446,7 @@ describe('admin.repasses.show (aperture-riywh)', () => {
           diagnosticField: 'pix_key',
           diagnosticReason: 'invalid_format',
           durationMs: 81,
+          privateProviderError: { body: privateBody, truncated: false },
         },
       },
       agora: T1,
@@ -458,8 +465,23 @@ describe('admin.repasses.show (aperture-riywh)', () => {
         durationMs: 81,
         stateBefore: 'aprovado',
         stateAfter: 'falhou',
+        providerErrorBodyPrivate: privateBody,
+        providerErrorBodyTruncated: false,
       }),
     ]);
+  });
+
+  it('denies the private attempt detail to an unauthenticated caller', async () => {
+    const { idRepasse } = await seedPendingRepasse(rig);
+    const anonymous = appRouter.createCaller({
+      deps: rig.deps,
+      headers: new Headers(),
+      resHeaders: new Headers(),
+    });
+
+    await expect(anonymous.admin.repasses.show({ idRepasse })).rejects.toMatchObject({
+      code: 'UNAUTHORIZED',
+    });
   });
 
   it('returns null when the campanha belongs to a different plataforma (defensive)', async () => {

@@ -381,6 +381,8 @@ export interface RepasseTransferAttempts {
   id: string;
   operation: string | null;
   outcome: string | null;
+  provider_error_body_private: string | null;
+  provider_error_body_truncated: boolean | null;
   provider_request_id: string | null;
   referencia: string;
   repasse_id: string;

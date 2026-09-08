@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { AdminShell } from "@/components/eunenem/admin/AdminShell";
 import { DddBadge } from "@/components/eunenem/admin/DddBadge";
+import { PrivateProviderErrorBody } from "@/components/eunenem/admin/PrivateProviderErrorBody";
 import {
   ManualResolutionPill,
   REPASSE_STATUS_GLOSS,
@@ -284,6 +285,12 @@ function AttemptRow({ attempt }: { attempt: RepasseTransferAttempt }) {
             <AttemptMeta label="diagnóstico" value={diagnostic} tone="error" />
           )}
         </dl>
+      )}
+      {attempt.providerErrorBodyPrivate !== null && (
+        <PrivateProviderErrorBody
+          body={attempt.providerErrorBodyPrivate}
+          truncated={attempt.providerErrorBodyTruncated === true}
+        />
       )}
     </li>
   );

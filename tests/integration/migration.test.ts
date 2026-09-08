@@ -188,6 +188,18 @@ describe('Migration round-trip', () => {
       await getConstraintDefinition(db, 'repasse_attempt_provider_request_id_check'),
     ).toContain('A-Za-z0-9');
 
+    // 20260908_051_repasse_private_provider_error (aperture-dr4mo): private,
+    // nullable response evidence with a database byte-cap backstop.
+    for (const column of ['provider_error_body_private', 'provider_error_body_truncated']) {
+      expect((await getColumn(db, 'repasse_transfer_attempts', column))?.is_nullable).toBe('YES');
+    }
+    const privateErrorConstraint = await getConstraintDefinition(
+      db,
+      'repasse_attempt_private_error_pair_check',
+    );
+    expect(privateErrorConstraint).toContain('octet_length(provider_error_body_private) <= 16384');
+    expect(privateErrorConstraint).toContain('provider_error_body_truncated IS NOT NULL');
+
     // 20260716_043_repasse_manual_resolution (aperture-477nz): the actual TIP
     //   now. Adds repasses_recebedor.needs_manual_resolution (NOT NULL default
     //   false) + the repasse_reconciliacao_candidatos table (masked-chave
@@ -418,7 +430,15 @@ describe('Migration round-trip', () => {
     //    this sequence must start at the LATEST migration and walk earlier.
     //    Adding a new migration on top REQUIRES prepending its down-step here.
 
-    // 20260908_050_repasse_attempt_diagnostics (aperture-9jg7h) → actual TIP.
+    // 20260908_051_repasse_private_provider_error (aperture-dr4mo) → actual TIP.
+    const downPrivateProviderError = await migrator.migrateDown();
+    expect(downPrivateProviderError.error).toBeUndefined();
+    expect(
+      await getColumn(db, 'repasse_transfer_attempts', 'provider_error_body_private'),
+    ).toBeUndefined();
+    expect(await getColumn(db, 'repasse_transfer_attempts', 'diagnostic_code')).toBeDefined();
+
+    // 20260908_050_repasse_attempt_diagnostics (aperture-9jg7h) → current TIP.
     // Its down removes only the nullable diagnostic projection.
     const downRepasseAttemptDiagnostics = await migrator.migrateDown();
     expect(downRepasseAttemptDiagnostics.error).toBeUndefined();

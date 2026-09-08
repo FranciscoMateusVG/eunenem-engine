@@ -1138,7 +1138,15 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
                     diagnostic_reason = COALESCE(
                       ${observation?.diagnosticReason ?? null}, diagnostic_reason
                     ),
-                    duration_ms = COALESCE(${observation?.durationMs ?? null}, duration_ms)
+                    duration_ms = COALESCE(${observation?.durationMs ?? null}, duration_ms),
+                    provider_error_body_private = COALESCE(
+                      ${observation?.privateProviderError?.body ?? null},
+                      provider_error_body_private
+                    ),
+                    provider_error_body_truncated = COALESCE(
+                      ${observation?.privateProviderError?.truncated ?? null},
+                      provider_error_body_truncated
+                    )
                 WHERE id = ${input.attemptId}
             `.execute(tx);
 
@@ -1610,7 +1618,8 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
                    request_summary, outcome, codigo_solicitacao, error,
                    operation, http_status, provider_request_id, response_class,
                    diagnostic_code, diagnostic_field, diagnostic_reason, duration_ms,
-                   state_before, state_after
+                   state_before, state_after, provider_error_body_private,
+                   provider_error_body_truncated
               FROM repasse_transfer_attempts
               WHERE repasse_id = ${idRepasse}
               ORDER BY attempt_no ASC, started_at ASC
@@ -1746,6 +1755,8 @@ type TransferAttemptRow = {
   duration_ms: number | null;
   state_before: RepasseTransferAttempt['stateBefore'];
   state_after: RepasseTransferAttempt['stateAfter'];
+  provider_error_body_private: string | null;
+  provider_error_body_truncated: boolean | null;
 };
 
 function transferAttemptFromRow(row: TransferAttemptRow): RepasseTransferAttempt {
@@ -1770,6 +1781,8 @@ function transferAttemptFromRow(row: TransferAttemptRow): RepasseTransferAttempt
     durationMs: row.duration_ms,
     stateBefore: row.state_before,
     stateAfter: row.state_after,
+    providerErrorBodyPrivate: row.provider_error_body_private,
+    providerErrorBodyTruncated: row.provider_error_body_truncated,
   };
 }
 

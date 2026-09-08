@@ -98,6 +98,8 @@ interface RepasseTransferAttemptRecord {
   durationMs: number | null;
   stateBefore: StatusRepasse | null;
   stateAfter: StatusRepasse | null;
+  providerErrorBodyPrivate: string | null;
+  providerErrorBodyTruncated: boolean | null;
 }
 
 type RepasseTransferAttemptRecordInput = Omit<
@@ -112,6 +114,8 @@ type RepasseTransferAttemptRecordInput = Omit<
   | 'durationMs'
   | 'stateBefore'
   | 'stateAfter'
+  | 'providerErrorBodyPrivate'
+  | 'providerErrorBodyTruncated'
 > &
   Partial<
     Pick<
@@ -126,6 +130,8 @@ type RepasseTransferAttemptRecordInput = Omit<
       | 'durationMs'
       | 'stateBefore'
       | 'stateAfter'
+      | 'providerErrorBodyPrivate'
+      | 'providerErrorBodyTruncated'
     >
   >;
 
@@ -230,6 +236,8 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
       durationMs: null,
       stateBefore: null,
       stateAfter: null,
+      providerErrorBodyPrivate: null,
+      providerErrorBodyTruncated: null,
       ...record,
     });
   }
@@ -1251,6 +1259,8 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
           durationMs: a.durationMs,
           stateBefore: a.stateBefore,
           stateAfter: a.stateAfter,
+          providerErrorBodyPrivate: a.providerErrorBodyPrivate,
+          providerErrorBodyTruncated: a.providerErrorBodyTruncated,
         }),
       );
     return attempts;
@@ -1344,6 +1354,11 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
       attempt.diagnosticField = patch.observation.diagnosticField;
       attempt.diagnosticReason = patch.observation.diagnosticReason;
       attempt.durationMs = patch.observation.durationMs;
+      const privateError = patch.observation.privateProviderError;
+      if (privateError !== undefined && privateError !== null) {
+        attempt.providerErrorBodyPrivate = privateError.body;
+        attempt.providerErrorBodyTruncated = privateError.truncated;
+      }
     }
   }
 }

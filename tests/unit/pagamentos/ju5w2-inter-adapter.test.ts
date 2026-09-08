@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  capturePrivateProviderErrorBody,
   classifyInterPayoutDiagnostics,
   type InterHttpResponse,
   type InterHttpTransport,
   type InterProviderConfig,
+  PRIVATE_PROVIDER_ERROR_BODY_MAX_BYTES,
   TransferenciaProviderInter,
 } from '../../../src/adapters/pagamentos/transferencia-provider.inter.js';
 import {
@@ -108,6 +110,7 @@ describe('TransferenciaProviderInter — pagarPix tipoRetorno mapping (money-saf
     const out = await newProvider(t).pagarPix(input);
     expect(out).toMatchObject({ outcome: 'pago', codigoSolicitacao: 'cod-x' });
     expect(out.diagnostics).toMatchObject({ responseClass: 'accepted', httpStatus: 200 });
+    expect(out.diagnostics?.privateProviderError).toBeNull();
   });
 
   it.each([
@@ -180,11 +183,17 @@ describe('TransferenciaProviderInter — pagarPix tipoRetorno mapping (money-saf
       diagnosticCode: 'invalid_request',
       diagnosticField: 'pix_key',
       diagnosticReason: 'invalid_format',
+      privateProviderError: {
+        body: expect.any(String),
+        truncated: false,
+      },
     });
-    expect(JSON.stringify(out.diagnostics)).not.toContain(CHAVE);
+    const { privateProviderError, ...safeProjection } = out.diagnostics ?? {};
+    expect(privateProviderError?.body).toContain(CHAVE);
+    expect(JSON.stringify(safeProjection)).not.toContain(CHAVE);
   });
 
-  it('unknown/malformed validation details remain honestly unavailable and emit no free text', async () => {
+  it('keeps unknown details out of the safe projection while retaining the private body', async () => {
     const pii = '52998224725-secret@example.com';
     const t = new ScriptedTransport().push(TOKEN_OK, {
       statusCode: 400,
@@ -205,7 +214,40 @@ describe('TransferenciaProviderInter — pagarPix tipoRetorno mapping (money-saf
       diagnosticField: null,
       diagnosticReason: 'diagnostic_unavailable',
     });
-    expect(JSON.stringify(out.diagnostics)).not.toContain(pii);
+    const { privateProviderError, ...safeProjection } = out.diagnostics ?? {};
+    expect(privateProviderError?.body).toContain(pii);
+    expect(JSON.stringify(safeProjection)).not.toContain(pii);
+  });
+
+  it('captures an exact non-2xx body privately without truncation', async () => {
+    const body = JSON.stringify({
+      title: 'Dados inválidos.',
+      detail: 'Verifique os dados informados.',
+      violacoes: [{ propriedade: 'destinatario.chave', razao: 'Formato inválido.' }],
+    });
+    const t = new ScriptedTransport().push(TOKEN_OK, { statusCode: 400, body });
+
+    const out = await newProvider(t).pagarPix(input);
+
+    expect(out.diagnostics?.privateProviderError).toEqual({ body, truncated: false });
+  });
+
+  it('truncates a multibyte body at a complete UTF-8 boundary within 16 KiB', () => {
+    const prefix = 'a'.repeat(PRIVATE_PROVIDER_ERROR_BODY_MAX_BYTES - 1);
+    const captured = capturePrivateProviderErrorBody(`${prefix}€suffix`);
+
+    expect(captured).toEqual({ body: prefix, truncated: true });
+    expect(Buffer.byteLength(captured.body, 'utf8')).toBeLessThanOrEqual(
+      PRIVATE_PROVIDER_ERROR_BODY_MAX_BYTES,
+    );
+    expect(captured.body).not.toContain('�');
+  });
+
+  it('preserves an exact 16 KiB multibyte body without a false truncation flag', () => {
+    const body = `${'a'.repeat(PRIVATE_PROVIDER_ERROR_BODY_MAX_BYTES - 3)}€`;
+
+    expect(Buffer.byteLength(body, 'utf8')).toBe(PRIVATE_PROVIDER_ERROR_BODY_MAX_BYTES);
+    expect(capturePrivateProviderErrorBody(body)).toEqual({ body, truncated: false });
   });
 
   it('503 → throws AMBIGUOUS (a payment may have landed before the 5xx)', async () => {
@@ -216,9 +258,10 @@ describe('TransferenciaProviderInter — pagarPix tipoRetorno mapping (money-saf
   });
 
   it('503 carries safe HTTP evidence without changing the ambiguous money outcome', async () => {
+    const body = JSON.stringify({ correlationId: 'req-503' });
     const t = new ScriptedTransport().push(TOKEN_OK, {
       statusCode: 503,
-      body: JSON.stringify({ correlationId: 'req-503' }),
+      body,
     });
     const error = await newProvider(t)
       .pagarPix(input)
@@ -229,6 +272,7 @@ describe('TransferenciaProviderInter — pagarPix tipoRetorno mapping (money-saf
       httpStatus: 503,
       providerRequestId: 'req-503',
       diagnosticCode: 'diagnostic_unavailable',
+      privateProviderError: { body, truncated: false },
     });
   });
 });

@@ -2022,6 +2022,10 @@ const RepasseTransferAttemptDTOSchema = z.object({
   durationMs: z.number().int().min(0).max(120_000).nullable(),
   stateBefore: RepasseStatusSchema.nullable(),
   stateAfter: RepasseStatusSchema.nullable(),
+  // Private Banco Inter non-2xx body. This DTO exists only behind
+  // adminProcedure plus the EuNeném campaign boundary in repasses.show.
+  providerErrorBodyPrivate: z.string().max(16_384).nullable(),
+  providerErrorBodyTruncated: z.boolean().nullable(),
 });
 export type RepasseTransferAttemptDTO = z.infer<typeof RepasseTransferAttemptDTOSchema>;
 
@@ -2275,6 +2279,8 @@ const repassesRouter = t.router({
         durationMs: a.durationMs,
         stateBefore: a.stateBefore,
         stateAfter: a.stateAfter,
+        providerErrorBodyPrivate: a.providerErrorBodyPrivate,
+        providerErrorBodyTruncated: a.providerErrorBodyTruncated,
       }));
 
       // aperture-477nz — persisted search-reconciliation candidates (chave
