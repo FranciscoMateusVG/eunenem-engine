@@ -37,8 +37,8 @@ import { sendEvent } from "@/lib/analytics";
 //
 // CONTENT ONLY: the topbar, 520/1200px shell and TweaksPanel come from
 // PainelLayout. This is the standalone "Dados Bancários" export (app.jsx)
-// ported into the painel foundation: a segmented mode toggle (conta completa
-// vs chave pix), the matching form section, a holder card (locked CPF +
+// ported into the painel foundation: a PIX-first form with bank account as a
+// secondary alternative, the matching form section, a holder card (locked CPF +
 // celular), inline validation, a "vamos depositar em…" review summary and a
 // lilás save CTA. Mock-first — saving just runs validation and fires a sonner
 // toast; nothing persists.
@@ -128,7 +128,7 @@ interface ValidationError {
 // 3 digits, numeric agência/conta, E.164-ish celular. nomeTitular + holder
 // CPF checksum are required in BOTH modes — the payout must be traceable to
 // the account holder's CPF regardless of rail.
-function validate(
+export function validateRecipientForm(
   modo: BancariosMode,
   s: BancariosForm,
   tipoPix: PixType["v"],
@@ -175,7 +175,7 @@ function validate(
 }
 
 // ── form ⇄ DadosRecebedor (the wire union) ──
-function toDadosRecebedor(
+export function toDadosRecebedor(
   modo: BancariosMode,
   s: BancariosForm,
   tipoPix: PixType["v"],
@@ -204,6 +204,12 @@ function toDadosRecebedor(
     contaDigito: s.contaDV,
     tipoConta: s.tipoConta as TipoConta,
   };
+}
+
+export function recipientModeFromSaved(
+  dados: DadosRecebedor | null | undefined,
+): BancariosMode {
+  return dados?.metodo === "conta" ? "conta" : "pix";
 }
 
 function fromDadosRecebedor(d: DadosRecebedor): BancariosForm {
@@ -338,6 +344,33 @@ const PIX_ICON: Record<PixType["v"], (p: IconProps) => React.ReactNode> = {
   aleatoria: IDice,
 };
 
+export function RecipientMethodChoice({
+  modo,
+  onSelect,
+}: {
+  modo: BancariosMode;
+  onSelect: (modo: BancariosMode) => void;
+}) {
+  return (
+    <div className="bnc-method-choice" data-testid="recipient-method-choice">
+      {modo === "pix" ? (
+        <>
+          <span>Não quer usar Pix?</span>
+          <button type="button" onClick={() => onSelect("conta")}>
+            <IBank size={16} />
+            Usar conta bancária
+          </button>
+        </>
+      ) : (
+        <button type="button" onClick={() => onSelect("pix")}>
+          <IPix size={16} />
+          Voltar para Pix
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ── component ───────────────────────────────────────────────────────────────
 
 export function BancariosBody(_props: PainelSectionBodyProps) {
@@ -349,9 +382,9 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
   // mirrors PerfilBody.tsx / the 11 authed write mutations (aperture-48mxt).
   const idCampanha = useCampanhaEscrita();
   const [s, setS] = useState<BancariosForm>({ ...EMPTY_FORM });
-  // PIX is the default tab (initially-selected mode); fields start empty and
+  // PIX is the default method for an unconfigured recipient; fields start empty and
   // only hydrate from real saved data below — no mock prefills.
-  const [modo, setModo] = useState<BancariosMode>("pix");
+  const [modo, setModo] = useState<BancariosMode>(() => recipientModeFromSaved(undefined));
   const [tipoPix, setTipoPix] = useState<PixType["v"]>("cpf");
   const [errors, setErrors] = useState<ValidationError[]>([]);
 
@@ -390,11 +423,9 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
     const d = dadosQuery.data;
     if (d) {
       setS(fromDadosRecebedor(d));
+      setModo(recipientModeFromSaved(d));
       if (d.metodo === "pix") {
-        setModo("pix");
         setTipoPix(DOMAIN_TO_PIX_TYPE[d.tipoChavePix]);
-      } else {
-        setModo("conta");
       }
     }
     hydrated.current = true;
@@ -450,20 +481,20 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
   // Clear an error as soon as its field becomes valid.
   useEffect(() => {
     if (errors.length) {
-      const live = validate(modo, s, tipoPix, effectiveCpf);
+      const live = validateRecipientForm(modo, s, tipoPix, effectiveCpf);
       setErrors((prev) => prev.filter((e) => live.some((x) => x.k === e.k)));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [s, modo, tipoPix]);
 
-  const isComplete = validate(modo, s, tipoPix, effectiveCpf).length === 0;
+  const isComplete = validateRecipientForm(modo, s, tipoPix, effectiveCpf).length === 0;
 
   const onSave = () => {
     if (!idCampanha) {
       toast.error("aguardando dados da campanha — tente novamente em um instante");
       return;
     }
-    const errs = validate(modo, s, tipoPix, effectiveCpf);
+    const errs = validateRecipientForm(modo, s, tipoPix, effectiveCpf);
     setErrors(errs);
     if (errs.length > 0) return;
     salvar.mutate({
@@ -534,33 +565,7 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
         </div>
       )}
 
-      {/* Mode toggle */}
-      <div className="bnc-mode-row">
-        <div className="bnc-mode-eyebrow">como você prefere receber?</div>
-        <div className={`bnc-mode-toggle ${modo === "pix" ? "pix" : ""}`} role="tablist">
-          <div className="bnc-slider" />
-          <button
-            type="button"
-            role="tab"
-            aria-selected={modo === "conta"}
-            className={modo === "conta" ? "active" : ""}
-            onClick={() => setModo("conta")}
-          >
-            <IBank size={16} />
-            conta completa
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={modo === "pix"}
-            className={modo === "pix" ? "active" : ""}
-            onClick={() => setModo("pix")}
-          >
-            <IPix size={16} />
-            chave pix
-          </button>
-        </div>
-      </div>
+      <RecipientMethodChoice modo={modo} onSelect={setModo} />
 
       {/* CPF callout */}
       <div className="bnc-callout" role="note">
@@ -1020,13 +1025,11 @@ const BNC_CSS = `
 .bnc-title h1{font-family:var(--font-patrick-hand),cursive;color:var(--plum);font-size:36px;line-height:1.05;letter-spacing:.01em;font-weight:600;margin:0}
 .bnc-title h1 .hl{padding:0 8px}
 
-.bnc-mode-row{display:flex;flex-direction:column;gap:10px;margin-top:18px}
-.bnc-mode-eyebrow{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-mute)}
-.bnc-mode-toggle{position:relative;display:flex;background:var(--cream-2);border-radius:999px;padding:5px;border:1px solid var(--line)}
-.bnc-mode-toggle button{flex:1;border:0;background:transparent;padding:10px 14px;border-radius:999px;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-soft);transition:color .2s;z-index:1;display:inline-flex;align-items:center;justify-content:center;gap:8px}
-.bnc-mode-toggle button.active{color:#fff}
-.bnc-slider{position:absolute;top:5px;bottom:5px;left:5px;width:calc(50% - 5px);background:var(--lilac);border-radius:999px;box-shadow:var(--shadow-cta);transition:transform .35s cubic-bezier(.34,1.56,.64,1)}
-.bnc-mode-toggle.pix .bnc-slider{transform:translateX(100%)}
+.bnc-method-choice{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0;margin-top:10px;color:var(--ink-mute);font-size:13px}
+.bnc-method-choice button{min-height:44px;border:0;background:transparent;padding:8px 10px;border-radius:12px;color:var(--lilac-deep);font-family:var(--font-dm-sans),sans-serif;font-size:13px;font-weight:700;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px;display:inline-flex;align-items:center;justify-content:center;gap:7px;cursor:pointer;transition:background .18s,color .18s}
+.bnc-method-choice button:hover{background:var(--lilac-soft);color:var(--plum)}
+.bnc-method-choice button:focus-visible{outline:3px solid var(--lilac);outline-offset:2px}
+@media (max-width:439px){.bnc-method-choice{align-items:flex-end;flex-direction:column;gap:0}.bnc-method-choice button{max-width:100%;text-align:right}}
 
 .bnc-callout{position:relative;margin-top:18px;padding:14px 16px 14px 52px;background:linear-gradient(135deg,var(--bnc-yellow-soft) 0%,#fff7df 60%,var(--cream) 100%);border:1px dashed #d8b53a;border-radius:18px;color:#7a5b15;font-size:13.5px}
 .bnc-callout strong{color:#5c3e08}
