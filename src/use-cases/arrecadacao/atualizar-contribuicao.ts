@@ -1,6 +1,7 @@
 import { SpanStatusCode } from '@opentelemetry/api';
 import { z } from 'zod/v4';
 import type { ContribuicaoRepository } from '../../adapters/arrecadacao/contribuicao-repository.js';
+import type { PagamentoRepository } from '../../adapters/pagamentos/repository.js';
 import type { Contribuicao } from '../../domain/arrecadacao/entities/contribuicao.js';
 import {
   contribuicaoAtualizada,
@@ -52,13 +53,7 @@ export const AtualizarContribuicaoInputSchema = z.object({
   // on imagemUrl shape; consumers enforce format at their API edge.
   imagemUrl: z.string().trim().min(1).max(500).nullable().optional(),
   grupo: z.string().trim().min(1).max(60).nullable().optional(),
-  /**
-   * Plan 0016 (aperture-putz5): change a slot's capacity. Per locked
-   * decision #10 the new value can be lower than the already-sold count —
-   * `quantidadeRestante` simply goes negative and `esgotada` returns true.
-   * The patch helper at `contribuicaoAtualizada` validates `quantidade >= 1`
-   * (the floor) but does NOT cap against sold count.
-   */
+  /** Change a slot's capacity without invalidating completed purchases. */
   quantidade: z.number().int().min(1).max(100).optional(),
 });
 
@@ -66,6 +61,7 @@ export type AtualizarContribuicaoInput = z.infer<typeof AtualizarContribuicaoInp
 
 export interface AtualizarContribuicaoDeps {
   readonly contribuicaoRepository: ContribuicaoRepository;
+  readonly pagamentoRepository: PagamentoRepository;
   readonly observability: Observability;
 }
 
@@ -73,7 +69,7 @@ export async function atualizarContribuicao(
   deps: AtualizarContribuicaoDeps,
   input: AtualizarContribuicaoInput,
 ): Promise<Contribuicao> {
-  const { contribuicaoRepository, observability } = deps;
+  const { contribuicaoRepository, pagamentoRepository, observability } = deps;
   const { logger, tracer } = observability;
 
   return tracer.startActiveSpan('atualizarContribuicao', async (span) => {
@@ -106,7 +102,19 @@ export async function atualizarContribuicao(
         );
       }
 
-      // Plan 0015: no more status guard. Slot edits allowed at any time.
+      // Purchased slots remain editable, but their capacity cannot be reduced
+      // below the approved quantity already recorded in immutable payment
+      // snapshots. Equality is valid; price/name changes remain unrestricted.
+      if (quantidade !== undefined) {
+        const soldById =
+          await pagamentoRepository.somarQuantidadesContribuicoesEmPagamentosAprovados([
+            idContribuicao,
+          ]);
+        const sold = soldById.get(idContribuicao) ?? 0;
+        if (quantidade < sold) {
+          throw new ArrecadacaoInputInvalidoError('quantidade_below_sold');
+        }
+      }
 
       const updated = contribuicaoAtualizada(existing, {
         nome,
