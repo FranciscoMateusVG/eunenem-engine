@@ -57,7 +57,6 @@ describe('withdrawal statement UI projection', () => {
       recebido: 2000,
       resgatado: 0,
       aguardandoAprovacao: 2000,
-      enviadoAoBanco: 0,
       disponivel: 0,
     });
 
@@ -70,7 +69,6 @@ describe('withdrawal statement UI projection', () => {
     );
     expect(mixed.resgatado).toBe(1000);
     expect(mixed.aguardandoAprovacao).toBe(2000);
-    expect(mixed.enviadoAoBanco).toBe(0);
   });
 
   it('keeps the empty statement zeroed', () => {
@@ -80,25 +78,24 @@ describe('withdrawal statement UI projection', () => {
       disponivel: 0,
       aguardando: 0,
       aguardandoAprovacao: 0,
-      enviadoAoBanco: 0,
     });
   });
 
-  it('keeps the R$20 bank handoff in its own prominent amount bucket', () => {
-    expect(
-      adaptSummary(
-        summary({
-          totalRecebidoCents: 2000,
-          enviadoAoBancoCents: 2000,
-        }),
-      ),
-    ).toMatchObject({
+  it('shows the accepted R$20 only as resgatado with no separate handoff bucket', () => {
+    const adapted = adaptSummary(
+      summary({
+        totalRecebidoCents: 2000,
+        resgatadoCents: 2000,
+        enviadoAoBancoCents: 2000,
+      }),
+    );
+    expect(adapted).toMatchObject({
       recebido: 2000,
-      enviadoAoBanco: 2000,
-      resgatado: 0,
+      resgatado: 2000,
       aguardandoAprovacao: 0,
       disponivel: 0,
     });
+    expect(adapted).not.toHaveProperty('enviadoAoBanco');
   });
 
   it('places a conditional pending label beside the completed summary', () => {
@@ -114,7 +111,7 @@ describe('withdrawal statement UI projection', () => {
   it.each([
     ['aguardando_aprovacao', 'aguardando aprovação'],
     ['em_transferencia', 'em transferência'],
-    ['enviado_ao_banco', 'enviado ao banco'],
+    ['enviado_ao_banco', 'resgatado'],
     ['concluido', 'transferência concluída'],
     ['falhou', 'transferência falhou'],
     ['cancelado', 'transferência cancelada'],
@@ -139,9 +136,9 @@ describe('withdrawal statement UI projection', () => {
     expect(view).toMatchObject({
       completed: true,
       amountPrefix: '− ',
-      statusLabel: 'enviado ao banco',
+      statusLabel: 'resgatado',
     });
-    expect(view.completedLabel).toContain('enviado');
+    expect(view.completedLabel).toContain('resgatado');
   });
 
   it('shows a minus sign and completion timestamp only for completed transfers', () => {

@@ -63,7 +63,7 @@ export type ExtratoSummaryDTO = {
    *  maturação). Optional on the mirror for the trpc-cache-rotation window
    *  — older cached responses lack this field; renderer falls back to 0. */
   aguardandoAprovacaoCents?: number;
-  /** Accepted by Inter and handed off; not bank settlement. */
+  /** Informational subset of resgatadoCents accepted by Inter. */
   enviadoAoBancoCents: number;
   proximaTransfDate: string | null;
   totalPresentes: number;

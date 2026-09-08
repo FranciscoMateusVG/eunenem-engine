@@ -73,7 +73,7 @@ const t = initTRPC.context<TrpcContext>().create();
 const ExtratoSummaryDTOSchema = z.object({
   /** Sum of all aprovado + not-cancelled saldo_recebedor lançamentos. */
   totalRecebidoCents: z.number().int().nonnegative(),
-  /** Already-withdrawn: transferidoEm IS NOT NULL. */
+  /** Platform-complete withdrawals: transferred ledger or accepted Inter handoff. */
   resgatadoCents: z.number().int().nonnegative(),
   /**
    * Currently withdrawable: aprovado + availableOn <= now + not-yet
@@ -90,13 +90,14 @@ const ExtratoSummaryDTOSchema = z.object({
   /**
    * aperture-1ut92 — sum of lançamentos already claimed by a
    * solicitado repasse but not yet approved by admin. These cents are
-   * in flight; once admin approves, they roll into resgatadoCents.
+   * in flight; they roll into resgatadoCents once the platform records
+   * a completed manual transfer or an Inter-accepted payout receipt.
    * Surfaces a 3rd bucket on the header so the operator sees the
    * full lifecycle: aguardando_liberacao → disponivel → solicitado
    * (this) → resgatado.
    */
   aguardandoAprovacaoCents: z.number().int().nonnegative(),
-  /** Accepted by Inter and handed off; not bank settlement. */
+  /** Informational subset of resgatadoCents accepted by Inter. */
   enviadoAoBancoCents: z.number().int().nonnegative(),
   /** Aprovado but not-yet-liberado: status='aprovado' AND availableOn > now. */
   aguardandoLiberacaoCents: z.number().int().nonnegative(),
@@ -147,7 +148,7 @@ const ExtratoSummaryDTOSchema = z.object({
 export type ExtratoSummaryDTO = z.infer<typeof ExtratoSummaryDTOSchema>;
 
 /**
- * aperture-1ut92 — 5-state derived liberação predicate per row.
+ * aperture-1ut92 — derived liberação predicate per row.
  *
  *   - `aguardando_liberacao` — aprovado pagamento, availableOn in the
  *     future (or null while webhook hasn't populated it yet).
@@ -156,6 +157,8 @@ export type ExtratoSummaryDTO = z.infer<typeof ExtratoSummaryDTOSchema>;
  *   - `solicitado` — claimed by a solicitado repasse
  *     (lancamento.idRepasse !== null) but admin hasn't approved yet
  *     (transferidoEm still null). Money is in the admin pipeline.
+ *   - `enviado_ao_banco` — Inter accepted the payout request. This is
+ *     platform-complete and included in resgatadoCents.
  *   - `transferido` — admin approved the repasse (transferidoEm set).
  *     The terminal happy-path state.
  *   - `cancelado` — pagamento estornado; lancamento.canceladoEm set.
@@ -769,12 +772,11 @@ const extratoRouter = t.router({
           dateRangeEndMs =
             dateRangeEndMs === null ? tsMs : Math.max(dateRangeEndMs, tsMs);
 
-          if (liberacao === "transferido") {
+          if (liberacao === "transferido" || liberacao === "enviado_ao_banco") {
             resgatadoCents += lancamento.amountCents;
-            continue;
-          }
-          if (liberacao === "enviado_ao_banco") {
-            enviadoAoBancoCents += lancamento.amountCents;
+            if (liberacao === "enviado_ao_banco") {
+              enviadoAoBancoCents += lancamento.amountCents;
+            }
             continue;
           }
           // aperture-1ut92 — solicitado lançamentos sit in the

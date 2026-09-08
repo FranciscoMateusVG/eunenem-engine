@@ -182,8 +182,6 @@ interface PresentesSummaryUI {
    *  saldoDisponivel (actionable) · aguardandoAprovacao (in flight) ·
    *  aguardandoLiberacao (Stripe maturação). */
   aguardandoAprovacao: number;
-  /** Accepted by Inter; platform handoff complete, bank settlement not asserted. */
-  enviadoAoBanco: number;
   opening: number;
 }
 
@@ -191,8 +189,8 @@ export function adaptSummary(s: ExtratoSummaryDTO): PresentesSummaryUI {
   return {
     recebido: s.totalRecebidoCents,
     presentes: s.totalPresentesUnidades ?? s.totalPresentesItensCount ?? s.totalPresentes,
-    // Completed means the authoritative receiver ledger has a transfer
-    // timestamp. A requested/in-flight payout is deliberately separate.
+    // The platform considers both a transferred ledger and an Inter-accepted
+    // payout receipt completed. The server aggregates both exactly once.
     resgatado: s.resgatadoCents,
     disponivel: s.saldoDisponivelCents,
     aguardando: s.aguardandoLiberacaoCents,
@@ -200,7 +198,6 @@ export function adaptSummary(s: ExtratoSummaryDTO): PresentesSummaryUI {
     // (older cached summaries lack this bucket); once the cache rotates
     // the field is always populated by Rex's server-side aggregation.
     aguardandoAprovacao: s.aguardandoAprovacaoCents ?? 0,
-    enviadoAoBanco: s.enviadoAoBancoCents,
     // `opening` is a mock concept (account-level prior balance carried
     // forward) that doesn't exist on Rex's wire. The wire saldoDisponivel
     // already accounts for all activity — no rolling prior balance needed.
@@ -1428,7 +1425,7 @@ const RESG_TINT = { "--tint-bg": "#F3E9F0", "--tint-stripe": "#6b3c5e" } as Reac
 const MOVIMENTO_ESTADO_LABEL: Record<MovimentoRepasseEstado, string> = {
   aguardando_aprovacao: "aguardando aprovação",
   em_transferencia: "em transferência",
-  enviado_ao_banco: "enviado ao banco",
+  enviado_ao_banco: "resgatado",
   concluido: "transferência concluída",
   falhou: "transferência falhou",
   cancelado: "transferência cancelada",
@@ -1460,7 +1457,7 @@ export function movementRowViewModel(movement: MovimentacaoRepasseDTO) {
     requestedLabel: `solicitada ${fmtMovementDateTime(movement.solicitadoEm)}`,
     completedLabel:
       movement.estado === "enviado_ao_banco" && movement.enviadoAoBancoEm
-        ? `enviado ${fmtMovementDateTime(movement.enviadoAoBancoEm)}`
+        ? `resgatado ${fmtMovementDateTime(movement.enviadoAoBancoEm)}`
         : completed && movement.concluidoEm
           ? `concluída ${fmtMovementDateTime(movement.concluidoEm)}`
           : null,
@@ -1740,18 +1737,6 @@ export function PresentesBody(props: PainelSectionBodyProps) {
                 <span className="ex-sm-sub">pronto pra resgatar</span>
               </div>
             </div>
-
-            {summary.enviadoAoBanco > 0 && (
-              <div className="mt-3 rounded-md border border-teal-200 bg-teal-50 px-4 py-3" role="status">
-                <span className="ex-caps text-teal-800">enviado ao banco</span>
-                <strong className="ml-3 font-mono text-lg tabular-nums text-teal-900">
-                  {fmtMoney(summary.enviadoAoBanco)}
-                </strong>
-                <span className="ml-3 text-xs text-teal-800">
-                  solicitação aceita pelo Inter; aprovação e liquidação seguem no banco
-                </span>
-              </div>
-            )}
 
             {/* aperture-fxfbk — collapsed two side-by-side CTAs (green
                 "resgatar valores" + lilac "solicitar transferência") into
