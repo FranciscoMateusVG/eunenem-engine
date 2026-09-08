@@ -218,6 +218,75 @@ describe('052 guarded operator-authorized payout handoff migration', () => {
     ).toBe('verificando');
   });
 
+  it('waits for concurrent ledger drift and then rejects conversion against the committed state', async () => {
+    await sql`
+      INSERT INTO repasses_recebedor
+        (id, amount_cents, status, inter_codigo_solicitacao)
+      VALUES (${TARGET}::uuid, 2000, 'verificando', ${RECEIPT})
+    `.execute(db);
+    await sql`
+      INSERT INTO repasse_transfer_attempts
+        (id, repasse_id, attempt_no, finished_at, http_status, outcome, codigo_solicitacao)
+      VALUES ('10000000-0000-4000-8000-000000000004', ${TARGET}::uuid, 4,
+              ${FINISHED}, 200, 'verificando', ${RECEIPT})
+    `.execute(db);
+    await sql`
+      INSERT INTO lancamentos_financeiros (id, id_repasse, amount_cents, transferido_em)
+      VALUES
+        ('20000000-0000-4000-8000-000000000001', ${TARGET}::uuid, 1000, NULL),
+        ('20000000-0000-4000-8000-000000000002', ${TARGET}::uuid, 1000, NULL)
+    `.execute(db);
+
+    let signalDriftReady: (() => void) | undefined;
+    let releaseDrift: (() => void) | undefined;
+    const driftReady = new Promise<void>((resolve) => {
+      signalDriftReady = resolve;
+    });
+    const driftMayCommit = new Promise<void>((resolve) => {
+      releaseDrift = resolve;
+    });
+    const drift = db.transaction().execute(async (trx) => {
+      await sql`
+        UPDATE lancamentos_financeiros
+          SET transferido_em = ${FINISHED}
+          WHERE id = '20000000-0000-4000-8000-000000000001'::uuid
+      `.execute(trx);
+      signalDriftReady?.();
+      await driftMayCommit;
+    });
+    await driftReady;
+
+    let migrationSettled = false;
+    const migration = db
+      .transaction()
+      .execute((trx) => up(trx))
+      .then(
+        () => ({ succeeded: true as const, error: undefined }),
+        (error: unknown) => ({ succeeded: false as const, error }),
+      )
+      .finally(() => {
+        migrationSettled = true;
+      });
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    const settledBeforeDriftCommit = migrationSettled;
+    releaseDrift?.();
+    await drift;
+    const result = await migration;
+    expect(settledBeforeDriftCommit).toBe(false);
+    expect(result.succeeded).toBe(false);
+    expect(result.error).toBeInstanceOf(Error);
+    expect((result.error as Error).message).toContain(
+      'operator-authorized payout handoff target does not match guarded predicates',
+    );
+    expect(
+      (
+        await sql<{ status: string }>`
+          SELECT status FROM repasses_recebedor WHERE id = ${TARGET}::uuid
+        `.execute(db)
+      ).rows[0]?.status,
+    ).toBe('verificando');
+  });
+
   it('maps accepted state snapshots on down so old checks can be restored without losing the attempt', async () => {
     await db.transaction().execute((trx) => up(trx));
     const repasseId = '30000000-0000-4000-8000-000000000001';

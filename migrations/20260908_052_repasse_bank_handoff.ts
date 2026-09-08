@@ -15,6 +15,12 @@ import { sql } from 'kysely';
  * is never changed by the forward migration.
  */
 export async function up(db: Kysely<unknown>): Promise<void> {
+  // Freeze the cross-table financial evidence for this migration transaction.
+  // SHARE conflicts with INSERT/UPDATE/DELETE's ROW EXCLUSIVE lock, so a
+  // concurrent worker must finish before the guarded mutation reads the ledger
+  // and cannot drift it between predicate evaluation and conversion.
+  await sql`LOCK TABLE lancamentos_financeiros IN SHARE MODE`.execute(db);
+
   await db.schema
     .alterTable('repasses_recebedor')
     .addColumn('enviado_ao_banco_em', 'timestamptz')
