@@ -105,6 +105,29 @@ export type RepasseDetailLancamento = {
   pagamentoCriadoEm: string;
 };
 
+export type RepasseDestination =
+  | {
+      method: 'pix';
+      receiverId: string;
+      holderName: string;
+      holderCpfMasked: string;
+      keyType: 'cpf' | 'cnpj' | 'email' | 'telefone' | 'aleatoria';
+      /** Server-safe display value; CPF keys are masked. */
+      keyDisplay: string;
+    }
+  | {
+      method: 'conta';
+      receiverId: string;
+      holderName: string;
+      holderCpfMasked: string;
+      bankCode: string;
+      agency: string;
+      agencyDigit: string | null;
+      account: string;
+      accountDigit: string;
+      accountType: 'cc' | 'cp' | 'pg' | 'csl';
+    };
+
 /**
  * One row of the append-only `repasse_transfer_attempts` audit table (spec
  * §4.2). The intent row is committed BEFORE the Inter HTTP call, so an
@@ -186,6 +209,8 @@ export type RepasseSearchCandidate = {
 };
 
 export type RepasseDetail = RepasseListRow & {
+  /** Current saved destination from the guarded admin-only detail query. */
+  destination: RepasseDestination | null;
   lancamentos: readonly RepasseDetailLancamento[];
   /**
    * Transfer attempt history (attemptNo ascending on the wire). Empty until
@@ -332,6 +357,7 @@ export function useStubRepasseDetail(idRepasse: string): RepasseDetailResult {
  */
 function toDetail(
   repasse: Parameters<typeof toListRow>[0] & {
+    destination: RepasseDestination | null;
     lancamentos: readonly RepasseDetailLancamento[];
     attempts: readonly RepasseTransferAttempt[];
     candidatos: readonly RepasseSearchCandidate[];
@@ -339,6 +365,7 @@ function toDetail(
 ): RepasseDetail {
   return {
     ...toListRow(repasse),
+    destination: repasse.destination,
     lancamentos: repasse.lancamentos,
     attempts: repasse.attempts,
     searchCandidates: repasse.candidatos,

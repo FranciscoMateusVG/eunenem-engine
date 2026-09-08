@@ -26,6 +26,7 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import { z } from "zod";
 import type { Campanha } from "../../../../src/domain/arrecadacao/entities/campanha.js";
 import type { Contribuicao } from "../../../../src/domain/arrecadacao/entities/contribuicao.js";
+import type { Recebedor } from "../../../../src/domain/arrecadacao/entities/recebedor.js";
 import type {
   IdCampanha,
   IdConta,
@@ -2089,7 +2090,35 @@ const RepasseLancamentoDetailSchema = z.object({
 });
 export type RepasseLancamentoDetail = z.infer<typeof RepasseLancamentoDetailSchema>;
 
+const RepasseDestinationDTOSchema = z.discriminatedUnion('method', [
+  z.object({
+    method: z.literal('pix'),
+    receiverId: z.string().uuid(),
+    holderName: z.string().min(1).max(120),
+    holderCpfMasked: z.string(),
+    keyType: z.enum(['cpf', 'cnpj', 'email', 'telefone', 'aleatoria']),
+    keyDisplay: z.string().min(1).max(140),
+  }),
+  z.object({
+    method: z.literal('conta'),
+    receiverId: z.string().uuid(),
+    holderName: z.string().min(1).max(120),
+    holderCpfMasked: z.string(),
+    bankCode: z.string().regex(/^\d{3}$/),
+    agency: z.string().min(1).max(10),
+    agencyDigit: z.string().max(2).nullable(),
+    account: z.string().min(1).max(20),
+    accountDigit: z.string().min(1).max(2),
+    accountType: z.enum(['cc', 'cp', 'pg', 'csl']),
+  }),
+]);
+export type RepasseDestinationDTO = z.infer<typeof RepasseDestinationDTOSchema>;
+
 const RepasseDetailDTOSchema = RepasseAdminDTOSchema.extend({
+  // Current saved payout destination. Detail-only: it is deliberately absent
+  // from list/public/receiver DTOs and remains behind adminProcedure plus the
+  // EuNeném campaign boundary in repasses.show.
+  destination: RepasseDestinationDTOSchema.nullable(),
   lancamentos: z.array(RepasseLancamentoDetailSchema),
   // aperture-vvh2j — transfer attempt history, attemptNo ASC.
   attempts: z.array(RepasseTransferAttemptDTOSchema),
@@ -2097,6 +2126,44 @@ const RepasseDetailDTOSchema = RepasseAdminDTOSchema.extend({
   candidatos: z.array(RepasseReconciliacaoCandidatoDTOSchema),
 });
 export type RepasseDetailDTO = z.infer<typeof RepasseDetailDTOSchema>;
+
+function maskHolderCpf(cpf: string): string {
+  const digits = cpf.replace(/\D/g, '');
+  return digits.length === 11 ? `***.***.***-${digits.slice(-2)}` : '***.***.***-**';
+}
+
+function toRepasseDestinationDTO(
+  receiver: Recebedor | undefined,
+): RepasseDestinationDTO | null {
+  if (!receiver) return null;
+  const { dadosRecebedor } = receiver;
+  const common = {
+    receiverId: receiver.id as unknown as string,
+    holderName: dadosRecebedor.nomeTitular,
+    holderCpfMasked: maskHolderCpf(dadosRecebedor.cpfTitular),
+  };
+  if (dadosRecebedor.metodo === 'pix') {
+    return {
+      method: 'pix',
+      ...common,
+      keyType: dadosRecebedor.tipoChavePix,
+      keyDisplay:
+        dadosRecebedor.tipoChavePix === 'cpf'
+          ? maskHolderCpf(dadosRecebedor.chavePix)
+          : dadosRecebedor.chavePix,
+    };
+  }
+  return {
+    method: 'conta',
+    ...common,
+    bankCode: dadosRecebedor.codigoBanco,
+    agency: dadosRecebedor.agencia,
+    agencyDigit: dadosRecebedor.agenciaDigito,
+    account: dadosRecebedor.conta,
+    accountDigit: dadosRecebedor.contaDigito,
+    accountType: dadosRecebedor.tipoConta,
+  };
+}
 
 const RepassesListInputSchema = z.object({
   statusFilter: RepasseStatusSchema.or(z.literal("all")).default("solicitado"),
@@ -2359,6 +2426,7 @@ const repassesRouter = t.router({
           recebedorAtivo?.dadosRecebedor.nomeTitular ?? null,
           linked.length,
         ),
+        destination: toRepasseDestinationDTO(recebedorAtivo),
         lancamentos,
         attempts,
         candidatos,
