@@ -126,6 +126,37 @@ export type SolicitarTransferenciaResult = {
   numLancamentos: number;
 };
 
+export type MovimentoRepasseEstado =
+  | "aguardando_aprovacao"
+  | "em_transferencia"
+  | "concluido"
+  | "falhou"
+  | "cancelado"
+  | "inconsistente";
+
+export type StatusRepasse =
+  | "solicitado"
+  | "aprovado"
+  | "transferindo"
+  | "verificando"
+  | "pago"
+  | "falhou"
+  | "cancelado";
+
+/** One withdrawal request in the statement history. The request is the
+ * stable grain; completed ledger rows are composed into it server-side so
+ * the amount is never duplicated per gift. */
+export type MovimentacaoRepasseDTO = {
+  idRepasse: string;
+  solicitadoEm: string;
+  concluidoEm: string | null;
+  valorCents: number;
+  quantidade: number;
+  tipo: "transferencia_conta";
+  estado: MovimentoRepasseEstado;
+  statusRepasse: StatusRepasse | null;
+};
+
 // ── Hook-shaped surface (real trpc calls) ───────────────────────────────────
 
 export type ExtratoSummaryResult = {

@@ -84,6 +84,36 @@ function makeLancamento(args: {
   } as never;
 }
 
+function makeRepasse(args: {
+  id?: string;
+  idCampanha: string;
+  amountCents: number;
+  status:
+    | 'solicitado'
+    | 'aprovado'
+    | 'transferindo'
+    | 'verificando'
+    | 'pago'
+    | 'falhou'
+    | 'cancelado';
+  solicitadoEm?: Date;
+}) {
+  return {
+    id: (args.id ?? randomUUID()) as never,
+    idCampanha: args.idCampanha as never,
+    amountCents: args.amountCents as never,
+    status: args.status,
+    solicitadoEm: args.solicitadoEm ?? FAKE_NOW,
+    aprovadoEm: args.status === 'solicitado' ? null : FAKE_NOW,
+    bankTransferRef: null,
+    transferReferencia: args.status === 'solicitado' ? null : `repasse:${args.id ?? 'test'}`,
+    interCodigoSolicitacao: args.status === 'pago' ? 'inter-test' : null,
+    transferAttempts: args.status === 'solicitado' ? 0 : 1,
+    lastTransferError: args.status === 'falhou' ? 'PAGAMENTO_REJEITADO' : null,
+    needsManualResolution: false,
+  } as const;
+}
+
 interface TestRig {
   caller: ReturnType<typeof appRouter.createCaller>;
   callerAnon: ReturnType<typeof appRouter.createCaller>;
@@ -1235,6 +1265,7 @@ describe('recebedor.extrato — solicitado state (aperture-1ut92)', () => {
     const past = new Date('2026-06-01T10:00:00.000Z');
     const idPagDisp = randomUUID();
     const idPagSol = randomUUID();
+    const idRepasse = randomUUID();
 
     await rig.pagamentoRepository.save(
       makePagamento({
@@ -1263,9 +1294,17 @@ describe('recebedor.extrato — solicitado state (aperture-1ut92)', () => {
         idContribuicao: rig.idContribuicao,
         idCampanha: rig.idCampanha,
         amountCents: 3000,
-        idRepasse: randomUUID(),
+        idRepasse,
       }),
     ]);
+    await rig.livroFinanceiroRepository.saveRepasse(
+      makeRepasse({
+        id: idRepasse,
+        idCampanha: rig.idCampanha,
+        amountCents: 3000,
+        status: 'solicitado',
+      }) as never,
+    );
 
     const result = await rig.caller.recebedor.extrato.summary({
       idCampanha: rig.idCampanha,
@@ -1275,6 +1314,57 @@ describe('recebedor.extrato — solicitado state (aperture-1ut92)', () => {
     expect(result.resgatadoCents).toBe(0);
     // totalRecebido includes both — money is in the system either way.
     expect(result.totalRecebidoCents).toBe(7500);
+  });
+
+  it('summary counts only active requests as pending and only transferred ledger as completed', async () => {
+    const past = new Date('2026-06-01T10:00:00.000Z');
+    const cases = [
+      { status: 'solicitado' as const, amount: 2000, transferred: false, linked: true },
+      { status: 'falhou' as const, amount: 3000, transferred: false, linked: true },
+      { status: 'pago' as const, amount: 4000, transferred: true, linked: true },
+      { status: 'cancelado' as const, amount: 5000, transferred: false, linked: false },
+    ];
+
+    for (const entry of cases) {
+      const idPagamento = randomUUID();
+      const idRepasse = randomUUID();
+      await rig.pagamentoRepository.save(
+        makePagamento({
+          id: idPagamento,
+          idContribuicao: rig.idContribuicao,
+          availableOn: past,
+        }),
+      );
+      await rig.livroFinanceiroRepository.saveRepasse(
+        makeRepasse({
+          id: idRepasse,
+          idCampanha: rig.idCampanha,
+          amountCents: entry.amount,
+          status: entry.status,
+        }) as never,
+      );
+      await rig.livroFinanceiroRepository.saveLancamentos([
+        makeLancamento({
+          idPagamento,
+          idContribuicao: rig.idContribuicao,
+          idCampanha: rig.idCampanha,
+          amountCents: entry.amount,
+          idRepasse: entry.linked ? idRepasse : null,
+          transferidoEm: entry.transferred ? past : null,
+        }),
+      ]);
+    }
+
+    const result = await rig.caller.recebedor.extrato.summary({
+      idCampanha: rig.idCampanha,
+    });
+
+    expect(result.totalRecebidoCents).toBe(14_000);
+    expect(result.aguardandoAprovacaoCents).toBe(2000);
+    expect(result.resgatadoCents).toBe(4000);
+    // falhou remains reserved; cancelado is the only state in this matrix
+    // whose ledger claim has been released back to available.
+    expect(result.saldoDisponivelCents).toBe(5000);
   });
 
   it('statusFilters supports "solicitado" filter — narrows to admin-pipeline rows only', async () => {
@@ -1353,7 +1443,7 @@ describe('recebedor.listMovimentacoes (aperture-2u5vw)', () => {
     expect(result.movimentacoes).toEqual([]);
   });
 
-  it('groups transferido lançamentos by idRepasse: summed valor, quantidade, data desc; excludes non-transferido', async () => {
+  it('preserves legacy transferred ledger groups once, without requiring a repasse row', async () => {
     const past = new Date('2026-06-01T10:00:00.000Z');
     // Repasse A: transferred 2026-06-05, TWO lançamentos (4500 + 2500 = 7000).
     const idRepasseA = randomUUID();
@@ -1437,7 +1527,10 @@ describe('recebedor.listMovimentacoes (aperture-2u5vw)', () => {
     if (!movA) throw new Error('expected movimentacao for idRepasseA');
     expect(movA.valorCents).toBe(7000); // 4500 + 2500
     expect(movA.quantidade).toBe(2);
-    expect(movA.data).toBe(transfA.toISOString());
+    expect(movA.solicitadoEm).toBe(transfA.toISOString());
+    expect(movA.concluidoEm).toBe(transfA.toISOString());
+    expect(movA.estado).toBe('concluido');
+    expect(movA.statusRepasse).toBeNull();
     expect(movA.tipo).toBe('transferencia_conta');
 
     const movB = byRepasse.get(idRepasseB);
@@ -1445,7 +1538,79 @@ describe('recebedor.listMovimentacoes (aperture-2u5vw)', () => {
     if (!movB) throw new Error('expected movimentacao for idRepasseB');
     expect(movB.valorCents).toBe(3000);
     expect(movB.quantidade).toBe(1);
-    expect(movB.data).toBe(transfB.toISOString());
+    expect(movB.concluidoEm).toBe(transfB.toISOString());
+    expect(movB.estado).toBe('concluido');
     expect(movB.tipo).toBe('transferencia_conta');
+  });
+
+  it('returns one request-grain row for pending, completed, failed and cancelled payouts', async () => {
+    const past = new Date('2026-06-01T10:00:00.000Z');
+    const completedAt = new Date('2026-06-08T09:30:00.000Z');
+    const entries = [
+      { status: 'solicitado' as const, estado: 'aguardando_aprovacao', amount: 2000 },
+      { status: 'transferindo' as const, estado: 'em_transferencia', amount: 2500 },
+      { status: 'falhou' as const, estado: 'falhou', amount: 3000 },
+      { status: 'cancelado' as const, estado: 'cancelado', amount: 3500 },
+      { status: 'pago' as const, estado: 'concluido', amount: 4000 },
+    ];
+    const ids = new Map<string, string>();
+
+    for (const [index, entry] of entries.entries()) {
+      const idRepasse = randomUUID();
+      const idPagamento = randomUUID();
+      ids.set(entry.status, idRepasse);
+      await rig.livroFinanceiroRepository.saveRepasse(
+        makeRepasse({
+          id: idRepasse,
+          idCampanha: rig.idCampanha,
+          amountCents: entry.amount,
+          status: entry.status,
+          solicitadoEm: new Date(`2026-06-0${index + 1}T08:00:00.000Z`),
+        }) as never,
+      );
+      if (entry.status === 'cancelado') continue;
+      await rig.pagamentoRepository.save(
+        makePagamento({
+          id: idPagamento,
+          idContribuicao: rig.idContribuicao,
+          availableOn: past,
+        }),
+      );
+      await rig.livroFinanceiroRepository.saveLancamentos([
+        makeLancamento({
+          idPagamento,
+          idContribuicao: rig.idContribuicao,
+          idCampanha: rig.idCampanha,
+          amountCents: entry.amount,
+          idRepasse,
+          transferidoEm: entry.status === 'pago' ? completedAt : null,
+        }),
+      ]);
+    }
+
+    const result = await rig.caller.recebedor.listMovimentacoes({
+      idCampanha: rig.idCampanha,
+    });
+
+    expect(result.movimentacoes).toHaveLength(entries.length);
+    for (const entry of entries) {
+      const movement = result.movimentacoes.find(
+        (candidate) => candidate.idRepasse === ids.get(entry.status),
+      );
+      expect(movement).toMatchObject({
+        valorCents: entry.amount,
+        estado: entry.estado,
+        statusRepasse: entry.status,
+      });
+    }
+    const completed = result.movimentacoes.find(
+      (movement) => movement.idRepasse === ids.get('pago'),
+    );
+    expect(completed?.concluidoEm).toBe(completedAt.toISOString());
+    const cancelled = result.movimentacoes.find(
+      (movement) => movement.idRepasse === ids.get('cancelado'),
+    );
+    expect(cancelled?.quantidade).toBe(0);
+    expect(cancelled?.concluidoEm).toBeNull();
   });
 });
