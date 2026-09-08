@@ -12,6 +12,7 @@ import {
   type AprovarMutationResult,
   type CancelarMutationResult,
   type RepasseDetail,
+  type RepasseDestination,
   type RepasseDetailLancamento,
   type RepasseSearchCandidate,
   type RepasseStatus,
@@ -110,6 +111,7 @@ function Body({ repasse }: { repasse: RepasseDetail }) {
     <section className="space-y-6">
       <SectionHeader />
       <SummaryCard repasse={repasse} />
+      <DestinationCard destination={repasse.destination} />
       {aprovalResult !== null && (
         <ApprovalSuccessCard result={aprovalResult} />
       )}
@@ -156,6 +158,95 @@ function Body({ repasse }: { repasse: RepasseDetail }) {
           }}
         />
       )}
+    </section>
+  );
+}
+
+const PIX_KEY_TYPE_LABEL: Record<
+  Extract<RepasseDestination, { method: 'pix' }>['keyType'],
+  string
+> = {
+  cpf: 'CPF',
+  cnpj: 'CNPJ',
+  email: 'E-mail',
+  telefone: 'Telefone',
+  aleatoria: 'Chave aleatória',
+};
+
+const ACCOUNT_TYPE_LABEL: Record<
+  Extract<RepasseDestination, { method: 'conta' }>['accountType'],
+  string
+> = {
+  cc: 'Conta corrente',
+  cp: 'Conta poupança',
+  pg: 'Conta de pagamento',
+  csl: 'Conta salário',
+};
+
+function destinationRow(label: string, value: string): React.ReactNode {
+  return (
+    <div className="space-y-1">
+      <dt className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-mute">
+        {label}
+      </dt>
+      <dd className="break-all text-[13px] text-ink">{value}</dd>
+    </div>
+  );
+}
+
+export function DestinationCard({
+  destination,
+}: {
+  destination: RepasseDestination | null;
+}) {
+  if (destination === null) {
+    return (
+      <section className="rounded-md border border-line bg-paper p-5" aria-label="Destino salvo atualmente">
+        <h3 className="text-sm font-semibold text-ink">Destino salvo atualmente</h3>
+        <p className="mt-2 text-[13px] text-ink-mute">
+          Destino de recebimento indisponível. Nenhum método ativo está salvo para esta campanha.
+        </p>
+      </section>
+    );
+  }
+
+  const common = (
+    <>
+      {destinationRow('Titular', destination.holderName)}
+      {destinationRow('CPF do titular', destination.holderCpfMasked)}
+    </>
+  );
+
+  return (
+    <section className="rounded-md border border-line bg-paper p-5" aria-label="Destino salvo atualmente">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-ink">Destino salvo atualmente</h3>
+        <span className="rounded-full border border-line px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-ink-soft">
+          {destination.method === 'pix' ? 'PIX automático' : 'Conta bancária · registro manual'}
+        </span>
+      </div>
+      <p className="mt-2 text-[12px] text-ink-mute">
+        Configuração ativa da campanha; não comprova o destino de tentativas anteriores.
+      </p>
+      <dl className="mt-4 grid gap-4 sm:grid-cols-2">
+        {common}
+        {destination.method === 'pix' ? (
+          <>
+            {destinationRow('Tipo de chave', PIX_KEY_TYPE_LABEL[destination.keyType])}
+            {destinationRow('Chave PIX salva', destination.keyDisplay)}
+          </>
+        ) : (
+          <>
+            {destinationRow('Banco', destination.bankCode)}
+            {destinationRow(
+              'Agência',
+              `${destination.agency}${destination.agencyDigit ? `-${destination.agencyDigit}` : ''}`,
+            )}
+            {destinationRow('Tipo de conta', ACCOUNT_TYPE_LABEL[destination.accountType])}
+            {destinationRow('Conta', `${destination.account}-${destination.accountDigit}`)}
+          </>
+        )}
+      </dl>
     </section>
   );
 }

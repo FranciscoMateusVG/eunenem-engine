@@ -271,6 +271,7 @@ describe('admin.repasses.list (aperture-riywh)', () => {
     expect(result.rows[0]?.numLancamentos).toBe(2);
     expect(result.rows[0]?.status).toBe('solicitado');
     expect(result.rows[0]?.aprovadoEm).toBeNull();
+    expect(result.rows[0]).not.toHaveProperty('destination');
     expect(result.nextCursor).toBeNull();
   });
 
@@ -401,10 +402,107 @@ describe('admin.repasses.show (aperture-riywh)', () => {
     expect(result.repasse).not.toBeNull();
     expect(result.repasse?.idRepasse).toBe(idRepasse);
     expect(result.repasse?.amountCents).toBe(4500);
+    expect(result.repasse?.destination).toEqual({
+      method: 'pix',
+      receiverId: expect.any(String),
+      holderName: 'Bia Silva',
+      holderCpfMasked: '***.***.***-25',
+      keyType: 'email',
+      keyDisplay: 'bia@example.com',
+    });
+    expect(JSON.stringify(result.repasse?.destination)).not.toContain('52998224725');
     expect(result.repasse?.lancamentos).toHaveLength(2);
     for (const l of result.repasse?.lancamentos ?? []) {
       expect(l.contribuinteNome).toBe('Tia Carmen');
     }
+  });
+
+  it('projects only the active saved bank-account variant on guarded detail', async () => {
+    const active = await rig.recebedorRepository.findAtivoByCampanhaId(rig.idCampanha as never);
+    expect(active).toBeDefined();
+    if (!active) return;
+    await rig.recebedorRepository.save({ ...active, isActive: false });
+    await rig.recebedorRepository.save(
+      criarRecebedorInicial({
+        id: randomUUID() as never,
+        idCampanha: rig.idCampanha as never,
+        dadosRecebedor: {
+          metodo: 'conta',
+          nomeTitular: 'Bia Silva',
+          cpfTitular: '52998224725',
+          celularTitular: '5511999999999',
+          codigoBanco: '001',
+          agencia: '1234',
+          agenciaDigito: '5',
+          conta: '98765',
+          contaDigito: '4',
+          tipoConta: 'cc',
+        },
+        criadaEm: T1,
+      }),
+    );
+    const { idRepasse } = await seedPendingRepasse(rig);
+
+    const result = await rig.caller.admin.repasses.show({ idRepasse });
+
+    expect(result.repasse?.destination).toEqual({
+      method: 'conta',
+      receiverId: expect.any(String),
+      holderName: 'Bia Silva',
+      holderCpfMasked: '***.***.***-25',
+      bankCode: '001',
+      agency: '1234',
+      agencyDigit: '5',
+      account: '98765',
+      accountDigit: '4',
+      accountType: 'cc',
+    });
+    expect(JSON.stringify(result.repasse?.destination)).not.toContain('52998224725');
+    expect(result.repasse?.destination).not.toHaveProperty('keyDisplay');
+  });
+
+  it('never reveals a full CPF when the saved PIX key itself is a CPF', async () => {
+    const active = await rig.recebedorRepository.findAtivoByCampanhaId(rig.idCampanha as never);
+    expect(active).toBeDefined();
+    if (!active) return;
+    await rig.recebedorRepository.save({ ...active, isActive: false });
+    await rig.recebedorRepository.save(
+      criarRecebedorInicial({
+        id: randomUUID() as never,
+        idCampanha: rig.idCampanha as never,
+        dadosRecebedor: {
+          metodo: 'pix',
+          nomeTitular: 'Bia Silva',
+          cpfTitular: '52998224725',
+          tipoChavePix: 'cpf',
+          chavePix: '52998224725',
+        },
+        criadaEm: T1,
+      }),
+    );
+    const { idRepasse } = await seedPendingRepasse(rig);
+
+    const result = await rig.caller.admin.repasses.show({ idRepasse });
+
+    expect(result.repasse?.destination).toMatchObject({
+      method: 'pix',
+      holderCpfMasked: '***.***.***-25',
+      keyType: 'cpf',
+      keyDisplay: '***.***.***-25',
+    });
+    expect(JSON.stringify(result.repasse?.destination)).not.toContain('52998224725');
+  });
+
+  it('returns an explicit null destination when no active receiver exists', async () => {
+    const active = await rig.recebedorRepository.findAtivoByCampanhaId(rig.idCampanha as never);
+    expect(active).toBeDefined();
+    if (!active) return;
+    await rig.recebedorRepository.save({ ...active, isActive: false });
+    const { idRepasse } = await seedPendingRepasse(rig);
+
+    const result = await rig.caller.admin.repasses.show({ idRepasse });
+
+    expect(result.repasse?.destination).toBeNull();
   });
 
   it('projects the terminal bank handoff and blocks every existing payout mutation', async () => {
