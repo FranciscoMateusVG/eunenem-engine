@@ -2033,6 +2033,18 @@ h4 {
   background: var(--pink-soft);
   color: var(--coral-pink);
 }
+.lista-card-actions button.is-disabled,
+.lista-card-actions button.is-disabled:hover {
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--ink-mute);
+  cursor: not-allowed;
+  box-shadow: none;
+  opacity: 0.58;
+}
+.lista-card-actions button:focus-visible {
+  outline: 3px solid var(--lilac-deep);
+  outline-offset: 2px;
+}
 .lista-card-stamp {
   position: absolute;
   bottom: 10px;
