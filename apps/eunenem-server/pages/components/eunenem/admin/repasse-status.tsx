@@ -104,9 +104,10 @@ export const REPASSE_STATUS_ORDER: readonly RepasseStatus[] = [
 
 /**
  * Short operator-facing gloss under each state. The admin surface shows the
- * raw enum in the pill (operators want the exact state name), but the queue
- * chips + detail explainer use these one-liners for context. This is NOT the
- * end-user extrato copy (that lives in the extrato surface, spec §5.5).
+ * human label in the pill, while the queue chips + detail explainer use these
+ * one-liners for context. Persisted/wire enum values never become UI copy.
+ * This is NOT the end-user extrato copy (that lives in the extrato surface,
+ * spec §5.5).
  */
 export const REPASSE_STATUS_GLOSS: Record<RepasseStatus, string> = {
   solicitado: "aguardando aprovação",
@@ -117,6 +118,18 @@ export const REPASSE_STATUS_GLOSS: Record<RepasseStatus, string> = {
   pago: "transferido com sucesso",
   falhou: "falhou — nenhum valor foi movido",
   cancelado: "cancelado — valores devolvidos ao saldo",
+};
+
+/** Human-facing labels. Persisted/wire values remain unchanged. */
+export const REPASSE_STATUS_LABEL: Record<RepasseStatus, string> = {
+  solicitado: "Solicitado",
+  aprovado: "Aprovado",
+  transferindo: "Transferindo",
+  verificando: "Verificando",
+  enviado_ao_banco: "Enviado ao banco",
+  pago: "Pago",
+  falhou: "Falhou",
+  cancelado: "Cancelado",
 };
 
 export function repasseInFlightExplanation(
@@ -234,7 +247,7 @@ export function RepasseStatusPill({
         aria-hidden
         className={`inline-block size-[6px] rounded-full ${palette.dot}`}
       />
-      {status}
+      {REPASSE_STATUS_LABEL[status]}
     </span>
   );
 }

@@ -114,7 +114,11 @@ function Body({ repasse }: { repasse: RepasseDetail }) {
         <ApprovalSuccessCard result={aprovalResult} />
       )}
       {repasse.attempts.length > 0 && (
-        <AttemptHistory attempts={repasse.attempts} />
+        <AttemptHistory
+          attempts={repasse.attempts}
+          currentStatus={repasse.status}
+          currentCodigoSolicitacao={repasse.interCodigoSolicitacao}
+        />
       )}
       <LancamentosList lancamentos={repasse.lancamentos} />
 
@@ -195,10 +199,14 @@ function attemptDiagnostic(attempt: RepasseTransferAttempt): string | null {
   return pieces.join(" · ");
 }
 
-function AttemptHistory({
+export function AttemptHistory({
   attempts,
+  currentStatus,
+  currentCodigoSolicitacao,
 }: {
   attempts: readonly RepasseTransferAttempt[];
+  currentStatus: RepasseStatus;
+  currentCodigoSolicitacao: string | null;
 }) {
   // Newest first for scan-ability; the wire order is attemptNo ascending.
   const ordered = [...attempts].sort((a, b) => b.attemptNo - a.attemptNo);
@@ -212,14 +220,60 @@ function AttemptHistory({
       </div>
       <ul className="divide-y divide-line">
         {ordered.map((a) => (
-          <AttemptRow key={a.id} attempt={a} />
+          <AttemptRow
+            key={a.id}
+            attempt={a}
+            currentStatus={currentStatus}
+            currentCodigoSolicitacao={currentCodigoSolicitacao}
+          />
         ))}
       </ul>
     </div>
   );
 }
 
-function AttemptRow({ attempt }: { attempt: RepasseTransferAttempt }) {
+function isAcceptedHandoffHistory(
+  attempt: RepasseTransferAttempt,
+  currentStatus: RepasseStatus,
+  currentCodigoSolicitacao: string | null,
+): boolean {
+  return (
+    currentStatus === "enviado_ao_banco" &&
+    attempt.finishedAt !== null &&
+    attempt.httpStatus !== null &&
+    attempt.httpStatus >= 200 &&
+    attempt.httpStatus < 300 &&
+    currentCodigoSolicitacao !== null &&
+    currentCodigoSolicitacao.length > 0 &&
+    attempt.codigoSolicitacao === currentCodigoSolicitacao
+  );
+}
+
+function hasUnavailableOnlyDiagnostic(attempt: RepasseTransferAttempt): boolean {
+  return (
+    attempt.diagnosticCode === "diagnostic_unavailable" &&
+    attempt.diagnosticField === null &&
+    (attempt.diagnosticReason === null ||
+      attempt.diagnosticReason === "diagnostic_unavailable") &&
+    attempt.error === null &&
+    attempt.providerErrorBodyPrivate === null
+  );
+}
+
+function AttemptRow({
+  attempt,
+  currentStatus,
+  currentCodigoSolicitacao,
+}: {
+  attempt: RepasseTransferAttempt;
+  currentStatus: RepasseStatus;
+  currentCodigoSolicitacao: string | null;
+}) {
+  const acceptedHandoffHistory = isAcceptedHandoffHistory(
+    attempt,
+    currentStatus,
+    currentCodigoSolicitacao,
+  );
   const tint =
     attempt.outcome !== null
       ? (ATTEMPT_OUTCOME_TINT[attempt.outcome] ?? {
@@ -228,7 +282,15 @@ function AttemptRow({ attempt }: { attempt: RepasseTransferAttempt }) {
         })
       : { dot: "bg-purple-500", text: "text-purple-800" };
   const inFlight = attempt.finishedAt === null;
-  const diagnostic = attemptDiagnostic(attempt);
+  const diagnostic =
+    acceptedHandoffHistory && hasUnavailableOnlyDiagnostic(attempt)
+      ? null
+      : attemptDiagnostic(attempt);
+  const outcomeLabel = inFlight
+    ? "em andamento"
+    : acceptedHandoffHistory && attempt.outcome !== null
+      ? `resultado histórico: ${attempt.outcome}`
+      : (attempt.outcome ?? "—");
   return (
     <li className="space-y-1.5 px-5 py-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -242,7 +304,7 @@ function AttemptRow({ attempt }: { attempt: RepasseTransferAttempt }) {
             aria-hidden
             className={`inline-block size-[6px] rounded-full ${tint.dot}`}
           />
-          {inFlight ? "em andamento" : (attempt.outcome ?? "—")}
+          {outcomeLabel}
         </span>
         <span className="font-mono text-[11px] tabular-nums text-ink-soft">
           {formatLongDate(attempt.startedAt)}
@@ -288,6 +350,13 @@ function AttemptRow({ attempt }: { attempt: RepasseTransferAttempt }) {
             <AttemptMeta label="diagnóstico" value={diagnostic} tone="error" />
           )}
         </dl>
+      )}
+      {acceptedHandoffHistory && (
+        <p className="ml-6 rounded-sm border border-teal-200 bg-teal-50 px-3 py-2 text-[12px] text-teal-900">
+          <span className="font-semibold">Estado atual: Enviado ao banco.</span>{" "}
+          O resultado acima preserva o registro histórico desta tentativa;
+          nenhuma consulta está em andamento.
+        </p>
       )}
       {attempt.providerErrorBodyPrivate !== null && (
         <PrivateProviderErrorBody
