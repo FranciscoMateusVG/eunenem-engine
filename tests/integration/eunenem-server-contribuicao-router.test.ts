@@ -486,7 +486,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
     // `status: 'indisponivel'` + attach `contribuinte` on the entity — no
     // longer represents anything (those fields don't exist), so "sold" is
     // now modeled by an `aprovado` Pagamento whose cart references the slot.
-    it('update on a SOLD contribuicao still SUCCEEDS (Plan 0015 removed the update guard)', async () => {
+    it('updates a sold contribution price and increases total quantity', async () => {
       const alice = await seedUserWithCampanha(rig, {
         handle: 'alice',
         email: 'alice@test.local',
@@ -503,17 +503,67 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       const itemId = requireFirst(create.ids);
 
       // Mark the slot as sold: an aprovado pagamento referencing it.
-      await deps.pagamentoRepository.save(makeAprovadoPagamento(itemId, 1));
+      const completedPayment = makeAprovadoPagamento(itemId, 1);
+      await deps.pagamentoRepository.save(completedPayment);
 
       const updated = (await caller.contribuicao.update({
         idCampanha: alice.idCampanha,
         id: itemId,
         nome: 'New name',
-      })) as { id: string; nome: string; indisponivel: boolean; quantidadeRestante: number };
+        valor: 4500,
+        quantidade: 2,
+      })) as {
+        id: string;
+        nome: string;
+        valor: number;
+        quantidade: number;
+        indisponivel: boolean;
+        quantidadeRestante: number;
+      };
       expect(updated.nome).toBe('New name');
-      // quantidade=1 with 1 sold → esgotada → indisponivel true, restante 0.
-      expect(updated.indisponivel).toBe(true);
-      expect(updated.quantidadeRestante).toBe(0);
+      expect(updated.valor).toBe(4500);
+      expect(updated.quantidade).toBe(2);
+      expect(updated.indisponivel).toBe(false);
+      expect(updated.quantidadeRestante).toBe(1);
+      await expect(deps.pagamentoRepository.findById(completedPayment.id)).resolves.toEqual(
+        completedPayment,
+      );
+    });
+
+    it('accepts quantity equal to sold and rejects quantity below sold', async () => {
+      const alice = await seedUserWithCampanha(rig, {
+        handle: 'alice',
+        email: 'alice@test.local',
+      });
+      const deps = (rig as TestRig & { deps: ServerDeps }).deps;
+      const caller = rig.callerFor(alice.cookieHeader);
+
+      const create = (await caller.contribuicao.create({
+        idCampanha: alice.idCampanha,
+        nome: 'Fralda',
+        valor: 3000,
+        quantidade: 5,
+      })) as { ids: string[] };
+      const itemId = requireFirst(create.ids);
+      await deps.pagamentoRepository.save(makeAprovadoPagamento(itemId, 3));
+
+      const equal = (await caller.contribuicao.update({
+        idCampanha: alice.idCampanha,
+        id: itemId,
+        quantidade: 3,
+      })) as { quantidade: number; quantidadeRestante: number };
+      expect(equal.quantidade).toBe(3);
+      expect(equal.quantidadeRestante).toBe(0);
+
+      const err = await expectTrpcError(() =>
+        caller.contribuicao.update({
+          idCampanha: alice.idCampanha,
+          id: itemId,
+          quantidade: 2,
+        }),
+      );
+      expect(err.code).toBe('BAD_REQUEST');
+      expect(err.message).toContain('quantidade_below_sold');
     });
 
     it('delete on a SOLD contribuicao → BAD_REQUEST contribuicao_locked', async () => {

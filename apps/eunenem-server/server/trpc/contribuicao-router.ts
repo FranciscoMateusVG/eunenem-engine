@@ -269,9 +269,7 @@ const UpdateInputSchema = z.object({
   grupo: z.string().trim().min(1).max(60).nullable().optional(),
   /**
    * Plan 0016 (aperture-putz5 + aperture-1l37i): change a slot's capacity.
-   * Per locked decision #10 the new value can be lower than already-sold
-   * count — `quantidadeRestante` goes negative, `esgotada` returns true.
-   * The use-case + entity validate `quantidade >= 1` only.
+   * The use-case also rejects a value below the approved sold quantity.
    */
   quantidade: z.number().int().min(1).max(100).optional(),
 });
@@ -537,6 +535,7 @@ export const contribuicaoRouter = t.router({
         const updated = await atualizarContribuicao(
           {
             contribuicaoRepository: ctx.deps.contribuicaoRepository,
+            pagamentoRepository: ctx.deps.pagamentoRepository,
             observability: ctx.deps.observability,
           },
           {
@@ -555,11 +554,8 @@ export const contribuicaoRouter = t.router({
             quantidade: input.quantidade,
           },
         );
-        // Plan 0016 (aperture-eg1s2): single-row esgotada check.
-        // atualizarContribuicao already rejects updates against
-        // sold-out slots upstream, so in practice this returns
-        // `false` — but we compute it explicitly to keep the
-        // projection contract consistent with `list`.
+        // Plan 0016 (aperture-eg1s2): single-row esgotada check. Purchased
+        // slots remain editable; only reducing capacity below sold is barred.
         const indisponivel = await esgotada(
           {
             pagamentoRepository: ctx.deps.pagamentoRepository,

@@ -286,7 +286,7 @@ function emptyDraft(): DraftFields {
 // aperture-0ph83 — one contribuicao = one UNIT. The UI groups by `nome` so
 // each card represents an item shape with aggregated qty/received counts.
 // Edits/deletes operate on the whole group (all ids).
-interface GroupedGift {
+export interface GroupedGift {
   ids: string[];
   nome: string;
   price: number; // BRL (converted from valor cents at the adapter boundary)
@@ -315,7 +315,7 @@ interface GroupedGift {
 const isImagePath = (v: string | null | undefined): v is string =>
   typeof v === 'string' && /^(\/|https?:\/\/)/.test(v);
 
-function groupContribuicoes(items: ContribuicaoDTO[]): GroupedGift[] {
+export function groupContribuicoes(items: ContribuicaoDTO[]): GroupedGift[] {
   const map = new Map<string, GroupedGift>();
   for (const c of items) {
     // aperture-intake-grxsh-followup — Only collapse to "personalizado" when
@@ -353,30 +353,28 @@ function groupContribuicoes(items: ContribuicaoDTO[]): GroupedGift[] {
     //     row per gift.
     //
     // aperture-ypk01 (Plan 0016 leak — partial-sale leak fix): the
-    // `received` axis is DUAL-MODE based on the row's quantidade:
+    // `received` prefers the explicit remaining-slots projection:
     //
-    //   - new-shape row (quantidade > 1): receive count =
-    //     quantidade - max(0, quantidadeRestante). Reads the explicit
-    //     remaining-slots projection landed by the router companion,
-    //     clamps negative overshoots to 0 (locked decision #10 allows
-    //     quantidadeRestante to go negative on concurrent oversell;
-    //     painel display caps at quantidade). This is what makes the
+    //   - projected row: receive count =
+    //     quantidade - quantidadeRestante. Reads the explicit
+    //     remaining-slots projection landed by the router companion and
+    //     intentionally preserves oversold counts instead of capping them
+    //     at the configured total. This is what makes the
     //     "5 de 10 recebidos" tally render when a partial purchase
     //     has happened — the binary indisponivel only flips when ALL
     //     N slots are sold, so legacy-mode below would have surfaced
     //     0 here.
     //
-    //   - legacy multi-row (quantidade <= 1): preserve the original
-    //     row-by-row count where each indisponivel row contributes
-    //     its own quantidade to the received tally. This keeps the
-    //     pre-Plan-0016 N-rows-of-quantidade-1 fixtures correct.
+    //   - legacy response without quantidadeRestante: preserve the original
+    //     row-by-row binary fallback where each indisponivel row contributes
+    //     its own quantidade to the received tally.
     //
     // The visitor-side equivalent of this dual-mode shipped in PR #182;
     // this is the painel-side analog the night batch missed.
     const rowQuantidade = c.quantidade ?? 1;
-    const isNewShape = rowQuantidade > 1;
-    const rowReceived = isNewShape
-      ? rowQuantidade - Math.max(0, c.quantidadeRestante ?? rowQuantidade)
+    const rowReceived =
+      c.quantidadeRestante !== undefined
+        ? Math.max(0, rowQuantidade - c.quantidadeRestante)
       : isReserved
         ? rowQuantidade
         : 0;
@@ -451,7 +449,26 @@ function Visor({ items }: { items: GroupedGift[] }) {
 }
 
 /* ─── Gift card ─── */
-function GiftCard({
+export function giftActionAvailability(hasClaimed: boolean, groupedRowCount = 1): {
+  editDisabled: boolean;
+  editReason?: string;
+  removeDisabled: boolean;
+  removeReason?: string;
+} {
+  const isLegacyGroup = groupedRowCount > 1;
+  return {
+    editDisabled: isLegacyGroup,
+    editReason: isLegacyGroup
+      ? 'Edição indisponível: este presente reúne registros antigos agrupados.'
+      : undefined,
+    removeDisabled: hasClaimed,
+    removeReason: hasClaimed
+      ? 'Não é possível remover porque este presente já foi comprado.'
+      : undefined,
+  };
+}
+
+export function GiftCard({
   item,
   onEdit,
   onRemove,
@@ -462,11 +479,7 @@ function GiftCard({
 }) {
   const pct = item.qty > 0 ? Math.min(100, (item.received / item.qty) * 100) : 0;
   const isComplete = item.received >= item.qty;
-  // aperture-0ph83 — Edit/Remove disabled when any unit is claimed
-  // (status='indisponivel'). The tooltip explains why the buttons are inert.
-  const lockedTip = item.hasClaimed
-    ? 'não dá pra mexer — algum presente desse grupo já foi reservado ♡'
-    : undefined;
+  const actions = giftActionAvailability(item.hasClaimed, item.ids.length);
   return (
     <div className={'lista-card' + (isComplete ? ' is-complete' : '')} data-testid="lista-card">
       <div className="lista-card-thumb" style={{ background: item.bgColor }}>
@@ -502,8 +515,8 @@ function GiftCard({
             type="button"
             onClick={() => onEdit(item)}
             aria-label={`Editar ${item.nome}`}
-            disabled={item.hasClaimed}
-            title={lockedTip}
+            disabled={actions.editDisabled}
+            title={actions.editReason}
             data-testid="gift-edit-btn"
           >
             {icon.edit}
@@ -513,7 +526,9 @@ function GiftCard({
             className="danger"
             onClick={() => onRemove(item)}
             aria-label={`Remover ${item.nome}`}
-            title={lockedTip}
+            disabled={actions.removeDisabled}
+            title={actions.removeReason}
+            data-testid="gift-remove-btn"
           >
             {icon.trash}
           </button>
@@ -539,6 +554,13 @@ function GiftCard({
             <b>{brl(item.price * item.qty)}</b>
           </span>
         </div>
+        {actions.editReason ? (
+          <span className="lista-hint">{actions.editReason}</span>
+        ) : item.hasClaimed ? (
+          <span className="lista-hint">
+            Você pode editar; a remoção fica indisponível depois da primeira compra.
+          </span>
+        ) : null}
       </div>
     </div>
   );
@@ -586,10 +608,14 @@ function PersonalizadoForm({
   f,
   setF,
   showBanner,
+  minimumQty = 1,
+  purchasedQty = 0,
 }: {
   f: DraftFields;
   setF: (next: DraftFields) => void;
   showBanner?: boolean;
+  minimumQty?: number;
+  purchasedQty?: number;
 }) {
   return (
     <>
@@ -629,19 +655,32 @@ function PersonalizadoForm({
           <span className="lista-hint">quanto cada convidado vai contribuir</span>
         </div>
         <div className="lista-field">
-          <label>quantidade</label>
+          <label htmlFor="lista-quantity">quantidade</label>
           <div className="lista-stepper">
             <button
               type="button"
-              onClick={() => setF({ ...f, qty: Math.max(1, (Number(f.qty) || 1) - 1) })}
+              onClick={() =>
+                setF({ ...f, qty: Math.max(minimumQty, (Number(f.qty) || minimumQty) - 1) })
+              }
               aria-label="Diminuir quantidade"
+              disabled={f.qty <= minimumQty}
             >
               −
             </button>
             <input
+              id="lista-quantity"
               value={f.qty}
+              min={minimumQty}
               inputMode="numeric"
-              onChange={(e) => setF({ ...f, qty: Number(e.target.value.replace(/\D/g, '')) || 1 })}
+              onChange={(e) =>
+                setF({
+                  ...f,
+                  qty: Math.max(
+                    minimumQty,
+                    Number(e.target.value.replace(/\D/g, '')) || minimumQty,
+                  ),
+                })
+              }
               aria-label="Quantidade"
               data-testid="qty-input"
             />
@@ -653,6 +692,12 @@ function PersonalizadoForm({
               +
             </button>
           </div>
+          {purchasedQty > 0 && (
+            <span className="lista-hint">
+              mínimo {minimumQty}: {purchasedQty} já{' '}
+              {purchasedQty === 1 ? 'comprado' : 'comprados'}
+            </span>
+          )}
         </div>
         {/* aperture-oa0th — CATEGORIA field hidden (visual-only). The category
             data model is intact: `f.category` still defaults to "personalizado"
@@ -1244,20 +1289,23 @@ function AddGiftModal({
 }
 
 /* ─── Edit item modal (single form, no tabs) ─── */
-function EditItemModal({
+export function EditItemModal({
   initial,
+  purchasedQty,
   onClose,
   onSubmit,
   submitting,
 }: {
   initial: DraftFields;
+  purchasedQty: number;
   onClose: () => void;
   onSubmit: (draft: DraftFields) => void;
   submitting: boolean;
 }) {
   const [f, setF] = useState<DraftFields>(initial);
+  const minimumQty = minimumEditableGiftQuantity(purchasedQty);
   const priceNum = parseValorBRL(f.price);
-  const valid = f.title.trim().length > 0 && priceNum > 0;
+  const valid = f.title.trim().length > 0 && priceNum > 0 && f.qty >= minimumQty;
   const previewTotal = priceNum * (Number(f.qty) || 0);
 
   const submit = () => {
@@ -1277,7 +1325,12 @@ function EditItemModal({
         </button>
       </div>
       <div className="lista-modal-body">
-        <PersonalizadoForm f={f} setF={setF} />
+        <PersonalizadoForm
+          f={f}
+          setF={setF}
+          minimumQty={minimumQty}
+          purchasedQty={purchasedQty}
+        />
       </div>
       <div className="lista-modal-foot">
         <div className="lista-sel-count">
@@ -1300,6 +1353,10 @@ function EditItemModal({
       </div>
     </Modal>
   );
+}
+
+export function minimumEditableGiftQuantity(purchasedQty: number): number {
+  return Math.max(1, purchasedQty);
 }
 
 /* ─── Remove confirm ─── */
@@ -1817,11 +1874,9 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
   // remain wired for confirmRemove + the addCatalogItems / addPresetItems
   // create flows, which still need them.
   //
-  // Multi-id legacy groups (operator's pre-0016 7-Fralda data) still
-  // patch through the first underlying id — the entity itself carries
-  // quantidade, so we update the representative row's fields and the
-  // group's other rows stay untouched. Operator's mental model is the
-  // group; the underlying data drift is invisible to them.
+  // Multi-id legacy groups are deliberately not passed to this path:
+  // GiftCard disables their Edit action because this mutation updates one
+  // entity and cannot safely define group-wide allocation semantics.
   //
   // Recovery on NOT_FOUND: when the stable id no longer exists server-
   // side (sibling tab deleted, DB reset, etc.) the toast surfaces a
@@ -1833,6 +1888,10 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
     if (!editItem) return;
     const price = parseValorBRL(draft.price);
     const newQty = Number(draft.qty) || 1;
+    if (newQty < editItem.received) {
+      toast.error('A quantidade não pode ser menor que o total já comprado.');
+      return;
+    }
     // aperture-qxntg follow-up — `editItem.emoji` is a UI-only display
     // fallback derived from the grupo when the row has no real image
     // URL. It MUST NOT be sent as the wire value: ImagemUrlSchema
@@ -2188,6 +2247,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
             // (and lets the user change/remove it via the same control).
             imageUrl: editItem.imageUrl ?? null,
           }}
+          purchasedQty={editItem.received}
           onClose={() => setEditItem(null)}
           onSubmit={saveEdit}
           submitting={editSubmitting}

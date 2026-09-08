@@ -24,6 +24,7 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { ContribuicaoRepositoryMemory } from '../../../src/adapters/arrecadacao/contribuicao-repository.memory.js';
+import { PagamentoRepositoryMemory } from '../../../src/adapters/pagamentos/repository.memory.js';
 import { ID_PLATAFORMA_EUNENEM } from '../../../src/adapters/plataforma/repository.memory.js';
 import type { DadosRecebedor } from '../../../src/domain/arrecadacao/value-objects/dados-recebedor.js';
 import { NoopLogger } from '../../../src/observability/noop-logger.js';
@@ -59,6 +60,7 @@ async function buildCampanhaComOpcao() {
   const { campanhaRepository, recebedorRepository, plataformaRepository } =
     createArrecadacaoMemoryRepos();
   const contribuicaoRepository = new ContribuicaoRepositoryMemory();
+  const pagamentoRepository = new PagamentoRepositoryMemory();
   const idCampanha = randomUUID();
   const idOpcao = randomUUID();
 
@@ -83,7 +85,13 @@ async function buildCampanhaComOpcao() {
     { idCampanha, idOpcao, tipo: 'presente' },
   );
 
-  return { campanhaRepository, contribuicaoRepository, idCampanha, idOpcao };
+  return {
+    campanhaRepository,
+    contribuicaoRepository,
+    pagamentoRepository,
+    idCampanha,
+    idOpcao,
+  };
 }
 
 describe('aperture-twnf0 — add-mimo: valor persists as cents (read-back)', () => {
@@ -151,10 +159,11 @@ describe('aperture-twnf0 — edit-mimo: the NEW name/price/qty is what persists 
   }
 
   it('editing name + price + qty persists ALL new values (not just "an update fired")', async () => {
-    const { contribuicaoRepository, idCampanha, idContribuicao } = await seedSlot();
+    const { contribuicaoRepository, pagamentoRepository, idCampanha, idContribuicao } =
+      await seedSlot();
 
     await atualizarContribuicao(
-      { contribuicaoRepository, observability: silentObservability },
+      { contribuicaoRepository, pagamentoRepository, observability: silentObservability },
       {
         idContribuicao,
         idCampanhaEsperada: idCampanha,
@@ -171,10 +180,11 @@ describe('aperture-twnf0 — edit-mimo: the NEW name/price/qty is what persists 
   });
 
   it('editing price only leaves name + qty untouched (patch semantics, read-back)', async () => {
-    const { contribuicaoRepository, idCampanha, idContribuicao } = await seedSlot();
+    const { contribuicaoRepository, pagamentoRepository, idCampanha, idContribuicao } =
+      await seedSlot();
 
     await atualizarContribuicao(
-      { contribuicaoRepository, observability: silentObservability },
+      { contribuicaoRepository, pagamentoRepository, observability: silentObservability },
       { idContribuicao, idCampanhaEsperada: idCampanha, valor: 12345 },
     );
 

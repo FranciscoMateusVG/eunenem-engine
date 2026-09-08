@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { CampanhaRepositoryMemory } from '../../../src/adapters/arrecadacao/campanha-repository.memory.js';
 import { ContribuicaoRepositoryMemory } from '../../../src/adapters/arrecadacao/contribuicao-repository.memory.js';
 import { RecebedorRepositoryMemory } from '../../../src/adapters/arrecadacao/recebedor-repository.memory.js';
+import { PagamentoRepositoryMemory } from '../../../src/adapters/pagamentos/repository.memory.js';
 import { criarCampanhaSemRecebedor } from '../../../src/domain/arrecadacao/entities/campanha.js';
 import { contribuicaoAtualizada } from '../../../src/domain/arrecadacao/entities/contribuicao.js';
 import type {
@@ -26,10 +27,7 @@ import { createTestObservability } from '../../helpers/observability.js';
  *      `qty` row-multiplier shape retired by locked decision #1).
  *   2. The opção cap is on slot count (rows), not unit count.
  *   3. atualizarContribuicao accepts quantidade and threads it to the
- *      entity patch helper; the new value can be lower than already-sold
- *      count per locked decision #10 (overshoot accepted —
- *      quantidadeRestante goes negative; the entity doesn't validate
- *      against the sold count).
+ *      entity patch helper while consulting approved-payment totals.
  *
  * Adapter behavior (saga writes to memory adapter; postgres
  * conformance is separately tested in tests/integration/).
@@ -40,7 +38,8 @@ const { observability } = createTestObservability();
 function makeRepos() {
   const campanhaRepository = new CampanhaRepositoryMemory(new RecebedorRepositoryMemory());
   const contribuicaoRepository = new ContribuicaoRepositoryMemory();
-  return { campanhaRepository, contribuicaoRepository };
+  const pagamentoRepository = new PagamentoRepositoryMemory();
+  return { campanhaRepository, contribuicaoRepository, pagamentoRepository };
 }
 
 async function seedCampanhaWithOpcao(deps: ReturnType<typeof makeRepos>) {
@@ -196,7 +195,11 @@ describe('atualizarContribuicao — accepts quantidade (aperture-putz5)', () => 
     const id = created.ids[0] as IdContribuicao;
 
     const updated = await atualizarContribuicao(
-      { contribuicaoRepository: repos.contribuicaoRepository, observability },
+      {
+        contribuicaoRepository: repos.contribuicaoRepository,
+        pagamentoRepository: repos.pagamentoRepository,
+        observability,
+      },
       {
         idContribuicao: id,
         idCampanhaEsperada: idCampanha,
@@ -210,13 +213,7 @@ describe('atualizarContribuicao — accepts quantidade (aperture-putz5)', () => 
     expect(reloaded?.quantidade).toBe(12);
   });
 
-  it('overshoot accepted per locked decision #10 — quantidade lowered below sold count does not throw', async () => {
-    // The entity-level invariant (contribuicaoAtualizada) is "quantidade >= 1"
-    // only. There is NO check against already-sold quantity at the entity
-    // or use-case layer — `quantidadeRestante` goes negative,
-    // `esgotada` returns true (verified separately in
-    // tests/unit/arrecadacao/quantidade-restante.test.ts). This test pins
-    // that the patch path itself doesn't reject.
+  it('quantity can be lowered when there are no approved purchases', async () => {
     const repos = makeRepos();
     const { idCampanha, idOpcao } = await seedCampanhaWithOpcao(repos);
 
@@ -230,10 +227,13 @@ describe('atualizarContribuicao — accepts quantidade (aperture-putz5)', () => 
     );
     const id = created.ids[0] as IdContribuicao;
 
-    // Lower from 10 to 2 — admin trimming the slot's offered cap after
-    // some units already sold.
+    // Lower from 10 to 2 while sold=0.
     const updated = await atualizarContribuicao(
-      { contribuicaoRepository: repos.contribuicaoRepository, observability },
+      {
+        contribuicaoRepository: repos.contribuicaoRepository,
+        pagamentoRepository: repos.pagamentoRepository,
+        observability,
+      },
       {
         idContribuicao: id,
         idCampanhaEsperada: idCampanha,
@@ -241,6 +241,46 @@ describe('atualizarContribuicao — accepts quantidade (aperture-putz5)', () => 
       },
     );
     expect(updated.quantidade).toBe(2);
+  });
+
+  it('rejects quantity below approved sales, accepts equality, and leaves rejected state intact', async () => {
+    const repos = makeRepos();
+    const { idCampanha, idOpcao } = await seedCampanhaWithOpcao(repos);
+    const created = await criarContribuicoesEmLote(
+      { ...repos, clock: () => new Date('2026-06-09T01:00:00Z'), observability },
+      {
+        idCampanha,
+        idOpcaoContribuicao: idOpcao,
+        items: [{ nome: 'Fralda', valor: 3000 as never, quantidade: 10 }],
+      },
+    );
+    const id = created.ids[0] as IdContribuicao;
+    vi.spyOn(
+      repos.pagamentoRepository,
+      'somarQuantidadesContribuicoesEmPagamentosAprovados',
+    ).mockResolvedValue(new Map([[id as never, 3]]));
+
+    await expect(
+      atualizarContribuicao(
+        {
+          contribuicaoRepository: repos.contribuicaoRepository,
+          pagamentoRepository: repos.pagamentoRepository,
+          observability,
+        },
+        { idContribuicao: id, idCampanhaEsperada: idCampanha, quantidade: 2 },
+      ),
+    ).rejects.toThrow('quantidade_below_sold');
+    expect((await repos.contribuicaoRepository.findById(id))?.quantidade).toBe(10);
+
+    const equal = await atualizarContribuicao(
+      {
+        contribuicaoRepository: repos.contribuicaoRepository,
+        pagamentoRepository: repos.pagamentoRepository,
+        observability,
+      },
+      { idContribuicao: id, idCampanhaEsperada: idCampanha, quantidade: 3 },
+    );
+    expect(equal.quantidade).toBe(3);
   });
 
   it('quantidade < 1 rejected by the entity patch helper (positive integer floor)', async () => {

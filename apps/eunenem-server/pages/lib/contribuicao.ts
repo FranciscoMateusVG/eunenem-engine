@@ -106,6 +106,7 @@ export function deriveBgColor(grupo: string | null): string {
 /** Discriminated error type so the UI can render the right toast. */
 export type ContribuicaoError =
   | { kind: 'locked' }
+  | { kind: 'quantity-below-sold' }
   | { kind: 'not-found' }
   | { kind: 'unauthorized' }
   | { kind: 'network' };
@@ -114,7 +115,9 @@ export type ContribuicaoError =
 export function contribuicaoErrorMessage(err: ContribuicaoError): string {
   switch (err.kind) {
     case 'locked':
-      return 'esse mimo já foi reservado, não dá pra mudar agora ♡';
+      return 'esse mimo já foi comprado e não pode ser removido ♡';
+    case 'quantity-below-sold':
+      return 'a quantidade não pode ser menor que o total já comprado';
     case 'not-found':
       return 'esse mimo não existe mais';
     case 'unauthorized':
@@ -137,6 +140,9 @@ export function toContribuicaoError(err: unknown): ContribuicaoError {
     case 'BAD_REQUEST':
       if (message.includes('contribuicao_locked')) {
         return { kind: 'locked' };
+      }
+      if (message.includes('quantidade_below_sold')) {
+        return { kind: 'quantity-below-sold' };
       }
       return { kind: 'network' };
     case 'NOT_FOUND':
