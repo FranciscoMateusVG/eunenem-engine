@@ -27,11 +27,66 @@ import type { MoneyCents } from '../../domain/money.js';
 
 /** Outcome of a `pagarPix` call. */
 export type PagarPixOutcome =
-  | { readonly outcome: 'pago'; readonly codigoSolicitacao: string }
+  | {
+      readonly outcome: 'pago';
+      readonly codigoSolicitacao: string;
+      readonly diagnostics?: TransferenciaProviderDiagnostics;
+    }
   // Inter-side approval workflow — a payment may settle later; NOT success.
-  | { readonly outcome: 'agendado_aprovacao'; readonly codigoSolicitacao: string }
+  | {
+      readonly outcome: 'agendado_aprovacao';
+      readonly codigoSolicitacao: string;
+      readonly diagnostics?: TransferenciaProviderDiagnostics;
+    }
   // Clean rejection: the payment was definitively NOT created.
-  | { readonly outcome: 'rejeitado'; readonly codigoSolicitacao?: string; readonly erro: string };
+  | {
+      readonly outcome: 'rejeitado';
+      readonly codigoSolicitacao?: string;
+      readonly erro: string;
+      readonly diagnostics?: TransferenciaProviderDiagnostics;
+    };
+
+/**
+ * Sanitized, finite evidence observed at the provider boundary.
+ *
+ * This is deliberately not a provider payload. Every string-valued member is
+ * an application-owned enum except `providerRequestId`, which is accepted only
+ * from Inter's documented correlation field under a strict bounded grammar.
+ * The record carries no PIX key, recipient data, request/response body, token,
+ * certificate or arbitrary upstream text.
+ */
+export interface TransferenciaProviderDiagnostics {
+  readonly operation: 'pagar_pix';
+  readonly responseClass:
+    | 'accepted'
+    | 'validation_rejection'
+    | 'ambiguous_http'
+    | 'pre_send_failure'
+    | 'ambiguous_transport'
+    | 'invalid_response'
+    | 'local_rejection'
+    | 'diagnostic_unavailable';
+  readonly httpStatus: number | null;
+  readonly providerRequestId: string | null;
+  readonly diagnosticCode:
+    | 'invalid_pix_key'
+    | 'invalid_amount'
+    | 'invalid_description'
+    | 'invalid_recipient'
+    | 'invalid_request'
+    | 'provider_rejection'
+    | 'recipient_not_pix'
+    | 'missing_reference'
+    | 'diagnostic_unavailable';
+  readonly diagnosticField: 'pix_key' | 'amount' | 'description' | 'recipient' | null;
+  readonly diagnosticReason:
+    | 'required'
+    | 'invalid_format'
+    | 'out_of_range'
+    | 'not_owned'
+    | 'unsupported'
+    | 'diagnostic_unavailable';
+}
 
 export interface PagarPixInput {
   /** chave PIX — cpf/cnpj/email/telefone/aleatoria. NEVER logged. */
@@ -116,8 +171,33 @@ export interface TransferenciaProvider {
  */
 export class TransferenciaTransitoriaError extends Error {
   readonly _tag = 'TransferenciaTransitoriaError';
-  constructor(message: string, options?: { cause?: unknown }) {
+  readonly diagnostics: TransferenciaProviderDiagnostics | undefined;
+  constructor(
+    message: string,
+    options?: { cause?: unknown; diagnostics?: TransferenciaProviderDiagnostics },
+  ) {
     super(message, options);
     this.name = 'TransferenciaTransitoriaError';
+    this.diagnostics = options?.diagnostics;
+  }
+}
+
+/**
+ * A payment request may have reached Inter, but its result is not proven.
+ * The executar use case intentionally treats this exactly like every other
+ * non-transient throw: move to `verificando`, never automatically retry.
+ */
+export class TransferenciaAmbiguaError extends Error {
+  readonly _tag = 'TransferenciaAmbiguaError';
+  readonly diagnostics: TransferenciaProviderDiagnostics;
+
+  constructor(
+    message: string,
+    diagnostics: TransferenciaProviderDiagnostics,
+    options?: { cause?: unknown },
+  ) {
+    super(message, options);
+    this.name = 'TransferenciaAmbiguaError';
+    this.diagnostics = diagnostics;
   }
 }

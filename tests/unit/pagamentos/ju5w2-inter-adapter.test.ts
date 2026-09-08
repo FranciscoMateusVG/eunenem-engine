@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+  classifyInterPayoutDiagnostics,
   type InterHttpResponse,
   type InterHttpTransport,
   type InterProviderConfig,
   TransferenciaProviderInter,
 } from '../../../src/adapters/pagamentos/transferencia-provider.inter.js';
-import { TransferenciaTransitoriaError } from '../../../src/adapters/pagamentos/transferencia-provider.js';
+import {
+  TransferenciaAmbiguaError,
+  TransferenciaTransitoriaError,
+} from '../../../src/adapters/pagamentos/transferencia-provider.js';
 import type { MoneyCents } from '../../../src/domain/money.js';
 
 /**
@@ -102,7 +106,8 @@ describe('TransferenciaProviderInter — pagarPix tipoRetorno mapping (money-saf
   it.each(['PAGAMENTO', 'REALIZADO', 'PAGO'])('%s → pago (settled)', async (tipo) => {
     const t = new ScriptedTransport().push(TOKEN_OK, pagar(tipo, 'cod-x'));
     const out = await newProvider(t).pagarPix(input);
-    expect(out).toEqual({ outcome: 'pago', codigoSolicitacao: 'cod-x' });
+    expect(out).toMatchObject({ outcome: 'pago', codigoSolicitacao: 'cod-x' });
+    expect(out.diagnostics).toMatchObject({ responseClass: 'accepted', httpStatus: 200 });
   });
 
   it.each([
@@ -113,7 +118,8 @@ describe('TransferenciaProviderInter — pagarPix tipoRetorno mapping (money-saf
   ])('%s → agendado_aprovacao (NOT booked — consult confirms settlement)', async (tipo) => {
     const t = new ScriptedTransport().push(TOKEN_OK, pagar(tipo, 'cod-y'));
     const out = await newProvider(t).pagarPix(input);
-    expect(out).toEqual({ outcome: 'agendado_aprovacao', codigoSolicitacao: 'cod-y' });
+    expect(out).toMatchObject({ outcome: 'agendado_aprovacao', codigoSolicitacao: 'cod-y' });
+    expect(out.diagnostics).toMatchObject({ responseClass: 'accepted', httpStatus: 200 });
   });
 
   it('unknown tipoRetorno on 2xx → throws AMBIGUOUS (not Transitoria)', async () => {
@@ -147,11 +153,105 @@ describe('TransferenciaProviderInter — pagarPix tipoRetorno mapping (money-saf
     }
   });
 
+  it('persists only canonical validation field/reason and a bounded documented correlation id', async () => {
+    const t = new ScriptedTransport().push(TOKEN_OK, {
+      statusCode: 422,
+      body: JSON.stringify({
+        title: 'Dados inválidos.',
+        correlationId: 'req-2026.09:abc',
+        detail: `never persist ${CHAVE}`,
+        violacoes: [
+          {
+            propriedade: 'destinatario.chave',
+            razao: `O campo não respeita o schema. never persist ${CHAVE}`,
+            valor: CHAVE,
+          },
+        ],
+      }),
+    });
+
+    const out = await newProvider(t).pagarPix(input);
+    expect(out.outcome).toBe('rejeitado');
+    expect(out.diagnostics).toEqual({
+      operation: 'pagar_pix',
+      responseClass: 'validation_rejection',
+      httpStatus: 422,
+      providerRequestId: 'req-2026.09:abc',
+      diagnosticCode: 'invalid_request',
+      diagnosticField: 'pix_key',
+      diagnosticReason: 'invalid_format',
+    });
+    expect(JSON.stringify(out.diagnostics)).not.toContain(CHAVE);
+  });
+
+  it('unknown/malformed validation details remain honestly unavailable and emit no free text', async () => {
+    const pii = '52998224725-secret@example.com';
+    const t = new ScriptedTransport().push(TOKEN_OK, {
+      statusCode: 400,
+      body: JSON.stringify({
+        codigo: pii,
+        title: pii,
+        correlationId: `bad ${pii}`,
+        detail: pii,
+        violacoes: [{ propriedade: 'campo.secreto', razao: pii, valor: pii }],
+      }),
+    });
+
+    const out = await newProvider(t).pagarPix(input);
+    expect(out.outcome).toBe('rejeitado');
+    expect(out.diagnostics).toMatchObject({
+      providerRequestId: null,
+      diagnosticCode: 'provider_rejection',
+      diagnosticField: null,
+      diagnosticReason: 'diagnostic_unavailable',
+    });
+    expect(JSON.stringify(out.diagnostics)).not.toContain(pii);
+  });
+
   it('503 → throws AMBIGUOUS (a payment may have landed before the 5xx)', async () => {
     const t = new ScriptedTransport().push(TOKEN_OK, { statusCode: 503, body: '{}' });
     const p = newProvider(t).pagarPix(input);
     await expect(p).rejects.toThrow();
     await expect(p).rejects.not.toBeInstanceOf(TransferenciaTransitoriaError);
+  });
+
+  it('503 carries safe HTTP evidence without changing the ambiguous money outcome', async () => {
+    const t = new ScriptedTransport().push(TOKEN_OK, {
+      statusCode: 503,
+      body: JSON.stringify({ correlationId: 'req-503' }),
+    });
+    const error = await newProvider(t)
+      .pagarPix(input)
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(TransferenciaAmbiguaError);
+    expect((error as TransferenciaAmbiguaError).diagnostics).toMatchObject({
+      responseClass: 'ambiguous_http',
+      httpStatus: 503,
+      providerRequestId: 'req-503',
+      diagnosticCode: 'diagnostic_unavailable',
+    });
+  });
+});
+
+describe('TransferenciaProviderInter — finite validation diagnostics', () => {
+  it.each([
+    ['valor', 'O valor deve ser maior que zero.', 'amount', 'out_of_range'],
+    ['destinatario.chave', 'Campo obrigatório.', 'pix_key', 'required'],
+    ['destinatario.chave', 'A chave não pertence à conta.', 'pix_key', 'not_owned'],
+    ['destinatario', 'Tipo não suportado.', 'recipient', 'unsupported'],
+  ] as const)('%s maps a documented-style reason to %s/%s', (property, reason, field, expected) => {
+    const diagnostics = classifyInterPayoutDiagnostics({
+      statusCode: 422,
+      body: JSON.stringify({
+        title: 'Dados inválidos.',
+        violacoes: [{ propriedade: property, razao: reason }],
+      }),
+    });
+    expect(diagnostics).toMatchObject({
+      diagnosticCode: 'invalid_request',
+      diagnosticField: field,
+      diagnosticReason: expected,
+    });
   });
 });
 

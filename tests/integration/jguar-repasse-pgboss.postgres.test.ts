@@ -263,11 +263,24 @@ interface AttemptRow {
   codigo_solicitacao: string | null;
   error: string | null;
   finished_at: Date | null;
+  operation: string | null;
+  http_status: number | null;
+  provider_request_id: string | null;
+  response_class: string | null;
+  diagnostic_code: string | null;
+  diagnostic_field: string | null;
+  diagnostic_reason: string | null;
+  duration_ms: number | null;
+  state_before: string | null;
+  state_after: string | null;
 }
 
 async function attemptRows(idRepasse: string): Promise<AttemptRow[]> {
   const result = await sql<AttemptRow>`
-    SELECT attempt_no, referencia, outcome, codigo_solicitacao, error, finished_at
+    SELECT attempt_no, referencia, outcome, codigo_solicitacao, error, finished_at,
+           operation, http_status, provider_request_id, response_class,
+           diagnostic_code, diagnostic_field, diagnostic_reason, duration_ms,
+           state_before, state_after
       FROM repasse_transfer_attempts
       WHERE repasse_id = ${idRepasse}
       ORDER BY attempt_no, started_at
@@ -483,6 +496,14 @@ describe('crash-mid-call and re-delivery reconciliation', () => {
     expect(attempts).toHaveLength(1);
     expect(attempts[0]?.outcome).toBe('verificando');
     expect(attempts[0]?.finished_at).not.toBeNull();
+    expect(attempts[0]).toMatchObject({
+      operation: 'pagar_pix',
+      response_class: 'ambiguous_transport',
+      diagnostic_code: 'diagnostic_unavailable',
+      state_before: 'aprovado',
+      state_after: 'verificando',
+    });
+    expect(attempts[0]?.duration_ms).not.toBeNull();
 
     expect(spy.confirmar).toEqual([
       { idRepasse, tentativa: 1, delaySeconds: CONFIRMAR_DELAY_INICIAL_SEGUNDOS },
@@ -524,10 +545,74 @@ describe('crash-mid-call and re-delivery reconciliation', () => {
     expect(attempts).toHaveLength(1);
     expect(attempts[0]?.attempt_no).toBe(1);
     expect(attempts[0]?.outcome).toBe('verificando');
+    expect(attempts[0]).toMatchObject({
+      operation: 'pagar_pix',
+      response_class: null,
+      diagnostic_code: null,
+      state_before: 'aprovado',
+      state_after: 'verificando',
+    });
 
     expect(spy.confirmar).toEqual([
       { idRepasse, tentativa: 1, delaySeconds: CONFIRMAR_DELAY_INICIAL_SEGUNDOS },
     ]);
+    expect(await stampedLancamentoCount(idRepasse)).toBe(0);
+  });
+
+  it('provider-result audit persistence failure rolls back settlement and redelivery never reissues PIX', async () => {
+    const { idRepasse, idCampanha } = await seedRepasseSolicitado({});
+    await seedClaimedLancamento({ idCampanha, idRepasse });
+    await aprovarPix(idRepasse);
+    const claimed = await repo.iniciarTransferenciaTransaction({
+      idRepasse,
+      requestSummary: 'audit-persistence-failure',
+      agora: new Date(),
+    });
+    expect(claimed.acao).toBe('prosseguir');
+
+    // Models a provider response followed by a rejected diagnostic write.
+    // The check violation occurs in the SAME transaction as status=pago and
+    // the ledger stamp, so neither business write may survive.
+    await expect(
+      repo.finalizarTentativaTransferencia({
+        idRepasse,
+        attemptId: claimed.attemptId,
+        resultado: {
+          tipo: 'pago',
+          codigoSolicitacao: randomUUID(),
+          observation: {
+            operation: 'pagar_pix',
+            responseClass: 'accepted',
+            httpStatus: 200,
+            providerRequestId: 'invalid id with spaces',
+            diagnosticCode: 'diagnostic_unavailable',
+            diagnosticField: null,
+            diagnosticReason: 'diagnostic_unavailable',
+            durationMs: 1,
+          },
+        },
+        agora: new Date(),
+      }),
+    ).rejects.toThrow();
+
+    expect((await repo.findRepasseById(idRepasse))?.status).toBe('transferindo');
+    expect(await stampedLancamentoCount(idRepasse)).toBe(0);
+    const open = await attemptRows(idRepasse);
+    expect(open).toHaveLength(1);
+    expect(open[0]).toMatchObject({
+      outcome: null,
+      finished_at: null,
+      provider_request_id: null,
+      response_class: null,
+      state_after: 'transferindo',
+    });
+
+    const freshFake = new TransferenciaProviderFake({ pagarPixOutcome: 'pago' });
+    const spy = makeSpyEnqueuer();
+    await executarTransferenciaRepasse(makeDeps(freshFake, spy.enqueuer), { idRepasse });
+
+    expect(freshFake.pagarPixCalls).toBe(0);
+    expect((await repo.findRepasseById(idRepasse))?.status).toBe('verificando');
     expect(await stampedLancamentoCount(idRepasse)).toBe(0);
   });
 

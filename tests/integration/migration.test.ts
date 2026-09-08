@@ -156,6 +156,38 @@ describe('Migration round-trip', () => {
     expect(await getColumn(db, 'repasses_recebedor', 'inter_codigo_solicitacao')).toBeDefined();
     expect(await getColumn(db, 'repasses_recebedor', 'last_transfer_error')).toBeDefined();
 
+    // 20260908_050_repasse_attempt_diagnostics (aperture-9jg7h): nullable,
+    // finite, safe provider evidence on the existing intent-first trail.
+    for (const column of [
+      'operation',
+      'http_status',
+      'provider_request_id',
+      'response_class',
+      'diagnostic_code',
+      'diagnostic_field',
+      'diagnostic_reason',
+      'duration_ms',
+      'state_before',
+      'state_after',
+    ]) {
+      expect((await getColumn(db, 'repasse_transfer_attempts', column))?.is_nullable).toBe('YES');
+    }
+    const httpStatusConstraint = await getConstraintDefinition(
+      db,
+      'repasse_attempt_http_status_check',
+    );
+    expect(httpStatusConstraint).toContain('http_status >= 100');
+    expect(httpStatusConstraint).toContain('http_status <= 599');
+    const durationConstraint = await getConstraintDefinition(
+      db,
+      'repasse_attempt_duration_ms_check',
+    );
+    expect(durationConstraint).toContain('duration_ms >= 0');
+    expect(durationConstraint).toContain('duration_ms <= 120000');
+    expect(
+      await getConstraintDefinition(db, 'repasse_attempt_provider_request_id_check'),
+    ).toContain('A-Za-z0-9');
+
     // 20260716_043_repasse_manual_resolution (aperture-477nz): the actual TIP
     //   now. Adds repasses_recebedor.needs_manual_resolution (NOT NULL default
     //   false) + the repasse_reconciliacao_candidatos table (masked-chave
@@ -385,6 +417,13 @@ describe('Migration round-trip', () => {
     //    migration. Each migrateDown() unwinds exactly the current tip, so
     //    this sequence must start at the LATEST migration and walk earlier.
     //    Adding a new migration on top REQUIRES prepending its down-step here.
+
+    // 20260908_050_repasse_attempt_diagnostics (aperture-9jg7h) → actual TIP.
+    // Its down removes only the nullable diagnostic projection.
+    const downRepasseAttemptDiagnostics = await migrator.migrateDown();
+    expect(downRepasseAttemptDiagnostics.error).toBeUndefined();
+    expect(await getColumn(db, 'repasse_transfer_attempts', 'provider_request_id')).toBeUndefined();
+    expect(await getColumn(db, 'repasse_transfer_attempts', 'outcome')).toBeDefined();
 
     // 20260805_049_add_inter_pix_refunds (aperture-2nbg6) → the actual TIP.
     // Its down() removes the refund table, e2e reference, and lookup index.
