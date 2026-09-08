@@ -449,13 +449,18 @@ function Visor({ items }: { items: GroupedGift[] }) {
 }
 
 /* ─── Gift card ─── */
-export function giftActionAvailability(hasClaimed: boolean): {
-  editDisabled: false;
+export function giftActionAvailability(hasClaimed: boolean, groupedRowCount = 1): {
+  editDisabled: boolean;
+  editReason?: string;
   removeDisabled: boolean;
   removeReason?: string;
 } {
+  const isLegacyGroup = groupedRowCount > 1;
   return {
-    editDisabled: false,
+    editDisabled: isLegacyGroup,
+    editReason: isLegacyGroup
+      ? 'Edição indisponível: este presente reúne registros antigos agrupados.'
+      : undefined,
     removeDisabled: hasClaimed,
     removeReason: hasClaimed
       ? 'Não é possível remover porque este presente já foi comprado.'
@@ -474,7 +479,7 @@ export function GiftCard({
 }) {
   const pct = item.qty > 0 ? Math.min(100, (item.received / item.qty) * 100) : 0;
   const isComplete = item.received >= item.qty;
-  const actions = giftActionAvailability(item.hasClaimed);
+  const actions = giftActionAvailability(item.hasClaimed, item.ids.length);
   return (
     <div className={'lista-card' + (isComplete ? ' is-complete' : '')} data-testid="lista-card">
       <div className="lista-card-thumb" style={{ background: item.bgColor }}>
@@ -511,6 +516,7 @@ export function GiftCard({
             onClick={() => onEdit(item)}
             aria-label={`Editar ${item.nome}`}
             disabled={actions.editDisabled}
+            title={actions.editReason}
             data-testid="gift-edit-btn"
           >
             {icon.edit}
@@ -548,11 +554,13 @@ export function GiftCard({
             <b>{brl(item.price * item.qty)}</b>
           </span>
         </div>
-        {item.hasClaimed && (
+        {actions.editReason ? (
+          <span className="lista-hint">{actions.editReason}</span>
+        ) : item.hasClaimed ? (
           <span className="lista-hint">
             Você pode editar; a remoção fica indisponível depois da primeira compra.
           </span>
-        )}
+        ) : null}
       </div>
     </div>
   );
@@ -1866,11 +1874,9 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
   // remain wired for confirmRemove + the addCatalogItems / addPresetItems
   // create flows, which still need them.
   //
-  // Multi-id legacy groups (operator's pre-0016 7-Fralda data) still
-  // patch through the first underlying id — the entity itself carries
-  // quantidade, so we update the representative row's fields and the
-  // group's other rows stay untouched. Operator's mental model is the
-  // group; the underlying data drift is invisible to them.
+  // Multi-id legacy groups are deliberately not passed to this path:
+  // GiftCard disables their Edit action because this mutation updates one
+  // entity and cannot safely define group-wide allocation semantics.
   //
   // Recovery on NOT_FOUND: when the stable id no longer exists server-
   // side (sibling tab deleted, DB reset, etc.) the toast surfaces a
