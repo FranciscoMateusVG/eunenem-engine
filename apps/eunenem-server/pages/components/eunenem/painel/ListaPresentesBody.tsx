@@ -480,6 +480,7 @@ export function GiftCard({
   const pct = item.qty > 0 ? Math.min(100, (item.received / item.qty) * 100) : 0;
   const isComplete = item.received >= item.qty;
   const actions = giftActionAvailability(item.hasClaimed, item.ids.length);
+  const removeReasonId = actions.removeReason ? `gift-remove-reason-${item.ids[0]}` : undefined;
   return (
     <div className={'lista-card' + (isComplete ? ' is-complete' : '')} data-testid="lista-card">
       <div className="lista-card-thumb" style={{ background: item.bgColor }}>
@@ -523,15 +524,23 @@ export function GiftCard({
           </button>
           <button
             type="button"
-            className="danger"
-            onClick={() => onRemove(item)}
+            className={'danger' + (actions.removeDisabled ? ' is-disabled' : '')}
+            onClick={() => {
+              if (!actions.removeDisabled) onRemove(item);
+            }}
             aria-label={`Remover ${item.nome}`}
-            disabled={actions.removeDisabled}
+            aria-disabled={actions.removeDisabled || undefined}
+            aria-describedby={removeReasonId}
             title={actions.removeReason}
             data-testid="gift-remove-btn"
           >
             {icon.trash}
           </button>
+          {actions.removeReason && (
+            <span id={removeReasonId} className="sr-only">
+              {actions.removeReason}
+            </span>
+          )}
         </div>
         {isComplete && <span className="lista-card-stamp">recebido ♡</span>}
       </div>
