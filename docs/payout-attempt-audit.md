@@ -85,3 +85,39 @@ Focused synthetic tests cover:
 
 No verification command in this slice calls Banco Inter or uses provider
 credentials.
+
+## Platform handoff semantics (aperture-62ok9)
+
+For PIX payouts, a documented Banco Inter `POST /banking/v2/pix` 2xx response
+with a non-empty `codigoSolicitacao` completes this platform's responsibility.
+The repasse moves atomically to `enviado_ao_banco`, stores the receipt in
+`inter_codigo_solicitacao`, and records the observed response time in
+`enviado_ao_banco_em`.
+
+`enviado_ao_banco` means **request accepted and handed to Inter**. It does not
+mean the operator approved the request in the bank application and does not
+mean the PIX settled. Consequently the transition does not set
+`lancamentos_financeiros.transferido_em`. The linked `id_repasse` claims remain
+in place, so the amount cannot be withdrawn again, cancelled back to the
+available balance, retried, resent, or manually marked paid through the
+existing repasse actions.
+
+Automatic payout confirmation is disabled. New accepted requests do not enqueue
+`repasse.confirmar`; ambiguous outcomes remain `verificando` for manual review
+without automatic provider reads or resends. The registered confirmation worker
+is temporarily drain-only so stale queued jobs cannot contact Inter or mutate
+financial state. Collection PIX-in webhooks and reconciliation are unrelated
+and unchanged.
+
+### Operator-authorized staging correction
+
+Migration `20260908_052_repasse_bank_handoff` contains a single guarded data
+correction for repasse `e2c18fc0-a5f9-4d23-a0e7-104b68327b57`. It runs only when
+that row and immutable attempt 4 match the recorded HTTP 200 acceptance receipt,
+all linked ledger settlement timestamps remain null, and the repasse is still
+`verificando`. It reuses attempt 4's real `finished_at` and existing receipt,
+preserves every attempt row, and performs no provider call. A missing target is
+a no-op (other environments); a present mismatch aborts the migration.
+
+The correction is intentionally retained with normal repasse/attempt lifetime.
+It is not a generic backfill rule and must not be copied for other payouts.

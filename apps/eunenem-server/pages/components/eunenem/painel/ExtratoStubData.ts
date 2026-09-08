@@ -43,6 +43,7 @@ export type ExtratoLiberacao =
   // solicitado repasse, awaiting admin approval. Wire ships this now;
   // visual treatment (color/label) is Vance's parallel-prep PR.
   | "solicitado"
+  | "enviado_ao_banco"
   | "transferido"
   | "cancelado";
 
@@ -62,6 +63,8 @@ export type ExtratoSummaryDTO = {
    *  maturação). Optional on the mirror for the trpc-cache-rotation window
    *  — older cached responses lack this field; renderer falls back to 0. */
   aguardandoAprovacaoCents?: number;
+  /** Accepted by Inter and handed off; not bank settlement. */
+  enviadoAoBancoCents: number;
   proximaTransfDate: string | null;
   totalPresentes: number;
   /**
@@ -129,6 +132,7 @@ export type SolicitarTransferenciaResult = {
 export type MovimentoRepasseEstado =
   | "aguardando_aprovacao"
   | "em_transferencia"
+  | "enviado_ao_banco"
   | "concluido"
   | "falhou"
   | "cancelado"
@@ -139,6 +143,7 @@ export type StatusRepasse =
   | "aprovado"
   | "transferindo"
   | "verificando"
+  | "enviado_ao_banco"
   | "pago"
   | "falhou"
   | "cancelado";
@@ -150,6 +155,7 @@ export type MovimentacaoRepasseDTO = {
   idRepasse: string;
   solicitadoEm: string;
   concluidoEm: string | null;
+  enviadoAoBancoEm: string | null;
   valorCents: number;
   quantidade: number;
   tipo: "transferencia_conta";

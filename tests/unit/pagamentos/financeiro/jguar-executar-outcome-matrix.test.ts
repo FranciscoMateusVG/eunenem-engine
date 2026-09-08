@@ -29,7 +29,6 @@ import { NoopLogger } from '../../../../src/observability/noop-logger.js';
 import { noopTracer } from '../../../../src/observability/tracer.js';
 import { gerarTransferReferencia } from '../../../../src/use-cases/pagamentos/financeiro/aprovar-repasse-recebedor.js';
 import {
-  CONFIRMAR_DELAY_INICIAL_SEGUNDOS,
   type ExecutarTransferenciaRepasseDeps,
   executarTransferenciaRepasse,
   MAX_TENTATIVAS_TRANSITORIAS,
@@ -183,8 +182,8 @@ function recordReferencias(
   };
 }
 
-describe('executarTransferenciaRepasse — outcome pago', () => {
-  it('FSM → pago, records codigo, closes the attempt, stamps transferidoEm, no confirmar', async () => {
+describe('executarTransferenciaRepasse — accepted bank handoff', () => {
+  it('FSM → enviado_ao_banco, records receipt, closes attempt, keeps settlement null and never polls', async () => {
     const rig = await buildRig();
     const { idRepasse, idsLancamentos } = await seedRepasseAprovado(rig);
     const provider = fake({ pagarPixOutcome: 'pago' });
@@ -192,13 +191,14 @@ describe('executarTransferenciaRepasse — outcome pago', () => {
     await executar(rig, provider, idRepasse);
 
     const repasse = await rig.livro.findRepasseById(idRepasse as never);
-    expect(repasse?.status).toBe('pago');
+    expect(repasse?.status).toBe('enviado_ao_banco');
     expect(repasse?.interCodigoSolicitacao).toBeTruthy();
     expect(repasse?.transferAttempts).toBe(1);
+    expect(repasse?.enviadoAoBancoEm).toEqual(T1);
 
     const attempts = await rig.livro.findTransferAttemptsByRepasseId(idRepasse as never);
     expect(attempts).toHaveLength(1);
-    expect(attempts[0]?.outcome).toBe('pago');
+    expect(attempts[0]?.outcome).toBe('aceito_pelo_banco');
     expect(attempts[0]?.codigoSolicitacao).toBe(repasse?.interCodigoSolicitacao);
     expect(attempts[0]?.finishedAt).not.toBeNull();
     expect(attempts[0]).toMatchObject({
@@ -207,15 +207,15 @@ describe('executarTransferenciaRepasse — outcome pago', () => {
       httpStatus: null,
       diagnosticCode: 'diagnostic_unavailable',
       stateBefore: 'aprovado',
-      stateAfter: 'pago',
+      stateAfter: 'enviado_ao_banco',
     });
     expect(attempts[0]?.durationMs).toBeTypeOf('number');
 
-    // The single debit point: linked lançamentos are stamped at pago.
+    // Platform handoff is not bank settlement; ledger transfer timestamps stay null.
     const lancamentos = await rig.livro.findLancamentosByIds(idsLancamentos as never);
     expect(lancamentos).toHaveLength(2);
     for (const l of lancamentos) {
-      expect(l.transferidoEm).toEqual(T1);
+      expect(l.transferidoEm).toBeNull();
     }
 
     // Success needs no reconciliation.
@@ -225,7 +225,7 @@ describe('executarTransferenciaRepasse — outcome pago', () => {
 });
 
 describe('executarTransferenciaRepasse — outcome agendado_aprovacao', () => {
-  it('is NOT success: FSM → verificando, codigo recorded, confirmar enqueued once, no stamp', async () => {
+  it('also hands off approval-flow receipts without polling or settlement stamping', async () => {
     const rig = await buildRig();
     const { idRepasse, idsLancamentos } = await seedRepasseAprovado(rig);
     const provider = fake({ pagarPixOutcome: 'agendado_aprovacao' });
@@ -233,17 +233,15 @@ describe('executarTransferenciaRepasse — outcome agendado_aprovacao', () => {
     await executar(rig, provider, idRepasse);
 
     const repasse = await rig.livro.findRepasseById(idRepasse as never);
-    expect(repasse?.status).toBe('verificando');
+    expect(repasse?.status).toBe('enviado_ao_banco');
     expect(repasse?.interCodigoSolicitacao).toBeTruthy();
 
     const attempts = await rig.livro.findTransferAttemptsByRepasseId(idRepasse as never);
     expect(attempts).toHaveLength(1);
-    expect(attempts[0]?.outcome).toBe('verificando');
+    expect(attempts[0]?.outcome).toBe('aceito_pelo_banco');
     expect(attempts[0]?.codigoSolicitacao).toBe(repasse?.interCodigoSolicitacao);
 
-    expect(rig.enqueued.confirmar).toEqual([
-      { id: idRepasse, tentativa: 1, delay: CONFIRMAR_DELAY_INICIAL_SEGUNDOS },
-    ]);
+    expect(rig.enqueued.confirmar).toEqual([]);
 
     // Payment outcome unknown → money is NOT marked as moved.
     const lancamentos = await rig.livro.findLancamentosByIds(idsLancamentos as never);
@@ -432,9 +430,7 @@ describe('executarTransferenciaRepasse — ambiguous throws (never auto-retry)',
       expect(attempts[0]?.outcome).toBe('verificando');
       expect(attempts[0]?.codigoSolicitacao).toBeNull();
 
-      expect(rig.enqueued.confirmar).toEqual([
-        { id: idRepasse, tentativa: 1, delay: CONFIRMAR_DELAY_INICIAL_SEGUNDOS },
-      ]);
+      expect(rig.enqueued.confirmar).toEqual([]);
 
       const lancamentos = await rig.livro.findLancamentosByIds(idsLancamentos as never);
       for (const l of lancamentos) {
@@ -481,9 +477,7 @@ describe('executarTransferenciaRepasse — reconciliar path (crash re-delivery)'
     expect(provider.pagarPixCalls).toBe(1); // the double-pay door stays shut
     const repasse = await rig.livro.findRepasseById(idRepasse as never);
     expect(repasse?.status).toBe('verificando');
-    expect(rig.enqueued.confirmar).toEqual([
-      { id: idRepasse, tentativa: 1, delay: CONFIRMAR_DELAY_INICIAL_SEGUNDOS },
-    ]);
+    expect(rig.enqueued.confirmar).toEqual([]);
     const attempts = await rig.livro.findTransferAttemptsByRepasseId(idRepasse as never);
     expect(attempts).toHaveLength(1);
     expect(attempts[0]?.outcome).toBe('verificando');
@@ -497,7 +491,7 @@ describe('executarTransferenciaRepasse — reconciliar path (crash re-delivery)'
 });
 
 describe('executarTransferenciaRepasse — concluido path', () => {
-  it('a re-delivered job on an already-pago repasse is a no-op (pagarPixCalls 0)', async () => {
+  it('a re-delivered job on an already-enviado_ao_banco repasse is a no-op (pagarPixCalls 0)', async () => {
     const rig = await buildRig();
     const { idRepasse } = await seedRepasseAprovado(rig);
     await executar(rig, fake({ pagarPixOutcome: 'pago' }), idRepasse);
@@ -507,7 +501,7 @@ describe('executarTransferenciaRepasse — concluido path', () => {
 
     expect(redelivered.pagarPixCalls).toBe(0);
     const repasse = await rig.livro.findRepasseById(idRepasse as never);
-    expect(repasse?.status).toBe('pago');
+    expect(repasse?.status).toBe('enviado_ao_banco');
     // No new attempt row, no new confirmar.
     const attempts = await rig.livro.findTransferAttemptsByRepasseId(idRepasse as never);
     expect(attempts).toHaveLength(1);
@@ -540,13 +534,13 @@ describe('executarTransferenciaRepasse — referencia stability (idempotency anc
     expect(referencias).toEqual([esperada, esperada, esperada]);
 
     const repasse = await rig.livro.findRepasseById(idRepasse as never);
-    expect(repasse?.status).toBe('pago');
+    expect(repasse?.status).toBe('enviado_ao_banco');
     // Every attempt row carries the same referencia.
     const attempts = await rig.livro.findTransferAttemptsByRepasseId(idRepasse as never);
     expect(attempts.map((a) => a.referencia)).toEqual([esperada, esperada, esperada]);
   });
 
-  it('passes the IDENTICAL deterministic referencia across falhou → retry → pago', async () => {
+  it('passes the IDENTICAL deterministic referencia across falhou → retry → handoff', async () => {
     const rig = await buildRig();
     const { idRepasse, referencia } = await seedRepasseAprovado(rig);
     const referencias: string[] = [];
@@ -564,7 +558,7 @@ describe('executarTransferenciaRepasse — referencia stability (idempotency anc
     expect(referencias).toEqual([esperada, esperada]);
 
     const repasse = await rig.livro.findRepasseById(idRepasse as never);
-    expect(repasse?.status).toBe('pago');
+    expect(repasse?.status).toBe('enviado_ao_banco');
     expect(repasse?.transferReferencia).toBe(esperada);
     // Every attempt row carries the same referencia.
     const attempts = await rig.livro.findTransferAttemptsByRepasseId(idRepasse as never);

@@ -12,6 +12,7 @@ import {
   cancelarRepasse,
   criarRepasseRecebedorSolicitado,
   iniciarTransferencia,
+  marcarRepasseEnviadoAoBanco,
   marcarRepasseFalhou,
   marcarRepasseNeedsManualResolution,
   marcarRepassePago,
@@ -124,6 +125,7 @@ type RepasseRow = {
   status: string;
   solicitado_em: Date;
   aprovado_em: Date | null;
+  enviado_ao_banco_em: Date | null;
   bank_transfer_ref: string | null;
   // aperture-vvh2j — automated PIX transfer bookkeeping.
   transfer_referencia: string | null;
@@ -946,7 +948,8 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
             if (
               existingRepasse.status === 'pago' ||
               existingRepasse.status === 'cancelado' ||
-              existingRepasse.status === 'verificando'
+              existingRepasse.status === 'verificando' ||
+              existingRepasse.status === 'enviado_ao_banco'
             ) {
               return {
                 repasse: existingRepasse,
@@ -1048,6 +1051,25 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
             let erro: string | null = null;
 
             switch (resultado.tipo) {
+              case 'enviado_ao_banco': {
+                updated = marcarRepasseEnviadoAoBanco(
+                  existingRepasse,
+                  resultado.codigoSolicitacao,
+                  input.agora,
+                );
+                outcome = 'aceito_pelo_banco';
+                codigo = resultado.codigoSolicitacao;
+                await sql`
+                  UPDATE repasses_recebedor
+                    SET status = ${updated.status},
+                        inter_codigo_solicitacao = ${updated.interCodigoSolicitacao},
+                        enviado_ao_banco_em = ${updated.enviadoAoBancoEm},
+                        last_transfer_error = NULL,
+                        needs_manual_resolution = FALSE
+                    WHERE id = ${updated.id}
+                `.execute(tx);
+                break;
+              }
               case 'pago': {
                 updated = marcarRepassePago(existingRepasse, resultado.codigoSolicitacao);
                 outcome = 'pago';
@@ -1286,6 +1308,12 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
               throw new FinanceiroRepasseNaoEncontradoError(input.idRepasse);
             }
             const existingRepasse = repasseFromRow(existing);
+            if (existingRepasse.status !== 'falhou') {
+              throw new FinanceiroRepasseStatusInvalidoError(
+                input.idRepasse,
+                existingRepasse.status,
+              );
+            }
 
             // Domain-guarded: falhou → cancelado (only claim-release path).
             const updated = cancelarRepasse(existingRepasse);
@@ -1712,6 +1740,7 @@ function rowFromRepasse(r: RepasseRecebedor): Record<string, unknown> {
     status: r.status,
     solicitado_em: r.solicitadoEm,
     aprovado_em: r.aprovadoEm,
+    enviado_ao_banco_em: r.enviadoAoBancoEm,
     bank_transfer_ref: r.bankTransferRef,
   };
 }
@@ -1725,6 +1754,7 @@ function repasseFromRow(row: RepasseRow): RepasseRecebedor {
     status: row.status,
     solicitadoEm: row.solicitado_em,
     aprovadoEm: row.aprovado_em,
+    enviadoAoBancoEm: row.enviado_ao_banco_em,
     bankTransferRef: row.bank_transfer_ref,
     transferReferencia: row.transfer_referencia,
     interCodigoSolicitacao: row.inter_codigo_solicitacao,

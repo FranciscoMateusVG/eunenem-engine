@@ -9,8 +9,7 @@ import { type IdRepasse, IdRepasseSchema } from '../value-objects/ids.js';
  * A payout request initiated by the receiver. Persisted via
  * `LivroFinanceiroRepository.saveRepasse` (and transitioned to `aprovado`
  * via `LivroFinanceiroRepository.aprovarRepasseTransaction` — the
- * approval path is atomic with the bulk lancamento `transferidoEm`
- * stamping).
+ * approval path is atomic with the linked lancamento claim/state changes).
  *
  * **aperture-s03dr.** FSM extended from 1-state (`solicitado`) to 2-state
  * (`solicitado → aprovado`):
@@ -28,17 +27,20 @@ import { type IdRepasse, IdRepasseSchema } from '../value-objects/ids.js';
  * Inter. `aprovado` becomes transient for pix recebedores — the admin's
  * approval enqueues the transfer and the worker drives the rest:
  *
- *   solicitado → aprovado → transferindo → pago
- *                                ├→ verificando → pago | falhou
+ *   solicitado → aprovado → transferindo → enviado_ao_banco
+ *                                ├→ verificando (manual review)
  *                                └→ falhou ──(admin retry)──→ transferindo
  *                                   falhou ──(admin cancel)──→ cancelado
  *
  *   transferindo  — a pagarPix attempt is in flight (intent row committed).
  *   verificando   — a payment MAY exist at Inter and its outcome is
- *                   unknown (timeout / crash / Inter-side APROVACAO). Only
- *                   the reconciliation path leaves this state; NO new
- *                   pagarPix is ever issued from here (double-pay door).
- *   pago          — terminal success. The linked lançamentos are stamped
+ *                   unknown (timeout / crash). No automatic provider query
+ *                   or new pagarPix is issued from here (double-pay door).
+ *   enviado_ao_banco — terminal platform handoff after a documented 2xx and
+ *                   receipt. Linked funds remain claimed and unstamped;
+ *                   approval and settlement continue at Inter.
+ *   pago          — terminal settled/manual success retained for existing
+ *                   flows. The linked lançamentos are stamped
  *                   `transferidoEm` HERE (aperture-vvh2j moved the stamp
  *                   from approval to pago, so money is never debited from
  *                   the recebedor's balance until the PIX actually lands).
@@ -52,7 +54,7 @@ import { type IdRepasse, IdRepasseSchema } from '../value-objects/ids.js';
  * The manual `conta` (bank-coordinate) path is unchanged: it goes
  * `solicitado → aprovado` via `aprovarRepasse` (below) with the money
  * considered sent out-of-band at approval time. Only pix recebedores
- * traverse the transferindo/verificando/pago/falhou/cancelado states.
+ * traverse the transferindo/verificando/enviado_ao_banco/falhou/cancelado states.
  *
  * `rejeitado` remains out of scope as a repasse status — a clean Inter
  * rejection lands the repasse in `falhou` (admin-actionable).
@@ -63,65 +65,87 @@ export const StatusRepasseSchema = z.enum([
   'aprovado',
   'transferindo',
   'verificando',
+  'enviado_ao_banco',
   'pago',
   'falhou',
   'cancelado',
 ]);
 export type StatusRepasse = z.infer<typeof StatusRepasseSchema>;
 
-/** States a repasse can occupy while its funds are still claimed (id_repasse set) and not yet paid. */
+/** States whose funds remain claimed (id_repasse set) without a settlement stamp. */
 export const STATUS_REPASSE_EM_TRANSITO = [
   'aprovado',
   'transferindo',
   'verificando',
+  'enviado_ao_banco',
   'falhou',
 ] as const;
 
-export const RepasseRecebedorSchema = z.object({
-  id: IdRepasseSchema,
-  idCampanha: IdCampanhaSchema,
-  amountCents: MoneyCentsSchema,
-  status: StatusRepasseSchema,
-  solicitadoEm: z.date(),
-  /**
-   * Set when the admin transitions the repasse to `aprovado`. Always
-   * null while `status === 'solicitado'`. Always set (non-null) while
-   * `status === 'aprovado'`. The `aprovarRepasseTransaction` atomic
-   * writes this value AND stamps `transferidoEm = aprovadoEm` on every
-   * linked lançamento in the same transaction — so the FSM transition
-   * and the money-movement record share one timestamp.
-   */
-  aprovadoEm: z.date().nullable(),
-  /**
-   * Optional bank-transfer reference the admin can attach at approval
-   * time (e.g. a PIX end-to-end id or a TED reference number). Free
-   * text — not validated by us; just stored for audit. Null when the
-   * admin doesn't supply one. Used by the manual `conta` path.
-   */
-  bankTransferRef: z.string().nullable(),
-  /**
-   * aperture-vvh2j. Stable reference derived once from the repasse id at
-   * approval (pix path), reused across every attempt. NEVER regenerated —
-   * this stability is the idempotency anchor that makes retries the SAME
-   * payment identity, not a new one. Null for legacy/conta repasses.
-   */
-  transferReferencia: z.string().nullable(),
-  /** Inter's payment id (codigoSolicitacao), set as soon as it is known. */
-  interCodigoSolicitacao: z.string().nullable(),
-  /** Monotonic attempt counter, incremented on each executar pickup. */
-  transferAttempts: z.number().int().nonnegative(),
-  /** Operator-facing error detail — Inter error codes only, never PII. */
-  lastTransferError: z.string().nullable(),
-  /**
-   * aperture-477nz. TRUE ⇒ a `verificando` repasse whose search
-   * reconciliation surfaced candidate payment(s) that cannot be auto-confirmed
-   * as ours (Inter exposes no reliable caller-supplied identifier in the
-   * extrato). The repasse STAYS `verificando` and awaits an admin's manual
-   * `resolverManualPago` / `resolverManualFalhou`. A search match NEVER
-   * auto-books `pago`. Cleared when the repasse leaves `verificando`.
-   */
-  needsManualResolution: z.boolean(),
-});
+export const RepasseRecebedorSchema = z
+  .object({
+    id: IdRepasseSchema,
+    idCampanha: IdCampanhaSchema,
+    amountCents: MoneyCentsSchema,
+    status: StatusRepasseSchema,
+    solicitadoEm: z.date(),
+    /**
+     * Set when the admin transitions the repasse to `aprovado`. Always
+     * null while `status === 'solicitado'`. Always set (non-null) while
+     * `status === 'aprovado'`. The manual bank-account approval path also stamps
+     * linked entries in that transaction. The automated PIX path records
+     * approval but deliberately leaves settlement timestamps null.
+     */
+    aprovadoEm: z.date().nullable(),
+    /**
+     * When Inter accepted the payout request and returned a valid receipt.
+     * This is the platform handoff timestamp, not bank approval or settlement.
+     * `transferidoEm` on the linked ledger entries deliberately remains null.
+     */
+    enviadoAoBancoEm: z.date().nullable(),
+    /**
+     * Optional bank-transfer reference the admin can attach at approval
+     * time (e.g. a PIX end-to-end id or a TED reference number). Free
+     * text — not validated by us; just stored for audit. Null when the
+     * admin doesn't supply one. Used by the manual `conta` path.
+     */
+    bankTransferRef: z.string().nullable(),
+    /**
+     * aperture-vvh2j. Stable reference derived once from the repasse id at
+     * approval (pix path), reused across every attempt. NEVER regenerated —
+     * this stability is the idempotency anchor that makes retries the SAME
+     * payment identity, not a new one. Null for legacy/conta repasses.
+     */
+    transferReferencia: z.string().nullable(),
+    /** Inter's payment id (codigoSolicitacao), set as soon as it is known. */
+    interCodigoSolicitacao: z.string().nullable(),
+    /** Monotonic attempt counter, incremented on each executar pickup. */
+    transferAttempts: z.number().int().nonnegative(),
+    /** Operator-facing error detail — Inter error codes only, never PII. */
+    lastTransferError: z.string().nullable(),
+    /**
+     * aperture-477nz. TRUE ⇒ a `verificando` repasse whose search
+     * reconciliation surfaced candidate payment(s) that cannot be auto-confirmed
+     * as ours (Inter exposes no reliable caller-supplied identifier in the
+     * extrato). The repasse STAYS `verificando` and awaits an admin's manual
+     * `resolverManualPago` / `resolverManualFalhou`. A search match NEVER
+     * auto-books `pago`. Cleared when the repasse leaves `verificando`.
+     */
+    needsManualResolution: z.boolean(),
+  })
+  .superRefine((repasse, ctx) => {
+    if (
+      repasse.status === 'enviado_ao_banco' &&
+      (repasse.enviadoAoBancoEm === null ||
+        repasse.interCodigoSolicitacao === null ||
+        repasse.interCodigoSolicitacao.trim().length === 0)
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['status'],
+        message: 'enviado_ao_banco requires an observed timestamp and Inter receipt',
+      });
+    }
+  });
 
 export type RepasseRecebedor = Readonly<z.infer<typeof RepasseRecebedorSchema>>;
 
@@ -143,6 +167,7 @@ export function criarRepasseRecebedorSolicitado(
     status: 'solicitado',
     solicitadoEm,
     aprovadoEm: null,
+    enviadoAoBancoEm: null,
     bankTransferRef: null,
     transferReferencia: null,
     interCodigoSolicitacao: null,
@@ -280,8 +305,32 @@ export function marcarRepassePago(
 }
 
 /**
+ * Platform-terminal handoff: Inter accepted the payout request and returned
+ * a valid codigoSolicitacao. This does not assert bank approval or settlement
+ * and therefore never stamps the receiver ledger's transferidoEm field.
+ */
+export function marcarRepasseEnviadoAoBanco(
+  repasse: RepasseRecebedor,
+  interCodigoSolicitacao: string,
+  enviadoAoBancoEm: Date,
+): RepasseRecebedor {
+  assertStatus(repasse, ['transferindo', 'verificando'], 'enviado_ao_banco');
+  if (interCodigoSolicitacao.trim().length === 0) {
+    throw new Error(`RepasseRecebedor ${repasse.id} requires a non-empty Inter receipt.`);
+  }
+  return {
+    ...repasse,
+    status: 'enviado_ao_banco',
+    interCodigoSolicitacao,
+    enviadoAoBancoEm,
+    lastTransferError: null,
+    needsManualResolution: false,
+  };
+}
+
+/**
  * Ambiguous outcome: `transferindo → verificando`. A payment MAY exist at
- * Inter (timeout / crash / APROVACAO) and must be positively reconciled.
+ * Inter (timeout / crash) and requires explicit manual review.
  * `interCodigoSolicitacao` may be null if we crashed before capturing it.
  * NO pagarPix is ever issued from `verificando` — this is the double-pay door, kept shut.
  */

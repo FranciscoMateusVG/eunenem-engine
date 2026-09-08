@@ -340,6 +340,7 @@ describe('criarRepasseRecebedorSolicitado', () => {
       status: 'solicitado',
       solicitadoEm: criadoEm,
       aprovadoEm: null,
+      enviadoAoBancoEm: null,
       bankTransferRef: null,
       // aperture-vvh2j — transfer bookkeeping defaults.
       transferReferencia: null,

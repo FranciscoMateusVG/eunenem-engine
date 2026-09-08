@@ -8,6 +8,7 @@ import {
   cancelarRepasse,
   criarRepasseRecebedorSolicitado,
   iniciarTransferencia,
+  marcarRepasseEnviadoAoBanco,
   marcarRepasseFalhou,
   marcarRepasseNeedsManualResolution,
   marcarRepassePago,
@@ -154,7 +155,12 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
         if (lancamento.transferidoEm !== null) return true;
         if (lancamento.idRepasse === null) return false;
         const status = this.repasses.get(lancamento.idRepasse)?.status;
-        return status === 'transferindo' || status === 'verificando' || status === 'pago';
+        return (
+          status === 'transferindo' ||
+          status === 'verificando' ||
+          status === 'enviado_ao_banco' ||
+          status === 'pago'
+        );
       }),
     );
   }
@@ -813,7 +819,8 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
               if (
                 existing.status === 'pago' ||
                 existing.status === 'cancelado' ||
-                existing.status === 'verificando'
+                existing.status === 'verificando' ||
+                existing.status === 'enviado_ao_banco'
               ) {
                 return {
                   repasse: existing,
@@ -902,6 +909,22 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
           const resultado = input.resultado;
           let updated: RepasseRecebedor;
           switch (resultado.tipo) {
+            case 'enviado_ao_banco': {
+              updated = marcarRepasseEnviadoAoBanco(
+                existing,
+                resultado.codigoSolicitacao,
+                input.agora,
+              );
+              this.repasses.set(updated.id, updated);
+              this.fecharTentativa(input.attemptId, {
+                outcome: 'aceito_pelo_banco',
+                codigoSolicitacao: resultado.codigoSolicitacao,
+                finishedAt: input.agora,
+                observation: resultado.observation,
+                stateAfter: updated.status,
+              });
+              break;
+            }
             case 'pago': {
               updated = marcarRepassePago(existing, resultado.codigoSolicitacao);
               this.repasses.set(updated.id, updated);
@@ -1064,6 +1087,9 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
           const existing = this.repasses.get(input.idRepasse);
           if (!existing) {
             throw new FinanceiroRepasseNaoEncontradoError(input.idRepasse);
+          }
+          if (existing.status !== 'falhou') {
+            throw new FinanceiroRepasseStatusInvalidoError(input.idRepasse, existing.status);
           }
 
           // Domain transition falhou → cancelado (defense-in-depth guard).

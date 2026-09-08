@@ -1043,11 +1043,9 @@ describe('LivroFinanceiroRepositoryPostgres — manual resolution (aperture-477n
     expect(linked?.transferidoEm).not.toBeNull(); // single debit point still fires
   });
 
-  // ── DISARM BOUNDARY end-to-end (confirmar handler → real postgres) ──
-  // THE load-bearing transition: at tentativa 12 the ~48h window is exhausted
-  // with zero candidates. extratoVerified gates whether that becomes auto-falhou
-  // (trusted extrato shape) or needs-manual-resolution (untrusted — a shape
-  // mismatch could be hiding a real payment; auto-falhou → retry → double PIX).
+  // ── STALE CONFIRMATION DRAIN end-to-end (handler → real postgres) ──
+  // Automatic payout confirmation is retired. Legacy queued jobs drain without
+  // consulting Inter or mutating the repasse, regardless of the old extrato flag.
 
   function confirmarDeps(extratoVerified: boolean) {
     return {
@@ -1063,7 +1061,7 @@ describe('LivroFinanceiroRepositoryPostgres — manual resolution (aperture-477n
     };
   }
 
-  it('DISARMED (extratoVerified=false): zero-candidate exhaustion escalates to needs-manual-resolution in the DB — not falhou', async () => {
+  it('DISARMED legacy job drains with state and funds unchanged', async () => {
     const { idRepasse, idPagamento } = await seedVerificando();
 
     await confirmarTransferenciaRepasse(confirmarDeps(false), {
@@ -1073,14 +1071,15 @@ describe('LivroFinanceiroRepositoryPostgres — manual resolution (aperture-477n
 
     const repasse = await repo.findRepasseById(idRepasse);
     expect(repasse?.status).toBe('verificando');
-    expect(repasse?.needsManualResolution).toBe(true);
+    expect(repasse?.needsManualResolution).toBe(false);
+    expect(repasse?.lastTransferError).toBeNull();
     const [linked] = await repo.findLancamentosByIdPagamento(idPagamento);
     expect(linked?.transferidoEm).toBeNull(); // door stays shut
     const candidatos = await repo.findCandidatosByRepasseId(idRepasse);
     expect(candidatos).toHaveLength(0);
   });
 
-  it('ARMED (extratoVerified=true): zero-candidate exhaustion resolves falhou/NAO_ENCONTRADO_NA_BUSCA in the DB', async () => {
+  it('ARMED legacy job also drains without auto-failure or settlement', async () => {
     const { idRepasse, idPagamento } = await seedVerificando();
 
     await confirmarTransferenciaRepasse(confirmarDeps(true), {
@@ -1089,8 +1088,8 @@ describe('LivroFinanceiroRepositoryPostgres — manual resolution (aperture-477n
     });
 
     const repasse = await repo.findRepasseById(idRepasse);
-    expect(repasse?.status).toBe('falhou');
-    expect(repasse?.lastTransferError).toBe('NAO_ENCONTRADO_NA_BUSCA');
+    expect(repasse?.status).toBe('verificando');
+    expect(repasse?.lastTransferError).toBeNull();
     expect(repasse?.needsManualResolution).toBe(false);
     const [linked] = await repo.findLancamentosByIdPagamento(idPagamento);
     expect(linked?.transferidoEm).toBeNull();

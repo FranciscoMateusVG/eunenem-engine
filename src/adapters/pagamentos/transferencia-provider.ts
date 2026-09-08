@@ -16,10 +16,9 @@ import type { MoneyCents } from '../../domain/money.js';
  *    from the repasse id and reused across every attempt. The provider
  *    MUST forward it to Inter unchanged so a retried attempt is the same
  *    payment identity, and `buscarPagamentos` can match on it.
- *  - `pagarPix` returning `agendado_aprovacao` is NOT success — it means
- *    the payment is parked in Inter's own approval workflow; the caller
- *    diverts the repasse to `verificando` and reconciles. Treating it as
- *    paid is the exact 1.0 defect this design forbids.
+ *  - Any documented accepted 2xx shape with a non-empty Inter receipt returns
+ *    `aceito_pelo_banco`. That ends the platform journey without claiming the
+ *    operator approved the transfer in Inter or that the PIX settled.
  *  - A THROWN error from `pagarPix` is ambiguous by contract (a payment
  *    MAY exist) UNLESS it is a `TransferenciaTransitoriaError` (below),
  *    which asserts no payment was created and is therefore safe to retry.
@@ -28,13 +27,8 @@ import type { MoneyCents } from '../../domain/money.js';
 /** Outcome of a `pagarPix` call. */
 export type PagarPixOutcome =
   | {
-      readonly outcome: 'pago';
-      readonly codigoSolicitacao: string;
-      readonly diagnostics?: TransferenciaProviderDiagnostics;
-    }
-  // Inter-side approval workflow — a payment may settle later; NOT success.
-  | {
-      readonly outcome: 'agendado_aprovacao';
+      /** Inter accepted the request; downstream bank approval/settlement is out of platform scope. */
+      readonly outcome: 'aceito_pelo_banco';
       readonly codigoSolicitacao: string;
       readonly diagnostics?: TransferenciaProviderDiagnostics;
     }
@@ -108,7 +102,7 @@ export interface PagarPixInput {
   readonly referencia: string;
 }
 
-/** Terminal/interim status of a previously-created Inter payment. */
+/** Legacy query result retained for the disabled confirmation adapter surface. */
 export type ConsultarPagamentoStatus =
   | 'pago'
   | 'em_processamento'

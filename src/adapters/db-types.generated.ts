@@ -357,6 +357,7 @@ export interface RepassesRecebedor {
   amount_cents: number;
   aprovado_em: Timestamp | null;
   bank_transfer_ref: string | null;
+  enviado_ao_banco_em: Timestamp | null;
   id: string;
   id_campanha: string;
   inter_codigo_solicitacao: string | null;

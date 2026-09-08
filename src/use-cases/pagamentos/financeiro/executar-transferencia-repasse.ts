@@ -1,7 +1,6 @@
 // biome-ignore-all lint/complexity/noExcessiveCognitiveComplexity: the linear handler carries the at-most-one-PIX invariant; extracting branches would hide the retry/ambiguity boundary.
 import { SpanStatusCode } from '@opentelemetry/api';
 import type { LivroFinanceiroRepository } from '../../../adapters/pagamentos/financeiro/livro-repository.js';
-import type { RepasseJobEnqueuer } from '../../../adapters/pagamentos/transferencia-enqueuer.js';
 import {
   TransferenciaAmbiguaError,
   type TransferenciaProvider,
@@ -32,9 +31,6 @@ import type { Observability } from '../../../observability/observability.js';
  * removes a whole class of races on top of the per-row FOR UPDATE.
  */
 
-/** First confirmar poll fires 30s after we enter `verificando`. */
-export const CONFIRMAR_DELAY_INICIAL_SEGUNDOS = 30;
-
 /**
  * Max fresh attempts before a persistently-transient failure is surfaced
  * to the admin as `falhou` (matches the spec's retryLimit intent). The
@@ -42,11 +38,12 @@ export const CONFIRMAR_DELAY_INICIAL_SEGUNDOS = 30;
  * reverts, so this bounds retry storms.
  */
 export const MAX_TENTATIVAS_TRANSITORIAS = 4;
+/** @deprecated automatic payout confirmation jobs are no longer scheduled. */
+export const CONFIRMAR_DELAY_INICIAL_SEGUNDOS = 30;
 
 export interface ExecutarTransferenciaRepasseDeps {
   readonly livroFinanceiroRepository: LivroFinanceiroRepository;
   readonly transferenciaProvider: TransferenciaProvider;
-  readonly repasseJobEnqueuer: RepasseJobEnqueuer;
   readonly clock: () => Date;
   readonly observability: Observability;
 }
@@ -83,13 +80,7 @@ export async function executarTransferenciaRepasse(
   deps: ExecutarTransferenciaRepasseDeps,
   input: ExecutarTransferenciaRepasseInput,
 ): Promise<void> {
-  const {
-    livroFinanceiroRepository,
-    transferenciaProvider,
-    repasseJobEnqueuer,
-    clock,
-    observability,
-  } = deps;
+  const { livroFinanceiroRepository, transferenciaProvider, clock, observability } = deps;
   const { logger, tracer } = observability;
   const { idRepasse } = input;
 
@@ -157,7 +148,8 @@ export async function executarTransferenciaRepasse(
       }
 
       // Crash re-delivery — a payment MAY exist. Do NOT call pagarPix.
-      // Divert to verificando and let confirmar reconcile.
+      // Divert to manual review. Automatic payout reconciliation is disabled:
+      // a stale/re-delivered job must never create another provider call.
       if (iniciado.acao === 'reconciliar') {
         await livroFinanceiroRepository.finalizarTentativaTransferencia({
           idRepasse,
@@ -168,10 +160,6 @@ export async function executarTransferenciaRepasse(
           },
           agora,
         });
-        await repasseJobEnqueuer.enqueueConfirmar(
-          { idRepasse, tentativaConfirmacao: 1 },
-          CONFIRMAR_DELAY_INICIAL_SEGUNDOS,
-        );
         logger.warn('financeiro.repasse.executar.reconciliar', { idRepasse });
         span.setStatus({ code: SpanStatusCode.OK });
         return;
@@ -256,7 +244,7 @@ export async function executarTransferenciaRepasse(
           throw err; // pg-boss retries
         }
 
-        // AMBIGUOUS — a payment may exist. Never auto-retry; reconcile.
+        // AMBIGUOUS — a payment may exist. Never auto-retry or auto-poll.
         const providerObservation = observation(
           err instanceof TransferenciaAmbiguaError
             ? err.diagnostics
@@ -273,10 +261,6 @@ export async function executarTransferenciaRepasse(
           },
           agora: clock(),
         });
-        await repasseJobEnqueuer.enqueueConfirmar(
-          { idRepasse, tentativaConfirmacao: 1 },
-          CONFIRMAR_DELAY_INICIAL_SEGUNDOS,
-        );
         logger.warn('financeiro.repasse.executar.ambiguo', { idRepasse });
         span.setStatus({ code: SpanStatusCode.OK });
         return;
@@ -291,37 +275,18 @@ export async function executarTransferenciaRepasse(
         providerStartedAt,
       );
       switch (outcome.outcome) {
-        case 'pago': {
+        case 'aceito_pelo_banco': {
           await livroFinanceiroRepository.finalizarTentativaTransferencia({
             idRepasse,
             attemptId: iniciado.attemptId,
             resultado: {
-              tipo: 'pago',
+              tipo: 'enviado_ao_banco',
               codigoSolicitacao: outcome.codigoSolicitacao,
               observation: providerObservation,
             },
             agora: clock(),
           });
-          logger.info('financeiro.repasse.executar.pago', { idRepasse });
-          break;
-        }
-        case 'agendado_aprovacao': {
-          // Inter-side approval workflow — NOT success. Reconcile.
-          await livroFinanceiroRepository.finalizarTentativaTransferencia({
-            idRepasse,
-            attemptId: iniciado.attemptId,
-            resultado: {
-              tipo: 'verificando',
-              codigoSolicitacao: outcome.codigoSolicitacao,
-              observation: providerObservation,
-            },
-            agora: clock(),
-          });
-          await repasseJobEnqueuer.enqueueConfirmar(
-            { idRepasse, tentativaConfirmacao: 1 },
-            CONFIRMAR_DELAY_INICIAL_SEGUNDOS,
-          );
-          logger.info('financeiro.repasse.executar.agendado_aprovacao', { idRepasse });
+          logger.info('financeiro.repasse.executar.enviado_ao_banco', { idRepasse });
           break;
         }
         case 'rejeitado': {

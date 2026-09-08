@@ -105,10 +105,14 @@ const input = {
 };
 
 describe('TransferenciaProviderInter — pagarPix tipoRetorno mapping (money-safety)', () => {
-  it.each(['PAGAMENTO', 'REALIZADO', 'PAGO'])('%s → pago (settled)', async (tipo) => {
+  it.each([
+    'PAGAMENTO',
+    'REALIZADO',
+    'PAGO',
+  ])('%s → aceito_pelo_banco (platform handoff)', async (tipo) => {
     const t = new ScriptedTransport().push(TOKEN_OK, pagar(tipo, 'cod-x'));
     const out = await newProvider(t).pagarPix(input);
-    expect(out).toMatchObject({ outcome: 'pago', codigoSolicitacao: 'cod-x' });
+    expect(out).toMatchObject({ outcome: 'aceito_pelo_banco', codigoSolicitacao: 'cod-x' });
     expect(out.diagnostics).toMatchObject({ responseClass: 'accepted', httpStatus: 200 });
     expect(out.diagnostics?.privateProviderError).toBeNull();
   });
@@ -118,10 +122,10 @@ describe('TransferenciaProviderInter — pagarPix tipoRetorno mapping (money-saf
     'APROVACAO',
     'AGENDADO',
     'AGUARDANDO_APROVACAO',
-  ])('%s → agendado_aprovacao (NOT booked — consult confirms settlement)', async (tipo) => {
+  ])('%s → aceito_pelo_banco (platform handoff)', async (tipo) => {
     const t = new ScriptedTransport().push(TOKEN_OK, pagar(tipo, 'cod-y'));
     const out = await newProvider(t).pagarPix(input);
-    expect(out).toMatchObject({ outcome: 'agendado_aprovacao', codigoSolicitacao: 'cod-y' });
+    expect(out).toMatchObject({ outcome: 'aceito_pelo_banco', codigoSolicitacao: 'cod-y' });
     expect(out.diagnostics).toMatchObject({ responseClass: 'accepted', httpStatus: 200 });
   });
 

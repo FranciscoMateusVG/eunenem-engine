@@ -78,21 +78,11 @@ export interface TransferenciaProviderFakeOptions {
  *
  *   e2e-outcome-<OUTCOME>[-consult-<STATUS>][-search-hit]@<anything>
  *
- * `-consult-<STATUS>` — only meaningful for the `agendado` path
- * (agendado_aprovacao → verificando WITH a codigo → `confirmar` polls
- * `consultarPagamento`); the requested consult status is encoded into the
- * generated codigoSolicitacao so the consult resolves data-driven. STATUS:
- * pago | rejeitado | cancelado | processando | aprovacao. Defaults to `pago`.
+ * `-consult-<STATUS>` is a legacy fake-only option retained for source
+ * compatibility. Production payout confirmation polling is disabled.
  *
- * `-search-hit` — only meaningful for the `ambiguo`/`timeout` paths (which
- * throw → repasse verificando with codigo=null → `confirmar` reconciles via
- * `buscarPagamentos`). When present, `pagarPix` RECORDS a candidate matching
- * this repasse (its valorCents + chave + referencia) so `buscarPagamentos`
- * returns it → `confirmar` flags needs-manual-resolution WITH a candidate list.
- * Absent → the search returns empty → the disarmed zero-candidate path. Each
- * E2E scenario should use a DISTINCT chave (the candidate carries it, and
- * confirmar's match is chave-scoped, so distinct chaves keep scenarios isolated
- * on a shared server).
+ * `-search-hit` is likewise retained only for older test fixtures. Ambiguous
+ * payouts now remain in manual review and no worker searches Inter.
  */
 const E2E_OUTCOME_TOKENS: Readonly<Record<string, PagarPixFakeOutcome>> = {
   pago: 'pago',
@@ -254,7 +244,7 @@ export class TransferenciaProviderFake implements TransferenciaProvider {
         switch (effectiveOutcome) {
           case 'pago': {
             const outcome: PagarPixOutcome = {
-              outcome: 'pago',
+              outcome: 'aceito_pelo_banco',
               codigoSolicitacao: mintCodigo(),
             };
             span.setStatus({ code: SpanStatusCode.OK });
@@ -262,7 +252,7 @@ export class TransferenciaProviderFake implements TransferenciaProvider {
           }
           case 'agendado_aprovacao': {
             const outcome: PagarPixOutcome = {
-              outcome: 'agendado_aprovacao',
+              outcome: 'aceito_pelo_banco',
               codigoSolicitacao: mintCodigo(),
             };
             span.setStatus({ code: SpanStatusCode.OK });

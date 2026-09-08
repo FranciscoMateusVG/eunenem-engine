@@ -57,6 +57,7 @@ export type RepasseStatus =
   | "aprovado"
   | "transferindo"
   | "verificando"
+  | "enviado_ao_banco"
   | "pago"
   | "falhou"
   | "cancelado";
@@ -72,6 +73,8 @@ export type RepasseListRow = {
   status: RepasseStatus;
   solicitadoEm: string;
   aprovadoEm: string | null;
+  /** Platform handoff time; not bank settlement. */
+  enviadoAoBancoEm: string | null;
   bankTransferRef: string | null;
   // ── Inter transfer fields (spec §4.2) — live on the wire since vvh2j. ──
   /** Stable idempotency anchor, generated once at approval. Null pre-approval. */
@@ -277,6 +280,7 @@ function toListRow(row: {
   status: RepasseStatus;
   solicitadoEm: string;
   aprovadoEm: string | null;
+  enviadoAoBancoEm: string | null;
   bankTransferRef: string | null;
   transferReferencia: string | null;
   interCodigoSolicitacao: string | null;
@@ -294,6 +298,7 @@ function toListRow(row: {
     status: row.status,
     solicitadoEm: row.solicitadoEm,
     aprovadoEm: row.aprovadoEm,
+    enviadoAoBancoEm: row.enviadoAoBancoEm,
     bankTransferRef: row.bankTransferRef,
     transferReferencia: row.transferReferencia,
     interCodigoSolicitacao: row.interCodigoSolicitacao,

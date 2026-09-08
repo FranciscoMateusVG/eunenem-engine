@@ -67,7 +67,7 @@ describe('TransferenciaProviderFake — magic DISABLED (default)', () => {
     const fake = new TransferenciaProviderFake({ pagarPixOutcome: 'pago' });
     // A magic-marker chave, but the flag is off → constructor 'pago' wins.
     const out = await fake.pagarPix(pagarInput('e2e-outcome-rejeitado@fake.test'));
-    expect(out.outcome).toBe('pago');
+    expect(out.outcome).toBe('aceito_pelo_banco');
   });
 });
 
@@ -76,13 +76,13 @@ describe('TransferenciaProviderFake — magic ENABLED: pagarPix outcomes', () =>
 
   it('pago', async () => {
     const out = await magic().pagarPix(pagarInput('e2e-outcome-pago@fake.test'));
-    expect(out.outcome).toBe('pago');
-    expect(out.outcome === 'pago' && out.codigoSolicitacao).toBeTruthy();
+    expect(out.outcome).toBe('aceito_pelo_banco');
+    expect(out.outcome === 'aceito_pelo_banco' && out.codigoSolicitacao).toBeTruthy();
   });
 
   it('agendado → agendado_aprovacao (NOT success — diverts to verificando)', async () => {
     const out = await magic().pagarPix(pagarInput('e2e-outcome-agendado@fake.test'));
-    expect(out.outcome).toBe('agendado_aprovacao');
+    expect(out.outcome).toBe('aceito_pelo_banco');
   });
 
   it('rejeitado (clean rejection)', async () => {
@@ -109,14 +109,14 @@ describe('TransferenciaProviderFake — magic ENABLED: pagarPix outcomes', () =>
 
   it('a non-marker chave falls back to the constructor default (pago)', async () => {
     const out = await magic().pagarPix(pagarInput('bia@example.com'));
-    expect(out.outcome).toBe('pago');
+    expect(out.outcome).toBe('aceito_pelo_banco');
   });
 
   it('is evaluated PER-CALL, not cached — two calls with different chaves diverge', async () => {
     const fake = magic();
     const first = await fake.pagarPix(pagarInput('e2e-outcome-pago@fake.test'));
     const second = await fake.pagarPix(pagarInput('e2e-outcome-rejeitado@fake.test'));
-    expect(first.outcome).toBe('pago');
+    expect(first.outcome).toBe('aceito_pelo_banco');
     expect(second.outcome).toBe('rejeitado');
   });
 });
@@ -127,7 +127,7 @@ describe('TransferenciaProviderFake — magic ENABLED: consult follow-up encodin
   it('agendado default → consultarPagamento resolves pago', async () => {
     const fake = magic();
     const out = await fake.pagarPix(pagarInput('e2e-outcome-agendado@fake.test'));
-    const codigo = out.outcome === 'agendado_aprovacao' ? out.codigoSolicitacao : '';
+    const codigo = out.outcome === 'aceito_pelo_banco' ? out.codigoSolicitacao : '';
     const consulta = await fake.consultarPagamento(codigo);
     expect(consulta.status).toBe('pago');
   });
@@ -135,7 +135,7 @@ describe('TransferenciaProviderFake — magic ENABLED: consult follow-up encodin
   it('agendado -consult-rejeitado → consultarPagamento resolves rejeitado', async () => {
     const fake = magic();
     const out = await fake.pagarPix(pagarInput('e2e-outcome-agendado-consult-rejeitado@fake.test'));
-    const codigo = out.outcome === 'agendado_aprovacao' ? out.codigoSolicitacao : '';
+    const codigo = out.outcome === 'aceito_pelo_banco' ? out.codigoSolicitacao : '';
     const consulta = await fake.consultarPagamento(codigo);
     expect(consulta.status).toBe('rejeitado');
   });
@@ -145,7 +145,7 @@ describe('TransferenciaProviderFake — magic ENABLED: consult follow-up encodin
     const out = await fake.pagarPix(
       pagarInput('e2e-outcome-agendado-consult-processando@fake.test'),
     );
-    const codigo = out.outcome === 'agendado_aprovacao' ? out.codigoSolicitacao : '';
+    const codigo = out.outcome === 'aceito_pelo_banco' ? out.codigoSolicitacao : '';
     const consulta = await fake.consultarPagamento(codigo);
     expect(consulta.status).toBe('em_processamento');
   });

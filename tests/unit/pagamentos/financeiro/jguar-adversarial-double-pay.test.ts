@@ -2,8 +2,8 @@
  * aperture-jguar — Tier 3 ADVERSARIAL suite (unit level, memory adapter).
  *
  * The invariant under attack: **at most one successful PIX per repasse,
- * ever** — plus the §10.1 ledger corollaries (transferido_em stamped at
- * `pago` only, exactly once, never a compensating entry).
+ * ever** — plus the ledger corollaries: bank acceptance never stamps
+ * transferido_em, while legacy/manual settlement remains exactly-once.
  *
  * Each describe block is an attack on one §6 enforcement layer:
  *   L2 — stable transfer_referencia across retry storms
@@ -210,7 +210,7 @@ async function forcarVerificandoSemCodigo(lab: Lab, idRepasse: string): Promise<
 }
 
 describe('jguar Tier 3 — adversarial double-pay hunt (memory level)', () => {
-  it('rig smoke: happy path pago stamps every linked lançamento exactly once', async () => {
+  it('rig smoke: accepted payout becomes a terminal bank handoff without settlement stamps', async () => {
     const lab = buildLab();
     const idCampanha = await seedCampanhaComRecebedorPix(lab, CHAVE_COMPARTILHADA);
     const idRepasse = await seedRepasseSolicitado(lab, idCampanha, [3000, 1500]);
@@ -220,12 +220,13 @@ describe('jguar Tier 3 — adversarial double-pay hunt (memory level)', () => {
     await executarTransferenciaRepasse(depsWith(lab, fake), { idRepasse: idRepasse as never });
 
     const repasse = await lab.livro.findRepasseById(idRepasse as never);
-    expect(repasse?.status).toBe('pago');
+    expect(repasse?.status).toBe('enviado_ao_banco');
+    expect(repasse?.enviadoAoBancoEm).toEqual(T1);
     expect(fake.pagarPixCalls).toBe(1);
     expect(fake.pagarPixInputs[0]?.referencia).toBe(referencia);
     const linked = await lancamentosDoRepasse(lab, idRepasse);
     expect(linked).toHaveLength(2);
-    for (const l of linked) expect(l.transferidoEm).toEqual(T1);
+    for (const l of linked) expect(l.transferidoEm).toBeNull();
   });
 
   describe('L2 attack — retry storm must never mint a new payment identity', () => {
@@ -300,25 +301,27 @@ describe('jguar Tier 3 — adversarial double-pay hunt (memory level)', () => {
       expect((await lab.livro.findRepasseById(idRepasse as never))?.status).toBe('verificando');
     });
 
-    it('poison consult flapping (em_processamento/aguardando_aprovacao) only ever reschedules; terminal rejeitado lands falhou; retry then pays and stamps EXACTLY once', async () => {
+    it('provider acceptance is terminal locally and stale confirmation work cannot consult, requeue, or settle it', async () => {
       const lab = buildLab();
       const idCampanha = await seedCampanhaComRecebedorPix(lab, CHAVE_COMPARTILHADA);
       const idRepasse = await seedRepasseSolicitado(lab, idCampanha, [4500]);
       await aprovarPix(lab, idRepasse);
 
-      // Inter parks the payment in its own approval workflow → verificando
-      // WITH a codigoSolicitacao (the consult path, not the search path).
+      // The valid 2xx receipt completes the platform handoff even if Inter still
+      // requires its own downstream approval.
       const fakeExec = new RecordingTransferenciaFake({ pagarPixOutcome: 'agendado_aprovacao' });
       await executarTransferenciaRepasse(depsWith(lab, fakeExec), {
         idRepasse: idRepasse as never,
       });
-      expect((await lab.livro.findRepasseById(idRepasse as never))?.status).toBe('verificando');
+      expect((await lab.livro.findRepasseById(idRepasse as never))?.status).toBe(
+        'enviado_ao_banco',
+      );
       expect(
         (await lab.livro.findRepasseById(idRepasse as never))?.interCodigoSolicitacao,
       ).not.toBeNull();
 
-      // Flapping, contradictory, non-terminal consults — the reconciler
-      // must never guess and never pay.
+      // Even a stale queued confirmation carrying contradictory statuses is a
+      // drain-only job. It never calls Inter or changes the accepted handoff.
       const fakeConfirm = new RecordingTransferenciaFake({
         consultSequence: [
           'em_processamento',
@@ -327,79 +330,31 @@ describe('jguar Tier 3 — adversarial double-pay hunt (memory level)', () => {
           'rejeitado',
         ],
       });
-      const confirmDeps = depsWith(lab, fakeConfirm);
-      const expectedDelays = [120, 600, 3600]; // proxima tentativa 2, 3, 4
-      for (let tentativa = 1; tentativa <= 3; tentativa++) {
-        await confirmarTransferenciaRepasse(confirmDeps, {
-          idRepasse: idRepasse as never,
-          tentativaConfirmacao: tentativa,
-        });
-        expect((await lab.livro.findRepasseById(idRepasse as never))?.status).toBe('verificando');
-        expect(lab.enqueued.confirmar.at(-1)).toEqual({
-          id: idRepasse,
-          tentativa: tentativa + 1,
-          delay: expectedDelays[tentativa - 1],
-        });
-      }
-
-      // Terminal rejeitado → falhou (positive knowledge: no money moved).
-      await confirmarTransferenciaRepasse(confirmDeps, {
+      await confirmarTransferenciaRepasse(depsWith(lab, fakeConfirm), {
         idRepasse: idRepasse as never,
-        tentativaConfirmacao: 4,
+        tentativaConfirmacao: 1,
       });
-      const failed = await lab.livro.findRepasseById(idRepasse as never);
-      expect(failed?.status).toBe('falhou');
-      expect(failed?.lastTransferError).toBe('CONSULTA_REJEITADO');
-      expect(fakeConfirm.pagarPixCalls).toBe(0); // the reconciler NEVER pays
+      expect(fakeConfirm.pagarPixCalls).toBe(0);
+      expect(fakeConfirm.consultarPagamentoCalls).toBe(0);
+      expect(lab.enqueued.confirmar).toEqual([]);
 
-      // Ledger untouched through the whole ordeal.
-      let linked = await lancamentosDoRepasse(lab, idRepasse);
+      const persisted = await lab.livro.findRepasseById(idRepasse as never);
+      expect(persisted?.status).toBe('enviado_ao_banco');
+      const linked = await lancamentosDoRepasse(lab, idRepasse);
       expect(linked[0]?.transferidoEm).toBeNull();
-
-      // Admin retry from falhou → pago. Stamp fires EXACTLY once.
-      const fakeRetry = new RecordingTransferenciaFake({ pagarPixOutcome: 'pago' });
-      await executarTransferenciaRepasse(depsWith(lab, fakeRetry), {
-        idRepasse: idRepasse as never,
-      });
-      const paid = await lab.livro.findRepasseById(idRepasse as never);
-      expect(paid?.status).toBe('pago');
-      linked = await lancamentosDoRepasse(lab, idRepasse);
-      expect(linked[0]?.transferidoEm).toEqual(T1);
-
-      // Post-pago double-stamp attempts must all be inert:
-      // (a) a stale resolverVerificacao pago is a no-op off `verificando`;
-      await lab.livro.resolverVerificacaoTransferencia({
-        idRepasse: idRepasse as never,
-        resultado: { tipo: 'pago', codigoSolicitacao: 'inter_stale_dup' } as never,
-        reconciliacaoResumo: 'adversarial:stale-duplicate',
-        agora: new Date('2026-07-16T12:00:00.000Z'),
-      } as never);
-      // (b) a stale re-delivered executar is concluido (0 pagarPix calls).
-      const fakeStale = new RecordingTransferenciaFake({ pagarPixOutcome: 'pago' });
-      await executarTransferenciaRepasse(depsWith(lab, fakeStale), {
-        idRepasse: idRepasse as never,
-      });
-      expect(fakeStale.pagarPixCalls).toBe(0);
-
-      linked = await lancamentosDoRepasse(lab, idRepasse);
-      expect(linked[0]?.transferidoEm).toEqual(T1); // original stamp, unchanged
-      const still = await lab.livro.findRepasseById(idRepasse as never);
-      expect(still?.status).toBe('pago');
     });
 
-    it('exhausted confirmation window STAYS verificando — the system never guesses', async () => {
+    it('ambiguous payout stays verificando and stale confirmation drains without consulting or guessing', async () => {
       const lab = buildLab();
       const idCampanha = await seedCampanhaComRecebedorPix(lab, CHAVE_COMPARTILHADA);
       const idRepasse = await seedRepasseSolicitado(lab, idCampanha, [4500]);
       await aprovarPix(lab, idRepasse);
 
-      const fakeExec = new RecordingTransferenciaFake({ pagarPixOutcome: 'agendado_aprovacao' });
+      const fakeExec = new RecordingTransferenciaFake({ pagarPixOutcome: 'ambiguo' });
       await executarTransferenciaRepasse(depsWith(lab, fakeExec), {
         idRepasse: idRepasse as never,
       });
 
-      // Tentativa 12 (the max) still non-terminal → reagendar computes the
-      // 13th delay as null → stays verificando, NO further enqueue.
       const fakeConfirm = new RecordingTransferenciaFake({
         consultSequence: ['em_processamento'],
       });
@@ -409,6 +364,7 @@ describe('jguar Tier 3 — adversarial double-pay hunt (memory level)', () => {
         tentativaConfirmacao: 12,
       });
       expect(lab.enqueued.confirmar.length).toBe(before); // nothing re-enqueued
+      expect(fakeConfirm.consultarPagamentoCalls).toBe(0);
       const repasse = await lab.livro.findRepasseById(idRepasse as never);
       expect(repasse?.status).toBe('verificando');
       const linked = await lancamentosDoRepasse(lab, idRepasse);
@@ -445,13 +401,13 @@ describe('jguar Tier 3 — adversarial double-pay hunt (memory level)', () => {
 
       // Current behavior: the replay claims falhou and pays.
       expect(fakeReplay.pagarPixCalls).toBe(1);
-      // The invariant that matters survives: same identity, single success,
-      // single stamp.
+      // The invariant that matters survives: same identity, single accepted
+      // handoff, no fabricated settlement stamp.
       expect(fakeReplay.pagarPixInputs[0]?.referencia).toBe(referencia);
       const repasse = await lab.livro.findRepasseById(idRepasse as never);
-      expect(repasse?.status).toBe('pago');
+      expect(repasse?.status).toBe('enviado_ao_banco');
       const linked = await lancamentosDoRepasse(lab, idRepasse);
-      expect(linked[0]?.transferidoEm).toEqual(T1);
+      expect(linked[0]?.transferidoEm).toBeNull();
     });
   });
 

@@ -1928,6 +1928,7 @@ const RepasseStatusSchema = z.enum([
   "aprovado",
   "transferindo",
   "verificando",
+  "enviado_ao_banco",
   "pago",
   "falhou",
   "cancelado",
@@ -1944,6 +1945,7 @@ const RepasseAdminDTOSchema = z.object({
   status: RepasseStatusSchema,
   solicitadoEm: z.string(),
   aprovadoEm: z.string().nullable(),
+  enviadoAoBancoEm: z.string().nullable(),
   bankTransferRef: z.string().nullable(),
   // aperture-vvh2j — automated PIX transfer fields.
   transferReferencia: z.string().nullable(),
@@ -2088,6 +2090,7 @@ function toRepasseAdminDTO(
     status: RepasseStatus;
     solicitadoEm: Date;
     aprovadoEm: Date | null;
+    enviadoAoBancoEm: Date | null;
     bankTransferRef: string | null;
     transferReferencia: string | null;
     interCodigoSolicitacao: string | null;
@@ -2109,6 +2112,7 @@ function toRepasseAdminDTO(
     status: repasse.status,
     solicitadoEm: repasse.solicitadoEm.toISOString(),
     aprovadoEm: repasse.aprovadoEm?.toISOString() ?? null,
+    enviadoAoBancoEm: repasse.enviadoAoBancoEm?.toISOString() ?? null,
     bankTransferRef: repasse.bankTransferRef,
     transferReferencia: repasse.transferReferencia,
     interCodigoSolicitacao: repasse.interCodigoSolicitacao,

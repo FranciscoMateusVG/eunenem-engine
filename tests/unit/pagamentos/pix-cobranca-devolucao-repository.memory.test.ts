@@ -119,4 +119,30 @@ describe('PIX charge refund × payout mutual exclusion — Memory', () => {
       ).toBeNull();
     }
   });
+
+  it('blocks a refund after the linked payout was accepted by the bank', async () => {
+    const state = fixture();
+    const idRepasse = randomUUID() as IdRepasse;
+    await state.livro.saveRepasse({
+      id: idRepasse,
+      idCampanha: state.lancamento.idCampanha as IdCampanha,
+      amountCents: state.lancamento.amountCents,
+      status: 'enviado_ao_banco',
+      solicitadoEm: new Date('2026-08-05T11:00:00Z'),
+      aprovadoEm: new Date('2026-08-05T11:30:00Z'),
+      enviadoAoBancoEm: new Date('2026-08-05T12:00:00Z'),
+      bankTransferRef: null,
+      transferReferencia: 'repasse-stable-reference',
+      interCodigoSolicitacao: 'inter-accepted-receipt',
+      transferAttempts: 1,
+      lastTransferError: null,
+      needsManualResolution: false,
+    });
+    await state.livro.saveLancamentos([{ ...state.lancamento, idRepasse }]);
+
+    await expect(state.refunds.createIfAbsent(state.input)).rejects.toBeInstanceOf(
+      FinanceiroPagamentoMovimentacaoConflitanteError,
+    );
+    await expect(state.refunds.findByPagamentoId(state.input.idPagamento)).resolves.toBeUndefined();
+  });
 });

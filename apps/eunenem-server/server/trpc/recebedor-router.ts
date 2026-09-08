@@ -96,6 +96,8 @@ const ExtratoSummaryDTOSchema = z.object({
    * (this) → resgatado.
    */
   aguardandoAprovacaoCents: z.number().int().nonnegative(),
+  /** Accepted by Inter and handed off; not bank settlement. */
+  enviadoAoBancoCents: z.number().int().nonnegative(),
   /** Aprovado but not-yet-liberado: status='aprovado' AND availableOn > now. */
   aguardandoLiberacaoCents: z.number().int().nonnegative(),
   /** Earliest upcoming availableOn (ISO). Null when nothing aguardando. */
@@ -169,6 +171,7 @@ const ExtratoLiberacaoSchema = z.enum([
   "aguardando_liberacao",
   "disponivel",
   "solicitado",
+  "enviado_ao_banco",
   "transferido",
   "cancelado",
 ]);
@@ -237,6 +240,7 @@ const ExtratoStatusFilterSchema = z.enum([
   "aguardando_liberacao",
   "disponivel",
   "solicitado",
+  "enviado_ao_banco",
   "transferido",
   "cancelado",
 ]);
@@ -279,6 +283,7 @@ const TransferenciaSolicitarOutputSchema = z.object({
 const MovimentoRepasseEstadoSchema = z.enum([
   "aguardando_aprovacao",
   "em_transferencia",
+  "enviado_ao_banco",
   "concluido",
   "falhou",
   "cancelado",
@@ -289,6 +294,7 @@ const MovimentacaoDTOSchema = z.object({
   idRepasse: z.string(),
   solicitadoEm: z.string(),
   concluidoEm: z.string().nullable(),
+  enviadoAoBancoEm: z.string().nullable(),
   valorCents: z.number().int().nonnegative(),
   quantidade: z.number().int().nonnegative(),
   tipo: z.literal("transferencia_conta"), // only out-type today; no resgate-loja concept exists
@@ -299,6 +305,7 @@ const MovimentacaoDTOSchema = z.object({
       "aprovado",
       "transferindo",
       "verificando",
+      "enviado_ao_banco",
       "pago",
       "falhou",
       "cancelado",
@@ -460,6 +467,8 @@ function projectRepasseEstado(
     case "transferindo":
     case "verificando":
       return "em_transferencia";
+    case "enviado_ao_banco":
+      return "enviado_ao_banco";
     case "falhou":
       return "falhou";
     case "cancelado":
@@ -506,6 +515,7 @@ function buildMovimentacoes(
       idRepasse: key,
       solicitadoEm: repasse.solicitadoEm.toISOString(),
       concluidoEm: ledger?.concluidoEm?.toISOString() ?? null,
+      enviadoAoBancoEm: repasse.enviadoAoBancoEm?.toISOString() ?? null,
       valorCents: repasse.amountCents as unknown as number,
       quantidade: ledger?.quantidade ?? 0,
       tipo: "transferencia_conta" as const,
@@ -523,6 +533,7 @@ function buildMovimentacoes(
       idRepasse,
       solicitadoEm: ledger.concluidoEm.toISOString(),
       concluidoEm: ledger.concluidoEm.toISOString(),
+      enviadoAoBancoEm: null,
       valorCents: ledger.valorTransferidoCents,
       quantidade: ledger.quantidade,
       tipo: "transferencia_conta",
@@ -623,6 +634,25 @@ function deriveLiberacao(
   return availableOn.getTime() <= now.getTime() ? "disponivel" : "aguardando_liberacao";
 }
 
+function applyRepasseLiberacao(
+  states: readonly ExtratoLancamentoState[],
+  repasses: readonly RepasseRecebedor[],
+): ExtratoLancamentoState[] {
+  const statusById = new Map(
+    repasses.map((repasse) => [repasse.id as unknown as string, repasse.status]),
+  );
+  return states.map((state) => {
+    const idRepasse = state.lancamento.idRepasse;
+    if (
+      idRepasse !== null &&
+      statusById.get(idRepasse as unknown as string) === "enviado_ao_banco"
+    ) {
+      return { ...state, liberacao: "enviado_ao_banco" };
+    }
+    return state;
+  });
+}
+
 // ────────────────────────────────────────────────────────────────────
 //  Cursor (page-token) shape — same family as admin.repasses.list:
 //   `${pagamentoCriadoEm-ms}:${idLancamento}`
@@ -656,12 +686,13 @@ const extratoRouter = t.router({
         await resolverCampanhaAdministrada(ctx, input.idCampanha);
 
         const now = ctx.deps.clock();
-        const [states, repasses] = await Promise.all([
+        const [rawStates, repasses] = await Promise.all([
           buildExtratoStates(ctx, input.idCampanha, now),
           ctx.deps.livroFinanceiroRepository.findRepassesByIdCampanha(
             input.idCampanha as IdCampanha,
           ),
         ]);
+        const states = applyRepasseLiberacao(rawStates, repasses);
         const repasseStatusById = new Map(
           repasses.map((repasse) => [repasse.id as unknown as string, repasse.status]),
         );
@@ -672,6 +703,7 @@ const extratoRouter = t.router({
         let resgatadoCents = 0;
         let saldoDisponivelCents = 0;
         let aguardandoAprovacaoCents = 0;
+        let enviadoAoBancoCents = 0;
         let aguardandoLiberacaoCents = 0;
         let proximaTransfMs: number | null = null;
         let dateRangeStartMs: number | null = null;
@@ -741,6 +773,10 @@ const extratoRouter = t.router({
             resgatadoCents += lancamento.amountCents;
             continue;
           }
+          if (liberacao === "enviado_ao_banco") {
+            enviadoAoBancoCents += lancamento.amountCents;
+            continue;
+          }
           // aperture-1ut92 — solicitado lançamentos sit in the
           // admin-pipeline bucket; they no longer count as actionable
           // saldo. saldoDisponivel only includes rows the recebedor
@@ -775,6 +811,7 @@ const extratoRouter = t.router({
           resgatadoCents,
           saldoDisponivelCents,
           aguardandoAprovacaoCents,
+          enviadoAoBancoCents,
           aguardandoLiberacaoCents,
           proximaTransfDate:
             proximaTransfMs === null ? null : new Date(proximaTransfMs).toISOString(),
@@ -800,7 +837,13 @@ const extratoRouter = t.router({
         await resolverCampanhaAdministrada(ctx, input.idCampanha);
 
         const now = ctx.deps.clock();
-        const allStates = await buildExtratoStates(ctx, input.idCampanha, now);
+        const [rawStates, repasses] = await Promise.all([
+          buildExtratoStates(ctx, input.idCampanha, now),
+          ctx.deps.livroFinanceiroRepository.findRepassesByIdCampanha(
+            input.idCampanha as IdCampanha,
+          ),
+        ]);
+        const allStates = applyRepasseLiberacao(rawStates, repasses);
 
         // Refunded rows remain part of the owner's statement history even
         // though summary totals exclude them from the live balance. Status
