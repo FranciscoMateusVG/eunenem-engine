@@ -48,10 +48,11 @@ type AdminShellProps = {
   activeNav?: NavKey;
 };
 
-type NavKey = "landing" | "repasses" | "catalogo";
+type NavKey = "landing" | "pagamentos" | "repasses" | "catalogo";
 
 const NAV_ITEMS: ReadonlyArray<{ key: NavKey; label: string; href: string }> = [
   { key: "landing", label: "Visão geral", href: "/admin" },
+  { key: "pagamentos", label: "Pagamentos", href: "/admin/pagamentos" },
   // plan q2d4b Track 3 — operator-facing recebedor repasses approval queue.
   // Lives as a sidebar sibling to Visão geral because it's a dedicated
   // operator workflow surface (action queue + historical record), not a
