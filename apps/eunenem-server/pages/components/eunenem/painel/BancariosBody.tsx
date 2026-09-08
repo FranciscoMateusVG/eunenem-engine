@@ -8,7 +8,6 @@ import {
   ACCOUNT_TYPES,
   BANKS,
   PIX_TYPES,
-  accountTypeLabel,
   bankByCode,
   type BankOption,
   type BancariosForm,
@@ -39,9 +38,7 @@ import { sendEvent } from "@/lib/analytics";
 // PainelLayout. This is the standalone "Dados Bancários" export (app.jsx)
 // ported into the painel foundation: a PIX-first form with bank account as a
 // secondary alternative, the matching form section, a holder card (locked CPF +
-// celular), inline validation, a "vamos depositar em…" review summary and a
-// lilás save CTA. Mock-first — saving just runs validation and fires a sonner
-// toast; nothing persists.
+// celular), inline validation and a lilás save CTA.
 //
 // Styling is a scoped <style> block (bnc- prefix) so it never collides with
 // the foundation's .input/.card/.field classes. It reuses the shared design
@@ -268,12 +265,6 @@ const IBank = (p: IconProps) => (
     <path d="M3 10h18M5 10v9M19 10v9M9 10v9M15 10v9M3 21h18M12 3l9 4H3l9-4z" />
   </Svg>
 );
-const IUser = (p: IconProps) => (
-  <Svg {...p}>
-    <circle cx="12" cy="8" r="4" />
-    <path d="M4 21c0-4.5 3.5-7 8-7s8 2.5 8 7" />
-  </Svg>
-);
 const IPix = (p: IconProps) => (
   <Svg {...p}>
     <path d="M5 12l7-7 7 7-7 7-7-7z" />
@@ -290,12 +281,6 @@ const IShield = (p: IconProps) => (
 const ICheck = (p: IconProps) => (
   <Svg {...p} strokeWidth={2}>
     <path d="M5 12l5 5L20 7" />
-  </Svg>
-);
-const ICheckCircle = (p: IconProps) => (
-  <Svg {...p} strokeWidth={2.4}>
-    <circle cx="12" cy="12" r="9" />
-    <path d="M8.5 12.5l2.5 2.5 4.5-5" />
   </Svg>
 );
 const IInfo = (p: IconProps) => (
@@ -487,8 +472,6 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [s, modo, tipoPix]);
 
-  const isComplete = validateRecipientForm(modo, s, tipoPix, effectiveCpf).length === 0;
-
   const onSave = () => {
     if (!idCampanha) {
       toast.error("aguardando dados da campanha — tente novamente em um instante");
@@ -565,44 +548,24 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
         </div>
       )}
 
-      <RecipientMethodChoice modo={modo} onSelect={setModo} />
-
-      {/* CPF callout */}
-      <div className="bnc-callout" role="note">
-        <span className="bnc-callout-ico">
-          <IShield size={18} />
-        </span>
-        <strong>importante:</strong> os dados bancários ou a chave Pix cadastrada
-        precisam estar vinculados ao mesmo CPF da sua conta
-        {cpfTitular ? (
-          <>
-            {" "}—{" "}
-            <span className="bnc-pill">
-              <ILock size={12} />
-              {cpfTitular}
-            </span>
-          </>
-        ) : null}
-        . essa regra protege você de fraudes e garante que o valor só caia na
-        conta da pessoa cadastrada
-      </div>
-
       <div className="bnc-form-stack">
-        {/* SECTION 2: holder */}
-        <section className="bnc-card">
-          <header className="bnc-card-head">
-            <span className="bnc-card-chip blue">
-              <IUser />
-            </span>
-            <div>
-              <div className="bnc-card-title">dados do titular</div>
-              <div className="bnc-card-title-sub">
-                precisam bater com o cpf da sua conta EuNeném
+        <section className="bnc-card bnc-recipient-card" aria-labelledby="bnc-recipient-title">
+          <header className="bnc-recipient-head">
+            <div className="bnc-recipient-heading">
+              <span className={`bnc-card-chip ${modo === "pix" ? "pink" : "lilac"}`}>
+                {modo === "pix" ? <IPix /> : <IBank />}
+              </span>
+              <div>
+                <h2 id="bnc-recipient-title">
+                  {modo === "pix" ? "Receber por Pix" : "Receber em conta bancária"}
+                </h2>
+                <p>Use uma chave ou conta vinculada ao mesmo CPF da sua conta EuNeném.</p>
               </div>
             </div>
+            <RecipientMethodChoice modo={modo} onSelect={setModo} />
           </header>
 
-          <div className="bnc-grid" style={{ gap: 14 }}>
+          <div className={`bnc-holder-fields ${modo === "conta" ? "has-phone" : ""}`}>
             <div className="bnc-field">
               <label>
                 nome do titular <span className="req">*</span>
@@ -616,80 +579,49 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
                 aria-label="nome do titular"
               />
             </div>
-            <div className="bnc-grid c2">
-              <div className={`bnc-field ${cpfTitular ? "locked" : ""}`}>
+            <div className={`bnc-field ${cpfTitular ? "locked" : ""}`}>
+              <label>
+                cpf <span className="req">*</span>
+              </label>
+              <input
+                className="bnc-input"
+                value={cpfTitular || cpfInput}
+                style={cpfTitular ? undefined : errStyle("cpf")}
+                placeholder="000.000.000-00"
+                inputMode="numeric"
+                disabled={cpfTitular !== ""}
+                onChange={(e) => setCpfInput(maskCPF(e.target.value))}
+                aria-label="cpf"
+              />
+              <span className="bnc-helper bnc-lock-helper">
+                <ILock size={12} />
+                {cpfTitular
+                  ? "CPF protegido: não pode ser alterado."
+                  : "Depois de salvar, o CPF não poderá ser alterado."}
+              </span>
+            </div>
+            {modo === "conta" && (
+              <div className="bnc-field">
                 <label>
-                  cpf <span className="req">*</span>
+                  celular <span className="req">*</span>
                 </label>
                 <input
                   className="bnc-input"
-                  value={cpfTitular || cpfInput}
-                  style={cpfTitular ? undefined : errStyle("cpf")}
-                  placeholder="000.000.000-00"
+                  value={s.telefone}
+                  style={errStyle("telefone")}
+                  onChange={(e) => set({ telefone: maskPhone(e.target.value) })}
+                  placeholder="(00) 00000-0000"
                   inputMode="numeric"
-                  disabled={cpfTitular !== ""}
-                  onChange={(e) => setCpfInput(maskCPF(e.target.value))}
-                  aria-label="cpf"
+                  aria-label="celular"
                 />
-                {cpfTitular ? (
-                  <span
-                    className="bnc-helper"
-                    style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-                  >
-                    <ILock size={12} />o cpf não pode ser alterado após o cadastro inicial
-                  </span>
-                ) : (
-                  <span className="bnc-helper">
-                    use o mesmo cpf da sua conta bancária
-                  </span>
-                )}
               </div>
-              {/* aperture-4biak — celular só existe no payload do modo CONTA
-                  (celularTitular). No modo PIX ele não é coletado nem persistido,
-                  então mostrá-lo como obrigatório era enganoso (sumia no reload). */}
-              {modo === "conta" && (
-                <div className="bnc-field">
-                  <label>
-                    celular <span className="req">*</span>
-                  </label>
-                  <input
-                    className="bnc-input"
-                    value={s.telefone}
-                    style={errStyle("telefone")}
-                    onChange={(e) => set({ telefone: maskPhone(e.target.value) })}
-                    placeholder="(00) 00000-0000"
-                    inputMode="numeric"
-                    aria-label="celular"
-                  />
-                  <span className="bnc-helper">
-                    usamos pra avisar caso haja algum problema
-                  </span>
-                </div>
-              )}
-            </div>
+            )}
           </div>
-        </section>
 
-        {/* SECTION 1: account / pix */}
-        <section className="bnc-card">
-          <header className="bnc-card-head">
-            <span className={`bnc-card-chip ${modo === "pix" ? "pink" : "lilac"}`}>
-              {modo === "pix" ? <IPix /> : <IBank />}
-            </span>
-            <div>
-              <div className="bnc-card-title">
-                {modo === "pix" ? "sua chave pix" : "dados da conta"}
-              </div>
-              <div className="bnc-card-title-sub">
-                {modo === "pix"
-                  ? "uma chave só, vinculada ao seu cpf"
-                  : "banco, agência e conta pra receber o dinheiro"}
-              </div>
-            </div>
-          </header>
+          <div className="bnc-section-divider" />
 
           {modo === "pix" ? (
-            <div className="bnc-grid" style={{ gap: 16 }}>
+            <div className="bnc-grid bnc-method-fields">
               <div className="bnc-field">
                 <label>tipo de chave</label>
                 <div className="bnc-chip-row">
@@ -725,16 +657,10 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
                   }
                   aria-label="chave pix"
                 />
-                <span className="bnc-helper">
-                  {tipo.help}
-                  {tipo.v === "cpf" && cpfTitular && (
-                    <b style={{ color: "var(--plum)" }}>{cpfTitular}</b>
-                  )}
-                </span>
               </div>
             </div>
           ) : (
-            <div className="bnc-grid" style={{ gap: 14 }}>
+            <div className="bnc-grid bnc-method-fields">
               <div className="bnc-grid c3">
                 <div className="bnc-field">
                   <label>
@@ -852,116 +778,36 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
               </div>
             </div>
           )}
-        </section>
 
-        {/* Inline validation banner */}
-        {errors.length > 0 && (
-          <div className="bnc-form-errors" role="alert">
-            <span className="bnc-form-errors-ico">
-              <IInfo size={16} />
-            </span>
-            <strong>pera, faltou conferir uma coisinha</strong>
-            <ul>
-              {errors.map((e, i) => (
-                <li key={i}>{e.msg}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {/* Review summary */}
-        {isComplete && (
-          <section className="bnc-summary" aria-label="resumo dos dados">
-            <span className="bnc-summary-eye">prontinho, vamos depositar em…</span>
-            <h2 className="bnc-summary-h">
-              {s.nome.split(" ").slice(0, 3).join(" ")}
-            </h2>
-
-            <div className="bnc-summary-row">
-              <span className="k">{modo === "pix" ? "via" : "banco"}</span>
-              <BankFlag bank={bank} />
-              <span className="v">{bank.name}</span>
+          {errors.length > 0 && (
+            <div className="bnc-form-errors" role="alert">
+              <span className="bnc-form-errors-ico">
+                <IInfo size={16} />
+              </span>
+              <strong>pera, faltou conferir uma coisinha</strong>
+              <ul>
+                {errors.map((e, i) => (
+                  <li key={i}>{e.msg}</li>
+                ))}
+              </ul>
             </div>
+          )}
 
-            {modo === "pix" ? (
-              <div className="bnc-summary-row">
-                <span className="k">chave pix</span>
-                <span className="v muted" style={{ fontVariantNumeric: "tabular-nums" }}>
-                  {s.pixKey}
-                </span>
-              </div>
-            ) : (
-              <>
-                <div className="bnc-summary-row">
-                  <span className="k">agência</span>
-                  <span className="v" style={{ fontVariantNumeric: "tabular-nums" }}>
-                    {s.agencia}
-                    {s.agenciaDV ? `-${s.agenciaDV}` : ""}
-                  </span>
-                </div>
-                <div className="bnc-summary-row">
-                  <span className="k">conta</span>
-                  <span className="v" style={{ fontVariantNumeric: "tabular-nums" }}>
-                    {s.conta}-{s.contaDV}
-                  </span>
-                  <span className="v muted bf">{accountTypeLabel(s.tipoConta)}</span>
-                </div>
-              </>
-            )}
-            <div className="bnc-summary-row">
-              <span className="k">titular</span>
-              <span className="v">{s.nome}</span>
-              {cpfTitular && (
-                <span className="bnc-verified-pill bf">
-                  <ICheckCircle size={12} />
-                  cpf {cpfTitular}
-                </span>
-              )}
-            </div>
-          </section>
-        )}
-
-        {/* Actions */}
-        {/* aperture-kj9el #4b — CPF immutability is a one-way door; warn
-            prominently right before the commit action. */}
-        <div className="bnc-cpf-warn" role="note">
-          <span className="bnc-cpf-warn-ico">
-            <ILock size={18} />
-          </span>
-          <div>
-            <strong>atenção:</strong> depois de salvar, o{" "}
-            <strong>CPF do titular não poderá ser alterado</strong>. confira com
-            carinho antes de continuar ♡
-          </div>
-        </div>
-
-        <div className="bnc-actions">
-          <button
-            type="button"
-            className="bnc-btn primary"
-            onClick={onSave}
-            disabled={salvar.isPending}
-          >
-            <ICheck size={16} />
-            {salvar.isPending ? "salvando…" : "salvar dados bancários"}
-          </button>
-          {/* aperture-kj9el #4b — defer bank data: marks a pending resgate so a
-              user setting up for someone else can complete it later. Hidden once
-              already pending (the banner above covers that state).
-              aperture-pegw8 (Thacy QA) — ALSO hidden once this campanha has
-              real saved recebedor data: deferring "para preencher depois"
-              after the data exists is meaningless, and its "complete os dados
-              quando puder" toast contradicted the prontinho summary right
-              above it. */}
-          {!resgatePendenteDesde &&
-            !dadosQuery.isLoading &&
-            !dadosQuery.data && (
+          <div className="bnc-actions">
+            <button
+              type="button"
+              className="bnc-btn primary"
+              onClick={onSave}
+              disabled={salvar.isPending}
+            >
+              <ICheck size={16} />
+              {salvar.isPending ? "salvando…" : "salvar dados bancários"}
+            </button>
+            {!resgatePendenteDesde && !dadosQuery.isLoading && !dadosQuery.data && (
               <button
                 type="button"
                 className="bnc-btn ghost"
-                onClick={() =>
-                  idCampanha && marcarPendente.mutate({ idCampanha })
-                }
+                onClick={() => idCampanha && marcarPendente.mutate({ idCampanha })}
                 disabled={marcarPendente.isPending}
               >
                 <IInfo size={16} />
@@ -970,7 +816,8 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
                   : "preencher depois · é para um amigo"}
               </button>
             )}
-        </div>
+          </div>
+        </section>
 
         <div className="bnc-security-strip">
           <IShield size={14} />
@@ -985,38 +832,10 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
   );
 }
 
-function BankFlag({
-  bank,
-  size = 30,
-}: {
-  bank: { color: string; text: string; short: string };
-  size?: number;
-}) {
-  return (
-    <span
-      className="bnc-bank-flag"
-      style={{
-        background: bank.color,
-        color: bank.text,
-        position: "static",
-        transform: "none",
-        width: size,
-        height: size,
-      }}
-    >
-      {bank.short}
-    </span>
-  );
-}
-
 // ── scoped CSS (bnc- prefix) ─────────────────────────────────────────────────
-// Reuses the shared tokens declared in tailwind.css. Only the four soft/tint
-// shades the runtime token set doesn't expose are inlined as literals here:
-//   --green-tint #EEF4D1 · --blue-soft #DEF1F3 · --blue-deep #3F8B92
-//   --yellow-soft #FCEFC1
+// Reuses the shared tokens declared in tailwind.css.
 
 const BNC_CSS = `
-.bnc{--bnc-green-tint:#EEF4D1;--bnc-blue-soft:#DEF1F3;--bnc-blue-deep:#3F8B92;--bnc-yellow-soft:#FCEFC1}
 .bnc *{box-sizing:border-box}
 
 .bnc-title{display:flex;flex-direction:column;gap:6px;margin:6px 2px 4px}
@@ -1025,34 +844,34 @@ const BNC_CSS = `
 .bnc-title h1{font-family:var(--font-patrick-hand),cursive;color:var(--plum);font-size:36px;line-height:1.05;letter-spacing:.01em;font-weight:600;margin:0}
 .bnc-title h1 .hl{padding:0 8px}
 
-.bnc-method-choice{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0;margin-top:10px;color:var(--ink-mute);font-size:13px}
+.bnc-method-choice{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0;color:var(--ink-mute);font-size:13px}
 .bnc-method-choice button{min-height:44px;border:0;background:transparent;padding:8px 10px;border-radius:12px;color:var(--lilac-deep);font-family:var(--font-dm-sans),sans-serif;font-size:13px;font-weight:700;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px;display:inline-flex;align-items:center;justify-content:center;gap:7px;cursor:pointer;transition:background .18s,color .18s}
 .bnc-method-choice button:hover{background:var(--lilac-soft);color:var(--plum)}
 .bnc-method-choice button:focus-visible{outline:3px solid var(--lilac);outline-offset:2px}
-@media (max-width:439px){.bnc-method-choice{align-items:flex-end;flex-direction:column;gap:0}.bnc-method-choice button{max-width:100%;text-align:right}}
+@media (max-width:639px){.bnc-method-choice{align-items:flex-start;flex-direction:column;gap:0}.bnc-method-choice button{max-width:100%;padding-left:0;text-align:left}}
 
-.bnc-callout{position:relative;margin-top:18px;padding:14px 16px 14px 52px;background:linear-gradient(135deg,var(--bnc-yellow-soft) 0%,#fff7df 60%,var(--cream) 100%);border:1px dashed #d8b53a;border-radius:18px;color:#7a5b15;font-size:13.5px}
-.bnc-callout strong{color:#5c3e08}
-.bnc-callout-ico{position:absolute;left:14px;top:50%;transform:translateY(-50%) rotate(-6deg);width:30px;height:30px;border-radius:9px;background:var(--yellow);display:inline-flex;align-items:center;justify-content:center;color:#5c3e08;box-shadow:0 3px 10px rgba(151,114,12,.18)}
-.bnc-pill{display:inline-flex;align-items:center;gap:6px;padding:1px 8px;margin:0 2px;border-radius:6px;background:#fff;border:1px solid #e8c95a;font-weight:700;font-variant-numeric:tabular-nums;color:#5c3e08}
 .bnc-pending{display:flex;align-items:center;gap:12px;margin-top:16px;padding:14px 16px;background:linear-gradient(135deg,var(--pink-soft) 0%,#fff7fb 70%);border:1px solid var(--coral-pink);border-radius:18px;color:var(--plum)}
 .bnc-pending-ico{flex-shrink:0;width:34px;height:34px;border-radius:10px;background:#fff;display:inline-flex;align-items:center;justify-content:center;color:var(--coral-pink);box-shadow:var(--shadow-sm)}
 .bnc-pending-txt{font-size:13.5px;line-height:1.4}
 .bnc-pending-txt strong{color:var(--coral-pink)}
-.bnc-cpf-warn{display:flex;align-items:center;gap:12px;margin-top:20px;padding:14px 16px;background:linear-gradient(135deg,#fdeef2 0%,#fff 70%);border:1.5px solid var(--coral-pink);border-radius:18px;color:var(--plum);font-size:13.5px;line-height:1.4}
-.bnc-cpf-warn-ico{flex-shrink:0;width:34px;height:34px;border-radius:10px;background:var(--pink-soft);display:inline-flex;align-items:center;justify-content:center;color:var(--coral-pink)}
-.bnc-cpf-warn strong{color:var(--coral-pink)}
-
-.bnc-form-stack{display:flex;flex-direction:column;gap:18px;margin-top:22px}
+.bnc-form-stack{display:flex;flex-direction:column;gap:12px;margin-top:16px}
 .bnc-card{background:var(--paper);border:1px solid var(--line);border-radius:24px;box-shadow:var(--shadow-sm);padding:20px 18px}
-.bnc-card-head{display:flex;align-items:center;gap:14px;margin-bottom:18px}
+.bnc-recipient-card{display:flex;flex-direction:column;gap:18px}
+.bnc-recipient-head{display:flex;align-items:center;justify-content:space-between;gap:20px}
+.bnc-recipient-heading{display:flex;align-items:center;gap:12px;min-width:0}
+.bnc-recipient-heading h2{font-family:var(--font-patrick-hand),cursive;color:var(--plum);font-size:26px;line-height:1;margin:0}
+.bnc-recipient-heading p{color:var(--ink-mute);font-size:12px;line-height:1.4;margin:3px 0 0}
 .bnc-card-chip{width:44px;height:44px;border-radius:13px;display:inline-flex;align-items:center;justify-content:center;box-shadow:var(--shadow-sm)}
 .bnc-card-chip.lilac{background:var(--lilac-soft);color:var(--lilac-deep)}
 .bnc-card-chip.pink{background:var(--pink-soft);color:var(--coral-pink)}
-.bnc-card-chip.blue{background:var(--bnc-blue-soft);color:var(--bnc-blue-deep)}
 .bnc-card-chip svg{width:22px;height:22px}
-.bnc-card-title{font-family:var(--font-patrick-hand),cursive;color:var(--plum);font-size:24px;line-height:1}
-.bnc-card-title-sub{color:var(--ink-mute);font-size:12px;margin-top:3px}
+.bnc-holder-fields{display:grid;grid-template-columns:minmax(0,2fr) minmax(210px,1fr);gap:14px}
+.bnc-holder-fields.has-phone{grid-template-columns:minmax(0,2fr) repeat(2,minmax(180px,1fr))}
+.bnc-lock-helper{display:inline-flex;align-items:center;gap:6px;color:#8a6818}
+.bnc-section-divider{height:1px;background:var(--line)}
+.bnc-method-fields{gap:14px}
+@media (max-width:799px){.bnc-recipient-head{align-items:flex-start;flex-direction:column;gap:8px}.bnc-holder-fields,.bnc-holder-fields.has-phone{grid-template-columns:1fr 1fr}.bnc-holder-fields.has-phone .bnc-field:last-child{grid-column:1/-1}}
+@media (max-width:639px){.bnc-holder-fields,.bnc-holder-fields.has-phone{grid-template-columns:1fr}.bnc-holder-fields.has-phone .bnc-field:last-child{grid-column:auto}.bnc-recipient-heading{align-items:flex-start}.bnc-card-chip{flex:0 0 44px}}
 
 .bnc-grid{display:grid;gap:14px}
 .bnc-grid.c2{grid-template-columns:1fr 1fr}
@@ -1077,39 +896,17 @@ const BNC_CSS = `
 .bnc-bank-pick .bnc-input{padding-left:52px}
 
 .bnc-chip-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
-.bnc-chip{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:0;padding:9px 10px;border-radius:999px;background:#fff;border:1.5px solid var(--line);font-size:12px;font-weight:600;color:var(--ink-soft);white-space:nowrap;transition:all .2s;cursor:pointer}
+.bnc-chip{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:0;min-height:44px;padding:9px 10px;border-radius:999px;background:#fff;border:1.5px solid var(--line);font-size:12px;font-weight:600;color:var(--ink-soft);white-space:nowrap;transition:all .2s;cursor:pointer}
 .bnc-chip svg{width:16px;height:16px}
 .bnc-chip:hover{border-color:var(--lilac-soft);color:var(--lilac-deep)}
 .bnc-chip.active{background:var(--lilac-soft);border-color:var(--lilac);color:var(--lilac-deep);box-shadow:0 4px 14px rgba(167,123,190,.18)}
-
-.bnc-verified-pill{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;background:var(--bnc-blue-soft);color:var(--bnc-blue-deep);font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:lowercase}
-.bnc-verified-pill svg{width:12px;height:12px}
-
-.bnc-saved-stamp{margin-top:0;padding:12px 16px;border-radius:16px;background:var(--cream-2);border:1px dashed var(--line);display:flex;align-items:center;gap:12px;color:var(--ink-soft);font-size:13px}
-.bnc-saved-stamp .who{color:var(--plum);font-weight:600}
-
-.bnc-autofill-strip{margin-top:0;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 14px;border-radius:14px;background:var(--bnc-blue-soft);color:var(--bnc-blue-deep);font-size:12.5px}
-.bnc-autofill-strip .lbl{font-weight:600}
-.bnc-autofill-strip button{margin-left:auto;border:1px solid rgba(63,139,146,.25);background:#fff;color:var(--bnc-blue-deep);padding:6px 12px;border-radius:999px;font-weight:700;font-size:11px;letter-spacing:.06em;text-transform:uppercase;cursor:pointer}
-.bnc-autofill-strip button:hover{background:var(--cream)}
 
 .bnc-form-errors{margin-top:0;padding:14px 16px 14px 50px;border-radius:16px;background:linear-gradient(135deg,var(--pink-soft) 0%,#fff5f9 100%);border:1px solid #f0c6d2;position:relative;color:#823753;font-size:13.5px}
 .bnc-form-errors strong{color:#5c1f3a}
 .bnc-form-errors-ico{position:absolute;left:12px;top:12px;width:28px;height:28px;border-radius:9px;background:var(--coral-pink);color:#fff;display:inline-flex;align-items:center;justify-content:center;transform:rotate(-4deg)}
 .bnc-form-errors ul{margin:6px 0 0;padding-left:18px;display:grid;gap:2px}
 
-.bnc-summary{margin-top:0;padding:18px 20px 18px 22px;border-radius:22px;background:linear-gradient(180deg,#fff 0%,var(--cream) 100%);border:1.5px solid var(--lilac-soft);box-shadow:var(--shadow-sm);position:relative;overflow:hidden}
-.bnc-summary::before{content:"";position:absolute;top:-30px;right:-30px;width:140px;height:140px;border-radius:50%;background:radial-gradient(circle,var(--bnc-green-tint) 0%,transparent 70%);opacity:.65;pointer-events:none}
-.bnc-summary-eye{font-family:var(--font-caveat),cursive;color:var(--lilac-deep);font-size:21px;transform:rotate(-2deg);display:inline-block;transform-origin:left;line-height:1;margin-bottom:2px}
-.bnc-summary-h{font-family:var(--font-patrick-hand),cursive;color:var(--plum);font-size:24px;line-height:1.1;margin:0 0 12px}
-.bnc-summary-row{display:flex;align-items:center;gap:14px;padding:10px 0;border-top:1px dashed var(--line);color:var(--ink);font-size:14px}
-.bnc-summary-row:first-of-type{border-top:0;padding-top:6px}
-.bnc-summary-row .k{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-mute);min-width:84px}
-.bnc-summary-row .v{font-weight:600;color:var(--plum);font-family:var(--font-patrick-hand),cursive;font-size:18px}
-.bnc-summary-row .v.muted{color:var(--ink-soft);font-family:var(--font-dm-sans),sans-serif;font-size:14px;font-weight:500}
-.bnc-summary-row .bf{margin-left:auto}
-
-.bnc-actions{margin-top:24px;display:flex;flex-direction:column;gap:10px;align-items:stretch}
+.bnc-actions{padding-top:2px;display:flex;flex-direction:column;gap:10px;align-items:stretch}
 @media (min-width:640px){.bnc-actions{flex-direction:row;justify-content:flex-end;align-items:center;gap:14px}}
 .bnc-btn{border:0;display:inline-flex;align-items:center;justify-content:center;gap:10px;padding:14px 22px;border-radius:999px;font-family:var(--font-dm-sans),sans-serif;font-weight:700;font-size:13px;letter-spacing:.06em;text-transform:uppercase;transition:transform .2s,box-shadow .2s,background .2s,color .2s;cursor:pointer}
 .bnc-btn svg{width:16px;height:16px}
@@ -1126,6 +923,5 @@ const BNC_CSS = `
 @media (min-width:900px){
   .bnc-title h1{font-size:48px}
   .bnc-card{padding:26px 30px;border-radius:28px}
-  .bnc-form-stack{gap:22px}
 }
 `;
