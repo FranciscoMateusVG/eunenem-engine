@@ -126,10 +126,13 @@ describe('052 guarded operator-authorized payout handoff migration', () => {
   });
 
   it.each([
-    ['amount', 1_999, RECEIPT, FINISHED],
-    ['receipt', 2_000, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', FINISHED],
-    ['finished timestamp', 2_000, RECEIPT, new Date('2026-09-08T12:12:09.140Z')],
-  ] as const)('fails closed and rolls back when the target %s differs from the verified receipt', async (_predicate, amountCents, receipt, finishedAt) => {
+    ['amount', 1_999, RECEIPT, FINISHED, 'exact'],
+    ['receipt', 2_000, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', FINISHED, 'exact'],
+    ['finished timestamp', 2_000, RECEIPT, new Date('2026-09-08T12:12:09.140Z'), 'exact'],
+    ['linked-ledger row count', 2_000, RECEIPT, FINISHED, 'one-row'],
+    ['linked-ledger amount sum', 2_000, RECEIPT, FINISHED, 'wrong-total'],
+    ['linked-ledger settlement', 2_000, RECEIPT, FINISHED, 'settled'],
+  ] as const)('fails closed and rolls back when the target %s differs from the verified receipt', async (_predicate, amountCents, receipt, finishedAt, ledgerVariant) => {
     await sql`
       INSERT INTO repasses_recebedor (id, amount_cents, status, inter_codigo_solicitacao)
       VALUES (${TARGET}::uuid, ${amountCents}, 'verificando', ${receipt})
@@ -140,12 +143,21 @@ describe('052 guarded operator-authorized payout handoff migration', () => {
       VALUES ('10000000-0000-4000-8000-000000000004', ${TARGET}::uuid, 4,
               ${finishedAt}, 200, 'verificando', ${receipt})
     `.execute(db);
+    const firstAmount = ledgerVariant === 'one-row' ? 2_000 : 1_000;
+    const firstTransferredAt = ledgerVariant === 'settled' ? FINISHED : null;
     await sql`
       INSERT INTO lancamentos_financeiros (id, id_repasse, amount_cents, transferido_em)
-      VALUES
-        ('20000000-0000-4000-8000-000000000001', ${TARGET}::uuid, 1000, NULL),
-        ('20000000-0000-4000-8000-000000000002', ${TARGET}::uuid, 1000, NULL)
+      VALUES ('20000000-0000-4000-8000-000000000001', ${TARGET}::uuid,
+              ${firstAmount}, ${firstTransferredAt})
     `.execute(db);
+    if (ledgerVariant !== 'one-row') {
+      const secondAmount = ledgerVariant === 'wrong-total' ? 999 : 1_000;
+      await sql`
+        INSERT INTO lancamentos_financeiros (id, id_repasse, amount_cents, transferido_em)
+        VALUES ('20000000-0000-4000-8000-000000000002', ${TARGET}::uuid,
+                ${secondAmount}, NULL)
+      `.execute(db);
+    }
 
     await expect(db.transaction().execute((trx) => up(trx))).rejects.toThrow(
       'operator-authorized payout handoff target does not match guarded predicates',
@@ -156,6 +168,52 @@ describe('052 guarded operator-authorized payout handoff migration', () => {
         await sql<{
           status: string;
         }>`SELECT status FROM repasses_recebedor WHERE id = ${TARGET}::uuid`.execute(db)
+      ).rows[0]?.status,
+    ).toBe('verificando');
+  });
+
+  it('fails closed when the exact guarded mutation does not update one target row', async () => {
+    await sql`
+      INSERT INTO repasses_recebedor
+        (id, amount_cents, status, inter_codigo_solicitacao)
+      VALUES (${TARGET}::uuid, 2000, 'verificando', ${RECEIPT})
+    `.execute(db);
+    await sql`
+      INSERT INTO repasse_transfer_attempts
+        (id, repasse_id, attempt_no, finished_at, http_status, outcome, codigo_solicitacao)
+      VALUES ('10000000-0000-4000-8000-000000000004', ${TARGET}::uuid, 4,
+              ${FINISHED}, 200, 'verificando', ${RECEIPT})
+    `.execute(db);
+    await sql`
+      INSERT INTO lancamentos_financeiros (id, id_repasse, amount_cents, transferido_em)
+      VALUES
+        ('20000000-0000-4000-8000-000000000001', ${TARGET}::uuid, 1000, NULL),
+        ('20000000-0000-4000-8000-000000000002', ${TARGET}::uuid, 1000, NULL)
+    `.execute(db);
+    await sql`
+      CREATE FUNCTION suppress_bank_handoff() RETURNS trigger LANGUAGE plpgsql AS $fn$
+      BEGIN
+        IF NEW.status = 'enviado_ao_banco' THEN
+          RETURN NULL;
+        END IF;
+        RETURN NEW;
+      END
+      $fn$
+    `.execute(db);
+    await sql`
+      CREATE TRIGGER suppress_bank_handoff
+        BEFORE UPDATE ON repasses_recebedor
+        FOR EACH ROW EXECUTE FUNCTION suppress_bank_handoff()
+    `.execute(db);
+
+    await expect(db.transaction().execute((trx) => up(trx))).rejects.toThrow(
+      'operator-authorized payout handoff target does not match guarded predicates',
+    );
+    expect(
+      (
+        await sql<{ status: string }>`
+          SELECT status FROM repasses_recebedor WHERE id = ${TARGET}::uuid
+        `.execute(db)
       ).rows[0]?.status,
     ).toBe('verificando');
   });

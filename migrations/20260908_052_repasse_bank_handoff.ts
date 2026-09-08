@@ -61,7 +61,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     DO $handoff$
     DECLARE
       target_exists boolean;
-      target_matches boolean;
+      updated_count integer;
     BEGIN
       SELECT EXISTS (
         SELECT 1 FROM repasses_recebedor WHERE id = 'e2c18fc0-a5f9-4d23-a0e7-104b68327b57'::uuid
@@ -71,39 +71,6 @@ export async function up(db: Kysely<unknown>): Promise<void> {
         RETURN;
       END IF;
 
-      SELECT EXISTS (
-        SELECT 1
-          FROM repasses_recebedor r
-          JOIN repasse_transfer_attempts a
-            ON a.repasse_id = r.id AND a.attempt_no = 4
-          WHERE r.id = 'e2c18fc0-a5f9-4d23-a0e7-104b68327b57'::uuid
-            AND r.amount_cents = 2000
-            AND r.status = 'verificando'
-            AND a.finished_at = '2026-09-08T12:12:09.139000Z'::timestamptz
-            AND a.http_status = 200
-            AND a.outcome = 'verificando'
-            AND a.codigo_solicitacao = '203f4559-72d8-4675-9f79-aa360b9f4456'
-            AND r.inter_codigo_solicitacao = a.codigo_solicitacao
-            AND NOT EXISTS (
-              SELECT 1
-                FROM lancamentos_financeiros l
-                WHERE l.id_repasse = r.id
-                  AND l.transferido_em IS NOT NULL
-            )
-            AND (
-              SELECT count(*) FROM lancamentos_financeiros l WHERE l.id_repasse = r.id
-            ) = 2
-            AND (
-              SELECT coalesce(sum(l.amount_cents), 0)
-                FROM lancamentos_financeiros l
-                WHERE l.id_repasse = r.id
-            ) = 2000
-      ) INTO target_matches;
-
-      IF NOT target_matches THEN
-        RAISE EXCEPTION 'operator-authorized payout handoff target does not match guarded predicates';
-      END IF;
-
       UPDATE repasses_recebedor r
         SET status = 'enviado_ao_banco',
             enviado_ao_banco_em = a.finished_at,
@@ -111,8 +78,34 @@ export async function up(db: Kysely<unknown>): Promise<void> {
             needs_manual_resolution = FALSE
         FROM repasse_transfer_attempts a
         WHERE r.id = 'e2c18fc0-a5f9-4d23-a0e7-104b68327b57'::uuid
+          AND r.amount_cents = 2000
+          AND r.status = 'verificando'
           AND a.repasse_id = r.id
-          AND a.attempt_no = 4;
+          AND a.attempt_no = 4
+          AND a.finished_at = '2026-09-08T12:12:09.139000Z'::timestamptz
+          AND a.http_status = 200
+          AND a.outcome = 'verificando'
+          AND a.codigo_solicitacao = '203f4559-72d8-4675-9f79-aa360b9f4456'
+          AND r.inter_codigo_solicitacao = a.codigo_solicitacao
+          AND NOT EXISTS (
+            SELECT 1
+              FROM lancamentos_financeiros l
+              WHERE l.id_repasse = r.id
+                AND l.transferido_em IS NOT NULL
+          )
+          AND (
+            SELECT count(*) FROM lancamentos_financeiros l WHERE l.id_repasse = r.id
+          ) = 2
+          AND (
+            SELECT coalesce(sum(l.amount_cents), 0)
+              FROM lancamentos_financeiros l
+              WHERE l.id_repasse = r.id
+          ) = 2000;
+
+      GET DIAGNOSTICS updated_count = ROW_COUNT;
+      IF updated_count <> 1 THEN
+        RAISE EXCEPTION 'operator-authorized payout handoff target does not match guarded predicates';
+      END IF;
     END
     $handoff$;
   `.execute(db);
