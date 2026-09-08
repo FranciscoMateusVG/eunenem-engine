@@ -200,6 +200,18 @@ describe('Migration round-trip', () => {
     expect(privateErrorConstraint).toContain('octet_length(provider_error_body_private) <= 16384');
     expect(privateErrorConstraint).toContain('provider_error_body_truncated IS NOT NULL');
 
+    // 20260908_052_repasse_bank_handoff (aperture-62ok9): distinct platform
+    // handoff state/timestamp, without a ledger settlement timestamp.
+    expect((await getColumn(db, 'repasses_recebedor', 'enviado_ao_banco_em'))?.is_nullable).toBe(
+      'YES',
+    );
+    expect(await getConstraintDefinition(db, 'repasses_recebedor_bank_handoff_check')).toContain(
+      'enviado_ao_banco_em IS NOT NULL',
+    );
+    expect(await getConstraintDefinition(db, 'repasses_recebedor_status_check')).toContain(
+      'enviado_ao_banco',
+    );
+
     // 20260716_043_repasse_manual_resolution (aperture-477nz): the actual TIP
     //   now. Adds repasses_recebedor.needs_manual_resolution (NOT NULL default
     //   false) + the repasse_reconciliacao_candidatos table (masked-chave
@@ -430,7 +442,15 @@ describe('Migration round-trip', () => {
     //    this sequence must start at the LATEST migration and walk earlier.
     //    Adding a new migration on top REQUIRES prepending its down-step here.
 
-    // 20260908_051_repasse_private_provider_error (aperture-dr4mo) → actual TIP.
+    // 20260908_052_repasse_bank_handoff (aperture-62ok9) → actual TIP.
+    const downBankHandoff = await migrator.migrateDown();
+    expect(downBankHandoff.error).toBeUndefined();
+    expect(await getColumn(db, 'repasses_recebedor', 'enviado_ao_banco_em')).toBeUndefined();
+    expect(
+      await getColumn(db, 'repasse_transfer_attempts', 'provider_error_body_private'),
+    ).toBeDefined();
+
+    // 20260908_051_repasse_private_provider_error (aperture-dr4mo) → current TIP.
     const downPrivateProviderError = await migrator.migrateDown();
     expect(downPrivateProviderError.error).toBeUndefined();
     expect(

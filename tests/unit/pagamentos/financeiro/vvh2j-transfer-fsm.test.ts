@@ -16,10 +16,13 @@ import {
   cancelarRepasse,
   criarRepasseRecebedorSolicitado,
   iniciarTransferencia,
+  marcarRepasseEnviadoAoBanco,
   marcarRepasseFalhou,
   marcarRepassePago,
   marcarRepasseVerificando,
   type RepasseRecebedor,
+  resolverManualFalhou,
+  resolverManualPago,
   reverterTransferenciaParaAprovado,
   type StatusRepasse,
 } from '../../../../src/domain/pagamentos/financeiro/entities/repasse-recebedor.js';
@@ -43,6 +46,9 @@ function emStatus(alvo: StatusRepasse): RepasseRecebedor {
   if (alvo === 'aprovado') return aprovado;
   const transferindo = iniciarTransferencia(aprovado);
   if (alvo === 'transferindo') return transferindo;
+  if (alvo === 'enviado_ao_banco') {
+    return marcarRepasseEnviadoAoBanco(transferindo, 'inter_accepted', T1);
+  }
   if (alvo === 'pago') return marcarRepassePago(transferindo, 'inter_1');
   if (alvo === 'verificando') return marcarRepasseVerificando(transferindo, 'inter_1');
   const falhou = marcarRepasseFalhou(transferindo, 'ERRO');
@@ -109,6 +115,27 @@ describe('marcarRepassePago', () => {
   });
 });
 
+describe('marcarRepasseEnviadoAoBanco (platform-terminal handoff)', () => {
+  it('records the receipt/time without asserting settlement', () => {
+    const r = marcarRepasseEnviadoAoBanco(emStatus('transferindo'), 'inter_receipt', T1);
+    expect(r).toMatchObject({
+      status: 'enviado_ao_banco',
+      interCodigoSolicitacao: 'inter_receipt',
+      enviadoAoBancoEm: T1,
+      lastTransferError: null,
+    });
+  });
+
+  it('rejects an empty receipt and every resend/cancel/manual-resolution path', () => {
+    expect(() => marcarRepasseEnviadoAoBanco(emStatus('transferindo'), ' ', T1)).toThrow();
+    const handedOff = emStatus('enviado_ao_banco');
+    expect(() => iniciarTransferencia(handedOff)).toThrow();
+    expect(() => cancelarRepasse(handedOff)).toThrow();
+    expect(() => resolverManualPago(handedOff, 'other')).toThrow();
+    expect(() => resolverManualFalhou(handedOff, 'manual')).toThrow();
+  });
+});
+
 describe('marcarRepasseVerificando', () => {
   it('transferindo → verificando, keeps prior codigo when passed null', () => {
     const base = { ...emStatus('transferindo'), interCodigoSolicitacao: 'inter_prev' };
@@ -155,8 +182,14 @@ describe('cancelarRepasse (only claim-release path)', () => {
     expect(r.status).toBe('cancelado');
   });
 
-  it('rejects cancel from aprovado/transferindo/verificando/pago', () => {
-    for (const s of ['aprovado', 'transferindo', 'verificando', 'pago'] as const) {
+  it('rejects cancel from aprovado/transferindo/verificando/enviado/pago', () => {
+    for (const s of [
+      'aprovado',
+      'transferindo',
+      'verificando',
+      'enviado_ao_banco',
+      'pago',
+    ] as const) {
       expect(() => cancelarRepasse(emStatus(s))).toThrow();
     }
   });

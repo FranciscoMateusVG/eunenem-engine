@@ -179,6 +179,7 @@ describe('financial use cases', () => {
       status: 'solicitado',
       solicitadoEm: fixedDate,
       aprovadoEm: null,
+      enviadoAoBancoEm: null,
       bankTransferRef: null,
       // aperture-vvh2j — transfer bookkeeping defaults.
       transferReferencia: null,

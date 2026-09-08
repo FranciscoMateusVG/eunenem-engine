@@ -464,9 +464,9 @@ export class TransferenciaProviderInter implements TransferenciaProvider {
 
   /**
    * Maps an Inter PIX-payment HTTP response to a `PagarPixOutcome`.
-   *  - 2xx + a "paid" tipoRetorno → `pago`.
-   *  - 2xx + an "approval/scheduled" tipoRetorno → `agendado_aprovacao`
-   *    (NOT success — the payment sits in Inter's approval workflow).
+   *  - 2xx + a documented tipoRetorno and a valid receipt →
+   *    `aceito_pelo_banco`. This is platform handoff, never proof of bank
+   *    approval or settlement.
    *  - 2xx + unknown tipoRetorno or missing codigoSolicitacao → AMBIGUOUS
    *    (a payment likely exists but we cannot classify it) → plain Error.
    *  - 400/422 (clean validation rejection, definitely no payment) →
@@ -494,12 +494,9 @@ export class TransferenciaProviderInter implements TransferenciaProvider {
       });
       span.setAttribute('transferencia.codigo_solicitacao', parsed.codigoSolicitacao);
       span.setAttribute('transferencia.tipo_retorno', parsed.tipoRetorno ?? 'DESCONHECIDO');
-      if (mapped === 'pago') {
-        return { outcome: 'pago', codigoSolicitacao: parsed.codigoSolicitacao, diagnostics };
-      }
-      if (mapped === 'agendado_aprovacao') {
+      if (mapped === 'aceito_pelo_banco') {
         return {
-          outcome: 'agendado_aprovacao',
+          outcome: 'aceito_pelo_banco',
           codigoSolicitacao: parsed.codigoSolicitacao,
           diagnostics,
         };
@@ -625,37 +622,24 @@ function isPreSendConnectionError(err: unknown): boolean {
 /**
  * Maps Inter's PIX-payment-CREATE `tipoRetorno` to a coarse outcome.
  *
- * MONEY-SAFETY (aperture-ju5w2, Rex): `'pago'` here books the money
- * immediately (executar stamps transferido_em). So ONLY tipoRetorno values
- * that UNAMBIGUOUSLY assert the payment SETTLED map to `'pago'`:
- * `PAGAMENTO`/`REALIZADO`/`PAGO` (explicit "paid" words). Everything else
- * that a 2xx can carry — `PROCESSADO` (accepted/processing, NOT the same as
- * settled), `APROVACAO`/`AGENDADO` (parked in Inter's approval/schedule
- * flow) — maps to `'agendado_aprovacao'`, which diverts the repasse to
- * `verificando` where `consultarPagamento` confirms the REAL terminal status
- * (PAGO/REALIZADO) before any money is booked. The asymmetry is deliberate:
- * mis-labelling a settled payment as agendado costs one ~30s consult;
- * mis-labelling a still-processing one as `pago` is a false-settlement.
- * NOTE (spec 10.2 / prod smoke): a sandbox round-trip should confirm which
- * value Inter's CURRENT API actually returns on an instant PIX success — if
- * it is `PROCESSADO` and empirically means settled, it can be promoted to
- * the `pago` set THEN, behind that evidence. Unknown → `'desconhecido'`
- * (caller escalates as ambiguous → verificando).
+ * Platform contract (aperture-62ok9): every documented recognized 2xx
+ * tipoRetorno with a valid codigoSolicitacao is an accepted bank handoff.
+ * None of these values is interpreted as downstream bank approval or PIX
+ * settlement, and no ledger settlement timestamp is written. Unknown values
+ * stay ambiguous so the platform never invents acceptance.
  */
-function mapTipoRetorno(
-  tipoRetorno: string | undefined,
-): 'pago' | 'agendado_aprovacao' | 'desconhecido' {
+function mapTipoRetorno(tipoRetorno: string | undefined): 'aceito_pelo_banco' | 'desconhecido' {
   switch (tipoRetorno) {
     case 'PAGAMENTO':
     case 'REALIZADO':
     case 'PAGO':
-      return 'pago';
+      return 'aceito_pelo_banco';
     case 'PROCESSADO':
     case 'APROVACAO':
     case 'AGENDADO':
     case 'AGENDADO_APROVACAO':
     case 'AGUARDANDO_APROVACAO':
-      return 'agendado_aprovacao';
+      return 'aceito_pelo_banco';
     default:
       return 'desconhecido';
   }

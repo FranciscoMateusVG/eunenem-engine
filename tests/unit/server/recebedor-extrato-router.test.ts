@@ -93,6 +93,7 @@ function makeRepasse(args: {
     | 'aprovado'
     | 'transferindo'
     | 'verificando'
+    | 'enviado_ao_banco'
     | 'pago'
     | 'falhou'
     | 'cancelado';
@@ -105,9 +106,11 @@ function makeRepasse(args: {
     status: args.status,
     solicitadoEm: args.solicitadoEm ?? FAKE_NOW,
     aprovadoEm: args.status === 'solicitado' ? null : FAKE_NOW,
+    enviadoAoBancoEm: args.status === 'enviado_ao_banco' ? FAKE_NOW : null,
     bankTransferRef: null,
     transferReferencia: args.status === 'solicitado' ? null : `repasse:${args.id ?? 'test'}`,
-    interCodigoSolicitacao: args.status === 'pago' ? 'inter-test' : null,
+    interCodigoSolicitacao:
+      args.status === 'pago' || args.status === 'enviado_ao_banco' ? 'inter-test' : null,
     transferAttempts: args.status === 'solicitado' ? 0 : 1,
     lastTransferError: args.status === 'falhou' ? 'PAGAMENTO_REJEITADO' : null,
     needsManualResolution: false,
@@ -312,6 +315,7 @@ describe('recebedor.extrato.summary — KPI aggregation (aperture-7g5sx)', () =>
       resgatadoCents: 0,
       saldoDisponivelCents: 0,
       aguardandoAprovacaoCents: 0,
+      enviadoAoBancoCents: 0,
       aguardandoLiberacaoCents: 0,
       proximaTransfDate: null,
       totalPresentes: 0,
@@ -1321,6 +1325,7 @@ describe('recebedor.extrato — solicitado state (aperture-1ut92)', () => {
     const cases = [
       { status: 'solicitado' as const, amount: 2000, transferred: false, linked: true },
       { status: 'falhou' as const, amount: 3000, transferred: false, linked: true },
+      { status: 'enviado_ao_banco' as const, amount: 3500, transferred: false, linked: true },
       { status: 'pago' as const, amount: 4000, transferred: true, linked: true },
       { status: 'cancelado' as const, amount: 5000, transferred: false, linked: false },
     ];
@@ -1359,8 +1364,9 @@ describe('recebedor.extrato — solicitado state (aperture-1ut92)', () => {
       idCampanha: rig.idCampanha,
     });
 
-    expect(result.totalRecebidoCents).toBe(14_000);
+    expect(result.totalRecebidoCents).toBe(17_500);
     expect(result.aguardandoAprovacaoCents).toBe(2000);
+    expect(result.enviadoAoBancoCents).toBe(3500);
     expect(result.resgatadoCents).toBe(4000);
     // falhou remains reserved; cancelado is the only state in this matrix
     // whose ledger claim has been released back to available.
@@ -1411,6 +1417,48 @@ describe('recebedor.extrato — solicitado state (aperture-1ut92)', () => {
     expect(result.rows).toHaveLength(1);
     expect(result.rows[0].liberacao).toBe('solicitado');
     expect(result.rows[0].idPagamento).toBe(idPagSol);
+  });
+
+  it('statusFilters exposes handed-off funds distinctly from settled transfers', async () => {
+    const idPagamento = randomUUID();
+    const idRepasse = randomUUID();
+    await rig.pagamentoRepository.save(
+      makePagamento({
+        id: idPagamento,
+        idContribuicao: rig.idContribuicao,
+        availableOn: new Date('2026-06-01T10:00:00.000Z'),
+      }),
+    );
+    await rig.livroFinanceiroRepository.saveRepasse(
+      makeRepasse({
+        id: idRepasse,
+        idCampanha: rig.idCampanha,
+        amountCents: 2000,
+        status: 'enviado_ao_banco',
+      }) as never,
+    );
+    await rig.livroFinanceiroRepository.saveLancamentos([
+      makeLancamento({
+        idPagamento,
+        idContribuicao: rig.idContribuicao,
+        idCampanha: rig.idCampanha,
+        amountCents: 2000,
+        idRepasse,
+        transferidoEm: null,
+      }),
+    ]);
+
+    const result = await rig.caller.recebedor.extrato.list({
+      idCampanha: rig.idCampanha,
+      statusFilters: ['enviado_ao_banco'],
+      cursor: null,
+      limit: 20,
+    });
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]).toMatchObject({
+      idPagamento,
+      liberacao: 'enviado_ao_banco',
+    });
   });
 });
 
@@ -1550,6 +1598,7 @@ describe('recebedor.listMovimentacoes (aperture-2u5vw)', () => {
       { status: 'solicitado' as const, estado: 'aguardando_aprovacao', amount: 2000 },
       { status: 'transferindo' as const, estado: 'em_transferencia', amount: 2500 },
       { status: 'falhou' as const, estado: 'falhou', amount: 3000 },
+      { status: 'enviado_ao_banco' as const, estado: 'enviado_ao_banco', amount: 3250 },
       { status: 'cancelado' as const, estado: 'cancelado', amount: 3500 },
       { status: 'pago' as const, estado: 'concluido', amount: 4000 },
     ];
@@ -1612,5 +1661,10 @@ describe('recebedor.listMovimentacoes (aperture-2u5vw)', () => {
     );
     expect(cancelled?.quantidade).toBe(0);
     expect(cancelled?.concluidoEm).toBeNull();
+    const handedOff = result.movimentacoes.find(
+      (movement) => movement.idRepasse === ids.get('enviado_ao_banco'),
+    );
+    expect(handedOff?.concluidoEm).toBeNull();
+    expect(handedOff?.enviadoAoBancoEm).toBe(FAKE_NOW.toISOString());
   });
 });

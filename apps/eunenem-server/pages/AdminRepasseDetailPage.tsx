@@ -137,6 +137,9 @@ function Body({ repasse }: { repasse: RepasseDetail }) {
         <InFlightNote status={repasse.status} />
       )}
       {repasse.status === "pago" && <TerminalNote status="pago" />}
+      {repasse.status === "enviado_ao_banco" && (
+        <TerminalNote status="enviado_ao_banco" />
+      )}
       {repasse.status === "cancelado" && <TerminalNote status="cancelado" />}
 
       {modalOpen && (
@@ -925,7 +928,7 @@ function ConfirmMarcarFalhouModal({
   );
 }
 
-/** Non-actionable in-flight states — the operator waits; the worker drives. */
+/** Non-actionable states before a bank acceptance receipt is available. */
 function InFlightNote({
   status,
 }: {
@@ -935,16 +938,26 @@ function InFlightNote({
     <div className="flex items-start gap-3 rounded-md border border-line bg-paper px-5 py-4">
       <RepasseStatusPill status={status} />
       <p className="text-[13px] text-ink-soft">
-        {REPASSE_STATUS_GLOSS[status]}. Nenhuma ação manual é necessária — o
-        repasse avança automaticamente. Esta página reflete o novo estado ao ser
-        atualizada.
+        {REPASSE_STATUS_GLOSS[status]}. Nenhum novo envio ou consulta automática
+        será feito. Confira o caso manualmente antes de qualquer ação financeira.
       </p>
     </div>
   );
 }
 
 /** Terminal states — settled (`pago`) or released (`cancelado`). No actions. */
-function TerminalNote({ status }: { status: "pago" | "cancelado" }) {
+function TerminalNote({ status }: { status: "enviado_ao_banco" | "pago" | "cancelado" }) {
+  if (status === "enviado_ao_banco") {
+    return (
+      <div className="flex items-start gap-3 rounded-md border border-teal-200 bg-teal-50 px-5 py-4">
+        <RepasseStatusPill status={status} />
+        <p className="text-[13px] text-teal-900">
+          Solicitação aceita e enviada ao Banco Inter. A aprovação e a liquidação
+          seguintes são tratadas diretamente no banco; este estado não afirma que o PIX foi pago.
+        </p>
+      </div>
+    );
+  }
   const isPaid = status === "pago";
   return (
     <div
@@ -1132,6 +1145,18 @@ function FactsGrid({ repasse }: { repasse: RepasseDetail }) {
           </span>
         ),
     },
+    ...(repasse.enviadoAoBancoEm !== null
+      ? [
+          {
+            label: "enviado ao banco em",
+            value: (
+              <span className="font-mono text-[12px] tabular-nums text-teal-700">
+                {formatLongDate(repasse.enviadoAoBancoEm)}
+              </span>
+            ),
+          },
+        ]
+      : []),
     {
       label: "referência bancária",
       value:

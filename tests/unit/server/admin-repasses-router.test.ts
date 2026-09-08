@@ -322,8 +322,8 @@ describe('admin.repasses.aprovar (aperture-riywh)', () => {
   });
 
   // aperture-vvh2j — the rig recebedor is pix, so aprovar takes the AUTOMATED
-  // path: it does NOT stamp transferido_em at approval (the debit books at
-  // pago) and it enqueues the executar job transactionally. The manual/conta
+  // path: it does NOT stamp transferido_em at approval or bank acceptance,
+  // and it enqueues the executar job transactionally. The manual/conta
   // stamp-at-approval + bankTransferRef idempotency is covered separately.
   it('approves a pix repasse without stamping transferidoEm, and enqueues executar once', async () => {
     const { idRepasse, idsLancamentos } = await seedPendingRepasse(rig);
@@ -334,7 +334,7 @@ describe('admin.repasses.aprovar (aperture-riywh)', () => {
     });
 
     expect(result.idRepasse).toBe(idRepasse);
-    // pix: the debit books at pago, so approval stamps nothing.
+    // pix: approval is not bank settlement, so it stamps nothing.
     expect(result.numLancamentosTransferidos).toBe(0);
 
     const refetched = await rig.livroFinanceiroRepository.findLancamentosByIds(
@@ -405,6 +405,63 @@ describe('admin.repasses.show (aperture-riywh)', () => {
     for (const l of result.repasse?.lancamentos ?? []) {
       expect(l.contribuinteNome).toBe('Tia Carmen');
     }
+  });
+
+  it('projects the terminal bank handoff and blocks every existing payout mutation', async () => {
+    const { idRepasse, idsLancamentos } = await seedPendingRepasse(rig);
+    await rig.livroFinanceiroRepository.aprovarRepassePixTransaction(
+      {
+        idRepasse: idRepasse as never,
+        aprovadoEm: T1,
+        transferReferencia: gerarTransferReferencia(idRepasse as never),
+      },
+      async () => {},
+    );
+    const started = await rig.livroFinanceiroRepository.iniciarTransferenciaTransaction({
+      idRepasse: idRepasse as never,
+      requestSummary: 'bank-handoff',
+      agora: T1,
+    });
+    await rig.livroFinanceiroRepository.finalizarTentativaTransferencia({
+      idRepasse: idRepasse as never,
+      attemptId: started.attemptId,
+      resultado: {
+        tipo: 'enviado_ao_banco',
+        codigoSolicitacao: 'inter-accepted-receipt',
+      },
+      agora: T1,
+    });
+
+    const shown = await rig.caller.admin.repasses.show({ idRepasse });
+    expect(shown.repasse).toMatchObject({
+      status: 'enviado_ao_banco',
+      interCodigoSolicitacao: 'inter-accepted-receipt',
+      enviadoAoBancoEm: T1.toISOString(),
+    });
+
+    await expect(rig.caller.admin.repasses.retry({ idRepasse })).rejects.toMatchObject({
+      code: 'CONFLICT',
+    });
+    await expect(rig.caller.admin.repasses.cancelar({ idRepasse })).rejects.toMatchObject({
+      code: 'CONFLICT',
+    });
+    await expect(
+      rig.caller.admin.repasses.resolverManualPago({
+        idRepasse,
+        codigoSolicitacao: 'different-receipt',
+      }),
+    ).resolves.toMatchObject({ status: 'enviado_ao_banco' });
+    await expect(
+      rig.caller.admin.repasses.resolverManualFalhou({ idRepasse }),
+    ).resolves.toMatchObject({ status: 'enviado_ao_banco' });
+
+    const linked = await rig.livroFinanceiroRepository.findLancamentosByIds(
+      idsLancamentos as never,
+    );
+    expect(linked.every((entry) => entry.transferidoEm === null)).toBe(true);
+    expect((await rig.livroFinanceiroRepository.findRepasseById(idRepasse as never))?.status).toBe(
+      'enviado_ao_banco',
+    );
   });
 
   it('returns null for an unknown idRepasse', async () => {

@@ -9,7 +9,12 @@ import { sortUniquePaymentIds } from './payment-money-movement-lock.js';
 type SqlExecutor = any;
 
 export const BLOCKING_PIX_REFUND_STATUSES = ['em_processamento', 'devolvida'] as const;
-export const BLOCKING_REPASSE_STATUSES = ['transferindo', 'verificando', 'pago'] as const;
+export const BLOCKING_REPASSE_STATUSES = [
+  'transferindo',
+  'verificando',
+  'enviado_ao_banco',
+  'pago',
+] as const;
 
 /**
  * Transaction-scoped, per-payment exclusion lock. IDs are sorted before

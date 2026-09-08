@@ -61,6 +61,12 @@ export const REPASSE_STATUS_PALETTE: Record<RepasseStatus, ChipPalette> = {
     text: "text-blue-800",
     dot: "bg-blue-500",
   },
+  enviado_ao_banco: {
+    border: "border-teal-200",
+    bg: "bg-teal-50",
+    text: "text-teal-800",
+    dot: "bg-teal-500",
+  },
   pago: {
     border: "border-emerald-200",
     bg: "bg-emerald-50",
@@ -90,6 +96,7 @@ export const REPASSE_STATUS_ORDER: readonly RepasseStatus[] = [
   "aprovado",
   "transferindo",
   "verificando",
+  "enviado_ao_banco",
   "pago",
   "falhou",
   "cancelado",
@@ -106,6 +113,7 @@ export const REPASSE_STATUS_GLOSS: Record<RepasseStatus, string> = {
   aprovado: "na fila de transferência",
   transferindo: "transferência em andamento no Inter",
   verificando: "confirmando o resultado no Inter",
+  enviado_ao_banco: "solicitação aceita e entregue ao banco",
   pago: "transferido com sucesso",
   falhou: "falhou — nenhum valor foi movido",
   cancelado: "cancelado — valores devolvidos ao saldo",
@@ -132,7 +140,7 @@ export function humanizeTransferError(code: string): string {
 
 /** Terminal states carry no further admin action. */
 export function isTerminalRepasse(status: RepasseStatus): boolean {
-  return status === "pago" || status === "cancelado";
+  return status === "enviado_ao_banco" || status === "pago" || status === "cancelado";
 }
 
 /** Retry re-fires the transfer — allowed ONLY from `falhou` (spec §4.1/§6). */

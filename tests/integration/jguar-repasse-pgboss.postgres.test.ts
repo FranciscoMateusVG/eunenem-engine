@@ -10,9 +10,9 @@
  *  1. Transactional enqueue — approve commit ⇒ exactly one `repasse.executar`
  *     job; approve rollback ⇒ zero jobs + FSM untouched; re-approve is a
  *     no-op (still one job).
- *  2. Crash-mid-call / re-delivery reconciliation — a re-delivered executar
- *     for a `transferindo` repasse NEVER fires a second pagarPix; it diverts
- *     to `verificando` and schedules `repasse.confirmar`.
+ *  2. Crash-mid-call / re-delivery safety — a re-delivered executar for a
+ *     `transferindo` repasse NEVER fires a second pagarPix; it diverts to
+ *     manual-review `verificando` without automatic provider polling.
  *  3. Races — double-approve (two admins) collapses to one job; concurrent
  *     executar collapses to one pagarPix + one attempt row.
  *  4. Worker lifecycle end-to-end — handlers registered exactly like
@@ -61,7 +61,6 @@ import type { Observability } from '../../src/observability/observability.js';
 import { gerarTransferReferencia } from '../../src/use-cases/pagamentos/financeiro/aprovar-repasse-recebedor.js';
 import { confirmarTransferenciaRepasse } from '../../src/use-cases/pagamentos/financeiro/confirmar-transferencia-repasse.js';
 import {
-  CONFIRMAR_DELAY_INICIAL_SEGUNDOS,
   executarTransferenciaRepasse,
   MAX_TENTATIVAS_TRANSITORIAS,
 } from '../../src/use-cases/pagamentos/financeiro/executar-transferencia-repasse.js';
@@ -343,8 +342,8 @@ function makeDeps(
     repasseJobEnqueuer: jobEnqueuer,
     clock: () => new Date(),
     observability,
-    // aperture-477nz — confirmar's disarm gate. Default DISARMED (prod default):
-    // ignored by executar; only the confirmar zero-candidate exhaustion reads it.
+    // Legacy confirmation configuration remains in the dependency object, but
+    // the drain-only payout confirmation handler does not read it.
     extratoVerified,
   };
 }
@@ -476,9 +475,9 @@ describe('crash-mid-call and re-delivery reconciliation', () => {
   // logic. This bit the POSTGRES adapter specifically (Rex's memory-fake unit
   // tests use arrow-function literals with no `this`, so they missed it). Rex
   // now calls the method on the repository directly; the ambiguous-throw
-  // in-process divert to verificando + confirmar scheduling executes. Flipped
+  // in-process divert to verificando executes. Flipped
   // it.fails → it() as the in-suite (real-Postgres) regression lock.
-  it('ambiguous throw AFTER intent commit diverts to verificando + schedules confirmar (no crash, no double-pay)', async () => {
+  it('ambiguous throw AFTER intent commit stays verificando without automatic confirmation (no crash, no double-pay)', async () => {
     const { idRepasse, idCampanha } = await seedRepasseSolicitado({});
     await seedClaimedLancamento({ idCampanha, idRepasse });
     await aprovarPix(idRepasse);
@@ -508,9 +507,7 @@ describe('crash-mid-call and re-delivery reconciliation', () => {
     });
     expect(attempts[0]?.duration_ms).not.toBeNull();
 
-    expect(spy.confirmar).toEqual([
-      { idRepasse, tentativa: 1, delaySeconds: CONFIRMAR_DELAY_INICIAL_SEGUNDOS },
-    ]);
+    expect(spy.confirmar).toEqual([]);
     // No money marked as moved while ambiguous.
     expect(await stampedLancamentoCount(idRepasse)).toBe(0);
   });
@@ -556,9 +553,7 @@ describe('crash-mid-call and re-delivery reconciliation', () => {
       state_after: 'verificando',
     });
 
-    expect(spy.confirmar).toEqual([
-      { idRepasse, tentativa: 1, delaySeconds: CONFIRMAR_DELAY_INICIAL_SEGUNDOS },
-    ]);
+    expect(spy.confirmar).toEqual([]);
     expect(await stampedLancamentoCount(idRepasse)).toBe(0);
   });
 
@@ -574,14 +569,14 @@ describe('crash-mid-call and re-delivery reconciliation', () => {
     expect(claimed.acao).toBe('prosseguir');
 
     // Models a provider response followed by a rejected oversized private-body
-    // write. The check violation occurs in the SAME transaction as status=pago
-    // and the ledger stamp, so neither business write may survive.
+    // write. The check violation occurs in the SAME transaction as the handoff
+    // state, so neither the state nor attempt close may survive.
     await expect(
       repo.finalizarTentativaTransferencia({
         idRepasse,
         attemptId: claimed.attemptId,
         resultado: {
-          tipo: 'pago',
+          tipo: 'enviado_ao_banco',
           codigoSolicitacao: randomUUID(),
           observation: {
             operation: 'pagar_pix',
@@ -686,19 +681,13 @@ describe('crash-mid-call and re-delivery reconciliation', () => {
   // needs-manual instead); the resolver-23505 lock now lives on the CONSULT-path
   // test below (which still resolves pago via resolverVerificacaoTransferencia).
   //
-  // aperture-477nz: a codigo-less verificando reconciled via buscarPagamentos is
-  // NEVER auto-booked pago — Inter exposes no reliable caller-supplied identifier
-  // in the extrato, so a search match cannot PROVE the payment is ours. A
-  // valor+chave candidate flags needs-manual-resolution and is persisted (chave
-  // masked) for an admin to resolve. This locks the never-auto-pago behavior +
-  // the flagNeedsManualResolution transaction on real Postgres.
-  it('reconciliation via buscarPagamentos flags needs-manual-resolution + persists a masked candidate — NEVER auto-pago', async () => {
+  // Automatic payout reconciliation is retired. A stale confirmation job must
+  // drain without consulting Inter, changing state, or creating candidates.
+  it('stale confirmation job for a codigo-less verificando repasse drains without provider or state changes', async () => {
     const amountCents = 4500;
     const { idRepasse, idCampanha } = await seedRepasseSolicitado({ amountCents });
     await seedClaimedLancamento({ idCampanha, idRepasse, amountCents });
     await aprovarPix(idRepasse);
-    const referencia = gerarTransferReferencia(idRepasse);
-
     // Crash shape: verificando with NO codigoSolicitacao captured.
     const claimed = await repo.iniciarTransferenciaTransaction({
       idRepasse,
@@ -718,7 +707,7 @@ describe('crash-mid-call and re-delivery reconciliation', () => {
           codigoSolicitacao: 'inter_recovered_123',
           valorCents: amountCents as never,
           chave: PIX_RECEBEDOR.chavePix,
-          referencia,
+          referencia: gerarTransferReferencia(idRepasse),
           status: 'pago',
           dataMovimento: '2026-07-16',
         },
@@ -732,28 +721,24 @@ describe('crash-mid-call and re-delivery reconciliation', () => {
     });
 
     expect(reconciler.pagarPixCalls).toBe(0); // confirmar NEVER pays
-    expect(reconciler.consultarPagamentoCalls).toBe(0); // deferred to admin, not consulted
+    expect(reconciler.consultarPagamentoCalls).toBe(0);
+    expect(spyConfirm.confirmar).toEqual([]);
 
-    // NEVER auto-pago: stays verificando, flagged, money not moved.
+    // Drain-only: stays verificando, unflagged, money not moved.
     const persisted = await repo.findRepasseById(idRepasse);
     expect(persisted?.status).toBe('verificando');
-    expect(persisted?.needsManualResolution).toBe(true);
+    expect(persisted?.needsManualResolution).toBe(false);
     expect(persisted?.interCodigoSolicitacao).toBeNull();
     expect(await stampedLancamentoCount(idRepasse)).toBe(0);
 
-    // The candidate is persisted with the chave MASKED at rest.
     const candidatos = await repo.findCandidatosByRepasseId(idRepasse as never);
-    expect(candidatos).toHaveLength(1);
-    expect(candidatos[0]?.codigoSolicitacao).toBe('inter_recovered_123');
-    expect(candidatos[0]?.chaveMascarada).not.toBeNull();
-    expect(candidatos[0]?.chaveMascarada).not.toContain('@'); // full chave never at rest
+    expect(candidatos).toHaveLength(0);
   });
 
   // VERIFIED-FIXED (resolver 23505, Rex PR #8) on the CONSULT path — the common
-  // production case (agendado_aprovacao left a codigoSolicitacao behind). Same
-  // fix as the buscarPagamentos test above (UPDATE the verificando row rather
-  // than INSERT a colliding audit row). Flipped it.fails → it().
-  it('confirmar consulting a known codigo as pago resolves the repasse to pago (no 23505 on the audit insert)', async () => {
+  // A known provider receipt does not authorize background settlement. Stale
+  // confirmation work drains without consulting Inter or stamping the ledger.
+  it('stale confirmation with a known codigo drains without provider consultation or settlement', async () => {
     const { idRepasse, idCampanha } = await seedRepasseSolicitado({});
     await seedClaimedLancamento({ idCampanha, idRepasse });
     await aprovarPix(idRepasse);
@@ -778,12 +763,14 @@ describe('crash-mid-call and re-delivery reconciliation', () => {
     });
 
     const persisted = await repo.findRepasseById(idRepasse);
-    expect(persisted?.status).toBe('pago');
+    expect(persisted?.status).toBe('verificando');
     expect(fake.pagarPixCalls).toBe(0);
-    expect(await stampedLancamentoCount(idRepasse)).toBe(1);
+    expect(fake.consultarPagamentoCalls).toBe(0);
+    expect(spy.confirmar).toEqual([]);
+    expect(await stampedLancamentoCount(idRepasse)).toBe(0);
   });
 
-  it('confirmar NEVER calls pagarPix from verificando, even when it cannot resolve (double-pay door stays shut)', async () => {
+  it('stale confirmation never calls or requeues when the provider would still report processing', async () => {
     const { idRepasse, idCampanha } = await seedRepasseSolicitado({});
     await seedClaimedLancamento({ idCampanha, idRepasse });
     await aprovarPix(idRepasse);
@@ -800,7 +787,6 @@ describe('crash-mid-call and re-delivery reconciliation', () => {
       agora: new Date(),
     });
 
-    // Non-terminal consult status → confirmar must reschedule, not pay.
     const fake = new TransferenciaProviderFake({
       pagarPixOutcome: 'pago',
       consultSequence: ['em_processamento'],
@@ -812,8 +798,8 @@ describe('crash-mid-call and re-delivery reconciliation', () => {
     });
 
     expect(fake.pagarPixCalls).toBe(0);
-    expect(fake.consultarPagamentoCalls).toBe(1);
-    expect(spy.confirmar).toEqual([{ idRepasse, tentativa: 2, delaySeconds: 120 }]);
+    expect(fake.consultarPagamentoCalls).toBe(0);
+    expect(spy.confirmar).toEqual([]);
 
     const persisted = await repo.findRepasseById(idRepasse);
     expect(persisted?.status).toBe('verificando');
@@ -849,7 +835,7 @@ describe('races — double-approve and double-executar', () => {
     expect(persisted?.transferReferencia).toBe(gerarTransferReferencia(idRepasse));
   });
 
-  it('two concurrent executar for the same aprovado repasse ⇒ exactly one pagarPix, one attempt row, one stamp', async () => {
+  it('two concurrent executar for the same aprovado repasse ⇒ exactly one pagarPix, one attempt row, no settlement stamp', async () => {
     const { idRepasse, idCampanha } = await seedRepasseSolicitado({});
     await seedClaimedLancamento({ idCampanha, idRepasse });
     await aprovarPix(idRepasse);
@@ -873,15 +859,14 @@ describe('races — double-approve and double-executar', () => {
     expect(attempts).toHaveLength(1);
     expect(attempts[0]?.attempt_no).toBe(1);
 
-    // The loser either saw `concluido` or diverted to verificando; the payer
-    // resolves the repasse to pago (verificando → pago is domain-legal).
+    // The accepted provider result is the terminal platform handoff even if
+    // the losing worker observed the in-flight attempt.
     const persisted = await repo.findRepasseById(idRepasse);
-    expect(['pago', 'verificando']).toContain(persisted?.status);
+    expect(persisted?.status).toBe('enviado_ao_banco');
 
-    // Never double-stamps: the single seeded lançamento is stamped at most
-    // once, and only if the repasse actually reached pago.
+    // Bank acceptance is not bank settlement: transferido_em remains null.
     const stamped = await stampedLancamentoCount(idRepasse);
-    expect(stamped).toBe(persisted?.status === 'pago' ? 1 : 0);
+    expect(stamped).toBe(0);
   });
 });
 
@@ -967,7 +952,7 @@ describe('worker lifecycle end-to-end (pg-boss delivers, handlers mirror server.
     });
   });
 
-  it('happy path: approve → boss delivers executar → pago, transferido_em stamped, attempt closed', async () => {
+  it('happy path: approve → boss delivers executar → enviado_ao_banco, ledger settlement remains null', async () => {
     const { idRepasse, idCampanha } = await seedRepasseSolicitado({});
     await seedClaimedLancamento({ idCampanha, idRepasse });
 
@@ -978,74 +963,49 @@ describe('worker lifecycle end-to-end (pg-boss delivers, handlers mirror server.
 
     await waitFor(
       `repasse ${idRepasse} pago via pg-boss worker`,
-      async () => (await repo.findRepasseById(idRepasse))?.status === 'pago',
+      async () => (await repo.findRepasseById(idRepasse))?.status === 'enviado_ao_banco',
       10_000,
     );
 
     expect(fake.pagarPixCalls).toBe(1);
 
     const persisted = await repo.findRepasseById(idRepasse);
-    expect(persisted?.status).toBe('pago');
+    expect(persisted?.status).toBe('enviado_ao_banco');
     expect(persisted?.interCodigoSolicitacao).toMatch(/^inter_fake_/);
     expect(persisted?.transferAttempts).toBe(1);
 
     const attempts = await attemptRows(idRepasse);
     expect(attempts).toHaveLength(1);
-    expect(attempts[0]?.outcome).toBe('pago');
+    expect(attempts[0]?.outcome).toBe('aceito_pelo_banco');
     expect(attempts[0]?.codigo_solicitacao).toBe(persisted?.interCodigoSolicitacao);
     expect(attempts[0]?.finished_at).not.toBeNull();
     expect(attempts[0]?.provider_error_body_private).toBeNull();
     expect(attempts[0]?.provider_error_body_truncated).toBeNull();
 
-    expect(await stampedLancamentoCount(idRepasse)).toBe(1);
+    expect(await stampedLancamentoCount(idRepasse)).toBe(0);
   }, 20_000);
 
-  it('agendado_aprovacao: executar → verificando + confirmar job scheduled ≈30s out (NOT success)', async () => {
+  it('approval-flow response is terminal platform handoff with no confirmation job', async () => {
     const { idRepasse, idCampanha } = await seedRepasseSolicitado({});
     await seedClaimedLancamento({ idCampanha, idRepasse });
 
-    const fake = new TransferenciaProviderFake({
-      pagarPixOutcome: 'agendado_aprovacao',
-      consultSequence: ['pago'],
-    });
+    const fake = new TransferenciaProviderFake({ pagarPixOutcome: 'agendado_aprovacao' });
     providerHolder.current = fake;
-
     await aprovarPix(idRepasse, workerEnqueuer);
 
-    // Wait for the handler's LAST side-effect (the confirmar enqueue), not just
-    // the status write. The agendado_aprovacao branch does two sequential awaits
-    // — finalizar(verificando) THEN enqueueConfirmar — so polling on status alone
-    // races the enqueue (green in isolation, flaky under full-suite load where
-    // the confirmar row isn't committed yet when asserted).
     await waitFor(
-      `repasse ${idRepasse} verificando + confirmar enqueued via pg-boss worker`,
-      async () => {
-        const r = await repo.findRepasseById(idRepasse);
-        if (r?.status !== 'verificando') return false;
-        return (await jobsIn(REPASSE_CONFIRMAR_QUEUE)).length === 1;
-      },
+      `repasse ${idRepasse} handed off via pg-boss worker`,
+      async () => (await repo.findRepasseById(idRepasse))?.status === 'enviado_ao_banco',
       10_000,
     );
 
     const persisted = await repo.findRepasseById(idRepasse);
     expect(persisted?.interCodigoSolicitacao).toMatch(/^inter_fake_/);
+    expect(persisted?.enviadoAoBancoEm).not.toBeNull();
     expect(fake.pagarPixCalls).toBe(1);
-
-    // Inter-side approval is NOT success: nothing stamped, attempt closed as verificando.
     expect(await stampedLancamentoCount(idRepasse)).toBe(0);
-    const attempts = await attemptRows(idRepasse);
-    expect(attempts).toHaveLength(1);
-    expect(attempts[0]?.outcome).toBe('verificando');
-
-    // The confirmar job EXISTS with startAfter ≈ 30s — we assert the row,
-    // we do NOT wait it out. (The resolution step itself — confirmar
-    // consulting `pago` — is exercised in the reconciliation describe.)
-    const confirmarJobs = await jobsIn(REPASSE_CONFIRMAR_QUEUE);
-    expect(confirmarJobs).toHaveLength(1);
-    expect(confirmarJobs[0]?.state).toBe('created');
-    expect(confirmarJobs[0]?.data.idRepasse).toBe(idRepasse);
-    expect(confirmarJobs[0]?.delay_seconds).toBeGreaterThanOrEqual(29);
-    expect(confirmarJobs[0]?.delay_seconds).toBeLessThanOrEqual(31);
+    expect((await attemptRows(idRepasse))[0]?.outcome).toBe('aceito_pelo_banco');
+    expect(await jobsIn(REPASSE_CONFIRMAR_QUEUE)).toHaveLength(0);
   }, 20_000);
 
   // Gap C empirical evidence, part 2: does a crashed executar job actually
@@ -1085,7 +1045,7 @@ describe('worker lifecycle end-to-end (pg-boss delivers, handlers mirror server.
 
     // Wait for the JOB to reach `completed` — pg-boss marks completion AFTER
     // the handler returns (i.e. after the pago FSM write commits), so this is
-    // the strongest end-of-processing signal and implies status === 'pago'.
+    // the strongest end-of-processing signal and implies status === 'enviado_ao_banco'.
     // Polling on status alone would race the job-state assertion below.
     await waitFor(
       'executar job re-delivered and completed as pago',
@@ -1108,12 +1068,12 @@ describe('worker lifecycle end-to-end (pg-boss delivers, handlers mirror server.
     expect(attempts).toHaveLength(2);
     expect(attempts.map((a) => a.referencia)).toEqual([referencia, referencia]);
     expect(attempts[0]?.outcome).toBe('transitorio');
-    expect(attempts[1]?.outcome).toBe('pago');
+    expect(attempts[1]?.outcome).toBe('aceito_pelo_banco');
 
     const persisted = await repo.findRepasseById(idRepasse);
-    expect(persisted?.status).toBe('pago');
-    expect(await stampedLancamentoCount(idRepasse)).toBe(1);
-    // pago resolves directly — no reconciliation scheduled.
+    expect(persisted?.status).toBe('enviado_ao_banco');
+    expect(await stampedLancamentoCount(idRepasse)).toBe(0);
+    // Accepted handoff resolves directly — no reconciliation scheduled.
     expect(await jobsIn(REPASSE_CONFIRMAR_QUEUE)).toHaveLength(0);
   }, 25_000);
 

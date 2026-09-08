@@ -205,8 +205,8 @@ describe('ledger invariant — transferidoEm stays null through every in-flight 
   });
 });
 
-describe('ledger invariant — only pago stamps, and exactly once', () => {
-  it('falhou → retry → pago stamps EXACTLY once, at the pago moment, never re-stamped', async () => {
+describe('ledger invariant — bank acceptance does not fabricate settlement', () => {
+  it('falhou → retry → accepted handoff keeps transferidoEm null and cannot resend', async () => {
     const rig = await buildRig();
     const { idRepasse, idsLancamentos } = await seedRepasseAprovado(rig);
 
@@ -215,28 +215,21 @@ describe('ledger invariant — only pago stamps, and exactly once', () => {
     expect((await rig.livro.findRepasseById(idRepasse as never))?.status).toBe('falhou');
     expect(await transferidoEmDe(rig, idsLancamentos)).toEqual([null, null]);
 
-    // Admin retry at T2 succeeds → pago stamps with the pago-time clock.
+    // Admin retry at T2 is accepted by Inter. Platform handoff completes,
+    // but bank settlement is deliberately not fabricated in the ledger.
     rig.setAgora(T2);
     await executar(rig, fake({ pagarPixOutcome: 'pago' }), idRepasse);
-    expect((await rig.livro.findRepasseById(idRepasse as never))?.status).toBe('pago');
-    expect(await transferidoEmDe(rig, idsLancamentos)).toEqual([T2, T2]);
+    const accepted = await rig.livro.findRepasseById(idRepasse as never);
+    expect(accepted?.status).toBe('enviado_ao_banco');
+    expect(accepted?.enviadoAoBancoEm).toEqual(T2);
+    expect(await transferidoEmDe(rig, idsLancamentos)).toEqual([null, null]);
 
-    // A later re-delivered job at T3 is a no-op — timestamps stay identical
-    // (a re-stamp would have moved them to T3).
+    // A later re-delivered job is terminal/no-op and cannot stamp or resend.
     rig.setAgora(T3);
     const redelivered = fake({ pagarPixOutcome: 'pago' });
     await executar(rig, redelivered, idRepasse);
     expect(redelivered.pagarPixCalls).toBe(0);
-    expect(await transferidoEmDe(rig, idsLancamentos)).toEqual([T2, T2]);
-
-    // A stale reconciliation resolve is equally a no-op on a pago repasse.
-    await rig.livro.resolverVerificacaoTransferencia({
-      idRepasse: idRepasse as never,
-      resultado: { tipo: 'pago', codigoSolicitacao: 'inter_stale' },
-      reconciliacaoResumo: 'stale',
-      agora: T3,
-    });
-    expect(await transferidoEmDe(rig, idsLancamentos)).toEqual([T2, T2]);
+    expect(await transferidoEmDe(rig, idsLancamentos)).toEqual([null, null]);
   });
 
   it('falhou books ZERO new ledger rows — no estorno/compensating entry', async () => {

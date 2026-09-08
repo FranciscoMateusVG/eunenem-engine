@@ -18,6 +18,7 @@ function summary(overrides: Partial<ExtratoSummaryDTO> = {}): ExtratoSummaryDTO 
     saldoDisponivelCents: 0,
     aguardandoLiberacaoCents: 0,
     aguardandoAprovacaoCents: 0,
+    enviadoAoBancoCents: 0,
     proximaTransfDate: null,
     totalPresentes: 0,
     totalRecadosCount: 0,
@@ -34,6 +35,7 @@ function movement(overrides: Partial<MovimentacaoRepasseDTO> = {}): Movimentacao
     idRepasse: 'repasse-test',
     solicitadoEm: '2026-09-08T02:15:00.000Z',
     concluidoEm: null,
+    enviadoAoBancoEm: null,
     valorCents: 2000,
     quantidade: 2,
     tipo: 'transferencia_conta',
@@ -55,6 +57,7 @@ describe('withdrawal statement UI projection', () => {
       recebido: 2000,
       resgatado: 0,
       aguardandoAprovacao: 2000,
+      enviadoAoBanco: 0,
       disponivel: 0,
     });
 
@@ -67,6 +70,7 @@ describe('withdrawal statement UI projection', () => {
     );
     expect(mixed.resgatado).toBe(1000);
     expect(mixed.aguardandoAprovacao).toBe(2000);
+    expect(mixed.enviadoAoBanco).toBe(0);
   });
 
   it('keeps the empty statement zeroed', () => {
@@ -76,6 +80,24 @@ describe('withdrawal statement UI projection', () => {
       disponivel: 0,
       aguardando: 0,
       aguardandoAprovacao: 0,
+      enviadoAoBanco: 0,
+    });
+  });
+
+  it('keeps the R$20 bank handoff in its own prominent amount bucket', () => {
+    expect(
+      adaptSummary(
+        summary({
+          totalRecebidoCents: 2000,
+          enviadoAoBancoCents: 2000,
+        }),
+      ),
+    ).toMatchObject({
+      recebido: 2000,
+      enviadoAoBanco: 2000,
+      resgatado: 0,
+      aguardandoAprovacao: 0,
+      disponivel: 0,
     });
   });
 
@@ -92,6 +114,7 @@ describe('withdrawal statement UI projection', () => {
   it.each([
     ['aguardando_aprovacao', 'aguardando aprovação'],
     ['em_transferencia', 'em transferência'],
+    ['enviado_ao_banco', 'enviado ao banco'],
     ['concluido', 'transferência concluída'],
     ['falhou', 'transferência falhou'],
     ['cancelado', 'transferência cancelada'],
@@ -102,6 +125,23 @@ describe('withdrawal statement UI projection', () => {
     expect(view.statusLabel).toBe(label);
     expect(view.requestedLabel).toContain('solicitada');
     expect(view.requestedLabel).toContain('23:15');
+  });
+
+  it('renders bank handoff as complete for the platform without a settlement timestamp', () => {
+    const view = movementRowViewModel(
+      movement({
+        estado: 'enviado_ao_banco',
+        statusRepasse: 'enviado_ao_banco',
+        enviadoAoBancoEm: '2026-09-08T06:00:40.466Z',
+        concluidoEm: null,
+      }),
+    );
+    expect(view).toMatchObject({
+      completed: true,
+      amountPrefix: '− ',
+      statusLabel: 'enviado ao banco',
+    });
+    expect(view.completedLabel).toContain('enviado');
   });
 
   it('shows a minus sign and completion timestamp only for completed transfers', () => {

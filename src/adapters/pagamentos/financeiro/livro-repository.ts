@@ -462,6 +462,11 @@ export type RepasseTransferResultadoTerminal =
 /** All outcomes an executar attempt can finalize into. */
 export type RepasseTransferResultado =
   | RepasseTransferResultadoTerminal
+  | {
+      readonly tipo: 'enviado_ao_banco';
+      readonly codigoSolicitacao: string;
+      readonly observation?: RepasseTransferObservation;
+    }
   // Ambiguous — a payment may exist; codigoSolicitacao is null when we
   // never captured it (crash/timeout before response).
   | {
