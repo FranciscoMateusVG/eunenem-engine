@@ -5,8 +5,10 @@ import type {
 } from '../../../apps/eunenem-server/pages/components/eunenem/painel/ExtratoStubData.js';
 import {
   adaptSummary,
+  awaitingReleaseSummaryLabel,
   movementRowViewModel,
   movementStateLabel,
+  pendingTransferSummaryLabel,
 } from '../../../apps/eunenem-server/pages/components/eunenem/painel/PresentesBody.js';
 
 function summary(overrides: Partial<ExtratoSummaryDTO> = {}): ExtratoSummaryDTO {
@@ -75,6 +77,16 @@ describe('withdrawal statement UI projection', () => {
       aguardando: 0,
       aguardandoAprovacao: 0,
     });
+  });
+
+  it('places a conditional pending label beside the completed summary', () => {
+    expect(pendingTransferSummaryLabel(2000)).toBe('(+ R$\u00a020,00 em transferência)');
+    expect(pendingTransferSummaryLabel(0)).toBeNull();
+  });
+
+  it('places awaiting release in the same cluster and hides its zero state', () => {
+    expect(awaitingReleaseSummaryLabel(1500)).toBe('(R$\u00a015,00 aguardando liberação)');
+    expect(awaitingReleaseSummaryLabel(0)).toBeNull();
   });
 
   it.each([

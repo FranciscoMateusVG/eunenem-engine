@@ -205,6 +205,14 @@ export function adaptSummary(s: ExtratoSummaryDTO): PresentesSummaryUI {
   };
 }
 
+export function pendingTransferSummaryLabel(amountCents: number): string | null {
+  return amountCents > 0 ? `(+ ${fmtMoney(amountCents)} em transferência)` : null;
+}
+
+export function awaitingReleaseSummaryLabel(amountCents: number): string | null {
+  return amountCents > 0 ? `(${fmtMoney(amountCents)} aguardando liberação)` : null;
+}
+
 function adaptRow(row: ExtratoRowDTO): PresentesTx {
   // Split ISO timestamp into date + time of day for the mock-shaped row.
   // YYYY-MM-DDTHH:MM:SSZ → ('YYYY-MM-DD', 'HH:MM')
@@ -1646,6 +1654,10 @@ export function PresentesBody(props: PainelSectionBodyProps) {
 
   // Adapt the wire shapes to what the existing visual layer consumes.
   const summary = adaptSummary(wireSummary);
+  const pendingTransferLabel = pendingTransferSummaryLabel(
+    summary.aguardandoAprovacao,
+  );
+  const awaitingReleaseLabel = awaitingReleaseSummaryLabel(summary.aguardando);
   const transactions: PresentesTx[] = wireRows.map(adaptRow);
 
   // Computed header labels (replacing the pre-wire constants).
@@ -1701,6 +1713,16 @@ export function PresentesBody(props: PainelSectionBodyProps) {
               >
                 <span className="ex-caps">resgatado</span>
                 <span className="ex-hand neg">{fmtMoney(summary.resgatado)}</span>
+                {pendingTransferLabel && (
+                  <span className="ex-sm-sub ex-sm-pending">
+                    {pendingTransferLabel}
+                  </span>
+                )}
+                {awaitingReleaseLabel && (
+                  <span className="ex-sm-sub ex-sm-awaiting">
+                    {awaitingReleaseLabel}
+                  </span>
+                )}
                 <span className="ex-sm-sub">ver detalhes →</span>
               </button>
               <div className="ex-sm-col ex-sm-col-main">
@@ -1744,27 +1766,6 @@ export function PresentesBody(props: PainelSectionBodyProps) {
               </button>
             </div>
 
-            <div className="ex-sheet-aux">
-              <span className="ex-aux-pill amber">
-                <span className="ex-aux-num">{fmtMoney(summary.aguardando)}</span>
-                <span>aguardando liberação</span>
-              </span>
-              {/* Active payout requests. Renders only when there's money
-                  in flight; an empty pill reads as visual noise. The broad
-                  label stays accurate from request through verification. */}
-              {summary.aguardandoAprovacao > 0 && (
-                <span className="ex-aux-pill lilac">
-                  <span className="ex-aux-num">
-                    {fmtMoney(summary.aguardandoAprovacao)}
-                  </span>
-                  <span>em transferência</span>
-                </span>
-              )}
-              {/* aperture-lwkwx — `próxima transf.` chip removed.
-                  It rendered the SAME value as `aguardando aprovação`
-                  above (both keyed on `aguardandoAprovacao > 0`), which
-                  duplicated information for no UX benefit. */}
-            </div>
           </header>
 
           <div className="ex-sheet-divider">
@@ -1957,6 +1958,14 @@ const EXTRATO_CSS = `
   font-feature-settings: "tnum"; white-space: nowrap;
 }
 .presentes-extrato .ex-sm-sub { font-family: var(--font-caveat), cursive; font-size: 14px; color: var(--sheet-ink-mute); line-height: 1; }
+.presentes-extrato .ex-sm-pending {
+  font-family: var(--font-dm-sans), sans-serif; font-size: 10px; font-weight: 600;
+  line-height: 1.3; color: var(--lilac-deep);
+}
+.presentes-extrato .ex-sm-awaiting {
+  font-family: var(--font-dm-sans), sans-serif; font-size: 10px; font-weight: 600;
+  line-height: 1.3; color: #7a5b0d;
+}
 
 .presentes-extrato .ex-sm-col-btn {
   appearance: none; cursor: pointer; text-align: left; border: 0; background: transparent;
@@ -1966,6 +1975,8 @@ const EXTRATO_CSS = `
 .presentes-extrato .ex-sm-col-btn:hover { background: rgba(255, 255, 255, 0.45); transform: translateY(-1px); }
 .presentes-extrato .ex-sm-col-btn .ex-sm-sub { color: var(--lilac-deep); font-weight: 600; transition: color 0.14s; }
 .presentes-extrato .ex-sm-col-btn:hover .ex-sm-sub { color: var(--sheet-neg); }
+.presentes-extrato .ex-sm-col-btn .ex-sm-awaiting,
+.presentes-extrato .ex-sm-col-btn:hover .ex-sm-awaiting { color: #7a5b0d; }
 
 /* ── CTAs ── */
 .presentes-extrato .ex-sheet-cta-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
@@ -1990,16 +2001,6 @@ const EXTRATO_CSS = `
 .presentes-extrato .ex-sheet-cta.lilac { background: var(--lilac-deep); box-shadow: var(--shadow-lilac); }
 .presentes-extrato .ex-sheet-cta.lilac:hover { background: #9d6cb6; transform: translateY(-1px); }
 .presentes-extrato .ex-sheet-cta:active { transform: translateY(0); }
-
-.presentes-extrato .ex-sheet-aux { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-.presentes-extrato .ex-aux-pill {
-  display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px;
-  border-radius: var(--r-pill); font-size: 11px; color: var(--sheet-ink-soft);
-  background: rgba(255, 255, 255, 0.4); border: 1px solid var(--sheet-line-soft);
-}
-.presentes-extrato .ex-aux-pill.amber { background: rgba(247, 213, 96, 0.38); color: #7a5b0d; border-color: rgba(210, 168, 42, 0.4); }
-.presentes-extrato .ex-aux-pill.lilac { background: rgba(201, 165, 216, 0.28); color: var(--lilac-deep); border-color: rgba(167, 123, 190, 0.35); }
-.presentes-extrato .ex-aux-num { font-family: var(--hand); font-size: 14px; }
 
 /* ── divider ── */
 .presentes-extrato .ex-sheet-divider {
