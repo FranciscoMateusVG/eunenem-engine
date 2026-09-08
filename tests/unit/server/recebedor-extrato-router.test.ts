@@ -1320,7 +1320,7 @@ describe('recebedor.extrato — solicitado state (aperture-1ut92)', () => {
     expect(result.totalRecebidoCents).toBe(7500);
   });
 
-  it('summary counts only active requests as pending and only transferred ledger as completed', async () => {
+  it('summary counts active requests as pending and accepted plus transferred withdrawals once as resgatado', async () => {
     const past = new Date('2026-06-01T10:00:00.000Z');
     const cases = [
       { status: 'solicitado' as const, amount: 2000, transferred: false, linked: true },
@@ -1367,10 +1367,52 @@ describe('recebedor.extrato — solicitado state (aperture-1ut92)', () => {
     expect(result.totalRecebidoCents).toBe(17_500);
     expect(result.aguardandoAprovacaoCents).toBe(2000);
     expect(result.enviadoAoBancoCents).toBe(3500);
-    expect(result.resgatadoCents).toBe(4000);
+    expect(result.resgatadoCents).toBe(7500);
     // falhou remains reserved; cancelado is the only state in this matrix
     // whose ledger claim has been released back to available.
     expect(result.saldoDisponivelCents).toBe(5000);
+  });
+
+  it('counts an accepted R$20 withdrawal as resgatado with no available or pending balance', async () => {
+    const idPagamento = randomUUID();
+    const idRepasse = randomUUID();
+    await rig.pagamentoRepository.save(
+      makePagamento({
+        id: idPagamento,
+        idContribuicao: rig.idContribuicao,
+        availableOn: new Date('2026-06-01T10:00:00.000Z'),
+      }),
+    );
+    await rig.livroFinanceiroRepository.saveRepasse(
+      makeRepasse({
+        id: idRepasse,
+        idCampanha: rig.idCampanha,
+        amountCents: 2000,
+        status: 'enviado_ao_banco',
+      }) as never,
+    );
+    await rig.livroFinanceiroRepository.saveLancamentos([
+      makeLancamento({
+        idPagamento,
+        idContribuicao: rig.idContribuicao,
+        idCampanha: rig.idCampanha,
+        amountCents: 2000,
+        idRepasse,
+        transferidoEm: null,
+      }),
+    ]);
+
+    const result = await rig.caller.recebedor.extrato.summary({
+      idCampanha: rig.idCampanha,
+    });
+
+    expect(result).toMatchObject({
+      totalRecebidoCents: 2000,
+      resgatadoCents: 2000,
+      enviadoAoBancoCents: 2000,
+      saldoDisponivelCents: 0,
+      aguardandoAprovacaoCents: 0,
+    });
   });
 
   it('statusFilters supports "solicitado" filter — narrows to admin-pipeline rows only', async () => {
