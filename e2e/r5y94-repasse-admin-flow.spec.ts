@@ -88,7 +88,7 @@ test.describe('aperture-r5y94 — repasse admin payout walks', () => {
 
       // UI reflects the platform handoff after a reload and offers no resend.
       await page.reload();
-      await expect(page.getByText('enviado_ao_banco', { exact: true }).first()).toBeVisible();
+      await expect(page.getByText('Enviado ao banco', { exact: true }).first()).toBeVisible();
       await expect(page.getByRole('button', { name: 'Aprovar repasse' })).toHaveCount(0);
       await expect(page.getByRole('button', { name: 'Reprocessar transferência' })).toHaveCount(0);
     } finally {
@@ -130,7 +130,7 @@ test.describe('aperture-r5y94 — repasse admin payout walks', () => {
       expect(row?.inter_codigo_solicitacao).not.toBeNull();
 
       await page.reload();
-      await expect(page.getByText('enviado_ao_banco', { exact: true }).first()).toBeVisible();
+      await expect(page.getByText('Enviado ao banco', { exact: true }).first()).toBeVisible();
       await expect(page.getByRole('button', { name: 'Reprocessar transferência' })).toHaveCount(0);
     } finally {
       await db.destroy();
