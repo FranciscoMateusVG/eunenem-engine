@@ -120,8 +120,8 @@ describe('withdrawal statement UI projection', () => {
     expect(movementStateLabel(estado)).toBe(label);
     const view = movementRowViewModel(movement({ estado }));
     expect(view.statusLabel).toBe(label);
-    expect(view.requestedLabel).toContain('solicitada');
-    expect(view.requestedLabel).toContain('23:15');
+    expect(view.requestedLabel).toBe('solicitada 07/09');
+    expect(view.requestedLabel).not.toContain(':');
   });
 
   it('renders bank handoff as complete for the platform without a settlement timestamp', () => {
@@ -138,10 +138,11 @@ describe('withdrawal statement UI projection', () => {
       amountPrefix: '− ',
       statusLabel: 'resgatado',
     });
-    expect(view.completedLabel).toContain('resgatado');
+    expect(view.completedLabel).toBe('resgatado 08/09');
+    expect(view.completedLabel).not.toContain(':');
   });
 
-  it('shows a minus sign and completion timestamp only for completed transfers', () => {
+  it('shows a minus sign and completion date only for completed transfers', () => {
     const pendingView = movementRowViewModel(movement());
     expect(pendingView.amountPrefix).toBe('');
     expect(pendingView.completedLabel).toBeNull();
@@ -154,7 +155,7 @@ describe('withdrawal statement UI projection', () => {
       }),
     );
     expect(completedView.amountPrefix).toBe('− ');
-    expect(completedView.completedLabel).toContain('concluída');
-    expect(completedView.completedLabel).toContain('00:45');
+    expect(completedView.completedLabel).toBe('concluída 08/09');
+    expect(completedView.completedLabel).not.toContain(':');
   });
 });

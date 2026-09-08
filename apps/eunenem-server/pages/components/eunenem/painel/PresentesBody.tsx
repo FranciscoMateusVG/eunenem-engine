@@ -1436,14 +1436,12 @@ export function movementStateLabel(estado: MovimentoRepasseEstado): string {
   return MOVIMENTO_ESTADO_LABEL[estado];
 }
 
-function fmtMovementDateTime(iso: string): string {
+function fmtMovementDate(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "data indisponível";
-  return date.toLocaleString("pt-BR", {
+  return date.toLocaleDateString("pt-BR", {
     day: "2-digit",
     month: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
     timeZone: "America/Sao_Paulo",
   });
 }
@@ -1454,12 +1452,12 @@ export function movementRowViewModel(movement: MovimentacaoRepasseDTO) {
     completed,
     amountPrefix: completed ? "− " : "",
     statusLabel: movementStateLabel(movement.estado),
-    requestedLabel: `solicitada ${fmtMovementDateTime(movement.solicitadoEm)}`,
+    requestedLabel: `solicitada ${fmtMovementDate(movement.solicitadoEm)}`,
     completedLabel:
       movement.estado === "enviado_ao_banco" && movement.enviadoAoBancoEm
-        ? `resgatado ${fmtMovementDateTime(movement.enviadoAoBancoEm)}`
+        ? `resgatado ${fmtMovementDate(movement.enviadoAoBancoEm)}`
         : completed && movement.concluidoEm
-          ? `concluída ${fmtMovementDateTime(movement.concluidoEm)}`
+          ? `concluída ${fmtMovementDate(movement.concluidoEm)}`
           : null,
   };
 }
