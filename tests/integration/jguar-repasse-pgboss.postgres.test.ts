@@ -273,6 +273,8 @@ interface AttemptRow {
   duration_ms: number | null;
   state_before: string | null;
   state_after: string | null;
+  provider_error_body_private: string | null;
+  provider_error_body_truncated: boolean | null;
 }
 
 async function attemptRows(idRepasse: string): Promise<AttemptRow[]> {
@@ -280,7 +282,8 @@ async function attemptRows(idRepasse: string): Promise<AttemptRow[]> {
     SELECT attempt_no, referencia, outcome, codigo_solicitacao, error, finished_at,
            operation, http_status, provider_request_id, response_class,
            diagnostic_code, diagnostic_field, diagnostic_reason, duration_ms,
-           state_before, state_after
+           state_before, state_after, provider_error_body_private,
+           provider_error_body_truncated
       FROM repasse_transfer_attempts
       WHERE repasse_id = ${idRepasse}
       ORDER BY attempt_no, started_at
@@ -570,9 +573,9 @@ describe('crash-mid-call and re-delivery reconciliation', () => {
     });
     expect(claimed.acao).toBe('prosseguir');
 
-    // Models a provider response followed by a rejected diagnostic write.
-    // The check violation occurs in the SAME transaction as status=pago and
-    // the ledger stamp, so neither business write may survive.
+    // Models a provider response followed by a rejected oversized private-body
+    // write. The check violation occurs in the SAME transaction as status=pago
+    // and the ledger stamp, so neither business write may survive.
     await expect(
       repo.finalizarTentativaTransferencia({
         idRepasse,
@@ -584,11 +587,15 @@ describe('crash-mid-call and re-delivery reconciliation', () => {
             operation: 'pagar_pix',
             responseClass: 'accepted',
             httpStatus: 200,
-            providerRequestId: 'invalid id with spaces',
+            providerRequestId: null,
             diagnosticCode: 'diagnostic_unavailable',
             diagnosticField: null,
             diagnosticReason: 'diagnostic_unavailable',
             durationMs: 1,
+            privateProviderError: {
+              body: 'x'.repeat(16_385),
+              truncated: false,
+            },
           },
         },
         agora: new Date(),
@@ -605,6 +612,8 @@ describe('crash-mid-call and re-delivery reconciliation', () => {
       provider_request_id: null,
       response_class: null,
       state_after: 'transferindo',
+      provider_error_body_private: null,
+      provider_error_body_truncated: null,
     });
 
     const freshFake = new TransferenciaProviderFake({ pagarPixOutcome: 'pago' });
@@ -614,6 +623,53 @@ describe('crash-mid-call and re-delivery reconciliation', () => {
     expect(freshFake.pagarPixCalls).toBe(0);
     expect((await repo.findRepasseById(idRepasse))?.status).toBe('verificando');
     expect(await stampedLancamentoCount(idRepasse)).toBe(0);
+  });
+
+  it('persists a bounded private rejection body in the same closed attempt transaction', async () => {
+    const { idRepasse, idCampanha } = await seedRepasseSolicitado({});
+    await seedClaimedLancamento({ idCampanha, idRepasse });
+    await aprovarPix(idRepasse);
+    const claimed = await repo.iniciarTransferenciaTransaction({
+      idRepasse,
+      requestSummary: 'private-provider-error',
+      agora: new Date(),
+    });
+    const body = JSON.stringify({
+      title: 'Dados inválidos.',
+      violacoes: [{ propriedade: 'destinatario.chave', razao: 'Formato inválido.' }],
+    });
+
+    await repo.finalizarTentativaTransferencia({
+      idRepasse,
+      attemptId: claimed.attemptId,
+      resultado: {
+        tipo: 'falhou',
+        erro: 'HTTP_400',
+        observation: {
+          operation: 'pagar_pix',
+          responseClass: 'validation_rejection',
+          httpStatus: 400,
+          providerRequestId: null,
+          diagnosticCode: 'invalid_request',
+          diagnosticField: 'pix_key',
+          diagnosticReason: 'invalid_format',
+          durationMs: 79,
+          privateProviderError: { body, truncated: false },
+        },
+      },
+      agora: new Date(),
+    });
+
+    expect((await repo.findRepasseById(idRepasse))?.status).toBe('falhou');
+    expect(await stampedLancamentoCount(idRepasse)).toBe(0);
+    expect(await attemptRows(idRepasse)).toEqual([
+      expect.objectContaining({
+        outcome: 'falhou',
+        http_status: 400,
+        provider_error_body_private: body,
+        provider_error_body_truncated: false,
+      }),
+    ]);
   });
 
   // VERIFIED-FIXED (resolver 23505, Rex PR #8, livro-repository.postgres.ts:1152-1168):
@@ -938,6 +994,8 @@ describe('worker lifecycle end-to-end (pg-boss delivers, handlers mirror server.
     expect(attempts[0]?.outcome).toBe('pago');
     expect(attempts[0]?.codigo_solicitacao).toBe(persisted?.interCodigoSolicitacao);
     expect(attempts[0]?.finished_at).not.toBeNull();
+    expect(attempts[0]?.provider_error_body_private).toBeNull();
+    expect(attempts[0]?.provider_error_body_truncated).toBeNull();
 
     expect(await stampedLancamentoCount(idRepasse)).toBe(1);
   }, 20_000);

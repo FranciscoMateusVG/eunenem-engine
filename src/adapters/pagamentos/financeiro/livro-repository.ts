@@ -423,6 +423,9 @@ export interface RepasseTransferAttempt {
   readonly durationMs: number | null;
   readonly stateBefore: StatusRepasse | null;
   readonly stateAfter: StatusRepasse | null;
+  /** Private admin-only non-2xx provider body; never log or trace. */
+  readonly providerErrorBodyPrivate: string | null;
+  readonly providerErrorBodyTruncated: boolean | null;
 }
 
 /** Provider evidence closed atomically with the repasse transition + attempt. */

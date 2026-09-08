@@ -49,11 +49,14 @@ export type PagarPixOutcome =
 /**
  * Sanitized, finite evidence observed at the provider boundary.
  *
- * This is deliberately not a provider payload. Every string-valued member is
- * an application-owned enum except `providerRequestId`, which is accepted only
- * from Inter's documented correlation field under a strict bounded grammar.
- * The record carries no PIX key, recipient data, request/response body, token,
- * certificate or arbitrary upstream text.
+ * Every operator-facing string-valued member is an application-owned enum
+ * except `providerRequestId`, which is accepted only from Inter's documented
+ * correlation field under a strict bounded grammar.
+ *
+ * `privateProviderError` is the sole exception: a bounded non-2xx response body
+ * retained for the existing campaign-scoped admin diagnosis path. It is
+ * storage-only private data. Never log, trace, serialize publicly, or include
+ * it in thrown error messages.
  */
 export interface TransferenciaProviderDiagnostics {
   readonly operation: 'pagar_pix';
@@ -86,6 +89,13 @@ export interface TransferenciaProviderDiagnostics {
     | 'not_owned'
     | 'unsupported'
     | 'diagnostic_unavailable';
+  readonly privateProviderError?: TransferenciaProviderPrivateError | null;
+}
+
+/** Private non-2xx response evidence, bounded before it leaves the adapter. */
+export interface TransferenciaProviderPrivateError {
+  readonly body: string;
+  readonly truncated: boolean;
 }
 
 export interface PagarPixInput {

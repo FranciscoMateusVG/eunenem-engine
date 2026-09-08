@@ -283,6 +283,10 @@ describe('executarTransferenciaRepasse — outcome rejeitado', () => {
     const rig = await buildRig();
     const { idRepasse } = await seedRepasseAprovado(rig);
     const delegate = fake();
+    const privateBody = JSON.stringify({
+      title: 'Dados inválidos.',
+      violacoes: [{ propriedade: 'destinatario.chave', razao: 'Formato inválido.' }],
+    });
     const provider: TransferenciaProvider = {
       async pagarPix() {
         return {
@@ -296,6 +300,7 @@ describe('executarTransferenciaRepasse — outcome rejeitado', () => {
             diagnosticCode: 'invalid_pix_key',
             diagnosticField: 'pix_key',
             diagnosticReason: 'invalid_format',
+            privateProviderError: { body: privateBody, truncated: false },
           },
         };
       },
@@ -320,6 +325,8 @@ describe('executarTransferenciaRepasse — outcome rejeitado', () => {
       diagnosticReason: 'invalid_format',
       stateBefore: 'aprovado',
       stateAfter: 'falhou',
+      providerErrorBodyPrivate: privateBody,
+      providerErrorBodyTruncated: false,
     });
   });
 

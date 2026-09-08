@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import { type Span, SpanStatusCode, trace } from '@opentelemetry/api';
 import { type MoneyCents, MoneyCentsSchema } from '../../domain/money.js';
 import {
@@ -20,6 +21,7 @@ import {
   TransferenciaAmbiguaError,
   type TransferenciaProvider,
   type TransferenciaProviderDiagnostics,
+  type TransferenciaProviderPrivateError,
   TransferenciaTransitoriaError,
 } from './transferencia-provider.js';
 
@@ -65,12 +67,16 @@ function setRespShapeAttrs(span: Span, response: InterHttpResponse): void {
  * string. Span attributes carry only: the operation name, the repasse-side
  * `referencia`/`valorCents` (our own, non-PII), a boolean `tem_chave`, the
  * HTTP status, an Inter error CODE, and the `codigoSolicitacao`. Inter
- * error bodies are mined for a CODE/field-name only — the raw body may
- * contain the chave/name and is never echoed.
+ * error bodies are mined for a safe summary and, for non-2xx PIX POST only,
+ * a bounded decoded copy is carried privately to the attempt row. That private
+ * body is never logged, traced, or included in an error message.
  */
 
 /** Inter `descricao` hard limit (API rejects > 140 chars). */
 const DESCRICAO_MAX_LEN = 140;
+
+/** Storage cap for the private decoded non-2xx PIX response body. */
+export const PRIVATE_PROVIDER_ERROR_BODY_MAX_BYTES = 16 * 1024;
 
 /** extrato/completo page size + a hard page cap so we never loop forever. */
 const EXTRATO_PAGE_SIZE = 100;
@@ -196,14 +202,33 @@ function baseDiagnostics(
     diagnosticCode: 'diagnostic_unavailable',
     diagnosticField: null,
     diagnosticReason: 'diagnostic_unavailable',
+    privateProviderError: null,
     ...overrides,
   };
 }
 
 /**
+ * Keep the longest complete UTF-8 prefix within the private 16 KiB cap.
+ * `response.body` has already been decoded by the HTTP transport; encoding it
+ * here gives the exact bytes PostgreSQL's `octet_length(text)` will enforce.
+ */
+export function capturePrivateProviderErrorBody(body: string): TransferenciaProviderPrivateError {
+  const encoded = Buffer.from(body, 'utf8');
+  if (encoded.byteLength <= PRIVATE_PROVIDER_ERROR_BODY_MAX_BYTES) {
+    return { body, truncated: false };
+  }
+
+  let end = PRIVATE_PROVIDER_ERROR_BODY_MAX_BYTES;
+  while (end > 0 && ((encoded[end] ?? 0) & 0xc0) === 0x80) end -= 1;
+  return { body: encoded.subarray(0, end).toString('utf8'), truncated: true };
+}
+
+/**
  * Converts Inter's documented problem response into a finite, PII-free
  * projection. `detail`, violation `valor`, and every unrecognised/free-text
- * member are ignored. An unknown response stays explicitly unavailable.
+ * member are ignored by the safe fields. Separately, the exact decoded body is
+ * attached under the private storage-only member. An unknown response stays
+ * explicitly unavailable in the safe projection.
  */
 export function classifyInterPayoutDiagnostics(
   response: InterHttpResponse,
@@ -228,6 +253,7 @@ export function classifyInterPayoutDiagnostics(
     diagnosticCode,
     diagnosticField: violation?.field ?? null,
     diagnosticReason: violation?.reason ?? 'diagnostic_unavailable',
+    privateProviderError: capturePrivateProviderErrorBody(response.body),
   });
 }
 

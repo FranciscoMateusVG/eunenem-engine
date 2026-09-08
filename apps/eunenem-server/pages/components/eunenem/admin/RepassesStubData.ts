@@ -158,6 +158,9 @@ export type RepasseTransferAttempt = {
   durationMs: number | null;
   stateBefore: RepasseStatus | null;
   stateAfter: RepasseStatus | null;
+  /** Private non-2xx Banco Inter response, available only on admin detail. */
+  providerErrorBodyPrivate: string | null;
+  providerErrorBodyTruncated: boolean | null;
 };
 
 /**
