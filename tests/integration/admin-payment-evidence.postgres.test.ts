@@ -202,6 +202,8 @@ describe('listAdminPaymentEvidence — Postgres', () => {
       provider: 'stripe',
       normalizedStatus: 'aprovado',
       rawStatus: 'succeeded',
+      providerAmountCents: 2_000,
+      providerRecordedAt: CREATED_AT.toISOString(),
       checkoutSessionRef: 'cs_1',
       paymentIntentRef: 'pi_1',
       chargeRef: 'ch_1',
@@ -244,6 +246,8 @@ describe('listAdminPaymentEvidence — Postgres', () => {
       provider: null,
       normalizedStatus: null,
       rawStatus: null,
+      providerAmountCents: null,
+      providerRecordedAt: null,
       checkoutSessionRef: null,
       paymentIntentRef: null,
       chargeRef: null,
@@ -269,6 +273,8 @@ describe('listAdminPaymentEvidence — Postgres', () => {
           provedor: 'unknown-provider',
           status: 'unknown-status',
           statusBruto: 'paid\runsafe',
+          amountCents: -1,
+          criadaEm: 'not-a-date',
         })}::jsonb
       WHERE id = ${PAYMENT_IDS[0]}::uuid
     `.execute(testDb.db);
@@ -285,11 +291,48 @@ describe('listAdminPaymentEvidence — Postgres', () => {
       provider: null,
       normalizedStatus: null,
       rawStatus: null,
+      providerAmountCents: null,
+      providerRecordedAt: null,
       checkoutSessionRef: null,
       paymentIntentRef: null,
       chargeRef: 'ch_1',
       interE2eRef: null,
       externalTransactionRef: null,
     });
+  });
+
+  it('isolates an unsafe campaign title instead of failing the whole page', async () => {
+    await testDb.db
+      .updateTable('campanhas')
+      .set({ titulo: 'Título\nperigoso' })
+      .where('id', '=', CAMPAIGN_ID)
+      .execute();
+    await testDb.db
+      .updateTable('campanhas')
+      .set({ id_plataforma: ID_PLATAFORMA_EUNENEM, titulo: 'Título normal' })
+      .where('id', '=', OTHER_CAMPAIGN_ID)
+      .execute();
+    await insertPayment({ id: PAYMENT_IDS[0], method: 'pix', status: 'pendente' });
+    await insertPayment({
+      id: PAYMENT_IDS[1],
+      campaignId: OTHER_CAMPAIGN_ID,
+      method: 'pix',
+      status: 'pendente',
+    });
+
+    const result = await listAdminPaymentEvidence(testDb.db, {
+      platformId: ID_PLATAFORMA_EUNENEM,
+      cursor: null,
+      limit: 10,
+      provider: null,
+      status: null,
+    });
+
+    expect(result.totalCount).toBe(2);
+    expect(result.rows.map((row) => row.campaignTitle).sort()).toEqual([
+      'Título indisponível',
+      'Título normal',
+    ]);
+    expect(JSON.stringify(result)).not.toContain('Título\\nperigoso');
   });
 });

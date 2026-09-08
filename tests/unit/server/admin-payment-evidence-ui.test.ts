@@ -31,6 +31,8 @@ function row(overrides: Partial<PaymentEvidenceRow> = {}): PaymentEvidenceRow {
       provider: 'stripe',
       normalizedStatus: 'aprovado',
       rawStatus: 'succeeded',
+      providerAmountCents: 1_900,
+      providerRecordedAt: '2026-09-08T14:02:00.000Z',
       checkoutSessionRef: 'cs_saved',
       paymentIntentRef: 'pi_saved',
       chargeRef: 'ch_saved',
@@ -54,6 +56,8 @@ describe('PaymentEvidenceTable', () => {
               provider: 'inter',
               normalizedStatus: 'aprovado',
               rawStatus: 'CONCLUIDA',
+              providerAmountCents: 2_000,
+              providerRecordedAt: '2026-09-08T14:03:00.000Z',
               checkoutSessionRef: null,
               paymentIntentRef: null,
               chargeRef: null,
@@ -73,6 +77,11 @@ describe('PaymentEvidenceTable', () => {
     expect(html).toContain('E0000000000000000000000000000001');
     expect(html).toContain('taxa plataforma');
     expect(html).toContain('adicional cartão');
+    expect(html).toContain('Total previsto');
+    expect(html).toContain('Valor registrado pelo provedor');
+    expect(html).toContain('20,00');
+    expect(html).toContain('19,00');
+    expect(html).not.toContain('>Pago ');
     expect(html).not.toContain('rawPayload');
     expect(html).not.toContain('signatureHeader');
   });
@@ -87,6 +96,8 @@ describe('PaymentEvidenceTable', () => {
               provider: null,
               normalizedStatus: null,
               rawStatus: null,
+              providerAmountCents: null,
+              providerRecordedAt: null,
               checkoutSessionRef: null,
               paymentIntentRef: null,
               chargeRef: null,
@@ -102,5 +113,7 @@ describe('PaymentEvidenceTable', () => {
     expect(html).toContain('sem estado normalizado');
     expect(html).toContain('sem estado salvo');
     expect(html).toContain('sem referência salva');
+    expect(html).toContain('Total previsto');
+    expect(html).not.toContain('>Pago ');
   });
 });

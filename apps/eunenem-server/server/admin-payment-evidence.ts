@@ -45,6 +45,8 @@ export const AdminPaymentEvidenceSchema = z.object({
     provider: PaymentEvidenceProviderFilterSchema.nullable(),
     normalizedStatus: z.enum(["aprovado", "rejeitado"]).nullable(),
     rawStatus: z.string().min(1).max(120).regex(SAFE_STORED_TEXT).nullable(),
+    providerAmountCents: z.number().int().nonnegative().nullable(),
+    providerRecordedAt: z.string().datetime().nullable(),
     checkoutSessionRef: NullableBoundedReferenceSchema,
     paymentIntentRef: NullableBoundedReferenceSchema,
     chargeRef: NullableBoundedReferenceSchema,
@@ -114,6 +116,8 @@ interface PaymentEvidenceDbRow {
   provider: string | null;
   normalized_status: string | null;
   raw_status: string | null;
+  provider_amount_cents: string | null;
+  provider_recorded_at: string | null;
   checkout_session_ref: string | null;
   payment_intent_ref: string | null;
   charge_ref: string | null;
@@ -155,6 +159,25 @@ function boundedStoredText(value: string | null, maxLength: number): string | nu
   return value;
 }
 
+function safeCampaignTitle(value: string): string {
+  if (value.length === 0 || value.length > 200 || !SAFE_STORED_TEXT.test(value)) {
+    return "Título indisponível";
+  }
+  return value;
+}
+
+function nullableAmountFromDb(value: string | null): number | null {
+  if (value === null || !/^(0|[1-9][0-9]*)$/.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+function nullableProviderDate(value: string | null): string | null {
+  if (value === null) return null;
+  const result = z.string().datetime().safeParse(value);
+  return result.success ? result.data : null;
+}
+
 /**
  * Stored-only admin payment evidence. The query applies platform and optional
  * filters before both pagination and count. It never reads webhook payloads,
@@ -194,6 +217,8 @@ export async function listAdminPaymentEvidence(
       p.transacao_externa ->> 'provedor' AS provider,
       p.transacao_externa ->> 'status' AS normalized_status,
       p.transacao_externa ->> 'statusBruto' AS raw_status,
+      p.transacao_externa ->> 'amountCents' AS provider_amount_cents,
+      p.transacao_externa ->> 'criadaEm' AS provider_recorded_at,
       p.intencao_external_ref AS checkout_session_ref,
       p.intencao_payment_intent_external_ref AS payment_intent_ref,
       p.intencao_charge_external_ref AS charge_ref,
@@ -228,7 +253,7 @@ export async function listAdminPaymentEvidence(
     AdminPaymentEvidenceSchema.parse({
       paymentId: row.payment_id,
       campaignId: row.campaign_id,
-      campaignTitle: row.campaign_title,
+      campaignTitle: safeCampaignTitle(row.campaign_title),
       method: row.method,
       status: row.status,
       createdAt: row.created_at.toISOString(),
@@ -248,6 +273,8 @@ export async function listAdminPaymentEvidence(
             ? row.normalized_status
             : null,
         rawStatus: boundedStoredText(row.raw_status, 120),
+        providerAmountCents: nullableAmountFromDb(row.provider_amount_cents),
+        providerRecordedAt: nullableProviderDate(row.provider_recorded_at),
         checkoutSessionRef: boundedStoredText(row.checkout_session_ref, 255),
         paymentIntentRef: boundedStoredText(row.payment_intent_ref, 255),
         chargeRef: boundedStoredText(row.charge_ref, 255),

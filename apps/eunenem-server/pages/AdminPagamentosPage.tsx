@@ -243,7 +243,7 @@ export function PaymentEvidenceTable({
                 </div>
               </td>
               <td className="whitespace-nowrap px-3 py-3 font-mono">
-                <div>Pago {formatBRL(row.amounts.paidCents)}</div>
+                <div>Total previsto {formatBRL(row.amounts.paidCents)}</div>
                 <div className="text-[10px] text-ink-mute">
                   contribuição {formatBRL(row.amounts.contributionCents)}
                 </div>
@@ -255,6 +255,18 @@ export function PaymentEvidenceTable({
                 </div>
                 <div className="text-[10px] text-ink-mute">
                   recebedor {formatBRL(row.amounts.receiverCents)}
+                </div>
+                <div className="mt-1 border-t border-line pt-1 text-[10px] text-ink-mute">
+                  Valor registrado pelo provedor:{" "}
+                  {row.providerEvidence.providerAmountCents === null
+                    ? "ausente"
+                    : formatBRL(row.providerEvidence.providerAmountCents)}
+                </div>
+                <div className="text-[10px] text-ink-mute">
+                  Momento registrado pelo provedor:{" "}
+                  {row.providerEvidence.providerRecordedAt === null
+                    ? "ausente"
+                    : formatDate(row.providerEvidence.providerRecordedAt)}
                 </div>
               </td>
               <td className="px-3 py-3">
