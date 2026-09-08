@@ -15,6 +15,45 @@ import { sql } from 'kysely';
  * is never changed by the forward migration.
  */
 export async function up(db: Kysely<unknown>): Promise<void> {
+  const previousTimeouts = await sql<{
+    lock_timeout: string;
+    statement_timeout: string;
+  }>`
+    SELECT current_setting('lock_timeout') AS lock_timeout,
+           current_setting('statement_timeout') AS statement_timeout
+  `.execute(db);
+  const previous = previousTimeouts.rows[0];
+  if (previous === undefined) {
+    throw new Error('Could not read PostgreSQL migration timeout settings');
+  }
+
+  // Bound this migration without widening an existing stricter session limit.
+  // These settings are transaction-local; the production Kysely migrator runs
+  // PostgreSQL migrations in one transaction. Restore them after success so
+  // later migrations in the same run retain the deployment session policy.
+  await sql`
+    SELECT set_config(
+             'lock_timeout',
+             CASE
+               WHEN (SELECT setting::bigint FROM pg_settings WHERE name = 'lock_timeout') = 0
+                 OR (SELECT setting::bigint FROM pg_settings WHERE name = 'lock_timeout') > 5000
+               THEN '5000ms'
+               ELSE current_setting('lock_timeout')
+             END,
+             TRUE
+           ),
+           set_config(
+             'statement_timeout',
+             CASE
+               WHEN (SELECT setting::bigint FROM pg_settings WHERE name = 'statement_timeout') = 0
+                 OR (SELECT setting::bigint FROM pg_settings WHERE name = 'statement_timeout') > 60000
+               THEN '60000ms'
+               ELSE current_setting('statement_timeout')
+             END,
+             TRUE
+           )
+  `.execute(db);
+
   // Freeze the cross-table financial evidence for this migration transaction.
   // SHARE conflicts with INSERT/UPDATE/DELETE's ROW EXCLUSIVE lock, so a
   // concurrent worker must finish before the guarded mutation reads the ledger
@@ -114,6 +153,11 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       END IF;
     END
     $handoff$;
+  `.execute(db);
+
+  await sql`
+    SELECT set_config('lock_timeout', ${previous.lock_timeout}, TRUE),
+           set_config('statement_timeout', ${previous.statement_timeout}, TRUE)
   `.execute(db);
 }
 

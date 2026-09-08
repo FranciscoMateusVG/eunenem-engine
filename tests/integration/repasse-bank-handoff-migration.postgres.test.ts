@@ -93,8 +93,52 @@ describe('052 guarded operator-authorized payout handoff migration', () => {
         ('20000000-0000-4000-8000-000000000001', ${TARGET}::uuid, 1000, NULL),
         ('20000000-0000-4000-8000-000000000002', ${TARGET}::uuid, 1000, NULL)
     `.execute(db);
+    await sql`
+      CREATE TABLE migration_timeout_observations (
+        lock_timeout_ms integer NOT NULL,
+        statement_timeout_ms integer NOT NULL
+      )
+    `.execute(db);
+    await sql`
+      CREATE FUNCTION observe_migration_timeouts() RETURNS trigger LANGUAGE plpgsql AS $fn$
+      BEGIN
+        INSERT INTO migration_timeout_observations (lock_timeout_ms, statement_timeout_ms)
+        VALUES (
+          (SELECT setting::integer FROM pg_settings WHERE name = 'lock_timeout'),
+          (SELECT setting::integer FROM pg_settings WHERE name = 'statement_timeout')
+        );
+        RETURN NEW;
+      END
+      $fn$
+    `.execute(db);
+    await sql`
+      CREATE TRIGGER observe_migration_timeouts
+        BEFORE UPDATE ON repasses_recebedor
+        FOR EACH ROW EXECUTE FUNCTION observe_migration_timeouts()
+    `.execute(db);
 
-    await db.transaction().execute((trx) => up(trx));
+    let restoredTimeouts: { lock_timeout_ms: number; statement_timeout_ms: number } | undefined;
+    await db.transaction().execute(async (trx) => {
+      await up(trx);
+      const restored = await sql<{ lock_timeout_ms: number; statement_timeout_ms: number }>`
+        SELECT
+          (SELECT setting::integer FROM pg_settings WHERE name = 'lock_timeout') AS lock_timeout_ms,
+          (SELECT setting::integer FROM pg_settings WHERE name = 'statement_timeout')
+            AS statement_timeout_ms
+      `.execute(trx);
+      restoredTimeouts = restored.rows[0];
+    });
+
+    const observedTimeouts = await sql<{
+      lock_timeout_ms: number;
+      statement_timeout_ms: number;
+    }>`SELECT lock_timeout_ms, statement_timeout_ms FROM migration_timeout_observations`.execute(
+      db,
+    );
+    expect(observedTimeouts.rows).toEqual([
+      { lock_timeout_ms: 5_000, statement_timeout_ms: 60_000 },
+    ]);
+    expect(restoredTimeouts).toEqual({ lock_timeout_ms: 0, statement_timeout_ms: 0 });
 
     const repasse = await sql<{
       status: string;
