@@ -164,6 +164,33 @@ const ATTEMPT_OUTCOME_TINT: Record<string, { dot: string; text: string }> = {
   transitorio: { dot: "bg-amber-500", text: "text-amber-800" },
 };
 
+const DIAGNOSTIC_LABELS: Record<string, string> = {
+  invalid_pix_key: "chave PIX inválida",
+  invalid_amount: "valor inválido",
+  invalid_description: "descrição inválida",
+  invalid_recipient: "destinatário inválido",
+  invalid_request: "requisição inválida",
+  provider_rejection: "rejeição do banco sem motivo seguro detalhado",
+  recipient_not_pix: "recebedor não configurado para PIX",
+  missing_reference: "referência de transferência ausente",
+  diagnostic_unavailable: "diagnóstico indisponível",
+};
+
+function attemptDiagnostic(attempt: RepasseTransferAttempt): string | null {
+  if (attempt.diagnosticCode === null) {
+    return attempt.error !== null ? "diagnóstico indisponível (registro sem dados estruturados)" : null;
+  }
+  const pieces = [DIAGNOSTIC_LABELS[attempt.diagnosticCode] ?? attempt.diagnosticCode];
+  if (attempt.diagnosticField !== null) pieces.push(`campo: ${attempt.diagnosticField}`);
+  if (
+    attempt.diagnosticReason !== null &&
+    attempt.diagnosticReason !== "diagnostic_unavailable"
+  ) {
+    pieces.push(`motivo: ${attempt.diagnosticReason}`);
+  }
+  return pieces.join(" · ");
+}
+
 function AttemptHistory({
   attempts,
 }: {
@@ -197,6 +224,7 @@ function AttemptRow({ attempt }: { attempt: RepasseTransferAttempt }) {
         })
       : { dot: "bg-purple-500", text: "text-purple-800" };
   const inFlight = attempt.finishedAt === null;
+  const diagnostic = attemptDiagnostic(attempt);
   return (
     <li className="space-y-1.5 px-5 py-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -224,7 +252,12 @@ function AttemptRow({ attempt }: { attempt: RepasseTransferAttempt }) {
       </div>
       {(attempt.codigoSolicitacao !== null ||
         attempt.error !== null ||
-        attempt.requestSummary !== null) && (
+        attempt.requestSummary !== null ||
+        attempt.httpStatus !== null ||
+        attempt.providerRequestId !== null ||
+        attempt.durationMs !== null ||
+        attempt.stateBefore !== null ||
+        diagnostic !== null) && (
         <dl className="grid gap-x-4 gap-y-0.5 pl-6 sm:grid-cols-[max-content_1fr]">
           {attempt.codigoSolicitacao !== null && (
             <AttemptMeta label="cód. inter" value={attempt.codigoSolicitacao} />
@@ -234,6 +267,21 @@ function AttemptRow({ attempt }: { attempt: RepasseTransferAttempt }) {
           )}
           {attempt.error !== null && (
             <AttemptMeta label="erro" value={attempt.error} tone="error" />
+          )}
+          {attempt.httpStatus !== null && (
+            <AttemptMeta label="HTTP" value={String(attempt.httpStatus)} />
+          )}
+          {attempt.providerRequestId !== null && (
+            <AttemptMeta label="correlação" value={attempt.providerRequestId} />
+          )}
+          {attempt.durationMs !== null && (
+            <AttemptMeta label="duração" value={`${attempt.durationMs} ms`} />
+          )}
+          {attempt.stateBefore !== null && attempt.stateAfter !== null && (
+            <AttemptMeta label="estado" value={`${attempt.stateBefore} → ${attempt.stateAfter}`} />
+          )}
+          {diagnostic !== null && (
+            <AttemptMeta label="diagnóstico" value={diagnostic} tone="error" />
           )}
         </dl>
       )}

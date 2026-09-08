@@ -371,14 +371,24 @@ export interface RepassesRecebedor {
 export interface RepasseTransferAttempts {
   attempt_no: number;
   codigo_solicitacao: string | null;
+  diagnostic_code: string | null;
+  diagnostic_field: string | null;
+  diagnostic_reason: string | null;
+  duration_ms: number | null;
   error: string | null;
   finished_at: Timestamp | null;
+  http_status: number | null;
   id: string;
+  operation: string | null;
   outcome: string | null;
+  provider_request_id: string | null;
   referencia: string;
   repasse_id: string;
   request_summary: string | null;
+  response_class: string | null;
   started_at: Timestamp;
+  state_after: string | null;
+  state_before: string | null;
 }
 
 export interface ResgatesPendentes {

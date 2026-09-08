@@ -122,6 +122,42 @@ export type RepasseTransferAttempt = {
   codigoSolicitacao: string | null;
   /** Inter error code only, never PII. */
   error: string | null;
+  operation: "pagar_pix" | "cancelar" | "resolver_manual" | null;
+  httpStatus: number | null;
+  providerRequestId: string | null;
+  responseClass:
+    | "accepted"
+    | "validation_rejection"
+    | "ambiguous_http"
+    | "pre_send_failure"
+    | "ambiguous_transport"
+    | "invalid_response"
+    | "local_rejection"
+    | "diagnostic_unavailable"
+    | null;
+  diagnosticCode:
+    | "invalid_pix_key"
+    | "invalid_amount"
+    | "invalid_description"
+    | "invalid_recipient"
+    | "invalid_request"
+    | "provider_rejection"
+    | "recipient_not_pix"
+    | "missing_reference"
+    | "diagnostic_unavailable"
+    | null;
+  diagnosticField: "pix_key" | "amount" | "description" | "recipient" | null;
+  diagnosticReason:
+    | "required"
+    | "invalid_format"
+    | "out_of_range"
+    | "not_owned"
+    | "unsupported"
+    | "diagnostic_unavailable"
+    | null;
+  durationMs: number | null;
+  stateBefore: RepasseStatus | null;
+  stateAfter: RepasseStatus | null;
 };
 
 /**

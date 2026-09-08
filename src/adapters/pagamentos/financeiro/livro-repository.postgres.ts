@@ -987,9 +987,11 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
             const attemptId = randomUUID();
             await sql`
               INSERT INTO repasse_transfer_attempts
-                (id, repasse_id, attempt_no, referencia, started_at, request_summary)
+                (id, repasse_id, attempt_no, referencia, started_at, request_summary,
+                 operation, state_before, state_after)
                 VALUES (${attemptId}, ${updated.id}, ${updated.transferAttempts},
-                        ${updated.transferReferencia}, ${input.agora}, ${input.requestSummary})
+                        ${updated.transferReferencia}, ${input.agora}, ${input.requestSummary},
+                        'pagar_pix', ${existingRepasse.status}, ${updated.status})
             `.execute(tx);
 
             return {
@@ -1111,12 +1113,32 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
             }
 
             // Close the open attempt row.
+            const observation = resultado.observation ?? null;
             await sql`
               UPDATE repasse_transfer_attempts
                 SET outcome = ${outcome},
                     codigo_solicitacao = ${codigo},
                     error = ${erro},
-                    finished_at = ${input.agora}
+                    finished_at = ${input.agora},
+                    state_after = ${updated.status},
+                    operation = COALESCE(${observation?.operation ?? null}, operation),
+                    http_status = COALESCE(${observation?.httpStatus ?? null}, http_status),
+                    provider_request_id = COALESCE(
+                      ${observation?.providerRequestId ?? null}, provider_request_id
+                    ),
+                    response_class = COALESCE(
+                      ${observation?.responseClass ?? null}, response_class
+                    ),
+                    diagnostic_code = COALESCE(
+                      ${observation?.diagnosticCode ?? null}, diagnostic_code
+                    ),
+                    diagnostic_field = COALESCE(
+                      ${observation?.diagnosticField ?? null}, diagnostic_field
+                    ),
+                    diagnostic_reason = COALESCE(
+                      ${observation?.diagnosticReason ?? null}, diagnostic_reason
+                    ),
+                    duration_ms = COALESCE(${observation?.durationMs ?? null}, duration_ms)
                 WHERE id = ${input.attemptId}
             `.execute(tx);
 
@@ -1215,6 +1237,7 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
                     codigo_solicitacao = COALESCE(${codigo}, codigo_solicitacao),
                     error = ${erro},
                     finished_at = ${input.agora},
+                    state_after = ${updated.status},
                     request_summary = COALESCE(request_summary, '') || ${` | reconciliacao: ${input.reconciliacaoResumo}`}
                 WHERE repasse_id = ${updated.id}
                   AND attempt_no = ${updated.transferAttempts}
@@ -1285,11 +1308,13 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
             await sql`
               INSERT INTO repasse_transfer_attempts
                 (id, repasse_id, attempt_no, referencia, started_at,
-                 request_summary, outcome, finished_at)
+                 request_summary, outcome, finished_at, operation,
+                 state_before, state_after)
                 SELECT ${randomUUID()}, ${updated.id},
                        COALESCE(MAX(attempt_no), 0) + 1,
                        ${updated.transferReferencia ?? ''}, ${input.agora},
-                       ${`cancelado_por:${input.canceladoPor}`}, ${'cancelado'}, ${input.agora}
+                       ${`cancelado_por:${input.canceladoPor}`}, ${'cancelado'}, ${input.agora},
+                       'cancelar', ${existingRepasse.status}, ${updated.status}
                   FROM repasse_transfer_attempts
                   WHERE repasse_id = ${updated.id}
             `.execute(tx);
@@ -1432,12 +1457,14 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
             await sql`
               INSERT INTO repasse_transfer_attempts
                 (id, repasse_id, attempt_no, referencia, started_at,
-                 request_summary, outcome, codigo_solicitacao, finished_at)
+                 request_summary, outcome, codigo_solicitacao, finished_at,
+                 operation, state_before, state_after)
                 SELECT ${randomUUID()}, ${updated.id},
                        COALESCE(MAX(attempt_no), 0) + 1,
                        ${updated.transferReferencia ?? ''}, ${input.agora},
                        ${`resolucao_manual_pago_por:${input.resolvidoPor}`}, ${'pago'},
-                       ${input.interCodigoSolicitacao}, ${input.agora}
+                       ${input.interCodigoSolicitacao}, ${input.agora},
+                       'resolver_manual', ${existingRepasse.status}, ${updated.status}
                   FROM repasse_transfer_attempts
                   WHERE repasse_id = ${updated.id}
             `.execute(tx);
@@ -1499,12 +1526,14 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
             await sql`
               INSERT INTO repasse_transfer_attempts
                 (id, repasse_id, attempt_no, referencia, started_at,
-                 request_summary, outcome, error, finished_at)
+                 request_summary, outcome, error, finished_at,
+                 operation, state_before, state_after)
                 SELECT ${randomUUID()}, ${updated.id},
                        COALESCE(MAX(attempt_no), 0) + 1,
                        ${updated.transferReferencia ?? ''}, ${input.agora},
                        ${`resolucao_manual_falhou_por:${input.resolvidoPor}`}, ${'falhou'},
-                       ${input.erro}, ${input.agora}
+                       ${input.erro}, ${input.agora},
+                       'resolver_manual', ${existingRepasse.status}, ${updated.status}
                   FROM repasse_transfer_attempts
                   WHERE repasse_id = ${updated.id}
             `.execute(tx);
@@ -1578,7 +1607,10 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
         try {
           const rows = (await sql<TransferAttemptRow>`
             SELECT id, repasse_id, attempt_no, referencia, started_at, finished_at,
-                   request_summary, outcome, codigo_solicitacao, error
+                   request_summary, outcome, codigo_solicitacao, error,
+                   operation, http_status, provider_request_id, response_class,
+                   diagnostic_code, diagnostic_field, diagnostic_reason, duration_ms,
+                   state_before, state_after
               FROM repasse_transfer_attempts
               WHERE repasse_id = ${idRepasse}
               ORDER BY attempt_no ASC, started_at ASC
@@ -1704,6 +1736,16 @@ type TransferAttemptRow = {
   outcome: string | null;
   codigo_solicitacao: string | null;
   error: string | null;
+  operation: RepasseTransferAttempt['operation'];
+  http_status: number | null;
+  provider_request_id: string | null;
+  response_class: RepasseTransferAttempt['responseClass'];
+  diagnostic_code: RepasseTransferAttempt['diagnosticCode'];
+  diagnostic_field: RepasseTransferAttempt['diagnosticField'];
+  diagnostic_reason: RepasseTransferAttempt['diagnosticReason'];
+  duration_ms: number | null;
+  state_before: RepasseTransferAttempt['stateBefore'];
+  state_after: RepasseTransferAttempt['stateAfter'];
 };
 
 function transferAttemptFromRow(row: TransferAttemptRow): RepasseTransferAttempt {
@@ -1718,6 +1760,16 @@ function transferAttemptFromRow(row: TransferAttemptRow): RepasseTransferAttempt
     outcome: row.outcome,
     codigoSolicitacao: row.codigo_solicitacao,
     error: row.error,
+    operation: row.operation,
+    httpStatus: row.http_status,
+    providerRequestId: row.provider_request_id,
+    responseClass: row.response_class,
+    diagnosticCode: row.diagnostic_code,
+    diagnosticField: row.diagnostic_field,
+    diagnosticReason: row.diagnostic_reason,
+    durationMs: row.duration_ms,
+    stateBefore: row.state_before,
+    stateAfter: row.state_after,
   };
 }
 

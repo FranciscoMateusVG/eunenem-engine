@@ -1,8 +1,11 @@
+// biome-ignore-all lint/complexity/noExcessiveCognitiveComplexity: the linear handler carries the at-most-one-PIX invariant; extracting branches would hide the retry/ambiguity boundary.
 import { SpanStatusCode } from '@opentelemetry/api';
 import type { LivroFinanceiroRepository } from '../../../adapters/pagamentos/financeiro/livro-repository.js';
 import type { RepasseJobEnqueuer } from '../../../adapters/pagamentos/transferencia-enqueuer.js';
 import {
+  TransferenciaAmbiguaError,
   type TransferenciaProvider,
+  type TransferenciaProviderDiagnostics,
   TransferenciaTransitoriaError,
 } from '../../../adapters/pagamentos/transferencia-provider.js';
 import type { IdRepasse } from '../../../domain/pagamentos/financeiro/value-objects/ids.js';
@@ -52,7 +55,30 @@ export interface ExecutarTransferenciaRepasseInput {
   readonly idRepasse: IdRepasse;
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: this handler carries the "at most one successful PIX per repasse" invariant; every branch (acao gate, transient-vs-ambiguous classification, outcome switch) is deliberately explicit and linear for money-path auditability. Extracting helpers would hide the invariant across call boundaries.
+const MAX_AUDIT_DURATION_MS = 120_000;
+
+function auditDurationMs(startedAt: number): number {
+  return Math.min(MAX_AUDIT_DURATION_MS, Math.max(0, Math.round(performance.now() - startedAt)));
+}
+
+function diagnosticsFallback(
+  responseClass: TransferenciaProviderDiagnostics['responseClass'],
+): TransferenciaProviderDiagnostics {
+  return {
+    operation: 'pagar_pix',
+    responseClass,
+    httpStatus: null,
+    providerRequestId: null,
+    diagnosticCode: 'diagnostic_unavailable',
+    diagnosticField: null,
+    diagnosticReason: 'diagnostic_unavailable',
+  };
+}
+
+function observation(diagnostics: TransferenciaProviderDiagnostics, startedAt: number) {
+  return { ...diagnostics, durationMs: auditDurationMs(startedAt) } as const;
+}
+
 export async function executarTransferenciaRepasse(
   deps: ExecutarTransferenciaRepasseDeps,
   input: ExecutarTransferenciaRepasseInput,
@@ -93,8 +119,18 @@ export async function executarTransferenciaRepasse(
           await livroFinanceiroRepository.finalizarTentativaTransferencia({
             idRepasse,
             attemptId: iniciado.attemptId,
-            resultado: { tipo: 'falhou', erro: 'RECEBEDOR_NAO_PIX' },
-            agora,
+            resultado: {
+              tipo: 'falhou',
+              erro: 'RECEBEDOR_NAO_PIX',
+              observation: {
+                ...diagnosticsFallback('local_rejection'),
+                diagnosticCode: 'recipient_not_pix',
+                diagnosticField: 'recipient',
+                diagnosticReason: 'unsupported',
+                durationMs: 0,
+              },
+            },
+            agora: clock(),
           });
         }
         logger.error('financeiro.repasse.executar.recebedor_nao_pix', { idRepasse });
@@ -148,8 +184,17 @@ export async function executarTransferenciaRepasse(
         await livroFinanceiroRepository.finalizarTentativaTransferencia({
           idRepasse,
           attemptId: iniciado.attemptId,
-          resultado: { tipo: 'falhou', erro: 'SEM_REFERENCIA' },
-          agora,
+          resultado: {
+            tipo: 'falhou',
+            erro: 'SEM_REFERENCIA',
+            observation: {
+              ...diagnosticsFallback('local_rejection'),
+              diagnosticCode: 'missing_reference',
+              diagnosticReason: 'required',
+              durationMs: 0,
+            },
+          },
+          agora: clock(),
         });
         span.setStatus({ code: SpanStatusCode.OK });
         return;
@@ -157,6 +202,7 @@ export async function executarTransferenciaRepasse(
 
       const shortId = String(idRepasse).slice(0, 8);
       let outcome: Awaited<ReturnType<TransferenciaProvider['pagarPix']>>;
+      const providerStartedAt = performance.now();
       try {
         outcome = await transferenciaProvider.pagarPix({
           chave: recebedor.chavePix,
@@ -171,14 +217,22 @@ export async function executarTransferenciaRepasse(
         // become undefined and EVERY thrown-pagarPix path TypeErrors, wedging
         // the repasse in `transferindo` (aperture-oxqlf, Izzy jguar suite).
         if (err instanceof TransferenciaTransitoriaError) {
+          const providerObservation = observation(
+            err.diagnostics ?? diagnosticsFallback('pre_send_failure'),
+            providerStartedAt,
+          );
           // Definitely no payment created. Exhausted → falhou; else revert
           // to aprovado and rethrow so pg-boss retries a clean fresh claim.
           if (iniciado.attemptNo >= MAX_TENTATIVAS_TRANSITORIAS) {
             await livroFinanceiroRepository.finalizarTentativaTransferencia({
               idRepasse,
               attemptId: iniciado.attemptId,
-              resultado: { tipo: 'falhou', erro: 'TRANSITORIO_ESGOTADO' },
-              agora,
+              resultado: {
+                tipo: 'falhou',
+                erro: 'TRANSITORIO_ESGOTADO',
+                observation: providerObservation,
+              },
+              agora: clock(),
             });
             logger.error('financeiro.repasse.executar.transitorio_esgotado', {
               idRepasse,
@@ -190,8 +244,12 @@ export async function executarTransferenciaRepasse(
           await livroFinanceiroRepository.finalizarTentativaTransferencia({
             idRepasse,
             attemptId: iniciado.attemptId,
-            resultado: { tipo: 'transitorio', erro: 'TRANSITORIO' },
-            agora,
+            resultado: {
+              tipo: 'transitorio',
+              erro: 'TRANSITORIO',
+              observation: providerObservation,
+            },
+            agora: clock(),
           });
           span.recordException(err);
           span.setStatus({ code: SpanStatusCode.ERROR, message: 'transitorio' });
@@ -199,11 +257,21 @@ export async function executarTransferenciaRepasse(
         }
 
         // AMBIGUOUS — a payment may exist. Never auto-retry; reconcile.
+        const providerObservation = observation(
+          err instanceof TransferenciaAmbiguaError
+            ? err.diagnostics
+            : diagnosticsFallback('ambiguous_transport'),
+          providerStartedAt,
+        );
         await livroFinanceiroRepository.finalizarTentativaTransferencia({
           idRepasse,
           attemptId: iniciado.attemptId,
-          resultado: { tipo: 'verificando', codigoSolicitacao: null },
-          agora,
+          resultado: {
+            tipo: 'verificando',
+            codigoSolicitacao: null,
+            observation: providerObservation,
+          },
+          agora: clock(),
         });
         await repasseJobEnqueuer.enqueueConfirmar(
           { idRepasse, tentativaConfirmacao: 1 },
@@ -215,13 +283,24 @@ export async function executarTransferenciaRepasse(
       }
 
       // Resolve the returned outcome.
+      const providerObservation = observation(
+        outcome.diagnostics ??
+          diagnosticsFallback(
+            outcome.outcome === 'rejeitado' ? 'validation_rejection' : 'accepted',
+          ),
+        providerStartedAt,
+      );
       switch (outcome.outcome) {
         case 'pago': {
           await livroFinanceiroRepository.finalizarTentativaTransferencia({
             idRepasse,
             attemptId: iniciado.attemptId,
-            resultado: { tipo: 'pago', codigoSolicitacao: outcome.codigoSolicitacao },
-            agora,
+            resultado: {
+              tipo: 'pago',
+              codigoSolicitacao: outcome.codigoSolicitacao,
+              observation: providerObservation,
+            },
+            agora: clock(),
           });
           logger.info('financeiro.repasse.executar.pago', { idRepasse });
           break;
@@ -231,8 +310,12 @@ export async function executarTransferenciaRepasse(
           await livroFinanceiroRepository.finalizarTentativaTransferencia({
             idRepasse,
             attemptId: iniciado.attemptId,
-            resultado: { tipo: 'verificando', codigoSolicitacao: outcome.codigoSolicitacao },
-            agora,
+            resultado: {
+              tipo: 'verificando',
+              codigoSolicitacao: outcome.codigoSolicitacao,
+              observation: providerObservation,
+            },
+            agora: clock(),
           });
           await repasseJobEnqueuer.enqueueConfirmar(
             { idRepasse, tentativaConfirmacao: 1 },
@@ -246,8 +329,12 @@ export async function executarTransferenciaRepasse(
           await livroFinanceiroRepository.finalizarTentativaTransferencia({
             idRepasse,
             attemptId: iniciado.attemptId,
-            resultado: { tipo: 'falhou', erro: outcome.erro },
-            agora,
+            resultado: {
+              tipo: 'falhou',
+              erro: outcome.erro,
+              observation: providerObservation,
+            },
+            agora: clock(),
           });
           logger.warn('financeiro.repasse.executar.rejeitado', { idRepasse, erro: outcome.erro });
           break;

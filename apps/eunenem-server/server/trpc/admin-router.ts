@@ -1980,6 +1980,48 @@ const RepasseTransferAttemptDTOSchema = z.object({
   outcome: z.string().nullable(),
   codigoSolicitacao: z.string().nullable(),
   error: z.string().nullable(),
+  operation: z.enum(['pagar_pix', 'cancelar', 'resolver_manual']).nullable(),
+  httpStatus: z.number().int().min(100).max(599).nullable(),
+  providerRequestId: z.string().max(128).nullable(),
+  responseClass: z
+    .enum([
+      'accepted',
+      'validation_rejection',
+      'ambiguous_http',
+      'pre_send_failure',
+      'ambiguous_transport',
+      'invalid_response',
+      'local_rejection',
+      'diagnostic_unavailable',
+    ])
+    .nullable(),
+  diagnosticCode: z
+    .enum([
+      'invalid_pix_key',
+      'invalid_amount',
+      'invalid_description',
+      'invalid_recipient',
+      'invalid_request',
+      'provider_rejection',
+      'recipient_not_pix',
+      'missing_reference',
+      'diagnostic_unavailable',
+    ])
+    .nullable(),
+  diagnosticField: z.enum(['pix_key', 'amount', 'description', 'recipient']).nullable(),
+  diagnosticReason: z
+    .enum([
+      'required',
+      'invalid_format',
+      'out_of_range',
+      'not_owned',
+      'unsupported',
+      'diagnostic_unavailable',
+    ])
+    .nullable(),
+  durationMs: z.number().int().min(0).max(120_000).nullable(),
+  stateBefore: RepasseStatusSchema.nullable(),
+  stateAfter: RepasseStatusSchema.nullable(),
 });
 export type RepasseTransferAttemptDTO = z.infer<typeof RepasseTransferAttemptDTOSchema>;
 
@@ -2223,6 +2265,16 @@ const repassesRouter = t.router({
         outcome: a.outcome,
         codigoSolicitacao: a.codigoSolicitacao,
         error: a.error,
+        operation: a.operation,
+        httpStatus: a.httpStatus,
+        providerRequestId: a.providerRequestId,
+        responseClass: a.responseClass,
+        diagnosticCode: a.diagnosticCode,
+        diagnosticField: a.diagnosticField,
+        diagnosticReason: a.diagnosticReason,
+        durationMs: a.durationMs,
+        stateBefore: a.stateBefore,
+        stateAfter: a.stateAfter,
       }));
 
       // aperture-477nz — persisted search-reconciliation candidates (chave

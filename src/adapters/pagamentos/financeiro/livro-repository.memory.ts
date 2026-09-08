@@ -36,6 +36,7 @@ import type {
   RepasseReconciliacaoCandidato,
   RepasseTransactionExecutor,
   RepasseTransferAttempt,
+  RepasseTransferObservation,
   RepasseTransferResultado,
   RepasseTransferResultadoTerminal,
 } from './livro-repository.js';
@@ -87,7 +88,46 @@ interface RepasseTransferAttemptRecord {
   codigoSolicitacao: string | null;
   error: string | null;
   finishedAt: Date | null;
+  operation: 'pagar_pix' | 'cancelar' | 'resolver_manual' | null;
+  httpStatus: number | null;
+  providerRequestId: string | null;
+  responseClass: RepasseTransferObservation['responseClass'] | null;
+  diagnosticCode: RepasseTransferObservation['diagnosticCode'] | null;
+  diagnosticField: RepasseTransferObservation['diagnosticField'];
+  diagnosticReason: RepasseTransferObservation['diagnosticReason'] | null;
+  durationMs: number | null;
+  stateBefore: StatusRepasse | null;
+  stateAfter: StatusRepasse | null;
 }
+
+type RepasseTransferAttemptRecordInput = Omit<
+  RepasseTransferAttemptRecord,
+  | 'operation'
+  | 'httpStatus'
+  | 'providerRequestId'
+  | 'responseClass'
+  | 'diagnosticCode'
+  | 'diagnosticField'
+  | 'diagnosticReason'
+  | 'durationMs'
+  | 'stateBefore'
+  | 'stateAfter'
+> &
+  Partial<
+    Pick<
+      RepasseTransferAttemptRecord,
+      | 'operation'
+      | 'httpStatus'
+      | 'providerRequestId'
+      | 'responseClass'
+      | 'diagnosticCode'
+      | 'diagnosticField'
+      | 'diagnosticReason'
+      | 'durationMs'
+      | 'stateBefore'
+      | 'stateAfter'
+    >
+  >;
 
 export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepository {
   private readonly lancamentos = new Map<IdLancamentoFinanceiro, LancamentoFinanceiro>();
@@ -168,7 +208,7 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
    * audit-row collision shipped green (aperture-vvh2j, GLaDOS money-flow review
    * 2026-07-16). This makes the fast unit suite faithful to that constraint.
    */
-  private pushTransferAttempt(record: RepasseTransferAttemptRecord): void {
+  private pushTransferAttempt(record: RepasseTransferAttemptRecordInput): void {
     const collision = this.repasseTransferAttempts.some(
       (a) => a.repasseId === record.repasseId && a.attemptNo === record.attemptNo,
     );
@@ -179,7 +219,19 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
       err.code = '23505';
       throw err;
     }
-    this.repasseTransferAttempts.push(record);
+    this.repasseTransferAttempts.push({
+      operation: null,
+      httpStatus: null,
+      providerRequestId: null,
+      responseClass: null,
+      diagnosticCode: null,
+      diagnosticField: null,
+      diagnosticReason: null,
+      durationMs: null,
+      stateBefore: null,
+      stateAfter: null,
+      ...record,
+    });
   }
 
   async saveLancamentos(lancamentos: readonly LancamentoFinanceiro[]): Promise<void> {
@@ -797,6 +849,9 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
                 codigoSolicitacao: null,
                 error: null,
                 finishedAt: null,
+                operation: 'pagar_pix',
+                stateBefore: existing.status,
+                stateAfter: updated.status,
               });
 
               return {
@@ -849,6 +904,8 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
                 outcome: 'pago',
                 codigoSolicitacao: resultado.codigoSolicitacao,
                 finishedAt: input.agora,
+                observation: resultado.observation,
+                stateAfter: updated.status,
               });
               break;
             }
@@ -860,6 +917,8 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
                 outcome: 'verificando',
                 codigoSolicitacao: resultado.codigoSolicitacao,
                 finishedAt: input.agora,
+                observation: resultado.observation,
+                stateAfter: updated.status,
               });
               break;
             }
@@ -871,6 +930,8 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
                 outcome: 'falhou',
                 error: resultado.erro,
                 finishedAt: input.agora,
+                observation: resultado.observation,
+                stateAfter: updated.status,
               });
               break;
             }
@@ -882,6 +943,8 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
                 outcome: 'transitorio',
                 error: resultado.erro,
                 finishedAt: input.agora,
+                observation: resultado.observation,
+                stateAfter: updated.status,
               });
               break;
             }
@@ -960,6 +1023,7 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
             attemptRow.codigoSolicitacao = codigo ?? attemptRow.codigoSolicitacao;
             attemptRow.error = erro;
             attemptRow.finishedAt = input.agora;
+            attemptRow.stateAfter = updated.status;
             attemptRow.requestSummary = `${attemptRow.requestSummary} | reconciliacao: ${input.reconciliacaoResumo}`;
           }
 
@@ -1026,6 +1090,9 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
             codigoSolicitacao: null,
             error: null,
             finishedAt: input.agora,
+            operation: 'cancelar',
+            stateBefore: existing.status,
+            stateAfter: updated.status,
           });
 
           span.setStatus({ code: SpanStatusCode.OK });
@@ -1101,6 +1168,9 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
       codigoSolicitacao: input.interCodigoSolicitacao,
       error: null,
       finishedAt: input.agora,
+      operation: 'resolver_manual',
+      stateBefore: existing.status,
+      stateAfter: updated.status,
     });
     return { repasse: updated };
   }
@@ -1131,6 +1201,9 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
       codigoSolicitacao: null,
       error: input.erro,
       finishedAt: input.agora,
+      operation: 'resolver_manual',
+      stateBefore: existing.status,
+      stateAfter: updated.status,
     });
     return { repasse: updated };
   }
@@ -1168,6 +1241,16 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
           outcome: a.outcome,
           codigoSolicitacao: a.codigoSolicitacao,
           error: a.error,
+          operation: a.operation,
+          httpStatus: a.httpStatus,
+          providerRequestId: a.providerRequestId,
+          responseClass: a.responseClass,
+          diagnosticCode: a.diagnosticCode,
+          diagnosticField: a.diagnosticField,
+          diagnosticReason: a.diagnosticReason,
+          durationMs: a.durationMs,
+          stateBefore: a.stateBefore,
+          stateAfter: a.stateAfter,
         }),
       );
     return attempts;
@@ -1235,6 +1318,8 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
       readonly finishedAt: Date;
       readonly codigoSolicitacao?: string | null;
       readonly error?: string | null;
+      readonly observation?: RepasseTransferObservation | undefined;
+      readonly stateAfter?: StatusRepasse;
     },
   ): void {
     const attempt = this.repasseTransferAttempts.find((a) => a.id === attemptId);
@@ -1246,6 +1331,19 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
     }
     if (patch.error !== undefined) {
       attempt.error = patch.error;
+    }
+    if (patch.stateAfter !== undefined) {
+      attempt.stateAfter = patch.stateAfter;
+    }
+    if (patch.observation !== undefined) {
+      attempt.operation = patch.observation.operation;
+      attempt.httpStatus = patch.observation.httpStatus;
+      attempt.providerRequestId = patch.observation.providerRequestId;
+      attempt.responseClass = patch.observation.responseClass;
+      attempt.diagnosticCode = patch.observation.diagnosticCode;
+      attempt.diagnosticField = patch.observation.diagnosticField;
+      attempt.diagnosticReason = patch.observation.diagnosticReason;
+      attempt.durationMs = patch.observation.durationMs;
     }
   }
 }

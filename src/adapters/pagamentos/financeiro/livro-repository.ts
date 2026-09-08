@@ -10,6 +10,7 @@ import type {
   IdPagamentoReferencia,
   IdRepasse,
 } from '../../../domain/pagamentos/financeiro/value-objects/ids.js';
+import type { TransferenciaProviderDiagnostics } from '../transferencia-provider.js';
 
 /**
  * Persistência do livro financeiro (porta).
@@ -412,6 +413,21 @@ export interface RepasseTransferAttempt {
   readonly outcome: string | null;
   readonly codigoSolicitacao: string | null;
   readonly error: string | null;
+  readonly operation: 'pagar_pix' | 'cancelar' | 'resolver_manual' | null;
+  readonly httpStatus: number | null;
+  readonly providerRequestId: string | null;
+  readonly responseClass: TransferenciaProviderDiagnostics['responseClass'] | null;
+  readonly diagnosticCode: TransferenciaProviderDiagnostics['diagnosticCode'] | null;
+  readonly diagnosticField: TransferenciaProviderDiagnostics['diagnosticField'];
+  readonly diagnosticReason: TransferenciaProviderDiagnostics['diagnosticReason'] | null;
+  readonly durationMs: number | null;
+  readonly stateBefore: StatusRepasse | null;
+  readonly stateAfter: StatusRepasse | null;
+}
+
+/** Provider evidence closed atomically with the repasse transition + attempt. */
+export interface RepasseTransferObservation extends TransferenciaProviderDiagnostics {
+  readonly durationMs: number;
 }
 
 /**
@@ -429,16 +445,32 @@ export interface RepasseTransactionExecutor {
 
 /** Terminal transfer outcome for finalize/resolve. `erro` MUST be PII-free (Inter codes only). */
 export type RepasseTransferResultadoTerminal =
-  | { readonly tipo: 'pago'; readonly codigoSolicitacao: string }
-  | { readonly tipo: 'falhou'; readonly erro: string };
+  | {
+      readonly tipo: 'pago';
+      readonly codigoSolicitacao: string;
+      readonly observation?: RepasseTransferObservation;
+    }
+  | {
+      readonly tipo: 'falhou';
+      readonly erro: string;
+      readonly observation?: RepasseTransferObservation;
+    };
 
 /** All outcomes an executar attempt can finalize into. */
 export type RepasseTransferResultado =
   | RepasseTransferResultadoTerminal
   // Ambiguous — a payment may exist; codigoSolicitacao is null when we
   // never captured it (crash/timeout before response).
-  | { readonly tipo: 'verificando'; readonly codigoSolicitacao: string | null }
+  | {
+      readonly tipo: 'verificando';
+      readonly codigoSolicitacao: string | null;
+      readonly observation?: RepasseTransferObservation;
+    }
   // Transient, payment definitely NOT created — revert transferindo →
   // aprovado so pg-boss's retry is a clean fresh claim (a new attempt,
   // same stable referencia). The attempt row is closed as 'transitorio'.
-  | { readonly tipo: 'transitorio'; readonly erro: string };
+  | {
+      readonly tipo: 'transitorio';
+      readonly erro: string;
+      readonly observation?: RepasseTransferObservation;
+    };

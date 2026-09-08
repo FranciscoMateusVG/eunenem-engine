@@ -17,7 +17,9 @@ import {
   type PagamentoEncontrado,
   type PagarPixInput,
   type PagarPixOutcome,
+  TransferenciaAmbiguaError,
   type TransferenciaProvider,
+  type TransferenciaProviderDiagnostics,
   TransferenciaTransitoriaError,
 } from './transferencia-provider.js';
 
@@ -96,6 +98,137 @@ export type { InterHttpResponse, InterHttpTransport } from './inter-http.js';
 interface InterPagarPixResponse {
   readonly tipoRetorno?: string;
   readonly codigoSolicitacao?: string;
+  readonly codigo?: unknown;
+  readonly title?: unknown;
+  readonly correlationId?: unknown;
+  readonly violacoes?: unknown;
+}
+
+interface InterViolation {
+  readonly propriedade?: unknown;
+  readonly razao?: unknown;
+}
+
+const CORRELATION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+
+const FIELD_CLASSIFICATIONS = new Map<
+  string,
+  NonNullable<TransferenciaProviderDiagnostics['diagnosticField']>
+>([
+  ['chave', 'pix_key'],
+  ['destinatario.chave', 'pix_key'],
+  ['valor', 'amount'],
+  ['descricao', 'description'],
+  ['destinatario', 'recipient'],
+]);
+
+const CODE_CLASSIFICATIONS = new Map<string, TransferenciaProviderDiagnostics['diagnosticCode']>([
+  ['CHAVE_INVALIDA', 'invalid_pix_key'],
+  ['Campo inválido', 'invalid_request'],
+  ['Dados inválidos.', 'invalid_request'],
+]);
+
+function classifyReason(value: unknown): TransferenciaProviderDiagnostics['diagnosticReason'] {
+  if (typeof value !== 'string' || value.length > 256) return 'diagnostic_unavailable';
+  const reason = value.normalize('NFC').toLocaleLowerCase('pt-BR');
+  if (reason.includes('obrigatório') || reason.includes('obrigatorio')) return 'required';
+  if (
+    reason.includes('não respeita o schema') ||
+    reason.includes('nao respeita o schema') ||
+    reason.includes('formato inválido') ||
+    reason.includes('formato invalido')
+  ) {
+    return 'invalid_format';
+  }
+  if (
+    reason.includes('maior que zero') ||
+    reason.includes('menor que zero') ||
+    reason.includes('não pode ser 0') ||
+    reason.includes('nao pode ser 0') ||
+    reason.includes('fora do limite')
+  ) {
+    return 'out_of_range';
+  }
+  if (reason.includes('não pertence') || reason.includes('nao pertence')) return 'not_owned';
+  if (reason.includes('não suportad') || reason.includes('nao suportad')) return 'unsupported';
+  return 'diagnostic_unavailable';
+}
+
+function readFirstMappedViolation(parsed: InterPagarPixResponse): {
+  readonly field: TransferenciaProviderDiagnostics['diagnosticField'];
+  readonly reason: TransferenciaProviderDiagnostics['diagnosticReason'];
+} {
+  if (!Array.isArray(parsed.violacoes)) {
+    return { field: null, reason: 'diagnostic_unavailable' };
+  }
+  for (const candidate of parsed.violacoes) {
+    if (candidate === null || typeof candidate !== 'object' || Array.isArray(candidate)) continue;
+    const violation = candidate as InterViolation;
+    if (typeof violation.propriedade !== 'string') continue;
+    const field = FIELD_CLASSIFICATIONS.get(violation.propriedade);
+    if (field === undefined) continue;
+    return { field, reason: classifyReason(violation.razao) };
+  }
+  return { field: null, reason: 'diagnostic_unavailable' };
+}
+
+function readProviderRequestId(parsed: InterPagarPixResponse | null): string | null {
+  return parsed !== null &&
+    typeof parsed.correlationId === 'string' &&
+    CORRELATION_ID_PATTERN.test(parsed.correlationId)
+    ? parsed.correlationId
+    : null;
+}
+
+function safeHttpStatus(statusCode: number): number | null {
+  return Number.isInteger(statusCode) && statusCode >= 100 && statusCode <= 599 ? statusCode : null;
+}
+
+function baseDiagnostics(
+  responseClass: TransferenciaProviderDiagnostics['responseClass'],
+  overrides: Partial<TransferenciaProviderDiagnostics> = {},
+): TransferenciaProviderDiagnostics {
+  return {
+    operation: 'pagar_pix',
+    responseClass,
+    httpStatus: null,
+    providerRequestId: null,
+    diagnosticCode: 'diagnostic_unavailable',
+    diagnosticField: null,
+    diagnosticReason: 'diagnostic_unavailable',
+    ...overrides,
+  };
+}
+
+/**
+ * Converts Inter's documented problem response into a finite, PII-free
+ * projection. `detail`, violation `valor`, and every unrecognised/free-text
+ * member are ignored. An unknown response stays explicitly unavailable.
+ */
+export function classifyInterPayoutDiagnostics(
+  response: InterHttpResponse,
+): TransferenciaProviderDiagnostics {
+  const parsed = parseJson<InterPagarPixResponse>(response.body);
+  const codeCandidate =
+    parsed !== null && typeof parsed.codigo === 'string'
+      ? parsed.codigo
+      : parsed !== null && typeof parsed.title === 'string'
+        ? parsed.title
+        : null;
+  const isValidationRejection = response.statusCode === 400 || response.statusCode === 422;
+  const diagnosticCode =
+    codeCandidate === null
+      ? 'diagnostic_unavailable'
+      : (CODE_CLASSIFICATIONS.get(codeCandidate) ??
+        (isValidationRejection ? 'provider_rejection' : 'diagnostic_unavailable'));
+  const violation = parsed === null ? null : readFirstMappedViolation(parsed);
+  return baseDiagnostics(isValidationRejection ? 'validation_rejection' : 'ambiguous_http', {
+    httpStatus: safeHttpStatus(response.statusCode),
+    providerRequestId: readProviderRequestId(parsed),
+    diagnosticCode,
+    diagnosticField: violation?.field ?? null,
+    diagnosticReason: violation?.reason ?? 'diagnostic_unavailable',
+  });
 }
 
 interface InterConsultaResponse {
@@ -146,10 +279,22 @@ export class TransferenciaProviderInter implements TransferenciaProvider {
         // Pre-flight (local) validation. A failure here means we never even
         // built a request, so NO payment can exist → safe-to-retry class.
         if (!input.chave) {
-          throw new TransferenciaTransitoriaError('pagarPix: chave ausente (pre-flight)');
+          throw new TransferenciaTransitoriaError('pagarPix: chave ausente (pre-flight)', {
+            diagnostics: baseDiagnostics('local_rejection', {
+              diagnosticCode: 'invalid_pix_key',
+              diagnosticField: 'pix_key',
+              diagnosticReason: 'required',
+            }),
+          });
         }
         if (!Number.isInteger(input.valorCents) || input.valorCents <= 0) {
-          throw new TransferenciaTransitoriaError('pagarPix: valorCents inválido (pre-flight)');
+          throw new TransferenciaTransitoriaError('pagarPix: valorCents inválido (pre-flight)', {
+            diagnostics: baseDiagnostics('local_rejection', {
+              diagnosticCode: 'invalid_amount',
+              diagnosticField: 'amount',
+              diagnosticReason: 'out_of_range',
+            }),
+          });
         }
 
         // Token fetch. If this fails for ANY reason, the payment request was
@@ -179,9 +324,14 @@ export class TransferenciaProviderInter implements TransferenciaProvider {
           if (isPreSendConnectionError(err)) {
             throw new TransferenciaTransitoriaError('pagarPix: falha de conexão pré-envio', {
               cause: err,
+              diagnostics: baseDiagnostics('pre_send_failure'),
             });
           }
-          throw new Error('pagarPix: falha de transporte pós-envio (ambígua)', { cause: err });
+          throw new TransferenciaAmbiguaError(
+            'pagarPix: falha de transporte pós-envio (ambígua)',
+            baseDiagnostics('ambiguous_transport'),
+            { cause: err },
+          );
         }
 
         span.setAttribute('transferencia.http_status', response.statusCode);
@@ -281,6 +431,7 @@ export class TransferenciaProviderInter implements TransferenciaProvider {
       span.setAttribute('transferencia.token_falhou', true);
       throw new TransferenciaTransitoriaError('pagarPix: falha ao obter token (pré-envio)', {
         cause: err,
+        diagnostics: baseDiagnostics('pre_send_failure'),
       });
     }
   }
@@ -302,40 +453,64 @@ export class TransferenciaProviderInter implements TransferenciaProvider {
       if (parsed === null || typeof parsed.codigoSolicitacao !== 'string') {
         // 2xx but we can't recover a codigoSolicitacao — a payment may well
         // have been created. Ambiguous by contract.
-        throw new Error('pagarPix: 2xx sem codigoSolicitacao (ambíguo)');
+        throw new TransferenciaAmbiguaError(
+          'pagarPix: 2xx sem codigoSolicitacao (ambíguo)',
+          baseDiagnostics('invalid_response', {
+            httpStatus: safeHttpStatus(response.statusCode),
+            providerRequestId: readProviderRequestId(parsed),
+          }),
+        );
       }
       const mapped = mapTipoRetorno(parsed.tipoRetorno);
+      const diagnostics = baseDiagnostics('accepted', {
+        httpStatus: safeHttpStatus(response.statusCode),
+        providerRequestId: readProviderRequestId(parsed),
+      });
       span.setAttribute('transferencia.codigo_solicitacao', parsed.codigoSolicitacao);
       span.setAttribute('transferencia.tipo_retorno', parsed.tipoRetorno ?? 'DESCONHECIDO');
       if (mapped === 'pago') {
-        return { outcome: 'pago', codigoSolicitacao: parsed.codigoSolicitacao };
+        return { outcome: 'pago', codigoSolicitacao: parsed.codigoSolicitacao, diagnostics };
       }
       if (mapped === 'agendado_aprovacao') {
-        return { outcome: 'agendado_aprovacao', codigoSolicitacao: parsed.codigoSolicitacao };
+        return {
+          outcome: 'agendado_aprovacao',
+          codigoSolicitacao: parsed.codigoSolicitacao,
+          diagnostics,
+        };
       }
       // Unknown tipoRetorno on a 2xx: the safest reading is that a payment
       // may exist in an unclassifiable state. Do NOT guess a terminal
       // outcome — hand the ambiguity to the caller (→ verificando).
-      throw new Error('pagarPix: tipoRetorno desconhecido em 2xx (ambíguo)');
+      throw new TransferenciaAmbiguaError(
+        'pagarPix: tipoRetorno desconhecido em 2xx (ambíguo)',
+        baseDiagnostics('invalid_response', {
+          httpStatus: safeHttpStatus(response.statusCode),
+          providerRequestId: readProviderRequestId(parsed),
+        }),
+      );
     }
 
     if (response.statusCode === 400 || response.statusCode === 422) {
       // A clean client-side validation rejection: Inter refuses the request
       // before creating any payment. Definite no-payment → rejeitado.
       const erro = extractInterErrorCode(response);
+      const diagnostics = classifyInterPayoutDiagnostics(response);
       span.setAttribute('transferencia.erro_code', erro);
       setRespShapeAttrs(span, response);
       const codigoSolicitacao = parseJson<InterPagarPixResponse>(response.body)?.codigoSolicitacao;
       return typeof codigoSolicitacao === 'string'
-        ? { outcome: 'rejeitado', erro, codigoSolicitacao }
-        : { outcome: 'rejeitado', erro };
+        ? { outcome: 'rejeitado', erro, codigoSolicitacao, diagnostics }
+        : { outcome: 'rejeitado', erro, diagnostics };
     }
 
     // 401/403/404/409/429 and every 5xx: we cannot assert no payment was
     // created (e.g. a 5xx after the payment already landed). Ambiguous.
     span.setAttribute('transferencia.erro_code', extractInterErrorCode(response));
     setRespShapeAttrs(span, response);
-    throw new Error(`pagarPix: HTTP ${response.statusCode} (ambíguo)`);
+    throw new TransferenciaAmbiguaError(
+      `pagarPix: HTTP ${response.statusCode} (ambíguo)`,
+      classifyInterPayoutDiagnostics(response),
+    );
   }
 
   /** Pages through extrato/completo, accumulating every transaction. */

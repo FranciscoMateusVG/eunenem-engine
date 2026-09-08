@@ -201,6 +201,15 @@ describe('executarTransferenciaRepasse — outcome pago', () => {
     expect(attempts[0]?.outcome).toBe('pago');
     expect(attempts[0]?.codigoSolicitacao).toBe(repasse?.interCodigoSolicitacao);
     expect(attempts[0]?.finishedAt).not.toBeNull();
+    expect(attempts[0]).toMatchObject({
+      operation: 'pagar_pix',
+      responseClass: 'accepted',
+      httpStatus: null,
+      diagnosticCode: 'diagnostic_unavailable',
+      stateBefore: 'aprovado',
+      stateAfter: 'pago',
+    });
+    expect(attempts[0]?.durationMs).toBeTypeOf('number');
 
     // The single debit point: linked lançamentos are stamped at pago.
     const lancamentos = await rig.livro.findLancamentosByIds(idsLancamentos as never);
@@ -268,6 +277,50 @@ describe('executarTransferenciaRepasse — outcome rejeitado', () => {
       expect(l.transferidoEm).toBeNull();
     }
     expect(provider.pagarPixCalls).toBe(1);
+  });
+
+  it('closes the provider diagnostic in the same attempt/FSM transition', async () => {
+    const rig = await buildRig();
+    const { idRepasse } = await seedRepasseAprovado(rig);
+    const delegate = fake();
+    const provider: TransferenciaProvider = {
+      async pagarPix() {
+        return {
+          outcome: 'rejeitado',
+          erro: 'HTTP_422',
+          diagnostics: {
+            operation: 'pagar_pix',
+            responseClass: 'validation_rejection',
+            httpStatus: 422,
+            providerRequestId: 'req-422',
+            diagnosticCode: 'invalid_pix_key',
+            diagnosticField: 'pix_key',
+            diagnosticReason: 'invalid_format',
+          },
+        };
+      },
+      consultarPagamento: (codigo) => delegate.consultarPagamento(codigo),
+      buscarPagamentos: (input) => delegate.buscarPagamentos(input),
+    };
+
+    await executar(rig, provider, idRepasse);
+
+    const repasse = await rig.livro.findRepasseById(idRepasse as never);
+    const attempts = await rig.livro.findTransferAttemptsByRepasseId(idRepasse as never);
+    expect(repasse?.status).toBe('falhou');
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]).toMatchObject({
+      outcome: 'falhou',
+      operation: 'pagar_pix',
+      httpStatus: 422,
+      providerRequestId: 'req-422',
+      responseClass: 'validation_rejection',
+      diagnosticCode: 'invalid_pix_key',
+      diagnosticField: 'pix_key',
+      diagnosticReason: 'invalid_format',
+      stateBefore: 'aprovado',
+      stateAfter: 'falhou',
+    });
   });
 
   it('handles a rejection WITHOUT codigoSolicitacao (incluiCodigoNaRejeicao: false)', async () => {
@@ -407,6 +460,13 @@ describe('executarTransferenciaRepasse — reconciliar path (crash re-delivery)'
     const openAttempts = await rig.livro.findTransferAttemptsByRepasseId(idRepasse as never);
     expect(openAttempts).toHaveLength(1);
     expect(openAttempts[0]?.finishedAt).toBeNull(); // orphan intent row
+    expect(openAttempts[0]).toMatchObject({
+      operation: 'pagar_pix',
+      stateBefore: 'aprovado',
+      stateAfter: 'transferindo',
+      responseClass: null,
+      diagnosticCode: null,
+    });
 
     // pg-boss re-delivers. A payment MAY exist → divert, never re-pay.
     await executar(rig, provider, idRepasse);
@@ -421,6 +481,11 @@ describe('executarTransferenciaRepasse — reconciliar path (crash re-delivery)'
     expect(attempts).toHaveLength(1);
     expect(attempts[0]?.outcome).toBe('verificando');
     expect(attempts[0]?.finishedAt).not.toBeNull();
+    expect(attempts[0]).toMatchObject({
+      responseClass: null,
+      diagnosticCode: null,
+      stateAfter: 'verificando',
+    });
   });
 });
 

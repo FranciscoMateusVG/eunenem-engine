@@ -410,6 +410,58 @@ describe('admin.repasses.show (aperture-riywh)', () => {
     expect(result.repasse).toBeNull();
   });
 
+  it('returns the sanitized durable provider diagnosis on the existing authorized detail', async () => {
+    const { idRepasse } = await seedPendingRepasse(rig);
+    await rig.livroFinanceiroRepository.aprovarRepassePixTransaction(
+      {
+        idRepasse: idRepasse as never,
+        aprovadoEm: T1,
+        transferReferencia: gerarTransferReferencia(idRepasse as never),
+      },
+      async () => {},
+    );
+    const started = await rig.livroFinanceiroRepository.iniciarTransferenciaTransaction({
+      idRepasse: idRepasse as never,
+      requestSummary: 'valor:4500;tipo_chave:email',
+      agora: T1,
+    });
+    await rig.livroFinanceiroRepository.finalizarTentativaTransferencia({
+      idRepasse: idRepasse as never,
+      attemptId: started.attemptId,
+      resultado: {
+        tipo: 'falhou',
+        erro: 'HTTP_422',
+        observation: {
+          operation: 'pagar_pix',
+          responseClass: 'validation_rejection',
+          httpStatus: 422,
+          providerRequestId: 'req-safe-422',
+          diagnosticCode: 'invalid_pix_key',
+          diagnosticField: 'pix_key',
+          diagnosticReason: 'invalid_format',
+          durationMs: 81,
+        },
+      },
+      agora: T1,
+    });
+
+    const result = await rig.caller.admin.repasses.show({ idRepasse });
+    expect(result.repasse?.attempts).toEqual([
+      expect.objectContaining({
+        operation: 'pagar_pix',
+        httpStatus: 422,
+        providerRequestId: 'req-safe-422',
+        responseClass: 'validation_rejection',
+        diagnosticCode: 'invalid_pix_key',
+        diagnosticField: 'pix_key',
+        diagnosticReason: 'invalid_format',
+        durationMs: 81,
+        stateBefore: 'aprovado',
+        stateAfter: 'falhou',
+      }),
+    ]);
+  });
+
   it('returns null when the campanha belongs to a different plataforma (defensive)', async () => {
     // Hijack the campanha to ID_PLATAFORMA_EUCASEI after seeding the repasse.
     const { idRepasse } = await seedPendingRepasse(rig);
