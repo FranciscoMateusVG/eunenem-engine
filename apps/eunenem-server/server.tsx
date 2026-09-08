@@ -23,6 +23,7 @@ import {
 } from './server/auth/setup.js';
 import { installBlockedAuthHandlerGuard } from './server/blocked-auth-handler.js';
 import { createLegacyBridgeHandler } from './server/legacy-bridge.js';
+import { createLegacyGuestRedirectMiddleware } from './server/legacy-guest-redirect.js';
 import { registerPixCobrancaReconciliationJob } from './server/jobs/pix-cobranca-reconciliation.pgboss.js';
 import { createPainelAccessMiddleware } from './server/painel-access.js';
 import { appRouter } from './server/trpc/router.js';
@@ -244,6 +245,13 @@ app.use(
     },
   }),
 );
+
+// Legacy guest links shared before Engine owned the public host. Explicit
+// Engine/API/static routes above always win; the middleware only redirects
+// eligible root guest identifiers and their /checkout deep link. It never
+// proxies legacy HTML/assets and has no destination fallback when the
+// configured legacy origin is absent, invalid, or points back at this host.
+app.use('*', createLegacyGuestRedirectMiddleware(env.LEGACY_SITE_ORIGIN));
 
 // "/" SSRs the marketing landing page via the catch-all below —
 // resolveRoute maps the exact "/" pathname to { kind: 'landing' }.
