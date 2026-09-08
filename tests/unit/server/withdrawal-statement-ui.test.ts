@@ -7,6 +7,7 @@ import {
   adaptSummary,
   movementRowViewModel,
   movementStateLabel,
+  pendingTransferSummaryLabel,
 } from '../../../apps/eunenem-server/pages/components/eunenem/painel/PresentesBody.js';
 
 function summary(overrides: Partial<ExtratoSummaryDTO> = {}): ExtratoSummaryDTO {
@@ -75,6 +76,11 @@ describe('withdrawal statement UI projection', () => {
       aguardando: 0,
       aguardandoAprovacao: 0,
     });
+  });
+
+  it('places a conditional pending label beside the completed summary', () => {
+    expect(pendingTransferSummaryLabel(2000)).toBe('(+ R$\u00a020,00 em transferência)');
+    expect(pendingTransferSummaryLabel(0)).toBeNull();
   });
 
   it.each([
