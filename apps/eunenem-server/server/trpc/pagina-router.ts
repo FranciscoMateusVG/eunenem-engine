@@ -12,6 +12,7 @@ import {
   type IdItemDoPagamento,
   type IdOpcaoContribuicao,
   type IdPagamento,
+  CheckoutOperationConflictError,
   iniciarPagamentoCarrinho,
   prepararPagamentoCarrinho,
   listarContribuicoesDeOpcao,
@@ -353,7 +354,10 @@ const checkoutProcedure = t.procedure.use(async ({ ctx, next }) => {
   return next();
 });
 
-function readCheckoutCapability(ctx: TrpcContext, operationId: string): string | null {
+function readCheckoutCapability(
+  ctx: TrpcContext,
+  operationId: string,
+): { readonly capability: string | null; readonly slotCount: number } {
   const raw = ctx.headers.get('cookie') ?? '';
   if (Buffer.byteLength(raw, 'utf8') > MAX_COOKIE_HEADER_BYTES) {
     throw new TRPCError({ code: 'CONFLICT', message: 'Operação indisponível' });
@@ -384,7 +388,7 @@ function readCheckoutCapability(ctx: TrpcContext, operationId: string): string |
       target = value;
     }
   }
-  return target;
+  return { capability: target, slotCount: slots };
 }
 
 function setCheckoutCapability(ctx: TrpcContext, operationId: string, capability: string): void {
@@ -395,6 +399,25 @@ function setCheckoutCapability(ctx: TrpcContext, operationId: string, capability
       capability +
       '; Max-Age=604800; Path=/; HttpOnly; Secure; SameSite=Lax',
   );
+}
+
+function clearCheckoutCapability(ctx: TrpcContext, operationId: string): void {
+  ctx.resHeaders.append(
+    'set-cookie',
+    checkoutCookieName(operationId) + '=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax',
+  );
+}
+
+function clearTerminalCheckoutCapability(
+  ctx: TrpcContext,
+  operationId: string,
+  status: string,
+): void {
+  // Mount material and local checkout persistence are not terminal: the same
+  // operation cookie must survive refresh until the payment itself concludes.
+  if (status === 'aprovado' || status === 'rejeitado' || status === 'estornado') {
+    clearCheckoutCapability(ctx, operationId);
+  }
 }
 
 function deterministicUuid(operationId: string, domain: string): string {
@@ -637,8 +660,11 @@ export const paginaRouter = t.router({
             // flows) and for direct-URL visits.
             redirectOnCompletion: 'if_required' as const,
           };
-        const existingCapability = readCheckoutCapability(ctx, input.operationId);
-        if (existingCapability === null) {
+        const checkoutCookie = readCheckoutCapability(ctx, input.operationId);
+        if (checkoutCookie.capability === null) {
+          if (checkoutCookie.slotCount >= MAX_CHECKOUT_COOKIE_SLOTS) {
+            throw new CheckoutOperationConflictError();
+          }
           const capability = randomBytes(32).toString('base64url');
           const prepared = await prepararPagamentoCarrinho(deps, sagaInput, { capability });
           if (!prepared.created) throw new Error('checkout operation is unavailable');
@@ -646,8 +672,9 @@ export const paginaRouter = t.router({
           return { tipo: 'prepared' as const, operationId: input.operationId };
         }
         const result = await iniciarPagamentoCarrinho(deps, sagaInput, {
-          capability: existingCapability,
+          capability: checkoutCookie.capability,
         });
+        clearTerminalCheckoutCapability(ctx, input.operationId, result.pagamento.status);
         // aperture-kuw0o (spec §4.3): discriminated union on the wire.
         // expiraEm → ISO string (no tRPC transformer in this app).
         if (result.tipo === 'pix_qr') {
@@ -678,10 +705,7 @@ export const paginaRouter = t.router({
               ? 'Pagamento aguardando recuperação'
               : (err as { _tag?: unknown })?._tag === 'CheckoutOperationConflictError'
                 ? 'Operação indisponível'
-                : err instanceof Error
-                  ? err.message
-                  : String(err),
-          cause: err,
+                : 'Não foi possível iniciar o pagamento',
         });
       }
     }),
@@ -779,8 +803,11 @@ export const paginaRouter = t.router({
             // + direct-URL visits + the legacy redirect path.
             redirectOnCompletion: 'if_required' as const,
           };
-        const existingCapability = readCheckoutCapability(ctx, input.operationId);
-        if (existingCapability === null) {
+        const checkoutCookie = readCheckoutCapability(ctx, input.operationId);
+        if (checkoutCookie.capability === null) {
+          if (checkoutCookie.slotCount >= MAX_CHECKOUT_COOKIE_SLOTS) {
+            throw new CheckoutOperationConflictError();
+          }
           const capability = randomBytes(32).toString('base64url');
           const prepared = await prepararPagamentoCarrinho(deps, sagaInput, { capability });
           if (!prepared.created) throw new Error('checkout operation is unavailable');
@@ -788,8 +815,9 @@ export const paginaRouter = t.router({
           return { tipo: 'prepared' as const, operationId: input.operationId };
         }
         const result = await iniciarPagamentoCarrinho(deps, sagaInput, {
-          capability: existingCapability,
+          capability: checkoutCookie.capability,
         });
+        clearTerminalCheckoutCapability(ctx, input.operationId, result.pagamento.status);
         // aperture-kuw0o (spec §4.3): discriminated union on the wire.
         // expiraEm → ISO string (no tRPC transformer in this app).
         if (result.tipo === 'pix_qr') {
@@ -820,10 +848,7 @@ export const paginaRouter = t.router({
               ? 'Pagamento aguardando recuperação'
               : (err as { _tag?: unknown })?._tag === 'CheckoutOperationConflictError'
                 ? 'Operação indisponível'
-                : err instanceof Error
-                  ? err.message
-                  : String(err),
-          cause: err,
+                : 'Não foi possível iniciar o pagamento',
         });
       }
     }),
@@ -896,6 +921,7 @@ export const paginaRouter = t.router({
       } else {
         status = 'unknown';
       }
+      clearTerminalCheckoutCapability(ctx, pagamento.id, pagamento.status);
 
       // Post-Phase-1 (plan 0015): contribuinte data moved from Contribuicao
       // to IntencaoPagamento per-pagamento. The success page now reads it
@@ -1029,9 +1055,11 @@ export const paginaRouter = t.router({
 
       // OUR DB is the source of truth for terminal states.
       if (pagamento.status === 'aprovado') {
+        clearTerminalCheckoutCapability(ctx, pagamento.id, pagamento.status);
         return { status: 'confirmado' as const };
       }
       if (pagamento.status === 'rejeitado') {
+        clearTerminalCheckoutCapability(ctx, pagamento.id, pagamento.status);
         return { status: 'rejeitado' as const };
       }
 

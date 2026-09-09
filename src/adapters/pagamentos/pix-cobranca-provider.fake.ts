@@ -28,7 +28,16 @@ export const PIX_COBRANCA_FAKE_MAGIC_CENTS = {
 } as const;
 
 export type ConsultarCobrancaFakeStep =
-  | Exclude<ConsultarCobrancaResult, { status: 'concluida' }>
+  | Exclude<ConsultarCobrancaResult, { status: 'concluida' | 'ativa' }>
+  | {
+      readonly status: 'ativa';
+      /** Omit to reuse the charge txid. */
+      readonly txid?: string;
+      /** Omit to reuse the charge amount. */
+      readonly valorOriginalCents?: MoneyCents;
+      readonly pixCopiaECola?: string;
+      readonly expiraEm?: Date;
+    }
   | {
       readonly status: 'concluida';
       /** Omit to exercise the injected deterministic factory. */
@@ -397,8 +406,10 @@ export class PixCobrancaProviderFake implements PixCobrancaProvider {
     if (step.status === 'ativa') {
       return {
         status: 'ativa',
-        pixCopiaECola: entry.result.pixCopiaECola,
-        expiraEm: new Date(entry.result.expiraEm.getTime()),
+        txid: step.txid ?? entry.result.txid,
+        valorOriginalCents: step.valorOriginalCents ?? entry.input.amountCents,
+        pixCopiaECola: step.pixCopiaECola ?? entry.result.pixCopiaECola,
+        expiraEm: step.expiraEm ?? new Date(entry.result.expiraEm.getTime()),
       };
     }
     if (step.status !== 'concluida') return cloneConsultarCobrancaResult(step);

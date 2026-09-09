@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { SpanStatusCode } from '@opentelemetry/api';
 import { z } from 'zod/v4';
 import type { CampanhaRepository } from '../../adapters/arrecadacao/campanha-repository.js';
@@ -8,7 +8,6 @@ import type {
   CheckoutOperationRepository,
   CheckoutOperationSnapshot,
 } from '../../adapters/pagamentos/checkout-operation-repository.js';
-import { CheckoutOperationRepositoryMemory } from '../../adapters/pagamentos/checkout-operation-repository.memory.js';
 import type {
   CheckoutSessionProvider,
   CriarSessaoCheckoutInput,
@@ -142,7 +141,7 @@ export interface IniciarPagamentoCarrinhoDeps {
   readonly contribuicaoRepository: ContribuicaoRepository;
   readonly provedorRegraTaxa: ProvedorRegraTaxa;
   readonly pagamentoRepository: PagamentoRepository;
-  readonly checkoutOperationRepository?: CheckoutOperationRepository;
+  readonly checkoutOperationRepository: CheckoutOperationRepository;
   readonly pagamentoEventPublisher: PagamentoEventPublisher;
   readonly checkoutSessionProvider: CheckoutSessionProvider;
   readonly pixCobrancaProvider: PixCobrancaProvider;
@@ -206,24 +205,8 @@ export async function prepararPagamentoCarrinho(
 export async function iniciarPagamentoCarrinho(
   deps: IniciarPagamentoCarrinhoDeps,
   input: IniciarPagamentoCarrinhoInput,
-  access?: CheckoutOperationAccess,
+  access: CheckoutOperationAccess,
 ): Promise<IniciarPagamentoCarrinhoResult> {
-  if (!deps.checkoutOperationRepository || !access) {
-    // Compatibility for existing internal callers/tests. It still uses the
-    // reserve-before-I/O state machine; only the public router owns cookies.
-    const guardedDeps = {
-      ...deps,
-      checkoutOperationRepository: new CheckoutOperationRepositoryMemory(deps.pagamentoRepository),
-    };
-    const guardedAccess = { capability: randomBytes(32).toString('base64url') };
-    await runPagamentoCarrinho(guardedDeps, input, guardedAccess, 'prepare');
-    return (await runPagamentoCarrinho(
-      guardedDeps,
-      input,
-      guardedAccess,
-      'execute',
-    )) as IniciarPagamentoCarrinhoResult;
-  }
   const result = await runPagamentoCarrinho(deps, input, access, 'execute');
   return result as IniciarPagamentoCarrinhoResult;
 }
@@ -250,6 +233,9 @@ async function runPagamentoCarrinho(
   const { logger, tracer } = observability;
   if (!checkoutOperationRepository) {
     throw new Error('checkoutOperationRepository is required');
+  }
+  if (!access || !/^[A-Za-z0-9_-]{43}$/.test(access.capability)) {
+    throw new Error('checkout operation access is required');
   }
 
   return tracer.startActiveSpan(
@@ -616,13 +602,13 @@ async function runPagamentoCarrinho(
               redirectOnCompletion: parsed.redirectOnCompletion ?? 'always',
             },
           );
-        } catch (providerError) {
+        } catch {
           await checkoutOperationRepository.completeAttempt({
             operationId: parsed.idPagamento,
             attemptNo: claimed.attemptNo,
             fenceToken: claimed.fenceToken,
             outcome: 'outcome_unknown',
-            diagnostic: providerError instanceof Error ? providerError.name.slice(0, 120) : null,
+            diagnostic: 'provider_call_failed',
             providerRef: null,
             providerExpiresAt: null,
             now: clock(),
@@ -730,7 +716,18 @@ async function obtainProviderMaterial(
       };
     }
     const recovered = await stripe.obterSessaoCheckout(operation.providerRef ?? '');
-    if (!recovered?.clientSecret) throw new CheckoutOperationPendingError();
+    if (
+      !recovered?.clientSecret ||
+      recovered.sessionId !== operation.providerRef ||
+      recovered.externalRef !== operation.providerRef ||
+      recovered.paymentId !== operation.paymentId ||
+      recovered.intentId !== operation.snapshot.intentId ||
+      recovered.campaignId !== operation.campaignId ||
+      recovered.method !== operation.method ||
+      recovered.amountTotalCents !== operation.snapshot.totalChargedCents
+    ) {
+      throw new CheckoutOperationPendingError();
+    }
     return {
       kind: 'stripe',
       sessionId: recovered.sessionId,
@@ -757,6 +754,8 @@ async function obtainProviderMaterial(
   const recovered = await inter.consultarCobranca(operation.providerRef ?? operation.snapshot.txid);
   if (
     recovered.status !== 'ativa' ||
+    recovered.txid !== (operation.providerRef ?? operation.snapshot.txid) ||
+    recovered.valorOriginalCents !== operation.snapshot.totalChargedCents ||
     typeof recovered.pixCopiaECola !== 'string' ||
     !(recovered.expiraEm instanceof Date)
   ) {
@@ -775,16 +774,23 @@ async function recoverProviderMaterial(
   stripe: CheckoutSessionProvider,
   inter: PixCobrancaProvider,
   operation: CheckoutOperation,
-  _amountCents: number,
+  amountCents: number,
 ): Promise<ReturnType<typeof toPublicMaterial> | null> {
-  const material = await obtainProviderMaterial(
-    'retrieve',
-    operation,
-    stripe,
-    inter,
-    {} as CriarSessaoCheckoutInput,
-  );
-  return toPublicMaterial(material, operation.snapshot.totalChargedCents);
+  if (amountCents !== operation.snapshot.totalChargedCents) return null;
+  try {
+    const material = await obtainProviderMaterial(
+      'retrieve',
+      operation,
+      stripe,
+      inter,
+      {} as CriarSessaoCheckoutInput,
+    );
+    return toPublicMaterial(material, operation.snapshot.totalChargedCents);
+  } catch {
+    // Provider-derived errors are never allowed to escape into router/tracing
+    // surfaces during recovery. The durable operation remains retryable.
+    return null;
+  }
 }
 
 function toPublicMaterial(material: ProviderMountMaterial, amountCents: number) {

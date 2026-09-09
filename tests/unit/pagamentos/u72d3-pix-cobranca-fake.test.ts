@@ -54,6 +54,8 @@ describe('PixCobrancaProviderFake — charge ledger', () => {
     expect(second.txid).toBe('FAKE0000000000000000000000000002');
     await expect(fake.consultarCobranca(first.txid)).resolves.toEqual({
       status: 'ativa',
+      txid: first.txid,
+      valorOriginalCents: 5000,
       pixCopiaECola: first.pixCopiaECola,
       expiraEm: first.expiraEm,
     });

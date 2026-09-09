@@ -156,6 +156,12 @@ export interface CriarSessaoCheckoutResult {
 export interface ObterSessaoCheckoutResult {
   readonly sessionId: string;
   readonly externalRef: string;
+  /** Server-stamped engine identities recovered from provider metadata. */
+  readonly paymentId: IdPagamento | null;
+  readonly intentId: IdIntencaoPagamento | null;
+  readonly campaignId: IdCampanha | null;
+  /** Provider-normalized payment rail used to create this exact session. */
+  readonly method: MetodoPagamento | null;
   /** Opaque mount secret returned only by an authoritative provider read. */
   readonly clientSecret: string | null;
   /**

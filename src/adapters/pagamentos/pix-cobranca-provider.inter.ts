@@ -68,6 +68,7 @@ interface InterCobrancaResponse {
   readonly calendario?: InterCalendario;
   readonly status?: unknown;
   readonly pix?: unknown;
+  readonly valor?: { readonly original?: unknown };
 }
 
 interface InterDevolucaoResponse {
@@ -356,13 +357,16 @@ function classifyCharge(
   switch (rawStatus.toUpperCase()) {
     case 'ATIVA': {
       const active = parseCreatedCharge(response, expectedTxid);
-      if (active === null) {
+      const valorOriginalCents = parseReaisToCents(response.valor?.original);
+      if (active === null || valorOriginalCents === null) {
         throw new PixCobrancaTransitoriaError(
           'consultarCobranca: cobrança ATIVA sem material recuperável',
         );
       }
       return {
         status: 'ativa',
+        txid: expectedTxid,
+        valorOriginalCents,
         pixCopiaECola: active.pixCopiaECola,
         expiraEm: active.expiraEm,
       };

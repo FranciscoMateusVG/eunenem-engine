@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CheckoutOperationStorageUnavailableError,
   clearPendingCheckoutOperation,
   getOrCreatePendingCheckoutOperation,
 } from '../../../apps/eunenem-server/pages/lib/checkoutOperationClient.js';
@@ -35,13 +36,43 @@ describe('checkout operation client recovery identity', () => {
     expect(getOrCreatePendingCheckoutOperation('checkout', storage, createId)).toBe(ids[1]);
   });
 
-  it('still creates an operation when browser storage is unavailable', () => {
-    expect(
+  it('fails closed before creating an operation when browser storage is unavailable', () => {
+    expect(() =>
       getOrCreatePendingCheckoutOperation(
         'checkout',
         undefined,
         () => '00000000-0000-4000-8000-000000000003',
       ),
-    ).toBe('00000000-0000-4000-8000-000000000003');
+    ).toThrow(CheckoutOperationStorageUnavailableError);
+  });
+
+  it('fails closed when storage discards or throws on the identity write', () => {
+    const discards = {
+      getItem: () => null,
+      setItem: () => {},
+      removeItem: () => {},
+    };
+    expect(() =>
+      getOrCreatePendingCheckoutOperation(
+        'checkout',
+        discards,
+        () => '00000000-0000-4000-8000-000000000003',
+      ),
+    ).toThrow(CheckoutOperationStorageUnavailableError);
+
+    const throws = {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error('sentinel storage failure');
+      },
+      removeItem: () => {},
+    };
+    expect(() =>
+      getOrCreatePendingCheckoutOperation(
+        'checkout',
+        throws,
+        () => '00000000-0000-4000-8000-000000000004',
+      ),
+    ).toThrow(CheckoutOperationStorageUnavailableError);
   });
 });

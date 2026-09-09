@@ -63,6 +63,10 @@
  */
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
+import {
+  CheckoutOperationStorageUnavailableError,
+  getOrCreatePendingCheckoutOperation,
+} from '../../../apps/eunenem-server/pages/lib/checkoutOperationClient.js';
 import type { ServerDeps } from '../../../apps/eunenem-server/server/auth/setup.js';
 import type { TrpcContext } from '../../../apps/eunenem-server/server/trpc/context.js';
 import { appRouter } from '../../../apps/eunenem-server/server/trpc/router.js';
@@ -1301,6 +1305,60 @@ describe('g1wl4 — per-hop idCampanha, THROUGH the router (PR #344 + aperture-4
 });
 
 describe('iytxa — public checkout capability slots', () => {
+  it('reuses one browser operation and provider key after an accepted response is lost', async () => {
+    const rig = await buildRig();
+    const user = await rig.addUser(uniqueEmail('checkout-client-recovery'));
+    const [idContribuicao] = (
+      await user.caller.contribuicao.create({
+        idCampanha: user.campanhaSignup.id,
+        nome: 'Client recovery checkout',
+        valor: 100,
+        quantidade: 1,
+      })
+    ).ids;
+    if (!idContribuicao) throw new Error('fixture contribution');
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => void values.set(key, value),
+      removeItem: (key: string) => void values.delete(key),
+    };
+    const operationId = getOrCreatePendingCheckoutOperation('contribution', storage);
+    const input = {
+      operationId,
+      slug: user.slug,
+      idContribuicao,
+      metodo: 'credit_card' as const,
+    };
+    const providerCall = vi.spyOn(rig.deps.checkoutSessionProvider, 'criarSessaoCheckout');
+    await rig.anonCaller.pagina.iniciarPagamentoContribuicao(input);
+    const pair = rig.anonCtx.resHeaders.get('set-cookie')?.split(';', 1)[0];
+    if (!pair) throw new Error('missing operation cookie');
+    rig.anonCtx.headers.set('cookie', pair);
+    const acceptedButLost = await rig.anonCaller.pagina.iniciarPagamentoContribuicao(input);
+    expect(acceptedButLost).toMatchObject({ tipo: 'stripe_embedded' });
+
+    const afterReload = getOrCreatePendingCheckoutOperation('contribution', storage);
+    expect(afterReload).toBe(operationId);
+    const recovered = await rig.anonCaller.pagina.iniciarPagamentoContribuicao({
+      ...input,
+      operationId: afterReload,
+    });
+    expect(recovered).toEqual(acceptedButLost);
+    expect(providerCall).toHaveBeenCalledOnce();
+    const operation = await rig.deps.checkoutOperationRepository.findById(operationId);
+    expect(operation).toMatchObject({ state: 'local_committed', paymentId: operationId });
+    expect(operation?.snapshot.totalSurchargeCents).toBeGreaterThan(0);
+
+    const unavailableStorage = getOrCreatePendingCheckoutOperation.bind(
+      null,
+      'contribution',
+      undefined,
+    );
+    expect(unavailableStorage).toThrow(CheckoutOperationStorageUnavailableError);
+    expect(providerCall).toHaveBeenCalledOnce();
+  });
+
   it('reserves before provider I/O and executes only after the exact cookie returns', async () => {
     const rig = await buildRig();
     const user = await rig.addUser(uniqueEmail('checkout-slot'));
@@ -1449,5 +1507,81 @@ describe('iytxa — public checkout capability slots', () => {
       rig.deps.checkoutOperationRepository.findById(operationId),
     ).resolves.toBeUndefined();
     expect(providerCall).not.toHaveBeenCalled();
+  });
+
+  it('refuses a ninth operation slot before reservation or provider I/O', async () => {
+    const rig = await buildRig();
+    const user = await rig.addUser(uniqueEmail('checkout-slot-cap'));
+    const [idContribuicao] = (
+      await user.caller.contribuicao.create({
+        idCampanha: user.campanhaSignup.id,
+        nome: 'Slot cap checkout',
+        valor: 100,
+        quantidade: 1,
+      })
+    ).ids;
+    if (!idContribuicao) throw new Error('fixture contribution');
+    const providerCall = vi.spyOn(rig.deps.checkoutSessionProvider, 'criarSessaoCheckout');
+    const operationId = randomUUID();
+    rig.anonCtx.headers.set(
+      'cookie',
+      Array.from(
+        { length: 8 },
+        () => `__Host-eunenem_checkout_${randomUUID()}=${'A'.repeat(43)}`,
+      ).join('; '),
+    );
+
+    await expect(
+      rig.anonCaller.pagina.iniciarPagamentoContribuicao({
+        operationId,
+        slug: user.slug,
+        idContribuicao,
+        metodo: 'credit_card',
+      }),
+    ).rejects.toMatchObject({ code: 'CONFLICT', message: 'Operação indisponível' });
+    await expect(
+      rig.deps.checkoutOperationRepository.findById(operationId),
+    ).resolves.toBeUndefined();
+    expect(providerCall).not.toHaveBeenCalled();
+    expect(rig.anonCtx.resHeaders.get('set-cookie')).toBeNull();
+  });
+
+  it('retains an in-progress slot and clears only that slot after a terminal payment state', async () => {
+    const rig = await buildRig();
+    const user = await rig.addUser(uniqueEmail('checkout-slot-terminal'));
+    const [idContribuicao] = (
+      await user.caller.contribuicao.create({
+        idCampanha: user.campanhaSignup.id,
+        nome: 'Terminal slot checkout',
+        valor: 100,
+        quantidade: 1,
+      })
+    ).ids;
+    if (!idContribuicao) throw new Error('fixture contribution');
+    const operationId = randomUUID();
+    const input = {
+      operationId,
+      slug: user.slug,
+      idContribuicao,
+      metodo: 'credit_card' as const,
+    };
+    await rig.anonCaller.pagina.iniciarPagamentoContribuicao(input);
+    const targetPair = rig.anonCtx.resHeaders.get('set-cookie')?.split(';', 1)[0];
+    if (!targetPair) throw new Error('missing target cookie');
+    const otherPair = `__Host-eunenem_checkout_${randomUUID()}=${'B'.repeat(43)}`;
+    rig.anonCtx.headers.set('cookie', `${targetPair}; ${otherPair}`);
+    rig.anonCtx.resHeaders.delete('set-cookie');
+
+    await rig.anonCaller.pagina.iniciarPagamentoContribuicao(input);
+    expect(rig.anonCtx.resHeaders.get('set-cookie')).toBeNull();
+
+    const payment = await rig.deps.pagamentoRepository.findById(operationId as never);
+    if (!payment) throw new Error('missing payment');
+    await rig.deps.pagamentoRepository.update({ ...payment, status: 'rejeitado' } as never);
+    await rig.anonCaller.pagina.iniciarPagamentoContribuicao(input);
+    expect(rig.anonCtx.resHeaders.get('set-cookie')).toBe(
+      `__Host-eunenem_checkout_${operationId}=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax`,
+    );
+    expect(rig.anonCtx.resHeaders.get('set-cookie')).not.toContain(otherPair.split('=')[0]);
   });
 });

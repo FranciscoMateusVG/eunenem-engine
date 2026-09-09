@@ -113,15 +113,19 @@ describe('PagamentoProviderStripe.criarSessaoCheckout — Stripe handoff contrac
     const { stripe, create } = mockStripe();
     const provider = new PagamentoProviderStripe({ stripe, clock: () => new Date(0) });
 
-    await provider.criarSessaoCheckout(baseInput());
+    await provider.criarSessaoCheckout(
+      baseInput({ metadata: { idPagamento: 'caller-override', campaignLabel: 'allowed' } }),
+    );
 
     const { params } = callArgs(create);
     // idPagamento is the fallback key the webhook uses to resolve the pagamento
     // when the externalRef lookup misses — losing it silently breaks finalize.
     expect(params.metadata?.idPagamento).toBe('pag_contract_1');
+    expect(params.metadata?.campaignLabel).toBe('allowed');
     // The other reserved ids the webhook relies on to dispatch without a DB
     // re-resolve (see provider.stripe.ts metadata bag).
     expect(params.metadata?.idIntencaoPagamento).toBe('int_contract_1');
+    expect(params.metadata?.idCampanha).toBe('camp_contract_1');
     expect(params.metadata?.idContribuicao).toBe('contrib_contract_1');
     expect(params.metadata?.idOpcaoContribuicao).toBe('opcao_contract_1');
     expect(params.metadata?.tipoOpcao).toBe('presente');
@@ -140,6 +144,9 @@ describe('PagamentoProviderStripe.criarSessaoCheckout — Stripe handoff contrac
 
 describe('PagamentoProviderStripe.obterSessaoCheckout — recovery contract', () => {
   it('returns the persisted session mount secret from authoritative retrieve', async () => {
+    const paymentId = '550e8400-e29b-41d4-a716-446655440301';
+    const intentId = '550e8400-e29b-41d4-a716-446655440302';
+    const campaignId = '550e8400-e29b-41d4-a716-446655440303';
     const retrieve = vi.fn().mockResolvedValue({
       id: 'cs_test_contract',
       client_secret: 'cs_test_contract_secret',
@@ -149,6 +156,12 @@ describe('PagamentoProviderStripe.obterSessaoCheckout — recovery contract', ()
       amount_total: 8000,
       customer_details: null,
       customer_email: null,
+      payment_method_types: ['card'],
+      metadata: {
+        idPagamento: paymentId,
+        idIntencaoPagamento: intentId,
+        idCampanha: campaignId,
+      },
     });
     const stripe = { checkout: { sessions: { retrieve } } } as unknown as Stripe;
     const provider = new PagamentoProviderStripe({ stripe, clock: () => new Date(0) });
@@ -157,6 +170,10 @@ describe('PagamentoProviderStripe.obterSessaoCheckout — recovery contract', ()
       sessionId: 'cs_test_contract',
       externalRef: 'cs_test_contract',
       clientSecret: 'cs_test_contract_secret',
+      paymentId,
+      intentId,
+      campaignId,
+      method: 'credit_card',
       status: 'open',
       paymentStatus: 'pending',
     });

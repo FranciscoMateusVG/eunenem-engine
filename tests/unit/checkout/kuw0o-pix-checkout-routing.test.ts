@@ -70,6 +70,7 @@ function makeDeps(cobrancaPixProviderKind: CobrancaPixProviderKind) {
   const contribuicaoRepository = new ContribuicaoRepositoryMemory();
   const provedorRegraTaxa = new ProvedorRegraTaxaMemory();
   const pagamentoRepository = new PagamentoRepositoryMemory();
+  const checkoutOperationRepository = new CheckoutOperationRepositoryMemory(pagamentoRepository);
   const pagamentoEventPublisher = new PagamentoEventPublisherMemory();
   const checkoutSessionProvider = new PagamentoProviderFake({ statusResultado: 'aprovado', clock });
   const pixCobrancaProvider = new PixCobrancaProviderFake({ clock });
@@ -81,6 +82,7 @@ function makeDeps(cobrancaPixProviderKind: CobrancaPixProviderKind) {
     contribuicaoRepository,
     provedorRegraTaxa,
     pagamentoRepository,
+    checkoutOperationRepository,
     pagamentoEventPublisher,
     checkoutSessionProvider,
     pixCobrancaProvider,
@@ -91,6 +93,15 @@ function makeDeps(cobrancaPixProviderKind: CobrancaPixProviderKind) {
 }
 
 type Deps = ReturnType<typeof makeDeps>;
+
+async function prepareAndStart(
+  deps: Deps,
+  input: Parameters<typeof iniciarPagamentoCarrinho>[1],
+  access = { capability: 'A'.repeat(43) },
+) {
+  await prepararPagamentoCarrinho(deps, input, access);
+  return iniciarPagamentoCarrinho(deps, input, access);
+}
 
 /**
  * Seeds a campanha (on plataforma EUNENEM) with a single 'presente'
@@ -143,6 +154,31 @@ const baseInput = () => ({
 });
 
 describe('iniciarPagamentoCarrinho — PIX-cobrança routing (aperture-kuw0o)', () => {
+  it('fails closed without explicitly injected durable operation dependencies or access', async () => {
+    const deps = makeDeps('stripe');
+    const seeded = await seedCampanhaComContribuicao(deps, 'Campanha required recovery');
+    const input = {
+      ...baseInput(),
+      idCampanha: seeded.idCampanha,
+      metodo: 'credit_card' as const,
+      itens: [{ idContribuicao: seeded.idContribuicao, quantidade: 1 }],
+      idsItens: [randomUUID(), randomUUID()],
+    };
+    const providerCall = vi.spyOn(deps.checkoutSessionProvider, 'criarSessaoCheckout');
+
+    await expect(
+      iniciarPagamentoCarrinho(
+        { ...deps, checkoutOperationRepository: undefined } as never,
+        input,
+        { capability: 'A'.repeat(43) },
+      ),
+    ).rejects.toThrow('checkoutOperationRepository is required');
+    await expect(iniciarPagamentoCarrinho(deps, input, undefined as never)).rejects.toThrow(
+      'checkout operation access is required',
+    );
+    expect(providerCall).not.toHaveBeenCalled();
+  });
+
   it('discards provider mount material when the worker loses its result fence', async () => {
     const deps = makeDeps('stripe');
     const a = await seedCampanhaComContribuicao(deps, 'Campanha fenced');
@@ -176,12 +212,39 @@ describe('iniciarPagamentoCarrinho — PIX-cobrança routing (aperture-kuw0o)', 
     ).toBeNull();
   });
 
+  it('persists only a finite provider failure category', async () => {
+    const deps = makeDeps('stripe');
+    const seeded = await seedCampanhaComContribuicao(deps, 'Campanha provider failure');
+    vi.spyOn(deps.checkoutSessionProvider, 'criarSessaoCheckout').mockRejectedValueOnce(
+      new Error('provider-derived canary must not persist'),
+    );
+    const input = {
+      ...baseInput(),
+      idCampanha: seeded.idCampanha,
+      metodo: 'credit_card' as const,
+      itens: [{ idContribuicao: seeded.idContribuicao, quantidade: 1 }],
+      idsItens: [randomUUID(), randomUUID()],
+    };
+    const access = { capability: 'F'.repeat(43) };
+
+    await prepararPagamentoCarrinho(deps, input, access);
+    await expect(iniciarPagamentoCarrinho(deps, input, access)).rejects.toBeInstanceOf(
+      CheckoutOperationPendingError,
+    );
+    expect(
+      JSON.stringify(deps.checkoutOperationRepository.listFactsForTests(input.idPagamento)),
+    ).toContain('provider_call_failed');
+    expect(
+      JSON.stringify(deps.checkoutOperationRepository.listFactsForTests(input.idPagamento)),
+    ).not.toContain('provider-derived canary');
+  });
+
   it("metodo='pix' + kind='fake' + contribuinte → pix_qr, persists txid as externalRef + contribuinte, skips checkoutSessionProvider", async () => {
     const deps = makeDeps('fake');
     const a = await seedCampanhaComContribuicao(deps, 'Campanha A');
     const sessaoSpy = vi.spyOn(deps.checkoutSessionProvider, 'criarSessaoCheckout');
 
-    const result = await iniciarPagamentoCarrinho(deps, {
+    const result = await prepareAndStart(deps, {
       ...baseInput(),
       idCampanha: a.idCampanha,
       metodo: 'pix',
@@ -220,7 +283,7 @@ describe('iniciarPagamentoCarrinho — PIX-cobrança routing (aperture-kuw0o)', 
     const idPagamento = randomUUID();
 
     await expect(
-      iniciarPagamentoCarrinho(deps, {
+      prepareAndStart(deps, {
         ...baseInput(),
         idPagamento,
         idCampanha: a.idCampanha,
@@ -241,7 +304,7 @@ describe('iniciarPagamentoCarrinho — PIX-cobrança routing (aperture-kuw0o)', 
 
     // contribuinte is supplied but the Stripe branch must NOT stamp it —
     // finalization is the only writer on that path.
-    const result = await iniciarPagamentoCarrinho(deps, {
+    const result = await prepareAndStart(deps, {
       ...baseInput(),
       idCampanha: a.idCampanha,
       metodo: 'pix',
@@ -265,7 +328,7 @@ describe('iniciarPagamentoCarrinho — PIX-cobrança routing (aperture-kuw0o)', 
     const deps = makeDeps('fake');
     const a = await seedCampanhaComContribuicao(deps, 'Campanha A');
 
-    const result = await iniciarPagamentoCarrinho(deps, {
+    const result = await prepareAndStart(deps, {
       ...baseInput(),
       idCampanha: a.idCampanha,
       metodo: 'credit_card',
@@ -281,7 +344,7 @@ describe('iniciarPagamentoCarrinho — PIX-cobrança routing (aperture-kuw0o)', 
     const deps = makeDeps('inter');
     const a = await seedCampanhaComContribuicao(deps, 'Campanha A');
 
-    const result = await iniciarPagamentoCarrinho(deps, {
+    const result = await prepareAndStart(deps, {
       ...baseInput(),
       idCampanha: a.idCampanha,
       metodo: 'pix',
@@ -291,5 +354,71 @@ describe('iniciarPagamentoCarrinho — PIX-cobrança routing (aperture-kuw0o)', 
     });
 
     expect(result.tipo).toBe('pix_qr');
+  });
+
+  it('never returns Stripe mount material when recovered identity, method, or amount drifts', async () => {
+    const deps = makeDeps('stripe');
+    const seeded = await seedCampanhaComContribuicao(deps, 'Campanha Stripe recovery');
+    const input = {
+      ...baseInput(),
+      idCampanha: seeded.idCampanha,
+      metodo: 'credit_card' as const,
+      itens: [{ idContribuicao: seeded.idContribuicao, quantidade: 1 }],
+      idsItens: [randomUUID(), randomUUID()],
+    };
+    const access = { capability: 'S'.repeat(43) };
+    const first = await prepareAndStart(deps, input, access);
+    if (first.tipo !== 'stripe_embedded') throw new Error('expected Stripe fixture');
+    const valid = await deps.checkoutSessionProvider.obterSessaoCheckout(first.sessionId);
+    if (!valid) throw new Error('expected fake provider session');
+
+    for (const drift of [
+      { paymentId: randomUUID() },
+      { externalRef: 'cs_wrong_external_ref' },
+      { method: 'pix' as const },
+      { amountTotalCents: (valid.amountTotalCents ?? 0) + 1 },
+    ]) {
+      vi.spyOn(deps.checkoutSessionProvider, 'obterSessaoCheckout').mockResolvedValueOnce({
+        ...valid,
+        ...drift,
+      });
+      await expect(iniciarPagamentoCarrinho(deps, input, access)).rejects.toBeInstanceOf(
+        CheckoutOperationPendingError,
+      );
+    }
+  });
+
+  it('never returns Inter BR Code when recovered txid or amount drifts', async () => {
+    const deps = makeDeps('inter');
+    const seeded = await seedCampanhaComContribuicao(deps, 'Campanha Inter recovery');
+    const input = {
+      ...baseInput(),
+      idCampanha: seeded.idCampanha,
+      metodo: 'pix' as const,
+      itens: [{ idContribuicao: seeded.idContribuicao, quantidade: 1 }],
+      idsItens: [randomUUID()],
+      contribuinte,
+    };
+    const access = { capability: 'I'.repeat(43) };
+    const first = await prepareAndStart(deps, input, access);
+    if (first.tipo !== 'pix_qr') throw new Error('expected Inter fixture');
+    const valid = await deps.pixCobrancaProvider.consultarCobranca(first.txid);
+    if (valid.status !== 'ativa') throw new Error('expected active charge');
+
+    vi.spyOn(deps.pixCobrancaProvider, 'consultarCobranca').mockResolvedValueOnce({
+      ...valid,
+      txid: 'WRONG000000000000000000000000000',
+    });
+    await expect(iniciarPagamentoCarrinho(deps, input, access)).rejects.toBeInstanceOf(
+      CheckoutOperationPendingError,
+    );
+
+    vi.spyOn(deps.pixCobrancaProvider, 'consultarCobranca').mockResolvedValueOnce({
+      ...valid,
+      valorOriginalCents: valid.valorOriginalCents + 1,
+    });
+    await expect(iniciarPagamentoCarrinho(deps, input, access)).rejects.toBeInstanceOf(
+      CheckoutOperationPendingError,
+    );
   });
 });

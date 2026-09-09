@@ -22,8 +22,10 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { CampanhaRepositoryPostgres } from '../../src/adapters/arrecadacao/campanha-repository.postgres.js';
 import { ContribuicaoRepositoryPostgres } from '../../src/adapters/arrecadacao/contribuicao-repository.postgres.js';
 import { RecebedorRepositoryPostgres } from '../../src/adapters/arrecadacao/recebedor-repository.postgres.js';
+import { CheckoutOperationRepositoryMemory } from '../../src/adapters/pagamentos/checkout-operation-repository.memory.js';
 import { PagamentoEventPublisherMemory } from '../../src/adapters/pagamentos/event-publisher.memory.js';
 import { LivroFinanceiroRepositoryMemory } from '../../src/adapters/pagamentos/financeiro/livro-repository.memory.js';
+import { PixCobrancaProviderFake } from '../../src/adapters/pagamentos/pix-cobranca-provider.fake.js';
 import { PagamentoProviderFake } from '../../src/adapters/pagamentos/provider.fake.js';
 import { PagamentoRepositoryMemory } from '../../src/adapters/pagamentos/repository.memory.js';
 import {
@@ -38,7 +40,10 @@ import { criarCampanha } from '../../src/use-cases/arrecadacao/criar-campanha.js
 import { criarContribuicao } from '../../src/use-cases/arrecadacao/criar-contribuicao.js';
 import { esgotada } from '../../src/use-cases/arrecadacao/quantidade-restante.js';
 import { finalizarPagamentoRejeitado } from '../../src/use-cases/checkout/finalizar-pagamento-rejeitado.js';
-import { iniciarPagamentoCarrinho } from '../../src/use-cases/checkout/iniciar-pagamento-carrinho.js';
+import {
+  iniciarPagamentoCarrinho,
+  prepararPagamentoCarrinho,
+} from '../../src/use-cases/checkout/iniciar-pagamento-carrinho.js';
 import { obterSaldoRecebedor } from '../../src/use-cases/pagamentos/financeiro/obter-saldo-recebedor.js';
 import { registrarContaUsuario } from '../../src/use-cases/usuario/registrar-conta-usuario.js';
 import { createTestObservability } from '../helpers/observability.js';
@@ -179,6 +184,24 @@ beforeEach(async () => {
   testObs.reset();
 });
 
+async function runDurableCheckout(
+  deps: Omit<
+    Parameters<typeof iniciarPagamentoCarrinho>[0],
+    'checkoutOperationRepository' | 'pixCobrancaProvider' | 'cobrancaPixProviderKind'
+  >,
+  input: Parameters<typeof iniciarPagamentoCarrinho>[1],
+) {
+  const durableDeps: Parameters<typeof iniciarPagamentoCarrinho>[0] = {
+    ...deps,
+    checkoutOperationRepository: new CheckoutOperationRepositoryMemory(deps.pagamentoRepository),
+    pixCobrancaProvider: new PixCobrancaProviderFake(),
+    cobrancaPixProviderKind: 'stripe',
+  };
+  const access = { capability: 'T'.repeat(43) };
+  await prepararPagamentoCarrinho(durableDeps, input, access);
+  return iniciarPagamentoCarrinho(durableDeps, input, access);
+}
+
 describe('Fluxo — pagamento rejeitado pelo provedor', () => {
   it('Rejeição de pagamento não deve gerar efeitos financeiros e a contribuição deve ficar disponível', async () => {
     const { deps, idCampanha, idContribuicao, idPagamento, idIntencaoPagamento } =
@@ -205,7 +228,7 @@ describe('Fluxo — pagamento rejeitado pelo provedor', () => {
     // finalize via webhook. A rejected payment therefore never had a claim to
     // release; the contribuição simply stays disponivel end-to-end.
     const { contribuicoes: contribuicoesAposSaga, pagamento: pagamentoPendente } =
-      await iniciarPagamentoCarrinho(checkoutDeps, {
+      await runDurableCheckout(checkoutDeps, {
         idPlataforma: ID_PLATAFORMA_EUNENEM,
         idCampanha,
         itens: [{ idContribuicao, quantidade: 1 }],

@@ -54,6 +54,7 @@ export interface StripePipelineResult {
     | 'duplicate_retry'
     | 'retryable_in_flight'
     | 'signature_failed'
+    | 'archive_conflict'
     | 'dispatched_success'
     | 'dispatched_failed';
 }
@@ -146,6 +147,28 @@ export async function archiveAndDispatchStripeEvent(
     };
   }
 
+  const archived = await archive.findById(archiveResult.id);
+  if (
+    archived === undefined ||
+    archived.provider !== 'stripe' ||
+    archived.providerEventId !== preview.id ||
+    archived.eventType !== preview.type ||
+    !archived.signatureValid ||
+    verifiedEvent.id !== preview.id ||
+    verifiedEvent.type !== preview.type ||
+    stableJson(archived.rawPayload) !== stableJson(parsedPayload)
+  ) {
+    // A duplicate ID is receipt deduplication, not permission to process
+    // different bytes under an older archive row. In particular, an
+    // invalid-first delivery can never be promoted by a later valid body.
+    return {
+      status: 409,
+      body: 'archived delivery conflict',
+      archiveId: archiveResult.id,
+      outcome: 'archive_conflict',
+    };
+  }
+
   // A known relevant event is acknowledged only after its durable processed
   // fact commits. Failed, stale, or fresh rows compete for one fenced lease;
   // an active claimant remains retryable rather than being falsely 2xx'd.
@@ -194,9 +217,8 @@ export async function archiveAndDispatchStripeEvent(
       archiveId: archiveResult.id,
       outcome: 'dispatched_success',
     };
-  } catch (dispatchError) {
-    const errMsg = (dispatchError as Error).message ?? String(dispatchError);
-    await archive.markFailedFenced(archiveResult.id, claim.fenceToken, errMsg);
+  } catch {
+    await archive.markFailedFenced(archiveResult.id, claim.fenceToken, 'dispatch_failed');
     return {
       status: 500,
       body: 'downstream error',
@@ -204,4 +226,14 @@ export async function archiveAndDispatchStripeEvent(
       outcome: 'dispatched_failed',
     };
   }
+}
+
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+    .join(',')}}`;
 }

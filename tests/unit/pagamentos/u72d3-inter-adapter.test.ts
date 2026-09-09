@@ -103,6 +103,7 @@ function chargeResponse(status: string, pix?: unknown): InterHttpResponse {
         ? {
             pixCopiaECola: '000201010212br-code',
             calendario: { criacao: '2026-08-05T12:00:00.000Z', expiracao: 600 },
+            valor: { original: '10.05' },
           }
         : {}),
       ...(pix === undefined ? {} : { pix }),
@@ -218,6 +219,8 @@ describe('PixCobrancaProviderInter — charge status classification', () => {
       'ATIVA',
       {
         status: 'ativa',
+        txid,
+        valorOriginalCents: 1005,
         pixCopiaECola: '000201010212br-code',
         expiraEm: new Date('2026-08-05T12:10:00.000Z'),
       },

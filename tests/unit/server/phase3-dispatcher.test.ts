@@ -523,7 +523,7 @@ describe('Phase 3 dispatcher: checkout.session.completed', () => {
       processedAt: null,
       pagamentoId: null,
     });
-    expect(archived?.processingError).toContain('paymentIntentExternalRef');
+    expect(archived?.processingError).toBe('dispatch_failed');
 
     await expect(rig.pagamentoRepository.findById(ids.idPagamento as never)).resolves.toMatchObject(
       {

@@ -21,6 +21,8 @@ export interface CobrancaCriada {
 export type ConsultarCobrancaResult =
   | {
       readonly status: 'ativa';
+      readonly txid: string;
+      readonly valorOriginalCents: MoneyCents;
       readonly pixCopiaECola?: string;
       readonly expiraEm?: Date;
     }
