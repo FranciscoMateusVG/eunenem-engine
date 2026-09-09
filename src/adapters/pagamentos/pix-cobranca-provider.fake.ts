@@ -137,9 +137,13 @@ function cloneCobrancaCriada(result: CobrancaCriada): CobrancaCriada {
 }
 
 function cloneConsultarCobrancaResult(result: ConsultarCobrancaResult): ConsultarCobrancaResult {
-  return result.status === 'concluida'
-    ? { ...result, horario: new Date(result.horario.getTime()) }
-    : { ...result };
+  if (result.status === 'concluida') {
+    return { ...result, horario: new Date(result.horario.getTime()) };
+  }
+  if (result.status === 'ativa' && result.expiraEm) {
+    return { ...result, expiraEm: new Date(result.expiraEm.getTime()) };
+  }
+  return { ...result };
 }
 
 function cloneConsultarCobrancaFakeStep(
@@ -390,6 +394,13 @@ export class PixCobrancaProviderFake implements PixCobrancaProvider {
     step: ConsultarCobrancaFakeStep,
     entry: CobrancaLedgerEntry,
   ): ConsultarCobrancaResult {
+    if (step.status === 'ativa') {
+      return {
+        status: 'ativa',
+        pixCopiaECola: entry.result.pixCopiaECola,
+        expiraEm: new Date(entry.result.expiraEm.getTime()),
+      };
+    }
     if (step.status !== 'concluida') return cloneConsultarCobrancaResult(step);
     this.e2eOrdinal += 1;
     return {

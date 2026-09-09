@@ -96,7 +96,17 @@ function createResponse(overrides: Record<string, unknown> = {}): InterHttpRespo
 function chargeResponse(status: string, pix?: unknown): InterHttpResponse {
   return {
     statusCode: 200,
-    body: JSON.stringify({ txid, status, ...(pix === undefined ? {} : { pix }) }),
+    body: JSON.stringify({
+      txid,
+      status,
+      ...(status === 'ATIVA'
+        ? {
+            pixCopiaECola: '000201010212br-code',
+            calendario: { criacao: '2026-08-05T12:00:00.000Z', expiracao: 600 },
+          }
+        : {}),
+      ...(pix === undefined ? {} : { pix }),
+    }),
   };
 }
 
@@ -204,7 +214,14 @@ describe('PixCobrancaProviderInter — criarCobranca request + create response',
 
 describe('PixCobrancaProviderInter — charge status classification', () => {
   it.each([
-    ['ATIVA', { status: 'ativa' }],
+    [
+      'ATIVA',
+      {
+        status: 'ativa',
+        pixCopiaECola: '000201010212br-code',
+        expiraEm: new Date('2026-08-05T12:10:00.000Z'),
+      },
+    ],
     ['REMOVIDA_PELO_USUARIO_RECEBEDOR', { status: 'removida' }],
     ['REMOVIDA_PELO_PSP', { status: 'removida' }],
     ['QUALQUER_STATUS_NOVO', { status: 'desconhecido', statusBruto: 'QUALQUER_STATUS_NOVO' }],

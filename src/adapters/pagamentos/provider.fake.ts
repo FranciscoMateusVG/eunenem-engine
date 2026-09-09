@@ -286,6 +286,7 @@ export class PagamentoProviderFake implements PagamentoProvider, CheckoutSession
         const result: ObterSessaoCheckoutResult = {
           sessionId: entry.result.sessionId,
           externalRef: entry.result.externalRef,
+          clientSecret: entry.result.clientSecret,
           status: 'complete',
           paymentStatus: this.statusResultado === 'aprovado' ? 'approved' : 'rejected',
           customFields: {

@@ -388,6 +388,23 @@ describe('finalizarPagamentoAprovado — idempotency contract', () => {
       await deps.livroFinanceiroRepository.findLancamentosByIdPagamento(idPagamento);
     expect(lancamentosAfter).toHaveLength(2);
   });
+
+  it('does not report webhook convergence when an approved payment has a partial ledger', async () => {
+    const { deps, idPagamento } = await setupPagamentoPendente(ID_PLATAFORMA_EUNENEM, 'presente');
+    const first = await finalizarPagamentoAprovado(deps, { idPagamento });
+    const originalFind = deps.livroFinanceiroRepository.findLancamentosByIdPagamento.bind(
+      deps.livroFinanceiroRepository,
+    );
+    deps.livroFinanceiroRepository.findLancamentosByIdPagamento = async (id) => {
+      const rows = await originalFind(id);
+      return id === idPagamento ? rows.slice(0, 1) : rows;
+    };
+
+    await expect(finalizarPagamentoAprovado(deps, { idPagamento })).rejects.toThrow(
+      'livro financeiro incompleto',
+    );
+    expect(first.lancamentos).toHaveLength(2);
+  });
 });
 
 describe('finalizarPagamentoAprovadoComTransacaoVerificada — provider-free Inter seam', () => {

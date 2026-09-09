@@ -523,7 +523,7 @@ describe('eunenem-server PIX cobrança rail DI gate (aperture-18j3j)', () => {
         idIntencaoPagamento: '10000000-0000-4000-8000-000000000500',
         amountCents: 5000,
       });
-      await expect(deps.pixCobrancaProvider.consultarCobranca(charge.txid)).resolves.toEqual({
+      await expect(deps.pixCobrancaProvider.consultarCobranca(charge.txid)).resolves.toMatchObject({
         status: 'ativa',
       });
     } finally {

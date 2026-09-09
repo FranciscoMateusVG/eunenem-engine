@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { ContribuicaoRepositoryMemory } from '../../../src/adapters/arrecadacao/contribuicao-repository.memory.js';
+import { CheckoutOperationRepositoryMemory } from '../../../src/adapters/pagamentos/checkout-operation-repository.memory.js';
 import { PagamentoEventPublisherMemory } from '../../../src/adapters/pagamentos/event-publisher.memory.js';
 import { PixCobrancaProviderFake } from '../../../src/adapters/pagamentos/pix-cobranca-provider.fake.js';
 import { PagamentoProviderFake } from '../../../src/adapters/pagamentos/provider.fake.js';
@@ -15,8 +16,10 @@ import { adicionarOpcaoContribuicao } from '../../../src/use-cases/arrecadacao/a
 import { criarCampanha } from '../../../src/use-cases/arrecadacao/criar-campanha.js';
 import { criarContribuicao } from '../../../src/use-cases/arrecadacao/criar-contribuicao.js';
 import {
+  CheckoutOperationPendingError,
   type CobrancaPixProviderKind,
   iniciarPagamentoCarrinho,
+  prepararPagamentoCarrinho,
 } from '../../../src/use-cases/checkout/iniciar-pagamento-carrinho.js';
 import { createArrecadacaoMemoryRepos } from '../../helpers/arrecadacao-repos.js';
 
@@ -140,6 +143,39 @@ const baseInput = () => ({
 });
 
 describe('iniciarPagamentoCarrinho — PIX-cobrança routing (aperture-kuw0o)', () => {
+  it('discards provider mount material when the worker loses its result fence', async () => {
+    const deps = makeDeps('stripe');
+    const a = await seedCampanhaComContribuicao(deps, 'Campanha fenced');
+    const checkoutOperationRepository = new CheckoutOperationRepositoryMemory(
+      deps.pagamentoRepository,
+    );
+    const providerCall = vi.spyOn(deps.checkoutSessionProvider, 'criarSessaoCheckout');
+    vi.spyOn(checkoutOperationRepository, 'completeAttempt').mockResolvedValue(false);
+    const idPagamento = randomUUID();
+    const input = {
+      ...baseInput(),
+      idPagamento,
+      idCampanha: a.idCampanha,
+      metodo: 'credit_card' as const,
+      itens: [{ idContribuicao: a.idContribuicao, quantidade: 1 }],
+      idsItens: [randomUUID(), randomUUID()],
+    };
+    const access = { capability: 'A'.repeat(43) };
+    const guardedDeps = { ...deps, checkoutOperationRepository };
+
+    await expect(prepararPagamentoCarrinho(guardedDeps, input, access)).resolves.toMatchObject({
+      operationId: idPagamento,
+      created: true,
+    });
+    await expect(iniciarPagamentoCarrinho(guardedDeps, input, access)).rejects.toBeInstanceOf(
+      CheckoutOperationPendingError,
+    );
+    expect(providerCall).toHaveBeenCalledOnce();
+    expect(
+      (await deps.pagamentoRepository.findById(idPagamento as IdPagamento))?.intencao.externalRef,
+    ).toBeNull();
+  });
+
   it("metodo='pix' + kind='fake' + contribuinte → pix_qr, persists txid as externalRef + contribuinte, skips checkoutSessionProvider", async () => {
     const deps = makeDeps('fake');
     const a = await seedCampanhaComContribuicao(deps, 'Campanha A');

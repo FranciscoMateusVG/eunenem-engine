@@ -97,11 +97,13 @@ export type InterPixItemOutcome =
   | 'duplicate_processed'
   | 'duplicate_in_flight'
   | 'charge_not_confirmed'
+  | 'charge_binding_absent'
   | 'charge_binding_failed'
   | 'charge_identity_mismatch'
   | 'charge_requery_failed'
   | 'charge_bookkeeping_failed'
   | 'refund_not_confirmed'
+  | 'refund_binding_absent'
   | 'refund_binding_failed'
   | 'refund_requery_failed'
   | 'refund_bookkeeping_failed';
@@ -113,8 +115,8 @@ export interface InterPixItemResult {
 }
 
 export interface InterPixPipelineResult {
-  readonly status: 200 | 400;
-  readonly body: 'ok' | 'invalid event shape';
+  readonly status: 200 | 400 | 503;
+  readonly body: 'ok' | 'invalid event shape' | 'processing incomplete';
   readonly outcome: 'accepted' | 'malformed_body';
   readonly items: readonly InterPixItemResult[];
 }
@@ -151,10 +153,10 @@ type ParsedEvent = ParsedChargeEvent | ParsedRefundEvent;
  * Inter does not sign these payloads. The payload is therefore only a
  * bounded routing hint: every locally-bound event is re-queried through
  * PixCobrancaProvider before a callback can mutate state. Unknown charge
- * txids fail before provider I/O. Accepted envelopes return 200 even when
- * an item cannot be confirmed; the durable failed row plus B4 reconciliation
- * own recovery. Archive-write failures still throw so the HTTP handler returns
- * 500 rather than acknowledging an event we did not durably record.
+ * txids finish as explicit local no-ops before provider I/O. Relevant events
+ * remain retryable non-2xx until their processed fact commits. Archive-write
+ * failures still throw so the HTTP handler never acknowledges an event it did
+ * not durably record.
  */
 export async function archiveAndDispatchInterPixWebhook(
   archive: WebhookEventArchive,
@@ -175,7 +177,23 @@ export async function archiveAndDispatchInterPixWebhook(
     items.push(await processEvent(archive, args, event));
   }
 
-  return { status: 200, body: 'ok', outcome: 'accepted', items };
+  const retryable = items.some((item) =>
+    [
+      'duplicate_in_flight',
+      'charge_not_confirmed',
+      'charge_binding_failed',
+      'charge_identity_mismatch',
+      'charge_requery_failed',
+      'charge_bookkeeping_failed',
+      'refund_not_confirmed',
+      'refund_binding_failed',
+      'refund_requery_failed',
+      'refund_bookkeeping_failed',
+    ].includes(item.outcome),
+  );
+  return retryable
+    ? { status: 503, body: 'processing incomplete', outcome: 'accepted', items }
+    : { status: 200, body: 'ok', outcome: 'accepted', items };
 }
 
 function exceedsEnvelopeWorkCaps(pixItems: readonly PixHint[]): boolean {
@@ -297,33 +315,20 @@ async function processEvent(
     signatureValid: false,
   });
 
-  if (saved.isDuplicate) {
-    const existing = await archive.findById(saved.id);
-    if (existing?.processedAt) {
-      return result(event, saved.id, 'duplicate_processed');
-    }
-    if (!existing?.processingError) {
-      return result(event, saved.id, 'duplicate_in_flight');
-    }
-    // A prior authoritative read/bookkeeping attempt failed. Claim the retry
-    // with one durable compare-and-set before re-querying or dispatching.
-    // Only the successful claimant may proceed; concurrent redeliveries see
-    // the cleared failure as in-flight and cannot duplicate side effects.
-    const claimed = await archive.tryClaimFailedForRetry(saved.id);
-    if (!claimed) {
-      const afterClaim = await archive.findById(saved.id);
-      return result(
-        event,
-        saved.id,
-        afterClaim?.processedAt ? 'duplicate_processed' : 'duplicate_in_flight',
-      );
-    }
+  const now = new Date();
+  const claim = await archive.claimForProcessing(saved.id, now, new Date(now.getTime() + 30_000));
+  if (claim.status !== 'claimed') {
+    return result(
+      event,
+      saved.id,
+      claim.status === 'processed' ? 'duplicate_processed' : 'duplicate_in_flight',
+    );
   }
 
   if (event.eventType === INTER_PIX_CHARGE_EVENT_TYPE) {
-    return processCharge(archive, args, event, saved.id);
+    return processCharge(archive, args, event, saved.id, claim.fenceToken);
   }
-  return processRefund(archive, args, event, saved.id);
+  return processRefund(archive, args, event, saved.id, claim.fenceToken);
 }
 
 async function processCharge(
@@ -331,6 +336,7 @@ async function processCharge(
   args: InterPixPipelineArgs,
   event: ParsedChargeEvent,
   archiveId: string,
+  fenceToken: string,
 ): Promise<InterPixItemResult> {
   let binding: InterPixChargeBinding | null;
   try {
@@ -339,24 +345,27 @@ async function processCharge(
       e2eId: event.hint.e2eId,
     });
   } catch {
-    return fail(archive, event, archiveId, 'charge_binding_failed');
+    return fail(archive, event, archiveId, fenceToken, 'charge_binding_failed');
   }
-  if (binding === null || binding.txid !== event.hint.txid) {
-    return fail(archive, event, archiveId, 'charge_binding_failed');
+  if (binding === null) {
+    return completeNoop(archive, event, archiveId, fenceToken, 'charge_binding_absent');
+  }
+  if (binding.txid !== event.hint.txid) {
+    return fail(archive, event, archiveId, fenceToken, 'charge_binding_failed');
   }
 
   let authoritative: Awaited<ReturnType<PixCobrancaProvider['consultarCobranca']>>;
   try {
     authoritative = await args.pixCobrancaProvider.consultarCobranca(event.hint.txid);
   } catch {
-    return fail(archive, event, archiveId, 'charge_requery_failed');
+    return fail(archive, event, archiveId, fenceToken, 'charge_requery_failed');
   }
 
   if (authoritative.status !== 'concluida') {
-    return fail(archive, event, archiveId, 'charge_not_confirmed');
+    return fail(archive, event, archiveId, fenceToken, 'charge_not_confirmed');
   }
   if (authoritative.e2eId !== event.hint.e2eId) {
-    return fail(archive, event, archiveId, 'charge_identity_mismatch');
+    return fail(archive, event, archiveId, fenceToken, 'charge_identity_mismatch');
   }
 
   try {
@@ -367,10 +376,14 @@ async function processCharge(
       amountCents: authoritative.valorPagoCents,
       horario: authoritative.horario,
     });
-    await archive.markProcessed(archiveId, dispatched.pagamentoId);
-    return result(event, archiveId, 'dispatched_success');
+    const committed = await archive.markProcessedFenced(
+      archiveId,
+      fenceToken,
+      dispatched.pagamentoId,
+    );
+    return result(event, archiveId, committed ? 'dispatched_success' : 'duplicate_in_flight');
   } catch {
-    return fail(archive, event, archiveId, 'charge_bookkeeping_failed');
+    return fail(archive, event, archiveId, fenceToken, 'charge_bookkeeping_failed');
   }
 }
 
@@ -379,6 +392,7 @@ async function processRefund(
   args: InterPixPipelineArgs,
   event: ParsedRefundEvent,
   archiveId: string,
+  fenceToken: string,
 ): Promise<InterPixItemResult> {
   let binding: InterPixRefundBinding | null;
   try {
@@ -387,25 +401,24 @@ async function processRefund(
       idDevolucao: event.hint.idDevolucao,
     });
   } catch {
-    return fail(archive, event, archiveId, 'refund_binding_failed');
+    return fail(archive, event, archiveId, fenceToken, 'refund_binding_failed');
   }
-  if (
-    binding === null ||
-    binding.e2eId !== event.hint.e2eId ||
-    binding.idDevolucao !== event.hint.idDevolucao
-  ) {
-    return fail(archive, event, archiveId, 'refund_binding_failed');
+  if (binding === null) {
+    return completeNoop(archive, event, archiveId, fenceToken, 'refund_binding_absent');
+  }
+  if (binding.e2eId !== event.hint.e2eId || binding.idDevolucao !== event.hint.idDevolucao) {
+    return fail(archive, event, archiveId, fenceToken, 'refund_binding_failed');
   }
 
   let authoritative: Awaited<ReturnType<PixCobrancaProvider['consultarDevolucao']>>;
   try {
     authoritative = await args.pixCobrancaProvider.consultarDevolucao(binding);
   } catch {
-    return fail(archive, event, archiveId, 'refund_requery_failed');
+    return fail(archive, event, archiveId, fenceToken, 'refund_requery_failed');
   }
 
   if (authoritative.status !== 'devolvida') {
-    return fail(archive, event, archiveId, 'refund_not_confirmed');
+    return fail(archive, event, archiveId, fenceToken, 'refund_not_confirmed');
   }
 
   try {
@@ -413,10 +426,14 @@ async function processRefund(
       e2eId: event.hint.e2eId,
       idDevolucao: event.hint.idDevolucao,
     });
-    await archive.markProcessed(archiveId, dispatched.pagamentoId);
-    return result(event, archiveId, 'dispatched_success');
+    const committed = await archive.markProcessedFenced(
+      archiveId,
+      fenceToken,
+      dispatched.pagamentoId,
+    );
+    return result(event, archiveId, committed ? 'dispatched_success' : 'duplicate_in_flight');
   } catch {
-    return fail(archive, event, archiveId, 'refund_bookkeeping_failed');
+    return fail(archive, event, archiveId, fenceToken, 'refund_bookkeeping_failed');
   }
 }
 
@@ -424,6 +441,7 @@ async function fail(
   archive: WebhookEventArchive,
   event: ParsedEvent,
   archiveId: string,
+  fenceToken: string,
   outcome: Exclude<
     InterPixItemOutcome,
     'dispatched_success' | 'duplicate_processed' | 'duplicate_in_flight'
@@ -431,8 +449,20 @@ async function fail(
 ): Promise<InterPixItemResult> {
   // Only categorical constants reach processing_error. Provider/body/error
   // messages may contain payer PII and must never be persisted or logged.
-  await archive.markFailed(archiveId, outcome);
+  const retained = await archive.markFailedFenced(archiveId, fenceToken, outcome);
+  if (!retained) return result(event, archiveId, 'duplicate_in_flight');
   return result(event, archiveId, outcome);
+}
+
+async function completeNoop(
+  archive: WebhookEventArchive,
+  event: ParsedEvent,
+  archiveId: string,
+  fenceToken: string,
+  outcome: 'charge_binding_absent' | 'refund_binding_absent',
+): Promise<InterPixItemResult> {
+  const committed = await archive.markProcessedFenced(archiveId, fenceToken, null);
+  return result(event, archiveId, committed ? outcome : 'duplicate_in_flight');
 }
 
 function result(

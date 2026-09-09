@@ -72,6 +72,9 @@ export class WebhookEventArchiveMemory implements WebhookEventArchive {
           processedAt: null,
           processingError: null,
           pagamentoId: null,
+          processingAttemptCount: 0,
+          processingFenceToken: null,
+          processingLeaseUntil: null,
         };
         this.rows.set(id, record);
         this.byProviderEventId.set(key, id);
@@ -115,6 +118,62 @@ export class WebhookEventArchiveMemory implements WebhookEventArchive {
         }
       },
     );
+  }
+
+  async claimForProcessing(
+    id: string,
+    now: Date,
+    leaseUntil: Date,
+  ): Promise<import('./webhook-event-archive.js').WebhookProcessingClaim> {
+    const row = this.rows.get(id);
+    if (!row) return { status: 'busy' };
+    if (row.processedAt) return { status: 'processed' };
+    if (
+      row.processingFenceToken &&
+      row.processingLeaseUntil &&
+      row.processingLeaseUntil.getTime() > now.getTime()
+    ) {
+      return { status: 'busy' };
+    }
+    const fenceToken = randomUUID();
+    this.rows.set(id, {
+      ...row,
+      processingAttemptCount: (row.processingAttemptCount ?? 0) + 1,
+      processingFenceToken: fenceToken,
+      processingLeaseUntil: leaseUntil,
+      processingError: null,
+    });
+    return { status: 'claimed', fenceToken };
+  }
+
+  async markProcessedFenced(
+    id: string,
+    fenceToken: string,
+    pagamentoId: string | null,
+  ): Promise<boolean> {
+    const row = this.rows.get(id);
+    if (!row || row.processedAt || row.processingFenceToken !== fenceToken) return false;
+    this.rows.set(id, {
+      ...row,
+      processedAt: this.clock(),
+      processingError: null,
+      pagamentoId,
+      processingFenceToken: null,
+      processingLeaseUntil: null,
+    });
+    return true;
+  }
+
+  async markFailedFenced(id: string, fenceToken: string, error: string): Promise<boolean> {
+    const row = this.rows.get(id);
+    if (!row || row.processedAt || row.processingFenceToken !== fenceToken) return false;
+    this.rows.set(id, {
+      ...row,
+      processingError: error.slice(0, PROCESSING_ERROR_MAX_LENGTH),
+      processingFenceToken: null,
+      processingLeaseUntil: null,
+    });
+    return true;
   }
 
   async markProcessed(id: string, pagamentoId: string | null): Promise<void> {

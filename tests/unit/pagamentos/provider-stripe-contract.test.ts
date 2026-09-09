@@ -138,6 +138,34 @@ describe('PagamentoProviderStripe.criarSessaoCheckout — Stripe handoff contrac
   });
 });
 
+describe('PagamentoProviderStripe.obterSessaoCheckout — recovery contract', () => {
+  it('returns the persisted session mount secret from authoritative retrieve', async () => {
+    const retrieve = vi.fn().mockResolvedValue({
+      id: 'cs_test_contract',
+      client_secret: 'cs_test_contract_secret',
+      status: 'open',
+      payment_status: 'unpaid',
+      custom_fields: [],
+      amount_total: 8000,
+      customer_details: null,
+      customer_email: null,
+    });
+    const stripe = { checkout: { sessions: { retrieve } } } as unknown as Stripe;
+    const provider = new PagamentoProviderStripe({ stripe, clock: () => new Date(0) });
+
+    await expect(provider.obterSessaoCheckout('cs_test_contract')).resolves.toMatchObject({
+      sessionId: 'cs_test_contract',
+      externalRef: 'cs_test_contract',
+      clientSecret: 'cs_test_contract_secret',
+      status: 'open',
+      paymentStatus: 'pending',
+    });
+    expect(retrieve).toHaveBeenCalledWith('cs_test_contract', {
+      expand: ['payment_intent', 'customer_details'],
+    });
+  });
+});
+
 describe('PagamentoProviderStripe.refundarPagamento — coexistence contract', () => {
   it('ignores the Inter e2e reference and preserves Stripe refund params and idempotency', async () => {
     const createRefund = vi.fn().mockResolvedValue({

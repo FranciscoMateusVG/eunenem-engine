@@ -215,6 +215,72 @@ describe('archiveAndDispatchStripeEvent (aperture-1n6u8 pipeline)', () => {
     expect(dispatch).toHaveBeenCalledTimes(1);
   });
 
+  it('reclaims a failed archived event and commits one later successful dispatch', async () => {
+    const event = makeStripeEvent({ id: 'evt_failed_then_retried' });
+    const args = {
+      rawBody: JSON.stringify(event),
+      signatureHeader: 't=ok',
+      verifyEvent: () => event,
+    };
+    const firstDispatch = vi.fn().mockRejectedValue(new Error('first dispatch failed'));
+    const retryDispatch = vi.fn().mockResolvedValue({ pagamentoId: 'pag_recovered' });
+
+    await expect(
+      archiveAndDispatchStripeEvent(archive, {
+        ...args,
+        dispatch: firstDispatch as never,
+      }),
+    ).resolves.toMatchObject({ status: 500, outcome: 'dispatched_failed' });
+    await expect(
+      archiveAndDispatchStripeEvent(archive, {
+        ...args,
+        dispatch: retryDispatch as never,
+      }),
+    ).resolves.toMatchObject({ status: 200, outcome: 'dispatched_success' });
+
+    expect(firstDispatch).toHaveBeenCalledOnce();
+    expect(retryDispatch).toHaveBeenCalledOnce();
+    await expect(archive.findByProviderEventId('stripe', event.id)).resolves.toMatchObject({
+      processedAt: expect.any(Date),
+      processingError: null,
+      pagamentoId: 'pag_recovered',
+      processingAttemptCount: 2,
+    });
+  });
+
+  it('keeps a concurrent redelivery retryable while the current fenced dispatch is active', async () => {
+    const event = makeStripeEvent({ id: 'evt_in_flight' });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const firstDispatch = vi.fn(async () => {
+      await gate;
+      return { pagamentoId: 'pag_once' };
+    });
+    const args = {
+      rawBody: JSON.stringify(event),
+      signatureHeader: 't=ok',
+      verifyEvent: () => event,
+    };
+
+    const first = archiveAndDispatchStripeEvent(archive, {
+      ...args,
+      dispatch: firstDispatch as never,
+    });
+    await vi.waitFor(() => expect(firstDispatch).toHaveBeenCalledOnce());
+    const competing = await archiveAndDispatchStripeEvent(archive, {
+      ...args,
+      dispatch: vi.fn() as never,
+    });
+    expect(competing).toMatchObject({
+      status: 503,
+      outcome: 'retryable_in_flight',
+    });
+    release();
+    await expect(first).resolves.toMatchObject({ status: 200, outcome: 'dispatched_success' });
+  });
+
   // ─── (e) Malformed body ──────────────────────────────────────────────
 
   it('(e) malformed body (not JSON): status 400, NO archive row, dispatch NOT called', async () => {

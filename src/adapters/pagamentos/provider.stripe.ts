@@ -309,6 +309,7 @@ export class PagamentoProviderStripe implements PagamentoProvider, CheckoutSessi
         return {
           sessionId: session.id,
           externalRef: session.id,
+          clientSecret: session.client_secret ?? null,
           status,
           paymentStatus,
           customFields,

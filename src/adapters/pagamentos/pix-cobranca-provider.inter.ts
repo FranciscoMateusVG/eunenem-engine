@@ -354,8 +354,19 @@ function classifyCharge(
   }
   const rawStatus = response.status;
   switch (rawStatus.toUpperCase()) {
-    case 'ATIVA':
-      return { status: 'ativa' };
+    case 'ATIVA': {
+      const active = parseCreatedCharge(response, expectedTxid);
+      if (active === null) {
+        throw new PixCobrancaTransitoriaError(
+          'consultarCobranca: cobrança ATIVA sem material recuperável',
+        );
+      }
+      return {
+        status: 'ativa',
+        pixCopiaECola: active.pixCopiaECola,
+        expiraEm: active.expiraEm,
+      };
+    }
     case 'REMOVIDA_PELO_USUARIO_RECEBEDOR':
     case 'REMOVIDA_PELO_PSP':
       return { status: 'removida' };

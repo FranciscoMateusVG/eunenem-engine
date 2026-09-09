@@ -284,6 +284,13 @@ async function finalizarPagamentoAprovadoInterno(
         );
       }
 
+      // A webhook is not complete merely because *some* ledger rows exist.
+      // Verify the exact per-item financial projection before the archive may
+      // record processed_at. This also closes the replay seam where an
+      // approved payment with a partial/corrupt prior ledger used to be
+      // treated as successfully converged.
+      assertLancamentosConformamPagamento(aprovado, lancamentos);
+
       logger.info('checkout.pagamento.finalizado', {
         idPlataforma: campanha.idPlataforma,
         idCampanha: campanha.id,
@@ -310,3 +317,37 @@ async function finalizarPagamentoAprovadoInterno(
 }
 
 function validarRepeticaoSemRestricoes(_pagamento: Pagamento): void {}
+
+function assertLancamentosConformamPagamento(
+  pagamento: Pagamento,
+  lancamentos: readonly LancamentoFinanceiro[],
+): void {
+  const expected = new Map<string, number>();
+  for (const item of pagamento.intencao.items) {
+    const composicao = item.composicaoValoresItem;
+    if (composicao.tipo === 'contribuicao') {
+      expected.set(`${item.id}:credito_saldo_recebedor`, composicao.lineReceiverAmountCents);
+      expected.set(`${item.id}:credito_receita_plataforma`, composicao.lineFeeAmountCents);
+    } else {
+      expected.set(`${item.id}:credito_passthrough_surcharge`, composicao.amountCents);
+    }
+  }
+
+  if (lancamentos.length !== expected.size) {
+    throw new Error('pagamento aprovado possui livro financeiro incompleto');
+  }
+  const seen = new Set<string>();
+  for (const lancamento of lancamentos) {
+    const key = `${lancamento.idItemPagamento}:${lancamento.tipo}`;
+    const amount = expected.get(key);
+    if (
+      seen.has(key) ||
+      amount === undefined ||
+      lancamento.idPagamento !== pagamento.id ||
+      lancamento.amountCents !== amount
+    ) {
+      throw new Error('pagamento aprovado possui livro financeiro divergente');
+    }
+    seen.add(key);
+  }
+}
