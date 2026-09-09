@@ -1,6 +1,11 @@
+import { createHmac } from "node:crypto";
 import { sql } from "kysely";
 import { z } from "zod";
 import type { Database } from "../../../src/adapters/database.js";
+import {
+  type CampaignFilter,
+  parseAdminCampaignQuery,
+} from "./admin-user-search.js";
 
 export const PaymentEvidenceProviderFilterSchema = z.enum(["stripe", "inter"]);
 export type PaymentEvidenceProviderFilter = z.infer<
@@ -19,6 +24,18 @@ export type PaymentEvidenceStatusFilter = z.infer<
 >;
 
 const SAFE_STORED_TEXT = /^[^\u0000-\u001f\u007f-\u009f\u2028\u2029]*$/u;
+export const PaymentEvidencePayerQuerySchema = z.string().max(160).regex(SAFE_STORED_TEXT);
+export const PaymentEvidenceCampaignQuerySchema = z.string().max(1024).regex(SAFE_STORED_TEXT);
+export const PaymentEvidenceExactReferenceSchema = z.string().max(255).regex(SAFE_STORED_TEXT);
+export const PaymentEvidenceReferenceResolutionSchema = z.enum([
+  "not_requested",
+  "unique",
+  "absent",
+  "ambiguous",
+]);
+export type PaymentEvidenceReferenceResolution = z.infer<
+  typeof PaymentEvidenceReferenceResolutionSchema
+>;
 const NullableBoundedReferenceSchema = z
   .string()
   .min(1)
@@ -57,11 +74,10 @@ export const AdminPaymentEvidenceSchema = z.object({
 export type AdminPaymentEvidence = z.infer<typeof AdminPaymentEvidenceSchema>;
 
 const PaymentEvidenceCursorSchema = z.object({
-  version: z.literal(1),
+  version: z.literal(2),
   createdAt: z.string().datetime(),
   paymentId: z.string().uuid(),
-  provider: PaymentEvidenceProviderFilterSchema.nullable(),
-  status: PaymentEvidenceStatusFilterSchema.nullable(),
+  filtersDigest: z.string().length(43),
 }).strict();
 
 type PaymentEvidenceCursor = z.infer<typeof PaymentEvidenceCursorSchema>;
@@ -73,12 +89,16 @@ export class InvalidPaymentEvidenceCursorError extends Error {
   }
 }
 
+export class InvalidPaymentEvidenceFilterError extends Error {
+  constructor() {
+    super("invalid_payment_evidence_filter");
+    this.name = "InvalidPaymentEvidenceFilterError";
+  }
+}
+
 export function decodePaymentEvidenceCursor(
   encoded: string,
-  filters: {
-    provider: PaymentEvidenceProviderFilter | null;
-    status: PaymentEvidenceStatusFilter | null;
-  },
+  expectedFiltersDigest: string,
 ): PaymentEvidenceCursor {
   try {
     if (encoded.length === 0 || encoded.length > 1024) {
@@ -86,7 +106,7 @@ export function decodePaymentEvidenceCursor(
     }
     const decoded = Buffer.from(encoded, "base64url").toString("utf8");
     const cursor = PaymentEvidenceCursorSchema.parse(JSON.parse(decoded));
-    if (cursor.provider !== filters.provider || cursor.status !== filters.status) {
+    if (cursor.filtersDigest !== expectedFiltersDigest) {
       throw new InvalidPaymentEvidenceCursorError();
     }
     return cursor;
@@ -94,6 +114,65 @@ export function decodePaymentEvidenceCursor(
     if (error instanceof InvalidPaymentEvidenceCursorError) throw error;
     throw new InvalidPaymentEvidenceCursorError();
   }
+}
+
+function canonicalFilter(
+  value: string | undefined,
+  schema: z.ZodString,
+): string | null {
+  const parsed = schema.safeParse(value?.trim() ?? "");
+  if (!parsed.success) throw new InvalidPaymentEvidenceFilterError();
+  return parsed.data.length === 0 ? null : parsed.data;
+}
+
+function escapeLike(value: string): string {
+  return value.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_");
+}
+
+function paymentCampaignPredicate(
+  platformId: string,
+  filter: CampaignFilter | null,
+) {
+  if (filter === null) return sql<boolean>`TRUE`;
+  if (filter.kind === "text") {
+    return sql<boolean>`(
+      c.titulo ILIKE ${filter.pattern} ESCAPE '\\'
+      OR c.slug ILIKE ${filter.pattern} ESCAPE '\\'
+    )`;
+  }
+  if (filter.kind === "slug") {
+    return sql<boolean>`(
+      c.slug = ${filter.campaignSlug}
+      AND EXISTS (
+        SELECT 1
+        FROM campanha_administradores ca
+        INNER JOIN usuarios u
+          ON u.id_conta = ca.id_usuario
+         AND u.id_plataforma = ${platformId}
+        WHERE ca.campanha_id = c.id
+          AND u.slug = ${filter.ownerSlug}
+      )
+    )`;
+  }
+  return sql<boolean>`(
+    c.id = ${filter.campaignId}::uuid
+    AND EXISTS (
+      SELECT 1
+      FROM campanha_administradores ca
+      INNER JOIN usuarios u
+        ON u.id_conta = ca.id_usuario
+       AND u.id_plataforma = ${platformId}
+      WHERE ca.campanha_id = c.id
+        AND u.slug = ${filter.ownerSlug}
+    )
+  )`;
+}
+
+function paymentFiltersDigest(secret: string, value: object): string {
+  return createHmac("sha256", secret)
+    .update("admin-payment-evidence-cursor:v2\0")
+    .update(JSON.stringify(value))
+    .digest("base64url");
 }
 
 function encodePaymentEvidenceCursor(cursor: PaymentEvidenceCursor): string {
@@ -131,12 +210,18 @@ export interface ListAdminPaymentEvidenceInput {
   readonly limit: number;
   readonly provider: PaymentEvidenceProviderFilter | null;
   readonly status: PaymentEvidenceStatusFilter | null;
+  readonly payerQuery?: string;
+  readonly campaignQuery?: string;
+  readonly exactReference?: string;
+  readonly publicOrigin: string;
+  readonly cursorSecret: string;
 }
 
 export interface ListAdminPaymentEvidenceOutput {
   readonly rows: AdminPaymentEvidence[];
   readonly nextCursor: string | null;
   readonly totalCount: number;
+  readonly referenceResolution: PaymentEvidenceReferenceResolution;
 }
 
 function numberFromDb(value: string | number): number {
@@ -187,18 +272,68 @@ export async function listAdminPaymentEvidence(
   db: Database,
   input: ListAdminPaymentEvidenceInput,
 ): Promise<ListAdminPaymentEvidenceOutput> {
+  const payerQuery = canonicalFilter(input.payerQuery, PaymentEvidencePayerQuerySchema);
+  const payerPattern = payerQuery === null ? null : `%${escapeLike(payerQuery)}%`;
+  let campaignFilter: CampaignFilter | null;
+  try {
+    campaignFilter = parseAdminCampaignQuery(input.campaignQuery, input.publicOrigin);
+  } catch {
+    throw new InvalidPaymentEvidenceFilterError();
+  }
+  const exactReference = canonicalFilter(
+    input.exactReference,
+    PaymentEvidenceExactReferenceSchema,
+  );
+  const digest = paymentFiltersDigest(input.cursorSecret, {
+    provider: input.provider,
+    status: input.status,
+    payerQuery,
+    campaignFilter,
+    exactReference,
+  });
   const cursor =
     input.cursor === null
       ? null
-      : decodePaymentEvidenceCursor(input.cursor, {
-          provider: input.provider,
-          status: input.status,
-        });
+      : decodePaymentEvidenceCursor(input.cursor, digest);
+
+  let exactPaymentId: string | null = null;
+  let referenceResolution: PaymentEvidenceReferenceResolution = "not_requested";
+  if (exactReference !== null) {
+    const matches = await sql<{ payment_id: string }>`
+      SELECT DISTINCT p.id AS payment_id
+      FROM pagamentos p
+      INNER JOIN campanhas c ON c.id = p.intencao_id_campanha
+      WHERE c.id_plataforma = ${input.platformId}
+        AND (
+          p.intencao_external_ref = ${exactReference}
+          OR p.intencao_payment_intent_external_ref = ${exactReference}
+          OR p.intencao_charge_external_ref = ${exactReference}
+          OR p.intencao_e2e_external_ref = ${exactReference}
+          OR p.transacao_externa ->> 'id' = ${exactReference}
+          OR EXISTS (
+            SELECT 1
+            FROM payment_webhook_events e
+            WHERE e.pagamento_id = p.id
+              AND e.provider_event_id = ${exactReference}
+          )
+        )
+      LIMIT 2
+    `.execute(db);
+    if (matches.rows.length === 0) {
+      return { rows: [], nextCursor: null, totalCount: 0, referenceResolution: "absent" };
+    }
+    if (matches.rows.length > 1) {
+      return { rows: [], nextCursor: null, totalCount: 0, referenceResolution: "ambiguous" };
+    }
+    exactPaymentId = matches.rows[0]?.payment_id ?? null;
+    referenceResolution = "unique";
+  }
 
   const providerFilter = input.provider;
   const statusFilter = input.status;
   const cursorCreatedAt = cursor?.createdAt ?? null;
   const cursorPaymentId = cursor?.paymentId ?? null;
+  const campaignPredicate = paymentCampaignPredicate(input.platformId, campaignFilter);
 
   const rowsResult = await sql<PaymentEvidenceDbRow>`
     SELECT
@@ -229,6 +364,12 @@ export async function listAdminPaymentEvidence(
     WHERE c.id_plataforma = ${input.platformId}
       AND (${providerFilter}::text IS NULL OR p.transacao_externa ->> 'provedor' = ${providerFilter})
       AND (${statusFilter}::text IS NULL OR p.status = ${statusFilter})
+      AND (${payerPattern}::text IS NULL OR (
+        p.intencao_contribuinte_nome ILIKE ${payerPattern} ESCAPE '\\'
+        OR p.intencao_contribuinte_email ILIKE ${payerPattern} ESCAPE '\\'
+      ))
+      AND ${campaignPredicate}
+      AND (${exactPaymentId}::uuid IS NULL OR p.id = ${exactPaymentId}::uuid)
       AND (
         ${cursorCreatedAt}::timestamptz IS NULL
         OR p.criado_em < ${cursorCreatedAt}::timestamptz
@@ -245,6 +386,12 @@ export async function listAdminPaymentEvidence(
     WHERE c.id_plataforma = ${input.platformId}
       AND (${providerFilter}::text IS NULL OR p.transacao_externa ->> 'provedor' = ${providerFilter})
       AND (${statusFilter}::text IS NULL OR p.status = ${statusFilter})
+      AND (${payerPattern}::text IS NULL OR (
+        p.intencao_contribuinte_nome ILIKE ${payerPattern} ESCAPE '\\'
+        OR p.intencao_contribuinte_email ILIKE ${payerPattern} ESCAPE '\\'
+      ))
+      AND ${campaignPredicate}
+      AND (${exactPaymentId}::uuid IS NULL OR p.id = ${exactPaymentId}::uuid)
   `.execute(db);
 
   const hasNext = rowsResult.rows.length > input.limit;
@@ -287,14 +434,13 @@ export async function listAdminPaymentEvidence(
   const last = hasNext ? visibleRows.at(-1) : undefined;
   const nextCursor = last
     ? encodePaymentEvidenceCursor({
-        version: 1,
+        version: 2,
         createdAt: last.created_at.toISOString(),
         paymentId: last.payment_id,
-        provider: input.provider,
-        status: input.status,
+        filtersDigest: digest,
       })
     : null;
   const totalCount = numberFromDb(countResult.rows[0]?.total_count ?? 0);
 
-  return { rows, nextCursor, totalCount };
+  return { rows, nextCursor, totalCount, referenceResolution };
 }
