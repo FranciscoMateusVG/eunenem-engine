@@ -3,7 +3,9 @@ import { sql } from "kysely";
 import { z } from "zod";
 import type { Database } from "../../../src/adapters/database.js";
 
-const SAFE_QUERY = /^[^\u0000-\u001f\u007f-\u009f\u2028\u2029]*$/u;
+const SAFE_QUERY = /^[^\u0000-\u001f\u007f-\u009f\u2028\u2029\p{Cf}]*$/u;
+const OWNER_SLUG = /^[a-z][a-z0-9-]{2,29}$/;
+const CAMPAIGN_SLUG = /^[a-z][a-z0-9-]{2,59}$/;
 
 export const AdminUserQuerySchema = z.string().max(160).regex(SAFE_QUERY);
 export const AdminCampaignQuerySchema = z.string().max(1024).regex(SAFE_QUERY);
@@ -71,14 +73,14 @@ function canonicalQuery(value: string | undefined, maxLength: number): string | 
   return cleaned.length === 0 ? null : cleaned;
 }
 
-function safePathSegment(value: string): string {
+function canonicalSlug(value: string, pattern: RegExp): string {
   let decoded: string;
   try {
     decoded = decodeURIComponent(value);
   } catch {
     throw new InvalidAdminSearchFilterError();
   }
-  if (decoded.length < 1 || decoded.length > 120 || !SAFE_QUERY.test(decoded)) {
+  if (decoded !== value || !pattern.test(decoded)) {
     throw new InvalidAdminSearchFilterError();
   }
   return decoded;
@@ -122,8 +124,8 @@ export function parseAdminCampaignQuery(
   if (segments.length === 3 && segments[0] === "pagina") {
     return {
       kind: "slug",
-      ownerSlug: safePathSegment(segments[1] ?? ""),
-      campaignSlug: safePathSegment(segments[2] ?? ""),
+      ownerSlug: canonicalSlug(segments[1] ?? "", OWNER_SLUG),
+      campaignSlug: canonicalSlug(segments[2] ?? "", CAMPAIGN_SLUG),
     };
   }
   if (
@@ -134,7 +136,7 @@ export function parseAdminCampaignQuery(
   ) {
     return {
       kind: "id",
-      ownerSlug: safePathSegment(segments[1] ?? ""),
+      ownerSlug: canonicalSlug(segments[1] ?? "", OWNER_SLUG),
       campaignId: segments[3] as string,
     };
   }
