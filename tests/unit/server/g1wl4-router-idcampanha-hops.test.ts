@@ -65,7 +65,7 @@ import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import {
   CheckoutOperationStorageUnavailableError,
-  getOrCreatePendingCheckoutOperation,
+  executeRecoverableCheckout,
 } from '../../../apps/eunenem-server/pages/lib/checkoutOperationClient.js';
 import type { ServerDeps } from '../../../apps/eunenem-server/server/auth/setup.js';
 import type { TrpcContext } from '../../../apps/eunenem-server/server/trpc/context.js';
@@ -1323,39 +1323,77 @@ describe('iytxa — public checkout capability slots', () => {
       setItem: (key: string, value: string) => void values.set(key, value),
       removeItem: (key: string) => void values.delete(key),
     };
-    const operationId = getOrCreatePendingCheckoutOperation('contribution', storage);
+    const operationId = randomUUID();
     const input = {
-      operationId,
       slug: user.slug,
       idContribuicao,
       metodo: 'credit_card' as const,
     };
     const providerCall = vi.spyOn(rig.deps.checkoutSessionProvider, 'criarSessaoCheckout');
-    await rig.anonCaller.pagina.iniciarPagamentoContribuicao(input);
-    const pair = rig.anonCtx.resHeaders.get('set-cookie')?.split(';', 1)[0];
-    if (!pair) throw new Error('missing operation cookie');
-    rig.anonCtx.headers.set('cookie', pair);
-    const acceptedButLost = await rig.anonCaller.pagina.iniciarPagamentoContribuicao(input);
-    expect(acceptedButLost).toMatchObject({ tipo: 'stripe_embedded' });
+    let loseFirstMountResponse = true;
+    const requestInputs: Array<typeof input & { operationId: string }> = [];
+    const setCookieHeaders: string[] = [];
+    const request = async (requestInput: typeof input & { operationId: string }) => {
+      requestInputs.push(requestInput);
+      const response = await rig.anonCaller.pagina.iniciarPagamentoContribuicao(requestInput);
+      const setCookie = rig.anonCtx.resHeaders.get('set-cookie');
+      if (setCookie) setCookieHeaders.push(setCookie);
+      const pair = setCookie?.split(';', 1)[0];
+      if (pair) rig.anonCtx.headers.set('cookie', pair);
+      rig.anonCtx.resHeaders.delete('set-cookie');
+      if (response.tipo !== 'prepared' && loseFirstMountResponse) {
+        loseFirstMountResponse = false;
+        throw new Error('simulated accepted response loss');
+      }
+      return response;
+    };
 
-    const afterReload = getOrCreatePendingCheckoutOperation('contribution', storage);
-    expect(afterReload).toBe(operationId);
-    const recovered = await rig.anonCaller.pagina.iniciarPagamentoContribuicao({
-      ...input,
-      operationId: afterReload,
+    await expect(
+      executeRecoverableCheckout({
+        storageKey: 'contribution',
+        requestInput: input,
+        request,
+        storage,
+        createId: () => operationId,
+      }),
+    ).rejects.toThrow('simulated accepted response loss');
+    expect(storage.getItem('contribution')).toBe(operationId);
+
+    const recovered = await executeRecoverableCheckout({
+      storageKey: 'contribution',
+      requestInput: input,
+      request,
+      storage,
+      createId: () => randomUUID(),
     });
-    expect(recovered).toEqual(acceptedButLost);
+    expect(recovered).toMatchObject({ tipo: 'stripe_embedded' });
+    expect(storage.getItem('contribution')).toBeNull();
     expect(providerCall).toHaveBeenCalledOnce();
+    expect(requestInputs).toHaveLength(3);
+    expect(requestInputs).toEqual(requestInputs.map(() => ({ ...input, operationId })));
+    expect(setCookieHeaders.some((header) => header.includes('Max-Age=0'))).toBe(false);
     const operation = await rig.deps.checkoutOperationRepository.findById(operationId);
     expect(operation).toMatchObject({ state: 'local_committed', paymentId: operationId });
-    expect(operation?.snapshot.totalSurchargeCents).toBeGreaterThan(0);
-
-    const unavailableStorage = getOrCreatePendingCheckoutOperation.bind(
-      null,
-      'contribution',
-      undefined,
+    expect(operation?.snapshot.items.reduce((sum, item) => sum + item.contributionCents, 0)).toBe(
+      100,
     );
-    expect(unavailableStorage).toThrow(CheckoutOperationStorageUnavailableError);
+    expect(operation?.snapshot.totalSurchargeCents).toBeGreaterThan(0);
+    expect(operation?.snapshot.totalChargedCents).toBe(
+      operation?.snapshot.items.reduce(
+        (sum, item) => sum + item.contributionCents + item.feeCents + item.surchargeCents,
+        0,
+      ),
+    );
+
+    await expect(
+      executeRecoverableCheckout({
+        storageKey: 'cart',
+        requestInput: input,
+        request,
+        storage: undefined,
+      }),
+    ).rejects.toBeInstanceOf(CheckoutOperationStorageUnavailableError);
+    expect(requestInputs).toHaveLength(3);
     expect(providerCall).toHaveBeenCalledOnce();
   });
 

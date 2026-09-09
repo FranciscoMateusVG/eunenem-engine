@@ -105,9 +105,10 @@ async function completePixIdentity(page: Page, modal: ReturnType<Page['locator']
   await modal.getByPlaceholder('a gente já te ama tanto ♡').fill('fluxo literal de estorno');
 
   const initiated = page.waitForResponse(
-    (response) =>
+    async (response) =>
       response.url().includes('iniciarPagamentoContribuicao') &&
-      response.request().method() === 'POST',
+      response.request().method() === 'POST' &&
+      !(await response.text()).includes('"tipo":"prepared"'),
   );
   await modal.getByRole('button', { name: 'continuar para o pix ♡' }).click();
   const response = await initiated;

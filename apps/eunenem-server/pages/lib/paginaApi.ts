@@ -16,13 +16,9 @@
 //   - IniciarPagamentoInput now requires `metodo: 'pix' | 'credit_card'`
 
 import type { inferRouterInputs, inferRouterOutputs } from "@trpc/server";
-import { useRef } from "react";
 import type { PaginaRouter } from "../../server/trpc/pagina-router.js";
 import { useCampanhaRota } from "./campanha-rota.js";
-import {
-  clearPendingCheckoutOperation,
-  getOrCreatePendingCheckoutOperation,
-} from "./checkoutOperationClient.js";
+import { executeRecoverableCheckout } from "./checkoutOperationClient.js";
 import { trpc } from "./trpc.js";
 
 type PaginaInputs = inferRouterInputs<PaginaRouter>;
@@ -123,26 +119,15 @@ export function useIniciarPagamentoContribuicao() {
   // bare guest URL → no idCampanha → server default (guest back-compat).
   const idCampanha = useCampanhaRota();
   const m = trpc.pagina.iniciarPagamentoContribuicao.useMutation();
-  const pendingOperation = useRef<string | null>(null);
   const mutateAsync = async (
     input: IniciarPagamentoInput,
   ): Promise<IniciarPagamentoResult> => {
-    const operationId =
-      pendingOperation.current ??
-      getOrCreatePendingCheckoutOperation(CHECKOUT_OPERATION_STORAGE_KEYS.contribution);
-    pendingOperation.current = operationId;
     const addressed = idCampanha ? { ...input, idCampanha } : input;
-    const prepared = await m.mutateAsync({ ...addressed, operationId });
-    if (prepared.tipo !== "prepared") {
-      clearPendingCheckoutOperation(CHECKOUT_OPERATION_STORAGE_KEYS.contribution, operationId);
-      pendingOperation.current = null;
-      return prepared;
-    }
-    const result = await m.mutateAsync({ ...addressed, operationId });
-    if (result.tipo === "prepared") throw new Error("Checkout não confirmado");
-    clearPendingCheckoutOperation(CHECKOUT_OPERATION_STORAGE_KEYS.contribution, operationId);
-    pendingOperation.current = null;
-    return result;
+    return executeRecoverableCheckout({
+      storageKey: CHECKOUT_OPERATION_STORAGE_KEYS.contribution,
+      requestInput: addressed,
+      request: m.mutateAsync,
+    });
   };
   // Do not expose the raw one-shot mutate: checkout requires the
   // reserve response's per-operation cookie to make the second request.
@@ -159,26 +144,15 @@ export function useIniciarPagamentoCarrinho() {
   // aperture-1yx1n — same money-write rule as the single-shot mutation.
   const idCampanha = useCampanhaRota();
   const m = trpc.pagina.iniciarPagamentoCarrinho.useMutation();
-  const pendingOperation = useRef<string | null>(null);
   const mutateAsync = async (
     input: IniciarPagamentoCarrinhoInput,
   ): Promise<IniciarPagamentoCarrinhoResult> => {
-    const operationId =
-      pendingOperation.current ??
-      getOrCreatePendingCheckoutOperation(CHECKOUT_OPERATION_STORAGE_KEYS.cart);
-    pendingOperation.current = operationId;
     const addressed = idCampanha ? { ...input, idCampanha } : input;
-    const prepared = await m.mutateAsync({ ...addressed, operationId });
-    if (prepared.tipo !== "prepared") {
-      clearPendingCheckoutOperation(CHECKOUT_OPERATION_STORAGE_KEYS.cart, operationId);
-      pendingOperation.current = null;
-      return prepared;
-    }
-    const result = await m.mutateAsync({ ...addressed, operationId });
-    if (result.tipo === "prepared") throw new Error("Checkout não confirmado");
-    clearPendingCheckoutOperation(CHECKOUT_OPERATION_STORAGE_KEYS.cart, operationId);
-    pendingOperation.current = null;
-    return result;
+    return executeRecoverableCheckout({
+      storageKey: CHECKOUT_OPERATION_STORAGE_KEYS.cart,
+      requestInput: addressed,
+      request: m.mutateAsync,
+    });
   };
   const { mutate: _rawMutate, mutateAsync: _rawMutateAsync, ...state } = m;
   return { ...state, mutateAsync };

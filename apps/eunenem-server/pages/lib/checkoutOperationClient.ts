@@ -1,4 +1,4 @@
-interface CheckoutOperationStorage {
+export interface CheckoutOperationStorage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
   removeItem(key: string): void;
@@ -63,4 +63,47 @@ export function clearPendingCheckoutOperation(
   } catch {
     // A blocked storage API must not change checkout authorization semantics.
   }
+}
+
+interface PreparedCheckoutResult {
+  readonly tipo: "prepared";
+}
+
+/**
+ * Exact two-request orchestration used by the public checkout hooks.
+ *
+ * The operation id is persisted and read back before the first request. A
+ * response lost after provider acceptance therefore leaves the same id for a
+ * reload. Only a response received by this caller clears the tab-local id;
+ * the HttpOnly capability has a separate business-terminal lifecycle owned by
+ * the server.
+ */
+export async function executeRecoverableCheckout<
+  TInput extends object,
+  TResponse extends { readonly tipo: string },
+>(input: {
+  readonly storageKey: string;
+  readonly requestInput: TInput;
+  readonly request: (
+    requestInput: TInput & { readonly operationId: string },
+  ) => Promise<TResponse>;
+  readonly storage?: CheckoutOperationStorage;
+  readonly createId?: () => string;
+}): Promise<Exclude<TResponse, PreparedCheckoutResult>> {
+  const operationId = getOrCreatePendingCheckoutOperation(
+    input.storageKey,
+    input.storage,
+    input.createId,
+  );
+  const requestInput = { ...input.requestInput, operationId };
+  const prepared = await input.request(requestInput);
+  if (prepared.tipo !== "prepared") {
+    clearPendingCheckoutOperation(input.storageKey, operationId, input.storage);
+    return prepared as Exclude<TResponse, PreparedCheckoutResult>;
+  }
+
+  const result = await input.request(requestInput);
+  if (result.tipo === "prepared") throw new Error("Checkout não confirmado");
+  clearPendingCheckoutOperation(input.storageKey, operationId, input.storage);
+  return result as Exclude<TResponse, PreparedCheckoutResult>;
 }
