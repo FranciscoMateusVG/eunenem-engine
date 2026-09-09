@@ -23,7 +23,7 @@ export type PaymentEvidenceStatusFilter = z.infer<
   typeof PaymentEvidenceStatusFilterSchema
 >;
 
-const SAFE_STORED_TEXT = /^[^\u0000-\u001f\u007f-\u009f\u2028\u2029]*$/u;
+const SAFE_STORED_TEXT = /^[^\u0000-\u001f\u007f-\u009f\u2028\u2029\p{Cf}]*$/u;
 export const PaymentEvidencePayerQuerySchema = z.string().max(160).regex(SAFE_STORED_TEXT);
 export const PaymentEvidenceCampaignQuerySchema = z.string().max(1024).regex(SAFE_STORED_TEXT);
 export const PaymentEvidenceExactReferenceSchema = z.string().max(255).regex(SAFE_STORED_TEXT);

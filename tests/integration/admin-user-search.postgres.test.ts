@@ -165,6 +165,14 @@ describe('admin user search — Postgres', () => {
         limit: 20,
       }),
     ).rejects.toBeInstanceOf(InvalidAdminSearchFilterError);
+    await expect(
+      searchAdminUsers(testDb.db, {
+        platformId: ID_PLATAFORMA_EUNENEM,
+        query: `${PUBLIC_ORIGIN}/pagina/%61na-silva/cha-bebe`,
+        publicOrigin: PUBLIC_ORIGIN,
+        limit: 20,
+      }),
+    ).rejects.toBeInstanceOf(InvalidAdminSearchFilterError);
 
     const wildcard = await searchAdminUsers(testDb.db, {
       platformId: ID_PLATAFORMA_EUNENEM,
