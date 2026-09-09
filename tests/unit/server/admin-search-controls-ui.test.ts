@@ -58,7 +58,7 @@ describe('admin search controls', () => {
       label: 'Campanha',
       ariaLabel: 'Filtrar usuários por campanha ou link da campanha',
       placeholder: 'Nome, link ou slug da campanha',
-      maxLength: 160,
+      maxLength: 1024,
       value: '',
       onChange,
     });
@@ -68,7 +68,7 @@ describe('admin search controls', () => {
       type: 'search',
       placeholder: 'Nome, link ou slug da campanha',
       'aria-label': 'Filtrar usuários por campanha ou link da campanha',
-      maxLength: 160,
+      maxLength: 1024,
     });
     expect(input?.onChange).toBeTypeOf('function');
     (input?.onChange as (event: { target: { value: string } }) => void)({

@@ -24,7 +24,12 @@ const EMPTY_PAYMENT_SEARCH: PaymentSearchDraft = {
   exactReference: "",
 };
 
-type ReferenceResolution = "absent" | "unique" | "ambiguous" | null;
+type ReferenceResolution =
+  | "not_requested"
+  | "absent"
+  | "unique"
+  | "ambiguous"
+  | null;
 
 export function paymentEvidenceSearchInput(search: PaymentSearchDraft) {
   return {
@@ -223,6 +228,7 @@ export function PaymentEvidenceFilters({
         label="Pagador"
         ariaLabel="Filtrar por nome ou email do pagador"
         placeholder="Nome ou email do pagador"
+        maxLength={160}
         value={search.payerQuery}
         onChange={(value) => onSearchChange("payerQuery", value)}
       />
@@ -230,6 +236,7 @@ export function PaymentEvidenceFilters({
         label="Pessoa ou campanha"
         ariaLabel="Filtrar por pessoa, campanha ou link da campanha"
         placeholder="Nome, título, link ou slug da campanha"
+        maxLength={1024}
         value={search.campaignQuery}
         onChange={(value) => onSearchChange("campaignQuery", value)}
       />
@@ -237,6 +244,7 @@ export function PaymentEvidenceFilters({
         label="Referência de pagamento / Inter"
         ariaLabel="Localizar por referência exata de pagamento ou Inter"
         placeholder="UUID, txid, e2e, cs_, pi_, ch_ ou evt_"
+        maxLength={255}
         value={search.exactReference}
         onChange={(value) => onSearchChange("exactReference", value)}
       />
@@ -304,12 +312,14 @@ function SearchField({
   label,
   ariaLabel,
   placeholder,
+  maxLength,
   value,
   onChange,
 }: {
   label: string;
   ariaLabel: string;
   placeholder: string;
+  maxLength: number;
   value: string;
   onChange: (value: string) => void;
 }) {
@@ -320,7 +330,7 @@ function SearchField({
         type="search"
         autoComplete="off"
         spellCheck={false}
-        maxLength={160}
+        maxLength={maxLength}
         aria-label={ariaLabel}
         placeholder={placeholder}
         value={value}
@@ -336,7 +346,8 @@ function referenceResolutionFrom(data: unknown): ReferenceResolution {
     return null;
   }
   const resolution = data.referenceResolution;
-  return resolution === "absent" ||
+  return resolution === "not_requested" ||
+    resolution === "absent" ||
     resolution === "unique" ||
     resolution === "ambiguous"
     ? resolution
@@ -350,7 +361,12 @@ export function ReferenceResolutionNotice({
   exactReference: string;
   resolution: ReferenceResolution;
 }) {
-  if (exactReference === "" || resolution === null || resolution === "unique") {
+  if (
+    exactReference === "" ||
+    resolution === null ||
+    resolution === "not_requested" ||
+    resolution === "unique"
+  ) {
     return null;
   }
   if (resolution === "absent") {

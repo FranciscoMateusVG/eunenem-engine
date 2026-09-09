@@ -348,7 +348,7 @@ export function AdminUsersFilters({
           label="Campanha"
           ariaLabel="Filtrar usuários por campanha ou link da campanha"
           placeholder="Nome, link ou slug da campanha"
-          maxLength={160}
+          maxLength={1024}
           value={campaignQuery}
           onChange={onCampaignQueryChange}
         />

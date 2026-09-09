@@ -163,7 +163,9 @@ describe('PaymentEvidenceFilters', () => {
     expect(html).toContain('Referência de pagamento / Inter');
     expect(html).toContain('Nome, título, link ou slug da campanha');
     expect(html).toContain('UUID, txid, e2e, cs_, pi_, ch_ ou evt_');
-    expect(html.match(/maxLength="160"/g)).toHaveLength(3);
+    expect(html).toContain('maxLength="160"');
+    expect(html).toContain('maxLength="1024"');
+    expect(html).toContain('maxLength="255"');
     expect(html.match(/min-h-11/g)?.length).toBeGreaterThanOrEqual(6);
     expect(html).toContain('min-w-0');
     expect(html).toContain('Limpar buscas');
@@ -228,6 +230,15 @@ describe('PaymentEvidenceFilters', () => {
     );
     expect(ambiguous).toContain('mais de um pagamento local');
     expect(ambiguous).toContain('Nenhuma linha foi escolhida');
+
+    expect(
+      renderToStaticMarkup(
+        React.createElement(ReferenceResolutionNotice, {
+          exactReference: 'reference',
+          resolution: 'not_requested',
+        }),
+      ),
+    ).toBe('');
 
     expect(
       renderToStaticMarkup(
