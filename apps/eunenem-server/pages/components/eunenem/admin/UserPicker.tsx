@@ -9,9 +9,9 @@ import {
 import { trpc } from "@/lib/trpc.js";
 
 /**
- * UserPicker — prefix-search dropdown for the admin landing page.
+ * UserPicker — user/campaign search dropdown for the admin landing page.
  *
- * Hits `trpc.admin.searchUsers` with a debounced prefix; renders the
+ * Hits `trpc.admin.searchUsers` with a debounced search value; renders the
  * results in a WAI-ARIA combobox dropdown. Keyboard nav (Arrow / Enter
  * / Esc) and click-outside dismiss. Selecting a row navigates to
  * `/admin/usuario/:idConta` via plain anchor click — the SSR catch-all
@@ -159,7 +159,7 @@ export function UserPicker() {
         role="combobox"
         autoComplete="off"
         spellCheck={false}
-        placeholder="email, telefone ou id da conta…"
+        placeholder="Email ou link da campanha…"
         value={query}
         aria-autocomplete="list"
         aria-expanded={showDropdown}
@@ -206,22 +206,13 @@ export function UserPicker() {
 }
 
 function RightAccessory({ spinning }: { spinning: boolean }) {
-  if (spinning) {
-    return (
-      <span
-        aria-hidden
-        className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2"
-      >
-        <Spinner />
-      </span>
-    );
-  }
+  if (!spinning) return null;
   return (
     <span
       aria-hidden
-      className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 font-mono text-[10px] uppercase tracking-[0.14em] text-ink-mute"
+      className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2"
     >
-      ⌘K
+      <Spinner />
     </span>
   );
 }

@@ -37,23 +37,23 @@ const REASON_LABELS: Record<EstornoReason, string> = {
   fraudulent: "fraude",
 };
 
-function errorCopy(message: string): string {
+export function refundErrorCopy(message: string): string {
   switch (message) {
     case "pagamento_nao_encontrado":
-      return "pagamento não encontrado.";
+      return "Pagamento não encontrado. Confira o registro aberto.";
     case "pagamento_status_invalido":
-      return "só pagamentos aprovados podem ser estornados.";
+      return "Só pagamentos aprovados podem ser estornados. Confira o estado atual.";
     case "lancamento_ja_transferido":
-      return "estorno bloqueado: o repasse deste pagamento já foi transferido ao recebedor.";
+      return "Estorno bloqueado porque o repasse já foi transferido. Não repita a operação.";
     case "estorno_recusado_pelo_provedor":
-      return "o provedor recusou o estorno — verifique no painel do provedor antes de tentar de novo.";
+      return "O provedor recusou o estorno. Verifique o painel do provedor antes de decidir qualquer nova ação.";
     case "devolucao_nao_realizada":
     case "devolucao_rejeitada":
-      return "a devolução PIX não foi realizada pelo banco (terminal). Investigue o registro antes de qualquer nova tentativa.";
+      return "O banco informou uma falha terminal na devolução PIX. Investigue o registro antes de qualquer nova ação.";
     case "devolucao_vinculo_invalido":
-      return "inconsistência no vínculo da devolução — investigue antes de tentar de novo.";
+      return "O vínculo da devolução está inconsistente. Investigue o registro sem tentar novamente.";
     default:
-      return message;
+      return "Não foi possível confirmar o resultado. Consulte o estado e as evidências antes de qualquer nova tentativa.";
   }
 }
 
@@ -129,7 +129,7 @@ export function EstornoBlock({ pagamento }: { pagamento: PagamentoDTO }) {
     );
   };
 
-  const errorMessage = estornar.error ? errorCopy(estornar.error.message) : null;
+  const errorMessage = estornar.error ? refundErrorCopy(estornar.error.message) : null;
 
   return (
     <div className="space-y-2 border-t border-line pt-4" data-testid="estorno-block">

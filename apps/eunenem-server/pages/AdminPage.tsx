@@ -251,7 +251,7 @@ function BrowseBlock({
       <p className="font-mono text-[10px] tracking-[0.04em] text-ink-mute">
         Clicking a row navigates to{" "}
         <code className="text-ink-soft">/admin/usuario/[idConta]</code>.
-        Use the sidebar quick-jump if you already know the email.
+        Use the sidebar quick-jump if you already know the email or campaign link.
       </p>
     </div>
   );
@@ -270,18 +270,12 @@ function FilterInput({
         type="search"
         autoComplete="off"
         spellCheck={false}
-        placeholder="Filtrar por email (prefixo)…"
+        placeholder="Filtrar por email ou link da campanha…"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        aria-label="Filtrar usuários por prefixo de email"
+        aria-label="Filtrar usuários por email ou campanha"
         className="block w-full rounded-md border border-line bg-paper px-4 py-3 font-mono text-[13px] text-ink placeholder:text-ink-mute focus:border-plum focus:outline-none focus:ring-2 focus:ring-lilac-soft"
       />
-      <span
-        aria-hidden
-        className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 font-mono text-[10px] uppercase tracking-[0.14em] text-ink-mute"
-      >
-        prefix
-      </span>
     </div>
   );
 }
