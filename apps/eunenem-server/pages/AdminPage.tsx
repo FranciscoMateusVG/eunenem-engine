@@ -21,7 +21,7 @@ import { trpc } from "@/lib/trpc.js";
 // already know the email they want.
 //
 // State machine lives here; UsersTable is a pure renderer:
-//   - emailPrefix (raw input) → debouncedEmailPrefix (300ms) → query
+//   - emailPrefix + campaignQuery (raw inputs) → debounced values (300ms) → query
 //   - sortBy, sortDir (tri-state cycle on column click)
 //   - limit (25 / 50 / 100; default 50)
 //   - cursor + cursorStack (for prev/next nav)
@@ -33,13 +33,26 @@ import { trpc } from "@/lib/trpc.js";
 const FILTER_DEBOUNCE_MS = 300;
 const DEFAULT_LIMIT = 50;
 
+export function adminUsersSearchInput(
+  emailPrefix: string,
+  campaignQuery: string,
+) {
+  return {
+    emailPrefix: emailPrefix.trim() || undefined,
+    campaignQuery: campaignQuery.trim() || undefined,
+  };
+}
+
 export function AdminPage() {
   const shortPlataforma = ADMIN_PLATAFORMA_ID.slice(0, 8);
 
   // --- Filter ----------------------------------------------------------
   const [emailPrefix, setEmailPrefix] = useState("");
   const [debouncedEmailPrefix, setDebouncedEmailPrefix] = useState("");
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [campaignQuery, setCampaignQuery] = useState("");
+  const [debouncedCampaignQuery, setDebouncedCampaignQuery] = useState("");
+  const emailDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const campaignDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // --- Sort + limit ----------------------------------------------------
   const [sortBy, setSortBy] = useState<SortBy>(DEFAULT_SORT_BY);
@@ -64,14 +77,24 @@ export function AdminPage() {
   // invariant). We do that synchronously on input change so the user
   // sees "page 1" semantics immediately when they start typing.
   useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
+    if (emailDebounceRef.current) clearTimeout(emailDebounceRef.current);
+    emailDebounceRef.current = setTimeout(() => {
       setDebouncedEmailPrefix(emailPrefix.trim());
     }, FILTER_DEBOUNCE_MS);
     return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
+      if (emailDebounceRef.current) clearTimeout(emailDebounceRef.current);
     };
   }, [emailPrefix]);
+
+  useEffect(() => {
+    if (campaignDebounceRef.current) clearTimeout(campaignDebounceRef.current);
+    campaignDebounceRef.current = setTimeout(() => {
+      setDebouncedCampaignQuery(campaignQuery.trim());
+    }, FILTER_DEBOUNCE_MS);
+    return () => {
+      if (campaignDebounceRef.current) clearTimeout(campaignDebounceRef.current);
+    };
+  }, [campaignQuery]);
 
   const onEmailPrefixChange = useCallback(
     (next: string) => {
@@ -80,6 +103,22 @@ export function AdminPage() {
     },
     [resetCursor],
   );
+
+  const onCampaignQueryChange = useCallback(
+    (next: string) => {
+      setCampaignQuery(next);
+      resetCursor();
+    },
+    [resetCursor],
+  );
+
+  const clearFilters = useCallback(() => {
+    setEmailPrefix("");
+    setDebouncedEmailPrefix("");
+    setCampaignQuery("");
+    setDebouncedCampaignQuery("");
+    resetCursor();
+  }, [resetCursor]);
 
   // --- Sort tri-state cycle on column click ----------------------------
   // idle (column ≠ active) → ASC → DESC → revert to default (criadoEm DESC)
@@ -116,10 +155,19 @@ export function AdminPage() {
       limit,
       sortBy,
       sortDir,
-      emailPrefix:
-        debouncedEmailPrefix === "" ? undefined : debouncedEmailPrefix,
+      ...adminUsersSearchInput(
+        debouncedEmailPrefix,
+        debouncedCampaignQuery,
+      ),
     }),
-    [cursor, limit, sortBy, sortDir, debouncedEmailPrefix],
+    [
+      cursor,
+      limit,
+      sortBy,
+      sortDir,
+      debouncedEmailPrefix,
+      debouncedCampaignQuery,
+    ],
   );
 
   const { data, isFetching, error, refetch } =
@@ -169,6 +217,9 @@ export function AdminPage() {
         <BrowseBlock
           emailPrefix={emailPrefix}
           onEmailPrefixChange={onEmailPrefixChange}
+          campaignQuery={campaignQuery}
+          onCampaignQueryChange={onCampaignQueryChange}
+          onClearFilters={clearFilters}
           isFetching={isFetching}
           totalCount={data?.totalCount ?? 0}
         >
@@ -222,12 +273,18 @@ function Header() {
 function BrowseBlock({
   emailPrefix,
   onEmailPrefixChange,
+  campaignQuery,
+  onCampaignQueryChange,
+  onClearFilters,
   isFetching,
   totalCount,
   children,
 }: {
   emailPrefix: string;
   onEmailPrefixChange: (next: string) => void;
+  campaignQuery: string;
+  onCampaignQueryChange: (next: string) => void;
+  onClearFilters: () => void;
   isFetching: boolean;
   totalCount: number;
   children: React.ReactNode;
@@ -246,7 +303,13 @@ function BrowseBlock({
               : "—"}
         </span>
       </div>
-      <AdminUsersFilterInput value={emailPrefix} onChange={onEmailPrefixChange} />
+      <AdminUsersFilters
+        emailPrefix={emailPrefix}
+        campaignQuery={campaignQuery}
+        onEmailPrefixChange={onEmailPrefixChange}
+        onCampaignQueryChange={onCampaignQueryChange}
+        onClear={onClearFilters}
+      />
       {children}
       <p className="font-mono text-[10px] tracking-[0.04em] text-ink-mute">
         Clicking a row navigates to{" "}
@@ -257,26 +320,82 @@ function BrowseBlock({
   );
 }
 
+export function AdminUsersFilters({
+  emailPrefix,
+  campaignQuery,
+  onEmailPrefixChange,
+  onCampaignQueryChange,
+  onClear,
+}: {
+  emailPrefix: string;
+  campaignQuery: string;
+  onEmailPrefixChange: (next: string) => void;
+  onCampaignQueryChange: (next: string) => void;
+  onClear: () => void;
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+        <AdminUsersFilterInput
+          label="Email"
+          ariaLabel="Filtrar usuários por email"
+          placeholder="Email (prefixo)"
+          maxLength={120}
+          value={emailPrefix}
+          onChange={onEmailPrefixChange}
+        />
+        <AdminUsersFilterInput
+          label="Campanha"
+          ariaLabel="Filtrar usuários por campanha ou link da campanha"
+          placeholder="Nome, link ou slug da campanha"
+          maxLength={160}
+          value={campaignQuery}
+          onChange={onCampaignQueryChange}
+        />
+      </div>
+      {(emailPrefix !== "" || campaignQuery !== "") && (
+        <button
+          type="button"
+          onClick={onClear}
+          className="min-h-11 rounded border border-line bg-paper px-3 py-2 font-mono text-[11px] uppercase tracking-[0.1em] text-ink-soft transition-colors hover:border-plum hover:text-plum focus:outline-none focus:ring-2 focus:ring-lilac-soft"
+        >
+          Limpar filtros
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function AdminUsersFilterInput({
+  label,
+  ariaLabel,
+  placeholder,
+  maxLength,
   value,
   onChange,
 }: {
+  label: string;
+  ariaLabel: string;
+  placeholder: string;
+  maxLength: number;
   value: string;
   onChange: (next: string) => void;
 }) {
   return (
-    <div className="relative">
+    <label className="min-w-0 space-y-1 font-mono text-[11px] uppercase tracking-[0.12em] text-ink-soft">
+      {label}
       <input
         type="search"
         autoComplete="off"
         spellCheck={false}
-        placeholder="Filtrar por email ou link da campanha…"
+        placeholder={placeholder}
+        maxLength={maxLength}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        aria-label="Filtrar usuários por email ou campanha"
-        className="block w-full rounded-md border border-line bg-paper px-4 py-3 font-mono text-[13px] text-ink placeholder:text-ink-mute focus:border-plum focus:outline-none focus:ring-2 focus:ring-lilac-soft"
+        aria-label={ariaLabel}
+        className="block min-h-11 w-full min-w-0 rounded-md border border-line bg-paper px-4 py-3 font-mono text-[13px] normal-case tracking-normal text-ink placeholder:text-ink-mute focus:border-plum focus:outline-none focus:ring-2 focus:ring-lilac-soft"
       />
-    </div>
+    </label>
   );
 }
 

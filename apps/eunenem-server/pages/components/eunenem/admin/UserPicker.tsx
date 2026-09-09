@@ -34,6 +34,10 @@ import { trpc } from "@/lib/trpc.js";
 const DEBOUNCE_MS = 250;
 const MIN_SPINNER_MS = 200;
 
+export function userPickerSearchInput(query: string) {
+  return { query: query.trim() };
+}
+
 export type UserPickerKeyboardAction =
   | { type: "dismiss" }
   | { type: "open" }
@@ -70,7 +74,7 @@ export function UserPicker() {
   const listboxId = useId();
 
   const [query, setQuery] = useState("");
-  const [debouncedPrefix, setDebouncedPrefix] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState<number>(-1);
   const [isOpen, setIsOpen] = useState(false);
   const [spinnerVisible, setSpinnerVisible] = useState(false);
@@ -85,20 +89,20 @@ export function UserPicker() {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     const next = query.trim();
     if (next === "") {
-      setDebouncedPrefix("");
+      setDebouncedQuery("");
       return;
     }
     debounceRef.current = setTimeout(() => {
-      setDebouncedPrefix(next);
+      setDebouncedQuery(next);
     }, DEBOUNCE_MS);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [query]);
 
-  const searchEnabled = debouncedPrefix !== "";
+  const searchEnabled = debouncedQuery !== "";
   const { data, isFetching, error } = trpc.admin.searchUsers.useQuery(
-    { prefix: debouncedPrefix },
+    userPickerSearchInput(debouncedQuery),
     { enabled: searchEnabled, staleTime: 30_000 },
   );
 
@@ -187,7 +191,9 @@ export function UserPicker() {
         role="combobox"
         autoComplete="off"
         spellCheck={false}
-        placeholder="Email ou link da campanha…"
+        placeholder="Email, nome ou link da campanha…"
+        aria-label="Buscar usuário por email, nome ou campanha"
+        maxLength={160}
         value={query}
         aria-autocomplete="list"
         aria-expanded={showDropdown}
@@ -204,7 +210,7 @@ export function UserPicker() {
           if (!isIdle) setIsOpen(true);
         }}
         onKeyDown={onKeyDown}
-        className="block w-full rounded-md border border-line bg-paper px-4 py-3 font-mono text-[13px] text-ink placeholder:text-ink-mute focus:border-plum focus:outline-none focus:ring-2 focus:ring-lilac-soft"
+        className="block min-h-11 w-full min-w-0 rounded-md border border-line bg-paper px-4 py-3 font-mono text-[13px] text-ink placeholder:text-ink-mute focus:border-plum focus:outline-none focus:ring-2 focus:ring-lilac-soft"
       />
       <RightAccessory spinning={!isIdle && (isFetching || spinnerVisible)} />
 

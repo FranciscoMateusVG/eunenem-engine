@@ -1,5 +1,5 @@
 import type { inferRouterOutputs } from "@trpc/server";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AdminShell } from "@/components/eunenem/admin/AdminShell";
 import { DddBadge } from "@/components/eunenem/admin/DddBadge";
 import { trpc } from "@/lib/trpc.js";
@@ -10,6 +10,29 @@ export type PaymentEvidenceRow =
   RouterOutputs["admin"]["pagamentos"]["listEvidencePaginated"]["rows"][number];
 
 const PAGE_SIZE = 50;
+const FILTER_DEBOUNCE_MS = 300;
+
+export type PaymentSearchDraft = {
+  payerQuery: string;
+  campaignQuery: string;
+  exactReference: string;
+};
+
+const EMPTY_PAYMENT_SEARCH: PaymentSearchDraft = {
+  payerQuery: "",
+  campaignQuery: "",
+  exactReference: "",
+};
+
+type ReferenceResolution = "absent" | "unique" | "ambiguous" | null;
+
+export function paymentEvidenceSearchInput(search: PaymentSearchDraft) {
+  return {
+    payerQuery: search.payerQuery.trim() || undefined,
+    campaignQuery: search.campaignQuery.trim() || undefined,
+    exactReference: search.exactReference.trim() || undefined,
+  };
+}
 
 export function AdminPagamentosPage() {
   const [provider, setProvider] = useState<"stripe" | "inter" | null>(null);
@@ -18,19 +41,62 @@ export function AdminPagamentosPage() {
   >(null);
   const [cursor, setCursor] = useState<string | null>(null);
   const [cursorStack, setCursorStack] = useState<Array<string | null>>([]);
+  const [searchDraft, setSearchDraft] = useState<PaymentSearchDraft>(
+    EMPTY_PAYMENT_SEARCH,
+  );
+  const [searchQuery, setSearchQuery] = useState<PaymentSearchDraft>(
+    EMPTY_PAYMENT_SEARCH,
+  );
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const resetCursor = useCallback(() => {
     setCursor(null);
     setCursorStack([]);
   }, []);
 
+  useEffect(() => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => {
+      const normalized = paymentEvidenceSearchInput(searchDraft);
+      setSearchQuery({
+        payerQuery: normalized.payerQuery ?? "",
+        campaignQuery: normalized.campaignQuery ?? "",
+        exactReference: normalized.exactReference ?? "",
+      });
+    }, FILTER_DEBOUNCE_MS);
+    return () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    };
+  }, [searchDraft]);
+
+  const onSearchChange = useCallback(
+    (field: keyof PaymentSearchDraft, value: string) => {
+      setSearchDraft((current) => ({ ...current, [field]: value }));
+      resetCursor();
+    },
+    [resetCursor],
+  );
+
+  const clearSearch = useCallback(() => {
+    setSearchDraft(EMPTY_PAYMENT_SEARCH);
+    setSearchQuery(EMPTY_PAYMENT_SEARCH);
+    resetCursor();
+  }, [resetCursor]);
+
   const queryInput = useMemo(
-    () => ({ cursor, limit: PAGE_SIZE, provider, status }),
-    [cursor, provider, status],
+    () => ({
+      cursor,
+      limit: PAGE_SIZE,
+      provider,
+      status,
+      ...paymentEvidenceSearchInput(searchQuery),
+    }),
+    [cursor, provider, status, searchQuery],
   );
   const query = trpc.admin.pagamentos.listEvidencePaginated.useQuery(queryInput, {
     staleTime: 30_000,
   });
+  const referenceResolution = referenceResolutionFrom(query.data);
 
   const onNext = useCallback(() => {
     if (!query.data?.nextCursor) return;
@@ -73,6 +139,7 @@ export function AdminPagamentosPage() {
         <PaymentEvidenceFilters
           provider={provider}
           status={status}
+          search={searchDraft}
           onProviderChange={(next) => {
             setProvider(next);
             resetCursor();
@@ -81,6 +148,8 @@ export function AdminPagamentosPage() {
             setStatus(next);
             resetCursor();
           }}
+          onSearchChange={onSearchChange}
+          onClearSearch={clearSearch}
         />
 
         {query.error ? (
@@ -88,8 +157,17 @@ export function AdminPagamentosPage() {
             Não foi possível carregar as evidências locais. {query.error.message}
           </div>
         ) : (
-          <PaymentEvidenceTable rows={query.data?.rows ?? []} loading={query.isLoading} />
+          <ReferenceResolutionNotice
+            exactReference={searchQuery.exactReference}
+            resolution={referenceResolution}
+          />
         )}
+
+        {!query.error &&
+        referenceResolution !== "absent" &&
+        referenceResolution !== "ambiguous" ? (
+          <PaymentEvidenceTable rows={query.data?.rows ?? []} loading={query.isLoading} />
+        ) : null}
 
         <div className="flex flex-wrap items-center justify-between gap-3">
           <span className="font-mono text-[11px] text-ink-mute">
@@ -119,21 +197,49 @@ export function AdminPagamentosPage() {
   );
 }
 
-function PaymentEvidenceFilters({
+export function PaymentEvidenceFilters({
   provider,
   status,
+  search,
   onProviderChange,
   onStatusChange,
+  onSearchChange,
+  onClearSearch,
 }: {
   provider: "stripe" | "inter" | null;
   status: "pendente" | "processing" | "aprovado" | "rejeitado" | "estornado" | null;
+  search: PaymentSearchDraft;
   onProviderChange: (provider: "stripe" | "inter" | null) => void;
   onStatusChange: (
     status: "pendente" | "processing" | "aprovado" | "rejeitado" | "estornado" | null,
   ) => void;
+  onSearchChange: (field: keyof PaymentSearchDraft, value: string) => void;
+  onClearSearch: () => void;
 }) {
+  const hasSearch = Object.values(search).some((value) => value.trim() !== "");
   return (
-    <div className="grid gap-3 rounded-md border border-line bg-cream-2/30 p-4 sm:grid-cols-2">
+    <div className="grid min-w-0 gap-3 rounded-md border border-line bg-cream-2/30 p-4 sm:grid-cols-2 lg:grid-cols-3">
+      <SearchField
+        label="Pagador"
+        ariaLabel="Filtrar por nome ou email do pagador"
+        placeholder="Nome ou email do pagador"
+        value={search.payerQuery}
+        onChange={(value) => onSearchChange("payerQuery", value)}
+      />
+      <SearchField
+        label="Pessoa ou campanha"
+        ariaLabel="Filtrar por pessoa, campanha ou link da campanha"
+        placeholder="Nome, título, link ou slug da campanha"
+        value={search.campaignQuery}
+        onChange={(value) => onSearchChange("campaignQuery", value)}
+      />
+      <SearchField
+        label="Referência de pagamento / Inter"
+        ariaLabel="Localizar por referência exata de pagamento ou Inter"
+        placeholder="UUID, txid, e2e, cs_, pi_, ch_ ou evt_"
+        value={search.exactReference}
+        onChange={(value) => onSearchChange("exactReference", value)}
+      />
       <label className="space-y-1 font-mono text-[11px] uppercase tracking-[0.12em] text-ink-soft">
         Provedor salvo
         <select
@@ -146,7 +252,7 @@ function PaymentEvidenceFilters({
                 : null,
             )
           }
-          className="block w-full rounded border border-line bg-paper px-3 py-2 text-[13px] normal-case tracking-normal text-ink"
+          className="block min-h-11 w-full min-w-0 rounded border border-line bg-paper px-3 py-2 text-[13px] normal-case tracking-normal text-ink"
         >
           <option value="">Todos</option>
           <option value="stripe">Stripe</option>
@@ -170,7 +276,7 @@ function PaymentEvidenceFilters({
                 : null,
             );
           }}
-          className="block w-full rounded border border-line bg-paper px-3 py-2 text-[13px] normal-case tracking-normal text-ink"
+          className="block min-h-11 w-full min-w-0 rounded border border-line bg-paper px-3 py-2 text-[13px] normal-case tracking-normal text-ink"
         >
           <option value="">Todos</option>
           <option value="pendente">Pendente</option>
@@ -180,7 +286,86 @@ function PaymentEvidenceFilters({
           <option value="estornado">Estornado</option>
         </select>
       </label>
+      <div className="flex items-end sm:justify-end lg:justify-start">
+        <button
+          type="button"
+          disabled={!hasSearch}
+          onClick={onClearSearch}
+          className="min-h-11 rounded border border-line bg-paper px-3 py-2 font-mono text-[11px] uppercase tracking-[0.1em] text-ink-soft transition-colors hover:border-plum hover:text-plum focus:outline-none focus:ring-2 focus:ring-lilac-soft disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Limpar buscas
+        </button>
+      </div>
     </div>
+  );
+}
+
+function SearchField({
+  label,
+  ariaLabel,
+  placeholder,
+  value,
+  onChange,
+}: {
+  label: string;
+  ariaLabel: string;
+  placeholder: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="min-w-0 space-y-1 font-mono text-[11px] uppercase tracking-[0.12em] text-ink-soft">
+      {label}
+      <input
+        type="search"
+        autoComplete="off"
+        spellCheck={false}
+        maxLength={160}
+        aria-label={ariaLabel}
+        placeholder={placeholder}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="block min-h-11 w-full min-w-0 rounded border border-line bg-paper px-3 py-2 text-[13px] normal-case tracking-normal text-ink placeholder:text-ink-mute focus:border-plum focus:outline-none focus:ring-2 focus:ring-lilac-soft"
+      />
+    </label>
+  );
+}
+
+function referenceResolutionFrom(data: unknown): ReferenceResolution {
+  if (!data || typeof data !== "object" || !("referenceResolution" in data)) {
+    return null;
+  }
+  const resolution = data.referenceResolution;
+  return resolution === "absent" ||
+    resolution === "unique" ||
+    resolution === "ambiguous"
+    ? resolution
+    : null;
+}
+
+export function ReferenceResolutionNotice({
+  exactReference,
+  resolution,
+}: {
+  exactReference: string;
+  resolution: ReferenceResolution;
+}) {
+  if (exactReference === "" || resolution === null || resolution === "unique") {
+    return null;
+  }
+  if (resolution === "absent") {
+    return (
+      <p className="rounded-md border border-amber-200 bg-amber-50 p-4 text-[14px] text-amber-900">
+        Nenhuma evidência local foi encontrada para esta referência. Isso não prova ausência no
+        provedor.
+      </p>
+    );
+  }
+  return (
+    <p role="alert" className="rounded-md border border-red-200 bg-red-50 p-4 text-[14px] text-red-800">
+      A referência corresponde a mais de um pagamento local. Nenhuma linha foi escolhida; confira
+      a inconsistência antes de agir.
+    </p>
   );
 }
 

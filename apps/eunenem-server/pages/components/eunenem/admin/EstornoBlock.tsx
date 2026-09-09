@@ -49,7 +49,7 @@ export function refundErrorCopy(message: string): string {
       return "O provedor recusou o estorno. Verifique o painel do provedor antes de decidir qualquer nova ação.";
     case "devolucao_nao_realizada":
     case "devolucao_rejeitada":
-      return "O banco informou uma falha terminal na devolução PIX. Investigue o registro antes de qualquer nova ação.";
+      return "O banco informou que a devolução PIX não foi concluída. Investigue o registro antes de qualquer nova ação.";
     case "devolucao_vinculo_invalido":
       return "O vínculo da devolução está inconsistente. Investigue o registro sem tentar novamente.";
     default:

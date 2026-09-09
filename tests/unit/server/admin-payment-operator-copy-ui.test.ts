@@ -43,11 +43,11 @@ describe('admin payment operator copy', () => {
     ],
     [
       'devolucao_nao_realizada',
-      'O banco informou uma falha terminal na devolução PIX. Investigue o registro antes de qualquer nova ação.',
+      'O banco informou que a devolução PIX não foi concluída. Investigue o registro antes de qualquer nova ação.',
     ],
     [
       'devolucao_rejeitada',
-      'O banco informou uma falha terminal na devolução PIX. Investigue o registro antes de qualquer nova ação.',
+      'O banco informou que a devolução PIX não foi concluída. Investigue o registro antes de qualquer nova ação.',
     ],
     [
       'devolucao_vinculo_invalido',

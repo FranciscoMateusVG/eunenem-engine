@@ -1,9 +1,14 @@
 import { createRequire } from 'node:module';
 import { describe, expect, it, vi } from 'vitest';
-import { AdminUsersFilterInput } from '../../../apps/eunenem-server/pages/AdminPage.js';
+import {
+  AdminUsersFilterInput,
+  AdminUsersFilters,
+  adminUsersSearchInput,
+} from '../../../apps/eunenem-server/pages/AdminPage.js';
 import {
   UserPickerDropdown,
   userPickerKeyboardAction,
+  userPickerSearchInput,
 } from '../../../apps/eunenem-server/pages/components/eunenem/admin/UserPicker.js';
 
 const appRequire = createRequire(
@@ -33,15 +38,37 @@ function findElement(
 }
 
 describe('admin search controls', () => {
-  it('presents the user list filter as email or campaign search with no fake prefix badge', () => {
+  it('submits independent trimmed email and campaign filters with the contract field names', () => {
+    expect(adminUsersSearchInput('  ana@exemplo.com  ', '  lista-francisco  ')).toEqual({
+      emailPrefix: 'ana@exemplo.com',
+      campaignQuery: 'lista-francisco',
+    });
+    expect(adminUsersSearchInput('   ', '')).toEqual({
+      emailPrefix: undefined,
+      campaignQuery: undefined,
+    });
+    expect(userPickerSearchInput('  Francisco Mateus  ')).toEqual({
+      query: 'Francisco Mateus',
+    });
+  });
+
+  it('presents the user list campaign filter with a bounded accessible input', () => {
     const onChange = vi.fn();
-    const tree = AdminUsersFilterInput({ value: '', onChange });
+    const tree = AdminUsersFilterInput({
+      label: 'Campanha',
+      ariaLabel: 'Filtrar usuários por campanha ou link da campanha',
+      placeholder: 'Nome, link ou slug da campanha',
+      maxLength: 160,
+      value: '',
+      onChange,
+    });
     const input = findElement(tree, (type) => type === 'input');
 
     expect(input).toMatchObject({
       type: 'search',
-      placeholder: 'Filtrar por email ou link da campanha…',
-      'aria-label': 'Filtrar usuários por email ou campanha',
+      placeholder: 'Nome, link ou slug da campanha',
+      'aria-label': 'Filtrar usuários por campanha ou link da campanha',
+      maxLength: 160,
     });
     expect(input?.onChange).toBeTypeOf('function');
     (input?.onChange as (event: { target: { value: string } }) => void)({
@@ -50,7 +77,48 @@ describe('admin search controls', () => {
     expect(onChange).toHaveBeenCalledWith('lista-francisco');
 
     const html = renderToStaticMarkup(tree);
-    expect(html).not.toContain('prefix');
+    expect(html).not.toContain('PREFIX');
+    expect(html).toContain('min-h-11');
+    expect(html).toContain('min-w-0');
+  });
+
+  it('keeps email and campaign independent and clears both through one explicit action', () => {
+    const onEmailPrefixChange = vi.fn();
+    const onCampaignQueryChange = vi.fn();
+    const onClear = vi.fn();
+    const tree = AdminUsersFilters({
+      emailPrefix: 'ana@',
+      campaignQuery: 'lista-francisco',
+      onEmailPrefixChange,
+      onCampaignQueryChange,
+      onClear,
+    });
+    const campaign = findElement(
+      tree,
+      (_type, props) => props.ariaLabel === 'Filtrar usuários por campanha ou link da campanha',
+    );
+    expect(campaign?.onChange).toBeTypeOf('function');
+    (campaign?.onChange as (next: string) => void)('lista-nova');
+    expect(onCampaignQueryChange).toHaveBeenCalledWith('lista-nova');
+    expect(onEmailPrefixChange).not.toHaveBeenCalled();
+
+    const clear = findElement(
+      tree,
+      (type, props) => type === 'button' && props.children === 'Limpar filtros',
+    );
+    (clear?.onClick as () => void)();
+    expect(onClear).toHaveBeenCalledOnce();
+
+    const empty = renderToStaticMarkup(
+      React.createElement(AdminUsersFilters, {
+        emailPrefix: '',
+        campaignQuery: '',
+        onEmailPrefixChange,
+        onCampaignQueryChange,
+        onClear,
+      }),
+    );
+    expect(empty).not.toContain('Limpar filtros');
   });
 
   it('renders honest zero, error and multiple-result states in the quick jump', () => {
@@ -109,10 +177,7 @@ describe('admin search controls', () => {
       onHover: () => undefined,
       onSelect,
     });
-    const second = findElement(
-      tree,
-      (_type, props) => props.id === 'picker-results-opt-1',
-    );
+    const second = findElement(tree, (_type, props) => props.id === 'picker-results-opt-1');
 
     expect(onSelect).not.toHaveBeenCalled();
     expect(second?.onClick).toBeTypeOf('function');
