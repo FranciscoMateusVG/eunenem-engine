@@ -34,6 +34,38 @@ import { trpc } from "@/lib/trpc.js";
 const DEBOUNCE_MS = 250;
 const MIN_SPINNER_MS = 200;
 
+export type UserPickerKeyboardAction =
+  | { type: "dismiss" }
+  | { type: "open" }
+  | { type: "move"; index: number }
+  | { type: "select"; index: number }
+  | null;
+
+export function userPickerKeyboardAction(
+  key: string,
+  resultsLength: number,
+  activeIndex: number,
+): UserPickerKeyboardAction {
+  if (key === "Escape") return { type: "dismiss" };
+  if (key === "ArrowDown") {
+    if (resultsLength === 0) return { type: "open" };
+    const base = activeIndex < 0 ? -1 : activeIndex;
+    return { type: "move", index: (base + 1) % resultsLength };
+  }
+  if (key === "ArrowUp") {
+    if (resultsLength === 0) return { type: "open" };
+    const base = activeIndex < 0 ? 0 : activeIndex;
+    return {
+      type: "move",
+      index: base <= 0 ? resultsLength - 1 : base - 1,
+    };
+  }
+  if (key === "Enter" && resultsLength > 0) {
+    return { type: "select", index: activeIndex >= 0 ? activeIndex : 0 };
+  }
+  return null;
+}
+
 export function UserPicker() {
   const listboxId = useId();
 
@@ -118,32 +150,28 @@ export function UserPicker() {
   }, []);
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Escape") {
-      e.preventDefault();
+    const action = userPickerKeyboardAction(
+      e.key,
+      results.length,
+      clampedActive,
+    );
+    if (action === null) return;
+    e.preventDefault();
+    if (action.type === "dismiss") {
       setIsOpen(false);
       return;
     }
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
+    if (action.type === "open") {
       if (!isOpen) setIsOpen(true);
-      if (results.length === 0) return;
-      const base = clampedActive < 0 ? -1 : clampedActive;
-      setActiveIndex((base + 1) % results.length);
       return;
     }
-    if (e.key === "ArrowUp") {
-      e.preventDefault();
+    if (action.type === "move") {
       if (!isOpen) setIsOpen(true);
-      if (results.length === 0) return;
-      const base = clampedActive < 0 ? 0 : clampedActive;
-      setActiveIndex(base <= 0 ? results.length - 1 : base - 1);
+      setActiveIndex(action.index);
       return;
     }
-    if (e.key === "Enter") {
-      if (results.length === 0) return;
-      e.preventDefault();
-      const idx = clampedActive >= 0 ? clampedActive : 0;
-      const target = results[idx];
+    if (action.type === "select") {
+      const target = results[action.index];
       if (target) navigateTo(target.idConta);
     }
   };
@@ -181,7 +209,7 @@ export function UserPicker() {
       <RightAccessory spinning={!isIdle && (isFetching || spinnerVisible)} />
 
       {showDropdown && (
-        <Dropdown
+        <UserPickerDropdown
           id={listboxId}
           activeIndex={clampedActive}
           results={results}
@@ -226,7 +254,7 @@ function Spinner() {
   );
 }
 
-function Dropdown({
+export function UserPickerDropdown({
   id,
   results,
   activeIndex,

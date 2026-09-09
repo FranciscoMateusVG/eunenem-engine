@@ -246,7 +246,7 @@ function BrowseBlock({
               : "—"}
         </span>
       </div>
-      <FilterInput value={emailPrefix} onChange={onEmailPrefixChange} />
+      <AdminUsersFilterInput value={emailPrefix} onChange={onEmailPrefixChange} />
       {children}
       <p className="font-mono text-[10px] tracking-[0.04em] text-ink-mute">
         Clicking a row navigates to{" "}
@@ -257,7 +257,7 @@ function BrowseBlock({
   );
 }
 
-function FilterInput({
+export function AdminUsersFilterInput({
   value,
   onChange,
 }: {
