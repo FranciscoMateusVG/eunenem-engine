@@ -92,6 +92,22 @@ describe('admin authz gate (aperture-4n222)', () => {
     });
   });
 
+  it('gates all three new admin search surfaces before database reads', async () => {
+    const { deps, headers } = makeDeps({ email: null, allowlist: ['admin@x.com'] });
+    const admin = caller(deps, headers).admin;
+    await expect(
+      admin.usuarios.listPaginated({
+        cursor: null,
+        limit: 20,
+        sortBy: 'criadoEm',
+        sortDir: 'desc',
+      }),
+    ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    await expect(admin.pagamentos.listEvidencePaginated({})).rejects.toMatchObject({
+      code: 'UNAUTHORIZED',
+    });
+  });
+
   it('(2) authed but NOT allowlisted → FORBIDDEN', async () => {
     const { deps, headers } = makeDeps({ email: 'intruder@x.com', allowlist: ['admin@x.com'] });
     await expect(caller(deps, headers).admin.searchUsers({ prefix: 'a' })).rejects.toMatchObject({

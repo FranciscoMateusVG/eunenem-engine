@@ -17,6 +17,16 @@ const PAYMENT_IDS = [
   '20000000-0000-4000-8000-000000000004',
 ] as const;
 const CREATED_AT = new Date('2026-09-08T14:00:00.000Z');
+const OWNER_USER_ID = '11000000-0000-4000-8000-000000000001';
+const OWNER_ACCOUNT_ID = '12000000-0000-4000-8000-000000000001';
+const WEBHOOK_IDS = [
+  '21000000-0000-4000-8000-000000000001',
+  '21000000-0000-4000-8000-000000000002',
+] as const;
+const LIST_CONTEXT = {
+  publicOrigin: 'https://staging.eunenem.com',
+  cursorSecret: 'admin-payment-evidence-test-secret',
+} as const;
 
 let testDb: TestDatabase;
 
@@ -26,12 +36,29 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await testDb.db
+    .deleteFrom('payment_webhook_events')
+    .where('id', 'in', [...WEBHOOK_IDS])
+    .execute();
+  await testDb.db
     .deleteFrom('pagamentos')
     .where('id', 'in', [...PAYMENT_IDS])
     .execute();
   await testDb.db
     .deleteFrom('campanhas')
     .where('id', 'in', [CAMPAIGN_ID, OTHER_CAMPAIGN_ID])
+    .execute();
+  await testDb.db.deleteFrom('usuarios').where('id', '=', OWNER_USER_ID).execute();
+
+  await testDb.db
+    .insertInto('usuarios')
+    .values({
+      id: OWNER_USER_ID,
+      id_plataforma: ID_PLATAFORMA_EUNENEM,
+      id_conta: OWNER_ACCOUNT_ID,
+      email: 'owner@example.test',
+      nome_exibicao: 'Owner Teste',
+      slug: 'owner-teste',
+    })
     .execute();
 
   await testDb.db
@@ -41,17 +68,27 @@ beforeEach(async () => {
         id: CAMPAIGN_ID,
         id_plataforma: ID_PLATAFORMA_EUNENEM,
         titulo: 'Campanha EuNeném',
+        slug: 'campanha-eunenem',
       },
       {
         id: OTHER_CAMPAIGN_ID,
         id_plataforma: randomUUID(),
         titulo: 'Campanha de outra plataforma',
+        slug: 'campanha-externa',
       },
     ])
+    .execute();
+  await testDb.db
+    .insertInto('campanha_administradores')
+    .values({ campanha_id: CAMPAIGN_ID, id_usuario: OWNER_ACCOUNT_ID })
     .execute();
 });
 
 afterAll(async () => {
+  await testDb.db
+    .deleteFrom('payment_webhook_events')
+    .where('id', 'in', [...WEBHOOK_IDS])
+    .execute();
   await testDb.db
     .deleteFrom('pagamentos')
     .where('id', 'in', [...PAYMENT_IDS])
@@ -60,6 +97,7 @@ afterAll(async () => {
     .deleteFrom('campanhas')
     .where('id', 'in', [CAMPAIGN_ID, OTHER_CAMPAIGN_ID])
     .execute();
+  await testDb.db.deleteFrom('usuarios').where('id', '=', OWNER_USER_ID).execute();
   await testDb.teardown();
 });
 
@@ -70,6 +108,8 @@ async function insertPayment(input: {
   status: 'pendente' | 'aprovado';
   provider?: 'inter' | 'stripe';
   rawStatus?: string;
+  contributorName?: string;
+  contributorEmail?: string;
 }): Promise<void> {
   const externalTransaction = input.provider
     ? {
@@ -97,6 +137,8 @@ async function insertPayment(input: {
       intencao_total_receiver_cents,
       intencao_total_surcharge_cents,
       intencao_total_paid_cents,
+      intencao_contribuinte_nome,
+      intencao_contribuinte_email,
       intencao_external_ref,
       intencao_payment_intent_external_ref,
       intencao_charge_external_ref,
@@ -116,6 +158,8 @@ async function insertPayment(input: {
       1_700,
       100,
       2_000,
+      ${input.contributorName ?? `Pessoa ${input.id.slice(-1)}`},
+      ${input.contributorEmail ?? `pessoa-${input.id.slice(-1)}@example.test`},
       ${input.provider === 'stripe' ? `cs_${input.id.slice(-1)}` : null},
       ${input.provider === 'stripe' ? `pi_${input.id.slice(-1)}` : null},
       ${input.provider === 'stripe' ? `ch_${input.id.slice(-1)}` : null},
@@ -151,6 +195,7 @@ describe('listAdminPaymentEvidence — Postgres', () => {
     });
 
     const first = await listAdminPaymentEvidence(testDb.db, {
+      ...LIST_CONTEXT,
       platformId: ID_PLATAFORMA_EUNENEM,
       cursor: null,
       limit: 2,
@@ -162,6 +207,7 @@ describe('listAdminPaymentEvidence — Postgres', () => {
     expect(first.nextCursor).not.toBeNull();
 
     const second = await listAdminPaymentEvidence(testDb.db, {
+      ...LIST_CONTEXT,
       platformId: ID_PLATAFORMA_EUNENEM,
       cursor: first.nextCursor,
       limit: 2,
@@ -190,6 +236,7 @@ describe('listAdminPaymentEvidence — Postgres', () => {
     });
 
     const stripe = await listAdminPaymentEvidence(testDb.db, {
+      ...LIST_CONTEXT,
       platformId: ID_PLATAFORMA_EUNENEM,
       cursor: null,
       limit: 1,
@@ -214,6 +261,7 @@ describe('listAdminPaymentEvidence — Postgres', () => {
     expect(Object.keys(stripe.rows[0] ?? {})).not.toContain('rawPayload');
 
     const unfiltered = await listAdminPaymentEvidence(testDb.db, {
+      ...LIST_CONTEXT,
       platformId: ID_PLATAFORMA_EUNENEM,
       cursor: null,
       limit: 1,
@@ -222,6 +270,7 @@ describe('listAdminPaymentEvidence — Postgres', () => {
     });
     await expect(
       listAdminPaymentEvidence(testDb.db, {
+        ...LIST_CONTEXT,
         platformId: ID_PLATAFORMA_EUNENEM,
         cursor: unfiltered.nextCursor,
         limit: 1,
@@ -235,6 +284,7 @@ describe('listAdminPaymentEvidence — Postgres', () => {
     await insertPayment({ id: PAYMENT_IDS[2], method: 'pix', status: 'pendente' });
 
     const result = await listAdminPaymentEvidence(testDb.db, {
+      ...LIST_CONTEXT,
       platformId: ID_PLATAFORMA_EUNENEM,
       cursor: null,
       limit: 10,
@@ -280,6 +330,7 @@ describe('listAdminPaymentEvidence — Postgres', () => {
     `.execute(testDb.db);
 
     const result = await listAdminPaymentEvidence(testDb.db, {
+      ...LIST_CONTEXT,
       platformId: ID_PLATAFORMA_EUNENEM,
       cursor: null,
       limit: 10,
@@ -321,6 +372,7 @@ describe('listAdminPaymentEvidence — Postgres', () => {
     });
 
     const result = await listAdminPaymentEvidence(testDb.db, {
+      ...LIST_CONTEXT,
       platformId: ID_PLATAFORMA_EUNENEM,
       cursor: null,
       limit: 10,
@@ -334,5 +386,180 @@ describe('listAdminPaymentEvidence — Postgres', () => {
       'Título normal',
     ]);
     expect(JSON.stringify(result)).not.toContain('Título\\nperigoso');
+  });
+
+  it('combines payer and canonical campaign filters before rows and count', async () => {
+    await insertPayment({
+      id: PAYMENT_IDS[0],
+      method: 'credit_card',
+      status: 'aprovado',
+      provider: 'stripe',
+      contributorName: 'Alice Percentual',
+      contributorEmail: 'alice@example.test',
+    });
+    await insertPayment({
+      id: PAYMENT_IDS[1],
+      method: 'pix',
+      status: 'pendente',
+      contributorName: 'Bruno Literal',
+      contributorEmail: 'bruno@example.test',
+    });
+
+    const result = await listAdminPaymentEvidence(testDb.db, {
+      ...LIST_CONTEXT,
+      platformId: ID_PLATAFORMA_EUNENEM,
+      cursor: null,
+      limit: 10,
+      provider: null,
+      status: null,
+      payerQuery: 'Alice',
+      campaignQuery: `${LIST_CONTEXT.publicOrigin}/pagina/owner-teste/campanha-eunenem`,
+    });
+    expect(result.totalCount).toBe(1);
+    expect(result.rows.map((row) => row.paymentId)).toEqual([PAYMENT_IDS[0]]);
+    expect(result.referenceResolution).toBe('not_requested');
+
+    const wildcard = await listAdminPaymentEvidence(testDb.db, {
+      ...LIST_CONTEXT,
+      platformId: ID_PLATAFORMA_EUNENEM,
+      cursor: null,
+      limit: 10,
+      provider: null,
+      status: null,
+      payerQuery: '%_',
+    });
+    expect(wildcard.totalCount).toBe(0);
+  });
+
+  it('resolves exact references by distinct tenant-scoped payment identity', async () => {
+    await insertPayment({
+      id: PAYMENT_IDS[0],
+      method: 'credit_card',
+      status: 'aprovado',
+      provider: 'stripe',
+    });
+    await insertPayment({
+      id: PAYMENT_IDS[1],
+      method: 'pix',
+      status: 'pendente',
+    });
+    await insertPayment({
+      id: PAYMENT_IDS[3],
+      campaignId: OTHER_CAMPAIGN_ID,
+      method: 'credit_card',
+      status: 'aprovado',
+      provider: 'stripe',
+    });
+    const exactReference = 'reference-shared';
+    await sql`
+      UPDATE pagamentos
+      SET intencao_external_ref = ${exactReference},
+          intencao_payment_intent_external_ref = ${exactReference}
+      WHERE id = ${PAYMENT_IDS[0]}::uuid
+    `.execute(testDb.db);
+    await sql`
+      UPDATE pagamentos
+      SET intencao_charge_external_ref = ${exactReference}
+      WHERE id = ${PAYMENT_IDS[3]}::uuid
+    `.execute(testDb.db);
+    await testDb.db
+      .insertInto('payment_webhook_events')
+      .values({
+        id: WEBHOOK_IDS[0],
+        provider: 'stripe',
+        provider_event_id: exactReference,
+        event_type: 'checkout.session.completed',
+        raw_payload: {},
+        signature_header: 'synthetic-valid-signature',
+        signature_valid: true,
+        pagamento_id: PAYMENT_IDS[0],
+      })
+      .execute();
+
+    const unique = await listAdminPaymentEvidence(testDb.db, {
+      ...LIST_CONTEXT,
+      platformId: ID_PLATAFORMA_EUNENEM,
+      cursor: null,
+      limit: 10,
+      provider: null,
+      status: null,
+      exactReference,
+    });
+    expect(unique.referenceResolution).toBe('unique');
+    expect(unique.rows.map((row) => row.paymentId)).toEqual([PAYMENT_IDS[0]]);
+
+    await sql`
+      UPDATE pagamentos
+      SET transacao_externa = ${JSON.stringify({ id: exactReference })}::jsonb
+      WHERE id = ${PAYMENT_IDS[1]}::uuid
+    `.execute(testDb.db);
+    const ambiguous = await listAdminPaymentEvidence(testDb.db, {
+      ...LIST_CONTEXT,
+      platformId: ID_PLATAFORMA_EUNENEM,
+      cursor: null,
+      limit: 10,
+      provider: null,
+      status: null,
+      exactReference,
+    });
+    expect(ambiguous).toEqual({
+      rows: [],
+      nextCursor: null,
+      totalCount: 0,
+      referenceResolution: 'ambiguous',
+    });
+
+    await testDb.db
+      .insertInto('payment_webhook_events')
+      .values({
+        id: WEBHOOK_IDS[1],
+        provider: 'stripe',
+        provider_event_id: 'orphan-or-unknown-reference',
+        event_type: 'checkout.session.completed',
+        raw_payload: {},
+        signature_header: 'synthetic-valid-signature',
+        signature_valid: true,
+        pagamento_id: null,
+      })
+      .execute();
+    const absent = await listAdminPaymentEvidence(testDb.db, {
+      ...LIST_CONTEXT,
+      platformId: ID_PLATAFORMA_EUNENEM,
+      cursor: null,
+      limit: 10,
+      provider: null,
+      status: null,
+      exactReference: 'orphan-or-unknown-reference',
+    });
+    expect(absent.referenceResolution).toBe('absent');
+    expect(absent.rows).toEqual([]);
+  });
+
+  it('binds cursors to payer and campaign filters without exposing raw values', async () => {
+    await insertPayment({ id: PAYMENT_IDS[0], method: 'pix', status: 'pendente' });
+    await insertPayment({ id: PAYMENT_IDS[1], method: 'pix', status: 'pendente' });
+    const first = await listAdminPaymentEvidence(testDb.db, {
+      ...LIST_CONTEXT,
+      platformId: ID_PLATAFORMA_EUNENEM,
+      cursor: null,
+      limit: 1,
+      provider: null,
+      status: null,
+      campaignQuery: 'Campanha',
+    });
+    expect(first.nextCursor).not.toBeNull();
+    expect(first.nextCursor).not.toContain('Campanha');
+
+    await expect(
+      listAdminPaymentEvidence(testDb.db, {
+        ...LIST_CONTEXT,
+        platformId: ID_PLATAFORMA_EUNENEM,
+        cursor: first.nextCursor,
+        limit: 1,
+        provider: null,
+        status: null,
+        campaignQuery: 'Outra campanha',
+      }),
+    ).rejects.toBeInstanceOf(InvalidPaymentEvidenceCursorError);
   });
 });
