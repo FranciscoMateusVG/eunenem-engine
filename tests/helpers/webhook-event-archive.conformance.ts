@@ -194,6 +194,58 @@ export function describeWebhookEventArchiveConformance(name: string, options: Co
       await expect(archive.tryClaimFailedForRetry(inserted.id)).resolves.toBe(true);
     });
 
+    it('fences processing across a live lease and rejects a stale worker after reclaim', async () => {
+      const inserted = await archive.saveReceived({
+        provider: 'stripe',
+        providerEventId: `evt_${randomUUID()}`,
+        eventType: 'checkout.session.completed',
+        rawPayload: { id: 'sess_fenced' },
+        signatureHeader: 't=ok',
+        signatureValid: true,
+      });
+      const startedAt = new Date('2026-09-09T12:00:00.000Z');
+      const firstLease = new Date('2026-09-09T12:01:00.000Z');
+      const first = await archive.claimForProcessing(inserted.id, startedAt, firstLease);
+      expect(first.status).toBe('claimed');
+      if (first.status !== 'claimed') throw new Error('expected first fenced claim');
+
+      await expect(
+        archive.claimForProcessing(
+          inserted.id,
+          new Date('2026-09-09T12:00:30.000Z'),
+          new Date('2026-09-09T12:01:30.000Z'),
+        ),
+      ).resolves.toEqual({ status: 'busy' });
+
+      const second = await archive.claimForProcessing(
+        inserted.id,
+        firstLease,
+        new Date('2026-09-09T12:02:00.000Z'),
+      );
+      expect(second.status).toBe('claimed');
+      if (second.status !== 'claimed') throw new Error('expected expired-lease reclaim');
+      expect(second.fenceToken).not.toBe(first.fenceToken);
+      await expect(
+        archive.markProcessedFenced(inserted.id, first.fenceToken, randomUUID()),
+      ).resolves.toBe(false);
+      await expect(archive.markProcessedFenced(inserted.id, second.fenceToken, null)).resolves.toBe(
+        true,
+      );
+      await expect(
+        archive.claimForProcessing(
+          inserted.id,
+          new Date('2026-09-09T12:03:00.000Z'),
+          new Date('2026-09-09T12:04:00.000Z'),
+        ),
+      ).resolves.toEqual({ status: 'processed' });
+      await expect(archive.findById(inserted.id)).resolves.toMatchObject({
+        processedAt: expect.any(Date),
+        processingAttemptCount: 2,
+        processingFenceToken: null,
+        processingLeaseUntil: null,
+      });
+    });
+
     it('a late markFailed cannot poison a terminally processed row', async () => {
       const inserted = await archive.saveReceived({
         provider: 'inter',

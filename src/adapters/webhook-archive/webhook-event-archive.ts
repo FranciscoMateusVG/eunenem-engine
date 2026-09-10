@@ -17,9 +17,9 @@
  *
  * Idempotency anchor: `saveReceived` uses INSERT ... ON CONFLICT
  * DO NOTHING on the `(provider, provider_event_id)` UNIQUE
- * constraint. Stripe retries on 5xx; the second arrival hits the
- * constraint and returns `isDuplicate=true` so the handler can
- * short-circuit to 200.
+ * constraint. Duplicate receipt alone is not successful processing: callers
+ * must acquire the fenced processing lease and return retryable non-2xx while
+ * another worker is active or a prior attempt has not committed.
  *
  * Write-before-verify discipline: the handler MUST call `saveReceived`
  * BEFORE signature verification, with `signatureValid` already set to
@@ -49,7 +49,14 @@ export interface WebhookEventRecord {
   readonly processedAt: Date | null;
   readonly processingError: string | null;
   readonly pagamentoId: string | null;
+  readonly processingAttemptCount?: number;
+  readonly processingFenceToken?: string | null;
+  readonly processingLeaseUntil?: Date | null;
 }
+
+export type WebhookProcessingClaim =
+  | { readonly status: 'claimed'; readonly fenceToken: string }
+  | { readonly status: 'processed' | 'busy' };
 
 export interface SaveReceivedInput {
   readonly provider: string;
@@ -65,9 +72,9 @@ export interface SaveReceivedResult {
   readonly id: string;
   /**
    * True when the (provider, providerEventId) tuple already existed in
-   * the archive — Stripe is retrying a previously-archived event.
-   * Handlers should short-circuit to 200 in that case to stop the retry
-   * loop without re-dispatching domain side effects.
+   * the archive. This is receipt deduplication only; handlers still claim the
+   * fenced processing state and acknowledge 2xx only after `processedAt` is
+   * durably committed.
    */
   readonly isDuplicate: boolean;
 }
@@ -88,7 +95,7 @@ export interface WebhookEventArchive {
    * Implements ON CONFLICT DO NOTHING semantics on the
    * `(provider, providerEventId)` UNIQUE constraint. Returns:
    *   - `{ id, isDuplicate: false }` on a fresh insert (caller proceeds to dispatch)
-   *   - `{ id, isDuplicate: true }` on a retry (caller short-circuits to 200)
+   *   - `{ id, isDuplicate: true }` on a retry (caller inspects/claims processing)
    *
    * The returned `id` is always a stable handle to THE archive row for
    * this (provider, providerEventId) — whether newly minted OR
@@ -107,6 +114,13 @@ export interface WebhookEventArchive {
    * write pair.
    */
   tryClaimFailedForRetry(id: string): Promise<boolean>;
+
+  /** Fenced claim for fresh, failed, or lease-expired relevant events. */
+  claimForProcessing(id: string, now: Date, leaseUntil: Date): Promise<WebhookProcessingClaim>;
+
+  markProcessedFenced(id: string, fenceToken: string, pagamentoId: string | null): Promise<boolean>;
+
+  markFailedFenced(id: string, fenceToken: string, error: string): Promise<boolean>;
 
   /**
    * Mark a successful domain dispatch: sets `processed_at = now()`,

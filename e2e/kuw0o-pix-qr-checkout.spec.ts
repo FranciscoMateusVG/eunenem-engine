@@ -164,8 +164,10 @@ test.describe('kuw0o — PIX checkout routing (:3004, fake cobrança provider)',
     await modal.getByPlaceholder('a gente já te ama tanto ♡').fill('um recadinho de teste ♡');
 
     const initiationPromise = page.waitForResponse(
-      (res) =>
-        res.url().includes('iniciarPagamentoContribuicao') && res.request().method() === 'POST',
+      async (res) =>
+        res.url().includes('iniciarPagamentoContribuicao') &&
+        res.request().method() === 'POST' &&
+        !(await res.text()).includes('"tipo":"prepared"'),
     );
     await modal.getByRole('button', { name: 'continuar para o pix ♡' }).click();
 
@@ -253,8 +255,10 @@ test.describe('kuw0o — PIX checkout routing (:3004, fake cobrança provider)',
     await modal.getByPlaceholder('ana@email.com').fill('e2e-pix-visitor@e2e.local');
     await modal.getByPlaceholder('a gente já te ama tanto ♡').fill('um recadinho de teste ♡');
     const initiationPromise = page.waitForResponse(
-      (res) =>
-        res.url().includes('iniciarPagamentoContribuicao') && res.request().method() === 'POST',
+      async (res) =>
+        res.url().includes('iniciarPagamentoContribuicao') &&
+        res.request().method() === 'POST' &&
+        !(await res.text()).includes('"tipo":"prepared"'),
     );
     await modal.getByRole('button', { name: 'continuar para o pix ♡' }).click();
 
@@ -541,8 +545,10 @@ test.describe('kuw0o — irhxi QA regressions (:3004, fake cobrança provider)',
     await modal.getByPlaceholder('Ana & João').fill('E2e Visitante Pix');
     await modal.getByPlaceholder('ana@email.com').fill('e2e-pix-visitor@e2e.local');
     const initiationPromise = page.waitForResponse(
-      (res) =>
-        res.url().includes('iniciarPagamentoContribuicao') && res.request().method() === 'POST',
+      async (res) =>
+        res.url().includes('iniciarPagamentoContribuicao') &&
+        res.request().method() === 'POST' &&
+        !(await res.text()).includes('"tipo":"prepared"'),
     );
     await modal.getByRole('button', { name: 'continuar para o pix ♡' }).click();
     const initiation = await initiationPromise;
@@ -579,7 +585,10 @@ test.describe('kuw0o — irhxi QA regressions (:3004, fake cobrança provider)',
     await drawer.getByPlaceholder('Ana & João').fill('E2e Carrinho Pix');
     await drawer.getByPlaceholder('ana@email.com').fill('e2e-pix-cart@e2e.local');
     const cartInitiation = page.waitForResponse(
-      (res) => res.url().includes('iniciarPagamentoCarrinho') && res.request().method() === 'POST',
+      async (res) =>
+        res.url().includes('iniciarPagamentoCarrinho') &&
+        res.request().method() === 'POST' &&
+        !(await res.text()).includes('"tipo":"prepared"'),
     );
     await drawer.getByRole('button', { name: 'continuar para o pix ♡' }).click();
     const cartBody = JSON.parse(await (await cartInitiation).text()) as Array<{
@@ -599,8 +608,10 @@ test.describe('kuw0o — flag gate (:3002, default stripe provider)', () => {
     // impossible here because the shared helper takes an absolute origin —
     // :3002 is the suite's default baseURL made explicit.
     const initiationPromise = page.waitForResponse(
-      (res) =>
-        res.url().includes('iniciarPagamentoContribuicao') && res.request().method() === 'POST',
+      async (res) =>
+        res.url().includes('iniciarPagamentoContribuicao') &&
+        res.request().method() === 'POST' &&
+        !(await res.text()).includes('"tipo":"prepared"'),
     );
     const modal = await openModalAndPickPix(
       page,

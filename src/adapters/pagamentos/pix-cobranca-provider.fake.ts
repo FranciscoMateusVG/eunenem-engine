@@ -28,7 +28,16 @@ export const PIX_COBRANCA_FAKE_MAGIC_CENTS = {
 } as const;
 
 export type ConsultarCobrancaFakeStep =
-  | Exclude<ConsultarCobrancaResult, { status: 'concluida' }>
+  | Exclude<ConsultarCobrancaResult, { status: 'concluida' | 'ativa' }>
+  | {
+      readonly status: 'ativa';
+      /** Omit to reuse the charge txid. */
+      readonly txid?: string;
+      /** Omit to reuse the charge amount. */
+      readonly valorOriginalCents?: MoneyCents;
+      readonly pixCopiaECola?: string;
+      readonly expiraEm?: Date;
+    }
   | {
       readonly status: 'concluida';
       /** Omit to exercise the injected deterministic factory. */
@@ -137,9 +146,13 @@ function cloneCobrancaCriada(result: CobrancaCriada): CobrancaCriada {
 }
 
 function cloneConsultarCobrancaResult(result: ConsultarCobrancaResult): ConsultarCobrancaResult {
-  return result.status === 'concluida'
-    ? { ...result, horario: new Date(result.horario.getTime()) }
-    : { ...result };
+  if (result.status === 'concluida') {
+    return { ...result, horario: new Date(result.horario.getTime()) };
+  }
+  if (result.status === 'ativa' && result.expiraEm) {
+    return { ...result, expiraEm: new Date(result.expiraEm.getTime()) };
+  }
+  return { ...result };
 }
 
 function cloneConsultarCobrancaFakeStep(
@@ -390,6 +403,15 @@ export class PixCobrancaProviderFake implements PixCobrancaProvider {
     step: ConsultarCobrancaFakeStep,
     entry: CobrancaLedgerEntry,
   ): ConsultarCobrancaResult {
+    if (step.status === 'ativa') {
+      return {
+        status: 'ativa',
+        txid: step.txid ?? entry.result.txid,
+        valorOriginalCents: step.valorOriginalCents ?? entry.input.amountCents,
+        pixCopiaECola: step.pixCopiaECola ?? entry.result.pixCopiaECola,
+        expiraEm: step.expiraEm ?? new Date(entry.result.expiraEm.getTime()),
+      };
+    }
     if (step.status !== 'concluida') return cloneConsultarCobrancaResult(step);
     this.e2eOrdinal += 1;
     return {

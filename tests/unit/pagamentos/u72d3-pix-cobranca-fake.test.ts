@@ -52,7 +52,13 @@ describe('PixCobrancaProviderFake — charge ledger', () => {
       expiraEm: new Date('2030-02-03T04:06:36.000Z'),
     });
     expect(second.txid).toBe('FAKE0000000000000000000000000002');
-    await expect(fake.consultarCobranca(first.txid)).resolves.toEqual({ status: 'ativa' });
+    await expect(fake.consultarCobranca(first.txid)).resolves.toEqual({
+      status: 'ativa',
+      txid: first.txid,
+      valorOriginalCents: 5000,
+      pixCopiaECola: first.pixCopiaECola,
+      expiraEm: first.expiraEm,
+    });
     expect(fake.criarCobrancaCalls).toBe(2);
     expect(fake.consultarCobrancaCalls).toBe(1);
     expect(fake.cobrancas).toHaveLength(2);
@@ -168,7 +174,11 @@ describe('PixCobrancaProviderFake — charge ledger', () => {
     paidAt.setTime(0);
     const { txid } = await fake.criarCobranca(chargeInput());
 
-    await expect(fake.consultarCobranca(txid)).resolves.toEqual({ status: 'ativa' });
+    await expect(fake.consultarCobranca(txid)).resolves.toMatchObject({
+      status: 'ativa',
+      pixCopiaECola: expect.any(String),
+      expiraEm: expect.any(Date),
+    });
     await expect(fake.consultarCobranca(txid)).resolves.toEqual({
       status: 'desconhecido',
       statusBruto: 'EM_ANALISE_NOVA',
@@ -356,7 +366,11 @@ describe('PixCobrancaProviderFake — opt-in magic and explicit failures', () =>
     const auto = await fake.criarCobranca(
       chargeInput({ amountCents: PIX_COBRANCA_FAKE_MAGIC_CENTS.autoComplete }),
     );
-    await expect(fake.consultarCobranca(auto.txid)).resolves.toEqual({ status: 'ativa' });
+    await expect(fake.consultarCobranca(auto.txid)).resolves.toMatchObject({
+      status: 'ativa',
+      pixCopiaECola: expect.any(String),
+      expiraEm: expect.any(Date),
+    });
     await expect(
       fake.solicitarDevolucao(
         refundInput({ amountCents: PIX_COBRANCA_FAKE_MAGIC_CENTS.refundRejected }),

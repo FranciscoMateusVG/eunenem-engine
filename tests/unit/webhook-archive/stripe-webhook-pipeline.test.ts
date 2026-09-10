@@ -207,12 +207,137 @@ describe('archiveAndDispatchStripeEvent (aperture-1n6u8 pipeline)', () => {
     const archived = await archive.findById(result.archiveId as string);
     expect(archived?.signatureValid).toBe(true); // verify succeeded
     expect(archived?.processedAt).toBeNull(); // dispatch did NOT complete
-    expect(archived?.processingError).toBe(
-      'finalizarPagamentoAprovado: Pagamento not in expected state',
-    );
+    expect(archived?.processingError).toBe('dispatch_failed');
     expect(archived?.pagamentoId).toBeNull();
 
     expect(dispatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('reclaims a failed archived event and commits one later successful dispatch', async () => {
+    const event = makeStripeEvent({ id: 'evt_failed_then_retried' });
+    const args = {
+      rawBody: JSON.stringify(event),
+      signatureHeader: 't=ok',
+      verifyEvent: () => event,
+    };
+    const firstDispatch = vi.fn().mockRejectedValue(new Error('first dispatch failed'));
+    const retryDispatch = vi.fn().mockResolvedValue({ pagamentoId: 'pag_recovered' });
+
+    await expect(
+      archiveAndDispatchStripeEvent(archive, {
+        ...args,
+        dispatch: firstDispatch as never,
+      }),
+    ).resolves.toMatchObject({ status: 500, outcome: 'dispatched_failed' });
+    await expect(
+      archiveAndDispatchStripeEvent(archive, {
+        ...args,
+        dispatch: retryDispatch as never,
+      }),
+    ).resolves.toMatchObject({ status: 200, outcome: 'dispatched_success' });
+
+    expect(firstDispatch).toHaveBeenCalledOnce();
+    expect(retryDispatch).toHaveBeenCalledOnce();
+    await expect(archive.findByProviderEventId('stripe', event.id)).resolves.toMatchObject({
+      processedAt: expect.any(Date),
+      processingError: null,
+      pagamentoId: 'pag_recovered',
+      processingAttemptCount: 2,
+    });
+  });
+
+  it('never promotes an invalid archived delivery when a later valid body reuses its event id', async () => {
+    const invalid = makeStripeEvent({ id: 'evt_invalid_then_valid' });
+    await expect(
+      archiveAndDispatchStripeEvent(archive, {
+        rawBody: JSON.stringify(invalid),
+        signatureHeader: 'invalid',
+        verifyEvent: () => {
+          throw new Error('provider canary: must not persist or escape');
+        },
+        dispatch: dispatch as never,
+      }),
+    ).resolves.toMatchObject({ status: 400, outcome: 'signature_failed' });
+
+    const valid = makeStripeEvent({
+      id: 'evt_invalid_then_valid',
+      data: {
+        object: { id: 'cs_different', object: 'checkout.session' } as Stripe.Checkout.Session,
+      },
+    });
+    await expect(
+      archiveAndDispatchStripeEvent(archive, {
+        rawBody: JSON.stringify(valid),
+        signatureHeader: 'valid',
+        verifyEvent: () => valid,
+        dispatch: dispatch as never,
+      }),
+    ).resolves.toMatchObject({ status: 409, outcome: 'archive_conflict' });
+
+    expect(dispatch).not.toHaveBeenCalled();
+    await expect(
+      archive.findByProviderEventId('stripe', 'evt_invalid_then_valid'),
+    ).resolves.toMatchObject({ signatureValid: false, processedAt: null, processingError: null });
+  });
+
+  it('rejects different verified bytes under an already archived event id', async () => {
+    const first = makeStripeEvent({ id: 'evt_payload_conflict' });
+    const firstBody = JSON.stringify(first);
+    await archiveAndDispatchStripeEvent(archive, {
+      rawBody: firstBody,
+      signatureHeader: 'valid',
+      verifyEvent: () => first,
+      dispatch: vi.fn().mockRejectedValue(new Error('first attempt failed')) as never,
+    });
+
+    const changed = makeStripeEvent({
+      id: 'evt_payload_conflict',
+      data: {
+        object: { id: 'cs_changed', object: 'checkout.session' } as Stripe.Checkout.Session,
+      },
+    });
+    await expect(
+      archiveAndDispatchStripeEvent(archive, {
+        rawBody: JSON.stringify(changed),
+        signatureHeader: 'valid',
+        verifyEvent: () => changed,
+        dispatch: dispatch as never,
+      }),
+    ).resolves.toMatchObject({ status: 409, outcome: 'archive_conflict' });
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('keeps a concurrent redelivery retryable while the current fenced dispatch is active', async () => {
+    const event = makeStripeEvent({ id: 'evt_in_flight' });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const firstDispatch = vi.fn(async () => {
+      await gate;
+      return { pagamentoId: 'pag_once' };
+    });
+    const args = {
+      rawBody: JSON.stringify(event),
+      signatureHeader: 't=ok',
+      verifyEvent: () => event,
+    };
+
+    const first = archiveAndDispatchStripeEvent(archive, {
+      ...args,
+      dispatch: firstDispatch as never,
+    });
+    await vi.waitFor(() => expect(firstDispatch).toHaveBeenCalledOnce());
+    const competing = await archiveAndDispatchStripeEvent(archive, {
+      ...args,
+      dispatch: vi.fn() as never,
+    });
+    expect(competing).toMatchObject({
+      status: 503,
+      outcome: 'retryable_in_flight',
+    });
+    release();
+    await expect(first).resolves.toMatchObject({ status: 200, outcome: 'dispatched_success' });
   });
 
   // ─── (e) Malformed body ──────────────────────────────────────────────

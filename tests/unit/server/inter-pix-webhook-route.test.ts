@@ -135,8 +135,8 @@ describe('Banco Inter Pix webhook HTTP shell', () => {
     await expect(archive.findByProviderEventId('inter', `${txid}:${e2eId}`)).resolves.toMatchObject(
       {
         rawPayload: { txid, endToEndId: e2eId },
-        processingError: 'charge_binding_failed',
-        processedAt: null,
+        processingError: null,
+        processedAt: expect.any(Date),
       },
     );
   });
@@ -186,15 +186,15 @@ describe('Banco Inter Pix webhook HTTP shell', () => {
       body: JSON.stringify({ pix: [{ txid, endToEndId: secondE2eId }] }),
     });
 
-    expect(first.status).toBe(200);
+    expect(first.status).toBe(503);
     expect(second.status).toBe(200);
     expect(claimPixCobrancaProviderReadByTxid).toHaveBeenCalledTimes(2);
     expect(consultarCobranca).toHaveBeenCalledTimes(1);
     await expect(
       archive.findByProviderEventId('inter', `${txid}:${secondE2eId}`),
     ).resolves.toMatchObject({
-      processingError: 'charge_binding_failed',
-      processedAt: null,
+      processingError: null,
+      processedAt: expect.any(Date),
     });
   });
 
@@ -298,7 +298,7 @@ describe('Banco Inter Pix webhook HTTP shell', () => {
         body: JSON.stringify({ pix: [{ txid, endToEndId: hintE2eId }] }),
       });
 
-    expect((await deliver(e2eId)).status).toBe(200);
+    expect((await deliver(e2eId)).status).toBe(503);
     await expect(pagamentoRepository.findById(idPagamento)).resolves.toMatchObject({
       status: 'aprovado',
       intencao: { e2eExternalRef: e2eId },
@@ -335,8 +335,8 @@ describe('Banco Inter Pix webhook HTTP shell', () => {
     await expect(
       webhookEventArchive.findByProviderEventId('inter', `${txid}:${differentE2eId}`),
     ).resolves.toMatchObject({
-      processedAt: null,
-      processingError: 'charge_binding_failed',
+      processedAt: expect.any(Date),
+      processingError: null,
     });
   });
 

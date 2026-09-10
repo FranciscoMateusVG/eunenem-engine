@@ -76,6 +76,12 @@ export {
   SURCHARGE_LINE_ITEM_NAME,
 } from './adapters/pagamentos/card-surcharge.js';
 export type {
+  CheckoutOperation,
+  CheckoutOperationRepository,
+} from './adapters/pagamentos/checkout-operation-repository.js';
+export { CheckoutOperationRepositoryMemory } from './adapters/pagamentos/checkout-operation-repository.memory.js';
+export { CheckoutOperationRepositoryPostgres } from './adapters/pagamentos/checkout-operation-repository.postgres.js';
+export type {
   CheckoutSessionProvider,
   CriarSessaoCheckoutInput,
   CriarSessaoCheckoutResult,
@@ -979,14 +985,18 @@ export {
 } from './use-cases/checkout/finalizar-pagamento-rejeitado.js';
 // Plan 0016 Phase 2 (aperture-eg1s2): saga renamed to multi-item carrinho.
 export type {
+  CheckoutOperationAccess,
   CobrancaPixProviderKind,
   IniciarPagamentoCarrinhoDeps,
   IniciarPagamentoCarrinhoInput,
   IniciarPagamentoCarrinhoResult,
 } from './use-cases/checkout/iniciar-pagamento-carrinho.js';
 export {
+  CheckoutOperationConflictError,
+  CheckoutOperationPendingError,
   IniciarPagamentoCarrinhoInputSchema,
   iniciarPagamentoCarrinho,
+  prepararPagamentoCarrinho,
 } from './use-cases/checkout/iniciar-pagamento-carrinho.js';
 export type {
   IniciarRepasseRecebedorDeps,

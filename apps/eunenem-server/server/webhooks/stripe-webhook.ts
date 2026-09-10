@@ -267,6 +267,12 @@ export function createStripeWebhookHandler(deps: ServerDeps) {
             });
             span.setStatus({ code: SpanStatusCode.OK });
             break;
+          case 'retryable_in_flight':
+            logger.warn('webhook.stripe.retryable_in_flight', {
+              archiveId: result.archiveId ?? null,
+            });
+            span.setStatus({ code: SpanStatusCode.ERROR, message: 'processing incomplete' });
+            break;
           case 'malformed_body':
             logger.warn('webhook.stripe.malformed_body', {});
             span.setStatus({ code: SpanStatusCode.ERROR, message: 'malformed body' });
@@ -279,7 +285,7 @@ export function createStripeWebhookHandler(deps: ServerDeps) {
             break;
         }
 
-        return c.text(result.body, result.status as 200 | 400 | 500);
+        return c.text(result.body, result.status as 200 | 400 | 500 | 503);
       } catch (unexpectedError) {
         // Catch-all for anything that escaped the pipeline (e.g.
         // c.req.text() blew up, archive write blew up at first use).

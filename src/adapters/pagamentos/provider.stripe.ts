@@ -1,14 +1,18 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 import type Stripe from 'stripe';
+import { IdCampanhaSchema } from '../../domain/arrecadacao/value-objects/ids.js';
 import type { MoneyCents } from '../../domain/money.js';
 import {
   type TransacaoExterna,
   TransacaoExternaSchema,
 } from '../../domain/pagamentos/entities/pagamento.js';
 import {
+  IdIntencaoPagamentoSchema,
+  IdPagamentoSchema,
   type IdTransacaoExterna,
   IdTransacaoExternaSchema,
 } from '../../domain/pagamentos/value-objects/ids.js';
+import type { MetodoPagamento } from '../../domain/pagamentos/value-objects/metodo-pagamento.js';
 import { SURCHARGE_LINE_ITEM_NAME } from './card-surcharge.js';
 import type {
   CheckoutSessionProvider,
@@ -197,12 +201,13 @@ export class PagamentoProviderStripe implements PagamentoProvider, CheckoutSessi
         // without re-resolving via the DB; idPagamento is also our
         // findByExternalRef fallback if event payload shape changes.
         const metadata: Stripe.MetadataParam = {
+          ...(input.metadata ?? {}),
           idPagamento: input.idPagamento,
           idIntencaoPagamento: input.idIntencaoPagamento,
+          idCampanha: input.idCampanha,
           idContribuicao: input.idContribuicao,
           idOpcaoContribuicao: input.idOpcaoContribuicao,
           tipoOpcao: input.tipoOpcao,
-          ...(input.metadata ?? {}),
         };
 
         // Idempotency: passing idPagamento ensures replays of this
@@ -253,10 +258,9 @@ export class PagamentoProviderStripe implements PagamentoProvider, CheckoutSessi
           clientSecret: session.client_secret,
           externalRef: session.id,
         };
-      } catch (error: unknown) {
-        span.recordException(error as Error);
+      } catch {
         span.setStatus({ code: SpanStatusCode.ERROR });
-        throw error;
+        throw new Error('checkout_provider_unavailable');
       } finally {
         span.end();
       }
@@ -304,11 +308,26 @@ export class PagamentoProviderStripe implements PagamentoProvider, CheckoutSessi
 
         const contribuinteEmail = session.customer_details?.email ?? session.customer_email ?? null;
         const contribuinteNome = customFields.nome ?? session.customer_details?.name ?? null;
+        const paymentId = IdPagamentoSchema.safeParse(session.metadata?.idPagamento);
+        const intentId = IdIntencaoPagamentoSchema.safeParse(session.metadata?.idIntencaoPagamento);
+        const campaignId = IdCampanhaSchema.safeParse(session.metadata?.idCampanha);
+        const method: MetodoPagamento | null =
+          session.payment_method_types?.length === 1 && session.payment_method_types[0] === 'pix'
+            ? 'pix'
+            : session.payment_method_types?.length === 1 &&
+                session.payment_method_types[0] === 'card'
+              ? 'credit_card'
+              : null;
 
         span.setStatus({ code: SpanStatusCode.OK });
         return {
           sessionId: session.id,
           externalRef: session.id,
+          paymentId: paymentId.success ? paymentId.data : null,
+          intentId: intentId.success ? intentId.data : null,
+          campaignId: campaignId.success ? campaignId.data : null,
+          method,
+          clientSecret: session.client_secret ?? null,
           status,
           paymentStatus,
           customFields,
@@ -330,9 +349,8 @@ export class PagamentoProviderStripe implements PagamentoProvider, CheckoutSessi
           span.setStatus({ code: SpanStatusCode.OK });
           return undefined;
         }
-        span.recordException(error as Error);
         span.setStatus({ code: SpanStatusCode.ERROR });
-        throw error;
+        throw new Error('checkout_provider_unavailable');
       } finally {
         span.end();
       }

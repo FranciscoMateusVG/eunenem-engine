@@ -105,9 +105,10 @@ async function completePixIdentity(page: Page, modal: ReturnType<Page['locator']
   await modal.getByPlaceholder('a gente já te ama tanto ♡').fill('fluxo literal de estorno');
 
   const initiated = page.waitForResponse(
-    (response) =>
+    async (response) =>
       response.url().includes('iniciarPagamentoContribuicao') &&
-      response.request().method() === 'POST',
+      response.request().method() === 'POST' &&
+      !(await response.text()).includes('"tipo":"prepared"'),
   );
   await modal.getByRole('button', { name: 'continuar para o pix ♡' }).click();
   const response = await initiated;
@@ -274,13 +275,28 @@ async function cleanupOwned(
   ]);
 
   for (const pagamentoId of ownedPaymentIds) {
+    const operation = await sql<{ retained: boolean }>`
+      SELECT EXISTS (
+        SELECT 1 FROM payment_provider_operations WHERE payment_id = ${pagamentoId}
+      ) AS retained
+    `.execute(db);
+    // Provider-operation attempts are append-only by design. Preserve the
+    // complete audited graph in this ephemeral, single-worker database rather
+    // than partially deleting its payment/ledger/contribution rows.
+    if (operation.rows[0]?.retained) continue;
     await sql`DELETE FROM payment_webhook_events WHERE pagamento_id = ${pagamentoId}`.execute(db);
     await sql`DELETE FROM pix_cobranca_devolucoes WHERE id_pagamento = ${pagamentoId}`.execute(db);
     await sql`DELETE FROM lancamentos_financeiros WHERE id_pagamento = ${pagamentoId}`.execute(db);
     await sql`DELETE FROM pagamentos WHERE id = ${pagamentoId}`.execute(db);
   }
   for (const contributionId of args.contributionIds) {
-    await sql`DELETE FROM contribuicoes WHERE id = ${contributionId}`.execute(db);
+    await sql`
+      DELETE FROM contribuicoes
+      WHERE id = ${contributionId}
+        AND NOT EXISTS (
+          SELECT 1 FROM intencao_items WHERE id_contribuicao = ${contributionId}
+        )
+    `.execute(db);
   }
 }
 

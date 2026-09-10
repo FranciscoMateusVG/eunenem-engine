@@ -16,8 +16,10 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { CampanhaRepositoryPostgres } from '../../src/adapters/arrecadacao/campanha-repository.postgres.js';
 import { ContribuicaoRepositoryPostgres } from '../../src/adapters/arrecadacao/contribuicao-repository.postgres.js';
 import { RecebedorRepositoryPostgres } from '../../src/adapters/arrecadacao/recebedor-repository.postgres.js';
+import { CheckoutOperationRepositoryMemory } from '../../src/adapters/pagamentos/checkout-operation-repository.memory.js';
 import { PagamentoEventPublisherMemory } from '../../src/adapters/pagamentos/event-publisher.memory.js';
 import { LivroFinanceiroRepositoryMemory } from '../../src/adapters/pagamentos/financeiro/livro-repository.memory.js';
+import { PixCobrancaProviderFake } from '../../src/adapters/pagamentos/pix-cobranca-provider.fake.js';
 import { PagamentoProviderFake } from '../../src/adapters/pagamentos/provider.fake.js';
 import { PagamentoRepositoryMemory } from '../../src/adapters/pagamentos/repository.memory.js';
 import {
@@ -31,7 +33,10 @@ import { adicionarOpcaoContribuicao } from '../../src/use-cases/arrecadacao/adic
 import { criarCampanha } from '../../src/use-cases/arrecadacao/criar-campanha.js';
 import { criarContribuicao } from '../../src/use-cases/arrecadacao/criar-contribuicao.js';
 import { finalizarPagamentoAprovado } from '../../src/use-cases/checkout/finalizar-pagamento-aprovado.js';
-import { iniciarPagamentoCarrinho } from '../../src/use-cases/checkout/iniciar-pagamento-carrinho.js';
+import {
+  iniciarPagamentoCarrinho,
+  prepararPagamentoCarrinho,
+} from '../../src/use-cases/checkout/iniciar-pagamento-carrinho.js';
 import { obterReceitaPlataforma } from '../../src/use-cases/pagamentos/financeiro/obter-receita-plataforma.js';
 import { obterSaldoRecebedor } from '../../src/use-cases/pagamentos/financeiro/obter-saldo-recebedor.js';
 import { registrarContaUsuario } from '../../src/use-cases/usuario/registrar-conta-usuario.js';
@@ -178,6 +183,24 @@ beforeEach(async () => {
   testObs.reset();
 });
 
+async function runDurableCheckout(
+  deps: Omit<
+    Parameters<typeof iniciarPagamentoCarrinho>[0],
+    'checkoutOperationRepository' | 'pixCobrancaProvider' | 'cobrancaPixProviderKind'
+  >,
+  input: Parameters<typeof iniciarPagamentoCarrinho>[1],
+) {
+  const durableDeps: Parameters<typeof iniciarPagamentoCarrinho>[0] = {
+    ...deps,
+    checkoutOperationRepository: new CheckoutOperationRepositoryMemory(deps.pagamentoRepository),
+    pixCobrancaProvider: new PixCobrancaProviderFake(),
+    cobrancaPixProviderKind: 'stripe',
+  };
+  const access = { capability: 'T'.repeat(43) };
+  await prepararPagamentoCarrinho(durableDeps, input, access);
+  return iniciarPagamentoCarrinho(durableDeps, input, access);
+}
+
 describe('Fluxo — reprocessamento de pagamento aprovado', () => {
   it('Mantém pagamento aprovado e não duplica efeitos entre Pagamentos e Financeiro ao reprocessar', async () => {
     const { deps, idCampanha, idContribuicao, idPagamento } = await seedFluxoBase();
@@ -204,7 +227,7 @@ describe('Fluxo — reprocessamento de pagamento aprovado', () => {
       observability: deps.observability,
     };
 
-    const { pagamento } = await iniciarPagamentoCarrinho(checkoutDeps, {
+    const { pagamento } = await runDurableCheckout(checkoutDeps, {
       idPlataforma: ID_PLATAFORMA_EUNENEM,
       idCampanha,
       itens: [{ idContribuicao, quantidade: 1 }],

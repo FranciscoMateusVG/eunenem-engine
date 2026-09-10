@@ -62,7 +62,11 @@
  * resolver header in resolve-campanha-administrada.ts).
  */
 import { randomUUID } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  CheckoutOperationStorageUnavailableError,
+  executeRecoverableCheckout,
+} from '../../../apps/eunenem-server/pages/lib/checkoutOperationClient.js';
 import type { ServerDeps } from '../../../apps/eunenem-server/server/auth/setup.js';
 import type { TrpcContext } from '../../../apps/eunenem-server/server/trpc/context.js';
 import { appRouter } from '../../../apps/eunenem-server/server/trpc/router.js';
@@ -74,6 +78,7 @@ import { ResgatePendenteRepositoryMemory } from '../../../src/adapters/arrecadac
 import { ConviteRepositoryMemory } from '../../../src/adapters/evento/convite-repository.memory.js';
 import { EventoRepositoryMemory } from '../../../src/adapters/evento/evento-repository.memory.js';
 import { ListaDeConvidadosRepositoryMemory } from '../../../src/adapters/evento/lista-de-convidados-repository.memory.js';
+import { CheckoutOperationRepositoryMemory } from '../../../src/adapters/pagamentos/checkout-operation-repository.memory.js';
 import { PagamentoEventPublisherMemory } from '../../../src/adapters/pagamentos/event-publisher.memory.js';
 import { LivroFinanceiroRepositoryMemory } from '../../../src/adapters/pagamentos/financeiro/livro-repository.memory.js';
 import { PagamentoProviderFake } from '../../../src/adapters/pagamentos/provider.fake.js';
@@ -146,6 +151,7 @@ async function buildRig(): Promise<Rig> {
     conviteRepository: new ConviteRepositoryMemory(),
     listaDeConvidadosRepository: new ListaDeConvidadosRepositoryMemory(),
     pagamentoRepository,
+    checkoutOperationRepository: new CheckoutOperationRepositoryMemory(pagamentoRepository),
     pagamentoProvider,
     checkoutSessionProvider: pagamentoProvider,
     pagamentoEventPublisher: new PagamentoEventPublisherMemory(),
@@ -199,7 +205,10 @@ async function buildRig(): Promise<Rig> {
     );
     const ctx: TrpcContext = {
       deps,
-      headers: new Headers({ cookie: `${SESSION_COOKIE}=${encodeURIComponent(sessao.token)}` }),
+      headers: new Headers({
+        cookie: `${SESSION_COOKIE}=${encodeURIComponent(sessao.token)}`,
+        origin: deps.publicOrigin,
+      }),
       resHeaders: new Headers(),
     };
     return {
@@ -211,9 +220,30 @@ async function buildRig(): Promise<Rig> {
     };
   }
 
-  const anonCtx: TrpcContext = { deps, headers: new Headers(), resHeaders: new Headers() };
+  const anonCtx: TrpcContext = {
+    deps,
+    headers: new Headers({ origin: deps.publicOrigin }),
+    resHeaders: new Headers(),
+  };
 
-  return { deps, anonCaller: appRouter.createCaller(anonCtx), addUser };
+  return { deps, anonCaller: appRouter.createCaller(anonCtx), anonCtx, addUser };
+}
+
+async function completePublicCheckout<T extends { readonly tipo: string }>(
+  ctx: TrpcContext,
+  invoke: (operationId: string) => Promise<T>,
+): Promise<Exclude<T, { readonly tipo: 'prepared' }>> {
+  const operationId = randomUUID();
+  const prepared = await invoke(operationId);
+  expect(prepared).toMatchObject({ tipo: 'prepared', operationId });
+  const setCookie = ctx.resHeaders.get('set-cookie');
+  if (!setCookie) throw new Error('checkout prepare did not set its capability cookie');
+  const pair = setCookie.split(';', 1)[0];
+  if (!pair) throw new Error('invalid checkout capability cookie');
+  ctx.headers.set('cookie', pair);
+  const result = await invoke(operationId);
+  if (result.tipo === 'prepared') throw new Error('checkout did not advance after cookie return');
+  return result as Exclude<T, { readonly tipo: 'prepared' }>;
 }
 
 /**
@@ -417,6 +447,7 @@ const OWNER_GATE_HOPS: OwnerGateHop[] = [
     expectedCode: 'NOT_FOUND',
     invoke: ({ caller, slug }, idCampanha) =>
       caller.pagina.iniciarPagamentoContribuicao({
+        operationId: randomUUID(),
         slug,
         idCampanha,
         idContribuicao: randomUUID(),
@@ -429,6 +460,7 @@ const OWNER_GATE_HOPS: OwnerGateHop[] = [
     expectedCode: 'NOT_FOUND',
     invoke: ({ caller, slug }, idCampanha) =>
       caller.pagina.iniciarPagamentoCarrinho({
+        operationId: randomUUID(),
         slug,
         idCampanha,
         itens: [{ idContribuicao: randomUUID(), quantidade: 1 }],
@@ -831,12 +863,15 @@ describe('g1wl4 — per-hop idCampanha, THROUGH the router (PR #344 + aperture-4
         })
       ).ids;
       if (!idContribuicao) throw new Error('setup: create não retornou id');
-      const { sessionId } = await rig.anonCaller.pagina.iniciarPagamentoContribuicao({
-        slug: user.slug,
-        idCampanha: c2,
-        idContribuicao,
-        metodo: 'pix',
-      });
+      const { sessionId } = await completePublicCheckout(rig.anonCtx, (operationId) =>
+        rig.anonCaller.pagina.iniciarPagamentoContribuicao({
+          operationId,
+          slug: user.slug,
+          idCampanha: c2,
+          idContribuicao,
+          metodo: 'pix',
+        }),
+      );
       const pagamento = await rig.deps.pagamentoRepository.findByExternalRef(sessionId);
       if (!pagamento) throw new Error('setup: pagamento não persistiu');
 
@@ -962,6 +997,7 @@ describe('g1wl4 — per-hop idCampanha, THROUGH the router (PR #344 + aperture-4
       // (contribuição must belong to the resolved campanha).
       const bare = await captureRejection(
         rig.anonCaller.pagina.iniciarPagamentoContribuicao({
+          operationId: randomUUID(),
           slug: user.slug,
           idContribuicao: idContribuicaoC2,
           metodo: 'pix',
@@ -970,12 +1006,15 @@ describe('g1wl4 — per-hop idCampanha, THROUGH the router (PR #344 + aperture-4
       expect(bare.code).toBe('INTERNAL_SERVER_ERROR');
 
       // idCampanha=c2 resolves the second campanha → checkout succeeds.
-      const ok = await rig.anonCaller.pagina.iniciarPagamentoContribuicao({
-        slug: user.slug,
-        idCampanha: c2,
-        idContribuicao: idContribuicaoC2,
-        metodo: 'pix',
-      });
+      const ok = await completePublicCheckout(rig.anonCtx, (operationId) =>
+        rig.anonCaller.pagina.iniciarPagamentoContribuicao({
+          operationId,
+          slug: user.slug,
+          idCampanha: c2,
+          idContribuicao: idContribuicaoC2,
+          metodo: 'pix',
+        }),
+      );
       expect(ok.sessionId.length).toBeGreaterThan(0);
       expect(ok.clientSecret.length).toBeGreaterThan(0);
       const pagamento = await rig.deps.pagamentoRepository.findByExternalRef(ok.sessionId);
@@ -998,6 +1037,7 @@ describe('g1wl4 — per-hop idCampanha, THROUGH the router (PR #344 + aperture-4
 
       const bare = await captureRejection(
         rig.anonCaller.pagina.iniciarPagamentoCarrinho({
+          operationId: randomUUID(),
           slug: user.slug,
           itens: [{ idContribuicao: idContribuicaoC2, quantidade: 1 }],
           metodo: 'pix',
@@ -1005,12 +1045,15 @@ describe('g1wl4 — per-hop idCampanha, THROUGH the router (PR #344 + aperture-4
       );
       expect(bare.code).toBe('INTERNAL_SERVER_ERROR');
 
-      const ok = await rig.anonCaller.pagina.iniciarPagamentoCarrinho({
-        slug: user.slug,
-        idCampanha: c2,
-        itens: [{ idContribuicao: idContribuicaoC2, quantidade: 1 }],
-        metodo: 'pix',
-      });
+      const ok = await completePublicCheckout(rig.anonCtx, (operationId) =>
+        rig.anonCaller.pagina.iniciarPagamentoCarrinho({
+          operationId,
+          slug: user.slug,
+          idCampanha: c2,
+          itens: [{ idContribuicao: idContribuicaoC2, quantidade: 1 }],
+          metodo: 'pix',
+        }),
+      );
       const pagamento = await rig.deps.pagamentoRepository.findByExternalRef(ok.sessionId);
       expect(pagamento?.intencao.idCampanha).toBe(c2);
     });
@@ -1028,12 +1071,15 @@ describe('g1wl4 — per-hop idCampanha, THROUGH the router (PR #344 + aperture-4
         })
       ).ids;
       if (!idContribuicaoC2) throw new Error('setup: create não retornou id');
-      const { sessionId } = await rig.anonCaller.pagina.iniciarPagamentoContribuicao({
-        slug: user.slug,
-        idCampanha: c2,
-        idContribuicao: idContribuicaoC2,
-        metodo: 'pix',
-      });
+      const { sessionId } = await completePublicCheckout(rig.anonCtx, (operationId) =>
+        rig.anonCaller.pagina.iniciarPagamentoContribuicao({
+          operationId,
+          slug: user.slug,
+          idCampanha: c2,
+          idContribuicao: idContribuicaoC2,
+          metodo: 'pix',
+        }),
+      );
 
       // Matching campanha addressing — legitimate flow, holds before AND
       // after the aperture-jlvet cross-check lands.
@@ -1075,11 +1121,14 @@ describe('g1wl4 — per-hop idCampanha, THROUGH the router (PR #344 + aperture-4
         })
       ).ids;
       if (!idContribuicao) throw new Error('setup: create não retornou id');
-      const { sessionId } = await rig.anonCaller.pagina.iniciarPagamentoContribuicao({
-        slug: owner.slug,
-        idContribuicao,
-        metodo: 'pix',
-      });
+      const { sessionId } = await completePublicCheckout(rig.anonCtx, (operationId) =>
+        rig.anonCaller.pagina.iniciarPagamentoContribuicao({
+          operationId,
+          slug: owner.slug,
+          idContribuicao,
+          metodo: 'pix',
+        }),
+      );
 
       // The leaked-token scenario: a valid sessionId replayed against a
       // DIFFERENT slug must behave exactly like a garbage sessionId.
@@ -1110,12 +1159,15 @@ describe('g1wl4 — per-hop idCampanha, THROUGH the router (PR #344 + aperture-4
         })
       ).ids;
       if (!idContribuicaoC2) throw new Error('setup: create não retornou id');
-      const { sessionId } = await rig.anonCaller.pagina.iniciarPagamentoContribuicao({
-        slug: user.slug,
-        idCampanha: c2,
-        idContribuicao: idContribuicaoC2,
-        metodo: 'pix',
-      });
+      const { sessionId } = await completePublicCheckout(rig.anonCtx, (operationId) =>
+        rig.anonCaller.pagina.iniciarPagamentoContribuicao({
+          operationId,
+          slug: user.slug,
+          idCampanha: c2,
+          idContribuicao: idContribuicaoC2,
+          metodo: 'pix',
+        }),
+      );
 
       // Bare resolves the OLDEST campanha; the pagamento belongs to c2 —
       // post-jlvet this mismatch is fail-closed.
@@ -1236,15 +1288,338 @@ describe('g1wl4 — per-hop idCampanha, THROUGH the router (PR #344 + aperture-4
       ).ids;
       if (!idContribuicao) throw new Error('setup: create não retornou id');
 
-      const ok = await rig.anonCaller.pagina.iniciarPagamentoContribuicao({
-        slug: user.slug,
-        idContribuicao,
-        metodo: 'pix',
-      });
+      const ok = await completePublicCheckout(rig.anonCtx, (operationId) =>
+        rig.anonCaller.pagina.iniciarPagamentoContribuicao({
+          operationId,
+          slug: user.slug,
+          idContribuicao,
+          metodo: 'pix',
+        }),
+      );
       expect(ok.sessionId.length).toBeGreaterThan(0);
       expect(ok.clientSecret.length).toBeGreaterThan(0);
       const pagamento = await rig.deps.pagamentoRepository.findByExternalRef(ok.sessionId);
       expect(pagamento?.intencao.idCampanha, 'bare checkout pins the oldest campanha').toBe(c1);
     });
+  });
+});
+
+describe('iytxa — public checkout capability slots', () => {
+  it('reuses one browser operation and provider key after an accepted response is lost', async () => {
+    const rig = await buildRig();
+    const user = await rig.addUser(uniqueEmail('checkout-client-recovery'));
+    const [idContribuicao] = (
+      await user.caller.contribuicao.create({
+        idCampanha: user.campanhaSignup.id,
+        nome: 'Client recovery checkout',
+        valor: 100,
+        quantidade: 1,
+      })
+    ).ids;
+    if (!idContribuicao) throw new Error('fixture contribution');
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => void values.set(key, value),
+      removeItem: (key: string) => void values.delete(key),
+    };
+    const operationId = randomUUID();
+    const input = {
+      slug: user.slug,
+      idContribuicao,
+      metodo: 'credit_card' as const,
+    };
+    const providerCall = vi.spyOn(rig.deps.checkoutSessionProvider, 'criarSessaoCheckout');
+    let loseFirstMountResponse = true;
+    const requestInputs: Array<typeof input & { operationId: string }> = [];
+    const setCookieHeaders: string[] = [];
+    const request = async (requestInput: typeof input & { operationId: string }) => {
+      requestInputs.push(requestInput);
+      const response = await rig.anonCaller.pagina.iniciarPagamentoContribuicao(requestInput);
+      const setCookie = rig.anonCtx.resHeaders.get('set-cookie');
+      if (setCookie) setCookieHeaders.push(setCookie);
+      const pair = setCookie?.split(';', 1)[0];
+      if (pair) rig.anonCtx.headers.set('cookie', pair);
+      rig.anonCtx.resHeaders.delete('set-cookie');
+      if (response.tipo !== 'prepared' && loseFirstMountResponse) {
+        loseFirstMountResponse = false;
+        throw new Error('simulated accepted response loss');
+      }
+      return response;
+    };
+
+    await expect(
+      executeRecoverableCheckout({
+        storageKey: 'contribution',
+        requestInput: input,
+        request,
+        storage,
+        createId: () => operationId,
+      }),
+    ).rejects.toThrow('simulated accepted response loss');
+    expect(storage.getItem('contribution')).toBe(operationId);
+
+    const recovered = await executeRecoverableCheckout({
+      storageKey: 'contribution',
+      requestInput: input,
+      request,
+      storage,
+      createId: () => randomUUID(),
+    });
+    expect(recovered).toMatchObject({ tipo: 'stripe_embedded' });
+    expect(storage.getItem('contribution')).toBeNull();
+    expect(providerCall).toHaveBeenCalledOnce();
+    expect(requestInputs).toHaveLength(3);
+    expect(requestInputs).toEqual(requestInputs.map(() => ({ ...input, operationId })));
+    expect(setCookieHeaders.some((header) => header.includes('Max-Age=0'))).toBe(false);
+    const operation = await rig.deps.checkoutOperationRepository.findById(operationId);
+    expect(operation).toMatchObject({ state: 'local_committed', paymentId: operationId });
+    expect(operation?.snapshot.items.reduce((sum, item) => sum + item.contributionCents, 0)).toBe(
+      100,
+    );
+    expect(operation?.snapshot.totalSurchargeCents).toBeGreaterThan(0);
+    expect(operation?.snapshot.totalChargedCents).toBe(
+      operation?.snapshot.items.reduce(
+        (sum, item) => sum + item.contributionCents + item.feeCents + item.surchargeCents,
+        0,
+      ),
+    );
+
+    await expect(
+      executeRecoverableCheckout({
+        storageKey: 'cart',
+        requestInput: input,
+        request,
+        storage: undefined,
+      }),
+    ).rejects.toBeInstanceOf(CheckoutOperationStorageUnavailableError);
+    expect(requestInputs).toHaveLength(3);
+    expect(providerCall).toHaveBeenCalledOnce();
+  });
+
+  it('reserves before provider I/O and executes only after the exact cookie returns', async () => {
+    const rig = await buildRig();
+    const user = await rig.addUser(uniqueEmail('checkout-slot'));
+    const [idContribuicao] = (
+      await user.caller.contribuicao.create({
+        idCampanha: user.campanhaSignup.id,
+        nome: 'Slot checkout',
+        valor: 100,
+        quantidade: 1,
+      })
+    ).ids;
+    if (!idContribuicao) throw new Error('fixture contribution');
+    const providerCall = vi.spyOn(rig.deps.checkoutSessionProvider, 'criarSessaoCheckout');
+    const operationId = randomUUID();
+    const input = {
+      operationId,
+      slug: user.slug,
+      idContribuicao,
+      metodo: 'credit_card' as const,
+    };
+
+    await expect(rig.anonCaller.pagina.iniciarPagamentoContribuicao(input)).resolves.toEqual({
+      tipo: 'prepared',
+      operationId,
+    });
+    expect(providerCall).not.toHaveBeenCalled();
+    const setCookie = rig.anonCtx.resHeaders.get('set-cookie');
+    expect(setCookie).toMatch(
+      /^__Host-eunenem_checkout_[0-9a-f-]+=.{43}; Max-Age=604800; Path=\/; HttpOnly; Secure; SameSite=Lax$/,
+    );
+    const reserved = await rig.deps.checkoutOperationRepository.findById(operationId);
+    expect(reserved?.snapshot.items).toHaveLength(2);
+    expect(reserved?.snapshot.items[1]).toMatchObject({
+      contributionId: null,
+      optionId: null,
+      optionType: 'passthrough_surcharge',
+      quantity: 1,
+    });
+    expect(reserved?.snapshot.items[1]?.surchargeCents).toBeGreaterThan(0);
+    rig.anonCtx.headers.set('cookie', setCookie?.split(';', 1)[0] ?? '');
+    await expect(rig.anonCaller.pagina.iniciarPagamentoContribuicao(input)).resolves.toMatchObject({
+      tipo: 'stripe_embedded',
+    });
+    expect(providerCall).toHaveBeenCalledOnce();
+  });
+
+  it('rejects missing Origin before reservation and never calls the provider', async () => {
+    const rig = await buildRig();
+    const user = await rig.addUser(uniqueEmail('checkout-origin'));
+    rig.anonCtx.headers.delete('origin');
+    const providerCall = vi.spyOn(rig.deps.checkoutSessionProvider, 'criarSessaoCheckout');
+    const operationId = randomUUID();
+
+    await expect(
+      rig.anonCaller.pagina.iniciarPagamentoContribuicao({
+        operationId,
+        slug: user.slug,
+        idContribuicao: randomUUID(),
+        metodo: 'credit_card',
+      }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN', message: 'Origem inválida' });
+    await expect(
+      rig.deps.checkoutOperationRepository.findById(operationId),
+    ).resolves.toBeUndefined();
+    expect(providerCall).not.toHaveBeenCalled();
+  });
+
+  it('does not issue a losing capability for the same operation id', async () => {
+    const rig = await buildRig();
+    const user = await rig.addUser(uniqueEmail('checkout-race'));
+    const [idContribuicao] = (
+      await user.caller.contribuicao.create({
+        idCampanha: user.campanhaSignup.id,
+        nome: 'Race checkout',
+        valor: 100,
+        quantidade: 1,
+      })
+    ).ids;
+    if (!idContribuicao) throw new Error('fixture contribution');
+    const operationId = randomUUID();
+    const input = {
+      operationId,
+      slug: user.slug,
+      idContribuicao,
+      metodo: 'credit_card' as const,
+    };
+    await rig.anonCaller.pagina.iniciarPagamentoContribuicao(input);
+
+    const loserCtx: TrpcContext = {
+      deps: rig.deps,
+      headers: new Headers({ origin: rig.deps.publicOrigin }),
+      resHeaders: new Headers(),
+    };
+    const loser = appRouter.createCaller(loserCtx);
+    await expect(loser.pagina.iniciarPagamentoContribuicao(input)).rejects.toMatchObject({
+      code: 'CONFLICT',
+      message: 'Operação indisponível',
+    });
+    expect(loserCtx.resHeaders.get('set-cookie')).toBeNull();
+  });
+
+  it('rejects malformed, duplicate, excessive, and oversized capability cookies before provider I/O', async () => {
+    const rig = await buildRig();
+    const user = await rig.addUser(uniqueEmail('checkout-cookie-boundary'));
+    const [idContribuicao] = (
+      await user.caller.contribuicao.create({
+        idCampanha: user.campanhaSignup.id,
+        nome: 'Cookie boundary checkout',
+        valor: 100,
+        quantidade: 1,
+      })
+    ).ids;
+    if (!idContribuicao) throw new Error('fixture contribution');
+    const providerCall = vi.spyOn(rig.deps.checkoutSessionProvider, 'criarSessaoCheckout');
+    const capability = 'A'.repeat(43);
+    const operationId = randomUUID();
+    const cookieName = `__Host-eunenem_checkout_${operationId}`;
+    const excessiveSlots = Array.from(
+      { length: 9 },
+      () => `__Host-eunenem_checkout_${randomUUID()}=${capability}`,
+    ).join('; ');
+    const cases = [
+      `${cookieName}=short`,
+      `${cookieName}=${capability}; ${cookieName}=${capability}`,
+      excessiveSlots,
+      `ordinary=${'x'.repeat(8192)}`,
+    ];
+
+    for (const cookie of cases) {
+      const ctx: TrpcContext = {
+        deps: rig.deps,
+        headers: new Headers({ origin: rig.deps.publicOrigin, cookie }),
+        resHeaders: new Headers(),
+      };
+      await expect(
+        appRouter.createCaller(ctx).pagina.iniciarPagamentoContribuicao({
+          operationId,
+          slug: user.slug,
+          idContribuicao,
+          metodo: 'credit_card',
+        }),
+      ).rejects.toMatchObject({ code: 'CONFLICT', message: 'Operação indisponível' });
+      expect(ctx.resHeaders.get('set-cookie')).toBeNull();
+    }
+    await expect(
+      rig.deps.checkoutOperationRepository.findById(operationId),
+    ).resolves.toBeUndefined();
+    expect(providerCall).not.toHaveBeenCalled();
+  });
+
+  it('refuses a ninth operation slot before reservation or provider I/O', async () => {
+    const rig = await buildRig();
+    const user = await rig.addUser(uniqueEmail('checkout-slot-cap'));
+    const [idContribuicao] = (
+      await user.caller.contribuicao.create({
+        idCampanha: user.campanhaSignup.id,
+        nome: 'Slot cap checkout',
+        valor: 100,
+        quantidade: 1,
+      })
+    ).ids;
+    if (!idContribuicao) throw new Error('fixture contribution');
+    const providerCall = vi.spyOn(rig.deps.checkoutSessionProvider, 'criarSessaoCheckout');
+    const operationId = randomUUID();
+    rig.anonCtx.headers.set(
+      'cookie',
+      Array.from(
+        { length: 8 },
+        () => `__Host-eunenem_checkout_${randomUUID()}=${'A'.repeat(43)}`,
+      ).join('; '),
+    );
+
+    await expect(
+      rig.anonCaller.pagina.iniciarPagamentoContribuicao({
+        operationId,
+        slug: user.slug,
+        idContribuicao,
+        metodo: 'credit_card',
+      }),
+    ).rejects.toMatchObject({ code: 'CONFLICT', message: 'Operação indisponível' });
+    await expect(
+      rig.deps.checkoutOperationRepository.findById(operationId),
+    ).resolves.toBeUndefined();
+    expect(providerCall).not.toHaveBeenCalled();
+    expect(rig.anonCtx.resHeaders.get('set-cookie')).toBeNull();
+  });
+
+  it('retains an in-progress slot and clears only that slot after a terminal payment state', async () => {
+    const rig = await buildRig();
+    const user = await rig.addUser(uniqueEmail('checkout-slot-terminal'));
+    const [idContribuicao] = (
+      await user.caller.contribuicao.create({
+        idCampanha: user.campanhaSignup.id,
+        nome: 'Terminal slot checkout',
+        valor: 100,
+        quantidade: 1,
+      })
+    ).ids;
+    if (!idContribuicao) throw new Error('fixture contribution');
+    const operationId = randomUUID();
+    const input = {
+      operationId,
+      slug: user.slug,
+      idContribuicao,
+      metodo: 'credit_card' as const,
+    };
+    await rig.anonCaller.pagina.iniciarPagamentoContribuicao(input);
+    const targetPair = rig.anonCtx.resHeaders.get('set-cookie')?.split(';', 1)[0];
+    if (!targetPair) throw new Error('missing target cookie');
+    const otherPair = `__Host-eunenem_checkout_${randomUUID()}=${'B'.repeat(43)}`;
+    rig.anonCtx.headers.set('cookie', `${targetPair}; ${otherPair}`);
+    rig.anonCtx.resHeaders.delete('set-cookie');
+
+    await rig.anonCaller.pagina.iniciarPagamentoContribuicao(input);
+    expect(rig.anonCtx.resHeaders.get('set-cookie')).toBeNull();
+
+    const payment = await rig.deps.pagamentoRepository.findById(operationId as never);
+    if (!payment) throw new Error('missing payment');
+    await rig.deps.pagamentoRepository.update({ ...payment, status: 'rejeitado' } as never);
+    await rig.anonCaller.pagina.iniciarPagamentoContribuicao(input);
+    expect(rig.anonCtx.resHeaders.get('set-cookie')).toBe(
+      `__Host-eunenem_checkout_${operationId}=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax`,
+    );
+    expect(rig.anonCtx.resHeaders.get('set-cookie')).not.toContain(otherPair.split('=')[0]);
   });
 });

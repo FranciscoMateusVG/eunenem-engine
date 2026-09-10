@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { initTRPC, TRPCError } from '@trpc/server';
 import { z } from 'zod/v4';
 import {
@@ -12,7 +12,9 @@ import {
   type IdItemDoPagamento,
   type IdOpcaoContribuicao,
   type IdPagamento,
+  CheckoutOperationConflictError,
   iniciarPagamentoCarrinho,
+  prepararPagamentoCarrinho,
   listarContribuicoesDeOpcao,
   obterTarifaPorTipo,
   type SlugUsuario,
@@ -139,6 +141,7 @@ export const ContribuinteInputSchema = z.object({
 });
 
 export const IniciarPagamentoContribuicaoInputSchema = z.object({
+  operationId: z.string().uuid(),
   slug: z.string().trim().min(1).max(60),
   // aperture-yeauv: OPTIONAL per-campanha routing (see ObterListaPresentes).
   idCampanha: z.string().optional(),
@@ -173,6 +176,7 @@ export const IniciarPagamentoContribuicaoInputSchema = z.object({
  * details across the public API.
  */
 export const IniciarPagamentoCarrinhoInputSchema = z.object({
+  operationId: z.string().uuid(),
   slug: z.string().trim().min(1).max(60),
   // aperture-yeauv: OPTIONAL per-campanha routing (see ObterListaPresentes).
   idCampanha: z.string().optional(),
@@ -197,6 +201,10 @@ export const IniciarPagamentoCarrinhoInputSchema = z.object({
  * transformer, so Dates don't survive the wire — serialize explicitly).
  */
 export const IniciarPagamentoContribuicaoOutputSchema = z.discriminatedUnion('tipo', [
+  z.object({
+    tipo: z.literal('prepared'),
+    operationId: z.string().uuid(),
+  }),
   z.object({
     tipo: z.literal('stripe_embedded'),
     sessionId: z.string(),
@@ -321,6 +329,113 @@ async function resolvePaginaBySlug(
     campanha,
     idOpcaoPresentes: opcaoPresentes.id,
   };
+}
+
+const CHECKOUT_COOKIE_PREFIX = '__Host-eunenem_checkout_';
+const CHECKOUT_COOKIE_VALUE = /^[A-Za-z0-9_-]{43}$/;
+const CHECKOUT_COOKIE_NAME = /^__Host-eunenem_checkout_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const MAX_CHECKOUT_COOKIE_SLOTS = 8;
+const MAX_COOKIE_HEADER_BYTES = 8192;
+
+function checkoutCookieName(operationId: string): string {
+  return CHECKOUT_COOKIE_PREFIX + operationId.toLowerCase();
+}
+
+function assertCheckoutOrigin(ctx: TrpcContext): void {
+  if (ctx.headers.get('origin') !== ctx.deps.publicOrigin) {
+    throw new TRPCError({ code: 'FORBIDDEN', message: 'Origem inválida' });
+  }
+}
+
+// Registered before each checkout input parser: CSRF is rejected before
+// request-body schema work, cookie parsing, or any repository/provider call.
+const checkoutProcedure = t.procedure.use(async ({ ctx, next }) => {
+  assertCheckoutOrigin(ctx);
+  return next();
+});
+
+function readCheckoutCapability(
+  ctx: TrpcContext,
+  operationId: string,
+): { readonly capability: string | null; readonly slotCount: number } {
+  const raw = ctx.headers.get('cookie') ?? '';
+  if (Buffer.byteLength(raw, 'utf8') > MAX_COOKIE_HEADER_BYTES) {
+    throw new TRPCError({ code: 'CONFLICT', message: 'Operação indisponível' });
+  }
+  const expectedName = checkoutCookieName(operationId);
+  const seen = new Set<string>();
+  let target: string | null = null;
+  let slots = 0;
+  for (const segment of raw.split(';')) {
+    const pair = segment.trim();
+    if (pair === '') continue;
+    const separator = pair.indexOf('=');
+    if (separator <= 0) continue;
+    const name = pair.slice(0, separator);
+    const value = pair.slice(separator + 1);
+    if (!name.startsWith(CHECKOUT_COOKIE_PREFIX)) continue;
+    slots += 1;
+    if (
+      slots > MAX_CHECKOUT_COOKIE_SLOTS ||
+      seen.has(name) ||
+      !CHECKOUT_COOKIE_NAME.test(name) ||
+      !CHECKOUT_COOKIE_VALUE.test(value)
+    ) {
+      throw new TRPCError({ code: 'CONFLICT', message: 'Operação indisponível' });
+    }
+    seen.add(name);
+    if (name === expectedName) {
+      target = value;
+    }
+  }
+  return { capability: target, slotCount: slots };
+}
+
+function setCheckoutCapability(ctx: TrpcContext, operationId: string, capability: string): void {
+  ctx.resHeaders.append(
+    'set-cookie',
+    checkoutCookieName(operationId) +
+      '=' +
+      capability +
+      '; Max-Age=604800; Path=/; HttpOnly; Secure; SameSite=Lax',
+  );
+}
+
+function clearCheckoutCapability(ctx: TrpcContext, operationId: string): void {
+  ctx.resHeaders.append(
+    'set-cookie',
+    checkoutCookieName(operationId) + '=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax',
+  );
+}
+
+function clearTerminalCheckoutCapability(
+  ctx: TrpcContext,
+  operationId: string,
+  status: string,
+): void {
+  // Mount material and local checkout persistence are not terminal: the same
+  // operation cookie must survive refresh until the payment itself concludes.
+  if (status === 'aprovado' || status === 'rejeitado' || status === 'estornado') {
+    clearCheckoutCapability(ctx, operationId);
+  }
+}
+
+function deterministicUuid(operationId: string, domain: string): string {
+  const bytes = createHash('sha256').update(operationId + '\0' + domain).digest().subarray(0, 16);
+  bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x50;
+  bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
+  const hex = bytes.toString('hex');
+  return (
+    hex.slice(0, 8) +
+    '-' +
+    hex.slice(8, 12) +
+    '-' +
+    hex.slice(12, 16) +
+    '-' +
+    hex.slice(16, 20) +
+    '-' +
+    hex.slice(20)
+  );
 }
 
 // ── Router ────────────────────────────────────────────────────────────────
@@ -466,13 +581,16 @@ export const paginaRouter = t.router({
    * Visitor-facing copy is rendered by the frontend; the tRPC error code
    * only signals "retry" vs "give up".
    */
-  iniciarPagamentoContribuicao: t.procedure
+  iniciarPagamentoContribuicao: checkoutProcedure
     .input(IniciarPagamentoContribuicaoInputSchema)
     .mutation(async ({ ctx, input }) => {
       const { campanha } = await resolvePaginaBySlug(ctx, input.slug, input.idCampanha);
 
-      const idPagamento = randomUUID() as IdPagamento;
-      const idIntencaoPagamento = randomUUID() as IdIntencaoPagamento;
+      const idPagamento = input.operationId as IdPagamento;
+      const idIntencaoPagamento = deterministicUuid(
+        input.operationId,
+        'intent',
+      ) as IdIntencaoPagamento;
       // aperture-jlvet: when the checkout is campanha-ADDRESSED (yeauv
       // per-campanha routing), the success_url must carry the same addressing
       // (?idCampanha=) — post-jlvet the success page cross-checks the
@@ -492,27 +610,33 @@ export const paginaRouter = t.router({
       // 1-element cart with quantidade=1. The saga itself injects the
       // surcharge item for the cartão path, so we mint exactly one
       // contribuição item id here.
-      const idItemContribuicao = randomUUID() as IdItemDoPagamento;
+      const idItemContribuicao = deterministicUuid(
+        input.operationId,
+        'item:0',
+      ) as IdItemDoPagamento;
       const idsItens: IdItemDoPagamento[] =
         input.metodo === 'credit_card'
-          ? [idItemContribuicao, randomUUID() as IdItemDoPagamento]
+          ? [
+              idItemContribuicao,
+              deterministicUuid(input.operationId, 'surcharge') as IdItemDoPagamento,
+            ]
           : [idItemContribuicao];
 
       try {
-        const result = await iniciarPagamentoCarrinho(
-          {
+        const deps = {
             campanhaRepository: ctx.deps.campanhaRepository,
             contribuicaoRepository: ctx.deps.contribuicaoRepository,
             provedorRegraTaxa: ctx.deps.provedorRegraTaxa,
             pagamentoRepository: ctx.deps.pagamentoRepository,
+            checkoutOperationRepository: ctx.deps.checkoutOperationRepository,
             pagamentoEventPublisher: ctx.deps.pagamentoEventPublisher,
             checkoutSessionProvider: ctx.deps.checkoutSessionProvider,
             pixCobrancaProvider: ctx.deps.pixCobrancaProvider,
             cobrancaPixProviderKind: ctx.deps.cobrancaPixProviderKind,
             clock: ctx.deps.clock,
             observability: ctx.deps.observability,
-          },
-          {
+          };
+        const sagaInput = {
             idPlataforma: ID_PLATAFORMA_EUNENEM,
             idCampanha: campanha.id,
             itens: [
@@ -535,8 +659,22 @@ export const paginaRouter = t.router({
             // payment methods that DO need a redirect (some bank-redirect
             // flows) and for direct-URL visits.
             redirectOnCompletion: 'if_required' as const,
-          },
-        );
+          };
+        const checkoutCookie = readCheckoutCapability(ctx, input.operationId);
+        if (checkoutCookie.capability === null) {
+          if (checkoutCookie.slotCount >= MAX_CHECKOUT_COOKIE_SLOTS) {
+            throw new CheckoutOperationConflictError();
+          }
+          const capability = randomBytes(32).toString('base64url');
+          const prepared = await prepararPagamentoCarrinho(deps, sagaInput, { capability });
+          if (!prepared.created) throw new Error('checkout operation is unavailable');
+          setCheckoutCapability(ctx, input.operationId, capability);
+          return { tipo: 'prepared' as const, operationId: input.operationId };
+        }
+        const result = await iniciarPagamentoCarrinho(deps, sagaInput, {
+          capability: checkoutCookie.capability,
+        });
+        clearTerminalCheckoutCapability(ctx, input.operationId, result.pagamento.status);
         // aperture-kuw0o (spec §4.3): discriminated union on the wire.
         // expiraEm → ISO string (no tRPC transformer in this app).
         if (result.tipo === 'pix_qr') {
@@ -554,10 +692,20 @@ export const paginaRouter = t.router({
           clientSecret: result.clientSecret,
         };
       } catch (err) {
+        if (err instanceof TRPCError) throw err;
         throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: err instanceof Error ? err.message : String(err),
-          cause: err,
+          code:
+            (err as { _tag?: unknown })?._tag === 'CheckoutOperationPendingError'
+              ? 'SERVICE_UNAVAILABLE'
+              : (err as { _tag?: unknown })?._tag === 'CheckoutOperationConflictError'
+                ? 'CONFLICT'
+                : 'INTERNAL_SERVER_ERROR',
+          message:
+            (err as { _tag?: unknown })?._tag === 'CheckoutOperationPendingError'
+              ? 'Pagamento aguardando recuperação'
+              : (err as { _tag?: unknown })?._tag === 'CheckoutOperationConflictError'
+                ? 'Operação indisponível'
+                : 'Não foi possível iniciar o pagamento',
         });
       }
     }),
@@ -584,13 +732,16 @@ export const paginaRouter = t.router({
    *   - Per-item esgotada early-fail (locked decision #6) — if any
    *     contribuição in the cart is sold out, the entire mutation rejects.
    */
-  iniciarPagamentoCarrinho: t.procedure
+  iniciarPagamentoCarrinho: checkoutProcedure
     .input(IniciarPagamentoCarrinhoInputSchema)
     .mutation(async ({ ctx, input }) => {
       const { campanha } = await resolvePaginaBySlug(ctx, input.slug, input.idCampanha);
 
-      const idPagamento = randomUUID() as IdPagamento;
-      const idIntencaoPagamento = randomUUID() as IdIntencaoPagamento;
+      const idPagamento = input.operationId as IdPagamento;
+      const idIntencaoPagamento = deterministicUuid(
+        input.operationId,
+        'intent',
+      ) as IdIntencaoPagamento;
       // aperture-jlvet: campanha-addressed checkout → addressed success_url
       // (see iniciarPagamentoContribuicao for the full rationale).
       const sucessoAddress = input.idCampanha
@@ -604,28 +755,32 @@ export const paginaRouter = t.router({
       // — we just provide the ids in the same order: contribuição items
       // first, surcharge id last when present.
       const idsItensContribuicao: IdItemDoPagamento[] = input.itens.map(
-        () => randomUUID() as IdItemDoPagamento,
+        (_, index) =>
+          deterministicUuid(input.operationId, 'item:' + index) as IdItemDoPagamento,
       );
       const idsItens: IdItemDoPagamento[] =
         input.metodo === 'credit_card'
-          ? [...idsItensContribuicao, randomUUID() as IdItemDoPagamento]
+          ? [
+              ...idsItensContribuicao,
+              deterministicUuid(input.operationId, 'surcharge') as IdItemDoPagamento,
+            ]
           : idsItensContribuicao;
 
       try {
-        const result = await iniciarPagamentoCarrinho(
-          {
+        const deps = {
             campanhaRepository: ctx.deps.campanhaRepository,
             contribuicaoRepository: ctx.deps.contribuicaoRepository,
             provedorRegraTaxa: ctx.deps.provedorRegraTaxa,
             pagamentoRepository: ctx.deps.pagamentoRepository,
+            checkoutOperationRepository: ctx.deps.checkoutOperationRepository,
             pagamentoEventPublisher: ctx.deps.pagamentoEventPublisher,
             checkoutSessionProvider: ctx.deps.checkoutSessionProvider,
             pixCobrancaProvider: ctx.deps.pixCobrancaProvider,
             cobrancaPixProviderKind: ctx.deps.cobrancaPixProviderKind,
             clock: ctx.deps.clock,
             observability: ctx.deps.observability,
-          },
-          {
+          };
+        const sagaInput = {
             idPlataforma: ID_PLATAFORMA_EUNENEM,
             idCampanha: campanha.id,
             itens: input.itens.map((item) => ({
@@ -647,8 +802,22 @@ export const paginaRouter = t.router({
             // /sucesso page remains the fallback for bank-redirect flows
             // + direct-URL visits + the legacy redirect path.
             redirectOnCompletion: 'if_required' as const,
-          },
-        );
+          };
+        const checkoutCookie = readCheckoutCapability(ctx, input.operationId);
+        if (checkoutCookie.capability === null) {
+          if (checkoutCookie.slotCount >= MAX_CHECKOUT_COOKIE_SLOTS) {
+            throw new CheckoutOperationConflictError();
+          }
+          const capability = randomBytes(32).toString('base64url');
+          const prepared = await prepararPagamentoCarrinho(deps, sagaInput, { capability });
+          if (!prepared.created) throw new Error('checkout operation is unavailable');
+          setCheckoutCapability(ctx, input.operationId, capability);
+          return { tipo: 'prepared' as const, operationId: input.operationId };
+        }
+        const result = await iniciarPagamentoCarrinho(deps, sagaInput, {
+          capability: checkoutCookie.capability,
+        });
+        clearTerminalCheckoutCapability(ctx, input.operationId, result.pagamento.status);
         // aperture-kuw0o (spec §4.3): discriminated union on the wire.
         // expiraEm → ISO string (no tRPC transformer in this app).
         if (result.tipo === 'pix_qr') {
@@ -666,10 +835,20 @@ export const paginaRouter = t.router({
           clientSecret: result.clientSecret,
         };
       } catch (err) {
+        if (err instanceof TRPCError) throw err;
         throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: err instanceof Error ? err.message : String(err),
-          cause: err,
+          code:
+            (err as { _tag?: unknown })?._tag === 'CheckoutOperationPendingError'
+              ? 'SERVICE_UNAVAILABLE'
+              : (err as { _tag?: unknown })?._tag === 'CheckoutOperationConflictError'
+                ? 'CONFLICT'
+                : 'INTERNAL_SERVER_ERROR',
+          message:
+            (err as { _tag?: unknown })?._tag === 'CheckoutOperationPendingError'
+              ? 'Pagamento aguardando recuperação'
+              : (err as { _tag?: unknown })?._tag === 'CheckoutOperationConflictError'
+                ? 'Operação indisponível'
+                : 'Não foi possível iniciar o pagamento',
         });
       }
     }),
@@ -742,6 +921,7 @@ export const paginaRouter = t.router({
       } else {
         status = 'unknown';
       }
+      clearTerminalCheckoutCapability(ctx, pagamento.id, pagamento.status);
 
       // Post-Phase-1 (plan 0015): contribuinte data moved from Contribuicao
       // to IntencaoPagamento per-pagamento. The success page now reads it
@@ -875,9 +1055,11 @@ export const paginaRouter = t.router({
 
       // OUR DB is the source of truth for terminal states.
       if (pagamento.status === 'aprovado') {
+        clearTerminalCheckoutCapability(ctx, pagamento.id, pagamento.status);
         return { status: 'confirmado' as const };
       }
       if (pagamento.status === 'rejeitado') {
+        clearTerminalCheckoutCapability(ctx, pagamento.id, pagamento.status);
         return { status: 'rejeitado' as const };
       }
 

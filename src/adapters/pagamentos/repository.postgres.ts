@@ -455,6 +455,19 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
             AND p.intencao_external_ref = replace(p.id::text, '-', '')
             AND p.intencao_metodo = 'pix'
             AND (
+              NOT EXISTS (
+                SELECT 1 FROM payment_provider_operations operation
+                WHERE operation.payment_id = p.id
+              )
+              OR EXISTS (
+                SELECT 1 FROM payment_provider_operations operation
+                WHERE operation.payment_id = p.id
+                  AND operation.state = 'local_committed'
+                  AND operation.provider_succeeded_at IS NOT NULL
+                  AND operation.provider_ref = p.intencao_external_ref
+              )
+            )
+            AND (
               p.status IN ('pendente', 'processing')
               OR (
                 p.status = 'aprovado'
@@ -520,6 +533,19 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
                 AND p.intencao_expira_em IS NOT NULL
                 AND p.intencao_expira_em <= ${input.now}
                 AND p.intencao_external_ref = replace(p.id::text, '-', '')
+                AND (
+                  NOT EXISTS (
+                    SELECT 1 FROM payment_provider_operations operation
+                    WHERE operation.payment_id = p.id
+                  )
+                  OR EXISTS (
+                    SELECT 1 FROM payment_provider_operations operation
+                    WHERE operation.payment_id = p.id
+                      AND operation.state = 'local_committed'
+                      AND operation.provider_succeeded_at IS NOT NULL
+                      AND operation.provider_ref = p.intencao_external_ref
+                  )
+                )
                 AND (
                   p.pix_reconciliacao_claimed_until IS NULL
                   OR p.pix_reconciliacao_claimed_until <= ${input.now}
@@ -1164,7 +1190,7 @@ export class PagamentoRepositoryPostgres implements PagamentoRepository {
  * the per-item rows are inserted separately by
  * `insertItemsForPagamento`.
  */
-function rowFromPagamento(p: Pagamento): Record<string, unknown> {
+export function rowFromPagamento(p: Pagamento): Record<string, unknown> {
   const aggregate = p.intencao.composicaoValoresAggregate;
   return {
     id: p.id,
@@ -1263,7 +1289,7 @@ function itemRowsFromPagamento(p: Pagamento): Record<string, unknown>[] {
  * is responsible for the txn wrapping (so the pagamentos row + items
  * commit/rollback atomically).
  */
-async function insertItemsForPagamento(trx: Transaction<DB>, p: Pagamento): Promise<void> {
+export async function insertItemsForPagamento(trx: Transaction<DB>, p: Pagamento): Promise<void> {
   const rows = itemRowsFromPagamento(p);
   if (rows.length === 0) return;
   // Cast through unknown to satisfy kysely's `Insertable<intencao_items>`

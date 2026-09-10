@@ -100,9 +100,9 @@ class InterPixWebhookBodyTooLargeError extends Error {
  * Inter supplies no payload signature. The payload is only a routing hint;
  * `archiveAndDispatchInterPixWebhook` first binds charge txids to eligible
  * local Inter payments, then re-queries the authoritative cobrança API before
- * either verified-result callback can run. Accepted, durably archived
- * envelopes return 200 even when an item remains unconfirmed so the route
- * stays fast and B4 reconciliation owns eventual recovery.
+ * either verified-result callback can run. Relevant items are acknowledged
+ * only after their processed fact commits; in-flight or failed convergence is
+ * retryable non-2xx. Out-of-scope, safely classified items may remain 200.
  */
 export function createInterPixWebhookHandler(
   deps: InterPixWebhookDeps,
@@ -209,7 +209,7 @@ export function createInterPixWebhookHandler(
         span.setAttribute('webhook.items.count', result.items.length);
         const pendingItems = result.items.filter(
           (item) =>
-            item.outcome !== 'dispatched_success' && !item.outcome.startsWith('duplicate_'),
+            item.outcome !== 'dispatched_success' && item.outcome !== 'duplicate_processed',
         );
         if (pendingItems.length > 0) {
           logger.warn('webhook.inter.pix.items_pending', {
