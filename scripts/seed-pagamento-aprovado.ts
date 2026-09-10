@@ -43,10 +43,13 @@ import type { ContribuicaoRepository } from '../src/adapters/arrecadacao/contrib
 import { ContribuicaoRepositoryPostgres } from '../src/adapters/arrecadacao/contribuicao-repository.postgres.js';
 import { RecebedorRepositoryPostgres } from '../src/adapters/arrecadacao/recebedor-repository.postgres.js';
 import { createDatabase } from '../src/adapters/database.js';
+import type { CheckoutOperationRepository } from '../src/adapters/pagamentos/checkout-operation-repository.js';
+import { CheckoutOperationRepositoryPostgres } from '../src/adapters/pagamentos/checkout-operation-repository.postgres.js';
 import type { PagamentoEventPublisher } from '../src/adapters/pagamentos/event-publisher.js';
 import { PagamentoEventPublisherMemory } from '../src/adapters/pagamentos/event-publisher.memory.js';
 import type { LivroFinanceiroRepository } from '../src/adapters/pagamentos/financeiro/livro-repository.js';
 import { LivroFinanceiroRepositoryPostgres } from '../src/adapters/pagamentos/financeiro/livro-repository.postgres.js';
+import { PixCobrancaProviderFake } from '../src/adapters/pagamentos/pix-cobranca-provider.fake.js';
 import { PagamentoProviderFake } from '../src/adapters/pagamentos/provider.fake.js';
 import type { PagamentoRepository } from '../src/adapters/pagamentos/repository.js';
 import { PagamentoRepositoryPostgres } from '../src/adapters/pagamentos/repository.postgres.js';
@@ -66,7 +69,10 @@ import type { Observability } from '../src/observability/observability.js';
 import { criarContribuicao } from '../src/use-cases/arrecadacao/criar-contribuicao.js';
 import { esgotada } from '../src/use-cases/arrecadacao/quantidade-restante.js';
 import { finalizarPagamentoAprovado } from '../src/use-cases/checkout/finalizar-pagamento-aprovado.js';
-import { iniciarPagamentoCarrinho } from '../src/use-cases/checkout/iniciar-pagamento-carrinho.js';
+import {
+  iniciarPagamentoCarrinho,
+  prepararPagamentoCarrinho,
+} from '../src/use-cases/checkout/iniciar-pagamento-carrinho.js';
 
 /** Deterministic per-campanha idempotency key / fake session ref. */
 export function seedExternalRef(idCampanha: IdCampanha): string {
@@ -86,6 +92,7 @@ export interface SeedDeps {
   readonly campanhaRepository: CampanhaRepository;
   readonly contribuicaoRepository: ContribuicaoRepository;
   readonly pagamentoRepository: PagamentoRepository;
+  readonly checkoutOperationRepository: CheckoutOperationRepository;
   readonly pagamentoEventPublisher: PagamentoEventPublisher;
   readonly livroFinanceiroRepository: LivroFinanceiroRepository;
   readonly provedorRegraTaxa: ProvedorRegraTaxa;
@@ -161,6 +168,7 @@ export async function seedPagamentoAprovado(deps: SeedDeps, input: SeedInput): P
     campanhaRepository,
     contribuicaoRepository,
     pagamentoRepository,
+    checkoutOperationRepository,
     pagamentoEventPublisher,
     livroFinanceiroRepository,
     provedorRegraTaxa,
@@ -212,29 +220,37 @@ export async function seedPagamentoAprovado(deps: SeedDeps, input: SeedInput): P
   // 1-element cart, quantidade=1, server-minted UUIDs. metodo 'pix' so
   // the saga does NOT inject the surcharge item (idsItens length 1).
   const idPagamento = randomUUID();
+  const checkoutDeps = {
+    campanhaRepository,
+    contribuicaoRepository,
+    provedorRegraTaxa,
+    pagamentoRepository,
+    checkoutOperationRepository,
+    pagamentoEventPublisher,
+    checkoutSessionProvider: providerFake,
+    pixCobrancaProvider: new PixCobrancaProviderFake({ clock }),
+    cobrancaPixProviderKind: 'stripe' as const,
+    clock,
+    observability,
+  };
+  const checkoutInput = {
+    idPlataforma: campanha.idPlataforma,
+    idCampanha: campanha.id,
+    itens: [{ idContribuicao: contribuicao.id, quantidade: 1 }],
+    metodo: 'pix',
+    idPagamento,
+    idIntencaoPagamento: randomUUID(),
+    idsItens: [randomUUID()],
+    // The fake provider never redirects; template literal kept for
+    // shape-parity with the router's server-built returnUrl.
+    returnUrl: 'https://seed.invalid/sucesso?sessionId={CHECKOUT_SESSION_ID}',
+  };
+  const checkoutAccess = { capability: 'S'.repeat(43) };
+  await prepararPagamentoCarrinho(checkoutDeps, checkoutInput, checkoutAccess);
   const { pagamento: pendente } = await iniciarPagamentoCarrinho(
-    {
-      campanhaRepository,
-      contribuicaoRepository,
-      provedorRegraTaxa,
-      pagamentoRepository,
-      pagamentoEventPublisher,
-      checkoutSessionProvider: providerFake,
-      clock,
-      observability,
-    },
-    {
-      idPlataforma: campanha.idPlataforma,
-      idCampanha: campanha.id,
-      itens: [{ idContribuicao: contribuicao.id, quantidade: 1 }],
-      metodo: 'pix',
-      idPagamento,
-      idIntencaoPagamento: randomUUID(),
-      idsItens: [randomUUID()],
-      // The fake provider never redirects; template literal kept for
-      // shape-parity with the router's server-built returnUrl.
-      returnUrl: 'https://seed.invalid/sucesso?sessionId={CHECKOUT_SESSION_ID}',
-    },
+    checkoutDeps,
+    checkoutInput,
+    checkoutAccess,
   );
 
   // ─── step 2: approve + register Financeiro effects (real saga) ─────
@@ -341,6 +357,7 @@ async function main(): Promise<void> {
   const campanhaRepository = new CampanhaRepositoryPostgres(db, recebedorRepository);
   const contribuicaoRepository = new ContribuicaoRepositoryPostgres(db);
   const pagamentoRepository = new PagamentoRepositoryPostgres(db);
+  const checkoutOperationRepository = new CheckoutOperationRepositoryPostgres(db);
   const livroFinanceiroRepository = new LivroFinanceiroRepositoryPostgres(db, recebedorRepository);
   const pagamentoEventPublisher = new PagamentoEventPublisherMemory();
   const provedorRegraTaxa = new ProvedorRegraTaxaMemory(REGRAS_TAXA_SEED);
@@ -351,6 +368,7 @@ async function main(): Promise<void> {
         campanhaRepository,
         contribuicaoRepository,
         pagamentoRepository,
+        checkoutOperationRepository,
         pagamentoEventPublisher,
         livroFinanceiroRepository,
         provedorRegraTaxa,

@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { ContribuicaoRepositoryMemory } from '../../../src/adapters/arrecadacao/contribuicao-repository.memory.js';
+import { CheckoutOperationRepositoryMemory } from '../../../src/adapters/pagamentos/checkout-operation-repository.memory.js';
 import { PagamentoEventPublisherMemory } from '../../../src/adapters/pagamentos/event-publisher.memory.js';
+import { PixCobrancaProviderFake } from '../../../src/adapters/pagamentos/pix-cobranca-provider.fake.js';
 import { PagamentoProviderFake } from '../../../src/adapters/pagamentos/provider.fake.js';
 import { PagamentoRepositoryMemory } from '../../../src/adapters/pagamentos/repository.memory.js';
 import { ID_PLATAFORMA_EUNENEM } from '../../../src/adapters/plataforma/repository.memory.js';
@@ -13,7 +15,10 @@ import { noopTracer } from '../../../src/observability/tracer.js';
 import { adicionarOpcaoContribuicao } from '../../../src/use-cases/arrecadacao/adicionar-opcao-contribuicao.js';
 import { criarCampanha } from '../../../src/use-cases/arrecadacao/criar-campanha.js';
 import { criarContribuicao } from '../../../src/use-cases/arrecadacao/criar-contribuicao.js';
-import { iniciarPagamentoCarrinho } from '../../../src/use-cases/checkout/iniciar-pagamento-carrinho.js';
+import {
+  iniciarPagamentoCarrinho,
+  prepararPagamentoCarrinho,
+} from '../../../src/use-cases/checkout/iniciar-pagamento-carrinho.js';
 import { createArrecadacaoMemoryRepos } from '../../helpers/arrecadacao-repos.js';
 
 /**
@@ -61,6 +66,7 @@ function makeDeps() {
   const pagamentoRepository = new PagamentoRepositoryMemory();
   const pagamentoEventPublisher = new PagamentoEventPublisherMemory();
   const checkoutSessionProvider = new PagamentoProviderFake({ statusResultado: 'aprovado', clock });
+  const checkoutOperationRepository = new CheckoutOperationRepositoryMemory(pagamentoRepository);
 
   return {
     campanhaRepository,
@@ -71,6 +77,9 @@ function makeDeps() {
     pagamentoRepository,
     pagamentoEventPublisher,
     checkoutSessionProvider,
+    checkoutOperationRepository,
+    pixCobrancaProvider: new PixCobrancaProviderFake({ clock }),
+    cobrancaPixProviderKind: 'stripe' as const,
     clock,
     observability: silentObservability,
   };
@@ -130,21 +139,26 @@ const baseInput = () => ({
 });
 
 describe('iniciarPagamentoCarrinho — cross-campaign mis-attribution guard', () => {
+  const access = { capability: 'A'.repeat(43) };
   it('rejects a cart whose items reference TWO different campanhas (CarrinhoMultiplasCampanhasError)', async () => {
     const deps = makeDeps();
     const a = await seedCampanhaComContribuicao(deps, 'Campanha A');
     const b = await seedCampanhaComContribuicao(deps, 'Campanha B');
 
     await expect(
-      iniciarPagamentoCarrinho(deps, {
-        ...baseInput(),
-        idCampanha: a.idCampanha,
-        itens: [
-          { idContribuicao: a.idContribuicao, quantidade: 1 },
-          { idContribuicao: b.idContribuicao, quantidade: 1 },
-        ],
-        idsItens: [randomUUID(), randomUUID()],
-      }),
+      iniciarPagamentoCarrinho(
+        deps,
+        {
+          ...baseInput(),
+          idCampanha: a.idCampanha,
+          itens: [
+            { idContribuicao: a.idContribuicao, quantidade: 1 },
+            { idContribuicao: b.idContribuicao, quantidade: 1 },
+          ],
+          idsItens: [randomUUID(), randomUUID()],
+        },
+        access,
+      ),
     ).rejects.toBeInstanceOf(CarrinhoMultiplasCampanhasError);
   });
 
@@ -158,12 +172,16 @@ describe('iniciarPagamentoCarrinho — cross-campaign mis-attribution guard', ()
     // attack: without this guard, B's gift would be paid under A's
     // checkout and credited to A's recebedor.
     await expect(
-      iniciarPagamentoCarrinho(deps, {
-        ...baseInput(),
-        idCampanha: a.idCampanha,
-        itens: [{ idContribuicao: b.idContribuicao, quantidade: 1 }],
-        idsItens: [randomUUID()],
-      }),
+      iniciarPagamentoCarrinho(
+        deps,
+        {
+          ...baseInput(),
+          idCampanha: a.idCampanha,
+          itens: [{ idContribuicao: b.idContribuicao, quantidade: 1 }],
+          idsItens: [randomUUID()],
+        },
+        access,
+      ),
     ).rejects.toBeInstanceOf(ArrecadacaoContribuicaoNaoEncontradaError);
   });
 
@@ -171,12 +189,14 @@ describe('iniciarPagamentoCarrinho — cross-campaign mis-attribution guard', ()
     const deps = makeDeps();
     const a = await seedCampanhaComContribuicao(deps, 'Campanha A');
 
-    const result = await iniciarPagamentoCarrinho(deps, {
+    const input = {
       ...baseInput(),
       idCampanha: a.idCampanha,
       itens: [{ idContribuicao: a.idContribuicao, quantidade: 1 }],
       idsItens: [randomUUID()],
-    });
+    };
+    await prepararPagamentoCarrinho(deps, input, access);
+    const result = await iniciarPagamentoCarrinho(deps, input, access);
 
     // Attribution lands on the claimed campanha and its own contribuição.
     expect(result.contribuicoes).toHaveLength(1);

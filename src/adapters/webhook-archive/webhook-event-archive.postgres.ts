@@ -116,6 +116,61 @@ export class WebhookEventArchivePostgres implements WebhookEventArchive {
     );
   }
 
+  async claimForProcessing(
+    id: string,
+    now: Date,
+    leaseUntil: Date,
+  ): Promise<import('./webhook-event-archive.js').WebhookProcessingClaim> {
+    const fenceToken = randomUUID();
+    const claimed = await sql<{ processing_fence_token: string }>`
+      UPDATE payment_webhook_events
+      SET processing_attempt_count = processing_attempt_count + 1,
+          processing_fence_token = ${fenceToken}::uuid,
+          processing_lease_until = ${leaseUntil},
+          processing_started_at = ${now},
+          processing_error = NULL
+      WHERE id = ${id}::uuid
+        AND processed_at IS NULL
+        AND (
+          processing_fence_token IS NULL
+          OR processing_lease_until IS NULL
+          OR processing_lease_until <= ${now}
+        )
+      RETURNING processing_fence_token
+    `.execute(this.db);
+    if (claimed.rows[0]) return { status: 'claimed', fenceToken };
+    const current = await sql<{ processed_at: Date | null }>`
+      SELECT processed_at FROM payment_webhook_events WHERE id = ${id}::uuid
+    `.execute(this.db);
+    return current.rows[0]?.processed_at ? { status: 'processed' } : { status: 'busy' };
+  }
+
+  async markProcessedFenced(
+    id: string,
+    fenceToken: string,
+    pagamentoId: string | null,
+  ): Promise<boolean> {
+    const updated = await sql`
+      UPDATE payment_webhook_events
+      SET processed_at = now(), processing_error = NULL, pagamento_id = ${pagamentoId},
+          processing_fence_token = NULL, processing_lease_until = NULL
+      WHERE id = ${id}::uuid AND processed_at IS NULL
+        AND processing_fence_token = ${fenceToken}::uuid
+    `.execute(this.db);
+    return Number(updated.numAffectedRows ?? 0n) === 1;
+  }
+
+  async markFailedFenced(id: string, fenceToken: string, error: string): Promise<boolean> {
+    const updated = await sql`
+      UPDATE payment_webhook_events
+      SET processing_error = ${error.slice(0, PROCESSING_ERROR_MAX_LENGTH)},
+          processing_fence_token = NULL, processing_lease_until = NULL
+      WHERE id = ${id}::uuid AND processed_at IS NULL
+        AND processing_fence_token = ${fenceToken}::uuid
+    `.execute(this.db);
+    return Number(updated.numAffectedRows ?? 0n) === 1;
+  }
+
   async markProcessed(id: string, pagamentoId: string | null): Promise<void> {
     return tracer.startActiveSpan('db.payment_webhook_events.markProcessed', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
@@ -167,7 +222,8 @@ export class WebhookEventArchivePostgres implements WebhookEventArchive {
         const rows = await sql<PaymentWebhookEventRow>`
           SELECT id, provider, provider_event_id, event_type, raw_payload,
                  signature_header, signature_valid, received_at, processed_at,
-                 processing_error, pagamento_id
+                 processing_error, pagamento_id, processing_attempt_count,
+                 processing_fence_token, processing_lease_until
             FROM payment_webhook_events
             WHERE id = ${id}
             LIMIT 1
@@ -196,7 +252,8 @@ export class WebhookEventArchivePostgres implements WebhookEventArchive {
           const rows = await sql<PaymentWebhookEventRow>`
             SELECT id, provider, provider_event_id, event_type, raw_payload,
                    signature_header, signature_valid, received_at, processed_at,
-                   processing_error, pagamento_id
+                   processing_error, pagamento_id, processing_attempt_count,
+                   processing_fence_token, processing_lease_until
               FROM payment_webhook_events
               WHERE provider = ${provider}
                 AND provider_event_id = ${providerEventId}
@@ -281,7 +338,8 @@ export class WebhookEventArchivePostgres implements WebhookEventArchive {
         const rows = await sql<PaymentWebhookEventRow>`
             SELECT id, provider, provider_event_id, event_type, raw_payload,
                    signature_header, signature_valid, received_at, processed_at,
-                   processing_error, pagamento_id
+                   processing_error, pagamento_id, processing_attempt_count,
+                   processing_fence_token, processing_lease_until
               FROM payment_webhook_events
               WHERE pagamento_id = ${idPagamento}
               ${orderClause}
@@ -314,6 +372,9 @@ interface PaymentWebhookEventRow {
   processed_at: Date | null;
   processing_error: string | null;
   pagamento_id: string | null;
+  processing_attempt_count: number;
+  processing_fence_token: string | null;
+  processing_lease_until: Date | null;
 }
 
 function toRecord(row: PaymentWebhookEventRow): WebhookEventRecord {
@@ -329,5 +390,8 @@ function toRecord(row: PaymentWebhookEventRow): WebhookEventRecord {
     processedAt: row.processed_at,
     processingError: row.processing_error,
     pagamentoId: row.pagamento_id,
+    processingAttemptCount: row.processing_attempt_count,
+    processingFenceToken: row.processing_fence_token,
+    processingLeaseUntil: row.processing_lease_until,
   };
 }

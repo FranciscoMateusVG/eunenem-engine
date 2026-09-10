@@ -442,7 +442,17 @@ describe('Migration round-trip', () => {
     //    this sequence must start at the LATEST migration and walk earlier.
     //    Adding a new migration on top REQUIRES prepending its down-step here.
 
-    // 20260908_052_repasse_bank_handoff (aperture-62ok9) → actual TIP.
+    // 20260909_053_payment_provider_recovery (aperture-iytxa) → actual TIP.
+    expect(await tableExists(db, 'payment_provider_operations')).toBe(true);
+    expect(await tableExists(db, 'payment_provider_operation_attempt_facts')).toBe(true);
+    expect(await getColumn(db, 'payment_webhook_events', 'processing_fence_token')).toBeDefined();
+    const downPaymentRecovery = await migrator.migrateDown();
+    expect(downPaymentRecovery.error).toBeUndefined();
+    expect(await tableExists(db, 'payment_provider_operations')).toBe(false);
+    expect(await tableExists(db, 'payment_provider_operation_attempt_facts')).toBe(false);
+    expect(await getColumn(db, 'payment_webhook_events', 'processing_fence_token')).toBeUndefined();
+
+    // 20260908_052_repasse_bank_handoff (aperture-62ok9) → current TIP.
     const downBankHandoff = await migrator.migrateDown();
     expect(downBankHandoff.error).toBeUndefined();
     expect(await getColumn(db, 'repasses_recebedor', 'enviado_ao_banco_em')).toBeUndefined();
@@ -1121,4 +1131,11 @@ async function getColumn(
         character_maximum_length: number | null;
       }
     | undefined;
+}
+
+async function tableExists(db: Kysely<unknown>, tableName: string): Promise<boolean> {
+  const found = await sql<{ exists: boolean }>`
+    SELECT to_regclass('public.' || ${tableName}) IS NOT NULL AS exists
+  `.execute(db);
+  return found.rows[0]?.exists ?? false;
 }

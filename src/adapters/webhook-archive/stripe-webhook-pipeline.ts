@@ -21,16 +21,15 @@ import type { WebhookEventArchive } from './webhook-event-archive.js';
  *      `signatureValid` in the archive row.
  *
  *   3. Archive: INSERT with `signatureValid` set. ON CONFLICT
- *      (provider, providerEventId) DO NOTHING — duplicate retries
- *      return `isDuplicate: true` and the pipeline short-circuits to
- *      200 without re-dispatching.
+ *      (provider, providerEventId) DO NOTHING. Receipt duplication does not
+ *      imply the prior dispatch committed.
  *
  *   4. If signature invalid: 400, NO domain dispatch. Row is archived
  *      with `signature_valid=false` — forensic evidence of the attempt.
  *
- *   5. If signature valid: dispatch domain side effects. On success,
- *      `markProcessed` + 200. On exception, `markFailed` + 500 (Stripe
- *      retries; the retry hits the ON CONFLICT path).
+ *   5. If signature valid: acquire a fenced lease, dispatch domain side
+ *      effects, and acknowledge 200 only after the processed fact commits.
+ *      Failed or active work remains retryable non-2xx.
  *
  * Write-before-verify discipline is captured by the order above: the
  * archive write happens with the freshly-computed `signatureValid`
@@ -53,7 +52,9 @@ export interface StripePipelineResult {
   readonly outcome:
     | 'malformed_body'
     | 'duplicate_retry'
+    | 'retryable_in_flight'
     | 'signature_failed'
+    | 'archive_conflict'
     | 'dispatched_success'
     | 'dispatched_failed';
 }
@@ -136,19 +137,6 @@ export async function archiveAndDispatchStripeEvent(
     signatureValid,
   });
 
-  if (archiveResult.isDuplicate) {
-    // Retry — short-circuit to 200 so Stripe stops re-delivering. Do
-    // NOT re-dispatch (the original first-delivery already succeeded
-    // OR is currently in flight; either way, double-processing is
-    // worse than the alternative).
-    return {
-      status: 200,
-      body: 'ok (duplicate)',
-      archiveId: archiveResult.id,
-      outcome: 'duplicate_retry',
-    };
-  }
-
   // ─── 4. Bail on invalid signature (row archived with signature_valid=false) ─
   if (!signatureValid || verifiedEvent === null) {
     return {
@@ -159,19 +147,78 @@ export async function archiveAndDispatchStripeEvent(
     };
   }
 
+  const archived = await archive.findById(archiveResult.id);
+  if (
+    archived === undefined ||
+    archived.provider !== 'stripe' ||
+    archived.providerEventId !== preview.id ||
+    archived.eventType !== preview.type ||
+    !archived.signatureValid ||
+    verifiedEvent.id !== preview.id ||
+    verifiedEvent.type !== preview.type ||
+    stableJson(archived.rawPayload) !== stableJson(parsedPayload)
+  ) {
+    // A duplicate ID is receipt deduplication, not permission to process
+    // different bytes under an older archive row. In particular, an
+    // invalid-first delivery can never be promoted by a later valid body.
+    return {
+      status: 409,
+      body: 'archived delivery conflict',
+      archiveId: archiveResult.id,
+      outcome: 'archive_conflict',
+    };
+  }
+
+  // A known relevant event is acknowledged only after its durable processed
+  // fact commits. Failed, stale, or fresh rows compete for one fenced lease;
+  // an active claimant remains retryable rather than being falsely 2xx'd.
+  const now = new Date();
+  const claim = await archive.claimForProcessing(
+    archiveResult.id,
+    now,
+    new Date(now.getTime() + 30_000),
+  );
+  if (claim.status !== 'claimed') {
+    if (claim.status === 'processed') {
+      return {
+        status: 200,
+        body: 'ok (duplicate)',
+        archiveId: archiveResult.id,
+        outcome: 'duplicate_retry',
+      };
+    }
+    return {
+      status: 503,
+      body: 'processing incomplete',
+      archiveId: archiveResult.id,
+      outcome: 'retryable_in_flight',
+    };
+  }
+
   // ─── 5. Dispatch + mark processed/failed ────────────────────────────
   try {
     const dispatchResult = await args.dispatch(verifiedEvent);
-    await archive.markProcessed(archiveResult.id, dispatchResult.pagamentoId);
+    const committed = await archive.markProcessedFenced(
+      archiveResult.id,
+      claim.fenceToken,
+      dispatchResult.pagamentoId,
+    );
+    if (!committed) {
+      return {
+        status: 503,
+        body: 'processing incomplete',
+        archiveId: archiveResult.id,
+        outcome: 'retryable_in_flight',
+      };
+    }
     return {
       status: 200,
       body: 'ok',
       archiveId: archiveResult.id,
       outcome: 'dispatched_success',
     };
-  } catch (dispatchError) {
-    const errMsg = (dispatchError as Error).message ?? String(dispatchError);
-    await archive.markFailed(archiveResult.id, errMsg);
+  } catch {
+    await archive.markFailedFenced(archiveResult.id, claim.fenceToken, 'dispatch_failed');
     return {
       status: 500,
       body: 'downstream error',
@@ -179,4 +226,14 @@ export async function archiveAndDispatchStripeEvent(
       outcome: 'dispatched_failed',
     };
   }
+}
+
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+    .join(',')}}`;
 }

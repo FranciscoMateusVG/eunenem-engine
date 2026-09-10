@@ -12,6 +12,8 @@ import {
   type ConviteRepository,
   ConviteRepositoryPostgres,
   type CheckoutSessionProvider,
+  type CheckoutOperationRepository,
+  CheckoutOperationRepositoryPostgres,
   ConsoleLogger,
   type ContribuicaoRepository,
   ContribuicaoRepositoryPostgres,
@@ -167,6 +169,7 @@ export interface ServerDeps {
    * publisher in-memory for now — no event consumers yet.
    */
   readonly pagamentoRepository: PagamentoRepository;
+  readonly checkoutOperationRepository: CheckoutOperationRepository;
   readonly pagamentoProvider: PagamentoProvider;
   readonly checkoutSessionProvider: CheckoutSessionProvider;
   readonly pagamentoEventPublisher: PagamentoEventPublisher;
@@ -995,6 +998,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
   // yet. Provider gated by NODE_ENV — same instance covers both ports
   // (PagamentoProvider + CheckoutSessionProvider).
   const pagamentoRepository = new PagamentoRepositoryPostgres(db);
+  const checkoutOperationRepository = new CheckoutOperationRepositoryPostgres(db);
   const pagamentoEventPublisher = new PagamentoEventPublisherMemory();
   const pixCobrancaDevolucaoRepository = new PixCobrancaDevolucaoRepositoryPostgres(db);
 
@@ -1190,6 +1194,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     conviteRepository,
     listaDeConvidadosRepository,
     pagamentoRepository,
+    checkoutOperationRepository,
     pagamentoProvider,
     checkoutSessionProvider,
     pagamentoEventPublisher,

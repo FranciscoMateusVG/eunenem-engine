@@ -337,7 +337,7 @@ describe('mounted signed Stripe route + real Postgres projection race', () => {
       pagamentoId: null,
       signatureValid: true,
       processedAt: null,
-      processingError: expect.stringContaining('paymentIntentExternalRef'),
+      processingError: 'dispatch_failed',
     });
     await expect(rig.pagamentoRepository.findById(idPagamento as never)).resolves.toMatchObject({
       status: 'pendente',

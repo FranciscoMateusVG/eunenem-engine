@@ -1,8 +1,17 @@
+import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { SpanStatusCode } from '@opentelemetry/api';
 import { z } from 'zod/v4';
 import type { CampanhaRepository } from '../../adapters/arrecadacao/campanha-repository.js';
 import type { ContribuicaoRepository } from '../../adapters/arrecadacao/contribuicao-repository.js';
-import type { CheckoutSessionProvider } from '../../adapters/pagamentos/checkout-session-provider.js';
+import type {
+  CheckoutOperation,
+  CheckoutOperationRepository,
+  CheckoutOperationSnapshot,
+} from '../../adapters/pagamentos/checkout-operation-repository.js';
+import type {
+  CheckoutSessionProvider,
+  CriarSessaoCheckoutInput,
+} from '../../adapters/pagamentos/checkout-session-provider.js';
 import type { PagamentoEventPublisher } from '../../adapters/pagamentos/event-publisher.js';
 import type { PixCobrancaProvider } from '../../adapters/pagamentos/pix-cobranca-provider.js';
 import type { PagamentoRepository } from '../../adapters/pagamentos/repository.js';
@@ -20,7 +29,11 @@ import {
   criarItemPassthroughSurcharge,
   type ItemDoPagamento,
 } from '../../domain/pagamentos/entities/item-do-pagamento.js';
-import type { Pagamento } from '../../domain/pagamentos/entities/pagamento.js';
+import {
+  criarEventoPagamento,
+  criarPagamentoPendente,
+  type Pagamento,
+} from '../../domain/pagamentos/entities/pagamento.js';
 import { DadosContribuinteSchema } from '../../domain/pagamentos/value-objects/dados-contribuinte.js';
 import {
   IdIntencaoPagamentoSchema,
@@ -43,7 +56,6 @@ import { CheckoutPlataformaMismatchError } from '../../errors/checkout/plataform
 import { PagamentosInputInvalidoError } from '../../errors/pagamentos/input-invalido.error.js';
 import type { Observability } from '../../observability/observability.js';
 import { esgotada } from '../arrecadacao/quantidade-restante.js';
-import { criarIntencaoPagamento } from '../pagamentos/criar-intencao-pagamento.js';
 import { calcularComposicaoValoresParaItem } from '../taxas/calcular-composicao-valores-para-item.js';
 import { calcularSurchargeParaCarrinho } from '../taxas/calcular-surcharge-para-carrinho.js';
 
@@ -60,7 +72,7 @@ const CartItemInputSchema = z.object({
 export const IniciarPagamentoCarrinhoInputSchema = z.object({
   idPlataforma: IdPlataformaReferenciaSchema,
   idCampanha: IdCampanhaSchema,
-  itens: z.array(CartItemInputSchema).min(1),
+  itens: z.array(CartItemInputSchema).min(1).max(50),
   metodo: MetodoPagamentoSchema,
   idPagamento: IdPagamentoSchema,
   idIntencaoPagamento: IdIntencaoPagamentoSchema,
@@ -69,7 +81,7 @@ export const IniciarPagamentoCarrinhoInputSchema = z.object({
    * exactly `itens.length` ids for the contribuicao items + ONE MORE if
    * `metodo === 'credit_card'` (the surcharge item's id).
    */
-  idsItens: z.array(IdItemDoPagamentoSchema).min(1),
+  idsItens: z.array(IdItemDoPagamentoSchema).min(1).max(51),
   returnUrl: z.string().trim().min(1).max(2000),
   redirectOnCompletion: z.enum(['always', 'if_required', 'never']).optional(),
   /**
@@ -129,6 +141,7 @@ export interface IniciarPagamentoCarrinhoDeps {
   readonly contribuicaoRepository: ContribuicaoRepository;
   readonly provedorRegraTaxa: ProvedorRegraTaxa;
   readonly pagamentoRepository: PagamentoRepository;
+  readonly checkoutOperationRepository: CheckoutOperationRepository;
   readonly pagamentoEventPublisher: PagamentoEventPublisher;
   readonly checkoutSessionProvider: CheckoutSessionProvider;
   readonly pixCobrancaProvider: PixCobrancaProvider;
@@ -137,15 +150,79 @@ export interface IniciarPagamentoCarrinhoDeps {
   readonly observability: Observability;
 }
 
+export interface CheckoutOperationAccess {
+  /** Opaque per-operation cookie capability. Never log or return it. */
+  readonly capability: string;
+}
+
+export interface PrepararPagamentoCarrinhoResult {
+  readonly operationId: string;
+  readonly created: boolean;
+}
+
+export class CheckoutOperationConflictError extends Error {
+  readonly _tag = 'CheckoutOperationConflictError';
+  constructor() {
+    super('checkout operation is unavailable');
+    this.name = 'CheckoutOperationConflictError';
+  }
+}
+
+export class CheckoutOperationPendingError extends Error {
+  readonly _tag = 'CheckoutOperationPendingError';
+  constructor() {
+    super('checkout operation outcome is pending recovery');
+    this.name = 'CheckoutOperationPendingError';
+  }
+}
+
+function digestCapability(capability: string): string {
+  return createHash('sha256').update(capability, 'utf8').digest('hex');
+}
+
+function digestRequest(capability: string, value: unknown): string {
+  return createHmac('sha256', capability)
+    .update('eunenem.checkout-operation.v1\0', 'utf8')
+    .update(JSON.stringify(value), 'utf8')
+    .digest('hex');
+}
+
+function equalDigest(left: string, right: string): boolean {
+  const a = Buffer.from(left, 'hex');
+  const b = Buffer.from(right, 'hex');
+  return a.length === 32 && b.length === 32 && timingSafeEqual(a, b);
+}
+
+export async function prepararPagamentoCarrinho(
+  deps: IniciarPagamentoCarrinhoDeps,
+  input: IniciarPagamentoCarrinhoInput,
+  access: CheckoutOperationAccess,
+): Promise<PrepararPagamentoCarrinhoResult> {
+  const result = await runPagamentoCarrinho(deps, input, access, 'prepare');
+  return result as PrepararPagamentoCarrinhoResult;
+}
+
 export async function iniciarPagamentoCarrinho(
   deps: IniciarPagamentoCarrinhoDeps,
   input: IniciarPagamentoCarrinhoInput,
+  access: CheckoutOperationAccess,
 ): Promise<IniciarPagamentoCarrinhoResult> {
+  const result = await runPagamentoCarrinho(deps, input, access, 'execute');
+  return result as IniciarPagamentoCarrinhoResult;
+}
+
+async function runPagamentoCarrinho(
+  deps: IniciarPagamentoCarrinhoDeps,
+  input: IniciarPagamentoCarrinhoInput,
+  access: CheckoutOperationAccess,
+  phase: 'prepare' | 'execute',
+): Promise<IniciarPagamentoCarrinhoResult | PrepararPagamentoCarrinhoResult> {
   const {
     campanhaRepository,
     contribuicaoRepository,
     provedorRegraTaxa,
     pagamentoRepository,
+    checkoutOperationRepository,
     pagamentoEventPublisher,
     checkoutSessionProvider,
     pixCobrancaProvider,
@@ -154,10 +231,16 @@ export async function iniciarPagamentoCarrinho(
     observability,
   } = deps;
   const { logger, tracer } = observability;
+  if (!checkoutOperationRepository) {
+    throw new Error('checkoutOperationRepository is required');
+  }
+  if (!access || !/^[A-Za-z0-9_-]{43}$/.test(access.capability)) {
+    throw new Error('checkout operation access is required');
+  }
 
   return tracer.startActiveSpan(
     'iniciarPagamentoCarrinho',
-    async (span): Promise<IniciarPagamentoCarrinhoResult> => {
+    async (span): Promise<IniciarPagamentoCarrinhoResult | PrepararPagamentoCarrinhoResult> => {
       try {
         const parsed = IniciarPagamentoCarrinhoInputSchema.parse(input);
 
@@ -325,11 +408,9 @@ export async function iniciarPagamentoCarrinho(
           responsavelTaxa: 'contribuinte',
         };
 
-        // ─── step 6: provider session ──────────────────────────────────
+        // Build the exact server-derived request snapshot before any provider I/O.
         const anchorContribuicao = contribuicoes[0];
-        if (!anchorContribuicao) {
-          throw new Error('Internal saga error: contribuicoes array vazio');
-        }
+        if (!anchorContribuicao) throw new Error('Internal saga error: contribuicoes array vazio');
         const anchorOpcao = encontrarOpcaoContribuicao(
           campanha,
           anchorContribuicao.idOpcaoContribuicao,
@@ -340,137 +421,255 @@ export async function iniciarPagamentoCarrinho(
             anchorContribuicao.idOpcaoContribuicao,
           );
         }
-
         const nomeItem =
           parsed.itens.length === 1
             ? anchorContribuicao.nome
-            : `Carrinho — ${parsed.itens.length} itens (${anchorContribuicao.nome} + ${parsed.itens.length - 1} mais)`;
-
-        // ─── aperture-kuw0o: PIX-cobrança branch (spec §4.3) ────────────
-        // metodo pix + a configured PixCobrancaProvider ('inter' or 'fake';
-        // see CobrancaPixProviderKind for why not literal 'inter') → create
-        // the Inter charge instead of a Stripe session. Everything above
-        // (validation, composição, items, aggregate) is method-agnostic and
-        // shared; everything below this block is the untouched Stripe path.
-        // Explicit allowlist (not `!== 'stripe'`): an absent/unknown kind —
-        // e.g. a stale caller that never learned this dep — must fall
-        // through to the Stripe path, never into a provider it didn't bind.
+            : 'Carrinho — ' +
+              parsed.itens.length +
+              ' itens (' +
+              anchorContribuicao.nome +
+              ' + ' +
+              (parsed.itens.length - 1) +
+              ' mais)';
         const viaPixCobranca =
           parsed.metodo === 'pix' &&
           (cobrancaPixProviderKind === 'inter' || cobrancaPixProviderKind === 'fake');
-        if (viaPixCobranca) {
-          if (!parsed.contribuinte) {
-            throw new PagamentosInputInvalidoError(
-              'contribuinte (nome + email) é obrigatório para pagamento PIX via cobrança — a coleta acontece no nosso formulário, não no provedor.',
-            );
-          }
-
-          const cobranca = await pixCobrancaProvider.criarCobranca({
-            idPagamento: parsed.idPagamento,
-            idIntencaoPagamento: parsed.idIntencaoPagamento,
-            amountCents: aggregate.totalPaidCents,
-            solicitacaoPagador: nomeItem,
-          });
-
-          span.setAttribute('checkout.cobranca.txid', cobranca.txid);
-
-          // txid fills the same semantic slot as Stripe's session id:
-          // "provider-side collection object id" (spec §4.4 —
-          // intencao_external_ref, partial unique index already fits).
-          // contribuinte is stamped atomically at creation; finalization's
-          // only-write-when-null guard (plan 0015 step 0) preserves it.
-          const pagamentoPix = await criarIntencaoPagamento(
-            { pagamentoRepository, pagamentoEventPublisher, clock, observability },
-            {
-              idPagamento: parsed.idPagamento,
-              idIntencaoPagamento: parsed.idIntencaoPagamento,
-              items,
-              composicaoValoresAggregate: aggregate,
-              valorACobrarCents: aggregate.totalPaidCents,
-              metodo: parsed.metodo,
-              externalRef: cobranca.txid,
-              contribuinte: parsed.contribuinte,
-              // B4 contract (aperture-fpd0j): persist the provider's
-              // AUTHORITATIVE expiry so the reconciliation poller selects
-              // expired charges from stored truth.
-              expiraEm: cobranca.expiraEm,
-            },
+        if (viaPixCobranca && !parsed.contribuinte) {
+          throw new PagamentosInputInvalidoError(
+            'contribuinte (nome + email) é obrigatório para pagamento PIX via cobrança — a coleta acontece no nosso formulário, não no provedor.',
           );
+        }
 
-          logger.info('checkout.pagamento.iniciado', {
-            idPlataforma: parsed.idPlataforma,
-            idCampanha: campanha.id,
-            idPagamento: pagamentoPix.id,
-            txid: cobranca.txid,
-            numeroDeItens: parsed.itens.length,
-            totalPaidCents: aggregate.totalPaidCents,
-            metodo: parsed.metodo,
-            via: 'pix_cobranca',
-          });
+        const provider = viaPixCobranca ? 'inter' : 'stripe';
+        const pagamento = criarPagamentoPendente({
+          idPagamento: parsed.idPagamento,
+          idIntencaoPagamento: parsed.idIntencaoPagamento,
+          items,
+          composicaoValoresAggregate: aggregate,
+          valorACobrarCents: aggregate.totalPaidCents,
+          metodo: parsed.metodo,
+          externalRef: null,
+          contribuinte: viaPixCobranca ? (parsed.contribuinte ?? null) : null,
+          expiraEm: null,
+          criadoEm: now,
+        });
+        const snapshot: CheckoutOperationSnapshot = {
+          operationId: parsed.idPagamento,
+          platformId: parsed.idPlataforma,
+          campaignId: parsed.idCampanha,
+          paymentId: parsed.idPagamento,
+          intentId: parsed.idIntencaoPagamento,
+          method: parsed.metodo,
+          provider,
+          items: [
+            ...itemComposicoes.map((line, index) => ({
+              paymentItemId: parsed.idsItens[index] as string,
+              contributionId: parsed.itens[index]?.idContribuicao ?? null,
+              optionId: contribuicoes[index]?.idOpcaoContribuicao ?? null,
+              optionType:
+                encontrarOpcaoContribuicao(
+                  campanha,
+                  contribuicoes[index]?.idOpcaoContribuicao ?? '',
+                )?.tipo ?? null,
+              quantity: parsed.itens[index]?.quantidade ?? 1,
+              contributionCents: line.lineContributionAmountCents as number,
+              feeCents: line.lineFeeAmountCents as number,
+              receiverCents: line.lineReceiverAmountCents as number,
+              surchargeCents: 0,
+            })),
+            ...(surchargeItem
+              ? [
+                  {
+                    paymentItemId: parsed.idsItens[parsed.itens.length] as string,
+                    contributionId: null,
+                    optionId: null,
+                    optionType: 'passthrough_surcharge',
+                    quantity: 1,
+                    contributionCents: 0,
+                    feeCents: 0,
+                    receiverCents: 0,
+                    surchargeCents: surchargeItem.amountCents,
+                  },
+                ]
+              : []),
+          ],
+          totalChargedCents: aggregate.totalPaidCents as number,
+          totalReceiverCents: aggregate.totalReceiverCents as number,
+          totalSurchargeCents: aggregate.totalSurchargeCents,
+          ...(provider === 'inter'
+            ? {
+                idempotencyKey: parsed.idPagamento.replaceAll('-', ''),
+                txid: parsed.idPagamento.replaceAll('-', ''),
+                expirationSeconds: 600,
+              }
+            : {
+                idempotencyKey: `pagamento:${parsed.idPagamento}:create-session`,
+                anchorContributionId: anchorContribuicao.id,
+                anchorOptionId: anchorContribuicao.idOpcaoContribuicao,
+                anchorOptionType: anchorOpcao.tipo,
+                redirectOnCompletion: parsed.redirectOnCompletion ?? 'always',
+              }),
+        } as CheckoutOperationSnapshot;
+        const requestMaterial = {
+          snapshot,
+          nomeItem,
+          returnUrl: parsed.returnUrl,
+          // PII is never stored in the operation snapshot, but it is bound
+          // by the keyed request HMAC so a replay cannot silently substitute
+          // a different contributor on the same operation.
+          contribuinte: parsed.contribuinte ?? null,
+        };
+        const capabilityHash = digestCapability(access.capability);
+        const requestHmac = digestRequest(access.capability, requestMaterial);
+        const prepared = await checkoutOperationRepository.prepare({
+          pagamento,
+          operationId: parsed.idPagamento,
+          platformId: parsed.idPlataforma,
+          campaignId: parsed.idCampanha,
+          provider,
+          method: parsed.metodo,
+          capabilityHash,
+          requestHmac,
+          snapshot,
+          now,
+        });
+        if (
+          !equalDigest(prepared.operation.capabilityHash, capabilityHash) ||
+          !equalDigest(prepared.operation.requestHmac, requestHmac)
+        ) {
+          throw new CheckoutOperationConflictError();
+        }
+        if (phase === 'prepare') {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return { operationId: parsed.idPagamento, created: prepared.created };
+        }
+        if (prepared.created) {
+          // Execution is a distinct request that proves receipt of the per-operation cookie.
+          throw new CheckoutOperationConflictError();
+        }
 
+        const claimNow = clock();
+        const claimed = await checkoutOperationRepository.claim({
+          operationId: parsed.idPagamento,
+          capabilityHash,
+          requestHmac,
+          now: claimNow,
+          leaseUntil: new Date(claimNow.getTime() + 30_000),
+        });
+        if (claimed.status === 'busy' || claimed.status === 'expired_window') {
+          throw new CheckoutOperationPendingError();
+        }
+        if (claimed.status === 'failed') throw new CheckoutOperationConflictError();
+
+        if (claimed.status === 'local_committed') {
+          const recovered = await recoverProviderMaterial(
+            checkoutSessionProvider,
+            pixCobrancaProvider,
+            claimed.operation,
+            aggregate.totalPaidCents as number,
+          );
+          if (!recovered) throw new CheckoutOperationPendingError();
+          const persisted = await pagamentoRepository.findById(parsed.idPagamento);
+          if (!persisted) throw new CheckoutOperationPendingError();
           span.setStatus({ code: SpanStatusCode.OK });
           return {
             contribuicoes,
-            pagamento: pagamentoPix,
-            tipo: 'pix_qr',
-            txid: cobranca.txid,
-            pixCopiaECola: cobranca.pixCopiaECola,
-            expiraEm: cobranca.expiraEm,
-            valorCents: aggregate.totalPaidCents as unknown as number,
-          };
+            pagamento: persisted,
+            ...recovered,
+          } as IniciarPagamentoCarrinhoResult;
+        }
+        if (claimed.status !== 'claimed') throw new CheckoutOperationPendingError();
+
+        let material: ProviderMountMaterial;
+        try {
+          material = await obtainProviderMaterial(
+            claimed.claimKind,
+            claimed.operation,
+            checkoutSessionProvider,
+            pixCobrancaProvider,
+            {
+              idPagamento: parsed.idPagamento,
+              idIntencaoPagamento: parsed.idIntencaoPagamento,
+              idCampanha: parsed.idCampanha,
+              idContribuicao: anchorContribuicao.id,
+              idOpcaoContribuicao: anchorContribuicao.idOpcaoContribuicao,
+              tipoOpcao: anchorOpcao.tipo,
+              nomeItem,
+              amountCents: aggregate.totalPaidCents,
+              surchargeCents: aggregate.totalSurchargeCents,
+              metodo: parsed.metodo,
+              returnUrl: parsed.returnUrl,
+              redirectOnCompletion: parsed.redirectOnCompletion ?? 'always',
+            },
+          );
+        } catch {
+          await checkoutOperationRepository.completeAttempt({
+            operationId: parsed.idPagamento,
+            attemptNo: claimed.attemptNo,
+            fenceToken: claimed.fenceToken,
+            outcome: 'outcome_unknown',
+            diagnostic: 'provider_call_failed',
+            providerRef: null,
+            providerExpiresAt: null,
+            now: clock(),
+          });
+          throw new CheckoutOperationPendingError();
         }
 
-        const sessao = await checkoutSessionProvider.criarSessaoCheckout({
-          idPagamento: parsed.idPagamento,
-          idIntencaoPagamento: parsed.idIntencaoPagamento,
-          idCampanha: parsed.idCampanha,
-          idContribuicao: anchorContribuicao.id,
-          idOpcaoContribuicao: anchorContribuicao.idOpcaoContribuicao,
-          tipoOpcao: anchorOpcao.tipo,
-          nomeItem,
-          amountCents: aggregate.totalPaidCents,
-          surchargeCents: aggregate.totalSurchargeCents,
-          metodo: parsed.metodo,
-          returnUrl: parsed.returnUrl,
-          ...(parsed.redirectOnCompletion
-            ? { redirectOnCompletion: parsed.redirectOnCompletion }
-            : {}),
+        const resultRecorded = await checkoutOperationRepository.completeAttempt({
+          operationId: parsed.idPagamento,
+          attemptNo: claimed.attemptNo,
+          fenceToken: claimed.fenceToken,
+          outcome: 'provider_succeeded',
+          diagnostic: null,
+          providerRef: material.externalRef,
+          providerExpiresAt: material.providerExpiresAt,
+          now: clock(),
         });
+        if (!resultRecorded) throw new CheckoutOperationPendingError();
+        const committed = await checkoutOperationRepository.commitLocal({
+          operationId: parsed.idPagamento,
+          fenceToken: claimed.fenceToken,
+          providerRef: material.externalRef,
+          providerExpiresAt: material.providerExpiresAt,
+          now: clock(),
+        });
+        if (!committed) {
+          // Never release mount material after losing the operation fence.
+          throw new CheckoutOperationPendingError();
+        }
 
-        span.setAttribute('checkout.session.id', sessao.sessionId);
-
-        // ─── step 7: persist intencao + items + publish event ──────────
-        const pagamento = await criarIntencaoPagamento(
-          { pagamentoRepository, pagamentoEventPublisher, clock, observability },
-          {
+        const committedPayment = await pagamentoRepository.findById(parsed.idPagamento);
+        if (!committedPayment) throw new CheckoutOperationPendingError();
+        try {
+          await pagamentoEventPublisher.publish(
+            criarEventoPagamento({
+              id: randomUUID(),
+              tipo: 'payment.intent_created',
+              pagamento: committedPayment,
+              ocorridoEm: clock(),
+            }),
+          );
+        } catch {
+          logger.warn('checkout.intent_event.publish_failed', {
             idPagamento: parsed.idPagamento,
-            idIntencaoPagamento: parsed.idIntencaoPagamento,
-            items,
-            composicaoValoresAggregate: aggregate,
-            valorACobrarCents: aggregate.totalPaidCents,
-            metodo: parsed.metodo,
-            externalRef: sessao.externalRef,
-          },
-        );
-
+          });
+        }
         logger.info('checkout.pagamento.iniciado', {
           idPlataforma: parsed.idPlataforma,
           idCampanha: campanha.id,
-          idPagamento: pagamento.id,
-          sessionId: sessao.sessionId,
+          idPagamento: committedPayment.id,
           numeroDeItens: parsed.itens.length,
           totalPaidCents: aggregate.totalPaidCents,
           metodo: parsed.metodo,
+          via: provider,
         });
-
         span.setStatus({ code: SpanStatusCode.OK });
         return {
           contribuicoes,
-          pagamento,
-          tipo: 'stripe_embedded',
-          sessionId: sessao.sessionId,
-          clientSecret: sessao.clientSecret,
-        };
+          pagamento: committedPayment,
+          ...toPublicMaterial(material, aggregate.totalPaidCents as number),
+        } as IniciarPagamentoCarrinhoResult;
       } catch (error) {
         span.recordException(error as Error);
         span.setStatus({ code: SpanStatusCode.ERROR, message: (error as Error).message });
@@ -480,4 +679,132 @@ export async function iniciarPagamentoCarrinho(
       }
     },
   );
+}
+
+type ProviderMountMaterial =
+  | {
+      readonly kind: 'stripe';
+      readonly sessionId: string;
+      readonly clientSecret: string;
+      readonly externalRef: string;
+      readonly providerExpiresAt: Date | null;
+    }
+  | {
+      readonly kind: 'inter';
+      readonly txid: string;
+      readonly pixCopiaECola: string;
+      readonly externalRef: string;
+      readonly providerExpiresAt: Date;
+    };
+
+async function obtainProviderMaterial(
+  claimKind: 'create' | 'retrieve' | 'reconcile',
+  operation: CheckoutOperation,
+  stripe: CheckoutSessionProvider,
+  inter: PixCobrancaProvider,
+  stripeInput: CriarSessaoCheckoutInput,
+): Promise<ProviderMountMaterial> {
+  if (operation.provider === 'stripe') {
+    if (claimKind === 'create') {
+      const created = await stripe.criarSessaoCheckout(stripeInput);
+      return {
+        kind: 'stripe',
+        sessionId: created.sessionId,
+        clientSecret: created.clientSecret,
+        externalRef: created.externalRef,
+        providerExpiresAt: null,
+      };
+    }
+    const recovered = await stripe.obterSessaoCheckout(operation.providerRef ?? '');
+    if (
+      !recovered?.clientSecret ||
+      recovered.sessionId !== operation.providerRef ||
+      recovered.externalRef !== operation.providerRef ||
+      recovered.paymentId !== operation.paymentId ||
+      recovered.intentId !== operation.snapshot.intentId ||
+      recovered.campaignId !== operation.campaignId ||
+      recovered.method !== operation.method ||
+      recovered.amountTotalCents !== operation.snapshot.totalChargedCents
+    ) {
+      throw new CheckoutOperationPendingError();
+    }
+    return {
+      kind: 'stripe',
+      sessionId: recovered.sessionId,
+      clientSecret: recovered.clientSecret,
+      externalRef: recovered.externalRef,
+      providerExpiresAt: null,
+    };
+  }
+  if (claimKind === 'create') {
+    const created = await inter.criarCobranca({
+      idPagamento: operation.paymentId as never,
+      idIntencaoPagamento: operation.snapshot.intentId as never,
+      amountCents: operation.snapshot.totalChargedCents as never,
+    });
+    return {
+      kind: 'inter',
+      txid: created.txid,
+      pixCopiaECola: created.pixCopiaECola,
+      externalRef: created.txid,
+      providerExpiresAt: created.expiraEm,
+    };
+  }
+  if (operation.snapshot.provider !== 'inter') throw new CheckoutOperationPendingError();
+  const recovered = await inter.consultarCobranca(operation.providerRef ?? operation.snapshot.txid);
+  if (
+    recovered.status !== 'ativa' ||
+    recovered.txid !== (operation.providerRef ?? operation.snapshot.txid) ||
+    recovered.valorOriginalCents !== operation.snapshot.totalChargedCents ||
+    typeof recovered.pixCopiaECola !== 'string' ||
+    !(recovered.expiraEm instanceof Date)
+  ) {
+    throw new CheckoutOperationPendingError();
+  }
+  return {
+    kind: 'inter',
+    txid: operation.providerRef ?? operation.snapshot.txid,
+    pixCopiaECola: recovered.pixCopiaECola,
+    externalRef: operation.providerRef ?? operation.snapshot.txid,
+    providerExpiresAt: recovered.expiraEm,
+  };
+}
+
+async function recoverProviderMaterial(
+  stripe: CheckoutSessionProvider,
+  inter: PixCobrancaProvider,
+  operation: CheckoutOperation,
+  amountCents: number,
+): Promise<ReturnType<typeof toPublicMaterial> | null> {
+  if (amountCents !== operation.snapshot.totalChargedCents) return null;
+  try {
+    const material = await obtainProviderMaterial(
+      'retrieve',
+      operation,
+      stripe,
+      inter,
+      {} as CriarSessaoCheckoutInput,
+    );
+    return toPublicMaterial(material, operation.snapshot.totalChargedCents);
+  } catch {
+    // Provider-derived errors are never allowed to escape into router/tracing
+    // surfaces during recovery. The durable operation remains retryable.
+    return null;
+  }
+}
+
+function toPublicMaterial(material: ProviderMountMaterial, amountCents: number) {
+  return material.kind === 'stripe'
+    ? {
+        tipo: 'stripe_embedded' as const,
+        sessionId: material.sessionId,
+        clientSecret: material.clientSecret,
+      }
+    : {
+        tipo: 'pix_qr' as const,
+        txid: material.txid,
+        pixCopiaECola: material.pixCopiaECola,
+        expiraEm: material.providerExpiresAt,
+        valorCents: amountCents,
+      };
 }

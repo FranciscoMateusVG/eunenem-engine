@@ -253,12 +253,53 @@ export interface Pagamentos {
   transacao_externa: Json | null;
 }
 
+export interface PaymentProviderOperationAttemptFacts {
+  attempt_no: number;
+  claim_kind: string | null;
+  diagnostic: string | null;
+  fact_kind: string;
+  fence_token: string;
+  id: string;
+  operation_id: string;
+  outcome: string | null;
+  prior_state: string | null;
+  provider_ref: string | null;
+  recorded_at: Timestamp;
+}
+
+export interface PaymentProviderOperations {
+  attempt_count: Generated<number>;
+  campaign_id: string;
+  capability_hash: string;
+  created_at: Generated<Timestamp>;
+  lease_token: string | null;
+  lease_until: Timestamp | null;
+  local_committed_at: Timestamp | null;
+  method: string;
+  operation_id: string;
+  payment_id: string;
+  platform_id: string;
+  provider: string;
+  provider_expires_at: Timestamp | null;
+  provider_ref: string | null;
+  provider_started_at: Timestamp | null;
+  provider_succeeded_at: Timestamp | null;
+  request_hmac: string;
+  request_snapshot: Json;
+  state: string;
+  updated_at: Generated<Timestamp>;
+}
+
 export interface PaymentWebhookEvents {
   event_type: string;
   id: string;
   pagamento_id: string | null;
   processed_at: Timestamp | null;
+  processing_attempt_count: Generated<number>;
   processing_error: string | null;
+  processing_fence_token: string | null;
+  processing_lease_until: Timestamp | null;
+  processing_started_at: Timestamp | null;
   provider: Generated<string>;
   provider_event_id: string;
   raw_payload: Json;
@@ -464,6 +505,8 @@ export interface DB {
   listas_de_convidados: ListasDeConvidados;
   opcoes_contribuicao: OpcoesContribuicao;
   pagamentos: Pagamentos;
+  payment_provider_operation_attempt_facts: PaymentProviderOperationAttemptFacts;
+  payment_provider_operations: PaymentProviderOperations;
   payment_webhook_events: PaymentWebhookEvents;
   perfil_campanhas: PerfilCampanhas;
   perfil_criadores: PerfilCriadores;

@@ -291,7 +291,7 @@ describe('archiveAndDispatchInterPixWebhook', () => {
       onRefundConfirmed,
     });
 
-    expect(result.status).toBe(200);
+    expect(result.status).toBe(503);
     expect(result.items[0]?.outcome).toBe('charge_requery_failed');
     expect(onChargeConfirmed).not.toHaveBeenCalled();
     const archived = await archive.findByProviderEventId('inter', `${TXID_A}:${E2E_A}`);
@@ -369,7 +369,7 @@ describe('archiveAndDispatchInterPixWebhook', () => {
       onRefundConfirmed,
     });
 
-    expect(result.items[0]?.outcome).toBe('charge_binding_failed');
+    expect(result.items[0]?.outcome).toBe('charge_binding_absent');
     expect(resolveChargeBinding).toHaveBeenCalledWith({ txid: TXID_A, e2eId: E2E_A });
     expect(consultarCobranca).not.toHaveBeenCalled();
     expect(onChargeConfirmed).not.toHaveBeenCalled();
@@ -709,7 +709,7 @@ describe('archiveAndDispatchInterPixWebhook', () => {
       onRefundConfirmed,
     });
 
-    expect(result.items[0]?.outcome).toBe('refund_binding_failed');
+    expect(result.items[0]?.outcome).toBe('refund_binding_absent');
     expect(consultarDevolucao).not.toHaveBeenCalled();
     expect(onRefundConfirmed).not.toHaveBeenCalled();
   });

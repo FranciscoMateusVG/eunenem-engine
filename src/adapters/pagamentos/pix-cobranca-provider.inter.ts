@@ -68,6 +68,7 @@ interface InterCobrancaResponse {
   readonly calendario?: InterCalendario;
   readonly status?: unknown;
   readonly pix?: unknown;
+  readonly valor?: { readonly original?: unknown };
 }
 
 interface InterDevolucaoResponse {
@@ -354,8 +355,22 @@ function classifyCharge(
   }
   const rawStatus = response.status;
   switch (rawStatus.toUpperCase()) {
-    case 'ATIVA':
-      return { status: 'ativa' };
+    case 'ATIVA': {
+      const active = parseCreatedCharge(response, expectedTxid);
+      const valorOriginalCents = parseReaisToCents(response.valor?.original);
+      if (active === null || valorOriginalCents === null) {
+        throw new PixCobrancaTransitoriaError(
+          'consultarCobranca: cobrança ATIVA sem material recuperável',
+        );
+      }
+      return {
+        status: 'ativa',
+        txid: expectedTxid,
+        valorOriginalCents,
+        pixCopiaECola: active.pixCopiaECola,
+        expiraEm: active.expiraEm,
+      };
+    }
     case 'REMOVIDA_PELO_USUARIO_RECEBEDOR':
     case 'REMOVIDA_PELO_PSP':
       return { status: 'removida' };

@@ -19,7 +19,13 @@ export interface CobrancaCriada {
 }
 
 export type ConsultarCobrancaResult =
-  | { readonly status: 'ativa' }
+  | {
+      readonly status: 'ativa';
+      readonly txid: string;
+      readonly valorOriginalCents: MoneyCents;
+      readonly pixCopiaECola?: string;
+      readonly expiraEm?: Date;
+    }
   | {
       readonly status: 'concluida';
       readonly e2eId: string;
