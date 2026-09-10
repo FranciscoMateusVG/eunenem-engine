@@ -1,8 +1,11 @@
 import { createRequire } from 'node:module';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
+  PaymentEvidenceFilters,
   type PaymentEvidenceRow,
   PaymentEvidenceTable,
+  paymentEvidenceSearchInput,
+  ReferenceResolutionNotice,
 } from '../../../apps/eunenem-server/pages/AdminPagamentosPage.js';
 
 const appRequire = createRequire(`${process.cwd()}/apps/eunenem-server/package.json`);
@@ -10,6 +13,24 @@ const React = appRequire('react') as typeof import('react');
 const { renderToStaticMarkup } = appRequire('react-dom/server') as {
   renderToStaticMarkup: (node: unknown) => string;
 };
+
+function findElement(
+  node: unknown,
+  predicate: (type: unknown, props: Record<string, unknown>) => boolean,
+): Record<string, unknown> | undefined {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const match = findElement(child, predicate);
+      if (match) return match;
+    }
+    return undefined;
+  }
+  if (!node || typeof node !== 'object') return undefined;
+  const element = node as { type?: unknown; props?: Record<string, unknown> };
+  const props = element.props ?? {};
+  if (predicate(element.type, props)) return props;
+  return findElement(props.children, predicate);
+}
 
 function row(overrides: Partial<PaymentEvidenceRow> = {}): PaymentEvidenceRow {
   return {
@@ -115,5 +136,117 @@ describe('PaymentEvidenceTable', () => {
     expect(html).toContain('sem referência salva');
     expect(html).toContain('Total previsto');
     expect(html).not.toContain('>Pago ');
+  });
+});
+
+describe('PaymentEvidenceFilters', () => {
+  it('renders and wires independent payer, campaign and exact-reference fields', () => {
+    const onSearchChange = vi.fn();
+    const onClearSearch = vi.fn();
+    const tree = PaymentEvidenceFilters({
+      provider: null,
+      status: null,
+      search: {
+        payerQuery: 'Dana',
+        campaignQuery: 'lista-francisco',
+        exactReference: 'E0000000000000000000000000000001',
+      },
+      onProviderChange: () => undefined,
+      onStatusChange: () => undefined,
+      onSearchChange,
+      onClearSearch,
+    });
+    const html = renderToStaticMarkup(tree);
+
+    expect(html).toContain('Pagador');
+    expect(html).toContain('Pessoa ou campanha');
+    expect(html).toContain('Referência de pagamento / Inter');
+    expect(html).toContain('Nome, título, link ou slug da campanha');
+    expect(html).toContain('UUID, txid, e2e, cs_, pi_, ch_ ou evt_');
+    expect(html).toContain('maxLength="160"');
+    expect(html).toContain('maxLength="1024"');
+    expect(html).toContain('maxLength="255"');
+    expect(html.match(/min-h-11/g)?.length).toBeGreaterThanOrEqual(6);
+    expect(html).toContain('min-w-0');
+    expect(html).toContain('Limpar buscas');
+
+    const payer = findElement(
+      tree,
+      (_type, props) => props.ariaLabel === 'Filtrar por nome ou email do pagador',
+    );
+    expect(payer?.onChange).toBeTypeOf('function');
+    (payer?.onChange as (value: string) => void)('Dana Lima');
+    expect(onSearchChange).toHaveBeenCalledWith('payerQuery', 'Dana Lima');
+
+    const clear = findElement(
+      tree,
+      (type, props) => type === 'button' && props.children === 'Limpar buscas',
+    );
+    expect(clear?.disabled).toBe(false);
+    (clear?.onClick as () => void)();
+    expect(onClearSearch).toHaveBeenCalledOnce();
+  });
+
+  it('normalizes searches into the exact listEvidencePaginated input names', () => {
+    expect(
+      paymentEvidenceSearchInput({
+        payerQuery: '  Dana  ',
+        campaignQuery: '  lista-francisco ',
+        exactReference: '  cs_saved  ',
+      }),
+    ).toEqual({
+      payerQuery: 'Dana',
+      campaignQuery: 'lista-francisco',
+      exactReference: 'cs_saved',
+    });
+    expect(
+      paymentEvidenceSearchInput({
+        payerQuery: ' ',
+        campaignQuery: '',
+        exactReference: '  ',
+      }),
+    ).toEqual({
+      payerQuery: undefined,
+      campaignQuery: undefined,
+      exactReference: undefined,
+    });
+  });
+
+  it('states exact-reference absence and ambiguity without inferring provider absence', () => {
+    const absent = renderToStaticMarkup(
+      React.createElement(ReferenceResolutionNotice, {
+        exactReference: 'reference',
+        resolution: 'absent',
+      }),
+    );
+    expect(absent).toContain('Nenhuma evidência local');
+    expect(absent).toContain('não prova ausência no provedor');
+
+    const ambiguous = renderToStaticMarkup(
+      React.createElement(ReferenceResolutionNotice, {
+        exactReference: 'reference',
+        resolution: 'ambiguous',
+      }),
+    );
+    expect(ambiguous).toContain('mais de um pagamento local');
+    expect(ambiguous).toContain('Nenhuma linha foi escolhida');
+
+    expect(
+      renderToStaticMarkup(
+        React.createElement(ReferenceResolutionNotice, {
+          exactReference: 'reference',
+          resolution: 'not_requested',
+        }),
+      ),
+    ).toBe('');
+
+    expect(
+      renderToStaticMarkup(
+        React.createElement(ReferenceResolutionNotice, {
+          exactReference: 'reference',
+          resolution: 'unique',
+        }),
+      ),
+    ).toBe('');
   });
 });

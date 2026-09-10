@@ -9,9 +9,9 @@ import {
 import { trpc } from "@/lib/trpc.js";
 
 /**
- * UserPicker — prefix-search dropdown for the admin landing page.
+ * UserPicker — user/campaign search dropdown for the admin landing page.
  *
- * Hits `trpc.admin.searchUsers` with a debounced prefix; renders the
+ * Hits `trpc.admin.searchUsers` with a debounced search value; renders the
  * results in a WAI-ARIA combobox dropdown. Keyboard nav (Arrow / Enter
  * / Esc) and click-outside dismiss. Selecting a row navigates to
  * `/admin/usuario/:idConta` via plain anchor click — the SSR catch-all
@@ -34,11 +34,47 @@ import { trpc } from "@/lib/trpc.js";
 const DEBOUNCE_MS = 250;
 const MIN_SPINNER_MS = 200;
 
+export function userPickerSearchInput(query: string) {
+  return { query: query.trim() };
+}
+
+export type UserPickerKeyboardAction =
+  | { type: "dismiss" }
+  | { type: "open" }
+  | { type: "move"; index: number }
+  | { type: "select"; index: number }
+  | null;
+
+export function userPickerKeyboardAction(
+  key: string,
+  resultsLength: number,
+  activeIndex: number,
+): UserPickerKeyboardAction {
+  if (key === "Escape") return { type: "dismiss" };
+  if (key === "ArrowDown") {
+    if (resultsLength === 0) return { type: "open" };
+    const base = activeIndex < 0 ? -1 : activeIndex;
+    return { type: "move", index: (base + 1) % resultsLength };
+  }
+  if (key === "ArrowUp") {
+    if (resultsLength === 0) return { type: "open" };
+    const base = activeIndex < 0 ? 0 : activeIndex;
+    return {
+      type: "move",
+      index: base <= 0 ? resultsLength - 1 : base - 1,
+    };
+  }
+  if (key === "Enter" && resultsLength > 0) {
+    return { type: "select", index: activeIndex >= 0 ? activeIndex : 0 };
+  }
+  return null;
+}
+
 export function UserPicker() {
   const listboxId = useId();
 
   const [query, setQuery] = useState("");
-  const [debouncedPrefix, setDebouncedPrefix] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState<number>(-1);
   const [isOpen, setIsOpen] = useState(false);
   const [spinnerVisible, setSpinnerVisible] = useState(false);
@@ -53,20 +89,20 @@ export function UserPicker() {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     const next = query.trim();
     if (next === "") {
-      setDebouncedPrefix("");
+      setDebouncedQuery("");
       return;
     }
     debounceRef.current = setTimeout(() => {
-      setDebouncedPrefix(next);
+      setDebouncedQuery(next);
     }, DEBOUNCE_MS);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [query]);
 
-  const searchEnabled = debouncedPrefix !== "";
+  const searchEnabled = debouncedQuery !== "";
   const { data, isFetching, error } = trpc.admin.searchUsers.useQuery(
-    { prefix: debouncedPrefix },
+    userPickerSearchInput(debouncedQuery),
     { enabled: searchEnabled, staleTime: 30_000 },
   );
 
@@ -118,32 +154,28 @@ export function UserPicker() {
   }, []);
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Escape") {
-      e.preventDefault();
+    const action = userPickerKeyboardAction(
+      e.key,
+      results.length,
+      clampedActive,
+    );
+    if (action === null) return;
+    e.preventDefault();
+    if (action.type === "dismiss") {
       setIsOpen(false);
       return;
     }
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
+    if (action.type === "open") {
       if (!isOpen) setIsOpen(true);
-      if (results.length === 0) return;
-      const base = clampedActive < 0 ? -1 : clampedActive;
-      setActiveIndex((base + 1) % results.length);
       return;
     }
-    if (e.key === "ArrowUp") {
-      e.preventDefault();
+    if (action.type === "move") {
       if (!isOpen) setIsOpen(true);
-      if (results.length === 0) return;
-      const base = clampedActive < 0 ? 0 : clampedActive;
-      setActiveIndex(base <= 0 ? results.length - 1 : base - 1);
+      setActiveIndex(action.index);
       return;
     }
-    if (e.key === "Enter") {
-      if (results.length === 0) return;
-      e.preventDefault();
-      const idx = clampedActive >= 0 ? clampedActive : 0;
-      const target = results[idx];
+    if (action.type === "select") {
+      const target = results[action.index];
       if (target) navigateTo(target.idConta);
     }
   };
@@ -159,7 +191,9 @@ export function UserPicker() {
         role="combobox"
         autoComplete="off"
         spellCheck={false}
-        placeholder="email, telefone ou id da conta…"
+        placeholder="Email, nome ou link da campanha…"
+        aria-label="Buscar usuário por email, nome ou campanha"
+        maxLength={160}
         value={query}
         aria-autocomplete="list"
         aria-expanded={showDropdown}
@@ -176,12 +210,12 @@ export function UserPicker() {
           if (!isIdle) setIsOpen(true);
         }}
         onKeyDown={onKeyDown}
-        className="block w-full rounded-md border border-line bg-paper px-4 py-3 font-mono text-[13px] text-ink placeholder:text-ink-mute focus:border-plum focus:outline-none focus:ring-2 focus:ring-lilac-soft"
+        className="block min-h-11 w-full min-w-0 rounded-md border border-line bg-paper px-4 py-3 font-mono text-[13px] text-ink placeholder:text-ink-mute focus:border-plum focus:outline-none focus:ring-2 focus:ring-lilac-soft"
       />
       <RightAccessory spinning={!isIdle && (isFetching || spinnerVisible)} />
 
       {showDropdown && (
-        <Dropdown
+        <UserPickerDropdown
           id={listboxId}
           activeIndex={clampedActive}
           results={results}
@@ -206,22 +240,13 @@ export function UserPicker() {
 }
 
 function RightAccessory({ spinning }: { spinning: boolean }) {
-  if (spinning) {
-    return (
-      <span
-        aria-hidden
-        className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2"
-      >
-        <Spinner />
-      </span>
-    );
-  }
+  if (!spinning) return null;
   return (
     <span
       aria-hidden
-      className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 font-mono text-[10px] uppercase tracking-[0.14em] text-ink-mute"
+      className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2"
     >
-      ⌘K
+      <Spinner />
     </span>
   );
 }
@@ -235,7 +260,7 @@ function Spinner() {
   );
 }
 
-function Dropdown({
+export function UserPickerDropdown({
   id,
   results,
   activeIndex,

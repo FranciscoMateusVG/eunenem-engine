@@ -50,7 +50,7 @@ const DATABASE_URL =
   'postgresql://frame:frame@localhost:54320/frame';
 
 const BLOCKED_COPY =
-  'estorno bloqueado: o repasse deste pagamento já foi transferido ao recebedor.';
+  'Estorno bloqueado porque o repasse já foi transferido. Não repita a operação.';
 
 /**
  * Seed ONE aprovado pagamento (single contribuição item) via the proven

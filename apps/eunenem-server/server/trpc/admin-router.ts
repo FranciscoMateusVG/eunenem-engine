@@ -76,10 +76,23 @@ import { enforceRateLimit } from "./rate-limit.js";
 import {
   AdminPaymentEvidenceSchema,
   InvalidPaymentEvidenceCursorError,
+  InvalidPaymentEvidenceFilterError,
   listAdminPaymentEvidence,
+  PaymentEvidenceCampaignQuerySchema,
+  PaymentEvidenceExactReferenceSchema,
+  PaymentEvidencePayerQuerySchema,
   PaymentEvidenceProviderFilterSchema,
+  PaymentEvidenceReferenceResolutionSchema,
   PaymentEvidenceStatusFilterSchema,
 } from "../admin-payment-evidence.js";
+import {
+  AdminCampaignQuerySchema,
+  AdminUserQuerySchema,
+  InvalidAdminSearchFilterError,
+  InvalidAdminUserCursorError,
+  listAdminUsers,
+  searchAdminUsers,
+} from "../admin-user-search.js";
 
 const t = initTRPC.context<TrpcContext>().create();
 
@@ -143,11 +156,9 @@ export type UsuarioMatch = z.infer<typeof UsuarioMatchSchema>;
 /* ─────────────────────────────────────────────────────────────────────────
  * usuarios.listPaginated — browse-as-default users table (aperture-tinly).
  *
- * Wires through to the engine port `findUsuariosPaginated(idPlataforma, input)`
- * from aperture-qatwz (Rex, PR #98). The DTO projection is the only
- * eunenem-specific shape — the wire output trims the full Usuario aggregate
- * down to the six fields the UI consumes (id, idConta, email, nomeExibicao,
- * slug, criadoEm) so we never leak the aggregate over the wire.
+ * The stored-only query keeps the existing lean DTO while adding independent
+ * campaign-link/title filtering. Platform scope is applied before matching,
+ * count and cursor pagination.
  * ────────────────────────────────────────────────────────────────────── */
 
 const UsuarioAdminDTOSchema = z.object({
@@ -169,6 +180,7 @@ const ListPaginatedInputSchema = z.object({
   sortBy: SortBySchema,
   sortDir: SortDirSchema,
   emailPrefix: z.string().max(120).optional(),
+  campaignQuery: AdminCampaignQuerySchema.optional(),
 });
 
 const ListPaginatedOutputSchema = z.object({
@@ -183,38 +195,34 @@ const usuariosRouter = t.router({
    * (criadoEm / email / nomeExibicao × asc/desc), LIKE-escaped
    * emailPrefix filter, exact totalCount.
    *
-   * Backed by `UsuarioRepository.findUsuariosPaginated` (Wheatley §6
-   * contract, Rex aperture-qatwz / PR #98). The proc projects the full
-   * Usuario aggregate down to the lean DTO the UI consumes; cursor +
-   * sort + filter semantics live on the port.
+   * The proc projects only the lean DTO the UI consumes. Email and campaign
+   * filters are independent AND terms; cursor identity binds both.
    */
   listPaginated: adminProcedure
     .input(ListPaginatedInputSchema)
     .output(ListPaginatedOutputSchema)
     .query(async ({ ctx, input }) => {
-      const result = await ctx.deps.usuarioRepository.findUsuariosPaginated(
-        ID_PLATAFORMA_EUNENEM,
-        {
+      try {
+        return await listAdminUsers(ctx.deps.db, {
+          platformId: ID_PLATAFORMA_EUNENEM,
           cursor: input.cursor,
           limit: input.limit,
           sortBy: input.sortBy,
           sortDir: input.sortDir,
           emailPrefix: input.emailPrefix,
-        },
-      );
-
-      return {
-        usuarios: result.usuarios.map((u) => ({
-          id: u.id,
-          idConta: u.idConta,
-          email: u.email,
-          nomeExibicao: u.nomeExibicao,
-          slug: u.slug,
-          criadoEm: u.criadoEm.toISOString(),
-        })),
-        nextCursor: result.nextCursor,
-        totalCount: result.totalCount,
-      };
+          campaignQuery: input.campaignQuery,
+          publicOrigin: ctx.deps.publicOrigin,
+          cursorSecret: ctx.deps.logPiiHashSalt,
+        });
+      } catch (error: unknown) {
+        if (
+          error instanceof InvalidAdminSearchFilterError ||
+          error instanceof InvalidAdminUserCursorError
+        ) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
+        }
+        throw error;
+      }
     }),
 });
 
@@ -1287,6 +1295,9 @@ const pagamentosRouter = t.router({
         limit: z.number().int().min(1).max(100).default(50),
         provider: PaymentEvidenceProviderFilterSchema.nullable().default(null),
         status: PaymentEvidenceStatusFilterSchema.nullable().default(null),
+        payerQuery: PaymentEvidencePayerQuerySchema.optional(),
+        campaignQuery: PaymentEvidenceCampaignQuerySchema.optional(),
+        exactReference: PaymentEvidenceExactReferenceSchema.optional(),
       }),
     )
     .output(
@@ -1294,6 +1305,7 @@ const pagamentosRouter = t.router({
         rows: z.array(AdminPaymentEvidenceSchema),
         nextCursor: z.string().nullable(),
         totalCount: z.number().int().nonnegative(),
+        referenceResolution: PaymentEvidenceReferenceResolutionSchema,
       }),
     )
     .query(async ({ ctx, input }) => {
@@ -1304,12 +1316,20 @@ const pagamentosRouter = t.router({
           limit: input.limit,
           provider: input.provider,
           status: input.status,
+          payerQuery: input.payerQuery,
+          campaignQuery: input.campaignQuery,
+          exactReference: input.exactReference,
+          publicOrigin: ctx.deps.publicOrigin,
+          cursorSecret: ctx.deps.logPiiHashSalt,
         });
       } catch (error: unknown) {
-        if (error instanceof InvalidPaymentEvidenceCursorError) {
+        if (
+          error instanceof InvalidPaymentEvidenceCursorError ||
+          error instanceof InvalidPaymentEvidenceFilterError
+        ) {
           throw new TRPCError({
             code: "BAD_REQUEST",
-            message: "invalid_payment_evidence_cursor",
+            message: error.message,
           });
         }
         throw error;
@@ -3595,36 +3615,37 @@ export const adminRouter = t.router({
   catalog: catalogRouter,
 
   /**
-   * Prefix-search usuarios by email. Case-insensitive (the postgres
-   * adapter does `LOWER(email) ILIKE LOWER($2) || '%'`). Tenant-scoped to
-   * ID_PLATAFORMA_EUNENEM. Empty/blank prefix → empty array (don't return
-   * the full table). Bounded by `SEARCH_LIMIT`.
-   *
-   * Backed by `UsuarioRepository.findUsuariosByEmailPrefix` (engine
-   * aperture-5d3yz / PR #93).
+   * Bounded user picker search across email, display name and current
+   * campaigns. `prefix` remains accepted for existing callers; new callers
+   * use `query`. Canonical campaign links are parsed locally and never fetched.
+   * Empty input returns no rows rather than the full table.
    */
   searchUsers: adminProcedure
     .input(
-      z.object({
-        prefix: z.string().max(120),
-      }),
+      z
+        .object({
+          prefix: z.string().max(120).optional(),
+          query: AdminUserQuerySchema.optional(),
+        })
+        .refine((input) => input.prefix !== undefined || input.query !== undefined, {
+          message: "query_required",
+        }),
     )
     .output(z.array(UsuarioMatchSchema))
     .query(async ({ ctx, input }) => {
-      const cleaned = input.prefix.trim();
-      if (cleaned === "") return [];
-
-      const usuarios = await ctx.deps.usuarioRepository.findUsuariosByEmailPrefix(
-        ID_PLATAFORMA_EUNENEM,
-        cleaned,
-        SEARCH_LIMIT,
-      );
-
-      return usuarios.map((u) => ({
-        idConta: u.idConta,
-        email: u.email,
-        nomeExibicao: u.nomeExibicao,
-      }));
+      try {
+        return await searchAdminUsers(ctx.deps.db, {
+          platformId: ID_PLATAFORMA_EUNENEM,
+          query: input.query ?? input.prefix ?? "",
+          publicOrigin: ctx.deps.publicOrigin,
+          limit: SEARCH_LIMIT,
+        });
+      } catch (error: unknown) {
+        if (error instanceof InvalidAdminSearchFilterError) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
+        }
+        throw error;
+      }
     }),
 
   /**

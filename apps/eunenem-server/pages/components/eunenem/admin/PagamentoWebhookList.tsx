@@ -8,8 +8,10 @@ import { WebhookEventDetailModal } from "@/components/eunenem/admin/WebhookEvent
  *
  * Renders below each PagamentoCard inside PagamentosSection. Collapsed by
  * default; the affordance chip in the toggle header shows the event count
- * + a red dot when any event has `signatureValid=false` OR
- * `processingError != null`. Click expands the list of events; click an
+ * + a red dot when a provider that requires a signature has
+ * `signatureValid=false`, or any event has `processingError != null`.
+ * Inter webhook hints are intentionally unsigned, so their expected
+ * `signatureValid=false` is neutral. Click expands the list of events; click an
  * event's "Ver payload" → lazy-fetches the full DTO + mounts a modal
  * with JsonViewer over the raw payload.
  *
@@ -26,8 +28,8 @@ import { WebhookEventDetailModal } from "@/components/eunenem/admin/WebhookEvent
  * Issue-count reporting: every render pings the parent (PagamentosList)
  * via `onIssueCountChange` so the PagamentosSection header can show the
  * aggregate "⚠ N webhooks com erro" chip without a server-side aggregate
- * call. Computed as: count of events where `signatureValid=false` OR
- * `processingError != null`.
+ * call. Computed by `webhookEventHasIssue`, which keeps the expected unsigned
+ * Inter transport separate from validation/processing failures.
  */
 export function PagamentoWebhookList({
   idPagamento,
@@ -43,9 +45,7 @@ export function PagamentoWebhookList({
     trpc.admin.webhooks.listByPagamento.useQuery({ idPagamento });
 
   const events = data?.events ?? [];
-  const issueCount = events.filter(
-    (e) => !e.signatureValid || e.processingError !== null,
-  ).length;
+  const issueCount = events.filter(webhookEventHasIssue).length;
 
   // Report up to parent so PagamentosSection can render the aggregate chip.
   useEffect(() => {
@@ -107,7 +107,7 @@ export function PagamentoWebhookList({
             ) : (
               <ul className="divide-y divide-line">
                 {events.map((e) => (
-                  <EventRow
+                  <WebhookEventRow
                     key={e.id}
                     event={e}
                     onOpenPayload={() => setModalEventId(e.id)}
@@ -163,7 +163,24 @@ type EventListDTO = {
   pagamentoId: string | null;
 };
 
-function EventRow({
+export function webhookEventHasIssue(
+  event: Pick<EventListDTO, "provider" | "signatureValid" | "processingError">,
+): boolean {
+  const invalidRequiredSignature =
+    event.provider !== "inter" && !event.signatureValid;
+  return invalidRequiredSignature || event.processingError !== null;
+}
+
+export function interVerificationLabel(
+  event: Pick<EventListDTO, "provider" | "processedAt" | "processingError">,
+): "confirmado por reconsulta" | "não confirmado" | null {
+  if (event.provider !== "inter") return null;
+  return event.processedAt !== null && event.processingError === null
+    ? "confirmado por reconsulta"
+    : "não confirmado";
+}
+
+export function WebhookEventRow({
   event,
   onOpenPayload,
 }: {
@@ -188,7 +205,9 @@ function EventRow({
         {formatReceivedAt(event.receivedAt)}
       </span>
 
-      <SignatureBadge valid={event.signatureValid} />
+      <SignatureBadge provider={event.provider} valid={event.signatureValid} />
+
+      <InterVerificationBadge event={event} />
 
       <ProcessStatus
         processedAt={event.processedAt}
@@ -206,7 +225,20 @@ function EventRow({
   );
 }
 
-function SignatureBadge({ valid }: { valid: boolean }) {
+function SignatureBadge({
+  provider,
+  valid,
+}: {
+  provider: string;
+  valid: boolean;
+}) {
+  if (provider === "inter") {
+    return (
+      <span className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-100 px-2 py-[2px] font-mono text-[10px] uppercase tracking-[0.10em] text-zinc-700">
+        não assinado
+      </span>
+    );
+  }
   if (valid) {
     return (
       <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-[2px] font-mono text-[10px] uppercase tracking-[0.10em] text-emerald-800">
@@ -219,6 +251,24 @@ function SignatureBadge({ valid }: { valid: boolean }) {
     <span className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2 py-[2px] font-mono text-[10px] uppercase tracking-[0.10em] text-red-800">
       <span aria-hidden>⚠</span>
       inválida
+    </span>
+  );
+}
+
+function InterVerificationBadge({ event }: { event: EventListDTO }) {
+  const label = interVerificationLabel(event);
+  if (label === null) return null;
+  const confirmed = label === "confirmado por reconsulta";
+  return (
+    <span
+      className={[
+        "inline-flex items-center rounded-full border px-2 py-[2px] font-mono text-[10px] uppercase tracking-[0.10em]",
+        confirmed
+          ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+          : "border-amber-200 bg-amber-50 text-amber-800",
+      ].join(" ")}
+    >
+      {label}
     </span>
   );
 }
