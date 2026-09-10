@@ -135,6 +135,7 @@ describe('Banco Inter Pix webhook HTTP shell', () => {
     await expect(archive.findByProviderEventId('inter', `${txid}:${e2eId}`)).resolves.toMatchObject(
       {
         rawPayload: { txid, endToEndId: e2eId },
+        ingressPlatformId: ID_PLATAFORMA_EUNENEM,
         processingError: null,
         processedAt: expect.any(Date),
       },

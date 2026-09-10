@@ -7,6 +7,7 @@ import {
   type SaveReceivedResult,
   type WebhookEventArchive,
   type WebhookEventRecord,
+  WebhookIngressPlatformConflictError,
 } from './webhook-event-archive.js';
 
 const tracer = trace.getTracer('frame');
@@ -50,6 +51,10 @@ export class WebhookEventArchiveMemory implements WebhookEventArchive {
         const existingId = this.byProviderEventId.get(key);
         if (existingId !== undefined) {
           // Retry — return the existing id, do NOT mutate the row.
+          const existing = this.rows.get(existingId);
+          if (existing?.ingressPlatformId !== (input.ingressPlatformId ?? null)) {
+            throw new WebhookIngressPlatformConflictError();
+          }
           span.setStatus({ code: SpanStatusCode.OK });
           return { id: existingId, isDuplicate: true };
         }
@@ -72,6 +77,7 @@ export class WebhookEventArchiveMemory implements WebhookEventArchive {
           processedAt: null,
           processingError: null,
           pagamentoId: null,
+          ingressPlatformId: input.ingressPlatformId ?? null,
           processingAttemptCount: 0,
           processingFenceToken: null,
           processingLeaseUntil: null,

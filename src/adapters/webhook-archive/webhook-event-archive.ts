@@ -49,6 +49,12 @@ export interface WebhookEventRecord {
   readonly processedAt: Date | null;
   readonly processingError: string | null;
   readonly pagamentoId: string | null;
+  /**
+   * Platform whose fixed server endpoint first archived this delivery.
+   * NULL means historical/unscoped and must never be inferred or promoted.
+   * This is ingress provenance, not provider-account/payment ownership.
+   */
+  readonly ingressPlatformId: string | null;
   readonly processingAttemptCount?: number;
   readonly processingFenceToken?: string | null;
   readonly processingLeaseUntil?: Date | null;
@@ -65,6 +71,18 @@ export interface SaveReceivedInput {
   readonly rawPayload: unknown;
   readonly signatureHeader: string;
   readonly signatureValid: boolean;
+  /**
+   * Required trusted composition-root value. Request or provider payload data
+   * must never populate this field.
+   */
+  readonly ingressPlatformId: string;
+}
+
+export class WebhookIngressPlatformConflictError extends Error {
+  constructor() {
+    super('webhook_ingress_platform_conflict');
+    this.name = 'WebhookIngressPlatformConflictError';
+  }
 }
 
 export interface SaveReceivedResult {

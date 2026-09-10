@@ -65,6 +65,8 @@ export interface InterPixDispatchResult {
 
 export interface InterPixPipelineArgs {
   readonly rawBody: string;
+  /** Fixed server/composition-root ingress scope; never payload-derived. */
+  readonly ingressPlatformId: string;
   readonly pixCobrancaProvider: PixCobrancaProvider;
   readonly onChargeConfirmed: (
     confirmed: InterPixChargeConfirmed,
@@ -313,6 +315,7 @@ async function processEvent(
     rawPayload: event.archivePayload,
     signatureHeader: INTER_PIX_SIGNATURE_SENTINEL,
     signatureValid: false,
+    ingressPlatformId: args.ingressPlatformId,
   });
 
   const now = new Date();

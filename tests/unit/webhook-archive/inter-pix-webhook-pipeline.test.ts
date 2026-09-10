@@ -16,6 +16,7 @@ const E2E_A = 'E'.repeat(32);
 const E2E_B = 'F'.repeat(32);
 const PAID_AT = new Date('2026-08-05T12:00:00.000Z');
 const REFUND_AMOUNT = 1005 as MoneyCents;
+const INGRESS_PLATFORM_ID = '10000000-0000-4000-8000-000000000001';
 
 function provider(overrides: Partial<PixCobrancaProvider> = {}): PixCobrancaProvider {
   return {
@@ -73,6 +74,7 @@ describe('archiveAndDispatchInterPixWebhook', () => {
         horario: PAID_AT,
       });
     const result = await archiveAndDispatchInterPixWebhook(archive, {
+      ingressPlatformId: INGRESS_PLATFORM_ID,
       rawBody: envelope([
         { txid: TXID_A, endToEndId: E2E_A, valor: '1.00', pagador: { cpf: 'hidden' } },
         { txid: TXID_B, endToEndId: E2E_B, valor: '999.00' },
@@ -116,6 +118,7 @@ describe('archiveAndDispatchInterPixWebhook', () => {
       signatureHeader: INTER_PIX_SIGNATURE_SENTINEL,
       signatureValid: false,
       pagamentoId: 'pagamento-a',
+      ingressPlatformId: INGRESS_PLATFORM_ID,
     });
     expect(archivedA?.rawPayload).toEqual({ txid: TXID_A, endToEndId: E2E_A });
     expect(archivedB?.rawPayload).toEqual({ txid: TXID_B, endToEndId: E2E_B });

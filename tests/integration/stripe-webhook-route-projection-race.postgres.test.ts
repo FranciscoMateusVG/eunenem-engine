@@ -12,6 +12,7 @@ import { PagamentoEventPublisherMemory } from '../../src/adapters/pagamentos/eve
 import { LivroFinanceiroRepositoryMemory } from '../../src/adapters/pagamentos/financeiro/livro-repository.memory.js';
 import { PagamentoProviderFake } from '../../src/adapters/pagamentos/provider.fake.js';
 import { PagamentoRepositoryPostgres } from '../../src/adapters/pagamentos/repository.postgres.js';
+import { ID_PLATAFORMA_EUNENEM } from '../../src/adapters/plataforma/repository.memory.js';
 import { WebhookEventArchivePostgres } from '../../src/adapters/webhook-archive/webhook-event-archive.postgres.js';
 import type { Pagamento } from '../../src/domain/pagamentos/entities/pagamento.js';
 import { NoopLogger } from '../../src/observability/noop-logger.js';
@@ -278,12 +279,14 @@ describe('mounted signed Stripe route + real Postgres projection race', () => {
     expect(unpaidArchive).toMatchObject({
       pagamentoId: idPagamento,
       signatureValid: true,
+      ingressPlatformId: ID_PLATAFORMA_EUNENEM,
       processedAt: expect.any(Date),
       processingError: null,
     });
     expect(chargeArchive).toMatchObject({
       pagamentoId: idPagamento,
       signatureValid: true,
+      ingressPlatformId: ID_PLATAFORMA_EUNENEM,
       processedAt: expect.any(Date),
       processingError: null,
     });
@@ -336,6 +339,7 @@ describe('mounted signed Stripe route + real Postgres projection race', () => {
     expect(archived).toMatchObject({
       pagamentoId: null,
       signatureValid: true,
+      ingressPlatformId: ID_PLATAFORMA_EUNENEM,
       processedAt: null,
       processingError: 'dispatch_failed',
     });

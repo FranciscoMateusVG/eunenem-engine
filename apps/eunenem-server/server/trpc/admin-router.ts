@@ -75,6 +75,7 @@ import {
 import { enforceRateLimit } from "./rate-limit.js";
 import {
   AdminPaymentEvidenceSchema,
+  AdminUnmatchedPaymentEvidenceSchema,
   InvalidPaymentEvidenceCursorError,
   InvalidPaymentEvidenceFilterError,
   listAdminPaymentEvidence,
@@ -1306,6 +1307,8 @@ const pagamentosRouter = t.router({
         nextCursor: z.string().nullable(),
         totalCount: z.number().int().nonnegative(),
         referenceResolution: PaymentEvidenceReferenceResolutionSchema,
+        unmatchedEvidence: z.array(AdminUnmatchedPaymentEvidenceSchema),
+        unmatchedEvidenceTruncated: z.boolean(),
       }),
     )
     .query(async ({ ctx, input }) => {
