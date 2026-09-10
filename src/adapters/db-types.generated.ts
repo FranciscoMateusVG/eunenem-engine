@@ -293,6 +293,7 @@ export interface PaymentProviderOperations {
 export interface PaymentWebhookEvents {
   event_type: string;
   id: string;
+  ingress_platform_id: string | null;
   pagamento_id: string | null;
   processed_at: Timestamp | null;
   processing_attempt_count: Generated<number>;

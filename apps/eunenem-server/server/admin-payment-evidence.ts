@@ -30,11 +30,62 @@ export const PaymentEvidenceExactReferenceSchema = z.string().max(255).regex(SAF
 export const PaymentEvidenceReferenceResolutionSchema = z.enum([
   "not_requested",
   "unique",
+  "unmatched",
+  "mixed",
   "absent",
   "ambiguous",
 ]);
 export type PaymentEvidenceReferenceResolution = z.infer<
   typeof PaymentEvidenceReferenceResolutionSchema
+>;
+export const UNMATCHED_PAYMENT_EVIDENCE_LIMIT = 20;
+const UnmatchedReferenceTypeSchema = z.enum([
+  "provider_event_id",
+  "inter_txid",
+  "inter_e2e",
+  "stripe_checkout_session",
+  "stripe_payment_intent",
+  "stripe_charge",
+]);
+const UnmatchedFailureCategorySchema = z.enum([
+  "dispatch_failed",
+  "charge_not_confirmed",
+  "charge_binding_failed",
+  "charge_identity_mismatch",
+  "charge_requery_failed",
+  "charge_bookkeeping_failed",
+  "refund_not_confirmed",
+  "refund_binding_failed",
+  "refund_requery_failed",
+  "refund_bookkeeping_failed",
+]);
+const ProviderEventIdSchema = z
+  .string()
+  .min(1)
+  .max(255)
+  .regex(/^[A-Za-z0-9:_-]+$/);
+const ProviderEventTypeSchema = z
+  .string()
+  .min(1)
+  .max(120)
+  .regex(/^[a-z0-9][a-z0-9._-]*$/);
+
+export const AdminUnmatchedPaymentEvidenceSchema = z.object({
+  archiveId: z.string().uuid(),
+  provider: PaymentEvidenceProviderFilterSchema,
+  matchedReferenceType: UnmatchedReferenceTypeSchema,
+  matchedReference: PaymentEvidenceExactReferenceSchema.min(1),
+  providerEventId: ProviderEventIdSchema,
+  eventType: ProviderEventTypeSchema,
+  receivedAt: z.string().datetime(),
+  processedAt: z.string().datetime().nullable(),
+  trust: z.enum(["stripe_configured_secret_verified", "inter_unsigned_hint"]),
+  processingState: z.enum(["pending", "failed", "processed"]),
+  failureCategory: UnmatchedFailureCategorySchema.nullable(),
+  linkState: z.literal("unmatched"),
+});
+export type AdminUnmatchedPaymentEvidence = z.infer<
+  typeof AdminUnmatchedPaymentEvidenceSchema
 >;
 const NullableBoundedReferenceSchema = z
   .string()
@@ -222,6 +273,169 @@ export interface ListAdminPaymentEvidenceOutput {
   readonly nextCursor: string | null;
   readonly totalCount: number;
   readonly referenceResolution: PaymentEvidenceReferenceResolution;
+  readonly unmatchedEvidence: AdminUnmatchedPaymentEvidence[];
+  readonly unmatchedEvidenceTruncated: boolean;
+}
+
+interface UnmatchedEvidenceDbRow {
+  id: string;
+  provider: string;
+  provider_event_id: string;
+  event_type: string;
+  received_at: Date;
+  processed_at: Date | null;
+  processing_error: string | null;
+  matched_reference_type: string | null;
+}
+
+const FAILURE_CATEGORIES = new Set(
+  UnmatchedFailureCategorySchema.options,
+);
+
+function unmatchedFailureCategory(value: string | null) {
+  return value !== null && FAILURE_CATEGORIES.has(value as never)
+    ? UnmatchedFailureCategorySchema.parse(value)
+    : null;
+}
+
+async function findUnmatchedPaymentEvidence(
+  db: Database,
+  platformId: string,
+  exactReference: string,
+): Promise<{
+  rows: AdminUnmatchedPaymentEvidence[];
+  truncated: boolean;
+}> {
+  // Reference extraction is an explicit provider/event/field tuple allowlist.
+  // raw_payload is used only for exact comparisons and is never selected.
+  const result = await sql<UnmatchedEvidenceDbRow>`
+    WITH matched AS (
+    SELECT
+      e.id,
+      e.provider,
+      e.provider_event_id,
+      e.event_type,
+      e.received_at,
+      e.processed_at,
+      e.processing_error,
+      CASE
+        WHEN e.provider = 'stripe'
+          AND e.provider_event_id = ${exactReference}
+          AND ${exactReference} ~ '^evt_[A-Za-z0-9]{1,251}$'
+          THEN 'provider_event_id'
+        WHEN e.provider = 'inter'
+          AND e.provider_event_id = ${exactReference}
+          AND ${exactReference} ~ '^[A-Za-z0-9:]{1,96}$'
+          THEN 'provider_event_id'
+        WHEN e.provider = 'inter'
+          AND e.event_type = 'pix.recebido'
+          AND e.raw_payload ->> 'txid' = ${exactReference}
+          AND ${exactReference} ~ '^[A-Za-z0-9]{26,35}$'
+          THEN 'inter_txid'
+        WHEN e.provider = 'inter'
+          AND e.event_type IN ('pix.recebido', 'pix.devolucao')
+          AND e.raw_payload ->> 'endToEndId' = ${exactReference}
+          AND ${exactReference} ~ '^[A-Za-z0-9]{32}$'
+          THEN 'inter_e2e'
+        WHEN e.provider = 'stripe'
+          AND e.event_type IN ('checkout.session.completed', 'checkout.session.expired')
+          AND e.raw_payload -> 'data' -> 'object' ->> 'id' = ${exactReference}
+          AND ${exactReference} ~ '^cs_[A-Za-z0-9_]{1,252}$'
+          THEN 'stripe_checkout_session'
+        WHEN e.provider = 'stripe'
+          AND e.event_type IN (
+            'payment_intent.created', 'payment_intent.processing',
+            'payment_intent.succeeded', 'payment_intent.payment_failed'
+          )
+          AND e.raw_payload -> 'data' -> 'object' ->> 'id' = ${exactReference}
+          AND ${exactReference} ~ '^pi_[A-Za-z0-9_]{1,252}$'
+          THEN 'stripe_payment_intent'
+        WHEN e.provider = 'stripe'
+          AND e.event_type IN (
+            'checkout.session.completed', 'checkout.session.expired',
+            'charge.succeeded', 'charge.failed', 'charge.refunded', 'charge.updated'
+          )
+          AND e.raw_payload -> 'data' -> 'object' ->> 'payment_intent' = ${exactReference}
+          AND ${exactReference} ~ '^pi_[A-Za-z0-9_]{1,252}$'
+          THEN 'stripe_payment_intent'
+        WHEN e.provider = 'stripe'
+          AND e.event_type IN (
+            'charge.succeeded', 'charge.failed', 'charge.refunded', 'charge.updated'
+          )
+          AND e.raw_payload -> 'data' -> 'object' ->> 'id' = ${exactReference}
+          AND ${exactReference} ~ '^ch_[A-Za-z0-9_]{1,252}$'
+          THEN 'stripe_charge'
+        WHEN e.provider = 'stripe'
+          AND e.event_type = 'charge.dispute.created'
+          AND e.raw_payload -> 'data' -> 'object' ->> 'charge' = ${exactReference}
+          AND ${exactReference} ~ '^ch_[A-Za-z0-9_]{1,252}$'
+          THEN 'stripe_charge'
+      END AS matched_reference_type
+    FROM payment_webhook_events e
+    WHERE e.pagamento_id IS NULL
+      AND e.ingress_platform_id = ${platformId}::uuid
+      AND (
+        (e.provider = 'stripe' AND e.signature_valid = TRUE)
+        OR (e.provider = 'inter' AND e.signature_valid = FALSE)
+      )
+      AND NOT (e.processed_at IS NOT NULL AND e.processing_error IS NOT NULL)
+      AND e.provider_event_id ~ '^[A-Za-z0-9:_-]{1,255}$'
+      AND e.event_type ~ '^[a-z0-9][a-z0-9._-]{0,119}$'
+      AND (
+        (e.provider = 'stripe' AND e.event_type IN (
+          'checkout.session.completed', 'checkout.session.expired',
+          'payment_intent.created', 'payment_intent.processing',
+          'payment_intent.succeeded', 'payment_intent.payment_failed',
+          'charge.succeeded', 'charge.failed', 'charge.refunded', 'charge.updated',
+          'charge.dispute.created'
+        ))
+        OR (e.provider = 'inter' AND e.event_type IN ('pix.recebido', 'pix.devolucao'))
+      )
+      AND (
+        e.provider_event_id = ${exactReference}
+        OR e.raw_payload ->> 'txid' = ${exactReference}
+        OR e.raw_payload ->> 'endToEndId' = ${exactReference}
+        OR e.raw_payload -> 'data' -> 'object' ->> 'id' = ${exactReference}
+        OR e.raw_payload -> 'data' -> 'object' ->> 'payment_intent' = ${exactReference}
+        OR e.raw_payload -> 'data' -> 'object' ->> 'charge' = ${exactReference}
+      )
+    )
+    SELECT id, provider, provider_event_id, event_type, received_at,
+           processed_at, processing_error, matched_reference_type
+    FROM matched
+    WHERE matched_reference_type IS NOT NULL
+    ORDER BY received_at DESC, id DESC
+    LIMIT ${UNMATCHED_PAYMENT_EVIDENCE_LIMIT + 1}
+  `.execute(db);
+
+  const visible = result.rows.slice(0, UNMATCHED_PAYMENT_EVIDENCE_LIMIT);
+  return {
+    rows: visible.map((row) =>
+      AdminUnmatchedPaymentEvidenceSchema.parse({
+        archiveId: row.id,
+        provider: row.provider,
+        matchedReferenceType: row.matched_reference_type,
+        matchedReference: exactReference,
+        providerEventId: row.provider_event_id,
+        eventType: row.event_type,
+        receivedAt: row.received_at.toISOString(),
+        processedAt: row.processed_at?.toISOString() ?? null,
+        trust:
+          row.provider === "stripe"
+            ? "stripe_configured_secret_verified"
+            : "inter_unsigned_hint",
+        processingState:
+          row.processed_at !== null
+            ? "processed"
+            : row.processing_error !== null
+              ? "failed"
+              : "pending",
+        failureCategory: unmatchedFailureCategory(row.processing_error),
+        linkState: "unmatched",
+      }),
+    ),
+    truncated: result.rows.length > UNMATCHED_PAYMENT_EVIDENCE_LIMIT,
+  };
 }
 
 function numberFromDb(value: string | number): number {
@@ -298,6 +512,8 @@ export async function listAdminPaymentEvidence(
 
   let exactPaymentId: string | null = null;
   let referenceResolution: PaymentEvidenceReferenceResolution = "not_requested";
+  let unmatchedEvidence: AdminUnmatchedPaymentEvidence[] = [];
+  let unmatchedEvidenceTruncated = false;
   if (exactReference !== null) {
     const matches = await sql<{ payment_id: string }>`
       SELECT DISTINCT p.id AS payment_id
@@ -319,14 +535,36 @@ export async function listAdminPaymentEvidence(
         )
       LIMIT 2
     `.execute(db);
-    if (matches.rows.length === 0) {
-      return { rows: [], nextCursor: null, totalCount: 0, referenceResolution: "absent" };
-    }
+    const unmatched = await findUnmatchedPaymentEvidence(
+      db,
+      input.platformId,
+      exactReference,
+    );
+    unmatchedEvidence = unmatched.rows;
+    unmatchedEvidenceTruncated = unmatched.truncated;
     if (matches.rows.length > 1) {
-      return { rows: [], nextCursor: null, totalCount: 0, referenceResolution: "ambiguous" };
+      return {
+        rows: [],
+        nextCursor: null,
+        totalCount: 0,
+        referenceResolution: "ambiguous",
+        unmatchedEvidence,
+        unmatchedEvidenceTruncated,
+      };
+    }
+    if (matches.rows.length === 0) {
+      return {
+        rows: [],
+        nextCursor: null,
+        totalCount: 0,
+        referenceResolution:
+          unmatchedEvidence.length === 0 ? "absent" : "unmatched",
+        unmatchedEvidence,
+        unmatchedEvidenceTruncated,
+      };
     }
     exactPaymentId = matches.rows[0]?.payment_id ?? null;
-    referenceResolution = "unique";
+    referenceResolution = unmatchedEvidence.length === 0 ? "unique" : "mixed";
   }
 
   const providerFilter = input.provider;
@@ -442,5 +680,12 @@ export async function listAdminPaymentEvidence(
     : null;
   const totalCount = numberFromDb(countResult.rows[0]?.total_count ?? 0);
 
-  return { rows, nextCursor, totalCount, referenceResolution };
+  return {
+    rows,
+    nextCursor,
+    totalCount,
+    referenceResolution,
+    unmatchedEvidence,
+    unmatchedEvidenceTruncated,
+  };
 }

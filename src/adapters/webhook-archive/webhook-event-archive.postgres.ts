@@ -9,6 +9,7 @@ import {
   type SaveReceivedResult,
   type WebhookEventArchive,
   type WebhookEventRecord,
+  WebhookIngressPlatformConflictError,
 } from './webhook-event-archive.js';
 
 const tracer = trace.getTracer('frame');
@@ -41,11 +42,12 @@ export class WebhookEventArchivePostgres implements WebhookEventArchive {
         const inserted = await sql<{ id: string }>`
           INSERT INTO payment_webhook_events
             (id, provider, provider_event_id, event_type, raw_payload,
-             signature_header, signature_valid)
+             signature_header, signature_valid, ingress_platform_id)
           VALUES
             (${newId}, ${input.provider}, ${input.providerEventId},
              ${input.eventType}, ${JSON.stringify(input.rawPayload)}::jsonb,
-             ${input.signatureHeader}, ${input.signatureValid})
+             ${input.signatureHeader}, ${input.signatureValid},
+             ${input.ingressPlatformId ?? null}::uuid)
           ON CONFLICT (provider, provider_event_id) DO NOTHING
           RETURNING id
         `.execute(this.db);
@@ -57,8 +59,8 @@ export class WebhookEventArchivePostgres implements WebhookEventArchive {
 
         // Conflict path — fetch the existing row's id. The unique
         // constraint guarantees exactly one match.
-        const existing = await sql<{ id: string }>`
-          SELECT id FROM payment_webhook_events
+        const existing = await sql<{ id: string; ingress_platform_id: string | null }>`
+          SELECT id, ingress_platform_id FROM payment_webhook_events
           WHERE provider = ${input.provider}
             AND provider_event_id = ${input.providerEventId}
           LIMIT 1
@@ -70,6 +72,13 @@ export class WebhookEventArchivePostgres implements WebhookEventArchive {
             'WebhookEventArchivePostgres: ON CONFLICT fired but the conflicting row could not be found. ' +
               'Race condition or constraint mismatch?',
           );
+        }
+
+        if (existing.rows[0]?.ingress_platform_id !== (input.ingressPlatformId ?? null)) {
+          // First-write provenance is immutable. In particular, a current
+          // retry cannot promote a historical NULL row or overwrite another
+          // platform's ingress fact.
+          throw new WebhookIngressPlatformConflictError();
         }
 
         span.setStatus({ code: SpanStatusCode.OK });
@@ -223,7 +232,8 @@ export class WebhookEventArchivePostgres implements WebhookEventArchive {
           SELECT id, provider, provider_event_id, event_type, raw_payload,
                  signature_header, signature_valid, received_at, processed_at,
                  processing_error, pagamento_id, processing_attempt_count,
-                 processing_fence_token, processing_lease_until
+                 processing_fence_token, processing_lease_until,
+                 ingress_platform_id
             FROM payment_webhook_events
             WHERE id = ${id}
             LIMIT 1
@@ -253,7 +263,8 @@ export class WebhookEventArchivePostgres implements WebhookEventArchive {
             SELECT id, provider, provider_event_id, event_type, raw_payload,
                    signature_header, signature_valid, received_at, processed_at,
                    processing_error, pagamento_id, processing_attempt_count,
-                   processing_fence_token, processing_lease_until
+                   processing_fence_token, processing_lease_until,
+                   ingress_platform_id
               FROM payment_webhook_events
               WHERE provider = ${provider}
                 AND provider_event_id = ${providerEventId}
@@ -339,7 +350,8 @@ export class WebhookEventArchivePostgres implements WebhookEventArchive {
             SELECT id, provider, provider_event_id, event_type, raw_payload,
                    signature_header, signature_valid, received_at, processed_at,
                    processing_error, pagamento_id, processing_attempt_count,
-                   processing_fence_token, processing_lease_until
+                   processing_fence_token, processing_lease_until,
+                   ingress_platform_id
               FROM payment_webhook_events
               WHERE pagamento_id = ${idPagamento}
               ${orderClause}
@@ -375,6 +387,7 @@ interface PaymentWebhookEventRow {
   processing_attempt_count: number;
   processing_fence_token: string | null;
   processing_lease_until: Date | null;
+  ingress_platform_id: string | null;
 }
 
 function toRecord(row: PaymentWebhookEventRow): WebhookEventRecord {
@@ -390,6 +403,7 @@ function toRecord(row: PaymentWebhookEventRow): WebhookEventRecord {
     processedAt: row.processed_at,
     processingError: row.processing_error,
     pagamentoId: row.pagamento_id,
+    ingressPlatformId: row.ingress_platform_id,
     processingAttemptCount: row.processing_attempt_count,
     processingFenceToken: row.processing_fence_token,
     processingLeaseUntil: row.processing_lease_until,

@@ -442,7 +442,16 @@ describe('Migration round-trip', () => {
     //    this sequence must start at the LATEST migration and walk earlier.
     //    Adding a new migration on top REQUIRES prepending its down-step here.
 
-    // 20260909_053_payment_provider_recovery (aperture-iytxa) → actual TIP.
+    // 20260910_054_webhook_ingress_platform (aperture-bsygp) → actual TIP.
+    expect(await getColumn(db, 'payment_webhook_events', 'ingress_platform_id')).toBeDefined();
+    expect(await listIndexNames(db, 'payment_webhook_events')).toContain(
+      'payment_webhook_events_unmatched_ingress_idx',
+    );
+    const downWebhookIngressPlatform = await migrator.migrateDown();
+    expect(downWebhookIngressPlatform.error).toBeUndefined();
+    expect(await getColumn(db, 'payment_webhook_events', 'ingress_platform_id')).toBeUndefined();
+
+    // 20260909_053_payment_provider_recovery (aperture-iytxa) → current TIP.
     expect(await tableExists(db, 'payment_provider_operations')).toBe(true);
     expect(await tableExists(db, 'payment_provider_operation_attempt_facts')).toBe(true);
     expect(await getColumn(db, 'payment_webhook_events', 'processing_fence_token')).toBeDefined();

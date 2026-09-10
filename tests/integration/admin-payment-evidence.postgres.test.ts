@@ -4,6 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   InvalidPaymentEvidenceCursorError,
   listAdminPaymentEvidence,
+  UNMATCHED_PAYMENT_EVIDENCE_LIMIT,
 } from '../../apps/eunenem-server/server/admin-payment-evidence.js';
 import { ID_PLATAFORMA_EUNENEM } from '../../src/index.js';
 import { createTestDatabase, type TestDatabase } from '../helpers/test-db.js';
@@ -35,6 +36,10 @@ beforeAll(async () => {
 }, 60_000);
 
 beforeEach(async () => {
+  await testDb.db
+    .deleteFrom('payment_webhook_events')
+    .where('ingress_platform_id', 'is not', null)
+    .execute();
   await testDb.db
     .deleteFrom('payment_webhook_events')
     .where('id', 'in', [...WEBHOOK_IDS])
@@ -167,6 +172,39 @@ async function insertPayment(input: {
       ${externalTransaction === null ? null : JSON.stringify(externalTransaction)}::jsonb
     )
   `.execute(testDb.db);
+}
+
+async function insertUnmatchedEvidence(input: {
+  id?: string;
+  provider: 'stripe' | 'inter';
+  providerEventId: string;
+  eventType: string;
+  rawPayload: unknown;
+  ingressPlatformId?: string | null;
+  signatureValid: boolean;
+  receivedAt?: Date;
+  processedAt?: Date | null;
+  processingError?: string | null;
+}): Promise<string> {
+  const id = input.id ?? randomUUID();
+  await testDb.db
+    .insertInto('payment_webhook_events')
+    .values({
+      id,
+      provider: input.provider,
+      provider_event_id: input.providerEventId,
+      event_type: input.eventType,
+      raw_payload: input.rawPayload as never,
+      signature_header: input.provider === 'stripe' ? 'synthetic-signature' : 'not-provided',
+      signature_valid: input.signatureValid,
+      ingress_platform_id: input.ingressPlatformId ?? null,
+      received_at: input.receivedAt ?? CREATED_AT,
+      processed_at: input.processedAt ?? null,
+      processing_error: input.processingError ?? null,
+      pagamento_id: null,
+    })
+    .execute();
+  return id;
 }
 
 describe('listAdminPaymentEvidence — Postgres', () => {
@@ -507,6 +545,8 @@ describe('listAdminPaymentEvidence — Postgres', () => {
       nextCursor: null,
       totalCount: 0,
       referenceResolution: 'ambiguous',
+      unmatchedEvidence: [],
+      unmatchedEvidenceTruncated: false,
     });
 
     await testDb.db
@@ -533,6 +573,314 @@ describe('listAdminPaymentEvidence — Postgres', () => {
     });
     expect(absent.referenceResolution).toBe('absent');
     expect(absent.rows).toEqual([]);
+    expect(absent.unmatchedEvidence).toEqual([]);
+    expect(absent.unmatchedEvidenceTruncated).toBe(false);
+  });
+
+  it('returns future platform-scoped Stripe and unsigned Inter orphan receipts without raw data', async () => {
+    const stripeReference = 'cs_future_receipt_1';
+    const stripeId = await insertUnmatchedEvidence({
+      provider: 'stripe',
+      providerEventId: 'evt_future_receipt_1',
+      eventType: 'checkout.session.completed',
+      rawPayload: {
+        data: {
+          object: {
+            id: stripeReference,
+            customer_email: 'must-not-leak@example.test',
+          },
+        },
+        privateCanary: 'raw-provider-body-must-not-leak',
+      },
+      ingressPlatformId: ID_PLATAFORMA_EUNENEM,
+      signatureValid: true,
+      processedAt: new Date('2026-09-08T14:01:00.000Z'),
+    });
+    const stripe = await listAdminPaymentEvidence(testDb.db, {
+      ...LIST_CONTEXT,
+      platformId: ID_PLATAFORMA_EUNENEM,
+      cursor: null,
+      limit: 10,
+      provider: null,
+      status: null,
+      exactReference: stripeReference,
+    });
+    expect(stripe.referenceResolution).toBe('unmatched');
+    expect(stripe.rows).toEqual([]);
+    expect(stripe.unmatchedEvidence).toEqual([
+      {
+        archiveId: stripeId,
+        provider: 'stripe',
+        matchedReferenceType: 'stripe_checkout_session',
+        matchedReference: stripeReference,
+        providerEventId: 'evt_future_receipt_1',
+        eventType: 'checkout.session.completed',
+        receivedAt: CREATED_AT.toISOString(),
+        processedAt: '2026-09-08T14:01:00.000Z',
+        trust: 'stripe_configured_secret_verified',
+        processingState: 'processed',
+        failureCategory: null,
+        linkState: 'unmatched',
+      },
+    ]);
+    expect(JSON.stringify(stripe)).not.toContain('must-not-leak');
+    expect(JSON.stringify(stripe)).not.toContain('synthetic-signature');
+
+    const interReference = 'T'.repeat(26);
+    const interId = await insertUnmatchedEvidence({
+      provider: 'inter',
+      providerEventId: `${interReference}:${'E'.repeat(32)}`,
+      eventType: 'pix.recebido',
+      rawPayload: { txid: interReference, endToEndId: 'E'.repeat(32), cpf: 'must-not-leak' },
+      ingressPlatformId: ID_PLATAFORMA_EUNENEM,
+      signatureValid: false,
+      processingError: 'charge_requery_failed',
+    });
+    const inter = await listAdminPaymentEvidence(testDb.db, {
+      ...LIST_CONTEXT,
+      platformId: ID_PLATAFORMA_EUNENEM,
+      cursor: null,
+      limit: 10,
+      provider: null,
+      status: null,
+      exactReference: interReference,
+    });
+    expect(inter.referenceResolution).toBe('unmatched');
+    expect(inter.unmatchedEvidence).toEqual([
+      expect.objectContaining({
+        archiveId: interId,
+        provider: 'inter',
+        matchedReferenceType: 'inter_txid',
+        trust: 'inter_unsigned_hint',
+        processingState: 'failed',
+        failureCategory: 'charge_requery_failed',
+      }),
+    ]);
+    expect(JSON.stringify(inter)).not.toContain('must-not-leak');
+  });
+
+  it.each([
+    {
+      label: 'Stripe event id',
+      provider: 'stripe' as const,
+      providerEventId: 'evt_exactevent1',
+      eventType: 'charge.succeeded',
+      rawPayload: { data: { object: { id: 'ch_unrelated_1' } } },
+      exactReference: 'evt_exactevent1',
+      matchedReferenceType: 'provider_event_id',
+      signatureValid: true,
+    },
+    {
+      label: 'Stripe charge id',
+      provider: 'stripe' as const,
+      providerEventId: 'evt_exact_charge_1',
+      eventType: 'charge.succeeded',
+      rawPayload: { data: { object: { id: 'ch_exact_charge_1' } } },
+      exactReference: 'ch_exact_charge_1',
+      matchedReferenceType: 'stripe_charge',
+      signatureValid: true,
+    },
+    {
+      label: 'Inter composite event id',
+      provider: 'inter' as const,
+      providerEventId: `${'I'.repeat(26)}:${'J'.repeat(32)}`,
+      eventType: 'pix.recebido',
+      rawPayload: { txid: 'I'.repeat(26), endToEndId: 'J'.repeat(32) },
+      exactReference: `${'I'.repeat(26)}:${'J'.repeat(32)}`,
+      matchedReferenceType: 'provider_event_id',
+      signatureValid: false,
+    },
+    {
+      label: 'Inter end-to-end id',
+      provider: 'inter' as const,
+      providerEventId: `${'K'.repeat(26)}:${'L'.repeat(32)}`,
+      eventType: 'pix.recebido',
+      rawPayload: { txid: 'K'.repeat(26), endToEndId: 'L'.repeat(32) },
+      exactReference: 'L'.repeat(32),
+      matchedReferenceType: 'inter_e2e',
+      signatureValid: false,
+    },
+  ])('matches the strict $label tuple without generic JSON traversal', async (fixture) => {
+    await insertUnmatchedEvidence({
+      ...fixture,
+      ingressPlatformId: ID_PLATAFORMA_EUNENEM,
+    });
+    const result = await listAdminPaymentEvidence(testDb.db, {
+      ...LIST_CONTEXT,
+      platformId: ID_PLATAFORMA_EUNENEM,
+      cursor: null,
+      limit: 10,
+      provider: null,
+      status: null,
+      exactReference: fixture.exactReference,
+    });
+    expect(result.referenceResolution).toBe('unmatched');
+    expect(result.unmatchedEvidence).toHaveLength(1);
+    expect(result.unmatchedEvidence[0]).toMatchObject({
+      provider: fixture.provider,
+      matchedReferenceType: fixture.matchedReferenceType,
+      matchedReference: fixture.exactReference,
+    });
+  });
+
+  it('keeps linked, unmatched, mixed and ambiguous resolution explicit without choosing a payment', async () => {
+    const reference = 'pi_mixed_reference';
+    await insertPayment({
+      id: PAYMENT_IDS[0],
+      method: 'credit_card',
+      status: 'aprovado',
+      provider: 'stripe',
+    });
+    await sql`
+      UPDATE pagamentos
+      SET intencao_payment_intent_external_ref = ${reference}
+      WHERE id = ${PAYMENT_IDS[0]}::uuid
+    `.execute(testDb.db);
+    const orphanId = await insertUnmatchedEvidence({
+      provider: 'stripe',
+      providerEventId: 'evt_mixed_reference',
+      eventType: 'payment_intent.succeeded',
+      rawPayload: { data: { object: { id: reference } } },
+      ingressPlatformId: ID_PLATAFORMA_EUNENEM,
+      signatureValid: true,
+    });
+
+    const mixed = await listAdminPaymentEvidence(testDb.db, {
+      ...LIST_CONTEXT,
+      platformId: ID_PLATAFORMA_EUNENEM,
+      cursor: null,
+      limit: 10,
+      provider: null,
+      status: null,
+      exactReference: reference,
+    });
+    expect(mixed.referenceResolution).toBe('mixed');
+    expect(mixed.rows.map((row) => row.paymentId)).toEqual([PAYMENT_IDS[0]]);
+    expect(mixed.unmatchedEvidence.map((row) => row.archiveId)).toEqual([orphanId]);
+
+    await insertPayment({
+      id: PAYMENT_IDS[1],
+      method: 'credit_card',
+      status: 'aprovado',
+      provider: 'stripe',
+    });
+    await sql`
+      UPDATE pagamentos
+      SET intencao_external_ref = ${reference}
+      WHERE id = ${PAYMENT_IDS[1]}::uuid
+    `.execute(testDb.db);
+    const ambiguous = await listAdminPaymentEvidence(testDb.db, {
+      ...LIST_CONTEXT,
+      platformId: ID_PLATAFORMA_EUNENEM,
+      cursor: null,
+      limit: 10,
+      provider: null,
+      status: null,
+      exactReference: reference,
+    });
+    expect(ambiguous.referenceResolution).toBe('ambiguous');
+    expect(ambiguous.rows).toEqual([]);
+    expect(ambiguous.unmatchedEvidence.map((row) => row.archiveId)).toEqual([orphanId]);
+  });
+
+  it('excludes unscoped, cross-platform, invalid Stripe and non-allowlisted tuple evidence', async () => {
+    const reference = 'pi_denied_reference';
+    const otherPlatformId = randomUUID();
+    const seeds = [
+      {
+        providerEventId: 'evt_unscoped_reference',
+        ingressPlatformId: null,
+        signatureValid: true,
+        eventType: 'payment_intent.succeeded',
+      },
+      {
+        providerEventId: 'evt_cross_platform_reference',
+        ingressPlatformId: otherPlatformId,
+        signatureValid: true,
+        eventType: 'payment_intent.succeeded',
+      },
+      {
+        providerEventId: 'evt_invalid_signature_reference',
+        ingressPlatformId: ID_PLATAFORMA_EUNENEM,
+        signatureValid: false,
+        eventType: 'payment_intent.succeeded',
+      },
+      {
+        providerEventId: 'evt_wrong_tuple_reference',
+        ingressPlatformId: ID_PLATAFORMA_EUNENEM,
+        signatureValid: true,
+        eventType: 'invoice.created',
+      },
+    ] as const;
+    for (const seed of seeds) {
+      await insertUnmatchedEvidence({
+        provider: 'stripe',
+        rawPayload: { data: { object: { id: reference } } },
+        ...seed,
+      });
+    }
+    await insertUnmatchedEvidence({
+      provider: 'stripe',
+      providerEventId: 'evt_inconsistent_state_reference',
+      eventType: 'payment_intent.succeeded',
+      rawPayload: { data: { object: { id: reference } } },
+      ingressPlatformId: ID_PLATAFORMA_EUNENEM,
+      signatureValid: true,
+      processedAt: new Date('2026-09-08T14:03:00.000Z'),
+      processingError: 'dispatch_failed',
+    });
+
+    const result = await listAdminPaymentEvidence(testDb.db, {
+      ...LIST_CONTEXT,
+      platformId: ID_PLATAFORMA_EUNENEM,
+      cursor: null,
+      limit: 10,
+      provider: null,
+      status: null,
+      exactReference: reference,
+    });
+    expect(result.referenceResolution).toBe('absent');
+    expect(result.unmatchedEvidence).toEqual([]);
+  });
+
+  it('caps unmatched evidence deterministically and sanitizes unknown failure text', async () => {
+    const reference = 'pi_capped_reference';
+    const ids: string[] = [];
+    for (let index = 0; index <= UNMATCHED_PAYMENT_EVIDENCE_LIMIT; index += 1) {
+      const id = await insertUnmatchedEvidence({
+        provider: 'stripe',
+        providerEventId: `evt_cap_${String(index).padStart(2, '0')}`,
+        eventType: 'payment_intent.payment_failed',
+        rawPayload: { data: { object: { id: reference } } },
+        ingressPlatformId: ID_PLATAFORMA_EUNENEM,
+        signatureValid: true,
+        receivedAt: new Date(CREATED_AT.getTime() + index * 1_000),
+        processingError:
+          index === UNMATCHED_PAYMENT_EVIDENCE_LIMIT
+            ? 'provider-secret-text-must-not-leak'
+            : 'dispatch_failed',
+      });
+      ids.push(id);
+    }
+
+    const result = await listAdminPaymentEvidence(testDb.db, {
+      ...LIST_CONTEXT,
+      platformId: ID_PLATAFORMA_EUNENEM,
+      cursor: null,
+      limit: 10,
+      provider: null,
+      status: null,
+      exactReference: reference,
+    });
+    expect(result.referenceResolution).toBe('unmatched');
+    expect(result.unmatchedEvidence).toHaveLength(UNMATCHED_PAYMENT_EVIDENCE_LIMIT);
+    expect(result.unmatchedEvidenceTruncated).toBe(true);
+    expect(result.unmatchedEvidence[0]).toMatchObject({
+      archiveId: ids.at(-1),
+      failureCategory: null,
+    });
+    expect(result.unmatchedEvidence.at(-1)?.archiveId).toBe(ids[1]);
+    expect(JSON.stringify(result)).not.toContain('provider-secret-text');
   });
 
   it('binds cursors to payer and campaign filters without exposing raw values', async () => {

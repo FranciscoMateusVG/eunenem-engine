@@ -9,6 +9,7 @@ import {
 } from '../../../../src/index.js';
 import {
   shouldBindInterCobrancaAdapter,
+  ID_PLATAFORMA_EUNENEM,
   type ServerDeps,
   type ServerEnv,
 } from '../auth/setup.js';
@@ -133,6 +134,7 @@ export function createInterPixWebhookHandler(
         const rawBody = await readBoundedBody(c.req.raw, INTER_PIX_WEBHOOK_MAX_BODY_BYTES);
         const result = await archiveAndDispatchInterPixWebhook(deps.webhookEventArchive, {
           rawBody,
+          ingressPlatformId: ID_PLATAFORMA_EUNENEM,
           pixCobrancaProvider: deps.pixCobrancaProvider,
           resolveChargeBinding: async (identity) => {
             const now = deps.clock();

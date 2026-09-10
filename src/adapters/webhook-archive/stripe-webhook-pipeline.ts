@@ -74,6 +74,8 @@ export interface StripeDispatchResult {
 export interface StripePipelineArgs {
   readonly rawBody: string;
   readonly signatureHeader: string;
+  /** Fixed server/composition-root ingress scope; never payload-derived. */
+  readonly ingressPlatformId: string;
   /**
    * Verifies the signature against the raw body. Should throw on
    * verification failure (matching `Stripe.Webhooks.constructEvent`
@@ -135,6 +137,7 @@ export async function archiveAndDispatchStripeEvent(
     rawPayload: parsedPayload,
     signatureHeader: args.signatureHeader,
     signatureValid,
+    ingressPlatformId: args.ingressPlatformId,
   });
 
   // ─── 4. Bail on invalid signature (row archived with signature_valid=false) ─

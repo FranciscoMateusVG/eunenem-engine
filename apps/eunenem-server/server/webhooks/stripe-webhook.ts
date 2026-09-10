@@ -128,7 +128,7 @@ import {
   PagamentoNaoEncontradoError,
   PagamentoEstornoLancamentoJaTransferidoError,
 } from '../../../../src/index.js';
-import type { ServerDeps } from '../auth/setup.js';
+import { ID_PLATAFORMA_EUNENEM, type ServerDeps } from '../auth/setup.js';
 import { getStripe } from '../../src/lib/stripe/stripe.js';
 
 const tracer = trace.getTracer('eunenem-server');
@@ -233,6 +233,7 @@ export function createStripeWebhookHandler(deps: ServerDeps) {
         const result = await archiveAndDispatchStripeEvent(deps.webhookEventArchive, {
           rawBody,
           signatureHeader: sig,
+          ingressPlatformId: ID_PLATAFORMA_EUNENEM,
           verifyEvent: (raw, header) =>
             getStripe().webhooks.constructEvent(raw, header, secret),
           dispatch: async (event) => {

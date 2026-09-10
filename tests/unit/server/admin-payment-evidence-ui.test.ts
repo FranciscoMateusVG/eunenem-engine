@@ -6,6 +6,7 @@ import {
   PaymentEvidenceTable,
   paymentEvidenceSearchInput,
   ReferenceResolutionNotice,
+  UnmatchedPaymentEvidenceTable,
 } from '../../../apps/eunenem-server/pages/AdminPagamentosPage.js';
 
 const appRequire = createRequire(`${process.cwd()}/apps/eunenem-server/package.json`);
@@ -248,5 +249,76 @@ describe('PaymentEvidenceFilters', () => {
         }),
       ),
     ).toBe('');
+  });
+
+  it('distinguishes mixed linked and unmatched evidence without claiming payment ownership', () => {
+    const mixed = renderToStaticMarkup(
+      React.createElement(ReferenceResolutionNotice, {
+        exactReference: 'pi_mixed',
+        resolution: 'mixed',
+      }),
+    );
+    expect(mixed).toContain('pagamento local');
+    expect(mixed).toContain('recebimentos sem vínculo');
+    expect(mixed).toContain('não confirma que pertencem ao mesmo pagamento');
+  });
+});
+
+describe('UnmatchedPaymentEvidenceTable', () => {
+  const rows = [
+    {
+      archiveId: '21000000-0000-4000-8000-000000000001',
+      provider: 'stripe' as const,
+      matchedReferenceType: 'stripe_payment_intent' as const,
+      matchedReference: 'pi_saved',
+      providerEventId: 'evt_saved',
+      eventType: 'payment_intent.succeeded',
+      receivedAt: '2026-09-08T14:00:00.000Z',
+      processedAt: '2026-09-08T14:01:00.000Z',
+      trust: 'stripe_configured_secret_verified' as const,
+      processingState: 'processed' as const,
+      failureCategory: null,
+      linkState: 'unmatched' as const,
+    },
+    {
+      archiveId: '21000000-0000-4000-8000-000000000002',
+      provider: 'inter' as const,
+      matchedReferenceType: 'inter_txid' as const,
+      matchedReference: 'T'.repeat(26),
+      providerEventId: `${'T'.repeat(26)}:${'E'.repeat(32)}`,
+      eventType: 'pix.recebido',
+      receivedAt: '2026-09-08T14:02:00.000Z',
+      processedAt: null,
+      trust: 'inter_unsigned_hint' as const,
+      processingState: 'failed' as const,
+      failureCategory: 'charge_requery_failed' as const,
+      linkState: 'unmatched' as const,
+    },
+  ];
+
+  it('renders honest trust and local-processing evidence without a paid or replay claim', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(UnmatchedPaymentEvidenceTable, { rows, truncated: false }),
+    );
+    expect(html).toContain('sem pagamento local vinculado');
+    expect(html).toContain('Não comprova que o pagamento pertence à plataforma');
+    expect(html).toContain('nem que o dinheiro chegou');
+    expect(html).toContain('Assinatura verificada pelo segredo configurado neste endpoint');
+    expect(html).toContain('Aviso não assinado; não confirmado pelo Inter');
+    expect(html).toContain('Processamento local concluído');
+    expect(html).toContain('Falha no processamento local');
+    expect(html).toContain('charge_requery_failed');
+    expect(html).not.toContain('Pago');
+    expect(html).not.toContain('Reprocessar');
+    expect(html).not.toContain('rawPayload');
+    expect(html).not.toContain('signatureHeader');
+  });
+
+  it('shows that the hard-capped result is incomplete', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(UnmatchedPaymentEvidenceTable, { rows: [rows[0]], truncated: true }),
+    );
+    expect(html).toContain('20 evidências mais recentes');
+    expect(html).toContain('Existem outros registros locais');
   });
 });

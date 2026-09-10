@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { archiveAndDispatchStripeEvent } from '../../../src/adapters/webhook-archive/stripe-webhook-pipeline.js';
 import { WebhookEventArchiveMemory } from '../../../src/adapters/webhook-archive/webhook-event-archive.memory.js';
 
+const INGRESS_PLATFORM_ID = '10000000-0000-4000-8000-000000000001';
+
 /**
  * Pipeline tests for aperture-1n6u8.
  *
@@ -67,6 +69,7 @@ describe('archiveAndDispatchStripeEvent (aperture-1n6u8 pipeline)', () => {
     dispatch.mockResolvedValueOnce({ pagamentoId: 'pag_xyz_001' });
 
     const result = await archiveAndDispatchStripeEvent(archive, {
+      ingressPlatformId: INGRESS_PLATFORM_ID,
       rawBody,
       signatureHeader: 't=1717000000,v1=fakebutpresent',
       verifyEvent: () => event,
@@ -86,6 +89,7 @@ describe('archiveAndDispatchStripeEvent (aperture-1n6u8 pipeline)', () => {
     expect(archived?.processedAt).toBeInstanceOf(Date);
     expect(archived?.pagamentoId).toBe('pag_xyz_001');
     expect(archived?.processingError).toBeNull();
+    expect(archived?.ingressPlatformId).toBe(INGRESS_PLATFORM_ID);
 
     expect(dispatch).toHaveBeenCalledTimes(1);
     expect(dispatch).toHaveBeenCalledWith(event);

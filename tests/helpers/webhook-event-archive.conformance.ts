@@ -4,7 +4,10 @@ import type {
   SaveReceivedInput,
   WebhookEventArchive,
 } from '../../src/adapters/webhook-archive/webhook-event-archive.js';
-import { PROCESSING_ERROR_MAX_LENGTH } from '../../src/adapters/webhook-archive/webhook-event-archive.js';
+import {
+  PROCESSING_ERROR_MAX_LENGTH,
+  WebhookIngressPlatformConflictError,
+} from '../../src/adapters/webhook-archive/webhook-event-archive.js';
 
 interface ConformanceOptions {
   readonly factory: () => WebhookEventArchive | Promise<WebhookEventArchive>;
@@ -100,6 +103,81 @@ export function describeWebhookEventArchiveConformance(name: string, options: Co
       expect(finalState?.rawPayload).toEqual({ id: 'sess_first' });
       expect(finalState?.processedAt).toBeInstanceOf(Date); // still processed
       expect(finalState?.pagamentoId).toBe(firstPagamentoId);
+    });
+
+    it('keeps ingress platform provenance immutable on duplicate delivery', async () => {
+      const providerEventId = `evt_${randomUUID()}`;
+      const firstPlatformId = randomUUID();
+      const otherPlatformId = randomUUID();
+      const first = await archive.saveReceived({
+        provider: 'stripe',
+        providerEventId,
+        eventType: 'checkout.session.completed',
+        rawPayload: { id: 'cs_ingress' },
+        signatureHeader: 't=ok',
+        signatureValid: true,
+        ingressPlatformId: firstPlatformId,
+      });
+
+      await expect(
+        archive.saveReceived({
+          provider: 'stripe',
+          providerEventId,
+          eventType: 'checkout.session.completed',
+          rawPayload: { id: 'cs_ingress' },
+          signatureHeader: 't=retry',
+          signatureValid: true,
+          ingressPlatformId: firstPlatformId,
+        }),
+      ).resolves.toEqual({ id: first.id, isDuplicate: true });
+      await expect(
+        archive.saveReceived({
+          provider: 'stripe',
+          providerEventId,
+          eventType: 'checkout.session.completed',
+          rawPayload: { id: 'cs_ingress' },
+          signatureHeader: 't=other-platform',
+          signatureValid: true,
+          ingressPlatformId: otherPlatformId,
+        }),
+      ).rejects.toBeInstanceOf(WebhookIngressPlatformConflictError);
+      await expect(
+        archive.saveReceived({
+          provider: 'stripe',
+          providerEventId,
+          eventType: 'checkout.session.completed',
+          rawPayload: { id: 'cs_ingress' },
+          signatureHeader: 't=unscoped',
+          signatureValid: true,
+        }),
+      ).rejects.toBeInstanceOf(WebhookIngressPlatformConflictError);
+      await expect(archive.findById(first.id)).resolves.toMatchObject({
+        ingressPlatformId: firstPlatformId,
+      });
+
+      const historicalEventId = `evt_${randomUUID()}`;
+      const historical = await archive.saveReceived({
+        provider: 'stripe',
+        providerEventId: historicalEventId,
+        eventType: 'checkout.session.completed',
+        rawPayload: { id: 'cs_historical' },
+        signatureHeader: 't=historical',
+        signatureValid: true,
+      });
+      await expect(
+        archive.saveReceived({
+          provider: 'stripe',
+          providerEventId: historicalEventId,
+          eventType: 'checkout.session.completed',
+          rawPayload: { id: 'cs_historical' },
+          signatureHeader: 't=promote',
+          signatureValid: true,
+          ingressPlatformId: firstPlatformId,
+        }),
+      ).rejects.toBeInstanceOf(WebhookIngressPlatformConflictError);
+      await expect(archive.findById(historical.id)).resolves.toMatchObject({
+        ingressPlatformId: null,
+      });
     });
 
     it('markProcessed sets processed_at + pagamento_id (or null) and clears processing_error (aperture-1n6u8)', async () => {

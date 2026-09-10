@@ -8,6 +8,8 @@ import type { AppRouter } from "../server/trpc/router.js";
 type RouterOutputs = inferRouterOutputs<AppRouter>;
 export type PaymentEvidenceRow =
   RouterOutputs["admin"]["pagamentos"]["listEvidencePaginated"]["rows"][number];
+export type UnmatchedPaymentEvidenceRow =
+  RouterOutputs["admin"]["pagamentos"]["listEvidencePaginated"]["unmatchedEvidence"][number];
 
 const PAGE_SIZE = 50;
 const FILTER_DEBOUNCE_MS = 300;
@@ -28,6 +30,8 @@ type ReferenceResolution =
   | "not_requested"
   | "absent"
   | "unique"
+  | "unmatched"
+  | "mixed"
   | "ambiguous"
   | null;
 
@@ -172,6 +176,13 @@ export function AdminPagamentosPage() {
         referenceResolution !== "absent" &&
         referenceResolution !== "ambiguous" ? (
           <PaymentEvidenceTable rows={query.data?.rows ?? []} loading={query.isLoading} />
+        ) : null}
+
+        {!query.error ? (
+          <UnmatchedPaymentEvidenceTable
+            rows={query.data?.unmatchedEvidence ?? []}
+            truncated={query.data?.unmatchedEvidenceTruncated ?? false}
+          />
         ) : null}
 
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -349,6 +360,8 @@ function referenceResolutionFrom(data: unknown): ReferenceResolution {
   return resolution === "not_requested" ||
     resolution === "absent" ||
     resolution === "unique" ||
+    resolution === "unmatched" ||
+    resolution === "mixed" ||
     resolution === "ambiguous"
     ? resolution
     : null;
@@ -365,7 +378,8 @@ export function ReferenceResolutionNotice({
     exactReference === "" ||
     resolution === null ||
     resolution === "not_requested" ||
-    resolution === "unique"
+    resolution === "unique" ||
+    resolution === "unmatched"
   ) {
     return null;
   }
@@ -377,11 +391,93 @@ export function ReferenceResolutionNotice({
       </p>
     );
   }
+  if (resolution === "mixed") {
+    return (
+      <p className="rounded-md border border-amber-200 bg-amber-50 p-4 text-[14px] text-amber-900">
+        A referência aparece em um pagamento local e também em recebimentos sem vínculo. As
+        evidências são mostradas separadamente; isso não confirma que pertencem ao mesmo pagamento.
+      </p>
+    );
+  }
   return (
     <p role="alert" className="rounded-md border border-red-200 bg-red-50 p-4 text-[14px] text-red-800">
       A referência corresponde a mais de um pagamento local. Nenhuma linha foi escolhida; confira
       a inconsistência antes de agir.
     </p>
+  );
+}
+
+export function UnmatchedPaymentEvidenceTable({
+  rows,
+  truncated,
+}: {
+  rows: readonly UnmatchedPaymentEvidenceRow[];
+  truncated: boolean;
+}) {
+  if (rows.length === 0) return null;
+  return (
+    <section className="space-y-3" aria-labelledby="unmatched-evidence-title">
+      <div>
+        <h2 id="unmatched-evidence-title" className="text-lg font-semibold text-ink">
+          Evidência recebida sem pagamento local vinculado
+        </h2>
+        <p className="text-[13px] text-ink-soft">
+          Registro recebido no endpoint EuNeném. Não comprova que o pagamento pertence à plataforma
+          nem que o dinheiro chegou.
+        </p>
+      </div>
+      <div className="overflow-x-auto rounded-md border border-line bg-paper">
+        <table className="min-w-full divide-y divide-line text-left text-[12px]">
+          <thead className="bg-cream-2/60 font-mono uppercase tracking-[0.12em] text-ink-mute">
+            <tr>
+              <th className="px-3 py-2">Recebido</th>
+              <th className="px-3 py-2">Provedor / confiança</th>
+              <th className="px-3 py-2">Processamento local</th>
+              <th className="px-3 py-2">Referências</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-line">
+            {rows.map((row) => (
+              <tr key={row.archiveId}>
+                <td className="whitespace-nowrap px-3 py-3 font-mono text-ink-soft">
+                  {formatDate(row.receivedAt)}
+                </td>
+                <td className="px-3 py-3">
+                  <div>{row.provider === "stripe" ? "Stripe" : "Inter"}</div>
+                  <div className="text-[11px] text-ink-mute">
+                    {row.trust === "stripe_configured_secret_verified"
+                      ? "Assinatura verificada pelo segredo configurado neste endpoint"
+                      : "Aviso não assinado; não confirmado pelo Inter"}
+                  </div>
+                </td>
+                <td className="px-3 py-3">
+                  <div>{formatUnmatchedProcessingState(row.processingState)}</div>
+                  <div className="text-[11px] text-ink-mute">
+                    {row.failureCategory ?? "sem categoria de falha disponível"}
+                  </div>
+                  {row.processedAt ? (
+                    <div className="text-[10px] text-ink-mute">
+                      Concluído localmente em {formatDate(row.processedAt)}
+                    </div>
+                  ) : null}
+                </td>
+                <td className="px-3 py-3 font-mono text-[10px]">
+                  <div className="break-all">{row.matchedReference}</div>
+                  <div className="break-all text-ink-mute">evento {row.providerEventId}</div>
+                  <div className="break-all text-ink-mute">tipo {row.eventType}</div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {truncated ? (
+        <p role="status" className="text-[12px] text-amber-900">
+          Mostrando as 20 evidências mais recentes. Existem outros registros locais para esta
+          referência.
+        </p>
+      ) : null}
+    </section>
   );
 }
 
@@ -534,6 +630,14 @@ function formatPaymentStatus(status: PaymentEvidenceRow["status"]): string {
     estornado: "Estornado",
   };
   return labels[status];
+}
+
+function formatUnmatchedProcessingState(
+  state: UnmatchedPaymentEvidenceRow["processingState"],
+): string {
+  if (state === "processed") return "Processamento local concluído";
+  if (state === "failed") return "Falha no processamento local";
+  return "Processamento local pendente";
 }
 
 function formatDate(iso: string): string {
