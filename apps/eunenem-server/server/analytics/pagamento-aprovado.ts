@@ -12,9 +12,17 @@ import type { ServerAnalytics } from './server-analytics.js';
  * `aprovado` in the database on this call path. It is not settlement or
  * payout evidence. Delivery is best-effort (see server-analytics.ts).
  *
- * Call it ONLY after the caller verified the transition actually happened on
- * this invocation (`aprovacaoEhNova(statusAntes)`). A replay that finalizes
- * as a no-op must not reach here.
+ * Call it ONLY after the caller verified, from its own pre-finalize read,
+ * that the pagamento was still pendente|processing (`aprovacaoEhNova`). That
+ * guard stops SEQUENTIAL replays (a retry after the transition is committed).
+ * It does NOT stop CONCURRENT deliveries: two Stripe events for one payment
+ * (checkout.session.completed(paid) and charge.succeeded) can both pre-read
+ * pendente, both call finalize (one wins the CAS, the other gets the canonical
+ * approved record back as a no-op) and BOTH track — with different
+ * `event.created`, so Mixpanel's exact-tuple dedup does not collapse them.
+ * This is a known, documented residual of the root-approved best-effort model
+ * (no outbox / no transition-winner signal in this round); see the regression
+ * in tests/unit/server/phase3-dispatcher.test.ts.
  */
 export type CaminhoAprovacao = 'webhook' | 'reconciliacao';
 
@@ -57,7 +65,12 @@ export function pagamentoAprovadoProps(
     caminho,
     valor_centavos: agg.totalPaidCents,
     valor_recebedor_centavos: agg.totalReceiverCents,
-    quantidade_itens: pagamento.intencao.items.filter((it) => it.tipo === 'contribuicao').length,
+    // Units, not lines: a contribuição line carries `quantidade` (may be > 1),
+    // matching the client contract's totalUnits (Vance #108).
+    quantidade_itens: pagamento.intencao.items.reduce(
+      (total, it) => (it.tipo === 'contribuicao' ? total + it.quantidade : total),
+      0,
+    ),
   };
 }
 

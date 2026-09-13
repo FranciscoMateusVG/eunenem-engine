@@ -57,11 +57,14 @@ function mixpanelOn(): boolean {
 // approval truth); it can legitimately be emitted twice for one payment (inline
 // modal, then the /sucesso escape hatch, then a reload). Vance's
 // analytics-conversao.ts dedupes BEFORE sendEvent on a durable transaction_id
-// (localStorage); this adds Mixpanel's own dedup key so a lost localStorage or
-// a second device still collapses to one row per payment. Best-effort by
-// Mixpanel's contract ($insert_id + distinct_id + event, bounded window), not
-// a guarantee. GA-facing props never carry $-keys — this is added ONLY on the
-// Mixpanel branch. An empty transaction_id (state lost) keeps the SDK's random id.
+// (localStorage) — that is the PRIMARY dedup. This adds Mixpanel's own
+// dedup key as a secondary hint only: Mixpanel collapses duplicates when
+// (event, time, distinct_id, $insert_id) all match at query time, or on the
+// same calendar day at a later non-guaranteed compaction. A second device or
+// a cleared localStorage has a DIFFERENT distinct_id, and a reload has a
+// different `time`, so those cases are NOT collapsed by this key. GA-facing
+// props never carry $-keys — this is added ONLY on the Mixpanel branch. An
+// empty transaction_id (state lost) keeps the SDK's random id.
 // Mixpanel's $insert_id must be ≤36 chars of [A-Za-z0-9-]; the event name is
 // already part of Mixpanel's dedup tuple, so the id is the sanitized key alone
 // (a Stripe `cs_live_…` keeps its first 36 chars; an Inter txid is 32 hex).

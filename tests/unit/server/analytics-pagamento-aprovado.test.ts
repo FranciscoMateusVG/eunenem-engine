@@ -61,6 +61,16 @@ describe('pagamentoAprovadoProps', () => {
     expect(Object.keys(props)).not.toContain('contribuinte');
     expect(Object.keys(props)).not.toContain('gift_name');
   });
+
+  it('quantidade_itens sums contribuição UNITS (quantidade > 1), not lines — matches the client totalUnits', () => {
+    const pagamento = makePagamento({ id: randomUUID(), idCampanha: randomUUID(), quantidade: 3 });
+    const linhas = pagamento.intencao.items.filter((it) => it.tipo === 'contribuicao').length;
+    expect(linhas).toBe(1);
+
+    const props = pagamentoAprovadoProps(pagamento, 'stripe', 'webhook', 'conta-dono');
+
+    expect(props.quantidade_itens).toBe(3);
+  });
 });
 
 describe('trackPagamentoAprovado', () => {
