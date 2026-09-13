@@ -92,7 +92,9 @@ WITH coorte AS (
          date_trunc('day', u.created_at AT TIME ZONE 'America/Sao_Paulo')::date AS dia_cadastro,
          u.created_at AS cadastro_em
   FROM users u
-  LEFT JOIN usuarios us ON us.id = u.id
+  -- users.id (BetterAuth) é VARCHAR; usuarios.id é UUID com o MESMO valor.
+  -- Comparar como texto (nunca ::uuid sobre users.id: um id não-UUID quebraria).
+  LEFT JOIN usuarios us ON us.id::text = u.id
 ), w AS (SELECT 30 AS dias)
 SELECT c.dia_cadastro,
        -- Maturidade pelo ÚLTIMO cadastro da coorte + W (timestamp), não pelo

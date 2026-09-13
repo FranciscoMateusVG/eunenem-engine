@@ -233,6 +233,30 @@ describe('creator-funnel server events (aperture-ai8vg)', () => {
     expect(JSON.stringify(rig.tracked)).not.toContain('Fralda');
   });
 
+  it('lista_item_criado: no durable created row on the re-read → ZERO events, never a clock fallback', async () => {
+    const rig = await buildRig();
+    const user = await rig.addUser(`ai8vg-noread-${randomUUID()}@example.com`);
+    const nova = await user.caller.campanhas.criar({ titulo: 'Sem leitura' });
+    // Read shape that never surfaces the created rows (visibility / shape
+    // mismatch). The write path is untouched: create must still succeed.
+    const repo = rig.deps.contribuicaoRepository;
+    const original = repo.findByCampanhaId.bind(repo);
+    repo.findByCampanhaId = (async () => []) as typeof repo.findByCampanhaId;
+    rig.tracked.length = 0;
+
+    const created = await user.caller.contribuicao.createBulk({
+      idCampanha: nova.id,
+      items: [{ nome: 'Fralda', valor: 100, quantidade: 2 }],
+    });
+    expect(created.ids).toHaveLength(1);
+    repo.findByCampanhaId = original;
+    expect((await original(nova.id as never)).map((l) => l.id)).toEqual(created.ids);
+
+    expect(rig.tracked.filter((e) => e.event === 'lista_item_criado')).toHaveLength(0);
+    // Nothing emitted carries a non-durable time: no event at all was tracked.
+    expect(rig.tracked.some((e) => e.event === 'lista_primeiro_item')).toBe(false);
+  });
+
   it('two-caller barrier: concurrent first writes emit one event per DURABLE write and no first claim', async () => {
     const rig = await buildRig();
     const user = await rig.addUser(`ai8vg-race-${randomUUID()}@example.com`);

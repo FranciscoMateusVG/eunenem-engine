@@ -62,7 +62,12 @@ async function emitirListaItemCriado(
   try {
     const agora = await ctx.deps.contribuicaoRepository.findByCampanhaId(f.idCampanha);
     const criados = agora.filter((it) => f.ids.includes(it.id));
-    const criadaEm = maisAntigo(criados)?.criadaEm ?? ctx.deps.clock();
+    const criadaEm = maisAntigo(criados)?.criadaEm;
+    // Event time is the durable row's persisted `criada_em`, never a later
+    // clock read. If the re-read does not surface any created row (read
+    // shape / visibility), skip analytics: the write already succeeded and
+    // a non-durable timestamp would contradict the event contract.
+    if (!criadaEm) return;
     sink.track(
       'lista_item_criado',
       f.idConta,

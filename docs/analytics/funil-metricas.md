@@ -101,7 +101,8 @@ Relatórios antigos que filtravam por `slug` migram para `id_campanha`.
 2. **Funil de criadores**: Funnels com os eventos `conta_criada` →
    `lista_item_criado` (primeira ocorrência por campanha — o Funnels do Mixpanel
    conta o usuário uma vez por conversão) → `perfil_campanha_salvo`
-   (`primeira_vez = true`) → `convite_criado` → `convidado_criado` →
+   (idem: primeira ocorrência por campanha — não existe `primeira_vez`) →
+   `convite_criado` → `convidado_criado` →
    `presenca_confirmada` → `pagamento_aprovado`; contagem por *Uniques*;
    janela de conversão 7 e 30 dias; breakdown por `migrado_1_0`.
 3. **Abandono**: o drop-off entre passos do funil acima na janela W — não
