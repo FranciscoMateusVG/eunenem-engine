@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { Footer } from "@/components/eunenem/Footer";
 import { sendEvent, sendPageView } from "@/lib/analytics";
+import { EUNENEM_SUPPORT_WHATSAPP_URL } from "@/lib/painelRoutes";
 
 // aperture-sgjnn — /faq Perguntas Frequentes page.
 //
@@ -32,7 +33,9 @@ interface QA {
   stamp: string;
 }
 
-const FALAR_CONOSCO_HREF = "https://eunenem.com/minha-area/fale-com-a-gente";
+// aperture-7mqsg item 6 — "falar conosco" is EuNeném ATENDIMENTO: the shared
+// support WhatsApp, not the legacy fale-com-a-gente page.
+const FALAR_CONOSCO_HREF = EUNENEM_SUPPORT_WHATSAPP_URL;
 
 // Verbatim from the artifact's FAQ[] array. Q3 (taxas) + Q4 (tempo) come
 // incomplete in the source → null, pending the operator's real copy.

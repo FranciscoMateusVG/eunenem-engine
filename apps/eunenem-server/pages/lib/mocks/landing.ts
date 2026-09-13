@@ -342,7 +342,7 @@ export const LANDING_FAQS: ReadonlyArray<LandingFaq> = [
 
 Para viabilizar o funcionamento da plataforma, é cobrada uma taxa de serviço de 8,98% sobre cada presente, destinada a cobrir os custos de operação, manutenção da plataforma e processamento dos pagamentos.
 
-Além disso, pagamentos por cartão incluem um acréscimo calculado para cobrir a tarifa de processamento de 3,9% sobre o total processado, mais R$ 0,39 por transação, com arredondamento para cima em centavos.
+Além disso, pagamentos por cartão incluem um acréscimo calculado para cobrir a tarifa de processamento de 3,9% sobre o total processado, mais R$ 0,39 por transação.
 
 Dessa forma, os futuros pais recebem o valor integral definido na lista, enquanto os custos da transação são pagos por quem realiza a compra do presente.`,
   },

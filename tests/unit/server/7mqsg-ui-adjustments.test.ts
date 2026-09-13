@@ -160,6 +160,11 @@ describe('7mqsg item 3 — card fee hint without "arredondado para cima"', () =>
     expect(cart).toMatch(/hint="processamento: 3,9% sobre o total \+ R\$ 0,39"/);
     expect(cart).not.toMatch(/arredondad/);
   });
+  it('public FAQ card-fee answer keeps 3,9% + R$ 0,39 and drops the rounding phrase (termos-de-uso legal text untouched by design)', () => {
+    const landing = src('pages/lib/mocks/landing.ts');
+    expect(landing).toMatch(/3,9% sobre o total processado, mais R\$ 0,39 por transação\./);
+    expect(landing).not.toMatch(/arredondamento para cima/);
+  });
 });
 
 describe('7mqsg item 4 — no invented "primeira ecografia" caption', () => {
@@ -191,6 +196,22 @@ describe('7mqsg item 6 — support WhatsApp is the EuNeném atendimento number',
     const social = LANDING_FOOTER_SOCIALS.find(([, label]) => label === 'WhatsApp');
     expect(social?.[0]).toBe('https://wa.me/5511961080489');
     expect(src('pages/lib/mocks/landing.ts')).not.toMatch(/fale-com-a-gente/);
+  });
+  it('every atendimento surface uses the support number: /faq "falar conosco" + no legacy fale-com-a-gente left under pages/', () => {
+    const faq = src('pages/FaqPage.tsx');
+    expect(faq).toMatch(/const FALAR_CONOSCO_HREF = EUNENEM_SUPPORT_WHATSAPP_URL;/);
+    const walk = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap((d) =>
+        d.isDirectory()
+          ? walk(join(dir, d.name))
+          : /\.(ts|tsx)$/.test(d.name)
+            ? [join(dir, d.name)]
+            : [],
+      );
+    const offenders = walk(join(APP, 'pages')).filter((f) =>
+      readFileSync(f, 'utf8').includes('fale-com-a-gente'),
+    );
+    expect(offenders).toEqual([]);
   });
   it('guest share links are untouched (whatsapp-invite still builds wa.me from the guest phone)', () => {
     const invite = src('pages/lib/whatsapp-invite.ts');
