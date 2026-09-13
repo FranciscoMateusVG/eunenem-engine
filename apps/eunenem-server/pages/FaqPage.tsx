@@ -34,7 +34,7 @@ interface QA {
 }
 
 // aperture-7mqsg item 6 — "falar conosco" is EuNeném ATENDIMENTO: the shared
-// support WhatsApp, not the legacy fale-com-a-gente page.
+// support WhatsApp, not the legacy eunenem.com contact page.
 const FALAR_CONOSCO_HREF = EUNENEM_SUPPORT_WHATSAPP_URL;
 
 // Verbatim from the artifact's FAQ[] array. Q3 (taxas) + Q4 (tempo) come

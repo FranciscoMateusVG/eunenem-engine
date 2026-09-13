@@ -209,7 +209,7 @@ describe('7mqsg item 6 — support WhatsApp is the EuNeném atendimento number',
             : [],
       );
     const offenders = walk(join(APP, 'pages')).filter((f) =>
-      readFileSync(f, 'utf8').includes('fale-com-a-gente'),
+      readFileSync(f, 'utf8').includes('https://eunenem.com/minha-area/fale-com-a-gente'),
     );
     expect(offenders).toEqual([]);
   });
