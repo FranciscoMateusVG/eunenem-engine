@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { Footer } from "@/components/eunenem/Footer";
 import { sendEvent, sendPageView } from "@/lib/analytics";
+import { pageViewProps } from "@/lib/rota-canonica";
 import { EUNENEM_SUPPORT_WHATSAPP_URL } from "@/lib/painelRoutes";
 
 // aperture-sgjnn — /faq Perguntas Frequentes page.
@@ -103,7 +104,7 @@ export function FaqPage() {
   const [openIdx, setOpenIdx] = useState<number>(0);
 
   useEffect(() => {
-    sendPageView("FAQ");
+    sendPageView("FAQ", pageViewProps(window.location.pathname));
   }, []);
 
   return (

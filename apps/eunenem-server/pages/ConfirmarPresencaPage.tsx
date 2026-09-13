@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { sendPageView } from "@/lib/analytics";
+import { pageViewProps } from "@/lib/rota-canonica";
 import { conviteStateFromData, useConvitePreviewData } from "@/lib/convite";
 import type { FormatoMensagemConvite, StatusPresencaConvidado } from "@/lib/convidados";
 import { convidadosErrorMessage } from "@/lib/convidados";
@@ -104,7 +105,8 @@ export function ConfirmarPresencaPage({
 }) {
   // aperture-ppuay — page-view tracking (EVENT_MAP addition), the RSVP surface.
   useEffect(() => {
-    sendPageView('Confirmar Presenca');
+    // aperture-ai8vg — guest surface: rota/publico only, no guest or owner ids.
+    sendPageView('Confirmar Presenca', pageViewProps(window.location.pathname));
   }, []);
 
   const convidadoQuery = trpc.eventoListaDeConvidados.getParaConfirmar.useQuery({

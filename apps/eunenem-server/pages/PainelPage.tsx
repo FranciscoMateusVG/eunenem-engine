@@ -13,6 +13,7 @@ import { buildPainelMenu, PAINEL_DEMO, type PainelEventSnapshot } from '@/lib/mo
 import { needsOnboarding } from '@/lib/onboarding-gate';
 import { trpc } from '@/lib/trpc';
 import { sendPageView } from '@/lib/analytics';
+import { pageViewProps } from '@/lib/rota-canonica';
 import { useListaDeConvidadosData } from '@/lib/convidados';
 import { deriveGiftListUnitCounts, derivePainelCounts } from '@/lib/painel-counts';
 import { PainelDataBoundary } from '@/components/eunenem/painel/PainelDataBoundary';
@@ -365,7 +366,7 @@ export function PainelPage({
       eventDate={eventDate}
       genero={genero}
     >
-      <PainelPageView slug={slug} />
+      <PainelPageView idCampanha={idCampanha ?? undefined} />
       <PainelHeaderCard snapshot={snapshot} slug={slug} campanhaTitulo={campanhaTitulo} />
       <PainelMenu groups={groups} slug={slug} />
       <PainelTutorialTrigger
@@ -384,9 +385,13 @@ export function PainelPage({
 // Renders nothing — fires the custom pageview exactly once per mount of the
 // real dashboard (never during the loading/onboarding gates above, which
 // return early before this component exists).
-function PainelPageView({ slug }: { slug: string }) {
+// aperture-ai8vg — rota/publico instead of the slug (PII); opaque campanha id.
+function PainelPageView({ idCampanha }: { idCampanha?: string }) {
   useEffect(() => {
-    sendPageView('Painel', { slug });
-  }, [slug]);
+    sendPageView(
+      'Painel',
+      pageViewProps(window.location.pathname, idCampanha ? { id_campanha: idCampanha } : {}),
+    );
+  }, [idCampanha]);
   return null;
 }

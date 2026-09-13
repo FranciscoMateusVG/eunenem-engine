@@ -16,6 +16,7 @@ import { PRIMARY_PRESETS } from '@/lib/mocks/tweaksDefaults';
 import type { TweaksState } from '@/lib/mocks/tweaksDefaults';
 import { sendPageView } from '@/lib/analytics.js';
 import { CartProvider } from '@/lib/cart.js';
+import { idCampanhaParaPageView, pageViewProps } from '@/lib/rota-canonica.js';
 import { trpc } from '@/lib/trpc';
 import { useEffect } from 'react';
 import { NotFoundPage } from './NotFoundPage.js';
@@ -60,9 +61,23 @@ export function PaginaPage({
 
   // aperture-ppuay — the public GIFT PAGE was the headline untracked surface.
   // Fire the page-view once the perfil resolves to a real page (not NOT_FOUND).
+  // aperture-ai8vg — no slug (owner's first name) in props; the opaque
+  // campanha id rides instead. On the bare /pagina/:slug the id comes from the
+  // SERVER-resolved projection (perfil.data.idCampanha), cross-checked with
+  // the route id on /c/:idCampanha — so the per-campanha visitor step works
+  // for the common bare URL, not only the explicit one.
+  const idCampanhaPageView = idCampanhaParaPageView(idCampanha, perfil.data?.idCampanha);
   useEffect(() => {
-    if (perfil.data) sendPageView('Pagina', { slug });
-  }, [perfil.data, slug]);
+    if (perfil.data) {
+      sendPageView(
+        'Pagina',
+        pageViewProps(
+          window.location.pathname,
+          idCampanhaPageView ? { id_campanha: idCampanhaPageView } : {},
+        ),
+      );
+    }
+  }, [perfil.data, idCampanhaPageView]);
   // Marketplace + Messages need NO prop threading: their hooks
   // (usePaginaListaPresentes / usePaginaMural) self-resolve the route
   // campanha via useCampanhaRota() — the route-level CampanhaRotaProvider
