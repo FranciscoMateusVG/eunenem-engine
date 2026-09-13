@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
+import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as esbuild from 'esbuild';
+import { writeBrowserArtifactRelease } from './browser-artifact-release.mjs';
 
 const watch = process.argv.includes('--watch');
 
@@ -72,4 +74,13 @@ function buildTailwind() {
   });
 }
 
+await rm(join('public', 'browser-error-release.json'), { force: true });
 await Promise.all([buildClient(), buildTailwind()]);
+try {
+  const browserArtifactRelease = await writeBrowserArtifactRelease();
+  console.log(`[build] browser release ${browserArtifactRelease}`);
+} catch {
+  // The application remains buildable without telemetry. The release file was
+  // removed before the build, so a failed calculation cannot reuse stale ID.
+  console.log('[build] browser release unavailable');
+}
