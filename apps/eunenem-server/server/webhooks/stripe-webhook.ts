@@ -129,6 +129,7 @@ import {
   PagamentoEstornoLancamentoJaTransferidoError,
 } from '../../../../src/index.js';
 import { ID_PLATAFORMA_EUNENEM, type ServerDeps } from '../auth/setup.js';
+import { reportRequestFailure } from '../request-observability.js';
 import { getStripe } from '../../src/lib/stripe/stripe.js';
 
 const tracer = trace.getTracer('eunenem-server');
@@ -291,13 +292,17 @@ export function createStripeWebhookHandler(deps: ServerDeps) {
         // Catch-all for anything that escaped the pipeline (e.g.
         // c.req.text() blew up, archive write blew up at first use).
         // Return 500 so Stripe retries.
-        logger.error('webhook.stripe.unexpected_error', {
-          error: (unexpectedError as Error).message,
+        // Arbitrary provider/payload error text may contain customer data.
+        // The global request boundary records a sanitized stack + request ID.
+        logger.error('webhook.stripe.unexpected_error', {});
+        reportRequestFailure(c, unexpectedError, {
+          source: 'hono',
+          statusCode: 500,
         });
-        span.recordException(unexpectedError as Error);
+        span.recordException(new Error('unexpected webhook failure'));
         span.setStatus({
           code: SpanStatusCode.ERROR,
-          message: (unexpectedError as Error).message,
+          message: 'unexpected webhook failure',
         });
         return c.text('internal error', 500);
       } finally {

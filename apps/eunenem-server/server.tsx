@@ -26,10 +26,16 @@ import { createLegacyBridgeHandler } from './server/legacy-bridge.js';
 import { createLegacyGuestRedirectMiddleware } from './server/legacy-guest-redirect.js';
 import { registerPixCobrancaReconciliationJob } from './server/jobs/pix-cobranca-reconciliation.pgboss.js';
 import { createPainelAccessMiddleware } from './server/painel-access.js';
+import {
+  createRequestObservabilityMiddleware,
+  reportTrpcInternalFailure,
+  REQUEST_ID_HEADER,
+} from './server/request-observability.js';
 import { appRouter } from './server/trpc/router.js';
 import { resolverUsuarioAutenticadoOuNull } from './server/trpc/session-resolver.js';
 import { createStripeWebhookHandler } from './server/webhooks/stripe-webhook.js';
 import { mountInterPixWebhookRoutesWhenBound } from './server/webhooks/inter-pix-webhook.js';
+import { captureGlitchTipRequestFailure } from './src/lib/glitchtip/instrument.js';
 
 const PORT = Number(process.env.PORT ?? 3001);
 
@@ -102,6 +108,17 @@ try {
 
 const app = new Hono();
 
+// Server-owned request correlation. This middleware never reads the body and
+// therefore preserves the BetterAuth/Stripe raw-body ordering contract below.
+// Nested ConsoleLogger calls inherit the ID through AsyncLocalStorage.
+app.use(
+  '*',
+  createRequestObservabilityMiddleware({
+    logger: deps.observability.logger,
+    reportFailure: captureGlitchTipRequestFailure,
+  }),
+);
+
 // CORS for the API surface (aperture-ht7sq). Explicit origin list — NO
 // wildcards (T6 from recon §4). `credentials: true` is required for the
 // session cookie to round-trip on cross-origin XHR (e.g. local-dev
@@ -118,7 +135,7 @@ app.use(
     credentials: true,
     allowMethods: ['GET', 'POST', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization', 'Cookie'],
-    exposeHeaders: ['Set-Cookie'],
+    exposeHeaders: ['Set-Cookie', REQUEST_ID_HEADER],
     maxAge: 600,
   }),
 );
@@ -177,6 +194,11 @@ app.all('/api/trpc/*', (c) =>
       headers: req.headers,
       resHeaders,
     }),
+    onError: ({ error, path }) => {
+      if (error.code === 'INTERNAL_SERVER_ERROR') {
+        reportTrpcInternalFailure(c, { error, path: path ?? undefined });
+      }
+    },
   }),
 );
 
