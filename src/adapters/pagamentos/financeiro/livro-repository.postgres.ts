@@ -628,6 +628,11 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
                     WHERE d.id_pagamento = l.id_pagamento
                       AND d.status IN ('em_processamento', 'devolvida')
                 )
+                AND NOT EXISTS (
+                  SELECT 1 FROM stripe_refund_operations s
+                    WHERE s.payment_id = l.id_pagamento
+                      AND s.state <> 'provider_failed'
+                )
           `.execute(this.db)) as unknown as { rows: LancamentoRow[] };
 
           const result = rows.rows.map(lancamentoFromRow);
@@ -687,6 +692,11 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
                     SELECT 1 FROM pix_cobranca_devolucoes d
                       WHERE d.id_pagamento = l.id_pagamento
                         AND d.status IN ('em_processamento', 'devolvida')
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1 FROM stripe_refund_operations s
+                      WHERE s.payment_id = l.id_pagamento
+                        AND s.state <> 'provider_failed'
                   )
                 FOR UPDATE OF l
             `.execute(tx)) as unknown as { rows: LancamentoRow[] };

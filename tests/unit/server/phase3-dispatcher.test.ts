@@ -33,6 +33,7 @@ import { PagamentoEventPublisherMemory } from '../../../src/adapters/pagamentos/
 import { LivroFinanceiroRepositoryMemory } from '../../../src/adapters/pagamentos/financeiro/livro-repository.memory.js';
 import { PagamentoProviderFake } from '../../../src/adapters/pagamentos/provider.fake.js';
 import { PagamentoRepositoryMemory } from '../../../src/adapters/pagamentos/repository.memory.js';
+import { StripeRefundOperationRepositoryMemory } from '../../../src/adapters/pagamentos/stripe-refund-operation-repository.memory.js';
 import { archiveAndDispatchStripeEvent } from '../../../src/adapters/webhook-archive/stripe-webhook-pipeline.js';
 import { WebhookEventArchiveMemory } from '../../../src/adapters/webhook-archive/webhook-event-archive.memory.js';
 import type { Pagamento } from '../../../src/domain/pagamentos/entities/pagamento.js';
@@ -40,6 +41,10 @@ import { PagamentoProviderProjectionConflictError } from '../../../src/errors/pa
 import { NoopLogger } from '../../../src/observability/noop-logger.js';
 import type { Observability } from '../../../src/observability/observability.js';
 import { noopTracer } from '../../../src/observability/tracer.js';
+import {
+  estornarPagamento,
+  PagamentoEstornoRecusadoPeloProvedorError,
+} from '../../../src/use-cases/checkout/estornar-pagamento.js';
 import { makePagamento } from '../../helpers/pagamento-repository.conformance.js';
 
 interface TestRig {
@@ -81,6 +86,10 @@ function buildRig(overrides?: {
   const contribuicaoRepository = new ContribuicaoRepositoryMemory();
   const livroFinanceiroRepository = new LivroFinanceiroRepositoryMemory();
   const pagamentoEventPublisher = new PagamentoEventPublisherMemory();
+  const stripeRefundOperationRepository = new StripeRefundOperationRepositoryMemory(
+    pagamentoRepository,
+    livroFinanceiroRepository,
+  );
   const receipts: Pagamento[] = [];
   const transactionId = randomUUID();
   const provider = new PagamentoProviderFake({
@@ -103,6 +112,7 @@ function buildRig(overrides?: {
     checkoutSessionProvider: provider,
     pagamentoEventPublisher,
     livroFinanceiroRepository,
+    stripeRefundOperationRepository,
     provedorRegraTaxa: {} as never,
     observability,
     clock: () => new Date('2026-06-03T12:00:00.000Z'),
@@ -202,6 +212,27 @@ async function setStatus(
   const p = await rig.pagamentoRepository.findById(idPagamento as never);
   if (!p) throw new Error('pagamento not seeded');
   await rig.pagamentoRepository.update({ ...p, status: status as never });
+}
+
+/** Persist the provider settlement evidence required by a verified Stripe refund. */
+async function setApprovedStripe(
+  rig: TestRig,
+  idPagamento: string,
+  transactionId: string,
+): Promise<void> {
+  const p = await rig.pagamentoRepository.findById(idPagamento as never);
+  if (!p) throw new Error('pagamento not seeded');
+  await rig.pagamentoRepository.update({
+    ...p,
+    status: 'aprovado',
+    transacaoExterna: {
+      id: transactionId as never,
+      provedor: 'stripe',
+      status: 'aprovado',
+      amountCents: p.intencao.composicaoValoresAggregate.totalPaidCents,
+      criadaEm: new Date('2026-06-03T12:00:00.000Z'),
+    },
+  });
 }
 
 /** Patch a pagamento's pi/ch external refs (simulates prior webhook events). */
@@ -1076,17 +1107,28 @@ describe('Phase 3 dispatcher: charge.refunded — FULL', () => {
     const chId = `ch_test_${randomUUID()}`;
     const ids = await seedFullChain(rig, sessionId);
     await setRefs(rig, ids.idPagamento, { pi: piId, ch: chId });
-    await setStatus(rig, ids.idPagamento, 'aprovado');
+    await setApprovedStripe(rig, ids.idPagamento, chId);
     await seedLancamentos(rig, ids);
 
+    let providerRefundCalls = 0;
+    const originalRefund = rig.provider.refundarPagamento.bind(rig.provider);
+    rig.provider.refundarPagamento = async (input) => {
+      providerRefundCalls += 1;
+      return originalRefund(input);
+    };
     const event = makeEvent('charge.refunded', {
       id: chId,
       payment_intent: piId,
       amount: 4949,
+      currency: 'brl',
       amount_refunded: 4949, // FULL
     });
     const result = await dispatchVerifiedStripeEvent(rig.deps, noopSpan, event);
     expect(result.pagamentoId).toBe(ids.idPagamento);
+    await expect(dispatchVerifiedStripeEvent(rig.deps, noopSpan, event)).resolves.toMatchObject({
+      pagamentoId: ids.idPagamento,
+    });
+    expect(providerRefundCalls).toBe(0);
 
     const updated = await rig.pagamentoRepository.findById(ids.idPagamento as never);
     expect(updated?.status).toBe('estornado');
@@ -1100,18 +1142,57 @@ describe('Phase 3 dispatcher: charge.refunded — FULL', () => {
     }
   });
 
+  it('authoritative full-refund webhook supersedes a definite admin refusal without another provider call', async () => {
+    rig = buildRig({ refundStatus: 'recusado' });
+    const sessionId = `cs_test_${randomUUID()}`;
+    const piId = `pi_test_${randomUUID()}`;
+    const chId = `ch_test_${randomUUID()}`;
+    const ids = await seedFullChain(rig, sessionId);
+    await setRefs(rig, ids.idPagamento, { pi: piId, ch: chId });
+    await setApprovedStripe(rig, ids.idPagamento, chId);
+    await seedLancamentos(rig, ids);
+    let providerRefundCalls = 0;
+    const originalRefund = rig.provider.refundarPagamento.bind(rig.provider);
+    rig.provider.refundarPagamento = async (input) => {
+      providerRefundCalls += 1;
+      return originalRefund(input);
+    };
+
+    await expect(
+      estornarPagamento(rig.deps as never, { idPagamento: ids.idPagamento as never }),
+    ).rejects.toBeInstanceOf(PagamentoEstornoRecusadoPeloProvedorError);
+    expect(providerRefundCalls).toBe(1);
+
+    const event = makeEvent('charge.refunded', {
+      id: chId,
+      payment_intent: piId,
+      amount: 4949,
+      currency: 'brl',
+      amount_refunded: 4949,
+    });
+    await expect(dispatchVerifiedStripeEvent(rig.deps, noopSpan, event)).resolves.toMatchObject({
+      pagamentoId: ids.idPagamento,
+    });
+    expect(providerRefundCalls).toBe(1);
+    expect((await rig.pagamentoRepository.findById(ids.idPagamento as never))?.status).toBe(
+      'estornado',
+    );
+  });
+
   it('idempotent on already-estornado (skip + audit)', async () => {
     const sessionId = `cs_test_${randomUUID()}`;
     const piId = `pi_test_${randomUUID()}`;
     const chId = `ch_test_${randomUUID()}`;
     const ids = await seedFullChain(rig, sessionId);
     await setRefs(rig, ids.idPagamento, { pi: piId, ch: chId });
+    await setApprovedStripe(rig, ids.idPagamento, chId);
     await setStatus(rig, ids.idPagamento, 'estornado');
 
     const event = makeEvent('charge.refunded', {
       id: chId,
       payment_intent: piId,
       amount: 4949,
+      currency: 'brl',
       amount_refunded: 4949,
     });
     const result = await dispatchVerifiedStripeEvent(rig.deps, noopSpan, event);
@@ -1121,13 +1202,13 @@ describe('Phase 3 dispatcher: charge.refunded — FULL', () => {
     expect(updated?.status).toBe('estornado'); // unchanged
   });
 
-  it('state-drift signal: 409 from estornar use-case bubbles up as a thrown error (Stripe will retry; operator investigates)', async () => {
+  it('persists provider-observed drift before surfacing a retryable webhook failure', async () => {
     const sessionId = `cs_test_${randomUUID()}`;
     const piId = `pi_test_${randomUUID()}`;
     const chId = `ch_test_${randomUUID()}`;
     const ids = await seedFullChain(rig, sessionId);
     await setRefs(rig, ids.idPagamento, { pi: piId, ch: chId });
-    await setStatus(rig, ids.idPagamento, 'aprovado');
+    await setApprovedStripe(rig, ids.idPagamento, chId);
     // Lancamentos with the recebedor row ALREADY transferred — the
     // estornar use-case's 409 gate fires.
     await seedLancamentos(rig, ids, { recebedorTransferido: true });
@@ -1136,10 +1217,11 @@ describe('Phase 3 dispatcher: charge.refunded — FULL', () => {
       id: chId,
       payment_intent: piId,
       amount: 4949,
+      currency: 'brl',
       amount_refunded: 4949,
     });
     await expect(dispatchVerifiedStripeEvent(rig.deps, noopSpan, event)).rejects.toThrow(
-      /Estorno bloqueado/,
+      /permanece desconhecido/,
     );
 
     // Pagamento stays aprovado (no partial transition).
@@ -1167,6 +1249,7 @@ describe('Phase 3 dispatcher: charge.refunded — PARTIAL (no transition)', () =
       id: chId,
       payment_intent: piId,
       amount: 4949,
+      currency: 'brl',
       amount_refunded: 2000, // PARTIAL
     });
     const result = await dispatchVerifiedStripeEvent(rig.deps, noopSpan, event);
@@ -1195,6 +1278,7 @@ describe('Phase 3 dispatcher: charge.refunded — PARTIAL (no transition)', () =
       id: chId,
       payment_intent: piId,
       amount: 0,
+      currency: 'brl',
       amount_refunded: 0,
     });
     const result = await dispatchVerifiedStripeEvent(rig.deps, noopSpan, event);

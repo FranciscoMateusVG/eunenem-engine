@@ -51,6 +51,8 @@ import {
   PagamentoEstornoPixNaoConcluidoError,
   PagamentoEstornoPixVinculoInvalidoError,
   PagamentoEstornoRecusadoPeloProvedorError,
+  PagamentoEstornoStripeOutcomeDesconhecidoError,
+  PagamentoEstornoStripeVinculoInvalidoError,
   PagamentoNaoEncontradoError,
   PagamentoTransicaoStatusInvalidaError,
   resolverManualFalhouRepasse,
@@ -1635,7 +1637,9 @@ const pagamentosRouter = t.router({
    * path ignores it. Result carries the ACTUAL refund status — 'aceito'
    * (Stripe, synchronous), 'em_processamento' (Inter, webhook will
    * finalize), or 'devolvida' (Inter, already verified) — so the UI can
-   * show truth instead of fire-and-forget.
+   * show truth instead of fire-and-forget. Stripe returns `aceito` only for
+   * exact succeeded evidence; an accepted-but-pending refund returns
+   * `em_processamento` without marking the payment or ledger terminal.
    */
   estornar: adminProcedure
     .input(
@@ -1669,6 +1673,7 @@ const pagamentosRouter = t.router({
             pagamentoProvider: ctx.deps.pagamentoProvider,
             pixCobrancaProvider: ctx.deps.pixCobrancaProvider,
             pixCobrancaDevolucaoRepository: ctx.deps.pixCobrancaDevolucaoRepository,
+            stripeRefundOperationRepository: ctx.deps.stripeRefundOperationRepository,
             pagamentoEventPublisher: ctx.deps.pagamentoEventPublisher,
             livroFinanceiroRepository: ctx.deps.livroFinanceiroRepository,
             clock: ctx.deps.clock,
@@ -1722,6 +1727,12 @@ const pagamentosRouter = t.router({
             code: "INTERNAL_SERVER_ERROR",
             message: "devolucao_vinculo_invalido",
           });
+        }
+        if (error instanceof PagamentoEstornoStripeOutcomeDesconhecidoError) {
+          throw new TRPCError({ code: 'CONFLICT', message: 'estorno_stripe_em_estado_desconhecido' });
+        }
+        if (error instanceof PagamentoEstornoStripeVinculoInvalidoError) {
+          throw new TRPCError({ code: 'CONFLICT', message: 'estorno_stripe_vinculo_invalido' });
         }
         throw error;
       }

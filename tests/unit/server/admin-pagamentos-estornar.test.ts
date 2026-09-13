@@ -32,12 +32,14 @@ import { PixCobrancaDevolucaoRepositoryMemory } from '../../../src/adapters/paga
 import { PixCobrancaProviderFake } from '../../../src/adapters/pagamentos/pix-cobranca-provider.fake.js';
 import { PagamentoProviderFake } from '../../../src/adapters/pagamentos/provider.fake.js';
 import { PagamentoRepositoryMemory } from '../../../src/adapters/pagamentos/repository.memory.js';
+import { StripeRefundOperationRepositoryMemory } from '../../../src/adapters/pagamentos/stripe-refund-operation-repository.memory.js';
 import { ID_PLATAFORMA_EUNENEM } from '../../../src/adapters/plataforma/repository.memory.js';
 import {
   aprovarPagamentoPendente,
   type Pagamento,
 } from '../../../src/domain/pagamentos/entities/pagamento.js';
 import type { LancamentoFinanceiro } from '../../../src/domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
+import { FinanceiroPagamentoMovimentacaoConflitanteError } from '../../../src/errors/pagamentos/financeiro/pagamento-movimentacao-conflitante.error.js';
 import { NoopLogger } from '../../../src/observability/noop-logger.js';
 import { noopTracer } from '../../../src/observability/tracer.js';
 import { adminAuthOverrides } from '../../helpers/admin-auth.js';
@@ -83,6 +85,7 @@ interface TestRig {
   pagamentoProvider: PagamentoProviderFake;
   pixCobrancaProvider: PixCobrancaProviderFake;
   pixCobrancaDevolucaoRepository: PixCobrancaDevolucaoRepositoryMemory;
+  stripeRefundOperationRepository: StripeRefundOperationRepositoryMemory;
   /** Same deps, but the session email is NOT in the admin allowlist. */
   nonAdminCaller: ReturnType<typeof appRouter.createCaller>;
 }
@@ -96,6 +99,10 @@ function buildRig(): TestRig {
   const pixCobrancaProvider = new PixCobrancaProviderFake();
   const pixCobrancaDevolucaoRepository = new PixCobrancaDevolucaoRepositoryMemory();
   const pagamentoProvider = new PagamentoProviderFake({ statusRefund: 'aceito' });
+  const stripeRefundOperationRepository = new StripeRefundOperationRepositoryMemory(
+    pagamentoRepository,
+    livroFinanceiroRepository,
+  );
   const pagamentoEventPublisher = new PagamentoEventPublisherMemory();
 
   const deps = {
@@ -112,6 +119,7 @@ function buildRig(): TestRig {
     checkoutSessionProvider: {} as never,
     pixCobrancaProvider,
     pixCobrancaDevolucaoRepository,
+    stripeRefundOperationRepository,
     pagamentoEventPublisher,
     livroFinanceiroRepository,
     repasseJobEnqueuer: {} as never,
@@ -151,6 +159,7 @@ function buildRig(): TestRig {
     pagamentoProvider,
     pixCobrancaProvider,
     pixCobrancaDevolucaoRepository,
+    stripeRefundOperationRepository,
     nonAdminCaller: appRouter.createCaller(nonAdminCtx),
   };
 }
@@ -178,7 +187,7 @@ async function seedAprovadoStripe(
   const aprovado = aprovarPagamentoPendente(
     pendente,
     {
-      id: randomUUID(),
+      id: 'ch_test_fake_123',
       provedor: 'stripe',
       status: 'aprovado',
       amountCents: pendente.intencao.composicaoValoresAggregate.totalPaidCents,
@@ -327,6 +336,23 @@ describe('admin.pagamentos.estornar (aperture-4uvgf)', () => {
     expect(persisted?.status).toBe('aprovado');
   });
 
+  it('maps a payout-won refund reservation conflict to the fixed 409 before provider I/O', async () => {
+    const pagamento = await seedAprovadoStripe(rig);
+    const refundSpy = vi.spyOn(rig.pagamentoProvider, 'refundarPagamento');
+    vi.spyOn(rig.stripeRefundOperationRepository, 'reserve').mockRejectedValueOnce(
+      new FinanceiroPagamentoMovimentacaoConflitanteError(pagamento.id, 'devolucao'),
+    );
+
+    await expect(
+      rig.caller.admin.pagamentos.estornar({ idPagamento: pagamento.id }),
+    ).rejects.toMatchObject({
+      code: 'CONFLICT',
+      message: 'lancamento_ja_transferido',
+    });
+    expect(refundSpy).not.toHaveBeenCalled();
+    expect((await rig.pagamentoRepository.findById(pagamento.id))?.status).toBe('aprovado');
+  });
+
   it('maps a non-aprovado (pendente) pagamento to CONFLICT pagamento_status_invalido', async () => {
     const id = randomUUID();
     const idCampanha = randomUUID();
@@ -344,6 +370,25 @@ describe('admin.pagamentos.estornar (aperture-4uvgf)', () => {
       code: 'CONFLICT',
       message: 'pagamento_status_invalido',
     });
+  });
+
+  it('maps a Stripe provider-reference mismatch to a fixed CONFLICT before provider I/O', async () => {
+    const pagamento = await seedAprovadoStripe(rig);
+    await rig.pagamentoRepository.update({
+      ...pagamento,
+      transacaoExterna: pagamento.transacaoExterna
+        ? { ...pagamento.transacaoExterna, id: 'pi_conflicting_binding' }
+        : undefined,
+    });
+    const refundSpy = vi.spyOn(rig.pagamentoProvider, 'refundarPagamento');
+
+    await expect(
+      rig.caller.admin.pagamentos.estornar({ idPagamento: pagamento.id }),
+    ).rejects.toMatchObject({
+      code: 'CONFLICT',
+      message: 'estorno_stripe_vinculo_invalido',
+    });
+    expect(refundSpy).not.toHaveBeenCalled();
   });
 
   it('maps an unknown idPagamento to NOT_FOUND pagamento_nao_encontrado', async () => {

@@ -1,10 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { PagamentoEventPublisherMemory } from '../../../src/adapters/pagamentos/event-publisher.memory.js';
 import { LivroFinanceiroRepositoryMemory } from '../../../src/adapters/pagamentos/financeiro/livro-repository.memory.js';
+import { PaymentMoneyMovementMemoryCoordinator } from '../../../src/adapters/pagamentos/payment-money-movement-lock.memory.js';
 import { PixCobrancaDevolucaoRepositoryMemory } from '../../../src/adapters/pagamentos/pix-cobranca-devolucao-repository.memory.js';
 import type { PixCobrancaProvider } from '../../../src/adapters/pagamentos/pix-cobranca-provider.js';
 import { PagamentoProviderFake } from '../../../src/adapters/pagamentos/provider.fake.js';
+import type {
+  PagamentoProvider,
+  RefundarPagamentoInput,
+  RefundarPagamentoResult,
+} from '../../../src/adapters/pagamentos/provider.js';
 import { PagamentoRepositoryMemory } from '../../../src/adapters/pagamentos/repository.memory.js';
+import { StripeRefundOperationRepositoryMemory } from '../../../src/adapters/pagamentos/stripe-refund-operation-repository.memory.js';
 import {
   aprovarPagamentoPendente,
   type Pagamento,
@@ -18,6 +25,7 @@ import {
   estornarPagamento,
   PagamentoEstornoLancamentoJaTransferidoError,
   PagamentoEstornoRecusadoPeloProvedorError,
+  PagamentoEstornoStripeOutcomeDesconhecidoError,
 } from '../../../src/use-cases/checkout/estornar-pagamento.js';
 import { makePagamento } from '../../helpers/pagamento-repository.conformance.js';
 
@@ -39,7 +47,6 @@ const idIntencaoPagamento = '550e8400-e29b-41d4-a716-446655440302';
 const idContribuicao = '550e8400-e29b-41d4-a716-446655440303';
 const idLancamentoRecebedor = '550e8400-e29b-41d4-a716-446655440304';
 const idLancamentoReceita = '550e8400-e29b-41d4-a716-446655440305';
-const idTransacaoExterna = '550e8400-e29b-41d4-a716-446655440306';
 
 const observability = { logger: new NoopLogger(), tracer: noopTracer() };
 
@@ -58,10 +65,35 @@ const pixCobrancaProviderNever: PixCobrancaProvider = {
   },
 };
 
-function legacyRefundDeps() {
+const stripeRefundRepositories = new WeakMap<
+  PagamentoRepositoryMemory,
+  StripeRefundOperationRepositoryMemory
+>();
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+function legacyRefundDeps(
+  pagamentoRepository: PagamentoRepositoryMemory,
+  livroFinanceiroRepository: LivroFinanceiroRepositoryMemory,
+) {
+  let stripeRefundOperationRepository = stripeRefundRepositories.get(pagamentoRepository);
+  if (!stripeRefundOperationRepository) {
+    stripeRefundOperationRepository = new StripeRefundOperationRepositoryMemory(
+      pagamentoRepository,
+      livroFinanceiroRepository,
+    );
+    stripeRefundRepositories.set(pagamentoRepository, stripeRefundOperationRepository);
+  }
   return {
     pixCobrancaProvider: pixCobrancaProviderNever,
     pixCobrancaDevolucaoRepository: new PixCobrancaDevolucaoRepositoryMemory(),
+    stripeRefundOperationRepository,
   };
 }
 
@@ -89,7 +121,7 @@ async function seedAprovado(deps: {
   const aprovado = aprovarPagamentoPendente(
     pendenteComIntencao,
     {
-      id: idTransacaoExterna,
+      id: 'ch_test_fake_123',
       // Historical Stripe provenance must keep using PagamentoProvider even
       // while Banco Inter refunds coexist in the same orchestration.
       provedor: 'stripe',
@@ -148,7 +180,7 @@ describe('estornarPagamento — happy path (no transferred lançamentos)', () =>
       {
         pagamentoRepository,
         pagamentoProvider,
-        ...legacyRefundDeps(),
+        ...legacyRefundDeps(pagamentoRepository, livroFinanceiroRepository),
         pagamentoEventPublisher,
         livroFinanceiroRepository,
         clock: () => new Date('2026-05-02T15:00:00Z'),
@@ -188,13 +220,16 @@ describe('estornarPagamento — happy path (no transferred lançamentos)', () =>
         chargeExternalRef: null,
         paymentIntentExternalRef: 'pi_test_fake_456',
       },
+      transacaoExterna: pagamento.transacaoExterna
+        ? { ...pagamento.transacaoExterna, id: 'pi_test_fake_456' }
+        : undefined,
     });
 
     const result = await estornarPagamento(
       {
         pagamentoRepository,
         pagamentoProvider,
-        ...legacyRefundDeps(),
+        ...legacyRefundDeps(pagamentoRepository, livroFinanceiroRepository),
         pagamentoEventPublisher,
         livroFinanceiroRepository,
         clock: () => new Date('2026-05-02T15:00:00Z'),
@@ -232,7 +267,7 @@ describe('estornarPagamento — 409 gate (any lançamento already transferred)',
         {
           pagamentoRepository,
           pagamentoProvider,
-          ...legacyRefundDeps(),
+          ...legacyRefundDeps(pagamentoRepository, livroFinanceiroRepository),
           pagamentoEventPublisher,
           livroFinanceiroRepository,
           clock: () => new Date('2026-05-02T15:00:00Z'),
@@ -267,7 +302,7 @@ describe('estornarPagamento — provider refusal', () => {
         {
           pagamentoRepository,
           pagamentoProvider,
-          ...legacyRefundDeps(),
+          ...legacyRefundDeps(pagamentoRepository, livroFinanceiroRepository),
           pagamentoEventPublisher,
           livroFinanceiroRepository,
           clock: () => new Date('2026-05-02T15:00:00Z'),
@@ -306,7 +341,7 @@ describe('estornarPagamento — idempotency', () => {
       {
         pagamentoRepository,
         pagamentoProvider,
-        ...legacyRefundDeps(),
+        ...legacyRefundDeps(pagamentoRepository, livroFinanceiroRepository),
         pagamentoEventPublisher,
         livroFinanceiroRepository,
         clock: () => new Date('2026-05-02T15:00:00Z'),
@@ -321,7 +356,7 @@ describe('estornarPagamento — idempotency', () => {
       {
         pagamentoRepository,
         pagamentoProvider,
-        ...legacyRefundDeps(),
+        ...legacyRefundDeps(pagamentoRepository, livroFinanceiroRepository),
         pagamentoEventPublisher,
         livroFinanceiroRepository,
         clock: () => new Date('2026-05-02T16:00:00Z'),
@@ -331,7 +366,245 @@ describe('estornarPagamento — idempotency', () => {
     );
     expect(providerCalls).toBe(1);
     expect(replay.pagamento.status).toBe('estornado');
-    expect(replay.refundId).toBe('replay');
+    expect(replay.refundId).toMatch(/^re_fake_/);
+  });
+});
+
+describe('estornarPagamento — durable Stripe refund attempts', () => {
+  function buildDeps(pagamentoProvider: PagamentoProvider) {
+    const pagamentoRepository = new PagamentoRepositoryMemory();
+    const livroFinanceiroRepository = new LivroFinanceiroRepositoryMemory();
+    const moneyMovement = new PaymentMoneyMovementMemoryCoordinator();
+    const stripeRefundOperationRepository = new StripeRefundOperationRepositoryMemory(
+      pagamentoRepository,
+      livroFinanceiroRepository,
+      moneyMovement,
+    );
+    return {
+      pagamentoRepository,
+      livroFinanceiroRepository,
+      stripeRefundOperationRepository,
+      moneyMovement,
+      deps: {
+        pagamentoRepository,
+        pagamentoProvider,
+        pixCobrancaProvider: pixCobrancaProviderNever,
+        pixCobrancaDevolucaoRepository: new PixCobrancaDevolucaoRepositoryMemory(),
+        stripeRefundOperationRepository,
+        pagamentoEventPublisher: new PagamentoEventPublisherMemory(),
+        livroFinanceiroRepository,
+        clock: () => new Date('2026-05-02T15:00:00Z'),
+        observability,
+      },
+    };
+  }
+
+  it('admits one provider call when two refunds race', async () => {
+    const entered = deferred();
+    const release = deferred();
+    let providerCalls = 0;
+    const provider = new PagamentoProviderFake({ statusRefund: 'aceito' });
+    const originalRefund = provider.refundarPagamento.bind(provider);
+    provider.refundarPagamento = async (input) => {
+      providerCalls += 1;
+      entered.resolve();
+      await release.promise;
+      return originalRefund(input);
+    };
+    const rig = buildDeps(provider);
+    await seedAprovado(rig);
+
+    const first = estornarPagamento(rig.deps, { idPagamento });
+    await entered.promise;
+    const second = estornarPagamento(rig.deps, { idPagamento });
+    release.resolve();
+    const outcomes = await Promise.allSettled([first, second]);
+
+    expect(providerCalls).toBe(1);
+    expect(outcomes.every((outcome) => outcome.status === 'fulfilled')).toBe(true);
+    expect((await rig.pagamentoRepository.findById(idPagamento))?.status).toBe('estornado');
+  });
+
+  it('uses a new numbered idempotency key only after an exact terminal refusal', async () => {
+    const calls: RefundarPagamentoInput[] = [];
+    const results: RefundarPagamentoResult[] = [
+      { id: 're_failed_1', status: 'failed', amountCents: 8400, currency: 'brl' },
+      { id: 're_succeeded_2', status: 'succeeded', amountCents: 8400, currency: 'brl' },
+    ];
+    const base = new PagamentoProviderFake();
+    base.refundarPagamento = async (input) => {
+      calls.push(input);
+      const result = results.shift();
+      if (!result) throw new Error('unexpected provider retry');
+      return result;
+    };
+    const rig = buildDeps(base);
+    await seedAprovado(rig);
+
+    await expect(estornarPagamento(rig.deps, { idPagamento })).rejects.toBeInstanceOf(
+      PagamentoEstornoRecusadoPeloProvedorError,
+    );
+    await expect(estornarPagamento(rig.deps, { idPagamento })).resolves.toMatchObject({
+      refundId: 're_succeeded_2',
+      refundStatus: 'aceito',
+    });
+
+    expect(calls.map((call) => call.idempotencyKey)).toEqual([
+      `pagamento:${idPagamento}:refund:1`,
+      `pagamento:${idPagamento}:refund:2`,
+    ]);
+    expect(new Set(calls.map((call) => call.operationId))).toHaveLength(1);
+    expect(
+      (await rig.stripeRefundOperationRepository.findByPaymentId(idPagamento))?.attemptCount,
+    ).toBe(2);
+  });
+
+  it('resumes a persisted provider success after a pre-convergence crash without another create', async () => {
+    let providerCalls = 0;
+    const provider = new PagamentoProviderFake({ statusRefund: 'aceito' });
+    const originalRefund = provider.refundarPagamento.bind(provider);
+    provider.refundarPagamento = async (input) => {
+      providerCalls += 1;
+      return originalRefund(input);
+    };
+    const rig = buildDeps(provider);
+    await seedAprovado(rig);
+    const originalConverge = rig.stripeRefundOperationRepository.convergeSuccessful.bind(
+      rig.stripeRefundOperationRepository,
+    );
+    rig.stripeRefundOperationRepository.convergeSuccessful = async () => {
+      throw new Error('synthetic crash before local convergence');
+    };
+
+    await expect(estornarPagamento(rig.deps, { idPagamento })).rejects.toThrow(
+      'synthetic crash before local convergence',
+    );
+    expect(providerCalls).toBe(1);
+    expect((await rig.stripeRefundOperationRepository.findByPaymentId(idPagamento))?.state).toBe(
+      'provider_succeeded',
+    );
+    expect((await rig.pagamentoRepository.findById(idPagamento))?.status).toBe('aprovado');
+    expect(
+      (await rig.livroFinanceiroRepository.findLancamentosByIdPagamento(idPagamento)).every(
+        (entry) => entry.canceladoEm === null,
+      ),
+    ).toBe(true);
+
+    rig.stripeRefundOperationRepository.convergeSuccessful = originalConverge;
+    await expect(estornarPagamento(rig.deps, { idPagamento })).resolves.toMatchObject({
+      refundStatus: 'aceito',
+      pagamento: { status: 'estornado' },
+    });
+    expect(providerCalls).toBe(1);
+    expect((await rig.stripeRefundOperationRepository.findByPaymentId(idPagamento))?.state).toBe(
+      'local_committed',
+    );
+    expect(
+      (await rig.livroFinanceiroRepository.findLancamentosByIdPagamento(idPagamento)).every(
+        (entry) => entry.canceladoEm !== null,
+      ),
+    ).toBe(true);
+  });
+
+  it('never repeats a provider call after a post-create persistence failure', async () => {
+    let providerCalls = 0;
+    const provider = new PagamentoProviderFake({ statusRefund: 'aceito' });
+    const originalRefund = provider.refundarPagamento.bind(provider);
+    provider.refundarPagamento = async (input) => {
+      providerCalls += 1;
+      return originalRefund(input);
+    };
+    const rig = buildDeps(provider);
+    await seedAprovado(rig);
+    const originalRecord = rig.stripeRefundOperationRepository.recordProviderResult.bind(
+      rig.stripeRefundOperationRepository,
+    );
+    rig.stripeRefundOperationRepository.recordProviderResult = async () => {
+      throw new Error('synthetic persistence outage after provider return');
+    };
+
+    await expect(estornarPagamento(rig.deps, { idPagamento })).rejects.toThrow(
+      'synthetic persistence outage',
+    );
+    rig.stripeRefundOperationRepository.recordProviderResult = originalRecord;
+    await expect(estornarPagamento(rig.deps, { idPagamento })).rejects.toBeInstanceOf(
+      PagamentoEstornoStripeOutcomeDesconhecidoError,
+    );
+    expect(providerCalls).toBe(1);
+    expect((await rig.stripeRefundOperationRepository.findByPaymentId(idPagamento))?.state).toBe(
+      'provider_started',
+    );
+  });
+
+  it('holds a malformed provider response as unknown and never recreates it', async () => {
+    let providerCalls = 0;
+    const provider = new PagamentoProviderFake();
+    provider.refundarPagamento = async () => {
+      providerCalls += 1;
+      return {
+        id: 're_malformed_1',
+        amountCents: 8400,
+        currency: 'brl',
+      } as never;
+    };
+    const rig = buildDeps(provider);
+    await seedAprovado(rig);
+
+    await expect(estornarPagamento(rig.deps, { idPagamento })).rejects.toBeInstanceOf(
+      PagamentoEstornoStripeOutcomeDesconhecidoError,
+    );
+    await expect(estornarPagamento(rig.deps, { idPagamento })).rejects.toBeInstanceOf(
+      PagamentoEstornoStripeOutcomeDesconhecidoError,
+    );
+    expect(providerCalls).toBe(1);
+    expect((await rig.stripeRefundOperationRepository.findByPaymentId(idPagamento))?.state).toBe(
+      'outcome_unknown',
+    );
+  });
+
+  it('keeps a pending provider result nonterminal and payout-blocking without recreating', async () => {
+    let providerCalls = 0;
+    const provider = new PagamentoProviderFake();
+    provider.refundarPagamento = async () => {
+      providerCalls += 1;
+      return { id: 're_pending_1', status: 'pending', amountCents: 8400, currency: 'brl' };
+    };
+    const rig = buildDeps(provider);
+    await seedAprovado(rig);
+
+    await expect(estornarPagamento(rig.deps, { idPagamento })).resolves.toMatchObject({
+      refundId: 're_pending_1',
+      refundStatus: 'em_processamento',
+      pagamento: { status: 'aprovado' },
+    });
+    await expect(estornarPagamento(rig.deps, { idPagamento })).resolves.toMatchObject({
+      refundStatus: 'em_processamento',
+      pagamento: { status: 'aprovado' },
+    });
+
+    expect(providerCalls).toBe(1);
+    expect((await rig.stripeRefundOperationRepository.findByPaymentId(idPagamento))?.state).toBe(
+      'provider_pending',
+    );
+    expect(rig.moneyMovement.hasBlockingRefund(idPagamento)).toBe(true);
+    const entries = await rig.livroFinanceiroRepository.findLancamentosByIdPagamento(idPagamento);
+    expect(entries.every((entry) => entry.canceladoEm === null)).toBe(true);
+
+    const operation = await rig.stripeRefundOperationRepository.findByPaymentId(idPagamento);
+    if (!operation) throw new Error('pending operation not persisted');
+    await expect(
+      rig.stripeRefundOperationRepository.recordProviderResult({
+        operationId: operation.operationId,
+        attemptNo: operation.attemptCount,
+        outcome: 'provider_failed',
+        providerRef: 're_pending_1',
+        providerStatus: 'failed',
+        amountCents: operation.amountCents,
+        currency: 'brl',
+        now: new Date('2026-05-02T16:00:00Z'),
+      }),
+    ).resolves.toMatchObject({ state: 'provider_pending' });
+    expect((await rig.pagamentoRepository.findById(idPagamento))?.status).toBe('aprovado');
   });
 });
 
@@ -355,7 +628,7 @@ describe('estornarPagamento — invalid source states', () => {
         {
           pagamentoRepository,
           pagamentoProvider,
-          ...legacyRefundDeps(),
+          ...legacyRefundDeps(pagamentoRepository, livroFinanceiroRepository),
           pagamentoEventPublisher,
           livroFinanceiroRepository,
           clock: () => new Date('2026-05-02T15:00:00Z'),
@@ -377,7 +650,7 @@ describe('estornarPagamento — invalid source states', () => {
         {
           pagamentoRepository,
           pagamentoProvider,
-          ...legacyRefundDeps(),
+          ...legacyRefundDeps(pagamentoRepository, livroFinanceiroRepository),
           pagamentoEventPublisher,
           livroFinanceiroRepository,
           clock: () => new Date('2026-05-02T15:00:00Z'),

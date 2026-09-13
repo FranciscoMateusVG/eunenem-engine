@@ -1,3 +1,4 @@
+import { sql } from 'kysely';
 import type { Database } from '../../src/adapters/database.js';
 
 /**
@@ -8,6 +9,7 @@ import type { Database } from '../../src/adapters/database.js';
  * first, then clear the aggregate table.
  */
 export async function truncatePagamentosTables(db: Database): Promise<void> {
+  await sql`TRUNCATE stripe_refund_operation_facts, stripe_refund_operations CASCADE`.execute(db);
   // Migration 049 adds a real FK from PIX refund attempts to pagamentos.
   // Delete children first; the FK intentionally uses the default RESTRICT
   // semantics so payment history cannot disappear under a refund record.

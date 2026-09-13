@@ -4,6 +4,7 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testconta
 import { Kysely, Migrator, PostgresDialect, sql } from 'kysely';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { down as downStripeRefundOperations } from '../../migrations/20260913_055_add_stripe_refund_operations.js';
 import catalogSnapshot from '../../migrations/seed/20260727_045_catalog.json';
 import listasSnapshot from '../../migrations/seed/20260727_045_listas-prontas.json';
 import { createMigrationProvider } from '../helpers/migration-provider.js';
@@ -441,6 +442,56 @@ describe('Migration round-trip', () => {
     //    migration. Each migrateDown() unwinds exactly the current tip, so
     //    this sequence must start at the LATEST migration and walk earlier.
     //    Adding a new migration on top REQUIRES prepending its down-step here.
+
+    // 20260913_055 is an empty-only rollback: once financial evidence exists,
+    // down must fail without dropping or mutating either row.
+    expect(await tableExists(db, 'stripe_refund_operations')).toBe(true);
+    expect(await tableExists(db, 'stripe_refund_operation_facts')).toBe(true);
+    await insertRefundConstraintFixture(db);
+    await sql`
+      INSERT INTO stripe_refund_operations
+        (operation_id, payment_id, origin, amount_cents, currency, charge_ref,
+         reason, state, attempt_count, provider_started_at)
+      VALUES ('60000000-0000-4000-8000-000000000055',
+        '20000000-0000-4000-8000-000000000049', 'admin', 1, 'brl',
+        'ch_migration_055', 'requested_by_customer', 'provider_started', 1, now())
+    `.execute(db);
+    await sql`
+      INSERT INTO stripe_refund_operation_facts
+        (id, operation_id, attempt_no, fact_kind, idempotency_key, recorded_at)
+      VALUES ('70000000-0000-4000-8000-000000000055',
+        '60000000-0000-4000-8000-000000000055', 1, 'provider_started',
+        'migration-055-attempt-1', now())
+    `.execute(db);
+    const refusedStripeRefundDown = await migrator.migrateDown();
+    expect(refusedStripeRefundDown.error).toBeDefined();
+    expect(await tableExists(db, 'stripe_refund_operations')).toBe(true);
+    expect(await tableExists(db, 'stripe_refund_operation_facts')).toBe(true);
+    expect(
+      Number(
+        (
+          await sql<{
+            count: string;
+          }>`SELECT count(*)::text AS count FROM stripe_refund_operations`.execute(db)
+        ).rows[0]?.count,
+      ),
+    ).toBe(1);
+    expect(
+      Number(
+        (
+          await sql<{
+            count: string;
+          }>`SELECT count(*)::text AS count FROM stripe_refund_operation_facts`.execute(db)
+        ).rows[0]?.count,
+      ),
+    ).toBe(1);
+    await sql`TRUNCATE stripe_refund_operation_facts, stripe_refund_operations`.execute(db);
+    await sql`DELETE FROM pagamentos WHERE id = '20000000-0000-4000-8000-000000000049'`.execute(db);
+    await sql`DELETE FROM campanhas WHERE id = '10000000-0000-4000-8000-000000000049'`.execute(db);
+    const downStripeRefunds = await migrator.migrateDown();
+    expect(downStripeRefunds.error).toBeUndefined();
+    expect(await tableExists(db, 'stripe_refund_operations')).toBe(false);
+    expect(await tableExists(db, 'stripe_refund_operation_facts')).toBe(false);
 
     // 20260910_054_webhook_ingress_platform (aperture-bsygp) → actual TIP.
     expect(await getColumn(db, 'payment_webhook_events', 'ingress_platform_id')).toBeDefined();
@@ -979,6 +1030,123 @@ describe('Migration round-trip', () => {
 
     const tablesAfterCats = await listTableNames(db);
     expect(tablesAfterCats).not.toContain('cats');
+  });
+
+  it('keeps a concurrent evidence insert behind the locked empty-only Stripe refund down', async () => {
+    const migrator = new Migrator({ db, provider: createMigrationProvider() });
+    const upResult = await migrator.migrateToLatest();
+    expect(upResult.error).toBeUndefined();
+    await insertRefundConstraintFixture(db);
+
+    const makeConnection = () =>
+      new Kysely<unknown>({
+        dialect: new PostgresDialect({
+          pool: new pg.Pool({ connectionString: container.getConnectionUri(), max: 1 }),
+        }),
+      });
+    const blockerDb = makeConnection();
+    const downDb = makeConnection();
+    const insertDb = makeConnection();
+
+    let releaseBlocker: (() => void) | undefined;
+    let signalBlockerReady: (() => void) | undefined;
+    const blockerReady = new Promise<void>((resolve) => {
+      signalBlockerReady = resolve;
+    });
+    const blockerRelease = new Promise<void>((resolve) => {
+      releaseBlocker = resolve;
+    });
+    const blocker = blockerDb.transaction().execute(async (tx) => {
+      await sql`LOCK TABLE stripe_refund_operations IN ACCESS SHARE MODE`.execute(tx);
+      signalBlockerReady?.();
+      await blockerRelease;
+    });
+    await blockerReady;
+
+    let signalDownPid: ((pid: number) => void) | undefined;
+    const downPidReady = new Promise<number>((resolve) => {
+      signalDownPid = resolve;
+    });
+    const down = downDb.transaction().execute(async (tx) => {
+      const pid = await sql<{ pid: number }>`SELECT pg_backend_pid()::integer AS pid`.execute(tx);
+      signalDownPid?.(pid.rows[0]?.pid as number);
+      await downStripeRefundOperations(tx);
+    });
+    const downPid = await downPidReady;
+
+    await expect
+      .poll(
+        async () => {
+          const locks = await sql<{ child_locked: boolean; parent_waiting: boolean }>`
+            SELECT
+              bool_or(relation.relname = 'stripe_refund_operation_facts'
+                AND locks.mode = 'AccessExclusiveLock' AND locks.granted) AS child_locked,
+              bool_or(relation.relname = 'stripe_refund_operations'
+                AND locks.mode = 'AccessExclusiveLock' AND NOT locks.granted) AS parent_waiting
+            FROM pg_locks locks
+            JOIN pg_class relation ON relation.oid = locks.relation
+            JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+            WHERE locks.pid = ${downPid} AND namespace.nspname = 'public'
+          `.execute(db);
+          return locks.rows[0];
+        },
+        { timeout: 5_000, interval: 10 },
+      )
+      .toEqual({ child_locked: true, parent_waiting: true });
+
+    let signalInsertPid: ((pid: number) => void) | undefined;
+    const insertPidReady = new Promise<number>((resolve) => {
+      signalInsertPid = resolve;
+    });
+    const insert = insertDb
+      .transaction()
+      .execute(async (tx) => {
+        const pid = await sql<{ pid: number }>`SELECT pg_backend_pid()::integer AS pid`.execute(tx);
+        signalInsertPid?.(pid.rows[0]?.pid as number);
+        await sql`
+          INSERT INTO stripe_refund_operations
+            (operation_id, payment_id, origin, amount_cents, currency, charge_ref,
+             reason, state)
+          VALUES ('60000000-0000-4000-8000-000000000056',
+            '20000000-0000-4000-8000-000000000049', 'admin', 1, 'brl',
+            'ch_migration_055_race', 'requested_by_customer', 'reserved')
+        `.execute(tx);
+      })
+      .then(
+        () => ({ succeeded: true as const, error: undefined }),
+        (error: unknown) => ({ succeeded: false as const, error }),
+      );
+    const insertPid = await insertPidReady;
+    await expect
+      .poll(
+        async () => {
+          const waiting = await sql<{ waiting: boolean }>`
+            SELECT EXISTS (
+              SELECT 1 FROM pg_locks locks
+              JOIN pg_class relation ON relation.oid = locks.relation
+              WHERE locks.pid = ${insertPid}
+                AND relation.relname = 'stripe_refund_operations'
+                AND locks.mode = 'RowExclusiveLock' AND NOT locks.granted
+            ) AS waiting
+          `.execute(db);
+          return waiting.rows[0]?.waiting;
+        },
+        { timeout: 5_000, interval: 10 },
+      )
+      .toBe(true);
+
+    releaseBlocker?.();
+    await blocker;
+    await expect(down).resolves.toBeUndefined();
+    const insertResult = await insert;
+    expect(insertResult.succeeded).toBe(false);
+    expect(insertResult.error).toBeInstanceOf(Error);
+    expect(await tableExists(db, 'stripe_refund_operations')).toBe(false);
+    expect(await tableExists(db, 'stripe_refund_operation_facts')).toBe(false);
+
+    await blockerDb.destroy();
+    await downDb.destroy();
+    await insertDb.destroy();
   });
 });
 

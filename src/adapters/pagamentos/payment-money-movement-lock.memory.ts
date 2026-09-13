@@ -9,19 +9,19 @@ type BlockerProbe = (idPagamento: string) => boolean;
  */
 export class PaymentMoneyMovementMemoryCoordinator {
   private readonly tails = new Map<string, Promise<void>>();
-  private financialBlockerProbe: BlockerProbe = () => false;
-  private refundBlockerProbe: BlockerProbe = () => false;
+  private readonly financialBlockerProbes = new Set<BlockerProbe>();
+  private readonly refundBlockerProbes = new Set<BlockerProbe>();
 
   registerFinancialBlockerProbe(probe: BlockerProbe): void {
-    this.financialBlockerProbe = probe;
+    this.financialBlockerProbes.add(probe);
   }
 
   registerRefundBlockerProbe(probe: BlockerProbe): void {
-    this.refundBlockerProbe = probe;
+    this.refundBlockerProbes.add(probe);
   }
 
   hasBlockingRefund(idPagamento: string): boolean {
-    return this.refundBlockerProbe(idPagamento);
+    return [...this.refundBlockerProbes].some((probe) => probe(idPagamento));
   }
 
   async withRefundCreationLock<T>(
@@ -29,7 +29,7 @@ export class PaymentMoneyMovementMemoryCoordinator {
     operation: () => T | Promise<T>,
   ): Promise<T> {
     return this.withPaymentLocks([idPagamento], async () => {
-      if (this.financialBlockerProbe(idPagamento)) {
+      if ([...this.financialBlockerProbes].some((probe) => probe(idPagamento))) {
         throw new FinanceiroPagamentoMovimentacaoConflitanteError(idPagamento, 'devolucao');
       }
       return operation();
@@ -41,7 +41,7 @@ export class PaymentMoneyMovementMemoryCoordinator {
     operation: () => T | Promise<T>,
   ): Promise<T> {
     return this.withPaymentLocks(idsPagamento, async () => {
-      const blocked = idsPagamento.find((idPagamento) => this.refundBlockerProbe(idPagamento));
+      const blocked = idsPagamento.find((idPagamento) => this.hasBlockingRefund(idPagamento));
       if (blocked !== undefined) {
         throw new FinanceiroPagamentoMovimentacaoConflitanteError(blocked, 'transferencia');
       }

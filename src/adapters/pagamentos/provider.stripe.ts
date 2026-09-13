@@ -459,11 +459,10 @@ export class PagamentoProviderStripe implements PagamentoProvider, CheckoutSessi
    * `paymentIntentExternalRef` (`pi_xxx`) — Stripe also accepts the PI
    * as a refund key and will fan it out to the latest charge.
    *
-   * Status normalization: Stripe's refund.status is
-   * `succeeded | pending | failed | canceled | requires_action`. We
-   * collapse `succeeded` AND `pending` to `aceito` (the money path is
-   * committed; settlement timing is out-of-band on the provider side)
-   * and everything else to `recusado`.
+   * The adapter returns Stripe's finite status unchanged. The durable refund
+   * use-case treats only `succeeded` as locally committable, keeps `pending`
+   * payout-blocking and nonterminal, accepts exact `failed | canceled` as a
+   * definite refusal, and holds every unavailable/malformed outcome.
    */
   async refundarPagamento(input: RefundarPagamentoInput): Promise<RefundarPagamentoResult> {
     return tracer.startActiveSpan('payment_provider.stripe.refundarPagamento', async (span) => {
@@ -478,18 +477,30 @@ export class PagamentoProviderStripe implements PagamentoProvider, CheckoutSessi
         }
 
         const refundParams: Stripe.RefundCreateParams = input.chargeExternalRef
-          ? { charge: input.chargeExternalRef, reason: input.reason ?? 'requested_by_customer' }
+          ? {
+              charge: input.chargeExternalRef,
+              amount: input.amountCents,
+              reason: input.reason ?? 'requested_by_customer',
+              metadata: { operationId: input.operationId, paymentId: input.idPagamento },
+            }
           : {
               payment_intent: input.paymentIntentExternalRef as string,
+              amount: input.amountCents,
               reason: input.reason ?? 'requested_by_customer',
+              metadata: { operationId: input.operationId, paymentId: input.idPagamento },
             };
 
         const refund = await this.stripe.refunds.create(refundParams, {
-          idempotencyKey: `pagamento:${input.idPagamento}:refund`,
+          idempotencyKey: input.idempotencyKey,
         });
-
         const status: RefundarPagamentoResult['status'] =
-          refund.status === 'succeeded' || refund.status === 'pending' ? 'aceito' : 'recusado';
+          refund.status === 'succeeded' ||
+          refund.status === 'pending' ||
+          refund.status === 'failed' ||
+          refund.status === 'canceled' ||
+          refund.status === 'requires_action'
+            ? refund.status
+            : 'unknown';
 
         span.setAttribute('refund.id', refund.id);
         span.setAttribute('refund.status', refund.status ?? 'unknown');
@@ -497,8 +508,8 @@ export class PagamentoProviderStripe implements PagamentoProvider, CheckoutSessi
         return {
           id: refund.id,
           status,
-          amountCents: input.amountCents,
-          statusBruto: refund.status?.slice(0, 120) ?? 'unknown',
+          amountCents: refund.amount,
+          currency: refund.currency,
         };
       } catch (error: unknown) {
         span.recordException(error as Error);
