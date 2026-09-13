@@ -459,6 +459,53 @@ describe('estornarPagamento — durable Stripe refund attempts', () => {
     ).toBe(2);
   });
 
+  it('resumes a persisted provider success after a pre-convergence crash without another create', async () => {
+    let providerCalls = 0;
+    const provider = new PagamentoProviderFake({ statusRefund: 'aceito' });
+    const originalRefund = provider.refundarPagamento.bind(provider);
+    provider.refundarPagamento = async (input) => {
+      providerCalls += 1;
+      return originalRefund(input);
+    };
+    const rig = buildDeps(provider);
+    await seedAprovado(rig);
+    const originalConverge = rig.stripeRefundOperationRepository.convergeSuccessful.bind(
+      rig.stripeRefundOperationRepository,
+    );
+    rig.stripeRefundOperationRepository.convergeSuccessful = async () => {
+      throw new Error('synthetic crash before local convergence');
+    };
+
+    await expect(estornarPagamento(rig.deps, { idPagamento })).rejects.toThrow(
+      'synthetic crash before local convergence',
+    );
+    expect(providerCalls).toBe(1);
+    expect((await rig.stripeRefundOperationRepository.findByPaymentId(idPagamento))?.state).toBe(
+      'provider_succeeded',
+    );
+    expect((await rig.pagamentoRepository.findById(idPagamento))?.status).toBe('aprovado');
+    expect(
+      (await rig.livroFinanceiroRepository.findLancamentosByIdPagamento(idPagamento)).every(
+        (entry) => entry.canceladoEm === null,
+      ),
+    ).toBe(true);
+
+    rig.stripeRefundOperationRepository.convergeSuccessful = originalConverge;
+    await expect(estornarPagamento(rig.deps, { idPagamento })).resolves.toMatchObject({
+      refundStatus: 'aceito',
+      pagamento: { status: 'estornado' },
+    });
+    expect(providerCalls).toBe(1);
+    expect((await rig.stripeRefundOperationRepository.findByPaymentId(idPagamento))?.state).toBe(
+      'local_committed',
+    );
+    expect(
+      (await rig.livroFinanceiroRepository.findLancamentosByIdPagamento(idPagamento)).every(
+        (entry) => entry.canceladoEm !== null,
+      ),
+    ).toBe(true);
+  });
+
   it('never repeats a provider call after a post-create persistence failure', async () => {
     let providerCalls = 0;
     const provider = new PagamentoProviderFake({ statusRefund: 'aceito' });

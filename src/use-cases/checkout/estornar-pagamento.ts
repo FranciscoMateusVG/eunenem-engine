@@ -21,6 +21,7 @@ import type {
 import { StripeRefundOperationConflictError } from '../../adapters/pagamentos/stripe-refund-operation-repository.js';
 import type { Pagamento } from '../../domain/pagamentos/entities/pagamento.js';
 import { IdPagamentoSchema } from '../../domain/pagamentos/value-objects/ids.js';
+import { FinanceiroPagamentoMovimentacaoConflitanteError } from '../../errors/pagamentos/financeiro/pagamento-movimentacao-conflitante.error.js';
 import { PagamentoNaoEncontradoError } from '../../errors/pagamentos/nao-encontrado.error.js';
 import { PagamentoTransicaoStatusInvalidaError } from '../../errors/pagamentos/transicao-status-invalida.error.js';
 import type { Observability } from '../../observability/observability.js';
@@ -173,6 +174,9 @@ async function estornarHistorico(
       deps.clock(),
     );
   } catch (error) {
+    if (error instanceof FinanceiroPagamentoMovimentacaoConflitanteError) {
+      throw new PagamentoEstornoLancamentoJaTransferidoError(pagamento.id);
+    }
     if (error instanceof StripeRefundOperationConflictError) {
       throw new PagamentoEstornoStripeVinculoInvalidoError();
     }

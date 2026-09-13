@@ -39,6 +39,7 @@ import {
   type Pagamento,
 } from '../../../src/domain/pagamentos/entities/pagamento.js';
 import type { LancamentoFinanceiro } from '../../../src/domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
+import { FinanceiroPagamentoMovimentacaoConflitanteError } from '../../../src/errors/pagamentos/financeiro/pagamento-movimentacao-conflitante.error.js';
 import { NoopLogger } from '../../../src/observability/noop-logger.js';
 import { noopTracer } from '../../../src/observability/tracer.js';
 import { adminAuthOverrides } from '../../helpers/admin-auth.js';
@@ -84,6 +85,7 @@ interface TestRig {
   pagamentoProvider: PagamentoProviderFake;
   pixCobrancaProvider: PixCobrancaProviderFake;
   pixCobrancaDevolucaoRepository: PixCobrancaDevolucaoRepositoryMemory;
+  stripeRefundOperationRepository: StripeRefundOperationRepositoryMemory;
   /** Same deps, but the session email is NOT in the admin allowlist. */
   nonAdminCaller: ReturnType<typeof appRouter.createCaller>;
 }
@@ -157,6 +159,7 @@ function buildRig(): TestRig {
     pagamentoProvider,
     pixCobrancaProvider,
     pixCobrancaDevolucaoRepository,
+    stripeRefundOperationRepository,
     nonAdminCaller: appRouter.createCaller(nonAdminCtx),
   };
 }
@@ -331,6 +334,23 @@ describe('admin.pagamentos.estornar (aperture-4uvgf)', () => {
     // No partial state: pagamento stays aprovado.
     const persisted = await rig.pagamentoRepository.findById(pagamento.id);
     expect(persisted?.status).toBe('aprovado');
+  });
+
+  it('maps a payout-won refund reservation conflict to the fixed 409 before provider I/O', async () => {
+    const pagamento = await seedAprovadoStripe(rig);
+    const refundSpy = vi.spyOn(rig.pagamentoProvider, 'refundarPagamento');
+    vi.spyOn(rig.stripeRefundOperationRepository, 'reserve').mockRejectedValueOnce(
+      new FinanceiroPagamentoMovimentacaoConflitanteError(pagamento.id, 'devolucao'),
+    );
+
+    await expect(
+      rig.caller.admin.pagamentos.estornar({ idPagamento: pagamento.id }),
+    ).rejects.toMatchObject({
+      code: 'CONFLICT',
+      message: 'lancamento_ja_transferido',
+    });
+    expect(refundSpy).not.toHaveBeenCalled();
+    expect((await rig.pagamentoRepository.findById(pagamento.id))?.status).toBe('aprovado');
   });
 
   it('maps a non-aprovado (pendente) pagamento to CONFLICT pagamento_status_invalido', async () => {

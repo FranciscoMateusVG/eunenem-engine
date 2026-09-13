@@ -282,6 +282,72 @@ describe('Stripe refund operation durability and payout exclusion — Postgres',
     ]);
   });
 
+  it('rolls payment, ledger, cursor and facts back when local convergence fails mid-transaction', async () => {
+    const seed = await seedApprovedStripePayment();
+    const { repo: ledger } = await seedApprovedPayout(testDb.db, seed);
+    const repository = new StripeRefundOperationRepositoryPostgres(dbA);
+    const reserved = await repository.reserve(reserveInput(seed));
+    const claim = await repository.claimProviderStart(
+      reserved.operation.operationId,
+      new Date('2026-09-13T12:03:00Z'),
+    );
+    if (claim.status !== 'call_provider') throw new Error('expected provider admission');
+    await repository.recordProviderResult({
+      operationId: claim.operation.operationId,
+      attemptNo: claim.attemptNo,
+      outcome: 'provider_succeeded',
+      providerRef: 're_succeeded_atomic_rollback',
+      providerStatus: 'succeeded',
+      amountCents: seed.payment.intencao.composicaoValoresAggregate.totalPaidCents,
+      currency: 'brl',
+      now: new Date('2026-09-13T12:04:00Z'),
+    });
+    await sql`
+      CREATE FUNCTION fail_stripe_refund_local_commit()
+      RETURNS trigger LANGUAGE plpgsql AS $body$
+      BEGIN
+        RAISE EXCEPTION 'synthetic local convergence failure';
+      END
+      $body$;
+      CREATE TRIGGER fail_stripe_refund_local_commit
+        BEFORE UPDATE ON stripe_refund_operations
+        FOR EACH ROW WHEN (NEW.state = 'local_committed')
+        EXECUTE FUNCTION fail_stripe_refund_local_commit();
+    `.execute(testDb.db);
+
+    try {
+      await expect(
+        repository.convergeSuccessful(
+          reserved.operation.operationId,
+          new Date('2026-09-13T12:05:00Z'),
+        ),
+      ).rejects.toThrow('synthetic local convergence failure');
+
+      expect((await repository.findByPaymentId(seed.payment.id))?.state).toBe('provider_succeeded');
+      expect(
+        (await new PagamentoRepositoryPostgres(testDb.db).findById(seed.payment.id))?.status,
+      ).toBe('aprovado');
+      expect(
+        (await ledger.findLancamentosByIdPagamento(seed.payment.id)).every(
+          (entry) => entry.canceladoEm === null,
+        ),
+      ).toBe(true);
+      // biome-ignore lint/suspicious/noExplicitAny: atomic evidence assertion
+      const localFacts = await (testDb.db as any)
+        .selectFrom('stripe_refund_operation_facts')
+        .selectAll()
+        .where('operation_id', '=', reserved.operation.operationId)
+        .where('fact_kind', '=', 'local_committed')
+        .execute();
+      expect(localFacts).toHaveLength(0);
+    } finally {
+      await sql`
+        DROP TRIGGER IF EXISTS fail_stripe_refund_local_commit ON stripe_refund_operations;
+        DROP FUNCTION IF EXISTS fail_stripe_refund_local_commit();
+      `.execute(testDb.db);
+    }
+  });
+
   it('refund-first waiter wins the shared lock and blocks concurrent payout admission', async () => {
     const seed = await seedApprovedStripePayment();
     const { repo: payoutRepo, repasseId } = await seedApprovedPayout(dbB, seed);
