@@ -208,14 +208,20 @@ export type EmissorEvento = (eventName: string, props: Record<string, unknown>) 
  * quantidade_itens?, metodo) on the FIRST successful iniciar of an intent,
  * and pix_qr_regenerado {transaction_id, valor_centavos, metodo:'pix'} when
  * the same intent regenerates its QR. Returns the event name emitted.
+ *
+ * Contract guard: pix_qr_regenerado means "a NEW QR (txid) was issued". A
+ * regenerate flag with no txid (e.g. the server answered stripe_embedded on
+ * the retry) is NOT a QR regenerate — it falls back to the plain
+ * checkout_iniciado shape rather than recording a QR event with a blank id.
  */
 export function emitirInicioCheckoutPix(
   input: InicioCheckoutPixInput,
   emitir: EmissorEvento = sendEvent,
 ): string {
-  if (input.regenerando) {
+  const txid = input.transactionId.trim();
+  if (input.regenerando && txid) {
     emitir(EVENTO_PIX_QR_REGENERADO, {
-      transaction_id: input.transactionId,
+      transaction_id: txid,
       valor_centavos: input.valorCentavos,
       metodo: 'pix',
     });

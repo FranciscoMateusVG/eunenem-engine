@@ -262,8 +262,11 @@ export function GiftCheckoutModal({
         metodo: "pix",
         contribuinte,
       });
+      // A regenerate is only a regenerate when a NEW QR actually came back;
+      // the defensive stripe_embedded branch below keeps the plain
+      // checkout_iniciado shape (Izzy sdg24h boundary finding).
       emitirInicioCheckoutPix({
-        regenerando: pixRegenerandoRef.current,
+        regenerando: pixRegenerandoRef.current && result.tipo === "pix_qr",
         transactionId: result.tipo === "pix_qr" ? result.txid : "",
         valorCentavos: gift.valorCents,
       });
