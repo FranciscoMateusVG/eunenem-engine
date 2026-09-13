@@ -1,7 +1,8 @@
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { CartButton } from "./CartButton";
 import { useCartDrawer } from "./CartDrawerContext.js";
+import { emitirCarrinhoAberto } from "@/lib/analytics-funil";
 import { useMe } from "@/lib/auth";
 import { useCampanhaRota } from "@/lib/campanha-rota";
 import { paginaSharePath } from "@/lib/painelRoutes";
@@ -47,6 +48,11 @@ export function Navbar({ slug }: { slug?: string } = {}) {
   const [activeSection, setActiveSection] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const drawer = useCartDrawer();
+  // aperture-qq74p — carrinho_aberto only on a real closed→open transition.
+  const abrirCarrinho = useCallback(() => {
+    emitirCarrinhoAberto(drawer.isOpen, "botao");
+    drawer.open();
+  }, [drawer]);
 
   // aperture-jdf1p — owner-only "voltar ao meu painel" affordance.
   //
@@ -177,7 +183,7 @@ export function Navbar({ slug }: { slug?: string } = {}) {
               Meu painel
             </a>
           )}
-          <CartButton onOpen={drawer.open} />
+          <CartButton onOpen={abrirCarrinho} />
         </div>
 
         {/* Mobile nav (below sm). Hamburger toggles a dropdown, with the
@@ -202,7 +208,7 @@ export function Navbar({ slug }: { slug?: string } = {}) {
               Painel
             </a>
           )}
-          <CartButton onOpen={drawer.open} />
+          <CartButton onOpen={abrirCarrinho} />
           <div ref={dropdownRef} className="relative">
             <button
               type="button"

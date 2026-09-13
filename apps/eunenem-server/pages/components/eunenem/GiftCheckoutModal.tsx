@@ -20,6 +20,7 @@ import { getStripePromise } from "@/lib/stripeClient";
 import type { VisitorGift } from "@/lib/visitorGift";
 import { sendEvent } from "@/lib/analytics";
 import { emitirInicioCheckoutPix, registrarCompraConcluida } from "@/lib/analytics-conversao";
+import { emitirCheckoutFalhou } from "@/lib/analytics-funil";
 
 // aperture-3xgch (scaffold) → aperture-ra027 (real wiring + metodo step)
 // → aperture-kx9bl (drop contribuinte form — Stripe is source of truth)
@@ -241,9 +242,11 @@ export function GiftCheckoutModal({
         kind: "checkout",
         step: result.tipo === "pix_qr" ? "pix_qr" : "stripe",
       });
-    } catch {
+    } catch (err) {
       // Error state surfaces via iniciarPagamento.isError on the metodo step.
       // Stay on the metodo step so the visitor can retry or close.
+      // aperture-qq74p — the mutation REJECTED: a real failure, finite code.
+      emitirCheckoutFalhou({ metodo, valorCentavos: gift.valorCents, erro: err });
     }
   }
 
@@ -277,8 +280,9 @@ export function GiftCheckoutModal({
         kind: "checkout",
         step: result.tipo === "pix_qr" ? "pix_qr" : "stripe",
       });
-    } catch {
+    } catch (err) {
       // isError surfaces inline on the identity form; visitor retries there.
+      emitirCheckoutFalhou({ metodo: "pix", valorCentavos: gift.valorCents, erro: err });
     }
   }
 
