@@ -112,7 +112,7 @@ export function renderMagicLinkEmail(to: string, url: string): EmailMessage {
                   Se o botão não funcionar, copie e cole este endereço no navegador:
                 </p>
                 <p style="margin:0 0 26px;font-size:13px;line-height:1.5;word-break:break-all;color:${LILAC_DEEP};">
-                  ${safeUrl}
+                  <a href="${safeUrl}" style="color:${LILAC_DEEP};text-decoration:underline;word-break:break-all;">${safeUrl}</a>
                 </p>
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">
                   <tr><td style="border-top:1px solid ${CREAM_2};padding-top:18px;">
@@ -145,5 +145,5 @@ export function renderMagicLinkEmail(to: string, url: string): EmailMessage {
     'Se você não pediu este link, pode ignorar este email com segurança.',
   ].join('\n');
 
-  return { to, subject, html, text };
+  return { to, subject, html, text, disableClickTracking: true };
 }
