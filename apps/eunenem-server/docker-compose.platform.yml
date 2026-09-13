@@ -16,7 +16,20 @@ services:
         # must be present THEN, not just at runtime (see Dockerfile +
         # setup.ts build-time-inline rationale in the staging compose).
         STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+    # Bypass pnpm/tsx CLI child wrappers: entrypoint exec makes this Node
+    # process receive Docker SIGTERM directly. Keep the existing tsx loader.
+    command: ["node", "--import", "tsx", "--env-file-if-exists=.env", "server.tsx"]
     restart: unless-stopped
+    # Best-effort app drain420s +30s supervisor margin, NOT provider resolution.
+    stop_grace_period: 450s
+    healthcheck:
+      # Native Node only; no curl dependency. Dokploy DONE is not readiness:
+      # release verification must independently check the exact new instance.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/healthz', {signal: AbortSignal.timeout(2000)}).then(r => process.exit(r.status === 200 ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
     environment:
       NODE_ENV: production
       PORT: "3001"

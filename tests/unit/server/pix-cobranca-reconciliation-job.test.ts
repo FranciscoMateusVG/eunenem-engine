@@ -77,3 +77,62 @@ describe('PIX cobranca reconciliation pg-boss registration', () => {
     ]);
   });
 });
+
+// Lifecycle boundary only: queue/schedule/effect policies remain unchanged.
+describe('reconciliation startup/drain admission', () => {
+  it('does not register a worker or schedule after a startup checkpoint closes', async () => {
+    let open = true;
+    const boss = {
+      createQueue: vi.fn(async () => {
+        open = false;
+      }),
+      work: vi.fn(async () => 'worker-id'),
+      schedule: vi.fn(async () => undefined),
+    };
+    const lifecycle = {
+      assertAdmissionOpen: () => {
+        if (!open) throw new Error('server_admission_closed');
+      },
+      runJob: <T>(operation: () => Promise<T>) => operation(),
+    };
+    await expect(
+      registerPixCobrancaReconciliationJob(boss as never, reconciliationDeps(), lifecycle),
+    ).rejects.toThrow('server_admission_closed');
+    expect(boss.work).not.toHaveBeenCalled();
+    expect(boss.schedule).not.toHaveBeenCalled();
+  });
+
+  it('passes the existing callback through lifecycle tracking; late callbacks cannot start effects', async () => {
+    let handler: ((jobs: readonly unknown[]) => Promise<void>) | undefined;
+    const boss = {
+      createQueue: vi.fn(async () => undefined),
+      work: vi.fn(async (_name, _options, registered) => {
+        handler = registered;
+        return 'worker-id';
+      }),
+      schedule: vi.fn(async () => undefined),
+    };
+    let open = true;
+    const runJob = vi.fn(async <T>(operation: () => Promise<T>) => {
+      if (!open) throw new Error('server_admission_closed');
+      return operation();
+    });
+    const deps = reconciliationDeps();
+    await registerPixCobrancaReconciliationJob(boss as never, deps, {
+      assertAdmissionOpen: () => {},
+      runJob,
+    });
+    await handler?.([{ data: { schemaVersion: 1 } }]);
+    expect(runJob).toHaveBeenCalledOnce();
+    expect(
+      deps.pagamentoRepository.claimPixCobrancaReconciliationCandidates,
+    ).toHaveBeenCalledOnce();
+    open = false;
+    await expect(handler?.([{ data: { schemaVersion: 1 } }])).rejects.toThrow(
+      'server_admission_closed',
+    );
+    expect(
+      deps.pagamentoRepository.claimPixCobrancaReconciliationCandidates,
+    ).toHaveBeenCalledOnce();
+  });
+});
