@@ -19,6 +19,7 @@ import { paginaSharePath } from "@/lib/painelRoutes";
 import { getStripePromise } from "@/lib/stripeClient";
 import type { VisitorGift } from "@/lib/visitorGift";
 import { sendEvent } from "@/lib/analytics";
+import { registrarCompraConcluida } from "@/lib/analytics-conversao";
 
 // aperture-3xgch (scaffold) → aperture-ra027 (real wiring + metodo step)
 // → aperture-kx9bl (drop contribuinte form — Stripe is source of truth)
@@ -152,9 +153,14 @@ export function GiftCheckoutModal({
       // undercounting real purchases. Same event name + props as the redirect
       // path, sourced from the same obterSucessoPagamento read. Fires exactly
       // once: after setPhase the guard above early-returns on re-runs.
-      sendEvent("compra_concluida", {
-        valor: successQuery.data.valor,
-        gift_name: successQuery.data.giftName,
+      // aperture-wdis6 — and deduped on the Stripe sessionId, so the /sucesso
+      // escape hatch for the SAME payment can never double-count it.
+      registrarCompraConcluida({
+        transactionId: sessionId ?? "",
+        valorCentavos: successQuery.data.valor,
+        metodo: "credit_card",
+        giftName: successQuery.data.giftName,
+        quantidadeItens: 1,
       });
       // aperture-6g58e operator follow-up: invalidate the Marketplace
       // cache so the gift grid re-renders the just-purchased gift as
@@ -163,7 +169,7 @@ export function GiftCheckoutModal({
       // is still in the success panel.
       void invalidarListaPresentes(slug);
     }
-  }, [successQuery.data, phase.kind, invalidarListaPresentes, slug]);
+  }, [successQuery.data, phase.kind, invalidarListaPresentes, slug, sessionId]);
 
   // 30s timeout: pending → slow. Cleared if the phase changes before then
   // (confirmed lands, or visitor closes + reopens which remounts).
@@ -269,12 +275,16 @@ export function GiftCheckoutModal({
   // doesn't apply (no onComplete race here).
   const onPixConfirmed = useCallback(() => {
     setPhase({ kind: "completed_confirmed" });
-    sendEvent("compra_concluida", {
-      valor: gift.valorCents,
-      gift_name: gift.nome,
+    // aperture-wdis6 — deduped on the Inter txid (durable payment id).
+    registrarCompraConcluida({
+      transactionId: pixData?.txid ?? "",
+      valorCentavos: gift.valorCents,
+      metodo: "pix",
+      giftName: gift.nome,
+      quantidadeItens: 1,
     });
     void invalidarListaPresentes(slug);
-  }, [gift.valorCents, gift.nome, invalidarListaPresentes, slug]);
+  }, [gift.valorCents, gift.nome, invalidarListaPresentes, slug, pixData?.txid]);
 
   // aperture-kuw0o: expired/rejected QR → back to a fresh identity step
   // (the typed identity survives in pixContribuinte state; the mutation
