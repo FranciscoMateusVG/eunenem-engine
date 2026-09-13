@@ -30,6 +30,7 @@ Os eventos de **verdade de servidor** saem do backend pelo sink
 | `onboarding_concluido` | Wizard de onboarding pós-signup concluído (o proxy de "cadastro concluído" no cliente; a criação da conta é verdade de servidor — `conta_criada`) | — | [pages/components/eunenem/auth/OnboardingWizard.tsx](pages/components/eunenem/auth/OnboardingWizard.tsx) — `finish` |
 | `compra_concluida` | Confirmação de pagamento **vista pelo comprador** (etapa de UX, best-effort por navegador). A conversão-verdade é `pagamento_aprovado` (servidor) | `transaction_id` (Stripe sessionId em cartão, txid Inter em PIX; **nunca vazio** — sem id o evento não é emitido), `value` (BRL decimal), `currency: 'BRL'`, `valor_centavos` (int), `valor` (legado, = `valor_centavos`), `metodo` (`pix`\|`credit_card`), `gift_name`, `quantidade_itens` (opcional; ausente em /sucesso) | [pages/PaginaSucessoPage.tsx](pages/PaginaSucessoPage.tsx) `ApprovedState`; [GiftCheckoutModal.tsx](pages/components/eunenem/GiftCheckoutModal.tsx) (inline Stripe + PIX QR); [CartDrawer.tsx](pages/components/eunenem/CartDrawer.tsx) (inline Stripe + PIX QR). Dedup ANTES do `sendEvent` em [pages/lib/analytics-conversao.ts](pages/lib/analytics-conversao.ts) por `transaction_id` (localStorage `eunenem:conv:compra:<id>`), aperture-wdis6 |
 | `pagamento_falhou` | Página de sucesso em estado de falha (pagamento rejeitado OU erro da query tRPC — ambos caem aqui) | — | pages/PaginaSucessoPage.tsx — `FailedState` |
+| `pagamento_falhou` | PIX inline (aperture-qq74p): o status **consultado no servidor** da cobrança é `expirado` ou `rejeitado` — uma vez por txid. O countdown local vencer **não** emite (não é estado real) | `metodo: 'pix'`, `motivo: 'expirado' \| 'rejeitado'`, `transaction_id` (txid), `valor_centavos`. Sem nomes/texto livre/URL | PixCheckout.tsx — `PixQrPanel` (efeito sobre `polledStatus`) |
 
 Removidos do código em PR #50 (contas por senha aposentadas) e por isso
 **fora desta tabela**: `signup_concluido`, `login_concluido` em
@@ -42,6 +43,23 @@ Removidos do código em PR #50 (contas por senha aposentadas) e por isso
 | `checkout_iniciado` | Intenção de pagamento criada com sucesso (uma vez por intenção): sessão Stripe (cartão) ou cobrança PIX (Inter) a partir de um presente único | `valor_centavos`, `metodo` | GiftCheckoutModal.tsx — `onConfirmMetodo` / formulário de identidade PIX |
 | `checkout_iniciado` | Idem a partir do carrinho (múltiplos itens) | `valor_centavos`, `quantidade_itens`, `metodo` | CartDrawer.tsx — `onFinalizar` / formulário de identidade PIX |
 | `pix_qr_regenerado` | Usuário gera um novo QR PIX após expiração/rejeição (aperture-4yse9 T1.5). **Não** re-emite `checkout_iniciado` | `transaction_id` (o NOVO txid), `valor_centavos`, `metodo: 'pix'` | GiftCheckoutModal.tsx e CartDrawer.tsx — próximo `iniciar` após `onPixRetry` |
+| `checkout_falhou` | A mutation `iniciar` foi **rejeitada** (aperture-qq74p) — estado real, não inferência (falha de rede ≠ pagamento recusado) | `etapa: 'iniciar'`, `metodo`, `valor_centavos`, `quantidade_itens` (só carrinho), `codigo` (código tRPC finito, ex. `CONFLICT`, ou `'desconhecido'`; a mensagem nunca é lida). Sem nomes/texto livre/URL | CartDrawer.tsx — `onFinalizar` / `onSubmitPixIdentity`; GiftCheckoutModal.tsx — `onConfirmMetodo` / `onSubmitPixIdentity` (os 4 `catch`) |
+
+## Carrinho
+
+Eventos derivados da **transição real do reducer** do carrinho
+(aperture-qq74p): o wrapper `despacharComDelta` (`lib/analytics-funil.ts`)
+prevê a transição a partir de uma célula de estado síncrona (ref
+ressincronizada do estado commitado a cada render e avançada antes do
+`dispatch`), emite só quando a linha mudou de fato e mantém o reducer puro.
+No-ops (limite `qtyAvailable`, esgotado, nome desconhecido) não emitem;
+`clear` (pós-compra) nunca é remoção. Sem nomes de item/texto livre/URL.
+
+| Evento | Ação | Propriedades | Arquivo |
+|---|---|---|---|
+| `carrinho_item_adicionado` | `add`/`increment` mudou a linha de fato | `valor_centavos` (unitário), `quantidade` (da linha, DEPOIS), `origem: 'card' \| 'drawer'` | lib/cart.tsx via `despacharComDelta`; origem `card` = Marketplace/GiftCard, `drawer` = CartDrawer |
+| `carrinho_item_removido` | `decrement`/`remove` mudou a linha (`quantidade: 0` = linha removida) | idem | idem |
+| `carrinho_aberto` | Drawer passou de fechado para aberto (guard em `drawer.isOpen`; já aberto não emite) | `origem: 'adicionar' \| 'botao'` | Marketplace.tsx — `onAdd`; Navbar.tsx — `abrirCarrinho` (CartButton ×2) |
 
 ## Pageviews customizados
 
