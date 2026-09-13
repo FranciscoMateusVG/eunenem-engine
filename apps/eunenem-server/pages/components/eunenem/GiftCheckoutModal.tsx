@@ -19,7 +19,7 @@ import { paginaSharePath } from "@/lib/painelRoutes";
 import { getStripePromise } from "@/lib/stripeClient";
 import type { VisitorGift } from "@/lib/visitorGift";
 import { sendEvent } from "@/lib/analytics";
-import { registrarCompraConcluida } from "@/lib/analytics-conversao";
+import { emitirInicioCheckoutPix, registrarCompraConcluida } from "@/lib/analytics-conversao";
 
 // aperture-3xgch (scaffold) → aperture-ra027 (real wiring + metodo step)
 // → aperture-kx9bl (drop contribuinte form — Stripe is source of truth)
@@ -153,8 +153,9 @@ export function GiftCheckoutModal({
       // undercounting real purchases. Same event name + props as the redirect
       // path, sourced from the same obterSucessoPagamento read. Fires exactly
       // once: after setPhase the guard above early-returns on re-runs.
-      // aperture-wdis6 — and deduped on the Stripe sessionId, so the /sucesso
-      // escape hatch for the SAME payment can never double-count it.
+      // aperture-wdis6 — client confirmation event; best-effort per-browser
+      // dedupe on the Stripe sessionId, so the /sucesso escape hatch for the
+      // same payment does not re-emit in this browser.
       registrarCompraConcluida({
         transactionId: sessionId ?? "",
         valorCentavos: successQuery.data.valor,
@@ -246,6 +247,10 @@ export function GiftCheckoutModal({
     }
   }
 
+  // aperture-wdis6 (T1.5) — set by onPixRetry; the next successful iniciar
+  // is a QR regenerate for the SAME intent, not a new checkout_iniciado.
+  const pixRegenerandoRef = useRef(false);
+
   // aperture-kuw0o: identity submitted → initiate the PIX charge → QR step.
   async function onSubmitPixIdentity(contribuinte: ContribuinteInput) {
     if (!gift.availableId || iniciarPagamento.isPending) return;
@@ -257,7 +262,12 @@ export function GiftCheckoutModal({
         metodo: "pix",
         contribuinte,
       });
-      sendEvent("checkout_iniciado", { valor_centavos: gift.valorCents, metodo: "pix" });
+      emitirInicioCheckoutPix({
+        regenerando: pixRegenerandoRef.current,
+        transactionId: result.tipo === "pix_qr" ? result.txid : "",
+        valorCentavos: gift.valorCents,
+      });
+      pixRegenerandoRef.current = false;
       // Response-driven (aperture-irhxi blocker 1): stripe_embedded here
       // means the flag flipped server-side mid-session — render Stripe.
       setPhase({
@@ -275,7 +285,7 @@ export function GiftCheckoutModal({
   // doesn't apply (no onComplete race here).
   const onPixConfirmed = useCallback(() => {
     setPhase({ kind: "completed_confirmed" });
-    // aperture-wdis6 — deduped on the Inter txid (durable payment id).
+    // aperture-wdis6 — best-effort per-browser dedupe on the Inter txid.
     registrarCompraConcluida({
       transactionId: pixData?.txid ?? "",
       valorCentavos: gift.valorCents,
@@ -290,6 +300,7 @@ export function GiftCheckoutModal({
   // (the typed identity survives in pixContribuinte state; the mutation
   // resets so a NEW idPagamento/txid is minted — charges are single-use).
   const onPixRetry = useCallback(() => {
+    pixRegenerandoRef.current = true;
     iniciarPagamento.reset();
     setPhase({ kind: "checkout", step: "pix_identity" });
   }, [iniciarPagamento]);

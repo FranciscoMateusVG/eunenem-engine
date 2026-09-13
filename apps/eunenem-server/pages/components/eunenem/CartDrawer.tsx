@@ -2,7 +2,7 @@ import {
   EmbeddedCheckout,
   EmbeddedCheckoutProvider,
 } from "@stripe/react-stripe-js";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   useIniciarPagamentoCarrinho,
   useInvalidarListaPresentes,
@@ -17,7 +17,7 @@ import { useCampanhaRota } from "@/lib/campanha-rota";
 import { formatBRL } from "@/lib/formatBRL";
 import { getStripePromise } from "@/lib/stripeClient";
 import { sendEvent } from "@/lib/analytics";
-import { registrarCompraConcluida } from "@/lib/analytics-conversao";
+import { emitirInicioCheckoutPix, registrarCompraConcluida } from "@/lib/analytics-conversao";
 
 // Plan 0017 / aperture-16flf — visitor cart drawer + checkout flow.
 //
@@ -103,10 +103,11 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
     }
     if (successQuery.data?.status === "approved") {
       setPhase({ kind: "completed_confirmed" });
-      // aperture-e69ur → aperture-wdis6 — conversion for the INLINE success
-      // path (see GiftCheckoutModal for the rationale). Same funnel + props as
-      // the redirect path's PaginaSucessoPage; deduped on the Stripe sessionId
-      // so the /sucesso escape hatch (same payment) can never double-count it.
+      // aperture-e69ur → aperture-wdis6 — client confirmation event for the
+      // INLINE success path (see GiftCheckoutModal for the rationale). Same
+      // funnel + props as the redirect path's PaginaSucessoPage; best-effort
+      // per-browser dedupe on the Stripe sessionId, so the /sucesso escape
+      // hatch for the same payment does not re-emit in this browser.
       registrarCompraConcluida({
         transactionId: sessionId ?? "",
         valorCentavos: successQuery.data.valor,
@@ -238,6 +239,10 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
   // aperture-kuw0o: identity submitted → initiate the PIX charge → QR step.
   // Cart lines are re-read at submit time (the visitor may have gone back
   // and edited between snapshot and submit).
+  // aperture-wdis6 (T1.5) — set by onPixRetry; the next successful iniciar
+  // is a QR regenerate for the SAME intent, not a new checkout_iniciado.
+  const pixRegenerandoRef = useRef(false);
+
   const onSubmitPixIdentity = useCallback(
     async (contribuinte: ContribuinteInput) => {
       if (cart.state.lines.length === 0 || iniciar.isPending) return;
@@ -259,11 +264,13 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
           metodo: "pix",
           contribuinte,
         });
-        sendEvent("checkout_iniciado", {
-          valor_centavos: cart.totalPixCents,
-          quantidade_itens: cart.totalUnits,
-          metodo: "pix",
+        emitirInicioCheckoutPix({
+          regenerando: pixRegenerandoRef.current,
+          transactionId: result.tipo === "pix_qr" ? result.txid : "",
+          valorCentavos: cart.totalPixCents,
+          quantidadeItens: cart.totalUnits,
         });
+        pixRegenerandoRef.current = false;
         // Response-driven (aperture-irhxi blocker 1).
         setPhase({
           kind: "checkout",
@@ -281,7 +288,7 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
   // land on the confirmed panel.
   const onPixConfirmed = useCallback(() => {
     setPhase({ kind: "completed_confirmed" });
-    // aperture-wdis6 — deduped on the Inter txid (durable payment id).
+    // aperture-wdis6 — best-effort per-browser dedupe on the Inter txid.
     registrarCompraConcluida({
       transactionId: pixData?.txid ?? "",
       valorCentavos: checkoutSnapshot?.totalCents ?? cart.totalPixCents,
@@ -294,6 +301,7 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
   }, [checkoutSnapshot, cart, invalidarListaPresentes, slug, pixData?.txid]);
 
   const onPixRetry = useCallback(() => {
+    pixRegenerandoRef.current = true;
     iniciar.reset();
     setPhase({ kind: "checkout", step: "pix_identity" });
   }, [iniciar]);

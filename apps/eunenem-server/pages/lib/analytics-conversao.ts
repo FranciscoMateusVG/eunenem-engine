@@ -1,27 +1,39 @@
-// aperture-wdis6 — ONE monetary conversion per payment.
+// aperture-wdis6 — compra_concluida: the CLIENT-SIDE purchase confirmation,
+// emitted best-effort at most once per payment PER BROWSER.
 //
-// `compra_concluida` used to be fired raw from five UI sites (the /sucesso
-// ApprovedState mount, and the inline Stripe-approved / PIX-confirmed paths
-// of CartDrawer + GiftCheckoutModal). Each site was only guarded by React
-// state (mount / phase), so a reload, a back-navigation or an alternate
-// success surface for the SAME payment re-emitted the conversion — and no
-// site carried a payment id, so GA4 (and Mixpanel) could not dedupe it
-// either. This module is the single funnel every site goes through:
+// Semantics (root decision 2026-09-13, Izzy sdg24h HOLD): this is a UX
+// confirmation event, not the financial truth. The server-side
+// pagamento_aprovado (Wheatley, aperture-4yse9) is the approval event;
+// reports must not add the two as separate purchases. What this module
+// guarantees, and what it does NOT:
 //
-//   1. props are built ONCE, in the shape both sinks agreed on (GA4 needs
-//      `value` decimal + `currency`; Mixpanel keeps `valor_centavos` parity
-//      with checkout_iniciado; `transaction_id` is the durable payment id —
-//      Stripe checkout session id or Inter PIX txid — that GA4 dedupes on
-//      and that Wheatley's Mixpanel contract maps to $insert_id inside
-//      analytics.ts). No `$`-prefixed keys here: GA4 drops/mangles them.
-//   2. the dedupe happens BEFORE sendEvent(), so BOTH sinks see exactly one
-//      compra_concluida per transaction_id — keyed in localStorage so it
-//      survives reload and alternate surfaces, with an in-memory fallback
-//      when storage is unavailable (Safari private mode throws on access).
+//   GUARANTEED (unit-tested, tests/unit/server/wdis6-compra-concluida.test.ts)
+//   - one prop contract for both sinks (GA4 + Mixpanel via sendEvent):
+//     transaction_id (Stripe checkout session id / Inter PIX txid), value
+//     (BRL decimal) + currency, valor_centavos (+ legacy `valor`), metodo,
+//     gift_name, quantidade_itens?. No `$`-prefixed keys (GA4 mangles them);
+//     the Mixpanel $insert_id mapping lives in analytics.ts, not here.
+//   - within ONE browser profile, a transaction_id is emitted at most once:
+//     the check runs BEFORE sendEvent(), keyed in localStorage, so a reload,
+//     back-navigation or the /sucesso escape hatch for the same payment does
+//     not re-emit to either sink.
+//   - no transaction_id → NOT emitted (a confirmation without identity is
+//     not countable; the flow/UI is untouched, nothing sensitive is logged).
 //
-// The emitter and the registry are injectable so the contract is provable in
-// a pure node unit test (tests/unit/server/wdis6-compra-concluida.test.ts)
-// without a DOM.
+//   NOT GUARANTEED (documented limits, also unit-tested where possible)
+//   - another browser / device / profile, or cleared site data, will emit the
+//     same payment again — the registry is browser-local, not payment state.
+//   - storage unavailable (Safari private mode, quota) degrades to
+//     page-lifetime dedupe only.
+//   - two tabs confirming the same payment at the same instant can both
+//     emit: localStorage has no atomic check-and-set.
+//   - GA4 does NOT deduplicate this custom event on transaction_id (that
+//     documented behaviour applies to `purchase`); Mixpanel dedupes only if
+//     $insert_id is set on its side. Local dedupe before the emitter proves
+//     nothing about delivery to either destination.
+//
+// The emitter and the registry are injectable so all of the above is
+// provable in a pure node unit test without a DOM.
 import { sendEvent } from './analytics.js';
 import type { MetodoPagamento } from './paginaApi.js';
 
@@ -91,6 +103,8 @@ const CHAVE_PREFIXO = 'eunenem:conv:compra:';
  * back to an in-memory Set for the lifetime of the page whenever storage is
  * missing or throws. Every access is guarded: a storage failure must never
  * break the success screen — worst case we degrade to per-page dedupe.
+ * Not atomic across tabs (localStorage has no check-and-set) and scoped to
+ * this browser profile — see the header for the documented limits.
  */
 export function criarRegistroConversao(
   armazenamento: ArmazenamentoConversao | null | undefined,
@@ -139,24 +153,77 @@ export interface RegistrarCompraDeps {
   emitir?: (eventName: string, props: Record<string, unknown>) => void;
 }
 
+export type ResultadoCompraConcluida =
+  /** emitted to sendEvent (both sinks) */
+  | 'emitida'
+  /** this browser already emitted this transaction_id — suppressed */
+  | 'ja_emitida'
+  /** no transaction_id available on this surface — suppressed, UI unaffected */
+  | 'sem_identidade';
+
 /**
- * The ONE entry point for the purchase conversion. Returns true when the
- * event was emitted, false when this transaction was already counted.
- * Empty transactionId → emitted WITHOUT dedupe (never silently drop a real
- * conversion; the id gap surfaces as a missing transaction_id in reports).
+ * The ONE entry point for the client purchase confirmation. Never throws.
+ * Blank transactionId → 'sem_identidade' and NOTHING is emitted: an event
+ * that cannot be tied to a payment must not be counted as one.
  */
 export function registrarCompraConcluida(
   input: CompraConcluidaInput,
   deps: RegistrarCompraDeps = {},
-): boolean {
+): ResultadoCompraConcluida {
+  const id = input.transactionId.trim();
+  if (!id) return 'sem_identidade';
   const registro = deps.registro ?? registroDoNavegador();
   const emitir = deps.emitir ?? sendEvent;
-  const props = montarPropsCompraConcluida(input);
-  const id = input.transactionId.trim();
-  if (id) {
-    if (registro.jaEmitida(id)) return false;
-    registro.marcarEmitida(id);
+  if (registro.jaEmitida(id)) return 'ja_emitida';
+  registro.marcarEmitida(id);
+  emitir(EVENTO_COMPRA_CONCLUIDA, { ...montarPropsCompraConcluida({ ...input, transactionId: id }) });
+  return 'emitida';
+}
+
+// ── PIX: first iniciar vs QR regenerate (Wheatley T1.5 contract, 4yse9) ──
+//
+// checkout_iniciado means "the visitor started ONE payment intent". On PIX,
+// an expired/rejected QR sends the visitor back to the identity step and a
+// NEW charge (new txid) is minted for the SAME intent — that used to re-emit
+// checkout_iniciado, inflating the funnel top. The regenerate path emits
+// pix_qr_regenerado instead; checkout_iniciado stays exactly once per intent.
+
+export const EVENTO_CHECKOUT_INICIADO = 'checkout_iniciado';
+export const EVENTO_PIX_QR_REGENERADO = 'pix_qr_regenerado';
+
+export interface InicioCheckoutPixInput {
+  /** True when this iniciar follows onPixRetry (expired/rejected QR). */
+  regenerando: boolean;
+  /** txid of the charge just minted (the QR now on screen). */
+  transactionId: string;
+  valorCentavos: number;
+  /** Present on the cart surface; absent on the single-gift modal. */
+  quantidadeItens?: number;
+}
+
+export type EmissorEvento = (eventName: string, props: Record<string, unknown>) => void;
+
+/**
+ * Emits checkout_iniciado (props unchanged from before: valor_centavos,
+ * quantidade_itens?, metodo) on the FIRST successful iniciar of an intent,
+ * and pix_qr_regenerado {transaction_id, valor_centavos, metodo:'pix'} when
+ * the same intent regenerates its QR. Returns the event name emitted.
+ */
+export function emitirInicioCheckoutPix(
+  input: InicioCheckoutPixInput,
+  emitir: EmissorEvento = sendEvent,
+): string {
+  if (input.regenerando) {
+    emitir(EVENTO_PIX_QR_REGENERADO, {
+      transaction_id: input.transactionId,
+      valor_centavos: input.valorCentavos,
+      metodo: 'pix',
+    });
+    return EVENTO_PIX_QR_REGENERADO;
   }
-  emitir(EVENTO_COMPRA_CONCLUIDA, { ...props });
-  return true;
+  const props: Record<string, unknown> = { valor_centavos: input.valorCentavos };
+  if (input.quantidadeItens !== undefined) props.quantidade_itens = input.quantidadeItens;
+  props.metodo = 'pix';
+  emitir(EVENTO_CHECKOUT_INICIADO, props);
+  return EVENTO_CHECKOUT_INICIADO;
 }
