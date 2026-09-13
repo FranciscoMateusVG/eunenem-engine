@@ -29,8 +29,10 @@ import Mixpanel from 'mixpanel';
  *     the same fact reported by two paths (webhook vs. reconciliation) carries
  *     the SAME timestamp instead of two send times — without that, the
  *     query-time dedup above never matches.
- * Every call site ALSO guards on the pre-transition status so a replay that
- * finalizes as a no-op does not re-track at all.
+ * Every call site ALSO guards on its own pre-transition read so a SEQUENTIAL
+ * replay (retry after commit) does not re-track. Concurrent deliveries for
+ * one payment can still both pass that guard and both send (different
+ * `time`, so not collapsed) — a documented residual, not a bug to hide.
  */
 export interface ServerAnalyticsTrackOptions {
   /**

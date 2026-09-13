@@ -147,7 +147,10 @@ também é enviado ao Mixpanel — nenhuma mudança por call-site foi necessári
 - **`$insert_id` no cliente** (aperture-4yse9): em `compra_concluida`, o sink
   Mixpanel recebe `$insert_id` derivado do `transaction_id` (sanitizado para
   `[A-Za-z0-9-]`, ≤36 chars). Só no ramo Mixpanel — o objeto do chamador
-  (que também vai ao GA) nunca carrega chaves `$`.
+  (que também vai ao GA) nunca carrega chaves `$`. É uma dica secundária: a
+  dedup primária é o guard por `transaction_id` em `analytics-conversao.ts`.
+  Outro dispositivo ou localStorage limpo = outro `distinct_id`; reload =
+  outro `time`; nesses casos o Mixpanel **não** colapsa por esta chave.
 
 ### Identidade
 
@@ -188,15 +191,24 @@ de `solicitado`, login/magic link, ponte legado (Clerk), mutations admin.
 
 ## Deduplicação e semântica
 
-- **Um pagamento = um `pagamento_aprovado`**, garantido *na origem* pelos
-  guards de status pré-finalize em cada call path. O que o sink acrescenta é
-  best-effort: `$insert_id` determinístico (hash de `evento + id_pagamento`,
-  36 chars) e `time` = timestamp do fato (`event.created` do Stripe; `horario`
-  do Inter — o MESMO valor lido pelo webhook e pela reconciliação). Contrato
-  real do Mixpanel: duplicatas colapsam só quando (evento, `time`,
-  `distinct_id`, `$insert_id`) coincidem em query-time, ou no mesmo dia em uma
-  compactação posterior não garantida. Crash entre commit e envio = evento
-  perdido (não há outbox nesta rodada — decisão de root).
+- **Alvo: um pagamento = um `pagamento_aprovado`.** O que está garantido na
+  origem é só contra *replay sequencial*: cada call path lê o status antes de
+  finalizar e só emite quando ESSA chamada fez `pendente`\|`processing` →
+  `aprovado`; um retry após o commit vê `aprovado` e não emite. O que NÃO
+  está garantido: **entregas concorrentes** do Stripe para o mesmo pagamento
+  (`checkout.session.completed(paid)` e `charge.succeeded` chegando juntos)
+  podem ambas ler `pendente`, ambas finalizar (uma vence o CAS, a outra recebe
+  o registro canônico como no-op) e **ambas emitir** — com `event.created`
+  distintos, o Mixpanel não colapsa. Residual conhecido e aceito por root nesta
+  rodada (sem outbox, sem sinal de "vencedor da transição"); regressão explícita
+  em `tests/unit/server/phase3-dispatcher.test.ts`.
+  O sink acrescenta, best-effort: `$insert_id` determinístico (hash de
+  `evento + id_pagamento`, 36 chars) e `time` = timestamp do fato
+  (`event.created` do Stripe; `horario` do Inter — o MESMO valor lido pelo
+  webhook e pela reconciliação, então webhook × poll colapsam). Contrato real
+  do Mixpanel: duplicatas colapsam só quando (evento, `time`, `distinct_id`,
+  `$insert_id`) coincidem em query-time, ou no mesmo dia em uma compactação
+  posterior não garantida. Crash entre commit e envio = evento perdido.
 - `compra_concluida` (cliente) e `pagamento_aprovado` (servidor) caem em
   perfis diferentes por desenho: o comprador é anônimo no cliente; o dono da
   campanha é o `distinct_id` no servidor. Funis de receita usam

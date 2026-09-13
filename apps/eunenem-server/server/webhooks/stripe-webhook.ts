@@ -535,6 +535,9 @@ export async function dispatchVerifiedStripeEvent(
         // terminal-status skip below). A Stripe retry after a post-finalize
         // failure sees `aprovado` here and does not re-track. Time = Stripe's
         // event.created, identical across retries of the same event.
+        // RESIDUAL (documented, root-accepted): if charge.succeeded for the
+        // same payment is dispatched CONCURRENTLY, both handlers can pre-read
+        // pendente and both track — no transition-winner signal this round.
         if (aprovacaoEhNova(pagamento.status)) {
           await trackPagamentoAprovado(deps, {
             pagamento,

@@ -367,6 +367,49 @@ describe('Phase 3 dispatcher: checkout.session.completed', () => {
     expect(aprovados[0]?.props).not.toHaveProperty('provider');
   });
 
+  it('analytics RESIDUAL (aperture-4yse9, documented): CONCURRENT paid + charge.succeeded can both track', async () => {
+    // Root-accepted limit of the best-effort model: both handlers pre-read
+    // `pendente` before either finalizes; the CAS loser receives the canonical
+    // approved record as a no-op and still tracks. Different event.created ⇒
+    // Mixpanel's exact-tuple dedup does not collapse the pair. This test pins
+    // the limit so a future transition-winner signal has a red bar to turn green.
+    const tracked: Array<{ event: string; options?: { occurredAt?: Date } }> = [];
+    (rig.deps as unknown as { serverAnalytics: ServerAnalytics }).serverAnalytics = {
+      track: (event, _distinctId, _props, options) => {
+        tracked.push({ event, options });
+      },
+    };
+
+    const sessionId = `cs_test_${randomUUID()}`;
+    const piId = `pi_test_${randomUUID()}`;
+    const chId = `ch_test_${randomUUID()}`;
+    const ids = await seedFullChain(rig, sessionId, 'credit_card');
+    await setRefs(rig, ids.idPagamento, { pi: piId });
+
+    const paid = makeEvent('checkout.session.completed', {
+      id: sessionId,
+      payment_intent: piId,
+      payment_status: 'paid',
+    });
+    const charge = {
+      ...makeEvent('charge.succeeded', { id: chId, payment_intent: piId }),
+      created: 1717000042,
+    };
+
+    await Promise.all([
+      dispatchVerifiedStripeEvent(rig.deps, noopSpan, paid),
+      dispatchVerifiedStripeEvent(rig.deps, noopSpan, charge as never),
+    ]);
+
+    const updated = await rig.pagamentoRepository.findById(ids.idPagamento as never);
+    expect(updated?.status).toBe('aprovado'); // the DB truth is still exactly one approval
+
+    const aprovados = tracked.filter((e) => e.event === 'pagamento_aprovado');
+    // The documented residual: TWO sends, with distinct business times.
+    expect(aprovados).toHaveLength(2);
+    expect(new Set(aprovados.map((e) => e.options?.occurredAt?.getTime())).size).toBe(2);
+  });
+
   it('pix pending (payment_status=unpaid): pendente → processing + contribuinte stamped (no finalize yet)', async () => {
     // Stripe's Checkout.Session.PaymentStatus union is
     // 'no_payment_required' | 'paid' | 'unpaid' — there is NO 'processing'
