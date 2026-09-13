@@ -4,6 +4,12 @@ import type { EmailMessage, EmailTransport } from './email-transport.js';
 
 const tracer = trace.getTracer('frame');
 
+// SendGrid SMTP API, per-message (not account/global tracking settings):
+// https://www.twilio.com/docs/sendgrid/for-developers/sending-email/smtp-filters
+const SENDGRID_DIRECT_LINKS_HEADER = JSON.stringify({
+  filters: { clicktrack: { settings: { enable: 0, enable_text: false } } },
+});
+
 /**
  * SMTP config for the nodemailer transport (aperture-lwx2k). Sourced from env
  * by the composition root (SMTP_HOST/PORT/USER/PASS/FROM/SECURE); the
@@ -63,12 +69,21 @@ export class EmailTransportNodemailer implements EmailTransport {
       span.setAttribute('email.transport', 'smtp');
       span.setAttribute('email.host', this.host);
       try {
+        // No generic/custom headers cross the port. Only the verified SendGrid
+        // SMTP host supports this mapping; never silently send an auth token
+        // through an unsupported tracking policy.
+        if (message.disableClickTracking && this.host.toLowerCase() !== 'smtp.sendgrid.net') {
+          throw new Error('Email click-tracking policy unsupported by this SMTP host');
+        }
         await this.transporter.sendMail({
           from: this.from,
           to: message.to,
           subject: message.subject,
           html: message.html,
           ...(message.text ? { text: message.text } : {}),
+          ...(message.disableClickTracking
+            ? { headers: { 'X-SMTPAPI': SENDGRID_DIRECT_LINKS_HEADER } }
+            : {}),
         });
         span.setStatus({ code: SpanStatusCode.OK });
       } catch (error) {

@@ -27,6 +27,12 @@ export interface EmailMessage {
   readonly html: string;
   /** Optional plain-text alternative (deliverability / no-HTML clients). */
   readonly text?: string;
+  /**
+   * Require direct links for bearer-token authentication email. The adapter
+   * must disable click rewriting per message or fail before sending; ordinary
+   * email omits this option and retains its existing provider settings.
+   */
+  readonly disableClickTracking?: boolean;
 }
 
 export interface EmailTransport {
