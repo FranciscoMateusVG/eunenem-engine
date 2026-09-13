@@ -18,6 +18,7 @@ import { formatBRL } from "@/lib/formatBRL";
 import { getStripePromise } from "@/lib/stripeClient";
 import { sendEvent } from "@/lib/analytics";
 import { emitirInicioCheckoutPix, registrarCompraConcluida } from "@/lib/analytics-conversao";
+import { emitirCheckoutFalhou } from "@/lib/analytics-funil";
 
 // Plan 0017 / aperture-16flf — visitor cart drawer + checkout flow.
 //
@@ -220,9 +221,16 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
         kind: "checkout",
         step: result.tipo === "pix_qr" ? "pix_qr" : "stripe",
       });
-    } catch {
+    } catch (err) {
       // Error surfaces via iniciar.isError on the summary panel.
       // Stay on summary; reset snapshot so the visitor can edit + retry.
+      // aperture-qq74p — the mutation REJECTED: a real failure, finite code.
+      emitirCheckoutFalhou({
+        metodo,
+        valorCentavos: metodo === "pix" ? cart.totalPixCents : cart.totalCartaoCents,
+        quantidadeItens: cart.totalUnits,
+        erro: err,
+      });
       setCheckoutSnapshot(null);
     }
   }, [
@@ -279,8 +287,14 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
           kind: "checkout",
           step: result.tipo === "pix_qr" ? "pix_qr" : "stripe",
         });
-      } catch {
+      } catch (err) {
         // isError surfaces inline on the identity form; visitor retries there.
+        emitirCheckoutFalhou({
+          metodo: "pix",
+          valorCentavos: cart.totalPixCents,
+          quantidadeItens: cart.totalUnits,
+          erro: err,
+        });
       }
     },
     [cart.state.lines, cart.totalUnits, cart.totalPixCents, iniciar, slug],

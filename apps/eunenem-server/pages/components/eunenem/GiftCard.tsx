@@ -257,7 +257,7 @@ function InCartStepper({
       >
         <button
           type="button"
-          onClick={() => cart.decrement(gift.nome)}
+          onClick={() => cart.decrement(gift.nome, "card")}
           aria-label={`Diminuir ${gift.nome}`}
           style={stepperBtnStyle(false)}
         >
@@ -277,7 +277,7 @@ function InCartStepper({
         </span>
         <button
           type="button"
-          onClick={() => cart.increment(gift.nome)}
+          onClick={() => cart.increment(gift.nome, "card")}
           disabled={!canIncrement}
           aria-label={`Aumentar ${gift.nome}`}
           style={stepperBtnStyle(!canIncrement)}
