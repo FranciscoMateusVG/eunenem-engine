@@ -26,6 +26,7 @@ import {
   StatusPresencaConvidadoSchema,
   type Usuario,
 } from '../../../../src/index.js';
+import { propsConvidadoCriado } from '../analytics/funil.js';
 import { distinctIdConvidado } from '../analytics/server-analytics.js';
 import type { TrpcContext } from './context.js';
 import {
@@ -315,7 +316,7 @@ export const eventoListaDeConvidadosRouter = t.router({
     .output(GetListaDeConvidadosOutputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        const { campanha } = await resolveCallerCampanha(ctx, input.idCampanha);
+        const { campanha, usuario } = await resolveCallerCampanha(ctx, input.idCampanha);
         const evento = await resolveCallerEvento(ctx, campanha);
         if (!evento) {
           throw new EventoAusenteError('Crie seu convite antes de adicionar convidados');
@@ -359,6 +360,20 @@ export const eventoListaDeConvidadosRouter = t.router({
                 convidados: [novoConvidado],
               },
             );
+
+        // aperture-ai8vg — server-truth "guest added" step. convidados rows
+        // carry no timestamp, so the write clock is the business time; the
+        // new convidado id is the dedup key. No name/phone in props.
+        ctx.deps.serverAnalytics?.track(
+          'convidado_criado',
+          usuario.idConta,
+          propsConvidadoCriado({
+            idCampanha: campanha.id,
+            idLista: updated.id,
+            totalConvidados: updated.convidados.length,
+          }),
+          { insertKey: novoConvidado.id, occurredAt: ctx.deps.clock() },
+        );
 
         return toSnapshot(updated);
       } catch (err) {

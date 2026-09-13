@@ -43,6 +43,7 @@ import {
 import { paginaSharePath } from "@/lib/painelRoutes";
 import { sendEvent, sendPageView } from "@/lib/analytics";
 import { registrarCompraConcluida } from "@/lib/analytics-conversao";
+import { pageViewProps } from "@/lib/rota-canonica";
 
 // ── Page ──────────────────────────────────────────────────────────────────
 
@@ -60,8 +61,10 @@ export function PaginaSucessoPage({ slug }: { slug: string }) {
 
   // aperture-ppuay — page-view tracking (EVENT_MAP addition). compra_concluida
   // / pagamento_falhou already fire from the approved/failed sub-states.
+  // aperture-ai8vg — rota/publico like every other page view (the URL carries
+  // sessionId/idCampanha; only the canonical template is sent).
   useEffect(() => {
-    sendPageView('Sucesso');
+    sendPageView('Sucesso', pageViewProps(window.location.pathname));
   }, []);
 
   useEffect(() => {

@@ -18,6 +18,7 @@
 // export drops in later at the same path with the same shape — NO code change
 // (tracked as a separate bead; see spec §10).
 
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { z } from 'zod/v4';
 import legacyUsersJson from './seed-data/legacy-1.0-users.json';
@@ -168,4 +169,35 @@ export function buscarCampanhasLegado(
       utm: entry.utm,
       mimos: entry.mimos,
     }));
+}
+
+/**
+ * aperture-ai8vg — content hash of a legacy snapshot (normalized emails,
+ * sorted), so an analytics classification can name WHICH list it was made
+ * against. The list is a static, versioned export: a user missing from it is
+ * "not in this snapshot", never "certainly not a 1.0 user".
+ */
+export function snapshotLegado(entries: readonly LegacyUserEntry[]): string {
+  const emails = entries.map((e) => normalizarEmail(e.email)).sort();
+  return createHash('sha256').update(JSON.stringify(emails)).digest('hex').slice(0, 12);
+}
+
+export const LEGACY_USERS_SNAPSHOT: string = snapshotLegado(LEGACY_USERS_SEED);
+
+/**
+ * PURE classification for analytics: `migrado_1_0` is true/false against the
+ * given snapshot, or 'unknown' when it cannot be decided (blank email, or an
+ * empty snapshot — e.g. the committed stub — which proves nothing about
+ * anyone). Reported separately downstream, never used to exclude a user
+ * silently.
+ */
+export function classificarLegado(
+  email: string,
+  entries: readonly LegacyUserEntry[] = LEGACY_USERS_SEED,
+  snapshot: string = entries === LEGACY_USERS_SEED ? LEGACY_USERS_SNAPSHOT : snapshotLegado(entries),
+): { migrado_1_0: boolean | 'unknown'; legado_snapshot: string } {
+  if (entries.length === 0 || normalizarEmail(email).length === 0) {
+    return { migrado_1_0: 'unknown', legado_snapshot: snapshot };
+  }
+  return { migrado_1_0: buscarCampanhasLegado(email, entries).length > 0, legado_snapshot: snapshot };
 }

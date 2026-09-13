@@ -19,6 +19,7 @@
 import { randomUUID } from 'node:crypto';
 import { initTRPC, TRPCError } from '@trpc/server';
 import { z } from 'zod/v4';
+import { fatoPerfilSalvo, propsPerfilCampanhaSalvo } from '../analytics/funil.js';
 import {
   ArrecadacaoInputInvalidoError,
   atualizarConteudoPerfilCampanha,
@@ -298,7 +299,7 @@ export const perfilCampanhaRouter = t.router({
     .mutation(async ({ ctx, input }) => {
       try {
         const { idCampanha, ...conteudoInput } = input;
-        const { campanha } = await resolverCampanhaAdministrada(ctx, idCampanha);
+        const { usuario, campanha } = await resolverCampanhaAdministrada(ctx, idCampanha);
 
         const perfil = await upsertConteudoPerfilCampanha(
           {
@@ -328,6 +329,26 @@ export const perfilCampanhaRouter = t.router({
             dataHora: conteudoInput.dataEvento,
           },
         );
+
+        // aperture-ai8vg — server-truth personalization save. Values never
+        // leave (only nomeado + a field COUNT). No first-save claim: it is not
+        // authoritative under concurrency. Key/time come from the DURABLE row
+        // re-read after the upsert (ON CONFLICT keeps the winner's id; the
+        // object returned to a concurrent loser carries a transient id).
+        if (ctx.deps.serverAnalytics) {
+          const fato = await fatoPerfilSalvo(ctx.deps.perfilCampanhaRepository, campanha.id);
+          if (fato) {
+            ctx.deps.serverAnalytics.track(
+              'perfil_campanha_salvo',
+              usuario.idConta,
+              propsPerfilCampanhaSalvo({
+                idCampanha: campanha.id,
+                conteudo: perfil.conteudo as unknown as Record<string, unknown>,
+              }),
+              fato,
+            );
+          }
+        }
 
         return toPerfilCampanhaDTO(
           campanha.id,

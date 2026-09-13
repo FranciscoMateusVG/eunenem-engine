@@ -66,20 +66,28 @@ No-ops (limite `qtyAvailable`, esgotado, nome desconhecido) não emitem;
 Necessários porque o app não tem client-side router (toda navegação é full
 page load) e deseja-se saber qual página/seção foi vista, não só a URL.
 
+Toda `page_view_custom` carrega `rota` (template canônico) e `publico`
+(aperture-ai8vg) — ver [## Funil de criadores](#funil-de-criadores-aperture-ai8vg).
+Propriedades extra abaixo são as ADICIONAIS a essas duas.
+
 | Evento | `page_name` | Propriedades extra | Arquivo |
 |---|---|---|---|
 | `page_view_custom` | `Landing` | — | [pages/LandingPage.tsx](pages/LandingPage.tsx) |
 | `page_view_custom` | `FAQ` | — | [pages/FaqPage.tsx](pages/FaqPage.tsx) |
-| `page_view_custom` | `Painel` | `slug` | [pages/PainelPage.tsx](pages/PainelPage.tsx) — `PainelPageView` |
-| `page_view_custom` | título da seção via `PAINEL_SECTION_META` | `slug`, `section` | [pages/PainelSectionPage.tsx](pages/PainelSectionPage.tsx) |
-| `page_view_custom` | `Pagina` | `slug` | [pages/PaginaPage.tsx](pages/PaginaPage.tsx) — página pública de presentes |
+| `page_view_custom` | `Painel` | `id_campanha` (quando a rota tem `/c/:id`) | [pages/PainelPage.tsx](pages/PainelPage.tsx) — `PainelPageView` |
+| `page_view_custom` | título da seção via `PAINEL_SECTION_META` | `section`, `id_campanha` (quando a rota tem `/c/:id`) | [pages/PainelSectionPage.tsx](pages/PainelSectionPage.tsx) |
+| `page_view_custom` | `Pagina` | `id_campanha` (id resolvido pelo servidor, conferido com o da rota em `/c/:id`) | [pages/PaginaPage.tsx](pages/PaginaPage.tsx) — página pública de presentes |
 | `page_view_custom` | `Sucesso` | — | [pages/PaginaSucessoPage.tsx](pages/PaginaSucessoPage.tsx) |
 | `page_view_custom` | `Confirmar Presenca` | — | [pages/ConfirmarPresencaPage.tsx](pages/ConfirmarPresencaPage.tsx) |
-| `page_view_custom` | `Campanhas` | — | [pages/CampanhasPage.tsx](pages/CampanhasPage.tsx) (dispara também para anônimos redirecionados a `/`) |
+| `page_view_custom` | `Campanhas` | — | [pages/CampanhasPage.tsx](pages/CampanhasPage.tsx) — hub de criadores; só dispara após `auth.me` resolver uma conta (anônimos são redirecionados antes) |
 | `page_view_custom` | `Termos de Uso` | — | [pages/TermosDeUsoPage.tsx](pages/TermosDeUsoPage.tsx) |
+| `page_view_custom` | `Convite Preview` | — | [pages/PainelConvitePreviewPage.tsx](pages/PainelConvitePreviewPage.tsx) |
+| `page_view_custom` | `Nao Encontrada` | `rota: '404'` | [pages/NotFoundPage.tsx](pages/NotFoundPage.tsx) |
 
-Sem pageview explícito hoje: `/painel/:slug/convite/preview`, todas as rotas
-`/admin*`, 404 e páginas de dev (`/auth-demo`, `/trpc-smoke`).
+`slug` **não** é mais enviado em nenhuma pageview (nome do dono = PII).
+**`/admin/*`: não instrumentado por política** enquanto o HOLD de privacidade
+(aperture-bdd59) estiver aberto. Páginas de dev (`/auth-demo`, `/trpc-smoke`):
+não aplicável.
 
 ## Convite
 
@@ -254,6 +262,42 @@ Verificado por Cipher (aperture-bdd59) contra `mixpanel-browser` 2.81.0:
   mask/block explícitos, blacklist de URL/referrer, remoção de texto livre nos
   call-sites) está **pendente de decisão do operador** — não aplicada nesta
   rodada. Sampling e consentimento são decisões de produto/legal.
+
+## Funil de criadores (aperture-ai8vg)
+
+Contrato completo, métricas diárias, janelas e limites:
+[docs/analytics/funil-metricas.md](../../docs/analytics/funil-metricas.md);
+consultas de relatório (fuso America/Sao_Paulo):
+[docs/analytics/relatorios-diarios.sql](../../docs/analytics/relatorios-diarios.sql).
+
+### Propriedades de página (todas as `page_view_custom`)
+
+| Prop | Valor | Notas |
+|---|---|---|
+| `rota` | template canônico (`/`, `/faq`, `/pagina/:slug`, `/painel/:slug/:section`, `/:slug/confirmar-presenca/:idConvidado`, `404`, …) via [pages/lib/rota-canonica.ts](pages/lib/rota-canonica.ts) | nunca contém slug, id, query, token |
+| `publico` | `visitante` \| `convidado` \| `criador` \| `admin` | derivado só do template |
+| `id_campanha` | uuid opaco | só onde a página resolve uma campanha (`/pagina/:slug/c/:id`, `/painel/:slug/c/:id...`) |
+| ~~`slug`~~ | **removido** (nome do dono = PII) | compatibilidade: relatórios antigos por `slug` migram para `rota` + `id_campanha` |
+
+Novos pageviews: `Convite Preview` (`/painel/:slug/convite/preview`), `Nao
+Encontrada` (`rota: '404'`). **`/admin/*` não instrumentado por política**
+enquanto o HOLD de privacidade (aperture-bdd59) estiver aberto — não é "não
+aplicável". `/trpc-smoke` e `/auth-demo`: não aplicável (dev).
+
+### Eventos de servidor do funil
+
+| Evento | `distinct_id` | Propriedades | Origem / dedup |
+|---|---|---|---|
+| `conta_criada` (alterado) | `idConta` | `idPlataforma`, `migrado_1_0` (`true`\|`false`\|`'unknown'`), `legado_snapshot` (hash da lista 1.0 usada), `signup_at` (`users.created_at` — a OCORRÊNCIA do cadastro; a emissão é lazy, na primeira chamada autenticada), `id_campanha_padrao`. **Sem `metodo`** (não há fato confiável; não se infere) | session-resolver `autoProvisionarUsuarioOrfao`; `$insert_id` = idConta, `time` = signup_at |
+| `campanha_criada` (alterado) | `idConta` | `idCampanha`, `origem: 'explicita'` (provado pelo call path). ~~`titulo`~~ removido (texto livre) | campanhas.criar; `$insert_id` = idCampanha, `time` = criadaEm. A lista padrão do cadastro NÃO emite — é parte do fato cadastro |
+| `lista_item_criado` | `idConta` | `id_campanha`, `linhas`, `quantidade_itens` (unidades) — **sem** `primeiro_item` | contribuicao.create/createBulk, um por escrita durável; `$insert_id` = primeiro id criado na escrita; `time` = `criada_em` PERSISTIDO das linhas criadas (relido após a escrita). **Não existe evento de "primeiro item"** (decisão de root): o passo do funil "lista com ≥ 1 item" é DERIVADO — primeiro `lista_item_criado` por campanha no Mixpanel; `MIN(criada_em)` por campanha no banco (SQL §4b). Proveniência (catálogo/personalizado/lista pronta) continua só nos eventos `lista_*` do cliente |
+| `perfil_campanha_salvo` | `idConta` | `id_campanha`, `nomeado` (nomeBebe preenchido), `campos_preenchidos` (contagem, nunca valores) — **sem** `primeira_vez` (não autoritativo sob concorrência) | perfilCampanha.atualizar; `$insert_id` = id da linha DURÁVEL relida após o upsert + `atualizado_em` (o ON CONFLICT preserva o id vencedor; um id transiente nunca é emitido). O passo "personalização" do funil é o fato `perfil_campanhas.criado_em` (SQL §4c) |
+| `convite_criado` | `idConta` | `id_campanha`, `id_evento`, `modelo` | eventoConvite.save — só no PRIMEIRO save; `$insert_id` = convite.id, `time` = criadoEm |
+| `convidado_criado` | `idConta` | `id_campanha`, `id_lista`, `total_convidados` | eventoListaDeConvidados.adicionarConvidado; `$insert_id` = convidado.id (linha sem timestamp → `time` = clock) |
+| `convidado_adicionado` (cliente, alterado) | dono (identificado) | `id_campanha` (~~`slug`~~ removido) | ConvidadosBody |
+
+Compartilhamento (`convite_compartilhado`, `painel_compartilhar_link_click`)
+continua **só no cliente**: não existe fato durável de compartilhamento.
 
 ## Variáveis de ambiente
 
