@@ -71,7 +71,11 @@ function SocialIcon({ label }: { label: string }) {
   }
 }
 
-export function Footer() {
+// aperture-7mqsg item 8 — `clearFab`: the landing mounts a fixed 56px WhatsApp
+// button at the bottom-right; on lg the social-icon row is right-aligned and
+// sat under it (measured at 1280×800). Reserve that strip on the right so the
+// icons stay clickable. Mobile rows are centred and already clear.
+export function Footer({ clearFab = false }: { clearFab?: boolean } = {}) {
   return (
     <footer className="bg-plum text-[#F4DCEA] pt-16 pb-7">
       <div className="mx-auto max-w-[1200px] px-6">
@@ -140,7 +144,11 @@ export function Footer() {
             ))}
           </div>
         </div>
-        <div className="border-t border-[#F4DCEA]/10 pt-6 flex flex-col items-center gap-4 lg:flex-row lg:justify-between lg:items-center">
+        <div
+          className={`border-t border-[#F4DCEA]/10 pt-6 flex flex-col items-center gap-4 lg:flex-row lg:justify-between lg:items-center${
+            clearFab ? ' lg:pr-[92px]' : ''
+          }`}
+        >
           <div className="text-[12.5px] text-[#F4DCEA]/60">
             © 2026 EuNeném® · feito com ❤️ no Brasil
           </div>

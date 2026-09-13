@@ -2202,6 +2202,10 @@ const EXTRATO_CSS = `
   padding: 12px 2px; margin: 12px 0 18px; border-top: 1px dashed var(--line); border-bottom: 1px dashed var(--line);
 }
 .presentes-extrato .ex-resg-row {
+  /* aperture-7mqsg — flex children with overflow:hidden get min-height:0 and
+     were compressed to a few px each once the list hit max-height (30 rows →
+     4px rows, no scroll). Pin the row's cross-axis size so the list scrolls. */
+  flex: 0 0 auto;
   position: relative; display: flex; align-items: stretch; background: var(--tint-bg);
   border: 1px solid var(--sheet-line-soft); border-left-width: 0; border-radius: 10px; overflow: hidden;
 }
@@ -2210,7 +2214,9 @@ const EXTRATO_CSS = `
 .presentes-extrato .ex-resg-l1 { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .presentes-extrato .ex-resg-item { font-family: var(--hand); font-size: 18px; color: var(--sheet-ink); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .presentes-extrato .ex-resg-val { font-family: var(--hand); font-size: 20px; color: var(--sheet-neg); font-feature-settings: "tnum"; flex: 0 0 auto; }
-.presentes-extrato .ex-resg-l2 { display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: var(--sheet-ink-soft); margin-top: 2px; letter-spacing: 0.02em; }
+.presentes-extrato .ex-resg-l2 { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 2px 10px; font-size: 11px; color: var(--sheet-ink-soft); margin-top: 2px; letter-spacing: 0.02em; }
+/* aperture-7mqsg — up to four metadata chips (solicitada · estado · concluída ·
+   N presentes) collided at 375px under space-between; let them wrap. */
 .presentes-extrato .ex-resg-l3 { font-size: 11.5px; color: var(--sheet-ink-mute); font-family: var(--font-dm-sans), sans-serif; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ── filter ── */

@@ -14,6 +14,12 @@
 /** Canonical authenticated painel sub-pages. Add a section here AND a page in
  *  painelSections.tsx when a page bead lands — both are required for the route
  *  to render its real component (otherwise it falls back to the placeholder). */
+// aperture-7mqsg — EuNeném ATENDIMENTO WhatsApp (support), NOT guest/share
+// links. Single source for every support entry point (painel menu row,
+// landing floating button). No prefilled ?text= — the user writes the message.
+export const EUNENEM_SUPPORT_WHATSAPP_NUMBER_DISPLAY = "(11) 96108-0489";
+export const EUNENEM_SUPPORT_WHATSAPP_URL = "https://wa.me/5511961080489";
+
 export const PAINEL_SECTIONS = [
   "presentes", // Presentes recebidos (statement + payout) — aperture-xjwc
   "lista", // Minha lista de presentes — aperture-4je0p
@@ -127,7 +133,8 @@ export function menuItemHref(
       return paginaSharePath(slug, idCampanha, campanhaSlug);
     case "suporte":
       // External support channel — no in-app page in scope.
-      return "https://wa.me/5531999999999";
+      // aperture-7mqsg — EuNeném atendimento: (11) 96108-0489.
+      return EUNENEM_SUPPORT_WHATSAPP_URL;
     default:
       return undefined; // e.g. `rifa` (soon) — not navigable yet.
   }

@@ -7769,3 +7769,44 @@ button.painel-topbar-link:hover {
   color: var(--plum);
   outline: none;
 }
+
+/* ── aperture-7mqsg item 8 — homepage floating WhatsApp support button ──
+ * Fixed bottom-right, ≥44px target (56px), safe-area aware. Only LandingPage
+ * mounts it. Navbar is sticky z-50; this sits below it (z-40) so a scrolled
+ * header never fights the button, and above page content. */
+.wa-fab {
+  position: fixed;
+  right: calc(env(safe-area-inset-right) + 20px);
+  bottom: calc(env(safe-area-inset-bottom) + 20px);
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 999px;
+  background: #25d366;
+  color: #ffffff;
+  box-shadow: 0 10px 24px -8px rgba(18, 140, 126, 0.55), 0 2px 6px rgba(0, 0, 0, 0.12);
+  transition: transform 0.18s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+  -webkit-tap-highlight-color: transparent;
+}
+.wa-fab:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 28px -8px rgba(18, 140, 126, 0.6), 0 3px 8px rgba(0, 0, 0, 0.14);
+}
+.wa-fab:active {
+  transform: translateY(0);
+}
+.wa-fab:focus-visible {
+  outline: 3px solid #ffffff;
+  outline-offset: 0;
+  box-shadow: 0 0 0 6px #128c7e, 0 10px 24px -8px rgba(18, 140, 126, 0.55);
+}
+@media (prefers-reduced-motion: reduce) {
+  .wa-fab,
+  .wa-fab:hover {
+    transition: none;
+    transform: none;
+  }
+}

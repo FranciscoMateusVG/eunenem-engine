@@ -1,3 +1,5 @@
+// aperture-7mqsg item 6 — footer 'whatsapp' entries are EuNeném ATENDIMENTO links.
+import { EUNENEM_SUPPORT_WHATSAPP_URL } from '../painelRoutes';
 // aperture-q1j2 — mock copy for the marketing Landing page (/).
 //
 // Ported verbatim (pt-BR) from the Next.js prototype components. Static,
@@ -305,7 +307,7 @@ export const LANDING_FOOTER_COLS: ReadonlyArray<LandingFooterCol> = [
   {
     title: 'fale conosco',
     links: [
-      ['whatsapp', 'https://eunenem.com/minha-area/fale-com-a-gente'],
+      ['whatsapp', EUNENEM_SUPPORT_WHATSAPP_URL],
       ['oi@eunenem.com', 'mailto:oi@eunenem.com'],
     ],
   },
@@ -316,7 +318,7 @@ export const LANDING_FOOTER_SOCIALS: ReadonlyArray<readonly [string, string]> = 
   ['https://www.instagram.com/eu_nenem', 'Instagram'],
   ['https://www.facebook.com/eunenem', 'Facebook'],
   ['https://br.pinterest.com/eunenem', 'Pinterest'],
-  ['https://eunenem.com/minha-area/fale-com-a-gente', 'WhatsApp'],
+  [EUNENEM_SUPPORT_WHATSAPP_URL, 'WhatsApp'],
 ];
 
 /** FAQ — question + answer. Answers with inline links carry a `link` field. */
@@ -340,7 +342,7 @@ export const LANDING_FAQS: ReadonlyArray<LandingFaq> = [
 
 Para viabilizar o funcionamento da plataforma, é cobrada uma taxa de serviço de 8,98% sobre cada presente, destinada a cobrir os custos de operação, manutenção da plataforma e processamento dos pagamentos.
 
-Além disso, pagamentos por cartão incluem um acréscimo calculado para cobrir a tarifa de processamento de 3,9% sobre o total processado, mais R$ 0,39 por transação, com arredondamento para cima em centavos.
+Além disso, pagamentos por cartão incluem um acréscimo calculado para cobrir a tarifa de processamento de 3,9% sobre o total processado, mais R$ 0,39 por transação.
 
 Dessa forma, os futuros pais recebem o valor integral definido na lista, enquanto os custos da transação são pagos por quem realiza a compra do presente.`,
   },
