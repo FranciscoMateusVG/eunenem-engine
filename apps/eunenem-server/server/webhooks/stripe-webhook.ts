@@ -128,6 +128,7 @@ import {
   PagamentoNaoEncontradoError,
   PagamentoEstornoLancamentoJaTransferidoError,
 } from '../../../../src/index.js';
+import { aprovacaoEhNova, trackPagamentoAprovado } from '../analytics/pagamento-aprovado.js';
 import { ID_PLATAFORMA_EUNENEM, type ServerDeps } from '../auth/setup.js';
 import { getStripe } from '../../src/lib/stripe/stripe.js';
 
@@ -523,20 +524,20 @@ export async function dispatchVerifiedStripeEvent(
           transition: 'aprovado',
           paymentStatus: 'paid',
         });
-        // aperture-ppuay — server-truth payment approval. distinct_id = the
-        // campanha owner's conta; resolve via campanha (Recebedor has no idConta).
-        const campanhaDoPagamento = await deps.campanhaRepository.findById(
-          pagamento.intencao.idCampanha,
-        );
-        deps.serverAnalytics?.track(
-          'pagamento_aprovado',
-          campanhaDoPagamento?.idsAdministradores[0] ?? null,
-          {
-            idPagamento: pagamento.id,
-            idCampanha: pagamento.intencao.idCampanha,
-            paymentStatus: 'paid',
-          },
-        );
+        // aperture-ppuay / aperture-4yse9 — server approval event. `pagamento`
+        // is the PRE-finalize snapshot: only a pendente|processing → aprovado
+        // transition on THIS dispatch tracks (mirrors the charge.succeeded
+        // terminal-status skip below). A Stripe retry after a post-finalize
+        // failure sees `aprovado` here and does not re-track. Time = Stripe's
+        // event.created, identical across retries of the same event.
+        if (aprovacaoEhNova(pagamento.status)) {
+          await trackPagamentoAprovado(deps, {
+            pagamento,
+            provedor: 'stripe',
+            caminho: 'webhook',
+            occurredAt: new Date(event.created * 1000),
+          });
+        }
       } else if (session.payment_status === 'unpaid') {
         // Write contribuinte first (first-writer-wins) — finalize-aprovado
         // isn't being called yet, so its own contribuinte-write logic
@@ -823,20 +824,16 @@ export async function dispatchVerifiedStripeEvent(
         idPagamento: pagamento.id,
         transition: 'aprovado',
       });
-      // aperture-ppuay — server-truth payment approval (charge.succeeded / PIX
-      // settle). distinct_id = the campanha owner's conta (resolved via campanha).
-      const campanhaDoPagamento = await deps.campanhaRepository.findById(
-        pagamento.intencao.idCampanha,
-      );
-      deps.serverAnalytics?.track(
-        'pagamento_aprovado',
-        campanhaDoPagamento?.idsAdministradores[0] ?? null,
-        {
-          idPagamento: pagamento.id,
-          idCampanha: pagamento.intencao.idCampanha,
-          paymentStatus: 'charge_succeeded',
-        },
-      );
+      // aperture-ppuay / aperture-4yse9 — server approval event (charge.succeeded
+      // / Stripe-PIX settle). The terminal-status skip above already proved
+      // `pagamento` was pendente|processing, so this is a new fact by
+      // construction; same unified props/helper as the paid branch.
+      await trackPagamentoAprovado(deps, {
+        pagamento,
+        provedor: 'stripe',
+        caminho: 'webhook',
+        occurredAt: new Date(event.created * 1000),
+      });
       return { pagamentoId: pagamento.id };
     }
 

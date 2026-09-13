@@ -23,6 +23,7 @@ import { randomUUID } from 'node:crypto';
 import { trace } from '@opentelemetry/api';
 import type Stripe from 'stripe';
 import { beforeEach, describe, expect, it } from 'vitest';
+import type { ServerAnalytics } from '../../../apps/eunenem-server/server/analytics/server-analytics.js';
 import type { ServerDeps } from '../../../apps/eunenem-server/server/auth/setup.js';
 import { dispatchVerifiedStripeEvent } from '../../../apps/eunenem-server/server/webhooks/stripe-webhook.ts';
 import { CampanhaRepositoryMemory } from '../../../src/adapters/arrecadacao/campanha-repository.memory.js';
@@ -304,6 +305,66 @@ describe('Phase 3 dispatcher: checkout.session.completed', () => {
     expect(updated?.intencao.contribuinte?.nome).toBe('Visitante Cartao');
     expect(updated?.intencao.contribuinte?.email).toBe('visitor@example.com');
     expect(updated?.intencao.contribuinte?.mensagem).toBe('Parabens!');
+  });
+
+  it('analytics (aperture-4yse9): pagamento_aprovado tracks ONCE across paid → charge.succeeded → replayed paid', async () => {
+    const tracked: Array<{
+      event: string;
+      distinctId: string | null;
+      props?: Record<string, unknown>;
+      options?: { insertKey?: string; occurredAt?: Date };
+    }> = [];
+    const serverAnalytics: ServerAnalytics = {
+      track: (event, distinctId, props, options) => {
+        tracked.push({ event, distinctId, props, options });
+      },
+    };
+    (rig.deps as unknown as { serverAnalytics: ServerAnalytics }).serverAnalytics = serverAnalytics;
+
+    const sessionId = `cs_test_${randomUUID()}`;
+    const piId = `pi_test_${randomUUID()}`;
+    const chId = `ch_test_${randomUUID()}`;
+    const ids = await seedFullChain(rig, sessionId, 'credit_card');
+    const paid = makeEvent('checkout.session.completed', {
+      id: sessionId,
+      payment_intent: piId,
+      payment_status: 'paid',
+    });
+
+    // 1. first dispatch performs pendente → aprovado: ONE track.
+    await dispatchVerifiedStripeEvent(rig.deps, noopSpan, paid);
+    // 2. charge.succeeded for the same payment hits the terminal skip: no track.
+    await dispatchVerifiedStripeEvent(
+      rig.deps,
+      noopSpan,
+      makeEvent('charge.succeeded', { id: chId, payment_intent: piId }),
+    );
+    // 3. Stripe retries the paid event (post-finalize failure scenario): the
+    //    pre-finalize snapshot is now `aprovado` → guard → no track.
+    await dispatchVerifiedStripeEvent(rig.deps, noopSpan, paid);
+
+    const aprovados = tracked.filter((e) => e.event === 'pagamento_aprovado');
+    expect(aprovados).toHaveLength(1);
+    const pagamento = await rig.pagamentoRepository.findById(ids.idPagamento as never);
+    expect(aprovados[0]).toMatchObject({
+      // The rig seeds the campanha with no admins → owner unresolved → the
+      // sink receives null and drops explicitly (owner resolution itself is
+      // covered in analytics-pagamento-aprovado.test.ts).
+      distinctId: null,
+      props: {
+        id_pagamento: ids.idPagamento,
+        id_campanha: ids.idCampanha,
+        metodo: 'credit_card',
+        provedor: 'stripe',
+        caminho: 'webhook',
+        valor_centavos: pagamento?.intencao.composicaoValoresAggregate.totalPaidCents,
+      },
+      // Stripe event.created (seconds) → business time, stable across retries.
+      options: { insertKey: ids.idPagamento, occurredAt: new Date(1717000000 * 1000) },
+    });
+    // Legacy divergent keys are gone: one schema for card and PIX.
+    expect(aprovados[0]?.props).not.toHaveProperty('paymentStatus');
+    expect(aprovados[0]?.props).not.toHaveProperty('provider');
   });
 
   it('pix pending (payment_status=unpaid): pendente → processing + contribuinte stamped (no finalize yet)', async () => {

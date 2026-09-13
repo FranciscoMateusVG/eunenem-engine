@@ -7,9 +7,11 @@
 //     GA4. A plain {event, ...} object push is invisible to gtag.js; it's
 //     only picked up by a GTM container if a trigger is configured for it.
 //   - GTM's container listens for {event: name, ...} objects.
-// Calling window.gtag() covers the GA4 path directly (no GTM tag/trigger
-// setup required); pushing the object form additionally keeps it visible to
-// the GTM container for anyone who *does* want to wire a trigger there.
+// sendEvent calls window.gtag() when it is loaded (the GA4 path, no GTM
+// tag/trigger setup required) and OTHERWISE falls back to the object push —
+// one sink or the other, never both. The object form is only visible to a GTM
+// container that has a trigger wired for it. (aperture-4yse9: comment aligned
+// with the code; it used to claim both shapes were pushed.)
 //
 // aperture-ppuay: Mixpanel is a SECOND sink here. Every event that flows through
 // sendEvent()/sendPageView() (the whole EVENT_MAP taxonomy) also fires to
@@ -50,12 +52,44 @@ function mixpanelOn(): boolean {
   return true;
 }
 
+// aperture-4yse9 — client-side conversion dedup at the ingestion layer.
+// compra_concluida is a UX-stage event (the server's pagamento_aprovado is the
+// approval truth); it can legitimately be emitted twice for one payment (inline
+// modal, then the /sucesso escape hatch, then a reload). Vance's
+// analytics-conversao.ts dedupes BEFORE sendEvent on a durable transaction_id
+// (localStorage); this adds Mixpanel's own dedup key so a lost localStorage or
+// a second device still collapses to one row per payment. Best-effort by
+// Mixpanel's contract ($insert_id + distinct_id + event, bounded window), not
+// a guarantee. GA-facing props never carry $-keys — this is added ONLY on the
+// Mixpanel branch. An empty transaction_id (state lost) keeps the SDK's random id.
+// Mixpanel's $insert_id must be ≤36 chars of [A-Za-z0-9-]; the event name is
+// already part of Mixpanel's dedup tuple, so the id is the sanitized key alone
+// (a Stripe `cs_live_…` keeps its first 36 chars; an Inter txid is 32 hex).
+const CLIENT_INSERT_ID_EVENTS: Readonly<Record<string, string>> = {
+  compra_concluida: 'transaction_id',
+};
+
+export function clientInsertIdFor(key: string): string {
+  return key.replace(/[^A-Za-z0-9-]/g, '-').slice(0, 36);
+}
+
+export function mixpanelPropsFor(
+  eventName: string,
+  data?: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  const keyProp = CLIENT_INSERT_ID_EVENTS[eventName];
+  if (!keyProp || !data) return data;
+  const key = data[keyProp];
+  if (typeof key !== 'string' || key.length === 0) return data;
+  return { ...data, $insert_id: clientInsertIdFor(key) };
+}
+
 export function sendEvent(eventName: string, data?: Record<string, unknown>): void {
   if (typeof window === 'undefined') return;
   // Mixpanel sink — fired BEFORE the dataLayer guard so it tracks even when
   // GTM/gtag isn't present on the page. No-ops when the token is absent.
   if (mixpanelOn()) {
-    mixpanel.track(eventName, data);
+    mixpanel.track(eventName, mixpanelPropsFor(eventName, data));
   }
   if (!window.dataLayer) return;
   if (typeof window.gtag === 'function') {
