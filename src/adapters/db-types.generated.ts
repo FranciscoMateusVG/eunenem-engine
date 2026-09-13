@@ -458,6 +458,10 @@ export interface StripeRefundOperationFacts {
   fact_kind: string;
   id: string;
   idempotency_key: string | null;
+  observed_amount_cents: Int8 | null;
+  observed_charge_ref: string | null;
+  observed_currency: string | null;
+  observed_payment_intent_ref: string | null;
   operation_id: string;
   outcome: string | null;
   provider_event_id: string | null;

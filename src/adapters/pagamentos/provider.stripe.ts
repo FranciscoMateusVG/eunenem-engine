@@ -459,11 +459,10 @@ export class PagamentoProviderStripe implements PagamentoProvider, CheckoutSessi
    * `paymentIntentExternalRef` (`pi_xxx`) — Stripe also accepts the PI
    * as a refund key and will fan it out to the latest charge.
    *
-   * Status normalization: Stripe's refund.status is
-   * `succeeded | pending | failed | canceled | requires_action`. We
-   * collapse `succeeded` AND `pending` to `aceito` (the money path is
-   * committed; settlement timing is out-of-band on the provider side)
-   * and everything else to `recusado`.
+   * The adapter returns Stripe's finite status unchanged. The durable refund
+   * use-case treats only `succeeded` as locally committable, keeps `pending`
+   * payout-blocking and nonterminal, accepts exact `failed | canceled` as a
+   * definite refusal, and holds every unavailable/malformed outcome.
    */
   async refundarPagamento(input: RefundarPagamentoInput): Promise<RefundarPagamentoResult> {
     return tracer.startActiveSpan('payment_provider.stripe.refundarPagamento', async (span) => {

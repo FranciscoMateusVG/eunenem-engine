@@ -93,15 +93,27 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       provider_ref varchar(255),
       provider_status varchar(120),
       provider_event_id varchar(255),
+      observed_charge_ref varchar(255),
+      observed_payment_intent_ref varchar(255),
+      observed_amount_cents bigint CHECK (
+        observed_amount_cents IS NULL OR observed_amount_cents > 0
+      ),
+      observed_currency char(3) CHECK (
+        observed_currency IS NULL OR observed_currency ~ '^[a-z]{3}$'
+      ),
       recorded_at timestamptz NOT NULL,
       CONSTRAINT stripe_refund_operation_fact_shape CHECK (
         (fact_kind = 'provider_started'
           AND attempt_no > 0 AND idempotency_key IS NOT NULL AND outcome IS NULL
-          AND provider_ref IS NULL AND provider_status IS NULL AND provider_event_id IS NULL)
+          AND provider_ref IS NULL AND provider_status IS NULL AND provider_event_id IS NULL
+          AND observed_charge_ref IS NULL AND observed_payment_intent_ref IS NULL
+          AND observed_amount_cents IS NULL AND observed_currency IS NULL)
         OR
         (fact_kind = 'provider_result'
           AND attempt_no > 0 AND idempotency_key IS NULL AND outcome IS NOT NULL
           AND provider_status IS NOT NULL AND provider_event_id IS NULL
+          AND observed_charge_ref IS NULL AND observed_payment_intent_ref IS NULL
+          AND observed_amount_cents IS NULL AND observed_currency IS NULL
           AND (
             (outcome = 'provider_pending' AND provider_ref IS NOT NULL
               AND provider_status = 'pending')
@@ -117,6 +129,8 @@ export async function up(db: Kysely<unknown>): Promise<void> {
           AND idempotency_key IS NULL AND outcome IS NOT NULL
           AND provider_ref IS NULL AND provider_status = 'succeeded'
           AND provider_event_id IS NOT NULL
+          AND observed_charge_ref IS NOT NULL
+          AND observed_amount_cents IS NOT NULL AND observed_currency IS NOT NULL
           AND (
             (fact_kind = 'provider_observed' AND outcome = 'provider_succeeded')
             OR (fact_kind = 'provider_observed_conflict' AND outcome = 'outcome_unknown')
@@ -125,7 +139,9 @@ export async function up(db: Kysely<unknown>): Promise<void> {
         (fact_kind = 'local_committed'
           AND idempotency_key IS NULL AND outcome IS NULL
           AND provider_ref IS NULL AND provider_status IS NULL
-          AND provider_event_id IS NULL)
+          AND provider_event_id IS NULL
+          AND observed_charge_ref IS NULL AND observed_payment_intent_ref IS NULL
+          AND observed_amount_cents IS NULL AND observed_currency IS NULL)
       )
     );
 

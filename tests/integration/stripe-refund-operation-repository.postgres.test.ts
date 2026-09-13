@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
+import { sql } from 'kysely';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createDatabase, type Database } from '../../src/adapters/database.js';
 import { LivroFinanceiroRepositoryPostgres } from '../../src/adapters/pagamentos/financeiro/livro-repository.postgres.js';
+import { acquirePaymentMoneyMovementLocks } from '../../src/adapters/pagamentos/payment-money-movement-lock.postgres.js';
 import { PagamentoRepositoryPostgres } from '../../src/adapters/pagamentos/repository.postgres.js';
 import { StripeRefundOperationRepositoryPostgres } from '../../src/adapters/pagamentos/stripe-refund-operation-repository.postgres.js';
 import {
@@ -150,6 +152,47 @@ async function seedApprovedPayout(
   return { repo, repasseId };
 }
 
+async function withPaymentLockHeld(paymentId: string, run: () => Promise<void>): Promise<void> {
+  let releaseLock: (() => void) | undefined;
+  let signalLocked: (() => void) | undefined;
+  const locked = new Promise<void>((resolve) => {
+    signalLocked = resolve;
+  });
+  const release = new Promise<void>((resolve) => {
+    releaseLock = resolve;
+  });
+  const holder = testDb.db.transaction().execute(async (tx) => {
+    await acquirePaymentMoneyMovementLocks(tx, [paymentId]);
+    signalLocked?.();
+    await release;
+  });
+  await locked;
+  try {
+    await run();
+  } finally {
+    releaseLock?.();
+    await holder;
+  }
+}
+
+async function waitForAdvisoryLockWaiters(expected: number): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const waiting = await sql<{ count: string }>`
+          SELECT count(*)::text AS count
+            FROM pg_stat_activity
+            WHERE datname = current_database()
+              AND wait_event_type = 'Lock'
+              AND query LIKE '%pg_advisory_xact_lock%'
+        `.execute(testDb.db);
+        return Number(waiting.rows[0]?.count ?? 0);
+      },
+      { timeout: 5_000, interval: 10 },
+    )
+    .toBe(expected);
+}
+
 describe('Stripe refund operation durability and payout exclusion — Postgres', () => {
   beforeEach(resetState);
 
@@ -239,32 +282,48 @@ describe('Stripe refund operation durability and payout exclusion — Postgres',
     ]);
   });
 
-  it('refund-first on pool A blocks payout admission on pool B', async () => {
+  it('refund-first waiter wins the shared lock and blocks concurrent payout admission', async () => {
     const seed = await seedApprovedStripePayment();
     const { repo: payoutRepo, repasseId } = await seedApprovedPayout(dbB, seed);
-    await new StripeRefundOperationRepositoryPostgres(dbA).reserve(reserveInput(seed));
-
-    await expect(
-      payoutRepo.iniciarTransferenciaTransaction({
+    let refund: Promise<unknown> | undefined;
+    let payout: Promise<unknown> | undefined;
+    await withPaymentLockHeld(seed.payment.id, async () => {
+      refund = new StripeRefundOperationRepositoryPostgres(dbA).reserve(reserveInput(seed));
+      await waitForAdvisoryLockWaiters(1);
+      payout = payoutRepo.iniciarTransferenciaTransaction({
         idRepasse: repasseId,
         requestSummary: 'pagarPix valor=8400',
         agora: new Date('2026-09-13T12:03:00Z'),
-      }),
-    ).rejects.toBeInstanceOf(FinanceiroPagamentoMovimentacaoConflitanteError);
-  });
-
-  it('payout-first on pool A blocks refund admission on pool B', async () => {
-    const seed = await seedApprovedStripePayment();
-    const { repo: payoutRepo, repasseId } = await seedApprovedPayout(dbA, seed);
-    await payoutRepo.iniciarTransferenciaTransaction({
-      idRepasse: repasseId,
-      requestSummary: 'pagarPix valor=8400',
-      agora: new Date('2026-09-13T12:03:00Z'),
+      });
+      await waitForAdvisoryLockWaiters(2);
     });
 
-    await expect(
-      new StripeRefundOperationRepositoryPostgres(dbB).reserve(reserveInput(seed)),
-    ).rejects.toBeInstanceOf(FinanceiroPagamentoMovimentacaoConflitanteError);
+    if (!refund || !payout) throw new Error('concurrent refund/payout did not start');
+    await expect(refund).resolves.toMatchObject({ created: true });
+    await expect(payout).rejects.toBeInstanceOf(FinanceiroPagamentoMovimentacaoConflitanteError);
+    expect((await payoutRepo.findRepasseById(repasseId))?.status).toBe('aprovado');
+  });
+
+  it('payout-first waiter wins the shared lock and blocks concurrent refund admission', async () => {
+    const seed = await seedApprovedStripePayment();
+    const { repo: payoutRepo, repasseId } = await seedApprovedPayout(dbA, seed);
+    let payout: Promise<unknown> | undefined;
+    let refund: Promise<unknown> | undefined;
+    await withPaymentLockHeld(seed.payment.id, async () => {
+      payout = payoutRepo.iniciarTransferenciaTransaction({
+        idRepasse: repasseId,
+        requestSummary: 'pagarPix valor=8400',
+        agora: new Date('2026-09-13T12:03:00Z'),
+      });
+      await waitForAdvisoryLockWaiters(1);
+      refund = new StripeRefundOperationRepositoryPostgres(dbB).reserve(reserveInput(seed));
+      await waitForAdvisoryLockWaiters(2);
+    });
+
+    if (!refund || !payout) throw new Error('concurrent payout/refund did not start');
+    await expect(payout).resolves.toMatchObject({ acao: 'prosseguir' });
+    await expect(refund).rejects.toBeInstanceOf(FinanceiroPagamentoMovimentacaoConflitanteError);
+    expect((await payoutRepo.findRepasseById(repasseId))?.status).toBe('transferindo');
   });
 
   it('commits a unique held webhook fact when payout already won, including an absent cursor', async () => {
@@ -302,6 +361,47 @@ describe('Stripe refund operation durability and payout exclusion — Postgres',
       .execute();
     expect(facts).toHaveLength(1);
     expect(facts[0]?.fact_kind).toBe('provider_observed_conflict');
+  });
+
+  it('preserves the distinct observed webhook tuple when an existing cursor binding conflicts', async () => {
+    const seed = await seedApprovedStripePayment();
+    const repository = new StripeRefundOperationRepositoryPostgres(dbA);
+    const reserved = await repository.reserve(reserveInput(seed));
+    const observed = {
+      eventId: `evt_${randomUUID()}`,
+      operationId: randomUUID(),
+      paymentId: seed.payment.id,
+      chargeRef: `ch_observed_${randomUUID()}`,
+      paymentIntentRef: `pi_observed_${randomUUID()}`,
+      amountCents: seed.payment.intencao.composicaoValoresAggregate.totalPaidCents,
+      currency: 'brl' as const,
+      now: new Date('2026-09-13T12:04:00Z'),
+    };
+
+    await expect(repository.observeVerifiedAndConverge(observed)).resolves.toEqual({
+      status: 'held_conflict',
+    });
+
+    const cursor = await repository.findByPaymentId(seed.payment.id);
+    expect(cursor).toMatchObject({
+      operationId: reserved.operation.operationId,
+      chargeRef: seed.chargeRef,
+      paymentIntentRef: seed.paymentIntentRef,
+      state: 'outcome_unknown',
+    });
+    // biome-ignore lint/suspicious/noExplicitAny: append-only evidence table assertion
+    const fact = await (testDb.db as any)
+      .selectFrom('stripe_refund_operation_facts')
+      .selectAll()
+      .where('provider_event_id', '=', observed.eventId)
+      .executeTakeFirstOrThrow();
+    expect(fact).toMatchObject({
+      fact_kind: 'provider_observed_conflict',
+      observed_charge_ref: observed.chargeRef,
+      observed_payment_intent_ref: observed.paymentIntentRef,
+      observed_amount_cents: String(observed.amountCents),
+      observed_currency: observed.currency,
+    });
   });
 
   it('keeps pending nonterminal, then converges once from verified full-refund evidence', async () => {

@@ -4,6 +4,7 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testconta
 import { Kysely, Migrator, PostgresDialect, sql } from 'kysely';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { down as downStripeRefundOperations } from '../../migrations/20260913_055_add_stripe_refund_operations.js';
 import catalogSnapshot from '../../migrations/seed/20260727_045_catalog.json';
 import listasSnapshot from '../../migrations/seed/20260727_045_listas-prontas.json';
 import { createMigrationProvider } from '../helpers/migration-provider.js';
@@ -1029,6 +1030,123 @@ describe('Migration round-trip', () => {
 
     const tablesAfterCats = await listTableNames(db);
     expect(tablesAfterCats).not.toContain('cats');
+  });
+
+  it('keeps a concurrent evidence insert behind the locked empty-only Stripe refund down', async () => {
+    const migrator = new Migrator({ db, provider: createMigrationProvider() });
+    const upResult = await migrator.migrateToLatest();
+    expect(upResult.error).toBeUndefined();
+    await insertRefundConstraintFixture(db);
+
+    const makeConnection = () =>
+      new Kysely<unknown>({
+        dialect: new PostgresDialect({
+          pool: new pg.Pool({ connectionString: container.getConnectionUri(), max: 1 }),
+        }),
+      });
+    const blockerDb = makeConnection();
+    const downDb = makeConnection();
+    const insertDb = makeConnection();
+
+    let releaseBlocker: (() => void) | undefined;
+    let signalBlockerReady: (() => void) | undefined;
+    const blockerReady = new Promise<void>((resolve) => {
+      signalBlockerReady = resolve;
+    });
+    const blockerRelease = new Promise<void>((resolve) => {
+      releaseBlocker = resolve;
+    });
+    const blocker = blockerDb.transaction().execute(async (tx) => {
+      await sql`LOCK TABLE stripe_refund_operations IN ACCESS SHARE MODE`.execute(tx);
+      signalBlockerReady?.();
+      await blockerRelease;
+    });
+    await blockerReady;
+
+    let signalDownPid: ((pid: number) => void) | undefined;
+    const downPidReady = new Promise<number>((resolve) => {
+      signalDownPid = resolve;
+    });
+    const down = downDb.transaction().execute(async (tx) => {
+      const pid = await sql<{ pid: number }>`SELECT pg_backend_pid()::integer AS pid`.execute(tx);
+      signalDownPid?.(pid.rows[0]?.pid as number);
+      await downStripeRefundOperations(tx);
+    });
+    const downPid = await downPidReady;
+
+    await expect
+      .poll(
+        async () => {
+          const locks = await sql<{ child_locked: boolean; parent_waiting: boolean }>`
+            SELECT
+              bool_or(relation.relname = 'stripe_refund_operation_facts'
+                AND locks.mode = 'AccessExclusiveLock' AND locks.granted) AS child_locked,
+              bool_or(relation.relname = 'stripe_refund_operations'
+                AND locks.mode = 'AccessExclusiveLock' AND NOT locks.granted) AS parent_waiting
+            FROM pg_locks locks
+            JOIN pg_class relation ON relation.oid = locks.relation
+            JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+            WHERE locks.pid = ${downPid} AND namespace.nspname = 'public'
+          `.execute(db);
+          return locks.rows[0];
+        },
+        { timeout: 5_000, interval: 10 },
+      )
+      .toEqual({ child_locked: true, parent_waiting: true });
+
+    let signalInsertPid: ((pid: number) => void) | undefined;
+    const insertPidReady = new Promise<number>((resolve) => {
+      signalInsertPid = resolve;
+    });
+    const insert = insertDb
+      .transaction()
+      .execute(async (tx) => {
+        const pid = await sql<{ pid: number }>`SELECT pg_backend_pid()::integer AS pid`.execute(tx);
+        signalInsertPid?.(pid.rows[0]?.pid as number);
+        await sql`
+          INSERT INTO stripe_refund_operations
+            (operation_id, payment_id, origin, amount_cents, currency, charge_ref,
+             reason, state)
+          VALUES ('60000000-0000-4000-8000-000000000056',
+            '20000000-0000-4000-8000-000000000049', 'admin', 1, 'brl',
+            'ch_migration_055_race', 'requested_by_customer', 'reserved')
+        `.execute(tx);
+      })
+      .then(
+        () => ({ succeeded: true as const, error: undefined }),
+        (error: unknown) => ({ succeeded: false as const, error }),
+      );
+    const insertPid = await insertPidReady;
+    await expect
+      .poll(
+        async () => {
+          const waiting = await sql<{ waiting: boolean }>`
+            SELECT EXISTS (
+              SELECT 1 FROM pg_locks locks
+              JOIN pg_class relation ON relation.oid = locks.relation
+              WHERE locks.pid = ${insertPid}
+                AND relation.relname = 'stripe_refund_operations'
+                AND locks.mode = 'RowExclusiveLock' AND NOT locks.granted
+            ) AS waiting
+          `.execute(db);
+          return waiting.rows[0]?.waiting;
+        },
+        { timeout: 5_000, interval: 10 },
+      )
+      .toBe(true);
+
+    releaseBlocker?.();
+    await blocker;
+    await expect(down).resolves.toBeUndefined();
+    const insertResult = await insert;
+    expect(insertResult.succeeded).toBe(false);
+    expect(insertResult.error).toBeInstanceOf(Error);
+    expect(await tableExists(db, 'stripe_refund_operations')).toBe(false);
+    expect(await tableExists(db, 'stripe_refund_operation_facts')).toBe(false);
+
+    await blockerDb.destroy();
+    await downDb.destroy();
+    await insertDb.destroy();
   });
 });
 

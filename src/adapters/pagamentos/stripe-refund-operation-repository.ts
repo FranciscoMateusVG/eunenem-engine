@@ -88,6 +88,12 @@ export interface StripeRefundOperationRepository {
   ): Promise<{ readonly created: boolean; readonly operation: StripeRefundOperation }>;
   findByPaymentId(paymentId: IdPagamento): Promise<StripeRefundOperation | undefined>;
   claimProviderStart(operationId: string, now: Date): Promise<ClaimStripeRefundResult>;
+  /**
+   * Persists only the immediate result of the already-admitted create call.
+   * A pending row is not advanced through this method: in the current call
+   * graph only a verified full charge.refunded event can authoritatively
+   * advance it to provider_succeeded and local convergence.
+   */
   recordProviderResult(input: RecordStripeRefundResultInput): Promise<StripeRefundOperation>;
   recordOutcomeUnknown(operationId: string, attemptNo: number, now: Date): Promise<void>;
   convergeSuccessful(

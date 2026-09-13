@@ -432,11 +432,13 @@ export class StripeRefundOperationRepositoryPostgres implements StripeRefundOper
         await sql`
         INSERT INTO stripe_refund_operation_facts
           (id, operation_id, attempt_no, fact_kind, outcome, provider_status,
-           provider_event_id, recorded_at)
+           provider_event_id, observed_charge_ref, observed_payment_intent_ref,
+           observed_amount_cents, observed_currency, recorded_at)
         VALUES (${randomUUID()}::uuid, ${row.operation_id}::uuid, ${row.attempt_count},
           ${conflict ? 'provider_observed_conflict' : 'provider_observed'},
           ${conflict ? 'outcome_unknown' : 'provider_succeeded'}, 'succeeded',
-          ${input.eventId}, ${input.now})
+          ${input.eventId}, ${input.chargeRef}, ${input.paymentIntentRef},
+          ${input.amountCents}, ${input.currency}, ${input.now})
       `.execute(tx);
         if (conflict) return { status: 'held_conflict' as const };
         return { status: await convergeInTransaction(tx, row, input.now) };
