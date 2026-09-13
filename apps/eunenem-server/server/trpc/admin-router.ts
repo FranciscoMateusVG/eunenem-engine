@@ -1637,7 +1637,9 @@ const pagamentosRouter = t.router({
    * path ignores it. Result carries the ACTUAL refund status — 'aceito'
    * (Stripe, synchronous), 'em_processamento' (Inter, webhook will
    * finalize), or 'devolvida' (Inter, already verified) — so the UI can
-   * show truth instead of fire-and-forget.
+   * show truth instead of fire-and-forget. Stripe returns `aceito` only for
+   * exact succeeded evidence; an accepted-but-pending refund returns
+   * `em_processamento` without marking the payment or ledger terminal.
    */
   estornar: adminProcedure
     .input(
