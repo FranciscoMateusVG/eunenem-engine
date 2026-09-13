@@ -1,13 +1,18 @@
 /**
- * aperture-wdis6 — ONE monetary conversion per payment (GA4 + Mixpanel).
+ * aperture-wdis6 — compra_concluida as a CLIENT confirmation event with
+ * best-effort per-browser dedupe, and pix_qr_regenerado vs checkout_iniciado
+ * on PIX QR regenerate (Wheatley T1.5 contract).
  *
  * Honest scope (node env, no DOM): proves the prop contract both sinks agreed
- * on, the dedupe-before-emit rule keyed on a durable payment id that survives
- * a "reload" (fresh registry over the same storage), the storage-failure
- * fallback, and — at source level — that no page/component fires
- * `compra_concluida` raw any more (every site goes through the funnel).
- * What it does NOT prove: actual GA4/Mixpanel ingestion, or the browser's
- * real localStorage; that is runtime/reporting evidence recorded on the bead.
+ * on; that the dedupe runs BEFORE the emitter and survives a "reload" (fresh
+ * registry over the same storage); that a blank transaction_id is NOT
+ * emitted; and the DOCUMENTED LIMITS — a new browser profile (different
+ * storage) emits the same payment again, blocked storage degrades to
+ * page-lifetime dedupe, and two tabs interleaving on the same storage can
+ * both emit (no atomic check-and-set). Source pins keep every surface on the
+ * funnel. What it does NOT prove: real localStorage, GA4/Mixpanel ingestion,
+ * or that either destination dedupes anything — local dedupe before the
+ * emitter is not delivery evidence.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -15,7 +20,10 @@ import { describe, expect, it } from 'vitest';
 import {
   type ArmazenamentoConversao,
   criarRegistroConversao,
+  EVENTO_CHECKOUT_INICIADO,
   EVENTO_COMPRA_CONCLUIDA,
+  EVENTO_PIX_QR_REGENERADO,
+  emitirInicioCheckoutPix,
   montarPropsCompraConcluida,
   registrarCompraConcluida,
 } from '../../../apps/eunenem-server/pages/lib/analytics-conversao.js';
@@ -40,6 +48,17 @@ function coletor() {
     },
   };
 }
+
+const compra = (
+  transactionId: string,
+  extra: Partial<Parameters<typeof registrarCompraConcluida>[0]> = {},
+) => ({
+  transactionId,
+  valorCentavos: 1000,
+  metodo: 'credit_card' as const,
+  giftName: 'A',
+  ...extra,
+});
 
 describe('montarPropsCompraConcluida — prop contract shared by GA4 and Mixpanel', () => {
   it('carries transaction_id, decimal BRL value + currency, centavos parity, metodo, gift_name', () => {
@@ -75,63 +94,88 @@ describe('montarPropsCompraConcluida — prop contract shared by GA4 and Mixpane
   });
 });
 
-describe('registrarCompraConcluida — dedupe BEFORE the emitter, so both sinks see one event', () => {
-  it('emits once per transaction_id; the second call for the same payment is dropped', () => {
+describe('registrarCompraConcluida — dedupe BEFORE the emitter (what IS guaranteed, per browser)', () => {
+  it('emits once per transaction_id; the second call for the same payment is suppressed', () => {
     const c = coletor();
     const registro = criarRegistroConversao(armazenamentoEmMemoria());
-    const input = {
-      transactionId: 'cs_1',
-      valorCentavos: 1000,
-      metodo: 'credit_card' as const,
-      giftName: 'A',
-    };
-    expect(registrarCompraConcluida(input, { registro, emitir: c.emitir })).toBe(true);
-    expect(registrarCompraConcluida(input, { registro, emitir: c.emitir })).toBe(false);
+    expect(registrarCompraConcluida(compra('cs_1'), { registro, emitir: c.emitir })).toBe(
+      'emitida',
+    );
+    expect(registrarCompraConcluida(compra('cs_1'), { registro, emitir: c.emitir })).toBe(
+      'ja_emitida',
+    );
     expect(c.emitidos).toHaveLength(1);
     expect(c.emitidos[0]?.nome).toBe(EVENTO_COMPRA_CONCLUIDA);
     expect(c.emitidos[0]?.props.transaction_id).toBe('cs_1');
   });
 
-  it('survives a reload: a FRESH registry over the same storage still dedupes (the /sucesso F5 case)', () => {
+  it('survives a reload: a FRESH registry over the same storage still suppresses (the /sucesso F5 case)', () => {
     const storage = armazenamentoEmMemoria();
     const c = coletor();
-    const input = {
-      transactionId: 'cs_reload',
-      valorCentavos: 1000,
-      metodo: 'credit_card' as const,
-      giftName: 'A',
-    };
     expect(
-      registrarCompraConcluida(input, {
+      registrarCompraConcluida(compra('cs_reload'), {
         registro: criarRegistroConversao(storage),
         emitir: c.emitir,
       }),
-    ).toBe(true);
+    ).toBe('emitida');
     // new page lifetime → new in-memory registry, same localStorage
     expect(
-      registrarCompraConcluida(input, {
+      registrarCompraConcluida(compra('cs_reload'), {
         registro: criarRegistroConversao(storage),
         emitir: c.emitir,
       }),
-    ).toBe(false);
+    ).toBe('ja_emitida');
     expect(c.emitidos).toHaveLength(1);
   });
 
-  it('different payments are independent (inline surface + a later /sucesso for another session both count)', () => {
+  it('different payments are independent', () => {
     const c = coletor();
     const registro = criarRegistroConversao(armazenamentoEmMemoria());
-    registrarCompraConcluida(
-      { transactionId: 'cs_a', valorCentavos: 1, metodo: 'pix', giftName: 'A' },
-      { registro, emitir: c.emitir },
-    );
-    registrarCompraConcluida(
-      { transactionId: 'cs_b', valorCentavos: 2, metodo: 'pix', giftName: 'B' },
-      { registro, emitir: c.emitir },
-    );
+    registrarCompraConcluida(compra('cs_a', { metodo: 'pix' }), { registro, emitir: c.emitir });
+    registrarCompraConcluida(compra('cs_b', { metodo: 'pix' }), { registro, emitir: c.emitir });
     expect(c.emitidos.map((e) => e.props.transaction_id)).toEqual(['cs_a', 'cs_b']);
   });
 
-  it('falls back to in-memory dedupe when storage throws (Safari private mode), never breaking the flow', () => {
+  it('a blank transaction_id is NOT emitted (no identity → not countable), UI flow unaffected (no throw)', () => {
+    const c = coletor();
+    const registro = criarRegistroConversao(armazenamentoEmMemoria());
+    expect(registrarCompraConcluida(compra('  '), { registro, emitir: c.emitir })).toBe(
+      'sem_identidade',
+    );
+    expect(registrarCompraConcluida(compra(''), { registro, emitir: c.emitir })).toBe(
+      'sem_identidade',
+    );
+    expect(c.emitidos).toHaveLength(0);
+  });
+
+  it('trims the id so " cs_x " and "cs_x" are the same payment', () => {
+    const c = coletor();
+    const registro = criarRegistroConversao(armazenamentoEmMemoria());
+    expect(registrarCompraConcluida(compra(' cs_x '), { registro, emitir: c.emitir })).toBe(
+      'emitida',
+    );
+    expect(registrarCompraConcluida(compra('cs_x'), { registro, emitir: c.emitir })).toBe(
+      'ja_emitida',
+    );
+    expect(c.emitidos[0]?.props.transaction_id).toBe('cs_x');
+  });
+});
+
+describe('registrarCompraConcluida — documented LIMITS (what is NOT guaranteed)', () => {
+  it('a different browser profile (different storage) emits the same payment AGAIN', () => {
+    const c = coletor();
+    const perfilA = criarRegistroConversao(armazenamentoEmMemoria());
+    const perfilB = criarRegistroConversao(armazenamentoEmMemoria());
+    expect(
+      registrarCompraConcluida(compra('cs_shared'), { registro: perfilA, emitir: c.emitir }),
+    ).toBe('emitida');
+    expect(
+      registrarCompraConcluida(compra('cs_shared'), { registro: perfilB, emitir: c.emitir }),
+    ).toBe('emitida');
+    expect(c.emitidos).toHaveLength(2); // browser-local dedupe is not payment state
+  });
+
+  it('blocked storage (Safari private / quota) degrades to page-lifetime dedupe only — never breaks the flow', () => {
     const quebrado: ArmazenamentoConversao = {
       getItem: () => {
         throw new Error('SecurityError');
@@ -141,25 +185,86 @@ describe('registrarCompraConcluida — dedupe BEFORE the emitter, so both sinks 
       },
     };
     const c = coletor();
-    const registro = criarRegistroConversao(quebrado);
-    const input = {
-      transactionId: 'cs_priv',
-      valorCentavos: 1,
-      metodo: 'pix' as const,
-      giftName: 'A',
-    };
-    expect(registrarCompraConcluida(input, { registro, emitir: c.emitir })).toBe(true);
-    expect(registrarCompraConcluida(input, { registro, emitir: c.emitir })).toBe(false);
-    expect(c.emitidos).toHaveLength(1);
+    const mesmaPagina = criarRegistroConversao(quebrado);
+    expect(
+      registrarCompraConcluida(compra('cs_priv'), { registro: mesmaPagina, emitir: c.emitir }),
+    ).toBe('emitida');
+    expect(
+      registrarCompraConcluida(compra('cs_priv'), { registro: mesmaPagina, emitir: c.emitir }),
+    ).toBe('ja_emitida');
+    // a reload (fresh registry) over the still-broken storage emits again
+    expect(
+      registrarCompraConcluida(compra('cs_priv'), {
+        registro: criarRegistroConversao(quebrado),
+        emitir: c.emitir,
+      }),
+    ).toBe('emitida');
+    expect(c.emitidos).toHaveLength(2);
   });
 
-  it('never silently drops a conversion with an empty transaction id (emits, undeduped, id gap visible in reports)', () => {
+  it('two tabs interleaving on the same storage can BOTH emit (no atomic check-and-set); sequential tabs do not', () => {
+    const storage = armazenamentoEmMemoria();
     const c = coletor();
-    const registro = criarRegistroConversao(armazenamentoEmMemoria());
-    const input = { transactionId: '  ', valorCentavos: 1, metodo: 'pix' as const, giftName: 'A' };
-    expect(registrarCompraConcluida(input, { registro, emitir: c.emitir })).toBe(true);
-    expect(registrarCompraConcluida(input, { registro, emitir: c.emitir })).toBe(true);
-    expect(c.emitidos).toHaveLength(2);
+    const abaA = criarRegistroConversao(storage);
+    const abaB = criarRegistroConversao(storage);
+    // Race: both tabs pass the check before either marks.
+    const aVe = abaA.jaEmitida('cs_race');
+    const bVe = abaB.jaEmitida('cs_race');
+    expect([aVe, bVe]).toEqual([false, false]);
+    abaA.marcarEmitida('cs_race');
+    abaB.marcarEmitida('cs_race');
+    // The public API on a later, sequential tab sees the mark.
+    expect(
+      registrarCompraConcluida(compra('cs_race'), {
+        registro: criarRegistroConversao(storage),
+        emitir: c.emitir,
+      }),
+    ).toBe('ja_emitida');
+    expect(c.emitidos).toHaveLength(0);
+  });
+});
+
+describe('emitirInicioCheckoutPix — checkout_iniciado once per intent; QR regenerate is pix_qr_regenerado', () => {
+  it('first iniciar → checkout_iniciado with the pre-existing props (no transaction_id)', () => {
+    const c = coletor();
+    expect(
+      emitirInicioCheckoutPix(
+        { regenerando: false, transactionId: 'tx1', valorCentavos: 5000, quantidadeItens: 2 },
+        c.emitir,
+      ),
+    ).toBe(EVENTO_CHECKOUT_INICIADO);
+    expect(c.emitidos).toEqual([
+      {
+        nome: 'checkout_iniciado',
+        props: { valor_centavos: 5000, quantidade_itens: 2, metodo: 'pix' },
+      },
+    ]);
+  });
+
+  it('single-gift surface omits quantidade_itens on checkout_iniciado (unchanged shape)', () => {
+    const c = coletor();
+    emitirInicioCheckoutPix(
+      { regenerando: false, transactionId: 'tx1', valorCentavos: 5000 },
+      c.emitir,
+    );
+    expect(c.emitidos[0]?.props).toEqual({ valor_centavos: 5000, metodo: 'pix' });
+  });
+
+  it('regenerate after expiry/rejection → pix_qr_regenerado {transaction_id, valor_centavos, metodo} and NOT checkout_iniciado', () => {
+    const c = coletor();
+    expect(
+      emitirInicioCheckoutPix(
+        { regenerando: true, transactionId: 'tx2', valorCentavos: 5000, quantidadeItens: 2 },
+        c.emitir,
+      ),
+    ).toBe(EVENTO_PIX_QR_REGENERADO);
+    expect(c.emitidos).toEqual([
+      {
+        nome: 'pix_qr_regenerado',
+        props: { transaction_id: 'tx2', valor_centavos: 5000, metodo: 'pix' },
+      },
+    ]);
+    expect(c.emitidos.some((e) => e.nome === 'checkout_iniciado')).toBe(false);
   });
 });
 
@@ -171,6 +276,7 @@ describe('source pin — every surface goes through the funnel', () => {
       return statSync(p).isDirectory() ? arquivosTsx(p) : /\.tsx?$/.test(n) ? [p] : [];
     });
   }
+  const src = (rel: string) => readFileSync(join(PAGES, rel), 'utf8');
 
   it('no page/component calls sendEvent("compra_concluida") raw any more', () => {
     const ofensores = arquivosTsx(PAGES)
@@ -186,9 +292,35 @@ describe('source pin — every surface goes through the funnel', () => {
       ['components/eunenem/GiftCheckoutModal.tsx', 2],
     ];
     for (const [rel, esperado] of sites) {
-      const src = readFileSync(join(PAGES, rel), 'utf8');
-      const n = (src.match(/registrarCompraConcluida\(/g) ?? []).length;
+      const n = (src(rel).match(/registrarCompraConcluida\(/g) ?? []).length;
       expect({ rel, n }).toEqual({ rel, n: esperado });
+    }
+  });
+
+  it('PIX identity submit uses emitirInicioCheckoutPix and onPixRetry arms the regenerate flag (both surfaces)', () => {
+    for (const rel of [
+      'components/eunenem/CartDrawer.tsx',
+      'components/eunenem/GiftCheckoutModal.tsx',
+    ]) {
+      const s = src(rel);
+      // exactly one PIX-path emitter, and no raw metodo:"pix" checkout_iniciado left behind
+      expect({ rel, n: (s.match(/emitirInicioCheckoutPix\(/g) ?? []).length }).toEqual({
+        rel,
+        n: 1,
+      });
+      expect({
+        rel,
+        raw: /sendEvent\(\s*"checkout_iniciado",[^)]*metodo:\s*"pix"/s.test(s),
+      }).toEqual({ rel, raw: false });
+      // the flag is armed inside onPixRetry and consumed after a successful iniciar
+      expect({
+        rel,
+        armed: /onPixRetry = useCallback\(\(\) => \{\s*pixRegenerandoRef\.current = true;/.test(s),
+      }).toEqual({ rel, armed: true });
+      expect({ rel, consumed: /pixRegenerandoRef\.current = false;/.test(s) }).toEqual({
+        rel,
+        consumed: true,
+      });
     }
   });
 });

@@ -176,11 +176,12 @@ function ApprovedState({
   sessionId: string;
 }) {
   const valorBRL = useMemo(() => Math.round(data.valor / 100), [data.valor]);
-  // aperture-ga4gtm → aperture-wdis6: GA4/Mixpanel conversion. A mount here
-  // corresponds to one confirmed payment, but a reload / back-nav / revisit of
-  // this URL mounts it AGAIN for the same payment — so the emit is deduped by
-  // sessionId (localStorage) inside registrarCompraConcluida, not by mount.
-  // This route is Stripe's return_url (PIX confirms inline), hence credit_card.
+  // aperture-ga4gtm → aperture-wdis6: client purchase CONFIRMATION event
+  // (best-effort, per browser — NOT the financial truth; that is the server's
+  // pagamento_aprovado). A reload / back-nav / revisit of this URL mounts this
+  // again for the same payment, so registrarCompraConcluida dedupes on the
+  // sessionId in localStorage instead of trusting the mount. This route is
+  // Stripe's return_url (PIX confirms inline), hence credit_card.
   useEffect(() => {
     registrarCompraConcluida({
       transactionId: sessionId,
