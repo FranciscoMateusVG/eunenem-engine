@@ -42,6 +42,7 @@ import {
 } from "@/lib/paginaApi";
 import { paginaSharePath } from "@/lib/painelRoutes";
 import { sendEvent, sendPageView } from "@/lib/analytics";
+import { registrarCompraConcluida } from "@/lib/analytics-conversao";
 
 // ── Page ──────────────────────────────────────────────────────────────────
 
@@ -120,7 +121,12 @@ export function PaginaSucessoPage({ slug }: { slug: string }) {
             ) : !data ? (
               <SkeletonState />
             ) : data.status === "approved" ? (
-              <ApprovedState data={data} slug={slug} idCampanha={idCampanha} />
+              <ApprovedState
+                data={data}
+                slug={slug}
+                idCampanha={idCampanha}
+                sessionId={sessionId}
+              />
             ) : data.status === "rejected" ? (
               <FailedState slug={slug} idCampanha={idCampanha} />
             ) : withinDeadline ? (
@@ -161,18 +167,27 @@ function ApprovedState({
   idCampanha,
   data,
   slug,
+  sessionId,
 }: {
   data: ObterSucessoResult;
   slug: string;
   idCampanha: string | null;
+  /** Stripe checkout session id from ?sessionId= — the durable payment id. */
+  sessionId: string;
 }) {
   const valorBRL = useMemo(() => Math.round(data.valor / 100), [data.valor]);
-  // aperture-ga4gtm: GA4 conversion event. Fires once per mount of the
-  // approved state — the page only reaches ApprovedState after the
-  // sessionId/status pair resolves to a terminal 'approved', so a fresh
-  // mount here corresponds to one confirmed payment.
+  // aperture-ga4gtm → aperture-wdis6: GA4/Mixpanel conversion. A mount here
+  // corresponds to one confirmed payment, but a reload / back-nav / revisit of
+  // this URL mounts it AGAIN for the same payment — so the emit is deduped by
+  // sessionId (localStorage) inside registrarCompraConcluida, not by mount.
+  // This route is Stripe's return_url (PIX confirms inline), hence credit_card.
   useEffect(() => {
-    sendEvent("compra_concluida", { valor: data.valor, gift_name: data.giftName });
+    registrarCompraConcluida({
+      transactionId: sessionId,
+      valorCentavos: data.valor,
+      metodo: "credit_card",
+      giftName: data.giftName,
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return (
