@@ -1,3 +1,4 @@
+import { currentLogContext } from './log-context.js';
 import type { Logger } from './logger.js';
 
 type LogLevel = 'INFO' | 'WARN' | 'ERROR' | 'DEBUG';
@@ -27,7 +28,10 @@ export class ConsoleLogger implements Logger {
 
   private log(level: LogLevel, message: string, attrs?: Record<string, unknown>): void {
     const timestamp = new Date().toISOString();
-    const attrsStr = attrs && Object.keys(attrs).length > 0 ? ` ${JSON.stringify(attrs)}` : '';
+    // Context wins over call-site attrs: a nested handler must not be able to
+    // replace the server-issued request ID with caller-controlled data.
+    const mergedAttrs = { ...attrs, ...currentLogContext() };
+    const attrsStr = Object.keys(mergedAttrs).length > 0 ? ` ${JSON.stringify(mergedAttrs)}` : '';
     const line = `[${timestamp}] ${level.padEnd(5)} ${message}${attrsStr}`;
 
     switch (level) {

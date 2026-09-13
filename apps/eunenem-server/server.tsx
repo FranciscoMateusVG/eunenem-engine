@@ -24,12 +24,22 @@ import {
 import { installBlockedAuthHandlerGuard } from './server/blocked-auth-handler.js';
 import { createLegacyBridgeHandler } from './server/legacy-bridge.js';
 import { createLegacyGuestRedirectMiddleware } from './server/legacy-guest-redirect.js';
-import { registerPixCobrancaReconciliationJob } from './server/jobs/pix-cobranca-reconciliation.pgboss.js';
+import {
+  PIX_COBRANCA_RECONCILIATION_QUEUE,
+  registerPixCobrancaReconciliationJob,
+} from './server/jobs/pix-cobranca-reconciliation.pgboss.js';
+import { createServerLifecycle, LifecycleAdmissionClosedError } from './server/lifecycle.js';
 import { createPainelAccessMiddleware } from './server/painel-access.js';
+import {
+  createRequestObservabilityMiddleware,
+  reportTrpcInternalFailure,
+  REQUEST_ID_HEADER,
+} from './server/request-observability.js';
 import { appRouter } from './server/trpc/router.js';
 import { resolverUsuarioAutenticadoOuNull } from './server/trpc/session-resolver.js';
 import { createStripeWebhookHandler } from './server/webhooks/stripe-webhook.js';
 import { mountInterPixWebhookRoutesWhenBound } from './server/webhooks/inter-pix-webhook.js';
+import { captureGlitchTipRequestFailure } from './src/lib/glitchtip/instrument.js';
 
 const PORT = Number(process.env.PORT ?? 3001);
 
@@ -39,6 +49,15 @@ const PORT = Number(process.env.PORT ?? 3001);
 // log instead of a cryptic auth failure on the first request.
 const env = loadEnv();
 const deps = buildServerDeps(env);
+const lifecycle = createServerLifecycle({
+  boss: deps.boss,
+  queues: [REPASSE_EXECUTAR_QUEUE, REPASSE_CONFIRMAR_QUEUE, PIX_COBRANCA_RECONCILIATION_QUEUE],
+  log: (event) => console.log(`[lifecycle] ${event}`),
+  exit: (code) => process.exit(code),
+});
+// Installed before the first asynchronous startup operation. Static imports
+// and synchronous env/dependency construction still fail closed before HTTP.
+lifecycle.installSignalHandlers();
 
 // aperture-vvh2j — automated PIX repasse workers. Start the shared pg-boss
 // instance, ensure both queues exist, and register the two workers BEFORE the
@@ -47,33 +66,34 @@ const deps = buildServerDeps(env);
 // receives an ARRAY of jobs (`Job<Data>[]`); with `batchSize: 1` that array
 // holds a single job, giving one-at-a-time processing on the executar queue.
 try {
-  await deps.boss.start();
-  await deps.boss.createQueue(REPASSE_EXECUTAR_QUEUE);
-  await deps.boss.createQueue(REPASSE_CONFIRMAR_QUEUE);
+  await lifecycle.startupStep(() => deps.boss.start());
+  await lifecycle.startupStep(() => deps.boss.createQueue(REPASSE_EXECUTAR_QUEUE));
+  await lifecycle.startupStep(() => deps.boss.createQueue(REPASSE_CONFIRMAR_QUEUE));
 
-  // Executar worker — concurrency 1 (batchSize: 1). Each job drives the
-  // transferencia FSM forward (solicitado/falhou → transferindo → aguardando).
-  await deps.boss.work<RepasseExecutarJobData>(
-    REPASSE_EXECUTAR_QUEUE,
-    { batchSize: 1 },
-    async (jobs) => {
-      for (const job of jobs) {
-        await executarTransferenciaRepasse(deps, { idRepasse: job.data.idRepasse });
-      }
-    },
+  // Executar worker — concurrency 1 (batchSize: 1). Keep the existing
+  // execution handler and provider/state-transition policy unchanged.
+  await lifecycle.startupStep(() =>
+    deps.boss.work<RepasseExecutarJobData>(REPASSE_EXECUTAR_QUEUE, { batchSize: 1 }, (jobs) =>
+      lifecycle.runJob(async () => {
+        for (const job of jobs) {
+          await executarTransferenciaRepasse(deps, { idRepasse: job.data.idRepasse });
+        }
+      }),
+    ),
   );
 
-  // Confirmar worker — reconcile/poll the provider for terminal status.
-  await deps.boss.work<RepasseConfirmarJobData>(
-    REPASSE_CONFIRMAR_QUEUE,
-    async (jobs) => {
-      for (const job of jobs) {
-        await confirmarTransferenciaRepasse(deps, {
-          idRepasse: job.data.idRepasse,
-          tentativaConfirmacao: job.data.tentativaConfirmacao,
-        });
-      }
-    },
+  // Confirmar worker — legacy queue drain only; provider polling is retired.
+  await lifecycle.startupStep(() =>
+    deps.boss.work<RepasseConfirmarJobData>(REPASSE_CONFIRMAR_QUEUE, (jobs) =>
+      lifecycle.runJob(async () => {
+        for (const job of jobs) {
+          await confirmarTransferenciaRepasse(deps, {
+            idRepasse: job.data.idRepasse,
+            tentativaConfirmacao: job.data.tentativaConfirmacao,
+          });
+        }
+      }),
+    ),
   );
 
   // aperture-fpd0j — durable recovery for expired/missed Inter PIX
@@ -87,7 +107,9 @@ try {
   // correctly configured provider gets a turn.
   const pixReconciliationWorkerDisabled = env.E2E_DISABLE_PIX_RECONCILIATION_WORKER === '1';
   if (!pixReconciliationWorkerDisabled) {
-    await registerPixCobrancaReconciliationJob(deps.boss, deps);
+    await lifecycle.startupStep(() =>
+      registerPixCobrancaReconciliationJob(deps.boss, deps, lifecycle),
+    );
   }
 
   console.log(
@@ -96,11 +118,32 @@ try {
       : '✅ pg-boss workers registered (repasse + PIX cobranca reconciliation)',
   );
 } catch (err) {
-  console.error('❌ Failed to start pg-boss workers:', err);
+  if (err instanceof LifecycleAdmissionClosedError) {
+    await lifecycle.shutdown();
+  } else {
+    console.error('❌ Failed to start pg-boss workers:', err);
+    await lifecycle.failStartup();
+  }
+  // The production exit above is terminal; never continue boot if an injected
+  // exit implementation returns (or the startup step was interrupted).
   throw err;
 }
-
 const app = new Hono();
+// Earliest global admission gate: includes health, assets, webhooks, API and
+// SSR. Already-admitted requests finish; requests arriving after close may see
+// connection refusal rather than HTTP503. Neither is a readiness verdict.
+app.use('*', lifecycle.admissionMiddleware);
+
+// Server-owned request correlation. This middleware never reads the body and
+// therefore preserves the BetterAuth/Stripe raw-body ordering contract below.
+// Nested ConsoleLogger calls inherit the ID through AsyncLocalStorage.
+app.use(
+  '*',
+  createRequestObservabilityMiddleware({
+    logger: deps.observability.logger,
+    reportFailure: captureGlitchTipRequestFailure,
+  }),
+);
 
 // CORS for the API surface (aperture-ht7sq). Explicit origin list — NO
 // wildcards (T6 from recon §4). `credentials: true` is required for the
@@ -118,7 +161,7 @@ app.use(
     credentials: true,
     allowMethods: ['GET', 'POST', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization', 'Cookie'],
-    exposeHeaders: ['Set-Cookie'],
+    exposeHeaders: ['Set-Cookie', REQUEST_ID_HEADER],
     maxAge: 600,
   }),
 );
@@ -136,7 +179,7 @@ app.use('/public/*', serveStatic({ root: './' }));
 app.use('/products/*', serveStatic({ root: './public' }));
 app.use('/listas-prontas/*', serveStatic({ root: './public' }));
 
-// Health check.
+// Readiness only: admission open after workers + listen, not DB/bank convergence.
 app.get('/healthz', (c) => c.text('ok'));
 
 // Deny-by-default auth guard (aperture-9tca0, supersedes ln3de denylist) —
@@ -177,6 +220,11 @@ app.all('/api/trpc/*', (c) =>
       headers: req.headers,
       resHeaders,
     }),
+    onError: ({ error, path }) => {
+      if (error.code === 'INTERNAL_SERVER_ERROR') {
+        reportTrpcInternalFailure(c, { error, path: path ?? undefined });
+      }
+    },
   }),
 );
 
@@ -404,7 +452,8 @@ function escapeHtml(s: string): string {
     .replaceAll("'", '&#39;');
 }
 
-serve({ fetch: app.fetch, port: PORT }, (info) => {
+const httpServer = serve({ fetch: app.fetch, port: PORT }, (info) => {
+  if (!lifecycle.markReady()) return;
   console.log('');
   console.log('🌐 eunenem-server');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -431,3 +480,5 @@ serve({ fetch: app.fetch, port: PORT }, (info) => {
   console.log('  /healthz           → plain text health check');
   console.log('');
 });
+
+lifecycle.attachServer(httpServer);

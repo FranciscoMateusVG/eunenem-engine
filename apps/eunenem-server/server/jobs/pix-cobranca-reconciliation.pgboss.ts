@@ -33,17 +33,25 @@ type ReconciliationBoss = Pick<PgBoss, 'createQueue' | 'schedule' | 'work'>;
 export async function registerPixCobrancaReconciliationJob(
   boss: ReconciliationBoss,
   deps: ReconciliarCobrancasPixDeps,
+  lifecycle: {
+    assertAdmissionOpen: () => void;
+    runJob: <T>(operation: () => Promise<T>) => Promise<T>;
+  } = { assertAdmissionOpen: () => {}, runJob: (operation) => operation() },
 ): Promise<void> {
+  lifecycle.assertAdmissionOpen();
   await boss.createQueue(PIX_COBRANCA_RECONCILIATION_QUEUE);
+  lifecycle.assertAdmissionOpen();
   await boss.work<PixCobrancaReconciliationJobData>(
     PIX_COBRANCA_RECONCILIATION_QUEUE,
     { batchSize: 1 },
-    async (jobs) => {
-      for (const _job of jobs) {
-        await reconciliarCobrancasPix(deps);
-      }
-    },
+    (jobs) =>
+      lifecycle.runJob(async () => {
+        for (const _job of jobs) {
+          await reconciliarCobrancasPix(deps);
+        }
+      }),
   );
+  lifecycle.assertAdmissionOpen();
   await boss.schedule(
     PIX_COBRANCA_RECONCILIATION_QUEUE,
     PIX_COBRANCA_RECONCILIATION_CRON,
