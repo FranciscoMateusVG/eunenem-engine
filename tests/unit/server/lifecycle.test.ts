@@ -118,18 +118,52 @@ describe('server lifecycle', () => {
         throw new Error('private');
       });
     if (kind === 'boss') boss.stop.mockRejectedValueOnce(new Error('private'));
+    const callback = deferred();
+    const admitted = lifecycle.runJob(() => callback.promise);
     const stop = lifecycle.shutdown();
     expect(lifecycle.shutdown()).toBe(stop);
-    expect(await stop).toBe(1);
+    // Let the rejection reach the coordinator while all admitted work is blocked.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(exit).not.toHaveBeenCalled();
     http.release();
     job.release();
-    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(exit).not.toHaveBeenCalled();
+    callback.release();
+    await admitted;
+    expect(await stop).toBe(1);
     expect(exit).toHaveBeenCalledExactlyOnceWith(1);
     expect(log.mock.calls.flat()).toEqual([
       'draining',
       kind === 'boss' ? 'boss_stop_failed' : 'http_close_failed',
     ]);
     expect(server.close).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    'close',
+    'boss',
+  ] as const)('%s rejection preserves the common deadline while admitted work never settles', async (kind) => {
+    vi.useFakeTimers();
+    const { lifecycle, http, job, server, boss, exit, log } = setup();
+    const callback = deferred();
+    const admitted = lifecycle.runJob(() => callback.promise);
+    if (kind === 'close') server.close.mockImplementationOnce((done) => done(new Error('private')));
+    else boss.stop.mockRejectedValueOnce(new Error('private'));
+    const stop = lifecycle.shutdown();
+    expect(lifecycle.shutdown()).toBe(stop);
+    http.release();
+    job.release();
+    await vi.advanceTimersByTimeAsync(99);
+    expect(exit).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await stop).toBe(1);
+    expect(log.mock.calls.flat()).toEqual(['draining', 'drain_timeout']);
+    callback.release();
+    await admitted;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(exit).toHaveBeenCalledExactlyOnceWith(1);
+    expect(log.mock.calls.flat()).not.toContain('drain_complete');
   });
 
   it('signal during startup fences later registration/readiness and stops any late worker', async () => {

@@ -44,7 +44,12 @@ export function createServerLifecycle(options: {
   let server: ServerType | undefined;
   let startupOperation: Promise<unknown> | undefined;
   let shutdownTask: Promise<number> | undefined;
-  let failure: 'startup_failed' | 'http_server_failed' | undefined;
+  let failure:
+    | 'startup_failed'
+    | 'http_server_failed'
+    | 'http_close_failed'
+    | 'boss_stop_failed'
+    | undefined;
   const admittedWork = new Set<Promise<void>>();
 
   // Workers may run during registration, but may not begin a new business
@@ -109,7 +114,8 @@ export function createServerLifecycle(options: {
       if (!server) return resolve();
       server.close((error) => (error ? reject(error) : resolve()));
     }).catch(() => {
-      finish(1, 'http_close_failed');
+      // A close error is not permission to abandon other admitted work.
+      failure ??= 'http_close_failed';
     });
 
     // pg-boss 12.26 stop() awaits notifier.stop() before stopping workers.
@@ -134,7 +140,9 @@ export function createServerLifecycle(options: {
       // forced pg-boss expiry can never be reported as graceful completion.
       await options.boss.stop({ graceful: true, timeout: deadlineMs + 1_000 });
     })().catch(() => {
-      finish(1, 'boss_stop_failed');
+      // Preserve failure but keep the other drains alive until settlement
+      // or the common deadline; never exit early while effects may run.
+      failure ??= 'boss_stop_failed';
     });
 
     // pg-boss may settle bookkeeping on job expiration while an advisory
