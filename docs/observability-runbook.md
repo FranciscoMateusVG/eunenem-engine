@@ -127,3 +127,65 @@ failure event. Provider truth and the durable payment state remain separate.
    terminal correlation record per webhook outcome.
 5. Add an application healthcheck only after its DB/worker semantics are
    specified; current `/healthz` is liveness-only.
+
+## Browser error capture delivery contract
+
+The Hono SSR client is bundled directly from `apps/eunenem-server/client.tsx`
+by esbuild. It is not a Next.js or Vite runtime. Browser capture initializes
+before the application module is loaded and before React hydration.
+
+Capture stays dark unless both of these values are present and valid:
+
+- `GLITCHTIP_BROWSER_DSN`: a dedicated public browser-ingestion DSN. It must
+  not equal or fall back to the server `GLITCHTIP_DSN`. A separate browser
+  client key in the existing EuNeném project is sufficient; a new project is
+  not required. Configure the project for exactly `https://eunenem.com` and
+  `https://www.eunenem.com` when GlitchTip supports origin restrictions. If it
+  does not, record that public-key submissions are forgeable and rely on key
+  revocation plus ingestion limits; CORS is not authentication.
+- `artifact-sha256:<64 lowercase hex>`: generated automatically after the
+  build from the exact final `public/client.js` and `public/styles.css` bytes,
+  using a fixed domain and ordered length framing. It identifies the browser
+  assets, not the Git commit or full server image. The deployment receipt maps
+  this ID to the canonical commit and image.
+
+The build never takes a manually updated release environment variable. It
+writes a small release metadata file outside the hashed inputs, avoiding a
+self-reference. The server reads that metadata once at startup and projects
+only `browserErrorDsn` and `release` into the existing script-safe
+`window.__EUNENEM_ENV__` object. Missing assets/metadata, read failure, invalid
+or partial configuration emits neither browser field and does not block SSR or
+hydration. The client also initializes only on the two exact production
+origins above; that client check is not an ingestion authentication boundary.
+
+The browser SDK has no default integrations. There is no replay, tracing,
+session tracking, breadcrumbs, console/fetch/history capture, user identity,
+or tunnel. Window errors, unhandled Promise rejections, and the React 19 root
+error callbacks share one bounded dedupe and one closed event envelope:
+
+- fixed failure type/message;
+- exact release, finite error-source category, and `resolveRoute` route kind;
+- at most 20 frames containing only a fixed bundle/application category and
+  bounded numeric line/column;
+- no raw URL, route parameter, query/hash, filename/function, exception
+  message/cause, component stack, DOM/input, request data, or attachments.
+
+### One-shot post-deploy witness
+
+This witness is intentionally a browser-console action, not a committed crash
+route or test button. After the deployed bundle and exact release value are
+independently pinned, the operator may open a harmless route such as `/faq`
+and execute once in DevTools:
+
+```js
+queueMicrotask(() => {
+  throw new Error('sq4jn-browser-witness');
+});
+```
+
+The literal is deliberately discarded by the client boundary. Identify the
+event in the EuNeném frontend project by the exact release, fixed
+`BrowserUnhandledError` type, `route_kind=faq`, and the bounded witness time.
+Record the GlitchTip event ID and receipt. Do not repeat against a payment
+route, add a permanent crash surface, or call a provider. Until that receipt
+exists, source/build success is not ingestion proof.

@@ -23,6 +23,10 @@ import {
 } from './server/auth/setup.js';
 import { installBlockedAuthHandlerGuard } from './server/blocked-auth-handler.js';
 import { createLegacyBridgeHandler } from './server/legacy-bridge.js';
+import {
+  clientRuntimeEnvScript,
+  readBrowserArtifactRelease,
+} from './server/client-runtime-env.js';
 import { createLegacyGuestRedirectMiddleware } from './server/legacy-guest-redirect.js';
 import {
   PIX_COBRANCA_RECONCILIATION_QUEUE,
@@ -42,6 +46,9 @@ import { mountInterPixWebhookRoutesWhenBound } from './server/webhooks/inter-pix
 import { captureGlitchTipRequestFailure } from './src/lib/glitchtip/instrument.js';
 
 const PORT = Number(process.env.PORT ?? 3001);
+// Read the small build-generated metadata once. The multi-megabyte assets are
+// hashed during `pnpm build`, never on an SSR request.
+const browserArtifactRelease = readBrowserArtifactRelease();
 
 // Boot-time gate (aperture-ht7sq) — fail fast if BETTER_AUTH_SECRET,
 // BETTER_AUTH_URL, TRUSTED_ORIGINS, or DATABASE_URL is missing /
@@ -392,7 +399,7 @@ function envelope(ssrHtml: string, pathname: string): string {
          own old-site host (iw-m4 staging → staging.eunenem.com; prod →
          default) WITHOUT a client rebuild. Serialized with < escaped so an
          operator-set value can never break out of this script tag. -->
-    <script>window.__EUNENEM_ENV__=${serializeRuntimeEnv()}</script>
+    ${clientRuntimeEnvScript(process.env, browserArtifactRelease)}
     <title>eunenem · ${escapeHtml(pathname)}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -414,33 +421,6 @@ function envelope(ssrHtml: string, pathname: string): string {
     <script type="module" src="/public/client.js"></script>
   </body>
 </html>`;
-}
-
-/**
- * aperture-pjd74 — runtime config → client. JSON with `<` escaped to \u003c
- * (script-tag breakout guard). Read per-request so a container env change +
- * restart is enough — no rebuild.
- */
-function serializeRuntimeEnv(): string {
-  const env: {
-    legacyMigracaoUrl?: string;
-    legacySiteOrigin?: string;
-    mixpanelToken?: string;
-  } = {};
-  if (process.env.LEGACY_MIGRACAO_URL) {
-    env.legacyMigracaoUrl = process.env.LEGACY_MIGRACAO_URL;
-  }
-  // aperture-gejcw — the 1.0 card derives its CTA from LEGACY_SITE_ORIGIN when
-  // no explicit LEGACY_MIGRACAO_URL override is set, so the swap is config-only.
-  if (process.env.LEGACY_SITE_ORIGIN) {
-    env.legacySiteOrigin = process.env.LEGACY_SITE_ORIGIN;
-  }
-  // aperture-ppuay — Mixpanel client token (public write-only). Runtime-injected
-  // so the sink activates without a rebuild; absent → analytics.ts stays dark.
-  if (process.env.MIXPANEL_TOKEN) {
-    env.mixpanelToken = process.env.MIXPANEL_TOKEN;
-  }
-  return JSON.stringify(env).replaceAll('<', '\\u003c');
 }
 
 function escapeHtml(s: string): string {
