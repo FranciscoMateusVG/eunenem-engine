@@ -266,6 +266,26 @@ describe('emitirInicioCheckoutPix — checkout_iniciado once per intent; QR rege
     ]);
     expect(c.emitidos.some((e) => e.nome === 'checkout_iniciado')).toBe(false);
   });
+
+  it('armed retry but NO new txid (server answered stripe_embedded) → plain checkout_iniciado, never a blank-id pix_qr_regenerado', () => {
+    const c = coletor();
+    // Exactly the call-site shape: regenerando from the ref, transactionId '' when result.tipo !== 'pix_qr'.
+    expect(
+      emitirInicioCheckoutPix(
+        { regenerando: true, transactionId: '', valorCentavos: 5000, quantidadeItens: 2 },
+        c.emitir,
+      ),
+    ).toBe(EVENTO_CHECKOUT_INICIADO);
+    expect(
+      emitirInicioCheckoutPix(
+        { regenerando: true, transactionId: '   ', valorCentavos: 5000 },
+        c.emitir,
+      ),
+    ).toBe(EVENTO_CHECKOUT_INICIADO);
+    expect(c.emitidos.map((e) => e.nome)).toEqual(['checkout_iniciado', 'checkout_iniciado']);
+    expect(c.emitidos.some((e) => e.nome === 'pix_qr_regenerado')).toBe(false);
+    expect(c.emitidos.some((e) => 'transaction_id' in e.props)).toBe(false);
+  });
 });
 
 describe('source pin — every surface goes through the funnel', () => {
@@ -321,6 +341,11 @@ describe('source pin — every surface goes through the funnel', () => {
         rel,
         consumed: true,
       });
+      // and the call site only classifies a regenerate when a NEW QR came back (Izzy sdg24h boundary)
+      expect({
+        rel,
+        gated: /regenerando: pixRegenerandoRef\.current && result\.tipo === "pix_qr"/.test(s),
+      }).toEqual({ rel, gated: true });
     }
   });
 });
