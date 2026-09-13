@@ -453,6 +453,40 @@ export interface Sessions {
   user_id: string;
 }
 
+export interface StripeRefundOperationFacts {
+  attempt_no: number;
+  fact_kind: string;
+  id: string;
+  idempotency_key: string | null;
+  operation_id: string;
+  outcome: string | null;
+  provider_event_id: string | null;
+  provider_ref: string | null;
+  provider_status: string | null;
+  recorded_at: Timestamp;
+}
+
+export interface StripeRefundOperations {
+  amount_cents: Int8;
+  attempt_count: Generated<number>;
+  charge_ref: string | null;
+  created_at: Generated<Timestamp>;
+  currency: string;
+  local_committed_at: Timestamp | null;
+  operation_id: string;
+  origin: string;
+  payment_id: string;
+  payment_intent_ref: string | null;
+  provider: Generated<string>;
+  provider_ref: string | null;
+  provider_result_at: Timestamp | null;
+  provider_started_at: Timestamp | null;
+  provider_status: string | null;
+  reason: string;
+  state: string;
+  updated_at: Generated<Timestamp>;
+}
+
 export interface Users {
   created_at: Generated<Timestamp>;
   email: string;
@@ -519,6 +553,8 @@ export interface DB {
   repasses_recebedor: RepassesRecebedor;
   resgates_pendentes: ResgatesPendentes;
   sessions: Sessions;
+  stripe_refund_operation_facts: StripeRefundOperationFacts;
+  stripe_refund_operations: StripeRefundOperations;
   users: Users;
   usuarios: Usuarios;
   verifications: Verifications;

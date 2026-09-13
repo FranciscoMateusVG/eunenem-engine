@@ -14,10 +14,12 @@ import {
 } from '../../adapters/pagamentos/pix-cobranca-provider.js';
 import type { PagamentoProvider } from '../../adapters/pagamentos/provider.js';
 import type { PagamentoRepository } from '../../adapters/pagamentos/repository.js';
-import {
-  estornarPagamentoAprovado,
-  type Pagamento,
-} from '../../domain/pagamentos/entities/pagamento.js';
+import type {
+  StripeRefundOperation,
+  StripeRefundOperationRepository,
+} from '../../adapters/pagamentos/stripe-refund-operation-repository.js';
+import { StripeRefundOperationConflictError } from '../../adapters/pagamentos/stripe-refund-operation-repository.js';
+import type { Pagamento } from '../../domain/pagamentos/entities/pagamento.js';
 import { IdPagamentoSchema } from '../../domain/pagamentos/value-objects/ids.js';
 import { PagamentoNaoEncontradoError } from '../../errors/pagamentos/nao-encontrado.error.js';
 import { PagamentoTransicaoStatusInvalidaError } from '../../errors/pagamentos/transicao-status-invalida.error.js';
@@ -27,6 +29,8 @@ import {
   PagamentoEstornoPixNaoConcluidoError,
   PagamentoEstornoPixVinculoInvalidoError,
   PagamentoEstornoRecusadoPeloProvedorError,
+  PagamentoEstornoStripeOutcomeDesconhecidoError,
+  PagamentoEstornoStripeVinculoInvalidoError,
 } from './estorno-pagamento-errors.js';
 import { finalizarEstornoPixVerificado } from './finalizar-estorno-pix-verificado.js';
 
@@ -35,6 +39,8 @@ export {
   PagamentoEstornoPixNaoConcluidoError,
   PagamentoEstornoPixVinculoInvalidoError,
   PagamentoEstornoRecusadoPeloProvedorError,
+  PagamentoEstornoStripeOutcomeDesconhecidoError,
+  PagamentoEstornoStripeVinculoInvalidoError,
 } from './estorno-pagamento-errors.js';
 
 export const EstornarPagamentoInputSchema = z.object({
@@ -49,6 +55,19 @@ export const EstornarPagamentoInputSchema = z.object({
 
 export type EstornarPagamentoInput = z.infer<typeof EstornarPagamentoInputSchema>;
 
+const StripeRefundResultSchema = z
+  .object({
+    id: z
+      .string()
+      .min(1)
+      .max(255)
+      .refine((value) => value === value.trim() && !/[\p{Cc}\p{Cf}]/u.test(value)),
+    status: z.enum(['succeeded', 'pending', 'failed', 'canceled']),
+    amountCents: z.number().int().positive(),
+    currency: z.literal('brl'),
+  })
+  .strict();
+
 export interface EstornarPagamentoResult {
   readonly pagamento: Pagamento;
   readonly refundId: string;
@@ -60,6 +79,7 @@ export interface EstornarPagamentoDeps {
   readonly pagamentoProvider: PagamentoProvider;
   readonly pixCobrancaProvider: PixCobrancaProvider;
   readonly pixCobrancaDevolucaoRepository: PixCobrancaDevolucaoRepository;
+  readonly stripeRefundOperationRepository: StripeRefundOperationRepository;
   readonly pagamentoEventPublisher: PagamentoEventPublisher;
   readonly livroFinanceiroRepository: LivroFinanceiroRepository;
   readonly clock: () => Date;
@@ -134,31 +154,152 @@ async function estornarHistorico(
   pagamento: Pagamento,
   reason: EstornarPagamentoInput['reason'],
 ): Promise<EstornarPagamentoResult> {
-  const refundResult = await deps.pagamentoProvider.refundarPagamento({
-    idPagamento: pagamento.id,
-    e2eExternalRef: pagamento.intencao.e2eExternalRef,
-    chargeExternalRef: pagamento.intencao.chargeExternalRef,
-    paymentIntentExternalRef: pagamento.intencao.paymentIntentExternalRef,
-    amountCents: pagamento.intencao.composicaoValoresAggregate.totalPaidCents,
-    ...(reason ? { reason } : {}),
-  });
-  if (refundResult.status === 'recusado') {
-    throw new PagamentoEstornoRecusadoPeloProvedorError(pagamento.id, refundResult.statusBruto);
+  const amountCents = pagamento.intencao.composicaoValoresAggregate.totalPaidCents;
+  let established: Awaited<ReturnType<StripeRefundOperationRepository['reserve']>>;
+  let claim: Awaited<ReturnType<StripeRefundOperationRepository['claimProviderStart']>>;
+  try {
+    established = await deps.stripeRefundOperationRepository.reserve({
+      operationId: randomUUID(),
+      paymentId: pagamento.id,
+      amountCents,
+      currency: 'brl',
+      chargeRef: pagamento.intencao.chargeExternalRef,
+      paymentIntentRef: pagamento.intencao.paymentIntentExternalRef,
+      reason: reason ?? 'requested_by_customer',
+      now: deps.clock(),
+    });
+    claim = await deps.stripeRefundOperationRepository.claimProviderStart(
+      established.operation.operationId,
+      deps.clock(),
+    );
+  } catch (error) {
+    if (error instanceof StripeRefundOperationConflictError) {
+      throw new PagamentoEstornoStripeVinculoInvalidoError();
+    }
+    throw error;
+  }
+  if (claim.status !== 'call_provider') {
+    return resolveHistoricalReplay(deps, pagamento, claim.operation);
   }
 
-  const now = deps.clock();
-  const estornado = estornarPagamentoAprovado(pagamento, now);
-  await deps.pagamentoRepository.update(estornado);
-  await deps.livroFinanceiroRepository.marcarLancamentosComoCanceladosPorPagamento(
-    pagamento.id,
-    now,
+  let refundResult: Awaited<ReturnType<PagamentoProvider['refundarPagamento']>>;
+  try {
+    refundResult = await deps.pagamentoProvider.refundarPagamento({
+      operationId: claim.operation.operationId,
+      idempotencyKey: claim.idempotencyKey,
+      idPagamento: pagamento.id,
+      e2eExternalRef: pagamento.intencao.e2eExternalRef,
+      chargeExternalRef: pagamento.intencao.chargeExternalRef,
+      paymentIntentExternalRef: pagamento.intencao.paymentIntentExternalRef,
+      amountCents,
+      currency: 'brl',
+      ...(reason ? { reason } : {}),
+    });
+  } catch {
+    await deps.stripeRefundOperationRepository.recordOutcomeUnknown(
+      claim.operation.operationId,
+      claim.attemptNo,
+      deps.clock(),
+    );
+    throw new PagamentoEstornoStripeOutcomeDesconhecidoError(pagamento.id);
+  }
+  const validatedResult = StripeRefundResultSchema.safeParse(refundResult);
+  if (!validatedResult.success || validatedResult.data.amountCents !== amountCents) {
+    await deps.stripeRefundOperationRepository.recordOutcomeUnknown(
+      claim.operation.operationId,
+      claim.attemptNo,
+      deps.clock(),
+    );
+    throw new PagamentoEstornoStripeOutcomeDesconhecidoError(pagamento.id);
+  }
+  const outcome =
+    validatedResult.data.status === 'succeeded'
+      ? 'provider_succeeded'
+      : validatedResult.data.status === 'pending'
+        ? 'provider_pending'
+        : 'provider_failed';
+  const persisted = await deps.stripeRefundOperationRepository.recordProviderResult({
+    operationId: claim.operation.operationId,
+    attemptNo: claim.attemptNo,
+    outcome,
+    providerRef: validatedResult.data.id,
+    providerStatus: validatedResult.data.status,
+    amountCents,
+    currency: 'brl',
+    now: deps.clock(),
+  });
+  if (persisted.state === 'provider_failed') {
+    throw new PagamentoEstornoRecusadoPeloProvedorError(
+      pagamento.id,
+      persisted.providerStatus ?? undefined,
+    );
+  }
+  if (persisted.state === 'provider_pending') {
+    return {
+      pagamento,
+      refundId: persisted.providerRef as string,
+      refundStatus: 'em_processamento',
+    };
+  }
+  return finalizeHistoricalSuccess(deps, pagamento, persisted.operationId);
+}
+
+async function finalizeHistoricalSuccess(
+  deps: EstornarPagamentoDeps,
+  pagamento: Pagamento,
+  operationId: string,
+): Promise<EstornarPagamentoResult> {
+  const converged = await deps.stripeRefundOperationRepository.convergeSuccessful(
+    operationId,
+    deps.clock(),
   );
+  if (converged.status === 'held_conflict') {
+    throw new PagamentoEstornoStripeOutcomeDesconhecidoError(pagamento.id);
+  }
+  const operation = await deps.stripeRefundOperationRepository.findByPaymentId(pagamento.id);
+  const estornado = await deps.pagamentoRepository.findById(pagamento.id);
+  if (!operation || !estornado || estornado.status !== 'estornado') {
+    throw new PagamentoEstornoStripeVinculoInvalidoError();
+  }
   deps.observability.logger.info('checkout.pagamento.estornado', {
     idPagamento: pagamento.id,
-    refundId: refundResult.id,
-    refundReason: reason ?? 'requested_by_customer',
+    refundId: operation.providerRef ?? 'provider_observed',
+    refundReason: operation.reason,
   });
-  return { pagamento: estornado, refundId: refundResult.id, refundStatus: 'aceito' };
+  return {
+    pagamento: estornado,
+    refundId: operation.providerRef ?? 'provider_observed',
+    refundStatus: 'aceito',
+  };
+}
+
+async function resolveHistoricalReplay(
+  deps: EstornarPagamentoDeps,
+  pagamento: Pagamento,
+  operation: StripeRefundOperation,
+): Promise<EstornarPagamentoResult> {
+  if (operation.state === 'provider_succeeded') {
+    return finalizeHistoricalSuccess(deps, pagamento, operation.operationId);
+  }
+  if (operation.state === 'local_committed') {
+    const canonical = await deps.pagamentoRepository.findById(pagamento.id);
+    if (!canonical || canonical.status !== 'estornado') {
+      throw new PagamentoEstornoStripeVinculoInvalidoError();
+    }
+    return {
+      pagamento: canonical,
+      refundId: operation.providerRef ?? 'provider_observed',
+      refundStatus: 'aceito',
+    };
+  }
+  if (operation.state === 'provider_pending') {
+    return {
+      pagamento,
+      refundId: operation.providerRef as string,
+      refundStatus: 'em_processamento',
+    };
+  }
+  throw new PagamentoEstornoStripeOutcomeDesconhecidoError(pagamento.id);
 }
 
 async function estornarInter(
@@ -300,6 +441,19 @@ async function replayJaEstornado(
   pagamento: Pagamento,
 ): Promise<EstornarPagamentoResult> {
   if (pagamento.transacaoExterna?.provedor !== 'inter') {
+    const operation = await deps.stripeRefundOperationRepository.findByPaymentId(pagamento.id);
+    if (operation) {
+      if (operation.state !== 'local_committed') {
+        throw new PagamentoEstornoStripeVinculoInvalidoError();
+      }
+      return {
+        pagamento,
+        refundId: operation.providerRef ?? 'provider_observed',
+        refundStatus: 'aceito',
+      };
+    }
+    // Pre-migration terminal rows have no provider audit cursor. Preserve the
+    // legacy replay response without fabricating a Stripe refund identifier.
     return { pagamento, refundId: 'replay', refundStatus: 'aceito' };
   }
   const record = await deps.pixCobrancaDevolucaoRepository.findByPagamentoId(pagamento.id);

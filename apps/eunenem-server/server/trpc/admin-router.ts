@@ -51,6 +51,8 @@ import {
   PagamentoEstornoPixNaoConcluidoError,
   PagamentoEstornoPixVinculoInvalidoError,
   PagamentoEstornoRecusadoPeloProvedorError,
+  PagamentoEstornoStripeOutcomeDesconhecidoError,
+  PagamentoEstornoStripeVinculoInvalidoError,
   PagamentoNaoEncontradoError,
   PagamentoTransicaoStatusInvalidaError,
   resolverManualFalhouRepasse,
@@ -1669,6 +1671,7 @@ const pagamentosRouter = t.router({
             pagamentoProvider: ctx.deps.pagamentoProvider,
             pixCobrancaProvider: ctx.deps.pixCobrancaProvider,
             pixCobrancaDevolucaoRepository: ctx.deps.pixCobrancaDevolucaoRepository,
+            stripeRefundOperationRepository: ctx.deps.stripeRefundOperationRepository,
             pagamentoEventPublisher: ctx.deps.pagamentoEventPublisher,
             livroFinanceiroRepository: ctx.deps.livroFinanceiroRepository,
             clock: ctx.deps.clock,
@@ -1722,6 +1725,12 @@ const pagamentosRouter = t.router({
             code: "INTERNAL_SERVER_ERROR",
             message: "devolucao_vinculo_invalido",
           });
+        }
+        if (error instanceof PagamentoEstornoStripeOutcomeDesconhecidoError) {
+          throw new TRPCError({ code: 'CONFLICT', message: 'estorno_stripe_em_estado_desconhecido' });
+        }
+        if (error instanceof PagamentoEstornoStripeVinculoInvalidoError) {
+          throw new TRPCError({ code: 'CONFLICT', message: 'estorno_stripe_vinculo_invalido' });
         }
         throw error;
       }

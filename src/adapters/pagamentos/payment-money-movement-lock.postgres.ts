@@ -9,6 +9,7 @@ import { sortUniquePaymentIds } from './payment-money-movement-lock.js';
 type SqlExecutor = any;
 
 export const BLOCKING_PIX_REFUND_STATUSES = ['em_processamento', 'devolvida'] as const;
+export const NON_BLOCKING_STRIPE_REFUND_STATUSES = ['provider_failed'] as const;
 export const BLOCKING_REPASSE_STATUSES = [
   'transferindo',
   'verificando',
@@ -61,10 +62,17 @@ export async function assertTransfersAllowed(
 ): Promise<void> {
   if (idsPagamento.length === 0) return;
   const result = (await sql<{ id_pagamento: string }>`
-    SELECT id_pagamento
-      FROM pix_cobranca_devolucoes
-      WHERE id_pagamento = ANY(${[...idsPagamento]}::uuid[])
-        AND status = ANY(${[...BLOCKING_PIX_REFUND_STATUSES]}::text[])
+    SELECT id_pagamento FROM (
+      SELECT id_pagamento
+        FROM pix_cobranca_devolucoes
+        WHERE id_pagamento = ANY(${[...idsPagamento]}::uuid[])
+          AND status = ANY(${[...BLOCKING_PIX_REFUND_STATUSES]}::text[])
+      UNION ALL
+      SELECT payment_id AS id_pagamento
+        FROM stripe_refund_operations
+        WHERE payment_id = ANY(${[...idsPagamento]}::uuid[])
+          AND state <> ALL(${[...NON_BLOCKING_STRIPE_REFUND_STATUSES]}::text[])
+    ) blocking_refunds
       ORDER BY id_pagamento ASC
       LIMIT 1
   `.execute(executor)) as unknown as { rows: Array<{ id_pagamento: string }> };

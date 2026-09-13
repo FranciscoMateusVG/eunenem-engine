@@ -442,6 +442,56 @@ describe('Migration round-trip', () => {
     //    this sequence must start at the LATEST migration and walk earlier.
     //    Adding a new migration on top REQUIRES prepending its down-step here.
 
+    // 20260913_055 is an empty-only rollback: once financial evidence exists,
+    // down must fail without dropping or mutating either row.
+    expect(await tableExists(db, 'stripe_refund_operations')).toBe(true);
+    expect(await tableExists(db, 'stripe_refund_operation_facts')).toBe(true);
+    await insertRefundConstraintFixture(db);
+    await sql`
+      INSERT INTO stripe_refund_operations
+        (operation_id, payment_id, origin, amount_cents, currency, charge_ref,
+         reason, state, attempt_count, provider_started_at)
+      VALUES ('60000000-0000-4000-8000-000000000055',
+        '20000000-0000-4000-8000-000000000049', 'admin', 1, 'brl',
+        'ch_migration_055', 'requested_by_customer', 'provider_started', 1, now())
+    `.execute(db);
+    await sql`
+      INSERT INTO stripe_refund_operation_facts
+        (id, operation_id, attempt_no, fact_kind, idempotency_key, recorded_at)
+      VALUES ('70000000-0000-4000-8000-000000000055',
+        '60000000-0000-4000-8000-000000000055', 1, 'provider_started',
+        'migration-055-attempt-1', now())
+    `.execute(db);
+    const refusedStripeRefundDown = await migrator.migrateDown();
+    expect(refusedStripeRefundDown.error).toBeDefined();
+    expect(await tableExists(db, 'stripe_refund_operations')).toBe(true);
+    expect(await tableExists(db, 'stripe_refund_operation_facts')).toBe(true);
+    expect(
+      Number(
+        (
+          await sql<{
+            count: string;
+          }>`SELECT count(*)::text AS count FROM stripe_refund_operations`.execute(db)
+        ).rows[0]?.count,
+      ),
+    ).toBe(1);
+    expect(
+      Number(
+        (
+          await sql<{
+            count: string;
+          }>`SELECT count(*)::text AS count FROM stripe_refund_operation_facts`.execute(db)
+        ).rows[0]?.count,
+      ),
+    ).toBe(1);
+    await sql`TRUNCATE stripe_refund_operation_facts, stripe_refund_operations`.execute(db);
+    await sql`DELETE FROM pagamentos WHERE id = '20000000-0000-4000-8000-000000000049'`.execute(db);
+    await sql`DELETE FROM campanhas WHERE id = '10000000-0000-4000-8000-000000000049'`.execute(db);
+    const downStripeRefunds = await migrator.migrateDown();
+    expect(downStripeRefunds.error).toBeUndefined();
+    expect(await tableExists(db, 'stripe_refund_operations')).toBe(false);
+    expect(await tableExists(db, 'stripe_refund_operation_facts')).toBe(false);
+
     // 20260910_054_webhook_ingress_platform (aperture-bsygp) → actual TIP.
     expect(await getColumn(db, 'payment_webhook_events', 'ingress_platform_id')).toBeDefined();
     expect(await listIndexNames(db, 'payment_webhook_events')).toContain(

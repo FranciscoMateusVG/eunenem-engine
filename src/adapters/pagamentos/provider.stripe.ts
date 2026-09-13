@@ -478,18 +478,30 @@ export class PagamentoProviderStripe implements PagamentoProvider, CheckoutSessi
         }
 
         const refundParams: Stripe.RefundCreateParams = input.chargeExternalRef
-          ? { charge: input.chargeExternalRef, reason: input.reason ?? 'requested_by_customer' }
+          ? {
+              charge: input.chargeExternalRef,
+              amount: input.amountCents,
+              reason: input.reason ?? 'requested_by_customer',
+              metadata: { operationId: input.operationId, paymentId: input.idPagamento },
+            }
           : {
               payment_intent: input.paymentIntentExternalRef as string,
+              amount: input.amountCents,
               reason: input.reason ?? 'requested_by_customer',
+              metadata: { operationId: input.operationId, paymentId: input.idPagamento },
             };
 
         const refund = await this.stripe.refunds.create(refundParams, {
-          idempotencyKey: `pagamento:${input.idPagamento}:refund`,
+          idempotencyKey: input.idempotencyKey,
         });
-
         const status: RefundarPagamentoResult['status'] =
-          refund.status === 'succeeded' || refund.status === 'pending' ? 'aceito' : 'recusado';
+          refund.status === 'succeeded' ||
+          refund.status === 'pending' ||
+          refund.status === 'failed' ||
+          refund.status === 'canceled' ||
+          refund.status === 'requires_action'
+            ? refund.status
+            : 'unknown';
 
         span.setAttribute('refund.id', refund.id);
         span.setAttribute('refund.status', refund.status ?? 'unknown');
@@ -497,8 +509,8 @@ export class PagamentoProviderStripe implements PagamentoProvider, CheckoutSessi
         return {
           id: refund.id,
           status,
-          amountCents: input.amountCents,
-          statusBruto: refund.status?.slice(0, 120) ?? 'unknown',
+          amountCents: refund.amount,
+          currency: refund.currency,
         };
       } catch (error: unknown) {
         span.recordException(error as Error);

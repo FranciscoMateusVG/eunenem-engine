@@ -182,9 +182,9 @@ export class PagamentoProviderFake implements PagamentoProvider, CheckoutSession
       try {
         const result: RefundarPagamentoResult = {
           id: this.idRefundFactory(),
-          status: this.statusRefund,
           amountCents: input.amountCents,
-          statusBruto: this.statusRefund === 'aceito' ? 'succeeded' : 'failed',
+          status: this.statusRefund === 'aceito' ? 'succeeded' : 'failed',
+          currency: 'brl',
         };
         span.setStatus({ code: SpanStatusCode.OK });
         return result;
