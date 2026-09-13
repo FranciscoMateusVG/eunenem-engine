@@ -12,6 +12,7 @@ import { Invites } from '@/components/eunenem/landing/Invites';
 import { Navbar } from '@/components/eunenem/landing/Navbar';
 import { Taxas } from '@/components/eunenem/landing/Taxas';
 import { Testimonials } from '@/components/eunenem/landing/Testimonials';
+import { WhatsAppFab } from '@/components/eunenem/landing/WhatsAppFab';
 
 // aperture-q1j2 → aperture-h4d7v (v2 rebuild) — marketing landing page
 // served at "/". Mock-first, no backend/auth: a pure composition of
@@ -77,7 +78,9 @@ export function LandingPage() {
       <Testimonials />
       <ChaRifa />
       <CTAFinal />
-      <Footer />
+      <Footer clearFab />
+      {/* aperture-7mqsg item 8 — homepage-only support entry point. */}
+      <WhatsAppFab />
     </>
   );
 }

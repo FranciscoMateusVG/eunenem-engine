@@ -1486,7 +1486,7 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
             type="text"
             value={papais}
             maxLength={120}
-            placeholder="ex: Mariana & Rodrigo"
+            placeholder="nomes dos papais, como vão assinar a página"
             onChange={(e) => setPapais(e.target.value)}
           />
         </Field>

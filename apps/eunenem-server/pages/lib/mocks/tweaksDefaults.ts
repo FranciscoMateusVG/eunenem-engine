@@ -31,7 +31,9 @@ export const TWEAKS_DEFAULTS: TweaksState = {
   // "Francisco" demo value leaked a stranger's name onto real creators' pages.
   babyName: "bebê",
   genero: null,
-  parents: "Mariana & Rodrigo",
+  // aperture-7mqsg — no fictional couple as the default signature. Empty means
+  // "not set": Story omits the signature line until the creator saves papais.
+  parents: "",
   targetDate: "2026-06-15",
   primary: "#C9A5D8",
   primaryDeep: "#A77BBE",

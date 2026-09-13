@@ -111,7 +111,7 @@ export function Marketplace({ slug }: MarketplaceProps) {
               marginRight: "auto",
             }}
           >
-            Cada presente vira dinheiro direto no Pix dos papais — sem
+            Cada presente vira dinheiro direto na conta dos papais — sem
             caixinha de loja, sem mensalidade. Você paga com Pix ou
             cartão, em checkout seguro.
           </p>

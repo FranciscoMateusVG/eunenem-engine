@@ -21,6 +21,13 @@ import { useTweaks } from "./TweaksContext";
 // getPerfilPublicoBySlug (threaded by PaginaPage). When absent we render a
 // neutral placeholder — NEVER the old hardcoded demo prose, which used to bleed
 // a stranger's ("Francisco") life story onto every creator's public page.
+// aperture-7mqsg — signature under the story. Empty/blank `parents` (no
+// creatorName/papais saved) renders NO line instead of a fictional default.
+export function signatureLine(parents: string): string | null {
+  const name = parents.trim();
+  return name ? `com amor, ${name}` : null;
+}
+
 export function Story({
   historia,
   fotoHistoria = null,
@@ -114,24 +121,29 @@ export function Story({
               </p>
             )}
 
-            <div
-              style={{
-                marginTop: 28,
-                fontFamily: "var(--font-caveat), cursive",
-                color: "var(--coral-pink)",
-                fontSize: 28,
-                transform: "rotate(-3deg)",
-                display: "inline-block",
-              }}
-            >
-              com amor, {parents}
-            </div>
+            {signatureLine(parents) && (
+              <div
+                style={{
+                  marginTop: 28,
+                  fontFamily: "var(--font-caveat), cursive",
+                  color: "var(--coral-pink)",
+                  fontSize: 28,
+                  transform: "rotate(-3deg)",
+                  display: "inline-block",
+                }}
+              >
+                {signatureLine(parents)}
+              </div>
+            )}
           </div>
 
           {/* Right — single polaroid + tape */}
           <div className="flex items-center justify-center py-5">
             <div className="relative inline-block">
-              <Polaroid rotate={-3} caption="primeira ecografia ♡">
+              {/* aperture-7mqsg — no invented caption: the perfil contract has
+                  no legenda field for this photo, so nothing is rendered until
+                  one exists. */}
+              <Polaroid rotate={-3}>
                 <div
                   style={{
                     width: 280,

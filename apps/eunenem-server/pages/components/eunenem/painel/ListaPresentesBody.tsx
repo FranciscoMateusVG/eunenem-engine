@@ -20,6 +20,10 @@ import {
   useContribuicaoUpdate,
 } from '@/lib/contribuicao.js';
 import type { PainelSectionBodyProps } from '@/PainelSectionPage';
+// aperture-7mqsg — the Visor's "já recebido" reads the SAME extrato summary the
+// statement uses (totalRecebidoCents, cancelado excluded server-side) instead
+// of price × received-units, which drifted whenever a price was edited.
+import { useStubCampanhaIdForSlug, useStubExtratoSummary } from './ExtratoStubData';
 import type { inferRouterOutputs } from '@trpc/server';
 import { trpc } from '@/lib/trpc.js';
 import type { AppRouter } from '../../../../server/trpc/router.js';
@@ -409,18 +413,49 @@ export function groupContribuicoes(items: ContribuicaoDTO[]): GroupedGift[] {
 }
 
 /* ─── Stats visor ─── */
-function Visor({ items }: { items: GroupedGift[] }) {
+// aperture-7mqsg — pure projection so the money rule is unit-testable.
+// `recebidoCents` is the extrato summary's totalRecebidoCents (null while the
+// summary hasn't loaded / errored → the amount renders as "—", never as a
+// price-derived guess). Item prices only feed "total da lista" (capacity value,
+// legitimately price-dependent) and the progress ratio's denominator.
+export function visorViewModel(
+  items: readonly Pick<GroupedGift, 'price' | 'qty' | 'received'>[],
+  recebidoCents: number | null,
+): {
+  totalValue: number;
+  receivedLabel: string;
+  pct: number;
+  totalUnits: number;
+  receivedUnits: number;
+} {
   const totalValue = items.reduce((s, i) => s + i.price * i.qty, 0);
-  const receivedValue = items.reduce((s, i) => s + i.price * i.received, 0);
-  const pct = totalValue > 0 ? Math.min(100, (receivedValue / totalValue) * 100) : 0;
   const totalUnits = items.reduce((s, i) => s + i.qty, 0);
   const receivedUnits = items.reduce((s, i) => s + i.received, 0);
+  if (recebidoCents === null) {
+    return { totalValue, receivedLabel: '—', pct: 0, totalUnits, receivedUnits };
+  }
+  const receivedValue = brlFromCents(recebidoCents);
+  const pct = totalValue > 0 ? Math.min(100, (receivedValue / totalValue) * 100) : 0;
+  return { totalValue, receivedLabel: brl(receivedValue), pct, totalUnits, receivedUnits };
+}
+
+function Visor({
+  items,
+  recebidoCents,
+}: {
+  items: GroupedGift[];
+  recebidoCents: number | null;
+}) {
+  const { totalValue, receivedLabel, pct, totalUnits, receivedUnits } = visorViewModel(
+    items,
+    recebidoCents,
+  );
 
   return (
     <div className="lista-visor">
       <div className="lista-visor-side lista-visor-received">
         <span className="lista-visor-eyebrow">já recebido ♡</span>
-        <div className="lista-visor-amount">{brl(receivedValue)}</div>
+        <div className="lista-visor-amount">{receivedLabel}</div>
         <div className="lista-visor-meta">
           {receivedUnits} de {totalUnits} presentes
         </div>
@@ -1667,9 +1702,12 @@ function ListaErrorBanner({ onRetry }: { onRetry: () => void }) {
 
 /* ─── Body ─── */
 export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
-  void slug; // session-driven on the server; slug here is just for routing.
-
   const listQuery = useContribuicaoList();
+  // aperture-7mqsg — same campanha resolution + summary query as PresentesBody
+  // (the extrato), so both surfaces show one "recebido" number.
+  const { idCampanha } = useStubCampanhaIdForSlug(slug);
+  const summaryQuery = useStubExtratoSummary(idCampanha ?? '');
+  const recebidoCents = summaryQuery.data?.totalRecebidoCents ?? null;
   const createMut = useContribuicaoCreate();
   const createBulkMut = useContribuicaoCreateBulk();
   const deleteMut = useContribuicaoDelete();
@@ -2150,7 +2188,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
         </div>
       </section>
 
-      {items.length > 0 && <Visor items={items} />}
+      {items.length > 0 && <Visor items={items} recebidoCents={recebidoCents} />}
 
       <div className="lista-group-title">
         <span>os presentes da sua lista</span>
