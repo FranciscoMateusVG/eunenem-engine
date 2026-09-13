@@ -2,7 +2,7 @@ import {
   EmbeddedCheckout,
   EmbeddedCheckoutProvider,
 } from "@stripe/react-stripe-js";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   useIniciarPagamentoCarrinho,
   useInvalidarListaPresentes,
@@ -17,6 +17,8 @@ import { useCampanhaRota } from "@/lib/campanha-rota";
 import { formatBRL } from "@/lib/formatBRL";
 import { getStripePromise } from "@/lib/stripeClient";
 import { sendEvent } from "@/lib/analytics";
+import { emitirInicioCheckoutPix, registrarCompraConcluida } from "@/lib/analytics-conversao";
+import { emitirCheckoutFalhou } from "@/lib/analytics-funil";
 
 // Plan 0017 / aperture-16flf — visitor cart drawer + checkout flow.
 //
@@ -102,17 +104,29 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
     }
     if (successQuery.data?.status === "approved") {
       setPhase({ kind: "completed_confirmed" });
-      // aperture-e69ur — conversion event for the INLINE success path (see
-      // GiftCheckoutModal for the full rationale). Same name + props as the
-      // redirect path's PaginaSucessoPage event; same obterSucessoPagamento
-      // source. Fires exactly once via the phase guard above.
-      sendEvent("compra_concluida", {
-        valor: successQuery.data.valor,
-        gift_name: successQuery.data.giftName,
+      // aperture-e69ur → aperture-wdis6 — client confirmation event for the
+      // INLINE success path (see GiftCheckoutModal for the rationale). Same
+      // funnel + props as the redirect path's PaginaSucessoPage; best-effort
+      // per-browser dedupe on the Stripe sessionId, so the /sucesso escape
+      // hatch for the same payment does not re-emit in this browser.
+      registrarCompraConcluida({
+        transactionId: sessionId ?? "",
+        valorCentavos: successQuery.data.valor,
+        metodo: "credit_card",
+        giftName: successQuery.data.giftName,
+        quantidadeItens: checkoutSnapshot?.totalUnits ?? cart.totalUnits,
       });
       void invalidarListaPresentes(slug);
     }
-  }, [successQuery.data, phase.kind, invalidarListaPresentes, slug]);
+  }, [
+    successQuery.data,
+    phase.kind,
+    invalidarListaPresentes,
+    slug,
+    sessionId,
+    checkoutSnapshot?.totalUnits,
+    cart.totalUnits,
+  ]);
 
   // 30s pending → slow timeout.
   useEffect(() => {
@@ -207,9 +221,16 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
         kind: "checkout",
         step: result.tipo === "pix_qr" ? "pix_qr" : "stripe",
       });
-    } catch {
+    } catch (err) {
       // Error surfaces via iniciar.isError on the summary panel.
       // Stay on summary; reset snapshot so the visitor can edit + retry.
+      // aperture-qq74p — the mutation REJECTED: a real failure, finite code.
+      emitirCheckoutFalhou({
+        metodo,
+        valorCentavos: metodo === "pix" ? cart.totalPixCents : cart.totalCartaoCents,
+        quantidadeItens: cart.totalUnits,
+        erro: err,
+      });
       setCheckoutSnapshot(null);
     }
   }, [
@@ -226,6 +247,10 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
   // aperture-kuw0o: identity submitted → initiate the PIX charge → QR step.
   // Cart lines are re-read at submit time (the visitor may have gone back
   // and edited between snapshot and submit).
+  // aperture-wdis6 (T1.5) — set by onPixRetry; the next successful iniciar
+  // is a QR regenerate for the SAME intent, not a new checkout_iniciado.
+  const pixRegenerandoRef = useRef(false);
+
   const onSubmitPixIdentity = useCallback(
     async (contribuinte: ContribuinteInput) => {
       if (cart.state.lines.length === 0 || iniciar.isPending) return;
@@ -247,18 +272,29 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
           metodo: "pix",
           contribuinte,
         });
-        sendEvent("checkout_iniciado", {
-          valor_centavos: cart.totalPixCents,
-          quantidade_itens: cart.totalUnits,
-          metodo: "pix",
+        // A regenerate is only a regenerate when a NEW QR actually came back;
+        // the defensive stripe_embedded branch below keeps the plain
+        // checkout_iniciado shape (Izzy sdg24h boundary finding).
+        emitirInicioCheckoutPix({
+          regenerando: pixRegenerandoRef.current && result.tipo === "pix_qr",
+          transactionId: result.tipo === "pix_qr" ? result.txid : "",
+          valorCentavos: cart.totalPixCents,
+          quantidadeItens: cart.totalUnits,
         });
+        pixRegenerandoRef.current = false;
         // Response-driven (aperture-irhxi blocker 1).
         setPhase({
           kind: "checkout",
           step: result.tipo === "pix_qr" ? "pix_qr" : "stripe",
         });
-      } catch {
+      } catch (err) {
         // isError surfaces inline on the identity form; visitor retries there.
+        emitirCheckoutFalhou({
+          metodo: "pix",
+          valorCentavos: cart.totalPixCents,
+          quantidadeItens: cart.totalUnits,
+          erro: err,
+        });
       }
     },
     [cart.state.lines, cart.totalUnits, cart.totalPixCents, iniciar, slug],
@@ -269,15 +305,20 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
   // land on the confirmed panel.
   const onPixConfirmed = useCallback(() => {
     setPhase({ kind: "completed_confirmed" });
-    sendEvent("compra_concluida", {
-      valor: checkoutSnapshot?.totalCents ?? cart.totalPixCents,
-      gift_name: checkoutSnapshot?.lines[0]?.nome ?? "",
+    // aperture-wdis6 — best-effort per-browser dedupe on the Inter txid.
+    registrarCompraConcluida({
+      transactionId: pixData?.txid ?? "",
+      valorCentavos: checkoutSnapshot?.totalCents ?? cart.totalPixCents,
+      metodo: "pix",
+      giftName: checkoutSnapshot?.lines[0]?.nome ?? "",
+      quantidadeItens: checkoutSnapshot?.totalUnits ?? cart.totalUnits,
     });
     cart.clear();
     void invalidarListaPresentes(slug);
-  }, [checkoutSnapshot, cart, invalidarListaPresentes, slug]);
+  }, [checkoutSnapshot, cart, invalidarListaPresentes, slug, pixData?.txid]);
 
   const onPixRetry = useCallback(() => {
+    pixRegenerandoRef.current = true;
     iniciar.reset();
     setPhase({ kind: "checkout", step: "pix_identity" });
   }, [iniciar]);

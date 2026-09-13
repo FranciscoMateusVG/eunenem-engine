@@ -7,6 +7,7 @@ import {
   type InterPixRefundConfirmed,
   type PixCobrancaProvider,
 } from '../../../../src/index.js';
+import { aprovacaoEhNova, trackPagamentoAprovado } from '../analytics/pagamento-aprovado.js';
 import {
   shouldBindInterCobrancaAdapter,
   ID_PLATAFORMA_EUNENEM,
@@ -150,6 +151,11 @@ export function createInterPixWebhookHandler(
               : { pagamentoId, txid: identity.txid };
           },
           onChargeConfirmed: async (confirmed) => {
+            // aperture-4yse9 — pre-finalize status snapshot (read-only) so the
+            // analytics event below fires only when THIS callback performed
+            // the transition; an Inter retry after a bookkeeping failure sees
+            // `aprovado` and does not re-track.
+            const antes = await deps.pagamentoRepository.findById(confirmed.pagamentoId);
             const finalized = await finalizarPagamentoAprovadoComTransacaoVerificada(
               {
                 pagamentoRepository: deps.pagamentoRepository,
@@ -172,18 +178,18 @@ export function createInterPixWebhookHandler(
                 },
               },
             );
-            const campanha = await deps.campanhaRepository.findById(
-              finalized.pagamento.intencao.idCampanha,
-            );
-            deps.serverAnalytics?.track(
-              'pagamento_aprovado',
-              campanha?.idsAdministradores[0] ?? null,
-              {
-                idPagamento: finalized.pagamento.id,
-                idCampanha: finalized.pagamento.intencao.idCampanha,
-                provider: 'inter',
-              },
-            );
+            // aperture-ppuay / aperture-4yse9 — server approval event (best-
+            // effort delivery; DB transition is the truth). Time = Inter's
+            // `horario`, the same value the reconciliation poll reads, so both
+            // paths produce an identical Mixpanel dedup key for one payment.
+            if (aprovacaoEhNova(antes?.status)) {
+              await trackPagamentoAprovado(deps, {
+                pagamento: finalized.pagamento,
+                provedor: 'inter',
+                caminho: 'webhook',
+                occurredAt: confirmed.horario,
+              });
+            }
             return { pagamentoId: finalized.pagamento.id };
           },
           resolveRefundBinding: async (identity) => {

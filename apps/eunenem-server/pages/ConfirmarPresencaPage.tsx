@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
-import { sendEvent, sendPageView } from "@/lib/analytics";
+import { sendPageView } from "@/lib/analytics";
 import { conviteStateFromData, useConvitePreviewData } from "@/lib/convite";
 import type { FormatoMensagemConvite, StatusPresencaConvidado } from "@/lib/convidados";
 import { convidadosErrorMessage } from "@/lib/convidados";
@@ -127,10 +127,10 @@ export function ConfirmarPresencaPage({
   });
   const utils = trpc.useUtils();
   const confirmarPresenca = trpc.eventoListaDeConvidados.confirmarPresenca.useMutation({
-    onSuccess: (_data, variables) => {
-      // aperture-ppuay — RSVP confirmation (EVENT_MAP addition). resposta is the
-      // guest's choice (sim | talvez | nao).
-      sendEvent("presenca_confirmada", { resposta: variables.presenca });
+    onSuccess: () => {
+      // aperture-4yse9 — the client no longer emits presenca_confirmada: the
+      // server (evento-lista-de-convidados-router confirmarPresenca) is the
+      // single emitter, so one RSVP is one row instead of two under one name.
       void utils.eventoListaDeConvidados.getParaConfirmar.invalidate({ slug, idConvidado });
     },
   });

@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 
-import { identifyWithUtm } from "./analytics.js";
+import { identifyWithUtm, sendEvent } from "./analytics.js";
+import { isLegacy } from "./onboarding-gate.js";
 import { postLoginTarget, resolveMeWithRetry } from "./post-login-route.js";
 import { trpc } from "./trpc.js";
 
@@ -68,6 +69,16 @@ export function useOauthReturnRedirect(): void {
         // window.location.assign below even if the network flush doesn't.
         // Signup completion identifies separately in OnboardingWizard.
         identifyWithUtm(me.idConta);
+        // aperture-4yse9 — THE client "login succeeded" event (signup_concluido /
+        // login_concluido were removed in PR #50 and never replaced). Fires
+        // AFTER identify so it lands on the account profile. Props are limited
+        // to server-reliable facts: is_legacy comes from auth.me. The auth
+        // method and "new account" are NOT derivable here without touching the
+        // auth callback, so they are omitted rather than inferred; account
+        // creation truth stays server-side (conta_criada) and signup completion
+        // stays onboarding_concluido. mixpanel-browser queues the event in
+        // localStorage, so it survives the full-page assign below.
+        sendEvent("login_concluido", { is_legacy: isLegacy(me) });
         // Route by the single shared post-login rule (legacy → /campanhas;
         // needs-onboarding → wizard; onboarded → /campanhas) so no entry point
         // can drift — see pages/lib/post-login-route.ts.

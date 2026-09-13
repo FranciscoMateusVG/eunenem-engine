@@ -6,6 +6,7 @@ import { GiftCard } from "./GiftCard";
 import { GiftCheckoutModal } from "./GiftCheckoutModal";
 import { useCart } from "@/lib/cart.js";
 import { useCartDrawer } from "./CartDrawerContext.js";
+import { emitirCarrinhoAberto } from "@/lib/analytics-funil";
 import { useTweaks } from "./TweaksContext";
 import { usePaginaListaPresentes } from "@/lib/paginaApi";
 import { groupVisitorGifts, type VisitorGift } from "@/lib/visitorGift";
@@ -53,7 +54,9 @@ export function Marketplace({ slug }: MarketplaceProps) {
 
   const onAdd = useCallback(
     (gift: VisitorGift) => {
-      cart.add(gift);
+      cart.add(gift, "card");
+      // aperture-qq74p — only a real closed→open transition is an event.
+      emitirCarrinhoAberto(drawer.isOpen, "adicionar");
       drawer.open();
     },
     [cart, drawer],

@@ -235,11 +235,13 @@ async function autoProvisionarUsuarioOrfao(
         // caller-supplied idConta; the retired password saga supplied its own).
       },
     );
-    // aperture-ppuay — server-truth account creation via the OAuth orphan
-    // self-heal. Password account creation has been retired.
+    // aperture-ppuay — server-truth account creation via the orphan self-heal
+    // (the only account-creation emitter: password signup was retired).
+    // aperture-4yse9: no `metodo` — the principal carries no provider, and
+    // every path (Google, Microsoft, magic link) lands here; a hardcoded
+    // 'oauth' was a lie. Unknown is omitted, never inferred.
     deps.serverAnalytics?.track('conta_criada', resultado.usuario.idConta, {
       idPlataforma: principal.idPlataforma,
-      metodo: 'oauth',
     });
     return resultado.usuario;
   } catch (err) {
