@@ -48,7 +48,7 @@ export function MigradosTable(props: MigradosTableProps) {
   if (!data && !error && isFetching) {
     return (
       <div className="overflow-hidden rounded-md border border-line bg-paper">
-        <TableHeaderRow disabled />
+        <StandaloneHeaderTable disabled />
         <SkeletonRows count={props.limit > 10 ? 10 : props.limit} />
       </div>
     );
@@ -64,7 +64,7 @@ export function MigradosTable(props: MigradosTableProps) {
   if (totalCount === 0) {
     return (
       <div className="overflow-hidden rounded-md border border-line bg-paper">
-        <TableHeaderRow disabled />
+        <StandaloneHeaderTable disabled />
         <EmptyState />
         <FooterShell {...props} totalCount={0} rowCount={0} />
       </div>
@@ -144,27 +144,33 @@ function TableHeaderRow({ disabled = false }: { disabled?: boolean }) {
     disabled ? "text-ink-mute/60" : "text-ink-mute"
   }`;
   return (
+    <thead className="bg-cream-2/40">
+      <tr>
+        <th scope="col" className={cls}>
+          e-mail
+        </th>
+        <th scope="col" className={cls}>
+          nome
+        </th>
+        <th scope="col" className={`${cls} text-right`}>
+          listas 1.0
+        </th>
+        <th scope="col" className={cls}>
+          status
+        </th>
+        <th scope="col" className={cls}>
+          evidência
+        </th>
+        <th scope="col" className="w-8 px-3 py-2" aria-label="abrir" />
+      </tr>
+    </thead>
+  );
+}
+
+function StandaloneHeaderTable({ disabled = false }: { disabled?: boolean }) {
+  return (
     <table className="min-w-full divide-y divide-line text-[13px] text-ink">
-      <thead className="bg-cream-2/40">
-        <tr>
-          <th scope="col" className={cls}>
-            e-mail
-          </th>
-          <th scope="col" className={cls}>
-            nome
-          </th>
-          <th scope="col" className={`${cls} text-right`}>
-            listas 1.0
-          </th>
-          <th scope="col" className={cls}>
-            status
-          </th>
-          <th scope="col" className={cls}>
-            evidência
-          </th>
-          <th scope="col" className="w-8 px-3 py-2" aria-label="abrir" />
-        </tr>
-      </thead>
+      <TableHeaderRow disabled={disabled} />
     </table>
   );
 }

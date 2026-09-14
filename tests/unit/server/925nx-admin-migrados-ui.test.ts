@@ -74,11 +74,11 @@ const ROWS: MigradoRow[] = [
   },
   {
     email: 'caio@exemplo.com',
-    nomeExibicao: 'Caio',
-    idConta: 'conta-caio',
+    nomeExibicao: null,
+    idConta: null,
     legacyCampaignCount: 3,
     status: 'conta_2_0',
-    evidencedAt: null,
+    evidencedAt: '2026-09-12T12:00:00.000Z',
   },
   {
     email: 'dana@exemplo.com',
@@ -103,18 +103,25 @@ describe('925nx MigradosTable — rows are truthful projections of the server ro
 
   it('links to /admin/usuario/:idConta ONLY when the server resolved a conta', () => {
     expect(html).toContain('href="/admin/usuario/conta-ana"');
-    expect(html).toContain('href="/admin/usuario/conta-caio"');
+    expect(html).not.toContain('href="/admin/usuario/conta-caio"');
     expect(html).not.toContain('href="/admin/usuario/null"');
-    expect((html.match(/data-linked="true"/g) ?? []).length).toBe(2);
-    expect((html.match(/data-linked="false"/g) ?? []).length).toBe(2);
+    expect((html.match(/data-linked="true"/g) ?? []).length).toBe(1);
+    expect((html.match(/data-linked="false"/g) ?? []).length).toBe(3);
     // the unlinked row still shows its email as plain text
     expect(html).toContain('bia@exemplo.com');
   });
 
   it('renders "—" for a missing name and a missing evidence date, a date only when evidenced', () => {
     expect(html).toContain('2026-09-13');
-    // bia: name + evidence (2) · caio: evidence only (1) · dana: name + evidence (2)
+    // bia: name + evidence (2) · caio: name only (1) · dana: name + evidence (2)
     expect((html.match(/—/g) ?? []).length).toBe(5);
+  });
+
+  it('renders one valid table with one header and one body in the populated state', () => {
+    expect((html.match(/<table/g) ?? []).length).toBe(1);
+    expect((html.match(/<thead/g) ?? []).length).toBe(1);
+    expect((html.match(/<tbody/g) ?? []).length).toBe(1);
+    expect(html).not.toMatch(/<table[^>]*>\s*<table/);
   });
 
   it('renders the server status label verbatim and never the raw enum as visible text', () => {
