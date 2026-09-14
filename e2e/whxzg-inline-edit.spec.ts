@@ -160,6 +160,22 @@ test.describe('Owner inline editing on /pagina/:slug (aperture-whxzg)', () => {
     }
   });
 
+  test('authenticated non-owner sees the public page but no edit controls or panel', async ({
+    adminAuthenticatedPage: page,
+    seededData,
+  }) => {
+    await page.goto(`/pagina/${seededData.slug}`);
+    await expect(page.getByTestId('pagina-baby-name')).toBeVisible();
+
+    for (const field of EDIT_FIELDS) {
+      await expect(page.getByTestId(`edit-${field}`)).toHaveCount(0);
+    }
+    await expect(page.locator('.eu-edit-btn')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Personalizar/ })).toHaveCount(0);
+    await expect(page.getByRole('dialog', { name: 'Personalizar página' })).toHaveCount(0);
+    await expect(page.locator('#tweaks-historia')).toHaveCount(0);
+  });
+
   test('mobile 390px — icons stay tappable in-viewport, panel is a full-width sheet, Escape closes', async ({
     authenticatedPage: page,
     seededData,
