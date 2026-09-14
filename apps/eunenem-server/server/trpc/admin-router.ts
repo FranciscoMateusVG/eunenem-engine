@@ -96,6 +96,14 @@ import {
   listAdminUsers,
   searchAdminUsers,
 } from "../admin-user-search.js";
+import {
+  AdminLegacyUserQuerySchema,
+  AdminLegacyUserStatusSchema,
+  InvalidAdminLegacyUserCursorError,
+  InvalidAdminLegacyUserQueryError,
+  listAdminLegacyUsers,
+} from "../admin-legacy-users.js";
+import { LEGACY_USERS_SEED } from "../../lib/legacy-users.js";
 
 const t = initTRPC.context<TrpcContext>().create();
 
@@ -192,7 +200,62 @@ const ListPaginatedOutputSchema = z.object({
   totalCount: z.number().int().min(0),
 });
 
+const LegacyUserItemSchema = z.object({
+  email: z.string(),
+  nomeExibicao: z.string().nullable(),
+  idConta: z.string().nullable(),
+  legacyCampaignCount: z.number().int().positive(),
+  status: AdminLegacyUserStatusSchema,
+  evidencedAt: z.string().datetime().nullable(),
+});
+
+const LegacyUsersPageSchema = z.object({
+  items: z.array(LegacyUserItemSchema),
+  nextCursor: z.string().nullable(),
+  totalCount: z.number().int().nonnegative(),
+  counts: z.object({
+    somente_legado: z.number().int().nonnegative(),
+    conta_2_0: z.number().int().nonnegative(),
+    perfil_2_0: z.number().int().nonnegative(),
+    evidencia_inconsistente: z.number().int().nonnegative(),
+  }),
+});
+
+const legacyUsersRouter = t.router({
+  listPaginated: adminProcedure
+    .input(
+      z.object({
+        query: AdminLegacyUserQuerySchema.optional(),
+        cursor: z.string().max(1024).nullable(),
+        limit: z.number().int().min(1).max(100),
+      }),
+    )
+    .output(LegacyUsersPageSchema)
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await listAdminLegacyUsers(ctx.deps.db, {
+          platformId: ID_PLATAFORMA_EUNENEM,
+          entries: LEGACY_USERS_SEED,
+          query: input.query,
+          cursor: input.cursor,
+          limit: input.limit,
+          cursorSecret: ctx.deps.logPiiHashSalt,
+        });
+      } catch (error: unknown) {
+        if (
+          error instanceof InvalidAdminLegacyUserQueryError ||
+          error instanceof InvalidAdminLegacyUserCursorError
+        ) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
+        }
+        throw error;
+      }
+    }),
+});
+
 const usuariosRouter = t.router({
+  /** Truthful legacy-snapshot membership and 2.0 account evidence. */
+  legado: legacyUsersRouter,
   /**
    * Cursor-paginated tenant-scoped browse of usuarios. Tri-state sort
    * (criadoEm / email / nomeExibicao × asc/desc), LIKE-escaped
