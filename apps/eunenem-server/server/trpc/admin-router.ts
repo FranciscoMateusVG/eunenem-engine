@@ -231,7 +231,7 @@ const legacyUsersRouter = t.router({
       }),
     )
     .output(LegacyUsersPageSchema)
-    .query(async ({ ctx, input }) => {
+    .mutation(async ({ ctx, input }) => {
       try {
         return await listAdminLegacyUsers(ctx.deps.db, {
           platformId: ID_PLATAFORMA_EUNENEM,

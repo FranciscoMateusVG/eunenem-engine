@@ -5,7 +5,9 @@ import type { Database } from "../../../src/adapters/database.js";
 import type { LegacyUserEntry } from "../lib/legacy-users.js";
 
 const SAFE_QUERY = /^[^\u0000-\u001f\u007f-\u009f\u2028\u2029\p{Cf}]*$/u;
-const CURSOR_DOMAIN = "admin-legacy-users-cursor:v1\0";
+const CURSOR_QUERY_DOMAIN = "admin-legacy-users-cursor:query:v1\0";
+const CURSOR_POSITION_DOMAIN = "admin-legacy-users-cursor:position:v1\0";
+const CURSOR_AUTH_DOMAIN = "admin-legacy-users-cursor:auth:v1\0";
 
 export const AdminLegacyUserQuerySchema = z.string().max(120).regex(SAFE_QUERY);
 
@@ -90,9 +92,9 @@ type EvidenceRow = z.infer<typeof EvidenceRowSchema>;
 const CursorSchema = z
   .object({
     version: z.literal(1),
-    query: z.string().max(120).nullable(),
-    afterEmail: z.string().min(1).max(320),
-    signature: z.string().length(43),
+    queryBinding: z.string().length(43),
+    positionBinding: z.string().length(43),
+    authentication: z.string().length(43),
   })
   .strict();
 type Cursor = z.infer<typeof CursorSchema>;
@@ -196,13 +198,23 @@ export function classifyAdminLegacyEvidence(row: EvidenceRow): AdminLegacyUserIt
   };
 }
 
-function cursorSignature(
+function keyedBinding(secret: string, domain: string, value: string | null): string {
+  const encoded =
+    value === null ? Buffer.from([0]) : Buffer.concat([Buffer.from([1]), Buffer.from(value)]);
+  return createHmac("sha256", secret)
+    .update(domain)
+    .update(encoded)
+    .digest("base64url");
+}
+
+function cursorAuthentication(
   secret: string,
-  value: Pick<Cursor, "query" | "afterEmail">,
+  value: Pick<Cursor, "queryBinding" | "positionBinding">,
 ): string {
   return createHmac("sha256", secret)
-    .update(CURSOR_DOMAIN)
-    .update(JSON.stringify([value.query, value.afterEmail]))
+    .update(CURSOR_AUTH_DOMAIN)
+    .update(value.queryBinding)
+    .update(value.positionBinding)
     .digest("base64url");
 }
 
@@ -213,11 +225,14 @@ function signaturesEqual(actual: string, expected: string): boolean {
 }
 
 function encodeCursor(secret: string, query: string | null, afterEmail: string): string {
-  const unsigned = { query, afterEmail };
+  const bindings = {
+    queryBinding: keyedBinding(secret, CURSOR_QUERY_DOMAIN, query),
+    positionBinding: keyedBinding(secret, CURSOR_POSITION_DOMAIN, afterEmail),
+  };
   const cursor: Cursor = {
     version: 1,
-    ...unsigned,
-    signature: cursorSignature(secret, unsigned),
+    ...bindings,
+    authentication: cursorAuthentication(secret, bindings),
   };
   return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
 }
@@ -230,8 +245,12 @@ function decodeCursor(encoded: string, secret: string, query: string | null): Cu
     const cursor = CursorSchema.parse(
       JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")),
     );
-    const expected = cursorSignature(secret, cursor);
-    if (cursor.query !== query || !signaturesEqual(cursor.signature, expected)) {
+    const expectedQueryBinding = keyedBinding(secret, CURSOR_QUERY_DOMAIN, query);
+    const expectedAuthentication = cursorAuthentication(secret, cursor);
+    if (
+      !signaturesEqual(cursor.queryBinding, expectedQueryBinding) ||
+      !signaturesEqual(cursor.authentication, expectedAuthentication)
+    ) {
       throw new InvalidAdminLegacyUserCursorError();
     }
     return cursor;
@@ -336,7 +355,12 @@ export async function listAdminLegacyUsers(
     input.cursor === null ? null : decodeCursor(input.cursor, input.cursorSecret, query);
   let start = 0;
   if (cursor !== null) {
-    const cursorIndex = filtered.findIndex(({ item }) => item.email === cursor.afterEmail);
+    const cursorIndex = filtered.findIndex(({ item }) =>
+      signaturesEqual(
+        cursor.positionBinding,
+        keyedBinding(input.cursorSecret, CURSOR_POSITION_DOMAIN, item.email),
+      ),
+    );
     if (cursorIndex < 0) throw new InvalidAdminLegacyUserCursorError();
     start = cursorIndex + 1;
   }

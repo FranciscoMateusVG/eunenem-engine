@@ -247,6 +247,55 @@ describe('admin legacy-user evidence query', () => {
       }),
     ).rejects.toBeInstanceOf(InvalidAdminLegacyUserCursorError);
 
+    const opaqueEntries: readonly LegacyUserEntry[] = [
+      {
+        email: 'pii-filter-canary-one@example.test',
+        utm: null,
+        nome: null,
+        mimos: null,
+      },
+      {
+        email: 'pii-filter-canary-two@example.test',
+        utm: null,
+        nome: null,
+        mimos: null,
+      },
+    ];
+    const opaqueCursorPage = await listAdminLegacyUsers(testDb.db, {
+      platformId: ID_PLATAFORMA_EUNENEM,
+      entries: opaqueEntries,
+      query: 'pii-filter-canary',
+      cursor: null,
+      limit: 1,
+      cursorSecret: CURSOR_SECRET,
+    });
+    expect(opaqueCursorPage.nextCursor).not.toBeNull();
+    if (opaqueCursorPage.nextCursor === null) throw new Error('expected opaque cursor');
+    const decodedCursor = Buffer.from(opaqueCursorPage.nextCursor, 'base64url').toString('utf8');
+    expect(decodedCursor).not.toContain('pii-filter-canary');
+    expect(decodedCursor).not.toContain('pii-filter-canary-one@example.test');
+    expect(Object.keys(JSON.parse(decodedCursor))).toEqual([
+      'version',
+      'queryBinding',
+      'positionBinding',
+      'authentication',
+    ]);
+
+    const tamperedPayload = JSON.parse(decodedCursor) as { positionBinding: string };
+    tamperedPayload.positionBinding = `${tamperedPayload.positionBinding.slice(0, -1)}${
+      tamperedPayload.positionBinding.endsWith('A') ? 'B' : 'A'
+    }`;
+    await expect(
+      listAdminLegacyUsers(testDb.db, {
+        platformId: ID_PLATAFORMA_EUNENEM,
+        entries: opaqueEntries,
+        query: 'pii-filter-canary',
+        cursor: Buffer.from(JSON.stringify(tamperedPayload), 'utf8').toString('base64url'),
+        limit: 2,
+        cursorSecret: CURSOR_SECRET,
+      }),
+    ).rejects.toBeInstanceOf(InvalidAdminLegacyUserCursorError);
+
     await expect(
       listAdminLegacyUsers(testDb.db, {
         platformId: ID_PLATAFORMA_EUNENEM,
