@@ -25,9 +25,14 @@ import {
   StatusPill,
 } from '../../../apps/eunenem-server/pages/components/eunenem/admin/MigradosTable.js';
 import {
+  beginFetch,
+  INITIAL_FETCH_STATE,
   MIGRADO_STATUS,
   type MigradoRow,
+  type MigradosListResult,
   migradosSearchInput,
+  requestKey,
+  settleFetch,
 } from '../../../apps/eunenem-server/pages/components/eunenem/admin/migrados-contract.js';
 
 const appRequire = createRequire(
@@ -238,7 +243,10 @@ describe('925nx wiring — route + nav (source-level)', () => {
 
   it('the UI talks to exactly the frozen procedure and its status enum matches the server enum', () => {
     const seam = src('pages/components/eunenem/admin/migrados-contract.ts');
-    expect(seam).toContain('trpc.admin.usuarios.legado.listPaginated.useQuery');
+    // Cipher HOLD follow-up: the list is fetched by MUTATION (native POST) —
+    // cursor/filters never ride a GET URL; no useQuery on this proc.
+    expect(seam).toContain('trpc.admin.usuarios.legado.listPaginated.useMutation()');
+    expect(seam).not.toContain('listPaginated.useQuery');
     const server = src('server/admin-legacy-users.ts');
     const enumBlock = server.slice(server.indexOf('AdminLegacyUserStatusSchema = z.enum(['));
     for (const status of Object.keys(MIGRADO_STATUS)) {
@@ -253,5 +261,68 @@ describe('925nx wiring — route + nav (source-level)', () => {
       'Perfil 2.0 criado',
       'Dados inconsistentes',
     ]);
+  });
+});
+
+describe('925nx fetch state — previous page retained, stale responses never win', () => {
+  const page = (n: number): MigradosListResult => ({
+    items: [],
+    nextCursor: null,
+    totalCount: n,
+    counts: {},
+  });
+
+  it('first load: fetching with no data; a settled latest ticket commits', () => {
+    const { state, ticket } = beginFetch(INITIAL_FETCH_STATE);
+    expect(state.isFetching).toBe(true);
+    expect(state.data).toBeUndefined();
+    const done = settleFetch(state, ticket, { ok: true, data: page(1) });
+    expect(done.isFetching).toBe(false);
+    expect(done.data?.totalCount).toBe(1);
+  });
+
+  it('rapid page/input change: the previous page stays visible while the next request is in flight', () => {
+    let s = settleFetch(beginFetch(INITIAL_FETCH_STATE).state, 1, { ok: true, data: page(1) });
+    s = beginFetch(s).state;
+    expect(s.isFetching).toBe(true);
+    expect(s.data?.totalCount).toBe(1); // not cleared
+  });
+
+  it('out-of-order: an older response arriving AFTER a newer request is dropped', () => {
+    const a = beginFetch(INITIAL_FETCH_STATE); // ticket 1 (e.g. query "an")
+    const b = beginFetch(a.state); // ticket 2 (query "ana") — newer
+    // ticket 2 resolves first
+    const s = settleFetch(b.state, b.ticket, { ok: true, data: page(2) });
+    expect(s.data?.totalCount).toBe(2);
+    expect(s.isFetching).toBe(false);
+    // ticket 1 resolves late → ignored (same object back, nothing replaced)
+    const after = settleFetch(s, a.ticket, { ok: true, data: page(1) });
+    expect(after).toBe(s);
+    expect(after.data?.totalCount).toBe(2);
+  });
+
+  it('a stale ERROR is ignored too; a latest error keeps the previous data and surfaces the message', () => {
+    const a = beginFetch(INITIAL_FETCH_STATE);
+    const b = beginFetch(a.state);
+    let s = settleFetch(b.state, b.ticket, { ok: true, data: page(2) });
+    s = settleFetch(s, a.ticket, { ok: false, message: 'late failure' });
+    expect(s.error).toBeNull();
+    const c = beginFetch(s);
+    const failed = settleFetch(c.state, c.ticket, { ok: false, message: 'cursor inválido' });
+    expect(failed.error?.message).toBe('cursor inválido');
+    expect(failed.data?.totalCount).toBe(2);
+    expect(failed.isFetching).toBe(false);
+  });
+
+  it('requestKey changes only when query/cursor/limit change', () => {
+    expect(requestKey({ cursor: null, limit: 50 })).toBe(
+      requestKey({ cursor: null, limit: 50, query: undefined }),
+    );
+    expect(requestKey({ cursor: null, limit: 50 })).not.toBe(
+      requestKey({ cursor: 'c', limit: 50 }),
+    );
+    expect(requestKey({ cursor: null, limit: 50, query: 'ana' })).not.toBe(
+      requestKey({ cursor: null, limit: 50 }),
+    );
   });
 });

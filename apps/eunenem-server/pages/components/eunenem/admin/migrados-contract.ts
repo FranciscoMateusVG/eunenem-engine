@@ -6,6 +6,7 @@
 // rendering of a server-declared status, and the counts are rendered as the
 // server declares them (no client-side math).
 
+import { useCallback, useEffect, useRef, useState } from "react";
 import { trpc } from "@/lib/trpc";
 
 /** One row = one legacy (1.0) person, deduped by normalized email on the server. */
@@ -102,20 +103,105 @@ export function migradosSearchInput(query: string): Pick<MigradosListInput, "que
   return { query: query.trim() || undefined };
 }
 
+/* -----------------------------------------------------------------------
+ * Fetch state — pure, node-testable (aperture-925nx, Cipher HOLD follow-up)
+ *
+ * The procedure is a tRPC MUTATION (native POST — the cursor/filters never
+ * ride a GET URL), so React Query's query cache does not manage it. The hook
+ * below re-creates the two behaviours the page relies on:
+ *   1. previous page stays visible while the next request is in flight
+ *      (no empty flash between pages / keystrokes);
+ *   2. a stale or out-of-order response NEVER replaces a newer one — every
+ *      request takes a ticket, and only the latest ticket may commit.
+ * --------------------------------------------------------------------- */
+
+export type FetchState = {
+  data: MigradosListResult | undefined;
+  isFetching: boolean;
+  error: { message: string } | null;
+  /** Ticket of the most recently STARTED request. */
+  latest: number;
+};
+
+export const INITIAL_FETCH_STATE: FetchState = {
+  data: undefined,
+  isFetching: true,
+  error: null,
+  latest: 0,
+};
+
+/** A new request starts: take the next ticket, keep previous data on screen. */
+export function beginFetch(state: FetchState): { state: FetchState; ticket: number } {
+  const ticket = state.latest + 1;
+  return { state: { ...state, isFetching: true, error: null, latest: ticket }, ticket };
+}
+
+/** A response lands. Only the LATEST ticket may commit; older ones are dropped. */
+export function settleFetch(
+  state: FetchState,
+  ticket: number,
+  outcome: { ok: true; data: MigradosListResult } | { ok: false; message: string },
+): FetchState {
+  if (ticket !== state.latest) return state; // stale / out-of-order → ignored
+  return outcome.ok
+    ? { ...state, data: outcome.data, error: null, isFetching: false }
+    : { ...state, error: { message: outcome.message }, isFetching: false };
+}
+
+/** Stable identity for an input so effects re-run only when the request changes. */
+export function requestKey(input: MigradosListInput): string {
+  return JSON.stringify([input.query ?? "", input.cursor, input.limit]);
+}
+
 /**
- * Data hook — the one place the UI touches tRPC. Same options as the
- * AdminPage users list: 30s staleness, previous page kept visible while the
- * next one loads (no empty flash between pages / searches).
+ * Data hook — the one place the UI touches tRPC. Mutation-backed (POST);
+ * same public contract as before (data / isFetching / error / refetch), same
+ * previous-page retention, plus the ticket guard above.
  */
 export function useMigradosList(input: MigradosListInput): MigradosQueryState {
-  const q = trpc.admin.usuarios.legado.listPaginated.useQuery(input, {
-    staleTime: 30_000,
-    placeholderData: (previous) => previous,
-  });
+  const mutation = trpc.admin.usuarios.legado.listPaginated.useMutation();
+  const [state, setState] = useState<FetchState>(INITIAL_FETCH_STATE);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const mutateAsync = mutation.mutateAsync;
+  // The effect keys on the REQUEST identity (query/cursor/limit), not on the
+  // input object reference — AdminMigradosPage memoises it, but a re-created
+  // object with equal fields must not refetch.
+  const key = requestKey(input);
+  const inputRef = useRef(input);
+  inputRef.current = input;
+
+  const run = useCallback(async () => {
+    const begun = beginFetch(stateRef.current);
+    stateRef.current = begun.state;
+    setState(begun.state);
+    let outcome:
+      | { ok: true; data: MigradosListResult }
+      | { ok: false; message: string };
+    try {
+      outcome = { ok: true, data: await mutateAsync(inputRef.current) };
+    } catch (err) {
+      outcome = {
+        ok: false,
+        message: err instanceof Error ? err.message : "não consegui carregar a lista",
+      };
+    }
+    const settled = settleFetch(stateRef.current, begun.ticket, outcome);
+    if (settled !== stateRef.current) {
+      stateRef.current = settled;
+      setState(settled);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, mutateAsync]);
+
+  useEffect(() => {
+    void run();
+  }, [run]);
+
   return {
-    data: q.data,
-    isFetching: q.isFetching,
-    error: q.error ? { message: q.error.message } : null,
-    refetch: () => void q.refetch(),
+    data: state.data,
+    isFetching: state.isFetching,
+    error: state.error,
+    refetch: () => void run(),
   };
 }
