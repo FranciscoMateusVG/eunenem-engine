@@ -12,8 +12,8 @@ import { Navbar } from '@/components/eunenem/Navbar';
 import { Story } from '@/components/eunenem/Story';
 import { TweaksPanel } from '@/components/eunenem/TweaksPanel';
 import { TweaksProvider } from '@/components/eunenem/TweaksContext';
-import { PRIMARY_PRESETS } from '@/lib/mocks/tweaksDefaults';
 import type { TweaksState } from '@/lib/mocks/tweaksDefaults';
+import { normalizeHex, triadFor } from '@/lib/palette';
 import { sendPageView } from '@/lib/analytics.js';
 import { CartProvider } from '@/lib/cart.js';
 import { idCampanhaParaPageView, pageViewProps } from '@/lib/rota-canonica.js';
@@ -124,15 +124,19 @@ export function PaginaPage({
   const eventDate = data?.dataEvento ? data.dataEvento.slice(0, 10) : null;
   if (eventDate) initialTweaks.targetDate = eventDate;
   if (data?.papais) initialTweaks.parents = data.papais;
-  if (data?.corPrimaria) {
-    initialTweaks.primary = data.corPrimaria;
-    const preset = PRIMARY_PRESETS[data.corPrimaria];
-    if (preset) {
-      initialTweaks.primaryDeep = preset.deep;
-      initialTweaks.primarySoft = preset.soft;
-    }
-  }
-  if (data?.corAcento) initialTweaks.accent = data.corAcento;
+  // aperture-whxzg — one derivation path for the primary triad (presets keep
+  // their hand-tuned deep/soft; any other valid hex gets a derived pair).
+  const seedPrimary = normalizeHex(data?.corPrimaria);
+  if (seedPrimary) Object.assign(initialTweaks, triadFor(seedPrimary));
+  const seedAccent = normalizeHex(data?.corAcento);
+  if (seedAccent) initialTweaks.accent = seedAccent;
+  // aperture-whxzg — seed the story + photo previews from the public
+  // projection so the owner editor's baseline equals what guests see.
+  initialTweaks.historia = data?.historia ?? "";
+  initialTweaks.fotoCapaUrl = data?.fotoCapaUrl ?? null;
+  initialTweaks.fotoPerfilUrl = data?.fotoPerfilUrl ?? null;
+  initialTweaks.fotoHistoriaUrl = data?.fotoHistoriaUrl ?? null;
+  const isOwner = data?.isOwner ?? false;
 
   return (
     <TweaksProvider initialState={initialTweaks}>
@@ -145,10 +149,12 @@ export function PaginaPage({
               profileUrl={data?.fotoPerfilUrl ?? null}
               eventDate={eventDate}
               tipoEvento={data?.tipoEvento ?? null}
+              editable={isOwner}
             />
             <Story
               historia={data?.historia ?? null}
               fotoHistoria={data?.fotoHistoriaUrl ?? null}
+              editable={isOwner}
             />
             <Marketplace slug={slug} />
             <HowTo />
@@ -157,7 +163,8 @@ export function PaginaPage({
           <Footer />
           <TweaksPanelMount
             idCampanha={data?.idCampanha ?? undefined}
-            canSave={data?.isOwner ?? false}
+            canSave={isOwner}
+            creatorName={data?.creatorName ?? ""}
           />
           <CartDrawerMount slug={slug} />
         </CartDrawerProvider>
@@ -183,6 +190,7 @@ function CartDrawerMount({ slug }: { slug: string }) {
 function TweaksPanelMount(props: {
   idCampanha?: string;
   canSave?: boolean;
+  creatorName?: string;
 }) {
   const drawer = useCartDrawer();
   if (drawer.purchaseOverlayVisible) return null;

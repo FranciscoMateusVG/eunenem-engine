@@ -8,6 +8,7 @@ import {
 } from "./Doodles";
 import { ImageSlot } from "./ImageSlot";
 import { CountdownTimer } from "./CountdownTimer";
+import { EditButton } from "./EditButton";
 import { useTweaks } from "./TweaksContext";
 import { artigoPosse, saudacao } from "@/lib/concordancia";
 import type { TipoEventoPerfil } from "../../../../../src/index.js";
@@ -47,19 +48,29 @@ const HERO_EVENT_TYPE_LABEL: Record<TipoEventoPerfil, string> = {
 // fallback, which was leaking a fake "chegada em 0 dias" onto pages with
 // no event date. The shared default is left untouched (the painel + its
 // date math depend on it); the guest path just stops trusting it.
+// aperture-whxzg — `editable` = the OWNER is looking at their own page
+// (getPerfilPublicoBySlug.isOwner, threaded by PaginaPage). Only then do the
+// contextual edit icons render (title / cover / polaroid); guests, signed-out
+// visitors and other creators get the exact same tree as before. Photo
+// previews prefer the TweaksContext override (set right after an owner
+// upload) over the server-resolved prop.
 export function Hero({
   coverUrl = null,
   profileUrl = null,
   eventDate = null,
   tipoEvento = null,
+  editable = false,
 }: {
   coverUrl?: string | null;
   profileUrl?: string | null;
   eventDate?: string | null;
   tipoEvento?: TipoEventoPerfil | null;
+  editable?: boolean;
 } = {}) {
   const { tweaks } = useTweaks();
   const { babyName, genero } = tweaks;
+  const shownCover = tweaks.fotoCapaUrl ?? coverUrl;
+  const shownProfile = tweaks.fotoPerfilUrl ?? profileUrl;
   const hasEventDate = typeof eventDate === "string" && eventDate.length > 0;
   const eventLabel = tipoEvento ? HERO_EVENT_TYPE_LABEL[tipoEvento] : "chá de bebê";
 
@@ -93,8 +104,13 @@ export function Hero({
       <div className="eu-container grid grid-cols-1 md:grid-cols-[1.1fr_1fr] items-center gap-14">
         {/* LEFT */}
         <div className="relative z-10">
+          {/* aperture-whxzg — the owner's title edit icon rides INLINE right
+              after the badge pill (same row), so its relationship to the
+              title block is unambiguous instead of floating at the column
+              edge. */}
+          <div className="flex items-center gap-2 mb-4">
           <div
-            className="inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 mb-4"
+            className="inline-flex items-center gap-2 rounded-full px-3.5 py-1.5"
             style={{
               background: "var(--lilac-soft)",
               color: "var(--lilac-deep)",
@@ -115,6 +131,13 @@ export function Hero({
               }}
             />
             {eventLabel} online
+          </div>
+          {editable && (
+            <EditButton
+              field="nomeBebe"
+              className="eu-edit-btn--inline"
+            />
+          )}
           </div>
 
           <h1
@@ -178,9 +201,15 @@ export function Hero({
               id="hero-cover"
               placeholder="Arraste a foto de capa aqui"
               fit="cover"
-              src={coverUrl}
+              src={shownCover}
               readOnly
             />
+            {editable && (
+              <EditButton
+                field="fotoCapa"
+                style={{ position: "absolute", top: 14, right: 14, zIndex: 2 }}
+              />
+            )}
             <Tape
               width={110}
               height={22}
@@ -189,14 +218,21 @@ export function Hero({
             />
           </div>
 
-          {/* Floating polaroid */}
+          {/* Floating polaroid. aperture-whxzg — the owner edit icon sits
+              OUTSIDE the anim-float wrapper (a control on a perpetually
+              animating element never settles for pointer/AT hit-testing),
+              so the positioned outer box carries both. */}
           <div
-            className="anim-float"
             style={{
               position: "absolute",
               bottom: -28,
               left: -24,
               zIndex: 3,
+            }}
+          >
+          <div
+            className="anim-float"
+            style={{
               transform: "rotate(-6deg)",
             }}
           >
@@ -214,11 +250,18 @@ export function Hero({
                   id="hero-profile"
                   placeholder="Foto do bebê"
                   fit="cover"
-                  src={profileUrl}
+                  src={shownProfile}
                   readOnly
                 />
               </div>
             </Polaroid>
+          </div>
+            {editable && (
+              <EditButton
+                field="fotoPerfil"
+                style={{ position: "absolute", top: -14, right: -14, zIndex: 4 }}
+              />
+            )}
           </div>
         </div>
       </div>
