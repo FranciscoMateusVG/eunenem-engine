@@ -1,6 +1,7 @@
 
 import { artigoDefinido } from "@/lib/concordancia";
 import { FlowerDoodle, Polaroid, StarDoodle, Tape } from "./Doodles";
+import { EditButton } from "./EditButton";
 import { ImageSlot } from "./ImageSlot";
 import { useTweaks } from "./TweaksContext";
 
@@ -28,19 +29,26 @@ export function signatureLine(parents: string): string | null {
   return name ? `com amor, ${name}` : null;
 }
 
+// aperture-whxzg — `editable` (owner on their own page) renders the contextual
+// edit icons for the text + the photo; the story body and photo prefer the
+// TweaksContext preview (owner typing / owner upload) over the server props.
 export function Story({
   historia,
   fotoHistoria = null,
+  editable = false,
 }: {
   historia?: string | null;
   // aperture-qjgfr gap-B — the creator's real história photo (7:8) from
   // getPerfilPublicoBySlug. Read-only; null → neutral branded frame.
   fotoHistoria?: string | null;
+  editable?: boolean;
 }) {
   const { tweaks } = useTweaks();
   const { babyName, parents, genero } = tweaks;
   const artDef = artigoDefinido(genero);
-  const paragraphs = (historia ?? "")
+  const shownHistoria = tweaks.historia ?? historia;
+  const shownFoto = tweaks.fotoHistoriaUrl ?? fotoHistoria;
+  const paragraphs = (shownHistoria ?? "")
     .split(/\n+/)
     .map((p) => p.trim())
     .filter(Boolean);
@@ -90,7 +98,13 @@ export function Story({
 
         <div className="grid grid-cols-1 md:grid-cols-[1.1fr_1fr] gap-12 items-center">
           {/* Text */}
-          <div>
+          <div className="relative">
+            {editable && (
+              <EditButton
+                field="historia"
+                className="eu-edit-btn--story-text"
+              />
+            )}
             {paragraphs.length > 0 ? (
               paragraphs.map((para, i) => (
                 <p
@@ -157,11 +171,17 @@ export function Story({
                     id="story-photo"
                     placeholder="Foto da família / ultrassom"
                     fit="cover"
-                    src={fotoHistoria}
+                    src={shownFoto}
                     readOnly
                   />
                 </div>
               </Polaroid>
+              {editable && (
+                <EditButton
+                  field="fotoHistoria"
+                  style={{ position: "absolute", top: -14, right: -14, zIndex: 4 }}
+                />
+              )}
               <Tape
                 width={90}
                 height={20}

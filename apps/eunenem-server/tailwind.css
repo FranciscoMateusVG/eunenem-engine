@@ -7810,3 +7810,265 @@ button.painel-topbar-link:hover {
     transform: none;
   }
 }
+
+/* =================================================================
+ * aperture-whxzg — owner inline editor on /pagina/:slug
+ * ================================================================= */
+
+/* Contextual edit icon — 44×44 hit area, paper disc, plum ink. Parked next
+ * to the element it edits; only in the tree when the owner is looking. */
+.eu-edit-btn {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  border: 1.5px solid var(--line);
+  background: var(--paper);
+  color: var(--plum);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: background 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+    transform 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.eu-edit-btn:hover {
+  background: var(--lilac-soft);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+.eu-edit-btn:focus-visible {
+  outline: none;
+  border-color: var(--lilac);
+  box-shadow: 0 0 0 4px rgba(201, 165, 216, 0.35);
+}
+.eu-edit-btn--inline {
+  position: static;
+  flex-shrink: 0;
+}
+/* Story text: sits just above the first paragraph, flush with its left
+ * edge, so it reads as "edit this block" instead of floating mid-column. */
+.eu-edit-btn--story-text {
+  top: -54px;
+  left: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .eu-edit-btn,
+  .eu-edit-btn:hover {
+    transition: none;
+    transform: none;
+  }
+}
+
+/* Panel dock (bottom-right on desktop; full-width bottom sheet on phones). */
+.tweaks-dock {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+}
+.tweaks-panel {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 22px;
+  width: 340px;
+  max-width: calc(100vw - 40px);
+  box-shadow: var(--shadow-lg);
+  max-height: 78vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.tweaks-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.tweaks-close {
+  background: var(--cream-2);
+  border: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  color: var(--ink-soft);
+  font-size: 20px;
+  cursor: pointer;
+  line-height: 1;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.tweaks-close:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(201, 165, 216, 0.35);
+}
+.tweaks-section {
+  margin-bottom: 18px;
+}
+.tweaks-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+  margin-bottom: 10px;
+}
+.tweaks-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tweaks-label {
+  font-size: 12px;
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+.tweaks-panel .perfil-input {
+  padding: 11px 12px;
+  font-size: 15px;
+}
+.tweaks-panel .perfil-textarea {
+  min-height: 110px;
+}
+.tweaks-swatch {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 2.5px solid var(--paper);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  position: relative;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.tweaks-swatch:hover {
+  transform: scale(1.06);
+}
+.tweaks-swatch:focus-visible,
+.tweaks-swatch:focus-within {
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(201, 165, 216, 0.35);
+}
+.tweaks-swatch--active {
+  border-color: var(--ink);
+}
+/* "Any colour" swatch — the native picker fills the disc; when no custom
+ * colour is active it shows a conic rainbow ring so it reads as "more". */
+.tweaks-swatch--custom {
+  background: conic-gradient(
+    from 90deg,
+    #e78fa7,
+    #f7d560,
+    #c7dc6e,
+    #9cd7dd,
+    #c9a5d8,
+    #e78fa7
+  );
+  display: inline-flex;
+  overflow: hidden;
+}
+.tweaks-swatch--custom input[type="color"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  border: none;
+  padding: 0;
+}
+.tweaks-hex {
+  width: 92px;
+  flex: 0 0 auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 9px 10px;
+}
+.tweaks-hex[aria-invalid="true"] {
+  border-color: var(--coral-pink);
+}
+.tweaks-warning {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ink-soft);
+  background: var(--yellow-soft);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+.tweaks-error {
+  font-size: 13px;
+  color: var(--coral-pink);
+  font-weight: 600;
+  margin: 0 0 10px;
+}
+.tweaks-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.tweaks-btn {
+  flex: 1;
+  justify-content: center;
+  padding: 12px 16px;
+  font-size: 13px;
+  min-height: 44px;
+}
+.tweaks-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+.btn-outline.tweaks-btn:disabled {
+  background: var(--paper);
+}
+.tweaks-footnote {
+  margin: 10px 0 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--ink-mute);
+}
+.tweaks-toggle {
+  padding: 12px 18px;
+  font-size: 12px;
+  min-height: 44px;
+  position: relative;
+}
+.tweaks-dirty-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--yellow);
+  border: 2px solid var(--paper);
+  display: inline-block;
+  margin-left: 6px;
+}
+@media (max-width: 480px) {
+  .tweaks-dock {
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    align-items: stretch;
+  }
+  .tweaks-panel {
+    width: 100%;
+    max-width: none;
+    max-height: 68vh;
+    padding: 18px 16px 16px;
+    border-radius: 18px;
+  }
+  .tweaks-toggle {
+    align-self: flex-end;
+  }
+}

@@ -48,6 +48,7 @@ export const E2E_SPEC_SAFETY = [
   { file: 'llol4-isolation-gates.spec.ts', safety: 'non-payment' },
   { file: 'n06ca-invite-required-date.spec.ts', safety: 'non-payment' },
   { file: 'ohum1-personalizar-palette-only.spec.ts', safety: 'non-payment' },
+  { file: 'whxzg-inline-edit.spec.ts', safety: 'non-payment' },
   { file: 'painel-adicionar-qty.spec.ts', safety: 'non-payment' },
   { file: 'painel-editar-mimo-qty-changed.spec.ts', safety: 'non-payment' },
   { file: 'painel-editar-mimo.spec.ts', safety: 'non-payment' },
