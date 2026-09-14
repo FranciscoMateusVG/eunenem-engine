@@ -26,10 +26,8 @@ import {
 } from '../../../apps/eunenem-server/pages/components/eunenem/admin/MigradosTable.js';
 import {
   MIGRADO_STATUS,
-  MIGRADOS_CONTRACT_PENDING_MESSAGE,
   type MigradoRow,
   migradosSearchInput,
-  useMigradosList,
 } from '../../../apps/eunenem-server/pages/components/eunenem/admin/migrados-contract.js';
 
 const appRequire = createRequire(
@@ -150,12 +148,15 @@ describe('925nx MigradosTable — states', () => {
     expect(html).not.toContain('data-linked');
   });
 
-  it('error → alert banner with the message and a retry button (the pending-contract path today)', () => {
-    const state = useMigradosList({ cursor: null, limit: 50 });
-    expect(state.error?.message).toBe(MIGRADOS_CONTRACT_PENDING_MESSAGE);
-    const html = render({ ...baseProps, data: undefined, isFetching: false, error: state.error });
+  it('error → alert banner with the server message and a retry button', () => {
+    const html = render({
+      ...baseProps,
+      data: undefined,
+      isFetching: false,
+      error: { message: 'cursor inválido para esta busca' },
+    });
     expect(html).toContain('role="alert"');
-    expect(html).toContain(MIGRADOS_CONTRACT_PENDING_MESSAGE);
+    expect(html).toContain('cursor inválido para esta busca');
     expect(html).toContain('tentar novamente');
   });
 
@@ -226,6 +227,16 @@ describe('925nx wiring — route + nav (source-level)', () => {
     expect(page).not.toContain('admin-router');
     expect(page).not.toContain('legacy-users');
     expect(page).toContain('não prova');
+  });
+
+  it('the UI talks to exactly the frozen procedure and its status enum matches the server enum', () => {
+    const seam = src('pages/components/eunenem/admin/migrados-contract.ts');
+    expect(seam).toContain('trpc.admin.usuarios.legado.listPaginated.useQuery');
+    const server = src('server/admin-legacy-users.ts');
+    const enumBlock = server.slice(server.indexOf('AdminLegacyUserStatusSchema = z.enum(['));
+    for (const status of Object.keys(MIGRADO_STATUS)) {
+      expect(enumBlock.slice(0, enumBlock.indexOf('])'))).toContain(`"${status}"`);
+    }
   });
 
   it('root-approved labels are the exact status wording', () => {

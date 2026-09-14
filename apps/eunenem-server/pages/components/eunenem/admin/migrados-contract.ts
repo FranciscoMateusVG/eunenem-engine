@@ -1,14 +1,12 @@
 // aperture-925nx — client-side view of the admin "usuários migrados" contract.
 //
 // SINGLE SEAM between the UI (AdminMigradosPage + MigradosTable) and Rex's
-// server contract (aperture-4i05m). The UI never derives meaning: every
-// label below is a verbatim rendering of a server-declared status, and the
-// counts are rendered as the server declares them (no client-side math).
-//
-// STATUS: CONTRACT PENDING ROOT APPROVAL. `useMigradosList` returns a
-// pending-contract error until the tRPC procedure lands; the table/page are
-// exercised by unit tests against fixture data in the meantime. Integration
-// is a one-function swap here — nothing else in the UI changes.
+// server contract (aperture-4i05m, `admin.usuarios.legado.listPaginated`,
+// PR #118). The UI never derives meaning: every label below is a verbatim
+// rendering of a server-declared status, and the counts are rendered as the
+// server declares them (no client-side math).
+
+import { trpc } from "@/lib/trpc";
 
 /** One row = one legacy (1.0) person, deduped by normalized email on the server. */
 export type MigradoRow = {
@@ -104,20 +102,20 @@ export function migradosSearchInput(query: string): Pick<MigradosListInput, "que
   return { query: query.trim() || undefined };
 }
 
-export const MIGRADOS_CONTRACT_PENDING_MESSAGE =
-  "contrato do servidor (aperture-4i05m) ainda não aprovado — lista indisponível";
-
 /**
- * Data hook. PENDING the server procedure landing on main: replace the body with
- *   trpc.admin.usuarios.legado.listPaginated.useQuery(input, { staleTime: 30_000, placeholderData: (p) => p })
- * (contract root-approved 2026-09-14; Rex 4i05m implements the server side). Until then the page renders the
- * honest error state — never fixture data in the real app.
+ * Data hook — the one place the UI touches tRPC. Same options as the
+ * AdminPage users list: 30s staleness, previous page kept visible while the
+ * next one loads (no empty flash between pages / searches).
  */
-export function useMigradosList(_input: MigradosListInput): MigradosQueryState {
+export function useMigradosList(input: MigradosListInput): MigradosQueryState {
+  const q = trpc.admin.usuarios.legado.listPaginated.useQuery(input, {
+    staleTime: 30_000,
+    placeholderData: (previous) => previous,
+  });
   return {
-    data: undefined,
-    isFetching: false,
-    error: { message: MIGRADOS_CONTRACT_PENDING_MESSAGE },
-    refetch: () => {},
+    data: q.data,
+    isFetching: q.isFetching,
+    error: q.error ? { message: q.error.message } : null,
+    refetch: () => void q.refetch(),
   };
 }
