@@ -8,6 +8,7 @@ import { useCart } from "@/lib/cart.js";
 import { useCartDrawer } from "./CartDrawerContext.js";
 import { emitirCarrinhoAberto } from "@/lib/analytics-funil";
 import { useTweaks } from "./TweaksContext";
+import { OWNER_EDIT_LISTA_LABEL } from "@/lib/pagina-owner";
 import { usePaginaListaPresentes } from "@/lib/paginaApi";
 import { groupVisitorGifts, type VisitorGift } from "@/lib/visitorGift";
 
@@ -27,9 +28,48 @@ import { groupVisitorGifts, type VisitorGift } from "@/lib/visitorGift";
 
 interface MarketplaceProps {
   slug: string;
+  /**
+   * aperture-4e1qo — owner shortcut to the painel editor of THIS campanha.
+   * PaginaPage computes it from the server-resolved projection
+   * (ownerListaEditHref: isOwner === true + idCampanha + creator slug →
+   * /painel/:slug/c/:idCampanha/lista) and passes null for everyone else, so
+   * guests / signed-out / other owners never get the element in the tree.
+   */
+  ownerEditHref?: string | null;
 }
 
-export function Marketplace({ slug }: MarketplaceProps) {
+/**
+ * aperture-4e1qo — native link (no modal, no JS routing) so it works with
+ * SSR, keyboard and middle-click. 44px floor for touch; pencil is decorative.
+ */
+export function OwnerEditListaLink({ href, className }: { href: string; className?: string }) {
+  return (
+    <a
+      href={href}
+      className={`btn-outline no-underline eu-owner-edit-lista${className ? ` ${className}` : ""}`}
+      data-testid="owner-edit-lista"
+      style={{ minHeight: 44 }}
+    >
+      <svg
+        viewBox="0 0 24 24"
+        width={16}
+        height={16}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.7}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3z" />
+        <path d="M13.5 6.5l3 3" />
+      </svg>
+      {OWNER_EDIT_LISTA_LABEL}
+    </a>
+  );
+}
+
+export function Marketplace({ slug, ownerEditHref = null }: MarketplaceProps) {
   const { tweaks } = useTweaks();
   const { data, isLoading, isError } = usePaginaListaPresentes(slug);
   const [selectedGift, setSelectedGift] = useState<VisitorGift | null>(null);
@@ -118,6 +158,11 @@ export function Marketplace({ slug }: MarketplaceProps) {
             caixinha de loja, sem mensalidade. Você paga com Pix ou
             cartão, em checkout seguro.
           </p>
+          {ownerEditHref && (
+            <div style={{ marginTop: 18, display: "flex", justifyContent: "center" }}>
+              <OwnerEditListaLink href={ownerEditHref} />
+            </div>
+          )}
         </header>
 
         {/* aperture-rdr8u — Mobile renders 2 columns (was 1) because the
@@ -140,6 +185,9 @@ export function Marketplace({ slug }: MarketplaceProps) {
             ainda não consegui carregar a listinha — recarrega a página ♡
           </p>
         ) : gifts.length === 0 ? (
+          // aperture-4e1qo — the owner's "Editar lista de presentes" CTA lives
+          // in the header above, which stays rendered in this empty state, so
+          // no second CTA here (root: one CTA that persists in empty suffices).
           <p
             className="text-center mt-10"
             style={{
