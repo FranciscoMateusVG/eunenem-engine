@@ -2,6 +2,7 @@ import type { inferRouterOutputs } from "@trpc/server";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { formatBRL } from "@/lib/formatBRL.js";
+import { VALOR_UNITARIO_PRESENTE_MINIMO_MESSAGE } from "@/lib/contribuicao.js";
 import { trpc } from "@/lib/trpc.js";
 import type { AppRouter } from "../../../../../server/trpc/router.js";
 import {
@@ -331,8 +332,8 @@ function ProdutoFormModal({
 
     if (nome.trim().length < 1 || nome.trim().length > 200)
       next.nome = "informe um nome (até 200 caracteres).";
-    if (precoCents === null || precoCents < 1)
-      next.preco = "informe um preço válido maior que zero.";
+    if (precoCents === null || precoCents < 1_000)
+      next.preco = VALOR_UNITARIO_PRESENTE_MINIMO_MESSAGE;
     if (emoji.trim().length < 1 || emoji.trim().length > 32)
       next.emoji = "escolha um emoji.";
     if (!idCategoria) next.idCategoria = "selecione uma categoria.";

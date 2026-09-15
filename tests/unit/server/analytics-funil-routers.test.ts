@@ -204,14 +204,14 @@ describe('creator-funnel server events (aperture-ai8vg)', () => {
     const first = await user.caller.contribuicao.createBulk({
       idCampanha: nova.id,
       items: [
-        { nome: 'Fralda', valor: 100, quantidade: 2 },
-        { nome: 'Body', valor: 50, quantidade: 1 },
+        { nome: 'Fralda', valor: 1100, quantidade: 2 },
+        { nome: 'Body', valor: 1050, quantidade: 1 },
       ],
     });
     await user.caller.contribuicao.create({
       idCampanha: nova.id,
       nome: 'Chupeta',
-      valor: 30,
+      valor: 1030,
       quantidade: 1,
     });
 
@@ -246,7 +246,7 @@ describe('creator-funnel server events (aperture-ai8vg)', () => {
 
     const created = await user.caller.contribuicao.createBulk({
       idCampanha: nova.id,
-      items: [{ nome: 'Fralda', valor: 100, quantidade: 2 }],
+      items: [{ nome: 'Fralda', valor: 1100, quantidade: 2 }],
     });
     expect(created.ids).toHaveLength(1);
     repo.findByCampanhaId = original;
@@ -266,11 +266,11 @@ describe('creator-funnel server events (aperture-ai8vg)', () => {
     await Promise.all([
       user.caller.contribuicao.createBulk({
         idCampanha: nova.id,
-        items: [{ nome: 'A', valor: 10, quantidade: 1 }],
+        items: [{ nome: 'A', valor: 1010, quantidade: 1 }],
       }),
       user.caller.contribuicao.createBulk({
         idCampanha: nova.id,
-        items: [{ nome: 'B', valor: 20, quantidade: 1 }],
+        items: [{ nome: 'B', valor: 1020, quantidade: 1 }],
       }),
     ]);
 

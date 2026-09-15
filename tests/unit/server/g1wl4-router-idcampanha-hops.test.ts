@@ -313,7 +313,7 @@ const OWNER_GATE_HOPS: OwnerGateHop[] = [
     surface: 'authed',
     expectedCode: 'UNAUTHORIZED',
     invoke: ({ caller }, idCampanha) =>
-      caller.contribuicao.create({ idCampanha, nome: 'Fralda', valor: 100, quantidade: 1 }),
+      caller.contribuicao.create({ idCampanha, nome: 'Fralda', valor: 1000, quantidade: 1 }),
   },
   {
     name: 'contribuicao.createBulk',
@@ -322,7 +322,7 @@ const OWNER_GATE_HOPS: OwnerGateHop[] = [
     invoke: ({ caller }, idCampanha) =>
       caller.contribuicao.createBulk({
         idCampanha,
-        items: [{ nome: 'Fralda', valor: 100, quantidade: 1 }],
+        items: [{ nome: 'Fralda', valor: 1000, quantidade: 1 }],
       }),
   },
   {
@@ -519,14 +519,14 @@ describe('g1wl4 — per-hop idCampanha, THROUGH the router (PR #344 + aperture-4
 
       // aperture-48mxt (W2 enforce): bare authed write is schema-rejected.
       await expect(
-        user.caller.contribuicao.create({ nome: 'Item Bare', valor: 100, quantidade: 1 }),
+        user.caller.contribuicao.create({ nome: 'Item Bare', valor: 1000, quantidade: 1 }),
       ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
 
       // The oldest-addressing behavior stays pinned — now explicitly.
       await user.caller.contribuicao.create({
         idCampanha: c1,
         nome: 'Item Bare',
-        valor: 100,
+        valor: 1000,
         quantidade: 1,
       });
 
@@ -548,7 +548,7 @@ describe('g1wl4 — per-hop idCampanha, THROUGH the router (PR #344 + aperture-4
       await user.caller.contribuicao.create({
         idCampanha: c2,
         nome: 'Item C2',
-        valor: 200,
+        valor: 2000,
         quantidade: 1,
       });
 
@@ -568,18 +568,18 @@ describe('g1wl4 — per-hop idCampanha, THROUGH the router (PR #344 + aperture-4
       // aperture-48mxt (W2 enforce): bare authed write is schema-rejected.
       await expect(
         user.caller.contribuicao.createBulk({
-          items: [{ nome: 'Bulk Bare', valor: 100, quantidade: 1 }],
+          items: [{ nome: 'Bulk Bare', valor: 1000, quantidade: 1 }],
         }),
       ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
 
       // Oldest-addressing pinned explicitly (formerly the bare path).
       await user.caller.contribuicao.createBulk({
         idCampanha: c1,
-        items: [{ nome: 'Bulk Bare', valor: 100, quantidade: 1 }],
+        items: [{ nome: 'Bulk Bare', valor: 1000, quantidade: 1 }],
       });
       await user.caller.contribuicao.createBulk({
         idCampanha: c2,
-        items: [{ nome: 'Bulk C2', valor: 100, quantidade: 1 }],
+        items: [{ nome: 'Bulk C2', valor: 1000, quantidade: 1 }],
       });
 
       const bare = (await user.caller.contribuicao.list()).map((i) => i.nome);
@@ -600,7 +600,7 @@ describe('g1wl4 — per-hop idCampanha, THROUGH the router (PR #344 + aperture-4
         await user.caller.contribuicao.create({
           idCampanha: c1,
           nome: 'Alvo C1',
-          valor: 100,
+          valor: 1000,
           quantidade: 1,
         })
       ).ids;
@@ -608,7 +608,7 @@ describe('g1wl4 — per-hop idCampanha, THROUGH the router (PR #344 + aperture-4
         await user.caller.contribuicao.create({
           idCampanha: c2,
           nome: 'Alvo C2',
-          valor: 100,
+          valor: 1000,
           quantidade: 1,
         })
       ).ids;
@@ -858,7 +858,7 @@ describe('g1wl4 — per-hop idCampanha, THROUGH the router (PR #344 + aperture-4
         await user.caller.contribuicao.create({
           idCampanha: c2,
           nome: 'Presente C2',
-          valor: 100,
+          valor: 1000,
           quantidade: 1,
         })
       ).ids;
@@ -949,13 +949,13 @@ describe('g1wl4 — per-hop idCampanha, THROUGH the router (PR #344 + aperture-4
       await user.caller.contribuicao.create({
         idCampanha: c1,
         nome: 'Item C1',
-        valor: 100,
+        valor: 1000,
         quantidade: 1,
       });
       await user.caller.contribuicao.create({
         idCampanha: c2,
         nome: 'Item C2',
-        valor: 100,
+        valor: 1000,
         quantidade: 1,
       });
 
@@ -987,7 +987,7 @@ describe('g1wl4 — per-hop idCampanha, THROUGH the router (PR #344 + aperture-4
         await user.caller.contribuicao.create({
           idCampanha: c2,
           nome: 'Presente C2',
-          valor: 100,
+          valor: 1000,
           quantidade: 1,
         })
       ).ids;
@@ -1029,7 +1029,7 @@ describe('g1wl4 — per-hop idCampanha, THROUGH the router (PR #344 + aperture-4
         await user.caller.contribuicao.create({
           idCampanha: c2,
           nome: 'Presente C2',
-          valor: 100,
+          valor: 1000,
           quantidade: 1,
         })
       ).ids;
@@ -1066,7 +1066,7 @@ describe('g1wl4 — per-hop idCampanha, THROUGH the router (PR #344 + aperture-4
         await user.caller.contribuicao.create({
           idCampanha: c2,
           nome: 'Presente C2',
-          valor: 100,
+          valor: 1000,
           quantidade: 1,
         })
       ).ids;
@@ -1116,7 +1116,7 @@ describe('g1wl4 — per-hop idCampanha, THROUGH the router (PR #344 + aperture-4
         await owner.caller.contribuicao.create({
           idCampanha: owner.campanhaSignup.id, // W2 — create requires idCampanha
           nome: 'Presente com PII',
-          valor: 100,
+          valor: 1000,
           quantidade: 1,
         })
       ).ids;
@@ -1154,7 +1154,7 @@ describe('g1wl4 — per-hop idCampanha, THROUGH the router (PR #344 + aperture-4
         await user.caller.contribuicao.create({
           idCampanha: c2,
           nome: 'Presente C2 sucesso',
-          valor: 100,
+          valor: 1000,
           quantidade: 1,
         })
       ).ids;
@@ -1189,7 +1189,7 @@ describe('g1wl4 — per-hop idCampanha, THROUGH the router (PR #344 + aperture-4
       await attacker.caller.contribuicao.create({
         idCampanha: attacker.campanhaSignup.id,
         nome: 'Segredo do Atacante',
-        valor: 100,
+        valor: 1000,
         quantidade: 1,
       });
 
@@ -1282,7 +1282,7 @@ describe('g1wl4 — per-hop idCampanha, THROUGH the router (PR #344 + aperture-4
         await user.caller.contribuicao.create({
           idCampanha: c1,
           nome: 'Presente C1',
-          valor: 100,
+          valor: 1000,
           quantidade: 1,
         })
       ).ids;
@@ -1312,7 +1312,7 @@ describe('iytxa — public checkout capability slots', () => {
       await user.caller.contribuicao.create({
         idCampanha: user.campanhaSignup.id,
         nome: 'Client recovery checkout',
-        valor: 100,
+        valor: 1000,
         quantidade: 1,
       })
     ).ids;
@@ -1375,7 +1375,7 @@ describe('iytxa — public checkout capability slots', () => {
     const operation = await rig.deps.checkoutOperationRepository.findById(operationId);
     expect(operation).toMatchObject({ state: 'local_committed', paymentId: operationId });
     expect(operation?.snapshot.items.reduce((sum, item) => sum + item.contributionCents, 0)).toBe(
-      100,
+      1000,
     );
     expect(operation?.snapshot.totalSurchargeCents).toBeGreaterThan(0);
     expect(operation?.snapshot.totalChargedCents).toBe(
@@ -1404,7 +1404,7 @@ describe('iytxa — public checkout capability slots', () => {
       await user.caller.contribuicao.create({
         idCampanha: user.campanhaSignup.id,
         nome: 'Slot checkout',
-        valor: 100,
+        valor: 1000,
         quantidade: 1,
       })
     ).ids;
@@ -1471,7 +1471,7 @@ describe('iytxa — public checkout capability slots', () => {
       await user.caller.contribuicao.create({
         idCampanha: user.campanhaSignup.id,
         nome: 'Race checkout',
-        valor: 100,
+        valor: 1000,
         quantidade: 1,
       })
     ).ids;
@@ -1505,7 +1505,7 @@ describe('iytxa — public checkout capability slots', () => {
       await user.caller.contribuicao.create({
         idCampanha: user.campanhaSignup.id,
         nome: 'Cookie boundary checkout',
-        valor: 100,
+        valor: 1000,
         quantidade: 1,
       })
     ).ids;
@@ -1554,7 +1554,7 @@ describe('iytxa — public checkout capability slots', () => {
       await user.caller.contribuicao.create({
         idCampanha: user.campanhaSignup.id,
         nome: 'Slot cap checkout',
-        valor: 100,
+        valor: 1000,
         quantidade: 1,
       })
     ).ids;
@@ -1591,7 +1591,7 @@ describe('iytxa — public checkout capability slots', () => {
       await user.caller.contribuicao.create({
         idCampanha: user.campanhaSignup.id,
         nome: 'Terminal slot checkout',
-        valor: 100,
+        valor: 1000,
         quantidade: 1,
       })
     ).ids;

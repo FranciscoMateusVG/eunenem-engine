@@ -38,6 +38,8 @@ import {
   brlFromCents,
   centsFromBRL,
   parseValorBRL,
+  todosValoresUnitariosPresentesValidos,
+  valorUnitarioPresenteInputValido,
 } from '../../../apps/eunenem-server/pages/lib/contribuicao.js';
 
 /**
@@ -90,9 +92,27 @@ describe('aperture-twnf0 — reais→cents parser (typed price → cents)', () =
     expect(parseValorInput(input)).toBe(cents);
   });
 
-  it('empty / non-numeric input falls back to 0 (|| 0 guard)', () => {
+  it('empty / non-numeric input falls back to 0', () => {
     expect(parseValorInput('')).toBe(0);
     expect(parseValorInput('abc')).toBe(0);
+  });
+});
+
+describe('aperture-w8ajy — minimum gift unit value', () => {
+  it.each([
+    ['0,01', false],
+    ['9,99', false],
+    ['9,999', false],
+    ['10,00', true],
+    ['10,001', false],
+  ])('validates %j in integer cents without rounding up', (input, valid) => {
+    expect(valorUnitarioPresenteInputValido(input)).toBe(valid);
+  });
+
+  it('rejects a whole catalog or preset selection when any unit price is below R$ 10', () => {
+    expect(todosValoresUnitariosPresentesValidos([10, 49.9])).toBe(true);
+    expect(todosValoresUnitariosPresentesValidos([10, 9.99, 100])).toBe(false);
+    expect(todosValoresUnitariosPresentesValidos([10.001])).toBe(false);
   });
 });
 

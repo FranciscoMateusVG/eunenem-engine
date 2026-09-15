@@ -23,6 +23,7 @@ import {
   listarContribuicoesDeOpcao,
   removerContribuicao,
   UsuarioInputInvalidoError,
+  ValorUnitarioPresenteWriteSchema,
 } from '../../../../src/index.js';
 import { maisAntigo, propsListaItemCriado } from '../analytics/funil.js';
 import type { TrpcContext } from './context.js';
@@ -242,22 +243,19 @@ const ImagemUrlSchema = z
 
 /**
  * Per-item contribuição amount in cents (aperture-phbwo). A single-item
- * price MUST be > 0 to match the domain `MoneyCentsSchema`
- * (z.number().int().positive()). A R$0 contribuição is not a valid gift.
+ * New writes MUST use a unit value of at least R$ 10. Historical lower
+ * values remain readable through the domain `MoneyCentsSchema`.
  *
  * Previously this boundary used `.nonnegative()`, which accepted 0 and let
  * zero-priced items (e.g. catalog rows in listas-prontas.json with price:0)
  * pass the wire layer only to be rejected deeper by the use-case with a
  * confusing "Too small: expected number to be >0" domain message. Pinning
- * it to `.positive()` here makes the boundary fail fast with a clear,
- * field-scoped error. NOTE: this is NOT the daxwm case — that was an
+ * it to the dedicated write schema here makes the boundary fail fast with a
+ * clear field-scoped error. NOTE: this is NOT the daxwm case — that was an
  * aggregate SUM (totalSurchargeCents) which CAN legitimately be 0; this is
  * a single per-item price which cannot.
  */
-const ValorContribuicaoCentavosSchema = z
-  .number()
-  .int()
-  .positive('valor deve ser maior que zero (em centavos)');
+const ValorContribuicaoCentavosSchema = ValorUnitarioPresenteWriteSchema;
 
 const CreateInputSchema = z.object({
   // aperture-48mxt (W2 enforce): REQUIRED. Writes to per-campanha data must

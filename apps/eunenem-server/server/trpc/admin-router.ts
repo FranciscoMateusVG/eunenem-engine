@@ -58,6 +58,7 @@ import {
   resolverManualFalhouRepasse,
   resolverManualPagoRepasse,
   retentarTransferenciaRepasse,
+  ValorUnitarioPresenteWriteSchema,
 } from "../../../../src/index.js";
 import type {
   CatalogoCategoria,
@@ -3046,7 +3047,7 @@ async function withCatalogAudit<T>(
 const CreateProductInputSchema = z
   .object({
     nome: ProductNameSchema,
-    precoCents: SafePositiveIntegerSchema,
+    precoCents: ValorUnitarioPresenteWriteSchema,
     quantidadeSugerida: SafePositiveIntegerSchema.default(1),
     emoji: EmojiSchema,
     bgColor: BgColorInputSchema,
@@ -3059,7 +3060,7 @@ const UpdateProductInputSchema = z
   .object({
     id: UuidSchema,
     nome: ProductNameSchema.optional(),
-    precoCents: SafePositiveIntegerSchema.optional(),
+    precoCents: ValorUnitarioPresenteWriteSchema.optional(),
     quantidadeSugerida: SafePositiveIntegerSchema.optional(),
     emoji: EmojiSchema.optional(),
     bgColor: BgColorInputSchema.optional(),
