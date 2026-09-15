@@ -948,6 +948,12 @@ export {
   RemoverContribuicaoInputSchema,
   removerContribuicao,
 } from './use-cases/arrecadacao/remover-contribuicao.js';
+export type { ValorUnitarioPresenteWrite } from './use-cases/arrecadacao/valor-unitario-presente.js';
+export {
+  VALOR_UNITARIO_PRESENTE_MINIMO_CENTS,
+  VALOR_UNITARIO_PRESENTE_MINIMO_MESSAGE,
+  ValorUnitarioPresenteWriteSchema,
+} from './use-cases/arrecadacao/valor-unitario-presente.js';
 // Plan 0015 (aperture-ucgok): admin estorno + admin batch transfer.
 export type {
   EstornarPagamentoDeps,

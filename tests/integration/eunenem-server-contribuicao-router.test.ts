@@ -32,6 +32,7 @@ import {
 import { ObjectStorageMemory } from '../../src/adapters/storage/object-storage.memory.js';
 import { AuthServiceMemoria } from '../../src/adapters/usuario/auth-service.memory.js';
 import { UsuarioRepositoryMemory } from '../../src/adapters/usuario/repository.memory.js';
+import { contribuicaoAtualizada } from '../../src/domain/arrecadacao/entities/contribuicao.js';
 import { criarRecebedorInicial } from '../../src/domain/arrecadacao/entities/recebedor.js';
 import { criarItemContribuicao } from '../../src/domain/pagamentos/entities/item-do-pagamento.js';
 import {
@@ -608,7 +609,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
         caller.contribuicao.create({
           idCampanha: randomUUID(),
           nome: 'X',
-          valor: 100,
+          valor: 1000,
           quantidade: 1,
         }),
       );
@@ -633,6 +634,79 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
   });
 
   describe('createBulk — bulk insert across M items × qty (aperture-d6atj fix-up)', () => {
+    it.each([
+      1, 999,
+    ])('rejects unit value %i before any contribution is persisted', async (valor) => {
+      const alice = await seedUserWithCampanha(rig, {
+        handle: 'alice',
+        email: 'alice@test.local',
+      });
+      const caller = rig.callerFor(alice.cookieHeader);
+
+      const err = await expectTrpcError(() =>
+        caller.contribuicao.create({
+          idCampanha: alice.idCampanha,
+          nome: 'Abaixo do mínimo',
+          valor,
+          quantidade: 100,
+        }),
+      );
+      expect(err.code).toBe('BAD_REQUEST');
+      expect(err.message).toContain('pelo menos R$ 10,00');
+      await expect(caller.contribuicao.list()).resolves.toEqual([]);
+    });
+
+    it('rejects the complete mixed bulk before save when one unit value is 999', async () => {
+      const alice = await seedUserWithCampanha(rig, {
+        handle: 'alice',
+        email: 'alice@test.local',
+      });
+      const caller = rig.callerFor(alice.cookieHeader);
+
+      const err = await expectTrpcError(() =>
+        caller.contribuicao.createBulk({
+          idCampanha: alice.idCampanha,
+          items: [
+            { nome: 'Válido', valor: 1_000, quantidade: 1 },
+            { nome: 'Inválido', valor: 999, quantidade: 100 },
+          ],
+        }),
+      );
+      expect(err.code).toBe('BAD_REQUEST');
+      expect(err.message).toContain('pelo menos R$ 10,00');
+      await expect(caller.contribuicao.list()).resolves.toEqual([]);
+    });
+
+    it('keeps a historical subminimum row readable and patchable when valor is omitted', async () => {
+      const alice = await seedUserWithCampanha(rig, {
+        handle: 'alice',
+        email: 'alice@test.local',
+      });
+      const deps = (rig as TestRig & { deps: ServerDeps }).deps;
+      const caller = rig.callerFor(alice.cookieHeader);
+      const created = await caller.contribuicao.create({
+        idCampanha: alice.idCampanha,
+        nome: 'Histórico',
+        valor: 1_000,
+        quantidade: 1,
+      });
+      const id = requireFirst(created.ids);
+      const row = await deps.contribuicaoRepository.findById(id);
+      if (!row) throw new Error('expected persisted contribution');
+      await deps.contribuicaoRepository.save(contribuicaoAtualizada(row, { valor: 999 }));
+
+      await expect(
+        caller.contribuicao.update({ idCampanha: alice.idCampanha, id, nome: 'Ainda legível' }),
+      ).resolves.toMatchObject({ nome: 'Ainda legível', valor: 999 });
+      const err = await expectTrpcError(() =>
+        caller.contribuicao.update({ idCampanha: alice.idCampanha, id, valor: 999 }),
+      );
+      expect(err.code).toBe('BAD_REQUEST');
+      await expect(caller.contribuicao.list()).resolves.toEqual([
+        expect.objectContaining({ id, nome: 'Ainda legível', valor: 999 }),
+      ]);
+    });
+
     it('N=1 item, qty=1 → produces 1 contribuicao via single INSERT', async () => {
       const alice = await seedUserWithCampanha(rig, {
         handle: 'alice',
@@ -726,7 +800,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
 
       const items = Array.from({ length: 50 }, (_, i) => ({
         nome: `Single ${i}`,
-        valor: 100,
+        valor: 1000,
         quantidade: 1,
       }));
 
@@ -751,8 +825,8 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       const result = (await caller.contribuicao.createBulk({
         idCampanha: alice.idCampanha,
         items: [
-          { nome: 'A', valor: 100, quantidade: 2 },
-          { nome: 'B', valor: 200, quantidade: 3 },
+          { nome: 'A', valor: 1000, quantidade: 2 },
+          { nome: 'B', valor: 2000, quantidade: 3 },
         ],
       })) as { ids: string[] };
 
@@ -776,7 +850,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
         caller.contribuicao.createBulk({
           idCampanha: alice.idCampanha,
           items: [
-            { nome: 'Valid', valor: 100, quantidade: 5 },
+            { nome: 'Valid', valor: 1000, quantidade: 5 },
             { nome: 'Invalid', valor: -1, quantidade: 1 },
           ],
         }),
@@ -841,7 +915,7 @@ describe('eunenem-server contribuicao tRPC router (aperture-d6atj)', () => {
       const err = await expectTrpcError(() =>
         caller.contribuicao.createBulk({
           idCampanha: randomUUID(),
-          items: [{ nome: 'X', valor: 100, quantidade: 1 }],
+          items: [{ nome: 'X', valor: 1000, quantidade: 1 }],
         }),
       );
       expect(err.code).toBe('UNAUTHORIZED');

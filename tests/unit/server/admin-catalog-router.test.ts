@@ -65,7 +65,7 @@ describe('admin.catalog authorization', () => {
       (caller: Caller) =>
         caller.admin.catalog.createProduct({
           nome: 'Produto',
-          precoCents: 100,
+          precoCents: 1000,
           emoji: '🎁',
           bgColor: 'var(--blue-soft)',
           idCategoria: randomUUID(),
@@ -138,7 +138,7 @@ describe('admin.catalog strict inputs', () => {
       (caller: Caller) =>
         caller.admin.catalog.createProduct({
           nome: 'Produto',
-          precoCents: 100,
+          precoCents: 1000,
           emoji: '🎁',
           bgColor: 'var(--blue-soft)',
           idCategoria: randomUUID(),
@@ -258,6 +258,52 @@ describe('admin.catalog strict inputs', () => {
 });
 
 describe('admin.catalog products', () => {
+  it.each([
+    1, 999,
+  ])('rejects product unit price %i before audit or repository writes', async (precoCents) => {
+    const { audit, caller, repository } = buildRig();
+    const category = makeCatalogoCategoria();
+    await repository.createCategoria(category);
+
+    await expect(
+      caller.admin.catalog.createProduct({
+        nome: 'Abaixo do mínimo',
+        precoCents,
+        emoji: '🎁',
+        bgColor: 'var(--blue-soft)',
+        idCategoria: category.id,
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(audit.events).toEqual([]);
+    await expect(caller.admin.catalog.listProducts({ includeInactive: true })).resolves.toEqual({
+      products: [],
+      total: 0,
+    });
+  });
+
+  it('keeps a historical subminimum product readable and patchable without precoCents', async () => {
+    const { audit, caller, repository } = buildRig();
+    const category = makeCatalogoCategoria();
+    const product = makeCatalogoProduto(category.id, { precoCents: 999 });
+    await repository.createCategoria(category);
+    await repository.createProduto(product);
+
+    await expect(caller.admin.catalog.listProducts({})).resolves.toMatchObject({
+      products: [expect.objectContaining({ id: product.id, precoCents: 999 })],
+      total: 1,
+    });
+    await expect(
+      caller.admin.catalog.updateProduct({ id: product.id, nome: 'Histórico atualizado' }),
+    ).resolves.toMatchObject({ nome: 'Histórico atualizado', precoCents: 999 });
+    const auditCount = audit.events.length;
+    for (const precoCents of [1, 999]) {
+      await expect(
+        caller.admin.catalog.updateProduct({ id: product.id, precoCents }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      expect(audit.events).toHaveLength(auditCount);
+    }
+  });
+
   it('creates, lists, patches and toggles complete product DTOs with server-owned positions', async () => {
     const { caller, repository } = buildRig();
     const sourceCategory = makeCatalogoCategoria({ position: 0 });
@@ -359,7 +405,7 @@ describe('admin.catalog products', () => {
     await expect(
       caller.admin.catalog.createProduct({
         nome: 'Sem categoria',
-        precoCents: 100,
+        precoCents: 1000,
         emoji: '🎁',
         bgColor: 'var(--blue-soft)',
         idCategoria: randomUUID(),
@@ -393,7 +439,7 @@ describe('admin.catalog products', () => {
       await expect(
         caller.admin.catalog.createProduct({
           nome: 'Imagem inválida',
-          precoCents: 100,
+          precoCents: 1000,
           emoji: '🎁',
           bgColor: 'var(--blue-soft)',
           idCategoria: category.id,
@@ -450,7 +496,7 @@ describe('admin.catalog products', () => {
     await expect(
       caller.admin.catalog.createProduct({
         nome: 'x'.repeat(201),
-        precoCents: 100,
+        precoCents: 1000,
         emoji: '🎁',
         bgColor: 'var(--blue-soft)',
         idCategoria: category.id,
@@ -867,7 +913,7 @@ describe('admin.catalog setListItems and upload presign', () => {
     await expect(
       caller.admin.catalog.createProduct({
         nome: 'Produto com upload',
-        precoCents: 100,
+        precoCents: 1000,
         emoji: '🎁',
         bgColor: 'var(--blue-soft)',
         idCategoria: category.id,
@@ -928,14 +974,14 @@ describe('admin.catalog setListItems and upload presign', () => {
     });
     const product = await caller.admin.catalog.createProduct({
       nome: 'Audit product',
-      precoCents: 100,
+      precoCents: 1000,
       emoji: '🎁',
       bgColor: 'var(--blue-soft)',
       idCategoria: category.id,
     });
     await caller.admin.catalog.updateProduct({
       id: product.id,
-      precoCents: 200,
+      precoCents: 2000,
     });
     await caller.admin.catalog.setProductAtivo({
       id: product.id,
@@ -1017,7 +1063,7 @@ describe('admin.catalog setListItems and upload presign', () => {
     await expect(
       caller.admin.catalog.createProduct({
         nome: 'Rejected product',
-        precoCents: 100,
+        precoCents: 1000,
         emoji: '🎁',
         bgColor: 'var(--blue-soft)',
         idCategoria: missingCategoryId,

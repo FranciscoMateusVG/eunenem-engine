@@ -6,14 +6,14 @@ import {
   contribuicaoAtualizada,
 } from '../../domain/arrecadacao/entities/contribuicao.js';
 import { IdContribuicaoSchema } from '../../domain/arrecadacao/value-objects/ids.js';
-import { MoneyCentsSchema } from '../../domain/money.js';
 import { ArrecadacaoContribuicaoNaoEncontradaError } from '../../errors/arrecadacao/contribuicao-nao-encontrada.error.js';
 import { ArrecadacaoInputInvalidoError } from '../../errors/arrecadacao/input-invalido.error.js';
 import type { Observability } from '../../observability/observability.js';
+import { ValorUnitarioPresenteWriteSchema } from './valor-unitario-presente.js';
 
 export const AlterarValorContribuicaoInputSchema = z.object({
   idContribuicao: IdContribuicaoSchema,
-  valor: MoneyCentsSchema,
+  valor: ValorUnitarioPresenteWriteSchema,
 });
 
 export type AlterarValorContribuicaoInput = z.infer<typeof AlterarValorContribuicaoInputSchema>;
