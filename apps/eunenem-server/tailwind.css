@@ -8072,3 +8072,14 @@ button.painel-topbar-link:hover {
     align-self: flex-end;
   }
 }
+
+/* aperture-4e1qo — owner "Editar lista de presentes" link on the public page.
+ * Inherits .btn-outline; adds the touch floor + a visible focus ring. */
+.eu-owner-edit-lista {
+  min-height: 44px;
+  gap: 8px;
+}
+.eu-owner-edit-lista:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(201, 165, 216, 0.35);
+}

@@ -13,6 +13,7 @@ import { Story } from '@/components/eunenem/Story';
 import { TweaksPanel } from '@/components/eunenem/TweaksPanel';
 import { TweaksProvider } from '@/components/eunenem/TweaksContext';
 import type { TweaksState } from '@/lib/mocks/tweaksDefaults';
+import { ownerListaEditHref } from '@/lib/pagina-owner';
 import { normalizeHex, triadFor } from '@/lib/palette';
 import { sendPageView } from '@/lib/analytics.js';
 import { CartProvider } from '@/lib/cart.js';
@@ -137,6 +138,9 @@ export function PaginaPage({
   initialTweaks.fotoPerfilUrl = data?.fotoPerfilUrl ?? null;
   initialTweaks.fotoHistoriaUrl = data?.fotoHistoriaUrl ?? null;
   const isOwner = data?.isOwner ?? false;
+  // aperture-4e1qo — owner shortcut to edit THIS campanha's gift list
+  // (fail-closed: null unless the server says owner + id + creator slug).
+  const ownerEditHref = ownerListaEditHref(data);
 
   return (
     <TweaksProvider initialState={initialTweaks}>
@@ -156,7 +160,7 @@ export function PaginaPage({
               fotoHistoria={data?.fotoHistoriaUrl ?? null}
               editable={isOwner}
             />
-            <Marketplace slug={slug} />
+            <Marketplace slug={slug} ownerEditHref={ownerEditHref} />
             <HowTo />
             <Messages slug={slug} />
           </main>
