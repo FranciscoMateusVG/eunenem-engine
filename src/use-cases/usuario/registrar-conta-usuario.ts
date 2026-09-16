@@ -27,10 +27,10 @@ import {
 } from '../../domain/usuario/value-objects/ids.js';
 import { NomeExibicaoUsuarioSchema } from '../../domain/usuario/value-objects/nome-exibicao-usuario.js';
 import { PERMISSOES_PADRAO } from '../../domain/usuario/value-objects/permissao.js';
-import type { SlugUsuario } from '../../domain/usuario/value-objects/slug-usuario.js';
 import { UsuarioEmailJaExisteError } from '../../errors/usuario/email-ja-existe.error.js';
 import { UsuarioInputInvalidoError } from '../../errors/usuario/input-invalido.error.js';
 import { UsuarioPlataformaNaoEncontradaError } from '../../errors/usuario/plataforma-nao-encontrada.error.js';
+import { UsuarioSlugJaExisteError } from '../../errors/usuario/slug-ja-existe.error.js';
 import type { Observability } from '../../observability/observability.js';
 import { adicionarOpcaoContribuicao } from '../arrecadacao/adicionar-opcao-contribuicao.js';
 import { criarCampanha } from '../arrecadacao/criar-campanha.js';
@@ -115,6 +115,33 @@ async function resolveInitialCampaignTemplateItems(deps: {
     );
   }
   return prepareInitialCampaignTemplateItems(configured.template, catalogImageUrlReadable);
+}
+
+async function saveRegistroWithUniqueSlug(input: {
+  readonly usuarioRepository: UsuarioRepository;
+  readonly usuario: Omit<Usuario, 'slug'>;
+  readonly conta: Conta;
+  readonly base: ReturnType<typeof deriveSlugBase>;
+}): Promise<Usuario> {
+  const { usuarioRepository, usuario: usuarioSemSlug, conta, base } = input;
+  // Every attempt is one repository transaction. A typed slug collision rolls
+  // the whole Usuario+Conta aggregate back before the next distinct candidate.
+  for (let attempt = 1; attempt <= MAX_SLUG_COLLISION_ATTEMPTS; attempt++) {
+    const slug = slugWithSuffix(base, attempt);
+    if (await usuarioRepository.findUsuarioBySlug(usuarioSemSlug.idPlataforma, slug)) continue;
+
+    const candidate: Usuario = { ...usuarioSemSlug, slug };
+    try {
+      await usuarioRepository.saveRegistroDomain({ usuario: candidate, conta });
+      return candidate;
+    } catch (error) {
+      if (error instanceof UsuarioSlugJaExisteError) continue;
+      throw error;
+    }
+  }
+  throw new UsuarioInputInvalidoError(
+    `Não foi possível gerar um slug único para "${base}" em ${MAX_SLUG_COLLISION_ATTEMPTS} tentativas`,
+  );
 }
 
 export const RegistrarContaUsuarioInputSchema = z.object({
@@ -502,30 +529,9 @@ export async function provisionarContaUsuarioDominio(
         catalogImageUrlReadable,
       });
 
-      // step 2: derive slug + walk suffix collisions within the plataforma
-      // (aperture-khbow). Pre-check is best-effort — a concurrent race could
-      // still slip through, in which case the Postgres unique constraint
-      // raises UsuarioSlugJaExisteError and the caller can retry.
+      // step 2: derive slug. The bounded loop below treats availability reads
+      // as an optimisation only; the UNIQUE constraint is the source of truth.
       const base = deriveSlugBase(data.nome);
-      const slug = await resolveSlugInPlataforma(usuarioRepository, data.idPlataforma, base);
-      span.setAttribute('usuario.slug', slug);
-
-      // step 3: domain aggregate
-      const usuario: Usuario = {
-        id: data.idUsuario,
-        idPlataforma: data.idPlataforma,
-        idConta,
-        email: data.email,
-        nomeExibicao: data.nome,
-        slug,
-        criadoEm,
-        // Plan 0018 Phase A (aperture-omswg). Fresh registrations start
-        // with `null` so the first-time tutorial overlay fires on first
-        // visit.
-        tutorialCompletadoEm: null,
-        onboardingConcluidoEm: null,
-      };
-
       const conta: Conta = {
         id: idConta,
         idUsuario: data.idUsuario,
@@ -533,13 +539,29 @@ export async function provisionarContaUsuarioDominio(
         criadaEm: criadoEm,
       };
 
-      // saveRegistroDomain maps the (id_plataforma, email) UNIQUE violation
-      // to UsuarioEmailJaExisteError — the typed backstop the self-heal
-      // caller catches to win the concurrent-double-provision race
-      // (Cipher constraint #4). No compensation is pushed for a FAILED
-      // insert (nothing was written); the undo is only registered after a
-      // SUCCESSFUL write.
-      await usuarioRepository.saveRegistroDomain({ usuario, conta });
+      // step 3: reserve one of at most 50 distinct candidates. Only a typed
+      // slug collision advances the suffix; all other errors fail closed.
+      const usuario = await saveRegistroWithUniqueSlug({
+        usuarioRepository,
+        base,
+        conta,
+        usuario: {
+          id: data.idUsuario,
+          idPlataforma: data.idPlataforma,
+          idConta,
+          email: data.email,
+          nomeExibicao: data.nome,
+          criadoEm,
+          // Plan 0018 Phase A (aperture-omswg). Fresh registrations start
+          // with `null` so the first-time tutorial overlay fires on first
+          // visit.
+          tutorialCompletadoEm: null,
+          onboardingConcluidoEm: null,
+        },
+      });
+      span.setAttribute('usuario.slug', usuario.slug);
+
+      // Compensation exists only after the one successful aggregate write.
       compensations.push({
         label: 'usuarioRepository.removeRegistroDomain',
         undo: () => usuarioRepository.removeRegistroDomain(data.idUsuario),
@@ -636,25 +658,4 @@ export function construirTituloListaPadrao(nomeExibicao: string): string {
       ? `${nomeExibicao.slice(0, orcamento - 1).trimEnd()}…`
       : nomeExibicao;
   return `${prefix}${nomeAjustado}`;
-}
-
-/**
- * Walk `base`, `base-2`, `base-3`… within `idPlataforma` until
- * `findUsuarioBySlug` returns undefined. Pre-check only — the eventual
- * `saveRegistroDomain` still relies on the Postgres unique constraint as
- * the source of truth in case a concurrent register raced us.
- */
-async function resolveSlugInPlataforma(
-  repo: UsuarioRepository,
-  idPlataforma: string,
-  base: SlugUsuario,
-): Promise<SlugUsuario> {
-  for (let attempt = 1; attempt <= MAX_SLUG_COLLISION_ATTEMPTS; attempt++) {
-    const candidate = slugWithSuffix(base, attempt);
-    const taken = await repo.findUsuarioBySlug(idPlataforma, candidate);
-    if (!taken) return candidate;
-  }
-  throw new UsuarioInputInvalidoError(
-    `Não foi possível gerar um slug único para "${base}" em ${MAX_SLUG_COLLISION_ATTEMPTS} tentativas`,
-  );
 }

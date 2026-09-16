@@ -342,7 +342,15 @@ export async function seedGateWalker(baseURL?: string): Promise<MagicLinkSession
     }
     campanhaB = await ensurePresenteOpcao(deps, campanhaB);
     await ensureRecebedor(deps, campanhaB);
-    await deps.campanhaRepository.updateSlug(campanhaB.id, SLUG_CAMP_B, null, false);
+    const slugResult = await deps.campanhaRepository.atualizarSlugAtomico({
+      idConta: usuario.idConta,
+      idCampanha: campanhaB.id,
+      slug: SLUG_CAMP_B,
+      alteradoEm: CLOCK_B,
+    });
+    if (slugResult.status !== 'updated') {
+      throw new Error(`gate fixture could not claim campaign slug: ${slugResult.status}`);
+    }
     await ensureConvite(deps, campanhaB);
     // B's perfil MUST differ from A's (the isolation axis) — distinct nomeBebe.
     await seedPerfilCampanha(deps, campanhaB, BEBE_B, DATA_EVENTO_B);

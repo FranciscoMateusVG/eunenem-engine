@@ -275,8 +275,8 @@ function Field({
 // campanhas.definirSlug with graceful inline errors (BAD_REQUEST codes
 // never surface as a 500), and a confirm step warning both that changing
 // the slug breaks already-shared links AND that this is the campanha's
-// ONE allowed change via this screen (origem: 'perfil' consumes it — the
-// SetupCampanhaWizard's own definirSlug call, origem: 'setup', does not).
+// ONE allowed replacement. The server infers initial versus replacement from
+// persisted state; the client does not send an authority-bearing origin flag.
 // currentSlug may be "" when the campanha has no slug of its own yet
 // (falls back to the /c/<uuid> public link shown in the "copiar link"
 // block below, outside this component).
@@ -435,7 +435,7 @@ function SlugEditor({
                   type="button"
                   className="perfil-btn perfil-btn-primary"
                   disabled={definirSlug.isPending}
-                  onClick={() => definirSlug.mutate({ idCampanha, slug: draft, origem: "perfil" })}
+                  onClick={() => definirSlug.mutate({ idCampanha, slug: draft })}
                 >
                   {definirSlug.isPending ? (
                     <>

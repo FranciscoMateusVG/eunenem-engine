@@ -6,8 +6,11 @@ import { RecebedorRepositoryMemory } from '../../../src/adapters/arrecadacao/rec
 import { CatalogoRepositoryMemory } from '../../../src/adapters/catalogo/repository.memory.js';
 import { PlataformaRepositoryMemory } from '../../../src/adapters/plataforma/repository.memory.js';
 import { AuthServiceMemoria } from '../../../src/adapters/usuario/auth-service.memory.js';
+import type { UsuarioRepository } from '../../../src/adapters/usuario/repository.js';
 import { UsuarioRepositoryMemory } from '../../../src/adapters/usuario/repository.memory.js';
 import type { Contribuicao } from '../../../src/domain/arrecadacao/entities/contribuicao.js';
+import { UsuarioInputInvalidoError } from '../../../src/errors/usuario/input-invalido.error.js';
+import { UsuarioSlugJaExisteError } from '../../../src/errors/usuario/slug-ja-existe.error.js';
 import { ID_PLATAFORMA_EUNENEM } from '../../../src/index.js';
 import { NoopLogger } from '../../../src/observability/noop-logger.js';
 import { noopTracer } from '../../../src/observability/tracer.js';
@@ -63,6 +66,50 @@ async function seedSelectedTemplate(
 }
 
 describe('initial campaign gift template provisioning', () => {
+  it('bounds typed slug-collision retries to 50 distinct valid candidates with no partial aggregate', async () => {
+    const rig = buildRig();
+    const attemptedSlugs: string[] = [];
+    const usuarioRepository = new Proxy(rig.usuarioRepository, {
+      get(target, property) {
+        if (property === 'findUsuarioBySlug') return async () => undefined;
+        if (property === 'saveRegistroDomain') {
+          return async (bundle: Parameters<UsuarioRepository['saveRegistroDomain']>[0]) => {
+            attemptedSlugs.push(bundle.usuario.slug);
+            throw new UsuarioSlugJaExisteError(bundle.usuario.slug);
+          };
+        }
+        const value = Reflect.get(target, property, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    }) as UsuarioRepository;
+    const idUsuario = randomUUID();
+
+    await expect(
+      provisionarContaUsuarioDominio(
+        {
+          ...rig,
+          usuarioRepository,
+          clock: () => NOW,
+          catalogImageUrlReadable: () => true,
+          observability,
+        },
+        {
+          idUsuario,
+          idPlataforma: ID_PLATAFORMA_EUNENEM,
+          email: 'slug-exhaustion@example.com',
+          nome: 'a'.repeat(60),
+        },
+      ),
+    ).rejects.toBeInstanceOf(UsuarioInputInvalidoError);
+
+    expect(attemptedSlugs).toHaveLength(50);
+    expect(new Set(attemptedSlugs).size).toBe(50);
+    expect(attemptedSlugs[0]).toBe('a'.repeat(30));
+    expect(attemptedSlugs[49]).toBe(`${'a'.repeat(27)}-50`);
+    expect(attemptedSlugs.every((slug) => /^[a-z][a-z0-9-]{2,29}$/.test(slug))).toBe(true);
+    expect(await rig.usuarioRepository.findUsuarioById(idUsuario as never)).toBeUndefined();
+  });
+
   it('preserves the historical empty campaign when no default is configured', async () => {
     const rig = buildRig();
     const result = await provisionarContaUsuarioDominio(

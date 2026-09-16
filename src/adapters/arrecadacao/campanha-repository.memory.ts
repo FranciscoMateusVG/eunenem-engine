@@ -9,7 +9,11 @@ import type {
   IdConta,
   IdPlataformaReferencia,
 } from '../../domain/arrecadacao/value-objects/ids.js';
-import type { CampanhaRepository } from './campanha-repository.js';
+import type {
+  AtualizarSlugCampanhaInput,
+  AtualizarSlugCampanhaResult,
+  CampanhaRepository,
+} from './campanha-repository.js';
 import type { RecebedorRepository } from './recebedor-repository.js';
 import type { ArrecadacaoRepositoryContext } from './repository-context.js';
 
@@ -29,7 +33,17 @@ export class CampanhaRepositoryMemory implements CampanhaRepository {
     return tracer.startActiveSpan('db.arrecadacao_campanhas.save', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPSERT' });
       try {
-        this.campanhas.set(campanha.id, campanha);
+        const existing = this.campanhas.get(campanha.id);
+        this.campanhas.set(
+          campanha.id,
+          existing
+            ? {
+                ...campanha,
+                slug: existing.slug,
+                slugAlteradoEm: existing.slugAlteradoEm,
+              }
+            : campanha,
+        );
         span.setStatus({ code: SpanStatusCode.OK });
       } catch (error: unknown) {
         span.recordException(error as Error);
@@ -319,27 +333,46 @@ export class CampanhaRepositoryMemory implements CampanhaRepository {
     });
   }
 
-  async updateSlug(
-    idCampanha: IdCampanha,
-    slug: string | null,
-    alteradoEm: Date | null,
-    marcarAlteracao: boolean,
+  async atualizarSlugAtomico(
+    input: AtualizarSlugCampanhaInput,
     _context?: ArrecadacaoRepositoryContext,
-  ): Promise<void> {
-    return tracer.startActiveSpan('db.arrecadacao_campanhas.updateSlug', async (span) => {
+  ): Promise<AtualizarSlugCampanhaResult> {
+    return tracer.startActiveSpan('db.arrecadacao_campanhas.atualizarSlugAtomico', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
       try {
-        // Mirrors the Postgres adapter — no-op for unknown id (the caller
-        // owner-gates before calling). marcarAlteracao=true (perfil editor
-        // consuming its one change) guards against a concurrent race via
-        // slugAlteradoEm === null; origem:'setup' calls pass
-        // marcarAlteracao=false and must NOT be blocked even when the
-        // campanha already has slugAlteradoEm set.
-        const campanha = this.campanhas.get(idCampanha);
-        if (campanha && (!marcarAlteracao || campanha.slugAlteradoEm === null)) {
-          this.campanhas.set(idCampanha, { ...campanha, slug, slugAlteradoEm: alteradoEm });
+        const campanha = this.campanhas.get(input.idCampanha);
+        if (!campanha?.idsAdministradores.includes(input.idConta)) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return { status: 'not_found_or_not_authorized' } as const;
         }
+
+        if (campanha.slug === input.slug) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return { status: 'updated', kind: 'idempotent' } as const;
+        }
+        if (campanha.slugAlteradoEm !== null) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return { status: 'slug_ja_alterado' } as const;
+        }
+        const conflito = [...this.campanhas.values()].some(
+          (candidate) =>
+            candidate.id !== campanha.id &&
+            candidate.slug === input.slug &&
+            candidate.idsAdministradores.includes(input.idConta),
+        );
+        if (conflito) {
+          span.setStatus({ code: SpanStatusCode.OK });
+          return { status: 'slug_em_uso' } as const;
+        }
+
+        const initial = campanha.slug === null;
+        this.campanhas.set(input.idCampanha, {
+          ...campanha,
+          slug: input.slug,
+          slugAlteradoEm: initial ? null : input.alteradoEm,
+        });
         span.setStatus({ code: SpanStatusCode.OK });
+        return { status: 'updated', kind: initial ? 'initial' : 'changed' } as const;
       } catch (error: unknown) {
         span.recordException(error as Error);
         span.setStatus({ code: SpanStatusCode.ERROR });

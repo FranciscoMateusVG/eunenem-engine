@@ -38,6 +38,10 @@ describe('deriveSlugBase', () => {
     expect(deriveSlugBase('A')).toBe('usuario');
   });
 
+  it.each(['admin', 'api', 'sucesso', 'login'])('falls back for reserved slug "%s"', (name) => {
+    expect(deriveSlugBase(name)).toBe('usuario');
+  });
+
   it('truncates very long first segments to 30 chars', () => {
     const longName = 'a'.repeat(60);
     const result = deriveSlugBase(longName);
