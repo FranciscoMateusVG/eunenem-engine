@@ -1,0 +1,108 @@
+openapi: 3.1.0
+info:
+  title: EuNeném admin initial-campaign template contract
+  version: 1.0.0
+  description: >-
+    tRPC wire contract for selecting the catalogue template copied into NEW
+    users' first campaign. This setting never backfills existing campaigns.
+servers:
+  - url: https://eunenem.com
+paths:
+  /api/trpc/admin.catalog.setInitialCampaignDefault:
+    post:
+      operationId: adminCatalogSetInitialCampaignDefault
+      summary: Atomically select, replace, or clear the initial-campaign template
+      security:
+        - sessionCookie: []
+      x-authorization: EuNeném admin allowlist
+      x-rate-limit-tier: authenticated-admin; no procedure-specific limiter
+      parameters:
+        - in: query
+          name: batch
+          required: true
+          schema:
+            type: integer
+            const: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: ["0"]
+              additionalProperties: false
+              properties:
+                "0":
+                  type: object
+                  required: [id]
+                  additionalProperties: false
+                  properties:
+                    id:
+                      description: Catalogue-list UUID, or null to clear the setting.
+                      oneOf:
+                        - type: string
+                          format: uuid
+                        - type: "null"
+            examples:
+              select:
+                value:
+                  "0":
+                    id: c081a858-df0c-4e5f-ba12-219bc0b6f48a
+              clear:
+                value:
+                  "0":
+                    id: null
+      responses:
+        "200":
+          description: Marker changed atomically after full template validation.
+          content:
+            application/json:
+              schema:
+                type: array
+                minItems: 1
+                maxItems: 1
+                items:
+                  type: object
+                  required: [result]
+                  properties:
+                    result:
+                      type: object
+                      required: [data]
+                      properties:
+                        data:
+                          type: object
+                          required: [selectedId]
+                          properties:
+                            selectedId:
+                              oneOf:
+                                - type: string
+                                  format: uuid
+                                - type: "null"
+              example:
+                - result:
+                    data:
+                      selectedId: c081a858-df0c-4e5f-ba12-219bc0b6f48a
+        "400":
+          description: Invalid tRPC/Zod input envelope.
+        "401":
+          description: Missing or invalid session.
+        "403":
+          description: Session is not an allowlisted EuNeném admin.
+        "404":
+          description: Catalogue list does not exist.
+        "409":
+          description: >-
+            Selected list is inactive, empty, exceeds 50 active items, or an
+            item violates the copied-gift/image contract. The previous marker
+            remains unchanged.
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: better-auth.session_token
+x-listLists-response-change:
+  procedure: admin.catalog.listLists
+  field: aplicarCampanhaInicial
+  type: boolean
+  semantics: Exactly one row may be true; all rows are false when unset.

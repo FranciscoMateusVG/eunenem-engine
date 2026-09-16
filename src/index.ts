@@ -19,6 +19,7 @@ export type { CatRepository } from './adapters/cat-repository.js';
 export type {
   CatalogoCategoria,
   CatalogoCategoriaComContagem,
+  CatalogoInitialCampaignTemplate,
   CatalogoLista,
   CatalogoListaComItens,
   CatalogoListaItem,
@@ -31,8 +32,12 @@ export type {
   FindCatalogoProdutosPageInput,
   FindCatalogoProdutosPageOutput,
   ReplaceCatalogoListaItensOutcome,
+  SetInitialCampaignDefaultOutcome,
 } from './adapters/catalogo/repository.js';
-export { CatalogoConflictError } from './adapters/catalogo/repository.js';
+export {
+  CatalogoConflictError,
+  CatalogoInitialCampaignDefaultInvalidError,
+} from './adapters/catalogo/repository.js';
 export { CatalogoRepositoryMemory } from './adapters/catalogo/repository.memory.js';
 export { CatalogoRepositoryPostgres } from './adapters/catalogo/repository.postgres.js';
 export type {
@@ -1403,7 +1408,9 @@ export type {
   RegistrarContaUsuarioResult,
 } from './use-cases/usuario/registrar-conta-usuario.js';
 export {
+  InitialCampaignGiftTemplateInvalidError,
   ProvisionarContaUsuarioDominioInputSchema,
+  prepareInitialCampaignTemplateItems,
   provisionarContaUsuarioDominio,
   RegistrarContaUsuarioInputSchema,
   registrarContaUsuario,

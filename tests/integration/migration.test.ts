@@ -230,6 +230,43 @@ describe('Migration round-trip', () => {
     expect(tableNames).toContain('catalogo_produtos');
     expect(tableNames).toContain('catalogo_listas');
     expect(tableNames).toContain('catalogo_lista_itens');
+    const initialCampaignDefault = await getColumn(
+      db,
+      'catalogo_listas',
+      'aplicar_campanha_inicial',
+    );
+    expect(initialCampaignDefault).toMatchObject({
+      data_type: 'boolean',
+      is_nullable: 'NO',
+    });
+    expect(await getIndexDefinition(db, 'catalogo_listas_initial_campaign_default_uniq')).toContain(
+      'WHERE (aplicar_campanha_inicial = true)',
+    );
+    const initialCampaignRows = await sql<{ id: string; selected: boolean }>`
+      SELECT id, aplicar_campanha_inicial AS selected
+      FROM catalogo_listas
+      ORDER BY id
+      LIMIT 2
+    `.execute(db);
+    expect(initialCampaignRows.rows).toHaveLength(2);
+    expect(initialCampaignRows.rows.every(({ selected }) => selected === false)).toBe(true);
+    const [firstInitialCampaignRow, secondInitialCampaignRow] = initialCampaignRows.rows;
+    if (!firstInitialCampaignRow || !secondInitialCampaignRow) {
+      throw new Error('catalog seed must contain at least two ready lists');
+    }
+    await sql`
+      UPDATE catalogo_listas
+      SET aplicar_campanha_inicial = true
+      WHERE id = ${firstInitialCampaignRow.id}
+    `.execute(db);
+    await expect(
+      sql`
+        UPDATE catalogo_listas
+        SET aplicar_campanha_inicial = true
+        WHERE id = ${secondInitialCampaignRow.id}
+      `.execute(db),
+    ).rejects.toThrow();
+    await sql`UPDATE catalogo_listas SET aplicar_campanha_inicial = false`.execute(db);
 
     const categoryRows = await sql<{
       slug: string;
@@ -442,6 +479,16 @@ describe('Migration round-trip', () => {
     //    migration. Each migrateDown() unwinds exactly the current tip, so
     //    this sequence must start at the LATEST migration and walk earlier.
     //    Adding a new migration on top REQUIRES prepending its down-step here.
+
+    // 20260916_056_catalogo_initial_campaign_default: removes only the
+    // singleton template marker/index. It contains configuration, not copied
+    // campaign evidence, so the ordinary reversible down is intentional.
+    const downInitialCampaignDefault = await migrator.migrateDown();
+    expect(downInitialCampaignDefault.error).toBeUndefined();
+    expect(await getColumn(db, 'catalogo_listas', 'aplicar_campanha_inicial')).toBeUndefined();
+    expect(
+      await getIndexDefinition(db, 'catalogo_listas_initial_campaign_default_uniq'),
+    ).toBeUndefined();
 
     // 20260913_055 is an empty-only rollback: once financial evidence exists,
     // down must fail without dropping or mutating either row.
