@@ -53,13 +53,11 @@ export interface Campanha {
    */
   readonly slug: string | null;
   /**
-   * Momento em que a campanha teve seu slug alterado pelo PAINEL DE
-   * PERFIL (aperture — 1-troca). `null` = ainda não trocou por lá;
-   * não-null = já usou a única troca — `campanhas.definirSlug` com
-   * `origem: 'perfil'` rejeita novas tentativas com
-   * `CampanhaSlugJaAlteradoError`. Chamadas com `origem: 'setup'` (o
-   * modal de configuração inicial da campanha) nunca leem nem gravam
-   * este campo — só a troca feita pelo perfil conta.
+   * Momento em que a campanha consumiu sua única troca de slug público.
+   * `null` significa que o slug ainda é ausente ou só recebeu sua definição
+   * inicial; não-null bloqueia qualquer novo valor. A operação atômica infere
+   * essa transição do estado persistido, sem confiar em uma origem declarada
+   * pelo cliente.
    */
   readonly slugAlteradoEm: Date | null;
   readonly opcoes: readonly OpcaoContribuicao[];

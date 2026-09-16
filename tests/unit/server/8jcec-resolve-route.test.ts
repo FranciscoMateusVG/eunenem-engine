@@ -209,6 +209,22 @@ describe('resolveRoute — /pagina/:slug (regression, spec §9)', () => {
     expect(resolveRoute('/pagina/helena/Outra')).toEqual({ kind: 'not-found' });
     expect(resolveRoute('/pagina/helena/ab')).toEqual({ kind: 'not-found' });
   });
+
+  it('keeps creator slugs capped at 30 while campaign slugs accept 3..60', () => {
+    const creator30 = `a${'b'.repeat(29)}`;
+    const creator31 = `a${'b'.repeat(30)}`;
+    const campanha60 = `c${'d'.repeat(59)}`;
+    const campanha61 = `c${'d'.repeat(60)}`;
+
+    expect(resolveRoute(`/pagina/${creator30}`)).toEqual({ kind: 'pagina', slug: creator30 });
+    expect(resolveRoute(`/pagina/${creator31}`)).toEqual({ kind: 'not-found' });
+    expect(resolveRoute(`/pagina/helena/${campanha60}`)).toEqual({
+      kind: 'pagina',
+      slug: 'helena',
+      campanhaSlug: campanha60,
+    });
+    expect(resolveRoute(`/pagina/helena/${campanha61}`)).toEqual({ kind: 'not-found' });
+  });
 });
 
 describe('resolveRoute — /painel/:slug (regression, spec §9)', () => {

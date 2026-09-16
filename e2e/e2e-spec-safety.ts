@@ -52,6 +52,8 @@ export const E2E_SPEC_SAFETY = [
   { file: 'painel-adicionar-qty.spec.ts', safety: 'non-payment' },
   { file: 'painel-editar-mimo-qty-changed.spec.ts', safety: 'non-payment' },
   { file: 'painel-editar-mimo.spec.ts', safety: 'non-payment' },
+  { file: 'pr2nn-campaign-slug-ui.spec.ts', safety: 'non-payment' },
+  { file: 'pr2nn-creator-slug-ui.spec.ts', safety: 'non-payment' },
   { file: 'qp12y-passwordless-only-gate.spec.ts', safety: 'non-payment' },
   {
     file: 'r5y94-repasse-admin-flow.spec.ts',

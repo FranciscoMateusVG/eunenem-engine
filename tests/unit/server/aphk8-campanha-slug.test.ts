@@ -420,22 +420,28 @@ describe('pagina.resolverCampanhaSlug (aperture-aphk8, PUBLIC)', () => {
   });
 });
 
-describe('campanhas.definirSlug — 1-troca via perfil (aperture)', () => {
-  it("origem: 'perfil' marks slugJaAlterado and a second 'perfil' attempt is FORBIDDEN", async () => {
+describe('campanhas.definirSlug — persisted one-change policy (aperture-pr2nn)', () => {
+  it('initial assignment is free, one replacement is allowed, then a different value is forbidden', async () => {
     const rig = await buildRig();
     const { caller, idCampanha } = await rig.addUser('perfil-a@example.com', 'Ana');
 
     const antes = await caller.campanhas.list();
     expect(antes.novas[0]?.slugJaAlterado).toBe(false);
 
-    await caller.campanhas.definirSlug({ idCampanha, slug: 'primeiro-link', origem: 'perfil' });
+    await caller.campanhas.definirSlug({ idCampanha, slug: 'link-inicial' });
+
+    const inicial = await caller.campanhas.list();
+    expect(inicial.novas[0]?.campanhaSlug).toBe('link-inicial');
+    expect(inicial.novas[0]?.slugJaAlterado).toBe(false);
+
+    await caller.campanhas.definirSlug({ idCampanha, slug: 'primeiro-link' });
 
     const depois = await caller.campanhas.list();
     expect(depois.novas[0]?.campanhaSlug).toBe('primeiro-link');
     expect(depois.novas[0]?.slugJaAlterado).toBe(true);
 
     await expect(
-      caller.campanhas.definirSlug({ idCampanha, slug: 'segundo-link', origem: 'perfil' }),
+      caller.campanhas.definirSlug({ idCampanha, slug: 'segundo-link' }),
     ).rejects.toMatchObject({ code: 'FORBIDDEN', message: 'slug_ja_alterado' });
 
     // The rejected attempt must not have changed anything.
@@ -443,47 +449,43 @@ describe('campanhas.definirSlug — 1-troca via perfil (aperture)', () => {
     expect(final.novas[0]?.campanhaSlug).toBe('primeiro-link');
   });
 
-  it("origem: 'setup' (the default) never sets slugJaAlterado, even called repeatedly", async () => {
+  it('idempotent replay of the current slug consumes no additional change', async () => {
     const rig = await buildRig();
     const { caller, idCampanha } = await rig.addUser('setup-a@example.com', 'Bia');
 
-    await caller.campanhas.definirSlug({ idCampanha, slug: 'lista-inicial', origem: 'setup' });
-    let card = (await caller.campanhas.list()).novas[0];
-    expect(card?.campanhaSlug).toBe('lista-inicial');
-    expect(card?.slugJaAlterado).toBe(false);
+    await caller.campanhas.definirSlug({ idCampanha, slug: 'lista-inicial' });
+    await caller.campanhas.definirSlug({ idCampanha, slug: 'lista-editada' });
+    await caller.campanhas.definirSlug({ idCampanha, slug: '  LISTA-EDITADA  ' });
 
-    // Omitting origem defaults to 'setup' too (back-compat with every
-    // pre-existing caller, including SetupCampanhaWizard's own call shape).
-    await caller.campanhas.definirSlug({ idCampanha, slug: 'lista-editada-de-novo' });
-    card = (await caller.campanhas.list()).novas[0];
-    expect(card?.campanhaSlug).toBe('lista-editada-de-novo');
-    expect(card?.slugJaAlterado).toBe(false);
+    const card = (await caller.campanhas.list()).novas[0];
+    expect(card?.campanhaSlug).toBe('lista-editada');
+    expect(card?.slugJaAlterado).toBe(true);
   });
 
-  it("a prior origem: 'setup' definition does NOT consume the later origem: 'perfil' change", async () => {
+  it('caller-controlled legacy origem cannot bypass the persisted change state', async () => {
     const rig = await buildRig();
     const { caller, idCampanha } = await rig.addUser('mix-a@example.com', 'Caio');
 
-    await caller.campanhas.definirSlug({ idCampanha, slug: 'setup-inicial', origem: 'setup' });
+    await caller.campanhas.definirSlug({ idCampanha, slug: 'setup-inicial' });
     expect((await caller.campanhas.list()).novas[0]?.slugJaAlterado).toBe(false);
 
-    // The FIRST perfil-origin change still succeeds after a setup-origin one.
-    await caller.campanhas.definirSlug({ idCampanha, slug: 'trocado-no-perfil', origem: 'perfil' });
+    await caller.campanhas.definirSlug({ idCampanha, slug: 'trocado-no-perfil' });
     const card = (await caller.campanhas.list()).novas[0];
     expect(card?.campanhaSlug).toBe('trocado-no-perfil');
     expect(card?.slugJaAlterado).toBe(true);
 
-    // Now a SETUP-origin call still works even after the perfil change was
-    // consumed — origem:'setup' never reads/writes slugAlteradoEm.
-    await caller.campanhas.definirSlug({ idCampanha, slug: 'setup-de-novo', origem: 'setup' });
-    const final = (await caller.campanhas.list()).novas[0];
-    expect(final?.campanhaSlug).toBe('setup-de-novo');
-    expect(final?.slugJaAlterado).toBe(true);
-
-    // But a SECOND perfil-origin attempt is still blocked.
+    // Extra object fields are not authority. This models an old or hostile
+    // client still sending the removed discriminator.
     await expect(
-      caller.campanhas.definirSlug({ idCampanha, slug: 'outro-perfil', origem: 'perfil' }),
+      caller.campanhas.definirSlug({
+        idCampanha,
+        slug: 'setup-de-novo',
+        origem: 'setup',
+      } as never),
     ).rejects.toMatchObject({ code: 'FORBIDDEN', message: 'slug_ja_alterado' });
+
+    const final = (await caller.campanhas.list()).novas[0];
+    expect(final?.campanhaSlug).toBe('trocado-no-perfil');
   });
 });
 

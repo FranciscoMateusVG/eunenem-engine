@@ -424,7 +424,7 @@ export function describeCampanhaRepositoryConformance(name: string, options: Con
       expect(found).toEqual([]);
     });
 
-    // ───── slug + updateSlug (aperture-aphk8) ─────
+    // ───── serialized public slug writer (aperture-pr2nn) ─────
 
     it('save round-trips a campanha slug (aperture-aphk8)', async () => {
       const campanha = makeCampanha({ slug: 'minha-lista' });
@@ -438,108 +438,130 @@ export function describeCampanhaRepositoryConformance(name: string, options: Con
       expect((await repo.findById(campanha.id))?.slug).toBeNull();
     });
 
-    it('updateSlug persists the slug without touching the rest of the aggregate (aperture-aphk8)', async () => {
+    it('initial assignment persists the slug without consuming the one replacement', async () => {
+      const idConta = randomUUID();
       const campanha = makeCampanha({
-        idsAdministradores: [randomUUID()],
+        idsAdministradores: [idConta],
         opcoes: [{ id: randomUUID(), tipo: 'presente' }],
       });
       await options.saveCampanha(repo, campanha);
 
-      await repo.updateSlug(campanha.id, 'lista-da-helena', null, false);
+      const result = await repo.atualizarSlugAtomico({
+        idConta: idConta as never,
+        idCampanha: campanha.id,
+        slug: 'lista-da-helena',
+        alteradoEm: new Date('2026-07-11T10:00:00.000Z'),
+      });
 
+      expect(result).toEqual({ status: 'updated', kind: 'initial' });
       const found = await repo.findById(campanha.id);
       expect(found?.slug).toBe('lista-da-helena');
+      expect(found?.slugAlteradoEm).toBeNull();
       expect(found?.titulo).toBe(campanha.titulo);
       expect(found?.idsAdministradores).toEqual(campanha.idsAdministradores);
       expect(found?.opcoes).toEqual(campanha.opcoes);
     });
 
-    it('updateSlug(null) clears a previously-set slug (aperture-aphk8)', async () => {
-      const campanha = makeCampanha({ slug: 'antigo' });
+    it('generic aggregate save cannot overwrite slug state after atomic assignment', async () => {
+      const idConta = randomUUID();
+      const campanha = makeCampanha({ idsAdministradores: [idConta] });
+      await options.saveCampanha(repo, campanha);
+      await repo.atualizarSlugAtomico({
+        idConta: idConta as never,
+        idCampanha: campanha.id,
+        slug: 'estado-serializado',
+        alteradoEm: new Date('2026-07-11T10:00:00.000Z'),
+      });
+
+      // Models a stale aggregate loaded before the slug assignment and later
+      // saved by an unrelated title/admin/option use case.
+      await options.saveCampanha(repo, { ...campanha, titulo: 'Título atualizado' });
+
+      const found = await repo.findById(campanha.id);
+      expect(found?.titulo).toBe('Título atualizado');
+      expect(found?.slug).toBe('estado-serializado');
+      expect(found?.slugAlteradoEm).toBeNull();
+    });
+
+    it('rejects an unknown or unauthorized target without writing', async () => {
+      const owner = randomUUID();
+      const campanha = makeCampanha({ idsAdministradores: [owner] });
       await options.saveCampanha(repo, campanha);
 
-      await repo.updateSlug(campanha.id, null, null, false);
-
+      await expect(
+        repo.atualizarSlugAtomico({
+          idConta: randomUUID() as never,
+          idCampanha: campanha.id,
+          slug: 'nao-autorizado',
+          alteradoEm: new Date('2026-07-11T10:00:00.000Z'),
+        }),
+      ).resolves.toEqual({ status: 'not_found_or_not_authorized' });
       expect((await repo.findById(campanha.id))?.slug).toBeNull();
     });
 
-    it('updateSlug is a no-op for an unknown id (aperture-aphk8)', async () => {
-      await expect(repo.updateSlug(randomUUID(), 'qualquer', null, false)).resolves.not.toThrow();
-    });
-
-    // ───── slugAlteradoEm — 1-troca via perfil (aperture) ─────
-
-    it('updateSlug persists a non-null alteradoEm when marcarAlteracao=true (perfil editor)', async () => {
-      const campanha = makeCampanha();
-      await options.saveCampanha(repo, campanha);
-      const agora = new Date('2026-07-11T10:00:00.000Z');
-
-      await repo.updateSlug(campanha.id, 'minha-lista', agora, true);
-
-      const found = await repo.findById(campanha.id);
-      expect(found?.slug).toBe('minha-lista');
-      expect(found?.slugAlteradoEm).toEqual(agora);
-    });
-
-    it('updateSlug with marcarAlteracao=false (origem: setup) never sets slugAlteradoEm', async () => {
-      const campanha = makeCampanha();
-      await options.saveCampanha(repo, campanha);
-
-      await repo.updateSlug(campanha.id, 'lista-inicial', null, false);
-
-      expect((await repo.findById(campanha.id))?.slugAlteradoEm).toBeNull();
-    });
-
-    it('updateSlug guards against overwriting an already-set alteradoEm when marcarAlteracao=true', async () => {
-      const campanha = makeCampanha();
+    it('allows one replacement, keeps idempotent replay free, and rejects a second replacement', async () => {
+      const idConta = randomUUID();
+      const campanha = makeCampanha({ idsAdministradores: [idConta], slug: 'inicial' });
       await options.saveCampanha(repo, campanha);
       const primeira = new Date('2026-07-11T10:00:00.000Z');
       const segunda = new Date('2026-07-12T10:00:00.000Z');
 
-      await repo.updateSlug(campanha.id, 'primeiro-slug', primeira, true);
-      await repo.updateSlug(campanha.id, 'segundo-slug', segunda, true);
+      await expect(
+        repo.atualizarSlugAtomico({
+          idConta: idConta as never,
+          idCampanha: campanha.id,
+          slug: 'primeiro-slug',
+          alteradoEm: primeira,
+        }),
+      ).resolves.toEqual({ status: 'updated', kind: 'changed' });
+      await expect(
+        repo.atualizarSlugAtomico({
+          idConta: idConta as never,
+          idCampanha: campanha.id,
+          slug: 'primeiro-slug',
+          alteradoEm: segunda,
+        }),
+      ).resolves.toEqual({ status: 'updated', kind: 'idempotent' });
+      await expect(
+        repo.atualizarSlugAtomico({
+          idConta: idConta as never,
+          idCampanha: campanha.id,
+          slug: 'segundo-slug',
+          alteradoEm: segunda,
+        }),
+      ).resolves.toEqual({ status: 'slug_ja_alterado' });
 
-      // Adapter-level guard is defense-in-depth (the router/use-case is the
-      // actual enforcement point) — the slug write itself is skipped once
-      // slugAlteradoEm is non-null, so BOTH slug and slugAlteradoEm stay
-      // pinned to the first write.
       const found = await repo.findById(campanha.id);
       expect(found?.slug).toBe('primeiro-slug');
       expect(found?.slugAlteradoEm).toEqual(primeira);
     });
 
-    it('updateSlug with marcarAlteracao=false (origem: setup) still works after slugAlteradoEm is set', async () => {
-      const campanha = makeCampanha();
-      await options.saveCampanha(repo, campanha);
-      const jaAlterado = new Date('2026-07-11T10:00:00.000Z');
-      await repo.updateSlug(campanha.id, 'trocado-pelo-perfil', jaAlterado, true);
-
-      // origem:'setup' calls pass marcarAlteracao=false and must not be
-      // blocked even though slugAlteradoEm is already set — only
-      // origem:'perfil' (marcarAlteracao=true) is guarded.
-      await repo.updateSlug(campanha.id, 'editado-pelo-setup', jaAlterado, false);
-
-      const found = await repo.findById(campanha.id);
-      expect(found?.slug).toBe('editado-pelo-setup');
-      expect(found?.slugAlteradoEm).toEqual(jaAlterado);
-    });
-
-    // aperture-y8e9w: validarSlug's em_uso check reads slugs THROUGH
-    // findCampanhasByAdministrador (checkCampanhaSlug iterates its result).
-    // The postgres impl currently hydrates via findById, so slug comes along
-    // transitively — but that delegation is an implementation detail. If a
-    // future optimization flattens the N+1 into a hand-rolled row mapping
-    // and forgets slug, validarSlug silently reports every taken slug as
-    // available (the exact operator-reported symptom). This pins the port
-    // promise explicitly at the read path validarSlug actually uses.
-    it('findCampanhasByAdministrador hydrates slug set via updateSlug (aperture-y8e9w)', async () => {
+    it('enforces same-account uniqueness while allowing another account to reuse a slug', async () => {
       const idConta = randomUUID();
       const campanhaA = makeCampanha({ idsAdministradores: [idConta] });
       const campanhaB = makeCampanha({ idsAdministradores: [idConta] });
+      const outroIdConta = randomUUID();
+      const campanhaOutro = makeCampanha({ idsAdministradores: [outroIdConta] });
       await options.saveCampanha(repo, campanhaA);
       await options.saveCampanha(repo, campanhaB);
+      await options.saveCampanha(repo, campanhaOutro);
 
-      await repo.updateSlug(campanhaA.id, 'francisco', null, false);
+      const alterar = (idCampanha: string, owner: string) =>
+        repo.atualizarSlugAtomico({
+          idConta: owner as never,
+          idCampanha: idCampanha as never,
+          slug: 'francisco',
+          alteradoEm: new Date('2026-07-11T10:00:00.000Z'),
+        });
+      await expect(alterar(campanhaA.id, idConta)).resolves.toEqual({
+        status: 'updated',
+        kind: 'initial',
+      });
+      await expect(alterar(campanhaB.id, idConta)).resolves.toEqual({ status: 'slug_em_uso' });
+      await expect(alterar(campanhaOutro.id, outroIdConta)).resolves.toEqual({
+        status: 'updated',
+        kind: 'initial',
+      });
 
       const campanhas = await repo.findCampanhasByAdministrador(idConta);
       const porId = new Map(campanhas.map((c) => [c.id, c.slug]));
@@ -547,9 +569,14 @@ export function describeCampanhaRepositoryConformance(name: string, options: Con
       expect(porId.get(campanhaB.id)).toBeNull();
     });
 
-    it('updateSlug emits db.arrecadacao_campanhas.updateSlug span (aperture-aphk8)', async () => {
-      await repo.updateSlug(randomUUID(), 'qualquer', null, false);
-      const span = findSpan(options.getSpans(), 'db.arrecadacao_campanhas.updateSlug');
+    it('emits the serialized slug operation span', async () => {
+      await repo.atualizarSlugAtomico({
+        idConta: randomUUID() as never,
+        idCampanha: randomUUID() as never,
+        slug: 'qualquer',
+        alteradoEm: new Date('2026-07-11T10:00:00.000Z'),
+      });
+      const span = findSpan(options.getSpans(), 'db.arrecadacao_campanhas.atualizarSlugAtomico');
       expect(span).toBeDefined();
       expect(span?.attributes['db.system']).toBe(options.expectedDbSystem);
       expect(span?.attributes['db.operation.name']).toBe('UPDATE');

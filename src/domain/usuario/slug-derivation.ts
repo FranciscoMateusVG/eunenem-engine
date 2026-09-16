@@ -1,4 +1,4 @@
-import { SLUG_USUARIO_REGEX, type SlugUsuario } from './value-objects/slug-usuario.js';
+import { type SlugUsuario, SlugUsuarioSchema } from './value-objects/slug-usuario.js';
 
 /**
  * Pure derivation: turn a `nomeExibicao` into a candidate slug.
@@ -11,15 +11,15 @@ import { SLUG_USUARIO_REGEX, type SlugUsuario } from './value-objects/slug-usuar
  *   5. Take the FIRST hyphen-separated segment (operator convention:
  *      `/painel/helena` not `/painel/helena-silva`)
  *   6. Truncate to 30 chars
- *   7. If the result fails the slug regex (e.g. name started with a digit
- *      or was empty after sanitisation), fall back to `'usuario'` — the
+ *   7. Validate with the complete SlugUsuario schema (shape + reserved
+ *      words). If it fails (e.g. digit-first, empty, or `admin`), fall back
+ *      to `'usuario'` — the
  *      caller is expected to resolve collisions, so `usuario`, `usuario-2`,
  *      `usuario-3` are always valid escape hatches.
  *
- * The return is a CANDIDATE — not guaranteed unique. The caller
- * (`registrarContaUsuario`) walks `base`, `base-2`, `base-3`… against
- * `findUsuarioBySlug` within the target plataforma until it finds a free
- * one.
+ * The return is a CANDIDATE — not guaranteed unique. Registration walks
+ * `base`, `base-2`, `base-3`… with an availability pre-check and treats the
+ * database UNIQUE constraint as the final concurrent-collision backstop.
  */
 export function deriveSlugBase(nomeExibicao: string): SlugUsuario {
   // U+0300..U+036F = Combining Diacritical Marks block. NFD splits "é"
@@ -39,9 +39,8 @@ export function deriveSlugBase(nomeExibicao: string): SlugUsuario {
   // Truncate to 30 chars (the VO's max length).
   const truncated = firstSegment.slice(0, 30);
 
-  if (SLUG_USUARIO_REGEX.test(truncated)) {
-    return truncated;
-  }
+  const parsed = SlugUsuarioSchema.safeParse(truncated);
+  if (parsed.success) return parsed.data;
 
   // Pad too-short segments to ≥3 chars by appending more digits if needed.
   // Common case: name was a single char ("X") → truncated="x" → invalid.

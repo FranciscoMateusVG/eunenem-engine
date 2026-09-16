@@ -33,6 +33,7 @@ import { isPainelSection, type PainelSection } from './lib/painelRoutes.js';
 // no-engine-dep function (App.tsx is shared SSR + client). The VO is the
 // source of truth; if it ever changes shape, update this regex too.
 const SLUG_REGEX = /^[a-z][a-z0-9-]{2,29}$/;
+const CAMPANHA_SLUG_REGEX = /^[a-z][a-z0-9-]{2,59}$/;
 
 // Route map (single source of truth, used by both server.tsx and client.tsx).
 // Server uses this to decide HTTP status (404 vs 200) before rendering.
@@ -230,7 +231,7 @@ export function resolveRoute(pathname: string):
     paginaCampanhaSlugMatch?.[1] &&
     paginaCampanhaSlugMatch[2] &&
     SLUG_REGEX.test(paginaCampanhaSlugMatch[1]) &&
-    SLUG_REGEX.test(paginaCampanhaSlugMatch[2])
+    CAMPANHA_SLUG_REGEX.test(paginaCampanhaSlugMatch[2])
   ) {
     return {
       kind: 'pagina',

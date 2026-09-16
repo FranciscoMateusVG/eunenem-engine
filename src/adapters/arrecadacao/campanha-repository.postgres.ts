@@ -1,4 +1,5 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
+import { sql, type Transaction } from 'kysely';
 import type { Campanha } from '../../domain/arrecadacao/entities/campanha.js';
 import {
   campanhaComRecebedorInicial,
@@ -14,7 +15,12 @@ import type {
   TipoOpcaoContribuicao,
 } from '../../domain/arrecadacao/value-objects/opcao-contribuicao.js';
 import type { Database } from '../database.js';
-import type { CampanhaRepository } from './campanha-repository.js';
+import type { DB } from '../db-types.generated.js';
+import type {
+  AtualizarSlugCampanhaInput,
+  AtualizarSlugCampanhaResult,
+  CampanhaRepository,
+} from './campanha-repository.js';
 import type { RecebedorRepository } from './recebedor-repository.js';
 import type { ArrecadacaoRepositoryContext } from './repository-context.js';
 
@@ -26,6 +32,56 @@ const DB_ATTRS = {
 } as const;
 
 type OpcaoRow = { id: string; campanha_id: string; tipo: string };
+
+async function atualizarSlugEmTransacao(
+  trx: Transaction<DB>,
+  input: AtualizarSlugCampanhaInput,
+): Promise<AtualizarSlugCampanhaResult> {
+  // Every writer for one public creator namespace takes the same
+  // transaction-scoped lock before the target row. The fixed order is
+  // account lock -> target row -> conflict read -> update.
+  await sql`SELECT pg_advisory_xact_lock(
+    hashtextextended(${`campanha-public-slug:${input.idConta}`}::text, 0)
+  )`.execute(trx);
+
+  const campanha = await trx
+    .selectFrom('campanhas')
+    .innerJoin('campanha_administradores', 'campanha_administradores.campanha_id', 'campanhas.id')
+    .select(['campanhas.id', 'campanhas.slug', 'campanhas.slug_alterado_em'])
+    .where('campanhas.id', '=', input.idCampanha)
+    .where('campanha_administradores.id_usuario', '=', input.idConta)
+    .forUpdate()
+    .executeTakeFirst();
+
+  // Revalidate authorization inside the write transaction. Knowing an
+  // idConta or passing the router's earlier check is not authority.
+  if (!campanha) return { status: 'not_found_or_not_authorized' };
+  if (campanha.slug === input.slug) return { status: 'updated', kind: 'idempotent' };
+  if (campanha.slug_alterado_em !== null) return { status: 'slug_ja_alterado' };
+
+  const conflito = await trx
+    .selectFrom('campanhas')
+    .innerJoin('campanha_administradores', 'campanha_administradores.campanha_id', 'campanhas.id')
+    .select('campanhas.id')
+    .where('campanha_administradores.id_usuario', '=', input.idConta)
+    .where('campanhas.id', '!=', input.idCampanha)
+    .where('campanhas.slug', '=', input.slug)
+    .executeTakeFirst();
+  if (conflito) return { status: 'slug_em_uso' };
+
+  const initial = campanha.slug === null;
+  const updated = await trx
+    .updateTable('campanhas')
+    .set({
+      slug: input.slug,
+      slug_alterado_em: initial ? campanha.slug_alterado_em : input.alteradoEm,
+    })
+    .where('id', '=', input.idCampanha)
+    .returning('id')
+    .execute();
+  if (updated.length !== 1) return { status: 'not_found_or_not_authorized' };
+  return { status: 'updated', kind: initial ? 'initial' : 'changed' };
+}
 
 /**
  * PostgreSQL CampanhaRepository: upsert da campanha (incluindo `id_plataforma`),
@@ -57,8 +113,6 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
             oc.column('id').doUpdateSet({
               titulo: campanha.titulo,
               id_plataforma: campanha.idPlataforma,
-              slug: campanha.slug,
-              slug_alterado_em: campanha.slugAlteradoEm,
             }),
           )
           .execute();
@@ -527,34 +581,18 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
     });
   }
 
-  async updateSlug(
-    idCampanha: IdCampanha,
-    slug: string | null,
-    alteradoEm: Date | null,
-    marcarAlteracao: boolean,
+  async atualizarSlugAtomico(
+    input: AtualizarSlugCampanhaInput,
     context?: ArrecadacaoRepositoryContext,
-  ): Promise<void> {
-    const executor = context?.trx ?? this.db;
-    return tracer.startActiveSpan('db.arrecadacao_campanhas.updateSlug', async (span) => {
+  ): Promise<AtualizarSlugCampanhaResult> {
+    return tracer.startActiveSpan('db.arrecadacao_campanhas.atualizarSlugAtomico', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
       try {
-        // (aperture-aphk8). No-op for unknown id — the caller owner-gates
-        // before calling. `marcarAlteracao` (only true for the perfil
-        // editor's ONE allowed change) adds a `slug_alterado_em IS NULL`
-        // guard as defense-in-depth against a concurrent race — the
-        // router already rejected the request if IT read a non-null
-        // value first. origem:'setup' calls pass marcarAlteracao=false
-        // (they may run on a campanha that already has slugAlteradoEm
-        // set) and must NOT be blocked by this guard.
-        let query = executor.updateTable('campanhas').set({
-          slug,
-          slug_alterado_em: alteradoEm,
-        });
-        if (marcarAlteracao) {
-          query = query.where('slug_alterado_em', 'is', null);
-        }
-        await query.where('id', '=', idCampanha).execute();
+        const result = context?.trx
+          ? await atualizarSlugEmTransacao(context.trx, input)
+          : await this.db.transaction().execute((trx) => atualizarSlugEmTransacao(trx, input));
         span.setStatus({ code: SpanStatusCode.OK });
+        return result;
       } catch (error: unknown) {
         span.recordException(error as Error);
         span.setStatus({ code: SpanStatusCode.ERROR });

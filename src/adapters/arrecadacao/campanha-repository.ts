@@ -6,10 +6,28 @@ import type {
 } from '../../domain/arrecadacao/value-objects/ids.js';
 import type { ArrecadacaoRepositoryContext } from './repository-context.js';
 
+export interface AtualizarSlugCampanhaInput {
+  readonly idConta: IdConta;
+  readonly idCampanha: IdCampanha;
+  readonly slug: string;
+  readonly alteradoEm: Date;
+}
+
+export type AtualizarSlugCampanhaResult =
+  | { readonly status: 'updated'; readonly kind: 'idempotent' | 'initial' | 'changed' }
+  | { readonly status: 'slug_em_uso' }
+  | { readonly status: 'slug_ja_alterado' }
+  | { readonly status: 'not_found_or_not_authorized' };
+
 /**
  * Persistência do agregado Campanha (porta).
  */
 export interface CampanhaRepository {
+  /**
+   * Creates a new aggregate or updates its non-slug fields. For an existing
+   * row, `slug` and `slugAlteradoEm` are deliberately preserved: every live
+   * slug transition must use `atualizarSlugAtomico` below.
+   */
   save(campanha: Campanha, context?: ArrecadacaoRepositoryContext): Promise<void>;
   findById(id: IdCampanha, context?: ArrecadacaoRepositoryContext): Promise<Campanha | undefined>;
   findByPlataforma(
@@ -127,33 +145,15 @@ export interface CampanhaRepository {
   delete(idCampanha: IdCampanha, context?: ArrecadacaoRepositoryContext): Promise<void>;
 
   /**
-   * Persists the campanha's own URL slug (aperture-aphk8, W1a). Narrow,
-   * single-column-pair update — deliberately NOT part of `save` semantics
-   * so callers can set/clear a slug without re-writing the whole
-   * aggregate. `slug` is stored normalized (trimmed, lowercase) by the
-   * caller; `null` clears it. Per-conta uniqueness is APP-enforced by the
-   * caller (campanhas-router `definirSlug`), not here and not by the DB.
-   *
-   * `alteradoEm` is written verbatim to `slug_alterado_em` — the CALLER
-   * decides what to pass (the campanha's UNCHANGED existing
-   * `slugAlteradoEm` for `origem: 'setup'` calls, which must never move
-   * this column in either direction; or a fresh timestamp for the ONE
-   * perfil-editor change).
-   *
-   * `marcarAlteracao` gates a defense-in-depth guard: when `true` (the
-   * perfil editor is consuming its one allowed change), the adapter also
-   * requires `slug_alterado_em IS NULL` in the WHERE clause, so a
-   * concurrent race can't double-write the timestamp — the router is the
-   * actual source of the rejection the user sees (it already read
-   * `slugAlteradoEm` and threw before calling this). `origem: 'setup'`
-   * calls MUST pass `false` — they may run on a campanha that already has
-   * `slugAlteradoEm` set, and must not be blocked by it.
+   * The sole writer for a campanha public slug. Authorization is rechecked
+   * against `campanha_administradores` inside the atomic operation. The
+   * implementation serializes every writer for the same account, checks
+   * same-account uniqueness, and infers initial assignment versus the one
+   * allowed replacement from persisted state — never from caller metadata.
+   * Repeating the current slug is idempotent and consumes no replacement.
    */
-  updateSlug(
-    idCampanha: IdCampanha,
-    slug: string | null,
-    alteradoEm: Date | null,
-    marcarAlteracao: boolean,
+  atualizarSlugAtomico(
+    input: AtualizarSlugCampanhaInput,
     context?: ArrecadacaoRepositoryContext,
-  ): Promise<void>;
+  ): Promise<AtualizarSlugCampanhaResult>;
 }

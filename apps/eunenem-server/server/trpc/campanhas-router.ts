@@ -170,6 +170,17 @@ type CampanhaSlugCheck =
   | { readonly ok: true; readonly slug: string }
   | { readonly ok: false; readonly motivo: 'formato' | 'reservado' | 'em_uso' };
 
+function validateCampanhaSlug(raw: string): CampanhaSlugCheck {
+  const slug = normalizeCampanhaSlug(raw);
+  if (!CAMPANHA_SLUG_REGEX.test(slug)) {
+    return { ok: false, motivo: 'formato' };
+  }
+  if (RESERVED_CAMPANHA_SLUGS.has(slug)) {
+    return { ok: false, motivo: 'reservado' };
+  }
+  return { ok: true, slug };
+}
+
 /**
  * Shared validation for definirSlug/validarSlug: format → reserved →
  * per-conta uniqueness (the conta's OTHER campanhas; a DIFFERENT conta
@@ -182,13 +193,9 @@ async function checkCampanhaSlug(
   idCampanha: string,
   raw: string,
 ): Promise<CampanhaSlugCheck> {
-  const slug = normalizeCampanhaSlug(raw);
-  if (!CAMPANHA_SLUG_REGEX.test(slug)) {
-    return { ok: false, motivo: 'formato' };
-  }
-  if (RESERVED_CAMPANHA_SLUGS.has(slug)) {
-    return { ok: false, motivo: 'reservado' };
-  }
+  const validated = validateCampanhaSlug(raw);
+  if (!validated.ok) return validated;
+  const { slug } = validated;
   const campanhas = await ctx.deps.campanhaRepository.findCampanhasByAdministrador(idConta);
   const emUso = campanhas.some((c) => c.id !== idCampanha && c.slug === slug);
   if (emUso) {
@@ -391,48 +398,41 @@ export const campanhasRouter = t.router({
    * contract — the frontend switches on it). Persists the NORMALIZED slug
    * and returns it.
    *
-   * `origem` (aperture — 1-troca): distinguishes the SETUP wizard
-   * (`SetupCampanhaWizard`, right after `campanhas.criar` or from a card's
-   * "completar" affordance) from the PERFIL editor (`PerfilBody`'s
-   * `SlugEditor`). Only `origem: 'perfil'` reads/writes
-   * `campanha.slugAlteradoEm` — it is the ONE call site that consumes the
-   * campanha's single allowed slug change (FORBIDDEN 'slug_ja_alterado' on
-   * a second attempt). `origem: 'setup'` (the default — every EXISTING
-   * caller, including every test, predates this field and means "setup")
-   * never blocks and never marks the campanha as having used its change,
-   * so defining a slug during setup does NOT consume the perfil's later
-   * one-time edit.
+   * Initial assignment versus the one allowed replacement is inferred from
+   * persisted state by the repository's serialized operation. The caller
+   * cannot label a replacement as "setup" to bypass the one-change rule.
    */
   definirSlug: t.procedure
     .input(
       z.object({
         idCampanha: z.string().uuid(),
         slug: z.string(),
-        origem: z.enum(['setup', 'perfil']).default('setup'),
       }),
     )
     .output(z.object({ slug: z.string() }))
     .mutation(async ({ ctx, input }) => {
       try {
         const { usuario, campanha } = await resolverCampanhaAdministrada(ctx, input.idCampanha);
-
-        if (input.origem === 'perfil' && campanha.slugAlteradoEm !== null) {
-          throw new CampanhaSlugJaAlteradoError(campanha.id);
-        }
-
-        const check = await checkCampanhaSlug(ctx, usuario.idConta, campanha.id, input.slug);
+        const check = validateCampanhaSlug(input.slug);
         if (!check.ok) {
           throw new TRPCError({ code: 'BAD_REQUEST', message: slugErrorMessage(check.motivo) });
         }
 
-        const marcarAlteracao = input.origem === 'perfil';
-        const alteradoEm = marcarAlteracao ? ctx.deps.clock() : campanha.slugAlteradoEm;
-        await ctx.deps.campanhaRepository.updateSlug(
-          campanha.id,
-          check.slug,
-          alteradoEm,
-          marcarAlteracao,
-        );
+        const result = await ctx.deps.campanhaRepository.atualizarSlugAtomico({
+          idConta: usuario.idConta,
+          idCampanha: campanha.id,
+          slug: check.slug,
+          alteradoEm: ctx.deps.clock(),
+        });
+        if (result.status === 'slug_em_uso') {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'slug_em_uso' });
+        }
+        if (result.status === 'slug_ja_alterado') {
+          throw new CampanhaSlugJaAlteradoError(campanha.id);
+        }
+        if (result.status === 'not_found_or_not_authorized') {
+          throw new CampanhaAcessoNegadoError('Campanha nao encontrada ou nao autorizada');
+        }
         return { slug: check.slug };
       } catch (err) {
         throw toSlugTRPCError(err);

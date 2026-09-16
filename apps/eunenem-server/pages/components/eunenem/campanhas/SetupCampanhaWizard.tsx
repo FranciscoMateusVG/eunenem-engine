@@ -163,11 +163,9 @@ export function SetupCampanhaWizard({
     const slugTrim = slug.trim();
     if (slugTrim && slugTrim !== slugAtual) {
       try {
-        // aperture — 1-troca: `origem: 'setup'` marks this as the initial
-        // setup definition, NOT the perfil's one-time edit — it must never
-        // consume (or be blocked by) the campanha's single allowed slug
-        // change via PerfilBody's SlugEditor.
-        await definirSlug.mutateAsync({ idCampanha: campanha.id, slug: slugTrim, origem: 'setup' });
+        // The server infers initial assignment from persisted state. The
+        // client cannot label a replacement as setup to bypass the one-change rule.
+        await definirSlug.mutateAsync({ idCampanha: campanha.id, slug: slugTrim });
       } catch (err) {
         const msg = (err as { message?: string })?.message ?? '';
         setSlugError(
