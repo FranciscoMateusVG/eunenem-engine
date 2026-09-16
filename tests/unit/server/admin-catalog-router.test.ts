@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import type { ServerDeps } from '../../../apps/eunenem-server/server/auth/setup.js';
 import type { TrpcContext } from '../../../apps/eunenem-server/server/trpc/context.js';
@@ -100,6 +101,10 @@ describe('admin.catalog authorization', () => {
     ],
     ['listLists', (caller: Caller) => caller.admin.catalog.listLists({})],
     ['getList', (caller: Caller) => caller.admin.catalog.getList({ id: randomUUID() })],
+    [
+      'setInitialCampaignDefault',
+      (caller: Caller) => caller.admin.catalog.setInitialCampaignDefault({ id: randomUUID() }),
+    ],
     ['createList', (caller: Caller) => caller.admin.catalog.createList({ nome: 'Lista' })],
     [
       'updateList',
@@ -195,6 +200,14 @@ describe('admin.catalog strict inputs', () => {
     [
       'getList',
       (caller: Caller) => caller.admin.catalog.getList({ id: randomUUID(), extra: true } as never),
+    ],
+    [
+      'setInitialCampaignDefault',
+      (caller: Caller) =>
+        caller.admin.catalog.setInitialCampaignDefault({
+          id: randomUUID(),
+          extra: true,
+        } as never),
     ],
     [
       'createList',
@@ -657,6 +670,21 @@ describe('admin.catalog categories', () => {
 });
 
 describe('admin.catalog lists', () => {
+  it('wires the minimal list-admin default marker control to the dedicated mutation', () => {
+    const source = readFileSync(
+      new URL(
+        '../../../apps/eunenem-server/pages/components/eunenem/admin/catalogo/ListasTab.tsx',
+        import.meta.url,
+      ),
+      'utf8',
+    );
+    expect(source).toContain('trpc.admin.catalog.setInitialCampaignDefault.useMutation');
+    expect(source).toContain('padrão da campanha inicial');
+    expect(source).toContain('usar na campanha inicial');
+    expect(source).toContain('remover padrão inicial');
+    expect(source).toContain('id: l.aplicarCampanhaInicial ? null : l.id');
+  });
+
   it('creates at the next server position, patches nullable fields and toggles visibility', async () => {
     const { caller, repository } = buildRig();
     await repository.createLista(makeCatalogoLista({ position: 4, ativo: true }));
@@ -674,6 +702,7 @@ describe('admin.catalog lists', () => {
       imageUrl: '/listas-prontas/lista.png',
       position: 5,
       ativo: true,
+      aplicarCampanhaInicial: false,
       quantidadeItens: 0,
       criadoEm: NOW.toISOString(),
       atualizadoEm: NOW.toISOString(),
@@ -792,6 +821,79 @@ describe('admin.catalog lists', () => {
     });
     expect((await originalFind(list.id))?.lista.ativo).toBe(false);
   });
+
+  it('selects and clears a validated initial-campaign template through the admin mutation', async () => {
+    const { audit, caller, repository } = buildRig();
+    const category = makeCatalogoCategoria();
+    const product = makeCatalogoProduto(category.id, {
+      nome: 'Carrinho',
+      precoCents: 12_000,
+      imageUrl: null,
+    });
+    const list = makeCatalogoLista({ slug: 'lista-inicial' });
+    await repository.createCategoria(category);
+    await repository.createProduto(product);
+    await repository.createLista(list);
+    await repository.replaceListaItens(list.id, [
+      {
+        id: randomUUID(),
+        idLista: list.id,
+        idProduto: product.id,
+        quantidade: 2,
+        position: 0,
+      },
+    ]);
+
+    await expect(caller.admin.catalog.setInitialCampaignDefault({ id: list.id })).resolves.toEqual({
+      selectedId: list.id,
+    });
+    await expect(caller.admin.catalog.listLists({})).resolves.toEqual([
+      expect.objectContaining({ id: list.id, aplicarCampanhaInicial: true }),
+    ]);
+    await expect(caller.admin.catalog.setInitialCampaignDefault({ id: null })).resolves.toEqual({
+      selectedId: null,
+    });
+    expect(
+      audit.events.filter(
+        (event) =>
+          event.action === 'catalog.list.set_initial_campaign_default' &&
+          event.phase === 'succeeded',
+      ),
+    ).toHaveLength(2);
+  });
+
+  it('rejects an absent or invalid default without changing the prior selection', async () => {
+    const { caller, repository } = buildRig();
+    const category = makeCatalogoCategoria();
+    const product = makeCatalogoProduto(category.id);
+    const selected = makeCatalogoLista({ position: 0 });
+    const empty = makeCatalogoLista({ position: 1 });
+    await repository.createCategoria(category);
+    await repository.createProduto(product);
+    await repository.createLista(selected);
+    await repository.createLista(empty);
+    await repository.replaceListaItens(selected.id, [
+      {
+        id: randomUUID(),
+        idLista: selected.id,
+        idProduto: product.id,
+        quantidade: 1,
+        position: 0,
+      },
+    ]);
+    await caller.admin.catalog.setInitialCampaignDefault({ id: selected.id });
+
+    await expect(
+      caller.admin.catalog.setInitialCampaignDefault({ id: randomUUID() }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(
+      caller.admin.catalog.setInitialCampaignDefault({ id: empty.id }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(await repository.findInitialCampaignTemplate()).toMatchObject({
+      status: 'ready',
+      template: { lista: { id: selected.id } },
+    });
+  });
 });
 
 describe('admin.catalog setListItems and upload presign', () => {
@@ -829,6 +931,7 @@ describe('admin.catalog setListItems and upload presign', () => {
       imageUrl: list.imageUrl,
       position: list.position,
       ativo: list.ativo,
+      aplicarCampanhaInicial: false,
       quantidadeItens: 2,
       criadoEm: list.criadoEm.toISOString(),
       atualizadoEm: list.atualizadoEm.toISOString(),

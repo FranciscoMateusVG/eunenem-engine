@@ -8,7 +8,10 @@ import type {
   CatalogoProduto,
   CatalogoRepository,
 } from '../../src/adapters/catalogo/repository.js';
-import { CatalogoConflictError } from '../../src/adapters/catalogo/repository.js';
+import {
+  CatalogoConflictError,
+  CatalogoInitialCampaignDefaultInvalidError,
+} from '../../src/adapters/catalogo/repository.js';
 
 const CREATED_AT = new Date('2026-07-27T12:00:00.000Z');
 const UPDATED_AT = new Date('2026-07-27T13:00:00.000Z');
@@ -58,6 +61,7 @@ export function makeCatalogoLista(overrides: Partial<CatalogoLista> = {}): Catal
     imageUrl: null,
     position: 0,
     ativo: true,
+    aplicarCampanhaInicial: false,
     criadoEm: CREATED_AT,
     atualizadoEm: CREATED_AT,
     ...overrides,
@@ -516,6 +520,114 @@ export function describeCatalogoRepositoryConformance(
       expect(publicLists.map(({ lista }) => lista.id)).toEqual([populated.id, becomesEmpty.id]);
       expect(publicLists[0]?.itens.map(({ produto }) => produto.id)).toEqual([activeProduct.id]);
       expect(publicLists[1]?.itens).toEqual([]);
+    });
+
+    it('atomically selects, swaps and clears one valid initial-campaign template', async () => {
+      const category = makeCatalogoCategoria();
+      await repo.createCategoria(category);
+      const firstProduct = makeCatalogoProduto(category.id, { position: 0 });
+      const secondProduct = makeCatalogoProduto(category.id, { position: 1 });
+      await repo.createProduto(firstProduct);
+      await repo.createProduto(secondProduct);
+      const first = makeCatalogoLista({ position: 0, slug: 'primeira' });
+      const second = makeCatalogoLista({ position: 1, slug: 'segunda' });
+      await repo.createLista(first);
+      await repo.createLista(second);
+      await repo.replaceListaItens(first.id, [makeCatalogoListaItem(first.id, firstProduct.id)]);
+      await repo.replaceListaItens(second.id, [makeCatalogoListaItem(second.id, secondProduct.id)]);
+
+      expect(await repo.findInitialCampaignTemplate()).toEqual({ status: 'none' });
+      const firstSelection = await repo.setInitialCampaignDefault(first.id, () => undefined);
+      expect(firstSelection).toMatchObject({
+        status: 'updated',
+        template: { lista: { id: first.id, aplicarCampanhaInicial: true } },
+      });
+      expect(await repo.findInitialCampaignTemplate()).toMatchObject({
+        status: 'ready',
+        template: { lista: { id: first.id } },
+      });
+
+      await expect(
+        repo.setInitialCampaignDefault(second.id, () => {
+          throw new Error('policy rejected');
+        }),
+      ).rejects.toThrow('policy rejected');
+      expect(await repo.findInitialCampaignTemplate()).toMatchObject({
+        status: 'ready',
+        template: { lista: { id: first.id } },
+      });
+
+      await repo.setInitialCampaignDefault(second.id, () => undefined);
+      const summaries = await repo.findListasResumo({ includeInactive: true });
+      expect(
+        summaries.filter(({ lista }) => lista.aplicarCampanhaInicial).map(({ lista }) => lista.id),
+      ).toEqual([second.id]);
+      await repo.setInitialCampaignDefault(null, () => undefined);
+      expect(await repo.findInitialCampaignTemplate()).toEqual({ status: 'none' });
+    });
+
+    it('rejects an absent, inactive, empty or structurally invalid selected template', async () => {
+      const category = makeCatalogoCategoria();
+      await repo.createCategoria(category);
+      const cheapProduct = makeCatalogoProduto(category.id, { precoCents: 999 });
+      await repo.createProduto(cheapProduct);
+      const inactive = makeCatalogoLista({ position: 0, ativo: false });
+      const empty = makeCatalogoLista({ position: 1 });
+      const invalid = makeCatalogoLista({ position: 2 });
+      await repo.createLista(inactive);
+      await repo.createLista(empty);
+      await repo.createLista(invalid);
+      await repo.replaceListaItens(invalid.id, [
+        makeCatalogoListaItem(invalid.id, cheapProduct.id),
+      ]);
+
+      expect(await repo.setInitialCampaignDefault(randomUUID(), () => undefined)).toEqual({
+        status: 'not_found',
+      });
+      expect(await repo.setInitialCampaignDefault(inactive.id, () => undefined)).toEqual({
+        status: 'invalid_config',
+        reason: 'inactive',
+      });
+      expect(await repo.setInitialCampaignDefault(empty.id, () => undefined)).toEqual({
+        status: 'invalid_config',
+        reason: 'empty',
+      });
+      expect(await repo.setInitialCampaignDefault(invalid.id, () => undefined)).toEqual({
+        status: 'invalid_config',
+        reason: 'invalid_items',
+      });
+      expect(await repo.findInitialCampaignTemplate()).toEqual({ status: 'none' });
+    });
+
+    it('prevents catalogue edits from invalidating the selected initial template', async () => {
+      const category = makeCatalogoCategoria();
+      await repo.createCategoria(category);
+      const product = makeCatalogoProduto(category.id);
+      await repo.createProduto(product);
+      const list = makeCatalogoLista();
+      await repo.createLista(list);
+      const item = makeCatalogoListaItem(list.id, product.id);
+      await repo.replaceListaItens(list.id, [item]);
+      await repo.setInitialCampaignDefault(list.id, () => undefined);
+
+      await expect(
+        repo.updateLista(list.id, { ativo: false, atualizadoEm: UPDATED_AT }),
+      ).rejects.toBeInstanceOf(CatalogoInitialCampaignDefaultInvalidError);
+      await expect(
+        repo.updateProduto(product.id, { ativo: false, atualizadoEm: UPDATED_AT }),
+      ).rejects.toBeInstanceOf(CatalogoInitialCampaignDefaultInvalidError);
+      await expect(repo.replaceListaItens(list.id, [])).rejects.toBeInstanceOf(
+        CatalogoInitialCampaignDefaultInvalidError,
+      );
+
+      const preserved = await repo.findInitialCampaignTemplate();
+      expect(preserved).toMatchObject({
+        status: 'ready',
+        template: {
+          lista: { id: list.id, ativo: true },
+          itens: [{ produto: { id: product.id, ativo: true } }],
+        },
+      });
     });
 
     it('emits portable db.catalogo spans', async () => {

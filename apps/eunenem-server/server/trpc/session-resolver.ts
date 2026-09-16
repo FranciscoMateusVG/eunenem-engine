@@ -8,6 +8,7 @@ import type { IdUsuario, Usuario } from '../../../../src/index.js';
 import { classificarLegado } from '../../lib/legacy-users.js';
 import { lerSignupAt, propsContaCriada } from '../analytics/funil.js';
 import type { ServerDeps } from '../auth/setup.js';
+import { isCatalogImageUrlReadable } from '../lib/security/catalog-image-url.js';
 
 /**
  * Central session resolution + OAuth orphan self-heal (aperture-6wo1f).
@@ -225,6 +226,10 @@ async function autoProvisionarUsuarioOrfao(
         plataformaRepository: deps.plataformaRepository,
         campanhaRepository: deps.campanhaRepository,
         recebedorRepository: deps.recebedorRepository,
+        catalogoRepository: deps.catalogoRepository,
+        contribuicaoRepository: deps.contribuicaoRepository,
+        catalogImageUrlReadable: (value) =>
+          isCatalogImageUrlReadable(value, deps.objectStorage),
         clock: deps.clock,
         observability: deps.observability,
       },

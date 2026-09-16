@@ -41,11 +41,13 @@ import {
   cancelarRepasseRecebedor,
   type CatalogoAuditJsonObject,
   CatalogoConflictError,
+  CatalogoInitialCampaignDefaultInvalidError,
   estornarPagamento,
   FinanceiroInputInvalidoError,
   FinanceiroRepasseNaoEncontradoError,
   FinanceiroRepasseStatusInvalidoError,
   ID_PLATAFORMA_EUNENEM,
+  InitialCampaignGiftTemplateInvalidError,
   MAX_CATALOGO_IMAGEM_SIZE_BYTES,
   PagamentoEstornoLancamentoJaTransferidoError,
   PagamentoEstornoPixNaoConcluidoError,
@@ -55,6 +57,7 @@ import {
   PagamentoEstornoStripeVinculoInvalidoError,
   PagamentoNaoEncontradoError,
   PagamentoTransicaoStatusInvalidaError,
+  prepareInitialCampaignTemplateItems,
   resolverManualFalhouRepasse,
   resolverManualPagoRepasse,
   retentarTransferenciaRepasse,
@@ -2876,6 +2879,7 @@ const ListaAdminDTOSchema = z.object({
   imageUrl: ImageUrlSchema.nullable(),
   position: NonNegativeIntegerSchema,
   ativo: z.boolean(),
+  aplicarCampanhaInicial: z.boolean(),
   quantidadeItens: NonNegativeIntegerSchema,
   criadoEm: IsoDateSchema,
   atualizadoEm: IsoDateSchema,
@@ -2970,6 +2974,7 @@ function listaAdminDTO(
     imageUrl: lista.imageUrl,
     position: lista.position,
     ativo: lista.ativo,
+    aplicarCampanhaInicial: lista.aplicarCampanhaInicial,
     quantidadeItens,
     criadoEm: lista.criadoEm.toISOString(),
     atualizadoEm: lista.atualizadoEm.toISOString(),
@@ -2978,6 +2983,20 @@ function listaAdminDTO(
 
 function catalogNotFound(message: string): TRPCError {
   return new TRPCError({ code: "NOT_FOUND", message });
+}
+
+function catalogMutationError(error: unknown): unknown {
+  if (
+    error instanceof CatalogoInitialCampaignDefaultInvalidError ||
+    error instanceof InitialCampaignGiftTemplateInvalidError
+  ) {
+    return new TRPCError({
+      code: "CONFLICT",
+      message:
+        "A lista padrão da campanha inicial precisa ficar ativa e conter de 1 a 50 itens válidos.",
+    });
+  }
+  return error;
 }
 
 interface CatalogAuditSpec {
@@ -3018,15 +3037,16 @@ async function withCatalogAudit<T>(
   try {
     result = await operation();
   } catch (error: unknown) {
+    const mappedError = catalogMutationError(error);
     await ctx.deps.catalogoAdminAudit.append({
       ...common,
       phase: "failed",
       metadata: {
         ...(spec.metadata ?? {}),
-        failureCode: failureCode(error),
+        failureCode: failureCode(mappedError),
       },
     });
-    throw error;
+    throw mappedError;
   }
 
   // This append intentionally sits outside the operation catch. If the side
@@ -3450,6 +3470,41 @@ const catalogRouter = t.router({
       };
     }),
 
+  setInitialCampaignDefault: adminProcedure
+    .input(z.object({ id: UuidSchema.nullable() }).strict())
+    .output(z.object({ selectedId: UuidSchema.nullable() }))
+    .mutation(async ({ ctx, input }) =>
+      withCatalogAudit(
+        ctx,
+        {
+          action: "catalog.list.set_initial_campaign_default",
+          targetType: "lista",
+          targetId: input.id,
+          metadata: { selected: input.id !== null },
+        },
+        async () => {
+          const outcome =
+            await ctx.deps.catalogoRepository.setInitialCampaignDefault(
+              input.id,
+              (template) => {
+                prepareInitialCampaignTemplateItems(template, (url) =>
+                  isCatalogImageUrlReadable(url, ctx.deps.objectStorage),
+                );
+              },
+            );
+          if (outcome.status === "not_found") {
+            throw catalogNotFound("Lista não encontrada.");
+          }
+          if (outcome.status === "invalid_config") {
+            throw new CatalogoInitialCampaignDefaultInvalidError(
+              outcome.reason,
+            );
+          }
+          return { selectedId: input.id };
+        },
+      ),
+    ),
+
   createList: adminProcedure
     .input(
       z.object({
@@ -3480,6 +3535,7 @@ const catalogRouter = t.router({
             position:
               await ctx.deps.catalogoRepository.findNextListaPosition(),
             ativo: true,
+            aplicarCampanhaInicial: false,
             criadoEm: now,
             atualizadoEm: now,
           };

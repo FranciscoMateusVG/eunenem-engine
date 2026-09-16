@@ -84,6 +84,7 @@ export interface CatalogoListaItens {
 }
 
 export interface CatalogoListas {
+  aplicar_campanha_inicial: Generated<boolean>;
   ativo: Generated<boolean>;
   atualizado_em: Generated<Timestamp>;
   criado_em: Generated<Timestamp>;

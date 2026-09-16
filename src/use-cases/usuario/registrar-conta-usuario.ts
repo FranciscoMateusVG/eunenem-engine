@@ -2,7 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { SpanStatusCode } from '@opentelemetry/api';
 import { z } from 'zod/v4';
 import type { CampanhaRepository } from '../../adapters/arrecadacao/campanha-repository.js';
+import type { ContribuicaoRepository } from '../../adapters/arrecadacao/contribuicao-repository.js';
 import type { RecebedorRepository } from '../../adapters/arrecadacao/recebedor-repository.js';
+import type {
+  CatalogoListaComItens,
+  CatalogoRepository,
+} from '../../adapters/catalogo/repository.js';
 import type { PlataformaRepository } from '../../adapters/plataforma/repository.js';
 import type { AuthService } from '../../adapters/usuario/auth-service.js';
 import type { UsuarioRepository } from '../../adapters/usuario/repository.js';
@@ -29,6 +34,11 @@ import { UsuarioPlataformaNaoEncontradaError } from '../../errors/usuario/plataf
 import type { Observability } from '../../observability/observability.js';
 import { adicionarOpcaoContribuicao } from '../arrecadacao/adicionar-opcao-contribuicao.js';
 import { criarCampanha } from '../arrecadacao/criar-campanha.js';
+import {
+  criarContribuicoesEmLote,
+  type ItemLote,
+  ItemLoteSchema,
+} from '../arrecadacao/criar-contribuicoes-em-lote.js';
 
 /**
  * Defensive cap on slug-collision retries (aperture-khbow). 50 is well past
@@ -37,6 +47,75 @@ import { criarCampanha } from '../arrecadacao/criar-campanha.js';
  * something is wrong with the derivation or the repo lookup.
  */
 const MAX_SLUG_COLLISION_ATTEMPTS = 50;
+
+const InitialCampaignItemsSchema = z.array(ItemLoteSchema).min(1).max(50);
+
+export class InitialCampaignGiftTemplateInvalidError extends Error {
+  readonly name = 'InitialCampaignGiftTemplateInvalidError';
+}
+
+export function prepareInitialCampaignTemplateItems(
+  template: CatalogoListaComItens,
+  isImageReadable: (value: string) => boolean,
+): ItemLote[] {
+  const grupo = template.lista.slug ?? template.lista.id;
+  const candidate = template.itens.map(({ item, produto }) => ({
+    nome: produto.nome,
+    valor: produto.precoCents,
+    imagemUrl: produto.imageUrl,
+    grupo,
+    quantidade: item.quantidade,
+  }));
+  const parsed = InitialCampaignItemsSchema.safeParse(candidate);
+  const normalizedAnyField = parsed.success
+    ? parsed.data.some((item, index) => {
+        const source = candidate[index];
+        return (
+          !source ||
+          item.nome !== source.nome ||
+          item.valor !== source.valor ||
+          item.imagemUrl !== source.imagemUrl ||
+          item.grupo !== source.grupo ||
+          item.quantidade !== source.quantidade
+        );
+      })
+    : false;
+  if (
+    !parsed.success ||
+    normalizedAnyField ||
+    parsed.data.some(
+      ({ imagemUrl }) => typeof imagemUrl === 'string' && !isImageReadable(imagemUrl),
+    )
+  ) {
+    throw new InitialCampaignGiftTemplateInvalidError(
+      'A lista padrão da campanha inicial possui itens inválidos.',
+    );
+  }
+  return candidate;
+}
+
+async function resolveInitialCampaignTemplateItems(deps: {
+  readonly catalogoRepository?: CatalogoRepository | undefined;
+  readonly contribuicaoRepository?: ContribuicaoRepository | undefined;
+  readonly catalogImageUrlReadable?: ((value: string) => boolean) | undefined;
+}): Promise<ItemLote[]> {
+  const { catalogoRepository, contribuicaoRepository, catalogImageUrlReadable } = deps;
+  if (!catalogoRepository) return [];
+
+  const configured = await catalogoRepository.findInitialCampaignTemplate();
+  if (configured.status === 'invalid_config') {
+    throw new InitialCampaignGiftTemplateInvalidError(
+      'A lista padrão da campanha inicial está inválida.',
+    );
+  }
+  if (configured.status === 'none') return [];
+  if (!contribuicaoRepository || !catalogImageUrlReadable) {
+    throw new InitialCampaignGiftTemplateInvalidError(
+      'Dependências da lista padrão da campanha inicial indisponíveis.',
+    );
+  }
+  return prepareInitialCampaignTemplateItems(configured.template, catalogImageUrlReadable);
+}
 
 export const RegistrarContaUsuarioInputSchema = z.object({
   idUsuario: IdUsuarioSchema,
@@ -89,6 +168,10 @@ export interface ProvisionarContaUsuarioDominioDeps {
   readonly plataformaRepository: PlataformaRepository;
   readonly campanhaRepository: CampanhaRepository;
   readonly recebedorRepository: RecebedorRepository;
+  /** Optional only for backwards-compatible embedded consumers with no catalog. */
+  readonly catalogoRepository?: CatalogoRepository | undefined;
+  readonly contribuicaoRepository?: ContribuicaoRepository | undefined;
+  readonly catalogImageUrlReadable?: ((value: string) => boolean) | undefined;
   readonly clock: () => Date;
   /** Optional override for deterministic id generation in tests. */
   readonly gerarIdConta?: () => IdContaUsuario;
@@ -104,6 +187,9 @@ export interface RegistrarContaUsuarioDeps {
   readonly plataformaRepository: PlataformaRepository;
   readonly campanhaRepository: CampanhaRepository;
   readonly recebedorRepository: RecebedorRepository;
+  readonly catalogoRepository?: CatalogoRepository | undefined;
+  readonly contribuicaoRepository?: ContribuicaoRepository | undefined;
+  readonly catalogImageUrlReadable?: ((value: string) => boolean) | undefined;
   readonly authService: AuthService;
   readonly clock: () => Date;
   /** Optional override for deterministic id generation in tests. */
@@ -172,6 +258,9 @@ export async function registrarContaUsuario(
     plataformaRepository,
     campanhaRepository,
     recebedorRepository,
+    catalogoRepository,
+    contribuicaoRepository,
+    catalogImageUrlReadable,
     authService,
     clock,
     gerarIdCampanha = randomUUID,
@@ -236,6 +325,9 @@ export async function registrarContaUsuario(
             plataformaRepository,
             campanhaRepository,
             recebedorRepository,
+            catalogoRepository,
+            contribuicaoRepository,
+            catalogImageUrlReadable,
             clock,
             gerarIdCampanha,
             gerarIdOpcao,
@@ -338,6 +430,9 @@ export async function provisionarContaUsuarioDominio(
     plataformaRepository,
     campanhaRepository,
     recebedorRepository,
+    catalogoRepository,
+    contribuicaoRepository,
+    catalogImageUrlReadable,
     clock,
     gerarIdConta = randomUUID,
     gerarIdCampanha = randomUUID,
@@ -396,6 +491,16 @@ export async function provisionarContaUsuarioDominio(
       if (!plataforma) {
         throw new UsuarioPlataformaNaoEncontradaError(data.idPlataforma);
       }
+
+      // Resolve and validate one coherent catalogue snapshot BEFORE any
+      // domain write. No configured marker intentionally preserves the
+      // historical empty initial campaign. A configured-but-invalid marker
+      // fails closed before Usuario/Conta/Campanha exist.
+      const initialCampaignItems = await resolveInitialCampaignTemplateItems({
+        catalogoRepository,
+        contribuicaoRepository,
+        catalogImageUrlReadable,
+      });
 
       // step 2: derive slug + walk suffix collisions within the plataforma
       // (aperture-khbow). Pre-check is best-effort — a concurrent race could
@@ -481,6 +586,20 @@ export async function provisionarContaUsuarioDominio(
         { campanhaRepository, observability },
         { idCampanha, idOpcao, tipo: 'presente' },
       );
+
+      // Final mutating step: one atomic bulk write. A failure reaches the
+      // existing LIFO compensation, whose campanha delete cascades option
+      // and contribution rows before Usuario/Conta are removed.
+      if (initialCampaignItems.length > 0 && contribuicaoRepository) {
+        await criarContribuicoesEmLote(
+          { campanhaRepository, contribuicaoRepository, clock, observability },
+          {
+            idCampanha,
+            idOpcaoContribuicao: idOpcao,
+            items: initialCampaignItems,
+          },
+        );
+      }
 
       span.setStatus({ code: SpanStatusCode.OK });
       return { usuario, conta, campanha: campanhaComOpcao };
