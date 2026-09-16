@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { httpBatchLink } from '@trpc/client';
 import { useState, type ReactNode } from 'react';
+import { noStoreFetch } from './trpc-fetch.js';
 import { trpc } from './trpc.js';
 
 /**
@@ -58,6 +59,12 @@ export function TrpcProvider({ children }: { children: ReactNode }) {
           // host is never exercised. If you later add a separate API
           // host or RN client, switch to an absolute URL.
           url: '/api/trpc',
+          // aperture-n1b34 — bypass the HTTP cache on every tRPC request.
+          // Batched query GETs were being answered from disk cache on
+          // browser Back (history navigation), resurrecting stale
+          // session state (tutorialStatus completado:false after
+          // ENCERRAR had persisted true). See trpc-fetch.ts.
+          fetch: noStoreFetch(),
         }),
       ],
     }),
