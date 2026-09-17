@@ -17,7 +17,7 @@ import { PainelCampanhaSwitcher } from "./PainelCampanhaSwitcher";
 //                     user who entered a list was stranded — no way back to
 //                     the mixed 1.0/2.0 grid). Leads the nav (back-affordance
 //                     reads left), never active inside the painel.
-//   • MINHA PÁGINA  — anchors to the painel root; active when there's no
+//   • INÍCIO        — anchors to the painel root; active when there's no
 //                     sub-section.
 
 interface PainelTopbarProps {
@@ -28,7 +28,7 @@ interface PainelTopbarProps {
   /**
    * aperture-hdftp — which top-level surface is current. On 'campanhas'
    * (the /campanhas multi-list grid) the MINHAS LISTAS chip renders as
-   * the active you-are-here chip (no back arrow) and MINHA PÁGINA is
+   * the active you-are-here chip (no back arrow) and INÍCIO is
    * never active. Defaults to 'painel' (all /painel/:slug surfaces).
    */
   surface?: 'painel' | 'campanhas';
@@ -44,8 +44,8 @@ export function PainelTopbar({
   // aperture-1wknu — wire the previously-dead logout button (it was a bare
   // <button> with no onClick, so clicking did nothing).
   const { signOut, isPending: isSigningOut } = useSignOut();
-  // aperture-h0hom — inside a specific campanha's painel, brand + MINHA
-  // PÁGINA keep that campanha's context (bare otherwise).
+  // aperture-h0hom — inside a specific campanha's painel, brand + INÍCIO
+  // keep that campanha's context (bare otherwise).
   const idCampanha = useCampanhaRota();
 
   return (
@@ -87,7 +87,7 @@ export function PainelTopbar({
                 <PainelCampanhaSwitcher slug={slug} />
               )}
             </li>
-            {/* MINHA PÁGINA — anchor to painel root, active when there's
+            {/* INÍCIO — anchor to painel root, active when there's
              *  no sub-section. (aperture-paf3m: AJUDA branch removed.) */}
             <li>
               <a
@@ -95,7 +95,7 @@ export function PainelTopbar({
                 aria-current={onPainelRoot ? "page" : undefined}
                 className={`painel-topbar-link${onPainelRoot ? " is-active" : ""}`}
               >
-                MINHA PÁGINA
+                INÍCIO
               </a>
             </li>
           </ul>
