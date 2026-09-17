@@ -7580,6 +7580,32 @@ button.painel-topbar-link:hover {
   transform: rotate(180deg);
 }
 
+/* Mobile topbar: keep logo, list switcher, Início and logout visible as one
+ * balanced row instead of clipping the second navigation chip. */
+@media (max-width: 899px) {
+  .painel-topbar-inner {
+    padding: 10px 12px;
+    gap: 8px;
+  }
+
+  .painel-topbar a.painel-topbar-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 36px;
+    box-sizing: border-box;
+    border-radius: 13px;
+    padding: 7px 10px;
+  }
+
+  .painel-switcher-trigger {
+    height: 36px;
+    box-sizing: border-box;
+    gap: 6px;
+    padding: 7px 9px;
+  }
+}
+
 @keyframes painel-switcher-floatin {
   from {
     opacity: 0;
