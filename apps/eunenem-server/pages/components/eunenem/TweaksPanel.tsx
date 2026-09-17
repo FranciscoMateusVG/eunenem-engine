@@ -92,6 +92,9 @@ export function TweaksPanel({
     clearFocusRequest,
   } = useTweaks();
   const open = editor.open;
+  const activeField = editor.activeField;
+  const showField = (field: keyof typeof EDIT_FIELDS) =>
+    activeField === null || activeField === field;
 
   const utils = trpc.useUtils();
   const showSave = canSave && Boolean(idCampanha);
@@ -354,116 +357,140 @@ export function TweaksPanel({
             </button>
           </header>
 
-          <TweakSection title={SECTION_TITLES.titulo}>
-            <TweakField
-              inputId={EDIT_FIELDS.nomeBebe.inputId}
-              label={EDIT_FIELDS.nomeBebe.label}
-              hint="aparece no título, na história e no polaroid"
-            >
-              <input
-                id={EDIT_FIELDS.nomeBebe.inputId}
-                className="perfil-input"
-                value={nomeInput}
-                maxLength={120}
-                placeholder={BABY_FALLBACK}
-                onChange={(e) => {
-                  setNomeInput(e.target.value);
-                  setTweaks({ babyName: e.target.value.trim() || BABY_FALLBACK });
-                }}
-              />
-            </TweakField>
-          </TweakSection>
+          {showField("nomeBebe") && (
+            <TweakSection title={SECTION_TITLES.titulo}>
+              <TweakField
+                inputId={EDIT_FIELDS.nomeBebe.inputId}
+                label={EDIT_FIELDS.nomeBebe.label}
+                hint="aparece no título, na história e no polaroid"
+              >
+                <input
+                  id={EDIT_FIELDS.nomeBebe.inputId}
+                  className="perfil-input"
+                  value={nomeInput}
+                  maxLength={120}
+                  placeholder={BABY_FALLBACK}
+                  onChange={(e) => {
+                    setNomeInput(e.target.value);
+                    setTweaks({ babyName: e.target.value.trim() || BABY_FALLBACK });
+                  }}
+                />
+              </TweakField>
+            </TweakSection>
+          )}
 
-          <TweakSection title={SECTION_TITLES.historia}>
-            <TweakField
-              inputId={EDIT_FIELDS.historia.inputId}
-              label={EDIT_FIELDS.historia.label}
-              hint={`${historiaLen}/${HISTORIA_MAX}`}
-            >
-              <textarea
-                id={EDIT_FIELDS.historia.inputId}
-                className="perfil-input perfil-textarea"
-                value={tweaks.historia ?? ""}
-                maxLength={HISTORIA_MAX}
-                rows={5}
-                placeholder="como esse neném chegou na vida de vocês?"
-                onChange={(e) => setTweaks({ historia: e.target.value })}
-              />
-            </TweakField>
-            <TweakField
-              inputId={EDIT_FIELDS.papais.inputId}
-              label={EDIT_FIELDS.papais.label}
-              hint={
-                creatorName
-                  ? `vazio = assina como ${creatorName}`
-                  : "quem assina a história"
-              }
-            >
-              <input
-                id={EDIT_FIELDS.papais.inputId}
-                className="perfil-input"
-                value={papaisInput}
-                maxLength={120}
-                placeholder={creatorName || "Mari & Rodrigo"}
-                onChange={(e) => {
-                  setPapaisInput(e.target.value);
-                  setTweaks({ parents: e.target.value.trim() || creatorName });
-                }}
-              />
-            </TweakField>
-          </TweakSection>
+          {(showField("historia") || showField("papais")) && (
+            <TweakSection title={SECTION_TITLES.historia}>
+              {showField("historia") && (
+                <TweakField
+                  inputId={EDIT_FIELDS.historia.inputId}
+                  label={EDIT_FIELDS.historia.label}
+                  hint={`${historiaLen}/${HISTORIA_MAX}`}
+                >
+                  <textarea
+                    id={EDIT_FIELDS.historia.inputId}
+                    className="perfil-input perfil-textarea"
+                    value={tweaks.historia ?? ""}
+                    maxLength={HISTORIA_MAX}
+                    rows={5}
+                    placeholder="como esse neném chegou na vida de vocês?"
+                    onChange={(e) => setTweaks({ historia: e.target.value })}
+                  />
+                </TweakField>
+              )}
+              {showField("papais") && (
+                <TweakField
+                  inputId={EDIT_FIELDS.papais.inputId}
+                  label={EDIT_FIELDS.papais.label}
+                  hint={
+                    creatorName
+                      ? `vazio = assina como ${creatorName}`
+                      : "quem assina a história"
+                  }
+                >
+                  <input
+                    id={EDIT_FIELDS.papais.inputId}
+                    className="perfil-input"
+                    value={papaisInput}
+                    maxLength={120}
+                    placeholder={creatorName || "Mari & Rodrigo"}
+                    onChange={(e) => {
+                      setPapaisInput(e.target.value);
+                      setTweaks({ parents: e.target.value.trim() || creatorName });
+                    }}
+                  />
+                </TweakField>
+              )}
+            </TweakSection>
+          )}
 
-          <TweakSection title={SECTION_TITLES.fotos}>
-            <PhotoSlot
-              slot="capa"
-              inline
-              label={EDIT_FIELDS.fotoCapa.label}
-              dropzoneId={EDIT_FIELDS.fotoCapa.inputId}
-              displayUrl={tweaks.fotoCapaUrl ?? null}
-              onUpload={uploadFoto}
-            />
-            <PhotoSlot
-              slot="perfil"
-              inline
-              label={EDIT_FIELDS.fotoPerfil.label}
-              dropzoneId={EDIT_FIELDS.fotoPerfil.inputId}
-              displayUrl={tweaks.fotoPerfilUrl ?? null}
-              onUpload={uploadFoto}
-            />
-            <PhotoSlot
-              slot="historia"
-              inline
-              label={EDIT_FIELDS.fotoHistoria.label}
-              dropzoneId={EDIT_FIELDS.fotoHistoria.inputId}
-              displayUrl={tweaks.fotoHistoriaUrl ?? null}
-              onUpload={uploadFoto}
-            />
-          </TweakSection>
+          {(showField("fotoCapa") ||
+            showField("fotoPerfil") ||
+            showField("fotoHistoria")) && (
+            <TweakSection title={SECTION_TITLES.fotos}>
+              {showField("fotoCapa") && (
+                <PhotoSlot
+                  slot="capa"
+                  inline
+                  label={EDIT_FIELDS.fotoCapa.label}
+                  dropzoneId={EDIT_FIELDS.fotoCapa.inputId}
+                  displayUrl={tweaks.fotoCapaUrl ?? null}
+                  onUpload={uploadFoto}
+                />
+              )}
+              {showField("fotoPerfil") && (
+                <PhotoSlot
+                  slot="perfil"
+                  inline
+                  label={EDIT_FIELDS.fotoPerfil.label}
+                  dropzoneId={EDIT_FIELDS.fotoPerfil.inputId}
+                  displayUrl={tweaks.fotoPerfilUrl ?? null}
+                  onUpload={uploadFoto}
+                />
+              )}
+              {showField("fotoHistoria") && (
+                <PhotoSlot
+                  slot="historia"
+                  inline
+                  label={EDIT_FIELDS.fotoHistoria.label}
+                  dropzoneId={EDIT_FIELDS.fotoHistoria.inputId}
+                  displayUrl={tweaks.fotoHistoriaUrl ?? null}
+                  onUpload={uploadFoto}
+                />
+              )}
+            </TweakSection>
+          )}
 
-          <TweakSection title={SECTION_TITLES.paleta}>
-            <TweakColor
-              inputId={EDIT_FIELDS.corPrimaria.inputId}
-              label={EDIT_FIELDS.corPrimaria.label}
-              value={tweaks.primary}
-              hexText={primaryHex}
-              options={PRIMARY_SWATCHES}
-              custom={primaryIsCustom}
-              warning={primaryWarning?.message ?? null}
-              onPick={onPickPrimary}
-              onHexText={onPrimaryHexText}
-            />
-            <TweakColor
-              inputId={EDIT_FIELDS.corAcento.inputId}
-              label={EDIT_FIELDS.corAcento.label}
-              value={tweaks.accent}
-              hexText={accentHex}
-              options={ACCENT_SWATCHES}
-              custom={accentIsCustom}
-              warning={accentWarning?.message ?? null}
-              onPick={onPickAccent}
-              onHexText={onAccentHexText}
-            />
-          </TweakSection>
+          {(showField("corPrimaria") || showField("corAcento")) && (
+            <TweakSection title={SECTION_TITLES.paleta}>
+              {showField("corPrimaria") && (
+                <TweakColor
+                  inputId={EDIT_FIELDS.corPrimaria.inputId}
+                  label={EDIT_FIELDS.corPrimaria.label}
+                  value={tweaks.primary}
+                  hexText={primaryHex}
+                  options={PRIMARY_SWATCHES}
+                  custom={primaryIsCustom}
+                  warning={primaryWarning?.message ?? null}
+                  onPick={onPickPrimary}
+                  onHexText={onPrimaryHexText}
+                />
+              )}
+              {showField("corAcento") && (
+                <TweakColor
+                  inputId={EDIT_FIELDS.corAcento.inputId}
+                  label={EDIT_FIELDS.corAcento.label}
+                  value={tweaks.accent}
+                  hexText={accentHex}
+                  options={ACCENT_SWATCHES}
+                  custom={accentIsCustom}
+                  warning={accentWarning?.message ?? null}
+                  onPick={onPickAccent}
+                  onHexText={onAccentHexText}
+                />
+              )}
+            </TweakSection>
+          )}
 
           {saveError && (
             <p role="alert" className="tweaks-error">
