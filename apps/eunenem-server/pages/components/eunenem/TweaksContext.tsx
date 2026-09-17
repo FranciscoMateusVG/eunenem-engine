@@ -42,6 +42,8 @@ import {
 
 interface EditorUiState {
   open: boolean;
+  /** Contextual field selected by a page pencil; null means full editor. */
+  activeField: EditField | null;
   /** Field to focus once the panel is open; cleared after focus lands. */
   focusField: EditField | null;
   /** Monotonic nonce so re-clicking the SAME icon re-focuses. */
@@ -103,6 +105,7 @@ export function TweaksProvider({
   );
   const [editor, setEditor] = useState<EditorUiState>({
     open: false,
+    activeField: null,
     focusField: null,
     focusNonce: 0,
   });
@@ -145,12 +148,18 @@ export function TweaksProvider({
   const openEditor = useCallback((field?: EditField) => {
     setEditor((prev) => ({
       open: true,
+      activeField: field ?? null,
       focusField: field ?? null,
       focusNonce: prev.focusNonce + 1,
     }));
   }, []);
   const closeEditor = useCallback(() => {
-    setEditor((prev) => ({ ...prev, open: false, focusField: null }));
+    setEditor((prev) => ({
+      ...prev,
+      open: false,
+      activeField: null,
+      focusField: null,
+    }));
   }, []);
   const clearFocusRequest = useCallback(() => {
     setEditor((prev) => (prev.focusField ? { ...prev, focusField: null } : prev));
