@@ -7812,11 +7812,14 @@ button.painel-topbar-link:hover {
 }
 
 
-/* Keep the Pix notification clear of the child's face on phone screens. */
+/* Give the Pix notification its own space below the polaroid on phones. */
 @media (max-width: 640px) {
+  .hero-visual {
+    min-height: 490px;
+  }
   .hero-fcard--pix {
-    bottom: 9%;
-    right: -4%;
+    bottom: 10px;
+    right: 0;
   }
 }
      
