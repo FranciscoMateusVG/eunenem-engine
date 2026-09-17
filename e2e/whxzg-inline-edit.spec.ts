@@ -113,8 +113,15 @@ test.describe('Owner inline editing on /pagina/:slug (aperture-whxzg)', () => {
       'false',
     );
 
-    // ── 3. Any colour: hex text → CSS var; invalid never applied; persists ──
+    // The generic Personalizar entry point keeps the full text/colour editor,
+    // but photos remain exclusive to their contextual pencils.
+    await page.getByRole('button', { name: 'Fechar', exact: true }).click();
+    await page.getByRole('button', { name: 'Personalizar', exact: true }).click();
     const panel2 = page.getByRole('dialog', { name: 'Personalizar página' });
+    await expect(panel2.locator('[id^="tweaks-foto-"]')).toHaveCount(0);
+    await expect(panel2.getByLabel('Fotos')).toHaveCount(0);
+
+    // ── 3. Any colour: hex text → CSS var; invalid never applied; persists ──
     const primaryHex = panel2.getByLabel('Primária: código hex');
     await primaryHex.fill('#2E7D32');
     await expect.poll(() => cssVar(page, '--lilac')).toBe('#2E7D32');
