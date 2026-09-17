@@ -7810,3 +7810,13 @@ button.painel-topbar-link:hover {
     transform: none;
   }
 }
+
+
+/* Keep the Pix notification clear of the child's face on phone screens. */
+@media (max-width: 640px) {
+  .hero-fcard--pix {
+    bottom: 9%;
+    right: -4%;
+  }
+}
+     
