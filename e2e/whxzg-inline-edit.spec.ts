@@ -62,6 +62,11 @@ test.describe('Owner inline editing on /pagina/:slug (aperture-whxzg)', () => {
     const panel = page.getByRole('dialog', { name: 'Personalizar página' });
     await expect(panel).toBeVisible();
     await expect.poll(() => activeId(page)).toBe('tweaks-historia');
+    await expect(panel.locator('#tweaks-historia')).toBeVisible();
+    await expect(panel.locator('#tweaks-nome-bebe')).toHaveCount(0);
+    await expect(panel.locator('#tweaks-papais')).toHaveCount(0);
+    await expect(panel.locator('[id^="tweaks-foto-"]')).toHaveCount(0);
+    await expect(panel.getByLabel('Paleta')).toHaveCount(0);
 
     // Instant preview: typing in the panel changes the page's Story section.
     const storyText = 'nossa história inline E2E ♡';
@@ -69,29 +74,28 @@ test.describe('Owner inline editing on /pagina/:slug (aperture-whxzg)', () => {
     await expect(page.locator('main').getByText(storyText)).toBeVisible();
     await expect(panel).toHaveAttribute('data-dirty', 'true');
 
-    // ── 4. Photo disclosure BEFORE the picker; Cancelar never claims photo undo ──
-    await expect(panel.getByTestId('capa-disclosure')).toHaveText(/foto salva na hora do envio/);
-    await expect(panel.getByTestId('perfil-disclosure')).toHaveText(/foto salva na hora do envio/);
-    await expect(panel.getByTestId('historia-disclosure')).toHaveText(
-      /foto salva na hora do envio/,
-    );
-    await expect(panel.getByText(/fotos enviadas já estão salvas/)).toBeVisible();
-    await expect(panel.getByRole('button', { name: 'Cancelar', exact: true })).toHaveAttribute(
-      'title',
-      /descarta só o texto e as cores não salvos/,
-    );
-    // Photo dropzones are keyboard-reachable focus targets with the field ids.
-    for (const id of ['tweaks-foto-capa', 'tweaks-foto-perfil', 'tweaks-foto-historia']) {
-      await expect(panel.locator(`#${id}`)).toHaveAttribute('role', 'button');
-      await expect(panel.locator(`#${id}`)).toHaveAttribute('tabindex', '0');
-    }
-
     // ── 2. Salvar persists; reload matches ──
     await panel.getByRole('button', { name: 'Salvar', exact: true }).click();
     await expect(page.getByText('Personalização salva ♡')).toBeVisible();
     await expect(panel).toHaveAttribute('data-dirty', 'false');
     await page.reload();
     await expect(page.locator('main').getByText(storyText)).toBeVisible();
+
+    // ── 4. Each photo pencil exposes only its own keyboard-ready picker ──
+    const photoFields = [
+      ['fotoCapa', 'tweaks-foto-capa', 'capa-disclosure'],
+      ['fotoPerfil', 'tweaks-foto-perfil', 'perfil-disclosure'],
+      ['fotoHistoria', 'tweaks-foto-historia', 'historia-disclosure'],
+    ] as const;
+    for (const [field, id, disclosure] of photoFields) {
+      await page.getByTestId(`edit-${field}`).click();
+      await expect(panel.locator(`#${id}`)).toHaveAttribute('role', 'button');
+      await expect(panel.locator(`#${id}`)).toHaveAttribute('tabindex', '0');
+      await expect(panel.locator('[id^="tweaks-foto-"]')).toHaveCount(1);
+      await expect(panel.getByTestId(disclosure)).toHaveText(/foto salva na hora do envio/);
+      await expect(panel.locator('#tweaks-nome-bebe')).toHaveCount(0);
+      await expect(panel.locator('#tweaks-historia')).toHaveCount(0);
+    }
 
     // ── Title icon → focus on the nome input; Cancelar discards the draft ──
     await page.getByTestId('edit-nomeBebe').click();

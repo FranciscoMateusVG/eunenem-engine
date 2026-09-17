@@ -171,7 +171,7 @@ export function Hero({
             </div>
           )}
 
-          <div className="flex gap-3 flex-wrap items-center">
+          <div className="hidden md:flex gap-3 flex-wrap items-center">
             <a href="#presentes" className="btn-lilac no-underline">
               Quero presentear
               <span style={{ fontSize: 16, marginLeft: 4 }} aria-hidden="true">
@@ -263,6 +263,19 @@ export function Hero({
               />
             )}
           </div>
+        </div>
+
+        {/* Keep mobile actions after the full cover + profile composition. */}
+        <div className="flex md:hidden gap-3 flex-wrap items-center">
+          <a href="#presentes" className="btn-lilac no-underline">
+            Quero presentear
+            <span style={{ fontSize: 16, marginLeft: 4 }} aria-hidden="true">
+              →
+            </span>
+          </a>
+          <a href="#como" className="btn-outline no-underline">
+            Como funciona
+          </a>
         </div>
       </div>
     </section>
