@@ -8109,3 +8109,15 @@ button.painel-topbar-link:hover {
   outline: none;
   box-shadow: 0 0 0 4px rgba(201, 165, 216, 0.35);
 }
+
+
+/* Give the Pix notification its own space below the polaroid on phones. */
+@media (max-width: 640px) {
+  .hero-visual {
+    min-height: 490px;
+  }
+  .hero-fcard--pix {
+    bottom: 10px;
+    right: 0;
+  }
+}
