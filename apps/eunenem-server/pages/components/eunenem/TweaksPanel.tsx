@@ -95,6 +95,9 @@ export function TweaksPanel({
   const activeField = editor.activeField;
   const showField = (field: keyof typeof EDIT_FIELDS) =>
     activeField === null || activeField === field;
+  const showPhotoField = (
+    field: "fotoCapa" | "fotoPerfil" | "fotoHistoria",
+  ) => activeField === field;
 
   const utils = trpc.useUtils();
   const showSave = canSave && Boolean(idCampanha);
@@ -424,11 +427,11 @@ export function TweaksPanel({
             </TweakSection>
           )}
 
-          {(showField("fotoCapa") ||
-            showField("fotoPerfil") ||
-            showField("fotoHistoria")) && (
+          {(showPhotoField("fotoCapa") ||
+            showPhotoField("fotoPerfil") ||
+            showPhotoField("fotoHistoria")) && (
             <TweakSection title={SECTION_TITLES.fotos}>
-              {showField("fotoCapa") && (
+              {showPhotoField("fotoCapa") && (
                 <PhotoSlot
                   slot="capa"
                   inline
@@ -438,7 +441,7 @@ export function TweaksPanel({
                   onUpload={uploadFoto}
                 />
               )}
-              {showField("fotoPerfil") && (
+              {showPhotoField("fotoPerfil") && (
                 <PhotoSlot
                   slot="perfil"
                   inline
@@ -448,7 +451,7 @@ export function TweaksPanel({
                   onUpload={uploadFoto}
                 />
               )}
-              {showField("fotoHistoria") && (
+              {showPhotoField("fotoHistoria") && (
                 <PhotoSlot
                   slot="historia"
                   inline

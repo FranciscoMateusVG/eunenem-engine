@@ -101,7 +101,7 @@ export function Hero({
         }}
       />
 
-      <div className="eu-container grid grid-cols-1 md:grid-cols-[1.1fr_1fr] items-center gap-14">
+      <div className="eu-container grid grid-cols-1 md:grid-cols-[1.1fr_1fr] items-center gap-x-14 gap-y-8 md:gap-y-14">
         {/* LEFT */}
         <div className="relative z-10">
           {/* aperture-whxzg — the owner's title edit icon rides INLINE right
@@ -266,7 +266,7 @@ export function Hero({
         </div>
 
         {/* Keep mobile actions after the full cover + profile composition. */}
-        <div className="flex md:hidden gap-3 flex-wrap items-center">
+        <div className="flex md:hidden gap-3 flex-wrap items-center mt-6">
           <a href="#presentes" className="btn-lilac no-underline">
             Quero presentear
             <span style={{ fontSize: 16, marginLeft: 4 }} aria-hidden="true">
