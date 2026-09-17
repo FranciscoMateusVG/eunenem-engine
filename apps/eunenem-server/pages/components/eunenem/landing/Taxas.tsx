@@ -98,7 +98,7 @@ export function Taxas() {
               pra você
             </div>
             <p>
-              Cada R$ 100 adiciona na sua lista cai inteirinho na sua conta. Sem
+              Cada R$ 100 presenteados na sua lista cai inteirinho na sua conta. Sem
               letra miúda.
             </p>
           </div>
