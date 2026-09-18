@@ -20,6 +20,7 @@ import {
   safeBrowserFrames,
 } from '../../../apps/eunenem-server/pages/lib/browser-errors.js';
 import {
+  browserArtifactAssetUrl,
   clientRuntimeEnvScript,
   readBrowserArtifactRelease,
 } from '../../../apps/eunenem-server/server/client-runtime-env.js';
@@ -305,6 +306,16 @@ describe('browser error stack boundary', () => {
 });
 
 describe('browser artifact release and Hono runtime envelope', () => {
+  it('versions browser assets with the build release so clients cannot reuse stale UI', () => {
+    expect(browserArtifactAssetUrl('/public/client.js', RELEASE)).toBe(
+      `/public/client.js?v=${encodeURIComponent(RELEASE)}`,
+    );
+    expect(browserArtifactAssetUrl('/public/styles.css', RELEASE)).toBe(
+      `/public/styles.css?v=${encodeURIComponent(RELEASE)}`,
+    );
+    expect(browserArtifactAssetUrl('/public/client.js', undefined)).toBe('/public/client.js');
+  });
+
   it('hashes both fixed assets deterministically and changes on either input', () => {
     const first = computeBrowserArtifactRelease({
       client: Buffer.from('client-a'),
