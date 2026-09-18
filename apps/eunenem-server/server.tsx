@@ -24,6 +24,7 @@ import {
 import { installBlockedAuthHandlerGuard } from './server/blocked-auth-handler.js';
 import { createLegacyBridgeHandler } from './server/legacy-bridge.js';
 import {
+  browserArtifactAssetUrl,
   clientRuntimeEnvScript,
   readBrowserArtifactRelease,
 } from './server/client-runtime-env.js';
@@ -49,6 +50,14 @@ const PORT = Number(process.env.PORT ?? 3001);
 // Read the small build-generated metadata once. The multi-megabyte assets are
 // hashed during `pnpm build`, never on an SSR request.
 const browserArtifactRelease = readBrowserArtifactRelease();
+const browserStylesUrl = browserArtifactAssetUrl(
+  '/public/styles.css',
+  browserArtifactRelease,
+);
+const browserClientUrl = browserArtifactAssetUrl(
+  '/public/client.js',
+  browserArtifactRelease,
+);
 
 // Boot-time gate (aperture-ht7sq) — fail fast if BETTER_AUTH_SECRET,
 // BETTER_AUTH_URL, TRUSTED_ORIGINS, or DATABASE_URL is missing /
@@ -414,11 +423,11 @@ function envelope(ssrHtml: string, pathname: string): string {
         --font-dm-sans: 'DM Sans', system-ui, sans-serif;
       }
     </style>
-    <link rel="stylesheet" href="/public/styles.css" />${googleAnalyticsSnippet()}${googleTagManagerHeadSnippet()}
+    <link rel="stylesheet" href="${browserStylesUrl}" />${googleAnalyticsSnippet()}${googleTagManagerHeadSnippet()}
   </head>
   <body class="min-h-full flex flex-col bg-cream text-ink">${googleTagManagerBodySnippet()}
     <div id="root">${ssrHtml}</div>
-    <script type="module" src="/public/client.js"></script>
+    <script type="module" src="${browserClientUrl}"></script>
   </body>
 </html>`;
 }
