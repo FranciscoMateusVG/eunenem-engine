@@ -35,6 +35,31 @@ export function Messages({ slug }: MessagesProps) {
   const recados = data ?? [];
 
   return (
+    <MessagesView
+      babyName={tweaks.babyName}
+      genero={tweaks.genero}
+      recados={recados}
+      isLoading={isLoading}
+    />
+  );
+}
+
+interface MessagesViewProps {
+  babyName: string;
+  genero?: string | null;
+  recados: PaginaMuralRecado[];
+  isLoading: boolean;
+}
+
+export function MessagesView({
+  babyName,
+  genero,
+  recados,
+  isLoading,
+}: MessagesViewProps) {
+  const copy = muralCopy(genero);
+
+  return (
     <section
       id="mural"
       className="eu-section relative overflow-hidden"
@@ -72,9 +97,9 @@ export function Messages({ slug }: MessagesProps) {
               marginTop: 8,
             }}
           >
-            o mural do{" "}
+            o mural {copy.posse}{" "}
             <span style={{ color: "var(--coral-pink)" }}>
-              {tweaks.babyName}
+              {babyName}
             </span>
           </h2>
           <p
@@ -87,7 +112,7 @@ export function Messages({ slug }: MessagesProps) {
               marginRight: "auto",
             }}
           >
-            Cada presente vem com um recadinho pro {tweaks.babyName} já se
+            Cada presente vem com um recadinho {copy.destino} {babyName} já se
             acostumar com a voz de vocês. ♡
           </p>
         </header>
@@ -95,7 +120,7 @@ export function Messages({ slug }: MessagesProps) {
         {isLoading ? (
           <MuralSkeleton />
         ) : recados.length === 0 ? (
-          <EmptyMural babyName={tweaks.babyName} />
+          <EmptyMural babyName={babyName} destino={copy.destino} />
         ) : (
           <div
             className="grid gap-7"
@@ -208,7 +233,13 @@ function MessageCard({ recado }: { recado: PaginaMuralRecado }) {
   );
 }
 
-function EmptyMural({ babyName }: { babyName: string }) {
+export function EmptyMural({
+  babyName,
+  destino,
+}: {
+  babyName: string;
+  destino: MuralCopy["destino"];
+}) {
   return (
     <div
       style={{
@@ -244,7 +275,7 @@ function EmptyMural({ babyName }: { babyName: string }) {
         }}
       >
         Os recadinhos aparecem aqui quando alguém escolhe um presente
-        e deixa uma mensagem pro {babyName} no checkout.
+        e deixa uma mensagem {destino} {babyName} no checkout.
       </p>
       <a href="#presentes" className="btn-lilac no-underline">
         Escolher presente
@@ -280,6 +311,22 @@ function MuralSkeleton() {
 }
 
 // ── helpers ────────────────────────────────────────────────────────────
+
+interface MuralCopy {
+  posse: "do" | "da";
+  destino: "pro" | "pra";
+}
+
+/**
+ * Agreement for copy addressed to the baby. The nullable/unknown fallback
+ * deliberately preserves the mural's legacy do/pro wording for profiles that
+ * predate the genero field; only an explicit menina value switches to da/pra.
+ */
+export function muralCopy(genero?: string | null): MuralCopy {
+  return genero === "menina"
+    ? { posse: "da", destino: "pra" }
+    : { posse: "do", destino: "pro" };
+}
 
 /**
  * Deterministic hash from an opaque pagamento UUID string. Used to pick
