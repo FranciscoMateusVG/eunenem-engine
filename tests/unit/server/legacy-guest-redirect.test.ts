@@ -11,6 +11,7 @@ function testApp(legacySiteOrigin: string | undefined) {
   const app = new Hono();
   app.get('/faq', (c) => c.text('engine faq'));
   app.use('*', createLegacyGuestRedirectMiddleware(legacySiteOrigin));
+  app.get('/', (c) => c.text('engine landing'));
   app.all('*', (c) => c.text('engine fallback', 404));
   return app;
 }
@@ -27,6 +28,61 @@ async function request(
 }
 
 describe('legacy guest-link redirect', () => {
+  describe.each(['GET', 'HEAD'])('convites landing redirect (%s)', (method) => {
+    it.each([
+      '/convites',
+      '/convites/',
+      '/convites?utm_source=google&utm_campaign=cha%20de%20bebe&gclid=abc%2B123',
+      '/convites/?utm_source=google&utm_source=email&next=https://example.com',
+    ])('redirects %s to the same-origin root without a loop', async (path) => {
+      for (const origin of [ENGINE_ORIGIN, 'https://eunenem.com']) {
+        const app = testApp(LEGACY_ORIGIN);
+        const response = await app.request(`${origin}${path}`, { method, redirect: 'manual' });
+        const location = response.headers.get('location');
+
+        expect(response.status).toBe(302);
+        expect(location).toBe(`/${new URL(`${origin}${path}`).search}`);
+        expect(response.headers.get('cache-control')).toBe('no-store');
+        expect(await response.text()).toBe('');
+
+        const destination = new URL(location ?? '', origin);
+        expect(destination.origin).toBe(origin);
+        const landing = await app.request(destination, { method, redirect: 'manual' });
+        expect(landing.status).toBe(200);
+        expect(landing.headers.get('location')).toBeNull();
+        expect(await landing.text()).toBe(method === 'HEAD' ? '' : 'engine landing');
+      }
+    });
+
+    it.each([
+      undefined,
+      '',
+      ENGINE_ORIGIN,
+      'javascript:alert(1)',
+    ])('does not depend on legacy origin %s', async (legacyOrigin) => {
+      const response = await testApp(legacyOrigin).request(
+        `${ENGINE_ORIGIN}/convites?utm_source=ad`,
+        {
+          method,
+        },
+      );
+      expect(response.status).toBe(302);
+      expect(response.headers.get('location')).toBe('/?utm_source=ad');
+    });
+  });
+
+  it.each([
+    'POST',
+    'PUT',
+    'PATCH',
+    'DELETE',
+    'OPTIONS',
+  ])('does not redirect %s /convites', async (method) => {
+    const response = await request('/convites', { method });
+    expect(response.status).toBe(404);
+    expect(response.headers.get('location')).toBeNull();
+  });
+
   it('redirects the operator UUID example to the configured legacy origin and preserves query', async () => {
     const response = await request(`/${UUID}?utm_source=convite&gift=fralda`);
 
@@ -40,6 +96,8 @@ describe('legacy guest-link redirect', () => {
   it.each([
     ['/casamento-da-ana', `${LEGACY_ORIGIN}/casamento-da-ana`],
     ['/123-bebe', `${LEGACY_ORIGIN}/123-bebe`],
+    ['/convites-da-ana', `${LEGACY_ORIGIN}/convites-da-ana`],
+    ['/convites/checkout?item=2', `${LEGACY_ORIGIN}/convites/checkout?item=2`],
     [`/${UUID}/checkout?item=2`, `${LEGACY_ORIGIN}/${UUID}/checkout?item=2`],
     ['/casamento-da-ana/checkout?item=2', `${LEGACY_ORIGIN}/casamento-da-ana/checkout?item=2`],
     [`/${FIFTY_CHAR_SLUG}/checkout`, `${LEGACY_ORIGIN}/${FIFTY_CHAR_SLUG}/checkout`],
