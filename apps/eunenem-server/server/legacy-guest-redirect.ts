@@ -101,6 +101,18 @@ export function createLegacyGuestRedirectMiddleware(
   legacySiteOrigin: string | undefined,
 ): MiddlewareHandler {
   return async (c, next) => {
+    // The old marketing URL belongs to Engine, not to a legacy guest slug.
+    // Keep this exact-path guard ahead of the legacy fallback and independent
+    // of its configuration. A relative Location stays on the request origin.
+    const request = new URL(c.req.url);
+    if (
+      (c.req.method === "GET" || c.req.method === "HEAD") &&
+      (request.pathname === "/convites" || request.pathname === "/convites/")
+    ) {
+      c.header("Cache-Control", "no-store");
+      return c.redirect(`/${request.search}`, 302);
+    }
+
     const destination = resolveLegacyGuestRedirect({
       method: c.req.method,
       requestUrl: c.req.url,
