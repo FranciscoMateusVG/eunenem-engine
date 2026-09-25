@@ -466,6 +466,7 @@ export interface Users {
 
 export interface Usuarios {
   criado_em: Generated<Timestamp>;
+  desativado_em: Timestamp | null;
   email: string;
   id: string;
   id_conta: string;

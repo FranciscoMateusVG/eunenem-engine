@@ -447,6 +447,25 @@ export class UsuarioRepositoryMemory implements UsuarioRepository {
     });
   }
 
+  async desativarConta(idUsuario: IdUsuario, desativadoEm: Date): Promise<void> {
+    return tracer.startActiveSpan('db.usuarios.desativarConta', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+      try {
+        const existing = this.usuarios.get(idUsuario);
+        if (existing && !existing.desativadoEm) {
+          this.usuarios.set(idUsuario, { ...existing, desativadoEm });
+        }
+        span.setStatus({ code: SpanStatusCode.OK });
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
   async removeRegistroDomain(idUsuario: IdUsuario): Promise<void> {
     return tracer.startActiveSpan('db.usuarios.removeRegistroDomain', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'DELETE' });

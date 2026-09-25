@@ -92,6 +92,10 @@ describe('Migration round-trip', () => {
     expect(tableNames).toContain('listas_de_convidados');
     expect(tableNames).toContain('convidados');
 
+    const desativadoEmCol = await getColumn(db, 'usuarios', 'desativado_em');
+    expect(desativadoEmCol?.data_type).toBe('timestamp with time zone');
+    expect(desativadoEmCol?.is_nullable).toBe('YES');
+
     // Migrations layered ON TOP of the evento migration (026 create_evento):
     //   - 20260615_023_expand_convites_fonte_check (CHECK only, no table)
     //   - 20260623_026_create_perfil_criador → perfil_criadores
@@ -442,7 +446,12 @@ describe('Migration round-trip', () => {
     //    this sequence must start at the LATEST migration and walk earlier.
     //    Adding a new migration on top REQUIRES prepending its down-step here.
 
-    // 20260910_054_webhook_ingress_platform (aperture-bsygp) → actual TIP.
+    // 20260925_055_add_desativado_em_to_usuarios → actual TIP.
+    const downDesativadoEm = await migrator.migrateDown();
+    expect(downDesativadoEm.error).toBeUndefined();
+    expect(await getColumn(db, 'usuarios', 'desativado_em')).toBeUndefined();
+
+    // 20260910_054_webhook_ingress_platform (aperture-bsygp) → current TIP.
     expect(await getColumn(db, 'payment_webhook_events', 'ingress_platform_id')).toBeDefined();
     expect(await listIndexNames(db, 'payment_webhook_events')).toContain(
       'payment_webhook_events_unmatched_ingress_idx',

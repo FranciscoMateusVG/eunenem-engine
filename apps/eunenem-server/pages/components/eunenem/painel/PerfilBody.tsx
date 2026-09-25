@@ -8,11 +8,11 @@ import { trpc } from "@/lib/trpc";
 import type { Genero } from "@/lib/concordancia";
 import { paginaShareDisplayPath, paginaShareDisplayPrefix, paginaShareUrl } from "@/lib/pagina-share";
 import { useCampanhaSlugInfoRota } from "@/lib/campanhas";
-import { EUNENEM_SUPPORT_WHATSAPP_URL, painelHref } from "@/lib/painelRoutes";
+import { painelHref } from "@/lib/painelRoutes";
 import { useCampanhaEscrita } from "@/lib/campanha-escrita";
 import { useCampanhaRota } from "@/lib/campanha-rota";
 import { PERFIL_RELATIONS } from "@/lib/mocks/perfil";
-import { sendEvent } from "@/lib/analytics";
+import { resetAnalyticsIdentity, sendEvent } from "@/lib/analytics";
 import type { PainelSectionBodyProps } from "@/PainelSectionPage";
 
 // aperture-1z6xa / aperture-bnj0z — Editar Perfil body (content only).
@@ -219,11 +219,15 @@ const ico = {
   ),
 } as const;
 
-const DEACTIVATE_ACCOUNT_WHATSAPP_URL = `${EUNENEM_SUPPORT_WHATSAPP_URL}?text=${encodeURIComponent(
-  "Olá! Quero solicitar a desativação da minha conta EuNeném.",
-)}`;
-
-function DeactivateAccountDialog({ onClose }: { onClose: () => void }) {
+function DeactivateAccountDialog({
+  onClose,
+  onConfirm,
+  isPending,
+}: {
+  onClose: () => void;
+  onConfirm: () => void;
+  isPending: boolean;
+}) {
   const cancelRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
@@ -232,7 +236,7 @@ function DeactivateAccountDialog({ onClose }: { onClose: () => void }) {
     cancelRef.current?.focus();
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape" && !isPending) onClose();
     };
     document.addEventListener("keydown", handleKeyDown);
 
@@ -240,10 +244,15 @@ function DeactivateAccountDialog({ onClose }: { onClose: () => void }) {
       document.body.style.overflow = previousOverflow;
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [onClose]);
+  }, [isPending, onClose]);
 
   return (
-    <div className="perfil-deactivate-scrim" onClick={onClose}>
+    <div
+      className="perfil-deactivate-scrim"
+      onClick={() => {
+        if (!isPending) onClose();
+      }}
+    >
       <section
         className="perfil-deactivate-dialog"
         role="dialog"
@@ -257,8 +266,8 @@ function DeactivateAccountDialog({ onClose }: { onClose: () => void }) {
         </span>
         <h2 id="perfil-deactivate-title">desativar conta?</h2>
         <p id="perfil-deactivate-description">
-          Para proteger seus dados e valores, nossa equipe confirma a solicitação
-          com você pelo WhatsApp antes de desativar a conta.
+          Sua conta será desativada agora e você sairá da sua área. Suas campanhas
+          e seu histórico financeiro serão preservados.
         </p>
         <div className="perfil-deactivate-dialog-actions">
           <button
@@ -266,18 +275,18 @@ function DeactivateAccountDialog({ onClose }: { onClose: () => void }) {
             type="button"
             className="perfil-btn perfil-btn-ghost"
             onClick={onClose}
+            disabled={isPending}
           >
             cancelar
           </button>
-          <a
+          <button
+            type="button"
             className="perfil-btn perfil-btn-danger"
-            href={DEACTIVATE_ACCOUNT_WHATSAPP_URL}
-            target="_blank"
-            rel="noreferrer"
-            onClick={onClose}
+            onClick={onConfirm}
+            disabled={isPending}
           >
-            falar com atendimento
-          </a>
+            {isPending ? "desativando…" : "desativar minha conta"}
+          </button>
         </div>
       </section>
     </div>
@@ -955,6 +964,17 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
   const [birthDate, setBirthDate] = useState("");
   const [story, setStory] = useState("");
   const [showDeactivateDialog, setShowDeactivateDialog] = useState(false);
+
+  const desativarConta = trpc.usuario.desativarConta.useMutation({
+    onSuccess: () => {
+      resetAnalyticsIdentity();
+      void utils.invalidate();
+      window.location.assign("/");
+    },
+    onError: (err) => {
+      toast.error(err.message || "não consegui desativar a conta — tenta de novo?");
+    },
+  });
   // aperture-ohum1 — "papais" moved HERE from the guest-view TweaksPanel
   // (now palette-only): the owner Perfil form is the event-identity edit
   // surface. Editable field; hydrates from the WRITE campanha (see the
@@ -1672,7 +1692,11 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
       </div>
 
       {showDeactivateDialog && (
-        <DeactivateAccountDialog onClose={() => setShowDeactivateDialog(false)} />
+        <DeactivateAccountDialog
+          onClose={() => setShowDeactivateDialog(false)}
+          onConfirm={() => desativarConta.mutate()}
+          isPending={desativarConta.isPending}
+        />
       )}
     </div>
   );

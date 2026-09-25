@@ -76,7 +76,7 @@ const FAQ: QA[] = [
   },
   {
     q: ["posso ", { hl: "desativar" }, " minha conta?"],
-    a: `claro ♡ a sua conta é sua. se quiser pausar ou desativar a qualquer momento, é só falar com a nossa equipe pelo contato e a gente <span class="accent">cuida de tudo</span> pra você.`,
+    a: `claro ♡ no fim da página <span class="accent">editar meu perfil</span>, toque em “desativar conta” e confirme. a desativação é feita na hora, sem precisar falar com o atendimento.`,
     stamp: "sem complicação ♡",
   },
 ];

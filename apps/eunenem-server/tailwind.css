@@ -3225,6 +3225,12 @@ h4 {
   filter: brightness(0.94);
   transform: translateY(-1px);
 }
+.perfil-btn-danger:disabled,
+.perfil-btn-ghost:disabled {
+  cursor: wait;
+  opacity: 0.62;
+  transform: none;
+}
 .perfil-deactivate {
   display: flex;
   justify-content: center;

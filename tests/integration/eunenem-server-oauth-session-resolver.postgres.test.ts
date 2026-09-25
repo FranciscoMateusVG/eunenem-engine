@@ -256,6 +256,28 @@ describe('central session resolver — OAuth A2 + orphan self-heal (aperture-6wo
     expect(second.usuario.idConta).toBe(first.usuario.idConta);
   });
 
+  it('rejects an otherwise valid session after the domain account is deactivated', async () => {
+    const { deps, auth, readMagicLinkUrl } = buildDeps({ useSecureCookies: false });
+    const cookie = await criarOrfaoOAuthCookie(
+      auth,
+      'deactivated@example.com',
+      'Deactivated User',
+      readMagicLinkUrl,
+    );
+    const headers = headersComCookie(cookie);
+    const first = await resolverUsuarioAutenticado(deps, headers);
+
+    await deps.usuarioRepository.desativarConta(
+      first.usuario.id as never,
+      new Date('2026-09-25T12:00:00.000Z'),
+    );
+
+    await expect(resolverUsuarioAutenticado(deps, headers)).rejects.toMatchObject({
+      motivo: 'conta_desativada',
+    });
+    expect(await resolverUsuarioAutenticadoOuNull(deps, headers)).toBeNull();
+  });
+
   it('concurrent double-resolve provisions exactly once (UNIQUE backstop, Cipher #4)', async () => {
     const { deps, auth, readMagicLinkUrl } = buildDeps({ useSecureCookies: false });
     const cookie = await criarOrfaoOAuthCookie(
