@@ -26,6 +26,7 @@ import { initTRPC, TRPCError } from '@trpc/server';
 import { z } from 'zod/v4';
 import {
   atualizarSlugUsuario,
+  desativarContaUsuario,
   type IdUsuario,
   marcarTutorialUsuarioComoCompletado,
   obterStatusTutorialUsuario,
@@ -37,11 +38,52 @@ import {
 } from '../../../../src/index.js';
 import type { TrpcContext } from './context.js';
 import {
+  readSessionCookie,
   resolverUsuarioAutenticado,
   SessaoNaoAutenticadaError,
 } from './session-resolver.js';
 
 const t = initTRPC.context<TrpcContext>().create();
+
+function clearSessionCookie(
+  resHeaders: Headers,
+  name: string,
+  useSecureCookies: boolean,
+): void {
+  const parts = [`${name}=`, 'Max-Age=0', 'Path=/', 'HttpOnly', 'SameSite=Lax'];
+  if (useSecureCookies) parts.push('Secure');
+  resHeaders.append('set-cookie', parts.join('; '));
+}
+
+async function encerrarSessoesAtuais(ctx: TrpcContext): Promise<void> {
+  const { deps, headers, resHeaders } = ctx;
+  const token = readSessionCookie(headers, deps.sessionCookieName);
+
+  if (token) {
+    try {
+      await deps.authService.revogarSessao(token);
+    } catch {
+      // A conta já está desativada; falhar ao revogar uma sessão legada não
+      // pode reverter nem impedir a desativação.
+    }
+  }
+
+  clearSessionCookie(
+    resHeaders,
+    deps.sessionCookieName,
+    deps.auth.options.advanced?.useSecureCookies ?? false,
+  );
+
+  try {
+    const response = await deps.auth.api.signOut({ headers, asResponse: true });
+    for (const setCookie of response.headers.getSetCookie()) {
+      resHeaders.append('set-cookie', setCookie);
+    }
+  } catch {
+    // O bloqueio em session-resolver é a barreira final mesmo se o provedor
+    // de autenticação estiver temporariamente indisponível.
+  }
+}
 
 /**
  * Resolve the caller's `idUsuario` via the shared central resolver
@@ -79,6 +121,31 @@ function toTRPCError(err: unknown): TRPCError {
 }
 
 export const usuarioRouter = t.router({
+  /**
+   * Desativa a conta no domínio sem apagar campanhas ou histórico financeiro.
+   * A gravação acontece antes do logout; depois dela qualquer sessão restante
+   * é rejeitada pelo resolver central por `conta_desativada`.
+   */
+  desativarConta: t.procedure
+    .output(z.object({ desativadoEm: z.string().datetime() }))
+    .mutation(async ({ ctx }) => {
+      try {
+        const idUsuario = await resolveCallerIdUsuario(ctx);
+        const result = await desativarContaUsuario(
+          {
+            usuarioRepository: ctx.deps.usuarioRepository,
+            observability: ctx.deps.observability,
+          },
+          idUsuario,
+          ctx.deps.clock(),
+        );
+        await encerrarSessoesAtuais(ctx);
+        return result;
+      } catch (err) {
+        throw toTRPCError(err);
+      }
+    }),
+
   /**
    * Read-only probe. Frontend hits this on first mount of the painel /
    * any tutorial-aware surface to decide whether to render the overlay.

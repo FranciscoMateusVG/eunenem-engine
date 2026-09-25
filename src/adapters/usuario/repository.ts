@@ -218,6 +218,9 @@ export interface UsuarioRepository {
    */
   marcarOnboardingConcluido(idUsuario: IdUsuario, concluidoEm: Date): Promise<void>;
 
+  /** Soft-disables the account, preserving all related business data. */
+  desativarConta(idUsuario: IdUsuario, desativadoEm: Date): Promise<void>;
+
   /**
    * Removes the domain Usuario aggregate (Usuario root + Conta inner entity).
    * Used by the `registrarContaUsuario` saga as a T3 compensation when a

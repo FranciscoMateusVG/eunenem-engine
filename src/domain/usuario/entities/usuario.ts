@@ -58,6 +58,8 @@ export interface Usuario {
    * so clearing it can't un-onboard a user with a list.
    */
   readonly onboardingConcluidoEm: Date | null;
+  /** Present only after the user soft-disables the account. */
+  readonly desativadoEm?: Date;
 }
 
 /** @entity Conta (within Usuario aggregate) — permissions and admin grouping. */

@@ -74,7 +74,11 @@ interface SessaoResolvida {
 export class SessaoNaoAutenticadaError extends Error {
   public readonly name = 'SessaoNaoAutenticadaError';
   constructor(
-    public readonly motivo: 'sem_sessao' | 'orfao_heal_falhou' | 'tenant_invalido',
+    public readonly motivo:
+      | 'sem_sessao'
+      | 'orfao_heal_falhou'
+      | 'tenant_invalido'
+      | 'conta_desativada',
   ) {
     super(motivo);
   }
@@ -275,6 +279,12 @@ export async function resolverUsuarioAutenticado(
   if (existente) {
     if (existente.idPlataforma !== ID_PLATAFORMA_EUNENEM) {
       rejeitarTenantInvalido(deps, existente.id, existente.idPlataforma);
+    }
+    if (existente.desativadoEm) {
+      deps.observability.logger.info('usuario.sessao.conta_desativada', {
+        idUsuario: existente.id,
+      });
+      throw new SessaoNaoAutenticadaError('conta_desativada');
     }
     return { usuario: existente, expiraEm: sessao.expiraEm };
   }

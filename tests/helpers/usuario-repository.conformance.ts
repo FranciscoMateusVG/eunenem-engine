@@ -1211,6 +1211,20 @@ export function describeUsuarioRepositoryConformance(name: string, options: Conf
       ).resolves.toBeUndefined();
     });
 
+    it('desativarConta: persists a timestamp and preserves the first write', async () => {
+      const idUsuario = randomUUID();
+      const idConta = randomUUID();
+      await seedFreshUsuario(idUsuario, idConta, 'deactivate-idempotent');
+
+      const t1 = new Date('2026-09-25T10:00:00.000Z');
+      const t2 = new Date('2026-09-25T11:00:00.000Z');
+      await repo.desativarConta(idUsuario, t1);
+      await repo.desativarConta(idUsuario, t2);
+
+      const loaded = await repo.findUsuarioById(idUsuario);
+      expect(loaded?.desativadoEm?.getTime()).toBe(t1.getTime());
+    });
+
     it('findUsuariosPaginated — cursor encode round-trip is canonical across adapters (aperture-qatwz)', async () => {
       // The cursor helpers are SHARED between memory + postgres adapters
       // — assert that the encoder/decoder pair is a pure round-trip so
