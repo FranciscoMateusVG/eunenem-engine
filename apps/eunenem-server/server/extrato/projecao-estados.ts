@@ -115,7 +115,10 @@ export interface RepasseLedgerGroup {
 }
 
 export function projectRepasseEstado(
-  repasse: RepasseRecebedor,
+  // Só `status` e `amountCents` são lidos; aceitar o subconjunto permite
+  // projetar a partir de linhas SQL do admin (aperture-5jk8y) sem
+  // reidratar a entidade. Comportamento idêntico.
+  repasse: Pick<RepasseRecebedor, "status" | "amountCents">,
   ledger: RepasseLedgerGroup | undefined,
 ): MovimentoRepasseEstado {
   if (ledger?.concluidoEm) {
