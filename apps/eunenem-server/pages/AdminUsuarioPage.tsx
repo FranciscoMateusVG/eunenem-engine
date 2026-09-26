@@ -1,6 +1,12 @@
+import { useId, useState } from "react";
 import { AdminShell } from "@/components/eunenem/admin/AdminShell";
+import { CampanhasAdministradasTable } from "@/components/eunenem/admin/CampanhasAdministradasTable";
 import { CampanhasTabs } from "@/components/eunenem/admin/CampanhasTabs";
 import { DddBadge } from "@/components/eunenem/admin/DddBadge";
+import type { BucketAdmin } from "@/components/eunenem/admin/financeiro-labels";
+import { LancamentosAdminTable } from "@/components/eunenem/admin/LancamentosAdminTable";
+import { ResumoFinanceiroCard } from "@/components/eunenem/admin/ResumoFinanceiroCard";
+import { TransferenciasAdminTable } from "@/components/eunenem/admin/TransferenciasAdminTable";
 import { trpc } from "@/lib/trpc.js";
 
 /**
@@ -57,6 +63,7 @@ export function AdminUsuarioPage({ idConta }: { idConta: string }) {
         <section className="space-y-10">
           <UsuarioHeader usuario={data} />
           <FactsGrid usuario={data} idConta={idConta} />
+          <FinanceiroSection idConta={idConta} />
           <CampanhasSection idConta={idConta} email={data.email} />
           <RawRecord usuario={data} idConta={idConta} />
         </section>
@@ -175,6 +182,144 @@ function FactsGrid({
         </div>
       ))}
     </dl>
+  );
+}
+
+/**
+ * FinanceiroSection (aperture-5jk8y) — leitura pura do detalhe financeiro das
+ * campanhas ADMINISTRADAS por esta conta. Três consultas independentes com
+ * seus próprios estados de loading/erro/vazio; nenhuma delas bloqueia o resto
+ * da página. Paginação por cursor com pilha (anterior/próxima), como em
+ * AdminPagamentosPage. Sem botões de ação financeira.
+ */
+function FinanceiroSection({ idConta }: { idConta: string }) {
+  const filterIdPrefix = useId();
+  const summary = trpc.admin.usuarios.financeiro.summary.useQuery({ idConta });
+
+  const [estado, setEstado] = useState<BucketAdmin | null>(null);
+  const [idCampanha, setIdCampanha] = useState<string | null>(null);
+  const [lancCursor, setLancCursor] = useState<string | null>(null);
+  const [lancStack, setLancStack] = useState<Array<string | null>>([]);
+  const lancamentos = trpc.admin.usuarios.financeiro.lancamentos.listPaginated.useQuery({
+    idConta,
+    cursor: lancCursor,
+    limit: 25,
+    estado,
+    idCampanha,
+  });
+
+  const [repCursor, setRepCursor] = useState<string | null>(null);
+  const [repStack, setRepStack] = useState<Array<string | null>>([]);
+  const repasses = trpc.admin.usuarios.financeiro.repasses.listPaginated.useQuery({
+    idConta,
+    cursor: repCursor,
+    limit: 20,
+  });
+
+  const resetLanc = () => {
+    setLancCursor(null);
+    setLancStack([]);
+  };
+
+  return (
+    <section data-bc="financeiro" className="space-y-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <div className="flex items-center gap-3">
+          <DddBadge bc="pagamentos" size="sm" />
+          <h2 className="font-mono text-[11px] uppercase tracking-[0.14em] text-ink-soft">
+            financeiro · campanhas administradas
+          </h2>
+        </div>
+        <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-mute">
+          somente leitura · celular do titular mascarado
+        </span>
+      </div>
+
+      {summary.isLoading && (
+        <div className="space-y-2" aria-busy="true">
+          <div className="h-24 animate-pulse rounded-md bg-cream-2" />
+          <div className="h-10 animate-pulse rounded-md bg-cream-2" />
+        </div>
+      )}
+      {summary.error && <ErrorState message={summary.error.message} />}
+      {!summary.isLoading && !summary.error && summary.data === null && (
+        <p className="text-[13px] italic text-ink-mute">
+          Resumo financeiro indisponível para esta conta.
+        </p>
+      )}
+      {summary.data && (
+        <>
+          <ResumoFinanceiroCard
+            totais={summary.data.totais}
+            ledgerAprovadoSemCancelCents={summary.data.ledgerAprovadoSemCancelCents}
+            diferencaNaoConciliadaCents={summary.data.diferencaNaoConciliadaCents}
+            campanhasTotal={summary.data.campanhasTotal}
+          />
+          <CampanhasAdministradasTable
+            idConta={idConta}
+            campanhas={summary.data.campanhas}
+            campanhasTotal={summary.data.campanhasTotal}
+            truncated={summary.data.truncated}
+          />
+        </>
+      )}
+
+      <LancamentosAdminTable
+        rows={lancamentos.data?.rows ?? []}
+        totalCount={lancamentos.data?.totalCount ?? 0}
+        isLoading={lancamentos.isLoading}
+        isFetching={lancamentos.isFetching}
+        errorMessage={lancamentos.error?.message ?? null}
+        estado={estado}
+        onEstadoChange={(next) => {
+          setEstado(next);
+          resetLanc();
+        }}
+        idCampanha={idCampanha}
+        onCampanhaChange={(next) => {
+          setIdCampanha(next);
+          resetLanc();
+        }}
+        campanhas={summary.data?.campanhas ?? []}
+        hasNext={Boolean(lancamentos.data?.nextCursor)}
+        onNext={() => {
+          const next = lancamentos.data?.nextCursor ?? null;
+          if (!next) return;
+          setLancStack((s) => [...s, lancCursor]);
+          setLancCursor(next);
+        }}
+        hasPrev={lancStack.length > 0}
+        onPrev={() => {
+          const prev = lancStack[lancStack.length - 1] ?? null;
+          setLancStack((s) => s.slice(0, -1));
+          setLancCursor(prev);
+        }}
+        pageIndex={lancStack.length}
+        filterIdPrefix={filterIdPrefix}
+      />
+
+      <TransferenciasAdminTable
+        rows={repasses.data?.rows ?? []}
+        totalCount={repasses.data?.totalCount ?? 0}
+        isLoading={repasses.isLoading}
+        isFetching={repasses.isFetching}
+        errorMessage={repasses.error?.message ?? null}
+        hasNext={Boolean(repasses.data?.nextCursor)}
+        onNext={() => {
+          const next = repasses.data?.nextCursor ?? null;
+          if (!next) return;
+          setRepStack((s) => [...s, repCursor]);
+          setRepCursor(next);
+        }}
+        hasPrev={repStack.length > 0}
+        onPrev={() => {
+          const prev = repStack[repStack.length - 1] ?? null;
+          setRepStack((s) => s.slice(0, -1));
+          setRepCursor(prev);
+        }}
+        pageIndex={repStack.length}
+      />
+    </section>
   );
 }
 

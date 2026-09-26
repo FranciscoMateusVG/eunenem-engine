@@ -94,6 +94,23 @@ import {
   listAdminUsers,
   searchAdminUsers,
 } from "../admin-user-search.js";
+import {
+  BucketAdminSchema,
+  InvalidAdminUserLancamentosCursorError,
+  InvalidAdminUserRepassesCursorError,
+  listAdminUserRepasses,
+  loadAdminUserFinanceiroSnapshot,
+  paginateLancamentosAdmin,
+} from "../admin-user-financeiro.js";
+import {
+  agregarTotaisAdmin,
+  TOTAIS_ADMIN_ZERO,
+  type TotaisAdmin,
+} from "../extrato/classificador-admin.js";
+import {
+  MovimentoRepasseEstadoSchema,
+  projectRepasseEstado,
+} from "../extrato/projecao-estados.js";
 
 const t = initTRPC.context<TrpcContext>().create();
 
@@ -190,7 +207,393 @@ const ListPaginatedOutputSchema = z.object({
   totalCount: z.number().int().min(0),
 });
 
+/* ─────────────────────────────────────────────────────────────────────────
+ * usuarios.financeiro.* — detalhe financeiro do usuário no admin
+ * (aperture-5jk8y; plano aperture-owmqs + A1; decisões root tyc1uv/y6lmbv).
+ *
+ * LEITURA PURA. Nenhum botão, nenhuma mutação, nenhum provider.
+ *
+ * Agregado = "campanhas administradas por esta conta" (papel de
+ * administração via `campanha_administradores`, NÃO patrimônio da pessoa).
+ * Coadmins são explícitos por campanha. Totais são calculados sobre TODAS
+ * as campanhas (sem LIMIT) em um único snapshot READ ONLY REPEATABLE READ;
+ * só a lista por campanha é limitada (truncamento declarado).
+ *
+ * Grão contratual = linha do ledger (`idLancamento`). Classificador único em
+ * `server/extrato/classificador-admin.ts`; fatos `estornoAtivo` e
+ * `disponivelCanonico` vêm dos predicados canônicos da branch.
+ *
+ * Celular: `recebedores.celular_titular` (titular do PIX/conta do recebedor
+ * ativo — não necessariamente o usuário), MASCARADO, e SOMENTE em `summary`.
+ * Nunca em listas, logs, spans ou erros.
+ * ────────────────────────────────────────────────────────────────────── */
+
+/** `(**) *****-NNNN`; null quando não informado. Mesma família de maskHolderCpf. */
+export function maskCelularTitular(raw: string | null | undefined): string | null {
+  if (raw === null || raw === undefined) return null;
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length === 0) return null;
+  return digits.length >= 4 ? `(**) *****-${digits.slice(-4)}` : "(**) *****-****";
+}
+
+const cents = () => z.number().int().nonnegative();
+
+const TotaisAdminSchema = z.object({
+  recebidoConfirmadoCents: cents(),
+  disponivelCents: cents(),
+  aguardandoLiberacaoCents: cents(),
+  aguardandoTransferenciaCents: cents(),
+  transferenciaFalhouCents: cents(),
+  emTransferenciaCents: cents(),
+  enviadoAoBancoCents: cents(),
+  transferidoCents: cents(),
+  resgatadoConcluidoCents: cents(),
+  estornoEmAndamentoCents: cents(),
+  inconsistenteCents: cents(),
+  pendenteConferenciaCents: cents(),
+  estornadoCents: cents(),
+  estornadoCount: z.number().int().nonnegative(),
+  anomaliaCents: cents(),
+  anomaliaCount: z.number().int().nonnegative(),
+  lancamentosCount: z.number().int().nonnegative(),
+});
+export type TotaisAdminDTO = z.infer<typeof TotaisAdminSchema>;
+
+const AdministradorCampanhaSchema = z.object({
+  idConta: z.string(),
+  nomeExibicao: z.string().nullable(),
+  email: z.string().nullable(),
+});
+
+const CampanhaFinanceiroAdminSchema = z.object({
+  idCampanha: z.string(),
+  titulo: z.string(),
+  /** Todos os administradores (inclui a própria conta). A UI deriva "compartilhada com". */
+  administradores: z.array(AdministradorCampanhaSchema),
+  /** Titular do recebedor ativo, mascarado. null = não informado / sem recebedor ativo. */
+  celularTitularMascarado: z.string().nullable(),
+  totais: TotaisAdminSchema,
+});
+export type CampanhaFinanceiroAdminDTO = z.infer<typeof CampanhaFinanceiroAdminSchema>;
+
+const USUARIO_FINANCEIRO_CAMPANHAS_LIMIT = 100;
+
+const UsuarioFinanceiroSummarySchema = z.object({
+  usuario: UsuarioMatchSchema,
+  campanhasTotal: z.number().int().nonnegative(),
+  truncated: z.boolean(),
+  totais: TotaisAdminSchema,
+  /** SUM SQL independente (aprovado ∧ sem cancelado_em), mesmo snapshot. */
+  ledgerAprovadoSemCancelCents: cents(),
+  /** recebidoConfirmado − ledgerAprovadoSemCancel. Exibir quando ≠ 0; nunca ajustar. */
+  diferencaNaoConciliadaCents: z.number().int(),
+  campanhas: z.array(CampanhaFinanceiroAdminSchema),
+});
+export type UsuarioFinanceiroSummaryDTO = z.infer<typeof UsuarioFinanceiroSummarySchema>;
+
+const LancamentoAdminUsuarioSchema = z.object({
+  idLancamento: z.string(),
+  criadoEm: z.string(),
+  pagamentoCriadoEm: z.string().nullable(),
+  idCampanha: z.string(),
+  campanhaTitulo: z.string(),
+  idContribuicao: z.string(),
+  contribuicaoNome: z.string().nullable(),
+  idPagamento: z.string(),
+  metodo: z.enum(["pix", "credit_card"]).nullable(),
+  amountCents: cents(),
+  bucket: BucketAdminSchema,
+  motivo: z.string().nullable(),
+  elegivelRecebido: z.boolean(),
+  /** Só para aguardando_liberacao: available_on previsto (ISO). */
+  liberacaoPrevistaEm: z.string().nullable(),
+  idRepasse: z.string().nullable(),
+  repasseStatus: z.string().nullable(),
+  transferidoEm: z.string().nullable(),
+  canceladoEm: z.string().nullable(),
+});
+export type LancamentoAdminUsuarioDTO = z.infer<typeof LancamentoAdminUsuarioSchema>;
+
+const UsuarioFinanceiroLancamentosInputSchema = z.object({
+  idConta: z.string(),
+  cursor: z.string().nullable(),
+  limit: z.number().int().min(1).max(100).default(50),
+  estado: BucketAdminSchema.nullable().optional(),
+  idCampanha: z.string().uuid().nullable().optional(),
+});
+
+const UsuarioFinanceiroLancamentosOutputSchema = z.object({
+  rows: z.array(LancamentoAdminUsuarioSchema),
+  nextCursor: z.string().nullable(),
+  totalCount: z.number().int().nonnegative(),
+});
+
+/**
+ * Mesmos campos de RepasseAdminDTOSchema (definido mais abaixo neste
+ * arquivo; referenciá-lo aqui violaria a ordem de avaliação do módulo)
+ * + `estadoExtrato` (projeção csye7 compartilhada) + `concluidoEm`.
+ * Sem `destination`, sem telefone.
+ */
+const REPASSE_STATUS_VALUES = [
+  "solicitado",
+  "aprovado",
+  "transferindo",
+  "verificando",
+  "enviado_ao_banco",
+  "pago",
+  "falhou",
+  "cancelado",
+] as const;
+type RepasseStatusValue = (typeof REPASSE_STATUS_VALUES)[number];
+const REPASSE_STATUS_SET: ReadonlySet<string> = new Set(REPASSE_STATUS_VALUES);
+
+const RepasseAdminUsuarioSchema = z.object({
+  idRepasse: z.string(),
+  idCampanha: z.string(),
+  campanhaTitulo: z.string(),
+  recebedorNome: z.string().nullable(),
+  amountCents: cents(),
+  numLancamentos: z.number().int().nonnegative(),
+  status: z.enum(REPASSE_STATUS_VALUES),
+  solicitadoEm: z.string(),
+  aprovadoEm: z.string().nullable(),
+  enviadoAoBancoEm: z.string().nullable(),
+  bankTransferRef: z.string().nullable(),
+  transferReferencia: z.string().nullable(),
+  interCodigoSolicitacao: z.string().nullable(),
+  transferAttempts: z.number().int().nonnegative(),
+  lastTransferError: z.string().nullable(),
+  needsManualResolution: z.boolean(),
+  estadoExtrato: MovimentoRepasseEstadoSchema,
+  concluidoEm: z.string().nullable(),
+});
+export type RepasseAdminUsuarioDTO = z.infer<typeof RepasseAdminUsuarioSchema>;
+
+const UsuarioFinanceiroRepassesInputSchema = z.object({
+  idConta: z.string(),
+  cursor: z.string().nullable(),
+  limit: z.number().int().min(1).max(100).default(20),
+});
+
+const UsuarioFinanceiroRepassesOutputSchema = z.object({
+  rows: z.array(RepasseAdminUsuarioSchema),
+  nextCursor: z.string().nullable(),
+  totalCount: z.number().int().nonnegative(),
+});
+
+function toTotaisDTO(t: TotaisAdmin): TotaisAdminDTO {
+  return { ...t };
+}
+
+/**
+ * Resolve o usuário no escopo da plataforma. `null` quando inexistente OU de
+ * outra plataforma (sem revelar existência) — mesma semântica de
+ * `findUsuarioByConta`. Executa ANTES de qualquer leitura financeira.
+ */
+async function resolveUsuarioAdmin(
+  ctx: TrpcContext,
+  idConta: string,
+): Promise<UsuarioMatch | null> {
+  const usuario = await ctx.deps.usuarioRepository.findUsuarioByConta(
+    idConta as never,
+    ID_PLATAFORMA_EUNENEM as never,
+  );
+  if (!usuario) return null;
+  return {
+    idConta: usuario.idConta,
+    email: usuario.email,
+    nomeExibicao: usuario.nomeExibicao,
+  };
+}
+
+const usuarioFinanceiroRouter = t.router({
+  summary: adminProcedure
+    .input(z.object({ idConta: z.string() }))
+    .output(UsuarioFinanceiroSummarySchema.nullable())
+    .query(async ({ ctx, input }) => {
+      const usuario = await resolveUsuarioAdmin(ctx, input.idConta);
+      if (!usuario) return null;
+
+      const now = ctx.deps.clock();
+      const snapshot = await loadAdminUserFinanceiroSnapshot(ctx.deps.db, {
+        idConta: input.idConta,
+        platformId: ID_PLATAFORMA_EUNENEM,
+        now,
+      });
+
+      const totais = agregarTotaisAdmin(snapshot.fatos, now);
+
+      const fatosPorCampanha = new Map<string, typeof snapshot.fatos[number][]>();
+      for (const fato of snapshot.fatos) {
+        const list = fatosPorCampanha.get(fato.idCampanha) ?? [];
+        list.push(fato);
+        fatosPorCampanha.set(fato.idCampanha, list);
+      }
+
+      const campanhas = snapshot.campanhas
+        .slice(0, USUARIO_FINANCEIRO_CAMPANHAS_LIMIT)
+        .map((c) => ({
+          idCampanha: c.idCampanha,
+          titulo: c.titulo,
+          administradores: c.administradores.map((a) => ({
+            idConta: a.idConta,
+            nomeExibicao: a.nomeExibicao,
+            email: a.email,
+          })),
+          celularTitularMascarado: maskCelularTitular(c.celularTitularRaw),
+          totais: toTotaisDTO(
+            fatosPorCampanha.has(c.idCampanha)
+              ? agregarTotaisAdmin(fatosPorCampanha.get(c.idCampanha) ?? [], now)
+              : TOTAIS_ADMIN_ZERO,
+          ),
+        }));
+
+      return {
+        usuario,
+        campanhasTotal: snapshot.campanhas.length,
+        truncated: snapshot.campanhas.length > USUARIO_FINANCEIRO_CAMPANHAS_LIMIT,
+        totais: toTotaisDTO(totais),
+        ledgerAprovadoSemCancelCents: snapshot.ledgerAprovadoSemCancelCents,
+        diferencaNaoConciliadaCents:
+          totais.recebidoConfirmadoCents - snapshot.ledgerAprovadoSemCancelCents,
+        campanhas,
+      };
+    }),
+
+  lancamentos: t.router({
+    listPaginated: adminProcedure
+      .input(UsuarioFinanceiroLancamentosInputSchema)
+      .output(UsuarioFinanceiroLancamentosOutputSchema.nullable())
+      .query(async ({ ctx, input }) => {
+        const usuario = await resolveUsuarioAdmin(ctx, input.idConta);
+        if (!usuario) return null;
+
+        const now = ctx.deps.clock();
+        const estado = input.estado ?? null;
+        const idCampanha = input.idCampanha ?? null;
+        const snapshot = await loadAdminUserFinanceiroSnapshot(ctx.deps.db, {
+          idConta: input.idConta,
+          platformId: ID_PLATAFORMA_EUNENEM,
+          now,
+          idCampanha,
+          somenteFatos: true,
+        });
+
+        let page: ReturnType<typeof paginateLancamentosAdmin>;
+        try {
+          page = paginateLancamentosAdmin({
+            fatos: snapshot.fatos,
+            now,
+            idConta: input.idConta,
+            estado,
+            idCampanha,
+            cursor: input.cursor,
+            limit: input.limit,
+            cursorSecret: ctx.deps.logPiiHashSalt,
+          });
+        } catch (error: unknown) {
+          if (error instanceof InvalidAdminUserLancamentosCursorError) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "Cursor inválido." });
+          }
+          throw error;
+        }
+
+        return {
+          rows: page.rows.map(({ fato, classificacao }) => ({
+            idLancamento: fato.idLancamento,
+            criadoEm: fato.criadoEm.toISOString(),
+            pagamentoCriadoEm: fato.pagamentoCriadoEm?.toISOString() ?? null,
+            idCampanha: fato.idCampanha,
+            campanhaTitulo: fato.campanhaTitulo,
+            idContribuicao: fato.idContribuicao,
+            contribuicaoNome: fato.contribuicaoNome,
+            idPagamento: fato.idPagamento,
+            metodo: fato.metodo,
+            amountCents: fato.amountCents,
+            bucket: classificacao.bucket,
+            motivo: classificacao.motivo,
+            elegivelRecebido: classificacao.elegivelRecebido,
+            liberacaoPrevistaEm:
+              classificacao.bucket === "aguardando_liberacao"
+                ? (fato.availableOn?.toISOString() ?? null)
+                : null,
+            idRepasse: fato.idRepasse,
+            repasseStatus: fato.repasseStatus,
+            transferidoEm: fato.transferidoEm?.toISOString() ?? null,
+            canceladoEm: fato.canceladoEm?.toISOString() ?? null,
+          })),
+          nextCursor: page.nextCursor,
+          totalCount: page.totalCount,
+        };
+      }),
+  }),
+
+  repasses: t.router({
+    listPaginated: adminProcedure
+      .input(UsuarioFinanceiroRepassesInputSchema)
+      .output(UsuarioFinanceiroRepassesOutputSchema.nullable())
+      .query(async ({ ctx, input }) => {
+        const usuario = await resolveUsuarioAdmin(ctx, input.idConta);
+        if (!usuario) return null;
+
+        let result: Awaited<ReturnType<typeof listAdminUserRepasses>>;
+        try {
+          result = await listAdminUserRepasses(ctx.deps.db, {
+            idConta: input.idConta,
+            platformId: ID_PLATAFORMA_EUNENEM,
+            cursor: input.cursor,
+            limit: input.limit,
+            cursorSecret: ctx.deps.logPiiHashSalt,
+          });
+        } catch (error: unknown) {
+          if (error instanceof InvalidAdminUserRepassesCursorError) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "Cursor inválido." });
+          }
+          throw error;
+        }
+
+        return {
+          rows: result.rows.map((r) => {
+            const statusConhecido = REPASSE_STATUS_SET.has(r.status);
+            const status = (statusConhecido ? r.status : "falhou") as RepasseStatusValue;
+            const estadoExtrato = statusConhecido
+              ? projectRepasseEstado(
+                  { status: status as never, amountCents: r.amountCents as never },
+                  r.ledger,
+                )
+              : "inconsistente";
+            return {
+              idRepasse: r.idRepasse,
+              idCampanha: r.idCampanha,
+              campanhaTitulo: r.campanhaTitulo,
+              recebedorNome: r.recebedorNome,
+              amountCents: r.amountCents,
+              numLancamentos: r.ledger.quantidade,
+              status,
+              solicitadoEm: r.solicitadoEm.toISOString(),
+              aprovadoEm: r.aprovadoEm?.toISOString() ?? null,
+              enviadoAoBancoEm: r.enviadoAoBancoEm?.toISOString() ?? null,
+              bankTransferRef: r.bankTransferRef,
+              transferReferencia: r.transferReferencia,
+              interCodigoSolicitacao: r.interCodigoSolicitacao,
+              transferAttempts: r.transferAttempts,
+              lastTransferError: r.lastTransferError,
+              needsManualResolution: r.needsManualResolution,
+              estadoExtrato,
+              concluidoEm: r.ledger.concluidoEm?.toISOString() ?? null,
+            };
+          }),
+          nextCursor: result.nextCursor,
+          totalCount: result.totalCount,
+        };
+      }),
+  }),
+});
+
 const usuariosRouter = t.router({
+  /** Detalhe financeiro do usuário (aperture-5jk8y). Leitura pura. */
+  financeiro: usuarioFinanceiroRouter,
+
   /**
    * Cursor-paginated tenant-scoped browse of usuarios. Tri-state sort
    * (criadoEm / email / nomeExibicao × asc/desc), LIKE-escaped
