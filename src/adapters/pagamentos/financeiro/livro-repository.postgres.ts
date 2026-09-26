@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { SpanStatusCode, trace } from '@opentelemetry/api';
-import { CompiledQuery, sql } from 'kysely';
+import { CompiledQuery, type RawBuilder, sql } from 'kysely';
 import type { IdCampanha } from '../../../domain/arrecadacao/value-objects/ids.js';
 import {
   type LancamentoFinanceiro,
@@ -57,6 +57,55 @@ const DB_ATTRS = {
   'db.system': 'postgresql',
   'db.collection.name': 'financeiro_livro',
 } as const;
+
+/**
+ * Predicados canônicos de liquidez do lançamento do recebedor (aperture-5jk8y).
+ *
+ * REEXTRAÍDOS DO PREDICADO REAL DE MAIN, sem mudança de comportamento, das
+ * duas ocorrências idênticas que existiam neste arquivo
+ * (`findLancamentosDisponiveisByIdCampanha` e o `SELECT … FOR UPDATE` de
+ * `solicitarRepasseTransaction`). Em main a guarda tem DUAS pernas: devolução
+ * PIX ativa (pix_cobranca_devolucoes em_processamento|devolvida) E refund-op
+ * Stripe ativa (stripe_refund_operations.state <> 'provider_failed'). Ambas
+ * são preservadas; nenhuma variante de staging é transportada.
+ *
+ * Exportados para que leituras administrativas em lote (apps/eunenem-server)
+ * reutilizem a MESMA regra desta branch em vez de copiar uma variante mais
+ * fraca. Aliases fixos por contrato: `l` = lancamentos_financeiros,
+ * `p` = pagamentos (INNER JOIN p.id = l.id_pagamento). Bindings: apenas `now`.
+ */
+export function predicadoDevolucaoPixAtiva(): RawBuilder<boolean> {
+  return sql<boolean>`EXISTS (
+                  SELECT 1 FROM pix_cobranca_devolucoes d
+                    WHERE d.id_pagamento = l.id_pagamento
+                      AND d.status IN ('em_processamento', 'devolvida')
+                )`;
+}
+
+export function predicadoRefundOpStripeAtiva(): RawBuilder<boolean> {
+  return sql<boolean>`EXISTS (
+                  SELECT 1 FROM stripe_refund_operations s
+                    WHERE s.payment_id = l.id_pagamento
+                      AND s.state <> 'provider_failed'
+                )`;
+}
+
+/** Estorno em andamento por qualquer perna da guarda de main (fato explícito para o admin). */
+export function predicadoEstornoAtivoLancamento(): RawBuilder<boolean> {
+  return sql<boolean>`(${predicadoDevolucaoPixAtiva()} OR ${predicadoRefundOpStripeAtiva()})`;
+}
+
+export function predicadoLancamentoDisponivel(now: Date): RawBuilder<boolean> {
+  return sql<boolean>`(l.tipo = 'credito_saldo_recebedor'
+                AND l.transferido_em IS NULL
+                AND l.cancelado_em IS NULL
+                AND l.id_repasse IS NULL
+                AND p.status = 'aprovado'
+                AND p.intencao_balance_transaction_available_on IS NOT NULL
+                AND p.intencao_balance_transaction_available_on <= ${now}
+                AND NOT ${predicadoDevolucaoPixAtiva()}
+                AND NOT ${predicadoRefundOpStripeAtiva()})`;
+}
 
 /**
  * Constraint name from migration 20260609_023_lancamentos_financeiros_per_item
@@ -616,23 +665,7 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
               FROM lancamentos_financeiros l
               INNER JOIN pagamentos p ON p.id = l.id_pagamento
               WHERE l.id_campanha = ${idCampanha}
-                AND l.tipo = 'credito_saldo_recebedor'
-                AND l.transferido_em IS NULL
-                AND l.cancelado_em IS NULL
-                AND l.id_repasse IS NULL
-                AND p.status = 'aprovado'
-                AND p.intencao_balance_transaction_available_on IS NOT NULL
-                AND p.intencao_balance_transaction_available_on <= ${now}
-                AND NOT EXISTS (
-                  SELECT 1 FROM pix_cobranca_devolucoes d
-                    WHERE d.id_pagamento = l.id_pagamento
-                      AND d.status IN ('em_processamento', 'devolvida')
-                )
-                AND NOT EXISTS (
-                  SELECT 1 FROM stripe_refund_operations s
-                    WHERE s.payment_id = l.id_pagamento
-                      AND s.state <> 'provider_failed'
-                )
+                AND ${predicadoLancamentoDisponivel(now)}
           `.execute(this.db)) as unknown as { rows: LancamentoRow[] };
 
           const result = rows.rows.map(lancamentoFromRow);
@@ -681,23 +714,7 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
                 FROM lancamentos_financeiros l
                 INNER JOIN pagamentos p ON p.id = l.id_pagamento
                 WHERE l.id_campanha = ${input.idCampanha}
-                  AND l.tipo = 'credito_saldo_recebedor'
-                  AND l.transferido_em IS NULL
-                  AND l.cancelado_em IS NULL
-                  AND l.id_repasse IS NULL
-                  AND p.status = 'aprovado'
-                  AND p.intencao_balance_transaction_available_on IS NOT NULL
-                  AND p.intencao_balance_transaction_available_on <= ${input.now}
-                  AND NOT EXISTS (
-                    SELECT 1 FROM pix_cobranca_devolucoes d
-                      WHERE d.id_pagamento = l.id_pagamento
-                        AND d.status IN ('em_processamento', 'devolvida')
-                  )
-                  AND NOT EXISTS (
-                    SELECT 1 FROM stripe_refund_operations s
-                      WHERE s.payment_id = l.id_pagamento
-                        AND s.state <> 'provider_failed'
-                  )
+                  AND ${predicadoLancamentoDisponivel(input.now)}
                 FOR UPDATE OF l
             `.execute(tx)) as unknown as { rows: LancamentoRow[] };
 
