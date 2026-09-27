@@ -95,6 +95,7 @@ import {
   PaymentEvidenceProviderFilterSchema,
   PaymentEvidenceReferenceResolutionSchema,
   PaymentEvidenceStatusFilterSchema,
+  toAdministratorsWire,
 } from "../admin-payment-evidence.js";
 import {
   AdminCampaignQuerySchema,
@@ -4217,15 +4218,7 @@ function toReceitaCampanhaDTO(
     titulo: campanha.titulo,
     campaignSlug: campanha.campaignSlug,
     publicOwnerSlug: campanha.administrators.publicOwnerSlug,
-    administrators: {
-      shown: campanha.administrators.rows.map((admin) => ({
-        idConta: admin.idConta,
-        displayName: admin.displayName,
-        email: admin.email,
-        hasUserRow: admin.hasUserRow,
-      })),
-      total: campanha.administrators.total,
-    },
+    administrators: toAdministratorsWire(campanha.administrators),
     taxasRegistradasCents: campanha.taxasRegistradasCents,
     cancelamentosCents: campanha.cancelamentosCents,
     resultadoDeTaxasCents: campanha.resultadoDeTaxasCents,

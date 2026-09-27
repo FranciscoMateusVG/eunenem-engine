@@ -18,6 +18,10 @@ export const E2E_SPEC_SAFETY = [
   { file: '8bac7-postlogin-routing.spec.ts', safety: 'non-payment' },
   { file: '8bac7-welcome-optout.spec.ts', safety: 'non-payment' },
   { file: '8jcec-campanhas-multicampanha.spec.ts', safety: 'non-payment' },
+  // Read-only admin journey. Self-skips unless launched by its ephemeral-DB
+  // runner (e2e/support/9bpre-ephemeral-run.mjs), so it never seeds a shared
+  // or remote database.
+  { file: '9bpre-admin-receita.spec.ts', safety: 'non-payment' },
   {
     file: 'a4pqt-inter-pix-expiry.spec.ts',
     safety: 'money-movement',
