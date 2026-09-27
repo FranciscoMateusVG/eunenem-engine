@@ -1,3 +1,7 @@
+import {
+  AdministradorItem,
+  campanhaPublicaPath,
+} from "@/components/eunenem/admin/AdministradoresCell";
 import { AdminShell } from "@/components/eunenem/admin/AdminShell";
 import { CampanhaPagamentosList } from "@/components/eunenem/admin/CampanhaPagamentosList";
 import { ContribuicoesList } from "@/components/eunenem/admin/ContribuicoesList";
@@ -65,6 +69,7 @@ export function AdminCampanhaPage({ idCampanha }: { idCampanha: string }) {
         <section className="space-y-10">
           <CampanhaHeader campanha={data} />
           <FactsGrid campanha={data} idCampanha={idCampanha} />
+          <AdministradoresSection campanha={data} idCampanha={idCampanha} />
           {/* PRIMARY — Pagamentos. The transaction aggregate root, where the
               "who paid me what?" question lives. New under Plan 0017. */}
           <PagamentosSection idCampanha={idCampanha} />
@@ -86,6 +91,17 @@ type CampanhaDetail = {
   recebedor: { nome: string } | null;
   idPlataforma: string;
   qtdOpcoes: number;
+  slug: string | null;
+  publicOwnerSlug: string | null;
+  administradores: {
+    rows: Array<{
+      idConta: string;
+      nomeExibicao: string | null;
+      email: string | null;
+      temUsuario: boolean;
+    }>;
+    total: number;
+  };
 };
 
 function LoadingState() {
@@ -221,6 +237,82 @@ function FactsGrid({
         </div>
       ))}
     </dl>
+  );
+}
+
+/**
+ * Administradores reais da campanha (aperture-9bpre) — lista COMPLETA, sem
+ * limite. É o destino do "+N" das tabelas, que mostram só os primeiros.
+ * Administrador é quem consta em `campanha_administradores`; não é o pagador
+ * nem o titular bancário (esse é o recebedor, no cabeçalho).
+ */
+export function AdministradoresSection({
+  campanha,
+  idCampanha,
+}: {
+  campanha: Pick<CampanhaDetail, "slug" | "publicOwnerSlug" | "administradores">;
+  idCampanha: string;
+}) {
+  const { rows, total } = campanha.administradores;
+  const publica = campanhaPublicaPath({
+    publicOwnerSlug: campanha.publicOwnerSlug,
+    campaignId: idCampanha,
+    campaignSlug: campanha.slug,
+  });
+  return (
+    <section data-bc="usuario" className="space-y-3" aria-labelledby="administradores-title">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <div className="flex items-center gap-3">
+          <DddBadge bc="usuario" size="sm" />
+          <h2
+            id="administradores-title"
+            className="font-mono text-[11px] uppercase tracking-[0.14em] text-ink-soft"
+          >
+            administradores ({total})
+          </h2>
+        </div>
+        {publica ? (
+          <a
+            className="text-[12px] text-plum underline underline-offset-2 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-plum"
+            href={publica}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Abrir campanha pública
+            <span className="sr-only"> (abre em nova aba)</span>
+            <span aria-hidden> ↗</span>
+          </a>
+        ) : (
+          <span className="text-[12px] italic text-ink-mute">página pública indisponível</span>
+        )}
+      </div>
+      {rows.length === 0 ? (
+        <p className="rounded-md border border-line bg-paper p-4 text-[13px] italic text-ink-mute">
+          Nenhum administrador registrado para esta campanha.
+        </p>
+      ) : (
+        <ul className="divide-y divide-line rounded-md border border-line bg-paper text-[13px]">
+          {rows.map((admin) => (
+            <li key={admin.idConta} className="px-4 py-2.5">
+              <AdministradorItem
+                admin={{
+                  idConta: admin.idConta,
+                  displayName: admin.nomeExibicao,
+                  email: admin.email,
+                  hasUserRow: admin.temUsuario,
+                }}
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+      {publica === null && rows.length > 0 ? (
+        <p className="text-[12px] text-ink-soft">
+          Nenhum administrador desta campanha tem cadastro nesta plataforma, então não há endereço
+          público para abrir.
+        </p>
+      ) : null}
+    </section>
   );
 }
 
