@@ -511,6 +511,31 @@ function nullableProviderDate(value: string | null): string | null {
 }
 
 /**
+ * Wire projection of a campaign's administrators. Stored text that is empty,
+ * too long or carries control characters becomes null instead of failing the
+ * whole response.
+ */
+export function toAdministratorsWire(administrators: {
+  readonly rows: readonly {
+    readonly idConta: string;
+    readonly displayName: string | null;
+    readonly email: string | null;
+    readonly hasUserRow: boolean;
+  }[];
+  readonly total: number;
+}): z.infer<typeof AdminPaymentAdministratorsSchema> {
+  return {
+    shown: administrators.rows.slice(0, ADMINISTRADORES_EXIBIDOS).map((admin) => ({
+      idConta: admin.idConta,
+      displayName: boundedStoredText(admin.displayName, 200),
+      email: boundedStoredText(admin.email, 320),
+      hasUserRow: admin.hasUserRow,
+    })),
+    total: administrators.total,
+  };
+}
+
+/**
  * Stored-only admin payment evidence. The query applies platform and optional
  * filters before both pagination and count. It never reads webhook payloads,
  * recipient data, contributor identity or provider credentials.
@@ -688,15 +713,7 @@ export async function listAdminPaymentEvidence(
       campaignId: row.campaign_id,
       campaignTitle: safeCampaignTitle(row.campaign_title),
       campaignSlug: boundedStoredText(row.campaign_slug, 120),
-      administrators: {
-        shown: administrators.rows.map((admin) => ({
-          idConta: admin.idConta,
-          displayName: boundedStoredText(admin.displayName, 200),
-          email: boundedStoredText(admin.email, 320),
-          hasUserRow: admin.hasUserRow,
-        })),
-        total: administrators.total,
-      },
+      administrators: toAdministratorsWire(administrators),
       publicOwnerSlug: boundedStoredText(administrators.publicOwnerSlug, 120),
       method: row.method,
       status: row.status,

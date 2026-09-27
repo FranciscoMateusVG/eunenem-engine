@@ -1051,6 +1051,35 @@ describe('admin.receita.* e admin.campanhas.findById pelo router', () => {
     expect(typeof d.snapshotAt).toBe('string');
   });
 
+  it('nome de administrador com caractere de controle vira null, não derruba a resposta', async () => {
+    const campanha = await seedCampanha();
+    const conta = '12000000-0000-4000-8000-00000000d0c1';
+    await seedUsuario({ idConta: conta, slug: 'nome-estranho', nome: 'Ana\u0007Sino' });
+    await seedAdministrador(campanha, conta);
+    await seedTaxa({
+      campaignId: campanha,
+      taxaCents: 100,
+      criadoEm: new Date('2031-01-15T15:00:00Z'),
+    });
+    const d = await buildCaller().admin.receita.dashboard({
+      de: '2031-01-01',
+      ate: '2031-02-01',
+      granularidade: 'mes',
+    });
+    expect(d.porCampanha.rows[0]?.administrators).toEqual({
+      shown: [
+        {
+          idConta: conta,
+          displayName: null,
+          email: 'nome-estranho@receita.test',
+          hasUserRow: true,
+        },
+      ],
+      total: 1,
+    });
+    expect(d.porCampanha.rows[0]?.publicOwnerSlug).toBe('nome-estranho');
+  });
+
   it('drilldown pelo router: cursor inválido ⇒ BAD_REQUEST', async () => {
     await expect(
       buildCaller().admin.receita.campanhasPaginated({

@@ -148,6 +148,12 @@ test('9bpre: pagamentos, administradores, campanha pública e Receita EuNeném',
   browser,
   baseURL,
 }, testInfo) => {
+  // Fora do runner efêmero este teste NÃO roda (aparece como skipped, nunca
+  // como aprovado): ele semeia o banco e exige um banco exclusivo e vazio.
+  test.skip(
+    !process.env.E2E_9BPRE_CONTAINER,
+    'roda apenas pelo runner efêmero: node --import tsx e2e/support/9bpre-ephemeral-run.mjs',
+  );
   test.setTimeout(180_000);
   expect(baseURL).toBe('http://localhost:3002');
 
