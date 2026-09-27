@@ -150,6 +150,20 @@ async function seedTaxa(input: TaxaSeed): Promise<{ idPagamento: string; idLanca
   const idItem = randomUUID();
   const idLancamento = randomUUID();
   const provedor = input.provedor === undefined ? 'stripe' : input.provedor;
+  // Composição válida para o agregado Pagamento: taxa cobrada sobre o presente.
+  const contribuicaoCents = input.taxaCents * 10;
+  // TransacaoExterna completa (o agregado exige status, valor e data).
+  const transacaoExterna =
+    provedor === null
+      ? null
+      : JSON.stringify({
+          id: `ext-${idPagamento}`,
+          provedor,
+          status: 'aprovado',
+          amountCents: contribuicaoCents + input.taxaCents + (input.adicionalCents ?? 0),
+          criadaEm: input.criadoEm.toISOString(),
+          statusBruto: 'paid',
+        });
   const metodo = input.metodo ?? 'pix';
 
   await db
@@ -163,7 +177,7 @@ async function seedTaxa(input: TaxaSeed): Promise<{ idPagamento: string; idLanca
       campanha_id: input.campaignId,
       id_opcao_contribuicao: idContribuicao,
       nome: 'presente sintético',
-      valor: 0,
+      valor: contribuicaoCents,
     })
     .execute();
   await sql`
@@ -177,8 +191,10 @@ async function seedTaxa(input: TaxaSeed): Promise<{ idPagamento: string; idLanca
       ${idPagamento}::uuid, ${input.status ?? 'aprovado'}, ${input.criadoEm}, ${input.criadoEm},
       ${randomUUID()}::uuid, ${input.campaignId}::uuid,
       ${metodo}, ${input.criadoEm},
-      0, ${input.taxaCents}, 0, ${input.adicionalCents ?? 0}, 0,
-      ${provedor === null ? null : JSON.stringify({ id: `ext-${idPagamento}`, provedor })}::jsonb
+      ${contribuicaoCents}, ${input.taxaCents}, ${contribuicaoCents},
+      ${input.adicionalCents ?? 0},
+      ${contribuicaoCents + input.taxaCents + (input.adicionalCents ?? 0)},
+      ${transacaoExterna}::jsonb
     )
   `.execute(testDb.db);
   await db
@@ -191,12 +207,12 @@ async function seedTaxa(input: TaxaSeed): Promise<{ idPagamento: string; idLanca
       tipo: 'contribuicao',
       id_contribuicao: idContribuicao,
       quantidade: 1,
-      contribution_unit_amount_cents: 0,
+      contribution_unit_amount_cents: contribuicaoCents,
       fee_unit_amount_cents: input.taxaCents,
-      receiver_unit_amount_cents: 0,
-      line_contribution_amount_cents: 0,
+      receiver_unit_amount_cents: contribuicaoCents,
+      line_contribution_amount_cents: contribuicaoCents,
       line_fee_amount_cents: input.taxaCents,
-      line_receiver_amount_cents: 0,
+      line_receiver_amount_cents: contribuicaoCents,
       surcharge_amount_cents: null,
       criado_em: input.criadoEm,
     })
