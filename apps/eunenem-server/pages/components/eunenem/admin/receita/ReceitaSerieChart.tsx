@@ -1,4 +1,4 @@
-import { type KeyboardEvent, useRef, useState } from "react";
+import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { formatBRL } from "@/lib/formatBRL";
 import { type Granularidade, rotuloBucket } from "@/lib/receitaPeriodo";
 import { type ReceitaBucket, ROTULOS } from "./types";
@@ -21,6 +21,24 @@ import { type ReceitaBucket, ROTULOS } from "./types";
  */
 
 const ALTURA_PLOT_PX = 220;
+/**
+ * Largura mínima de coluna. Até 12 intervalos cabem em 375px sem rolagem; com
+ * mais, as colunas afinam e o quadro rola por dentro quando preciso.
+ */
+function colunaMinPx(intervalos: number): number {
+  return intervalos <= 12 ? 18 : 12;
+}
+
+const EIXO_SEM_CENTAVOS = new Intl.NumberFormat("pt-BR", {
+  style: "currency",
+  currency: "BRL",
+  maximumFractionDigits: 0,
+});
+
+/** Rótulo de eixo: sem centavos quando o valor é inteiro em reais. */
+function formatEixo(cents: number): string {
+  return cents % 100 === 0 ? EIXO_SEM_CENTAVOS.format(cents / 100) : formatBRL(cents);
+}
 
 /** Arredonda para cima em 1 / 2 / 5 × 10^k centavos. */
 export function tetoLegivel(cents: number): number {
@@ -73,8 +91,23 @@ export function ReceitaSerieChart({
   serie: readonly ReceitaBucket[];
   granularidade: Granularidade;
 }) {
-  const [ativo, setAtivo] = useState(0);
+  // null = ninguém escolheu ainda: a leitura mostra o intervalo mais recente.
+  const [ativo, setAtivo] = useState<number | null>(null);
   const colunas = useRef<Array<HTMLButtonElement | null>>([]);
+  const rolagem = useRef<HTMLDivElement | null>(null);
+  const intervalos = serie.length;
+  const colunaMin = colunaMinPx(intervalos);
+
+  // Com muitos intervalos o gráfico rola dentro do próprio quadro; começa no
+  // fim, onde está o intervalo mais recente.
+  const primeiroInicio = serie[0]?.inicio ?? "";
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refaz ao trocar de série, não a cada render
+  useEffect(() => {
+    // Série nova (outro período ou outra grade): volta à leitura padrão.
+    setAtivo(null);
+    const el = rolagem.current;
+    if (el && intervalos > 0) el.scrollLeft = el.scrollWidth;
+  }, [intervalos, granularidade, primeiroInicio]);
   const escala = escalaDaSerie(serie);
   const total = escala.acima + escala.abaixo;
 
@@ -88,10 +121,11 @@ export function ReceitaSerieChart({
   }
 
   const base = (escala.acima / total) * 100; // % a partir do topo
-  const indice = Math.min(ativo, serie.length - 1);
+  const ultimo = serie.length - 1;
+  const indice = ativo === null ? ultimo : Math.min(ativo, ultimo);
   const atual = serie[indice];
   const passoDesktop = Math.max(1, Math.ceil(serie.length / 12));
-  const passoMobile = Math.max(1, Math.ceil(serie.length / 6));
+  const passoMobile = Math.max(1, Math.ceil(serie.length / 4));
 
   function mover(para: number) {
     const destino = Math.max(0, Math.min(serie.length - 1, para));
@@ -148,10 +182,12 @@ export function ReceitaSerieChart({
         ) : null}
       </figcaption>
 
-      <div className="mt-3 overflow-x-auto">
+      <div ref={rolagem} className="mt-3 overflow-x-auto">
+        {/* O respiro vertical e à direita dá lugar aos rótulos que ficam
+            centrados sobre as linhas e sob a última coluna. */}
         <div
-          className="grid grid-cols-[3.5rem_minmax(0,1fr)] gap-x-2"
-          style={{ minWidth: `${56 + 8 + serie.length * 22}px` }}
+          className="grid grid-cols-[4rem_minmax(0,1fr)] gap-x-2 py-2 pr-3"
+          style={{ minWidth: `${64 + 8 + 12 + intervalos * colunaMin}px` }}
         >
           {/* Eixo: só os três valores que ancoram a leitura. */}
           <div
@@ -160,17 +196,17 @@ export function ReceitaSerieChart({
             style={{ height: ALTURA_PLOT_PX }}
           >
             <span className="absolute right-0 top-0 -translate-y-1/2 whitespace-nowrap">
-              {formatBRL(escala.acima)}
+              {formatEixo(escala.acima)}
             </span>
             <span
               className="absolute right-0 -translate-y-1/2 whitespace-nowrap text-ink-soft"
               style={{ top: `${base}%` }}
             >
-              {formatBRL(0)}
+              {formatEixo(0)}
             </span>
             {escala.abaixo > 0 ? (
               <span className="absolute bottom-0 right-0 translate-y-1/2 whitespace-nowrap">
-                {formatBRL(-escala.abaixo)}
+                {formatEixo(-escala.abaixo)}
               </span>
             ) : null}
           </div>
@@ -180,6 +216,11 @@ export function ReceitaSerieChart({
             aria-label={`Gráfico: ${ROTULOS.registradas.toLowerCase()}, ${ROTULOS.cancelamentos.toLowerCase()} e ${ROTULOS.resultado.toLowerCase()} por intervalo. Use as setas para percorrer.`}
             className="relative flex"
             style={{ height: ALTURA_PLOT_PX }}
+            onPointerLeave={(event) => {
+              // Ponteiro saiu: volta ao intervalo mais recente, a menos que o
+              // teclado esteja dentro do gráfico.
+              if (!event.currentTarget.contains(document.activeElement)) setAtivo(null);
+            }}
           >
             <span aria-hidden className="absolute inset-x-0 top-0 border-t border-line" />
             {escala.abaixo > 0 ? (
@@ -208,10 +249,11 @@ export function ReceitaSerieChart({
                   onFocus={() => setAtivo(i)}
                   onPointerEnter={() => setAtivo(i)}
                   onKeyDown={(event) => onKeyDown(event, i)}
+                  style={{ minWidth: colunaMin }}
                   className={[
-                    "relative h-full min-w-[22px] flex-1 cursor-default rounded-sm",
+                    "relative h-full flex-1 cursor-default rounded-sm bg-transparent",
+                    "hover:bg-cream-2/60 focus-visible:bg-cream-2/60",
                     "focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-plum",
-                    i === indice ? "bg-cream-2/60" : "bg-transparent",
                   ].join(" ")}
                 >
                   {bucket.taxasRegistradasCents > 0 ? (
@@ -245,13 +287,15 @@ export function ReceitaSerieChart({
             {serie.map((bucket, i) => (
               <span
                 key={bucket.inicio}
-                className="relative h-4 min-w-[22px] flex-1"
+                className="relative h-4 flex-1"
+                style={{ minWidth: colunaMin }}
               >
-                {i % passoDesktop === 0 ? (
+                {/* Contado a partir do fim: o intervalo mais recente sempre tem rótulo. */}
+                {(ultimo - i) % passoDesktop === 0 ? (
                   <span
                     className={[
                       "absolute left-1/2 top-0 -translate-x-1/2 whitespace-nowrap",
-                      i % passoMobile === 0 ? "" : "max-sm:hidden",
+                      (ultimo - i) % passoMobile === 0 ? "" : "max-sm:hidden",
                     ].join(" ")}
                   >
                     {rotuloCurto(bucket, granularidade)}
@@ -301,7 +345,7 @@ export function ReceitaSerieTabela({
         </thead>
         <tbody className="divide-y divide-line">
           {serie.map((bucket) => (
-            <tr key={bucket.inicio}>
+            <tr key={bucket.inicio} className="align-top">
               <th scope="row" className="whitespace-nowrap px-3 py-2 font-normal text-ink">
                 {rotuloBucket(bucket, granularidade)}
                 {bucket.parcial ? (

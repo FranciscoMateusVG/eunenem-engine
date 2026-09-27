@@ -321,6 +321,37 @@ describe('ReceitaPainel — decomposições', () => {
     expect(html).toContain('PIX');
   });
 
+  it('lista longa começa recolhida e os totais continuam cobrindo todas', () => {
+    const base = dashboard().porCampanha.rows[0];
+    if (!base) throw new Error('fixture sem campanha');
+    const rows = Array.from({ length: 12 }, (_, i) => ({
+      ...base,
+      idCampanha: `10000000-0000-4000-8000-0000000000${String(i).padStart(2, '0')}`,
+      titulo: `Campanha ${String(i).padStart(2, '0')}`,
+    }));
+    const html = texto(
+      render(dashboard({ porCampanha: { ...dashboard().porCampanha, rows, campanhasTotal: 12 } })),
+    );
+    expect(html).toContain('Campanha 09');
+    expect(html).not.toContain('Campanha 10');
+    expect(html).toContain('Mostrar as 12 campanhas da lista');
+    expect(html).toContain('Os totais abaixo já incluem todas.');
+    expect(html).toContain('Todas as campanhas (12)');
+  });
+
+  it('eixo do gráfico usa reais inteiros quando não há centavos', () => {
+    const html = texto(render(dashboard()));
+    expect(html).toContain('>R$ 200<');
+    expect(html).toContain('>-R$ 500<');
+    expect(html).toContain('>R$ 0<');
+  });
+
+  it('a leitura do gráfico começa no intervalo mais recente', () => {
+    const html = texto(render(dashboard()));
+    const leitura = html.slice(html.indexOf('data-testid="receita-leitura"'));
+    expect(leitura.slice(0, 400)).toContain('fev/2031');
+  });
+
   it('lista truncada mostra o que ficou de fora e o total de todas', () => {
     const html = texto(
       render(

@@ -26,6 +26,8 @@ import {
  */
 
 const TH = "px-3 py-2";
+/** Linhas visíveis antes de "mostrar todas". Os totais nunca dependem disto. */
+const CAMPANHAS_VISIVEIS = 10;
 const THR = "px-3 py-2 text-right";
 
 function CabecalhoValores() {
@@ -46,9 +48,9 @@ function CabecalhoValores() {
 
 function LinhaCampanha({ campanha }: { campanha: ReceitaCampanha }) {
   return (
-    <tr>
+    <tr className="align-top">
       <th scope="row" className="px-3 py-3 text-left font-normal">
-        <div className="min-w-[12rem] font-medium text-ink">{campanha.titulo}</div>
+        <div className="min-w-[14rem] font-medium text-ink">{campanha.titulo}</div>
         <CampanhaLinks
           campaignId={campanha.idCampanha}
           campaignSlug={campanha.campaignSlug}
@@ -76,6 +78,10 @@ export function ReceitaPorCampanha({
   somaPorCampanha: ReceitaDashboard["conciliacao"]["somaPorCampanha"];
 }) {
   const fora = porCampanha.campanhasTotal - porCampanha.rows.length;
+  const [todas, setTodas] = useState(false);
+  const recolhivel = porCampanha.rows.length > CAMPANHAS_VISIVEIS;
+  const visiveis =
+    recolhivel && !todas ? porCampanha.rows.slice(0, CAMPANHAS_VISIVEIS) : porCampanha.rows;
   return (
     <section aria-labelledby="receita-campanhas-title" className="space-y-3">
       <div>
@@ -108,11 +114,32 @@ export function ReceitaPorCampanha({
               </tr>
             </thead>
             <tbody className="divide-y divide-line">
-              {porCampanha.rows.map((campanha) => (
+              {visiveis.map((campanha) => (
                 <LinhaCampanha key={campanha.idCampanha} campanha={campanha} />
               ))}
             </tbody>
             <tfoot className="border-t-2 border-line bg-cream-2/40">
+              {recolhivel ? (
+                <tr>
+                  <td colSpan={5} className="px-3 py-2">
+                    <button
+                      type="button"
+                      aria-expanded={todas}
+                      onClick={() => setTodas((valor) => !valor)}
+                      className="min-h-11 rounded border border-line bg-paper px-3 py-2 font-mono text-[11px] uppercase tracking-[0.1em] text-ink-soft transition-colors hover:border-plum hover:text-plum focus:outline-none focus-visible:ring-2 focus-visible:ring-plum"
+                    >
+                      {todas
+                        ? `Mostrar só as ${CAMPANHAS_VISIVEIS} primeiras`
+                        : `Mostrar as ${porCampanha.rows.length} campanhas da lista`}
+                    </button>
+                    {todas ? null : (
+                      <span className="ml-3 text-[12px] text-ink-soft">
+                        Os totais abaixo já incluem todas.
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              ) : null}
               {porCampanha.truncated ? (
                 <tr>
                   <th scope="row" colSpan={2} className="px-3 py-2 text-left font-normal text-ink">

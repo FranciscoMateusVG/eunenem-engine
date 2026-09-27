@@ -521,15 +521,13 @@ export function PaymentEvidenceTable({
         </thead>
         <tbody className="divide-y divide-line">
           {rows.map((row) => (
-            <tr key={row.paymentId}>
+            <tr key={row.paymentId} className="align-top">
               <td className="whitespace-nowrap px-3 py-3 font-mono text-ink-soft">
                 {formatDate(row.createdAt)}
               </td>
               <td className="px-3 py-3">
-                <div className="min-w-[12rem] font-medium text-ink">{row.campaignTitle}</div>
-                <div className="break-all font-mono text-[10px] text-ink-mute">
-                  pagamento {row.paymentId}
-                </div>
+                <div className="min-w-[14rem] font-medium text-ink">{row.campaignTitle}</div>
+                <div className="font-mono text-[10px] text-ink-mute">{row.paymentId}</div>
                 <CampanhaLinks
                   campaignId={row.campaignId}
                   campaignSlug={row.campaignSlug}
