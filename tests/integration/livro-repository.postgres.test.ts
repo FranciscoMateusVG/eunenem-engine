@@ -1095,3 +1095,151 @@ describe('LivroFinanceiroRepositoryPostgres — manual resolution (aperture-477n
     expect(linked?.transferidoEm).toBeNull();
   });
 });
+
+// ────────────────────────────────────────────────────────────────────
+//  aperture-5jk8y — predicado canônico de liquidez (extração sem mudança)
+//
+//  `predicadoLancamentoDisponivel` / `predicadoEstornoAtivoLancamento` foram
+//  extraídos das duas ocorrências inline (leitura e SELECT … FOR UPDATE).
+//  Estes testes fixam o comportamento nas DUAS chamadas, com positivos e
+//  negativos da guarda PIX presente nesta branch (staging não tem
+//  stripe_refund_operations — regressão de refund-op fica para main).
+// ────────────────────────────────────────────────────────────────────
+
+describe('LivroFinanceiroRepositoryPostgres — predicado canônico de disponível (aperture-5jk8y)', () => {
+  let repo: LivroFinanceiroRepositoryPostgres;
+  const NOW = new Date('2026-09-26T12:00:00Z');
+  const PAST = new Date('2026-09-20T12:00:00Z');
+  const FUTURE = new Date('2026-10-02T12:00:00Z');
+
+  // biome-ignore lint/suspicious/noExplicitAny: raw fixture writes outside the BC's typed surface
+  const anyDb = () => testDb.db as any;
+
+  beforeEach(async () => {
+    await anyDb().deleteFrom('pix_cobranca_devolucoes').execute();
+    await anyDb().deleteFrom('repasse_transfer_attempts').execute();
+    await anyDb().deleteFrom('lancamentos_financeiros').execute();
+    await anyDb().deleteFrom('repasses_recebedor').execute();
+    repo = withLancamentoSeeding(new LivroFinanceiroRepositoryPostgres(testDb.db), testDb.db);
+  });
+
+  async function seedDisponivel(availableOn: Date | null = PAST) {
+    const idCampanha = randomUUID() as IdCampanha;
+    const lancamento = makeLancamentoRecebedor({ idCampanha });
+    await repo.saveLancamentos([lancamento]);
+    await anyDb()
+      .updateTable('pagamentos')
+      .set({ intencao_balance_transaction_available_on: availableOn })
+      .where('id', '=', lancamento.idPagamento as string)
+      .execute();
+    return { idCampanha, lancamento };
+  }
+
+  function alnum(len: number): string {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ0123456789';
+    let out = '';
+    for (let i = 0; i < len; i++) out += chars[Math.floor(Math.random() * chars.length)];
+    return out;
+  }
+
+  async function insertDevolucao(idPagamento: string, status: string) {
+    await anyDb()
+      .insertInto('pix_cobranca_devolucoes')
+      .values({
+        id: randomUUID(),
+        id_pagamento: idPagamento,
+        e2e_id: `E${alnum(31)}`,
+        id_devolucao: alnum(30),
+        amount_cents: 1000,
+        status,
+        rtr_id: null,
+      })
+      .execute();
+  }
+
+  it('positivo: aprovado, liberado, sem repasse, sem devolução → disponível nas duas chamadas', async () => {
+    const { idCampanha, lancamento } = await seedDisponivel();
+
+    const lidos = await repo.findLancamentosDisponiveisByIdCampanha(idCampanha, NOW);
+    expect(lidos.map((l) => l.id)).toEqual([lancamento.id]);
+
+    const { idsLancamentosClaimados, repasse } = await repo.solicitarRepasseTransaction({
+      idCampanha,
+      idRepasse: randomUUID() as IdRepasse,
+      solicitadoEm: NOW,
+      now: NOW,
+    });
+    expect(idsLancamentosClaimados).toEqual([lancamento.id]);
+    expect(repasse.amountCents).toBe(1000);
+  });
+
+  it.each([
+    'em_processamento',
+    'devolvida',
+  ])('negativo: devolução PIX %s ativa → excluído da leitura E do FOR UPDATE', async (status) => {
+    const { idCampanha, lancamento } = await seedDisponivel();
+    await insertDevolucao(lancamento.idPagamento as string, status);
+
+    expect(await repo.findLancamentosDisponiveisByIdCampanha(idCampanha, NOW)).toEqual([]);
+
+    const { idsLancamentosClaimados, repasse } = await repo.solicitarRepasseTransaction({
+      idCampanha,
+      idRepasse: randomUUID() as IdRepasse,
+      solicitadoEm: NOW,
+      now: NOW,
+    });
+    expect(idsLancamentosClaimados).toEqual([]);
+    expect(repasse.amountCents).toBe(0);
+  });
+
+  it.each([
+    'nao_realizada',
+    'rejeitada',
+  ])('positivo: devolução PIX %s (terminal sem efeito) NÃO bloqueia', async (status) => {
+    const { idCampanha, lancamento } = await seedDisponivel();
+    await insertDevolucao(lancamento.idPagamento as string, status);
+
+    const lidos = await repo.findLancamentosDisponiveisByIdCampanha(idCampanha, NOW);
+    expect(lidos.map((l) => l.id)).toEqual([lancamento.id]);
+  });
+
+  it('negativo: available_on NULL ou futuro → não disponível', async () => {
+    const nulo = await seedDisponivel(null);
+    const futuro = await seedDisponivel(FUTURE);
+    expect(await repo.findLancamentosDisponiveisByIdCampanha(nulo.idCampanha, NOW)).toEqual([]);
+    expect(await repo.findLancamentosDisponiveisByIdCampanha(futuro.idCampanha, NOW)).toEqual([]);
+  });
+
+  it('negativo: pagamento não aprovado, já reivindicado, transferido ou cancelado → não disponível', async () => {
+    const pendente = await seedDisponivel();
+    await anyDb()
+      .updateTable('pagamentos')
+      .set({ status: 'pendente' })
+      .where('id', '=', pendente.lancamento.idPagamento as string)
+      .execute();
+    expect(await repo.findLancamentosDisponiveisByIdCampanha(pendente.idCampanha, NOW)).toEqual([]);
+
+    const transferido = await seedDisponivel();
+    await repo.marcarLancamentosComoTransferidos([transferido.lancamento.id], NOW);
+    expect(await repo.findLancamentosDisponiveisByIdCampanha(transferido.idCampanha, NOW)).toEqual(
+      [],
+    );
+
+    const cancelado = await seedDisponivel();
+    await repo.marcarLancamentosComoCanceladosPorPagamento(cancelado.lancamento.idPagamento, NOW);
+    expect(await repo.findLancamentosDisponiveisByIdCampanha(cancelado.idCampanha, NOW)).toEqual(
+      [],
+    );
+
+    const reivindicado = await seedDisponivel();
+    await repo.solicitarRepasseTransaction({
+      idCampanha: reivindicado.idCampanha,
+      idRepasse: randomUUID() as IdRepasse,
+      solicitadoEm: NOW,
+      now: NOW,
+    });
+    expect(await repo.findLancamentosDisponiveisByIdCampanha(reivindicado.idCampanha, NOW)).toEqual(
+      [],
+    );
+  });
+});
