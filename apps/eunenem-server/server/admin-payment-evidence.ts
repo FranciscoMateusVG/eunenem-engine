@@ -3,6 +3,11 @@ import { sql } from "kysely";
 import { z } from "zod";
 import type { Database } from "../../../src/adapters/database.js";
 import {
+  ADMINISTRADORES_EXIBIDOS,
+  loadCampaignAdministrators,
+  NO_CAMPAIGN_ADMINISTRATORS,
+} from "./admin-campaign-administrators.js";
+import {
   type CampaignFilter,
   parseAdminCampaignQuery,
 } from "./admin-user-search.js";
@@ -94,10 +99,37 @@ const NullableBoundedReferenceSchema = z
   .regex(SAFE_STORED_TEXT)
   .nullable();
 
+/**
+ * Administrador REAL da campanha (aperture-9bpre) — nunca o pagador nem o
+ * titular bancário. `displayName`/`email` são null quando a conta não tem
+ * linha em `usuarios` na plataforma; a UI mostra o id, sem inventar nome.
+ */
+export const AdminPaymentAdministratorSchema = z.object({
+  idConta: z.string().uuid(),
+  displayName: z.string().min(1).max(200).regex(SAFE_STORED_TEXT).nullable(),
+  email: z.string().min(1).max(320).regex(SAFE_STORED_TEXT).nullable(),
+  hasUserRow: z.boolean(),
+});
+export type AdminPaymentAdministrator = z.infer<typeof AdminPaymentAdministratorSchema>;
+
+export const AdminPaymentAdministratorsSchema = z.object({
+  /** Até ADMINISTRADORES_EXIBIDOS, em ordem de id_conta. */
+  shown: z.array(AdminPaymentAdministratorSchema).max(ADMINISTRADORES_EXIBIDOS),
+  /** Total real da campanha; `shown` truncado não decide nada. */
+  total: z.number().int().nonnegative(),
+});
+
 export const AdminPaymentEvidenceSchema = z.object({
   paymentId: z.string().uuid(),
   campaignId: z.string().uuid(),
   campaignTitle: z.string().min(1).max(200).regex(SAFE_STORED_TEXT),
+  campaignSlug: z.string().min(1).max(120).regex(SAFE_STORED_TEXT).nullable(),
+  administrators: AdminPaymentAdministratorsSchema,
+  /**
+   * Slug de usuário para o link público, escolhido no servidor sobre a
+   * TOTALIDADE dos administradores. null = nenhum administrador elegível.
+   */
+  publicOwnerSlug: z.string().min(1).max(120).regex(SAFE_STORED_TEXT).nullable(),
   method: z.enum(["pix", "credit_card"]),
   status: PaymentEvidenceStatusFilterSchema,
   createdAt: z.string().datetime(),
@@ -234,6 +266,7 @@ interface PaymentEvidenceDbRow {
   payment_id: string;
   campaign_id: string;
   campaign_title: string;
+  campaign_slug: string | null;
   method: string;
   status: string;
   created_at: Date;
@@ -478,9 +511,39 @@ function nullableProviderDate(value: string | null): string | null {
 }
 
 /**
+ * Wire projection of a campaign's administrators. Stored text that is empty,
+ * too long or carries control characters becomes null instead of failing the
+ * whole response.
+ */
+export function toAdministratorsWire(administrators: {
+  readonly rows: readonly {
+    readonly idConta: string;
+    readonly displayName: string | null;
+    readonly email: string | null;
+    readonly hasUserRow: boolean;
+  }[];
+  readonly total: number;
+}): z.infer<typeof AdminPaymentAdministratorsSchema> {
+  return {
+    shown: administrators.rows.slice(0, ADMINISTRADORES_EXIBIDOS).map((admin) => ({
+      idConta: admin.idConta,
+      displayName: boundedStoredText(admin.displayName, 200),
+      email: boundedStoredText(admin.email, 320),
+      hasUserRow: admin.hasUserRow,
+    })),
+    total: administrators.total,
+  };
+}
+
+/**
  * Stored-only admin payment evidence. The query applies platform and optional
  * filters before both pagination and count. It never reads webhook payloads,
  * recipient data, contributor identity or provider credentials.
+ *
+ * aperture-9bpre: each row also carries the campaign's REAL administrators
+ * (up to ADMINISTRADORES_EXIBIDOS + total) and the public-link owner slug,
+ * loaded in one batched query for the page. Filters, cursor and totalCount
+ * are unchanged.
  */
 export async function listAdminPaymentEvidence(
   db: Database,
@@ -578,6 +641,7 @@ export async function listAdminPaymentEvidence(
       p.id AS payment_id,
       c.id AS campaign_id,
       c.titulo AS campaign_title,
+      c.slug AS campaign_slug,
       p.intencao_metodo AS method,
       p.status,
       p.criado_em AS created_at,
@@ -634,11 +698,23 @@ export async function listAdminPaymentEvidence(
 
   const hasNext = rowsResult.rows.length > input.limit;
   const visibleRows = rowsResult.rows.slice(0, input.limit);
-  const rows = visibleRows.map((row) =>
-    AdminPaymentEvidenceSchema.parse({
+  // Uma consulta para todas as campanhas da página (sem N+1). Leitura
+  // posterior à das linhas: não compartilha snapshot com elas.
+  const administratorsByCampaign = await loadCampaignAdministrators(db, {
+    platformId: input.platformId,
+    campaignIds: visibleRows.map((row) => row.campaign_id),
+    perCampaignLimit: ADMINISTRADORES_EXIBIDOS,
+  });
+  const rows = visibleRows.map((row) => {
+    const administrators =
+      administratorsByCampaign.get(row.campaign_id) ?? NO_CAMPAIGN_ADMINISTRATORS;
+    return AdminPaymentEvidenceSchema.parse({
       paymentId: row.payment_id,
       campaignId: row.campaign_id,
       campaignTitle: safeCampaignTitle(row.campaign_title),
+      campaignSlug: boundedStoredText(row.campaign_slug, 120),
+      administrators: toAdministratorsWire(administrators),
+      publicOwnerSlug: boundedStoredText(administrators.publicOwnerSlug, 120),
       method: row.method,
       status: row.status,
       createdAt: row.created_at.toISOString(),
@@ -666,8 +742,8 @@ export async function listAdminPaymentEvidence(
         interE2eRef: boundedStoredText(row.inter_e2e_ref, 32),
         externalTransactionRef: boundedStoredText(row.external_transaction_ref, 255),
       },
-    }),
-  );
+    });
+  });
 
   const last = hasNext ? visibleRows.at(-1) : undefined;
   const nextCursor = last

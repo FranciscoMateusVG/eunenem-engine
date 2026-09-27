@@ -20,6 +20,7 @@
  *   /admin/campanha/:idCampanha[/]   → admin-campanha    (free-shape id)
  *   /admin/contribuicao/:id[/]       → admin-contribuicao (free-shape id)
  *   /admin/pagamento/:id[/]          → admin-pagamento   (free-shape id)
+ *   /admin/pagamentos/receita[/]     → admin-pagamentos-receita (aperture-9bpre)
  *   /admin/pagamentos[/]             → admin-pagamentos  (evidence browse)
  *   /admin/repasses/:idRepasse[/]    → admin-repasse-detail (free-shape id)
  *   /admin/repasses[/]               → admin-repasses
@@ -112,6 +113,24 @@ describe('resolveRoute — /admin/* (regression, spec §9)', () => {
   it('/admin/pagamentos → admin-pagamentos (with and without trailing slash)', () => {
     expect(resolveRoute('/admin/pagamentos')).toEqual({ kind: 'admin-pagamentos' });
     expect(resolveRoute('/admin/pagamentos/')).toEqual({ kind: 'admin-pagamentos' });
+  });
+
+  it('/admin/pagamentos/receita → admin-pagamentos-receita, sem colidir com as vizinhas', () => {
+    expect(resolveRoute('/admin/pagamentos/receita')).toEqual({
+      kind: 'admin-pagamentos-receita',
+    });
+    expect(resolveRoute('/admin/pagamentos/receita/')).toEqual({
+      kind: 'admin-pagamentos-receita',
+    });
+    // Vizinhas inalteradas.
+    expect(resolveRoute('/admin/pagamentos')).toEqual({ kind: 'admin-pagamentos' });
+    expect(resolveRoute('/admin/pagamento/receita')).toEqual({
+      kind: 'admin-pagamento',
+      idPagamento: 'receita',
+    });
+    // Sub-rotas desconhecidas continuam 404 honesto.
+    expect(resolveRoute('/admin/pagamentos/outra')).toEqual({ kind: 'not-found' });
+    expect(resolveRoute('/admin/pagamentos/receita/extra')).toEqual({ kind: 'not-found' });
   });
 
   it('/admin/repasses → admin-repasses (list)', () => {
