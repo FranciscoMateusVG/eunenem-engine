@@ -3,6 +3,7 @@ import { Kysely, PostgresDialect, sql } from 'kysely';
 import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { loadCampaignAdministrators } from '../../apps/eunenem-server/server/admin-campaign-administrators.js';
+import { listAdminPaymentEvidence } from '../../apps/eunenem-server/server/admin-payment-evidence.js';
 import {
   InvalidReceitaCampanhasCursorError,
   InvalidReceitaPeriodoError,
@@ -927,6 +928,62 @@ describe('Administradores da campanha', () => {
     expect(resumo?.rows.every((a) => !a.hasUserRow && a.displayName === null)).toBe(true);
     // A lista exibida não contém nenhum elegível; o slug vem da totalidade.
     expect(resumo?.publicOwnerSlug).toBe('sexta-pessoa');
+  });
+
+  it('T12/T14/T15: a lista de pagamentos carrega administradores e slug sem mudar a paginação', async () => {
+    const campanha = await seedCampanha({ slug: 'seis-na-lista', titulo: 'Seis na lista' });
+    for (const conta of contas) await seedAdministrador(campanha, conta);
+    await seedUsuario({ idConta: contas[5] as string, slug: 'sexta-na-lista' });
+    const semSlug = await seedCampanha({ titulo: 'Sem slug e sem admin' });
+    const a = await seedTaxa({
+      campaignId: campanha,
+      taxaCents: 100,
+      criadoEm: new Date('2031-05-05T15:00:00Z'),
+    });
+    const b = await seedTaxa({
+      campaignId: semSlug,
+      taxaCents: 100,
+      criadoEm: new Date('2031-05-06T15:00:00Z'),
+    });
+
+    const contexto = {
+      platformId: ID_PLATAFORMA_EUNENEM,
+      cursor: null,
+      limit: 50,
+      provider: null,
+      status: null,
+      publicOrigin: 'https://staging.eunenem.com',
+      cursorSecret: CURSOR_SECRET,
+    } as const;
+    const comAdmins = await listAdminPaymentEvidence(testDb.db, {
+      ...contexto,
+      exactReference: `ext-${a.idPagamento}`,
+    });
+    expect(comAdmins.totalCount).toBe(1);
+    expect(comAdmins.nextCursor).toBeNull();
+    expect(comAdmins.referenceResolution).toBe('unique');
+    expect(comAdmins.rows).toHaveLength(1);
+    expect(comAdmins.rows[0]).toMatchObject({
+      paymentId: a.idPagamento,
+      campaignId: campanha,
+      campaignSlug: 'seis-na-lista',
+      publicOwnerSlug: 'sexta-na-lista',
+    });
+    expect(comAdmins.rows[0]?.administrators.total).toBe(6);
+    expect(comAdmins.rows[0]?.administrators.shown.map((x) => x.idConta)).toEqual(
+      contas.slice(0, 5),
+    );
+
+    const semAdmins = await listAdminPaymentEvidence(testDb.db, {
+      ...contexto,
+      exactReference: `ext-${b.idPagamento}`,
+    });
+    expect(semAdmins.rows[0]).toMatchObject({
+      paymentId: b.idPagamento,
+      campaignSlug: null,
+      publicOwnerSlug: null,
+      administrators: { shown: [], total: 0 },
+    });
   });
 
   it('T13: nenhum administrador elegível — sem slug público', async () => {
