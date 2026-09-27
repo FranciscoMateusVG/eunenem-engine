@@ -79,7 +79,17 @@ import {
   isCatalogImageUrlWritable,
 } from "../lib/security/catalog-image-url.js";
 import { enforceRateLimit } from "./rate-limit.js";
+import { loadCampaignAdministrators } from "../admin-campaign-administrators.js";
 import {
+  InvalidReceitaCampanhasCursorError,
+  InvalidReceitaPeriodoError,
+  listReceitaCampanhas,
+  loadReceitaDashboard,
+  RECEITA_CAMPANHAS_LIMIT,
+} from "../admin-receita.js";
+import { GRANULARIDADES, isLocalDate } from "../../pages/lib/receitaPeriodo.js";
+import {
+  AdminPaymentAdministratorsSchema,
   AdminPaymentEvidenceSchema,
   AdminUnmatchedPaymentEvidenceSchema,
   InvalidPaymentEvidenceCursorError,
@@ -717,10 +727,30 @@ const CampanhaAdminDTOSchema = z.object({
 });
 export type CampanhaAdminDTO = z.infer<typeof CampanhaAdminDTOSchema>;
 
+/**
+ * Administrador real da campanha no detalhe admin (aperture-9bpre). Lista
+ * COMPLETA — o limite de exibição só existe nas tabelas.
+ */
+const CampanhaAdministradorDTOSchema = z.object({
+  idConta: z.string(),
+  nomeExibicao: z.string().nullable(),
+  email: z.string().nullable(),
+  /** False quando a conta não tem linha em `usuarios` na plataforma. */
+  temUsuario: z.boolean(),
+});
+
 /** Detail wire shape — superset of the row DTO, adds idPlataforma + opcoes count. */
 const CampanhaDetailDTOSchema = CampanhaAdminDTOSchema.extend({
   idPlataforma: z.string(),
   qtdOpcoes: z.number().int().min(0),
+  /** Slug da campanha para o link público; null = campanha sem slug. */
+  slug: z.string().nullable(),
+  /** Primeiro administrador elegível entre TODOS; null = nenhum elegível. */
+  publicOwnerSlug: z.string().nullable(),
+  administradores: z.object({
+    rows: z.array(CampanhaAdministradorDTOSchema),
+    total: z.number().int().nonnegative(),
+  }),
 });
 export type CampanhaDetailDTO = z.infer<typeof CampanhaDetailDTOSchema>;
 
@@ -813,10 +843,28 @@ const campanhasRouter = t.router({
       if (!campanha) return null;
       if (campanha.idPlataforma !== ID_PLATAFORMA_EUNENEM) return null;
       const row = toCampanhaAdminDTO(campanha);
+      const administradores = (
+        await loadCampaignAdministrators(ctx.deps.db, {
+          platformId: ID_PLATAFORMA_EUNENEM,
+          campaignIds: [campanha.id],
+          perCampaignLimit: null,
+        })
+      ).get(campanha.id);
       return {
         ...row,
         idPlataforma: campanha.idPlataforma,
         qtdOpcoes: campanha.opcoes.length,
+        slug: campanha.slug ?? null,
+        publicOwnerSlug: administradores?.publicOwnerSlug ?? null,
+        administradores: {
+          rows: (administradores?.rows ?? []).map((admin) => ({
+            idConta: admin.idConta,
+            nomeExibicao: admin.displayName,
+            email: admin.email,
+            temUsuario: admin.hasUserRow,
+          })),
+          total: administradores?.total ?? 0,
+        },
       };
     }),
 });
@@ -4144,6 +4192,262 @@ const catalogRouter = t.router({
     ),
 });
 
+/* ─────────────────────────────────────────────────────────────────────────
+ * receita.* — aba Receita EuNeném (aperture-9bpre; plano aperture-owmqs
+ * A2.1; contrato ROOT no epic aperture-qda35).
+ *
+ * LEITURA PURA. Taxas da plataforma registradas no ledger, por EVENTO:
+ * registradas por criado_em, cancelamentos por cancelado_em, resultado =
+ * diferença (pode ser negativo). Nenhuma fórmula filtra pelo status atual do
+ * pagamento. Não é saldo de campanhas nem lucro.
+ *
+ * `dashboard` devolve cards + série + decomposições + conciliação +
+ * inconsistências de UM snapshot READ ONLY REPEATABLE READ.
+ * `campanhasPaginated` é o drilldown além das 100 campanhas, com
+ * CONSISTÊNCIA DISTINTA DECLARADA: snapshot próprio por página; totais nunca
+ * saem dele.
+ * ────────────────────────────────────────────────────────────────────── */
+
+const LocalDateSchema = z
+  .string()
+  .length(10)
+  .refine(isLocalDate, { message: "data_invalida" });
+
+const ReceitaSomaSchema = z.object({
+  taxasRegistradasCents: cents(),
+  cancelamentosCents: cents(),
+});
+
+/** Diferença de conciliação: exibida como está, pode ter qualquer sinal. */
+const ReceitaDiferencaSchema = z.object({
+  taxasRegistradasCents: z.number().int(),
+  cancelamentosCents: z.number().int(),
+});
+
+const ReceitaMetricasShape = {
+  taxasRegistradasCents: cents(),
+  cancelamentosCents: cents(),
+  /** registradas − cancelamentos. Pode ser negativo. */
+  resultadoDeTaxasCents: z.number().int(),
+};
+
+const ReceitaCardSchema = z.object({
+  de: LocalDateSchema,
+  ate: LocalDateSchema,
+  ...ReceitaMetricasShape,
+  lancamentosRegistrados: z.number().int().nonnegative(),
+  lancamentosCancelados: z.number().int().nonnegative(),
+  pagamentosComTaxa: z.number().int().nonnegative(),
+  /** Informativo: repasse do custo de cartão. Nunca é receita. */
+  adicionalCartao: z.object({
+    registradoCents: cents(),
+    canceladoCents: cents(),
+  }),
+});
+
+const ReceitaCampanhaSchema = z.object({
+  idCampanha: z.string(),
+  titulo: z.string(),
+  campaignSlug: z.string().nullable(),
+  publicOwnerSlug: z.string().nullable(),
+  administrators: AdminPaymentAdministratorsSchema,
+  ...ReceitaMetricasShape,
+});
+
+const ReceitaInconsistenciaSchema = z.object({
+  count: z.number().int().nonnegative(),
+  cents: cents(),
+});
+
+/** Limites fixos da fonte. São declarações, não medições. */
+const RECEITA_LIMITES_DE_DADOS = {
+  custoProvedor: "desconhecido",
+  receitaLiquida: "desconhecida",
+  estornoParcial: "nao_refletido_no_ledger",
+  disputa: "nao_refletida_no_ledger",
+  linhasSemPagamentoResolvivel: "nao_contadas_cobertura_inconclusiva",
+} as const;
+
+const ReceitaLimitesDeDadosSchema = z.object({
+  custoProvedor: z.literal("desconhecido"),
+  receitaLiquida: z.literal("desconhecida"),
+  estornoParcial: z.literal("nao_refletido_no_ledger"),
+  disputa: z.literal("nao_refletida_no_ledger"),
+  linhasSemPagamentoResolvivel: z.literal("nao_contadas_cobertura_inconclusiva"),
+});
+
+const ReceitaDashboardSchema = z.object({
+  snapshotAt: z.string().datetime(),
+  timezone: z.literal("America/Sao_Paulo"),
+  periodo: z.object({
+    de: LocalDateSchema,
+    ate: LocalDateSchema,
+    granularidade: z.enum(GRANULARIDADES),
+  }),
+  cards: z.object({
+    semanaAtual: ReceitaCardSchema,
+    mesAtual: ReceitaCardSchema,
+    periodo: ReceitaCardSchema,
+  }),
+  serie: z.array(
+    z.object({
+      inicio: LocalDateSchema,
+      fim: LocalDateSchema,
+      parcial: z.boolean(),
+      ...ReceitaMetricasShape,
+    }),
+  ),
+  porCampanha: z.object({
+    rows: z.array(ReceitaCampanhaSchema).max(RECEITA_CAMPANHAS_LIMIT),
+    campanhasTotal: z.number().int().nonnegative(),
+    truncated: z.boolean(),
+    foraDaLista: ReceitaSomaSchema,
+  }),
+  porMeioProvedor: z.array(
+    z.object({
+      metodo: z.enum(["pix", "credit_card", "nao_registrado"]),
+      provedor: z.enum(["stripe", "inter", "nao_registrado"]),
+      ...ReceitaMetricasShape,
+    }),
+  ),
+  conciliacao: z.object({
+    totalIndependente: ReceitaSomaSchema,
+    somaSerie: ReceitaSomaSchema,
+    somaPorCampanha: ReceitaSomaSchema,
+    somaPorMeioProvedor: ReceitaSomaSchema,
+    diferencas: z.object({
+      serie: ReceitaDiferencaSchema,
+      porCampanha: ReceitaDiferencaSchema,
+      porMeioProvedor: ReceitaDiferencaSchema,
+    }),
+  }),
+  inconsistencias: z.object({
+    estornadoSemCancelamento: ReceitaInconsistenciaSchema,
+    canceladoSemEstorno: ReceitaInconsistenciaSchema,
+  }),
+  primeiroRegistroTaxaEm: z.string().datetime().nullable(),
+  limitesDeDados: ReceitaLimitesDeDadosSchema,
+});
+export type ReceitaDashboardDTO = z.infer<typeof ReceitaDashboardSchema>;
+
+const ReceitaCampanhasPageSchema = z.object({
+  snapshotAt: z.string().datetime(),
+  consistencia: z.literal("snapshot_distinto"),
+  periodo: z.object({ de: LocalDateSchema, ate: LocalDateSchema }),
+  rows: z.array(ReceitaCampanhaSchema),
+  nextCursor: z.string().nullable(),
+  campanhasTotal: z.number().int().nonnegative(),
+});
+export type ReceitaCampanhasPageDTO = z.infer<typeof ReceitaCampanhasPageSchema>;
+
+function toReceitaCampanhaDTO(
+  campanha: Awaited<ReturnType<typeof loadReceitaDashboard>>["porCampanha"]["rows"][number],
+): z.infer<typeof ReceitaCampanhaSchema> {
+  return {
+    idCampanha: campanha.idCampanha,
+    titulo: campanha.titulo,
+    campaignSlug: campanha.campaignSlug,
+    publicOwnerSlug: campanha.administrators.publicOwnerSlug,
+    administrators: {
+      shown: campanha.administrators.rows.map((admin) => ({
+        idConta: admin.idConta,
+        displayName: admin.displayName,
+        email: admin.email,
+        hasUserRow: admin.hasUserRow,
+      })),
+      total: campanha.administrators.total,
+    },
+    taxasRegistradasCents: campanha.taxasRegistradasCents,
+    cancelamentosCents: campanha.cancelamentosCents,
+    resultadoDeTaxasCents: campanha.resultadoDeTaxasCents,
+  };
+}
+
+function receitaBadRequest(error: unknown): never {
+  if (
+    error instanceof InvalidReceitaPeriodoError ||
+    error instanceof InvalidReceitaCampanhasCursorError
+  ) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
+  }
+  throw error;
+}
+
+const receitaRouter = t.router({
+  dashboard: adminProcedure
+    .input(
+      z.object({
+        de: LocalDateSchema,
+        ate: LocalDateSchema,
+        granularidade: z.enum(GRANULARIDADES),
+      }),
+    )
+    .output(ReceitaDashboardSchema)
+    .query(async ({ ctx, input }) => {
+      try {
+        const dashboard = await loadReceitaDashboard(ctx.deps.db, {
+          platformId: ID_PLATAFORMA_EUNENEM,
+          periodo: input,
+          now: ctx.deps.clock(),
+        });
+        return {
+          snapshotAt: dashboard.snapshotAt.toISOString(),
+          timezone: dashboard.timezone,
+          periodo: dashboard.periodo,
+          cards: dashboard.cards,
+          serie: [...dashboard.serie],
+          porCampanha: {
+            rows: dashboard.porCampanha.rows.map(toReceitaCampanhaDTO),
+            campanhasTotal: dashboard.porCampanha.campanhasTotal,
+            truncated: dashboard.porCampanha.truncated,
+            foraDaLista: dashboard.porCampanha.foraDaLista,
+          },
+          porMeioProvedor: [...dashboard.porMeioProvedor],
+          conciliacao: dashboard.conciliacao,
+          inconsistencias: dashboard.inconsistencias,
+          primeiroRegistroTaxaEm:
+            dashboard.primeiroRegistroTaxaEm?.toISOString() ?? null,
+          limitesDeDados: RECEITA_LIMITES_DE_DADOS,
+        };
+      } catch (error: unknown) {
+        return receitaBadRequest(error);
+      }
+    }),
+
+  campanhasPaginated: adminProcedure
+    .input(
+      z.object({
+        de: LocalDateSchema,
+        ate: LocalDateSchema,
+        cursor: z.string().max(1024).nullable().default(null),
+        limit: z.number().int().min(1).max(100).default(50),
+      }),
+    )
+    .output(ReceitaCampanhasPageSchema)
+    .query(async ({ ctx, input }) => {
+      try {
+        const page = await listReceitaCampanhas(ctx.deps.db, {
+          platformId: ID_PLATAFORMA_EUNENEM,
+          de: input.de,
+          ate: input.ate,
+          cursor: input.cursor,
+          limit: input.limit,
+          cursorSecret: ctx.deps.logPiiHashSalt,
+        });
+        return {
+          snapshotAt: page.snapshotAt.toISOString(),
+          consistencia: page.consistencia,
+          periodo: page.periodo,
+          rows: page.rows.map(toReceitaCampanhaDTO),
+          nextCursor: page.nextCursor,
+          campanhasTotal: page.campanhasTotal,
+        };
+      } catch (error: unknown) {
+        return receitaBadRequest(error);
+      }
+    }),
+});
+
 export const adminRouter = t.router({
   /** Nested sub-router for usuarios browse + paginated list. */
   usuarios: usuariosRouter,
@@ -4227,6 +4531,9 @@ export const adminRouter = t.router({
 
   /** Nested sub-router for pagamentos lifecycle list per contribuicao (W4). */
   pagamentos: pagamentosRouter,
+
+  /** Receita EuNeném — taxas da plataforma por evento (aperture-9bpre). */
+  receita: receitaRouter,
 
   /** Nested sub-router for the Financeiro BC lancamentos drill (W5). */
   financeiro: financeiroRouter,
