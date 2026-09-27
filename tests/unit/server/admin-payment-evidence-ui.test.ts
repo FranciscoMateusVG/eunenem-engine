@@ -38,6 +38,19 @@ function row(overrides: Partial<PaymentEvidenceRow> = {}): PaymentEvidenceRow {
     paymentId: '20000000-0000-4000-8000-000000000001',
     campaignId: '10000000-0000-4000-8000-000000000001',
     campaignTitle: 'Campanha teste',
+    campaignSlug: 'cha-da-lia',
+    administrators: {
+      shown: [
+        {
+          idConta: '12000000-0000-4000-8000-000000000001',
+          displayName: 'Ana Administradora',
+          email: 'ana@example.test',
+          hasUserRow: true,
+        },
+      ],
+      total: 1,
+    },
+    publicOwnerSlug: 'ana-admin',
     method: 'credit_card',
     status: 'aprovado',
     createdAt: '2026-09-08T14:00:00.000Z',
@@ -64,6 +77,103 @@ function row(overrides: Partial<PaymentEvidenceRow> = {}): PaymentEvidenceRow {
     ...overrides,
   };
 }
+
+describe('PaymentEvidenceTable — usuário e links da campanha (aperture-9bpre)', () => {
+  const PAYMENT = '20000000-0000-4000-8000-000000000001';
+  const CAMPAIGN = '10000000-0000-4000-8000-000000000001';
+
+  function render(overrides: Partial<PaymentEvidenceRow> = {}): string {
+    return renderToStaticMarkup(
+      React.createElement(PaymentEvidenceTable, { rows: [row(overrides)] }),
+    );
+  }
+
+  it('lista os administradores reais como links para o detalhe do usuário', () => {
+    const html = render();
+    expect(html).toContain('Usuário (administradores)');
+    expect(html).toContain('href="/admin/usuario/12000000-0000-4000-8000-000000000001"');
+    expect(html).toContain('Ana Administradora');
+    expect(html).toContain('ana@example.test');
+  });
+
+  it('separa Ver pagamento, Campanha no admin e Abrir campanha pública', () => {
+    const html = render();
+    // O destino antigo do título continua existindo, com rótulo próprio.
+    expect(html).toMatch(new RegExp(`href="/admin/pagamento/${PAYMENT}"[^>]*>Ver pagamento`));
+    expect(html).toContain(`href="/admin/campanha/${CAMPAIGN}"`);
+    expect(html).toContain('Campanha no admin');
+    // Link público pelo builder canônico, com slug de campanha.
+    expect(html).toContain('href="/pagina/ana-admin/cha-da-lia"');
+    expect(html).toContain('target="_blank"');
+    expect(html).toContain('rel="noopener noreferrer"');
+    expect(html).toContain('Abrir campanha pública');
+    // O título deixou de ser um link disfarçado de campanha.
+    expect(html).not.toContain(`href="/admin/pagamento/${PAYMENT}">Campanha teste`);
+    expect(html).not.toContain('href="/c/');
+  });
+
+  it('campanha sem slug usa o caminho canônico com o id', () => {
+    const html = render({ campaignSlug: null });
+    expect(html).toContain(`href="/pagina/ana-admin/c/${CAMPAIGN}"`);
+  });
+
+  it('sem administrador elegível: texto explícito, nenhum link público', () => {
+    const html = render({
+      publicOwnerSlug: null,
+      administrators: {
+        shown: [
+          {
+            idConta: '12000000-0000-4000-8000-0000000000ff',
+            displayName: null,
+            email: null,
+            hasUserRow: false,
+          },
+        ],
+        total: 1,
+      },
+    });
+    expect(html).toContain('página pública indisponível');
+    expect(html).not.toContain('Abrir campanha pública');
+    expect(html).not.toContain('href="/pagina/');
+    // Sem cadastro: id curto, nenhum nome inventado, nenhum link morto.
+    expect(html).toContain('conta 12000000…');
+    expect(html).toContain('sem cadastro nesta plataforma');
+    expect(html).not.toContain('href="/admin/usuario/12000000-0000-4000-8000-0000000000ff"');
+  });
+
+  it('acima de cinco administradores mostra +N com link para a lista completa', () => {
+    const shown = Array.from({ length: 5 }, (_, i) => ({
+      idConta: `12000000-0000-4000-8000-00000000000${i + 1}`,
+      displayName: `Pessoa ${i + 1}`,
+      email: `pessoa${i + 1}@example.test`,
+      hasUserRow: true,
+    }));
+    const html = render({ administrators: { shown, total: 7 } });
+    expect(html).toContain('+2 · ver os 7 administradores');
+    expect(html).toContain(`href="/admin/campanha/${CAMPAIGN}"`);
+    expect(html.match(/href="\/admin\/usuario\//g)).toHaveLength(5);
+  });
+
+  it('link público existe mesmo quando nenhum dos exibidos é elegível', () => {
+    const shown = Array.from({ length: 5 }, (_, i) => ({
+      idConta: `12000000-0000-4000-8000-00000000000${i + 1}`,
+      displayName: null,
+      email: null,
+      hasUserRow: false,
+    }));
+    const html = render({
+      administrators: { shown, total: 6 },
+      publicOwnerSlug: 'sexta-pessoa',
+    });
+    expect(html).toContain('href="/pagina/sexta-pessoa/cha-da-lia"');
+    expect(html).not.toContain('página pública indisponível');
+  });
+
+  it('campanha sem administrador registrado diz isso', () => {
+    const html = render({ administrators: { shown: [], total: 0 }, publicOwnerSlug: null });
+    expect(html).toContain('sem administrador registrado');
+  });
+});
 
 describe('PaymentEvidenceTable', () => {
   it('renders bounded saved evidence for Stripe and Inter without provider fetching', () => {

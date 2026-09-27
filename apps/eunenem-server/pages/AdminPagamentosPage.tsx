@@ -1,7 +1,12 @@
 import type { inferRouterOutputs } from "@trpc/server";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  AdministradoresCell,
+  CampanhaLinks,
+} from "@/components/eunenem/admin/AdministradoresCell";
 import { AdminShell } from "@/components/eunenem/admin/AdminShell";
 import { DddBadge } from "@/components/eunenem/admin/DddBadge";
+import { PagamentosTabs } from "@/components/eunenem/admin/PagamentosTabs";
 import { trpc } from "@/lib/trpc.js";
 import type { AppRouter } from "../server/trpc/router.js";
 
@@ -129,6 +134,7 @@ export function AdminPagamentosPage() {
       bcContext="evidência local de Stripe e Inter"
     >
       <section className="space-y-6">
+        <PagamentosTabs active="pagamentos" />
         <header className="space-y-3">
           <div className="flex items-center gap-3">
             <DddBadge bc="pagamentos" size="sm" />
@@ -506,6 +512,7 @@ export function PaymentEvidenceTable({
           <tr>
             <th className="px-3 py-2">Quando</th>
             <th className="px-3 py-2">Campanha</th>
+            <th className="px-3 py-2">Usuário (administradores)</th>
             <th className="px-3 py-2">Meio / provedor</th>
             <th className="px-3 py-2">Estado</th>
             <th className="px-3 py-2">Valores</th>
@@ -519,10 +526,22 @@ export function PaymentEvidenceTable({
                 {formatDate(row.createdAt)}
               </td>
               <td className="px-3 py-3">
-                <a className="font-medium text-plum underline" href={`/admin/pagamento/${row.paymentId}`}>
-                  {row.campaignTitle}
-                </a>
-                <div className="font-mono text-[10px] text-ink-mute">{row.paymentId}</div>
+                <div className="min-w-[12rem] font-medium text-ink">{row.campaignTitle}</div>
+                <div className="break-all font-mono text-[10px] text-ink-mute">
+                  pagamento {row.paymentId}
+                </div>
+                <CampanhaLinks
+                  campaignId={row.campaignId}
+                  campaignSlug={row.campaignSlug}
+                  publicOwnerSlug={row.publicOwnerSlug}
+                  paymentId={row.paymentId}
+                />
+              </td>
+              <td className="px-3 py-3">
+                <AdministradoresCell
+                  administrators={row.administrators}
+                  campaignId={row.campaignId}
+                />
               </td>
               <td className="px-3 py-3">
                 <div>{row.method === "credit_card" ? "Cartão" : "PIX"}</div>
