@@ -1123,6 +1123,13 @@ describe('LivroFinanceiroRepositoryPostgres — predicado canônico de disponív
     repo = withLancamentoSeeding(new LivroFinanceiroRepositoryPostgres(testDb.db), testDb.db);
   });
 
+  // Isolamento entre arquivos (container compartilhado): não deixar linhas que
+  // referenciem pagamentos para os cleanups de outros suites.
+  afterAll(async () => {
+    await anyDb().deleteFrom('pix_cobranca_devolucoes').execute();
+    await anyDb().deleteFrom('lancamentos_financeiros').execute();
+  });
+
   async function seedDisponivel(availableOn: Date | null = PAST) {
     const idCampanha = randomUUID() as IdCampanha;
     const lancamento = makeLancamentoRecebedor({ idCampanha });
@@ -1263,6 +1270,15 @@ describe('LivroFinanceiroRepositoryPostgres — refund-op Stripe ativa nunca dis
     await anyDb().deleteFrom('lancamentos_financeiros').execute();
     await anyDb().deleteFrom('repasses_recebedor').execute();
     repo = withLancamentoSeeding(new LivroFinanceiroRepositoryPostgres(testDb.db), testDb.db);
+  });
+
+  // Isolamento entre arquivos: stripe_refund_operations referencia pagamentos
+  // (FK sem cascade); o último teste deixava uma linha que quebrava o cleanup
+  // de jguar-repasse-pgboss quando este arquivo rodava antes.
+  afterAll(async () => {
+    await anyDb().deleteFrom('stripe_refund_operation_facts').execute();
+    await anyDb().deleteFrom('stripe_refund_operations').execute();
+    await anyDb().deleteFrom('lancamentos_financeiros').execute();
   });
 
   async function seedDisponivel() {
