@@ -4,6 +4,7 @@ import { AdminContribuicaoPage } from './AdminContribuicaoPage.js';
 import { AdminPage } from './AdminPage.js';
 import { AdminPagamentoPage } from './AdminPagamentoPage.js';
 import { AdminPagamentosPage } from './AdminPagamentosPage.js';
+import { AdminReceitaPage } from './AdminReceitaPage.js';
 import { AdminRepasseDetailPage } from './AdminRepasseDetailPage.js';
 import { AdminCatalogoPage } from './AdminCatalogoPage.js';
 import { AdminMigradosPage } from './AdminMigradosPage.js';
@@ -67,6 +68,7 @@ export function resolveRoute(pathname: string):
   | { kind: 'admin-contribuicao'; idContribuicao: string }
   | { kind: 'admin-pagamento'; idPagamento: string }
   | { kind: 'admin-pagamentos' }
+  | { kind: 'admin-pagamentos-receita' }
   | { kind: 'admin-repasses' }
   | { kind: 'admin-catalogo' }
   | { kind: 'admin-migrados' }
@@ -155,6 +157,15 @@ export function resolveRoute(pathname: string):
       kind: 'admin-pagamento',
       idPagamento: adminPagamentoMatch[1],
     };
+  }
+  // /admin/pagamentos/receita (aperture-9bpre) — aba Receita EuNeném. Rota
+  // própria (deep-link + SSR); não colide com /admin/pagamento/<id>, que é
+  // singular e tem um único segmento.
+  if (
+    pathname === '/admin/pagamentos/receita' ||
+    pathname === '/admin/pagamentos/receita/'
+  ) {
+    return { kind: 'admin-pagamentos-receita' };
   }
   if (pathname === '/admin/pagamentos' || pathname === '/admin/pagamentos/') {
     return { kind: 'admin-pagamentos' };
@@ -418,6 +429,7 @@ function pickPage(route: ReturnType<typeof resolveRoute>, pathname: string) {
   if (route.kind === 'admin-pagamento')
     return <AdminPagamentoPage idPagamento={route.idPagamento} />;
   if (route.kind === 'admin-pagamentos') return <AdminPagamentosPage />;
+  if (route.kind === 'admin-pagamentos-receita') return <AdminReceitaPage />;
   if (route.kind === 'admin-repasses') return <AdminRepassesPage />;
   if (route.kind === 'admin-catalogo') return <AdminCatalogoPage />;
   if (route.kind === 'admin-migrados') return <AdminMigradosPage />;
