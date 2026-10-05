@@ -8,8 +8,8 @@ import { formatBRL } from "@/lib/formatBRL";
  *
  * - Rótulo honesto: são campanhas ADMINISTRADAS (papel), não patrimônio.
  * - "compartilhada com" lista os coadmins (os outros administradores).
- * - Celular = titular do recebimento (recebedor ativo), MASCARADO pelo servidor;
- *   este componente nunca recebe o número completo.
+ * - Celular = titular do recebimento (recebedor ativo), COMPLETO, com links
+ *   tel: e WhatsApp para o admin entrar em contato.
  * - Lista pode estar truncada (>100); os totais do card acima cobrem todas.
  */
 
@@ -17,7 +17,7 @@ export interface CampanhaAdministradaRow {
   idCampanha: string;
   titulo: string;
   administradores: Array<{ idConta: string; nomeExibicao: string | null; email: string | null }>;
-  celularTitularMascarado: string | null;
+  celularTitular: string | null;
   totais: TotaisResumo;
 }
 
@@ -98,7 +98,9 @@ export function CampanhasAdministradasTable({
                     />
                     <Money cents={c.totais.estornadoCents} tone="muted" />
                     <td className="px-4 py-3 font-mono text-[12px] tabular-nums text-ink-soft">
-                      {c.celularTitularMascarado ?? (
+                      {c.celularTitular ? (
+                        <CelularTitular digits={c.celularTitular} />
+                      ) : (
                         <span className="italic text-ink-mute">não informado</span>
                       )}
                     </td>
@@ -144,5 +146,36 @@ function Money({
     >
       {formatBRL(cents)}
     </td>
+  );
+}
+
+/** Dígitos BR sem DDI (10–11) ganham 55; com DDI ficam como estão. */
+function comDdi(digits: string): string {
+  return digits.length <= 11 ? `55${digits}` : digits;
+}
+
+function formatarCelular(digits: string): string {
+  const local = digits.length > 11 && digits.startsWith("55") ? digits.slice(2) : digits;
+  if (local.length === 11) return `(${local.slice(0, 2)}) ${local.slice(2, 7)}-${local.slice(7)}`;
+  if (local.length === 10) return `(${local.slice(0, 2)}) ${local.slice(2, 6)}-${local.slice(6)}`;
+  return digits;
+}
+
+function CelularTitular({ digits }: { digits: string }) {
+  const intl = comDdi(digits);
+  return (
+    <span className="flex flex-col gap-0.5">
+      <a href={`tel:+${intl}`} className="text-ink hover:underline">
+        {formatarCelular(digits)}
+      </a>
+      <a
+        href={`https://wa.me/${intl}`}
+        target="_blank"
+        rel="noreferrer"
+        className="text-[11px] text-ink-mute hover:underline"
+      >
+        WhatsApp
+      </a>
+    </span>
   );
 }

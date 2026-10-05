@@ -235,16 +235,15 @@ const ListPaginatedOutputSchema = z.object({
  * `disponivelCanonico` vêm dos predicados canônicos da branch.
  *
  * Celular: `recebedores.celular_titular` (titular do PIX/conta do recebedor
- * ativo — não necessariamente o usuário), MASCARADO, e SOMENTE em `summary`.
- * Nunca em listas, logs, spans ou erros.
+ * ativo — não necessariamente o usuário), COMPLETO (o admin precisa ligar),
+ * e SOMENTE em `summary`. Nunca em listas, logs, spans ou erros.
  * ────────────────────────────────────────────────────────────────────── */
 
-/** `(**) *****-NNNN`; null quando não informado. Mesma família de maskHolderCpf. */
-export function maskCelularTitular(raw: string | null | undefined): string | null {
+/** Celular completo, só dígitos; null quando não informado. */
+export function normalizarCelularTitular(raw: string | null | undefined): string | null {
   if (raw === null || raw === undefined) return null;
   const digits = raw.replace(/\D/g, "");
-  if (digits.length === 0) return null;
-  return digits.length >= 4 ? `(**) *****-${digits.slice(-4)}` : "(**) *****-****";
+  return digits.length === 0 ? null : digits;
 }
 
 const cents = () => z.number().int().nonnegative();
@@ -281,8 +280,8 @@ const CampanhaFinanceiroAdminSchema = z.object({
   titulo: z.string(),
   /** Todos os administradores (inclui a própria conta). A UI deriva "compartilhada com". */
   administradores: z.array(AdministradorCampanhaSchema),
-  /** Titular do recebedor ativo, mascarado. null = não informado / sem recebedor ativo. */
-  celularTitularMascarado: z.string().nullable(),
+  /** Titular do recebedor ativo, completo (só dígitos). null = não informado / sem recebedor ativo. */
+  celularTitular: z.string().nullable(),
   totais: TotaisAdminSchema,
 });
 export type CampanhaFinanceiroAdminDTO = z.infer<typeof CampanhaFinanceiroAdminSchema>;
@@ -451,7 +450,7 @@ const usuarioFinanceiroRouter = t.router({
             nomeExibicao: a.nomeExibicao,
             email: a.email,
           })),
-          celularTitularMascarado: maskCelularTitular(c.celularTitularRaw),
+          celularTitular: normalizarCelularTitular(c.celularTitularRaw),
           totais: toTotaisDTO(
             fatosPorCampanha.has(c.idCampanha)
               ? agregarTotaisAdmin(fatosPorCampanha.get(c.idCampanha) ?? [], now)
