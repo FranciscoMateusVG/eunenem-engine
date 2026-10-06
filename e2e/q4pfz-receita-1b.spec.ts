@@ -166,6 +166,22 @@ function semanasDoMes(mes: { de: string; ate: string }, hoje: string): SemanaEsp
   return out;
 }
 
+const DIAS = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+function diaDaSemana(data: string): string {
+  return DIAS[new Date(`${data}T12:00:00Z`).getUTCDay()] as string;
+}
+/** "01–04/10" (fim inclusivo). */
+function rotuloSemana(w: SemanaEsperada): string {
+  const fim = addDays(w.ate, -1);
+  return `${w.de.slice(8, 10)}–${fim.slice(8, 10)}/${fim.slice(5, 7)}`;
+}
+/** "qui a dom" para uma semana recortada pelo mês. */
+function notaRecorte(w: SemanaEsperada): string {
+  const a = diaDaSemana(w.de);
+  const b = diaDaSemana(addDays(w.ate, -1));
+  return a === b ? a : `${a} a ${b}`;
+}
+
 async function semOverflow(page: Page, onde: string) {
   const g = await page.evaluate(() => ({
     viewport: window.innerWidth,
@@ -445,13 +461,25 @@ test('q4pfz: Receita 1b — KPIs, meses, semanas do mês e notas de definição'
             await expect(barra.locator('[data-serie=recebido]')).toHaveText(brl(esperado.recebido));
             expect(tracejada, `semana ${w.estado} ${w.de} sem tracejado`).toBe(false);
             if (w.estado === 'atual') {
-              await expect(barra).toContainText('esta semana');
               await expect(barra).toHaveAttribute('aria-label', /\(esta semana\)/);
               expect(cores).toEqual(expect.arrayContaining([LILAS_CLARO, TEAL_CLARO]));
             } else {
               expect(cores).toEqual(expect.arrayContaining([LILAS, TEAL]));
             }
           }
+        }
+
+        // Rótulos do eixo: faixa dd–dd/mm e a nota ("esta semana" ou o recorte).
+        const secaoSemanas = page.locator('section').filter({ has: barrasSemana.first() }).last();
+        for (const w of semanasEsperadas) {
+          await expect(secaoSemanas).toContainText(rotuloSemana(w));
+        }
+        await expect(secaoSemanas.getByText('esta semana', { exact: true })).toHaveCount(1);
+        const primeira = semanasEsperadas[0] as SemanaEsperada;
+        if (primeira.estado === 'passada' && addDays(primeira.de, 7) !== primeira.ate) {
+          await expect(
+            secaoSemanas.getByText(notaRecorte(primeira), { exact: true }),
+          ).toBeVisible();
         }
 
         // ── Sem nada a conferir, o aviso não existe ───────────────────────
