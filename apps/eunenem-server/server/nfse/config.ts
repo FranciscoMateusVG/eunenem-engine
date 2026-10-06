@@ -33,7 +33,7 @@ export interface CampoConfig<T> {
 }
 
 export interface ProblemaConfig {
-  readonly variavel: string;
+  readonly variavel: NfseVariavel;
   readonly motivo: 'ausente' | 'invalido';
 }
 
@@ -149,17 +149,41 @@ const CNbsSchema = z.string().regex(/^\d{9}$/);
 const DescricaoSchema = z.string().min(1).max(1900).regex(LATIN1);
 const Base64Schema = z.string().transform((v) => v.replace(/\s/g, '')).pipe(z.base64().min(1));
 
-export type NfseEnv = Readonly<Record<string, string | undefined>>;
+export type NfseVariavel = keyof typeof NfseEnvShape;
+export type NfseEnv = { readonly [K in NfseVariavel]?: string | undefined };
+
+/**
+ * Chaves NFSE_* aceitas pelo `ServerEnvSchema` (todas opcionais e cruas:
+ * a validação de verdade é `parseNfseConfig`, que nunca derruba o boot).
+ */
+export const NfseEnvShape = {
+  NFSE_PRESTADOR_CNPJ: z.string().optional(),
+  NFSE_MUNICIPIO_IBGE: z.string().optional(),
+  NFSE_AMBIENTE: z.string().optional(),
+  NFSE_CTRIB_NAC: z.string().optional(),
+  NFSE_DESCRICAO_SERVICO: z.string().optional(),
+  NFSE_OP_SIMP_NAC: z.string().optional(),
+  NFSE_REG_AP_TRIB_SN: z.string().optional(),
+  NFSE_REG_ESP_TRIB: z.string().optional(),
+  NFSE_TRIB_ISSQN: z.string().optional(),
+  NFSE_TP_RET_ISSQN: z.string().optional(),
+  NFSE_ALIQUOTA_ISS: z.string().optional(),
+  NFSE_INSCRICAO_MUNICIPAL: z.string().optional(),
+  NFSE_CNBS: z.string().optional(),
+  NFSE_CERT_PATH: z.string().optional(),
+  NFSE_CERT_BASE64: z.string().optional(),
+  NFSE_CERT_PASSWORD: z.string().optional(),
+};
 
 export function parseNfseConfig(env: NfseEnv): NfseConfig {
   const problemas: ProblemaConfig[] = [];
 
-  const ler = (nome: string): string | undefined => {
+  const ler = (nome: NfseVariavel): string | undefined => {
     const v = env[nome];
     return v === undefined || v.trim() === '' ? undefined : v.trim();
   };
 
-  function obrigatorio<T>(nome: string, schema: z.ZodType<T>): T | null {
+  function obrigatorio<T>(nome: NfseVariavel, schema: z.ZodType<T>): T | null {
     const bruto = ler(nome);
     if (bruto === undefined) {
       problemas.push({ variavel: nome, motivo: 'ausente' });
@@ -173,7 +197,7 @@ export function parseNfseConfig(env: NfseEnv): NfseConfig {
     return r.data;
   }
 
-  function campo<T, D extends T>(nome: string, schema: z.ZodType<T>, padrao: D): CampoConfig<T> {
+  function campo<T, D extends T>(nome: NfseVariavel, schema: z.ZodType<T>, padrao: D): CampoConfig<T> {
     const bruto = ler(nome);
     if (bruto === undefined) return { valor: padrao, origem: 'default' };
     const r = schema.safeParse(bruto);
@@ -226,7 +250,7 @@ export function parseNfseConfig(env: NfseEnv): NfseConfig {
 }
 
 function parseCertificado(
-  ler: (nome: string) => string | undefined,
+  ler: (nome: NfseVariavel) => string | undefined,
   problemas: ProblemaConfig[],
 ): CertificadoNfse | null {
   const caminho = ler('NFSE_CERT_PATH');

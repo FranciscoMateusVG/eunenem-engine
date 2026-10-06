@@ -88,6 +88,7 @@ import { parseAdminAllowedEmails } from './admin-allowlist.js';
 import { RepasseJobEnqueuerPgBoss } from '../jobs/repasse-enqueuer.pgboss.js';
 import { noopTracer } from '../../../../src/observability/tracer.js';
 import { getStripe } from '../../src/lib/stripe/stripe.js';
+import { type NfseConfig, NfseEnvShape, parseNfseConfig } from '../nfse/config.js';
 import {
   type ServerAnalytics,
   ServerAnalyticsMixpanel,
@@ -297,6 +298,12 @@ export interface ServerDeps {
    * confirmar search fallback's zero-candidate auto-falhou (see the env docs).
    */
   readonly extratoVerified: boolean;
+  /**
+   * aperture-dh1k7 — config NFSE_* da prévia mensal da NFS-e. Tolerante:
+   * ausente/inválido vira `problemas` e nunca derruba o boot. Carrega o
+   * certificado (senha/PFX em campos privados, nunca serializados).
+   */
+  readonly nfse: NfseConfig;
 }
 
 /**
@@ -546,6 +553,8 @@ const ServerEnvSchema = z
      * smoke fires a R$1 PIX and confirms buscarPagamentos finds it.
      */
     INTER_EXTRATO_VERIFIED: z.enum(['true', 'false']).default('false'),
+    /** aperture-dh1k7 — NFSE_* crus; validados por `parseNfseConfig`. */
+    ...NfseEnvShape,
     /**
      * aperture-18j3j (B7 of 2j2j1) — PIX-in charge rail selector (spec §6).
      * `'stripe'` (default → zero behavior change at merge): PIX checkout keeps
@@ -1222,6 +1231,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     repasseJobEnqueuer,
     transferenciaProvider,
     extratoVerified: env.INTER_EXTRATO_VERIFIED === 'true',
+    nfse: parseNfseConfig(env),
   };
 }
 
