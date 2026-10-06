@@ -1,11 +1,17 @@
-import { createHmac } from "node:crypto";
 import { sql } from "kysely";
-import { z } from "zod";
 import type { Database } from "../../../src/adapters/database.js";
+import {
+  agregarDias,
+  type DiaPainel,
+  gradePainel,
+  type PainelAgregado,
+  type Soma as SomaPainel,
+} from "../pages/lib/receitaPainel.js";
 import {
   type BucketReceita,
   bucketsDoPeriodo,
   type Granularidade,
+  localDateInSaoPaulo,
   mesAtual,
   type PeriodoInvalido,
   type PeriodoReceita,
@@ -55,13 +61,6 @@ export class InvalidReceitaPeriodoError extends Error {
   constructor(readonly motivo: PeriodoInvalido) {
     super(`invalid_receita_periodo:${motivo}`);
     this.name = "InvalidReceitaPeriodoError";
-  }
-}
-
-export class InvalidReceitaCampanhasCursorError extends Error {
-  constructor() {
-    super("invalid_receita_campanhas_cursor");
-    this.name = "InvalidReceitaCampanhasCursorError";
   }
 }
 
@@ -148,12 +147,7 @@ export interface ReceitaDashboard {
       readonly porMeioProvedor: SomaReceita;
     };
   };
-  readonly inconsistencias: {
-    /** Pagamento estornado cuja linha de taxa não tem cancelado_em. */
-    readonly estornadoSemCancelamento: InconsistenciaReceita;
-    /** Linha de taxa cancelada cujo pagamento não está estornado. */
-    readonly canceladoSemEstorno: InconsistenciaReceita;
-  };
+  readonly inconsistencias: InconsistenciasReceita;
   /** MIN(criado_em) das taxas no escopo. Primeiro registro, NÃO cobertura. */
   readonly primeiroRegistroTaxaEm: Date | null;
 }
@@ -164,6 +158,15 @@ export interface ReceitaDashboard {
 
 const TIPO_RECEITA = "credito_receita_plataforma";
 const TIPO_ADICIONAL = "credito_passthrough_surcharge";
+const TIPO_SALDO_RECEBEDOR = "credito_saldo_recebedor";
+
+/** Tipos lidos pelo dashboard: taxa e adicional de cartão. */
+const TIPOS_DASHBOARD = [TIPO_RECEITA, TIPO_ADICIONAL] as const;
+/**
+ * Os três tipos que um pagamento aprovado gera. Por invariante do livro, a
+ * soma deles por pagamento é `pagamentos.intencao_total_paid_cents`.
+ */
+const TIPOS_PAGAMENTO = [TIPO_RECEITA, TIPO_ADICIONAL, TIPO_SALDO_RECEBEDOR] as const;
 
 function inteiro(value: string | number | null | undefined, campo: string): number {
   if (value === null || value === undefined) {
@@ -194,7 +197,12 @@ function corte(data: string) {
  * PRÓPRIA data — registrar não olha cancelado_em e cancelar não olha
  * criado_em.
  */
-function eventosDoPeriodo(platformId: string, de: string, ate: string) {
+function eventosDoPeriodo(
+  platformId: string,
+  de: string,
+  ate: string,
+  tipos: readonly string[] = TIPOS_DASHBOARD,
+) {
   const colunas = sql`
       l.id,
       l.tipo,
@@ -216,7 +224,7 @@ function eventosDoPeriodo(platformId: string, de: string, ate: string) {
     INNER JOIN campanhas c
       ON c.id = p.intencao_id_campanha
      AND c.id_plataforma = ${platformId}
-    WHERE l.tipo IN (${sql.lit(TIPO_RECEITA)}, ${sql.lit(TIPO_ADICIONAL)})`;
+    WHERE l.tipo IN (${sql.join(tipos.map((tipo) => sql.lit(tipo)))})`;
   return sql`(
     SELECT ${colunas}, 'registro'::text AS evento, l.criado_em AS em
     ${origem}
@@ -441,6 +449,86 @@ interface InconsistenciaRow {
   cancelado_sem_estorno_cents: string | number;
 }
 
+export interface InconsistenciasReceita {
+  /** Pagamento estornado cuja linha de taxa não tem cancelado_em. */
+  readonly estornadoSemCancelamento: InconsistenciaReceita;
+  /** Linha de taxa cancelada cujo pagamento não está estornado. */
+  readonly canceladoSemEstorno: InconsistenciaReceita;
+}
+
+/**
+ * Único ponto que lê pagamentos.status — e fica fora de todo total. Linhas de
+ * taxa registradas OU canceladas no intervalo.
+ */
+async function inconsistenciasDoIntervalo(
+  trx: Database,
+  platformId: string,
+  intervalo: { readonly de: string; readonly ate: string },
+): Promise<InconsistenciasReceita> {
+  const incRes = await sql<InconsistenciaRow>`
+    SELECT
+      COUNT(*) FILTER (
+        WHERE p.status = 'estornado' AND l.cancelado_em IS NULL
+      ) AS estornado_sem_cancelamento_n,
+      COALESCE(SUM(l.amount_cents) FILTER (
+        WHERE p.status = 'estornado' AND l.cancelado_em IS NULL
+      ), 0)::bigint AS estornado_sem_cancelamento_cents,
+      COUNT(*) FILTER (
+        WHERE p.status <> 'estornado' AND l.cancelado_em IS NOT NULL
+      ) AS cancelado_sem_estorno_n,
+      COALESCE(SUM(l.amount_cents) FILTER (
+        WHERE p.status <> 'estornado' AND l.cancelado_em IS NOT NULL
+      ), 0)::bigint AS cancelado_sem_estorno_cents
+    FROM lancamentos_financeiros l
+    INNER JOIN pagamentos p ON p.id = l.id_pagamento
+    INNER JOIN campanhas c
+      ON c.id = p.intencao_id_campanha
+     AND c.id_plataforma = ${platformId}
+    WHERE l.tipo = ${sql.lit(TIPO_RECEITA)}
+      AND (
+        (l.criado_em >= ${corte(intervalo.de)} AND l.criado_em < ${corte(intervalo.ate)})
+        OR (
+          l.cancelado_em >= ${corte(intervalo.de)}
+          AND l.cancelado_em < ${corte(intervalo.ate)}
+        )
+      )
+  `.execute(trx);
+  const inc = incRes.rows[0];
+  if (!inc) throw new Error("admin_receita_inconsistencias_sem_linha");
+  return {
+    estornadoSemCancelamento: {
+      count: naoNegativo(inc.estornado_sem_cancelamento_n, "inc.estornado_n"),
+      cents: naoNegativo(inc.estornado_sem_cancelamento_cents, "inc.estornado_cents"),
+    },
+    canceladoSemEstorno: {
+      count: naoNegativo(inc.cancelado_sem_estorno_n, "inc.cancelado_n"),
+      cents: naoNegativo(inc.cancelado_sem_estorno_cents, "inc.cancelado_cents"),
+    },
+  };
+}
+
+/**
+ * Uma transação `REPEATABLE READ` + `READ ONLY`: toda leitura de `fn` vê o
+ * mesmo snapshot. A primeira consulta fixa o snapshot e registra o instante.
+ */
+async function emSnapshotDeLeitura<T>(
+  db: Database,
+  fn: (trx: Database, snapshotAt: Date) => Promise<T>,
+): Promise<T> {
+  return db
+    .transaction()
+    .setIsolationLevel("repeatable read")
+    .execute(async (trx) => {
+      await sql`SET TRANSACTION READ ONLY`.execute(trx);
+      const snapshot = await sql<{ snapshot_at: Date }>`
+        SELECT now() AS snapshot_at
+      `.execute(trx);
+      const snapshotAt = snapshot.rows[0]?.snapshot_at;
+      if (!snapshotAt) throw new Error("admin_receita_snapshot_sem_instante");
+      return fn(trx, new Date(snapshotAt));
+    });
+}
+
 // ────────────────────────────────────────────────────────────────────
 //  Dashboard
 // ────────────────────────────────────────────────────────────────────
@@ -457,19 +545,7 @@ export async function loadReceitaDashboard(
   const grade = bucketsDoPeriodo(periodo);
   if (!grade.ok) throw new InvalidReceitaPeriodoError(grade.erro);
 
-  return db
-    .transaction()
-    .setIsolationLevel("repeatable read")
-    .execute(async (trx) => {
-      await sql`SET TRANSACTION READ ONLY`.execute(trx);
-
-      // Primeira leitura: fixa o snapshot e registra o instante dele.
-      const snapshot = await sql<{ snapshot_at: Date }>`
-        SELECT now() AS snapshot_at
-      `.execute(trx);
-      const snapshotAt = snapshot.rows[0]?.snapshot_at;
-      if (!snapshotAt) throw new Error("admin_receita_snapshot_sem_instante");
-
+  return emSnapshotDeLeitura(db, async (trx, snapshotAt) => {
       const cardPeriodo = await totalDoIntervalo(trx, platformId, periodo);
       const cardSemana = await totalDoIntervalo(trx, platformId, semanaAtual(now));
       const cardMes = await totalDoIntervalo(trx, platformId, mesAtual(now));
@@ -534,37 +610,7 @@ export async function loadReceitaDashboard(
         }),
       );
 
-      // Único ponto que lê pagamentos.status — e fica fora de todo total.
-      const incRes = await sql<InconsistenciaRow>`
-        SELECT
-          COUNT(*) FILTER (
-            WHERE p.status = 'estornado' AND l.cancelado_em IS NULL
-          ) AS estornado_sem_cancelamento_n,
-          COALESCE(SUM(l.amount_cents) FILTER (
-            WHERE p.status = 'estornado' AND l.cancelado_em IS NULL
-          ), 0)::bigint AS estornado_sem_cancelamento_cents,
-          COUNT(*) FILTER (
-            WHERE p.status <> 'estornado' AND l.cancelado_em IS NOT NULL
-          ) AS cancelado_sem_estorno_n,
-          COALESCE(SUM(l.amount_cents) FILTER (
-            WHERE p.status <> 'estornado' AND l.cancelado_em IS NOT NULL
-          ), 0)::bigint AS cancelado_sem_estorno_cents
-        FROM lancamentos_financeiros l
-        INNER JOIN pagamentos p ON p.id = l.id_pagamento
-        INNER JOIN campanhas c
-          ON c.id = p.intencao_id_campanha
-         AND c.id_plataforma = ${platformId}
-        WHERE l.tipo = ${sql.lit(TIPO_RECEITA)}
-          AND (
-            (l.criado_em >= ${corte(periodo.de)} AND l.criado_em < ${corte(periodo.ate)})
-            OR (
-              l.cancelado_em >= ${corte(periodo.de)}
-              AND l.cancelado_em < ${corte(periodo.ate)}
-            )
-          )
-      `.execute(trx);
-      const inc = incRes.rows[0];
-      if (!inc) throw new Error("admin_receita_inconsistencias_sem_linha");
+      const inconsistencias = await inconsistenciasDoIntervalo(trx, platformId, periodo);
 
       const primeiroRes = await sql<{ primeiro: Date | null }>`
         SELECT MIN(l.criado_em) AS primeiro
@@ -608,16 +654,7 @@ export async function loadReceitaDashboard(
             porMeioProvedor: diferenca(totalIndependente, somaPorMeioProvedor),
           },
         },
-        inconsistencias: {
-          estornadoSemCancelamento: {
-            count: naoNegativo(inc.estornado_sem_cancelamento_n, "inc.estornado_n"),
-            cents: naoNegativo(inc.estornado_sem_cancelamento_cents, "inc.estornado_cents"),
-          },
-          canceladoSemEstorno: {
-            count: naoNegativo(inc.cancelado_sem_estorno_n, "inc.cancelado_n"),
-            cents: naoNegativo(inc.cancelado_sem_estorno_cents, "inc.cancelado_cents"),
-          },
-        },
+        inconsistencias,
         primeiroRegistroTaxaEm: primeiroRes.rows[0]?.primeiro
           ? new Date(primeiroRes.rows[0].primeiro)
           : null,
@@ -626,146 +663,115 @@ export async function loadReceitaDashboard(
 }
 
 // ────────────────────────────────────────────────────────────────────
-//  Drilldown paginado — CONSISTÊNCIA DISTINTA DECLARADA
+//  Painel 1b (aperture-zn5cm): Tarifas EuNeném e Recebido no banco
 //
-//  Cada página roda na própria transação READ ONLY REPEATABLE READ e devolve
-//  o próprio `snapshotAt`. Pode refletir um instante posterior ao do
-//  dashboard. Totais e conciliação NUNCA saem daqui.
+//  Tarifas  = o mesmo resultado de taxas do dashboard (`credito_receita_
+//             plataforma`, registro por criado_em − cancelamento por
+//             cancelado_em).
+//  Recebido = os TRÊS tipos que um pagamento aprovado gera, no mesmo modelo de
+//             eventos. Por invariante do livro, a soma deles por pagamento é
+//             `intencao_total_paid_cents` (o bruto pago pelo contribuinte), e
+//             o estorno total cancela todas as linhas do pagamento. É uma
+//             estimativa: custo do provedor, estorno parcial, disputa e
+//             chargeback não estão no ledger.
+//
+//  Uma consulta agrupada por dia local de SP alimenta todos os buckets (a
+//  soma em meses e semanas é pura, em `receitaPainel.ts`). Um SUM
+//  independente da janela, no MESMO snapshot, concilia a soma dos dias; a
+//  diferença é devolvida como está.
 // ────────────────────────────────────────────────────────────────────
 
-const CampanhasCursorSchema = z
-  .object({
-    version: z.literal(1),
-    registradasCents: z.number().int().nonnegative(),
-    idCampanha: z.string().uuid(),
-    filtersDigest: z.string().length(43),
-  })
-  .strict();
-type CampanhasCursor = z.infer<typeof CampanhasCursorSchema>;
-
-function campanhasFiltersDigest(secret: string, value: object): string {
-  return createHmac("sha256", secret)
-    .update("admin-receita-campanhas-cursor:v1\0")
-    .update(JSON.stringify(value))
-    .digest("base64url");
-}
-
-function decodeCampanhasCursor(encoded: string, expectedDigest: string): CampanhasCursor {
-  try {
-    if (encoded.length === 0 || encoded.length > 1024) {
-      throw new InvalidReceitaCampanhasCursorError();
-    }
-    const cursor = CampanhasCursorSchema.parse(
-      JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")),
-    );
-    if (cursor.filtersDigest !== expectedDigest) {
-      throw new InvalidReceitaCampanhasCursorError();
-    }
-    return cursor;
-  } catch (error: unknown) {
-    if (error instanceof InvalidReceitaCampanhasCursorError) throw error;
-    throw new InvalidReceitaCampanhasCursorError();
-  }
-}
-
-export interface ReceitaCampanhasPage {
+export interface ReceitaPainel extends PainelAgregado {
   readonly snapshotAt: Date;
-  readonly consistencia: "snapshot_distinto";
-  readonly periodo: { readonly de: string; readonly ate: string };
-  readonly rows: readonly CampanhaReceita[];
-  readonly nextCursor: string | null;
-  readonly campanhasTotal: number;
+  readonly timezone: typeof RECEITA_TIMEZONE;
+  readonly hoje: string;
+  readonly janela: { readonly de: string; readonly ate: string };
+  /** SUM independente da janela − soma dos dias. Exibir quando ≠ 0. */
+  readonly diferencaConciliacao: {
+    readonly tarifas: SomaPainel;
+    readonly recebido: SomaPainel;
+  };
+  readonly inconsistencias: InconsistenciasReceita;
 }
 
-export async function listReceitaCampanhas(
+const SOMAS_PAINEL = sql`
+  ${SOMA_REGISTRADAS} AS tarifas_registradas,
+  ${SOMA_CANCELAMENTOS} AS tarifas_canceladas,
+  COALESCE(SUM(e.amount_cents) FILTER (WHERE e.evento = 'registro'), 0)::bigint
+    AS recebido_registrado,
+  COALESCE(SUM(e.amount_cents) FILTER (WHERE e.evento = 'cancelamento'), 0)::bigint
+    AS recebido_cancelado`;
+
+interface SomasPainelRow {
+  tarifas_registradas: string | number;
+  tarifas_canceladas: string | number;
+  recebido_registrado: string | number;
+  recebido_cancelado: string | number;
+}
+
+function toSomasPainel(row: SomasPainelRow, campo: string): Omit<DiaPainel, "dia"> {
+  return {
+    tarifas: {
+      registradoCents: naoNegativo(row.tarifas_registradas, `${campo}.tarifas_registradas`),
+      canceladoCents: naoNegativo(row.tarifas_canceladas, `${campo}.tarifas_canceladas`),
+    },
+    recebido: {
+      registradoCents: naoNegativo(row.recebido_registrado, `${campo}.recebido_registrado`),
+      canceladoCents: naoNegativo(row.recebido_cancelado, `${campo}.recebido_cancelado`),
+    },
+  };
+}
+
+function diferencaSoma(total: SomaPainel, soma: SomaPainel): SomaPainel {
+  return {
+    registradoCents: total.registradoCents - soma.registradoCents,
+    canceladoCents: total.canceladoCents - soma.canceladoCents,
+  };
+}
+
+export async function loadReceitaPainel(
   db: Database,
-  input: {
-    readonly platformId: string;
-    readonly de: string;
-    readonly ate: string;
-    readonly cursor: string | null;
-    readonly limit: number;
-    readonly cursorSecret: string;
-  },
-): Promise<ReceitaCampanhasPage> {
-  // Granularidade não altera o agregado por campanha; só valida o intervalo.
-  const grade = bucketsDoPeriodo({ de: input.de, ate: input.ate, granularidade: "mes" });
-  if (!grade.ok) throw new InvalidReceitaPeriodoError(grade.erro);
+  input: { readonly platformId: string; readonly now: Date },
+): Promise<ReceitaPainel> {
+  const { platformId } = input;
+  const grade = gradePainel(localDateInSaoPaulo(input.now));
+  const { janela } = grade;
 
-  const digest = campanhasFiltersDigest(input.cursorSecret, {
-    de: input.de,
-    ate: input.ate,
+  return emSnapshotDeLeitura(db, async (trx, snapshotAt) => {
+    const total = await sql<SomasPainelRow>`
+      SELECT ${SOMAS_PAINEL}
+      FROM ${eventosDoPeriodo(platformId, janela.de, janela.ate, TIPOS_PAGAMENTO)} e
+    `.execute(trx);
+    const totalRow = total.rows[0];
+    if (!totalRow) throw new Error("admin_receita_painel_total_sem_linha");
+    const independente = toSomasPainel(totalRow, "total");
+
+    const diasRes = await sql<SomasPainelRow & { dia: string }>`
+      SELECT
+        to_char(e.em AT TIME ZONE ${sql.lit(RECEITA_TIMEZONE)}, 'YYYY-MM-DD') AS dia,
+        ${SOMAS_PAINEL}
+      FROM ${eventosDoPeriodo(platformId, janela.de, janela.ate, TIPOS_PAGAMENTO)} e
+      GROUP BY 1
+      ORDER BY 1
+    `.execute(trx);
+    const dias = diasRes.rows.map(
+      (row): DiaPainel => ({ dia: row.dia, ...toSomasPainel(row, "dia") }),
+    );
+    const agregado = agregarDias(grade, dias);
+
+    return {
+      ...agregado,
+      snapshotAt,
+      timezone: RECEITA_TIMEZONE,
+      hoje: grade.hoje,
+      janela,
+      diferencaConciliacao: {
+        tarifas: diferencaSoma(independente.tarifas, agregado.somaDosDias.tarifas),
+        recebido: diferencaSoma(independente.recebido, agregado.somaDosDias.recebido),
+      },
+      inconsistencias: await inconsistenciasDoIntervalo(trx, platformId, janela),
+    };
   });
-  const cursor = input.cursor === null ? null : decodeCampanhasCursor(input.cursor, digest);
-  const cursorCents = cursor?.registradasCents ?? null;
-  const cursorId = cursor?.idCampanha ?? null;
-
-  return db
-    .transaction()
-    .setIsolationLevel("repeatable read")
-    .execute(async (trx) => {
-      await sql`SET TRANSACTION READ ONLY`.execute(trx);
-      const snapshot = await sql<{ snapshot_at: Date }>`
-        SELECT now() AS snapshot_at
-      `.execute(trx);
-      const snapshotAt = snapshot.rows[0]?.snapshot_at;
-      if (!snapshotAt) throw new Error("admin_receita_snapshot_sem_instante");
-
-      const pageRes = await sql<CampanhaPageRow>`
-        WITH ${porCampanhaCte(input.platformId, input.de, input.ate)}
-        SELECT
-          por.id_campanha,
-          c.titulo,
-          c.slug,
-          por.registradas,
-          por.cancelamentos
-        FROM por
-        INNER JOIN campanhas c ON c.id = por.id_campanha
-        WHERE ${cursorCents}::bigint IS NULL
-          OR por.registradas < ${cursorCents}::bigint
-          OR (
-            por.registradas = ${cursorCents}::bigint
-            AND por.id_campanha > ${cursorId}::uuid
-          )
-        ORDER BY por.registradas DESC, por.id_campanha ASC
-        LIMIT ${input.limit + 1}
-      `.execute(trx);
-
-      const countRes = await sql<{ campanhas_total: string | number }>`
-        WITH ${porCampanhaCte(input.platformId, input.de, input.ate)}
-        SELECT COUNT(*) AS campanhas_total FROM por
-      `.execute(trx);
-
-      const visible = pageRes.rows.slice(0, input.limit);
-      const administrators = await loadCampaignAdministrators(trx, {
-        platformId: input.platformId,
-        campaignIds: visible.map((row) => row.id_campanha),
-        perCampaignLimit: ADMINISTRADORES_EXIBIDOS,
-      });
-      const last = pageRes.rows.length > input.limit ? visible.at(-1) : undefined;
-
-      return {
-        snapshotAt: new Date(snapshotAt),
-        consistencia: "snapshot_distinto" as const,
-        periodo: { de: input.de, ate: input.ate },
-        rows: visible.map((row) => toCampanhaReceita(row, administrators)),
-        nextCursor: last
-          ? Buffer.from(
-              JSON.stringify({
-                version: 1,
-                registradasCents: naoNegativo(last.registradas, "cursor.registradas"),
-                idCampanha: last.id_campanha,
-                filtersDigest: digest,
-              } satisfies CampanhasCursor),
-              "utf8",
-            ).toString("base64url")
-          : null,
-        campanhasTotal: naoNegativo(
-          countRes.rows[0]?.campanhas_total,
-          "campanhas_total",
-        ),
-      };
-    });
 }
 
 export type { Granularidade };

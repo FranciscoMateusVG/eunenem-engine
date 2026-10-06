@@ -5,10 +5,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { loadCampaignAdministrators } from '../../apps/eunenem-server/server/admin-campaign-administrators.js';
 import { listAdminPaymentEvidence } from '../../apps/eunenem-server/server/admin-payment-evidence.js';
 import {
-  InvalidReceitaCampanhasCursorError,
   InvalidReceitaPeriodoError,
-  listReceitaCampanhas,
   loadReceitaDashboard,
+  loadReceitaPainel,
 } from '../../apps/eunenem-server/server/admin-receita.js';
 import type { ServerDeps } from '../../apps/eunenem-server/server/auth/setup.js';
 import type { TrpcContext } from '../../apps/eunenem-server/server/trpc/context.js';
@@ -39,7 +38,7 @@ import { createTestDatabase, type TestDatabase } from '../helpers/test-db.js';
  *   T10 inconsistências no escopo, recortadas pelo período
  *   T11 snapshot único + transação somente leitura
  *   T12/T13/T18 administradores: exibição limitada, elegibilidade na totalidade
- *   T16 drilldown paginado com snapshot distinto declarado
+ *   P1  painel 1b: Recebido soma os 3 tipos; estorno na data do cancelamento
  */
 
 const OTHER_PLATFORM = '00000000-0000-4000-8000-00000000f9b1';
@@ -594,17 +593,6 @@ describe('Receita EuNeném — eventos E', () => {
       canceladoSemEstorno: { count: 0, cents: 0 },
     });
     expectConciliado(d);
-
-    const pagina = await listReceitaCampanhas(testDb.db, {
-      platformId: ID_PLATAFORMA_EUNENEM,
-      de: '2031-08-01',
-      ate: '2031-09-01',
-      cursor: null,
-      limit: 50,
-      cursorSecret: CURSOR_SECRET,
-    });
-    expect(pagina.rows.map((c) => c.idCampanha)).toEqual([nossa]);
-    expect(pagina.campanhasTotal).toBe(1);
   });
 
   it('T10: inconsistências ficam no escopo e são recortadas pelo período', async () => {
@@ -716,7 +704,126 @@ describe('Receita EuNeném — eventos E', () => {
   });
 });
 
-describe('Receita EuNeném — limites da lista e drilldown', () => {
+describe('Receita EuNeném — painel 1b (aperture-zn5cm)', () => {
+  /** Linha `credito_saldo_recebedor` do mesmo pagamento (a parte do recebedor). */
+  async function seedSaldo(
+    taxa: { idPagamento: string; idLancamento: string },
+    campaignId: string,
+    cents: number,
+    criadoEm: Date,
+    canceladoEm: Date | null = null,
+  ): Promise<void> {
+    const linhaTaxa = await anyDb()
+      .selectFrom('lancamentos_financeiros')
+      .select(['id_item_pagamento', 'id_contribuicao'])
+      .where('id', '=', taxa.idLancamento)
+      .executeTakeFirstOrThrow();
+    const id = randomUUID();
+    await anyDb()
+      .insertInto('lancamentos_financeiros')
+      .values({
+        id,
+        id_pagamento: taxa.idPagamento,
+        id_item_pagamento: linhaTaxa.id_item_pagamento,
+        id_contribuicao: linhaTaxa.id_contribuicao,
+        id_campanha: campaignId,
+        tipo: 'credito_saldo_recebedor',
+        amount_cents: cents,
+        criado_em: criadoEm,
+        transferido_em: null,
+        cancelado_em: canceladoEm,
+        id_repasse: null,
+      })
+      .execute();
+    seeded.lancamentos.add(id);
+  }
+
+  it('P1: Recebido soma os 3 tipos; estorno entra na data do cancelamento em SP', async () => {
+    const campanha = await seedCampanha();
+    const alheia = await seedCampanha({ platformId: OTHER_PLATFORM });
+    // 31/05 23:30 em SP (já 01/06 em UTC), estornado em junho.
+    const maio = new Date('2031-06-01T02:30:00Z');
+    const estorno = new Date('2031-06-01T12:00:00Z');
+    const a = await seedTaxa({
+      campaignId: campanha,
+      taxaCents: 100,
+      adicionalCents: 30,
+      criadoEm: maio,
+      canceladoEm: estorno,
+      status: 'estornado',
+    });
+    await seedSaldo(a, campanha, 1_000, maio, estorno);
+    const junho = new Date('2031-06-17T15:00:00Z');
+    const b = await seedTaxa({ campaignId: campanha, taxaCents: 50, criadoEm: junho });
+    await seedSaldo(b, campanha, 500, junho);
+    const fora = await seedTaxa({ campaignId: alheia, taxaCents: 9_999, criadoEm: junho });
+    await seedSaldo(fora, alheia, 99_999, junho);
+
+    const p = await loadReceitaPainel(testDb.db, { platformId: ID_PLATAFORMA_EUNENEM, now: NOW });
+
+    expect(p.hoje).toBe('2031-06-18');
+    expect(p.janela).toEqual({ de: '2030-07-01', ate: '2031-07-01' });
+    const mes = (de: string) => p.meses.find((m) => m.de === de);
+    expect(mes('2031-05-01')?.tarifas).toEqual({
+      registradoCents: 100,
+      canceladoCents: 0,
+      resultadoCents: 100,
+    });
+    expect(mes('2031-05-01')?.recebido.resultadoCents).toBe(1_130);
+    expect(p.kpis.mesAtual).toMatchObject({
+      de: '2031-06-01',
+      ate: '2031-06-19',
+      tarifas: { registradoCents: 50, canceladoCents: 100, resultadoCents: -50 },
+      recebido: { registradoCents: 500 + 50, canceladoCents: 1_130, resultadoCents: -580 },
+    });
+    expect(p.kpis.mesAnterior.recebido.resultadoCents).toBe(1_130);
+    expect(p.kpis.semanaAtual).toMatchObject({
+      de: '2031-06-16',
+      ate: '2031-06-23',
+      tarifas: { resultadoCents: 50 },
+      recebido: { resultadoCents: 550 },
+    });
+    // 01/06/2031 é domingo: a primeira barra de junho é só esse dia.
+    expect(p.semanas[0]).toMatchObject({
+      de: '2031-06-01',
+      ate: '2031-06-02',
+      estado: 'passada',
+      tarifas: { resultadoCents: -100 },
+      recebido: { resultadoCents: -1_130 },
+    });
+    expect(p.semanas.map((s) => s.estado)).toEqual([
+      'passada',
+      'passada',
+      'passada',
+      'atual',
+      'futura',
+      'futura',
+    ]);
+    expect(p.diferencaConciliacao).toEqual({
+      tarifas: { registradoCents: 0, canceladoCents: 0 },
+      recebido: { registradoCents: 0, canceladoCents: 0 },
+    });
+    expect(p.inconsistencias).toEqual({
+      estornadoSemCancelamento: { count: 0, cents: 0 },
+      canceladoSemEstorno: { count: 0, cents: 0 },
+    });
+  });
+
+  it('P2: estorno sem cancelamento aparece em inconsistências do painel', async () => {
+    const campanha = await seedCampanha();
+    await seedTaxa({
+      campaignId: campanha,
+      taxaCents: 70,
+      criadoEm: new Date('2031-06-10T15:00:00Z'),
+      status: 'estornado',
+    });
+    const p = await loadReceitaPainel(testDb.db, { platformId: ID_PLATAFORMA_EUNENEM, now: NOW });
+    expect(p.inconsistencias.estornadoSemCancelamento).toEqual({ count: 1, cents: 70 });
+    expect(p.kpis.mesAtual.tarifas.resultadoCents).toBe(70);
+  });
+});
+
+describe('Receita EuNeném — limites da lista', () => {
   const PERIODO = { de: '2031-10-01', ate: '2031-11-01', granularidade: 'mes' } as const;
   let ids: string[] = [];
 
@@ -760,67 +867,6 @@ describe('Receita EuNeném — limites da lista e drilldown', () => {
     expect(d.porCampanha.rows.some((c) => c.idCampanha === ids[1])).toBe(false);
     expect(d.porCampanha.rows.at(-1)?.idCampanha).toBe(ids[0]);
     expectConciliado(d);
-  }, 120_000);
-
-  it('T16: drilldown pagina todas as campanhas sem perder nem duplicar', async () => {
-    await seed101();
-    const vistos: string[] = [];
-    const valores: number[] = [];
-    let cursor: string | null = null;
-    let paginas = 0;
-    let primeiroCursor: string | null = null;
-    do {
-      const pagina = await listReceitaCampanhas(testDb.db, {
-        platformId: ID_PLATAFORMA_EUNENEM,
-        de: PERIODO.de,
-        ate: PERIODO.ate,
-        cursor,
-        limit: 40,
-        cursorSecret: CURSOR_SECRET,
-      });
-      expect(pagina.consistencia).toBe('snapshot_distinto');
-      expect(pagina.campanhasTotal).toBe(101);
-      expect(pagina.snapshotAt).toBeInstanceOf(Date);
-      for (const row of pagina.rows) {
-        vistos.push(row.idCampanha);
-        valores.push(row.taxasRegistradasCents);
-      }
-      cursor = pagina.nextCursor;
-      primeiroCursor ??= cursor;
-      paginas += 1;
-    } while (cursor !== null && paginas < 10);
-
-    expect(paginas).toBe(3);
-    expect(vistos).toHaveLength(101);
-    expect(new Set(vistos).size).toBe(101);
-    expect([...vistos].sort()).toEqual([...ids].sort());
-    expect(valores).toEqual([...valores].sort((a, b) => b - a));
-    // Empate resolvido por id ASC.
-    expect(vistos.slice(-2)).toEqual([ids[0], ids[1]]);
-
-    if (primeiroCursor === null) throw new Error('cursor esperado');
-    const adulterado = `${primeiroCursor.slice(0, -2)}xx`;
-    await expect(
-      listReceitaCampanhas(testDb.db, {
-        platformId: ID_PLATAFORMA_EUNENEM,
-        de: PERIODO.de,
-        ate: PERIODO.ate,
-        cursor: adulterado,
-        limit: 40,
-        cursorSecret: CURSOR_SECRET,
-      }),
-    ).rejects.toBeInstanceOf(InvalidReceitaCampanhasCursorError);
-    // Cursor de outro período não vale para este.
-    await expect(
-      listReceitaCampanhas(testDb.db, {
-        platformId: ID_PLATAFORMA_EUNENEM,
-        de: '2031-10-02',
-        ate: PERIODO.ate,
-        cursor: primeiroCursor,
-        limit: 40,
-        cursorSecret: CURSOR_SECRET,
-      }),
-    ).rejects.toBeInstanceOf(InvalidReceitaCampanhasCursorError);
   }, 120_000);
 });
 
@@ -1137,15 +1183,19 @@ describe('admin.receita.* e admin.campanhas.findById pelo router', () => {
     expect(d.porCampanha.rows[0]?.publicOwnerSlug).toBe('nome-estranho');
   });
 
-  it('drilldown pelo router: cursor inválido ⇒ BAD_REQUEST', async () => {
-    await expect(
-      buildCaller().admin.receita.campanhasPaginated({
-        de: '2031-02-01',
-        ate: '2031-03-01',
-        cursor: 'nao-e-cursor',
-        limit: 10,
-      }),
-    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  it('painel pelo router: DTO válido no contrato, com o relógio do servidor', async () => {
+    const campanha = await seedCampanha();
+    await seedTaxa({
+      campaignId: campanha,
+      taxaCents: 100,
+      criadoEm: new Date('2031-06-17T15:00:00Z'),
+    });
+    const p = await buildCaller().admin.receita.painel();
+    expect(p.hoje).toBe('2031-06-18');
+    expect(p.timezone).toBe('America/Sao_Paulo');
+    expect(typeof p.snapshotAt).toBe('string');
+    expect(p.meses).toHaveLength(12);
+    expect(p.kpis.semanaAtual.tarifas.resultadoCents).toBe(100);
   });
 
   it('T18: detalhe da campanha devolve TODOS os administradores e o slug público', async () => {
