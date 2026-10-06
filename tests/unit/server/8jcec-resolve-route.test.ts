@@ -133,6 +133,16 @@ describe('resolveRoute — /admin/* (regression, spec §9)', () => {
     expect(resolveRoute('/admin/pagamentos/receita/extra')).toEqual({ kind: 'not-found' });
   });
 
+  it('/admin/pagamentos/nota-fiscal → admin-pagamentos-nota-fiscal (aperture-dh1k7)', () => {
+    expect(resolveRoute('/admin/pagamentos/nota-fiscal')).toEqual({
+      kind: 'admin-pagamentos-nota-fiscal',
+    });
+    expect(resolveRoute('/admin/pagamentos/nota-fiscal/')).toEqual({
+      kind: 'admin-pagamentos-nota-fiscal',
+    });
+    expect(resolveRoute('/admin/pagamentos/nota-fiscal/extra')).toEqual({ kind: 'not-found' });
+  });
+
   it('/admin/repasses → admin-repasses (list)', () => {
     expect(resolveRoute('/admin/repasses')).toEqual({ kind: 'admin-repasses' });
     expect(resolveRoute('/admin/repasses/')).toEqual({ kind: 'admin-repasses' });
