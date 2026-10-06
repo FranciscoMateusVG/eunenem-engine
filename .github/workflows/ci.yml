@@ -1,8 +1,9 @@
 name: CI
 
 # V1 CI for EuNenem/engine (aperture-14mtr). Runs on every PR targeting
-# `staging`. Four jobs, modelled on monorepo-incluir's ci.yml but on
-# GitHub-hosted runners (the V1 jobs are lightweight; no Mac Mini
+# `staging` or `main` (main was GitGuardian-only until aperture-zdn35, which
+# let broken tests land on main unseen). Four jobs, modelled on
+# monorepo-incluir's ci.yml but on GitHub-hosted runners (the V1 jobs are lightweight; no Mac Mini
 # self-hosted runner needed — that's a phase-2 optimisation if Actions
 # minutes ever bite).
 #
@@ -25,7 +26,7 @@ name: CI
 
 on:
   pull_request:
-    branches: [staging]
+    branches: [staging, main]
   workflow_dispatch:
 
 concurrency:
@@ -217,12 +218,13 @@ jobs:
       - name: Snapshot PR migrations
         run: cp -r migrations /tmp/pr-migrations
       # Phase 1 — reproduce prod's "already-migrated" state by applying
-      # ONLY the base branch's (staging) migrations to the fresh Postgres.
+      # ONLY the base branch's (staging or main — github.base_ref) migrations
+      # to the fresh Postgres. workflow_dispatch has no base_ref → staging.
       - name: Apply base-branch migrations (prod-like applied state)
         run: |
           set -euo pipefail
           rm -rf migrations
-          git fetch origin "${{ github.base_ref }}" --depth=1
+          git fetch origin "${{ github.base_ref || 'staging' }}" --depth=1
           git checkout FETCH_HEAD -- migrations
           pnpm db:migrate
       # Phase 2 — restore the PR's migrations and apply on top. If the PR
@@ -240,7 +242,7 @@ jobs:
   # aperture-zaz5r: THE Playwright e2e gate. Previously ci.yml ran
   # typecheck/lint/test/build/migrate only — the e2e suite existed but never
   # ran in CI (line 24 "E2E ... = phase 2"), so it rotted undetected. This job
-  # runs it on every staging PR. Hermetic per-run isolation via a fresh
+  # runs it on every staging/main PR. Hermetic per-run isolation via a fresh
   # `services: postgres:16` (approved swap from the config's old "testcontainers"
   # Phase-2 note — identical per-run isolation, mirrors the migrate job, far
   # fewer moving parts). Specs self-seed per-test via e2e/fixtures, so no

@@ -4,7 +4,7 @@ import {
   DEFAULT_LOCAL_BASE_URL,
   formatTargetVerdict,
   logTargetVerdict,
-} from '../../e2e/target-classifier.js';
+} from '../../../e2e/target-classifier.js';
 
 /**
  * aperture-odyxd — regressions for the exact-host E2E target classifier.

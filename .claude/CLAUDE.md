@@ -2,7 +2,7 @@
 
 ## Rules
 
-1. **NEVER use `--no-verify` when committing or pushing.** The pre-push hook running `pnpm check` is the canonical and only quality gate. If it fails, fix the code. Do not bypass the gate.
+1. **NEVER use `--no-verify` when committing or pushing.** CI (`.github/workflows/ci.yml`, on every PR to `staging` and `main`) is the canonical quality gate; the pre-commit hook runs lint-staged. There is no pre-push hook (removed on purpose in b4bde53). If a check fails, fix the code. Do not bypass the gate.
 2. **NEVER skip git hooks.** If hooks are broken, fix them. Do not work around them.
 3. **Run `pnpm check` before considering any work complete.** All checks must pass: lint, dependency-cruiser, typecheck, codegen drift, tests with coverage, examples, hook verification.
 4. **Do not export concrete adapter implementations from `src/index.ts`.** Only types, interfaces, use cases, and errors belong in the public surface. Concrete adapters use subpath exports (e.g., `frame/adapters/postgres`).

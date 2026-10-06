@@ -88,6 +88,18 @@ function trecho(html: string, testId: string, fim = '</li>'): string {
   return html.slice(inicio, html.indexOf(fim, inicio));
 }
 
+/** `height` inline do primeiro elemento que tem `marca` na tag de abertura. */
+function altura(html: string, marca: string): string | undefined {
+  const tag = html.match(new RegExp(`<[^>]*${marca}[^>]*>`))?.[0] ?? '';
+  return tag.match(/height:([^;"]+)/)?.[1];
+}
+
+/** `class` do primeiro elemento que tem `marca` na tag de abertura. */
+function classes(html: string, marca: string): string {
+  const tag = html.match(new RegExp(`<[^>]*${marca}[^>]*>`))?.[0] ?? '';
+  return tag.match(/class="([^"]*)"/)?.[1] ?? '';
+}
+
 describe('Receita 1b — cabeçalho', () => {
   it('título, subtítulo e data de hoje em São Paulo', () => {
     const t = texto(
@@ -133,11 +145,75 @@ describe('Receita 1b — barras', () => {
     expect(texto(html)).toContain('R$ 94,4 mil R$ 4,7 mil');
   });
 
-  it('cada série tem a própria escala: o maior mês de cada uma chega ao topo', () => {
-    // Setembro tem o maior valor nas duas séries: grupo a 84%, as duas a 100%.
+  it('uma barra por mês: altura proporcional ao Recebido, numa escala única', () => {
+    // Setembro tem o maior Recebido (R$ 94.364,00): chega a 84% da área.
     const setembro = trecho(html, 'receita-mes" data-mes="2026-09-01');
-    expect(setembro).toContain('height:84.00%');
-    expect(setembro.match(/height:100\.00%/g)).toHaveLength(2);
+    expect(setembro.match(/data-testid="receita-barra"/g)).toHaveLength(1);
+    expect(altura(setembro, 'data-testid="receita-barra"')).toBe('84.00%');
+    // Agosto: R$ 74.817,00 / R$ 94.364,00 × 84 = 66,60%.
+    const agosto = trecho(html, 'receita-mes" data-mes="2026-08-01');
+    expect(altura(agosto, 'data-testid="receita-barra"')).toBe('66.60%');
+    // Outubro (parcial): R$ 11.798,00 / R$ 94.364,00 × 84 = 10,50%.
+    const outubro = trecho(html, 'receita-mes" data-mes="2026-10-01');
+    expect(altura(outubro, 'data-testid="receita-barra"')).toBe('10.50%');
+  });
+
+  it('a fatia lilás de baixo é Tarifas/Recebido, e o resto é teal', () => {
+    // Setembro: R$ 4.706,00 / R$ 94.364,00 = 4,99% da barra.
+    const setembro = trecho(html, 'receita-mes" data-mes="2026-09-01');
+    expect(altura(setembro, 'data-fatia="tarifas"')).toBe('4.99%');
+    expect(classes(setembro, 'data-fatia="tarifas"')).toContain('bg-lilac-deep');
+    expect(classes(setembro, 'data-fatia="recebido"')).toContain('bg-blue-deep');
+    // A fatia fica embaixo: vem depois do resto na coluna.
+    expect(setembro.indexOf('data-fatia="tarifas"')).toBeGreaterThan(
+      setembro.indexOf('data-fatia="recebido"'),
+    );
+    // Agosto: R$ 3.667,50 / R$ 74.817,00 = 4,90%.
+    const agosto = trecho(html, 'receita-mes" data-mes="2026-08-01');
+    expect(altura(agosto, 'data-fatia="tarifas"')).toBe('4.90%');
+  });
+
+  it('legenda verdadeira: tarifas são parte do recebido', () => {
+    const t = texto(html);
+    expect(t).toContain('tarifas são parte do recebido');
+    expect(t).not.toContain('própria escala');
+  });
+
+  it('semanas: mesma regra, escala única entre as semanas que já começaram', () => {
+    // 01–04/10: R$ 10.394,00 é o maior Recebido entre as semanas visíveis.
+    const primeira = trecho(html, 'receita-semana" data-de="2026-10-01');
+    expect(altura(primeira, 'data-testid="receita-barra"')).toBe('76.00%');
+    expect(altura(primeira, 'data-fatia="tarifas"')).toBe('4.93%');
+    // 05–11/10: R$ 1.404,00 / R$ 10.394,00 × 76 = 10,27%.
+    const atual = trecho(html, 'receita-semana" data-de="2026-10-05');
+    expect(altura(atual, 'data-testid="receita-barra"')).toBe('10.27%');
+  });
+
+  it('Recebido ≤ 0 vira barra vazia com o valor no rótulo; Tarifas > Recebido enche a barra', () => {
+    const borda = render(
+      painel('2026-10-05', [
+        dia('2026-09-10', 389_300, 7_786_000),
+        // Julho: estorno maior que o recebido ⇒ Recebido −R$ 50,00.
+        dia('2026-07-10', 100, 0, 5_000),
+        // Junho: Tarifas R$ 9,00 acima do Recebido R$ 6,00.
+        dia('2026-06-10', 900, 600),
+      ]),
+    );
+    expect(borda).not.toMatch(/NaN|Infinity/);
+    const julho = trecho(borda, 'receita-mes" data-mes="2026-07-01');
+    expect(altura(julho, 'data-testid="receita-barra"')).toBe('0.00%');
+    expect(altura(julho, 'data-fatia="tarifas"')).toBe('0.00%');
+    expect(texto(julho)).toContain('-R$ 50');
+    const junho = trecho(borda, 'receita-mes" data-mes="2026-06-01');
+    expect(altura(junho, 'data-fatia="tarifas"')).toBe('100.00%');
+  });
+
+  it('sem nenhum Recebido positivo, todas as barras ficam vazias sem quebrar', () => {
+    const vazio = render(painel('2026-10-05', [dia('2026-09-10', 0, 0, 1_000)]));
+    expect(vazio).not.toMatch(/NaN|Infinity/);
+    const alturas = [...vazio.matchAll(/data-testid="receita-barra"[^>]*style="height:([^"]+)"/g)];
+    expect(alturas.length).toBeGreaterThan(0);
+    expect(new Set(alturas.map((m) => m[1]))).toEqual(new Set(['0.00%']));
   });
 
   it('semanas de outubro: passada, atual em destaque e futuras com "—"', () => {

@@ -18,7 +18,8 @@
 //     email / storage / webhook-archive are supporting INFRA adapters
 //     (adapters-only, no domain/use-cases/errors of their own).
 //   • tests/unit/ — a tiny explicit root allowlist (no wildcard) plus one
-//     subfolder per import-target: <bc>/, <infra>/, server/, observability/.
+//     subfolder per import-target: <bc>/, <infra>/, server/, observability/,
+//     e2e/ (the Playwright harness modules).
 //     A test file lives in the folder of its PRIMARY import target (Izzy's
 //     policy, aperture-o6y48). Anything new at tests/unit root is a lint error
 //     by design — it forces the author to pick the right home.
@@ -267,6 +268,9 @@ export const folderStructureConfig = createFolderStructure({
             ...infraTestChildren(),
             { name: 'server', children: testFiles(2) },
             { name: 'observability', children: testFiles(2) },
+            // The Playwright harness's own guards (e2e/*.ts — target classifier,
+            // spec safety, remote selection) — tests of e2e/, not of the specs.
+            { name: 'e2e', children: testFiles(2) },
             ...applicationTestChildren(),
           ],
         },
