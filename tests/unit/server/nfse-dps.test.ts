@@ -125,14 +125,14 @@ describe('numeroDpsPrevia / série de prévia', () => {
 });
 
 describe('montarIdDps', () => {
-  it('"DPS" + município(7) + tipo(1) + CNPJ(14) + série(5) + número(15) = 45', () => {
+  it('"DPS" + município(7) + tipo(1, 2 = CNPJ) + CNPJ(14) + série(5) + número(15) = 45', () => {
     const id = montarIdDps({
       cLocEmi: '2611606',
       cnpj: '12345678000195',
       serie: '99999',
       nDPS: '20260999999999',
     });
-    expect(id).toBe('DPS2611606112345678000195999990' + '20260999999999');
+    expect(id).toBe('DPS2611606212345678000195999990' + '20260999999999');
     expect(id).toHaveLength(45);
     expect(id).toMatch(/^DPS[0-9]{42}$/);
   });
@@ -140,6 +140,20 @@ describe('montarIdDps', () => {
   it('completa série e número com zeros à esquerda', () => {
     const id = montarIdDps({ cLocEmi: '2611606', cnpj: '12345678000195', serie: '1', nDPS: '7' });
     expect(id.slice(-20)).toBe('00001000000000000007');
+  });
+});
+
+describe('Id da DPS decomposto confere com o XML (Anexo I: tipo 2 = CNPJ, E0004)', () => {
+  it('cLocEmi, tipo 2, CNPJ do prest, série e nDPS', () => {
+    const { xml, idDps } = montarDpsXml(input());
+    const m = /^DPS(\d{7})(\d)(\d{14})(\d{5})(\d{15})$/.exec(idDps);
+    if (!m) throw new Error(idDps);
+    const [, mun, tipo, inscricao, serie, numero] = m;
+    expect(tipo).toBe('2');
+    expect(xml).toContain(`<cLocEmi>${mun}</cLocEmi>`);
+    expect(xml).toContain(`<prest><CNPJ>${inscricao}</CNPJ>`);
+    expect(xml).toContain(`<serie>${Number(serie)}</serie>`);
+    expect(xml).toContain(`<nDPS>${Number(numero)}</nDPS>`);
   });
 });
 

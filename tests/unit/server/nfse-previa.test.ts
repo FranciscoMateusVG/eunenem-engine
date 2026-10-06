@@ -63,7 +63,7 @@ describe('montarPreviaDps', () => {
       now: NOW,
     });
     if (previa.status !== 'gerada') throw new Error(previa.status);
-    expect(previa.idDps).toBe('DPS2611606111222333000181999990' + '20260999999999');
+    expect(previa.idDps).toBe('DPS2611606211222333000181999990' + '20260999999999');
     expect(previa.valorServico).toBe('1234.56');
     expect(previa.xml).toContain(
       '<serie>99999</serie><nDPS>20260999999999</nDPS><dCompet>2026-09-01</dCompet>',

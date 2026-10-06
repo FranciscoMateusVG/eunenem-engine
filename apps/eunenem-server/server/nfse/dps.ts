@@ -129,9 +129,12 @@ export function numeroDpsPrevia(mes: string): string {
   return `${mes.replace('-', '')}99999999`;
 }
 
+/** Anexo I v1.01 (regra E0004): tipo de inscrição federal 1 = CPF, 2 = CNPJ. */
+const TIPO_INSCRICAO_CNPJ = '2';
+
 /**
- * "DPS" + cLocEmi (7) + tipo de inscrição (1 = CNPJ) + CNPJ (14) +
- * série (5) + número (15).
+ * "DPS" + cLocEmi (7) + tipo de inscrição federal (1) + CNPJ (14) +
+ * série (5) + número (15). O sandbox usava "1" para CNPJ, o que está errado.
  */
 export function montarIdDps(input: {
   readonly cLocEmi: string;
@@ -139,7 +142,7 @@ export function montarIdDps(input: {
   readonly serie: string;
   readonly nDPS: string;
 }): string {
-  return `DPS${input.cLocEmi}1${input.cnpj.padStart(14, '0')}${input.serie.padStart(5, '0')}${input.nDPS.padStart(15, '0')}`;
+  return `DPS${input.cLocEmi}${TIPO_INSCRICAO_CNPJ}${input.cnpj.padStart(14, '0')}${input.serie.padStart(5, '0')}${input.nDPS.padStart(15, '0')}`;
 }
 
 const SAO_PAULO = 'America/Sao_Paulo';

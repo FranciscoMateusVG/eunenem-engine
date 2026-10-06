@@ -25,7 +25,7 @@ const { renderToStaticMarkup } = appRequire('react-dom/server') as {
 };
 
 const XML =
-  '<?xml version="1.0" encoding="UTF-8"?><DPS xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.01"><infDPS Id="DPS261160611122233300018199999020260999999999"><vServ>1234.56</vServ></infDPS></DPS>';
+  '<?xml version="1.0" encoding="UTF-8"?><DPS xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.01"><infDPS Id="DPS261160621122233300018199999020260999999999"><vServ>1234.56</vServ></infDPS></DPS>';
 
 function previa(overrides: Partial<NotaFiscalPrevia> = {}): NotaFiscalPrevia {
   return {
@@ -61,7 +61,7 @@ function previa(overrides: Partial<NotaFiscalPrevia> = {}): NotaFiscalPrevia {
     avisos: ['xml_nao_assinado'],
     dps: {
       status: 'gerada',
-      idDps: 'DPS261160611122233300018199999020260999999999',
+      idDps: 'DPS261160621122233300018199999020260999999999',
       valorServico: '1234.56',
       campos: [
         {
