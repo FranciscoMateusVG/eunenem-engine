@@ -4,6 +4,7 @@ import { AdminContribuicaoPage } from './AdminContribuicaoPage.js';
 import { AdminPage } from './AdminPage.js';
 import { AdminPagamentoPage } from './AdminPagamentoPage.js';
 import { AdminPagamentosPage } from './AdminPagamentosPage.js';
+import { AdminNotaFiscalPage } from './AdminNotaFiscalPage.js';
 import { AdminReceitaPage } from './AdminReceitaPage.js';
 import { AdminRepasseDetailPage } from './AdminRepasseDetailPage.js';
 import { AdminCatalogoPage } from './AdminCatalogoPage.js';
@@ -68,6 +69,7 @@ export function resolveRoute(pathname: string):
   | { kind: 'admin-pagamento'; idPagamento: string }
   | { kind: 'admin-pagamentos' }
   | { kind: 'admin-pagamentos-receita' }
+  | { kind: 'admin-pagamentos-nota-fiscal' }
   | { kind: 'admin-repasses' }
   | { kind: 'admin-catalogo' }
   | { kind: 'admin-repasse-detail'; idRepasse: string }
@@ -164,6 +166,13 @@ export function resolveRoute(pathname: string):
     pathname === '/admin/pagamentos/receita/'
   ) {
     return { kind: 'admin-pagamentos-receita' };
+  }
+  // /admin/pagamentos/nota-fiscal (aperture-dh1k7) — prévia da NFS-e mensal.
+  if (
+    pathname === '/admin/pagamentos/nota-fiscal' ||
+    pathname === '/admin/pagamentos/nota-fiscal/'
+  ) {
+    return { kind: 'admin-pagamentos-nota-fiscal' };
   }
   if (pathname === '/admin/pagamentos' || pathname === '/admin/pagamentos/') {
     return { kind: 'admin-pagamentos' };
@@ -423,6 +432,7 @@ function pickPage(route: ReturnType<typeof resolveRoute>, pathname: string) {
     return <AdminPagamentoPage idPagamento={route.idPagamento} />;
   if (route.kind === 'admin-pagamentos') return <AdminPagamentosPage />;
   if (route.kind === 'admin-pagamentos-receita') return <AdminReceitaPage />;
+  if (route.kind === 'admin-pagamentos-nota-fiscal') return <AdminNotaFiscalPage />;
   if (route.kind === 'admin-repasses') return <AdminRepassesPage />;
   if (route.kind === 'admin-catalogo') return <AdminCatalogoPage />;
   if (route.kind === 'admin-repasse-detail')
