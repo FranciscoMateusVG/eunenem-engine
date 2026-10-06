@@ -141,6 +141,11 @@ describe('parseNfseConfig', () => {
       expect(cfg.certificado?.senha()).toBe(' com espaço ');
     });
 
+    it('senha só de espaços também é usada como está', () => {
+      const cfg = parseNfseConfig({ NFSE_CERT_BASE64: PFX_B64, NFSE_CERT_PASSWORD: '   ' });
+      expect(cfg.certificado?.senha()).toBe('   ');
+    });
+
     it('caminho: fonte caminho (arquivo só é lido em lerPfx)', () => {
       const cfg = parseNfseConfig({ NFSE_CERT_PATH: '/nao/existe.pfx' });
       expect(cfg.certificado?.fonte).toBe('caminho');
@@ -170,6 +175,33 @@ describe('parseNfseConfig', () => {
         expect(vista).not.toContain(SENHA);
         expect(vista).not.toContain(PFX_B64);
       }
+    });
+  });
+});
+
+describe('descrição: limite de 2000 (TSDesc2000) DEPOIS de expandir {competencia}', () => {
+  // Rótulo mais longo possível: "fevereiro/2026" (14). O template precisa caber com ele.
+  it('2000 caracteres após expansão é aceito', () => {
+    const cfg = parseNfseConfig({ NFSE_DESCRICAO_SERVICO: `${'a'.repeat(1986)}{competencia}` });
+    expect(cfg.descricaoServico.origem).toBe('env');
+    expect(descricaoDoServico(cfg.descricaoServico.valor, 'fevereiro/2026')).toHaveLength(2000);
+  });
+
+  it('2001 após expansão é inválido e cai no default', () => {
+    const cfg = parseNfseConfig({ NFSE_DESCRICAO_SERVICO: `${'a'.repeat(1987)}{competencia}` });
+    expect(cfg.descricaoServico.origem).toBe('default');
+    expect(cfg.problemas).toContainEqual({
+      variavel: 'NFSE_DESCRICAO_SERVICO',
+      motivo: 'invalido',
+    });
+  });
+
+  it('muitos {competencia} que estouram só depois de expandir são inválidos', () => {
+    const cfg = parseNfseConfig({ NFSE_DESCRICAO_SERVICO: '{competencia}'.repeat(146) });
+    expect(cfg.descricaoServico.origem).toBe('default');
+    expect(cfg.problemas).toContainEqual({
+      variavel: 'NFSE_DESCRICAO_SERVICO',
+      motivo: 'invalido',
     });
   });
 });
