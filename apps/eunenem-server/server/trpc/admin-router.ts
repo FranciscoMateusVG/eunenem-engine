@@ -81,6 +81,7 @@ import {
   RECEITA_CAMPANHAS_LIMIT,
 } from "../admin-receita.js";
 import { GRANULARIDADES, isLocalDate } from "../../pages/lib/receitaPeriodo.js";
+import { carregarPreviaMensal, MesFuturoError } from "../nfse/previa-mensal.js";
 import {
   AdminPaymentAdministratorsSchema,
   AdminPaymentEvidenceSchema,
@@ -4344,6 +4345,153 @@ const receitaRouter = t.router({
   }),
 });
 
+/* ─────────────────────────────────────────────────────────────────────────
+ * notaFiscal.previaMensal — PRÉVIA (dry run) da NFS-e mensal (aperture-dh1k7).
+ *
+ * Só leitura: nada é enviado ao Sistema Nacional e nada é escrito no banco.
+ * O valor é o "Resultado de taxas" do mês (mesmo read model da Receita).
+ * Senha e PFX do certificado nunca entram neste DTO.
+ * ────────────────────────────────────────────────────────────────────── */
+
+const MesSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
+
+const NotaFiscalCampoSchema = z.object({
+  grupo: z.string(),
+  tag: z.string(),
+  rotulo: z.string(),
+  /** Exatamente o valor que vai no XML, ou "(omitido…)". */
+  valor: z.string(),
+  origem: z.enum(["ledger", "env", "default", "derivado", "fixo"]),
+  aConfirmar: z.boolean(),
+  nota: z.string().nullable(),
+});
+
+const NotaFiscalAssinaturaSchema = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("assinada"),
+    certificadoCnpj: z.string().nullable(),
+    certificadoConfereComPrestador: z.boolean(),
+    certificadoValidoAte: z.string().datetime(),
+  }),
+  z.object({
+    status: z.literal("nao_assinada"),
+    motivo: z.enum(["sem_certificado", "certificado_ilegivel"]),
+  }),
+]);
+
+const NotaFiscalDpsSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("sem_valor") }),
+  z.object({ status: z.literal("config_incompleta"), faltando: z.array(z.string()) }),
+  z.object({
+    status: z.literal("gerada"),
+    idDps: z.string().regex(/^DPS[0-9]{42}$/),
+    valorServico: z.string(),
+    campos: z.array(NotaFiscalCampoSchema),
+    xml: z.string(),
+    assinatura: NotaFiscalAssinaturaSchema,
+  }),
+]);
+
+const NotaFiscalPreviaSchema = z.object({
+  mes: MesSchema,
+  rotulo: z.string(),
+  situacao: z.enum(["fechado", "em_andamento"]),
+  periodo: z.object({ de: LocalDateSchema, ate: LocalDateSchema }),
+  timezone: z.literal("America/Sao_Paulo"),
+  snapshotAt: z.string().datetime(),
+  valor: z.object({
+    ...ReceitaMetricasShape,
+    lancamentosRegistrados: z.number().int().nonnegative(),
+    lancamentosCancelados: z.number().int().nonnegative(),
+    pagamentosComTaxa: z.number().int().nonnegative(),
+  }),
+  porMeioProvedor: z.array(
+    z.object({
+      metodo: z.enum(["pix", "credit_card", "nao_registrado"]),
+      provedor: z.enum(["stripe", "inter", "nao_registrado"]),
+      ...ReceitaMetricasShape,
+    }),
+  ),
+  /** Informativo: repasse do custo de cartão. Nunca entra no valor da nota. */
+  adicionalCartao: z.object({ registradoCents: cents(), canceladoCents: cents() }),
+  inconsistencias: z.object({
+    estornadoSemCancelamento: ReceitaInconsistenciaSchema,
+    canceladoSemEstorno: ReceitaInconsistenciaSchema,
+  }),
+  configuracao: z.object({
+    problemas: z.array(
+      z.object({ variavel: z.string(), motivo: z.enum(["ausente", "invalido"]) }),
+    ),
+  }),
+  avisos: z.array(
+    z.enum([
+      "mes_em_andamento",
+      "resultado_nao_positivo",
+      "config_com_problemas",
+      "xml_nao_assinado",
+      "certificado_de_outro_cnpj",
+      "certificado_vencido",
+      "inconsistencias_no_periodo",
+      "detalhamento_nao_concilia",
+      "tot_trib_pendente",
+    ]),
+  ),
+  dps: NotaFiscalDpsSchema,
+});
+export type NotaFiscalPreviaDTO = z.infer<typeof NotaFiscalPreviaSchema>;
+
+const notaFiscalRouter = t.router({
+  previaMensal: adminProcedure
+    .input(z.object({ mes: MesSchema }))
+    .output(NotaFiscalPreviaSchema)
+    .query(async ({ ctx, input }) => {
+      let previa: Awaited<ReturnType<typeof carregarPreviaMensal>>;
+      try {
+        previa = await carregarPreviaMensal(ctx.deps.db, {
+          platformId: ID_PLATAFORMA_EUNENEM,
+          mes: input.mes,
+          now: ctx.deps.clock(),
+          config: ctx.deps.nfse,
+        });
+      } catch (error: unknown) {
+        if (error instanceof MesFuturoError) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
+        }
+        return receitaBadRequest(error);
+      }
+      const { dps } = previa;
+      return {
+        ...previa,
+        snapshotAt: previa.snapshotAt.toISOString(),
+        porMeioProvedor: [...previa.porMeioProvedor],
+        configuracao: { problemas: [...previa.configuracao.problemas] },
+        avisos: [...previa.avisos],
+        dps:
+          dps.status === "sem_valor"
+            ? { status: "sem_valor" as const }
+            : dps.status === "config_incompleta"
+              ? { status: "config_incompleta" as const, faltando: [...dps.faltando] }
+              : {
+                  status: "gerada" as const,
+                  idDps: dps.idDps,
+                  valorServico: dps.valorServico,
+                  campos: [...dps.campos],
+                  xml: dps.xml,
+                  assinatura:
+                    dps.assinatura.status === "assinada"
+                      ? {
+                          status: "assinada" as const,
+                          certificadoCnpj: dps.assinatura.certificadoCnpj,
+                          certificadoConfereComPrestador:
+                            dps.assinatura.certificadoConfereComPrestador,
+                          certificadoValidoAte: dps.assinatura.certificadoValidoAte.toISOString(),
+                        }
+                      : { status: "nao_assinada" as const, motivo: dps.assinatura.motivo },
+                },
+      };
+    }),
+});
+
 export const adminRouter = t.router({
   /** Nested sub-router for usuarios browse + paginated list. */
   usuarios: usuariosRouter,
@@ -4430,6 +4578,9 @@ export const adminRouter = t.router({
 
   /** Receita EuNeném — taxas da plataforma por evento (aperture-9bpre). */
   receita: receitaRouter,
+
+  /** Prévia (dry run, sem envio) da NFS-e mensal da EuNeném (aperture-dh1k7). */
+  notaFiscal: notaFiscalRouter,
 
   /** Nested sub-router for the Financeiro BC lancamentos drill (W5). */
   financeiro: financeiroRouter,

@@ -245,6 +245,21 @@ export class ReceitaLedgerSeed {
     return { idPagamento, idLancamento, pagoCents };
   }
 
+  /**
+   * Prévia da NFS-e (aperture-uj78j): pagamento com linha de taxa, com os
+   * defaults originais desse uso (método pix).
+   */
+  async taxa(
+    input: Omit<PagamentoSeed, 'semLancamento'>,
+  ): Promise<{ idPagamento: string; idLancamento: string }> {
+    const { idPagamento, idLancamento } = await this.pagamento({
+      ...input,
+      metodo: input.metodo ?? 'pix',
+    });
+    if (idLancamento === null) throw new Error('taxa sem lançamento');
+    return { idPagamento, idLancamento };
+  }
+
   /** Devolução PIX do Inter (uma por pagamento, como no contrato atual). */
   async devolucaoInter(input: DevolucaoInterSeed): Promise<string> {
     const row = await sql<{ e2e: string | null }>`

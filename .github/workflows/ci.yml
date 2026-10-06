@@ -118,6 +118,11 @@ jobs:
       - name: Install (eunenem-server)
         working-directory: apps/eunenem-server
         run: pnpm install --frozen-lockfile
+      # aperture-uj78j — os testes da prévia da NFS-e validam a DPS contra o
+      # XSD oficial e conferem a XMLDsig com o xmllint (libxml2); o
+      # ubuntu-latest não traz o binário.
+      - name: Install xmllint (validação XSD da NFS-e)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libxml2-utils
       # vitest globalSetup spins ONE Testcontainers Postgres for the
       # integration tests. ubuntu-latest ships a working Docker daemon,
       # so no `services:` block is needed here.
