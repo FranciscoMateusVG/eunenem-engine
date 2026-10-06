@@ -16,6 +16,7 @@
  *   tarifas  = taxa por criado_em − taxa por cancelado_em
  *   recebido = (presente + taxa + adicional) por criado_em − o mesmo por cancelado_em
  */
+import { writeFile } from 'node:fs/promises';
 import type { Locator, Page } from '@playwright/test';
 import { sql } from 'kysely';
 import {
@@ -181,6 +182,41 @@ function notaRecorte(w: SemanaEsperada): string {
   const b = diaDaSemana(addDays(w.ate, -1));
   return a === b ? a : `${a} a ${b}`;
 }
+
+const ESTILOS_1B = (root: Element) => {
+  const pick = (el: Element | undefined) => {
+    if (!el) return null;
+    const s = getComputedStyle(el);
+    const r = el.getBoundingClientRect();
+    return {
+      font: s.fontFamily.split(',')[0],
+      size: s.fontSize,
+      weight: s.fontWeight,
+      ls: s.letterSpacing,
+      color: s.color,
+      h: Math.round(r.height),
+      w: Math.round(r.width),
+    };
+  };
+  const byText = (sel: string, re: RegExp) =>
+    [...root.querySelectorAll(sel)].find((e) => re.test((e.textContent ?? '').trim()));
+  return {
+    h1: pick(byText('h1', /^Receita EuNeném$/)),
+    subtitulo: pick(byText('p', /^Taxas da plataforma menos cancelamentos\.$/)),
+    atualizado: pick(byText('p', /^Atualizado/)),
+    kpiTitulo: pick(byText('h3', /^Mês atual$/i)),
+    kpiFaixa: pick(byText('span', /^01\/10/)),
+    kpiValor: pick(byText('p', /^R\$\s?\d/)),
+    kpiComp: pick(byText('p', /^Setembro:/)),
+    kpiCard: pick(byText('article', /Mês atual/i)),
+    legendaEscala: pick(byText('span', /^cada série/)),
+    h2Mes: pick(byText('h2', /^Por mês$/)),
+    h2Semanas: pick(byText('h2', /^Semanas de/)),
+    eixoMes: pick(byText('span', /^set\/26$/)),
+    notaTarifas: pick(byText('p', /^Tarifas EuNeném:/)),
+    notaRecebido: pick(byText('p', /^Recebido no banco:/)),
+  };
+};
 
 async function semOverflow(page: Page, onde: string) {
   const g = await page.evaluate(() => ({
@@ -395,6 +431,24 @@ test('q4pfz: Receita 1b — KPIs, meses, semanas do mês e notas de definição'
           kSemanaAnterior.recebido,
         );
 
+        // Fidelidade ao 1b: título do KPI em mono, espaçado e em ink-soft; h1
+        // com tracking −0,02em. (Regra global `[data-admin] h1–h4` fora de
+        // @layer não pode vencer os utilitários.)
+        const tituloKpi = await cardMes
+          .locator('h3, [data-testid=receita-kpi-titulo]')
+          .first()
+          .evaluate((el) => {
+            const st = getComputedStyle(el);
+            return { font: st.fontFamily, ls: st.letterSpacing, color: st.color };
+          });
+        expect(tituloKpi.font, 'título do KPI em monospace').toMatch(/mono/i);
+        expect(tituloKpi.ls).toBe('1.32px');
+        expect(tituloKpi.color).toBe('rgb(122, 90, 108)');
+        const lsH1 = await page
+          .getByRole('heading', { level: 1, name: 'Receita EuNeném' })
+          .evaluate((el) => getComputedStyle(el).letterSpacing);
+        expect(lsH1, 'h1 com tracking −0,02em (30px ⇒ −0,6px)').toBe('-0.6px');
+
         // ── Legenda: as duas séries juntas, sem alternância ───────────────
         await expect(page.getByText('cada série na sua própria escala')).toBeVisible();
         await expect(page.getByRole('tab')).toHaveCount(0);
@@ -490,9 +544,15 @@ test('q4pfz: Receita 1b — KPIs, meses, semanas do mês e notas de definição'
           'Tarifas EuNeném: taxas registradas na data do pagamento aprovado, menos cancelamentos na data em que ocorreram.',
         );
         await expect(page.locator('p').filter({ hasText: /^Recebido no banco:/ })).toHaveText(
-          'Recebido no banco: soma dos pagamentos aprovados, menos estornos. É uma estimativa: o custo do provedor e o valor que de fato caiu na conta não são registrados.',
+          'Recebido no banco: soma dos pagamentos aprovados, menos estornos. É uma estimativa: o custo do provedor e o valor que de fato caiu na conta não são registrados. Estornos parciais, disputas e chargebacks não são registrados e ficam fora.',
         );
 
+        // Evidência da comparação visual com o bloco 1b do design: estilos
+        // computados dos elementos-chave (o design é medido do mesmo jeito).
+        await writeFile(
+          testInfo.outputPath(`estilos-${tag}.json`),
+          JSON.stringify(await page.locator('main').first().evaluate(ESTILOS_1B), null, 1),
+        );
         await page.screenshot({
           path: testInfo.outputPath(`receita-1b-${tag}.png`),
           fullPage: true,
