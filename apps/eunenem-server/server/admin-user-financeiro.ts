@@ -107,7 +107,7 @@ export interface CampanhaAdministradaMeta {
   readonly titulo: string;
   readonly criadaEm: Date;
   readonly administradores: readonly CoadminAdmin[];
-  /** Celular do titular do recebedor ATIVO, EM CLARO — o router mascara antes do wire. Nunca logar. */
+  /** Celular do titular do recebedor ATIVO, EM CLARO — o router só normaliza para dígitos. Nunca logar. */
   readonly celularTitularRaw: string | null;
 }
 
