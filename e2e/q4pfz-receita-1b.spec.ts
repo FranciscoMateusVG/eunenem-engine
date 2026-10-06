@@ -488,6 +488,13 @@ test('q4pfz: Receita 1b — KPIs, meses, semanas do mês e notas de definição'
           }
         }
 
+        // O mês corrente aparece sem rolar: o gráfico abre rolado até o fim
+        // (no mobile ele rola por dentro).
+        const caixaAtual = await barrasMes.nth(11).boundingBox();
+        expect(caixaAtual, 'barra do mês corrente renderizada').not.toBeNull();
+        expect(caixaAtual?.x ?? -1, `mês corrente à vista em ${tag}`).toBeGreaterThanOrEqual(0);
+        expect((caixaAtual?.x ?? 0) + (caixaAtual?.width ?? 0)).toBeLessThanOrEqual(viewport.width);
+
         // ── Semanas do mês corrente: seg–dom recortadas, futuras tracejadas
         await expect(
           page.getByRole('heading', { name: new RegExp(`^Semanas de ${nomeMes}$`, 'i') }),
