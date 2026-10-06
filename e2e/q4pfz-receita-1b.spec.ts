@@ -16,13 +16,14 @@
  *   tarifas  = taxa por criado_em − taxa por cancelado_em
  *   recebido = (presente + taxa + adicional) por criado_em − o mesmo por cancelado_em
  */
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { sql } from 'kysely';
 import {
   addDays,
   localDateInSaoPaulo,
   mesAtual,
   semanaAtual,
+  startOfIsoWeek,
   startOfMonth,
 } from '../apps/eunenem-server/pages/lib/receitaPeriodo.js';
 import { createDatabase, type Database } from '../src/adapters/database.js';
@@ -87,6 +88,82 @@ function somar(eventos: readonly Evento[], de: string, ate: string) {
     }
   }
   return { tarifas, recebido };
+}
+
+// Cores do design 1b (Receita.dc.html): cheias para períodos fechados, claras
+// para o período em andamento.
+const LILAS = 'rgb(167, 123, 190)'; // #a77bbe
+const TEAL = 'rgb(63, 139, 146)'; // #3f8b92
+const LILAS_CLARO = 'rgb(232, 213, 240)'; // #e8d5f0
+const TEAL_CLARO = 'rgb(222, 241, 243)'; // #def1f3
+
+function ddmm(data: string): string {
+  return `${data.slice(8, 10)}/${data.slice(5, 7)}`;
+}
+
+function ddmmaaaa(data: string): string {
+  return `${ddmm(data)}/${data.slice(0, 4)}`;
+}
+
+function cap(texto: string): string {
+  return texto.charAt(0).toUpperCase() + texto.slice(1);
+}
+
+async function expectKpi(
+  card: Locator,
+  serie: 'tarifas' | 'recebido',
+  valor: number,
+  prefixo: string,
+  comparacao: number,
+) {
+  const coluna = card.getByTestId(`receita-kpi-${serie}`);
+  await expect(coluna.getByTestId('receita-kpi-valor')).toHaveText(brl(valor));
+  await expect(coluna.getByTestId('receita-kpi-comparacao')).toHaveText(
+    new RegExp(`^${prefixo}${brl(comparacao).source}$`),
+  );
+}
+
+/** Cores de fundo não transparentes dos descendentes (as barras). */
+function coresDasBarras(item: Locator): Promise<string[]> {
+  return item.evaluate((el) =>
+    [...el.querySelectorAll('*')]
+      .map((n) => getComputedStyle(n).backgroundColor)
+      .filter((c) => c !== 'rgba(0, 0, 0, 0)' && c !== 'transparent'),
+  );
+}
+
+function temBordaTracejada(item: Locator): Promise<boolean> {
+  return item.evaluate((el) =>
+    [el, ...el.querySelectorAll('*')].some((n) => {
+      const st = getComputedStyle(n);
+      return [
+        st.borderTopStyle,
+        st.borderRightStyle,
+        st.borderBottomStyle,
+        st.borderLeftStyle,
+      ].some((b) => b === 'dashed');
+    }),
+  );
+}
+
+interface SemanaEsperada {
+  readonly de: string;
+  readonly ate: string;
+  readonly estado: 'passada' | 'atual' | 'futura';
+}
+
+/** Semanas seg–dom do mês de `hoje`, recortadas ao mês. */
+function semanasDoMes(mes: { de: string; ate: string }, hoje: string): SemanaEsperada[] {
+  const out: SemanaEsperada[] = [];
+  let de = mes.de;
+  while (de < mes.ate) {
+    const proxima = addDays(startOfIsoWeek(de), 7);
+    const ate = proxima < mes.ate ? proxima : mes.ate;
+    const estado = hoje >= ate ? 'passada' : hoje < de ? 'futura' : 'atual';
+    out.push({ de, ate, estado });
+    de = ate;
+  }
+  return out;
 }
 
 async function semOverflow(page: Page, onde: string) {
@@ -210,6 +287,8 @@ test('q4pfz: Receita 1b — KPIs, meses, semanas do mês e notas de definição'
     const kSemanaAnterior = somar(eventos, addDays(semana.de, -7), semana.de);
     const nomeMesAnterior = MESES_PT[Number((meses[10] as string).slice(5, 7)) - 1] as string;
     const nomeMes = MESES_PT[Number(mes.de.slice(5, 7)) - 1] as string;
+    const semanasEsperadas = semanasDoMes(mes, hoje);
+    expect(semanasEsperadas.filter((w) => w.estado === 'atual')).toHaveLength(1);
 
     let session: Awaited<ReturnType<typeof mintMagicLinkSession>>;
     try {
@@ -257,52 +336,134 @@ test('q4pfz: Receita 1b — KPIs, meses, semanas do mês e notas de definição'
           page.getByRole('heading', { level: 1, name: 'Receita EuNeném' }),
         ).toBeVisible();
         await expect(page.getByText('Taxas da plataforma menos cancelamentos.')).toBeVisible();
+        await expect(
+          page.getByText(`Atualizado ${ddmmaaaa(hoje)} · horário de São Paulo`),
+        ).toBeVisible();
         await expect(page.locator('body')).not.toContainText(/lucro|l[ií]quid/i);
         await expect(page.locator('body')).not.toContainText(brl(99_900));
 
-        // ── KPIs ──────────────────────────────────────────────────────────
-        // TODO(contrato UI): seletores definitivos dos cards.
-        const cardMes = page.locator('article').filter({ hasText: 'Mês atual' });
-        await expect(cardMes).toContainText(brl(kMes.tarifas));
-        await expect(cardMes).toContainText(brl(kMes.recebido));
-        await expect(cardMes).toContainText(
-          new RegExp(`${nomeMesAnterior}: ${brl(kMesAnterior.tarifas).source}`, 'i'),
+        // ── KPIs: duas colunas por cartão (Tarifas | Recebido) ────────────
+        const cardMes = page.getByTestId('receita-kpi-mes');
+        await expect(cardMes).toHaveAttribute('aria-label', 'Mês atual');
+        await expect(cardMes.getByTestId('receita-kpi-faixa')).toHaveText(
+          `${ddmm(mes.de)} – ${ddmm(hoje)}`,
         );
-        await expect(cardMes).toContainText(
-          new RegExp(`${nomeMesAnterior}: ${brl(kMesAnterior.recebido).source}`, 'i'),
+        await expectKpi(
+          cardMes,
+          'tarifas',
+          kMes.tarifas,
+          `${cap(nomeMesAnterior)}: `,
+          kMesAnterior.tarifas,
         );
-        const cardSemana = page.locator('article').filter({ hasText: 'Semana atual' });
-        await expect(cardSemana).toContainText(brl(kSemana.tarifas));
-        await expect(cardSemana).toContainText(brl(kSemana.recebido));
-        await expect(cardSemana).toContainText(
-          new RegExp(`Semana anterior: ${brl(kSemanaAnterior.tarifas).source}`),
+        await expectKpi(
+          cardMes,
+          'recebido',
+          kMes.recebido,
+          `${cap(nomeMesAnterior)}: `,
+          kMesAnterior.recebido,
         );
-        await expect(cardSemana).toContainText(
-          new RegExp(`Semana anterior: ${brl(kSemanaAnterior.recebido).source}`),
+        const cardSemana = page.getByTestId('receita-kpi-semana');
+        await expect(cardSemana).toHaveAttribute('aria-label', 'Semana atual');
+        await expectKpi(
+          cardSemana,
+          'tarifas',
+          kSemana.tarifas,
+          'Semana anterior: ',
+          kSemanaAnterior.tarifas,
+        );
+        await expectKpi(
+          cardSemana,
+          'recebido',
+          kSemana.recebido,
+          'Semana anterior: ',
+          kSemanaAnterior.recebido,
         );
 
-        // ── Legenda: duas séries juntas, sem alternância ──────────────────
+        // ── Legenda: as duas séries juntas, sem alternância ───────────────
         await expect(page.getByText('cada série na sua própria escala')).toBeVisible();
         await expect(page.getByRole('tab')).toHaveCount(0);
-
-        // ── Por mês / semanas: seções ─────────────────────────────────────
-        await expect(page.getByRole('heading', { name: 'Por mês' })).toBeVisible();
         await expect(
-          page.getByRole('heading', { name: new RegExp(`Semanas de ${nomeMes}`, 'i') }),
+          page.getByRole('button', { name: /^(Tarifas EuNeném|Recebido no banco)$/ }),
+        ).toHaveCount(0);
+
+        // ── Por mês: 12 meses, só o corrente parcial, barras pareadas ─────
+        await expect(page.getByRole('heading', { name: 'Por mês' })).toBeVisible();
+        const barrasMes = page.getByTestId('receita-mes');
+        await expect(barrasMes).toHaveCount(12);
+        for (let k = 0; k < 12; k++) {
+          const de = meses[k] as string;
+          const ate = k === 11 ? amanha : (meses[k + 1] as string);
+          const esperado = somar(eventos, de, ate);
+          const barra = barrasMes.nth(k);
+          await expect(barra).toHaveAttribute('data-mes', de);
+          await expect(barra).toHaveAttribute('data-parcial', k === 11 ? 'true' : 'false');
+          const rotulo = await barra.getAttribute('aria-label');
+          expect(rotulo, `aria-label do mês ${de}`).toMatch(brl(esperado.tarifas));
+          expect(rotulo).toMatch(new RegExp(`tarifas ${brl(esperado.tarifas).source}`));
+          expect(rotulo).toMatch(new RegExp(`recebido ${brl(esperado.recebido).source}`));
+          if (k === 11) expect(rotulo).toContain('(parcial)');
+          await expect(barra.locator('[data-serie=tarifas]')).toBeVisible();
+          await expect(barra.locator('[data-serie=recebido]')).toBeVisible();
+          const cores = await coresDasBarras(barra);
+          if (k === 11) {
+            expect(cores, `mês parcial ${de} em tons claros`).toEqual(
+              expect.arrayContaining([LILAS_CLARO, TEAL_CLARO]),
+            );
+            expect(cores).not.toContain(LILAS);
+            expect(cores).not.toContain(TEAL);
+          } else {
+            expect(cores, `mês fechado ${de} em tons cheios`).toEqual(
+              expect.arrayContaining([LILAS, TEAL]),
+            );
+          }
+        }
+
+        // ── Semanas do mês corrente: seg–dom recortadas, futuras tracejadas
+        await expect(
+          page.getByRole('heading', { name: new RegExp(`^Semanas de ${nomeMes}$`, 'i') }),
         ).toBeVisible();
         await expect(page.getByText('semana de segunda a domingo')).toBeVisible();
+        const barrasSemana = page.getByTestId('receita-semana');
+        await expect(barrasSemana).toHaveCount(semanasEsperadas.length);
+        for (let k = 0; k < semanasEsperadas.length; k++) {
+          const w = semanasEsperadas[k] as SemanaEsperada;
+          const barra = barrasSemana.nth(k);
+          await expect(barra).toHaveAttribute('data-de', w.de);
+          await expect(barra).toHaveAttribute('data-estado', w.estado);
+          const cores = await coresDasBarras(barra);
+          const tracejada = await temBordaTracejada(barra);
+          if (w.estado === 'futura') {
+            await expect(barra.locator('[data-serie=tarifas]')).toHaveText('—');
+            await expect(barra.locator('[data-serie=recebido]')).toHaveText('');
+            await expect(barra).toHaveAttribute('aria-label', /ainda não começou/);
+            expect(tracejada, `semana futura ${w.de} tracejada`).toBe(true);
+            expect(cores).not.toContain(LILAS);
+            expect(cores).not.toContain(TEAL);
+          } else {
+            const esperado = somar(eventos, w.de, w.ate);
+            await expect(barra.locator('[data-serie=tarifas]')).toHaveText(brl(esperado.tarifas));
+            await expect(barra.locator('[data-serie=recebido]')).toHaveText(brl(esperado.recebido));
+            expect(tracejada, `semana ${w.estado} ${w.de} sem tracejado`).toBe(false);
+            if (w.estado === 'atual') {
+              await expect(barra).toContainText('esta semana');
+              await expect(barra).toHaveAttribute('aria-label', /\(esta semana\)/);
+              expect(cores).toEqual(expect.arrayContaining([LILAS_CLARO, TEAL_CLARO]));
+            } else {
+              expect(cores).toEqual(expect.arrayContaining([LILAS, TEAL]));
+            }
+          }
+        }
 
-        // ── Notas de definição (texto exato do design) ────────────────────
-        await expect(
-          page.getByText(
-            'taxas registradas na data do pagamento aprovado, menos cancelamentos na data em que ocorreram.',
-          ),
-        ).toBeVisible();
-        await expect(
-          page.getByText(
-            'soma dos pagamentos aprovados, menos estornos. É uma estimativa: o custo do provedor e o valor que de fato caiu na conta não são registrados.',
-          ),
-        ).toBeVisible();
+        // ── Sem nada a conferir, o aviso não existe ───────────────────────
+        await expect(page.getByTestId('receita-aviso')).toHaveCount(0);
+
+        // ── Notas de definição (texto do design) ──────────────────────────
+        await expect(page.locator('p').filter({ hasText: /^Tarifas EuNeném:/ })).toHaveText(
+          'Tarifas EuNeném: taxas registradas na data do pagamento aprovado, menos cancelamentos na data em que ocorreram.',
+        );
+        await expect(page.locator('p').filter({ hasText: /^Recebido no banco:/ })).toHaveText(
+          'Recebido no banco: soma dos pagamentos aprovados, menos estornos. É uma estimativa: o custo do provedor e o valor que de fato caiu na conta não são registrados.',
+        );
 
         await page.screenshot({
           path: testInfo.outputPath(`receita-1b-${tag}.png`),
@@ -319,6 +480,38 @@ test('q4pfz: Receita 1b — KPIs, meses, semanas do mês e notas de definição'
         });
         await context.close();
       }
+    }
+
+    // ── Com algo a conferir, o aviso aparece ──────────────────────────────
+    // Pagamento estornado cuja taxa não tem data de cancelamento.
+    await seed.pagamento({
+      campaignId: campanha,
+      taxaCents: 640,
+      criadoEm: new Date(agora.getTime() - 120_000),
+      status: 'estornado',
+    });
+    const context = await browser.newContext({ viewport: { width: 1280, height: 1400 } });
+    try {
+      await context.addCookies([browserCookieFor(session, baseURL)]);
+      const page = await context.newPage();
+      await page.goto(`${baseURL}/admin/pagamentos/receita`);
+      const aviso = page.getByTestId('receita-aviso');
+      await expect(aviso).toBeVisible();
+      await expect(aviso).toHaveAttribute('role', 'status');
+      await expect(aviso).toHaveAttribute('aria-label', 'Conferir');
+      await expect(aviso.getByTestId('receita-aviso-estornado')).toHaveText(
+        new RegExp(
+          `^1 taxa\\(s\\) de pagamento estornado sem data de cancelamento \\(${brl(640).source}\\): seguem somadas\\.$`,
+        ),
+      );
+      await expect(aviso.getByTestId('receita-aviso-cancelado')).toHaveCount(0);
+      await expect(aviso.getByTestId('receita-aviso-conciliacao')).toHaveCount(0);
+      await page.screenshot({
+        path: testInfo.outputPath('receita-1b-aviso-1280.png'),
+        fullPage: true,
+      });
+    } finally {
+      await context.close();
     }
   } finally {
     await db.destroy();
