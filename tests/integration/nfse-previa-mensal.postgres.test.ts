@@ -458,6 +458,31 @@ describe('assinatura XMLDsig (verificada sem o xml-crypto)', () => {
     expect(p.dps.xml).not.toContain('Signature');
   });
 
+  for (const cadeia of ['folha_primeiro', 'ac_primeiro'] as const) {
+    it(`PFX com cadeia (${cadeia}): KeyInfo e CNPJ são os da folha, que casa com a chave`, async () => {
+      await seedBordasDeMarco();
+      const comCadeia = gerarPfxDeTeste({ cnpj: CNPJ, cadeia });
+      const p = await previa('2032-03', { env: envComCert(comCadeia, 'base64') });
+      if (p.dps.status !== 'gerada') throw new Error(p.dps.status);
+      expect(p.dps.assinatura).toMatchObject({
+        status: 'assinada',
+        certificadoCnpj: CNPJ,
+        certificadoConfereComPrestador: true,
+      });
+      const check = verificarAssinaturaDps(p.dps.xml);
+      expect(check.certificadoBase64).toBe(comCadeia.certificadoBase64);
+      expect(check.assinaturaConfere).toBe(true);
+    });
+  }
+
+  it('senha com espaço nas pontas é usada como está', async () => {
+    await seedBordasDeMarco();
+    const comEspaco = gerarPfxDeTeste({ cnpj: CNPJ, senha: ' senha com espaço ' });
+    const p = await previa('2032-03', { env: envComCert(comEspaco, 'base64') });
+    if (p.dps.status !== 'gerada') throw new Error(p.dps.status);
+    expect(p.dps.assinatura.status).toBe('assinada');
+  });
+
   it('certificado de outro CNPJ assina, mas avisa', async () => {
     await seedBordasDeMarco();
     const outro = gerarPfxDeTeste({ cnpj: OUTRO_CNPJ });
