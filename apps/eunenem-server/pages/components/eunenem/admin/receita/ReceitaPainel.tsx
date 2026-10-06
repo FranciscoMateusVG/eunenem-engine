@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { formatBRL } from "@/lib/formatBRL";
 import {
   alturasPareadas,
@@ -187,15 +188,34 @@ function Legenda() {
   );
 }
 
+/**
+ * Rola o contêiner até o item corrente ficar visível (encostado à direita).
+ * Só tem efeito quando o gráfico rola por dentro (telas estreitas).
+ */
+export function rolarAteCorrente(caixa: HTMLElement, seletor: string): void {
+  const item = caixa.querySelector<HTMLElement>(seletor);
+  if (!item) return;
+  // `caixa` é `relative`: offsetLeft do item já é medido a partir dela.
+  const fim = item.offsetLeft + item.offsetWidth;
+  caixa.scrollLeft = Math.max(0, fim - caixa.clientWidth + 8);
+}
+
 function Grafico({
   titulo,
   legenda,
+  corrente,
   children,
 }: {
   titulo: string;
   legenda: string;
+  /** Seletor do item que precisa abrir visível (mês ou semana corrente). */
+  corrente: string;
   children: React.ReactNode;
 }) {
+  const rolagem = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (rolagem.current) rolarAteCorrente(rolagem.current, corrente);
+  }, [corrente]);
   return (
     <section className="flex flex-col gap-5 rounded-lg border border-line px-6 pb-4 pt-5">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
@@ -203,7 +223,9 @@ function Grafico({
         <span className={MONO}>{legenda}</span>
       </div>
       {/* Em telas estreitas o gráfico rola por dentro; a página não. */}
-      <div className="overflow-x-auto lg:overflow-visible">{children}</div>
+      <div ref={rolagem} className="relative overflow-x-auto lg:overflow-visible">
+        {children}
+      </div>
     </section>
   );
 }
@@ -254,7 +276,7 @@ export function ReceitaPorMes({ meses }: Pick<ReceitaPainelData, "meses">) {
     corrente?.parcial ? ` · ${nomeMes(corrente.de)} em andamento` : ""
   }`;
   return (
-    <Grafico titulo="Por mês" legenda={legenda}>
+    <Grafico titulo="Por mês" legenda={legenda} corrente='[data-parcial="true"]'>
       <div className="flex min-w-[860px] flex-col px-2 lg:min-w-0 lg:px-0">
         <ol className="flex h-[220px] items-stretch gap-3">
           {meses.map((m) => {
@@ -324,7 +346,11 @@ export function ReceitaSemanasDoMes({
   const maxT = maximo(visiveis.map((s) => s.tarifas.resultadoCents));
   const maxR = maximo(visiveis.map((s) => s.recebido.resultadoCents));
   return (
-    <Grafico titulo={`Semanas de ${nomeMes(mes)}`} legenda="semana de segunda a domingo">
+    <Grafico
+      titulo={`Semanas de ${nomeMes(mes)}`}
+      legenda="semana de segunda a domingo"
+      corrente='[data-estado="atual"]'
+    >
       <div className="flex min-w-[520px] flex-col px-2 lg:min-w-0 lg:px-0">
         <ol className="flex h-[180px] items-stretch gap-6">
           {semanas.map((s) => {
