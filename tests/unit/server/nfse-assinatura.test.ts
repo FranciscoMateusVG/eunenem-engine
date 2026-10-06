@@ -61,7 +61,45 @@ function dps() {
   });
 }
 
+/** PFX [AC, folha] sem localKeyId: o par só se acha pela chave pública. */
+function gerarPfxComAcPrimeiro(cn: string): Buffer {
+  const acKeys = forge.pki.rsa.generateKeyPair(2048);
+  const ac = forge.pki.createCertificate();
+  ac.publicKey = acKeys.publicKey;
+  ac.serialNumber = '02';
+  ac.validity.notBefore = new Date('2025-01-01T00:00:00Z');
+  ac.validity.notAfter = new Date('2030-01-01T00:00:00Z');
+  const acAttrs = [{ name: 'commonName', value: 'AC TESTE RFB:99888777000110' }];
+  ac.setSubject(acAttrs);
+  ac.setIssuer(acAttrs);
+  ac.sign(acKeys.privateKey, forge.md.sha256.create());
+
+  const keys = forge.pki.rsa.generateKeyPair(2048);
+  const folha = forge.pki.createCertificate();
+  folha.publicKey = keys.publicKey;
+  folha.serialNumber = '03';
+  folha.validity.notBefore = new Date('2026-01-01T00:00:00Z');
+  folha.validity.notAfter = new Date('2027-01-01T00:00:00Z');
+  folha.setSubject([{ name: 'commonName', value: cn }]);
+  folha.setIssuer(acAttrs);
+  folha.sign(acKeys.privateKey, forge.md.sha256.create());
+
+  const p12 = forge.pkcs12.toPkcs12Asn1(keys.privateKey, [ac, folha], SENHA, {
+    algorithm: '3des',
+    generateLocalKeyId: false,
+  });
+  return Buffer.from(forge.asn1.toDer(p12).getBytes(), 'binary');
+}
+
 describe('carregarCertificado', () => {
+  it('PFX com a AC antes da folha: usa o certificado que casa com a chave privada', () => {
+    const material = carregarCertificado(
+      new CertificadoNfse('base64', () => gerarPfxComAcPrimeiro('EUNENEM:11222333000181'), SENHA),
+    );
+    expect(material.cnpj).toBe('11222333000181');
+    expect(material.validoAte.toISOString()).toBe('2027-01-01T00:00:00.000Z');
+  });
+
   it('extrai CNPJ do CN (padrão e-CNPJ "RAZAO:CNPJ") e validade', () => {
     const material = carregarCertificado(new CertificadoNfse('base64', () => pfx, SENHA));
     expect(material.cnpj).toBe('11222333000181');

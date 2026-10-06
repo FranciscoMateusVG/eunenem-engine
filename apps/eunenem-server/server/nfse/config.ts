@@ -228,7 +228,8 @@ export function parseNfseConfig(env: NfseEnv): NfseConfig {
   const cNBS = campo<string | null, null>('NFSE_CNBS', CNbsSchema, null);
   const descricaoServico = campo('NFSE_DESCRICAO_SERVICO', DescricaoSchema, DESCRICAO_SERVICO_PADRAO);
 
-  const certificado = parseCertificado(ler, problemas);
+  // A senha NÃO passa por trim: espaços nas pontas fazem parte dela.
+  const certificado = parseCertificado(ler, env.NFSE_CERT_PASSWORD ?? '', problemas);
 
   return {
     prestadorCnpj,
@@ -251,11 +252,12 @@ export function parseNfseConfig(env: NfseEnv): NfseConfig {
 
 function parseCertificado(
   ler: (nome: NfseVariavel) => string | undefined,
+  senhaCrua: string,
   problemas: ProblemaConfig[],
 ): CertificadoNfse | null {
   const caminho = ler('NFSE_CERT_PATH');
   const base64 = ler('NFSE_CERT_BASE64');
-  const senha = ler('NFSE_CERT_PASSWORD') ?? '';
+  const senha = senhaCrua;
 
   if (caminho !== undefined && base64 !== undefined) {
     problemas.push({ variavel: 'NFSE_CERT_PATH', motivo: 'invalido' });
