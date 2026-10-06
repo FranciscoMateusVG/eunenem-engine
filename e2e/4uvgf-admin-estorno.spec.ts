@@ -60,12 +60,14 @@ const BLOCKED_COPY =
 async function seedAprovadoPagamento(
   db: Database,
   seed: { idCampanha: string; idOpcaoPresentes: string },
+  provenance?: 'stripe',
 ): Promise<string> {
   const repos = buildSeedGiftRepos(db);
   const { pagamentoId } = await seedMultiItemApprovedPagamento(repos, {
     idCampanha: seed.idCampanha,
     idOpcaoPresentes: seed.idOpcaoPresentes,
     items: [{ nome: `Estorno Alvo ${randomUUID().slice(0, 8)}`, valorCents: 5000 }],
+    ...(provenance ? { provenance } : {}),
   });
   return pagamentoId;
 }
@@ -186,7 +188,7 @@ test.describe('aperture-4uvgf — admin estorno (refund) walks', () => {
   }) => {
     const db = createDatabase(DATABASE_URL);
     try {
-      const idPagamento = await seedAprovadoPagamento(db, seededData);
+      const idPagamento = await seedAprovadoPagamento(db, seededData, 'stripe');
 
       const { dialog, confirm } = await walkToArmedConfirm(page, idPagamento);
       await confirm.click();

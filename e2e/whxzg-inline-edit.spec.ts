@@ -24,7 +24,8 @@
  * persist-payload discipline for uploads is pinned at source level in
  * tests/unit/server/whxzg-inline-edit.test.ts.
  */
-import { expect, type Page, test } from './fixtures.js';
+import type { Page } from '@playwright/test';
+import { expect, test } from './fixtures.js';
 
 const cssVar = (page: Page, name: string) =>
   page.evaluate(
@@ -91,10 +92,18 @@ test.describe('Owner inline editing on /pagina/:slug (aperture-whxzg)', () => {
       await page.getByTestId(`edit-${field}`).click();
       await expect(panel.locator(`#${id}`)).toHaveAttribute('role', 'button');
       await expect(panel.locator(`#${id}`)).toHaveAttribute('tabindex', '0');
-      await expect(panel.locator('[id^="tweaks-foto-"]')).toHaveCount(1);
+      // Exactly one photo picker (role=button dropzone) is shown. Each inline
+      // dropzone also owns a `${id}-status` live region (aria-describedby),
+      // which shares the id prefix but is not a second control.
+      await expect(panel.locator('[id^="tweaks-foto-"][role="button"]')).toHaveCount(1);
+      await expect(panel.locator(`#${id}-status`)).toHaveAttribute('role', 'status');
       await expect(panel.getByTestId(disclosure)).toHaveText(/foto salva na hora do envio/);
       await expect(panel.locator('#tweaks-nome-bebe')).toHaveCount(0);
       await expect(panel.locator('#tweaks-historia')).toHaveCount(0);
+      // The floating dock is non-modal but can cover a pencil lower on the
+      // page (e.g. the story photo's), so close it before the next pencil.
+      await page.getByRole('button', { name: 'Fechar', exact: true }).click();
+      await expect(panel).toHaveCount(0);
     }
 
     // ── Title icon → focus on the nome input; Cancelar discards the draft ──

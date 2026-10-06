@@ -278,9 +278,12 @@ async function cleanupOwned(
     const operation = await sql<{ retained: boolean }>`
       SELECT EXISTS (
         SELECT 1 FROM payment_provider_operations WHERE payment_id = ${pagamentoId}
+      ) OR EXISTS (
+        SELECT 1 FROM stripe_refund_operations WHERE payment_id = ${pagamentoId}
       ) AS retained
     `.execute(db);
-    // Provider-operation attempts are append-only by design. Preserve the
+    // Provider-operation attempts (Inter) and Stripe refund operations/facts
+    // are append-only by design. Preserve the
     // complete audited graph in this ephemeral, single-worker database rather
     // than partially deleting its payment/ledger/contribution rows.
     if (operation.rows[0]?.retained) continue;
@@ -432,6 +435,7 @@ test.describe('a4pqt — literal admin refund journeys', () => {
         idCampanha: seededData.idCampanha,
         idOpcaoPresentes: seededData.idOpcaoPresentes,
         items: [{ nome: `A4PQT Stripe ${randomUUID().slice(0, 8)}`, valorCents: 5000 }],
+        provenance: 'stripe',
       });
       paymentIds.push(seeded.pagamentoId);
       contributionIds.push(...seeded.contribuicaoIds);

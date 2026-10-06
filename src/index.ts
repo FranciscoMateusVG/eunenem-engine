@@ -1364,6 +1364,8 @@ export {
   CriarSessaoUsuarioInputSchema,
   criarSessaoUsuario,
 } from './use-cases/usuario/criar-sessao-usuario.js';
+export type { DesativarContaUsuarioDeps } from './use-cases/usuario/desativar-conta-usuario.js';
+export { desativarContaUsuario } from './use-cases/usuario/desativar-conta-usuario.js';
 export type {
   EmitirUrlUploadFotoDeps,
   EmitirUrlUploadFotoInput,

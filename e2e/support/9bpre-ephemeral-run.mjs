@@ -5,7 +5,11 @@
 // fim. Não altera playwright.config.ts, dependências nem CI.
 //
 // Uso (da raiz do repo, Node 22):
-//   node --import tsx e2e/support/9bpre-ephemeral-run.mjs
+//   node --import tsx e2e/support/9bpre-ephemeral-run.mjs [spec]
+//
+// `spec` é opcional (padrão: o spec do 9bpre). Outros specs que seguem o
+// mesmo contrato de identidade do banco (E2E_9BPRE_*) reusam este runner —
+// ex.: e2e/q4pfz-receita-1b.spec.ts.
 //
 // Garantias:
 //   - nunca usa o Postgres de desenvolvimento (localhost:54320);
@@ -24,7 +28,12 @@ import { fileURLToPath } from 'node:url';
 import { sql } from 'kysely';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const SPEC = 'e2e/9bpre-admin-receita.spec.ts';
+const SPEC_PADRAO = 'e2e/9bpre-admin-receita.spec.ts';
+const SPEC = process.argv[2] ?? SPEC_PADRAO;
+if (!/^e2e\/[\w.-]+\.spec\.ts$/.test(SPEC)) {
+  console.error('[9bpre-runner] spec inválido: use e2e/<nome>.spec.ts');
+  process.exit(2);
+}
 const PORTS = [3002, 3003, 3004];
 const DEV_DB_PORT = '54320';
 

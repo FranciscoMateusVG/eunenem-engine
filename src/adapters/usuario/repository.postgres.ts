@@ -64,6 +64,7 @@ type UsuarioRow = {
   /** Plan 0018 Phase A (aperture-omswg / migration 024). */
   tutorial_completado_em: Date | null;
   onboarding_concluido_em: Date | null;
+  desativado_em: Date | null;
 };
 
 type ContaRow = {
@@ -138,6 +139,7 @@ export class UsuarioRepositoryPostgres implements UsuarioRepository {
               // the overlay fires on first visit.
               tutorial_completado_em: usuario.tutorialCompletadoEm,
               onboarding_concluido_em: usuario.onboardingConcluidoEm,
+              desativado_em: usuario.desativadoEm ?? null,
             })
             .execute();
 
@@ -421,6 +423,7 @@ export class UsuarioRepositoryPostgres implements UsuarioRepository {
             // Plan 0018 Phase A (aperture-omswg / migration 024).
             'usuarios.tutorial_completado_em as tutorial_completado_em',
             'usuarios.onboarding_concluido_em as onboarding_concluido_em',
+            'usuarios.desativado_em as desativado_em',
           ])
           .where('contas.id', '=', idConta)
           .where('usuarios.id_plataforma', '=', idPlataforma)
@@ -558,6 +561,27 @@ export class UsuarioRepositoryPostgres implements UsuarioRepository {
     });
   }
 
+  async desativarConta(idUsuario: IdUsuario, desativadoEm: Date): Promise<void> {
+    return tracer.startActiveSpan('db.usuarios.desativarConta', async (span) => {
+      span.setAttributes({ ...DB_USUARIOS_ATTRS, 'db.operation.name': 'UPDATE' });
+      try {
+        await this.db
+          .updateTable('usuarios')
+          .set({ desativado_em: desativadoEm })
+          .where('id', '=', idUsuario)
+          .where('desativado_em', 'is', null)
+          .execute();
+        span.setStatus({ code: SpanStatusCode.OK });
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
   async removeRegistroDomain(idUsuario: IdUsuario): Promise<void> {
     return tracer.startActiveSpan('db.usuarios.removeRegistroDomain', async (span) => {
       span.setAttributes({ ...DB_USUARIOS_ATTRS, 'db.operation.name': 'DELETE' });
@@ -618,6 +642,7 @@ function toUsuario(row: UsuarioRow): Usuario {
     // the user completes (or skips) the tutorial overlay.
     tutorialCompletadoEm: row.tutorial_completado_em,
     onboardingConcluidoEm: row.onboarding_concluido_em,
+    ...(row.desativado_em ? { desativadoEm: row.desativado_em } : {}),
   };
 }
 

@@ -24,7 +24,7 @@ import { createTestDatabase, type TestDatabase } from '../helpers/test-db.js';
  *   - buckets por linha com fatos explícitos (estorno_ativo via devolução PIX
  *     em_processamento; disponivel_canonico via predicado da branch);
  *   - cross-check SUM independente = recebido (diferença 0 em base sã);
- *   - coadmins explícitos; celular do titular mascarado SÓ no summary;
+ *   - coadmins explícitos; celular do titular COMPLETO SÓ no summary;
  *   - keyset determinístico de lançamentos (sem duplicar/perder), cursor de
  *     outra conta / inválido ⇒ BAD_REQUEST;
  *   - repasses com estadoExtrato da projeção compartilhada;
@@ -390,12 +390,10 @@ describe('admin.usuarios.financeiro.summary', () => {
     expect(b?.administradores).toEqual([
       { idConta: OWNER_CONTA, nomeExibicao: 'Owner Fin', email: 'owner-fin@example.test' },
     ]);
-    expect(a?.celularTitularMascarado).toBe('(**) *****-4321');
-    expect(b?.celularTitularMascarado).toBeNull();
+    expect(a?.celularTitular).toBe(CELULAR_RAW);
+    expect(b?.celularTitular).toBeNull();
 
     const wire = JSON.stringify(s);
-    expect(wire).not.toContain(CELULAR_RAW);
-    expect(wire).not.toContain('1198765');
     expect(wire).not.toContain('Outra plataforma');
   });
 

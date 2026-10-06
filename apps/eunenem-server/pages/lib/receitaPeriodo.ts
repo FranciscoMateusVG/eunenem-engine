@@ -2,8 +2,8 @@
 //
 // Única fonte para: datas locais America/Sao_Paulo, semana ISO (seg–dom), mês
 // calendário, intervalo [de, ate) e a lista de buckets da série. Usado pelo
-// servidor (validação + preenchimento da série) e pela página (defaults +
-// query string), para que os dois nunca discordem sobre onde um período
+// servidor (validação + preenchimento da série) e pela página (painel 1b, via
+// receitaPainel.ts), para que os dois nunca discordem sobre onde um período
 // começa.
 //
 // Datas locais viajam como "YYYY-MM-DD". A aritmética usa `Date.UTC` apenas
@@ -81,8 +81,8 @@ export function addDays(date: string, days: number): string {
   return fromCalendar(requireCalendar(date) + days * DAY_MS);
 }
 
-/** Soma meses a uma data que já é dia 1 (único uso: início de mês). */
-function addMonthsToMonthStart(date: string, months: number): string {
+/** Soma meses a uma data que já é dia 1. */
+export function addMonthsToMonthStart(date: string, months: number): string {
   const current = new Date(requireCalendar(date));
   return fromCalendar(
     Date.UTC(current.getUTCFullYear(), current.getUTCMonth() + months, 1),
@@ -137,23 +137,6 @@ export function mesAtual(now: Date): { de: string; ate: string } {
   return { de, ate: addMonthsToMonthStart(de, 1) };
 }
 
-/** Default da aba: os 12 buckets mais recentes, incluindo o corrente. */
-export function periodoPadrao(
-  now: Date,
-  granularidade: Granularidade,
-): PeriodoReceita {
-  if (granularidade === "semana") {
-    const atual = semanaAtual(now);
-    return { de: addDays(atual.de, -77), ate: atual.ate, granularidade };
-  }
-  const atual = mesAtual(now);
-  return {
-    de: addMonthsToMonthStart(atual.de, -11),
-    ate: atual.ate,
-    granularidade,
-  };
-}
-
 export function bucketsDoPeriodo(
   periodo: PeriodoReceita,
 ): { ok: true; buckets: BucketReceita[] } | { ok: false; erro: PeriodoInvalido } {
@@ -179,71 +162,8 @@ export function bucketsDoPeriodo(
   return { ok: true, buckets };
 }
 
-function isGranularidade(value: string | null): value is Granularidade {
-  return value === "semana" || value === "mes";
-}
-
-/**
- * Lê `?de=&ate=&g=` da query string. Qualquer parte ausente ou inválida cai no
- * default do período — a URL nunca deixa a página sem período.
- */
-export function periodoFromSearch(search: string, now: Date): PeriodoReceita {
-  const params = new URLSearchParams(search);
-  const g = params.get("g");
-  const granularidade: Granularidade = isGranularidade(g) ? g : "mes";
-  const de = params.get("de");
-  const ate = params.get("ate");
-  if (de !== null && ate !== null) {
-    const candidato: PeriodoReceita = { de, ate, granularidade };
-    if (bucketsDoPeriodo(candidato).ok) return candidato;
-  }
-  return periodoPadrao(now, granularidade);
-}
-
-export function periodoToSearch(periodo: PeriodoReceita): string {
-  const params = new URLSearchParams({
-    de: periodo.de,
-    ate: periodo.ate,
-    g: periodo.granularidade,
-  });
-  return `?${params.toString()}`;
-}
-
-/** Último dia incluído no intervalo (para exibição "de … até …"). */
-export function ultimoDiaIncluido(ate: string): string {
-  return addDays(ate, -1);
-}
-
 export function formatLocalDate(date: string): string {
   const match = LOCAL_DATE.exec(date);
   if (!match) return date;
   return `${match[3]}/${match[2]}/${match[1]}`;
-}
-
-const MESES_CURTOS = [
-  "jan",
-  "fev",
-  "mar",
-  "abr",
-  "mai",
-  "jun",
-  "jul",
-  "ago",
-  "set",
-  "out",
-  "nov",
-  "dez",
-] as const;
-
-/** Rótulo curto do bucket: "set/2026" ou "semana de 21/09/2026". */
-export function rotuloBucket(
-  bucket: Pick<BucketReceita, "inicio">,
-  granularidade: Granularidade,
-): string {
-  const match = LOCAL_DATE.exec(bucket.inicio);
-  if (!match) return bucket.inicio;
-  if (granularidade === "mes") {
-    return `${MESES_CURTOS[Number(match[2]) - 1] ?? match[2]}/${match[1]}`;
-  }
-  return `semana de ${formatLocalDate(bucket.inicio)}`;
 }

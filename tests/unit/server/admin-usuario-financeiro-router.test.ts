@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { ServerDeps } from '../../../apps/eunenem-server/server/auth/setup.js';
-import { maskCelularTitular } from '../../../apps/eunenem-server/server/trpc/admin-router.js';
+import { normalizarCelularTitular } from '../../../apps/eunenem-server/server/trpc/admin-router.js';
 import type { TrpcContext } from '../../../apps/eunenem-server/server/trpc/context.js';
 import { appRouter } from '../../../apps/eunenem-server/server/trpc/router.js';
 import { adminAuthOverrides } from '../../helpers/admin-auth.js';
@@ -129,23 +129,15 @@ describe('admin.usuarios.financeiro — gate e escopo (sem banco)', () => {
   });
 });
 
-describe('maskCelularTitular', () => {
-  it('mostra só os 4 últimos dígitos', () => {
-    expect(maskCelularTitular('11987654321')).toBe('(**) *****-4321');
-    expect(maskCelularTitular('+55 (11) 98765-4321')).toBe('(**) *****-4321');
+describe('normalizarCelularTitular', () => {
+  it('devolve o número completo, só dígitos (operador: admin sempre vê o celular)', () => {
+    expect(normalizarCelularTitular('11987654321')).toBe('11987654321');
+    expect(normalizarCelularTitular('+55 (11) 98765-4321')).toBe('5511987654321');
   });
   it('null / vazio / sem dígitos ⇒ null', () => {
-    expect(maskCelularTitular(null)).toBeNull();
-    expect(maskCelularTitular(undefined)).toBeNull();
-    expect(maskCelularTitular('')).toBeNull();
-    expect(maskCelularTitular('abc')).toBeNull();
-  });
-  it('menos de 4 dígitos ⇒ máscara total', () => {
-    expect(maskCelularTitular('123')).toBe('(**) *****-****');
-  });
-  it('nunca contém o número completo', () => {
-    const raw = '11987654321';
-    expect(maskCelularTitular(raw)).not.toContain(raw);
-    expect(maskCelularTitular(raw)).not.toContain('1198765');
+    expect(normalizarCelularTitular(null)).toBeNull();
+    expect(normalizarCelularTitular(undefined)).toBeNull();
+    expect(normalizarCelularTitular('')).toBeNull();
+    expect(normalizarCelularTitular('abc')).toBeNull();
   });
 });

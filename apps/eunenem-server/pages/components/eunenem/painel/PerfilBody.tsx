@@ -16,7 +16,7 @@ import { painelHref } from "@/lib/painelRoutes";
 import { useCampanhaEscrita } from "@/lib/campanha-escrita";
 import { useCampanhaRota } from "@/lib/campanha-rota";
 import { PERFIL_RELATIONS } from "@/lib/mocks/perfil";
-import { sendEvent } from "@/lib/analytics";
+import { resetAnalyticsIdentity, sendEvent } from "@/lib/analytics";
 import type { PainelSectionBodyProps } from "@/PainelSectionPage";
 
 // aperture-1z6xa / aperture-bnj0z — Editar Perfil body (content only).
@@ -200,6 +200,12 @@ const ico = {
       <path d="M5 12l4.5 4.5L19 7" />
     </svg>
   ),
+  power: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 3v9" />
+      <path d="M7.1 5.8a8 8 0 1 0 9.8 0" />
+    </svg>
+  ),
   // aperture-ou9bp — tiny photo glyph for per-slot header tile + plus glyph
   // for the dropzone CTA circle.
   photo: (
@@ -216,6 +222,80 @@ const ico = {
     </svg>
   ),
 } as const;
+
+function DeactivateAccountDialog({
+  onClose,
+  onConfirm,
+  isPending,
+}: {
+  onClose: () => void;
+  onConfirm: () => void;
+  isPending: boolean;
+}) {
+  const cancelRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    cancelRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !isPending) onClose();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isPending, onClose]);
+
+  return (
+    <div
+      className="perfil-deactivate-scrim"
+      onClick={() => {
+        if (!isPending) onClose();
+      }}
+    >
+      <section
+        className="perfil-deactivate-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="perfil-deactivate-title"
+        aria-describedby="perfil-deactivate-description"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <span className="perfil-deactivate-icon" aria-hidden="true">
+          {ico.power}
+        </span>
+        <h2 id="perfil-deactivate-title">desativar conta?</h2>
+        <p id="perfil-deactivate-description">
+          Sua conta será desativada agora e você sairá da sua área. Suas campanhas
+          e seu histórico financeiro serão preservados.
+        </p>
+        <div className="perfil-deactivate-dialog-actions">
+          <button
+            ref={cancelRef}
+            type="button"
+            className="perfil-btn perfil-btn-ghost"
+            onClick={onClose}
+            disabled={isPending}
+          >
+            cancelar
+          </button>
+          <button
+            type="button"
+            className="perfil-btn perfil-btn-danger"
+            onClick={onConfirm}
+            disabled={isPending}
+          >
+            {isPending ? "desativando…" : "desativar minha conta"}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
 
 type ChipVariant = "lilac" | "pink" | "yellow" | "blue" | "green";
 
@@ -568,6 +648,18 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
   const [teaDate, setTeaDate] = useState("");
   const [birthDate, setBirthDate] = useState("");
   const [story, setStory] = useState("");
+  const [showDeactivateDialog, setShowDeactivateDialog] = useState(false);
+
+  const desativarConta = trpc.usuario.desativarConta.useMutation({
+    onSuccess: () => {
+      resetAnalyticsIdentity();
+      void utils.invalidate();
+      window.location.assign("/");
+    },
+    onError: (err) => {
+      toast.error(err.message || "não consegui desativar a conta — tenta de novo?");
+    },
+  });
   // aperture-ohum1 — "papais" moved HERE from the guest-view TweaksPanel
   // (now palette-only): the owner Perfil form is the event-identity edit
   // surface. Editable field; hydrates from the WRITE campanha (see the
@@ -1272,6 +1364,25 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
           )}
         </button>
       </div>
+
+      <div className="perfil-deactivate">
+        <button
+          type="button"
+          className="perfil-deactivate-trigger"
+          onClick={() => setShowDeactivateDialog(true)}
+        >
+          {ico.power}
+          <span>desativar conta</span>
+        </button>
+      </div>
+
+      {showDeactivateDialog && (
+        <DeactivateAccountDialog
+          onClose={() => setShowDeactivateDialog(false)}
+          onConfirm={() => desativarConta.mutate()}
+          isPending={desativarConta.isPending}
+        />
+      )}
     </div>
   );
 }

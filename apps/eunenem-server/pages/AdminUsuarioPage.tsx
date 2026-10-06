@@ -231,7 +231,7 @@ function FinanceiroSection({ idConta }: { idConta: string }) {
           </h2>
         </div>
         <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-mute">
-          somente leitura · celular do titular mascarado
+          somente leitura
         </span>
       </div>
 
