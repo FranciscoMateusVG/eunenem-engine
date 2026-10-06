@@ -5,7 +5,8 @@ import { appRouter } from '../../../apps/eunenem-server/server/trpc/router.js';
 import { adminAuthOverrides } from '../../helpers/admin-auth.js';
 
 /**
- * aperture-9bpre — admin.receita.* : gate e validação de entrada, sem banco.
+ * aperture-9bpre / aperture-zn5cm — admin.receita.* : gate e validação de
+ * entrada, sem banco.
  *
  * O `db` é um proxy que explode se tocado: prova que 401/403 e período
  * inválido são decididos ANTES de qualquer leitura financeira. Fórmulas,
@@ -40,15 +41,14 @@ function buildCtx(opts: { admin: boolean }): TrpcContext {
 }
 
 const PERIODO = { de: '2031-01-01', ate: '2031-02-01', granularidade: 'mes' } as const;
-const PAGINA = { de: '2031-01-01', ate: '2031-02-01', cursor: null, limit: 10 };
 
 describe('admin.receita — gate (sem banco)', () => {
-  it('401 sem sessão nas duas procedures', async () => {
+  it('401 sem sessão nas duas procedures (dashboard e painel)', async () => {
     const caller = appRouter.createCaller(buildCtx({ admin: false }));
     await expect(caller.admin.receita.dashboard(PERIODO)).rejects.toMatchObject({
       code: 'UNAUTHORIZED',
     });
-    await expect(caller.admin.receita.campanhasPaginated(PAGINA)).rejects.toMatchObject({
+    await expect(caller.admin.receita.painel()).rejects.toMatchObject({
       code: 'UNAUTHORIZED',
     });
   });
@@ -62,7 +62,7 @@ describe('admin.receita — gate (sem banco)', () => {
     await expect(caller.admin.receita.dashboard(PERIODO)).rejects.toMatchObject({
       code: 'FORBIDDEN',
     });
-    await expect(caller.admin.receita.campanhasPaginated(PAGINA)).rejects.toMatchObject({
+    await expect(caller.admin.receita.painel()).rejects.toMatchObject({
       code: 'FORBIDDEN',
     });
   });
@@ -105,20 +105,5 @@ describe('admin.receita — validação de entrada (sem banco)', () => {
       code: 'BAD_REQUEST',
       message: 'invalid_receita_periodo:buckets_demais',
     });
-  });
-
-  it('drilldown: limite fora da faixa e cursor inválido são BAD_REQUEST', async () => {
-    await expect(
-      caller().admin.receita.campanhasPaginated({ ...PAGINA, limit: 101 }),
-    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
-    await expect(
-      caller().admin.receita.campanhasPaginated({ ...PAGINA, limit: 0 }),
-    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
-    await expect(
-      caller().admin.receita.campanhasPaginated({ ...PAGINA, cursor: 'nao-e-cursor' }),
-    ).rejects.toMatchObject({ code: 'BAD_REQUEST', message: 'invalid_receita_campanhas_cursor' });
-    await expect(
-      caller().admin.receita.campanhasPaginated({ ...PAGINA, ate: PAGINA.de }),
-    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
   });
 });

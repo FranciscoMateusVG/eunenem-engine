@@ -1,24 +1,25 @@
 import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
-import {
-  ReceitaPainel,
-  ReceitaPeriodoFiltro,
-} from '../../../apps/eunenem-server/pages/AdminReceitaPage.js';
 import { PagamentosTabs } from '../../../apps/eunenem-server/pages/components/eunenem/admin/PagamentosTabs.js';
 import {
-  escalaDaSerie,
-  ReceitaSerieChart,
-  tetoLegivel,
-} from '../../../apps/eunenem-server/pages/components/eunenem/admin/receita/ReceitaSerieChart.js';
-import type { ReceitaDashboard } from '../../../apps/eunenem-server/pages/components/eunenem/admin/receita/types.js';
+  ReceitaCabecalho,
+  ReceitaPainel,
+} from '../../../apps/eunenem-server/pages/components/eunenem/admin/receita/ReceitaPainel.js';
+import type { ReceitaPainelData } from '../../../apps/eunenem-server/pages/components/eunenem/admin/receita/types.js';
+import {
+  agregarDias,
+  type DiaPainel,
+  gradePainel,
+} from '../../../apps/eunenem-server/pages/lib/receitaPainel.js';
 
 /**
- * aperture-9bpre — aba Receita EuNeném, renderização (sem browser, sem banco).
+ * aperture-zn5cm — aba Receita EuNeném 1b, renderização (sem browser, sem
+ * banco).
  *
- * Prova o que a tela DIZ: resultado negativo aparece como negativo, a tabela
- * carrega os mesmos números do gráfico, os limites da fonte ficam sempre
- * visíveis, diferença de conciliação é mostrada e nunca escondida, e nenhum
- * rótulo promete lucro ou valor líquido.
+ * Prova o que a tela DIZ: os dois KPIs com Tarifas e Recebido e as
+ * comparações, 12 meses com o corrente parcial, semanas do mês com a corrente
+ * em destaque e as futuras com "—", as duas notas de definição, e o aviso
+ * compacto que só existe quando há algo a conferir.
  */
 
 const appRequire = createRequire(`${process.cwd()}/apps/eunenem-server/package.json`);
@@ -27,434 +28,193 @@ const { renderToStaticMarkup } = appRequire('react-dom/server') as {
   renderToStaticMarkup: (node: unknown) => string;
 };
 
-const ZERO = { taxasRegistradasCents: 0, cancelamentosCents: 0 };
-
-function card(
-  de: string,
-  ate: string,
-  registradas: number,
-  cancelamentos: number,
-): ReceitaDashboard['cards']['periodo'] {
+function dia(d: string, tarifas: number, recebido: number, cancelado = 0): DiaPainel {
   return {
-    de,
-    ate,
-    taxasRegistradasCents: registradas,
-    cancelamentosCents: cancelamentos,
-    resultadoDeTaxasCents: registradas - cancelamentos,
-    lancamentosRegistrados: registradas > 0 ? 1 : 0,
-    lancamentosCancelados: cancelamentos > 0 ? 1 : 0,
-    pagamentosComTaxa: registradas > 0 ? 1 : 0,
-    adicionalCartao: { registradoCents: 7_000, canceladoCents: 0 },
+    dia: d,
+    tarifas: { registradoCents: tarifas, canceladoCents: 0 },
+    recebido: { registradoCents: recebido, canceladoCents: cancelado },
   };
 }
 
-function dashboard(overrides: Partial<ReceitaDashboard> = {}): ReceitaDashboard {
-  const total = { taxasRegistradasCents: 12_345, cancelamentosCents: 45_678 };
+const ZERO = { registradoCents: 0, canceladoCents: 0 };
+
+function painel(
+  hoje = '2026-10-05',
+  dias: DiaPainel[] = [
+    dia('2026-09-10', 389_300, 7_786_000),
+    dia('2026-09-29', 81_300, 1_650_400),
+    dia('2026-10-02', 51_200, 1_039_400),
+    dia('2026-10-05', 7_200, 140_400),
+    dia('2026-08-15', 366_750, 7_481_700),
+  ],
+  overrides: Partial<ReceitaPainelData> = {},
+): ReceitaPainelData {
+  const grade = gradePainel(hoje);
+  const agregado = agregarDias(grade, dias);
   return {
-    snapshotAt: '2031-06-18T15:00:00.000Z',
+    snapshotAt: '2026-10-05T15:00:00.000Z',
     timezone: 'America/Sao_Paulo',
-    periodo: { de: '2031-01-01', ate: '2031-03-01', granularidade: 'mes' },
-    cards: {
-      semanaAtual: card('2031-06-16', '2031-06-23', 0, 0),
-      mesAtual: card('2031-06-01', '2031-07-01', 2_500, 0),
-      periodo: card('2031-01-01', '2031-03-01', 12_345, 45_678),
-    },
-    serie: [
-      {
-        inicio: '2031-01-01',
-        fim: '2031-02-01',
-        parcial: false,
-        taxasRegistradasCents: 12_345,
-        cancelamentosCents: 0,
-        resultadoDeTaxasCents: 12_345,
-      },
-      {
-        inicio: '2031-02-01',
-        fim: '2031-03-01',
-        parcial: false,
-        taxasRegistradasCents: 0,
-        cancelamentosCents: 45_678,
-        resultadoDeTaxasCents: -45_678,
-      },
-    ],
-    porCampanha: {
-      rows: [
-        {
-          idCampanha: '10000000-0000-4000-8000-000000000001',
-          titulo: 'Chá da Lia',
-          campaignSlug: 'cha-da-lia',
-          publicOwnerSlug: 'ana-admin',
-          administrators: {
-            shown: [
-              {
-                idConta: '12000000-0000-4000-8000-000000000001',
-                displayName: 'Ana Administradora',
-                email: 'ana@example.test',
-                hasUserRow: true,
-              },
-              {
-                idConta: '12000000-0000-4000-8000-000000000002',
-                displayName: 'Bia Coadmin',
-                email: 'bia@example.test',
-                hasUserRow: true,
-              },
-            ],
-            total: 2,
-          },
-          taxasRegistradasCents: 12_345,
-          cancelamentosCents: 45_678,
-          resultadoDeTaxasCents: -33_333,
-        },
-      ],
-      campanhasTotal: 1,
-      truncated: false,
-      foraDaLista: ZERO,
-    },
-    porMeioProvedor: [
-      {
-        metodo: 'pix',
-        provedor: 'nao_registrado',
-        taxasRegistradasCents: 12_345,
-        cancelamentosCents: 45_678,
-        resultadoDeTaxasCents: -33_333,
-      },
-    ],
-    conciliacao: {
-      totalIndependente: total,
-      somaSerie: total,
-      somaPorCampanha: total,
-      somaPorMeioProvedor: total,
-      diferencas: { serie: ZERO, porCampanha: ZERO, porMeioProvedor: ZERO },
-    },
+    hoje,
+    janela: grade.janela,
+    kpis: agregado.kpis,
+    meses: [...agregado.meses],
+    semanas: [...agregado.semanas],
+    diferencaConciliacao: { tarifas: ZERO, recebido: ZERO },
     inconsistencias: {
       estornadoSemCancelamento: { count: 0, cents: 0 },
       canceladoSemEstorno: { count: 0, cents: 0 },
-    },
-    primeiroRegistroTaxaEm: '2030-11-02T13:00:00.000Z',
-    limitesDeDados: {
-      custoProvedor: 'desconhecido',
-      receitaLiquida: 'desconhecida',
-      estornoParcial: 'nao_refletido_no_ledger',
-      disputa: 'nao_refletida_no_ledger',
-      linhasSemPagamentoResolvivel: 'nao_contadas_cobertura_inconclusiva',
     },
     ...overrides,
   };
 }
 
-function render(data: ReceitaDashboard): string {
+function render(data: ReceitaPainelData): string {
   return renderToStaticMarkup(React.createElement(ReceitaPainel, { data }));
 }
 
-/** Intl usa NBSP entre "R$" e o número; normaliza para comparar texto. */
 function texto(html: string): string {
-  return html.replace(/ /g, ' ').replace(/&nbsp;/g, ' ');
+  return html
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;| /g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
-describe('ReceitaPainel — resultado e rótulos', () => {
-  const html = texto(render(dashboard()));
+/** HTML do primeiro elemento com o data-testid dado, até `fim`. */
+function trecho(html: string, testId: string, fim = '</li>'): string {
+  const inicio = html.indexOf(`data-testid="${testId}"`);
+  if (inicio < 0) throw new Error(`sem ${testId}`);
+  return html.slice(inicio, html.indexOf(fim, inicio));
+}
 
-  it('mostra resultado negativo como negativo, com explicação', () => {
-    expect(html).toContain('-R$ 333,33');
-    expect(html).toContain('-R$ 456,78');
-    expect(html).toContain('os cancelamentos do intervalo superam as taxas registradas');
-  });
-
-  it('usa os rótulos do contrato', () => {
-    expect(html).toContain('Taxas registradas');
-    expect(html).toContain('Cancelamentos');
-    expect(html).toContain('Resultado de taxas');
-    expect(html).toContain('Receita EuNeném (taxa da plataforma)');
-    expect(html).toContain('Adicional de cartão (repasse, não é receita)');
-  });
-
-  it('nunca promete lucro nem valor líquido', () => {
-    expect(html).not.toMatch(/lucro/i);
-    expect(html).not.toMatch(/l[ií]quid/i);
-    expect(html).not.toMatch(/margem/i);
-  });
-
-  it('adicional de cartão fica em linha própria e não altera o resultado', () => {
-    expect(html).toContain('registrado R$ 70,00');
-    // Período: 123,45 − 456,78 = −333,33, sem os 70,00 do adicional.
-    expect(html).not.toContain('-R$ 263,33');
-    expect(html).not.toContain('R$ 193,45');
-  });
-
-  it('intervalo sem evento diz isso em vez de parecer um zero qualquer', () => {
-    expect(html).toContain('Nenhuma taxa registrada ou cancelada neste intervalo.');
-  });
-
-  it('intervalos dos cards mostram o último dia incluído', () => {
-    expect(html).toContain('01/01/2031 a 28/02/2031');
-    expect(html).toContain('16/06/2031 a 22/06/2031');
+describe('Receita 1b — cabeçalho', () => {
+  it('título, subtítulo e data de hoje em São Paulo', () => {
+    const t = texto(
+      renderToStaticMarkup(React.createElement(ReceitaCabecalho, { hoje: '2026-10-05' })),
+    );
+    expect(t).toContain('Receita EuNeném');
+    expect(t).toContain('Taxas da plataforma menos cancelamentos.');
+    expect(t).toContain('Atualizado 05/10/2026 · horário de São Paulo');
   });
 });
 
-describe('ReceitaPainel — limites da fonte sempre visíveis', () => {
-  it('declara o que o ledger não sabe, mesmo com dados sãos', () => {
-    const html = texto(render(dashboard()));
-    expect(html).toContain('O que esta tela não mostra');
-    expect(html).toContain('Estorno parcial e contestação de cartão não alteram o ledger');
-    expect(html).toContain('nenhum valor é estimado');
-    expect(html).toContain('O custo cobrado pelo provedor');
-    expect(html).toContain('não é contada');
-    expect(html).toContain('inconclusiva — não é zero');
-    expect(html).toContain('Correções históricas ainda podem alterar');
-    expect(html).toContain('Primeiro registro de taxa no ledger: 02/11/2030');
-    expect(html).toContain('não prova que todo pagamento antigo tem taxa');
-    expect(html).toContain('Leitura única de 18/06/2031');
+describe('Receita 1b — KPIs', () => {
+  const html = render(painel());
+
+  it('mês atual: até hoje, com setembro inteiro como comparação', () => {
+    const t = texto(trecho(html, 'receita-kpi-mes', '</article>'));
+    expect(t).toMatch(
+      /^.*Mês atual 01\/10 – 05\/10 Tarifas EuNeném R\$ 584,00 Setembro: R\$ 4\.706,00/,
+    );
+    expect(t).toContain('Recebido no banco R$ 11.798,00 Setembro: R$ 94.364,00');
   });
 
-  it('sem nenhum registro, diz que não há registro — não inventa data', () => {
-    const html = texto(render(dashboard({ primeiroRegistroTaxaEm: null })));
-    expect(html).toContain('Ainda não há registro de taxa no ledger.');
-    expect(html).not.toContain('Primeiro registro de taxa no ledger:');
+  it('semana atual: semana inteira, com a semana anterior inteira (atravessa o mês)', () => {
+    const t = texto(trecho(html, 'receita-kpi-semana', '</article>'));
+    expect(t).toContain('Semana atual 05 – 11/10');
+    expect(t).toContain('Tarifas EuNeném R$ 72,00 Semana anterior: R$ 1.325,00');
+    expect(t).toContain('Recebido no banco R$ 1.404,00 Semana anterior: R$ 26.898,00');
   });
 });
 
-describe('ReceitaPainel — gráfico e tabela equivalente', () => {
-  const html = texto(render(dashboard()));
+describe('Receita 1b — barras', () => {
+  const html = render(painel());
 
-  it('cada intervalo do gráfico anuncia os três valores', () => {
-    expect(html).toContain(
-      'aria-label="jan/2031; Taxas registradas R$ 123,45; Cancelamentos R$ 0,00; Resultado de taxas R$ 123,45"',
+  it('12 meses, só o corrente parcial, com valores compactos e título completo', () => {
+    expect(html.match(/data-testid="receita-mes"/g)).toHaveLength(12);
+    expect(html.match(/data-parcial="true"/g)).toHaveLength(1);
+    expect(html).toContain('data-mes="2026-10-01" data-parcial="true"');
+    expect(html.replace(/\u00a0/g, ' ')).toContain(
+      'title="outubro 2026 (parcial) · tarifas R$ 584,00 · recebido R$ 11.798,00"',
     );
-    expect(html).toContain(
-      'aria-label="fev/2031; Taxas registradas R$ 0,00; Cancelamentos R$ 456,78; Resultado de taxas -R$ 456,78"',
+    expect(texto(html)).toContain('últimos 12 meses · outubro em andamento');
+    expect(texto(trecho(html, 'receita-mes'))).toContain('R$ 0');
+    expect(texto(html)).toContain('R$ 94,4 mil R$ 4,7 mil');
+  });
+
+  it('cada série tem a própria escala: o maior mês de cada uma chega ao topo', () => {
+    // Setembro tem o maior valor nas duas séries: grupo a 84%, as duas a 100%.
+    const setembro = trecho(html, 'receita-mes" data-mes="2026-09-01');
+    expect(setembro).toContain('height:84.00%');
+    expect(setembro.match(/height:100\.00%/g)).toHaveLength(2);
+  });
+
+  it('semanas de outubro: passada, atual em destaque e futuras com "—"', () => {
+    expect(texto(html)).toContain('Semanas de outubro');
+    expect(html.match(/data-testid="receita-semana"/g)).toHaveLength(5);
+    expect(html.match(/data-estado="futura"/g)).toHaveLength(3);
+    const primeira = texto(trecho(html, 'receita-semana" data-de="2026-10-01'));
+    expect(primeira).toMatch(/^.*R\$ 10\.394,00 R\$ 512,00/);
+    const futura = trecho(html, 'receita-semana" data-de="2026-10-12');
+    expect(futura).toContain('ainda não começou');
+    expect(futura).toContain('border-dashed');
+    expect(texto(futura)).toMatch(/> —$/);
+    const t = texto(html);
+    expect(t).toContain('01–04/10 qui a dom');
+    expect(t).toContain('05–11/10 esta semana');
+    expect(t).toContain('26–31/10');
+  });
+
+  it('semana atual e mês corrente usam o tom claro', () => {
+    const atual = trecho(html, 'receita-semana" data-de="2026-10-05');
+    expect(atual).toContain('bg-lilac-soft');
+    expect(atual).toContain('bg-blue-soft');
+    const outubro = trecho(html, 'receita-mes" data-mes="2026-10-01');
+    expect(outubro).toContain('bg-lilac-soft');
+  });
+});
+
+describe('Receita 1b — notas e aviso', () => {
+  it('as duas definições ficam no rodapé', () => {
+    const t = texto(render(painel()));
+    expect(t).toContain(
+      'Tarifas EuNeném: taxas registradas na data do pagamento aprovado, menos cancelamentos na data em que ocorreram.',
+    );
+    expect(t).toContain(
+      'Recebido no banco: soma dos pagamentos aprovados, menos estornos. É uma estimativa: o custo do provedor e o valor que de fato caiu na conta não são registrados.',
     );
   });
 
-  it('a tabela traz os mesmos intervalos e valores, mais a soma', () => {
-    const tabela = html.slice(html.indexOf('Mesmos valores do gráfico'));
-    expect(tabela).toContain('jan/2031');
-    expect(tabela).toContain('fev/2031');
-    expect(tabela).toContain('R$ 123,45');
-    expect(tabela).toContain('R$ 456,78');
-    expect(tabela).toContain('-R$ 456,78');
-    expect(tabela).toContain('Soma da série');
-    expect(tabela).toContain('-R$ 333,33');
+  it('sem nada a conferir, não há aviso', () => {
+    expect(render(painel())).not.toContain('receita-aviso');
   });
 
-  it('o gráfico é uma única parada de tabulação com navegação por setas', () => {
-    expect(html.match(/tabindex="0"/g)).toHaveLength(1);
-    expect(html.match(/tabindex="-1"/g)).toHaveLength(1);
-    expect(html).toContain('Use as setas para percorrer');
-  });
-
-  it('legenda nomeia as séries e a direção de cada uma', () => {
-    expect(html).toContain('Taxas registradas (acima da linha)');
-    expect(html).toContain('Cancelamentos (abaixo da linha)');
-  });
-
-  it('barra de cancelamento desce a partir da linha de base', () => {
-    // Escala 200,00 acima e 500,00 abaixo ⇒ base a 200/700 do topo.
-    expect(escalaDaSerie(dashboard().serie)).toEqual({ acima: 20_000, abaixo: 50_000 });
-    const chart = renderToStaticMarkup(
-      React.createElement(ReceitaSerieChart, {
-        serie: dashboard().serie,
-        granularidade: 'mes',
+  it('inconsistências e diferença de conciliação aparecem no aviso compacto', () => {
+    const html = render(
+      painel(undefined, undefined, {
+        diferencaConciliacao: {
+          tarifas: { registradoCents: 100, canceladoCents: 0 },
+          recebido: ZERO,
+        },
+        inconsistencias: {
+          estornadoSemCancelamento: { count: 2, cents: 1_500 },
+          canceladoSemEstorno: { count: 1, cents: 700 },
+        },
       }),
     );
-    const base = (20_000 / 70_000) * 100;
-    expect(chart).toContain(`top:${base}%`);
-    expect(chart).toContain(`height:${(45_678 / 70_000) * 100}%`);
-    expect(chart).toContain(`height:${(12_345 / 70_000) * 100}%`);
-    // Ponto do resultado negativo fica ABAIXO da base.
-    expect(chart).toContain(`top:${base + (45_678 / 70_000) * 100}%`);
+    expect(html).toContain('role="status" aria-label="Conferir"');
+    expect(texto(trecho(html, 'receita-aviso-conciliacao', '</p>'))).toContain(
+      'diferença de R$ 1,00 em tarifas e R$ 0,00 em recebido',
+    );
+    expect(texto(trecho(html, 'receita-aviso-estornado', '</p>'))).toContain(
+      '2 taxa(s) de pagamento estornado sem data de cancelamento (R$ 15,00)',
+    );
+    expect(texto(trecho(html, 'receita-aviso-cancelado', '</p>'))).toContain(
+      '1 taxa(s) cancelada(s) com pagamento não estornado (R$ 7,00)',
+    );
   });
 
-  it('teto do eixo arredonda para 1, 2 ou 5 vezes potência de dez', () => {
-    expect(tetoLegivel(0)).toBe(0);
-    expect(tetoLegivel(1)).toBe(1);
-    expect(tetoLegivel(12_345)).toBe(20_000);
-    expect(tetoLegivel(45_678)).toBe(50_000);
-    expect(tetoLegivel(50_000)).toBe(50_000);
-    expect(tetoLegivel(50_001)).toBe(100_000);
-  });
-
-  it('período sem eventos: aviso no lugar do gráfico e tabela com zeros de fato', () => {
-    const vazio = dashboard({
-      cards: {
-        semanaAtual: card('2031-06-16', '2031-06-23', 0, 0),
-        mesAtual: card('2031-06-01', '2031-07-01', 0, 0),
-        periodo: card('2031-01-01', '2031-03-01', 0, 0),
-      },
-      serie: dashboard().serie.map((b) => ({
-        ...b,
-        taxasRegistradasCents: 0,
-        cancelamentosCents: 0,
-        resultadoDeTaxasCents: 0,
-      })),
-      porCampanha: { rows: [], campanhasTotal: 0, truncated: false, foraDaLista: ZERO },
-      porMeioProvedor: [],
-      conciliacao: {
-        totalIndependente: ZERO,
-        somaSerie: ZERO,
-        somaPorCampanha: ZERO,
-        somaPorMeioProvedor: ZERO,
-        diferencas: { serie: ZERO, porCampanha: ZERO, porMeioProvedor: ZERO },
-      },
-    });
-    const out = texto(render(vazio));
-    expect(out).toContain('não há o que desenhar');
-    expect(out).toContain('Nenhuma campanha teve taxa registrada ou cancelada neste período.');
-    expect(out).toContain('jan/2031');
-    expect(out).not.toContain('role="alert"');
+  it('resultado negativo aparece como negativo', () => {
+    const html = render(painel('2026-10-05', [dia('2026-10-02', 0, 0, 50_000)]));
+    expect(texto(trecho(html, 'receita-kpi-mes', '</article>'))).toContain('-R$ 500,00');
   });
 });
 
-describe('ReceitaPainel — decomposições', () => {
-  it('campanha aparece uma vez, com os coadmins como atributo', () => {
-    const html = texto(render(dashboard()));
-    expect(html.match(/Chá da Lia/g)).toHaveLength(1);
-    expect(html).toContain('href="/admin/usuario/12000000-0000-4000-8000-000000000001"');
-    expect(html).toContain('href="/admin/usuario/12000000-0000-4000-8000-000000000002"');
-    expect(html).toContain('href="/pagina/ana-admin/cha-da-lia"');
-    expect(html).toContain('os valores não são divididos entre eles');
-    expect(html).toContain('Todas as campanhas (1)');
-  });
-
-  it('provedor ausente aparece nomeado, não some', () => {
-    const html = texto(render(dashboard()));
-    expect(html).toContain('provedor não registrado');
-    expect(html).toContain('PIX');
-  });
-
-  it('lista longa começa recolhida e os totais continuam cobrindo todas', () => {
-    const base = dashboard().porCampanha.rows[0];
-    if (!base) throw new Error('fixture sem campanha');
-    const rows = Array.from({ length: 12 }, (_, i) => ({
-      ...base,
-      idCampanha: `10000000-0000-4000-8000-0000000000${String(i).padStart(2, '0')}`,
-      titulo: `Campanha ${String(i).padStart(2, '0')}`,
-    }));
-    const html = texto(
-      render(dashboard({ porCampanha: { ...dashboard().porCampanha, rows, campanhasTotal: 12 } })),
-    );
-    expect(html).toContain('Campanha 09');
-    expect(html).not.toContain('Campanha 10');
-    expect(html).toContain('Mostrar as 12 campanhas da lista');
-    expect(html).toContain('Os totais abaixo já incluem todas.');
-    expect(html).toContain('Todas as campanhas (12)');
-  });
-
-  it('eixo do gráfico usa reais inteiros quando não há centavos', () => {
-    const html = texto(render(dashboard()));
-    expect(html).toContain('>R$ 200<');
-    expect(html).toContain('>-R$ 500<');
-    expect(html).toContain('>R$ 0<');
-  });
-
-  it('a leitura do gráfico começa no intervalo mais recente', () => {
-    const html = texto(render(dashboard()));
-    const leitura = html.slice(html.indexOf('data-testid="receita-leitura"'));
-    expect(leitura.slice(0, 400)).toContain('fev/2031');
-  });
-
-  it('lista truncada mostra o que ficou de fora e o total de todas', () => {
-    const html = texto(
-      render(
-        dashboard({
-          porCampanha: {
-            ...dashboard().porCampanha,
-            campanhasTotal: 101,
-            truncated: true,
-            foraDaLista: { taxasRegistradasCents: 9_900, cancelamentosCents: 100 },
-          },
-        }),
-      ),
-    );
-    expect(html).toContain('Fora desta lista (100 campanhas)');
-    expect(html).toContain('R$ 99,00');
-    expect(html).toContain('R$ 98,00');
-    expect(html).toContain('Todas as campanhas (101)');
-    expect(html).toContain('o total cobre todas');
-  });
-});
-
-describe('ReceitaPainel — conciliação e inconsistências', () => {
-  it('dados conciliados não geram alerta', () => {
-    const html = render(dashboard());
-    expect(html).not.toContain('Diferença não conciliada');
-    expect(html).not.toContain('Linhas incoerentes no período');
-    expect(html).not.toContain('role="alert"');
-  });
-
-  it('diferença é mostrada como está, nomeando a origem', () => {
-    const base = dashboard();
-    const html = texto(
-      render(
-        dashboard({
-          conciliacao: {
-            ...base.conciliacao,
-            diferencas: {
-              serie: ZERO,
-              porCampanha: { taxasRegistradasCents: 150, cancelamentosCents: -20 },
-              porMeioProvedor: ZERO,
-            },
-          },
-        }),
-      ),
-    );
-    expect(html).toContain('role="alert"');
-    expect(html).toContain('Diferença não conciliada');
-    expect(html).toContain('soma por campanha: diferença de R$ 1,50 em taxas registradas');
-    expect(html).toContain('-R$ 0,20 em cancelamentos');
-    expect(html).toContain('Nenhum valor foi ajustado');
-    expect(html).not.toContain('soma da série: diferença');
-  });
-
-  it('linhas incoerentes aparecem à parte, com contagem e valor', () => {
-    const html = texto(
-      render(
-        dashboard({
-          inconsistencias: {
-            estornadoSemCancelamento: { count: 2, cents: 1_200 },
-            canceladoSemEstorno: { count: 1, cents: 800 },
-          },
-        }),
-      ),
-    );
-    expect(html).toContain('Linhas incoerentes no período');
-    expect(html).toContain('2 taxa(s) de pagamento estornado sem data de cancelamento');
-    expect(html).toContain('R$ 12,00');
-    expect(html).toContain('1 taxa(s) cancelada(s) cujo pagamento não está estornado');
-    expect(html).toContain('R$ 8,00');
-    expect(html).toContain('Nenhum total foi ajustado');
-  });
-});
-
-describe('abas e filtro de período', () => {
+describe('abas', () => {
   it('abas são links e marcam a página atual', () => {
     const html = renderToStaticMarkup(React.createElement(PagamentosTabs, { active: 'receita' }));
-    expect(html).toContain('aria-label="Seções de pagamentos"');
-    expect(html).toMatch(/<a href="\/admin\/pagamentos"(?![^>]*aria-current)[^>]*>Pagamentos<\/a>/);
-    expect(html).toMatch(
-      /<a href="\/admin\/pagamentos\/receita" aria-current="page"[^>]*>Receita EuNeném<\/a>/,
-    );
+    expect(html).toContain('href="/admin/pagamentos"');
+    expect(html).toContain('href="/admin/pagamentos/receita" aria-current="page"');
     expect(html).not.toContain('<button');
-  });
-
-  it('filtro tem rótulos, estado da granularidade e data final inclusiva', () => {
-    const html = renderToStaticMarkup(
-      React.createElement(ReceitaPeriodoFiltro, {
-        periodo: { de: '2031-01-01', ate: '2031-03-01', granularidade: 'semana' },
-        onAplicar: () => undefined,
-        now: () => new Date('2031-06-18T15:00:00Z'),
-      }),
-    );
-    expect(html).toContain('aria-label="Período da receita"');
-    expect(html).toContain('Agrupar por');
-    expect(html).toMatch(/aria-pressed="true"[^>]*>Semana</);
-    expect(html).toMatch(/aria-pressed="false"[^>]*>Mês</);
-    expect(html).toContain('value="2031-01-01"');
-    // ate é exclusivo no contrato; o campo mostra o último dia incluído.
-    expect(html).toContain('value="2031-02-28"');
-    expect(html).toContain('Até (inclusive)');
-    for (const atalho of ['Últimos 12 meses', 'Últimas 12 semanas', 'Mês atual', 'Semana atual']) {
-      expect(html).toContain(atalho);
-    }
-    expect(html).toContain('Semana de segunda a domingo');
   });
 });
