@@ -155,6 +155,15 @@ export async function seedMultiItemApprovedPagamento(
     readonly idCampanha: string;
     readonly idOpcaoPresentes: string;
     readonly items: readonly SeedPagamentoItemSpec[];
+    /**
+     * `'stripe'` binds the approved row to a historical Stripe charge
+     * (PaymentIntent + charge refs on the intenção, and a matching
+     * `transacaoExterna` with `provedor: 'stripe'`), which is what a real
+     * Stripe-approved pagamento carries and what the Stripe refund fence
+     * (`paymentBindingMatches`) verifies before any provider call.
+     * Omitted → no provider provenance (legacy shortcut; not refundable).
+     */
+    readonly provenance?: 'stripe';
   },
 ): Promise<SeedMultiItemResult> {
   const contribuicaoIds: string[] = [];
@@ -214,9 +223,32 @@ export async function seedMultiItemApprovedPagamento(
     metodo: 'pix',
     criadoEm: new Date(),
   });
-  const pagamento = { ...base, status: 'aprovado' as const };
+  const aprovado = { ...base, status: 'aprovado' as const };
+  const pagamento = opts.provenance === 'stripe' ? comProvenienciaStripe(aprovado) : aprovado;
   await repos.pagamentoRepository.save(pagamento);
   return { pagamentoId, contribuicaoIds };
+}
+
+function comProvenienciaStripe<T extends ReturnType<typeof criarPagamentoPendente>>(
+  pagamento: T,
+): T {
+  const suffix = randomUUID().replaceAll('-', '').slice(0, 24);
+  const chargeRef = `ch_e2e_${suffix}`;
+  return {
+    ...pagamento,
+    intencao: {
+      ...pagamento.intencao,
+      paymentIntentExternalRef: `pi_e2e_${suffix}`,
+      chargeExternalRef: chargeRef,
+    },
+    transacaoExterna: {
+      id: chargeRef as never,
+      provedor: 'stripe',
+      status: 'aprovado',
+      amountCents: pagamento.intencao.composicaoValoresAggregate.totalPaidCents,
+      criadaEm: new Date(),
+    },
+  };
 }
 
 export interface SeedPendenteResult {

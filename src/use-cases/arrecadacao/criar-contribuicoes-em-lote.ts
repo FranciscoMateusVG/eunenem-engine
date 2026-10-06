@@ -17,12 +17,12 @@ import {
   type IdOpcaoContribuicao,
   IdOpcaoContribuicaoSchema,
 } from '../../domain/arrecadacao/value-objects/ids.js';
-import { MoneyCentsSchema } from '../../domain/money.js';
 import { ArrecadacaoCampanhaNaoEncontradaError } from '../../errors/arrecadacao/campanha-nao-encontrada.error.js';
 import { ArrecadacaoInputInvalidoError } from '../../errors/arrecadacao/input-invalido.error.js';
 import { ArrecadacaoLimiteOpcaoExcedidoError } from '../../errors/arrecadacao/limite-opcao-excedido.error.js';
 import { ArrecadacaoOpcaoContribuicaoNaoEncontradaError } from '../../errors/arrecadacao/opcao-contribuicao-nao-encontrada.error.js';
 import type { Observability } from '../../observability/observability.js';
+import { ValorUnitarioPresenteWriteSchema } from './valor-unitario-presente.js';
 
 /**
  * Item de catálogo persisted como UMA contribuição com `quantidade=N`.
@@ -37,7 +37,7 @@ import type { Observability } from '../../observability/observability.js';
  */
 export const ItemLoteSchema = z.object({
   nome: NomeContribuicaoSchema,
-  valor: MoneyCentsSchema,
+  valor: ValorUnitarioPresenteWriteSchema,
   // See criar-contribuicao.ts for the rationale: engine is consumer-agnostic
   // on imagemUrl shape; consumers enforce format at their API edge.
   imagemUrl: z.string().trim().min(1).max(500).nullable().optional(),

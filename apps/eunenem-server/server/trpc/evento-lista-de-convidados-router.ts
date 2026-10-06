@@ -26,6 +26,8 @@ import {
   StatusPresencaConvidadoSchema,
   type Usuario,
 } from '../../../../src/index.js';
+import { propsConvidadoCriado } from '../analytics/funil.js';
+import { distinctIdConvidado } from '../analytics/server-analytics.js';
 import type { TrpcContext } from './context.js';
 import {
   CampanhaAcessoNegadoError,
@@ -314,7 +316,7 @@ export const eventoListaDeConvidadosRouter = t.router({
     .output(GetListaDeConvidadosOutputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        const { campanha } = await resolveCallerCampanha(ctx, input.idCampanha);
+        const { campanha, usuario } = await resolveCallerCampanha(ctx, input.idCampanha);
         const evento = await resolveCallerEvento(ctx, campanha);
         if (!evento) {
           throw new EventoAusenteError('Crie seu convite antes de adicionar convidados');
@@ -358,6 +360,20 @@ export const eventoListaDeConvidadosRouter = t.router({
                 convidados: [novoConvidado],
               },
             );
+
+        // aperture-ai8vg — server-truth "guest added" step. convidados rows
+        // carry no timestamp, so the write clock is the business time; the
+        // new convidado id is the dedup key. No name/phone in props.
+        ctx.deps.serverAnalytics?.track(
+          'convidado_criado',
+          usuario.idConta,
+          propsConvidadoCriado({
+            idCampanha: campanha.id,
+            idLista: updated.id,
+            totalConvidados: updated.convidados.length,
+          }),
+          { insertKey: novoConvidado.id, occurredAt: ctx.deps.clock() },
+        );
 
         return toSnapshot(updated);
       } catch (err) {
@@ -448,11 +464,11 @@ export const eventoListaDeConvidadosRouter = t.router({
     .output(GetParaConfirmarOutputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        const { lista, idCampanha } = await resolveConvidadoPublico(
-          ctx,
-          input.slug,
-          input.idConvidado,
-        );
+        const {
+          lista,
+          convidado: antes,
+          idCampanha,
+        } = await resolveConvidadoPublico(ctx, input.slug, input.idConvidado);
 
         const updated = await alterarPresencaConvidado(
           {
@@ -472,14 +488,24 @@ export const eventoListaDeConvidadosRouter = t.router({
           throw new ConvidadoNaoEncontradoError(input.idConvidado as IdConvidado, updated.id);
         }
 
-        // aperture-ppuay — server-truth RSVP. A guest action (no session), so
-        // the distinct_id is anonymous; the identifying context rides in props.
-        ctx.deps.serverAnalytics?.track('presenca_confirmada', null, {
-          idCampanha,
-          idConvidado: input.idConvidado,
-          idLista: lista.id,
-          presenca: convidado.presenca,
-        });
+        // aperture-ppuay / aperture-4yse9 — server-truth RSVP, THE single
+        // emitter (the client no longer tracks it). Guest action, no session:
+        // distinct_id is the opaque `convidado:<id>` — stable per guest, never
+        // a shared placeholder (Mixpanel rejects 'anon'). Fires only when the
+        // answer actually CHANGED; a re-submit of the same value is not a fact.
+        if (antes.presenca !== convidado.presenca) {
+          ctx.deps.serverAnalytics?.track(
+            'presenca_confirmada',
+            distinctIdConvidado(input.idConvidado),
+            {
+              idCampanha,
+              idConvidado: input.idConvidado,
+              idLista: lista.id,
+              presenca: convidado.presenca,
+              presenca_anterior: antes.presenca,
+            },
+          );
+        }
 
         return {
           nome: convidado.nome,

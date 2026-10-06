@@ -34,6 +34,18 @@ export function ListasTab() {
     onSuccess: () => void utils.admin.catalog.listLists.invalidate(),
     onError: (e) => toast.error(e.message),
   });
+  const setInitialDefault =
+    trpc.admin.catalog.setInitialCampaignDefault.useMutation({
+      onSuccess: ({ selectedId }) => {
+        void utils.admin.catalog.listLists.invalidate();
+        toast.success(
+          selectedId === null
+            ? "padrão da campanha inicial removido."
+            : "lista definida para novas campanhas iniciais.",
+        );
+      },
+      onError: (e) => toast.error(e.message),
+    });
 
   function invalidate() {
     void utils.admin.catalog.listLists.invalidate();
@@ -92,9 +104,16 @@ export function ListasTab() {
               </div>
               <div className="flex min-w-0 flex-1 flex-col">
                 <div className="flex items-start justify-between gap-2">
-                  <h3 className="truncate text-[14px] font-medium text-ink">
-                    {l.nome}
-                  </h3>
+                  <div className="min-w-0">
+                    <h3 className="truncate text-[14px] font-medium text-ink">
+                      {l.nome}
+                    </h3>
+                    {l.aplicarCampanhaInicial && (
+                      <span className="mt-1 inline-flex rounded-full bg-lilac-soft px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.08em] text-plum">
+                        padrão da campanha inicial
+                      </span>
+                    )}
+                  </div>
                   <AtivoBadge ativo={l.ativo} />
                 </div>
                 {l.descricao && (
@@ -106,6 +125,18 @@ export function ListasTab() {
                   {l.quantidadeItens} {l.quantidadeItens === 1 ? "item" : "itens"}
                 </p>
                 <div className="mt-auto flex flex-wrap justify-end gap-2 pt-2">
+                  <GhostButton
+                    onClick={() =>
+                      setInitialDefault.mutate({
+                        id: l.aplicarCampanhaInicial ? null : l.id,
+                      })
+                    }
+                    disabled={setInitialDefault.isPending || !l.ativo}
+                  >
+                    {l.aplicarCampanhaInicial
+                      ? "remover padrão inicial"
+                      : "usar na campanha inicial"}
+                  </GhostButton>
                   <GhostButton onClick={() => setManagingItems(l)}>
                     itens
                   </GhostButton>

@@ -1,12 +1,13 @@
 import { useEffect } from 'react';
 import { sendPageView } from './lib/analytics.js';
+import { pageViewProps } from './lib/rota-canonica.js';
 import { TERMOS_DE_USO_BODY } from './lib/termos-de-uso.js';
 
 // Static legal page — /termos-de-uso.
 export function TermosDeUsoPage() {
   // aperture-ppuay — page-view tracking (EVENT_MAP addition).
   useEffect(() => {
-    sendPageView('Termos de Uso');
+    sendPageView('Termos de Uso', pageViewProps(window.location.pathname));
   }, []);
 
   return (

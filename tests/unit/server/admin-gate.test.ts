@@ -103,6 +103,9 @@ describe('admin authz gate (aperture-4n222)', () => {
         sortDir: 'desc',
       }),
     ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    await expect(
+      admin.usuarios.legado.listPaginated({ cursor: null, limit: 25 }),
+    ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
     await expect(admin.pagamentos.listEvidencePaginated({})).rejects.toMatchObject({
       code: 'UNAUTHORIZED',
     });
@@ -113,6 +116,14 @@ describe('admin authz gate (aperture-4n222)', () => {
     await expect(caller(deps, headers).admin.searchUsers({ prefix: 'a' })).rejects.toMatchObject({
       code: 'FORBIDDEN',
     });
+    await expect(
+      caller(deps, headers).admin.usuarios.legado.listPaginated({ cursor: null, limit: 25 }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it('exposes legacy membership only below the admin router', () => {
+    expect('legado' in appRouter._def.record).toBe(false);
+    expect('legado' in appRouter._def.record.admin.usuarios).toBe(true);
   });
 
   it('(3) authed AND allowlisted → passes the gate', async () => {

@@ -509,7 +509,7 @@ describe('alterarValorContribuicao', () => {
     await expect(
       alterarValorContribuicao(
         { contribuicaoRepository, observability: silentObservability },
-        { idContribuicao: randomUUID(), valor: 100 },
+        { idContribuicao: randomUUID(), valor: 1000 },
       ),
     ).rejects.toThrow(ArrecadacaoContribuicaoNaoEncontradaError);
   });
@@ -693,7 +693,7 @@ describe('criarContribuicao', () => {
           idCampanha: randomUUID(),
           idOpcaoContribuicao: randomUUID(),
           nome: '',
-          valor: 100,
+          valor: 1000,
         },
       ),
     ).rejects.toThrow(ArrecadacaoInputInvalidoError);
@@ -717,7 +717,7 @@ describe('criarContribuicao', () => {
           idCampanha: missingCampanha,
           idOpcaoContribuicao: randomUUID(),
           nome: 'Fralda',
-          valor: 100,
+          valor: 1000,
         },
       ),
     ).rejects.toThrow(ArrecadacaoCampanhaNaoEncontradaError);
@@ -759,7 +759,7 @@ describe('criarContribuicao', () => {
           idCampanha,
           idOpcaoContribuicao: randomUUID(),
           nome: 'Fralda',
-          valor: 100,
+          valor: 1000,
         },
       ),
     ).rejects.toThrow(ArrecadacaoOpcaoContribuicaoNaoEncontradaError);
@@ -805,7 +805,7 @@ describe('criarContribuicao', () => {
       idCampanha,
       idOpcaoContribuicao: idOpcao,
       nome: 'Fralda',
-      valor: 100,
+      valor: 1000,
     };
 
     await criarContribuicao(deps, input);

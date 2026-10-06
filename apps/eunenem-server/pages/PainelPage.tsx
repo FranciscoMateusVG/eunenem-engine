@@ -11,8 +11,10 @@ import { OnboardingWizard } from '@/components/eunenem/auth/OnboardingWizard';
 import { useContribuicaoList } from '@/lib/contribuicao';
 import { buildPainelMenu, PAINEL_DEMO, type PainelEventSnapshot } from '@/lib/mocks/painelDemo';
 import { needsOnboarding } from '@/lib/onboarding-gate';
+import { shouldAutoOpenTutorial, stripTutorialDeepLink } from '@/lib/tutorial-gate';
 import { trpc } from '@/lib/trpc';
 import { sendPageView } from '@/lib/analytics';
+import { pageViewProps } from '@/lib/rota-canonica';
 import { useListaDeConvidadosData } from '@/lib/convidados';
 import { deriveGiftListUnitCounts, derivePainelCounts } from '@/lib/painel-counts';
 import { PainelDataBoundary } from '@/components/eunenem/painel/PainelDataBoundary';
@@ -200,14 +202,19 @@ export function PainelPage({
   // aperture-7nius / aperture-4my2a — tutorial state (Plan 0018 Phase B,
   // real-tRPC swap).
   const tutorialStatus = trpc.usuario.tutorialStatus.useQuery();
+  const trpcUtils = trpc.useUtils();
   const completarTutorial = trpc.usuario.completarTutorial.useMutation({
-    onSuccess: () => {
-      // Invalidate the status query so `completado: true` reaches the
-      // PainelPage on the next mount (refresh, navigation back, etc).
-      // This isn't what gates the current-session loop — `dismissedThisSession`
-      // does — but it keeps the cached state honest for the re-trigger path.
-      tutorialStatus.refetch();
+    onSuccess: (persisted) => {
+      // aperture-n1b34 — the mutation RETURNS the persisted status; write it
+      // straight into the tutorialStatus cache instead of racing a refetch.
+      // Cross-navigation persistence is the server flag + the no-store tRPC
+      // transport (pages/lib/trpc-fetch.ts) — Back used to rehydrate a
+      // disk-cached `completado:false` GET after ENCERRAR had persisted.
+      trpcUtils.usuario.tutorialStatus.setData(undefined, persisted);
     },
+    // On failure the cache keeps whatever the server last said (still
+    // `completado:false`): the overlay stays closed for THIS session via the
+    // latch, and honestly reopens next visit. Never fake `completado:true`.
   });
 
   const [overlayOpen, setOverlayOpen] = useState(false);
@@ -224,35 +231,46 @@ export function PainelPage({
   // Dismissal latch: once the user has dismissed in this session, the effect
   // refuses to re-open even if the query re-settles. Without this, every
   // refetch / cache mutation would slam the overlay back over the user.
+  //
+  // aperture-n1b34 — the decision is the pure `shouldAutoOpenTutorial`
+  // (pages/lib/tutorial-gate.ts): unknown status never opens (no transient
+  // overlay before the server has spoken), `completado:true` never opens on
+  // reload / Back / remount, and the mutation is NEVER fired from here — only
+  // from the user's CONCLUIR / ENCERRAR / Esc.
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (dismissedThisSession) return;
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('tutorial') === 'open') {
-      setOverlayOpen(true);
-      return;
-    }
-    if (tutorialStatus.data && !tutorialStatus.data.completado) {
+    if (
+      shouldAutoOpenTutorial({
+        status: tutorialStatus.data,
+        dismissedThisSession,
+        search: window.location.search,
+      })
+    ) {
       setOverlayOpen(true);
     }
   }, [tutorialStatus.data, dismissedThisSession]);
 
-  // CONCLUIR (step 9 PRÓXIMO → CONCLUIR variant) — auto-fires the mutation
-  // AND latches the dismissal so the user lands on the painel clean.
-  const handleComplete = () => {
+  // Persist + latch + close, shared by CONCLUIR and ENCERRAR/Esc. Also drops a
+  // `?tutorial=open` deep-link from the URL so Back / reload on this entry
+  // can't replay the overlay from the query string after the user closed it.
+  const persistTutorialClosed = () => {
     completarTutorial.mutate();
     setDismissedThisSession(true);
     setOverlayOpen(false);
+    if (typeof window !== 'undefined') {
+      const cleaned = stripTutorialDeepLink(window.location.href);
+      if (cleaned !== null) window.history.replaceState(window.history.state, '', cleaned);
+    }
   };
+
+  // CONCLUIR (step 9 PRÓXIMO → CONCLUIR variant) — auto-fires the mutation
+  // AND latches the dismissal so the user lands on the painel clean.
+  const handleComplete = () => persistTutorialClosed();
 
   // ENCERRAR (or Esc) — same persistence + latch. Plan 0018 §"Dismissal
   // path": ENCERRAR ≡ CONCLUIR for state. Both fire the mutation; the
   // user has been shown the entry-point and that's what the flag tracks.
-  const handleDismiss = () => {
-    completarTutorial.mutate();
-    setDismissedThisSession(true);
-    setOverlayOpen(false);
-  };
+  const handleDismiss = () => persistTutorialClosed();
 
   // Re-trigger path (floating CTA). Resets the session latch so the
   // auto-open useEffect can fire again on next visit if the user dismisses
@@ -365,7 +383,7 @@ export function PainelPage({
       eventDate={eventDate}
       genero={genero}
     >
-      <PainelPageView slug={slug} />
+      <PainelPageView idCampanha={idCampanha ?? undefined} />
       <PainelHeaderCard snapshot={snapshot} slug={slug} campanhaTitulo={campanhaTitulo} />
       <PainelMenu groups={groups} slug={slug} />
       <PainelTutorialTrigger
@@ -384,9 +402,13 @@ export function PainelPage({
 // Renders nothing — fires the custom pageview exactly once per mount of the
 // real dashboard (never during the loading/onboarding gates above, which
 // return early before this component exists).
-function PainelPageView({ slug }: { slug: string }) {
+// aperture-ai8vg — rota/publico instead of the slug (PII); opaque campanha id.
+function PainelPageView({ idCampanha }: { idCampanha?: string }) {
   useEffect(() => {
-    sendPageView('Painel', { slug });
-  }, [slug]);
+    sendPageView(
+      'Painel',
+      pageViewProps(window.location.pathname, idCampanha ? { id_campanha: idCampanha } : {}),
+    );
+  }, [idCampanha]);
   return null;
 }

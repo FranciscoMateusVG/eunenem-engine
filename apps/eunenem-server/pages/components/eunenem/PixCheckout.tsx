@@ -23,6 +23,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
+import { emitirPixFalhou, motivoPixFalhou } from "@/lib/analytics-funil";
 import {
   useObterStatusPix,
   type ContribuinteInput,
@@ -329,6 +330,18 @@ export function PixQrPanel({ slug, pix, onConfirmed, onRetry }: PixQrPanelProps)
       onConfirmed();
     }
   }, [isConfirmed, onConfirmed]);
+
+  // aperture-qq74p — pagamento_falhou (pix) only when the SERVER says the
+  // charge expired/rejected; the local countdown running out is UI, not a
+  // real state, and emits nothing. Once per txid (mirrors confirmedFiredRef).
+  const falhaFiredRef = useRef(false);
+  useEffect(() => {
+    const motivo = motivoPixFalhou(polledStatus);
+    if (motivo && !falhaFiredRef.current) {
+      falhaFiredRef.current = true;
+      emitirPixFalhou({ transactionId: pix.txid, valorCentavos: pix.valorCents, motivo });
+    }
+  }, [polledStatus, pix.txid, pix.valorCents]);
 
   const handleCopy = useCallback(async () => {
     try {

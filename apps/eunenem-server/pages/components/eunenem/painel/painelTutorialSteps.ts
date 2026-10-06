@@ -25,18 +25,18 @@ export interface TutorialStep {
 
 export const PAINEL_TUTORIAL_STEPS: readonly TutorialStep[] = [
   {
-    targetId: "presentes",
-    titulo: "presentes recebidos",
-    descricao:
-      "Acompanhe cada presente em dinheiro que chega e abra o extrato completo, com datas e quem enviou.",
-    defaultPosition: "bottom",
-  },
-  {
     targetId: "lista",
     titulo: "minha lista de presentes",
     descricao:
       "Monte e edite a lista de itens que você sonha para o bebê — a gente cuida da conversão em dinheiro.",
     defaultPosition: "top",
+  },
+  {
+    targetId: "presentes",
+    titulo: "presentes recebidos",
+    descricao:
+      "Acompanhe cada presente em dinheiro que chega e abra o extrato completo, com datas e quem enviou.",
+    defaultPosition: "bottom",
   },
   {
     targetId: "convite",

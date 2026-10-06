@@ -22,6 +22,15 @@ export interface TweaksState {
   primarySoft: string;
   /** Coral accent — eyebrow signatures + child's name. */
   accent: string;
+  /**
+   * aperture-whxzg — owner inline-editor previews. `historia` is the story
+   * body (null = not seeded, Story falls back to its prop); the three photo
+   * URLs override Hero/Story props once the owner uploads a new photo.
+   */
+  historia?: string | null;
+  fotoCapaUrl?: string | null;
+  fotoPerfilUrl?: string | null;
+  fotoHistoriaUrl?: string | null;
 }
 
 export const TWEAKS_DEFAULTS: TweaksState = {
@@ -39,6 +48,10 @@ export const TWEAKS_DEFAULTS: TweaksState = {
   primaryDeep: "#A77BBE",
   primarySoft: "#E8D5F0",
   accent: "#E78FA7",
+  historia: null,
+  fotoCapaUrl: null,
+  fotoPerfilUrl: null,
+  fotoHistoriaUrl: null,
 };
 
 /**

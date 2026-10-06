@@ -156,7 +156,11 @@ describe('Fluxo — administração de campanha', () => {
     expect(campanhaComB.idsAdministradores).toEqual([contaA.id, contaB.id]);
 
     const campanhaReloadComB = await deps.campanhaRepository.findById(idCampanha);
-    expect(campanhaReloadComB?.idsAdministradores).toEqual([contaA.id, contaB.id]);
+    // The repository's admin SELECT has no ORDER BY (the PK index may return
+    // id order), so compare as a set.
+    expect([...(campanhaReloadComB?.idsAdministradores ?? [])].sort()).toEqual(
+      [contaA.id, contaB.id].sort(),
+    );
 
     const contribuicaoCriada = await criarContribuicao(
       {

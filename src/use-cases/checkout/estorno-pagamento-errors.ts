@@ -38,3 +38,19 @@ export class PagamentoEstornoPixVinculoInvalidoError extends Error {
     this.name = 'PagamentoEstornoPixVinculoInvalidoError';
   }
 }
+
+export class PagamentoEstornoStripeOutcomeDesconhecidoError extends Error {
+  constructor(public readonly idPagamento: string) {
+    super(
+      'Resultado do estorno Stripe permanece desconhecido; nenhuma nova tentativa foi iniciada.',
+    );
+    this.name = 'PagamentoEstornoStripeOutcomeDesconhecidoError';
+  }
+}
+
+export class PagamentoEstornoStripeVinculoInvalidoError extends Error {
+  constructor() {
+    super('Identidade do estorno Stripe nao corresponde ao pagamento persistido.');
+    this.name = 'PagamentoEstornoStripeVinculoInvalidoError';
+  }
+}

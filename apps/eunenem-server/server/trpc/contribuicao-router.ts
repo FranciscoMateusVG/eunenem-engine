@@ -23,7 +23,9 @@ import {
   listarContribuicoesDeOpcao,
   removerContribuicao,
   UsuarioInputInvalidoError,
+  ValorUnitarioPresenteWriteSchema,
 } from '../../../../src/index.js';
+import { maisAntigo, propsListaItemCriado } from '../analytics/funil.js';
 import type { TrpcContext } from './context.js';
 import {
   CampanhaAcessoNegadoError,
@@ -32,6 +34,51 @@ import {
 } from './resolve-campanha-administrada.js';
 
 const t = initTRPC.context<TrpcContext>().create();
+
+/**
+ * aperture-ai8vg — server-truth "list got items" event, shared by `create`
+ * and `createBulk` (ONE write path, ONE emitter): `lista_item_criado`, one
+ * per durable write (lines/units), keyed on the first created row id and
+ * timed by the created rows' PERSISTED criadaEm (re-read after the write —
+ * not a second clock() call). There is deliberately NO "first item" claim in
+ * the event (root decision): a pre-write count is not authoritative under
+ * concurrency, and a post-write derivation is still best-effort. The funnel
+ * step "lista com >= 1 item" is DERIVED — first lista_item_criado per
+ * campanha in Mixpanel, MIN(criada_em) per campanha in the DB report.
+ * Provenance (catalog / custom / preset) is not a server fact — the client
+ * lista_* events carry it. Analytics never fails the write.
+ */
+async function emitirListaItemCriado(
+  ctx: TrpcContext,
+  f: {
+    idConta: string;
+    idCampanha: IdCampanha;
+    items: ReadonlyArray<{ quantidade?: number | undefined }>;
+    ids: readonly string[];
+  },
+): Promise<void> {
+  const sink = ctx.deps.serverAnalytics;
+  const primeiroCriadoId = f.ids[0];
+  if (!sink || !primeiroCriadoId) return;
+  try {
+    const agora = await ctx.deps.contribuicaoRepository.findByCampanhaId(f.idCampanha);
+    const criados = agora.filter((it) => f.ids.includes(it.id));
+    const criadaEm = maisAntigo(criados)?.criadaEm;
+    // Event time is the durable row's persisted `criada_em`, never a later
+    // clock read. If the re-read does not surface any created row (read
+    // shape / visibility), skip analytics: the write already succeeded and
+    // a non-durable timestamp would contradict the event contract.
+    if (!criadaEm) return;
+    sink.track(
+      'lista_item_criado',
+      f.idConta,
+      propsListaItemCriado({ idCampanha: f.idCampanha, items: f.items }),
+      { insertKey: primeiroCriadoId, occurredAt: criadaEm },
+    );
+  } catch {
+    // non-critical: the item write already succeeded.
+  }
+}
 
 /**
  * Sentinel errors carried out of `resolveCallerCampanha`. We don't throw
@@ -196,22 +243,19 @@ const ImagemUrlSchema = z
 
 /**
  * Per-item contribuição amount in cents (aperture-phbwo). A single-item
- * price MUST be > 0 to match the domain `MoneyCentsSchema`
- * (z.number().int().positive()). A R$0 contribuição is not a valid gift.
+ * New writes MUST use a unit value of at least R$ 10. Historical lower
+ * values remain readable through the domain `MoneyCentsSchema`.
  *
  * Previously this boundary used `.nonnegative()`, which accepted 0 and let
  * zero-priced items (e.g. catalog rows in listas-prontas.json with price:0)
  * pass the wire layer only to be rejected deeper by the use-case with a
  * confusing "Too small: expected number to be >0" domain message. Pinning
- * it to `.positive()` here makes the boundary fail fast with a clear,
- * field-scoped error. NOTE: this is NOT the daxwm case — that was an
+ * it to the dedicated write schema here makes the boundary fail fast with a
+ * clear field-scoped error. NOTE: this is NOT the daxwm case — that was an
  * aggregate SUM (totalSurchargeCents) which CAN legitimately be 0; this is
  * a single per-item price which cannot.
  */
-const ValorContribuicaoCentavosSchema = z
-  .number()
-  .int()
-  .positive('valor deve ser maior que zero (em centavos)');
+const ValorContribuicaoCentavosSchema = ValorUnitarioPresenteWriteSchema;
 
 const CreateInputSchema = z.object({
   // aperture-48mxt (W2 enforce): REQUIRED. Writes to per-campanha data must
@@ -416,7 +460,19 @@ export const contribuicaoRouter = t.router({
     .input(CreateInputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        const { campanha, idOpcaoPresentes } = await resolveCallerCampanha(ctx, input.idCampanha);
+        const { idConta, campanha, idOpcaoPresentes } = await resolveCallerCampanha(
+          ctx,
+          input.idCampanha,
+        );
+        const items = [
+          {
+            nome: input.nome,
+            valor: input.valor,
+            imagemUrl: input.imagemUrl ?? null,
+            grupo: input.grupo ?? null,
+            quantidade: input.quantidade,
+          },
+        ];
         const result = await criarContribuicoesEmLote(
           {
             campanhaRepository: ctx.deps.campanhaRepository,
@@ -427,17 +483,15 @@ export const contribuicaoRouter = t.router({
           {
             idCampanha: campanha.id,
             idOpcaoContribuicao: idOpcaoPresentes,
-            items: [
-              {
-                nome: input.nome,
-                valor: input.valor,
-                imagemUrl: input.imagemUrl ?? null,
-                grupo: input.grupo ?? null,
-                quantidade: input.quantidade,
-              },
-            ],
+            items,
           },
         );
+        await emitirListaItemCriado(ctx, {
+          idConta,
+          idCampanha: campanha.id,
+          items,
+          ids: result.ids,
+        });
         return { ids: result.ids };
       } catch (err) {
         throw toTRPCError(err);
@@ -462,7 +516,17 @@ export const contribuicaoRouter = t.router({
     .input(CreateBulkInputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        const { campanha, idOpcaoPresentes } = await resolveCallerCampanha(ctx, input.idCampanha);
+        const { idConta, campanha, idOpcaoPresentes } = await resolveCallerCampanha(
+          ctx,
+          input.idCampanha,
+        );
+        const items = input.items.map((item) => ({
+          nome: item.nome,
+          valor: item.valor,
+          imagemUrl: item.imagemUrl ?? null,
+          grupo: item.grupo ?? null,
+          quantidade: item.quantidade,
+        }));
         const result = await criarContribuicoesEmLote(
           {
             campanhaRepository: ctx.deps.campanhaRepository,
@@ -473,15 +537,15 @@ export const contribuicaoRouter = t.router({
           {
             idCampanha: campanha.id,
             idOpcaoContribuicao: idOpcaoPresentes,
-            items: input.items.map((item) => ({
-              nome: item.nome,
-              valor: item.valor,
-              imagemUrl: item.imagemUrl ?? null,
-              grupo: item.grupo ?? null,
-              quantidade: item.quantidade,
-            })),
+            items,
           },
         );
+        await emitirListaItemCriado(ctx, {
+          idConta,
+          idCampanha: campanha.id,
+          items,
+          ids: result.ids,
+        });
         return { ids: result.ids };
       } catch (err) {
         throw toTRPCError(err);

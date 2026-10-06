@@ -18,7 +18,7 @@
 // this PR. If catalog/lista-pronta convenience procedures land later they
 // re-enter through the bulk path.
 //
-// Errors: BAD_REQUEST 'contribuicao_locked' | NOT_FOUND | UNAUTHORIZED
+// Errors: BAD_REQUEST locked | quantity | minimum-value; NOT_FOUND | UNAUTHORIZED
 //         mapped to ContribuicaoError discriminated union.
 //
 // Invalidation: every mutation invalidates `trpc.contribuicao.list` via
@@ -36,6 +36,12 @@ import type {
   UpdateInput,
 } from './mocks/contribuicao-mock.js';
 import { trpc } from './trpc.js';
+import {
+  VALOR_UNITARIO_PRESENTE_MINIMO_CENTS,
+  VALOR_UNITARIO_PRESENTE_MINIMO_MESSAGE,
+} from '../../../../src/use-cases/arrecadacao/valor-unitario-presente.js';
+
+export { VALOR_UNITARIO_PRESENTE_MINIMO_MESSAGE };
 
 // ── Re-exported contract types ─────────────────────────────────────────────
 
@@ -48,6 +54,11 @@ export function centsFromBRL(brl: number): number {
   return Math.round(brl * 100);
 }
 
+/** Validate the unit price at the client write boundary, in integer cents. */
+export function valorUnitarioPresenteCentsValido(cents: number): boolean {
+  return Number.isInteger(cents) && cents >= VALOR_UNITARIO_PRESENTE_MINIMO_CENTS;
+}
+
 /**
  * Parse a Brazilian-formatted price string → BRL float.
  *
@@ -56,13 +67,33 @@ export function centsFromBRL(brl: number): number {
  * separators (only the FIRST comma was swapped and dots were left in place),
  * so `"1.500,00"` parsed as `1.5` → a ~1000× undercharge on high-value gifts
  * (aperture-t8zj5). Strip every thousand-dot, normalize the decimal comma,
- * then parse. `|| 0` guards empty / non-numeric input.
+ * then parse. A full-shape check guards empty, non-numeric and sub-cent input.
  *
  *   "1.500,00" → 1500      "1.234,56" → 1234.56
  *   "2.000"    → 2000      "50,00"    → 50        "" / "abc" → 0
  */
 export function parseValorBRL(input: string): number {
-  return parseFloat(input.trim().replace(/\./g, '').replace(',', '.')) || 0;
+  const trimmed = input.trim();
+  // Accept only complete pt-BR money inputs. In particular, reject a third
+  // decimal digit instead of rounding it into a different write value.
+  if (!/^(?:\d+|\d{1,3}(?:\.\d{3})+)(?:,\d{1,2})?$/.test(trimmed)) return 0;
+  const parsed = Number(trimmed.replace(/\./g, '').replace(',', '.'));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+export function valorUnitarioPresenteInputValido(input: string): boolean {
+  return valorUnitarioPresenteCentsValido(centsFromBRL(parseValorBRL(input)));
+}
+
+export function todosValoresUnitariosPresentesValidos(valuesBRL: readonly number[]): boolean {
+  return valuesBRL.every((value) => {
+    const cents = value * 100;
+    return (
+      Number.isFinite(cents) &&
+      Math.abs(cents - Math.round(cents)) < 1e-8 &&
+      valorUnitarioPresenteCentsValido(Math.round(cents))
+    );
+  });
 }
 
 /** Cents (4990) → BRL float (49.9). For display formatters. */
@@ -107,6 +138,7 @@ export function deriveBgColor(grupo: string | null): string {
 export type ContribuicaoError =
   | { kind: 'locked' }
   | { kind: 'quantity-below-sold' }
+  | { kind: 'minimum-value' }
   | { kind: 'not-found' }
   | { kind: 'unauthorized' }
   | { kind: 'network' };
@@ -118,6 +150,8 @@ export function contribuicaoErrorMessage(err: ContribuicaoError): string {
       return 'esse mimo já foi comprado e não pode ser removido ♡';
     case 'quantity-below-sold':
       return 'a quantidade não pode ser menor que o total já comprado';
+    case 'minimum-value':
+      return VALOR_UNITARIO_PRESENTE_MINIMO_MESSAGE;
     case 'not-found':
       return 'esse mimo não existe mais';
     case 'unauthorized':
@@ -143,6 +177,9 @@ export function toContribuicaoError(err: unknown): ContribuicaoError {
       }
       if (message.includes('quantidade_below_sold')) {
         return { kind: 'quantity-below-sold' };
+      }
+      if (message.includes(VALOR_UNITARIO_PRESENTE_MINIMO_MESSAGE)) {
+        return { kind: 'minimum-value' };
       }
       return { kind: 'network' };
     case 'NOT_FOUND':

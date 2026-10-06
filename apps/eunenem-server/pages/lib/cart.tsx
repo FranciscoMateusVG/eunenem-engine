@@ -41,7 +41,9 @@ import {
   useContext,
   useMemo,
   useReducer,
+  useRef,
 } from 'react';
+import { type OrigemCarrinho, despacharComDelta } from './analytics-funil.js';
 import type { VisitorGift } from './visitorGift.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -95,7 +97,7 @@ type Action =
 
 // ── Reducer ────────────────────────────────────────────────────────────────
 
-function reducer(state: CartState, action: Action): CartState {
+export function cartReducer(state: CartState, action: Action): CartState {
   switch (action.type) {
     case 'add': {
       const existing = state.lines.find((l) => l.nome === action.gift.nome);
@@ -175,10 +177,11 @@ function reducer(state: CartState, action: Action): CartState {
 
 interface CartContextValue {
   state: CartState;
-  add: (gift: VisitorGift) => void;
-  increment: (nome: string) => void;
-  decrement: (nome: string) => void;
-  remove: (nome: string) => void;
+  /** `origem` tags the analytics event (card stepper vs drawer). */
+  add: (gift: VisitorGift, origem?: OrigemCarrinho) => void;
+  increment: (nome: string, origem?: OrigemCarrinho) => void;
+  decrement: (nome: string, origem?: OrigemCarrinho) => void;
+  remove: (nome: string, origem?: OrigemCarrinho) => void;
   clear: () => void;
   /** Total units across all lines. Drives the badge on the cart button. */
   totalUnits: number;
@@ -200,7 +203,23 @@ interface CartProviderProps {
 }
 
 export function CartProvider({ slug, children }: CartProviderProps) {
-  const [state, dispatch] = useReducer(reducer, { slug, lines: [] } as CartState);
+  const [state, dispatch] = useReducer(cartReducer, { slug, lines: [] } as CartState);
+
+  // aperture-qq74p — synchronous current-state cell for the analytics
+  // wrapper: re-synced from committed state every render, advanced by each
+  // action wrapper BEFORE dispatch so two clicks in one tick predict from
+  // the right state (the reducer is pure, so prediction == commit order).
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const celula = useMemo(
+    () => ({
+      obter: () => stateRef.current,
+      avancar: (proximo: CartState) => {
+        stateRef.current = proximo;
+      },
+    }),
+    [],
+  );
 
   // aperture-90rab — in-memory only: no hydrate, no persist. Navigation or
   // refresh resets the cart (intentional; see header).
@@ -217,10 +236,18 @@ export function CartProvider({ slug, children }: CartProviderProps) {
     );
     return {
       state,
-      add: (gift) => dispatch({ type: 'add', gift }),
-      increment: (nome) => dispatch({ type: 'increment', nome }),
-      decrement: (nome) => dispatch({ type: 'decrement', nome }),
-      remove: (nome) => dispatch({ type: 'remove', nome }),
+      // aperture-qq74p — analytics from the REAL transition via the
+      // synchronous cell (see stateRef above): only a line that actually
+      // changed emits (cap/esgotado no-ops emit nothing).
+      add: (gift, origem = 'card') =>
+        despacharComDelta(celula, cartReducer, dispatch, { type: 'add', gift }, gift.nome, origem),
+      increment: (nome, origem = 'drawer') =>
+        despacharComDelta(celula, cartReducer, dispatch, { type: 'increment', nome }, nome, origem),
+      decrement: (nome, origem = 'drawer') =>
+        despacharComDelta(celula, cartReducer, dispatch, { type: 'decrement', nome }, nome, origem),
+      remove: (nome, origem = 'drawer') =>
+        despacharComDelta(celula, cartReducer, dispatch, { type: 'remove', nome }, nome, origem),
+      // clear runs after a purchase — not a removal, nothing emitted.
       clear: () => dispatch({ type: 'clear' }),
       totalUnits,
       totalPixCents,
@@ -236,7 +263,7 @@ export function CartProvider({ slug, children }: CartProviderProps) {
       quantidadeFor: (nome) =>
         state.lines.find((l) => l.nome === nome)?.quantidade ?? 0,
     };
-  }, [state]);
+  }, [state, celula]);
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
 }

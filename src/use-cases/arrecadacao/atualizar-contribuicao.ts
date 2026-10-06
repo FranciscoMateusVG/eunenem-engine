@@ -11,11 +11,11 @@ import {
   IdCampanhaSchema,
   IdContribuicaoSchema,
 } from '../../domain/arrecadacao/value-objects/ids.js';
-import { MoneyCentsSchema } from '../../domain/money.js';
 import { ArrecadacaoContribuicaoNaoEncontradaError } from '../../errors/arrecadacao/contribuicao-nao-encontrada.error.js';
 import { ArrecadacaoInputInvalidoError } from '../../errors/arrecadacao/input-invalido.error.js';
 import { ArrecadacaoNaoAutorizadoError } from '../../errors/arrecadacao/nao-autorizado.error.js';
 import type { Observability } from '../../observability/observability.js';
+import { ValorUnitarioPresenteWriteSchema } from './valor-unitario-presente.js';
 
 /**
  * Patch genérico de uma contribuição existente (aperture-d6atj). Substitui o
@@ -48,7 +48,7 @@ export const AtualizarContribuicaoInputSchema = z.object({
    */
   idCampanhaEsperada: IdCampanhaSchema,
   nome: NomeContribuicaoSchema.optional(),
-  valor: MoneyCentsSchema.optional(),
+  valor: ValorUnitarioPresenteWriteSchema.optional(),
   // See criar-contribuicao.ts for the rationale: engine is consumer-agnostic
   // on imagemUrl shape; consumers enforce format at their API edge.
   imagemUrl: z.string().trim().min(1).max(500).nullable().optional(),

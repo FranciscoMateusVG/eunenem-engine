@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useOauthReturnRedirect } from '@/lib/useOauthReturnRedirect';
 import { sendPageView } from '@/lib/analytics';
+import { pageViewProps } from '@/lib/rota-canonica';
 import { Calculadora } from '@/components/eunenem/landing/Calculadora';
 import { ChaRifa } from '@/components/eunenem/landing/ChaRifa';
 import { CTAFinal } from '@/components/eunenem/landing/CTAFinal';
@@ -39,7 +40,8 @@ export function LandingPage() {
   useOauthReturnRedirect();
 
   useEffect(() => {
-    sendPageView('Landing');
+    // aperture-ai8vg — rota/publico make page views countable per page.
+    sendPageView('Landing', pageViewProps(window.location.pathname));
   }, []);
 
   // aperture-ppuay — first-touch utm_source capture. Persist to localStorage so

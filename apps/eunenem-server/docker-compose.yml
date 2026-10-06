@@ -37,6 +37,7 @@ services:
       # boot-safe no-op (src/lib/glitchtip/instrument.ts logs one line and
       # skips init). DSN is set per-environment in Dokploy, never committed.
       - GLITCHTIP_DSN=${GLITCHTIP_DSN:-}
+      - GLITCHTIP_BROWSER_DSN=${GLITCHTIP_BROWSER_DSN:-}
       # PIX transfer rail selection + E2E magic-outcome gate (aperture-k9ajk).
       # Defaults mirror the zod schema in server/auth/setup.ts (fake/false) so
       # absent values are behavior-neutral. TRANSFERENCIA_PROVIDER='inter' is

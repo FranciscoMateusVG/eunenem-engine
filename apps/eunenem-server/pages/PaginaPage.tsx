@@ -12,10 +12,12 @@ import { Navbar } from '@/components/eunenem/Navbar';
 import { Story } from '@/components/eunenem/Story';
 import { TweaksPanel } from '@/components/eunenem/TweaksPanel';
 import { TweaksProvider } from '@/components/eunenem/TweaksContext';
-import { PRIMARY_PRESETS } from '@/lib/mocks/tweaksDefaults';
 import type { TweaksState } from '@/lib/mocks/tweaksDefaults';
+import { ownerListaEditHref } from '@/lib/pagina-owner';
+import { normalizeHex, triadFor } from '@/lib/palette';
 import { sendPageView } from '@/lib/analytics.js';
 import { CartProvider } from '@/lib/cart.js';
+import { idCampanhaParaPageView, pageViewProps } from '@/lib/rota-canonica.js';
 import { trpc } from '@/lib/trpc';
 import { useEffect } from 'react';
 import { NotFoundPage } from './NotFoundPage.js';
@@ -60,9 +62,23 @@ export function PaginaPage({
 
   // aperture-ppuay — the public GIFT PAGE was the headline untracked surface.
   // Fire the page-view once the perfil resolves to a real page (not NOT_FOUND).
+  // aperture-ai8vg — no slug (owner's first name) in props; the opaque
+  // campanha id rides instead. On the bare /pagina/:slug the id comes from the
+  // SERVER-resolved projection (perfil.data.idCampanha), cross-checked with
+  // the route id on /c/:idCampanha — so the per-campanha visitor step works
+  // for the common bare URL, not only the explicit one.
+  const idCampanhaPageView = idCampanhaParaPageView(idCampanha, perfil.data?.idCampanha);
   useEffect(() => {
-    if (perfil.data) sendPageView('Pagina', { slug });
-  }, [perfil.data, slug]);
+    if (perfil.data) {
+      sendPageView(
+        'Pagina',
+        pageViewProps(
+          window.location.pathname,
+          idCampanhaPageView ? { id_campanha: idCampanhaPageView } : {},
+        ),
+      );
+    }
+  }, [perfil.data, idCampanhaPageView]);
   // Marketplace + Messages need NO prop threading: their hooks
   // (usePaginaListaPresentes / usePaginaMural) self-resolve the route
   // campanha via useCampanhaRota() — the route-level CampanhaRotaProvider
@@ -109,15 +125,22 @@ export function PaginaPage({
   const eventDate = data?.dataEvento ? data.dataEvento.slice(0, 10) : null;
   if (eventDate) initialTweaks.targetDate = eventDate;
   if (data?.papais) initialTweaks.parents = data.papais;
-  if (data?.corPrimaria) {
-    initialTweaks.primary = data.corPrimaria;
-    const preset = PRIMARY_PRESETS[data.corPrimaria];
-    if (preset) {
-      initialTweaks.primaryDeep = preset.deep;
-      initialTweaks.primarySoft = preset.soft;
-    }
-  }
-  if (data?.corAcento) initialTweaks.accent = data.corAcento;
+  // aperture-whxzg — one derivation path for the primary triad (presets keep
+  // their hand-tuned deep/soft; any other valid hex gets a derived pair).
+  const seedPrimary = normalizeHex(data?.corPrimaria);
+  if (seedPrimary) Object.assign(initialTweaks, triadFor(seedPrimary));
+  const seedAccent = normalizeHex(data?.corAcento);
+  if (seedAccent) initialTweaks.accent = seedAccent;
+  // aperture-whxzg — seed the story + photo previews from the public
+  // projection so the owner editor's baseline equals what guests see.
+  initialTweaks.historia = data?.historia ?? "";
+  initialTweaks.fotoCapaUrl = data?.fotoCapaUrl ?? null;
+  initialTweaks.fotoPerfilUrl = data?.fotoPerfilUrl ?? null;
+  initialTweaks.fotoHistoriaUrl = data?.fotoHistoriaUrl ?? null;
+  const isOwner = data?.isOwner ?? false;
+  // aperture-4e1qo — owner shortcut to edit THIS campanha's gift list
+  // (fail-closed: null unless the server says owner + id + creator slug).
+  const ownerEditHref = ownerListaEditHref(data);
 
   return (
     <TweaksProvider initialState={initialTweaks}>
@@ -130,19 +153,22 @@ export function PaginaPage({
               profileUrl={data?.fotoPerfilUrl ?? null}
               eventDate={eventDate}
               tipoEvento={data?.tipoEvento ?? null}
+              editable={isOwner}
             />
             <Story
               historia={data?.historia ?? null}
               fotoHistoria={data?.fotoHistoriaUrl ?? null}
+              editable={isOwner}
             />
-            <Marketplace slug={slug} />
+            <Marketplace slug={slug} ownerEditHref={ownerEditHref} />
             <HowTo />
             <Messages slug={slug} />
           </main>
           <Footer />
           <TweaksPanelMount
             idCampanha={data?.idCampanha ?? undefined}
-            canSave={data?.isOwner ?? false}
+            canSave={isOwner}
+            creatorName={data?.creatorName ?? ""}
           />
           <CartDrawerMount slug={slug} />
         </CartDrawerProvider>
@@ -168,6 +194,7 @@ function CartDrawerMount({ slug }: { slug: string }) {
 function TweaksPanelMount(props: {
   idCampanha?: string;
   canSave?: boolean;
+  creatorName?: string;
 }) {
   const drawer = useCartDrawer();
   if (drawer.purchaseOverlayVisible) return null;

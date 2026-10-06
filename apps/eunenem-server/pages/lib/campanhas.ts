@@ -47,9 +47,11 @@ declare global {
     /** Runtime config injected by server.tsx's envelope() (aperture-pjd74 +
      *  aperture-gejcw). Both keys are whitelisted in serializeRuntimeEnv. */
     __EUNENEM_ENV__?: {
+      browserErrorDsn?: string;
       legacyMigracaoUrl?: string;
       legacySiteOrigin?: string;
       mixpanelToken?: string;
+      release?: string;
     };
   }
 }

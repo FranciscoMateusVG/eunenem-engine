@@ -376,8 +376,11 @@ export function parsePriceToCents(raw: string): number | null {
   // Strip currency symbols/spaces; normalize BR "1.234,56" and "29,90".
   let s = trimmed.replace(/[R$\s]/g, "");
   if (s.includes(",")) {
+    if (!/^(?:\d+|\d{1,3}(?:\.\d{3})+),\d{1,2}$/.test(s)) return null;
     // Comma is the decimal sep → dots are thousands.
     s = s.replace(/\./g, "").replace(",", ".");
+  } else if (!/^\d+(?:\.\d{1,2})?$/.test(s)) {
+    return null;
   }
   const value = Number(s);
   if (!Number.isFinite(value) || value < 0) return null;

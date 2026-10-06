@@ -188,23 +188,41 @@ describe('PagamentoProviderStripe.refundarPagamento — coexistence contract', (
     const createRefund = vi.fn().mockResolvedValue({
       id: 're_contract_1',
       status: 'succeeded',
+      amount: 8400,
+      currency: 'brl',
     });
     const stripe = { refunds: { create: createRefund } } as unknown as Stripe;
     const provider = new PagamentoProviderStripe({ stripe, clock: () => new Date(0) });
 
     const result = await provider.refundarPagamento({
+      operationId: '650e8400-e29b-41d4-a716-446655440301',
+      idempotencyKey: 'pagamento:550e8400-e29b-41d4-a716-446655440301:refund:1',
       idPagamento: '550e8400-e29b-41d4-a716-446655440301',
       e2eExternalRef: 'E1234567890123456789012345678901',
       chargeExternalRef: 'ch_contract_1',
       paymentIntentExternalRef: 'pi_contract_1',
       amountCents: 8400 as never,
+      currency: 'brl',
       reason: 'requested_by_customer',
     });
 
     expect(createRefund).toHaveBeenCalledWith(
-      { charge: 'ch_contract_1', reason: 'requested_by_customer' },
-      { idempotencyKey: 'pagamento:550e8400-e29b-41d4-a716-446655440301:refund' },
+      {
+        charge: 'ch_contract_1',
+        amount: 8400,
+        reason: 'requested_by_customer',
+        metadata: {
+          operationId: '650e8400-e29b-41d4-a716-446655440301',
+          paymentId: '550e8400-e29b-41d4-a716-446655440301',
+        },
+      },
+      { idempotencyKey: 'pagamento:550e8400-e29b-41d4-a716-446655440301:refund:1' },
     );
-    expect(result).toMatchObject({ id: 're_contract_1', status: 'aceito', amountCents: 8400 });
+    expect(result).toMatchObject({
+      id: 're_contract_1',
+      status: 'succeeded',
+      amountCents: 8400,
+      currency: 'brl',
+    });
   });
 });

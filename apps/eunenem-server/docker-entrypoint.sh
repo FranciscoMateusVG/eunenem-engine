@@ -17,8 +17,9 @@
 #   the parent shell's CWD (and the subsequent `exec "$@"`) untouched.
 #
 # Why `exec "$@"`:
-#   Preserves PID 1 semantics for the CMD (`pnpm start`), so SIGTERM from
-#   Docker reaches the app cleanly on container stop / redeploy.
+#   Replaces the shell with the command. Platform compose supplies direct
+#   `node --import tsx ...`, avoiding the pnpm/tsx CLI signal-forwarding chain.
+#   Other callers keep their original CMD; exec alone is not a drain proof.
 #
 # Idempotency:
 #   Kysely's migrator skips already-applied migrations via the
@@ -30,6 +31,11 @@
 #   — better to refuse to boot than to silently run stale-schema code.
 #   Dokploy surfaces the failed migration logs in the deployment view.
 set -e
+# If interrupted while waiting for migration, never proceed to HTTP startup.
+# This does not cancel or roll back a migration already in progress. The shell
+# may defer its trap until that child returns; Docker's grace is still finite.
+trap 'exit 143' TERM
+trap 'exit 130' INT
 
 echo "[entrypoint] running pending migrations..."
 ( cd /app && pnpm db:migrate )
