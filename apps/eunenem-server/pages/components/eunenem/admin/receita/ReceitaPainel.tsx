@@ -23,6 +23,11 @@ import type { ReceitaPainelData } from "./types";
 
 const MONO = "font-mono text-[11px] text-ink-mute";
 
+/*
+ * `[data-admin] h1–h4` (tailwind.css) fica fora de @layer e vence utilitários
+ * de fonte, cor e tracking. Nos headings do 1b esses utilitários levam `!`.
+ */
+
 /** Tom da coluna de valor de cada série (texto sobre branco). */
 const TEXTO_TARIFAS = "text-[#7d4f97]";
 const TEXTO_RECEBIDO = "text-[#2f6e74]";
@@ -40,7 +45,7 @@ export function ReceitaCabecalho({ hoje }: { hoje: string | null }) {
   return (
     <header className="flex flex-wrap items-end justify-between gap-4">
       <div className="flex flex-col gap-1.5">
-        <h1 className="text-[30px] font-semibold tracking-[-0.02em] text-ink">Receita EuNeném</h1>
+        <h1 className="text-[30px] font-semibold tracking-[-0.02em]! text-ink">Receita EuNeném</h1>
         <p className="text-[14px] text-ink-soft">Taxas da plataforma menos cancelamentos.</p>
       </div>
       {hoje ? (
@@ -113,7 +118,7 @@ function CartaoKpi({
       className="flex flex-col gap-4 rounded-lg border border-line px-6 py-5"
     >
       <div className="flex items-baseline justify-between gap-3">
-        <h3 className="font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-soft">
+        <h3 className="font-mono! text-[11px] font-semibold uppercase tracking-[0.12em]! text-ink-soft!">
           {titulo}
         </h3>
         <span data-testid="receita-kpi-faixa" className={MONO}>
@@ -194,7 +199,7 @@ function Grafico({
   return (
     <section className="flex flex-col gap-5 rounded-lg border border-line px-6 pb-4 pt-5">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <h2 className="text-[16px] font-semibold text-ink">{titulo}</h2>
+        <h2 className="text-[16px] font-semibold tracking-normal! text-ink">{titulo}</h2>
         <span className={MONO}>{legenda}</span>
       </div>
       {/* Em telas estreitas o gráfico rola por dentro; a página não. */}
