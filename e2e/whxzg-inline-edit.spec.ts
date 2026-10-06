@@ -24,7 +24,8 @@
  * persist-payload discipline for uploads is pinned at source level in
  * tests/unit/server/whxzg-inline-edit.test.ts.
  */
-import { expect, type Page, test } from './fixtures.js';
+import type { Page } from '@playwright/test';
+import { expect, test } from './fixtures.js';
 
 const cssVar = (page: Page, name: string) =>
   page.evaluate(
