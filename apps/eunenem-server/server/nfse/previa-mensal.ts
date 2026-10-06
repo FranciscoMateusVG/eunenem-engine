@@ -22,6 +22,7 @@ import {
   montarDpsXml,
   numeroDpsPrevia,
   SERIE_DPS_PREVIA,
+  type TotTrib,
 } from './dps.js';
 
 /**
@@ -57,6 +58,78 @@ export function situacaoDoMes(mes: string, now: Date): SituacaoMes {
   const atual = localDateInSaoPaulo(now).slice(0, 7);
   if (mes > atual) throw new MesFuturoError();
   return mes === atual ? 'em_andamento' : 'fechado';
+}
+
+// ────────────────────────────────────────────────────────────────────
+//  totTrib por regime (Anexo I: E0710, E0712, E0713)
+// ────────────────────────────────────────────────────────────────────
+
+interface TotTribResolvido {
+  readonly totTrib: TotTrib;
+  /** A DPS seria recusada pelas regras do Sistema Nacional como está. */
+  readonly pendente: boolean;
+  readonly campo: Omit<CampoDps, 'grupo' | 'tag' | 'rotulo'>;
+}
+
+function resolverTotTrib(config: NfseConfig): TotTribResolvido {
+  const regime = config.opSimpNac;
+  if (regime.valor === '2') {
+    return {
+      totTrib: { tipo: 'indicador' },
+      pendente: false,
+      campo: {
+        valor: 'indTotTrib=0',
+        origem: 'derivado',
+        aConfirmar: regime.origem === 'default',
+        nota: 'MEI: não informa valor estimado de tributos (Decreto 8.264/2014).',
+      },
+    };
+  }
+  if (regime.valor === '3') {
+    const sn = config.pTotTribSN;
+    if (sn.valor !== null) {
+      return {
+        totTrib: { tipo: 'simples', pTotTribSN: sn.valor },
+        pendente: false,
+        campo: { valor: `pTotTribSN=${sn.valor}`, origem: 'env', aConfirmar: false, nota: null },
+      };
+    }
+    return {
+      totTrib: { tipo: 'indicador' },
+      pendente: true,
+      campo: {
+        valor: 'indTotTrib=0',
+        origem: 'default',
+        aConfirmar: true,
+        nota:
+          'Seria RECUSADO: ME/EPP não pode informar indTotTrib (regra E0712). Defina NFSE_P_TOT_TRIB_SN com o percentual aproximado do Simples, definido com o contador.',
+      },
+    };
+  }
+  const p = config.pTotTrib;
+  if (p.valor !== null) {
+    return {
+      totTrib: { tipo: 'percentual', ...p.valor },
+      pendente: false,
+      campo: {
+        valor: `pTotTrib=${p.valor.fed}/${p.valor.est}/${p.valor.mun}`,
+        origem: 'env',
+        aConfirmar: regime.origem === 'default',
+        nota: 'Percentuais aproximados federal/estadual/municipal (Lei 12.741/2012).',
+      },
+    };
+  }
+  return {
+    totTrib: { tipo: 'indicador' },
+    pendente: true,
+    campo: {
+      valor: 'indTotTrib=0',
+      origem: 'default',
+      aConfirmar: true,
+      nota:
+        'Seria RECUSADO: não optante do Simples não pode informar indTotTrib (regra E0713). Defina NFSE_P_TOT_TRIB como "federal;estadual;municipal" (ex. 13.45;0.00;2.00), definido com o contador.',
+    },
+  };
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -101,7 +174,7 @@ const ROTULO_OP_SIMP_NAC: Record<string, string> = {
   '3': 'ME/EPP',
 };
 
-function camposDaDps(dps: DpsInput, config: NfseConfig): CampoDps[] {
+function camposDaDps(dps: DpsInput, config: NfseConfig, totTrib: TotTribResolvido): CampoDps[] {
   const id = 'Identificação';
   const prest = 'Prestador';
   const serv = 'Serviço';
@@ -195,15 +268,7 @@ function camposDaDps(dps: DpsInput, config: NfseConfig): CampoDps[] {
     deConfig(val, 'tribISSQN', 'Tributação do ISSQN', config.tribISSQN, '1 = operação tributável. Defina NFSE_TRIB_ISSQN.'),
     deConfig(val, 'tpRetISSQN', 'Retenção do ISSQN', config.tpRetISSQN, '1 = não retido. Defina NFSE_TP_RET_ISSQN.'),
     deConfig(val, 'pAliq', 'Alíquota do ISSQN (%)', config.pAliq, 'Omitida: a alíquota vem da parametrização do município. Defina NFSE_ALIQUOTA_ISS se exigido.'),
-    {
-      grupo: val,
-      tag: 'indTotTrib',
-      rotulo: 'Total aproximado de tributos',
-      valor: '0',
-      origem: 'fixo',
-      aConfirmar: false,
-      nota: '0 = não informar valor estimado (Decreto 8.264/2014).',
-    },
+    { grupo: val, tag: 'totTrib', rotulo: 'Total aproximado de tributos', ...totTrib.campo },
   ];
 }
 
@@ -220,6 +285,8 @@ export type PreviaDps =
       readonly valorServico: string;
       readonly campos: readonly CampoDps[];
       readonly xml: string;
+      /** totTrib incompatível com o regime: o Sistema Nacional recusaria. */
+      readonly totTribPendente: boolean;
     };
 
 const VARIAVEIS_BLOQUEANTES: readonly NfseVariavel[] = ['NFSE_PRESTADOR_CNPJ', 'NFSE_MUNICIPIO_IBGE'];
@@ -244,6 +311,7 @@ export function montarPreviaDps(input: {
   }
 
   const competencia = competenciaDoMes(mes);
+  const totTrib = resolverTotTrib(config);
   const dps: DpsInput = {
     tpAmb: config.ambiente.valor,
     dhEmi: dhEmiSaoPaulo(now),
@@ -270,6 +338,7 @@ export function montarPreviaDps(input: {
       tribISSQN: config.tribISSQN.valor,
       tpRetISSQN: config.tpRetISSQN.valor,
       pAliq: config.pAliq.valor,
+      totTrib: totTrib.totTrib,
     },
   };
   const { xml, idDps } = montarDpsXml(dps);
@@ -277,8 +346,9 @@ export function montarPreviaDps(input: {
     status: 'gerada',
     idDps,
     valorServico: formatarValorDps(resultadoCents),
-    campos: camposDaDps(dps, config),
+    campos: camposDaDps(dps, config, totTrib),
     xml,
+    totTribPendente: totTrib.pendente,
   };
 }
 
@@ -333,7 +403,8 @@ export type AvisoPrevia =
   | 'certificado_de_outro_cnpj'
   | 'certificado_vencido'
   | 'inconsistencias_no_periodo'
-  | 'detalhamento_nao_concilia';
+  | 'detalhamento_nao_concilia'
+  | 'tot_trib_pendente';
 
 export interface PreviaMensal {
   readonly mes: string;
@@ -425,6 +496,7 @@ async function previaMensal(
   let dps: PreviaMensal['dps'];
   if (previa.status === 'gerada') {
     const { xml, assinatura } = assinarPrevia(previa.xml, previa.idDps, config);
+    if (previa.totTribPendente) avisos.push('tot_trib_pendente');
     if (assinatura.status === 'nao_assinada') avisos.push('xml_nao_assinado');
     if (assinatura.status === 'assinada') {
       if (!assinatura.certificadoConfereComPrestador) avisos.push('certificado_de_outro_cnpj');

@@ -60,7 +60,32 @@ export interface DpsInput {
     readonly tpRetISSQN: TpRetISSQN;
     /** Alíquota já formatada (TSDec1V2), ex. "2.00". */
     readonly pAliq: string | null;
+    readonly totTrib: TotTrib;
   };
+}
+
+/**
+ * Choice de `totTrib`. Pelo Anexo I: `indicador` (indTotTrib=0) só é aceito
+ * para MEI (E0712 recusa ME/EPP, E0713 recusa não optante); não optante
+ * informa `percentual` (pTotTrib); ME/EPP informa `simples` (pTotTribSN).
+ */
+export type TotTrib =
+  | { readonly tipo: 'indicador' }
+  | { readonly tipo: 'percentual'; readonly fed: string; readonly est: string; readonly mun: string }
+  | { readonly tipo: 'simples'; readonly pTotTribSN: string };
+
+function totTribXml(totTrib: TotTrib): string {
+  switch (totTrib.tipo) {
+    case 'indicador':
+      return txt('indTotTrib', '0');
+    case 'percentual':
+      return el(
+        'pTotTrib',
+        txt('pTotTribFed', totTrib.fed) + txt('pTotTribEst', totTrib.est) + txt('pTotTribMun', totTrib.mun),
+      );
+    case 'simples':
+      return txt('pTotTribSN', totTrib.pTotTribSN);
+  }
 }
 
 /** Centavos inteiros positivos → TSDec15V2 ("1234.56"). */
@@ -129,9 +154,12 @@ export function numeroDpsPrevia(mes: string): string {
   return `${mes.replace('-', '')}99999999`;
 }
 
+/** Anexo I v1.01 (regra E0004): tipo de inscrição federal 1 = CPF, 2 = CNPJ. */
+const TIPO_INSCRICAO_CNPJ = '2';
+
 /**
- * "DPS" + cLocEmi (7) + tipo de inscrição (1 = CNPJ) + CNPJ (14) +
- * série (5) + número (15).
+ * "DPS" + cLocEmi (7) + tipo de inscrição federal (1) + CNPJ (14) +
+ * série (5) + número (15). O sandbox usava "1" para CNPJ, o que está errado.
  */
 export function montarIdDps(input: {
   readonly cLocEmi: string;
@@ -139,7 +167,7 @@ export function montarIdDps(input: {
   readonly serie: string;
   readonly nDPS: string;
 }): string {
-  return `DPS${input.cLocEmi}1${input.cnpj.padStart(14, '0')}${input.serie.padStart(5, '0')}${input.nDPS.padStart(15, '0')}`;
+  return `DPS${input.cLocEmi}${TIPO_INSCRICAO_CNPJ}${input.cnpj.padStart(14, '0')}${input.serie.padStart(5, '0')}${input.nDPS.padStart(15, '0')}`;
 }
 
 const SAO_PAULO = 'America/Sao_Paulo';
@@ -222,7 +250,7 @@ export function montarDpsXml(input: DpsInput): { readonly xml: string; readonly 
         el(
           'tribMun',
           txt('tribISSQN', valores.tribISSQN) + txt('tpRetISSQN', valores.tpRetISSQN) + opcional('pAliq', valores.pAliq),
-        ) + el('totTrib', txt('indTotTrib', '0')),
+        ) + el('totTrib', totTribXml(valores.totTrib)),
       ),
   );
 

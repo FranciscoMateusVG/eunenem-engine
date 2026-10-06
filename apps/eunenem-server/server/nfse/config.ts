@@ -78,6 +78,12 @@ export class CertificadoNfse {
   }
 }
 
+export interface PercentuaisTributos {
+  readonly fed: string;
+  readonly est: string;
+  readonly mun: string;
+}
+
 export interface NfseConfig {
   /** 14 dígitos, DV conferido. */
   readonly prestadorCnpj: string | null;
@@ -95,6 +101,10 @@ export interface NfseConfig {
   readonly pAliq: CampoConfig<string | null>;
   readonly inscricaoMunicipal: CampoConfig<string | null>;
   readonly cNBS: CampoConfig<string | null>;
+  /** pTotTrib (não optante): percentuais fed/est/mun, TSDec3V2. */
+  readonly pTotTrib: CampoConfig<PercentuaisTributos | null>;
+  /** pTotTribSN (ME/EPP), TSDec2V2. */
+  readonly pTotTribSN: CampoConfig<string | null>;
   readonly certificado: CertificadoNfse | null;
   readonly problemas: readonly ProblemaConfig[];
 }
@@ -146,6 +156,14 @@ const TpRetISSQNSchema = z.enum(['1', '2', '3']);
 const AliquotaSchema = z.string().regex(/^(0|[0-9](\.[0-9]{2})?)$/);
 const InscricaoMunicipalSchema = z.string().min(1).max(15).regex(LATIN1);
 const CNbsSchema = z.string().regex(/^\d{9}$/);
+const DEC3V2 = /^(0|0\.[0-9]{2}|[1-9][0-9]{0,2}(\.[0-9]{2})?)$/;
+const DEC2V2 = /^(0|0\.[0-9]{2}|[1-9][0-9]?(\.[0-9]{2})?)$/;
+const PTotTribSchema = z
+  .string()
+  .transform((v) => v.split(';').map((p) => p.trim()))
+  .refine((partes) => partes.length === 3 && partes.every((p) => DEC3V2.test(p)))
+  .transform(([fed, est, mun]): PercentuaisTributos => ({ fed: fed ?? '', est: est ?? '', mun: mun ?? '' }));
+const PTotTribSNSchema = z.string().regex(DEC2V2);
 /**
  * Rótulo de competência mais longo possível ("fevereiro/AAAA", 14). O limite
  * de 2000 do TSDesc2000 vale para o texto EXPANDIDO, então o template é
@@ -180,6 +198,8 @@ export const NfseEnvShape = {
   NFSE_ALIQUOTA_ISS: z.string().optional(),
   NFSE_INSCRICAO_MUNICIPAL: z.string().optional(),
   NFSE_CNBS: z.string().optional(),
+  NFSE_P_TOT_TRIB: z.string().optional(),
+  NFSE_P_TOT_TRIB_SN: z.string().optional(),
   NFSE_CERT_PATH: z.string().optional(),
   NFSE_CERT_BASE64: z.string().optional(),
   NFSE_CERT_PASSWORD: z.string().optional(),
@@ -236,6 +256,8 @@ export function parseNfseConfig(env: NfseEnv): NfseConfig {
   const pAliq = campo<string | null, null>('NFSE_ALIQUOTA_ISS', AliquotaSchema, null);
   const inscricaoMunicipal = campo<string | null, null>('NFSE_INSCRICAO_MUNICIPAL', InscricaoMunicipalSchema, null);
   const cNBS = campo<string | null, null>('NFSE_CNBS', CNbsSchema, null);
+  const pTotTrib = campo<PercentuaisTributos | null, null>('NFSE_P_TOT_TRIB', PTotTribSchema, null);
+  const pTotTribSN = campo<string | null, null>('NFSE_P_TOT_TRIB_SN', PTotTribSNSchema, null);
   const descricaoServico = campo('NFSE_DESCRICAO_SERVICO', DescricaoSchema, DESCRICAO_SERVICO_PADRAO);
 
   // A senha NÃO passa por trim: espaços nas pontas fazem parte dela.
@@ -255,6 +277,8 @@ export function parseNfseConfig(env: NfseEnv): NfseConfig {
     pAliq,
     inscricaoMunicipal,
     cNBS,
+    pTotTrib,
+    pTotTribSN,
     certificado,
     problemas,
   };

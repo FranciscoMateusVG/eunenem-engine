@@ -44,6 +44,7 @@ function input(overrides: Partial<DpsInput> = {}): DpsInput {
       tribISSQN: '1',
       tpRetISSQN: '1',
       pAliq: null,
+      totTrib: { tipo: 'indicador' },
     },
     ...overrides,
   };
@@ -125,14 +126,14 @@ describe('numeroDpsPrevia / série de prévia', () => {
 });
 
 describe('montarIdDps', () => {
-  it('"DPS" + município(7) + tipo(1) + CNPJ(14) + série(5) + número(15) = 45', () => {
+  it('"DPS" + município(7) + tipo(1, 2 = CNPJ) + CNPJ(14) + série(5) + número(15) = 45', () => {
     const id = montarIdDps({
       cLocEmi: '2611606',
       cnpj: '12345678000195',
       serie: '99999',
       nDPS: '20260999999999',
     });
-    expect(id).toBe('DPS2611606112345678000195999990' + '20260999999999');
+    expect(id).toBe('DPS2611606212345678000195999990' + '20260999999999');
     expect(id).toHaveLength(45);
     expect(id).toMatch(/^DPS[0-9]{42}$/);
   });
@@ -140,6 +141,20 @@ describe('montarIdDps', () => {
   it('completa série e número com zeros à esquerda', () => {
     const id = montarIdDps({ cLocEmi: '2611606', cnpj: '12345678000195', serie: '1', nDPS: '7' });
     expect(id.slice(-20)).toBe('00001000000000000007');
+  });
+});
+
+describe('Id da DPS decomposto confere com o XML (Anexo I: tipo 2 = CNPJ, E0004)', () => {
+  it('cLocEmi, tipo 2, CNPJ do prest, série e nDPS', () => {
+    const { xml, idDps } = montarDpsXml(input());
+    const m = /^DPS(\d{7})(\d)(\d{14})(\d{5})(\d{15})$/.exec(idDps);
+    if (!m) throw new Error(idDps);
+    const [, mun, tipo, inscricao, serie, numero] = m;
+    expect(tipo).toBe('2');
+    expect(xml).toContain(`<cLocEmi>${mun}</cLocEmi>`);
+    expect(xml).toContain(`<prest><CNPJ>${inscricao}</CNPJ>`);
+    expect(xml).toContain(`<serie>${Number(serie)}</serie>`);
+    expect(xml).toContain(`<nDPS>${Number(numero)}</nDPS>`);
   });
 });
 
@@ -259,9 +274,49 @@ describe('montarDpsXml', () => {
 
   it('pAliq entra depois de tpRetISSQN quando configurada', () => {
     const { xml } = montarDpsXml(
-      input({ valores: { vServCents: 100, tribISSQN: '1', tpRetISSQN: '1', pAliq: '2.00' } }),
+      input({
+        valores: {
+          vServCents: 100,
+          tribISSQN: '1',
+          tpRetISSQN: '1',
+          pAliq: '2.00',
+          totTrib: { tipo: 'indicador' },
+        },
+      }),
     );
     expect(xml).toContain('<tpRetISSQN>1</tpRetISSQN><pAliq>2.00</pAliq></tribMun>');
+  });
+
+  it('totTrib percentual (não optante, E0713): pTotTrib federal/estadual/municipal', () => {
+    const { xml } = montarDpsXml(
+      input({
+        valores: {
+          vServCents: 100,
+          tribISSQN: '1',
+          tpRetISSQN: '1',
+          pAliq: null,
+          totTrib: { tipo: 'percentual', fed: '13.45', est: '0.00', mun: '2.00' },
+        },
+      }),
+    );
+    expect(xml).toContain(
+      '<totTrib><pTotTrib><pTotTribFed>13.45</pTotTribFed><pTotTribEst>0.00</pTotTribEst><pTotTribMun>2.00</pTotTribMun></pTotTrib></totTrib>',
+    );
+  });
+
+  it('totTrib Simples Nacional (ME/EPP, E0712): pTotTribSN', () => {
+    const { xml } = montarDpsXml(
+      input({
+        valores: {
+          vServCents: 100,
+          tribISSQN: '1',
+          tpRetISSQN: '1',
+          pAliq: null,
+          totTrib: { tipo: 'simples', pTotTribSN: '6.00' },
+        },
+      }),
+    );
+    expect(xml).toContain('<totTrib><pTotTribSN>6.00</pTotTribSN></totTrib>');
   });
 
   it('cabeçalho: tpEmit=1 (prestador) e cLocEmi', () => {

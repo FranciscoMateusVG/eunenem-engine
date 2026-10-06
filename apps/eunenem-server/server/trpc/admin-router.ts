@@ -4399,6 +4399,7 @@ const NotaFiscalPreviaSchema = z.object({
       "certificado_vencido",
       "inconsistencias_no_periodo",
       "detalhamento_nao_concilia",
+      "tot_trib_pendente",
     ]),
   ),
   dps: NotaFiscalDpsSchema,
