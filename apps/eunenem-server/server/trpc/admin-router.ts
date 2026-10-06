@@ -81,13 +81,13 @@ import {
 import { enforceRateLimit } from "./rate-limit.js";
 import { loadCampaignAdministrators } from "../admin-campaign-administrators.js";
 import {
-  InvalidReceitaCampanhasCursorError,
   InvalidReceitaPeriodoError,
-  listReceitaCampanhas,
   loadReceitaDashboard,
+  loadReceitaPainel,
   RECEITA_CAMPANHAS_LIMIT,
 } from "../admin-receita.js";
 import { GRANULARIDADES, isLocalDate } from "../../pages/lib/receitaPeriodo.js";
+import { carregarPreviaMensal, MesFuturoError } from "../nfse/previa-mensal.js";
 import {
   AdminPaymentAdministratorsSchema,
   AdminPaymentEvidenceSchema,
@@ -4201,11 +4201,11 @@ const catalogRouter = t.router({
  * diferença (pode ser negativo). Nenhuma fórmula filtra pelo status atual do
  * pagamento. Não é saldo de campanhas nem lucro.
  *
- * `dashboard` devolve cards + série + decomposições + conciliação +
- * inconsistências de UM snapshot READ ONLY REPEATABLE READ.
- * `campanhasPaginated` é o drilldown além das 100 campanhas, com
- * CONSISTÊNCIA DISTINTA DECLARADA: snapshot próprio por página; totais nunca
- * saem dele.
+ * `painel` (aperture-zn5cm) alimenta a tela 1b: KPIs, 12 meses e semanas do
+ * mês corrente, com Tarifas e Recebido no banco, de UM snapshot READ ONLY
+ * REPEATABLE READ. `dashboard` devolve cards + série + decomposições +
+ * conciliação + inconsistências por período; a tela não o usa mais, mas a
+ * prévia da NFS-e (PR #144) depende dele e dos tipos dele.
  * ────────────────────────────────────────────────────────────────────── */
 
 const LocalDateSchema = z
@@ -4330,15 +4330,69 @@ const ReceitaDashboardSchema = z.object({
 });
 export type ReceitaDashboardDTO = z.infer<typeof ReceitaDashboardSchema>;
 
-const ReceitaCampanhasPageSchema = z.object({
-  snapshotAt: z.string().datetime(),
-  consistencia: z.literal("snapshot_distinto"),
-  periodo: z.object({ de: LocalDateSchema, ate: LocalDateSchema }),
-  rows: z.array(ReceitaCampanhaSchema),
-  nextCursor: z.string().nullable(),
-  campanhasTotal: z.number().int().nonnegative(),
+/**
+ * Painel 1b (aperture-zn5cm). Tarifas = resultado de taxas do ledger;
+ * Recebido = os três tipos de lançamento do pagamento (≈ total pago),
+ * registrado por criado_em − estornado por cancelado_em. Estimativa.
+ */
+const ReceitaPainelMetricaSchema = z.object({
+  registradoCents: cents(),
+  canceladoCents: cents(),
+  /** registrado − cancelado. Pode ser negativo. */
+  resultadoCents: z.number().int(),
 });
-export type ReceitaCampanhasPageDTO = z.infer<typeof ReceitaCampanhasPageSchema>;
+
+const ReceitaPainelValoresShape = {
+  tarifas: ReceitaPainelMetricaSchema,
+  recebido: ReceitaPainelMetricaSchema,
+};
+
+/** `de` inclusivo, `ate` exclusivo; datas locais de São Paulo. */
+const ReceitaPainelIntervaloSchema = z.object({
+  de: LocalDateSchema,
+  ate: LocalDateSchema,
+  ...ReceitaPainelValoresShape,
+});
+
+const ReceitaPainelSomaDiferencaSchema = z.object({
+  registradoCents: z.number().int(),
+  canceladoCents: z.number().int(),
+});
+
+const ReceitaPainelSchema = z.object({
+  snapshotAt: z.string().datetime(),
+  timezone: z.literal("America/Sao_Paulo"),
+  hoje: LocalDateSchema,
+  janela: z.object({ de: LocalDateSchema, ate: LocalDateSchema }),
+  kpis: z.object({
+    /** Dia 1 até hoje (inclusive). */
+    mesAtual: ReceitaPainelIntervaloSchema,
+    mesAnterior: ReceitaPainelIntervaloSchema,
+    /** Semana inteira seg–dom que contém hoje; pode atravessar o mês. */
+    semanaAtual: ReceitaPainelIntervaloSchema,
+    semanaAnterior: ReceitaPainelIntervaloSchema,
+  }),
+  /** 12 meses em ordem; só o último (mês corrente) é parcial. */
+  meses: z
+    .array(ReceitaPainelIntervaloSchema.extend({ parcial: z.boolean() }))
+    .length(12),
+  /** Semanas seg–dom do mês corrente, recortadas ao mês. */
+  semanas: z.array(
+    ReceitaPainelIntervaloSchema.extend({
+      estado: z.enum(["passada", "atual", "futura"]),
+    }),
+  ),
+  /** SUM independente da janela − soma dos dias. Exibir quando ≠ 0. */
+  diferencaConciliacao: z.object({
+    tarifas: ReceitaPainelSomaDiferencaSchema,
+    recebido: ReceitaPainelSomaDiferencaSchema,
+  }),
+  inconsistencias: z.object({
+    estornadoSemCancelamento: ReceitaInconsistenciaSchema,
+    canceladoSemEstorno: ReceitaInconsistenciaSchema,
+  }),
+});
+export type ReceitaPainelDTO = z.infer<typeof ReceitaPainelSchema>;
 
 function toReceitaCampanhaDTO(
   campanha: Awaited<ReturnType<typeof loadReceitaDashboard>>["porCampanha"]["rows"][number],
@@ -4356,10 +4410,7 @@ function toReceitaCampanhaDTO(
 }
 
 function receitaBadRequest(error: unknown): never {
-  if (
-    error instanceof InvalidReceitaPeriodoError ||
-    error instanceof InvalidReceitaCampanhasCursorError
-  ) {
+  if (error instanceof InvalidReceitaPeriodoError) {
     throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
   }
   throw error;
@@ -4406,37 +4457,169 @@ const receitaRouter = t.router({
       }
     }),
 
-  campanhasPaginated: adminProcedure
-    .input(
-      z.object({
-        de: LocalDateSchema,
-        ate: LocalDateSchema,
-        cursor: z.string().max(1024).nullable().default(null),
-        limit: z.number().int().min(1).max(100).default(50),
-      }),
-    )
-    .output(ReceitaCampanhasPageSchema)
+  painel: adminProcedure.output(ReceitaPainelSchema).query(async ({ ctx }) => {
+    const painel = await loadReceitaPainel(ctx.deps.db, {
+      platformId: ID_PLATAFORMA_EUNENEM,
+      now: ctx.deps.clock(),
+    });
+    return {
+      snapshotAt: painel.snapshotAt.toISOString(),
+      timezone: painel.timezone,
+      hoje: painel.hoje,
+      janela: painel.janela,
+      kpis: painel.kpis,
+      meses: [...painel.meses],
+      semanas: [...painel.semanas],
+      diferencaConciliacao: painel.diferencaConciliacao,
+      inconsistencias: painel.inconsistencias,
+    };
+  }),
+});
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * notaFiscal.previaMensal — PRÉVIA (dry run) da NFS-e mensal (aperture-dh1k7).
+ *
+ * Só leitura: nada é enviado ao Sistema Nacional e nada é escrito no banco.
+ * O valor é o "Resultado de taxas" do mês (mesmo read model da Receita).
+ * Senha e PFX do certificado nunca entram neste DTO.
+ * ────────────────────────────────────────────────────────────────────── */
+
+const MesSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
+
+const NotaFiscalCampoSchema = z.object({
+  grupo: z.string(),
+  tag: z.string(),
+  rotulo: z.string(),
+  /** Exatamente o valor que vai no XML, ou "(omitido…)". */
+  valor: z.string(),
+  origem: z.enum(["ledger", "env", "default", "derivado", "fixo"]),
+  aConfirmar: z.boolean(),
+  nota: z.string().nullable(),
+});
+
+const NotaFiscalAssinaturaSchema = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("assinada"),
+    certificadoCnpj: z.string().nullable(),
+    certificadoConfereComPrestador: z.boolean(),
+    certificadoValidoAte: z.string().datetime(),
+  }),
+  z.object({
+    status: z.literal("nao_assinada"),
+    motivo: z.enum(["sem_certificado", "certificado_ilegivel"]),
+  }),
+]);
+
+const NotaFiscalDpsSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("sem_valor") }),
+  z.object({ status: z.literal("config_incompleta"), faltando: z.array(z.string()) }),
+  z.object({
+    status: z.literal("gerada"),
+    idDps: z.string().regex(/^DPS[0-9]{42}$/),
+    valorServico: z.string(),
+    campos: z.array(NotaFiscalCampoSchema),
+    xml: z.string(),
+    assinatura: NotaFiscalAssinaturaSchema,
+  }),
+]);
+
+const NotaFiscalPreviaSchema = z.object({
+  mes: MesSchema,
+  rotulo: z.string(),
+  situacao: z.enum(["fechado", "em_andamento"]),
+  periodo: z.object({ de: LocalDateSchema, ate: LocalDateSchema }),
+  timezone: z.literal("America/Sao_Paulo"),
+  snapshotAt: z.string().datetime(),
+  valor: z.object({
+    ...ReceitaMetricasShape,
+    lancamentosRegistrados: z.number().int().nonnegative(),
+    lancamentosCancelados: z.number().int().nonnegative(),
+    pagamentosComTaxa: z.number().int().nonnegative(),
+  }),
+  porMeioProvedor: z.array(
+    z.object({
+      metodo: z.enum(["pix", "credit_card", "nao_registrado"]),
+      provedor: z.enum(["stripe", "inter", "nao_registrado"]),
+      ...ReceitaMetricasShape,
+    }),
+  ),
+  /** Informativo: repasse do custo de cartão. Nunca entra no valor da nota. */
+  adicionalCartao: z.object({ registradoCents: cents(), canceladoCents: cents() }),
+  inconsistencias: z.object({
+    estornadoSemCancelamento: ReceitaInconsistenciaSchema,
+    canceladoSemEstorno: ReceitaInconsistenciaSchema,
+  }),
+  configuracao: z.object({
+    problemas: z.array(
+      z.object({ variavel: z.string(), motivo: z.enum(["ausente", "invalido"]) }),
+    ),
+  }),
+  avisos: z.array(
+    z.enum([
+      "mes_em_andamento",
+      "resultado_nao_positivo",
+      "config_com_problemas",
+      "xml_nao_assinado",
+      "certificado_de_outro_cnpj",
+      "certificado_vencido",
+      "inconsistencias_no_periodo",
+      "detalhamento_nao_concilia",
+      "tot_trib_pendente",
+    ]),
+  ),
+  dps: NotaFiscalDpsSchema,
+});
+export type NotaFiscalPreviaDTO = z.infer<typeof NotaFiscalPreviaSchema>;
+
+const notaFiscalRouter = t.router({
+  previaMensal: adminProcedure
+    .input(z.object({ mes: MesSchema }))
+    .output(NotaFiscalPreviaSchema)
     .query(async ({ ctx, input }) => {
+      let previa: Awaited<ReturnType<typeof carregarPreviaMensal>>;
       try {
-        const page = await listReceitaCampanhas(ctx.deps.db, {
+        previa = await carregarPreviaMensal(ctx.deps.db, {
           platformId: ID_PLATAFORMA_EUNENEM,
-          de: input.de,
-          ate: input.ate,
-          cursor: input.cursor,
-          limit: input.limit,
-          cursorSecret: ctx.deps.logPiiHashSalt,
+          mes: input.mes,
+          now: ctx.deps.clock(),
+          config: ctx.deps.nfse,
         });
-        return {
-          snapshotAt: page.snapshotAt.toISOString(),
-          consistencia: page.consistencia,
-          periodo: page.periodo,
-          rows: page.rows.map(toReceitaCampanhaDTO),
-          nextCursor: page.nextCursor,
-          campanhasTotal: page.campanhasTotal,
-        };
       } catch (error: unknown) {
+        if (error instanceof MesFuturoError) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
+        }
         return receitaBadRequest(error);
       }
+      const { dps } = previa;
+      return {
+        ...previa,
+        snapshotAt: previa.snapshotAt.toISOString(),
+        porMeioProvedor: [...previa.porMeioProvedor],
+        configuracao: { problemas: [...previa.configuracao.problemas] },
+        avisos: [...previa.avisos],
+        dps:
+          dps.status === "sem_valor"
+            ? { status: "sem_valor" as const }
+            : dps.status === "config_incompleta"
+              ? { status: "config_incompleta" as const, faltando: [...dps.faltando] }
+              : {
+                  status: "gerada" as const,
+                  idDps: dps.idDps,
+                  valorServico: dps.valorServico,
+                  campos: [...dps.campos],
+                  xml: dps.xml,
+                  assinatura:
+                    dps.assinatura.status === "assinada"
+                      ? {
+                          status: "assinada" as const,
+                          certificadoCnpj: dps.assinatura.certificadoCnpj,
+                          certificadoConfereComPrestador:
+                            dps.assinatura.certificadoConfereComPrestador,
+                          certificadoValidoAte: dps.assinatura.certificadoValidoAte.toISOString(),
+                        }
+                      : { status: "nao_assinada" as const, motivo: dps.assinatura.motivo },
+                },
+      };
     }),
 });
 
@@ -4526,6 +4709,9 @@ export const adminRouter = t.router({
 
   /** Receita EuNeném — taxas da plataforma por evento (aperture-9bpre). */
   receita: receitaRouter,
+
+  /** Prévia (dry run, sem envio) da NFS-e mensal da EuNeném (aperture-dh1k7). */
+  notaFiscal: notaFiscalRouter,
 
   /** Nested sub-router for the Financeiro BC lancamentos drill (W5). */
   financeiro: financeiroRouter,

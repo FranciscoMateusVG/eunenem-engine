@@ -56,6 +56,9 @@ export const E2E_SPEC_SAFETY = [
   { file: 'painel-adicionar-qty.spec.ts', safety: 'non-payment' },
   { file: 'painel-editar-mimo-qty-changed.spec.ts', safety: 'non-payment' },
   { file: 'painel-editar-mimo.spec.ts', safety: 'non-payment' },
+  // Read-only admin screen (Receita 1b). Self-skips unless launched by the
+  // 9bpre ephemeral-DB runner with this spec as argument.
+  { file: 'q4pfz-receita-1b.spec.ts', safety: 'non-payment' },
   { file: 'qp12y-passwordless-only-gate.spec.ts', safety: 'non-payment' },
   {
     file: 'r5y94-repasse-admin-flow.spec.ts',
@@ -75,6 +78,9 @@ export const E2E_SPEC_SAFETY = [
   },
   { file: 'tqp4t-postlogin-routing-gaps.spec.ts', safety: 'non-payment' },
   { file: 'u38rz-nova-lista-create.spec.ts', safety: 'non-payment' },
+  // Prévia da NFS-e (somente leitura, nada é enviado). Self-skips unless
+  // launched by its ephemeral-DB runner (e2e/support/uj78j-nfse-ephemeral-run.mjs).
+  { file: 'uj78j-admin-nota-fiscal.spec.ts', safety: 'non-payment' },
   {
     file: 'visitor-cart-checkout.spec.ts',
     safety: 'money-movement',
