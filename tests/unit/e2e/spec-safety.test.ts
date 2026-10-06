@@ -8,9 +8,9 @@ import {
   REMOTE_MONEY_MOVEMENT_SPEC_GLOBS,
   REMOTE_MONEY_MOVEMENT_SPECS,
   resolveMoneyMovementPolicy,
-} from '../../e2e/e2e-spec-safety.js';
+} from '../../../e2e/e2e-spec-safety.js';
 
-const e2eDir = fileURLToPath(new URL('../../e2e', import.meta.url));
+const e2eDir = fileURLToPath(new URL('../../../e2e', import.meta.url));
 
 describe('exhaustive E2E spec safety manifest', () => {
   it('classifies every Playwright spec exactly once', () => {
