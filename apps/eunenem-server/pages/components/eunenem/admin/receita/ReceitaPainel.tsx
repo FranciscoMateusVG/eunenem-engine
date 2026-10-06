@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { formatBRL } from "@/lib/formatBRL";
 import {
-  alturasPareadas,
+  barraEmpilhada,
   faixaKpiMes,
   faixaKpiSemana,
   formatCompacto,
@@ -16,9 +16,10 @@ import type { ReceitaPainelData } from "./types";
 /**
  * Painel da aba Receita EuNeném, proposta 1b (aperture-zn5cm).
  *
- * Duas séries lado a lado, cada uma na própria escala: Tarifas EuNeném
- * (lilás) e Recebido no banco (teal). O mês corrente e a semana corrente
- * aparecem em tom claro; semanas futuras do mês, tracejadas e com "—".
+ * Uma barra empilhada por período, numa escala única: a altura é o Recebido
+ * no banco e a fatia de baixo (lilás) é a parte das Tarifas EuNeném; o resto
+ * é teal. O mês corrente e a semana corrente aparecem em tom claro; semanas
+ * futuras do mês, tracejadas e com "—".
  * Tudo vem de UMA resposta de `admin.receita.painel`.
  */
 
@@ -183,7 +184,7 @@ function Legenda() {
           Recebido no banco
         </span>
       </div>
-      <span className={MONO}>cada série na sua própria escala</span>
+      <span className={MONO}>tarifas são parte do recebido</span>
     </div>
   );
 }
@@ -234,42 +235,50 @@ function maximo(valores: readonly number[]): number {
   return Math.max(...valores, 1);
 }
 
-function BarrasPareadas({
-  alturas,
+function BarraEmpilhada({
+  barra,
   corTarifas,
   corRecebido,
   largura,
   raio,
   futura = false,
 }: {
-  alturas: { max: number; t: number; r: number };
+  barra: { total: number; tarifas: number };
   corTarifas: string;
   corRecebido: string;
   largura: string;
   raio: string;
   futura?: boolean;
 }) {
-  const borda = futura ? `border border-b-0 border-dashed ${EIXO}` : "";
+  if (futura) {
+    return (
+      <div
+        aria-hidden
+        data-testid="receita-barra"
+        className={`h-[2px] w-full ${largura} ${raio} border border-b-0 border-dashed ${EIXO}`}
+      />
+    );
+  }
+  // Recebido ≤ 0: barra vazia (sem altura mínima); o rótulo mostra o valor.
+  const minimo = barra.total > 0 ? "min-h-[2px]" : "";
   return (
     <div
       aria-hidden
-      className={`flex w-full items-end ${largura}`}
-      style={{ height: `${alturas.max.toFixed(2)}%` }}
+      data-testid="receita-barra"
+      className={`flex w-full flex-col overflow-hidden ${largura} ${raio} ${minimo}`}
+      style={{ height: `${barra.total.toFixed(2)}%` }}
     >
+      <div data-fatia="recebido" className={`flex-1 ${corRecebido}`} />
       <div
-        className={`min-h-[2px] flex-1 ${raio} ${corTarifas} ${borda}`}
-        style={{ height: `${alturas.t.toFixed(2)}%` }}
-      />
-      <div
-        className={`min-h-[2px] flex-1 ${raio} ${corRecebido} ${borda}`}
-        style={{ height: `${alturas.r.toFixed(2)}%` }}
+        data-fatia="tarifas"
+        className={`shrink-0 ${corTarifas}`}
+        style={{ height: `${barra.tarifas.toFixed(2)}%` }}
       />
     </div>
   );
 }
 
 export function ReceitaPorMes({ meses }: Pick<ReceitaPainelData, "meses">) {
-  const maxT = maximo(meses.map((m) => m.tarifas.resultadoCents));
   const maxR = maximo(meses.map((m) => m.recebido.resultadoCents));
   const corrente = meses.at(-1);
   const legenda = `últimos ${meses.length} meses${
@@ -304,17 +313,16 @@ export function ReceitaPorMes({ meses }: Pick<ReceitaPainelData, "meses">) {
                     {formatCompacto(m.tarifas.resultadoCents)}
                   </span>
                 </div>
-                <BarrasPareadas
-                  alturas={alturasPareadas(
+                <BarraEmpilhada
+                  barra={barraEmpilhada(
                     m.tarifas.resultadoCents,
                     m.recebido.resultadoCents,
-                    maxT,
                     maxR,
                     84,
                   )}
                   corTarifas={m.parcial ? "bg-lilac-soft" : "bg-lilac-deep"}
                   corRecebido={m.parcial ? "bg-blue-soft" : "bg-blue-deep"}
-                  largura="max-w-[60px] gap-[3px]"
+                  largura="max-w-[60px]"
                   raio="rounded-t-[3px]"
                 />
               </li>
@@ -343,7 +351,6 @@ export function ReceitaSemanasDoMes({
   mes,
 }: Pick<ReceitaPainelData, "semanas"> & { mes: string }) {
   const visiveis = semanas.filter((s) => s.estado !== "futura");
-  const maxT = maximo(visiveis.map((s) => s.tarifas.resultadoCents));
   const maxR = maximo(visiveis.map((s) => s.recebido.resultadoCents));
   return (
     <Grafico
@@ -384,21 +391,11 @@ export function ReceitaSemanasDoMes({
                     {futura ? "—" : formatBRL(s.tarifas.resultadoCents)}
                   </span>
                 </div>
-                <BarrasPareadas
-                  alturas={
-                    futura
-                      ? { max: 0, t: 0, r: 0 }
-                      : alturasPareadas(
-                          s.tarifas.resultadoCents,
-                          s.recebido.resultadoCents,
-                          maxT,
-                          maxR,
-                          76,
-                        )
-                  }
-                  corTarifas={atual ? "bg-lilac-soft" : futura ? "bg-transparent" : "bg-lilac-deep"}
-                  corRecebido={atual ? "bg-blue-soft" : futura ? "bg-transparent" : "bg-blue-deep"}
-                  largura="max-w-[112px] gap-1"
+                <BarraEmpilhada
+                  barra={barraEmpilhada(s.tarifas.resultadoCents, s.recebido.resultadoCents, maxR, 76)}
+                  corTarifas={atual ? "bg-lilac-soft" : "bg-lilac-deep"}
+                  corRecebido={atual ? "bg-blue-soft" : "bg-blue-deep"}
+                  largura="max-w-[112px]"
                   raio="rounded-t-[4px]"
                   futura={futura}
                 />

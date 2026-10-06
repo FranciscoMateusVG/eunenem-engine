@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   agregarDias,
-  alturasPareadas,
+  barraEmpilhada,
   type DiaPainel,
   faixaKpiMes,
   faixaKpiSemana,
@@ -140,18 +140,37 @@ describe('agregarDias', () => {
   });
 });
 
-describe('alturasPareadas (cada série na própria escala)', () => {
-  it('a maior barra de cada série chega à escala', () => {
-    expect(alturasPareadas(100, 50, 100, 200, 84)).toEqual({ max: 84, t: 100, r: 25 });
-    expect(alturasPareadas(50, 200, 100, 200, 84)).toEqual({ max: 84, t: 50, r: 100 });
+describe('barraEmpilhada (escala única do Recebido; Tarifas são a fatia de baixo)', () => {
+  it('a altura é proporcional ao Recebido: o maior chega à escala', () => {
+    expect(barraEmpilhada(500, 10_000, 10_000, 84)).toEqual({ total: 84, tarifas: 5 });
+    expect(barraEmpilhada(400, 5_000, 10_000, 84)).toEqual({ total: 42, tarifas: 8 });
   });
 
-  it('negativo vira zero e o grupo nunca fica com altura zero', () => {
-    expect(alturasPareadas(-10, 0, 100, 100, 84)).toEqual({ max: 1, t: 0, r: 0 });
+  it('a fatia é Tarifas/Recebido, não a escala própria das tarifas', () => {
+    // Tarifas ~8% em todos os meses: a fatia é 8% da barra, nunca 100%.
+    const a = barraEmpilhada(800, 10_000, 10_000, 84);
+    const b = barraEmpilhada(80, 1_000, 10_000, 84);
+    expect(a.tarifas).toBeCloseTo(8);
+    expect(b.tarifas).toBeCloseTo(8);
+    expect(b.total).toBeCloseTo(a.total / 10);
+  });
+
+  it('Recebido zero ou negativo (estornos) vira barra vazia', () => {
+    expect(barraEmpilhada(300, 0, 10_000, 84)).toEqual({ total: 0, tarifas: 0 });
+    expect(barraEmpilhada(-300, -5_000, 10_000, 84)).toEqual({ total: 0, tarifas: 0 });
+  });
+
+  it('Tarifas acima do Recebido enchem a barra, sem passar de 100%', () => {
+    expect(barraEmpilhada(900, 600, 10_000, 84)).toEqual({ total: 5.04, tarifas: 100 });
+  });
+
+  it('Tarifas negativas não viram fatia negativa', () => {
+    expect(barraEmpilhada(-200, 5_000, 10_000, 84)).toEqual({ total: 42, tarifas: 0 });
   });
 
   it('máximo zero ou negativo não divide por zero', () => {
-    expect(alturasPareadas(0, 0, 0, -5, 76)).toEqual({ max: 1, t: 0, r: 0 });
+    expect(barraEmpilhada(0, 0, 0, 76)).toEqual({ total: 0, tarifas: 0 });
+    expect(barraEmpilhada(10, 100, -5, 76)).toEqual({ total: 0, tarifas: 0 });
   });
 });
 

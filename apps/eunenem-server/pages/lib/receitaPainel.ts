@@ -184,21 +184,25 @@ export function agregarDias(grade: GradePainel, dias: readonly DiaPainel[]): Pai
 // ────────────────────────────────────────────────────────────────────
 
 /**
- * Barras pareadas, cada série na própria escala. `max` é a altura do grupo em
- * % da área (a maior das duas, mínimo 1); `t` e `r` são % do grupo.
+ * Barra empilhada de um período. A altura é o Recebido no banco, numa escala
+ * única: o maior Recebido do gráfico (`maxRecebido`) chega a `escala`% da área.
+ * A fatia de baixo é a parte das Tarifas EuNeném, que estão contidas no
+ * Recebido. `total` é % da área; `tarifas` é % da barra.
+ *
+ * Estornos podem deixar o Recebido zero ou negativo (barra vazia; o rótulo
+ * mostra o valor) e as Tarifas acima do Recebido ou negativas (a fatia fica
+ * entre 0 e 100%).
  */
-export function alturasPareadas(
+export function barraEmpilhada(
   tarifas: number,
   recebido: number,
-  maxTarifas: number,
   maxRecebido: number,
   escala: number,
-): { max: number; t: number; r: number } {
-  const h = (v: number, m: number) => (m > 0 ? Math.max(0, (v / m) * escala) : 0);
-  const hT = h(tarifas, maxTarifas);
-  const hR = h(recebido, maxRecebido);
-  const max = Math.max(hT, hR, 1);
-  return { max, t: (hT / max) * 100, r: (hR / max) * 100 };
+): { total: number; tarifas: number } {
+  if (recebido <= 0 || maxRecebido <= 0) return { total: 0, tarifas: 0 };
+  const total = Math.min(escala, (recebido / maxRecebido) * escala);
+  const fatia = Math.min(100, Math.max(0, (tarifas / recebido) * 100));
+  return { total, tarifas: fatia };
 }
 
 const INTEIRO = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 });
