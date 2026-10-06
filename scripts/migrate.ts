@@ -35,12 +35,6 @@ const db = new Kysely({
 const migrator = new Migrator({
   db,
   provider: { getMigrations: loadMigrations },
-  // TEMPORÁRIO (sync main↔staging, aprovado pelo operador em 2026-10-05):
-  // staging aplicou 20260925_055_add_desativado_em_to_usuarios antes de
-  // 20260913_055 e 20260916_056, que prod já tem. Desligar assim que os dois
-  // bancos tiverem todas as migrations — enquanto ligado, a trava de ordem do
-  // CI (1bo61) também fica desligada.
-  allowUnorderedMigrations: true,
 });
 
 const { error, results } = await migrator.migrateToLatest();
