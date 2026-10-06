@@ -218,6 +218,12 @@ const ESTILOS_1B = (root: Element) => {
   };
 };
 
+/** O item está inteiro dentro da largura da tela, sem rolar. */
+async function dentroDaTela(item: Locator, largura: number): Promise<boolean> {
+  const caixa = await item.boundingBox();
+  return caixa !== null && caixa.x >= 0 && caixa.x + caixa.width <= largura;
+}
+
 async function semOverflow(page: Page, onde: string) {
   const g = await page.evaluate(() => ({
     viewport: window.innerWidth,
@@ -490,10 +496,12 @@ test('q4pfz: Receita 1b — KPIs, meses, semanas do mês e notas de definição'
 
         // O mês corrente aparece sem rolar: o gráfico abre rolado até o fim
         // (no mobile ele rola por dentro).
-        const caixaAtual = await barrasMes.nth(11).boundingBox();
-        expect(caixaAtual, 'barra do mês corrente renderizada').not.toBeNull();
-        expect(caixaAtual?.x ?? -1, `mês corrente à vista em ${tag}`).toBeGreaterThanOrEqual(0);
-        expect((caixaAtual?.x ?? 0) + (caixaAtual?.width ?? 0)).toBeLessThanOrEqual(viewport.width);
+        // A rolagem acontece depois da hidratação: espera estabilizar.
+        await expect
+          .poll(() => dentroDaTela(barrasMes.nth(11), viewport.width), {
+            message: `mês corrente à vista em ${tag}`,
+          })
+          .toBe(true);
 
         // ── Semanas do mês corrente: seg–dom recortadas, futuras tracejadas
         await expect(
@@ -529,6 +537,17 @@ test('q4pfz: Receita 1b — KPIs, meses, semanas do mês e notas de definição'
             }
           }
         }
+
+        await expect
+          .poll(
+            () =>
+              dentroDaTela(
+                page.locator('li[data-testid=receita-semana][data-estado=atual]'),
+                viewport.width,
+              ),
+            { message: `semana atual à vista em ${tag}` },
+          )
+          .toBe(true);
 
         // Rótulos do eixo: faixa dd–dd/mm e a nota ("esta semana" ou o recorte).
         const secaoSemanas = page.locator('section').filter({ has: barrasSemana.first() }).last();
