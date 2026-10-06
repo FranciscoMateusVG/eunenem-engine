@@ -401,6 +401,34 @@ describe('DPS valida contra o XSD oficial (xmllint)', () => {
     }
   });
 
+  it('tributos aproximados por regime (pTotTrib / pTotTribSN) também validam', async () => {
+    await seedBordasDeMarco();
+    const casos: { env: NfseEnv; trecho: string }[] = [
+      {
+        env: { ...BASE_ENV, NFSE_OP_SIMP_NAC: '1', NFSE_P_TOT_TRIB: '13.45;0.00;2.00' },
+        trecho: '<pTotTrib><pTotTribFed>13.45</pTotTribFed>',
+      },
+      {
+        env: {
+          ...BASE_ENV,
+          NFSE_OP_SIMP_NAC: '3',
+          NFSE_REG_AP_TRIB_SN: '1',
+          NFSE_P_TOT_TRIB_SN: '6.00',
+        },
+        trecho: '<pTotTribSN>6.00</pTotTribSN>',
+      },
+    ];
+    for (const { env, trecho } of casos) {
+      const p = await previa('2032-03', { env });
+      if (p.dps.status !== 'gerada') throw new Error(p.dps.status);
+      expect(p.dps.xml).toContain(trecho);
+      expect(p.avisos).not.toContain('tot_trib_pendente');
+      expect(validateDps(p.dps.xml)).toEqual({ ok: true, errors: [] });
+    }
+    const padrao = await previa('2032-03');
+    expect(padrao.avisos).toContain('tot_trib_pendente');
+  });
+
   it('assinada', async () => {
     await seedBordasDeMarco();
     const pfx = gerarPfxDeTeste({ cnpj: CNPJ });
