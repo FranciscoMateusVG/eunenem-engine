@@ -403,18 +403,25 @@ export function ReceitaAvisoPainel({
   inconsistencias,
 }: Pick<ReceitaPainelData, "diferencaConciliacao" | "inconsistencias">) {
   const itens: { id: string; texto: string }[] = [];
-  const { tarifas, recebido } = diferencaConciliacao;
-  if (
-    tarifas.registradoCents !== 0 ||
-    tarifas.canceladoCents !== 0 ||
-    recebido.registradoCents !== 0 ||
-    recebido.canceladoCents !== 0
-  ) {
+  // Cada série divergente com os dois deltas: registro e cancelamento podem
+  // divergir no mesmo valor e se anular na subtração.
+  const divergentes = (["tarifas", "recebido"] as const)
+    .filter((serie) => {
+      const d = diferencaConciliacao[serie];
+      return d.registradoCents !== 0 || d.canceladoCents !== 0;
+    })
+    .map((serie) => {
+      const d = diferencaConciliacao[serie];
+      return `${serie}: ${formatBRL(d.registradoCents)} em registros e ${formatBRL(
+        d.canceladoCents,
+      )} em cancelamentos`;
+    });
+  if (divergentes.length > 0) {
     itens.push({
       id: "receita-aviso-conciliacao",
-      texto: `A soma por dia não bate com o total independente: diferença de ${formatBRL(
-        tarifas.registradoCents - tarifas.canceladoCents,
-      )} em tarifas e ${formatBRL(recebido.registradoCents - recebido.canceladoCents)} em recebido.`,
+      texto: `A soma por dia não bate com o total independente. Diferença em ${divergentes.join(
+        "; ",
+      )}.`,
     });
   }
   const { estornadoSemCancelamento: estornado, canceladoSemEstorno: cancelado } =
@@ -466,7 +473,8 @@ export function ReceitaNotas() {
       <p>
         <span className="text-ink-soft">Recebido no banco:</span> soma dos pagamentos aprovados,
         menos estornos. É uma estimativa: o custo do provedor e o valor que de fato caiu na conta
-        não são registrados.
+        não são registrados. Estornos parciais, disputas e chargebacks não são registrados e
+        ficam fora.
       </p>
     </div>
   );
