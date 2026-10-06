@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-const projectRoot = fileURLToPath(new URL('../..', import.meta.url));
+const projectRoot = fileURLToPath(new URL('../../..', import.meta.url));
 const playwrightCli = createRequire(import.meta.url).resolve('@playwright/test/cli');
 const destructiveSpec = 'e2e/r5y94-repasse-admin-flow.spec.ts';
 const safeSpec = 'e2e/qp12y-passwordless-only-gate.spec.ts';

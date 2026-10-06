@@ -2,7 +2,7 @@
 
 ## Commit & Push Workflow
 
-Frame uses Husky git hooks as the canonical quality gate. There is no server-side CI — the hooks are the only thing standing between your code and the repository.
+CI (`.github/workflows/ci.yml`) is the canonical quality gate: it runs on every PR to `staging` and `main`. Locally, Husky runs a fast pre-commit hook. There is no pre-push hook — it was removed on purpose (b4bde53, 2026-08-01) because it duplicated CI and hung whenever the local Docker daemon was down.
 
 ### Pre-commit hook (fast)
 
@@ -11,9 +11,9 @@ Runs `lint-staged` on staged files:
 
 This is fast and non-disruptive. It catches formatting and simple lint issues before they're committed.
 
-### Pre-push hook (full verification)
+### `pnpm check` (full verification, run before you push)
 
-Runs `pnpm check` — the complete Definition of Done:
+The complete local Definition of Done:
 
 ```bash
 pnpm lint              # Biome lint
@@ -25,13 +25,13 @@ tsx examples/*.ts      # Examples run cleanly
 pnpm verify-hooks      # Hooks are installed
 ```
 
-If **any** of these fail, the push is blocked. Fix the code, don't bypass the gate.
+If **any** of these fail, the work is not done. Fix the code, don't bypass the gate.
 
 ## ⚠️ --no-verify is Forbidden
 
 **Do not use `git push --no-verify` or `git commit --no-verify`.**
 
-There is no server-side CI fallback. The pre-push hook is the only quality gate. Bypassing it means broken code reaches the repository with no safety net.
+Bypassing the pre-commit hook means unformatted or unlinted code reaches the branch, and CI will reject it anyway.
 
 This is not a suggestion — it's a rule. For human contributors and AI agents alike.
 
@@ -46,8 +46,7 @@ If you're stuck and need to push a WIP branch for backup or collaboration, creat
 
 - **Husky** manages git hooks in `.husky/`
 - **lint-staged** (configured in `lint-staged.config.js`) runs Biome on staged files during pre-commit; `*.generated.ts` is skipped (ignored by Biome)
-- The pre-push hook calls `pnpm check` which runs the full pipeline
-- `pnpm verify-hooks` (part of `pnpm check`) confirms hooks are installed and readable
+- `pnpm verify-hooks` (part of `pnpm check`) confirms the pre-commit hook is installed and readable
 
 Hooks are installed automatically via the `prepare` script when you run `pnpm install`.
 

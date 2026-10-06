@@ -133,6 +133,50 @@ function coresDasBarras(item: Locator): Promise<string[]> {
   );
 }
 
+/**
+ * Geometria medida da barra empilhada: altura da área (o item), da barra e da
+ * fatia de Tarifas, em px.
+ */
+function geometria(item: Locator): Promise<{ area: number; barra: number; tarifas: number }> {
+  return item.evaluate((el) => {
+    const h = (sel: string) => el.querySelector(sel)?.getBoundingClientRect().height ?? Number.NaN;
+    return {
+      area: el.getBoundingClientRect().height,
+      barra: h('[data-testid=receita-barra]'),
+      tarifas: h('[data-fatia=tarifas]'),
+    };
+  });
+}
+
+/**
+ * Uma barra por período, numa escala única: a altura é proporcional ao
+ * Recebido (o maior chega a `escala` da área) e a fatia de baixo é
+ * Tarifas/Recebido da barra. Recebido ≤ 0 ⇒ barra vazia.
+ */
+async function expectBarraEmpilhada(
+  item: Locator,
+  esperado: { tarifas: number; recebido: number },
+  maxRecebido: number,
+  escala: number,
+  onde: string,
+) {
+  const g = await geometria(item);
+  if (esperado.recebido <= 0) {
+    expect(g.barra, `${onde}: Recebido ≤ 0 ⇒ barra vazia`).toBe(0);
+    return;
+  }
+  const alturaEsperada = Math.max(2, (esperado.recebido / maxRecebido) * escala * g.area);
+  expect(
+    Math.abs(g.barra - alturaEsperada),
+    `${onde}: altura ${g.barra}px ∝ Recebido (esperado ${alturaEsperada.toFixed(1)}px)`,
+  ).toBeLessThanOrEqual(1);
+  const fatia = Math.min(1, Math.max(0, esperado.tarifas / esperado.recebido));
+  expect(
+    Math.abs(g.tarifas - fatia * g.barra),
+    `${onde}: fatia ${g.tarifas}px = Tarifas/Recebido da barra (esperado ${(fatia * g.barra).toFixed(1)}px)`,
+  ).toBeLessThanOrEqual(1);
+}
+
 function temBordaTracejada(item: Locator): Promise<boolean> {
   return item.evaluate((el) =>
     [el, ...el.querySelectorAll('*')].some((n) => {
@@ -209,7 +253,7 @@ const ESTILOS_1B = (root: Element) => {
     kpiValor: pick(byText('p', /^R\$\s?\d/)),
     kpiComp: pick(byText('p', /^Setembro:/)),
     kpiCard: pick(byText('article', /Mês atual/i)),
-    legendaEscala: pick(byText('span', /^cada série/)),
+    legendaEscala: pick(byText('span', /^tarifas são parte do recebido$/)),
     h2Mes: pick(byText('h2', /^Por mês$/)),
     h2Semanas: pick(byText('h2', /^Semanas de/)),
     eixoMes: pick(byText('span', /^set\/26$/)),
@@ -456,20 +500,23 @@ test('q4pfz: Receita 1b — KPIs, meses, semanas do mês e notas de definição'
         expect(lsH1, 'h1 com tracking −0,02em (30px ⇒ −0,6px)').toBe('-0.6px');
 
         // ── Legenda: as duas séries juntas, sem alternância ───────────────
-        await expect(page.getByText('cada série na sua própria escala')).toBeVisible();
+        await expect(page.getByText('tarifas são parte do recebido')).toBeVisible();
+        await expect(page.getByText(/própria escala/)).toHaveCount(0);
         await expect(page.getByRole('tab')).toHaveCount(0);
         await expect(
           page.getByRole('button', { name: /^(Tarifas EuNeném|Recebido no banco)$/ }),
         ).toHaveCount(0);
 
-        // ── Por mês: 12 meses, só o corrente parcial, barras pareadas ─────
+        // ── Por mês: 12 meses, só o corrente parcial, barra empilhada ─────
         await expect(page.getByRole('heading', { name: 'Por mês' })).toBeVisible();
         const barrasMes = page.getByTestId('receita-mes');
         await expect(barrasMes).toHaveCount(12);
+        const somaMes = (k: number) =>
+          somar(eventos, meses[k] as string, k === 11 ? amanha : (meses[k + 1] as string));
+        const maxRecebidoMes = Math.max(...meses.map((_, k) => somaMes(k).recebido));
         for (let k = 0; k < 12; k++) {
           const de = meses[k] as string;
-          const ate = k === 11 ? amanha : (meses[k + 1] as string);
-          const esperado = somar(eventos, de, ate);
+          const esperado = somaMes(k);
           const barra = barrasMes.nth(k);
           await expect(barra).toHaveAttribute('data-mes', de);
           await expect(barra).toHaveAttribute('data-parcial', k === 11 ? 'true' : 'false');
@@ -480,6 +527,8 @@ test('q4pfz: Receita 1b — KPIs, meses, semanas do mês e notas de definição'
           if (k === 11) expect(rotulo).toContain('(parcial)');
           await expect(barra.locator('[data-serie=tarifas]')).toBeVisible();
           await expect(barra.locator('[data-serie=recebido]')).toBeVisible();
+          await expect(barra.getByTestId('receita-barra')).toHaveCount(1);
+          await expectBarraEmpilhada(barra, esperado, maxRecebidoMes, 0.84, `mês ${de} ${tag}`);
           const cores = await coresDasBarras(barra);
           if (k === 11) {
             expect(cores, `mês parcial ${de} em tons claros`).toEqual(
@@ -510,6 +559,11 @@ test('q4pfz: Receita 1b — KPIs, meses, semanas do mês e notas de definição'
         await expect(page.getByText('semana de segunda a domingo')).toBeVisible();
         const barrasSemana = page.getByTestId('receita-semana');
         await expect(barrasSemana).toHaveCount(semanasEsperadas.length);
+        const maxRecebidoSemana = Math.max(
+          ...semanasEsperadas
+            .filter((w) => w.estado !== 'futura')
+            .map((w) => somar(eventos, w.de, w.ate).recebido),
+        );
         for (let k = 0; k < semanasEsperadas.length; k++) {
           const w = semanasEsperadas[k] as SemanaEsperada;
           const barra = barrasSemana.nth(k);
@@ -529,6 +583,13 @@ test('q4pfz: Receita 1b — KPIs, meses, semanas do mês e notas de definição'
             await expect(barra.locator('[data-serie=tarifas]')).toHaveText(brl(esperado.tarifas));
             await expect(barra.locator('[data-serie=recebido]')).toHaveText(brl(esperado.recebido));
             expect(tracejada, `semana ${w.estado} ${w.de} sem tracejado`).toBe(false);
+            await expectBarraEmpilhada(
+              barra,
+              esperado,
+              maxRecebidoSemana,
+              0.76,
+              `semana ${w.de} ${tag}`,
+            );
             if (w.estado === 'atual') {
               await expect(barra).toHaveAttribute('aria-label', /\(esta semana\)/);
               expect(cores).toEqual(expect.arrayContaining([LILAS_CLARO, TEAL_CLARO]));
