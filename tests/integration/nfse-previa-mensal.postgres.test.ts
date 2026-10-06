@@ -376,6 +376,22 @@ describe('DPS valida contra o XSD oficial (xmllint)', () => {
     expect(validateDps(p.dps.xml)).toEqual({ ok: true, errors: [] });
   });
 
+  it('descrição que só passa do limite depois de expandir {competencia} não gera XML inválido', async () => {
+    await seedBordasDeMarco();
+    // 146 × "{competencia}" = 1898 chars no env; "março/2032" (10) expande para 1460.
+    // Fevereiro: "fevereiro/2032" (14) expande para 2044 > 2000 (TSDesc2000).
+    const env = { ...BASE_ENV, NFSE_DESCRICAO_SERVICO: '{competencia}'.repeat(146) };
+    const p = await previa('2032-02', { env });
+    if (p.dps.status === 'gerada') {
+      expect(validateDps(p.dps.xml)).toEqual({ ok: true, errors: [] });
+    } else {
+      expect(p.configuracao.problemas).toContainEqual({
+        variavel: 'NFSE_DESCRICAO_SERVICO',
+        motivo: 'invalido',
+      });
+    }
+  });
+
   it('assinada', async () => {
     await seedBordasDeMarco();
     const pfx = gerarPfxDeTeste({ cnpj: CNPJ });
