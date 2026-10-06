@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -530,7 +531,10 @@ describe('assinatura XMLDsig (verificada sem o xml-crypto)', () => {
 
   it('senha com espaço nas pontas é usada como está', async () => {
     await seedBordasDeMarco();
-    const comEspaco = gerarPfxDeTeste({ cnpj: CNPJ, senha: ' senha com espaço ' });
+    const comEspaco = gerarPfxDeTeste({
+      cnpj: CNPJ,
+      senha: ` ${randomBytes(8).toString('hex')} `,
+    });
     const p = await previa('2032-03', { env: envComCert(comEspaco, 'base64') });
     if (p.dps.status !== 'gerada') throw new Error(p.dps.status);
     expect(p.dps.assinatura.status).toBe('assinada');
@@ -588,7 +592,8 @@ describe('segredos do certificado nunca saem da procedure', () => {
   it('senha errada: não assina, motivo fixo, nenhuma das senhas aparece', async () => {
     await seedBordasDeMarco();
     const pfx = gerarPfxDeTeste({ cnpj: CNPJ });
-    const errada = 'senha-errada-0f9e8d7c';
+    // Gerada na hora: nenhuma senha literal no repositório.
+    const errada = `${pfx.senha}-${randomBytes(6).toString('hex')}`;
     const p = await previa('2032-03', {
       env: envComCert(pfx, 'base64', { NFSE_CERT_PASSWORD: errada }),
     });
