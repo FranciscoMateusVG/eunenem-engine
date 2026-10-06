@@ -175,6 +175,42 @@ describe('Receita 1b — notas e aviso', () => {
     );
   });
 
+  it('o rodapé declara que estorno parcial, disputa e chargeback ficam fora', () => {
+    const t = texto(render(painel()));
+    expect(t).toContain(
+      'Estornos parciais, disputas e chargebacks não são registrados e ficam fora.',
+    );
+  });
+
+  it('diferença de conciliação mostra registro e cancelamento separados, por série', () => {
+    const html = render(
+      painel(undefined, undefined, {
+        diferencaConciliacao: {
+          tarifas: { registradoCents: 100, canceladoCents: 100 },
+          recebido: { registradoCents: 0, canceladoCents: -250 },
+        },
+      }),
+    );
+    const t = texto(trecho(html, 'receita-aviso-conciliacao', '</p>'));
+    expect(t).toContain('tarifas: R$ 1,00 em registros e R$ 1,00 em cancelamentos');
+    expect(t).toContain('recebido: R$ 0,00 em registros e -R$ 2,50 em cancelamentos');
+    expect(t).not.toContain('diferença de R$ 0,00');
+  });
+
+  it('só a série divergente aparece na diferença de conciliação', () => {
+    const html = render(
+      painel(undefined, undefined, {
+        diferencaConciliacao: {
+          tarifas: ZERO,
+          recebido: { registradoCents: 300, canceladoCents: 0 },
+        },
+      }),
+    );
+    const t = texto(trecho(html, 'receita-aviso-conciliacao', '</p>'));
+    expect(t).toContain('recebido: R$ 3,00 em registros e R$ 0,00 em cancelamentos');
+    expect(t).not.toContain('tarifas:');
+  });
+
   it('sem nada a conferir, não há aviso', () => {
     expect(render(painel())).not.toContain('receita-aviso');
   });
@@ -194,7 +230,7 @@ describe('Receita 1b — notas e aviso', () => {
     );
     expect(html).toContain('role="status" aria-label="Conferir"');
     expect(texto(trecho(html, 'receita-aviso-conciliacao', '</p>'))).toContain(
-      'diferença de R$ 1,00 em tarifas e R$ 0,00 em recebido',
+      'tarifas: R$ 1,00 em registros e R$ 0,00 em cancelamentos',
     );
     expect(texto(trecho(html, 'receita-aviso-estornado', '</p>'))).toContain(
       '2 taxa(s) de pagamento estornado sem data de cancelamento (R$ 15,00)',
