@@ -30,6 +30,7 @@ import {
   RemetenteConviteSchema,
   TipoEventoSchema,
 } from '../../../../src/index.js';
+import { propsConviteCriado } from '../analytics/funil.js';
 import type { TrpcContext } from './context.js';
 import {
   CampanhaAcessoNegadoError,
@@ -104,11 +105,13 @@ async function resolveCallerCampanha(
   idCampanha?: string,
 ): Promise<{
   campanha: Campanha;
+  /** aperture-ai8vg — the owner's conta id (analytics distinct_id). */
+  idConta: string;
 }> {
   // aperture-yeauv: resolve via the shared per-campanha resolver. PRESENT
   // idCampanha → that campanha, owner-gated; ABSENT → oldest (back-compat).
-  const { campanha } = await resolverCampanhaAdministrada(ctx, idCampanha);
-  return { campanha };
+  const { usuario, campanha } = await resolverCampanhaAdministrada(ctx, idCampanha);
+  return { campanha, idConta: usuario.idConta };
 }
 
 const SaveEventoConviteInputSchema = z.object({
@@ -306,7 +309,7 @@ export const eventoConviteRouter = t.router({
     .output(GetEventoConviteOutputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        const { campanha } = await resolveCallerCampanha(ctx, input.idCampanha);
+        const { campanha, idConta } = await resolveCallerCampanha(ctx, input.idCampanha);
         const existingEvento = await ctx.deps.eventoRepository.findByIdCampanha(
           campanha.id as IdCampanhaEvento,
         );
@@ -391,6 +394,19 @@ export const eventoConviteRouter = t.router({
                 assinatura: input.assinatura ?? undefined,
               },
             );
+
+        // aperture-ai8vg — server-truth "invite created" funnel step: the
+        // FIRST save only (a convites row now exists); later saves are UX
+        // (client convite_salvo). Row id + its own criadoEm = dedup key/time.
+        // Sharing is not a durable fact and stays client-side.
+        if (!existingConvite) {
+          ctx.deps.serverAnalytics?.track(
+            'convite_criado',
+            idConta,
+            propsConviteCriado({ idCampanha: campanha.id, idEvento: evento.id, modelo: convite.modelo }),
+            { insertKey: convite.id, occurredAt: convite.criadoEm },
+          );
+        }
 
         return {
           evento: {

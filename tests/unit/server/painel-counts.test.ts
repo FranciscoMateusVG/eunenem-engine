@@ -10,6 +10,12 @@ import {
 } from '../../../apps/eunenem-server/pages/lib/painel-counts.js';
 
 describe('painel count synchronisation', () => {
+  it('shows the gift list before received gifts in the event menu', () => {
+    const eventItems = buildPainelMenu(PAINEL_DEMO).find((group) => group.id === 'evento')?.items;
+
+    expect(eventItems?.slice(0, 2).map((item) => item.id)).toEqual(['lista', 'presentes']);
+  });
+
   it('uses purchased gift units for both the received row and header strip', () => {
     const counts = derivePainelCounts({
       summary: { totalPresentes: 2, totalPresentesItensCount: 3, totalPresentesUnidades: 5 },

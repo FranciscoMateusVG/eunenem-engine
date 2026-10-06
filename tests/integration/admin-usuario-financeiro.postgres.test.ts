@@ -583,3 +583,130 @@ describe('admin.usuarios.financeiro.repasses.listPaginated', () => {
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
   });
 });
+
+// ────────────────────────────────────────────────────────────────────
+//  main-only: refund-op Stripe ativa ⇒ estorno_em_andamento (nunca disponível)
+// ────────────────────────────────────────────────────────────────────
+
+const REFUND_ID = '11000000-0000-4000-8000-0000000000a4';
+const REFUND_CONTA = '12000000-0000-4000-8000-0000000000a4';
+const CAMP_R = '10000000-0000-4000-8000-0000000000c4';
+
+describe('admin.usuarios.financeiro — refund-op Stripe ativa (main)', () => {
+  const R: Record<string, LancamentoFinanceiro> = {};
+
+  beforeAll(async () => {
+    await anyDb().deleteFrom('stripe_refund_operation_facts').execute();
+    await anyDb()
+      .deleteFrom('stripe_refund_operations')
+      .where(
+        'payment_id',
+        'in',
+        anyDb().selectFrom('pagamentos').select('id').where('intencao_id_campanha', '=', CAMP_R),
+      )
+      .execute();
+    await wipe([CAMP_R], [REFUND_ID]);
+    await anyDb()
+      .insertInto('usuarios')
+      .values({
+        id: REFUND_ID,
+        id_plataforma: ID_PLATAFORMA_EUNENEM,
+        id_conta: REFUND_CONTA,
+        email: 'refund-fin@example.test',
+        nome_exibicao: 'Refund Fin',
+        slug: 'refund-fin',
+      })
+      .execute();
+    await anyDb()
+      .insertInto('contas')
+      .values({ id: REFUND_CONTA, id_usuario: REFUND_ID })
+      .execute();
+    await anyDb()
+      .insertInto('campanhas')
+      .values({ id: CAMP_R, id_plataforma: ID_PLATAFORMA_EUNENEM, titulo: 'Chá R', slug: 'cha-r' })
+      .execute();
+    await anyDb()
+      .insertInto('campanha_administradores')
+      .values({ campanha_id: CAMP_R, id_usuario: REFUND_CONTA })
+      .execute();
+
+    R.ativo = lancamento(CAMP_R, 1500); // refund-op reserved → estorno_em_andamento
+    R.falhou = lancamento(CAMP_R, 1600); // refund-op provider_failed → disponivel
+    await repo.saveLancamentos([R.ativo, R.falhou] as never);
+    await setAvailableOn(R.ativo.idPagamento, PAST);
+    await setAvailableOn(R.falhou.idPagamento, PAST);
+
+    const base = (idPagamento: string) => ({
+      operation_id: randomUUID(),
+      payment_id: idPagamento,
+      origin: 'admin',
+      amount_cents: 1000,
+      currency: 'brl',
+      charge_ref: `ch_${randomUUID().replace(/-/g, '')}`,
+      reason: 'requested_by_customer',
+    });
+    await anyDb()
+      .insertInto('stripe_refund_operations')
+      .values({ ...base(R.ativo.idPagamento), state: 'reserved', attempt_count: 0 })
+      .execute();
+    await anyDb()
+      .insertInto('stripe_refund_operations')
+      .values({
+        ...base(R.falhou.idPagamento),
+        state: 'provider_failed',
+        attempt_count: 1,
+        provider_started_at: PAST,
+        provider_result_at: PAST,
+        provider_ref: `re_${randomUUID().replace(/-/g, '')}`,
+        provider_status: 'failed',
+      })
+      .execute();
+  }, 60_000);
+
+  afterAll(async () => {
+    await anyDb()
+      .deleteFrom('stripe_refund_operations')
+      .where(
+        'payment_id',
+        'in',
+        anyDb().selectFrom('pagamentos').select('id').where('intencao_id_campanha', '=', CAMP_R),
+      )
+      .execute();
+    await wipe([CAMP_R], [REFUND_ID]);
+  });
+
+  it('fatos: estornoAtivo=true e disponivelCanonico=false só na linha com refund-op ativa', async () => {
+    const snap = await loadAdminUserFinanceiroSnapshot(testDb.db, {
+      idConta: REFUND_CONTA,
+      platformId: ID_PLATAFORMA_EUNENEM,
+      now: NOW,
+    });
+    const byId = new Map(snap.fatos.map((f) => [f.idLancamento, f]));
+    expect(snap.fatos).toHaveLength(2);
+    expect(byId.get(R.ativo.id)?.estornoAtivo).toBe(true);
+    expect(byId.get(R.ativo.id)?.disponivelCanonico).toBe(false);
+    expect(byId.get(R.falhou.id)?.estornoAtivo).toBe(false);
+    expect(byId.get(R.falhou.id)?.disponivelCanonico).toBe(true);
+    expect(snap.ledgerAprovadoSemCancelCents).toBe(1500 + 1600);
+  });
+
+  it('summary + lancamentos: refund-op ativa → estorno_em_andamento dentro do recebido, nunca disponível', async () => {
+    const caller = buildCaller();
+    const s = await caller.admin.usuarios.financeiro.summary({ idConta: REFUND_CONTA });
+    expect(s?.totais.recebidoConfirmadoCents).toBe(3100);
+    expect(s?.totais.disponivelCents).toBe(1600);
+    expect(s?.totais.estornoEmAndamentoCents).toBe(1500);
+    expect(s?.totais.pendenteConferenciaCents).toBe(1500);
+    expect(s?.totais.estornadoCents).toBe(0);
+    expect(s?.diferencaNaoConciliadaCents).toBe(0);
+
+    const l = await caller.admin.usuarios.financeiro.lancamentos.listPaginated({
+      idConta: REFUND_CONTA,
+      cursor: null,
+      limit: 10,
+    });
+    const bucketOf = new Map(l?.rows.map((r) => [r.idLancamento, r.bucket]));
+    expect(bucketOf.get(R.ativo.id)).toBe('estorno_em_andamento');
+    expect(bucketOf.get(R.falhou.id)).toBe('disponivel');
+  });
+});

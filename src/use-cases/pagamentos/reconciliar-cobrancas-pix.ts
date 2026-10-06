@@ -4,7 +4,7 @@ import type { PagamentoEventPublisher } from '../../adapters/pagamentos/event-pu
 import type { LivroFinanceiroRepository } from '../../adapters/pagamentos/financeiro/livro-repository.js';
 import type { PixCobrancaProvider } from '../../adapters/pagamentos/pix-cobranca-provider.js';
 import type { PagamentoRepository } from '../../adapters/pagamentos/repository.js';
-import type { TransacaoExterna } from '../../domain/pagamentos/entities/pagamento.js';
+import type { Pagamento, TransacaoExterna } from '../../domain/pagamentos/entities/pagamento.js';
 import type { Observability } from '../../observability/observability.js';
 import { finalizarPagamentoAprovadoComTransacaoVerificada } from '../checkout/finalizar-pagamento-aprovado.js';
 import type { PixReceiptNotifier } from './aprovar-pagamento.js';
@@ -28,6 +28,17 @@ export interface ReconciliarCobrancasPixDeps {
   readonly clock: () => Date;
   readonly observability: Observability;
   readonly pixReceiptNotifier?: PixReceiptNotifier;
+  /**
+   * aperture-4yse9 — optional analytics port. Invoked with the EXACT approved
+   * pagamento and Inter's `horario` only when THIS run performed the
+   * pendente|processing → aprovado transition (a replay of an already-approved
+   * charge does not call it). Never an aggregate; never affects the result or
+   * the financial seams — a throwing port is swallowed.
+   */
+  readonly onPagamentoAprovado?: (fato: {
+    readonly pagamento: Pagamento;
+    readonly horario: Date;
+  }) => Promise<void> | void;
 }
 
 export interface ReconciliarCobrancasPixResult {
@@ -84,7 +95,11 @@ export async function reconciliarCobrancasPix(
 
       switch (authoritative.status) {
         case 'concluida': {
-          await finalizarPagamentoAprovadoComTransacaoVerificada(
+          // aperture-4yse9 — read-only status snapshot for the analytics port.
+          const antes = deps.onPagamentoAprovado
+            ? await deps.pagamentoRepository.findById(candidate.idPagamento)
+            : undefined;
+          const finalized = await finalizarPagamentoAprovadoComTransacaoVerificada(
             {
               pagamentoRepository: deps.pagamentoRepository,
               pagamentoEventPublisher: deps.pagamentoEventPublisher,
@@ -107,6 +122,19 @@ export async function reconciliarCobrancasPix(
             },
           );
           result.approved += 1;
+          if (
+            deps.onPagamentoAprovado &&
+            (antes?.status === 'pendente' || antes?.status === 'processing')
+          ) {
+            try {
+              await deps.onPagamentoAprovado({
+                pagamento: finalized.pagamento,
+                horario: authoritative.horario,
+              });
+            } catch {
+              // analytics is non-critical: never fails reconciliation.
+            }
+          }
           break;
         }
 

@@ -2,4 +2,5 @@ node_modules/
 public/client.js
 public/client.js.map
 public/styles.css
+public/browser-error-release.json
 *.log

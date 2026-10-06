@@ -41,21 +41,27 @@ import {
   cancelarRepasseRecebedor,
   type CatalogoAuditJsonObject,
   CatalogoConflictError,
+  CatalogoInitialCampaignDefaultInvalidError,
   estornarPagamento,
   FinanceiroInputInvalidoError,
   FinanceiroRepasseNaoEncontradoError,
   FinanceiroRepasseStatusInvalidoError,
   ID_PLATAFORMA_EUNENEM,
+  InitialCampaignGiftTemplateInvalidError,
   MAX_CATALOGO_IMAGEM_SIZE_BYTES,
   PagamentoEstornoLancamentoJaTransferidoError,
   PagamentoEstornoPixNaoConcluidoError,
   PagamentoEstornoPixVinculoInvalidoError,
   PagamentoEstornoRecusadoPeloProvedorError,
+  PagamentoEstornoStripeOutcomeDesconhecidoError,
+  PagamentoEstornoStripeVinculoInvalidoError,
   PagamentoNaoEncontradoError,
   PagamentoTransicaoStatusInvalidaError,
+  prepareInitialCampaignTemplateItems,
   resolverManualFalhouRepasse,
   resolverManualPagoRepasse,
   retentarTransferenciaRepasse,
+  ValorUnitarioPresenteWriteSchema,
 } from "../../../../src/index.js";
 import type {
   CatalogoCategoria,
@@ -105,6 +111,14 @@ import {
   listAdminUsers,
   searchAdminUsers,
 } from "../admin-user-search.js";
+import {
+  AdminLegacyUserQuerySchema,
+  AdminLegacyUserStatusSchema,
+  InvalidAdminLegacyUserCursorError,
+  InvalidAdminLegacyUserQueryError,
+  listAdminLegacyUsers,
+} from "../admin-legacy-users.js";
+import { LEGACY_USERS_SEED } from "../../lib/legacy-users.js";
 import {
   BucketAdminSchema,
   InvalidAdminUserLancamentosCursorError,
@@ -216,6 +230,59 @@ const ListPaginatedOutputSchema = z.object({
   usuarios: z.array(UsuarioAdminDTOSchema),
   nextCursor: z.string().nullable(),
   totalCount: z.number().int().min(0),
+});
+
+const LegacyUserItemSchema = z.object({
+  email: z.string(),
+  nomeExibicao: z.string().nullable(),
+  idConta: z.string().nullable(),
+  legacyCampaignCount: z.number().int().positive(),
+  status: AdminLegacyUserStatusSchema,
+  evidencedAt: z.string().datetime().nullable(),
+});
+
+const LegacyUsersPageSchema = z.object({
+  items: z.array(LegacyUserItemSchema),
+  nextCursor: z.string().nullable(),
+  totalCount: z.number().int().nonnegative(),
+  counts: z.object({
+    somente_legado: z.number().int().nonnegative(),
+    conta_2_0: z.number().int().nonnegative(),
+    perfil_2_0: z.number().int().nonnegative(),
+    evidencia_inconsistente: z.number().int().nonnegative(),
+  }),
+});
+
+const legacyUsersRouter = t.router({
+  listPaginated: adminProcedure
+    .input(
+      z.object({
+        query: AdminLegacyUserQuerySchema.optional(),
+        cursor: z.string().max(1024).nullable(),
+        limit: z.number().int().min(1).max(100),
+      }),
+    )
+    .output(LegacyUsersPageSchema)
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await listAdminLegacyUsers(ctx.deps.db, {
+          platformId: ID_PLATAFORMA_EUNENEM,
+          entries: LEGACY_USERS_SEED,
+          query: input.query,
+          cursor: input.cursor,
+          limit: input.limit,
+          cursorSecret: ctx.deps.logPiiHashSalt,
+        });
+      } catch (error: unknown) {
+        if (
+          error instanceof InvalidAdminLegacyUserQueryError ||
+          error instanceof InvalidAdminLegacyUserCursorError
+        ) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
+        }
+        throw error;
+      }
+    }),
 });
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -601,6 +668,8 @@ const usuarioFinanceiroRouter = t.router({
 });
 
 const usuariosRouter = t.router({
+  /** Truthful legacy-snapshot membership and 2.0 account evidence. */
+  legado: legacyUsersRouter,
   /** Detalhe financeiro do usuário (aperture-5jk8y). Leitura pura. */
   financeiro: usuarioFinanceiroRouter,
 
@@ -2086,7 +2155,9 @@ const pagamentosRouter = t.router({
    * path ignores it. Result carries the ACTUAL refund status — 'aceito'
    * (Stripe, synchronous), 'em_processamento' (Inter, webhook will
    * finalize), or 'devolvida' (Inter, already verified) — so the UI can
-   * show truth instead of fire-and-forget.
+   * show truth instead of fire-and-forget. Stripe returns `aceito` only for
+   * exact succeeded evidence; an accepted-but-pending refund returns
+   * `em_processamento` without marking the payment or ledger terminal.
    */
   estornar: adminProcedure
     .input(
@@ -2120,6 +2191,7 @@ const pagamentosRouter = t.router({
             pagamentoProvider: ctx.deps.pagamentoProvider,
             pixCobrancaProvider: ctx.deps.pixCobrancaProvider,
             pixCobrancaDevolucaoRepository: ctx.deps.pixCobrancaDevolucaoRepository,
+            stripeRefundOperationRepository: ctx.deps.stripeRefundOperationRepository,
             pagamentoEventPublisher: ctx.deps.pagamentoEventPublisher,
             livroFinanceiroRepository: ctx.deps.livroFinanceiroRepository,
             clock: ctx.deps.clock,
@@ -2173,6 +2245,12 @@ const pagamentosRouter = t.router({
             code: "INTERNAL_SERVER_ERROR",
             message: "devolucao_vinculo_invalido",
           });
+        }
+        if (error instanceof PagamentoEstornoStripeOutcomeDesconhecidoError) {
+          throw new TRPCError({ code: 'CONFLICT', message: 'estorno_stripe_em_estado_desconhecido' });
+        }
+        if (error instanceof PagamentoEstornoStripeVinculoInvalidoError) {
+          throw new TRPCError({ code: 'CONFLICT', message: 'estorno_stripe_vinculo_invalido' });
         }
         throw error;
       }
@@ -3252,6 +3330,7 @@ const ListaAdminDTOSchema = z.object({
   imageUrl: ImageUrlSchema.nullable(),
   position: NonNegativeIntegerSchema,
   ativo: z.boolean(),
+  aplicarCampanhaInicial: z.boolean(),
   quantidadeItens: NonNegativeIntegerSchema,
   criadoEm: IsoDateSchema,
   atualizadoEm: IsoDateSchema,
@@ -3346,6 +3425,7 @@ function listaAdminDTO(
     imageUrl: lista.imageUrl,
     position: lista.position,
     ativo: lista.ativo,
+    aplicarCampanhaInicial: lista.aplicarCampanhaInicial,
     quantidadeItens,
     criadoEm: lista.criadoEm.toISOString(),
     atualizadoEm: lista.atualizadoEm.toISOString(),
@@ -3354,6 +3434,20 @@ function listaAdminDTO(
 
 function catalogNotFound(message: string): TRPCError {
   return new TRPCError({ code: "NOT_FOUND", message });
+}
+
+function catalogMutationError(error: unknown): unknown {
+  if (
+    error instanceof CatalogoInitialCampaignDefaultInvalidError ||
+    error instanceof InitialCampaignGiftTemplateInvalidError
+  ) {
+    return new TRPCError({
+      code: "CONFLICT",
+      message:
+        "A lista padrão da campanha inicial precisa ficar ativa e conter de 1 a 50 itens válidos.",
+    });
+  }
+  return error;
 }
 
 interface CatalogAuditSpec {
@@ -3394,15 +3488,16 @@ async function withCatalogAudit<T>(
   try {
     result = await operation();
   } catch (error: unknown) {
+    const mappedError = catalogMutationError(error);
     await ctx.deps.catalogoAdminAudit.append({
       ...common,
       phase: "failed",
       metadata: {
         ...(spec.metadata ?? {}),
-        failureCode: failureCode(error),
+        failureCode: failureCode(mappedError),
       },
     });
-    throw error;
+    throw mappedError;
   }
 
   // This append intentionally sits outside the operation catch. If the side
@@ -3423,7 +3518,7 @@ async function withCatalogAudit<T>(
 const CreateProductInputSchema = z
   .object({
     nome: ProductNameSchema,
-    precoCents: SafePositiveIntegerSchema,
+    precoCents: ValorUnitarioPresenteWriteSchema,
     quantidadeSugerida: SafePositiveIntegerSchema.default(1),
     emoji: EmojiSchema,
     bgColor: BgColorInputSchema,
@@ -3436,7 +3531,7 @@ const UpdateProductInputSchema = z
   .object({
     id: UuidSchema,
     nome: ProductNameSchema.optional(),
-    precoCents: SafePositiveIntegerSchema.optional(),
+    precoCents: ValorUnitarioPresenteWriteSchema.optional(),
     quantidadeSugerida: SafePositiveIntegerSchema.optional(),
     emoji: EmojiSchema.optional(),
     bgColor: BgColorInputSchema.optional(),
@@ -3826,6 +3921,41 @@ const catalogRouter = t.router({
       };
     }),
 
+  setInitialCampaignDefault: adminProcedure
+    .input(z.object({ id: UuidSchema.nullable() }).strict())
+    .output(z.object({ selectedId: UuidSchema.nullable() }))
+    .mutation(async ({ ctx, input }) =>
+      withCatalogAudit(
+        ctx,
+        {
+          action: "catalog.list.set_initial_campaign_default",
+          targetType: "lista",
+          targetId: input.id,
+          metadata: { selected: input.id !== null },
+        },
+        async () => {
+          const outcome =
+            await ctx.deps.catalogoRepository.setInitialCampaignDefault(
+              input.id,
+              (template) => {
+                prepareInitialCampaignTemplateItems(template, (url) =>
+                  isCatalogImageUrlReadable(url, ctx.deps.objectStorage),
+                );
+              },
+            );
+          if (outcome.status === "not_found") {
+            throw catalogNotFound("Lista não encontrada.");
+          }
+          if (outcome.status === "invalid_config") {
+            throw new CatalogoInitialCampaignDefaultInvalidError(
+              outcome.reason,
+            );
+          }
+          return { selectedId: input.id };
+        },
+      ),
+    ),
+
   createList: adminProcedure
     .input(
       z.object({
@@ -3856,6 +3986,7 @@ const catalogRouter = t.router({
             position:
               await ctx.deps.catalogoRepository.findNextListaPosition(),
             ativo: true,
+            aplicarCampanhaInicial: false,
             criadoEm: now,
             atualizadoEm: now,
           };

@@ -35,6 +35,8 @@ export interface SolicitarPagamentoInput {
  * `requested_by_customer` at the adapter when unset.
  */
 export interface RefundarPagamentoInput {
+  readonly operationId: string;
+  readonly idempotencyKey: string;
   readonly idPagamento: IdPagamento;
   /**
    * Banco Inter PIX end-to-end settlement id. Stripe and legacy adapters
@@ -45,24 +47,21 @@ export interface RefundarPagamentoInput {
   readonly chargeExternalRef: string | null;
   readonly paymentIntentExternalRef: string | null;
   readonly amountCents: MoneyCents;
+  readonly currency: 'brl';
   readonly reason?: 'duplicate' | 'fraudulent' | 'requested_by_customer';
 }
 
 /**
  * Result returned by the provider after firing the refund.
  *
- * `id` is the provider-side refund identifier (Stripe's `re_xxx` /
- * PagarMe's refund id). `status` collapses provider-specific lifecycles
- * to a binary — anything Stripe reports as `succeeded` or `pending`
- * counts as `aceito` (the money path is committed; eventual settlement
- * happens out-of-band on the provider side); explicit failures
- * surface as `recusado` and the use-case rolls back.
+ * `id`, amount, currency and status are provider-observed result fields.
+ * Callers must not collapse `pending` into terminal success.
  */
 export interface RefundarPagamentoResult {
   readonly id: string;
-  readonly status: 'aceito' | 'recusado';
+  readonly status: 'succeeded' | 'pending' | 'failed' | 'canceled' | 'requires_action' | 'unknown';
   readonly amountCents: MoneyCents;
-  readonly statusBruto?: string;
+  readonly currency: string;
 }
 
 /**

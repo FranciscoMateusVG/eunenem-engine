@@ -81,9 +81,17 @@ interface RigUser {
   slug: string;
 }
 
+/** aperture-4yse9 — recorded server analytics calls (fake sink). */
+interface RecordedTrack {
+  event: string;
+  distinctId: string | null;
+  props?: Record<string, unknown>;
+}
+
 interface Rig {
   deps: ServerDeps;
   anonCaller: Caller;
+  analytics: RecordedTrack[];
   addUser: (email: string) => Promise<RigUser>;
   /** Save an evento+lista holding `convidados` onto `idCampanha` directly. */
   seedListaParaCampanha: (
@@ -115,6 +123,7 @@ async function buildRig(): Promise<Rig> {
     return () => new Date(Date.parse('2026-07-08T02:00:00.000Z') + 1000 * tick++);
   })();
 
+  const analytics: RecordedTrack[] = [];
   const deps: ServerDeps = {
     db: {} as never,
     auth: {} as never,
@@ -149,6 +158,11 @@ async function buildRig(): Promise<Rig> {
     logPiiHashSalt: '',
     webhookEventArchive: new WebhookEventArchiveMemory(),
     objectStorage: new ObjectStorageMemory(),
+    serverAnalytics: {
+      track: (event, distinctId, props) => {
+        analytics.push({ event, distinctId, props });
+      },
+    },
   };
 
   async function addUser(email: string): Promise<RigUser> {
@@ -215,7 +229,13 @@ async function buildRig(): Promise<Rig> {
   }
 
   const anonCtx: TrpcContext = { deps, headers: new Headers(), resHeaders: new Headers() };
-  return { deps, anonCaller: appRouter.createCaller(anonCtx), addUser, seedListaParaCampanha };
+  return {
+    deps,
+    anonCaller: appRouter.createCaller(anonCtx),
+    addUser,
+    seedListaParaCampanha,
+    analytics,
+  };
 }
 
 function makeConvidado(nome: string): Convidado {
@@ -303,6 +323,43 @@ describe('public RSVP convidado-first resolution (aperture-rvhlt)', () => {
         presenca: 'sim',
       }),
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it('E. analytics (aperture-4yse9): presenca_confirmada is server-only, under convidado:<id>, and only when the answer CHANGES', async () => {
+    const rig = await buildRig();
+    const user = await rig.addUser(`rvhlt-analytics-${randomUUID()}@example.com`);
+    const nova = await user.caller.campanhas.criar({ titulo: 'Lista Analytics' });
+    const convidado = makeConvidado('Convidada Analytics');
+    await rig.seedListaParaCampanha(nova.id, [convidado]);
+    rig.analytics.length = 0;
+
+    const rsvp = (presenca: 'sim' | 'talvez' | 'nao') =>
+      rig.anonCaller.eventoListaDeConvidados.confirmarPresenca({
+        slug: user.slug,
+        idConvidado: convidado.id,
+        presenca,
+      });
+
+    await rsvp('sim'); // nao_enviado → sim: a fact
+    await rsvp('sim'); // re-submit of the same value: NOT a fact
+    await rsvp('nao'); // sim → nao: a fact
+
+    const eventos = rig.analytics.filter((e) => e.event === 'presenca_confirmada');
+    expect(eventos).toHaveLength(2);
+    expect(eventos.map((e) => e.distinctId)).toEqual([
+      `convidado:${convidado.id}`,
+      `convidado:${convidado.id}`,
+    ]);
+    expect(eventos[0]?.props).toMatchObject({
+      idCampanha: nova.id,
+      idConvidado: convidado.id,
+      presenca: 'sim',
+      presenca_anterior: 'nao_enviado',
+    });
+    expect(eventos[1]?.props).toMatchObject({ presenca: 'nao', presenca_anterior: 'sim' });
+    // Never a shared placeholder, never the guest's name.
+    expect(eventos.some((e) => e.distinctId === 'anon')).toBe(false);
+    expect(JSON.stringify(eventos)).not.toContain('Convidada Analytics');
   });
 
   it('D. unknown convidado → NOT_FOUND', async () => {

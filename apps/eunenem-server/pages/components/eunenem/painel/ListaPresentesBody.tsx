@@ -12,7 +12,10 @@ import {
   contribuicaoErrorMessage,
   deriveBgColor,
   parseValorBRL,
+  todosValoresUnitariosPresentesValidos,
   toContribuicaoError,
+  VALOR_UNITARIO_PRESENTE_MINIMO_MESSAGE,
+  valorUnitarioPresenteInputValido,
   useContribuicaoCreate,
   useContribuicaoCreateBulk,
   useContribuicaoDelete,
@@ -661,6 +664,8 @@ function PersonalizadoForm({
   minimumQty?: number;
   purchasedQty?: number;
 }) {
+  const showMinimumError =
+    f.price.trim().length > 0 && !valorUnitarioPresenteInputValido(f.price);
   return (
     <>
       {showBanner && (
@@ -695,8 +700,18 @@ function PersonalizadoForm({
             placeholder="R$ 0,00"
             value={f.price}
             onChange={(e) => setF({ ...f, price: e.target.value })}
+            aria-invalid={showMinimumError || undefined}
+            aria-describedby={showMinimumError ? 'lista-price-error' : 'lista-price-hint'}
           />
-          <span className="lista-hint">quanto cada convidado vai contribuir</span>
+          {showMinimumError ? (
+            <span id="lista-price-error" className="lista-hint" role="alert">
+              {VALOR_UNITARIO_PRESENTE_MINIMO_MESSAGE}
+            </span>
+          ) : (
+            <span id="lista-price-hint" className="lista-hint">
+              quanto cada convidado vai contribuir
+            </span>
+          )}
         </div>
         <div className="lista-field">
           <label htmlFor="lista-quantity">quantidade</label>
@@ -1127,8 +1142,8 @@ function AddGiftModal({
   const [f, setF] = useState<DraftFields>(emptyDraft);
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
 
-  const personPriceNum = parseValorBRL(f.price);
-  const personValid = f.title.trim().length > 0 && personPriceNum > 0;
+  const personValid =
+    f.title.trim().length > 0 && valorUnitarioPresenteInputValido(f.price);
 
   const selectedItems = useMemo(() => {
     const out: CatalogItem[] = [];
@@ -1349,7 +1364,10 @@ export function EditItemModal({
   const [f, setF] = useState<DraftFields>(initial);
   const minimumQty = minimumEditableGiftQuantity(purchasedQty);
   const priceNum = parseValorBRL(f.price);
-  const valid = f.title.trim().length > 0 && priceNum > 0 && f.qty >= minimumQty;
+  const valid =
+    f.title.trim().length > 0 &&
+    valorUnitarioPresenteInputValido(f.price) &&
+    f.qty >= minimumQty;
   const previewTotal = priceNum * (Number(f.qty) || 0);
 
   const submit = () => {
@@ -1802,6 +1820,10 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
 
   const addItem = async (draft: DraftFields) => {
     const price = parseValorBRL(draft.price);
+    if (!valorUnitarioPresenteInputValido(draft.price)) {
+      toast.error(VALOR_UNITARIO_PRESENTE_MINIMO_MESSAGE);
+      return;
+    }
     try {
       await createMut.mutateAsync({
         nome: draft.title,
@@ -1828,6 +1850,10 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
   };
 
   const addCatalogItems = async (picked: CatalogItem[]) => {
+    if (!todosValoresUnitariosPresentesValidos(picked.map((item) => item.price))) {
+      toast.error(VALOR_UNITARIO_PRESENTE_MINIMO_MESSAGE);
+      return;
+    }
     try {
       await createBulkMut.mutateAsync({
         // Plan 0016 (aperture-putz5): one ROW per catalog item with
@@ -1867,6 +1893,10 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
   };
 
   const addPresetItems = async (picked: PresetItemPub[], presetId: string) => {
+    if (!todosValoresUnitariosPresentesValidos(picked.map((item) => item.price))) {
+      toast.error(VALOR_UNITARIO_PRESENTE_MINIMO_MESSAGE);
+      return;
+    }
     try {
       await createBulkMut.mutateAsync({
         // Plan 0016 (aperture-putz5): one ROW per preset item with
@@ -1934,6 +1964,10 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
   const saveEdit = async (draft: DraftFields) => {
     if (!editItem) return;
     const price = parseValorBRL(draft.price);
+    if (!valorUnitarioPresenteInputValido(draft.price)) {
+      toast.error(VALOR_UNITARIO_PRESENTE_MINIMO_MESSAGE);
+      return;
+    }
     const newQty = Number(draft.qty) || 1;
     if (newQty < editItem.received) {
       toast.error('A quantidade não pode ser menor que o total já comprado.');

@@ -1599,9 +1599,10 @@ export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
       // / OnboardingWizard). id_campanha is the same write-target id the
       // mutation itself addresses (useCampanhaEscrita: route id ?? session
       // default). NO guest PII in the props — name/phone stay out of Mixpanel.
+      // aperture-ai8vg — slug (owner's first name) removed; opaque id only.
+      // The server-truth counterpart is convidado_criado (adicionarConvidado).
       sendEvent("convidado_adicionado", {
         id_campanha: idCampanhaEvento ?? null,
-        slug,
       });
       toast.success("convidado adicionado à lista ♡");
       return true;

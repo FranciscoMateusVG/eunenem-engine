@@ -1123,6 +1123,13 @@ describe('LivroFinanceiroRepositoryPostgres — predicado canônico de disponív
     repo = withLancamentoSeeding(new LivroFinanceiroRepositoryPostgres(testDb.db), testDb.db);
   });
 
+  // Isolamento entre arquivos (container compartilhado): não deixar linhas que
+  // referenciem pagamentos para os cleanups de outros suites.
+  afterAll(async () => {
+    await anyDb().deleteFrom('pix_cobranca_devolucoes').execute();
+    await anyDb().deleteFrom('lancamentos_financeiros').execute();
+  });
+
   async function seedDisponivel(availableOn: Date | null = PAST) {
     const idCampanha = randomUUID() as IdCampanha;
     const lancamento = makeLancamentoRecebedor({ idCampanha });
@@ -1241,5 +1248,104 @@ describe('LivroFinanceiroRepositoryPostgres — predicado canônico de disponív
     expect(await repo.findLancamentosDisponiveisByIdCampanha(reivindicado.idCampanha, NOW)).toEqual(
       [],
     );
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────
+//  aperture-5jk8y (main) — perna Stripe refund-op da guarda canônica
+// ────────────────────────────────────────────────────────────────────
+
+describe('LivroFinanceiroRepositoryPostgres — refund-op Stripe ativa nunca disponível (aperture-5jk8y main)', () => {
+  let repo: LivroFinanceiroRepositoryPostgres;
+  const NOW = new Date('2026-09-26T12:00:00Z');
+  const PAST = new Date('2026-09-20T12:00:00Z');
+
+  // biome-ignore lint/suspicious/noExplicitAny: raw fixture writes outside the BC's typed surface
+  const anyDb = () => testDb.db as any;
+
+  beforeEach(async () => {
+    await anyDb().deleteFrom('stripe_refund_operation_facts').execute();
+    await anyDb().deleteFrom('stripe_refund_operations').execute();
+    await anyDb().deleteFrom('repasse_transfer_attempts').execute();
+    await anyDb().deleteFrom('lancamentos_financeiros').execute();
+    await anyDb().deleteFrom('repasses_recebedor').execute();
+    repo = withLancamentoSeeding(new LivroFinanceiroRepositoryPostgres(testDb.db), testDb.db);
+  });
+
+  // Isolamento entre arquivos: stripe_refund_operations referencia pagamentos
+  // (FK sem cascade); o último teste deixava uma linha que quebrava o cleanup
+  // de jguar-repasse-pgboss quando este arquivo rodava antes.
+  afterAll(async () => {
+    await anyDb().deleteFrom('stripe_refund_operation_facts').execute();
+    await anyDb().deleteFrom('stripe_refund_operations').execute();
+    await anyDb().deleteFrom('lancamentos_financeiros').execute();
+  });
+
+  async function seedDisponivel() {
+    const idCampanha = randomUUID() as IdCampanha;
+    const lancamento = makeLancamentoRecebedor({ idCampanha });
+    await repo.saveLancamentos([lancamento]);
+    await anyDb()
+      .updateTable('pagamentos')
+      .set({ intencao_balance_transaction_available_on: PAST })
+      .where('id', '=', lancamento.idPagamento as string)
+      .execute();
+    return { idCampanha, lancamento };
+  }
+
+  /** Estados válidos pelo CHECK stripe_refund_operations_state_shape (migration 055). */
+  async function insertRefundOp(idPagamento: string, state: 'reserved' | 'provider_failed') {
+    const base = {
+      operation_id: randomUUID(),
+      payment_id: idPagamento,
+      origin: 'admin',
+      amount_cents: 1000,
+      currency: 'brl',
+      charge_ref: `ch_${randomUUID().replace(/-/g, '')}`,
+      reason: 'requested_by_customer',
+    };
+    if (state === 'reserved') {
+      await anyDb()
+        .insertInto('stripe_refund_operations')
+        .values({ ...base, state: 'reserved', attempt_count: 0 })
+        .execute();
+      return;
+    }
+    await anyDb()
+      .insertInto('stripe_refund_operations')
+      .values({
+        ...base,
+        state: 'provider_failed',
+        attempt_count: 1,
+        provider_started_at: PAST,
+        provider_result_at: PAST,
+        provider_ref: `re_${randomUUID().replace(/-/g, '')}`,
+        provider_status: 'failed',
+      })
+      .execute();
+  }
+
+  it('negativo: refund-op ativa (reserved) → excluído da leitura E do FOR UPDATE', async () => {
+    const { idCampanha, lancamento } = await seedDisponivel();
+    await insertRefundOp(lancamento.idPagamento as string, 'reserved');
+
+    expect(await repo.findLancamentosDisponiveisByIdCampanha(idCampanha, NOW)).toEqual([]);
+
+    const { idsLancamentosClaimados, repasse } = await repo.solicitarRepasseTransaction({
+      idCampanha,
+      idRepasse: randomUUID() as IdRepasse,
+      solicitadoEm: NOW,
+      now: NOW,
+    });
+    expect(idsLancamentosClaimados).toEqual([]);
+    expect(repasse.amountCents).toBe(0);
+  });
+
+  it('positivo: refund-op provider_failed (terminal sem efeito) NÃO bloqueia', async () => {
+    const { idCampanha, lancamento } = await seedDisponivel();
+    await insertRefundOp(lancamento.idPagamento as string, 'provider_failed');
+
+    const lidos = await repo.findLancamentosDisponiveisByIdCampanha(idCampanha, NOW);
+    expect(lidos.map((l) => l.id)).toEqual([lancamento.id]);
   });
 });

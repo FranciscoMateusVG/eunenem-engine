@@ -94,7 +94,7 @@
  *                                     available_on resolution when
  *                                     cs.completed got null from Stripe
  *                                     (balance_transaction race)
- *   charge.refunded (FULL)          → estornarPagamento (aprovado → estornado)
+ *   charge.refunded (FULL)          → provider-free verified convergence
  *   charge.refunded (partial)       → no transition (stays aprovado per
  *                                     plan 0015 locked decision #7)
  *   charge.dispute.created          → no transition (out-of-scope; audit only;
@@ -119,16 +119,17 @@ import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import {
   archiveAndDispatchStripeEvent,
-  estornarPagamento,
+  finalizarEstornoStripeVerificado,
   finalizarPagamentoAprovado,
   finalizarPagamentoRejeitado,
   IdPagamentoSchema,
   iniciarProcessamentoPagamento,
   type Pagamento,
   PagamentoNaoEncontradoError,
-  PagamentoEstornoLancamentoJaTransferidoError,
 } from '../../../../src/index.js';
+import { aprovacaoEhNova, trackPagamentoAprovado } from '../analytics/pagamento-aprovado.js';
 import { ID_PLATAFORMA_EUNENEM, type ServerDeps } from '../auth/setup.js';
+import { reportRequestFailure } from '../request-observability.js';
 import { getStripe } from '../../src/lib/stripe/stripe.js';
 
 const tracer = trace.getTracer('eunenem-server');
@@ -291,13 +292,17 @@ export function createStripeWebhookHandler(deps: ServerDeps) {
         // Catch-all for anything that escaped the pipeline (e.g.
         // c.req.text() blew up, archive write blew up at first use).
         // Return 500 so Stripe retries.
-        logger.error('webhook.stripe.unexpected_error', {
-          error: (unexpectedError as Error).message,
+        // Arbitrary provider/payload error text may contain customer data.
+        // The global request boundary records a sanitized stack + request ID.
+        logger.error('webhook.stripe.unexpected_error', {});
+        reportRequestFailure(c, unexpectedError, {
+          source: 'hono',
+          statusCode: 500,
         });
-        span.recordException(unexpectedError as Error);
+        span.recordException(new Error('unexpected webhook failure'));
         span.setStatus({
           code: SpanStatusCode.ERROR,
-          message: (unexpectedError as Error).message,
+          message: 'unexpected webhook failure',
         });
         return c.text('internal error', 500);
       } finally {
@@ -523,20 +528,23 @@ export async function dispatchVerifiedStripeEvent(
           transition: 'aprovado',
           paymentStatus: 'paid',
         });
-        // aperture-ppuay — server-truth payment approval. distinct_id = the
-        // campanha owner's conta; resolve via campanha (Recebedor has no idConta).
-        const campanhaDoPagamento = await deps.campanhaRepository.findById(
-          pagamento.intencao.idCampanha,
-        );
-        deps.serverAnalytics?.track(
-          'pagamento_aprovado',
-          campanhaDoPagamento?.idsAdministradores[0] ?? null,
-          {
-            idPagamento: pagamento.id,
-            idCampanha: pagamento.intencao.idCampanha,
-            paymentStatus: 'paid',
-          },
-        );
+        // aperture-ppuay / aperture-4yse9 — server approval event. `pagamento`
+        // is the PRE-finalize snapshot: only a pendente|processing → aprovado
+        // transition on THIS dispatch tracks (mirrors the charge.succeeded
+        // terminal-status skip below). A Stripe retry after a post-finalize
+        // failure sees `aprovado` here and does not re-track. Time = Stripe's
+        // event.created, identical across retries of the same event.
+        // RESIDUAL (documented, root-accepted): if charge.succeeded for the
+        // same payment is dispatched CONCURRENTLY, both handlers can pre-read
+        // pendente and both track — no transition-winner signal this round.
+        if (aprovacaoEhNova(pagamento.status)) {
+          await trackPagamentoAprovado(deps, {
+            pagamento,
+            provedor: 'stripe',
+            caminho: 'webhook',
+            occurredAt: new Date(event.created * 1000),
+          });
+        }
       } else if (session.payment_status === 'unpaid') {
         // Write contribuinte first (first-writer-wins) — finalize-aprovado
         // isn't being called yet, so its own contribuinte-write logic
@@ -823,20 +831,16 @@ export async function dispatchVerifiedStripeEvent(
         idPagamento: pagamento.id,
         transition: 'aprovado',
       });
-      // aperture-ppuay — server-truth payment approval (charge.succeeded / PIX
-      // settle). distinct_id = the campanha owner's conta (resolved via campanha).
-      const campanhaDoPagamento = await deps.campanhaRepository.findById(
-        pagamento.intencao.idCampanha,
-      );
-      deps.serverAnalytics?.track(
-        'pagamento_aprovado',
-        campanhaDoPagamento?.idsAdministradores[0] ?? null,
-        {
-          idPagamento: pagamento.id,
-          idCampanha: pagamento.intencao.idCampanha,
-          paymentStatus: 'charge_succeeded',
-        },
-      );
+      // aperture-ppuay / aperture-4yse9 — server approval event (charge.succeeded
+      // / Stripe-PIX settle). The terminal-status skip above already proved
+      // `pagamento` was pendente|processing, so this is a new fact by
+      // construction; same unified props/helper as the paid branch.
+      await trackPagamentoAprovado(deps, {
+        pagamento,
+        provedor: 'stripe',
+        caminho: 'webhook',
+        occurredAt: new Date(event.created * 1000),
+      });
       return { pagamentoId: pagamento.id };
     }
 
@@ -887,13 +891,10 @@ export async function dispatchVerifiedStripeEvent(
       return { pagamentoId: pagamento.id };
     }
 
-    // charge.refunded — Plan 0015 Phase 3: aprovado → estornado on FULL
-    // refunds only (amount_refunded === amount). Partial refunds keep
-    // the pagamento aprovado per locked decision #7. The estorno gate
-    // (no transferred lançamentos) lives in the use-case; if Stripe
-    // refunded but our admin already marked transferred, the use-case
-    // throws and we 500 → Stripe retries (which won't help — operator
-    // must investigate). That's an acceptable signal of state drift.
+    // A verified full-refund event records provider evidence and converges
+    // local state without issuing another Stripe refund request. Partial
+    // refunds remain audit-only. Binding or payout conflicts are persisted
+    // as held evidence before this dispatcher surfaces a retryable failure.
     case 'charge.refunded': {
       const charge = event.data.object as Stripe.Charge;
       const pagamento = await resolvePagamentoFromCharge(deps, charge);
@@ -922,45 +923,21 @@ export async function dispatchVerifiedStripeEvent(
         });
         return { pagamentoId: pagamento.id };
       }
-      // Idempotent on already-estornado (estornarPagamento handles it).
-      if (pagamento.status === 'estornado') {
-        logger.info('webhook.stripe.charge_refund_already_estornado', {
+      const paymentIntentRef = extractStripeId(charge.payment_intent);
+      await finalizarEstornoStripeVerificado(
+        {
+          stripeRefundOperationRepository: deps.stripeRefundOperationRepository,
+          clock: deps.clock,
+        },
+        {
           eventId: event.id,
-          idPagamento: pagamento.id,
-        });
-        return { pagamentoId: pagamento.id };
-      }
-      // Webhook-driven full refund — call the estornar use-case. The
-      // use-case still runs the 409 gate; if any lançamento has been
-      // transferred, the gate throws PagamentoEstornoLancamentoJaTransferidoError
-      // and the webhook surfaces 500 (Stripe retries). This is the
-      // right signal for the operator that state has drifted —
-      // Stripe says refunded, our admin says transferred — and
-      // resolution requires manual investigation.
-      try {
-        await estornarPagamento(
-          {
-            pagamentoRepository: deps.pagamentoRepository,
-            pagamentoProvider: deps.pagamentoProvider,
-            pixCobrancaProvider: deps.pixCobrancaProvider,
-            pixCobrancaDevolucaoRepository: deps.pixCobrancaDevolucaoRepository,
-            pagamentoEventPublisher: deps.pagamentoEventPublisher,
-            livroFinanceiroRepository: deps.livroFinanceiroRepository,
-            clock: deps.clock,
-            observability: deps.observability,
-          },
-          { idPagamento: pagamento.id },
-        );
-      } catch (estornoError) {
-        if (estornoError instanceof PagamentoEstornoLancamentoJaTransferidoError) {
-          logger.error('webhook.stripe.charge_refund_409_state_drift', {
-            eventId: event.id,
-            idPagamento: pagamento.id,
-            note: 'Stripe says refunded; engine says at least one lançamento was already transferred to recebedor. Manual investigation required.',
-          });
-        }
-        throw estornoError;
-      }
+          paymentId: pagamento.id,
+          chargeRef: charge.id,
+          paymentIntentRef,
+          amountCents: amountTotal,
+          currency: charge.currency,
+        },
+      );
       logger.info('webhook.stripe.dispatched', {
         eventId: event.id,
         eventType: event.type,

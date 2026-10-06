@@ -19,6 +19,7 @@ export type { CatRepository } from './adapters/cat-repository.js';
 export type {
   CatalogoCategoria,
   CatalogoCategoriaComContagem,
+  CatalogoInitialCampaignTemplate,
   CatalogoLista,
   CatalogoListaComItens,
   CatalogoListaItem,
@@ -31,8 +32,12 @@ export type {
   FindCatalogoProdutosPageInput,
   FindCatalogoProdutosPageOutput,
   ReplaceCatalogoListaItensOutcome,
+  SetInitialCampaignDefaultOutcome,
 } from './adapters/catalogo/repository.js';
-export { CatalogoConflictError } from './adapters/catalogo/repository.js';
+export {
+  CatalogoConflictError,
+  CatalogoInitialCampaignDefaultInvalidError,
+} from './adapters/catalogo/repository.js';
 export { CatalogoRepositoryMemory } from './adapters/catalogo/repository.memory.js';
 export { CatalogoRepositoryPostgres } from './adapters/catalogo/repository.postgres.js';
 export type {
@@ -143,6 +148,12 @@ export type {
 } from './adapters/pagamentos/repository.js';
 export { PagamentoRepositoryMemory } from './adapters/pagamentos/repository.memory.js';
 export { PagamentoRepositoryPostgres } from './adapters/pagamentos/repository.postgres.js';
+export type {
+  StripeRefundOperation,
+  StripeRefundOperationRepository,
+} from './adapters/pagamentos/stripe-refund-operation-repository.js';
+export { StripeRefundOperationRepositoryMemory } from './adapters/pagamentos/stripe-refund-operation-repository.memory.js';
+export { StripeRefundOperationRepositoryPostgres } from './adapters/pagamentos/stripe-refund-operation-repository.postgres.js';
 export {
   REPASSE_CONFIRMAR_QUEUE,
   REPASSE_EXECUTAR_QUEUE,
@@ -942,6 +953,12 @@ export {
   RemoverContribuicaoInputSchema,
   removerContribuicao,
 } from './use-cases/arrecadacao/remover-contribuicao.js';
+export type { ValorUnitarioPresenteWrite } from './use-cases/arrecadacao/valor-unitario-presente.js';
+export {
+  VALOR_UNITARIO_PRESENTE_MINIMO_CENTS,
+  VALOR_UNITARIO_PRESENTE_MINIMO_MESSAGE,
+  ValorUnitarioPresenteWriteSchema,
+} from './use-cases/arrecadacao/valor-unitario-presente.js';
 // Plan 0015 (aperture-ucgok): admin estorno + admin batch transfer.
 export type {
   EstornarPagamentoDeps,
@@ -955,6 +972,8 @@ export {
   PagamentoEstornoPixNaoConcluidoError,
   PagamentoEstornoPixVinculoInvalidoError,
   PagamentoEstornoRecusadoPeloProvedorError,
+  PagamentoEstornoStripeOutcomeDesconhecidoError,
+  PagamentoEstornoStripeVinculoInvalidoError,
 } from './use-cases/checkout/estornar-pagamento.js';
 export type {
   FinalizarEstornoPixVerificadoDeps,
@@ -962,6 +981,7 @@ export type {
   FinalizarEstornoPixVerificadoResult,
 } from './use-cases/checkout/finalizar-estorno-pix-verificado.js';
 export { finalizarEstornoPixVerificado } from './use-cases/checkout/finalizar-estorno-pix-verificado.js';
+export { finalizarEstornoStripeVerificado } from './use-cases/checkout/finalizar-estorno-stripe-verificado.js';
 export type {
   FinalizarPagamentoAprovadoComTransacaoVerificadaDeps,
   FinalizarPagamentoAprovadoComTransacaoVerificadaInput,
@@ -1390,7 +1410,9 @@ export type {
   RegistrarContaUsuarioResult,
 } from './use-cases/usuario/registrar-conta-usuario.js';
 export {
+  InitialCampaignGiftTemplateInvalidError,
   ProvisionarContaUsuarioDominioInputSchema,
+  prepareInitialCampaignTemplateItems,
   provisionarContaUsuarioDominio,
   RegistrarContaUsuarioInputSchema,
   registrarContaUsuario,

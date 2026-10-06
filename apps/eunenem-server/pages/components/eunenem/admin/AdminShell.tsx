@@ -48,7 +48,7 @@ type AdminShellProps = {
   activeNav?: NavKey;
 };
 
-type NavKey = "landing" | "pagamentos" | "repasses" | "catalogo";
+type NavKey = "landing" | "pagamentos" | "repasses" | "catalogo" | "migrados";
 
 const NAV_ITEMS: ReadonlyArray<{ key: NavKey; label: string; href: string }> = [
   { key: "landing", label: "Visão geral", href: "/admin" },
@@ -62,6 +62,8 @@ const NAV_ITEMS: ReadonlyArray<{ key: NavKey; label: string; href: string }> = [
   // Operator workflow surface like Repasses; DB-backed catalog CRUD that
   // the customer /painel read-path (F2) consumes.
   { key: "catalogo", label: "Catálogo", href: "/admin/catalogo" },
+  // aperture-925nx — read-only "who migrated from 1.0" list (operator ask).
+  { key: "migrados", label: "Legado e migração", href: "/admin/migrados" },
 ];
 
 export function AdminShell({

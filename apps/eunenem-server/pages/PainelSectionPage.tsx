@@ -11,6 +11,7 @@ import { PerfilBody } from "@/components/eunenem/painel/PerfilBody";
 import { PresentesBody } from "@/components/eunenem/painel/PresentesBody";
 import { PAINEL_SECTION_META, type PainelSection } from "@/lib/painelRoutes";
 import { sendPageView } from "@/lib/analytics";
+import { pageViewProps } from "@/lib/rota-canonica";
 
 // aperture-vv3i — Painel sub-page dispatch + section registry.
 //
@@ -60,8 +61,15 @@ export function PainelSectionPage({
 }) {
   const Body = PAINEL_SECTION_PAGES[section];
   useEffect(() => {
-    sendPageView(PAINEL_SECTION_META[section].title, { slug, section });
-  }, [slug, section]);
+    // aperture-ai8vg — section + opaque campanha id; no slug (PII).
+    sendPageView(
+      PAINEL_SECTION_META[section].title,
+      pageViewProps(window.location.pathname, {
+        section,
+        ...(idCampanha ? { id_campanha: idCampanha } : {}),
+      }),
+    );
+  }, [section, idCampanha]);
   return (
     <PainelLayout slug={slug} idCampanha={idCampanha} activeSection={section}>
       {Body ? <Body slug={slug} /> : <PainelPlaceholder slug={slug} section={section} />}

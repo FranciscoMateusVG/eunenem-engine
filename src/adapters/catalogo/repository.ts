@@ -39,6 +39,8 @@ export interface CatalogoLista {
   readonly imageUrl: string | null;
   readonly position: number;
   readonly ativo: boolean;
+  /** Global operator-selected template for NEW users' first campaign. */
+  readonly aplicarCampanhaInicial: boolean;
   readonly criadoEm: Date;
   readonly atualizadoEm: Date;
 }
@@ -77,6 +79,25 @@ export interface CatalogoListaResumo {
   /** Includes active and inactive products assigned to the list. */
   readonly quantidadeItens: number;
 }
+
+export type CatalogoInitialCampaignTemplate =
+  | { readonly status: 'none' }
+  | {
+      readonly status: 'ready';
+      readonly template: CatalogoListaComItens;
+    }
+  | {
+      readonly status: 'invalid_config';
+      readonly reason: 'inactive' | 'empty' | 'invalid_items';
+    };
+
+export type SetInitialCampaignDefaultOutcome =
+  | { readonly status: 'updated'; readonly template: CatalogoListaComItens | null }
+  | { readonly status: 'not_found' }
+  | {
+      readonly status: 'invalid_config';
+      readonly reason: 'inactive' | 'empty' | 'invalid_items';
+    };
 
 /**
  * Mutable product fields accepted by the persistence boundary.
@@ -158,6 +179,15 @@ export class CatalogoConflictError extends Error {
   }
 }
 
+export class CatalogoInitialCampaignDefaultInvalidError extends Error {
+  constructor(readonly reason: 'inactive' | 'empty' | 'invalid_items') {
+    super(
+      'A lista padrão da campanha inicial precisa estar ativa e conter de 1 a 50 itens válidos.',
+    );
+    this.name = 'CatalogoInitialCampaignDefaultInvalidError';
+  }
+}
+
 /**
  * Persistence port used by the catalogue administration and public read
  * routers. Creates receive complete records. Updates receive field patches
@@ -212,4 +242,15 @@ export interface CatalogoRepository {
    * active lists remain present when all of their items are inactive.
    */
   findListasAtivasComItensAtivos(): Promise<readonly CatalogoListaComItens[]>;
+  /** One coherent projection of marker + list + current active product rows. */
+  findInitialCampaignTemplate(): Promise<CatalogoInitialCampaignTemplate>;
+  /**
+   * Atomically clear/swap the singleton marker. The callback runs against the
+   * locked coherent snapshot before commit so app-level image policy can veto
+   * selection without leaving a marker behind.
+   */
+  setInitialCampaignDefault(
+    idLista: string | null,
+    validateReady: (template: CatalogoListaComItens) => void,
+  ): Promise<SetInitialCampaignDefaultOutcome>;
 }

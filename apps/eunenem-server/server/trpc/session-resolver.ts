@@ -5,7 +5,10 @@ import {
   UsuarioEmailJaExisteError,
 } from '../../../../src/index.js';
 import type { IdUsuario, Usuario } from '../../../../src/index.js';
+import { classificarLegado } from '../../lib/legacy-users.js';
+import { lerSignupAt, propsContaCriada } from '../analytics/funil.js';
 import type { ServerDeps } from '../auth/setup.js';
+import { isCatalogImageUrlReadable } from '../lib/security/catalog-image-url.js';
 
 /**
  * Central session resolution + OAuth orphan self-heal (aperture-6wo1f).
@@ -227,6 +230,10 @@ async function autoProvisionarUsuarioOrfao(
         plataformaRepository: deps.plataformaRepository,
         campanhaRepository: deps.campanhaRepository,
         recebedorRepository: deps.recebedorRepository,
+        catalogoRepository: deps.catalogoRepository,
+        contribuicaoRepository: deps.contribuicaoRepository,
+        catalogImageUrlReadable: (value) =>
+          isCatalogImageUrlReadable(value, deps.objectStorage),
         clock: deps.clock,
         observability: deps.observability,
       },
@@ -239,12 +246,36 @@ async function autoProvisionarUsuarioOrfao(
         // caller-supplied idConta; the retired password saga supplied its own).
       },
     );
-    // aperture-ppuay — server-truth account creation via the OAuth orphan
-    // self-heal. Password account creation has been retired.
-    deps.serverAnalytics?.track('conta_criada', resultado.usuario.idConta, {
-      idPlataforma: principal.idPlataforma,
-      metodo: 'oauth',
-    });
+    // aperture-ppuay — server-truth account creation via the orphan self-heal
+    // (the only account-creation emitter: password signup was retired).
+    // aperture-4yse9: no `metodo` — the principal carries no provider, and
+    // every path (Google, Microsoft, magic link) lands here; a hardcoded
+    // 'oauth' was a lie. Unknown is omitted, never inferred.
+    // aperture-ai8vg: this emission is LAZY (first authenticated request) —
+    // `signup_at` carries the real signup occurrence (users.created_at) and
+    // doubles as the event time; `migrado_1_0` is classified against the
+    // versioned legacy snapshot ('unknown' when undecidable), reported, never
+    // used to exclude anyone; `id_campanha_padrao` names the default list so
+    // it is not mistaken for a created list. All reads are guarded — analytics
+    // never fails provisioning.
+    if (deps.serverAnalytics) {
+      const idConta = resultado.usuario.idConta;
+      const [signupAt, campanhaPadrao] = await Promise.all([
+        lerSignupAt(deps.db, idUsuario),
+        deps.campanhaRepository.findFirstByAdministrador(idConta).catch(() => undefined),
+      ]);
+      deps.serverAnalytics.track(
+        'conta_criada',
+        idConta,
+        propsContaCriada({
+          idPlataforma: principal.idPlataforma,
+          legado: classificarLegado(principal.email),
+          signupAt,
+          idCampanhaPadrao: campanhaPadrao?.id,
+        }),
+        { insertKey: idConta, occurredAt: signupAt ?? deps.clock() },
+      );
+    }
     return resultado.usuario;
   } catch (err) {
     // Concurrent-double-provision race (Cipher #4): another in-flight resolve

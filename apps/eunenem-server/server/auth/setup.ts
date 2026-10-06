@@ -14,6 +14,8 @@ import {
   type CheckoutSessionProvider,
   type CheckoutOperationRepository,
   CheckoutOperationRepositoryPostgres,
+  type StripeRefundOperationRepository,
+  StripeRefundOperationRepositoryPostgres,
   ConsoleLogger,
   type ContribuicaoRepository,
   ContribuicaoRepositoryPostgres,
@@ -196,6 +198,8 @@ export interface ServerDeps {
    * same table under the shared per-payment advisory-lock convention.
    */
   readonly pixCobrancaDevolucaoRepository: PixCobrancaDevolucaoRepository;
+  /** Durable Stripe refund admission/result/convergence under the payout lock. */
+  readonly stripeRefundOperationRepository: StripeRefundOperationRepository;
   /**
    * Financeiro BC — livro de lançamentos. Required by the
    * `finalizarPagamentoAprovado` use-case dispatched by the Stripe
@@ -1001,6 +1005,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
   const checkoutOperationRepository = new CheckoutOperationRepositoryPostgres(db);
   const pagamentoEventPublisher = new PagamentoEventPublisherMemory();
   const pixCobrancaDevolucaoRepository = new PixCobrancaDevolucaoRepositoryPostgres(db);
+  const stripeRefundOperationRepository = new StripeRefundOperationRepositoryPostgres(db);
 
   // Financeiro BC — postgres-backed livro (aperture-id3ay, migration
   // 012). Before this swap, the memory adapter was losing every
@@ -1202,6 +1207,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     pixCobrancaProvider,
     cobrancaPixProviderKind: env.COBRANCA_PIX_PROVIDER,
     pixCobrancaDevolucaoRepository,
+    stripeRefundOperationRepository,
     livroFinanceiroRepository,
     provedorRegraTaxa,
     observability,

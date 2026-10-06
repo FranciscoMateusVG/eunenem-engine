@@ -161,6 +161,14 @@ export function buildPainelMenu(
       title: "seu evento",
       items: [
         {
+          id: "lista",
+          label: "minha lista de presentes",
+          sub: `${listaTotal} itens · ${listaClaimed} já escolhidos`,
+          variant: "lilac",
+          icon: "list",
+          badge: { kind: "soft", text: `${listaClaimed}/${listaTotal}` },
+        },
+        {
           id: "presentes",
           label: "presentes recebidos",
           // aperture-9qu7k — "presentes" reads more direct than "mimos"
@@ -169,14 +177,6 @@ export function buildPainelMenu(
           variant: "pink",
           icon: "gift",
           featured: true,
-        },
-        {
-          id: "lista",
-          label: "minha lista de presentes",
-          sub: `${listaTotal} itens · ${listaClaimed} já escolhidos`,
-          variant: "lilac",
-          icon: "list",
-          badge: { kind: "soft", text: `${listaClaimed}/${listaTotal}` },
         },
         {
           id: "convite",

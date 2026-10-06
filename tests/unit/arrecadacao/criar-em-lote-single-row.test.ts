@@ -105,7 +105,7 @@ describe('criarContribuicoesEmLote — single-row + quantidade (aperture-putz5)'
         items: [
           { nome: 'Mamadeira', valor: 3000 as never, quantidade: 1 },
           { nome: 'Chupeta', valor: 1500 as never, quantidade: 1 },
-          { nome: 'Babador', valor: 800 as never, quantidade: 1 },
+          { nome: 'Babador', valor: 1800 as never, quantidade: 1 },
         ],
       },
     );
@@ -128,7 +128,7 @@ describe('criarContribuicoesEmLote — single-row + quantidade (aperture-putz5)'
         idOpcaoContribuicao: idOpcao,
         items: [
           { nome: 'Pacote Fraldas', valor: 8000 as never, quantidade: 10 },
-          { nome: 'Babador', valor: 800 as never, quantidade: 3 },
+          { nome: 'Babador', valor: 1800 as never, quantidade: 3 },
           { nome: 'Mamadeira', valor: 3000 as never, quantidade: 1 },
         ],
       },

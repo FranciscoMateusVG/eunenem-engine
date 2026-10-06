@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ConsoleLogger } from '../../../src/observability/console-logger.js';
+import { runWithLogContext } from '../../../src/observability/log-context.js';
 import { NoopLogger } from '../../../src/observability/noop-logger.js';
 
 describe('ConsoleLogger', () => {
@@ -41,6 +42,33 @@ describe('ConsoleLogger', () => {
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
     logger.info('no attrs');
     expect(spy.mock.calls[0]?.[0]).not.toMatch(/\{/);
+    spy.mockRestore();
+  });
+
+  it('adds isolated async request context and prevents call-site override', async () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    let releaseFirst: (() => void) | undefined;
+    const firstPaused = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+
+    const first = runWithLogContext({ requestId: 'request-a' }, async () => {
+      await firstPaused;
+      logger.info('first', { requestId: 'forged', domainId: 'domain-a' });
+    });
+    const second = runWithLogContext({ requestId: 'request-b' }, async () => {
+      logger.info('second');
+      releaseFirst?.();
+    });
+    await Promise.all([first, second]);
+
+    const lines = spy.mock.calls.map(([line]) => String(line));
+    expect(lines.find((line) => line.includes('second'))).toContain('"requestId":"request-b"');
+    const firstAttrs = JSON.parse(
+      lines.find((line) => line.includes('first'))?.split('first ')[1] ?? '{}',
+    );
+    expect(firstAttrs).toEqual({ requestId: 'request-a', domainId: 'domain-a' });
+    expect(lines.join('\n')).not.toContain('forged');
     spy.mockRestore();
   });
 });

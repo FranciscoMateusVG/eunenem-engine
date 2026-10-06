@@ -2,6 +2,7 @@ import { SpanStatusCode, trace } from '@opentelemetry/api';
 import type {
   CatalogoCategoria,
   CatalogoCategoriaComContagem,
+  CatalogoInitialCampaignTemplate,
   CatalogoLista,
   CatalogoListaComItens,
   CatalogoListaItem,
@@ -14,10 +15,11 @@ import type {
   FindCatalogoProdutosPageInput,
   FindCatalogoProdutosPageOutput,
   ReplaceCatalogoListaItensOutcome,
+  SetInitialCampaignDefaultOutcome,
   UpdateCatalogoListaPatch,
   UpdateCatalogoProdutoPatch,
 } from './repository.js';
-import { CatalogoConflictError } from './repository.js';
+import { CatalogoConflictError, CatalogoInitialCampaignDefaultInvalidError } from './repository.js';
 
 const tracer = trace.getTracer('frame');
 
@@ -52,6 +54,35 @@ function cloneLista(value: CatalogoLista): CatalogoLista {
 
 function cloneItem(value: CatalogoListaItem): CatalogoListaItem {
   return { ...value };
+}
+
+function initialTemplateInvalidReason(
+  template: CatalogoListaComItens,
+): 'inactive' | 'empty' | 'invalid_items' | null {
+  if (!template.lista.ativo) return 'inactive';
+  if (template.itens.length === 0) return 'empty';
+  const group = template.lista.slug ?? template.lista.id;
+  if (
+    template.itens.length > 50 ||
+    group.length < 1 ||
+    group.length > 60 ||
+    template.itens.some(({ item, produto }) => {
+      const image = produto.imageUrl;
+      return (
+        produto.nome.trim().length < 1 ||
+        produto.nome.trim().length > 120 ||
+        !Number.isSafeInteger(produto.precoCents) ||
+        produto.precoCents < 1_000 ||
+        !Number.isInteger(item.quantidade) ||
+        item.quantidade < 1 ||
+        item.quantidade > 100 ||
+        (image !== null && (image.trim().length < 1 || image.length > 500))
+      );
+    })
+  ) {
+    return 'invalid_items';
+  }
+  return null;
 }
 
 async function withMemorySpan<T>(
@@ -154,6 +185,12 @@ export class CatalogoRepositoryMemory implements CatalogoRepository {
       this.assertProdutoValid(produto);
       this.assertProdutoUnique(produto, id);
       this.produtos.set(id, cloneProduto(produto));
+      try {
+        this.assertMarkedTemplateValid();
+      } catch (error) {
+        this.produtos.set(id, current);
+        throw error;
+      }
       return cloneProduto(produto);
     });
   }
@@ -238,6 +275,12 @@ export class CatalogoRepositoryMemory implements CatalogoRepository {
       this.assertPositionValid(lista.position, 'lista');
       this.assertListaUnique(lista, id);
       this.listas.set(id, cloneLista(lista));
+      try {
+        this.assertMarkedTemplateValid();
+      } catch (error) {
+        this.listas.set(id, current);
+        throw error;
+      }
       return cloneLista(lista);
     });
   }
@@ -289,10 +332,17 @@ export class CatalogoRepositoryMemory implements CatalogoRepository {
       this.assertListaItensValid(idLista, itens);
       // The validation above happens before this single swap. A failed
       // replacement cannot partially mutate the previous item set.
+      const previous = this.itensByLista.get(idLista) ?? [];
       this.itensByLista.set(
         idLista,
         itens.map(cloneItem).sort((a, b) => a.position - b.position || compareText(a.id, b.id)),
       );
+      try {
+        this.assertMarkedTemplateValid();
+      } catch (error) {
+        this.itensByLista.set(idLista, previous);
+        throw error;
+      }
       return { status: 'replaced' };
     });
   }
@@ -304,6 +354,53 @@ export class CatalogoRepositoryMemory implements CatalogoRepository {
         .sort((a, b) => a.position - b.position || compareText(a.id, b.id))
         .map((lista) => this.listaComItens(lista, true)),
     );
+  }
+
+  async findInitialCampaignTemplate(): Promise<CatalogoInitialCampaignTemplate> {
+    return withMemorySpan('findInitialCampaignTemplate', 'SELECT', () => {
+      const marked = [...this.listas.values()].filter((lista) => lista.aplicarCampanhaInicial);
+      if (marked.length === 0) return { status: 'none' };
+      if (marked.length !== 1) return { status: 'invalid_config', reason: 'invalid_items' };
+      const markedList = marked[0];
+      if (!markedList) return { status: 'invalid_config', reason: 'invalid_items' };
+      const template = this.listaComItens(markedList, true);
+      const reason = initialTemplateInvalidReason(template);
+      return reason ? { status: 'invalid_config', reason } : { status: 'ready', template };
+    });
+  }
+
+  async setInitialCampaignDefault(
+    idLista: string | null,
+    validateReady: (template: CatalogoListaComItens) => void,
+  ): Promise<SetInitialCampaignDefaultOutcome> {
+    return withMemorySpan('setInitialCampaignDefault', 'UPDATE', () => {
+      if (idLista === null) {
+        this.replaceInitialCampaignMarker(null);
+        return { status: 'updated', template: null };
+      }
+      const target = this.listas.get(idLista);
+      if (!target) return { status: 'not_found' };
+      const template = this.listaComItens(target, true);
+      const reason = initialTemplateInvalidReason(template);
+      if (reason) return { status: 'invalid_config', reason };
+      validateReady(template);
+      this.replaceInitialCampaignMarker(idLista);
+      const selected = this.listas.get(idLista);
+      if (!selected) throw new Error('Lista selecionada desapareceu durante a atualização');
+      return {
+        status: 'updated',
+        template: this.listaComItens(selected, true),
+      };
+    });
+  }
+
+  private replaceInitialCampaignMarker(selectedId: string | null): void {
+    for (const [id, lista] of this.listas) {
+      this.listas.set(id, {
+        ...lista,
+        aplicarCampanhaInicial: selectedId !== null && id === selectedId,
+      });
+    }
   }
 
   private produtoComCategoria(produto: CatalogoProduto): CatalogoProdutoComCategoria {
@@ -381,6 +478,13 @@ export class CatalogoRepositoryMemory implements CatalogoRepository {
         throw new Error(`Slug de lista ${lista.slug} já existe`);
       }
     }
+  }
+
+  private assertMarkedTemplateValid(): void {
+    const marked = [...this.listas.values()].find((lista) => lista.aplicarCampanhaInicial);
+    if (!marked) return;
+    const reason = initialTemplateInvalidReason(this.listaComItens(marked, true));
+    if (reason) throw new CatalogoInitialCampaignDefaultInvalidError(reason);
   }
 
   private assertListaItensValid(idLista: string, itens: readonly CatalogoListaItem[]): void {

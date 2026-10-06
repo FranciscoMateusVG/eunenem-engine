@@ -14,20 +14,20 @@ import {
   IdContribuicaoSchema,
   IdOpcaoContribuicaoSchema,
 } from '../../domain/arrecadacao/value-objects/ids.js';
-import { MoneyCentsSchema } from '../../domain/money.js';
 import { ArrecadacaoCampanhaNaoEncontradaError } from '../../errors/arrecadacao/campanha-nao-encontrada.error.js';
 import { ArrecadacaoContribuicaoJaExisteError } from '../../errors/arrecadacao/contribuicao-ja-existe.error.js';
 import { ArrecadacaoInputInvalidoError } from '../../errors/arrecadacao/input-invalido.error.js';
 import { ArrecadacaoLimiteOpcaoExcedidoError } from '../../errors/arrecadacao/limite-opcao-excedido.error.js';
 import { ArrecadacaoOpcaoContribuicaoNaoEncontradaError } from '../../errors/arrecadacao/opcao-contribuicao-nao-encontrada.error.js';
 import type { Observability } from '../../observability/observability.js';
+import { ValorUnitarioPresenteWriteSchema } from './valor-unitario-presente.js';
 
 export const CriarContribuicaoInputSchema = z.object({
   id: IdContribuicaoSchema,
   idCampanha: IdCampanhaSchema,
   idOpcaoContribuicao: IdOpcaoContribuicaoSchema,
   nome: NomeContribuicaoSchema,
-  valor: MoneyCentsSchema,
+  valor: ValorUnitarioPresenteWriteSchema,
   // imagemUrl is a consumer-facing display reference — engine doesn't enforce
   // a URL shape because consumers may pass: absolute http(s) URLs (legacy/CDN),
   // same-origin paths (e.g. eunenem-server's /products/<id>.jpg), or future

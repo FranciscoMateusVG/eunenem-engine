@@ -40,6 +40,7 @@ import {
   RESERVED_SLUGS,
 } from '../../../../src/index.js';
 import { buscarCampanhasLegado } from '../../lib/legacy-users.js';
+import { propsCampanhaCriada } from '../analytics/funil.js';
 import type { TrpcContext } from './context.js';
 import {
   CampanhaAcessoNegadoError,
@@ -353,11 +354,16 @@ export const campanhasRouter = t.router({
           throw opcaoErr;
         }
 
-        // aperture-ppuay — server-truth campaign creation.
-        deps.serverAnalytics?.track('campanha_criada', usuario.idConta, {
-          idCampanha,
-          titulo: input.titulo,
-        });
+        // aperture-ppuay — server-truth campaign creation. aperture-ai8vg:
+        // origem 'explicita' is PROVEN by this call path (the signup default
+        // list is created in provisioning and is part of the cadastro fact);
+        // `titulo` (free text) removed; stable id + row time for dedup.
+        deps.serverAnalytics?.track(
+          'campanha_criada',
+          usuario.idConta,
+          propsCampanhaCriada(idCampanha),
+          { insertKey: idCampanha, occurredAt: campanhaComOpcao.criadaEm ?? deps.clock() },
+        );
 
         // Fresh campanha has no perfil_campanhas row yet → nomeBebe null
         // (blank-perfil by definition; the wizard fills it in).

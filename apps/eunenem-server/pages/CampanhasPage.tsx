@@ -35,6 +35,7 @@ import {
   type CampanhaNovaDTO,
 } from './lib/campanhas.js';
 import { sendPageView } from './lib/analytics.js';
+import { pageViewProps } from './lib/rota-canonica.js';
 import { postLoginTarget } from './lib/post-login-route.js';
 import { trpc } from './lib/trpc.js';
 
@@ -82,9 +83,15 @@ export function CampanhasPage() {
   const temLegado = legado.length > 0;
 
   // aperture-ppuay — page-view tracking (EVENT_MAP addition), the post-login hub.
+  // aperture-ai8vg — creator surface: emit ONLY once auth.me resolves to a
+  // real account, so an anonymous visitor bounced to '/' below never counts
+  // as a creator view.
+  const emitiuView = useRef(false);
   useEffect(() => {
-    sendPageView('Campanhas');
-  }, []);
+    if (!meQ.data || emitiuView.current) return;
+    emitiuView.current = true;
+    sendPageView('Campanhas', pageViewProps(window.location.pathname));
+  }, [meQ.data]);
 
   // Logged-out visitors have nothing to see here — back to the landing.
   // auth.me resolves to null (not an error) for anonymous sessions.
