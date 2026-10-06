@@ -146,7 +146,17 @@ const TpRetISSQNSchema = z.enum(['1', '2', '3']);
 const AliquotaSchema = z.string().regex(/^(0|[0-9](\.[0-9]{2})?)$/);
 const InscricaoMunicipalSchema = z.string().min(1).max(15).regex(LATIN1);
 const CNbsSchema = z.string().regex(/^\d{9}$/);
-const DescricaoSchema = z.string().min(1).max(1900).regex(LATIN1);
+/**
+ * Rótulo de competência mais longo possível ("fevereiro/AAAA", 14). O limite
+ * de 2000 do TSDesc2000 vale para o texto EXPANDIDO, então o template é
+ * validado já expandido com o pior caso — vale para qualquer mês.
+ */
+const ROTULO_COMPETENCIA_MAIS_LONGO = 'fevereiro/2026';
+const DescricaoSchema = z
+  .string()
+  .min(1)
+  .regex(LATIN1)
+  .refine((t) => descricaoDoServico(t, ROTULO_COMPETENCIA_MAIS_LONGO).length <= 2000);
 const Base64Schema = z.string().transform((v) => v.replace(/\s/g, '')).pipe(z.base64().min(1));
 
 export type NfseVariavel = keyof typeof NfseEnvShape;
