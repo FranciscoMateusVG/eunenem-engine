@@ -104,6 +104,30 @@ describe('parseNfseConfig', () => {
     expect(JSON.stringify(cfg.problemas)).not.toContain('11222333000182');
   });
 
+  it('percentuais de tributos: NFSE_P_TOT_TRIB "fed;est;mun" e NFSE_P_TOT_TRIB_SN', () => {
+    const cfg = parseNfseConfig({ NFSE_P_TOT_TRIB: '13.45;0.00;2.00', NFSE_P_TOT_TRIB_SN: '6.00' });
+    expect(cfg.pTotTrib).toEqual({
+      valor: { fed: '13.45', est: '0.00', mun: '2.00' },
+      origem: 'env',
+    });
+    expect(cfg.pTotTribSN).toEqual({ valor: '6.00', origem: 'env' });
+    expect(cfg.problemas).toEqual([
+      { variavel: 'NFSE_PRESTADOR_CNPJ', motivo: 'ausente' },
+      { variavel: 'NFSE_MUNICIPIO_IBGE', motivo: 'ausente' },
+    ]);
+  });
+
+  it.each([
+    '13.45;0.00',
+    '13.4;0;2',
+    '1000.00;0;0',
+    'a;b;c',
+  ])('NFSE_P_TOT_TRIB %j é inválido', (v) => {
+    const cfg = parseNfseConfig({ NFSE_P_TOT_TRIB: v });
+    expect(cfg.pTotTrib).toEqual({ valor: null, origem: 'default' });
+    expect(cfg.problemas).toContainEqual({ variavel: 'NFSE_P_TOT_TRIB', motivo: 'invalido' });
+  });
+
   it('regApTribSN só vale com opSimpNac=3', () => {
     const cfg = parseNfseConfig({ NFSE_OP_SIMP_NAC: '1', NFSE_REG_AP_TRIB_SN: '1' });
     expect(cfg.regApTribSN).toEqual({ valor: null, origem: 'default' });

@@ -60,7 +60,32 @@ export interface DpsInput {
     readonly tpRetISSQN: TpRetISSQN;
     /** Alíquota já formatada (TSDec1V2), ex. "2.00". */
     readonly pAliq: string | null;
+    readonly totTrib: TotTrib;
   };
+}
+
+/**
+ * Choice de `totTrib`. Pelo Anexo I: `indicador` (indTotTrib=0) só é aceito
+ * para MEI (E0712 recusa ME/EPP, E0713 recusa não optante); não optante
+ * informa `percentual` (pTotTrib); ME/EPP informa `simples` (pTotTribSN).
+ */
+export type TotTrib =
+  | { readonly tipo: 'indicador' }
+  | { readonly tipo: 'percentual'; readonly fed: string; readonly est: string; readonly mun: string }
+  | { readonly tipo: 'simples'; readonly pTotTribSN: string };
+
+function totTribXml(totTrib: TotTrib): string {
+  switch (totTrib.tipo) {
+    case 'indicador':
+      return txt('indTotTrib', '0');
+    case 'percentual':
+      return el(
+        'pTotTrib',
+        txt('pTotTribFed', totTrib.fed) + txt('pTotTribEst', totTrib.est) + txt('pTotTribMun', totTrib.mun),
+      );
+    case 'simples':
+      return txt('pTotTribSN', totTrib.pTotTribSN);
+  }
 }
 
 /** Centavos inteiros positivos → TSDec15V2 ("1234.56"). */
@@ -225,7 +250,7 @@ export function montarDpsXml(input: DpsInput): { readonly xml: string; readonly 
         el(
           'tribMun',
           txt('tribISSQN', valores.tribISSQN) + txt('tpRetISSQN', valores.tpRetISSQN) + opcional('pAliq', valores.pAliq),
-        ) + el('totTrib', txt('indTotTrib', '0')),
+        ) + el('totTrib', totTribXml(valores.totTrib)),
       ),
   );
 

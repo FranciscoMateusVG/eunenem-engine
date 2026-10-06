@@ -35,6 +35,8 @@ const TEXTO_AVISO: Record<Aviso, string> = {
     "Há linhas incoerentes no ledger deste mês (detalhes abaixo). Nenhum total foi ajustado.",
   detalhamento_nao_concilia:
     "A soma por meio de pagamento difere do total do mês. O valor da nota usa o total.",
+  tot_trib_pendente:
+    "O total aproximado de tributos não é compatível com o regime tributário configurado: o Sistema Nacional recusaria esta DPS. Veja o campo totTrib abaixo e defina os percentuais com o contador.",
 };
 
 const ROTULO_ORIGEM: Record<Campo["origem"], string> = {

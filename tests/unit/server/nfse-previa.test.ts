@@ -113,6 +113,54 @@ describe('montarPreviaDps', () => {
     }
   });
 
+  describe('totTrib por regime (Anexo I E0710/E0712/E0713)', () => {
+    function gerada(env: Record<string, string>) {
+      const previa = montarPreviaDps({
+        mes: '2026-09',
+        resultadoCents: 500,
+        config: parseNfseConfig({ ...ENV_MINIMO, ...env }),
+        now: NOW,
+      });
+      if (previa.status !== 'gerada') throw new Error(previa.status);
+      const campo = previa.campos.find((c) => c.tag === 'totTrib');
+      if (!campo) throw new Error('sem campo totTrib');
+      return { previa, campo };
+    }
+
+    it('não optante sem NFSE_P_TOT_TRIB: pendente, a confirmar, explica E0713', () => {
+      const { previa, campo } = gerada({});
+      expect(previa.totTribPendente).toBe(true);
+      expect(campo.aConfirmar).toBe(true);
+      expect(campo.nota).toContain('E0713');
+      expect(campo.nota).toContain('NFSE_P_TOT_TRIB');
+    });
+
+    it('não optante com NFSE_P_TOT_TRIB: pTotTrib no XML, não pendente', () => {
+      const { previa, campo } = gerada({
+        NFSE_OP_SIMP_NAC: '1',
+        NFSE_P_TOT_TRIB: '13.45;0.00;2.00',
+      });
+      expect(previa.totTribPendente).toBe(false);
+      expect(previa.xml).toContain('<pTotTrib><pTotTribFed>13.45</pTotTribFed>');
+      expect(campo).toMatchObject({ origem: 'env', aConfirmar: false });
+    });
+
+    it('ME/EPP sem NFSE_P_TOT_TRIB_SN: pendente (E0712); com ele, pTotTribSN', () => {
+      expect(gerada({ NFSE_OP_SIMP_NAC: '3' }).previa.totTribPendente).toBe(true);
+      expect(gerada({ NFSE_OP_SIMP_NAC: '3' }).campo.nota).toContain('E0712');
+      const ok = gerada({ NFSE_OP_SIMP_NAC: '3', NFSE_P_TOT_TRIB_SN: '6.00' });
+      expect(ok.previa.totTribPendente).toBe(false);
+      expect(ok.previa.xml).toContain('<totTrib><pTotTribSN>6.00</pTotTribSN></totTrib>');
+    });
+
+    it('MEI: indTotTrib=0 é permitido e não fica pendente', () => {
+      const { previa, campo } = gerada({ NFSE_OP_SIMP_NAC: '2' });
+      expect(previa.totTribPendente).toBe(false);
+      expect(previa.xml).toContain('<totTrib><indTotTrib>0</indTotTrib></totTrib>');
+      expect(campo.aConfirmar).toBe(false);
+    });
+  });
+
   it('valores explícitos no env deixam de ser "a confirmar"', () => {
     const previa = montarPreviaDps({
       mes: '2026-09',

@@ -57,7 +57,13 @@ function dps() {
       regEspTrib: '0',
     },
     servico: { cLocPrestacao: '2611606', cTribNac: '100501', xDescServ: 'Comissão', cNBS: null },
-    valores: { vServCents: 12345, tribISSQN: '1', tpRetISSQN: '1', pAliq: null },
+    valores: {
+      vServCents: 12345,
+      tribISSQN: '1',
+      tpRetISSQN: '1',
+      pAliq: null,
+      totTrib: { tipo: 'indicador' },
+    },
   });
 }
 
