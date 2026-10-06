@@ -75,10 +75,9 @@ import {
 import { enforceRateLimit } from "./rate-limit.js";
 import { loadCampaignAdministrators } from "../admin-campaign-administrators.js";
 import {
-  InvalidReceitaCampanhasCursorError,
   InvalidReceitaPeriodoError,
-  listReceitaCampanhas,
   loadReceitaDashboard,
+  loadReceitaPainel,
   RECEITA_CAMPANHAS_LIMIT,
 } from "../admin-receita.js";
 import { GRANULARIDADES, isLocalDate } from "../../pages/lib/receitaPeriodo.js";
@@ -4070,11 +4069,11 @@ const catalogRouter = t.router({
  * diferença (pode ser negativo). Nenhuma fórmula filtra pelo status atual do
  * pagamento. Não é saldo de campanhas nem lucro.
  *
- * `dashboard` devolve cards + série + decomposições + conciliação +
- * inconsistências de UM snapshot READ ONLY REPEATABLE READ.
- * `campanhasPaginated` é o drilldown além das 100 campanhas, com
- * CONSISTÊNCIA DISTINTA DECLARADA: snapshot próprio por página; totais nunca
- * saem dele.
+ * `painel` (aperture-zn5cm) alimenta a tela 1b: KPIs, 12 meses e semanas do
+ * mês corrente, com Tarifas e Recebido no banco, de UM snapshot READ ONLY
+ * REPEATABLE READ. `dashboard` devolve cards + série + decomposições +
+ * conciliação + inconsistências por período; a tela não o usa mais, mas a
+ * prévia da NFS-e (PR #144) depende dele e dos tipos dele.
  * ────────────────────────────────────────────────────────────────────── */
 
 const LocalDateSchema = z
@@ -4199,15 +4198,69 @@ const ReceitaDashboardSchema = z.object({
 });
 export type ReceitaDashboardDTO = z.infer<typeof ReceitaDashboardSchema>;
 
-const ReceitaCampanhasPageSchema = z.object({
-  snapshotAt: z.string().datetime(),
-  consistencia: z.literal("snapshot_distinto"),
-  periodo: z.object({ de: LocalDateSchema, ate: LocalDateSchema }),
-  rows: z.array(ReceitaCampanhaSchema),
-  nextCursor: z.string().nullable(),
-  campanhasTotal: z.number().int().nonnegative(),
+/**
+ * Painel 1b (aperture-zn5cm). Tarifas = resultado de taxas do ledger;
+ * Recebido = os três tipos de lançamento do pagamento (≈ total pago),
+ * registrado por criado_em − estornado por cancelado_em. Estimativa.
+ */
+const ReceitaPainelMetricaSchema = z.object({
+  registradoCents: cents(),
+  canceladoCents: cents(),
+  /** registrado − cancelado. Pode ser negativo. */
+  resultadoCents: z.number().int(),
 });
-export type ReceitaCampanhasPageDTO = z.infer<typeof ReceitaCampanhasPageSchema>;
+
+const ReceitaPainelValoresShape = {
+  tarifas: ReceitaPainelMetricaSchema,
+  recebido: ReceitaPainelMetricaSchema,
+};
+
+/** `de` inclusivo, `ate` exclusivo; datas locais de São Paulo. */
+const ReceitaPainelIntervaloSchema = z.object({
+  de: LocalDateSchema,
+  ate: LocalDateSchema,
+  ...ReceitaPainelValoresShape,
+});
+
+const ReceitaPainelSomaDiferencaSchema = z.object({
+  registradoCents: z.number().int(),
+  canceladoCents: z.number().int(),
+});
+
+const ReceitaPainelSchema = z.object({
+  snapshotAt: z.string().datetime(),
+  timezone: z.literal("America/Sao_Paulo"),
+  hoje: LocalDateSchema,
+  janela: z.object({ de: LocalDateSchema, ate: LocalDateSchema }),
+  kpis: z.object({
+    /** Dia 1 até hoje (inclusive). */
+    mesAtual: ReceitaPainelIntervaloSchema,
+    mesAnterior: ReceitaPainelIntervaloSchema,
+    /** Semana inteira seg–dom que contém hoje; pode atravessar o mês. */
+    semanaAtual: ReceitaPainelIntervaloSchema,
+    semanaAnterior: ReceitaPainelIntervaloSchema,
+  }),
+  /** 12 meses em ordem; só o último (mês corrente) é parcial. */
+  meses: z
+    .array(ReceitaPainelIntervaloSchema.extend({ parcial: z.boolean() }))
+    .length(12),
+  /** Semanas seg–dom do mês corrente, recortadas ao mês. */
+  semanas: z.array(
+    ReceitaPainelIntervaloSchema.extend({
+      estado: z.enum(["passada", "atual", "futura"]),
+    }),
+  ),
+  /** SUM independente da janela − soma dos dias. Exibir quando ≠ 0. */
+  diferencaConciliacao: z.object({
+    tarifas: ReceitaPainelSomaDiferencaSchema,
+    recebido: ReceitaPainelSomaDiferencaSchema,
+  }),
+  inconsistencias: z.object({
+    estornadoSemCancelamento: ReceitaInconsistenciaSchema,
+    canceladoSemEstorno: ReceitaInconsistenciaSchema,
+  }),
+});
+export type ReceitaPainelDTO = z.infer<typeof ReceitaPainelSchema>;
 
 function toReceitaCampanhaDTO(
   campanha: Awaited<ReturnType<typeof loadReceitaDashboard>>["porCampanha"]["rows"][number],
@@ -4225,10 +4278,7 @@ function toReceitaCampanhaDTO(
 }
 
 function receitaBadRequest(error: unknown): never {
-  if (
-    error instanceof InvalidReceitaPeriodoError ||
-    error instanceof InvalidReceitaCampanhasCursorError
-  ) {
+  if (error instanceof InvalidReceitaPeriodoError) {
     throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
   }
   throw error;
@@ -4275,38 +4325,23 @@ const receitaRouter = t.router({
       }
     }),
 
-  campanhasPaginated: adminProcedure
-    .input(
-      z.object({
-        de: LocalDateSchema,
-        ate: LocalDateSchema,
-        cursor: z.string().max(1024).nullable().default(null),
-        limit: z.number().int().min(1).max(100).default(50),
-      }),
-    )
-    .output(ReceitaCampanhasPageSchema)
-    .query(async ({ ctx, input }) => {
-      try {
-        const page = await listReceitaCampanhas(ctx.deps.db, {
-          platformId: ID_PLATAFORMA_EUNENEM,
-          de: input.de,
-          ate: input.ate,
-          cursor: input.cursor,
-          limit: input.limit,
-          cursorSecret: ctx.deps.logPiiHashSalt,
-        });
-        return {
-          snapshotAt: page.snapshotAt.toISOString(),
-          consistencia: page.consistencia,
-          periodo: page.periodo,
-          rows: page.rows.map(toReceitaCampanhaDTO),
-          nextCursor: page.nextCursor,
-          campanhasTotal: page.campanhasTotal,
-        };
-      } catch (error: unknown) {
-        return receitaBadRequest(error);
-      }
-    }),
+  painel: adminProcedure.output(ReceitaPainelSchema).query(async ({ ctx }) => {
+    const painel = await loadReceitaPainel(ctx.deps.db, {
+      platformId: ID_PLATAFORMA_EUNENEM,
+      now: ctx.deps.clock(),
+    });
+    return {
+      snapshotAt: painel.snapshotAt.toISOString(),
+      timezone: painel.timezone,
+      hoje: painel.hoje,
+      janela: painel.janela,
+      kpis: painel.kpis,
+      meses: [...painel.meses],
+      semanas: [...painel.semanas],
+      diferencaConciliacao: painel.diferencaConciliacao,
+      inconsistencias: painel.inconsistencias,
+    };
+  }),
 });
 
 export const adminRouter = t.router({

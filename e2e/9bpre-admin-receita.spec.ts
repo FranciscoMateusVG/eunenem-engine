@@ -1,6 +1,7 @@
 /**
  * aperture-9bpre — jornada única do admin: Pagamentos → usuário → campanha →
- * página pública → aba Receita EuNeném → drilldown, em 1440×900 e 375×812.
+ * página pública → aba Receita EuNeném, em 1440×900 e 375×812. O conteúdo da
+ * aba (Receita 1b) é provado em e2e/q4pfz-receita-1b.spec.ts.
  *
  * SÓ roda contra o Postgres efêmero do runner
  * (e2e/support/9bpre-ephemeral-run.mjs). Antes de qualquer seed confere a
@@ -23,18 +24,9 @@ import { browserCookieFor, mintMagicLinkSession } from './magic-link-auth.js';
 import { seedCampanhaOwner } from './repasse-seed.js';
 
 const DEV_DB_PORT = '54320';
-const CAMPANHAS_EXTRAS = 55;
 
 // Credenciais ficam em memória; sem trace/vídeo com cookie de sessão.
 test.use({ trace: 'off', video: 'off' });
-
-function brl(cents: number): RegExp {
-  const texto = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
-    .format(cents / 100)
-    .replace(/\u00a0/g, ' ');
-  // Aceita espaço comum ou NBSP entre "R$" e o número.
-  return new RegExp(texto.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ /g, '[\\s\\u00a0]'));
-}
 
 interface TaxaSeed {
   readonly campaignId: string;
@@ -214,7 +206,6 @@ test('9bpre: pagamentos, administradores, campanha pública e Receita EuNeném',
 
     const agora = new Date();
     const mes = mesAtual(agora);
-    const inicioDoMes = new Date(`${mes.de}T04:00:00Z`); // 01:00 em SP
     const mesPassado = mesAtual(new Date(`${addDays(mes.de, -1)}T15:00:00Z`));
     const tresMesesAtras = mesAtual(new Date(`${addDays(mes.de, -70)}T15:00:00Z`));
 
@@ -233,22 +224,12 @@ test('9bpre: pagamentos, administradores, campanha pública e Receita EuNeném',
       criadoEm: agora,
       provedor: null,
     });
-    for (let i = 0; i < CAMPANHAS_EXTRAS; i++) {
-      const id = randomUUID();
-      await sql`
-        INSERT INTO campanhas (id, id_plataforma, titulo)
-        VALUES (${id}::uuid, ${ID_PLATAFORMA_EUNENEM}, ${`Campanha sintética ${i + 1}`})
-      `.execute(db);
-      await seedTaxa(db, { campaignId: id, taxaCents: 100, criadoEm: inicioDoMes });
-    }
     // A fixture precisa ser um Pagamento que o domínio aceita, senão as telas
     // vizinhas (detalhe do pagamento, pagamentos da campanha) falham por causa
     // do dado sintético e não do produto.
     const pagamentos = new PagamentoRepositoryPostgres(db);
     expect((await pagamentos.findById(pagamentoRecente as never))?.status).toBe('aprovado');
     expect((await pagamentos.findById(pagamentoEstornado as never))?.status).toBe('estornado');
-    const TOTAL_MES = 5_000 + CAMPANHAS_EXTRAS * 100;
-    const TOTAL_REGISTRADAS = 10_000 + TOTAL_MES;
 
     let session: Awaited<ReturnType<typeof mintMagicLinkSession>>;
     try {
@@ -372,120 +353,16 @@ test('9bpre: pagamentos, administradores, campanha pública e Receita EuNeném',
           .click();
         await expect(page).toHaveURL(/\/admin\/pagamentos\/receita$/);
         await expect(
-          page.getByRole('heading', { level: 1, name: 'Receita EuNeném (taxa da plataforma)' }),
+          page.getByRole('heading', { level: 1, name: 'Receita EuNeném' }),
         ).toBeVisible();
-        await expect(page.getByText('O que esta tela não mostra')).toBeVisible();
+        // O conteúdo da aba (Receita 1b) é provado em e2e/q4pfz-receita-1b.spec.ts.
+        await expect(page.getByTestId('receita-kpi-mes')).toBeVisible();
         await expect(page.locator('body')).not.toContainText(/lucro|l[ií]quid/i);
-
-        const cards = page.locator('section[aria-labelledby="receita-cards-title"] article');
-        await expect(cards).toHaveCount(3);
-        const cardMes = cards.filter({ hasText: 'Mês atual' });
-        await expect(cardMes).toContainText(brl(TOTAL_MES));
-        const cardPeriodo = cards.filter({ hasText: 'Período escolhido' });
-        await expect(cardPeriodo).toContainText(brl(TOTAL_REGISTRADAS));
-        await expect(cardPeriodo).toContainText(brl(10_000));
-        await expect(cardPeriodo).toContainText(brl(TOTAL_REGISTRADAS - 10_000));
-
-        // Mês passado: só cancelamento ⇒ resultado negativo no gráfico e na tabela.
-        const colunaNegativa = page.locator('button[aria-label*="Resultado de taxas -R$"]');
-        await expect(colunaNegativa).toHaveCount(1);
-        const barra = colunaNegativa.locator('span.bg-amber-700');
-        await expect(barra).toBeVisible();
-        const caixaBarra = await barra.boundingBox();
-        const caixaBase = await page
-          .locator('[role="group"][aria-label^="Gráfico"] > span.border-ink-mute')
-          .boundingBox();
-        expect(caixaBarra?.height ?? 0).toBeGreaterThan(4);
-        // A barra de cancelamento começa na linha de base e desce.
-        expect(Math.abs((caixaBarra?.y ?? 0) - (caixaBase?.y ?? -99))).toBeLessThanOrEqual(1.5);
-        const tabelaSerie = page.locator('table').filter({ hasText: 'Mesmos valores do gráfico' });
-        await expect(tabelaSerie.locator('tbody tr').filter({ hasText: brl(-10_000) })).toHaveCount(
-          1,
-        );
-        await expect(tabelaSerie.locator('tfoot')).toContainText(brl(TOTAL_REGISTRADAS - 10_000));
-
-        // Provedor ausente aparece nomeado.
-        await expect(page.locator('section[aria-labelledby="receita-meio-title"]')).toContainText(
-          'provedor não registrado',
-        );
-        // 56 campanhas, todas na lista (≤ 100): sem truncamento.
-        await expect(
-          page.locator('section[aria-labelledby="receita-campanhas-title"]'),
-        ).toContainText(`Todas as campanhas (${CAMPANHAS_EXTRAS + 1})`);
-        // A lista começa recolhida; os totais não dependem do que está visível.
-        const porCampanha = page.locator('section[aria-labelledby="receita-campanhas-title"]');
-        await expect(porCampanha.locator('tbody tr')).toHaveCount(10);
-        await expect(porCampanha.locator('tfoot')).toContainText(brl(TOTAL_REGISTRADAS - 10_000));
-        await porCampanha
-          .getByRole('button', { name: `Mostrar as ${CAMPANHAS_EXTRAS + 1} campanhas da lista` })
-          .click();
-        await expect(porCampanha.locator('tbody tr')).toHaveCount(CAMPANHAS_EXTRAS + 1);
-        await porCampanha.getByRole('button', { name: 'Mostrar só as 10 primeiras' }).click();
-        await expect(porCampanha.locator('tbody tr')).toHaveCount(10);
-
         await page.screenshot({
-          path: testInfo.outputPath(`receita-mes-${tag}.png`),
+          path: testInfo.outputPath(`receita-${tag}.png`),
           fullPage: true,
         });
-        await page
-          .locator('figure')
-          .first()
-          .screenshot({ path: testInfo.outputPath(`receita-grafico-${tag}.png`) });
         await semOverflow(page, `/admin/pagamentos/receita ${tag}`);
-
-        // ── (7) Teclado: uma parada de tabulação, setas percorrem ──────────
-        const grafico = page.locator('[role="group"][aria-label^="Gráfico"]');
-        await expect(grafico.locator('button[tabindex="0"]')).toHaveCount(1);
-        // Parte de uma coluna conhecida: o ponteiro pode ter passado pelo
-        // gráfico em passos anteriores e mudado a coluna ativa.
-        await grafico.locator('button').last().focus();
-        await expect(grafico.locator('button[tabindex="0"]')).toHaveCount(1);
-        const primeiro = await page.evaluate(() =>
-          document.activeElement?.getAttribute('aria-label'),
-        );
-        await page.keyboard.press('ArrowLeft');
-        const segundo = await page.evaluate(() =>
-          document.activeElement?.getAttribute('aria-label'),
-        );
-        expect(segundo).not.toBe(primeiro);
-        expect(segundo).toContain('Taxas registradas');
-        await page.keyboard.press('End');
-        await expect(grafico.locator('button').last()).toBeFocused();
-        await page.keyboard.press('Home');
-        await expect(grafico.locator('button').first()).toBeFocused();
-
-        // ── (8) Troca de granularidade ─────────────────────────────────────
-        const filtro = page.getByRole('form', { name: 'Período da receita' });
-        await filtro.getByRole('button', { name: 'Semana', exact: true }).click();
-        await expect(page).toHaveURL(/g=semana/);
-        await expect(filtro.getByRole('button', { name: 'Semana', exact: true })).toHaveAttribute(
-          'aria-pressed',
-          'true',
-        );
-        await expect(tabelaSerie).toContainText('por semana');
-        await expect(tabelaSerie.locator('tbody tr').first()).toContainText('semana de');
-        // Mesmo período, outra grade: os totais não mudam.
-        await expect(cardPeriodo).toContainText(brl(TOTAL_REGISTRADAS));
-        await expect(tabelaSerie.locator('tfoot')).toContainText(brl(TOTAL_REGISTRADAS - 10_000));
-        await page.screenshot({
-          path: testInfo.outputPath(`receita-semana-${tag}.png`),
-          fullPage: true,
-        });
-        await semOverflow(page, `receita por semana ${tag}`);
-
-        // ── (9) Drilldown paginado, com consistência distinta declarada ────
-        const drill = page.locator('section[aria-labelledby="receita-drilldown-title"]');
-        await drill.getByRole('button', { name: 'Abrir lista paginada' }).click();
-        await expect(drill).toContainText('lida separadamente do painel');
-        await expect(drill).toContainText(`página 1 · ${CAMPANHAS_EXTRAS + 1} campanha(s)`);
-        await expect(drill.locator('tbody tr')).toHaveCount(50);
-        await drill.getByRole('button', { name: 'Próxima' }).click();
-        await expect(drill).toContainText('página 2');
-        await expect(drill.locator('tbody tr')).toHaveCount(CAMPANHAS_EXTRAS + 1 - 50);
-        await drill.getByRole('button', { name: 'Anterior' }).click();
-        await expect(drill).toContainText('página 1');
-        await expect(drill.locator('tbody tr')).toHaveCount(50);
-        await semOverflow(page, `drilldown ${tag}`);
 
         expect(pageErrors).toEqual([]);
         expect(consoleErrors).toEqual([]);

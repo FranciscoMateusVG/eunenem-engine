@@ -73,6 +73,8 @@
   --color-green-deep: var(--green-deep);
   --color-yellow: var(--yellow);
   --color-blue: var(--blue);
+  --color-blue-soft: var(--blue-soft);
+  --color-blue-deep: var(--blue-deep);
 
   --color-plum: var(--plum);
   --color-ink: var(--ink);

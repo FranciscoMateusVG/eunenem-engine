@@ -55,6 +55,9 @@ export const E2E_SPEC_SAFETY = [
   { file: 'painel-adicionar-qty.spec.ts', safety: 'non-payment' },
   { file: 'painel-editar-mimo-qty-changed.spec.ts', safety: 'non-payment' },
   { file: 'painel-editar-mimo.spec.ts', safety: 'non-payment' },
+  // Read-only admin screen (Receita 1b). Self-skips unless launched by the
+  // 9bpre ephemeral-DB runner with this spec as argument.
+  { file: 'q4pfz-receita-1b.spec.ts', safety: 'non-payment' },
   { file: 'qp12y-passwordless-only-gate.spec.ts', safety: 'non-payment' },
   {
     file: 'r5y94-repasse-admin-flow.spec.ts',

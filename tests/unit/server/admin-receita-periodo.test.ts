@@ -5,14 +5,9 @@ import {
   isLocalDate,
   localDateInSaoPaulo,
   mesAtual,
-  periodoFromSearch,
-  periodoPadrao,
-  periodoToSearch,
   RECEITA_MAX_BUCKETS,
-  rotuloBucket,
   semanaAtual,
   startOfIsoWeek,
-  ultimoDiaIncluido,
 } from '../../../apps/eunenem-server/pages/lib/receitaPeriodo.js';
 
 /**
@@ -37,7 +32,6 @@ describe('datas locais', () => {
     expect(addDays('2031-01-31', 1)).toBe('2031-02-01');
     expect(addDays('2031-12-31', 1)).toBe('2032-01-01');
     expect(addDays('2031-03-01', -1)).toBe('2031-02-28');
-    expect(ultimoDiaIncluido('2031-02-01')).toBe('2031-01-31');
   });
 
   it('a data local de São Paulo vem do fuso, não do UTC', () => {
@@ -67,19 +61,6 @@ describe('semana ISO e mês', () => {
       de: '2031-12-01',
       ate: '2032-01-01',
     });
-  });
-
-  it('o período padrão cobre 12 intervalos incluindo o corrente', () => {
-    const now = new Date('2031-06-18T15:00:00Z');
-    const meses = periodoPadrao(now, 'mes');
-    expect(meses).toEqual({ de: '2030-07-01', ate: '2031-07-01', granularidade: 'mes' });
-    const semanas = periodoPadrao(now, 'semana');
-    expect(semanas).toEqual({ de: '2031-03-31', ate: '2031-06-23', granularidade: 'semana' });
-    for (const periodo of [meses, semanas]) {
-      const grade = bucketsDoPeriodo(periodo);
-      expect(grade.ok && grade.buckets.length).toBe(12);
-      expect(grade.ok && grade.buckets.every((b) => !b.parcial)).toBe(true);
-    }
   });
 });
 
@@ -125,38 +106,5 @@ describe('grade de intervalos', () => {
       granularidade: 'semana',
     });
     expect(naoCabe).toEqual({ ok: false, erro: 'buckets_demais' });
-  });
-});
-
-describe('query string', () => {
-  const now = new Date('2031-06-18T15:00:00Z');
-
-  it('ida e volta preserva o período', () => {
-    const periodo = { de: '2031-01-01', ate: '2031-03-01', granularidade: 'semana' } as const;
-    expect(periodoToSearch(periodo)).toBe('?de=2031-01-01&ate=2031-03-01&g=semana');
-    expect(periodoFromSearch(periodoToSearch(periodo), now)).toEqual(periodo);
-  });
-
-  it('parte ausente ou inválida cai no padrão da granularidade pedida', () => {
-    expect(periodoFromSearch('', now)).toEqual(periodoPadrao(now, 'mes'));
-    expect(periodoFromSearch('?g=semana', now)).toEqual(periodoPadrao(now, 'semana'));
-    expect(periodoFromSearch('?de=2031-02-30&ate=2031-03-01', now)).toEqual(
-      periodoPadrao(now, 'mes'),
-    );
-    expect(periodoFromSearch('?de=2031-03-01&ate=2031-01-01&g=mes', now)).toEqual(
-      periodoPadrao(now, 'mes'),
-    );
-    expect(periodoFromSearch('?de=2031-01-01&ate=2031-02-01&g=ano', now)).toEqual({
-      de: '2031-01-01',
-      ate: '2031-02-01',
-      granularidade: 'mes',
-    });
-  });
-});
-
-describe('rótulos', () => {
-  it('nomeia mês e semana de forma legível', () => {
-    expect(rotuloBucket({ inicio: '2031-09-01' }, 'mes')).toBe('set/2031');
-    expect(rotuloBucket({ inicio: '2031-09-22' }, 'semana')).toBe('semana de 22/09/2031');
   });
 });
