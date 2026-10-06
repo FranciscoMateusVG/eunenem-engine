@@ -163,19 +163,19 @@ describe('CampanhasAdministradasTable', () => {
         },
         { idConta: '12000000-0000-4000-8000-0000000000a3', nomeExibicao: null, email: null },
       ],
-      celularTitularMascarado: '(**) *****-4321',
+      celularTitular: '11987654321',
       totais: TOTAIS,
     },
     {
       idCampanha: '10000000-0000-4000-8000-0000000000c2',
       titulo: 'Chá B',
       administradores: [{ idConta: OWNER, nomeExibicao: 'Owner', email: 'o@x.test' }],
-      celularTitularMascarado: null,
+      celularTitular: null,
       totais: ZERO,
     },
   ];
 
-  it('lista campanhas, coadmins explícitos e celular mascarado', () => {
+  it('lista campanhas, coadmins explícitos e celular completo com tel:/WhatsApp', () => {
     const html = nbsp(
       renderToStaticMarkup(
         React.createElement(CampanhasAdministradasTable, {
@@ -190,10 +190,12 @@ describe('CampanhasAdministradasTable', () => {
     expect(html).toContain('href="/admin/campanha/10000000-0000-4000-8000-0000000000c1"');
     expect(html).toContain('Coadmin, 12000000…');
     expect(html).toContain('somente esta conta');
-    expect(html).toContain('(**) *****-4321');
+    expect(html).toContain('(11) 98765-4321');
+    expect(html).toContain('href="tel:+5511987654321"');
+    expect(html).toContain('href="https://wa.me/5511987654321"');
+    expect(html).not.toContain('*****');
     expect(html).toContain('não informado');
     expect(html).toContain('celular do titular');
-    expect(html).not.toContain('11987654321');
     expect(html).not.toContain('mostrando');
   });
 
