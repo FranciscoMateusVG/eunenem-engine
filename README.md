@@ -136,7 +136,7 @@ expect(spans.find(s => s.name === 'myUseCase')).toBeDefined();
 4. **No OTel SDK imports in production code.** `src/` (except `src/testing/`) only uses the OTel API. The SDK is for tests, examples, and consumer setup.
 5. **No circular dependencies, anywhere.**
 
-Violations are caught by `pnpm depcruise` and blocked by the pre-push hook.
+Violations are caught by `pnpm depcruise` and blocked by CI.
 
 ### Folder Layout Rules (enforced by eslint-plugin-project-structure)
 
