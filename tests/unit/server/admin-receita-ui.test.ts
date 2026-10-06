@@ -4,6 +4,7 @@ import { PagamentosTabs } from '../../../apps/eunenem-server/pages/components/eu
 import {
   ReceitaCabecalho,
   ReceitaPainel,
+  rolarAteCorrente,
 } from '../../../apps/eunenem-server/pages/components/eunenem/admin/receita/ReceitaPainel.js';
 import type { ReceitaPainelData } from '../../../apps/eunenem-server/pages/components/eunenem/admin/receita/types.js';
 import {
@@ -243,6 +244,32 @@ describe('Receita 1b — notas e aviso', () => {
   it('resultado negativo aparece como negativo', () => {
     const html = render(painel('2026-10-05', [dia('2026-10-02', 0, 0, 50_000)]));
     expect(texto(trecho(html, 'receita-kpi-mes', '</article>'))).toContain('-R$ 500,00');
+  });
+});
+
+describe('Receita 1b — rolagem no mobile', () => {
+  function caixa(item: { offsetLeft: number; offsetWidth: number } | null, clientWidth: number) {
+    const el = {
+      clientWidth,
+      scrollLeft: 0,
+      querySelector: (seletor: string) => (seletor === '[data-x]' ? item : null),
+    };
+    return el as unknown as HTMLElement & { scrollLeft: number };
+  }
+
+  it('encosta o item corrente à direita da área visível', () => {
+    const el = caixa({ offsetLeft: 800, offsetWidth: 60 }, 343);
+    rolarAteCorrente(el, '[data-x]');
+    expect(el.scrollLeft).toBe(800 + 60 - 343 + 8);
+  });
+
+  it('item já visível não rola; sem item, nada muda', () => {
+    const visivel = caixa({ offsetLeft: 100, offsetWidth: 60 }, 343);
+    rolarAteCorrente(visivel, '[data-x]');
+    expect(visivel.scrollLeft).toBe(0);
+    const vazio = caixa(null, 343);
+    rolarAteCorrente(vazio, '[data-x]');
+    expect(vazio.scrollLeft).toBe(0);
   });
 });
 
