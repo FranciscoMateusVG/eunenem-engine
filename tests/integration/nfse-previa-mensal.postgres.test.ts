@@ -230,6 +230,15 @@ describe('valor da prévia = Resultado de taxas da Receita (mesmo mês, SP)', ()
     });
   });
 
+  it('Id da DPS segue a regra E0004 do Anexo I: tipo de inscrição 2 = CNPJ', async () => {
+    await seedBordasDeMarco();
+    const mar = await previa('2032-03');
+    if (mar.dps.status !== 'gerada') throw new Error(mar.dps.status);
+    // "DPS" + cLocEmi (7) + tipo (1 = CPF, 2 = CNPJ) + inscrição (14) + série (5) + nDPS (15).
+    expect(mar.dps.idDps).toBe(`DPS${IBGE}2${CNPJ}99999020320399999999`);
+    expect(mar.dps.xml).toContain(`<infDPS Id="${mar.dps.idDps}">`);
+  });
+
   it('cancelamento no mês seguinte: entra no mês da taxa e abate no mês do cancelamento', async () => {
     await seedBordasDeMarco();
     const abr = await previa('2032-04');
