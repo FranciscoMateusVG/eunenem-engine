@@ -133,6 +133,14 @@ describe('parseNfseConfig', () => {
       expect(cfg.certificado?.senha()).toBe(SENHA);
     });
 
+    it('senha é usada como está (espaços nas pontas fazem parte dela)', () => {
+      const cfg = parseNfseConfig({
+        NFSE_CERT_BASE64: PFX_B64,
+        NFSE_CERT_PASSWORD: ' com espaço ',
+      });
+      expect(cfg.certificado?.senha()).toBe(' com espaço ');
+    });
+
     it('caminho: fonte caminho (arquivo só é lido em lerPfx)', () => {
       const cfg = parseNfseConfig({ NFSE_CERT_PATH: '/nao/existe.pfx' });
       expect(cfg.certificado?.fonte).toBe('caminho');

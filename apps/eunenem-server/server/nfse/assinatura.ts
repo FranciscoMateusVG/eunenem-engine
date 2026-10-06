@@ -35,6 +35,17 @@ class CertificadoIlegivelError extends Error {
   }
 }
 
+function casaComChave(cert: forge.pki.Certificate, key: forge.pki.PrivateKey): boolean {
+  const publica = cert.publicKey as forge.pki.rsa.PublicKey;
+  const privada = key as forge.pki.rsa.PrivateKey;
+  return (
+    publica.n !== undefined &&
+    privada.n !== undefined &&
+    publica.n.equals(privada.n) &&
+    publica.e.equals(privada.e)
+  );
+}
+
 export function carregarCertificado(certificado: CertificadoNfse): MaterialCertificado {
   try {
     const der = certificado.lerPfx().toString('binary');
@@ -43,8 +54,13 @@ export function carregarCertificado(certificado: CertificadoNfse): MaterialCerti
     const key =
       p12.getBags({ bagType: PKCS8_KEY_BAG })[PKCS8_KEY_BAG]?.[0]?.key ??
       p12.getBags({ bagType: KEY_BAG })[KEY_BAG]?.[0]?.key;
-    const cert = p12.getBags({ bagType: CERT_BAG })[CERT_BAG]?.[0]?.cert;
-    if (!key || !cert) throw new CertificadoIlegivelError();
+    if (!key) throw new CertificadoIlegivelError();
+    // e-CNPJ real traz a cadeia (AC + folha) em qualquer ordem e nem sempre
+    // com localKeyId: o certificado certo é o que casa com a chave privada.
+    const cert = (p12.getBags({ bagType: CERT_BAG })[CERT_BAG] ?? [])
+      .map((bag) => bag.cert)
+      .find((c): c is forge.pki.Certificate => c !== undefined && casaComChave(c, key));
+    if (!cert) throw new CertificadoIlegivelError();
 
     const cn = cert.subject.getField('CN')?.value;
     const cnpj = typeof cn === 'string' ? (/(\d{14})/.exec(cn)?.[1] ?? null) : null;
