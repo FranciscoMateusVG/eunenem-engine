@@ -22,6 +22,7 @@ const ENGINE_RESERVED_NAMESPACES = new Set([
   "faq",
   "healthz",
   "listas-prontas",
+  "login",
   "pagina",
   "painel",
   "products",

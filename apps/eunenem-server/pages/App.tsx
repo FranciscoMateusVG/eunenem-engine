@@ -17,6 +17,7 @@ import { FaqPage } from './FaqPage.js';
 import { AuthModalProvider } from './components/eunenem/auth/AuthModalProvider.js';
 import { CampanhasPage } from './CampanhasPage.js';
 import { LandingPage } from './LandingPage.js';
+import { LoginPage } from './LoginPage.js';
 import { NotFoundPage } from './NotFoundPage.js';
 import { PainelConvitePreviewPage } from './PainelConvitePreviewPage.js';
 import { PaginaCampanhaSlugResolver } from './PaginaCampanhaSlugResolver.js';
@@ -52,6 +53,7 @@ const SLUG_REGEX = /^[a-z][a-z0-9-]{2,29}$/;
 // SSR) will still hit the SSR catch-all and get its 404 honestly.
 export function resolveRoute(pathname: string):
   | { kind: 'landing' }
+  | { kind: 'login' }
   | { kind: 'campanhas' }
   | { kind: 'pagina'; slug: string; idCampanha?: string; campanhaSlug?: string }
   | { kind: 'pagina-sucesso'; slug: string }
@@ -79,6 +81,9 @@ export function resolveRoute(pathname: string):
   // Marketing landing page (aperture-q1j2) — exact "/" only.
   if (pathname === '/') {
     return { kind: 'landing' };
+  }
+  if (pathname === '/login' || pathname === '/login/') {
+    return { kind: 'login' };
   }
   if (pathname === '/termos-de-uso' || pathname === '/termos-de-uso/') {
     return { kind: 'termos-de-uso' };
@@ -359,7 +364,9 @@ export function App({ pathname }: { pathname: string }) {
       {/* AuthModalProvider (aperture-nop8l) — singleton modal mounted at the
        *  tree root so any landing CTA or painel control can summon it via
        *  `useAuthModal()`. Renders the AuthModalShell itself when open. */}
-      <AuthModalProvider>
+      <AuthModalProvider
+        onClose={route.kind === 'login' ? () => window.location.replace('/') : undefined}
+      >
         {pickPage(route, pathname)}
         <Toaster
           position="bottom-center"
@@ -376,6 +383,7 @@ export function App({ pathname }: { pathname: string }) {
 
 function pickPage(route: ReturnType<typeof resolveRoute>, pathname: string) {
   if (route.kind === 'landing') return <LandingPage />;
+  if (route.kind === 'login') return <LoginPage />;
   if (route.kind === 'campanhas') return <CampanhasPage />;
   if (route.kind === 'termos-de-uso') return <TermosDeUsoPage />;
   // aperture-z6vks — CampanhaRotaProvider mounts at ROUTE level for every
