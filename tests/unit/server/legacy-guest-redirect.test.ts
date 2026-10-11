@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
+import { resolveRoute } from '../../../apps/eunenem-server/pages/App.js';
 import { createLegacyGuestRedirectMiddleware } from '../../../apps/eunenem-server/server/legacy-guest-redirect.js';
 
 const ENGINE_ORIGIN = 'https://staging.eunenem.com';
@@ -175,5 +176,33 @@ describe('legacy guest-link redirect', () => {
     expect(response.headers.get('location')).toBe(
       `${LEGACY_ORIGIN}/${UUID}?next=https://attacker.example`,
     );
+  });
+});
+
+// /login is an Engine entry point, never a legacy campaign identifier.
+describe('login route ownership', () => {
+  it.each(['/login', '/login/'])('%s stays on Engine with HTTP 200', async (path) => {
+    const app = new Hono();
+    app.use('*', createLegacyGuestRedirectMiddleware(LEGACY_ORIGIN));
+    app.get('*', (c) =>
+      c.text('engine', resolveRoute(c.req.path).kind === 'not-found' ? 404 : 200),
+    );
+    for (const method of ['GET', 'HEAD']) {
+      const response = await app.request(
+        `${ENGINE_ORIGIN}${path}?next=https://attacker.example&redirect=//attacker.example`,
+        { method },
+      );
+      expect(response.status).toBe(200);
+      expect(response.headers.get('location')).toBeNull();
+    }
+  });
+  it.each([
+    '/login/checkout',
+    '/login/typo',
+    '/LOGIN/checkout',
+  ])('%s is reserved, not a legacy slug', async (path) => {
+    const response = await request(path);
+    expect(response.status).toBe(404);
+    expect(response.headers.get('location')).toBeNull();
   });
 });

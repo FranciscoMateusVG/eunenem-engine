@@ -309,3 +309,25 @@ test.describe('8bac7 — destination-side gate (PainelPage)', () => {
     await context.close();
   });
 });
+
+for (const onboarded of [false, true]) {
+  test(`no4n5 login entry with existing session (onboarded=${onboarded}) uses the existing post-login rule`, async ({
+    browser,
+  }) => {
+    const user = await seedUser({ onboarded });
+    const { context, page } = await openAuthedPage(browser, user);
+    try {
+      const response = await page.goto(
+        '/login?next=https://attacker.invalid&redirect=//attacker.invalid',
+      );
+      expect(response?.status()).toBe(200);
+      await expect(page).toHaveURL(
+        `${BASE_URL}${onboarded ? '/campanhas' : `/painel/${user.slug}`}`,
+      );
+      await expect(page.getByRole('dialog', { name: 'entrar ou criar sua lista' })).toHaveCount(0);
+      if (!onboarded) await expect(page.getByRole('dialog', { name: WIZARD_LABEL })).toBeVisible();
+    } finally {
+      await context.close();
+    }
+  });
+}
