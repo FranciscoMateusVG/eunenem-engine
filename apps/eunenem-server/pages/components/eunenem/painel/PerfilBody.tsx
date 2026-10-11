@@ -52,8 +52,7 @@ const SLUG_RE = /^[a-z][a-z0-9-]{2,59}$/;
 // Canonical celebration slugs — kept in sync with the contract enum
 // (TipoEventoPerfilSchema, mirror of the Evento BC's TipoEvento). The form
 // stores the SLUG; the label is display-only. Selectable set matches the
-// convite selector (aperture-irowp): chá revelação is not offered as a new
-// choice, but is labelled if an existing profile already carries it.
+// convite selector (aperture-irowp), including chá revelação.
 type PerfilEventTypeSlug =
   | "cha-bebe"
   | "cha-fraldas"
@@ -75,6 +74,7 @@ const SELECTABLE_EVENT_TYPES: PerfilEventTypeSlug[] = [
   "cha-bebe",
   "cha-fraldas",
   "cha-surpresa",
+  "cha-revelacao",
   "aniversario",
   "batizado",
 ];
