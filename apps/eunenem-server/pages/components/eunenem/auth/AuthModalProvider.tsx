@@ -55,10 +55,13 @@ const AuthModalContext = createContext<AuthModalContextValue | null>(null);
 export function AuthModalProvider({
   children,
   initialMode = "signin",
+  onClose,
 }: {
   children: ReactNode;
   /** Mode to use the first time `open()` is called without an explicit mode. */
   initialMode?: AuthMode;
+  /** Optional route-specific exit, invoked only by an explicit modal close. */
+  onClose?: (() => void) | undefined;
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [mode, setModeState] = useState<AuthMode>(initialMode);
@@ -78,7 +81,8 @@ export function AuthModalProvider({
 
   const close = useCallback(() => {
     setIsOpen(false);
-  }, []);
+    onClose?.();
+  }, [onClose]);
 
   const setMode = useCallback((next: AuthMode) => {
     setModeState(next);

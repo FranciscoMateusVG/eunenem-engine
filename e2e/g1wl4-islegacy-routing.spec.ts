@@ -108,3 +108,17 @@ test.describe('g1wl4 — legacy-first post-login routing (OAuth-return leg)', ()
     await context.close();
   });
 });
+
+test('no4n5 /login preserves legacy precedence over onboarding', async ({ browser }) => {
+  const { context, page } = await openLegacyPage(browser);
+  try {
+    const response = await page.goto('/login/');
+    expect(response?.status()).toBe(200);
+    await expect(page).toHaveURL(`${BASE_URL}/campanhas`);
+    await expect(page.getByTestId('campanhas-grid')).toBeVisible();
+    await expect(page.getByRole('dialog', { name: WIZARD_LABEL })).toHaveCount(0);
+    await expect(page.getByRole('dialog', { name: 'entrar ou criar sua lista' })).toHaveCount(0);
+  } finally {
+    await context.close();
+  }
+});
