@@ -16,6 +16,7 @@ import { trpc } from '@/lib/trpc';
 import { sendPageView } from '@/lib/analytics';
 import { pageViewProps } from '@/lib/rota-canonica';
 import { useListaDeConvidadosData } from '@/lib/convidados';
+import { useAcessoCampanha } from '@/components/eunenem/painel/useAcessoCampanha';
 import { deriveGiftListUnitCounts, derivePainelCounts } from '@/lib/painel-counts';
 import { PainelDataBoundary } from '@/components/eunenem/painel/PainelDataBoundary';
 
@@ -101,9 +102,13 @@ export function PainelPage({
     : campanhasQ.isLoading
       ? null
       : undefined;
-  const summary = useStubExtratoSummary(idCampanha ?? '');
+  // aperture-1z18g — shared-campanha members only fetch what they may see.
+  const acesso = useAcessoCampanha(idCampanha);
+  const summary = useStubExtratoSummary(acesso.pode('extrato:ver') ? (idCampanha ?? '') : '');
   const listaQuery = useContribuicaoList();
-  const convidadosQuery = useListaDeConvidadosData(idCampanha ?? undefined);
+  const convidadosQuery = useListaDeConvidadosData(idCampanha ?? undefined, {
+    enabled: acesso.pode('convidados:ver'),
+  });
 
   const liveReceivedCents = summary.data?.totalRecebidoCents;
   // aperture-kvpvf — finishes the B1 audit. Wire the strip-only
@@ -346,7 +351,7 @@ export function PainelPage({
   }
 
   const dashboardDataLoading =
-    summary.isLoading || convidadosQuery.isLoading || listaQuery.isLoading;
+    acesso.isLoading || summary.isLoading || convidadosQuery.isLoading || listaQuery.isLoading;
   const dashboardDataFailed = Boolean(
     summary.error || convidadosQuery.error || listaQuery.error,
   );

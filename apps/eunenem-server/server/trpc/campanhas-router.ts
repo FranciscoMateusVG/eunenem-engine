@@ -48,6 +48,10 @@ import {
   resolverCampanhaAdministrada,
 } from './resolve-campanha-administrada.js';
 import {
+  PermissaoCampanhaNegadaError,
+  resolverCampanhaComPermissao,
+} from './exigir-permissao-campanha.js';
+import {
   resolverUsuarioAutenticado,
   SessaoNaoAutenticadaError,
 } from './session-resolver.js';
@@ -210,6 +214,9 @@ function slugErrorMessage(motivo: 'formato' | 'reservado' | 'em_uso'): string {
 
 function toSlugTRPCError(err: unknown): TRPCError {
   if (err instanceof TRPCError) return err;
+  if (err instanceof PermissaoCampanhaNegadaError) {
+    return new TRPCError({ code: 'FORBIDDEN', message: err.message, cause: err });
+  }
   if (err instanceof CampanhaAcessoNegadoError) {
     return new TRPCError({ code: 'UNAUTHORIZED', message: err.message, cause: err });
   }
@@ -414,7 +421,12 @@ export const campanhasRouter = t.router({
     .output(z.object({ slug: z.string() }))
     .mutation(async ({ ctx, input }) => {
       try {
-        const { usuario, campanha } = await resolverCampanhaAdministrada(ctx, input.idCampanha);
+        // aperture-1z18g: changing the public link is a configurable action.
+        const { usuario, campanha } = await resolverCampanhaComPermissao(
+          ctx,
+          input.idCampanha,
+          'link:editar',
+        );
 
         if (input.origem === 'perfil' && campanha.slugAlteradoEm !== null) {
           throw new CampanhaSlugJaAlteradoError(campanha.id);

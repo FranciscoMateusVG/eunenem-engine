@@ -479,7 +479,7 @@ const extratoRouter = t.router({
     .output(ExtratoSummaryDTOSchema)
     .query(async ({ ctx, input }) => {
       try {
-        await resolverCampanhaAdministrada(ctx, input.idCampanha);
+        await resolverCampanhaComPermissao(ctx, input.idCampanha, "extrato:ver");
 
         const now = ctx.deps.clock();
         const [rawStates, repasses] = await Promise.all([
@@ -629,7 +629,7 @@ const extratoRouter = t.router({
     .output(ExtratoListOutputSchema)
     .query(async ({ ctx, input }) => {
       try {
-        await resolverCampanhaAdministrada(ctx, input.idCampanha);
+        await resolverCampanhaComPermissao(ctx, input.idCampanha, "extrato:ver");
 
         const now = ctx.deps.clock();
         const [rawStates, repasses] = await Promise.all([
@@ -856,7 +856,7 @@ const listMovimentacoesProcedure = t.procedure
   .output(ListMovimentacoesOutputSchema)
   .query(async ({ ctx, input }) => {
     try {
-      await resolverCampanhaAdministrada(ctx, input.idCampanha); // same auth as extrato.summary / extrato.list
+      await resolverCampanhaComPermissao(ctx, input.idCampanha, "extrato:ver"); // same auth as extrato.summary / extrato.list
       const [states, repasses] = await Promise.all([
         buildExtratoStates(ctx, input.idCampanha, ctx.deps.clock()),
         ctx.deps.livroFinanceiroRepository.findRepassesByIdCampanha(

@@ -27,6 +27,7 @@ import type { PainelSectionBodyProps } from '@/PainelSectionPage';
 // statement uses (totalRecebidoCents, cancelado excluded server-side) instead
 // of price × received-units, which drifted whenever a price was edited.
 import { useStubCampanhaIdForSlug, useStubExtratoSummary } from './ExtratoStubData';
+import { useAcessoCampanha } from './useAcessoCampanha';
 import type { inferRouterOutputs } from '@trpc/server';
 import { trpc } from '@/lib/trpc.js';
 import type { AppRouter } from '../../../../server/trpc/router.js';
@@ -510,10 +511,13 @@ export function GiftCard({
   item,
   onEdit,
   onRemove,
+  podeEditar = true,
 }: {
   item: GroupedGift;
   onEdit: (i: GroupedGift) => void;
   onRemove: (i: GroupedGift) => void;
+  /** aperture-1z18g — false hides edit/remove for members without presentes:gerenciar. */
+  podeEditar?: boolean;
 }) {
   const pct = item.qty > 0 ? Math.min(100, (item.received / item.qty) * 100) : 0;
   const isComplete = item.received >= item.qty;
@@ -549,6 +553,7 @@ export function GiftCard({
             field + filter chips). The underlying category data model stays
             intact (chipLabel/category still computed in groupContribuicoes)
             in case this is reactivated later. */}
+        {podeEditar && (
         <div className="lista-card-actions">
           <button
             type="button"
@@ -580,6 +585,7 @@ export function GiftCard({
             </span>
           )}
         </div>
+        )}
         {isComplete && <span className="lista-card-stamp">recebido ♡</span>}
       </div>
       <div className="lista-card-body">
@@ -1724,7 +1730,11 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
   // aperture-7mqsg — same campanha resolution + summary query as PresentesBody
   // (the extrato), so both surfaces show one "recebido" number.
   const { idCampanha } = useStubCampanhaIdForSlug(slug);
-  const summaryQuery = useStubExtratoSummary(idCampanha ?? '');
+  // aperture-1z18g — members without presentes:gerenciar see the list read-only;
+  // the received total needs extrato:ver. The server enforces both.
+  const acesso = useAcessoCampanha(idCampanha);
+  const podeEditar = acesso.pode('presentes:gerenciar');
+  const summaryQuery = useStubExtratoSummary(acesso.pode('extrato:ver') ? (idCampanha ?? '') : '');
   const recebidoCents = summaryQuery.data?.totalRecebidoCents ?? null;
   const createMut = useContribuicaoCreate();
   const createBulkMut = useContribuicaoCreateBulk();
@@ -2076,6 +2086,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
             </b>{' '}
             presentes já recebidos
           </p>
+          {podeEditar && (
           <div className="lista-header-actions">
             <button
               type="button"
@@ -2113,7 +2124,8 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
               </span>
             </button>
           </div>
-          {presetsOpen && (
+          )}
+          {podeEditar && presetsOpen && (
             <div
               id="lista-prontas-panel"
               className="lista-prontas-panel"
@@ -2271,13 +2283,15 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
             <span className="eyebrow coral">primeira página em branco ♡</span>
             <h3>Sua lista está pronta pra começar</h3>
             <p>Adicione os presentes que vão contar a história do seu bebê.</p>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => openAddModal('catalogo')}
-            >
-              <span className="lista-btn-ic">{icon.plus}</span> Adicionar primeiro item
-            </button>
+            {podeEditar && (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => openAddModal('catalogo')}
+              >
+                <span className="lista-btn-ic">{icon.plus}</span> Adicionar primeiro item
+              </button>
+            )}
           </div>
         ) : filtered.length === 0 ? (
           <div className="lista-empty lista-empty-sm">
@@ -2288,17 +2302,25 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
         ) : (
           <div className="lista-grid">
             {filtered.map((it) => (
-              <GiftCard key={it.nome} item={it} onEdit={setEditItem} onRemove={setRemoveItem} />
+              <GiftCard
+                key={it.nome}
+                item={it}
+                onEdit={setEditItem}
+                onRemove={setRemoveItem}
+                podeEditar={podeEditar}
+              />
             ))}
-            <button
-              type="button"
-              className="lista-card lista-card-add"
-              onClick={() => openAddModal('catalogo')}
-            >
-              <span className="lista-card-add-plus">{icon.plus}</span>
-              <span className="lista-card-add-label">adicionar outro presente</span>
-              <span className="lista-card-add-sub">um novo presente pra lista</span>
-            </button>
+            {podeEditar && (
+              <button
+                type="button"
+                className="lista-card lista-card-add"
+                onClick={() => openAddModal('catalogo')}
+              >
+                <span className="lista-card-add-plus">{icon.plus}</span>
+                <span className="lista-card-add-label">adicionar outro presente</span>
+                <span className="lista-card-add-sub">um novo presente pra lista</span>
+              </button>
+            )}
           </div>
         )}
       </div>

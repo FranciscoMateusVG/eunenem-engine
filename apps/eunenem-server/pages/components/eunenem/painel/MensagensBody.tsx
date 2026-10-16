@@ -5,6 +5,7 @@ import type { PainelSectionBodyProps } from "@/PainelSectionPage";
 import { useCampanhaEscrita } from "@/lib/campanha-escrita.js";
 import { useCampanhaRota } from "@/lib/campanha-rota.js";
 import { trpc } from "@/lib/trpc";
+import { ComPermissao } from "./ComPermissao";
 
 // aperture-5v766 Phase B + aperture-kih74 swap-over — admin mensagens page
 // against Rex's Phase A backend (PR #199).
@@ -457,7 +458,7 @@ function RecadoCard({
 }
 
 // ---------- page body ----------
-export function MensagensBody({ slug }: PainelSectionBodyProps) {
+function MensagensBodyConteudo({ slug }: PainelSectionBodyProps) {
   // aperture-kih74 — real wire. Slug-keyed; tenant chain runs server-side
   // (session-derived idUsuario → slug-owner-admin guard → idCampanha lookup).
   // No client-side slug→idCampanha resolver needed.
@@ -777,5 +778,14 @@ export function MensagensBody({ slug }: PainelSectionBodyProps) {
         )}
       </div>
     </section>
+  );
+}
+
+/** aperture-1z18g — gated by `mensagens:ver` for members of a shared campanha. */
+export function MensagensBody(props: PainelSectionBodyProps) {
+  return (
+    <ComPermissao acao="mensagens:ver" titulo="Recados">
+      <MensagensBodyConteudo {...props} />
+    </ComPermissao>
   );
 }

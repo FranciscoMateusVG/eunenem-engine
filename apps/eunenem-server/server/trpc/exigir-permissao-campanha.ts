@@ -34,12 +34,30 @@ export class PermissaoCampanhaNegadaError extends Error {
   }
 }
 
-export async function obterAcessoCampanha(
+/**
+ * Require `acao` for an ALREADY-resolved campanha + caller (for hops with
+ * their own resolver, e.g. the slug-based painel-mensagens).
+ *
+ * @throws PermissaoCampanhaNegadaError
+ */
+export async function exigirPermissaoCampanha(
   ctx: TrpcContext,
   idCampanha: IdCampanha,
   idConta: string,
-): Promise<AcessoMembroCampanha | undefined> {
-  return ctx.deps.campanhaMembrosRepository.obterAcesso(idCampanha, idConta);
+  acao: AcaoCampanha,
+): Promise<AcessoMembroCampanha> {
+  try {
+    return await assertCampaignPermission(
+      {
+        campanhaMembrosRepository: ctx.deps.campanhaMembrosRepository,
+        observability: ctx.deps.observability,
+      },
+      { idCampanha, idConta, acao },
+    );
+  } catch (err) {
+    if (err instanceof CampanhaPermissaoNegadaError) throw new PermissaoCampanhaNegadaError(acao);
+    throw err;
+  }
 }
 
 /**
@@ -55,17 +73,6 @@ export async function resolverCampanhaComPermissao(
   acao: AcaoCampanha,
 ): Promise<{ usuario: Usuario; campanha: Campanha; acesso: AcessoMembroCampanha }> {
   const { usuario, campanha } = await resolverCampanhaAdministrada(ctx, idCampanha);
-  try {
-    const acesso = await assertCampaignPermission(
-      {
-        campanhaMembrosRepository: ctx.deps.campanhaMembrosRepository,
-        observability: ctx.deps.observability,
-      },
-      { idCampanha: campanha.id, idConta: usuario.idConta, acao },
-    );
-    return { usuario, campanha, acesso };
-  } catch (err) {
-    if (err instanceof CampanhaPermissaoNegadaError) throw new PermissaoCampanhaNegadaError(acao);
-    throw err;
-  }
+  const acesso = await exigirPermissaoCampanha(ctx, campanha.id, usuario.idConta, acao);
+  return { usuario, campanha, acesso };
 }

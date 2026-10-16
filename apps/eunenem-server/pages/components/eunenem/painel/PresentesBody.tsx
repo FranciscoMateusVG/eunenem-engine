@@ -52,6 +52,8 @@ import {
   useStubExtratoSummary,
   useStubSolicitarTransferencia,
 } from "./ExtratoStubData";
+import { ComPermissao } from "./ComPermissao";
+import { useAcessoCampanha } from "./useAcessoCampanha";
 
 // aperture-xjwc — "Presentes recebidos" (extrato + resgatar).
 //
@@ -774,6 +776,7 @@ function TransferModal({
   open,
   saldo,
   hasRecebedor,
+  podeCadastrarRecebedor,
   idCampanha,
   onClose,
   solicitarState,
@@ -782,6 +785,8 @@ function TransferModal({
   saldo: number;
   /** Drives the onboarding branch. Sourced from useStubCampanhaIdForSlug. */
   hasRecebedor: boolean;
+  /** aperture-1z18g — recebedor:gerenciar; without it the onboarding form is hidden. */
+  podeCadastrarRecebedor: boolean;
   /** Required to submit recebedor.criar (the input schema demands it). */
   idCampanha: string | null;
   onClose: () => void;
@@ -792,6 +797,31 @@ function TransferModal({
   // Branch on hasRecebedor. Existing-recebedor flow keeps the current
   // all-or-nothing confirm body verbatim; no-recebedor flow embeds the
   // onboarding form.
+  if (!hasRecebedor && !podeCadastrarRecebedor) {
+    return (
+      <>
+        <div className="ex-scrim is-open" onClick={onClose} />
+        <div className="ex-modal" role="dialog" aria-label="Dados bancários pendentes">
+          <header className="ex-modal-hd">
+            <div>
+              <span className="ex-caps">solicitar transferência</span>
+              <h3 className="ex-modal-title">dados bancários pendentes</h3>
+            </div>
+            <button type="button" className="ex-icon-btn" onClick={onClose} aria-label="Fechar">
+              <IconClose />
+            </button>
+          </header>
+          <p className="ex-modal-text">
+            Esta campanha ainda não tem dados de recebimento. Peça para quem criou a
+            campanha cadastrar os dados bancários antes de solicitar a transferência.
+          </p>
+          <button type="button" className="ex-btn-primary block" onClick={onClose}>
+            entendi
+          </button>
+        </div>
+      </>
+    );
+  }
   if (!hasRecebedor) {
     return (
       <TransferOnboardingModal
@@ -1582,7 +1612,7 @@ function ResgatadoModal({
 }
 
 // ── Body ─────────────────────────────────────────────────────────────────────
-export function PresentesBody(props: PainelSectionBodyProps) {
+function PresentesBodyConteudo(props: PainelSectionBodyProps) {
   const [openTx, setOpenTx] = useState<PresentesTx | null>(null);
   const [transferOpen, setTransferOpen] = useState(false);
   const [resgatadoOpen, setResgatadoOpen] = useState(false);
@@ -1621,6 +1651,11 @@ export function PresentesBody(props: PainelSectionBodyProps) {
   // MUST run BEFORE the loading-gate early returns — React hooks rules
   // forbid conditional hook calls. The hook itself defends against
   // null idCampanha at mutate-time.
+  // aperture-1z18g — hide what a shared-campanha member can't do (the server
+  // enforces it regardless): the transfer CTA needs saque:solicitar; the
+  // no-recebedor onboarding embed needs recebedor:gerenciar.
+  const acesso = useAcessoCampanha(idCampanha);
+
   const solicitarState = useStubSolicitarTransferencia({
     idCampanha,
     onSuccess: () => {
@@ -1753,6 +1788,7 @@ export function PresentesBody(props: PainelSectionBodyProps) {
                 nothing to transfer"). The all-or-nothing confirm modal
                 inside doesn't expose an amount input — there's no
                 partial-withdrawal UI ever (locked decision s03dr). */}
+            {acesso.pode("saque:solicitar") && (
             <div className="ex-sheet-cta-row">
               <button
                 type="button"
@@ -1768,6 +1804,7 @@ export function PresentesBody(props: PainelSectionBodyProps) {
                 solicitar transferência
               </button>
             </div>
+            )}
 
           </header>
 
@@ -1816,6 +1853,7 @@ export function PresentesBody(props: PainelSectionBodyProps) {
         open={transferOpen}
         saldo={summary.disponivel}
         hasRecebedor={hasRecebedor}
+        podeCadastrarRecebedor={acesso.pode("recebedor:gerenciar")}
         idCampanha={idCampanha}
         onClose={() => {
           setTransferOpen(false);
@@ -2310,3 +2348,12 @@ const EXTRATO_CSS = `
   .presentes-extrato .ex-filter-panel { right: -8px; width: 240px; }
 }
 `;
+
+/** aperture-1z18g — gated by `extrato:ver` for members of a shared campanha. */
+export function PresentesBody(props: PainelSectionBodyProps) {
+  return (
+    <ComPermissao acao="extrato:ver" titulo="Extrato">
+      <PresentesBodyConteudo {...props} />
+    </ComPermissao>
+  );
+}

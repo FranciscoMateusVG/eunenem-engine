@@ -16,18 +16,27 @@ import { appRouter } from '../../apps/eunenem-server/server/trpc/router.js';
 import { CampanhaMembrosRepositoryPostgres } from '../../src/adapters/arrecadacao/campanha-membros-repository.postgres.js';
 import { CampanhaRepositoryPostgres } from '../../src/adapters/arrecadacao/campanha-repository.postgres.js';
 import { ContribuicaoRepositoryPostgres } from '../../src/adapters/arrecadacao/contribuicao-repository.postgres.js';
+import { PerfilCampanhaRepositoryPostgres } from '../../src/adapters/arrecadacao/perfil-campanha-repository.postgres.js';
 import { RecebedorRepositoryPostgres } from '../../src/adapters/arrecadacao/recebedor-repository.postgres.js';
 import { ResgatePendenteRepositoryPostgres } from '../../src/adapters/arrecadacao/resgate-pendente-repository.postgres.js';
+import { ConviteRepositoryPostgres } from '../../src/adapters/evento/convite-repository.postgres.js';
+import { EventoRepositoryPostgres } from '../../src/adapters/evento/evento-repository.postgres.js';
+import { ListaDeConvidadosRepositoryPostgres } from '../../src/adapters/evento/lista-de-convidados-repository.postgres.js';
 import { LivroFinanceiroRepositoryPostgres } from '../../src/adapters/pagamentos/financeiro/livro-repository.postgres.js';
 import { PagamentoRepositoryPostgres } from '../../src/adapters/pagamentos/repository.postgres.js';
 import {
   ID_PLATAFORMA_EUNENEM,
   PlataformaRepositoryMemory,
 } from '../../src/adapters/plataforma/repository.memory.js';
+import { ObjectStorageMemory } from '../../src/adapters/storage/object-storage.memory.js';
 import { AuthServiceMemoria } from '../../src/adapters/usuario/auth-service.memory.js';
 import { UsuarioRepositoryPostgres } from '../../src/adapters/usuario/repository.postgres.js';
 import type { DadosRecebedorPix } from '../../src/domain/arrecadacao/value-objects/dados-recebedor.js';
-import type { AcaoConcedivel } from '../../src/domain/arrecadacao/value-objects/permissao-campanha.js';
+import {
+  ACOES_CONCEDIVEIS,
+  type AcaoConcedivel,
+  PERMISSOES_PADRAO_MEMBRO,
+} from '../../src/domain/arrecadacao/value-objects/permissao-campanha.js';
 import { NoopLogger } from '../../src/observability/noop-logger.js';
 import type { Observability } from '../../src/observability/observability.js';
 import { noopTracer } from '../../src/observability/tracer.js';
@@ -73,6 +82,11 @@ beforeAll(async () => {
     contribuicaoRepository: new ContribuicaoRepositoryPostgres(db),
     recebedorRepository,
     resgatePendenteRepository: new ResgatePendenteRepositoryPostgres(db),
+    perfilCampanhaRepository: new PerfilCampanhaRepositoryPostgres(db),
+    eventoRepository: new EventoRepositoryPostgres(db),
+    conviteRepository: new ConviteRepositoryPostgres(db),
+    listaDeConvidadosRepository: new ListaDeConvidadosRepositoryPostgres(db),
+    objectStorage: new ObjectStorageMemory(),
     pagamentoRepository,
     livroFinanceiroRepository: new LivroFinanceiroRepositoryPostgres(db, recebedorRepository),
     observability,
@@ -94,6 +108,7 @@ async function registrar(): Promise<{
   idCampanha: string;
   headers: Headers;
   idUsuario: string;
+  slug: string;
 }> {
   const idUsuario = randomUUID();
   const idConta = randomUUID();
@@ -113,7 +128,7 @@ async function registrar(): Promise<{
       idConta,
       idPlataforma: ID_PLATAFORMA_EUNENEM,
       email,
-      nomeExibicao: 'Pessoa',
+      nomeExibicao: nomeAleatorio(),
       senhaSimulada: TEST_PASSWORD,
     },
   );
@@ -132,7 +147,16 @@ async function registrar(): Promise<{
     idCampanha: registro.campanha.id,
     headers: ctx.headers,
     idUsuario,
+    slug: registro.usuario.slug,
   };
+}
+
+/** Slugs derive from the first name only — keep it unique per test user. */
+function nomeAleatorio(): string {
+  const letras = 'abcdefghijklmnopqrstuvwxyz';
+  let nome = '';
+  for (let i = 0; i < 10; i++) nome += letras[Math.floor(Math.random() * letras.length)];
+  return nome.charAt(0).toUpperCase() + nome.slice(1);
 }
 
 async function codeOf(p: Promise<unknown>): Promise<string> {
@@ -163,6 +187,25 @@ describe('per-action permission guards (Postgres, real router)', () => {
     estranho = await registrar();
     idCampanha = owner.idCampanha;
     await deps.campanhaRepository.adicionarAdministrador(idCampanha, membro.idConta);
+    // Start every case from an explicit empty grant set (independent of the
+    // invite default, which has its own test below).
+    await conceder([]);
+  });
+
+  it('a freshly added member gets the operator defaults (and nothing financial)', async () => {
+    const novo = await registrar();
+    await testDb.db
+      .insertInto('campanha_administradores')
+      .values({ campanha_id: idCampanha, id_usuario: novo.idConta })
+      .execute();
+    await deps.campanhaMembrosRepository.adicionarMembro(idCampanha, novo.idConta);
+    const acesso = await novo.caller.campanhaMembros.meuAcesso({ idCampanha });
+    expect(acesso.acoes.slice().sort()).toEqual([...PERMISSOES_PADRAO_MEMBRO].sort());
+    expect(await codeOf(novo.caller.recebedor.extrato.summary({ idCampanha }))).toBe('FORBIDDEN');
+    expect(
+      await codeOf(novo.caller.campanhas.definirSlug({ idCampanha, slug: 'outro-link-novo' })),
+    ).toBe('FORBIDDEN');
+    expect(await codeOf(novo.caller.contribuicao.list({ idCampanha }))).toBe('OK');
   });
 
   describe('recebedor:gerenciar', () => {
@@ -303,12 +346,169 @@ describe('per-action permission guards (Postgres, real router)', () => {
     });
   });
 
+  describe('non-financial + read actions (one guard per route, real Postgres)', () => {
+    type Caso = {
+      nome: string;
+      acao: AcaoConcedivel;
+      chamar: (quem: Awaited<ReturnType<typeof registrar>>) => Promise<unknown>;
+    };
+    const casos: Caso[] = [
+      {
+        nome: 'campanhas.definirSlug',
+        acao: 'link:editar',
+        chamar: (q) =>
+          q.caller.campanhas.definirSlug({ idCampanha, slug: `lista-${randomUUID().slice(0, 8)}` }),
+      },
+      {
+        nome: 'perfilCampanha.atualizar',
+        acao: 'perfil:editar',
+        chamar: (q) =>
+          q.caller.perfilCampanha.atualizar({
+            idCampanha,
+            nomeBebe: 'Aurora',
+            relacao: null,
+            historia: null,
+            dataNascimento: null,
+            tipoEvento: null,
+            genero: null,
+            dataEvento: null,
+            fotoPerfilKey: null,
+            fotoCapaKey: null,
+            fotoHistoriaKey: null,
+          }),
+      },
+      {
+        nome: 'perfilCampanha.emitirUrlUploadFoto',
+        acao: 'perfil:editar',
+        chamar: (q) =>
+          q.caller.perfilCampanha.emitirUrlUploadFoto({
+            idCampanha,
+            slot: 'perfil',
+            contentType: 'image/png',
+          }),
+      },
+      {
+        nome: 'eventoConvite.save',
+        acao: 'convite:editar',
+        chamar: (q) =>
+          q.caller.eventoConvite.save({
+            idCampanha,
+            tipoEvento: 'cha-bebe',
+            modalidade: 'presencial',
+            dataHoraIso: '2026-12-01T15:00:00.000Z',
+            endereco: 'Rua das Flores, 123',
+            remetente: 'Ana',
+            nomeExibido: 'Helena',
+            mensagem: 'Venha!',
+            paleta: 'lilas',
+            fonte: 'patrick',
+            modelo: 'scrapbook',
+          }),
+      },
+      {
+        nome: 'eventoListaDeConvidados.adicionarConvidado',
+        acao: 'convite:editar',
+        chamar: (q) =>
+          q.caller.eventoListaDeConvidados.adicionarConvidado({
+            idCampanha,
+            nome: 'Convidado',
+            numeroCelular: '11999990000',
+          }),
+      },
+      {
+        nome: 'eventoListaDeConvidados.alterarPresenca',
+        acao: 'convite:editar',
+        chamar: (q) =>
+          q.caller.eventoListaDeConvidados.alterarPresenca({
+            idCampanha,
+            idConvidado: randomUUID(),
+            presenca: 'sim',
+          }),
+      },
+      {
+        nome: 'eventoListaDeConvidados.salvarFormatoMensagem',
+        acao: 'convite:editar',
+        chamar: (q) =>
+          q.caller.eventoListaDeConvidados.salvarFormatoMensagem({
+            idCampanha,
+            formatoMensagemConvite: 'texto',
+          }),
+      },
+      {
+        nome: 'eventoListaDeConvidados.get (read)',
+        acao: 'convidados:ver',
+        chamar: (q) => q.caller.eventoListaDeConvidados.get({ idCampanha }),
+      },
+      {
+        nome: 'painelMensagens.list (read)',
+        acao: 'mensagens:ver',
+        chamar: (q) => q.caller.painelMensagens.list({ slug: q.slug, idCampanha }),
+      },
+      {
+        nome: 'painelMensagens.marcarLida',
+        acao: 'mensagens:gerenciar',
+        chamar: (q) =>
+          q.caller.painelMensagens.marcarLida({
+            slug: q.slug,
+            idCampanha,
+            idPagamento: randomUUID(),
+          }),
+      },
+      {
+        nome: 'painelMensagens.marcarTodasLidas',
+        acao: 'mensagens:gerenciar',
+        chamar: (q) => q.caller.painelMensagens.marcarTodasLidas({ slug: q.slug, idCampanha }),
+      },
+      {
+        nome: 'recebedor.extrato.summary (read)',
+        acao: 'extrato:ver',
+        chamar: (q) => q.caller.recebedor.extrato.summary({ idCampanha }),
+      },
+      {
+        nome: 'recebedor.extrato.list (read)',
+        acao: 'extrato:ver',
+        chamar: (q) => q.caller.recebedor.extrato.list({ idCampanha, cursor: null }),
+      },
+      {
+        nome: 'recebedor.listMovimentacoes (read)',
+        acao: 'extrato:ver',
+        chamar: (q) => q.caller.recebedor.listMovimentacoes({ idCampanha }),
+      },
+    ];
+
+    for (const caso of casos) {
+      it(`${caso.nome}: membro denied without ${caso.acao}, every OTHER grant doesn't help; granted passes the guard; outsider UNAUTHORIZED`, async () => {
+        expect(await codeOf(caso.chamar(membro))).toBe('FORBIDDEN');
+        const outras = (
+          [
+            'presentes:gerenciar',
+            'perfil:editar',
+            'mensagens:ver',
+            'mensagens:gerenciar',
+            'convidados:ver',
+            'convite:editar',
+            'link:editar',
+            'extrato:ver',
+            'recebedor:gerenciar',
+            'saque:solicitar',
+          ] as const
+        ).filter((a) => a !== caso.acao);
+        await conceder([...outras]);
+        expect(await codeOf(caso.chamar(membro))).toBe('FORBIDDEN');
+        await conceder([caso.acao]);
+        expect(await codeOf(caso.chamar(membro))).not.toBe('FORBIDDEN');
+        expect(await codeOf(caso.chamar(owner))).not.toBe('FORBIDDEN');
+        expect(['UNAUTHORIZED', 'NOT_FOUND']).toContain(await codeOf(caso.chamar(estranho)));
+      });
+    }
+  });
+
   describe('membros:gerenciar (owner-only)', () => {
     it('owner lists members with roles and grants', async () => {
       await conceder(['presentes:gerenciar']);
       const membros = await owner.caller.campanhaMembros.listar({ idCampanha });
       expect(membros.map((m) => [m.idConta, m.papel, m.permissoes])).toEqual([
-        [owner.idConta, 'owner', ['recebedor:gerenciar', 'saque:solicitar', 'presentes:gerenciar']],
+        [owner.idConta, 'owner', [...ACOES_CONCEDIVEIS]],
         [membro.idConta, 'membro', ['presentes:gerenciar']],
       ]);
     });
@@ -444,12 +644,7 @@ describe('per-action permission guards (Postgres, real router)', () => {
     it('meuAcesso reports effective actions for the UI', async () => {
       expect(await owner.caller.campanhaMembros.meuAcesso({ idCampanha })).toEqual({
         papel: 'owner',
-        acoes: [
-          'recebedor:gerenciar',
-          'saque:solicitar',
-          'presentes:gerenciar',
-          'membros:gerenciar',
-        ],
+        acoes: [...ACOES_CONCEDIVEIS, 'membros:gerenciar'],
       });
       await conceder(['saque:solicitar']);
       expect(await membro.caller.campanhaMembros.meuAcesso({ idCampanha })).toEqual({

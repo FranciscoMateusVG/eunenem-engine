@@ -18,6 +18,8 @@ import { useCampanhaRota } from "@/lib/campanha-rota";
 import { PERFIL_RELATIONS } from "@/lib/mocks/perfil";
 import { resetAnalyticsIdentity, sendEvent } from "@/lib/analytics";
 import type { PainelSectionBodyProps } from "@/PainelSectionPage";
+import { ComPermissao } from "./ComPermissao";
+import { useAcessoCampanha } from "./useAcessoCampanha";
 
 // aperture-1z6xa / aperture-bnj0z — Editar Perfil body (content only).
 //
@@ -624,7 +626,7 @@ function PerfilDateField({
   );
 }
 
-export function PerfilBody({ slug }: PainelSectionBodyProps) {
+function PerfilBodyConteudo({ slug }: PainelSectionBodyProps) {
   const idCampanha = useCampanhaRota();
   // aperture-qmaoi (fblrt W2-c1) — WRITE target: rota ?? session-default
   // (oldest). Bare /painel/:slug saves now address the default campanha's
@@ -633,6 +635,8 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
   // rota-only split: bare URLs hydrate from perfil.getPerfil, whose shim reads
   // the oldest campanha — the same rows these writes now target.
   const idCampanhaEscrita = useCampanhaEscrita();
+  // aperture-1z18g — the public link is its own permission (link:editar).
+  const podeEditarLink = useAcessoCampanha(idCampanhaEscrita).pode("link:editar");
   // aperture-2v91z — the route campanha's pretty slug for the share row.
   // aperture (1-troca) — slugJaAlterado gates whether the SlugEditor
   // renders at all (see the render below).
@@ -1135,7 +1139,7 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
             that, only the "copiar link" block below remains. idCampanhaEscrita
             is the actual write target (mirrors every other save call in
             this component — see currentPayload/campanhaPayload above). */}
-        {!slugJaAlterado && idCampanhaEscrita && (
+        {!slugJaAlterado && idCampanhaEscrita && podeEditarLink && (
           <SlugEditor
             idCampanha={idCampanhaEscrita}
             currentSlug={campanhaSlugRota ?? ""}
@@ -1384,5 +1388,14 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
         />
       )}
     </div>
+  );
+}
+
+/** aperture-1z18g — gated by `perfil:editar` for members of a shared campanha. */
+export function PerfilBody(props: PainelSectionBodyProps) {
+  return (
+    <ComPermissao acao="perfil:editar" titulo="Perfil">
+      <PerfilBodyConteudo {...props} />
+    </ComPermissao>
   );
 }
