@@ -10,7 +10,7 @@ describe('transactional link SMTP MIME policy', () => {
       host: 'smtp.sendgrid.net',
       port: 587,
       user: 'synthetic',
-      pass: 'not-a-real-password-test-only',
+      pass: 'not-a-real-password-test-only', // ggignore: synthetic stream-transport fixture; never authenticates
       from: 'sender@example.invalid',
       secure: false,
     });
