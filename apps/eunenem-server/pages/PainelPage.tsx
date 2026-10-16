@@ -17,6 +17,7 @@ import { sendPageView } from '@/lib/analytics';
 import { pageViewProps } from '@/lib/rota-canonica';
 import { useListaDeConvidadosData } from '@/lib/convidados';
 import { useAcessoCampanha } from '@/components/eunenem/painel/useAcessoCampanha';
+import { filtrarMenuPorAcesso, visibilidadeRecebido } from '@/lib/painel-permissoes';
 import { deriveGiftListUnitCounts, derivePainelCounts } from '@/lib/painel-counts';
 import { PainelDataBoundary } from '@/components/eunenem/painel/PainelDataBoundary';
 
@@ -200,10 +201,14 @@ export function PainelPage({
     recadosStripCount: liveRecadosStrip ?? 0,
   };
 
-  const groups = buildPainelMenu(snapshot, {
-    listaTotal: liveListaCounts.total,
-    listaClaimed: liveListaCounts.claimed,
-  });
+  // aperture-1z18g (kpesy-04) — members only see the rows/cards they may use.
+  const groups = filtrarMenuPorAcesso(
+    buildPainelMenu(snapshot, {
+      listaTotal: liveListaCounts.total,
+      listaClaimed: liveListaCounts.claimed,
+    }),
+    acesso.pode,
+  );
 
   // aperture-7nius / aperture-4my2a — tutorial state (Plan 0018 Phase B,
   // real-tRPC swap).
@@ -391,7 +396,12 @@ export function PainelPage({
     >
       <PainelPageView idCampanha={idCampanha ?? undefined} />
       {meQ.data?.onboardingProprioPendente && meQ.data.idCampanhaCompartilhada && <a className="mb-4 inline-block rounded border border-plum px-4 py-2 text-plum" href={`/painel/${slug}?criarMinhaLista=1`}>Criar minha própria lista</a>}
-      <PainelHeaderCard snapshot={snapshot} slug={slug} campanhaTitulo={campanhaTitulo} />
+      <PainelHeaderCard
+        snapshot={snapshot}
+        slug={slug}
+        campanhaTitulo={campanhaTitulo}
+        visibilidade={visibilidadeRecebido(acesso.pode)}
+      />
       <PainelMenu groups={groups} slug={slug} />
       <PainelTutorialTrigger
         visible={!overlayOpen}

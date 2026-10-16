@@ -9,6 +9,7 @@ import { paginaShareDisplayPath, paginaShareDisplayPrefix, paginaShareUrl } from
 import { painelHref } from "@/lib/painelRoutes";
 import { useCampanhaRota } from "@/lib/campanha-rota";
 import { sendEvent } from "@/lib/analytics";
+import { VISIBILIDADE_TOTAL, type VisibilidadeRecebido } from "@/lib/painel-permissoes";
 
 // aperture-9qu7k — Painel root hero composition (target screenshot 32).
 //
@@ -58,6 +59,11 @@ interface Props {
    * undefined = list unavailable (chip hidden).
    */
   campanhaTitulo?: string | null;
+  /**
+   * aperture-1z18g — which parts of the recebido card the caller may see
+   * (shared-campanha members). Omitted = everything (owner).
+   */
+  visibilidade?: VisibilidadeRecebido;
 }
 
 const MONTHS_PT = [
@@ -65,7 +71,12 @@ const MONTHS_PT = [
   "jul", "ago", "set", "out", "nov", "dez",
 ];
 
-export function PainelHeaderCard({ snapshot, slug, campanhaTitulo }: Props) {
+export function PainelHeaderCard({
+  snapshot,
+  slug,
+  campanhaTitulo,
+  visibilidade = VISIBILIDADE_TOTAL,
+}: Props) {
   const idCampanha = useCampanhaRota();
   const { tweaks } = useTweaks();
   const [copied, setCopied] = useState(false);
@@ -232,20 +243,26 @@ export function PainelHeaderCard({ snapshot, slug, campanhaTitulo }: Props) {
           and the amount updates implicitly on snapshot refresh, so
           the live-stream framing was marketing noise on a private
           figure both times. */}
-      <section className="painel-recebido-card" aria-label="recebido até agora">
-        <div className="painel-recebido-head">
-          <span className="painel-recebido-lbl">recebido até agora</span>
-        </div>
-        <div className="painel-recebido-amount">
-          <small>R$</small>
-          {reaisInt}
-          <span className="painel-recebido-cents">,{reaisCents}</span>
-        </div>
+      {visibilidade.card && (
+      <section className="painel-recebido-card" aria-label="resumo do evento">
+        {visibilidade.valor && (
+          <>
+            <div className="painel-recebido-head">
+              <span className="painel-recebido-lbl">recebido até agora</span>
+            </div>
+            <div className="painel-recebido-amount">
+              <small>R$</small>
+              {reaisInt}
+              <span className="painel-recebido-cents">,{reaisCents}</span>
+            </div>
+          </>
+        )}
         {/* aperture-sm7uc (#2 fix) — pill was a dead <button>. Navigates
             to the extrato (presentes) sub-page so the operator lands on
             the place that actually lets them resgatar. Render an <a>
             (not a button) so the painel router picks it up via the same
             full-page nav path every other menu row uses. */}
+        {visibilidade.resgatar && (
         <a
           href={painelHref(slug, "presentes", idCampanha)}
           className="painel-recebido-cta"
@@ -265,6 +282,7 @@ export function PainelHeaderCard({ snapshot, slug, campanhaTitulo }: Props) {
             <path d="M13 5l7 7-7 7" />
           </svg>
         </a>
+        )}
         <div className="painel-stats" role="group" aria-label="resumo do evento">
           {/* aperture-kvpvf — strip swap from snapshot.giftsClaimed
               (distinct-pagamento count) to snapshot.presentesStripCount
@@ -273,24 +291,31 @@ export function PainelHeaderCard({ snapshot, slug, campanhaTitulo }: Props) {
               card on the menu still reads giftsClaimed (distinct
               pagamentos) — those are two intentionally different
               numbers on the same page. */}
-          <div className="painel-stat">
-            <div className="painel-stat-num">{snapshot.presentesStripCount}</div>
-            <div className="painel-stat-lbl">presentes</div>
-          </div>
-          <div className="painel-stat">
-            <div className="painel-stat-num">{snapshot.guestsConfirmed}</div>
-            <div className="painel-stat-lbl">confirmados</div>
-          </div>
+          {visibilidade.presentes && (
+            <div className="painel-stat">
+              <div className="painel-stat-num">{snapshot.presentesStripCount}</div>
+              <div className="painel-stat-lbl">presentes</div>
+            </div>
+          )}
+          {visibilidade.confirmados && (
+            <div className="painel-stat">
+              <div className="painel-stat-num">{snapshot.guestsConfirmed}</div>
+              <div className="painel-stat-lbl">confirmados</div>
+            </div>
+          )}
           {/* aperture-kvpvf — strip swap from snapshot.messagesTotal
               (mock 12) to snapshot.recadosStripCount (real count). The
               "mensagens recebidas" menu row still reads messagesTotal
               (separate follow-up bead aperture-mztrb covers that). */}
-          <div className="painel-stat">
-            <div className="painel-stat-num">{snapshot.recadosStripCount}</div>
-            <div className="painel-stat-lbl">recados</div>
-          </div>
+          {visibilidade.recados && (
+            <div className="painel-stat">
+              <div className="painel-stat-num">{snapshot.recadosStripCount}</div>
+              <div className="painel-stat-lbl">recados</div>
+            </div>
+          )}
         </div>
       </section>
+      )}
     </>
   );
 }
