@@ -18,6 +18,7 @@ export { PerfilCampanhaRepositoryPostgres } from './adapters/arrecadacao/perfil-
 export type { RecebedorRepository } from './adapters/arrecadacao/recebedor-repository.js';
 export { RecebedorRepositoryMemory } from './adapters/arrecadacao/recebedor-repository.memory.js';
 export { RecebedorRepositoryPostgres } from './adapters/arrecadacao/recebedor-repository.postgres.js';
+export type { ArrecadacaoRepositoryContext } from './adapters/arrecadacao/repository-context.js';
 export type { ResgatePendenteRepository } from './adapters/arrecadacao/resgate-pendente-repository.js';
 export { ResgatePendenteRepositoryMemory } from './adapters/arrecadacao/resgate-pendente-repository.memory.js';
 export { ResgatePendenteRepositoryPostgres } from './adapters/arrecadacao/resgate-pendente-repository.postgres.js';

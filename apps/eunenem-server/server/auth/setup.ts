@@ -68,6 +68,9 @@ import {
   type PerfilCriadorRepository,
   PerfilCriadorRepositoryPostgres,
   type ResgatePendenteRepository,
+  type ArrecadacaoRepositoryContext,
+  type CampanhaMembrosRepository,
+  CampanhaMembrosRepositoryPostgres,
   ResgatePendenteRepositoryPostgres,
   PlataformaRepositoryMemory,
   type PlataformaRepository,
@@ -110,6 +113,11 @@ import {
  * what they need from the context object instead of standing up new
  * adapters per call.
  */
+export type RevogarConvitesPendentesDoMembro = (
+  input: { readonly idCampanha: string; readonly idConta: string; readonly idUsuarioAtor: string },
+  context: Required<ArrecadacaoRepositoryContext>,
+) => Promise<void>;
+
 export interface ServerDeps {
   readonly db: Database;
   readonly auth: Auth;
@@ -157,6 +165,19 @@ export interface ServerDeps {
    * shared single instances built at boot — they hold no per-request state.
    */
   readonly campanhaRepository: CampanhaRepository;
+  /**
+   * Papéis + permissões por ação dos administradores de cada campanha
+   * (aperture-1z18g). Lido por `assertCampaignPermission` em toda rota
+   * que exige uma ação específica (recebedor, saque, presentes, membros).
+   */
+  readonly campanhaMembrosRepository: CampanhaMembrosRepository;
+  /**
+   * Hook called by `campanhaMembros.remover` INSIDE its transaction (campanha
+   * row already locked FOR UPDATE, before the membership rows are deleted) so
+   * the sharing flow revokes the removed member's pending invites atomically.
+   * Wired by the compartilhamento composition; required in production.
+   */
+  readonly revogarConvitesPendentesDoMembro?: RevogarConvitesPendentesDoMembro;
   readonly contribuicaoRepository: ContribuicaoRepository;
   readonly recebedorRepository: RecebedorRepository;
   /** Evento BC — event metadata + invite content for the painel convite flow. */
@@ -1001,6 +1022,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
   // resolve the active recebedor.
   const recebedorRepository = new RecebedorRepositoryPostgres(db);
   const campanhaRepository = new CampanhaRepositoryPostgres(db, recebedorRepository);
+  const campanhaMembrosRepository = new CampanhaMembrosRepositoryPostgres(db);
   const contribuicaoRepository = new ContribuicaoRepositoryPostgres(db);
   const eventoRepository = new EventoRepositoryPostgres(db);
   const conviteRepository = new ConviteRepositoryPostgres(db);
@@ -1202,6 +1224,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     resgatePendenteRepository,
     plataformaRepository,
     campanhaRepository,
+    campanhaMembrosRepository,
     contribuicaoRepository,
     recebedorRepository,
     eventoRepository,
