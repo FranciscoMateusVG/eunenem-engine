@@ -7,6 +7,7 @@
  *   - `auth.me`                 — returns the current Usuario or null
  *     Account entry is passwordless and handled by BetterAuth OAuth/magic-link
  *     endpoints. No tRPC route accepts or creates a password.
+ *   - `campanhaMembros.*`       — owner-managed per-action permissions (aperture-1z18g)
  *   - `catalogo.*`              — public database-backed catalogue projections
  *   - `contribuicao.list`       — list caller's presentes (aperture-d6atj)
  *   - `contribuicao.create`     — batched create-by-qty
@@ -18,6 +19,7 @@
 import { initTRPC } from '@trpc/server';
 import { adminRouter } from './admin-router.js';
 import { authRouter } from './auth-router.js';
+import { campanhaMembrosRouter } from './campanha-membros-router.js';
 import { campanhasRouter } from './campanhas-router.js';
 import { catalogoRouter } from './catalogo-router.js';
 import { contribuicaoRouter } from './contribuicao-router.js';
@@ -44,6 +46,7 @@ export const appRouter = t.router({
   }),
   admin: adminRouter,
   auth: authRouter,
+  campanhaMembros: campanhaMembrosRouter,
   campanhas: campanhasRouter,
   catalogo: catalogoRouter,
   contribuicao: contribuicaoRouter,

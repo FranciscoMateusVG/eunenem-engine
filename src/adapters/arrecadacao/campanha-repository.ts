@@ -10,6 +10,16 @@ import type { ArrecadacaoRepositoryContext } from './repository-context.js';
  * Persistência do agregado Campanha (porta).
  */
 export interface CampanhaRepository {
+  adicionarAdministrador(
+    idCampanha: IdCampanha,
+    idConta: IdConta,
+    context?: ArrecadacaoRepositoryContext,
+  ): Promise<void>;
+  removerAdministrador(
+    idCampanha: IdCampanha,
+    idConta: IdConta,
+    context?: ArrecadacaoRepositoryContext,
+  ): Promise<void>;
   save(campanha: Campanha, context?: ArrecadacaoRepositoryContext): Promise<void>;
   findById(id: IdCampanha, context?: ArrecadacaoRepositoryContext): Promise<Campanha | undefined>;
   findByPlataforma(

@@ -25,6 +25,7 @@ import {
   obterListaDeConvidadosPorIdEvento,
   StatusPresencaConvidadoSchema,
   type Usuario,
+  type AcaoCampanha,
 } from '../../../../src/index.js';
 import { propsConvidadoCriado } from '../analytics/funil.js';
 import { distinctIdConvidado } from '../analytics/server-analytics.js';
@@ -32,8 +33,11 @@ import type { TrpcContext } from './context.js';
 import {
   CampanhaAcessoNegadoError,
   CampanhaInexistenteError,
-  resolverCampanhaAdministrada,
 } from './resolve-campanha-administrada.js';
+import {
+  PermissaoCampanhaNegadaError,
+  resolverCampanhaComPermissao,
+} from './exigir-permissao-campanha.js';
 
 const t = initTRPC.context<TrpcContext>().create();
 
@@ -51,14 +55,19 @@ class CampanhaSlugNaoEncontradaError extends Error {
 
 async function resolveCallerCampanha(
   ctx: TrpcContext,
-  idCampanha?: string,
+  idCampanha: string | undefined,
+  /** aperture-1z18g: every hop here needs convidados:ver or convite:editar. */
+  acao: AcaoCampanha,
 ): Promise<{ campanha: Campanha; usuario: Usuario }> {
   // aperture-yeauv: resolve via the shared per-campanha resolver. PRESENT
   // idCampanha → that campanha, owner-gated; ABSENT → oldest (back-compat).
-  return resolverCampanhaAdministrada(ctx, idCampanha);
+  return resolverCampanhaComPermissao(ctx, idCampanha, acao);
 }
 
 function toTRPCError(err: unknown): TRPCError {
+  if (err instanceof PermissaoCampanhaNegadaError) {
+    return new TRPCError({ code: 'FORBIDDEN', message: err.message, cause: err });
+  }
   // aperture-yeauv: shared per-campanha resolver sentinels (authed hops).
   if (err instanceof CampanhaAcessoNegadoError) {
     return new TRPCError({ code: 'UNAUTHORIZED', message: err.message, cause: err });
@@ -262,7 +271,7 @@ export const eventoListaDeConvidadosRouter = t.router({
     .output(GetListaDeConvidadosOutputSchema)
     .query(async ({ ctx, input }) => {
       try {
-        const { campanha } = await resolveCallerCampanha(ctx, input?.idCampanha);
+        const { campanha } = await resolveCallerCampanha(ctx, input?.idCampanha, 'convidados:ver');
         const evento = await resolveCallerEvento(ctx, campanha);
         if (!evento) {
           return { lista: null };
@@ -278,7 +287,7 @@ export const eventoListaDeConvidadosRouter = t.router({
     .output(GetListaDeConvidadosOutputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        const { campanha } = await resolveCallerCampanha(ctx, input.idCampanha);
+        const { campanha } = await resolveCallerCampanha(ctx, input.idCampanha, 'convite:editar');
         const evento = await resolveCallerEvento(ctx, campanha);
         if (!evento) {
           throw new ListaDeConvidadosNaoEncontradaError();
@@ -316,7 +325,7 @@ export const eventoListaDeConvidadosRouter = t.router({
     .output(GetListaDeConvidadosOutputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        const { campanha, usuario } = await resolveCallerCampanha(ctx, input.idCampanha);
+        const { campanha, usuario } = await resolveCallerCampanha(ctx, input.idCampanha, 'convite:editar');
         const evento = await resolveCallerEvento(ctx, campanha);
         if (!evento) {
           throw new EventoAusenteError('Crie seu convite antes de adicionar convidados');
@@ -392,7 +401,7 @@ export const eventoListaDeConvidadosRouter = t.router({
     .output(GetListaDeConvidadosOutputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        const { campanha } = await resolveCallerCampanha(ctx, input.idCampanha);
+        const { campanha } = await resolveCallerCampanha(ctx, input.idCampanha, 'convite:editar');
         const evento = await resolveCallerEvento(ctx, campanha);
         if (!evento) {
           throw new EventoAusenteError('Crie seu convite antes de escolher o formato da mensagem');

@@ -1,4 +1,5 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
+import { sql } from 'kysely';
 import type { Campanha } from '../../domain/arrecadacao/entities/campanha.js';
 import {
   campanhaComRecebedorInicial,
@@ -13,6 +14,7 @@ import type {
   OpcaoContribuicao,
   TipoOpcaoContribuicao,
 } from '../../domain/arrecadacao/value-objects/opcao-contribuicao.js';
+import { PERMISSOES_PADRAO_MEMBRO } from '../../domain/arrecadacao/value-objects/permissao-campanha.js';
 import type { Database } from '../database.js';
 import type { CampanhaRepository } from './campanha-repository.js';
 import type { RecebedorRepository } from './recebedor-repository.js';
@@ -29,7 +31,7 @@ type OpcaoRow = { id: string; campanha_id: string; tipo: string };
 
 /**
  * PostgreSQL CampanhaRepository: upsert da campanha (incluindo `id_plataforma`),
- * sync de administradores (delete-all + insert) e upsert de opções por id.
+ * administradores somente na criação e upsert de opções por id.
  * Recebedor ativo resolvido via RecebedorRepository.
  */
 export class CampanhaRepositoryPostgres implements CampanhaRepository {
@@ -39,11 +41,14 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
   ) {}
 
   async save(campanha: Campanha, context?: ArrecadacaoRepositoryContext): Promise<void> {
-    const executor = context?.trx ?? this.db;
+    if (!context?.trx) {
+      return this.db.transaction().execute((trx) => this.save(campanha, { trx }));
+    }
+    const executor = context.trx;
     return tracer.startActiveSpan('db.arrecadacao_campanhas.save', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPSERT' });
       try {
-        await executor
+        const inserted = await executor
           .insertInto('campanhas')
           .values({
             id: campanha.id,
@@ -53,22 +58,23 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
             slug_alterado_em: campanha.slugAlteradoEm,
             criada_em: campanha.criadaEm,
           })
-          .onConflict((oc) =>
-            oc.column('id').doUpdateSet({
+          .onConflict((oc) => oc.column('id').doNothing())
+          .returning('id')
+          .executeTakeFirst();
+
+        if (!inserted) {
+          await executor
+            .updateTable('campanhas')
+            .set({
               titulo: campanha.titulo,
-              id_plataforma: campanha.idPlataforma,
               slug: campanha.slug,
               slug_alterado_em: campanha.slugAlteradoEm,
-            }),
-          )
-          .execute();
-
-        await executor
-          .deleteFrom('campanha_administradores')
-          .where('campanha_id', '=', campanha.id)
-          .execute();
-
-        if (campanha.idsAdministradores.length > 0) {
+            })
+            .where('id', '=', campanha.id)
+            .execute();
+        } else if (campanha.idsAdministradores.length > 0) {
+          // Membership is initialized exactly once. A stale aggregate must never
+          // erase a concurrent grant or resurrect a revoked member.
           await executor
             .insertInto('campanha_administradores')
             .values(
@@ -78,6 +84,12 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
               })),
             )
             .execute();
+          for (const idConta of campanha.idsAdministradores) {
+            await sql`INSERT INTO campanha_membros_permissoes (campanha_id, id_conta, papel, permissoes)
+              VALUES (${campanha.id}, ${idConta}, 'owner', '{}') ON CONFLICT DO NOTHING`.execute(
+              executor,
+            );
+          }
         }
 
         for (const opcao of campanha.opcoes) {
@@ -106,6 +118,69 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
         span.end();
       }
     });
+  }
+
+  async adicionarAdministrador(
+    idCampanha: IdCampanha,
+    idConta: IdConta,
+    context?: ArrecadacaoRepositoryContext,
+  ): Promise<void> {
+    if (!context?.trx)
+      return this.db
+        .transaction()
+        .execute((trx) => this.adicionarAdministrador(idCampanha, idConta, { trx }));
+    const trx = context.trx;
+    await trx
+      .selectFrom('campanhas')
+      .select('id')
+      .where('id', '=', idCampanha)
+      .forUpdate()
+      .executeTakeFirstOrThrow();
+    await trx
+      .insertInto('campanha_administradores')
+      .values({ campanha_id: idCampanha, id_usuario: idConta })
+      .onConflict((oc) => oc.columns(['campanha_id', 'id_usuario']).doNothing())
+      .execute();
+    await trx
+      .insertInto('campanha_membros_permissoes')
+      .values({
+        campanha_id: idCampanha,
+        id_conta: idConta,
+        papel: 'membro',
+        permissoes: [...PERMISSOES_PADRAO_MEMBRO],
+      })
+      .onConflict((oc) => oc.columns(['campanha_id', 'id_conta']).doNothing())
+      .execute();
+  }
+
+  async removerAdministrador(
+    idCampanha: IdCampanha,
+    idConta: IdConta,
+    context?: ArrecadacaoRepositoryContext,
+  ): Promise<void> {
+    if (!context?.trx)
+      return this.db
+        .transaction()
+        .execute((trx) => this.removerAdministrador(idCampanha, idConta, { trx }));
+    const trx = context.trx;
+    await trx
+      .selectFrom('campanhas')
+      .select('id')
+      .where('id', '=', idCampanha)
+      .forUpdate()
+      .executeTakeFirstOrThrow();
+    // Membership removal never removes an owner or changes financial ownership.
+    const role = await sql<{ papel: string }>`SELECT papel FROM campanha_membros_permissoes
+      WHERE campanha_id = ${idCampanha} AND id_conta = ${idConta}`.execute(trx);
+    if (role.rows[0]?.papel === 'owner') throw new Error('Nao e permitido remover o proprietario');
+    await trx
+      .deleteFrom('campanha_administradores')
+      .where('campanha_id', '=', idCampanha)
+      .where('id_usuario', '=', idConta)
+      .execute();
+    await sql`DELETE FROM campanha_membros_permissoes WHERE campanha_id = ${idCampanha} AND id_conta = ${idConta}`.execute(
+      trx,
+    );
   }
 
   async findById(
@@ -243,6 +318,8 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
       async (span) => {
         span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
         try {
+          // Only OWNED campaigns may be a bare-slug/default resolution.
+          // Shared campaigns are accessible exclusively by explicit campaign id.
           // Join through campanha_administradores; pick the oldest matching
           // campanha (criada_em ASC, then id ASC for tie-breaks). Today
           // each user has exactly one campanha, but the deterministic
@@ -263,6 +340,16 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
               'campanhas.criada_em',
             ])
             .where('campanha_administradores.id_usuario', '=', idConta)
+            .where((eb) =>
+              eb.exists(
+                eb
+                  .selectFrom('campanha_membros_permissoes as owner')
+                  .select('owner.id_conta')
+                  .whereRef('owner.campanha_id', '=', 'campanhas.id')
+                  .where('owner.id_conta', '=', idConta)
+                  .where('owner.papel', '=', 'owner'),
+              ),
+            )
             .orderBy('campanhas.criada_em', 'asc')
             .orderBy('campanhas.id', 'asc')
             .limit(1)
@@ -339,6 +426,16 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
           .innerJoin('campanhas', 'campanhas.id', 'campanha_administradores.campanha_id')
           .select('campanha_administradores.campanha_id')
           .where('campanha_administradores.id_usuario', '=', idConta)
+          .where((eb) =>
+            eb.exists(
+              eb
+                .selectFrom('campanha_membros_permissoes as owner')
+                .select('owner.id_conta')
+                .whereRef('owner.campanha_id', '=', 'campanhas.id')
+                .where('owner.id_conta', '=', idConta)
+                .where('owner.papel', '=', 'owner'),
+            ),
+          )
           .orderBy('campanhas.criada_em', 'asc')
           .orderBy('campanhas.id', 'asc')
           .limit(1)

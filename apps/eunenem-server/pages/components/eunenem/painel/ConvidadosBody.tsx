@@ -53,6 +53,7 @@ import {
 // fields the wizard does, instead of dead-ending on the backend 400.
 import { conviteFieldErrors, FieldError, InvitePreview } from "./ConviteBody";
 import { ConfirmarPresencaView } from "@/ConfirmarPresencaPage";
+import { ComPermissao } from "./ComPermissao";
 
 // aperture-x1b3u — Lista de convidados (RSVP + convites por WhatsApp).
 //
@@ -1470,7 +1471,7 @@ function VirtualInvitePreviewSection({
 // Inline 9:16 preview in the collapse replaced the modal entry point.
 
 // ---------- page body ----------
-export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
+function ConvidadosBodyConteudo({ slug }: PainelSectionBodyProps) {
   // aperture-lista-convidados — the guest list is the real backend source of truth.
   const listaQuery = useListaDeConvidadosData();
   const alterarPresenca = useAlterarPresencaConvidado();
@@ -2422,5 +2423,14 @@ export function ConvidadosBody({ slug }: PainelSectionBodyProps) {
         />
       )}
     </section>
+  );
+}
+
+/** aperture-1z18g — gated by `convidados:ver` for members of a shared campanha. */
+export function ConvidadosBody(props: PainelSectionBodyProps) {
+  return (
+    <ComPermissao acao="convidados:ver" titulo="Convidados">
+      <ConvidadosBodyConteudo {...props} />
+    </ComPermissao>
   );
 }

@@ -60,7 +60,7 @@ export async function adicionarAdministradorCampanha(
 
       const updated = campanhaComAdministrador(existing, idConta);
 
-      await campanhaRepository.save(updated);
+      await campanhaRepository.adicionarAdministrador(idCampanha, idConta);
 
       logger.info('arrecadacao.campanha.administrador_adicionado', {
         idCampanha,

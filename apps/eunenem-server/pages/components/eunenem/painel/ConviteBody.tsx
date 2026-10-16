@@ -43,6 +43,7 @@ import {
 } from "@/lib/mocks/templates";
 
 import { MobileConviteBody } from "./MobileConviteBody";
+import { ComPermissao } from "./ComPermissao";
 
 // aperture-ghvfn — Convites wizard FOUNDATION shell.
 //
@@ -1408,7 +1409,7 @@ function useIsMobile(): boolean {
   return isMobile;
 }
 
-export function ConviteBody(props: PainelSectionBodyProps) {
+function ConviteBodyConteudo(props: PainelSectionBodyProps) {
   const isMobile = useIsMobile();
   if (isMobile) {
     // aperture-zlrd2 — mobile wizard ships in MobileConviteBody.
@@ -2977,3 +2978,12 @@ const CV_WIZ_CSS = `
   .cv-fundo-grid{grid-template-columns:repeat(2,1fr)}
 }
 `;
+
+/** aperture-1z18g — gated by `convite:editar` for members of a shared campanha. */
+export function ConviteBody(props: PainelSectionBodyProps) {
+  return (
+    <ComPermissao acao="convite:editar" titulo="Convite">
+      <ConviteBodyConteudo {...props} />
+    </ComPermissao>
+  );
+}

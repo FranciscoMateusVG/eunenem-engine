@@ -36,6 +36,7 @@ import {
   conviteFieldErrors,
   type ConviteFieldErrors,
 } from "./ConviteBody";
+import { ComPermissao } from "./ComPermissao";
 
 // aperture-zlrd2 — Mobile-specific convites wizard.
 //
@@ -109,7 +110,7 @@ interface StepProps {
 
 // ─── shell ──────────────────────────────────────────────────────────
 
-export function MobileConviteBody({ slug }: PainelSectionBodyProps) {
+function MobileConviteBodyConteudo({ slug }: PainelSectionBodyProps) {
   // aperture-z6vks — keep the /c/:idCampanha context on the preview link.
   const idCampanha = useCampanhaRota();
   // aperture-zy4uo — EMPTY_STATE: never flash demo content as user content.
@@ -1525,3 +1526,12 @@ const MCV_CSS = `
   }
 }
 `;
+
+/** aperture-1z18g — gated by `convite:editar` for members of a shared campanha. */
+export function MobileConviteBody(props: PainelSectionBodyProps) {
+  return (
+    <ComPermissao acao="convite:editar" titulo="Convite">
+      <MobileConviteBodyConteudo {...props} />
+    </ComPermissao>
+  );
+}

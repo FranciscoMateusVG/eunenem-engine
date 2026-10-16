@@ -37,6 +37,11 @@ import { marcarTodosRecadosComoLidos } from '../../../../src/use-cases/pagamento
 import { obterRecadosAdminDeCampanha } from '../../../../src/use-cases/pagamentos/obter-recados-admin-de-campanha.js';
 import { ID_PLATAFORMA_EUNENEM } from '../auth/setup.js';
 import type { TrpcContext } from './context.js';
+import type { AcaoCampanha } from '../../../../src/domain/arrecadacao/value-objects/permissao-campanha.js';
+import {
+  exigirPermissaoCampanha,
+  PermissaoCampanhaNegadaError,
+} from './exigir-permissao-campanha.js';
 import {
   resolverUsuarioAutenticado,
   SessaoNaoAutenticadaError,
@@ -57,7 +62,9 @@ class PainelMensagensSessaoError extends Error {
 async function resolvePainelAdminBySlug(
   ctx: TrpcContext,
   slug: string,
-  idCampanha?: string,
+  idCampanha: string | undefined,
+  /** aperture-1z18g: action the SESSION admin must hold on the campanha. */
+  acao: AcaoCampanha,
 ): Promise<{ usuario: Usuario; campanha: Campanha }> {
   const { deps, headers } = ctx;
   // aperture-6wo1f: resolve the SESSION usuario via the shared central resolver
@@ -106,10 +113,14 @@ async function resolvePainelAdminBySlug(
   if (!campanha.idsAdministradores.includes(sessaoUsuario.idConta)) {
     throw new PainelMensagensSessaoError('Slug nao encontrado ou nao autorizado');
   }
+  await exigirPermissaoCampanha(ctx, campanha.id, sessaoUsuario.idConta, acao);
   return { usuario, campanha };
 }
 
 function toTRPCError(err: unknown): TRPCError {
+  if (err instanceof PermissaoCampanhaNegadaError) {
+    return new TRPCError({ code: 'FORBIDDEN', message: err.message, cause: err });
+  }
   if (err instanceof PainelMensagensSessaoError) {
     return new TRPCError({ code: 'UNAUTHORIZED', message: err.message, cause: err });
   }
@@ -154,7 +165,7 @@ export const painelMensagensRouter = t.router({
    */
   list: t.procedure.input(ListInputSchema).query(async ({ ctx, input }) => {
     try {
-      const { campanha } = await resolvePainelAdminBySlug(ctx, input.slug, input.idCampanha);
+      const { campanha } = await resolvePainelAdminBySlug(ctx, input.slug, input.idCampanha, 'mensagens:ver');
       return await obterRecadosAdminDeCampanha(
         {
           pagamentoRepository: ctx.deps.pagamentoRepository,
@@ -175,7 +186,12 @@ export const painelMensagensRouter = t.router({
    */
   marcarLida: t.procedure.input(MarcarLidaInputSchema).mutation(async ({ ctx, input }) => {
     try {
-      const { campanha } = await resolvePainelAdminBySlug(ctx, input.slug, input.idCampanha);
+      const { campanha } = await resolvePainelAdminBySlug(
+        ctx,
+        input.slug,
+        input.idCampanha,
+        'mensagens:gerenciar',
+      );
       const pagamento = await ctx.deps.pagamentoRepository.findById(
         input.idPagamento as IdPagamento,
       );
@@ -211,7 +227,12 @@ export const painelMensagensRouter = t.router({
     .input(MarcarTodasLidasInputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        const { campanha } = await resolvePainelAdminBySlug(ctx, input.slug, input.idCampanha);
+        const { campanha } = await resolvePainelAdminBySlug(
+        ctx,
+        input.slug,
+        input.idCampanha,
+        'mensagens:gerenciar',
+      );
         return await marcarTodosRecadosComoLidos(
           {
             pagamentoRepository: ctx.deps.pagamentoRepository,

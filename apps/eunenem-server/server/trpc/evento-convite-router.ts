@@ -29,6 +29,7 @@ import {
   PaletaConviteSchema,
   RemetenteConviteSchema,
   TipoEventoSchema,
+  type AcaoCampanha,
 } from '../../../../src/index.js';
 import { propsConviteCriado } from '../analytics/funil.js';
 import type { TrpcContext } from './context.js';
@@ -37,6 +38,10 @@ import {
   CampanhaInexistenteError,
   resolverCampanhaAdministrada,
 } from './resolve-campanha-administrada.js';
+import {
+  PermissaoCampanhaNegadaError,
+  resolverCampanhaComPermissao,
+} from './exigir-permissao-campanha.js';
 
 const t = initTRPC.context<TrpcContext>().create();
 
@@ -103,6 +108,8 @@ async function resolveCampanhaBySlug(
 async function resolveCallerCampanha(
   ctx: TrpcContext,
   idCampanha?: string,
+  /** aperture-1z18g: action required (writes); omitted = any admin (reads). */
+  acao?: AcaoCampanha,
 ): Promise<{
   campanha: Campanha;
   /** aperture-ai8vg — the owner's conta id (analytics distinct_id). */
@@ -110,7 +117,10 @@ async function resolveCallerCampanha(
 }> {
   // aperture-yeauv: resolve via the shared per-campanha resolver. PRESENT
   // idCampanha → that campanha, owner-gated; ABSENT → oldest (back-compat).
-  const { usuario, campanha } = await resolverCampanhaAdministrada(ctx, idCampanha);
+  const { usuario, campanha } =
+    acao === undefined
+      ? await resolverCampanhaAdministrada(ctx, idCampanha)
+      : await resolverCampanhaComPermissao(ctx, idCampanha, acao);
   return { campanha, idConta: usuario.idConta };
 }
 
@@ -180,6 +190,9 @@ const GetEventoConviteOutputSchema = z.object({
 });
 
 function toTRPCError(err: unknown): TRPCError {
+  if (err instanceof PermissaoCampanhaNegadaError) {
+    return new TRPCError({ code: 'FORBIDDEN', message: err.message, cause: err });
+  }
   // aperture-yeauv: shared per-campanha resolver sentinels (authed hops).
   if (err instanceof CampanhaAcessoNegadoError) {
     return new TRPCError({ code: 'UNAUTHORIZED', message: err.message, cause: err });
@@ -309,7 +322,11 @@ export const eventoConviteRouter = t.router({
     .output(GetEventoConviteOutputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        const { campanha, idConta } = await resolveCallerCampanha(ctx, input.idCampanha);
+        const { campanha, idConta } = await resolveCallerCampanha(
+          ctx,
+          input.idCampanha,
+          'convite:editar',
+        );
         const existingEvento = await ctx.deps.eventoRepository.findByIdCampanha(
           campanha.id as IdCampanhaEvento,
         );

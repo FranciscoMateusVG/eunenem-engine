@@ -1,7 +1,9 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 import {
   type Campanha,
+  campanhaComAdministrador,
   campanhaComRecebedorAtivo,
+  campanhaSemAdministrador,
   campanhaSemRecebedor,
 } from '../../domain/arrecadacao/entities/campanha.js';
 import type {
@@ -22,6 +24,7 @@ const DB_ATTRS = {
 
 export class CampanhaRepositoryMemory implements CampanhaRepository {
   private readonly campanhas = new Map<IdCampanha, Campanha>();
+  private readonly owners = new Map<IdCampanha, readonly IdConta[]>();
 
   constructor(private readonly recebedorRepository?: RecebedorRepository) {}
 
@@ -29,7 +32,12 @@ export class CampanhaRepositoryMemory implements CampanhaRepository {
     return tracer.startActiveSpan('db.arrecadacao_campanhas.save', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPSERT' });
       try {
-        this.campanhas.set(campanha.id, campanha);
+        const existing = this.campanhas.get(campanha.id);
+        if (!existing) this.owners.set(campanha.id, [...campanha.idsAdministradores]);
+        this.campanhas.set(
+          campanha.id,
+          existing ? { ...campanha, idsAdministradores: existing.idsAdministradores } : campanha,
+        );
         span.setStatus({ code: SpanStatusCode.OK });
       } catch (error: unknown) {
         span.recordException(error as Error);
@@ -39,6 +47,18 @@ export class CampanhaRepositoryMemory implements CampanhaRepository {
         span.end();
       }
     });
+  }
+
+  async adicionarAdministrador(idCampanha: IdCampanha, idConta: IdConta): Promise<void> {
+    const campanha = this.campanhas.get(idCampanha);
+    if (campanha && !campanha.idsAdministradores.includes(idConta)) {
+      this.campanhas.set(idCampanha, campanhaComAdministrador(campanha, idConta));
+    }
+  }
+
+  async removerAdministrador(idCampanha: IdCampanha, idConta: IdConta): Promise<void> {
+    const campanha = this.campanhas.get(idCampanha);
+    if (campanha) this.campanhas.set(idCampanha, campanhaSemAdministrador(campanha, idConta));
   }
 
   async findById(
@@ -124,7 +144,10 @@ export class CampanhaRepositoryMemory implements CampanhaRepository {
           // Deterministic ordering by criadaEm ASC (oldest first) — matches
           // the Postgres adapter contract so callers see a stable result.
           const matches = [...this.campanhas.values()]
-            .filter((c) => c.idsAdministradores.includes(idConta))
+            .filter(
+              (c) =>
+                c.idsAdministradores.includes(idConta) && this.owners.get(c.id)?.includes(idConta),
+            )
             .sort((a, b) => a.criadaEm.getTime() - b.criadaEm.getTime());
 
           const first = matches[0];
@@ -167,7 +190,10 @@ export class CampanhaRepositoryMemory implements CampanhaRepository {
         // silently take over the resolved single-result. Same comparator as
         // findCampanhasByAdministrador so single- and multi-result ports agree.
         const campanha = [...this.campanhas.values()]
-          .filter((c) => c.idsAdministradores.includes(idConta))
+          .filter(
+            (c) =>
+              c.idsAdministradores.includes(idConta) && this.owners.get(c.id)?.includes(idConta),
+          )
           .sort((a, b) => {
             const dt = a.criadaEm.getTime() - b.criadaEm.getTime();
             if (dt !== 0) return dt;

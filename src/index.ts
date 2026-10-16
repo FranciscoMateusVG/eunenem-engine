@@ -1,5 +1,11 @@
 // --- Adapter Interfaces & Implementations ---
 
+export type {
+  CampanhaMembrosRepository,
+  MembroCampanha,
+} from './adapters/arrecadacao/campanha-membros-repository.js';
+export { CampanhaMembrosRepositoryMemory } from './adapters/arrecadacao/campanha-membros-repository.memory.js';
+export { CampanhaMembrosRepositoryPostgres } from './adapters/arrecadacao/campanha-membros-repository.postgres.js';
 export type { CampanhaRepository } from './adapters/arrecadacao/campanha-repository.js';
 export { CampanhaRepositoryMemory } from './adapters/arrecadacao/campanha-repository.memory.js';
 export { CampanhaRepositoryPostgres } from './adapters/arrecadacao/campanha-repository.postgres.js';
@@ -12,6 +18,7 @@ export { PerfilCampanhaRepositoryPostgres } from './adapters/arrecadacao/perfil-
 export type { RecebedorRepository } from './adapters/arrecadacao/recebedor-repository.js';
 export { RecebedorRepositoryMemory } from './adapters/arrecadacao/recebedor-repository.memory.js';
 export { RecebedorRepositoryPostgres } from './adapters/arrecadacao/recebedor-repository.postgres.js';
+export type { ArrecadacaoRepositoryContext } from './adapters/arrecadacao/repository-context.js';
 export type { ResgatePendenteRepository } from './adapters/arrecadacao/resgate-pendente-repository.js';
 export { ResgatePendenteRepositoryMemory } from './adapters/arrecadacao/resgate-pendente-repository.memory.js';
 export { ResgatePendenteRepositoryPostgres } from './adapters/arrecadacao/resgate-pendente-repository.postgres.js';
@@ -349,6 +356,21 @@ export {
   OpcaoContribuicaoSchema,
   TipoOpcaoContribuicaoSchema,
 } from './domain/arrecadacao/value-objects/opcao-contribuicao.js';
+export type {
+  AcaoCampanha,
+  AcaoConcedivel,
+  AcessoMembroCampanha,
+  PapelMembroCampanha,
+} from './domain/arrecadacao/value-objects/permissao-campanha.js';
+export {
+  ACOES_CONCEDIVEIS,
+  AcaoCampanhaSchema,
+  AcaoConcedivelSchema,
+  acessoPermite,
+  acoesPermitidas,
+  PapelMembroCampanhaSchema,
+  PERMISSOES_PADRAO_MEMBRO,
+} from './domain/arrecadacao/value-objects/permissao-campanha.js';
 // Plan 0015 (aperture-7pqee): DadosContribuinte moved to the Pagamentos BC
 // since it now lives on IntencaoPagamento, not on the Contribuição
 // aggregate. The arrecadacao path keeps a deprecated re-export for one
@@ -751,6 +773,7 @@ export { ArrecadacaoLimiteOpcaoExcedidoError } from './errors/arrecadacao/limite
 export { ArrecadacaoNaoAutorizadoError } from './errors/arrecadacao/nao-autorizado.error.js';
 export { ArrecadacaoOpcaoContribuicaoNaoEncontradaError } from './errors/arrecadacao/opcao-contribuicao-nao-encontrada.error.js';
 export { ArrecadacaoOpcaoIdDuplicadoError } from './errors/arrecadacao/opcao-id-duplicado.error.js';
+export { CampanhaPermissaoNegadaError } from './errors/arrecadacao/permissao-negada.error.js';
 export { ArrecadacaoPlataformaNaoEncontradaError } from './errors/arrecadacao/plataforma-nao-encontrada.error.js';
 export { ArrecadacaoRecebedorNaoEncontradoError } from './errors/arrecadacao/recebedor-nao-encontrado.error.js';
 export { ArrecadacaoUltimoAdministradorError } from './errors/arrecadacao/ultimo-administrador.error.js';
@@ -846,6 +869,11 @@ export {
   alterarValorContribuicao,
 } from './use-cases/arrecadacao/alterar-valor-contribuicao.js';
 export type {
+  AssertCampaignPermissionDeps,
+  AssertCampaignPermissionInput,
+} from './use-cases/arrecadacao/assert-campaign-permission.js';
+export { assertCampaignPermission } from './use-cases/arrecadacao/assert-campaign-permission.js';
+export type {
   AtualizarContribuicaoDeps,
   AtualizarContribuicaoInput,
 } from './use-cases/arrecadacao/atualizar-contribuicao.js';
@@ -890,6 +918,14 @@ export {
   CriarRecebedorParaCampanhaInputSchema,
   criarRecebedorParaCampanha,
 } from './use-cases/arrecadacao/criar-recebedor-para-campanha.js';
+export type {
+  DefinirPermissoesMembroCampanhaDeps,
+  DefinirPermissoesMembroCampanhaInput,
+} from './use-cases/arrecadacao/definir-permissoes-membro-campanha.js';
+export {
+  DefinirPermissoesMembroCampanhaInputSchema,
+  definirPermissoesMembroCampanha,
+} from './use-cases/arrecadacao/definir-permissoes-membro-campanha.js';
 export type {
   EmitirUrlUploadFotoCampanhaDeps,
   EmitirUrlUploadFotoCampanhaInput,

@@ -1,6 +1,7 @@
 import { initTRPC, TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import {
+  type AcaoCampanha,
   ArrecadacaoCampanhaNaoEncontradaError,
   ArrecadacaoContribuicaoJaExisteError,
   ArrecadacaoContribuicaoIndisponivelError,
@@ -32,6 +33,10 @@ import {
   CampanhaInexistenteError,
   resolverCampanhaAdministrada,
 } from './resolve-campanha-administrada.js';
+import {
+  PermissaoCampanhaNegadaError,
+  resolverCampanhaComPermissao,
+} from './exigir-permissao-campanha.js';
 
 const t = initTRPC.context<TrpcContext>().create();
 
@@ -123,6 +128,8 @@ class CampanhaAusenteError extends Error {
 async function resolveCallerCampanha(
   ctx: TrpcContext,
   idCampanha?: string,
+  /** aperture-1z18g: action the caller must hold (writes); omitted = any admin (reads). */
+  acao?: AcaoCampanha,
 ): Promise<{
   idUsuario: string;
   idConta: string;
@@ -135,7 +142,10 @@ async function resolveCallerCampanha(
   // (CampanhaAcessoNegadoError / CampanhaInexistenteError) are mapped in
   // toTRPCError below. We keep this router's local CampanhaAusenteError for
   // the "no presente opção" case, which is contribuicao-specific.
-  const { usuario, campanha } = await resolverCampanhaAdministrada(ctx, idCampanha);
+  const { usuario, campanha } =
+    acao === undefined
+      ? await resolverCampanhaAdministrada(ctx, idCampanha)
+      : await resolverCampanhaComPermissao(ctx, idCampanha, acao);
 
   const opcaoPresentes = campanha.opcoes.find((o) => o.tipo === 'presente');
   if (!opcaoPresentes) {
@@ -166,6 +176,9 @@ function toTRPCError(err: unknown): TRPCError {
   }
   if (err instanceof CampanhaInexistenteError) {
     return new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err.message, cause: err });
+  }
+  if (err instanceof PermissaoCampanhaNegadaError) {
+    return new TRPCError({ code: 'FORBIDDEN', message: err.message, cause: err });
   }
   if (err instanceof SessaoAusenteError) {
     return new TRPCError({ code: 'UNAUTHORIZED', message: err.message, cause: err });
@@ -460,10 +473,7 @@ export const contribuicaoRouter = t.router({
     .input(CreateInputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        const { idConta, campanha, idOpcaoPresentes } = await resolveCallerCampanha(
-          ctx,
-          input.idCampanha,
-        );
+        const { idConta, campanha, idOpcaoPresentes } = await resolveCallerCampanha(ctx, input.idCampanha, 'presentes:gerenciar');
         const items = [
           {
             nome: input.nome,
@@ -516,10 +526,7 @@ export const contribuicaoRouter = t.router({
     .input(CreateBulkInputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        const { idConta, campanha, idOpcaoPresentes } = await resolveCallerCampanha(
-          ctx,
-          input.idCampanha,
-        );
+        const { idConta, campanha, idOpcaoPresentes } = await resolveCallerCampanha(ctx, input.idCampanha, 'presentes:gerenciar');
         const items = input.items.map((item) => ({
           nome: item.nome,
           valor: item.valor,
@@ -577,7 +584,7 @@ export const contribuicaoRouter = t.router({
     .mutation(async ({ ctx, input }) => {
       try {
         const { idCampanha, ...uploadInput } = input;
-        const { idUsuario } = await resolveCallerCampanha(ctx, idCampanha);
+        const { idUsuario } = await resolveCallerCampanha(ctx, idCampanha, 'presentes:gerenciar');
         return await emitirUrlUploadImagemItem(
           {
             objectStorage: ctx.deps.objectStorage,
@@ -595,7 +602,7 @@ export const contribuicaoRouter = t.router({
     .input(UpdateInputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        const { campanha } = await resolveCallerCampanha(ctx, input.idCampanha);
+        const { campanha } = await resolveCallerCampanha(ctx, input.idCampanha, 'presentes:gerenciar');
         const updated = await atualizarContribuicao(
           {
             contribuicaoRepository: ctx.deps.contribuicaoRepository,
@@ -653,7 +660,7 @@ export const contribuicaoRouter = t.router({
     .input(DeleteInputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        const { campanha } = await resolveCallerCampanha(ctx, input.idCampanha);
+        const { campanha } = await resolveCallerCampanha(ctx, input.idCampanha, 'presentes:gerenciar');
         const deletedIds: string[] = [];
         for (const id of input.ids) {
           await removerContribuicao(

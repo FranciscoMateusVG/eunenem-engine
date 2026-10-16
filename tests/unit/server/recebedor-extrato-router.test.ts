@@ -22,6 +22,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { ServerDeps } from '../../../apps/eunenem-server/server/auth/setup.js';
 import type { TrpcContext } from '../../../apps/eunenem-server/server/trpc/context.js';
 import { appRouter } from '../../../apps/eunenem-server/server/trpc/router.js';
+import { CampanhaMembrosRepositoryMemory } from '../../../src/adapters/arrecadacao/campanha-membros-repository.memory.js';
 import { CampanhaRepositoryMemory } from '../../../src/adapters/arrecadacao/campanha-repository.memory.js';
 import { ContribuicaoRepositoryMemory } from '../../../src/adapters/arrecadacao/contribuicao-repository.memory.js';
 import { RecebedorRepositoryMemory } from '../../../src/adapters/arrecadacao/recebedor-repository.memory.js';
@@ -223,6 +224,7 @@ async function buildRig(): Promise<TestRig> {
     usuarioRepository: usuarioRepository as never,
     plataformaRepository: {} as never,
     campanhaRepository,
+    campanhaMembrosRepository: new CampanhaMembrosRepositoryMemory(campanhaRepository),
     contribuicaoRepository,
     recebedorRepository,
     pagamentoRepository,

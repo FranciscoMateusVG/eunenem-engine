@@ -31,6 +31,7 @@ import {
   telefoneBrValido,
 } from "../../../../../../src/domain/arrecadacao/value-objects/dados-recebedor.js";
 import { sendEvent } from "@/lib/analytics";
+import { ComPermissao } from "./ComPermissao";
 
 // aperture-6xjcw — Dados Bancários body for /painel/:slug/bancarios.
 //
@@ -358,7 +359,7 @@ export function RecipientMethodChoice({
 
 // ── component ───────────────────────────────────────────────────────────────
 
-export function BancariosBody(_props: PainelSectionBodyProps) {
+function BancariosBodyConteudo(_props: PainelSectionBodyProps) {
   const utils = trpc.useUtils();
   // aperture — recebedor-per-campanha unification: this form edits THIS
   // campanha's recebedor (same data the "solicitar transferência" onboarding
@@ -419,6 +420,7 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
   const salvar = trpc.recebedor.atualizar.useMutation({
     onSuccess: () => {
       void utils.recebedor.get.invalidate();
+      void utils.recebedor.status.invalidate();
       // aperture-kj9el #4b — a full save clears the pending marker server-side;
       // refresh the banner query so the "resgate pendente" notice disappears.
       void utils.recebedor.getResgatePendente.invalidate();
@@ -925,3 +927,12 @@ const BNC_CSS = `
   .bnc-card{padding:26px 30px;border-radius:28px}
 }
 `;
+
+/** aperture-1z18g — gated by `recebedor:gerenciar` for members of a shared campanha. */
+export function BancariosBody(props: PainelSectionBodyProps) {
+  return (
+    <ComPermissao acao="recebedor:gerenciar" titulo="Dados Bancários">
+      <BancariosBodyConteudo {...props} />
+    </ComPermissao>
+  );
+}
