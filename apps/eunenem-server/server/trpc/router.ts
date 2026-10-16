@@ -1,3 +1,4 @@
+import { compartilhamentoRouter } from './compartilhamento-router.js';
 /**
  * tRPC router for eunenem-server (aperture-kungg + aperture-ht7sq + aperture-d6atj).
  *
@@ -48,6 +49,7 @@ export const appRouter = t.router({
   auth: authRouter,
   campanhaMembros: campanhaMembrosRouter,
   campanhas: campanhasRouter,
+  compartilhamento: compartilhamentoRouter,
   catalogo: catalogoRouter,
   contribuicao: contribuicaoRouter,
   eventoConvite: eventoConviteRouter,

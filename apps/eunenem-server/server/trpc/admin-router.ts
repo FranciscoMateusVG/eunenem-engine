@@ -1,3 +1,4 @@
+import { CampanhaCompartilhamentoPostgres, EmailJaMembroCampanhaError } from '../../../../src/adapters/arrecadacao/campanha-compartilhamento.postgres.js';
 /**
  * Admin tRPC router (rsidz.2 + tinly + rsidz.3).
  *
@@ -771,6 +772,26 @@ function toCampanhaAdminDTO(c: Campanha): CampanhaAdminDTO {
 }
 
 const campanhasRouter = t.router({
+  adicionarEmail: adminProcedure
+    .input(z.object({ idCampanha: z.string().uuid(), email: z.string().trim().email().max(254), confirmarApenasAcesso: z.literal(true) }))
+    .mutation(async ({ ctx, input }) => {
+      // The operator grants access, NEVER changes owner or bank-account data.
+      await enforceRateLimit(ctx.deps.db, { key: `admin:compartilhar:${ctx.adminUsuario.id}`, max: 20, windowMs: 3600_000 });
+      const sharing = new CampanhaCompartilhamentoPostgres(ctx.deps.db);
+      await ctx.deps.db.transaction().execute(async (trx) => {
+        const campaign = await trx.selectFrom('campanhas').select('id')
+          .where('id', '=', input.idCampanha).where('id_plataforma', '=', ID_PLATAFORMA_EUNENEM)
+          .forUpdate().executeTakeFirst();
+        if (!campaign) throw new TRPCError({ code: 'NOT_FOUND' });
+        await sharing.convidar({ campanhaId: input.idCampanha, plataformaId: ID_PLATAFORMA_EUNENEM,
+          email: input.email, atorId: ctx.adminUsuario.id, origem: 'admin' }, trx).catch((error: unknown) => {
+            if (error instanceof EmailJaMembroCampanhaError) throw new TRPCError({ code: 'BAD_REQUEST', message: error.message });
+            throw error;
+          });
+      });
+      await ctx.deps.enviarConviteCampanha(input.email.trim().toLowerCase());
+      return { ok: true };
+    }),
   /**
    * Campanhas administered by the usuario identified by `idConta`.
    *

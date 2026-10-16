@@ -21,6 +21,7 @@ export const EUNENEM_SUPPORT_WHATSAPP_NUMBER_DISPLAY = "(11) 96108-0489";
 export const EUNENEM_SUPPORT_WHATSAPP_URL = "https://wa.me/5511961080489";
 
 export const PAINEL_SECTIONS = [
+  "compartilhar",
   "presentes", // Presentes recebidos (statement + payout) — aperture-xjwc
   "lista", // Minha lista de presentes — aperture-4je0p
   "convite", // Convites (invite builder/preview) — aperture-q8rr
@@ -109,6 +110,8 @@ export function menuItemHref(
   campanhaSlug?: string | null,
 ): string | undefined {
   switch (id) {
+    case "compartilhar":
+      return painelHref(slug, "compartilhar", idCampanha);
     case "presentes":
       return painelHref(slug, "presentes", idCampanha);
     case "lista":
@@ -149,6 +152,7 @@ export const PAINEL_SECTION_META: Record<
   PainelSection,
   { eyebrow: string; title: string; note: string }
 > = {
+  compartilhar: { eyebrow: "juntos", title: "compartilhar", note: "Gerencie o acesso à campanha." },
   presentes: {
     eyebrow: "quase lá ♡",
     title: "presentes recebidos",

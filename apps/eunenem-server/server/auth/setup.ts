@@ -1,3 +1,5 @@
+import { renderCampaignInviteEmail } from './campaign-invite-email.js';
+import { CampanhaCompartilhamentoPostgres } from '../../../../src/adapters/arrecadacao/campanha-compartilhamento.postgres.js';
 import { z } from 'zod';
 import {
   AuthServiceBetterAuth,
@@ -120,6 +122,9 @@ export type RevogarConvitesPendentesDoMembro = (
 
 export interface ServerDeps {
   readonly db: Database;
+  /** Optional only for isolated in-memory router fixtures. Production composition requires it. */
+  readonly consumirConvitesVerificados?: (usuarioId: string, plataformaId: string) => Promise<void>;
+  readonly enviarConviteCampanha: (email: string) => Promise<void>;
   readonly auth: Auth;
   readonly authService: AuthService;
   readonly usuarioRepository: UsuarioRepository;
@@ -903,7 +908,10 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): ServerEnv {
  *   (PagamentoProvider + CheckoutSessionProvider) so dev/test flows
  *   exercise the same code paths the prod adapter takes.
  */
-export function buildServerDeps(env: ServerEnv): ServerDeps {
+export function buildServerDeps(env: ServerEnv): ServerDeps & {
+  consumirConvitesVerificados: (usuarioId: string, plataformaId: string) => Promise<void>;
+  revogarConvitesPendentesDoMembro: RevogarConvitesPendentesDoMembro;
+} {
   const observability: Observability = {
     logger: new ConsoleLogger(),
     tracer: noopTracer(),
@@ -1213,6 +1221,11 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
   }
 
   return {
+    revogarConvitesPendentesDoMembro: (input, { trx }) => new CampanhaCompartilhamentoPostgres(db).revogarPendentesDoMembro(input.idCampanha, input.idConta, input.idUsuarioAtor, trx),
+    consumirConvitesVerificados: (usuarioId, plataformaId) => new CampanhaCompartilhamentoPostgres(db).consumirVerificados(usuarioId, plataformaId),
+    enviarConviteCampanha: async (email: string) => {
+      await emailTransport.enviar(renderCampaignInviteEmail(email, env.BETTER_AUTH_URL));
+    },
     db,
     auth,
     authService,

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { type Selectable, sql, type Transaction } from 'kysely';
 import type { Database } from '../database.js';
 import type { CampanhaConvites, DB } from '../db-types.generated.js';
+import { CampanhaMembrosRepositoryPostgres } from './campanha-membros-repository.postgres.js';
 
 export class EmailJaMembroCampanhaError extends Error {
   constructor() {
@@ -228,10 +229,11 @@ export class CampanhaCompartilhamentoPostgres {
           .values({ campanha_id: candidate.campanha_id, id_usuario: verified.id_conta })
           .onConflict((oc) => oc.columns(['campanha_id', 'id_usuario']).doNothing())
           .execute();
-        // Permissions coder owns this schema. Never overwrite existing access.
-        await sql`INSERT INTO campanha_membros_permissoes (campanha_id, id_conta, papel, permissoes)
-          VALUES (${candidate.campanha_id}, ${verified.id_conta}, 'membro', '{}')
-          ON CONFLICT DO NOTHING`.execute(trx);
+        await new CampanhaMembrosRepositoryPostgres(this.db).adicionarMembro(
+          candidate.campanha_id,
+          verified.id_conta,
+          { trx },
+        );
         await this.auditar(trx, candidate.campanha_id, usuarioId, 'consumir', consumed.id);
       });
     }

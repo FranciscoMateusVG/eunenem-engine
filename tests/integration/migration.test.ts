@@ -484,13 +484,14 @@ describe('Migration round-trip', () => {
     //    this sequence must start at the LATEST migration and walk earlier.
     //    Adding a new migration on top REQUIRES prepending its down-step here.
 
-    // 20261016_057_campanha_membros_permissoes (aperture-1z18g) → actual TIP.
-    expect(await tableExists(db, 'campanha_membros_permissoes')).toBe(true);
+    // Sharing and permissions are the newest migrations.
+    const downSharing = await migrator.migrateDown();
+    expect(downSharing.error).toBeUndefined();
+    expect(await listTableNames(db)).not.toContain('campanha_convites');
     const downMembrosPermissoes = await migrator.migrateDown();
     expect(downMembrosPermissoes.error).toBeUndefined();
     expect(await tableExists(db, 'campanha_membros_permissoes')).toBe(false);
 
-    // 20260925_055_add_desativado_em_to_usuarios.
     const downDesativadoEm = await migrator.migrateDown();
     expect(downDesativadoEm.error).toBeUndefined();
     expect(await getColumn(db, 'usuarios', 'desativado_em')).toBeUndefined();

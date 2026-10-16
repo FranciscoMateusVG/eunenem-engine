@@ -317,6 +317,7 @@ export async function resolverUsuarioAutenticado(
       });
       throw new SessaoNaoAutenticadaError('conta_desativada');
     }
+    await deps.consumirConvitesVerificados?.(existente.id, existente.idPlataforma);
     return { usuario: existente, expiraEm: sessao.expiraEm };
   }
 
@@ -344,6 +345,7 @@ export async function resolverUsuarioAutenticado(
   if (usuario.idPlataforma !== ID_PLATAFORMA_EUNENEM) {
     rejeitarTenantInvalido(deps, usuario.id, usuario.idPlataforma);
   }
+  await deps.consumirConvitesVerificados?.(usuario.id, usuario.idPlataforma);
   return { usuario, expiraEm: sessao.expiraEm };
 }
 
