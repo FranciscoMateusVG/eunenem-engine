@@ -34,9 +34,10 @@ async function comSpan<T>(nome: string, operacao: string, fn: () => Promise<T>):
 
 /**
  * Memory twin of the Postgres adapter. Membership (`campanha_administradores`)
- * is read from the CampanhaRepository; the Postgres trigger that makes a
- * campanha's FIRST admin its owner is emulated lazily: a campanha with no
- * papel rows yet gets `idsAdministradores[0]` as owner on first read.
+ * is read from the CampanhaRepository. The Postgres `save` writes a NEW
+ * campanha's creator as owner; the memory CampanhaRepository can't reach this
+ * store, so that is emulated lazily: a campanha with no papel rows yet gets
+ * its creator (`idsAdministradores[0]`) as owner on first access.
  */
 export class CampanhaMembrosRepositoryMemory implements CampanhaMembrosRepository {
   private readonly papeis = new Map<IdCampanha, Map<IdConta, AcessoMembroCampanha>>();

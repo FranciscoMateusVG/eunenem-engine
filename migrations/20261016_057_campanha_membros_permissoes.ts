@@ -23,12 +23,10 @@ import { type Kysely, sql } from 'kysely';
  * único administrador (o criador) e não havia rota de produto para adicionar
  * administradores, então na prática owner = criador.
  *
- * TRIGGER — campanhas novas: o PRIMEIRO administrador inserido numa campanha
- * que ainda não tem nenhuma linha de papel vira owner. Vale para qualquer
- * caminho de criação (signup saga, campanhas.criar) sem depender da ordem de
- * merge do código. Administradores adicionados depois NÃO ganham linha
- * automática: o fluxo de convite insere 'membro' explicitamente; sem linha =
- * sem direitos (fail-closed).
+ * Campanhas NOVAS: o `save` do agregado grava o(s) criador(es) como owner ao
+ * inserir uma campanha nova; o fluxo de convite grava 'membro' explicitamente.
+ * Administrador sem linha aqui = sem direitos (fail-closed). Sem trigger de
+ * propósito: um convite aceito numa campanha sem papéis nunca pode virar owner.
  */
 export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema
@@ -57,33 +55,8 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     FROM campanha_administradores ca
     ON CONFLICT DO NOTHING
   `.execute(db);
-
-  await sql`
-    CREATE FUNCTION campanha_membros_permissoes_owner_inicial() RETURNS trigger
-    LANGUAGE plpgsql AS $$
-    BEGIN
-      INSERT INTO campanha_membros_permissoes (campanha_id, id_conta, papel)
-      SELECT NEW.campanha_id, NEW.id_usuario, 'owner'
-      WHERE NOT EXISTS (
-        SELECT 1 FROM campanha_membros_permissoes p WHERE p.campanha_id = NEW.campanha_id
-      )
-      ON CONFLICT DO NOTHING;
-      RETURN NEW;
-    END;
-    $$
-  `.execute(db);
-
-  await sql`
-    CREATE TRIGGER campanha_administradores_owner_inicial
-    AFTER INSERT ON campanha_administradores
-    FOR EACH ROW EXECUTE FUNCTION campanha_membros_permissoes_owner_inicial()
-  `.execute(db);
 }
 
 export async function down(db: Kysely<unknown>): Promise<void> {
-  await sql`DROP TRIGGER IF EXISTS campanha_administradores_owner_inicial ON campanha_administradores`.execute(
-    db,
-  );
-  await sql`DROP FUNCTION IF EXISTS campanha_membros_permissoes_owner_inicial()`.execute(db);
   await db.schema.dropTable('campanha_membros_permissoes').execute();
 }
