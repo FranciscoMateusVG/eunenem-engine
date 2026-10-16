@@ -14,6 +14,7 @@ import type {
   OpcaoContribuicao,
   TipoOpcaoContribuicao,
 } from '../../domain/arrecadacao/value-objects/opcao-contribuicao.js';
+import { PERMISSOES_PADRAO_MEMBRO } from '../../domain/arrecadacao/value-objects/permissao-campanha.js';
 import type { Database } from '../database.js';
 import type { CampanhaRepository } from './campanha-repository.js';
 import type { RecebedorRepository } from './recebedor-repository.js';
@@ -140,8 +141,16 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
       .values({ campanha_id: idCampanha, id_usuario: idConta })
       .onConflict((oc) => oc.columns(['campanha_id', 'id_usuario']).doNothing())
       .execute();
-    await sql`INSERT INTO campanha_membros_permissoes (campanha_id, id_conta, papel, permissoes)
-      VALUES (${idCampanha}, ${idConta}, 'membro', '{}') ON CONFLICT DO NOTHING`.execute(trx);
+    await trx
+      .insertInto('campanha_membros_permissoes')
+      .values({
+        campanha_id: idCampanha,
+        id_conta: idConta,
+        papel: 'membro',
+        permissoes: [...PERMISSOES_PADRAO_MEMBRO],
+      })
+      .onConflict((oc) => oc.columns(['campanha_id', 'id_conta']).doNothing())
+      .execute();
   }
 
   async removerAdministrador(

@@ -589,7 +589,7 @@ describe('per-action permission guards (Postgres, real router)', () => {
         headers: owner.headers,
         resHeaders: new Headers(),
       });
-      await conceder(['presentes:gerenciar']);
+      await conceder(['presentes:gerenciar', 'saque:solicitar']);
       await ownerComHook.campanhaMembros.remover({ idCampanha, idConta: membro.idConta });
       expect(chamadas).toEqual([
         {
@@ -608,11 +608,11 @@ describe('per-action permission guards (Postgres, real router)', () => {
           membro.caller.contribuicao.create({ idCampanha, nome: 'x', valor: 15000, quantidade: 1 }),
         ),
       ).toBe('UNAUTHORIZED');
-      // Re-adding starts from zero grants.
+      // Re-adding starts from the invite defaults — the old saque grant is gone.
       await deps.campanhaRepository.adicionarAdministrador(idCampanha, membro.idConta);
       expect(
         (await deps.campanhaMembrosRepository.obterAcesso(idCampanha, membro.idConta))?.permissoes,
-      ).toEqual([]);
+      ).toEqual([...PERMISSOES_PADRAO_MEMBRO]);
     });
 
     it('remover: membro cannot remove anyone (incl. itself); owner cannot be removed; outsider UNAUTHORIZED', async () => {
