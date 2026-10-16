@@ -38,6 +38,8 @@ export const E2E_SPEC_SAFETY = [
   { file: 'admin-authz-denial.spec.ts', safety: 'non-payment' },
   { file: 'admin-grouped-legacy.spec.ts', safety: 'non-payment' },
   { file: 'admin-pagamento-multi-item.spec.ts', safety: 'non-payment' },
+  // Sharing is local-only (the spec self-skips remote targets); never moves money.
+  { file: 'campanha-compartilhar.spec.ts', safety: 'non-payment' },
   { file: 'cross-user-denial.spec.ts', safety: 'non-payment' },
   { file: 'd3tlf-convidados-save-deadend.spec.ts', safety: 'non-payment' },
   { file: 'fblrt-fix-wave.spec.ts', safety: 'non-payment' },

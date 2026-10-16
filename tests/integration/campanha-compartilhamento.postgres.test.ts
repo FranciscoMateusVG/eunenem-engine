@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { CampanhaCompartilhamentoPostgres } from '../../src/adapters/arrecadacao/campanha-compartilhamento.postgres.js';
 import { criarAuth } from '../../src/adapters/usuario/criar-auth.js';
+import { PERMISSOES_PADRAO_MEMBRO } from '../../src/domain/arrecadacao/value-objects/permissao-campanha.js';
 import { createTestDatabase, type TestDatabase } from '../helpers/test-db.js';
 
 let testDb: TestDatabase;
@@ -230,5 +231,39 @@ it('new invite to a campaign with no members still grants only membro, never own
     .where('id_conta', '=', user.conta)
     .executeTakeFirstOrThrow();
   expect(access.papel).toBe('membro');
-  expect(access.permissoes).toEqual([]);
+  expect(access.permissoes).toEqual(PERMISSOES_PADRAO_MEMBRO);
+});
+
+it('revoke is scoped to the campaign even when given another campaign invite id', async () => {
+  const first = await seedCampaign();
+  const second = await seedCampaign();
+  const invitation = await invite(first, `scope-${randomUUID()}@example.com`);
+  await sharing.revogar(second, plataforma, invitation.id, randomUUID());
+  const unchanged = await testDb.db
+    .selectFrom('campanha_convites')
+    .select('revogado_em')
+    .where('id', '=', invitation.id)
+    .executeTakeFirstOrThrow();
+  expect(unchanged.revogado_em).toBeNull();
+});
+
+it('revocation and its audit roll back together on a real database write failure', async () => {
+  const campanha = await seedCampaign();
+  const email = `atomic-${randomUUID()}@example.com`;
+  const user = await seedUser(email, true);
+  const invitation = await invite(campanha, email);
+  // Invalid actor UUID causes Postgres to reject audit AFTER the pending rows
+  // were updated. The transaction must roll the earlier update back as well.
+  await expect(
+    testDb.db.transaction().execute(async (trx) => {
+      await sharing.bloquear(trx, campanha, plataforma);
+      await sharing.revogarPendentesDoMembro(campanha, user.conta, 'invalid-uuid', trx);
+    }),
+  ).rejects.toThrow();
+  const unchanged = await testDb.db
+    .selectFrom('campanha_convites')
+    .select('revogado_em')
+    .where('id', '=', invitation.id)
+    .executeTakeFirstOrThrow();
+  expect(unchanged.revogado_em).toBeNull();
 });

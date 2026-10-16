@@ -26,3 +26,44 @@ test('owner shares by email and revokes through the real campaign screen', async
   await invitation.getByRole('button', { name: 'Revogar convite' }).click();
   await expect(invitation).toContainText('Revogado');
 });
+
+test('verified invitee sees the shared campaign and loses it immediately after owner removal', async ({
+  authenticatedPage: ownerPage,
+  seededData,
+  browser,
+}, testInfo) => {
+  const { createDatabase } = await import('../src/adapters/database.js');
+  const { mintMagicLinkSession, browserCookieFor } = await import('./magic-link-auth.js');
+  const databaseUrl = process.env.E2E_DATABASE_URL;
+  if (!databaseUrl) throw new Error('This test requires an explicit local E2E_DATABASE_URL');
+  const db = createDatabase(databaseUrl);
+  const baseURL = process.env.E2E_BASE_URL ?? 'http://localhost:3002';
+  const recipientContext = await browser.newContext({ baseURL });
+  try {
+    await ownerPage.goto(`/painel/${seededData.slug}/c/${seededData.idCampanha}/compartilhar`);
+    const email = `shared-member-${randomUUID()}@example.com`;
+    await ownerPage.getByLabel('E-mail da pessoa').fill(email);
+    await ownerPage.getByRole('button', { name: 'Convidar', exact: true }).click();
+    await expect(ownerPage.getByRole('status')).toContainText('Convite enviado');
+    const session = await mintMagicLinkSession(db, { email, name: 'Shared Member', baseURL });
+    await recipientContext.addCookies([browserCookieFor(session, baseURL)]);
+    const recipient = await recipientContext.newPage();
+    await recipient.goto('/campanhas');
+    await expect(recipient.locator(`a[href$="/c/${seededData.idCampanha}"]`)).toBeVisible();
+    await ownerPage.reload();
+    const member = ownerPage
+      .getByRole('listitem')
+      .filter({ hasText: email })
+      .filter({ has: ownerPage.getByRole('button', { name: 'Remover acesso' }) });
+    await expect(member).toBeVisible();
+    await ownerPage.screenshot({ path: testInfo.outputPath('compartilhar.png'), fullPage: true });
+    ownerPage.once('dialog', (dialog) => dialog.accept());
+    await member.getByRole('button', { name: 'Remover acesso' }).click();
+    await expect(member).toHaveCount(0);
+    await recipient.reload();
+    await expect(recipient.locator(`a[href$="/c/${seededData.idCampanha}"]`)).toHaveCount(0);
+  } finally {
+    await recipientContext.close();
+    await db.destroy();
+  }
+});

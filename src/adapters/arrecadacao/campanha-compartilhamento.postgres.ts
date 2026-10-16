@@ -174,6 +174,46 @@ export class CampanhaCompartilhamentoPostgres {
       await this.auditar(trx, campanhaId, atorId, 'remover:revogar-convite', row.id);
   }
 
+  /** Read-only onboarding projection; a shared campaign never completes the
+   * invitee's own onboarding or replaces their owner-only default campaign. */
+  async contextoOnboarding(
+    usuarioId: string,
+    idConta: string,
+    plataformaId: string,
+  ): Promise<{ idsProprias: string[]; idCompartilhada: string | null }> {
+    const memberships = await this.db
+      .selectFrom('campanha_administradores as a')
+      .innerJoin('campanhas as c', 'c.id', 'a.campanha_id')
+      .innerJoin('campanha_membros_permissoes as p', (join) =>
+        join.onRef('p.campanha_id', '=', 'a.campanha_id').onRef('p.id_conta', '=', 'a.id_usuario'),
+      )
+      .select(['c.id', 'p.papel'])
+      .where('a.id_usuario', '=', idConta)
+      .where('c.id_plataforma', '=', plataformaId)
+      .orderBy('c.criada_em', 'asc')
+      .orderBy('c.id', 'asc')
+      .execute();
+    const idsProprias = memberships.filter((m) => m.papel === 'owner').map((m) => m.id);
+    const verified = await this.db
+      .selectFrom('users')
+      .select('id')
+      .where('id', '=', usuarioId)
+      .where('id_plataforma', '=', plataformaId)
+      .where('email_verified', '=', true)
+      .executeTakeFirst();
+    if (!verified) return { idsProprias, idCompartilhada: null };
+    const accepted = await this.db
+      .selectFrom('campanha_convites')
+      .select('campanha_id')
+      .where('consumido_por', '=', usuarioId)
+      .where('consumido_em', 'is not', null)
+      .execute();
+    const shared = memberships.find(
+      (m) => m.papel === 'membro' && accepted.some((invite) => invite.campanha_id === m.id),
+    );
+    return { idsProprias, idCompartilhada: shared?.id ?? null };
+  }
+
   async consumirVerificados(usuarioId: string, plataformaId: string): Promise<void> {
     // Called only AFTER session resolution/domain healing. Re-read authoritative
     // email verification and account mapping; never trust request/session email.

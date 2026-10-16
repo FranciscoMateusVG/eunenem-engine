@@ -327,3 +327,52 @@ it('Google verified callback consumes the invite only after invalidating the pre
     }),
   ).rejects.toThrow();
 });
+
+it('owner cannot re-invite an existing member and gets an actionable BAD_REQUEST', async () => {
+  const owner = await login();
+  const campaign = makeCampanha({
+    idPlataforma: ID_PLATAFORMA_EUNENEM,
+    idsAdministradores: [owner.user.id_conta],
+  });
+  await deps.campanhaRepository.save(campaign);
+  await expect(
+    owner.caller.compartilhamento.convidar({ idCampanha: campaign.id, email: owner.email }),
+  ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+});
+
+it('accepted verified sharing bypasses own onboarding without latching it; non-invitees still onboard', async () => {
+  const owner = await login();
+  const campaign = makeCampanha({
+    idPlataforma: ID_PLATAFORMA_EUNENEM,
+    idsAdministradores: [owner.user.id_conta],
+  });
+  await deps.campanhaRepository.save(campaign);
+  await deps.db
+    .insertInto('perfil_campanhas')
+    .values({ id: randomUUID(), id_campanha: campaign.id, nome_bebe: 'Bebê do proprietário' })
+    .execute();
+  const email = `onboarding-invite-${randomUUID()}@example.com`;
+  await owner.caller.compartilhamento.convidar({ idCampanha: campaign.id, email });
+  const member = await login(email);
+  const me = await member.caller.auth.me();
+  expect(me?.needsOnboarding).toBe(false);
+  expect(me?.onboardingProprioPendente).toBe(true);
+  expect(me?.idCampanhaCompartilhada).toBe(campaign.id);
+  expect(me?.idCampanha).not.toBe(campaign.id);
+  expect(
+    (
+      await deps.db
+        .selectFrom('usuarios')
+        .select('onboarding_concluido_em')
+        .where('id', '=', member.user.id)
+        .executeTakeFirstOrThrow()
+    ).onboarding_concluido_em,
+  ).toBeNull();
+  const fresh = await login();
+  expect((await fresh.caller.auth.me())?.needsOnboarding).toBe(true);
+  await owner.caller.campanhaMembros.remover({
+    idCampanha: campaign.id,
+    idConta: member.user.id_conta,
+  });
+  expect((await member.caller.auth.me())?.needsOnboarding).toBe(true);
+});

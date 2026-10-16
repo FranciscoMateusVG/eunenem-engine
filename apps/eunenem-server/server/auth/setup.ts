@@ -123,6 +123,7 @@ export type RevogarConvitesPendentesDoMembro = (
 export interface ServerDeps {
   readonly db: Database;
   /** Optional only for isolated in-memory router fixtures. Production composition requires it. */
+  readonly contextoCompartilhamentoOnboarding?: (usuarioId: string, idConta: string, plataformaId: string) => Promise<{ idsProprias: string[]; idCompartilhada: string | null }>;
   readonly consumirConvitesVerificados?: (usuarioId: string, plataformaId: string) => Promise<void>;
   readonly enviarConviteCampanha: (email: string) => Promise<void>;
   readonly auth: Auth;
@@ -911,6 +912,7 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): ServerEnv {
 export function buildServerDeps(env: ServerEnv): ServerDeps & {
   consumirConvitesVerificados: (usuarioId: string, plataformaId: string) => Promise<void>;
   revogarConvitesPendentesDoMembro: RevogarConvitesPendentesDoMembro;
+  contextoCompartilhamentoOnboarding: NonNullable<ServerDeps['contextoCompartilhamentoOnboarding']>;
 } {
   const observability: Observability = {
     logger: new ConsoleLogger(),
@@ -1221,6 +1223,7 @@ export function buildServerDeps(env: ServerEnv): ServerDeps & {
   }
 
   return {
+    contextoCompartilhamentoOnboarding: (usuarioId, idConta, plataformaId) => new CampanhaCompartilhamentoPostgres(db).contextoOnboarding(usuarioId, idConta, plataformaId),
     revogarConvitesPendentesDoMembro: (input, { trx }) => new CampanhaCompartilhamentoPostgres(db).revogarPendentesDoMembro(input.idCampanha, input.idConta, input.idUsuarioAtor, trx),
     consumirConvitesVerificados: (usuarioId, plataformaId) => new CampanhaCompartilhamentoPostgres(db).consumirVerificados(usuarioId, plataformaId),
     enviarConviteCampanha: async (email: string) => {
