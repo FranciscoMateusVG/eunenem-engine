@@ -513,3 +513,58 @@ it('shared campaign cards keep private routing separate from the canonical publi
     publicOwnerSlug: owner.user.slug,
   });
 });
+
+it('a delegated link editor validates and writes in the canonical owner namespace, not their own', async () => {
+  const { owner, member, campaign } = await sharedOnlyFixture();
+  await owner.caller.campanhaMembros.definirPermissoes({
+    idCampanha: campaign.id,
+    idConta: member.user.id_conta,
+    permissoes: ['link:editar'],
+  });
+  const sibling = makeCampanha({
+    idPlataforma: ID_PLATAFORMA_EUNENEM,
+    idsAdministradores: [owner.user.id_conta],
+  });
+  await deps.campanhaRepository.save(sibling);
+  await deps.db
+    .updateTable('campanhas')
+    .set({ slug: 'owner-reserved' })
+    .where('id', '=', sibling.id)
+    .execute();
+  expect(
+    await member.caller.campanhas.validarSlug({ idCampanha: campaign.id, slug: 'owner-reserved' }),
+  ).toEqual({ disponivel: false, motivo: 'em_uso' });
+  await expect(
+    member.caller.campanhas.definirSlug({ idCampanha: campaign.id, slug: 'owner-reserved' }),
+  ).rejects.toMatchObject({ code: 'BAD_REQUEST', message: 'slug_em_uso' });
+  const memberOwn = makeCampanha({
+    idPlataforma: ID_PLATAFORMA_EUNENEM,
+    idsAdministradores: [member.user.id_conta],
+  });
+  await deps.campanhaRepository.save(memberOwn);
+  await deps.db
+    .updateTable('campanhas')
+    .set({ slug: 'member-reserved' })
+    .where('id', '=', memberOwn.id)
+    .execute();
+  // Even if the canonical owner is invited to that other list, it is not their namespace.
+  await deps.campanhaRepository.adicionarAdministrador(memberOwn.id, owner.user.id_conta);
+  expect(
+    await member.caller.campanhas.validarSlug({ idCampanha: campaign.id, slug: 'member-reserved' }),
+  ).toEqual({ disponivel: true, motivo: null });
+  expect(
+    await member.caller.campanhas.definirSlug({ idCampanha: campaign.id, slug: 'member-reserved' }),
+  ).toEqual({ slug: 'member-reserved' });
+  expect(
+    await member.caller.pagina.resolverCampanhaSlug({
+      slug: owner.user.slug,
+      campanhaSlug: 'member-reserved',
+    }),
+  ).toEqual({ idCampanha: campaign.id });
+  expect(
+    await member.caller.pagina.resolverCampanhaSlug({
+      slug: member.user.slug,
+      campanhaSlug: 'member-reserved',
+    }),
+  ).toEqual({ idCampanha: memberOwn.id });
+});

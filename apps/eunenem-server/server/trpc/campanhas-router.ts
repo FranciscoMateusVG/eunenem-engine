@@ -1,4 +1,4 @@
-import { campaignPublicOwnerSlug } from './campaign-public-address.js';
+import { campaignPublicOwner, campaignPublicOwnerSlug, isCampaignPublicOwner } from './campaign-public-address.js';
 /**
  * Campanhas tRPC router (aperture-mebax — multicampanha migration bridge POC,
  * epic aperture-7hm2g, design spec §6).
@@ -181,14 +181,13 @@ type CampanhaSlugCheck =
 
 /**
  * Shared validation for definirSlug/validarSlug: format → reserved →
- * per-conta uniqueness (the conta's OTHER campanhas; a DIFFERENT conta
- * holding the same slug is fine — uniqueness is per-conta only, matching
- * the non-unique DB index).
+ * canonical-owner namespace uniqueness. Invited lists and the acting member's
+ * own lists are NOT in that namespace; check only campaigns owned by the
+ * same public owner used for share links.
  */
 async function checkCampanhaSlug(
   ctx: TrpcContext,
-  idConta: string,
-  idCampanha: string,
+  idCampanha: IdCampanha,
   raw: string,
 ): Promise<CampanhaSlugCheck> {
   const slug = normalizeCampanhaSlug(raw);
@@ -198,8 +197,15 @@ async function checkCampanhaSlug(
   if (RESERVED_CAMPANHA_SLUGS.has(slug)) {
     return { ok: false, motivo: 'reservado' };
   }
-  const campanhas = await ctx.deps.campanhaRepository.findCampanhasByAdministrador(idConta);
-  const emUso = campanhas.some((c) => c.id !== idCampanha && c.slug === slug);
+  const owner = await campaignPublicOwner(ctx, idCampanha);
+  if (!owner) throw new CampanhaInexistenteError('Campanha sem proprietario publico');
+  const campanhas = await ctx.deps.campanhaRepository.findCampanhasByAdministrador(owner.idConta);
+  const conflicts = await Promise.all(
+    campanhas.filter((c) => c.id !== idCampanha && c.slug === slug).map((c) =>
+      isCampaignPublicOwner(ctx, c.id, owner.idConta),
+    ),
+  );
+  const emUso = conflicts.some(Boolean);
   if (emUso) {
     return { ok: false, motivo: 'em_uso' };
   }
@@ -427,7 +433,7 @@ export const campanhasRouter = t.router({
     .mutation(async ({ ctx, input }) => {
       try {
         // aperture-1z18g: changing the public link is a configurable action.
-        const { usuario, campanha } = await resolverCampanhaComPermissao(
+        const { campanha } = await resolverCampanhaComPermissao(
           ctx,
           input.idCampanha,
           'link:editar',
@@ -437,7 +443,7 @@ export const campanhasRouter = t.router({
           throw new CampanhaSlugJaAlteradoError(campanha.id);
         }
 
-        const check = await checkCampanhaSlug(ctx, usuario.idConta, campanha.id, input.slug);
+        const check = await checkCampanhaSlug(ctx, campanha.id, input.slug);
         if (!check.ok) {
           throw new TRPCError({ code: 'BAD_REQUEST', message: slugErrorMessage(check.motivo) });
         }
@@ -476,9 +482,9 @@ export const campanhasRouter = t.router({
     )
     .query(async ({ ctx, input }) => {
       try {
-        const { usuario, campanha } = await resolverCampanhaAdministrada(ctx, input.idCampanha);
+        const { campanha } = await resolverCampanhaAdministrada(ctx, input.idCampanha);
 
-        const check = await checkCampanhaSlug(ctx, usuario.idConta, campanha.id, input.slug);
+        const check = await checkCampanhaSlug(ctx, campanha.id, input.slug);
         return check.ok
           ? { disponivel: true, motivo: null }
           : { disponivel: false, motivo: check.motivo };
