@@ -24,6 +24,7 @@ const DB_ATTRS = {
 
 export class CampanhaRepositoryMemory implements CampanhaRepository {
   private readonly campanhas = new Map<IdCampanha, Campanha>();
+  private readonly owners = new Map<IdCampanha, readonly IdConta[]>();
 
   constructor(private readonly recebedorRepository?: RecebedorRepository) {}
 
@@ -32,6 +33,7 @@ export class CampanhaRepositoryMemory implements CampanhaRepository {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPSERT' });
       try {
         const existing = this.campanhas.get(campanha.id);
+        if (!existing) this.owners.set(campanha.id, [...campanha.idsAdministradores]);
         this.campanhas.set(
           campanha.id,
           existing ? { ...campanha, idsAdministradores: existing.idsAdministradores } : campanha,
@@ -142,7 +144,10 @@ export class CampanhaRepositoryMemory implements CampanhaRepository {
           // Deterministic ordering by criadaEm ASC (oldest first) — matches
           // the Postgres adapter contract so callers see a stable result.
           const matches = [...this.campanhas.values()]
-            .filter((c) => c.idsAdministradores.includes(idConta))
+            .filter(
+              (c) =>
+                c.idsAdministradores.includes(idConta) && this.owners.get(c.id)?.includes(idConta),
+            )
             .sort((a, b) => a.criadaEm.getTime() - b.criadaEm.getTime());
 
           const first = matches[0];
@@ -185,7 +190,10 @@ export class CampanhaRepositoryMemory implements CampanhaRepository {
         // silently take over the resolved single-result. Same comparator as
         // findCampanhasByAdministrador so single- and multi-result ports agree.
         const campanha = [...this.campanhas.values()]
-          .filter((c) => c.idsAdministradores.includes(idConta))
+          .filter(
+            (c) =>
+              c.idsAdministradores.includes(idConta) && this.owners.get(c.id)?.includes(idConta),
+          )
           .sort((a, b) => {
             const dt = a.criadaEm.getTime() - b.criadaEm.getTime();
             if (dt !== 0) return dt;

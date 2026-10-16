@@ -309,6 +309,8 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
       async (span) => {
         span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
         try {
+          // Only OWNED campaigns may be a bare-slug/default resolution.
+          // Shared campaigns are accessible exclusively by explicit campaign id.
           // Join through campanha_administradores; pick the oldest matching
           // campanha (criada_em ASC, then id ASC for tie-breaks). Today
           // each user has exactly one campanha, but the deterministic
@@ -329,6 +331,16 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
               'campanhas.criada_em',
             ])
             .where('campanha_administradores.id_usuario', '=', idConta)
+            .where((eb) =>
+              eb.exists(
+                eb
+                  .selectFrom('campanha_membros_permissoes as owner')
+                  .select('owner.id_conta')
+                  .whereRef('owner.campanha_id', '=', 'campanhas.id')
+                  .where('owner.id_conta', '=', idConta)
+                  .where('owner.papel', '=', 'owner'),
+              ),
+            )
             .orderBy('campanhas.criada_em', 'asc')
             .orderBy('campanhas.id', 'asc')
             .limit(1)
@@ -405,6 +417,16 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
           .innerJoin('campanhas', 'campanhas.id', 'campanha_administradores.campanha_id')
           .select('campanha_administradores.campanha_id')
           .where('campanha_administradores.id_usuario', '=', idConta)
+          .where((eb) =>
+            eb.exists(
+              eb
+                .selectFrom('campanha_membros_permissoes as owner')
+                .select('owner.id_conta')
+                .whereRef('owner.campanha_id', '=', 'campanhas.id')
+                .where('owner.id_conta', '=', idConta)
+                .where('owner.papel', '=', 'owner'),
+            ),
+          )
           .orderBy('campanhas.criada_em', 'asc')
           .orderBy('campanhas.id', 'asc')
           .limit(1)
