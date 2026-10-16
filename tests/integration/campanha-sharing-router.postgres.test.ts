@@ -7,6 +7,10 @@ import {
 } from '../../apps/eunenem-server/server/auth/setup.js';
 import { appRouter } from '../../apps/eunenem-server/server/trpc/router.js';
 import { criarAuth } from '../../src/adapters/usuario/criar-auth.js';
+import {
+  ACOES_CONCEDIVEIS,
+  PERMISSOES_PADRAO_MEMBRO,
+} from '../../src/domain/arrecadacao/value-objects/permissao-campanha.js';
 import { ID_PLATAFORMA_EUNENEM } from '../../src/index.js';
 import { makeCampanha } from '../helpers/campanha-repository.conformance.js';
 import { createTestDatabase, type TestDatabase } from '../helpers/test-db.js';
@@ -567,4 +571,151 @@ it('a delegated link editor validates and writes in the canonical owner namespac
       campanhaSlug: 'member-reserved',
     }),
   ).toEqual({ idCampanha: memberOwn.id });
+});
+
+async function ownedCampaign() {
+  const owner = await login();
+  const campaign = makeCampanha({
+    idPlataforma: ID_PLATAFORMA_EUNENEM,
+    idsAdministradores: [owner.user.id_conta],
+  });
+  await deps.campanhaRepository.save(campaign);
+  return { owner, campaign };
+}
+
+it('aperture-m3vx4: owner chooses permissions when inviting; acceptance grants exactly those', async () => {
+  const { owner, campaign } = await ownedCampaign();
+  const email = `chosen-router-${randomUUID()}@example.com`;
+  await owner.caller.compartilhamento.convidar({
+    idCampanha: campaign.id,
+    email,
+    permissoes: ['mensagens:ver', 'extrato:ver'],
+  });
+  const [pending] = await owner.caller.compartilhamento.listarConvites({
+    idCampanha: campaign.id,
+  });
+  if (!pending) throw new Error('invite not listed');
+  expect(pending.permissoes).toEqual(['mensagens:ver', 'extrato:ver']);
+  const member = await login(email);
+  const members = await owner.caller.campanhaMembros.listar({ idCampanha: campaign.id });
+  expect(members.find((m) => m.idConta === member.user.id_conta)).toMatchObject({
+    papel: 'membro',
+    permissoes: ['mensagens:ver', 'extrato:ver'],
+  });
+});
+
+it('aperture-m3vx4: an invite without a chosen set keeps the default member permissions', async () => {
+  const { owner, campaign } = await ownedCampaign();
+  const email = `default-router-${randomUUID()}@example.com`;
+  await owner.caller.compartilhamento.convidar({ idCampanha: campaign.id, email });
+  const [pending] = await owner.caller.compartilhamento.listarConvites({
+    idCampanha: campaign.id,
+  });
+  if (!pending) throw new Error('invite not listed');
+  expect(pending.permissoes).toEqual(PERMISSOES_PADRAO_MEMBRO);
+});
+
+it('aperture-m3vx4: owner edits a pending invite and acceptance follows the edit', async () => {
+  const { owner, campaign } = await ownedCampaign();
+  const email = `edit-router-${randomUUID()}@example.com`;
+  await owner.caller.compartilhamento.convidar({ idCampanha: campaign.id, email });
+  const [pending] = await owner.caller.compartilhamento.listarConvites({
+    idCampanha: campaign.id,
+  });
+  if (!pending) throw new Error('invite not listed');
+  expect(
+    await owner.caller.compartilhamento.definirPermissoesConvite({
+      idCampanha: campaign.id,
+      idConvite: pending.id,
+      permissoes: ['recebedor:gerenciar'],
+    }),
+  ).toEqual({ ok: true });
+  expect(
+    (await owner.caller.compartilhamento.listarConvites({ idCampanha: campaign.id }))[0]
+      ?.permissoes,
+  ).toEqual(['recebedor:gerenciar']);
+  const member = await login(email);
+  const members = await owner.caller.campanhaMembros.listar({ idCampanha: campaign.id });
+  expect(members.find((m) => m.idConta === member.user.id_conta)?.permissoes).toEqual([
+    'recebedor:gerenciar',
+  ]);
+  // Accepted: the invite is no longer editable (member permissions are edited on the member).
+  await expect(
+    owner.caller.compartilhamento.definirPermissoesConvite({
+      idCampanha: campaign.id,
+      idConvite: pending.id,
+      permissoes: ['saque:solicitar'],
+    }),
+  ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+});
+
+it('aperture-m3vx4: non-owners cannot set or edit invite permissions', async () => {
+  const { owner, campaign } = await ownedCampaign();
+  const memberEmail = `member-escalate-${randomUUID()}@example.com`;
+  await owner.caller.compartilhamento.convidar({
+    idCampanha: campaign.id,
+    email: memberEmail,
+    permissoes: ['presentes:gerenciar'],
+  });
+  const member = await login(memberEmail);
+  const outsider = await login();
+  const pendingEmail = `pending-${randomUUID()}@example.com`;
+  await owner.caller.compartilhamento.convidar({ idCampanha: campaign.id, email: pendingEmail });
+  const pending = (
+    await owner.caller.compartilhamento.listarConvites({ idCampanha: campaign.id })
+  ).find((i) => i.email === pendingEmail);
+  if (!pending) throw new Error('invite not listed');
+  for (const intruder of [member, outsider]) {
+    await expect(
+      intruder.caller.compartilhamento.convidar({
+        idCampanha: campaign.id,
+        email: `x-${randomUUID()}@example.com`,
+        permissoes: ['saque:solicitar'],
+      }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(
+      intruder.caller.compartilhamento.definirPermissoesConvite({
+        idCampanha: campaign.id,
+        idConvite: pending.id,
+        permissoes: [...ACOES_CONCEDIVEIS],
+      }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  }
+  const after = (
+    await owner.caller.compartilhamento.listarConvites({ idCampanha: campaign.id })
+  ).find((i) => i.id === pending.id);
+  expect(after?.permissoes).toEqual(PERMISSOES_PADRAO_MEMBRO);
+});
+
+it('aperture-m3vx4: owner-only and unknown actions are rejected on invite and on edit', async () => {
+  const { owner, campaign } = await ownedCampaign();
+  for (const invalid of [['membros:gerenciar'], ['qualquer:coisa']]) {
+    await expect(
+      owner.caller.compartilhamento.convidar({
+        idCampanha: campaign.id,
+        email: `invalid-${randomUUID()}@example.com`,
+        permissoes: invalid as never,
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  }
+  expect(await owner.caller.compartilhamento.listarConvites({ idCampanha: campaign.id })).toEqual(
+    [],
+  );
+  const email = `valid-${randomUUID()}@example.com`;
+  await owner.caller.compartilhamento.convidar({ idCampanha: campaign.id, email });
+  const [pending] = await owner.caller.compartilhamento.listarConvites({
+    idCampanha: campaign.id,
+  });
+  if (!pending) throw new Error('invite not listed');
+  await expect(
+    owner.caller.compartilhamento.definirPermissoesConvite({
+      idCampanha: campaign.id,
+      idConvite: pending.id,
+      permissoes: ['membros:gerenciar'] as never,
+    }),
+  ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  expect(
+    (await owner.caller.compartilhamento.listarConvites({ idCampanha: campaign.id }))[0]
+      ?.permissoes,
+  ).toEqual(PERMISSOES_PADRAO_MEMBRO);
 });

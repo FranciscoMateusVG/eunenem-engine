@@ -93,6 +93,7 @@ export class CampanhaMembrosRepositoryPostgres implements CampanhaMembrosReposit
     idCampanha: IdCampanha,
     idConta: IdConta,
     context?: ArrecadacaoRepositoryContext,
+    permissoes: readonly AcaoConcedivel[] = PERMISSOES_PADRAO_MEMBRO,
   ): Promise<void> {
     const executor = context?.trx ?? this.db;
     return comSpan('adicionarMembro', 'INSERT', async () => {
@@ -102,7 +103,7 @@ export class CampanhaMembrosRepositoryPostgres implements CampanhaMembrosReposit
           campanha_id: idCampanha,
           id_conta: idConta,
           papel: 'membro',
-          permissoes: [...PERMISSOES_PADRAO_MEMBRO],
+          permissoes: [...new Set(permissoes)],
         })
         .onConflict((oc) => oc.columns(['campanha_id', 'id_conta']).doNothing())
         .execute();

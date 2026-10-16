@@ -1,5 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { type Selectable, sql, type Transaction } from 'kysely';
+import {
+  type AcaoConcedivel,
+  PERMISSOES_PADRAO_MEMBRO,
+} from '../../domain/arrecadacao/value-objects/permissao-campanha.js';
 import type { Database } from '../database.js';
 import type { CampanhaConvites, DB } from '../db-types.generated.js';
 import { CampanhaMembrosRepositoryPostgres } from './campanha-membros-repository.postgres.js';
@@ -54,6 +58,8 @@ export class CampanhaCompartilhamentoPostgres {
       email: string;
       atorId: string;
       origem: 'owner' | 'admin';
+      /** What the member gets on acceptance; validated by the caller (boundary). */
+      permissoes?: readonly AcaoConcedivel[];
     },
     trx?: Transaction<DB>,
   ): Promise<Selectable<CampanhaConvites>> {
@@ -95,6 +101,8 @@ export class CampanhaCompartilhamentoPostgres {
       .where('consumido_em', 'is', null)
       .where('revogado_em', 'is', null)
       .executeTakeFirst();
+    // A duplicate keeps the pending invite as-is (its permissions included);
+    // the owner edits a pending invite explicitly via definirPermissoesConvite.
     if (existing) return existing;
     const row = await trx
       .insertInto('campanha_convites')
@@ -107,6 +115,7 @@ export class CampanhaCompartilhamentoPostgres {
         revogado_em: null,
         consumido_em: null,
         consumido_por: null,
+        permissoes: [...new Set(input.permissoes ?? PERMISSOES_PADRAO_MEMBRO)],
       })
       .returningAll()
       .executeTakeFirstOrThrow();
@@ -136,6 +145,46 @@ export class CampanhaCompartilhamentoPostgres {
       .returning('id')
       .executeTakeFirst();
     if (row) await this.auditar(trx, campanhaId, atorId, 'revogar', row.id);
+  }
+
+  /** Replaces the permissions of a PENDING invite of this campaign. Returns
+   * false (nothing changed) for an accepted, revoked, expired or foreign invite.
+   * Accepted members' permissions are edited on the member, not the invite. */
+  async definirPermissoesConvite(
+    campanhaId: string,
+    plataformaId: string,
+    conviteId: string,
+    permissoes: readonly AcaoConcedivel[],
+    atorId: string,
+    trx?: Transaction<DB>,
+  ): Promise<boolean> {
+    if (!trx)
+      return this.db
+        .transaction()
+        .execute((tx) =>
+          this.definirPermissoesConvite(
+            campanhaId,
+            plataformaId,
+            conviteId,
+            permissoes,
+            atorId,
+            tx,
+          ),
+        );
+    await this.bloquear(trx, campanhaId, plataformaId);
+    const row = await trx
+      .updateTable('campanha_convites')
+      .set({ permissoes: [...new Set(permissoes)] })
+      .where('id', '=', conviteId)
+      .where('campanha_id', '=', campanhaId)
+      .where('consumido_em', 'is', null)
+      .where('revogado_em', 'is', null)
+      .where('expira_em', '>', new Date())
+      .returning('id')
+      .executeTakeFirst();
+    if (!row) return false;
+    await this.auditar(trx, campanhaId, atorId, 'convite:permissoes', row.id);
+    return true;
   }
 
   /** Called by the sole membership-removal path while holding the campaign lock. */
@@ -261,7 +310,7 @@ export class CampanhaCompartilhamentoPostgres {
           .where('revogado_em', 'is', null)
           .where('consumido_em', 'is', null)
           .where('expira_em', '>', new Date())
-          .returning('id')
+          .returning(['id', 'permissoes'])
           .executeTakeFirst();
         if (!consumed) return;
         await trx
@@ -269,10 +318,13 @@ export class CampanhaCompartilhamentoPostgres {
           .values({ campanha_id: candidate.campanha_id, id_usuario: verified.id_conta })
           .onConflict((oc) => oc.columns(['campanha_id', 'id_usuario']).doNothing())
           .execute();
+        // Exactly what the owner chose on the invite (DB CHECK guarantees
+        // grantable actions only). An existing papel row is never overwritten.
         await new CampanhaMembrosRepositoryPostgres(this.db).adicionarMembro(
           candidate.campanha_id,
           verified.id_conta,
           { trx },
+          consumed.permissoes as AcaoConcedivel[],
         );
         await this.auditar(trx, candidate.campanha_id, usuarioId, 'consumir', consumed.id);
       });
