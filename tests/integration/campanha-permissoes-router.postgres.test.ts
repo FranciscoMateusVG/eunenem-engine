@@ -608,11 +608,11 @@ describe('per-action permission guards (Postgres, real router)', () => {
           membro.caller.contribuicao.create({ idCampanha, nome: 'x', valor: 15000, quantidade: 1 }),
         ),
       ).toBe('UNAUTHORIZED');
-      // Re-adding starts from zero grants.
+      // Re-adding restores only the approved defaults, never old elevated grants.
       await deps.campanhaRepository.adicionarAdministrador(idCampanha, membro.idConta);
       expect(
         (await deps.campanhaMembrosRepository.obterAcesso(idCampanha, membro.idConta))?.permissoes,
-      ).toEqual([]);
+      ).toEqual(PERMISSOES_PADRAO_MEMBRO);
     });
 
     it('remover: membro cannot remove anyone (incl. itself); owner cannot be removed; outsider UNAUTHORIZED', async () => {

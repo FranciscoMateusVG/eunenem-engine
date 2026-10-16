@@ -7,6 +7,9 @@
 - Remover acesso usa exclusivamente `campanhaMembros.remover`, revogando convites pendentes do e-mail na mesma transação. Um login posterior não restaura esse acesso.
 - Os caminhos sem ID explícito (inclusive o endereço público pelo slug da pessoa) continuam usando a campanha mais antiga **da qual ela é proprietária**. Campanhas compartilhadas aparecem na lista e exigem seu ID explícito.
 
+- Novos membros podem gerenciar presentes, perfil, mensagens e convite, e visualizar convidados. Link público, extrato, recebedor, saques e gestão de membros permanecem restritos; o proprietário pode ajustar permissões.
+- Pessoas verificadas com convite aceito entram direto na campanha compartilhada, sem concluir o onboarding próprio. **Criar minha própria lista** abre esse onboarding opcional; sem acesso compartilhado, ele continua obrigatório.
+
 ## Suporte: cliente sem acesso ao Gmail antigo
 
 1. Entrar como operador permitido em `ADMIN_ALLOWED_EMAILS`.

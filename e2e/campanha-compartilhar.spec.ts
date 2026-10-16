@@ -50,6 +50,21 @@ test('verified invitee sees the shared campaign and loses it immediately after o
     const recipient = await recipientContext.newPage();
     await recipient.goto('/campanhas');
     await expect(recipient.locator(`a[href$="/c/${seededData.idCampanha}"]`)).toBeVisible();
+    await recipient.locator(`a[href$="/c/${seededData.idCampanha}"]`).click();
+    await expect(recipient.getByRole('dialog', { name: 'Vamos montar sua página' })).toHaveCount(0);
+    await expect(recipient.getByRole('link', { name: 'Criar minha própria lista' })).toBeVisible();
+    await expect(recipient.locator('.painel-tutorial-overlay')).toBeVisible();
+    await recipient.keyboard.press('Escape');
+    await expect(recipient.locator('.painel-tutorial-overlay')).toHaveCount(0);
+    await recipient.getByRole('link', { name: 'Criar minha própria lista' }).click();
+    await expect(recipient.getByRole('dialog', { name: 'Vamos montar sua página' })).toBeVisible();
+    const ownOnboarding = await db
+      .selectFrom('usuarios')
+      .select('onboarding_concluido_em')
+      .where('id', '=', session.userId)
+      .executeTakeFirstOrThrow();
+    expect(ownOnboarding.onboarding_concluido_em).toBeNull();
+    await recipient.goto('/campanhas');
     await ownerPage.reload();
     const member = ownerPage
       .getByRole('listitem')

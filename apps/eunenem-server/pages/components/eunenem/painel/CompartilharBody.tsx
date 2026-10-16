@@ -1,3 +1,4 @@
+import { MembroPermissoesToggles } from './MembroPermissoesToggles';
 import { useState } from 'react';
 import { trpc } from '@/lib/trpc';
 import { useCampanhaEscrita } from '@/lib/campanha-escrita';
@@ -85,6 +86,7 @@ export function CompartilharBody() {
             <p>
               {member.nomeExibicao ?? 'Pessoa'} · {member.email ?? 'Sem e-mail'}
             </p>
+            <MembroPermissoesToggles idCampanha={idCampanha} idConta={member.idConta} />
             {member.papel === 'owner' ? (
               <span>Proprietário</span>
             ) : (
