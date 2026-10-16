@@ -4,6 +4,7 @@ import {
   CampanhaCompartilhamentoPostgres,
   EmailJaMembroCampanhaError,
 } from '../../../../src/adapters/arrecadacao/campanha-compartilhamento.postgres.js';
+import { ACOES_CONCEDIVEIS } from '../../../../src/domain/arrecadacao/value-objects/permissao-campanha.js';
 import { assertCampaignPermission } from '../../../../src/use-cases/arrecadacao/assert-campaign-permission.js';
 import { ID_PLATAFORMA_EUNENEM, type IdCampanha } from '../../../../src/index.js';
 import type { TrpcContext } from './context.js';
@@ -12,6 +13,9 @@ import { enforceRateLimit } from './rate-limit.js';
 
 const t = initTRPC.context<TrpcContext>().create();
 const campaignInput = z.object({ idCampanha: z.uuid() });
+// Only grantable member actions: `membros:gerenciar` (owner-only) and unknown
+// strings fail validation (BAD_REQUEST). The DB CHECK is the second line.
+const permissoesInput = z.array(z.enum(ACOES_CONCEDIVEIS)).max(ACOES_CONCEDIVEIS.length);
 const ownerProcedure = t.procedure.input(campaignInput).use(async ({ ctx, input, next }) => {
   try {
     const { usuario } = await resolverUsuarioAutenticado(ctx.deps, ctx.headers);
@@ -67,13 +71,19 @@ export const compartilhamentoRouter = t.router({
   listarConvites: ownerProcedure.query(async ({ ctx, input }) => {
     return ctx.trx
       .selectFrom('campanha_convites')
-      .select(['id', 'email', 'expira_em', 'revogado_em', 'consumido_em'])
+      .select(['id', 'email', 'expira_em', 'revogado_em', 'consumido_em', 'permissoes'])
       .where('campanha_id', '=', input.idCampanha)
       .orderBy('criado_em', 'desc')
       .execute();
   }),
   convidar: ownerProcedure
-    .input(z.object({ email: z.string().trim().email().max(254) }))
+    .input(
+      z.object({
+        email: z.string().trim().email().max(254),
+        /** Omitted → PERMISSOES_PADRAO_MEMBRO (adapter default). */
+        permissoes: permissoesInput.optional(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       await enforceRateLimit(ctx.deps.db, {
         key: `compartilhar:${ctx.usuario.id}`,
@@ -87,10 +97,30 @@ export const compartilhamentoRouter = t.router({
           email: input.email,
           atorId: ctx.usuario.id,
           origem: 'owner',
+          ...(input.permissoes ? { permissoes: input.permissoes } : {}),
         },
         ctx.trx,
       );
       ctx.emails.push(input.email.trim().toLowerCase());
+      return { ok: true };
+    }),
+  /** Owner-only, under the campaign lock (ownerProcedure). Pending invites only. */
+  definirPermissoesConvite: ownerProcedure
+    .input(z.object({ idConvite: z.uuid(), permissoes: permissoesInput }))
+    .mutation(async ({ ctx, input }) => {
+      const updated = await ctx.sharing.definirPermissoesConvite(
+        input.idCampanha,
+        ID_PLATAFORMA_EUNENEM,
+        input.idConvite,
+        input.permissoes,
+        ctx.usuario.id,
+        ctx.trx,
+      );
+      if (!updated)
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Convite não está mais pendente.',
+        });
       return { ok: true };
     }),
   revogar: ownerProcedure

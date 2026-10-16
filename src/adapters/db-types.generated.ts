@@ -64,6 +64,7 @@ export interface CampanhaConvites {
   email: string;
   expira_em: Timestamp;
   id: string;
+  permissoes: string[];
   revogado_em: Timestamp | null;
 }
 

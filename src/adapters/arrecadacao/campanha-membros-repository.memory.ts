@@ -8,6 +8,7 @@ import {
 import type { CampanhaMembrosRepository, MembroCampanha } from './campanha-membros-repository.js';
 import { ordenarMembros } from './campanha-membros-repository.postgres.js';
 import type { CampanhaRepository } from './campanha-repository.js';
+import type { ArrecadacaoRepositoryContext } from './repository-context.js';
 
 const tracer = trace.getTracer('frame');
 
@@ -86,11 +87,16 @@ export class CampanhaMembrosRepositoryMemory implements CampanhaMembrosRepositor
     });
   }
 
-  async adicionarMembro(idCampanha: IdCampanha, idConta: IdConta): Promise<void> {
+  async adicionarMembro(
+    idCampanha: IdCampanha,
+    idConta: IdConta,
+    _context?: ArrecadacaoRepositoryContext,
+    permissoes: readonly AcaoConcedivel[] = PERMISSOES_PADRAO_MEMBRO,
+  ): Promise<void> {
     return comSpan('adicionarMembro', 'INSERT', async () => {
       const linhas = await this.linhas(idCampanha);
       if (!linhas.has(idConta))
-        linhas.set(idConta, { papel: 'membro', permissoes: [...PERMISSOES_PADRAO_MEMBRO] });
+        linhas.set(idConta, { papel: 'membro', permissoes: [...new Set(permissoes)] });
     });
   }
 

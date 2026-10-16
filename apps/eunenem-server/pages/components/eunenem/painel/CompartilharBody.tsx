@@ -1,12 +1,22 @@
 import { MembroPermissoesToggles } from './MembroPermissoesToggles';
+import { PermissoesCheckboxes, resumoPermissoes } from './PermissoesCheckboxes';
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { trpc } from '@/lib/trpc';
 import { useCampanhaEscrita } from '@/lib/campanha-escrita';
+// Deep-leaf import (zod-only, pg-free) — see BancariosBody.tsx (aperture-9abwt).
+import {
+  type AcaoConcedivel,
+  PERMISSOES_PADRAO_MEMBRO,
+} from '../../../../../../src/domain/arrecadacao/value-objects/permissao-campanha.js';
 
 export function CompartilharBody() {
   const idCampanha = useCampanhaEscrita();
   const [email, setEmail] = useState('');
   const [notice, setNotice] = useState('');
+  // aperture-m3vx4: chosen at invite time; acceptance grants exactly this set.
+  const [permissoes, setPermissoes] = useState<AcaoConcedivel[]>([...PERMISSOES_PADRAO_MEMBRO]);
+  const utils = trpc.useUtils();
   const query = trpc.campanhaMembros.listar.useQuery(
     { idCampanha: idCampanha ?? '' },
     { enabled: !!idCampanha, retry: false },
@@ -22,6 +32,7 @@ export function CompartilharBody() {
   const invite = trpc.compartilhamento.convidar.useMutation({
     onSuccess: () => {
       setEmail('');
+      setPermissoes([...PERMISSOES_PADRAO_MEMBRO]);
       setNotice(
         'Convite enviado. O acesso será liberado quando a pessoa entrar com este e-mail verificado.',
       );
@@ -29,6 +40,28 @@ export function CompartilharBody() {
     },
   });
   const revoke = trpc.compartilhamento.revogar.useMutation({ onSuccess: refresh });
+  const editInvite = trpc.compartilhamento.definirPermissoesConvite.useMutation({
+    onMutate: async ({ idConvite, permissoes: proximas }) => {
+      const key = { idCampanha: idCampanha ?? '' };
+      await utils.compartilhamento.listarConvites.cancel(key);
+      const anterior = utils.compartilhamento.listarConvites.getData(key);
+      utils.compartilhamento.listarConvites.setData(key, (lista) =>
+        lista?.map((i) => (i.id === idConvite ? { ...i, permissoes: proximas } : i)),
+      );
+      return { anterior };
+    },
+    onError: (error, _vars, context) => {
+      if (context?.anterior)
+        utils.compartilhamento.listarConvites.setData(
+          { idCampanha: idCampanha ?? '' },
+          context.anterior,
+        );
+      toast.error(error.message || 'não consegui salvar a permissão — tente de novo');
+    },
+    onSettled: () => {
+      void invites.refetch();
+    },
+  });
   const remove = trpc.campanhaMembros.remover.useMutation({ onSuccess: refresh });
   const busy = invite.isPending || revoke.isPending || remove.isPending;
   if (!idCampanha || query.isLoading) return <p role="status">Carregando compartilhamento…</p>;
@@ -48,16 +81,16 @@ export function CompartilharBody() {
         e-mail pelo Google ou link de acesso.
       </p>
       <p className="text-sm text-ink-soft">
-        Compartilhar não transfere a propriedade da campanha nem a titularidade financeira. Novos
-        membros podem cuidar dos presentes, recados, perfil e convite. Não têm acesso a extrato,
-        dados bancários ou saques, nem podem mudar o link ou compartilhar com outras pessoas.
+        Compartilhar não transfere a propriedade da campanha nem a titularidade financeira. Escolha
+        abaixo o que a pessoa poderá fazer; você pode mudar isso depois, enquanto o convite estiver
+        pendente ou já no acesso dela. Só você pode compartilhar a campanha com outras pessoas.
       </p>
       <form
         className="flex flex-wrap gap-3"
         onSubmit={(event) => {
           event.preventDefault();
           setNotice('');
-          invite.mutate({ idCampanha, email });
+          invite.mutate({ idCampanha, email, permissoes });
         }}
       >
         <label className="flex-1">
@@ -71,6 +104,18 @@ export function CompartilharBody() {
             onChange={(event) => setEmail(event.target.value)}
           />
         </label>
+        <div className="basis-full">
+          <PermissoesCheckboxes
+            testId="convite-permissoes-novo"
+            legenda="o que essa pessoa poderá fazer"
+            permissoes={permissoes}
+            disabled={invite.isPending}
+            onChange={setPermissoes}
+          />
+          <p className="mt-2 text-sm text-ink-soft" data-testid="convite-permissoes-resumo">
+            {resumoPermissoes(permissoes)}
+          </p>
+        </div>
         <button className="rounded bg-plum px-4 py-2 text-white" disabled={busy} type="submit">
           Convidar
         </button>
@@ -124,6 +169,21 @@ export function CompartilharBody() {
                       ? `Pendente até ${new Date(invitation.expira_em).toLocaleDateString('pt-BR')}`
                       : 'Expirado'}
               </span>
+              {active && (
+                <PermissoesCheckboxes
+                  testId={`convite-permissoes-${invitation.id}`}
+                  legenda="o que essa pessoa poderá fazer ao aceitar"
+                  permissoes={invitation.permissoes as AcaoConcedivel[]}
+                  disabled={editInvite.isPending}
+                  onChange={(proximas) =>
+                    editInvite.mutate({
+                      idCampanha,
+                      idConvite: invitation.id,
+                      permissoes: proximas,
+                    })
+                  }
+                />
+              )}
               {active && (
                 <button
                   className="ml-4 text-plum underline"

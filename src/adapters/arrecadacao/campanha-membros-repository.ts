@@ -32,13 +32,15 @@ export interface CampanhaMembrosRepository {
   ): Promise<readonly MembroCampanha[]>;
 
   /**
-   * Registra um novo membro com papel 'membro' e PERMISSOES_PADRAO_MEMBRO.
-   * Idempotente: nunca rebaixa um owner nem zera permissões existentes.
+   * Registra um novo membro com papel 'membro' e as `permissoes` dadas
+   * (padrão: PERMISSOES_PADRAO_MEMBRO; o aceite de convite passa as do convite).
+   * Idempotente: nunca rebaixa um owner nem altera permissões existentes.
    */
   adicionarMembro(
     idCampanha: IdCampanha,
     idConta: IdConta,
     context?: ArrecadacaoRepositoryContext,
+    permissoes?: readonly AcaoConcedivel[],
   ): Promise<void>;
 
   /** Remove o papel da conta (chamado junto com a remoção do administrador). */
