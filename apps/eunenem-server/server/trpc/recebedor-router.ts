@@ -309,7 +309,7 @@ function toTRPCError(err: unknown): TRPCError {
     return new TRPCError({ code: "UNAUTHORIZED", message: err.message, cause: err });
   }
   if (err instanceof CampanhaInexistenteError) {
-    return new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: err.message, cause: err });
+    return new TRPCError({ code: "NOT_FOUND", message: err.message, cause: err });
   }
   // aperture-1z18g: admin of the campanha, but the owner didn't grant this action.
   if (err instanceof PermissaoCampanhaNegadaError) {

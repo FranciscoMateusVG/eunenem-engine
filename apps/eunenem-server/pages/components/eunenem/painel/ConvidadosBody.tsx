@@ -1,3 +1,4 @@
+import { useCampanhaPublicOwnerSlugRota } from "@/lib/campanhas";
 import { useMemo, useRef, useState, useEffect, type CSSProperties } from "react";
 import { toast } from "sonner";
 
@@ -1472,6 +1473,7 @@ function VirtualInvitePreviewSection({
 
 // ---------- page body ----------
 function ConvidadosBodyConteudo({ slug }: PainelSectionBodyProps) {
+  const publicOwnerSlug = useCampanhaPublicOwnerSlugRota();
   // aperture-lista-convidados — the guest list is the real backend source of truth.
   const listaQuery = useListaDeConvidadosData();
   const alterarPresenca = useAlterarPresencaConvidado();
@@ -2402,18 +2404,18 @@ function ConvidadosBodyConteudo({ slug }: PainelSectionBodyProps) {
       `}</style>
 
       {/* aperture-8qg1s — VER LINK preview modal */}
-      {verLinkOpen && (
+      {verLinkOpen && publicOwnerSlug && (
         <VerLinkModal
-          slug={slug}
+          slug={publicOwnerSlug}
           formatoMensagemConvite={inviteType}
           onClose={() => setVerLinkOpen(false)}
         />
       )}
 
-      {sendTarget && (
+      {sendTarget && publicOwnerSlug && (
         <EnviarConviteModal
           guest={sendTarget}
-          slug={slug}
+          slug={publicOwnerSlug}
           eventTypeLabel={eventTypeLabel}
           mensagemConvite={state.message}
           onClose={() => setSendTarget(null)}

@@ -82,3 +82,66 @@ test('verified invitee sees the shared campaign and loses it immediately after o
     await db.destroy();
   }
 });
+
+test('member-only dashboard has an empty own profile and public links use the campaign owner', async ({
+  authenticatedPage: ownerPage,
+  seededData,
+  browser,
+}) => {
+  const { createDatabase } = await import('../src/adapters/database.js');
+  const { mintMagicLinkSession, browserCookieFor } = await import('./magic-link-auth.js');
+  const databaseUrl = process.env.E2E_DATABASE_URL;
+  if (!databaseUrl) throw new Error('Explicit local test database required');
+  const db = createDatabase(databaseUrl);
+  const baseURL = process.env.E2E_BASE_URL ?? 'http://localhost:3002';
+  const context = await browser.newContext({ baseURL });
+  try {
+    const campanhaSlug = `shared-${randomUUID().slice(0, 8)}`;
+    await db
+      .updateTable('campanhas')
+      .set({ slug: campanhaSlug })
+      .where('id', '=', seededData.idCampanha)
+      .execute();
+    await ownerPage.goto(`/painel/${seededData.slug}/c/${seededData.idCampanha}/compartilhar`);
+    const email = `member-only-${randomUUID()}@example.com`;
+    await ownerPage.getByLabel('E-mail da pessoa').fill(email);
+    await ownerPage.getByRole('button', { name: 'Convidar', exact: true }).click();
+    await expect(ownerPage.getByRole('status')).toContainText('Convite enviado');
+    const session = await mintMagicLinkSession(db, { email, name: 'Member Only', baseURL });
+    const user = await db
+      .selectFrom('usuarios')
+      .select(['slug', 'id_conta'])
+      .where('id', '=', session.userId)
+      .executeTakeFirstOrThrow();
+    await db
+      .deleteFrom('campanha_administradores')
+      .where('id_usuario', '=', user.id_conta)
+      .where('campanha_id', '!=', seededData.idCampanha)
+      .execute();
+    await db
+      .deleteFrom('campanha_membros_permissoes')
+      .where('id_conta', '=', user.id_conta)
+      .where('campanha_id', '!=', seededData.idCampanha)
+      .execute();
+    await context.addCookies([browserCookieFor(session, baseURL)]);
+    const page = await context.newPage();
+    const profileResponse = page.waitForResponse((response) =>
+      response.url().includes('perfil.getPerfil'),
+    );
+    await page.goto(`/painel/${user.slug}/c/${seededData.idCampanha}`);
+    expect((await profileResponse).status()).toBe(200);
+    const canonicalPath = `/pagina/${seededData.slug}/${campanhaSlug}`;
+    await expect(page.locator('.painel-url-slug')).toHaveAttribute(
+      'href',
+      `${baseURL}${canonicalPath}`,
+    );
+    await expect(page.getByRole('dialog', { name: 'Vamos montar sua página' })).toHaveCount(0);
+    await expect(page.locator(`a[href="${canonicalPath}"]`)).toBeVisible();
+    await page.goto(canonicalPath);
+    await expect(page.locator('body')).not.toContainText('Página não encontrada');
+    await expect(page.locator('body')).toContainText(seededData.nomeContribuicao);
+  } finally {
+    await context.close();
+    await db.destroy();
+  }
+});

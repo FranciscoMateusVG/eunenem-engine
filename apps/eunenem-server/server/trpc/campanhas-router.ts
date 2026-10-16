@@ -1,3 +1,4 @@
+import { campaignPublicOwnerSlug } from './campaign-public-address.js';
 /**
  * Campanhas tRPC router (aperture-mebax — multicampanha migration bridge POC,
  * epic aperture-7hm2g, design spec §6).
@@ -64,6 +65,8 @@ const CampanhaNovaDTOSchema = z.object({
   titulo: z.string(),
   /** The USER's painel slug — card navigates to `/painel/${slug}`. */
   slug: z.string(),
+  /** Canonical public identity; distinct from the viewer's private painel slug. */
+  publicOwnerSlug: z.string().nullable(),
   /**
    * Mimo count for the card — `null` in the POC (a real received-mimos count
    * needs a per-campanha contribuições aggregate; deliberately out of scope,
@@ -132,11 +135,13 @@ function toCardDTO(
   campanha: Campanha,
   slug: string,
   nomeBebe: string | null,
+  publicOwnerSlug: string | null = slug,
 ): z.infer<typeof CampanhaNovaDTOSchema> {
   return {
     id: campanha.id,
     titulo: campanha.titulo,
     slug,
+    publicOwnerSlug,
     quantidadeMimos: null,
     criadaEm: campanha.criadaEm.toISOString(),
     hasRecebedor: campanha.idRecebedor != null,
@@ -221,7 +226,7 @@ function toSlugTRPCError(err: unknown): TRPCError {
     return new TRPCError({ code: 'UNAUTHORIZED', message: err.message, cause: err });
   }
   if (err instanceof CampanhaInexistenteError) {
-    return new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err.message, cause: err });
+    return new TRPCError({ code: 'NOT_FOUND', message: err.message, cause: err });
   }
   if (err instanceof CampanhaSlugJaAlteradoError) {
     return new TRPCError({ code: 'FORBIDDEN', message: 'slug_ja_alterado', cause: err });
@@ -268,11 +273,11 @@ export const campanhasRouter = t.router({
         const nomeBebePorCampanha = new Map(
           campanhas.map((campanha, i) => [campanha.id, perfis[i]?.conteudo.nomeBebe ?? null]),
         );
-        const novas = [...campanhas]
+        const novas = await Promise.all([...campanhas]
           .sort((a, b) => b.criadaEm.getTime() - a.criadaEm.getTime())
-          .map((campanha) =>
-            toCardDTO(campanha, usuario.slug, nomeBebePorCampanha.get(campanha.id) ?? null),
-          );
+          .map(async (campanha) =>
+            toCardDTO(campanha, usuario.slug, nomeBebePorCampanha.get(campanha.id) ?? null, await campaignPublicOwnerSlug(ctx, campanha.id)),
+          ));
 
         // Static-snapshot legacy detection (spec §4) — pure, in-memory match;
         // no legacy-system call at runtime.

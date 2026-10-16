@@ -376,3 +376,105 @@ it('accepted verified sharing bypasses own onboarding without latching it; non-i
   });
   expect((await member.caller.auth.me())?.needsOnboarding).toBe(true);
 });
+
+async function sharedOnlyFixture() {
+  const owner = await login();
+  const campaign = makeCampanha({
+    idPlataforma: ID_PLATAFORMA_EUNENEM,
+    idsAdministradores: [owner.user.id_conta],
+  });
+  await deps.campanhaRepository.save(campaign);
+  await deps.db
+    .updateTable('campanhas')
+    .set({ slug: 'shared-baby' })
+    .where('id', '=', campaign.id)
+    .execute();
+  await deps.db
+    .insertInto('perfil_campanhas')
+    .values({ id: randomUUID(), id_campanha: campaign.id, nome_bebe: 'Owner Baby' })
+    .execute();
+  const email = `only-member-${randomUUID()}@example.com`;
+  await owner.caller.compartilhamento.convidar({ idCampanha: campaign.id, email });
+  const member = await login(email);
+  // Model the reported member-only account, not the signup saga's own blank list.
+  await deps.db
+    .deleteFrom('campanha_administradores')
+    .where('id_usuario', '=', member.user.id_conta)
+    .where('campanha_id', '!=', campaign.id)
+    .execute();
+  await deps.db
+    .deleteFrom('campanha_membros_permissoes')
+    .where('id_conta', '=', member.user.id_conta)
+    .where('campanha_id', '!=', campaign.id)
+    .execute();
+  return { owner, member, campaign };
+}
+
+it('member-only profile returns empty own content or explicit shared content, never 500', async () => {
+  const { member, campaign } = await sharedOnlyFixture();
+  expect((await member.caller.auth.me())?.idCampanha).toBeNull();
+  expect(await member.caller.perfil.getPerfil()).toMatchObject({
+    slug: member.user.slug,
+    nomeBebe: null,
+  });
+  expect(await member.caller.perfil.getPerfil({ idCampanha: campaign.id })).toMatchObject({
+    slug: member.user.slug,
+    nomeBebe: 'Owner Baby',
+  });
+  await expect(member.caller.perfil.getPerfil({ idCampanha: randomUUID() })).rejects.toMatchObject({
+    code: 'UNAUTHORIZED',
+  });
+  expect(await member.caller.perfil.atualizar({ nomeExibicao: 'New name' })).toMatchObject({
+    creatorName: 'New name',
+    nomeBebe: null,
+  });
+});
+
+it('member-only bare campaign routes return a controlled missing-context response, not 500', async () => {
+  const { member } = await sharedOnlyFixture();
+  await expect(member.caller.contribuicao.list()).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  await expect(member.caller.eventoConvite.get()).rejects.toMatchObject({ code: 'NOT_FOUND' });
+});
+
+it('shared campaign public addresses belong only to its owner, not an invited member', async () => {
+  const { owner, member, campaign } = await sharedOnlyFixture();
+  await expect(
+    member.caller.pagina.resolverCampanhaSlug({
+      slug: member.user.slug,
+      campanhaSlug: 'shared-baby',
+    }),
+  ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  expect(
+    await member.caller.pagina.resolverCampanhaSlug({
+      slug: owner.user.slug,
+      campanhaSlug: 'shared-baby',
+    }),
+  ).toEqual({ idCampanha: campaign.id });
+  await expect(
+    member.caller.perfil.getPerfilPublicoBySlug({
+      slug: member.user.slug,
+      idCampanha: campaign.id,
+    }),
+  ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  await expect(
+    member.caller.pagina.obterListaPresentes({ slug: member.user.slug, idCampanha: campaign.id }),
+  ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  await expect(
+    member.caller.eventoConvite.getPreview({ slug: member.user.slug, idCampanha: campaign.id }),
+  ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  expect(
+    await member.caller.perfil.getPerfilPublicoBySlug({
+      slug: owner.user.slug,
+      idCampanha: campaign.id,
+    }),
+  ).toMatchObject({ nomeBebe: 'Owner Baby' });
+});
+
+it('shared campaign cards keep private routing separate from the canonical public owner', async () => {
+  const { owner, member, campaign } = await sharedOnlyFixture();
+  const cards = await member.caller.campanhas.list();
+  expect(cards.novas.find((c) => c.id === campaign.id)).toMatchObject({
+    slug: member.user.slug,
+    publicOwnerSlug: owner.user.slug,
+  });
+});

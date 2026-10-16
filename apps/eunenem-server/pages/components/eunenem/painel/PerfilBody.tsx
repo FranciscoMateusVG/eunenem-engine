@@ -11,7 +11,7 @@ import {
 import { trpc } from "@/lib/trpc";
 import type { Genero } from "@/lib/concordancia";
 import { paginaShareDisplayPath, paginaShareDisplayPrefix, paginaShareUrl } from "@/lib/pagina-share";
-import { useCampanhaSlugInfoRota } from "@/lib/campanhas";
+import { useCampanhaSlugInfoRota, useCampanhaPublicOwnerSlugRota } from "@/lib/campanhas";
 import { painelHref } from "@/lib/painelRoutes";
 import { useCampanhaEscrita } from "@/lib/campanha-escrita";
 import { useCampanhaRota } from "@/lib/campanha-rota";
@@ -641,6 +641,7 @@ function PerfilBodyConteudo({ slug }: PainelSectionBodyProps) {
   // aperture (1-troca) — slugJaAlterado gates whether the SlugEditor
   // renders at all (see the render below).
   const { campanhaSlug: campanhaSlugRota, slugJaAlterado } = useCampanhaSlugInfoRota();
+  const publicOwnerSlug = useCampanhaPublicOwnerSlugRota();
   const { tweaks, setTweaks } = useTweaks();
   const utils = trpc.useUtils();
 
@@ -1158,18 +1159,20 @@ function PerfilBodyConteudo({ slug }: PainelSectionBodyProps) {
                 pretty slug when chosen; /c/<uuid> copy fallback otherwise. */}
             <span
               className="perfil-share-url"
-              title={paginaShareUrl(profileSlug, idCampanha, campanhaSlugRota)}
+              title={publicOwnerSlug ? paginaShareUrl(publicOwnerSlug, idCampanha, campanhaSlugRota) : undefined}
             >
               {paginaShareDisplayPrefix()}
-              {paginaShareDisplayPath(profileSlug, campanhaSlugRota)}
+              {publicOwnerSlug ? paginaShareDisplayPath(publicOwnerSlug, campanhaSlugRota) : "carregando link…"}
             </span>
             <button
               type="button"
               className="perfil-share-copy"
+              disabled={!publicOwnerSlug}
               onClick={() => {
                 // aperture-1yx1n — copy the REAL public page URL, campanha-
                 // addressed when this perfil sits under a /c/:id route.
-                const link = paginaShareUrl(profileSlug, idCampanha, campanhaSlugRota);
+                if (!publicOwnerSlug) return;
+                const link = paginaShareUrl(publicOwnerSlug, idCampanha, campanhaSlugRota);
                 sendEvent("painel_compartilhar_link_click");
                 void navigator.clipboard
                   .writeText(link)

@@ -1,3 +1,4 @@
+import { isCampaignPublicOwner } from './campaign-public-address.js';
 import { randomUUID } from 'node:crypto';
 import { initTRPC, TRPCError } from '@trpc/server';
 import { z } from 'zod';
@@ -91,7 +92,7 @@ async function resolveCampanhaBySlug(
   if (idCampanha !== undefined && idCampanha !== '') {
     const campanha = await ctx.deps.campanhaRepository.findById(idCampanha as IdCampanha);
     // Not-found AND not-owned-by-this-slug collapse to the same error.
-    if (!campanha || !campanha.idsAdministradores.includes(usuario.idConta)) {
+    if (!campanha || !await isCampaignPublicOwner(ctx, campanha.id, usuario.idConta)) {
       throw new CampanhaSlugNaoEncontradaError('Campanha nao encontrada ou nao autorizada');
     }
     return { campanha };
@@ -199,7 +200,7 @@ function toTRPCError(err: unknown): TRPCError {
   }
   if (err instanceof CampanhaInexistenteError) {
     return new TRPCError({
-      code: 'INTERNAL_SERVER_ERROR',
+      code: 'NOT_FOUND',
       message: err.message,
       cause: err,
     });

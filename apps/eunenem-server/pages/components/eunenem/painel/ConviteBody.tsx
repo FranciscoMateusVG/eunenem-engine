@@ -1,3 +1,4 @@
+import { useCampanhaPublicOwnerSlugRota } from "@/lib/campanhas";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -1418,7 +1419,8 @@ function ConviteBodyConteudo(props: PainelSectionBodyProps) {
   return <DesktopConviteBody {...props} />;
 }
 
-function DesktopConviteBody({ slug }: PainelSectionBodyProps) {
+function DesktopConviteBody(_props: PainelSectionBodyProps) {
+  const publicOwnerSlug = useCampanhaPublicOwnerSlugRota();
   // aperture-z6vks — keep the /c/:idCampanha context on the preview link.
   const idCampanha = useCampanhaRota();
   // aperture-zy4uo — init from EMPTY_STATE: demo content (DEFAULT_STATE) must
@@ -1515,6 +1517,7 @@ function DesktopConviteBody({ slug }: PainelSectionBodyProps) {
     }
   };
   const onSend = async () => {
+    if (!publicOwnerSlug) return;
     if (!guardComplete()) return;
     setIsSharing(true);
     try {
@@ -1525,7 +1528,7 @@ function DesktopConviteBody({ slug }: PainelSectionBodyProps) {
       // save, so sharing doesn't depend on the mutation; we persist after.
       try {
         const resultado = await shareConvitePreview({
-          slug,
+          slug: publicOwnerSlug,
           // aperture-2v91z — share THIS campanha's convite, not the oldest's.
           idCampanha,
           title: `Convite de ${state.babyName || 'nosso evento'}`,
@@ -1611,7 +1614,7 @@ function DesktopConviteBody({ slug }: PainelSectionBodyProps) {
           {isSaving ? "salvando..." : "salvar"}
         </button>
         <a
-          href={painelConvitePreviewHref(slug, idCampanha)}
+          href={publicOwnerSlug ? painelConvitePreviewHref(publicOwnerSlug, idCampanha) : undefined}
           className="cv-btn ghost sm"
           aria-label="ver convite salvo"
           onClick={() => sendEvent("convite_ver_preview_click")}
