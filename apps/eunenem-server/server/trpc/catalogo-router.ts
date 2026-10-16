@@ -4,6 +4,7 @@ import type {
   CatalogoListaItemComProduto,
   CatalogoProdutoComCategoria,
 } from "../../../../src/index.js";
+import type { Logger } from "../../../../src/observability/logger.js";
 import type { ObjectStorage } from "../../../../src/adapters/storage/object-storage.js";
 import { isCatalogImageUrlReadable } from "../lib/security/catalog-image-url.js";
 import type { TrpcContext } from "./context.js";
@@ -83,15 +84,23 @@ function produtoPublico({ produto, categoria }: CatalogoProdutoComCategoria) {
   };
 }
 
-function requireReadableImageUrl(
+function readableImageUrlOrNull(
   imageUrl: string | null,
   objectStorage: ObjectStorage,
+  logger: Logger,
+  entityType: "produto" | "lista",
+  entityId: string,
 ): string | null {
   if (
     imageUrl !== null &&
     !isCatalogImageUrlReadable(imageUrl, objectStorage)
   ) {
-    throw new Error("catalog image URL violates the owned/legacy host policy");
+    logger.warn("catalogo.image_rejected", {
+      reason: "image_url_policy",
+      entityType,
+      entityId,
+    });
+    return null;
   }
   return imageUrl;
 }
@@ -99,17 +108,21 @@ function requireReadableImageUrl(
 function produtoPublicoSeguro(
   row: CatalogoProdutoComCategoria,
   objectStorage: ObjectStorage,
+  logger: Logger,
 ) {
   const dto = produtoPublico(row);
   return {
     ...dto,
-    imageUrl: requireReadableImageUrl(dto.imageUrl, objectStorage),
+    imageUrl: readableImageUrlOrNull(
+      dto.imageUrl, objectStorage, logger, "produto", row.produto.id,
+    ),
   };
 }
 
 function listaProntaItemPublico(
   { item, produto }: CatalogoListaItemComProduto,
   objectStorage: ObjectStorage,
+  logger: Logger,
 ) {
   return {
     id: produto.id,
@@ -120,16 +133,40 @@ function listaProntaItemPublico(
     suggestedQty: item.quantidade,
     emoji: produto.emoji,
     bgColor: CatalogoBgColorPublicoSchema.parse(produto.bgColor),
-    imageUrl: requireReadableImageUrl(produto.imageUrl, objectStorage),
+    imageUrl: readableImageUrlOrNull(
+      produto.imageUrl, objectStorage, logger, "produto", produto.id,
+    ),
   };
 }
 
 async function runPublicCatalogQuery<T>(
+  operationName: "listSections" | "listListasProntas",
+  logger: Logger,
   operation: () => Promise<T>,
 ): Promise<T> {
   try {
     return await operation();
-  } catch {
+  } catch (error) {
+    // Never log raw error messages, SQL, URLs or driver detail: they can carry
+    // credentials/content. Preserve a bounded underlying failure classification.
+    const code =
+      typeof error === "object" && error !== null && "code" in error
+        ? error.code
+        : undefined;
+    const sqlState =
+      typeof code === "string" &&
+      ["42P01", "42703", "42501", "57014", "53300", "08006", "08001", "28P01"].includes(code)
+        ? code
+        : undefined;
+    logger.error("catalogo.query_failed", {
+      operation: operationName,
+      reason: sqlState
+        ? "database_error"
+        : error instanceof z.ZodError
+          ? "invalid_catalog_data"
+          : "unexpected_error",
+      ...(sqlState ? { sqlState } : {}),
+    });
     throw new TRPCError({
       code: "INTERNAL_SERVER_ERROR",
       message: "Não foi possível carregar o catálogo.",
@@ -144,14 +181,15 @@ async function runPublicCatalogQuery<T>(
  * ordering. This layer only groups and translates persistence records into
  * the stable public DTOs. Repository/projection failures become a generic
  * INTERNAL_SERVER_ERROR rather than leaking internals or lying with an empty
- * catalogue.
+ * catalogue. Rejected images alone become null, never a foreign URL or a
+ * failure of the otherwise usable catalogue. Mutation policy stays strict.
  */
 export const catalogoRouter = t.router({
   listSections: t.procedure
     .input(z.object({}).strict().optional())
     .output(CatalogoListSectionsOutputSchema)
     .query(({ ctx }) =>
-      runPublicCatalogQuery(async () => {
+      runPublicCatalogQuery("listSections", ctx.deps.observability.logger, async () => {
         const produtos =
           await ctx.deps.catalogoRepository.findProdutosAtivosComCategoria();
         const sections = new Map<
@@ -174,6 +212,7 @@ export const catalogoRouter = t.router({
             produtoPublicoSeguro(
               produtoComCategoria,
               ctx.deps.objectStorage,
+              ctx.deps.observability.logger,
             ),
           );
           sections.set(categoria.id, section);
@@ -187,7 +226,7 @@ export const catalogoRouter = t.router({
     .input(z.object({}).strict().optional())
     .output(CatalogoListasProntasOutputSchema)
     .query(({ ctx }) =>
-      runPublicCatalogQuery(async () => {
+      runPublicCatalogQuery("listListasProntas", ctx.deps.observability.logger, async () => {
         const listas =
           await ctx.deps.catalogoRepository.findListasAtivasComItensAtivos();
         const entries: [
@@ -208,12 +247,15 @@ export const catalogoRouter = t.router({
               id: key,
               title: lista.nome,
               description: lista.descricao ?? "",
-              imageUrl: requireReadableImageUrl(
+              imageUrl: readableImageUrlOrNull(
                 lista.imageUrl,
                 ctx.deps.objectStorage,
+                ctx.deps.observability.logger,
+                "lista",
+                lista.id,
               ),
               items: itens.map((item) =>
-                listaProntaItemPublico(item, ctx.deps.objectStorage),
+                listaProntaItemPublico(item, ctx.deps.objectStorage, ctx.deps.observability.logger),
               ),
             },
           ]);

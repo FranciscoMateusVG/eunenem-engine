@@ -16,10 +16,14 @@ import {
   makeCatalogoProduto,
 } from '../../helpers/catalogo-repository.conformance.js';
 
-function callerFor(catalogoRepository: CatalogoRepository) {
+function callerFor(
+  catalogoRepository: CatalogoRepository,
+  logger = { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
+) {
   const context: TrpcContext = {
     deps: {
       catalogoRepository,
+      observability: { logger },
       objectStorage: new ObjectStorageMemory('catalog-test'),
     } as ServerDeps,
     headers: new Headers(),
@@ -240,12 +244,15 @@ describe('catalogo public router', () => {
   });
 
   it('surfaces repository failures generically instead of returning an empty projection', async () => {
-    const failure = new Error('catalog database unavailable');
+    const failure = Object.assign(new Error('postgres://never-log:secret@private/db'), {
+      code: '42P01',
+    });
+    const logger = { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() };
     const repository = {
       findProdutosAtivosComCategoria: vi.fn().mockRejectedValue(failure),
       findListasAtivasComItensAtivos: vi.fn().mockRejectedValue(failure),
     } as unknown as CatalogoRepository;
-    const caller = callerFor(repository);
+    const caller = callerFor(repository, logger);
 
     await expect(caller.catalogo.listSections()).rejects.toMatchObject({
       code: 'INTERNAL_SERVER_ERROR',
@@ -255,9 +262,20 @@ describe('catalogo public router', () => {
       code: 'INTERNAL_SERVER_ERROR',
       message: 'Não foi possível carregar o catálogo.',
     });
+    expect(logger.error).toHaveBeenCalledWith('catalogo.query_failed', {
+      operation: 'listSections',
+      reason: 'database_error',
+      sqlState: '42P01',
+    });
+    expect(logger.error).toHaveBeenCalledWith('catalogo.query_failed', {
+      operation: 'listListasProntas',
+      reason: 'database_error',
+      sqlState: '42P01',
+    });
+    expect(JSON.stringify(logger.error.mock.calls)).not.toContain('never-log');
   });
 
-  it('fails loudly when a stored product or list image violates the read policy', async () => {
+  it('omits only the image when a stored product or list image violates the read policy', async () => {
     const repository = new CatalogoRepositoryMemory();
     const categoria = makeCatalogoCategoria();
     await repository.createCategoria(categoria);
@@ -267,10 +285,8 @@ describe('catalogo public router', () => {
       }),
     );
 
-    await expect(callerFor(repository).catalogo.listSections()).rejects.toMatchObject({
-      code: 'INTERNAL_SERVER_ERROR',
-      message: 'Não foi possível carregar o catálogo.',
-    });
+    const sections = await callerFor(repository).catalogo.listSections();
+    expect(sections[0]?.items[0]?.imageUrl).toBeNull();
 
     const cleanRepository = new CatalogoRepositoryMemory();
     await cleanRepository.createLista(
@@ -278,9 +294,7 @@ describe('catalogo public router', () => {
         imageUrl: 'https://127.0.0.1/private.png',
       }),
     );
-    await expect(callerFor(cleanRepository).catalogo.listListasProntas()).rejects.toMatchObject({
-      code: 'INTERNAL_SERVER_ERROR',
-      message: 'Não foi possível carregar o catálogo.',
-    });
+    const lists = await callerFor(cleanRepository).catalogo.listListasProntas();
+    expect(Object.values(lists)[0]?.imageUrl).toBeNull();
   });
 });
