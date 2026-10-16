@@ -1,7 +1,9 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 import {
   type Campanha,
+  campanhaComAdministrador,
   campanhaComRecebedorAtivo,
+  campanhaSemAdministrador,
   campanhaSemRecebedor,
 } from '../../domain/arrecadacao/entities/campanha.js';
 import type {
@@ -29,7 +31,11 @@ export class CampanhaRepositoryMemory implements CampanhaRepository {
     return tracer.startActiveSpan('db.arrecadacao_campanhas.save', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPSERT' });
       try {
-        this.campanhas.set(campanha.id, campanha);
+        const existing = this.campanhas.get(campanha.id);
+        this.campanhas.set(
+          campanha.id,
+          existing ? { ...campanha, idsAdministradores: existing.idsAdministradores } : campanha,
+        );
         span.setStatus({ code: SpanStatusCode.OK });
       } catch (error: unknown) {
         span.recordException(error as Error);
@@ -39,6 +45,18 @@ export class CampanhaRepositoryMemory implements CampanhaRepository {
         span.end();
       }
     });
+  }
+
+  async adicionarAdministrador(idCampanha: IdCampanha, idConta: IdConta): Promise<void> {
+    const campanha = this.campanhas.get(idCampanha);
+    if (campanha && !campanha.idsAdministradores.includes(idConta)) {
+      this.campanhas.set(idCampanha, campanhaComAdministrador(campanha, idConta));
+    }
+  }
+
+  async removerAdministrador(idCampanha: IdCampanha, idConta: IdConta): Promise<void> {
+    const campanha = this.campanhas.get(idCampanha);
+    if (campanha) this.campanhas.set(idCampanha, campanhaSemAdministrador(campanha, idConta));
   }
 
   async findById(
