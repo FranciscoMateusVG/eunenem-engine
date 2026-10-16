@@ -434,6 +434,21 @@ it('member-only bare campaign routes return a controlled missing-context respons
   const { member } = await sharedOnlyFixture();
   await expect(member.caller.contribuicao.list()).rejects.toMatchObject({ code: 'NOT_FOUND' });
   await expect(member.caller.eventoConvite.get()).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  await expect(member.caller.eventoListaDeConvidados.get()).rejects.toMatchObject({
+    code: 'NOT_FOUND',
+  });
+  await expect(
+    member.caller.pagina.obterListaPresentes({ slug: member.user.slug }),
+  ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  await expect(
+    member.caller.eventoConvite.getPreview({ slug: member.user.slug }),
+  ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  await expect(
+    member.caller.painelMensagens.list({ slug: member.user.slug }),
+  ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+  expect(
+    await member.caller.perfil.getPerfilPublicoBySlug({ slug: member.user.slug }),
+  ).toMatchObject({ nomeBebe: null });
 });
 
 it('shared campaign public addresses belong only to its owner, not an invited member', async () => {
