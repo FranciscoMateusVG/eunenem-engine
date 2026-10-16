@@ -265,6 +265,13 @@ export function buildPainelMenu(
         // "verified" kind stays available for that future — tracked by
         // aperture-aqiu7, re-scoped to "IF a real verification ever ships").
         {
+          id: "compartilhar",
+          label: "compartilhar",
+          sub: "convide pessoas para sua campanha",
+          variant: null,
+          icon: "phone",
+        },
+        {
           id: "bancarios",
           label: "dados bancários",
           sub: "para onde a gente envia o dinheiro",

@@ -46,6 +46,27 @@ export interface CampanhaAdministradores {
   id_usuario: string;
 }
 
+export interface CampanhaCompartilhamentoAudit {
+  acao: string;
+  alvo: string;
+  ator_id: string;
+  campanha_id: string;
+  criado_em: Generated<Timestamp>;
+  id: string;
+}
+
+export interface CampanhaConvites {
+  campanha_id: string;
+  consumido_em: Timestamp | null;
+  consumido_por: string | null;
+  criado_em: Generated<Timestamp>;
+  criado_por: string;
+  email: string;
+  expira_em: Timestamp;
+  id: string;
+  revogado_em: Timestamp | null;
+}
+
 export interface CampanhaMembrosPermissoes {
   atualizado_em: Generated<Timestamp>;
   campanha_id: string;
@@ -536,6 +557,8 @@ export interface Verifications {
 export interface DB {
   accounts: Accounts;
   campanha_administradores: CampanhaAdministradores;
+  campanha_compartilhamento_audit: CampanhaCompartilhamentoAudit;
+  campanha_convites: CampanhaConvites;
   campanha_membros_permissoes: CampanhaMembrosPermissoes;
   campanhas: Campanhas;
   catalogo_admin_audit_events: CatalogoAdminAuditEvents;

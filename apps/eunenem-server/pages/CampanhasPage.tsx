@@ -109,7 +109,7 @@ export function CampanhasPage() {
   useEffect(() => {
     if (meQ.isLoading || !meQ.data) return;
     const target = postLoginTarget(meQ.data);
-    if (target !== '/campanhas' && window.location.pathname !== target) {
+    if (meQ.data.needsOnboarding && target !== '/campanhas' && window.location.pathname !== target) {
       window.location.assign(target);
     }
   }, [meQ.isLoading, meQ.data]);

@@ -1,3 +1,4 @@
+import { CompartilharBody } from "@/components/eunenem/painel/CompartilharBody";
 import { useEffect, type ReactNode } from "react";
 
 import { BancariosBody } from "@/components/eunenem/painel/BancariosBody";
@@ -40,6 +41,7 @@ type PainelSectionBody = (props: PainelSectionBodyProps) => ReactNode;
 export const PAINEL_SECTION_PAGES: Partial<
   Record<PainelSection, PainelSectionBody>
 > = {
+  compartilhar: CompartilharBody,
   presentes: PresentesBody,           // aperture-xjwc
   lista: ListaPresentesBody,          // aperture-4je0p
   convite: ConviteBody,               // aperture-q8rr

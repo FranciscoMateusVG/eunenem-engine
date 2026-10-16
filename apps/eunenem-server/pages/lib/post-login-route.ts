@@ -16,13 +16,16 @@
 import { isLegacy, needsOnboarding } from "./onboarding-gate.js";
 
 /** A minimal shape — the real me is the inferred auth.me output. */
-type MeLike = { slug?: string | null } | null | undefined;
+type MeLike = { slug?: string | null; onboardingProprioPendente?: boolean; idCampanhaCompartilhada?: string | null } | null | undefined;
 
 /**
  * The destination for a *resolved, authenticated* me. Never returns a wizard
  * path without a slug (falls back to /campanhas — CampanhasPage re-checks auth).
  */
 export function postLoginTarget(me: MeLike): string {
+  if (me?.onboardingProprioPendente && me.idCampanhaCompartilhada && me.slug) {
+    return `/painel/${me.slug}/c/${me.idCampanhaCompartilhada}`;
+  }
   if (isLegacy(me)) return "/campanhas";
   if (needsOnboarding(me) && me?.slug) return `/painel/${me.slug}`;
   return "/campanhas";

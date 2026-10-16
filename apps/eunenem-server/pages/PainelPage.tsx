@@ -159,7 +159,8 @@ export function PainelPage({
   // combined with the #304 OAuth-return redirect (which lands every OAuth user
   // on /painel/<slug>), no per-callback patching is needed.
   const meQ = trpc.auth.me.useQuery(undefined, { staleTime: 0 });
-  const mustOnboard = needsOnboarding(meQ.data);
+  const pediuListaPropria = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('criarMinhaLista') === '1';
+  const mustOnboard = needsOnboarding(meQ.data) || (pediuListaPropria && meQ.data?.onboardingProprioPendente === true && !idCampanhaRota);
 
   // aperture-3ic62 — the REAL baby name for the "página da <X>" header.
   // null (unset or still loading) → PainelLayout falls back to the neutral
@@ -389,6 +390,7 @@ export function PainelPage({
       genero={genero}
     >
       <PainelPageView idCampanha={idCampanha ?? undefined} />
+      {meQ.data?.onboardingProprioPendente && meQ.data.idCampanhaCompartilhada && <a className="mb-4 inline-block rounded border border-plum px-4 py-2 text-plum" href={`/painel/${slug}?criarMinhaLista=1`}>Criar minha própria lista</a>}
       <PainelHeaderCard snapshot={snapshot} slug={slug} campanhaTitulo={campanhaTitulo} />
       <PainelMenu groups={groups} slug={slug} />
       <PainelTutorialTrigger
