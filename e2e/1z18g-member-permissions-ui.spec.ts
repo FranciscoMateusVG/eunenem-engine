@@ -50,7 +50,8 @@ test.describe('member permissions in the painel UI (aperture-1z18g)', () => {
 
   async function abrir(secao: string): Promise<Page> {
     const page = await context.newPage();
-    await page.goto(`/painel/${intruder.slug}/c/${victimA.idCampanha}/${secao}`);
+    const sufixo = secao === '' ? '' : `/${secao}`;
+    await page.goto(`/painel/${intruder.slug}/c/${victimA.idCampanha}${sufixo}`);
     return page;
   }
 
@@ -153,6 +154,67 @@ test.describe('member permissions in the painel UI (aperture-1z18g)', () => {
     await conceder(['extrato:ver', 'saque:solicitar']);
     page = await abrir('presentes');
     await expect(page.getByRole('button', { name: /solicitar transferência/ })).toBeVisible();
+    await page.close();
+  });
+
+  test('dashboard (default member grants) hides financial cards, bank data and sharing', async () => {
+    await conceder([
+      'presentes:gerenciar',
+      'perfil:editar',
+      'mensagens:ver',
+      'mensagens:gerenciar',
+      'convidados:ver',
+      'convite:editar',
+    ]);
+    let page = await abrir('');
+    await expect(page.getByText('minha lista de presentes')).toBeVisible();
+    for (const visivel of [
+      'meu convite',
+      'editar meu perfil',
+      'lista de convidados',
+      'mensagens recebidas',
+    ]) {
+      await expect(page.getByText(visivel, { exact: true }), `${visivel} stays`).toBeVisible();
+    }
+    for (const oculto of [
+      'recebido até agora',
+      'resgatar valores',
+      'presentes recebidos',
+      'dados bancários',
+    ]) {
+      await expect(page.getByText(oculto, { exact: true }), `${oculto} must be hidden`).toHaveCount(
+        0,
+      );
+    }
+    await expect(page.getByText('compartilhar', { exact: true })).toHaveCount(0);
+    await page.close();
+
+    // Granting the financial actions brings them back (sharing stays owner-only).
+    await conceder(['extrato:ver', 'saque:solicitar', 'recebedor:gerenciar']);
+    page = await abrir('');
+    for (const visivel of [
+      'recebido até agora',
+      'resgatar valores',
+      'presentes recebidos',
+      'dados bancários',
+    ]) {
+      await expect(
+        page.getByText(visivel, { exact: true }),
+        `${visivel} after grant`,
+      ).toBeVisible();
+    }
+    for (const oculto of [
+      'meu convite',
+      'editar meu perfil',
+      'lista de convidados',
+      'mensagens recebidas',
+    ]) {
+      await expect(
+        page.getByText(oculto, { exact: true }),
+        `${oculto} hidden without grant`,
+      ).toHaveCount(0);
+    }
+    await expect(page.getByText('compartilhar', { exact: true })).toHaveCount(0);
     await page.close();
   });
 
