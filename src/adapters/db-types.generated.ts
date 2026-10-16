@@ -46,6 +46,14 @@ export interface CampanhaAdministradores {
   id_usuario: string;
 }
 
+export interface CampanhaMembrosPermissoes {
+  atualizado_em: Generated<Timestamp>;
+  campanha_id: string;
+  id_conta: string;
+  papel: string;
+  permissoes: Generated<string[]>;
+}
+
 export interface Campanhas {
   criada_em: Generated<Timestamp>;
   id: string;
@@ -528,6 +536,7 @@ export interface Verifications {
 export interface DB {
   accounts: Accounts;
   campanha_administradores: CampanhaAdministradores;
+  campanha_membros_permissoes: CampanhaMembrosPermissoes;
   campanhas: Campanhas;
   catalogo_admin_audit_events: CatalogoAdminAuditEvents;
   catalogo_categorias: CatalogoCategorias;
