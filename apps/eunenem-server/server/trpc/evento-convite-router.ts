@@ -92,7 +92,7 @@ async function resolveCampanhaBySlug(
   if (idCampanha !== undefined && idCampanha !== '') {
     const campanha = await ctx.deps.campanhaRepository.findById(idCampanha as IdCampanha);
     // Not-found AND not-owned-by-this-slug collapse to the same error.
-    if (!campanha || !await isCampaignPublicOwner(ctx, campanha.id, usuario.idConta)) {
+    if (!campanha || !(await isCampaignPublicOwner(ctx, campanha.id, usuario.idConta))) {
       throw new CampanhaSlugNaoEncontradaError('Campanha nao encontrada ou nao autorizada');
     }
     return { campanha };

@@ -470,6 +470,26 @@ it('shared campaign public addresses belong only to its owner, not an invited me
   ).toMatchObject({ nomeBebe: 'Owner Baby' });
 });
 
+it('an invited campaign with the same slug never shadows the member’s own public campaign', async () => {
+  const { member } = await sharedOnlyFixture();
+  const own = makeCampanha({
+    idPlataforma: ID_PLATAFORMA_EUNENEM,
+    idsAdministradores: [member.user.id_conta],
+  });
+  await deps.campanhaRepository.save(own);
+  await deps.db
+    .updateTable('campanhas')
+    .set({ slug: 'shared-baby' })
+    .where('id', '=', own.id)
+    .execute();
+  expect(
+    await member.caller.pagina.resolverCampanhaSlug({
+      slug: member.user.slug,
+      campanhaSlug: 'shared-baby',
+    }),
+  ).toEqual({ idCampanha: own.id });
+});
+
 it('shared campaign cards keep private routing separate from the canonical public owner', async () => {
   const { owner, member, campaign } = await sharedOnlyFixture();
   const cards = await member.caller.campanhas.list();

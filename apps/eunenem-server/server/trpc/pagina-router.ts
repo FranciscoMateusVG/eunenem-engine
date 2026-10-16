@@ -310,7 +310,7 @@ async function resolvePaginaBySlug(
   let campanha: Campanha | undefined;
   if (idCampanha !== undefined && idCampanha !== '') {
     campanha = await deps.campanhaRepository.findById(idCampanha as IdCampanha);
-    if (!campanha || !await isCampaignPublicOwner(ctx, campanha.id, usuario.idConta)) {
+    if (!campanha || !(await isCampaignPublicOwner(ctx, campanha.id, usuario.idConta))) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Pagina nao encontrada' });
     }
   } else {
@@ -986,10 +986,13 @@ export const paginaRouter = t.router({
       const campanhas = await deps.campanhaRepository.findCampanhasByAdministrador(
         usuario.idConta,
       );
-      const candidates = await Promise.all(campanhas.filter(c => c.slug === alvo).map(async c =>
-        await isCampaignPublicOwner(ctx, c.id, usuario.idConta) ? c : undefined));
-      const campanha = candidates.find(c => c !== undefined);
-      if (!campanha || !await isCampaignPublicOwner(ctx, campanha.id, usuario.idConta)) {
+      const candidates = await Promise.all(
+        campanhas.filter((c) => c.slug === alvo).map(async (c) =>
+          (await isCampaignPublicOwner(ctx, c.id, usuario.idConta)) ? c : undefined,
+        ),
+      );
+      const campanha = candidates.find((c) => c !== undefined);
+      if (!campanha) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Pagina nao encontrada' });
       }
 

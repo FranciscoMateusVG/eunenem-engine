@@ -320,7 +320,7 @@ export const perfilRouter = t.router({
           campanha = await deps.campanhaRepository.findById(input.idCampanha as IdCampanha);
           // Not-found AND not-owned-by-the-slug's-conta collapse to the SAME
           // NOT_FOUND — a visitor can't distinguish which.
-          if (!campanha || !await isCampaignPublicOwner(ctx, campanha.id, usuario.idConta)) {
+          if (!campanha || !(await isCampaignPublicOwner(ctx, campanha.id, usuario.idConta))) {
             throw new UsuarioNaoEncontradoError(input.slug);
           }
         } else {
