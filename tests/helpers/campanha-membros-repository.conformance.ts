@@ -147,6 +147,17 @@ export function describeCampanhaMembrosRepositoryConformance(
       });
     });
 
+    it('adicionarMembro grants exactly the given set (accepted invite), never re-applied', async () => {
+      await rig.adicionarAdministrador(idCampanha, membro);
+      await repo.adicionarMembro(idCampanha, membro, undefined, ['extrato:ver', 'extrato:ver']);
+      expect(await repo.obterAcesso(idCampanha, membro)).toEqual({
+        papel: 'membro',
+        permissoes: ['extrato:ver'],
+      });
+      await repo.adicionarMembro(idCampanha, membro, undefined, ['saque:solicitar']);
+      expect((await repo.obterAcesso(idCampanha, membro))?.permissoes).toEqual(['extrato:ver']);
+    });
+
     it('definirPermissoes refuses an owner or a non-member (returns false, changes nothing)', async () => {
       expect(await repo.definirPermissoes(idCampanha, owner, ['saque:solicitar'])).toBe(false);
       expect(await repo.obterAcesso(idCampanha, owner)).toEqual({ papel: 'owner', permissoes: [] });

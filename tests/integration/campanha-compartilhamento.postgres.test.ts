@@ -2,7 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { CampanhaCompartilhamentoPostgres } from '../../src/adapters/arrecadacao/campanha-compartilhamento.postgres.js';
 import { criarAuth } from '../../src/adapters/usuario/criar-auth.js';
-import { PERMISSOES_PADRAO_MEMBRO } from '../../src/domain/arrecadacao/value-objects/permissao-campanha.js';
+import {
+  type AcaoConcedivel,
+  PERMISSOES_PADRAO_MEMBRO,
+} from '../../src/domain/arrecadacao/value-objects/permissao-campanha.js';
 import { createTestDatabase, type TestDatabase } from '../helpers/test-db.js';
 
 let testDb: TestDatabase;
@@ -61,14 +64,23 @@ async function seedUser(email: string, verified = false, tenant = plataforma) {
   await testDb.db.insertInto('contas').values({ id: conta, id_usuario: id }).execute();
   return { id, conta };
 }
-async function invite(campanha: string, email: string) {
+async function invite(campanha: string, email: string, permissoes?: readonly AcaoConcedivel[]) {
   return sharing.convidar({
     campanhaId: campanha,
     plataformaId: plataforma,
     email,
     atorId: randomUUID(),
     origem: 'owner',
+    ...(permissoes ? { permissoes } : {}),
   });
+}
+async function accessOf(campanha: string, conta: string) {
+  return testDb.db
+    .selectFrom('campanha_membros_permissoes')
+    .selectAll()
+    .where('campanha_id', '=', campanha)
+    .where('id_conta', '=', conta)
+    .executeTakeFirstOrThrow();
 }
 async function members(campanha: string) {
   return testDb.db
@@ -266,4 +278,123 @@ it('revocation and its audit roll back together on a real database write failure
     .where('id', '=', invitation.id)
     .executeTakeFirstOrThrow();
   expect(unchanged.revogado_em).toBeNull();
+});
+
+it('verified acceptance grants EXACTLY the permissions chosen on the invite', async () => {
+  const campanha = await seedCampaign();
+  const email = `chosen-${randomUUID()}@example.com`;
+  const user = await seedUser(email, true);
+  const chosen: AcaoConcedivel[] = ['mensagens:ver', 'extrato:ver', 'saque:solicitar'];
+  const row = await invite(campanha, email, chosen);
+  expect(row.permissoes).toEqual(chosen);
+  await sharing.consumirVerificados(user.id, plataforma);
+  const access = await accessOf(campanha, user.conta);
+  expect(access.papel).toBe('membro');
+  expect(access.permissoes).toEqual(chosen);
+});
+
+it('an invite with no permissions chosen grants nothing beyond membership', async () => {
+  const campanha = await seedCampaign();
+  const email = `none-${randomUUID()}@example.com`;
+  const user = await seedUser(email, true);
+  await invite(campanha, email, []);
+  await sharing.consumirVerificados(user.id, plataforma);
+  expect((await accessOf(campanha, user.conta)).permissoes).toEqual([]);
+});
+
+it('invites default to PERMISSOES_PADRAO_MEMBRO when the caller chooses nothing', async () => {
+  const campanha = await seedCampaign();
+  const row = await invite(campanha, `default-${randomUUID()}@example.com`);
+  expect(row.permissoes).toEqual(PERMISSOES_PADRAO_MEMBRO);
+});
+
+it('a duplicate invite keeps the pending invite and its current permissions', async () => {
+  const campanha = await seedCampaign();
+  const email = `dup-perms-${randomUUID()}@example.com`;
+  const first = await invite(campanha, email, ['extrato:ver']);
+  const again = await invite(campanha, email, ['presentes:gerenciar']);
+  expect(again.id).toBe(first.id);
+  expect(again.permissoes).toEqual(['extrato:ver']);
+});
+
+it('editing a pending invite changes what acceptance grants, and is audited', async () => {
+  const campanha = await seedCampaign();
+  const email = `edit-${randomUUID()}@example.com`;
+  const user = await seedUser(email, true);
+  const row = await invite(campanha, email);
+  const ator = randomUUID();
+  expect(
+    await sharing.definirPermissoesConvite(
+      campanha,
+      plataforma,
+      row.id,
+      ['recebedor:gerenciar', 'perfil:editar', 'perfil:editar'],
+      ator,
+    ),
+  ).toBe(true);
+  await sharing.consumirVerificados(user.id, plataforma);
+  expect((await accessOf(campanha, user.conta)).permissoes).toEqual([
+    'recebedor:gerenciar',
+    'perfil:editar',
+  ]);
+  const audit = await testDb.db
+    .selectFrom('campanha_compartilhamento_audit')
+    .selectAll()
+    .where('campanha_id', '=', campanha)
+    .where('acao', '=', 'convite:permissoes')
+    .executeTakeFirstOrThrow();
+  expect(audit).toMatchObject({ ator_id: ator, alvo: row.id });
+});
+
+it('only pending invites of the same campaign can be edited', async () => {
+  const campanha = await seedCampaign();
+  const other = await seedCampaign();
+  const email = `edit-closed-${randomUUID()}@example.com`;
+  const user = await seedUser(email, true);
+  const accepted = await invite(campanha, email);
+  await sharing.consumirVerificados(user.id, plataforma);
+  expect(
+    await sharing.definirPermissoesConvite(
+      campanha,
+      plataforma,
+      accepted.id,
+      ['saque:solicitar'],
+      randomUUID(),
+    ),
+  ).toBe(false);
+  expect((await accessOf(campanha, user.conta)).permissoes).toEqual(PERMISSOES_PADRAO_MEMBRO);
+  const revoked = await invite(campanha, `revoked-edit-${randomUUID()}@example.com`);
+  await sharing.revogar(campanha, plataforma, revoked.id, randomUUID());
+  expect(
+    await sharing.definirPermissoesConvite(campanha, plataforma, revoked.id, [], randomUUID()),
+  ).toBe(false);
+  const pending = await invite(campanha, `foreign-edit-${randomUUID()}@example.com`);
+  expect(
+    await sharing.definirPermissoesConvite(other, plataforma, pending.id, [], randomUUID()),
+  ).toBe(false);
+  const unchanged = await testDb.db
+    .selectFrom('campanha_convites')
+    .select('permissoes')
+    .where('id', '=', pending.id)
+    .executeTakeFirstOrThrow();
+  expect(unchanged.permissoes).toEqual(PERMISSOES_PADRAO_MEMBRO);
+});
+
+it('acceptance never overwrites the permissions of someone who is already a member', async () => {
+  const campanha = await seedCampaign();
+  const email = `already-${randomUUID()}@example.com`;
+  const user = await seedUser(email, true);
+  await invite(campanha, email, ['saque:solicitar']);
+  // Legacy/manual grant while the invite is pending: current rules stay.
+  await testDb.db
+    .insertInto('campanha_membros_permissoes')
+    .values({
+      campanha_id: campanha,
+      id_conta: user.conta,
+      papel: 'membro',
+      permissoes: ['mensagens:ver'],
+    })
+    .execute();
+  await sharing.consumirVerificados(user.id, plataforma);
+  expect((await accessOf(campanha, user.conta)).permissoes).toEqual(['mensagens:ver']);
 });

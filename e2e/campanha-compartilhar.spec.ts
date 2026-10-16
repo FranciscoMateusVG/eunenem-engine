@@ -145,3 +145,102 @@ test('member-only dashboard has an empty own profile and public links use the ca
     await db.destroy();
   }
 });
+
+test('owner chooses permissions in the invite form, edits the pending invite, and acceptance grants exactly that', async ({
+  authenticatedPage: ownerPage,
+  seededData,
+  browser,
+}) => {
+  const { createDatabase } = await import('../src/adapters/database.js');
+  const { mintMagicLinkSession, browserCookieFor } = await import('./magic-link-auth.js');
+  const databaseUrl = process.env.E2E_DATABASE_URL;
+  if (!databaseUrl) throw new Error('This test requires an explicit local E2E_DATABASE_URL');
+  const db = createDatabase(databaseUrl);
+  const baseURL = process.env.E2E_BASE_URL ?? 'http://localhost:3002';
+  const recipientContext = await browser.newContext({ baseURL });
+  try {
+    await ownerPage.goto(`/painel/${seededData.slug}/c/${seededData.idCampanha}/compartilhar`);
+    await expect(ownerPage.locator('body')).not.toContainText('Novos membros podem cuidar');
+    const form = ownerPage.getByTestId('convite-permissoes-novo');
+    const box = (scope: typeof form, acao: string) => scope.locator(`input[data-acao="${acao}"]`);
+    // Pre-ticked with the default member permissions; finance stays off.
+    for (const acao of [
+      'presentes:gerenciar',
+      'perfil:editar',
+      'mensagens:ver',
+      'mensagens:gerenciar',
+      'convidados:ver',
+      'convite:editar',
+    ])
+      await expect(box(form, acao)).toBeChecked();
+    for (const acao of ['link:editar', 'extrato:ver', 'recebedor:gerenciar', 'saque:solicitar'])
+      await expect(box(form, acao)).not.toBeChecked();
+    await expect(form).toContainText('financeiro');
+    await box(form, 'presentes:gerenciar').uncheck();
+    await box(form, 'extrato:ver').check();
+    await expect(ownerPage.getByTestId('convite-permissoes-resumo')).toContainText(
+      'ver o extrato financeiro',
+    );
+    await expect(ownerPage.getByTestId('convite-permissoes-resumo')).not.toContainText(
+      'editar a lista de presentes',
+    );
+
+    const email = `chosen-ui-${randomUUID()}@example.com`;
+    await ownerPage.getByLabel('E-mail da pessoa').fill(email);
+    await ownerPage.getByRole('button', { name: 'Convidar', exact: true }).click();
+    await expect(ownerPage.getByRole('status')).toContainText('Convite enviado');
+    // The form resets to the defaults for the next invite.
+    await expect(box(form, 'presentes:gerenciar')).toBeChecked();
+    await expect(box(form, 'extrato:ver')).not.toBeChecked();
+
+    const invitation = ownerPage.getByRole('listitem').filter({ hasText: email });
+    await expect(invitation).toContainText('Pendente');
+    const pending = invitation.locator('fieldset');
+    await expect(box(pending, 'extrato:ver')).toBeChecked();
+    await expect(box(pending, 'presentes:gerenciar')).not.toBeChecked();
+    const saved = ownerPage.waitForResponse(
+      (r) => r.url().includes('compartilhamento.definirPermissoesConvite') && r.ok(),
+    );
+    await box(pending, 'saque:solicitar').check();
+    await saved;
+    await ownerPage.reload();
+    const reloaded = ownerPage.getByRole('listitem').filter({ hasText: email }).locator('fieldset');
+    await expect(box(reloaded, 'saque:solicitar')).toBeChecked();
+
+    const session = await mintMagicLinkSession(db, { email, name: 'Chosen Member', baseURL });
+    await recipientContext.addCookies([browserCookieFor(session, baseURL)]);
+    const recipient = await recipientContext.newPage();
+    await recipient.goto('/campanhas'); // verified session → invite consumed
+    await expect(recipient.locator(`a[href$="/c/${seededData.idCampanha}"]`)).toBeVisible();
+    const user = await db
+      .selectFrom('usuarios')
+      .select('id_conta')
+      .where('id', '=', session.userId)
+      .executeTakeFirstOrThrow();
+    const access = await db
+      .selectFrom('campanha_membros_permissoes')
+      .select(['papel', 'permissoes'])
+      .where('campanha_id', '=', seededData.idCampanha)
+      .where('id_conta', '=', user.id_conta)
+      .executeTakeFirstOrThrow();
+    expect(access.papel).toBe('membro');
+    expect([...access.permissoes].sort()).toEqual(
+      [
+        'perfil:editar',
+        'mensagens:ver',
+        'mensagens:gerenciar',
+        'convidados:ver',
+        'convite:editar',
+        'extrato:ver',
+        'saque:solicitar',
+      ].sort(),
+    );
+    await ownerPage.reload();
+    const memberToggles = ownerPage.getByTestId(`membro-permissoes-${user.id_conta}`);
+    await expect(box(memberToggles, 'saque:solicitar')).toBeChecked();
+    await expect(box(memberToggles, 'presentes:gerenciar')).not.toBeChecked();
+  } finally {
+    await recipientContext.close();
+    await db.destroy();
+  }
+});
