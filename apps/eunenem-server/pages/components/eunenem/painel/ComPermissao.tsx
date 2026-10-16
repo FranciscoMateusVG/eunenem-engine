@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useCampanhaEscrita } from "@/lib/campanha-escrita";
 import type { AcaoCampanha } from "../../../../../../src/domain/arrecadacao/value-objects/permissao-campanha.js";
+import { PainelDataBoundary } from "./PainelDataBoundary";
 import { useAcessoCampanha } from "./useAcessoCampanha";
 
 /**
@@ -26,6 +27,10 @@ export function ComPermissao({
         <span className="perfil-spinner" aria-hidden="true" />
       </div>
     );
+  }
+  // A failed permission read is an error to retry — never "sem permissão".
+  if (acesso.error) {
+    return <PainelDataBoundary isLoading={false} hasError onRetry={() => void acesso.refetch()} />;
   }
   if (acesso.pode(acao)) return <>{children}</>;
   return <SemPermissao titulo={titulo} />;

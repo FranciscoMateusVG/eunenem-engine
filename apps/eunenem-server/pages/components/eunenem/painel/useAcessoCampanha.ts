@@ -7,6 +7,9 @@ export interface AcessoCampanhaUI {
   /** True only once the server confirmed the action. Hides by default while loading. */
   pode: (acao: AcaoCampanha) => boolean;
   isLoading: boolean;
+  /** Query failure — callers must show an error/retry, not a permission-less UI. */
+  error: unknown;
+  refetch: () => unknown;
 }
 
 /**
@@ -24,5 +27,7 @@ export function useAcessoCampanha(idCampanha: string | null | undefined): Acesso
     papel: query.data?.papel ?? null,
     pode: (acao) => acoes.includes(acao),
     isLoading: query.isLoading,
+    error: query.error,
+    refetch: () => query.refetch(),
   };
 }

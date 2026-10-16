@@ -18,6 +18,7 @@ import { pageViewProps } from '@/lib/rota-canonica';
 import { useListaDeConvidadosData } from '@/lib/convidados';
 import { useAcessoCampanha } from '@/components/eunenem/painel/useAcessoCampanha';
 import { filtrarMenuPorAcesso, visibilidadeRecebido } from '@/lib/painel-permissoes';
+import { estadoDadosDashboard } from '@/lib/painel-dashboard-estado';
 import { deriveGiftListUnitCounts, derivePainelCounts } from '@/lib/painel-counts';
 import { PainelDataBoundary } from '@/components/eunenem/painel/PainelDataBoundary';
 
@@ -356,18 +357,20 @@ export function PainelPage({
     );
   }
 
-  const dashboardDataLoading =
-    acesso.isLoading || summary.isLoading || convidadosQuery.isLoading || listaQuery.isLoading;
-  const dashboardDataFailed = Boolean(
-    summary.error || convidadosQuery.error || listaQuery.error,
-  );
+  // aperture-6wl0f — meuAcesso is part of the gate: a failed permission read
+  // shows the error/retry state instead of a dashboard stripped of every card.
+  const {
+    loading: dashboardDataLoading,
+    failed: dashboardDataFailed,
+    retry: retryDashboardData,
+  } = estadoDadosDashboard({
+    acesso,
+    summary,
+    convidados: convidadosQuery,
+    lista: listaQuery,
+  });
 
   if (dashboardDataLoading || dashboardDataFailed) {
-    const retryDashboardData = () => {
-      if (summary.error) void summary.refetch();
-      if (convidadosQuery.error) void convidadosQuery.refetch();
-      if (listaQuery.error) void listaQuery.refetch();
-    };
 
     return (
       <PainelLayout
