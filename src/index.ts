@@ -369,6 +369,7 @@ export {
   acessoPermite,
   acoesPermitidas,
   PapelMembroCampanhaSchema,
+  PERMISSOES_PADRAO_MEMBRO,
 } from './domain/arrecadacao/value-objects/permissao-campanha.js';
 // Plan 0015 (aperture-7pqee): DadosContribuinte moved to the Pagamentos BC
 // since it now lives on IntencaoPagamento, not on the Contribuição

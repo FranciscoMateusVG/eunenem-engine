@@ -32,7 +32,7 @@ export interface CampanhaMembrosRepository {
   ): Promise<readonly MembroCampanha[]>;
 
   /**
-   * Registra um novo membro com papel 'membro' e NENHUMA permissão.
+   * Registra um novo membro com papel 'membro' e PERMISSOES_PADRAO_MEMBRO.
    * Idempotente: nunca rebaixa um owner nem zera permissões existentes.
    */
   adicionarMembro(

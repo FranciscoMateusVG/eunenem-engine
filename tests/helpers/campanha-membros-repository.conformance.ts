@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { CampanhaMembrosRepository } from '../../src/adapters/arrecadacao/campanha-membros-repository.js';
 import type { CampanhaRepository } from '../../src/adapters/arrecadacao/campanha-repository.js';
 import type { Campanha } from '../../src/domain/arrecadacao/entities/campanha.js';
+import { PERMISSOES_PADRAO_MEMBRO } from '../../src/domain/arrecadacao/value-objects/permissao-campanha.js';
 import { CampanhaPermissaoNegadaError } from '../../src/errors/arrecadacao/permissao-negada.error.js';
 import { NoopLogger } from '../../src/observability/noop-logger.js';
 import { noopTracer } from '../../src/observability/tracer.js';
@@ -76,19 +77,25 @@ export function describeCampanhaMembrosRepositoryConformance(
       }
     });
 
-    it('new member starts with NO permissions and is denied everything (fail-closed)', async () => {
+    it('new member starts with the operator defaults: no financial, link or member rights', async () => {
       await rig.adicionarAdministrador(idCampanha, membro);
       await repo.adicionarMembro(idCampanha, membro);
       expect(await repo.obterAcesso(idCampanha, membro)).toEqual({
         papel: 'membro',
-        permissoes: [],
+        permissoes: [...PERMISSOES_PADRAO_MEMBRO],
       });
-      await expect(assertAcao(membro, 'presentes:gerenciar')).rejects.toBeInstanceOf(
-        CampanhaPermissaoNegadaError,
-      );
-      await expect(assertAcao(membro, 'membros:gerenciar')).rejects.toBeInstanceOf(
-        CampanhaPermissaoNegadaError,
-      );
+      await expect(assertAcao(membro, 'presentes:gerenciar')).resolves.toMatchObject({
+        papel: 'membro',
+      });
+      for (const acao of [
+        'recebedor:gerenciar',
+        'saque:solicitar',
+        'extrato:ver',
+        'link:editar',
+        'membros:gerenciar',
+      ] as const) {
+        await expect(assertAcao(membro, acao)).rejects.toBeInstanceOf(CampanhaPermissaoNegadaError);
+      }
     });
 
     it('an admin WITHOUT a papel row has no rights', async () => {
@@ -117,7 +124,7 @@ export function describeCampanhaMembrosRepositoryConformance(
       await expect(assertAcao(membro, 'presentes:gerenciar')).resolves.toMatchObject({
         papel: 'membro',
       });
-      await expect(assertAcao(membro, 'recebedor:gerenciar')).rejects.toBeInstanceOf(
+      await expect(assertAcao(membro, 'perfil:editar')).rejects.toBeInstanceOf(
         CampanhaPermissaoNegadaError,
       );
       expect(await repo.definirPermissoes(idCampanha, membro, [])).toBe(true);
@@ -148,7 +155,7 @@ export function describeCampanhaMembrosRepositoryConformance(
       );
     });
 
-    it('removerMembro drops the papel; re-adding starts from zero permissions', async () => {
+    it('removerMembro drops the papel; re-adding starts from the defaults, not old grants', async () => {
       await rig.adicionarAdministrador(idCampanha, membro);
       await repo.adicionarMembro(idCampanha, membro);
       await repo.definirPermissoes(idCampanha, membro, ['saque:solicitar']);
@@ -157,7 +164,7 @@ export function describeCampanhaMembrosRepositoryConformance(
       await repo.adicionarMembro(idCampanha, membro);
       expect(await repo.obterAcesso(idCampanha, membro)).toEqual({
         papel: 'membro',
-        permissoes: [],
+        permissoes: [...PERMISSOES_PADRAO_MEMBRO],
       });
     });
 

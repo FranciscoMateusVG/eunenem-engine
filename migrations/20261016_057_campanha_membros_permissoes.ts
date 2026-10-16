@@ -13,7 +13,9 @@ import { type Kysely, sql } from 'kysely';
  *
  * `papel`:
  *   - 'owner'  → todas as permissões, inclusive gerenciar membros.
- *   - 'membro' → só as ações listadas em `permissoes` (padrão: nenhuma).
+ *   - 'membro' → só as ações listadas em `permissoes`. O default da coluna é
+ *     vazio (fail-closed para qualquer insert cru); o fluxo de convite grava
+ *     PERMISSOES_PADRAO_MEMBRO do domínio.
  *
  * BACKFILL — owner = criador da campanha. Evidência procurada: `campanhas` não
  * tem coluna de criador e `campanha_administradores` não tem timestamp nem
@@ -45,7 +47,11 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     )
     .addCheckConstraint(
       'campanha_membros_permissoes_permissoes_check',
-      sql`permissoes <@ ARRAY['recebedor:gerenciar', 'saque:solicitar', 'presentes:gerenciar']::text[]`,
+      sql`permissoes <@ ARRAY[
+        'presentes:gerenciar', 'perfil:editar', 'mensagens:ver', 'mensagens:gerenciar',
+        'convidados:ver', 'convite:editar', 'link:editar', 'extrato:ver',
+        'recebedor:gerenciar', 'saque:solicitar'
+      ]::text[]`,
     )
     .execute();
 

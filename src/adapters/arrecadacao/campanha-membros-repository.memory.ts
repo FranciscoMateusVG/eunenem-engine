@@ -1,8 +1,9 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 import type { IdCampanha, IdConta } from '../../domain/arrecadacao/value-objects/ids.js';
-import type {
-  AcaoConcedivel,
-  AcessoMembroCampanha,
+import {
+  type AcaoConcedivel,
+  type AcessoMembroCampanha,
+  PERMISSOES_PADRAO_MEMBRO,
 } from '../../domain/arrecadacao/value-objects/permissao-campanha.js';
 import type { CampanhaMembrosRepository, MembroCampanha } from './campanha-membros-repository.js';
 import { ordenarMembros } from './campanha-membros-repository.postgres.js';
@@ -88,7 +89,8 @@ export class CampanhaMembrosRepositoryMemory implements CampanhaMembrosRepositor
   async adicionarMembro(idCampanha: IdCampanha, idConta: IdConta): Promise<void> {
     return comSpan('adicionarMembro', 'INSERT', async () => {
       const linhas = await this.linhas(idCampanha);
-      if (!linhas.has(idConta)) linhas.set(idConta, { papel: 'membro', permissoes: [] });
+      if (!linhas.has(idConta))
+        linhas.set(idConta, { papel: 'membro', permissoes: [...PERMISSOES_PADRAO_MEMBRO] });
     });
   }
 

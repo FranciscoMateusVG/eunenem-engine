@@ -5,6 +5,7 @@ import {
   AcaoConcedivelSchema,
   type AcessoMembroCampanha,
   PapelMembroCampanhaSchema,
+  PERMISSOES_PADRAO_MEMBRO,
 } from '../../domain/arrecadacao/value-objects/permissao-campanha.js';
 import type { Database } from '../database.js';
 import type { CampanhaMembrosRepository, MembroCampanha } from './campanha-membros-repository.js';
@@ -97,7 +98,12 @@ export class CampanhaMembrosRepositoryPostgres implements CampanhaMembrosReposit
     return comSpan('adicionarMembro', 'INSERT', async () => {
       await executor
         .insertInto('campanha_membros_permissoes')
-        .values({ campanha_id: idCampanha, id_conta: idConta, papel: 'membro' })
+        .values({
+          campanha_id: idCampanha,
+          id_conta: idConta,
+          papel: 'membro',
+          permissoes: [...PERMISSOES_PADRAO_MEMBRO],
+        })
         .onConflict((oc) => oc.columns(['campanha_id', 'id_conta']).doNothing())
         .execute();
     });

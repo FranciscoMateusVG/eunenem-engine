@@ -419,6 +419,7 @@ export function BancariosBody(_props: PainelSectionBodyProps) {
   const salvar = trpc.recebedor.atualizar.useMutation({
     onSuccess: () => {
       void utils.recebedor.get.invalidate();
+      void utils.recebedor.status.invalidate();
       // aperture-kj9el #4b — a full save clears the pending marker server-side;
       // refresh the banner query so the "resgate pendente" notice disappears.
       void utils.recebedor.getResgatePendente.invalidate();

@@ -378,8 +378,8 @@ export function useStubCampanhaIdForSlug(_slug: string): {
    * configured. Drives the TransferModal's onboarding-vs-confirm branch
    * (aperture-kbmel + aperture-jtamj swap-over).
    *
-   * Derived from `recebedor.get({ idCampanha })` — `null` (no data yet, or
-   * genuinely no recebedor) surfaces as `false`, routing to the onboarding
+   * Derived from `recebedor.status({ idCampanha })` — no data yet, or
+   * genuinely no recebedor, surfaces as `false`, routing to the onboarding
    * embed.
    */
   hasRecebedor: boolean;
@@ -392,14 +392,16 @@ export function useStubCampanhaIdForSlug(_slug: string): {
   const idCampanhaRota = useCampanhaRota();
   const idCampanha = idCampanhaRota ?? me.data?.idCampanha ?? null;
 
-  const recebedorQuery = trpc.recebedor.get.useQuery(
+  // aperture-1z18g: recebedor.status (not recebedor.get) — every admin may
+  // read whether a recebedor exists; full bank data needs recebedor:gerenciar.
+  const recebedorQuery = trpc.recebedor.status.useQuery(
     { idCampanha: idCampanha ?? "" },
     { enabled: idCampanha !== null && isUuid(idCampanha) },
   );
 
   return {
     idCampanha,
-    hasRecebedor: recebedorQuery.data != null,
+    hasRecebedor: recebedorQuery.data?.configurado ?? false,
     isLoading: me.isLoading || recebedorQuery.isLoading,
     error: me.error
       ? { message: me.error.message }

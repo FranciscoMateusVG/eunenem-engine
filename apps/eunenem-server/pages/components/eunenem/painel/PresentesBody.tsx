@@ -993,6 +993,7 @@ function TransferOnboardingModal({
   const criarRecebedor = trpc.recebedor.criar.useMutation({
     onSuccess: () => {
       void utils.recebedor.get.invalidate();
+      void utils.recebedor.status.invalidate();
       void utils.auth.me.invalidate();
       toast.success("Dados cadastrados com sucesso!");
     },

@@ -12,16 +12,44 @@ import { z } from 'zod/v4';
  */
 
 export const ACOES_CONCEDIVEIS = [
+  /** Adicionar, editar e remover presentes da lista. */
+  'presentes:gerenciar',
+  /** Editar o perfil da campanha (textos, fotos, personalização). */
+  'perfil:editar',
+  /** Ler os recados deixados pelos convidados. */
+  'mensagens:ver',
+  /** Marcar recados como lidos. */
+  'mensagens:gerenciar',
+  /** Ver a lista de convidados do evento. */
+  'convidados:ver',
+  /** Editar o convite do evento e a lista de convidados. */
+  'convite:editar',
+  /** Alterar o link público (slug) da campanha. */
+  'link:editar',
+  /** Ver o extrato financeiro (valores recebidos, saldo, transferências). */
+  'extrato:ver',
   /** Criar/editar o recebedor e ver os dados bancários completos. */
   'recebedor:gerenciar',
   /** Solicitar transferência (saque) do saldo. */
   'saque:solicitar',
-  /** Adicionar, editar e remover presentes da lista. */
-  'presentes:gerenciar',
 ] as const;
 
 export const AcaoConcedivelSchema = z.enum(ACOES_CONCEDIVEIS);
 export type AcaoConcedivel = z.infer<typeof AcaoConcedivelSchema>;
+
+/**
+ * Permissões de um membro recém-convidado (decisão do operador, 2026-10-16):
+ * pode cuidar da lista, recados, perfil, convite e convidados; NÃO mexe em
+ * link, extrato, dados bancários, saque nem membros. O owner ajusta por membro depois.
+ */
+export const PERMISSOES_PADRAO_MEMBRO: readonly AcaoConcedivel[] = [
+  'presentes:gerenciar',
+  'perfil:editar',
+  'mensagens:ver',
+  'mensagens:gerenciar',
+  'convidados:ver',
+  'convite:editar',
+];
 
 export const AcaoCampanhaSchema = z.enum([...ACOES_CONCEDIVEIS, 'membros:gerenciar']);
 export type AcaoCampanha = z.infer<typeof AcaoCampanhaSchema>;
