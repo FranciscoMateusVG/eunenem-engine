@@ -30,6 +30,14 @@ export function readBrowserArtifactRelease(
   }
 }
 
+export function browserArtifactAssetUrl(
+  pathname: string,
+  browserArtifactRelease: string | undefined,
+): string {
+  if (!browserArtifactRelease) return pathname;
+  return `${pathname}?v=${encodeURIComponent(browserArtifactRelease)}`;
+}
+
 export function serializeClientRuntimeEnv(
   source: Readonly<Record<string, string | undefined>>,
   browserArtifactRelease: string | undefined,
