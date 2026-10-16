@@ -1,10 +1,6 @@
 import type { ReactNode } from 'react';
 
-// aperture-cvhlm — "Taxas" / transparent fees section (v2 HTML section 06).
-// Cream card with the 100% headline on the left + a 3-column payout-method
-// grid on the right (Pix / Cartão / Transferência). Backs the "100% em
-// dinheiro" positioning by showing that the 8.98% fee is paid by guests and
-// the creator's payout is never reduced.
+// Fees are charged to the buyer; payout availability follows payment confirmation.
 type FeeItem = {
   label: string;
   value: string;
@@ -16,8 +12,8 @@ type FeeItem = {
 const FEE_ITEMS: FeeItem[] = [
   {
     label: 'Pix',
-    value: '10 min',
-    detail: 'após o convidado pagar',
+    value: 'confirmado',
+    detail: 'saldo disponível para solicitar saque',
     iconBg: 'f1',
     icon: (
       <svg
@@ -34,8 +30,8 @@ const FEE_ITEMS: FeeItem[] = [
   },
   {
     label: 'Cartão',
-    value: '31 dias',
-    detail: 'proteção contra estorno',
+    value: 'data no extrato',
+    detail: 'data prevista informada no extrato',
     iconBg: 'f2',
     icon: (
       <svg
@@ -53,8 +49,8 @@ const FEE_ITEMS: FeeItem[] = [
   },
   {
     label: 'Transferência',
-    value: '3 dias úteis',
-    detail: 'para a sua conta',
+    value: 'até 3 dias úteis',
+    detail: 'após solicitar o saque',
     iconBg: 'f3',
     icon: (
       <svg
@@ -98,8 +94,9 @@ export function Taxas() {
               pra você
             </div>
             <p>
-              Cada R$ 100 presenteados na sua lista cai inteirinho na sua conta. Sem
-              letra miúda.
+              Você recebe integralmente o valor cadastrado de cada presente
+              comprado. As taxas de serviço e os acréscimos aplicáveis ao
+              pagamento são cobrados de quem compra, no checkout.
             </p>
           </div>
           <div className="taxas-grid">
@@ -117,6 +114,13 @@ export function Taxas() {
             ))}
           </div>
         </div>
+        <p className="mt-6 mx-auto max-w-[760px] text-[15px] leading-relaxed text-ink-soft text-center">
+          O saque pode ser solicitado quando o pagamento estiver aprovado e o
+          saldo liberado. No Pix, a liberação ocorre após a confirmação do
+          pagamento. No cartão, depende da data informada pelo processador;
+          acompanhe a previsão e o saldo disponível no extrato. A solicitação de
+          saque e a transferência para sua conta são etapas distintas.
+        </p>
       </div>
     </section>
   );

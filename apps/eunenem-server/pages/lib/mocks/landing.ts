@@ -340,19 +340,17 @@ export const LANDING_FAQS: ReadonlyArray<LandingFaq> = [
     q: 'A EuNeném cobra taxa?',
     a: `Sim. As taxas da EuNeném são cobradas do convidado no momento da compra do presente. Isso significa que o valor que você adiciona à sua lista é exatamente o valor que você receberá. Por exemplo, se você cadastrar um presente de R$ 100, receberá integralmente os R$ 100.
 
-Para viabilizar o funcionamento da plataforma, é cobrada uma taxa de serviço de 8,98% sobre cada presente, destinada a cobrir os custos de operação, manutenção da plataforma e processamento dos pagamentos.
-
-Além disso, pagamentos por cartão incluem um acréscimo calculado para cobrir a tarifa de processamento de 3,9% sobre o total processado, mais R$ 0,39 por transação.
+As taxas de serviço e os acréscimos aplicáveis à forma de pagamento são apresentados a quem compra no checkout.
 
 Dessa forma, os futuros pais recebem o valor integral definido na lista, enquanto os custos da transação são pagos por quem realiza a compra do presente.`,
   },
   {
     q: 'Quando posso sacar o dinheiro?',
-    a: `O prazo começa a contar assim que o convidado realiza o pagamento do presente.
+    a: `Você pode solicitar o saque quando o pagamento estiver aprovado e o saldo liberado.
 
-Pagamentos via Pix: o valor fica disponível para solicitação de resgate em até 10 minutos.
+Pagamentos via Pix: a liberação ocorre após a confirmação do pagamento.
 
-Pagamentos via cartão de crédito: o valor fica disponível para solicitação de resgate em 31 dias corridos.
+Pagamentos via cartão de crédito: a liberação segue a data informada pelo processador de pagamento. A previsão aparece no extrato; enquanto não houver confirmação da liberação, o valor permanece aguardando.
 
 Depois que você solicitar o resgate, a transferência será realizada para a sua conta em até 3 dias úteis.
 

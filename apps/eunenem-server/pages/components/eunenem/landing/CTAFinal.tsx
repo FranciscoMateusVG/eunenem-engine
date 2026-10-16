@@ -56,7 +56,7 @@ export function CTAFinal() {
           → criar minha lista agora — é grátis
         </button>
         <p className="text-[13px] text-ink-mute mt-4.5">
-          Menos de 2 minutos · transparência total em taxas · suporte via
+          Criação grátis · transparência total em taxas · suporte via
           WhatsApp
         </p>
 

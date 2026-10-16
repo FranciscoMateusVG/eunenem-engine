@@ -69,7 +69,7 @@ const STEPS: ReadonlyArray<Step> = [
     color: 'bg-blue',
     rot: '-rotate-2',
     title: 'receba via Pix',
-    desc: 'Saque quando quiser, direto na sua conta.',
+    desc: 'Solicite o saque do saldo disponível, direto para sua conta.',
     icon: (
       <svg
         viewBox="0 0 56 56"
