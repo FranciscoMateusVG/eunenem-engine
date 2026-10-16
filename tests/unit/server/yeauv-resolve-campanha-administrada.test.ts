@@ -25,6 +25,7 @@ import {
   resolverCampanhaAdministrada,
 } from '../../../apps/eunenem-server/server/trpc/resolve-campanha-administrada.js';
 import { appRouter } from '../../../apps/eunenem-server/server/trpc/router.js';
+import { CampanhaMembrosRepositoryMemory } from '../../../src/adapters/arrecadacao/campanha-membros-repository.memory.js';
 import { CampanhaRepositoryMemory } from '../../../src/adapters/arrecadacao/campanha-repository.memory.js';
 import { ContribuicaoRepositoryMemory } from '../../../src/adapters/arrecadacao/contribuicao-repository.memory.js';
 import { PerfilCampanhaRepositoryMemory } from '../../../src/adapters/arrecadacao/perfil-campanha-repository.memory.js';
@@ -89,6 +90,7 @@ async function buildRig(): Promise<Rig> {
     perfilCampanhaRepository: new PerfilCampanhaRepositoryMemory(),
     plataformaRepository,
     campanhaRepository,
+    campanhaMembrosRepository: new CampanhaMembrosRepositoryMemory(campanhaRepository),
     contribuicaoRepository: new ContribuicaoRepositoryMemory(),
     recebedorRepository,
     eventoRepository: new EventoRepositoryMemory(),

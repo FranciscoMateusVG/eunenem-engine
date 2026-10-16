@@ -376,3 +376,195 @@ it('accepted verified sharing bypasses own onboarding without latching it; non-i
   });
   expect((await member.caller.auth.me())?.needsOnboarding).toBe(true);
 });
+
+async function sharedOnlyFixture() {
+  const owner = await login();
+  const campaign = makeCampanha({
+    idPlataforma: ID_PLATAFORMA_EUNENEM,
+    idsAdministradores: [owner.user.id_conta],
+  });
+  await deps.campanhaRepository.save(campaign);
+  await deps.db
+    .updateTable('campanhas')
+    .set({ slug: 'shared-baby' })
+    .where('id', '=', campaign.id)
+    .execute();
+  await deps.db
+    .insertInto('perfil_campanhas')
+    .values({ id: randomUUID(), id_campanha: campaign.id, nome_bebe: 'Owner Baby' })
+    .execute();
+  const email = `only-member-${randomUUID()}@example.com`;
+  await owner.caller.compartilhamento.convidar({ idCampanha: campaign.id, email });
+  const member = await login(email);
+  // Model the reported member-only account, not the signup saga's own blank list.
+  await deps.db
+    .deleteFrom('campanha_administradores')
+    .where('id_usuario', '=', member.user.id_conta)
+    .where('campanha_id', '!=', campaign.id)
+    .execute();
+  await deps.db
+    .deleteFrom('campanha_membros_permissoes')
+    .where('id_conta', '=', member.user.id_conta)
+    .where('campanha_id', '!=', campaign.id)
+    .execute();
+  return { owner, member, campaign };
+}
+
+it('member-only profile returns empty own content or explicit shared content, never 500', async () => {
+  const { member, campaign } = await sharedOnlyFixture();
+  expect((await member.caller.auth.me())?.idCampanha).toBeNull();
+  expect(await member.caller.perfil.getPerfil()).toMatchObject({
+    slug: member.user.slug,
+    nomeBebe: null,
+  });
+  expect(await member.caller.perfil.getPerfil({ idCampanha: campaign.id })).toMatchObject({
+    slug: member.user.slug,
+    nomeBebe: 'Owner Baby',
+  });
+  await expect(member.caller.perfil.getPerfil({ idCampanha: randomUUID() })).rejects.toMatchObject({
+    code: 'UNAUTHORIZED',
+  });
+  expect(await member.caller.perfil.atualizar({ nomeExibicao: 'New name' })).toMatchObject({
+    creatorName: 'New name',
+    nomeBebe: null,
+  });
+});
+
+it('member-only bare campaign routes return a controlled missing-context response, not 500', async () => {
+  const { member } = await sharedOnlyFixture();
+  await expect(member.caller.contribuicao.list()).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  await expect(member.caller.eventoConvite.get()).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  await expect(member.caller.eventoListaDeConvidados.get()).rejects.toMatchObject({
+    code: 'NOT_FOUND',
+  });
+  await expect(
+    member.caller.pagina.obterListaPresentes({ slug: member.user.slug }),
+  ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  await expect(
+    member.caller.eventoConvite.getPreview({ slug: member.user.slug }),
+  ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  await expect(
+    member.caller.painelMensagens.list({ slug: member.user.slug }),
+  ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+  expect(
+    await member.caller.perfil.getPerfilPublicoBySlug({ slug: member.user.slug }),
+  ).toMatchObject({ nomeBebe: null });
+});
+
+it('shared campaign public addresses belong only to its owner, not an invited member', async () => {
+  const { owner, member, campaign } = await sharedOnlyFixture();
+  await expect(
+    member.caller.pagina.resolverCampanhaSlug({
+      slug: member.user.slug,
+      campanhaSlug: 'shared-baby',
+    }),
+  ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  expect(
+    await member.caller.pagina.resolverCampanhaSlug({
+      slug: owner.user.slug,
+      campanhaSlug: 'shared-baby',
+    }),
+  ).toEqual({ idCampanha: campaign.id });
+  await expect(
+    member.caller.perfil.getPerfilPublicoBySlug({
+      slug: member.user.slug,
+      idCampanha: campaign.id,
+    }),
+  ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  await expect(
+    member.caller.pagina.obterListaPresentes({ slug: member.user.slug, idCampanha: campaign.id }),
+  ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  await expect(
+    member.caller.eventoConvite.getPreview({ slug: member.user.slug, idCampanha: campaign.id }),
+  ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  expect(
+    await member.caller.perfil.getPerfilPublicoBySlug({
+      slug: owner.user.slug,
+      idCampanha: campaign.id,
+    }),
+  ).toMatchObject({ nomeBebe: 'Owner Baby' });
+});
+
+it('an invited campaign with the same slug never shadows the member’s own public campaign', async () => {
+  const { member } = await sharedOnlyFixture();
+  const own = makeCampanha({
+    idPlataforma: ID_PLATAFORMA_EUNENEM,
+    idsAdministradores: [member.user.id_conta],
+  });
+  await deps.campanhaRepository.save(own);
+  await deps.db
+    .updateTable('campanhas')
+    .set({ slug: 'shared-baby' })
+    .where('id', '=', own.id)
+    .execute();
+  expect(
+    await member.caller.pagina.resolverCampanhaSlug({
+      slug: member.user.slug,
+      campanhaSlug: 'shared-baby',
+    }),
+  ).toEqual({ idCampanha: own.id });
+});
+
+it('shared campaign cards keep private routing separate from the canonical public owner', async () => {
+  const { owner, member, campaign } = await sharedOnlyFixture();
+  const cards = await member.caller.campanhas.list();
+  expect(cards.novas.find((c) => c.id === campaign.id)).toMatchObject({
+    slug: member.user.slug,
+    publicOwnerSlug: owner.user.slug,
+  });
+});
+
+it('a delegated link editor validates and writes in the canonical owner namespace, not their own', async () => {
+  const { owner, member, campaign } = await sharedOnlyFixture();
+  await owner.caller.campanhaMembros.definirPermissoes({
+    idCampanha: campaign.id,
+    idConta: member.user.id_conta,
+    permissoes: ['link:editar'],
+  });
+  const sibling = makeCampanha({
+    idPlataforma: ID_PLATAFORMA_EUNENEM,
+    idsAdministradores: [owner.user.id_conta],
+  });
+  await deps.campanhaRepository.save(sibling);
+  await deps.db
+    .updateTable('campanhas')
+    .set({ slug: 'owner-reserved' })
+    .where('id', '=', sibling.id)
+    .execute();
+  expect(
+    await member.caller.campanhas.validarSlug({ idCampanha: campaign.id, slug: 'owner-reserved' }),
+  ).toEqual({ disponivel: false, motivo: 'em_uso' });
+  await expect(
+    member.caller.campanhas.definirSlug({ idCampanha: campaign.id, slug: 'owner-reserved' }),
+  ).rejects.toMatchObject({ code: 'BAD_REQUEST', message: 'slug_em_uso' });
+  const memberOwn = makeCampanha({
+    idPlataforma: ID_PLATAFORMA_EUNENEM,
+    idsAdministradores: [member.user.id_conta],
+  });
+  await deps.campanhaRepository.save(memberOwn);
+  await deps.db
+    .updateTable('campanhas')
+    .set({ slug: 'member-reserved' })
+    .where('id', '=', memberOwn.id)
+    .execute();
+  // Even if the canonical owner is invited to that other list, it is not their namespace.
+  await deps.campanhaRepository.adicionarAdministrador(memberOwn.id, owner.user.id_conta);
+  expect(
+    await member.caller.campanhas.validarSlug({ idCampanha: campaign.id, slug: 'member-reserved' }),
+  ).toEqual({ disponivel: true, motivo: null });
+  expect(
+    await member.caller.campanhas.definirSlug({ idCampanha: campaign.id, slug: 'member-reserved' }),
+  ).toEqual({ slug: 'member-reserved' });
+  expect(
+    await member.caller.pagina.resolverCampanhaSlug({
+      slug: owner.user.slug,
+      campanhaSlug: 'member-reserved',
+    }),
+  ).toEqual({ idCampanha: campaign.id });
+  expect(
+    await member.caller.pagina.resolverCampanhaSlug({
+      slug: member.user.slug,
+      campanhaSlug: 'member-reserved',
+    }),
+  ).toEqual({ idCampanha: memberOwn.id });
+});

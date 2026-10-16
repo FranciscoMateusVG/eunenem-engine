@@ -65,7 +65,7 @@ function toTRPCError(err: unknown): TRPCError {
   }
   // Absent-branch inconsistency (caller administers no campanha) — fail loud.
   if (err instanceof CampanhaInexistenteError) {
-    return new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err.message, cause: err });
+    return new TRPCError({ code: 'NOT_FOUND', message: err.message, cause: err });
   }
   if (err instanceof ArrecadacaoInputInvalidoError) {
     return new TRPCError({ code: 'BAD_REQUEST', message: err.message, cause: err });

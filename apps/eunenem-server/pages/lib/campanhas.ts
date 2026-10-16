@@ -160,3 +160,9 @@ export function useCampanhaSlugInfoRota(): {
     slugJaAlterado: card?.slugJaAlterado ?? false,
   };
 }
+
+/** Public links use the campaign owner, never the dashboard viewer.
+ * Undefined while loading/no owner: callers must not fabricate a member URL. */
+export function useCampanhaPublicOwnerSlugRota(): string | undefined {
+  return useCampanhaCardRota()?.publicOwnerSlug ?? undefined;
+}

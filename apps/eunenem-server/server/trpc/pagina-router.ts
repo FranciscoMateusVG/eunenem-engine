@@ -1,3 +1,4 @@
+import { isCampaignPublicOwner } from './campaign-public-address.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { initTRPC, TRPCError } from '@trpc/server';
 import { z } from 'zod/v4';
@@ -309,7 +310,7 @@ async function resolvePaginaBySlug(
   let campanha: Campanha | undefined;
   if (idCampanha !== undefined && idCampanha !== '') {
     campanha = await deps.campanhaRepository.findById(idCampanha as IdCampanha);
-    if (!campanha || !campanha.idsAdministradores.includes(usuario.idConta)) {
+    if (!campanha || !(await isCampaignPublicOwner(ctx, campanha.id, usuario.idConta))) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Pagina nao encontrada' });
     }
   } else {
@@ -985,7 +986,12 @@ export const paginaRouter = t.router({
       const campanhas = await deps.campanhaRepository.findCampanhasByAdministrador(
         usuario.idConta,
       );
-      const campanha = campanhas.find((c) => c.slug === alvo);
+      const candidates = await Promise.all(
+        campanhas.filter((c) => c.slug === alvo).map(async (c) =>
+          (await isCampaignPublicOwner(ctx, c.id, usuario.idConta)) ? c : undefined,
+        ),
+      );
+      const campanha = candidates.find((c) => c !== undefined);
       if (!campanha) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Pagina nao encontrada' });
       }

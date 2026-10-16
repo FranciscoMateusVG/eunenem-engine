@@ -4,7 +4,7 @@ import { artigoPosse } from "@/lib/concordancia";
 import { toast } from "sonner";
 import { useTweaks } from "../TweaksContext";
 import type { PainelEventSnapshot } from "@/lib/mocks/painelDemo";
-import { useCampanhaSlugRota } from "@/lib/campanhas";
+import { useCampanhaSlugRota, useCampanhaPublicOwnerSlugRota } from "@/lib/campanhas";
 import { paginaShareDisplayPath, paginaShareDisplayPrefix, paginaShareUrl } from "@/lib/pagina-share";
 import { painelHref } from "@/lib/painelRoutes";
 import { useCampanhaRota } from "@/lib/campanha-rota";
@@ -124,9 +124,11 @@ export function PainelHeaderCard({
   // the copy carries the full addressing — PRETTY campanha-slug form when
   // the user chose one (W1a), /c/<uuid> canonical fallback otherwise.
   const campanhaSlug = useCampanhaSlugRota();
-  const fullShareUrl = paginaShareUrl(slug, idCampanha, campanhaSlug);
+  const publicOwnerSlug = useCampanhaPublicOwnerSlugRota();
+  const fullShareUrl = publicOwnerSlug ? paginaShareUrl(publicOwnerSlug, idCampanha, campanhaSlug) : undefined;
 
   const onCopy = async () => {
+    if (!fullShareUrl) return;
     try {
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(fullShareUrl);
@@ -159,6 +161,7 @@ export function PainelHeaderCard({
           className="painel-share-cta"
           onClick={onCopy}
           aria-label="copiar link do evento"
+          disabled={!fullShareUrl}
         >
           <svg
             viewBox="0 0 24 24"
@@ -229,7 +232,7 @@ export function PainelHeaderCard({
               {/* aperture-2v91z — the campanha's OWN address when it chose a
                   slug ('francisco/teste'), never the same bare user-slug on
                   every campanha. */}
-              {paginaShareDisplayPath(slug, campanhaSlug)}
+              {publicOwnerSlug ? paginaShareDisplayPath(publicOwnerSlug, campanhaSlug) : "carregando link…"}
             </a>
           </span>
         </div>

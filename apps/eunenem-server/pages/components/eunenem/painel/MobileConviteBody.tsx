@@ -1,3 +1,4 @@
+import { useCampanhaPublicOwnerSlugRota } from "@/lib/campanhas";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -111,6 +112,7 @@ interface StepProps {
 // ─── shell ──────────────────────────────────────────────────────────
 
 function MobileConviteBodyConteudo({ slug }: PainelSectionBodyProps) {
+  const publicOwnerSlug = useCampanhaPublicOwnerSlugRota();
   // aperture-z6vks — keep the /c/:idCampanha context on the preview link.
   const idCampanha = useCampanhaRota();
   // aperture-zy4uo — EMPTY_STATE: never flash demo content as user content.
@@ -191,6 +193,7 @@ function MobileConviteBodyConteudo({ slug }: PainelSectionBodyProps) {
     }
   };
   const onSend = async () => {
+    if (!publicOwnerSlug) return;
     if (!guardComplete()) return;
     setIsSharing(true);
     try {
@@ -200,7 +203,7 @@ function MobileConviteBodyConteudo({ slug }: PainelSectionBodyProps) {
       // after.
       try {
         const result = await shareConvitePreview({
-          slug,
+          slug: publicOwnerSlug,
           // aperture-2v91z — share THIS campanha's convite, not the oldest's.
           idCampanha,
           title: `Convite de ${state.babyName || 'nosso evento'}`,
@@ -266,7 +269,7 @@ function MobileConviteBodyConteudo({ slug }: PainelSectionBodyProps) {
           {isSaving ? "salvando..." : "salvar"}
         </button>
         <a
-          href={painelConvitePreviewHref(slug, idCampanha)}
+          href={publicOwnerSlug ? painelConvitePreviewHref(publicOwnerSlug, idCampanha) : undefined}
           className="mcv-save"
           onClick={() => sendEvent("convite_ver_preview_click")}
         >

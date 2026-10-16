@@ -1,3 +1,4 @@
+import { isCampaignPublicOwner } from './campaign-public-address.js';
 /**
  * Perfil tRPC router (aperture-cdo69) — exposes the PerfilCriador aggregate.
  *
@@ -72,13 +73,13 @@ function toTRPCError(err: unknown): TRPCError {
   // aperture-aphk8 shim: the authed hops now resolve the caller's OLDEST
   // campanha via resolverCampanhaAdministrada. Its session-failure sentinel
   // maps to the SAME UNAUTHORIZED shape the old resolveCallerIdUsuario threw;
-  // an authed caller with NO campanha at all is a data-model inconsistency
-  // (signup saga always creates one) → fail loud.
-  if (err instanceof CampanhaAcessoNegadoError) {
+  // a member-only account may have no owned default; reads return empty
+  // identity content and campaign-scoped operations require an explicit ID.
+  if (err instanceof CampanhaAcessoNegadoError || err instanceof SessaoNaoAutenticadaError) {
     return new TRPCError({ code: 'UNAUTHORIZED', message: 'sessao_invalida', cause: err });
   }
   if (err instanceof CampanhaInexistenteError) {
-    return new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err.message, cause: err });
+    return new TRPCError({ code: 'NOT_FOUND', message: err.message, cause: err });
   }
   return err instanceof Error
     ? new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err.message, cause: err })
@@ -177,6 +178,15 @@ const AtualizarPerfilInputSchema = z.object({
   nomeExibicao: z.string().trim().min(1).max(120),
 });
 
+// A member-only account is valid. Bare own-profile reads must not borrow a
+// shared baby's profile; explicit campaign context still verifies membership.
+async function resolverPerfilProprio(ctx: TrpcContext, idCampanha?: string) {
+  if (idCampanha) return resolverCampanhaAdministrada(ctx, idCampanha);
+  const { usuario } = await resolverUsuarioAutenticado(ctx.deps, ctx.headers);
+  const campanha = await ctx.deps.campanhaRepository.findByAdministrador(usuario.idConta);
+  return { usuario, campanha };
+}
+
 export const perfilRouter = t.router({
   /**
    * Update the caller's profile content + display name in one round-trip.
@@ -197,7 +207,7 @@ export const perfilRouter = t.router({
         // empty content would WIPE the campanha perfil on every name change.
         // Output shape unchanged: the DTO's baby-half is READ (not written)
         // from the oldest campanha's perfil_campanhas, same as getPerfil.
-        const { usuario, campanha } = await resolverCampanhaAdministrada(ctx);
+        const { usuario, campanha } = await resolverPerfilProprio(ctx);
         const idUsuario = usuario.id as IdUsuario;
         const { nomeExibicao } = input;
 
@@ -209,10 +219,10 @@ export const perfilRouter = t.router({
           { idUsuario, nomeExibicao },
         );
 
-        const perfil = await ctx.deps.perfilCampanhaRepository.findByIdCampanha(campanha.id);
-        const evento = await ctx.deps.eventoRepository.findByIdCampanha(
+        const perfil = campanha ? await ctx.deps.perfilCampanhaRepository.findByIdCampanha(campanha.id) : undefined;
+        const evento = campanha ? await ctx.deps.eventoRepository.findByIdCampanha(
           campanha.id as IdCampanhaEvento,
-        );
+        ) : undefined;
 
         return mapPerfilProprioFromCampanha(
           { slug: usuario.slug, nomeExibicao },
@@ -226,16 +236,16 @@ export const perfilRouter = t.router({
     }),
 
   /** Read the caller's own full profile (painel form load). */
-  getPerfil: t.procedure.output(PerfilProprioDTOSchema).query(async ({ ctx }) => {
+  getPerfil: t.procedure.input(z.object({ idCampanha: z.uuid().optional() }).optional()).output(PerfilProprioDTOSchema).query(async ({ ctx, input }) => {
     try {
       // aperture-aphk8 shim: baby-half reads the OLDEST campanha's
       // perfil_campanhas row; identity half stays on Usuario. Output shape
       // unchanged.
-      const { usuario, campanha } = await resolverCampanhaAdministrada(ctx);
-      const perfil = await ctx.deps.perfilCampanhaRepository.findByIdCampanha(campanha.id);
-      const evento = await ctx.deps.eventoRepository.findByIdCampanha(
+      const { usuario, campanha } = await resolverPerfilProprio(ctx, input?.idCampanha);
+      const perfil = campanha ? await ctx.deps.perfilCampanhaRepository.findByIdCampanha(campanha.id) : undefined;
+      const evento = campanha ? await ctx.deps.eventoRepository.findByIdCampanha(
         campanha.id as IdCampanhaEvento,
-      );
+      ) : undefined;
       return mapPerfilProprioFromCampanha(
         usuario,
         perfil?.conteudo,
@@ -310,7 +320,7 @@ export const perfilRouter = t.router({
           campanha = await deps.campanhaRepository.findById(input.idCampanha as IdCampanha);
           // Not-found AND not-owned-by-the-slug's-conta collapse to the SAME
           // NOT_FOUND — a visitor can't distinguish which.
-          if (!campanha || !campanha.idsAdministradores.includes(usuario.idConta)) {
+          if (!campanha || !(await isCampaignPublicOwner(ctx, campanha.id, usuario.idConta))) {
             throw new UsuarioNaoEncontradoError(input.slug);
           }
         } else {
