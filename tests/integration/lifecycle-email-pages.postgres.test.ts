@@ -149,6 +149,25 @@ describe('/avaliar-email', () => {
     expect(await feedbackRows(deliveryId)).toEqual([]);
   });
 
+  it('a real browser form POST (Origin: null under no-referrer + Sec-Fetch-Site) is accepted', async () => {
+    const deliveryId = await seedDelivery();
+    const token = tokens.signFeedbackToken(deliveryId);
+    const send = (site: string) =>
+      app.request('/avaliar-email', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/x-www-form-urlencoded',
+          origin: 'null',
+          'sec-fetch-site': site,
+        },
+        body: new URLSearchParams({ token, nota: '4' }).toString(),
+      });
+    expect((await send('cross-site')).status).toBe(403);
+    expect(await feedbackRows(deliveryId)).toEqual([]);
+    expect((await send('same-origin')).status).toBe(200);
+    expect(await feedbackRows(deliveryId)).toHaveLength(1);
+  });
+
   it('cross-site POST is refused', async () => {
     const deliveryId = await seedDelivery();
     const token = tokens.signFeedbackToken(deliveryId);

@@ -33,6 +33,9 @@ import {
   registerPixCobrancaReconciliationJob,
 } from './server/jobs/pix-cobranca-reconciliation.pgboss.js';
 import { createServerLifecycle, LifecycleAdmissionClosedError } from './server/lifecycle.js';
+import { createLifecycleEmailPages } from './server/lifecycle-email-pages.js';
+import { consumeRateLimit } from './server/trpc/rate-limit.js';
+import { EmailFeedbackPostgres } from '../../src/adapters/email/email-feedback.postgres.js';
 import { createPainelAccessMiddleware } from './server/painel-access.js';
 import {
   createRequestObservabilityMiddleware,
@@ -278,6 +281,26 @@ const interPixWebhookRoutesMounted = mountInterPixWebhookRoutesWhenBound(
 // security rationale (verified-email trust anchor, sk_live server-only, mint
 // rate-limit, fail-open-to-fallback) lives in server/legacy-bridge.ts.
 app.get('/api/legacy-bridge', createLegacyBridgeHandler(deps));
+
+// aperture-tykv8 — token pages linked from the lifecycle emails (Avalie sua
+// experiência, descadastrar, preferências). Before the legacy guest redirect
+// and the SSR catch-all so their root paths are never treated as guest links.
+// GET never writes; POSTs are same-origin and rate-limited per delivery/user.
+app.route(
+  '/',
+  createLifecycleEmailPages({
+    tokens: deps.lifecycleEmailTokens,
+    preferences: deps.lifecycleEmailPreferences,
+    feedback: new EmailFeedbackPostgres(deps.db),
+    allowedOrigins,
+    consumeRateLimit: async (key) =>
+      (await consumeRateLimit(deps.db, { key, max: 20, windowMs: 10 * 60_000 })).allowed,
+    resolveSessionUser: async (headers) => {
+      const sessao = await resolverUsuarioAutenticadoOuNull(deps, headers);
+      return sessao ? { userId: sessao.usuario.id, tenantId: sessao.usuario.idPlataforma } : null;
+    },
+  }),
+);
 
 // aperture-ij2g5 — owner-private painel access runs before the SSR catch-all.
 // Cache policy is attached before every redirect/404/owner response, and denied

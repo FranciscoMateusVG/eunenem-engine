@@ -151,9 +151,16 @@ ${extra}
   );
 }
 
+/**
+ * CSRF gate for the POSTs. Under `Referrer-Policy: no-referrer` browsers send
+ * `Origin: null` even for same-origin form posts, so fall back to Fetch
+ * Metadata: `Sec-Fetch-Site` is browser-controlled and can't be forged by a
+ * cross-site page.
+ */
 function sameOrigin(c: Context, allowed: readonly string[]): boolean {
   const origin = c.req.header('origin');
-  return origin !== undefined && allowed.includes(origin);
+  if (origin !== undefined && allowed.includes(origin)) return true;
+  return (origin === undefined || origin === 'null') && c.req.header('sec-fetch-site') === 'same-origin';
 }
 
 function forbidden(c: Context) {
