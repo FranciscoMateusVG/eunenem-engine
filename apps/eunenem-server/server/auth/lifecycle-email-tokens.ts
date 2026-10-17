@@ -5,9 +5,10 @@ type PreferenceClaims = { userId: string; tenantId: string; type?: LifecycleEmai
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export function createLifecycleEmailTokens(secret: string, clock: () => Date = () => new Date()) {
   if (secret.length < 32) throw new Error('Lifecycle token signing key must be at least 32 characters');
-  const mac = (value: string) => createHmac('sha256', secret).update(`lifecycle-email-v1:${value}`).digest();
-  const sign = (scope: string, claims: object) => {
-    const payload = Buffer.from(JSON.stringify({ ...claims, scope, exp: Math.floor(clock().getTime() / 1000) + 30 * 86400 })).toString('base64url');
+  const key = createHmac('sha256',secret).update('eunenem/lifecycle-email/signing-key/v1').digest();
+  const mac = (value: string) => createHmac('sha256', key).update(`lifecycle-email-v1:${value}`).digest();
+  const sign = (scope: string, claims: object, days=30) => {
+    const payload = Buffer.from(JSON.stringify({ ...claims, scope, exp: Math.floor(clock().getTime() / 1000) + days * 86400 })).toString('base64url');
     return `${payload}.${mac(payload).toString('base64url')}`;
   };
   const verify = (token: string, scope: string): Record<string, unknown> | null => {
@@ -24,7 +25,7 @@ export function createLifecycleEmailTokens(secret: string, clock: () => Date = (
     } catch { return null; }
   };
   return {
-    signPreferenceToken: (claims: PreferenceClaims) => sign('preferences', claims),
+    signPreferenceToken: (claims: PreferenceClaims) => sign('preferences', claims,claims.type ? 3650 : 30),
     verifyPreferenceToken(token: string): PreferenceClaims | null {
       const data = verify(token, 'preferences');
       if (!data || typeof data.userId !== 'string' || !UUID.test(data.userId) || typeof data.tenantId !== 'string' || !UUID.test(data.tenantId)) return null;
