@@ -33,6 +33,10 @@ import { createTestObservability } from '../helpers/observability.js';
 import { makePagamento } from '../helpers/pagamento-repository.conformance.js';
 import { createTestDatabase, type TestDatabase } from '../helpers/test-db.js';
 
+const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
+
 describe('lifecycle real Postgres and loopback TLS SMTP', () => {
   let test: TestDatabase;
   let sink: Awaited<ReturnType<typeof createLifecycleSmtpSink>>;
@@ -208,6 +212,71 @@ describe('lifecycle real Postgres and loopback TLS SMTP', () => {
       )
     ).rows.map((r) => r.state);
   }
+  // The first-gift fact is stamped by the database clock; move the service
+  // clock relative to it so the 24h list_ready delay is tested exactly.
+  async function firstGiftAt(campaign: string) {
+    const { rows } = await sql<{
+      occurred_at: Date;
+    }>`SELECT occurred_at FROM lifecycle_email_first_gifts WHERE campaign_id=${campaign}`.execute(
+      test.db,
+    );
+    const occurred = rows[0]?.occurred_at;
+    if (!occurred) throw new Error('first gift fact missing');
+    return occurred;
+  }
+  async function elapseSinceFirstGift(campaign: string, ms: number) {
+    now = new Date((await firstGiftAt(campaign)).getTime() + ms);
+  }
+  it('sends list_ready only 24h after the first gift, anchored to the first gift, once', async () => {
+    const s = await seed();
+    await gift(s);
+    await elapseSinceFirstGift(s.campaign, 0);
+    await service.scan();
+    await service.dispatch();
+    expect(await states('welcome')).toEqual(['sent']);
+    expect(await states('list_ready')).toEqual([]);
+    // A later gift through a raw insert does not restart nor advance the delay.
+    await elapseSinceFirstGift(s.campaign, 23 * HOUR);
+    await sql`INSERT INTO contribuicoes(id,campanha_id,id_opcao_contribuicao,nome,valor,criada_em)
+      VALUES(${randomUUID()},${s.campaign},${s.option},'Another gift',5000,${now})`.execute(
+      test.db,
+    );
+    await elapseSinceFirstGift(s.campaign, DAY - MINUTE);
+    await Promise.all([service.scan(), service.scan()]);
+    await service.dispatch();
+    expect(await states('list_ready')).toEqual([]);
+    await elapseSinceFirstGift(s.campaign, DAY - 1);
+    await service.scan();
+    expect(await states('list_ready')).toEqual([]);
+    await elapseSinceFirstGift(s.campaign, DAY);
+    await Promise.all([service.scan(), service.scan()]);
+    expect(await states('list_ready')).toEqual(['pending']);
+    await Promise.all([service.dispatch(), service.dispatch()]);
+    expect(await states('list_ready')).toEqual(['sent']);
+    const invites = sink.messages
+      .map((m) => m.replace(/=\r\n/g, ''))
+      .filter((m) => m.includes(`/c/${s.campaign}/convite`));
+    expect(invites).toHaveLength(1);
+    expect(sink.messages).toHaveLength(2);
+    await elapseSinceFirstGift(s.campaign, 3 * DAY);
+    await build().scan();
+    await build().dispatch();
+    expect(await states('list_ready')).toEqual(['sent']);
+    expect(sink.messages).toHaveLength(2);
+  });
+  it('a due list_ready still waits for provisioning and the eligible owner cohort', async () => {
+    const pending = await seed({ complete: false });
+    await gift(pending);
+    const old = await seed({ oldAccount: true });
+    await gift(old);
+    await elapseSinceFirstGift(pending.campaign, 2 * DAY);
+    await service.scan();
+    expect(await states('list_ready')).toEqual([]);
+    await gift(pending);
+    await service.scan();
+    await service.dispatch();
+    expect(await states('list_ready')).toEqual(['sent']);
+  });
   it('sends welcome only once across concurrent scans/dispatchers, with both tracking filters OFF', async () => {
     const s = await seed();
     await Promise.all([service.scan(), service.scan()]);
@@ -249,6 +318,7 @@ describe('lifecycle real Postgres and loopback TLS SMTP', () => {
     await service.scan();
     expect(await states('list_ready')).toEqual([]);
     await gift(s);
+    await elapseSinceFirstGift(s.campaign, DAY);
     await Promise.all([service.scan(), service.scan()]);
     await service.dispatch();
     expect(await states('list_ready')).toEqual(['sent']);
@@ -528,6 +598,7 @@ describe('lifecycle real Postgres and loopback TLS SMTP', () => {
     }
     const good = await seed();
     await gift(good);
+    await elapseSinceFirstGift(good.campaign, DAY);
     await service.scan();
     expect(await states('list_ready')).toEqual(['pending']);
     await build().dispatch();
@@ -640,6 +711,16 @@ describe('lifecycle real Postgres and loopback TLS SMTP', () => {
       await deps.lifecycleEmail.scan();
       await deps.lifecycleEmail.dispatch();
       expect(await states('welcome')).toEqual(['sent']);
+      // The production clock holds "seu chá já está pronto" for 24h after the first gift.
+      expect(await states('list_ready')).toEqual([]);
+      expect(sink.messages).toHaveLength(2);
+      const { rows: firstGifts } = await sql<{
+        campaign_id: string;
+      }>`SELECT campaign_id FROM lifecycle_email_first_gifts`.execute(test.db);
+      expect(firstGifts).toHaveLength(1);
+      await elapseSinceFirstGift(firstGifts[0]?.campaign_id ?? '', DAY);
+      await service.scan();
+      await service.dispatch();
       expect(await states('list_ready')).toEqual(['sent']);
       expect(sink.messages).toHaveLength(3);
       await resolverUsuarioAutenticado(deps, new Headers({ cookie }));
