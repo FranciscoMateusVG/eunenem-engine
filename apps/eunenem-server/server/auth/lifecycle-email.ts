@@ -293,11 +293,15 @@ ${opts.rows}
 
 // ── plain-text helpers ──────────────────────────────────────────────────────
 
-function textFooter(v: LifecycleEmailCommonVars, reason: string): string {
+function textFooter(v: LifecycleEmailCommonVars, reason: string, withFeedback = true): string {
   return [
-    'avalie sua experiência — como foi montar o seu chá?',
-    `de 1 (poderia ser melhor) a 5 (amei): ${v.feedbackUrl}`,
-    '',
+    ...(withFeedback
+      ? [
+          'avalie sua experiência — como foi montar o seu chá?',
+          `de 1 (poderia ser melhor) a 5 (amei): ${v.feedbackUrl}`,
+          '',
+        ]
+      : []),
     '—',
     reason,
     `descadastrar: ${v.unsubscribeUrl}`,
@@ -606,7 +610,8 @@ ${para(registered, `color:${C.muted};font-size:14px`)}
 ${handTitle('feliz por você,<br>time EuNeném', 22)}`,
       '40px 44px',
     ),
-    feedbackSection(v.feedbackUrl),
+    // Members did not build this chá, so "como foi montar o seu chá?" is owner-only.
+    ...(isOwner ? [feedbackSection(v.feedbackUrl)] : []),
     footer({ logo: logo(v.assetBaseUrl, 112), reason, unsubscribeUrl: v.unsubscribeUrl, preferencesUrl: v.preferencesUrl }),
   ].join('\n');
 
@@ -629,7 +634,7 @@ ${handTitle('feliz por você,<br>time EuNeném', 22)}`,
     'feliz por você,',
     'time EuNeném',
     '',
-    textFooter(v, reason),
+    textFooter(v, reason, isOwner),
   ].join('\n');
 
   return { subject, html: documentShell({ subject, preheader: `${guestLabel} escolheu um presente pro bebê ♡`, rows }), text };

@@ -4,12 +4,13 @@ import { type RawBuilder, sql, type Transaction } from 'kysely';
 import type { Database } from '../database.js';
 import type { DB } from '../db-types.generated.js';
 import type { LifecycleEmailType } from './lifecycle-email-preferences.js';
-import type {
-  Delivery,
-  LifecycleCandidates,
-  LifecycleEmailRepository,
-  Recipient,
-  Snapshot,
+import {
+  type Delivery,
+  LIST_READY_DELAY_MS,
+  type LifecycleCandidates,
+  type LifecycleEmailRepository,
+  type Recipient,
+  type Snapshot,
 } from './lifecycle-email-repository.js';
 
 export class LifecycleEmailRepositoryPostgres implements LifecycleEmailRepository {
@@ -210,11 +211,13 @@ export class LifecycleEmailRepositoryPostgres implements LifecycleEmailRepositor
         WHERE a.created_at>=${launchAt} AND a.email_verified AND a.id>${cursor('welcome')}::text
         AND NOT EXISTS(SELECT 1 FROM lifecycle_email_events e WHERE e.type='welcome' AND e.subject_id::text=a.id)
         ORDER BY a.id LIMIT 100`.execute(trx);
+        // Compared at the app clock's millisecond resolution (first-gift facts carry µs).
         const gifts = await sql<{
           campaign_id: string;
           occurred_at: Date;
         }>`SELECT f.* FROM lifecycle_email_first_gifts f JOIN campanhas c ON c.id=f.campaign_id
-        WHERE ${eligibleOwner} AND c.criada_em>=${launchAt} AND f.occurred_at>=${launchAt} AND f.campaign_id>${cursor('list_ready')}::uuid
+        WHERE ${eligibleOwner} AND c.criada_em>=${launchAt} AND f.occurred_at>=${launchAt}
+        AND date_trunc('milliseconds',f.occurred_at)<=${new Date(now.getTime() - LIST_READY_DELAY_MS)} AND f.campaign_id>${cursor('list_ready')}::uuid
         AND NOT EXISTS(SELECT 1 FROM lifecycle_email_events e WHERE e.type='list_ready' AND e.subject_id=f.campaign_id)
         ORDER BY f.campaign_id LIMIT 100`.execute(trx);
         const reminders = await sql<{

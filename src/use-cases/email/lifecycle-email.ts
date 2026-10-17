@@ -5,12 +5,13 @@ import type {
   LifecycleEmailPreferencesRepository,
   LifecycleEmailType,
 } from '../../adapters/email/lifecycle-email-preferences.js';
-import type {
-  Delivery,
-  LifecycleEmailConfig,
-  LifecycleEmailRepository,
-  LifecycleEmailVars,
-  Snapshot,
+import {
+  type Delivery,
+  LIST_READY_DELAY_MS,
+  type LifecycleEmailConfig,
+  type LifecycleEmailRepository,
+  type LifecycleEmailVars,
+  type Snapshot,
 } from '../../adapters/email/lifecycle-email-repository.js';
 import type { LivroFinanceiroRepository } from '../../adapters/pagamentos/financeiro/livro-repository.js';
 import type { PagamentoRepository } from '../../adapters/pagamentos/repository.js';
@@ -149,8 +150,11 @@ export class LifecycleEmailService {
       const candidates = await this.deps.repository.candidates(this.launchAt(), now);
       for (const row of candidates.welcomes)
         await this.admit('welcome', row.id, null, row.created_at, {}, true, row.id);
-      for (const row of candidates.gifts)
+      for (const row of candidates.gifts) {
+        // Only ever admitted 24h after the first gift (the scanner is its sole admit path).
+        if (now.getTime() - row.occurred_at.getTime() < LIST_READY_DELAY_MS) continue;
         await this.admit('list_ready', row.campaign_id, row.campaign_id, row.occurred_at, {}, true);
+      }
       for (const row of candidates.reminders)
         await this.admit(
           'event_reminder',

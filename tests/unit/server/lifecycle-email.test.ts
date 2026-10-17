@@ -262,6 +262,35 @@ describe('payment_received (presente recebido)', () => {
     expect(m.html).toContain('porque tem acesso a um chá de bebê na EuNeném.');
   });
 
+  it('a member never gets the "avalie sua experiência" block; the owner still does', () => {
+    const member = payment({
+      recipientIsOwner: false,
+      recipientName: 'Marcos',
+      ownerName: 'Helena',
+    });
+    for (const part of [member.html, member.text]) {
+      expect(part).not.toMatch(/avalie sua experi[eê]ncia/i);
+      expect(part).not.toContain('como foi montar o seu chá?');
+      expect(part).not.toContain('avaliar-email');
+      expect(part).not.toMatch(/poderia ser melhor/i);
+      expect(part).not.toMatch(/escrever meu coment[aá]rio/i);
+    }
+    // The rest of the member footer is intact.
+    expect(member.html).toContain(
+      'href="https://staging.eunenem.com/email/descadastrar?token=UNSUB"',
+    );
+    expect(member.text).toContain(
+      'descadastrar: https://staging.eunenem.com/email/descadastrar?token=UNSUB',
+    );
+    expect(member.text).toContain(
+      'preferências de e-mail: https://staging.eunenem.com/email/preferencias?token=PREF',
+    );
+    const owner = payment();
+    expect(owner.html).toContain('como foi montar o seu chá?');
+    expect(owner.html).toContain('href="https://staging.eunenem.com/avaliar-email?token=FB"');
+    expect(owner.text).toContain('avalie sua experiência — como foi montar o seu chá?');
+  });
+
   it('a member without a known owner name gets neutral copy, never their own name as owner', () => {
     for (const ownerName of [undefined, null, '  ']) {
       const m = payment({ recipientIsOwner: false, recipientName: 'Marcos', ownerName });

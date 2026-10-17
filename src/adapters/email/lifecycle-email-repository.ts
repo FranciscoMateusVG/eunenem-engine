@@ -51,8 +51,11 @@ export interface LifecycleEmailConfig {
   recipientAllowlist?: readonly string[];
 }
 
+/** "seu chá já está pronto!" waits this long after the campaign's first gift. */
+export const LIST_READY_DELAY_MS = 24 * 60 * 60_000;
 export interface LifecycleCandidates {
   welcomes: { id: string; created_at: Date }[];
+  /** First-gift facts at least LIST_READY_DELAY_MS old. */
   gifts: { campaign_id: string; occurred_at: Date }[];
   reminders: { id_campanha: string; event_date: string }[];
   payments: { id: string }[];
