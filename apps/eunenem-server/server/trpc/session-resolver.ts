@@ -226,6 +226,8 @@ async function autoProvisionarUsuarioOrfao(
   try {
     const resultado = await provisionarContaUsuarioDominio(
       {
+        lifecycleProvisioningStarted: deps.lifecycleEmail ? (userId,campaignId,giftCount) => (deps.lifecycleEmail?.provisioningStarted(userId,campaignId,giftCount) ?? Promise.resolve()) : undefined,
+        lifecycleProvisioningCompleted: deps.lifecycleEmail ? (userId,campaignId,giftCount) => (deps.lifecycleEmail?.provisioningCompleted(userId,campaignId,giftCount) ?? Promise.resolve()) : undefined,
         usuarioRepository: deps.usuarioRepository,
         plataformaRepository: deps.plataformaRepository,
         campanhaRepository: deps.campanhaRepository,

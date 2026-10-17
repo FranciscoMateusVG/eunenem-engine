@@ -2,13 +2,19 @@ import { type Kysely, sql } from 'kysely';
 
 export async function up(db: Kysely<unknown>): Promise<void> {
   await sql`
+    CREATE TABLE lifecycle_email_scan_cursors (
+      type text PRIMARY KEY,
+      last_id uuid NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000'::uuid
+    );
     CREATE TABLE lifecycle_email_rollout (
       singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),
       launch_at timestamptz NOT NULL
     );
     CREATE TABLE lifecycle_email_provisioned (
       user_id uuid PRIMARY KEY REFERENCES usuarios(id) ON DELETE CASCADE,
-      completed_at timestamptz NOT NULL DEFAULT now()
+      campaign_id uuid NOT NULL,
+      expected_gift_count integer NOT NULL CHECK(expected_gift_count >= 0),
+      completed_at timestamptz
     );
     CREATE TABLE lifecycle_email_first_gifts (
       campaign_id uuid PRIMARY KEY REFERENCES campanhas(id) ON DELETE CASCADE,
@@ -33,6 +39,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       created_at timestamptz NOT NULL DEFAULT now(),
       UNIQUE(tenant_id, type, subject_id)
     );
+    CREATE INDEX lifecycle_email_subject ON lifecycle_email_events(type,subject_id);
     CREATE TABLE lifecycle_email_deliveries (
       id uuid PRIMARY KEY,
       event_id uuid NOT NULL REFERENCES lifecycle_email_events(id),
@@ -46,6 +53,8 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       sent_at timestamptz,
       reason text,
       template_version integer NOT NULL DEFAULT 1,
+      email_key text,
+      UNIQUE(event_id,email_key),
       UNIQUE(event_id,user_id)
     );
     CREATE INDEX lifecycle_email_due ON lifecycle_email_deliveries(next_attempt_at,id) WHERE state='pending';
@@ -62,7 +71,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
 export async function down(db: Kysely<unknown>): Promise<void> {
   await sql`
     DROP TABLE lifecycle_email_preferences, lifecycle_email_deliveries, lifecycle_email_events,
-      lifecycle_email_provisioned, lifecycle_email_rollout;
+      lifecycle_email_provisioned, lifecycle_email_rollout, lifecycle_email_scan_cursors;
     DROP TRIGGER lifecycle_email_first_gift ON contribuicoes;
     DROP FUNCTION lifecycle_email_first_gift();
     DROP TABLE lifecycle_email_first_gifts;

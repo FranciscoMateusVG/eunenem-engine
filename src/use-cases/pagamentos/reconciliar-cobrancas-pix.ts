@@ -28,6 +28,7 @@ export interface ReconciliarCobrancasPixDeps {
   readonly clock: () => Date;
   readonly observability: Observability;
   readonly pixReceiptNotifier?: PixReceiptNotifier;
+  readonly lifecyclePaymentFinalized?: import('../checkout/finalizar-pagamento-aprovado.js').FinalizarPagamentoAprovadoDeps['lifecyclePaymentFinalized'];
   /**
    * aperture-4yse9 — optional analytics port. Invoked with the EXACT approved
    * pagamento and Inter's `horario` only when THIS run performed the
@@ -109,6 +110,7 @@ export async function reconciliarCobrancasPix(
               clock: deps.clock,
               observability: deps.observability,
               ...(deps.pixReceiptNotifier ? { pixReceiptNotifier: deps.pixReceiptNotifier } : {}),
+              lifecyclePaymentFinalized: deps.lifecyclePaymentFinalized,
             },
             {
               idPagamento: candidate.idPagamento,

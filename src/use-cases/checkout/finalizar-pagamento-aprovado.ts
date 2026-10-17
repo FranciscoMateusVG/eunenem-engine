@@ -63,6 +63,7 @@ export interface FinalizarPagamentoAprovadoDeps {
   readonly clock: () => Date;
   readonly observability: Observability;
   readonly pixReceiptNotifier?: PixReceiptNotifier;
+  readonly lifecyclePaymentFinalized?: ((pagamento: Pagamento) => Promise<void>) | undefined;
 }
 
 export type FinalizarPagamentoAprovadoComTransacaoVerificadaDeps = Omit<
@@ -290,6 +291,13 @@ async function finalizarPagamentoAprovadoInterno(
       // approved payment with a partial/corrupt prior ledger used to be
       // treated as successfully converged.
       assertLancamentosConformamPagamento(aprovado, lancamentos);
+      // Outbox admission cannot fail a completed financial operation. The scanner
+      // recovers a crash/failure with owner-only recipients, never invented history.
+      try {
+        await deps.lifecyclePaymentFinalized?.(aprovado);
+      } catch {
+        logger.info('lifecycle_email.admission_failed', { idPagamento: aprovado.id });
+      }
 
       logger.info('checkout.pagamento.finalizado', {
         idPlataforma: campanha.idPlataforma,
@@ -318,7 +326,7 @@ async function finalizarPagamentoAprovadoInterno(
 
 function validarRepeticaoSemRestricoes(_pagamento: Pagamento): void {}
 
-function assertLancamentosConformamPagamento(
+export function assertLancamentosConformamPagamento(
   pagamento: Pagamento,
   lancamentos: readonly LancamentoFinanceiro[],
 ): void {

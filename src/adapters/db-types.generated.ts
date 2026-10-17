@@ -257,6 +257,7 @@ export interface LancamentosFinanceiros {
 export interface LifecycleEmailDeliveries {
   attempts: Generated<number>;
   claimed_at: Timestamp | null;
+  email_key: string | null;
   event_id: string;
   id: string;
   next_attempt_at: Generated<Timestamp>;
@@ -294,13 +295,20 @@ export interface LifecycleEmailPreferences {
 }
 
 export interface LifecycleEmailProvisioned {
-  completed_at: Generated<Timestamp>;
+  campaign_id: string;
+  completed_at: Timestamp | null;
+  expected_gift_count: number;
   user_id: string;
 }
 
 export interface LifecycleEmailRollout {
   launch_at: Timestamp;
   singleton: Generated<boolean>;
+}
+
+export interface LifecycleEmailScanCursors {
+  last_id: Generated<string>;
+  type: string;
 }
 
 export interface ListasDeConvidados {
@@ -644,6 +652,7 @@ export interface DB {
   lifecycle_email_preferences: LifecycleEmailPreferences;
   lifecycle_email_provisioned: LifecycleEmailProvisioned;
   lifecycle_email_rollout: LifecycleEmailRollout;
+  lifecycle_email_scan_cursors: LifecycleEmailScanCursors;
   listas_de_convidados: ListasDeConvidados;
   opcoes_contribuicao: OpcoesContribuicao;
   pagamentos: Pagamentos;
