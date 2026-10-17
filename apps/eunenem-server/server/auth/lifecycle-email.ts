@@ -194,7 +194,7 @@ function hero(opts: { eyebrow?: string; title: string; subtitle?: string; align:
   return `<tr><td style="padding:0 0 32px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td class="pad" align="${align}" bgcolor="${C.heroSolid}" style="background-color:${C.heroSolid};background-image:${HERO_GRADIENT};border-radius:24px;padding:${align === 'center' ? '56px 48px' : '44px 44px'};text-align:${align}">
 ${opts.eyebrow ? `<div style="margin:0 0 18px;font-family:${SANS};font-size:12px;line-height:16px;letter-spacing:2px;color:${C.white}">${esc(upper(opts.eyebrow))}</div>` : ''}
 <h1 style="margin:0 0 ${opts.subtitle ? '18px' : '0'};font-family:${HAND};font-size:${align === 'center' ? 44 : 40}px;line-height:1.15;font-weight:normal;color:${C.white}">${opts.title}</h1>
-${opts.subtitle ? `<p style="margin:0;font-family:${SANS};font-size:16px;line-height:26px;color:${C.white}">${opts.subtitle}</p>` : ''}
+${opts.subtitle ? `<p style="margin:0${align === 'center' ? ' auto' : ''};max-width:${align === 'center' ? 400 : 480}px;font-family:${SANS};font-size:16px;line-height:26px;color:${C.white}">${opts.subtitle}</p>` : ''}
 </td></tr></table></td></tr>`;
 }
 
