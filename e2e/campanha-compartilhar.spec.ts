@@ -23,7 +23,11 @@ test('owner shares by email and revokes through the real campaign screen', async
   await expect(page.getByRole('status')).toContainText('Convite enviado');
   const invitation = page.getByRole('listitem').filter({ hasText: email });
   await expect(invitation).toContainText('Pendente');
+  await invitation.getByRole('button', { name: /^Gerenciar acesso/ }).click();
   await invitation.getByRole('button', { name: 'Revogar convite' }).click();
+  await invitation.getByRole('button', { name: 'Sim, revogar' }).click();
+  // Past invites move to the collapsed "Convites anteriores" list.
+  await page.getByText(/^Convites anteriores/).click();
   await expect(invitation).toContainText('Revogado');
 });
 
@@ -69,11 +73,12 @@ test('verified invitee sees the shared campaign and loses it immediately after o
     const member = ownerPage
       .getByRole('listitem')
       .filter({ hasText: email })
-      .filter({ has: ownerPage.getByRole('button', { name: 'Remover acesso' }) });
+      .filter({ has: ownerPage.getByRole('button', { name: /^Gerenciar acesso/ }) });
     await expect(member).toBeVisible();
     await ownerPage.screenshot({ path: testInfo.outputPath('compartilhar.png'), fullPage: true });
-    ownerPage.once('dialog', (dialog) => dialog.accept());
+    await member.getByRole('button', { name: /^Gerenciar acesso/ }).click();
     await member.getByRole('button', { name: 'Remover acesso' }).click();
+    await member.getByRole('button', { name: 'Sim, remover' }).click();
     await expect(member).toHaveCount(0);
     await recipient.reload();
     await expect(recipient.locator(`a[href$="/c/${seededData.idCampanha}"]`)).toHaveCount(0);
@@ -163,7 +168,10 @@ test('owner chooses permissions in the invite form, edits the pending invite, an
     await expect(ownerPage.locator('body')).not.toContainText('Novos membros podem cuidar');
     const form = ownerPage.getByTestId('convite-permissoes-novo');
     const box = (scope: typeof form, acao: string) => scope.locator(`input[data-acao="${acao}"]`);
-    // Pre-ticked with the default member permissions; finance stays off.
+    // Starts on the "Ajudante" preset (the default member permissions);
+    // "Personalizar" reveals the switches, pre-ticked; finance stays off.
+    await expect(form.getByRole('radio', { name: 'Ajudante' })).toBeChecked();
+    await form.getByRole('radio', { name: 'Personalizar' }).check();
     for (const acao of [
       'presentes:gerenciar',
       'perfil:editar',
@@ -175,26 +183,28 @@ test('owner chooses permissions in the invite form, edits the pending invite, an
       await expect(box(form, acao)).toBeChecked();
     for (const acao of ['link:editar', 'extrato:ver', 'recebedor:gerenciar', 'saque:solicitar'])
       await expect(box(form, acao)).not.toBeChecked();
-    await expect(form).toContainText('financeiro');
+    await expect(form).toContainText('Financeiro');
     await box(form, 'presentes:gerenciar').uncheck();
     await box(form, 'extrato:ver').check();
-    await expect(ownerPage.getByTestId('convite-permissoes-resumo')).toContainText(
-      'ver o extrato financeiro',
-    );
-    await expect(ownerPage.getByTestId('convite-permissoes-resumo')).not.toContainText(
-      'editar a lista de presentes',
+    await expect(ownerPage.getByTestId('convite-permissoes-resumo')).toHaveText(
+      '5 de 7 no evento, 1 de 3 no financeiro.',
     );
 
     const email = `chosen-ui-${randomUUID()}@example.com`;
     await ownerPage.getByLabel('E-mail da pessoa').fill(email);
     await ownerPage.getByRole('button', { name: 'Convidar', exact: true }).click();
     await expect(ownerPage.getByRole('status')).toContainText('Convite enviado');
-    // The form resets to the defaults for the next invite.
+    // The form resets to the defaults (the "Ajudante" preset) for the next invite.
+    await expect(form.getByRole('radio', { name: 'Ajudante' })).toBeChecked();
+    await expect(box(form, 'extrato:ver')).toHaveCount(0);
+    await form.getByRole('radio', { name: 'Personalizar' }).check();
     await expect(box(form, 'presentes:gerenciar')).toBeChecked();
     await expect(box(form, 'extrato:ver')).not.toBeChecked();
 
     const invitation = ownerPage.getByRole('listitem').filter({ hasText: email });
     await expect(invitation).toContainText('Pendente');
+    await expect(invitation).toContainText('Personalizado');
+    await invitation.getByRole('button', { name: /^Gerenciar acesso/ }).click();
     const pending = invitation.locator('fieldset');
     await expect(box(pending, 'extrato:ver')).toBeChecked();
     await expect(box(pending, 'presentes:gerenciar')).not.toBeChecked();
@@ -204,7 +214,9 @@ test('owner chooses permissions in the invite form, edits the pending invite, an
     await box(pending, 'saque:solicitar').check();
     await saved;
     await ownerPage.reload();
-    const reloaded = ownerPage.getByRole('listitem').filter({ hasText: email }).locator('fieldset');
+    const reloadedItem = ownerPage.getByRole('listitem').filter({ hasText: email });
+    await reloadedItem.getByRole('button', { name: /^Gerenciar acesso/ }).click();
+    const reloaded = reloadedItem.locator('fieldset');
     await expect(box(reloaded, 'saque:solicitar')).toBeChecked();
 
     const session = await mintMagicLinkSession(db, { email, name: 'Chosen Member', baseURL });
@@ -236,6 +248,12 @@ test('owner chooses permissions in the invite form, edits the pending invite, an
       ].sort(),
     );
     await ownerPage.reload();
+    await ownerPage
+      .getByRole('listitem')
+      .filter({ hasText: email })
+      .filter({ has: ownerPage.getByRole('button', { name: /^Gerenciar acesso/ }) })
+      .getByRole('button', { name: /^Gerenciar acesso/ })
+      .click();
     const memberToggles = ownerPage.getByTestId(`membro-permissoes-${user.id_conta}`);
     await expect(box(memberToggles, 'saque:solicitar')).toBeChecked();
     await expect(box(memberToggles, 'presentes:gerenciar')).not.toBeChecked();

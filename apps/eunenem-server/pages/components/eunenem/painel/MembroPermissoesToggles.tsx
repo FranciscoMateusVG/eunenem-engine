@@ -1,13 +1,13 @@
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
-import { PermissoesCheckboxes } from "./PermissoesCheckboxes";
+import { PermissoesEditor } from "./PermissoesEditor";
 import { useAcessoCampanha } from "./useAcessoCampanha";
 
 /**
  * aperture-1z18g — owner-only per-member permission toggles. Slotted into the
- * sharing panel (CompartilharBody) once per member row. Renders NOTHING unless
- * the viewer is the campanha's owner and the target is a 'membro' (owners
- * always have everything). Each toggle saves immediately; the server re-checks
+ * sharing panel (CompartilharBody), inside each member card's "Gerenciar"
+ * panel. Renders NOTHING unless the viewer is the campanha's owner and the
+ * target is a 'membro' (owners always have everything). Each toggle saves immediately; the server re-checks
  * ownership and the member's next request already sees the change.
  */
 
@@ -45,9 +45,9 @@ export function MembroPermissoesToggles({
   if (!alvo || alvo.papel !== "membro") return null;
 
   return (
-    <PermissoesCheckboxes
+    <PermissoesEditor
       testId={`membro-permissoes-${idConta}`}
-      legenda="o que essa pessoa pode fazer"
+      legenda="O que essa pessoa pode fazer"
       permissoes={alvo.permissoes}
       disabled={definir.isPending}
       onChange={(permissoes) => definir.mutate({ idCampanha, idConta, permissoes })}
