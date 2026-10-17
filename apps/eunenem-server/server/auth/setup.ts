@@ -1,3 +1,8 @@
+import { LifecycleEmailService } from '../../../../src/use-cases/email/lifecycle-email.js';
+import { LifecycleEmailRepositoryPostgres } from '../../../../src/adapters/email/lifecycle-email.postgres.js';
+import { LifecycleEmailPreferencesPostgres } from '../../../../src/adapters/email/lifecycle-email-preferences.postgres.js';
+import { createLifecycleEmailTokens, type LifecycleEmailTokens } from './lifecycle-email-tokens.js';
+import { renderLifecycleEmail } from './lifecycle-email.js';
 import { renderCampaignInviteEmail } from './campaign-invite-email.js';
 import { CampanhaCompartilhamentoPostgres } from '../../../../src/adapters/arrecadacao/campanha-compartilhamento.postgres.js';
 import { z } from 'zod';
@@ -121,6 +126,10 @@ export type RevogarConvitesPendentesDoMembro = (
 ) => Promise<void>;
 
 export interface ServerDeps {
+  readonly lifecycleEmail?: LifecycleEmailService;
+  readonly lifecycleEmailTokens?: LifecycleEmailTokens;
+  readonly lifecycleEmailPreferences?: LifecycleEmailPreferencesPostgres;
+  readonly lifecyclePaymentFinalized?: ((pagamento: Pagamento) => Promise<void>) | undefined;
   readonly db: Database;
   /** Optional only for isolated in-memory router fixtures. Production composition requires it. */
   readonly contextoCompartilhamentoOnboarding?: (usuarioId: string, idConta: string, plataformaId: string) => Promise<{ idsProprias: string[]; idCompartilhada: string | null }>;
@@ -686,6 +695,9 @@ const ServerEnvSchema = z
      * SMTP transport for tenant-scoped magic-link authentication. The plugin
      * registers only when HOST/USER/PASS are all configured.
      */
+    LIFECYCLE_EMAIL_ENABLED: z.enum(['true', 'false']).default('false'),
+    LIFECYCLE_EMAIL_LAUNCH_AT: z.iso.datetime({ offset: true }).optional(),
+    LIFECYCLE_EMAIL_ALLOWED_RECIPIENTS: z.string().optional(),
     SMTP_HOST: z.string().optional(),
     SMTP_PORT: z.coerce.number().int().positive().optional().default(587),
     SMTP_USER: z.string().optional(),
@@ -909,7 +921,13 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): ServerEnv {
  *   (PagamentoProvider + CheckoutSessionProvider) so dev/test flows
  *   exercise the same code paths the prod adapter takes.
  */
-export function buildServerDeps(env: ServerEnv): ServerDeps & {
+export function buildServerDeps(
+  env: ServerEnv,
+  testSmtpEndpoint?: { port: number; ca: string },
+): ServerDeps & {
+  lifecycleEmail: LifecycleEmailService;
+  lifecycleEmailTokens: LifecycleEmailTokens;
+  lifecycleEmailPreferences: LifecycleEmailPreferencesPostgres;
   consumirConvitesVerificados: (usuarioId: string, plataformaId: string) => Promise<void>;
   revogarConvitesPendentesDoMembro: RevogarConvitesPendentesDoMembro;
   contextoCompartilhamentoOnboarding: NonNullable<ServerDeps['contextoCompartilhamentoOnboarding']>;
@@ -965,6 +983,9 @@ export function buildServerDeps(env: ServerEnv): ServerDeps & {
       : {}),
   };
 
+  if (testSmtpEndpoint && env.NODE_ENV !== 'test') {
+    throw new Error('SMTP test endpoint forbidden outside tests');
+  }
   const smtpConfigured =
     !!env.SMTP_HOST?.length && !!env.SMTP_USER?.length && !!env.SMTP_PASS?.length;
   const emailTransport: EmailTransport = smtpConfigured
@@ -975,8 +996,11 @@ export function buildServerDeps(env: ServerEnv): ServerDeps & {
         pass: env.SMTP_PASS as string,
         from: env.SMTP_FROM,
         secure: env.SMTP_SECURE,
-      })
+      }, testSmtpEndpoint)
     : new EmailTransportNoop(observability.logger);
+  if (env.LIFECYCLE_EMAIL_ENABLED === 'true' && (!smtpConfigured || env.SMTP_HOST?.toLowerCase() !== 'smtp.sendgrid.net')) {
+    throw new Error('Lifecycle emails require configured SendGrid SMTP; Noop is forbidden');
+  }
   const pixReceiptNotifier = async (pagamento: Pagamento): Promise<void> => {
     const message = renderPixPaymentReceiptEmail(pagamento);
     if (message !== null) await emailTransport.enviar(message);
@@ -1222,7 +1246,47 @@ export function buildServerDeps(env: ServerEnv): ServerDeps & {
     pixCobrancaProvider = new PixCobrancaNaoConfigurado();
   }
 
+  const lifecycleEmailTokens = createLifecycleEmailTokens(env.BETTER_AUTH_SECRET);
+  const lifecycleEmailPreferences = new LifecycleEmailPreferencesPostgres(db);
+  const emailOrigin = new URL(env.BETTER_AUTH_URL).origin;
+  const emailAllowlist = env.LIFECYCLE_EMAIL_ALLOWED_RECIPIENTS?.split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  if (
+    env.LIFECYCLE_EMAIL_ENABLED === 'true' &&
+    new URL(emailOrigin).hostname !== 'eunenem.com' &&
+    !emailAllowlist?.length
+  ) {
+    throw new Error(
+      'Non-production lifecycle email rollout requires an explicit recipient allowlist',
+    );
+  }
+  const lifecycleEmail = new LifecycleEmailService(
+    {
+      repository: new LifecycleEmailRepositoryPostgres(db),
+      preferences: lifecycleEmailPreferences,
+      transport: emailTransport,
+      pagamentoRepository,
+      livroFinanceiroRepository,
+      clock: () => new Date(),
+      render: renderLifecycleEmail,
+      report: (event, data) => observability.logger.info(event, data),
+      links: (userId, tenantId, type, deliveryId) => ({
+        preferencesUrl: `${emailOrigin}/email/preferencias?token=${lifecycleEmailTokens.signPreferenceToken({ userId, tenantId })}`,
+        unsubscribeUrl: `${emailOrigin}/email/descadastrar?token=${lifecycleEmailTokens.signPreferenceToken({ userId, tenantId, type })}`,
+        feedbackUrl: `${emailOrigin}/avaliar-email?token=${lifecycleEmailTokens.signFeedbackToken(deliveryId)}`,
+      }),
+    },
+    {
+      enabled: env.LIFECYCLE_EMAIL_ENABLED === 'true',
+      launchAt: env.LIFECYCLE_EMAIL_LAUNCH_AT ? new Date(env.LIFECYCLE_EMAIL_LAUNCH_AT) : null,
+      origin: emailOrigin,
+      ...(emailAllowlist ? { recipientAllowlist: emailAllowlist } : {}),
+    },
+  );
   return {
+    lifecycleEmail, lifecycleEmailTokens, lifecycleEmailPreferences,
+    lifecyclePaymentFinalized: (payment) => lifecycleEmail.paymentFinalized(payment),
     contextoCompartilhamentoOnboarding: (usuarioId, idConta, plataformaId) => new CampanhaCompartilhamentoPostgres(db).contextoOnboarding(usuarioId, idConta, plataformaId),
     revogarConvitesPendentesDoMembro: (input, { trx }) => new CampanhaCompartilhamentoPostgres(db).revogarPendentesDoMembro(input.idCampanha, input.idConta, input.idUsuarioAtor, trx),
     consumirConvitesVerificados: (usuarioId, plataformaId) => new CampanhaCompartilhamentoPostgres(db).consumirVerificados(usuarioId, plataformaId),

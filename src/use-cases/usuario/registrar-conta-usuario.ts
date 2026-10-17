@@ -164,6 +164,12 @@ export type ProvisionarContaUsuarioDominioInput = z.infer<
  * domain logic without dragging in the BetterAuth adapter.
  */
 export interface ProvisionarContaUsuarioDominioDeps {
+  readonly lifecycleProvisioningStarted?:
+    | ((userId: string, campaignId: string, giftCount: number) => Promise<void>)
+    | undefined;
+  readonly lifecycleProvisioningCompleted?:
+    | ((userId: string, campaignId: string, giftCount: number) => Promise<void>)
+    | undefined;
   readonly usuarioRepository: UsuarioRepository;
   readonly plataformaRepository: PlataformaRepository;
   readonly campanhaRepository: CampanhaRepository;
@@ -547,6 +553,15 @@ export async function provisionarContaUsuarioDominio(
 
       // step 4: default Campanha (no Recebedor — user has no PIX at signup)
       const idCampanha = gerarIdCampanha();
+      try {
+        await deps.lifecycleProvisioningStarted?.(
+          data.idUsuario,
+          idCampanha,
+          contribuicaoRepository ? initialCampaignItems.length : 0,
+        );
+      } catch {
+        logger.info('lifecycle_email.provisioning_plan_failed', { idUsuario: data.idUsuario });
+      }
       const titulo = construirTituloListaPadrao(data.nome);
       span.setAttribute('arrecadacao.campanha.id', idCampanha);
       span.setAttribute('arrecadacao.campanha.titulo.length', titulo.length);
@@ -602,6 +617,15 @@ export async function provisionarContaUsuarioDominio(
       }
 
       span.setStatus({ code: SpanStatusCode.OK });
+      try {
+        await deps.lifecycleProvisioningCompleted?.(
+          usuario.id,
+          idCampanha,
+          contribuicaoRepository ? initialCampaignItems.length : 0,
+        );
+      } catch {
+        logger.info('lifecycle_email.provisioning_completion_failed', { idUsuario: usuario.id });
+      }
       return { usuario, conta, campanha: campanhaComOpcao };
     } catch (error) {
       // Compensation path. Best-effort — runCompensations logs failures

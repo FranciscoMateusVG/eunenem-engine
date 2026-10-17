@@ -515,6 +515,7 @@ export async function dispatchVerifiedStripeEvent(
             clock: deps.clock,
             observability: deps.observability,
             pixReceiptNotifier: deps.pixReceiptNotifier,
+            lifecyclePaymentFinalized: deps.lifecyclePaymentFinalized,
           },
           {
             idPagamento: pagamento.id,
@@ -822,6 +823,7 @@ export async function dispatchVerifiedStripeEvent(
           clock: deps.clock,
           observability: deps.observability,
           pixReceiptNotifier: deps.pixReceiptNotifier,
+            lifecyclePaymentFinalized: deps.lifecyclePaymentFinalized,
         },
         { idPagamento: pagamento.id },
       );

@@ -32,6 +32,7 @@ import {
   PIX_COBRANCA_RECONCILIATION_QUEUE,
   registerPixCobrancaReconciliationJob,
 } from './server/jobs/pix-cobranca-reconciliation.pgboss.js';
+import { LIFECYCLE_EMAIL_QUEUE, registerLifecycleEmailJob } from './server/jobs/lifecycle-email.pgboss.js';
 import { createServerLifecycle, LifecycleAdmissionClosedError } from './server/lifecycle.js';
 import { createPainelAccessMiddleware } from './server/painel-access.js';
 import {
@@ -58,7 +59,7 @@ const env = loadEnv();
 const deps = buildServerDeps(env);
 const lifecycle = createServerLifecycle({
   boss: deps.boss,
-  queues: [REPASSE_EXECUTAR_QUEUE, REPASSE_CONFIRMAR_QUEUE, PIX_COBRANCA_RECONCILIATION_QUEUE],
+  queues: [LIFECYCLE_EMAIL_QUEUE, REPASSE_EXECUTAR_QUEUE, REPASSE_CONFIRMAR_QUEUE, PIX_COBRANCA_RECONCILIATION_QUEUE],
   log: (event) => console.log(`[lifecycle] ${event}`),
   exit: (code) => process.exit(code),
 });
@@ -118,6 +119,8 @@ try {
       registerPixCobrancaReconciliationJob(deps.boss, deps, lifecycle),
     );
   }
+
+  await lifecycle.startupStep(() => registerLifecycleEmailJob(deps.boss, deps.lifecycleEmail, lifecycle));
 
   console.log(
     pixReconciliationWorkerDisabled
