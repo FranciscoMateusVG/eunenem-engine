@@ -64,7 +64,7 @@ const INFRA_ADAPTER_FOLDERS = [
  * `use-cases/`, `errors/`, and `tests/unit/` (no `domain/`, no `adapters/`).
  * Reserved for layers that compose BCs by their ports.
  */
-const APPLICATION_FOLDERS = ['checkout'];
+const APPLICATION_FOLDERS = ['checkout', 'email'];
 
 // ── financeiro nested-module nodes (spliced into `pagamentos/` per layer) ──
 // financeiro (§2.5) lives under pagamentos in every src layer. Its shape per

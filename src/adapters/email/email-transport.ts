@@ -33,6 +33,8 @@ export interface EmailMessage {
    * email omits this option and retains its existing provider settings.
    */
   readonly disableClickTracking?: boolean;
+  /** Disable per-message open pixels (lifecycle mail). */
+  readonly disableOpenTracking?: boolean;
 }
 
 export interface EmailTransport {

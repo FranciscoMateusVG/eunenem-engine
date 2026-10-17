@@ -484,6 +484,12 @@ describe('Migration round-trip', () => {
     //    this sequence must start at the LATEST migration and walk earlier.
     //    Adding a new migration on top REQUIRES prepending its down-step here.
 
+    // Lifecycle email ledger/outbox (060).
+    const down060 = await migrator.migrateDown();
+    expect(down060.error).toBeUndefined();
+    expect(await listTableNames(db)).not.toContain('lifecycle_email_deliveries');
+    expect(await listTableNames(db)).not.toContain('lifecycle_email_preferences');
+
     // Invite permissions (059), sharing and permissions are the newest migrations.
     expect((await getColumn(db, 'campanha_convites', 'permissoes'))?.is_nullable).toBe('NO');
     const downConvitesPermissoes = await migrator.migrateDown();
