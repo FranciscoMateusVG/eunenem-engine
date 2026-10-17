@@ -6,9 +6,9 @@ import type {
 } from '../../../src/adapters/email/email-feedback.postgres.js';
 import {
   LIFECYCLE_EMAIL_TYPES,
-  type LifecycleEmailPreferencesPostgres,
+  type LifecycleEmailPreferencesRepository,
   type LifecycleEmailType,
-} from '../../../src/adapters/email/lifecycle-email-preferences.postgres.js';
+} from '../../../src/adapters/email/lifecycle-email-preferences.js';
 import type { LifecycleEmailTokens } from './auth/lifecycle-email-tokens.js';
 
 /**
@@ -27,7 +27,7 @@ export interface LifecycleEmailPagesDeps {
     LifecycleEmailTokens,
     'verifyFeedbackToken' | 'verifyPreferenceToken' | 'signPreferenceToken'
   >;
-  preferences: Pick<LifecycleEmailPreferencesPostgres, 'getPreferences' | 'setPreferences'>;
+  preferences: LifecycleEmailPreferencesRepository;
   feedback: Pick<EmailFeedbackPostgres, 'save' | 'findByDeliveryId'>;
   /** Origins allowed to POST (BETTER_AUTH_URL + TRUSTED_ORIGINS). */
   allowedOrigins: readonly string[];
