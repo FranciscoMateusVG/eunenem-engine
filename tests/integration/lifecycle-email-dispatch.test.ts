@@ -743,4 +743,64 @@ describe('lifecycle real Postgres and loopback TLS SMTP', () => {
     await service.dispatch();
     expect(await states('event_reminder')).toEqual(['sent']);
   });
+  it('requires the same eligible campaign owner for hook admission and recovery, including members', async () => {
+    const owner = await seed({ oldAccount: true });
+    const contribution = await gift(owner);
+    await seed({
+      campaign: owner.campaign,
+      tenant: owner.tenant,
+      role: 'membro',
+      permissions: ['extrato:ver'],
+    });
+    const payment = await approved(owner, contribution);
+    await service.paymentFinalized(payment);
+    expect(await states('payment_received')).toEqual([]);
+    now = new Date(now.getTime() + 11 * 60_000);
+    await service.scan();
+    expect(await states('payment_received')).toEqual([]);
+    const repository = new LifecycleEmailRepositoryPostgres(test.db);
+    expect(await repository.recipients(launch, owner.campaign)).toEqual([]);
+  });
+  it('does not reset a new owner failed reminder because the former owner has a restorable row', async () => {
+    const owner = await seed();
+    const id = randomUUID();
+    const date = new Date('2026-10-22T03:00:00Z');
+    await test.db
+      .insertInto('eventos')
+      .values({ id, id_campanha: owner.campaign, data_hora: date })
+      .execute();
+    await service.scan();
+    await test.db.updateTable('eventos').set({ data_hora: null }).where('id', '=', id).execute();
+    await service.dispatch();
+    expect(await states('event_reminder')).toEqual(['suppressed']);
+    await test.db
+      .updateTable('campanha_membros_permissoes')
+      .set({ papel: 'membro', permissoes: [] })
+      .where('campanha_id', '=', owner.campaign)
+      .execute();
+    const current = await seed({ campaign: owner.campaign, tenant: owner.tenant });
+    // A genuinely different unsent date can admit the new owner.
+    await test.db
+      .updateTable('eventos')
+      .set({ data_hora: new Date('2026-10-23T03:00:00Z') })
+      .where('id', '=', id)
+      .execute();
+    now = new Date('2026-10-18T12:00:00Z');
+    await service.scan();
+    sink.setMode('reject');
+    for (let i = 0; i < 3; i++) {
+      await service.dispatch();
+      now = new Date(now.getTime() + 10 * 60_000);
+    }
+    const currentDelivery = () =>
+      test.db
+        .selectFrom('lifecycle_email_deliveries')
+        .select(['state', 'attempts'])
+        .where('type', '=', 'event_reminder')
+        .where('user_id', '=', current.userId)
+        .executeTakeFirstOrThrow();
+    expect(await currentDelivery()).toEqual({ state: 'failed', attempts: 3 });
+    await service.scan();
+    expect(await currentDelivery()).toEqual({ state: 'failed', attempts: 3 });
+  });
 });
