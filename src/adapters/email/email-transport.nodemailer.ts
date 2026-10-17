@@ -40,12 +40,14 @@ export class EmailTransportNodemailer implements EmailTransport {
   private readonly from: string;
   private readonly host: string;
 
-  constructor(config: SmtpConfig) {
+  constructor(config: SmtpConfig, testEndpoint?: { port: number; ca: string }) {
+    if (testEndpoint && process.env.NODE_ENV !== 'test')
+      throw new Error('SMTP test endpoint forbidden outside tests');
     this.from = config.from;
     this.host = config.host;
     this.transporter = nodemailer.createTransport({
-      host: config.host,
-      port: config.port,
+      host: testEndpoint ? '127.0.0.1' : config.host,
+      port: testEndpoint?.port ?? config.port,
       secure: config.secure,
       // Authentication emails contain a bearer token. Port 587 must fail
       // closed if STARTTLS is unavailable or stripped; implicit TLS on 465 is
@@ -54,12 +56,22 @@ export class EmailTransportNodemailer implements EmailTransport {
       tls: {
         minVersion: 'TLSv1.2',
         rejectUnauthorized: true,
+        ...(testEndpoint ? { ca: testEndpoint.ca, servername: 'localhost' } : {}),
       },
       auth: { user: config.user, pass: config.pass },
       // Pool so a burst of magic-link sends reuses connections rather than
       // opening one socket per email.
       pool: true,
+      // Pool reconnects must never resend an ambiguous DATA transaction.
+      ...{ maxRequeues: 0 },
+      connectionTimeout: 15_000,
+      greetingTimeout: 15_000,
+      socketTimeout: 60_000,
     });
+  }
+
+  close(): void {
+    this.transporter.close();
   }
 
   async enviar(message: EmailMessage): Promise<void> {
@@ -72,8 +84,14 @@ export class EmailTransportNodemailer implements EmailTransport {
         // No generic/custom headers cross the port. Only the verified SendGrid
         // SMTP host supports this mapping; never silently send an auth token
         // through an unsupported tracking policy.
-        if (message.disableClickTracking && this.host.toLowerCase() !== 'smtp.sendgrid.net') {
-          throw new Error('Email click-tracking policy unsupported by this SMTP host');
+        if (
+          (message.disableClickTracking || message.disableOpenTracking) &&
+          this.host.toLowerCase() !== 'smtp.sendgrid.net'
+        ) {
+          throw Object.assign(
+            new Error('Email click-tracking policy unsupported by this SMTP host'),
+            { code: 'ETRACKINGPOLICY' },
+          );
         }
         await this.transporter.sendMail({
           from: this.from,
@@ -81,8 +99,24 @@ export class EmailTransportNodemailer implements EmailTransport {
           subject: message.subject,
           html: message.html,
           ...(message.text ? { text: message.text } : {}),
-          ...(message.disableClickTracking
-            ? { headers: { 'X-SMTPAPI': SENDGRID_DIRECT_LINKS_HEADER } }
+          ...(message.disableClickTracking || message.disableOpenTracking
+            ? {
+                headers: {
+                  'X-SMTPAPI': message.disableOpenTracking
+                    ? {
+                        prepared: true,
+                        value: JSON.stringify({
+                          filters: {
+                            ...(message.disableClickTracking
+                              ? { clicktrack: { settings: { enable: 0, enable_text: false } } }
+                              : {}),
+                            opentrack: { settings: { enable: 0 } },
+                          },
+                        }),
+                      }
+                    : SENDGRID_DIRECT_LINKS_HEADER,
+                },
+              }
             : {}),
         });
         span.setStatus({ code: SpanStatusCode.OK });

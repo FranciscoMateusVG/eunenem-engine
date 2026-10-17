@@ -829,6 +829,17 @@ export { noopTracer, SpanKind, SpanStatusCode, trace } from './observability/tra
 
 // --- Use Cases ---
 
+export type {
+  LifecycleEmailPreferences,
+  LifecycleEmailPreferencesRepository,
+  LifecycleEmailType,
+} from './adapters/email/lifecycle-email-preferences.js';
+// Lifecycle notifications: ports and orchestration; concrete SMTP/Postgres stay in adapters.
+export type {
+  LifecycleEmailConfig,
+  LifecycleEmailRepository,
+  LifecycleEmailVars,
+} from './adapters/email/lifecycle-email-repository.js';
 export { ArrecadacaoRecebedorJaExisteError } from './errors/arrecadacao/recebedor-ja-existe.error.js';
 // Plan 0016 Phase 2 (aperture-eg1s2): cart-multi-campanha error.
 export { CarrinhoMultiplasCampanhasError } from './errors/checkout/carrinho-multiplas-campanhas.error.js';
@@ -1075,6 +1086,10 @@ export {
 } from './use-cases/checkout/obter-contribuicoes-precalculadas-campanha.js';
 export type { CreateCatDeps } from './use-cases/create-cat.js';
 export { createCat } from './use-cases/create-cat.js';
+export {
+  type LifecycleEmailDeps,
+  LifecycleEmailService,
+} from './use-cases/email/lifecycle-email.js';
 export type {
   AlterarPresencaConvidadoDeps,
   AlterarPresencaConvidadoInput,

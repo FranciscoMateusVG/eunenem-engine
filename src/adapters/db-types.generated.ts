@@ -242,6 +242,63 @@ export interface LancamentosFinanceiros {
   transferido_em: Timestamp | null;
 }
 
+export interface LifecycleEmailDeliveries {
+  attempts: Generated<number>;
+  claimed_at: Timestamp | null;
+  email_key: string | null;
+  event_id: string;
+  id: string;
+  next_attempt_at: Generated<Timestamp>;
+  reason: string | null;
+  sent_at: Timestamp | null;
+  state: Generated<string>;
+  template_version: Generated<number>;
+  tenant_id: string;
+  type: string;
+  user_id: string;
+}
+
+export interface LifecycleEmailEvents {
+  campaign_id: string | null;
+  created_at: Generated<Timestamp>;
+  id: string;
+  occurred_at: Timestamp;
+  snapshot: Generated<Json>;
+  subject_id: string;
+  tenant_id: string;
+  type: string;
+}
+
+export interface LifecycleEmailFirstGifts {
+  campaign_id: string;
+  occurred_at: Generated<Timestamp>;
+}
+
+export interface LifecycleEmailPreferences {
+  enabled: Generated<boolean>;
+  tenant_id: string;
+  type: string;
+  updated_at: Generated<Timestamp>;
+  user_id: string;
+}
+
+export interface LifecycleEmailProvisioned {
+  campaign_id: string;
+  completed_at: Timestamp | null;
+  expected_gift_count: number;
+  user_id: string;
+}
+
+export interface LifecycleEmailRollout {
+  launch_at: Timestamp;
+  singleton: Generated<boolean>;
+}
+
+export interface LifecycleEmailScanCursors {
+  last_id: Generated<string>;
+  type: string;
+}
+
 export interface ListasDeConvidados {
   atualizado_em: Generated<Timestamp>;
   criado_em: Generated<Timestamp>;
@@ -576,6 +633,13 @@ export interface DB {
   eventos: Eventos;
   intencao_items: IntencaoItems;
   lancamentos_financeiros: LancamentosFinanceiros;
+  lifecycle_email_deliveries: LifecycleEmailDeliveries;
+  lifecycle_email_events: LifecycleEmailEvents;
+  lifecycle_email_first_gifts: LifecycleEmailFirstGifts;
+  lifecycle_email_preferences: LifecycleEmailPreferences;
+  lifecycle_email_provisioned: LifecycleEmailProvisioned;
+  lifecycle_email_rollout: LifecycleEmailRollout;
+  lifecycle_email_scan_cursors: LifecycleEmailScanCursors;
   listas_de_convidados: ListasDeConvidados;
   opcoes_contribuicao: OpcoesContribuicao;
   pagamentos: Pagamentos;
