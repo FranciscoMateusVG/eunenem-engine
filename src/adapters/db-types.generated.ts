@@ -199,6 +199,18 @@ export interface Convites {
   remetente: string;
 }
 
+export interface EmailFeedback {
+  comentario: string | null;
+  created_at: Generated<Timestamp>;
+  delivery_id: string;
+  id: string;
+  nota: number | null;
+  tenant_id: string;
+  type: string;
+  updated_at: Generated<Timestamp>;
+  user_id: string;
+}
+
 export interface Eventos {
   atualizado_em: Generated<Timestamp>;
   criado_em: Generated<Timestamp>;
@@ -240,6 +252,55 @@ export interface LancamentosFinanceiros {
   id_repasse: string | null;
   tipo: string;
   transferido_em: Timestamp | null;
+}
+
+export interface LifecycleEmailDeliveries {
+  attempts: Generated<number>;
+  claimed_at: Timestamp | null;
+  event_id: string;
+  id: string;
+  next_attempt_at: Generated<Timestamp>;
+  reason: string | null;
+  sent_at: Timestamp | null;
+  state: Generated<string>;
+  template_version: Generated<number>;
+  tenant_id: string;
+  type: string;
+  user_id: string;
+}
+
+export interface LifecycleEmailEvents {
+  campaign_id: string | null;
+  created_at: Generated<Timestamp>;
+  id: string;
+  occurred_at: Timestamp;
+  snapshot: Generated<Json>;
+  subject_id: string;
+  tenant_id: string;
+  type: string;
+}
+
+export interface LifecycleEmailFirstGifts {
+  campaign_id: string;
+  occurred_at: Generated<Timestamp>;
+}
+
+export interface LifecycleEmailPreferences {
+  enabled: Generated<boolean>;
+  tenant_id: string;
+  type: string;
+  updated_at: Generated<Timestamp>;
+  user_id: string;
+}
+
+export interface LifecycleEmailProvisioned {
+  completed_at: Generated<Timestamp>;
+  user_id: string;
+}
+
+export interface LifecycleEmailRollout {
+  launch_at: Timestamp;
+  singleton: Generated<boolean>;
 }
 
 export interface ListasDeConvidados {
@@ -573,9 +634,16 @@ export interface DB {
   contribuicoes: Contribuicoes;
   convidados: Convidados;
   convites: Convites;
+  email_feedback: EmailFeedback;
   eventos: Eventos;
   intencao_items: IntencaoItems;
   lancamentos_financeiros: LancamentosFinanceiros;
+  lifecycle_email_deliveries: LifecycleEmailDeliveries;
+  lifecycle_email_events: LifecycleEmailEvents;
+  lifecycle_email_first_gifts: LifecycleEmailFirstGifts;
+  lifecycle_email_preferences: LifecycleEmailPreferences;
+  lifecycle_email_provisioned: LifecycleEmailProvisioned;
+  lifecycle_email_rollout: LifecycleEmailRollout;
   listas_de_convidados: ListasDeConvidados;
   opcoes_contribuicao: OpcoesContribuicao;
   pagamentos: Pagamentos;
