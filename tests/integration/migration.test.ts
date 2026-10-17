@@ -484,7 +484,17 @@ describe('Migration round-trip', () => {
     //    this sequence must start at the LATEST migration and walk earlier.
     //    Adding a new migration on top REQUIRES prepending its down-step here.
 
-    // Invite permissions (059), sharing and permissions are the newest migrations.
+    // 061 email_feedback and 060 lifecycle emails (aperture-tykv8) are the newest.
+    expect(await tableExists(db, 'email_feedback')).toBe(true);
+    const downEmailFeedback = await migrator.migrateDown();
+    expect(downEmailFeedback.error).toBeUndefined();
+    expect(await tableExists(db, 'email_feedback')).toBe(false);
+    const downLifecycleEmails = await migrator.migrateDown();
+    expect(downLifecycleEmails.error).toBeUndefined();
+    expect(await tableExists(db, 'lifecycle_email_deliveries')).toBe(false);
+    expect(await tableExists(db, 'lifecycle_email_preferences')).toBe(false);
+
+    // Invite permissions (059), sharing and permissions come next.
     expect((await getColumn(db, 'campanha_convites', 'permissoes'))?.is_nullable).toBe('NO');
     const downConvitesPermissoes = await migrator.migrateDown();
     expect(downConvitesPermissoes.error).toBeUndefined();
