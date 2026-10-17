@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { SpanStatusCode, trace } from '@opentelemetry/api';
-import { sql, type Transaction } from 'kysely';
+import { type RawBuilder, sql, type Transaction } from 'kysely';
 import type { Database } from '../database.js';
 import type { DB } from '../db-types.generated.js';
 import type { LifecycleEmailType } from './lifecycle-email-preferences.js';
@@ -76,7 +76,7 @@ export class LifecycleEmailRepositoryPostgres implements LifecycleEmailRepositor
       WHERE a.email_verified=true AND lower(trim(a.email))=lower(trim(u.email)) AND u.desativado_em IS NULL
         AND a.created_at>=${launchAt} AND u.criado_em>=${launchAt}
         ${userId ? sql`AND u.id=${userId}` : sql``}
-        ${campaignId ? sql`AND c.criada_em>=${launchAt} AND (p.papel='owner' ${ownerOnly ? sql`` : sql`OR 'extrato:ver'=ANY(p.permissoes)`})` : sql``}
+        ${campaignId ? sql`AND ${eligibleCampaignOwner(launchAt)} AND c.criada_em>=${launchAt} AND (p.papel='owner' ${ownerOnly ? sql`` : sql`OR 'extrato:ver'=ANY(p.permissoes)`})` : sql``}
       ORDER BY lower(trim(u.email)), ${campaignId ? sql`(p.papel='owner') DESC,` : sql``} u.id
     `.execute(executor);
       return rows;
@@ -119,7 +119,8 @@ export class LifecycleEmailRepositoryPostgres implements LifecycleEmailRepositor
           if (!previous) return;
           if (previous.snapshot.eventDate === snapshot.eventDate) {
             const restorable =
-              await sql`SELECT 1 FROM lifecycle_email_deliveries WHERE event_id=${previous.id} AND state='suppressed' AND reason='event_date_changed'`.execute(
+              await sql`SELECT 1 FROM lifecycle_email_deliveries WHERE event_id=${previous.id} AND state='suppressed' AND reason='event_date_changed'
+                AND user_id IN (${sql.join(recipients.map((recipient) => recipient.user_id))})`.execute(
                 trx,
               );
             if (!restorable.rows.length) return;
@@ -200,15 +201,7 @@ export class LifecycleEmailRepositoryPostgres implements LifecycleEmailRepositor
           '00000000-0000-0000-0000-000000000000';
         // Filter permanent cohort misses before LIMIT; cursors are only for
         // recoverable admission failures, not repeated historical-account sweeps.
-        const eligibleOwner = sql`EXISTS (
-          SELECT 1 FROM campanha_administradores ca
-          JOIN campanha_membros_permissoes mp ON mp.campanha_id=ca.campanha_id AND mp.id_conta=ca.id_usuario AND mp.papel='owner'
-          JOIN usuarios u ON u.id_conta=ca.id_usuario AND u.id_plataforma=c.id_plataforma
-          JOIN users a ON a.id=u.id::text AND a.id_plataforma=u.id_plataforma
-          JOIN lifecycle_email_provisioned provision ON provision.user_id=u.id AND provision.completed_at IS NOT NULL
-          WHERE ca.campanha_id=c.id AND a.created_at>=${launchAt} AND u.criado_em>=${launchAt}
-            AND a.email_verified AND u.desativado_em IS NULL AND lower(trim(a.email))=lower(trim(u.email))
-        )`;
+        const eligibleOwner = eligibleCampaignOwner(launchAt);
         const welcomes = await sql<{
           id: string;
           created_at: Date;
@@ -233,7 +226,8 @@ export class LifecycleEmailRepositoryPostgres implements LifecycleEmailRepositor
         AND (${now}::timestamptz AT TIME ZONE 'America/Sao_Paulo')::time>='09:00'::time
         AND NOT EXISTS(SELECT 1 FROM lifecycle_email_events e WHERE e.type='event_reminder' AND e.subject_id=c.id
           AND ((e.snapshot->>'eventDate'=to_char(v.data_hora AT TIME ZONE 'America/Sao_Paulo','YYYY-MM-DD')
-              AND NOT EXISTS(SELECT 1 FROM lifecycle_email_deliveries d WHERE d.event_id=e.id AND d.state='suppressed' AND d.reason='event_date_changed'))
+              AND NOT EXISTS(SELECT 1 FROM lifecycle_email_deliveries d WHERE d.event_id=e.id AND d.state='suppressed' AND d.reason='event_date_changed'
+                AND ${eligibleCampaignOwner(launchAt, sql`d.user_id`)}))
             OR EXISTS(SELECT 1 FROM lifecycle_email_deliveries d WHERE d.event_id=e.id AND d.state IN ('sending','sent','unknown'))))
         ORDER BY c.id LIMIT 100`.execute(trx);
         const payments = await sql<{
@@ -355,6 +349,22 @@ export class LifecycleEmailRepositoryPostgres implements LifecycleEmailRepositor
       WHERE id=${id} AND state='sending'`.execute(this.db);
     });
   }
+}
+
+/** Correlated to campaign alias c. Shared by scanning, hook admission and send-time resolution. */
+function eligibleCampaignOwner(launchAt: Date, userId?: RawBuilder<unknown>) {
+  return sql`EXISTS (
+    SELECT 1 FROM campanha_administradores owner_ca
+    JOIN campanha_membros_permissoes owner_mp ON owner_mp.campanha_id=owner_ca.campanha_id
+      AND owner_mp.id_conta=owner_ca.id_usuario AND owner_mp.papel='owner'
+    JOIN usuarios owner_u ON owner_u.id_conta=owner_ca.id_usuario AND owner_u.id_plataforma=c.id_plataforma
+    JOIN users owner_a ON owner_a.id=owner_u.id::text AND owner_a.id_plataforma=owner_u.id_plataforma
+    JOIN lifecycle_email_provisioned owner_provision ON owner_provision.user_id=owner_u.id AND owner_provision.completed_at IS NOT NULL
+    WHERE owner_ca.campanha_id=c.id AND owner_a.created_at>=${launchAt} AND owner_u.criado_em>=${launchAt}
+      AND owner_a.email_verified AND owner_u.desativado_em IS NULL
+      AND lower(trim(owner_a.email))=lower(trim(owner_u.email))
+      ${userId ? sql`AND owner_u.id=${userId}` : sql``}
+  )`;
 }
 
 async function lifecycleSpan<T>(name: string, operation: () => Promise<T>): Promise<T> {
