@@ -259,6 +259,18 @@ describe('/email/preferencias', () => {
     });
   });
 
+  it('an expired/invalid token falls back to the session, else offers login', async () => {
+    const anon = await app.request('/email/preferencias?token=expired');
+    expect(anon.status).toBe(400);
+    expect(await anon.text()).toContain('href="/login"');
+    const res = await app.request('/email/preferencias?token=expired', {
+      headers: { 'x-test-session': '1' },
+    });
+    expect(res.status).toBe(200);
+    const token = /name="token" value="([^"]+)"/.exec(await res.text())?.[1] ?? '';
+    expect(tokens.verifyPreferenceToken(token)).toEqual(sessionUser);
+  });
+
   it('a type-scoped token can only change its own type', async () => {
     const userId = randomUUID();
     const tenantId = randomUUID();

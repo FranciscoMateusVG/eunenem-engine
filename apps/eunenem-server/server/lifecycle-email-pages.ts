@@ -139,13 +139,14 @@ a{color:${C.accent}}
   );
 }
 
-function invalidLink(c: Context, status = 400) {
+function invalidLink(c: Context, status = 400, extra = '') {
   return page(
     c,
     status,
     'Link inválido',
     `<h1>este link não vale mais</h1>
 <p>ele pode ter expirado (os links dos e-mails valem por 30 dias) ou estar incompleto.</p>
+${extra}
 <p class="muted">se precisar de ajuda, é só escrever pra gente.</p>`,
   );
 }
@@ -395,10 +396,18 @@ export function createLifecycleEmailPages(deps: LifecycleEmailPagesDeps): Hono {
 
   app.get('/email/preferencias', async (c) => {
     let token = c.req.query('token');
-    if (token === undefined) {
-      // Painel entry: no email link, so mint an all-types token for the
-      // signed-in user. It only travels in this page's hidden form field.
+    if (token === undefined || !deps.tokens.verifyPreferenceToken(token)) {
+      // Painel entry (no token) or an expired email link: mint an all-types
+      // token for the signed-in user. It only travels in this page's hidden
+      // form field.
       const user = await deps.resolveSessionUser(c.req.raw.headers);
+      if (!user && token !== undefined) {
+        return invalidLink(
+          c,
+          400,
+          '<p><a href="/login">entre na sua conta</a> e abra “e-mails automáticos” no painel.</p>',
+        );
+      }
       if (!user) {
         return page(
           c,
