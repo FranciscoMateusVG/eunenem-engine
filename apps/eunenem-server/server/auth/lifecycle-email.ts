@@ -540,31 +540,35 @@ ${para('não precisa ser hoje, nem tudo de uma vez. está tudo salvo na sua pág
 }
 
 function renderPaymentReceived(v: LifecycleEmailVars['payment_received']): RenderedLifecycleEmail {
-  const owner = clean(v.ownerName) ?? clean(v.recipientName) ?? '';
-  const recipient = clean(v.recipientName) ?? owner;
+  const isOwner = v.recipientIsOwner;
+  // The owner's name only ever comes from ownerName; for a member we never
+  // fall back to the member's own name (that would address them as the mother).
+  const ownerName = clean(v.ownerName);
+  const owner = ownerName ?? (isOwner ? (clean(v.recipientName) ?? '') : null);
+  const recipient = clean(v.recipientName) ?? owner ?? '';
+  const ofOwner = owner ? ` de ${owner}` : '';
   const guest = clean(v.guestName);
   const guestLabel = guest ?? 'alguém';
   const message = clean(v.guestMessage);
   const gifts = v.gifts
     .map((g) => ({ name: g.name.trim(), quantity: Math.max(1, Math.floor(g.quantity)) }))
     .filter((g) => g.name.length > 0);
-  const isOwner = v.recipientIsOwner;
 
   const subject = isOwner
     ? 'hoje alguém escolheu fazer parte da história do seu bebê'
-    : `hoje alguém escolheu fazer parte da história do bebê de ${owner}`;
+    : `hoje alguém escolheu fazer parte da história do bebê${ofOwner}`;
   const heroTitle = isOwner
     ? 'hoje alguém escolheu<br>fazer parte da história<br>do seu bebê'
-    : `hoje alguém escolheu<br>fazer parte da história<br>do bebê de ${esc(owner)}`;
+    : `hoje alguém escolheu<br>fazer parte da história<br>do bebê${esc(ofOwner)}`;
   const reason = isOwner
     ? 'você recebeu este e-mail porque tem um chá de bebê na EuNeném.'
     : 'você recebeu este e-mail porque tem acesso a um chá de bebê na EuNeném.';
   const greeting = isOwner
     ? `${owner}, aconteceu uma coisa bonita hoje.`
-    : `${recipient}, aconteceu uma coisa bonita hoje no chá de ${owner}.`;
+    : `${recipient}, aconteceu uma coisa bonita hoje no chá${ofOwner}.`;
   const visited = isOwner
     ? 'passou pela sua lista, olhou com calma cada item que você escolheu com tanto cuidado — e decidiu presentear o seu bebê.'
-    : `passou pela lista de ${owner}, olhou com calma cada item escolhido com tanto cuidado — e decidiu presentear o bebê.`;
+    : `passou pela lista ${owner ? `de ${owner}` : 'do chá'}, olhou com calma cada item escolhido com tanto cuidado — e decidiu presentear o bebê.`;
   const registered = isOwner
     ? 'já deixamos tudo registrado na sua lista — você pode acompanhar por lá, com calma, sempre que quiser.'
     : 'já deixamos tudo registrado na lista do chá — dá pra acompanhar por lá, com calma, sempre que quiser.';

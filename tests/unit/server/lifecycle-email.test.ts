@@ -262,6 +262,18 @@ describe('payment_received (presente recebido)', () => {
     expect(m.html).toContain('porque tem acesso a um chá de bebê na EuNeném.');
   });
 
+  it('a member without a known owner name gets neutral copy, never their own name as owner', () => {
+    for (const ownerName of [undefined, null, '  ']) {
+      const m = payment({ recipientIsOwner: false, recipientName: 'Marcos', ownerName });
+      expect(m.subject).toBe('hoje alguém escolheu fazer parte da história do bebê');
+      expect(m.html).toContain('do bebê</h1>');
+      expect(m.html).toContain('Marcos, aconteceu uma coisa bonita hoje no chá.');
+      expect(m.html).toContain('passou pela lista do chá');
+      expect(m.html).not.toMatch(/de Marcos|Marcos,.*de Marcos/);
+      expect(m.text).not.toContain('de Marcos');
+    }
+  });
+
   it('owner name falls back to the recipient name', () => {
     expect(payment({ ownerName: undefined, recipientName: 'Ana' }).html).toContain(
       'Ana, aconteceu uma coisa bonita hoje.',
