@@ -1,3 +1,5 @@
+import { LifecycleEmailPreferencesPostgres } from '../../../../src/adapters/email/lifecycle-email-preferences.postgres.js';
+import { createLifecycleEmailTokens, type LifecycleEmailTokens } from './lifecycle-email-tokens.js';
 import { renderCampaignInviteEmail } from './campaign-invite-email.js';
 import { CampanhaCompartilhamentoPostgres } from '../../../../src/adapters/arrecadacao/campanha-compartilhamento.postgres.js';
 import { z } from 'zod';
@@ -121,6 +123,8 @@ export type RevogarConvitesPendentesDoMembro = (
 ) => Promise<void>;
 
 export interface ServerDeps {
+  readonly lifecycleEmailTokens?: LifecycleEmailTokens;
+  readonly lifecycleEmailPreferences?: LifecycleEmailPreferencesPostgres;
   readonly db: Database;
   /** Optional only for isolated in-memory router fixtures. Production composition requires it. */
   readonly contextoCompartilhamentoOnboarding?: (usuarioId: string, idConta: string, plataformaId: string) => Promise<{ idsProprias: string[]; idCompartilhada: string | null }>;
@@ -910,6 +914,8 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): ServerEnv {
  *   exercise the same code paths the prod adapter takes.
  */
 export function buildServerDeps(env: ServerEnv): ServerDeps & {
+  lifecycleEmailTokens: LifecycleEmailTokens;
+  lifecycleEmailPreferences: LifecycleEmailPreferencesPostgres;
   consumirConvitesVerificados: (usuarioId: string, plataformaId: string) => Promise<void>;
   revogarConvitesPendentesDoMembro: RevogarConvitesPendentesDoMembro;
   contextoCompartilhamentoOnboarding: NonNullable<ServerDeps['contextoCompartilhamentoOnboarding']>;
@@ -1222,7 +1228,10 @@ export function buildServerDeps(env: ServerEnv): ServerDeps & {
     pixCobrancaProvider = new PixCobrancaNaoConfigurado();
   }
 
+  const lifecycleEmailTokens = createLifecycleEmailTokens(env.BETTER_AUTH_SECRET);
+  const lifecycleEmailPreferences = new LifecycleEmailPreferencesPostgres(db);
   return {
+    lifecycleEmailTokens, lifecycleEmailPreferences,
     contextoCompartilhamentoOnboarding: (usuarioId, idConta, plataformaId) => new CampanhaCompartilhamentoPostgres(db).contextoOnboarding(usuarioId, idConta, plataformaId),
     revogarConvitesPendentesDoMembro: (input, { trx }) => new CampanhaCompartilhamentoPostgres(db).revogarPendentesDoMembro(input.idCampanha, input.idConta, input.idUsuarioAtor, trx),
     consumirConvitesVerificados: (usuarioId, plataformaId) => new CampanhaCompartilhamentoPostgres(db).consumirVerificados(usuarioId, plataformaId),
