@@ -7,8 +7,11 @@
  *   - 600px presentation tables at width 100%, every style inline, no flex/grid,
  *     scripts, forms or CSS variables. A small <style> block only adds optional
  *     mobile stacking; without it the two-column cards still fit at 320px.
- *   - Patrick Hand (the brand handwriting) is a progressive enhancement via
- *     Google Fonts with web-safe handwriting fallbacks; body text is Arial.
+ *   - Patrick Hand (the brand handwriting) renders where installed, with web-safe
+ *     handwriting fallbacks; no webfont is fetched, so opening the email makes no
+ *     third-party request (only our hosted logo). Body text is Arial.
+ *   - Outlook (MSO) gets a fixed 600px ghost table; everyone else a fluid table
+ *     capped by max-width.
  *   - The purple→pink→orange hero declares a solid `bgcolor` + background-color
  *     BEFORE the gradient, so Outlook and gradient-less clients keep white-text
  *     contrast. Radius/shadow are cosmetic.
@@ -268,7 +271,6 @@ function documentShell(opts: { subject: string; preheader: string; rows: string 
 <meta name="supported-color-schemes" content="light only">
 <meta name="x-apple-disable-message-reformatting">
 <title>${esc(opts.subject)}</title>
-<link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&amp;display=swap" rel="stylesheet">
 <style>
 :root{color-scheme:light only;supported-color-schemes:light only}
 @media only screen and (max-width:520px){
@@ -280,9 +282,11 @@ function documentShell(opts: { subject: string; preheader: string; rows: string 
 <body bgcolor="${C.page}" style="margin:0;padding:0;background-color:${C.page};-webkit-text-size-adjust:100%">
 <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:${C.page}">${esc(opts.preheader)}</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${C.page}" style="background-color:${C.page}"><tr><td align="center" style="padding:0 12px">
-<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px">
+<!--[if mso]><table role="presentation" align="center" width="600" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;margin:0 auto">
 ${opts.rows}
 </table>
+<!--[if mso]></td></tr></table><![endif]-->
 </td></tr></table>
 </body></html>`;
 }

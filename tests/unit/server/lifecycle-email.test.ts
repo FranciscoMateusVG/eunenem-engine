@@ -89,6 +89,15 @@ describe('lifecycle emails — shared email-safe contract', () => {
     // No HTML leaks into the text part.
     expect(m.text).not.toMatch(/<[a-z]/i);
     expect(m.html).toContain('<meta name="color-scheme" content="light only">');
+    // No third-party request when the email is opened (only our hosted logo).
+    expect(m.html).not.toContain('fonts.googleapis.com');
+    expect(m.html.match(/https?:\/\/[^"' )]+\.(png|jpe?g|gif|css|woff2?)/g)).toEqual([
+      'https://staging.eunenem.com/public/logo-landing.png',
+      'https://staging.eunenem.com/public/logo-landing.png',
+    ]);
+    // Outlook: fixed 600px ghost table; the fluid table itself is max-width only.
+    expect(m.html).toContain('<!--[if mso]><table role="presentation" align="center" width="600"');
+    expect(m.html).not.toMatch(/<table[^>]*width="600"[^>]*width:100%/);
   });
 
   it('uses the approved contact channels', () => {

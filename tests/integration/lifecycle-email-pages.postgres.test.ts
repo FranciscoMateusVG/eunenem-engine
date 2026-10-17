@@ -139,9 +139,10 @@ describe('/avaliar-email', () => {
     const good = tokens.signFeedbackToken(deliveryId);
     const wrongScope = tokens.signPreferenceToken({ userId: randomUUID(), tenantId: randomUUID() });
     for (const token of [`${good}x`, wrongScope, 'nope']) {
-      expect((await app.request(`/avaliar-email?token=${encodeURIComponent(token)}`)).status).toBe(
-        400,
-      );
+      const invalid = await app.request(`/avaliar-email?token=${encodeURIComponent(token)}`);
+      expect(invalid.status).toBe(400);
+      // Token lifetimes differ per link type; the copy must not promise one.
+      expect(await invalid.text()).not.toMatch(/\d+ dias/);
       expect((await post('/avaliar-email', { token, nota: '5' })).status).toBe(400);
     }
     const ghost = tokens.signFeedbackToken(randomUUID());

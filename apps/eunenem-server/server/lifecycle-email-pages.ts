@@ -145,7 +145,7 @@ function invalidLink(c: Context, status = 400, extra = '') {
     status,
     'Link inválido',
     `<h1>este link não vale mais</h1>
-<p>ele pode ter expirado (os links dos e-mails valem por 30 dias) ou estar incompleto.</p>
+<p>ele pode ter expirado ou estar incompleto.</p>
 ${extra}
 <p class="muted">se precisar de ajuda, é só escrever pra gente.</p>`,
   );
