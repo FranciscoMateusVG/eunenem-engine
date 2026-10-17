@@ -199,6 +199,18 @@ export interface Convites {
   remetente: string;
 }
 
+export interface EmailFeedback {
+  comentario: string | null;
+  created_at: Generated<Timestamp>;
+  delivery_id: string;
+  id: string;
+  nota: number | null;
+  tenant_id: string;
+  type: string;
+  updated_at: Generated<Timestamp>;
+  user_id: string;
+}
+
 export interface Eventos {
   atualizado_em: Generated<Timestamp>;
   criado_em: Generated<Timestamp>;
@@ -630,6 +642,7 @@ export interface DB {
   contribuicoes: Contribuicoes;
   convidados: Convidados;
   convites: Convites;
+  email_feedback: EmailFeedback;
   eventos: Eventos;
   intencao_items: IntencaoItems;
   lancamentos_financeiros: LancamentosFinanceiros;

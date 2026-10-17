@@ -17,8 +17,8 @@
 // aperture-7mqsg — EuNeném ATENDIMENTO WhatsApp (support), NOT guest/share
 // links. Single source for every support entry point (painel menu row,
 // landing floating button). No prefilled ?text= — the user writes the message.
-export const EUNENEM_SUPPORT_WHATSAPP_NUMBER_DISPLAY = "(11) 96108-0489";
-export const EUNENEM_SUPPORT_WHATSAPP_URL = "https://wa.me/5511961080489";
+export const EUNENEM_SUPPORT_WHATSAPP_NUMBER_DISPLAY = "(31) 99601-1432";
+export const EUNENEM_SUPPORT_WHATSAPP_URL = "https://wa.me/5531996011432";
 
 export const PAINEL_SECTIONS = [
   "compartilhar",
@@ -134,9 +134,12 @@ export function menuItemHref(
       // they were viewing someone else's page. `slug` here is the real creator
       // slug (the same one every other row above already threads correctly).
       return paginaSharePath(slug, idCampanha, campanhaSlug);
+    case "emails":
+      // aperture-tykv8 — server-rendered page; the session mints its token.
+      return "/email/preferencias";
     case "suporte":
       // External support channel — no in-app page in scope.
-      // aperture-7mqsg — EuNeném atendimento: (11) 96108-0489.
+      // aperture-7mqsg — EuNeném atendimento: (31) 99601-1432.
       return EUNENEM_SUPPORT_WHATSAPP_URL;
     default:
       return undefined; // e.g. `rifa` (soon) — not navigable yet.
