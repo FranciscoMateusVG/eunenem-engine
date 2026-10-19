@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { KyselyPlugin } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { loadAdminUserFinanceiroSnapshot } from '../../apps/eunenem-server/server/admin-user-financeiro.js';
 import type { ServerDeps } from '../../apps/eunenem-server/server/auth/setup.js';
@@ -435,6 +436,55 @@ describe('admin.usuarios.financeiro.summary', () => {
 });
 
 describe('admin.usuarios.financeiro.lancamentos.listPaginated', () => {
+  it('fpah7: returns payer name in the batched ledger DTO, nullable and without email/CPF', async () => {
+    await anyDb()
+      .updateTable('pagamentos')
+      .set({
+        intencao_contribuinte_nome: 'Rafa Sintético',
+        intencao_contribuinte_email: 'payer-private@example.test',
+      })
+      .where('id', '=', F.a1.idPagamento)
+      .execute();
+    await anyDb()
+      .updateTable('pagamentos')
+      .set({ intencao_contribuinte_nome: null })
+      .where('id', '=', F.a2.idPagamento)
+      .execute();
+    const result = await buildCaller().admin.usuarios.financeiro.lancamentos.listPaginated({
+      idConta: OWNER_CONTA,
+      cursor: null,
+      limit: 100,
+    });
+    expect(result?.rows.find((r) => r.idLancamento === F.a1.id)).toMatchObject({
+      contribuinteNome: 'Rafa Sintético',
+    });
+    expect(result?.rows.find((r) => r.idLancamento === F.a2.id)).toMatchObject({
+      contribuinteNome: null,
+    });
+    expect(JSON.stringify(result)).not.toContain('payer-private@example.test');
+    expect(
+      result?.rows.every((r) => !('contribuinteEmail' in r) && !('contribuinteCpf' in r)),
+    ).toBe(true);
+    let queries = 0;
+    const observer: KyselyPlugin = {
+      transformQuery(args) {
+        queries++;
+        return args.node;
+      },
+      async transformResult(args) {
+        return args.result;
+      },
+    };
+    const snapshot = await loadAdminUserFinanceiroSnapshot(testDb.db.withPlugin(observer), {
+      idConta: OWNER_CONTA,
+      platformId: ID_PLATAFORMA_EUNENEM,
+      now: NOW,
+      somenteFatos: true,
+    });
+    expect(snapshot.fatos).toHaveLength(9);
+    expect(queries).toBe(2); // SET TRANSACTION READ ONLY + one SELECT, not one query per payer.
+  });
+
   it('buckets por linha, filtros, sem telefone', async () => {
     const caller = buildCaller();
     const all = await caller.admin.usuarios.financeiro.lancamentos.listPaginated({

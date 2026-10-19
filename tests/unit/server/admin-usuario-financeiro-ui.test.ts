@@ -235,6 +235,7 @@ function lanc(overrides: Partial<LancamentoAdminRow>): LancamentoAdminRow {
     campanhaTitulo: 'Chá A',
     idContribuicao: '30000000-0000-4000-8000-000000000001',
     contribuicaoNome: 'Berço',
+    contribuinteNome: 'Rafa Sintético',
     idPagamento: '20000000-0000-4000-8000-000000000001',
     metodo: 'pix',
     amountCents: 10000,
@@ -310,6 +311,7 @@ describe('LancamentosAdminTable', () => {
         motivo: 'pagamento_nao_aprovado',
         elegivelRecebido: false,
         contribuicaoNome: null,
+        contribuinteNome: null,
         metodo: null,
       }),
     ];
@@ -319,6 +321,9 @@ describe('LancamentosAdminTable', () => {
       ),
     );
     expect(html).toContain('lançamentos (11)');
+    expect(html).toContain('Quem pagou');
+    expect(html).toContain('Rafa Sintético');
+    expect(html).toContain('Não informado');
     for (const label of [
       'Disponível',
       'Aguardando liberação',
