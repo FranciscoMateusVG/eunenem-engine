@@ -59,6 +59,7 @@ interface FatoRow {
   pagamento_criado_em: Date | null;
   campanha_titulo: string;
   contribuicao_nome: string | null;
+  contribuinte_nome: string | null;
   estorno_ativo: boolean | null;
   disponivel_canonico: boolean | null;
 }
@@ -92,6 +93,7 @@ export interface FatoLancamentoAdmin extends FatosLancamentoAdmin {
   readonly campanhaTitulo: string;
   readonly idContribuicao: string;
   readonly contribuicaoNome: string | null;
+  readonly contribuinteNome: string | null;
   readonly idPagamento: string;
   readonly metodo: MetodoPagamentoAdmin | null;
 }
@@ -180,6 +182,7 @@ export async function loadAdminUserFinanceiroSnapshot(
           p.criado_em AS pagamento_criado_em,
           c.titulo AS campanha_titulo,
           ct.nome AS contribuicao_nome,
+          p.intencao_contribuinte_nome AS contribuinte_nome,
           COALESCE(${predicadoEstornoAtivoLancamento()}, FALSE) AS estorno_ativo,
           COALESCE(${predicadoLancamentoDisponivel(now)}, FALSE) AS disponivel_canonico
         FROM lancamentos_financeiros l
@@ -212,6 +215,7 @@ export async function loadAdminUserFinanceiroSnapshot(
         campanhaTitulo: row.campanha_titulo,
         idContribuicao: row.id_contribuicao,
         contribuicaoNome: row.contribuicao_nome,
+        contribuinteNome: row.contribuinte_nome,
         idPagamento: row.id_pagamento,
         metodo: toMetodo(row.metodo),
       }));

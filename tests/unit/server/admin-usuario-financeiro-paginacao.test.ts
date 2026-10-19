@@ -41,6 +41,7 @@ function fato(
     campanhaTitulo: 'Chá 1',
     idContribuicao: '30000000-0000-4000-8000-000000000001',
     contribuicaoNome: 'Berço',
+    contribuinteNome: null,
     idPagamento: '20000000-0000-4000-8000-000000000001',
     metodo: 'pix',
     ...overrides,
