@@ -316,6 +316,14 @@ export async function seedVerificandoNeedsManual(
       SET needs_manual_resolution = TRUE, transfer_attempts = 1
       WHERE id = ${idRepasse}
   `.execute(db);
+  // Match a real parked transfer: the manual preview reads its original attempt.
+  await sql`INSERT INTO repasse_transfer_attempts
+    (id, repasse_id, attempt_no, referencia, started_at, finished_at,
+     request_summary, outcome, operation, state_before, state_after)
+    VALUES (${randomUUID()}, ${idRepasse}, 1, ${gerarTransferReferencia(idRepasse as IdRepasse)},
+      ${T0}, ${T0}, 'synthetic attempt', 'verificando', 'pagar_pix', 'transferindo', 'verificando')`.execute(
+    db,
+  );
   const lancamento = makeClaimedLancamento({
     idCampanha: args.idCampanha,
     idRepasse,

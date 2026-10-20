@@ -51,6 +51,14 @@ export function ManualResolutionActions({ repasse }: { repasse: RepasseDetail })
       aria-label="Resolver repasse em verificação"
     >
       <h2>Resolver repasse em verificação</h2>
+      {repasse.searchCandidates.length > 0 && <details open>
+        <summary>Candidatos históricos — não substituem a nova consulta ao Inter</summary>
+        <table className="w-full text-left"><thead><tr><th>Código</th><th>Valor</th><th>Data</th><th>Chave mascarada</th></tr></thead>
+          <tbody>{repasse.searchCandidates.map(candidate => <tr key={candidate.codigoSolicitacao}>
+            <td>{candidate.codigoSolicitacao}</td><td>{(candidate.valorCents / 100).toFixed(2)}</td>
+            <td>{candidate.dataMovimento ?? 'Não informada'}</td><td>{candidate.chaveMascarada ?? 'Não informada'}</td>
+          </tr>)}</tbody></table>
+      </details>}
       <p>Nenhuma consulta envia dinheiro. Confira o extrato antes de confirmar.</p>
       <div className="flex flex-wrap gap-3">
         <button
