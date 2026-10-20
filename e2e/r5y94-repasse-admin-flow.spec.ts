@@ -200,38 +200,49 @@ test.describe('aperture-r5y94 — repasse admin payout walks', () => {
 
       await page.goto(`/admin/repasses/${idRepasse}`);
 
-      // needs-manual pill + panel render.
       await expect(page.getByText('ação manual', { exact: true }).first()).toBeVisible();
-      await expect(page.getByText('resolução manual necessária').first()).toBeVisible();
-      // The candidate list renders the persisted candidate (código + masked chave).
+      await expect(
+        page.getByRole('heading', { name: 'Resolver repasse em verificação' }),
+      ).toBeVisible();
       await expect(page.getByText(CANDIDATE_CODE).first()).toBeVisible();
       await expect(page.getByText('e***@e***.com').first()).toBeVisible();
 
-      // Marcar como falhou surfaces the scary duplicate-pay warning (do NOT confirm).
-      await page.getByRole('button', { name: 'Marcar como falhou' }).click();
-      const falhouDialog = page.getByRole('dialog', {
-        name: 'Confirmar falha da transferência',
-      });
-      await expect(falhouDialog).toBeVisible();
-      // The double-pay warning is the whole point of this modal: with candidates
-      // present it escalates to a scary "pago em dobro" acknowledgment gate.
-      await expect(falhouDialog).toContainText('pagamento em dobro');
-      await expect(falhouDialog).toContainText('SEGUNDO PIX');
-      // The confirm stays disabled until the operator acknowledges — proof the
-      // gate can't be bypassed by an accidental click.
-      await expect(falhouDialog.getByRole('button', { name: 'Confirmar falha' })).toBeDisabled();
-      // Dismiss without confirming — we resolve as pago instead.
-      await page.keyboard.press('Escape');
-      await expect(falhouDialog).toBeHidden();
+      // Fresh read-only lookup, evidence table, then a separate confirmation.
+      await page.getByRole('button', { name: 'Confirmei que NÃO saiu' }).click();
+      await expect(
+        page.getByRole('table').filter({ hasText: 'Débitos candidatos no extrato' }),
+      ).toBeVisible();
+      await expect(page.getByText('A consulta é inconclusiva.', { exact: false })).toBeVisible();
+      const authorize = page.getByRole('button', { name: 'Autorizar uma nova tentativa' });
+      await expect(authorize).toBeDisabled();
+      await page.getByLabel('Motivo obrigatório').fill('Extrato sintético conferido pelo teste');
+      await page.getByLabel('Evidência do extrato').fill('Período sintético completo conferido');
+      await page.getByLabel('Digite o valor em reais', { exact: false }).fill('73,50');
+      await page
+        .getByRole('checkbox', { name: 'Confirmo esta ação e seu registro no histórico.' })
+        .check();
+      await authorize.click();
+      const retryDialog = page.getByRole('dialog', { name: 'Confirmar nova tentativa' });
+      await expect(retryDialog).toBeVisible();
+      await expect(retryDialog).toContainText('pagar duas vezes');
+      await retryDialog.getByRole('button', { name: 'Voltar' }).click();
+      await expect(retryDialog).toBeHidden();
+      // No retry/payment was authorized by opening or dismissing the dialog.
+      await expectRepasseStatus(db, idRepasse, 'verificando');
+      expect((await getLancamentoById(db, idLancamento))?.transferido_em).toBeNull();
 
-      // Marcar como pago requires a codigoSolicitacao; supply the candidate code.
-      await page.getByRole('button', { name: 'Marcar como pago' }).click();
+      await page.getByRole('button', { name: 'Confirmei que saiu', exact: true }).click();
+      const markPaid = page.getByRole('button', { name: 'Confirmar como pago', exact: true });
+      await expect(markPaid).toBeDisabled();
+      await page.getByLabel('Referência bancária', { exact: true }).fill(CANDIDATE_CODE);
+      await page
+        .getByRole('checkbox', { name: 'Confirmo esta ação e seu registro no histórico.' })
+        .check();
+      await markPaid.click();
       const pagoDialog = page.getByRole('dialog', { name: 'Confirmar pagamento manual' });
       await expect(pagoDialog).toBeVisible();
-      const codigoInput = pagoDialog.locator('#codigo-manual');
-      await expect(codigoInput).toBeVisible();
-      await codigoInput.fill(CANDIDATE_CODE);
-      await pagoDialog.getByRole('button', { name: 'Confirmar pagamento' }).click();
+      await expect(pagoDialog).toContainText(CANDIDATE_CODE);
+      await pagoDialog.getByRole('button', { name: 'Confirmar definitivamente' }).click();
       await expect(pagoDialog).toBeHidden();
 
       // Manual pago books the repasse + settles the lançamento.

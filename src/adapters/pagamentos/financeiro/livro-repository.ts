@@ -33,6 +33,15 @@ import type { TransferenciaProviderDiagnostics } from '../transferencia-provider
  *     `estornar-pagamento` use-case's 409 gate.
  */
 export interface LivroFinanceiroRepository {
+  recuperarRepasseTransaction(
+    input: {
+      readonly idRepasse: IdRepasse;
+      readonly expectedTransferAttempts: number;
+      readonly audit: string;
+      readonly agora: Date;
+    },
+    enqueue: (executor: RepasseTransactionExecutor) => Promise<void>,
+  ): Promise<{ readonly repasse: RepasseRecebedor }>;
   saveLancamentos(lancamentos: readonly LancamentoFinanceiro[]): Promise<void>;
   findLancamentosByIdPagamento(
     idPagamento: IdPagamentoReferencia,
@@ -353,7 +362,7 @@ export interface LivroFinanceiroRepository {
 
   /**
    * Admin manual resolution → pago. SELECT FOR UPDATE, require
-   * status='verificando' AND needs_manual_resolution=true, domain
+   * status='verificando' regardless of reconciliation flag, domain
    * resolverManualPago (records the admin-supplied interCodigoSolicitacao),
    * STAMP transferido_em on the linked lançamentos exactly like the auto-pago
    * path (the single §10.1 debit point), append an audit row carrying the
@@ -364,6 +373,7 @@ export interface LivroFinanceiroRepository {
     readonly idRepasse: IdRepasse;
     readonly interCodigoSolicitacao: string;
     readonly resolvidoPor: string;
+    readonly motivo?: string;
     readonly agora: Date;
   }): Promise<{ readonly repasse: RepasseRecebedor }>;
 

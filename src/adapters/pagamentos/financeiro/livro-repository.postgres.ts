@@ -993,8 +993,8 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
               const openAttempt = (await sql<{ id: string }>`
                 SELECT id FROM repasse_transfer_attempts
                   WHERE repasse_id = ${existingRepasse.id}
-                    AND attempt_no = ${existingRepasse.transferAttempts}
-                  ORDER BY started_at DESC LIMIT 1
+                    AND operation = 'pagar_pix'
+                  ORDER BY attempt_no DESC LIMIT 1
               `.execute(tx)) as unknown as { rows: { id: string }[] };
               return {
                 repasse: existingRepasse,
@@ -1019,9 +1019,10 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
               INSERT INTO repasse_transfer_attempts
                 (id, repasse_id, attempt_no, referencia, started_at, request_summary,
                  operation, state_before, state_after)
-                VALUES (${attemptId}, ${updated.id}, ${updated.transferAttempts},
+                SELECT ${attemptId}, ${updated.id}, COALESCE(MAX(attempt_no), 0) + 1,
                         ${updated.transferReferencia}, ${input.agora}, ${input.requestSummary},
-                        'pagar_pix', ${existingRepasse.status}, ${updated.status})
+                        'pagar_pix', ${existingRepasse.status}, ${updated.status}
+                  FROM repasse_transfer_attempts WHERE repasse_id = ${updated.id}
             `.execute(tx);
 
             return {
@@ -1297,7 +1298,9 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
                     state_after = ${updated.status},
                     request_summary = COALESCE(request_summary, '') || ${` | reconciliacao: ${input.reconciliacaoResumo}`}
                 WHERE repasse_id = ${updated.id}
-                  AND attempt_no = ${updated.transferAttempts}
+                  AND id = (SELECT id FROM repasse_transfer_attempts
+                    WHERE repasse_id = ${updated.id} AND operation = 'pagar_pix'
+                    ORDER BY attempt_no DESC LIMIT 1)
             `.execute(tx);
 
             return { repasse: updated };
@@ -1460,10 +1463,53 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
     );
   }
 
+  async recuperarRepasseTransaction(
+    input: Parameters<LivroFinanceiroRepository['recuperarRepasseTransaction']>[0],
+    enqueue: (executor: RepasseTransactionExecutor) => Promise<void>,
+  ): Promise<{ readonly repasse: RepasseRecebedor }> {
+    return this.db.transaction().execute(async (tx) => {
+      const ids = await findPaymentIdsForRepasse(tx, input.idRepasse);
+      const locked = await acquirePaymentMoneyMovementLocks(tx, ids);
+      await assertTransfersAllowed(tx, locked);
+      const rows = await sql<RepasseRow>`SELECT * FROM repasses_recebedor
+        WHERE id = ${input.idRepasse} FOR UPDATE`.execute(tx);
+      const row = rows.rows[0];
+      if (!row) throw new FinanceiroRepasseNaoEncontradoError(input.idRepasse);
+      const repasse = repasseFromRow(row);
+      // Evidence belongs to precisely one original transfer attempt.
+      if (
+        repasse.status !== 'verificando' ||
+        repasse.transferAttempts !== input.expectedTransferAttempts
+      )
+        return { repasse };
+      await sql`UPDATE repasses_recebedor SET status = 'aprovado',
+        needs_manual_resolution = FALSE, last_transfer_error = NULL, inter_codigo_solicitacao = NULL
+        WHERE id = ${repasse.id}`.execute(tx);
+      await sql`INSERT INTO repasse_transfer_attempts
+        (id, repasse_id, attempt_no, referencia, started_at, finished_at,
+         request_summary, outcome, operation, state_before, state_after)
+        SELECT ${randomUUID()}, ${repasse.id}, COALESCE(MAX(attempt_no), 0) + 1,
+          ${repasse.transferReferencia ?? ''}, ${input.agora}, ${input.agora},
+          ${input.audit}, 'falhou', 'resolver_manual', 'verificando', 'aprovado'
+        FROM repasse_transfer_attempts WHERE repasse_id = ${repasse.id}`.execute(tx);
+      await enqueue(buildRepasseExecutor(tx));
+      return {
+        repasse: {
+          ...repasse,
+          status: 'aprovado' as const,
+          needsManualResolution: false,
+          lastTransferError: null,
+          interCodigoSolicitacao: null,
+        },
+      };
+    });
+  }
+
   async resolverManualPagoTransaction(input: {
     readonly idRepasse: IdRepasse;
     readonly interCodigoSolicitacao: string;
     readonly resolvidoPor: string;
+    readonly motivo?: string;
     readonly agora: Date;
   }): Promise<{ readonly repasse: RepasseRecebedor }> {
     return tracer.startActiveSpan(
@@ -1485,12 +1531,9 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
             }
             const existingRepasse = repasseFromRow(existing);
 
-            // Idempotent: only a verificando + flagged repasse is manually
-            // resolvable. Anything else (already resolved) is a no-op.
-            if (
-              existingRepasse.status !== 'verificando' ||
-              !existingRepasse.needsManualResolution
-            ) {
+            // Polling is retired: every verificando can be resolved manually.
+            // The row lock serializes admins; terminal states remain a no-op.
+            if (existingRepasse.status !== 'verificando') {
               return { repasse: existingRepasse };
             }
 
@@ -1525,7 +1568,7 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
                 SELECT ${randomUUID()}, ${updated.id},
                        COALESCE(MAX(attempt_no), 0) + 1,
                        ${updated.transferReferencia ?? ''}, ${input.agora},
-                       ${`resolucao_manual_pago_por:${input.resolvidoPor}`}, ${'pago'},
+                       ${`resolucao_manual_pago_por:${input.resolvidoPor};motivo:${input.motivo ?? ''}`}, ${'pago'},
                        ${input.interCodigoSolicitacao}, ${input.agora},
                        'resolver_manual', ${existingRepasse.status}, ${updated.status}
                   FROM repasse_transfer_attempts

@@ -1,3 +1,4 @@
+import { consultarRecuperacaoRepasse, recuperarRepasse, RecoveryInputSchema } from '../../../../src/use-cases/pagamentos/financeiro/consultar-recuperacao-repasse.js';
 import { CampanhaCompartilhamentoPostgres, EmailJaMembroCampanhaError } from '../../../../src/adapters/arrecadacao/campanha-compartilhamento.postgres.js';
 /**
  * Admin tRPC router (rsidz.2 + tinly + rsidz.3).
@@ -59,7 +60,6 @@ import {
   PagamentoNaoEncontradoError,
   PagamentoTransicaoStatusInvalidaError,
   prepareInitialCampaignTemplateItems,
-  resolverManualFalhouRepasse,
   resolverManualPagoRepasse,
   retentarTransferenciaRepasse,
   ValorUnitarioPresenteWriteSchema,
@@ -3149,6 +3149,7 @@ const repassesRouter = t.router({
       z.object({
         idRepasse: z.string().uuid(),
         codigoSolicitacao: z.string().trim().min(1).max(255),
+        motivo: z.string().trim().min(10).max(1000),
       }),
     )
     .output(
@@ -3173,6 +3174,7 @@ const repassesRouter = t.router({
           {
             idRepasse: input.idRepasse,
             interCodigoSolicitacao: input.codigoSolicitacao,
+            motivo: input.motivo,
             resolvidoPor: usuario.email,
           },
         );
@@ -3213,60 +3215,31 @@ const repassesRouter = t.router({
    * any other state is an idempotent no-op returning the current status. Acting
    * admin recorded on the audit trail. NOT_FOUND if the repasse doesn't exist.
    */
+  // Retired unsafe assertion path: callers must inspect fresh bank evidence.
   resolverManualFalhou: adminProcedure
     .input(z.object({ idRepasse: z.string().uuid() }))
-    .output(
-      z.object({
-        idRepasse: z.string(),
-        status: z.string(),
-        needsManualResolution: z.boolean(),
-      }),
-    )
+    .mutation(() => { throw new TRPCError({ code: "BAD_REQUEST", message: "Use a consulta de recuperação antes de retentar" }); }),
+  consultarRecuperacao: adminProcedure
+    .input(z.object({ idRepasse: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
-      const { usuario } = await resolverUsuarioAutenticado(
-        ctx.deps,
-        ctx.headers,
-      );
-      try {
-        const result = await resolverManualFalhouRepasse(
-          {
-            livroFinanceiroRepository: ctx.deps.livroFinanceiroRepository,
-            clock: ctx.deps.clock,
-            observability: ctx.deps.observability,
-          },
-          {
-            idRepasse: input.idRepasse,
-            resolvidoPor: usuario.email,
-          },
-        );
-
-        return {
-          idRepasse: result.repasse.id,
-          status: result.repasse.status,
-          needsManualResolution: result.repasse.needsManualResolution,
-        };
-      } catch (error: unknown) {
-        if (error instanceof FinanceiroRepasseNaoEncontradoError) {
-          throw new TRPCError({
-            code: "NOT_FOUND",
-            message: "repasse_nao_encontrado",
-          });
-        }
-        if (error instanceof FinanceiroRepasseStatusInvalidoError) {
-          throw new TRPCError({
-            code: "CONFLICT",
-            message: "repasse_status_invalido",
-          });
-        }
-        if (error instanceof FinanceiroInputInvalidoError) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: error.message,
-          });
-        }
+      try { return await consultarRecuperacaoRepasse(ctx.deps, input.idRepasse); }
+      catch (error) {
+        if (error instanceof FinanceiroInputInvalidoError) throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
         throw error;
       }
-  }),
+    }),
+  recuperar: adminProcedure.input(RecoveryInputSchema)
+    .mutation(async ({ ctx, input }) => {
+      const { usuario } = await resolverUsuarioAutenticado(ctx.deps, ctx.headers);
+      try {
+        const result = await recuperarRepasse(ctx.deps, input, usuario.email);
+        return { idRepasse: result.repasse.id, status: result.repasse.status };
+      } catch (error) {
+        if (error instanceof FinanceiroInputInvalidoError) throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
+        throw error;
+      }
+    }),
+
 });
 
 /* ─────────────────────────────────────────────────────────────────────────

@@ -401,7 +401,7 @@ export function marcarRepasseNeedsManualResolution(repasse: RepasseRecebedor): R
 
 /**
  * Admin manual resolution → `pago`. Legal ONLY from a `verificando` repasse
- * already flagged `needsManualResolution`. The admin supplies the matched
+ * (regardless of the retired reconciliation flag). The admin supplies the matched
  * Inter `codigoSolicitacao` (from the persisted candidate list) — books
  * IDENTICALLY to the auto-pago path (records the codigo, clears error + flag;
  * the repository stamps `transferido_em` in the same transaction).
@@ -410,11 +410,6 @@ export function resolverManualPago(
   repasse: RepasseRecebedor,
   interCodigoSolicitacao: string,
 ): RepasseRecebedor {
-  if (!repasse.needsManualResolution) {
-    throw new Error(
-      `RepasseRecebedor ${repasse.id} cannot resolverManualPago: not flagged needsManualResolution.`,
-    );
-  }
   assertStatus(repasse, ['verificando'], 'pago');
   return {
     ...repasse,
