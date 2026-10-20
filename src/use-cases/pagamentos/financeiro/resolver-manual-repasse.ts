@@ -35,6 +35,7 @@ export const RESOLUCAO_MANUAL_FALHOU_ERRO = 'RESOLUCAO_MANUAL_FALHOU';
 
 export const ResolverManualPagoRepasseInputSchema = z.object({
   idRepasse: IdRepasseSchema,
+  motivo: z.string().trim().min(10).max(1000),
   /**
    * Inter's server-generated `codigoSolicitacao` for the payment the admin
    * confirmed is ours (copied from the persisted candidate list). This is the
@@ -52,6 +53,7 @@ export type ResolverManualPagoRepasseInput = Readonly<
 
 export const ResolverManualFalhouRepasseInputSchema = z.object({
   idRepasse: IdRepasseSchema,
+  motivo: z.string().trim().min(10).max(1000),
   /** Identifier of the acting admin (email) — audit trail. */
   resolvidoPor: z.string().min(1).max(255),
 });
@@ -84,13 +86,14 @@ export async function resolverManualPagoRepasse(
         const message = parsed.error.issues.map((issue) => issue.message).join('; ');
         throw new FinanceiroInputInvalidoError(message);
       }
-      const { idRepasse, interCodigoSolicitacao, resolvidoPor } = parsed.data;
+      const { idRepasse, interCodigoSolicitacao, resolvidoPor, motivo } = parsed.data;
       span.setAttribute('financeiro.repasse.id', idRepasse);
 
       const result = await livroFinanceiroRepository.resolverManualPagoTransaction({
         idRepasse,
         interCodigoSolicitacao,
         resolvidoPor,
+        motivo,
         agora: clock(),
       });
 

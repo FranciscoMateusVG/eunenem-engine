@@ -123,6 +123,9 @@ export interface BuscarPagamentosInput {
 }
 
 export interface PagamentoEncontrado {
+  readonly e2eId?: string;
+  readonly recipientName?: string;
+  readonly recipientDocument?: string;
   readonly codigoSolicitacao: string;
   readonly valorCents: MoneyCents;
   /**

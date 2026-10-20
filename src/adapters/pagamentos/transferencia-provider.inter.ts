@@ -261,7 +261,11 @@ interface InterConsultaResponse {
   readonly transacaoPix?: { readonly status?: string };
 }
 
+// Official DetalhePix: https://developers.inter.co/redocusaurus/swagger-banking-yaml.yaml
 interface InterExtratoDetalhePix {
+  readonly endToEndId?: string;
+  readonly nomeRecebedor?: string;
+  readonly cpfCnpjRecebedor?: string;
   readonly codigoSolicitacao?: string;
   readonly descricaoPix?: string;
   readonly chavePixRecebedor?: string;
@@ -560,11 +564,11 @@ export class TransferenciaProviderInter implements TransferenciaProvider {
       }
 
       const parsed = parseJson<InterExtratoResponse>(response.body);
-      if (parsed === null) {
+      if (parsed === null || !Array.isArray(parsed.transacoes)) {
         throw new Error('buscarPagamentos: resposta ilegível');
       }
 
-      const pageItems = parsed.transacoes ?? [];
+      const pageItems = parsed.transacoes;
       transacoes.push(...pageItems);
 
       const totalPaginas = parsed.totalPaginas;
@@ -573,10 +577,10 @@ export class TransferenciaProviderInter implements TransferenciaProvider {
         pageItems.length === 0 ||
         (typeof totalPaginas === 'number' && pagina >= totalPaginas - 1);
       if (isLastPage) {
-        break;
+        return transacoes;
       }
     }
-    return transacoes;
+    throw new Error('buscarPagamentos: extrato incompleto');
   }
 }
 
@@ -679,7 +683,8 @@ function mapConsultStatus(status: string | undefined): ConsultarPagamentoStatus 
 
 /**
  * Maps one extrato/completo transaction to a `PagamentoEncontrado` iff it is
- * a PIX-out debit carrying a codigoSolicitacao. Returns null otherwise.
+ * a PIX-out debit. Missing codigoSolicitacao is retained as an empty identity;
+ * never infer non-payment from a debit without that identifier.
  *
  * `referencia` is populated ONLY from Inter's `descricaoPix` (else ''): the
  * adapter surfaces exactly what Inter returns and never fabricates a
@@ -690,7 +695,7 @@ function mapPixOutTransacao(transacao: InterExtratoTransacao): PagamentoEncontra
   const isPix = transacao.tipoTransacao === 'PIX';
   const detalhes = transacao.detalhes;
   const codigoSolicitacao = detalhes?.codigoSolicitacao;
-  if (!isDebit || !isPix || typeof codigoSolicitacao !== 'string' || codigoSolicitacao === '') {
+  if (!isDebit || !isPix) {
     return null;
   }
   if (transacao.valor === undefined) {
@@ -710,7 +715,15 @@ function mapPixOutTransacao(transacao: InterExtratoTransacao): PagamentoEncontra
   const chave = detalhes?.chavePixRecebedor;
   const dataMovimento = transacao.dataInclusao;
   return {
-    codigoSolicitacao,
+    ...(typeof detalhes?.endToEndId === 'string' ? { e2eId: detalhes.endToEndId } : {}),
+    ...(typeof detalhes?.nomeRecebedor === 'string'
+      ? { recipientName: detalhes.nomeRecebedor }
+      : {}),
+    ...(typeof detalhes?.cpfCnpjRecebedor === 'string'
+      ? { recipientDocument: detalhes.cpfCnpjRecebedor }
+      : {}),
+    // Missing bank request identity must not hide a debit from manual review.
+    codigoSolicitacao: typeof codigoSolicitacao === 'string' ? codigoSolicitacao : '',
     valorCents,
     referencia: detalhes?.descricaoPix ?? '',
     // exactOptionalPropertyTypes: include optional fields only when present.

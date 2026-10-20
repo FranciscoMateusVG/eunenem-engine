@@ -856,7 +856,7 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
               this.pushTransferAttempt({
                 id: attemptId,
                 repasseId: updated.id,
-                attemptNo: updated.transferAttempts,
+                attemptNo: this.nextAttemptNo(updated.id),
                 referencia: updated.transferReferencia,
                 startedAt: input.agora,
                 requestSummary: input.requestSummary,
@@ -1046,9 +1046,9 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
           // would collide with the intent row under the unique constraint.
           const codigo = resultado.tipo === 'pago' ? resultado.codigoSolicitacao : null;
           const erro = resultado.tipo === 'falhou' ? resultado.erro : null;
-          const attemptRow = this.repasseTransferAttempts.find(
-            (a) => a.repasseId === updated.id && a.attemptNo === existing.transferAttempts,
-          );
+          const attemptRow = [...this.repasseTransferAttempts]
+            .reverse()
+            .find((a) => a.repasseId === updated.id && a.operation === 'pagar_pix');
           if (attemptRow) {
             attemptRow.outcome = resultado.tipo;
             attemptRow.codigoSolicitacao = codigo ?? attemptRow.codigoSolicitacao;
@@ -1175,17 +1175,61 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
     return { repasse: updated };
   }
 
+  async recuperarRepasseTransaction(
+    input: Parameters<LivroFinanceiroRepository['recuperarRepasseTransaction']>[0],
+    enqueue: (executor: RepasseTransactionExecutor) => Promise<void>,
+  ): Promise<{ readonly repasse: RepasseRecebedor }> {
+    const existing = this.repasses.get(input.idRepasse);
+    if (!existing) throw new FinanceiroRepasseNaoEncontradoError(input.idRepasse);
+    if (
+      existing.status !== 'verificando' ||
+      existing.transferAttempts !== input.expectedTransferAttempts
+    )
+      return { repasse: existing };
+    const updated = {
+      ...existing,
+      status: 'aprovado' as const,
+      needsManualResolution: false,
+      lastTransferError: null,
+      interCodigoSolicitacao: null,
+    };
+    this.repasses.set(updated.id, updated);
+    try {
+      await enqueue({ executeSql: async () => ({ rows: [] }) });
+    } catch (error) {
+      this.repasses.set(existing.id, existing);
+      throw error;
+    }
+    this.pushTransferAttempt({
+      id: randomUUID(),
+      repasseId: updated.id,
+      attemptNo: this.nextAttemptNo(updated.id),
+      referencia: updated.transferReferencia ?? '',
+      startedAt: input.agora,
+      finishedAt: input.agora,
+      requestSummary: input.audit,
+      outcome: 'falhou',
+      codigoSolicitacao: null,
+      error: null,
+      operation: 'resolver_manual',
+      stateBefore: 'verificando',
+      stateAfter: 'aprovado',
+    });
+    return { repasse: updated };
+  }
+
   async resolverManualPagoTransaction(input: {
     readonly idRepasse: IdRepasse;
     readonly interCodigoSolicitacao: string;
     readonly resolvidoPor: string;
+    readonly motivo?: string;
     readonly agora: Date;
   }): Promise<{ readonly repasse: RepasseRecebedor }> {
     const existing = this.repasses.get(input.idRepasse);
     if (!existing) {
       throw new FinanceiroRepasseNaoEncontradoError(input.idRepasse);
     }
-    if (existing.status !== 'verificando' || !existing.needsManualResolution) {
+    if (existing.status !== 'verificando') {
       return { repasse: existing };
     }
     const updated = resolverManualPago(existing, input.interCodigoSolicitacao);
@@ -1197,7 +1241,7 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
       attemptNo: this.nextAttemptNo(updated.id),
       referencia: updated.transferReferencia ?? '',
       startedAt: input.agora,
-      requestSummary: `resolucao_manual_pago_por:${input.resolvidoPor}`,
+      requestSummary: `resolucao_manual_pago_por:${input.resolvidoPor};motivo:${input.motivo ?? ''}`,
       outcome: 'pago',
       codigoSolicitacao: input.interCodigoSolicitacao,
       error: null,

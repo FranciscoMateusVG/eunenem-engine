@@ -489,7 +489,7 @@ export type ResolverManualPagoResult = {
 };
 
 export type ResolverManualPagoState = {
-  mutate: (input: { idRepasse: string; codigoSolicitacao: string }) => void;
+  mutate: (input: { idRepasse: string; codigoSolicitacao: string; motivo: string }) => void;
   isPending: boolean;
   error: { code: string; message: string } | null;
   data: ResolverManualPagoResult | null;
@@ -524,51 +524,6 @@ export function useStubRepasseResolverManualPago(
             codigoSolicitacao: mutation.variables.codigoSolicitacao,
           }
         : null,
-  };
-}
-
-export type ResolverManualFalhouResult = {
-  idRepasse: string;
-  /**
-   * `falhou` when this call resolved the repasse (retry/cancelar take over);
-   * any other value means a concurrent resolution won.
-   */
-  status: RepasseStatus;
-};
-
-export type ResolverManualFalhouState = {
-  mutate: (input: { idRepasse: string }) => void;
-  isPending: boolean;
-  error: { code: string; message: string } | null;
-  data: ResolverManualFalhouResult | null;
-};
-
-export function useStubRepasseResolverManualFalhou(
-  onSuccess: (result: ResolverManualFalhouResult) => void,
-): ResolverManualFalhouState {
-  const utils = trpc.useUtils();
-  const mutation = trpc.admin.repasses.resolverManualFalhou.useMutation({
-    onSuccess: async (result) => {
-      await Promise.all([
-        utils.admin.repasses.list.invalidate(),
-        utils.admin.repasses.show.invalidate(),
-      ]);
-      onSuccess({
-        idRepasse: result.idRepasse,
-        status: result.status as RepasseStatus,
-      });
-    },
-  });
-  return {
-    mutate: (input) => mutation.mutate(input),
-    isPending: mutation.isPending,
-    error: toMutationError(mutation.error),
-    data: mutation.data
-      ? {
-          idRepasse: mutation.data.idRepasse,
-          status: mutation.data.status as RepasseStatus,
-        }
-      : null,
   };
 }
 
