@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 /** No provider payload/PII is returned by this policy; references are audit-only. */
 export interface RecoveryCandidate {
   readonly e2eId: string | null;
+  readonly amountCents?: number;
+  readonly dataMovimento?: string | null;
   readonly destination: 'matches' | 'different' | 'unknown';
 }
 export interface RecoveryEvidence {
@@ -49,6 +51,20 @@ export function classifyDestination(
   // A differing key alone can belong to the same person. Only a complete
   // destination identity supports dismissal, never a masked/partial document.
   if (recipient && doc && /^\d{11}(?:\d{3})?$/.test(doc)) return 'different';
-  if (recipient && name && /^[\p{L}][\p{L} .'-]{3,}$/u.test(name)) return 'different';
+  if (recipient && name && /^[\p{L}][\p{L} .'-]{3,}$/u.test(name)) {
+    const tokens = (value: string) =>
+      normalizedName(value)
+        .normalize('NFD')
+        .replace(/\p{M}/gu, '')
+        .match(/\p{L}{3,}/gu) ?? [];
+    const bankTokens = tokens(name);
+    const holderTokens = new Set(tokens(recipient.nomeTitular));
+    if (
+      bankTokens.length &&
+      holderTokens.size &&
+      !bankTokens.some((token) => holderTokens.has(token))
+    )
+      return 'different';
+  }
   return 'unknown';
 }

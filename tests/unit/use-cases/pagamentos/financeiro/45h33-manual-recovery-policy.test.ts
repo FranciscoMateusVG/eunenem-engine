@@ -69,3 +69,13 @@ describe('45h33 candidate destination', () => {
     );
   });
 });
+
+it('45h33 abbreviated bank name cannot dismiss the same recipient', () => {
+  expect(
+    classifyDestination(
+      { recipientName: 'PAULO C F JUNIOR' },
+      { nomeTitular: 'Paulo Cesar Ferreira Junior', cpfTitular: '12345678901' },
+      null,
+    ),
+  ).toBe('unknown');
+});

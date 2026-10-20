@@ -33,7 +33,9 @@ export async function consultarRecuperacaoRepasse(deps: RecoveryDeps, idRepasse:
   const repo = deps.livroFinanceiroRepository;
   const repasse = await repo.findRepasseById(idRepasse);
   if (!repasse || repasse.status !== 'verificando')
-    throw new FinanceiroInputInvalidoError('Repasse não está em verificação');
+    throw new FinanceiroInputInvalidoError(
+      'Repasse já resolvido ou não está em verificação. Recarregue para ver o estado atual.',
+    );
   const attempts = await repo.findTransferAttemptsByRepasseId(idRepasse);
   const original = [...attempts].reverse().find((a) => a.operation === 'pagar_pix');
   if (!original) throw new FinanceiroInputInvalidoError('Tentativa original não encontrada');
@@ -80,6 +82,8 @@ export async function consultarRecuperacaoRepasse(deps: RecoveryDeps, idRepasse:
       })
       .map((p) => ({
         e2eId: p.e2eId?.trim() || null,
+        amountCents: p.valorCents,
+        dataMovimento: p.dataMovimento ?? null,
         destination: classifyDestination(p, recipient, fingerprint),
       }));
   } catch {
