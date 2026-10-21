@@ -203,6 +203,7 @@ export class LifecycleEmailService {
     )[0];
     if (
       recipient &&
+      this.config.allowAllRecipients !== true &&
       this.config.recipientAllowlist &&
       !this.config.recipientAllowlist.includes(recipient.email.trim().toLowerCase())
     ) {

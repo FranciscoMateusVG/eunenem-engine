@@ -49,6 +49,8 @@ export interface LifecycleEmailConfig {
   origin: string;
   enabledTypes?: readonly LifecycleEmailType[];
   recipientAllowlist?: readonly string[];
+  /** Explicit override of recipient allowlist only; all other eligibility gates remain. */
+  allowAllRecipients?: boolean;
 }
 
 /** "seu chá já está pronto!" waits this long after the campaign's first gift. */

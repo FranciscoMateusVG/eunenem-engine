@@ -698,6 +698,7 @@ const ServerEnvSchema = z
     LIFECYCLE_EMAIL_ENABLED: z.enum(['true', 'false']).default('false'),
     LIFECYCLE_EMAIL_LAUNCH_AT: z.iso.datetime({ offset: true }).optional(),
     LIFECYCLE_EMAIL_ALLOWED_RECIPIENTS: z.string().optional(),
+    LIFECYCLE_EMAIL_ALLOW_ALL_RECIPIENTS: z.enum(['true', 'false']).default('false'),
     SMTP_HOST: z.string().optional(),
     SMTP_PORT: z.coerce.number().int().positive().optional().default(587),
     SMTP_USER: z.string().optional(),
@@ -1255,10 +1256,11 @@ export function buildServerDeps(
   if (
     env.LIFECYCLE_EMAIL_ENABLED === 'true' &&
     new URL(emailOrigin).hostname !== 'eunenem.com' &&
-    !emailAllowlist?.length
+    !emailAllowlist?.length &&
+    env.LIFECYCLE_EMAIL_ALLOW_ALL_RECIPIENTS !== 'true'
   ) {
     throw new Error(
-      'Non-production lifecycle email rollout requires an explicit recipient allowlist',
+      'Non-production lifecycle email rollout requires an explicit recipient allowlist or LIFECYCLE_EMAIL_ALLOW_ALL_RECIPIENTS=true',
     );
   }
   const lifecycleEmail = new LifecycleEmailService(
@@ -1281,6 +1283,7 @@ export function buildServerDeps(
       enabled: env.LIFECYCLE_EMAIL_ENABLED === 'true',
       launchAt: env.LIFECYCLE_EMAIL_LAUNCH_AT ? new Date(env.LIFECYCLE_EMAIL_LAUNCH_AT) : null,
       origin: emailOrigin,
+      allowAllRecipients: env.LIFECYCLE_EMAIL_ALLOW_ALL_RECIPIENTS === 'true',
       ...(emailAllowlist ? { recipientAllowlist: emailAllowlist } : {}),
     },
   );

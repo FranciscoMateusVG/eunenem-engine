@@ -612,7 +612,40 @@ describe('lifecycle real Postgres and loopback TLS SMTP', () => {
     await expect(service.initialize()).rejects.toThrow('past');
     await expect(build({ launchAt: now }).initialize()).resolves.toBeUndefined();
   });
-  it('boots real production composition and pg-boss worker through a real TLS mail sink', async () => {
+  it.each([undefined, 'false'] as const)('keeps staging boot closed with opt-in %s', (flag) => {
+    expect(() =>
+      buildServerDeps(
+        loadEnv({
+          NODE_ENV: 'test',
+          DATABASE_URL: test.connectionUri,
+          BETTER_AUTH_SECRET: 'synthetic-long-test-secret-32-characters',
+          BETTER_AUTH_URL: 'https://staging.example.invalid',
+          LIFECYCLE_EMAIL_ENABLED: 'true',
+          LIFECYCLE_EMAIL_LAUNCH_AT: launch.toISOString(),
+          LIFECYCLE_EMAIL_ALLOW_ALL_RECIPIENTS: flag,
+          TRUSTED_ORIGINS: 'https://staging.example.invalid',
+          SMTP_HOST: 'smtp.sendgrid.net',
+          SMTP_USER: smtpAuth.user,
+          SMTP_PASS: smtpAuth.pass,
+        }),
+      ),
+    ).toThrow('explicit recipient allowlist');
+  });
+  it.each([
+    false,
+    true,
+  ])('empty allowlist dispatch with explicit allowAllRecipients=%s', async (allowAllRecipients) => {
+    await seed();
+    const configured = build({ recipientAllowlist: [], allowAllRecipients });
+    await configured.scan();
+    await configured.dispatch();
+    expect(await states('welcome')).toEqual([allowAllRecipients ? 'sent' : 'suppressed']);
+    expect(sink.messages).toHaveLength(allowAllRecipients ? 1 : 0);
+  });
+  it.each([
+    'allowlist',
+    'allow-all',
+  ] as const)('boots real composition and TLS SMTP with %s', async (mode) => {
     const owner = await seed();
     const deps = buildServerDeps(
       loadEnv({
@@ -623,7 +656,12 @@ describe('lifecycle real Postgres and loopback TLS SMTP', () => {
         TRUSTED_ORIGINS: 'https://staging.example.invalid',
         LIFECYCLE_EMAIL_ENABLED: 'true',
         LIFECYCLE_EMAIL_LAUNCH_AT: launch.toISOString(),
-        LIFECYCLE_EMAIL_ALLOWED_RECIPIENTS: owner.email,
+        ...(mode === 'allowlist'
+          ? { LIFECYCLE_EMAIL_ALLOWED_RECIPIENTS: owner.email }
+          : {
+              LIFECYCLE_EMAIL_ALLOWED_RECIPIENTS: '',
+              LIFECYCLE_EMAIL_ALLOW_ALL_RECIPIENTS: 'true',
+            }),
         SMTP_HOST: 'smtp.sendgrid.net',
         SMTP_PORT: String(sink.port),
         SMTP_SECURE: 'true',
