@@ -4,7 +4,7 @@ Default: **OFF** (`LIFECYCLE_EMAIL_ENABLED=false`). No production sends were use
 
 ## Enable only after the complete feature lands
 
-The backend depends on the companion templates/preferences/feedback pages. Do not enable until `/email/preferencias`, `/email/descadastrar`, and `/avaliar-email` are mounted and tested. Account settings and every template offer per-type opt-out; unset preferences mean enabled. Authentication and payer PIX receipts are unaffected.
+The backend depends on the companion templates/preferences/feedback pages. Do not enable until `/email/preferencias`, `/email/descadastrar`, and `/avaliar-email` are mounted and tested. Email templates offer per-type opt-out and preference links; the logged-in dashboard no longer links to these pages. The email routes, session fallback, saved preferences and dispatch checks remain unchanged; unset preferences mean enabled. Authentication and payer PIX receipts are unaffected.
 
 1. Apply additive migration 060 (and companion 061), with normal backup/restore checks.
 2. Verify `SMTP_*` configuration in the process's env-file, the verified sender, and `BETTER_AUTH_URL`. Do not print values or credentials. Enabled boot rejects missing SMTP/Noop and any host other than SendGrid.
