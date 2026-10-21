@@ -8230,3 +8230,16 @@ button.painel-topbar-link:hover {
     right: 0;
   }
 }
+
+/* Uses the profile form's existing typography, cards and actions. */
+.personalizar-section { padding: 24px; margin-bottom: 24px; }
+.personalizar-body h2 { font-family: var(--font-patrick-hand), "Patrick Hand", cursive; font-size: 28px; margin-bottom: 12px; }
+.personalizar-body section > p { color: var(--ink-soft); margin-bottom: 18px; }
+.personalizar-color { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 20px 0; }
+.personalizar-color label { display: grid; gap: 8px; }
+.personalizar-color input[type="color"] { width: 44px; height: 44px; padding: 0; border: 0; background: transparent; }
+.personalizar-devices { display: flex; gap: 12px; margin-bottom: 16px; }
+.personalizar-devices [aria-pressed="true"] { background: var(--lilac-soft); }
+.personalizar-preview-scroll { overflow: auto; max-width: 100%; border: 1px solid var(--line); border-radius: 20px; background: var(--paper); }
+.personalizar-preview-scroll iframe { display: block; height: 720px; border: 0; margin: 0 auto; max-width: none; }
+.personalizar-body button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
