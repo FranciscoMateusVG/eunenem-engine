@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { toast } from 'sonner';
 import { PhotoSlot, type FotoSlot, type FotoContentType } from '../PhotoSlot';
 import { PRIMARY_SWATCHES, ACCENT_SWATCHES, TWEAKS_DEFAULTS } from '@/lib/mocks/tweaksDefaults';
@@ -38,7 +38,6 @@ function Editor({ idCampanha }: { idCampanha: string }) {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [mobile, setMobile] = useState(false);
   const frame = useRef<HTMLIFrameElement>(null);
   const data = query.data;
   const primaryValue = primary ?? data?.corPrimaria ?? TWEAKS_DEFAULTS.primary;
@@ -166,27 +165,21 @@ function Editor({ idCampanha }: { idCampanha: string }) {
       <fieldset disabled={busy} style={{ border: 0, padding: 0, minWidth: 0 }}>
         <section className="perfil-card personalizar-section">
           <h2>Fotos da página</h2>
-          <p>As fotos e cores só aparecem para seus convidados depois de salvar.</p>
-          <div className="perfil-fotos-grid">
+          <p>Toque na foto para alterar. Salve para publicar.</p>
+          <div className="personalizar-photos">
             {slots.map((slot) => (
-              <div key={slot}>
-                <PhotoSlot
-                  disabled={busy}
-                  slot={slot}
-                  displayUrl={photos[slot] ? photos[slot].url : data[fields[slot][1]]}
-                  onUpload={upload}
-                />
-                <button
-                  type="button"
-                  className="perfil-btn perfil-btn-ghost"
-                  disabled={!(photos[slot] ? photos[slot].url : data[fields[slot][1]])}
-                  onClick={() =>
-                    setPhotos((previous) => ({ ...previous, [slot]: { key: null, url: null } }))
-                  }
-                >
-                  Remover foto
-                </button>
-              </div>
+              <PhotoSlot
+                key={slot}
+                compact
+                label={{ perfil: 'Perfil', capa: 'Capa', historia: 'História' }[slot]}
+                disabled={busy}
+                slot={slot}
+                displayUrl={photos[slot] ? photos[slot].url : data[fields[slot][1]]}
+                onUpload={upload}
+                onRemove={() =>
+                  setPhotos((previous) => ({ ...previous, [slot]: { key: null, url: null } }))
+                }
+              />
             ))}
           </div>
         </section>
@@ -208,37 +201,15 @@ function Editor({ idCampanha }: { idCampanha: string }) {
       </fieldset>
       <section className="perfil-card personalizar-section">
         <h2>Prévia da página</h2>
-        <p>Esta é a sua página real. Role para conferir como ela ficará.</p>
-        <div className="personalizar-devices" role="group" aria-label="Tamanho da prévia">
-          <button
-            type="button"
-            className="perfil-btn perfil-btn-ghost"
-            aria-pressed={!mobile}
-            onClick={() => setMobile(false)}
-          >
-            Desktop
-          </button>
-          <button
-            type="button"
-            className="perfil-btn perfil-btn-ghost"
-            aria-pressed={mobile}
-            onClick={() => setMobile(true)}
-          >
-            Mobile
-          </button>
-        </div>
-        <div className="personalizar-preview-scroll">
-          {ownerSlug ? (
-            <iframe
-              ref={frame}
-              title="Prévia real da página"
-              src={`${paginaSharePath(ownerSlug, idCampanha)}?personalizar-preview=1`}
-              style={{ width: mobile ? 390 : 1100 }}
-            />
-          ) : (
-            <p role="status">Carregando prévia…</p>
-          )}
-        </div>
+        <p>Sua página real, no tamanho da sua tela. Role para conferir.</p>
+        {ownerSlug ? (
+          <PagePreview
+            frame={frame}
+            src={`${paginaSharePath(ownerSlug, idCampanha)}?personalizar-preview=1`}
+          />
+        ) : (
+          <p role="status">Carregando prévia…</p>
+        )}
       </section>
       {error && <p role="alert">{error}</p>}
       <p role="status" aria-live="polite">
@@ -281,43 +252,76 @@ function ColorField({
   swatches: string[];
   onChange: (value: string) => void;
 }) {
+  const normalized = normalizeHex(value);
+  const customSelected = !swatches.some((color) => normalizeHex(color) === normalized);
   return (
-    <div className="personalizar-color">
-      <label>
-        {label}
-        <input
-          aria-label={label}
-          className="perfil-input"
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          maxLength={7}
-        />
-      </label>
-      <input
-        type="color"
-        aria-label={`Selecionar ${label.toLowerCase()}`}
-        value={normalizeHex(value) ?? '#000000'}
-        onChange={(event) => onChange(event.target.value)}
-      />
-      {swatches.map((color) => (
-        <button
-          key={color}
-          type="button"
-          aria-label={`${label} ${color}`}
-          aria-pressed={normalizeHex(value) === normalizeHex(color)}
-          onClick={() => onChange(color)}
-          style={{
-            background: color,
-            width: 44,
-            height: 44,
-            borderRadius: '50%',
-            border:
-              normalizeHex(value) === normalizeHex(color)
-                ? '3px solid var(--ink)'
-                : '1px solid var(--line)',
-          }}
-        />
-      ))}
+    <fieldset className="personalizar-color">
+      <legend>{label}</legend>
+      <div className="personalizar-swatches">
+        {swatches.map((color) => (
+          <button
+            key={color}
+            type="button"
+            className="personalizar-swatch"
+            aria-label={`${label} ${color}`}
+            aria-pressed={normalized === normalizeHex(color)}
+            onClick={() => onChange(color)}
+            style={{ background: color }}
+          />
+        ))}
+        <label className="personalizar-swatch personalizar-custom" data-selected={customSelected}>
+          <span
+            aria-hidden="true"
+            style={customSelected ? { background: normalized ?? undefined } : undefined}
+          >
+            +
+          </span>
+          <input
+            type="color"
+            aria-label={`Selecionar ${label.toLowerCase()} personalizada`}
+            value={normalized ?? '#000000'}
+            onChange={(event) => onChange(event.target.value)}
+          />
+        </label>
+      </div>
+    </fieldset>
+  );
+}
+
+/** One real public page, scaled to fit; the iframe's viewport controls its layout. */
+function PagePreview({ frame, src }: { frame: RefObject<HTMLIFrameElement | null>; src: string }) {
+  const container = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const element = container.current;
+    if (!element) return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) setWidth(entry.contentRect.width);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  const viewport = width >= 700 ? 1100 : 390;
+  const scale = width > 0 ? Math.min(1, width / viewport) : 1;
+  return (
+    <div
+      ref={container}
+      className="personalizar-preview"
+      data-preview-device={viewport === 1100 ? 'desktop' : 'mobile'}
+    >
+      {width > 0 && (
+        <div
+          className="personalizar-preview-stage"
+          style={{ width: viewport * scale, height: 620 * scale }}
+        >
+          <iframe
+            ref={frame}
+            title="Prévia real da página"
+            src={src}
+            style={{ width: viewport, height: 620, transform: `scale(${scale})` }}
+          />
+        </div>
+      )}
     </div>
   );
 }

@@ -8231,15 +8231,47 @@ button.painel-topbar-link:hover {
   }
 }
 
-/* Uses the profile form's existing typography, cards and actions. */
-.personalizar-section { padding: 24px; margin-bottom: 24px; }
-.personalizar-body h2 { font-family: var(--font-patrick-hand), "Patrick Hand", cursive; font-size: 28px; margin-bottom: 12px; }
-.personalizar-body section > p { color: var(--ink-soft); margin-bottom: 18px; }
-.personalizar-color { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 20px 0; }
-.personalizar-color label { display: grid; gap: 8px; }
-.personalizar-color input[type="color"] { width: 44px; height: 44px; padding: 0; border: 0; background: transparent; }
-.personalizar-devices { display: flex; gap: 12px; margin-bottom: 16px; }
-.personalizar-devices [aria-pressed="true"] { background: var(--lilac-soft); }
-.personalizar-preview-scroll { overflow: auto; max-width: 100%; border: 1px solid var(--line); border-radius: 20px; background: var(--paper); }
-.personalizar-preview-scroll iframe { display: block; height: 720px; border: 0; margin: 0 auto; max-width: none; }
-.personalizar-body button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
+/* Compact customization, scoped to this screen. */
+.personalizar-body { gap: 12px; margin-top: 14px; min-width: 0; }
+.personalizar-body .perfil-hero { padding: 0 16px; }
+.personalizar-body .perfil-hero-title { font-size: 28px; margin: 0; }
+.personalizar-body .perfil-hero p { font-size: 13px; margin-top: 4px; color: var(--ink-soft); }
+.personalizar-body .personalizar-section { padding: 14px; margin: 0 16px; border-radius: 18px; background: var(--paper); min-width: 0; }
+.personalizar-section::after { content: none; }
+.personalizar-body h2 { font-family: var(--font-patrick-hand), "Patrick Hand", cursive; font-size: 22px; line-height: 1.15; margin: 0 0 8px; }
+.personalizar-body section > p { color: var(--ink-soft); font-size: 12px; line-height: 1.4; margin: 0 0 12px; }
+.personalizar-body > fieldset { display: grid; gap: 12px; }
+.personalizar-photos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; max-width: 360px; }
+.personalizar-photos .perfil-foto-slot { position: relative; gap: 6px; }
+.personalizar-photos .perfil-foto-header { justify-content: center; height: 18px; }
+.personalizar-photos .perfil-foto-icon, .personalizar-photos .perfil-foto-cta { display: none; }
+.personalizar-photos .perfil-foto-label { font-size: 15px; }
+.personalizar-photos .perfil-foto-dropzone { min-height: 0; padding: 0; border-radius: 12px; width: 100%; }
+.personalizar-photos .perfil-foto-preview { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.personalizar-photos .perfil-foto-plus-circle { width: 28px; height: 28px; }
+.personalizar-photo-remove { position: absolute; top: 24px; right: 0; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 0; background: transparent; color: var(--plum); cursor: pointer; }
+.personalizar-photo-remove svg { box-sizing: content-box; padding: 6px; border-radius: 50%; background: var(--paper); box-shadow: var(--shadow-sm); }
+.personalizar-color { border: 0; padding: 0; margin: 12px 0 0; min-width: 0; }
+.personalizar-color legend { font-size: 13px; font-weight: 600; color: var(--plum); margin-bottom: 5px; }
+.personalizar-swatches { display: flex; flex-wrap: wrap; gap: 4px; }
+.personalizar-swatch { position: relative; display: grid; place-items: center; width: 44px; height: 44px; flex: 0 0 44px; padding: 5px; border: 2px solid transparent; border-radius: 50%; background-clip: content-box !important; cursor: pointer; }
+.personalizar-swatch[aria-pressed="true"], .personalizar-custom[data-selected="true"] { border-color: var(--plum); }
+.personalizar-custom { background: conic-gradient(#E78FA7, #F7D560, #C7DC6E, #9CD7DD, #A77BBE, #E78FA7); }
+.personalizar-custom span { color: var(--plum); font-size: 20px; line-height: 1; border-radius: 50%; width: 22px; height: 22px; text-align: center; }
+.personalizar-custom input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.personalizar-preview { width: 100%; min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); }
+.personalizar-preview-stage { margin: 0 auto; overflow: hidden; }
+.personalizar-preview iframe { display: block; max-width: none; border: 0; transform-origin: top left; }
+.personalizar-body > [role="status"], .personalizar-body > [role="alert"] { margin: 0 16px; font-size: 12px; }
+.personalizar-body .perfil-actions { gap: 8px; margin: 0 16px 16px; padding: 0; }
+.personalizar-body .perfil-btn { min-height: 44px; padding: 10px 16px; font-size: 12px; }
+.personalizar-body button:focus-visible, .personalizar-custom:focus-within { outline: 2px solid var(--plum); outline-offset: 2px; }
+@media (min-width: 900px) {
+  .personalizar-body .perfil-hero { padding: 0; }
+  .personalizar-body .personalizar-section { margin: 0; padding: 18px; }
+  .personalizar-body .perfil-hero-title { font-size: 32px; }
+  .personalizar-body > [role="status"], .personalizar-body > [role="alert"], .personalizar-body .perfil-actions { margin-left: 0; margin-right: 0; }
+}
+@media (min-width: 900px) {
+  .personalizar-body > fieldset { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; }
+}

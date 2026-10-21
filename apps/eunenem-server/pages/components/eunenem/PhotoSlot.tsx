@@ -238,6 +238,8 @@ export function PhotoSlot({
   dropzoneId,
   inline = false,
   disabled = false,
+  compact = false,
+  onRemove,
   label,
 }: {
   slot: FotoSlot;
@@ -252,6 +254,9 @@ export function PhotoSlot({
    */
   inline?: boolean;
   disabled?: boolean;
+  /** Compact square thumbnail; the saved crop keeps SLOT_CONFIG.aspect. */
+  compact?: boolean;
+  onRemove?: () => void;
   /** Override the SLOT_CONFIG header label (inline editor uses page wording). */
   label?: string;
 }) {
@@ -290,7 +295,7 @@ export function PhotoSlot({
   const statusId = dropzoneId ? `${dropzoneId}-status` : undefined;
 
   return (
-    <div className="perfil-foto-slot">
+    <div className={`perfil-foto-slot${compact ? " perfil-foto-slot--compact" : ""}`}>
       <div className="perfil-foto-header">
         <span className="perfil-foto-icon" aria-hidden="true">
           {ico.photo}
@@ -315,7 +320,7 @@ export function PhotoSlot({
         aria-busy={uploading || undefined}
         onClick={openPicker}
         onKeyDown={handleKey}
-        style={{ aspectRatio: String(cfg.aspect), position: "relative" }}
+        style={{ aspectRatio: String(compact ? 1 : cfg.aspect), position: "relative" }}
       >
         {uploading ? (
           <span className="perfil-spinner" aria-hidden="true" />
@@ -359,7 +364,12 @@ export function PhotoSlot({
           {error}
         </span>
       )}
-      {filled && !uploading && (
+      {compact && filled && onRemove && (
+        <button type="button" className="personalizar-photo-remove" aria-label={`Remover ${shownLabel.toLowerCase()}`} disabled={disabled || uploading} onClick={onRemove}>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7" /></svg>
+        </button>
+      )}
+      {!compact && filled && !uploading && (
         <button
           type="button"
           className="perfil-foto-replace"
