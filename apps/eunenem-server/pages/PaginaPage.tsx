@@ -10,7 +10,8 @@ import { Marketplace } from '@/components/eunenem/Marketplace';
 import { Messages } from '@/components/eunenem/Messages';
 import { Navbar } from '@/components/eunenem/Navbar';
 import { Story } from '@/components/eunenem/Story';
-import { TweaksPanel } from '@/components/eunenem/TweaksPanel';
+import { useTweaks } from '@/components/eunenem/TweaksContext';
+import { painelHref } from '@/lib/painelRoutes';
 import { TweaksProvider } from '@/components/eunenem/TweaksContext';
 import type { TweaksState } from '@/lib/mocks/tweaksDefaults';
 import { ownerListaEditHref } from '@/lib/pagina-owner';
@@ -55,6 +56,7 @@ export function PaginaPage({
 }) {
   // aperture-1yx1n — idCampanha is a real optional input post-#359 (shim
   // swap point fired; plain inference).
+  const preview = typeof window !== "undefined" && window.parent !== window && new URLSearchParams(window.location.search).has("personalizar-preview");
   const perfil = trpc.perfil.getPerfilPublicoBySlug.useQuery(
     idCampanha ? { slug, idCampanha } : { slug },
     { staleTime: 60_000, retry: false },
@@ -69,7 +71,7 @@ export function PaginaPage({
   // for the common bare URL, not only the explicit one.
   const idCampanhaPageView = idCampanhaParaPageView(idCampanha, perfil.data?.idCampanha);
   useEffect(() => {
-    if (perfil.data) {
+    if (perfil.data && !preview) {
       sendPageView(
         'Pagina',
         pageViewProps(
@@ -78,7 +80,7 @@ export function PaginaPage({
         ),
       );
     }
-  }, [perfil.data, idCampanhaPageView]);
+  }, [perfil.data, idCampanhaPageView, preview]);
   // Marketplace + Messages need NO prop threading: their hooks
   // (usePaginaListaPresentes / usePaginaMural) self-resolve the route
   // campanha via useCampanhaRota() — the route-level CampanhaRotaProvider
@@ -105,6 +107,10 @@ export function PaginaPage({
         <span className="perfil-spinner" aria-hidden="true" />
       </div>
     );
+  }
+
+  if (preview && perfil.error) {
+    return <div role="alert" style={{ padding: 24 }}>Não consegui carregar a prévia. <button type="button" onClick={() => void perfil.refetch()}>Tentar novamente</button></div>;
   }
 
   // Found (or a transient non-404 error → render with defaults, children
@@ -140,10 +146,12 @@ export function PaginaPage({
   const isOwner = data?.isOwner ?? false;
   // aperture-4e1qo — owner shortcut to edit THIS campanha's gift list
   // (fail-closed: null unless the server says owner + id + creator slug).
-  const ownerEditHref = ownerListaEditHref(data);
+  const ownerEditHref = preview ? null : ownerListaEditHref(data);
 
   return (
     <TweaksProvider initialState={initialTweaks}>
+      {preview && <CustomizationPreviewBridge />}
+      <div inert={preview || undefined} style={{ display: "contents" }}>
       <CartProvider slug={slug}>
         <CartDrawerProvider>
           <Navbar slug={slug} />
@@ -153,26 +161,23 @@ export function PaginaPage({
               profileUrl={data?.fotoPerfilUrl ?? null}
               eventDate={eventDate}
               tipoEvento={data?.tipoEvento ?? null}
-              editable={isOwner}
+              editable={false}
             />
             <Story
               historia={data?.historia ?? null}
               fotoHistoria={data?.fotoHistoriaUrl ?? null}
-              editable={isOwner}
+              editable={false}
             />
             <Marketplace slug={slug} ownerEditHref={ownerEditHref} />
             <HowTo />
             <Messages slug={slug} />
           </main>
           <Footer />
-          <TweaksPanelMount
-            idCampanha={data?.idCampanha ?? undefined}
-            canSave={isOwner}
-            creatorName={data?.creatorName ?? ""}
-          />
+          {isOwner && !preview && data?.idCampanha && <CustomizationShortcut slug={data.slug} idCampanha={data.idCampanha} />}
           <CartDrawerMount slug={slug} />
         </CartDrawerProvider>
       </CartProvider>
+      </div>
     </TweaksProvider>
   );
 }
@@ -184,19 +189,35 @@ function CartDrawerMount({ slug }: { slug: string }) {
   return <CartDrawer open={drawer.isOpen} onClose={drawer.close} slug={slug} />;
 }
 
-// aperture-v6mpf (Thacy QA) — the floating TweaksPanel is position:fixed, so
-// without a gate it painted OVER the checkout overlays (cart drawer + single-
-// gift GiftCheckoutModal). Same indirection pattern as CartDrawerMount:
-// reads the purchase-overlay signal below the provider and unmounts the
-// panel while any purchase flow covers the page. Unsaved tweak edits survive
-// (they live in TweaksContext, not in the panel). TweaksPanel itself stays
-// provider-agnostic — PainelLayout mounts it with no cart context at all.
-function TweaksPanelMount(props: {
-  idCampanha?: string;
-  canSave?: boolean;
-  creatorName?: string;
-}) {
+function CustomizationShortcut({ slug, idCampanha }: { slug: string; idCampanha: string }) {
   const drawer = useCartDrawer();
   if (drawer.purchaseOverlayVisible) return null;
-  return <TweaksPanel {...props} />;
+  return <a className="perfil-btn perfil-btn-primary" style={{ position: "fixed", bottom: 24, right: 24, zIndex: 30 }} href={painelHref(slug, "personalizar", idCampanha)}>Personalizar página</a>;
+}
+
+// The public component tree is unchanged. Only draft presentation fields from
+// the same-origin parent are accepted; no mutations or checkout are exposed.
+function CustomizationPreviewBridge() {
+  const { setTweaks } = useTweaks();
+  useEffect(() => {
+    const receive = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin || event.source !== window.parent || event.data?.type !== "eunenem-preview") return;
+      const draft = event.data.draft;
+      if (!draft || typeof draft !== "object") return;
+      const patch: Partial<TweaksState> = {};
+      const primary = normalizeHex(draft.corPrimaria);
+      const accent = normalizeHex(draft.corAcento);
+      if (primary) Object.assign(patch, triadFor(primary));
+      if (accent) patch.accent = accent;
+      for (const field of ["fotoPerfilUrl", "fotoCapaUrl", "fotoHistoriaUrl"] as const) {
+        const value = draft[field];
+        if (value === null || (typeof value === "string" && /^https?:\/\//.test(value))) patch[field] = value;
+      }
+      setTweaks(patch);
+    };
+    window.addEventListener("message", receive);
+    window.parent.postMessage({ type: "eunenem-preview-ready" }, window.location.origin);
+    return () => window.removeEventListener("message", receive);
+  }, [setTweaks]);
+  return null;
 }

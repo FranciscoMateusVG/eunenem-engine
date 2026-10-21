@@ -237,6 +237,7 @@ export function PhotoSlot({
   onUpload,
   dropzoneId,
   inline = false,
+  disabled = false,
   label,
 }: {
   slot: FotoSlot;
@@ -250,6 +251,7 @@ export function PhotoSlot({
    * enviando/salva/erro status (the painel form has its own toasts).
    */
   inline?: boolean;
+  disabled?: boolean;
   /** Override the SLOT_CONFIG header label (inline editor uses page wording). */
   label?: string;
 }) {
@@ -261,7 +263,7 @@ export function PhotoSlot({
   const [saved, setSaved] = useState(false);
   const shownLabel = label ?? cfg.label;
 
-  const openPicker = () => inputRef.current?.click();
+  const openPicker = () => { if (!disabled && !uploading) inputRef.current?.click(); };
   const handleKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
@@ -306,7 +308,8 @@ export function PhotoSlot({
         id={dropzoneId}
         className={`perfil-foto-dropzone${filled ? " perfil-foto-dropzone--filled" : ""}`}
         role="button"
-        tabIndex={0}
+        tabIndex={disabled ? -1 : 0}
+        aria-disabled={disabled || undefined}
         aria-label={inline ? `${cfg.cta} (${PHOTO_SAVE_DISCLOSURE})` : cfg.cta}
         aria-describedby={statusId}
         aria-busy={uploading || undefined}
@@ -379,6 +382,7 @@ export function PhotoSlot({
         ref={inputRef}
         className="perfil-foto-input"
         type="file"
+        disabled={disabled}
         accept="image/jpeg,image/png,image/webp"
         onChange={(e) => {
           const f = e.target.files?.[0] ?? null;

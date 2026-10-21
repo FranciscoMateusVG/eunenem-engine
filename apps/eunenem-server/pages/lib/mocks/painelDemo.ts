@@ -243,14 +243,21 @@ export function buildPainelMenu(
     },
     {
       id: "conta",
-      title: "conta & ajuda",
+      title: "Sua página & Conta",
       items: [
         // TODO(aperture-5q39i): wire to the real perfil edit backend
         // (nome/foto/história) when trpc.usuario.updateProfile ships.
         {
+          id: "personalizar",
+          label: "Personalizar página",
+          sub: "fotos, cores e prévia da página",
+          variant: null,
+          icon: "edit-profile",
+        },
+        {
           id: "perfil",
           label: "editar meu perfil",
-          sub: "nome, foto, história do bebê",
+          sub: "nome, datas e história do bebê",
           variant: null,
           icon: "edit-profile",
         },

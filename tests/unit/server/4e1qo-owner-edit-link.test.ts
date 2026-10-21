@@ -105,7 +105,7 @@ describe('4e1qo Marketplace — link only where the prop is set (header + empty 
   });
 
   it('PaginaPage derives the href from the server projection only and passes it once', () => {
-    expect(page).toContain('const ownerEditHref = ownerListaEditHref(data);');
+    expect(page).toContain('const ownerEditHref = preview ? null : ownerListaEditHref(data);');
     expect(page).toContain('<Marketplace slug={slug} ownerEditHref={ownerEditHref} />');
     // never from auth.me / login state
     expect(page).not.toMatch(/auth\.me/);

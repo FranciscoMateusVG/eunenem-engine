@@ -13,6 +13,7 @@ export const ACAO_POR_ITEM_MENU: Readonly<Record<string, AcaoCampanha>> = {
   "lista-convidados": "convidados:ver",
   mensagens: "mensagens:ver",
   perfil: "perfil:editar",
+  personalizar: "perfil:editar",
   compartilhar: "membros:gerenciar",
   bancarios: "recebedor:gerenciar",
 };

@@ -27,6 +27,7 @@ export const PAINEL_SECTIONS = [
   "convite", // Convites (invite builder/preview) — aperture-q8rr
   "convidados", // Lista de convidados (RSVP) — aperture-x1b3u
   "mensagens", // Mensagens recebidas
+  "personalizar",
   "perfil", // Editar perfil — aperture-1z6xa
   "bancarios", // Dados bancários (Pix/bank) — aperture-6xjcw
 ] as const;
@@ -122,6 +123,8 @@ export function menuItemHref(
       return painelHref(slug, "convidados", idCampanha);
     case "mensagens":
       return painelHref(slug, "mensagens", idCampanha);
+    case "personalizar":
+      return painelHref(slug, "personalizar", idCampanha);
     case "perfil":
       return painelHref(slug, "perfil", idCampanha);
     case "bancarios":
@@ -178,6 +181,7 @@ export const PAINEL_SECTION_META: Record<
     title: "mensagens recebidas",
     note: "Em breve você lê aqui todos os recados carinhosos.",
   },
+  personalizar: { eyebrow: "do seu jeitinho ♡", title: "Personalizar página", note: "Fotos, cores e prévia da sua página." },
   perfil: {
     eyebrow: "sobre você ♡",
     title: "editar meu perfil",
