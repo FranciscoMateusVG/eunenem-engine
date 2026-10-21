@@ -278,15 +278,6 @@ export function buildPainelMenu(
           variant: null,
           icon: "bank",
         },
-        // aperture-tykv8 — per-type opt-out of the automatic lifecycle emails.
-        // Personal (not campaign) setting: open to every admin/member.
-        {
-          id: "emails",
-          label: "e-mails automáticos",
-          sub: "escolha quais avisos receber",
-          variant: null,
-          icon: "envelope",
-        },
         {
           id: "suporte",
           label: "fale com a gente",

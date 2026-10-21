@@ -211,6 +211,11 @@ describe('/email/descadastrar', () => {
     const res = await app.request(`/email/descadastrar?token=${token}`);
     expect(res.status).toBe(303);
     expect(res.headers.get('location')).toBe(`/email/preferencias?token=${token}`);
+    const location = res.headers.get('location');
+    if (!location) throw new Error('Missing preferences redirect');
+    const page = await app.request(location);
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain('Salvar preferências');
   });
 
   it('invalid token and cross-site POST are refused', async () => {
