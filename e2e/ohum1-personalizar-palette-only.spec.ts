@@ -15,9 +15,9 @@ test('personalização salva cores sem alterar identidade; Perfil preserva a pal
   await page.getByRole('button', { name: /salvar alterações/i }).click();
   await expect(page.getByText('Tudo salvo! Feito com carinho ♡')).toBeVisible();
   await page.goto(`/painel/${seededData.slug}/personalizar`);
-  await expect(page.getByRole('textbox', { name: 'Cor principal', exact: true })).toHaveValue(
-    '#9CD7DD',
-  );
+  await expect(
+    page.getByLabel('Selecionar cor principal personalizada', { exact: true }),
+  ).toHaveValue('#9CD7DD');
   await expect(
     page.frameLocator('iframe[title="Prévia real da página"]').getByTestId('pagina-baby-name'),
   ).toContainText('Helena E2E');
