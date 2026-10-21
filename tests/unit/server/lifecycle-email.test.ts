@@ -43,12 +43,14 @@ function all() {
 }
 
 describe('lifecycle emails — shared email-safe contract', () => {
-  it('exposes exactly the four agreed types', () => {
+  it('exposes existing and new optional notification types', () => {
     expect([...LIFECYCLE_EMAIL_TYPES]).toEqual([
       'welcome',
       'list_ready',
       'event_reminder',
       'payment_received',
+      'new_message',
+      'presence_confirmed',
     ]);
   });
 

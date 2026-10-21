@@ -1,3 +1,4 @@
+import { ConfiguracoesBody } from '@/components/eunenem/painel/ConfiguracoesBody';
 import { CompartilharBody } from "@/components/eunenem/painel/CompartilharBody";
 import { useEffect, type ReactNode } from "react";
 
@@ -49,6 +50,7 @@ export const PAINEL_SECTION_PAGES: Partial<
   convidados: ConvidadosBody,         // aperture-x1b3u
   mensagens: MensagensBody,           // aperture-1oafq
   personalizar: PersonalizarBody,
+  configuracoes: ConfiguracoesBody,
   perfil: PerfilBody, // aperture-1z6xa
   bancarios: BancariosBody, // aperture-6xjcw
 };

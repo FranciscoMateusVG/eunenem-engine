@@ -76,6 +76,12 @@ export interface CampanhaMembrosPermissoes {
   permissoes: Generated<string[]>;
 }
 
+export interface CampanhaPrivacidade {
+  atualizado_em: Generated<Timestamp>;
+  campanha_id: string;
+  exibir_recados: Generated<boolean>;
+}
+
 export interface Campanhas {
   criada_em: Generated<Timestamp>;
   id: string;
@@ -465,6 +471,14 @@ export interface RateLimit {
   last_request: Int8;
 }
 
+export interface RecadoModeracao {
+  aprovado: Generated<boolean>;
+  ator_id: string;
+  atualizado_em: Generated<Timestamp>;
+  campanha_id: string;
+  pagamento_id: string;
+}
+
 export interface Recebedores {
   agencia: string | null;
   agencia_digito: string | null;
@@ -553,6 +567,14 @@ export interface Sessions {
   user_id: string;
 }
 
+export interface SolicitacoesExclusaoConta {
+  criada_em: Generated<Timestamp>;
+  estado: Generated<string>;
+  id: string;
+  usuario_id: string;
+  verificacoes: Json;
+}
+
 export interface StripeRefundOperationFacts {
   attempt_no: number;
   fact_kind: string;
@@ -630,6 +652,7 @@ export interface DB {
   campanha_compartilhamento_audit: CampanhaCompartilhamentoAudit;
   campanha_convites: CampanhaConvites;
   campanha_membros_permissoes: CampanhaMembrosPermissoes;
+  campanha_privacidade: CampanhaPrivacidade;
   campanhas: Campanhas;
   catalogo_admin_audit_events: CatalogoAdminAuditEvents;
   catalogo_categorias: CatalogoCategorias;
@@ -663,12 +686,14 @@ export interface DB {
   perfil_criadores: PerfilCriadores;
   pix_cobranca_devolucoes: PixCobrancaDevolucoes;
   rate_limit: RateLimit;
+  recado_moderacao: RecadoModeracao;
   recebedores: Recebedores;
   repasse_reconciliacao_candidatos: RepasseReconciliacaoCandidatos;
   repasse_transfer_attempts: RepasseTransferAttempts;
   repasses_recebedor: RepassesRecebedor;
   resgates_pendentes: ResgatesPendentes;
   sessions: Sessions;
+  solicitacoes_exclusao_conta: SolicitacoesExclusaoConta;
   stripe_refund_operation_facts: StripeRefundOperationFacts;
   stripe_refund_operations: StripeRefundOperations;
   users: Users;

@@ -247,20 +247,9 @@ export function buildPainelMenu(
       items: [
         // TODO(aperture-5q39i): wire to the real perfil edit backend
         // (nome/foto/história) when trpc.usuario.updateProfile ships.
-        {
-          id: "personalizar",
-          label: "Personalizar página",
-          sub: "fotos, cores e prévia da página",
-          variant: null,
-          icon: "edit-profile",
-        },
-        {
-          id: "perfil",
-          label: "editar meu perfil",
-          sub: "nome, datas e história do bebê",
-          variant: null,
-          icon: "edit-profile",
-        },
+        { id: "perfil", label: "Editar meu perfil", sub: "Nome, datas e informações do bebê", variant: null, icon: "edit-profile" },
+        { id: "personalizar", label: "Personalizar página", sub: "Fotos e cores da sua página", variant: null, icon: "edit-profile" },
+        { id: "configuracoes", label: "Configurações", sub: "Acessos, privacidade e notificações", variant: null, icon: "edit-profile" },
         // aperture-tja4d — NO "verificado" badge. eunenem 2.0 performs ZERO
         // bank-data / PIX-key-ownership / identity verification (recebedores
         // supply a raw PIX chave; Inter has no DICT key-lookup — aperture-1n53f).
@@ -272,23 +261,16 @@ export function buildPainelMenu(
         // "verified" kind stays available for that future — tracked by
         // aperture-aqiu7, re-scoped to "IF a real verification ever ships").
         {
-          id: "compartilhar",
-          label: "compartilhar",
-          sub: "convide pessoas para sua campanha",
-          variant: null,
-          icon: "phone",
-        },
-        {
           id: "bancarios",
-          label: "dados bancários",
-          sub: "para onde a gente envia o dinheiro",
+          label: "Dados bancários",
+          sub: "Informações para receber seus valores",
           variant: null,
           icon: "bank",
         },
         {
           id: "suporte",
-          label: "fale com a gente",
-          sub: "WhatsApp · seg a sex, 9h–16h",
+          label: "Fale com a gente",
+          sub: "Ajuda e atendimento",
           variant: null,
           icon: "phone",
         },

@@ -99,13 +99,9 @@ export function PainelHeaderCard({
   // the user choose an event time — that idea is parked on aperture-5lu4z).
   const targetDate = rawTarget ? new Date(`${rawTarget}T12:00:00-03:00`) : null;
   const hasDate = targetDate !== null && !Number.isNaN(targetDate.getTime());
-  const weekdayPt = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
   const daysLeft = hasDate
     ? Math.max(0, Math.floor((targetDate.getTime() - now) / 86_400_000))
     : 0;
-  const inlineDate = hasDate
-    ? `${targetDate.getDate()} ${MONTHS_PT[targetDate.getMonth()]}, ${weekdayPt[targetDate.getDay()]}`
-    : "";
   const chipDate = hasDate
     ? `${targetDate.getDate()} ${MONTHS_PT[targetDate.getMonth()]} ${targetDate.getFullYear()}`
     : "";
@@ -130,11 +126,11 @@ export function PainelHeaderCard({
   const onCopy = async () => {
     if (!fullShareUrl) return;
     try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(fullShareUrl);
-      }
+      if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');
+      await navigator.clipboard.writeText(fullShareUrl);
     } catch {
-      // fall through — still toast as visual confirmation
+      toast.error("Não consegui copiar. Toque no endereço para abrir sua página.");
+      return;
     }
     sendEvent("painel_compartilhar_link_click");
     setCopied(true);
@@ -152,33 +148,11 @@ export function PainelHeaderCard({
           </span>
           {hasDate && (
             <span className="painel-top-strip-line">
-              {daysLeft} dias · {inlineDate}
+              {daysLeft} dias para o evento
             </span>
           )}
         </div>
-        <button
-          type="button"
-          className="painel-share-cta"
-          onClick={onCopy}
-          aria-label="copiar link do evento"
-          disabled={!fullShareUrl}
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            style={{ width: 14, height: 14, strokeWidth: 2.2 }}
-            aria-hidden="true"
-          >
-            {/* sparkle — ✦ shape, traced inline (no new dep) */}
-            <path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.5 5.5l2.5 2.5M16 16l2.5 2.5M5.5 18.5l2.5-2.5M16 8l2.5-2.5" />
-          </svg>
-          <span className="painel-share-cta-label">
-            {copied ? "link copiado ♡" : "compartilhe o link do evento"}
-          </span>
-        </button>
+
       </section>
 
       {/* 2. Title row — greeting + h1 + url chip line */}
@@ -235,6 +209,15 @@ export function PainelHeaderCard({
               {publicOwnerSlug ? paginaShareDisplayPath(publicOwnerSlug, campanhaSlug) : "carregando link…"}
             </a>
           </span>
+        </div>
+        <div className="painel-share-actions">
+          <button type="button" className="painel-share-small" disabled={!fullShareUrl} onClick={onCopy}>{copied ? 'Copiado ♡' : 'Copiar link'}</button>
+          <button type="button" className="painel-share-small" disabled={!fullShareUrl} onClick={async () => {
+            if (!fullShareUrl) return;
+            if (!navigator.share) { await onCopy(); return; }
+            try { await navigator.share({ title: `Página de ${babyNameDisplay}`, url: fullShareUrl }); }
+            catch (err) { if (!(err instanceof Error && err.name === 'AbortError')) await onCopy(); }
+          }}>Compartilhar</button>
         </div>
       </header>
 

@@ -482,11 +482,21 @@ describe('lifecycle real Postgres and loopback TLS SMTP', () => {
     owner: Awaited<ReturnType<typeof seed>>,
     contribution: string,
     valid = true,
+    withMessage = false,
   ) {
     const payment = makePagamento({
       idCampanha: owner.campaign,
       idContribuicao: contribution,
       status: 'aprovado',
+      ...(withMessage
+        ? {
+            contribuinte: {
+              nome: 'Convidada',
+              email: 'guest@example.invalid',
+              mensagem: 'Um recado novo',
+            },
+          }
+        : {}),
       criadoEm: now,
     });
     await payments.save(payment);
@@ -510,6 +520,34 @@ describe('lifecycle real Postgres and loopback TLS SMTP', () => {
       );
     return payment;
   }
+  it('keeps gift, message and RSVP opt-outs independent at dispatch time', async () => {
+    const owner = await seed();
+    const contribution = await gift(owner);
+    const payment = await approved(owner, contribution, true, true);
+    const prefs = new LifecycleEmailPreferencesPostgres(test.db);
+    await prefs.setPreferences(owner.userId, owner.tenant, {
+      payment_received: false,
+      new_message: true,
+      presence_confirmed: false,
+    });
+    await service.paymentFinalized(payment);
+    await service.presenceConfirmed(owner.campaign, randomUUID());
+    await service.dispatch();
+    expect(await states('payment_received')).toEqual(['suppressed']);
+    expect(await states('new_message')).toEqual(['sent']);
+    expect(await states('presence_confirmed')).toEqual(['suppressed']);
+    expect(sink.messages).toHaveLength(1);
+    await prefs.setPreferences(owner.userId, owner.tenant, { presence_confirmed: true });
+    const guest = randomUUID();
+    await service.presenceConfirmed(owner.campaign, guest);
+    await service.presenceConfirmed(owner.campaign, guest);
+    await service.dispatch();
+    expect((await states('presence_confirmed')).filter((state) => state === 'sent')).toHaveLength(
+      1,
+    );
+    expect(sink.messages).toHaveLength(2);
+  });
+
   it('quarantines abandoned sending claims on restart', async () => {
     await seed();
     await service.scan();

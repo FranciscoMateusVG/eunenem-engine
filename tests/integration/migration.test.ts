@@ -484,6 +484,11 @@ describe('Migration round-trip', () => {
     //    this sequence must start at the LATEST migration and walk earlier.
     //    Adding a new migration on top REQUIRES prepending its down-step here.
 
+    expect(await tableExists(db, 'campanha_privacidade')).toBe(true);
+    const downSettings = await migrator.migrateDown();
+    expect(downSettings.error).toBeUndefined();
+    expect(await tableExists(db, 'recado_moderacao')).toBe(false);
+
     // 061 email_feedback (aperture-tykv8) is the newest.
     expect(await tableExists(db, 'email_feedback')).toBe(true);
     const downEmailFeedback = await migrator.migrateDown();
