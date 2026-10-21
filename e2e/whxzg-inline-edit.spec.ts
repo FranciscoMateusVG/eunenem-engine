@@ -10,7 +10,7 @@ test('editor centralizado: prévia temporária, cancelar, salvar, reload e mobil
   const primary = page.getByRole('textbox', { name: 'Cor principal', exact: true });
   const original = await primary.inputValue();
   await primary.fill('#123456');
-  const preview = page.frameLocator('iframe');
+  const preview = page.frameLocator('iframe[title="Prévia real da página"]');
   await expect
     .poll(() =>
       preview
@@ -29,7 +29,7 @@ test('editor centralizado: prévia temporária, cancelar, salvar, reload e mobil
   await page.reload();
   await expect(primary).toHaveValue('#123456');
   await page.getByRole('button', { name: 'Mobile', exact: true }).click();
-  await expect(page.locator('iframe')).toHaveCSS('width', '390px');
+  await expect(page.locator('iframe[title="Prévia real da página"]')).toHaveCSS('width', '390px');
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
