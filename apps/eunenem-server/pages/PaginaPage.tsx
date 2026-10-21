@@ -146,7 +146,7 @@ export function PaginaPage({
   const isOwner = data?.isOwner ?? false;
   // aperture-4e1qo — owner shortcut to edit THIS campanha's gift list
   // (fail-closed: null unless the server says owner + id + creator slug).
-  const ownerEditHref = ownerListaEditHref(data);
+  const ownerEditHref = preview ? null : ownerListaEditHref(data);
 
   return (
     <TweaksProvider initialState={initialTweaks}>
@@ -168,7 +168,7 @@ export function PaginaPage({
               fotoHistoria={data?.fotoHistoriaUrl ?? null}
               editable={false}
             />
-            <Marketplace slug={slug} ownerEditHref={preview ? null : ownerEditHref} />
+            <Marketplace slug={slug} ownerEditHref={ownerEditHref} />
             <HowTo />
             <Messages slug={slug} />
           </main>
