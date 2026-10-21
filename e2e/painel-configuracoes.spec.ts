@@ -2,6 +2,12 @@ import { sql } from 'kysely';
 import { createDatabase } from '../src/adapters/database.js';
 import { expect, test } from './fixtures.js';
 import { buildSeedGiftRepos, seedMultiItemApprovedPagamento } from './seed-helpers.js';
+import { classifyTarget } from './target-classifier.js';
+
+test.skip(
+  !classifyTarget(process.env.E2E_BASE_URL).isLocal,
+  'Settings fixtures run only against local test infrastructure.',
+);
 
 const databaseUrl =
   process.env.E2E_DATABASE_URL ??
