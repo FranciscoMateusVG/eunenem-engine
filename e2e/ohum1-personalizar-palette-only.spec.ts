@@ -18,7 +18,7 @@ test('personalização salva cores sem alterar identidade; Perfil preserva a pal
   await expect(page.getByRole('textbox', { name: 'Cor principal', exact: true })).toHaveValue(
     '#9CD7DD',
   );
-  await expect(page.frameLocator('iframe').getByTestId('pagina-baby-name')).toContainText(
-    'Helena E2E',
-  );
+  await expect(
+    page.frameLocator('iframe[title="Prévia real da página"]').getByTestId('pagina-baby-name'),
+  ).toContainText('Helena E2E');
 });
