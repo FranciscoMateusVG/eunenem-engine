@@ -1,7 +1,6 @@
 import { sql } from 'kysely';
 import { createDatabase } from '../src/adapters/database.js';
 import { expect, test } from './fixtures.js';
-import { buildSeedGiftRepos, seedMultiItemApprovedPagamento } from './seed-helpers.js';
 import { classifyTarget } from './target-classifier.js';
 
 test.skip(
@@ -13,7 +12,7 @@ const databaseUrl =
   process.env.E2E_DATABASE_URL ??
   process.env.DATABASE_URL ??
   'postgresql://frame:frame@localhost:54320/frame';
-test('painel compacto, navegação, privacidade, e-mail e solicitação segura de exclusão', async ({
+test('painel compacto e configurações sem novas dependências de banco', async ({
   authenticatedPage: page,
   seededData,
 }) => {
@@ -87,142 +86,34 @@ test('painel compacto, navegação, privacidade, e-mail e solicitação segura d
     await expect(
       page.getByRole('link', { name: 'Gerenciar acessos', exact: true }),
     ).toHaveAttribute('href', `${base}/compartilhar`);
-    for (const name of ['Presentes recebidos', 'Novos recados', 'Confirmações de presença']) {
-      const toggle = page.getByRole('switch', { name, exact: true });
-      await expect(toggle).toBeEnabled();
-      const saved = page.waitForResponse(
-        (response) =>
-          response.url().includes('configuracoes.emails') && response.request().method() === 'POST',
-      );
-      await toggle.click();
-      await saved;
-      await expect(toggle).toBeEnabled();
-      await page.reload();
-      await expect(toggle).not.toBeChecked();
+    for (const name of [
+      'Exibir recados publicamente',
+      'Presentes recebidos',
+      'Novos recados',
+      'Confirmações de presença',
+    ]) {
+      await expect(page.getByRole('switch', { name, exact: true })).toBeDisabled();
     }
-    await page.route('**/api/trpc/configuracoes.emails*', (route) =>
-      route.fulfill({
-        status: 500,
-        contentType: 'application/json',
-        body: JSON.stringify([
-          {
-            error: {
-              message: 'Falha simulada de gravação',
-              code: -32603,
-              data: { code: 'INTERNAL_SERVER_ERROR', httpStatus: 500 },
-            },
-          },
-        ]),
-      }),
-    );
-    await page.getByRole('switch', { name: 'Novos recados', exact: true }).click();
-    await expect(page.getByRole('alert')).toContainText('Falha simulada');
-    await expect(
-      page.getByRole('switch', { name: 'Novos recados', exact: true }),
-    ).not.toBeChecked();
-    await page.unroute('**/api/trpc/configuracoes.emails*');
-    const privacy = page.getByRole('switch', { name: 'Exibir recados publicamente' });
-    const privacySaved = page.waitForResponse(
-      (response) =>
-        response.url().includes('configuracoes.privacidade') &&
-        response.request().method() === 'POST',
-    );
-    await privacy.click();
-    await privacySaved;
-    await expect(privacy).toBeEnabled();
-    await page.reload();
-    await expect(privacy).not.toBeChecked();
-    // Synthetic approved payment with an old, UNMODERATED message stays private.
-    const seeded = await seedMultiItemApprovedPagamento(buildSeedGiftRepos(db), {
-      idCampanha: seededData.idCampanha,
-      idOpcaoPresentes: seededData.idOpcaoPresentes,
-      items: [{ nome: 'Presente de teste', valorCents: 1000, quantidade: 1 }],
-    });
-    await sql`UPDATE pagamentos SET intencao_contribuinte_nome='Convidada Teste',intencao_contribuinte_email='guest@example.invalid',intencao_contribuinte_mensagem='Recado aguardando aprovação' WHERE id=${seeded.pagamentoId}`.execute(
-      db,
-    );
-    await privacy.click();
-    await expect(privacy).toBeEnabled();
-    const publicInput = encodeURIComponent(
-      JSON.stringify({ slug: seededData.slug, idCampanha: seededData.idCampanha }),
-    );
-    const mural = async () =>
-      (await (await page.request.get(`/api/trpc/pagina.obterMural?input=${publicInput}`)).json())
-        .result.data;
-    await expect.poll(mural).toEqual([]);
-    await page.goto(`${base}/mensagens`);
-    await page.getByRole('button', { name: 'Aprovar para publicar', exact: true }).click();
-    await expect(page.getByRole('button', { name: 'Ocultar recado', exact: true })).toBeVisible();
-    await expect.poll(mural).toHaveLength(1);
-    await page.goto(`${base}/configuracoes`);
-    await page.getByRole('switch', { name: 'Exibir recados publicamente' }).click();
-    await expect(
-      page.getByRole('switch', { name: 'Exibir recados publicamente' }),
-    ).not.toBeChecked();
-    await expect(page.getByRole('switch', { name: 'Exibir recados publicamente' })).toBeEnabled();
-    await expect.poll(mural).toEqual([]);
-    await page.getByRole('switch', { name: 'Exibir recados publicamente' }).click();
-    await expect(page.getByRole('switch', { name: 'Exibir recados publicamente' })).toBeEnabled();
-    await expect.poll(mural).toHaveLength(1);
-    await page.goto(`${base}/mensagens`);
-    await page.getByRole('button', { name: 'Ocultar recado', exact: true }).click();
-    await expect(
-      page.getByRole('button', { name: 'Aprovar para publicar', exact: true }),
-    ).toBeVisible();
-    await expect.poll(mural).toEqual([]);
-    await page.goto(`${base}/configuracoes`);
     for (const width of [320, 375, 390, 768, 1440]) {
       await page.setViewportSize({ width, height: 900 });
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
         true,
       );
-      await page.screenshot({
-        path: `test-results/configuracoes-width-${width}-${page.url().includes('configuracoes') ? 'settings' : 'dashboard'}.png`,
-        fullPage: true,
-      });
     }
+    await page.getByRole('link', { name: 'Gerenciar acessos', exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`${base}/compartilhar$`));
+    await page.goto(`${base}/configuracoes`);
     await page.getByRole('button', { name: 'Excluir minha conta', exact: true }).click();
-    await expect(page.getByRole('button', { name: 'Confirmar solicitação' })).toBeDisabled();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Falar com o atendimento' })).toBeDisabled();
     await page.getByRole('button', { name: 'Cancelar', exact: true }).click();
-    expect(
-      (
-        await sql`SELECT 1 FROM solicitacoes_exclusao_conta WHERE usuario_id=${seededData.session.userId}`.execute(
-          db,
-        )
-      ).rows,
-    ).toHaveLength(0);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
     await page.getByRole('button', { name: 'Excluir minha conta', exact: true }).click();
-    await page.getByRole('checkbox', { name: /Entendo as consequências/ }).check();
-    await page.getByRole('button', { name: 'Confirmar solicitação' }).click();
-    await expect(page.getByText(/Solicitação registrada para análise/)).toBeVisible();
-    const requests = await sql<{
-      estado: string;
-      verificacoes: {
-        exclusaoAutomatica: boolean;
-        eventosFuturosOuSemData: string;
-        requerAnaliseFinanceira: boolean;
-      };
-    }>`SELECT estado,verificacoes FROM solicitacoes_exclusao_conta WHERE usuario_id=${seededData.session.userId}`.execute(
-      db,
+    await page.getByRole('checkbox', { name: /Entendo e quero conversar/ }).check();
+    await expect(page.getByRole('link', { name: 'Falar com o atendimento' })).toHaveAttribute(
+      'href',
+      /wa.me/,
     );
-    expect(requests.rows[0]?.estado).toBe('em_analise');
-    expect(requests.rows[0]?.verificacoes.exclusaoAutomatica).toBe(false);
-    expect(Number(requests.rows[0]?.verificacoes.eventosFuturosOuSemData)).toBeGreaterThan(0);
-    expect(requests.rows[0]?.verificacoes.requerAnaliseFinanceira).toBe(true);
-    await page.reload();
-    await expect(page.getByText(/Solicitação registrada para análise/)).toBeVisible();
-    const repeat = await page.request.post('/api/trpc/configuracoes.solicitarExclusao', {
-      data: { confirmacao: 'SOLICITAR EXCLUSAO' },
-    });
-    expect(repeat.status()).toBe(200);
-    expect(
-      (
-        await sql`SELECT 1 FROM solicitacoes_exclusao_conta WHERE usuario_id=${seededData.session.userId}`.execute(
-          db,
-        )
-      ).rows,
-    ).toHaveLength(1);
-
     expect(
       (
         await db
@@ -232,14 +123,6 @@ test('painel compacto, navegação, privacidade, e-mail e solicitação segura d
           .executeTakeFirst()
       )?.desativado_em,
     ).toBeNull();
-    // A stale session can neither bypass confirmation nor create a second request.
-    await sql`UPDATE sessions SET created_at=now()-interval '1 hour' WHERE user_id=${seededData.session.userId}`.execute(
-      db,
-    );
-    const response = await page.request.post('/api/trpc/configuracoes.solicitarExclusao', {
-      data: { confirmacao: 'SOLICITAR EXCLUSAO' },
-    });
-    expect(response.status()).toBe(401);
   } finally {
     await db.destroy();
   }

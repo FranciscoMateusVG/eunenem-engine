@@ -110,7 +110,7 @@ export class LifecycleEmailService {
   async paymentFinalized(payment: Pagamento, recovered = false): Promise<void> {
     return lifecycleSpan('lifecycleEmail.paymentFinalized', async () => {
       if (
-        (!this.active('payment_received') && !this.active('new_message')) ||
+        !this.active('payment_received') ||
         payment.status !== 'aprovado' ||
         payment.criadoEm < this.launchAt()
       )
@@ -137,27 +137,7 @@ export class LifecycleEmailService {
         },
         recovered,
       );
-      // New message alerts use the same durable queue and opt-out checks, but
-      // never replay historical recovered payments or block existing receipts.
-      if (!recovered && payment.intencao.contribuinte?.mensagem?.trim()) {
-        try {
-          await this.admit(
-            'new_message',
-            payment.id,
-            payment.intencao.idCampanha,
-            this.deps.clock(),
-            {},
-            true,
-          );
-        } catch {
-          this.deps.report('lifecycle_email.message_admission_failed', {});
-        }
-      }
     });
-  }
-
-  async presenceConfirmed(campaignId: string, guestId: string): Promise<void> {
-    await this.admit('presence_confirmed', guestId, campaignId, this.deps.clock(), {}, true);
   }
 
   async scan(): Promise<void> {
@@ -235,9 +215,9 @@ export class LifecycleEmailService {
       return;
     }
     if (
-      (await this.deps.preferences.getPreferences(recipient.user_id, recipient.tenant_id))[
+      !(await this.deps.preferences.getPreferences(recipient.user_id, recipient.tenant_id))[
         delivery.type
-      ] === false
+      ]
     ) {
       await suppress('opt_out');
       return;
@@ -327,9 +307,9 @@ export class LifecycleEmailService {
     if (
       !latestRecipient ||
       latestRecipient.email.trim().toLowerCase() !== recipient.email.trim().toLowerCase() ||
-      (await this.deps.preferences.getPreferences(recipient.user_id, recipient.tenant_id))[
+      !(await this.deps.preferences.getPreferences(recipient.user_id, recipient.tenant_id))[
         delivery.type
-      ] === false
+      ]
     ) {
       await suppress('recipient_changed');
       return;

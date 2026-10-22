@@ -231,7 +231,7 @@ describe('/email/descadastrar', () => {
 });
 
 describe('/email/preferencias', () => {
-  it('GET lists notification types with current state; POST saves the toggles', async () => {
+  it('GET lists the four types with current state; POST saves the toggles', async () => {
     const userId = randomUUID();
     const tenantId = randomUUID();
     await preferences.setPreferences(userId, tenantId, { event_reminder: false });
@@ -260,8 +260,6 @@ describe('/email/preferencias', () => {
       list_ready: false,
       event_reminder: true,
       payment_received: true,
-      new_message: false,
-      presence_confirmed: false,
     });
   });
 

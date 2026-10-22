@@ -497,11 +497,6 @@ export const eventoListaDeConvidadosRouter = t.router({
           throw new ConvidadoNaoEncontradoError(input.idConvidado as IdConvidado, updated.id);
         }
 
-        if (antes.presenca !== 'sim' && convidado.presenca === 'sim') {
-          try { await ctx.deps.lifecycleEmail?.presenceConfirmed(idCampanha, input.idConvidado); }
-          catch { ctx.deps.observability.logger.info('email.presenca.admissao_falhou', { idCampanha }); }
-        }
-
         // aperture-ppuay / aperture-4yse9 — server-truth RSVP, THE single
         // emitter (the client no longer tracks it). Guest action, no session:
         // distinct_id is the opaque `convidado:<id>` — stable per guest, never

@@ -1,4 +1,3 @@
-import { configuracoesRouter } from './configuracoes-router.js';
 import { compartilhamentoRouter } from './compartilhamento-router.js';
 /**
  * tRPC router for eunenem-server (aperture-kungg + aperture-ht7sq + aperture-d6atj).
@@ -62,7 +61,6 @@ export const appRouter = t.router({
   perfilCampanha: perfilCampanhaRouter,
   recebedor: recebedorRouter,
   usuario: usuarioRouter,
-  configuracoes: configuracoesRouter,
 });
 
 export type AppRouter = typeof appRouter;

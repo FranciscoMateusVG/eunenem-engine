@@ -1,9 +1,3 @@
-vi.mock('../../../apps/eunenem-server/server/painel-settings-store.js', () => ({
-  getPrivacy: async () => true,
-  approvedMessages: async () => new Set(),
-  publicMessages: async () => [],
-}));
-
 /**
  * aperture-g1wl4 (part 1) — THROUGH-THE-ROUTER suite for PR #344
  * (aperture-yeauv: per-hop OPTIONAL idCampanha resolution).
