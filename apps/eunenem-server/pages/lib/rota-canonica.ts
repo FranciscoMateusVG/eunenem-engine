@@ -21,6 +21,7 @@ const ROTAS: ReadonlyArray<readonly [RegExp, string]> = [
   [/^\/trpc-smoke\/?$/, '/trpc-smoke'],
   [/^\/auth-demo\/?$/, '/auth-demo'],
   [/^\/faq\/?$/, '/faq'],
+  [/^\/taxas-e-prazos\/?$/, '/taxas-e-prazos'],
   [/^\/campanhas\/?$/, '/campanhas'],
   [/^\/admin(?:\/.*)?$/, '/admin/*'],
   [/^\/pagina\/[^/]+\/sucesso\/?$/, '/pagina/:slug/sucesso'],

@@ -25,6 +25,7 @@ import { PaginaPage } from './PaginaPage.js';
 import { PaginaSucessoPage } from './PaginaSucessoPage.js';
 import { PainelPage } from './PainelPage.js';
 import { PainelSectionPage } from './PainelSectionPage.js';
+import { TaxasEPrazosPage } from './TaxasEPrazosPage.js';
 import { TermosDeUsoPage } from './TermosDeUsoPage.js';
 import { TrpcSmokePage } from './TrpcSmokePage.js';
 import { TrpcProvider } from './lib/TrpcProvider.js';
@@ -65,6 +66,7 @@ export function resolveRoute(pathname: string):
   | { kind: 'trpc-smoke' }
   | { kind: 'auth-demo' }
   | { kind: 'faq' }
+  | { kind: 'taxas-e-prazos' }
   | { kind: 'admin' }
   | { kind: 'admin-usuario'; idConta: string }
   | { kind: 'admin-campanha'; idCampanha: string }
@@ -97,8 +99,10 @@ export function resolveRoute(pathname: string):
   if (pathname === '/auth-demo') {
     return { kind: 'auth-demo' };
   }
-  // Perguntas Frequentes (aperture-sgjnn) — public FAQ page, linked from the
-  // footer. Exact "/faq" only.
+  if (pathname === '/taxas-e-prazos' || pathname === '/taxas-e-prazos/') {
+    return { kind: 'taxas-e-prazos' };
+  }
+  // Perguntas Frequentes — exact "/faq" only.
   if (pathname === '/faq') {
     return { kind: 'faq' };
   }
@@ -436,6 +440,7 @@ function pickPage(route: ReturnType<typeof resolveRoute>, pathname: string) {
   if (route.kind === 'trpc-smoke') return <TrpcSmokePage />;
   if (route.kind === 'auth-demo') return <AuthDemoPage />;
   if (route.kind === 'faq') return <FaqPage />;
+  if (route.kind === 'taxas-e-prazos') return <TaxasEPrazosPage />;
   if (route.kind === 'admin') return <AdminPage />;
   if (route.kind === 'admin-usuario')
     return <AdminUsuarioPage idConta={route.idConta} />;
