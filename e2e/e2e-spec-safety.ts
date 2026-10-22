@@ -82,6 +82,7 @@ export const E2E_SPEC_SAFETY = [
     safety: 'money-movement',
     capability: 'Posts a signed PIX settlement webhook and advances payment state.',
   },
+  { file: 'taxas-e-prazos.spec.ts', safety: 'non-payment' },
   { file: 'tqp4t-postlogin-routing-gaps.spec.ts', safety: 'non-payment' },
   { file: 'u38rz-nova-lista-create.spec.ts', safety: 'non-payment' },
   // Prévia da NFS-e (somente leitura, nada é enviado). Self-skips unless

@@ -46,10 +46,10 @@ describe('painel dashboard — filtered by member permissions', () => {
     }
   });
 
-  it('member with no grants still sees the gift list, preview and support; empty groups are dropped', () => {
+  it('member with no grants still sees the gift list, preview, support and public fees page; empty groups are dropped', () => {
     const grupos = filtrarMenuPorAcesso(buildPainelMenu(PAINEL_DEMO), com([]));
     expect(grupos.flatMap((g) => g.items.map((i) => i.id)).sort()).toEqual(
-      ['configuracoes', 'lista', 'preview', 'rifa', 'suporte'].sort(),
+      ['configuracoes', 'lista', 'preview', 'rifa', 'suporte', 'taxas-e-prazos'].sort(),
     );
     expect(grupos.map((g) => g.id)).not.toContain('convidados');
   });
