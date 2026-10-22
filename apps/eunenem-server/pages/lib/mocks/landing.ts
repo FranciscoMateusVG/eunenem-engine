@@ -292,7 +292,7 @@ export const LANDING_FOOTER_COLS: ReadonlyArray<LandingFooterCol> = [
     links: [
       ['perguntas frequentes', '/faq'],
       ['status dos serviços', '/faq'],
-      ['taxas', '/faq'],
+      ['Taxas e prazos', '/taxas-e-prazos'],
       ['termos de uso', '/termos-de-uso'],
     ],
   },

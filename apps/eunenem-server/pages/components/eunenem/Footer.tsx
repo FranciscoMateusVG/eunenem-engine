@@ -144,6 +144,13 @@ export function Footer({ clearFab = false }: { clearFab?: boolean } = {}) {
             ))}
           </div>
         </div>
+        <a
+          href="/taxas-e-prazos"
+          className="lg:hidden inline-flex min-h-11 items-center mb-6 text-sm text-[#F4DCEA] underline underline-offset-4"
+          onClick={() => sendEvent('footer_link_click', { link_label: 'Taxas e prazos' })}
+        >
+          Taxas e prazos
+        </a>
         <div
           className={`border-t border-[#F4DCEA]/10 pt-6 flex flex-col items-center gap-4 lg:flex-row lg:justify-between lg:items-center${
             clearFab ? ' lg:pr-[92px]' : ''

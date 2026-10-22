@@ -40,6 +40,7 @@ const ROUTE_KINDS = new Set([
   'trpc-smoke',
   'auth-demo',
   'faq',
+  'taxas-e-prazos',
   'admin',
   'admin-usuario',
   'admin-campanha',

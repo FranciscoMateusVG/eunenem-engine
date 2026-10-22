@@ -140,6 +140,8 @@ export function menuItemHref(
       // they were viewing someone else's page. `slug` here is the real creator
       // slug (the same one every other row above already threads correctly).
       return paginaSharePath(slug, idCampanha, campanhaSlug);
+    case "taxas-e-prazos":
+      return "/taxas-e-prazos";
     case "suporte":
       // External support channel — no in-app page in scope.
       // aperture-7mqsg — EuNeném atendimento: (31) 99601-1432.

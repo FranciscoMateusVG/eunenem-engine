@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { PublicInfoHeader } from "@/components/eunenem/PublicInfoHeader";
 import { Footer } from "@/components/eunenem/Footer";
 import { sendEvent, sendPageView } from "@/lib/analytics";
 import { pageViewProps } from "@/lib/rota-canonica";
@@ -109,22 +110,7 @@ export function FaqPage() {
     <div className="faq-page">
       <style>{FAQ_CSS}</style>
 
-      <header className="faq-topbar">
-        <div className="faq-topbar-inner">
-          <a className="faq-logo" href="/" aria-label="EuNeném — início">
-            <img src="/public/logo-landing.png" alt="EuNeném" className="faq-logo-img" />
-          </a>
-          <nav className="faq-nav-right">
-            <a
-              className="faq-nav-link"
-              href={FALAR_CONOSCO_HREF}
-              onClick={() => sendEvent("faq_contato_whatsapp_click", { origem: "topbar" })}
-            >
-              falar conosco
-            </a>
-          </nav>
-        </div>
-      </header>
+      <PublicInfoHeader onContactClick={() => sendEvent("faq_contato_whatsapp_click", { origem: "topbar" })} />
 
       <main className="faq-wrap">
         <section className="faq-card" aria-label="Perguntas frequentes">
@@ -229,15 +215,6 @@ const FAQ_CSS = `
   background:linear-gradient(180deg,transparent 62%,var(--marker) 62%,var(--marker) 92%,transparent 92%);
   padding:0 .06em;border-radius:2px;
 }
-
-/* topbar */
-.faq-topbar{position:sticky;top:0;z-index:50;background:rgba(248,247,246,.78);backdrop-filter:blur(14px) saturate(1.2);-webkit-backdrop-filter:blur(14px) saturate(1.2);border-bottom:1px solid var(--line);}
-.faq-topbar-inner{max-width:1080px;margin:0 auto;padding:12px 26px;display:flex;align-items:center;justify-content:space-between;gap:16px;}
-.faq-logo{display:inline-flex;align-items:center;text-decoration:none;}
-.faq-logo-img{height:54px;width:auto;background:rgba(255,255,255,.95);padding:6px 12px;border-radius:14px;}
-.faq-nav-right{display:flex;align-items:center;gap:18px;}
-.faq-nav-link{font-size:12px;color:var(--ink-soft);text-decoration:none;text-transform:uppercase;letter-spacing:.12em;font-weight:600;}
-.faq-nav-link:hover{color:var(--plum);}
 
 /* page */
 .faq-wrap{max-width:1080px;margin:0 auto;padding:46px 26px 90px;}
