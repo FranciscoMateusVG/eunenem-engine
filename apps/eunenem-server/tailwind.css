@@ -8333,3 +8333,57 @@ button.painel-topbar-link:hover {
 .config-consent input { width: 20px; height: 20px; flex-shrink: 0; }
 dialog.config-modal { margin: auto; color: var(--ink); border: 1px solid var(--line); width: calc(100% - 32px); }
 dialog.config-modal::backdrop { background: #33233380; }
+
+/* Minhas listas: compact scrapbook cards, scoped away from panels/modals. */
+.camp-main { padding: 24px 20px 48px; }
+.camp-hero { margin-bottom: 22px; }
+.camp-hero-eyebrow { font-size: 22px; }
+.camp-hero-title { margin-top: 4px; font-size: clamp(24px, 3.5vw, 36px); }
+.camp-hero-help { margin-top: 2px; min-height: 44px; padding: 8px 10px; }
+.camp-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.camp-grid .camp-card {
+  min-width: 0; min-height: 124px; padding: 12px; border-radius: 18px;
+  flex-direction: row; align-items: center; gap: 12px;
+}
+.camp-grid .camp-tape { top: -6px; left: 26px; width: 44px; height: 13px; }
+.camp-grid .camp-cover { flex: 0 0 92px; width: 92px; height: 92px; border-radius: 13px; }
+.camp-grid .camp-cover img { width: 100%; height: 100%; object-fit: cover; }
+.camp-grid .camp-cover-ini { font-size: 46px; }
+.camp-grid .camp-selo {
+  top: 10px; right: 12px; width: 27px; height: 21px; border-radius: 7px; font-size: 12px;
+}
+.camp-grid .camp-card-body { min-width: 0; padding: 0 30px 0 0; gap: 3px; }
+.camp-grid .camp-card-body > :nth-last-child(2) { margin-bottom: 0; }
+.camp-grid .camp-card-name {
+  font-size: 23px; line-height: 1.08; display: -webkit-box;
+  -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.camp-grid .camp-card-mimos { font-size: 11px; margin-top: 0; }
+.camp-grid .camp-cta {
+  position: absolute; inset: 0; display: block; width: auto; min-height: 0;
+  margin: 0; padding: 0; background: transparent; box-shadow: none; color: var(--lilac-deep);
+  border-radius: 18px; transform: none;
+}
+.camp-grid .camp-cta > span {
+  position: absolute; right: 5px; top: 50%; width: 44px; height: 44px;
+  display: grid; place-items: center; font-size: 25px; transform: translateY(-50%);
+}
+/* The real anchor covers the card; the separate setup action stays above it. */
+.camp-grid .camp-cta:hover { background: transparent; transform: none; }
+.camp-grid .camp-card:has(.camp-cta:focus-visible) { outline: 2px solid var(--lilac-deep); outline-offset: 3px; }
+.camp-grid .camp-card-completar { position: relative; z-index: 2; min-height: 32px; margin: 0; padding: 4px 0; align-self: flex-start; }
+.camp-grid .camp-nova { flex-direction: row; min-height: 124px; padding: 12px; gap: 14px; border-radius: 18px; }
+.camp-grid .camp-nova-plus { width: 48px; height: 48px; border-radius: 14px; }
+.camp-grid .camp-nova-plus > span { font-size: 34px; }
+.camp-grid .camp-skel-btn { display: none; }
+@media (min-width: 1024px) { .camp-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 640px) {
+  .camp-main { padding: 16px 16px 36px; }
+  .camp-hero { margin-bottom: 16px; }
+  .camp-hero-eyebrow { font-size: 20px; }
+  .camp-hero-title { font-size: clamp(17px, 5.15vw, 22px); white-space: nowrap; }
+  .camp-grid { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .camp-grid .camp-card, .camp-grid .camp-nova { min-height: 116px; padding: 10px; }
+  .camp-grid .camp-cover { flex-basis: 88px; width: 88px; height: 88px; }
+  .camp-grid .camp-card-name { font-size: 22px; }
+}

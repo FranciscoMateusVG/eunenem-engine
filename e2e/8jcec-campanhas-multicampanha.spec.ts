@@ -205,3 +205,88 @@ base.describe('/campanhas — anonymous visitor', () => {
     await expect(page.getByTestId('campanhas-grid')).toHaveCount(0);
   });
 });
+
+seededTest(
+  'compact cards at six widths preserve decoration and whole-card navigation',
+  async ({ authenticatedPage: page, seededData }) => {
+    // Only read responses are adapted for deterministic layout; creation is covered above.
+    await page.route('**/api/trpc/**', async (route) => {
+      const response = await route.fetch();
+      const data = await response.json();
+      const batch = Array.isArray(data) ? data : [data];
+      const calls = new URL(route.request().url()).pathname.split('/api/trpc/')[1].split(',');
+      calls.forEach((call, index) => {
+        if (call === 'auth.me') batch[index].result.data.needsOnboarding = false;
+        if (call === 'campanhas.list') {
+          const first = batch[index].result.data.novas[0];
+          batch[index].result.data.legado = [];
+          batch[index].result.data.novas = [
+            'Chá da Helena',
+            'Uma lista com um nome muito longo para a chegada do nosso bebê querido',
+            'Quartinho ♡',
+          ].map((titulo, i) => ({
+            ...first,
+            id: i === 0 ? first.id : `00000000-0000-4000-8000-00000000000${i}`,
+            titulo,
+            nomeBebe: 'Helena',
+          }));
+        }
+        if (call === 'perfilCampanha.get')
+          batch[index] = {
+            result: {
+              data: {
+                fotoPerfilUrl:
+                  'data:image/svg+xml,' +
+                  encodeURIComponent(
+                    '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80"><rect width="120" height="80" fill="#dac4e8"/></svg>',
+                  ),
+              },
+            },
+          };
+      });
+      await route.fulfill({ response, json: Array.isArray(data) ? batch : batch[0] });
+    });
+    await page.goto('/campanhas');
+    const cards = page.getByTestId('card-campanha');
+    await expect(cards).toHaveCount(3);
+    for (const width of [320, 375, 390, 430, 768, 1440]) {
+      await page.setViewportSize({ width, height: 800 });
+      await page.evaluate(() => document.fonts.ready);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+        true,
+      );
+      if (width <= 430) {
+        expect(
+          await page.locator('.camp-hero-title').evaluate((el) => el.scrollWidth <= el.clientWidth),
+        ).toBe(true);
+        const bounds = await cards.evaluateAll((nodes) =>
+          nodes.map((el) => {
+            const r = el.getBoundingClientRect();
+            return { top: r.top, bottom: r.bottom, height: r.height };
+          }),
+        );
+        expect(bounds[0].height).toBeLessThan(135);
+        expect(bounds[1].top).toBeGreaterThan(bounds[0].bottom);
+        expect(bounds[2].bottom).toBeLessThan(800);
+      }
+      await expect(cards.first().locator('.camp-tape')).toBeVisible();
+      await expect(cards.first().locator('img')).toBeVisible();
+      expect(
+        await cards
+          .nth(1)
+          .locator('.camp-card-name')
+          .evaluate((el) => el.clientHeight <= parseFloat(getComputedStyle(el).lineHeight) * 2 + 1),
+      ).toBe(true);
+      await page.screenshot({ path: `test-results/minhas-listas-${width}.png`, fullPage: true });
+    }
+    await page.getByRole('button', { name: 'como funciona? ♡', exact: true }).click();
+    await page.keyboard.press('Escape');
+    await page.getByTestId('card-nova-lista').click();
+    await expect(page.getByTestId('nova-lista-modal')).toBeVisible();
+    await page.getByTestId('nova-lista-cancel').click();
+    await cards.first().click({ position: { x: 12, y: 60 } });
+    await expect(page).toHaveURL(
+      new RegExp(`/painel/${seededData.slug}/c/${seededData.idCampanha}$`),
+    );
+  },
+);
