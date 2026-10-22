@@ -1,3 +1,4 @@
+import { useAcessoCampanha } from './useAcessoCampanha';
 import { useMemo, useState, type CSSProperties } from "react";
 import { toast } from "sonner";
 
@@ -34,6 +35,7 @@ import { ComPermissao } from "./ComPermissao";
 // + wire validation are unaffected; the inline shape stays a verbatim
 // mirror of `AdminRecadoProjectionSchema` exported from `src/index.ts`.
 interface AdminRecadoProjection {
+  publico?: boolean;
   idPagamento: string;
   contribuinteNome: string;
   mensagem: string;
@@ -234,11 +236,13 @@ function RecadoCard({
   onMarcarLida,
   onAgradecer,
   isMarkingLida,
+  onModerar,
 }: {
   r: AdminRecadoProjection;
   onMarcarLida: (idPagamento: string) => void;
   onAgradecer: (r: AdminRecadoProjection) => void;
   isMarkingLida: boolean;
+  onModerar?: (r: AdminRecadoProjection) => void;
 }) {
   const pal = avatarFor(r.contribuinteNome);
   const isUnread = r.lidaEm === null;
@@ -394,6 +398,7 @@ function RecadoCard({
             )}
           </span>
 
+          {onModerar && <button type="button" className="perfil-btn perfil-btn-ghost" onClick={() => onModerar(r)}>{r.publico ? "Ocultar recado" : "Aprovar para publicar"}</button>}
           {/* actions */}
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             {isUnread && (
@@ -488,6 +493,8 @@ function MensagensBodyConteudo({ slug }: PainelSectionBodyProps) {
     },
   });
 
+  const acesso = useAcessoCampanha(idCampanhaEscrita);
+  const moderar = trpc.configuracoes.moderar.useMutation({ onSuccess: () => { void list.refetch(); void utils.pagina.obterMural.invalidate(); toast.success('Moderação salva ♡'); }, onError: (err) => toast.error(err.message) });
   const [filter, setFilter] = useState<"all" | "unread">("all");
 
   // Explicit type aliasing for `recados` — see file-header comment
@@ -770,6 +777,7 @@ function MensagensBodyConteudo({ slug }: PainelSectionBodyProps) {
             <RecadoCard
               key={r.idPagamento}
               r={r}
+              onModerar={acesso.pode("mensagens:gerenciar") && !moderar.isPending ? (recado) => moderar.mutate({ idCampanha: idCampanhaEscrita ?? "", idPagamento: recado.idPagamento, aprovado: !recado.publico }) : undefined}
               onMarcarLida={handleMarcarLida}
               onAgradecer={handleAgradecer}
               isMarkingLida={marcarLida.isPending}

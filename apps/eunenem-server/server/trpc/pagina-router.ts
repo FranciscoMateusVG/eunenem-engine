@@ -1,3 +1,4 @@
+import { getPrivacy, publicMessages } from '../painel-settings-store.js';
 import { isCampaignPublicOwner } from './campaign-public-address.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { initTRPC, TRPCError } from '@trpc/server';
@@ -550,17 +551,8 @@ export const paginaRouter = t.router({
     .query(async ({ ctx, input }) => {
       const { campanha } = await resolvePaginaBySlug(ctx, input.slug, input.idCampanha);
 
-      const recados = await ctx.deps.pagamentoRepository.findMensagensMuralByCampanha(
-        campanha.id,
-        50,
-      );
-
-      return recados.map((r) => ({
-        id: r.idPagamento as unknown as string,
-        contribuinteNome: r.contribuinteNome,
-        mensagem: r.mensagem,
-        criadoEm: r.criadoEm,
-      }));
+      if (!(await getPrivacy(ctx.deps.db, campanha.id))) return [];
+      return await publicMessages(ctx.deps.db, campanha.id);
     }),
 
   /**

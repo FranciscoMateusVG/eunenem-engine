@@ -28,6 +28,8 @@ export const LIFECYCLE_EMAIL_TYPES = [
   'list_ready',
   'event_reminder',
   'payment_received',
+  'new_message',
+  'presence_confirmed',
 ] as const;
 
 export type LifecycleEmailRenderType = (typeof LIFECYCLE_EMAIL_TYPES)[number];
@@ -48,6 +50,8 @@ export interface LifecycleEmailCommonVars {
 }
 
 export interface LifecycleEmailVars {
+  new_message: LifecycleEmailCommonVars;
+  presence_confirmed: LifecycleEmailCommonVars;
   welcome: LifecycleEmailCommonVars & {
     startUrl: string;
     /** Real number of contribuições on the campaign; null hides the line. */
@@ -645,6 +649,14 @@ export function renderLifecycleEmail<T extends LifecycleEmailRenderType>(
   vars: LifecycleEmailVars[T],
 ): RenderedLifecycleEmail {
   switch (type) {
+    case 'new_message':
+    case 'presence_confirmed': {
+      const v = vars as LifecycleEmailCommonVars;
+      const subject = type === 'new_message' ? 'Você recebeu um novo recado ♡' : 'Nova confirmação de presença ♡';
+      const reason = 'Você escolheu receber atualizações do seu chá.';
+      const rows = header(v.assetBaseUrl, false) + card(handTitle(esc(subject)) + para('Confira a atualização no painel da sua página.') + button('Ver no painel', v.dashboardUrl)) + footer({ logo: logo(v.assetBaseUrl, 100), reason: esc(reason), unsubscribeUrl: v.unsubscribeUrl, preferencesUrl: v.preferencesUrl });
+      return { subject, html: documentShell({ subject, preheader: subject, rows }), text: `${subject}\n${v.dashboardUrl}\n${textFooter(v, reason)}` };
+    }
     case 'welcome':
       return renderWelcome(vars as LifecycleEmailVars['welcome']);
     case 'list_ready':
