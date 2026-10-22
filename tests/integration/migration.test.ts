@@ -484,7 +484,18 @@ describe('Migration round-trip', () => {
     //    this sequence must start at the LATEST migration and walk earlier.
     //    Adding a new migration on top REQUIRES prepending its down-step here.
 
-    // 061 email_feedback (aperture-tykv8) is the newest.
+    // 062 is a historical no-op: the design-only settings page needs no tables.
+    for (const table of [
+      'campanha_privacidade',
+      'recado_moderacao',
+      'solicitacoes_exclusao_conta',
+    ]) {
+      expect(await tableExists(db, table)).toBe(false);
+    }
+    const downSettingsPlaceholder = await migrator.migrateDown();
+    expect(downSettingsPlaceholder.error).toBeUndefined();
+
+    // 061 email_feedback (aperture-tykv8).
     expect(await tableExists(db, 'email_feedback')).toBe(true);
     const downEmailFeedback = await migrator.migrateDown();
     expect(downEmailFeedback.error).toBeUndefined();
