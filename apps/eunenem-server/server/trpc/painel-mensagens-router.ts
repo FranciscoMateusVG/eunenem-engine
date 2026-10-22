@@ -1,4 +1,3 @@
-import { approvedMessages } from '../painel-settings-store.js';
 /**
  * aperture-16wrk / 5v766 Phase A — admin mensagens dashboard tRPC.
  *
@@ -167,7 +166,7 @@ export const painelMensagensRouter = t.router({
   list: t.procedure.input(ListInputSchema).query(async ({ ctx, input }) => {
     try {
       const { campanha } = await resolvePainelAdminBySlug(ctx, input.slug, input.idCampanha, 'mensagens:ver');
-      const response = await obterRecadosAdminDeCampanha(
+      return await obterRecadosAdminDeCampanha(
         {
           pagamentoRepository: ctx.deps.pagamentoRepository,
           contribuicaoRepository: ctx.deps.contribuicaoRepository,
@@ -175,8 +174,6 @@ export const painelMensagensRouter = t.router({
         },
         campanha.id as IdCampanha,
       );
-      const approved = await approvedMessages(ctx.deps.db, campanha.id);
-      return { ...response, recados: response.recados.map((r) => ({ ...r, publico: approved.has(r.idPagamento) })) };
     } catch (err) {
       throw toTRPCError(err);
     }

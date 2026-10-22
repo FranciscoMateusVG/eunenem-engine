@@ -41,8 +41,6 @@ export const LIFECYCLE_EMAIL_TYPE_LABELS: Record<
   LifecycleEmailType,
   { label: string; description: string }
 > = {
-  new_message: { label: 'Novos recados', description: 'quando chega um recado para seu chá.' },
-  presence_confirmed: { label: 'Confirmações de presença', description: 'quando um convidado confirma presença.' },
   welcome: {
     label: 'Boas-vindas',
     description: 'o primeiro e-mail, logo depois de criar sua conta.',
@@ -256,14 +254,14 @@ function preferencesPage(
   opts: {
     token: string;
     types: readonly LifecycleEmailType[];
-    current: import("../../../src/adapters/email/lifecycle-email-preferences.js").LifecycleEmailPreferences;
+    current: Record<LifecycleEmailType, boolean>;
     saved?: boolean;
   },
 ) {
   const rows = opts.types
     .map((type) => {
       const { label, description } = LIFECYCLE_EMAIL_TYPE_LABELS[type];
-      return `<label class="pref"><input type="checkbox" name="tipo" value="${type}"${opts.current[type] !== false ? ' checked' : ''}><span><strong>${esc(label)}</strong><span class="muted">${esc(description)}</span></span></label>`;
+      return `<label class="pref"><input type="checkbox" name="tipo" value="${type}"${opts.current[type] ? ' checked' : ''}><span><strong>${esc(label)}</strong><span class="muted">${esc(description)}</span></span></label>`;
     })
     .join('');
   return page(
@@ -386,7 +384,7 @@ export function createLifecycleEmailPages(deps: LifecycleEmailPagesDeps): Hono {
     if (!claims) return invalidLink(c);
     if (!claims.type) return c.redirect(`/email/preferencias?token=${encodeURIComponent(token)}`, 303);
     const current = await deps.preferences.getPreferences(claims.userId, claims.tenantId);
-    return unsubscribePage(c, { token, type: claims.type, enabled: current[claims.type] !== false, changed: false });
+    return unsubscribePage(c, { token, type: claims.type, enabled: current[claims.type], changed: false });
   });
 
   app.post('/email/descadastrar', async (c) => {
